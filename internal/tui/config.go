@@ -136,8 +136,8 @@ type TTSConfig struct {
 	Enabled  bool        `json:"enabled"` // Enable text-to-speech (default: false)
 	Engine   string      `json:"engine"`  // TTS engine: "piper" or "platform" (default: "piper")
 	Voice    string      `json:"voice"`   // Voice identifier (default: "danny-medium")
-	Playback TTSPlayback `json:"playback,omitempty"`
-	Behavior TTSBehavior `json:"behavior,omitempty"`
+	Playback TTSPlayback `json:"playback,omitzero"`
+	Behavior TTSBehavior `json:"behavior,omitzero"`
 }
 
 // TTSPlayback holds TTS playback settings (volume, rate).

@@ -142,8 +142,12 @@ func TestSaveModelsConfigDrilldownProvider(t *testing.T) {
 	timeoutField := NewNumberField("options.timeout", "timeout", 30)
 
 	// Simulate user changing the API key and base URL
-	apiKeyField.Set("new-secret-key")
-	baseURLField.Set("https://custom.proxy.com")
+	if err := apiKeyField.Set("new-secret-key"); err != nil {
+		t.Fatalf("apiKeyField.Set: %v", err)
+	}
+	if err := baseURLField.Set("https://custom.proxy.com"); err != nil {
+		t.Fatalf("baseURLField.Set: %v", err)
+	}
 
 	sm := NewDrilldownSectionModel(
 		"models > providers > openai", "models", "models.json5",
@@ -206,8 +210,12 @@ func TestSaveModelsConfigDrilldownNewProvider(t *testing.T) {
 	baseURLField := NewTextField("options.baseURL", "base url", "")
 
 	// Simulate user setting values for new provider
-	apiField.Set("anthropic")
-	baseURLField.Set("https://api.anthropic.com")
+	if err := apiField.Set("anthropic"); err != nil {
+		t.Fatalf("apiField.Set: %v", err)
+	}
+	if err := baseURLField.Set("https://api.anthropic.com"); err != nil {
+		t.Fatalf("baseURLField.Set: %v", err)
+	}
 
 	sm := NewDrilldownSectionModel(
 		"models > providers > anthropic", "models", "models.json5",
@@ -263,8 +271,12 @@ func TestSaveMCPServersConfigDrilldown(t *testing.T) {
 	urlField := NewTextField("url", "url", "")
 
 	// Simulate user changing type to http and adding url
-	typeField.Set("http")
-	urlField.Set("https://mcp.example.com/sse")
+	if err := typeField.Set("http"); err != nil {
+		t.Fatalf("typeField.Set: %v", err)
+	}
+	if err := urlField.Set("https://mcp.example.com/sse"); err != nil {
+		t.Fatalf("urlField.Set: %v", err)
+	}
 
 	sm := NewDrilldownSectionModel(
 		"mcp servers > servers > myserver", "mcp_servers", "mcp_servers.json5",
@@ -327,7 +339,9 @@ func TestSavePresetsConfigDrilldown(t *testing.T) {
 	tempField := NewFloatField("params.temperature", "temperature", 0.3)
 
 	// Simulate user changing temperature
-	tempField.Set("0.7")
+	if err := tempField.Set("0.7"); err != nil {
+		t.Fatalf("tempField.Set: %v", err)
+	}
 
 	sm := NewDrilldownSectionModel(
 		"presets > presets > development", "presets", "presets.json5",
@@ -381,7 +395,9 @@ func TestSaveModelsConfigTopLevel(t *testing.T) {
 
 	// Non-drilldown (top-level) section should still work
 	modelField := NewTextField("model", "default model", "old-model")
-	modelField.Set("new-model")
+	if err := modelField.Set("new-model"); err != nil {
+		t.Fatalf("modelField.Set: %v", err)
+	}
 
 	sm := NewSectionModel("models", "models", "models.json5", []Field{modelField})
 	if err := saveModelsConfig(sm); err != nil {
@@ -444,7 +460,9 @@ func TestSaveModelsConfigDrilldownLifecycleModelPaths(t *testing.T) {
 		"model paths (json)",
 		`{}`,
 	)
-	modelPathsField.Set(`{"code":"/models/lfm-code.gguf","chat":"/models/lfm-chat.gguf"}`)
+	if err := modelPathsField.Set(`{"code":"/models/lfm-code.gguf","chat":"/models/lfm-chat.gguf"}`); err != nil {
+		t.Fatalf("modelPathsField.Set: %v", err)
+	}
 
 	sm := NewDrilldownSectionModel(
 		"models > providers > llama-cpp", "models", "models.json5",
@@ -510,7 +528,9 @@ func TestSaveModelsConfigDrilldownLifecycleSpawnCommand(t *testing.T) {
 		"spawn command",
 		``,
 	)
-	spawnField.Set("llama-server --port 8080 --model ${MODEL_PATH}")
+	if err := spawnField.Set("llama-server --port 8080 --model ${MODEL_PATH}"); err != nil {
+		t.Fatalf("spawnField.Set: %v", err)
+	}
 
 	sm := NewDrilldownSectionModel(
 		"models > providers > llama-cpp", "models", "models.json5",

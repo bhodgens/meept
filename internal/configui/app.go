@@ -387,7 +387,9 @@ func (a *App) handleEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.phase = PhaseSection
 			a.editor = nil
 		case "q", "esc":
-			a.editor.Cancel()
+			if err := a.editor.Cancel(); err != nil {
+				slog.Warn("configui: editor cancel failed", "error", err)
+			}
 			a.phase = PhaseSection
 			a.editor = nil
 		}
@@ -402,7 +404,9 @@ func (a *App) handleEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.phase = PhaseSection
 			a.editor = nil
 		case "q", "esc":
-			a.editor.Cancel()
+			if err := a.editor.Cancel(); err != nil {
+				slog.Warn("configui: editor cancel failed", "error", err)
+			}
 			a.phase = PhaseSection
 			a.editor = nil
 		}
@@ -418,18 +422,24 @@ func (a *App) handleEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.phase = PhaseSection
 			a.editor = nil
 		case "q", "esc":
-			a.editor.Cancel()
+			if err := a.editor.Cancel(); err != nil {
+				slog.Warn("configui: editor cancel failed", "error", err)
+			}
 			a.phase = PhaseSection
 			a.editor = nil
 		}
 	case FieldText, FieldMasked, FieldNumber, FieldFloat, FieldDuration:
 		switch msg.String() {
 		case "enter":
-			a.editor.ConfirmInput()
+			if err := a.editor.ConfirmInput(); err != nil {
+				slog.Warn("configui: editor confirm failed", "error", err)
+			}
 			a.phase = PhaseSection
 			a.editor = nil
 		case "esc":
-			a.editor.Cancel()
+			if err := a.editor.Cancel(); err != nil {
+				slog.Warn("configui: editor cancel failed", "error", err)
+			}
 			a.phase = PhaseSection
 			a.editor = nil
 		default:

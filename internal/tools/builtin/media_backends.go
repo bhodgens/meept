@@ -441,7 +441,7 @@ func applyTemplateValue(v any, vars map[string]string) any {
 
 func lookupString(root any, path string) (string, bool) {
 	cur := root
-	for _, part := range strings.Split(path, ".") {
+	for part := range strings.SplitSeq(path, ".") {
 		if part == "" {
 			continue
 		}

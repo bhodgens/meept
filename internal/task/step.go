@@ -582,7 +582,7 @@ func (s *StepStore) Update(step *TaskStep) error {
 		return fmt.Errorf("failed to begin transaction for step update %s: %w", step.ID, err)
 	}
 	// Safe to call after Commit; a no-op on a committed transaction.
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // rollback error is irrelevant after Commit/return
 
 	// Fetch current state for transition recording (inside the transaction).
 	var oldState StepState
@@ -680,7 +680,7 @@ func (s *StepStore) UpdatePhaseSteps(steps []*TaskStep) error {
 		return fmt.Errorf("begin tx for phase step update: %w", err)
 	}
 	// Safe to call after Commit; a no-op on a committed transaction.
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // rollback error is irrelevant after Commit/return
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, step := range steps {

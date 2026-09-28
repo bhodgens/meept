@@ -89,7 +89,7 @@ func contentLooksFailed(content string) bool {
 		}
 	}
 	// Multi-line results: any line may be the failure line.
-	for _, line := range strings.Split(c, "\n") {
+	for line := range strings.SplitSeq(c, "\n") {
 		line = strings.TrimSpace(line)
 		for _, marker := range failureMarkers {
 			if strings.HasPrefix(line, marker) {

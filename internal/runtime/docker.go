@@ -142,8 +142,8 @@ func newDockerBackend(cfg DockerConfig, image string, logger *slog.Logger) (*Doc
 	}
 
 	if err := client.StartContainer(container.ID, nil); err != nil {
-		// Best-effort cleanup
-		client.RemoveContainer(docker.RemoveContainerOptions{
+		// Best-effort cleanup: the start error below is what matters.
+		_ = client.RemoveContainer(docker.RemoveContainerOptions{
 			ID:            container.ID,
 			RemoveVolumes: true,
 			Force:         true,

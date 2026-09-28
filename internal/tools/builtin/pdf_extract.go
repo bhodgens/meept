@@ -109,7 +109,7 @@ func parsePageRange(spec string, total int) ([]int, error) {
 	}
 
 	var pages []int
-	for _, part := range strings.Split(spec, ",") {
+	for part := range strings.SplitSeq(spec, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			return nil, fmt.Errorf("invalid page range %q: empty element", spec)

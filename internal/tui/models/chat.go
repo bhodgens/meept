@@ -498,7 +498,7 @@ func (m *ChatModel) InitTTS(mgr *tts.Manager, enabled bool) {
 func (m *ChatModel) ToggleTTS() bool {
 	m.ttsEnabled = !m.ttsEnabled
 	if m.ttsManager != nil && !m.ttsEnabled {
-		m.ttsManager.Stop()
+		_ = m.ttsManager.Stop() // best-effort: TTS stop failure must not block the toggle
 	}
 	return m.ttsEnabled
 }
@@ -2096,8 +2096,8 @@ func formatStageWithTimer(stage string, startedAt time.Time) string {
 		timer = fmt.Sprintf("%dm%ds", int(elapsed.Minutes()), int(elapsed.Seconds())%60)
 	}
 	// Insert the timer before a trailing "..." if present, otherwise append.
-	if strings.HasSuffix(stage, "...") {
-		return strings.TrimSuffix(stage, "...") + " " + timer + "..."
+	if base, dots := strings.CutSuffix(stage, "..."); dots {
+		return base + " " + timer + "..."
 	}
 	return stage + " " + timer
 }
@@ -2797,12 +2797,12 @@ func (m *ChatModel) expandPasteTokens(text string) string {
 	// Tokens appear in the text in chronological order (oldest first), and
 	// pasteIDs are assigned sequentially, so we match in forward order.
 	result := text
-	for i := len(contents) - 1; i >= 0; i-- {
+	for _, content := range slices.Backward(contents) {
 		loc := pasteTokenRe.FindStringIndex(result)
 		if loc == nil {
 			break
 		}
-		result = result[:loc[0]] + contents[i] + result[loc[1]:]
+		result = result[:loc[0]] + content + result[loc[1]:]
 	}
 
 	return result

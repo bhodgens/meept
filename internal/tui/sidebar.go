@@ -1547,7 +1547,7 @@ func (s *SidebarModel) renderPlanPanel() string {
 		// leading indentation; we add it here to keep the widget itself
 		// layout-agnostic.
 		rendered := s.planView.Render()
-		for _, line := range strings.Split(rendered, "\n") {
+		for line := range strings.SplitSeq(rendered, "\n") {
 			b.WriteString("  ")
 			b.WriteString(line)
 			b.WriteString("\n")

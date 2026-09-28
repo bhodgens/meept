@@ -226,19 +226,14 @@ func (p *AgentsPanel) resizeColumns() {
 		return
 	}
 	available := p.width - 10
-	idW := available * 22 / 100
-	if idW < 12 {
-		idW = 12
-	}
+	idW := max(available*22/100, 12)
 	statusW := 10
 	tierW := 16
 	driftW := 8
 	costW := 10
 	findingsW := 8
 	lastW := available - idW - statusW - tierW - driftW - costW - findingsW
-	if lastW < 8 {
-		lastW = 8
-	}
+	lastW = max(lastW, 8)
 	p.table.SetColumns([]table.Column{
 		{Title: "id", Width: idW},
 		{Title: "status", Width: statusW},

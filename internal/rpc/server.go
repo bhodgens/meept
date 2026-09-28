@@ -361,8 +361,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		if err != nil {
 			if s.running.Load() {
 				// Don't log timeout as error - it's expected idle behavior
-				var netErr net.Error
-				if errors.As(err, &netErr) {
+				if _, isNet := errors.AsType[net.Error](err); isNet {
 					s.logger.Debug("rpc: client idle timeout, closing connection")
 				} else {
 					s.logger.Debug("rpc: read error", "error", err)

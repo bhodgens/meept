@@ -30,7 +30,7 @@ func TestWeekEarlyTerminalBufferCapped(t *testing.T) {
 
 	// The oldest ids were evicted: the first earlyTerminalBufferMax ids
 	// are gone.
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		id := fmt.Sprintf("turn-%03d", i)
 		if _, still := model.earlyTerminals.take(id); still {
 			t.Errorf("oldest buffered id %q should have been evicted at cap", id)

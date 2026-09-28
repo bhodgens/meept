@@ -23,7 +23,9 @@ func TestTextFieldSetDirty(t *testing.T) {
 	if f.IsDirty() {
 		t.Error("new field should not be dirty")
 	}
-	f.Set("/tmp/other.sock")
+	if err := f.Set("/tmp/other.sock"); err != nil {
+		t.Fatalf("f.Set: %v", err)
+	}
 	if !f.IsDirty() {
 		t.Error("field should be dirty after set")
 	}
@@ -34,7 +36,9 @@ func TestTextFieldSetDirty(t *testing.T) {
 
 func TestTextFieldReset(t *testing.T) {
 	f := NewTextField("socket_path", "Socket Path", "/tmp/meept.sock")
-	f.Set("/tmp/other.sock")
+	if err := f.Set("/tmp/other.sock"); err != nil {
+		t.Fatalf("f.Set: %v", err)
+	}
 	f.Reset()
 	if f.IsDirty() {
 		t.Error("field should not be dirty after reset")
@@ -49,7 +53,9 @@ func TestToggleField(t *testing.T) {
 	if f.Get() != "true" {
 		t.Errorf("expected true, got %s", f.Get())
 	}
-	f.Set("false")
+	if err := f.Set("false"); err != nil {
+		t.Fatalf("f.Set: %v", err)
+	}
 	if f.Get() != "false" {
 		t.Errorf("expected false, got %s", f.Get())
 	}
@@ -60,7 +66,9 @@ func TestSelectField(t *testing.T) {
 	if f.Get() != "info" {
 		t.Errorf("expected info, got %s", f.Get())
 	}
-	f.Set("debug")
+	if err := f.Set("debug"); err != nil {
+		t.Fatalf("f.Set: %v", err)
+	}
 	if f.Get() != "debug" {
 		t.Errorf("expected debug, got %s", f.Get())
 	}
@@ -92,7 +100,9 @@ func TestNumberField(t *testing.T) {
 	if f.Get() != "4" {
 		t.Errorf("expected 4, got %s", f.Get())
 	}
-	f.Set("8")
+	if err := f.Set("8"); err != nil {
+		t.Fatalf("f.Set: %v", err)
+	}
 	if f.Get() != "8" {
 		t.Errorf("expected 8, got %s", f.Get())
 	}
@@ -145,7 +155,9 @@ func TestFloatFieldSetDirty(t *testing.T) {
 	if f.IsDirty() {
 		t.Error("new field should not be dirty")
 	}
-	f.Set("0.5")
+	if err := f.Set("0.5"); err != nil {
+		t.Fatalf("f.Set: %v", err)
+	}
 	if !f.IsDirty() {
 		t.Error("field should be dirty after set")
 	}
@@ -156,7 +168,9 @@ func TestFloatFieldSetDirty(t *testing.T) {
 
 func TestFloatFieldReset(t *testing.T) {
 	f := NewFloatField("aggressiveness", "Aggressiveness", 0.75)
-	f.Set("0.5")
+	if err := f.Set("0.5"); err != nil {
+		t.Fatalf("f.Set: %v", err)
+	}
 	f.Reset()
 	if f.IsDirty() {
 		t.Error("field should not be dirty after reset")

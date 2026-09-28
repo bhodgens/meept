@@ -161,7 +161,7 @@ func TestPushPriority_Values(t *testing.T) {
 
 type fakeStore struct{}
 
-func (f *fakeStore) Create(name string) (*session.Session, error) { return nil, nil }
+func (f *fakeStore) Create(name string) (*session.Session, error) { return nil, nil } //nolint:nilnil // test stub: never invoked, only satisfies the interface
 func (f *fakeStore) Get(string) *session.Session                  { return nil }
 func (f *fakeStore) GetByConversationID(string) *session.Session  { return nil }
 func (f *fakeStore) GetMostRecent() *session.Session              { return nil }
@@ -174,7 +174,7 @@ func (f *fakeStore) AddWorker(string, string) error               { return nil }
 func (f *fakeStore) RemoveWorker(string, string) error            { return nil }
 func (f *fakeStore) SaveMessages(string, []session.Message) error { return nil }
 func (f *fakeStore) GetMessages(string, int, int) ([]session.Message, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
 func (f *fakeStore) GetMessageCount(string) (int, error)    { return 0, nil }
 func (f *fakeStore) UpdateDescription(string, string) error { return nil }
@@ -189,19 +189,19 @@ func (f *fakeStore) GetMessagePath(string, int64) ([]session.Message, error) {
 func (f *fakeStore) GetMessageBranches(string) ([]session.Branch, error) { return nil, nil }
 func (f *fakeStore) NavigateToBranch(string, int64) (int64, error)       { return 0, nil }
 func (f *fakeStore) CreateBranch(string, int64, int64, string) (*session.Branch, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
-func (f *fakeStore) GetBranch(string, string) (*session.Branch, error) { return nil, nil }
+func (f *fakeStore) GetBranch(string, string) (*session.Branch, error) { return nil, nil } //nolint:nilnil // test stub: never invoked, only satisfies the interface
 func (f *fakeStore) DeleteBranch(string, string) error                 { return nil }
 func (f *fakeStore) ListBranches(string) ([]session.Branch, error)     { return nil, nil }
 func (f *fakeStore) GetTree(string) ([]session.TreeNode, error)        { return nil, nil }
 func (f *fakeStore) ForkSession(string, int64, string) (*session.Session, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
 func (f *fakeStore) SaveToolCalls(int64, []session.ToolCall) error  { return nil }
 func (f *fakeStore) GetToolCalls(int64) ([]session.ToolCall, error) { return nil, nil }
 func (f *fakeStore) GetToolCallsForMessages([]int64) (map[int64][]session.ToolCall, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
 func (f *fakeStore) SetProject(string, string, string) error                         { return nil }
 func (f *fakeStore) SetWorktree(string, string, string) error                        { return nil }
@@ -224,13 +224,13 @@ func (f *fakeStore) UnembeddedMessages(context.Context, int) ([]session.MessageS
 	return nil, nil
 }
 func (f *fakeStore) GetActiveThread(context.Context, string) (*session.Thread, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
 func (f *fakeStore) ListThreadsBySession(context.Context, string) ([]*session.Thread, error) {
 	return nil, nil
 }
 func (f *fakeStore) CreateThread(context.Context, *session.Thread) error        { return nil }
-func (f *fakeStore) GetThread(context.Context, string) (*session.Thread, error) { return nil, nil }
+func (f *fakeStore) GetThread(context.Context, string) (*session.Thread, error) { return nil, nil } //nolint:nilnil // test stub: never invoked, only satisfies the interface
 func (f *fakeStore) UpdateThread(context.Context, *session.Thread) error        { return nil }
 func (f *fakeStore) DeleteThread(context.Context, string) error                 { return nil }
 func (f *fakeStore) SetActiveThread(context.Context, string, string) error      { return nil }

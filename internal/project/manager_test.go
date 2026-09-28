@@ -27,7 +27,9 @@ func newTestManager(t *testing.T) (*ProjectManager, *Store) {
 		DefaultBranch:   "main",
 		WorktreePerPlan: "auto",
 	}
-	os.MkdirAll(cfg.BaseDir, 0o755)
+	if err := os.MkdirAll(cfg.BaseDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 
 	pm := NewProjectManager(store, nil, cfg, nil)
 	return pm, store
@@ -116,7 +118,9 @@ func TestRegisterGit(t *testing.T) {
 
 	// Create a "remote" repo to clone from
 	remoteDir := filepath.Join(t.TempDir(), "remote")
-	os.MkdirAll(remoteDir, 0o755)
+	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 	initGitRepo(t, remoteDir)
 
 	p, err := pm.RegisterGit(ctx, "git-1", "my-git", remoteDir)
@@ -177,12 +181,16 @@ func TestDetectFromPath(t *testing.T) {
 
 	// Create a git repo in a temp dir
 	repoDir := filepath.Join(t.TempDir(), "my-repo")
-	os.MkdirAll(repoDir, 0o755)
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 	initGitRepo(t, repoDir)
 
 	// Create a subdirectory to detect from
 	subDir := filepath.Join(repoDir, "src", "pkg")
-	os.MkdirAll(subDir, 0o755)
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 
 	p, err := pm.DetectFromPath(ctx, subDir)
 	if err != nil {
@@ -224,7 +232,9 @@ func TestStatus(t *testing.T) {
 	ctx := context.Background()
 
 	repoDir := filepath.Join(t.TempDir(), "status-repo")
-	os.MkdirAll(repoDir, 0o755)
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 	initGitRepo(t, repoDir)
 
 	p, err := pm.RegisterLocal(ctx, "status-1", "status-proj", repoDir)
@@ -501,7 +511,9 @@ func TestManager_CreateOrResolve_AbsolutePathWithGit(t *testing.T) {
 
 	// Create a real git repo in a temp dir.
 	repoDir := filepath.Join(t.TempDir(), "myrepo")
-	os.MkdirAll(repoDir, 0o755)
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 	initGitRepo(t, repoDir)
 
 	p, err := pm.CreateOrResolve(ctx, repoDir)
@@ -522,7 +534,9 @@ func TestManager_CreateOrResolve_AbsolutePathNoGit(t *testing.T) {
 
 	// A directory with no .git.
 	localDir := filepath.Join(t.TempDir(), "localproj")
-	os.MkdirAll(localDir, 0o755)
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 
 	p, err := pm.CreateOrResolve(ctx, localDir)
 	if err != nil {
@@ -733,7 +747,9 @@ func TestManager_EnsureDefault_StaleDirRecreates(t *testing.T) {
 
 	// Pre-create an active project with a directory that exists initially.
 	staleDir := filepath.Join(pm.Config().BaseDir, "stale")
-	os.MkdirAll(staleDir, 0o755)
+	if err := os.MkdirAll(staleDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 	existing := &Project{
 		ID: "stale", Name: "stale", Mode: ModeGit,
 		LocalPath: staleDir, Status: "active",
@@ -770,8 +786,12 @@ func TestManager_CreateOrResolve_SidecarNoGitUsesLocalMode(t *testing.T) {
 	// Create a directory with a sidecar but no .git.
 	dir := t.TempDir()
 	sidecarPath := filepath.Join(dir, ".meept", "project_id")
-	os.MkdirAll(filepath.Dir(sidecarPath), 0o755)
-	os.WriteFile(sidecarPath, []byte("sidecar-test-id"), 0o644)
+	if err := os.MkdirAll(filepath.Dir(sidecarPath), 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(sidecarPath, []byte("sidecar-test-id"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	p, err := pm.CreateOrResolve(ctx, dir)
 	if err != nil {

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"maps"
 	"os"
 
 	tea "charm.land/bubbletea/v2"
@@ -89,9 +90,7 @@ func (i *ConfirmationInterceptor) ConfirmWithReexecute(
 	}
 	// Confirmed path — re-execute with confirmed=true.
 	reexec := map[string]any{}
-	for k, v := range args {
-		reexec[k] = v
-	}
+	maps.Copy(reexec, args)
 	reexec["confirmed"] = true
 	return tool.Execute(ctx, reexec)
 }

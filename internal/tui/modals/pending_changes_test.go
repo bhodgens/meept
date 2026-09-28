@@ -291,7 +291,7 @@ func TestPendingChangesModal_LowercaseStrings(t *testing.T) {
 	_ = m.Show("sess-1")
 
 	view := m.View(120, 40)
-	for _, line := range strings.Split(view, "\n") {
+	for line := range strings.SplitSeq(view, "\n") {
 		// Skip decoration and diff content markers; check that no line
 		// carries an uppercase alphabetic character (lowercase mandate).
 		trimmed := strings.TrimSpace(line)

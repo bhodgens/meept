@@ -518,7 +518,7 @@ func TestPlanSeal_PersistFailureNotMarked(t *testing.T) {
 		Execute: func(string) error { return nil },
 	}
 	raw, _ := json.Marshal(map[string]any{"task_id": "task-1"})
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, err := h.handleSeal(context.Background(), raw); err == nil {
 			t.Fatalf("attempt %d: want persist error", i+1)
 		}

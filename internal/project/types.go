@@ -17,7 +17,7 @@ type Project struct {
 	Branch    string    `json:"branch"`
 	LocalPath string    `json:"local_path"`
 	Status    string    `json:"status"` // "active", "archived", "error"
-	LastSync  time.Time `json:"last_sync,omitempty"`
+	LastSync  time.Time `json:"last_sync,omitzero"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

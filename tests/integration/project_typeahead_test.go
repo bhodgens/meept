@@ -212,7 +212,9 @@ func TestProjectTypeaheadEmptyPrefix(t *testing.T) {
 			t.Fatalf("mkdir %s: %v", path, err)
 		}
 		runGitInit(t, path)
-		recentsStore.TouchRecent(ctx, path)
+		if err := recentsStore.TouchRecent(ctx, path); err != nil {
+			t.Fatalf("TouchRecent: %v", err)
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 

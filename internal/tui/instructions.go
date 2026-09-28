@@ -100,10 +100,7 @@ func (m InstructionConfirmationModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		if m.width < 40 {
-			m.width = 40
-		}
+		m.width = max(msg.Width, 40)
 	}
 	return m, nil
 }

@@ -12,8 +12,12 @@ import (
 
 func TestFileGrep_ContentMode(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello world\nfoo bar\nhello again\n"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("no match here\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello world\nfoo bar\nhello again\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("no match here\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileGrepTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -40,9 +44,15 @@ func TestFileGrep_ContentMode(t *testing.T) {
 
 func TestFileGrep_FilesWithMatchesMode(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello world\n"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("no match\n"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "c.txt"), []byte("hello again\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello world\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("no match\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "c.txt"), []byte("hello again\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileGrepTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -66,8 +76,12 @@ func TestFileGrep_FilesWithMatchesMode(t *testing.T) {
 
 func TestFileGrep_CountMode(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello\nhello\nworld\n"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("hello\nworld\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello\nhello\nworld\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("hello\nworld\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileGrepTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -97,8 +111,12 @@ func TestFileGrep_CountMode(t *testing.T) {
 
 func TestFileGrep_WithGlobFilter(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "a.go"), []byte("hello world\n"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("hello world\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.go"), []byte("hello world\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("hello world\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileGrepTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -124,7 +142,9 @@ func TestFileGrep_WithGlobFilter(t *testing.T) {
 func TestFileGrep_ContextLines(t *testing.T) {
 	tmpDir := t.TempDir()
 	content := "line1\nline2\nTARGET\nline4\nline5\n"
-	os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte(content), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte(content), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileGrepTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -151,7 +171,9 @@ func TestFileGrep_ContextLines(t *testing.T) {
 
 func TestFileGrep_MaxResults(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("match1\nmatch2\nmatch3\nmatch4\nmatch5\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("match1\nmatch2\nmatch3\nmatch4\nmatch5\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileGrepTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -180,8 +202,12 @@ func TestFileGrep_BinaryFileSkipping(t *testing.T) {
 	tmpDir := t.TempDir()
 	// Create a binary file with null bytes
 	binaryContent := []byte{0x89, 0x50, 0x4E, 0x47, 0x00, 0x00, 0x00} // PNG-like header with null
-	os.WriteFile(filepath.Join(tmpDir, "image.bin"), binaryContent, 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "text.txt"), []byte("hello world\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "image.bin"), binaryContent, 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "text.txt"), []byte("hello world\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileGrepTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{

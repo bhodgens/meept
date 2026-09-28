@@ -292,7 +292,7 @@ func TestHandleReadDir_MaxEntriesLimit(t *testing.T) {
 
 	// Create 60 subdirectories to test that fs fallback caps at 50.
 	tmpDir := t.TempDir()
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		if err := os.Mkdir(filepath.Join(tmpDir, fmt.Sprintf("dir%03d", i)), 0o755); err != nil {
 			t.Fatalf("os.Mkdir: %v", err)
 		}

@@ -48,11 +48,12 @@ func (ed *FieldEditor) Toggle() {
 	if ed.field.Type() != FieldToggle {
 		return
 	}
-	cur := ed.field.Get()
-	if cur == "true" {
-		ed.field.Set("false")
+	// "true"/"false" are a toggle field's canonical values, so Set cannot
+	// fail here.
+	if ed.field.Get() == "true" {
+		_ = ed.field.Set("false")
 	} else {
-		ed.field.Set("true")
+		_ = ed.field.Set("true")
 	}
 }
 
@@ -81,7 +82,8 @@ func (ed *FieldEditor) ConfirmSelect() {
 	}
 	sf := ed.field.(*SelectField)
 	if ed.selectIdx >= 0 && ed.selectIdx < len(sf.Options) {
-		ed.field.Set(sf.Options[ed.selectIdx])
+		// The value is one of the field's own options, so Set cannot fail.
+		_ = ed.field.Set(sf.Options[ed.selectIdx])
 	}
 }
 

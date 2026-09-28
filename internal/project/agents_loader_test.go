@@ -242,12 +242,20 @@ func TestLoadAllAgentsMD_FindsAllSubdirs(t *testing.T) {
 func TestLoadAllAgentsMD_IgnoresNonAGENTS(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("# Root"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("not this"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("# Root"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("not this"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	subDir := filepath.Join(tmpDir, "sub")
-	os.MkdirAll(subDir, 0o755)
-	os.WriteFile(filepath.Join(subDir, "CLERKS.md"), []byte("not this either"), 0o644)
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "CLERKS.md"), []byte("not this either"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	loaded, err := LoadAllAgentsMD(tmpDir)
 	if err != nil {

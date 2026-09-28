@@ -113,15 +113,15 @@ type AuthMethod struct {
 // InitializeParams is params for the initialize method.
 type InitializeParams struct {
 	ProtocolVersion    int                 `json:"protocolVersion"`
-	ClientInfo         ImplementationInfo  `json:"clientInfo,omitempty"`
+	ClientInfo         ImplementationInfo  `json:"clientInfo,omitzero"`
 	ClientCapabilities *ClientCapabilities `json:"clientCapabilities,omitempty"`
 }
 
 // InitializeResult is the initialize method result.
 type InitializeResult struct {
 	ProtocolVersion   int                `json:"protocolVersion"`
-	AgentCapabilities AgentCapabilities  `json:"agentCapabilities,omitempty"`
-	AgentInfo         ImplementationInfo `json:"agentInfo,omitempty"`
+	AgentCapabilities AgentCapabilities  `json:"agentCapabilities,omitzero"`
+	AgentInfo         ImplementationInfo `json:"agentInfo,omitzero"`
 	AuthMethods       []AuthMethod       `json:"authMethods,omitempty"`
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/caimlas/meept/internal/sharedclient"
@@ -181,8 +182,7 @@ func (h *CommandHandler) handleNew(ctx context.Context) {
 func (h *CommandHandler) handleRetry() {
 	// Scan scrollback for the last "you:" line
 	lastMsg := ""
-	for i := len(h.tui.scrollback) - 1; i >= 0; i-- {
-		line := h.tui.scrollback[i]
+	for _, line := range slices.Backward(h.tui.scrollback) {
 		if strings.HasPrefix(line, "you: ") {
 			lastMsg = line[5:]
 			break
@@ -200,8 +200,7 @@ func (h *CommandHandler) handleUndo() {
 	// Scan from bottom up: skip the last response, then skip the last "you: X" line
 	removed := false
 	newScroll := make([]string, 0, len(h.tui.scrollback))
-	for i := len(h.tui.scrollback) - 1; i >= 0; i-- {
-		line := h.tui.scrollback[i]
+	for _, line := range slices.Backward(h.tui.scrollback) {
 		// Skip last meept response or error response
 		if !removed && (strings.HasPrefix(line, "meept: ") || strings.HasPrefix(line, "error: ")) {
 			removed = true

@@ -34,7 +34,9 @@ func newWorktreeTestManager(t *testing.T) (*ProjectManager, string) {
 
 	// Create a git repo for testing
 	repoDir := filepath.Join(dir, "repo")
-	os.MkdirAll(repoDir, 0o755)
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 	initGitRepo(t, repoDir)
 
 	// Register it as a git project
@@ -278,7 +280,10 @@ func TestCreateWorktreeNonGitProject(t *testing.T) {
 	pm := NewProjectManager(store, nil, cfg, nil)
 
 	// Register a local (non-git) project
-	pm.RegisterLocal(ctx(), "local-1", "local-proj", "/tmp/local")
+	// Best-effort: the test asserts the failure path via CreateWorktree below.
+	if _, err := pm.RegisterLocal(ctx(), "local-1", "local-proj", "/tmp/local"); err != nil {
+		t.Fatalf("RegisterLocal: %v", err)
+	}
 
 	_, err := pm.CreateWorktree(ctx(), "local-1", "sess-1", "")
 	if err == nil {

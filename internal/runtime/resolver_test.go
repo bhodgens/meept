@@ -59,7 +59,7 @@ func newCaptureLogger(h *captureHandler) *slog.Logger {
 type fakeBackend struct{ name string }
 
 func (f *fakeBackend) Execute(context.Context, Command) (*CommandResult, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
 func (f *fakeBackend) Name() string { return f.name }
 func (f *fakeBackend) Close() error { return nil }

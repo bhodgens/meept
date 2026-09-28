@@ -238,8 +238,7 @@ func (m *Manager) applyDirtyPatch(ctx context.Context, worktreePath string, ref 
 		m.incPatchConflicts()
 		// Enrich the conflict with the commit SHA for caller introspection.
 		// applyPatch wraps *PatchConflict via fmt.Errorf, so use errors.As.
-		var pc *PatchConflictError
-		if errors.As(err, &pc) {
+		if pc, ok := errors.AsType[*PatchConflictError](err); ok {
 			pc.Commit = ref.CommitSHA
 		}
 		return err

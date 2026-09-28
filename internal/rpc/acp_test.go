@@ -122,11 +122,11 @@ func TestACPHandler_List_EnabledCatalog(t *testing.T) {
 }
 
 func TestACPListResult_JSONAndYAMLTags(t *testing.T) {
-	assertJSONYAMLTags(t, reflect.TypeOf(ACPListResult{}), map[string]string{
+	assertJSONYAMLTags(t, reflect.TypeFor[ACPListResult](), map[string]string{
 		"Enabled": "enabled",
 		"Agents":  "agents",
 	})
-	assertJSONYAMLTags(t, reflect.TypeOf(ACPAgentStatus{}), map[string]string{
+	assertJSONYAMLTags(t, reflect.TypeFor[ACPAgentStatus](), map[string]string{
 		"ID":      "id",
 		"Enabled": "enabled",
 		"Running": "running",

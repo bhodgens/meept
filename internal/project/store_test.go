@@ -280,7 +280,8 @@ func TestCleanupOrphanedWorktrees(t *testing.T) {
 		t.Fatal(err)
 	}
 	// active with plan_id only -> not orphaned
-	s.CreateWorktree(ctx, &Worktree{
+	// Best-effort seed: exercised indirectly via CleanupOrphanedWorktrees below.
+	_ = s.CreateWorktree(ctx, &Worktree{
 		ID:        "wt-plan",
 		ProjectID: "wc1",
 		PlanID:    "plan-42",
@@ -317,7 +318,8 @@ func TestGetProjectByPath(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	s.CreateProject(ctx, &Project{
+	// Best-effort seed for GetProjectByPath below.
+	_ = s.CreateProject(ctx, &Project{
 		ID:        "pp1",
 		Name:      "path-proj",
 		Mode:      ModeLocal,

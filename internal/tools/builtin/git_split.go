@@ -201,7 +201,7 @@ func filterLockFiles(changes []FileChangeInfo) []FileChangeInfo {
 
 func (t *GitSplitTool) parseSimpleStatus(output string) []FileChangeInfo {
 	var changes []FileChangeInfo
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		// Note: do NOT TrimSpace the whole line. The leading character in
 		// porcelain v1 format is the X status, which may legitimately be a
 		// space (worktree-only changes). Trailing whitespace is safe to strip.

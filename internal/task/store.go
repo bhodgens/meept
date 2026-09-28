@@ -814,7 +814,7 @@ func (s *Store) RecoverStaleTasks() (int, error) {
 		return 0, fmt.Errorf("failed to begin transaction for stale recovery: %w", err)
 	}
 	// Safe to call after Commit; a no-op on a committed transaction.
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // rollback error is irrelevant after Commit/return
 
 	// Orphan sweep: catch steps left non-terminal by prior incomplete recoveries.
 	if _, err := tx.ExecContext(ctx, `

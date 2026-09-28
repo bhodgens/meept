@@ -48,7 +48,9 @@ func TestSaveMainConfigDrilldownSubStruct(t *testing.T) {
 	ConfigFilePath = func(name string) string { return path }
 
 	cacheEnabledField := NewToggleField("cache.enabled", "enabled", true)
-	cacheEnabledField.Set("false")
+	if err := cacheEnabledField.Set("false"); err != nil {
+		t.Fatalf("cacheEnabledField.Set: %v", err)
+	}
 
 	sm := NewDrilldownSectionModel(
 		"agent loop > cache > cache", "agent", "meept.json5",
@@ -89,9 +91,13 @@ func TestSaveMainConfigMapDrilldown(t *testing.T) {
 	ConfigFilePath = func(name string) string { return path }
 
 	cmdField := NewTextField("command", "command", "gopls")
-	cmdField.Set("gopls-new")
+	if err := cmdField.Set("gopls-new"); err != nil {
+		t.Fatalf("cmdField.Set: %v", err)
+	}
 	portField := NewNumberField("port", "port", 0)
-	portField.Set("8080")
+	if err := portField.Set("8080"); err != nil {
+		t.Fatalf("portField.Set: %v", err)
+	}
 
 	sm := NewDrilldownSectionModel(
 		"code intel > lsp servers > golang", "code_intel", "meept.json5",
@@ -141,7 +147,9 @@ func TestSaveClientConfigMapStringString(t *testing.T) {
 
 	// Simulate editing one item's value and having all items available
 	ddField := NewTextField("value", "dd", "delete_line")
-	ddField.Set("delete_line_v2")
+	if err := ddField.Set("delete_line_v2"); err != nil {
+		t.Fatalf("ddField.Set: %v", err)
+	}
 	yyField := NewTextField("value", "yy", "yank_line")
 
 	sm := NewMapStringStringDrilldownSectionModel(

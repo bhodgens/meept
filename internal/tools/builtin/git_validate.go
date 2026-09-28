@@ -224,8 +224,8 @@ func (t *GitValidateTool) getGitState(ctx context.Context, dir string) (*GitStat
 		counts, _ := t.runGitCmd(ctx, dir, "rev-list", "--left-right", "--count", fmt.Sprintf("HEAD...%s", strings.TrimSpace(upstream)))
 		parts := strings.Fields(strings.TrimSpace(counts))
 		if len(parts) == 2 {
-			fmt.Sscanf(parts[0], "%d", &state.Ahead)
-			fmt.Sscanf(parts[1], "%d", &state.Behind)
+			_, _ = fmt.Sscanf(parts[0], "%d", &state.Ahead) // parse failure leaves 0; git numstat/count output is pre-validated by Fields() length check
+			_, _ = fmt.Sscanf(parts[1], "%d", &state.Behind) // parse failure leaves 0; git numstat/count output is pre-validated by Fields() length check
 		}
 	}
 

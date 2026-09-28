@@ -168,7 +168,7 @@ func TestTransportConcurrentCalls(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func() {
 			defer wg.Done()
 			var out SessionNewResult
@@ -179,7 +179,7 @@ func TestTransportConcurrentCalls(t *testing.T) {
 
 	dec := json.NewDecoder(fromClient)
 	enc := json.NewEncoder(toClient)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var req Request
 		if err := dec.Decode(&req); err != nil {
 			t.Fatalf("read request %d: %v", i, err)

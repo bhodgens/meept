@@ -81,10 +81,7 @@ func (h *PushHistory) QueryAll(limit int) []PushEntry {
 		limit = 50
 	}
 
-	start := len(h.entries) - limit
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(h.entries)-limit, 0)
 
 	result := make([]PushEntry, len(h.entries)-start)
 	copy(result, h.entries[start:])

@@ -98,7 +98,9 @@ func (t *TUI) setupMenuCallbacks() {
 	t.sessionMenu.SetCallbacks(
 		func(sess *types.Session) {
 			if sess != nil {
-				t.sessionMgr.SwitchSession(context.TODO(), sess.ID)
+				if err := t.sessionMgr.SwitchSession(context.TODO(), sess.ID); err != nil {
+					t.addScrollback(fmt.Sprintf("session switch failed: %v", err))
+				}
 				t.prompt.SetSessionName(t.sessionMgr.GetSessionName())
 				t.addScrollback(fmt.Sprintf("switched to session: %s", t.sessionMgr.GetSessionName()))
 			}
@@ -223,7 +225,7 @@ func (t *TUI) Run() error {
 	// Enable bracketed paste mode
 	termbox.SetInputMode(termbox.InputAlt | termbox.InputMouse)
 	termbox.SetOutputMode(termbox.Output256)
-	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
+	_ = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault) // best-effort; render continues either way
 
 	// Send bracketed paste enable sequence (write to stdout)
 	fmt.Print("\x1b[?2004h")
@@ -271,7 +273,7 @@ func (t *TUI) handleEvent(ev termbox.Event) {
 	case termbox.EventKey:
 		t.handleKeyEvent(ev)
 	case termbox.EventResize:
-		termbox.Sync()
+		_ = termbox.Sync() // best-effort; next render redraws anyway
 		t.render()
 	case termbox.EventError:
 		if t.client != nil && !t.client.IsConnected() {
@@ -712,7 +714,7 @@ func (t *TUI) scrollDown() {
 }
 
 func (t *TUI) render() {
-	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
+	_ = termbox.Clear(termbox.ColorDefault, termbox.ColorDefault) // best-effort; render continues either way
 	width, height := termbox.Size()
 
 	// Calculate scrollback area (everything except prompt line)
@@ -721,10 +723,7 @@ func (t *TUI) render() {
 	// Determine which lines to show
 	startIdx := 0
 	if t.scrollOffset > 0 {
-		startIdx = len(t.scrollback) - scrollbackHeight + t.scrollOffset
-		if startIdx < 0 {
-			startIdx = 0
-		}
+		startIdx = max(len(t.scrollback)-scrollbackHeight+t.scrollOffset, 0)
 	} else {
 		// Show from the end
 		if len(t.scrollback) > scrollbackHeight {
@@ -892,10 +891,7 @@ func (t *TUI) renderAutocomplete() {
 
 	// Footer hint
 	hint := " up/down=nav enter=select esc=cancel "
-	hintX := popupX + (boxWidth-len(hint))/2
-	if hintX < popupX+2 {
-		hintX = popupX + 2
-	}
+	hintX := max(popupX+(boxWidth-len(hint))/2, popupX+2)
 	y := popupY + boxHeight - 2
 	for i := 0; i < len(hint) && hintX+i < popupX+boxWidth-2; i++ {
 		r := rune(hint[i])

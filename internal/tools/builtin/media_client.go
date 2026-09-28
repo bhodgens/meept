@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"maps"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -358,9 +359,7 @@ func mediaExt(kind string, art *mediaArtifact) string {
 
 func modelAuthHeaders(ctx context.Context, mc *llm.ModelConfig, tr llm.TokenResolver) (map[string]string, error) {
 	headers := map[string]string{}
-	for k, v := range mc.ExtraHeaders {
-		headers[k] = v
-	}
+	maps.Copy(headers, mc.ExtraHeaders)
 	if mc.OAuthProvider != "" && tr != nil {
 		tok, err := tr.ResolveToken(ctx, mc.OAuthProvider)
 		if err != nil {
@@ -392,7 +391,7 @@ func readLimited(r io.Reader, limit int64) ([]byte, error) {
 
 func shouldEnhancePrompt(prompt string) bool {
 	n := 0
-	for _, f := range strings.Fields(prompt) {
+	for f := range strings.FieldsSeq(prompt) {
 		if f != "" {
 			n++
 		}

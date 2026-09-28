@@ -208,12 +208,11 @@ func stripHTMLCommentFrontmatter(s string) string {
 	if !strings.HasPrefix(trimmed, "<!--") {
 		return s
 	}
-	end := strings.Index(trimmed, "-->")
-	if end < 0 {
+	_, after, found := strings.Cut(trimmed, "-->")
+	if !found {
 		return s
 	}
-	rest := trimmed[end+3:]
-	return strings.TrimLeft(rest, " \t\r\n")
+	return strings.TrimLeft(after, " \t\r\n")
 }
 
 // Resolve returns ordered ComponentSections for the requested IDs. Unknown

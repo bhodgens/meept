@@ -164,7 +164,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) ContextInjector\(\) \*ContextInjector](<#AgentLoop.ContextInjector>)
   - [func \(l \*AgentLoop\) CurrentReasoningEffort\(\) string](<#AgentLoop.CurrentReasoningEffort>)
   - [func \(l \*AgentLoop\) ExecuteSkillToolCalls\(ctx context.Context, toolCalls \[\]llm.ToolCall\) \[\]\*ExecutionResult](<#AgentLoop.ExecuteSkillToolCalls>)
-  - [func \(l \*AgentLoop\) FireHTTPHooks\(ctx context.Context, event string, data map\[string\]interface\{\}\)](<#AgentLoop.FireHTTPHooks>)
+  - [func \(l \*AgentLoop\) FireHTTPHooks\(ctx context.Context, event string, data map\[string\]any\)](<#AgentLoop.FireHTTPHooks>)
   - [func \(l \*AgentLoop\) FirewallStats\(\) map\[string\]any](<#AgentLoop.FirewallStats>)
   - [func \(l \*AgentLoop\) GetBudgetStatus\(\) \*BudgetStatus](<#AgentLoop.GetBudgetStatus>)
   - [func \(l \*AgentLoop\) GetConfig\(\) AgentConfig](<#AgentLoop.GetConfig>)
@@ -3457,7 +3457,7 @@ ExecuteSkillToolCalls is the exported tool\-execution seam for the skill state r
 <a name="AgentLoop.FireHTTPHooks"></a>
 ### func \(\*AgentLoop\) FireHTTPHooks
 
-	func (l *AgentLoop) FireHTTPHooks(ctx context.Context, event string, data map[string]interface{})
+	func (l *AgentLoop) FireHTTPHooks(ctx context.Context, event string, data map[string]any)
 
 FireHTTPHooks is an exported helper that agent code calls to signal HTTP hook events. It builds a HookPayload from the provided data and fires all registered hooks in parallel, respecting context lifetime.
 

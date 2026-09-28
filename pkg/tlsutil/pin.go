@@ -55,13 +55,12 @@ func LoadExpectedFingerprint(path string) (certFP, spkiFP string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "cert:") {
-			certFP = strings.TrimPrefix(line, "cert:")
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if after, ok := strings.CutPrefix(line, "cert:"); ok {
+			certFP = after
 		}
-		if strings.HasPrefix(line, "spki:") {
-			spkiFP = strings.TrimPrefix(line, "spki:")
+		if after, ok := strings.CutPrefix(line, "spki:"); ok {
+			spkiFP = after
 		}
 	}
 	return strings.TrimSpace(certFP), strings.TrimSpace(spkiFP), nil

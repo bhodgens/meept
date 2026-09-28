@@ -26,7 +26,7 @@ func (s resultSizerStub) Name() string                       { return "result_si
 func (s resultSizerStub) Description() string                { return "stub" }
 func (s resultSizerStub) Parameters() llm.FunctionParameters { return llm.FunctionParameters{} }
 func (s resultSizerStub) Execute(ctx context.Context, args map[string]any) (any, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
 func (s resultSizerStub) MaxResultTokens() int { return s.floor }
 
@@ -39,7 +39,7 @@ func (s plainToolStub) Name() string                       { return "plain_tool_
 func (s plainToolStub) Description() string                { return "stub" }
 func (s plainToolStub) Parameters() llm.FunctionParameters { return llm.FunctionParameters{} }
 func (s plainToolStub) Execute(ctx context.Context, args map[string]any) (any, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
 
 func TestGetMaxResultTokens(t *testing.T) {

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"maps"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -239,9 +240,7 @@ func (s *PushService) Push(ctx context.Context, req *PushRequest) (*PushResult, 
 		"source":    req.Source,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	for k, v := range req.Extra {
-		payload[k] = v
-	}
+	maps.Copy(payload, req.Extra)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, wrapError("push", "Push", err)

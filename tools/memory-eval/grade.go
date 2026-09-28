@@ -483,14 +483,8 @@ func finalizeAmbient(m *AmbientMetrics, latencies []float64) {
 // rescues.
 func finalizeJudge(j *JudgeMetrics, lexicalTP, lexicalFP, lexicalFN int) {
 	j.TruePositives = lexicalTP + j.JudgeMatched
-	j.FalsePositives = lexicalFP - j.JudgeMatched
-	if j.FalsePositives < 0 {
-		j.FalsePositives = 0
-	}
-	j.FalseNegatives = lexicalFN - j.JudgeMatched
-	if j.FalseNegatives < 0 {
-		j.FalseNegatives = 0
-	}
+	j.FalsePositives = max(lexicalFP-j.JudgeMatched, 0)
+	j.FalseNegatives = max(lexicalFN-j.JudgeMatched, 0)
 	if j.TruePositives+j.FalsePositives > 0 {
 		j.Precision = float64(j.TruePositives) / float64(j.TruePositives+j.FalsePositives)
 	}

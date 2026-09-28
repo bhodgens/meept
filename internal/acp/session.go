@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -114,7 +115,9 @@ func Start(ctx context.Context, cfg SessionConfig) (*Session, error) {
 		ProtocolVersion: ProtocolVersion,
 		ClientInfo:      ImplementationInfo{Name: "meept", Version: "0.1"},
 	}, &init); err != nil {
-		s.closeLocked()
+		// Best-effort teardown during startup failure; the primary error below
+		// is what the caller sees.
+		_ = s.closeLocked()
 		return nil, fmt.Errorf("acp: start %s handshake: %w", cfg.AgentID, err)
 	}
 
@@ -128,7 +131,9 @@ func Start(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	if err := s.tr.Call(hctx, MethodSessionNew, map[string]any{
 		"cwd": cwd,
 	}, &newRes); err != nil {
-		s.closeLocked()
+		// Best-effort teardown during startup failure; the primary error below
+		// is what the caller sees.
+		_ = s.closeLocked()
 		return nil, fmt.Errorf("acp: start %s session/new: %w", cfg.AgentID, err)
 	}
 	if newRes.SessionID == "" {
@@ -219,13 +224,13 @@ func (s *Session) Send(ctx context.Context, text string) (string, error) {
 	}
 
 	s.mu.Lock()
-	out := ""
+	var out strings.Builder
 	for _, c := range s.chunks {
-		out += c
+		out.WriteString(c)
 	}
 	s.mu.Unlock()
-	s.emit(SessionEvent{Kind: "done", Text: out})
-	return out, nil
+	s.emit(SessionEvent{Kind: "done", Text: out.String()})
+	return out.String(), nil
 }
 
 // Cancel interrupts the in-flight turn.

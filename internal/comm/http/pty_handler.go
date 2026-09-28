@@ -129,7 +129,8 @@ func (h *PTYHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	// encoding errors are unrecoverable (client disconnect); headers already sent
+	_ = json.NewEncoder(w).Encode(info)
 }
 
 // handleSession handles session-specific endpoints
@@ -266,7 +267,8 @@ func (h *PTYHandler) writeToSession(w http.ResponseWriter, r *http.Request, sess
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	// encoding errors are unrecoverable (client disconnect); headers already sent
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (h *PTYHandler) closeSession(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -278,7 +280,8 @@ func (h *PTYHandler) closeSession(w http.ResponseWriter, r *http.Request, sessio
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "closed"})
+	// encoding errors are unrecoverable (client disconnect); headers already sent
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "closed"})
 }
 
 // Helpers

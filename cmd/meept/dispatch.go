@@ -210,7 +210,7 @@ func newDispatchResultsCmd() *cobra.Command {
 			var results []struct {
 				JobID       string                 `json:"job_id"`
 				OutputRef   string                 `json:"output_ref"`
-				Workspace   map[string]interface{} `json:"workspace"`
+				Workspace   map[string]any `json:"workspace"`
 				Error       string                 `json:"error"`
 				CompletedAt int64                  `json:"completed_at"`
 			}

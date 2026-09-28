@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -167,13 +168,9 @@ func WithExtraEnv(env map[string]string) StartOption {
 		sc.extraEnv = func() map[string]string {
 			merged := map[string]string{}
 			if prev != nil {
-				for k, v := range prev() {
-					merged[k] = v
-				}
+				maps.Copy(merged, prev())
 			}
-			for k, v := range env {
-				merged[k] = v
-			}
+			maps.Copy(merged, env)
 			return merged
 		}
 	}
@@ -681,7 +678,7 @@ func (s *Stack) CreateSession(t testing.TB, name, cwd string) string {
 	out, _ := s.RunCLI(t, 30*time.Second, false,
 		"--cwd", cwd, "session", "create", name)
 	// Output: "Created session: <id>"
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if after, ok := strings.CutPrefix(line, "Created session: "); ok {
 			return strings.TrimSpace(after)

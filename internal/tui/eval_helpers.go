@@ -46,7 +46,7 @@ func evalListPayload(result json.RawMessage) ([]map[string]any, error) {
 	}
 	if errRaw, ok := rawMap["error"]; ok && string(errRaw) != `"null"` && string(errRaw) != `""` {
 		var errStr string
-		json.Unmarshal(errRaw, &errStr)
+		_ = json.Unmarshal(errRaw, &errStr) // best-effort: on failure errStr stays empty and the error is still surfaced
 		return nil, fmt.Errorf("eval.list error: %s", errStr)
 	}
 	runsWithRunsRaw, ok := rawMap["runs"]

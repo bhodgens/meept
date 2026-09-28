@@ -3,6 +3,7 @@ package project
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -71,8 +72,7 @@ func LoadAgentsMDForPath(projectRoot, filePath string) ([]AgentsMD, error) {
 	}
 
 	// Reverse to get root-to-leaf order.
-	for i := len(stack) - 1; i >= 0; i-- {
-		e := stack[i]
+	for _, e := range slices.Backward(stack) {
 		agentsPath := filepath.Join(e.absPath, "AGENTS.md")
 		if data, err := os.ReadFile(agentsPath); err == nil {
 			results = append(results, AgentsMD{RelPath: e.relPath, Content: string(data)})

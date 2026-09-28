@@ -13,9 +13,15 @@ import (
 func TestFileFind_BasicTxtFiles(t *testing.T) {
 	// Create temp directory with files
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("world"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "c.go"), []byte("package main"), 0o644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("world"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "c.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileFindTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -49,9 +55,15 @@ func TestFileFind_BasicTxtFiles(t *testing.T) {
 func TestFileFind_Subdirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	subDir := filepath.Join(tmpDir, "sub")
-	os.MkdirAll(subDir, 0o755)
-	os.WriteFile(filepath.Join(tmpDir, "top.txt"), []byte("top"), 0o644)
-	os.WriteFile(filepath.Join(subDir, "nested.txt"), []byte("nested"), 0o644)
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "top.txt"), []byte("top"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "nested.txt"), []byte("nested"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileFindTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
@@ -72,7 +84,9 @@ func TestFileFind_Subdirectory(t *testing.T) {
 func TestFileFind_MaxResultsTruncation(t *testing.T) {
 	tmpDir := t.TempDir()
 	for i := 0; i < 10; i++ {
-		os.WriteFile(filepath.Join(tmpDir, filepath.FromSlash("file"+string(rune('0'+i))+".txt")), []byte("x"), 0o644)
+		if err := os.WriteFile(filepath.Join(tmpDir, filepath.FromSlash("file"+string(rune('0'+i))+".txt")), []byte("x"), 0o644); err != nil {
+			t.Fatalf("os.WriteFile: %v", err)
+		}
 	}
 
 	tool := NewFileFindTool(nil)
@@ -97,8 +111,12 @@ func TestFileFind_MaxResultsTruncation(t *testing.T) {
 
 func TestFileFind_FilterByType(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.MkdirAll(filepath.Join(tmpDir, "mydir"), 0o755)
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("x"), 0o644)
+	if err := os.MkdirAll(filepath.Join(tmpDir, "mydir"), 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileFindTool(nil)
 
@@ -161,11 +179,21 @@ func TestFileFind_EmptyPattern(t *testing.T) {
 func TestFileFind_DoubleStarPattern(t *testing.T) {
 	tmpDir := t.TempDir()
 	subDir := filepath.Join(tmpDir, "pkg", "inner")
-	os.MkdirAll(subDir, 0o755)
-	os.WriteFile(filepath.Join(tmpDir, "root.go"), []byte("package main"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "pkg", "mid.go"), []byte("package pkg"), 0o644)
-	os.WriteFile(filepath.Join(subDir, "deep.go"), []byte("package inner"), 0o644)
-	os.WriteFile(filepath.Join(subDir, "deep.txt"), []byte("text"), 0o644)
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "root.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "pkg", "mid.go"), []byte("package pkg"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "deep.go"), []byte("package inner"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "deep.txt"), []byte("text"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	tool := NewFileFindTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{

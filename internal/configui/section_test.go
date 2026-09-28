@@ -189,7 +189,9 @@ func TestIsDirtyWithOneDirtyField(t *testing.T) {
 	s := NewSectionModel("General", "daemon", "meept.json5", makeTestFields())
 
 	// modify the first field
-	s.CurrentField().Set("example.com")
+	if err := s.CurrentField().Set("example.com"); err != nil {
+		t.Fatalf("s.CurrentField().Set: %v", err)
+	}
 
 	if !s.IsDirty() {
 		t.Error("IsDirty() = false after modifying first field, want true")
@@ -200,7 +202,9 @@ func TestIsDirtyAfterReset(t *testing.T) {
 	s := NewSectionModel("General", "daemon", "meept.json5", makeTestFields())
 
 	// modify then reset
-	s.CurrentField().Set("example.com")
+	if err := s.CurrentField().Set("example.com"); err != nil {
+		t.Fatalf("s.CurrentField().Set: %v", err)
+	}
 	s.CurrentField().Reset()
 
 	if s.IsDirty() {
@@ -213,11 +217,15 @@ func TestIsDirtyMultipleFields(t *testing.T) {
 
 	// modify second field (move down first)
 	s.MoveDown() // cursor at 1 (debug toggle)
-	s.CurrentField().Set("false")
+	if err := s.CurrentField().Set("false"); err != nil {
+		t.Fatalf("s.CurrentField().Set: %v", err)
+	}
 
 	// modify third field
 	s.MoveDown() // cursor at 2 (log_level select)
-	s.CurrentField().Set("warn")
+	if err := s.CurrentField().Set("warn"); err != nil {
+		t.Fatalf("s.CurrentField().Set: %v", err)
+	}
 
 	if !s.IsDirty() {
 		t.Error("IsDirty() = false after modifying two fields, want true")

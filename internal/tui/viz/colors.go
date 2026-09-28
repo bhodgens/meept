@@ -3,6 +3,7 @@ package viz
 import (
 	"fmt"
 	"image/color"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -38,13 +39,7 @@ func SetPalette(name string) error {
 	if err != nil {
 		return fmt.Errorf("viz: load theme tokens: %w", err)
 	}
-	frozen := false
-	for _, v := range theme.FrozenVariants {
-		if v == name {
-			frozen = true
-			break
-		}
-	}
+	frozen := slices.Contains(theme.FrozenVariants, name)
 	if !frozen {
 		return fmt.Errorf("viz: unknown ui theme %q (valid: %s)",
 			name, strings.Join(theme.FrozenVariants, ", "))

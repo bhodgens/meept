@@ -106,7 +106,7 @@ func run(modelA, modelB, outputDir string, detailed bool, benchmarkName, baseURL
 	return nil
 }
 
-func saveJSON(path string, v interface{}) error {
+func saveJSON(path string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err

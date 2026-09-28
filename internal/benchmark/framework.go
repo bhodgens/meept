@@ -109,9 +109,7 @@ func (f *Framework) Run(ctx context.Context) (*BenchmarkResult, error) {
 
 	// Start workers
 	for range f.config.MaxThreads {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for task := range taskChan {
 				select {
 				case <-ctx.Done():
@@ -120,7 +118,7 @@ func (f *Framework) Run(ctx context.Context) (*BenchmarkResult, error) {
 					f.runTask(ctx, task)
 				}
 			}
-		}()
+		})
 	}
 
 	// Queue all tasks

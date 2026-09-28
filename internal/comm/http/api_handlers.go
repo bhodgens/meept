@@ -37,7 +37,7 @@ type DispatchJobRequest struct {
 	AgentID           string                 `json:"agent_id"`
 	TaskDescription   string                 `json:"task_description"`
 	RequiredResources []string               `json:"required_resources,omitempty"`
-	Workspace         map[string]interface{} `json:"workspace,omitempty"`
+	Workspace         map[string]any `json:"workspace,omitempty"`
 	Priority          int                    `json:"priority,omitempty"`
 }
 
@@ -61,7 +61,7 @@ type DispatchJobResponse struct {
 type DispatchResultEntry struct {
 	JobID       string                 `json:"job_id"`
 	OutputRef   string                 `json:"output_ref,omitempty"`
-	Workspace   map[string]interface{} `json:"workspace,omitempty"`
+	Workspace   map[string]any `json:"workspace,omitempty"`
 	Error       string                 `json:"error,omitempty"`
 	CompletedAt int64                  `json:"completed_at,omitempty"`
 }

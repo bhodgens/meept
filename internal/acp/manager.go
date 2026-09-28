@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -192,9 +193,7 @@ func (m *Manager) StopAll() {
 func (m *Manager) LiveSessions() map[string]SessionState {
 	m.mu.Lock()
 	snap := make(map[string]*Session, len(m.sessions))
-	for id, s := range m.sessions {
-		snap[id] = s
-	}
+	maps.Copy(snap, m.sessions)
 	m.mu.Unlock()
 	out := make(map[string]SessionState, len(snap))
 	for id, s := range snap {
@@ -238,8 +237,6 @@ func copyEnv(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }

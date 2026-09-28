@@ -112,7 +112,7 @@ func newSyncStatusCmd() *cobra.Command {
 			}
 
 			if outputJSON {
-				status := map[string]interface{}{
+				status := map[string]any{
 					"node_id":      hostname,
 					"sync_enabled": syncCfg.Enabled,
 					"peers":        syncCfg.Peers,

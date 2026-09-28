@@ -143,7 +143,7 @@ func TestThreadIndicator_LargeThreadCount(t *testing.T) {
 
 	now := time.Now()
 	threads := make(map[string]types.Thread, 12)
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		id := "t" + string(rune('a'+i))
 		threads[id] = types.Thread{
 			ID:             id,

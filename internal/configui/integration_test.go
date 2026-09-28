@@ -47,7 +47,9 @@ func TestIntegrationMenuToSection(t *testing.T) {
 	f = section.CurrentField()
 
 	// Edit a field
-	f.Set("modified_value")
+	if err := f.Set("modified_value"); err != nil {
+		t.Fatalf("f.Set: %v", err)
+	}
 	if !f.IsDirty() {
 		t.Error("field should be dirty after edit")
 	}
@@ -125,7 +127,9 @@ func TestIntegrationSaveAndReload(t *testing.T) {
 	if logLevelField == nil {
 		t.Fatal("expected to find log_level field in daemon section")
 	}
-	logLevelField.Set("DEBUG")
+	if err := logLevelField.Set("DEBUG"); err != nil {
+		t.Fatalf("logLevelField.Set: %v", err)
+	}
 	if !logLevelField.IsDirty() {
 		t.Error("log_level should be dirty after set")
 	}

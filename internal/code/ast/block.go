@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"slices"
 	"context"
 	"fmt"
 )
@@ -95,13 +96,7 @@ func (pm *ParserManager) FindBlockSpan(ctx context.Context, filePath string, lin
 			return // already found a (deeper) match
 		}
 
-		isBlock := false
-		for _, bt := range blockNodeTypes[lang] {
-			if node.Type == bt {
-				isBlock = true
-				break
-			}
-		}
+		isBlock := slices.Contains(blockNodeTypes[lang], node.Type)
 
 		if isBlock {
 			start := node.Range.StartLine // 0-based
@@ -144,13 +139,7 @@ func (pm *ParserManager) FindBlockSpan(ctx context.Context, filePath string, lin
 		var nearestDist int
 		var walkNearest func(Node)
 		walkNearest = func(node Node) {
-			isBlock := false
-			for _, bt := range blockNodeTypes[lang] {
-				if node.Type == bt {
-					isBlock = true
-					break
-				}
-			}
+			isBlock := slices.Contains(blockNodeTypes[lang], node.Type)
 			if isBlock {
 				start := node.Range.StartLine
 				end := node.Range.EndLine

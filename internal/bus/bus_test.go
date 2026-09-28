@@ -207,7 +207,7 @@ func TestBus_BufferNearFull(t *testing.T) {
 
 	// Fill buffer - warning triggers at >90% utilization
 	// With buffer size 5, that's >4.5, so 5 messages will trigger it
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, fmt.Sprintf("msg%d", i), map[string]any{"i": i})
 		bus.Publish("test.topic", msg)
 	}

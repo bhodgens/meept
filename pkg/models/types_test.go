@@ -43,7 +43,9 @@ func TestBusMessageSourceClientOmitEmpty(t *testing.T) {
 	// source_client should be absent when empty (omitempty)
 	if string(data) != "" {
 		var m map[string]any
-		json.Unmarshal(data, &m)
+		if err := json.Unmarshal(data, &m); err != nil {
+			t.Fatalf("json.Unmarshal: %v", err)
+		}
 		if _, exists := m["source_client"]; exists {
 			t.Error("source_client should be omitted when empty")
 		}

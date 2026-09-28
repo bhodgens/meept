@@ -215,15 +215,8 @@ func (m *MCPMenu) Render() {
 		bodyRows = 1
 	}
 
-	boxHeight := headerRows + bodyRows + footerRows
-	if boxHeight > height-2 {
-		boxHeight = height - 2
-	}
-
-	boxWidth := 64
-	if boxWidth > width-2 {
-		boxWidth = width - 2
-	}
+	boxHeight := min(headerRows+bodyRows+footerRows, height-2)
+	boxWidth := min(64, width-2)
 
 	x := (width - boxWidth) / 2
 	y := (height - boxHeight) / 2

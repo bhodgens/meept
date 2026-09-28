@@ -238,10 +238,10 @@ func SplitNodePrefixedAgentID(agentID string) (nodeID, remainingAgentID string, 
 	}
 	rest := strings.TrimPrefix(agentID, prefix)
 	// Split on first colon: nodeID:agentID
-	idx := strings.Index(rest, ":")
-	if idx < 0 {
+	first, _, hasColon := strings.Cut(rest, ":")
+	if !hasColon {
 		// "node:<nodeID>" with no agent — treat rest as nodeID.
 		return rest, "", true
 	}
-	return rest[:idx], rest[idx+1:], true
+	return first, rest[len(first)+1:], true
 }

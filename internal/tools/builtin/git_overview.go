@@ -194,7 +194,7 @@ func (t *GitOverviewTool) getUnstagedChanges(ctx context.Context, dir string) ([
 func (t *GitOverviewTool) parseFileStatus(ctx context.Context, dir, output string, staged bool) ([]FileChangeInfo, error) {
 	var changes []FileChangeInfo
 
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		// Note: do NOT TrimSpace the whole line. The leading character in
 		// porcelain v1 format is the X status, which may legitimately be a
 		// space (worktree-only changes). Trailing whitespace is safe to strip.
@@ -264,8 +264,8 @@ func (t *GitOverviewTool) getFileStats(ctx context.Context, dir, file string, st
 	parts := strings.Fields(output)
 	if len(parts) >= 2 {
 		additions, deletions := 0, 0
-		fmt.Sscanf(parts[0], "%d", &additions)
-		fmt.Sscanf(parts[1], "%d", &deletions)
+		_, _ = fmt.Sscanf(parts[0], "%d", &additions) // parse failure leaves 0; git numstat/count output is pre-validated by Fields() length check
+		_, _ = fmt.Sscanf(parts[1], "%d", &deletions) // parse failure leaves 0; git numstat/count output is pre-validated by Fields() length check
 		return additions, deletions
 	}
 
@@ -279,7 +279,7 @@ func (t *GitOverviewTool) getUntrackedFiles(ctx context.Context, dir string) ([]
 	}
 
 	var files []string
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			files = append(files, line)

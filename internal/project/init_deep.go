@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -397,10 +398,8 @@ func (di *DeepInitializer) componentConventions(dir *dirInfo) string {
 func (di *DeepInitializer) hasLang(dir *dirInfo, exts ...string) bool {
 	for _, f := range dir.Files {
 		ext := strings.ToLower(filepath.Ext(f))
-		for _, e := range exts {
-			if ext == e {
-				return true
-			}
+		if slices.Contains(exts, ext) {
+			return true
 		}
 	}
 	return false

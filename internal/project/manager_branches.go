@@ -38,7 +38,7 @@ func (pm *ProjectManager) ListBranches(ctx context.Context, id string) ([]*Branc
 	}
 
 	var branches []*BranchInfo
-	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

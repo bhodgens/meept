@@ -31,7 +31,9 @@ func TestFieldEditorToggleCancel(t *testing.T) {
 		t.Fatalf("expected true after toggle, got %s", f.Get())
 	}
 
-	ed.Cancel()
+	if err := ed.Cancel(); err != nil {
+		t.Fatalf("ed.Cancel: %v", err)
+	}
 	if f.Get() != "false" {
 		t.Errorf("expected false after cancel, got %s", f.Get())
 	}
@@ -99,7 +101,9 @@ func TestFieldEditorSelectCancel(t *testing.T) {
 		t.Fatalf("expected error after confirm, got %s", f.Get())
 	}
 
-	ed.Cancel()
+	if err := ed.Cancel(); err != nil {
+		t.Fatalf("ed.Cancel: %v", err)
+	}
 	if f.Get() != "info" {
 		t.Errorf("expected info after cancel, got %s", f.Get())
 	}
@@ -157,7 +161,9 @@ func TestFieldEditorMultiSelectCancel(t *testing.T) {
 	ed.ToggleMultiSelectOption(0) // deselect code
 	ed.ToggleMultiSelectOption(2) // select tool_use
 
-	ed.Cancel()
+	if err := ed.Cancel(); err != nil {
+		t.Fatalf("ed.Cancel: %v", err)
+	}
 	selected := f.GetStrings()
 	if len(selected) != 1 || selected[0] != "code" {
 		t.Errorf("expected [code] after cancel, got %v", selected)
@@ -174,12 +180,16 @@ func TestFieldEditorTextInputAndConfirm(t *testing.T) {
 		t.Errorf("expected input initialized to current value, got %s", ed.InputValue())
 	}
 
-	ed.SetInput("/tmp/other.sock")
+	if err := ed.SetInput("/tmp/other.sock"); err != nil {
+		t.Fatalf("ed.SetInput: %v", err)
+	}
 	if ed.InputValue() != "/tmp/other.sock" {
 		t.Errorf("expected input /tmp/other.sock, got %s", ed.InputValue())
 	}
 
-	ed.ConfirmInput()
+	if err := ed.ConfirmInput(); err != nil {
+		t.Fatalf("ed.ConfirmInput: %v", err)
+	}
 	if f.Get() != "/tmp/other.sock" {
 		t.Errorf("expected field value /tmp/other.sock after confirm, got %s", f.Get())
 	}
@@ -189,13 +199,19 @@ func TestFieldEditorTextCancel(t *testing.T) {
 	f := NewTextField("socket_path", "Socket Path", "/tmp/meept.sock")
 	ed := NewFieldEditor(f)
 
-	ed.SetInput("/tmp/changed.sock")
-	ed.ConfirmInput()
+	if err := ed.SetInput("/tmp/changed.sock"); err != nil {
+		t.Fatalf("ed.SetInput: %v", err)
+	}
+	if err := ed.ConfirmInput(); err != nil {
+		t.Fatalf("ed.ConfirmInput: %v", err)
+	}
 	if f.Get() != "/tmp/changed.sock" {
 		t.Fatalf("expected changed value, got %s", f.Get())
 	}
 
-	ed.Cancel()
+	if err := ed.Cancel(); err != nil {
+		t.Fatalf("ed.Cancel: %v", err)
+	}
 	if f.Get() != "/tmp/meept.sock" {
 		t.Errorf("expected original value after cancel, got %s", f.Get())
 	}
@@ -211,8 +227,12 @@ func TestFieldEditorNumberInputAndConfirm(t *testing.T) {
 		t.Errorf("expected input initialized to 4, got %s", ed.InputValue())
 	}
 
-	ed.SetInput("16")
-	ed.ConfirmInput()
+	if err := ed.SetInput("16"); err != nil {
+		t.Fatalf("ed.SetInput: %v", err)
+	}
+	if err := ed.ConfirmInput(); err != nil {
+		t.Fatalf("ed.ConfirmInput: %v", err)
+	}
 	if f.Get() != "16" {
 		t.Errorf("expected field value 16 after confirm, got %s", f.Get())
 	}
@@ -222,9 +242,15 @@ func TestFieldEditorNumberCancel(t *testing.T) {
 	f := NewNumberField("pool_size", "Pool Size", 4)
 	ed := NewFieldEditor(f)
 
-	ed.SetInput("99")
-	ed.ConfirmInput()
-	ed.Cancel()
+	if err := ed.SetInput("99"); err != nil {
+		t.Fatalf("ed.SetInput: %v", err)
+	}
+	if err := ed.ConfirmInput(); err != nil {
+		t.Fatalf("ed.ConfirmInput: %v", err)
+	}
+	if err := ed.Cancel(); err != nil {
+		t.Fatalf("ed.Cancel: %v", err)
+	}
 	if f.Get() != "4" {
 		t.Errorf("expected original value after cancel, got %s", f.Get())
 	}
@@ -240,8 +266,12 @@ func TestFieldEditorMaskedInputAndConfirm(t *testing.T) {
 		t.Errorf("expected input initialized to sk-old, got %s", ed.InputValue())
 	}
 
-	ed.SetInput("sk-new-123")
-	ed.ConfirmInput()
+	if err := ed.SetInput("sk-new-123"); err != nil {
+		t.Fatalf("ed.SetInput: %v", err)
+	}
+	if err := ed.ConfirmInput(); err != nil {
+		t.Fatalf("ed.ConfirmInput: %v", err)
+	}
 	if f.Get() != "sk-new-123" {
 		t.Errorf("expected field value sk-new-123 after confirm, got %s", f.Get())
 	}
@@ -251,9 +281,15 @@ func TestFieldEditorMaskedCancel(t *testing.T) {
 	f := NewMaskedField("api_key", "API Key", "sk-original")
 	ed := NewFieldEditor(f)
 
-	ed.SetInput("sk-changed")
-	ed.ConfirmInput()
-	ed.Cancel()
+	if err := ed.SetInput("sk-changed"); err != nil {
+		t.Fatalf("ed.SetInput: %v", err)
+	}
+	if err := ed.ConfirmInput(); err != nil {
+		t.Fatalf("ed.ConfirmInput: %v", err)
+	}
+	if err := ed.Cancel(); err != nil {
+		t.Fatalf("ed.Cancel: %v", err)
+	}
 	if f.Get() != "sk-original" {
 		t.Errorf("expected original value after cancel, got %s", f.Get())
 	}

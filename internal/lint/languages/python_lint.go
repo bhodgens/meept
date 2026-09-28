@@ -178,7 +178,7 @@ func parsePythonSyntaxErrors(output, targetFile string) ([]LinterResult, error) 
 	for _, line := range lines {
 		// Check for line number
 		if matches := linePattern.FindStringSubmatch(line); matches != nil {
-			fmt.Sscanf(matches[1], "%d", &currentLine)
+			_, _ = fmt.Sscanf(matches[1], "%d", &currentLine) // parse failure leaves 0; the regex already guaranteed digits
 			currentLine--
 		}
 
@@ -214,14 +214,12 @@ func parseFlake8Errors(output, targetFile string) ([]LinterResult, error) {
 	pattern := regexp.MustCompile(`([^:]+):(\d+):(\d+):\s*(\w+)\s+(.+)`)
 
 	var results []LinterResult
-	lines := strings.Split(output, "\n")
-
-	for _, line := range lines {
+	for line := range strings.SplitSeq(output, "\n") {
 		if matches := pattern.FindStringSubmatch(line); matches != nil {
 			lineNum := 0
 			colNum := 0
-			fmt.Sscanf(matches[2], "%d", &lineNum)
-			fmt.Sscanf(matches[3], "%d", &colNum)
+			_, _ = fmt.Sscanf(matches[2], "%d", &lineNum) // parse failure leaves 0; the regex already guaranteed digits
+			_, _ = fmt.Sscanf(matches[3], "%d", &colNum) // parse failure leaves 0; the regex already guaranteed digits
 
 			results = append(results, LinterResult{
 				File:     targetFile,
@@ -246,13 +244,11 @@ func parsePyrightErrors(output, targetFile string) ([]LinterResult, error) {
 	pattern := regexp.MustCompile(`(\S+):(\d+):(\d+)\s*-\s*(error|warning):\s*(.+)`)
 
 	var results []LinterResult
-	lines := strings.Split(output, "\n")
-
-	for _, line := range lines {
+	for line := range strings.SplitSeq(output, "\n") {
 		if matches := pattern.FindStringSubmatch(line); matches != nil {
 			lineNum, colNum := 0, 0
-			fmt.Sscanf(matches[2], "%d", &lineNum)
-			fmt.Sscanf(matches[3], "%d", &colNum)
+			_, _ = fmt.Sscanf(matches[2], "%d", &lineNum) // parse failure leaves 0; the regex already guaranteed digits
+			_, _ = fmt.Sscanf(matches[3], "%d", &colNum) // parse failure leaves 0; the regex already guaranteed digits
 			lineNum--
 			colNum--
 

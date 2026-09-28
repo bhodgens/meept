@@ -18,7 +18,7 @@ import (
 // extractFirstLine returns the first non-heading, non-empty line from a
 // markdown body. Used to produce brief summaries from agent purpose bodies.
 func extractFirstLine(body string) string {
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
