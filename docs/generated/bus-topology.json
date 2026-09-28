@@ -317,7 +317,7 @@
     "chat.progress": [
       {
         "file": "internal/services/chat_service.go",
-        "line": 259,
+        "line": 257,
         "payload_keys": [
           "elapsed_ms",
           "request_id",
@@ -338,7 +338,7 @@
       },
       {
         "file": "internal/services/chat_service.go",
-        "line": 220,
+        "line": 218,
         "payload_keys": []
       },
       {
