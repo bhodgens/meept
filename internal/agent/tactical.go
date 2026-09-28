@@ -2565,8 +2565,7 @@ func (ts *TacticalScheduler) publishTokenProgress(t *task.Task) {
 // requires threading the structured error value through the message bus, which
 // is a cross-package refactor tracked in docs/20260618-checkreview.md D2.
 func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
-	//nolint:staticcheck // SA1019: caller has only the bus-serialized error string; see deprecation notice
-	return llm.IsRateLimitErrorMessage(errMsg)
+	return llm.IsRateLimitErrorMessage(errMsg) //nolint:staticcheck // SA1019: caller has only the bus-serialized error string; see deprecation notice
 }
 
 // isRateLimitErrorFromErr uses structured error classification via errcls.
