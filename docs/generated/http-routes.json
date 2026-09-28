@@ -53,7 +53,7 @@
     "path": "Content-Length",
     "handler": "",
     "file": "internal/secrets/proxy.go",
-    "line": 313
+    "line": 323
   },
   {
     "method": "GET",
@@ -109,7 +109,7 @@
     "path": "Content-Type",
     "handler": "",
     "file": "internal/secrets/proxy.go",
-    "line": 277
+    "line": 287
   },
   {
     "method": "GET",
@@ -2076,7 +2076,7 @@
     "path": "Retry-After",
     "handler": "",
     "file": "internal/auth/codex_flow.go",
-    "line": 166
+    "line": 168
   },
   {
     "method": "GET",
@@ -2279,21 +2279,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7190
+    "line": 7192
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7201
+    "line": 7203
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7182
+    "line": 7184
   },
   {
     "method": "GET",
@@ -2321,7 +2321,7 @@
     "path": "json",
     "handler": "",
     "file": "internal/configui/keypath.go",
-    "line": 123
+    "line": 124
   },
   {
     "method": "GET",
@@ -2335,14 +2335,14 @@
     "path": "json",
     "handler": "",
     "file": "internal/configui/save.go",
-    "line": 231
+    "line": 232
   },
   {
     "method": "GET",
     "path": "json",
     "handler": "",
     "file": "internal/configui/save.go",
-    "line": 350
+    "line": 352
   },
   {
     "method": "GET",
