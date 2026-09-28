@@ -9,7 +9,7 @@ import (
 // writeSSEData writes a properly-framed SSE data event. Per the SSE spec,
 // multi-line data must use separate "data:" lines.
 func writeSSEData(w http.ResponseWriter, data string) {
-	for _, line := range strings.Split(data, "\n") {
+	for line := range strings.SplitSeq(data, "\n") {
 		fmt.Fprintf(w, "data: %s\n", line)
 	}
 	fmt.Fprintf(w, "\n")

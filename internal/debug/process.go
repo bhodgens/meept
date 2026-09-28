@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -131,10 +132,8 @@ func DetectAdapterForProcess(pid int) (*AdapterConfig, error) {
 	if ext != "" {
 		for i := range defaultAdapters {
 			a := &defaultAdapters[i]
-			for _, ft := range a.FileTypes {
-				if ft == ext {
-					return a, nil
-				}
+			if slices.Contains(a.FileTypes, ext) {
+				return a, nil
 			}
 		}
 	}

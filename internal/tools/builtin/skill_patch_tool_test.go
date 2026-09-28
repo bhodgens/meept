@@ -2,7 +2,6 @@ package builtin
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -49,7 +48,7 @@ func newPatchToolFixture(t *testing.T, skillsDir string) *SkillPatchTool {
 	registry.RegisterAll(found)
 	writer := lifecycle.NewWriter(skillsDir, nil)
 	writer.SetTierResolver(discovery)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	return NewSkillPatchTool(registry, writer, logger)
 }
 
@@ -369,7 +368,7 @@ func TestSkillPatch_SystemTierRefused(t *testing.T) {
 	writer.SetTierResolver(skills.NewDiscovery(skills.WithTiers([]skills.DiscoveryTier{
 		{Path: skillsDir, Priority: skills.PrioritySystem},
 	})))
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	tool := NewSkillPatchTool(registry, writer, logger)
 
 	for _, args := range []map[string]any{
@@ -403,7 +402,7 @@ func TestSkillPatch_NilDependencies(t *testing.T) {
 	skillsDir := filepath.Join(tmp, "skills")
 	writePatchFixtureSkill(t, skillsDir, "patch-me", "body.")
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 
 	t.Run("nil registry", func(t *testing.T) {
 		tool := NewSkillPatchTool(nil, lifecycle.NewWriter(skillsDir, nil), logger)

@@ -187,9 +187,7 @@ func TestFindBarSessionChange(t *testing.T) {
 
 	// Simulate session switch via SetSession(nil).
 	cmd := m.SetSession(nil)
-	if cmd != nil {
-		// SetSession can return a cmd; that's fine, we care about state.
-	}
+	_ = cmd // SetSession may return a cmd; we only care about model state.
 	if m.findBarVisible {
 		t.Error("find bar should close on session change")
 	}

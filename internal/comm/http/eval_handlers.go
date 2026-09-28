@@ -71,7 +71,8 @@ type evalErrorResponse struct {
 func writeEvalError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(evalErrorResponse{Error: msg})
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(evalErrorResponse{Error: msg})
 }
 
 // EvalTrajectoryStep is one optional per-tool step in a run request. When
@@ -138,7 +139,7 @@ func (h *EvalHandler) runRecord(ctx context.Context, req *EvalRunParams) (*eval.
 	rec.HarnessHash = eval.HarnessHash(req.Prompt, req.ToolList, req.Command)
 	rec.OracleName = oracleName
 
-	for i := 0; i < req.K; i++ {
+	for i := range req.K {
 		attempt := eval.Attempt{Index: i, ModelID: req.ModelID}
 		res, err := eval.ShellOracle{
 			OracleName: oracleName,
@@ -258,7 +259,8 @@ func (h *EvalHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(rec)
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(rec)
 }
 
 // handleList implements GET /api/v1/eval/runs.
@@ -273,7 +275,8 @@ func (h *EvalHandler) handleList(w http.ResponseWriter, r *http.Request) {
 		runs = []eval.RunRecord{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"runs": runs})
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(map[string]any{"runs": runs})
 }
 
 // handleGet implements GET /api/v1/eval/runs/{id}. Unknown ids are 404 via
@@ -297,7 +300,8 @@ func (h *EvalHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rec)
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(rec)
 }
 
 // EvalRPCHandlers returns the eval.run / eval.show / eval.list handler

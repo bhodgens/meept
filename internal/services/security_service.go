@@ -106,6 +106,9 @@ func (s *SecurityService) Audit(ctx context.Context, req AuditRequest) ([]AuditE
 			Allowed:   severity != "critical" && severity != "error",
 		})
 	}
+	if err := rows.Err(); err != nil {
+		return []AuditEntry{}, err
+	}
 	if result == nil {
 		result = []AuditEntry{}
 	}

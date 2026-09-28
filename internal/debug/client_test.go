@@ -30,7 +30,9 @@ func TestDAPReadMessageBasic(t *testing.T) {
 	var buf bytes.Buffer
 
 	body := map[string]any{"type": "response", "request_seq": 1, "success": true, "command": "threads"}
-	writeDAP(&buf, body)
+	if err := writeDAP(&buf, body); err != nil {
+		t.Fatalf("writeDAP: %v", err)
+	}
 
 	client := &Client{
 		pending: make(map[int64]chan *DAPResponse),
@@ -60,7 +62,7 @@ func TestDAPReadMessageBasic(t *testing.T) {
 func TestDAPReadMessageMultiple(t *testing.T) {
 	var buf bytes.Buffer
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		body := map[string]any{"seq": i, "type": "event", "event": "output"}
 		if err := writeDAP(&buf, body); err != nil {
 			t.Fatalf("writeDAP %d failed: %v", i, err)
@@ -74,7 +76,7 @@ func TestDAPReadMessageMultiple(t *testing.T) {
 	}
 	client.stdout = bufio.NewReaderSize(&buf, 65536)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		msg, err := client.readMessage()
 		if err != nil {
 			t.Fatalf("readMessage %d failed: %v", i, err)
@@ -241,7 +243,9 @@ func TestDAPSendRequestRoundTrip(t *testing.T) {
 		Command:    "threads",
 		Body:       json.RawMessage(`{"threads":[{"id":1,"name":"main"}]}`),
 	}
-	writeDAP(adapterOut, resp)
+	if err := writeDAP(adapterOut, resp); err != nil {
+		t.Fatalf("writeDAP: %v", err)
+	}
 
 	// Step 4: Read the response through the client.
 	client.stdout = bufio.NewReaderSize(adapterOut, 65536)
@@ -311,11 +315,11 @@ func TestDAPTrimCR(t *testing.T) {
 }
 
 func TestDAPBoolPtr(t *testing.T) {
-	p := boolPtr(true)
+	p := new(true)
 	if p == nil || !*p {
 		t.Fatal("expected *true")
 	}
-	p = boolPtr(false)
+	p = new(false)
 	if p == nil || *p {
 		t.Fatal("expected *false")
 	}

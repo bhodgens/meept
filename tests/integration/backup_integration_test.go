@@ -3,7 +3,6 @@ package integration
 import (
 	"context"
 	"database/sql"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -204,6 +203,6 @@ func TestSyncMetadataStoreIntegration(t *testing.T) {
 var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 func newTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 

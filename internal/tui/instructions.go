@@ -121,36 +121,36 @@ func (m InstructionConfirmationModel) View() tea.View {
 	var b strings.Builder
 
 	// Header — lowercase per CLAUDE.md
-	b.WriteString(fmt.Sprintf("  confirm instruction — %s\n\n", m.riskStyle.Render(string(m.data.RiskLevel))))
+	fmt.Fprintf(&b, "  confirm instruction — %s\n\n", m.riskStyle.Render(string(m.data.RiskLevel)))
 
 	// Action
 	if m.data.Action != "" {
-		b.WriteString(fmt.Sprintf("  action:   %s\n", m.data.Action))
+		fmt.Fprintf(&b, "  action:   %s\n", m.data.Action)
 	}
 	if m.data.ActionDetail != "" {
 		detail := truncateForDisplay(m.data.ActionDetail, m.width-14)
-		b.WriteString(fmt.Sprintf("  command:  %s\n", detail))
+		fmt.Fprintf(&b, "  command:  %s\n", detail)
 	}
 
 	// Trigger
 	if m.data.Trigger != "" {
-		b.WriteString(fmt.Sprintf("  trigger:  %s\n", m.data.Trigger))
+		fmt.Fprintf(&b, "  trigger:  %s\n", m.data.Trigger)
 	}
 
 	// Scope
 	if m.data.Scope != "" {
-		b.WriteString(fmt.Sprintf("  scope:    %s\n", m.data.Scope))
+		fmt.Fprintf(&b, "  scope:    %s\n", m.data.Scope)
 	}
 
 	// Priority
 	if m.data.Priority != "" {
-		b.WriteString(fmt.Sprintf("  priority: %s\n", m.data.Priority))
+		fmt.Fprintf(&b, "  priority: %s\n", m.data.Priority)
 	}
 
 	// Raw input (truncated)
 	if m.data.RawInput != "" {
 		raw := truncateForDisplay(m.data.RawInput, m.width-14)
-		b.WriteString(fmt.Sprintf("  input:    %s\n", raw))
+		fmt.Fprintf(&b, "  input:    %s\n", raw)
 	}
 
 	b.WriteString("\n")

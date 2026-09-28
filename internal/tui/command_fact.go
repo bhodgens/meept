@@ -55,7 +55,7 @@ func (h *CommandHandler) executeFacts(args []string) *CommandResult {
 		value := strMap(f, "value")
 		fkind := strMap(f, "kind")
 		updated := strMap(f, "updated_at")
-		sb.WriteString(fmt.Sprintf("  [%s] %s: %s  %s\n", fkind, key, value, updated))
+		fmt.Fprintf(&sb, "  [%s] %s: %s  %s\n", fkind, key, value, updated)
 	}
 	return &CommandResult{Output: sb.String()}
 }

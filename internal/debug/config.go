@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -81,12 +82,9 @@ func DetectAdapter(program string, workDir string) (*AdapterConfig, error) {
 		extMatch := false
 
 		// Check file extension match
-		for _, ft := range a.FileTypes {
-			if ext == ft {
-				s += 10
-				extMatch = true
-				break
-			}
+		if slices.Contains(a.FileTypes, ext) {
+			s += 10
+			extMatch = true
 		}
 
 		// Require at least an extension match to be considered.

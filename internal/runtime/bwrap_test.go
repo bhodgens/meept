@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"os/exec"
 	"runtime"
@@ -26,7 +25,7 @@ func hasBwrap() bool {
 }
 
 func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // recordingRunner captures the assembled argv/env/dir and returns canned

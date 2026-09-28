@@ -79,22 +79,22 @@ func (m ConfirmationModel) View() tea.View {
 	var b strings.Builder
 
 	// Header line
-	b.WriteString(fmt.Sprintf("  %s — confirm action\n\n", action))
-	b.WriteString(fmt.Sprintf("  %s\n\n", summary))
+	fmt.Fprintf(&b, "  %s — confirm action\n\n", action)
+	fmt.Fprintf(&b, "  %s\n\n", summary)
 
 	// Detail previews (if present in the response)
 	details, _ := m.response["details"].(map[string]any)
 	if old := asStringField(details, "old_preview"); old != "" {
-		b.WriteString(fmt.Sprintf("  OLD: %s\n", truncateForDisplay(old, m.width-8)))
+		fmt.Fprintf(&b, "  OLD: %s\n", truncateForDisplay(old, m.width-8))
 	}
 	if newText := asStringField(details, "new_preview"); newText != "" {
-		b.WriteString(fmt.Sprintf("  NEW: %s\n", truncateForDisplay(newText, m.width-8)))
+		fmt.Fprintf(&b, "  NEW: %s\n", truncateForDisplay(newText, m.width-8))
 	}
 	if edges := asStringField(details, "affected_edges"); edges != "" {
-		b.WriteString(fmt.Sprintf("  %s edges will be redirected.\n", edges))
+		fmt.Fprintf(&b, "  %s edges will be redirected.\n", edges)
 	}
 
-	b.WriteString(fmt.Sprintf("  reversible: %s\n\n", reversibility))
+	fmt.Fprintf(&b, "  reversible: %s\n\n", reversibility)
 
 	if m.showDetail {
 		b.WriteString("  --- full details ---\n")
@@ -102,10 +102,10 @@ func (m ConfirmationModel) View() tea.View {
 			if k == "details" {
 				continue
 			}
-			b.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
+			fmt.Fprintf(&b, "  %s: %v\n", k, v)
 		}
 		for k, v := range details {
-			b.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
+			fmt.Fprintf(&b, "  %s: %v\n", k, v)
 		}
 		b.WriteString("\n")
 	}

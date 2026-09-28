@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ import (
 func testBus() *bus.MessageBus {
 	return bus.New(&bus.Config{
 		BufferSize: 100,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, slog.New(slog.DiscardHandler))
 }
 
 func TestNewPushService(t *testing.T) {

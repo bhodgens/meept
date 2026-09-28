@@ -3,7 +3,6 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -187,7 +186,7 @@ func TestGossipHandler_ConflictResolution_NewerTimestampWins(t *testing.T) {
 	}
 	defer store.Close()
 
-	resolver := cluster.NewConflictResolver(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	resolver := cluster.NewConflictResolver(slog.New(slog.DiscardHandler))
 	handler := cluster.NewGossipHandler(store, "node-local", newTestLogger(), resolver)
 
 	memID := id.Generate("conflict-")

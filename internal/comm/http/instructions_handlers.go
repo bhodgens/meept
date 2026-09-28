@@ -66,7 +66,8 @@ func (h *InstructionsHandler) handleList(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(resp)
 	_ = ctx
 }
 
@@ -80,7 +81,8 @@ func (h *InstructionsHandler) handleCreate(w http.ResponseWriter, r *http.Reques
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "invalid request body: " + err.Error(),
 		})
@@ -89,7 +91,8 @@ func (h *InstructionsHandler) handleCreate(w http.ResponseWriter, r *http.Reques
 
 	if req.Input == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "input is required",
 		})
@@ -100,7 +103,8 @@ func (h *InstructionsHandler) handleCreate(w http.ResponseWriter, r *http.Reques
 	parsed, err := h.parser.Parse(r.Context(), req.Input)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "parse error: " + err.Error(),
 		})
@@ -111,7 +115,8 @@ func (h *InstructionsHandler) handleCreate(w http.ResponseWriter, r *http.Reques
 	result := h.verifier.Verify(parsed)
 	if !result.Valid {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "validation failed: " + strings.Join(result.Errors, "; "),
 		})
@@ -137,7 +142,8 @@ func (h *InstructionsHandler) handleCreate(w http.ResponseWriter, r *http.Reques
 
 	if err := h.store.Save(instr, tier); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "save error: " + err.Error(),
 		})
@@ -145,7 +151,8 @@ func (h *InstructionsHandler) handleCreate(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(InstructionResponse{
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(InstructionResponse{
 		Success:              true,
 		Instruction:          instr,
 		ConfirmationRequired: result.ConfirmationNeeded,
@@ -157,7 +164,8 @@ func (h *InstructionsHandler) handleGetByID(w http.ResponseWriter, r *http.Reque
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/instructions/")
 	if id == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "id is required",
 		})
@@ -167,14 +175,16 @@ func (h *InstructionsHandler) handleGetByID(w http.ResponseWriter, r *http.Reque
 	instr := h.store.Get(id)
 	if instr == nil {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "instruction not found: " + id,
 		})
 		return
 	}
 
-	json.NewEncoder(w).Encode(InstructionResponse{
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(InstructionResponse{
 		Success:     true,
 		Instruction: instr,
 	})
@@ -185,7 +195,8 @@ func (h *InstructionsHandler) handleUpdateByID(w http.ResponseWriter, r *http.Re
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/instructions/")
 	if id == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "id is required",
 		})
@@ -201,7 +212,8 @@ func (h *InstructionsHandler) handleUpdateByID(w http.ResponseWriter, r *http.Re
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "invalid request body: " + err.Error(),
 		})
@@ -211,7 +223,8 @@ func (h *InstructionsHandler) handleUpdateByID(w http.ResponseWriter, r *http.Re
 	instr := h.store.Get(id)
 	if instr == nil {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "instruction not found: " + id,
 		})
@@ -228,7 +241,8 @@ func (h *InstructionsHandler) handleUpdateByID(w http.ResponseWriter, r *http.Re
 		parsed, err := h.parser.Parse(r.Context(), *req.Input)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(InstructionResponse{
+			// best-effort: client may disconnect mid-write (headers already sent)
+			_ = json.NewEncoder(w).Encode(InstructionResponse{
 				Success: false,
 				Error:   "parse error: " + err.Error(),
 			})
@@ -238,7 +252,8 @@ func (h *InstructionsHandler) handleUpdateByID(w http.ResponseWriter, r *http.Re
 		result := h.verifier.Verify(parsed)
 		if !result.Valid {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(InstructionResponse{
+			// best-effort: client may disconnect mid-write (headers already sent)
+			_ = json.NewEncoder(w).Encode(InstructionResponse{
 				Success: false,
 				Error:   "validation failed: " + strings.Join(result.Errors, ", "),
 			})
@@ -257,14 +272,16 @@ func (h *InstructionsHandler) handleUpdateByID(w http.ResponseWriter, r *http.Re
 
 	if err := h.store.Save(instr, tier); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "save error: " + err.Error(),
 		})
 		return
 	}
 
-	json.NewEncoder(w).Encode(InstructionResponse{
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(InstructionResponse{
 		Success:     true,
 		Instruction: instr,
 	})
@@ -275,7 +292,8 @@ func (h *InstructionsHandler) handleDeleteByID(w http.ResponseWriter, r *http.Re
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/instructions/")
 	if id == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "id is required",
 		})
@@ -284,14 +302,16 @@ func (h *InstructionsHandler) handleDeleteByID(w http.ResponseWriter, r *http.Re
 
 	if err := h.store.Delete(id); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "delete error: " + err.Error(),
 		})
 		return
 	}
 
-	json.NewEncoder(w).Encode(InstructionResponse{
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(InstructionResponse{
 		Success: true,
 	})
 }
@@ -305,7 +325,8 @@ func (h *InstructionsHandler) handlePreview(w http.ResponseWriter, r *http.Reque
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "invalid request body: " + err.Error(),
 		})
@@ -314,7 +335,8 @@ func (h *InstructionsHandler) handlePreview(w http.ResponseWriter, r *http.Reque
 
 	if req.Input == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "input is required",
 		})
@@ -324,7 +346,8 @@ func (h *InstructionsHandler) handlePreview(w http.ResponseWriter, r *http.Reque
 	parsed, err := h.parser.Parse(r.Context(), req.Input)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(InstructionResponse{
+		// best-effort: client may disconnect mid-write (headers already sent)
+		_ = json.NewEncoder(w).Encode(InstructionResponse{
 			Success: false,
 			Error:   "parse error: " + err.Error(),
 		})
@@ -345,7 +368,8 @@ func (h *InstructionsHandler) handlePreview(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(http.StatusBadRequest)
 	}
 
-	json.NewEncoder(w).Encode(resp)
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // generateInstructionID generates a unique ID for an instruction.

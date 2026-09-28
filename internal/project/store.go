@@ -237,7 +237,9 @@ func (s *Store) GetActive(ctx context.Context) (*Project, error) {
 	p, err := scanProject(row)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return nil, nil
+			// Documented contract: (nil, nil) means "no active project";
+			// every caller nil-checks the result alongside err.
+			return nil, nil //nolint:nilnil // no-active-project is a normal, queryable state
 		}
 		return nil, err
 	}

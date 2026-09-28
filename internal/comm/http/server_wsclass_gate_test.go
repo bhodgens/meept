@@ -1,9 +1,9 @@
 package http
 
 import (
+	"go/types"
 	"os"
 	"path/filepath"
-	"go/types"
 	"reflect"
 	"strings"
 	"testing"

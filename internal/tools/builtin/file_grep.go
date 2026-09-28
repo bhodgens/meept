@@ -210,7 +210,7 @@ func (t *FileGrepTool) Execute(ctx context.Context, args map[string]any) (any, e
 		}
 
 		// Read file and check for binary
-		content, readErr := os.ReadFile(walkPath)
+		content, readErr := os.ReadFile(walkPath) //nolint:gosec // G122: walkPath is derived from the fence-checked root and re-validated by the checker; the read is race-tolerant by design (best-effort grep)
 		if readErr != nil {
 			return nil //nolint:nilerr // unreadable file: skip it, never abort the walk
 		}

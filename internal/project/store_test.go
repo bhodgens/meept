@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -61,7 +62,7 @@ func TestGetProjectNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := s.GetProject(ctx, "nonexistent")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetProject(nonexistent) error = %v, want ErrNotFound", err)
 	}
 }
@@ -139,7 +140,7 @@ func TestDeleteProject(t *testing.T) {
 	}
 
 	_, err := s.GetProject(ctx, "d1")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("after delete: error = %v, want ErrNotFound", err)
 	}
 }
@@ -216,7 +217,7 @@ func TestGetActiveWorktreeBySession(t *testing.T) {
 	}
 
 	_, err = s.GetActiveWorktreeBySession(ctx, "sess-done")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetActiveWorktreeBySession(sess-done) = %v, want ErrNotFound", err)
 	}
 }
@@ -332,7 +333,7 @@ func TestGetProjectByPath(t *testing.T) {
 	}
 
 	_, err = s.GetProjectByPath(ctx, "/no/such/path")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetProjectByPath(missing) = %v, want ErrNotFound", err)
 	}
 }

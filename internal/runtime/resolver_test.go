@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -70,7 +69,7 @@ func (f *fakeBackend) Close() error { return nil }
 func fakeManager(names ...string) *ContainerManager {
 	m := &ContainerManager{
 		backends: make(map[string]ExecutionBackend, len(names)),
-		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:   slog.New(slog.DiscardHandler),
 	}
 	hasLocal := false
 	for _, n := range names {
@@ -320,7 +319,7 @@ func TestResolveBackend_Table(t *testing.T) {
 // with an explicit local order can never qualify (local never provides OS
 // confinement), independent of installed binaries.
 func TestResolveBackend_PublicAPI_FailClosed(t *testing.T) {
-	mgr, err := NewContainerManager(Config{DefaultBackend: "local"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mgr, err := NewContainerManager(Config{DefaultBackend: "local"}, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 
 	backend, err := ResolveBackend(mgr, ResolverConfig{
@@ -336,7 +335,7 @@ func TestResolveBackend_PublicAPI_FailClosed(t *testing.T) {
 // TestResolveBackend_PublicAPI_ExplicitLocal verifies the public entry point
 // honors an explicit local order without probing platform binaries.
 func TestResolveBackend_PublicAPI_ExplicitLocal(t *testing.T) {
-	mgr, err := NewContainerManager(Config{DefaultBackend: "local"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mgr, err := NewContainerManager(Config{DefaultBackend: "local"}, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 
 	backend, err := ResolveBackend(mgr, ResolverConfig{Order: SandboxOrderLocal}, nil)

@@ -309,12 +309,12 @@ func parsePatternPage(content string) *LearnedPattern {
 		return nil
 	}
 	rest := content[len("---\n"):]
-	end := strings.Index(rest, "\n---\n")
-	if end < 0 {
+	before, after, ok := strings.Cut(rest, "\n---\n")
+	if !ok {
 		return nil
 	}
-	fm := parseFrontmatterFields(rest[:end])
-	body := rest[end+len("\n---\n"):]
+	fm := parseFrontmatterFields(before)
+	body := after
 
 	p := &LearnedPattern{}
 	if v, ok := fm["id"]; ok {
@@ -380,7 +380,7 @@ func parsePatternBody(body string, p *LearnedPattern) {
 
 	p.Pattern = strings.TrimSpace(patternText)
 	if examplesText != "" {
-		for _, line := range strings.Split(strings.TrimRight(examplesText, "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimRight(examplesText, "\n"), "\n") {
 			line = strings.TrimSpace(line)
 			if ex, ok := strings.CutPrefix(line, "- "); ok {
 				p.Examples = append(p.Examples, ex)
@@ -393,7 +393,7 @@ func parsePatternBody(body string, p *LearnedPattern) {
 // contain ':'; keys are lowercased and trimmed.
 func parseFrontmatterFields(fm string) map[string]string {
 	fields := make(map[string]string)
-	for _, line := range strings.Split(fm, "\n") {
+	for line := range strings.SplitSeq(fm, "\n") {
 		key, value, ok := strings.Cut(line, ":")
 		if !ok {
 			continue

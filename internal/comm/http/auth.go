@@ -95,7 +95,7 @@ func (a *APIKeyAuth) extractKey(r *http.Request) string {
 	// Convention: client sends "bearer.<token>" as a subprotocol.
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		if proto := r.Header.Get("Sec-WebSocket-Protocol"); proto != "" {
-			for _, p := range strings.Split(proto, ",") {
+			for p := range strings.SplitSeq(proto, ",") {
 				p = strings.TrimSpace(p)
 				if strings.HasPrefix(p, "bearer.") {
 					return p[len("bearer."):]
@@ -121,7 +121,7 @@ func ExtractKeyFromRequest(r *http.Request) string {
 	// For WebSocket clients, check Sec-WebSocket-Protocol header
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		if proto := r.Header.Get("Sec-WebSocket-Protocol"); proto != "" {
-			for _, p := range strings.Split(proto, ",") {
+			for p := range strings.SplitSeq(proto, ",") {
 				p = strings.TrimSpace(p)
 				if strings.HasPrefix(p, "bearer.") {
 					return p[len("bearer."):]

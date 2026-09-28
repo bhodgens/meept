@@ -92,14 +92,14 @@ func TestWriteFileRelativePathUsesContextWorkingDir(t *testing.T) {
 
 	// Find the file in the temp dir (may be in a subdirectory due to Go test isolation)
 	found := false
-	filepath.Walk(sessionDir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(sessionDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // skip unreadable entries; the assertion below reports "not found"
 		}
 		if !info.IsDir() && filepath.Base(path) == "answer.txt" {
-			got, err := os.ReadFile(path)
+			got, err := os.ReadFile(path) //nolint:gosec // G122: test-only walk over t.TempDir(); no concurrent mutation to race against
 			if err != nil {
-				return nil
+				return nil //nolint:nilerr // skip unreadable files; the assertion below reports "not found"
 			}
 			if string(got) == "42\n" {
 				found = true

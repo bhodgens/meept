@@ -3,7 +3,6 @@ package bus
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -139,7 +138,7 @@ func TestMatchWildcard(t *testing.T) {
 // TestGossip_SubscriptionDrained tests that the bus correctly detects
 // undrained subscriptions as specified in Phase 1 of code-quality-detection-gaps.md
 func TestGossip_SubscriptionDrained(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	bus := New(DefaultConfig(), logger)
 	defer bus.Close()
 

@@ -20,7 +20,7 @@ import (
 // custom headers, so auth is carried via Sec-WebSocket-Protocol: bearer.<key>.
 func pickBearerSubprotocol(r *http.Request) []string {
 	raw := r.Header.Get("Sec-WebSocket-Protocol")
-	for _, p := range strings.Split(raw, ",") {
+	for p := range strings.SplitSeq(raw, ",") {
 		p = strings.TrimSpace(p)
 		if strings.HasPrefix(p, "bearer.") {
 			return []string{p}
@@ -47,15 +47,15 @@ const (
 
 // NotificationEvent represents a notification event sent to clients.
 type NotificationEvent struct {
-	ID        string                 `json:"id"`
-	Timestamp string                 `json:"timestamp"` // RFC3339
-	Type      NotificationType       `json:"type"`
-	Title     string                 `json:"title"`
-	Message   string                 `json:"message"`
-	Data      map[string]interface{} `json:"data,omitempty"`
-	AgentID   string                 `json:"agent_id,omitempty"`
-	TaskID    string                 `json:"task_id,omitempty"`
-	SessionID string                 `json:"session_id,omitempty"`
+	ID        string           `json:"id"`
+	Timestamp string           `json:"timestamp"` // RFC3339
+	Type      NotificationType `json:"type"`
+	Title     string           `json:"title"`
+	Message   string           `json:"message"`
+	Data      map[string]any   `json:"data,omitempty"`
+	AgentID   string           `json:"agent_id,omitempty"`
+	TaskID    string           `json:"task_id,omitempty"`
+	SessionID string           `json:"session_id,omitempty"`
 }
 
 // NotificationEmitter is an interface for publishing and subscribing to notification events.
@@ -174,7 +174,7 @@ func (h *NotificationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"events": events,
 		"count":  len(events),
 	}); err != nil {

@@ -235,10 +235,10 @@ func (t *GitCommitTool) executeBatchCommits(ctx context.Context, workingDir stri
 			}
 		}
 
-		// Reset staging area before each commit to ensure clean state
-		if _, err := t.runGitCmd(ctx, workingDir, "reset", "HEAD", "--"); err != nil {
-			// Not a fatal error — may have no previous state to reset
-		}
+		// Reset staging area before each commit to ensure clean state.
+		// Not a fatal error — may have no previous state to reset, and the
+		// subsequent git add/commit surfaces any real failure.
+		_, _ = t.runGitCmd(ctx, workingDir, "reset", "HEAD", "--") //nolint:errcheck // best-effort reset; may have no previous state to reset
 
 		var files []string
 		if filesRaw, ok := cMap["files"].([]any); ok {

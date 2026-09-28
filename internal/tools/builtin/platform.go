@@ -133,8 +133,8 @@ func (t *PlatformAgentsTool) Execute(ctx context.Context, args map[string]any) (
 	sb.WriteString("Specialist agents for different task types:\n\n")
 
 	for _, spec := range specs {
-		sb.WriteString(fmt.Sprintf("### %s (`%s`)\n", spec.Name, spec.ID))
-		sb.WriteString(fmt.Sprintf("**Role**: %s\n\n", spec.Role))
+		fmt.Fprintf(&sb, "### %s (`%s`)\n", spec.Name, spec.ID)
+		fmt.Fprintf(&sb, "**Role**: %s\n\n", spec.Role)
 		// Roster reachability (leaf 10): employees report heartbeat
 		// state; in-process specialists are always addressable.
 		if t.reachability != nil {
@@ -147,7 +147,7 @@ func (t *PlatformAgentsTool) Execute(ctx context.Context, args map[string]any) (
 				if !lastSeen.IsZero() {
 					seen = lastSeen.Format(time.RFC3339)
 				}
-				sb.WriteString(fmt.Sprintf("**reachable**: %s | **last_seen**: %s\n\n", reachableStr, seen))
+				fmt.Fprintf(&sb, "**reachable**: %s | **last_seen**: %s\n\n", reachableStr, seen)
 			}
 		}
 		// Extract first meaningful line from the purpose body to avoid
@@ -159,10 +159,10 @@ func (t *PlatformAgentsTool) Execute(ctx context.Context, args map[string]any) (
 		if len(purpose) > 300 {
 			purpose = purpose[:297] + "..."
 		}
-		sb.WriteString(fmt.Sprintf("%s\n\n", purpose))
+		fmt.Fprintf(&sb, "%s\n\n", purpose)
 	}
 
-	sb.WriteString(fmt.Sprintf("*Total: %d agents*\n", len(specs)))
+	fmt.Fprintf(&sb, "*Total: %d agents*\n", len(specs))
 
 	return sb.String(), nil
 }
@@ -242,14 +242,14 @@ func (t *PlatformToolsTool) Execute(ctx context.Context, args map[string]any) (a
 
 	for _, cat := range categories {
 		tools := toolsByCategory[cat]
-		sb.WriteString(fmt.Sprintf("### %s Tools\n\n", strings.ToUpper(cat[:1])+cat[1:]))
+		fmt.Fprintf(&sb, "### %s Tools\n\n", strings.ToUpper(cat[:1])+cat[1:])
 		for _, tool := range tools {
-			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tool.Name, tool.Description))
+			fmt.Fprintf(&sb, "- **%s**: %s\n", tool.Name, tool.Description)
 		}
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString(fmt.Sprintf("*Total: %d tools*\n", len(registeredTools)))
+	fmt.Fprintf(&sb, "*Total: %d tools*\n", len(registeredTools))
 
 	return sb.String(), nil
 }

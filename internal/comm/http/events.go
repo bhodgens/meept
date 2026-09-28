@@ -186,7 +186,7 @@ func (e *EventEmitter) PublishTaskNotification(taskID, agentID string, notifType
 		Type:      notifType,
 		Title:     title,
 		Message:   message,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"task_id":  taskID,
 			"agent_id": agentID,
 		},

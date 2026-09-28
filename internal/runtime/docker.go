@@ -234,7 +234,7 @@ func (b *DockerBackend) Execute(ctx context.Context, cmd Command) (*CommandResul
 		startOpts.RawTerminal = false
 		retryWaiter, retryErr := b.client.StartExecNonBlocking(exec.ID, startOpts)
 		if retryErr != nil {
-			return nil, fmt.Errorf("failed to start container exec: %w (raw retry: %v)", startErr, retryErr)
+			return nil, fmt.Errorf("failed to start container exec: %w (raw retry: %w)", startErr, retryErr)
 		}
 		waiter = retryWaiter
 	}

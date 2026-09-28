@@ -227,7 +227,7 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 
 	// Validate and schedule
 	if err := scheduler.ValidateJobConfig(cfg); err != nil {
-		return ScheduleCreateResult{
+		return ScheduleCreateResult{ //nolint:nilerr // tool contract: validation failures are reported via the result Error field, not as execute error
 			Success: false,
 			Error:   err.Error(),
 		}, nil

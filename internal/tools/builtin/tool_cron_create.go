@@ -128,7 +128,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 	// Build cron expression from interval
 	cronExpr, err := t.buildCronExpression(args)
 	if err != nil {
-		return CronCreateResult{
+		return CronCreateResult{ //nolint:nilerr // tool contract: validation failures are reported via the result Error field, not as execute error
 			Success: false,
 			Error:   err.Error(),
 		}, nil
@@ -198,7 +198,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 
 	// Validate and schedule
 	if err := scheduler.ValidateJobConfig(cfg); err != nil {
-		return CronCreateResult{
+		return CronCreateResult{ //nolint:nilerr // tool contract: validation failures are reported via the result Error field, not as execute error
 			Success: false,
 			Error:   err.Error(),
 		}, nil

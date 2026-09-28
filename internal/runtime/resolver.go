@@ -3,7 +3,6 @@ package runtime
 import (
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os/exec"
 	"runtime"
@@ -138,7 +137,7 @@ func resolveBackend(
 	newBwrap bwrapConstructor,
 ) (ExecutionBackend, error) {
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+		logger = slog.New(slog.DiscardHandler)
 	}
 
 	order := cfg.Order
@@ -220,7 +219,7 @@ func resolveBackend(
 			be, err := newBwrap(mgr, logger)
 			if err != nil {
 				if cfg.RequireSandbox {
-					return nil, fmt.Errorf("%w: bwrap construction failed: %v", ErrSandboxRequired, err)
+					return nil, fmt.Errorf("%w: bwrap construction failed: %w", ErrSandboxRequired, err)
 				}
 				logger.Warn("runtime: bwrap construction failed; falling back", "error", err)
 				continue

@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -170,7 +171,7 @@ func TestGetActiveWorktree(t *testing.T) {
 
 	// No worktree yet
 	_, err := pm.GetActiveWorktree(ctx(), "sess-nope")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 

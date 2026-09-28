@@ -691,7 +691,7 @@ func (a *App) fetchCurrentProject() tea.Msg {
 	return ProjectInfoUpdatedMsg{
 		ProjectID:   p.ID,
 		ProjectName: p.Name,
-		ProjectMode: string(p.Mode),
+		ProjectMode: p.Mode,
 		Dirty:       dirty,
 		Branch:      branch,
 	}

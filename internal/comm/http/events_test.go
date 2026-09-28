@@ -16,10 +16,10 @@ import (
 // interleave.
 func TestEventEmitter_SubscribeDuringClose_NoPanic(t *testing.T) {
 	const iterations = 200
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		e := NewEventEmitter(64, slog.Default())
 		// Populate the buffer so Subscribe has events to replay.
-		for j := 0; j < 8; j++ {
+		for range 8 {
 			e.Publish(&NotificationEvent{
 				ID:        "evt",
 				Timestamp: "2026-01-01T00:00:00Z",
@@ -56,7 +56,7 @@ func TestEventEmitter_SubscribeDuringClose_NoPanic(t *testing.T) {
 
 		wg.Wait()
 		if subPanic != nil {
-			t.Fatalf("iteration %d: Subscribe panicked: %v", i, subPanic)
+			t.Fatalf("iteration %d: Subscribe panicked: %v", iterations, subPanic)
 		}
 	}
 }

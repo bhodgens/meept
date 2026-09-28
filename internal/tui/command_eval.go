@@ -58,7 +58,7 @@ func (h *CommandHandler) evalList() *CommandResult {
 		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 			when = t.Format("2006-01-02 15:04")
 		}
-		sb.WriteString(fmt.Sprintf("  [%s] %s  kind=%s  model=%s  task=%s  k=%d  %s\n", status, truncate(id, 12), kind, truncate(modelID, 16), truncate(taskID, 16), k, when))
+		fmt.Fprintf(&sb, "  [%s] %s  kind=%s  model=%s  task=%s  k=%d  %s\n", status, truncate(id, 12), kind, truncate(modelID, 16), truncate(taskID, 16), k, when)
 	}
 	return &CommandResult{Output: sb.String()}
 }
@@ -86,15 +86,15 @@ func (h *CommandHandler) evalShow(runID string) *CommandResult {
 		status = "pass"
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("eval run: %s\n", id))
-	sb.WriteString(fmt.Sprintf("  status:    %s\n", status))
-	sb.WriteString(fmt.Sprintf("  kind:      %s\n", kind))
-	sb.WriteString(fmt.Sprintf("  model:     %s\n", modelID))
-	sb.WriteString(fmt.Sprintf("  task:      %s\n", taskID))
-	sb.WriteString(fmt.Sprintf("  k:         %d\n", k))
-	sb.WriteString(fmt.Sprintf("  oracle:    %s\n", oracleName))
-	sb.WriteString(fmt.Sprintf("  attempts:  %d\n", attempts))
-	sb.WriteString(fmt.Sprintf("  created:   %s\n", createdAt))
+	fmt.Fprintf(&sb, "eval run: %s\n", id)
+	fmt.Fprintf(&sb, "  status:    %s\n", status)
+	fmt.Fprintf(&sb, "  kind:      %s\n", kind)
+	fmt.Fprintf(&sb, "  model:     %s\n", modelID)
+	fmt.Fprintf(&sb, "  task:      %s\n", taskID)
+	fmt.Fprintf(&sb, "  k:         %d\n", k)
+	fmt.Fprintf(&sb, "  oracle:    %s\n", oracleName)
+	fmt.Fprintf(&sb, "  attempts:  %d\n", attempts)
+	fmt.Fprintf(&sb, "  created:   %s\n", createdAt)
 	attemptsArr := anyArray(rec, "attempts")
 	if len(attemptsArr) > 0 {
 		sb.WriteString("\n  attempts:\n")
@@ -109,7 +109,7 @@ func (h *CommandHandler) evalShow(runID string) *CommandResult {
 			if aPassed {
 				aStatus = "pass"
 			}
-			sb.WriteString(fmt.Sprintf("    [%d] %s\n", idx, aStatus))
+			fmt.Fprintf(&sb, "    [%d] %s\n", idx, aStatus)
 		}
 	}
 	return &CommandResult{Output: sb.String()}

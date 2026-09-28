@@ -33,7 +33,9 @@ func TestInstructionsHandlerCRUD(t *testing.T) {
 		Action:  "shell",
 		Enabled: true,
 	}
-	store.Save(instr, "project")
+	if err := store.Save(instr, "project"); err != nil {
+		t.Fatalf("store.Save: %v", err)
+	}
 
 	t.Run("List instructions", func(t *testing.T) {
 		resp, err := client.Get(server.URL + "/api/v1/instructions")
@@ -102,7 +104,9 @@ func TestInstructionsHandlerDelete(t *testing.T) {
 		Action:  "shell",
 		Enabled: true,
 	}
-	store.Save(instr, "project")
+	if err := store.Save(instr, "project"); err != nil {
+		t.Fatalf("store.Save: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -152,7 +156,9 @@ func TestInstructionsHandlerUpdate(t *testing.T) {
 		Action:  "shell",
 		Enabled: true,
 	}
-	store.Save(instr, "project")
+	if err := store.Save(instr, "project"); err != nil {
+		t.Fatalf("store.Save: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)

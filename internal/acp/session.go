@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -273,7 +274,7 @@ func (s *Session) closeLocked() error {
 }
 
 func isAlreadyDone(err error) bool {
-	return err == os.ErrProcessDone || err == exec.ErrNotFound
+	return errors.Is(err, os.ErrProcessDone) || errors.Is(err, exec.ErrNotFound)
 }
 
 func (s *Session) onNotice(n Notification) {

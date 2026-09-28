@@ -224,7 +224,7 @@ func AnalyzeCoreDelve(ctx context.Context, coreFile, program string, timeout tim
 	// Write commands and close stdin.
 	go func() {
 		defer stdin.Close()
-		for _, line := range strings.Split(script, "\n") {
+		for line := range strings.SplitSeq(script, "\n") {
 			if line != "" {
 				fmt.Fprintln(stdin, line)
 			}
@@ -239,9 +239,8 @@ func AnalyzeCoreDelve(ctx context.Context, coreFile, program string, timeout tim
 
 	select {
 	case <-ctx.Done():
-		if cmd.Process != nil {
-			cmd.Process.Kill()
-		}
+		// Best-effort kill; the Wait below reaps the process either way.
+		_ = cmd.Process.Kill()
 		// Reap the process to avoid a zombie (S6-6). The cmd.Wait call
 		// in the goroutine above has either returned already or will
 		// return as a result of the Kill.
@@ -406,8 +405,9 @@ func parseGDBOutput(raw, coreFile, program string) *CoreDumpResult {
 		}
 
 		// Detect faulting address.
-		if idx := strings.Index(line, "faulting address"); idx >= 0 {
-			result.FaultAddr = extractAddress(strings.TrimSpace(line[idx+len("faulting address"):]))
+		if before, after, ok := strings.Cut(line, "faulting address"); ok {
+			_ = before
+			result.FaultAddr = extractAddress(strings.TrimSpace(after))
 			continue
 		}
 
@@ -480,17 +480,15 @@ func extractGDBSignal(line string) string {
 		}
 	}
 	// Generic extraction: find "terminated with signal ..." or "received signal ..." pattern.
-	if idx := strings.Index(line, "terminated with signal "); idx >= 0 {
-		rest := line[idx+len("terminated with signal "):]
-		if comma := strings.Index(rest, ","); comma >= 0 {
-			return strings.TrimSpace(rest[:comma])
+	if _, rest, ok := strings.Cut(line, "terminated with signal "); ok {
+		if sig, _, ok := strings.Cut(rest, ","); ok {
+			return strings.TrimSpace(sig)
 		}
 		return strings.TrimSpace(rest)
 	}
-	if idx := strings.Index(line, "received signal "); idx >= 0 {
-		rest := line[idx+len("received signal "):]
-		if comma := strings.Index(rest, ","); comma >= 0 {
-			return strings.TrimSpace(rest[:comma])
+	if _, rest, ok := strings.Cut(line, "received signal "); ok {
+		if sig, _, ok := strings.Cut(rest, ","); ok {
+			return strings.TrimSpace(sig)
 		}
 		return strings.TrimSpace(rest)
 	}
@@ -499,8 +497,8 @@ func extractGDBSignal(line string) string {
 
 func extractGDBReason(line string) string {
 	// Extract text after the comma in "Program terminated with signal SIGSEGV, ..."
-	if idx := strings.Index(line, ","); idx >= 0 {
-		return strings.TrimSpace(line[idx+1:])
+	if _, after, ok := strings.Cut(line, ","); ok {
+		return strings.TrimSpace(after)
 	}
 	return line
 }
@@ -523,29 +521,39 @@ func extractAddress(s string) string {
 	return s
 }
 
+// leadingInt returns the leading decimal digits of s parsed as an int.
+// It returns 0 when s does not start with a digit, matching the previous
+// accumulate-then-parse behavior (no overflow detection in either form).
+func leadingInt(s string) int {
+	n := 0
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			break
+		}
+		n = n*10 + int(ch-'0')
+	}
+	return n
+}
+
+// lenDigitPrefix returns the length of the leading decimal digit run of s.
+func lenDigitPrefix(s string) int {
+	n := 0
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			break
+		}
+		n++
+	}
+	return n
+}
+
 func parseGDBThreadID(line string) int {
 	// "Thread 1 (LWP 12345):" -> extract "1"
 	// Or "(LWP 12345)" -> extract 12345
 	// Try "Thread N" pattern first.
 	after := strings.TrimPrefix(line, "Thread ")
 	after = strings.TrimSpace(after)
-	// Take the number before the first non-digit.
-	var idStr string
-	for _, ch := range after {
-		if ch >= '0' && ch <= '9' {
-			idStr += string(ch)
-		} else {
-			break
-		}
-	}
-	if idStr != "" {
-		id := 0
-		for _, ch := range idStr {
-			id = id*10 + int(ch-'0')
-		}
-		return id
-	}
-	return 0
+	return leadingInt(after)
 }
 
 func parseGDBFrame(line string) *CoreFrame {
@@ -562,47 +570,33 @@ func parseGDBFrame(line string) *CoreFrame {
 	frame := &CoreFrame{}
 	// Extract frame index.
 	rest := trimmed[1:] // Skip '#'
-	var idxStr string
-	for _, ch := range rest {
-		if ch >= '0' && ch <= '9' {
-			idxStr += string(ch)
-		} else {
-			break
-		}
-	}
-	if idxStr != "" {
-		frame.Index = 0
-		for _, ch := range idxStr {
-			frame.Index = frame.Index*10 + int(ch-'0')
-		}
-	}
+	frame.Index = leadingInt(rest)
 
 	// Extract address: 0xNNNN
-	if addrIdx := strings.Index(rest, "0x"); addrIdx >= 0 {
-		addrStart := rest[addrIdx:]
-		if space := strings.Index(addrStart, " "); space >= 0 {
-			frame.Address = addrStart[:space]
+	if _, addrStart, ok := strings.Cut(rest, "0x"); ok {
+		addrStart = "0x" + addrStart
+		if addr, _, ok := strings.Cut(addrStart, " "); ok {
+			frame.Address = addr
 		} else {
 			frame.Address = addrStart
 		}
 	}
 
 	// Extract "in function_name" or directly the function name.
-	if inIdx := strings.Index(rest, " in "); inIdx >= 0 {
-		funcStart := rest[inIdx+4:]
+	if _, funcStart, ok := strings.Cut(rest, " in "); ok {
 		// Trim arguments if present.
-		if paren := strings.Index(funcStart, "("); paren >= 0 {
-			frame.Function = strings.TrimSpace(funcStart[:paren])
-		} else if at := strings.Index(funcStart, " at "); at >= 0 {
-			frame.Function = strings.TrimSpace(funcStart[:at])
+		if fn, _, ok := strings.Cut(funcStart, "("); ok {
+			frame.Function = strings.TrimSpace(fn)
+		} else if fn, _, ok := strings.Cut(funcStart, " at "); ok {
+			frame.Function = strings.TrimSpace(fn)
 		} else {
 			frame.Function = strings.TrimSpace(funcStart)
 		}
 	}
 
 	// Extract "at file:line".
-	if atIdx := strings.Index(rest, " at "); atIdx >= 0 {
-		location := strings.TrimSpace(rest[atIdx+4:])
+	if _, loc, ok := strings.Cut(rest, " at "); ok {
+		location := strings.TrimSpace(loc)
 		// file:line format.
 		if colon := strings.LastIndex(location, ":"); colon >= 0 {
 			frame.File = location[:colon]
@@ -698,8 +692,8 @@ func parseLLDBOutput(raw, coreFile, program string) *CoreDumpResult {
 				}
 			}
 			// Extract fault address.
-			if addrIdx := strings.Index(line, "address="); addrIdx >= 0 {
-				result.FaultAddr = extractAddress(line[addrIdx+8:])
+			if _, after, ok := strings.Cut(line, "address="); ok {
+				result.FaultAddr = extractAddress(after)
 			}
 			continue
 		}
@@ -752,8 +746,7 @@ func parseLLDBOutput(raw, coreFile, program string) *CoreDumpResult {
 }
 
 func extractLLDBStopReason(line string) string {
-	if idx := strings.Index(line, "stop reason = "); idx >= 0 {
-		rest := line[idx+len("stop reason = "):]
+	if _, rest, ok := strings.Cut(line, "stop reason = "); ok {
 		// Trim trailing context (usually parenthetical details like "(code=1, ...)").
 		// But also handle bare reason strings.
 		// If the reason starts with a parenthesized group, skip it.
@@ -768,19 +761,7 @@ func extractLLDBStopReason(line string) string {
 
 func parseLLDBThreadID(line string) int {
 	rest := strings.TrimPrefix(line, "thread #")
-	var idStr string
-	for _, ch := range rest {
-		if ch >= '0' && ch <= '9' {
-			idStr += string(ch)
-		} else {
-			break
-		}
-	}
-	id := 0
-	for _, ch := range idStr {
-		id = id*10 + int(ch-'0')
-	}
-	return id
+	return leadingInt(rest)
 }
 
 func parseLLDBFrame(line string) *CoreFrame {
@@ -793,38 +774,23 @@ func parseLLDBFrame(line string) *CoreFrame {
 	trimmed = strings.TrimPrefix(trimmed, "frame #")
 
 	frame := &CoreFrame{}
-	var idxStr string
-	for _, ch := range trimmed {
-		if ch >= '0' && ch <= '9' {
-			idxStr += string(ch)
-		} else {
-			break
-		}
-	}
-	if idxStr != "" {
-		frame.Index = 0
-		for _, ch := range idxStr {
-			frame.Index = frame.Index*10 + int(ch-'0')
-		}
-	}
+	frame.Index = leadingInt(trimmed)
 
 	// Extract address.
-	if addrIdx := strings.Index(trimmed, "0x"); addrIdx >= 0 {
-		addrStart := trimmed[addrIdx:]
-		if tick := strings.Index(addrStart, "`"); tick >= 0 {
-			frame.Address = addrStart[:tick]
-		} else if space := strings.Index(addrStart, " "); space >= 0 {
-			frame.Address = addrStart[:space]
+	if _, addrStart, ok := strings.Cut(trimmed, "0x"); ok {
+		addrStart = "0x" + addrStart
+		if addr, _, ok := strings.Cut(addrStart, "`"); ok {
+			frame.Address = addr
+		} else if addr, _, ok := strings.Cut(addrStart, " "); ok {
+			frame.Address = addr
 		}
 	}
 
 	// Extract function: after backtick "`".
-	if tick := strings.Index(trimmed, "`"); tick >= 0 {
-		funcStart := trimmed[tick+1:]
+	if _, funcStart, ok := strings.Cut(trimmed, "`"); ok {
 		// "function_name at file.c:42:col" (lldb uses file:line:col format).
-		if at := strings.Index(funcStart, " at "); at >= 0 {
-			frame.Function = funcStart[:at]
-			location := funcStart[at+4:]
+		if fn, location, ok := strings.Cut(funcStart, " at "); ok {
+			frame.Function = fn
 			// Split on colon. lldb produces "file:line:col".
 			// Use the first colon to separate file from line:col.
 			parts := strings.SplitN(location, ":", 3)
@@ -916,15 +882,7 @@ func parseDelveCoreOutput(raw, coreFile, program string) *CoreDumpResult {
 			if currentThread != nil && len(currentThread.Stack) > 0 {
 				threads = append(threads, *currentThread)
 			}
-			gID := 0
-			rest := strings.TrimPrefix(line, "Goroutine ")
-			for _, ch := range rest {
-				if ch >= '0' && ch <= '9' {
-					gID = gID*10 + int(ch-'0')
-				} else {
-					break
-				}
-			}
+			gID := leadingInt(strings.TrimPrefix(line, "Goroutine "))
 			currentThread = &CoreThread{ID: gID}
 			frameIdx = 0
 			continue
@@ -934,24 +892,16 @@ func parseDelveCoreOutput(raw, coreFile, program string) *CoreDumpResult {
 		if strings.HasPrefix(line, "    ") {
 			trimmed := strings.TrimSpace(line)
 			// Check if it starts with a number (frame index).
-			var numStr string
-			for _, ch := range trimmed {
-				if ch >= '0' && ch <= '9' {
-					numStr += string(ch)
-				} else {
-					break
-				}
-			}
-			if numStr != "" && currentThread != nil {
-				funcName := strings.TrimSpace(trimmed[len(numStr):])
+			numLen := lenDigitPrefix(trimmed)
+			if numLen > 0 && currentThread != nil {
+				funcName := strings.TrimSpace(trimmed[numLen:])
 				frame := CoreFrame{
 					Index:    frameIdx,
 					Function: funcName,
 				}
 				// Parse "at file:line" suffix.
-				if at := strings.Index(funcName, " at "); at >= 0 {
-					frame.Function = funcName[:at]
-					location := funcName[at+4:]
+				if fn, location, ok := strings.Cut(funcName, " at "); ok {
+					frame.Function = fn
 					if colon := strings.LastIndex(location, ":"); colon >= 0 {
 						frame.File = location[:colon]
 						lineStr := location[colon+1:]

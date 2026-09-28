@@ -394,7 +394,7 @@ func (s *ConversationSession) buildSystemPrompt(mode AnalysisMode) string {
 	var sb strings.Builder
 
 	sb.WriteString("You are a trace analysis consultant for the Meept agent framework.\n")
-	sb.WriteString(fmt.Sprintf("Current analysis mode: %s.\n\n", mode))
+	fmt.Fprintf(&sb, "Current analysis mode: %s.\n\n", mode)
 
 	switch mode {
 	case ModeDiscovery:
@@ -418,7 +418,7 @@ func (s *ConversationSession) buildSystemPrompt(mode AnalysisMode) string {
 	}
 
 	if len(s.config.EnableTools) > 0 {
-		sb.WriteString(fmt.Sprintf("\nActive tools: %s\n", strings.Join(s.config.EnableTools, ", ")))
+		fmt.Fprintf(&sb, "\nActive tools: %s\n", strings.Join(s.config.EnableTools, ", "))
 	}
 
 	return sb.String()
@@ -434,10 +434,7 @@ func (s *ConversationSession) buildHistoryMessages(mode AnalysisMode) []ChatMess
 
 	// Include only recent turns to manage context budget.
 	const contextWindow = 6
-	start := len(s.turns) - contextWindow
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(s.turns)-contextWindow, 0)
 
 	// Brief summary of omitted earlier turns.
 	if start > 0 {
@@ -509,18 +506,18 @@ func (s *ConversationSession) llmCallLocked(systemPrompt string, messages []Chat
 // The caller holds s.mu.
 func (s *ConversationSession) deterministicAnalysis(systemPrompt string, messages []ChatMessage, store agent.TraceStoreReader) (string, error) {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("=== Analysis (deterministic, %s) ===\n\n", s.currentMode))
+	fmt.Fprintf(&sb, "=== Analysis (deterministic, %s) ===\n\n", s.currentMode)
 
 	if store != nil {
 		traceIDs, err := store.ListTraceIDs()
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("Error listing traces: %v\n", err))
+			fmt.Fprintf(&sb, "Error listing traces: %v\n", err)
 		} else if len(traceIDs) == 0 {
 			sb.WriteString("No traces available for analysis.\n")
 		} else {
-			sb.WriteString(fmt.Sprintf("Trace store: %d traces indexed.\n", len(traceIDs)))
+			fmt.Fprintf(&sb, "Trace store: %d traces indexed.\n", len(traceIDs))
 			for i := 0; i < len(traceIDs) && i < 5; i++ {
-				sb.WriteString(fmt.Sprintf("  trace %s\n", traceIDs[i]))
+				fmt.Fprintf(&sb, "  trace %s\n", traceIDs[i])
 			}
 		}
 	} else {
@@ -529,7 +526,7 @@ func (s *ConversationSession) deterministicAnalysis(systemPrompt string, message
 
 	sb.WriteString("\n--- Conversation context ---\n")
 	for _, msg := range messages {
-		sb.WriteString(fmt.Sprintf("[%s] %s\n", msg.Role, truncateStr(msg.Content, 500)))
+		fmt.Fprintf(&sb, "[%s] %s\n", msg.Role, truncateStr(msg.Content, 500))
 	}
 
 	return sb.String(), nil

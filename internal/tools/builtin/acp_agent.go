@@ -64,7 +64,10 @@ func (a acpManagerAdapter) GetOrCreate(
 		return nil, err
 	}
 	if s == nil {
-		return nil, nil
+		// Documented contract: a nil session with nil error means the
+		// manager started nothing for this agent (start waiter resolved
+		// without a session); callers treat it as "not running".
+		return nil, nil //nolint:nilnil // nil-session is the manager's "not started" signal
 	}
 	return s, nil
 }

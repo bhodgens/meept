@@ -311,14 +311,14 @@ func (di *DeepInitializer) buildAgentsContent(dir *dirInfo, level string) string
 		b.WriteString("\n")
 	case "domain":
 		b.WriteString("## Domain\n\n")
-		b.WriteString(fmt.Sprintf("Domain: `%s`. Contains %d files, %d symbols.\n\n",
-			rel, len(dir.Files), len(dir.Symbols)))
+		fmt.Fprintf(&b, "Domain: `%s`. Contains %d files, %d symbols.\n\n",
+			rel, len(dir.Files), len(dir.Symbols))
 		b.WriteString(di.domainConventions(dir))
 		b.WriteString("\n")
 	case "component":
 		b.WriteString("## Component\n\n")
-		b.WriteString(fmt.Sprintf("Component: `%s`. Contains %d files, %d symbols.\n\n",
-			rel, len(dir.Files), len(dir.Symbols)))
+		fmt.Fprintf(&b, "Component: `%s`. Contains %d files, %d symbols.\n\n",
+			rel, len(dir.Files), len(dir.Symbols))
 		b.WriteString(di.componentConventions(dir))
 		b.WriteString("\n")
 	}
@@ -372,14 +372,14 @@ func (di *DeepInitializer) rootConventions(dir *dirInfo) string {
 	if hasRS {
 		b.WriteString("- Rust project: src/lib.rs or src/main.rs as entry.\n")
 	}
-	b.WriteString(fmt.Sprintf("- Total source files in project: %d.\n", len(dir.Files)))
+	fmt.Fprintf(&b, "- Total source files in project: %d.\n", len(dir.Files))
 	return b.String()
 }
 
 func (di *DeepInitializer) domainConventions(dir *dirInfo) string {
 	var b strings.Builder
 	pkg := filepath.Base(dir.Path)
-	b.WriteString(fmt.Sprintf("- Package/module name: `%s`.\n", pkg))
+	fmt.Fprintf(&b, "- Package/module name: `%s`.\n", pkg)
 	b.WriteString("- Domain-specific types and interfaces live here.\n")
 	b.WriteString("- Prefer internal functions; export only when cross-domain.\n")
 	return b.String()
@@ -388,7 +388,7 @@ func (di *DeepInitializer) domainConventions(dir *dirInfo) string {
 func (di *DeepInitializer) componentConventions(dir *dirInfo) string {
 	var b strings.Builder
 	pkg := filepath.Base(dir.Path)
-	b.WriteString(fmt.Sprintf("- Component: `%s`.\n", pkg))
+	fmt.Fprintf(&b, "- Component: `%s`.\n", pkg)
 	b.WriteString("- Focused, single-responsibility component.\n")
 	b.WriteString("- Minimal public surface area.\n")
 	return b.String()
@@ -433,10 +433,10 @@ func (di *DeepInitializer) writeSymbolsShorthand(b *strings.Builder, symbols []a
 		if len(items) == 0 {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("### %s\n\n", kind))
+		fmt.Fprintf(b, "### %s\n\n", kind)
 		for _, s := range items {
 			if written >= maxSymbols {
-				b.WriteString(fmt.Sprintf("_... and %d more ..._\n", len(symbols)-written))
+				fmt.Fprintf(b, "_... and %d more ..._\n", len(symbols)-written)
 				return
 			}
 			shorthand := di.shorthandFor(s)

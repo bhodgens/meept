@@ -1739,27 +1739,27 @@ func (h *CommandHandler) executeProjectInfo() *CommandResult {
 			if p.Branch != "" {
 				branch = fmt.Sprintf(" branch:%s", p.Branch)
 			}
-			sb.WriteString(fmt.Sprintf("  %s  [%s]%s%s\n", p.Name, p.Mode, branch, dirty))
+			fmt.Fprintf(&sb, "  %s  [%s]%s%s\n", p.Name, p.Mode, branch, dirty)
 			if p.LocalPath != "" {
-				sb.WriteString(fmt.Sprintf("    path: %s\n", p.LocalPath))
+				fmt.Fprintf(&sb, "    path: %s\n", p.LocalPath)
 			}
 			if p.GitURL != "" {
-				sb.WriteString(fmt.Sprintf("    url:  %s\n", p.GitURL))
+				fmt.Fprintf(&sb, "    url:  %s\n", p.GitURL)
 			}
 		}
 
 		sb.WriteString("\nuse /project set <path|name> to switch the current session's project\n")
-		sb.WriteString(fmt.Sprintf("registered %d project(s). base_dir: ~/.meept/projects\n\n", len(projects.Projects)))
+		fmt.Fprintf(&sb, "registered %d project(s). base_dir: ~/.meept/projects\n\n", len(projects.Projects))
 	} else if len(recents) > 0 || len(matches) > 0 {
 		// No registered projects but recents or filesystem matches available.
 		sb.WriteString("recent project paths:\n\n")
 		for _, r := range recents {
-			sb.WriteString(fmt.Sprintf("  ~ %s\n", r))
+			fmt.Fprintf(&sb, "  ~ %s\n", r)
 		}
 		if len(matches) > 0 {
 			sb.WriteString("\nmatching directories:\n\n")
 			for _, m := range matches {
-				sb.WriteString(fmt.Sprintf("  %s\n", m))
+				fmt.Fprintf(&sb, "  %s\n", m)
 			}
 		}
 		sb.WriteString("\nuse /project set <path> to switch the current session's project\n")
@@ -1770,7 +1770,7 @@ func (h *CommandHandler) executeProjectInfo() *CommandResult {
 	}
 
 	if readdirErr != nil {
-		sb.WriteString(fmt.Sprintf("\n(note: could not fetch recent paths: %v)\n", readdirErr))
+		fmt.Fprintf(&sb, "\n(note: could not fetch recent paths: %v)\n", readdirErr)
 	}
 
 	return &CommandResult{Output: sb.String()}
@@ -1792,7 +1792,7 @@ func (h *CommandHandler) executeProjectList() *CommandResult {
 
 	var sb strings.Builder
 	sb.WriteString("projects:\n\n")
-	sb.WriteString(fmt.Sprintf("  %-20s %-8s %-16s %-10s %s\n", "NAME", "MODE", "BRANCH", "STATUS", "PATH"))
+	fmt.Fprintf(&sb, "  %-20s %-8s %-16s %-10s %s\n", "NAME", "MODE", "BRANCH", "STATUS", "PATH")
 	for _, p := range projects.Projects {
 		path := p.LocalPath
 		if len(path) > 40 {
@@ -1802,9 +1802,9 @@ func (h *CommandHandler) executeProjectList() *CommandResult {
 		if branch == "" {
 			branch = "-"
 		}
-		sb.WriteString(fmt.Sprintf("  %-20s %-8s %-16s %-10s %s\n", p.Name, p.Mode, branch, p.Status, path))
+		fmt.Fprintf(&sb, "  %-20s %-8s %-16s %-10s %s\n", p.Name, p.Mode, branch, p.Status, path)
 	}
-	sb.WriteString(fmt.Sprintf("\n  total: %d projects", projects.Count))
+	fmt.Fprintf(&sb, "\n  total: %d projects", projects.Count)
 	return &CommandResult{Output: sb.String()}
 }
 
@@ -1867,7 +1867,7 @@ func (h *CommandHandler) executeProjectSet(args []string) *CommandResult {
 
 	// Build a helpful error message explaining why both attempts failed.
 	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("project '%s' not found\n", query))
+	fmt.Fprintf(&msg, "project '%s' not found\n", query)
 
 	// Explain DetectProject result if it failed.
 	if detected, detectErr := h.rpc.DetectProject(query); detectErr != nil {
@@ -1875,17 +1875,17 @@ func (h *CommandHandler) executeProjectSet(args []string) *CommandResult {
 		if strings.Contains(detectMsg, "no git repository") || strings.Contains(detectMsg, "not a git") {
 			msg.WriteString("  - path does not appear to be inside a git repository")
 		} else if strings.Contains(detectMsg, "resolve path") {
-			msg.WriteString(fmt.Sprintf("  - could not resolve path '%s'", query))
+			fmt.Fprintf(&msg, "  - could not resolve path '%s'", query)
 		} else if strings.Contains(detectMsg, "auto-register") {
-			msg.WriteString(fmt.Sprintf("  - encountered an error while auto-registering: %v", detectErr))
+			fmt.Fprintf(&msg, "  - encountered an error while auto-registering: %v", detectErr)
 		} else {
-			msg.WriteString(fmt.Sprintf("  - path detection failed: %v", detectErr))
+			fmt.Fprintf(&msg, "  - path detection failed: %v", detectErr)
 		}
 	} else if detected != nil && detected.ID != "" {
 		// Detection succeeded and found a project, but somehow the name/ID fallback didn't
 		// pick it up — shouldn't normally happen, but if the detected project name doesn't
 		// match the query verbatim, explain that.
-		msg.WriteString(fmt.Sprintf("  - detected project '%s' (ID: %s), but query '%s' did not match by name or ID", detected.Name, detected.ID, query))
+		fmt.Fprintf(&msg, "  - detected project '%s' (ID: %s), but query '%s' did not match by name or ID", detected.Name, detected.ID, query)
 	} else {
 		msg.WriteString("  - path detection did not return a valid project")
 	}
@@ -1995,31 +1995,31 @@ func (h *CommandHandler) executeProjectStatus() *CommandResult {
 		if p.Status != "active" {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("project: %s (%s)\n", p.Name, p.Mode))
-		sb.WriteString(fmt.Sprintf("  id:     %s\n", p.ID))
+		fmt.Fprintf(&sb, "project: %s (%s)\n", p.Name, p.Mode)
+		fmt.Fprintf(&sb, "  id:     %s\n", p.ID)
 		if p.LocalPath != "" {
-			sb.WriteString(fmt.Sprintf("  path:   %s\n", p.LocalPath))
+			fmt.Fprintf(&sb, "  path:   %s\n", p.LocalPath)
 		}
 		if p.GitURL != "" {
-			sb.WriteString(fmt.Sprintf("  url:    %s\n", p.GitURL))
+			fmt.Fprintf(&sb, "  url:    %s\n", p.GitURL)
 		}
 
 		if p.Mode == "git" {
 			status, err := h.rpc.ProjectStatus(p.ID)
 			if err != nil {
-				sb.WriteString(fmt.Sprintf("  status: error: %v\n", err))
+				fmt.Fprintf(&sb, "  status: error: %v\n", err)
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("  branch: %s\n", status.Branch))
-			sb.WriteString(fmt.Sprintf("  dirty:  %v\n", status.Dirty))
+			fmt.Fprintf(&sb, "  branch: %s\n", status.Branch)
+			fmt.Fprintf(&sb, "  dirty:  %v\n", status.Dirty)
 			if status.Ahead > 0 {
-				sb.WriteString(fmt.Sprintf("  ahead:  %d commits\n", status.Ahead))
+				fmt.Fprintf(&sb, "  ahead:  %d commits\n", status.Ahead)
 			}
 			if status.Behind > 0 {
-				sb.WriteString(fmt.Sprintf("  behind: %d commits\n", status.Behind))
+				fmt.Fprintf(&sb, "  behind: %d commits\n", status.Behind)
 			}
 			if status.ModifiedFiles > 0 {
-				sb.WriteString(fmt.Sprintf("  modified files: %d\n", status.ModifiedFiles))
+				fmt.Fprintf(&sb, "  modified files: %d\n", status.ModifiedFiles)
 			}
 		}
 		sb.WriteString("\n")
@@ -2103,37 +2103,37 @@ func (h *CommandHandler) executeDebugSession() *CommandResult {
 
 	var sb strings.Builder
 	sb.WriteString("=== Session Debug Info ===\n\n")
-	sb.WriteString(fmt.Sprintf("ID:              %s\n", session.ID))
-	sb.WriteString(fmt.Sprintf("Name:            %s\n", session.Name))
-	sb.WriteString(fmt.Sprintf("Conversation ID: %s\n", session.ConversationID))
-	sb.WriteString(fmt.Sprintf("Created:         %s\n", session.CreatedAt))
-	sb.WriteString(fmt.Sprintf("Last Activity:   %s\n", session.LastActivity))
+	fmt.Fprintf(&sb, "ID:              %s\n", session.ID)
+	fmt.Fprintf(&sb, "Name:            %s\n", session.Name)
+	fmt.Fprintf(&sb, "Conversation ID: %s\n", session.ConversationID)
+	fmt.Fprintf(&sb, "Created:         %s\n", session.CreatedAt)
+	fmt.Fprintf(&sb, "Last Activity:   %s\n", session.LastActivity)
 
 	if session.ProjectID != "" {
-		sb.WriteString(fmt.Sprintf("Project ID:      %s\n", session.ProjectID))
+		fmt.Fprintf(&sb, "Project ID:      %s\n", session.ProjectID)
 	}
 	if session.ProjectPath != "" {
-		sb.WriteString(fmt.Sprintf("Project Path:    %s\n", session.ProjectPath))
+		fmt.Fprintf(&sb, "Project Path:    %s\n", session.ProjectPath)
 	}
 	if session.WorktreePath != "" {
-		sb.WriteString(fmt.Sprintf("Worktree Path:   %s\n", session.WorktreePath))
-		sb.WriteString(fmt.Sprintf("Effective Dir:   %s\n", session.WorktreePath))
+		fmt.Fprintf(&sb, "Worktree Path:   %s\n", session.WorktreePath)
+		fmt.Fprintf(&sb, "Effective Dir:   %s\n", session.WorktreePath)
 	} else if session.ProjectPath != "" {
-		sb.WriteString(fmt.Sprintf("Effective Dir:   %s\n", session.ProjectPath))
+		fmt.Fprintf(&sb, "Effective Dir:   %s\n", session.ProjectPath)
 	}
 	if session.DetectionContext != nil {
-		sb.WriteString(fmt.Sprintf("CWD:             %s\n", session.DetectionContext.CWD))
+		fmt.Fprintf(&sb, "CWD:             %s\n", session.DetectionContext.CWD)
 		if session.DetectionContext.DetectedProjectID != "" {
-			sb.WriteString(fmt.Sprintf("Detected Project: %s\n", session.DetectionContext.DetectedProjectID))
+			fmt.Fprintf(&sb, "Detected Project: %s\n", session.DetectionContext.DetectedProjectID)
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("Archived:        %v\n", session.Archived))
-	sb.WriteString(fmt.Sprintf("Attached Clients: %d\n", len(session.AttachedClients)))
-	sb.WriteString(fmt.Sprintf("Worker IDs:      %d\n", len(session.WorkerIDs)))
+	fmt.Fprintf(&sb, "Archived:        %v\n", session.Archived)
+	fmt.Fprintf(&sb, "Attached Clients: %d\n", len(session.AttachedClients))
+	fmt.Fprintf(&sb, "Worker IDs:      %d\n", len(session.WorkerIDs))
 
 	if session.Designation != nil {
-		sb.WriteString(fmt.Sprintf("Designation:     %s\n", session.Designation.Status))
+		fmt.Fprintf(&sb, "Designation:     %s\n", session.Designation.Status)
 	}
 
 	return &CommandResult{

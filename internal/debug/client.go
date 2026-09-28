@@ -404,8 +404,8 @@ func (c *Client) Initialize(ctx context.Context, adapterID string) error {
 	args := InitializeRequestArguments{
 		AdapterID:       adapterID,
 		PathFormat:      "path",
-		LinesStartAt1:   boolPtr(true),
-		ColumnsStartAt1: boolPtr(true),
+		LinesStartAt1:   new(true),
+		ColumnsStartAt1: new(true),
 	}
 
 	resp, err := c.SendRequest(ctx, "initialize", args)
@@ -610,8 +610,9 @@ func (c *Client) Close() error {
 				lastErr = err
 			}
 		}
-		// Reap the process to avoid zombies.
-		c.cmd.Wait()
+		// Reap the process to avoid zombies. Wait normally reports "process
+		// already finished" after a Kill; the kill error above is authoritative.
+		_ = c.cmd.Wait()
 	}
 
 	return lastErr
@@ -628,9 +629,4 @@ func trimCR(s string) string {
 		return s[:len(s)-1]
 	}
 	return s
-}
-
-// boolPtr returns a pointer to the given bool value.
-func boolPtr(v bool) *bool {
-	return &v
 }

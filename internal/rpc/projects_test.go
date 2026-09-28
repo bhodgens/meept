@@ -29,7 +29,9 @@ func newTestProjectHandler(t *testing.T) (*ProjectHandler, *project.ProjectManag
 		BaseDir:       filepath.Join(dir, "projects"),
 		DefaultBranch: "main",
 	}
-	os.MkdirAll(cfg.BaseDir, 0o755)
+	if err := os.MkdirAll(cfg.BaseDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 
 	pm := project.NewProjectManager(store, nil, cfg, nil)
 	sessionStore := session.NewMemoryStore(nil)
@@ -87,14 +89,18 @@ func TestHandleSet_DeactivatesPreviousActive(t *testing.T) {
 		"session_id": sess.ID,
 		"path":       "first",
 	})
-	h.handleSet(ctx, params1)
+	if _, err := h.handleSet(ctx, params1); err != nil {
+		t.Fatalf("handleSet: %v", err)
+	}
 
 	// Set second project.
 	params2, _ := json.Marshal(map[string]string{
 		"session_id": sess.ID,
 		"path":       "second",
 	})
-	h.handleSet(ctx, params2)
+	if _, err := h.handleSet(ctx, params2); err != nil {
+		t.Fatalf("handleSet: %v", err)
+	}
 
 	// Only one active project should exist.
 	active, err := pm.GetActive(ctx)
@@ -167,7 +173,9 @@ func setupGitProject(t *testing.T, h *ProjectHandler) string {
 	ctx := context.Background()
 	dir := t.TempDir()
 	repoDir := filepath.Join(dir, "repo")
-	os.MkdirAll(repoDir, 0o755)
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 	initGitRepoForRPC(t, repoDir)
 
 	pm := h.pm

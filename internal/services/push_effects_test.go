@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"sync"
 	"testing"
@@ -16,7 +15,7 @@ import (
 
 // effectsTestLogger discards output for services effects tests.
 func effectsTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // effectsBusCounter counts publishes on the push topics so tests can

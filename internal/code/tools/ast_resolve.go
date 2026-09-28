@@ -9,14 +9,26 @@ import (
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/internal/tools/builtin"
 )
 
 // ASTResolveTool applies or discards pending AST edit proposals.
-type ASTResolveTool struct{ tools.ToolDefaults }
+type ASTResolveTool struct {
+	tools.ToolDefaults
+	fenceChecker builtin.FenceChecker
+}
 
 // NewASTResolveTool creates a new AST resolve tool.
 func NewASTResolveTool() (*ASTResolveTool, error) {
 	return &ASTResolveTool{}, nil
+}
+
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+// Nil guard is required per CLAUDE.md "Setter methods" coding practice.
+func (t *ASTResolveTool) SetFenceChecker(fc builtin.FenceChecker) {
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 func (t *ASTResolveTool) Name() string { return "ast_resolve" }
@@ -113,6 +125,15 @@ func (t *ASTResolveTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	result := ast.ApplyEdits(source, edits)
+
+	// Validate the path against the workspace fence before writing.
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(filePath, "write"); err != nil {
+			return nil, fmt.Errorf("fence check failed: %w", err)
+		}
+	}
+
+	//nolint:gosec // gosec taint analysis cannot model the fence sanitizer; filePath is validated against the workspace fence by FenceChecker.CheckPath directly above
 	if err := os.WriteFile(filePath, result, 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}

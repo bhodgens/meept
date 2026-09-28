@@ -1669,13 +1669,11 @@ func TestShouldSendProgress_Concurrent(t *testing.T) {
 	hub.SubscribeSession(nilWSConn, "sess-a")
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			_ = hub.ShouldSendProgress(nilWSConn, "sess-a")
 			_ = hub.ShouldSendProgress(nilWSConn, "sess-b")
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -1827,9 +1825,7 @@ func TestHandleWSProgress_NilMessage_NoPanic(t *testing.T) {
 }
 
 func TestHandleWSProgress_InvalidPayload(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{
-		Level: slog.LevelWarn,
-	}))
+	logger := slog.New(slog.DiscardHandler)
 	s := &Server{logger: logger, wsHub: NewWebSocketHub(logger)}
 	msg := &models.BusMessage{
 		Topic:   "agent.progress.synthesized",
@@ -2109,7 +2105,7 @@ func TestConfigServiceListAgents_NewFields(t *testing.T) {
 // SessionService for archive handler tests.
 func newArchiveTestServer(t *testing.T) *Server {
 	t.Helper()
-	store := session.NewMemoryStore(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store := session.NewMemoryStore(slog.New(slog.DiscardHandler))
 	svcReg := &services.ServiceRegistry{
 		Session:      services.NewSessionService(store),
 		SessionStore: store,
@@ -2491,7 +2487,7 @@ func wsSendSubscribe(t *testing.T, conn *websocket.Conn, sessionID string) {
 
 // wsDrain reads and discards any pending WS messages with a short deadline.
 func wsDrain(conn *websocket.Conn, timeout time.Duration) {
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	_ = conn.SetReadDeadline(time.Now().Add(timeout)) // best-effort in test helper
 	for {
 		var msg map[string]any
 		if err := websocket.JSON.Receive(conn, &msg); err != nil {
@@ -2503,7 +2499,7 @@ func wsDrain(conn *websocket.Conn, timeout time.Duration) {
 // wsReadOne reads exactly one WS JSON message within the deadline.
 // Returns the parsed message and true on success, or nil and false on timeout.
 func wsReadOne(conn *websocket.Conn, timeout time.Duration) (map[string]any, bool) {
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	_ = conn.SetReadDeadline(time.Now().Add(timeout)) // best-effort in test helper
 	var msg map[string]any
 	if err := websocket.JSON.Receive(conn, &msg); err != nil {
 		return nil, false

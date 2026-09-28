@@ -550,7 +550,7 @@ func (s *ConfigService) SaveOrchestratorConfig(oc configCli.OrchestratorConfig) 
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		if removeErr := os.Remove(tmpPath); removeErr != nil && !os.IsNotExist(removeErr) {
-			return fmt.Errorf("failed to rename meept config into place (cleanup also failed: %v): %w", removeErr, err)
+			return fmt.Errorf("failed to rename meept config into place (cleanup also failed: %w): %w", removeErr, err)
 		}
 		return fmt.Errorf("failed to rename meept config into place: %w", err)
 	}
@@ -613,7 +613,7 @@ func (s *ConfigService) PatchClientConfig(patch map[string]any) (map[string]any,
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		if removeErr := os.Remove(tmpPath); removeErr != nil && !os.IsNotExist(removeErr) {
-			return nil, fmt.Errorf("failed to rename client config into place (cleanup also failed: %v): %w", removeErr, err)
+			return nil, fmt.Errorf("failed to rename client config into place (cleanup also failed: %w): %w", removeErr, err)
 		}
 		return nil, fmt.Errorf("failed to rename client config into place: %w", err)
 	}

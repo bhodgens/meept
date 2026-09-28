@@ -99,7 +99,7 @@ func (s *Server) handleFilesystemBrowse(w http.ResponseWriter, r *http.Request) 
 func isHiddenPath(path string) bool {
 	// Check the last few components for hidden markers.
 	// We check the path relative to home to avoid flagging the home dir.
-	for _, part := range strings.Split(path, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(path, string(filepath.Separator)) {
 		if len(part) > 0 && part[0] == '.' {
 			return true
 		}

@@ -443,7 +443,7 @@ func walkMarkdown(root string) ([]string, error) {
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
-			return nil // skip unreadable
+			return nil //nolint:nilerr // walk-callback skip: a path outside root is ignored, not an abort
 		}
 		files = append(files, rel)
 		return nil

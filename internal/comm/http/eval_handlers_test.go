@@ -161,7 +161,7 @@ func TestEvalListReturnsRecords(t *testing.T) {
 	mux, h := newEvalTestMux(t)
 
 	// Seed two records directly.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		rec := eval.NewRun(eval.KindPassK, fmt.Sprintf("task-%d", i), "m", 1)
 		rec.CreatedAt = time.Now().UTC().Add(time.Duration(i) * time.Minute)
 		if err := h.store.Save(t.Context(), *rec); err != nil {

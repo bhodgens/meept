@@ -561,7 +561,7 @@ func TestSnapshotTag_Generation(t *testing.T) {
 
 	// Should be valid hex
 	for _, c := range tag1 {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Errorf("tag %q contains non-hex character %q", tag1, c)
 		}
 	}

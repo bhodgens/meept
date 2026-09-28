@@ -216,9 +216,8 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 	}
 	defer func() {
 		// Best-effort deadline reset; connection may already be closed.
-		if dErr := conn.SetDeadline(time.Time{}); dErr != nil {
-			// connection likely already closed; nothing to do
-		}
+		// A non-nil error there is expected and safe to ignore.
+		_ = conn.SetDeadline(time.Time{})
 	}()
 
 	// Write length-prefixed frame

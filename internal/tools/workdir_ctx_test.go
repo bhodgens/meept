@@ -31,7 +31,7 @@ func TestNoWorkingDirError_IsActionableAndDetectable(t *testing.T) {
 }
 
 func TestNoWorkingDirError_EmptyToolNameReturnsSentinel(t *testing.T) {
-	if err := NoWorkingDirError(""); err != ErrNoWorkingDir {
+	if err := NoWorkingDirError(""); !errors.Is(err, ErrNoWorkingDir) {
 		t.Errorf("NoWorkingDirError(\"\") = %v, want the sentinel itself", err)
 	}
 	if IsNoWorkingDir(nil) {

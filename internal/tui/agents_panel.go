@@ -1220,13 +1220,13 @@ func (p *AgentsPanel) renderAudit() string {
 			if rule == "" {
 				rule = f.Checkpoint
 			}
-			b.WriteString(fmt.Sprintf("%s %s  %s  %s\n",
+			fmt.Fprintf(&b, "%s %s  %s  %s\n",
 				dot,
 				ruleStyle.Render(truncate(rule, 40)),
 				lipgloss.NewStyle().Foreground(Current().TextMuted).
 					Render(f.Severity),
 				formatTimeAgoTime(f.DetectedAt),
-			))
+			)
 		}
 
 		b.WriteString("\n")

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -237,13 +238,17 @@ func parseTypeScriptErrors(output, targetFile string) ([]LinterResult, error) {
 	pattern := regexp.MustCompile(`(\S+)\((\d+),(\d+)\):\s*error\s+TS\d+:\s*(.+)`)
 
 	var results []LinterResult
-	lines := strings.Split(output, "\n")
 
-	for _, line := range lines {
+	for line := range strings.SplitSeq(output, "\n") {
 		if matches := pattern.FindStringSubmatch(line); matches != nil {
-			var lineNum, colNum int
-			fmt.Sscanf(matches[2], "%d", &lineNum)
-			fmt.Sscanf(matches[3], "%d", &colNum)
+			lineNum, errLine := strconv.Atoi(matches[2])
+			if errLine != nil {
+				continue
+			}
+			colNum, errCol := strconv.Atoi(matches[3])
+			if errCol != nil {
+				continue
+			}
 			lineNum--
 			colNum--
 
@@ -279,12 +284,14 @@ func parseJavaScriptErrors(output, targetFile string) ([]LinterResult, error) {
 
 	for _, line := range lines {
 		if matches := linePattern.FindStringSubmatch(line); matches != nil {
-			fmt.Sscanf(matches[1], "%d", &lineNum)
-			lineNum--
+			if n, err := strconv.Atoi(matches[1]); err == nil {
+				lineNum = n - 1
+			}
 		}
 		if matches := colPattern.FindStringSubmatch(line); matches != nil {
-			fmt.Sscanf(matches[1], "%d", &colNum)
-			colNum--
+			if n, err := strconv.Atoi(matches[1]); err == nil {
+				colNum = n - 1
+			}
 		}
 		if matches := messagePattern.FindStringSubmatch(line); matches != nil {
 			results = append(results, LinterResult{
@@ -320,13 +327,17 @@ func parseESLintErrors(output, targetFile string) ([]LinterResult, error) {
 	pattern := regexp.MustCompile(`(\S+):(\d+):(\d+):\s*(error|warning):\s*(.+?)\s*\[(\w+)\]`)
 
 	var results []LinterResult
-	lines := strings.Split(output, "\n")
 
-	for _, line := range lines {
+	for line := range strings.SplitSeq(output, "\n") {
 		if matches := pattern.FindStringSubmatch(line); matches != nil {
-			var lineNum, colNum int
-			fmt.Sscanf(matches[2], "%d", &lineNum)
-			fmt.Sscanf(matches[3], "%d", &colNum)
+			lineNum, errLine := strconv.Atoi(matches[2])
+			if errLine != nil {
+				continue
+			}
+			colNum, errCol := strconv.Atoi(matches[3])
+			if errCol != nil {
+				continue
+			}
 			lineNum--
 			colNum--
 

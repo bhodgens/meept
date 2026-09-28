@@ -222,10 +222,7 @@ func truncateWithMarker(s string, budget *int) string {
 		*budget -= len(s)
 		return s
 	}
-	keep := *budget - len(truncationMarker)
-	if keep < 0 {
-		keep = 0
-	}
+	keep := max(*budget-len(truncationMarker), 0)
 	*budget = 0
 	return s[:keep] + truncationMarker
 }

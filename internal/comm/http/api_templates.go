@@ -46,7 +46,8 @@ func (s *TemplatesService) HandleInvoke(w http.ResponseWriter, r *http.Request) 
 	rendered := sharedclient.RenderTemplate(cmd.Template, req.Arguments)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(TemplatesResponse{Content: rendered})
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(TemplatesResponse{Content: rendered})
 }
 
 // HandleList handles GET /api/v1/templates/list
@@ -74,5 +75,6 @@ func (s *TemplatesService) HandleList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string][]CommandSummary{"templates": summaries})
+	// best-effort: client may disconnect mid-write (headers already sent)
+	_ = json.NewEncoder(w).Encode(map[string][]CommandSummary{"templates": summaries})
 }

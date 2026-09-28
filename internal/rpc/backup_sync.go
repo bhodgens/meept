@@ -116,7 +116,9 @@ func (h *BackupSyncHandler) handleBackupPush(ctx context.Context, params json.Ra
 	}
 
 	if err := h.backupScheduler.RunNow(); err != nil {
-		return map[string]any{
+		// RPC contract: operation failures are reported in the response body
+		// (status "error"), not as transport-level RPC errors.
+		return map[string]any{ //nolint:nilerr // error is surfaced in the response body per RPC contract
 			RPCKeyStatus: "error",
 			"error":      err.Error(),
 		}, nil
@@ -176,7 +178,9 @@ func (h *BackupSyncHandler) handleConfigSyncPush(ctx context.Context, params jso
 	}
 
 	if err := h.configSyncer.PushLocalChanges(ctx, req.Message); err != nil {
-		return map[string]any{
+		// RPC contract: operation failures are reported in the response body
+		// (status "error"), not as transport-level RPC errors.
+		return map[string]any{ //nolint:nilerr // error is surfaced in the response body per RPC contract
 			RPCKeyStatus: "error",
 			"error":      err.Error(),
 		}, nil
@@ -221,7 +225,9 @@ func (h *BackupSyncHandler) handleSyncPull(ctx context.Context, params json.RawM
 		}
 	}
 	if err := h.syncPuller.PullNow(); err != nil {
-		return map[string]any{
+		// RPC contract: operation failures are reported in the response body
+		// (status "error"), not as transport-level RPC errors.
+		return map[string]any{ //nolint:nilerr // error is surfaced in the response body per RPC contract
 			RPCKeyStatus: "error",
 			"error":      err.Error(),
 		}, nil

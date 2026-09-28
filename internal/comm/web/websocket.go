@@ -245,7 +245,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			// the upgrade.
 			if proto := request.Header.Get("Sec-WebSocket-Protocol"); proto != "" {
 				picked := ""
-				for _, p := range strings.Split(proto, ",") {
+				for p := range strings.SplitSeq(proto, ",") {
 					p = strings.TrimSpace(p)
 					if strings.HasPrefix(p, "bearer.") {
 						picked = p

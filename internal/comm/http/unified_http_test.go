@@ -216,7 +216,7 @@ func TestUnifiedHTTPServer_ContextCancellation(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			t.Logf("server shutdown: %v", err)
 		}
 	case <-time.After(5 * time.Second):
@@ -266,7 +266,7 @@ func TestUnifiedHTTPServer_MCPRouteRegistration(t *testing.T) {
 		if resp2.StatusCode == gohttp.StatusNotFound {
 			t.Error("GET /mcp/sse returned 404 — route not registered")
 		}
-		io.Copy(io.Discard, resp2.Body)
+		_, _ = io.Copy(io.Discard, resp2.Body)
 	}
 }
 
@@ -742,7 +742,7 @@ func TestUnifiedHTTPServer_SSEHeaders(t *testing.T) {
 	}
 	if resp != nil {
 		defer resp.Body.Close()
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 
 		ct := resp.Header.Get("Content-Type")
 		if ct != "text/event-stream" {
@@ -821,7 +821,7 @@ func TestUnifiedHTTPServer_WebSocketConnectionAndBroadcast(t *testing.T) {
 	// "chat.message.received" -> type "chat_message"
 	var received map[string]any
 	deadline := time.Now().Add(3 * time.Second)
-	conn.SetReadDeadline(deadline)
+	_ = conn.SetReadDeadline(deadline) // best-effort in test client
 	err = websocket.JSON.Receive(conn, &received)
 	if err != nil {
 		t.Fatalf("failed to read WS broadcast: %v", err)
@@ -862,8 +862,8 @@ func TestUnifiedHTTPServer_WebSocketClientCount(t *testing.T) {
 
 	// Consume welcome status messages from both connections.
 	var welcome1, welcome2 map[string]any
-	conn1.SetReadDeadline(time.Now().Add(2 * time.Second))
-	conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn1.SetReadDeadline(time.Now().Add(2 * time.Second)) // best-effort in test client
+	_ = conn2.SetReadDeadline(time.Now().Add(2 * time.Second)) // best-effort in test client
 	if err := websocket.JSON.Receive(conn1, &welcome1); err != nil {
 		t.Fatalf("failed to read conn1 welcome: %v", err)
 	}
@@ -886,10 +886,10 @@ func TestUnifiedHTTPServer_WebSocketClientCount(t *testing.T) {
 	// Read from both connections to verify they're alive.
 	// The WS event transformer converts "task.*" -> type "job_update"
 	var msg1, msg2 map[string]any
-	conn1.SetReadDeadline(time.Now().Add(2 * time.Second))
-	conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
-	websocket.JSON.Receive(conn1, &msg1)
-	websocket.JSON.Receive(conn2, &msg2)
+	_ = conn1.SetReadDeadline(time.Now().Add(2 * time.Second)) // best-effort in test client
+	_ = conn2.SetReadDeadline(time.Now().Add(2 * time.Second)) // best-effort in test client
+	_ = websocket.JSON.Receive(conn1, &msg1)                   // best-effort: verified via the assertions below
+	_ = websocket.JSON.Receive(conn2, &msg2)                   // best-effort: verified via the assertions below
 
 	if msg1["type"] != "job_update" {
 		t.Errorf("conn1 expected type 'job_update', got %v", msg1["type"])
@@ -931,7 +931,7 @@ func TestUnifiedHTTPServer_SSESessionEvent(t *testing.T) {
 	// Read initial data — should contain the session event
 	buf := make([]byte, 4096)
 	n, err := resp.Body.Read(buf)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		t.Logf("SSE read error: %v", err)
 	}
 
@@ -942,7 +942,7 @@ func TestUnifiedHTTPServer_SSESessionEvent(t *testing.T) {
 	if !strings.Contains(body, "session_id") {
 		t.Errorf("expected 'session_id' in SSE stream, got: %s", body)
 	}
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 }
 
 // TestUnifiedHTTPServer_SSEBusEventForwarding verifies bus events are forwarded as SSE events.
@@ -1014,7 +1014,7 @@ func TestUnifiedHTTPServer_SSEBusEventForwarding(t *testing.T) {
 		t.Errorf("expected forwarded payload in SSE data, got: %s", forwardedBody)
 	}
 
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 }
 
 // TestUnifiedHTTPServer_OptionNilGuards verifies options handle nil dependencies gracefully.
@@ -1259,9 +1259,11 @@ func TestUnifiedHTTPServer_RuntimeStatus_WithManager(t *testing.T) {
 		t.Fatal("failed to create server")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	go srv.Start(ctx)
+	go func() {
+		_ = srv.Start(ctx) // server runs until ctx is cancelled
+	}()
 
 	// Wait for server to be ready
 	for i := 0; i < 50; i++ {

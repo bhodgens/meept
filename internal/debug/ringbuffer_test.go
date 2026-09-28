@@ -53,8 +53,8 @@ func TestRingBufferWriteRead(t *testing.T) {
 func TestRingBufferMultipleWrites(t *testing.T) {
 	rb := NewRingBuffer(64)
 
-	rb.Write([]byte("hello "))
-	rb.Write([]byte("world"))
+	_, _ = rb.Write([]byte("hello "))
+	_, _ = rb.Write([]byte("world"))
 
 	got := rb.Read()
 	expected := "hello world"
@@ -70,11 +70,11 @@ func TestRingBufferWrapAround(t *testing.T) {
 	rb := NewRingBuffer(8)
 
 	// Write 12 bytes total into a size-8 buffer.
-	rb.Write([]byte("12345678"))
+	_, _ = rb.Write([]byte("12345678"))
 	if !rb.full {
 		t.Fatal("expected buffer to be full after writing 8 bytes into size-8 buffer")
 	}
-	rb.Write([]byte("ABCD"))
+	_, _ = rb.Write([]byte("ABCD"))
 
 	got := rb.Read()
 	// Should contain the last 8 bytes: "5678ABCD"
@@ -89,7 +89,7 @@ func TestRingBufferWrapAround(t *testing.T) {
 
 func TestRingBufferReset(t *testing.T) {
 	rb := NewRingBuffer(64)
-	rb.Write([]byte("data"))
+	_, _ = rb.Write([]byte("data"))
 	rb.Reset()
 
 	if rb.Len() != 0 {
@@ -105,7 +105,7 @@ func TestRingBufferReset(t *testing.T) {
 
 func TestRingBufferExactFill(t *testing.T) {
 	rb := NewRingBuffer(5)
-	rb.Write([]byte("12345"))
+	_, _ = rb.Write([]byte("12345"))
 
 	if !rb.full {
 		t.Fatal("expected buffer to be full")
@@ -129,7 +129,7 @@ func TestRingBufferLargeData(t *testing.T) {
 	for i := range data {
 		data[i] = byte(i % 256)
 	}
-	rb.Write(data)
+	_, _ = rb.Write(data)
 
 	got := rb.Read()
 	if !bytes.Equal(got, data) {
@@ -140,7 +140,7 @@ func TestRingBufferLargeData(t *testing.T) {
 func TestRingBufferOverwrite(t *testing.T) {
 	rb := NewRingBuffer(4)
 	// Write 8 bytes into a 4-byte buffer.
-	rb.Write([]byte("ABCDEFGH"))
+	_, _ = rb.Write([]byte("ABCDEFGH"))
 
 	got := rb.Read()
 	// Last 4 bytes: EFGH

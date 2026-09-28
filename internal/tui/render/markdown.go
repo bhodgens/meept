@@ -379,15 +379,15 @@ func LightStyleConfig() ansi.StyleConfig {
 	return style
 }
 
-// Helper functions for pointer types
+// pointer helpers; `new(expr)` inlines these wrappers (see modernize/newexpr).
 func stringPtr(s string) *string {
-	return &s
+	return new(s)
 }
 
 func boolPtr(b bool) *bool {
-	return &b
+	return new(b)
 }
 
 func uintPtr(u uint) *uint {
-	return &u
+	return new(u)
 }

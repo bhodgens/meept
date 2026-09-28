@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -69,7 +70,7 @@ func denyGateFrontmatter(relPath, diff string) error {
 	if !isGateFrontmatterPath(relPath) {
 		return nil
 	}
-	if idx := strings.Index(diff, "\n---\n"); idx >= 0 {
+	if strings.Contains(diff, "\n---\n") {
 		return fmt.Errorf("%w: %s frontmatter", ErrTrustedRoot, relPath)
 	}
 	return nil
@@ -442,10 +443,8 @@ func (a *ChangeApplier) denyTrustedRoot(relPath string) error {
 	if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "/") {
 		return fmt.Errorf("%w: %s", ErrTrustedRoot, relPath)
 	}
-	for _, seg := range strings.Split(cleaned, "/") {
-		if seg == ".." {
-			return fmt.Errorf("%w: %s", ErrTrustedRoot, relPath)
-		}
+	if slices.Contains(strings.Split(cleaned, "/"), "..") {
+		return fmt.Errorf("%w: %s", ErrTrustedRoot, relPath)
 	}
 
 	for _, prefix := range trustedRootPrefixes {

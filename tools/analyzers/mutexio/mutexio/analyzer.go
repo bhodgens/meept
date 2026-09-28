@@ -29,6 +29,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -132,7 +133,7 @@ var ioMethods = map[string]bool{
 	"Wait":            true, // exec.Cmd.Wait() / process wait
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func run(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	// Collect all comment groups so checkRange can honor //nolint:mutexio
@@ -179,7 +180,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 		checkBody(pass, body, nolintLines, fset)
 	})
-	return nil, nil
+	return nil, nil //nolint:nilnil // go/analysis contract: run() returns a nil result when the analyzer produces no facts or diagnostics
 }
 
 // callInfo is a single selector-method call recorded during linear scan.
@@ -278,7 +279,7 @@ func checkBody(pass *analysis.Pass, body *ast.BlockStmt, nolintLines map[string]
 			continue
 		}
 		// find matching lock (innermost with same receiver key)
-		for j := len(stack) - 1; j >= 0; j-- {
+		for j := range slices.Backward(stack) {
 			lf := stack[j]
 			if lf.ci.recvKey == "" || ci.recvKey == "" {
 				continue
@@ -489,11 +490,7 @@ func structHasMutexFieldDepth(s *types.Struct, depth int) bool {
 	if s == nil || depth > maxMutexFieldDepth {
 		return false
 	}
-	for i := 0; i < s.NumFields(); i++ {
-		f := s.Field(i)
-		if f == nil {
-			continue
-		}
+	for f := range s.Fields() {
 		if isMutexType(f.Type()) {
 			return true
 		}

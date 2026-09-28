@@ -460,7 +460,7 @@ func (s *Server) dispatch(connCtx context.Context, connCancel context.CancelFunc
 		}
 		s.logger.Warn("rpc: handler error",
 			"method", req.Method,
-			"error_code", int(code),
+			"error_code", code,
 			"error", err)
 		return MakeErrorResponse(
 			req.ID,

@@ -85,11 +85,9 @@ func TestWebSocketHub_ConnWriteMu_SerializesConcurrentLockers(t *testing.T) {
 	const goroutines = 8
 	const itersPer = 100
 	var wg sync.WaitGroup
-	for g := 0; g < goroutines; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < itersPer; i++ {
+	for range goroutines {
+		wg.Go(func() {
+			for range itersPer {
 				mu.Lock()
 				cur := inSection.Add(1)
 				if cur != 1 {
@@ -98,7 +96,7 @@ func TestWebSocketHub_ConnWriteMu_SerializesConcurrentLockers(t *testing.T) {
 				inSection.Add(-1)
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

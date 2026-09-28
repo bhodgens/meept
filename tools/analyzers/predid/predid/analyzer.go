@@ -57,7 +57,7 @@ var idNameSubstrings = []string{
 	"uuid", "guid", "nonce", "seed", "hash",
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func run(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	nodeFilter := []ast.Node{
@@ -80,7 +80,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 	})
 
-	return nil, nil
+	return nil, nil //nolint:nilnil // go/analysis contract: run() returns a nil result when the analyzer produces no facts or diagnostics
 }
 
 // checkAssignStmt checks `lhs := rhs` and `lhs = rhs` for predictable IDs.

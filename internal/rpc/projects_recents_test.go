@@ -85,9 +85,15 @@ func TestHandleReadDir_RecentsOnly(t *testing.T) {
 
 	// Touch 3 recents paths using the recentsStore directly.
 	ctx := context.Background()
-	recentsStore.TouchRecent(ctx, "/home/user/repos/foo")
-	recentsStore.TouchRecent(ctx, "/home/user/repos/bar")
-	recentsStore.TouchRecent(ctx, "/home/user/repos/baz")
+	if err := recentsStore.TouchRecent(ctx, "/home/user/repos/foo"); err != nil {
+		t.Fatalf("TouchRecent: %v", err)
+	}
+	if err := recentsStore.TouchRecent(ctx, "/home/user/repos/bar"); err != nil {
+		t.Fatalf("TouchRecent: %v", err)
+	}
+	if err := recentsStore.TouchRecent(ctx, "/home/user/repos/baz"); err != nil {
+		t.Fatalf("TouchRecent: %v", err)
+	}
 
 	// Call with empty prefix to get all recents.
 	params := json.RawMessage(`{"prefix":""}`)
@@ -111,9 +117,15 @@ func TestHandleReadDir_RecentsFilteredByPrefix(t *testing.T) {
 
 	// Touch 3 paths using the recentsStore directly.
 	ctx := context.Background()
-	recentsStore.TouchRecent(ctx, "/home/user/repos/goo")
-	recentsStore.TouchRecent(ctx, "/home/user/repos/fo")
-	recentsStore.TouchRecent(ctx, "/home/user/repos/other")
+	if err := recentsStore.TouchRecent(ctx, "/home/user/repos/goo"); err != nil {
+		t.Fatalf("TouchRecent: %v", err)
+	}
+	if err := recentsStore.TouchRecent(ctx, "/home/user/repos/fo"); err != nil {
+		t.Fatalf("TouchRecent: %v", err)
+	}
+	if err := recentsStore.TouchRecent(ctx, "/home/user/repos/other"); err != nil {
+		t.Fatalf("TouchRecent: %v", err)
+	}
 
 	params := json.RawMessage(`{"prefix":"fo"}`)
 	result, err := h.handleReadDir(context.Background(), params)
@@ -142,10 +154,14 @@ func TestHandleReadDir_FsFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	for _, name := range []string{"alpha", "beta", "gamma", "notadir.txt"} {
 		if name == "notadir.txt" {
-			os.WriteFile(filepath.Join(tmpDir, name), nil, 0o644)
+			if err := os.WriteFile(filepath.Join(tmpDir, name), nil, 0o644); err != nil {
+				t.Fatalf("os.WriteFile: %v", err)
+			}
 			continue
 		}
-		os.Mkdir(filepath.Join(tmpDir, name), 0o755)
+		if err := os.Mkdir(filepath.Join(tmpDir, name), 0o755); err != nil {
+			t.Fatalf("os.Mkdir: %v", err)
+		}
 	}
 
 	// Use tmpDir as prefix - fs fallback will read tmpDir and return subdirs.
@@ -214,11 +230,15 @@ func TestHandleReadDir_RecentsTrumpsFsFallback(t *testing.T) {
 	defer cleanup()
 
 	// Touch one recent that matches the prefix exactly.
-	recentsStore.TouchRecent(context.Background(), "/home/user/repos/test")
+	if err := recentsStore.TouchRecent(context.Background(), "/home/user/repos/test"); err != nil {
+		t.Fatalf("TouchRecent: %v", err)
+	}
 
 	// Also create a directory on disk that matches.
 	tmpDir := t.TempDir()
-	os.MkdirAll(filepath.Join(tmpDir, "test"), 0o755)
+	if err := os.MkdirAll(filepath.Join(tmpDir, "test"), 0o755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 
 	// The prefix matches both. Since recents have 1 match, fs fallback is
 	// SKIPPED (the handler only does fs fallback when filtered recents is empty).
@@ -273,7 +293,9 @@ func TestHandleReadDir_MaxEntriesLimit(t *testing.T) {
 	// Create 60 subdirectories to test that fs fallback caps at 50.
 	tmpDir := t.TempDir()
 	for i := 0; i < 60; i++ {
-		os.Mkdir(filepath.Join(tmpDir, fmt.Sprintf("dir%03d", i)), 0o755)
+		if err := os.Mkdir(filepath.Join(tmpDir, fmt.Sprintf("dir%03d", i)), 0o755); err != nil {
+			t.Fatalf("os.Mkdir: %v", err)
+		}
 	}
 
 	params := json.RawMessage(`{"prefix":"` + tmpDir + `"}`)
@@ -303,7 +325,9 @@ func TestHandleReadDir_SubstringMatch(t *testing.T) {
 		"/home/user/other-gamma",
 	}
 	for _, p := range paths {
-		recentsStore.TouchRecent(ctx, p)
+		if err := recentsStore.TouchRecent(ctx, p); err != nil {
+			t.Fatalf("TouchRecent: %v", err)
+		}
 	}
 
 	// Test "alpha" substring match.

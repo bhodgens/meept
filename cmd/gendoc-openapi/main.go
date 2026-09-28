@@ -275,9 +275,9 @@ func generateOpenAPI(info *APIInfo) string {
 
 	sb.WriteString("openapi: 3.0.3\n")
 	sb.WriteString("info:\n")
-	sb.WriteString(fmt.Sprintf("  title: %s\n", info.Title))
-	sb.WriteString(fmt.Sprintf("  description: %s\n", info.Description))
-	sb.WriteString(fmt.Sprintf("  version: %s\n", info.Version))
+	fmt.Fprintf(&sb, "  title: %s\n", info.Title)
+	fmt.Fprintf(&sb, "  description: %s\n", info.Description)
+	fmt.Fprintf(&sb, "  version: %s\n", info.Version)
 	sb.WriteString("\n")
 	sb.WriteString("servers:\n")
 	sb.WriteString("  - url: http://localhost:8081\n")
@@ -288,7 +288,7 @@ func generateOpenAPI(info *APIInfo) string {
 	if len(info.Tags) > 0 {
 		sb.WriteString("tags:\n")
 		for _, tag := range info.Tags {
-			sb.WriteString(fmt.Sprintf("  - name: %s\n", tag))
+			fmt.Fprintf(&sb, "  - name: %s\n", tag)
 		}
 		sb.WriteString("\n")
 	}
@@ -307,19 +307,19 @@ func generateOpenAPI(info *APIInfo) string {
 	if len(info.Schemas) > 0 {
 		sb.WriteString("  schemas:\n")
 		for _, schema := range info.Schemas {
-			sb.WriteString(fmt.Sprintf("    %s:\n", schema.Name))
+			fmt.Fprintf(&sb, "    %s:\n", schema.Name)
 			if schema.Description != "" {
-				sb.WriteString(fmt.Sprintf("      description: %s\n", schema.Description))
+				fmt.Fprintf(&sb, "      description: %s\n", schema.Description)
 			}
 			sb.WriteString("      type: object\n")
 			if len(schema.Properties) > 0 {
 				sb.WriteString("      properties:\n")
 				for _, prop := range schema.Properties {
-					sb.WriteString(fmt.Sprintf("        %s:\n", prop.Name))
+					fmt.Fprintf(&sb, "        %s:\n", prop.Name)
 					if prop.Description != "" {
-						sb.WriteString(fmt.Sprintf("          description: %s\n", prop.Description))
+						fmt.Fprintf(&sb, "          description: %s\n", prop.Description)
 					}
-					sb.WriteString(fmt.Sprintf("          type: %s\n", mapGoTypeToOpenAPI(prop.Type)))
+					fmt.Fprintf(&sb, "          type: %s\n", mapGoTypeToOpenAPI(prop.Type))
 					if prop.Nullable {
 						sb.WriteString("          nullable: true\n")
 					}
@@ -328,7 +328,7 @@ func generateOpenAPI(info *APIInfo) string {
 			if len(schema.Required) > 0 {
 				sb.WriteString("      required:\n")
 				for _, req := range schema.Required {
-					sb.WriteString(fmt.Sprintf("        - %s\n", req))
+					fmt.Fprintf(&sb, "        - %s\n", req)
 				}
 			}
 		}
@@ -339,16 +339,16 @@ func generateOpenAPI(info *APIInfo) string {
 	sb.WriteString("paths:\n")
 	for _, endpoint := range info.Endpoints {
 		pathKey := "/" + strings.TrimPrefix(endpoint.Path, "/")
-		sb.WriteString(fmt.Sprintf("  %s:\n", pathKey))
-		sb.WriteString(fmt.Sprintf("    %s:\n", strings.ToLower(endpoint.Method)))
-		sb.WriteString(fmt.Sprintf("      summary: %s\n", endpoint.Summary))
+		fmt.Fprintf(&sb, "  %s:\n", pathKey)
+		fmt.Fprintf(&sb, "    %s:\n", strings.ToLower(endpoint.Method))
+		fmt.Fprintf(&sb, "      summary: %s\n", endpoint.Summary)
 		if endpoint.Description != "" {
-			sb.WriteString(fmt.Sprintf("      description: %s\n", endpoint.Description))
+			fmt.Fprintf(&sb, "      description: %s\n", endpoint.Description)
 		}
 		if len(endpoint.Tags) > 0 {
 			sb.WriteString("      tags:\n")
 			for _, tag := range endpoint.Tags {
-				sb.WriteString(fmt.Sprintf("        - %s\n", tag))
+				fmt.Fprintf(&sb, "        - %s\n", tag)
 			}
 		}
 		sb.WriteString("      security:\n")

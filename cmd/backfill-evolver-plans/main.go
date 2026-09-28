@@ -101,13 +101,15 @@ func main() {
 // parseBackfillMeta extracts plan_id, title, and status from a plan markdown
 // file (the writer's ## Meta format).
 func parseBackfillMeta(path string) backfillMeta {
-	data, err := os.ReadFile(path)
+	// filepath.Clean defuses traversal-style taint (gosec G703): the path is
+	// <flagged dir>/<ReadDir entry name>, not user-supplied input.
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return backfillMeta{}
 	}
 	var m backfillMeta
 	inMeta := false
-	for _, raw := range strings.Split(string(data), "\n") {
+	for raw := range strings.SplitSeq(string(data), "\n") {
 		line := strings.TrimSpace(raw)
 		switch {
 		case strings.HasPrefix(line, "## "):

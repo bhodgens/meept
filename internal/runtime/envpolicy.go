@@ -37,6 +37,8 @@ var BaseEnvKeys = []string{"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TERM", "
 // SecretPlaceholderPrefix marks values that always pass through regardless of
 // name-based denial. The daemon resolves secrets into this placeholder form
 // before handing them to Command.Env; BuildChildEnv never strips them.
+//
+//nolint:gosec // G101: this is an env-value placeholder prefix, not a credential.
 const SecretPlaceholderPrefix = "MEEPT_SECRET:"
 
 // isDenied reports whether name matches any deny glob. Globs use path.Match

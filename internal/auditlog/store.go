@@ -75,7 +75,7 @@ func OpenStore(dbPath string, logger *slog.Logger) (*Store, error) {
 	if err := s.migrate(context.Background()); err != nil {
 		if cerr := db.Close(); cerr != nil {
 			// Close error cannot supersede the migrate failure.
-			err = fmt.Errorf("audit log: migrate: %w (close: %v)", err, cerr)
+			err = fmt.Errorf("audit log: migrate: %w (close: %w)", err, cerr)
 		}
 		return nil, err
 	}

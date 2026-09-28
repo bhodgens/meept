@@ -1,6 +1,6 @@
 // Package http: first-run pairing handshake for freshly installed GUIs.
 //
-// WHY THIS EXISTS
+// # WHY THIS EXISTS
 //
 // The per-installation dev key lives at $MEEPT_HOME/dev_key and the daemon
 // authenticates HTTP/WS clients with it. Historically `make build-gui` baked
@@ -217,9 +217,9 @@ func (p *PairingService) handleStatus(w http.ResponseWriter, r *http.Request) {
 	armed, outstanding, remaining := p.status()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"pairing":         armed,
+		"pairing":          armed,
 		"code_outstanding": outstanding,
-		"expires_in_s":    int(remaining.Seconds()),
+		"expires_in_s":     int(remaining.Seconds()),
 	})
 }
 

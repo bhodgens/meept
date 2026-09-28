@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -33,14 +34,14 @@ var update = flag.Bool("update", false, "rewrite the golden fixture at ui/flutte
 func goStructJSONTags(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	typ := reflect.TypeOf(agent.TurnTerminalEvent{})
+	typ := reflect.TypeFor[agent.TurnTerminalEvent]()
 	for i := 0; i < typ.NumField(); i++ {
 		f := typ.Field(i)
 		tag := f.Tag.Get("json")
 		if tag == "" || tag == "-" {
 			continue
 		}
-		name := strings.Split(tag, ",")[0]
+		name, _, _ := strings.Cut(tag, ",")
 		out[name] = tag
 	}
 	return out
@@ -114,12 +115,7 @@ func schemaRequired(t *testing.T, schema map[string]any, def string) []string {
 }
 
 func inList(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, s)
 }
 
 // TestWSSchemaDrift pins the TurnTerminalEvent <-> schema contract:

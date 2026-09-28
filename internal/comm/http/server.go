@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -709,6 +710,7 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 	if len(msg.Payload) > 0 {
 		if jErr := json.Unmarshal(msg.Payload, &payload); jErr != nil {
 			// payload stays nil; default event type classification is used
+			_ = jErr
 		}
 	}
 
@@ -1172,7 +1174,8 @@ func (l *tlsDetectListener) Accept() (net.Conn, error) {
 				"first_byte", string(rune(b)),
 				"hint", "client must use HTTPS")
 			resp := []byte("HTTP/1.1 426 Upgrade Required\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 68\r\n\r\n{\"error\":\"upgrade required\",\"message\":\"use HTTPS for this endpoint\"}")
-			conn.Write(resp)
+			// Best-effort 426 response; the client may already be gone.
+			_, _ = conn.Write(resp)
 			conn.Close()
 			continue
 		}
@@ -1802,12 +1805,7 @@ func isLocalOrigin(origin string) bool {
 		return false
 	}
 	host := u.Hostname()
-	for _, allowed := range defaultWSOrigins {
-		if host == allowed {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(defaultWSOrigins, host)
 }
 
 // readJSON reads and decodes a JSON request body with a size limit.
@@ -2393,6 +2391,7 @@ func (s *Server) ensureTLSCert() error {
 
 // fileExists checks if a file exists.
 func fileExists(path string) bool {
+	//nolint:gosec // G703: paths come from trusted server config, not user input
 	_, err := os.Stat(path)
 	return err == nil
 }

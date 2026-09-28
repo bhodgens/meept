@@ -140,7 +140,7 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 			defer conn.Close()
 
 			// Consume the welcome status message sent on connect.
-			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second)) // best-effort in load-test client
 			var welcome map[string]any
 			if err := websocket.JSON.Receive(conn, &welcome); err != nil {
 				res.errors.Add(1)
@@ -153,7 +153,7 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 				"data": map[string]any{"channel": "chat"},
 			}
 			subBytes, _ := json.Marshal(subscribeMsg)
-			conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second)) // best-effort in load-test client
 			if _, err := conn.Write(subBytes); err != nil {
 				res.errors.Add(1)
 				return
@@ -164,7 +164,7 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 			// blind 2s sleep that both slowed the suite and raced slow
 			// machines: 100 sequential WS handshakes don't fit a fixed
 			// window deterministically).
-			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // best-effort in load-test client
 			var subAck map[string]any
 			if err := websocket.JSON.Receive(conn, &subAck); err != nil {
 				res.errors.Add(1)
@@ -179,7 +179,7 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 					return
 				default:
 				}
-				conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+				_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // best-effort in load-test client
 				var msg map[string]any
 				if err := websocket.JSON.Receive(conn, &msg); err != nil {
 					return // connection closed or timed out
@@ -397,7 +397,7 @@ func TestWebSocket_Load_BroadcastCorrectness(t *testing.T) {
 		conns = append(conns, conn)
 
 		// Consume welcome.
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // best-effort in load-test client
 		var welcome map[string]any
 		if err := websocket.JSON.Receive(conn, &welcome); err != nil {
 			t.Fatalf("client %d welcome error: %v", i, err)
@@ -440,7 +440,7 @@ func TestWebSocket_Load_BroadcastCorrectness(t *testing.T) {
 					return
 				default:
 				}
-				c.SetReadDeadline(time.Now().Add(2 * time.Second))
+				_ = c.SetReadDeadline(time.Now().Add(2 * time.Second)) // best-effort in load-test client
 				var msg map[string]any
 				if err := websocket.JSON.Receive(c, &msg); err != nil {
 					results[idx] = res

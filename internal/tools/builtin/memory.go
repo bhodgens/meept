@@ -1061,7 +1061,7 @@ func (t *MemoryReflectTool) Execute(ctx context.Context, args map[string]any) (a
 				imp = i2
 			}
 		}
-		factsContext.WriteString(fmt.Sprintf("[%d] (domain: %s, importance: %s) %s\n", i+1, dom, imp, mem.Content))
+		fmt.Fprintf(&factsContext, "[%d] (domain: %s, importance: %s) %s\n", i+1, dom, imp, mem.Content)
 	}
 
 	// Append epistemic context to the LLM prompt so the model can reason
@@ -1069,16 +1069,16 @@ func (t *MemoryReflectTool) Execute(ctx context.Context, args map[string]any) (a
 	if len(claimResults) > 0 || len(contradictions) > 0 || len(pendingDecisions) > 0 || len(pendingPredictions) > 0 {
 		factsContext.WriteString("\nEpistemic context:\n")
 		for _, r := range claimResults {
-			factsContext.WriteString(fmt.Sprintf("- [claim:%s] %s\n", r.Memory.ID, truncatePreview(r.Memory.Content, 100)))
+			fmt.Fprintf(&factsContext, "- [claim:%s] %s\n", r.Memory.ID, truncatePreview(r.Memory.Content, 100))
 		}
 		for _, c := range contradictions {
-			factsContext.WriteString(fmt.Sprintf("- [contradiction] %s -> %s (%s)\n", c["source_id"], c["target_id"], c["edge_type"]))
+			fmt.Fprintf(&factsContext, "- [contradiction] %s -> %s (%s)\n", c["source_id"], c["target_id"], c["edge_type"])
 		}
 		for _, d := range pendingDecisions {
-			factsContext.WriteString(fmt.Sprintf("- [decision-due] %s\n", truncatePreview(d.Memory.Content, 100)))
+			fmt.Fprintf(&factsContext, "- [decision-due] %s\n", truncatePreview(d.Memory.Content, 100))
 		}
 		for _, p := range pendingPredictions {
-			factsContext.WriteString(fmt.Sprintf("- [prediction-due] %s\n", truncatePreview(p.Memory.Content, 100)))
+			fmt.Fprintf(&factsContext, "- [prediction-due] %s\n", truncatePreview(p.Memory.Content, 100))
 		}
 	}
 

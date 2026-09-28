@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,7 +146,7 @@ func TestUnregister(t *testing.T) {
 		t.Fatalf("Unregister: %v", err)
 	}
 	_, err := pm.Get(ctx, "u1")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("after unregister: error = %v, want ErrNotFound", err)
 	}
 }

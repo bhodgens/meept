@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"testing"
 
@@ -10,7 +9,7 @@ import (
 )
 
 func TestBotContext_PushNotification(t *testing.T) {
-	bus := bus.New(&bus.Config{BufferSize: 100}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	bus := bus.New(&bus.Config{BufferSize: 100}, slog.New(slog.DiscardHandler))
 	defer bus.Close()
 
 	pushSvc := NewPushService(nil, bus, nil)

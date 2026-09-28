@@ -87,6 +87,7 @@ func TestBuildChildEnv(t *testing.T) {
 		{
 			name: "placeholder value passes even if name denied",
 			cfg:  EnvPolicyConfig{Mode: EnvModeAllowlist, DenyGlobs: []string{"*SECRET*"}},
+			//nolint:gosec // G101: env-var name literal, not a credential.
 			cmdEnv: map[string]string{
 				"MEEPT_SENTINEL_SECRET": "MEEPT_SECRET:resolved-by-daemon",
 			},

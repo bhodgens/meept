@@ -73,7 +73,7 @@ func (s *nilStore) Store(ctx context.Context, e compress.CCREntry) (string, erro
 }
 func (s *nilStore) Retrieve(ctx context.Context, hash string) (*compress.CCREntry, error) {
 	s.wrap.stats.TotalRetrievals++
-	return nil, nil
+	return nil, nil //nolint:nilnil // CCR store contract: (nil, nil) means "not found"; CompressionHandler.execRetrieve maps a nil entry to found=false
 }
 func (s *nilStore) Search(ctx context.Context, h, q string) ([]compress.CCRSearchResult, error) {
 	return nil, nil

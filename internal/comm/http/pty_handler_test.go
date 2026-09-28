@@ -63,10 +63,8 @@ func TestPTYHandler_StreamSessionOutput_NoSendOnClosedChannel(t *testing.T) {
 
 	var wg sync.WaitGroup
 	const subscribers = 8
-	for i := 0; i < subscribers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range subscribers {
+		wg.Go(func() {
 			ch := make(chan []byte, 1)
 			// Register subscriber.
 			h.mu.Lock()
@@ -88,7 +86,7 @@ func TestPTYHandler_StreamSessionOutput_NoSendOnClosedChannel(t *testing.T) {
 			}
 			h.mu.Unlock()
 			close(ch)
-		}()
+		})
 	}
 
 	// streamSessionOutput drains sess.Output() until it is closed.

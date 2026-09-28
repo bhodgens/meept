@@ -43,7 +43,7 @@ var guardedByRegex = regexp.MustCompile(`//\s*guarded by\s+(\w+)`)
 // immutableRegex matches "// immutable" comments
 var immutableRegex = regexp.MustCompile(`//\s*immutable\b`)
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func run(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	// Build a map of guarded fields per struct
@@ -86,7 +86,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 	})
 
-	return nil, nil
+	return nil, nil //nolint:nilnil // go/analysis contract: run() returns a nil result when the analyzer produces no facts or diagnostics
 }
 
 func analyzeStructFields(st *ast.StructType, typeName string,

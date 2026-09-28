@@ -192,6 +192,7 @@ func (t *ResolveASTEditTool) Execute(ctx context.Context, args map[string]any) (
 		}
 
 		// Write to file
+		//nolint:gosec // gosec taint analysis cannot model the fence sanitizer; filePath is validated against the workspace fence by FenceChecker.CheckPath directly above
 		if err := os.WriteFile(filePath, modifiedSource, 0o644); err != nil {
 			return nil, fmt.Errorf("failed to write modified file: %w", err)
 		}

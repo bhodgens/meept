@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ type LSPRenameTool struct {
 	tools.ToolDefaults
 	manager                *lsp.Manager
 	pendingChangesRegistry *builtin.PendingChangesRegistry
+	fenceChecker           builtin.FenceChecker
 }
 
 // NewLSPRenameTool creates a new LSP rename tool.
@@ -28,6 +30,14 @@ func NewLSPRenameTool(manager *lsp.Manager) (*LSPRenameTool, error) {
 		return nil, fmt.Errorf("lsp.Manager cannot be nil")
 	}
 	return &LSPRenameTool{manager: manager}, nil
+}
+
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+// Nil guard is required per CLAUDE.md "Setter methods" coding practice.
+func (t *LSPRenameTool) SetFenceChecker(fc builtin.FenceChecker) {
+	if fc != nil {
+		t.fenceChecker = fc
+	}
 }
 
 // SetPendingChangesRegistry sets the pending changes registry for preview/accept workflow.
@@ -257,6 +267,11 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 	// Apply edits immediately when apply=true or no registry
 	if apply {
 		for _, fe := range fileEdits {
+			if err := t.validateWritePath(fe.path); err != nil {
+				return nil, fmt.Errorf("fence check failed: %w", err)
+			}
+		}
+		for _, fe := range fileEdits {
 			if err := applyTextEdits(fe.path, fe.edits); err != nil {
 				return nil, fmt.Errorf("failed to apply edits to %s: %w", fe.path, err)
 			}
@@ -273,6 +288,15 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 	}, nil
 }
 
+// validateWritePath validates filePath against the workspace fence (when a
+// fence checker is installed) before any on-disk write.
+func (t *LSPRenameTool) validateWritePath(filePath string) error {
+	if t.fenceChecker != nil {
+		return t.fenceChecker.CheckPath(filePath, "write")
+	}
+	return nil
+}
+
 // applyTextEdits applies text edits to a file on disk.
 func applyTextEdits(filePath string, edits []lsp.TextEdit) error {
 	content, err := os.ReadFile(filePath)
@@ -283,8 +307,7 @@ func applyTextEdits(filePath string, edits []lsp.TextEdit) error {
 	lines := strings.Split(string(content), "\n")
 
 	// Apply edits in reverse order to preserve positions
-	for i := len(edits) - 1; i >= 0; i-- {
-		edit := edits[i]
+	for _, edit := range slices.Backward(edits) {
 		startLine := edit.Range.Start.Line
 		startChar := edit.Range.Start.Character
 		endLine := edit.Range.End.Line
@@ -321,6 +344,7 @@ func applyTextEdits(filePath string, edits []lsp.TextEdit) error {
 		lines = strings.Split(newContent, "\n")
 	}
 
+	//nolint:gosec // gosec taint analysis cannot model the fence sanitizer; each path was validated against the workspace fence by FenceChecker.CheckPath before applyTextEdits was called
 	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644)
 }
 
@@ -332,8 +356,7 @@ func applyTextEditsToString(content string, edits []lsp.TextEdit) string {
 	lines := strings.Split(content, "\n")
 
 	// Apply edits in reverse order to preserve positions
-	for i := len(edits) - 1; i >= 0; i-- {
-		edit := edits[i]
+	for _, edit := range slices.Backward(edits) {
 		startLine := edit.Range.Start.Line
 		startChar := edit.Range.Start.Character
 		endLine := edit.Range.End.Line

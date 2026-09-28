@@ -99,10 +99,10 @@ func (c *SkillCommand) executeList() *SkillResult {
 	})
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("installed skills (%d):\n\n", len(skills)))
+	fmt.Fprintf(&sb, "installed skills (%d):\n\n", len(skills))
 
 	for _, skill := range skills {
-		sb.WriteString(fmt.Sprintf("  /%-20s %s\n", skill.Name, skill.Description))
+		fmt.Fprintf(&sb, "  /%-20s %s\n", skill.Name, skill.Description)
 	}
 
 	sb.WriteString("\nusage: /skill <name> to view details")
@@ -133,19 +133,19 @@ func (c *SkillCommand) executeShow(name string) *SkillResult {
 
 func (c *SkillCommand) formatSkillDetail(s SkillInfo) *SkillResult {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("skill: %s\n", s.Name))
-	sb.WriteString(fmt.Sprintf("description: %s\n", s.Description))
+	fmt.Fprintf(&sb, "skill: %s\n", s.Name)
+	fmt.Fprintf(&sb, "description: %s\n", s.Description)
 
 	if len(s.Requires) > 0 {
-		sb.WriteString(fmt.Sprintf("requires: %s\n", strings.Join(s.Requires, ", ")))
+		fmt.Fprintf(&sb, "requires: %s\n", strings.Join(s.Requires, ", "))
 	}
 
 	if len(s.Tags) > 0 {
-		sb.WriteString(fmt.Sprintf("tags: %s\n", strings.Join(s.Tags, ", ")))
+		fmt.Fprintf(&sb, "tags: %s\n", strings.Join(s.Tags, ", "))
 	}
 
 	if s.RiskLevel != "" {
-		sb.WriteString(fmt.Sprintf("risk: %s\n", s.RiskLevel))
+		fmt.Fprintf(&sb, "risk: %s\n", s.RiskLevel)
 	}
 
 	return &SkillResult{Output: sb.String()}

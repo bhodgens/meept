@@ -64,9 +64,7 @@ func (t *StdioTransport) Read(ctx context.Context) ([]byte, error) {
 	// Use a channel to unblock when context is cancelled
 	resultCh := make(chan readResult, 1)
 
-	t.readWG.Add(1)
-	go func() {
-		defer t.readWG.Done()
+	t.readWG.Go(func() {
 		var contentLength int
 		var readErr error
 		for {
@@ -105,7 +103,7 @@ func (t *StdioTransport) Read(ctx context.Context) ([]byte, error) {
 		}
 
 		resultCh <- readResult{content, nil}
-	}()
+	})
 
 	select {
 	case <-ctx.Done():
@@ -157,15 +155,16 @@ func (t *StdioTransport) Close() error {
 		t.readWG.Wait()
 		close(readDone)
 	}()
+	// Best-effort wait for pending reads; on timeout the goroutines will
+	// eventually finish when GC reclaims.
 	select {
 	case <-readDone:
 	case <-time.After(5 * time.Second):
-		// Best-effort; goroutines will eventually finish when GC reclaims.
 	}
 	if t.cmd != nil && t.cmd.Process != nil {
-		if err := t.cmd.Process.Kill(); err != nil {
-			// Process may already be dead; fall through to Wait.
-		}
+		// Kill is best-effort: the process may already be dead. Either way
+		// the bounded Wait below reaps it.
+		_ = t.cmd.Process.Kill()
 		// Reap the process to avoid zombies. Use a goroutine + timer so
 		// Close doesn't block forever on an unresponsive child.
 		done := make(chan error, 1)

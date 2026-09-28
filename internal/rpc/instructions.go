@@ -280,7 +280,9 @@ func (h *InstructionHandler) handleListRPC(ctx context.Context, params json.RawM
 	// in-memory map that GetActive reads; without it a fresh daemon shows
 	// an empty list until the first Save.
 	if _, err := h.store.Discovery(); err != nil {
-		return InstructionResponse{Success: false, Error: "discovery failed: " + err.Error()}, nil
+		// RPC contract: handler failures are reported as InstructionResponse with
+		// Success=false; the transport error stays nil.
+		return InstructionResponse{Success: false, Error: "discovery failed: " + err.Error()}, nil //nolint:nilerr // error surfaced in the response body per RPC contract
 	}
 	instructions := h.store.GetActive()
 	return InstructionResponse{
@@ -296,12 +298,16 @@ func (h *InstructionHandler) handleAddRPC(ctx context.Context, raw json.RawMessa
 		Tier  string `json:"tier"`
 	}
 	if err := json.Unmarshal(raw, &params); err != nil {
-		return InstructionResponse{Success: false, Error: "invalid params: " + err.Error()}, nil
+		// RPC contract: handler failures are reported as InstructionResponse with
+		// Success=false; the transport error stays nil.
+		return InstructionResponse{Success: false, Error: "invalid params: " + err.Error()}, nil //nolint:nilerr // error surfaced in the response body per RPC contract
 	}
 
 	parsed, err := h.parser.Parse(ctx, params.Input)
 	if err != nil {
-		return InstructionResponse{Success: false, Error: "parse error: " + err.Error()}, nil
+		// RPC contract: handler failures are reported as InstructionResponse with
+		// Success=false; the transport error stays nil.
+		return InstructionResponse{Success: false, Error: "parse error: " + err.Error()}, nil //nolint:nilerr // error surfaced in the response body per RPC contract
 	}
 
 	result := h.verifier.Verify(parsed)
@@ -328,7 +334,9 @@ func (h *InstructionHandler) handleAddRPC(ctx context.Context, raw json.RawMessa
 	}
 
 	if err := h.store.Save(instr, params.Tier); err != nil {
-		return InstructionResponse{Success: false, Error: "save error: " + err.Error()}, nil
+		// RPC contract: handler failures are reported as InstructionResponse with
+		// Success=false; the transport error stays nil.
+		return InstructionResponse{Success: false, Error: "save error: " + err.Error()}, nil //nolint:nilerr // error surfaced in the response body per RPC contract
 	}
 
 	return InstructionResponse{
@@ -344,11 +352,15 @@ func (h *InstructionHandler) handleDeleteRPC(ctx context.Context, raw json.RawMe
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(raw, &params); err != nil {
-		return InstructionResponse{Success: false, Error: "invalid params"}, nil
+		// RPC contract: handler failures are reported as InstructionResponse with
+		// Success=false; the transport error stays nil.
+		return InstructionResponse{Success: false, Error: "invalid params"}, nil //nolint:nilerr // error surfaced in the response body per RPC contract
 	}
 
 	if err := h.store.Delete(params.ID); err != nil {
-		return InstructionResponse{Success: false, Error: "delete error: " + err.Error()}, nil
+		// RPC contract: handler failures are reported as InstructionResponse with
+		// Success=false; the transport error stays nil.
+		return InstructionResponse{Success: false, Error: "delete error: " + err.Error()}, nil //nolint:nilerr // error surfaced in the response body per RPC contract
 	}
 
 	return InstructionResponse{Success: true}, nil
@@ -360,12 +372,16 @@ func (h *InstructionHandler) handlePreviewRPC(ctx context.Context, raw json.RawM
 		Input string `json:"input"`
 	}
 	if err := json.Unmarshal(raw, &params); err != nil {
-		return InstructionResponse{Success: false, Error: "invalid params"}, nil
+		// RPC contract: handler failures are reported as InstructionResponse with
+		// Success=false; the transport error stays nil.
+		return InstructionResponse{Success: false, Error: "invalid params"}, nil //nolint:nilerr // error surfaced in the response body per RPC contract
 	}
 
 	parsed, err := h.parser.Parse(ctx, params.Input)
 	if err != nil {
-		return InstructionResponse{Success: false, Error: "parse error: " + err.Error()}, nil
+		// RPC contract: handler failures are reported as InstructionResponse with
+		// Success=false; the transport error stays nil.
+		return InstructionResponse{Success: false, Error: "parse error: " + err.Error()}, nil //nolint:nilerr // error surfaced in the response body per RPC contract
 	}
 
 	result := h.verifier.Verify(parsed)

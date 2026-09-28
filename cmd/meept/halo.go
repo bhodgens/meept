@@ -264,10 +264,10 @@ func generateReport(modes []agent.FailureMode) string {
 		fmt.Fprintf(&sb, "## %s Severity Issues (%d)\n\n", strings.ToUpper(severity), len(group))
 		for i, fm := range group {
 			fmt.Fprintf(&sb, "### %d. %s\n\n", i+1, fm.ID)
-			sb.WriteString(fmt.Sprintf("**Category:** %s\n\n", fm.Category))
-			sb.WriteString(fmt.Sprintf("**Description:** %s\n\n", fm.Description))
+			fmt.Fprintf(&sb, "**Category:** %s\n\n", fm.Category)
+			fmt.Fprintf(&sb, "**Description:** %s\n\n", fm.Description)
 			if len(fm.TraceIDs) > 0 {
-				sb.WriteString(fmt.Sprintf("**Affected traces:** %s\n\n", strings.Join(fm.TraceIDs, ", ")))
+				fmt.Fprintf(&sb, "**Affected traces:** %s\n\n", strings.Join(fm.TraceIDs, ", "))
 			}
 		}
 	}

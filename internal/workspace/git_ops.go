@@ -152,7 +152,7 @@ func gitFetchAndCheckout(ctx context.Context, dir, branchName, commitSHA string)
 		// checkout -b may fail if branch already exists (idempotent Ensure).
 		// Fall back to: checkout existing branch, then reset to commit.
 		if _, err2 := g.run(ctx, dir, "checkout", branchName); err2 != nil {
-			return fmt.Errorf("checkout branch %s at %s: %w (fallback also failed: %v)",
+			return fmt.Errorf("checkout branch %s at %s: %w (fallback also failed: %w)",
 				branchName, commitSHA, err, err2)
 		}
 		if _, err2 := g.run(ctx, dir, "reset", "--hard", commitSHA); err2 != nil {
