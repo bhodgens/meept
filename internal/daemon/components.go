@@ -8010,11 +8010,13 @@ func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
 				// path, which keys on conversation. Try both lookups
 				// (meept-bench: project.set bound the worktree to the
 				// session, but Get() missed it and step jobs ran in the
-				// daemon's cwd).
-				sess := p.sessionStore.Get(sessID)
-				if sess == nil {
-					sess = p.sessionStore.GetByConversationID(sessID)
-				}
+				// daemon's cwd). ResolveThreadConversationID additionally
+				// unwraps thread-scoped conv ids ("conv-…-thread-…") back to
+				// the owning session: the thread router used to hand those
+				// to task links, and a plain dual lookup missed them
+				// (task-state-04 e2e).
+				sess := session.ResolveThreadConversationID(sessID,
+					p.sessionStore.GetByConversationID, p.sessionStore.Get)
 				if sess == nil {
 					continue
 				}

@@ -24,12 +24,12 @@ func FuzzWSClassString(f *testing.F) {
 	}
 
 	valid := map[string]bool{
-		"chat_message":    true,
-		"agent_progress":  true,
-		"metrics_update":  true,
-		"job_update":      true,
-		"plan_update":     true,
-		"event":           true,
+		"chat_message":   true,
+		"agent_progress": true,
+		"metrics_update": true,
+		"job_update":     true,
+		"plan_update":    true,
+		"event":          true,
 	}
 	f.Fuzz(func(t *testing.T, v int) {
 		got := WSClass(v).String()

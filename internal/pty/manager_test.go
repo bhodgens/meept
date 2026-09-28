@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -94,9 +95,10 @@ func TestManager_SessionLimit(t *testing.T) {
 		t.Fatal("expected error when session limit is reached")
 	}
 	errMsg := err.Error()
-	// Error should contain "session limit"
-	if errMsg != "session limit reached (2)" {
-		t.Logf("got error: %v", err)
+	// Error should carry the session-limit sentinel wrapped with the limit
+	// (CreateAutoSession wraps it with a "failed to create auto session:" prefix).
+	if !strings.Contains(errMsg, "session limit reached (2)") {
+		t.Errorf("expected error to contain %q, got %q", "session limit reached (2)", errMsg)
 	}
 }
 

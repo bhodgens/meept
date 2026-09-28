@@ -85,7 +85,7 @@ func FuzzSSEChunkParse(f *testing.F) {
 	// The exact per-line parse shape from doStreamRequest's scanner loop,
 	// isolated from network I/O.
 	parseSSEBody := func(body string) {
-		for _, line := range strings.Split(body, "\n") {
+		for line := range strings.SplitSeq(body, "\n") {
 			data, ok := strings.CutPrefix(line, "data:")
 			if !ok {
 				continue
@@ -101,7 +101,7 @@ func FuzzSSEChunkParse(f *testing.F) {
 						ReasoningContent string `json:"reasoning_content,omitempty"`
 						Reasoning        string `json:"reasoning,omitempty"`
 						Role             string `json:"role"`
-						ToolCalls []struct {
+						ToolCalls        []struct {
 							Index    int    `json:"index"`
 							ID       string `json:"id"`
 							Type     string `json:"type"`

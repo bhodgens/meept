@@ -343,36 +343,50 @@ func waitAnyTerminal(t *testing.T, s *harness.Stack, turnID string, timeout time
 // project dir — never in the daemon's CWD (the harness starts the daemon
 // with cwd = Work, deliberately different from ProjectDir).
 //
-// STILL SKIPPED (updated reason, 2026-09-24 — verified live with
-// MEEPT_E2E_KEEP=1 sandboxes, not assumed): conversation-bound scripting
-// now reliably delivers the relative-path file_write to executor turns,
-// but the write lands in the DAEMON CWD because session resolution is
-// broken for every lane that reaches a filesystem tool:
-//
-//   - TASK lane: the thread router routes the turn to a thread-scoped
-//     conversation (conv-<hex> ≠ the session row's conversation_id); the
-//     dispatcher links the task to THAT id, and
-//     resolveStepWorkingDir's GetByConversationID lookup misses — the
-//     step job falls back to the daemon CWD. Log shows no "Step job
-//     working dir resolved" line.
-//   - INLINE chat lane: ChatHandler passes the SAME thread conv id, so
-//     sessionLoop/resolveAgent log "chat turn has no working directory
-//     bound ... has_session=false" even with project.set applied.
-//
-// Fixing either lookup requires changes in internal/agent (thread router
-// must surface the session-level id for store lookups) and/or
-// internal/daemon — both outside this suite's scope. The session-bound
-// working directory is exercised indirectly by the smoke suite's
-// absolute-path artifact assertion.
+// Previously skipped: the thread router routed the turn to a thread-scoped
+// conversation id (conv-<hex>-thread-… ≠ the session row's conversation_id),
+// the dispatcher linked the task to THAT id, and both session lookups
+// (resolveStepWorkingDir's link chain and the inline chat lane's
+// sessionLoop) missed — steps fell back to the daemon CWD and the inline
+// lane logged "chat turn has no working directory bound". Fixed at the
+// root: task links stay on the session-level conversation id
+// (dispatcher compound/plan routes), the link chain unwraps any legacy
+// thread-scoped id back to its owning session
+// (session.ResolveThreadConversationID), and resolveAgent falls back to the
+// primary-id lookup for thread-scoped keys.
 func TestTaskState04StepRunsInSessionProjectDir(t *testing.T) {
-	t.Skip("task-state-04 still deferred: thread-router conversation ids break session resolution. " +
-		"Verified live: task lane links the task to a thread-scoped conv id, resolveStepWorkingDir's " +
-		"GetByConversationID misses (no 'Step job working dir resolved' log), and the relative-path " +
-		"file_write lands in the daemon CWD; the inline chat lane logs 'chat turn has no working " +
-		"directory bound ... has_session=false' for the same reason even after project.set. Both " +
-		"lookups need the session-level conversation id (fix in internal/agent thread router or " +
-		"internal/session store), which is outside this suite's scope.")
 	s := newStack(t)
 	sessionID := s.CreateSession(t, "ts04", s.ProjectDir)
-	_ = sessionID
+
+	// Relative path on purpose: resolution must come from the SESSION's
+	// project dir, not the tool-call arguments.
+	s.Fake.SetPostToolText("Created relative.txt in the project directory.")
+	s.Fake.EnqueueFileWrite("call-ts04", "relative.txt", "session-dir")
+
+	s.SubmitChatHTTP(t, sessionID,
+		"Create a file named relative.txt containing session-dir")
+
+	task := waitAnyTask(t, s)
+	row := waitTaskTerminal(t, s, task.ID, 240*time.Second)
+	if row.State != "completed" {
+		t.Fatalf("task-state-04: state = %q, want completed; steps:\n%s",
+			row.State, harness.FormatSteps(harness.Steps(t, s.TasksDBPath(), task.ID)))
+	}
+
+	// The artifact must exist in the session's project dir...
+	artifact := filepath.Join(s.ProjectDir, "relative.txt")
+	data, err := os.ReadFile(artifact)
+	if err != nil {
+		t.Fatalf("task-state-04: relative-path artifact missing from the session project dir (%v); "+
+			"step ran outside the session working dir; steps:\n%s",
+			err, harness.FormatSteps(harness.Steps(t, s.TasksDBPath(), task.ID)))
+	}
+	if strings.TrimSpace(string(data)) != "session-dir" {
+		t.Fatalf("task-state-04: artifact content = %q, want %q", string(data), "session-dir")
+	}
+	// ...and the daemon's CWD must NOT have received a stray copy.
+	if _, err := os.Stat(filepath.Join(s.Work, "relative.txt")); err == nil {
+		t.Fatalf("task-state-04: relative-path write landed in the daemon CWD (%s), not the session project dir",
+			s.Work)
+	}
 }

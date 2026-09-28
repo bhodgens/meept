@@ -2918,13 +2918,12 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	}
 	var sess *session.Session
 	if h.sessionStore != nil {
-		sess = h.sessionStore.GetByConversationID(conversationID)
-		if sess == nil {
-			// The Flutter client sends the session's primary ID in the
-			// conversation_id field; accept both lookups, mirroring the
-			// dual lookup in the daemon's resolveStepWorkingDir.
-			sess = h.sessionStore.Get(conversationID)
-		}
+		// Dual lookup + thread-id unwrap, mirroring the daemon's
+		// resolveStepWorkingDir link chain: the conversation id may be the
+		// session's own, the primary id, or a thread-scoped id minted by
+		// the thread router (which resolves no session row on its own).
+		sess = session.ResolveThreadConversationID(conversationID,
+			h.sessionStore.GetByConversationID, h.sessionStore.Get)
 	}
 	// Legacy session fallback: if ProjectPath is empty but ProjectID is set,
 	// look up the project's LocalPath from the project manager (available

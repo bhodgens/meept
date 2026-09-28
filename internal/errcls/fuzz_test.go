@@ -12,7 +12,7 @@ import (
 // walks exercise deep chains.
 func wrappedTree(depth int, base error) error {
 	err := base
-	for i := 0; i < depth; i++ {
+	for i := range depth {
 		err = fmt.Errorf("layer %d: %w", i, err)
 	}
 	return err

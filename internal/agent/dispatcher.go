@@ -1181,9 +1181,17 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// video <url> and then write the summary into notes.md") is genuine
 	// multi-work; deterministic ingestion would drop the second intent
 	// (routing-repair leaf 04, AR-2).
+	//
+	// sessionID, NOT the thread-resolved conversationID: the compound
+	// route links the parent task to this id (createTask → LinkSession)
+	// and step jobs resolve their working directory through
+	// Task.LinkedSessions → GetByConversationID. A thread-scoped id there
+	// broke session resolution and steps fell back to the daemon CWD
+	// (task-state-04 e2e). Session-conversation binding is not
+	// thread-isolated (see RouteToAgent).
 	multiIntent := d.classifyMultiIntent(ctx, resolvedInput, memCtx)
 	if multiIntent.IsCompound {
-		return d.routeCompoundWithModel(ctx, multiIntent, input, conversationID, parseResult.Directive)
+		return d.routeCompoundWithModel(ctx, multiIntent, input, sessionID, parseResult.Directive)
 	}
 
 	// 4.5b. Media-URL guard: a media-CONSUMPTION request carrying a
@@ -1276,8 +1284,12 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	}
 
 	// 5.5. Check if plan creation is warranted (before task creation)
+	// sessionID, NOT the thread-resolved conversationID: the plan route
+	// threads this id into createTask (quickplan → LinkSession) and plan
+	// SourceSession, both of which are session-store lookup keys. See the
+	// compound-route comment above.
 	if d.planManager != nil && d.planManager.ShouldCreatePlan(intent.Type, 0) {
-		return d.routeToPlanWithOverride(ctx, input, intent, conversationID, agentOverrideApplied)
+		return d.routeToPlanWithOverride(ctx, input, intent, sessionID, agentOverrideApplied)
 	}
 
 	// 6. Create task if needed (for trackable work). Task creation is
@@ -2882,13 +2894,24 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// (performing silent migration of legacy sessions if needed). When no
 	// thread router is wired (legacy mode), this block is skipped and the
 	// original conversationID is used as-is.
+	//
+	// Thread isolation is scoped to the LLM CONTINUITY lane (agent.RunOnce
+	// conversation memory) only: the session-conversation binding stays on
+	// the session-level ID, so task links (Task.LinkedSessions), working-dir
+	// resolution, and WS event delivery all resolve. The thread-scoped id
+	// was previously written into LinkedSessions, and every step job then
+	// fell back to the daemon CWD (task-state-04 e2e, verified live
+	// 2026-09-24) — a thread id is not a session key, and thread routing
+	// never has a session-provenance meaning.
 	if d.threadRouter != nil {
 		resolved, err := d.threadRouter.GetThreadConversationID(ctx, conversationID, result.Intent.Summary)
 		if err != nil {
 			d.logger.Warn("thread router lookup failed, falling back to conversation ID",
 				"conversation", conversationID,
 				"error", err)
-		} else if resolved != "" {
+		} else if resolved != "" && resolved != conversationID {
+			// Continuity lane (agent loop conversation memory) uses the
+			// thread-scoped id, exactly as before this fix.
 			conversationID = resolved
 		}
 	}
@@ -3246,6 +3269,14 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 	// Try session-scoped loop first.
 	if d.loopManager != nil && d.sessionStore != nil && conversationID != "" {
 		sess := d.sessionStore.GetByConversationID(conversationID)
+		if sess == nil {
+			// Thread-scoped conversation ids never resolve here: the
+			// session store keys sessions by their own conversation id
+			// (and primary id). Fall back to the primary id so a
+			// thread-routed turn still binds the session's working dir
+			// instead of silently degrading to the daemon CWD.
+			sess = d.sessionStore.Get(conversationID)
+		}
 		d.logger.Debug("resolveAgent: session lookup",
 			"conversation_id", conversationID,
 			"session_found", sess != nil,
