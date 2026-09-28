@@ -229,8 +229,18 @@ func (w *rotatingWriter) rotateLocked() {
 
 // Close closes the underlying file. Only the ProcessLogger.Close path should
 // call this, to avoid double-closing when both out/err writers share the file.
+// The mutex guards the shared *os.File pointer: the auto-restart path calls
+// Truncate concurrently, and an unlocked nil-write here raced it (found by
+// the race detector on the StopAll/auto-restart overlap).
 func (w *rotatingWriter) Close() error {
-	if w == nil || w.file == nil || *w.file == nil {
+	if w == nil || w.file == nil {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if *w.file == nil {
 		return nil
 	}
 	err := (*w.file).Close()
