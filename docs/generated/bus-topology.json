@@ -388,7 +388,7 @@
     "cluster.event.heartbeat": [
       {
         "file": "internal/cluster/gossip.go",
-        "line": 764,
+        "line": 771,
         "payload_keys": [
           "event",
           "node_id",
@@ -2452,7 +2452,7 @@
     "*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 2867,
+        "line": 2868,
         "subscriber_id": "session.sessionID"
       }
     ],
