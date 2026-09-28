@@ -41,7 +41,8 @@
       "breakers",
       "output-filters",
       "refusal",
-      "naive-user-chat"
+      "naive-user-chat",
+      "continuity-regressions"
     ],
     "internal/validator/": [
       "output-filters",
@@ -57,7 +58,8 @@
       "goal-loop"
     ],
     "internal/skills/": [
-      "skills-discovery"
+      "skills-discovery",
+      "continuity-regressions"
     ],
     "internal/tools/": [
       "tools-argvalidate",
@@ -106,7 +108,8 @@
     ],
     "internal/llm/": [
       "daemon-lifecycle",
-      "runtime-guards"
+      "runtime-guards",
+      "continuity-regressions"
     ],
     "internal/security/": [
       "security-fence",
@@ -186,7 +189,8 @@
     ],
     "internal/plan/": [
       "step-pipeline",
-      "state-restart"
+      "state-restart",
+      "continuity-regressions"
     ],
     "internal/preferences/": [
       "smoke"
@@ -473,6 +477,11 @@
     {
       "name": "naive-user-chat",
       "dir": "e2e/suites/naive-user-chat",
+      "status": "implemented"
+    },
+    {
+      "name": "continuity-regressions",
+      "dir": "e2e/suites/continuity-regressions",
       "status": "implemented"
     }
   ],
@@ -1937,6 +1946,75 @@
       "title": "A6 clean lifecycle: the scratch daemon terminates on teardown after real work",
       "paths": [
         "internal/daemon/daemon.go"
+      ]
+    },
+    {
+      "id": "continuity-regressions-01",
+      "suite": "continuity-regressions",
+      "diff": "L",
+      "title": "plan-write race loop: approving an evolver plan while Synthesize rewrites plan.md keeps BOTH the origin stamp and the applied marker; the actuator trigger is never dropped (9f503122)",
+      "paths": [
+        "internal/plan/writer.go",
+        "internal/plan/filelock.go",
+        "internal/skills/lifecycle/evolver.go",
+        "internal/daemon/evolver_approval_bridge.go"
+      ]
+    },
+    {
+      "id": "continuity-regressions-02",
+      "suite": "continuity-regressions",
+      "diff": "M",
+      "title": "archive actuator semantics hold under the race: the skill is actually archived and the plan file ends executing+applied (9f503122 conjunction invariant)",
+      "paths": [
+        "internal/skills/lifecycle/evolver.go",
+        "internal/plan/writer.go"
+      ]
+    },
+    {
+      "id": "continuity-regressions-03",
+      "suite": "continuity-regressions",
+      "diff": "M",
+      "title": "follow-up question is answered from the stored task result via the session-level conversation id (RecallAnswer; runs 38-42; d045a450/bb6830a7/14dd4145/ee0274be)",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/agent/recall_answer.go"
+      ]
+    },
+    {
+      "id": "continuity-regressions-04",
+      "suite": "continuity-regressions",
+      "diff": "S",
+      "title": "follow-up question classified as work creates NO task (shouldCreateTask gate, run 44, 9c6f46f4)",
+      "paths": [
+        "internal/agent/dispatcher.go"
+      ]
+    },
+    {
+      "id": "continuity-regressions-05",
+      "suite": "continuity-regressions",
+      "diff": "S",
+      "title": "imperative message referencing prior work does NOT take the recall shortcut and executes (file really changes)",
+      "paths": [
+        "internal/agent/dispatcher.go"
+      ]
+    },
+    {
+      "id": "continuity-regressions-06",
+      "suite": "continuity-regressions",
+      "diff": "S",
+      "title": "whitespace-only completion is retried immediately within the short budget against the SAME provider (317ba37b in-budget arm)",
+      "paths": [
+        "internal/llm/client.go"
+      ]
+    },
+    {
+      "id": "continuity-regressions-07",
+      "suite": "continuity-regressions",
+      "diff": "M",
+      "title": "all-blank primary provider exhausts the short budget and rotation lands on the fallback provider; the turn never completes with a whitespace success (317ba37b failover arm)",
+      "paths": [
+        "internal/llm/client.go",
+        "internal/llm/provider_manager.go"
       ]
     }
   ]

@@ -313,15 +313,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		rpcServer.RegisterHandler("chat.submit", chatSubmitHandler.Submit)
 	}
 
-	// Register skills handlers (direct RPC closures — there is no bus path
-	// for skills; the former dead bus-subscriber handler was removed)
-	if rpcServer != nil && fullCfg.Skills.Enabled && components.SkillRegistry != nil {
-		rpc.RegisterSkillsHandlers(rpcServer, components.SkillRegistry, components.SkillExecutor, components.SkillUsageTracker, components.SkillWriter, components.SkillVersioner, components.SkillEvolver)
-		logger.Info("Skills RPC handlers registered",
-			"skill_count", components.SkillRegistry.Count(),
-			"executor_available", components.SkillExecutor != nil,
-		)
-	}
+	// NOTE: skills RPC handler registration moved AFTER
+	// initializeSkillEvolver (below) — it captures components.SkillEvolver
+	// in its closures, and the evolver is constructed only in the plan-system
+	// wiring section. Registered at the old position, skills.evolve always
+	// answered "skill evolver not configured" (found by the
+	// continuity-regressions e2e suite, 2026-09-28).
 
 	// Register routing-log handlers (Phase 4 wiring: meept routing CLI surface)
 	if rpcServer != nil && components.RoutingLogger != nil {
@@ -945,6 +942,22 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if _, err := components.wireEvolverApprovalBridge(); err != nil {
 			logger.Warn("Failed to wire evolver approval bridge", "error", err)
 		}
+	}
+
+	// Register skills handlers (direct RPC closures — there is no bus path
+	// for skills; the former dead bus-subscriber handler was removed).
+	// AFTER initializeSkillEvolver: the skills.evolve closure captures
+	// components.SkillEvolver, which exists only once the evolver is
+	// constructed above (registration order bug: skills.evolve always
+	// answered "skill evolver not configured"; found by the
+	// continuity-regressions e2e suite, 2026-09-28).
+	if rpcServer != nil && fullCfg.Skills.Enabled && components != nil && components.SkillRegistry != nil {
+		rpc.RegisterSkillsHandlers(rpcServer, components.SkillRegistry, components.SkillExecutor, components.SkillUsageTracker, components.SkillWriter, components.SkillVersioner, components.SkillEvolver)
+		logger.Info("Skills RPC handlers registered",
+			"skill_count", components.SkillRegistry.Count(),
+			"executor_available", components.SkillExecutor != nil,
+			"evolver_available", components.SkillEvolver != nil,
+		)
 	}
 
 	// Register plan RPC handlers (direct Go handlers override bus proxy)
