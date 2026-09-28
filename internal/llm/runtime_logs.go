@@ -244,7 +244,7 @@ func (w *rotatingWriter) Close() error {
 		return nil
 	}
 	//nolint:mutexio // f.Close is shared-file lifecycle, not request I/O; the mutex serializes Close vs Truncate on the same pointer
-	err := (*w.file).Close()
+	err := (*w.file).Close() //nolint:mutexio // same directive, on the call line: the analyzer only honors directives on lines spanned by the call expression
 	*w.file = nil
 	return err
 }
