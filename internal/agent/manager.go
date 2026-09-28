@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 
 	"github.com/caimlas/meept/internal/project"
@@ -152,9 +153,7 @@ func (m *Manager) List() map[string]*AgentLoop {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := make(map[string]*AgentLoop, len(m.loops))
-	for k, v := range m.loops {
-		result[k] = v
-	}
+	maps.Copy(result, m.loops)
 	return result
 }
 

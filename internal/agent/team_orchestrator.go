@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -267,9 +268,7 @@ func (to *TeamOrchestrator) handleTeamStart(ctx context.Context, msg *models.Bus
 		// Detach from the orchestrator's cancel context so that Stop() on the
 		// orchestrator does not abort an in-flight team session (S1-7).
 		teamCtx := context.WithoutCancel(ctx)
-		to.wg.Add(1)
-		go func() {
-			defer to.wg.Done()
+		to.wg.Go(func() {
 			defer to.teams.Delete(req.SessionID)
 
 			result, err := to.collabEngine.RunSession(teamCtx, sess.ID)
@@ -287,7 +286,7 @@ func (to *TeamOrchestrator) handleTeamStart(ctx context.Context, msg *models.Bus
 			state.mu.Unlock()
 
 			to.publishResult(state)
-		}()
+		})
 	} else {
 		// No collaboration engine available -- log and publish error
 		to.logger.Error("No collaboration engine configured for team orchestrator")
@@ -340,13 +339,7 @@ func (to *TeamOrchestrator) AssignSubtask(ctx context.Context, sessionID string,
 
 	// Verify agent is on the roster
 	state.mu.RLock()
-	found := false
-	for _, m := range state.Roster {
-		if m == assignment.AgentID {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(state.Roster, assignment.AgentID)
 	leadAgent := state.LeadAgent
 	state.mu.RUnlock()
 	if !found && assignment.AgentID != leadAgent {
@@ -413,13 +406,7 @@ func (to *TeamOrchestrator) BroadcastMessage(ctx context.Context, sessionID stri
 	// Validate target agent if specified
 	if tm.TargetAgent != "" {
 		state.mu.RLock()
-		found := false
-		for _, m := range state.Roster {
-			if m == tm.TargetAgent {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(state.Roster, tm.TargetAgent)
 		leadAgent := state.LeadAgent
 		state.mu.RUnlock()
 		if !found && tm.TargetAgent != leadAgent {
@@ -465,13 +452,7 @@ func (to *TeamOrchestrator) ReceiveResult(ctx context.Context, sessionID string,
 
 	// Verify agent is on the roster
 	state.mu.RLock()
-	found := false
-	for _, m := range state.Roster {
-		if m == result.AgentID {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(state.Roster, result.AgentID)
 	leadAgent := state.LeadAgent
 	state.mu.RUnlock()
 	if !found && result.AgentID != leadAgent {
@@ -480,9 +461,10 @@ func (to *TeamOrchestrator) ReceiveResult(ctx context.Context, sessionID string,
 
 	// Update team state with the member's result
 	status := MemberDone
-	if result.Status == "failed" {
+	switch result.Status {
+	case "failed":
 		status = MemberFailed
-	} else if result.Status == "partial" {
+	case "partial":
 		status = MemberRunning
 	}
 

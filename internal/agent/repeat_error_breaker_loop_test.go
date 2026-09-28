@@ -46,7 +46,7 @@ func (f *failingCountTool) IsConcurrencySafe(map[string]any) bool { return true 
 func newBreakerLoopHarness(t *testing.T, probe *failingCountTool, n int) (*AgentLoop, *mockChatter) {
 	t.Helper()
 	responses := make([]*llm.Response, 0, n+2)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		responses = append(responses, &llm.Response{
 			Content:      "trying",
 			FinishReason: "tool_calls",
@@ -142,7 +142,7 @@ func TestLoop_DifferentArgsGetFreshBudget(t *testing.T) {
 	loop, _ := newBreakerLoopHarness(t, probe, 1)
 
 	hashDoomed := repeatErrorArgsHash(map[string]any{"name": "doomed"})
-	for i := 0; i < maxIdenticalToolErrors; i++ {
+	for range maxIdenticalToolErrors {
 		loop.repeatErr.Observe("task_create", hashDoomed, "name is required")
 	}
 	require.False(t, loop.repeatErr.Allow("task_create", hashDoomed))

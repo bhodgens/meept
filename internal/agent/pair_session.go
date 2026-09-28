@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/pkg/id"
@@ -45,7 +47,7 @@ type Attempt struct {
 	StartedAt time.Time `json:"started_at"`
 
 	// CompletedAt is when the review came back.
-	CompletedAt time.Time `json:"completed_at,omitempty"`
+	CompletedAt time.Time `json:"completed_at,omitzero"`
 }
 
 // Satisfied returns true if this attempt's review approved the work.
@@ -78,38 +80,44 @@ func (pc *PairContext) ActorPrompt() string {
 	prompt := fmt.Sprintf("## Task Spec\n\n%s\n\n", pc.OriginalSpec)
 
 	if len(pc.AcceptedCriteria) > 0 {
+		var sb strings.Builder
 		prompt += "## Already Satisfied\n\n"
 		for _, c := range pc.AcceptedCriteria {
-			prompt += fmt.Sprintf("- [x] %s\n", c)
+			fmt.Fprintf(&sb, "- [x] %s\n", c)
 		}
+		prompt += sb.String()
 		prompt += "\n"
 	}
 
 	if len(pc.PendingCriteria) > 0 {
+		var sb strings.Builder
 		prompt += "## Remaining Requirements\n\n"
 		for _, c := range pc.PendingCriteria {
-			prompt += fmt.Sprintf("- [ ] %s\n", c)
+			fmt.Fprintf(&sb, "- [ ] %s\n", c)
 		}
+		prompt += sb.String()
 		prompt += "\n"
 	}
 
 	if len(pc.Attempts) > 0 {
+		var sb strings.Builder
 		prompt += "## Prior Attempt History\n\n"
 		for _, a := range pc.Attempts {
-			prompt += fmt.Sprintf("### Round %d\n", a.Round)
-			prompt += fmt.Sprintf("**Your previous output:**\n%s\n\n", truncateString(a.ActorOutput, 2000))
+			fmt.Fprintf(&sb, "### Round %d\n", a.Round)
+			fmt.Fprintf(&sb, "**Your previous output:**\n%s\n\n", truncateString(a.ActorOutput, 2000))
 			if a.Review != nil {
-				prompt += fmt.Sprintf("**Reviewer feedback:** [%s] %s\n",
+				fmt.Fprintf(&sb, "**Reviewer feedback:** [%s] %s\n",
 					a.Review.Status, a.Review.Feedback)
 				if len(a.Review.Issues) > 0 {
-					prompt += "**Issues:**\n"
+					fmt.Fprint(&sb, "**Issues:**\n")
 					for _, issue := range a.Review.Issues {
-						prompt += fmt.Sprintf("- %s\n", issue)
+						fmt.Fprintf(&sb, "- %s\n", issue)
 					}
 				}
-				prompt += "\n"
+				fmt.Fprint(&sb, "\n")
 			}
 		}
+		prompt += sb.String()
 	}
 
 	prompt += "Address the remaining requirements. Focus only on what is not yet satisfied.\n"
@@ -123,22 +131,27 @@ func (pc *PairContext) ReviewerPrompt(actorOutput string) string {
 	prompt := fmt.Sprintf("## Task Spec\n\n%s\n\n", pc.OriginalSpec)
 
 	if len(pc.AcceptedCriteria) > 0 {
+		var sb strings.Builder
 		prompt += "## Already Satisfied\n\n"
 		for _, c := range pc.AcceptedCriteria {
-			prompt += fmt.Sprintf("- [x] %s\n", c)
+			fmt.Fprintf(&sb, "- [x] %s\n", c)
 		}
+		prompt += sb.String()
 		prompt += "\n"
 	}
 
 	if len(pc.PendingCriteria) > 0 {
+		var sb strings.Builder
 		prompt += "## Pending Requirements\n\n"
 		for _, c := range pc.PendingCriteria {
-			prompt += fmt.Sprintf("- [ ] %s\n", c)
+			fmt.Fprintf(&sb, "- [ ] %s\n", c)
 		}
+		prompt += sb.String()
 		prompt += "\n"
 	}
 
 	if len(pc.Attempts) > 1 {
+		var rs strings.Builder
 		prompt += "## Prior Rounds Summary\n\n"
 		for _, a := range pc.Attempts[:len(pc.Attempts)-1] {
 			// Attempt.Review is a pointer and may be nil if a round was
@@ -148,8 +161,9 @@ func (pc *PairContext) ReviewerPrompt(actorOutput string) string {
 			if a.Review != nil {
 				status = string(a.Review.Status)
 			}
-			prompt += fmt.Sprintf("- Round %d: %s\n", a.Round, status)
+			fmt.Fprintf(&rs, "- Round %d: %s\n", a.Round, status)
 		}
+		prompt += rs.String()
 		prompt += "\n"
 	}
 
@@ -251,12 +265,7 @@ func (ps *PairSession) AddStepID(stepID string) {
 
 // OwnsStep returns true if the given step ID belongs to this pair session.
 func (ps *PairSession) OwnsStep(stepID string) bool {
-	for _, id := range ps.StepIDs {
-		if id == stepID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ps.StepIDs, stepID)
 }
 
 // MarkConverged transitions the session to the converged state.

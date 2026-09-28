@@ -23,8 +23,8 @@ func TestWireHTTPHooks_RetryCountNilMeansDefault3(t *testing.T) {
 		Hooks: config.HooksConfig{
 			HTTP: []config.HTTPHookConfig{
 				{URL: "http://example.internal/hook"},
-				{URL: "http://example.internal/other", RetryCount: intPtr(0)},
-				{URL: "http://example.internal/third", RetryCount: intPtr(-1)},
+				{URL: "http://example.internal/other", RetryCount: new(0)},
+				{URL: "http://example.internal/third", RetryCount: new(-1)},
 			},
 		},
 	}
@@ -84,14 +84,14 @@ func TestWireHTTPHooks_EndToEndRetrySemantics(t *testing.T) {
 		},
 		{
 			name:       "explicit 0 means no retries",
-			retryCount: intPtr(0),
+			retryCount: new(0),
 			failTimes:  100,
 			wantMin:    1,
 			wantMax:    1,
 		},
 		{
 			name:       "negative means unlimited",
-			retryCount: intPtr(-1),
+			retryCount: new(-1),
 			failTimes:  4,
 			wantMin:    5,
 			wantMax:    5,
@@ -100,10 +100,10 @@ func TestWireHTTPHooks_EndToEndRetrySemantics(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var hits int32
+			var hits atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
-				if atomic.AddInt32(&hits, 1) <= tc.failTimes {
+				if hits.Add(1) <= tc.failTimes {
 					w.WriteHeader(http.StatusInternalServerError)
 					return
 				}
@@ -143,12 +143,12 @@ func TestWireHTTPHooks_EndToEndRetrySemantics(t *testing.T) {
 			// the hit count to settle (bounded), then assert.
 			deadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(deadline) {
-				if got := atomic.LoadInt32(&hits); got >= tc.wantMin {
+				if got := hits.Load(); got >= tc.wantMin {
 					break
 				}
 				time.Sleep(5 * time.Millisecond)
 			}
-			got := atomic.LoadInt32(&hits)
+			got := hits.Load()
 			if got < tc.wantMin || got > tc.wantMax {
 				t.Fatalf("server hit %d times, want [%d,%d] (retry_count=%v)",
 					got, tc.wantMin, tc.wantMax, tc.retryCount)
@@ -156,7 +156,6 @@ func TestWireHTTPHooks_EndToEndRetrySemantics(t *testing.T) {
 		})
 	}
 }
-func intPtr(i int) *int { return &i }
 
 // backoffConfigForTest returns a tiny deterministic backoff used to make
 // retry pacing hermetic (1ms delays, no jitter, no multiplier).

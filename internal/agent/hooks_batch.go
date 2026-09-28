@@ -9,14 +9,14 @@ import (
 // It captures the event name, originating agent, session, and arbitrary
 // event-specific data.
 type HookPayload struct {
-	Event     string                 `json:"event"`
-	AgentID   string                 `json:"agent_id,omitempty"`
-	SessionID string                 `json:"session_id,omitempty"`
-	Data      map[string]interface{} `json:"data,omitempty"`
+	Event     string         `json:"event"`
+	AgentID   string         `json:"agent_id,omitempty"`
+	SessionID string         `json:"session_id,omitempty"`
+	Data      map[string]any `json:"data,omitempty"`
 }
 
 // NewHookPayload constructs a HookPayload from the provided fields.
-func NewHookPayload(event, agentID, sessionID string, data map[string]interface{}) HookPayload {
+func NewHookPayload(event, agentID, sessionID string, data map[string]any) HookPayload {
 	return HookPayload{
 		Event:     event,
 		AgentID:   agentID,

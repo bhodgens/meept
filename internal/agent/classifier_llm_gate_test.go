@@ -251,7 +251,7 @@ func TestClassifyAndRoute_LLMQuickPlanOpensAsyncGate(t *testing.T) {
 		t.Fatal("ShouldDispatchAsync = false for LLM quickplan: handler async branch (handler.go:770) unreachable (C-0)")
 	}
 	// The gate expression verbatim.
-	if !(d.ShouldDispatchAsync(res) && res.Task != nil) {
+	if !d.ShouldDispatchAsync(res) || res.Task == nil {
 		t.Fatal("handler async gate (ShouldDispatchAsync && Task != nil) is shut for an LLM-classified quickplan")
 	}
 }

@@ -85,8 +85,8 @@ func TestRegisterModel(t *testing.T) {
 	// Save original state to restore after test
 	origSize := len(modelCatalog)
 
-	RegisterModel(ModelInfo{
-		ID:             "test/custom-model", //nolint:gosec // G101: model identifier, not a credential
+	RegisterModel(ModelInfo{ //nolint:gosec // G101: model identifier, not a credential
+		ID:             "test/custom-model",
 		Dimension:      256,
 		MaxSequenceLen: 512,
 		ONNXModelPath:  "model.onnx",

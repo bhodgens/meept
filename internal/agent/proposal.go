@@ -2,12 +2,14 @@ package agent
 
 import (
 	"fmt"
-	"github.com/caimlas/meept/pkg/id"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // ReflectionProposal represents a single proposed improvement surfaced by the
@@ -42,7 +44,10 @@ type proposalQueue struct {
 }
 
 func newProposalQueue(path string) *proposalQueue {
-	return &proposalQueue{path: path}
+	// G703: path is daemon-constructed (MEEPT_HOME-derived queue path from
+	// reflection_collector.go / services callers), never user input; the
+	// taint analyzer cannot see that the value originates in server config.
+	return &proposalQueue{path: path} //nolint:gosec // G703: trusted daemon-configured path, not user input
 }
 
 // Append writes a new proposal to the queue file. ID, Status, and CreatedAt
@@ -237,7 +242,7 @@ func (q *proposalQueue) markStatus(id, newStatus string) error {
 	if !found {
 		return fmt.Errorf("proposal %s not found or not in pending state", id)
 	}
-	return os.WriteFile(q.path, []byte(strings.Join(lines, "\n")), 0o644) //nolint:mutexio // I/O under mutex required to prevent race with Append
+	return os.WriteFile(q.path, []byte(strings.Join(lines, "\n")), 0o644) //nolint:mutexio,gosec // I/O under mutex required to prevent race with Append; path is daemon-configured (G703)
 }
 
 // isAlwaysProposeOnly returns true for files that must never be auto-applied
@@ -269,14 +274,12 @@ func isSafeTargetPath(target string) bool {
 		return false
 	}
 	// Reject paths that traverse above the working directory.
-	if strings.HasPrefix(clean, "../") || clean == ".." {
+	if clean == ".." || strings.HasPrefix(clean, "../") {
 		return false
 	}
 	// Reject any path component that is "..".
-	for _, part := range strings.Split(filepath.ToSlash(clean), "/") {
-		if part == ".." {
-			return false
-		}
+	if slices.Contains(strings.Split(filepath.ToSlash(clean), "/"), "..") {
+		return false
 	}
 	return true
 }
@@ -366,9 +369,8 @@ func parseProposals(content string) []ReflectionProposal {
 				}
 				afterBracket := rest[closeBracket+1:]
 				// afterBracket = " 2026-06-25 — abc123"
-				emIdx := strings.Index(afterBracket, "—")
-				if emIdx >= 0 {
-					cur.ID = strings.TrimSpace(afterBracket[emIdx+len("—"):])
+				if _, idPart, found := strings.Cut(afterBracket, "—"); found {
+					cur.ID = strings.TrimSpace(idPart)
 				}
 			}
 		} else if cur != nil && strings.HasPrefix(line, "- **Type:**") {
@@ -378,7 +380,9 @@ func parseProposals(content string) []ReflectionProposal {
 			cur.Target = strings.TrimSpace(strings.TrimPrefix(line, "- **Target:**"))
 			inChangeContinuation = false
 		} else if cur != nil && strings.HasPrefix(line, "- **Confidence:**") {
-			fmt.Sscanf(line, "- **Confidence:** %f", &cur.Confidence)
+			// Best-effort parse of an LLM-authored markdown header: an
+			// unparseable value leaves the zero confidence in place.
+			_, _ = fmt.Sscanf(line, "- **Confidence:** %f", &cur.Confidence)
 			inChangeContinuation = false
 		} else if cur != nil && strings.HasPrefix(line, "- **Source:**") {
 			cur.Source = strings.TrimSpace(strings.TrimPrefix(line, "- **Source:**"))

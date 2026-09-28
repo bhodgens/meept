@@ -58,7 +58,10 @@ func (c *Components) wireEvolverApprovalBridge() (*EvolverApprovalBridge, error)
 	}
 	if c.SkillEvolver == nil || c.msgBus == nil {
 		c.Logger.Debug("evolver approval bridge: evolver or message bus absent; bridge not wired")
-		return nil, nil
+		// Opt-in evolver seam: an absent evolver/bus is the documented
+		// "bridge not wired" result, not an error (same contract as the
+		// other evolver wiring helpers).
+		return nil, nil //nolint:nilnil // intentional not-wired contract when the evolver is opt-in-absent
 	}
 	if c.EvolverPlanApprovalBridge != nil {
 		return c.EvolverPlanApprovalBridge, nil

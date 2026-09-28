@@ -403,6 +403,7 @@ func (d *ParallelTeamDriver) buildMemberPrompt(sess *CollaborationSession, membe
 
 // buildLeadSynthesisPrompt constructs the prompt for the lead agent to aggregate partial results.
 func (d *ParallelTeamDriver) buildLeadSynthesisPrompt(sess *CollaborationSession, cfg TeamConfig, results map[string]*TeamMemberResult) string {
+	var sb strings.Builder
 	prompt := "## Team Lead: Synthesize Partial Results\n\n"
 	prompt += fmt.Sprintf("**Session:** %s\n", sess.ID)
 	prompt += fmt.Sprintf("**Your Role:** Lead agent (%s) - aggregate and synthesize\n\n", cfg.LeadAgent)
@@ -412,22 +413,23 @@ func (d *ParallelTeamDriver) buildLeadSynthesisPrompt(sess *CollaborationSession
 	for _, memberID := range cfg.Roster {
 		result, ok := results[memberID]
 		if !ok {
-			prompt += fmt.Sprintf("### %s: NO RESULT\n\n", memberID)
+			fmt.Fprintf(&sb, "### %s: NO RESULT\n\n", memberID)
 			continue
 		}
 
 		switch result.Status {
 		case MemberDone:
-			prompt += fmt.Sprintf("### %s: COMPLETED\n\n", memberID)
-			prompt += fmt.Sprintf("%s\n\n", truncateString(result.Output, 2000))
+			fmt.Fprintf(&sb, "### %s: COMPLETED\n\n", memberID)
+			fmt.Fprintf(&sb, "%s\n\n", truncateString(result.Output, 2000))
 		case MemberFailed:
-			prompt += fmt.Sprintf("### %s: FAILED\n\n", memberID)
-			prompt += fmt.Sprintf("Error: %s\n\n", result.Error)
+			fmt.Fprintf(&sb, "### %s: FAILED\n\n", memberID)
+			fmt.Fprintf(&sb, "Error: %s\n\n", result.Error)
 		default:
-			prompt += fmt.Sprintf("### %s: %s\n\n", memberID, result.Status)
+			fmt.Fprintf(&sb, "### %s: %s\n\n", memberID, result.Status)
 		}
 	}
 
+	prompt += sb.String()
 	prompt += "## Your Task as Lead\n"
 	prompt += "1. Review all partial results from the team members.\n"
 	prompt += "2. Identify areas of agreement and disagreement.\n"

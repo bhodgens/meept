@@ -32,8 +32,7 @@ func TestQuotaDeferral_NotFailsTask(t *testing.T) {
 	}
 
 	// Verify it's a QuotaResetError
-	var qe *llm.QuotaResetError
-	if !errors.As(quotaErr, &qe) {
+	if _, ok := errors.AsType[*llm.QuotaResetError](quotaErr); !ok {
 		t.Fatal("expected quota error")
 	}
 

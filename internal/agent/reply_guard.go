@@ -129,7 +129,7 @@ func toolResultJSONKey(reply string) (string, bool) {
 	if !strings.HasSuffix(trimmed, "}") && !strings.HasSuffix(trimmed, "]") {
 		return "", false
 	}
-	for _, line := range strings.Split(trimmed, "\n") {
+	for line := range strings.SplitSeq(trimmed, "\n") {
 		if s := strings.TrimSpace(line); s != "" && !isStructuralLine(s) {
 			return "", false
 		}
@@ -151,7 +151,7 @@ func matchedTotalsLine(reply string) (string, bool) {
 	if !strings.Contains(reply, " tools*") && !strings.Contains(reply, " agents*") {
 		return "", false
 	}
-	for _, line := range strings.Split(reply, "\n") {
+	for line := range strings.SplitSeq(reply, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if !strings.Contains(trimmed, "*Total: ") {
 			continue

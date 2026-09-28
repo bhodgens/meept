@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/caimlas/meept/internal/tools"
@@ -63,11 +64,11 @@ func canonicalArgs(args map[string]any) string {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		var s string
+		var s strings.Builder
 		for _, k := range keys {
-			s += k + "=" + fmt.Sprint(args[k]) + ";"
+			fmt.Fprintf(&s, "%s=%v;", k, args[k])
 		}
-		return s
+		return s.String()
 	}
 	return string(b)
 }

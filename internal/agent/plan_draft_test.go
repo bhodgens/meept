@@ -2,8 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -16,7 +16,7 @@ import (
 )
 
 func draftDiscardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func newDraftTestPlanner(t *testing.T) (*StrategicPlanner, *task.Store) {
@@ -427,11 +427,11 @@ func TestRenderDraftScaffold_CompilesWhenSealable(t *testing.T) {
 }
 
 func asCompileError(err error, target **plan.CompileError) bool {
-	ce, ok := err.(*plan.CompileError)
-	if ok {
+	var ce *plan.CompileError
+	if errors.As(err, &ce) {
 		*target = ce
 	}
-	return ok
+	return ce != nil
 }
 
 // TestFlattenPlanPhasesToSteps_CapsPerPhase is the H4 regression test: the
@@ -442,7 +442,7 @@ func asCompileError(err error, target **plan.CompileError) bool {
 func TestFlattenPlanPhasesToSteps_CapsPerPhase(t *testing.T) {
 	mkPhases := func() []PlanPhaseSpec {
 		phase := PlanPhaseSpec{Name: "only"}
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			phase.Steps = append(phase.Steps, plannerStep{Description: fmt.Sprintf("step %d", i)})
 		}
 		return []PlanPhaseSpec{phase}
@@ -473,7 +473,7 @@ func TestFlattenPlanPhasesToSteps_CapsPerPhase(t *testing.T) {
 	// step even when phase 1 was truncated at the cap.
 	twoPhases := func() []PlanPhaseSpec {
 		p1 := PlanPhaseSpec{Name: "one"}
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			p1.Steps = append(p1.Steps, plannerStep{Description: fmt.Sprintf("a%d", i)})
 		}
 		p2 := PlanPhaseSpec{Name: "two"}

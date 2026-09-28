@@ -293,7 +293,7 @@ type BudgetSummary struct {
 type BudgetStatus struct {
 	Task   BudgetSummary            `json:"task"`
 	Phases map[string]BudgetSummary `json:"phases"`
-	Turn   BudgetSummary            `json:"turn,omitempty"`
+	Turn   BudgetSummary            `json:"turn,omitzero"`
 }
 
 // BudgetHierarchy manages the budget hierarchy for a task, providing

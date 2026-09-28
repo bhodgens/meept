@@ -31,6 +31,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -78,10 +79,8 @@ func (l *GoalLoop) CanExecutePlan(planRef PlanRef) bool {
 		return true
 	}
 	// Check if the approver matches one of the escalates_to entries.
-	for _, approver := range c.EscalatesTo {
-		if approver == planRef.ApproverID {
-			return true
-		}
+	if slices.Contains(c.EscalatesTo, planRef.ApproverID) {
+		return true
 	}
 	return false
 }
@@ -1160,8 +1159,10 @@ func (l *GoalLoop) reflectViaLLM(ctx context.Context, reflector Reflector, c *Co
 	}
 	health, err := parseReflectResponse(resp.Content)
 	if err != nil {
-		// Unparseable: default to GoalHealthy (don't punish for an LLM hiccup).
-		return GoalHealthy, nil
+		// Unparseable: default to GoalHealthy (don't punish for an LLM
+		// hiccup). The parse error is deliberately swallowed — the spec
+		// treats an unreadable reflect response as a healthy no-op turn.
+		return GoalHealthy, nil //nolint:nilerr // deliberate: parse failure falls back to healthy rather than failing the turn
 	}
 	return health, nil
 }
@@ -1187,14 +1188,14 @@ func (l *GoalLoop) lookupActiveGoal(ctx context.Context) (*Goal, error) {
 		return lookup.ActiveGoal(ctx, l.employeeID)
 	}
 	if store == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // no goal store configured means "no active goal", the caller's defined no-work contract
 	}
 	goals, err := store.ListActive(ctx, l.employeeID)
 	if err != nil {
 		return nil, err
 	}
 	if len(goals) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // zero active goals is a normal state: nil goal + nil error means "nothing to do"
 	}
 	return goals[0], nil
 }
@@ -1678,9 +1679,9 @@ func buildReflectUserPrompt(c *Constitution, result *bot.BotExecutionResult) str
 	if result == nil {
 		sb.WriteString("(no result — execution returned nil)\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("**success:** %v\n", result.Success))
-		sb.WriteString(fmt.Sprintf("**tokens used:** %d\n", result.TokensUsed))
-		sb.WriteString(fmt.Sprintf("**duration:** %s\n", result.Duration))
+		fmt.Fprintf(&sb, "**success:** %v\n", result.Success)
+		fmt.Fprintf(&sb, "**tokens used:** %d\n", result.TokensUsed)
+		fmt.Fprintf(&sb, "**duration:** %s\n", result.Duration)
 		if result.Error != "" {
 			sb.WriteString("**error:** " + result.Error + "\n")
 		}

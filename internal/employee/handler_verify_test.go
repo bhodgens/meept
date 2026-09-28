@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -26,7 +27,7 @@ func TestHandleAuditVerify_OKAndBroken(t *testing.T) {
 		t.Fatalf("OpenStoreFromDB: %v", err)
 	}
 	defer chainStore.Close()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := chainStore.Append(ctx, auditlog.Record{
 			Type: "audit_finding", EmployeeID: "e",
 			Payload: map[string]any{"i": i},
@@ -75,14 +76,14 @@ func TestHandleAuditVerify_OKAndBroken(t *testing.T) {
 func TestHandleAuditVerify_NotConfigured(t *testing.T) {
 	h := NewRPCHandler(nil)
 	_, err := h.handleAuditVerify(context.Background(), json.RawMessage(`{}`))
-	if err != errNotConfigured {
+	if !errors.Is(err, errNotConfigured) {
 		t.Fatalf("nil manager: want errNotConfigured, got %v", err)
 	}
 	// A non-nil manager without a wired chain handle is also not configured.
 	m := NewManager(nil)
 	h2 := NewRPCHandler(m)
 	_, err = h2.handleAuditVerify(context.Background(), json.RawMessage(`{}`))
-	if err != errNotConfigured {
+	if !errors.Is(err, errNotConfigured) {
 		t.Fatalf("nil chain: want errNotConfigured, got %v", err)
 	}
 }

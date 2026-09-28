@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -51,10 +52,8 @@ func (g *ToolDependencyGraph) AddDependency(from, to string) {
 	if from == to {
 		return
 	}
-	for _, existing := range g.edges[from] {
-		if existing == to {
-			return // already recorded
-		}
+	if slices.Contains(g.edges[from], to) {
+		return // already recorded
 	}
 	g.edges[from] = append(g.edges[from], to)
 }
@@ -70,11 +69,8 @@ func (g *ToolDependencyGraph) GetDependencies(id string) []string {
 func (g *ToolDependencyGraph) Dependents(id string) []string {
 	var dependents []string
 	for node, deps := range g.edges {
-		for _, dep := range deps {
-			if dep == id {
-				dependents = append(dependents, node)
-				break
-			}
+		if slices.Contains(deps, id) {
+			dependents = append(dependents, node)
 		}
 	}
 	return dependents
@@ -248,9 +244,8 @@ func (r *DependencyInferrer) InferDependencies(calls []llm.ToolCall) *ToolDepend
 	}
 
 	// Pairwise comparison: for each (A earlier, B later), check heuristics.
-	for i := 0; i < len(infos); i++ {
+	for i, a := range infos {
 		for j := i + 1; j < len(infos); j++ {
-			a := infos[i]
 			b := infos[j]
 			aID := a.call.ID
 			bID := b.call.ID

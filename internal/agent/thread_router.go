@@ -201,7 +201,7 @@ func (tr *ThreadRouter) GetActiveThread(sessionID string) (*session.Thread, erro
 	tr.mu.RUnlock()
 
 	if store == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // no session store wired: feature unavailable, not an error
 	}
 
 	sess := store.GetByConversationID(sessionID)

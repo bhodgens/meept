@@ -229,8 +229,7 @@ func TestAgentLoop_TimeoutParkGivesUpBeyondMaxWait(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the D8 give-up error to surface")
 	}
-	var giveUp *llm.ThrottleGiveUpError
-	if !errors.As(err, &giveUp) {
+	if _, ok := errors.AsType[*llm.ThrottleGiveUpError](err); !ok {
 		t.Fatalf("got %T (%v), want *llm.ThrottleGiveUpError", err, err)
 	}
 	if parker.Pending() != 0 {
@@ -266,9 +265,8 @@ func TestAgentLoop_NonTimeoutFailureStillSurfaces(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the non-timeout failure to surface (control)")
 	}
-	var giveUp *llm.ThrottleGiveUpError
-	if errors.As(err, &giveUp) {
-		t.Fatalf("non-timeout failure must not become a give-up: %v", err)
+	if giveUp, ok := errors.AsType[*llm.ThrottleGiveUpError](err); ok {
+		t.Fatalf("non-timeout failure must not become a give-up: %v", giveUp)
 	}
 	if parker.Pending() != 0 {
 		t.Errorf("parker.Pending() = %d, want 0 (no park on non-timeout)", parker.Pending())

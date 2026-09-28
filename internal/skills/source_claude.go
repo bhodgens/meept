@@ -183,7 +183,7 @@ func (s *ClaudeSource) loadAndAdapt(path string, adapter *ClaudeSkillAdapter) (*
 		s.logger.Warn("Claude skill has no name, skipping",
 			"path", path,
 		)
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented skip contract: unnamed skill is skipped, not an error
 	}
 
 	skill.Priority = PriorityClaude

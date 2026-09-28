@@ -59,7 +59,7 @@ func seedAllotmentSteps(t *testing.T, taskStore *task.Store, name string, n int)
 		t.Fatalf("create task: %v", err)
 	}
 	desc := allotmentDesc
-	for i := 0; i < n; i++ {
+	for i := range n {
 		s := task.NewTaskStep(tk.ID, desc, i)
 		s.State = task.StepReady
 		s.ToolHint = "code" // executor hint -> allotmentAgentID resolves "coder"

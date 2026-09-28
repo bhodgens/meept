@@ -746,7 +746,7 @@ func TestRecommendInstruction_Sorting(t *testing.T) {
 	analyses := make([]*SessionAnalysis, 30)
 
 	// Pattern 1: 10 shell_execute occurrences
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		analyses[i] = &SessionAnalysis{
 			SessionID: string(rune(i)),
 			AgentID:   "test-agent",
@@ -902,7 +902,7 @@ func TestRecommendInstruction_SuggestedInstructionContent(t *testing.T) {
 
 func makeTestAnalyses(n int, toolName, intent string, success bool) []*SessionAnalysis {
 	analyses := make([]*SessionAnalysis, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		analyses[i] = &SessionAnalysis{
 			SessionID: string(rune('a' + i)),
 			AgentID:   "test-agent",
@@ -921,7 +921,7 @@ func makeTestAnalysesWithSuccessRate(n int, toolName, intent string, successRate
 	analyses := make([]*SessionAnalysis, n)
 	successCount := int(float64(n) * successRate)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		success := i < successCount
 		analyses[i] = &SessionAnalysis{
 			SessionID: string(rune('a' + i)),

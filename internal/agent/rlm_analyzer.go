@@ -66,7 +66,7 @@ func NewRLMAnalyzer(cfg RLMAnalyzerConfig, store TraceStoreReader, llmClient *ll
 	// Build semaphore limits: each spawnable depth (0..maxDepth-1) gets the
 	// configured parallelism limit.
 	limits := make(map[int]int)
-	for d := 0; d < cfg.MaximumDepth; d++ {
+	for d := range cfg.MaximumDepth {
 		limits[d] = cfg.MaximumParallelSubagents
 	}
 
@@ -149,7 +149,6 @@ func (a *RLMAnalyzer) Analyze(ctx context.Context, prompt string) (*AnalyzeResul
 		outputBus    []outputEntry
 		sequence     int64
 		failureModes []FailureMode
-		allReports   []string
 	)
 
 	nextSeq := func() int64 {
@@ -180,9 +179,6 @@ func (a *RLMAnalyzer) Analyze(ctx context.Context, prompt string) (*AnalyzeResul
 		tag:      "root",
 		depth:    0,
 	})
-	//lint:ignore SA4006 allReports reserved for future multi-agent synthesis
-	//lint:ignore SA4010 allReports reserved for future multi-agent synthesis
-	allReports = append(allReports, rootResult.output)
 	mu.Unlock()
 
 	waitCh := make(chan struct{})
@@ -403,22 +399,21 @@ func (a *RLMAnalyzer) deterministicScan(run *analyzerRun, traceIDs []string, pro
 
 		if hasErrors {
 			errorSpanCount++
-			errorStr := fmt.Sprintf("  trace %s: %d error spans found\n", tid, sidsWithErrorsCount(spans))
-			sb.WriteString(errorStr)
+			fmt.Fprintf(&sb, "  trace %s: %d error spans found\n", tid, sidsWithErrorsCount(spans))
 		}
 		if hasRefusal {
-			sb.WriteString(fmt.Sprintf("  trace %s: refusal pattern detected\n", tid))
+			fmt.Fprintf(&sb, "  trace %s: refusal pattern detected\n", tid)
 		}
 
 		for tool, count := range repeatedTools {
 			if count >= 3 {
-				sb.WriteString(fmt.Sprintf("  trace %s: repeated %s tool (%d times)\n", tid, tool, count))
+				fmt.Fprintf(&sb, "  trace %s: repeated %s tool (%d times)\n", tid, tool, count)
 			}
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("Total traces scanned: %d\n", len(traceIDs)))
-	sb.WriteString(fmt.Sprintf("Error spans: %d/%d\n", errorSpanCount, totalSpans))
+	fmt.Fprintf(&sb, "Total traces scanned: %d\n", len(traceIDs))
+	fmt.Fprintf(&sb, "Error spans: %d/%d\n", errorSpanCount, totalSpans)
 
 	// Add turn nudge.
 	sb.WriteString("\n" + run.turnCounter.Nudge().Message)
@@ -451,9 +446,8 @@ func (a *RLMAnalyzer) extractFailureModesFromOutput(output, tag string, depth in
 	// Or: just the description.
 
 	var modes []FailureMode
-	lines := strings.Split(output, "\n")
 
-	for _, line := range lines {
+	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "[HALO:") {
 			continue
@@ -533,12 +527,12 @@ func synthesizeReport(modes []FailureMode) string {
 
 	var sb strings.Builder
 	sb.WriteString("=== HALO Trace Analysis Report ===\n\n")
-	sb.WriteString(fmt.Sprintf("Failure modes found: %d\n\n", len(modes)))
+	fmt.Fprintf(&sb, "Failure modes found: %d\n\n", len(modes))
 
 	for i, fm := range modes {
-		sb.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, fm.Severity, fm.Description))
+		fmt.Fprintf(&sb, "%d. [%s] %s\n", i+1, fm.Severity, fm.Description)
 		if len(fm.TraceIDs) > 0 {
-			sb.WriteString(fmt.Sprintf("   Traces: %s\n", strings.Join(fm.TraceIDs, ", ")))
+			fmt.Fprintf(&sb, "   Traces: %s\n", strings.Join(fm.TraceIDs, ", "))
 		}
 		sb.WriteString("\n")
 	}

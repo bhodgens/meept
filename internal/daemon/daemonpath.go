@@ -88,7 +88,7 @@ func DaemonPath() string {
 	for _, dir := range meeptPrefixPathDirs() {
 		add(dir)
 	}
-	for _, dir := range strings.Split(os.Getenv("PATH"), ":") {
+	for dir := range strings.SplitSeq(os.Getenv("PATH"), ":") {
 		add(dir)
 	}
 	for _, dir := range guaranteedPathDirs() {

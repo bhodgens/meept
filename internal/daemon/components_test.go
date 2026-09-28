@@ -65,8 +65,7 @@ func (tc testComponents) publishStatusRequest() <-chan *models.BusMessage {
 func TestComponentsStart_RollbackOnSuccess(t *testing.T) {
 	tc := makeTestComponents(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := tc.Start(ctx); err != nil {
 		t.Fatalf("Start returned unexpected error: %v", err)
@@ -83,7 +82,9 @@ func TestComponentsStart_RollbackOnSuccess(t *testing.T) {
 	}
 
 	// Clean shutdown via Stop (not rollback).
-	tc.Stop(ctx)
+	if err := tc.Stop(ctx); err != nil {
+		t.Errorf("Stop returned error: %v", err)
+	}
 }
 
 // TestComponentsStart_RollbackCoverage verifies that when Start()
@@ -96,8 +97,7 @@ func TestComponentsStart_RollbackOnSuccess(t *testing.T) {
 func TestComponentsStart_RollbackCoverage(t *testing.T) {
 	tc := makeTestComponents(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := tc.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)

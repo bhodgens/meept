@@ -283,11 +283,10 @@ func TestMCPRuntime_Started(t *testing.T) {
 
 	_ = r.Shutdown()
 
-	// After shutdown, Started should still reflect the lifecycle state.
-	// The runtime tracks whether Start was ever called.
-	if !r.Started() {
-		// Started remains true even after Shutdown because it indicates
-		// that the lifecycle was entered. This is expected behavior.
+	// After shutdown, Started must report false: MCPRuntime.Shutdown sets
+	// started=false, and Started() reflects the current lifecycle state.
+	if r.Started() {
+		t.Error("Started() should be false after Shutdown()")
 	}
 }
 

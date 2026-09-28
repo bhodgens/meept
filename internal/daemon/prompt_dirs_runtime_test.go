@@ -134,10 +134,7 @@ func TestWireProjectPromptTier_UpdatesOnProjectChange(t *testing.T) {
 
 	wantPrompts := filepath.Join(projBDir, ".meept", "prompts")
 	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if svc.ProjectDir() == wantPrompts {
-			break
-		}
+	for svc.ProjectDir() != wantPrompts {
 		if time.Now().After(deadline) {
 			t.Fatalf("ProjectDir = %q, want %q after project.set", svc.ProjectDir(), wantPrompts)
 		}

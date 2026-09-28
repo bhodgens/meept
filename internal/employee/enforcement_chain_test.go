@@ -3,6 +3,7 @@ package employee
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -103,8 +104,4 @@ func TestAuditStore_ChainDB(t *testing.T) {
 	}
 }
 
-var errBoom = errorString("boom")
-
-type errorString string
-
-func (e errorString) Error() string { return string(e) }
+var errBoom = errors.New("boom")

@@ -222,11 +222,11 @@ func renderPhaseStartup(phase *PlanPhaseSpec, store *artifactStore) string {
 			art, ok := store.Get(c.Name)
 			if !ok {
 				if c.Required {
-					sb.WriteString(fmt.Sprintf("- MISSING: %s (required)\n", c.Name))
+					fmt.Fprintf(&sb, "- MISSING: %s (required)\n", c.Name)
 				}
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("- %s (%s): %s\n", art.Name, art.Kind, art.Description))
+			fmt.Fprintf(&sb, "- %s (%s): %s\n", art.Name, art.Kind, art.Description)
 		}
 		sb.WriteString("\n")
 	}

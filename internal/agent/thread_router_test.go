@@ -36,7 +36,7 @@ func (m *mockThreadStore) GetByConversationID(conversationID string) *session.Se
 func (m *mockThreadStore) GetActiveThread(ctx context.Context, sessionID string) (*session.Thread, error) {
 	sess := m.Get(sessionID)
 	if sess == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // "no session" contract of the mocked store
 	}
 	return sess.GetActiveThread(), nil
 }

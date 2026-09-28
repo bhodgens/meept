@@ -334,7 +334,7 @@ func TestResumeGoalEpisode_AssessReenters(t *testing.T) {
 		ResumeAt:       time.Now().UTC().Add(30 * time.Minute),
 		TurnPayload: mustMarshalGoalPayload(t, goalTurnPayload{
 			Phase:   "assess",
-			Trigger: triggerPtr(basicTrigger()),
+			Trigger: new(basicTrigger()),
 		}),
 	}
 	loop.ResumeGoalEpisode(context.Background(), rec)
@@ -388,8 +388,6 @@ func TestGiveUpQuotaResetReflectDefaultsHealthy(t *testing.T) {
 }
 
 // --- tiny helpers ---------------------------------------------------------
-
-func triggerPtr(t TriggerEvent) *TriggerEvent { return &t }
 
 // mustMarshalGoalPayload marshals a payload or fails the test.
 func mustMarshalGoalPayload(t *testing.T, p goalTurnPayload) []byte {

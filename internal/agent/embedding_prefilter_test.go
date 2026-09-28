@@ -51,13 +51,13 @@ func exampleSet() []map[string]any {
 	// intent, so a perfect axis query votes, and anything off-axis dies
 	// on unanimity or floor.
 	ex := make([]map[string]any, 0, 10)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		ex = append(ex, map[string]any{
 			"intent": "code", "agent": "coder", "text": fmt.Sprintf("code ex %d", i),
 			"vector": basisVec(0),
 		})
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		ex = append(ex, map[string]any{
 			"intent": "chat", "agent": "chat", "text": fmt.Sprintf("chat ex %d", i),
 			"vector": basisVec(1),
@@ -134,13 +134,13 @@ func TestPrefilter_KNNDissenterAbstains(t *testing.T) {
 func TestPrefilter_KNNTiltedUnanimousRoutes(t *testing.T) {
 	tiltedCode := []float64{0.9, 0.44, 0, 0}
 	ex := make([]map[string]any, 0, 10)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		ex = append(ex, map[string]any{
 			"intent": "code", "agent": "coder", "text": "tilted",
 			"vector": tiltedCode,
 		})
 	}
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		ex = append(ex, map[string]any{
 			"intent": "chat", "agent": "chat", "text": "chat",
 			"vector": basisVec(1),
@@ -253,7 +253,7 @@ func TestPrefilter_MissingStoreInert(t *testing.T) {
 	})
 	p := NewEmbeddingPrefilter(emb, cfg, testLogger())
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if intent := p.Match(context.Background(), "input"); intent != nil {
 			t.Fatal("expected nil with missing store")
 		}

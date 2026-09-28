@@ -103,7 +103,7 @@ func TestRetryMetrics_Concurrent(t *testing.T) {
 	opTypes := []string{"llm", "tool", "http"}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -203,8 +203,7 @@ func TestBackoff_Sleep_Logging_Waiting(t *testing.T) {
 	}
 
 	// Verify structured fields are present in the JSON.
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
 		if strings.Contains(line, "backoff waiting") {
 			var entry map[string]any
 			if err := json.Unmarshal([]byte(line), &entry); err != nil {

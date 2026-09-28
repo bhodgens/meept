@@ -454,7 +454,7 @@ func TestRetryRecovery_ConcurrentAccess(t *testing.T) {
 	})
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
@@ -529,15 +529,12 @@ func TestRetryRecovery_ConcurrentCalls(t *testing.T) {
 	results := make([]any, 10)
 	errs := make([]error, 10)
 
-	for i := 0; i < 10; i++ {
-		i := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range 10 {
+		wg.Go(func() {
 			results[i], errs[i] = r.ExecuteWithRetry(context.Background(), "test", func() (any, error) {
 				return i, nil
 			})
-		}()
+		})
 	}
 	wg.Wait()
 

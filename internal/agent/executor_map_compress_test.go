@@ -20,13 +20,13 @@ import (
 // semantic contract the determinism protects.
 func TestCompressMapResult_DeterministicByteIdentical(t *testing.T) {
 	m := map[string]any{}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		m[fmt.Sprintf("key_%d", i)] = strings.Repeat("x", 50*(i+1))
 	}
 	const maxChars = 1200 // content sums to ~1800 chars: clipping is forced
 
 	var first string
-	for run := 0; run < 100; run++ {
+	for run := range 100 {
 		out := compressMapResult(m, maxChars)
 		data, err := json.Marshal(out)
 		if err != nil {
@@ -176,7 +176,7 @@ func TestCompressMapResult_MetadataOverflow(t *testing.T) {
 		"content": "small",
 	}
 	// 30 non-primary keys x 100 chars = 3000 chars > maxChars 2000.
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		m[fmt.Sprintf("meta_%02d", i)] = strings.Repeat("m", 100)
 	}
 	out := compressMapResult(m, 2000)
@@ -189,7 +189,7 @@ func TestCompressMapResult_MetadataOverflow(t *testing.T) {
 	if got := out["content"].(string); !strings.Contains(got, "truncated") {
 		t.Errorf("content = %q, want clipped-to-marker on overflow", got)
 	}
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		key := fmt.Sprintf("meta_%02d", i)
 		got, ok := out[key].(string)
 		if !ok {

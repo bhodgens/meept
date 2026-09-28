@@ -306,10 +306,10 @@ func waitForCondition(timeout time.Duration, cond func() bool) error {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	return wiringTimeout{}
+	return wiringTimeoutError{}
 }
 
 // wiringTimeoutError is the sentinel waitForCondition returns on timeout.
-type wiringTimeout struct{}
+type wiringTimeoutError struct{}
 
-func (wiringTimeout) Error() string { return "condition not met within timeout" }
+func (wiringTimeoutError) Error() string { return "condition not met within timeout" }

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"maps"
 	"reflect"
 	"testing"
 
@@ -60,9 +61,7 @@ func pfDeepCopyNodes(ns []phaseNode) []phaseNode {
 // pfCopySet copies a bool set for purity comparisons.
 func pfCopySet(m map[string]bool) map[string]bool {
 	out := make(map[string]bool, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }
 

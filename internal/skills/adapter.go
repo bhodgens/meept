@@ -40,7 +40,7 @@ func (a *ClaudeSkillAdapter) AdaptSkill(skill *Skill) *Skill {
 	// If description is empty, derive it from the first non-heading,
 	// non-empty line of the body.
 	if skill.Description == "" && skill.Body != "" {
-		for _, line := range strings.Split(skill.Body, "\n") {
+		for line := range strings.SplitSeq(skill.Body, "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" {
 				continue

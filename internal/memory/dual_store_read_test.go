@@ -240,7 +240,7 @@ func TestGetMemoryCountByOwner(t *testing.T) {
 	ds := setupDualStoreRead(t)
 
 	// 3 local memories.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_ = ds.StoreMemory(context.Background(), &Memory{
 			ID:        fmt.Sprintf("count-local-%d", i),
 			Type:      MemoryTypeEpisodic,
@@ -251,7 +251,7 @@ func TestGetMemoryCountByOwner(t *testing.T) {
 	}
 
 	// 2 gossip memories.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		_ = ds.StoreRemoteMemory(context.Background(), &Memory{
 			ID:        fmt.Sprintf("count-gossip-%d", i),
 			Type:      MemoryTypeEpisodic,

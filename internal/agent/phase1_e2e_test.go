@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -90,14 +91,7 @@ func TestPhase1IntentInstructionType(t *testing.T) {
 
 	// Verify keywords are registered
 	keywords := intent.Keywords()
-	found := false
-	for _, kw := range keywords {
-		if kw == "always" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(keywords, "always") {
 		t.Error("IntentInstruction.Keywords() missing 'always'")
 	}
 }

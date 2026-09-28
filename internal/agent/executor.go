@@ -96,10 +96,7 @@ func NewAdaptiveParallelismLimiter(baseParallelism int) *AdaptiveParallelismLimi
 	if baseParallelism < 1 {
 		baseParallelism = 1
 	}
-	cpuBoundLimit := baseParallelism / 2
-	if cpuBoundLimit < 1 {
-		cpuBoundLimit = 1
-	}
+	cpuBoundLimit := max(baseParallelism/2, 1)
 
 	limits := map[ToolConcurrencyProfile]int{
 		ProfileIOBound:   baseParallelism,
@@ -1104,11 +1101,7 @@ func (e *Executor) SetParallelismConfig(baseParallelism int, profiles map[string
 	}
 	// If cpu_bound wasn't explicitly set, derive from base.
 	if _, ok := resizeMap[ProfileCPUBound]; !ok {
-		cpuLimit := baseParallelism / 2
-		if cpuLimit < 1 {
-			cpuLimit = 1
-		}
-		resizeMap[ProfileCPUBound] = cpuLimit
+		resizeMap[ProfileCPUBound] = max(baseParallelism/2, 1)
 	}
 
 	e.mu.Lock()
@@ -1519,10 +1512,10 @@ func (e *Executor) ExecuteAll(ctx context.Context, toolCalls []llm.ToolCall) []*
 		}
 		if e.shouldTerminateEarly(groupResults) {
 			// Fill remaining nil slots with skipped-error results.
-			for i := range results {
+			for i, tc := range toolCalls {
 				if results[i] == nil {
 					results[i] = &ExecutionResult{
-						ToolCallID: toolCalls[i].ID,
+						ToolCallID: tc.ID,
 						Success:    false,
 						Error:      "skipped: earlier group reported a critical error",
 					}
@@ -1804,19 +1797,17 @@ func (e *Executor) publishToolComplete(toolCallID, toolName string, result *Exec
 // ("Created pending change ... for /path").
 func extractEditedFiles(summary string) []string {
 	// Pending changes format: "Created pending change <id> for <path> (<edits> -> <lines> lines)..."
-	if idx := strings.Index(summary, " for "); idx != -1 {
-		rest := summary[idx+4:]
+	if _, rest, found := strings.Cut(summary, " for "); found {
 		// Extract path up to the "(" that precedes line counts
-		if parenIdx := strings.Index(rest, " ("); parenIdx != -1 {
-			return []string{strings.TrimSpace(rest[:parenIdx])}
+		if path, _, found := strings.Cut(rest, " ("); found {
+			return []string{strings.TrimSpace(path)}
 		}
 		return []string{strings.TrimSpace(rest)}
 	}
 	// Direct mode format: "Applied N edit(s) to /path (X lines -> Y lines)"
-	if idx := strings.Index(summary, " to "); idx != -1 {
-		rest := summary[idx+4:]
-		if parenIdx := strings.Index(rest, " ("); parenIdx != -1 {
-			return []string{strings.TrimSpace(rest[:parenIdx])}
+	if _, rest, found := strings.Cut(summary, " to "); found {
+		if path, _, found := strings.Cut(rest, " ("); found {
+			return []string{strings.TrimSpace(path)}
 		}
 		return []string{strings.TrimSpace(rest)}
 	}

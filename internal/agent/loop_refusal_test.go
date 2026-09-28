@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"sync"
 	"testing"
 
@@ -178,7 +179,7 @@ func TestAgentLoop_HandleRefusal_DecisionTable(t *testing.T) {
 			rr := &recordingResolver{refusalResolver: tt.resolver}
 
 			loop := NewAgentLoop("sess-refusal-"+tt.name, t.TempDir(),
-				WithLoopLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+				WithLoopLogger(slog.New(slog.DiscardHandler)),
 			)
 			loop.spec = tt.spec
 			loop.refusalResolver = rr
@@ -232,7 +233,7 @@ func TestAgentLoop_HandleRefusal_DecisionTable(t *testing.T) {
 		}}
 		bus := newEventCaptureBus()
 		loop := NewAgentLoop("sess-refusal-precedence", t.TempDir(),
-			WithLoopLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+			WithLoopLogger(slog.New(slog.DiscardHandler)),
 		)
 		loop.spec = &AgentSpec{RefusalModel: "spec-fb"}
 		loop.refusalResolver = rr
@@ -291,7 +292,7 @@ func TestAgentLoop_RefusalError_RetriesFallbackThenSucceeds(t *testing.T) {
 	})
 	chatter := &refusalChatter{inner: inner, refusals: 1}
 	loop := NewAgentLoop("sess-refusal-retry", t.TempDir(),
-		WithLoopLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		WithLoopLogger(slog.New(slog.DiscardHandler)),
 		WithResolver(resolver),
 		WithModelRef(testClassifierAlias),
 		WithLLMChatter(chatter),
@@ -351,7 +352,7 @@ func TestAgentLoop_RefusalError_NeverRecordAliasFailure(t *testing.T) {
 	})
 	chatter := &refusalChatter{inner: inner, refusals: 1}
 	loop := NewAgentLoop("sess-refusal-invariant", t.TempDir(),
-		WithLoopLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		WithLoopLogger(slog.New(slog.DiscardHandler)),
 		WithResolver(resolver),
 		WithModelRef(testClassifierAlias),
 		WithLLMChatter(chatter),
@@ -391,7 +392,7 @@ func TestAgentLoop_RefusalError_FallbackAlsoRefuses_TwoCallsExactly(t *testing.T
 	})
 	chatter := &refusalChatter{inner: inner, refusals: 2}
 	loop := NewAgentLoop("sess-refusal-two-hops", t.TempDir(),
-		WithLoopLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		WithLoopLogger(slog.New(slog.DiscardHandler)),
 		WithResolver(resolver),
 		WithModelRef(testClassifierAlias),
 		WithLLMChatter(chatter),
@@ -434,9 +435,9 @@ func (b *eventCaptureBus) publisher() EventPublisher {
 	return func(topic string, payload map[string]any) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		cloned := make(map[string]any, len(payload))
-		for k, v := range payload {
-			cloned[k] = v
+		cloned := maps.Clone(payload)
+		if cloned == nil {
+			cloned = make(map[string]any, len(payload))
 		}
 		b.payloads = append(b.payloads, cloned)
 	}

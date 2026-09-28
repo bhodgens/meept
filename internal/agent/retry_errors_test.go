@@ -82,7 +82,7 @@ func TestIsRetryable_RetryableWrapper(t *testing.T) {
 
 func TestRetryBudget_Exhaustion(t *testing.T) {
 	budget := NewRetryBudget(3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if !budget.TryUse("op1") {
 			t.Errorf("TryUse attempt %d should succeed", i+1)
 		}

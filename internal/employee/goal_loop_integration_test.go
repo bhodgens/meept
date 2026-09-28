@@ -272,7 +272,7 @@ func TestGoalLoop_FullCycle_MetricsEmission(t *testing.T) {
 		t.Fatalf("Create goal: %v", err)
 	}
 
-	var metricCalls int32
+	var metricCalls atomic.Int32
 	var lastMetricName string
 	var lastMetricValue float64
 	var lastMetricTags map[string]string
@@ -281,7 +281,7 @@ func TestGoalLoop_FullCycle_MetricsEmission(t *testing.T) {
 		WithReflector(reflector).
 		WithExecutor(executor)
 	loop.SetEmitMetricFunc(func(name string, value float64, tags map[string]string) {
-		atomic.AddInt32(&metricCalls, 1)
+		metricCalls.Add(1)
 		lastMetricName = name
 		lastMetricValue = value
 		lastMetricTags = tags
@@ -292,7 +292,7 @@ func TestGoalLoop_FullCycle_MetricsEmission(t *testing.T) {
 		t.Fatalf("Decide error: %v", err)
 	}
 
-	if atomic.LoadInt32(&metricCalls) == 0 {
+	if metricCalls.Load() == 0 {
 		t.Fatal("expected at least one metric emission from Reflect")
 	}
 	if lastMetricName != "employee.goal.health" {
@@ -323,7 +323,7 @@ func TestGoalLoop_Tier1_FailureSequence_Broken(t *testing.T) {
 
 	// Queue responses for 3 cycles: each produces a candidate, executor
 	// fails, reflect is not called via LLM (failure path skips LLM reflect).
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		reflector.queueResponse(`{"candidates":[{"title":"retry","description":"d","prompt":"p"}]}`)
 	}
 

@@ -206,9 +206,7 @@ func (l *AgentLoop) tryWriteTrace(traj Trajectory, sessionID string, injectedSki
 	if !hasWriter {
 		return
 	}
-	l.wg.Add(1)
-	go func() {
-		defer l.wg.Done()
+	l.wg.Go(func() {
 		defer func() {
 			if r := recover(); r != nil {
 				logger := l.logger
@@ -219,5 +217,5 @@ func (l *AgentLoop) tryWriteTrace(traj Trajectory, sessionID string, injectedSki
 			}
 		}()
 		l.writeTraceHook(traj, sessionID, injectedSkills, turnErr, summary)
-	}()
+	})
 }

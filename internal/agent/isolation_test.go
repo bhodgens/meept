@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"io"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -299,7 +298,7 @@ func TestPairSession_SharedTranscriptOptIn(t *testing.T) {
 // config files and API payloads round-trip (yaml-only structs silently emit Go
 // field names when marshaled over JSON/RPC).
 func TestSessionConfig_SharedTranscriptTags(t *testing.T) {
-	cfgType := reflect.TypeOf(SessionConfig{})
+	cfgType := reflect.TypeFor[SessionConfig]()
 	field, ok := cfgType.FieldByName("SharedTranscript")
 	if !ok {
 		t.Fatal("SessionConfig.SharedTranscript field missing")
@@ -340,7 +339,7 @@ func TestDispatcherHandoff_SpawnContextIsArtifactOnly(t *testing.T) {
 // dispatcher prepends the structured Brief (never a transcript) to the child's
 // input message.
 func TestBuildContextMessage_IncludesHandoffBrief(t *testing.T) {
-	d := &Dispatcher{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	d := &Dispatcher{logger: slog.New(slog.DiscardHandler)}
 	result := &DispatchResult{
 		Intent:        &Intent{Summary: "fix the bug"},
 		OriginalInput: "fix the bug",
@@ -377,7 +376,7 @@ func TestWarnUnknownIsolationOnce(t *testing.T) {
 	isolationResetWarnOnce()
 
 	const bogus = ContextIsolation("__bogus_warn_once__")
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		sc := BuildSpawnContext(bogus, "b", nil, nil, nil)
 		if sc.Isolation != IsolationArtifactOnly {
 			t.Fatalf("spawn %d: expected fail-closed isolation, got %q", i, sc.Isolation)

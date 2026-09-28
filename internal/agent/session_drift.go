@@ -197,12 +197,8 @@ func (d *SessionDriftDetector) Observe(sessionID string, embedding []float64) (d
 	}
 
 	half := d.window / 3
-	if half < 2 {
-		half = 2
-	}
-	if half > d.window/2 {
-		half = d.window / 2
-	}
+	half = max(half, 2)
+	half = min(half, d.window/2)
 	base := meanUnit(s.window[:d.window-half])
 	cur := meanUnit(s.window[d.window-half:])
 	if base == nil || cur == nil {

@@ -93,7 +93,7 @@ func classifyReportTagAlong(actionClause, reportClause string) bool {
 	// flaky test, then tell me the weather" — the weather is new).
 	stop := newTopicStopwords()
 	for _, f := range strings.FieldsFunc(report, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z')
+		return r < 'a' || r > 'z'
 	}) {
 		if len(f) < 4 || stop[f] || strings.Contains(action, f) {
 			continue

@@ -271,7 +271,7 @@ func TestPairManagerConcurrentAccess(t *testing.T) {
 
 	// Create sessions concurrently
 	done := make(chan struct{})
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(idx int) {
 			defer func() { done <- struct{}{} }()
 			session := pm.CreateSession(
@@ -287,7 +287,7 @@ func TestPairManagerConcurrentAccess(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 

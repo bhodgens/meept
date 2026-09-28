@@ -349,11 +349,8 @@ func parseMetadata(frontmatter string) (*SkillMetadata, error) {
 
 	// Map Claude's "trigger" field into Tags if present and not already there.
 	if meta.Trigger != "" {
-		for _, tag := range meta.Tags {
-			if tag == meta.Trigger {
-				meta.Trigger = "" // already present, nothing to do
-				break
-			}
+		if slices.Contains(meta.Tags, meta.Trigger) {
+			meta.Trigger = "" // already present, nothing to do
 		}
 		if meta.Trigger != "" {
 			meta.Tags = append(meta.Tags, meta.Trigger)

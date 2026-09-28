@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 )
 
@@ -50,9 +51,9 @@ func thresholdFor(turn, tot int) float64 {
 		return 0.0
 	}
 	frac := float64(turn) / float64(tot)
-	for i := len(nudgeTable) - 1; i >= 0; i-- {
-		if frac >= nudgeTable[i].Threshold {
-			return nudgeTable[i].Threshold
+	for _, tbl := range slices.Backward(nudgeTable) {
+		if frac >= tbl.Threshold {
+			return tbl.Threshold
 		}
 	}
 	return 0.0
@@ -64,9 +65,9 @@ func thresholdTagFor(turn, tot int) string {
 		return ""
 	}
 	frac := float64(turn) / float64(tot)
-	for i := len(nudgeTable) - 1; i >= 0; i-- {
-		if frac >= nudgeTable[i].Threshold {
-			return nudgeTable[i].Tag
+	for _, tbl := range slices.Backward(nudgeTable) {
+		if frac >= tbl.Threshold {
+			return tbl.Tag
 		}
 	}
 	return ""
@@ -79,9 +80,7 @@ func nudgeMessageFor(turn, tot int) string {
 	}
 
 	remaining := tot - turn
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining = max(remaining, 0)
 
 	if turn >= tot {
 		return "Turn limit reached. Finalize immediately."
@@ -90,8 +89,7 @@ func nudgeMessageFor(turn, tot int) string {
 	frac := float64(turn) / float64(tot)
 
 	// Scan thresholds from highest to lowest for progressive urgency.
-	for i := len(nudgeTable) - 1; i >= 0; i-- {
-		tbl := nudgeTable[i]
+	for _, tbl := range slices.Backward(nudgeTable) {
 		if frac >= tbl.Threshold {
 			if tbl.Tag != "" {
 				return fmt.Sprintf(tbl.Message, remaining)
@@ -118,9 +116,7 @@ func (tc *turnCounter) Nudge() nudgeInfo {
 	tc.mu.Unlock()
 
 	remaining := lim - cur
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining = max(remaining, 0)
 
 	exhausted := cur >= lim
 

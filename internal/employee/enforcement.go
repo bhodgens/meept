@@ -24,6 +24,7 @@ import (
 	mathrand "math/rand"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -422,7 +423,7 @@ type TurnRecord struct {
 	PlanID         string           `json:"plan_id,omitempty"`
 	ToolCalls      []ToolCallRecord `json:"tool_calls"`
 	FinalOutput    string           `json:"final_output"`
-	TokenUsage     TokenCounts      `json:"token_usage,omitempty"`
+	TokenUsage     TokenCounts      `json:"token_usage,omitzero"`
 	Duration       time.Duration    `json:"duration,omitempty"`
 	Constitution   *Constitution    `json:"-"`
 }
@@ -583,29 +584,20 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 
 	// 1a. tools_forbidden — hard deny.
 	if len(constraints.ToolsForbidden) > 0 {
-		for _, forbidden := range constraints.ToolsForbidden {
-			if toolName == forbidden {
-				p.recordDenial(context.Background(), p.employeeID, action, toolName,
-					"tools_forbidden", SeverityWarning)
-				return Decision{
-					Allowed:  false,
-					Reason:   fmt.Sprintf("tool %q is forbidden by constitution", toolName),
-					Severity: string(SeverityWarning),
-				}
+		if slices.Contains(constraints.ToolsForbidden, toolName) {
+			p.recordDenial(context.Background(), p.employeeID, action, toolName,
+				"tools_forbidden", SeverityWarning)
+			return Decision{
+				Allowed:  false,
+				Reason:   fmt.Sprintf("tool %q is forbidden by constitution", toolName),
+				Severity: string(SeverityWarning),
 			}
 		}
 	}
 
 	// 1b. tools_allowed — if non-empty and tool not in list, hard deny.
 	if len(constraints.ToolsAllowed) > 0 {
-		allowed := false
-		for _, a := range constraints.ToolsAllowed {
-			if toolName == a {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
+		if !slices.Contains(constraints.ToolsAllowed, toolName) {
 			p.recordDenial(context.Background(), p.employeeID, action, toolName,
 				"tools_allowed", SeverityWarning)
 			return Decision{
@@ -933,10 +925,9 @@ func ruleMatchesField(rule, field string) bool {
 	// "@remote" -> "remote") so command flags still match plain-word
 	// rules like "force push".
 	fieldTokens := make(map[string]struct{})
-	for _, t := range strings.Fields(field) {
-		nt := normalizeToken(t)
-		if nt != "" {
-			fieldTokens[normalizeToken(t)] = struct{}{}
+	for t := range strings.FieldsSeq(field) {
+		if nt := normalizeToken(t); nt != "" {
+			fieldTokens[nt] = struct{}{}
 		}
 	}
 	// All rule tokens must appear in the field token set.
@@ -1190,11 +1181,12 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 	a.turnCacheMu.Unlock()
 
 	if model == nil {
-		// No audit model configured — skip silently.
-		return nil, nil
+		// No audit model configured — skip silently (spec: audit is
+		// best-effort; no model means nothing to run, not a failure).
+		return nil, nil //nolint:nilnil // spec-mandated skip path: nil finding + nil error is the documented "audit not run" contract
 	}
 	if turn.Constitution == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // turn carries no constitution, so there is nothing to audit against; caller treats nil finding as "no violation"
 	}
 
 	// Build the audit prompt from the constitution + turn record.
@@ -1223,10 +1215,11 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 	}
 	if parseErr != nil {
 		// Unparseable after retry — skip turn with warning (spec line 605).
-		return nil, nil
+		//nolint:nilerr // spec line 605: unparseable LLM response skips the turn (warn + continue), never errors the audit pass
+		return nil, nil //nolint:nilnil // nil finding is the defined "audit skipped" result
 	}
 	if finding == nil {
-		return nil, nil // clean turn
+		return nil, nil //nolint:nilnil // clean turn: nil finding is the success contract, not an invalid value
 	}
 
 	// Spec line 625: if the audit model reports a critical finding but the
@@ -1327,7 +1320,7 @@ func buildPostTurnPrompt(basePrompt string, turn TurnRecord) string {
 	}
 	sb.WriteString("\n## Turn Tool Calls\n")
 	for i, tc := range turn.ToolCalls {
-		sb.WriteString(fmt.Sprintf("%d. tool=%s action=%s args=%v result=%s\n", i+1, tc.ToolName, tc.Action, tc.Args, truncate(tc.Result, 500)))
+		fmt.Fprintf(&sb, "%d. tool=%s action=%s args=%v result=%s\n", i+1, tc.ToolName, tc.Action, tc.Args, truncate(tc.Result, 500))
 	}
 	sb.WriteString("\n## Final Output\n")
 	sb.WriteString(truncate(turn.FinalOutput, 4000))
@@ -1364,7 +1357,7 @@ func parseAuditResponse(content string, turn TurnRecord) (*AuditFinding, error) 
 
 	// Clean turn: info + no violated rule.
 	if sev == SeverityInfo && parsed.ViolatedRule == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // spec: an info-severity response with no violated rule IS a clean turn; nil finding is the defined success value
 	}
 
 	return &AuditFinding{
@@ -1515,7 +1508,9 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 		findings, driftScore, parseErr = parsePeriodicResponse(resp2.Content, turns)
 		if parseErr != nil {
 			a.recordPeriodicFailure(store, turns)
-			return nil, 0, nil // skip, log warning
+			// Spec line 605: an unparseable periodic response is a skip
+			// (failure recorded above), not an audit error.
+			return nil, 0, nil //nolint:nilerr // deliberate skip path: periodic audit is best-effort, unparseable response just records a failure
 		}
 	}
 
@@ -1594,11 +1589,11 @@ func buildPeriodicPrompt(turns []TurnRecord) string {
 			sb.WriteString("- " + n + "\n")
 		}
 	}
-	sb.WriteString(fmt.Sprintf("\n## Last %d Turns\n", len(turns)))
+	fmt.Fprintf(&sb, "\n## Last %d Turns\n", len(turns))
 	for i, t := range turns {
-		sb.WriteString(fmt.Sprintf("### Turn %d (id=%s)\n", i+1, t.TurnID))
+		fmt.Fprintf(&sb, "### Turn %d (id=%s)\n", i+1, t.TurnID)
 		for _, tc := range t.ToolCalls {
-			sb.WriteString(fmt.Sprintf("- tool=%s action=%s\n", tc.ToolName, tc.Action))
+			fmt.Fprintf(&sb, "- tool=%s action=%s\n", tc.ToolName, tc.Action)
 		}
 		sb.WriteString("output: " + truncate(t.FinalOutput, 1000) + "\n\n")
 	}
@@ -2052,15 +2047,15 @@ func SynthesizedPromptWithMax(c *Constitution, existingPrompt string, maxLen int
 		sb.WriteString("**risk ceiling:** " + string(constraints.RiskCeiling) + "\n\n")
 	}
 	if constraints.DailyBudgetCents > 0 {
-		sb.WriteString(fmt.Sprintf("**daily budget:** %d cents\n\n", constraints.DailyBudgetCents))
+		fmt.Fprintf(&sb, "**daily budget:** %d cents\n\n", constraints.DailyBudgetCents)
 	}
 	if constraints.MaxInvocationsPerDay > 0 {
-		sb.WriteString(fmt.Sprintf("**max invocations/day:** %d\n\n", constraints.MaxInvocationsPerDay))
+		fmt.Fprintf(&sb, "**max invocations/day:** %d\n\n", constraints.MaxInvocationsPerDay)
 	}
 	if len(constraints.EscalationTriggers) > 0 {
 		sb.WriteString("**escalation triggers:**\n")
 		for _, t := range constraints.EscalationTriggers {
-			sb.WriteString(fmt.Sprintf("- on %s matching %q: %s\n", t.On, t.Match, t.Reason))
+			fmt.Fprintf(&sb, "- on %s matching %q: %s\n", t.On, t.Match, t.Reason)
 		}
 		sb.WriteString("\n")
 	}
@@ -2107,10 +2102,7 @@ func SynthesizedPromptWithMax(c *Constitution, existingPrompt string, maxLen int
 		over := len(result) - maxLen
 		if c.Charter != "" {
 			// Rebuild without the full charter — truncate it.
-			charterBudget := len(c.Charter)
-			if charterBudget > over {
-				charterBudget = over
-			}
+			charterBudget := min(len(c.Charter), over)
 			// Truncate charter in the result string by removing
 			// from the charter section onward.
 			charterHeader := "# charter\n\n"
@@ -2137,10 +2129,7 @@ func SynthesizedPromptWithMax(c *Constitution, existingPrompt string, maxLen int
 			over = len(result) - maxLen
 			idx := strings.Index(result, existingPrompt)
 			if idx >= 0 {
-				keep := len(existingPrompt) - over
-				if keep < 0 {
-					keep = 0
-				}
+				keep := max(len(existingPrompt)-over, 0)
 				result = result[:idx] + existingPrompt[:keep]
 				if keep > 0 && keep < len(existingPrompt) {
 					result += "..."
@@ -2201,8 +2190,11 @@ func reservoirSample(items []TurnRecord, k int) []TurnRecord {
 	return result
 }
 
-// mathrandIntn returns a non-negative pseudo-random int in [0, n).
-// It wraps math/rand so callers don't need to import it separately.
+// mathrandIntn returns a non-negative pseudo-random int in [0, n). It
+// wraps math/rand deliberately: this only shuffles prompt example order
+// (non-security jitter), so crypto/rand is unnecessary.
+//
+//nolint:gosec // G404: weak randomness is intentional here — used only for non-security prompt example jitter, not for keys/tokens
 func mathrandIntn(n int) int {
 	if n <= 0 {
 		return 0

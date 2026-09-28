@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -887,9 +888,7 @@ func (m *Manager) RegisterPreExecCheckers(pc *security.PermissionChecker) {
 	}
 	m.mu.RLock()
 	snapshot := make(map[string]Constitution, len(m.constitutions))
-	for k, v := range m.constitutions {
-		snapshot[k] = v
-	}
+	maps.Copy(snapshot, m.constitutions)
 	m.mu.RUnlock()
 	for id, c := range snapshot {
 		constCopy := c
@@ -1022,7 +1021,7 @@ func (m *Manager) ListEmployees(ctx context.Context, statusFilter string) ([]Emp
 // treats this as "not found" without needing special error handling.
 func (m *Manager) GetEmployee(ctx context.Context, id string) (*Employee, error) {
 	if m.botManager == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented contract: no bot backend means caller treats nil as "not found" without special error handling
 	}
 	b, err := m.botManager.GetBot(ctx, id)
 	if err != nil {
@@ -1743,9 +1742,7 @@ func (m *Manager) buildEscalationGraphForHire(newID string, c Constitution, know
 	// Snapshot the cached constitutions under lock to build the graph.
 	m.mu.RLock()
 	cached := make(map[string]Constitution, len(m.constitutions)+1)
-	for id, cc := range m.constitutions {
-		cached[id] = cc
-	}
+	maps.Copy(cached, m.constitutions)
 	m.mu.RUnlock()
 
 	// Add the new employee's constitution. A shallow copy is fine — we
@@ -2503,9 +2500,7 @@ func flattenJSON(src map[string]any) map[string]any {
 	result := make(map[string]any)
 	for k, v := range src {
 		if nested, ok := v.(map[string]any); ok {
-			for fk, fv := range flattenJSONInner(k, nested) {
-				result[fk] = fv
-			}
+			maps.Copy(result, flattenJSONInner(k, nested))
 		} else {
 			result[k] = v
 		}
@@ -2518,9 +2513,7 @@ func flattenJSONInner(prefix string, src map[string]any) map[string]any {
 	for k, v := range src {
 		path := prefix + "." + k
 		if nested, ok := v.(map[string]any); ok {
-			for fk, fv := range flattenJSONInner(path, nested) {
-				result[fk] = fv
-			}
+			maps.Copy(result, flattenJSONInner(path, nested))
 		} else {
 			result[path] = v
 		}
@@ -2572,8 +2565,7 @@ func patchConstitution(existing Constitution, patch map[string]any) (Constitutio
 	// Apply top-level patches directly; "constraints.<x>" patches are
 	// routed into the nested constraints map.
 	for k, v := range patch {
-		if strings.HasPrefix(k, "constraints.") {
-			sub := strings.TrimPrefix(k, "constraints.")
+		if sub, ok := strings.CutPrefix(k, "constraints."); ok {
 			constraintsAny, ok := baseMap["constraints"]
 			if !ok {
 				constraintsAny = map[string]any{}
@@ -2586,8 +2578,7 @@ func patchConstitution(existing Constitution, patch map[string]any) (Constitutio
 			baseMap["constraints"] = constraintsMap
 			continue
 		}
-		if strings.HasPrefix(k, "amendment_policy.") {
-			sub := strings.TrimPrefix(k, "amendment_policy.")
+		if sub, ok := strings.CutPrefix(k, "amendment_policy."); ok {
 			apAny, ok := baseMap["amendment_policy"]
 			if !ok {
 				apAny = map[string]any{}

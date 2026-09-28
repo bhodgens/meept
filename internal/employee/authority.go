@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"reflect"
 	"sort"
+	"strings"
 )
 
 // EscalationGraph captures the minimum interface
@@ -39,14 +40,14 @@ func (c CycleFinding) String() string {
 	if len(c.AgentIDs) == 0 {
 		return "(empty cycle)"
 	}
-	out := ""
+	out := &strings.Builder{}
 	for i, id := range c.AgentIDs {
 		if i > 0 {
-			out += " -> "
+			out.WriteString(" -> ")
 		}
-		out += id
+		out.WriteString(id)
 	}
-	return out
+	return out.String()
 }
 
 // DetectEscalationCycles walks the escalates_to graph for the given
@@ -220,14 +221,14 @@ func cycleKey(cycle []string) string {
 		members = append(members, id)
 	}
 	sort.Strings(members)
-	out := ""
+	out := &strings.Builder{}
 	for i, m := range members {
 		if i > 0 {
-			out += "|"
+			out.WriteString("|")
 		}
-		out += m
+		out.WriteString(m)
 	}
-	return out
+	return out.String()
 }
 
 // isNilGraph returns true if g is a nil interface or a typed-nil value
@@ -239,7 +240,7 @@ func isNilGraph(g EscalationGraph) bool {
 	}
 	v := reflect.ValueOf(g)
 	switch v.Kind() {
-	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
 		return v.IsNil()
 	}
 	return false

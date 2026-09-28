@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestIntentCollaborate_Category(t *testing.T) {
 	if IntentCollaborate.Category() != CategoryDefer {
@@ -37,14 +40,7 @@ func TestIntentCollaborate_Keywords(t *testing.T) {
 	if len(kw) == 0 {
 		t.Error("keywords should not be empty")
 	}
-	hasCollab := false
-	for _, k := range kw {
-		if k == "collaborate" {
-			hasCollab = true
-			break
-		}
-	}
-	if !hasCollab {
+	if !slices.Contains(kw, "collaborate") {
 		t.Error("'collaborate' should be in keywords")
 	}
 }

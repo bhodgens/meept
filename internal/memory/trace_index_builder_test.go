@@ -258,7 +258,7 @@ func TestTraceIndexBuilder_MergePreservesOrder(t *testing.T) {
 
 	// Create 100 spans with distinct trace IDs in order.
 	var traces []SpanRecord
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		traces = append(traces, SpanRecord{
 			TraceID:   "trace-" + int64str(int64(i)),
 			SpanID:    "span-" + int64str(int64(i)),
@@ -304,9 +304,9 @@ func TestTraceIndexBuilder_ParallelChunkProcessing(t *testing.T) {
 	var traces []SpanRecord
 	spanPerTrace := 20
 	numTraces := 10
-	for i := 0; i < numTraces; i++ {
+	for i := range numTraces {
 		traceID := "trace-" + int64str(int64(i))
-		for j := 0; j < spanPerTrace; j++ {
+		for j := range spanPerTrace {
 			traces = append(traces, SpanRecord{
 				TraceID:      traceID,
 				SpanID:       "span-" + int64str(int64(i*spanPerTrace+j)),
@@ -349,12 +349,12 @@ func TestTraceIndexBuilder_ParallelChunkProcessing(t *testing.T) {
 
 	// Verify each trace row has the right aggregated values.
 	wantInput := 0
-	for j := 0; j < spanPerTrace; j++ {
+	for j := range spanPerTrace {
 		wantInput += 100 + j
 	}
 	expectedServices := []string{"worker-0", "worker-1", "worker-2"}
 
-	for i := 0; i < numTraces; i++ {
+	for i := range numTraces {
 		traceID := "trace-" + int64str(int64(i))
 		row, ok := rowMap[traceID]
 		if !ok {
@@ -396,7 +396,7 @@ func TestTraceIndexBuilder_ParallelChunkProcessingNoDataRace(t *testing.T) {
 	// Each goroutine uses its own temp dir to avoid file collisions.
 	// Tests that the builder is safe under concurrent build requests.
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		wg.Add(1)
 		go func(goroutineID int) {
 			defer wg.Done()
@@ -404,7 +404,7 @@ func TestTraceIndexBuilder_ParallelChunkProcessingNoDataRace(t *testing.T) {
 			source := filepath.Join(dir, "traces.jsonl")
 
 			var traces []SpanRecord
-			for j := 0; j < 50; j++ {
+			for j := range 50 {
 				traces = append(traces, SpanRecord{
 					TraceID: "t-" + int64str(int64(j%5)),
 					SpanID:  "s-" + int64str(int64(j)),
@@ -500,7 +500,7 @@ func TestTraceStore_OversizedReturnsPlanningMetadata(t *testing.T) {
 	// Each span line is about 200 bytes in JSONL. 150000/200 = 750 spans needed.
 	// To be safe, generate 800 spans.
 	filler := strings.Repeat("x", 150) // 150 bytes of content per attribute
-	for i := 0; i < 800; i++ {
+	for i := range 800 {
 		traces = append(traces, SpanRecord{
 			TraceID:   "oversized",
 			SpanID:    "span-" + int64str(int64(i)),
@@ -547,7 +547,7 @@ func TestTraceStore_SearchTraceLazyParsing(t *testing.T) {
 
 	// Create 200 spans. Half contain "error" in their output, half don't.
 	var traces []SpanRecord
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		var output string
 		if i%2 == 0 {
 			output = "normal execution"

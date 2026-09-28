@@ -154,14 +154,12 @@ func (c *EmbedHealthCheck) calibrate(ref refSet) (float64, error) {
 		normed[i] = out
 	}
 	k := folds
-	if k > n {
-		k = n
-	}
+	k = min(k, n)
 	dists := make([]float64, 0, n)
-	for f := 0; f < k; f++ {
+	for f := range k {
 		for i := f; i < n; i += k { // deterministic contiguous folds: i % k == f
 			best := math.Inf(1)
-			for j := 0; j < n; j++ {
+			for j := range n {
 				if j%k == f {
 					continue // same fold: never score against self/fold-mates
 				}
@@ -177,12 +175,8 @@ func (c *EmbedHealthCheck) calibrate(ref refSet) (float64, error) {
 	// Nearest-rank percentile (deterministic, no interpolation ambiguity):
 	// index ceil(pct*N)-1, clamped to the last element.
 	idx := int(math.Ceil(pct*float64(len(dists)))) - 1
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(dists) {
-		idx = len(dists) - 1
-	}
+	idx = max(idx, 0)
+	idx = min(idx, len(dists)-1)
 	return dists[idx], nil
 }
 

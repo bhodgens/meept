@@ -124,10 +124,7 @@ func (t *GetDatasetOverviewTool) Invoke(ctx context.Context, args map[string]any
 	}
 
 	var sampleIDs []string
-	maxSamples := limit
-	if len(traceIDs) < maxSamples {
-		maxSamples = len(traceIDs)
-	}
+	maxSamples := min(limit, len(traceIDs))
 
 	for i, tid := range traceIDs {
 		if i >= maxSamples {
@@ -627,8 +624,7 @@ func (t *SynthesizeTracesTool) Invoke(ctx context.Context, args map[string]any) 
 	traceIDs, _ := args["trace_ids"].([]any)
 	prompt, _ := args["prompt"].(string)
 
-	//lint:ignore S1009 len() for nil slices is defined as zero
-	if traceIDs == nil || len(traceIDs) == 0 {
+	if len(traceIDs) == 0 {
 		return nil, fmt.Errorf("trace_ids is required")
 	}
 	if prompt == "" {
@@ -654,10 +650,10 @@ func (t *SynthesizeTracesTool) Invoke(ctx context.Context, args map[string]any) 
 			continue
 		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("=== Trace %s ===\n", tid))
+		fmt.Fprintf(&sb, "=== Trace %s ===\n", tid)
 		for _, s := range spans {
-			sb.WriteString(fmt.Sprintf("  span: %s (%s) tokens_in:%d out:%d err:%v\n",
-				s.spanID, s.spanName, s.inputTokens, s.outputTokens, s.hasError))
+			fmt.Fprintf(&sb, "  span: %s (%s) tokens_in:%d out:%d err:%v\n",
+				s.spanID, s.spanName, s.inputTokens, s.outputTokens, s.hasError)
 		}
 		traceData = append(traceData, sb.String())
 	}

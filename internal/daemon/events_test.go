@@ -16,7 +16,7 @@ func TestRateLimiter_Allow(t *testing.T) {
 	r := NewRateLimiter(5)
 
 	// First 5 calls should be allowed.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		assert.True(t, r.Allow("info"), "allow should return true for call %d", i+1)
 	}
 	// 6th call should be denied.
@@ -59,7 +59,7 @@ func TestRateLimiter_SlidingWindow(t *testing.T) {
 func TestRateLimiter_ZeroMax(t *testing.T) {
 	r := NewRateLimiter(0) // should default to 60
 	// Should allow 60.
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		assert.True(t, r.Allow("info"))
 	}
 	assert.False(t, r.Allow("info"))
@@ -68,7 +68,7 @@ func TestRateLimiter_ZeroMax(t *testing.T) {
 func TestNewRateLimiter_NegativeMax(t *testing.T) {
 	r := NewRateLimiter(-1) // negative treated as 0, defaults to 60
 	// With negative input, NewRateLimiter clamps to default 60.
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		assert.True(t, r.Allow("info"))
 	}
 	assert.False(t, r.Allow("info"))
@@ -79,7 +79,7 @@ func TestEventEmitter_RateLimits(t *testing.T) {
 	// Limit to 3 per minute.
 	emitter := NewEventEmitter(100, 3, logger)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		emitter.Publish(&http.NotificationEvent{Type: http.NotificationTypeInfo, ID: "id"})
 	}
 	// This should be rate-limited.
@@ -152,15 +152,13 @@ func TestEventEmitter_ConcurrentPublish(t *testing.T) {
 		}
 	}()
 
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			emitter.Publish(&http.NotificationEvent{
 				Type: http.NotificationTypeInfo,
 				ID:   "id",
 			})
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -182,11 +180,11 @@ func TestEventEmitter_DifferentTypesIndependent(t *testing.T) {
 	// info type has been used up.
 	emitter.Publish(&http.NotificationEvent{Type: http.NotificationTypeInfo, ID: "info1"})
 	// error type should be independent and still allowed.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		emitter.Publish(&http.NotificationEvent{Type: http.NotificationTypeError, ID: "error"})
 	}
 	// warning type should be independent.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		emitter.Publish(&http.NotificationEvent{Type: http.NotificationTypeWarning, ID: "warning"})
 	}
 
@@ -212,7 +210,7 @@ func TestEventEmitter_DisableRateLimit(t *testing.T) {
 
 	// Should allow all 100 events.
 	const n = 100
-	for i := 0; i < n; i++ {
+	for range n {
 		emitter.Publish(&http.NotificationEvent{
 			Type: http.NotificationTypeInfo,
 			ID:   "id",
@@ -264,7 +262,7 @@ func TestEventEmitter_DoNotDisturb(t *testing.T) {
 	assert.True(t, emitter.IsDoNotDisturb(), "DND should be enabled")
 
 	// Publish several events — all should be suppressed.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		emitter.Publish(&http.NotificationEvent{
 			Type: http.NotificationTypeInfo,
 			ID:   "dnd-suppressed",

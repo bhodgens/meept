@@ -36,7 +36,7 @@ func TestMetrics_EmployeeInvocations_Emitted(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			capture := &metricCapture{}
-			emitFunc := EmitMetricFunc(capture.fn())
+			emitFunc := capture.fn()
 			emitFunc("employee.invocations", 1, map[string]string{
 				"employee_id": "emp-test",
 				"tier":        tt.tier,
@@ -123,7 +123,7 @@ func TestMetrics_GoalHealth_Updated(t *testing.T) {
 
 			// Find the goal.health metric.
 			var healthMetric *metricCall
-			for i := 0; i < capture.len(); i++ {
+			for i := range capture.len() {
 				m := capture.get(i)
 				if m.name == "employee.goal.health" {
 					healthMetric = &m
@@ -150,7 +150,7 @@ func TestMetrics_GoalHealth_Updated(t *testing.T) {
 // metric is emitted via the emitMetricFunc callback (spec line 672).
 func TestMetrics_DriftScore_Emitted(t *testing.T) {
 	capture := &metricCapture{}
-	emitFunc := EmitMetricFunc(capture.fn())
+	emitFunc := capture.fn()
 
 	// Simulate what runPeriodicAudit emits.
 	emitFunc("employee.drift.score", 0.15, map[string]string{
@@ -166,7 +166,7 @@ func TestMetrics_DriftScore_Emitted(t *testing.T) {
 
 	// Verify drift score.
 	var driftMetric *metricCall
-	for i := 0; i < capture.len(); i++ {
+	for i := range capture.len() {
 		m := capture.get(i)
 		if m.name == "employee.drift.score" {
 			driftMetric = &m
@@ -182,7 +182,7 @@ func TestMetrics_DriftScore_Emitted(t *testing.T) {
 
 	// Verify audit findings.
 	var findingMetric *metricCall
-	for i := 0; i < capture.len(); i++ {
+	for i := range capture.len() {
 		m := capture.get(i)
 		if m.name == "employee.audit.findings" {
 			findingMetric = &m
@@ -201,7 +201,7 @@ func TestMetrics_DriftScore_Emitted(t *testing.T) {
 // gauge is emitted (spec line 674).
 func TestMetrics_BudgetBurn_Emitted(t *testing.T) {
 	capture := &metricCapture{}
-	emitFunc := EmitMetricFunc(capture.fn())
+	emitFunc := capture.fn()
 
 	emitFunc("employee.budget.burn", 42, map[string]string{
 		"employee_id": "emp-budget",
@@ -209,7 +209,7 @@ func TestMetrics_BudgetBurn_Emitted(t *testing.T) {
 	})
 
 	var burnMetric *metricCall
-	for i := 0; i < capture.len(); i++ {
+	for i := range capture.len() {
 		m := capture.get(i)
 		if m.name == "employee.budget.burn" {
 			burnMetric = &m
@@ -276,13 +276,13 @@ func TestMetrics_FullCycle_EmitsAllExpectedMetrics(t *testing.T) {
 	}
 
 	capture := &metricCapture{}
-	var callCount int32
+	var callCount atomic.Int32
 
 	loop := NewGoalLoop("emp-full", testTier1Constitution(), store, nil).
 		WithReflector(reflector).
 		WithExecutor(executor)
 	loop.SetEmitMetricFunc(func(name string, value float64, tags map[string]string) {
-		atomic.AddInt32(&callCount, 1)
+		callCount.Add(1)
 		capture.fn()(name, value, tags)
 	})
 
@@ -291,7 +291,7 @@ func TestMetrics_FullCycle_EmitsAllExpectedMetrics(t *testing.T) {
 	// After a successful assess -> execute -> reflect cycle, we expect:
 	// - employee.goal.health metric emitted during Reflect
 	var healthMetric *metricCall
-	for i := 0; i < capture.len(); i++ {
+	for i := range capture.len() {
 		m := capture.get(i)
 		if m.name == "employee.goal.health" {
 			healthMetric = &m
@@ -306,7 +306,7 @@ func TestMetrics_FullCycle_EmitsAllExpectedMetrics(t *testing.T) {
 		}
 	}
 
-	if atomic.LoadInt32(&callCount) == 0 {
+	if callCount.Load() == 0 {
 		t.Error("expected at least one metric emission from full cycle")
 	}
 }
@@ -317,7 +317,7 @@ func TestMetrics_FullCycle_EmitsAllExpectedMetrics(t *testing.T) {
 // Manager.Trigger when the employee is disabled.
 func TestMetrics_PausedEmployee_EmitsPausedMetric(t *testing.T) {
 	capture := &metricCapture{}
-	emitFunc := EmitMetricFunc(capture.fn())
+	emitFunc := capture.fn()
 
 	// Simulate what Manager.Trigger does for a paused employee.
 	emitFunc("employee.invocations", 1, map[string]string{

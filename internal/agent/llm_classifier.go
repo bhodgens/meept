@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -240,9 +241,7 @@ func PublishLaneAgentIndex(idx map[string]string) {
 		return
 	}
 	snapshot := make(map[string]string, len(idx))
-	for lane, agent := range idx {
-		snapshot[lane] = agent
-	}
+	maps.Copy(snapshot, idx)
 	laneAgentIndex.Store(&snapshot)
 }
 
@@ -559,7 +558,7 @@ func (c *LLMClassifier) chatWithFailover(ctx context.Context, messages []llm.Cha
 	c.resolver.RecordAliasFailure(c.aliasName, err, c.modelConfig)
 	nextCfg, rerr := c.resolver.ResolveForAlias(c.aliasName, "")
 	if rerr != nil || nextCfg == nil {
-		return nil, fmt.Errorf("llm classification: %w (no alternate candidate: %v)", err, rerr)
+		return nil, fmt.Errorf("llm classification: %w (no alternate candidate: %w)", err, rerr)
 	}
 	c.logger.Warn("LLM classifier rotating to next alias candidate",
 		"alias", c.aliasName,
@@ -877,9 +876,10 @@ func extractJSONFromLLM(s string) string {
 			continue
 		}
 
-		if ch == '{' || ch == '[' {
+		switch ch {
+		case '{', '[':
 			depth++
-		} else if ch == '}' || ch == ']' {
+		case '}', ']':
 			depth--
 			if depth == 0 && ch == closeChar {
 				return s[start : i+1]

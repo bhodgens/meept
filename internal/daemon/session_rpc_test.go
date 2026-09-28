@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"testing"
 
@@ -14,10 +13,10 @@ import (
 
 func newArchiveRPCTestServer(t *testing.T) (*rpc.Server, *services.SessionService) {
 	t.Helper()
-	store := session.NewMemoryStore(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store := session.NewMemoryStore(slog.New(slog.DiscardHandler))
 	svc := services.NewSessionService(store)
 	// rpc.New dereferences cfg (cfg.Shutdown), so pass a non-nil zero Config.
-	srv := rpc.New(&rpc.Config{}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := rpc.New(&rpc.Config{}, nil, slog.New(slog.DiscardHandler))
 	registerSessionRPCHandlers(srv, svc, nil)
 	return srv, svc
 }

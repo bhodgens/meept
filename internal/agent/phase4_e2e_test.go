@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -32,8 +31,7 @@ func TestPhase4_E2E_ParseVerifySaveExecute(t *testing.T) {
 
 	handler := NewInstructionHandler(store, msgBus, parser, verifier, logger)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	handler.Start(ctx)
 	defer handler.Stop()
 
@@ -149,8 +147,7 @@ func TestPhase4_E2E_PreviewViaBus(t *testing.T) {
 
 	handler := NewInstructionHandler(store, msgBus, parser, verifier, logger)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	handler.Start(ctx)
 	defer handler.Stop()
 
@@ -207,8 +204,7 @@ func TestPhase4_E2E_AddListDeleteViaBus(t *testing.T) {
 
 	handler := NewInstructionHandler(store, msgBus, parser, verifier, logger)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	handler.Start(ctx)
 	defer handler.Stop()
 
@@ -319,8 +315,7 @@ func TestPhase4_E2E_ExecuteNotFound(t *testing.T) {
 
 	handler := NewInstructionHandler(store, msgBus, parser, verifier, logger)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	handler.Start(ctx)
 	defer handler.Stop()
 

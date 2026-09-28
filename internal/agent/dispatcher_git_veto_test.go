@@ -193,14 +193,5 @@ func TestGitVerbAgreementVeto_BenchPromptTable(t *testing.T) {
 	}
 }
 
-// min for the table above (Go <1.21 shim; remove when the toolchain floor
-// allows the builtin).
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // strings is imported for the table test's label truncation.
 var _ = strings.TrimSpace

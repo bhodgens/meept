@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,8 +120,7 @@ func keepNewestRows(content string, maxChars int) string {
 	// in a newline; walk backwards accumulating until the budget is hit.
 	kept := make([]string, 0, len(lines))
 	total := 0
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := lines[i]
+	for _, line := range slices.Backward(lines) {
 		if line == "" {
 			continue
 		}

@@ -2,6 +2,7 @@ package employee
 
 import (
 	"context"
+	"maps"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -44,9 +45,9 @@ func (c *metricCapture) fn() EmitMetricFunc {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		// Defensive copy of tags so the test sees a stable snapshot.
-		tagCopy := make(map[string]string, len(tags))
-		for k, v := range tags {
-			tagCopy[k] = v
+		tagCopy := maps.Clone(tags)
+		if tagCopy == nil {
+			tagCopy = map[string]string{}
 		}
 		c.calls = append(c.calls, metricCall{name: name, value: value, tags: tagCopy})
 	}
@@ -182,14 +183,18 @@ func TestReflect_EmitsGoalHealthMetric_Broken(t *testing.T) {
 	fail := &bot.BotExecutionResult{Success: false, Error: "dead"}
 
 	// Fail 1: at_risk (value 1)
-	loop.Reflect(context.Background(), PlanRef{ID: "p1"}, fail)
+	if _, err := loop.Reflect(context.Background(), PlanRef{ID: "p1"}, fail); err != nil {
+		t.Fatalf("reflect 1: %v", err)
+	}
 	c1 := capture.get(0)
 	if c1.value != float64(GoalAtRisk) {
 		t.Errorf("failure 1 metric value = %v, want %v", c1.value, float64(GoalAtRisk))
 	}
 
 	// Fail 2: broken (value 2)
-	loop.Reflect(context.Background(), PlanRef{ID: "p1"}, fail)
+	if _, err := loop.Reflect(context.Background(), PlanRef{ID: "p1"}, fail); err != nil {
+		t.Fatalf("reflect 2: %v", err)
+	}
 	c2 := capture.get(1)
 	if c2.value != float64(GoalBroken) {
 		t.Errorf("failure 2 metric value = %v, want %v (GoalBroken=%d)", c2.value, float64(GoalBroken), GoalBroken)
@@ -284,11 +289,13 @@ func TestPruneOlderThan_RemovesOldFindings(t *testing.T) {
 func TestPruneOlderThan_ZeroRetention(t *testing.T) {
 	store := testAuditStoreHelper(t)
 
-	store.Create(context.Background(), AuditFinding{
+	if err := store.Create(context.Background(), AuditFinding{
 		ID: "audit_zero_1", EmployeeID: "e1",
 		Severity: SeverityInfo, Checkpoint: CheckpointPostTurn,
 		DetectedAt: time.Now().UTC().Add(-200 * 24 * time.Hour),
-	})
+	}); err != nil {
+		t.Fatalf("seed audit_zero_1: %v", err)
+	}
 
 	pruned, err := store.PruneOlderThan(context.Background(), 0)
 	if err != nil {
@@ -322,7 +329,7 @@ func TestAttachFinding_AppendsAndCaps(t *testing.T) {
 	}
 
 	// Attach enough to exceed the cap.
-	for i := 0; i < recentFindingsMax+10; i++ {
+	for range recentFindingsMax + 10 {
 		g.AttachFinding("bulk_finding")
 	}
 	list = g.RecentFindingsList()

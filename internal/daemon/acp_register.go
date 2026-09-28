@@ -8,10 +8,12 @@ import (
 )
 
 // applyACPFromConfig constructs the ACP manager when [acp] enabled=true.
-// Disabled (the DefaultConfig path) returns nil, nil with no log line.
+// Disabled (the DefaultConfig path) returns (nil, nil) with no log line:
+// ACP is opt-in and a disabled manager is a valid construction result, not
+// an error — callers nil-check the manager.
 func applyACPFromConfig(cfg config.ACPConfig) (*acp.Manager, error) {
 	if !cfg.Enabled {
-		return nil, nil
+		return nil, nil //nolint:nilnil // disabled ACP is an intentional "not present" contract, not an error
 	}
 	return acp.NewManagerFromFiles(cfg)
 }

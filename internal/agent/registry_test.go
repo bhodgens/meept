@@ -122,7 +122,7 @@ func TestAssemblePurpose_ComponentsWrapBody(t *testing.T) {
 	cIdx := strings.Index(got, "# Constitution")
 	mIdx := strings.Index(got, "# Memory")
 	bIdx := strings.Index(got, "# Purpose & Task Principles")
-	if !(cIdx < mIdx && mIdx < bIdx) {
+	if cIdx < 0 || cIdx >= mIdx || mIdx >= bIdx {
 		t.Errorf("ordering wrong: c=%d m=%d b=%d", cIdx, mIdx, bIdx)
 	}
 }
@@ -746,8 +746,8 @@ func TestAgentRegistry_GetForTask_EmptyTaskIDDefaults(t *testing.T) {
 
 func TestAgentRegistry_ReleaseTaskLoops(t *testing.T) {
 	reg := newTestRegistryForTask(t)
-	reg.GetForTask("coder", "task-1")
-	reg.GetForTask("debugger", "task-1")
+	_, _ = reg.GetForTask("coder", "task-1")
+	_, _ = reg.GetForTask("debugger", "task-1")
 	reg.ReleaseTaskLoops("task-1")
 	// After release, new GetForTask should create a fresh loop.
 	loop1, _ := reg.GetForTask("coder", "task-1")
@@ -769,7 +769,7 @@ func TestAgentRegistry_Get_BackwardCompat(t *testing.T) {
 
 func TestAgentRegistry_ReleaseTaskLoops_EmptyTaskID_Noop(t *testing.T) {
 	reg := newTestRegistryForTask(t)
-	reg.GetForTask("coder", "task-1")
+	_, _ = reg.GetForTask("coder", "task-1")
 	// Empty taskID should be a no-op (doesn't delete anything).
 	reg.ReleaseTaskLoops("")
 	loop, _ := reg.GetForTask("coder", "task-1")

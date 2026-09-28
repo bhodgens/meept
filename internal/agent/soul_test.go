@@ -5,7 +5,6 @@ package agent
 // startup gate semantics.
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,8 +134,7 @@ func TestSoulHotReload(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 		if err := sp.StartWatching(ctx); err != nil {
 			t.Fatalf("StartWatching: %v", err)
 		}
@@ -169,8 +167,7 @@ func TestSoulHotReload(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 		if err := sp.StartWatching(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -214,8 +211,7 @@ func TestSoulHotReload(t *testing.T) {
 			hooked = append(hooked, text)
 			mu.Unlock()
 		})
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 		if err := sp.StartWatching(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -265,8 +261,7 @@ func TestAgentLoopEffectivePersonality(t *testing.T) {
 		}))
 		loop.SetSoulProvider(sp)
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 		if err := sp.StartWatching(ctx); err != nil {
 			t.Fatalf("StartWatching: %v", err)
 		}

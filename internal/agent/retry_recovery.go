@@ -82,8 +82,8 @@ type ResumeResult struct {
 	SkippedTurns int `json:"skipped_turns"`
 	// RunID is the ID of the run that was resumed.
 	RunID string `json:"run_id"`
-	// State is the restored agent state (caller-defined interface{}).
-	State interface{} `json:"-"`
+	// State is the restored agent state (caller-defined value).
+	State any `json:"-"`
 	// ResumedAt records when the resume operation occurred.
 	ResumedAt time.Time `json:"resumed_at"`
 	// Warning contains any non-fatal issues discovered during resume.
@@ -663,7 +663,7 @@ func (r *RetryRecovery) ExecuteWithRetry(ctx context.Context, toolName string, f
 	}
 
 	// Reusable lastErr for the loop.
-	var lastErr error = retryErr
+	lastErr := retryErr
 	attempt := 0
 
 	for {
@@ -739,7 +739,7 @@ func (r *RetryRecovery) GetRecoveryState() RecoveryState {
 // backoffDuration computes exponential backoff: baseDelay * 2^attempt.
 func backoffDuration(baseDelay time.Duration, attempt int) time.Duration {
 	duration := baseDelay
-	for i := 0; i < attempt; i++ {
+	for range attempt {
 		duration *= 2
 	}
 	// Cap at 30 seconds.
@@ -756,8 +756,7 @@ func errorTypeName(err error) string {
 	}
 
 	// HTTPError: check structured types first.
-	var httpErr *HTTPError
-	if errors.As(err, &httpErr) {
+	if httpErr, ok := errors.AsType[*HTTPError](err); ok {
 		switch httpErr.StatusCode {
 		case 429:
 			return "rate_limit"
@@ -771,8 +770,7 @@ func errorTypeName(err error) string {
 	if errcls.IsRateLimit(err) {
 		return "rate_limit"
 	}
-	var rateLimitErr *llm.RateLimitError
-	if errors.As(err, &rateLimitErr) {
+	if _, ok := errors.AsType[*llm.RateLimitError](err); ok {
 		return "rate_limit"
 	}
 	if errcls.IsAuthError(err) {
@@ -784,8 +782,7 @@ func errorTypeName(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout"
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
+	if _, ok := errors.AsType[net.Error](err); ok {
 		return "network_error"
 	}
 	if errcls.IsParameterError(err) {

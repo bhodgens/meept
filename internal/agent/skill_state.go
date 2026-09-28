@@ -486,7 +486,7 @@ func (r *SkillStateRuntime) Run(ctx context.Context, skill *skills.Skill, input,
 	answer := ""
 	var runErr error
 
-	for step := 0; step < maxIters; step++ {
+	for step := range maxIters {
 		if err := ctx.Err(); err != nil {
 			runErr = fmt.Errorf("state runtime: %w", err)
 			break

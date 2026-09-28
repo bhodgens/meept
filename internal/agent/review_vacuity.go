@@ -152,8 +152,8 @@ func hasStructuredPlanArtifact(text string) bool {
 		return true
 	}
 	bulletLines := 0
-	for _, line := range strings.Split(text, "\n") {
-		stripped := strings.TrimLeft(line, " \t")
+	for line := range strings.SplitSeq(text, "\n") {
+		stripped := strings.TrimLeft(line, " 	")
 		if isNumberedListItem(stripped) {
 			return true
 		}

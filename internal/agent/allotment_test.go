@@ -66,7 +66,7 @@ func TestAllotmentTokens(t *testing.T) {
 func TestSplitStepsByAllotment(t *testing.T) {
 	mk := func(n int) []*task.TaskStep {
 		var out []*task.TaskStep
-		for i := 0; i < n; i++ {
+		for i := range n {
 			s := task.NewTaskStep("t1", strings.Repeat("a", 2048), i) // 512 tok each
 			out = append(out, s)
 		}
@@ -194,7 +194,7 @@ func TestSplitStepsByAllotment_Boundaries(t *testing.T) {
 func mkN(taskID string, n, tokens int) []*task.TaskStep {
 	desc := strings.Repeat("a", tokens*4)
 	out := make([]*task.TaskStep, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out = append(out, task.NewTaskStep(taskID, desc, i))
 	}
 	return out

@@ -1,10 +1,10 @@
 package agent
 
 import (
-	"log/slog"
-	"testing"
-
 	"github.com/caimlas/meept/internal/llm"
+	"log/slog"
+	"slices"
+	"testing"
 )
 
 // makeToolCall is a test helper that constructs an llm.ToolCall.
@@ -370,10 +370,5 @@ func callIDsFromGroup(group []llm.ToolCall) []string {
 }
 
 func sliceContains(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, s)
 }

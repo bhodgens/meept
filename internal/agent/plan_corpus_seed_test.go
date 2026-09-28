@@ -71,7 +71,6 @@ var planReplanAttemptSeedCases = []struct {
 // deterministic classifier and asserts the expected tier per row.
 func TestPlanCorpus_SeedTierTable(t *testing.T) {
 	for _, tc := range planTierSeedCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			req := PlanRequest{Input: tc.input, IsReplan: tc.isReplan}
 			if got := EvaluatePlanComplexity(req); got != tc.want {
@@ -88,7 +87,6 @@ func TestPlanCorpus_SeedTierTable(t *testing.T) {
 // truth.
 func TestPlanCorpus_SeedReplanAttemptPolicy(t *testing.T) {
 	for _, tc := range planReplanAttemptSeedCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			req := PlanRequest{Input: tc.input, ReplanAttempt: tc.replanAttempt}
 			if got := tierForRequest(req); got != tc.want {

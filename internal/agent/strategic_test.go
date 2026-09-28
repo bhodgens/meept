@@ -5,19 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-
-	_ "modernc.org/sqlite"
-	"time"
-
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/task"
+	"log/slog"
+	_ "modernc.org/sqlite"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
 )
 
 func TestExtractJSON_DirectJSON(t *testing.T) {
@@ -495,14 +494,7 @@ func TestExtractCriteria(t *testing.T) {
 				t.Errorf("extractCriteria() returned %d criteria, want at least %d", len(got), tt.wantMin)
 			}
 			for _, want := range tt.wantExact {
-				found := false
-				for _, c := range got {
-					if c == want {
-						found = true
-						break
-					}
-				}
-				if !found {
+				if !slices.Contains(got, want) {
 					t.Errorf("extractCriteria() expected criterion %q to be present exactly, got %v", want, got)
 				}
 			}

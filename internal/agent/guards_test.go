@@ -77,7 +77,7 @@ func TestNoProgressLadder_ResetsOnDistinctCall(t *testing.T) {
 
 func TestNoProgressLadder_ConsecutiveVetoes(t *testing.T) {
 	l := NewNoProgressLadder()
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		l.Track("search", `{"q":"a"}`, 3, 5)
 	}
 	// Streak: ok,ok,warn,warn,veto -> exactly one veto so far.
@@ -204,7 +204,7 @@ func TestGuards_NoProgressLadder_Integration(t *testing.T) {
 			}},
 		}
 	}
-	for i := 0; i < 7; i++ {
+	for range 7 {
 		responses = append(responses, newSearchResp())
 	}
 	responses = append(responses, &llm.Response{Content: "should never be reached", Usage: llm.TokenUsage{TotalTokens: 1}})

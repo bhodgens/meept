@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -649,15 +650,13 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		// Stop() can interrupt it at shutdown; track via WaitGroup so callers
 		// can confirm exit.
 		d.indexCtx, d.indexCancel = context.WithCancel(context.Background())
-		d.indexWG.Add(1)
-		go func() { //nolint:gosec // background goroutine outlives request context
-			defer d.indexWG.Done()
+		d.indexWG.Go(func() { //nolint:gosec // background goroutine outlives request context
 			if err := d.semanticIndex.BuildIndex(d.indexCtx); err != nil {
 				if d.indexCtx.Err() == nil {
 					d.logger.Warn("Failed to build semantic index", "error", err)
 				}
 			}
-		}()
+		})
 	}
 
 	// Initialize the Stage-0 embedding prefilter when configured
@@ -1618,7 +1617,6 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 					"input_len", len(input),
 				)
 				d.recordClassificationMethod("platform_action_arbitration")
-				intent = nil
 			} else if d.gitVerbAgreementVeto &&
 				intent.Type == string(IntentGit) &&
 				!inputContainsGitVerb(input) &&
@@ -1641,7 +1639,6 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 					"input_len", len(input),
 				)
 				d.recordClassificationMethod("git_verb_agreement_veto")
-				intent = nil
 			} else if intent.Type == string(IntentChat) &&
 				hasLeadingImperativeVerb(input) &&
 				inputMentionsWorkArtifact(input) {
@@ -1663,7 +1660,6 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 					"input_len", len(input),
 				)
 				d.recordClassificationMethod("chat_imperative_arbitration")
-				intent = nil
 			} else if ShouldUseLLMResult(intent) &&
 				quickPlanCueUpgradeApplies(intent.Type, input) {
 				// QuickPlan cue upgrade (#52, campaign 20260918 phase 2):
@@ -2039,7 +2035,7 @@ func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, 
 			Task:                 created,
 			Intent:               intent,
 			Plan:                 p,
-			SuggestedMode:        string(IntentQuickPlan.SuggestedMode()),
+			SuggestedMode:        IntentQuickPlan.SuggestedMode(),
 			AgentOverrideApplied: agentOverrideApplied,
 		}, nil
 	}
@@ -2069,18 +2065,18 @@ func (d *Dispatcher) buildClarificationResult(input string, analysis *TrueIntent
 	// intents — the ambiguity gate is unchanged for them.
 	pendingMode := ""
 	if IntentType(analysis.Category) == IntentQuickPlan {
-		pendingMode = string(IntentQuickPlan.SuggestedMode())
+		pendingMode = IntentQuickPlan.SuggestedMode()
 	}
 
 	// Build a single clarifying message
 	var sb strings.Builder
 	sb.WriteString("I'm not quite sure what you're asking for. ")
 	if analysis.Goal != "" {
-		sb.WriteString(fmt.Sprintf("It seems like you want to %s, but ", analysis.Goal))
+		fmt.Fprintf(&sb, "It seems like you want to %s, but ", analysis.Goal)
 	}
 	sb.WriteString("I need a bit more clarity:\n\n")
 	for i, q := range questions {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, q))
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, q)
 	}
 
 	intent := &Intent{
@@ -2804,8 +2800,8 @@ func splitReportReadbackClauses(input string) (action, report string, ok bool) {
 	// ", and " must be tried before " and " shapes so the comma variant
 	// wins when both match.
 	for _, sep := range []string{" then ", " and then ", ", and "} {
-		if idx := strings.Index(input, sep); idx >= 0 {
-			return input[:idx], input[idx+len(sep):], true
+		if before, after, found := strings.Cut(input, sep); found {
+			return before, after, true
 		}
 	}
 	return "", "", false
@@ -4666,10 +4662,8 @@ func isShortSimpleMessage(input string) bool {
 			"is this working", "are you there", "can you hear me",
 			"hello world", "hi", "hey there",
 		}
-		for _, p := range simplePatterns {
-			if lower == p {
-				return true
-			}
+		if slices.Contains(simplePatterns, lower) {
+			return true
 		}
 		// Single-word or two-word questions that are clearly chat
 		words := strings.Fields(lower)
@@ -5024,7 +5018,7 @@ func isSecondPersonWorkRecall(input string) bool {
 			// "you" + past-tense work verb.
 			for j := i + 1; j < len(fields) && j <= i+2; j++ {
 				nxt := strings.Trim(fields[j], ",.!?:;\"'")
-				if nxt != "you" && !(nxt == "u" && j == i+1) {
+				if nxt != "you" && (nxt != "u" || j != i+1) {
 					if j == i+1 {
 						break // "you" must directly follow
 					}
@@ -5137,8 +5131,7 @@ func isInterrogativeNonImperativeQuestion(input string) bool {
 	if trimmed == "" {
 		return false
 	}
-	fields := strings.Fields(trimmed)
-	for _, f := range fields {
+	for f := range strings.FieldsSeq(trimmed) {
 		// Normalize punctuation before comparison (AR-4 evidence class).
 		switch strings.Trim(f, ",.!?:;\"'") {
 		case "please", "hey", "ok", "okay", "now", "first", "then":
@@ -5594,8 +5587,8 @@ func (d *Dispatcher) buildClarificationQuestion(directive *ModelReassignmentDire
 	// Check for provider-level references that need specific model selection
 	var providerRefs []string
 	for _, ref := range directive.ModelReferences {
-		if strings.HasPrefix(ref, "provider:") {
-			providerRefs = append(providerRefs, strings.TrimPrefix(ref, "provider:"))
+		if name, ok := strings.CutPrefix(ref, "provider:"); ok {
+			providerRefs = append(providerRefs, name)
 		}
 	}
 

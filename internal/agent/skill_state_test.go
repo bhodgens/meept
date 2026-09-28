@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"testing"
-
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/skills"
+	"slices"
+	"strings"
+	"testing"
 )
 
 // ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ func TestValidateStatePatch_WrongTypeDropped(t *testing.T) {
 func TestBuildStatePrompt_Bounded(t *testing.T) {
 	body := strings.Repeat("x", 100)
 	state := map[string]any{}
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		state[fmt.Sprintf("k%d", i)] = strings.Repeat("v", 200)
 	}
 	state["files_touched"] = []any{"a.go"}
@@ -508,9 +508,9 @@ func promptsToString(msgs []llm.ChatMessage) string {
 // userPrompt returns the LAST user-role message's content from a captured
 // message list (the per-step skill prompt proper).
 func userPrompt(msgs []llm.ChatMessage) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == llm.RoleUser {
-			return msgs[i].Content
+	for _, msg := range slices.Backward(msgs) {
+		if msg.Role == llm.RoleUser {
+			return msg.Content
 		}
 	}
 	return ""

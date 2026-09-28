@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -220,9 +221,9 @@ func (s *CollaborationSession) TotalTokensUsed() int64 {
 func (s *CollaborationSession) LastContentByRole(role string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for i := len(s.TurnLog) - 1; i >= 0; i-- {
-		if s.TurnLog[i].Role == role {
-			return s.TurnLog[i].Content
+	for _, turn := range slices.Backward(s.TurnLog) {
+		if turn.Role == role {
+			return turn.Content
 		}
 	}
 	return ""

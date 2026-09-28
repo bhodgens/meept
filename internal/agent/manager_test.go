@@ -149,7 +149,7 @@ func TestManager_Concurrent(t *testing.T) {
 
 	// Goroutines target a small set of session IDs so some contention
 	// occurs (10 unique IDs × 10 goroutines each).
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		wg.Add(1)
 		go func(bucket int) {
 			defer wg.Done()

@@ -349,18 +349,19 @@ type storeBackedGoalLookup struct {
 	store *employee.GoalStore
 }
 
-// ActiveGoal returns the first active goal for the employee from the
-// store. Returns (nil, nil) when no active goal exists.
+// ActiveGoal returns the first active goal for the employee from the store.
+// (nil, nil) is the documented "no active goal" answer — the GoalLoop treats
+// it as nothing-to-reflect-on, not a failure.
 func (l *storeBackedGoalLookup) ActiveGoal(ctx context.Context, employeeID string) (*employee.Goal, error) {
 	if l.store == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // absent store is the documented "no active goal" contract, not an error
 	}
 	goals, err := l.store.ListActive(ctx, employeeID)
 	if err != nil {
 		return nil, err
 	}
 	if len(goals) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // "no active goal exists" is an intentional empty-result contract, not an error
 	}
 	return goals[0], nil
 }
@@ -422,7 +423,7 @@ type pushNotifierAdapter struct {
 // Publish forwards an arbitrary event to the emitter. The event must be
 // *http.NotificationEvent or a type convertible to it; other types are
 // dropped with a warning log.
-func (a pushNotifierAdapter) Publish(event interface{}) {
+func (a pushNotifierAdapter) Publish(event any) {
 	ne, ok := event.(*http.NotificationEvent)
 	if !ok {
 		// Best-effort: drop unknown types silently rather than panicking.
@@ -433,7 +434,7 @@ func (a pushNotifierAdapter) Publish(event interface{}) {
 
 // PublishNotification forwards the arguments to EventEmitter.PublishNotification,
 // translating the interface{} notifType to NotificationType.
-func (a pushNotifierAdapter) PublishNotification(sessionID, agentID string, notifType interface{}, title, message string) {
+func (a pushNotifierAdapter) PublishNotification(sessionID, agentID string, notifType any, title, message string) {
 	var nt NotificationType
 	switch v := notifType.(type) {
 	case NotificationType:

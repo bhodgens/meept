@@ -1852,14 +1852,20 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Start all registry components (RPC server, etc.)
 	if err := d.registry.StartAll(ctx); err != nil {
-		d.shutdown() // D5: Clean up any partially-initialized state
+		// D5: Clean up any partially-initialized state.
+		if shutdownErr := d.shutdown(); shutdownErr != nil {
+			d.logger.Error("daemon: shutdown after failed component start", "error", shutdownErr)
+		}
 		return fmt.Errorf("failed to start components: %w", err)
 	}
 
 	// Start agent components (chat handler, status handler, etc.)
 	if d.components != nil {
 		if err := d.components.Start(ctx); err != nil {
-			d.shutdown() // D5: Clean up registry components on agent start failure
+			// D5: Clean up registry components on agent start failure.
+			if shutdownErr := d.shutdown(); shutdownErr != nil {
+				d.logger.Error("daemon: shutdown after failed agent component start", "error", shutdownErr)
+			}
 			return fmt.Errorf("failed to start agent components: %w", err)
 		}
 		d.logger.Info("daemon: agent components started",
@@ -1913,7 +1919,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 			); err != nil {
 				d.logger.Error("FATAL: classifier runtime unhealthy at startup — refusing to serve with degraded classification", "error", err)
 				cancelLlm()
-				d.shutdown()
+				if shutdownErr := d.shutdown(); shutdownErr != nil {
+					d.logger.Error("daemon: shutdown after classifier health gate failure", "error", shutdownErr)
+				}
 				return fmt.Errorf("classifier runtime health gate failed: %w", err)
 			}
 		}

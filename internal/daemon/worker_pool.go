@@ -4,6 +4,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -40,7 +41,7 @@ type WorkItem struct {
 	Message        string
 	ConversationID string
 	// Parts is optional for multimodal messages
-	Parts []interface{} // []llm.ContentPart when used
+	Parts []any // []llm.ContentPart when used
 }
 
 // WorkTrigger indicates what triggered work.
@@ -180,7 +181,10 @@ func (w *Worker) processWorkItem(item WorkItem) {
 	switch item.Trigger {
 	case TriggerUserMessage:
 		// For now, always use RunOnce - multimodal support is a future enhancement
-		item.Loop.RunOnce(ctx, item.Message, item.ConversationID)
+		_, runErr := item.Loop.RunOnce(ctx, item.Message, item.ConversationID)
+		if runErr != nil {
+			slog.Error("worker: work item run failed", "conversation_id", item.ConversationID, "error", runErr)
+		}
 	// For other triggers, the loop would have specific handling
 	// These are placeholders for future implementation
 	case TriggerTaskQueued, TriggerTimer, TriggerReflection:

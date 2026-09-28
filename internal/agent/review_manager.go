@@ -176,12 +176,14 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		)
 		feedback := fmt.Sprintf("Maximum revision cycles (%d) exceeded. Human intervention required.", policy.MaxRevisionCycles)
 		if spec != nil {
+			var fb strings.Builder
 			for _, c := range spec.Criteria {
 				if c.StepSequence == step.Sequence {
-					feedback += fmt.Sprintf(" Original acceptance criteria: %s", c.AcceptanceCriteria)
+					fmt.Fprintf(&fb, " Original acceptance criteria: %s", c.AcceptanceCriteria)
 					break
 				}
 			}
+			feedback += fb.String()
 		}
 		return &ReviewResult{
 			Status:     ReviewNeedsInfo,

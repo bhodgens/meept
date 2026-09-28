@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -39,7 +38,7 @@ func newCycleGuardTestDetector() *cycleDetector {
 		CycleThreshold:       3,
 		ConvergenceThreshold: 3,
 		HistorySize:          10,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, slog.New(slog.DiscardHandler))
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +141,7 @@ func TestCycleDetector_ArgumentChangeResetsRun(t *testing.T) {
 // tool's first call.
 func TestCycleDetector_DegenerateConfigDoesNotPanic(t *testing.T) {
 	cd := newCycleDetector(DetectionConfig{HistorySize: 0},
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
+		slog.New(slog.DiscardHandler))
 
 	abort, repeats := cd.recordCall("list_directory", "")
 	assert.False(t, abort, "a tool's first call must never abort")

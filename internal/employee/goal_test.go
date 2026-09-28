@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -692,12 +693,14 @@ func TestGoalStore_Update_ConcurrentSafe(t *testing.T) {
 		errCount int
 		errMu    sync.Mutex
 	)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			// In-memory mutation under the goal's own lock.
-			g.AppendHistory("p-" + string(rune('a'+n)))
+			// In-memory mutation under the goal's own lock. Loop bound is
+			// 20, so 'a'+n is always in [a,t] — the int->rune conversion
+			// cannot overflow (gosec G115).
+			g.AppendHistory("p-" + string(rune('a'+n))) //nolint:gosec // bounds proven: n in [0,20), 'a'+n <= 't'
 
 			// Serialize persistence.
 			writeMu.Lock()
@@ -804,21 +807,16 @@ func goalIDs(gs []*Goal) []string {
 
 func mustContain(t *testing.T, ids []string, want string) {
 	t.Helper()
-	for _, id := range ids {
-		if id == want {
-			return
-		}
+	if slices.Contains(ids, want) {
+		return
 	}
 	t.Errorf("IDs %v do not contain %q", ids, want)
 }
 
 func mustNotContain(t *testing.T, ids []string, want string) {
 	t.Helper()
-	for _, id := range ids {
-		if id == want {
-			t.Errorf("IDs %v contain %q (should not)", ids, want)
-			return
-		}
+	if slices.Contains(ids, want) {
+		t.Errorf("IDs %v contain %q (should not)", ids, want)
 	}
 }
 

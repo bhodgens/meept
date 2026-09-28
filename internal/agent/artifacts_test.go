@@ -35,12 +35,12 @@ func TestArtifactStore_ConcurrentSafe(t *testing.T) {
 	s := newArtifactStore()
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			s.Add(Artifact{Name: "x", Kind: "file"}, "step-1")
 		}
 		close(done)
 	}()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		s.Has("x")
 	}
 	<-done

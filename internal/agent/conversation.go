@@ -518,9 +518,9 @@ func (c *Conversation) LastUserMessage() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	for i := len(c.messages) - 1; i >= 0; i-- {
-		if c.messages[i].Role == llm.RoleUser {
-			return c.messages[i].Content
+	for _, msg := range slices.Backward(c.messages) {
+		if msg.Role == llm.RoleUser {
+			return msg.Content
 		}
 	}
 	return ""

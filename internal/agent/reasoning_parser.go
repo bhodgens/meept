@@ -137,7 +137,7 @@ var (
 // (scope=next-turn); otherwise scope=session.
 func ParseReasoningDirective(text string) (*ReasoningDirective, error) {
 	if strings.TrimSpace(text) == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // empty input: no directive is a normal parse result, not an error
 	}
 
 	// Order matters: more-specific patterns first. Token hints are checked
@@ -201,7 +201,7 @@ func ParseReasoningDirective(text string) (*ReasoningDirective, error) {
 			return &ReasoningDirective{
 				Config: &llm.ReasoningConfig{
 					Effort:  alias.tier,
-					Enabled: boolPtr(true),
+					Enabled: new(true),
 				},
 				Scope:        detectScope(text),
 				ReasoningReq: m[0],
@@ -231,7 +231,7 @@ func ParseReasoningDirective(text string) (*ReasoningDirective, error) {
 		}, nil
 	}
 
-	return nil, nil
+	return nil, nil //nolint:nilnil // no directive matched: a normal parse result, not an error
 }
 
 // findTierWord returns the lowercased tier word from reasoningTierRe when the
@@ -263,6 +263,4 @@ func detectScope(text string) string {
 	return "session"
 }
 
-// boolPtr returns a pointer to b. Small helper to keep ReasoningConfig
-// construction concise.
-func boolPtr(b bool) *bool { return &b }
+// boolPtr was removed: modernize's newexpr rewrites boolPtr(x) to new(x).

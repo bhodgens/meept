@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"io"
 	"log/slog"
 	"testing"
 
@@ -27,7 +26,7 @@ func testResolver(t *testing.T, aliasNames ...string) *llm.Resolver {
 		},
 		ModelAliases: aliases,
 	}
-	return llm.NewResolver(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return llm.NewResolver(cfg, slog.New(slog.DiscardHandler))
 }
 
 // TestModelRefForAgent_UsesOwnAliasWhenSpecHasNoModel is the regression for the

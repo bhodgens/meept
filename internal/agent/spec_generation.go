@@ -59,7 +59,7 @@ func GenerateSpecFromSteps(steps []*task.TaskStep) *TaskSpec {
 func deriveAcceptanceCriteria(step *task.TaskStep) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("Step %q must be fully completed.", step.Description))
+	fmt.Fprintf(&sb, "Step %q must be fully completed.", step.Description)
 
 	switch step.ToolHint {
 	case string(IntentCode), KeywordRefactor:

@@ -128,10 +128,7 @@ type LinkedAsset struct {
 // "template" for templates/, "asset" for assets/, and "" for anything
 // outside the known directories (including SKILL.md itself and empty paths).
 func classifyAsset(relPath string) string {
-	first := relPath
-	if i := strings.IndexByte(relPath, '/'); i >= 0 {
-		first = relPath[:i]
-	}
+	first, _, _ := strings.Cut(relPath, "/")
 	switch first {
 	case "scripts":
 		return "script"
@@ -225,7 +222,7 @@ func (sl *stringList) UnmarshalYAML(value *yaml.Node) error {
 // trimming whitespace and dropping empty segments.
 func parseStringListScalar(raw string) stringList {
 	var out stringList
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		if part = strings.TrimSpace(part); part != "" {
 			out = append(out, part)
 		}

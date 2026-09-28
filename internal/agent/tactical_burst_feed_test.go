@@ -56,7 +56,7 @@ func TestOnJobFailed_FeedsBurstDetector_FailedReplan(t *testing.T) {
 
 	const sessionID = "sess-f29-burst"
 	const failures = 5
-	for i := 0; i < failures; i++ {
+	for i := range failures {
 		parent := newTestTask("task-f29-"+string(rune('a'+i)), "f29 burst feed")
 		parent.TotalJobs = 1
 		if err := ts.taskStore.Create(parent); err != nil {

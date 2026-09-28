@@ -56,10 +56,10 @@ func TestTaskServiceFilterBeforeValidationOrder(t *testing.T) {
 	snap := trace.snapshot()
 	var filterIdxs, validationIdxs []int
 	for i, entry := range snap {
-		switch {
-		case entry == "filter:json_format":
+		switch entry {
+		case "filter:json_format":
 			filterIdxs = append(filterIdxs, i)
-		case entry == "validation":
+		case "validation":
 			validationIdxs = append(validationIdxs, i)
 		}
 	}

@@ -93,9 +93,7 @@ func (w *BudgetResumeWatcher) Start(ctx context.Context) {
 	w.cancel = cancel
 	w.mu.Unlock()
 
-	w.wg.Add(1)
-	go func() {
-		defer w.wg.Done()
+	w.wg.Go(func() {
 		ticker := time.NewTicker(w.pollInterval)
 		defer ticker.Stop()
 		for {
@@ -106,7 +104,7 @@ func (w *BudgetResumeWatcher) Start(ctx context.Context) {
 				w.drainIfClear(runCtx)
 			}
 		}
-	}()
+	})
 	w.logger.Info("budget resume watcher started", "poll_interval", w.pollInterval)
 }
 
@@ -185,11 +183,8 @@ func (w *BudgetResumeWatcher) drainIfClear(ctx context.Context) {
 
 	w.logger.Info("budget cleared — resuming parked turns", "count", len(pending))
 	for _, turn := range pending {
-		turn := turn
-		w.wg.Add(1)
-		go func() {
-			defer w.wg.Done()
+		w.wg.Go(func() {
 			resume(ctx, turn)
-		}()
+		})
 	}
 }

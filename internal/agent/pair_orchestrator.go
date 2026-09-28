@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -189,11 +190,9 @@ func (po *PairOrchestrator) handleStartRequest(ctx context.Context, msg *models.
 	)
 
 	// Run the pair conversation in a background goroutine
-	po.wg.Add(1)
-	go func() {
-		defer po.wg.Done()
+	po.wg.Go(func() {
 		po.runPairConversation(ctx, state)
-	}()
+	})
 }
 
 // runPairConversation executes the full actor-reviewer loop.
@@ -210,7 +209,6 @@ func (po *PairOrchestrator) runPairConversation(ctx context.Context, state *BusP
 	sessionID := state.SessionID
 	state.mu.RUnlock()
 
-	ct = 0
 	for {
 		state.mu.RLock()
 		ct = state.CurrentTurn
@@ -331,9 +329,9 @@ func (po *PairOrchestrator) runPairConversation(ctx context.Context, state *BusP
 	resultTurns := make([]PairTurn, len(state.Turns))
 	copy(resultTurns, state.Turns)
 	lastVerdict := state.LastVerdict
-	for i := len(state.Turns) - 1; i >= 0; i-- {
-		if state.Turns[i].Role == "actor" {
-			lastActorOutput = state.Turns[i].Content
+	for _, turn := range slices.Backward(state.Turns) {
+		if turn.Role == "actor" {
+			lastActorOutput = turn.Content
 			break
 		}
 	}
@@ -376,10 +374,12 @@ func (po *PairOrchestrator) buildReviewerPrompt(state *BusPairSessionState, acto
 
 	// Include history from previous turns for context
 	if len(turnsCopy) > 1 {
+		var sb strings.Builder
 		prompt += "\n\nPrevious conversation history:\n"
 		for _, turn := range turnsCopy {
-			prompt += fmt.Sprintf("\n[%s - %s]: %s\n", turn.Role, turn.AgentID, truncateString(turn.Content, 200))
+			fmt.Fprintf(&sb, "\n[%s - %s]: %s\n", turn.Role, turn.AgentID, truncateString(turn.Content, 200))
 		}
+		prompt += sb.String()
 	}
 
 	return prompt

@@ -137,14 +137,17 @@ func (c *legacyController) Stop() error {
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		return nil
+		// Process already gone — nothing to stop (best-effort stop).
+		return nil //nolint:nilerr // FindProcess error means the process is already gone on unix; the stop has nothing to do
 	}
 	if proc.Signal(syscall.SIGTERM) == nil {
 		// Best-effort wait for graceful shutdown.
 		for range 40 {
 			time.Sleep(250 * time.Millisecond)
-			if proc.Signal(syscall.Signal(0)) != nil {
-				return nil
+			sigErr := proc.Signal(syscall.Signal(0))
+			if sigErr != nil {
+				// Process exited — the graceful stop succeeded.
+				return nil //nolint:nilerr // Signal(0) error means the process is gone, i.e. the stop succeeded
 			}
 		}
 		// Force kill if still alive.

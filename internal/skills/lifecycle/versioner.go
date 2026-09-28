@@ -135,7 +135,7 @@ func (v *Versioner) Snapshot(name string) (string, error) {
 	}
 
 	versionedSkillPath := filepath.Join(versionDir, "SKILL.md")
-	if err := os.WriteFile(versionedSkillPath, content, 0o644); err != nil {
+	if err := os.WriteFile(versionedSkillPath, content, 0o644); err != nil { //nolint:gosec // G703: path built from internal registry/catalog skill names, not user input
 		return "", fmt.Errorf("versioner: write versioned skill file: %w", err)
 	}
 
@@ -269,7 +269,7 @@ func (v *Versioner) Restore(name string, version int) error {
 
 	// Atomic write.
 	tmpPath := livePath + ".tmp"
-	if err := os.WriteFile(tmpPath, content, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, content, 0o644); err != nil { //nolint:gosec // G703: path built from internal registry/catalog skill names, not user input
 		return fmt.Errorf("versioner: write restore tmp: %w", err)
 	}
 	if err := os.Rename(tmpPath, livePath); err != nil {

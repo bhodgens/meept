@@ -171,20 +171,20 @@ func TestAcquireInvokeMutex_SerializesConcurrentAccess(t *testing.T) {
 	var (
 		wg       sync.WaitGroup
 		maxDepth int32
-		curDepth int32
+		curDepth atomic.Int32
 		callCnt  int32
 	)
 
 	const n = 10
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for range n {
 		go func() {
 			defer wg.Done()
 			mu := m.acquireInvokeMutex("emp-ser-test")
 			mu.Lock()
 			defer mu.Unlock()
 
-			cur := atomic.AddInt32(&curDepth, 1)
+			cur := curDepth.Add(1)
 			for {
 				old := atomic.LoadInt32(&maxDepth)
 				if cur <= old || atomic.CompareAndSwapInt32(&maxDepth, old, cur) {
@@ -196,7 +196,7 @@ func TestAcquireInvokeMutex_SerializesConcurrentAccess(t *testing.T) {
 			// Simulate work (hold the lock briefly to widen the race window).
 			time.Sleep(5 * time.Millisecond)
 
-			atomic.AddInt32(&curDepth, -1)
+			curDepth.Add(-1)
 		}()
 	}
 	wg.Wait() //nolint:mutexio /// Wait for test goroutines - test verifies serialized I/O
@@ -243,21 +243,23 @@ func TestAcquireInvokeMutex_DistinctEmployeesConcurrent(t *testing.T) {
 	var (
 		wg       sync.WaitGroup
 		maxDepth int32
-		curDepth int32
+		curDepth atomic.Int32
 	)
 
 	const n = 5
 	wg.Add(n)
-	for i := 0; i < n; i++ {
-		go func(idx int) {
+	for idx := range n {
+		go func() {
 			defer wg.Done()
-			// Each goroutine uses a distinct employee ID.
-			empID := "emp-distinct-" + string(rune('A'+idx))
+			// Each goroutine uses a distinct employee ID. idx is bounded by
+			// the range loop [0, n) with n=5, so 'A'+idx is always in 'A'..'E'
+			// — the int->rune conversion cannot overflow (gosec G115).
+			empID := "emp-distinct-" + string(rune('A'+idx)) //nolint:gosec // bounds proven: idx in [0,5), 'A'+idx <= 'E'
 			mu := m.acquireInvokeMutex(empID)
 			mu.Lock()
 			defer mu.Unlock()
 
-			cur := atomic.AddInt32(&curDepth, 1)
+			cur := curDepth.Add(1)
 			for {
 				old := atomic.LoadInt32(&maxDepth)
 				if cur <= old || atomic.CompareAndSwapInt32(&maxDepth, old, cur) {
@@ -265,8 +267,8 @@ func TestAcquireInvokeMutex_DistinctEmployeesConcurrent(t *testing.T) {
 				}
 			}
 			time.Sleep(10 * time.Millisecond)
-			atomic.AddInt32(&curDepth, -1)
-		}(i)
+			curDepth.Add(-1)
+		}()
 	}
 	wg.Wait() //nolint:mutexio /// Wait for test goroutines - test verifies serialized I/O
 

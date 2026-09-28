@@ -73,7 +73,7 @@ func TestResetTurnGuards_ClearsCycleHistory(t *testing.T) {
 func TestConvergenceDetector_ResetRestartsStreak(t *testing.T) {
 	cd := newTestConvergenceDetector()
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if cd.recordResponse("same old answer", false) {
 			t.Fatalf("entry %d: premature convergence", i+1)
 		}
@@ -86,7 +86,7 @@ func TestConvergenceDetector_ResetRestartsStreak(t *testing.T) {
 
 	// Post-reset, a fresh streak must build from zero: the first two new
 	// entries must NOT converge (pre-reset leftovers would make them).
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if cd.recordResponse("same old answer", false) {
 			t.Fatalf("post-reset entry %d converged early; Reset must clear history", i+1)
 		}

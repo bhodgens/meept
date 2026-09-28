@@ -44,7 +44,7 @@ func TestBreaker_DifferentArgsAllowed(t *testing.T) {
 	hashA := repeatErrorArgsHash(map[string]any{"name": "a"})
 	hashB := repeatErrorArgsHash(map[string]any{"name": "b"})
 
-	for i := 0; i < maxIdenticalToolErrors; i++ {
+	for i := range maxIdenticalToolErrors {
 		exhausted, _ := b.Observe("task_create", hashA, "name is required")
 		if i < maxIdenticalToolErrors-1 {
 			assert.False(t, exhausted)
@@ -90,7 +90,7 @@ func TestBreaker_ResetClears(t *testing.T) {
 	assert.Empty(t, b.Refusal("task_create", hash), "Refusal must be empty after Reset")
 
 	// The budget restarts from zero: two more failures do not exhaust.
-	for i := 0; i < maxIdenticalToolErrors-1; i++ {
+	for i := range maxIdenticalToolErrors - 1 {
 		exhausted, _ = b.Observe("task_create", hash, "name is required")
 		assert.False(t, exhausted, "post-Reset failure %d must not exhaust", i+1)
 	}
@@ -108,18 +108,16 @@ func TestBreaker_Concurrent(t *testing.T) {
 	var mu sync.Mutex
 	summaries := make([]string, 0, goroutines)
 	var wg sync.WaitGroup
-	for g := 0; g < goroutines; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < observesPerGoroutine; i++ {
+	for range goroutines {
+		wg.Go(func() {
+			for range observesPerGoroutine {
 				if exhausted, summary := b.Observe("task_create", hash, "boom"); exhausted {
 					mu.Lock()
 					summaries = append(summaries, summary)
 					mu.Unlock()
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

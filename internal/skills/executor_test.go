@@ -156,8 +156,7 @@ func TestExecutor_GetModelForSkill_NoMatch(t *testing.T) {
 		t.Error("Expected error for unsatisfiable requirements")
 	}
 
-	var capErr *llm.CapabilityError
-	if !errors.As(err, &capErr) {
+	if _, ok := errors.AsType[*llm.CapabilityError](err); !ok {
 		t.Errorf("Expected CapabilityError, got %T", err)
 	}
 }

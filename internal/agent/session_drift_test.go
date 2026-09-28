@@ -75,13 +75,13 @@ func TestSessionDriftStableSingleIntent(t *testing.T) {
 	)
 	// Pass rate must hold across independent seeds, not one lucky seed.
 	for seed := int64(1); seed <= 3; seed++ {
-		rnd := rand.New(rand.NewSource(seed))
+		rnd := rand.New(rand.NewSource(seed)) //nolint:gosec // deterministic/non-crypto test data
 		d := NewSessionDriftDetector(driftConfig(0, 0), driftTestLogger(t))
 		fired := 0
-		for s := 0; s < sessions; s++ {
+		for s := range sessions {
 			id := "stable-" + string(rune('a'+s%26)) + string(rune('0'+s/26))
 			dir := unitRandomDir(rnd, 16)
-			for turn := 0; turn < turns; turn++ {
+			for range turns {
 				drifted, _ := d.Observe(id, noisyUnit(rnd, dir, sigma))
 				if drifted {
 					fired++
@@ -107,15 +107,15 @@ func TestSessionDriftMidSessionShift(t *testing.T) {
 		sigma    = 0.3
 		within   = 5 // turns after k to fire
 	)
-	rnd := rand.New(rand.NewSource(1234))
+	rnd := rand.New(rand.NewSource(1234)) //nolint:gosec // deterministic/non-crypto test data
 	d := NewSessionDriftDetector(driftConfig(0, 0), driftTestLogger(t))
 	detected := 0
-	for s := 0; s < sessions; s++ {
+	for s := range sessions {
 		id := "shift-" + string(rune('a'+s%26)) + string(rune('0'+s/26))
 		dir1 := unitRandomDir(rnd, 16)
 		dir2 := unitRandomDir(rnd, 16)
 		fired := false
-		for turn := 0; turn < turns; turn++ {
+		for turn := range turns {
 			dir := dir1
 			if turn >= k {
 				dir = dir2
@@ -138,7 +138,7 @@ func TestSessionDriftMidSessionShift(t *testing.T) {
 
 // TestSessionDriftWarmUp: no signal before the window has filled once.
 func TestSessionDriftWarmUp(t *testing.T) {
-	rnd := rand.New(rand.NewSource(99))
+	rnd := rand.New(rand.NewSource(99)) //nolint:gosec // deterministic/non-crypto test data
 	d := NewSessionDriftDetector(driftConfig(0, 0), driftTestLogger(t))
 	if got := d.WindowSize(); got != defaultDriftWindow {
 		t.Fatalf("default window = %d, want %d", got, defaultDriftWindow)
@@ -146,7 +146,7 @@ func TestSessionDriftWarmUp(t *testing.T) {
 	dir := unitRandomDir(rnd, 16)
 	// Feed extremely opposite signals after fill; before fill nothing
 	// may fire regardless of input.
-	for turn := 0; turn < d.WindowSize()-1; turn++ {
+	for turn := range d.WindowSize() - 1 {
 		var emb []float64
 		if turn%2 == 0 {
 			emb = noisyUnit(rnd, dir, 0.1)
@@ -200,13 +200,13 @@ func TestSessionDriftDefaultsSane(t *testing.T) {
 // TestSessionDriftLogOnlyNoEffect: LogOnly is a call-site concern and
 // must not change detector output.
 func TestSessionDriftLogOnlyNoEffect(t *testing.T) {
-	rnd := rand.New(rand.NewSource(7))
+	rnd := rand.New(rand.NewSource(7)) //nolint:gosec // deterministic/non-crypto test data
 	dir := unitRandomDir(rnd, 16)
 	logOnly := NewSessionDriftDetector(driftConfig(0, 0), driftTestLogger(t))
 	logOnlyCfg := driftConfig(0, 0)
 	logOnlyCfg.LogOnly = false
 	enforcing := NewSessionDriftDetector(logOnlyCfg, driftTestLogger(t))
-	for turn := 0; turn < 40; turn++ {
+	for turn := range 40 {
 		emb := noisyUnit(rnd, dir, 0.3)
 		d1, s1 := logOnly.Observe("s", emb)
 		d2, s2 := enforcing.Observe("s", emb)
@@ -226,14 +226,18 @@ func TestSessionDriftConcurrentObserve(t *testing.T) {
 		turns      = 50
 	)
 	var wg sync.WaitGroup
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			rnd := rand.New(rand.NewSource(int64(1000 + g)))
+			if g < 0 || g > 25 {
+				t.Errorf("goroutine index %d out of rune-id range", g)
+				return
+			}
+			rnd := rand.New(rand.NewSource(int64(1000 + g))) //nolint:gosec // deterministic/non-crypto test data
 			dir := unitRandomDir(rnd, 16)
 			id := "goroutine-" + string(rune('a'+g))
-			for turn := 0; turn < turns; turn++ {
+			for range turns {
 				d.Observe(id, noisyUnit(rnd, dir, 0.3))
 			}
 		}(g)
@@ -241,13 +245,13 @@ func TestSessionDriftConcurrentObserve(t *testing.T) {
 	wg.Wait()
 	// Same session from concurrent goroutines too (contention path).
 	wg = sync.WaitGroup{}
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			rnd := rand.New(rand.NewSource(int64(2000 + g)))
+			rnd := rand.New(rand.NewSource(int64(2000 + g))) //nolint:gosec // deterministic/non-crypto test data
 			dir := unitRandomDir(rnd, 16)
-			for turn := 0; turn < turns; turn++ {
+			for range turns {
 				d.Observe("shared-session", noisyUnit(rnd, dir, 0.3))
 			}
 		}(g)
@@ -258,13 +262,13 @@ func TestSessionDriftConcurrentObserve(t *testing.T) {
 // TestSessionDriftCapEvictionAndReset covers the session cap (LRU
 // eviction) and ResetSession.
 func TestSessionDriftCapEvictionAndReset(t *testing.T) {
-	rnd := rand.New(rand.NewSource(55))
+	rnd := rand.New(rand.NewSource(55)) //nolint:gosec // deterministic/non-crypto test data
 	d := NewSessionDriftDetector(driftConfig(0, 0), driftTestLogger(t))
 	// Fill one session partially so it is distinguishable.
 	d.Observe("first", noisyUnit(rnd, unitRandomDir(rnd, 16), 0.1))
 	// Overflow the map: enough unique new sessions must evict the
 	// oldest down to the cap.
-	for i := 0; i < defaultMaxDriftSession+50; i++ {
+	for i := range defaultMaxDriftSession + 50 {
 		d.Observe("cap-"+strconv.Itoa(i), noisyUnit(rnd, unitRandomDir(rnd, 16), 0.1))
 	}
 	d.mu.Lock()
@@ -291,7 +295,7 @@ func TestSessionDriftCapEvictionAndReset(t *testing.T) {
 // TestSessionDriftDegenerateInputs: NaN/Inf/zero-norm/empty/dim-mismatch
 // inputs return (false, 0), never panic, and leave the session usable.
 func TestSessionDriftDegenerateInputs(t *testing.T) {
-	rnd := rand.New(rand.NewSource(3))
+	rnd := rand.New(rand.NewSource(3)) //nolint:gosec // deterministic/non-crypto test data
 	d := NewSessionDriftDetector(driftConfig(0, 0), driftTestLogger(t))
 	dir := unitRandomDir(rnd, 16)
 
@@ -317,7 +321,7 @@ func TestSessionDriftDegenerateInputs(t *testing.T) {
 	}
 	// Session still usable and still in warm-up (degenerate inputs were
 	// not recorded).
-	for turn := 0; turn < d.WindowSize(); turn++ {
+	for range d.WindowSize() {
 		drifted, _ := d.Observe("degenerate", noisyUnit(rnd, dir, 0.1))
 		if drifted {
 			t.Fatal("drift fired immediately after warm-up with clean feed; degenerate inputs polluted the window")
@@ -334,8 +338,8 @@ func TestSessionDriftInertWhenDisabled(t *testing.T) {
 	if d.Enabled() {
 		t.Fatal("disabled config produced enabled detector")
 	}
-	for i := 0; i < 30; i++ {
-		drifted, score := d.Observe("x", noisyUnit(rand.New(rand.NewSource(1)), []float64{1, 0, 0}, 0.3))
+	for range 30 {
+		drifted, score := d.Observe("x", noisyUnit(rand.New(rand.NewSource(1)), []float64{1, 0, 0}, 0.3)) //nolint:gosec // deterministic seeded RNG, non-crypto test data
 		if drifted || score != 0 {
 			t.Fatalf("disabled detector fired: (%v,%v)", drifted, score)
 		}

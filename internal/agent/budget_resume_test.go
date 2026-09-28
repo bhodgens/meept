@@ -68,8 +68,7 @@ func TestBudgetResumeWatcher_ParkAndDrain(t *testing.T) {
 	// Use a short poll interval for the test.
 	w.pollInterval = 20 * time.Millisecond
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	w.Start(ctx)
 	defer w.Stop()
 

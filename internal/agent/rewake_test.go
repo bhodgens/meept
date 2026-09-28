@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -14,7 +13,7 @@ import (
 
 // rewindTestLogger returns a quiet logger for rewake tests.
 func rewindTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // waitRewake polls rewakeCh until a payload arrives or the timeout

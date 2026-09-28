@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -19,21 +20,14 @@ func TestTopicDetector_Detect(t *testing.T) {
 		{"lunch food", "What should I eat for lunch today?", []string{"food"}},
 		{"restaurant", "Recommend a good Italian restaurant", []string{"food"}},
 		{"weekend plans", "What are my weekend plans?", []string{"personal"}},
-		{"heat food", "What's the weather like today?", []string{"general"}}, // "eat" must NOT match inside "we[a]ther" (word-boundary fix, 2026-08-24)
+		{"heat food", "What's the weather like today?", []string{"general"}}, // "eat" must NOT match inside "weather" (word-boundary fix, 2026-08-24)
 		{"general fallback", "I need to buy groceries", []string{"general"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := detector.Detect(tt.input)
-			allowed := false
-			for _, a := range tt.accept {
-				if got == a {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
+			if !slices.Contains(tt.accept, got) {
 				t.Errorf("Detect(%q) = %q, want one of %v", tt.input, got, tt.accept)
 			}
 		})

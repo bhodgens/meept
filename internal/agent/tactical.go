@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -967,10 +968,7 @@ func (ts *TacticalScheduler) validationRetryCount(step *task.TaskStep) int {
 		ts.validationRetries = make(map[string]int)
 	}
 	n := ts.validationRetries[step.ID]
-	if step.ValidationRetryCount > n {
-		n = step.ValidationRetryCount
-	}
-	return n
+	return max(n, step.ValidationRetryCount)
 }
 
 // bumpValidationRetry records one consumed validation retry for the step.
@@ -1246,7 +1244,12 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			// (see the gate scoping in the finalize block).
 			ts.terminalizeStepCompleted(step, "pair-managed step handed back to PairManager")
 
-			// Run next pair round asynchronously
+			// Run next pair round asynchronously. The error return is
+			// deliberately discarded: this is a fire-and-forget round with
+			// no caller to receive it (RunRound logs failures on its own
+			// session path). The detached context is intentional: the round
+			// must outlive the step job's request context.
+			//nolint:errcheck,gosec // fire-and-forget round + detached context, see comment above
 			go ts.pairManager.RunRound(context.Background(), session.ID)
 
 			return nil
@@ -2562,7 +2565,7 @@ func (ts *TacticalScheduler) publishTokenProgress(t *task.Task) {
 // requires threading the structured error value through the message bus, which
 // is a cross-package refactor tracked in docs/20260618-checkreview.md D2.
 func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
-	//lint:ignore SA1019 caller has only the serialized error string; see doc comment above
+	//nolint:staticcheck // SA1019: caller has only the bus-serialized error string; see deprecation notice
 	return llm.IsRateLimitErrorMessage(errMsg)
 }
 
@@ -3311,10 +3314,7 @@ var fileSideEffectClaimRe = regexp.MustCompile(
 // mark the step unverified rather than letting fabricated narration read
 // as ground truth.
 func (ts *TacticalScheduler) claimsFileSideEffects(claims []string) bool {
-	for _, c := range claims {
-		if fileSideEffectClaimRe.MatchString(c) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(claims, func(c string) bool {
+		return fileSideEffectClaimRe.MatchString(c)
+	})
 }

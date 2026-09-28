@@ -159,8 +159,7 @@ func TestTurnParker_ParkAndResumeAtResumeAt(t *testing.T) {
 		resumed = append(resumed, turn)
 		mu.Unlock()
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	p.Start(ctx)
 	defer p.Stop()
 
@@ -197,8 +196,7 @@ func TestTurnParker_MaxWaitSoftStopSchedulesAtNowPlusMaxWait(t *testing.T) {
 		resumed = append(resumed, turn)
 		mu.Unlock()
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	p.Start(ctx)
 	defer p.Stop()
 
@@ -313,8 +311,7 @@ func TestTurnParker_StopHaltsDrain(t *testing.T) {
 		resumed++
 		mu.Unlock()
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	p.Start(ctx)
 	defer p.Stop()
 
@@ -364,8 +361,7 @@ func TestTurnParker_ResumeCallbackErrorDoesNotCrash(t *testing.T) {
 		mu.Unlock()
 		panic(errors.New("resume callback exploded"))
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	p.Start(ctx)
 	defer p.Stop()
 

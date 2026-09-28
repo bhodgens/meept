@@ -111,21 +111,21 @@ func (h *StepHandoff) RenderMarkdown() string {
 	if len(h.FilesModified) > 0 {
 		sb.WriteString("**Files:**\n")
 		for _, f := range h.FilesModified {
-			sb.WriteString(fmt.Sprintf("- `%s` (%s): %s\n", f.Path, f.Change, f.Summary))
+			fmt.Fprintf(&sb, "- `%s` (%s): %s\n", f.Path, f.Change, f.Summary)
 		}
 		sb.WriteString("\n")
 	}
 	if len(h.Decisions) > 0 {
 		sb.WriteString("**Decisions:**\n")
 		for _, d := range h.Decisions {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", d.Name, d.Rationale))
+			fmt.Fprintf(&sb, "- %s: %s\n", d.Name, d.Rationale)
 		}
 		sb.WriteString("\n")
 	}
 	if len(h.Artifacts) > 0 {
 		sb.WriteString("**Artifacts:**\n")
 		for _, a := range h.Artifacts {
-			sb.WriteString(fmt.Sprintf("- %s (%s): %s\n", a.Name, a.Kind, a.Description))
+			fmt.Fprintf(&sb, "- %s (%s): %s\n", a.Name, a.Kind, a.Description)
 		}
 		sb.WriteString("\n")
 	}

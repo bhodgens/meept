@@ -1079,7 +1079,7 @@ func (sp *StrategicPlanner) planMultiPhase(ctx context.Context, req PlanRequest)
 		retryPrompt := prompt + "\n\nPrevious attempt failed:\n" + err.Error()
 		output2, retryErr := plannerLoop.RunOnce(planCtx, retryPrompt, conversationID+"-retry")
 		if retryErr != nil {
-			return nil, fmt.Errorf("planner retry failed: %w (original: %v)", retryErr, err)
+			return nil, fmt.Errorf("planner retry failed: %w (original: %w)", retryErr, err)
 		}
 		parsed, err = parsePhaseOutput(output2, sp.maxPhases)
 		if err != nil {
@@ -1164,13 +1164,13 @@ func (sp *StrategicPlanner) buildContextSection(req PlanRequest) string {
 		var sb strings.Builder
 		sb.WriteString("## Verified Context\n")
 		if req.TrueAnalysis.Goal != "" {
-			sb.WriteString(fmt.Sprintf("True goal: %s\n", req.TrueAnalysis.Goal))
+			fmt.Fprintf(&sb, "True goal: %s\n", req.TrueAnalysis.Goal)
 		}
 		if req.TrueAnalysis.Scope != "" {
-			sb.WriteString(fmt.Sprintf("Scope: %s\n", req.TrueAnalysis.Scope))
+			fmt.Fprintf(&sb, "Scope: %s\n", req.TrueAnalysis.Scope)
 		}
 		if req.TrueAnalysis.Category != "" {
-			sb.WriteString(fmt.Sprintf("Category: %s\n", req.TrueAnalysis.Category))
+			fmt.Fprintf(&sb, "Category: %s\n", req.TrueAnalysis.Category)
 		}
 		contextSection = sb.String()
 	}
@@ -1182,18 +1182,18 @@ func (sp *StrategicPlanner) buildContextSection(req PlanRequest) string {
 			sb.WriteString("## Verified Context\n")
 		}
 		if req.PlanningCtx.TrueGoal != "" {
-			sb.WriteString(fmt.Sprintf("True goal: %s\n", req.PlanningCtx.TrueGoal))
+			fmt.Fprintf(&sb, "True goal: %s\n", req.PlanningCtx.TrueGoal)
 		}
 		if len(req.PlanningCtx.Requirements) > 0 {
 			sb.WriteString("Requirements:\n")
 			for _, r := range req.PlanningCtx.Requirements {
-				sb.WriteString(fmt.Sprintf("- %s\n", r))
+				fmt.Fprintf(&sb, "- %s\n", r)
 			}
 		}
 		if len(req.PlanningCtx.Constraints) > 0 {
 			sb.WriteString("Constraints:\n")
 			for k, v := range req.PlanningCtx.Constraints {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+				fmt.Fprintf(&sb, "- %s: %s\n", k, v)
 			}
 		}
 		contextSection = sb.String()
@@ -1221,8 +1221,7 @@ func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest
 			// One retry maximum: the second failure is final. Fall through
 			// with a wrapped error that carries the original parse failure
 			// so the legacy failure paths see what they expect.
-			err = fmt.Errorf("%w (plan-repair retry also failed: %v)", err, repairErr)
-			steps = nil
+			err = fmt.Errorf("%w (plan-repair retry also failed: %w)", err, repairErr)
 		}
 		// Empty-plan guard (issue #53 direction 3): only the EMPTY-plan
 		// sentinel takes the deterministic-first paths. Other planner
@@ -1316,13 +1315,13 @@ func (sp *StrategicPlanner) runPlannerOnceWithPrompt(ctx context.Context, req Pl
 		var sb strings.Builder
 		sb.WriteString("## Verified Context\n")
 		if req.TrueAnalysis.Goal != "" {
-			sb.WriteString(fmt.Sprintf("True goal: %s\n", req.TrueAnalysis.Goal))
+			fmt.Fprintf(&sb, "True goal: %s\n", req.TrueAnalysis.Goal)
 		}
 		if req.TrueAnalysis.Scope != "" {
-			sb.WriteString(fmt.Sprintf("Scope: %s\n", req.TrueAnalysis.Scope))
+			fmt.Fprintf(&sb, "Scope: %s\n", req.TrueAnalysis.Scope)
 		}
 		if req.TrueAnalysis.Category != "" {
-			sb.WriteString(fmt.Sprintf("Category: %s\n", req.TrueAnalysis.Category))
+			fmt.Fprintf(&sb, "Category: %s\n", req.TrueAnalysis.Category)
 		}
 		contextSection = sb.String()
 	}
@@ -1334,18 +1333,18 @@ func (sp *StrategicPlanner) runPlannerOnceWithPrompt(ctx context.Context, req Pl
 			sb.WriteString("## Verified Context\n")
 		}
 		if req.PlanningCtx.TrueGoal != "" {
-			sb.WriteString(fmt.Sprintf("True goal: %s\n", req.PlanningCtx.TrueGoal))
+			fmt.Fprintf(&sb, "True goal: %s\n", req.PlanningCtx.TrueGoal)
 		}
 		if len(req.PlanningCtx.Requirements) > 0 {
 			sb.WriteString("Requirements:\n")
 			for _, r := range req.PlanningCtx.Requirements {
-				sb.WriteString(fmt.Sprintf("- %s\n", r))
+				fmt.Fprintf(&sb, "- %s\n", r)
 			}
 		}
 		if len(req.PlanningCtx.Constraints) > 0 {
 			sb.WriteString("Constraints:\n")
 			for k, v := range req.PlanningCtx.Constraints {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+				fmt.Fprintf(&sb, "- %s: %s\n", k, v)
 			}
 		}
 		contextSection = sb.String()
@@ -1483,18 +1482,18 @@ func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []st
 			var sb strings.Builder
 			sb.WriteString("## Verified Context\n")
 			if pctx.TrueGoal != "" {
-				sb.WriteString(fmt.Sprintf("True goal: %s\n", pctx.TrueGoal))
+				fmt.Fprintf(&sb, "True goal: %s\n", pctx.TrueGoal)
 			}
 			if len(pctx.Requirements) > 0 {
 				sb.WriteString("Requirements:\n")
 				for _, r := range pctx.Requirements {
-					sb.WriteString(fmt.Sprintf("- %s\n", r))
+					fmt.Fprintf(&sb, "- %s\n", r)
 				}
 			}
 			if len(pctx.Constraints) > 0 {
 				sb.WriteString("Constraints:\n")
 				for k, v := range pctx.Constraints {
-					sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+					fmt.Fprintf(&sb, "- %s: %s\n", k, v)
 				}
 			}
 			sb.WriteString("\n")

@@ -5,11 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
-	"strings"
-	"testing"
-	"time"
-
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
@@ -17,8 +12,12 @@ import (
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
-
 	_ "modernc.org/sqlite"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
 )
 
 // mockQueue is a no-op implementation of queue.Queue for testing.
@@ -26,14 +25,14 @@ type mockQueue struct{}
 
 func (m *mockQueue) Enqueue(_ context.Context, _ *queue.Job) error { return nil }
 func (m *mockQueue) Claim(_ context.Context, _ string, _ []string, _ string) (*queue.Job, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // no-op test mock: "no job" contract
 }
 func (m *mockQueue) MarkProcessing(_ context.Context, _ string) error  { return nil }
 func (m *mockQueue) Complete(_ context.Context, _ string, _ any) error { return nil }
 func (m *mockQueue) Fail(_ context.Context, _ string, _ error) error   { return nil }
 func (m *mockQueue) Retry(_ context.Context, _ string) error           { return nil }
 func (m *mockQueue) Get(_ context.Context, _ string) (*queue.Job, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // no-op test mock: "not found" contract
 }
 func (m *mockQueue) ListByState(_ context.Context, _ queue.JobState, _ int) ([]*queue.Job, error) {
 	return nil, nil
@@ -42,10 +41,10 @@ func (m *mockQueue) ListByTaskID(_ context.Context, _ string) ([]*queue.Job, err
 	return nil, nil
 }
 func (m *mockQueue) Stats(_ context.Context) (*queue.QueueStats, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // no-op test mock
 }
 func (m *mockQueue) RecoverFromDeadLetter(_ context.Context, _ string) (*queue.Job, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // no-op test mock
 }
 func (m *mockQueue) ListDeadLetter(_ context.Context, _ int) ([]*queue.Job, error) {
 	return nil, nil
@@ -347,14 +346,7 @@ func TestTacticalScheduler_HandleHandoff_RewiresDownstreamDependencies(t *testin
 		t.Fatal("injected step not found")
 	}
 
-	found := false
-	for _, dep := range bAfter.DependsOn {
-		if dep == injected.ID {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(bAfter.DependsOn, injected.ID) {
 		t.Errorf("step B should depend on injected step, but depends on %v", bAfter.DependsOn)
 	}
 }
@@ -586,14 +578,7 @@ func TestOrchestrator_HandoffSubscription_FullFlow(t *testing.T) {
 			t.Error("step B should not depend on step A after rewiring")
 		}
 	}
-	found := false
-	for _, dep := range bAfter.DependsOn {
-		if dep == injected.ID {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(bAfter.DependsOn, injected.ID) {
 		t.Errorf("step B should depend on injected step, got %v", bAfter.DependsOn)
 	}
 
@@ -721,7 +706,7 @@ func TestTacticalScheduler_HandleHandoff_RateLimitReached(t *testing.T) {
 	}
 
 	// Create 5 handoff steps (max) to hit the rate limit
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		handoffStep := task.NewTaskStep(tk.ID, fmt.Sprintf("handoff step %d", i), 100+i)
 		handoffStep.State = task.StepPending
 		handoffStep.AccumulatedContext = fmt.Sprintf("[Handoff from coder]: partial result %d", i)
@@ -1224,7 +1209,10 @@ func requestHandoffExecute(bus *bus.MessageBus, agentExists func(string) bool) f
 			InjectAfter:   true,
 		})
 		if err != nil {
-			return map[string]any{"success": false, "error": err.Error()}, nil
+			// Mirrors RequestHandoffTool.Execute (internal/tools/builtin/handoff.go):
+			// a serialization failure becomes a structured {success:false} result,
+			// not a Go error.
+			return map[string]any{"success": false, "error": err.Error()}, nil //nolint:nilerr // mirrors production tool contract
 		}
 
 		const handoffTopic = "orchestrator.handoff" // same topic the real tool publishes and the orchestrator subscribes to
@@ -1392,7 +1380,7 @@ func TestSpecialistRequestHandoff_CascadeBoundedByMaxHandoffSteps(t *testing.T) 
 
 	// Seed 5 handoff steps — the production default max (config
 	// max_handoff_steps: 5).
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		hs := task.NewTaskStep(tk.ID, fmt.Sprintf("handoff step %d", i), 100+i)
 		hs.State = task.StepPending
 		hs.IsHandoff = true
@@ -1440,7 +1428,7 @@ func TestSpecialistRequestHandoff_CascadeBoundedByMaxHandoffSteps(t *testing.T) 
 	defer func() { _ = orchestrator.Stop(context.Background()) }()
 	time.Sleep(10 * time.Millisecond)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		result, err := tool.Execute(context.Background(), map[string]any{
 			"task_id":       tk.ID,
 			"from_step_id":  fromStep.ID,

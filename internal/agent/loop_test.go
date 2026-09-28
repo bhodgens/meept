@@ -1211,7 +1211,7 @@ func TestAgentLoop_SetWorkingDir_Concurrent(t *testing.T) {
 	done := make(chan struct{})
 	// Writer goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			l.SetWorkingDir(fmt.Sprintf("/path/%d", i))
 		}
 		close(done)
@@ -1219,7 +1219,7 @@ func TestAgentLoop_SetWorkingDir_Concurrent(t *testing.T) {
 
 	// Reader goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			_ = l.GetWorkingDir()
 		}
 	}()

@@ -455,10 +455,12 @@ func (rl *RalphLoop) TriggerReplan(ctx context.Context, taskID string, previousE
 	replanContext := fmt.Sprintf("Previous attempt (iteration %d/%d) completed without sufficient evidence.\n",
 		iteration-1, rl.config.MaxIterations)
 	if len(previousEvidence) > 0 {
+		var sb strings.Builder
 		replanContext += "Evidence from previous attempt (summarized):\n"
 		for i, ev := range previousEvidence {
-			replanContext += fmt.Sprintf("  %d. %s\n", i+1, truncateRunes(firstLine(ev), 200, "…"))
+			fmt.Fprintf(&sb, "  %d. %s\n", i+1, truncateRunes(firstLine(ev), 200, "…"))
 		}
+		replanContext += sb.String()
 	}
 	replanContext += "\nPlease revise the approach to ensure verifiable completion."
 

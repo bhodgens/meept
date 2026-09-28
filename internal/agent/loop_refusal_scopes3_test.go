@@ -18,7 +18,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"sync"
 	"testing"
@@ -121,7 +120,7 @@ func (c *streamingRefusalChatter) ChatWithDeltaCallback(ctx context.Context, mes
 func streamingRefusalLoop(t *testing.T, chatter *streamingRefusalChatter) *AgentLoop {
 	t.Helper()
 	loop := NewAgentLoop("sess-refusal-stream", t.TempDir(),
-		WithLoopLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		WithLoopLogger(slog.New(slog.DiscardHandler)),
 		WithLLMChatter(chatter),
 	)
 	loop.refusalResolver = &refusalResolver{resolved: map[string]string{"fb": "local/fb-model"}}
@@ -178,7 +177,7 @@ func TestRefusalFallback_StreamRetryResetsAccumulator(t *testing.T) {
 // epoch bumps (handleRefusal arming a retry).
 func TestRefusalFallback_StreamEpochResetsAccumulator_Unit(t *testing.T) {
 	loop := NewAgentLoop("sess-epoch", t.TempDir(),
-		WithLoopLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+		WithLoopLogger(slog.New(slog.DiscardHandler)))
 
 	require.Equal(t, int64(0), loop.streamAttemptEpochSnapshot())
 
@@ -202,7 +201,7 @@ func TestRefusalFallback_StreamEpochResetsAccumulator_Unit(t *testing.T) {
 // pins the guard surfaces the refusal instead of re-arming.
 func TestRefusalFallback_HopBudgetSurvivesResume(t *testing.T) {
 	loop := NewAgentLoop("sess-hop-budget", t.TempDir(),
-		WithLoopLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+		WithLoopLogger(slog.New(slog.DiscardHandler)))
 	loop.spec = &AgentSpec{RefusalModel: "fb"}
 	loop.refusalResolver = &refusalResolver{resolved: map[string]string{"fb": "local/fb-model"}}
 	loop.refusalEventPublisher = func(string, map[string]any) {}
@@ -245,7 +244,7 @@ func TestRefusalFallback_HopBudgetSurvivesResume(t *testing.T) {
 // so a later unrelated turn can still use its fallback.
 func TestRefusalFallback_HopBudgetResetsOnGenuinelyFreshTurn(t *testing.T) {
 	loop := NewAgentLoop("sess-hop-reset", t.TempDir(),
-		WithLoopLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+		WithLoopLogger(slog.New(slog.DiscardHandler)))
 	loop.spec = &AgentSpec{RefusalModel: "fb"}
 	loop.refusalResolver = &refusalResolver{resolved: map[string]string{"fb": "local/fb-model"}}
 	loop.refusalEventPublisher = func(string, map[string]any) {}

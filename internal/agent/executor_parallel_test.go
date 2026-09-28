@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"testing"
@@ -133,7 +134,7 @@ func TestAdaptiveParallelismLimiter_ContextCancellation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from Acquire with cancelled context")
 	}
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got: %v", err)
 	}
 }
@@ -237,21 +238,21 @@ func TestExecuteAll_RespectsExclusiveProfile(t *testing.T) {
 	toolProfiles["memory_search"] = ProfileExclusive
 	defer func() { toolProfiles["memory_search"] = originalProfile }()
 
-	var currentConcurrent int64
-	var maxConcurrent int64
+	var currentConcurrent atomic.Int64
+	var maxConcurrent atomic.Int64
 
 	registry := NewPlaceholderToolRegistry()
 	registry.Register(NewMockTool("memory_search", "memory search", func(ctx context.Context, args map[string]any) (any, error) {
-		cur := atomic.AddInt64(&currentConcurrent, 1)
+		cur := currentConcurrent.Add(1)
 		// Track max concurrency.
 		for {
-			max := atomic.LoadInt64(&maxConcurrent)
-			if cur <= max || atomic.CompareAndSwapInt64(&maxConcurrent, max, cur) {
+			max := maxConcurrent.Load()
+			if cur <= max || maxConcurrent.CompareAndSwap(max, cur) {
 				break
 			}
 		}
 		time.Sleep(50 * time.Millisecond) // Hold the slot briefly to force overlap if not serialized.
-		atomic.AddInt64(&currentConcurrent, -1)
+		currentConcurrent.Add(-1)
 		return "found", nil
 	}))
 
@@ -280,7 +281,7 @@ func TestExecuteAll_RespectsExclusiveProfile(t *testing.T) {
 		}
 	}
 
-	if got := atomic.LoadInt64(&maxConcurrent); got != 1 {
+	if got := maxConcurrent.Load(); got != 1 {
 		t.Errorf("max concurrent exclusive calls = %d, want 1 (ProfileExclusive)", got)
 	}
 }
@@ -349,7 +350,7 @@ func TestAdaptiveParallelismLimiter_AdjustLimits(t *testing.T) {
 		limiter := NewAdaptiveParallelismLimiter(1) // io=1, cpu=1
 
 		// Repeated high-error adjustments should not go below 1.
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			limiter.AdjustLimits(ExecutionMetrics{ErrorRate: 0.9})
 		}
 
@@ -366,7 +367,7 @@ func TestAdaptiveParallelismLimiter_AdjustLimits(t *testing.T) {
 		limiter := NewAdaptiveParallelismLimiter(maxAdaptiveLimit)
 
 		// Healthy metrics should not increase beyond cap.
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			limiter.AdjustLimits(ExecutionMetrics{
 				ErrorRate:  0.0,
 				AvgLatency: 10 * time.Millisecond,
@@ -421,7 +422,7 @@ func TestAdaptiveParallelismLimiter_AdjustLimits(t *testing.T) {
 		}
 
 		// Acquire 5 slots without blocking.
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			if err := limiter.Acquire(context.Background(), ProfileIOBound); err != nil {
 				t.Fatalf("Acquire[%d] failed: %v", i, err)
 			}
@@ -435,7 +436,7 @@ func TestAdaptiveParallelismLimiter_AdjustLimits(t *testing.T) {
 		}
 
 		// Release all.
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			limiter.Release(ProfileIOBound)
 		}
 	})

@@ -22,6 +22,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -237,7 +238,7 @@ func (s *SQLiteParkStore) Load(ctx context.Context, kind ParkKind, now time.Time
 	defer func() {
 		// Rollback after Commit is a documented no-op; the error carries
 		// no information worth logging, so it is explicitly discarded.
-		if rerr := tx.Rollback(); rerr != nil && rerr != sql.ErrTxDone {
+		if rerr := tx.Rollback(); rerr != nil && !errors.Is(rerr, sql.ErrTxDone) {
 			s.logger.Debug("park store: post-commit rollback", "error", rerr)
 		}
 	}()
@@ -263,7 +264,7 @@ func (s *SQLiteParkStore) Load(ctx context.Context, kind ParkKind, now time.Time
 		)
 		if err := rows.Scan(&key, &sessID, &convID, &agentID, &classRaw,
 			&resumeAtRaw, &attempt, &maxAttempts, &payload); err != nil {
-			rows.Close()
+			defer rows.Close()
 			return nil, nil, fmt.Errorf("park store: load scan: %w", err)
 		}
 		resumeAt := parseParkTime(resumeAtRaw)

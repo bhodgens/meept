@@ -133,8 +133,8 @@ func TestAgentStateMachine_InvalidTransition(t *testing.T) {
 
 func TestAgentStateMachine_History(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
 
 	history := sm.History()
 	if len(history) != 2 {
@@ -154,9 +154,9 @@ func TestAgentStateMachine_TerminalState(t *testing.T) {
 		t.Error("Idle should not be terminal")
 	}
 
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateError, "error", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateError, "error", nil)
 	if !sm.IsTerminal() {
 		t.Error("Error should be terminal")
 	}
@@ -168,9 +168,9 @@ func TestAgentStateMachine_ActiveState(t *testing.T) {
 		t.Error("Idle should not be active")
 	}
 
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateThinking, "start", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateThinking, "start", nil)
 	if !sm.IsActive() {
 		t.Error("Thinking should be active")
 	}
@@ -179,9 +179,9 @@ func TestAgentStateMachine_ActiveState(t *testing.T) {
 func TestAgentStateMachine_SameStateNoOp(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
 	// Navigate through valid transitions to reach Thinking state
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateThinking, "think", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateThinking, "think", nil)
 	// Same state transition should not fail and should not record history
 	err := sm.Transition(StateThinking, "noop", nil)
 	if err != nil {
@@ -196,10 +196,10 @@ func TestAgentStateMachine_SameStateNoOp(t *testing.T) {
 func TestAgentStateMachine_MaxHistoryTrimming(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
 	sm.maxHistory = 3
-	sm.Transition(StateReceivingInput, "1", nil)
-	sm.Transition(StateClassifying, "2", nil)
-	sm.Transition(StateThinking, "3", nil)
-	sm.Transition(StateToolExecuting, "4", nil)
+	_ = sm.Transition(StateReceivingInput, "1", nil)
+	_ = sm.Transition(StateClassifying, "2", nil)
+	_ = sm.Transition(StateThinking, "3", nil)
+	_ = sm.Transition(StateToolExecuting, "4", nil)
 
 	history := sm.History()
 	if len(history) != 3 {
@@ -233,7 +233,7 @@ func TestAgentStateMachine_ListenerNotified(t *testing.T) {
 	})
 
 	// Navigate through a valid path that triggers transitions
-	sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
 
 	// Give goroutines a moment to complete
 	time.Sleep(50 * time.Millisecond)
@@ -250,14 +250,14 @@ type mutex struct{ sync.Mutex }
 
 func TestAgentStateMachine_ErrorToIdleReset(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateError, "initial_error", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateError, "initial_error", nil)
 	if sm.CurrentState() != StateError {
 		t.Error("expected error state")
 	}
 	// From Error, can go to Idle (reset)
-	sm.Transition(StateIdle, "reset", nil)
+	_ = sm.Transition(StateIdle, "reset", nil)
 	if sm.CurrentState() != StateIdle {
 		t.Errorf("expected reset to idle, got %v", sm.CurrentState())
 	}
@@ -265,16 +265,16 @@ func TestAgentStateMachine_ErrorToIdleReset(t *testing.T) {
 
 func TestAgentStateMachine_CompletedToIdleReset(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateThinking, "start", nil)
-	sm.Transition(StateGeneratingResponse, "response", nil)
-	sm.Transition(StateCompleted, "done", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateThinking, "start", nil)
+	_ = sm.Transition(StateGeneratingResponse, "response", nil)
+	_ = sm.Transition(StateCompleted, "done", nil)
 	if !sm.IsTerminal() {
 		t.Error("Completed should be terminal")
 	}
 	// From Completed, can go to Idle (reset)
-	sm.Transition(StateIdle, "reset", nil)
+	_ = sm.Transition(StateIdle, "reset", nil)
 	if sm.CurrentState() != StateIdle {
 		t.Errorf("expected reset to idle, got %v", sm.CurrentState())
 	}
@@ -373,7 +373,7 @@ func TestAgentStateMachine_MultipleListeners(t *testing.T) {
 	sm.OnTransition(func(t StateTransition) { count.Add(1) })
 	sm.OnTransition(func(t StateTransition) { count.Add(1) })
 
-	sm.Transition(StateReceivingInput, "test", nil)
+	_ = sm.Transition(StateReceivingInput, "test", nil)
 
 	// Give goroutines a moment to complete
 	time.Sleep(50 * time.Millisecond)
@@ -400,9 +400,9 @@ func TestAgentStateMachine_CancelledTransitions(t *testing.T) {
 
 func TestAgentStateMachine_MaxIterationsFromThinking(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateThinking, "start", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateThinking, "start", nil)
 
 	err := sm.Transition(StateMaxIterations, "limit_reached", nil)
 	if err != nil {
@@ -412,9 +412,9 @@ func TestAgentStateMachine_MaxIterationsFromThinking(t *testing.T) {
 
 func TestAgentStateMachine_BudgetExhaustedFromThinking(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateThinking, "start", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateThinking, "start", nil)
 
 	err := sm.Transition(StateBudgetExhausted, "budget_reached", nil)
 	if err != nil {
@@ -424,10 +424,10 @@ func TestAgentStateMachine_BudgetExhaustedFromThinking(t *testing.T) {
 
 func TestAgentStateMachine_TransitionFromToolExecuting(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateThinking, "start", nil)
-	sm.Transition(StateToolExecuting, "tools", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateThinking, "start", nil)
+	_ = sm.Transition(StateToolExecuting, "tools", nil)
 
 	// From ToolExecuting, can go to ProcessingResult
 	err := sm.Transition(StateProcessingResult, "done", nil)
@@ -444,11 +444,11 @@ func TestAgentStateMachine_TransitionFromToolExecuting(t *testing.T) {
 
 func TestAgentStateMachine_BlockedTransitions(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateThinking, "start", nil)
-	sm.Transition(StateToolExecuting, "tools", nil)
-	sm.Transition(StateBlocked, "blocked", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateThinking, "start", nil)
+	_ = sm.Transition(StateToolExecuting, "tools", nil)
+	_ = sm.Transition(StateBlocked, "blocked", nil)
 
 	// From Blocked, can go back to Thinking (after user approves)
 	err := sm.Transition(StateThinking, "unblocked", nil)
@@ -458,11 +458,11 @@ func TestAgentStateMachine_BlockedTransitions(t *testing.T) {
 
 	// From Blocked, can go to Cancelled
 	sm2 := NewAgentStateMachine(nil)
-	sm2.Transition(StateReceivingInput, "input", nil)
-	sm2.Transition(StateClassifying, "classify", nil)
-	sm2.Transition(StateThinking, "start", nil)
-	sm2.Transition(StateToolExecuting, "tools", nil)
-	sm2.Transition(StateBlocked, "blocked", nil)
+	_ = sm2.Transition(StateReceivingInput, "input", nil)
+	_ = sm2.Transition(StateClassifying, "classify", nil)
+	_ = sm2.Transition(StateThinking, "start", nil)
+	_ = sm2.Transition(StateToolExecuting, "tools", nil)
+	_ = sm2.Transition(StateBlocked, "blocked", nil)
 	err = sm2.Transition(StateCancelled, "cancel", nil)
 	if err != nil {
 		t.Errorf("allowed blocked -> cancelled: %v", err)
@@ -471,11 +471,11 @@ func TestAgentStateMachine_BlockedTransitions(t *testing.T) {
 
 func TestAgentStateMachine_ToToolWaiting(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateThinking, "start", nil)
-	sm.Transition(StateToolExecuting, "tools", nil)
-	sm.Transition(StateToolWaiting, "waiting", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateThinking, "start", nil)
+	_ = sm.Transition(StateToolExecuting, "tools", nil)
+	_ = sm.Transition(StateToolWaiting, "waiting", nil)
 
 	// From ToolWaiting, can go to ProcessingResult
 	err := sm.Transition(StateProcessingResult, "results", nil)
@@ -486,8 +486,8 @@ func TestAgentStateMachine_ToToolWaiting(t *testing.T) {
 
 func TestAgentSnapshot_Serialization(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
 
 	snapshot := AgentStateSnapshot{
 		CurrentState:   sm.CurrentState().String(),
@@ -535,11 +535,11 @@ func TestAgentSnapshot_Serialization(t *testing.T) {
 
 func TestAgentStateMachine_BlockedFromToolWaiting(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateThinking, "start", nil)
-	sm.Transition(StateToolExecuting, "tools", nil)
-	sm.Transition(StateToolWaiting, "waiting", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateThinking, "start", nil)
+	_ = sm.Transition(StateToolExecuting, "tools", nil)
+	_ = sm.Transition(StateToolWaiting, "waiting", nil)
 
 	// From ToolWaiting, can go to Blocked
 	err := sm.Transition(StateBlocked, "blocked_while_waiting", nil)
@@ -564,37 +564,26 @@ func TestAgentStateMachine_ErrorTransitions(t *testing.T) {
 
 	for _, s := range states {
 		t.Run(s.String(), func(t *testing.T) {
-			// Build path to target state
-			sm.Transition(StateIdle, "reset", nil)
-			sm.Transition(StateReceivingInput, "input", nil)
-			sm.Transition(StateClassifying, "classify", nil)
-			if s == StateClassifying {
-				// already there
-			} else {
-				sm.Transition(StateThinking, "think", nil)
-				if s == StateThinking {
-					// already there
-				} else {
-					sm.Transition(StateToolExecuting, "exec", nil)
-					if s == StateToolExecuting {
-						// already there
-					} else {
-						sm.Transition(StateToolWaiting, "wait", nil)
-						if s == StateToolWaiting {
-							// already there
-						} else {
-							sm.Transition(StateProcessingResult, "result", nil)
-							if s == StateProcessingResult {
-								// already there
-							} else {
-								sm.Transition(StateBlocked, "blocked", nil)
-								if s == StateBlocked {
-									// already there
-								}
-							}
-						}
-					}
+			// Build path to target state: walk the canonical pipeline
+			// Idle -> ReceivingInput -> Classifying -> Thinking ->
+			// ToolExecuting -> ToolWaiting -> ProcessingResult -> Blocked,
+			// stopping at s (every stage is a legal transition from the
+			// previous one, and s is always reachable along this path).
+			steps := []struct {
+				state  AgentState
+				reason string
+			}{
+				{StateThinking, "think"},
+				{StateToolExecuting, "exec"},
+				{StateToolWaiting, "wait"},
+				{StateProcessingResult, "result"},
+				{StateBlocked, "blocked"},
+			}
+			for _, step := range steps {
+				if s == step.state {
+					break // already there
 				}
+				_ = sm.Transition(step.state, step.reason, nil)
 			}
 
 			err := sm.Transition(StateError, "error_from_"+s.String(), nil)
@@ -607,8 +596,8 @@ func TestAgentStateMachine_ErrorTransitions(t *testing.T) {
 
 func TestAgentStateMachine_TransitionReasonInHistory(t *testing.T) {
 	sm := NewAgentStateMachine(slog.Default())
-	sm.Transition(StateReceivingInput, "my_reason", nil)
-	sm.Transition(StateClassifying, "my_reason_2", nil)
+	_ = sm.Transition(StateReceivingInput, "my_reason", nil)
+	_ = sm.Transition(StateClassifying, "my_reason_2", nil)
 
 	hist := sm.History()
 	if hist[0].Reason != "my_reason" {
@@ -621,7 +610,7 @@ func TestAgentStateMachine_TransitionReasonInHistory(t *testing.T) {
 
 func TestAgentStateMachine_HistoryTimestamp(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "test", nil)
+	_ = sm.Transition(StateReceivingInput, "test", nil)
 
 	hist := sm.History()
 	if hist[0].Timestamp.IsZero() {
@@ -716,15 +705,15 @@ func TestAgentStateMachine_IsTerminalMethod(t *testing.T) {
 	if sm.IsTerminal() {
 		t.Error("idle should not be terminal via IsTerminal()")
 	}
-	sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
 	if sm.IsTerminal() {
 		t.Error("receiving_input should not be terminal via IsTerminal()")
 	}
-	sm.Transition(StateClassifying, "classify", nil)
-	sm.Transition(StateThinking, "think", nil)
-	sm.Transition(StateToolExecuting, "exec", nil)
-	sm.Transition(StateProcessingResult, "result", nil)
-	sm.Transition(StateCompleted, "done", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateThinking, "think", nil)
+	_ = sm.Transition(StateToolExecuting, "exec", nil)
+	_ = sm.Transition(StateProcessingResult, "result", nil)
+	_ = sm.Transition(StateCompleted, "done", nil)
 	if !sm.IsTerminal() {
 		t.Error("completed should be terminal via IsTerminal()")
 	}
@@ -735,12 +724,12 @@ func TestAgentStateMachine_IsActiveMethod(t *testing.T) {
 	if sm.IsActive() {
 		t.Error("idle should not be active via IsActive()")
 	}
-	sm.Transition(StateReceivingInput, "input", nil)
-	sm.Transition(StateClassifying, "classify", nil)
+	_ = sm.Transition(StateReceivingInput, "input", nil)
+	_ = sm.Transition(StateClassifying, "classify", nil)
 	if sm.IsActive() {
 		t.Error("classifying should not be active via IsActive()")
 	}
-	sm.Transition(StateThinking, "start", nil)
+	_ = sm.Transition(StateThinking, "start", nil)
 	if !sm.IsActive() {
 		t.Error("thinking should be active via IsActive()")
 	}
@@ -748,7 +737,7 @@ func TestAgentStateMachine_IsActiveMethod(t *testing.T) {
 
 func TestAgentStateMachine_HistoryCopyIsIndependent(t *testing.T) {
 	sm := NewAgentStateMachine(nil)
-	sm.Transition(StateReceivingInput, "1", nil)
+	_ = sm.Transition(StateReceivingInput, "1", nil)
 
 	h1 := sm.History()
 	if len(h1) != 1 {

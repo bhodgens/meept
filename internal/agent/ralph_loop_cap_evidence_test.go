@@ -47,7 +47,7 @@ func newRalphCapFixture(t *testing.T) (rl *RalphLoop, messageBus *bus.MessageBus
 func driveToReplanCap(t *testing.T, rl *RalphLoop, taskID string) {
 	t.Helper()
 	ctx := context.Background()
-	for i := 0; i < rl.config.MaxIterations; i++ {
+	for i := range rl.config.MaxIterations {
 		result, _ := json.Marshal(map[string]any{
 			"success":  true,
 			"result":   "done",

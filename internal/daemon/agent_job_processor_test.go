@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -29,7 +28,7 @@ import (
 func newTestAgentJobProcessor(t *testing.T) (*AgentJobProcessor, *session.MemoryStore, *task.Store) {
 	t.Helper()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	ss := session.NewMemoryStore(logger)
 
 	ts, err := task.NewStore(t.TempDir()+"/tasks.db", logger)
@@ -193,11 +192,11 @@ func TestResolveStepWorkingDir_TaskIDFallbackCWD(t *testing.T) {
 // Mirrors the agent package's errChatter (unexported there).
 type quotaFailChatter struct {
 	err   error
-	calls int32
+	calls atomic.Int32
 }
 
 func (c *quotaFailChatter) Chat(_ context.Context, _ []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
-	atomic.AddInt32(&c.calls, 1)
+	c.calls.Add(1)
 	return nil, c.err
 }
 
@@ -304,7 +303,7 @@ func TestAgentJobProcessor_QuotaErrorPublishesEvent(t *testing.T) {
 	if perr == nil {
 		t.Fatal("Process = nil error, want quota failure to propagate")
 	}
-	if got := atomic.LoadInt32(&chatter.calls); got != 1 {
+	if got := chatter.calls.Load(); got != 1 {
 		t.Errorf("chatter calls = %d, want 1 (terminal quota error, no retry)", got)
 	}
 

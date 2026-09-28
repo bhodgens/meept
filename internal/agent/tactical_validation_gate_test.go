@@ -247,7 +247,7 @@ func TestTacticalScheduler_ReviewerErrorDoesNotBlockTask(t *testing.T) {
 	// heuristic path; two are already complete, so driving the third
 	// finalizes the task.
 	parent := newGateTestTask(t, ts, "reviewer-error", 3)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		done := newGateTestStep(t, ts, parent.ID, "", "", "already done")
 		if err := ts.stepStore.SetState(done.ID, task.StepCompleted); err != nil {
 			t.Fatalf("complete sibling step: %v", err)
@@ -356,7 +356,7 @@ func TestTacticalScheduler_ValidationExhaustionTerminalizesStep(t *testing.T) {
 	// Default MaxValidationLoops is 3 -> 2 retries, then exhaustion. Each
 	// retry re-stamps the step's job id, so re-read it every round (exactly
 	// what the daemon's retry job does).
-	for round := 0; round < 3; round++ {
+	for round := range 3 {
 		row, gerr := ts.stepStore.GetByID(step.ID)
 		if gerr != nil || row == nil {
 			t.Fatalf("round %d: re-read step: %v", round, gerr)

@@ -3,12 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"github.com/caimlas/meept/internal/compress"
+	"github.com/caimlas/meept/internal/llm"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/caimlas/meept/internal/compress"
-	"github.com/caimlas/meept/internal/llm"
 )
 
 // memCCRStore is an in-memory CCR store for testing, implemented to satisfy
@@ -34,7 +34,7 @@ func (s *memCCRStore) Store(ctx context.Context, entry compress.CCREntry) (strin
 func (s *memCCRStore) Retrieve(ctx context.Context, hash string) (*compress.CCREntry, error) {
 	e, ok := s.data[hash]
 	if !ok {
-		return nil, nil
+		return nil, nil //nolint:nilnil // "not found" contract of the store interface under test
 	}
 	return e, nil
 }
@@ -101,7 +101,7 @@ func makeLargeJSONToolOutput() string {
 // MinTokensToCompress (500 tokens ~= 2000+ characters).
 func largeTextOutput() string {
 	var sb strings.Builder
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		sb.WriteString("This is line ")
 		sb.WriteString(string(rune('a' + i%26)))
 		sb.WriteString(" of the output, padding for compression testing.\n")
@@ -428,7 +428,7 @@ func TestAgentLoop_WithCompressionPipeline(t *testing.T) {
 
 	// Test that RunOnce returns ErrNoLLMClient even with compression enabled
 	_, err := loop.RunOnce(context.Background(), "test message", "conv-1")
-	if err != ErrNoLLMClient {
+	if !errors.Is(err, ErrNoLLMClient) {
 		t.Errorf("expected ErrNoLLMClient, got: %v", err)
 	}
 }

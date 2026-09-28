@@ -460,7 +460,7 @@ func dedupePatternSkillName(baseName string, existingNames, proposedNames map[st
 func buildSkillFromPatternNamed(p *selfimprove.LearnedPattern, skillName string) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("name: %s\n", skillName))
+	fmt.Fprintf(&sb, "name: %s\n", skillName)
 	sb.WriteString("description: " + p.Description + "\n")
 	if len(p.Tags) > 0 {
 		sb.WriteString("tags: [" + strings.Join(p.Tags, ", ") + "]\n")
@@ -998,11 +998,10 @@ func evolverPlanCandidateContent(path string) string {
 	}
 	content := string(data)
 	const divider = "Candidate content:"
-	idx := strings.Index(content, divider)
-	if idx < 0 {
+	_, candidate, found := strings.Cut(content, divider)
+	if !found {
 		return ""
 	}
-	candidate := content[idx+len(divider):]
 	// Drop the plan file's trailing Notes section (always the final section
 	// per WritePlanMarkdown). Cut at the LAST occurrence so a candidate that
 	// itself references "## Notes" in fenced examples keeps its body.
@@ -1035,7 +1034,7 @@ func evolverSkillNameFromAction(proposalID string) string {
 // treat nil as "no decision" and skip.
 func (e *Evolver) callLLMJSON(ctx context.Context, systemPrompt, userPrompt string) (map[string]any, error) {
 	if e.llmClient == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented contract: nil map = "no decision", not an error
 	}
 
 	messages := []llm.ChatMessage{

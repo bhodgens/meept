@@ -110,7 +110,7 @@ func (s *SecurityTransformContext) TransformContext(_ context.Context, messages 
 			if len(warnings) > 0 {
 				threatsFound = true
 				for _, w := range warnings {
-					detectedThreats = append(detectedThreats, string(w.Type)+": "+w.Message)
+					detectedThreats = append(detectedThreats, w.Type+": "+w.Message)
 				}
 			}
 

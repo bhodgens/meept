@@ -50,7 +50,7 @@ func TestFeedbackInterval(t *testing.T) {
 			trigger := NewInlineFeedbackTrigger(tt.interval, pipeline, classifyFn)
 			trigger.SetActiveSkill("test-skill")
 
-			for i := 0; i < tt.turns; i++ {
+			for range tt.turns {
 				trigger.PrepareNextTurn(context.Background(), TurnState{})
 			}
 

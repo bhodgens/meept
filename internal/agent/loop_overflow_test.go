@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -77,7 +78,7 @@ func TestAgentLoop_ContextOverflowSingleCandidateSurfaces(t *testing.T) {
 		StatusCode: 500,
 	}
 	script := []scriptedAttempt{{resp: nil, err: overflow}}
-	for i := 0; i < maxSaturatedOverflowRetries+1; i++ {
+	for range maxSaturatedOverflowRetries + 1 {
 		script = append(script, scriptedAttempt{resp: nil, err: overflow})
 	}
 	chatter := &overflowScriptChatter{script: script}
@@ -134,7 +135,7 @@ func TestAgentLoop_ContextOverflowRetryOnceAfterCompaction(t *testing.T) {
 	loop.contextFirewall = fw
 	// Grow the conversation so compaction actually has something to drop.
 	conv := loop.conversations.Get("conv-overflow-retry")
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		conv.AddAssistantMessage(fmt.Sprintf("assistant filler %d %s", i, strings.Repeat("x", 120)))
 		conv.AddUserMessage(fmt.Sprintf("user filler %d %s", i, strings.Repeat("y", 120)))
 	}
@@ -159,7 +160,11 @@ type messageCountingChatter struct {
 }
 
 func (m *messageCountingChatter) Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
-	m.lastLen.Store(int32(len(messages)))
+	n := len(messages)
+	if n > math.MaxInt32 {
+		panic(fmt.Sprintf("message count %d overflows int32", n))
+	}
+	m.lastLen.Store(int32(n))
 	return m.inner.Chat(ctx, messages, opts...)
 }
 

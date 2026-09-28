@@ -201,9 +201,7 @@ func (f *FileWatcherHook) invokeCallback(path string) {
 	sid := f.sessionID
 	f.mu.RUnlock()
 
-	f.wg.Add(1)
-	go func() {
-		defer f.wg.Done()
+	f.wg.Go(func() {
 		f.Callback(path)
 
 		if f.AsyncRewake && busRef != nil {
@@ -231,7 +229,7 @@ func (f *FileWatcherHook) invokeCallback(path string) {
 				"pattern", f.Pattern,
 			)
 		}
-	}()
+	})
 }
 
 // watchLoop processes filesystem events with debouncing.

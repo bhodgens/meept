@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,10 +126,7 @@ func TestRecordVote_ValidationAndReasonCap(t *testing.T) {
 	if err := m.RecordVote(id, 0, ""); err == nil {
 		t.Error("delta=0 should error")
 	}
-	long := ""
-	for i := 0; i < 600; i++ {
-		long += "x"
-	}
+	long := strings.Repeat("x", 600)
 	if err := m.RecordVote(id, 1, long); err != nil {
 		t.Fatalf("long reason rejected: %v", err)
 	}
@@ -152,7 +150,7 @@ func TestNetVotes_BatchedNoNPlusOne(t *testing.T) {
 	defer vs.Close()
 	ctx := context.Background()
 	var ids []string
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		id := fmt.Sprintf("mem-%d", i)
 		ids = append(ids, id)
 		if err := vs.Insert(VoteRecord{MemoryID: id, Delta: 1, CreatedAt: time.Now()}); err != nil {
@@ -228,7 +226,7 @@ func TestPlanUsefulEviction_FloorPercentileBeforeAgeRules(t *testing.T) {
 	// still evicts the lowest-scoring slice.
 	var cands []MemoryResult
 	net := map[string]int{}
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		id := fmt.Sprintf("m%02d", i)
 		cands = append(cands, MemoryResult{Memory: Memory{ID: id, CreatedAt: now.Add(time.Duration(i) * time.Minute)}})
 		net[id] = i // ascending usefulness, none harmful

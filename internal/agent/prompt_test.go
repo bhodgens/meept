@@ -494,7 +494,7 @@ func TestAssembleOrderedStableBeforeUnstable(t *testing.T) {
 		}
 	}
 	// Stable sections first, in given order; then unstable, in given order.
-	if !(constPos < rulesPos && rulesPos < memPos && memPos < toolsPos) {
+	if constPos >= rulesPos || rulesPos >= memPos || memPos >= toolsPos {
 		t.Errorf("wrong order: constitution=%d rules=%d memory=%d tools=%d", constPos, rulesPos, memPos, toolsPos)
 	}
 }
@@ -590,7 +590,7 @@ func TestBuildSystemPromptStablePrefixDefault(t *testing.T) {
 	if constPos == -1 || memPos == -1 || toolsPos == -1 {
 		t.Fatalf("missing sections: constitution=%d memory=%d tools=%d", constPos, memPos, toolsPos)
 	}
-	if !(constPos < memPos && constPos < toolsPos) {
+	if constPos >= memPos || constPos >= toolsPos {
 		t.Errorf("stable constitution must precede unstable sections: constitution=%d memory=%d tools=%d", constPos, memPos, toolsPos)
 	}
 	if hash == "" {

@@ -126,7 +126,6 @@ func TestSessionStateUpgrade_Gates(t *testing.T) {
 		{"quickplan no-op (C4)", string(IntentQuickPlan), cueInput, true, true, false},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := sessionStateUpgradeApplies(tc.verdict, tc.input, tc.hasEvidence, tc.knob)

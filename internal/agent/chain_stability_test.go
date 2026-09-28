@@ -120,7 +120,7 @@ func TestChainStability_RalphLoopProgress(t *testing.T) {
 	// The trigger loop drives the counter to the cap: with progress still
 	// happening, each cap hit must EXTEND (counter → MaxIterations-1) and
 	// keep replanning instead of failing the task.
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		addCompletedStep(i + 10) // forward progress BEFORE each attempt
 		_, _, needsReplan := rl.CheckCompletion(ctx, tk.ID, unsubstantiated())
 		if !needsReplan {
@@ -176,7 +176,7 @@ func TestChainStability_RalphLoopStalledStillFails(t *testing.T) {
 		})
 		return result
 	}
-	for i := 0; i < rl.config.MaxIterations; i++ {
+	for i := range rl.config.MaxIterations {
 		isComplete, _, needsReplan := rl.CheckCompletion(ctx, tk.ID, unsubstantiated())
 		if isComplete || !needsReplan {
 			t.Fatalf("iteration %d: expected a replan request", i+1)
@@ -410,7 +410,7 @@ func TestAgentLoop_LargeRequestOverflowStillFailsHonestly(t *testing.T) {
 	loop.llm = fw
 	loop.contextFirewall = fw
 	conv := loop.conversations.Get("conv-overflow-true-size")
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		conv.AddAssistantMessage(fmt.Sprintf("assistant filler %d %s", i, strings.Repeat("x", 120)))
 		conv.AddUserMessage(fmt.Sprintf("user filler %d %s", i, strings.Repeat("y", 120)))
 	}

@@ -16,7 +16,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -61,7 +60,7 @@ type wiringFixture struct {
 func newWiringFixture(t *testing.T, enabled bool, provisioner func(ctx context.Context, taskID, phaseID, phaseName string) (string, error)) *wiringFixture {
 	t.Helper()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 

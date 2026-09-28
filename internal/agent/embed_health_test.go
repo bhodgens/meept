@@ -284,7 +284,7 @@ func TestGoldEmbeddingsRetention(t *testing.T) {
 	if vecs, intents := loadPrefilterStoreVectors(t); vecs != nil {
 		ref, gold = stratifiedSplit(vecs, intents)
 	} else {
-		rng := rand.New(rand.NewSource(42))
+		rng := rand.New(rand.NewSource(42)) //nolint:gosec // deterministic/non-crypto test data
 		shared := make([]float64, 32)
 		for j := range shared {
 			shared[j] = rng.NormFloat64()
@@ -337,7 +337,7 @@ func stratifiedSplit(vecs [][]float64, intents []string) ([][]float64, [][]float
 // embeddings must be flagged (>= 95%). Refuses to run vacuously when the
 // synthetic clusters would pass on their own (sanity arm).
 func TestDegradedEmbeddingsFlagged(t *testing.T) {
-	rng := rand.New(rand.NewSource(7))
+	rng := rand.New(rand.NewSource(7)) //nolint:gosec // deterministic/non-crypto test data
 	const dim = 32
 	ref := goldCluster(rng, 40, dim)
 	hc, err := NewEmbedHealthCheck(writeRefJSON(t, ref), slog.New(slog.DiscardHandler))
@@ -350,7 +350,7 @@ func TestDegradedEmbeddingsFlagged(t *testing.T) {
 		vec  []float64
 	}
 	var cases []degradedCase
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		gold := goldCluster(rng, 1, dim)[0]
 
 		zeroed := make([]float64, dim)
@@ -387,7 +387,7 @@ func TestDegradedEmbeddingsFlagged(t *testing.T) {
 // TestDegenerateInputFlagged: NaN, Inf, zero-norm, dimension mismatch, and
 // empty embeddings are unhealthy, and never panic.
 func TestDegenerateInputFlagged(t *testing.T) {
-	rng := rand.New(rand.NewSource(11))
+	rng := rand.New(rand.NewSource(11)) //nolint:gosec // deterministic/non-crypto test data
 	ref := goldCluster(rng, 20, 8)
 	hc, err := NewEmbedHealthCheck(writeRefJSON(t, ref), slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -417,7 +417,7 @@ func TestDegenerateInputFlagged(t *testing.T) {
 // TestConcurrentCheckSafe: Check from 10 goroutines under -race must be
 // clean and deterministic (same input, same verdict).
 func TestConcurrentCheckSafe(t *testing.T) {
-	rng := rand.New(rand.NewSource(3))
+	rng := rand.New(rand.NewSource(3)) //nolint:gosec // deterministic/non-crypto test data
 	const dim = 16
 	ref := goldCluster(rng, 30, dim)
 	hc, err := NewEmbedHealthCheck(writeRefJSON(t, ref), slog.New(slog.DiscardHandler))
@@ -429,18 +429,16 @@ func TestConcurrentCheckSafe(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 10)
-	for g := 0; g < 10; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 100; i++ {
+	for range 10 {
+		wg.Go(func() {
+			for range 100 {
 				ok, _ := hc.Check(input)
 				if ok != want {
 					errs <- fmt.Errorf("nondeterministic verdict: got %v want %v", ok, want)
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

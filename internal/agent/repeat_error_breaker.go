@@ -87,7 +87,7 @@ func repeatErrKey(tool, argsHash, errFirstLine string) string {
 // semantics as progress_synthesizer.firstLine; kept local so the breaker is
 // self-contained).
 func firstErrorLine(errMsg string) string {
-	for _, line := range strings.Split(errMsg, "\n") {
+	for line := range strings.SplitSeq(errMsg, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			return line

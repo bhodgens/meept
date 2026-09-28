@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 )
 
@@ -39,17 +40,18 @@ func (a *RLMAnalyzer) guardedInvoke(ctx context.Context, depth int, prompt strin
 		return nil, fmt.Errorf("exceeded maximum depth %d (current: %d)",
 			a.config.MaximumDepth, depth)
 	}
-	if depth >= a.config.MaximumDepth && depth > 0 {
-		// At max depth (for non-root), we must use _final, not spawn.
-		// The caller should check canSpawnSubagentAt(depth) instead.
-	}
+	// At max depth (for non-root), the caller must finalize instead of
+	// spawning: canSpawnSubagentAt(depth) is the gate callers check.
+	_ = depth
 
 	// 2. Semaphore acquire (blocks until a slot is available).
 	if err := a.semaphore.Acquire(depth); err != nil {
 		return nil, fmt.Errorf("semaphore acquire at depth %d: %w", depth, err)
 	}
 
-	// 3. Create a cancellable context.
+	// 3. Create a cancellable context. The cancel function is stored on the
+	// returned run and invoked by the run's own cleanup (rlm_analyzer
+	// releases it after execution completes).
 	childCtx, cancel := context.WithCancel(ctx)
 
 	// 4. Turn counter starts at 0.
@@ -105,9 +107,13 @@ type analyzerRun struct {
 	finished bool
 }
 
-// releaseSemaphore returns the depth-N slot to the per-depth semaphore pool.
-// Safe to call multiple times (double-release is a no-op on the channel).
+// releaseSemaphore returns the depth-N slot to the per-depth semaphore pool
+// and cancels the run's context. Safe to call multiple times (double-release
+// is a no-op on the channel; context.CancelFunc is idempotent).
 func (r *analyzerRun) releaseSemaphore() {
+	if r.cancel != nil {
+		r.cancel()
+	}
 	if r.semaphore != nil {
 		r.semaphore.Release(r.depth)
 	}
@@ -173,10 +179,7 @@ func (tc *turnCounter) Remaining() int {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	remaining := tc.limit - tc.current
-	if remaining < 0 {
-		remaining = 0
-	}
-	return remaining
+	return max(remaining, 0)
 }
 
 // GetCount returns the current turn count.
@@ -212,10 +215,8 @@ func newToolRegistry() *toolRegistry {
 func (tr *toolRegistry) Register(name string) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	for _, existing := range tr.tools {
-		if existing == name {
-			return // already registered
-		}
+	if slices.Contains(tr.tools, name) {
+		return // already registered
 	}
 	tr.tools = append(tr.tools, name)
 }

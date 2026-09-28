@@ -199,7 +199,7 @@ func StripClaimsEvidence(response string) string {
 // returns (start, end, true) with end exclusive. ok=false when no envelope is
 // present. start is the index of the opening '{'.
 func findClaimsEnvelopeSpan(s string) (int, int, bool) {
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] != '{' {
 			continue
 		}

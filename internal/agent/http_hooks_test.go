@@ -70,9 +70,9 @@ func TestNewHTTPHook_ExplicitRetryCountRespected(t *testing.T) {
 // production bug where RetryCount=0 tripped the loop guard at attempt 0 and
 // Execute failed permanently with "after 0 retries".
 func TestHTTPHook_TransientFailureRetriesByDefault(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&hits, 1)
+		n := hits.Add(1)
 		_, _ = io.Copy(io.Discard, r.Body)
 		if n == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -91,7 +91,7 @@ func TestHTTPHook_TransientFailureRetriesByDefault(t *testing.T) {
 	if err := hook.Execute(context.Background(), map[string]any{"hi": true}); err != nil {
 		t.Fatalf("Execute should succeed after one transient 500: %v", err)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Fatalf("server hit %d times, want 2 (1 failed + 1 retry)", got)
 	}
 }
@@ -133,9 +133,9 @@ func TestHTTPHook_RetryResendsBody(t *testing.T) {
 // This is only expressible because the config surface carries retry_count as
 // a *int (nil = omitted = 3), so 0 is a real operator decision.
 func TestHTTPHook_ZeroRetryCountMeansNoRetries(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
@@ -149,7 +149,7 @@ func TestHTTPHook_ZeroRetryCountMeansNoRetries(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute should fail when server always returns 500")
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Fatalf("server hit %d times, want 1 (retry_count=0 means no retries)", got)
 	}
 }
@@ -170,9 +170,9 @@ func TestHTTPHook_UnlimitedRetryStopsOnAuthFailure(t *testing.T) {
 		Jitter:     0,
 	})
 
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer srv.Close()
@@ -186,7 +186,7 @@ func TestHTTPHook_UnlimitedRetryStopsOnAuthFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute should fail on permanent 401")
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Fatalf("server hit %d times, want 1 (401 is non-retryable even with retry_count=-1)", got)
 	}
 	if !strings.Contains(err.Error(), "401") {
@@ -210,9 +210,9 @@ func TestHTTPHook_UnlimitedRetryCount(t *testing.T) {
 		Jitter:     0,
 	})
 
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
@@ -230,7 +230,7 @@ func TestHTTPHook_UnlimitedRetryCount(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute should fail when context is cancelled during unlimited retries")
 	}
-	got := int(atomic.LoadInt32(&hits))
+	got := int(hits.Load())
 	if got < 3 {
 		t.Fatalf("server hit %d times, want >= 3 (retry_count=-1 must keep retrying until context cancellation)", got)
 	}
@@ -241,9 +241,9 @@ func TestHTTPHook_UnlimitedRetryCount(t *testing.T) {
 // The explicit "no retries" value is 0 (see TestHTTPHook_ZeroRetryCountMeansNoRetries).
 
 func TestHTTPHook_SyncExecute(t *testing.T) {
-	var called int32
+	var called atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&called, 1)
+		called.Add(1)
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -257,15 +257,15 @@ func TestHTTPHook_SyncExecute(t *testing.T) {
 	if err := hook.Execute(context.Background(), map[string]any{"hi": true}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if got := atomic.LoadInt32(&called); got != 1 {
+	if got := called.Load(); got != 1 {
 		t.Fatalf("server called %d times, want 1", got)
 	}
 }
 
 func TestHTTPHook_AsyncExecute(t *testing.T) {
-	var called int32
+	var called atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&called, 1)
+		called.Add(1)
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -283,15 +283,15 @@ func TestHTTPHook_AsyncExecute(t *testing.T) {
 	}
 
 	hook.Wait()
-	if got := atomic.LoadInt32(&called); got != 1 {
+	if got := called.Load(); got != 1 {
 		t.Fatalf("server called %d times, want 1", got)
 	}
 }
 
 func TestHTTPHook_AsyncRewake(t *testing.T) {
-	var serverHits int32
+	var serverHits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&serverHits, 1)
+		serverHits.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -336,15 +336,15 @@ func TestHTTPHook_AsyncRewake(t *testing.T) {
 		t.Fatal("timed out waiting for rewake signal")
 	}
 
-	if got := atomic.LoadInt32(&serverHits); got != 1 {
+	if got := serverHits.Load(); got != 1 {
 		t.Fatalf("server called %d times, want 1", got)
 	}
 }
 
 func TestHTTPHook_AsyncRewake_NilBus(t *testing.T) {
-	var serverHits int32
+	var serverHits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&serverHits, 1)
+		serverHits.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -363,7 +363,7 @@ func TestHTTPHook_AsyncRewake_NilBus(t *testing.T) {
 	}
 
 	hook.Wait()
-	if got := atomic.LoadInt32(&serverHits); got != 1 {
+	if got := serverHits.Load(); got != 1 {
 		t.Fatalf("server called %d times, want 1", got)
 	}
 }

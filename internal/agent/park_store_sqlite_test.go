@@ -113,6 +113,9 @@ func (s *SQLiteParkStore) persistedRowCount(t *testing.T, kind ParkKind) int {
 	if err := rows.Scan(&n); err != nil {
 		t.Fatalf("count scan: %v", err)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
 	return n
 }
 
@@ -121,8 +124,7 @@ func (s *SQLiteParkStore) persistedRowCount(t *testing.T, kind ParkKind) int {
 func TestTurnParkerPersistence_ReArmAfterRestart(t *testing.T) {
 	store := newTestParkStore(t)
 	defer func() { _ = store.Close() }()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	resumeAt := time.Now().Add(50 * time.Millisecond)
 
@@ -241,8 +243,7 @@ func TestTurnParkerPersistence_ExpiredPrunedAtLoad(t *testing.T) {
 func TestTurnParkerPersistence_ResumeDeletesRow(t *testing.T) {
 	store := newTestParkStore(t)
 	defer func() { _ = store.Close() }()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	var mu sync.Mutex
 	resumed := 0
@@ -280,8 +281,7 @@ func TestTurnParkerPersistence_ResumeDeletesRow(t *testing.T) {
 // --- (d) Memory-only mode unaffected -----------------------------------------
 
 func TestTurnParkerPersistence_MemoryOnlyUnchanged(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p := NewTurnParker(parkedTurnTestLogger(), func(context.Context, ParkedTurnRecord) {}, time.Hour)
 	p.SetPollInterval(10 * time.Millisecond)
@@ -311,8 +311,7 @@ func TestTurnParkerPersistence_MemoryOnlyUnchanged(t *testing.T) {
 // still parks the record in memory (best-effort write-behind).
 func TestTurnParkerPersistence_SaveFailureStillParks(t *testing.T) {
 	store := &fakePersistence{saveErr: errors.New("disk on fire")}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p := NewTurnParker(newParkStoreTestLogger(), func(context.Context, ParkedTurnRecord) {}, time.Hour)
 	p.logger = newParkStoreTestLogger()
@@ -336,8 +335,7 @@ func TestTurnParkerPersistence_SaveFailureStillParks(t *testing.T) {
 // reArm load failure must not wedge Start (records stay for next boot).
 func TestTurnParkerPersistence_LoadFailureDoesNotWedgeStart(t *testing.T) {
 	store := &fakePersistence{loadErr: errors.New("corrupt page")}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p := NewTurnParker(newParkStoreTestLogger(), func(context.Context, ParkedTurnRecord) {}, time.Hour)
 	p.logger = newParkStoreTestLogger()

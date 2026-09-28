@@ -651,7 +651,7 @@ func TestRouteToPlan_QuickPlanCarriesThrough(t *testing.T) {
 	if res.Response != "" {
 		t.Errorf("quickplan routeToPlan set Response %q; handler treats non-empty as direct_response (M3)", res.Response)
 	}
-	if res.SuggestedMode != string(IntentQuickPlan.SuggestedMode()) {
+	if res.SuggestedMode != IntentQuickPlan.SuggestedMode() {
 		t.Errorf("SuggestedMode = %q, want %q", res.SuggestedMode, IntentQuickPlan.SuggestedMode())
 	}
 	if res.Intent == nil || res.Intent.Type != string(IntentQuickPlan) {

@@ -34,7 +34,7 @@ func fastBackoffConfig() BackoffConfig {
 func TestLLMCall_WithRateLimit(t *testing.T) {
 	t.Parallel()
 
-	var calls int32
+	var calls atomic.Int32
 
 	// Note: the actual LLM response type is llm.ChatResponse (not
 	// ChatCompletionResponse — that type does not exist in this codebase).
@@ -43,7 +43,7 @@ func TestLLMCall_WithRateLimit(t *testing.T) {
 	ctx := WithRetryBudget(context.Background(), budget)
 
 	fn := func() (*llm.ChatResponse, error) {
-		n := atomic.AddInt32(&calls, 1)
+		n := calls.Add(1)
 		if n == 1 {
 			return nil, &llm.RateLimitError{
 				ProviderID: "test",
@@ -68,7 +68,7 @@ func TestLLMCall_WithRateLimit(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if got := atomic.LoadInt32(&calls); got != 2 {
+	if got := calls.Load(); got != 2 {
 		t.Errorf("expected 2 invocations, got %d", got)
 	}
 	if budget.Used() != 1 {
@@ -87,10 +87,10 @@ func TestLLMCall_WithRateLimit(t *testing.T) {
 func TestToolExecution_NetworkFailure(t *testing.T) {
 	t.Parallel()
 
-	var calls int32
+	var calls atomic.Int32
 	registry := NewPlaceholderToolRegistry()
 	registry.Register(NewMockTool("web_fetch", "web fetch", func(ctx context.Context, args map[string]any) (any, error) {
-		n := atomic.AddInt32(&calls, 1)
+		n := calls.Add(1)
 		if n < 3 {
 			return nil, Retryable(
 				errors.New("connection reset"),
@@ -120,7 +120,7 @@ func TestToolExecution_NetworkFailure(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if got := atomic.LoadInt32(&calls); got != 3 {
+	if got := calls.Load(); got != 3 {
 		t.Errorf("expected 3 tool invocations, got %d", got)
 	}
 }
@@ -149,9 +149,9 @@ func TestRetryBudget_LLMAndToolShareBudget(t *testing.T) {
 
 	// Op1 (LLM simulation): fails twice with retryable errors, then succeeds.
 	// Each failure triggers one budget consumption via RunWithRetry.
-	var llmCalls int32
+	var llmCalls atomic.Int32
 	llmFn := func() (string, error) {
-		n := atomic.AddInt32(&llmCalls, 1)
+		n := llmCalls.Add(1)
 		if n < 3 {
 			return "", Retryable(
 				errors.New("rate limited"),
@@ -167,9 +167,9 @@ func TestRetryBudget_LLMAndToolShareBudget(t *testing.T) {
 	}
 
 	// Op2 (tool simulation): fails once, then succeeds.
-	var toolCalls int32
+	var toolCalls atomic.Int32
 	toolFn := func() (string, error) {
-		n := atomic.AddInt32(&toolCalls, 1)
+		n := toolCalls.Add(1)
 		if n < 2 {
 			return "", Retryable(
 				errors.New("connection refused"),

@@ -69,10 +69,7 @@ func TestTurnCounter_NudgeThresholds(t *testing.T) {
 				t.Errorf("limit in info = %d, want %d (%s)", info.Limit, tt.limit, tt.description)
 			}
 
-			wantRemaining := tt.limit - tc.current
-			if wantRemaining < 0 {
-				wantRemaining = 0
-			}
+			wantRemaining := max(tt.limit-tc.current, 0)
 			if info.Remaining != wantRemaining {
 				t.Errorf("remaining = %d, want %d (%s)", info.Remaining, wantRemaining, tt.description)
 			}

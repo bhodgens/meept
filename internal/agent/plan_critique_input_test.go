@@ -23,7 +23,7 @@ type critiqueStubTool struct {
 func (t *critiqueStubTool) Name() string                                             { return t.name }
 func (t *critiqueStubTool) Description() string                                      { return t.name + " tool" }
 func (t *critiqueStubTool) Parameters() llm.FunctionParameters                       { return llm.FunctionParameters{} }
-func (t *critiqueStubTool) Execute(_ context.Context, _ map[string]any) (any, error) { return nil, nil }
+func (t *critiqueStubTool) Execute(_ context.Context, _ map[string]any) (any, error) { return nil, nil } //nolint:nilnil // no-op stub tool
 
 // newCritiqueToolRegistry builds a real tools.Registry carrying the given
 // tool names — the same production registry type the daemon wires into
@@ -305,7 +305,7 @@ func TestBuildCritiqueInput_NilStepStoreZeroVerdicts(t *testing.T) {
 // assembled failure block, even for many oversized failures.
 func TestBuildCritiqueInput_FailureBlockBounded(t *testing.T) {
 	failures := make([]stepFailure, 0, 20)
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		failures = append(failures, stepFailure{
 			Description: "step that failed catastrophically",
 			Agent:       "coder",

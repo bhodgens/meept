@@ -93,8 +93,7 @@ func TestAgentLoop_QuotaResetErrorSingleCandidateSurfaces(t *testing.T) {
 	if err == nil {
 		t.Fatal("RunOnce = nil error, want quota error surfaced when no candidate remains")
 	}
-	var qe *llm.QuotaResetError
-	if !errors.As(err, &qe) {
+	if _, ok := errors.AsType[*llm.QuotaResetError](err); !ok {
 		t.Fatalf("surfaced error = %T (%v), want *llm.QuotaResetError", err, err)
 	}
 	if got := chatter.calls.Load(); got != 1 {

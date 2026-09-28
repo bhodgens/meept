@@ -12,7 +12,7 @@ func TestUsageTrackerRecordInjection(t *testing.T) {
 	tracker := newTestTracker(t)
 	defer func() { _ = tracker.Close() }()
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if err := tracker.RecordInjection("test-skill"); err != nil {
 			t.Fatalf("RecordInjection[%d] failed: %v", i, err)
 		}
@@ -37,21 +37,21 @@ func TestUsageTrackerRecordOutcome(t *testing.T) {
 	defer func() { _ = tracker.Close() }()
 
 	// 10 injections.
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if err := tracker.RecordInjection("test-skill"); err != nil {
 			t.Fatalf("RecordInjection[%d] failed: %v", i, err)
 		}
 	}
 
 	// 8 positive outcomes.
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		if err := tracker.RecordOutcome("test-skill", OutcomePositive, "sess-1"); err != nil {
 			t.Fatalf("RecordOutcome(Positive)[%d] failed: %v", i, err)
 		}
 	}
 
 	// 2 negative outcomes.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if err := tracker.RecordOutcome("test-skill", OutcomeNegative, "sess-1"); err != nil {
 			t.Fatalf("RecordOutcome(Negative)[%d] failed: %v", i, err)
 		}
@@ -134,19 +134,19 @@ func TestUsageTrackerGetLowPerformers(t *testing.T) {
 	defer func() { _ = tracker.Close() }()
 
 	// skill-low: 10 injections, all negative -> effectiveness 0.0
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_ = tracker.RecordInjection("skill-low")
 		_ = tracker.RecordOutcome("skill-low", OutcomeNegative, "s")
 	}
 
 	// skill-high: 10 injections, all positive -> effectiveness 1.0
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_ = tracker.RecordInjection("skill-high")
 		_ = tracker.RecordOutcome("skill-high", OutcomePositive, "s")
 	}
 
 	// skill-few: 2 injections, all negative -> effectiveness 0.0 (below minInjections)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		_ = tracker.RecordInjection("skill-few")
 		_ = tracker.RecordOutcome("skill-few", OutcomeNegative, "s")
 	}

@@ -509,7 +509,7 @@ func TestAgentDesignerGenerateFullAgentFile(t *testing.T) {
 			MaxIterations:    20,
 			TimeoutSeconds:   300,
 			MaxTokensPerTurn: 8192,
-			Temperature:      ptrFloat(0.3),
+			Temperature:      new(0.3),
 		},
 		SystemPromptSections: []string{
 			"## Scope\nYou specialize in debugging\n",

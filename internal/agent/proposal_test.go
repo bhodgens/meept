@@ -65,7 +65,9 @@ func TestProposalQueue_MarkSkipped(t *testing.T) {
 	tmp := t.TempDir()
 	q := newProposalQueue(filepath.Join(tmp, "improvements.md"))
 	p := ReflectionProposal{Type: "agent_prompt", Target: "x", Change: "y", Confidence: 0.7, Source: "test"}
-	q.Append(p)
+	if err := q.Append(p); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
 	pending, _ := q.ListPending()
 	if err := q.MarkSkipped(pending[0].ID); err != nil {
 		t.Fatalf("MarkSkipped: %v", err)
@@ -147,7 +149,7 @@ func TestProposalQueue_AppendMarkStatusConcurrency(t *testing.T) {
 
 	// Pre-populate with 5 proposals so MarkApplied has something to mark.
 	var preIDs []string
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		p := ReflectionProposal{
 			Type: "skill_create", Target: "x",
 			Change: "y", Justification: "z", Confidence: 0.5, Source: "pre",
@@ -163,10 +165,8 @@ func TestProposalQueue_AppendMarkStatusConcurrency(t *testing.T) {
 	errCh := make(chan error, 20)
 
 	// Half the goroutines append new proposals; half mark existing ones applied.
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			p := ReflectionProposal{
 				Type: "skill_create", Target: "x",
 				Change: "y", Justification: "z", Confidence: 0.5, Source: "concurrent",
@@ -174,9 +174,9 @@ func TestProposalQueue_AppendMarkStatusConcurrency(t *testing.T) {
 			if err := q.Append(p); err != nil {
 				errCh <- fmt.Errorf("Append: %w", err)
 			}
-		}()
+		})
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -278,7 +278,7 @@ func TestProposalQueue_AppendConcurrency(t *testing.T) {
 	tmp := t.TempDir()
 	q := newProposalQueue(filepath.Join(tmp, "improvements.md"))
 	done := make(chan error, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(n int) {
 			p := ReflectionProposal{
 				Type:          "skill_create",
@@ -291,7 +291,7 @@ func TestProposalQueue_AppendConcurrency(t *testing.T) {
 			done <- q.Append(p)
 		}(i)
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if err := <-done; err != nil {
 			t.Fatalf("Append %d: %v", i, err)
 		}

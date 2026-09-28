@@ -35,6 +35,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -205,7 +206,7 @@ var draftToolHintRe = regexp.MustCompile(`^\s*[0-9]+\.\s+.+?\[([a-z_]+)\]`)
 func draftToolHints(markdown string) []string {
 	seen := make(map[string]bool)
 	var hints []string
-	for _, line := range strings.Split(markdown, "\n") {
+	for line := range strings.SplitSeq(markdown, "\n") {
 		m := draftToolHintRe.FindStringSubmatch(line)
 		if m == nil {
 			continue
@@ -680,11 +681,11 @@ func compileProblemText(err error) string {
 // asAgentCompileError is the package-local errors.As for *plan.CompileError
 // (two-value type assertion convention).
 func asAgentCompileError(err error, target **plan.CompileError) bool {
-	ce, ok := err.(*plan.CompileError)
-	if ok {
+	if ce, ok := errors.AsType[*plan.CompileError](err); ok {
 		*target = ce
+		return true
 	}
-	return ok
+	return false
 }
 
 // stampCritiqueMetadata persists critique_rounds_used,

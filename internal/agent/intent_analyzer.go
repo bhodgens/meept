@@ -293,7 +293,7 @@ func (ia *IntentAnalyzer) chatWithFailover(ctx context.Context, messages []llm.C
 	ia.resolver.RecordAliasFailure(ia.aliasName, err, ia.modelConfig)
 	nextCfg, rerr := ia.resolver.ResolveForAlias(ia.aliasName, "")
 	if rerr != nil || nextCfg == nil {
-		return nil, fmt.Errorf("intent analysis: %w (no alternate candidate: %v)", err, rerr)
+		return nil, fmt.Errorf("intent analysis: %w (no alternate candidate: %w)", err, rerr)
 	}
 	ia.logger.Warn("Intent analyzer rotating to next alias candidate",
 		"alias", ia.aliasName,

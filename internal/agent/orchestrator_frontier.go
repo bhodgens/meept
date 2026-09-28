@@ -194,9 +194,7 @@ func artifactDecls(consumes []plan.Artifact) []Artifact {
 		return nil
 	}
 	out := make([]Artifact, 0, len(consumes))
-	for _, a := range consumes {
-		out = append(out, Artifact(a))
-	}
+	out = append(out, consumes...)
 	return out
 }
 

@@ -15,7 +15,6 @@ package daemon
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"testing"
 	"time"
@@ -91,7 +90,7 @@ func TestResolveStepWorkingDirFor_NoWorktree(t *testing.T) {
 // step-dispatch consumption: the per-phase worktree wins for steps of that
 // phase, while the legacy resolution stays on the session worktree.
 func TestDaemonWiring_PhaseWorktreeWinsInDispatch(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 
 	tests := []struct {
 		name     string

@@ -232,13 +232,13 @@ func TestPassARefine_PromptCarriesLedgerTracesIndex(t *testing.T) {
 			t.Fatalf("prompt missing %s:\n%s", name, prompt)
 		}
 	}
-	if !(ledgerIdx < indexIdx && indexIdx < tracesIdx) {
+	if ledgerIdx >= indexIdx || indexIdx >= tracesIdx {
 		t.Fatalf("section order wrong: ledger=%d index=%d traces=%d", ledgerIdx, indexIdx, tracesIdx)
 	}
 	if !strings.Contains(prompt, "rejected diff") {
 		t.Fatalf("prompt must carry the ledger row diff:\n%s", prompt)
 	}
-	if !(failIdx < passIdx) {
+	if failIdx >= passIdx {
 		t.Fatalf("failures must render before successes:\n%s", prompt)
 	}
 	if stepIdx := strings.Index(prompt, "edit_file"); stepIdx < tracesIdx {
@@ -298,7 +298,7 @@ func eLoadCycleWikiContextForTest(t *testing.T, ws *selfimprove.WikiStore, tp Tr
 func TestBuildWikiContext_KeepsNewestRows(t *testing.T) {
 	ws := selfimprove.NewWikiStore(t.TempDir(), slog.Default())
 	longReason := strings.Repeat("r", 500)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		if err := ws.AppendSkillImpact(selfimprove.SkillImpactEntry{
 			Time:      time.Now().UTC(),
 			Action:    "improve_skill",

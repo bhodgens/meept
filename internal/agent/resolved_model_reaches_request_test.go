@@ -1,9 +1,9 @@
 package agent
 
 import (
-	"fmt"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -19,11 +19,11 @@ import (
 type modelCapture struct {
 	mu     sync.Mutex
 	models []string
-	hits   int32
+	hits   atomic.Int32
 }
 
 func (c *modelCapture) record(model string) {
-	atomic.AddInt32(&c.hits, 1)
+	c.hits.Add(1)
 	c.mu.Lock()
 	c.models = append(c.models, model)
 	c.mu.Unlock()
@@ -38,7 +38,7 @@ func (c *modelCapture) last() string {
 	return c.models[len(c.models)-1]
 }
 
-func (c *modelCapture) count() int { return int(atomic.LoadInt32(&c.hits)) }
+func (c *modelCapture) count() int { return int(c.hits.Load()) }
 
 func newModelCaptureServer(cap *modelCapture) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

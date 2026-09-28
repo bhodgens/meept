@@ -30,12 +30,12 @@ func (e *retryableTestError) RetryAfter() time.Duration { return 0 }
 func (e *retryableTestError) IsRetryable() bool         { return true }
 
 func TestExecute_RetriesOnRetryableError(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	registry := NewPlaceholderToolRegistry()
 	// Use "shell" tool which has shorter backoff delays (BaseDelay=1s, MaxAttempts=2).
 	// We need 3 attempts (1 initial + 2 retries), which matches MaxAttempts=2.
 	registry.Register(NewMockTool("shell", "shell", func(ctx context.Context, args map[string]any) (any, error) {
-		n := atomic.AddInt32(&attempts, 1)
+		n := attempts.Add(1)
 		if n < 3 {
 			return nil, &retryableTestError{msg: "connection reset"}
 		}
@@ -50,16 +50,16 @@ func TestExecute_RetriesOnRetryableError(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("expected success after retries, got error: %s", result.Error)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Errorf("expected 3 attempts, got %d", got)
 	}
 }
 
 func TestExecute_DoesNotRetryNonRetryableError(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	registry := NewPlaceholderToolRegistry()
 	registry.Register(NewMockTool("web_search", "search", func(ctx context.Context, args map[string]any) (any, error) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		return nil, errors.New("permanent failure: invalid argument")
 	}))
 
@@ -71,17 +71,17 @@ func TestExecute_DoesNotRetryNonRetryableError(t *testing.T) {
 	if result.Success {
 		t.Fatal("expected failure")
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Errorf("expected 1 attempt (no retry), got %d", got)
 	}
 }
 
 func TestExecute_DoesNotRetryPermissionDenied(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	registry := NewPlaceholderToolRegistry()
 	// Register a tool with a name NOT in the safe-tools list so it gets blocked.
 	registry.Register(NewMockTool("dangerous_tool", "dangerous", func(ctx context.Context, args map[string]any) (any, error) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		return "should not reach", nil
 	}))
 
@@ -93,16 +93,16 @@ func TestExecute_DoesNotRetryPermissionDenied(t *testing.T) {
 	if result.Success {
 		t.Fatal("expected failure (permission denied)")
 	}
-	if got := atomic.LoadInt32(&attempts); got != 0 {
+	if got := attempts.Load(); got != 0 {
 		t.Errorf("expected 0 tool executions (blocked before execution), got %d", got)
 	}
 }
 
 func TestExecute_DoesNotRetryCacheHit(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	registry := NewPlaceholderToolRegistry()
 	registry.Register(NewMockTool("memory_search", "search", func(ctx context.Context, args map[string]any) (any, error) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		return "result", nil
 	}))
 
@@ -116,7 +116,7 @@ func TestExecute_DoesNotRetryCacheHit(t *testing.T) {
 		t.Fatalf("first call failed: %s", r1.Error)
 	}
 
-	firstAttempts := atomic.LoadInt32(&attempts)
+	firstAttempts := attempts.Load()
 
 	// Second call should hit cache, not execute the tool.
 	r2 := executor.Execute(context.Background(), makeToolCall("call_2", "memory_search", `{"query":"test"}`))
@@ -127,18 +127,18 @@ func TestExecute_DoesNotRetryCacheHit(t *testing.T) {
 		t.Error("expected second call to be a cache hit")
 	}
 
-	secondAttempts := atomic.LoadInt32(&attempts)
+	secondAttempts := attempts.Load()
 	if secondAttempts != firstAttempts {
 		t.Errorf("expected no additional tool execution for cache hit, first=%d second=%d", firstAttempts, secondAttempts)
 	}
 }
 
 func TestExecute_RetriesExhausted(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	registry := NewPlaceholderToolRegistry()
 	// Use "shell" tool which has MaxAttempts=2 (shorter delays for test speed).
 	registry.Register(NewMockTool("shell", "shell", func(ctx context.Context, args map[string]any) (any, error) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		return nil, &retryableTestError{msg: "connection refused"}
 	}))
 
@@ -152,7 +152,7 @@ func TestExecute_RetriesExhausted(t *testing.T) {
 	}
 	// shell retry config: MaxAttempts=2, meaning 2 retry sleeps.
 	// Total tool executions = 1 initial + 2 retries = 3.
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Errorf("expected 3 attempts (1 initial + 2 retries), got %d", got)
 	}
 	if !strings.Contains(result.Error, "connection refused") {

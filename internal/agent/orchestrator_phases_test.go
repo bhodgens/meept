@@ -70,11 +70,11 @@ func (s *stubPlanStore) GetPlansForSession(_ context.Context, _ string) ([]*plan
 }
 func (s *stubPlanStore) CreateSignoff(_ context.Context, _ *plan.PlanSignoff) error { return nil }
 func (s *stubPlanStore) GetSignoffs(_ context.Context, _ string) ([]*plan.PlanSignoff, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // no-op test stub
 }
 func (s *stubPlanStore) GetRevisionCount(_ context.Context, _ string) (int, error) { return 0, nil }
 func (s *stubPlanStore) CountPlansBySessionAndState(_ context.Context, _ string) (map[plan.PlanState]int, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // no-op test stub
 }
 
 // newTestOrchestrator builds a minimal Orchestrator wired with a real

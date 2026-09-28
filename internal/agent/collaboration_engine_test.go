@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -70,7 +71,7 @@ func TestCollaborationEngine_CreateNestedSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected depth exceeded error")
 	}
-	if err != ErrDepthExceeded {
+	if !errors.Is(err, ErrDepthExceeded) {
 		t.Errorf("expected ErrDepthExceeded, got %v", err)
 	}
 }

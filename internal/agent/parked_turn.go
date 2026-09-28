@@ -229,9 +229,7 @@ func (p *TurnParker) Start(ctx context.Context) {
 
 	p.reArm(ctx)
 
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
+	p.wg.Go(func() {
 		ticker := time.NewTicker(p.pollInterval)
 		defer ticker.Stop()
 		for {
@@ -242,7 +240,7 @@ func (p *TurnParker) Start(ctx context.Context) {
 				p.drainDue(runCtx)
 			}
 		}
-	}()
+	})
 	p.logger.Info("turn parker started",
 		"poll_interval", p.pollInterval,
 		"max_wait", p.maxWait,

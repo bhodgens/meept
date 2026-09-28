@@ -18,11 +18,11 @@ import (
 // error-branch tests can drive RunOnce's LLM call without an HTTP server.
 type errChatter struct {
 	err       error
-	callCount int32
+	callCount atomic.Int32
 }
 
 func (m *errChatter) Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
-	atomic.AddInt32(&m.callCount, 1)
+	m.callCount.Add(1)
 	return nil, m.err
 }
 
@@ -35,7 +35,7 @@ func (m *errChatter) Config() *llm.ModelConfig {
 }
 
 // chatterCalls returns the LLM call count (atomic; the loop may retry).
-func (m *errChatter) chatterCalls() int { return int(atomic.LoadInt32(&m.callCount)) }
+func (m *errChatter) chatterCalls() int { return int(m.callCount.Load()) }
 
 // newThrottleTestLoop builds a loop wired to a two-model alias resolver and
 // the failing chatter, mirroring the shadow-specialist same-package pattern

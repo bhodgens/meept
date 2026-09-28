@@ -310,7 +310,7 @@ func (s *SoulProvider) watchLoop(ctx context.Context, watcher *fsnotify.Watcher)
 func (s *SoulProvider) reread() {
 	var content []byte
 	var err error
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		content, err = os.ReadFile(s.path)
 		if err == nil {
 			break

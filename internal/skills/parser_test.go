@@ -496,8 +496,7 @@ func TestParseSkillFile_NotFound(t *testing.T) {
 		t.Error("Expected error for nonexistent file")
 	}
 
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
+	if _, ok := errors.AsType[*ParseError](err); !ok {
 		t.Errorf("Expected ParseError, got %T", err)
 	}
 }

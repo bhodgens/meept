@@ -79,7 +79,7 @@ func TestHealthRecovery_BrokenToAtRiskToHealthy(t *testing.T) {
 	current := GoalBroken
 
 	// 0, 1, 2 successes: still broken
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		current = HealthRecoveryFunc(i+1, recoveryThreshold, current)
 		if current != GoalBroken {
 			t.Fatalf("after %d successes: health = %s, want broken", i+1, current.String())
@@ -97,7 +97,7 @@ func TestHealthRecovery_BrokenToAtRiskToHealthy(t *testing.T) {
 	// `consecutiveSuccesses` is reset when the health transitions.
 	// So after broken→at_risk, we need 3 MORE successes.
 	current = GoalAtRisk
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		current = HealthRecoveryFunc(i+1, recoveryThreshold, current)
 		if current != GoalAtRisk {
 			t.Fatalf("at_risk with %d successes: health = %s, want at_risk", i+1, current.String())
@@ -356,7 +356,7 @@ func TestAppendHistory_RingBuffer(t *testing.T) {
 
 func TestAppendHistory_DefaultCap(t *testing.T) {
 	g := &Goal{ID: "g-g4"} // MaxPlanHistory = 0 → default
-	for i := 0; i < DefaultMaxPlanHistory+5; i++ {
+	for i := range DefaultMaxPlanHistory + 5 {
 		g.AppendHistory(fmt.Sprintf("p-%d", i))
 	}
 	h := g.History()
@@ -382,7 +382,7 @@ func TestAppendHistory_PersistRoundTrip(t *testing.T) {
 		Source:         SourceUser,
 		MaxPlanHistory: 5,
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		g.AppendHistory(fmt.Sprintf("p-%d", i))
 	}
 	if err := store.Create(context.Background(), g); err != nil {
@@ -747,7 +747,7 @@ func TestGoal_ConcurrentActivePlanOps(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// 20 goroutines adding/removing plans concurrently.
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()

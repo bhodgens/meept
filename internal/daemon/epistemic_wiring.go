@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,11 +68,11 @@ Valid relationships:
 Return a JSON array of objects with keys: relation, target_id, confidence (0.0-1.0), explanation.
 If no relationships, return [].`
 
-	var candStr string
+	var candStr strings.Builder
 	for _, c := range candidates {
-		candStr += fmt.Sprintf("- id=%s type=%s content=%q\n", c.ID, c.Type, c.Content)
+		fmt.Fprintf(&candStr, "- id=%s type=%s content=%q\n", c.ID, c.Type, c.Content)
 	}
-	user := fmt.Sprintf("New memory: id=%s type=%s content=%q\n\nCandidates:\n%s", newMem.ID, newMem.Type, newMem.Content, candStr)
+	user := fmt.Sprintf("New memory: id=%s type=%s content=%q\n\nCandidates:\n%s", newMem.ID, newMem.Type, newMem.Content, candStr.String())
 
 	return []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: system},

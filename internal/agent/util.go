@@ -29,7 +29,7 @@ func truncateString(s string, maxLen int) string {
 // line from a markdown body. This is used to produce a short summary from agent
 // purpose bodies that start with "# Name" followed by a description paragraph.
 func extractBriefDescription(body string) string {
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue

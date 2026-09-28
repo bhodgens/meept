@@ -236,7 +236,7 @@ func TestExecutor_RequiresTools(t *testing.T) {
 // separately in every subtest.
 func asExecutorError(err error, target **ExecutorError) bool {
 	for e := err; e != nil; {
-		if execErr, ok := e.(*ExecutorError); ok {
+		if execErr, ok := e.(*ExecutorError); ok { //nolint:errorlint // hand-rolled unwrap helper implementing errors.As semantics
 			*target = execErr
 			return true
 		}

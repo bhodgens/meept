@@ -55,7 +55,7 @@ func TestParsePhaseOutput_EmptyPhasesDropped(t *testing.T) {
 
 func TestParsePhaseOutput_CapsPhaseCount(t *testing.T) {
 	var phases []map[string]any
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		phases = append(phases, map[string]any{
 			"name":  "P",
 			"steps": []map[string]any{{"description": "x"}},

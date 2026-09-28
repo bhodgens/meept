@@ -17,7 +17,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -55,7 +54,7 @@ type sealWiringFixture struct {
 func newSealWiringFixture(t *testing.T, compilerEnabled bool) *sealWiringFixture {
 	t.Helper()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -460,7 +459,7 @@ func TestPlanSealWiring_FlagOffLegacyIntact(t *testing.T) {
 	// to executing with fallback steps. NO draft is created. The registry
 	// carries the planner spec (nil LLM client), matching the agent-package
 	// gate test.
-	reg := agent.NewAgentRegistry(agent.RegistryConfig{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	reg := agent.NewAgentRegistry(agent.RegistryConfig{Logger: slog.New(slog.DiscardHandler)})
 	spec := &agent.AgentSpec{
 		ID:          config.AgentIDPlanner,
 		Name:        "planner",

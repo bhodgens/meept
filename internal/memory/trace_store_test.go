@@ -62,8 +62,8 @@ func TestTraceStore_Constructor_Basic(t *testing.T) {
 
 func TestTraceStore_Constructor_MultipleTraces(t *testing.T) {
 	var spans []SpanRecord
-	for tr := 0; tr < 3; tr++ {
-		for sp := 0; sp < 5; sp++ {
+	for tr := range 3 {
+		for sp := range 5 {
 			spans = append(spans, SpanRecord{
 				TraceID:   fmt.Sprintf("trace-%d", tr),
 				SpanID:    fmt.Sprintf("trace-%d-span-%d", tr, sp),
@@ -220,7 +220,7 @@ func TestTraceStore_OversizedSummary(t *testing.T) {
 	// Build a trace large enough to exceed the ~150 KB budget.
 	// 30 spans * ~15 KB each (10 KB Input + 5 KB Output + overhead) > 150 KB.
 	var spans []SpanRecord
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		spans = append(spans, SpanRecord{
 			TraceID:   "oversized",
 			SpanID:    fmt.Sprintf("s%d", i),
@@ -381,7 +381,7 @@ func TestTraceStore_OversizedReturnsPlanningMetadata_Phase3(t *testing.T) {
 	// Create a trace that exceeds 150KB budget.
 	// Each span with 10KB payload takes about 10KB, so 20 spans = ~200KB.
 	var spans []SpanRecord
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		spans = append(spans, SpanRecord{
 			TraceID:   "big-trace",
 			SpanID:    fmt.Sprintf("s%d", i),
@@ -463,7 +463,7 @@ func TestTraceStore_RecommendationGuidesFollowUp_Phase3(t *testing.T) {
 
 func TestTraceStore_ViewSpansOversized_Phase3(t *testing.T) {
 	var spans []SpanRecord
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		spans = append(spans, SpanRecord{
 			TraceID:   "big-t",
 			SpanID:    fmt.Sprintf("sp%d", i),
@@ -482,7 +482,7 @@ func TestTraceStore_ViewSpansOversized_Phase3(t *testing.T) {
 
 	// Request a subset that's still oversize.
 	var ids []string
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		ids = append(ids, fmt.Sprintf("sp%d", i))
 	}
 	result, err := store.ViewSpans("big-t", ids)
@@ -507,7 +507,7 @@ func TestViewSpans_TooManyIDs(t *testing.T) {
 	}
 
 	var ids []string
-	for i := 0; i < 250; i++ {
+	for i := range 250 {
 		ids = append(ids, fmt.Sprintf("s%d", i))
 	}
 	_, err = store.ViewSpans("t1", ids)
@@ -577,7 +577,7 @@ func TestSearchTrace_Matches(t *testing.T) {
 
 func TestSearchTrace_MaxMatches(t *testing.T) {
 	var spans []SpanRecord
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		spans = append(spans, SpanRecord{
 			TraceID:   "t1",
 			SpanID:    fmt.Sprintf("s%d", i),
@@ -702,7 +702,7 @@ func TestTraceStore_E2E_SmallTrace(t *testing.T) {
 	path := filepath.Join(dir, "traces.jsonl")
 
 	var spans []SpanRecord
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		spans = append(spans, SpanRecord{
 			TraceID:   "e2e",
 			SpanID:    fmt.Sprintf("e2e-%d", i),
@@ -760,7 +760,7 @@ func TestTraceStore_E2E_SmallTrace(t *testing.T) {
 // makeJSONLSpans creates trace spans for testing.
 func makeJSONLSpans(count int, track string) []SpanRecord {
 	var spans []SpanRecord
-	for i := 0; i < count; i++ {
+	for i := range count {
 		spans = append(spans, SpanRecord{
 			TraceID:   track,
 			SpanID:    fmt.Sprintf("span-%d", i),

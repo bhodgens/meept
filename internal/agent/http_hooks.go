@@ -180,9 +180,7 @@ func (h *HTTPHook) Execute(ctx context.Context, payload any) error {
 	htype := h.hookType
 	h.mu.RUnlock()
 
-	h.wg.Add(1)
-	go func() {
-		defer h.wg.Done()
+	h.wg.Go(func() {
 		err := h.executeSync(ctx, payload)
 		if err != nil {
 			if h.logger != nil {
@@ -219,7 +217,7 @@ func (h *HTTPHook) Execute(ctx context.Context, payload any) error {
 				"url", h.config.URL,
 			)
 		}
-	}()
+	})
 
 	return nil
 }
@@ -339,8 +337,7 @@ func shouldRetryHookError(err error) bool {
 	}
 	// A non-retryable HTTP status (e.g. 401/403/404) that reached this
 	// function was classified non-retryable by IsRetryable above — stop.
-	var httpErr *HTTPError
-	if errors.As(err, &httpErr) {
+	if _, ok := errors.AsType[*HTTPError](err); ok {
 		return false
 	}
 	// Fallback: retry on any non-nil error to preserve the original

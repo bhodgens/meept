@@ -11,16 +11,16 @@ package agent
 import (
 	"context"
 	"errors"
-	"log/slog"
-	"strings"
-	"sync"
-	"testing"
-
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"log/slog"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
 )
 
 // fakeRestoreStore is a minimal in-memory sessionMessageReader for
@@ -306,9 +306,9 @@ func TestConversationRestore_StoreErrorAndEmpty(t *testing.T) {
 
 // lastUserContent returns the content of the last user-role message.
 func lastUserContent(messages []llm.ChatMessage) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == llm.RoleUser {
-			return messages[i].Content
+	for _, msg := range slices.Backward(messages) {
+		if msg.Role == llm.RoleUser {
+			return msg.Content
 		}
 	}
 	return ""
@@ -389,7 +389,7 @@ func newCapturingLogger() *capturingLogger {
 }
 
 func (c *capturingLogger) countContaining(needle string) int {
-	c.syncBuffer.mu.Lock()
-	defer c.syncBuffer.mu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return strings.Count(string(c.buf), needle)
 }

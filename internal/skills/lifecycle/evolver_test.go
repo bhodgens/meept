@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,9 +118,7 @@ func (s *stubUsageTracker) GetAllStats() (map[string]*UsageStats, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := make(map[string]*UsageStats, len(s.allStats))
-	for k, v := range s.allStats {
-		result[k] = v
-	}
+	maps.Copy(result, s.allStats)
 	return result, nil
 }
 
@@ -345,7 +344,9 @@ func TestEvolver_PassB_Promote(t *testing.T) {
 		UseCount:    10,
 		CreatedAt:   time.Now(),
 	}
-	lp.StorePattern(context.Background(), pattern)
+	if err := lp.StorePattern(context.Background(), pattern); err != nil {
+		t.Fatalf("StorePattern: %v", err)
+	}
 
 	// Empty capability index (no existing skill covers this pattern).
 	capIndex := skills.BuildCapabilityIndex(skills.NewSkillIndex())
@@ -401,7 +402,9 @@ func TestEvolver_PassB_SkipCoveredByExistingSkill(t *testing.T) {
 		UseCount:    10,
 		CreatedAt:   time.Now(),
 	}
-	lp.StorePattern(context.Background(), pattern)
+	if err := lp.StorePattern(context.Background(), pattern); err != nil {
+		t.Fatalf("StorePattern: %v", err)
+	}
 
 	// Build a capability index that already covers this pattern.
 	skillIndex := skills.NewSkillIndex()
@@ -1093,7 +1096,7 @@ func TestEvolver_FullCycle_AllThreePasses(t *testing.T) {
 	lpCfg := selfimprove.DefaultLearningConfig()
 	lp := selfimprove.NewLearningPipeline(lpCfg, nil, dir, slog.Default())
 	_ = lp.Initialize(context.Background())
-	lp.StorePattern(context.Background(), &selfimprove.LearnedPattern{
+	if err := lp.StorePattern(context.Background(), &selfimprove.LearnedPattern{
 		ID:          "promote-me",
 		Type:        selfimprove.PatternTypeStrategy,
 		Status:      selfimprove.PatternStatusActive,
@@ -1103,7 +1106,9 @@ func TestEvolver_FullCycle_AllThreePasses(t *testing.T) {
 		Confidence:  0.95,
 		UseCount:    12,
 		CreatedAt:   time.Now(),
-	})
+	}); err != nil {
+		t.Fatalf("StorePattern: %v", err)
+	}
 
 	capIndex := skills.BuildCapabilityIndex(skills.NewSkillIndex())
 

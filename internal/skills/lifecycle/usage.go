@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -270,7 +271,7 @@ func (ut *UsageTrackerImpl) GetStats(skillName string) (*UsageStats, error) {
 
 	err := ut.db.Get(&row, `SELECT * FROM skill_usage WHERE skill_name = ?`, skillName)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return &UsageStats{SkillName: skillName}, nil
 		}
 		return nil, fmt.Errorf("usage tracker: get stats: %w", err)

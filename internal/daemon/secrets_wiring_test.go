@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -11,7 +10,7 @@ import (
 )
 
 func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // TestWireSecretsProxy_DisabledIsNoOp verifies the nil-safe no-op path when
@@ -49,8 +48,7 @@ func TestWireSecretsProxy_EnabledWiresBrokerAndAddr(t *testing.T) {
 		Logger: discardLogger(),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := c.wireSecretsProxy(ctx); err != nil {
 		t.Fatalf("wireSecretsProxy failed: %v", err)
 	}

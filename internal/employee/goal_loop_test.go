@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -27,7 +28,7 @@ type stubReflector struct {
 	mu        sync.Mutex
 	responses []*llm.Response
 	errs      []error
-	calls     int32
+	calls     atomic.Int32
 	default_  *llm.Response
 }
 
@@ -50,7 +51,7 @@ func (s *stubReflector) queueError(err error) {
 }
 
 func (s *stubReflector) Chat(_ context.Context, _ []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
-	atomic.AddInt32(&s.calls, 1)
+	s.calls.Add(1)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.errs) > 0 {
@@ -72,7 +73,7 @@ func (s *stubReflector) ChatWithProgress(_ context.Context, msgs []llm.ChatMessa
 	return s.Chat(context.Background(), msgs, opts...)
 }
 
-func (s *stubReflector) CallCount() int32 { return atomic.LoadInt32(&s.calls) }
+func (s *stubReflector) CallCount() int32 { return s.calls.Load() }
 
 // stubExecutor is a controllable BotExecutor for tests.
 type stubExecutor struct {
@@ -80,7 +81,7 @@ type stubExecutor struct {
 	output string
 	tokens int
 	err    error
-	calls  int32
+	calls  atomic.Int32
 	execFn func(ctx context.Context, systemPrompt, userMessage string) (string, int, error)
 }
 
@@ -92,7 +93,7 @@ func newStubExecutor() *stubExecutor {
 }
 
 func (e *stubExecutor) ExecuteBot(ctx context.Context, systemPrompt, userMessage string) (string, int, error) {
-	atomic.AddInt32(&e.calls, 1)
+	e.calls.Add(1)
 	e.mu.Lock()
 	execFn := e.execFn
 	e.mu.Unlock()
@@ -121,7 +122,7 @@ func (e *stubExecutor) succeedWith(output string, tokens int) {
 	e.err = nil
 }
 
-func (e *stubExecutor) CallCount() int32 { return atomic.LoadInt32(&e.calls) }
+func (e *stubExecutor) CallCount() int32 { return e.calls.Load() }
 
 // stubPlanner is a controllable PlanCreator for tests.
 type stubPlanner struct {
@@ -541,14 +542,20 @@ func TestReflect_ResetOnSuccess(t *testing.T) {
 	okResult := &bot.BotExecutionResult{Success: true, Output: "ok"}
 
 	// Two failures.
-	loop.Reflect(context.Background(), PlanRef{ID: "p1"}, failResult)
-	loop.Reflect(context.Background(), PlanRef{ID: "p1"}, failResult)
+	if _, err := loop.Reflect(context.Background(), PlanRef{ID: "p1"}, failResult); err != nil {
+		t.Fatalf("reflect failure 1: %v", err)
+	}
+	if _, err := loop.Reflect(context.Background(), PlanRef{ID: "p1"}, failResult); err != nil {
+		t.Fatalf("reflect failure 2: %v", err)
+	}
 	if loop.ConsecutiveFailures() != 2 {
 		t.Fatalf("expected 2 consecutive failures, got %d", loop.ConsecutiveFailures())
 	}
 
 	// Success resets.
-	loop.Reflect(context.Background(), PlanRef{ID: "p1"}, okResult)
+	if _, err := loop.Reflect(context.Background(), PlanRef{ID: "p1"}, okResult); err != nil {
+		t.Fatalf("reflect success: %v", err)
+	}
 	if loop.ConsecutiveFailures() != 0 {
 		t.Fatalf("expected 0 failures after success, got %d", loop.ConsecutiveFailures())
 	}
@@ -816,8 +823,12 @@ func TestResetFailureCounter(t *testing.T) {
 		WithReflector(reflector)
 
 	fail := &bot.BotExecutionResult{Success: false, Error: "err"}
-	loop.Reflect(context.Background(), PlanRef{ID: "p1"}, fail)
-	loop.Reflect(context.Background(), PlanRef{ID: "p1"}, fail)
+	if _, err := loop.Reflect(context.Background(), PlanRef{ID: "p1"}, fail); err != nil {
+		t.Fatalf("reflect 1: %v", err)
+	}
+	if _, err := loop.Reflect(context.Background(), PlanRef{ID: "p1"}, fail); err != nil {
+		t.Fatalf("reflect 2: %v", err)
+	}
 	if loop.ConsecutiveFailures() != 2 {
 		t.Fatalf("expected 2 failures before reset, got %d", loop.ConsecutiveFailures())
 	}
@@ -1337,11 +1348,7 @@ func TestDecide_Tier3_EmitsInvocationMetrics(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		if name == "employee.invocations" {
-			cp := make(map[string]string, len(tags))
-			for k, v := range tags {
-				cp[k] = v
-			}
-			metrics = append(metrics, metric{name: name, tags: cp})
+			metrics = append(metrics, metric{name: name, tags: maps.Clone(tags)})
 		}
 	})
 
@@ -1403,11 +1410,7 @@ func TestDecide_Tier3_EmitsEscalatedMetric(t *testing.T) {
 	loop.SetEmitMetricFunc(func(name string, value float64, tags map[string]string) {
 		mu.Lock()
 		defer mu.Unlock()
-		cp := make(map[string]string, len(tags))
-		for k, v := range tags {
-			cp[k] = v
-		}
-		metrics = append(metrics, metric{name: name, tags: cp})
+		metrics = append(metrics, metric{name: name, tags: maps.Clone(tags)})
 	})
 
 	if err := loop.Decide(context.Background(), basicTrigger()); err != nil {

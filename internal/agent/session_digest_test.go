@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"io"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,7 @@ import (
 )
 
 func digestTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // newDigestTestDispatcher builds a Dispatcher backed by a real task

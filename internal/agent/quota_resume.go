@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"time"
 
@@ -60,7 +59,7 @@ type quotaTurnPayload struct {
 	// can emit the final turn.terminal under the acked id; it must
 	// survive the persistence round-trip like the rest of the payload.
 	TurnID   string    `json:"turn_id,omitempty"`
-	ParkedAt time.Time `json:"parked_at,omitempty"`
+	ParkedAt time.Time `json:"parked_at,omitzero"`
 }
 
 // quotaTurnToRecord encodes a QuotaParkedTurn as a Class=quota
@@ -175,7 +174,7 @@ func NewQuotaResumeWatcher(logger *slog.Logger, resumeFunc func(ctx context.Cont
 			resumeFunc(ctx, turn)
 		}
 	}
-	w.turns = NewTurnParker(slog.New(slog.NewTextHandler(io.Discard, nil)), adapted, maxWait)
+	w.turns = NewTurnParker(slog.New(slog.DiscardHandler), adapted, maxWait)
 	return w
 }
 

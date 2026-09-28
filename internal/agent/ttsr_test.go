@@ -409,11 +409,9 @@ func TestTTSRThreadSafety(t *testing.T) {
 
 	// Concurrent CheckDelta calls
 	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = mgr.CheckDelta("text", "trigger", 1)
-		}()
+		})
 	}
 
 	// Concurrent MarkInjected calls
@@ -427,11 +425,9 @@ func TestTTSRThreadSafety(t *testing.T) {
 
 	// Concurrent InjectionState calls
 	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = mgr.InjectionState()
-		}()
+		})
 	}
 
 	wg.Wait()

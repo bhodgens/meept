@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1065,7 +1066,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			if !llm.IsLoopbackBaseURL(provider.Options.BaseURL) {
 				logger.Warn("Skipping runtime config: baseURL is not loopback",
 					"provider", providerID,
-					"baseURL", provider.Options.BaseURL)
+					"base_url", provider.Options.BaseURL)
 				continue
 			}
 
@@ -1750,9 +1751,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				// Create adapter to implement VectorSearcher interface
 				vectorSearcher = memory.NewShardManagerVectorSearcher(shardMgr, shardTypes)
 				logger.Info("Vector shard manager initialized",
-					"basePath", cfg.Memory.Embeddings.ShardBasePath,
-					"maxRAMShards", cfg.Memory.Embeddings.MaxRAMShards,
-					"shardTypes", cfg.Memory.Embeddings.ShardTypes,
+					"base_path", cfg.Memory.Embeddings.ShardBasePath,
+					"max_ram_shards", cfg.Memory.Embeddings.MaxRAMShards,
+					"shard_types", cfg.Memory.Embeddings.ShardTypes,
 				)
 			}
 		}
@@ -3797,37 +3798,37 @@ func (c *Components) Start(ctx context.Context) error {
 		if c.cancel != nil {
 			c.cancel()
 		}
-		for i := len(startedHandlers) - 1; i >= 0; i-- {
-			name := startedHandlers[i]
+		for _, name := range slices.Backward(startedHandlers) {
 			c.Logger.Debug("rolling back handler", "handler", name)
+			var stopErr error
 			switch name {
 			case "chat":
 				if c.ChatHandler != nil {
-					c.ChatHandler.Stop(ctx)
+					stopErr = c.ChatHandler.Stop(ctx)
 				}
 			case "status":
 				if c.StatusHandler != nil {
-					c.StatusHandler.Stop(ctx)
+					stopErr = c.StatusHandler.Stop(ctx)
 				}
 			case "session":
 				if c.SessionHandler != nil {
-					c.SessionHandler.Stop(ctx)
+					stopErr = c.SessionHandler.Stop(ctx)
 				}
 			case "queue":
 				if c.QueueHandler != nil {
-					c.QueueHandler.Stop(ctx)
+					stopErr = c.QueueHandler.Stop(ctx)
 				}
 			case "task":
 				if c.TaskHandler != nil {
-					c.TaskHandler.Stop(ctx)
+					stopErr = c.TaskHandler.Stop(ctx)
 				}
 			case "worker":
 				if c.WorkerHandler != nil {
-					c.WorkerHandler.Stop(ctx)
+					stopErr = c.WorkerHandler.Stop(ctx)
 				}
 			case "memory":
 				if c.MemoryHandler != nil {
-					c.MemoryHandler.Stop(ctx)
+					stopErr = c.MemoryHandler.Stop(ctx)
 				}
 			case "instructions":
 				if c.InstructionHandler != nil {
@@ -3843,25 +3844,23 @@ func (c *Components) Start(ctx context.Context) error {
 				}
 			case "change-journal":
 				if c.ChangeJournal != nil {
-					if err := c.ChangeJournal.Close(); err != nil {
-						c.Logger.Warn("Change journal close failed", "error", err)
-					}
+					stopErr = c.ChangeJournal.Close()
 				}
 			case "pool":
 				if c.WorkerPool != nil {
-					c.WorkerPool.Stop(ctx)
+					stopErr = c.WorkerPool.Stop(ctx)
 				}
 			case "scheduler":
 				if c.Scheduler != nil {
-					c.Scheduler.Stop(ctx)
+					stopErr = c.Scheduler.Stop(ctx)
 				}
 			case "orchestrator":
 				if c.Orchestrator != nil {
-					c.Orchestrator.Stop(ctx)
+					stopErr = c.Orchestrator.Stop(ctx)
 				}
 			case "team":
 				if c.TeamOrchestrator != nil {
-					c.TeamOrchestrator.Stop(ctx)
+					stopErr = c.TeamOrchestrator.Stop(ctx)
 				}
 			case "watchdog":
 				if c.Watchdog != nil {
@@ -3885,17 +3884,15 @@ func (c *Components) Start(ctx context.Context) error {
 				}
 			case "syncmgr":
 				if c.SyncManager != nil {
-					c.SyncManager.Stop()
+					stopErr = c.SyncManager.Stop()
 				}
 			case "sync":
 				if c.SyncHandler != nil {
-					c.SyncHandler.Stop(ctx)
+					stopErr = c.SyncHandler.Stop(ctx)
 				}
 			case "web":
 				if c.WebServer != nil {
-					if err := c.WebServer.Shutdown(ctx); err != nil {
-						slog.Warn("web server shutdown error", "error", err)
-					}
+					stopErr = c.WebServer.Shutdown(ctx)
 				}
 			case "telegram":
 				if c.TelegramBot != nil {
@@ -3911,21 +3908,15 @@ func (c *Components) Start(ctx context.Context) error {
 				}
 			case "cluster":
 				if c.ClusterEngine != nil {
-					if err := c.ClusterEngine.Stop(); err != nil {
-						slog.Warn("cluster engine stop error", "error", err)
-					}
+					stopErr = c.ClusterEngine.Stop()
 				}
 			case "clustergit":
 				if c.ClusterGitSync != nil {
-					if err := c.ClusterGitSync.Stop(); err != nil {
-						slog.Warn("cluster git sync stop error", "error", err)
-					}
+					stopErr = c.ClusterGitSync.Stop()
 				}
 			case "clustercrm":
 				if c.GRPCTransport != nil {
-					if err := c.GRPCTransport.Stop(); err != nil {
-						slog.Warn("cluster gRPC transport stop error", "error", err)
-					}
+					stopErr = c.GRPCTransport.Stop()
 				}
 			case "config_sync":
 				if c.ConfigSyncer != nil {
@@ -3939,6 +3930,9 @@ func (c *Components) Start(ctx context.Context) error {
 				if c.SyncPuller != nil {
 					c.SyncPuller.Stop()
 				}
+			}
+			if stopErr != nil {
+				c.Logger.Warn("component stop error during rollback", "handler", name, "error", stopErr)
 			}
 		}
 	}()
@@ -4848,7 +4842,11 @@ func (c *Components) Start(ctx context.Context) error {
 			interval = 30 * time.Minute
 		}
 		reflectionTicker := time.NewTicker(interval)
-		go func() {
+		// Daemon-lifetime goroutine: the reflection timer must outlive the
+		// caller's request/boot context — it exits via c.ctx.Done() (the
+		// components lifecycle context cancelled on Stop), mirroring the
+		// detached health-check runs in internal/daemon/AGENTS.md.
+		go func() { //nolint:gosec // daemon-lifetime goroutine must outlive request
 			defer reflectionTicker.Stop()
 			for {
 				select {
@@ -7860,12 +7858,11 @@ func (p *AgentJobProcessor) WithBus(b *bus.MessageBus) *AgentJobProcessor {
 		sub := b.Subscribe("agent-job-processor-evidence", "tool.execution.complete")
 		p.evidenceSub = sub
 		p.toolEvidence.wg.Add(1)
-		go func() {
-			defer p.toolEvidence.wg.Done()
+		p.toolEvidence.wg.Go(func() {
 			for msg := range sub.Channel {
 				p.toolEvidence.absorb(msg.Payload)
 			}
-		}()
+		})
 	}
 	return p
 }
@@ -8259,8 +8256,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		// Quota is NOT an alias failure: no RecordAliasFailure, no retry or
 		// block mutation here — the loop already did its rotation/parking
 		// before the error escaped.
-		var quotaErr *llm.QuotaResetError
-		if errors.As(err, &quotaErr) {
+		if quotaErr, ok := errors.AsType[*llm.QuotaResetError](err); ok {
 			p.publishQuotaWait(job, stepPayload.TaskID, quotaErr)
 			unblockAt := quotaErr.ResetAt
 			if unblockAt.IsZero() {
@@ -8719,7 +8715,10 @@ func (a *agentListerAdapter) DelegateTask(ctx context.Context, agentID, message 
 	conversationID := id.Generate("web-delegate-")
 	response, err := a.registry.RunAgent(ctx, agentID, message, conversationID)
 	if err != nil {
-		return web.DelegateResult{AgentID: agentID, Status: "error", Error: err.Error()}, nil
+		// Contract of web.DelegateTask: agent-side failures are reported in
+		// the DelegateResult.Status/Error fields for the web client, not as
+		// a transport error (only registry absence is a hard error above).
+		return web.DelegateResult{AgentID: agentID, Status: "error", Error: err.Error()}, nil //nolint:nilerr // error is surfaced via DelegateResult.Status per the web.DelegateTask contract
 	}
 
 	return web.DelegateResult{AgentID: agentID, Status: "ok", Response: response}, nil
@@ -8805,7 +8804,12 @@ func discoverProjectFiles(baseDir string, logger *slog.Logger) []string {
 		".scala": true, ".rb": true, ".elixir": true,
 	}
 	err := filepath.WalkDir(baseDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			// Unreadable entries are skipped: discovery is best-effort and a
+			// single inaccessible path must not fail the whole listing.
+			return nil //nolint:nilerr // intentional skip of unreadable walk entries (best-effort discovery)
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if exts[filepath.Ext(path)] {
@@ -8830,7 +8834,7 @@ func gitLsFiles(dir string) ([]string, error) {
 		return nil, err
 	}
 	var files []string
-	for _, f := range strings.Split(string(out[:len(out)-1]), "\x00") {
+	for f := range strings.SplitSeq(string(out[:len(out)-1]), "\x00") {
 		if f != "" {
 			files = append(files, filepath.Join(dir, f))
 		}
@@ -8902,7 +8906,7 @@ type sessionProjectResolver struct {
 // manager is absent or the project is unknown.
 func (r sessionProjectResolver) GetProject(ctx context.Context, id string) (*session.ProjectBinding, error) {
 	if r.pm == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // absent manager is the documented "no binding" contract, not an error
 	}
 	p, err := r.pm.Get(ctx, id)
 	if err != nil || p == nil {
@@ -8916,7 +8920,7 @@ func (r sessionProjectResolver) GetProject(ctx context.Context, id string) (*ses
 // session.create path bind exactly like the services path.
 func (r sessionProjectResolver) CreateOrResolveProject(ctx context.Context, path string) (*session.ProjectBinding, error) {
 	if r.pm == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // absent manager is the documented "no binding" contract, not an error
 	}
 	p, err := r.pm.CreateOrResolve(ctx, path)
 	if err != nil || p == nil {

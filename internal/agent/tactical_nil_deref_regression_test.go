@@ -68,7 +68,7 @@ func TestOnJobCompleted_BusyStormAtStepRefreshDoesNotPanic(t *testing.T) {
 	calls := 0
 	ts.stepStoreReadHook = func(id string, byJob bool) (*task.TaskStep, error) {
 		if byJob {
-			return nil, nil // pass through to the real store
+			return nil, nil //nolint:nilnil // pass through to the real store
 		}
 		calls++
 		return nil, task.ErrStepNotFound // (nil, err) — the BUSY-storm shape
@@ -161,11 +161,11 @@ func TestTaskStoreConcurrentWritesNoBusy(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, goroutines*iters)
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < iters; i++ {
+			for i := range iters {
 				if _, err := store.IncrementCompletedJobs(parent.ID); err != nil {
 					errCh <- fmt.Errorf("increment: %w", err)
 					continue
@@ -223,11 +223,11 @@ func TestQueueStoreConcurrentEnqueueNoBusy(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, goroutines*iters)
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < iters; i++ {
+			for i := range iters {
 				payload, _ := json.Marshal(map[string]any{"goroutine": id, "iter": i})
 				job, jerr := queue.NewJob(queue.JobTypeProjectTask, payload)
 				if jerr != nil {

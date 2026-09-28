@@ -154,8 +154,8 @@ func (l *GoalLoop) WithEpisodeParker(parker *EpisodeParker) *GoalLoop {
 //     schedule is the quota plan's first step (D5 base); past the
 //     horizon → give-up.
 func (p *EpisodeParker) providerWaitSchedule(err error, now time.Time) (time.Time, bool) {
-	var quotaErr *llm.QuotaResetError
-	if errors.As(err, &quotaErr) {
+	quotaErr, ok := errors.AsType[*llm.QuotaResetError](err)
+	if ok {
 		resetAt := quotaErr.ResetAt
 		if resetAt.IsZero() && quotaErr.RetryAfter > 0 {
 			resetAt = now.Add(quotaErr.RetryAfter)
@@ -399,7 +399,10 @@ func (l *GoalLoop) ResumeGoalEpisode(ctx context.Context, rec agent.ParkedTurnRe
 				"employee_id", l.employeeID)
 			return
 		}
-		l.ApproveAndExecute(ctx, *p.Plan)
+		if _, _, err := l.ApproveAndExecute(ctx, *p.Plan); err != nil {
+			l.logger.Warn("resumed goal episode approve+execute failed",
+				"employee_id", l.employeeID, "error", err)
+		}
 	case "reflect":
 		if p.Plan == nil || p.Result == nil {
 			l.logger.Warn("parked goal episode reflect missing plan/result — dropping",

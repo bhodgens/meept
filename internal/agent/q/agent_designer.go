@@ -191,7 +191,7 @@ func (d *AgentDesigner) deriveConstraints(analyses []*SessionAnalysis) AgentCons
 			TimeoutSeconds:   300,
 			MaxTokensPerTurn: 4096,
 			MaxMemoryRefs:    20,
-			Temperature:      ptrFloat(0.3),
+			Temperature:      new(0.3),
 		}
 	}
 
@@ -213,7 +213,7 @@ func (d *AgentDesigner) deriveConstraints(analyses []*SessionAnalysis) AgentCons
 		TimeoutSeconds:   maxInt(avgDuration+60, 300),
 		MaxTokensPerTurn: maxInt(avgTokens+1000, 4096),
 		MaxMemoryRefs:    20,
-		Temperature:      ptrFloat(0.3),
+		Temperature:      new(0.3),
 	}
 }
 
@@ -437,10 +437,6 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
-}
-
-func ptrFloat(f float64) *float64 {
-	return &f
 }
 
 // GenerateFullAgentFile generates a complete AGENT.md file content.

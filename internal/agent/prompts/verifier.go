@@ -80,18 +80,18 @@ You MUST include at least one CHECK before your VERDICT.
 
 `)
 
-	b.WriteString(fmt.Sprintf("### Task Description\n%s\n\n", taskDescription))
+	fmt.Fprintf(&b, "### Task Description\n%s\n\n", taskDescription)
 
 	if len(filesChanged) > 0 {
 		b.WriteString("### Files Changed\n")
 		for _, f := range filesChanged {
-			b.WriteString(fmt.Sprintf("- %s\n", f))
+			fmt.Fprintf(&b, "- %s\n", f)
 		}
 		b.WriteString("\n")
 	}
 
 	if approach != "" {
-		b.WriteString(fmt.Sprintf("### Implementation Approach\n%s\n\n", approach))
+		fmt.Fprintf(&b, "### Implementation Approach\n%s\n\n", approach)
 	}
 
 	b.WriteString(`## Strict Prohibitions

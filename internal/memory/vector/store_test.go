@@ -245,7 +245,7 @@ func TestBatchInsert(t *testing.T) {
 	embeddings := make([][]float32, n)
 	contents := make([]string, n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		memoryIDs[i] = fmt.Sprintf("mem-%d", i)
 		contents[i] = fmt.Sprintf("content item %d", i)
 		emb, err := provider.GenerateEmbedding(ctx, contents[i])
@@ -405,7 +405,7 @@ func BenchmarkInsert(b *testing.B) {
 			embedding, _ := provider.GenerateEmbedding(ctx, "benchmark item")
 
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for i := range b.N {
 				_ = shard.Insert(ctx, string(rune(i%26)), embedding, "benchmark content")
 			}
 		})
@@ -444,7 +444,7 @@ func BenchmarkSearch(b *testing.B) {
 				ctx := context.Background()
 
 				// Pre-populate
-				for i := 0; i < size; i++ {
+				for i := range size {
 					emb, _ := provider.GenerateEmbedding(ctx, "item")
 					_ = shard.Insert(ctx, string(rune(i%26)), emb, "item")
 				}
@@ -453,7 +453,7 @@ func BenchmarkSearch(b *testing.B) {
 				queryEmb, _ := provider.GenerateEmbedding(ctx, "query")
 
 				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
+				for range b.N {
 					_, _ = shard.Search(ctx, queryEmb, 10, 50)
 				}
 			})
@@ -480,13 +480,13 @@ func BenchmarkDimensionComparison(b *testing.B) {
 			provider := newMockProvider(dim)
 			ctx := context.Background()
 
-			for i := 0; i < nItems; i++ {
+			for i := range nItems {
 				emb, _ := provider.GenerateEmbedding(ctx, "item")
 				_ = shard.Insert(ctx, string(rune(i%26)), emb, "item")
 			}
 
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				_, _ = shard.Search(ctx, queryEmb, 10, 50)
 			}
 		})

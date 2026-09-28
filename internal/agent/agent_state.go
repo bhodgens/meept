@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 )
@@ -298,13 +299,7 @@ func (m *AgentStateMachine) isValidTransition(from, to AgentState) bool {
 		return false
 	}
 
-	for _, s := range allowed {
-		if s == to {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(allowed, to)
 }
 
 // OnTransition registers a listener for state transitions.

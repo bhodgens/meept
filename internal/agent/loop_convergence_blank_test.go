@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"io"
 	"log/slog"
 	"testing"
 )
@@ -20,7 +19,7 @@ func newTestConvergenceDetector() *convergenceDetector {
 		CycleThreshold:       3,
 		ConvergenceThreshold: 3,
 		HistorySize:          10,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, slog.New(slog.DiscardHandler))
 }
 
 // Blank replies must not count toward convergence: they belong to the
@@ -28,7 +27,7 @@ func newTestConvergenceDetector() *convergenceDetector {
 func TestConvergenceDetector_BlankResponsesDoNotConverge(t *testing.T) {
 	cd := newTestConvergenceDetector()
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if cd.recordResponse("", false) {
 			t.Fatalf("iteration %d: blank responses tripped convergence; blank turns must not converge", i+1)
 		}
@@ -63,7 +62,7 @@ func TestConvergenceDetector_IdenticalRepliesStillConverge(t *testing.T) {
 	cd := newTestConvergenceDetector()
 
 	same := "I cannot do that, sorry."
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if cd.recordResponse(same, false) {
 			// The identical-reply convergence fired at or before the
 			// threshold — but it must fire exactly AT the threshold
@@ -86,7 +85,7 @@ func TestConvergenceDetector_BlankTurnsDoNotFeedIdenticalStreak(t *testing.T) {
 	// behavior the blanks themselves converged; under the fix they are
 	// invisible and the substantive streak needs its own 3.
 	blank := func(n int) {
-		for i := 0; i < n; i++ {
+		for range n {
 			if cd.recordResponse("", false) {
 				t.Fatal("blank-only turns tripped convergence")
 			}
@@ -113,7 +112,7 @@ func TestConvergenceDetector_BlankTurnsDoNotFeedIdenticalStreak(t *testing.T) {
 func TestConvergenceDetector_ToolTurnsNeverConverge(t *testing.T) {
 	cd := newTestConvergenceDetector()
 
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		if cd.recordResponse("same text every time", true) {
 			t.Fatalf("iteration %d: tool-using turns tripped convergence", i+1)
 		}

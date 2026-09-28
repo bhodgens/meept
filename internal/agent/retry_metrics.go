@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 )
@@ -53,13 +54,9 @@ func (m *RetryMetrics) Snapshot() RetryMetricsSnapshot {
 	defer m.mu.Unlock()
 
 	byType := make(map[string]int64, len(m.retriesByType))
-	for k, v := range m.retriesByType {
-		byType[k] = v
-	}
+	maps.Copy(byType, m.retriesByType)
 	byError := make(map[string]int64, len(m.retriesByError))
-	for k, v := range m.retriesByError {
-		byError[k] = v
-	}
+	maps.Copy(byError, m.retriesByError)
 
 	return RetryMetricsSnapshot{
 		TotalRetries:    m.totalRetries,

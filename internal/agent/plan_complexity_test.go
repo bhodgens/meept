@@ -119,7 +119,7 @@ func TestEvaluatePlanComplexity(t *testing.T) {
 func TestEvaluatePlanComplexity_Deterministic(t *testing.T) {
 	req := PlanRequest{Input: "comprehensive refactor of the planner"}
 	want := EvaluatePlanComplexity(req)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if got := EvaluatePlanComplexity(req); got != want {
 			t.Fatalf("iteration %d: EvaluatePlanComplexity = %q, want stable %q", i, got, want)
 		}

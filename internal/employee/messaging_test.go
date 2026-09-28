@@ -61,7 +61,7 @@ func TestMessageStore_EnqueueDrainTransitions(t *testing.T) {
 
 func TestMessageStore_DrainFIFOAndLimit(t *testing.T) {
 	s := newTestMessageStore(t)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		m := &AgentMessage{From: "a", To: "b", Body: fmt.Sprintf("m%d", i)}
 		if err := s.Enqueue(m); err != nil {
 			t.Fatalf("Enqueue %d: %v", i, err)

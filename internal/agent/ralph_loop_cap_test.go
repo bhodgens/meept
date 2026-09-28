@@ -54,7 +54,7 @@ func TestRalphLoop_TriggerReplan_CapFailsTask(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	for i := 0; i < rl.config.MaxIterations; i++ {
+	for i := range rl.config.MaxIterations {
 		// Result carries evidence that does NOT match the task's key terms,
 		// mirroring run 3's validateEvidence failure.
 		result, _ := json.Marshal(map[string]any{

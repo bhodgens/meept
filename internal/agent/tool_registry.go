@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"math"
+	"slices"
 	"sync"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -106,10 +107,7 @@ func (dtr *DepthToolRegistry) visibleTools(depth int) []tools.Tool {
 	result := make([]tools.Tool, 0, len(dtr.leafTools)+len(dtr.gatedTools))
 
 	// Always add leaf tools.
-	//lint:ignore S1011 loop preserves future expansion logic
-	for _, t := range dtr.leafTools {
-		result = append(result, t)
-	}
+	result = append(result, dtr.leafTools...)
 
 	// Add gated tools that are still visible at this depth.
 	for _, t := range dtr.gatedTools {
@@ -353,17 +351,8 @@ func (g *GatedToolRegistry) IsAvailable(depth int, toolName string, agentState s
 		if desc.RequiresState != "" && desc.RequiresState != agentState {
 			return false
 		}
-		if len(desc.AvailableAtDepths) > 0 {
-			depthOk := false
-			for _, d := range desc.AvailableAtDepths {
-				if d == depth {
-					depthOk = true
-					break
-				}
-			}
-			if !depthOk {
-				return false
-			}
+		if len(desc.AvailableAtDepths) > 0 && !slices.Contains(desc.AvailableAtDepths, depth) {
+			return false
 		}
 	}
 
@@ -413,17 +402,8 @@ func (g *GatedToolRegistry) GetAvailableTools(depth int, agentState string) []To
 		}
 
 		// Explicit depth gate from descriptor.
-		if len(desc.AvailableAtDepths) > 0 {
-			depthOk := false
-			for _, d := range desc.AvailableAtDepths {
-				if d == depth {
-					depthOk = true
-					break
-				}
-			}
-			if !depthOk {
-				continue
-			}
+		if len(desc.AvailableAtDepths) > 0 && !slices.Contains(desc.AvailableAtDepths, depth) {
+			continue
 		}
 
 		// Usage gate check.

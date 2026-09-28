@@ -60,8 +60,10 @@ func registerMemoryRPCHandlers(server *rpc.Server, memSvc *services.MemoryServic
 		}
 		var parsed any
 		if err := json.Unmarshal(data, &parsed); err != nil {
-			// Non-JSON payload: return as a raw string field.
-			return map[string]any{"data": string(data), "format": req.Format}, nil
+			// Non-JSON payload: return as a raw string field. The export
+			// itself succeeded — only the JSON re-parse failed, so the raw
+			// payload is the correct answer, not an error.
+			return map[string]any{"data": string(data), "format": req.Format}, nil //nolint:nilerr // non-JSON export payload is returned raw by contract; the export itself succeeded
 		}
 		return map[string]any{"data": parsed, "format": req.Format}, nil
 	})

@@ -107,9 +107,9 @@ func TestLLMClassifier_RotatesOnEmptyResponse(t *testing.T) {
 }
 
 func TestLLMClassifier_NoRotationWithoutResolver(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(emptyContentResponse()))
 	}))
@@ -130,7 +130,7 @@ func TestLLMClassifier_NoRotationWithoutResolver(t *testing.T) {
 	// The client absorbs the empty completion with bounded in-loop retries
 	// (agnes-2.5-flash hardening); with no resolver, the sentinel then
 	// surfaces without any rotation.
-	if got := atomic.LoadInt32(&calls); got != llm.DefaultEmptyCompletionRetries {
+	if got := calls.Load(); got != llm.DefaultEmptyCompletionRetries {
 		t.Errorf("expected exactly %d requests without resolver, got %d", llm.DefaultEmptyCompletionRetries, got)
 	}
 }

@@ -136,7 +136,7 @@ func TestConcurrentWriteRouting(t *testing.T) {
 	ctx := context.Background()
 	done := make(chan struct{}, 20)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(idx int) {
 			defer func() { done <- struct{}{} }()
 			id := fmt.Sprintf("mem-local-conc-%d", idx)
@@ -150,7 +150,7 @@ func TestConcurrentWriteRouting(t *testing.T) {
 			_ = ds.StoreMemory(ctx, mem)
 		}(i)
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(idx int) {
 			defer func() { done <- struct{}{} }()
 			id := fmt.Sprintf("mem-gossip-conc-%d", idx)
@@ -166,7 +166,7 @@ func TestConcurrentWriteRouting(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		<-done
 	}
 
@@ -188,11 +188,11 @@ func TestWriteLockNoDeadlock(t *testing.T) {
 	var wg sync.WaitGroup
 	done := make(chan struct{})
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 50; j++ {
+			for j := range 50 {
 				_ = ds.StoreMemory(ctx, &Memory{
 					ID:        fmt.Sprintf("lock-test-%d-%d", i, j),
 					Type:      MemoryTypeEpisodic,
@@ -204,7 +204,7 @@ func TestWriteLockNoDeadlock(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 50; j++ {
+			for j := range 50 {
 				_ = ds.StoreRemoteMemory(ctx, &Memory{
 					ID:        fmt.Sprintf("lock-remote-%d-%d", i, j),
 					Type:      MemoryTypeEpisodic,

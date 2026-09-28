@@ -468,14 +468,18 @@ func TestAuditStore_SinceFilter(t *testing.T) {
 	old := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
 	recent := time.Now().UTC().Truncate(time.Second)
 
-	store.Create(context.Background(), AuditFinding{
+	if err := store.Create(context.Background(), AuditFinding{
 		ID: "audit_old", EmployeeID: "e1", Severity: SeverityInfo,
 		Checkpoint: CheckpointPostTurn, DetectedAt: old,
-	})
-	store.Create(context.Background(), AuditFinding{
+	}); err != nil {
+		t.Fatalf("seed audit_old: %v", err)
+	}
+	if err := store.Create(context.Background(), AuditFinding{
 		ID: "audit_new", EmployeeID: "e1", Severity: SeverityInfo,
 		Checkpoint: CheckpointPostTurn, DetectedAt: recent,
-	})
+	}); err != nil {
+		t.Fatalf("seed audit_new: %v", err)
+	}
 
 	cutoff := time.Now().UTC().Add(-1 * time.Hour)
 	results, err := store.List(context.Background(), AuditListFilter{Since: cutoff})

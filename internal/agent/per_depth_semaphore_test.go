@@ -29,10 +29,8 @@ func TestPerDepthSemaphore_NoDeadlock(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Acquire all depth-1 slots (4 parents)
-	for i := 0; i < maxParallel; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range maxParallel {
+		wg.Go(func() {
 			if err := sems.Acquire(1); err != nil {
 				t.Errorf("acquire depth 1: %v", err)
 				return
@@ -46,7 +44,7 @@ func TestPerDepthSemaphore_NoDeadlock(t *testing.T) {
 			}
 			sems.Release(2)
 			sems.Release(1)
-		}()
+		})
 	}
 
 	done := make(chan struct{})
@@ -76,28 +74,22 @@ func TestPerDepthSemaphore_ThreeLevelTree(t *testing.T) {
 	leavesCompleted := 0
 
 	// Depth-1 root spawns 2 children to depth-2
-	for i := 0; i < maxParallel; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range maxParallel {
+		wg.Go(func() {
 			if err := sems.Acquire(1); err != nil {
 				t.Errorf("acquire depth 1: %v", err)
 				return
 			}
 
 			// Spawn one depth-2 child.
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				if err := sems.Acquire(2); err != nil {
 					t.Errorf("acquire depth 2: %v", err)
 					return
 				}
 
 				// Spawn one depth-3 grandchild.
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					if err := sems.Acquire(3); err != nil {
 						t.Errorf("acquire depth 3: %v", err)
 						return
@@ -106,13 +98,13 @@ func TestPerDepthSemaphore_ThreeLevelTree(t *testing.T) {
 					leavesCompleted++
 					mu.Unlock()
 					sems.Release(3)
-				}()
+				})
 
 				sems.Release(2)
-			}()
+			})
 
 			sems.Release(1)
-		}()
+		})
 	}
 
 	done := make(chan struct{})
@@ -146,7 +138,7 @@ func TestPerDepthSemaphore_SingleSemaphoreWouldDeadlock(t *testing.T) {
 	var stuckCount int64
 	var mu sync.Mutex
 
-	for i := 0; i < maxParallel; i++ {
+	for range maxParallel {
 		go func() {
 			single <- struct{}{} // acquire one slot
 			barrier.Done()       // signal acquired
@@ -176,7 +168,7 @@ func TestPerDepthSemaphore_SingleSemaphoreWouldDeadlock(t *testing.T) {
 	}
 
 	// Clean up the held slots so the goroutines can finish.
-	for i := 0; i < maxParallel; i++ {
+	for range maxParallel {
 		<-single
 	}
 	// Wait for goroutines to complete.
@@ -315,10 +307,8 @@ func TestPerDepthSemaphore_DeadlockScenario_ProvesConcept(t *testing.T) {
 	started := make(chan struct{}, maxParallel)
 	completed := make(chan struct{}, maxParallel)
 
-	for i := 0; i < maxParallel; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range maxParallel {
+		wg.Go(func() {
 			// Acquire depth-1 slot.
 			if err := sems.Acquire(1); err != nil {
 				t.Errorf("depth-1 acquire: %v", err)
@@ -340,7 +330,7 @@ func TestPerDepthSemaphore_DeadlockScenario_ProvesConcept(t *testing.T) {
 
 			sems.Release(1)
 			completed <- struct{}{}
-		}()
+		})
 	}
 
 	// Wait for completion within a generous timeout.
@@ -354,7 +344,7 @@ func TestPerDepthSemaphore_DeadlockScenario_ProvesConcept(t *testing.T) {
 	case <-done:
 		// Count completions.
 		var nCompleted int
-		for i := 0; i < maxParallel; i++ {
+		for range maxParallel {
 			select {
 			case <-completed:
 				nCompleted++

@@ -87,7 +87,7 @@ func TestBuildFailureBlock_Empty(t *testing.T) {
 func TestBuildFailureBlock_Bounded(t *testing.T) {
 	huge := strings.Repeat("x", 10*failureStepErrorMaxChars)
 	failures := make([]stepFailure, 0, 30)
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		failures = append(failures, stepFailure{
 			Description: "step with a giant transcript result",
 			Agent:       "coder",

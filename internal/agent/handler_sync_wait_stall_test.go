@@ -103,7 +103,7 @@ func TestChatHandler_WaitForTaskCompletion_ProgressResetsStall(t *testing.T) {
 		// single-connection task-store pool (writes serialize with the
 		// poller's reads there). After ~3s of churn, finalize the task.
 		toggled := false
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			select {
 			case <-stop:
 				return

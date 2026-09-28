@@ -882,9 +882,6 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		var dispatchErr error
 		result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID, req.Parts, req.AgentID, req.Model)
 
-		// handlerCase is declared at function scope above; re-sync the
-		// direct-mode default for this dispatch attempt.
-		handlerCase = "direct_mode"
 		inputSummary := extractSummary(req.Message)
 		hasParts := len(req.Parts) > 0
 
@@ -1139,8 +1136,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 	if err != nil {
 		// Check for BudgetExceededError to provide user-friendly message
-		var budgetErr *llm.BudgetExceededError
-		if errors.As(err, &budgetErr) {
+		if budgetErr, ok := errors.AsType[*llm.BudgetExceededError](err); ok {
 			response.Error = budgetErr.UserMessage()
 			response.Reply = budgetErr.UserMessage()
 			// If this is a time-windowed limit that will clear on its own,
@@ -2377,8 +2373,7 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 		// Still quota-blocked (reset drifted) or a new failure: park again
 		// if the error is quota and the window is knowable; otherwise push
 		// the error to the session.
-		var quotaErr *llm.QuotaResetError
-		if errors.As(err, &quotaErr) {
+		if quotaErr, ok := errors.AsType[*llm.QuotaResetError](err); ok {
 			unblockAt := quotaErr.ResetAt
 			if unblockAt.IsZero() && quotaErr.RetryAfter > 0 {
 				unblockAt = time.Now().Add(quotaErr.RetryAfter)
@@ -3099,9 +3094,7 @@ func (h *ChatHandler) startCollaborationSession(ctx context.Context, result *Dis
 	// Run the session asynchronously so the chat handler returns immediately.
 	// Use context.Background() to detach from the request context - the session
 	// has its own lifecycle governed by cfg.TimeBudget, not the request deadline.
-	h.wg.Add(1)
-	go func() {
-		defer h.wg.Done()
+	h.wg.Go(func() { //nolint:gosec // G118: collaboration session runs on its own TimeBudget, not the request deadline
 		runCtx, cancel := context.WithTimeout(context.Background(), cfg.TimeBudget)
 		defer cancel()
 
@@ -3119,7 +3112,7 @@ func (h *ChatHandler) startCollaborationSession(ctx context.Context, result *Dis
 			"state", collabResult.State,
 			"turn_count", collabResult.TurnCount,
 		)
-	}()
+	})
 
 	return fmt.Sprintf("## collaboration started\n\n**mode:** %s\n**participants:** %s\n**session:** `%s`\n\nagents are collaborating. you will see updates as the session progresses.", mode, strings.Join(participants, ", "), sess.ID), nil
 }

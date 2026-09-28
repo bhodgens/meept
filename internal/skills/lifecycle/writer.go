@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -310,9 +311,7 @@ func (w *Writer) recordSHA(contentSHA, skillName string) error {
 	w.shaMu.Lock()
 	w.shaIndex[contentSHA] = skillName
 	snapshot := make(map[string]string, len(w.shaIndex))
-	for k, v := range w.shaIndex {
-		snapshot[k] = v
-	}
+	maps.Copy(snapshot, w.shaIndex)
 	w.shaMu.Unlock()
 
 	// Persist outside the lock.
@@ -354,9 +353,7 @@ func (w *Writer) removeSHABySkillName(skillName string) error {
 		}
 	}
 	snapshot := make(map[string]string, len(w.shaIndex))
-	for k, v := range w.shaIndex {
-		snapshot[k] = v
-	}
+	maps.Copy(snapshot, w.shaIndex)
 	w.shaMu.Unlock()
 
 	// Persist outside the lock.
@@ -416,9 +413,7 @@ func (w *Writer) ensureSHALoaded() error {
 	if w.shaIndex == nil {
 		w.shaIndex = make(map[string]string)
 	}
-	for k, v := range loaded {
-		w.shaIndex[k] = v
-	}
+	maps.Copy(w.shaIndex, loaded)
 	w.shaLoaded = true
 	w.shaMu.Unlock()
 	return nil
@@ -614,7 +609,7 @@ func copyDir(src, dst string) error {
 			if err != nil {
 				return err
 			}
-			if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+			if err := os.WriteFile(dstPath, data, 0o644); err != nil { //nolint:gosec // G703: entry names come from os.ReadDir of the local skill dir, not user input
 				return err
 			}
 		}

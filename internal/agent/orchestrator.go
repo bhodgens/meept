@@ -922,9 +922,7 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 	// Run reflection in a goroutine to not block the message bus.
 	// Detach from the orchestrator's cancel context so reflection is not
 	// aborted by orchestrator shutdown (S1-11).
-	o.wg.Add(1)
-	go func() {
-		defer o.wg.Done()
+	o.wg.Go(func() {
 		reflectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
 		result, err := o.reflectionEngine.RunReflection(reflectCtx, event.EditedFiles)
@@ -1015,7 +1013,7 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 				"iterations", result.Iterations,
 			)
 		}
-	}()
+	})
 }
 
 // handleContextCompressed handles llm.context_compressed bus events.
@@ -1263,7 +1261,10 @@ func (o *Orchestrator) publishReflectionEvent(ctx context.Context, toolCallID, p
 // mentionedIdentifiers are identifiers (functions, types, etc.) from the conversation.
 func (o *Orchestrator) GenerateRepoMap(ctx context.Context, chatFiles, mentionedIdentifiers []string) (*repomap.RenderedMap, error) {
 	if o.repoMapGen == nil {
-		return nil, nil
+		// Documented contract: no repo-map generator wired (config off)
+		// means "feature unavailable", not an error — callers treat
+		// (nil, nil) as enrichment skipped.
+		return nil, nil //nolint:nilnil // nil result is the documented "generator not wired" contract
 	}
 	return o.repoMapGen.Generate(ctx, chatFiles, mentionedIdentifiers)
 }
@@ -1329,7 +1330,7 @@ func buildConversationExcerpt(messages []llm.ChatMessage) string {
 			if toolName == "" {
 				toolName = "unknown"
 			}
-			sb.WriteString(fmt.Sprintf("TOOL[%s]: %s\n", toolName, content))
+			fmt.Fprintf(&sb, "TOOL[%s]: %s\n", toolName, content)
 		}
 	}
 	return sb.String()

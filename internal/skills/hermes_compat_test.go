@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -98,14 +99,7 @@ tags: [dev]`,
 			}
 			if len(tt.wantTags) > 0 {
 				for _, wantTag := range tt.wantTags {
-					found := false
-					for _, haveTag := range skill.Tags {
-						if haveTag == wantTag {
-							found = true
-							break
-						}
-					}
-					if !found {
+					if !slices.Contains(skill.Tags, wantTag) {
 						t.Errorf("Tag %q not found in %v", wantTag, skill.Tags)
 					}
 				}

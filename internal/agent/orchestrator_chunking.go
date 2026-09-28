@@ -81,8 +81,8 @@ func (o *Orchestrator) chunkToExecutorCapacity(ctx context.Context, taskID strin
 			"task_id", taskID,
 			"tactical", o.tactical != nil,
 			"registry", o.registry != nil,
-			"stepStore", o.stepStore != nil,
-			"templateReg", o.templateReg != nil,
+			"step_store", o.stepStore != nil,
+			"template_reg", o.templateReg != nil,
 		)
 		return nil
 	}
@@ -112,9 +112,7 @@ func (o *Orchestrator) chunkToExecutorCapacity(ctx context.Context, taskID strin
 			continue // fall back to ContextFirewall at runtime
 		}
 		budget := executorBudget(modelCfg)
-		if budget < minExecutorBudget {
-			budget = minExecutorBudget
-		}
+		budget = max(budget, minExecutorBudget)
 		cost := estimateStepTokens(step, modelCfg)
 		if cost > budget {
 			subSteps, splitErr := o.splitStep(ctx, step, budget, modelCfg)

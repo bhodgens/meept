@@ -274,10 +274,12 @@ func (d *PairProgrammingDriver) buildDriverPrompt(sess *CollaborationSession, co
 	turnLog := sess.CopyTurnLog()
 	if sess.Isolation == IsolationSharedTranscript {
 		if len(turnLog) > 0 {
+			var sb strings.Builder
 			prompt += "## Conversation History\n\n"
 			for _, turn := range turnLog {
-				prompt += fmt.Sprintf("**%s (%s):** %s\n\n", turn.AgentID, turn.Role, truncateString(turn.Content, 1000))
+				fmt.Fprintf(&sb, "**%s (%s):** %s\n\n", turn.AgentID, turn.Role, truncateString(turn.Content, 1000))
 			}
+			prompt += sb.String()
 		}
 	} else {
 		spawn := BuildSpawnContext(IsolationArtifactOnly, "", []ArtifactRef{{Path: sess.Workspace}}, nil, nil)
@@ -311,10 +313,12 @@ func (d *PairProgrammingDriver) buildObserverPrompt(sess *CollaborationSession, 
 	// rides along ONLY under the SharedTranscript opt-in.
 	turnLog := sess.CopyTurnLog()
 	if sess.Isolation == IsolationSharedTranscript && len(turnLog) > 0 {
+		var sb strings.Builder
 		prompt += "## Conversation History\n\n"
 		for _, turn := range turnLog {
-			prompt += fmt.Sprintf("**%s (%s):** %s\n\n", turn.AgentID, turn.Role, truncateString(turn.Content, 1000))
+			fmt.Fprintf(&sb, "**%s (%s):** %s\n\n", turn.AgentID, turn.Role, truncateString(turn.Content, 1000))
 		}
+		prompt += sb.String()
 	} else if sess.Isolation != IsolationSharedTranscript {
 		spawn := BuildSpawnContext(IsolationArtifactOnly, "", []ArtifactRef{{Path: sess.Workspace}}, nil, nil)
 		if rendered := RenderSpawnContext(spawn); rendered != "" {

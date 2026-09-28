@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -219,7 +220,7 @@ func listRuntimeProcs() []string {
 		return nil
 	}
 	var found []string
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		l := strings.ToLower(line)
 		switch {
 		case strings.Contains(l, "llama-server"), strings.Contains(l, "llama.cpp"),
@@ -258,5 +259,17 @@ func diskFreeBytes(dir string) (int64, error) {
 	if err := syscall.Statfs(dir, &st); err != nil {
 		return 0, fmt.Errorf("statfs %s: %w", dir, err)
 	}
-	return int64(st.Bavail) * int64(st.Bsize), nil
+	// Bavail/Bsize are uint64: clamp to MaxInt64 so the multiplication can
+	// neither overflow int64 (disk sizes far below the clamp in practice)
+	// nor trip the G115 overflow conversion check.
+	const maxI64 = uint64(math.MaxInt64)
+	bavail, bsize := st.Bavail, uint64(st.Bsize)
+	if bsize == 0 || bavail > maxI64/bsize {
+		return math.MaxInt64, nil
+	}
+	free := bavail * bsize
+	if free > maxI64 {
+		return math.MaxInt64, nil
+	}
+	return int64(free), nil
 }

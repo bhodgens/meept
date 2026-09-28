@@ -127,7 +127,7 @@ func TestWorkerPool_MultipleSubmits(t *testing.T) {
 
 	// Submit multiple work items
 	// With maxLoopsPerWorker=2, we should need multiple workers for 5 loops
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		loop := agent.NewAgentLoop("test-session", "/tmp")
 		item := WorkItem{
 			Loop:           loop,
@@ -136,7 +136,7 @@ func TestWorkerPool_MultipleSubmits(t *testing.T) {
 			ConversationID: "conv",
 		}
 		if err := pool.Submit(item); err != nil {
-			t.Fatalf("Submit %d failed: %v", i, err)
+			t.Fatalf("Submit failed: %v", err)
 		}
 	}
 
@@ -165,7 +165,7 @@ func TestWorkerPool_Exhaustion(t *testing.T) {
 	defer pool.Stop()
 
 	// Fill the pool
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		loop := agent.NewAgentLoop("test-session", "/tmp")
 		item := WorkItem{
 			Loop:           loop,
@@ -174,7 +174,7 @@ func TestWorkerPool_Exhaustion(t *testing.T) {
 			ConversationID: "conv",
 		}
 		if err := pool.Submit(item); err != nil {
-			t.Fatalf("Submit %d failed: %v", i, err)
+			t.Fatalf("Submit failed: %v", err)
 		}
 	}
 
@@ -230,8 +230,8 @@ func TestWorkerPoolConfig_Defaults(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		got      interface{}
-		expected interface{}
+		got      any
+		expected any
 	}{
 		{"MaxWorkers", cfg.MaxWorkers, 100},
 		{"MaxLoopsPerWorker", cfg.MaxLoopsPerWorker, 5},
@@ -275,7 +275,7 @@ func TestWorkerPool_FindWorkerWithCapacity(t *testing.T) {
 	}
 
 	// Fill w1 to capacity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		w1.assignedLoops[agent.NewAgentLoop("test", "/tmp")] = true
 	}
 
@@ -310,7 +310,7 @@ func TestWorkerPool_FindWorkerWithCapacity(t *testing.T) {
 func TestWorkerPool_MultipleStartStop(t *testing.T) {
 	pool := NewWorkerPool(DefaultWorkerPoolConfig())
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		pool.Start()
 		pool.Stop()
 	}
@@ -334,7 +334,7 @@ func TestWorkerPool_Multiplexing(t *testing.T) {
 	}()
 
 	// Submit 5 distinct loops. All should fit on one worker.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		loop := agent.NewAgentLoop("mp-session", "/tmp")
 		item := WorkItem{
 			Loop:           loop,
@@ -343,7 +343,7 @@ func TestWorkerPool_Multiplexing(t *testing.T) {
 			ConversationID: "conv",
 		}
 		if err := pool.Submit(item); err != nil {
-			t.Fatalf("Submit loop %d: %v", i, err)
+			t.Fatalf("Submit loop: %v", err)
 		}
 	}
 
@@ -395,10 +395,8 @@ func TestWorkerPool_ConcurrentSubmit(t *testing.T) {
 	var successCount, errorCount int64
 
 	numGoroutines := 50
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range numGoroutines {
+		wg.Go(func() {
 			loop := agent.NewAgentLoop("conc-session", "/tmp")
 			err := pool.Submit(WorkItem{
 				Loop:           loop,
@@ -411,7 +409,7 @@ func TestWorkerPool_ConcurrentSubmit(t *testing.T) {
 			} else {
 				atomic.AddInt64(&successCount, 1)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -441,16 +439,14 @@ func TestWorkerPool_ConcurrentStop(t *testing.T) {
 	pool.Start()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 20 {
+		wg.Go(func() {
 			_ = pool.Submit(WorkItem{
 				Loop:           agent.NewAgentLoop("stop-conc", "/tmp"),
 				Trigger:        TriggerUserMessage,
 				ConversationID: "conv",
 			})
-		}()
+		})
 	}
 
 	// Stop concurrently with submits.

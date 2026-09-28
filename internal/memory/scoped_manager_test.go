@@ -170,7 +170,7 @@ func TestScopedManager_GetRecent(t *testing.T) {
 	botB := mgr.ScopedManager("recent-b")
 
 	// Interleave stores between bots.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := botA.Store(ctx, Memory{
 			Type: MemoryTypeEpisodic, Content: time.Now().String(),
 			Category: "conversation",

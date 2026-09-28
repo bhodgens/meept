@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -156,14 +157,19 @@ func (p *InstructionParser) parseToCron(matches []string, keyword string) string
 		if len(matches) > 2 && matches[2] != "" {
 			minute = matches[2]
 		}
+		// Convert 12-hour clock to 24-hour for the cron hour field
+		// (crontab has no am/pm marker). "12am" -> 0, "12pm" stays 12.
 		h := mustParseInt(hour)
-		if len(matches) > 3 && strings.ToLower(matches[3]) == "pm" && hour != "12" {
-			h = h + 12
-		} else if len(matches) > 3 && strings.ToLower(matches[3]) == "am" && hour == "12" {
-			hour = "0"
+		if len(matches) > 3 && matches[3] != "" {
+			meridiem := strings.ToLower(matches[3])
+			switch {
+			case meridiem == "pm" && h != 12:
+				h += 12
+			case meridiem == "am" && h == 12:
+				h = 0
+			}
 		}
-		_ = h // WIP: user-instructions feature, cron formatting incomplete
-		return minute + " " + matches[1] + " * * *"
+		return minute + " " + strconv.Itoa(h) + " * * *"
 	case "weekly":
 		day := matches[1]
 		hour := matches[2]

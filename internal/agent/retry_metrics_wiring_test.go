@@ -17,10 +17,10 @@ func TestRetryMetrics_ExecutorWiring(t *testing.T) {
 
 	metrics := NewRetryMetrics()
 
-	var calls int32
+	var calls atomic.Int32
 	registry := NewPlaceholderToolRegistry()
 	registry.Register(NewMockTool("flaky_tool", "a tool that fails once then succeeds", func(ctx context.Context, args map[string]any) (any, error) {
-		n := atomic.AddInt32(&calls, 1)
+		n := calls.Add(1)
 		if n < 2 {
 			return nil, Retryable(
 				errors.New("transient failure"),
@@ -66,10 +66,10 @@ func TestRetryMetrics_ExecutorWiring(t *testing.T) {
 func TestRetryMetrics_ExecutorNilSafe(t *testing.T) {
 	t.Parallel()
 
-	var calls int32
+	var calls atomic.Int32
 	registry := NewPlaceholderToolRegistry()
 	registry.Register(NewMockTool("safe_tool", "nil-safe test", func(ctx context.Context, args map[string]any) (any, error) {
-		n := atomic.AddInt32(&calls, 1)
+		n := calls.Add(1)
 		if n < 2 {
 			return nil, Retryable(
 				errors.New("transient"),

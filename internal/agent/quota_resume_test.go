@@ -31,8 +31,7 @@ func TestQuotaResumeWatcher_ParkAndDrain(t *testing.T) {
 		mu.Unlock()
 	}, 24*time.Hour)
 	w.SetPollInterval(10 * time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	w.Start(ctx)
 	defer w.Stop()
 
@@ -68,8 +67,7 @@ func TestQuotaResumeWatcher_NotDueStaysParked(t *testing.T) {
 		mu.Unlock()
 	}, 24*time.Hour)
 	w.SetPollInterval(10 * time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	w.Start(ctx)
 	defer w.Stop()
 
@@ -173,7 +171,7 @@ func TestQuotaResumeWatcher_OrderingOldestFirst(t *testing.T) {
 
 func TestQuotaResumeWatcher_StopNoLeak(t *testing.T) {
 	before := runtimeNumGoroutine()
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		w := NewQuotaResumeWatcher(testLogger(), func(ctx context.Context, turn QuotaParkedTurn) {}, 0)
 		ctx, cancel := context.WithCancel(context.Background())
 		w.Start(ctx)

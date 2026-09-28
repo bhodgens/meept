@@ -204,16 +204,17 @@ func (s *MessageStore) DrainInbox(to string, limit int) ([]AgentMessage, error) 
 	}
 	var msgs []AgentMessage
 	var ids []string
+	// Closed via defer: scan errors and later returns inside the
+	// transaction must not leak the rows handle.
+	defer rows.Close()
 	for rows.Next() {
 		m, scanErr := scanMessage(rows)
 		if scanErr != nil {
-			rows.Close()
 			return nil, fmt.Errorf("message drain: scan: %w", scanErr)
 		}
 		msgs = append(msgs, m)
 		ids = append(ids, m.ID)
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("message drain: rows: %w", err)
 	}

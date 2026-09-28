@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -403,10 +404,8 @@ func (p *ModelReassignmentParser) isAmbiguousReference(ref string) bool {
 
 	// Check if it's EXACTLY a broad category term (not containing it)
 	broadTerms := []string{"local", "glm", "qwen", "llama", "claude", "gpt"}
-	for _, term := range broadTerms {
-		if ref == term {
-			return true
-		}
+	if slices.Contains(broadTerms, ref) {
+		return true
 	}
 
 	// If it looks like a specific model reference (contains / or - or .), it's not ambiguous
@@ -456,8 +455,7 @@ func (p *ModelReassignmentParser) ResolveModelReferences(refs []string, resolver
 
 	for _, ref := range refs {
 		// Handle provider: prefix (resolve to first available)
-		if strings.HasPrefix(ref, "provider:") {
-			provider := strings.TrimPrefix(ref, "provider:")
+		if provider, ok := strings.CutPrefix(ref, "provider:"); ok {
 			models := resolver.FindByProvider(provider)
 			if len(models) > 0 {
 				configs = append(configs, models[0]) // Use first available

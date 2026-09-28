@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -346,11 +347,11 @@ func TestBuildPlannerPromptHint_TruncatesDescription(t *testing.T) {
 	}
 
 	// Extract the description portion (after "→ ").
-	idx := strings.Index(got, "→ ")
-	if idx < 0 {
+	_, descPart, found := strings.Cut(got, "→ ")
+	if !found {
 		t.Fatalf("hint should contain arrow separator; got:\n%s", got)
 	}
-	descPart := strings.TrimSpace(got[idx+len("→ "):])
+	descPart = strings.TrimSpace(descPart)
 	if len(descPart) != maxHintDescriptionLen {
 		t.Errorf("description should be truncated to %d chars, got %d: %q",
 			maxHintDescriptionLen, len(descPart), descPart)
@@ -406,14 +407,7 @@ func TestSecurityKeywords(t *testing.T) {
 	}
 
 	// Verify "security" is present.
-	found := false
-	for _, k := range kw {
-		if k == "security" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(kw, "security") {
 		t.Errorf("SecurityKeywords() should contain \"security\"; got %v", kw)
 	}
 

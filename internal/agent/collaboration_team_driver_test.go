@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -178,31 +179,14 @@ func TestParallelTeamDriver_Run_TooFewParticipants(t *testing.T) {
 		t.Fatal("expected error for single participant")
 	}
 	var collabErr *CollaborationError
-	if !isCollaborationError(err, ErrCodeInvalidMode) {
+	if !errors.As(err, &collabErr) || collabErr.Code != ErrCodeInvalidMode {
 		t.Errorf("expected CollaborationError with code %q, got %T: %v", ErrCodeInvalidMode, err, err)
 	}
-	_ = collabErr
 }
 
 func isCollaborationError(err error, code string) bool {
 	var ce *CollaborationError
-	if err == nil {
-		return false
-	}
-	// unwrap wrapped errors
-	type unwrapper interface{ Unwrap() error }
-	for {
-		if as, ok := err.(*CollaborationError); ok {
-			ce = as
-			break
-		}
-		if u, ok := err.(unwrapper); ok {
-			err = u.Unwrap()
-			continue
-		}
-		return false
-	}
-	return ce != nil && ce.Code == code
+	return errors.As(err, &ce) && ce.Code == code
 }
 
 // ---------------------------------------------------------------------------
@@ -970,7 +954,7 @@ func TestParallelTeamDriver_ConcurrentCleanupAndLookup(t *testing.T) {
 	d := newTestTeamDriver()
 
 	// Populate multiple sessions
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		sid := fmt.Sprintf("sess-%d", i)
 		d.convMu.Lock()
 		d.conversations[sid] = &TeamStatus{
@@ -986,7 +970,7 @@ func TestParallelTeamDriver_ConcurrentCleanupAndLookup(t *testing.T) {
 
 	var wg sync.WaitGroup
 	// Concurrent cleanups
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -1006,7 +990,7 @@ func TestParallelTeamDriver_ConcurrentCleanupAndLookup(t *testing.T) {
 	wg.Wait()
 
 	// Clean up remaining
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		d.cleanupSession(fmt.Sprintf("sess-%d", i))
 	}
 

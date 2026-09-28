@@ -62,10 +62,7 @@ func TestChunking_BudgetFloorCoversCodeToolBudget(t *testing.T) {
 	if raw >= minExecutorBudget {
 		t.Fatalf("precondition changed: executorBudget(16k) = %d now >= floor; reevaluate the floor", raw)
 	}
-	budget := raw
-	if budget < minExecutorBudget {
-		budget = minExecutorBudget
-	}
+	budget := max(raw, minExecutorBudget)
 	if budget <= toolOutputBudget("code") {
 		t.Fatalf("floored budget %d <= code tool budget %d; the every-step-is-oversized bug returns", budget, toolOutputBudget("code"))
 	}

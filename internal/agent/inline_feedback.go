@@ -143,10 +143,7 @@ func recentMessageStrings(messages []llm.ChatMessage, n int) []string {
 	if len(messages) == 0 {
 		return nil
 	}
-	start := len(messages) - n
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(messages)-n, 0)
 	out := make([]string, 0, len(messages)-start)
 	for _, m := range messages[start:] {
 		out = append(out, m.Content)

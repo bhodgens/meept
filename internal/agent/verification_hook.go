@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/caimlas/meept/internal/agent/prompts"
@@ -285,12 +286,12 @@ func (h *VerificationAutoTrigger) handleFail(verifierOutput string, checks []Che
 	var checkSummary strings.Builder
 	for _, c := range checks {
 		if !c.Passed {
-			checkSummary.WriteString(fmt.Sprintf("- FAIL: %s\n", c.Name))
+			fmt.Fprintf(&checkSummary, "- FAIL: %s\n", c.Name)
 			if c.Command != "" {
-				checkSummary.WriteString(fmt.Sprintf("  command: %s\n", c.Command))
+				fmt.Fprintf(&checkSummary, "  command: %s\n", c.Command)
 			}
 			if c.Output != "" {
-				checkSummary.WriteString(fmt.Sprintf("  output: %s\n", c.Output))
+				fmt.Fprintf(&checkSummary, "  output: %s\n", c.Output)
 			}
 		}
 	}
@@ -313,9 +314,9 @@ func (h *VerificationAutoTrigger) handleFail(verifierOutput string, checks []Che
 // extractTaskDescription pulls a task description from the turn state messages.
 func extractTaskDescription(state TurnState) string {
 	// Use the last user message as the task description.
-	for i := len(state.Messages) - 1; i >= 0; i-- {
-		if state.Messages[i].Role == llm.RoleUser && state.Messages[i].Content != "" {
-			content := state.Messages[i].Content
+	for _, msg := range slices.Backward(state.Messages) {
+		if msg.Role == llm.RoleUser && msg.Content != "" {
+			content := msg.Content
 			if len(content) > 500 {
 				return content[:500] + "..."
 			}

@@ -200,7 +200,7 @@ func informativeResultLine(result string) string {
 	}
 	var prose []string
 	var fallback string
-	for _, line := range strings.Split(result, "\n") {
+	for line := range strings.SplitSeq(result, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

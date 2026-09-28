@@ -7,7 +7,6 @@ package daemon
 // and degrade to 0 (legacy scheduling) on every unknown/absent input.
 
 import (
-	"io"
 	"log/slog"
 	"testing"
 
@@ -22,7 +21,7 @@ import (
 // ContextLimit 8192.
 func newAllotmentProviderFixture(t *testing.T) *Components {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 
 	modelsCfg := &config.ModelsConfig{
 		Model: "testprov/test-8k",

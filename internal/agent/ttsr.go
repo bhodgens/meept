@@ -135,14 +135,17 @@ func loadRuleFile(path string) (*TTSRRule, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			// Not a rule file: absence is a normal skip condition, not an
+			// error (the walker probes candidate paths).
+			return nil, nil //nolint:nilnil,nilerr // intentional: missing file / non-rule file are normal skips
 		}
 		return nil, err
 	}
 
 	frontmatter, body, err := splitTTSRFrontmatter(string(data))
 	if err != nil || frontmatter == "" {
-		return nil, nil // not a TT-SR rule file, skip silently
+		//nolint:nilerr,nilnil // not a TT-SR rule file: a normal skip, not a failure
+		return nil, nil
 	}
 
 	var fm ttsrFrontmatter
@@ -152,7 +155,7 @@ func loadRuleFile(path string) (*TTSRRule, error) {
 
 	// Only treat as TT-SR rule if scope is set
 	if fm.Scope == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // no scope: file is not a rule, a normal skip
 	}
 
 	// Validate scope
@@ -319,8 +322,8 @@ func splitTTSRFrontmatter(text string) (frontmatter, body string, err error) {
 
 	if strings.HasPrefix(rest, "---") {
 		afterClose := rest[3:]
-		if idx := strings.Index(afterClose, "\n"); idx >= 0 {
-			body = afterClose[idx+1:]
+		if _, bodyPart, found := strings.Cut(afterClose, "\n"); found {
+			body = bodyPart
 		} else {
 			body = ""
 		}
@@ -334,8 +337,8 @@ func splitTTSRFrontmatter(text string) (frontmatter, body string, err error) {
 
 	frontmatter = rest[:closePos]
 	afterClose := rest[closePos+4:]
-	if idx := strings.Index(afterClose, "\n"); idx >= 0 {
-		body = afterClose[idx+1:]
+	if _, bodyPart, found := strings.Cut(afterClose, "\n"); found {
+		body = bodyPart
 	} else {
 		body = ""
 	}

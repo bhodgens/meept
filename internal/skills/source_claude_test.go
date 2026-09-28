@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 )
@@ -74,7 +75,7 @@ func TestClaudeSource_ParseFailureWarnDedupe(t *testing.T) {
 	handler := &capturingHandler{}
 	src := NewClaudeSourceWithPath(tmpDir, newTestLogger(handler))
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := src.Discover(context.Background()); err != nil {
 			t.Fatalf("Discover pass %d: %v", i, err)
 		}
@@ -107,7 +108,7 @@ func TestClaudeSource_ParseFailureWarnDedupe_DifferentPaths(t *testing.T) {
 	handler := &capturingHandler{}
 	src := NewClaudeSourceWithPath(tmpDir, newTestLogger(handler))
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, err := src.Discover(context.Background()); err != nil {
 			t.Fatalf("Discover pass %d: %v", i, err)
 		}
@@ -197,14 +198,7 @@ Instructions.
 				t.Errorf("Priority = %d, want %d", s.Priority, PriorityClaude)
 			}
 			// Trigger should be mapped to Tags by the parser
-			hasGraphify := false
-			for _, tag := range s.Tags {
-				if tag == "graphify" {
-					hasGraphify = true
-					break
-				}
-			}
-			if !hasGraphify {
+			if !slices.Contains(s.Tags, "graphify") {
 				t.Error("Expected 'graphify' tag from trigger field")
 			}
 		}

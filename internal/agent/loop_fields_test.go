@@ -140,14 +140,14 @@ func TestAgentLoop_IsActive_Concurrent(t *testing.T) {
 	// Writer goroutine
 	go func() {
 		defer close(done)
-		for i := 0; i < 1000; i++ {
+		for range 1000 {
 			loop.SetActive(true)
 			loop.SetActive(false)
 		}
 	}()
 
 	// Reader goroutine: just ensure no panic/race
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		_ = loop.IsActive()
 	}
 

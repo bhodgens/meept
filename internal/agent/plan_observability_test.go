@@ -207,20 +207,19 @@ func fallbackReasonsInSource() ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, line := range strings.Split(string(data), "\n") {
+		for line := range strings.SplitSeq(string(data), "\n") {
 			if !strings.Contains(line, marker) {
 				continue
 			}
-			idx := strings.Index(line, `"reason": "`)
-			if idx < 0 {
+			_, rest, found := strings.Cut(line, `"reason": "`)
+			if !found {
 				continue
 			}
-			rest := line[idx+len(`"reason": "`):]
-			end := strings.Index(rest, `"`)
-			if end < 0 {
+			reason, _, found := strings.Cut(rest, `"`)
+			if !found {
 				continue
 			}
-			reasons = append(reasons, rest[:end])
+			reasons = append(reasons, reason)
 		}
 	}
 	return reasons, nil

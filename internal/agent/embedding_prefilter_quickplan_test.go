@@ -12,7 +12,7 @@ import (
 // the cue guard.
 func quickplanExampleSet() []map[string]any {
 	ex := make([]map[string]any, 0, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		ex = append(ex, map[string]any{
 			"intent": "quickplan", "agent": "orchestrator",
 			"text":   fmt.Sprintf("quickplan ex %d", i),

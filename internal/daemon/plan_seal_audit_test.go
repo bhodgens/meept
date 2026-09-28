@@ -24,7 +24,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -126,7 +125,7 @@ func newParkedTurnTestLoop(t *testing.T, chatter llm.Chatter, parker *agent.Turn
 func TestAgentJobProcessor_ParkedTurnDoesNotFailJob(t *testing.T) {
 	p, _, _ := newTestAgentJobProcessor(t)
 
-	parker := agent.NewTurnParker(slog.New(slog.NewTextHandler(io.Discard, nil)), func(context.Context, agent.ParkedTurnRecord) {}, time.Hour)
+	parker := agent.NewTurnParker(slog.New(slog.DiscardHandler), func(context.Context, agent.ParkedTurnRecord) {}, time.Hour)
 	chatter := &throttleFirstChatter{retry: time.Now().Add(30 * time.Minute), answer: "late"}
 	loop := newParkedTurnTestLoop(t, chatter, parker)
 	p.agentLoop = loop
@@ -172,7 +171,7 @@ func TestAgentJobProcessor_ParkedTurnDoesNotFailJob(t *testing.T) {
 // RunOnce turn hitting a ThrottleBackoffError on a wired parker).
 func TestAgentJobProcessor_ParkedTurnSentinelIsQuotaClass(t *testing.T) {
 	p, _, _ := newTestAgentJobProcessor(t)
-	parker := agent.NewTurnParker(slog.New(slog.NewTextHandler(io.Discard, nil)), func(context.Context, agent.ParkedTurnRecord) {}, time.Hour)
+	parker := agent.NewTurnParker(slog.New(slog.DiscardHandler), func(context.Context, agent.ParkedTurnRecord) {}, time.Hour)
 	chatter := &throttleFirstChatter{retry: time.Now().Add(30 * time.Minute), answer: "late"}
 	loop := newParkedTurnTestLoop(t, chatter, parker)
 
@@ -435,7 +434,7 @@ func TestTreeLeavesPerPhase_MatchesEmitterPartition(t *testing.T) {
 			var specs []plan.PhaseSpec
 			for _, n := range tc.stepCounts {
 				phase := plan.PhaseSpec{Name: fmt.Sprintf("phase-%d", n)}
-				for i := 0; i < n; i++ {
+				for i := range n {
 					phase.Steps = append(phase.Steps, plan.StepSpec{Description: fmt.Sprintf("step %d", i)})
 				}
 				specs = append(specs, phase)
@@ -452,7 +451,7 @@ func TestTreeLeavesPerPhase_MatchesEmitterPartition(t *testing.T) {
 				content := leafContent(t, tree, leaf.Path)
 				var phaseNo int
 				parsed := false
-				for _, line := range strings.Split(content, "\n") {
+				for line := range strings.SplitSeq(content, "\n") {
 					if !strings.HasPrefix(line, "- **Scope:** Phase ") {
 						continue
 					}
@@ -524,17 +523,15 @@ func TestSealPipelineState_ConcurrentStaging(t *testing.T) {
 	state := &sealPipelineState{}
 	const tasks = 16
 	var wg sync.WaitGroup
-	for i := 0; i < tasks; i++ {
-		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
+	for n := range tasks {
+		wg.Go(func() {
 			id := fmt.Sprintf("task-%d", n)
 			state.store(id, []agent.PlanPhaseSpec{{Name: id}})
 			got := state.take(id)
 			if len(got) != 1 || got[0].Name != id {
 				t.Errorf("task %d took %v, want its own phase", n, got)
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 	if got := state.take("task-0"); got != nil {

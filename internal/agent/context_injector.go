@@ -60,10 +60,10 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 	// the agent prompt — GetActive alone reads a map that starts empty.
 	var instructions []*preferences.UserInstruction
 	if c.instructions != nil {
-		if _, discErr := c.instructions.Discovery(); discErr != nil {
-			// scanTier treats missing dirs as empty. A real walk error
-			// leaves the previous in-memory map in place.
-		}
+		// A Discovery error is deliberately ignored: scanTier treats
+		// missing dirs as empty, and a real walk error leaves the
+		// previous in-memory map in place.
+		_, _ = c.instructions.Discovery()
 		instructions = c.instructions.GetActive()
 	}
 
@@ -83,8 +83,8 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 			sb.WriteString("\n## Standing Instructions\n")
 			sb.WriteString("The following automated actions are configured and will execute when their triggers match:\n\n")
 			for i, instr := range instructions {
-				sb.WriteString(fmt.Sprintf("%d. **%s** (trigger: `%s`, action: `%s`)\n",
-					i+1, instr.ID, instr.Trigger, instr.Action))
+				fmt.Fprintf(&sb, "%d. **%s** (trigger: `%s`, action: `%s`)\n",
+					i+1, instr.ID, instr.Trigger, instr.Action)
 				if instr.Scope == "project" {
 					sb.WriteString("   _Scope: This project only_\n")
 				}
@@ -101,7 +101,7 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 					if desc == "" {
 						desc = "(no description)"
 					}
-					sb.WriteString(fmt.Sprintf("- **%s**: %s\n", s.Name, desc))
+					fmt.Fprintf(&sb, "- **%s**: %s\n", s.Name, desc)
 				}
 			}
 		}

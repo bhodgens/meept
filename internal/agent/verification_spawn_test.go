@@ -146,7 +146,7 @@ type stubTool struct {
 func (t *stubTool) Name() string                                             { return t.name }
 func (t *stubTool) Description() string                                      { return t.name + " tool" }
 func (t *stubTool) Parameters() llm.FunctionParameters                       { return llm.FunctionParameters{} }
-func (t *stubTool) Execute(_ context.Context, _ map[string]any) (any, error) { return nil, nil }
+func (t *stubTool) Execute(_ context.Context, _ map[string]any) (any, error) { return nil, nil } //nolint:nilnil // no-op stub tool
 
 // stubRegistry implements ToolRegistry for testing.
 type stubRegistry struct {

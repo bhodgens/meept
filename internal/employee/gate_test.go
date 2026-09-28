@@ -251,7 +251,9 @@ func TestGate_RealLocalPassFail(t *testing.T) {
 
 	t.Run("passing script completes goal eligibility", func(t *testing.T) {
 		script := filepath.Join(dir, "gate_ok.sh")
-		os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755)
+		if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write gate script: %v", err)
+		}
 		cfg := GateConfig{Command: "./gate_ok.sh"}
 		res, state, err := RunGate(context.Background(), cfg, be, dir, nil)
 		if err != nil {
@@ -270,7 +272,9 @@ func TestGate_RealLocalPassFail(t *testing.T) {
 
 	t.Run("failing script records output and skips when unchanged", func(t *testing.T) {
 		script := filepath.Join(dir, "gate_bad.sh")
-		os.WriteFile(script, []byte("#!/bin/sh\necho 'compile error'\nexit 1\n"), 0o755)
+		if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'compile error'\nexit 1\n"), 0o755); err != nil {
+			t.Fatalf("write gate script: %v", err)
+		}
 		cfg := GateConfig{Command: "./gate_bad.sh", SkipWhenUnchanged: true}
 
 		res1, state1, err := RunGate(context.Background(), cfg, be, dir, nil)

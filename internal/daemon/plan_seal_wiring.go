@@ -22,6 +22,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -268,10 +269,7 @@ func treeLeavesPerPhase(specs []plan.PhaseSpec, maxLeaves int) []int {
 		if n > maxLeaves {
 			perLeaf = (n + maxLeaves - 1) / maxLeaves
 		}
-		counts[i] = (n + perLeaf - 1) / perLeaf
-		if counts[i] > maxLeaves {
-			counts[i] = maxLeaves
-		}
+		counts[i] = min((n+perLeaf-1)/perLeaf, maxLeaves)
 	}
 	return counts
 }
@@ -290,7 +288,7 @@ func treeLeafPathForPhase(tree *plan.EmittedTree, specs []plan.PhaseSpec, phaseI
 	}
 	counts := treeLeavesPerPhase(specs, 0)
 	offset := 0
-	for i := 0; i < phaseIdx; i++ {
+	for i := range phaseIdx {
 		offset += counts[i]
 	}
 	if offset >= len(tree.Leaves) {
@@ -329,13 +327,14 @@ func writePhaseLeafSidecar(dir string, tree *plan.EmittedTree, specs []plan.Phas
 }
 
 // readPhaseLeafSidecar loads a task's phase-index→leaf-path map from its
-// plan-trees dir. Returns nil (not an error) when absent — flat-mode seals
-// write no sidecar, and older tree-mode seals predate it.
+// plan-trees dir. Returns (nil, nil) when absent — flat-mode seals write no
+// sidecar, and older tree-mode seals predate it; absence is a valid state,
+// not an error (the caller falls back to first-leaf selection).
 func readPhaseLeafSidecar(treeRoot, taskID string) (map[string]string, error) {
 	raw, err := os.ReadFile(filepath.Join(treeRoot, taskID, phaseLeafSidecarName))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil //nolint:nilnil // absent sidecar is a valid flat-mode state, not an error
 		}
 		return nil, fmt.Errorf("read phase-leaf sidecar: %w", err)
 	}
@@ -349,7 +348,7 @@ func readPhaseLeafSidecar(treeRoot, taskID string) (map[string]string, error) {
 // asCompileError is a local errors.As helper (daemon package has no other
 // use for the plan.CompileError type).
 func asCompileError(err error, target **plan.CompileError) bool {
-	ce, ok := err.(*plan.CompileError)
+	ce, ok := errors.AsType[*plan.CompileError](err)
 	if ok {
 		*target = ce
 	}

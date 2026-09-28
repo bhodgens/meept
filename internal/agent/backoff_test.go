@@ -81,7 +81,7 @@ func TestBackoff_MaxAttempts(t *testing.T) {
 	b := NewBackoff(config)
 
 	// First 3 calls succeed.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, ok := b.NextDelay(); !ok {
 			t.Fatalf("attempt %d: expected ok=true", i)
 		}
@@ -104,7 +104,7 @@ func TestBackoff_Reset(t *testing.T) {
 	b := NewBackoff(config)
 
 	// Exhaust attempts.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, ok := b.NextDelay(); !ok {
 			t.Fatalf("attempt %d: expected ok=true", i)
 		}

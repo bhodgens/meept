@@ -41,7 +41,7 @@ type throttledTurnPayload struct {
 	ProviderID     string            `json:"provider_id,omitempty"`
 	ModelID        string            `json:"model_id,omitempty"`
 	SourceClient   string            `json:"source_client,omitempty"`
-	ParkedAt       time.Time         `json:"parked_at,omitempty"`
+	ParkedAt       time.Time         `json:"parked_at,omitzero"`
 	// Autonomous mirrors ParkedTurnRecord.Autonomous (F14 follow-up): the
 	// parked turn ran with the AUTONOMOUS marker, so the resume must re-apply
 	// it. It lives HERE, not only on the record, because the SQLite park store

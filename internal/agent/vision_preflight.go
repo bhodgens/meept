@@ -29,11 +29,12 @@ func needsVisionPreflight(messages []llm.ChatMessage) bool {
 func collectUndescribedImageRefs(messages []llm.ChatMessage) []*llm.ImageRef {
 	var refs []*llm.ImageRef
 	for i := range messages {
-		for j := range messages[i].Parts {
-			p := &messages[i].Parts[j]
-			if p.Type == "image_url" && p.ImageURL != nil &&
-				(p.ImageURL.Description == "" || p.ImageURL.AnalysisFailed) {
-				refs = append(refs, p.ImageURL)
+		parts := messages[i].Parts
+		for j := range parts {
+			part := &parts[j]
+			if part.Type == "image_url" && part.ImageURL != nil &&
+				(part.ImageURL.Description == "" || part.ImageURL.AnalysisFailed) {
+				refs = append(refs, part.ImageURL)
 			}
 		}
 	}
@@ -65,20 +66,21 @@ func runVisionPreflight(ctx context.Context, messages []llm.ChatMessage, chatter
 	seen := make(map[string]bool)
 	var toDescribe []*llm.ImageRef
 	for i := range messages {
-		for j := range messages[i].Parts {
-			p := &messages[i].Parts[j]
-			if p.Type != "image_url" || p.ImageURL == nil {
+		parts := messages[i].Parts
+		for j := range parts {
+			part := &parts[j]
+			if part.Type != "image_url" || part.ImageURL == nil {
 				continue
 			}
-			if p.ImageURL.Description != "" && !p.ImageURL.AnalysisFailed {
+			if part.ImageURL.Description != "" && !part.ImageURL.AnalysisFailed {
 				continue
 			}
-			if !seen[p.ImageURL.URL] {
-				seen[p.ImageURL.URL] = true
+			if !seen[part.ImageURL.URL] {
+				seen[part.ImageURL.URL] = true
 				// Clear the failure flag before retrying so a clean-slate
 				// failure path can re-set it if this attempt also fails.
-				p.ImageURL.AnalysisFailed = false
-				toDescribe = append(toDescribe, p.ImageURL)
+				part.ImageURL.AnalysisFailed = false
+				toDescribe = append(toDescribe, part.ImageURL)
 			}
 		}
 	}

@@ -9,6 +9,7 @@ package employee
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/caimlas/meept/internal/comm/http"
 )
@@ -86,12 +87,7 @@ func isAuthorizedApprover(callerID string, escalatesTo []string) bool {
 	if callerID == "user" {
 		return true
 	}
-	for _, id := range escalatesTo {
-		if id == callerID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(escalatesTo, callerID)
 }
 
 // isAuthorizedAmmender checks if the caller is authorized to propose
@@ -108,12 +104,7 @@ func isAuthorizedAmmender(callerID string, employeeID string, escalatesTo []stri
 		return true
 	}
 	// Caller is in escalates_to
-	for _, id := range escalatesTo {
-		if id == callerID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(escalatesTo, callerID)
 }
 
 // requireCaller extracts and validates the caller from context.
@@ -148,21 +139,11 @@ func isAuthorizedForOperation(callerID, employeeID string, escalatesTo []string,
 	switch operation {
 	case "read", "list":
 		// Allow read access to escalates_to entries
-		for _, id := range escalatesTo {
-			if id == callerID {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(escalatesTo, callerID)
 
 	case "approve", "reject":
 		// Plan approval requires being in escalates_to
-		for _, id := range escalatesTo {
-			if id == callerID {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(escalatesTo, callerID)
 
 	case "amend":
 		// Amendments handled separately via isAuthorizedAmmender

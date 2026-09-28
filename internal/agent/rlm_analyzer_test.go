@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -169,7 +168,7 @@ func TestRLMAnalyzer_PerDepthSemaphoreNoDeadlock(t *testing.T) {
 	spawned := make(chan int, goroutines)
 	deadline := time.After(10 * time.Second)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(n int) {
 			defer wg.Done()
 			depth := n % 3 // vary between depths 0, 1, 2
@@ -360,8 +359,8 @@ func TestPerDepthSemaphore_Basic(t *testing.T) {
 	sem.Release(1)
 
 	// Test depth isolation: releasing depth 2 should not unblock depth 1.
-	sem.Acquire(1) // fill depth 1 again
-	sem.Acquire(1) // fill second slot
+	_ = sem.Acquire(1) // fill depth 1 again
+	_ = sem.Acquire(1) // fill second slot
 
 	blocked := make(chan struct{})
 	done3 := make(chan error, 1)
@@ -444,9 +443,6 @@ func buildFixtureTraces(t *testing.T, store *mockTraceStore) {
 		}
 		for i, s := range tc.spans {
 			fixture.spanIDs[i] = s.spanID
-			//lint:ignore SA9005 traceSpan has unexported fields for test fixture
-			b, _ := json.Marshal(s)
-			s.rawJSON = b
 		}
 		store.AddSpan(fixture)
 		// Register traceID -> spanIDs mapping.

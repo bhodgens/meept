@@ -20,8 +20,7 @@ func TestChatHandler_StopStopsQuotaResumeWatcher(t *testing.T) {
 
 	before := runtime.NumGoroutine()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	h.quotaResumeWatcher.Start(ctx)
 	if err := h.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop returned error: %v", err)

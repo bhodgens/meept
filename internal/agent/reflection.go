@@ -244,7 +244,7 @@ type FixAttempt struct {
 func (re *ReflectionEngine) requestFix(ctx context.Context, fixRequest string, files []string) (*FixAttempt, error) {
 	if re.llmClient == nil {
 		re.logger.Warn("no LLM client available for fix requests")
-		return nil, nil
+		return nil, nil //nolint:nilnil // no LLM wired: fix requests are best-effort, absence is not an error
 	}
 
 	// Build prompt with error context
@@ -264,7 +264,7 @@ func (re *ReflectionEngine) requestFix(ctx context.Context, fixRequest string, f
 
 	if response == nil || response.Content == "" {
 		re.logger.Warn("empty response from LLM")
-		return nil, nil
+		return nil, nil //nolint:nilnil // empty LLM response: no fix attempt available, not an error
 	}
 
 	// Log the response for debugging
@@ -373,8 +373,8 @@ func (re *ReflectionEngine) formatLintFixRequest(errors []lint.LinterResult, _ [
 
 	// First, list all errors
 	for _, err := range errors {
-		sb.WriteString(fmt.Sprintf("## %s:%d:%d\n", err.File, err.Line+1, err.Column+1))
-		sb.WriteString(fmt.Sprintf("Error (%s): %s\n\n", err.Rule, err.Message))
+		fmt.Fprintf(&sb, "## %s:%d:%d\n", err.File, err.Line+1, err.Column+1)
+		fmt.Fprintf(&sb, "Error (%s): %s\n\n", err.Rule, err.Message)
 	}
 
 	// Add tree context for each file with errors
@@ -408,12 +408,12 @@ func (re *ReflectionEngine) formatTestFixRequest(failures []lint.TestResult) str
 
 	for _, f := range failures {
 		if !f.Passed && !f.Skipped {
-			sb.WriteString(fmt.Sprintf("## Test: %s\n", f.Name))
+			fmt.Fprintf(&sb, "## Test: %s\n", f.Name)
 			if f.File != "" {
-				sb.WriteString(fmt.Sprintf("File: %s\n", f.File))
+				fmt.Fprintf(&sb, "File: %s\n", f.File)
 			}
 			if f.Error != "" {
-				sb.WriteString(fmt.Sprintf("Error: %s\n", f.Error))
+				fmt.Fprintf(&sb, "Error: %s\n", f.Error)
 			}
 			if f.Output != "" {
 				sb.WriteString("\nOutput:\n```\n")
@@ -437,7 +437,7 @@ func (re *ReflectionEngine) buildTreeContext(filePath string, errors []lint.Lint
 	// Try to use ast.TreeContextWithMarkers if available
 	// This is a placeholder - the actual implementation would use AST parsing
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## Context for %s\n\n", filePath))
+	fmt.Fprintf(&sb, "## Context for %s\n\n", filePath)
 
 	// Read the file and show lines around errors
 	content, err := os.ReadFile(filePath)
@@ -453,13 +453,13 @@ func (re *ReflectionEngine) buildTreeContext(filePath string, errors []lint.Lint
 		start := max(0, lineNum-padding)
 		end := min(len(lines), lineNum+padding+1)
 
-		sb.WriteString(fmt.Sprintf("Lines %d-%d:\n", start+1, end))
+		fmt.Fprintf(&sb, "Lines %d-%d:\n", start+1, end)
 		for i := start; i < end; i++ {
 			marker := "  "
 			if i == lineNum {
 				marker = ">> "
 			}
-			sb.WriteString(fmt.Sprintf("%s%d: %s\n", marker, i+1, lines[i]))
+			fmt.Fprintf(&sb, "%s%d: %s\n", marker, i+1, lines[i])
 		}
 		sb.WriteString("\n")
 	}

@@ -498,8 +498,7 @@ func (c *Constitution) ValidateFrozenFields() []string {
 			continue
 		}
 
-		if strings.HasPrefix(key, "constraints.") {
-			sub := strings.TrimPrefix(key, "constraints.")
+		if sub, ok := strings.CutPrefix(key, "constraints."); ok {
 			if _, ok := constraintsFieldNames[sub]; ok {
 				continue
 			}

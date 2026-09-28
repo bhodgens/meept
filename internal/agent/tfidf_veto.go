@@ -50,7 +50,7 @@ func loadTfidfVeto(path string) (*tfidfVeto, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil // not built: veto disabled
+			return nil, nil //nolint:nilnil // not built: veto disabled is a normal configuration state
 		}
 		return nil, fmt.Errorf("read tfidf veto model: %w", err)
 	}

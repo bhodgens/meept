@@ -38,18 +38,15 @@ func ExtractJSON(s string) string {
 // include a language identifier (e.g., ```json). Returns ok=false if no fence
 // is present or it is never closed.
 func stripFirstFence(s string) (string, bool) {
-	openIdx := strings.Index(s, "```")
-	if openIdx < 0 {
+	_, rest, found := strings.Cut(s, "```")
+	if !found {
 		return "", false
 	}
-	// Start after the opening backticks.
-	rest := s[openIdx+3:]
 	// Skip an optional language identifier up to the next newline.
+	// One-line fence with no newline ("```{...}```") is unusual but handled:
+	// nothing to skip; rest already points right after the opening fence.
 	if nl := strings.Index(rest, "\n"); nl >= 0 {
 		rest = rest[nl+1:]
-	} else {
-		// One-line fence with no newline: "```{...}```" — unusual but handle it.
-		// Nothing to skip; rest already points right after "```".
 	}
 	// Find the closing fence.
 	closeIdx := strings.Index(rest, "```")
@@ -63,7 +60,7 @@ func stripFirstFence(s string) (string, bool) {
 // delimited by balanced '{' '}' braces (with string-literal awareness) that
 // passes json.Valid. Returns "" if no such substring exists.
 func scanFirstJSONObject(s string) string {
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] != '{' {
 			continue
 		}

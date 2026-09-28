@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -191,8 +192,11 @@ type Goal struct {
 	MaxPlanHistory int `json:"max_plan_history,omitempty"`
 	// CreatedAt is when the goal was first persisted.
 	CreatedAt time.Time `json:"created_at"`
-	// RetiredAt is when the goal was soft-deleted. Zero for active goals.
-	RetiredAt time.Time `json:"retired_at,omitempty"`
+	// RetiredAt is when the goal was retired. Zero for active goals.
+	// omitzero: omitempty has no effect on a time.Time (nested struct);
+	// omitzero drops the key only for the zero time, preserving the
+	// "absent = active goal" wire shape the original tag intended.
+	RetiredAt time.Time `json:"retired_at,omitzero"`
 
 	// Gate is the optional completion check for this goal. Nil or empty
 	// Command means no per-goal gate (the employee default or none).
@@ -392,10 +396,8 @@ func (g *Goal) AddActivePlan(planID string) int {
 		return len(g.ActivePlanIDs)
 	}
 	// Check for duplicates.
-	for _, id := range g.ActivePlanIDs {
-		if id == planID {
-			return len(g.ActivePlanIDs)
-		}
+	if slices.Contains(g.ActivePlanIDs, planID) {
+		return len(g.ActivePlanIDs)
 	}
 	g.ActivePlanIDs = append(g.ActivePlanIDs, planID)
 	if len(g.ActivePlanIDs) > 0 {

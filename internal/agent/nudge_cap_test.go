@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -127,7 +128,7 @@ func TestNudgeCap_BudgetResetsPerTurn(t *testing.T) {
 // TestNudgeCap_ConsumeNudgeBudgetUnit pins the budget primitive directly.
 func TestNudgeCap_ConsumeNudgeBudgetUnit(t *testing.T) {
 	l := &AgentLoop{nudgeClassCounts: make(map[string]int)}
-	for i := 0; i < maxNudgesPerClassPerTurn; i++ {
+	for i := range maxNudgesPerClassPerTurn {
 		if !l.consumeNudgeBudget(nudgeClassUnbackedClaims) {
 			t.Fatalf("consume %d: want true", i+1)
 		}
@@ -152,18 +153,7 @@ func TestNudgeCap_ConsumeNudgeBudgetUnit(t *testing.T) {
 	}
 }
 
-// containsError is errors.Is without importing errors in every test above.
+// containsError wraps errors.Is for the tests above.
 func containsError(err, target error) bool {
-	for err != nil {
-		if err == target {
-			return true
-		}
-		type unwrapper interface{ Unwrap() error }
-		u, ok := err.(unwrapper)
-		if !ok {
-			return false
-		}
-		err = u.Unwrap()
-	}
-	return false
+	return errors.Is(err, target)
 }

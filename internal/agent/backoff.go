@@ -84,14 +84,12 @@ func IsRetryable(err error) bool {
 	}
 
 	// 1. Try the RetryableError interface (covers errors wrapped via Retryable()).
-	var re RetryableError
-	if errors.As(err, &re) {
+	if re, ok := errors.AsType[RetryableError](err); ok {
 		return re.IsRetryable()
 	}
 
 	// 2. llm.RateLimitError is always retryable.
-	var rateLimitErr *llm.RateLimitError
-	if errors.As(err, &rateLimitErr) {
+	if _, ok := errors.AsType[*llm.RateLimitError](err); ok {
 		return true
 	}
 
@@ -101,8 +99,7 @@ func IsRetryable(err error) bool {
 	}
 
 	// 4. HTTPError with a retryable status code.
-	var httpErr *HTTPError
-	if errors.As(err, &httpErr) {
+	if httpErr, ok := errors.AsType[*HTTPError](err); ok {
 		return isRetryableHTTPStatus(httpErr.StatusCode)
 	}
 
@@ -125,13 +122,11 @@ func GetRetryAfter(err error) time.Duration {
 		return 0
 	}
 
-	var re RetryableError
-	if errors.As(err, &re) {
+	if re, ok := errors.AsType[RetryableError](err); ok {
 		return re.RetryAfter()
 	}
 
-	var rateLimitErr *llm.RateLimitError
-	if errors.As(err, &rateLimitErr) {
+	if rateLimitErr, ok := errors.AsType[*llm.RateLimitError](err); ok {
 		return rateLimitErr.RetryAfter
 	}
 
@@ -451,7 +446,7 @@ type Backoff struct {
 func NewBackoff(config BackoffConfig) *Backoff {
 	return &Backoff{
 		config:  config,
-		rng:     rand.New(rand.NewSource(time.Now().UnixNano())),
+		rng:     rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // jitter only, non-crypto
 		attempt: 0,
 		logger:  slog.Default(),
 	}
@@ -480,15 +475,13 @@ func (b *Backoff) NextDelay() (delay time.Duration, ok bool) {
 
 	// Calculate exponential delay: baseDelay * multiplier^attempt
 	multiplier := 1.0
-	for i := 0; i < b.attempt; i++ {
+	for range b.attempt {
 		multiplier *= b.config.Multiplier
 	}
 	delay = time.Duration(float64(b.config.BaseDelay) * multiplier)
 
 	// Apply max delay cap
-	if delay > b.config.MaxDelay {
-		delay = b.config.MaxDelay
-	}
+	delay = min(delay, b.config.MaxDelay)
 
 	// Apply jitter: range is [-jitterRange, +jitterRange] around the base delay
 	if b.config.Jitter > 0 {
@@ -496,9 +489,7 @@ func (b *Backoff) NextDelay() (delay time.Duration, ok bool) {
 		jitter := b.rng.Float64()*jitterRange*2 - jitterRange
 		delay = delay + time.Duration(jitter)
 		// Enforce a 100ms floor to prevent retry storms.
-		if delay < 100*time.Millisecond {
-			delay = 100 * time.Millisecond
-		}
+		delay = max(delay, 100*time.Millisecond)
 	}
 
 	b.attempt++
