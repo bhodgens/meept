@@ -1,11 +1,11 @@
 package services
 
 import (
-	"maps"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"

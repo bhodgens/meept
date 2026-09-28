@@ -18,6 +18,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -89,7 +90,7 @@ func (e *tier2Executor) ExecuteBot(_ context.Context, _, _ string) (string, int,
 type tier2Planner struct {
 	mu       sync.Mutex
 	nextID   int
-	created  int32
+	created  atomic.Int32
 	idPrefix string
 }
 
@@ -101,7 +102,7 @@ func (p *tier2Planner) CreatePlan(_ context.Context, _, _, _, _ string) (employe
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.nextID++
-	atomic.AddInt32(&p.created, 1)
+	p.created.Add(1)
 	return employee.PlanRef{
 		ID:    p.idPrefix + zeroPad(p.nextID),
 		State: "pending_approval",
@@ -264,10 +265,10 @@ func TestEmployee_Tier2ApprovalCycle(t *testing.T) {
 	var candidates []employee.CandidatePlan
 	t.Run("assess produces candidate", func(t *testing.T) {
 		candidates, err = loop.Assess(ctx, employee.TriggerEvent{
-			Source:   "webhook",
-			Topic:    "github.push",
-			Payload:  []byte(`{"status":"failure"}`),
-			FiredAt:  time.Now().UTC(),
+			Source:  "webhook",
+			Topic:   "github.push",
+			Payload: []byte(`{"status":"failure"}`),
+			FiredAt: time.Now().UTC(),
 		})
 		if err != nil {
 			t.Fatalf("Assess: %v", err)
@@ -387,13 +388,7 @@ func TestEmployee_Tier2ApprovalCycle(t *testing.T) {
 		}
 		// Disposer recorded the approval.
 		disposer.mu.Lock()
-		found := false
-		for _, id := range disposer.approvedIDs {
-			if id == planID {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(disposer.approvedIDs, planID)
 		disposer.mu.Unlock()
 		if !found {
 			t.Errorf("plan %q not in disposer.approvedIDs", planID)
@@ -429,13 +424,7 @@ func TestEmployee_Tier2ApprovalCycle(t *testing.T) {
 		}
 		// Disposer recorded the rejection.
 		disposer.mu.Lock()
-		found := false
-		for _, id := range disposer.rejectedIDs {
-			if id == planID {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(disposer.rejectedIDs, planID)
 		disposer.mu.Unlock()
 		if !found {
 			t.Errorf("plan %q not in disposer.rejectedIDs", planID)
@@ -513,8 +502,8 @@ func TestEmployee_Tier2AssessNoCandidates(t *testing.T) {
 		t.Errorf("executor was called %d times; expected 0 on no-op Assess",
 			executor.calls.Load())
 	}
-	if atomic.LoadInt32(&planner.created) != 0 {
+	if planner.created.Load() != 0 {
 		t.Errorf("planner created %d plans; expected 0 on no-op Assess",
-			atomic.LoadInt32(&planner.created))
+			planner.created.Load())
 	}
 }

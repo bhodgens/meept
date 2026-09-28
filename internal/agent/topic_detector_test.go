@@ -86,9 +86,9 @@ func TestTopicDetector_Concurrent(t *testing.T) {
 	iterations := 100
 	results := make(chan string, iterations*10)
 
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		wg.Add(10)
-		for j := 0; j < 10; j++ {
+		for j := range 10 {
 			go func(topic string) {
 				defer wg.Done()
 				switch topic {
@@ -180,7 +180,7 @@ func BenchmarkDetect(b *testing.B) {
 	input := "I need to debug this error and build a new API feature for lunch"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = detector.Detect(input)
 	}
 }

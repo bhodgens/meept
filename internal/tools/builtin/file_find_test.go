@@ -83,7 +83,7 @@ func TestFileFind_Subdirectory(t *testing.T) {
 
 func TestFileFind_MaxResultsTruncation(t *testing.T) {
 	tmpDir := t.TempDir()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if err := os.WriteFile(filepath.Join(tmpDir, filepath.FromSlash("file"+string(rune('0'+i))+".txt")), []byte("x"), 0o644); err != nil {
 			t.Fatalf("os.WriteFile: %v", err)
 		}

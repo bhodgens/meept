@@ -408,14 +408,14 @@ func TestTTSRThreadSafety(t *testing.T) {
 	const goroutines = 50
 
 	// Concurrent CheckDelta calls
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		wg.Go(func() {
 			_ = mgr.CheckDelta("text", "trigger", 1)
 		})
 	}
 
 	// Concurrent MarkInjected calls
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -424,7 +424,7 @@ func TestTTSRThreadSafety(t *testing.T) {
 	}
 
 	// Concurrent InjectionState calls
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		wg.Go(func() {
 			_ = mgr.InjectionState()
 		})

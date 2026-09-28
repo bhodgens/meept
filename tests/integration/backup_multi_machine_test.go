@@ -42,7 +42,7 @@ func backupOneDB(t *testing.T, dbPath, backupSubdir, nodeID string) *backup.Back
 	}
 
 	manifest := &backup.BackupManifest{
-		NodeID:    nodeID,
+		NodeID: nodeID,
 		Databases: []backup.DatabaseInfo{
 			{
 				Name:             name,

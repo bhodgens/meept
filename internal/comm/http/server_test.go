@@ -2435,7 +2435,7 @@ func startWSTestServer(t *testing.T) (baseURL string, msgBus *bus.MessageBus, ca
 	go func() { _ = srv.Start(ctx) }()
 
 	// Wait for listener to be ready.
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		time.Sleep(20 * time.Millisecond)
 		conn, err := net.Dial("tcp", srv.Addr())
 		if err == nil {

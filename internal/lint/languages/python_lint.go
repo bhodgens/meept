@@ -219,7 +219,7 @@ func parseFlake8Errors(output, targetFile string) ([]LinterResult, error) {
 			lineNum := 0
 			colNum := 0
 			_, _ = fmt.Sscanf(matches[2], "%d", &lineNum) // parse failure leaves 0; the regex already guaranteed digits
-			_, _ = fmt.Sscanf(matches[3], "%d", &colNum) // parse failure leaves 0; the regex already guaranteed digits
+			_, _ = fmt.Sscanf(matches[3], "%d", &colNum)  // parse failure leaves 0; the regex already guaranteed digits
 
 			results = append(results, LinterResult{
 				File:     targetFile,
@@ -248,7 +248,7 @@ func parsePyrightErrors(output, targetFile string) ([]LinterResult, error) {
 		if matches := pattern.FindStringSubmatch(line); matches != nil {
 			lineNum, colNum := 0, 0
 			_, _ = fmt.Sscanf(matches[2], "%d", &lineNum) // parse failure leaves 0; the regex already guaranteed digits
-			_, _ = fmt.Sscanf(matches[3], "%d", &colNum) // parse failure leaves 0; the regex already guaranteed digits
+			_, _ = fmt.Sscanf(matches[3], "%d", &colNum)  // parse failure leaves 0; the regex already guaranteed digits
 			lineNum--
 			colNum--
 

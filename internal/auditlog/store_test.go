@@ -120,7 +120,7 @@ func TestAppend_ConcurrentSerialization(t *testing.T) {
 	const n = 20
 	var wg sync.WaitGroup
 	seqs := make(chan uint64, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

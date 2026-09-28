@@ -181,12 +181,12 @@ func TestDualStore_MergedReadLocalWins(t *testing.T) {
 
 // countingPublisher is a GossipPublisher that counts PublishClusterEvent calls.
 type countingPublisher struct {
-	count    int32
+	count    atomic.Int32
 	lastType atomic.Value // ClusterEventType
 }
 
 func (c *countingPublisher) PublishClusterEvent(eventType models.ClusterEventType, payload any) error {
-	atomic.AddInt32(&c.count, 1)
+	c.count.Add(1)
 	c.lastType.Store(eventType)
 
 	// Validate that payload is JSON-marshalable (mirrors real publisher contract).
@@ -223,13 +223,13 @@ func TestDualStore_SessionStorePublishesTurn(t *testing.T) {
 	// Wait briefly for the non-blocking goroutine in publishTurnGossip.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if atomic.LoadInt32(&pub.count) > 0 {
+		if pub.count.Load() > 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if got := atomic.LoadInt32(&pub.count); got != 1 {
+	if got := pub.count.Load(); got != 1 {
 		t.Errorf("publish count = %d, want 1", got)
 	}
 
@@ -268,11 +268,11 @@ func TestDualStore_GetSessionMergesBoth(t *testing.T) {
 	// Local-only session.
 	localSessID := id.Generate("local-sess-")
 	localSess := &memory.Session{
-		ID:           localSessID,
-		Name:         "local",
+		ID:             localSessID,
+		Name:           "local",
 		ConversationID: id.Generate("conv-"),
-		CreatedAt:    time.Now().UTC(),
-		LastActivity: time.Now().UTC(),
+		CreatedAt:      time.Now().UTC(),
+		LastActivity:   time.Now().UTC(),
 	}
 	if err := store.StoreSession(ctx, localSess); err != nil {
 		t.Fatalf("StoreSession local: %v", err)
@@ -281,11 +281,11 @@ func TestDualStore_GetSessionMergesBoth(t *testing.T) {
 	// Remote session via StoreRemoteSession.
 	remoteSessID := id.Generate("remote-sess-")
 	remoteSess := &memory.Session{
-		ID:           remoteSessID,
-		Name:         "remote",
+		ID:             remoteSessID,
+		Name:           "remote",
 		ConversationID: id.Generate("conv-"),
-		CreatedAt:    time.Now().UTC(),
-		LastActivity: time.Now().UTC(),
+		CreatedAt:      time.Now().UTC(),
+		LastActivity:   time.Now().UTC(),
 	}
 	if err := store.StoreRemoteSession(ctx, remoteSess, "node-peer"); err != nil {
 		t.Fatalf("StoreRemoteSession: %v", err)
@@ -294,21 +294,21 @@ func TestDualStore_GetSessionMergesBoth(t *testing.T) {
 	// Shared ID: insert into local first, then gossip. Local should win.
 	sharedID := id.Generate("shared-sess-")
 	sharedLocal := &memory.Session{
-		ID:           sharedID,
-		Name:         "local-version",
+		ID:             sharedID,
+		Name:           "local-version",
 		ConversationID: id.Generate("conv-"),
-		CreatedAt:    time.Now().UTC(),
-		LastActivity: time.Now().UTC(),
+		CreatedAt:      time.Now().UTC(),
+		LastActivity:   time.Now().UTC(),
 	}
 	if err := store.StoreSession(ctx, sharedLocal); err != nil {
 		t.Fatalf("StoreSession shared local: %v", err)
 	}
 	sharedRemote := &memory.Session{
-		ID:           sharedID,
-		Name:         "remote-version",
+		ID:             sharedID,
+		Name:           "remote-version",
 		ConversationID: id.Generate("conv-"),
-		CreatedAt:    time.Now().UTC(),
-		LastActivity: time.Now().UTC(),
+		CreatedAt:      time.Now().UTC(),
+		LastActivity:   time.Now().UTC(),
 	}
 	if err := store.StoreRemoteSession(ctx, sharedRemote, "node-peer"); err != nil {
 		t.Fatalf("StoreRemoteSession shared: %v", err)
@@ -387,7 +387,7 @@ func TestDualStore_StoreRemoteTurn_NoEcho(t *testing.T) {
 	// StoreRemoteTurn should NOT invoke the publisher (no echo).
 	// Give a brief grace period in case of goroutine scheduling.
 	time.Sleep(50 * time.Millisecond)
-	if got := atomic.LoadInt32(&pub.count); got != 0 {
+	if got := pub.count.Load(); got != 0 {
 		t.Errorf("publish count = %d, want 0 (StoreRemoteTurn must not echo-publish)", got)
 	}
 

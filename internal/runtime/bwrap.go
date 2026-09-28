@@ -38,8 +38,7 @@ func realBwrapRunner(ctx context.Context, path string, args []string, dir string
 		return out, 0, nil
 	}
 
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		// Non-zero command exit is reported as a RESULT for callers to act on.
 		return out, exitErr.ExitCode(), nil
 	}

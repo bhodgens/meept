@@ -29,9 +29,9 @@ import (
 // mockChatter (which lives in the employee package's test files and so
 // cannot be imported here).
 type auditChatter struct {
-	resp    *llm.Response
-	err     error
-	called  atomic.Int32
+	resp   *llm.Response
+	err    error
+	called atomic.Int32
 }
 
 func (c *auditChatter) Chat(_ context.Context, _ []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
@@ -51,10 +51,10 @@ func (c *auditChatter) Config() *llm.ModelConfig { return nil }
 // pauseRecorder is the AutoPauseFunc used by the audit test. It records
 // the most recent pause call so the test can assert on the reason.
 type pauseRecorder struct {
-	mu        sync.Mutex
-	called    bool
-	employee  string
-	reason    string
+	mu         sync.Mutex
+	called     bool
+	employee   string
+	reason     string
 	pauseCount int
 }
 

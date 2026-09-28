@@ -30,8 +30,6 @@ import (
 )
 
 // boolPtr returns a pointer to b. Used to construct ServerConfig.Enabled.
-func boolPtr(b bool) *bool { return &b }
-
 // quietLogger returns a logger that discards output, keeping tests quiet.
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -46,8 +44,8 @@ func TestSetConfigs_PopulatesConfigsMap(t *testing.T) {
 	t.Cleanup(m.StopAll)
 
 	m.SetConfigs([]ServerConfig{
-		{Name: "a", Enabled: boolPtr(true), Category: "alpha", Description: "alpha-a"},
-		{Name: "b", Enabled: boolPtr(false), Category: "beta", Description: "beta-b"},
+		{Name: "a", Enabled: new(true), Category: "alpha", Description: "alpha-a"},
+		{Name: "b", Enabled: new(false), Category: "beta", Description: "beta-b"},
 	})
 
 	m.mu.RLock()
@@ -94,7 +92,7 @@ func TestAllServerStatuses_IncludesDisabledServers(t *testing.T) {
 	t.Cleanup(m.StopAll)
 
 	m.SetConfigs([]ServerConfig{
-		{Name: "disabled-one", Enabled: boolPtr(false), Category: "z", Description: "never starts"},
+		{Name: "disabled-one", Enabled: new(false), Category: "z", Description: "never starts"},
 	})
 
 	entries := m.AllServerStatuses()
@@ -313,7 +311,7 @@ func TestStartServer_DisabledReturnsError(t *testing.T) {
 
 	cfg := ServerConfig{
 		Name:    "disabled",
-		Enabled: boolPtr(false),
+		Enabled: new(false),
 		Command: []string{"sleep", "3600"},
 		Type:    "stdio",
 	}
@@ -346,8 +344,8 @@ func TestReload_DisabledServersSkippedFromStart(t *testing.T) {
 	}
 
 	configs := []ServerConfig{
-		{Name: "alive", Enabled: boolPtr(true), Command: []string{"bash", scriptPath}, Type: "stdio"},
-		{Name: "dead", Enabled: boolPtr(false), Command: []string{"bash", scriptPath}, Type: "stdio"},
+		{Name: "alive", Enabled: new(true), Command: []string{"bash", scriptPath}, Type: "stdio"},
+		{Name: "dead", Enabled: new(false), Command: []string{"bash", scriptPath}, Type: "stdio"},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -397,7 +395,7 @@ func TestReload_PreservesStatsForDisabledServers(t *testing.T) {
 	}
 
 	configs := []ServerConfig{
-		{Name: "to-disable", Enabled: boolPtr(false), Command: []string{"bash", scriptPath}, Type: "stdio"},
+		{Name: "to-disable", Enabled: new(false), Command: []string{"bash", scriptPath}, Type: "stdio"},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

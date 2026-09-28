@@ -62,7 +62,7 @@ func TestNotificationRateLimiter(t *testing.T) {
 	lim := NewNotificationRateLimiter(3) // 3 per hour
 
 	// First 3 should be allowed
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if !lim.Allow("sess-1") {
 			t.Errorf("expected true for request %d", i+1)
 		}
@@ -82,7 +82,7 @@ func TestNotificationRateLimiter(t *testing.T) {
 func TestNotificationRateLimiter_NoLimit(t *testing.T) {
 	lim := NewNotificationRateLimiter(0) // no limit
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		if !lim.Allow("sess-1") {
 			t.Errorf("expected true for request %d with no limit", i+1)
 		}

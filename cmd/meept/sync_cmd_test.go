@@ -166,7 +166,7 @@ func TestSyncStatusCmd_JSONOutputStructure(t *testing.T) {
 	}
 	out := buf.String()
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
 		t.Fatalf("output is not valid JSON: %v\nraw=%q", err, out)
 	}
@@ -181,7 +181,7 @@ func TestSyncStatusCmd_JSONOutputStructure(t *testing.T) {
 	peersVal, ok := parsed["peers"]
 	if !ok {
 		t.Error("peers missing from JSON output")
-	} else if peersMap, ok := peersVal.(map[string]interface{}); ok {
+	} else if peersMap, ok := peersVal.(map[string]any); ok {
 		if _, has := peersMap[peerID]; !has {
 			t.Errorf("seeded peer %q not in status map: %v", peerID, peersMap)
 		}

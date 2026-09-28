@@ -117,7 +117,7 @@ func startTestServer(t *testing.T, opts ...http.ServerOption) (baseURL string, c
 	}()
 
 	// Wait for listener to be ready
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		time.Sleep(20 * time.Millisecond)
 		conn, err := net.DialTimeout("tcp", "127.0.0.1"+srv.Addr(), time.Second)
 		if err == nil {
@@ -996,7 +996,7 @@ func TestUnifiedHTTPServer_SSEBusEventForwarding(t *testing.T) {
 
 	// Read the forwarded event — may need multiple reads
 	var forwardedBody string
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		n, _ = resp.Body.Read(buf)
 		if n > 0 {
 			forwardedBody = string(buf[:n])
@@ -1266,7 +1266,7 @@ func TestUnifiedHTTPServer_RuntimeStatus_WithManager(t *testing.T) {
 	}()
 
 	// Wait for server to be ready
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		time.Sleep(20 * time.Millisecond)
 		conn, err := net.DialTimeout("tcp", "127.0.0.1"+srv.Addr(), time.Second)
 		if err == nil {

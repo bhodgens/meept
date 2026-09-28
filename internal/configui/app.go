@@ -604,7 +604,8 @@ func (a *App) View() tea.View {
 }
 
 func (a *App) viewMenu() string {
-	s := a.styles.title.Render("meept config") + "\n\n"
+	var b strings.Builder
+	b.WriteString(a.styles.title.Render("meept config") + "\n\n")
 	for i, item := range a.menuItems {
 		cursor := "  "
 		style := a.styles.unselected
@@ -612,18 +613,18 @@ func (a *App) viewMenu() string {
 			cursor = "> "
 			style = a.styles.selected
 		}
-		s += cursor + style.Render(item.Title) + "  " + a.styles.label.Render(item.Description) + "\n"
+		fmt.Fprintf(&b, "%s%s  %s\n", cursor, style.Render(item.Title), a.styles.label.Render(item.Description))
 	}
-	s += "\n" + a.styles.help.Render("up/down navigate  enter select  a toggle advanced  ? help  q quit")
+	b.WriteString("\n" + a.styles.help.Render("up/down navigate  enter select  a toggle advanced  ? help  q quit"))
 	if a.helpVisible {
-		s += "\n\n" + a.styles.title.Render("key bindings") + "\n"
-		s += "  up/down, j/k   navigate menu\n"
-		s += "  enter           select section\n"
-		s += "  a               toggle advanced sections\n"
-		s += "  q               quit\n"
-		s += "  ?               toggle this help\n"
+		b.WriteString("\n\n" + a.styles.title.Render("key bindings") + "\n")
+		b.WriteString("  up/down, j/k   navigate menu\n")
+		b.WriteString("  enter           select section\n")
+		b.WriteString("  a               toggle advanced sections\n")
+		b.WriteString("  q               quit\n")
+		b.WriteString("  ?               toggle this help\n")
 	}
-	return s
+	return b.String()
 }
 
 func (a *App) viewSection() string {
@@ -635,9 +636,10 @@ func (a *App) viewSection() string {
 	if a.section.IsDirty() {
 		unsavedMarker = " " + a.styles.dirtyMarker.Render("(unsaved)")
 	}
-	s := a.styles.breadcrumb.Render("meept config > ") + a.styles.title.Render(a.section.Title()) + unsavedMarker + "\n\n"
+	var b2 strings.Builder
+	b2.WriteString(a.styles.breadcrumb.Render("meept config > ") + a.styles.title.Render(a.section.Title()) + unsavedMarker + "\n\n")
 	if a.errMsg != "" {
-		s += a.styles.dirtyMarker.Render("error: "+a.errMsg) + "\n\n"
+		b2.WriteString(a.styles.dirtyMarker.Render("error: "+a.errMsg) + "\n\n")
 	}
 	for i, f := range a.section.Fields() {
 		cursor := "  "
@@ -650,24 +652,24 @@ func (a *App) viewSection() string {
 		if f.IsDirty() {
 			dirty = a.styles.dirtyMarker.Render(" *")
 		}
-		s += cursor + style.Render(f.Label()) + "  " + a.styles.value.Render(f.Display()) + dirty + "\n"
+		fmt.Fprintf(&b2, "%s%s  %s%s\n", cursor, style.Render(f.Label()), a.styles.value.Render(f.Display()), dirty)
 	}
 	// Context-aware help text for drilldown sub-sections vs top-level sections
 	if a.section.IsDrilldown() {
-		s += "\n" + a.styles.help.Render("up/down navigate  enter edit  s save  d reset  esc to drilldown list  ? help")
+		b2.WriteString("\n" + a.styles.help.Render("up/down navigate  enter edit  s save  d reset  esc to drilldown list  ? help"))
 	} else {
-		s += "\n" + a.styles.help.Render("up/down navigate  enter edit  s save  d reset  ? help  esc back  q back")
+		b2.WriteString("\n" + a.styles.help.Render("up/down navigate  enter edit  s save  d reset  ? help  esc back  q back"))
 	}
 	if a.helpVisible {
-		s += "\n\n" + a.styles.title.Render("key bindings") + "\n"
-		s += "  up/down, j/k   navigate fields\n"
-		s += "  enter           edit field / drill into sub-section\n"
-		s += "  s               save changes\n"
-		s += "  d               reset field to original value\n"
-		s += "  esc/q           back to parent menu (prompts to save if dirty)\n"
-		s += "  ?               toggle this help\n"
+		b2.WriteString("\n\n" + a.styles.title.Render("key bindings") + "\n")
+		b2.WriteString("  up/down, j/k   navigate fields\n")
+		b2.WriteString("  enter           edit field / drill into sub-section\n")
+		b2.WriteString("  s               save changes\n")
+		b2.WriteString("  d               reset field to original value\n")
+		b2.WriteString("  esc/q           back to parent menu (prompts to save if dirty)\n")
+		b2.WriteString("  ?               toggle this help\n")
 	}
-	return s
+	return b2.String()
 }
 
 func (a *App) viewEditor() string {
@@ -675,7 +677,8 @@ func (a *App) viewEditor() string {
 		return ""
 	}
 	f := a.editor.field
-	s := a.styles.breadcrumb.Render("meept config > "+a.section.Title()+" > ") + a.styles.title.Render(f.Label()) + "\n\n"
+	var b strings.Builder
+	b.WriteString(a.styles.breadcrumb.Render("meept config > "+a.section.Title()+" > ") + a.styles.title.Render(f.Label()) + "\n\n")
 
 	switch f.Type() {
 	case FieldToggle:
@@ -683,8 +686,8 @@ func (a *App) viewEditor() string {
 		if f.Get() == "true" {
 			cur = "[*] enabled"
 		}
-		s += cur + "\n\n"
-		s += a.styles.help.Render("space/enter toggle  esc cancel")
+		b.WriteString(cur + "\n\n")
+		b.WriteString(a.styles.help.Render("space/enter toggle  esc cancel"))
 	case FieldSelect:
 		sf := f.(*SelectField)
 		for i, opt := range sf.Options {
@@ -696,19 +699,19 @@ func (a *App) viewEditor() string {
 			if opt == f.Get() {
 				prefix = "[*] "
 			}
-			s += cursor + prefix + opt + "\n"
+			fmt.Fprintf(&b, "%s%s%s\n", cursor, prefix, opt)
 		}
-		s += "\n" + a.styles.help.Render("up/down navigate  enter confirm  esc cancel")
+		b.WriteString("\n" + a.styles.help.Render("up/down navigate  enter confirm  esc cancel"))
 	case FieldText, FieldMasked, FieldNumber, FieldFloat, FieldDuration:
 		display := a.editor.InputValue()
 		if f.Type() == FieldMasked && display != "" {
 			display = "......"
 		}
-		s += "> " + display + "\n\n"
-		s += a.styles.help.Render("type value  enter confirm  esc cancel")
+		b.WriteString("> " + display + "\n\n")
+		b.WriteString(a.styles.help.Render("type value  enter confirm  esc cancel"))
 	}
 
-	return s
+	return b.String()
 }
 
 func (a *App) viewConfirm() string {
@@ -726,10 +729,11 @@ func (a *App) viewDrilldown() string {
 	if a.section == nil {
 		return ""
 	}
-	s := a.styles.breadcrumb.Render("meept config > "+a.section.Title()+" > ") + a.styles.title.Render(a.drilldownField.Label()) + "\n\n"
+	var b strings.Builder
+	b.WriteString(a.styles.breadcrumb.Render("meept config > "+a.section.Title()+" > ") + a.styles.title.Render(a.drilldownField.Label()) + "\n\n")
 
 	if len(a.drilldownItems) == 0 {
-		s += "  (no items)\n\n"
+		b.WriteString("  (no items)\n\n")
 	} else {
 		for i, item := range a.drilldownItems {
 			cursor := "  "
@@ -738,12 +742,12 @@ func (a *App) viewDrilldown() string {
 				cursor = "> "
 				style = a.styles.selected
 			}
-			s += cursor + style.Render(item.Name) + "  " + a.styles.value.Render(fmt.Sprintf("[%d fields]", len(item.Fields))) + "\n"
+			fmt.Fprintf(&b, "%s%s  %s\n", cursor, style.Render(item.Name), a.styles.value.Render(fmt.Sprintf("[%d fields]", len(item.Fields))))
 		}
 	}
 
-	s += "\n" + a.styles.help.Render("up/down navigate  enter view details  n new  d delete  esc back")
-	return s
+	b.WriteString("\n" + a.styles.help.Render("up/down navigate  enter view details  n new  d delete  esc back"))
+	return b.String()
 }
 
 // sectionAliases maps shorthand names to the menu item Title they should match.

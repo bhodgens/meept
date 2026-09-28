@@ -63,7 +63,7 @@ func TestFixLoopEscalation(t *testing.T) {
 	hook.SetSpawner(spawner)
 
 	// First 2 FAILs produce fix instructions (iteration 1/2, 2/2).
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		tr := NewVerificationTracker(1)
 		tr.RecordToolCall("file_write", "f.go")
 		hook.tracker = tr

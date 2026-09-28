@@ -55,7 +55,7 @@ func TestPTYHandler_StreamSessionOutput_NoSendOnClosedChannel(t *testing.T) {
 
 	// Producer: feed output.
 	go func() {
-		for i := 0; i < 200; i++ {
+		for range 200 {
 			out <- []byte("x")
 		}
 		close(out)
@@ -99,13 +99,13 @@ func TestPTYHandler_StreamSessionOutput_NoSendOnClosedChannel(t *testing.T) {
 // IDs are unique and properly prefixed.
 func TestGenerateSessionID_Unpredictable(t *testing.T) {
 	ids := make(map[string]struct{}, 1000)
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		id := generateSessionID()
 		if !strings.HasPrefix(id, "pty-") {
 			t.Fatalf("session id %q missing pty- prefix", id)
 		}
 		if _, dup := ids[id]; dup {
-			t.Fatalf("duplicate session id after %d generations: %s", i, id)
+			t.Fatalf("duplicate session id generated: %s", id)
 		}
 		ids[id] = struct{}{}
 	}

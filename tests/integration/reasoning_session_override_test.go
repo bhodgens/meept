@@ -32,13 +32,13 @@ type rpcCallFunc = func(ctx context.Context, method string, params json.RawMessa
 
 // sessionReasoningHTTPTestCase holds the fixtures for one HTTP test case.
 type sessionReasoningHTTPTestCase struct {
-	name        string
-	method      string
-	pathID      string
-	body        string
-	rpcCall     rpcCallFunc
-	wantStatus  int
-	wantMethod  string // expected RPC method name (empty skips check)
+	name       string
+	method     string
+	pathID     string
+	body       string
+	rpcCall    rpcCallFunc
+	wantStatus int
+	wantMethod string // expected RPC method name (empty skips check)
 }
 
 // runSessionReasoningHTTPTest exercises the HTTP handler logic by simulating
@@ -194,10 +194,10 @@ func TestSessionReasoningHTTP_DeleteSuccess(t *testing.T) {
 func TestSessionReasoningHTTP_NoLoop(t *testing.T) {
 	t.Parallel()
 	tc := sessionReasoningHTTPTestCase{
-		name:      "no loop",
-		method:    http.MethodPut,
-		pathID:    "sess-x",
-		body:      `{"effort":"high"}`, // no agent_id in MVP
+		name:       "no loop",
+		method:     http.MethodPut,
+		pathID:     "sess-x",
+		body:       `{"effort":"high"}`, // no agent_id in MVP
 		wantStatus: http.StatusNotFound,
 		wantMethod: "reasoning.session_set",
 		rpcCall: func(_ context.Context, _ string, _ json.RawMessage) (any, error) {
@@ -212,10 +212,10 @@ func TestSessionReasoningHTTP_NoLoop(t *testing.T) {
 func TestSessionReasoningHTTP_AgentNotFound(t *testing.T) {
 	t.Parallel()
 	tc := sessionReasoningHTTPTestCase{
-		name:      "agent not found",
-		method:    http.MethodPut,
-		pathID:    "sess-1",
-		body:      `{"effort":"high","agent_id":"nonexistent"}`,
+		name:       "agent not found",
+		method:     http.MethodPut,
+		pathID:     "sess-1",
+		body:       `{"effort":"high","agent_id":"nonexistent"}`,
 		wantStatus: http.StatusNotFound,
 		wantMethod: "reasoning.session_set",
 		rpcCall: func(_ context.Context, _ string, _ json.RawMessage) (any, error) {
@@ -230,10 +230,10 @@ func TestSessionReasoningHTTP_AgentNotFound(t *testing.T) {
 func TestSessionReasoningHTTP_InternalError(t *testing.T) {
 	t.Parallel()
 	tc := sessionReasoningHTTPTestCase{
-		name:      "internal error",
-		method:    http.MethodPut,
-		pathID:    "sess-1",
-		body:      `{"effort":"high","agent_id":"coder"}`,
+		name:       "internal error",
+		method:     http.MethodPut,
+		pathID:     "sess-1",
+		body:       `{"effort":"high","agent_id":"coder"}`,
 		wantStatus: http.StatusInternalServerError,
 		wantMethod: "reasoning.session_set",
 		rpcCall: func(_ context.Context, _ string, _ json.RawMessage) (any, error) {

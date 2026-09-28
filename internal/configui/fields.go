@@ -4,6 +4,7 @@ package configui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -119,12 +120,10 @@ func NewSelectField(key, label, value string, options []string) *SelectField {
 func (f *SelectField) Type() FieldType { return FieldSelect }
 
 func (f *SelectField) Set(v string) error {
-	for _, o := range f.Options {
-		if o == v {
-			f.current = v
-			f.dirty = f.current != f.orig
-			return nil
-		}
+	if slices.Contains(f.Options, v) {
+		f.current = v
+		f.dirty = f.current != f.orig
+		return nil
 	}
 	return fmt.Errorf("select field %q: %q is not a valid option", f.key, v)
 }

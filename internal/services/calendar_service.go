@@ -40,8 +40,8 @@ type AttendeeInfo struct {
 
 // ListEventsRequest contains list parameters.
 type ListEventsRequest struct {
-	TimeMin    time.Time `json:"time_min,omitempty"`
-	TimeMax    time.Time `json:"time_max,omitempty"`
+	TimeMin    time.Time `json:"time_min,omitzero"`
+	TimeMax    time.Time `json:"time_max,omitzero"`
 	MaxResults int       `json:"max_results,omitempty"`
 }
 

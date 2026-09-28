@@ -2,6 +2,7 @@ package ast
 
 import (
 	"context"
+	"slices"
 	"testing"
 )
 
@@ -43,14 +44,7 @@ func Goodbye() string {
 	}
 
 	// Check that the match includes the function name
-	found := false
-	for _, line := range m.MatchedLines {
-		if line == "func Hello() string {" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(m.MatchedLines, "func Hello() string {") {
 		t.Errorf("expected matched lines to contain Hello function, got: %v", m.MatchedLines)
 	}
 }

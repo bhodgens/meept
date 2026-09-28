@@ -78,7 +78,7 @@ func TestSyncPull_MergePeerIntoGossipAndPersistMetadata(t *testing.T) {
 	turnRows := 8
 	memoryRows := 2
 
-	for i := 0; i < sessionRows; i++ {
+	for i := range sessionRows {
 		sid := id.Generate("sess-")
 		_, err = peerDB.Exec(
 			`INSERT INTO sessions (id, created_at, last_activity, metadata_json, source_node) VALUES (?, ?, ?, ?, ?)`,
@@ -88,7 +88,7 @@ func TestSyncPull_MergePeerIntoGossipAndPersistMetadata(t *testing.T) {
 			t.Fatalf("insert peer session %d: %v", i, err)
 		}
 	}
-	for i := 0; i < turnRows; i++ {
+	for i := range turnRows {
 		tid := id.Generate("turn-")
 		_, err = peerDB.Exec(
 			`INSERT INTO turns (turn_id, session_id, role, content, timestamp, source_node) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -98,7 +98,7 @@ func TestSyncPull_MergePeerIntoGossipAndPersistMetadata(t *testing.T) {
 			t.Fatalf("insert peer turn %d: %v", i, err)
 		}
 	}
-	for i := 0; i < memoryRows; i++ {
+	for i := range memoryRows {
 		mid := id.Generate("mem-")
 		_, err = peerDB.Exec(
 			`INSERT INTO memories (id, type, category, content, created_at, agent_id, session_id, source_node) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

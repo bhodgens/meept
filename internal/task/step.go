@@ -71,7 +71,7 @@ type CategorizedRecommendation struct {
 type ChecklistItem struct {
 	Text        string     `json:"text"`
 	Completed   bool       `json:"completed"`
-	CreatedAt   time.Time  `json:"created_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at,omitzero"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 

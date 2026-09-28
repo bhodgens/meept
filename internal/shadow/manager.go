@@ -311,10 +311,8 @@ func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string,
 	case ModeAsync, ModeSelective:
 		// Process in background with WaitGroup tracking so Close() can
 		// wait for in-flight records before shutting down.
-		m.wg.Add(1)
 		//nolint:gosec // goroutine outlives request context
-		go func() {
-			defer m.wg.Done()
+		m.wg.Go(func() {
 			bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 
@@ -330,7 +328,7 @@ func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string,
 			if err := m.ProcessRecord(bgCtx, record); err != nil {
 				m.logger.Error("Failed to process shadow record", "error", err)
 			}
-		}()
+		})
 	}
 }
 
@@ -696,16 +694,14 @@ func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID str
 		}
 
 	case ModeAsync, ModeSelective:
-		m.wg.Add(1)
 		//nolint:gosec // goroutine outlives request context
-		go func() {
-			defer m.wg.Done()
+		m.wg.Go(func() {
 			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := m.ProcessRecord(bgCtx, record); err != nil {
 				m.logger.Error("Failed to process shadow tool record", "error", err)
 			}
-		}()
+		})
 	}
 }
 

@@ -312,8 +312,7 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 	// the tool is never invoked — the 2026-09-18 e2e run showed 45 identical
 	// task_create{} calls because nothing structural stopped the loop.
 	if err := ValidateToolArgs(tool, args); err != nil {
-		var ae *ArgValidationError
-		if errors.As(err, &ae) {
+		if ae, ok := errors.AsType[*ArgValidationError](err); ok {
 			r.logger.Warn("tool arguments failed schema validation",
 				"name", name,
 				"arg", ae.Arg,

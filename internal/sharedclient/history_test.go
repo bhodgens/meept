@@ -162,7 +162,7 @@ func TestHistoryMaxSize(t *testing.T) {
 	h := NewHistory(5)
 
 	// Add more than max size
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		h.Add(string(rune('a' + i)))
 	}
 

@@ -166,7 +166,7 @@ func TestTestRunnerTruncateOutput(t *testing.T) {
 
 	// Create output with multiple lines
 	output := ""
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		output += "line \n"
 	}
 

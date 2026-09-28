@@ -35,8 +35,7 @@ func goStructJSONTags(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	typ := reflect.TypeFor[agent.TurnTerminalEvent]()
-	for i := 0; i < typ.NumField(); i++ {
-		f := typ.Field(i)
+	for f := range typ.Fields() {
 		tag := f.Tag.Get("json")
 		if tag == "" || tag == "-" {
 			continue

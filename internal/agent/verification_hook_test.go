@@ -100,7 +100,7 @@ func driveToExhaustion(t *testing.T, hook *VerificationAutoTrigger) TurnModifica
 	if maxLoops < 1 {
 		maxLoops = 3
 	}
-	for i := 0; i < maxLoops; i++ {
+	for i := range maxLoops {
 		tr := NewVerificationTracker(1)
 		tr.RecordToolCall("file_write", "f.go")
 		hook.tracker = tr
@@ -292,7 +292,7 @@ func TestEscalationBusPayloadKeysExact(t *testing.T) {
 	// Drive to exhaustion on an observable base ref so from_model is
 	// captured (mirrors driveToExhaustion but passes ModelRef): 3 fix
 	// loops, then the 4th call exceeds MaxFixLoops=3.
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		hook.tracker = NewVerificationTracker(1)
 		hook.tracker.RecordToolCall("file_write", "f.go")
 		hook.PrepareNextTurn(context.Background(), TurnState{ModelRef: "base/ref"})

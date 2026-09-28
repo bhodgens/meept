@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -101,10 +102,5 @@ func TestDiscovery_ShadowingUnionHasNoDuplicates(t *testing.T) {
 }
 
 func contains(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, want)
 }

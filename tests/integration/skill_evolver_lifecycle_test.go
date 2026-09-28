@@ -59,12 +59,12 @@ func (c *callCountUsageTracker) GetAllStatsCallCount() int64 {
 
 // evolverFixture bundles all the real objects constructed for a test case.
 type evolverFixture struct {
-	evolver  *lifecycle.Evolver
-	sched    *lifecycle.EvolverScheduler
-	usage    *callCountUsageTracker
-	writer   *lifecycle.Writer
+	evolver   *lifecycle.Evolver
+	sched     *lifecycle.EvolverScheduler
+	usage     *callCountUsageTracker
+	writer    *lifecycle.Writer
 	skillsDir string
-	cleanup  func()
+	cleanup   func()
 }
 
 // buildEvolverFixture constructs a full Evolver + EvolverScheduler using real
@@ -186,7 +186,7 @@ func TestSkillEvolverLifecycle_StartStopClean(t *testing.T) {
 
 	f.sched.Stop()
 	f.sched.Stop() // Double-stop must be safe (idempotent).
-	cancel()        // Cancel after Stop — should be safe.
+	cancel()       // Cancel after Stop — should be safe.
 
 	afterGoroutines := settleGoroutines()
 	if afterGoroutines > beforeGoroutines {
@@ -226,11 +226,9 @@ func TestSkillEvolverLifecycle_NoGoroutineLeak(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		f.sched.Start(ctx)
-	}()
+	})
 
 	time.Sleep(250 * time.Millisecond)
 

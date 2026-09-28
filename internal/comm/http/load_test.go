@@ -75,7 +75,7 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 
 	// Wait for listener.
 	var baseURL string
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		time.Sleep(20 * time.Millisecond)
 		addr := srv.Addr()
 		host, port, err := net.SplitHostPort(addr)
@@ -118,7 +118,7 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 	// publisher waits for numClients of these instead of a blind sleep.
 	acks := make(chan struct{}, numClients)
 
-	for i := 0; i < numClients; i++ {
+	for i := range numClients {
 		results[i] = &clientResult{}
 		wg.Add(1)
 		go func(idx int, res *clientResult) {
@@ -202,7 +202,7 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 	// Wait until every client completed the subscribe handshake (deterministic;
 	// replaces a blind 2s sleep that raced slow machines). Timeout guards
 	// against a wedged handshake — testTimeout bounds the whole test anyway.
-	for i := 0; i < numClients; i++ {
+	for i := range numClients {
 		select {
 		case <-acks:
 		case <-ctx.Done():
@@ -215,7 +215,7 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 	// type (confirmed by existing tests in unified_http_test.go).
 	publishStart := time.Now()
 
-	for i := 0; i < numEvents; i++ {
+	for i := range numEvents {
 		payload, _ := json.Marshal(map[string]any{
 			"task_id": fmt.Sprintf("load-test-task-%d", i),
 			"status":  "running",
@@ -355,7 +355,7 @@ func TestWebSocket_Load_BroadcastCorrectness(t *testing.T) {
 
 	// Wait for server.
 	var baseURL string
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		time.Sleep(20 * time.Millisecond)
 		addr := srv.Addr()
 		_, port, err := net.SplitHostPort(addr)
@@ -384,7 +384,7 @@ func TestWebSocket_Load_BroadcastCorrectness(t *testing.T) {
 		}
 	}()
 
-	for i := 0; i < numClients; i++ {
+	for i := range numClients {
 		wsCfg, err := websocket.NewConfig(wsURL, baseURL)
 		if err != nil {
 			t.Fatalf("client %d config error: %v", i, err)
@@ -405,7 +405,7 @@ func TestWebSocket_Load_BroadcastCorrectness(t *testing.T) {
 	}
 
 	// Publish events.
-	for i := 0; i < numEvents; i++ {
+	for i := range numEvents {
 		payload, _ := json.Marshal(map[string]any{
 			"task_id": fmt.Sprintf("broadcast-test-%d", i),
 			"status":  "done",

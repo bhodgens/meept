@@ -198,7 +198,7 @@ func TestCIMonitor_POC(t *testing.T) {
 		// tier-2 Decide should have produced exactly one plan via the
 		// stubbed planner. The plan sits in pending_approval; the
 		// executor should NOT have been called yet.
-		if got := atomic.LoadInt32(&planner.created); got != 1 {
+		if got := planner.created.Load(); got != 1 {
 			t.Errorf("expected 1 plan created, got %d", got)
 		}
 		if executor.calls.Load() != 0 {
@@ -221,7 +221,6 @@ func TestCIMonitor_POC(t *testing.T) {
 		// in GoalLoop.Reflect does not call the LLM — it uses the
 		// consecutive-failure counter to derive health (at_risk when
 		// below threshold, broken when at/above).
-
 
 		planRef := employee.PlanRef{
 			ID:    "plan-t2-001",

@@ -151,9 +151,9 @@ func TestGossipHandler_MemoryStored_PersistsWithSourceNode(t *testing.T) {
 
 	ctx := context.Background()
 	var (
-		gotContent   string
-		gotSource    string
-		gotAgent     string
+		gotContent string
+		gotSource  string
+		gotAgent   string
 	)
 	err = store.GossipDB().QueryRowContext(ctx,
 		`SELECT content, source_node, agent_id FROM memories WHERE id = ?`,

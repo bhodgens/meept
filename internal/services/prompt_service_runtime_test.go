@@ -133,9 +133,7 @@ func TestPromptService_ConcurrentLookupsDuringProjectChange(t *testing.T) {
 	var toggleWG, readerWG sync.WaitGroup
 
 	// Toggler: keeps swapping the project tier between the two projects.
-	toggleWG.Add(1)
-	go func() {
-		defer toggleWG.Done()
+	toggleWG.Go(func() {
 		for i := 0; ; i++ {
 			select {
 			case <-stop:
@@ -148,17 +146,15 @@ func TestPromptService_ConcurrentLookupsDuringProjectChange(t *testing.T) {
 				svc.SetProjectDir(projB)
 			}
 		}
-	}()
+	})
 
 	// Readers: every lookup must see a coherent project tier (A or B), never a
 	// torn, mislabeled, or missing one.
 	const readers = 8
 	const iterations = 300
-	for r := 0; r < readers; r++ {
-		readerWG.Add(1)
-		go func() {
-			defer readerWG.Done()
-			for j := 0; j < iterations; j++ {
+	for range readers {
+		readerWG.Go(func() {
+			for range iterations {
 				entries, err := svc.List()
 				if err != nil {
 					failures.Add(1)
@@ -186,7 +182,7 @@ func TestPromptService_ConcurrentLookupsDuringProjectChange(t *testing.T) {
 					failures.Add(1)
 				}
 			}
-		}()
+		})
 	}
 
 	readerWG.Wait()

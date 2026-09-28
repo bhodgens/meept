@@ -284,9 +284,9 @@ func (t *Task) AddTokenUsage(tokens int) {
 	t.UpdatedAt = time.Now().UTC()
 }
 
-var taskIDCounter uint64
+var taskIDCounter atomic.Uint64
 
 func generateTaskID() string {
-	seq := atomic.AddUint64(&taskIDCounter, 1)
+	seq := taskIDCounter.Add(1)
 	return fmt.Sprintf("task-%s-%04d", time.Now().UTC().Format("20060102150405.000000000"), seq)
 }

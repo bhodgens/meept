@@ -5,6 +5,7 @@ package runtime
 
 import (
 	"path"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -54,17 +55,7 @@ func isDenied(name string, denyGlobs []string) bool {
 
 // isAllowedName reports whether name is in BaseEnvKeys or allowlist.
 func isAllowedName(name string, allowlist []string) bool {
-	for _, k := range BaseEnvKeys {
-		if k == name {
-			return true
-		}
-	}
-	for _, k := range allowlist {
-		if k == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(BaseEnvKeys, name) || slices.Contains(allowlist, name)
 }
 
 // BuildChildEnv builds the child env slice. parentEnv is the daemon's captured

@@ -2,6 +2,7 @@
 package security
 
 import (
+	"maps"
 	"os/user"
 	"path/filepath"
 	"regexp"
@@ -194,11 +195,7 @@ func (pc *PermissionChecker) snapshotPreExecCheckers() map[string]PreExecChecker
 	if len(pc.preExecCheckers) == 0 {
 		return nil
 	}
-	cp := make(map[string]PreExecChecker, len(pc.preExecCheckers))
-	for k, v := range pc.preExecCheckers {
-		cp[k] = v
-	}
-	return cp
+	return maps.Clone(pc.preExecCheckers)
 }
 
 // CheckPath returns true if the path is allowed.

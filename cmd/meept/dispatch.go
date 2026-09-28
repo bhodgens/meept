@@ -208,11 +208,11 @@ func newDispatchResultsCmd() *cobra.Command {
 			}
 
 			var results []struct {
-				JobID       string                 `json:"job_id"`
-				OutputRef   string                 `json:"output_ref"`
+				JobID       string         `json:"job_id"`
+				OutputRef   string         `json:"output_ref"`
 				Workspace   map[string]any `json:"workspace"`
-				Error       string                 `json:"error"`
-				CompletedAt int64                  `json:"completed_at"`
+				Error       string         `json:"error"`
+				CompletedAt int64          `json:"completed_at"`
 			}
 			if err := json.Unmarshal(raw, &results); err != nil {
 				return fmt.Errorf("failed to parse response: %w", err)

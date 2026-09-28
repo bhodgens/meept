@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -215,12 +216,11 @@ func (f *GoLintFilter) Process(ctx context.Context, _ *task.TaskStep, output str
 // temp-file name for blocks[i]; formatted holds the reformatted sources.
 func substituteBlocks(output string, blocks []codeBlock, names []string, formatted map[string]string) (string, error) {
 	out := output
-	for i := len(blocks) - 1; i >= 0; i-- {
+	for i, block := range slices.Backward(blocks) {
 		newCode, ok := formatted[names[i]]
 		if !ok {
 			continue // file was already gofmt-clean
 		}
-		block := blocks[i]
 		if block.start < 0 || block.end > len(out) || block.start > block.end {
 			return "", fmt.Errorf("code block %d offsets out of range", i)
 		}

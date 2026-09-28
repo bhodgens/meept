@@ -27,7 +27,7 @@ func TestPushHistory_QueryAll(t *testing.T) {
 	h := NewPushHistory(100)
 
 	// Add 10 entries
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		h.Record(PushEntry{
 			ID:        string(rune(i)),
 			SessionID: "sess-1",
@@ -45,7 +45,7 @@ func TestPushHistory_MaxSize(t *testing.T) {
 	h := NewPushHistory(5)
 
 	// Add 10 entries
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		h.Record(PushEntry{
 			ID: string(rune(i)),
 		})

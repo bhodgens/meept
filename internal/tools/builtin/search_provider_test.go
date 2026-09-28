@@ -183,7 +183,7 @@ func TestParseSearxngPayload_LimitAndTruncation(t *testing.T) {
 	t.Parallel()
 	var sb strings.Builder
 	sb.WriteString(`{"query":"q","results":[`)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if i > 0 {
 			sb.WriteString(",")
 		}

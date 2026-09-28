@@ -196,7 +196,7 @@ func TestRegistrySchemaMode_UnknownModeFallsBackToFull(t *testing.T) {
 
 func TestRegistrySchemaMode_IndexedPayloadSmallerThanFull(t *testing.T) {
 	r := NewRegistry(nil)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		r.Register(&schemaModeTool{
 			name:        fmt.Sprintf("size_tool_%02d", i),
 			description: fmt.Sprintf("Fixture tool %d: does fixture things with fixture inputs.", i),
@@ -225,7 +225,7 @@ func TestRegistrySchemaMode_IndexedPayloadSmallerThanFull(t *testing.T) {
 
 func TestRegistrySchemaMode_RaceSafeModeSwitching(t *testing.T) {
 	r := NewRegistry(nil)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		r.Register(&schemaModeTool{
 			name:        fmt.Sprintf("race_tool_%d", i),
 			description: "Race fixture tool.",
@@ -236,11 +236,9 @@ func TestRegistrySchemaMode_RaceSafeModeSwitching(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Concurrent readers of the definitions.
-	for g := 0; g < 4; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 500; i++ {
+	for range 4 {
+		wg.Go(func() {
+			for range 500 {
 				defs := r.GetDefinitions()
 				for _, d := range defs {
 					if d.Function.Name == "" {
@@ -253,21 +251,19 @@ func TestRegistrySchemaMode_RaceSafeModeSwitching(t *testing.T) {
 					}
 				}
 			}
-		}()
+		})
 	}
 
 	// Concurrent writer flipping modes mid-flight.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
+	wg.Go(func() {
+		for i := range 200 {
 			if i%2 == 0 {
 				r.SetSchemaMode(SchemaModeIndexed, []string{"race_tool_0"})
 			} else {
 				r.SetSchemaMode(SchemaModeFull, nil)
 			}
 		}
-	}()
+	})
 
 	wg.Wait()
 }

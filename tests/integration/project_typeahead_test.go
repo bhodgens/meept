@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -102,8 +103,8 @@ func TestProjectTypeaheadFlow(t *testing.T) {
 	}
 
 	// Touch recents in reverse order so project-gamma is most recent.
-	for i := len(testPaths) - 1; i >= 0; i-- {
-		if err := recentsStore.TouchRecent(ctx, testPaths[i]); err != nil {
+	for _, p := range slices.Backward(testPaths) {
+		if err := recentsStore.TouchRecent(ctx, p); err != nil {
 			t.Fatalf("TouchRecent: %v", err)
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -206,7 +207,7 @@ func TestProjectTypeaheadEmptyPrefix(t *testing.T) {
 	ctx := context.Background()
 
 	// Touch 5 recents.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		path := filepath.Join(dir, "project-"+string(rune('a'+i)))
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", path, err)
@@ -274,7 +275,6 @@ func TestProjectTypeaheadNoMatches(t *testing.T) {
 		t.Errorf("expected 0 fs matches, got %d", len(resp.Matches))
 	}
 }
-
 
 // runGitInit initializes a minimal git repo at the given path.
 func runGitInit(t *testing.T, path string) {

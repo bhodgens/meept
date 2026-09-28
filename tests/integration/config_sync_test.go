@@ -272,17 +272,17 @@ func TestConfigSyncer_ReloadHookFires(t *testing.T) {
 	})
 	hash := commitAndPush(t, workDir, "hook trigger")
 
-	var hookCalls int32
+	var hookCalls atomic.Int32
 	var capturedHash string
 	syncer.RegisterReloadHook("app.json5", func(commitHash string) error {
-		atomic.AddInt32(&hookCalls, 1)
+		hookCalls.Add(1)
 		capturedHash = commitHash
 		return nil
 	})
 
 	runOnePullCycle(syncer)
 
-	if got := atomic.LoadInt32(&hookCalls); got != 1 {
+	if got := hookCalls.Load(); got != 1 {
 		t.Errorf("hook calls = %d, want 1", got)
 	}
 	if capturedHash != hash {

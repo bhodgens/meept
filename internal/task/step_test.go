@@ -847,10 +847,8 @@ func TestStepStore_SetState_ConcurrentRace(t *testing.T) {
 		errCnt     int32
 	)
 	start := make(chan struct{})
-	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
-		go func(idx int) {
-			defer wg.Done()
+	for range goroutines {
+		wg.Go(func() {
 			<-start // barrier so all goroutines fire at once
 			err := store.SetState(step.ID, StepRunning)
 			if err == nil {
@@ -858,7 +856,7 @@ func TestStepStore_SetState_ConcurrentRace(t *testing.T) {
 			} else {
 				atomic.AddInt32(&errCnt, 1)
 			}
-		}(i)
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -916,10 +914,8 @@ func TestStepStore_SetStateWithReason_ConcurrentRace(t *testing.T) {
 		errCnt     int32
 	)
 	start := make(chan struct{})
-	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
-		go func(idx int) {
-			defer wg.Done()
+	for idx := range goroutines {
+		wg.Go(func() {
 			<-start
 			err := store.SetStateWithReason(step.ID, StepRunning,
 				fmt.Sprintf("worker-%d", idx))
@@ -928,7 +924,7 @@ func TestStepStore_SetStateWithReason_ConcurrentRace(t *testing.T) {
 			} else {
 				atomic.AddInt32(&errCnt, 1)
 			}
-		}(i)
+		})
 	}
 	close(start)
 	wg.Wait()

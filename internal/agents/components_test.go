@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -96,14 +97,7 @@ func TestComponentRegistryDiscoverAndResolve(t *testing.T) {
 	}
 	gotIDs := reg.IDs()
 	for _, w := range wantIDs {
-		found := false
-		for _, g := range gotIDs {
-			if g == w {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(gotIDs, w) {
 			t.Errorf("expected component %q in discovered IDs %v", w, gotIDs)
 		}
 	}
@@ -224,14 +218,7 @@ func TestBundledComponentsAllDiscovered(t *testing.T) {
 	}
 	got := reg.IDs()
 	for _, w := range want {
-		found := false
-		for _, g := range got {
-			if g == w {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(got, w) {
 			t.Errorf("expected bundled component %q in discovered IDs %v", w, got)
 		}
 	}

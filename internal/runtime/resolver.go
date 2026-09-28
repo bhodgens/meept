@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"runtime"
+	"slices"
 	"sync"
 )
 
@@ -165,14 +166,7 @@ func resolveBackend(
 		candidates = []string{"docker", "bwrap"}
 	}
 	if !cfg.RequireSandbox && order != SandboxOrderLocal {
-		hasLocal := false
-		for _, c := range candidates {
-			if c == "local" {
-				hasLocal = true
-				break
-			}
-		}
-		if !hasLocal {
+		if !slices.Contains(candidates, "local") {
 			candidates = append(candidates, "local")
 		}
 	}

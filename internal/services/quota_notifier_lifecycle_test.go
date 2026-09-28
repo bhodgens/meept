@@ -84,7 +84,7 @@ func TestQuotaNotifier_ClearedDoesNotDedupRepeatedly(t *testing.T) {
 	defer qn.Stop()
 
 	// Two cleared events in a row: both render (cleared events bypass dedup).
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		msg := quotaEventPayload(t, map[string]any{
 			"agent_id":       "agent-1",
 			"provider_id":    "openrouter",

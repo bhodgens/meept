@@ -50,7 +50,7 @@ func TestTurnCounter_NudgeThresholds(t *testing.T) {
 			tc := newTurnCounter(tt.limit)
 
 			// Burn turns.
-			for i := 0; i < tt.increment; i++ {
+			for range tt.increment {
 				tc.Increment()
 			}
 
@@ -100,7 +100,7 @@ func TestTurnCounter_NudgeMessages(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := newTurnCounter(20)
-			for i := 0; i < tt.increment; i++ {
+			for range tt.increment {
 				tc.Increment()
 			}
 
@@ -144,7 +144,7 @@ func TestTurnCounter_Remaining(t *testing.T) {
 	}
 
 	// Burn up to limit.
-	for i := 0; i < 7; i++ {
+	for range 7 {
 		tc.Increment()
 	}
 	if tc.Remaining() != 0 {
@@ -175,28 +175,28 @@ func TestTurnCounter_GetNudgeThreshold(t *testing.T) {
 		t.Errorf("after 1 turn: threshold = %v, want 0.0", got)
 	}
 
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		tc.Increment() // 5
 	}
 	if got := tc.GetNudgeThreshold(); got != 0.25 {
 		t.Errorf("after 5 turns: threshold = %v, want 0.25", got)
 	}
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		tc.Increment() // 10
 	}
 	if got := tc.GetNudgeThreshold(); got != 0.50 {
 		t.Errorf("after 10 turns: threshold = %v, want 0.50", got)
 	}
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		tc.Increment() // 15
 	}
 	if got := tc.GetNudgeThreshold(); got != 0.75 {
 		t.Errorf("after 15 turns: threshold = %v, want 0.75", got)
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		tc.Increment() // 18
 	}
 	if got := tc.GetNudgeThreshold(); got != 0.90 {
@@ -248,7 +248,7 @@ func TestTurnCounter_MultiIncrement(t *testing.T) {
 	tc := newTurnCounter(5)
 
 	// Call Increment without tracking return values (simulate burn).
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		tc.Increment()
 	}
 
@@ -275,7 +275,7 @@ func TestTurnCounter_Concurrent(t *testing.T) {
 	tc := newTurnCounter(1000)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
@@ -306,7 +306,7 @@ func TestTurnCounter_SoftLimitWarning(t *testing.T) {
 	tc := newTurnCounter(50) // soft limit ~30, warn at 80% = 24
 
 	// Up to 23 turns: below 50%, so 25% threshold fires.
-	for i := 0; i < 23; i++ {
+	for range 23 {
 		tc.Increment()
 	}
 	info := tc.Nudge()
@@ -324,7 +324,7 @@ func TestTurnCounter_SoftLimitWarning(t *testing.T) {
 	// The spec says warn at 80% of soft limit, but the implementation uses fixed thresholds.
 	// At turn 38 (76%): 75% threshold fires.
 	tc = newTurnCounter(50)
-	for i := 0; i < 38; i++ {
+	for range 38 {
 		tc.Increment()
 	}
 	info = tc.Nudge()
@@ -345,7 +345,7 @@ func TestTurnCounter_HardLimitEnforcement(t *testing.T) {
 	tc := newTurnCounter(limit)
 
 	// Burn all turns.
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		count, exhausted := tc.Increment()
 		if i < limit-1 && exhausted {
 			t.Errorf("at turn %d/%d: should not be exhausted yet", count, limit)
@@ -422,7 +422,7 @@ func TestTurnCounter_Reset(t *testing.T) {
 	tc := newTurnCounter(20)
 
 	// Burn 10 turns.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		tc.Increment()
 	}
 

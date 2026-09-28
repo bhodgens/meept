@@ -70,7 +70,7 @@ func TestDiskStoreGetRefusesTraversal(t *testing.T) {
 func TestDiskStoreListNewestFirst(t *testing.T) {
 	store := NewDiskStore(t.TempDir())
 	base := time.Now().UTC().Truncate(time.Second)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		rec := newTestRecord(fmt.Sprintf("task-%d", i), base.Add(time.Duration(i)*time.Minute))
 		if err := store.Save(context.Background(), *rec); err != nil {
 			t.Fatalf("save %d: %v", i, err)
@@ -95,7 +95,7 @@ func TestDiskStoreListNewestFirst(t *testing.T) {
 func TestDiskStoreListCapsAt50(t *testing.T) {
 	store := NewDiskStore(t.TempDir())
 	base := time.Now().UTC().Truncate(time.Second)
-	for i := 0; i < maxListRuns+5; i++ {
+	for i := range maxListRuns + 5 {
 		rec := newTestRecord(fmt.Sprintf("task-%03d", i), base.Add(time.Duration(i)*time.Minute))
 		if err := store.Save(context.Background(), *rec); err != nil {
 			t.Fatalf("save %d: %v", i, err)

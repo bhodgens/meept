@@ -326,7 +326,7 @@ func TestReadCache(t *testing.T) {
 			t.Fatal("expected cache to be created with default size")
 		}
 		// Should be able to store more than 0 items
-		for i := 0; i < 35; i++ {
+		for range 35 {
 			cache.Store("/file.txt", []string{"a"})
 		}
 	})

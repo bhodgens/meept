@@ -3,6 +3,7 @@ package harness
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,9 +152,9 @@ func CountStepsByState(t testing.TB, dbPath, taskID string) map[string]int {
 
 // FormatSteps renders step rows for failure messages.
 func FormatSteps(steps []StepRow) string {
-	out := ""
+	var b strings.Builder
 	for _, s := range steps {
-		out += fmt.Sprintf("  [%s] %s (seq %d): %.120s\n", s.State, s.ID, s.Sequence, s.Result)
+		fmt.Fprintf(&b, "  [%s] %s (seq %d): %.120s\n", s.State, s.ID, s.Sequence, s.Result)
 	}
-	return out
+	return b.String()
 }

@@ -67,7 +67,7 @@ func TestScorer_LengthTrap(t *testing.T) {
 				Messages:       []Message{{Role: RoleUser, Content: "What is the capital of France?"}},
 				StudentContent: longWellFormattedWrongAnswer,
 				Domain:         DomainGeneral,
-				EvalPassed:     boolRef(false),
+				EvalPassed:     new(false),
 			},
 			wantCorrectness: 0.0,
 			wantScoreAtMost: 0.85, // never high quality
@@ -79,7 +79,7 @@ func TestScorer_LengthTrap(t *testing.T) {
 				Messages:       []Message{{Role: RoleUser, Content: "What is the capital of France?"}},
 				StudentContent: "The capital of France is Paris, a city of about two million people known for its history, art, and architecture across many centuries of European development.",
 				Domain:         DomainGeneral,
-				EvalPassed:     boolRef(true),
+				EvalPassed:     new(true),
 			},
 			wantCorrectness: 1.0,
 			wantScoreAtMost: 1.0,
@@ -181,7 +181,7 @@ func TestScorer_EvalPassedNil_UsesHeuristicCorrectness(t *testing.T) {
 		Messages:       []Message{{Role: RoleUser, Content: "What is the capital of France?"}},
 		StudentContent: "Paris",
 		Domain:         DomainGeneral,
-		EvalPassed:     boolRef(true),
+		EvalPassed:     new(true),
 	}
 	withoutOracle := &ShadowRecord{
 		Messages:       []Message{{Role: RoleUser, Content: "What is the capital of France?"}},
@@ -208,9 +208,4 @@ func TestScorer_EvalPassedNil_UsesHeuristicCorrectness(t *testing.T) {
 	if resWith.Score <= resWithout.Score {
 		t.Errorf("oracle-pass score %v should exceed heuristic-only score %v", resWith.Score, resWithout.Score)
 	}
-}
-
-// boolRef returns a pointer to b (test helper; no package-wide equivalent).
-func boolRef(b bool) *bool {
-	return &b
 }

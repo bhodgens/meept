@@ -90,7 +90,7 @@ func newTestDaemon(t *testing.T, ctx context.Context, nodeID string) *testDaemon
 
 	// GRPCTransport.
 	clusterCfg := &cluster.Config{
-		NodeID:  nodeID,
+		NodeID:    nodeID,
 		ClusterID: "test-cluster",
 	}
 	transport := cluster.NewGRPCTransport(clusterCfg, nodeID, logger)

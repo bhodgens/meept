@@ -77,7 +77,7 @@ func (c *chatClient) chat(ctx context.Context, system, user string) (string, flo
 
 	var lastErr error
 	lastLatency := 0.0
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
@@ -152,7 +152,7 @@ func (c *chatClient) chatJudge(ctx context.Context, system, user string) (string
 
 	var lastErr error
 	lastLatency := 0.0
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():

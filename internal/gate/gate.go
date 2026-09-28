@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/runtime"
@@ -91,7 +92,7 @@ type GateState struct {
 // which is hashed as-is — the hash remains stable across no-op rounds either
 // way.
 func workspaceHash(ctx context.Context, backend runtime.ExecutionBackend, workdir string) (string, error) {
-	var combined string
+	var combined strings.Builder
 	for _, cmd := range []string{"git status --porcelain", "git rev-parse HEAD"} {
 		res, err := backend.Execute(ctx, runtime.Command{
 			Cmd: cmd,
@@ -100,9 +101,10 @@ func workspaceHash(ctx context.Context, backend runtime.ExecutionBackend, workdi
 		if err != nil {
 			return "", fmt.Errorf("gate hash %q: %w", cmd, err)
 		}
-		combined += res.Output + "\x00"
+		combined.WriteString(res.Output)
+		combined.WriteByte(0)
 	}
-	sum := sha256.Sum256([]byte(combined))
+	sum := sha256.Sum256([]byte(combined.String()))
 	return hex.EncodeToString(sum[:]), nil
 }
 

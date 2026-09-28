@@ -248,7 +248,7 @@ func TestTranscriptFetch_Execute_Truncation(t *testing.T) {
 		// Each "word \n" line is 6 formatted chars; 25k lines = 149999
 		// formatted chars, comfortably over the 100k cap.
 		var b strings.Builder
-		for i := 0; i < 25000; i++ {
+		for range 25000 {
 			b.WriteString("{\"text\": \"word \", \"start\": 0.0}\n")
 		}
 		return []byte(b.String()), nil, nil
@@ -285,7 +285,7 @@ func TestTranscriptFetch_Execute_Pagination(t *testing.T) {
 	// 199 formatted chars: chars 100..149 are five whole lines.
 	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
 		var b strings.Builder
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			b.WriteString(`{"text": "abcdefghi", "start": 0.0}` + "\n")
 		}
 		return []byte(b.String()), nil, nil
@@ -332,7 +332,7 @@ func TestTranscriptFetch_Execute_Pagination(t *testing.T) {
 func TestTranscriptFetch_Execute_OffsetBeyondTotal(t *testing.T) {
 	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
 		var b strings.Builder
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			b.WriteString(`{"text": "abcdefghi", "start": 0.0}` + "\n")
 		}
 		return []byte(b.String()), nil, nil
@@ -369,7 +369,7 @@ func TestTranscriptFetch_Execute_OffsetBeyondTotal(t *testing.T) {
 func TestTranscriptFetch_Execute_NoFalseTruncationUnderCap(t *testing.T) {
 	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
 		var b strings.Builder
-		for i := 0; i < 10000; i++ {
+		for range 10000 {
 			b.WriteString(`{"text": "abcdefgh", "start": 0.0}` + "\n")
 		}
 		return []byte(b.String()), nil, nil
@@ -479,7 +479,7 @@ func summarizeChatterFor(t *testing.T, words int, ch *transcriptFakeChatter) *Tr
 	t.Helper()
 	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
 		var b strings.Builder
-		for i := 0; i < words; i++ {
+		for i := range words {
 			fmt.Fprintf(&b, "w%05d ", i)
 		}
 		stdout := fmt.Sprintf("{\"text\": %q, \"start\": 0.0}\n", strings.TrimRight(b.String(), " "))
@@ -676,7 +676,7 @@ func TestTranscriptFetch_SplitIntoWindows(t *testing.T) {
 	// before them is a space. (Positional checks against the original
 	// text don't work here — windows beyond the first start mid-text.)
 	spaced := ""
-	for i := 0; i < 2500; i++ {
+	for range 2500 {
 		spaced += strings.Repeat("x", 20) + " "
 	}
 	for i, w := range splitIntoWindows(spaced) {
@@ -1367,7 +1367,7 @@ func TestTranscriptFetch_PreviewTruncation_UTF8Boundary(t *testing.T) {
 	// each line is "[00:00] " + 10 runes of 3 bytes + "\n" = 39 bytes.
 	runner := func(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
 		var b strings.Builder
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			fmt.Fprintf(&b, `{"text": %q, "start": 0.0}`+"\n", strings.Repeat("日", 10))
 		}
 		return []byte(b.String()), nil, nil

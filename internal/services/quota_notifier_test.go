@@ -129,7 +129,7 @@ func TestQuotaNotifier_Cleanup(t *testing.T) {
 	qn := NewQuotaNotifier(b, pushSvc, slog.Default())
 
 	// Add more than 100 entries
-	for i := 0; i < 150; i++ {
+	for i := range 150 {
 		qn.mu.Lock()
 		qn.seen[fmt.Sprintf("key-%d", i)] = true
 		qn.mu.Unlock()

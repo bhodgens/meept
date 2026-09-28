@@ -1,9 +1,9 @@
 package ast
 
 import (
-	"slices"
 	"context"
 	"fmt"
+	"slices"
 )
 
 // BlockSpan represents the line range of a syntactic block.

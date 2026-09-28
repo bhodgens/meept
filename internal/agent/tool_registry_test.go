@@ -107,7 +107,7 @@ func TestToolRegistry_LeafToolsAtAllDepths(t *testing.T) {
 	}
 	registry := NewDepthToolRegistry(2, leaves, nil)
 
-	for d := 0; d <= 2; d++ {
+	for d := range 3 {
 		tools := registry.ToolsAtDepth(d)
 		for _, name := range []string{
 			"get_dataset_overview", "query_traces", "view_trace",

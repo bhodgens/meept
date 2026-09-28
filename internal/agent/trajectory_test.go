@@ -54,7 +54,7 @@ func TestBuildTrajectory_ErrorStep(t *testing.T) {
 
 func TestBuildTrajectory_Caps50Steps(t *testing.T) {
 	conv := NewConversation()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		conv.AddAssistantMessage("x")
 	}
 	traj := buildTrajectory(conv, "s1", "coder", "in", "success", 0)

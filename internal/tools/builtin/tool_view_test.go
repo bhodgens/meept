@@ -240,11 +240,11 @@ func TestToolViewConcurrentExecute(t *testing.T) {
 	names := []string{"alpha_tool", "beta_tool", "gamma_tool", "missing_tool"}
 
 	var wg sync.WaitGroup
-	for g := 0; g < 16; g++ {
+	for g := range 16 {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				name := names[(g+i)%len(names)]
 				_, err := tv.Execute(context.Background(), map[string]any{"name": name})
 				if err != nil && name != "missing_tool" {

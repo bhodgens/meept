@@ -147,7 +147,7 @@ func TestBuildChildEnv_DeterministicOrdering(t *testing.T) {
 	cmdEnv := map[string]string{"ZVAR": "z", "AVAR": "a", "MVAR": "m"}
 
 	var first []string
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		env, _ := BuildChildEnv(cfg, parentEnv, cmdEnv)
 		if i == 0 {
 			first = env
@@ -160,7 +160,7 @@ func TestBuildChildEnv_DeterministicOrdering(t *testing.T) {
 	// cmdEnv-only vars appended after parent-derived ones, sorted.
 	idx := map[string]int{}
 	for i, e := range first {
-		k := strings.SplitN(e, "=", 2)[0]
+		k, _, _ := strings.Cut(e, "=")
 		idx[k] = i
 	}
 	for _, pair := range [][2]string{{"ZVAR", "MVAR"}, {"MVAR", "AVAR"}} {

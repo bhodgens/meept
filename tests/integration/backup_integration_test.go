@@ -197,7 +197,6 @@ func TestSyncMetadataStoreIntegration(t *testing.T) {
 	t.Log("Sync metadata store integration test completed")
 }
 
-
 // Helper functions
 
 var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -205,4 +204,3 @@ var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level:
 func newTestLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
-

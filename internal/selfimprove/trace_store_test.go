@@ -137,7 +137,7 @@ func TestTraceStoreSample_Stratified(t *testing.T) {
 	dir := t.TempDir()
 	ts := NewTraceStore(dir, slogDiscardLogger())
 	base := fixedNoon
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		_, err := ts.Write(&TraceRecord{
 			ID:        fmt.Sprintf("f%d", i),
 			Outcome:   TraceOutcomeFailure,
@@ -148,7 +148,7 @@ func TestTraceStoreSample_Stratified(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		_, err := ts.Write(&TraceRecord{
 			ID:        fmt.Sprintf("s%d", i),
 			Outcome:   TraceOutcomeSuccess,
@@ -189,7 +189,7 @@ func TestTraceStoreSample_NewestFirst(t *testing.T) {
 	}
 	wantID := ""
 	for di, at := range dates {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			id := fmt.Sprintf("d%d-%02d", di, i)
 			if _, err := ts.Write(&TraceRecord{
 				ID:        id,
@@ -219,7 +219,7 @@ func TestTraceStoreSample_NewestFirst(t *testing.T) {
 func TestTraceStoreSample_SkipsCorruptFiles(t *testing.T) {
 	dir := t.TempDir()
 	ts := NewTraceStore(dir, slogDiscardLogger())
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := ts.Write(&TraceRecord{
 			ID:        fmt.Sprintf("ok%d", i),
 			Outcome:   TraceOutcomeFailure,

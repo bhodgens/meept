@@ -270,7 +270,7 @@ func TestConversationSession_MaxTurnsEnforcement(t *testing.T) {
 			session := NewConversationSession(config)
 			session.Start(freshStore())
 
-			for i := 0; i < tt.wantTurns; i++ {
+			for i := range tt.wantTurns {
 				_, done, err := session.ProcessTurn(fmt.Sprintf("q %d", i+1))
 				if err != nil {
 					t.Fatalf("turn %d: unexpected error: %v", i+1, err)
@@ -726,7 +726,7 @@ func BenchmarkConversationSession_BasicTurn(b *testing.B) {
 	session.Start(store)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _, _ = session.ProcessTurn("benchmark turn")
 	}
 }

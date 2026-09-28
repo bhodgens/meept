@@ -44,8 +44,7 @@ func newBrowserTestManager(t *testing.T, srvURL string) *browser.Manager {
 }
 
 func hostOf(raw string) string {
-	i := strings.Index(raw, "://")
-	rest := raw[i+3:]
+	_, rest, _ := strings.Cut(raw, "://")
 	if j := strings.Index(rest, "/"); j >= 0 {
 		rest = rest[:j]
 	}

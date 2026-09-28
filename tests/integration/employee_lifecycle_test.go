@@ -124,20 +124,20 @@ func newEmployeeLifecycleEnv(t *testing.T) *employeeLifecycleEnv {
 // receives raw JSON-decoded maps).
 func validConstitutionMap() map[string]any {
 	return map[string]any{
-		"purpose":        "keep CI green for main",
-		"role":           "CI Reliability Engineer",
-		"charter":        "investigate failures, open issues, never merge code",
-		"autonomy_tier":  "tier_1_reactive",
-		"escalates_to":   []string{"user"},
+		"purpose":       "keep CI green for main",
+		"role":          "CI Reliability Engineer",
+		"charter":       "investigate failures, open issues, never merge code",
+		"autonomy_tier": "tier_1_reactive",
+		"escalates_to":  []string{"user"},
 		"amendment_policy": map[string]any{
-			"requires_approval":     true,
-			"self_propose_allowed":  false,
-			"frozen_fields":         []string{"purpose"},
+			"requires_approval":    true,
+			"self_propose_allowed": false,
+			"frozen_fields":        []string{"purpose"},
 		},
 		"constraints": map[string]any{
-			"risk_ceiling":     "medium",
+			"risk_ceiling":       "medium",
 			"daily_budget_cents": 50,
-			"never":            []string{"merge to main"},
+			"never":              []string{"merge to main"},
 		},
 	}
 }

@@ -50,7 +50,7 @@ func TestShouldTrigger(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := NewVerificationTracker(tt.threshold)
-			for i := 0; i < tt.edits; i++ {
+			for range tt.edits {
 				tr.RecordToolCall("file_write", "f.go")
 			}
 			assert.Equal(t, tt.want, tr.ShouldTrigger())

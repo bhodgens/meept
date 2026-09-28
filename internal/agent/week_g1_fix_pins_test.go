@@ -234,7 +234,7 @@ func TestTurnRegistry_CompletedTombstoneSuppressesRetry(t *testing.T) {
 func TestTurnRegistry_TombstoneBounded(t *testing.T) {
 	reg := NewTurnRegistry()
 
-	for i := 0; i < turnRegistryTombstoneCap+25; i++ {
+	for i := range turnRegistryTombstoneCap + 25 {
 		turnID := "turn-bound-" + idFromInt(i)
 		reg.Register(turnID, "conv-bound")
 		reg.Complete(turnID)

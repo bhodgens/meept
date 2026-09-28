@@ -28,7 +28,7 @@ func TestToolRetryBreaker_VetoAtConsecutiveFailures(t *testing.T) {
 		{
 			name: "veto only after VetoAt consecutive failures",
 			call: func(b *ToolRetryBreaker) bool {
-				for i := 0; i < 4; i++ {
+				for range 4 {
 					if b.Observe("sh", map[string]any{"cmd": "bad"}, true) {
 						return true
 					}
@@ -40,7 +40,7 @@ func TestToolRetryBreaker_VetoAtConsecutiveFailures(t *testing.T) {
 		{
 			name: "fifth identical failure vetoes",
 			call: func(b *ToolRetryBreaker) bool {
-				for i := 0; i < 5; i++ {
+				for i := range 5 {
 					v := b.Observe("sh", map[string]any{"cmd": "bad"}, true)
 					if i == 4 && !v {
 						t.Fatal("expected veto on 5th consecutive failure")
@@ -56,11 +56,11 @@ func TestToolRetryBreaker_VetoAtConsecutiveFailures(t *testing.T) {
 		{
 			name: "success resets the counter",
 			call: func(b *ToolRetryBreaker) bool {
-				for i := 0; i < 4; i++ {
+				for range 4 {
 					b.Observe("sh", map[string]any{"cmd": "bad"}, true)
 				}
 				b.Observe("sh", map[string]any{"cmd": "bad"}, false) // success resets
-				for i := 0; i < 4; i++ {
+				for range 4 {
 					if b.Observe("sh", map[string]any{"cmd": "bad"}, true) {
 						return true
 					}
@@ -72,7 +72,7 @@ func TestToolRetryBreaker_VetoAtConsecutiveFailures(t *testing.T) {
 		{
 			name: "different args are different keys",
 			call: func(b *ToolRetryBreaker) bool {
-				for i := 0; i < 5; i++ {
+				for i := range 5 {
 					// Alternate args: no single key reaches 5.
 					args := map[string]any{"cmd": "a"}
 					if i%2 == 1 {
@@ -89,7 +89,7 @@ func TestToolRetryBreaker_VetoAtConsecutiveFailures(t *testing.T) {
 		{
 			name: "different tool names are different keys",
 			call: func(b *ToolRetryBreaker) bool {
-				for i := 0; i < 3; i++ {
+				for range 3 {
 					if b.Observe("sh", map[string]any{"cmd": "x"}, true) {
 						return true
 					}
@@ -106,7 +106,7 @@ func TestToolRetryBreaker_VetoAtConsecutiveFailures(t *testing.T) {
 			call: func(b *ToolRetryBreaker) bool {
 				a1 := map[string]any{"a": 1, "b": 2}
 				a2 := map[string]any{"b": 2, "a": 1}
-				for i := 0; i < 4; i++ {
+				for range 4 {
 					if b.Observe("t", a1, true) {
 						return true
 					}
@@ -122,7 +122,7 @@ func TestToolRetryBreaker_VetoAtConsecutiveFailures(t *testing.T) {
 		{
 			name: "nil args count as empty args",
 			call: func(b *ToolRetryBreaker) bool {
-				for i := 0; i < 4; i++ {
+				for range 4 {
 					if b.Observe("t", nil, true) {
 						return true
 					}
@@ -146,11 +146,11 @@ func TestToolRetryBreaker_VetoAtConsecutiveFailures(t *testing.T) {
 func TestToolRetryBreaker_ConcurrentObserve(t *testing.T) {
 	b := NewToolRetryBreaker()
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			for j := 0; j < 50; j++ {
+			for j := range 50 {
 				b.Observe("tool", map[string]any{"i": n}, j%2 == 0)
 			}
 		}(i)

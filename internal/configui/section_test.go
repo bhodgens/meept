@@ -81,7 +81,7 @@ func TestMoveUp(t *testing.T) {
 	s := NewSectionModel("General", "daemon", "meept.json5", makeTestFields())
 
 	// move to the bottom first
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		s.MoveDown()
 	}
 	if s.Cursor() != 3 {

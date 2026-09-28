@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -247,8 +248,7 @@ func (t *TUI) quit() {
 	if t.sessionMgr != nil && t.sessionMgr.GetCurrentSession() != nil {
 		// Update the session description with last user message or conversation summary
 		lastUserMsg := ""
-		for i := len(t.scrollback) - 1; i >= 0; i-- {
-			line := t.scrollback[i]
+		for _, line := range slices.Backward(t.scrollback) {
 			if strings.HasPrefix(line, "you: ") {
 				lastUserMsg = line[5:]
 				break

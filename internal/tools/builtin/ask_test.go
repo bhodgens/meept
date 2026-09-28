@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -47,14 +48,7 @@ func TestAskTool_Parameters(t *testing.T) {
 	}
 
 	// question should be required
-	found := false
-	for _, r := range params.Required {
-		if r == "question" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(params.Required, "question") {
 		t.Error("question not in Required list")
 	}
 

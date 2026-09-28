@@ -357,10 +357,8 @@ func TestLedgerConformance(t *testing.T) {
 				key := EffectKey("tool.race", "sess", "step")
 				var wg sync.WaitGroup
 				granted := make(chan struct{}, goroutines)
-				for i := 0; i < goroutines; i++ {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
+				for range goroutines {
+					wg.Go(func() {
 						ok, _, err := l.Claim(ctx2(), key, EffectMeta{Tool: "tool.race"})
 						if err != nil {
 							t.Errorf("claim: %v", err)
@@ -369,7 +367,7 @@ func TestLedgerConformance(t *testing.T) {
 						if ok {
 							granted <- struct{}{}
 						}
-					}()
+					})
 				}
 				wg.Wait()
 				close(granted)

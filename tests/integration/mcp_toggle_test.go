@@ -93,7 +93,7 @@ func TestMCPToggle_PersistAndReload(t *testing.T) {
 		Servers: []mcp.ServerConfig{
 			{
 				Name:        "alive",
-				Enabled:     boolPtrTrue(true),
+				Enabled:     new(true),
 				Command:     []string{"bash", scriptPath},
 				Type:        "stdio",
 				Description: "stub server that stays running",
@@ -101,7 +101,7 @@ func TestMCPToggle_PersistAndReload(t *testing.T) {
 			},
 			{
 				Name:        "broken",
-				Enabled:     boolPtrFalse(false),
+				Enabled:     new(false),
 				Command:     []string{"false"},
 				Type:        "stdio",
 				Description: "guaranteed-fail command, disabled",
@@ -161,9 +161,9 @@ func TestMCPToggle_PersistAndReload(t *testing.T) {
 	for i := range loaded.Servers {
 		switch loaded.Servers[i].Name {
 		case "alive":
-			loaded.Servers[i].Enabled = boolPtrFalse(false)
+			loaded.Servers[i].Enabled = new(false)
 		case "broken":
-			loaded.Servers[i].Enabled = boolPtrTrue(true)
+			loaded.Servers[i].Enabled = new(true)
 		}
 	}
 
@@ -217,11 +217,3 @@ func TestMCPToggle_PersistAndReload(t *testing.T) {
 		t.Error("expected 'broken' to have LastError populated after failed start")
 	}
 }
-
-// boolPtrTrue returns a pointer to b. Named distinctly from the unit-test
-// helper to avoid confusion about which package owns it.
-func boolPtrTrue(b bool) *bool { return &b }
-
-// boolPtrFalse returns a pointer to b. Named distinctly from the unit-test
-// helper to avoid confusion about which package owns it.
-func boolPtrFalse(b bool) *bool { return &b }

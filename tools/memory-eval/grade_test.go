@@ -173,7 +173,7 @@ func TestJudgeCacheDedup(t *testing.T) {
 
 	const cand = "the team ships on fridays"
 	const gold = "the team deploys on fridays"
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if !jp.judgePair(cand, gold) {
 			t.Fatalf("judgePair said no on iteration %d, want yes", i)
 		}

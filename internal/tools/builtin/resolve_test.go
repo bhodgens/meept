@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestResolveTool_AcceptDriftChecking(t *testing.T) {
 		{
 			name:         "drifted file refuses with changed-since-staging message",
 			preImage:     "alpha\nbeta\n",
-			interimWrite: strPtr("alpha\nbeta\nTAMPERED\n"),
+			interimWrite: new("alpha\nbeta\nTAMPERED\n"),
 			wantFailed:   true,
 			// File must remain the drifted content, NOT be overwritten.
 			wantDisk:      "alpha\nbeta\nTAMPERED\n",
@@ -51,7 +52,7 @@ func TestResolveTool_AcceptDriftChecking(t *testing.T) {
 		{
 			name:          "already-applied idempotent no-op succeeds",
 			preImage:      "alpha\nbeta\n",
-			interimWrite:  strPtr(modified),
+			interimWrite:  new(modified),
 			wantAccepted:  true,
 			wantDisk:      modified,
 			diskMustExist: true,
@@ -93,12 +94,7 @@ func TestResolveTool_AcceptDriftChecking(t *testing.T) {
 			}
 
 			idIn := func(list []string) bool {
-				for _, v := range list {
-					if v == change2.ID {
-						return true
-					}
-				}
-				return false
+				return slices.Contains(list, change2.ID)
 			}
 
 			if tt.wantAccepted && !idIn(result.Accepted) {
@@ -292,8 +288,6 @@ func TestResolveTool_FenceRevalidationStillRuns(t *testing.T) {
 		t.Errorf("fence refusal must leave file untouched, got %q", string(data))
 	}
 }
-
-func strPtr(s string) *string { return &s }
 
 func TestResolveTool_ExistingCleanAcceptStillWorks(t *testing.T) {
 	// Sanity: a plain accept through StageWrite-produced change writes Modified

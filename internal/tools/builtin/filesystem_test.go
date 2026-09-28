@@ -598,8 +598,7 @@ func TestResolvePath(t *testing.T) {
 // containsHashlineFormat checks if the output contains a hashline tag for the given line.
 func containsHashlineFormat(output string, lineNum int, content string) bool {
 	prefix := fmt.Sprintf("%d:", lineNum)
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(output, "\n") {
 		if strings.HasPrefix(line, prefix) && strings.Contains(line, "|"+content) {
 			return true
 		}

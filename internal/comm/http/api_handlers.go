@@ -33,12 +33,12 @@ type DispatchSubmitter interface {
 
 // DispatchJobRequest mirrors rpc.DispatchJobRequest for HTTP API use.
 type DispatchJobRequest struct {
-	TargetNode        string                 `json:"target_node"`
-	AgentID           string                 `json:"agent_id"`
-	TaskDescription   string                 `json:"task_description"`
-	RequiredResources []string               `json:"required_resources,omitempty"`
+	TargetNode        string         `json:"target_node"`
+	AgentID           string         `json:"agent_id"`
+	TaskDescription   string         `json:"task_description"`
+	RequiredResources []string       `json:"required_resources,omitempty"`
 	Workspace         map[string]any `json:"workspace,omitempty"`
-	Priority          int                    `json:"priority,omitempty"`
+	Priority          int            `json:"priority,omitempty"`
 }
 
 // DispatchJobAck mirrors rpc.DispatchJobAck for HTTP API use.
@@ -59,11 +59,11 @@ type DispatchJobResponse struct {
 
 // DispatchResultEntry mirrors rpc.DispatchResult for HTTP API use.
 type DispatchResultEntry struct {
-	JobID       string                 `json:"job_id"`
-	OutputRef   string                 `json:"output_ref,omitempty"`
+	JobID       string         `json:"job_id"`
+	OutputRef   string         `json:"output_ref,omitempty"`
 	Workspace   map[string]any `json:"workspace,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	CompletedAt int64                  `json:"completed_at,omitempty"`
+	Error       string         `json:"error,omitempty"`
+	CompletedAt int64          `json:"completed_at,omitempty"`
 }
 
 // ===== Dispatch Endpoints =====

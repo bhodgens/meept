@@ -187,10 +187,8 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 	// Watch for responses (context-aware, with deterministic cleanup)
 	watcherCtx, cancelWatcher := context.WithCancel(ctx)
 	var watcherWG sync.WaitGroup
-	watcherWG.Add(1)
 
-	go func() {
-		defer watcherWG.Done()
+	watcherWG.Go(func() {
 		for {
 			select {
 			case resp, ok := <-sub.Channel:
@@ -208,7 +206,7 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 				return
 			}
 		}
-	}()
+	})
 
 	// Ensure the watcher goroutine exits before we return.
 	defer func() {

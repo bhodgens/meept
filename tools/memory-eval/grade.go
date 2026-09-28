@@ -500,7 +500,7 @@ func finalizeJudge(j *JudgeMetrics, lexicalTP, lexicalFP, lexicalFN int) {
 
 func tokenize(s string) map[string]int {
 	toks := map[string]int{}
-	for _, f := range strings.Fields(strings.ToLower(s)) {
+	for f := range strings.FieldsSeq(strings.ToLower(s)) {
 		f = strings.Trim(f, ".,!?;:'\"()[]{}")
 		if f != "" {
 			toks[f]++

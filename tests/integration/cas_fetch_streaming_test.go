@@ -60,7 +60,7 @@ func TestCASFetchStreaming(t *testing.T) {
 	if len(fetched) != blobSize {
 		t.Errorf("size mismatch: got %d, want %d", len(fetched), blobSize)
 	}
-	for i := 0; i < blobSize; i++ {
+	for i := range blobSize {
 		if fetched[i] != blob[i] {
 			t.Errorf("byte mismatch at offset %d: got %d, want %d", i, fetched[i], blob[i])
 			break

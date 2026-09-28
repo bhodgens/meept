@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,14 +35,7 @@ func TestDebugToolParameters(t *testing.T) {
 	}
 
 	// Check that 'action' is required.
-	found := false
-	for _, r := range params.Required {
-		if r == "action" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(params.Required, "action") {
 		t.Fatal("expected 'action' to be required")
 	}
 }
@@ -254,14 +248,7 @@ func TestDebugToolAttachIncludesMode(t *testing.T) {
 	}
 
 	// Verify 'attach' is in the enum list.
-	found := false
-	for _, e := range actionProp.Enum {
-		if e == "attach" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(actionProp.Enum, "attach") {
 		t.Fatal("expected 'attach' to be in the action enum")
 	}
 
@@ -330,14 +317,7 @@ func TestDebugToolGoroutinesInEnum(t *testing.T) {
 	}
 
 	for _, want := range []string{"goroutines", "set_goroutine"} {
-		found := false
-		for _, e := range actionProp.Enum {
-			if e == want {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(actionProp.Enum, want) {
 			t.Errorf("expected %q to be in the action enum", want)
 		}
 	}
@@ -391,14 +371,7 @@ func TestDebugToolLoadCoreInEnum(t *testing.T) {
 		t.Fatal("expected 'action' property in parameters")
 	}
 
-	found := false
-	for _, e := range actionProp.Enum {
-		if e == "load_core" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(actionProp.Enum, "load_core") {
 		t.Fatal("expected 'load_core' to be in the action enum")
 	}
 }
@@ -578,14 +551,7 @@ func TestDebugToolScriptInEnum(t *testing.T) {
 		t.Fatal("expected 'action' property in parameters")
 	}
 
-	found := false
-	for _, e := range actionProp.Enum {
-		if e == "script" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(actionProp.Enum, "script") {
 		t.Fatal("expected 'script' to be in the action enum")
 	}
 }

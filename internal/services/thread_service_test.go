@@ -158,8 +158,7 @@ func TestCreateThread_StoreError(t *testing.T) {
 	}
 	// The underlying store returns a plain error (not ErrNotFound) so just
 	// verify it's wrapped in a ServiceError.
-	var svcErr *ServiceError
-	if !errors.As(err, &svcErr) {
+	if _, ok := errors.AsType[*ServiceError](err); !ok {
 		t.Errorf("expected *ServiceError, got %T: %v", err, err)
 	}
 }
@@ -609,7 +608,7 @@ func TestCreateThread_GeneratesUniqueIDs(t *testing.T) {
 	s := NewThreadService(store)
 
 	ids := make(map[string]bool)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		thread, err := s.CreateThread(context.Background(), CreateThreadRequest{
 			SessionID:  sessID,
 			TopicLabel: "dup",
