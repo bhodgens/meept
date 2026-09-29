@@ -118,6 +118,24 @@ CI is green on both workflows as of `a4036479` (CI 8/8, Code Quality
 - naive-user-chat: formalized (open item 3 resolved — hermetic twin
   green; live tier = `make e2e-chat`).
 
+## Skipped-test decisions — ALL RESOLVED (2026-09-29)
+
+Operator decisions on the three remaining e2e skips (fixes dispatched
+to subagents 2026-09-29):
+
+1. breakers-04: the repeat-error breaker threshold becomes a real config
+   knob (agent.repeat_error_limit, default 3, <=0 falls back to default).
+   Production behavior unchanged; the e2e suite raises it above the tool
+   breaker's 5-strike veto so the veto path is testable.
+2. tools-filesystem-05: list_directory's path argument becomes optional.
+   Omitted path resolves to the session working dir; the no-working-dir
+   sentinel fires only when none exists.
+3. web-search: fake SearchProvider wired in the e2e harness (canned,
+   deterministic, zero network) via the existing SetSearchProvider seam.
+
+All three suites lose their t.Skip; after landing, the tier runs with
+zero skips.
+
 ## Recommended next steps (ranked)
 
 1. **Evolver lane — bridge pump CI silence.** Root-cause why the
