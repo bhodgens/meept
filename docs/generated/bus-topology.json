@@ -388,7 +388,7 @@
     "cluster.event.heartbeat": [
       {
         "file": "internal/cluster/gossip.go",
-        "line": 771,
+        "line": 773,
         "payload_keys": [
           "event",
           "node_id",
