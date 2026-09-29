@@ -197,16 +197,26 @@ func (h *PlanHandler) handleReject(ctx context.Context, params json.RawMessage) 
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
-	sharedErr := h.manager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason)
-	if sharedErr != nil && h.fallbackManager != nil {
-		if sinkErr := h.fallbackManager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason); sinkErr != nil {
-			sharedErr = errors.Join(fmt.Errorf("shared: %w", sharedErr), fmt.Errorf("sink: %w", sinkErr))
+	// Mirror handleApprove: track whether the sink manager performed the
+	// transition, and read the plan back from the store that actually
+	// holds it — a sink-only plan is invisible to the shared store, so a
+	// shared-store read-back would return "plan not found" on success.
+	usedFallback := false
+	err := h.manager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason)
+	if err != nil && h.fallbackManager != nil {
+		// Not in the shared store: try the evolver sink manager.
+		if err2 := h.fallbackManager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason); err2 == nil {
+			usedFallback = true
+			err = nil
 		} else {
-			sharedErr = nil
+			err = errors.Join(fmt.Errorf("shared: %w", err), fmt.Errorf("sink: %w", err2))
 		}
 	}
-	if sharedErr != nil {
-		return nil, sharedErr
+	if err != nil {
+		return nil, err
+	}
+	if usedFallback {
+		return h.fallbackManager.GetPlan(ctx, req.PlanID)
 	}
 	return h.store.GetPlan(ctx, req.PlanID)
 }
@@ -223,16 +233,24 @@ func (h *PlanHandler) handleConfirm(ctx context.Context, params json.RawMessage)
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	sharedErr := h.manager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By)
-	if sharedErr != nil && h.fallbackManager != nil {
-		if sinkErr := h.fallbackManager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By); sinkErr != nil {
-			sharedErr = errors.Join(fmt.Errorf("shared: %w", sharedErr), fmt.Errorf("sink: %w", sinkErr))
+	// Mirror handleApprove: read back from the sink manager when it
+	// performed the transition (a sink-only plan is invisible to the
+	// shared store's read-back).
+	usedFallback := false
+	err := h.manager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By)
+	if err != nil && h.fallbackManager != nil {
+		if err2 := h.fallbackManager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By); err2 == nil {
+			usedFallback = true
+			err = nil
 		} else {
-			sharedErr = nil
+			err = errors.Join(fmt.Errorf("shared: %w", err), fmt.Errorf("sink: %w", err2))
 		}
 	}
-	if sharedErr != nil {
-		return nil, sharedErr
+	if err != nil {
+		return nil, err
+	}
+	if usedFallback {
+		return h.fallbackManager.GetPlan(ctx, req.PlanID)
 	}
 	return h.store.GetPlan(ctx, req.PlanID)
 }
@@ -249,16 +267,24 @@ func (h *PlanHandler) handleRevise(ctx context.Context, params json.RawMessage) 
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	sharedErr := h.manager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback)
-	if sharedErr != nil && h.fallbackManager != nil {
-		if sinkErr := h.fallbackManager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback); sinkErr != nil {
-			sharedErr = errors.Join(fmt.Errorf("shared: %w", sharedErr), fmt.Errorf("sink: %w", sinkErr))
+	// Mirror handleApprove: read back from the sink manager when it
+	// performed the transition (a sink-only plan is invisible to the
+	// shared store's read-back).
+	usedFallback := false
+	err := h.manager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback)
+	if err != nil && h.fallbackManager != nil {
+		if err2 := h.fallbackManager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback); err2 == nil {
+			usedFallback = true
+			err = nil
 		} else {
-			sharedErr = nil
+			err = errors.Join(fmt.Errorf("shared: %w", err), fmt.Errorf("sink: %w", err2))
 		}
 	}
-	if sharedErr != nil {
-		return nil, sharedErr
+	if err != nil {
+		return nil, err
+	}
+	if usedFallback {
+		return h.fallbackManager.GetPlan(ctx, req.PlanID)
 	}
 	return h.store.GetPlan(ctx, req.PlanID)
 }

@@ -28,7 +28,6 @@
 package continuityregressions
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,15 +95,14 @@ func TestSinkPlanRejectCancelsAndKeepsFile(t *testing.T) {
 		"by":         "e2e-reviewer",
 		"reason":     "not good enough",
 	})
-	// The daemon log proves the sink manager rejected the plan, but
-	// handleReject reads the plan back from the SHARED store (unlike
-	// handleApprove it never consults the fallback store for the return
-	// value), so a sink-only plan yields a "plan not found" error envelope
-	// on success. Any OTHER error is a real failure.
+	// The handler must return the transitioned plan, not an error
+	// envelope: when the sink manager performed the reject, the read-back
+	// goes to the sink store (mirroring handleApprove's usedFallback).
 	if errText := resp["error"]; errText != nil {
-		if !strings.Contains(toStr(errText), "not found") {
-			t.Fatalf("plan.reject failed: %v\ndaemon log tail:\n%s", errText, s.logTail())
-		}
+		t.Fatalf("plan.reject returned an error envelope on success: %v\ndaemon log tail:\n%s", errText, s.logTail())
+	}
+	if id, _ := resp["result"].(map[string]any)["id"].(string); id != planID {
+		t.Fatalf("plan.reject result plan id %q, want %q (resp: %+v)", id, planID, resp)
 	}
 	// State: cancelled, via the REAL listing surface.
 	waitPlanStateListed(t, s, planID, string(plan.StateCancelled))
@@ -154,13 +152,14 @@ func TestSinkPlanReviseReturnsToPlanning(t *testing.T) {
 		"plan_id":  planID,
 		"feedback": "needs a rollback section",
 	})
-	// Same shared-store read-back gap as reject: the sink revision
-	// succeeds (daemon log "plan revised") but the envelope errors with
-	// the shared store's "plan not found". Only other errors are real.
+	// The sink revision must return the transitioned plan (the read-back
+	// follows the store that performed the transition) — any error
+	// envelope is a real failure.
 	if errText := resp["error"]; errText != nil {
-		if !strings.Contains(toStr(errText), "not found") {
-			t.Fatalf("plan.revise failed: %v\ndaemon log tail:\n%s", errText, s.logTail())
-		}
+		t.Fatalf("plan.revise returned an error envelope on success: %v\ndaemon log tail:\n%s", errText, s.logTail())
+	}
+	if id, _ := resp["result"].(map[string]any)["id"].(string); id != planID {
+		t.Fatalf("plan.revise result plan id %q, want %q (resp: %+v)", id, planID, resp)
 	}
 
 	// State: planning (back for re-work), revision_count 1.
@@ -204,13 +203,13 @@ func TestSinkPlanConfirmFromCancelled(t *testing.T) {
 		"session_id": "e2e-continuity",
 		"by":         "e2e-manager",
 	})
-	// Same shared-store read-back gap as reject/revise: the sink confirm
-	// succeeds (daemon log "plan confirmed") but the envelope errors with
-	// the shared store's "plan not found". Only other errors are real.
+	// The sink confirm must return the transitioned plan — any error
+	// envelope is a real failure.
 	if errText := resp["error"]; errText != nil {
-		if !strings.Contains(toStr(errText), "not found") {
-			t.Fatalf("plan.confirm failed: %v\ndaemon log tail:\n%s", errText, s.logTail())
-		}
+		t.Fatalf("plan.confirm returned an error envelope on success: %v\ndaemon log tail:\n%s", errText, s.logTail())
+	}
+	if id, _ := resp["result"].(map[string]any)["id"].(string); id != planID {
+		t.Fatalf("plan.confirm result plan id %q, want %q (resp: %+v)", id, planID, resp)
 	}
 
 	// State: confirmed with confirmed_by, via the real surfaces.
@@ -249,9 +248,8 @@ func (s *sandbox) seedSkill(skillName string) string {
 }
 
 // rpcRaw performs one RPC call returning the RAW response envelope
-// (error included) — for the reject/confirm/revise verbs whose sink
-// fallback can legitimately return a shared-store "not found" error
-// envelope after succeeding.
+// (error included) — the transitions here assert on the envelope itself
+// (success must carry the plan, never an error).
 func (s *sandbox) rpcRaw(method string, params any) map[string]any {
 	return harness.DialRPC(s.t, s.SocketPath).CallError(method, params)
 }
@@ -264,19 +262,6 @@ func (s *sandbox) readFileIfExists(path string) (string, error) {
 		return "", nil
 	}
 	return string(data), err
-}
-
-// toStr renders an RPC error value (string or map) as a flat string.
-func toStr(v any) string {
-	switch e := v.(type) {
-	case string:
-		return e
-	case map[string]any:
-		if m, ok := e["message"].(string); ok {
-			return m
-		}
-	}
-	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(fmt.Sprint(v)), "\""))
 }
 
 // waitPlanStateListed polls plan.list until the plan appears with the
