@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"errors"
 	"github.com/jmoiron/sqlx"
 
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects

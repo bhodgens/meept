@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -42,7 +43,7 @@ func TestNoStrayColorLiterals(t *testing.T) {
 		if d.IsDir() {
 			switch d.Name() {
 			case ".git", "testdata":
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}

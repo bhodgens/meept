@@ -582,15 +582,17 @@ func (g *GossipEngine) cleanupDedupCache() {
 	}
 }
 
-// startRetryLoop launches a background goroutine that retries failed event broadcasts
-// up to maxRetryAttempts times. Tracked via wg so Stop waits for it (S6-16).
+// startRetryLoop launches a background goroutine that retries failed event broadcasts.
+// Tracked via wg so Stop waits for it (S6-16).
 func (g *GossipEngine) startRetryLoop(ctx context.Context) {
 	g.wg.Go(func() {
 		g.retryLoop(ctx)
 	})
 }
 
-// retryLoop processes the retry queue, re-publishing events until max attempts.
+// retryLoop processes the retry queue, re-publishing events.
+// NOTE: cfg.Gossip.MaxRetryAttempts is currently NOT honored — events are
+// re-published without attempt limiting (attempt count is not tracked here).
 func (g *GossipEngine) retryLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
