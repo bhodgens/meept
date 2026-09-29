@@ -11,7 +11,7 @@
 //
 //	tools-web-ssrf-01  web_fetch to 127.0.0.1 blocked, zero hits  — TestWebFetchLoopbackBlockedWithZeroHits
 //	tools-web-ssrf-02  private-range fetch returns page text      — TestWebFetchPrivateTestServerReturnsPageText (allowed_cidrs overlay)
-//	tools-web-ssrf-03  web_search stubbed provider results        — deferred (t.Skip; backend URL is hardwired to DuckDuckGo, not stubbable without network)
+//	tools-web-ssrf-03  web_search stubbed provider results        — TestWebSearchReturnsProviderResults (harness.WithFakeSearch env-gated fake provider; hermetic, zero network)
 package toolswebssrf
 
 import (
@@ -162,11 +162,73 @@ func TestWebFetchPrivateTestServerReturnsPageText(t *testing.T) {
 }
 
 // tools-web-ssrf-03: web_search returns provider results into the tool
-// envelope. DEFERRED: the DuckDuckGo backend URL is hardwired in the tool;
-// a hermetic stub would need a search-provider seam (the MCP searxng
-// provider) or real network access, neither available in the sandbox.
+// envelope. The harness daemon boots with MEEPT_E2E_FAKE_SEARCH=1
+// (harness.WithFakeSearch): daemon startup installs an in-memory fake
+// SearchProvider (internal/tools/builtin/fake_search_provider.go) instead
+// of the MCP/DuckDuckGo chain, so the query is served hermetically — the
+// canned fake results must land in the tool output and a bogus-argument
+// call must return a clean failure envelope, with zero network.
 func TestWebSearchReturnsProviderResults(t *testing.T) {
-	t.Skip("deferred: web_search's backend (html.duckduckgo.com / lite endpoint) " +
-		"is hardwired; the hermetic sandbox cannot stub it without a search-provider " +
-		"seam (MCP searxng) or network access. Requires a provider seam to cover e2e.")
+	s := harness.Start(t, harness.WithFakeSearch())
+	s.RegisterProject(t, "e2e-project")
+	sessionID := s.CreateSession(t, "websearch-fake", s.ProjectDir)
+
+	s.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"pinned chat"}`)
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "web_search",
+		Arguments: `{"query":"hermetic fake search probe","limit":10}`,
+	})
+
+	s.ChatTurn(t, sessionID,
+		"Search the web for the hermetic fake search probe and summarize what you find",
+		120*time.Second)
+
+	res := toolResultsJoined(s.Fake)
+	for _, want := range harness.FakeSearchResults() {
+		if !strings.Contains(res, want.Title) {
+			t.Fatalf("web_search tool result missing canned fake result %q; results:\n%s", want.Title, res)
+		}
+		if !strings.Contains(res, want.URL) {
+			t.Fatalf("web_search tool result missing canned fake URL %q; results:\n%s", want.URL, res)
+		}
+	}
+	if !strings.Contains(res, harness.FakeSearchSnippetMarker()) {
+		t.Fatalf("web_search tool result missing the fake provider snippet marker; results:\n%s", res)
+	}
+	if !strings.Contains(res, `"success":true`) {
+		t.Fatalf("fake-provider search must produce a success envelope; results:\n%s", res)
+	}
+	if strings.Contains(res, "duckduckgo") || strings.Contains(res, "anti-bot") {
+		t.Fatalf("fake-provider search must never consult DuckDuckGo; results:\n%s", res)
+	}
+}
+
+// tools-web-ssrf-03 companion: the provider error path returns cleanly
+// into the tool envelope (a failure result the model can read), still with
+// zero network. A bogus query shape (missing required query argument) must
+// surface as a clean argument error, not a hang or a scrape attempt.
+func TestWebSearchErrorPathReturnsCleanly(t *testing.T) {
+	s := harness.Start(t, harness.WithFakeSearch())
+	s.RegisterProject(t, "e2e-project")
+	sessionID := s.CreateSession(t, "websearch-error", s.ProjectDir)
+
+	s.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"pinned chat"}`)
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "web_search",
+		Arguments: `{}`,
+	})
+
+	s.ChatTurn(t, sessionID,
+		"Run a web search for me with no particular query",
+		120*time.Second)
+
+	res := toolResultsJoined(s.Fake)
+	if !strings.Contains(res, `"success":false`) {
+		t.Fatalf("missing-query web_search must return a failure envelope; results:\n%s", res)
+	}
+	// The arg validator (or the tool itself) must name the missing argument
+	// in the failure envelope the model reads.
+	if !strings.Contains(res, "query is missing") && !strings.Contains(res, "query is required") {
+		t.Fatalf("missing-query web_search must name the query argument error; results:\n%s", res)
+	}
 }

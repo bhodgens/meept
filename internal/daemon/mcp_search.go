@@ -60,8 +60,20 @@ func (b *mcpSearchBackend) Call(ctx context.Context, fullName string, args map[s
 // websearch tool when an MCP manager exists. Called from
 // registerBuiltinTools' caller after the MCP manager is built; a nil
 // manager leaves the tool on the DuckDuckGo-only path.
+//
+// Hermetic e2e override: when MEEPT_E2E_FAKE_SEARCH is set in the daemon
+// environment, an in-memory fake provider is installed INSTEAD (even with
+// a live MCP manager) so sandboxed suites get deterministic canned results
+// with zero network. See internal/tools/builtin/fake_search_provider.go.
 func ensureMCPSearchProvider(webSearchTool *builtin.WebSearchTool, manager *mcp.Manager) {
-	if webSearchTool == nil || manager == nil {
+	if webSearchTool == nil {
+		return
+	}
+	if builtin.FakeSearchProviderEnvEnabled() {
+		webSearchTool.SetSearchProvider(builtin.NewFakeSearchProvider())
+		return
+	}
+	if manager == nil {
 		return
 	}
 	provider := builtin.NewMCPSearchProvider(builtin.DefaultSearchTimeout)

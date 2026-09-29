@@ -1394,7 +1394,7 @@
       "id": "tools-web-ssrf-03",
       "suite": "tools-web-ssrf",
       "diff": "S",
-      "title": "web_search returns stubbed provider results into the tool envelope",
+      "title": "web_search returns stubbed provider results into the tool envelope (fake SearchProvider via MEEPT_E2E_FAKE_SEARCH)",
       "paths": [
         "internal/tools/builtin/tool_web_search.go"
       ]
