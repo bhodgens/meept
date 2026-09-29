@@ -463,6 +463,12 @@ func TestResolvePlanDir(t *testing.T) {
 // converge on ONE container plan (an earlier RLock-check → unlock → create
 // → register shape let both miss and orphaned the first plan).
 func TestEnsureTaskPlan_ConcurrentSinglePlan(t *testing.T) {
+	// EnsureTaskPlan creates its container with an empty project path, so
+	// CreatePlan resolves the markdown dir relative to the process CWD.
+	// Chdir into a temp dir first, or the run overwrites the tracked
+	// internal/plan/docs/plans/sealed-plan.md fixture (and any other
+	// docs/plans content under whatever directory the test ran from).
+	t.Chdir(t.TempDir())
 	mgr := setupTestManager(t)
 	ctx := context.Background()
 
@@ -524,6 +530,9 @@ func TestEnsureTaskPlan_ConcurrentSinglePlan(t *testing.T) {
 // a second call for the same task returns the same plan, and a stale mapping
 // (plan vanished from the store) is replaced rather than returned.
 func TestEnsureTaskPlan_IdempotentSequential(t *testing.T) {
+	// Same CWD hazard as the concurrent twin above: EnsureTaskPlan writes
+	// its markdown relative to the process CWD. Keep the run in a temp dir.
+	t.Chdir(t.TempDir())
 	mgr := setupTestManager(t)
 	ctx := context.Background()
 

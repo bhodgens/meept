@@ -4,6 +4,8 @@
 /bin/meept
 /meept-lite
 /llmdoc
+/backfill-evolver-plans
+/gendoc-openapi
 /.meept/
 
 # IDE
