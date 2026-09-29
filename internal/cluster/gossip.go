@@ -590,9 +590,12 @@ func (g *GossipEngine) startRetryLoop(ctx context.Context) {
 	})
 }
 
-// retryLoop processes the retry queue, re-publishing events.
-// NOTE: cfg.Gossip.MaxRetryAttempts is currently NOT honored — events are
-// re-published without attempt limiting (attempt count is not tracked here).
+// retryLoop processes the retry queue, re-publishing events. Each event's
+// re-broadcast count is tracked per EventID; when cfg.Gossip.MaxRetryAttempts
+// is positive the event is DROPPED (with a Warn) once its count exceeds the
+// bound — no unbounded re-publishing. A zero/negative MaxRetryAttempts falls
+// back to the default of 3 (config.setDefault mirrors this), which also keeps
+// a hand-built &Config{} from retrying forever.
 func (g *GossipEngine) retryLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
