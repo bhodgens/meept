@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-09-23",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet.",
+  "generated": "2026-09-29",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet.",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -54,6 +54,7 @@
     ],
     "internal/task/": [
       "task-state",
+      "step-pipeline",
       "task-queue"
     ],
     "internal/worker/": [
@@ -231,11 +232,6 @@
     ],
     "internal/stt/": [
       "smoke"
-    ],
-    "internal/task/": [
-      "task-state",
-      "step-pipeline",
-      "task-queue"
     ],
     "internal/templates/": [
       "smoke"
@@ -1969,6 +1965,16 @@
       "title": "A6 clean lifecycle: the scratch daemon terminates on teardown after real work",
       "paths": [
         "internal/daemon/daemon.go"
+      ]
+    },
+    {
+      "id": "naive-user-chat-05",
+      "suite": "naive-user-chat",
+      "diff": "M",
+      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge — the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+      "paths": [
+        "internal/agent/loop.go",
+        "internal/agent/reply_guard.go"
       ]
     },
     {

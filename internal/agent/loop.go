@@ -683,6 +683,15 @@ type AgentLoop struct {
 	// turn; consumed by applyReplyGuard in the loop's response assembly.
 	guardFallback string
 
+	// guardRetried is the reply-guard rewrite-retry flag: when the guard
+	// replaces a machine-shaped reply at the loop's response-assembly
+	// seam, RunOnceWithParts re-enters reasoningCycle ONCE with a rewrite
+	// nudge instead of shipping the canned apology. Tracked so the retry
+	// is strictly bounded: a retry reply that trips the guard again (or an
+	// errored retry) ships the canned/fallback replacement exactly as
+	// before. Reset per turn in resetTurnGuards.
+	guardRetried bool
+
 	// Turn tool ledger (anti-hallucination contract, e2e run 7 rkl3Th):
 	// per-turn count of tools the model ACTUALLY emitted for execution.
 	// The model narrating "Created file X" with zero tool calls is the
@@ -2978,10 +2987,68 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// Catalog reply guard (leaf 05): classify machine-shaped platform_*
 	// dumps and substitute a short user-language fallback before the text
 	// is persisted, notified, or returned. Prose passes byte-identical.
-	finalResponse = applyReplyGuardWithFallback(finalResponse, l.logger, replyGuardContext{
-		Agent:          l.agentID,
-		ConversationID: conversationID,
-	}, l.guardFallback)
+	//
+	// Bounded rewrite retry: a replacement here means the turn ENDED on
+	// raw machine output. Instead of shipping the canned apology
+	// dead-end, nudge the model ONCE to rewrite its answer in plain
+	// language and re-run the reasoning cycle with the dump already in
+	// its context. The retry itself is guarded by guardRetried (one per
+	// turn, reset in resetTurnGuards): a reply that trips the guard again
+	// ships the fallback/canned line — the pre-retry behavior — so the
+	// worst case stays exactly one extra model call. The handler
+	// choke point (handleChatRequest) is NOT wired to this: it guards
+	// post-loop paths (platform fast path, sync-wait) that cannot
+	// continue a loop, so those keep the single-shot replacement.
+	guarded, guardMatch, guardReplaced := classifyReplyGuard(finalResponse)
+	if guardReplaced && !l.guardRetried {
+		l.guardRetried = true
+		l.logger.Warn("reply guard replaced a machine-shaped reply; retrying once with a rewrite nudge",
+			"rule", guardMatch.Rule,
+			"matched", guardMatch.Matched,
+			"agent", l.agentID,
+			"conversation_id", conversationID,
+		)
+		// Preserve the loop protocol the reasoningCycle left behind: the
+		// assistant's machine-shaped turn plus a user-role system nudge,
+		// the same shape the loop's own nudge ladder uses (strict
+		// providers reject assistant→assistant transitions).
+		conv.AddAssistantMessage(finalResponse)
+		conv.AddUserMessage(replyGuardRewriteNudge)
+		conv.Truncate()
+		if retryResponse, retryErr := l.reasoningCycle(loopCtx, conv, conversationID); retryErr != nil {
+			// The retry LLM call failed: ship the guarded replacement of
+			// the ORIGINAL reply — the caller's error contract is
+			// unchanged (this turn already succeeded once) and the user
+			// still gets the honest fallback, not a bare error.
+			l.logger.Warn("reply-guard rewrite retry failed; shipping the guarded replacement",
+				"conversation_id", conversationID,
+				"error", retryErr,
+			)
+			finalResponse = guarded
+		} else {
+			// Re-run the guard on the retried reply (one line: the
+			// canned/fallback substitution). A second trip means the
+			// model rewrote into machine shape again — the retry budget
+			// is spent, so this replacement ships as-is (bounded).
+			retryGuarded, retryMatch, retryReplaced := classifyReplyGuard(retryResponse)
+			if retryReplaced {
+				applyReplyGuardLogged(retryResponse, l.logger, replyGuardContext{
+					Agent:          l.agentID,
+					ConversationID: conversationID,
+				})
+				_ = retryMatch
+				retryResponse = retryGuarded
+			}
+			finalResponse = retryResponse
+		}
+	} else {
+		// No replacement (prose passthrough — byte-identical) or the retry
+		// budget is spent (second trip: ship the canned/fallback line).
+		finalResponse = applyReplyGuardWithFallback(finalResponse, l.logger, replyGuardContext{
+			Agent:          l.agentID,
+			ConversationID: conversationID,
+		}, l.guardFallback)
+	}
 	l.guardFallback = ""
 	// Refusal-fallback leaf 04 (user decision 2026-09-16, option b): when a
 	// refusal-fallback retry served this turn, append the CODE-generated
@@ -4092,6 +4159,8 @@ func (l *AgentLoop) resetTurnGuards() {
 	l.turnToolCalls = nil
 	// F-A3: a fresh turn starts with an empty per-class nudge budget.
 	l.nudgeClassCounts = make(map[string]int)
+	// Reply-guard rewrite retry: one per turn, fresh budget each turn.
+	l.guardRetried = false
 	// Chain-stability phase-2: the per-turn prompt snapshot clears with
 	// the rest of the guard state.
 	l.turnUserPrompt = ""

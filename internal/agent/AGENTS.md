@@ -65,6 +65,12 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
 - **Machine-shaped output never becomes a reply.** `RunOnceWithParts`
   applies `applyReplyGuard` — raw `platform_*` tool dumps, agent
   rosters, and status JSON are replaced with user-language fallbacks.
+  On the loop seam the replacement first earns ONE bounded rewrite
+  retry (`guardRetried`, reset per turn): the machine-shaped reply
+  plus a user-role rewrite nudge re-enter `reasoningCycle` once, and
+  only a second guard trip (or an errored retry) ships the canned
+  line. The handler choke point (`handleChatRequest`) stays
+  single-shot — it cannot continue a loop.
 - **Quota failures surface to the user.** Terminal
   `*llm.QuotaResetError` in a step job publishes the existing
   `agent.quota_wait` event and appends a user-language quota sentence

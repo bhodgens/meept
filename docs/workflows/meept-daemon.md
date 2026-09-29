@@ -165,6 +165,19 @@ hatch (a reply that is more than 40 percent running text passes through). Every
 replacement emits exactly one WARN naming the rule, the matched token, the
 agent, the intent, the session and conversation ids, and a bounded preview.
 
+### Rewrite retry (agent-loop seam)
+
+On the agent-loop path (`RunOnceWithParts` response assembly), a replacement
+earns ONE bounded rewrite retry before the fallback ships: the loop appends
+the machine-shaped reply to the conversation, injects a user-role
+`[system: ...]` rewrite nudge ("rewrite your answer in plain language…"),
+and re-runs the reasoning cycle with the dump already in context. The flag
+(`guardRetried`) is reset per turn, so a retried reply that trips the guard
+again — or an errored retry — ships the canned/fallback line exactly as
+before; the worst case is one extra model call. The handler choke point
+(`handleChatRequest`) and the other guard entry points stay single-shot:
+they guard post-loop paths that cannot continue a loop.
+
 ## Edge Cases
 
 - `daemon already running` is refused at startup by the PID file, not by the

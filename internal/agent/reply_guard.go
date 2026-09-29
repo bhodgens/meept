@@ -82,8 +82,11 @@ func replaceCatalogReply(reply string) (string, replyGuardMatch, bool) {
 		// machine-shaped dumps — raw tool JSON forwarded verbatim is valid
 		// content by that layer's definition. This replacement (plus the
 		// reply_guard context logged by applyReplyGuardLogged) is the
-		// correct final backstop; a retry layer here would double-retry
-		// with the loop's existing nudge ladder.
+		// correct final backstop. On the agent-loop seam the replacement
+		// additionally earns ONE bounded rewrite retry (loop.go
+		// guardRetried) before the canned line ships; this pure function
+		// stays retry-free so every entry point keeps single-shot
+		// semantics.
 		return "the tool ran, but the result came back as raw data instead of an answer. ask me to do something specific — for example 'make me a program that ...' — and i'll get to work.", match, true
 	}
 
@@ -290,6 +293,25 @@ const replyGuardPreviewLimit = 240
 // replyGuardPreviewSuffix marks a truncated preview so an operator can tell a
 // short reply from a clipped one.
 const replyGuardPreviewSuffix = "...(truncated)"
+
+// replyGuardRewriteNudge is the user-role system nudge appended when the
+// reply-guard rewrite retry re-enters the reasoning cycle. Same bracketed
+// [system: ...] convention as the loop's blank-content and anti-fabrication
+// nudges: instructive, not conversational, and clearly machine-authored so
+// the model does not read it as a second user question.
+const replyGuardRewriteNudge = "[system: your previous reply was raw tool output, not an answer for the user. rewrite your answer in plain language for the user, referencing the tool results you already have. do not call tools again unless necessary.]"
+
+// classifyReplyGuard is the non-logging half of applyReplyGuardLogged: it
+// returns the canned/fallback replacement, the match, and whether the guard
+// replaced the reply, WITHOUT emitting the WARN or consulting a session
+// digest fallback. RunOnceWithParts uses it to DETECT a guard trip before
+// deciding between the rewrite retry and the single-shot substitution; the
+// final WARN for a shipped replacement is still emitted by
+// applyReplyGuardWithFallback / applyReplyGuardLogged, so a reply is
+// reported exactly once by whichever seam shipped it.
+func classifyReplyGuard(reply string) (string, replyGuardMatch, bool) {
+	return replaceCatalogReply(reply)
+}
 
 // applyReplyGuard is the RunOnce response-assembly seam (plan leaf 05
 // Task 2). The single final-response return site calls this on the
