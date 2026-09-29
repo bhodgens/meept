@@ -1994,6 +1994,39 @@
       ]
     },
     {
+      "id": "continuity-regressions-08",
+      "suite": "continuity-regressions",
+      "diff": "M",
+      "title": "plan.reject on an evolver sink plan routes through the sink-manager fallback: state cancelled, rejected signoff, plan file survives with stamps, no actuator run (skill not archived)",
+      "paths": [
+        "internal/rpc/plan.go",
+        "internal/plan/manager.go",
+        "internal/skills/lifecycle/evolver.go"
+      ]
+    },
+    {
+      "id": "continuity-regressions-09",
+      "suite": "continuity-regressions",
+      "diff": "S",
+      "title": "plan.revise on an evolver sink plan returns it to planning with revision_count bumped and the plan file intact",
+      "paths": [
+        "internal/rpc/plan.go",
+        "internal/plan/manager.go",
+        "internal/skills/lifecycle/evolver.go"
+      ]
+    },
+    {
+      "id": "continuity-regressions-10",
+      "suite": "continuity-regressions",
+      "diff": "S",
+      "title": "plan.confirm on a terminal evolver sink plan lands confirmed with confirmed_by and UpdatePlanStatus rewrites the file status line",
+      "paths": [
+        "internal/rpc/plan.go",
+        "internal/plan/manager.go",
+        "internal/skills/lifecycle/evolver.go"
+      ]
+    },
+    {
       "id": "continuity-regressions-03",
       "suite": "continuity-regressions",
       "diff": "M",
