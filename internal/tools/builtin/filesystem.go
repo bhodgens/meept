@@ -802,7 +802,8 @@ func (t *ListDirectoryTool) Name() string { return "list_directory" }
 func (t *ListDirectoryTool) Category() string { return "filesystem" }
 
 func (t *ListDirectoryTool) Description() string {
-	return "List files and directories at the given path. Returns names, types, and sizes."
+	return "List files and directories at the given path. Returns names, types, and sizes. " +
+		"Path is optional: omit it to list the session's working directory."
 }
 
 func (t *ListDirectoryTool) Parameters() llm.FunctionParameters {
@@ -810,8 +811,9 @@ func (t *ListDirectoryTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropPath: {
-				Type:        schemaTypeString,
-				Description: "Absolute or ~-prefixed path to the directory.",
+				Type: schemaTypeString,
+				Description: "Optional. Absolute or ~-prefixed path to the directory. " +
+					"Omitted: lists the session working directory (errors when the session has none).",
 			},
 			"recursive": {
 				Type:        schemaTypeBoolean,
@@ -822,7 +824,11 @@ func (t *ListDirectoryTool) Parameters() llm.FunctionParameters {
 				Description: "Maximum number of entries to return (default 200).",
 			},
 		},
-		Required: []string{schemaPropPath},
+		// path is deliberately NOT required: an omitted path lists the
+		// session working directory, and a session with no working
+		// directory at all gets the actionable tools.ErrNoWorkingDir
+		// sentinel from Execute (workdir_ctx.go) — the registry schema
+		// gate must not shadow that sentinel with invalid_args.
 	}
 }
 

@@ -11,7 +11,7 @@
 //	tools-filesystem-02  file_read hashline output                — TestFileReadReturnsHashlineAnchors (file_edit leg deferred, see TestFileEditStaleAnchorFlow)
 //	tools-filesystem-03  file_edit stale anchor                   — deferred (t.Skip; no roster agent grants file_edit)
 //	tools-filesystem-04  file_grep/file_find relative workdir     — TestFileGrepAndFindResolveAgainstSessionWorkdir
-//	tools-filesystem-05  unbound-session ErrNoWorkingDir sentinel — deferred (t.Skip; schema gate shadows the sentinel)
+//	tools-filesystem-05  unbound-session ErrNoWorkingDir sentinel — TestUnboundSessionNoWorkingDirSentinel
 //	tools-filesystem-06  shell runs in the session workdir        — TestShellRunsRealCommandInWorkdir
 //	tools-filesystem-07  shell refuses destructive command        — TestShellRefusesDestructiveCommand
 package toolsfilesystem
@@ -271,15 +271,53 @@ func TestFileGrepAndFindResolveAgainstSessionWorkdir(t *testing.T) {
 	}
 }
 
-// tools-filesystem-05: unbound session surfaces the ErrNoWorkingDir sentinel.
-// DEFERRED: through the real agent path the registry-level schema gate fires
-// first — list_directory declares path as required, so a path-less scripted
-// call is rejected with invalid_args before the tool can return the sentinel.
-// The sentinel remains a unit-level contract (internal/tools/workdir_ctx.go).
+// tools-filesystem-05: an unbound session (no project, worktree, detection
+// CWD and no daemon default) surfaces the ErrNoWorkingDir sentinel through
+// the REAL agent path. list_directory no longer declares path as required,
+// so the schema gate lets the path-less scripted call through and the tool
+// itself fails with "list_directory: no working directory for this session;
+// pass an explicit path" — never invalid_args, never the daemon's cwd.
 func TestUnboundSessionNoWorkingDirSentinel(t *testing.T) {
-	t.Skip("deferred: the registry schema gate rejects path-less list_directory with " +
-		"invalid_args before tools.NoWorkingDirError can fire; the ErrNoWorkingDir " +
-		"sentinel is only reachable when the schema gate is bypassed (unit-level contract).")
+	s := harness.Start(t)
+
+	// No RegisterProject, no --cwd: the session stays unbound
+	// (session.ResolveWorkingDir → WorkingDirFromNone), mirroring
+	// session-binding-02.
+	rpc := harness.DialRPC(t, s.SocketPath)
+	created := rpc.CallResult("session.create", map[string]any{"name": "fs-sentinel"})
+	sessionID, _ := created["id"].(string)
+	projectID, _ := created["project_id"].(string)
+	projectPath, _ := created["project_path"].(string)
+	if sessionID == "" {
+		t.Fatalf("session.create returned no id: %v", created)
+	}
+	if projectID != "" || projectPath != "" {
+		t.Fatalf("sentinel session unexpectedly bound: project id=%q path=%q", projectID, projectPath)
+	}
+
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "list_directory",
+		Arguments: `{}`,
+	})
+
+	s.ChatTurn(t, sessionID, "Report what is in the current directory using the list_directory tool", 120*time.Second)
+
+	res := toolResultsJoined(s.Fake)
+	if !strings.Contains(res, "no working directory for this session; pass an explicit path") {
+		t.Fatalf("unbound-session list_directory did not surface the ErrNoWorkingDir sentinel; results:\n%s", res)
+	}
+	if strings.Contains(res, "invalid_args") {
+		t.Fatalf("schema gate shadowed the sentinel with invalid_args; results:\n%s", res)
+	}
+	for _, raw := range toolResultTexts(s.Fake) {
+		var env struct {
+			Success bool   `json:"success"`
+			Error   string `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(raw), &env); err == nil && env.Error != "" && env.Success {
+			t.Fatalf("sentinel surfaced inside a success envelope: %s", raw)
+		}
+	}
 }
 
 // tools-filesystem-06: shell runs a real command inside the session workdir —
