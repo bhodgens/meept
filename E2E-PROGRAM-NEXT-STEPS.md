@@ -57,15 +57,15 @@ passes locally every time (even GOMAXPROCS=1, count=5, full package).
 The skip dumps bridge/skillEvolver/msgBus wiring state on every CI run
 for the lane owner. All in `internal/daemon/evolver_approval_wiring_test.go`.
 
-## Open item 2 — models.json5 alias-collapse intent (needs operator)
+## Open item 2 — RESOLVED: alias fallbacks confirmed intentional
 
-The coder/planner/analyst aliases carry remote fallbacks (zai/ollama);
-the e2e remap filters member lists to sandbox-reachable providers and
-remote-only aliases collapse to the general local runtime — that is the
-documented post-0zmnHP behavior and the tests pin it. If the REMOTE
-fallbacks in the template are not intended for production alias shapes,
-that is a template decision for the operator; the suites already encode
-the current contract.
+Operator confirmed (2026-09-28): fallback follows the same implementation
+for every alias — resolver walks the alias's model list in order, first
+success wins, failures record backoff and rotate to the next model. No
+per-alias special-casing exists or is wanted. Remote members (zai, ollama)
+in coder/planner/analyst are intentional production fallbacks. The e2e
+sandbox's remote-member filtering and the suites' pinned contract remain
+correct as-is. No template changes needed.
 
 ## Known product findings (FIXED 2026-09-27, see commits 5edcd799..7d8acd13)
 
@@ -124,10 +124,8 @@ CI is green on both workflows as of `a4036479` (CI 8/8, Code Quality
    plan.approved pump never fires on the 2-core runner (see open item
    1). The skip's t.Logf dumps bridge/skillEvolver/msgBus state each CI
    run; start there, then delete the skip.
-2. **Operator decision — alias member lists.** Confirm whether the
-   zai/ollama remote fallbacks in config/models.json5 aliases are the
-   intended production shape (open item 2). Suites pin the current
-   contract either way.
+2. ~~Operator decision — alias member lists.~~ RESOLVED: fallbacks
+   confirmed intentional (open item 2).
 3. ~~Formalize naive-user-chat~~ DONE — hermetic twin in
    e2e/suites/naive-user-chat (manifest-registered, green) + live tier
    via `make e2e-chat`.
