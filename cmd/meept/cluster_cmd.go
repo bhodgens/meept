@@ -879,6 +879,7 @@ func generateJoinKey() (string, error) {
 func sanitizeNodeID(id string) string {
 	var sb strings.Builder
 	for _, r := range id {
+		// Allowed set is pure ASCII, so WriteRune emits exactly one byte.
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
 			// The guard admits only ASCII (< 128), so the conversion
 			// cannot overflow a byte.

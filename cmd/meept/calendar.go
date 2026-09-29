@@ -136,6 +136,8 @@ func buildCalendarTokenStore() (*auth.TokenStore, error) {
 func loadCalendarConfig() (*config.CalendarConfig, error) {
 	cfg, err := config.LoadDefault()
 	if err != nil {
+		// Config load failure is non-fatal for calendar commands: fall back
+		// to built-in defaults so the user still gets a usable calendar.
 		def := config.DefaultConfig()
 		return &def.Calendar, nil //nolint:nilerr // default calendar config is the documented fallback when config is unloadable
 	}

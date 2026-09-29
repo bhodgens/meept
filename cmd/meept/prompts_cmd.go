@@ -107,6 +107,8 @@ func (b *localPromptBase) listAll() []map[string]string {
 	seen := make(map[string]map[string]string)
 	for _, tier := range b.tiers {
 		var files []string
+		// Best-effort walk: unreadable tier directories are simply absent
+		// from the listing (tiers are optional by design).
 		_ = filepath.Walk(tier.dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
 				return nil //nolint:nilerr // listing a prompt tier is best-effort: an unreadable tier is skipped, not fatal
