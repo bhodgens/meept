@@ -227,38 +227,69 @@ func TestBreakers03LadderNudgesBeforeAborting(t *testing.T) {
 // ---------------------------------------------------------------------------
 // breakers-04 (S): tool breaker halts a persistently failing tool
 // ---------------------------------------------------------------------------
-// breakers-04 (S): tool breaker halts a persistently failing tool
-// ---------------------------------------------------------------------------
 
 // TestBreakers04PersistentToolFailureHaltsBounded pins the ToolRetryBreaker
-// veto (5+ consecutive identical-args failures append the
+// veto (5 consecutive identical-args failures append the
 // "[tool-retry breaker: ...]" annotation to the result and the loop logs
-// "tool retry breaker vetoed call").
+// "tool retry breaker vetoed call") through the REAL daemon.
 //
-// STILL SKIPPED (updated reason, 2026-09-24): the tool breaker's veto is
-// keyed on (tool, identical canonical args) and its Observe fires at 5
-// consecutive failures — but the repeat-ERROR breaker (breakers-01) owns
-// the identical-args failure shape at 3 strikes and TERMINALIZES the turn
-// first (loop.go: repeatBreakerRefusal preempts every later guard), so the
-// tool breaker's veto is unreachable through ANY scripted shape: distinct
-// args never trip its key, and identical args lose the race to the
-// repeat-error breaker by design (loop.go comment: "a guard-only harness
-// otherwise trips breaker terminalization at iteration 4"). Forcing it
-// end to end would need a harness seam to disable the repeat-error breaker
-// (config knob does not exist). The veto logic is unit-pinned in
-// internal/agent tool_breaker tests.
+// Ordering: the loop-level repeat-ERROR breaker (breakers-01) terminalizes
+// the same identical-args failure shape at its own budget (default 3), which
+// preempts every later guard — so this suite's daemon is booted with
+// agent.guards.repeat_error_limit = 10 (WithConfigOverlay). The tool
+// breaker's veto at 5 strikes then fires WITHIN the 4-call byte-level cycle
+// window, before any loop-level guard ends the turn.
 func TestBreakers04PersistentToolFailureHaltsBounded(t *testing.T) {
-	t.Skip("breakers-04 still deferred: the ToolRetryBreaker veto (5+ identical-args failures) is preempted " +
-		"end to end by the repeat-error breaker, which terminalizes the same identical-args failure shape at 3 " +
-		"strikes (verified live: the turn ends with 'tool file_write rejected the identical input 3 times; giving " +
-		"up' and the veto never logs). Distinct-args failures never trip the breaker's (tool, args) key, so NO " +
-		"scripted shape reaches the veto; a config seam to disable the repeat-error breaker would be required. " +
-		"The veto logic is unit-pinned in internal/agent tool_breaker tests.")
-	s := newStack(t)
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		"agent.guards.repeat_error_limit": 10,
+	}))
+	s.RegisterProject(t, "e2e-project")
 	sessionID := s.CreateSession(t, "brk04", s.ProjectDir)
 
+	// The doomed path is INSIDE the allowed project fence: blocker is a
+	// FILE, so MkdirAll/doomed write fails at the OS layer — identical
+	// real tool failure on every retry (the shape both breakers key on).
 	const marker = "BRK04-HALT"
-	s.ChatTurn(t, sessionID, "noop "+marker, 30*time.Second)
+	blocker := filepath.Join(s.ProjectDir, "brk04-blocker")
+	if err := os.WriteFile(blocker, []byte("obstacle"), 0o644); err != nil {
+		t.Fatalf("create blocker file: %v", err)
+	}
+	doomedPath := filepath.Join(blocker, "doomed.txt")
+	doomed := `{"path":"` + doomedPath + `","content":"x","direct":true}`
+
+	s.Fake.SetPlannerResponse(`{"steps":[{"description":"` + marker + `: create the doomed file","tool_hint":"file_write","depends_on":[]}]}`)
+	s.Fake.ScriptN(12,
+		harness.And(harness.IsExecutorRequest(),
+			harness.Not(harness.IsPlannerRequest()),
+			harness.MessageContains(marker)),
+		harness.ToolCallResponse(harness.ToolCall{Name: "file_write", Arguments: doomed}))
+	s.Fake.SetPostToolText("The requested work could not be completed.")
+	s.Fake.SetChatText("The requested work could not be completed.")
+
+	_ = chatTurnAllowError(t, s, sessionID,
+		"Create a file at "+doomedPath+" containing x. "+marker,
+		240*time.Second)
+
+	// The tool-breaker veto path (not the loop-level repeat-error
+	// breaker) fired in the daemon: the veto log line and the result
+	// annotation are both written by the loop's toolBreaker observe
+	// block, which runs only when a call is observed 5 consecutive times.
+	log := readWholeDaemonLog(t, s)
+	if !strings.Contains(log, "tool retry breaker vetoed call") {
+		t.Fatalf("breakers-04: tool-breaker veto never logged — repeat_error_limit=10 must let the 5-strike veto fire first; log tail:\n%s", s.Daemon.LogTail())
+	}
+	// The turn ended on a guard/breaker explanation (cycle/breaker/veto),
+	// never on the scripted post-tool success text.
+	lower := strings.ToLower(log)
+	if !strings.Contains(lower, "veto") &&
+		!strings.Contains(lower, "cycle detected") &&
+		!strings.Contains(lower, "giving up") {
+		t.Fatalf("breakers-04: turn did not end on a guard/breaker outcome; log tail:\n%s", s.Daemon.LogTail())
+	}
+	// The doomed file was never created.
+	if _, err := os.Stat(doomedPath); err == nil {
+		t.Fatal("breakers-04: doomed file unexpectedly exists")
+	}
 }
 
 // readWholeDaemonLog returns the FULL daemon log (LogTail caps at 4KB,

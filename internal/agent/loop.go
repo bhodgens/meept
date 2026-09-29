@@ -1052,14 +1052,21 @@ type AgentLoop struct {
 	toolBreaker *ToolRetryBreaker
 
 	// repeatErr is the repeat-identical-error breaker (tool-boundary-hardening
-	// leaf 02): after (tool, canonical-args, error-first-line) fails 3 times
-	// within this loop's logical work scope, identical calls are refused
-	// WITHOUT executing and the turn terminalizes with the honest summary.
-	// Deliberately NOT reset by resetTurnGuards — see the comment there and
+	// leaf 02): after (tool, canonical-args, error-first-line) fails
+	// repeatErrorBudget times within this loop's logical work scope,
+	// identical calls are refused WITHOUT executing and the turn
+	// terminalizes with the honest summary. Deliberately NOT reset by
+	// resetTurnGuards — see the comment there and
 	// the struct comment on repeatErrorBreaker for the lifetime proof (it
 	// must survive the abort→escalation→replan cycle, which re-enters this
 	// same loop instance).
 	repeatErr *repeatErrorBreaker
+
+	// repeatErrorBudget is the breaker's per-key failure budget
+	// (agent.repeat_error_limit, wired via WithRepeatErrorBudget). 0 keeps
+	// the shipped default (maxIdenticalToolErrors); negative values also
+	// fall back to the default at breaker construction.
+	repeatErrorBudget int
 
 	// rosterGate is the per-agent quality gate from AGENT.md `gate:`
 	// (leaf 04-coder-gates). Evaluated after each turn that ran a mutating
@@ -1457,6 +1464,19 @@ func WithLoopLogger(logger *slog.Logger) LoopOption {
 func WithAgentConfig(config AgentConfig) LoopOption {
 	return func(l *AgentLoop) {
 		l.config = config
+	}
+}
+
+// WithRepeatErrorBudget sets the repeat-identical-error breaker's per-key
+// failure budget (agent.repeat_error_limit). Values <= 0 fall back to the
+// shipped default (maxIdenticalToolErrors, mirrored in
+// config.DefaultCfgRepeatErrorLimit) at breaker construction, so the config
+// loader can pass the raw field through unchanged. The config is the source
+// of truth; this option exists so the daemon wiring path and tests can thread
+// the loaded value into NewAgentLoop.
+func WithRepeatErrorBudget(n int) LoopOption {
+	return func(l *AgentLoop) {
+		l.repeatErrorBudget = n
 	}
 }
 
@@ -2288,6 +2308,14 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	// Initialize loop guards (leaf 07). Zero-value config normalizes to
 	// ship-on defaults.
 	loop.guards = loop.config.Guards.Normalized()
+	// Repeat-error breaker budget (agent.guards.repeat_error_limit): the
+	// normalized guards value is the source of truth (config loads raw
+	// <=0 values and Normalized falls them back to the default 3). An
+	// explicit non-zero WithRepeatErrorBudget option (daemon wiring /
+	// tests) outranks it.
+	if loop.repeatErrorBudget == 0 {
+		loop.repeatErrorBudget = loop.guards.RepeatErrorLimit
+	}
 	loop.noProgress = NewNoProgressLadder()
 	loop.searchRollbk = NewSearchRollback(loop.guards.RollbackWindow)
 	loop.reasonWatch = NewReasoningWatchdog()
@@ -2379,7 +2407,7 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 	// abort→escalation→replan cycle that re-enters this same instance
 	// (see repeatErrorBreaker struct comment). Never reset by
 	// resetTurnGuards.
-	loop.repeatErr = newRepeatErrorBreaker()
+	loop.repeatErr = newRepeatErrorBreakerWithBudget(loop.repeatErrorBudget)
 
 	// Wrap LLM with ContextFirewall for context budget enforcement
 	if loop.llm != nil {
@@ -7767,7 +7795,15 @@ func (l *AgentLoop) executeToolCallsUngated(ctx context.Context, toolCalls []llm
 	l.executor.SetConversationID(accountingSession)
 
 	if l.config.Memory.RecallMode != RecallModeDisabled {
-		return l.executor.ExecuteAll(ctx, toolCalls)
+		results := l.executor.ExecuteAll(ctx, toolCalls)
+		// Tool-retry breaker observation for the default recall path.
+		// The breaker block below only runs under RecallModeDisabled;
+		// without this, every default-config daemon (recall auto) skips
+		// veto observation entirely and the tool-retry breaker is
+		// production-dormant (found enabling breakers-04: the e2e daemon
+		// racked up 10 identical failures with zero veto logs).
+		l.observeToolBreaker(toolCalls, results)
+		return results
 	}
 
 	// RecallModeDisabled: gate memory tools but preserve result ordering.
@@ -7802,27 +7838,36 @@ func (l *AgentLoop) executeToolCallsUngated(ctx context.Context, toolCalls []llm
 	// inject a system note when a call is vetoed after repeated identical
 	// failures. The model sees the note; execution already happened, so the
 	// veto steers the next iteration instead of erasing results.
-	if l.toolBreaker != nil {
-		for i, tc := range toolCalls {
-			r := results[i]
-			if r == nil {
-				continue
-			}
-			var args map[string]any
-			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-				// Best-effort parse: veto observation proceeds with nil
-				// args when the tool arguments are not valid JSON.
-				args = nil
-			}
-			if veto := l.toolBreaker.Observe(tc.Function.Name, args, !r.Success); veto {
-				r.Error = strings.TrimSpace(r.Error + " [tool-retry breaker: this call has failed identically " +
-					"5+ consecutive times and is vetoed; change the arguments or abandon this approach]")
-				l.logger.Warn("tool retry breaker vetoed call", "tool", tc.Function.Name)
-			}
-		}
-	}
+	l.observeToolBreaker(toolCalls, results)
 
 	return results
+}
+
+// observeToolBreaker feeds every completed tool result into the tool-retry
+// breaker and annotates vetoed results. Shared by both recall-mode paths in
+// executeToolCallsUngated (the default path returns early after ExecuteAll,
+// so the tail block alone would leave the breaker dormant in production).
+func (l *AgentLoop) observeToolBreaker(toolCalls []llm.ToolCall, results []*ExecutionResult) {
+	if l.toolBreaker == nil {
+		return
+	}
+	for i, tc := range toolCalls {
+		r := results[i]
+		if r == nil {
+			continue
+		}
+		var args map[string]any
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			// Best-effort parse: veto observation proceeds with nil
+			// args when the tool arguments are not valid JSON.
+			args = nil
+		}
+		if veto := l.toolBreaker.Observe(tc.Function.Name, args, !r.Success); veto {
+			r.Error = strings.TrimSpace(r.Error + " [tool-retry breaker: this call has failed identically " +
+				"5+ consecutive times and is vetoed; change the arguments or abandon this approach]")
+			l.logger.Warn("tool retry breaker vetoed call", "tool", tc.Function.Name)
+		}
+	}
 }
 
 // buildSystemPrompt constructs the system prompt.
@@ -8400,6 +8445,11 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 
 		// --- Config ---
 		WithAgentConfig(l.config),
+		// --- Repeat-error breaker budget (agent.repeat_error_limit):
+		// per-session clones must keep the daemon template's breaker
+		// budget, or a raised limit would silently revert to the default
+		// 3 on every cloned chat loop. ---
+		WithRepeatErrorBudget(l.repeatErrorBudget),
 		// --- D11 slot priority (tree 04 leaf 03): per-session chat
 		// loops cloned from the daemon template keep the interactive
 		// lane; the flag default-false keeps specialists background. ---

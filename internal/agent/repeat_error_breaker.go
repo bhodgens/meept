@@ -9,11 +9,16 @@ import (
 	"sync"
 )
 
-// maxIdenticalToolErrors is the per-key failure budget (tool-boundary-hardening
-// leaf 02): once the same (tool, canonical-args, error-first-line) triple has
-// failed this many times in one logical work scope, further identical calls
-// are refused WITHOUT executing the tool and the step/plan turn terminalizes
-// with the honest summary. 3 mirrors the cycle detector's corrective threshold.
+// maxIdenticalToolErrors is the DEFAULT per-key failure budget
+// (tool-boundary-hardening leaf 02): once the same (tool, canonical-args,
+// error-first-line) triple has failed this many times in one logical work
+// scope, further identical calls are refused WITHOUT executing the tool and
+// the step/plan turn terminalizes with the honest summary. 3 mirrors the
+// cycle detector's corrective threshold.
+//
+// The budget is configurable via agent.repeat_error_limit in meept.json5
+// (threaded through WithRepeatErrorBudget): values <= 0 fall back to this
+// default.
 const maxIdenticalToolErrors = 3
 
 // repeatErrorBreaker is a turn-scoped circuit breaker for the
@@ -45,6 +50,10 @@ const maxIdenticalToolErrors = 3
 // Thread-safe: tool calls may run concurrently (ExecuteAll parallel groups).
 type repeatErrorBreaker struct {
 	mu sync.Mutex
+	// budget is the per-key failure count at which the key dies. <= 0
+	// means "unset" and resolves to maxIdenticalToolErrors at every use
+	// (budget()), so the zero value keeps the shipped default.
+	budget int
 	// counts maps full key (tool|argsHash|errLine) -> failure count.
 	counts map[string]int
 	// dead maps pair key (tool|argsHash) -> the terminal summary of the
@@ -56,9 +65,32 @@ type repeatErrorBreaker struct {
 
 func newRepeatErrorBreaker() *repeatErrorBreaker {
 	return &repeatErrorBreaker{
+		budget: maxIdenticalToolErrors,
 		counts: make(map[string]int),
 		dead:   make(map[string]string),
 	}
+}
+
+// newRepeatErrorBreakerWithBudget builds a breaker with an explicit per-key
+// failure budget (agent.repeat_error_limit). Values <= 0 fall back to the
+// shipped default (maxIdenticalToolErrors) — document that contract at the
+// config field.
+func newRepeatErrorBreakerWithBudget(budget int) *repeatErrorBreaker {
+	b := newRepeatErrorBreaker()
+	if budget > 0 {
+		b.budget = budget
+	}
+	return b
+}
+
+// budgetOrDefault resolves the effective budget; the zero value keeps the
+// shipped default so a breaker built via the literal struct (tests) stays
+// inert-default.
+func (b *repeatErrorBreaker) budgetOrDefault() int {
+	if b.budget <= 0 {
+		return maxIdenticalToolErrors
+	}
+	return b.budget
 }
 
 // repeatErrorArgsHash hashes args canonically: json.Marshal on map[string]any
@@ -105,8 +137,8 @@ func repeatErrPairKey(tool, argsHash string) string {
 }
 
 // Allow is the pre-call check: false when the (tool, args) pair is dead —
-// i.e. some error variant of this exact input already failed
-// maxIdenticalToolErrors times (the call must NOT reach the tool).
+// i.e. some error variant of this exact input already exhausted its budget
+// (the call must NOT reach the tool).
 func (b *repeatErrorBreaker) Allow(tool, argsHash string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -115,7 +147,8 @@ func (b *repeatErrorBreaker) Allow(tool, argsHash string) bool {
 }
 
 // Observe records one failed call. Returns exhausted=true when this exact
-// key has now failed maxIdenticalToolErrors times; summary is the honest
+// key has now failed its configured budget times (default
+// maxIdenticalToolErrors, agent.repeat_error_limit); summary is the honest
 // terminal message for the step/plan turn:
 //
 //	"tool <name> rejected the identical input N times (<firstErr>); giving up"
@@ -131,6 +164,7 @@ func (b *repeatErrorBreaker) Observe(tool, argsHash, errMsg string) (exhausted b
 		b.counts = make(map[string]int)
 		b.dead = make(map[string]string)
 	}
+	effective := b.budgetOrDefault()
 	// Already dead: exhausted is a one-time TRANSITION signal (the caller
 	// terminalizes on it); the pre-call Allow check owns refusal afterwards.
 	if existing, dead := b.dead[pair]; dead {
@@ -139,14 +173,14 @@ func (b *repeatErrorBreaker) Observe(tool, argsHash, errMsg string) (exhausted b
 	}
 	b.counts[key]++
 	count := b.counts[key]
-	if count >= maxIdenticalToolErrors {
+	if count >= effective {
 		summary = fmt.Sprintf(
 			"tool %s rejected the identical input %d times (%s); giving up",
 			tool, count, errLine)
 		b.dead[pair] = summary
 	}
 	b.mu.Unlock()
-	return count >= maxIdenticalToolErrors, summary
+	return count >= effective, summary
 }
 
 // Refusal returns the terminal summary stored for the dead (tool, args) pair,

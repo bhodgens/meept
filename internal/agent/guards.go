@@ -43,6 +43,13 @@ type GuardConfig struct {
 	// ReasoningStreakTurns is the number of consecutive reasoning-only
 	// turns tolerated before breach. Default 3.
 	ReasoningStreakTurns int `json:"reasoning_streak_turns"`
+	// RepeatErrorLimit is the loop-level repeat-identical-error breaker
+	// budget (agent.guards.repeat_error_limit): identical failed calls are
+	// refused without execution once the same (tool, canonical args,
+	// error first line) triple has failed this many times in one logical
+	// work scope. Default 3. Zero or negative values fall back to the
+	// default.
+	RepeatErrorLimit int `json:"repeat_error_limit"`
 }
 
 // Defaults for GuardConfig zero values.
@@ -53,6 +60,10 @@ const (
 	DefaultRollbackWindow       = 10
 	DefaultReasoningTokenCap    = 16384
 	DefaultReasoningStreakTurns = 3
+	// DefaultRepeatErrorLimit is the repeat-error breaker's default
+	// budget; keep in sync with maxIdenticalToolErrors
+	// (repeat_error_breaker.go) and config.DefaultCfgRepeatErrorLimit.
+	DefaultRepeatErrorLimit = 3
 )
 
 // DefaultGuardConfig returns the ship-on guard defaults (user directive:
@@ -66,6 +77,7 @@ func DefaultGuardConfig() GuardConfig {
 		RollbackWindow:          DefaultRollbackWindow,
 		ReasoningTokenCap:       DefaultReasoningTokenCap,
 		ReasoningStreakTurns:    DefaultReasoningStreakTurns,
+		RepeatErrorLimit:        DefaultRepeatErrorLimit,
 	}
 }
 
@@ -94,6 +106,9 @@ func (c GuardConfig) Normalized() GuardConfig {
 	}
 	if n.ReasoningStreakTurns <= 0 {
 		n.ReasoningStreakTurns = DefaultReasoningStreakTurns
+	}
+	if n.RepeatErrorLimit <= 0 {
+		n.RepeatErrorLimit = DefaultRepeatErrorLimit
 	}
 	// Ship-on: an unconfigured (zero-value) config defaults rollback ON.
 	// Explicit disable requires starting from DefaultGuardConfig().

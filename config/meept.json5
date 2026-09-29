@@ -303,6 +303,18 @@
       "persist_followup": true,       // Enable hybrid persistence
       "flush_delay_ms": 5000,         // Write-behind flush delay (milliseconds)
     },
+    // Loop-safety guards: no-progress ladder, duplicate-search rollback,
+    // reasoning watchdog, and the repeat-identical-error breaker budget.
+    "guards": {
+      // Repeat-error breaker budget: how many times the same (tool,
+      // canonical args, error first line) triple may fail within one
+      // logical work scope before identical calls are refused without
+      // execution and the turn terminalizes with the honest summary.
+      // Default 3. Zero/negative values fall back to the default.
+      // Raise it above the tool-retry breaker's veto threshold (5) only
+      // when a suite must observe the tool-level veto end to end.
+      "repeat_error_limit": 3,
+    },
     // Auto-lint/test reflection loop settings
     "reflection": {
       "enabled": false,               // Enable auto-fix reflection loop

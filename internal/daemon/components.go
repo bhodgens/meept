@@ -1352,6 +1352,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// slots on the interactive lane when concurrency is capped.
 		// Per-session clones inherit the flag via ConfigSnapshot.
 		agent.WithInteractiveTurns(true),
+		// Repeat-error breaker budget (agent.guards.repeat_error_limit):
+		// the config is the source of truth; the option threads the
+		// loaded value into the loop (<=0 raw values fall back to the
+		// default 3 at the breaker). Per-session clones inherit it via
+		// ConfigSnapshot; the registry path carries it through
+		// RegistryConfig.Guards.
+		agent.WithRepeatErrorBudget(cfg.Agent.Guards.RepeatErrorLimit),
 	}
 
 	// Quota episode tracker (quota-reset-resilience): shared singleton that

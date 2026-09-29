@@ -455,6 +455,7 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 			RollbackWindow:          g.RollbackWindow,
 			ReasoningTokenCap:       g.ReasoningTokenCap,
 			ReasoningStreakTurns:    g.ReasoningStreakTurns,
+			RepeatErrorLimit:        g.RepeatErrorLimit,
 		}
 	}
 

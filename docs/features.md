@@ -288,7 +288,17 @@ duplicate_search_rollback = true
 rollback_window = 10            # turns
 reasoning_token_cap = 16384     # per reasoning-only streak
 reasoning_streak_turns = 3
+repeat_error_limit = 3          # repeat-identical-error breaker budget; 0/negative = default 3
 ```
+
+The `repeat_error_limit` knob (tool-boundary-hardening leaf 02) is the
+loop-level repeat-identical-error breaker's per-key failure budget: once the
+same (tool, canonical args, error first line) triple has failed that many
+times in one logical work scope, further identical calls are refused WITHOUT
+executing the tool and the turn terminalizes with the honest summary. Raise
+it above the tool-retry breaker's veto threshold (5) only when a suite must
+observe the tool-level veto end to end (e2e breakers-04 boots its daemon at
+10 for exactly this).
 
 ---
 
