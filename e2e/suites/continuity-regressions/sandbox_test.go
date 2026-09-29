@@ -10,7 +10,7 @@
 //     atomic (tmp+rename, unique per-call scratch names) and serialized the
 //     spans per path (plan.LockMarkdownWrite). The regression drives the
 //     REAL daemon path — seeded usage stats → skills.evolve → pass C
-//     archive proposal → plan → auto-approve → bridge + Synthesize — in a
+//     archive proposal → plan → submit → RPC approve → bridge + Synthesize — in a
 //     loop, asserting after every iteration that the plan file ends with
 //     BOTH the evolver origin stamp AND the applied marker (neither writer
 //     clobbers the other) and that the actuator ran (the marker IS the

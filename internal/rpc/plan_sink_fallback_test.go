@@ -135,3 +135,87 @@ func TestPlanHandler_EvolverSinkFallback(t *testing.T) {
 		t.Fatalf("shared plan state = %q, want pending_approval (cross-store approval must not happen)", sp.State)
 	}
 }
+
+// TestPlanHandler_ListNoProjectFilterReturnsSinkPlans pins the operator
+// decision behind the ListPlans empty-filter semantics: with no project_id,
+// plan.list must surface project-less evolver sink plans (machine-originated
+// operator-oversight items are global by nature), and with a project filter
+// they must stay excluded. This is the regression for the NULL-vs-''
+// invisibility bug (sink plans stored with NULL project_id never matched
+// `WHERE project_id = ''`).
+func TestPlanHandler_ListNoProjectFilterReturnsSinkPlans(t *testing.T) {
+	dir := t.TempDir()
+
+	sharedStore, err := plan.NewSQLiteStore(filepath.Join(dir, "shared.db"), slog.Default())
+	if err != nil {
+		t.Fatalf("shared store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sharedStore.Close(); err != nil {
+			t.Logf("shared store close: %v", err)
+		}
+	})
+	sinkStore, err := plan.NewSQLiteStore(filepath.Join(dir, "sink.db"), slog.Default())
+	if err != nil {
+		t.Fatalf("sink store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sinkStore.Close(); err != nil {
+			t.Logf("sink store close: %v", err)
+		}
+	})
+
+	ctx := context.Background()
+	sinkMgr := plan.NewPlanManager(sinkStore, nil, config.Config{}.Plans, stubSinkTaskCreator{}, slog.Default())
+
+	// Project plan in the shared store; project-less plan in the sink
+	// (empty ProjectID — what the evolver's CreatePlan writes).
+	sharedPlan := &plan.Plan{ID: "plan-shared-0001", Title: "human plan", ProjectID: "proj", State: plan.StateDraft}
+	if err := sharedStore.CreatePlan(ctx, sharedPlan); err != nil {
+		t.Fatalf("seed shared plan: %v", err)
+	}
+	sinkPlan := &plan.Plan{ID: "plan-sink-0001", Title: "evolver plan", State: plan.StateDraft}
+	if err := sinkStore.CreatePlan(ctx, sinkPlan); err != nil {
+		t.Fatalf("seed sink plan: %v", err)
+	}
+	// Sanity: the insert must have stored '' (not NULL) so equality
+	// filters can see it.
+	row, err := sinkStore.ListPlans(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("sink list: %v", err)
+	}
+	if len(row) != 1 {
+		t.Fatalf("sink store list-all returned %d plans, want 1", len(row))
+	}
+
+	sharedMgr := plan.NewPlanManager(sharedStore, nil, config.Config{}.Plans, nil, slog.Default())
+	h := NewPlanHandler(sharedMgr, sharedStore)
+	h.SetEvolverSink(sinkMgr, sinkStore)
+
+	// No filter: union of both stores, including the project-less sink plan.
+	raw, err := h.handleList(ctx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("list (no filter): %v", err)
+	}
+	resp, _ := raw.(map[string]any)
+	plans, _ := resp["plans"].([]*plan.Plan)
+	ids := map[string]bool{}
+	for _, p := range plans {
+		ids[p.ID] = true
+	}
+	if !ids["plan-shared-0001"] || !ids["plan-sink-0001"] {
+		t.Fatalf("no-filter list missing plans: got %v, want shared+sink", ids)
+	}
+
+	// Project filter: only the shared project's plan; the project-less
+	// sink plan must NOT leak into a project-scoped listing.
+	rawP, err := h.handleList(ctx, json.RawMessage(`{"project_id":"proj"}`))
+	if err != nil {
+		t.Fatalf("list (proj): %v", err)
+	}
+	respP, _ := rawP.(map[string]any)
+	plansP, _ := respP["plans"].([]*plan.Plan)
+	if len(plansP) != 1 || plansP[0].ID != "plan-shared-0001" {
+		t.Fatalf("project-filtered list returned %+v, want only the shared project plan", plansP)
+	}
+}

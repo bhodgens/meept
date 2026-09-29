@@ -178,16 +178,20 @@ When a plan enters `pending_approval`, an inline message appears in chat:
 
 ### `meept plans list` - List Plans
 
-List all plans, optionally filtered by state or project.
+List all plans, optionally filtered by state or project. With no
+`--project` filter, ALL plans are returned — including project-less
+evolver plans (machine-originated operator-oversight items are global).
+With `--project`, only that project's plans are returned; evolver plans
+never appear in a project-scoped listing.
 
 ```bash
-# List all plans
+# List all plans (includes project-less evolver plans)
 meept plans list
 
 # Filter by state
 meept plans list --state pending_approval
 
-# Filter by project
+# Filter by project (evolver plans excluded — they have no project)
 meept plans list --project my-app
 ```
 

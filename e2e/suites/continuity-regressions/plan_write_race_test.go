@@ -12,12 +12,23 @@
 //
 // The scenario drives the REAL daemon path end to end, N times: seed a low
 // performer into skills.db + a skill fixture → `skills.evolve` → pass C
-// proposes the archive → a stamped plan is created in the evolver sink and
-// auto-approved (RequireApproval=false) → bridge + Synthesize race. After
-// each iteration the plan file must contain BOTH the origin stamp AND the
-// applied marker AND the executing status — neither writer's effect lost.
-// The applied marker landing is also the proof the actuator trigger was
-// not dropped.
+// proposes the archive → a stamped plan is created in the evolver sink,
+// stamped, and SUBMITTED (draft → pending_approval) — the human gate, real
+// since the submit wiring fix (previously the plan sat in draft forever and
+// this suite had to move the row with direct SQL) → approve through the
+// plan.approve RPC → bridge + Synthesize race. With require_approval=true
+// SubmitPlan parks the plan at the gate and the RPC approval is the
+// production path — no fixture-seaming SQL anywhere in this file.
+//
+// After each iteration the plan file must contain BOTH the origin stamp AND
+// the applied marker AND the executing status — neither writer's effect
+// lost. The applied marker landing is also the proof the actuator trigger
+// was not dropped.
+//
+// The approval surface itself is asserted too: plan.list (no project
+// filter — evolver plans are global by operator decision) must return the
+// plan, plan.get must resolve it, and plan.approve must move it out of
+// pending_approval.
 package continuityregressions
 
 import (
@@ -28,6 +39,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/plan"
 )
 
 // planWriteIterations is the race-loop size. The original bug reproduced
@@ -42,8 +55,9 @@ const planWriteIterations = 10
 // continuity-regressions-01..02.
 func TestPlanWriteSerialization_ApproveRaceKeepsOriginAndAppliedMarker(t *testing.T) {
 	// Evolver on, auto_apply off (the default): proposals become stamped
-	// plans; plans auto-approve (plans.approval.require_approval default
-	// false) which is exactly the concurrent approve the fix targets.
+	// plans. require_approval=true parks them at the pending_approval gate
+	// via the real SubmitPlan path — the gate this test's RPC approve then
+	// plays (the race under test is event → bridge actuator ∥ Synthesize).
 	s := newSandbox(t, withMeeptOverlay(`
   "skills": {
     "enabled": true,
@@ -53,7 +67,7 @@ func TestPlanWriteSerialization_ApproveRaceKeepsOriginAndAppliedMarker(t *testin
       "plan_dir": "__MEEPT_HOME__/plans/evolver",
     },
   },
-  "plans": { "approval": { "require_approval": false } },
+  "plans": { "approval": { "require_approval": true } },
 `))
 
 	for i := range planWriteIterations {
@@ -91,31 +105,39 @@ func TestPlanWriteSerialization_ApproveRaceKeepsOriginAndAppliedMarker(t *testin
 				i, planned, result, s.logTail())
 		}
 
-		// 4. Locate the plan the cycle created (sink dir) and move it into
-		// pending_approval — the human-gate state ApprovePlan's conditional
-		// transition requires. (The evolver parks plans in draft; the
-		// production CLI has no submit surface for sink plans, so the test
-		// plays the gate: the thing under test is the CONCURRENT approve —
-		// event → bridge actuator ∥ Synthesize rewrite — not the state
-		// bookkeeping.)
+		// 4. Locate the plan file the cycle created (sink dir) for the
+		// provenance assertions; the plan ID comes from plan.list, not
+		// from the filesystem.
 		planPath, proposalID := s.findEvolverPlanFile(skillName)
-		s.setPlanStatePending(proposalID)
 
-		// 5. Approve through the REAL RPC surface: PlanManager.ApprovePlan
+		// 5. The plan must be visible through the REAL approval surface:
+		// plan.list with no project filter (evolver plans are global by
+		// operator decision) returns it, already SUBMITTED into
+		// pending_approval by the evolver (draft → pending_approval).
+		planID := s.waitPlanListed(proposalID, string(plan.StatePendingApproval))
+
+		// 6. plan.get resolves the sink plan through the RPC fallback.
+		got := s.rpc("plan.get", map[string]any{"id": planID})
+		if gotPlan, ok := got["id"].(string); !ok || gotPlan != planID {
+			t.Fatalf("iter %d: plan.get(%s) returned %+v, want the sink plan", i, planID, got)
+		}
+
+		// 7. Approve through the REAL RPC surface: PlanManager.ApprovePlan
 		// publishes plan.approved (the bridge's trigger) and runs
 		// Synthesize's UpdatePlanStatus rewrite CONCURRENTLY with the
-		// bridge's markPlanApplied. This is the race.
+		// bridge's markPlanApplied. This is the race. No direct SQL
+		// anywhere — the plan reached pending_approval via SubmitPlan.
 		s.rpc("plan.approve", map[string]any{
-			"plan_id":    s.planIDFor(proposalID),
+			"plan_id":    planID,
 			"session_id": "e2e-continuity",
 			"by":         "e2e",
 		})
 
-		// 6. Quiesce: the applied marker must land (the actuator ran —
+		// 8. Quiesce: the applied marker must land (the actuator ran —
 		// the plan.approved event was NOT dropped).
 		content := s.waitPlanApplied(planPath, 30*time.Second)
 
-		// 7. The conjunction invariant: BOTH writers' effects survived.
+		// 9. The conjunction invariant: BOTH writers' effects survived.
 		if !strings.Contains(content, "- origin: skill-evolver") {
 			t.Fatalf("iter %d: plan file lost the evolver origin stamp (synthesis clobbered provenance):\n%s", i, content)
 		}
@@ -132,39 +154,54 @@ func TestPlanWriteSerialization_ApproveRaceKeepsOriginAndAppliedMarker(t *testin
 			t.Fatalf("iter %d: plan file lost the executing status (actuator write clobbered the synthesis rewrite):\n%s", i, content)
 		}
 
-		// 8. The actuator actually archived the skill (leaf-02 semantics —
+		// 10. The actuator actually archived the skill (leaf-02 semantics —
 		// proves the marker is not a false positive).
 		if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
 			t.Fatalf("iter %d: skill %s still present after archived application (err=%v)", i, skillName, err)
 		}
 
-		// 9. Retire the usage row so the next iteration's cycle only
+		// 11. Retire the usage row so the next iteration's cycle only
 		// proposes the next skill (GetLowPerformers is DB-driven).
 		s.clearUsageRow(skillName)
 	}
 }
 
-// setPlanStatePending moves the sink plan row from draft into
-// pending_approval (the human gate the approve RPC's conditional transition
-// requires). The evolver parks plans in draft and no CLI surface submits
-// sink plans, so the test plays the gate operator. Direct SQL against the
-// sink store — the same fixture-seaming class as the skills.db seeding.
-func (s *sandbox) setPlanStatePending(proposalID string) {
+// waitPlanListed polls plan.list (NO project filter — evolver sink plans
+// are project-less and global by operator decision) until the plan carrying
+// the given proposal id's plan_id stamp appears with the wanted state, and
+// returns the plan id. This is the regression for the two coordinated
+// listing breaks: (a) sink plans used to be stored with NULL project_id
+// which `WHERE project_id = ?` with '' could never match, and (b) the
+// evolver never submitted its plans, so they sat in draft forever. The
+// identity match still uses the plan-file stamp — proposal id ↔ plan id —
+// recovered from the sink directory.
+func (s *sandbox) waitPlanListed(proposalID string, wantState string) string {
 	t := s.t
 	planID := s.planIDFor(proposalID)
-	dbPath := filepath.Join(s.StateDir, "plans-evolver.db")
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
-	if err != nil {
-		t.Fatalf("open plans-evolver.db: %v", err)
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		result := s.rpc("plan.list", map[string]any{})
+		plans, _ := result["plans"].([]any)
+		for _, raw := range plans {
+			p, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := p["id"].(string)
+			state, _ := p["state"].(string)
+			if id == planID {
+				if state != wantState {
+					t.Fatalf("plan %s listed in state %q, want %q (result: %v)\ndaemon log tail:\n%s",
+						planID, state, wantState, result, s.logTail())
+				}
+				return planID
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	defer db.Close()
-	res, err := db.Exec(`UPDATE plans SET state = 'pending_approval' WHERE id = ? AND state = 'draft'`, planID)
-	if err != nil {
-		t.Fatalf("move plan %s to pending_approval: %v", planID, err)
-	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		t.Fatalf("plan %s not moved to pending_approval (rows=%d)", planID, n)
-	}
+	t.Fatalf("plan %s (proposal %s) never surfaced via plan.list in state %s\ndaemon log tail:\n%s",
+		planID, proposalID, wantState, s.logTail())
+	return ""
 }
 
 // planIDFor recovers the sink plan's id for a proposal id by matching the
@@ -231,11 +268,9 @@ func (s *sandbox) clearUsageRow(skillName string) {
 
 // findEvolverPlanFile polls the evolver plan sink directory for the archive
 // plan carrying the given skill name in its proposal id, and returns
-// (file path, proposal id).
-// NOTE: deliberately not via `plan.list` — the sink store stores an empty
-// project id as NULL while ListPlans filters `WHERE project_id = ?` with
-// the empty string, so sink plans never surface there (observed while
-// writing this suite; flagged to the repo as a separate finding).
+// (file path, proposal id). Only the FILE is located here (for the later
+// applied-marker assertions); the DB-visible identity goes through
+// plan.list in waitPlanListed.
 func (s *sandbox) findEvolverPlanFile(skillName string) (string, string) {
 	t := s.t
 	sinkDir := filepath.Join(s.MeeptHome, "plans", "evolver")

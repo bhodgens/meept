@@ -250,6 +250,17 @@ so approval tooling can identify machine-originated plans. The default
 path is resolved against the user's home directory (not the daemon CWD);
 relative paths are rejected.
 
+Evolver plans are SUBMITTED by the evolver itself (draft →
+`pending_approval`) and are project-less by design — machine-originated
+operator-oversight items are global. Consequences on the approval
+surface:
+
+- `meept plans list` with no project filter returns them (empty
+  `project_id` means "no project filter", not "projectless only").
+- A project-scoped listing never includes them (they match no project).
+- `meept plans show/approve` work on them through the sink fallback in
+  the plan RPC handler.
+
 ### CLI Reference
 
 ```bash

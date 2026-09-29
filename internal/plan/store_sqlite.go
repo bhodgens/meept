@@ -133,6 +133,16 @@ func (s *SQLiteStore) migrate() error {
 		return fmt.Errorf("failed to add task_id column: %w", err)
 	}
 
+	// Normalize legacy NULL project_id rows to ''. The store used to write
+	// NULL for an empty project id, and `WHERE project_id = ?` can never
+	// match NULL in SQLite — project-less (evolver sink) plans became
+	// invisible to plan.list. Normalizing at open (instead of only fixing
+	// the insert) repairs every existing database; see ListPlans for the
+	// empty-filter-means-all semantics this enables.
+	if _, err := s.db.Exec(`UPDATE plans SET project_id = '' WHERE project_id IS NULL`); err != nil {
+		return fmt.Errorf("failed to normalize NULL project_id: %w", err)
+	}
+
 	return nil
 }
 
@@ -203,7 +213,7 @@ func (s *SQLiteStore) CreatePlan(ctx context.Context, p *Plan) error {
 		p.Title,
 		nullableString(p.Description),
 		p.FilePath,
-		nullableString(p.ProjectID),
+		p.ProjectID,
 		string(p.State),
 		nullableString(p.TaskID),
 		nullableString(p.SourceSession),
@@ -239,7 +249,7 @@ func (s *SQLiteStore) UpdatePlan(ctx context.Context, p *Plan) error {
 		p.Title,
 		nullableString(p.Description),
 		p.FilePath,
-		nullableString(p.ProjectID),
+		p.ProjectID,
 		string(p.State),
 		nullableString(p.TaskID),
 		nullableString(p.SourceSession),
@@ -271,12 +281,22 @@ func (s *SQLiteStore) DeletePlan(ctx context.Context, id string) error {
 	return nil
 }
 
+// ListPlans returns plans, newest update first. An empty projectID means
+// "no project filter": ALL plans are returned, including project-less ones
+// (evolver sink plans are machine-originated operator-oversight items and
+// are deliberately global — see docs/configuration/plans.md). A non-empty
+// projectID returns only that project's plans; project-less plans never
+// match a project filter.
 func (s *SQLiteStore) ListPlans(ctx context.Context, projectID string, limit int) ([]*Plan, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT `+planColumns+` FROM plans
-		WHERE project_id = ?
-		ORDER BY updated_at DESC
-		LIMIT ?`, projectID, limit)
+	query := `SELECT ` + planColumns + ` FROM plans`
+	args := []any{}
+	if projectID != "" {
+		query += ` WHERE project_id = ?`
+		args = append(args, projectID)
+	}
+	query += ` ORDER BY updated_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list plans: %w", err)
 	}

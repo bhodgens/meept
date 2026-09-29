@@ -632,7 +632,21 @@ func (e *Evolver) processProposal(ctx context.Context, report *EvolutionReport, 
 				// so the approval actuator can identify machine-originated
 				// plans and dispatch the right skill action.
 				StampEvolverPlan(created, evolverProposalID(proposal), string(proposal.Action))
-				report.Planned++
+				// Move the plan draft → pending_approval so it actually
+				// reaches the human gate: ApprovePlan's conditional
+				// transition requires pending_approval, and a plan left in
+				// draft is invisible to the approval surface (the plan
+				// would sit in draft forever, unapprovable).
+				if serr := e.planMgr.SubmitPlan(ctx, created.ID); serr != nil {
+					e.logger.Error("failed to submit plan for approval",
+						"skill", proposal.SkillName, "plan_id", created.ID, "error", serr)
+					report.Skipped++
+				} else {
+					e.logger.Info("evolver plan submitted for approval",
+						"plan_id", created.ID, "skill", proposal.SkillName,
+						"action", string(proposal.Action))
+					report.Planned++
+				}
 			}
 		} else {
 			// No plan manager: record as "would have created plan" without applying.

@@ -104,7 +104,10 @@ func (h *PlanHandler) handleList(ctx context.Context, params json.RawMessage) (a
 		return nil, err
 	}
 	// Merge evolver sink plans so the CLI/RPC surface sees the full set
-	// (plan-sink leaf 01: evolver plans live in the dedicated store).
+	// (plan-sink leaf 01: evolver plans live in the dedicated store). With
+	// no project filter the sink's project-less (global) plans surface;
+	// with a project filter the sink store only yields plans for that
+	// same project — sink plans are project-less and correctly excluded.
 	if h.fallbackStore != nil {
 		sinkPlans, sinkErr := h.fallbackStore.ListPlans(ctx, req.ProjectID, req.Limit)
 		if sinkErr == nil {
