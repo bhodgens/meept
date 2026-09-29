@@ -335,6 +335,14 @@ func TestPairOrchestrator_FullConversation(t *testing.T) {
 	sessionID := "test-pair-001"
 	turnSub := msgBus.Subscribe("test-turn", PairTopic(sessionID))
 
+	// Subscribe to the error topic BEFORE publishing: the registry has no
+	// agent loops, so RunAgent fails almost immediately and the error
+	// event can beat a post-publish subscription to the bus (late
+	// subscribers miss already-published messages). 30s/5s budgets flaked
+	// twice on CI (runs 36356806686, 36613327634) before this ordering
+	// fix. Keep the 30s budget as load defense.
+	errSub := msgBus.Subscribe("test-err", TopicPairError)
+
 	// Publish start request
 	req := PairStartRequest{
 		SessionID:     sessionID,
@@ -353,10 +361,6 @@ func TestPairOrchestrator_FullConversation(t *testing.T) {
 		Payload:   payload,
 	}
 	msgBus.Publish(TopicPairStart, msg)
-
-	// Since we don't have real agents, the registry.RunAgent will fail.
-	// Verify we get an error on the pair.error topic.
-	errSub := msgBus.Subscribe("test-err", TopicPairError)
 
 	select {
 	case errMsg := <-errSub.Channel:
