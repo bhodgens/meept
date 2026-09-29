@@ -50,7 +50,7 @@ func TestRefreshManager_RefreshesExpiringToken(t *testing.T) {
 	defer func() { OAuthProviders = origProviders }()
 
 	// Save a token that is about to expire (within the 10-minute default margin).
-		if err := store.Save("test-provider", &TokenResult{
+	if err := store.Save("test-provider", &TokenResult{
 		AccessToken:  "old-access-token",
 		TokenType:    "Bearer",
 		RefreshToken: "old-refresh-token",

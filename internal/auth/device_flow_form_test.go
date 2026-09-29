@@ -22,7 +22,7 @@ func TestStartDeviceFlow_FormEncoded(t *testing.T) {
 		gotBody = string(body)
 		gotContentType = r.Header.Get("Content-Type")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(deviceCodeResponse{
+		if err := json.NewEncoder(w).Encode(deviceCodeResponse{
 			DeviceCode:      "dc_form",
 			UserCode:        "ABCD-1234",
 			VerificationURI: "https://example.com/device",
@@ -72,7 +72,7 @@ func TestStartDeviceFlow_JSONDefault(t *testing.T) {
 		gotBody = string(body)
 		gotContentType = r.Header.Get("Content-Type")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(deviceCodeResponse{
+		if err := json.NewEncoder(w).Encode(deviceCodeResponse{
 			DeviceCode:      "dc_json",
 			UserCode:        "ABCD-1234",
 			VerificationURI: "https://example.com/device",

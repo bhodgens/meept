@@ -140,9 +140,9 @@ func TestPlanHandler_EvolverSinkFallback(t *testing.T) {
 // decision behind the ListPlans empty-filter semantics: with no project_id,
 // plan.list must surface project-less evolver sink plans (machine-originated
 // operator-oversight items are global by nature), and with a project filter
-// they must stay excluded. This is the regression for the NULL-vs-''
+// they must stay excluded. This is the regression for the NULL-vs-”
 // invisibility bug (sink plans stored with NULL project_id never matched
-// `WHERE project_id = ''`).
+// `WHERE project_id = ”`).
 func TestPlanHandler_ListNoProjectFilterReturnsSinkPlans(t *testing.T) {
 	dir := t.TempDir()
 
