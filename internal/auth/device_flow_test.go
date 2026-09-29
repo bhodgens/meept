@@ -95,10 +95,12 @@ func TestStartDeviceFlow_ServerError(t *testing.T) {
 
 func TestStartDeviceFlow_IncompleteResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"device_code": "dc_abc",
 			// missing user_code and verification_uri
-		})
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -115,22 +117,26 @@ func writeTokenError(w http.ResponseWriter, code, desc string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	//nolint:gosec // G117: test fixture writes fake token strings
-	_ = json.NewEncoder(w).Encode(tokenResponse{
+	if err := json.NewEncoder(w).Encode(tokenResponse{
 		Error:     code,
 		ErrorDesc: desc,
-	})
+	}); err != nil {
+		panic(err) // impossible for httptest.ResponseWriter in practice
+	}
 }
 
 func writeTokenSuccess(w http.ResponseWriter, at, rt string, expiresIn int, scope string) {
 	w.Header().Set("Content-Type", "application/json")
 	//nolint:gosec // G117: test fixture writes fake token strings
-	_ = json.NewEncoder(w).Encode(tokenResponse{
+	if err := json.NewEncoder(w).Encode(tokenResponse{
 		AccessToken:  at,
 		TokenType:    "Bearer",
 		RefreshToken: rt,
 		ExpiresIn:    expiresIn,
 		Scope:        scope,
-	})
+	}); err != nil {
+		panic(err) // impossible for httptest.ResponseWriter in practice
+	}
 }
 
 func TestPollForToken_AuthorizationPending(t *testing.T) {

@@ -485,13 +485,13 @@ func TestTracker_ConcurrentStoreRetrieve(t *testing.T) {
 	wg.Add(n)
 
 	for i := range n {
-		go func(idx int) {
+		go func() {
 			defer wg.Done()
-			key := fmt.Sprintf("var%d", idx)
-			val := tracker.MarkExternal(fmt.Sprintf("value%d", idx), "concurrent_src")
+			key := fmt.Sprintf("var%d", i)
+			val := tracker.MarkExternal(fmt.Sprintf("value%d", i), "concurrent_src")
 			tracker.Store(key, val)
 			_ = tracker.Retrieve(key)
-		}(i)
+		}()
 	}
 	wg.Wait()
 
@@ -518,11 +518,11 @@ func TestTracker_ConcurrentCheckShellCommand(t *testing.T) {
 	wg.Add(n)
 
 	for i := range n {
-		go func(idx int) {
+		go func() {
 			defer wg.Done()
-			cmd := fmt.Sprintf("echo %s step_%d", varName, idx)
+			cmd := fmt.Sprintf("echo %s step_%d", varName, i)
 			_ = tracker.CheckShellCommand(cmd)
-		}(i)
+		}()
 	}
 	wg.Wait()
 
@@ -545,14 +545,14 @@ func TestTracker_ConcurrentMarkAndRetrieve(t *testing.T) {
 	wg.Add(n)
 
 	for i := range n {
-		go func(idx int) {
+		go func() {
 			defer wg.Done()
-			val := tracker.MarkExternal(fmt.Sprintf("val%d", idx), "ext")
-			key := fmt.Sprintf("k%d", idx)
+			val := tracker.MarkExternal(fmt.Sprintf("val%d", i), "ext")
+			key := fmt.Sprintf("k%d", i)
 			tracker.Store(key, val)
 			_ = tracker.Retrieve(key)
-			_ = tracker.CheckShellCommand("echo k" + fmt.Sprintf("%d", idx))
-		}(i)
+			_ = tracker.CheckShellCommand("echo k" + fmt.Sprintf("%d", i))
+		}()
 	}
 	wg.Wait()
 

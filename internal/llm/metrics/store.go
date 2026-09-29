@@ -752,6 +752,7 @@ GROUP BY provider_id, model_id
 		if err != nil {
 			return err
 		}
+		defer rows.Close()
 		for rows.Next() {
 			var providerID, modelID string
 			var count int
@@ -762,7 +763,6 @@ GROUP BY provider_id, model_id
 			summary.ByModel[modelID] += count
 			summary.Total24h += count
 		}
-		defer rows.Close()
 		if err := rows.Err(); err != nil {
 			return err
 		}
