@@ -692,6 +692,19 @@ type AgentLoop struct {
 	// before. Reset per turn in resetTurnGuards.
 	guardRetried bool
 
+	// terminateGuardRetried is the TERMINATING-TOOL lane's copy of the
+	// reply-guard rewrite budget. reasoningCycle short-circuits to
+	// buildTerminateResponse the moment a terminating tool's result
+	// arrives (reason "tool_requested_termination") — that raw tool dump
+	// then bypasses BOTH the LLM layer's empty-completion hardening and
+	// the loop seam's guardRetried retry in RunOnceWithParts, so a
+	// machine-shaped memory_store/remember/vote payload shipped to the
+	// user verbatim. The terminate seam re-enters reasoningCycle once
+	// with the same rewrite nudge (budget guarded by this flag, reset
+	// per turn alongside guardRetried); if the rewrite also dumps, the
+	// canned line ships as before.
+	terminateGuardRetried bool
+
 	// Turn tool ledger (anti-hallucination contract, e2e run 7 rkl3Th):
 	// per-turn count of tools the model ACTUALLY emitted for execution.
 	// The model narrating "Created file X" with zero tool calls is the
@@ -4161,6 +4174,9 @@ func (l *AgentLoop) resetTurnGuards() {
 	l.nudgeClassCounts = make(map[string]int)
 	// Reply-guard rewrite retry: one per turn, fresh budget each turn.
 	l.guardRetried = false
+	// Terminating-tool lane rewrite retry: same per-turn budget
+	// semantics as guardRetried (one rewrite per turn).
+	l.terminateGuardRetried = false
 	// Chain-stability phase-2: the per-turn prompt snapshot clears with
 	// the rest of the guard state.
 	l.turnUserPrompt = ""
@@ -5279,7 +5295,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				)
 				l.safeTransition(StateCompleted, "tool_requested_termination", map[string]any{"iteration": iteration})
 				l.persistCurrentState("tool_requested_termination")
-				return l.buildTerminateResponse(results), nil
+				// Terminating-tool reply guard: the raw tool dump this
+				// lane returns bypasses the loop seam's reply guard
+				// (RunOnceWithParts never sees it), so classify and —
+				// on a trip — run the SAME bounded rewrite-nudge
+				// retry right here. A terminating tool does not
+				// re-enter the cycle on its own, so this seam owns
+				// the one rewrite (applyTerminateReplyGuard; budget
+				// terminateGuardRetried, reset per turn).
+				return l.applyTerminateReplyGuard(ctx, conv, conversationID, l.buildTerminateResponse(results)), nil
 			}
 
 			// Continue loop for LLM to process tool results
@@ -9052,6 +9076,76 @@ func (l *AgentLoop) buildMCPContextSection() string {
 	sb.WriteString("Use the platform_tools tool to list all available tools.\n")
 	sb.WriteString("Use the mcp_servers tool to inspect individual server details.\n")
 	return sb.String()
+}
+
+// applyTerminateReplyGuard runs the reply guard's classification over the
+// terminating-tool lane's final reply (the buildTerminateResponse product)
+// and, when it trips, earns ONE bounded rewrite retry on the SAME seam the
+// loop's response-assembly guard uses (guardRetried's twin,
+// terminateGuardRetried): the raw dump plus replyGuardRewriteNudge re-enters
+// reasoningCycle, whose next completion replaces the dump as the reply. A
+// second trip (or an errored retry) ships the canned replacement — the
+// pre-fix behavior — so the worst case stays exactly one extra model call.
+//
+// Why the retry lives HERE and not at RunOnceWithParts: the terminate path
+// short-circuits the reasoning cycle (reason "tool_requested_termination")
+// and returns straight to the caller, so the loop seam's guard never sees
+// the dump, and the LLM layer's empty-completion hardening cannot catch it
+// either (a non-empty machine-shaped payload is valid content by that
+// layer's definition). conv is the live conversation of the cycle that just
+// terminated; the assistant(tool_calls) + tool(result) pairing is already
+// recorded by the normal iteration flow above, so appending the assistant
+// dump + user nudge keeps the protocol intact for the rewrite call.
+func (l *AgentLoop) applyTerminateReplyGuard(ctx context.Context, conv *Conversation, conversationID, response string) string {
+	guarded, guardMatch, guardReplaced := classifyReplyGuard(response)
+	if !guardReplaced {
+		return response
+	}
+	l.mu.Lock()
+	retried := l.terminateGuardRetried
+	l.terminateGuardRetried = true
+	l.mu.Unlock()
+	if retried {
+		// The per-turn rewrite budget is spent: ship the canned
+		// replacement with the standard single-shot WARN (same
+		// observability seam as every other guard replacement).
+		return applyReplyGuardLogged(response, l.logger, replyGuardContext{
+			Agent:          l.agentID,
+			ConversationID: conversationID,
+		})
+	}
+	l.logger.Warn("reply guard replaced a terminating-tool reply; retrying once with a rewrite nudge",
+		"rule", guardMatch.Rule,
+		"matched", guardMatch.Matched,
+		"agent", l.agentID,
+		"conversation_id", conversationID,
+	)
+	// Preserve the loop protocol the terminated cycle left behind: the
+	// assistant's machine-shaped reply plus a user-role system nudge —
+	// the same shape the loop seam's rewrite retry uses (strict
+	// providers reject assistant→assistant transitions).
+	conv.AddAssistantMessage(response)
+	conv.AddUserMessage(replyGuardRewriteNudge)
+	conv.Truncate()
+	retryResponse, retryErr := l.reasoningCycle(ctx, conv, conversationID)
+	if retryErr != nil {
+		l.logger.Warn("terminating-tool reply-guard rewrite retry failed; shipping the guarded replacement",
+			"conversation_id", conversationID,
+			"error", retryErr,
+		)
+		return guarded
+	}
+	// Re-run the guard on the retried reply. A second trip means the
+	// model rewrote into machine shape again — the budget is spent, so
+	// this replacement ships as-is (bounded, with its WARN).
+	retryGuarded, _, retryReplaced := classifyReplyGuard(retryResponse)
+	if retryReplaced {
+		return applyReplyGuardLogged(retryResponse, l.logger, replyGuardContext{
+			Agent:          l.agentID,
+			ConversationID: conversationID,
+		})
+	}
+	return retryGuarded
 }
 
 // buildTerminateResponse builds a response string from tool execution results.
