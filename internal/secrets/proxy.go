@@ -117,7 +117,7 @@ func (p *Proxy) Start(ctx context.Context) (string, error) {
 	p.server = srv
 	p.addr.Store(ln.Addr().String())
 
-	go func() {
+	go func() { //nolint:gosec // G118: ctx is already Done here; deriving the shutdown ctx from it would be cancelled on arrival — a fresh timeout ctx bounded by shutdownGrace is the correct server-lifetime scope
 		<-ctx.Done()
 		// context.WithoutCancel keeps the request-scoped lineage gosec G118
 		// requires while detaching from ctx cancellation (which already

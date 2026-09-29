@@ -88,7 +88,7 @@ func TestResolveFlowConfig_Discovery(t *testing.T) {
 // srvTokenPath returns the full token endpoint URL for the test server,
 // derived from the request so the endpoint matches the chosen listener host.
 func srvTokenPath(r *http.Request) string {
-	return "http://" + r.Host + "/tok"
+	return "http://" + r.Host + "/tok" //nolint:gosec // URL constructed from the httptest listener's own Host; no untrusted input
 }
 
 func TestResolveFlowConfig_NoDiscovery(t *testing.T) {

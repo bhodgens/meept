@@ -106,6 +106,13 @@ func NewHTTPClient(baseURL string, timeout time.Duration, opts ...HTTPClientOpti
 // applyPinning wires the VerifyPeerCertificate callback into the underlying
 // *http.Transport's TLSClientConfig. It is invoked once from NewHTTPClient
 // when a fingerprint pin is configured.
+//
+// Security pairing (gosec G402/G123): InsecureSkipVerify is forced to FALSE
+// here, so standard chain+hostname validation stays on and the pin is an
+// ADDITIONAL check, not a replacement. ClientSessionCache is left nil, which
+// disables TLS session resumption (session tickets require a cache); that
+// guarantees VerifyPeerCertificate runs on every handshake, so a resumed
+// session can never bypass the pin check (gosec G123 root-cause fix).
 func (c *httpClient) applyPinning() {
 	transport, ok := c.client.Transport.(*http.Transport)
 	if !ok || transport.TLSClientConfig == nil {
@@ -143,7 +150,13 @@ func (c *httpClient) buildTLSConfig() *tls.Config {
 		ClientSessionCache:     nil,
 	}
 	if c.certFingerprint != "" || c.spkiFingerprint != "" {
+		// When a pin is configured, chain validation stays ON
+		// (InsecureSkipVerify=false) and the pin is an additional check.
 		cfg.InsecureSkipVerify = false
+		// Resumption must stay disabled so the pin verifier runs on every
+		// handshake (see applyPinning).
+		cfg.ClientSessionCache = nil
+		//nolint:gosec // G123 false positive: ClientSessionCache is explicitly nil one line above, so resumption is disabled and the pin verifier runs on every handshake
 		cfg.VerifyPeerCertificate = c.verifyPinnedCert
 	}
 	return cfg

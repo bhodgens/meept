@@ -124,13 +124,15 @@ func TestTokenStore_List(t *testing.T) {
 		Expiry:       now.Add(1 * time.Hour),
 		Scopes:       []string{"models:read"},
 	})
-	_ = store.Save("google-oauth", &TokenResult{
+	if err := store.Save("google-oauth", &TokenResult{
 		AccessToken:  "at2",
 		TokenType:    "Bearer",
 		RefreshToken: "",
 		Expiry:       now.Add(30 * time.Minute),
 		Scopes:       []string{"generativelanguage.retriever"},
-	})
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	infos, err := store.List()
 	if err != nil {
@@ -185,12 +187,14 @@ func TestTokenStore_GetValidToken_Fresh(t *testing.T) {
 	enc, _ := NewEncryptionKey("test-key")
 	store := NewTokenStoreDir(dir, enc)
 
-	_ = store.Save("provider-a", &TokenResult{
+	if err := store.Save("provider-a", &TokenResult{
 		AccessToken:  "fresh-access-token",
 		TokenType:    "Bearer",
 		RefreshToken: "refresh-tok",
 		Expiry:       time.Now().Add(2 * time.Hour),
-	})
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	//nolint:gosec // G101: fake test values
 	cfg := DeviceFlowConfig{
@@ -212,12 +216,14 @@ func TestTokenStore_GetValidToken_ExpiredNoRefresh(t *testing.T) {
 	enc, _ := NewEncryptionKey("test-key")
 	store := NewTokenStoreDir(dir, enc)
 
-	_ = store.Save("provider-b", &TokenResult{
+	if err := store.Save("provider-b", &TokenResult{
 		AccessToken:  "expired-token",
 		TokenType:    "Bearer",
 		RefreshToken: "",
 		Expiry:       time.Now().Add(-5 * time.Minute),
-	})
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	//nolint:gosec // G101: fake test values
 	cfg := DeviceFlowConfig{

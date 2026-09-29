@@ -21,12 +21,14 @@ func TestRefreshManager_RefreshesExpiringToken(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
+		if _, err := w.Write([]byte(`{
 			"access_token": "refreshed-access-token",
 			"token_type": "Bearer",
 			"refresh_token": "new-refresh-token",
 			"expires_in": 3600
-		}`))
+		}`)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -48,12 +50,14 @@ func TestRefreshManager_RefreshesExpiringToken(t *testing.T) {
 	defer func() { OAuthProviders = origProviders }()
 
 	// Save a token that is about to expire (within the 10-minute default margin).
-	_ = store.Save("test-provider", &TokenResult{
+		if err := store.Save("test-provider", &TokenResult{
 		AccessToken:  "old-access-token",
 		TokenType:    "Bearer",
 		RefreshToken: "old-refresh-token",
 		Expiry:       time.Now().Add(5 * time.Minute), // within margin
-	})
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	rm := NewRefreshManager(store, WithRefreshMargin(10*time.Minute))
 
@@ -105,12 +109,14 @@ func TestRefreshManager_SkipsNonExpiringToken(t *testing.T) {
 	defer func() { OAuthProviders = origProviders }()
 
 	// Token has 2 hours of validity — well beyond the margin.
-	_ = store.Save("test-provider", &TokenResult{
+	if err := store.Save("test-provider", &TokenResult{
 		AccessToken:  "still-valid",
 		TokenType:    "Bearer",
 		RefreshToken: "rt",
 		Expiry:       time.Now().Add(2 * time.Hour),
-	})
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	rm := NewRefreshManager(store, WithRefreshMargin(10*time.Minute))
 	ctx, cancel := context.WithCancel(t.Context())
@@ -148,12 +154,14 @@ func TestRefreshManager_TracksFailures(t *testing.T) {
 	defer func() { OAuthProviders = origProviders }()
 
 	// Token is expiring and will fail to refresh.
-	_ = store.Save("fail-provider", &TokenResult{
+	if err := store.Save("fail-provider", &TokenResult{
 		AccessToken:  "expiring",
 		TokenType:    "Bearer",
 		RefreshToken: "bad-refresh",
 		Expiry:       time.Now().Add(1 * time.Minute),
-	})
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	rm := NewRefreshManager(store, WithRefreshMargin(10*time.Minute))
 	ctx, cancel := context.WithCancel(t.Context())
