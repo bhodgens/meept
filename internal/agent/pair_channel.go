@@ -88,6 +88,20 @@ type PairResult struct {
 }
 
 // Bus topic constants for pair channel messages.
+//
+// DELIVERY CONTRACT: the bus (internal/bus) has no latched or buffered
+// topics — Publish is fire-and-forget into the channels of subscribers
+// registered AT PUBLISH TIME, and a message published with no subscriber
+// (or a full subscriber buffer) is dropped. There is NO late-subscriber
+// replay. This applies to all four pair topics below: pair.start,
+// pair.{session}.turn, pair.result, and especially pair.error — a client
+// that subscribes after the pair session has started will never see a
+// pair.error emitted before it attached (this was the root cause of the
+// TestPairOrchestrator_FullConversation flake; the test now subscribes
+// before publishing). Real operators must subscribe to pair.* topics
+// before initiating pair sessions. If guaranteed delivery is ever
+// needed, add a latching topic kind to the bus itself — do NOT work
+// around it at publish sites.
 const (
 	// TopicPairStart is used to initiate a pair session.
 	TopicPairStart = "pair.start"
