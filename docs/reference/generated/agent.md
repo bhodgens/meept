@@ -941,6 +941,7 @@ Package agent provides the agent loop and related components.
   - [func WithProjectID\(pid string\) LoopOption](<#WithProjectID>)
   - [func WithQuotaTracker\(tracker \*QuotaEpisodeTracker\) LoopOption](<#WithQuotaTracker>)
   - [func WithReflectionCollector\(rc \*ReflectionCollector\) LoopOption](<#WithReflectionCollector>)
+  - [func WithRepeatErrorBudget\(n int\) LoopOption](<#WithRepeatErrorBudget>)
   - [func WithRepoMapGenerator\(gen \*repomap.RepoMapGenerator\) LoopOption](<#WithRepoMapGenerator>)
   - [func WithResolver\(resolver \*llm.Resolver\) LoopOption](<#WithResolver>)
   - [func WithResponseAnalyzer\(ra \*metrics.ResponseAnalyzer\) LoopOption](<#WithResponseAnalyzer>)
@@ -1936,6 +1937,10 @@ Package agent provides the agent loop and related components.
 	    DefaultRollbackWindow       = 10
 	    DefaultReasoningTokenCap    = 16384
 	    DefaultReasoningStreakTurns = 3
+	    // DefaultRepeatErrorLimit is the repeat-error breaker's default
+	    // budget; keep in sync with maxIdenticalToolErrors
+	    // (repeat_error_breaker.go) and config.DefaultCfgRepeatErrorLimit.
+	    DefaultRepeatErrorLimit = 3
 	)
 
 <a name="KeywordRefactor"></a>Action keyword constants used in routing tables, review policies, and capability builders. These represent keyword\-level triggers, distinct from IntentType values.
@@ -1977,6 +1982,8 @@ Package agent provides the agent loop and related components.
 	)
 
 <a name="TopicPairStart"></a>Bus topic constants for pair channel messages.
+
+DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics — Publish is fire\-and\-forget into the channels of subscribers registered AT PUBLISH TIME, and a message published with no subscriber \(or a full subscriber buffer\) is dropped. There is NO late\-subscriber replay. This applies to all four pair topics below: pair.start, pair.\{session\}.turn, pair.result, and especially pair.error — a client that subscribes after the pair session has started will never see a pair.error emitted before it attached \(this was the root cause of the TestPairOrchestrator\_FullConversation flake; the test now subscribes before publishing\). Real operators must subscribe to pair.\* topics before initiating pair sessions. If guaranteed delivery is ever needed, add a latching topic kind to the bus itself — do NOT work around it at publish sites.
 
 	const (
 	    // TopicPairStart is used to initiate a pair session.
@@ -8964,6 +8971,13 @@ GuardConfig configures the loop guards. Zero values normalize to the defaults do
 	    // ReasoningStreakTurns is the number of consecutive reasoning-only
 	    // turns tolerated before breach. Default 3.
 	    ReasoningStreakTurns int `json:"reasoning_streak_turns"`
+	    // RepeatErrorLimit is the loop-level repeat-identical-error breaker
+	    // budget (agent.guards.repeat_error_limit): identical failed calls are
+	    // refused without execution once the same (tool, canonical args,
+	    // error first line) triple has failed this many times in one logical
+	    // work scope. Default 3. Zero or negative values fall back to the
+	    // default.
+	    RepeatErrorLimit int `json:"repeat_error_limit"`
 	}
 
 <a name="DefaultGuardConfig"></a>
@@ -10362,6 +10376,13 @@ WithQuotaTracker sets the quota episode tracker for this agent loop. When set, q
 	func WithReflectionCollector(rc *ReflectionCollector) LoopOption
 
 WithReflectionCollector wires the immediate self\-reflection collector \(Turbo Thread E\). When set, the loop calls ReflectTurn after each successful turn. Nil guard prevents typed\-nil panic.
+
+<a name="WithRepeatErrorBudget"></a>
+### func WithRepeatErrorBudget
+
+	func WithRepeatErrorBudget(n int) LoopOption
+
+WithRepeatErrorBudget sets the repeat\-identical\-error breaker's per\-key failure budget \(agent.repeat\_error\_limit\). Values \<= 0 fall back to the shipped default \(maxIdenticalToolErrors, mirrored in config.DefaultCfgRepeatErrorLimit\) at breaker construction, so the config loader can pass the raw field through unchanged. The config is the source of truth; this option exists so the daemon wiring path and tests can thread the loaded value into NewAgentLoop.
 
 <a name="WithRepoMapGenerator"></a>
 ### func WithRepoMapGenerator

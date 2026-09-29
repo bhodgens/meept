@@ -1,9 +1,7 @@
 package cluster
 
 import (
-	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"sync"
 	"testing"
@@ -97,7 +95,7 @@ func retryLoopTestEngine(t *testing.T, maxRetry int) (*GossipEngine, *bus.Messag
 }
 
 // discardLogger silences engine logs in tests.
-func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // TestRetryLoop_MaxRetryAttemptsBoundsRepublish drives the REAL retryLoop
 // goroutine: an event whose deliveries keep failing is queued again after
@@ -109,8 +107,7 @@ func TestRetryLoop_MaxRetryAttemptsBoundsRepublish(t *testing.T) {
 	counter := newBroadcastCounter(b)
 	defer counter.stop()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("engine start: %v", err)
 	}
@@ -149,8 +146,7 @@ func TestRetryLoop_ZeroKeepsDefaultBound(t *testing.T) {
 	counter := newBroadcastCounter(b)
 	defer counter.stop()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("engine start: %v", err)
 	}

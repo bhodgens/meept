@@ -388,9 +388,9 @@ Delete a file from the filesystem.
 
 #### `list_directory` - List Directory
 
-List files and directories at the given path.
+List files and directories at the given path, or the session working directory when no path is given.
 
-**Description:** "List files and directories at the given path. Returns names, types, and sizes."
+**Description:** "List files and directories at the given path. Returns names, types, and sizes. Path is optional: omit it to list the session's working directory."
 
 **Parameters:**
 ```json
@@ -399,7 +399,7 @@ List files and directories at the given path.
   "properties": {
     "path": {
       "type": "string",
-      "description": "Absolute or ~-prefixed path to the directory."
+      "description": "Optional. Absolute or ~-prefixed path to the directory. Omitted: lists the session working directory (errors when the session has none)."
     },
     "recursive": {
       "type": "boolean",
@@ -409,10 +409,11 @@ List files and directories at the given path.
       "type": "integer",
       "description": "Maximum number of entries to return (default 200)."
     }
-  },
-  "required": ["path"]
+  }
 }
 ```
+
+An omitted `path` lists the session's working directory (worktree > project > client CWD). When the session has no working directory bound at all, the call fails with the actionable sentinel `no working directory for this session; pass an explicit path` instead of guessing a directory.
 
 **Limits:**
 - Max entries: 500
@@ -520,6 +521,11 @@ challenge).
 **Features:**
 - MCP-first: prefers a connected search MCP server (searxng, see
   `config/mcp_servers.json5`), falls back to direct DuckDuckGo scraping
+- Hermetic e2e override: when the daemon environment sets
+  `MEEPT_E2E_FAKE_SEARCH`, an in-memory fake provider
+  (`internal/tools/builtin/fake_search_provider.go`) serves deterministic
+  canned results with zero network — installed by the e2e harness
+  (`harness.WithFakeSearch`), never set in production
 - No API key required
 - Rate limiting (500ms between requests, DuckDuckGo path only)
 - Automatic HTML entity decoding

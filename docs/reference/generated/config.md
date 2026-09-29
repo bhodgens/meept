@@ -414,6 +414,9 @@ Package config provides configuration loading and validation for meept.
 	    DefaultCfgRollbackWindow       = 10
 	    DefaultCfgReasoningTokenCap    = 16384
 	    DefaultCfgReasoningStreakTurns = 3
+	    // DefaultCfgRepeatErrorLimit mirrors agent.maxIdenticalToolErrors
+	    // (internal/config cannot import internal/agent).
+	    DefaultCfgRepeatErrorLimit = 3
 	)
 
 <a name="AgentIDExplore"></a>AgentIDExplore is the read\-only codebase search specialist \(config/agents/explore, discovered via AGENT.md\).
@@ -982,6 +985,15 @@ AgentGuardsConfig mirrors agent.GuardConfig for the \[agent.guards\] TOML sectio
 	    RollbackWindow          int  `json:"rollback_window"             toml:"rollback_window"`
 	    ReasoningTokenCap       int  `json:"reasoning_token_cap"         toml:"reasoning_token_cap"`
 	    ReasoningStreakTurns    int  `json:"reasoning_streak_turns"      toml:"reasoning_streak_turns"`
+	    // RepeatErrorLimit is the loop-level repeat-identical-error breaker
+	    // budget (agent.guards.repeat_error_limit): how many times the same
+	    // (tool, canonical args, error first line) triple may fail within one
+	    // logical work scope before further identical calls are refused
+	    // without execution and the turn terminalizes. Default 3. Zero or
+	    // negative values fall back to the default. Raise it above the
+	    // tool-retry breaker's veto threshold (5) when a suite must observe
+	    // the tool-level veto end to end.
+	    RepeatErrorLimit int `json:"repeat_error_limit"          toml:"repeat_error_limit"`
 	}
 
 <a name="AgentLintConfig"></a>
