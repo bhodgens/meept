@@ -61,8 +61,8 @@ func TestTaskCollectorConcurrentWithStore(t *testing.T) {
 	}
 
 	// Half the goroutines write to the TaskCollector.
-	for i := range goroutines {
-		go func(n int) {
+	for range goroutines {
+		go func() {
 			defer wg.Done()
 			for range writesPerGoroutine {
 				m := &AgentTaskMetrics{
@@ -81,7 +81,7 @@ func TestTaskCollectorConcurrentWithStore(t *testing.T) {
 					t.Logf("dropped metric (queue full): %v", err)
 				}
 			}
-		}(i)
+		}()
 	}
 
 	// Wait with a generous timeout to catch deadlocks.
