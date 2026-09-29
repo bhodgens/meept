@@ -28,7 +28,9 @@ func TestStartDeviceFlow_FormEncoded(t *testing.T) {
 			VerificationURI: "https://example.com/device",
 			ExpiresIn:       900,
 			Interval:        5,
-		})
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -78,7 +80,9 @@ func TestStartDeviceFlow_JSONDefault(t *testing.T) {
 			VerificationURI: "https://example.com/device",
 			ExpiresIn:       900,
 			Interval:        5,
-		})
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
