@@ -437,6 +437,34 @@ func (a *App) SetTargetSession(sessionID string) {
 	}
 }
 
+// ActiveModal reports the currently open modal (ModalNone when closed).
+// Read accessor for status surfaces and behavioral tests.
+func (a *App) ActiveModal() ModalType {
+	return a.activeModal
+}
+
+// ActiveView reports the current top-level view.
+// Read accessor for status surfaces and behavioral tests.
+func (a *App) ActiveView() ViewType {
+	return a.currentView
+}
+
+// ActiveSessionID reports the current session's ID ("" when none).
+// Read accessor for status surfaces and behavioral tests.
+func (a *App) ActiveSessionID() string {
+	if a.currentSession == nil {
+		return ""
+	}
+	return a.currentSession.ID
+}
+
+// ChatSessionID reports the session ID the chat model is bound to (the
+// transcript target). Read accessor for status surfaces and behavioral
+// tests; empty when no session is loaded.
+func (a *App) ChatSessionID() string {
+	return a.chat.SessionID()
+}
+
 // loadMainConfigForTTS loads the main meept.json5 config and returns TTS settings.
 // Used for config merging: meept.json5 provides Playback and Behavior defaults,
 // while client.json5 can override Enabled, Engine, and Voice.

@@ -240,7 +240,7 @@
       "smoke"
     ],
     "internal/tui/": [
-      "smoke"
+      "tui-flows"
     ],
     "internal/util/": [
       "smoke"
@@ -501,6 +501,11 @@
     {
       "name": "scheduler",
       "dir": "e2e/suites/scheduler",
+      "status": "implemented"
+    },
+    {
+      "name": "tui-flows",
+      "dir": "e2e/suites/tui-flows",
       "status": "implemented"
     }
   ],
@@ -2175,6 +2180,54 @@
         "internal/scheduler/scheduler.go",
         "internal/scheduler/persistence.go",
         "internal/scheduler/rpc.go"
+      ]
+    },
+    {
+      "id": "tui-palette-01",
+      "suite": "tui-flows",
+      "diff": "M",
+      "title": "palette flow: ctrl+x opens the palette, the sessions command executes, and its session.list RPC populates the sessions view",
+      "paths": [
+        "internal/tui/app.go",
+        "internal/tui/modal.go"
+      ]
+    },
+    {
+      "id": "tui-session-switch-01",
+      "suite": "tui-flows",
+      "diff": "M",
+      "title": "session switch via the picker keys fires the switch effect and re-targets the chat transcript",
+      "paths": [
+        "internal/tui/app.go",
+        "internal/tui/models/sessions.go"
+      ]
+    },
+    {
+      "id": "tui-agent-tab-01",
+      "suite": "tui-flows",
+      "diff": "S",
+      "title": "agents view renders populated at a fixed size (zero-width-viewport regression class, in situ)",
+      "paths": [
+        "internal/tui/agents_panel.go"
+      ]
+    },
+    {
+      "id": "tui-quota-01",
+      "suite": "tui-flows",
+      "diff": "S",
+      "title": "quota surfaces as the wait indicator (quota_wait label / blocked badge), never an error bubble",
+      "paths": [
+        "internal/tui/quota_status.go"
+      ]
+    },
+    {
+      "id": "tui-streaming-01",
+      "suite": "tui-flows",
+      "diff": "M",
+      "title": "scripted streaming turn finalizes; the TUI renders the finalized reply from the persisted transcript",
+      "paths": [
+        "internal/tui/models/chat.go",
+        "internal/tui/app.go"
       ]
     }
   ]
