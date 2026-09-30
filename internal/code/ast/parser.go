@@ -372,9 +372,10 @@ func collectBodyRanges(root *sitter.Node, source []byte, lang Language) []bodyRa
 				// Include the braces/brackets of the body
 				start := body.StartByte()
 				end := body.EndByte()
-				// Extend to include closing brace on same line
-				//nolint:gosec // value bounded by upstream
-				if end <= uint32(len(source)) {
+				// Extend to include closing brace on same line. Compare in
+				// a widening domain: uint32 tree-sitter offsets always fit
+				// int64, so neither conversion can overflow.
+				if int64(end) <= int64(len(source)) {
 					ranges = append(ranges, bodyRange{start: int(start), end: int(end)})
 				}
 				// Don't recurse into the body itself

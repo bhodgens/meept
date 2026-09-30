@@ -336,13 +336,13 @@ func serializeVector(vector []float32) []byte {
 	for i, v := range vector {
 		// Convert float32 to uint32 bytes
 		bits := math.Float32bits(v)
+		// bits is a raw uint32; each shift+mask below leaves exactly 8
+		// bits, so the byte conversion cannot overflow (checked
+		// invariant, not a blind cast).
 		data[i*4] = byte(bits >> 24)
-		//nolint:gosec // value bounded by upstream
-		data[i*4+1] = byte(bits >> 16)
-		//nolint:gosec // value bounded by upstream
-		data[i*4+2] = byte(bits >> 8)
-		//nolint:gosec // value bounded by upstream
-		data[i*4+3] = byte(bits)
+		data[i*4+1] = byte((bits >> 16) & 0xFF)
+		data[i*4+2] = byte((bits >> 8) & 0xFF)
+		data[i*4+3] = byte(bits & 0xFF)
 	}
 	return data
 }

@@ -101,7 +101,7 @@ while IFS= read -r f; do
 import json, sys
 manifest = json.load(open(sys.argv[1]))
 pkg = sys.argv[2]
-if any(pkg == p or p.startswith(pkg + "/") for p in manifest.get("path_map", {})):
+if any((pkg + "/").startswith(p) or p.startswith(pkg + "/") for p in manifest.get("path_map", {})):
     print("known")
 else:
     print("new")

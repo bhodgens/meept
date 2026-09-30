@@ -465,8 +465,12 @@ func (s *State) StatusLine() string {
 			return s.Pending
 		}
 		if s.Count > 0 {
-			//nolint:gosec // value bounded by upstream
-			return string(rune('0' + s.Count))
+			// Count is an accumulated digit prefix; clamp to a single
+			// digit before the rune conversion so it can never
+			// overflow (values above 9 still format as a digit
+			// character, matching prior behavior for display only).
+			digit := min(s.Count, 9)
+			return string(rune('0' + digit))
 		}
 	}
 	return ""

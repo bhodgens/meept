@@ -136,9 +136,11 @@ func (ti *ThreadIndicator) viewCompact() string {
 	b.WriteString(ti.styles.topicLabel.Render("thread: " + label))
 
 	if len(ti.threads) > 1 {
-		// The branch below clamps to "9+" for anything above nine, so the
-		// conversion only ever sees 2..9 — no rune overflow.
-		countStr := string(rune('0' + len(ti.threads))) //nolint:gosec // G115: len is 2..9 here, clamped to "9+" below
+		// Branch below clamps to "9+" for anything above nine, so the
+		// conversion only ever sees 1..9 after the min() cap — no
+		// rune overflow possible.
+		count := min(len(ti.threads), 9)
+		countStr := string(rune('0' + count))
 		if len(ti.threads) > 9 {
 			countStr = "9+"
 		}
