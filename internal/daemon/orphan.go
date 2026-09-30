@@ -34,7 +34,6 @@
 package daemon
 
 import (
-	"os"
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
@@ -79,9 +78,17 @@ func (d *Daemon) StartupOrphanSweep() {
 	// llm.SpawnRecordStaleAfter whose pid is STILL alive, re-parented to
 	// init, and command-line-identical to the record is exactly such a
 	// leftover, so it is reaped here — after the existing sweep, and only
-	// through the guarded stale-record path. Ages are read BEFORE the call
-	// because a reaped record's PID file is removed by it.
-	staleReaped := llm.SweepStaleSpawnRecords(records, llm.SpawnRecordStaleAfter, time.Now)
+	// through the guarded stale-record path. The registered endpoint
+	// configs are threaded in so the stale path applies the same
+	// RuntimeHasLiveOwner veto the sweep above applies; the guarded path
+	// itself enforces the F57/F58 auto_stop contract (an AutoStop=false
+	// operator-started runtime is never reaped, whatever its age). Ages
+	// travel on the result (StaleRecordReap) because the sweep removes a
+	// reaped record's PID file — statting afterwards always read a 0s
+	// record_age (finding L1).
+	staleReaped := llm.SweepStaleSpawnRecordsWithAges(
+		d.components.ContainerManager.SweepCandidates(),
+		records, llm.SpawnRecordStaleAfter, time.Now)
 
 	// Scratch-rig records (2026-09-22 orphan audit): e2e/bench rigs run
 	// daemons with their own MEEPT_HOME under the OS temp dir, so a rig
@@ -89,9 +96,10 @@ func (d *Daemon) StartupOrphanSweep() {
 	// production-home sweep could ever see. Scan those run dirs and run the
 	// SAME guarded stale-record path over them: a record is reaped only when
 	// its pid is alive, re-parented to init, command-line-identical to the
-	// record, and older than the stale bound. A live rig's daemons own their
-	// runtimes (ppid != 1) and young records are skipped by the age gate, so
-	// a rig mid-run is untouched by construction.
+	// record, older than the stale bound, and not vetoed by a live owner. A
+	// live rig's daemons own their runtimes (ppid != 1) and young records
+	// are skipped by the age gate, so a rig mid-run is untouched by
+	// construction.
 	rigRecords, err := llm.CollectScratchRigSpawnRecords(scratchRigRunDirs())
 	if err != nil {
 		d.logger.Debug("daemon: scratch-rig record scan unavailable", "error", err)
@@ -99,22 +107,18 @@ func (d *Daemon) StartupOrphanSweep() {
 	if len(rigRecords) > 0 {
 		d.logger.Debug("daemon: orphan sweep considering scratch-rig spawn records", "records", len(rigRecords))
 	}
-	rigReaped := llm.SweepStaleSpawnRecords(rigRecords, llm.ScratchRecordStaleAfter, time.Now)
+	rigReaped := llm.SweepStaleSpawnRecordsWithAges(
+		d.components.ContainerManager.SweepCandidates(),
+		rigRecords, llm.ScratchRecordStaleAfter, time.Now)
 
 	if len(staleReaped) > 0 || len(rigReaped) > 0 {
-		ageOf := make(map[int]time.Duration, len(records)+len(rigRecords))
-		for _, rec := range append(records, rigRecords...) {
-			if info, err := os.Stat(rec.PIDFile); err == nil {
-				ageOf[rec.PID] = time.Since(info.ModTime())
-			}
-		}
-		for _, pid := range staleReaped {
+		for _, reap := range staleReaped {
 			d.logger.Warn("daemon: reaped stale-record orphan runtime",
-				"pid", pid, "record_age", ageOf[pid])
+				"pid", reap.PID, "record_age", reap.Age)
 		}
-		for _, pid := range rigReaped {
+		for _, reap := range rigReaped {
 			d.logger.Warn("daemon: reaped scratch-rig orphan runtime",
-				"pid", pid, "record_age", ageOf[pid])
+				"pid", reap.PID, "record_age", reap.Age)
 		}
 	}
 }

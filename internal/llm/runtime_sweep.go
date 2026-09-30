@@ -497,8 +497,46 @@ const SpawnRecordStaleAfter = spawnRecordStaleAfter
 // maxAge is a parameter so tests can pin the boundary; production callers
 // pass spawnRecordStaleAfter. now is likewise a test seam. Returns the pids
 // confirmed gone. Best-effort, like every sweep: never returns an error.
-func SweepStaleSpawnRecords(records []SpawnRecord, maxAge time.Duration, now func() time.Time) []int {
-	return sweepStaleSpawnRecords(records, maxAge, now, orphanTermGraceDefault, nil, nil, slog.Default())
+// StaleRecordReap is one stale-record runtime the sweep confirmed reaped:
+// the pid and the record age (PID-file mtime relative to the sweep's clock)
+// captured BEFORE the reap removed the PID file. The age travels with the
+// result because callers that log it (internal/daemon/orphan.go) would
+// otherwise stat a PID file the sweep has already deleted — which always
+// read as a 0s age (audit finding L1).
+type StaleRecordReap struct {
+	PID int
+	Age time.Duration
+}
+
+// SweepStaleSpawnRecords reaps runtimes that the ppid==1 match of the boot
+// orphan sweep cannot see through the ownership guard: a record older than
+// maxAge whose pid is still ALIVE, re-parented to init, and whose command line
+// matches the record's argv (issue #54). The PID file's ModTime is the record
+// age proxy.
+//
+// cfgs are the endpoint configs for the RuntimeHasLiveOwner veto (nil
+// disables the veto): a stale record whose command line matches an endpoint
+// recording a DIFFERENT live owner is left alone, exactly as the boot sweep
+// leaves it. The F57/F58 contract the boot sweep enforces via sweepableRecord
+// applies here too: a record whose runtime opted OUT of daemon-driven stopping
+// (AutoStop=false, e.g. an operator-started `meept runtime start`) is never
+// reaped, whatever its age.
+//
+// Returns the pids confirmed gone. Best-effort, like every sweep: never
+// returns an error.
+func SweepStaleSpawnRecords(cfgs []*RuntimeConfig, records []SpawnRecord, maxAge time.Duration, now func() time.Time) []int {
+	reaped := sweepStaleSpawnRecords(cfgs, records, maxAge, now, orphanTermGraceDefault, nil, nil, slog.Default())
+	pids := make([]int, 0, len(reaped))
+	for _, r := range reaped {
+		pids = append(pids, r.PID)
+	}
+	return pids
+}
+
+// SweepStaleSpawnRecordsWithAges is SweepStaleSpawnRecords returning the
+// reaped pids WITH the record age observed at stat time (see StaleRecordReap).
+func SweepStaleSpawnRecordsWithAges(cfgs []*RuntimeConfig, records []SpawnRecord, maxAge time.Duration, now func() time.Time) []StaleRecordReap {
+	return sweepStaleSpawnRecords(cfgs, records, maxAge, now, orphanTermGraceDefault, nil, nil, slog.Default())
 }
 
 // orphanTermGraceDefault bounds the SIGTERM grace period in
@@ -508,8 +546,9 @@ func SweepStaleSpawnRecords(records []SpawnRecord, maxAge time.Duration, now fun
 const orphanTermGraceDefault = 2 * time.Second
 
 // sweepStaleSpawnRecords is the seam-complete core of SweepStaleSpawnRecords.
-func sweepStaleSpawnRecords(records []SpawnRecord, maxAge time.Duration, now func() time.Time,
-	waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log *slog.Logger) []int {
+// Returns the confirmed reaps with the record age captured at stat time.
+func sweepStaleSpawnRecords(cfgs []*RuntimeConfig, records []SpawnRecord, maxAge time.Duration, now func() time.Time,
+	waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log *slog.Logger) []StaleRecordReap {
 
 	if now == nil {
 		now = time.Now
@@ -520,8 +559,12 @@ func sweepStaleSpawnRecords(records []SpawnRecord, maxAge time.Duration, now fun
 
 	// Age gate first: the PID file's ModTime is the record age proxy. A
 	// missing PID file is not stale-by-mtime — without an age the record is
-	// left to the existing sweep paths.
+	// left to the existing sweep paths. The age is remembered per pid so it
+	// can travel on the result even though the reap removes the PID file
+	// (finding L1: the daemon used to re-stat AFTER the sweep and always
+	// logged a 0s record_age).
 	var stale []SpawnRecord
+	ageOf := make(map[int]time.Duration, len(records))
 	for _, rec := range records {
 		if rec.PIDFile == "" {
 			continue
@@ -531,10 +574,22 @@ func sweepStaleSpawnRecords(records []SpawnRecord, maxAge time.Duration, now fun
 			log.Debug("stale-record sweep: pid file unstattable; skipping", "pid_file", rec.PIDFile, "error", err)
 			continue
 		}
-		if age := now().Sub(info.ModTime()); age <= maxAge {
+		age := now().Sub(info.ModTime())
+		if age <= maxAge {
+			continue
+		}
+		// F57/F58 contract (same predicate the boot sweep enforces): a
+		// record whose runtime opted OUT of daemon-driven stopping marks a
+		// runtime the operator deliberately started (`meept runtime start`
+		// writes AutoStop=false) — the sweep must not reap it, whatever
+		// its age.
+		if !sweepableRecord(rec) {
+			log.Debug("stale-record sweep: record opted out of auto-stop; skipping",
+				"pid_file", rec.PIDFile, "record_pid", rec.PID)
 			continue
 		}
 		stale = append(stale, rec)
+		ageOf[rec.PID] = age
 	}
 	if len(stale) == 0 {
 		return nil
@@ -564,17 +619,46 @@ func sweepStaleSpawnRecords(records []SpawnRecord, maxAge time.Duration, now fun
 		return nil
 	}
 
+	// The live-owner veto the boot sweep applies (RuntimeHasLiveOwner): a
+	// stale record whose command line matches an endpoint recording a
+	// DIFFERENT live owner is a user-managed server, not a leftover — the
+	// vetoes are dropped from the target list before anything is signalled.
+	if len(cfgs) > 0 {
+		vetoed := make(map[int]struct{})
+		for _, t := range targets {
+			if RuntimeHasLiveOwner(cfgs, t.Command, t.PID) {
+				log.Warn("stale-record sweep: leaving process alone — an endpoint with this command records a different live owner",
+					"endpoint_key", t.EndpointKey, "pid", t.PID)
+				vetoed[t.PID] = struct{}{}
+			}
+		}
+		if len(vetoed) > 0 {
+			kept := targets[:0]
+			for _, t := range targets {
+				if _, drop := vetoed[t.PID]; !drop {
+					kept = append(kept, t)
+				}
+			}
+			targets = kept
+		}
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
 	// TERM → grace → KILL with the same re-validated machinery the boot
 	// sweep uses, then the existing removeHandle discipline: no reaped
 	// runtime may leave a PID file or a spawn record behind.
 	confirmed := ReapRuntimeProcesses(targets, waitAfterTerm, listOrFallback(list), signal, log)
 	RemoveRuntimeHandlesForPids(nil, stale, confirmed)
 
+	var reaped []StaleRecordReap
 	for _, pid := range confirmed {
 		log.Warn("stale-record sweep: reaped runtime whose spawn record passed the age bound",
 			"pid", pid, "argv", argvOf[pid])
+		reaped = append(reaped, StaleRecordReap{PID: pid, Age: ageOf[pid]})
 	}
-	return confirmed
+	return reaped
 }
 
 // listOrFallback resolves a nil process-table seam to the real ps scan.
@@ -786,6 +870,19 @@ func (m *RuntimeManager) hasLiveOwnerAmong(cfgs []*RuntimeConfig, command string
 // RuntimeHasLiveOwner for why the veto is not narrowed to managed endpoints).
 // The manager lock is not held across the scan or the signals.
 func (m *RuntimeManager) sweepCandidates() []*RuntimeConfig {
+	return m.sweepCandidatesLocked()
+}
+
+// SweepCandidates is the exported read of sweepCandidates for the daemon call
+// site (internal/daemon/orphan.go), which threads the configs into the
+// stale-record sweep so its live-owner veto matches the manager sweep's
+// (audit finding H2, 2026-09-29 bughunt). Snapshot under the manager lock.
+func (m *RuntimeManager) SweepCandidates() []*RuntimeConfig {
+	return m.sweepCandidatesLocked()
+}
+
+// sweepCandidatesLocked is the shared snapshot body.
+func (m *RuntimeManager) sweepCandidatesLocked() []*RuntimeConfig {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]*RuntimeConfig, 0, len(m.endpoints))

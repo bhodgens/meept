@@ -67,8 +67,21 @@ func (f *staleSweepFixture) signaler() runtimeSignaler {
 }
 
 func (f *staleSweepFixture) run(records []SpawnRecord, maxAge time.Duration, age time.Duration) []int {
-	return sweepStaleSpawnRecords(records, maxAge, func() time.Time { return sweepFixedNow },
+	return sweepPids(f.runReaps(records, maxAge, age))
+}
+
+func (f *staleSweepFixture) runReaps(records []SpawnRecord, maxAge time.Duration, age time.Duration) []StaleRecordReap {
+	return sweepStaleSpawnRecords(nil, records, maxAge, func() time.Time { return sweepFixedNow },
 		time.Millisecond, f.lister(), f.signaler(), slog.Default())
+}
+
+// sweepPids projects reaps onto their pids.
+func sweepPids(reaps []StaleRecordReap) []int {
+	pids := make([]int, 0, len(reaps))
+	for _, r := range reaps {
+		pids = append(pids, r.PID)
+	}
+	return pids
 }
 
 // staleRecordFixture writes a PID file (backdated by age) and its durable
@@ -239,9 +252,114 @@ func TestSweepStaleSpawnRecords_ExportedWrapperSkipsFresh(t *testing.T) {
 	argv := []string{"llama-server", "--port", "8099"}
 	rec := staleRecordFixture(t, pid, 30*time.Minute, argv)
 
-	if reaped := SweepStaleSpawnRecords([]SpawnRecord{rec}, spawnRecordStaleAfter,
+	if reaped := SweepStaleSpawnRecords(nil, []SpawnRecord{rec}, spawnRecordStaleAfter,
 		func() time.Time { return sweepFixedNow }); len(reaped) != 0 {
 		t.Fatalf("reaped = %v, want none for a fresh record", reaped)
 	}
 	assertUntouched(t, rec)
+}
+
+// Pin 6 (H2, 2026-09-29 bughunt): an AutoStop=false record — the shape
+// cmd/meept/runtime.go writes for an operator-started `meept runtime start` —
+// past maxAge with a matching ppid=1 argv is NOT reaped. The F57/F58 contract
+// the boot sweep enforces via sweepableRecord applies to the stale path too.
+func TestSweepStaleSpawnRecords_LeavesOperatorStartedRuntime(t *testing.T) {
+	selfPID := os.Getpid()
+	argv := []string{"llama-server", "--port", "8099", "-c", "65536"}
+	rec := staleRecordFixture(t, selfPID, 8*time.Hour, argv)
+	rec.AutoStop = false // the operator-started shape
+	if err := WriteSpawnRecord(rec); err != nil {
+		t.Fatalf("rewrite spawn record: %v", err)
+	}
+
+	fx := newStaleSweepFixture()
+	fx.procs[selfPID] = RuntimeProcInfo{PID: selfPID, PPID: 1, Command: strings.Join(argv, " ")}
+
+	if reaped := fx.run([]SpawnRecord{rec}, spawnRecordStaleAfter, 8*time.Hour); len(reaped) != 0 {
+		t.Fatalf("reaped = %v, want none for an AutoStop=false operator runtime", reaped)
+	}
+	if len(fx.signals) != 0 {
+		t.Fatalf("signals = %v, want none for an AutoStop=false operator runtime", fx.signals)
+	}
+	assertUntouched(t, rec)
+}
+
+// Pin 6b (H2): the AutoStop=true twin of pin 6 — same age, same argv — IS
+// reaped, proving the spared outcome comes from the auto_stop gate and not
+// from any other guard.
+func TestSweepStaleSpawnRecords_ReapsAutoStopTrueTwin(t *testing.T) {
+	selfPID := os.Getpid()
+	argv := []string{"llama-server", "--port", "8099", "-c", "65536"}
+	rec := staleRecordFixture(t, selfPID, 8*time.Hour, argv)
+	rec.AutoStop = true // the daemon-managed shape (fixture default, pinned explicitly)
+	if err := WriteSpawnRecord(rec); err != nil {
+		t.Fatalf("rewrite spawn record: %v", err)
+	}
+
+	fx := newStaleSweepFixture()
+	fx.procs[selfPID] = RuntimeProcInfo{PID: selfPID, PPID: 1, Command: strings.Join(argv, " ")}
+
+	reaps := fx.runReaps([]SpawnRecord{rec}, spawnRecordStaleAfter, 8*time.Hour)
+	if len(reaps) != 1 || reaps[0].PID != selfPID {
+		t.Fatalf("reaps = %+v, want exactly pid %d", reaps, selfPID)
+	}
+	if len(fx.signals) != 1 {
+		t.Fatalf("signals = %v, want exactly one", fx.signals)
+	}
+}
+
+// Pin 6c (H2): the RuntimeHasLiveOwner veto the boot sweep applies — a stale
+// record whose command line matches an endpoint config recording a DIFFERENT
+// live owner is left alone.
+func TestSweepStaleSpawnRecords_LiveOwnerVetoSparesTarget(t *testing.T) {
+	selfPID := os.Getpid()
+	ownerPID := os.Getppid()
+	argv := []string{"llama-server", "--port", "8099", "-c", "65536"}
+	rec := staleRecordFixture(t, selfPID, 8*time.Hour, argv)
+
+	dir := t.TempDir()
+	ownerPIDFile := filepath.Join(dir, "owner.pid")
+	if err := os.WriteFile(ownerPIDFile, []byte(fmt.Sprintf(`{"pid":%d,"token":"tok"}`, ownerPID)), 0o600); err != nil {
+		t.Fatalf("write owner pid file: %v", err)
+	}
+	cfgs := []*RuntimeConfig{{
+		EndpointKey:  "llama:127.0.0.1:8098",
+		PIDFile:      ownerPIDFile,
+		SpawnCommand: argv,
+		AutoStop:     true,
+	}}
+
+	fx := newStaleSweepFixture()
+	fx.procs[selfPID] = RuntimeProcInfo{PID: selfPID, PPID: 1, Command: strings.Join(argv, " ")}
+
+	reaps := sweepStaleSpawnRecords(cfgs, []SpawnRecord{rec}, spawnRecordStaleAfter,
+		func() time.Time { return sweepFixedNow },
+		time.Millisecond, fx.lister(), fx.signaler(), slog.Default())
+	if len(reaps) != 0 {
+		t.Fatalf("reaps = %+v, want none under the live-owner veto", reaps)
+	}
+	if len(fx.signals) != 0 {
+		t.Fatalf("signals = %v, want none under the live-owner veto", fx.signals)
+	}
+	assertUntouched(t, rec)
+}
+
+// Pin 6d (L1): the reaped age travels on the result and is measured BEFORE
+// the reap removes the PID file — a caller logging StaleRecordReap.Age sees
+// the real age, not the 0s a post-reap stat produces.
+func TestSweepStaleSpawnRecords_AgeTravelsWithReap(t *testing.T) {
+	selfPID := os.Getpid()
+	argv := []string{"llama-server", "--port", "8099"}
+	rec := staleRecordFixture(t, selfPID, 8*time.Hour, argv)
+
+	fx := newStaleSweepFixture()
+	fx.procs[selfPID] = RuntimeProcInfo{PID: selfPID, PPID: 1, Command: strings.Join(argv, " ")}
+
+	reaps := fx.runReaps([]SpawnRecord{rec}, spawnRecordStaleAfter, 8*time.Hour)
+	if len(reaps) != 1 {
+		t.Fatalf("reaps = %+v, want exactly one", reaps)
+	}
+	if reaps[0].Age != 8*time.Hour {
+		t.Errorf("Age = %v, want the 8h stat-time age", reaps[0].Age)
+	}
 }

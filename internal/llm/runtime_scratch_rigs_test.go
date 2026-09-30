@@ -126,7 +126,8 @@ func TestSweepStaleSpawnRecords_ScratchAgeBound(t *testing.T) {
 		table.drop(pid)
 		return nil
 	}
-	confirmed := sweepStaleSpawnRecords(
+	confirmed := sweepPids(sweepStaleSpawnRecords(
+		nil,
 		[]SpawnRecord{{
 			EndpointKey: "mlx:127.0.0.1:58081",
 			PIDFile:     pidFile,
@@ -140,7 +141,7 @@ func TestSweepStaleSpawnRecords_ScratchAgeBound(t *testing.T) {
 		lister,
 		signal,
 		slog.Default(),
-	)
+	))
 	if !signalled {
 		t.Error("expected the stale scratch runtime to be signalled")
 	}
