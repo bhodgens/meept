@@ -262,10 +262,8 @@ func TestGuardRetry_FlagCheckAndSetUnderMutex(t *testing.T) {
 	loop.mu.Unlock()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			// The same shape the retry branch uses.
 			loop.mu.Lock()
 			already := loop.guardRetried
@@ -273,7 +271,7 @@ func TestGuardRetry_FlagCheckAndSetUnderMutex(t *testing.T) {
 			loop.mu.Unlock()
 			_ = already
 			loop.resetTurnGuards()
-		}()
+		})
 	}
 	wg.Wait()
 	deadline := time.Now().Add(time.Second)

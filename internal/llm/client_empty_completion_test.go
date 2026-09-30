@@ -260,7 +260,7 @@ func TestChatWithDeltaCallback_StreamEmptyExhaustionIsBareSentinel(t *testing.T)
 	// Identity check: the surfaced error IS the sentinel, not a wrapping
 	// ClientError that merely contains it (the sibling Chat loop returns
 	// the bare sentinel; the streaming loop must match).
-	if err != error(ErrEmptyResponse) {
+	if err != error(ErrEmptyResponse) { //nolint:errorlint // deliberate pointer-identity check on the bare sentinel
 		t.Fatalf("err identity = %p (%T: %v), want the bare ErrEmptyResponse sentinel (%p)",
 			err, err, err, error(ErrEmptyResponse))
 	}

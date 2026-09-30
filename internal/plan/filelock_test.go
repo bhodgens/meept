@@ -39,11 +39,11 @@ func TestLockMarkdownWrite_MutualExclusion(t *testing.T) {
 // serialize through the shared bucket mutex.
 func TestLockMarkdownWrite_ConcurrentDistinctPaths(t *testing.T) {
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			for j := 0; j < 50; j++ {
+			for range 50 {
 				unlock := LockMarkdownWrite("/tmp/plans/plan-lock-concurrent-test.md")
 				unlock()
 			}

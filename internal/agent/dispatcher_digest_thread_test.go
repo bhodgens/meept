@@ -61,7 +61,7 @@ func (m *promptCapturingChatter) Chat(ctx context.Context, messages []llm.ChatMe
 	// StateQuotaWait, or the loop's turnParked guard would classify the
 	// blank reply as a parked turn.
 	if m.loop != nil && m.loop.stateMachine != nil {
-		m.loop.stateMachine.Transition(StateIdle, "test_chatter_reset", map[string]any{})
+		_ = m.loop.stateMachine.Transition(StateIdle, "test_chatter_reset", map[string]any{})
 	}
 	// Vary per call so the loop's convergence detector never sees a repeat.
 	return &llm.Response{

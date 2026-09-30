@@ -71,8 +71,8 @@ func FuzzExtractFencedBlocks(f *testing.F) {
 		// the full ```javascript/```typescript names — plus the Python
 		// pair. Multi-fence pass exercises extractFencedMulti directly the
 		// way JSLintFilter invokes it.
-		jsTsBlocks := extractFencedMulti(output, []string{"```javascript", "```js", "```typescript", "```ts"})
-		for _, b := range jsTsBlocks {
+		jsTSBlocks := extractFencedMulti(output, []string{"```javascript", "```js", "```typescript", "```ts"})
+		for _, b := range jsTSBlocks {
 			checkBlocks(t, output, []int{b.start}, []int{b.end}, []string{b.code})
 		}
 		pyBlocks := extractFencedMulti(output, []string{"```python", "```py"})

@@ -175,7 +175,7 @@ func (s *rpcStub) serve(conn net.Conn) {
 			return
 		}
 		fmt.Fprintf(conn, "%d\n", len(respData))
-		conn.Write(respData)
+		_, _ = conn.Write(respData)
 	}
 }
 

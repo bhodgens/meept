@@ -47,7 +47,7 @@ func switchView(t *testing.T, hp *headlessProgram, key string) {
 func retryWithFreshApp(t *testing.T, wantIn string, attempt func(t *testing.T) *App) *App {
 	t.Helper()
 	var last *App
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		app := attempt(t)
 		last = app
 		if strings.Contains(app.View().Content, wantIn) {

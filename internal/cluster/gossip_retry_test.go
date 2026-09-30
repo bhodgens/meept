@@ -227,7 +227,7 @@ func TestRetryLoop_AttemptsMapBounded(t *testing.T) {
 
 	// The retry queue's cap is 64; flood 4x that many distinct IDs.
 	const flood = 4 * 64
-	for i := 0; i < flood; i++ {
+	for i := range flood {
 		engine.QueueForRetry(&models.ClusterEvent{
 			EventID:   fmt.Sprintf("evt-flood-%d", i),
 			EventType: models.EventNodeHeartbeat,
