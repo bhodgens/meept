@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // Tests for the empty/malformed-completion classification (agnes-2.5-flash
@@ -227,5 +228,124 @@ func TestChatWithDeltaCallback_LeadingWhitespaceStreamPasses(t *testing.T) {
 	}
 	if got := hits.Load(); got != 1 {
 		t.Errorf("server hits = %d, want 1", got)
+	}
+}
+
+// TestChatWithDeltaCallback_StreamEmptyExhaustionIsBareSentinel pins L2
+// (2026-09-29 bughunt): the streaming delta loop is 0-INDEXED
+// (for attempt := range shortRetries), so its empty-completion exhaustion
+// guard must compare attempt < shortRetries-1. A 1-indexed bound let the
+// last empty attempt fall through to the loop tail and surface a WRAPPED
+// ClientError ("streaming failed after N attempts") instead of the bare
+// ErrEmptyResponse sentinel. errors.Is alone is insufficient here (it also
+// matches through the wrap): the error must BE the sentinel.
+func TestChatWithDeltaCallback_StreamEmptyExhaustionIsBareSentinel(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	c := newFailurePolicyTestClient(t, srv, fastFailurePolicyCfg)
+	_, err := c.ChatWithDeltaCallback(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		func(string) error { return nil },
+	)
+	if !errors.Is(err, ErrEmptyResponse) {
+		t.Fatalf("err = %v, want ErrEmptyResponse", err)
+	}
+	// Identity check: the surfaced error IS the sentinel, not a wrapping
+	// ClientError that merely contains it (the sibling Chat loop returns
+	// the bare sentinel; the streaming loop must match).
+	if err != error(ErrEmptyResponse) {
+		t.Fatalf("err identity = %p (%T: %v), want the bare ErrEmptyResponse sentinel (%p)",
+			err, err, err, error(ErrEmptyResponse))
+	}
+	if got := hits.Load(); got != int32(fastFailurePolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
+		t.Errorf("server hits = %d, want %d (short budget)", got, fastFailurePolicyCfg.ShortRetries)
+	}
+}
+
+// TestClientChat_EmptyExhaustionRecordsFailureUsageRow pins L4: exhausting
+// the short budget on blank completions appends ONE failure-shaped llm_calls
+// row (error=1, zero completion tokens) so the burned prompt tokens are
+// visible in the metrics ledger — previously the empty-exhaustion path
+// recorded nothing.
+func TestClientChat_EmptyExhaustionRecordsFailureUsageRow(t *testing.T) {
+	var hits int32
+	srv := newScriptedServer(t, []scriptedResponse{
+		{status: http.StatusOK, body: whitespaceChatBody()},
+	}, &hits)
+	defer srv.Close()
+
+	store := newUsageTestStore(t)
+	c := newFailurePolicyTestClient(t, srv, fastFailurePolicyCfg)
+	c.SetUsageStore(store)
+	_, err := c.Chat(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		WithAgentScope("coder"))
+	if !errors.Is(err, ErrEmptyResponse) {
+		t.Fatalf("err = %v, want ErrEmptyResponse", err)
+	}
+
+	// recordUsageStore writes async; poll for the failure row.
+	pollUntil(t, func() bool {
+		got, qerr := store.QueryLLMCallUsage(time.Now().Add(-time.Hour), time.Now().Add(time.Hour), true)
+		return qerr == nil && len(got) == 1 && got[0].Errors > 0
+	})
+	rows, qerr := store.QueryLLMCallUsage(time.Now().Add(-time.Hour), time.Now().Add(time.Hour), true)
+	if qerr != nil || len(rows) != 1 {
+		t.Fatalf("llm_calls rows = %d (err %v), want exactly 1 failure row", len(rows), qerr)
+	}
+	r := rows[0]
+	if r.Provider != "openai" || r.AgentID != "coder" {
+		t.Errorf("row attribution = %s/%s, want openai/coder", r.Provider, r.AgentID)
+	}
+	if r.Calls != 1 || r.Errors != 1 {
+		t.Errorf("row calls/errors = %d/%d, want 1/1", r.Calls, r.Errors)
+	}
+	if r.TokensRecv != 0 {
+		t.Errorf("row completion tokens = %d, want 0 (no content was produced)", r.TokensRecv)
+	}
+}
+
+// TestChatWithDeltaCallback_StreamEmptyExhaustionRecordsFailureUsageRow is
+// the streaming twin of the L4 pin: the delta-path exhaustion must also
+// ledger the failure-shaped row.
+func TestChatWithDeltaCallback_StreamEmptyExhaustionRecordsFailureUsageRow(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	store := newUsageTestStore(t)
+	c := newFailurePolicyTestClient(t, srv, fastFailurePolicyCfg)
+	c.SetUsageStore(store)
+	_, err := c.ChatWithDeltaCallback(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		func(string) error { return nil },
+		WithAgentScope("coder"),
+	)
+	if !errors.Is(err, ErrEmptyResponse) {
+		t.Fatalf("err = %v, want ErrEmptyResponse", err)
+	}
+
+	pollUntil(t, func() bool {
+		got, qerr := store.QueryLLMCallUsage(time.Now().Add(-time.Hour), time.Now().Add(time.Hour), true)
+		return qerr == nil && len(got) == 1 && got[0].Errors > 0
+	})
+	rows, qerr := store.QueryLLMCallUsage(time.Now().Add(-time.Hour), time.Now().Add(time.Hour), true)
+	if qerr != nil || len(rows) != 1 {
+		t.Fatalf("llm_calls rows = %d (err %v), want exactly 1 failure row", len(rows), qerr)
+	}
+	if rows[0].Provider != "openai" || rows[0].AgentID != "coder" || rows[0].Errors != 1 || rows[0].TokensRecv != 0 {
+		t.Errorf("stream failure row = %+v, want openai/coder, errors=1, tokens_received=0", rows[0])
 	}
 }

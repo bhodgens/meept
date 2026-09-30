@@ -656,6 +656,12 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 				if attempt < shortRetries {
 					continue
 				}
+				// L4: exhaustion of blank completions still burned prompt
+				// tokens (every 200-OK attempt carried a real prompt) —
+				// ledger a failure-shaped row so the burn is visible (the
+				// parser returns no usage on an empty body; the store's
+				// zero-completion row is the valid failure shape).
+				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, ErrEmptyResponse.Message, 0)
 				return nil, err
 			}
 
@@ -906,6 +912,8 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 				if attempt < shortRetries {
 					continue
 				}
+				// L4: ledger the burned blank completions (see Chat loop).
+				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, ErrEmptyResponse.Message, 0)
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -2259,10 +2267,21 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 				"attempt", attempt,
 				"max_retries", shortRetries,
 			)
-			// Immediate re-dispatch, NO plan sleep (see Chat loop).
-			if attempt < shortRetries {
+			// Immediate re-dispatch, NO plan sleep (see Chat loop). The
+			// loop is 0-INDEXED (for attempt := range shortRetries), so
+			// the last attempt is shortRetries-1 and the exhaustion guard
+			// must compare against that — a 1-indexed bound here returned
+			// a wrapped ClientError instead of the bare sentinel (audit
+			// finding L2, sibling loops are correct).
+			if attempt < shortRetries-1 {
 				continue
 			}
+			// L4: exhaustion means shortRetries blank completions were
+			// served (200 OK each) — the prompt tokens they burned are
+			// invisible unless the ledger records a failure-shaped row
+			// (the streaming site has no parsed usage to attach; the
+			// store schema's zero-value row is valid for consumers).
+			c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, ErrEmptyResponse.Message, 0)
 			return nil, err
 		}
 
