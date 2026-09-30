@@ -1,0 +1,45 @@
+{
+  "_comment": "TUI/GUI parity manifest (docs/workflows/tui-e2e-plan.md §7). The Flutter GUI has no Go test runner, so this checked-in manifest is the shared contract between internal/tui and ui/flutter_ui. When a surface changes legitimately, update BOTH the code and this manifest in the same commit. gui:false marks a TUI-only item; every deviation MUST have a justification in `deviations`. GUI sources of truth: ui/flutter_ui/lib/widgets/command_palette.dart (palette items), ui/flutter_ui/lib/core/shortcuts.dart (shortcuts), ui/flutter_ui status widgets (status bar).",
+  "palette_commands": [
+    { "key": "c", "label": "chat", "description": "switch to chat view", "gui": true },
+    { "key": "s", "label": "sessions", "description": "switch to sessions view", "gui": true },
+    { "key": "t", "label": "tasks", "description": "switch to tasks view", "gui": true },
+    { "key": "q", "label": "queue", "description": "switch to queue view", "gui": false },
+    { "key": "m", "label": "memory", "description": "switch to memory view", "gui": false },
+    { "key": "p", "label": "plans", "description": "switch to plans view", "gui": true },
+    { "key": "e", "label": "agents", "description": "switch to employees view", "gui": true },
+    { "key": "y", "label": "toggle sidebar", "description": "show/hide sidebar", "gui": false },
+    { "key": "o", "label": "projects", "description": "manage projects", "gui": true },
+    { "key": "u", "label": "users", "description": "multi-user awareness (manage via cli)", "gui": false },
+    { "key": "n", "label": "new session", "description": "create a new session", "gui": true },
+    { "key": "r", "label": "edit description", "description": "edit session description", "gui": true },
+    { "key": "f", "label": "find...", "description": "search sessions and tasks", "gui": true }
+  ],
+  "shortcuts": [
+    { "key": "ctrl+x", "action": "command palette", "gui": true },
+    { "key": "ctrl+c", "action": "quit", "gui": true },
+    { "key": "ctrl+s", "action": "steer / sessions", "gui": true },
+    { "key": "ctrl+t", "action": "toggle tts", "gui": true },
+    { "key": "ctrl+v", "action": "cycle verbosity", "gui": true },
+    { "key": "ctrl+p", "action": "fuzzy finder", "gui": true },
+    { "key": "ctrl+d", "action": "pending changes", "gui": false },
+    { "key": "esc", "action": "cancel / back", "gui": true }
+  ],
+  "status_elements": [
+    "menu",
+    "sessions",
+    "find",
+    "quit",
+    "verbosity:"
+  ],
+  "deviations": {
+    "palette:queue": "no flutter queue route yet (documented deviation, command_palette.dart header comment)",
+    "palette:memory": "no flutter memory route yet (documented deviation, command_palette.dart header comment)",
+    "palette:toggle sidebar": "no flutter sidebar surface (documented deviation, command_palette.dart header comment)",
+    "palette:users": "users awareness is CLI-managed; TUI read-only modal (documented deviation)",
+    "shortcut:ctrl+m": "markdown rendering toggle is TUI-only; the GUI renders markdown natively",
+    "shortcut:ctrl+d": "pending-changes review modal is TUI-only today; GUI review lives in the diff panel",
+    "shortcut:ctrl+b": "branches disabled by default in both surfaces; shortcut only bound when branches_enabled",
+    "status:connection dot": "● connection indicator renders as an ANSI dot; GUI shows a colored badge (same semantics, different glyph)"
+  }
+}

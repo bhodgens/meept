@@ -1,0 +1,25 @@
+               ╭────────────────────────────────────────────────╮
+               │                                                │
+               │  command palette                               │
+               │                                                │
+               │  ────────────────────────────────────────────  │
+               │  ──                                            │
+               │    [c]  chat - switch to chat view             │
+               │    [s]  sessions - switch to sessions view     │
+               │    [t]  tasks - switch to tasks view           │
+               │    [q]  queue - switch to queue view           │
+               │    [m]  memory - switch to memory view         │
+               │    [p]  plans - switch to plans view           │
+               │    [e]  agents - switch to employees view      │
+               │    [y]  toggle sidebar - show/hide sidebar     │
+               │    [o]  projects - manage projects             │
+               │    [u]  users - multi-user awareness (manage   │
+               │  via cli)                                      │
+               │    [n]  new session - create a new session     │
+               │    [r]  edit description - edit session        │
+               │  description                                   │
+               │    [f]  find... - search sessions and tasks    │
+               │                                                │
+               │            press key or esc to cancel          │
+               │                                                │
+               ╰────────────────────────────────────────────────╯

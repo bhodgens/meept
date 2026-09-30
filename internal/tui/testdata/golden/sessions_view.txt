@@ -1,0 +1,22 @@
+ meept
+sessions  (2)
+╭────────────────────────────────────────────╮╭────────────────────────────╮
+│ title                         created      ││alpha session               │
+│last activity                               ││                            │
+│────────────────────────────────────────────││id:       sess-alpha        │
+│────────────────                            ││name:     alpha             │
+│ alpha session                 Aug 21 HH:MM ││created:  Aug 21 HH:MM      │
+│ beta session                  Aug 21 HH:MM ││activity: Aug 21            │
+│                                            ││                            │
+│                                            ││--- plans ---               │
+│                                            ││no plans                    │
+│                                            ││                            │
+│                                            ││                            │
+│                                            ││                            │
+│                                            │╰────────────────────────────╯
+│                                            │
+╰────────────────────────────────────────────╯
+
+n: new | d: archive | D: delete | r: refresh | enter: details | up/down: navigate | f: search | ?: help
+ ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ ^X y sidebar │ /test/project │
+ verbosity: quiet
