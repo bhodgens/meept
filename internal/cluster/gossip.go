@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"sort"
 	"sync"
 	"time"
 
@@ -54,6 +55,17 @@ type GossipEngine struct {
 
 	// Retry queue for failed broadcasts
 	retryQueue chan *models.ClusterEvent
+
+	// retryAttempts is the PERSISTENT per-EventID re-broadcast count. It
+	// lives on the engine (not in retryLoop's locals) and survives a drop:
+	// the re-queue path (gossip_transport.sendToPeer → QueueForRetry) used
+	// to restore a FRESH budget after every drop, so an undeliverable event
+	// burned 3 attempts per cycle forever (audit finding L5). Entries are
+	// deleted on successful re-publish (the delivery ack goes to the
+	// transport's sentEvents tracker, invisible here) and bounded by
+	// retryAttemptsCap otherwise.
+	retryAttempts   map[string]int
+	retryAttemptsMu sync.Mutex
 
 	// Deduplication cache (xxhash of event_id -> expiration time)
 	dedupCache map[string]time.Time
@@ -138,17 +150,18 @@ func NewGossipEngine(cfg *Config, localNode string, msgBus *bus.MessageBus, logg
 	}
 
 	g := &GossipEngine{
-		cfg:         cfg,
-		localNode:   localNode,
-		msgBus:      msgBus,
-		logger:      logger,
-		peers:       make(map[string]*PeerInfo),
-		stopCh:      make(chan struct{}),
-		doneCh:      make(chan struct{}),
-		signingPub:  make(map[string]ed25519.PublicKey),
-		retryQueue:  make(chan *models.ClusterEvent, 64),
-		dedupCache:  make(map[string]time.Time),
-		vectorClock: make(map[string]int64),
+		cfg:           cfg,
+		localNode:     localNode,
+		msgBus:        msgBus,
+		logger:        logger,
+		peers:         make(map[string]*PeerInfo),
+		stopCh:        make(chan struct{}),
+		doneCh:        make(chan struct{}),
+		signingPub:    make(map[string]ed25519.PublicKey),
+		retryQueue:    make(chan *models.ClusterEvent, 64),
+		retryAttempts: make(map[string]int),
+		dedupCache:    make(map[string]time.Time),
+		vectorClock:   make(map[string]int64),
 	}
 
 	// Generate an ed25519 signing key pair if signing is required
@@ -590,12 +603,27 @@ func (g *GossipEngine) startRetryLoop(ctx context.Context) {
 	})
 }
 
+// retryAttemptsCap bounds the persistent per-EventID attempts map: an entry
+// whose last activity is older than this is evictable, and the map is swept
+// once it grows past 4x the retry queue's capacity (64). Generous — a live
+// retry cycle touches an entry every tick — but never unbounded.
+const retryAttemptsCap = 256
+
 // retryLoop processes the retry queue, re-publishing events. Each event's
-// re-broadcast count is tracked per EventID; when cfg.Gossip.MaxRetryAttempts
-// is positive the event is DROPPED (with a Warn) once its count exceeds the
-// bound — no unbounded re-publishing. A zero/negative MaxRetryAttempts falls
-// back to the default of 3 (config.setDefault mirrors this), which also keeps
-// a hand-built &Config{} from retrying forever.
+// re-broadcast count is tracked per EventID in the engine-persistent
+// g.retryAttempts map; when cfg.Gossip.MaxRetryAttempts is positive the
+// event is DROPPED (with a Warn) once its count reaches the bound. The count
+// SURVIVES the drop: a re-queue (gossip_transport.sendToPeer → QueueForRetry
+// after another failed send) does NOT restore a fresh budget — the event is
+// dropped PERMANENTLY once its total publishes across all re-queues reach
+// maxAttempts (audit finding L5; the drop used to delete the counter, so an
+// undeliverable event retried in unbounded 3-attempt cycles). A zero/negative
+// MaxRetryAttempts falls back to the default of 3 (config.setDefault mirrors
+// this), which also keeps a hand-built &Config{} from retrying forever.
+//
+// An entry is deleted when a re-publish is ACCEPTED (the per-peer delivery
+// ack itself lands in the transport's sentEvents tracker) or evicted by the
+// size/TTL bound below, so the map cannot grow without bound.
 func (g *GossipEngine) retryLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -605,10 +633,6 @@ func (g *GossipEngine) retryLoop(ctx context.Context) {
 		maxAttempts = 3
 	}
 
-	// attempts tracks how many times each event has been re-broadcast so
-	// the retry bound (maxAttempts) is actually enforced.
-	attempts := make(map[string]int)
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -617,24 +641,63 @@ func (g *GossipEngine) retryLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			g.cleanupDedupCache()
+			g.cleanupRetryAttempts()
 			// Drain retry queue at most once per tick
 			select {
 			case event := <-g.retryQueue:
-				attempts[event.EventID]++
-				if attempts[event.EventID] > maxAttempts {
+				g.retryAttemptsMu.Lock()
+				g.retryAttempts[event.EventID]++
+				count := g.retryAttempts[event.EventID]
+				g.retryAttemptsMu.Unlock()
+				if count > maxAttempts {
 					g.logger.Warn("gossip: dropping event after max retry attempts",
-						"event_id", event.EventID, "attempts", attempts[event.EventID])
-					delete(attempts, event.EventID)
+						"event_id", event.EventID, "attempts", count)
+					// The counter stays: a later re-queue of the same
+					// EventID must not resurrect a fresh budget, or
+					// delivery failure loops forever (audit L5).
 					continue
 				}
 				g.logger.Info("gossip: retrying event broadcast",
-					"event_id", event.EventID, "attempt", attempts[event.EventID])
-				// Re-broadcast via existing Publish path
+					"event_id", event.EventID, "attempt", count)
+				// Re-broadcast via existing Publish path. The counter is
+				// deliberately NOT deleted here: Publish only hands the
+				// event to the transport — the per-peer ACK lands in the
+				// transport's sentEvents tracker and is invisible to this
+				// loop, so a "successful" publish says nothing about
+				// delivery. Deleting on it would restore a fresh budget on
+				// the next failed-send re-queue (the exact L5 cycle). The
+				// entry is retired by the size bound in cleanupRetryAttempts.
 				g.Publish(event)
 			default:
 				// nothing to retry
 			}
 		}
+	}
+}
+
+// cleanupRetryAttempts bounds the persistent attempts map: past
+// retryAttemptsCap entries, entries with the smallest counts (and among
+// equals, map-order) are evicted until under the cap. A bound, not a leak.
+func (g *GossipEngine) cleanupRetryAttempts() {
+	g.retryAttemptsMu.Lock()
+	defer g.retryAttemptsMu.Unlock()
+	if len(g.retryAttempts) <= retryAttemptsCap {
+		return
+	}
+	type idCount struct {
+		id    string
+		count int
+	}
+	entries := make([]idCount, 0, len(g.retryAttempts))
+	for id, count := range g.retryAttempts {
+		entries = append(entries, idCount{id, count})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].count < entries[j].count })
+	for _, e := range entries {
+		if len(g.retryAttempts) <= retryAttemptsCap {
+			break
+		}
+		delete(g.retryAttempts, e.id)
 	}
 }
 

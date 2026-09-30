@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"testing"
@@ -170,4 +171,84 @@ func TestRetryLoop_ZeroKeepsDefaultBound(t *testing.T) {
 	if got := counter.count(eventID); got > 3 {
 		t.Fatalf("event re-published %d times; MaxRetryAttempts=0 must fall back to the default bound of 3", got)
 	}
+}
+
+// TestRetryLoop_DropKeepsPersistentCounter pins L5(a) (2026-09-29 bughunt):
+// after the loop drops an event at the attempt bound, further re-queues of
+// the SAME EventID must NOT resurrect a fresh budget. The old code deleted
+// the counter on drop, so each re-queue restarted a full maxAttempts cycle —
+// unbounded retry rounds while delivery kept failing. Total publishes across
+// ALL re-queues must stay <= maxAttempts.
+func TestRetryLoop_DropKeepsPersistentCounter(t *testing.T) {
+	engine, b := retryLoopTestEngine(t, 2)
+	counter := newBroadcastCounter(b)
+	defer counter.stop()
+
+	ctx := t.Context()
+	if err := engine.Start(ctx); err != nil {
+		t.Fatalf("engine start: %v", err)
+	}
+	defer func() { _ = engine.Stop() }()
+
+	const eventID = "evt-retry-persistent"
+	// Keep re-queueing for well past the point where the old
+	// delete-on-drop behavior would have completed two full 2-attempt
+	// cycles (>= 4 publishes).
+	deadline := time.Now().Add(9 * time.Second)
+	for time.Now().Before(deadline) {
+		if counter.count(eventID) > 4 {
+			break
+		}
+		engine.QueueForRetry(&models.ClusterEvent{EventID: eventID, EventType: models.EventNodeHeartbeat, NodeID: "node-retry"})
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Grace tick for an overshoot if the counter were reset on drop.
+	time.Sleep(6 * time.Second)
+	if got := counter.count(eventID); got > 2 {
+		t.Fatalf("event re-published %d times across re-queues; the drop must keep the persistent counter (max 2)", got)
+	}
+	if got := counter.count(eventID); got == 0 {
+		t.Fatal("event was never re-published; retry loop did not run")
+	}
+}
+
+// TestRetryLoop_AttemptsMapBounded pins L5(b): the persistent attempts map
+// must not grow without bound. Flood many DISTINCT event IDs through the
+// retry queue; the map is capped by cleanupRetryAttempts.
+func TestRetryLoop_AttemptsMapBounded(t *testing.T) {
+	engine, _ := retryLoopTestEngine(t, 1)
+
+	ctx := t.Context()
+	if err := engine.Start(ctx); err != nil {
+		t.Fatalf("engine start: %v", err)
+	}
+	defer func() { _ = engine.Stop() }()
+
+	// The retry queue's cap is 64; flood 4x that many distinct IDs.
+	const flood = 4 * 64
+	for i := 0; i < flood; i++ {
+		engine.QueueForRetry(&models.ClusterEvent{
+			EventID:   fmt.Sprintf("evt-flood-%d", i),
+			EventType: models.EventNodeHeartbeat,
+			NodeID:    "node-retry",
+		})
+	}
+
+	// Each tick re-publishes at most one event and sweeps the map; wait
+	// until the map has been swept under the cap.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		engine.retryAttemptsMu.Lock()
+		n := len(engine.retryAttempts)
+		engine.retryAttemptsMu.Unlock()
+		if n <= retryAttemptsCap {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	engine.retryAttemptsMu.Lock()
+	n := len(engine.retryAttempts)
+	engine.retryAttemptsMu.Unlock()
+	t.Fatalf("attempts map grew to %d entries; want <= cap %d", n, retryAttemptsCap)
 }
