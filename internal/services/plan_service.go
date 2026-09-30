@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/plan"
@@ -9,13 +11,26 @@ import (
 
 // PlanService handles plan lifecycle operations.
 type PlanService struct {
-	manager *plan.PlanManager
-	store   plan.PlanStore
+	manager         *plan.PlanManager
+	store           plan.PlanStore
+	fallbackManager *plan.PlanManager // evolver sink; either may be nil
+	fallbackStore   plan.PlanStore
 }
 
 // NewPlanService creates a plan service.
 func NewPlanService(manager *plan.PlanManager, store plan.PlanStore) *PlanService {
 	return &PlanService{manager: manager, store: store}
+}
+
+// SetEvolverSink wires the evolver sink manager + store. Either argument
+// may be nil; nil values are ignored (setter nil-guard convention).
+func (s *PlanService) SetEvolverSink(m *plan.PlanManager, store plan.PlanStore) {
+	if m != nil {
+		s.fallbackManager = m
+	}
+	if store != nil {
+		s.fallbackStore = store
+	}
 }
 
 // CreatePlanRequest contains plan creation parameters.
@@ -80,6 +95,10 @@ func (s *PlanService) Get(ctx context.Context, planID string) (*plan.Plan, error
 		return nil, wrapError("plan", "Get", ErrUnavailable)
 	}
 	p, err := s.store.GetPlan(ctx, planID)
+	if err != nil && s.fallbackStore != nil {
+		// Not in the shared store: try the evolver sink store.
+		p, err = s.fallbackStore.GetPlan(ctx, planID)
+	}
 	if err != nil {
 		return nil, wrapError("plan", "Get", err)
 	}
@@ -127,8 +146,27 @@ func (s *PlanService) Approve(ctx context.Context, req ApprovePlanRequest) (*pla
 	if s.manager == nil || s.store == nil {
 		return nil, wrapError("plan", "Approve", ErrUnavailable)
 	}
-	if err := s.manager.ApprovePlan(ctx, req.PlanID, req.SessionID, req.By); err != nil {
+	// Mirror rpc/plan.go handleApprove: track whether the sink manager
+	// performed the transition, and read the plan back from the side
+	// that actually holds it — a sink-only plan is invisible to the
+	// shared store, so a shared-store read-back would return
+	// "plan not found" on success.
+	usedFallback := false
+	err := s.manager.ApprovePlan(ctx, req.PlanID, req.SessionID, req.By)
+	if err != nil && s.fallbackManager != nil {
+		// Not in the shared store: try the evolver sink manager.
+		if err2 := s.fallbackManager.ApprovePlan(ctx, req.PlanID, req.SessionID, req.By); err2 == nil {
+			usedFallback = true
+			err = nil
+		} else {
+			err = errors.Join(fmt.Errorf("shared: %w", err), fmt.Errorf("sink: %w", err2))
+		}
+	}
+	if err != nil {
 		return nil, wrapError("plan", "Approve", err)
+	}
+	if usedFallback {
+		return s.fallbackManager.GetPlan(ctx, req.PlanID)
 	}
 	p, err := s.store.GetPlan(ctx, req.PlanID)
 	if err != nil {
@@ -145,8 +183,24 @@ func (s *PlanService) Reject(ctx context.Context, req RejectPlanRequest) (*plan.
 	if s.manager == nil || s.store == nil {
 		return nil, wrapError("plan", "Reject", ErrUnavailable)
 	}
-	if err := s.manager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason); err != nil {
+	// Mirror Approve: read back from the sink manager when it performed
+	// the transition (a sink-only plan is invisible to the shared
+	// store's read-back).
+	usedFallback := false
+	err := s.manager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason)
+	if err != nil && s.fallbackManager != nil {
+		if err2 := s.fallbackManager.RejectPlan(ctx, req.PlanID, req.SessionID, req.By, req.Reason); err2 == nil {
+			usedFallback = true
+			err = nil
+		} else {
+			err = errors.Join(fmt.Errorf("shared: %w", err), fmt.Errorf("sink: %w", err2))
+		}
+	}
+	if err != nil {
 		return nil, wrapError("plan", "Reject", err)
+	}
+	if usedFallback {
+		return s.fallbackManager.GetPlan(ctx, req.PlanID)
 	}
 	p, err := s.store.GetPlan(ctx, req.PlanID)
 	if err != nil {
@@ -163,8 +217,24 @@ func (s *PlanService) Confirm(ctx context.Context, req ConfirmPlanRequest) (*pla
 	if s.manager == nil || s.store == nil {
 		return nil, wrapError("plan", "Confirm", ErrUnavailable)
 	}
-	if err := s.manager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By); err != nil {
+	// Mirror Approve: read back from the sink manager when it performed
+	// the transition (a sink-only plan is invisible to the shared
+	// store's read-back).
+	usedFallback := false
+	err := s.manager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By)
+	if err != nil && s.fallbackManager != nil {
+		if err2 := s.fallbackManager.ConfirmPlan(ctx, req.PlanID, req.SessionID, req.By); err2 == nil {
+			usedFallback = true
+			err = nil
+		} else {
+			err = errors.Join(fmt.Errorf("shared: %w", err), fmt.Errorf("sink: %w", err2))
+		}
+	}
+	if err != nil {
 		return nil, wrapError("plan", "Confirm", err)
+	}
+	if usedFallback {
+		return s.fallbackManager.GetPlan(ctx, req.PlanID)
 	}
 	p, err := s.store.GetPlan(ctx, req.PlanID)
 	if err != nil {
@@ -223,8 +293,24 @@ func (s *PlanService) Revise(ctx context.Context, req RevisePlanRequest) (*plan.
 	if s.manager == nil || s.store == nil {
 		return nil, wrapError("plan", "Revise", ErrUnavailable)
 	}
-	if err := s.manager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback); err != nil {
+	// Mirror Approve: read back from the sink manager when it performed
+	// the transition (a sink-only plan is invisible to the shared
+	// store's read-back).
+	usedFallback := false
+	err := s.manager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback)
+	if err != nil && s.fallbackManager != nil {
+		if err2 := s.fallbackManager.RevisePlan(ctx, req.PlanID, req.SessionID, req.Feedback); err2 == nil {
+			usedFallback = true
+			err = nil
+		} else {
+			err = errors.Join(fmt.Errorf("shared: %w", err), fmt.Errorf("sink: %w", err2))
+		}
+	}
+	if err != nil {
 		return nil, wrapError("plan", "Revise", err)
+	}
+	if usedFallback {
+		return s.fallbackManager.GetPlan(ctx, req.PlanID)
 	}
 	p, err := s.store.GetPlan(ctx, req.PlanID)
 	if err != nil {
