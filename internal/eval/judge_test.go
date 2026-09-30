@@ -190,6 +190,54 @@ func TestStepsFromMessagesFailureMarkers(t *testing.T) {
 	}
 }
 
+// TestStepsFromMessagesZeroExitStatusIsSuccess pins the M7 success
+// discrimination: a failure-marker hit whose tail reports a ZERO status is a
+// clean run, not a failure. All three shapes ("exit status 0", "exit code 0",
+// "exit code: 0") grade PASSED through StepsFromMessages + Judge; nonzero
+// statuses and bare/truncated marker lines still fail. The multiline cases
+// also pin the interplay: a zero-status line on its own never masks an
+// "error:" line elsewhere in the same content, and vice versa a zero status
+// elsewhere never rescues an "error:" line.
+func TestStepsFromMessagesZeroExitStatusIsSuccess(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"exit status 0 bare", "exit status 0", false},
+		{"exit code 0 bare", "exit code 0", false},
+		{"exit code colon 0", "exit code: 0", false},
+		{"exit status 0 after prose", "build ok\nexit status 0", false},
+		{"exit code 0 indented", "  exit code: 0  ", false},
+		{"exit status 1 still fails", "exit status 1", true},
+		{"exit code 3 still fails", "exit code: 3", true},
+		{"bare truncated exit status fails", "exit status", true},
+		{"bare truncated exit code fails", "exit code", true},
+		{"exit status 10 fails not 1+0", "exit status 10", true},
+		{"multiline zero status with error line elsewhere", "ok\nexit status 0\nerror: disk full", true},
+		{"multiline error line with zero status elsewhere", "error: permission denied\nexit status 0", true},
+		{"command failed not exempted by a zero elsewhere", "command failed\nexit code: 0", true},
+		{"all clean multiline", "compiled\ntests pass\nexit status 0", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msgs := []llm.ChatMessage{
+				{Role: llm.RoleTool, Name: "shell", Content: tc.content},
+			}
+			steps := StepsFromMessages(msgs)
+			if len(steps) != 1 {
+				t.Fatalf("expected 1 step, got %d", len(steps))
+			}
+			if steps[0].Failed != tc.want {
+				t.Errorf("content %q: Failed=%v, want %v", tc.content, steps[0].Failed, tc.want)
+			}
+			if !tc.want && steps[0].Err != "" {
+				t.Errorf("clean content must not carry Err, got %q", steps[0].Err)
+			}
+		})
+	}
+}
+
 func TestStepsFromMessagesEmpty(t *testing.T) {
 	if steps := StepsFromMessages(nil); steps != nil {
 		t.Errorf("expected nil steps for nil messages, got %+v", steps)

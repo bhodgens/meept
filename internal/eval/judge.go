@@ -20,6 +20,13 @@ var ErrJudgmentNotFound = errors.New("eval: judgment not found")
 // represents a failed execution. IsToolError is the primary signal; these
 // markers cover conversations serialized before the flag existed or rebuilt
 // from wire formats that dropped it.
+//
+// The exit-status markers are SUCCESS-DISCRIMINATED: a marker hit whose tail
+// is a zero status ("exit status 0", "exit code 0", "exit code: 0") reports a
+// clean run, not a failure. Nonzero statuses and bare "exit status"/"exit
+// code" lines (truncated output) still fail. Without this, every trajectory
+// echoing a zero exit status graded FAILED — a downward bias on every
+// headline pass-rate.
 var failureMarkers = []string{
 	"error:",
 	"command failed",
@@ -80,24 +87,51 @@ func StepsFromMessages(msgs []llm.ChatMessage) []Step {
 
 // contentLooksFailed reports whether tool-result content carries a failure
 // marker. Line-leading prefixes only, case-insensitive, so prose mentioning
-// "error" mid-sentence does not false-positive.
+// "error" mid-sentence does not false-positive. A marker hit whose tail is a
+// ZERO status ("exit status 0" / "exit code 0" / "exit code: 0") is a clean
+// run, not a failure (M7); nonzero and bare marker lines still fail. An
+// "error:" line on any other line of the same content still fails the whole
+// result — the zero-status exemption applies only to the matched line.
 func contentLooksFailed(content string) bool {
 	c := strings.ToLower(content)
-	for _, marker := range failureMarkers {
-		if strings.HasPrefix(c, marker) {
+	for _, line := range iterLines(c) {
+		line = strings.TrimSpace(line)
+		for _, marker := range failureMarkers {
+			if !strings.HasPrefix(line, marker) {
+				continue
+			}
+			if isZeroStatusMarker(marker, line) {
+				// "exit status 0" / "exit code 0" / "exit code: 0" —
+				// a reported CLEAN exit, the opposite of a failure.
+				continue
+			}
 			return true
 		}
 	}
-	// Multi-line results: any line may be the failure line.
-	for line := range strings.SplitSeq(c, "\n") {
-		line = strings.TrimSpace(line)
-		for _, marker := range failureMarkers {
-			if strings.HasPrefix(line, marker) {
-				return true
-			}
-		}
-	}
 	return false
+}
+
+// iterLines yields content plus every line after a newline, so both the
+// whole-content prefix check and the per-line check share one code path.
+func iterLines(c string) []string {
+	lines := []string{c}
+	for line := range strings.SplitSeq(c, "\n") {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// isZeroStatusMarker reports whether a matched line-start marker is one of
+// the exit-status markers whose tail reports a ZERO status. Only those two
+// markers qualify; everything else ("error:", "command failed", …) has no
+// zero shape.
+func isZeroStatusMarker(marker, line string) bool {
+	if marker != "exit status" && marker != "exit code" {
+		return false
+	}
+	tail := strings.TrimSpace(strings.TrimPrefix(line, marker))
+	tail = strings.TrimSpace(strings.TrimPrefix(tail, ":"))
+	return tail == "0"
 }
 
 // Judge evaluates a trajectory's tool steps plus an oracle check against the

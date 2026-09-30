@@ -2,8 +2,10 @@
 
 // Suite eval-judge: the deterministic trajectory judge — graded verdicts
 // over recorded tool steps with contentLooksFailed honesty (markers count
-// as failure even without the error flag), oracle fail-closed behavior,
-// and the DiskStore judgment round-trip.
+// as failure even without the error flag, but a zero-exit tail — "exit
+// status 0" / "exit code 0" / "exit code: 0" — is a clean run, not a
+// failure), oracle fail-closed behavior, and the DiskStore judgment
+// round-trip.
 package evaljudge
 
 import (
@@ -50,26 +52,37 @@ func TestEvalJudge_GradesTrajectoryWithHonestContentFailure(t *testing.T) {
 	}
 
 	// StepsFromMessages: only tool-role messages become steps; the
-	// IsToolError flag and content markers both fail honestly.
+	// IsToolError flag and content markers both fail honestly. A
+	// zero-exit-status tail ("exit status 0" / "exit code 0" / "exit code:
+	// 0") is a CLEAN run (M7 success discrimination) — the earlier fixture
+	// pinned the wrong shape, grading "exit status 0" FAILED.
 	msgs := []llm.ChatMessage{
 		{Role: llm.RoleUser, Content: "please deploy"},
 		{Role: llm.RoleAssistant, Content: "running deploy"},
-		{Role: llm.RoleTool, Name: "shell", Content: "build succeeded\nexit status 0"}, // marker mid-line fails...
+		{Role: llm.RoleTool, Name: "shell", Content: "build succeeded\nexit status 0"}, // zero tail = clean
+		{Role: llm.RoleTool, Name: "lint", Content: "exit code: 0"},                    // zero tail = clean
+		{Role: llm.RoleTool, Name: "test", Content: "exit status 1: FAIL pkg/x"},       // nonzero = failure
 		{Role: llm.RoleTool, Name: "deploy", Content: "all green"},
 	}
 	steps := eval.StepsFromMessages(msgs)
-	if len(steps) != 2 {
-		t.Fatalf("steps = %d, want the 2 tool rows only", len(steps))
+	if len(steps) != 4 {
+		t.Fatalf("steps = %d, want the 4 tool rows only", len(steps))
 	}
-	// Honest content failure: "exit status 0" line-STARTS with a marker.
-	if !steps[0].Failed {
-		t.Fatalf("contentLooksFailed missed the failure marker: %+v", steps[0])
+	// Zero-exit tails are NOT failures; a nonzero exit IS.
+	if steps[0].Failed {
+		t.Fatalf("zero exit tail (exit status 0) must not grade failed: %+v", steps[0])
 	}
-	if steps[1].Failed || steps[1].Err != "" {
-		t.Fatalf("clean tool result must not be failed or carry Err: %+v", steps[1])
+	if steps[1].Failed {
+		t.Fatalf("zero exit tail (exit code: 0) must not grade failed: %+v", steps[1])
+	}
+	if !steps[2].Failed {
+		t.Fatalf("nonzero exit status must still grade failed: %+v", steps[2])
+	}
+	if steps[3].Failed || steps[3].Err != "" {
+		t.Fatalf("clean tool result must not be failed or carry Err: %+v", steps[3])
 	}
 
-	// Judge: the failed step pins FirstErrorStep at 1 (1-based), the
+	// Judge: the failed step pins FirstErrorStep at 3 (1-based), the
 	// earlier signal wins over the passing oracle.
 	judgment, err := eval.Judge(ctx, steps, passOracle{"artifact"}, workdir)
 	if err != nil {
@@ -78,11 +91,23 @@ func TestEvalJudge_GradesTrajectoryWithHonestContentFailure(t *testing.T) {
 	if judgment.Passed {
 		t.Fatal("trajectory with a failed tool step must not pass")
 	}
-	if judgment.FirstErrorStep != 1 {
-		t.Fatalf("FirstErrorStep = %d, want 1", judgment.FirstErrorStep)
+	if judgment.FirstErrorStep != 3 {
+		t.Fatalf("FirstErrorStep = %d, want 3", judgment.FirstErrorStep)
 	}
-	if !strings.Contains(judgment.Summary, "step 1") {
+	if !strings.Contains(judgment.Summary, "step 3") {
 		t.Fatalf("summary should name the failing step: %q", judgment.Summary)
+	}
+
+	// Same zero-tail trajectory WITHOUT the nonzero exit passes the judge:
+	// the M7 discrimination is observable end-to-end through Judge, not
+	// only on the step level.
+	zeroOnly := steps[:2]
+	zeroJudgment, err := eval.Judge(ctx, zeroOnly, passOracle{"artifact"}, workdir)
+	if err != nil {
+		t.Fatalf("Judge zero-only: %v", err)
+	}
+	if !zeroJudgment.Passed || zeroJudgment.FirstErrorStep != 0 {
+		t.Fatalf("trajectory whose only exit markers are zero tails must PASS: %+v", zeroJudgment)
 	}
 
 	// All-clean steps + passing oracle = pass, FirstErrorStep 0.
