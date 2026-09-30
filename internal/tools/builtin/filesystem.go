@@ -849,6 +849,7 @@ type ListResult struct {
 
 func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	rawPath, _ := args[schemaPropPath].(string)
+	rawPath = strings.TrimSpace(rawPath)
 	if rawPath == "" {
 		// No explicit path: default to the session working directory
 		// injected by the agent loop. An empty context dir means the turn
