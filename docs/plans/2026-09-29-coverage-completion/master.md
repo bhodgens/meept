@@ -71,9 +71,9 @@ Dispatch order: both branches in parallel (disjoint file sets).
 | Child | Status | Commit |
 |---|---|---|
 | 01-lint-and-sink-fallback | pending | — |
-| 02-tui-e2e Phase 1 | pending | — |
-| 02-tui-e2e Phase 2 | pending | — |
-| 02-tui-e2e Phase 3 | pending | — |
+| 02-tui-e2e Phase 1 | done | 5fdeec90 |
+| 02-tui-e2e Phase 2 | done | 5c7247bf |
+| 02-tui-e2e Phase 3 | done | b1e592da |
 
 ## Integration review plan
 

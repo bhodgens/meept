@@ -37,9 +37,9 @@ previous layer).
 
 | Child | Status | Commit |
 |---|---|---|
-| 01-phase1-foundations | pending | — |
-| 02-phase2-tui-flows | pending | — |
-| 03-phase3-breadth | pending | — |
+| 01-phase1-foundations | done | 5fdeec90 |
+| 02-phase2-tui-flows | done | 5c7247bf |
+| 03-phase3-breadth | done | b1e592da |
 
 ## Final verification
 
