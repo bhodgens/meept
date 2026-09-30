@@ -47,8 +47,13 @@ func startRecallSandboxWithPriorWork(t *testing.T) (*sandbox, string, string) {
 	s.Fake.EnqueueFileWrite("call-cr-t1", helloPath, "hello")
 
 	replyT1 := s.chatTurn(sessionID, "create a file named hello.txt in the current directory containing the word hello", 180*time.Second)
-	if !strings.Contains(strings.ToLower(replyT1), "hello.txt") && !strings.Contains(replyT1, "Task ") {
-		t.Fatalf("T1 did not acknowledge work: %q", replyT1)
+	// The substantive marker ONLY (L17): the forbidden "Task <id>
+	// completed." stub must NOT satisfy this gate — accepting it made the
+	// acceptance weaker than the sibling suite's own A1 contract, which
+	// rejects the stub. The fake's post-tool text names hello.txt, so an
+	// honest acknowledgment carries it.
+	if !strings.Contains(strings.ToLower(replyT1), "hello.txt") {
+		t.Fatalf("T1 did not acknowledge the work substantively (no hello.txt marker): %q", replyT1)
 	}
 	if data, err := os.ReadFile(helloPath); err != nil || strings.TrimSpace(string(data)) != "hello" {
 		t.Fatalf("T1 artifact missing or wrong: %v (%q)", err, string(data))

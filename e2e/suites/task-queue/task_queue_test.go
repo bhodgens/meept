@@ -383,13 +383,38 @@ func TestKilledTaskIsHonestlyMarkedAfterRestart(t *testing.T) {
 		return false
 	})
 
-	// Give the task a moment to leave pending, then SIGKILL the daemon.
+	// Wait until the task leaves pending before the SIGKILL — OR reaches a
+	// terminal state. Terminal during this poll is a LEGITIMATE exit (M8):
+	// under load the fake executor can finish the whole turn between two
+	// 200 ms polls, and killing a daemon whose task already completed would
+	// be a spurious failure (the post-restart assertion wants "failed", the
+	// row says "completed"). In that case the honest outcome is asserted
+	// and the kill path is skipped.
 	deadline := time.Now().Add(30 * time.Second)
+	killed := false
 	for time.Now().Before(deadline) {
-		if row, ok := taskByID(t, s, taskID); ok && row.State != "pending" && row.State != "completed" && row.State != "failed" {
-			break
+		row, ok := taskByID(t, s, taskID)
+		if !ok {
+			time.Sleep(200 * time.Millisecond)
+			continue
 		}
-		if row, ok := taskByID(t, s, taskID); ok && row.State == "pending" && time.Now().After(deadline.Add(-5*time.Second)) {
+		switch row.State {
+		case "completed", "failed":
+			// The task finished before we could kill it: that is honest
+			// completion, not a fixture failure. Assert the completed
+			// outcome and skip the kill/restart sweep entirely.
+			if row.State != "completed" {
+				t.Fatalf("task reached terminal state %q before the kill window; expected completed or still in-flight", row.State)
+			}
+			t.Skipf("task %s completed between polls before the daemon could be SIGKILLed — honest completion, kill-recovery path not exercised (M8)", taskID)
+		case "pending":
+			if time.Now().After(deadline.Add(-5 * time.Second)) {
+				killed = true // kill a still-pending task rather than spin forever
+			}
+		default:
+			killed = true // in-flight (running/planning/...) — the intended kill window
+		}
+		if killed {
 			break
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -492,7 +517,11 @@ func TestQueuedJobSurvivesRestartAndIsHonestlyResolved(t *testing.T) {
 		t.Fatalf("queue.enqueue returned no job id: %v", created)
 	}
 
-	// Confirm it is in the queue store before the restart.
+	// Confirm it is in the queue store before the restart, and capture the
+	// updated_at baseline (M8): the pending branch below must prove the
+	// startup reclaim sweep actually touched the row, not just that the row
+	// still says pending (indistinguishable from sweep-never-ran without a
+	// baseline).
 	preJob := queueJobByID(t, s, jobID)
 	if preJob == nil {
 		t.Fatalf("job %s not found in queue.db after enqueue", jobID)
@@ -500,6 +529,10 @@ func TestQueuedJobSurvivesRestartAndIsHonestlyResolved(t *testing.T) {
 	if preJob.State != string(queue.StatePending) {
 		t.Fatalf("job state after enqueue = %q, want pending", preJob.State)
 	}
+	if preJob.UpdatedAt == "" {
+		t.Fatalf("job %s has no updated_at baseline in queue.db", jobID)
+	}
+	updatedBefore := preJob.UpdatedAt
 
 	stop := restartDaemon(t, s)
 	defer stop()
@@ -513,7 +546,11 @@ func TestQueuedJobSurvivesRestartAndIsHonestlyResolved(t *testing.T) {
 	// Honest resolution: the startup reclaim sweep resets crash-orphaned
 	// claims to pending; the worker pool may then complete or fail it. Any
 	// terminal state is honest; a forever-claimed/processing row is not.
+	// The PENDING branch is honest only when updated_at advanced past the
+	// pre-restart baseline — a bare "still pending" with a stale timestamp
+	// means the sweep never ran (the vacuous grade the audit flagged).
 	resolvedDeadline := time.Now().Add(30 * time.Second)
+	var pendingAdvanced bool
 	for time.Now().Before(resolvedDeadline) {
 		postJob = queueJobByID(t, s, jobID)
 		if postJob == nil {
@@ -521,11 +558,22 @@ func TestQueuedJobSurvivesRestartAndIsHonestlyResolved(t *testing.T) {
 		}
 		switch postJob.State {
 		case string(queue.StatePending):
-			return // reclaimed for re-execution — honest
+			if postJob.UpdatedAt > updatedBefore {
+				// Timestamp advanced past the baseline: the row was
+				// reclaimed/reset after restart, then returned to
+				// pending (or was re-pended by the sweep) — honest.
+				pendingAdvanced = true
+				return
+			}
+			// Stale timestamp: give the sweep/worker a moment before
+			// declaring the branch vacuous.
 		case string(queue.StateCompleted), string(queue.StateFailed), string(queue.StateDead):
 			return // executed to a terminal state — honest
 		}
 		time.Sleep(250 * time.Millisecond)
+	}
+	if postJob.State == string(queue.StatePending) && !pendingAdvanced {
+		t.Fatalf("job %s stuck pending with updated_at %q never advancing past pre-restart baseline %q (startup reclaim sweep did not touch the row)", jobID, postJob.UpdatedAt, updatedBefore)
 	}
 	t.Fatalf("job %s stuck in state %q after restart (not reclaimed, not terminal)", jobID, postJob.State)
 }
@@ -547,8 +595,9 @@ func taskByID(t *testing.T, s *harness.Stack, id string) (harness.TaskRow, bool)
 
 // queueJobRow is the decoded jobs-row shape the suite asserts on.
 type queueJobRow struct {
-	ID    string
-	State string
+	ID        string
+	State     string
+	UpdatedAt string // RFC3339 text, bumped on every state transition
 }
 
 // queueJobByID opens queue.db read-only and returns the job row, or nil when

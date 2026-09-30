@@ -226,9 +226,16 @@ func TestWebSearchErrorPathReturnsCleanly(t *testing.T) {
 	if !strings.Contains(res, `"success":false`) {
 		t.Fatalf("missing-query web_search must return a failure envelope; results:\n%s", res)
 	}
-	// The arg validator (or the tool itself) must name the missing argument
-	// in the failure envelope the model reads.
-	if !strings.Contains(res, "query is missing") && !strings.Contains(res, "query is required") {
-		t.Fatalf("missing-query web_search must name the query argument error; results:\n%s", res)
+	// The schema validator (tools.ValidateToolArgs, run by the live
+	// executor path BEFORE Execute — internal/agent/executor.go) must name
+	// the missing argument in the failure envelope the model reads.
+	// web_search declares query Required in its Parameters(), so the
+	// ArgValidationError ("query is missing") always wins the race against
+	// the tool's own "query is required" defense-in-depth check — the tool
+	// body never runs. Only the validator message is accepted (L16b):
+	// grading the fake provider's own error string would grade the fake,
+	// not the gate.
+	if !strings.Contains(res, "query is missing") {
+		t.Fatalf("missing-query web_search must be rejected by the arg validator naming the query argument; results:\n%s", res)
 	}
 }

@@ -82,8 +82,19 @@ func FuzzSSEChunkParse(f *testing.F) {
 		f.Add(s)
 	}
 
-	// The exact per-line parse shape from doStreamRequest's scanner loop,
+	// The per-line parse shape from doStreamRequest's scanner loop,
 	// isolated from network I/O.
+	//
+	// DRIFT RISK (L15a): this is a HAND COPY of the production scanner, not
+	// an extraction of it — extracting it would touch the quota-parked
+	// streaming path in client.go, which is outside this fuzz target's
+	// blast radius. The mirrored production function is
+	// Client.doStreamRequest (internal/llm/client.go, the scanner.Text()
+	// loop: CutPrefix "data:" → TrimPrefix " " → "[DONE]" break →
+	// json.Unmarshal into the chunk struct). If you change that loop's line
+	// handling, the delta/usage struct shape, or the tool_calls decoding,
+	// UPDATE THIS COPY IN THE SAME COMMIT — otherwise the fuzzer keeps
+	// proving properties about code the daemon no longer runs.
 	parseSSEBody := func(body string) {
 		for line := range strings.SplitSeq(body, "\n") {
 			data, ok := strings.CutPrefix(line, "data:")

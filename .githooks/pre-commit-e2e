@@ -96,12 +96,22 @@ while IFS= read -r f; do
     pkg_dir="$(dirname "$f")"
 
     # NEW = the directory is not a prefix key in the manifest path_map and
-    # is not itself an existing e2e suite dir.
+    # is not itself an existing e2e suite dir. Both sides are normalized
+    # (trailing slashes stripped) because behavioral path_map keys are
+    # trailing-slash prefixes ("internal/agent/"): without normalization a
+    # NEW subpackage of a covered package (internal/agent/prompts vs the
+    # "internal/agent/" key) was false-flagged, contradicting the prefix
+    # semantics scripts/e2e-affected.sh applies to the same map. Matching is
+    # directional after normalization: pkg equals a key, a key prefixes pkg
+    # ("internal/agent/" covers "internal/agent/prompts"), or pkg prefixes a
+    # key ("internal/agent" covers the "internal/agent/" key). The boundary
+    # stays safe: "internal/agentfoo" shares no slash boundary with
+    # "internal/agent" and remains NEW.
     known="$(python3 - e2e/manifest.json "$pkg_dir" <<'PYEOF'
 import json, sys
 manifest = json.load(open(sys.argv[1]))
-pkg = sys.argv[2]
-if any((pkg + "/").startswith(p) or p.startswith(pkg + "/") for p in manifest.get("path_map", {})):
+pkg = sys.argv[2].rstrip("/")
+if any(pkg == (p := k.rstrip("/")) or p.startswith(pkg + "/") or pkg.startswith(p + "/") for k in manifest.get("path_map", {})):
     print("known")
 else:
     print("new")

@@ -32,8 +32,8 @@ func openQueueDB(s *harness.Stack) (*sql.DB, error) {
 // queryQueueJob fetches one job row by id.
 func queryQueueJob(db *sql.DB, jobID string) (*queueJobRow, error) {
 	var row queueJobRow
-	err := db.QueryRow(`SELECT id, COALESCE(state,'') FROM jobs WHERE id = ?`, jobID).
-		Scan(&row.ID, &row.State)
+	err := db.QueryRow(`SELECT id, COALESCE(state,''), COALESCE(updated_at,'') FROM jobs WHERE id = ?`, jobID).
+		Scan(&row.ID, &row.State, &row.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
