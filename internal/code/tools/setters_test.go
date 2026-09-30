@@ -30,6 +30,7 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		{"LSPRenameTool.SetPendingChangesRegistry", func() {
 			lspRename.SetPendingChangesRegistry((*builtin.PendingChangesRegistry)(nil))
 		}},
+		{"LSPRenameTool.SetFenceChecker", func() { lspRename.SetFenceChecker(nil) }},
 
 		// ResolveASTEditTool setters (internal/code/tools/resolve_ast_edit.go)
 		{"ResolveASTEditTool.SetFenceChecker", func() { resolveEdit.SetFenceChecker(nil) }},

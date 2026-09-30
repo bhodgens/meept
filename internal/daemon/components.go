@@ -7142,6 +7142,9 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegis
 			if pendingChangesRegistry != nil {
 				tool.SetPendingChangesRegistry(pendingChangesRegistry)
 			}
+			if c.FenceChecker != nil {
+				tool.SetFenceChecker(c.FenceChecker)
+			}
 			c.ToolRegistry.Register(tool)
 		}
 		if tool, err := codetools.NewLSPRenameFilesTool(c.LSPManager); err != nil {
