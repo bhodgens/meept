@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
@@ -70,6 +71,11 @@ func ensureMCPSearchProvider(webSearchTool *builtin.WebSearchTool, manager *mcp.
 		return
 	}
 	if builtin.FakeSearchProviderEnvEnabled() {
+		// L21 (2026-09-29 bughunt): the override silently fakes web_search
+		// for the whole process — make it visible at boot with one Warn
+		// naming the env var, so a production env that accidentally
+		// carries it is diagnosable from the log alone.
+		slog.Warn("web_search served by fake provider via " + builtin.FakeSearchProviderEnv)
 		webSearchTool.SetSearchProvider(builtin.NewFakeSearchProvider())
 		return
 	}
