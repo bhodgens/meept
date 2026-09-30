@@ -138,23 +138,26 @@ zero skips.
 
 ## Recommended next steps (ranked)
 
-1. **Evolver lane — bridge pump CI silence.** Root-cause why the
-   plan.approved pump never fires on the 2-core runner (see open item
-   1). The skip's t.Logf dumps bridge/skillEvolver/msgBus state each CI
-   run; start there, then delete the skip.
+1. ~~Evolver lane — bridge pump CI silence.~~ RESOLVED 2026-09-28
+   (9f503122): the failure was plan.md rewrite races (non-atomic writes,
+   shared tmp scratch, lost applied-marker update), not runner slowness.
+   Skip removed; deterministic at -count=100 under contention.
 2. ~~Operator decision — alias member lists.~~ RESOLVED: fallbacks
-   confirmed intentional (open item 2).
+   confirmed intentional (open item 2); agnes-2.5-flash is now the coder/
+   planner/analyst primary (8e2fa2e5).
 3. ~~Formalize naive-user-chat~~ DONE — hermetic twin in
    e2e/suites/naive-user-chat (manifest-registered, green) + live tier
    via `make e2e-chat`.
-4. **Fix the six product findings** in "Known product findings" — each
-   has a pinned suite skip that flips green when fixed; start with the
-   step-lane workdir injection (blocks spreadsheet_write end-to-end)
-   and the memory_vote ToolActionMap entry (smallest).
-5. **Lint debt paydown.** ~1100 golangci findings + gosec G115/G123,
+4. ~~Six product findings~~ RESOLVED 2026-09-28 (7d8acd13, 5edcd799,
+   95cc425f, 525b268c, b0342a5f, 043b7c3f); every pinned skip flipped
+   green.
+5. ~~A5 continuity~~ RESOLVED — PASSED in run 45 (2026-09-26T21:53,
+   17/17) after five root-cause fixes; see open item 3 history.
+6. **Lint debt paydown.** ~1100 golangci findings + gosec G115/G123,
    package by package; the CI gate already blocks regressions.
-6. **Verify A5 continuity** with a healthy-provider naive-user-chat run
-   (run 43 flaked upstream of the continuity path).
+7. **TUI e2e phases 1-3** per docs/workflows/tui-e2e-plan.md
+   (3305f6c9): parity inventory + goldens first.
+8. **Live evolver operator exercise** — issue #60.
 
 ## Open item 3 — RESOLVED: naive-user-chat is formalized
 
