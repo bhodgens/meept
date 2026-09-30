@@ -119,7 +119,8 @@ func TestGuardRetry_RecoversProseAnswer(t *testing.T) {
 	if strings.Contains(reply, "ask me to do something specific") {
 		t.Fatalf("reply = %q, the canned apology must not ship when the retry recovers", reply)
 	}
-	// Exactly one extra model call happened (the bounded retry).
+	// Exactly one extra reasoning cycle ran (the bounded retry — a full
+	// fresh cycle, not a single model call).
 	if chatter.callCount != 2 {
 		t.Fatalf("LLM calls = %d, want exactly 2 (original + one bounded retry)", chatter.callCount)
 	}

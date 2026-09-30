@@ -3036,51 +3036,86 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// its context. The retry itself is guarded by guardRetried (one per
 	// turn, reset in resetTurnGuards): a reply that trips the guard again
 	// ships the fallback/canned line — the pre-retry behavior — so the
-	// worst case stays exactly one extra model call. The handler
-	// choke point (handleChatRequest) is NOT wired to this: it guards
-	// post-loop paths (platform fast path, sync-wait) that cannot
+	// worst case stays one bounded extra reasoning cycle (a full fresh
+	// cycle with its own iteration budget, not a single model call). The
+	// handler choke point (handleChatRequest) is NOT wired to this: it
+	// guards post-loop paths (platform fast path, sync-wait) that cannot
 	// continue a loop, so those keep the single-shot replacement.
-	guarded, guardMatch, guardReplaced := classifyReplyGuard(finalResponse)
-	if guardReplaced && !l.guardRetried {
+	_, guardMatch, guardReplaced := classifyReplyGuard(finalResponse)
+	if guardReplaced {
+		// guardRetried is written under l.mu in resetTurnGuards; the
+		// check-and-set here takes the same lock (mutexio: unlocked
+		// read-modify-write on a guarded flag is a lost-update race).
+		l.mu.Lock()
+		alreadyRetried := l.guardRetried
 		l.guardRetried = true
-		l.logger.Warn("reply guard replaced a machine-shaped reply; retrying once with a rewrite nudge",
-			"rule", guardMatch.Rule,
-			"matched", guardMatch.Matched,
-			"agent", l.agentID,
-			"conversation_id", conversationID,
-		)
-		// Preserve the loop protocol the reasoningCycle left behind: the
-		// assistant's machine-shaped turn plus a user-role system nudge,
-		// the same shape the loop's own nudge ladder uses (strict
-		// providers reject assistant→assistant transitions).
-		conv.AddAssistantMessage(finalResponse)
-		conv.AddUserMessage(replyGuardRewriteNudge)
-		conv.Truncate()
-		if retryResponse, retryErr := l.reasoningCycle(loopCtx, conv, conversationID); retryErr != nil {
-			// The retry LLM call failed: ship the guarded replacement of
-			// the ORIGINAL reply — the caller's error contract is
-			// unchanged (this turn already succeeded once) and the user
-			// still gets the honest fallback, not a bare error.
-			l.logger.Warn("reply-guard rewrite retry failed; shipping the guarded replacement",
-				"conversation_id", conversationID,
-				"error", retryErr,
-			)
-			finalResponse = guarded
+		l.mu.Unlock()
+		if alreadyRetried {
+			// The per-turn rewrite budget is spent: ship the
+			// digest-aware fallback when the dispatcher armed one
+			// (the canned line discarded the session's answer),
+			// else the canned replacement.
+			finalResponse = applyReplyGuardWithFallback(finalResponse, l.logger, replyGuardContext{
+				Agent:          l.agentID,
+				ConversationID: conversationID,
+			}, l.guardFallback)
 		} else {
-			// Re-run the guard on the retried reply (one line: the
-			// canned/fallback substitution). A second trip means the
-			// model rewrote into machine shape again — the retry budget
-			// is spent, so this replacement ships as-is (bounded).
-			retryGuarded, retryMatch, retryReplaced := classifyReplyGuard(retryResponse)
-			if retryReplaced {
-				applyReplyGuardLogged(retryResponse, l.logger, replyGuardContext{
+			l.logger.Warn("reply guard replaced a machine-shaped reply; retrying once with a rewrite nudge",
+				"rule", guardMatch.Rule,
+				"matched", guardMatch.Matched,
+				"agent", l.agentID,
+				"conversation_id", conversationID,
+			)
+			// Preserve the loop protocol the reasoningCycle left behind: the
+			// assistant's machine-shaped turn plus a user-role system nudge,
+			// the same shape the loop's own nudge ladder uses (strict
+			// providers reject assistant→assistant transitions).
+			conv.AddAssistantMessage(finalResponse)
+			conv.AddUserMessage(replyGuardRewriteNudge)
+			conv.Truncate()
+			if retryResponse, retryErr := l.reasoningCycle(loopCtx, conv, conversationID); retryErr != nil {
+				// The retry LLM call failed: ship the digest-aware
+				// fallback when armed, else the guarded replacement of
+				// the ORIGINAL reply — the caller's error contract is
+				// unchanged (this turn already succeeded once) and the
+				// user still gets the honest fallback, not a bare error.
+				l.logger.Warn("reply-guard rewrite retry failed; shipping the guarded replacement",
+					"conversation_id", conversationID,
+					"error", retryErr,
+				)
+				finalResponse = applyReplyGuardWithFallback(finalResponse, l.logger, replyGuardContext{
 					Agent:          l.agentID,
 					ConversationID: conversationID,
-				})
-				_ = retryMatch
-				retryResponse = retryGuarded
+				}, l.guardFallback)
+			} else {
+				// Re-run the guard on the retried reply (one line: the
+				// canned/fallback substitution). A second trip means the
+				// model rewrote into machine shape again — the retry budget
+				// is spent, so the digest-aware fallback (or the canned
+				// line) ships as-is (bounded).
+				_, _, retryReplaced := classifyReplyGuard(retryResponse)
+				if retryReplaced {
+					retryResponse = applyReplyGuardWithFallback(retryResponse, l.logger, replyGuardContext{
+						Agent:          l.agentID,
+						ConversationID: conversationID,
+					}, l.guardFallback)
+				}
+				// M3 (bughunt 2026-09-29): the RETRY itself can park on a
+				// provider wait — reasoningCycle returns ("", nil) with
+				// StateQuotaWait. That is NOT a completed turn: shipping a
+				// blank/rewritten reply through the post-turn success
+				// pipeline (empty assistant append, learning, trajectory)
+				// repeats the exact pollution the first-cycle turnParked
+				// guard above exists to skip. Same shape, same skip.
+				if strings.TrimSpace(retryResponse) == "" &&
+					l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait {
+					l.logger.Info("reply-guard rewrite retry parked on provider wait — skipping post-turn success pipeline",
+						"conversation_id", conversationID,
+					)
+					return "", nil
+				}
+				finalResponse = retryResponse
 			}
-			finalResponse = retryResponse
 		}
 	} else {
 		// No replacement (prose passthrough — byte-identical) or the retry
@@ -5327,10 +5362,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				// lane returns bypasses the loop seam's reply guard
 				// (RunOnceWithParts never sees it), so classify and —
 				// on a trip — run the SAME bounded rewrite-nudge
-				// retry right here. A terminating tool does not
-				// re-enter the cycle on its own, so this seam owns
+				// retry right here (one bounded extra reasoning
+				// cycle, not one model call). A terminating tool does
+				// not re-enter the cycle on its own, so this seam owns
 				// the one rewrite (applyTerminateReplyGuard; budget
-				// terminateGuardRetried, reset per turn).
+				// terminateGuardRetried, reset per turn). A rewrite
+				// that PARKS returns "" with the StateQuotaWait
+				// transition already recorded — the parked-turn
+				// contract (empty reply, nil error) propagates.
 				return l.applyTerminateReplyGuard(ctx, conv, conversationID, l.buildTerminateResponse(results)), nil
 			}
 
@@ -9134,8 +9173,10 @@ func (l *AgentLoop) buildMCPContextSection() string {
 // loop's response-assembly guard uses (guardRetried's twin,
 // terminateGuardRetried): the raw dump plus replyGuardRewriteNudge re-enters
 // reasoningCycle, whose next completion replaces the dump as the reply. A
-// second trip (or an errored retry) ships the canned replacement — the
-// pre-fix behavior — so the worst case stays exactly one extra model call.
+// second trip (or an errored retry) ships the digest-aware fallback when the
+// dispatcher armed one, else the canned replacement — the pre-fix behavior —
+// so the worst case stays one bounded extra reasoning cycle (a full fresh
+// cycle with its own iteration budget, not a single model call).
 //
 // Why the retry lives HERE and not at RunOnceWithParts: the terminate path
 // short-circuits the reasoning cycle (reason "tool_requested_termination")
@@ -9183,19 +9224,41 @@ func (l *AgentLoop) applyTerminateReplyGuard(ctx context.Context, conv *Conversa
 			"conversation_id", conversationID,
 			"error", retryErr,
 		)
+		// Digest-aware fallback: a dispatcher-armed session digest answer
+		// beats the canned line on this exit too (M2's terminate twin).
+		if shipped := applyReplyGuardWithFallback(response, l.logger, replyGuardContext{
+			Agent:          l.agentID,
+			ConversationID: conversationID,
+		}, l.guardFallback); shipped != guarded {
+			return shipped
+		}
 		return guarded
+	}
+	// M3 (bughunt 2026-09-29): the rewrite re-entry itself can PARK on a
+	// provider wait — reasoningCycle returns ("", nil) with StateQuotaWait.
+	// A parked turn is not a completed turn: fall through to the caller's
+	// parked-turn handling by shipping the parked shape, never a canned
+	// line masquerading as an answer. The StateQuotaWait transition
+	// already carried the park reason (throttle_wait).
+	if strings.TrimSpace(retryResponse) == "" &&
+		l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait {
+		l.logger.Info("terminating-tool reply-guard rewrite parked on provider wait",
+			"conversation_id", conversationID,
+		)
+		return ""
 	}
 	// Re-run the guard on the retried reply. A second trip means the
 	// model rewrote into machine shape again — the budget is spent, so
-	// this replacement ships as-is (bounded, with its WARN).
-	retryGuarded, _, retryReplaced := classifyReplyGuard(retryResponse)
+	// the digest-aware fallback (when armed) or this replacement ships
+	// as-is (bounded, with its WARN).
+	_, _, retryReplaced := classifyReplyGuard(retryResponse)
 	if retryReplaced {
-		return applyReplyGuardLogged(retryResponse, l.logger, replyGuardContext{
+		return applyReplyGuardWithFallback(retryResponse, l.logger, replyGuardContext{
 			Agent:          l.agentID,
 			ConversationID: conversationID,
-		})
+		}, l.guardFallback)
 	}
-	return retryGuarded
+	return retryResponse
 }
 
 // buildTerminateResponse builds a response string from tool execution results.

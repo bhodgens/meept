@@ -115,11 +115,62 @@ func TestRecallAnswer_NoPriorTaskFallsThrough(t *testing.T) {
 	}
 }
 
-// TestRecallAnswer_NonRecallNotHandled guards the intent gate.
-func TestRecallAnswer_NonRecallNotHandled(t *testing.T) {
+// TestRecallAnswer_AnyLabelWithPriorTaskAnswers pins the H1 fix (bughunt
+// 2026-09-29): the label check inside RecallAnswer made the dispatcher's
+// shape-gated branch a no-op for every non-recall label. The gate is SHAPE
+// at the call site; any label with a digest prior task must answer.
+func TestRecallAnswer_AnyLabelWithPriorTaskAnswers(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		intentType IntentType
+	}{
+		{"chat label", IntentChat},
+		{"work label", IntentCode},
+		{"platform label", IntentPlatform},
+		{"recall label", IntentRecall},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, reg := recallTestDispatcher(t)
+			ctx := context.Background()
+
+			tsk, err := reg.Create(ctx, "create a file named hello.txt", "create hello.txt")
+			if err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			if err := reg.LinkSession(ctx, tsk.ID, "session-labels"); err != nil {
+				t.Fatalf("link session: %v", err)
+			}
+			if err := reg.UpdateState(ctx, tsk.ID, task.StateCompleted); err != nil {
+				t.Fatalf("complete task: %v", err)
+			}
+
+			result := &DispatchResult{
+				Intent:        &Intent{Type: string(tc.intentType)},
+				OriginalInput: "did the change get made?",
+			}
+			answer, handled := d.RecallAnswer(ctx, result, "session-labels", false)
+			if !handled {
+				t.Fatalf("%s-labeled intent with a prior task must be handled", tc.intentType)
+			}
+			if !strings.Contains(answer, "completed") {
+				t.Errorf("answer = %q, want the task status", answer)
+			}
+		})
+	}
+}
+
+// TestRecallAnswer_EmptyDigestStillFallsThrough pins the preserved
+// fall-through: with the label gate gone, an empty digest (no prior task)
+// is still not handled for ANY label — open chat is unchanged.
+func TestRecallAnswer_EmptyDigestStillFallsThrough(t *testing.T) {
 	d, _ := recallTestDispatcher(t)
-	result := &DispatchResult{Intent: &Intent{Type: string(IntentChat)}}
-	if _, handled := d.RecallAnswer(context.Background(), result, "s", false); handled {
-		t.Error("non-recall intent must not be handled")
+	for _, intentType := range []IntentType{IntentChat, IntentPlatform, IntentRecall} {
+		result := &DispatchResult{
+			Intent:        &Intent{Type: string(intentType)},
+			OriginalInput: "did the change get made?",
+		}
+		if _, handled := d.RecallAnswer(context.Background(), result, "session-empty-h1", false); handled {
+			t.Errorf("%s-labeled intent on an empty digest must fall through", intentType)
+		}
 	}
 }

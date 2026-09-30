@@ -32,6 +32,11 @@ func TestInformativeResultLine(t *testing.T) {
 			result: "- job job-1 completed by agent coder:\ncreated the file\nat the requested path",
 			want:   "created the file at the requested path",
 		},
+		{
+			name:   "prose line starting with job is kept (bughunt 2026-09-29 L7)",
+			result: "job finished successfully, the file is at /project/hello.txt",
+			want:   "job finished successfully, the file is at /project/hello.txt",
+		},
 	}
 	for _, tc := range cases {
 		if got := informativeResultLine(tc.result); got != tc.want {

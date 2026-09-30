@@ -173,8 +173,10 @@ the machine-shaped reply to the conversation, injects a user-role
 `[system: ...]` rewrite nudge ("rewrite your answer in plain language…"),
 and re-runs the reasoning cycle with the dump already in context. The flag
 (`guardRetried`) is reset per turn, so a retried reply that trips the guard
-again — or an errored retry — ships the canned/fallback line exactly as
-before; the worst case is one extra model call. The handler choke point
+again — or an errored retry — ships the digest-aware fallback (when armed)
+or the canned line exactly as before; the worst case is one bounded extra
+reasoning cycle (a full fresh cycle with its own iteration budget, not a
+single model call). The handler choke point
 (`handleChatRequest`) and the other guard entry points stay single-shot:
 they guard post-loop paths that cannot continue a loop.
 

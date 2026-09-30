@@ -30,11 +30,16 @@ const recallWaitTimeout = 90 * time.Second
 // poll; faster polling buys nothing against a multi-second model call.
 const recallPollInterval = 2 * time.Second
 
-// RecallAnswer is the option-3 continuity answer for a recall-intent
-// follow-up. handled=false means the caller should fall through to the
-// normal LLM path (no prior task, or nothing to say without an LLM).
+// RecallAnswer is the option-3 continuity answer for a follow-up question
+// about prior work. The dispatcher gates the call on SHAPE
+// (referencesPriorWork && isInterrogative, or the platform-labeled sibling),
+// never on the intent label: the 8B classifier labels the same question
+// recall/chat/work/platform across runs, so a label check here made the
+// shape-gated branch a no-op for every non-recall label. handled=false means
+// the caller should fall through to the normal LLM path (no prior task, or
+// nothing to say without an LLM).
 func (d *Dispatcher) RecallAnswer(ctx context.Context, result *DispatchResult, conversationID string, wait bool) (string, bool) {
-	if result == nil || result.Intent == nil || result.Intent.Type != string(IntentRecall) {
+	if result == nil || result.Intent == nil {
 		return "", false
 	}
 	excludeID := ""

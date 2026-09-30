@@ -208,9 +208,11 @@ func informativeResultLine(result string) string {
 		if fallback == "" {
 			fallback = line
 		}
-		// Envelope header / job bookkeeping lines: skip.
-		if strings.HasPrefix(line, "- job ") || strings.HasPrefix(line, "job ") ||
-			strings.HasPrefix(line, "```") {
+		// Envelope header / job bookkeeping lines: skip. Only the stamped
+		// envelope frame ("- job ...") is bookkeeping — a prose line that
+		// merely starts with "job " (e.g. "job finished successfully, the
+		// file is at ...") is real answer text (bughunt 2026-09-29 L7).
+		if strings.HasPrefix(line, "- job ") || strings.HasPrefix(line, "```") {
 			continue
 		}
 		prose = append(prose, line)
