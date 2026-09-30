@@ -53,8 +53,13 @@ func NewGitCheckout(repoURL, checkoutDir string, logger *slog.Logger) (*GitCheck
 
 // isLocalPath reports whether the repo URL is a filesystem path (not a
 // remote URL). go-git's file transport does not support shallow fetch.
+// file:// URLs count as local: go-git's file transport serves them too,
+// and shipping Depth to it fails with "reference not found" (L14).
 func (g *GitCheckout) isLocalPath() bool {
 	u := g.repoURL
+	if strings.HasPrefix(u, "file://") {
+		return true
+	}
 	return !strings.Contains(u, "://") && !strings.Contains(u, "@")
 }
 
