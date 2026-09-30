@@ -62,29 +62,34 @@ type ServiceRegistry struct {
 // Config holds dependencies for service instantiation.
 // All fields are optional; services whose dependencies are nil will not be created.
 type Config struct {
-	Bus                 *bus.MessageBus
-	AgentRegistry       *agent.AgentRegistry
-	Queue               queue.Queue
-	MemoryManager       *memory.Manager
-	TaskRegistry        *task.Registry
-	SessionStore        session.Store
-	WorkerPool          *worker.Pool
-	SkillRegistry       *skills.Registry
-	SkillExecutor       *skills.Executor
-	TemplateRegistry    *templates.Registry
-	SelfImprove         *selfimprove.Controller
-	TokenCache          *llm.TokenCacheCoordinator
-	SecurityChecker     *security.PermissionChecker
-	Scheduler           *scheduler.Scheduler
-	CalendarClient      *calendar.Client
-	DaemonController    DaemonController
-	WorkingDir          string
-	PidFile             string
-	StateDir            string
-	BinPath             string
-	ProjectManager      *project.ProjectManager
-	PlanManager         *plan.PlanManager
-	PlanStore           plan.PlanStore
+	Bus              *bus.MessageBus
+	AgentRegistry    *agent.AgentRegistry
+	Queue            queue.Queue
+	MemoryManager    *memory.Manager
+	TaskRegistry     *task.Registry
+	SessionStore     session.Store
+	WorkerPool       *worker.Pool
+	SkillRegistry    *skills.Registry
+	SkillExecutor    *skills.Executor
+	TemplateRegistry *templates.Registry
+	SelfImprove      *selfimprove.Controller
+	TokenCache       *llm.TokenCacheCoordinator
+	SecurityChecker  *security.PermissionChecker
+	Scheduler        *scheduler.Scheduler
+	CalendarClient   *calendar.Client
+	DaemonController DaemonController
+	WorkingDir       string
+	PidFile          string
+	StateDir         string
+	BinPath          string
+	ProjectManager   *project.ProjectManager
+	PlanManager      *plan.PlanManager
+	PlanStore        plan.PlanStore
+	// FallbackPlanManager/FallbackPlanStore wire the evolver sink plan
+	// manager + store into the HTTP PlanService (L6). Both may be nil;
+	// PlanService.SetEvolverSink ignores nils.
+	FallbackPlanManager *plan.PlanManager
+	FallbackPlanStore   plan.PlanStore
 	RuntimeManager      *llm.RuntimeManager
 	ChatTimeout         time.Duration
 	UploadsDir          string
@@ -192,6 +197,10 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	// PlanService is available if PlanManager and PlanStore are configured
 	if cfg.PlanManager != nil && cfg.PlanStore != nil {
 		reg.Plan = NewPlanService(cfg.PlanManager, cfg.PlanStore)
+		// Evolver sink fallback (L6): sink plans become readable through
+		// the same service. SetEvolverSink ignores nils, so a zero-value
+		// FallbackPlanManager/FallbackPlanStore is a no-op.
+		reg.Plan.SetEvolverSink(cfg.FallbackPlanManager, cfg.FallbackPlanStore)
 	}
 
 	// SearchService is always created with whatever dependencies are available.

@@ -309,12 +309,12 @@ func chanID(ch PushChannel) string {
 	}
 }
 
-// formatForTelegram escapes MarkdownV2-safe characters and truncates to 4096.
+// formatForTelegram escapes MarkdownV2-safe characters and truncates the
+// ESCAPED text to 4096 bytes. Truncation happens AFTER escaping so MarkdownV2
+// escape growth cannot push the payload past the limit, and cuts on a rune
+// boundary — Telegram rejects invalid UTF-8 with a 400.
 func formatForTelegram(text string) string {
 	const maxLen = 4096
-	if len(text) > maxLen {
-		text = text[:maxLen] + "..."
-	}
 	// Escape MarkdownV2 special chars
 	esc := []byte{}
 	for _, r := range text {
@@ -325,6 +325,15 @@ func formatForTelegram(text string) string {
 		// Telegram MarkdownV2 escaping is byte-oriented; non-ASCII runes must
 		// pass through as their UTF-8 bytes, not be truncated to one byte.
 		esc = utf8.AppendRune(esc, r)
+	}
+	if len(esc) > maxLen {
+		// Reserve room for the ellipsis, then back off to the last rune
+		// boundary so the cut never splits a UTF-8 sequence.
+		limit := maxLen - 3
+		for limit > 0 && !utf8.RuneStart(esc[limit]) {
+			limit--
+		}
+		esc = append(esc[:limit], '.', '.', '.')
 	}
 	return string(esc)
 }

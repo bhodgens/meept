@@ -134,9 +134,10 @@ func GitAddCommitPush(repo *git.Repository, files []string, message string) erro
 		return Wrap("git_commit_worktree", err)
 	}
 
+	failedAdds := []string{}
 	for _, f := range files {
-		_, err := w.Add(relToRepo(repo, f))
-		if err != nil {
+		if _, err := w.Add(relToRepo(repo, f)); err != nil {
+			failedAdds = append(failedAdds, f)
 			slog.Debug("backup: failed to add file to git (may already be staged)",
 				"file", f, "error", err)
 		}
@@ -144,6 +145,14 @@ func GitAddCommitPush(repo *git.Repository, files []string, message string) erro
 
 	status, _ := w.Status()
 	if status.IsClean() {
+		// Clean tree is "nothing to commit" only when every requested file
+		// staged (or none were requested). When files WERE expected and every
+		// Add failed, the clean tree means the backup silently dropped them —
+		// report the failure instead of success (L10).
+		if len(files) > 0 && len(failedAdds) == len(files) {
+			return fmt.Errorf("git_add_all_failed: failed to stage %d file(s): %s",
+				len(failedAdds), strings.Join(failedAdds, ", "))
+		}
 		slog.Debug("backup: git working tree is clean, nothing to commit")
 		return nil
 	}
@@ -313,9 +322,10 @@ func gitAddAndCommit(repo *git.Repository, files []string, message string) error
 		return Wrap("git_commit_worktree", err)
 	}
 
+	failedAdds := []string{}
 	for _, f := range files {
-		_, err := w.Add(relToRepo(repo, f))
-		if err != nil {
+		if _, err := w.Add(relToRepo(repo, f)); err != nil {
+			failedAdds = append(failedAdds, f)
 			slog.Debug("backup: failed to add file to git (may already be staged)",
 				"file", f, "error", err)
 		}
@@ -323,6 +333,14 @@ func gitAddAndCommit(repo *git.Repository, files []string, message string) error
 
 	status, _ := w.Status()
 	if status.IsClean() {
+		// Clean tree is "nothing to commit" only when every requested file
+		// staged (or none were requested). When files WERE expected and every
+		// Add failed, the clean tree means the backup silently dropped them —
+		// report the failure instead of success (L10).
+		if len(files) > 0 && len(failedAdds) == len(files) {
+			return fmt.Errorf("git_add_all_failed: failed to stage %d file(s): %s",
+				len(failedAdds), strings.Join(failedAdds, ", "))
+		}
 		slog.Debug("backup: git working tree is clean, nothing to commit")
 		return nil
 	}
