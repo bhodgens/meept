@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"sync"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -101,6 +103,14 @@ type App struct {
 	rpc          *RPCClient
 	eventRPC     *RPCClient // Separate connection for event polling
 	currentView  ViewType
+
+	// loadSessionMu serializes loadSession: App.Init and the
+	// ConnectSuccessMsg handler both dispatch it, and the two cmd
+	// goroutines raced sessionMgr writes (double load per startup). The
+	// pre-connect dispatch is a no-op by design (returns nil; retried by
+	// the post-connect dispatch), so the mutex — not a once — is the
+	// right guard.
+	loadSessionMu sync.Mutex
 
 	// Sub-models for each view
 	chat     *models.ChatModel
@@ -587,7 +597,18 @@ func (a *App) Init() tea.Cmd {
 }
 
 // loadSession attempts to load or create a session using SessionManager.
+// Dispatched by both App.Init and the ConnectSuccessMsg handler; the
+// once-guard makes the second dispatch return the FIRST load's message
+// instead of two cmd goroutines racing sessionMgr (double load per
+// startup). The loaded-once message is replayed to the second caller —
+// harmless: SessionLoadedMsg is idempotent (re-binds the same session).
 func (a *App) loadSession() tea.Msg {
+	a.loadSessionMu.Lock()
+	defer a.loadSessionMu.Unlock()
+	return a.loadSessionImpl()
+}
+
+func (a *App) loadSessionImpl() tea.Msg {
 	// Wait for connection first - this will be called after connectDaemon
 	if !a.rpc.IsConnected() {
 		return nil

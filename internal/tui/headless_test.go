@@ -16,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caimlas/meept/internal/sharedclient"
+	"github.com/caimlas/meept/internal/tui/modals"
 	"github.com/caimlas/meept/internal/tui/models"
 )
 
@@ -239,6 +240,13 @@ func newHeadlessAppSocket(t *testing.T, socketPath string, w, h int) *headlessPr
 	// createTestApp leaves sessionMgr nil (NewApp sets it); loadSession
 	// needs it as soon as any fetch succeeds.
 	app.sessionMgr = sharedclient.NewSessionManager(rpc, app.clientConfig.Session.DefaultName)
+	// NewApp also wires the remaining modals; createTestApp only builds
+	// the palette + picker. Mirror NewApp so every key flow works.
+	app.sessionRename = NewSessionRenameModal(app.styles)
+	app.fuzzyFinder = NewFuzzyFinderModal(app.styles, rpc)
+	app.projectPicker = NewProjectPickerModal(app.styles, rpc)
+	app.usersModal = NewUsersModal(app.styles)
+	app.pendingChangesModal = modals.NewPendingChangesModal(&changesRPCAPI{rpc: rpc})
 	app.chat = models.NewChatModel(rpc, DefaultStyles().UserMessage, DefaultStyles().AssistantMessage, DefaultStyles().SystemMessage, "once")
 	app.sessions = models.NewSessionsModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)

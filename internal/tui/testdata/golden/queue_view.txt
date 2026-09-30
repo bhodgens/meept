@@ -1,0 +1,21 @@
+ meept
+job queue
+
+
+╭──────────────────────────────────────────────────────────────────────────╮
+│  pending: 2  │  processing: 0  │  completed: 5  │  failed: 0             │
+╰──────────────────────────────────────────────────────────────────────────╯
+filter: pending
+
+╭──────────────────────────────────────────────────────────────────────────────────────────╮
+│ id                    type          priority    state         task                       │
+│──────────────────────────────────────────────────────────────────────────────────────────│
+│ job-1                 one_off       normal      pending       task-1                     │
+│ job-2                 project_task  high        completed     -                          │
+│                                                                                          │
+│                                                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────╯
+
+r: refresh | p/f/c/a: filter | R: retry | ?: help
+ ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ j/k navigate │ r refresh │ tab
+ toggle view │ ^X y sidebar │ /test/project │ verbosity: quiet

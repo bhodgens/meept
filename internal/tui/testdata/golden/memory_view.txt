@@ -1,0 +1,17 @@
+ meept
+memory browser
+
+
+╭──────────────────────────────────────────────────────────────────────────╮
+│ > search memory...                                                       │
+╰──────────────────────────────────────────────────────────────────────────╯
+
+
+
+             no results. enter a search query and press enter.
+
+
+
+/ focus search | tab switch focus | enter select
+ ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ j/k navigate │ / search │ r
+ refresh │ ^X y sidebar │ /test/project │ verbosity: quiet

@@ -1,0 +1,4 @@
+ meept
+search unavailable
+ ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ enter open │ esc back │ j/k
+ navigate │ tab scope │ ^X y sidebar │ /test/project │ verbosity: quiet

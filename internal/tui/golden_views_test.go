@@ -84,6 +84,12 @@ func TestGoldenChatLoadedOneAssistant(t *testing.T) {
 		// sent before it is wiped. settleAsync's 100ms is normally ample;
 		// attempts that still lose the race are discarded by the retry.
 		settleAsync()
+		// chat.Init's welcome bubble races the load's SetSession
+		// nondeterministically (both are async cmds); clear the
+		// transcript through the real command path so the golden shows
+		// exactly the task bubble.
+		hp.send(CommandResultMsg{Result: &CommandResult{ClearConversation: true}})
+		hp.settle(goldenWidth, goldenHeight)
 		hp.send(models.ChatTaskResultMsg{
 			State:         "completed",
 			TaskID:        "golden-task",

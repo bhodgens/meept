@@ -1,0 +1,22 @@
+ meept
+plans   all   active   pending   completed   (1/1)
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ title               state       phases    steps     progress      updated    │
+│──────────────────────────────────────────────────────────────────────────────│
+│ rewrite the parser  ● draft     0         1/4       ██░░░░░░ 1/4  HH:MM:SS   │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────╮
+│                                                                          │
+│  select a plan to view details                                           │
+│                                                                          │
+╰──────────────────────────────────────────────────────────────────────────╯
+r: refresh | /: filter | a: approve | v: revise | c: confirm | enter: details | ?: help
+ ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ j/k navigate │ enter details │
+ r refresh │ / filter │ ^X y sidebar │ /test/project │ verbosity: quiet

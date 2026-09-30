@@ -89,6 +89,15 @@ func replaceClockTokens(s string) string {
 			if prevOK && nextOK {
 				b.WriteString("HH:MM")
 				i += 4
+				// Swallow a trailing :SS too (HH:MM:SS renders appear
+				// in plan/detail timestamps) so seconds never leak
+				// into a golden.
+				if i+2 < len(runes) && runes[i+1] == ':' &&
+					isDigit(runes[i+2]) && isDigit(runes[i+3]) &&
+					(i+4 >= len(runes) || !isDigit(runes[i+4])) {
+					b.WriteString(":SS")
+					i += 3
+				}
 				continue
 			}
 		}
@@ -117,8 +126,8 @@ func assertGolden(t *testing.T, name, content string) {
 		"Task: ", "Steps: ",
 		"Make sure the meept daemon is running:",
 		"Aug ", "Jan ", // month abbreviations in date cells (time.Format)
-		"HH:MM", // clock placeholder from replaceClockTokens
-		"D: delete",
+		"HH:MM", ":SS", // clock placeholders from replaceClockTokens
+		"D: delete", "R: retry",
 	}
 	for i, line := range strings.Split(normalized, "\n") {
 		probe := line

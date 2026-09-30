@@ -46,7 +46,6 @@ import (
 // → race-free reads).
 func settleAsync() { time.Sleep(250 * time.Millisecond) }
 
-
 // TestPaletteFlowOpensExecutesAndIssuesRPC covers tui-palette-01: ctrl+x
 // opens the palette; the sessions action key executes the command and the
 // sessions-view fetch (the RPC the command issues) populates the picker
@@ -54,9 +53,7 @@ func settleAsync() { time.Sleep(250 * time.Millisecond) }
 // round-tripped.
 func TestPaletteFlowOpensExecutesAndIssuesRPC(t *testing.T) {
 	stack := harness.Start(t)
-	idA := stack.CreateSession(t, "palette-alpha", stack.MeeptHome)
-	idB := stack.CreateSession(t, "palette-beta", stack.MeeptHome)
-	_ = idB
+	_ = stack.CreateSession(t, "palette-alpha", stack.MeeptHome)
 
 	hp := startTUIAgainst(t, stack)
 	hp.sendKey("ctrl+x")
@@ -76,14 +73,13 @@ func TestPaletteFlowOpensExecutesAndIssuesRPC(t *testing.T) {
 		t.Errorf("palette still open after action: activeModal=%v", app.ActiveModal())
 	}
 	// The command's RPC effect: the sessions view fetched and rendered
-	// the daemon-side sessions (the seeded descriptions come from the
+	// the daemon-side sessions (the seeded description comes from the
 	// session.list round-trip the palette action triggered).
 	view := app.View().Content
 	if !strings.Contains(view, "palette-alpha") {
 		t.Errorf("sessions view does not show the seeded session after the palette "+
 			"command executed (session.list RPC effect missing):\n%s", view)
 	}
-	_ = idA
 }
 
 // TestSessionSwitchReloadsTranscript covers tui-session-switch-01: two
@@ -92,75 +88,45 @@ func TestPaletteFlowOpensExecutesAndIssuesRPC(t *testing.T) {
 func TestSessionSwitchReloadsTranscript(t *testing.T) {
 	stack := harness.Start(t)
 	idA := stack.CreateSession(t, "switch-alpha", stack.MeeptHome)
-	idB := "" // created after boot (activity gap) — see below
 
 	// Boot the TUI pinned to session A; the switch must move it to B.
+	// The pre-switch wait matters for ORDERING: the startup loadSession's
+	// SessionLoadedMsg → chat.SetSession(A) runs on an async cmd — a
+	// switch issued before it lands would be clobbered back to A.
 	hp := startTUIAgainst(t, stack, WithTargetSession(idA))
 	time.Sleep(800 * time.Millisecond)
 	hp.settle()
-	// Create B after boot. Its row position depends on last-activity
-	// ordering, which the TUI boot itself influences (attaching to A
-	// touches A's activity), so the probe app below LEARNS the row order
-	// from the rendered view instead of assuming it.
-	idB = stack.CreateSession(t, "switch-beta", stack.MeeptHome)
-
 	if got := hp.app.ActiveSessionID(); got != idA {
 		t.Fatalf("target session not loaded at start: got %q want %q", got, idA)
 	}
 
-	// Probe app: learn which session the sessions view's cursor row 0
-	// holds (the detail pane shows the auto-selected row's name) — the
-	// ordering is stable across apps on the same daemon data, so the
-	// driven app can pick the navigation that lands on B.
-	probe := startTUIAgainst(t, stack, WithTargetSession(idA))
-	time.Sleep(800 * time.Millisecond)
-	probe.settle()
-	probe.sendKey("ctrl+x")
-	probe.settle()
-	probe.sendKey("s")
-	settleAsync()
-	probeView := stripEscapes(probe.finish().View().Content)
-	row0IsB := strings.Contains(probeView, "switch-beta") &&
-		strings.Index(probeView, "switch-beta") < strings.Index(probeView, "switch-alpha")
+	// Create B now and bump its activity with a real chat turn. The
+	// sessions view sorts by last activity (newest first); the boot
+	// attach touches A, so B's bump must land AFTER it — creating +
+	// turning B post-boot makes B strictly newest, i.e. cursor row 0,
+	// the row Enter switches to.
+	idB := stack.CreateSession(t, "switch-beta", stack.MeeptHome)
+	stack.Fake.SetPostToolText("activity bump turn")
+	stack.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"tui-flows bump pin"}`)
+	stack.ChatTurn(t, idB, "bump activity", 60*time.Second)
 
-	// Driven app: sessions tab via palette, then the picker's documented
-	// switch flow (enter: switch) on the row that holds B — down+enter if
-	// A is row 0, plain enter if B is row 0.
-	hp = startTUIAgainst(t, stack, WithTargetSession(idA))
-	time.Sleep(800 * time.Millisecond) // let the boot load settle first
-	hp.settle()
+	// Sessions tab via palette, then Enter = the picker's documented
+	// switch flow (enter: switch) on row 0 = B.
 	hp.sendKey("ctrl+x")
 	hp.settle()
 	hp.sendKey("s")
 	settleAsync()
-	if !row0IsB {
-		hp.sendKey("down")
-		hp.settle()
-	}
 	hp.sendKey("enter")
 	settleAsync()
 
 	app := hp.finish()
 	gotSession := app.ActiveSessionID()
 	if gotSession != idB {
-		t.Errorf("active session after picker switch = %q, want %q (row0IsB=%v)", gotSession, idB, row0IsB)
+		t.Errorf("active session after picker switch = %q, want %q (row 0 = newest)", gotSession, idB)
 	}
 	if got := app.ChatSessionID(); got != idB {
 		t.Errorf("chat model session after switch = %q, want %q (transcript reload)", got, idB)
 	}
-}
-
-// stripEscapes removes ANSI escape bytes so plain-text checks run on the
-// rendered view.
-func stripEscapes(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r == 0x1b {
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
 }
 
 // TestAgentTabRendersTableRows covers tui-agent-tab-01: the agents view
