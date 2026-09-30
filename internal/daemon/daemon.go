@@ -1014,35 +1014,37 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("Upload service disabled by config (uploads.enabled=false)")
 	}
 	svcRegistry, err := services.NewRegistry(services.Config{
-		Bus:              msgBus,
-		AgentRegistry:    nilSafeAgentRegistry(components),
-		Queue:            nilSafeQueue(components),
-		MemoryManager:    nilSafeMemoryManager(components),
-		TaskRegistry:     nilSafeTaskRegistry(components),
-		SessionStore:     nilSafeSessionStore(components),
-		WorkerPool:       nilSafeWorkerPool(components),
-		SkillRegistry:    nilSafeSkillRegistry(components),
-		SkillExecutor:    nilSafeSkillExecutor(components),
-		TemplateRegistry: nilSafeTemplateRegistry(components),
-		SelfImprove:      nilSafeSelfImprove(components),
-		TokenCache:       nilSafeTokenCache(components),
-		SecurityChecker:  nilSafeSecurityChecker(components),
-		Scheduler:        nilSafeScheduler(components),
-		CalendarClient:   nilSafeCalendarClient(components),
-		RuntimeManager:   nilSafeRuntimeManager(components),
-		WorkingDir:       cfg.WorkingDir,
-		DaemonController: daemonControl,
-		PidFile:          cfg.PIDFile,
-		StateDir:         cfg.StateDir,
-		ProjectManager:   nilSafeProjectManager(components),
-		PlanManager:      planManagerInst,
-		PlanStore:        planStoreIF,
-		ChatTimeout:      fullCfg.ChatTimeout(),
-		UploadsDir:       uploadDataDir,
-		UploadsMaxMB:     uploadCfg.MaxSizeMB,
-		UploadsTypes:     uploadCfg.AllowedTypes,
-		EmployeeManager:  nilSafeEmployeeManagerAdapter(components),
-		PromptDirs:       resolvePromptDirs(components),
+		Bus:                 msgBus,
+		AgentRegistry:       nilSafeAgentRegistry(components),
+		Queue:               nilSafeQueue(components),
+		MemoryManager:       nilSafeMemoryManager(components),
+		TaskRegistry:        nilSafeTaskRegistry(components),
+		SessionStore:        nilSafeSessionStore(components),
+		WorkerPool:          nilSafeWorkerPool(components),
+		SkillRegistry:       nilSafeSkillRegistry(components),
+		SkillExecutor:       nilSafeSkillExecutor(components),
+		TemplateRegistry:    nilSafeTemplateRegistry(components),
+		SelfImprove:         nilSafeSelfImprove(components),
+		TokenCache:          nilSafeTokenCache(components),
+		SecurityChecker:     nilSafeSecurityChecker(components),
+		Scheduler:           nilSafeScheduler(components),
+		CalendarClient:      nilSafeCalendarClient(components),
+		RuntimeManager:      nilSafeRuntimeManager(components),
+		WorkingDir:          cfg.WorkingDir,
+		DaemonController:    daemonControl,
+		PidFile:             cfg.PIDFile,
+		StateDir:            cfg.StateDir,
+		ProjectManager:      nilSafeProjectManager(components),
+		PlanManager:         planManagerInst,
+		PlanStore:           planStoreIF,
+		FallbackPlanManager: nilSafeEvolverPlanManager(components),
+		FallbackPlanStore:   nilSafeEvolverPlanStore(components),
+		ChatTimeout:         fullCfg.ChatTimeout(),
+		UploadsDir:          uploadDataDir,
+		UploadsMaxMB:        uploadCfg.MaxSizeMB,
+		UploadsTypes:        uploadCfg.AllowedTypes,
+		EmployeeManager:     nilSafeEmployeeManagerAdapter(components),
+		PromptDirs:          resolvePromptDirs(components),
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)
@@ -2684,6 +2686,24 @@ func nilSafeProjectManager(c *Components) *project.ProjectManager {
 		return nil
 	}
 	return c.ProjectManager
+}
+
+// nilSafeEvolverPlanManager returns the evolver-DEDICATED sink PlanManager
+// (or nil when unavailable) for the HTTP PlanService sink fallback (L6).
+func nilSafeEvolverPlanManager(c *Components) *plan.PlanManager {
+	if c == nil {
+		return nil
+	}
+	return c.EvolverPlanManager
+}
+
+// nilSafeEvolverPlanStore returns the evolver sink plan store (or nil when
+// unavailable) for the HTTP PlanService sink fallback (L6).
+func nilSafeEvolverPlanStore(c *Components) *plan.SQLiteStore {
+	if c == nil {
+		return nil
+	}
+	return c.EvolverPlanStore
 }
 
 func nilSafeCalendarClient(c *Components) *calendar.Client {
