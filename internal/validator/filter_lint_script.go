@@ -33,11 +33,21 @@ type PythonLintFilter struct {
 	pythonBin string
 }
 
-// NewPythonLintFilter creates a lint_python output filter. Empty binary
-// name falls back to PATH lookup ("python3").
+// NewPythonLintFilter creates a lint_python output filter. An empty binary
+// name resolves via PATH lookup: python3 first, then python — mirroring
+// DefaultFilters, which adds lint_python when EITHER exists (L20). An
+// explicit config value is never second-guessed.
 func NewPythonLintFilter(pythonBin string) *PythonLintFilter {
 	if pythonBin == "" {
-		pythonBin = "python3"
+		if _, err := exec.LookPath("python3"); err == nil {
+			pythonBin = "python3"
+		} else if _, err := exec.LookPath("python"); err == nil {
+			pythonBin = "python"
+		} else {
+			// Neither on PATH: keep the conventional name so the filter
+			// degrades to its advisory tool-failure verdict at run time.
+			pythonBin = "python3"
+		}
 	}
 	return &PythonLintFilter{pythonBin: pythonBin}
 }

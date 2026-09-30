@@ -111,15 +111,16 @@ func ParseSkillMetadataOnly(path string) (*SkillIndexEntry, error) {
 	}
 
 	entry := &SkillIndexEntry{
-		Name:         meta.Name,
-		Description:  meta.Description,
-		Requires:     meta.Requires,
-		Tags:         meta.Tags,
-		Path:         path,
-		RiskLevel:    meta.RiskLevel,
-		AllowedTools: meta.AllowedTools,
-		Examples:     meta.Examples,
-		SourceOrigin: meta.SourceOrigin,
+		Name:          meta.Name,
+		Description:   meta.Description,
+		Requires:      meta.Requires,
+		RequiresTools: meta.RequiresTools,
+		Tags:          meta.Tags,
+		Path:          path,
+		RiskLevel:     meta.RiskLevel,
+		AllowedTools:  meta.AllowedTools,
+		Examples:      meta.Examples,
+		SourceOrigin:  meta.SourceOrigin,
 	}
 
 	// Apply defaults

@@ -1,8 +1,18 @@
 package plan
 
 import (
+	"hash/fnv"
 	"sync"
 )
+
+// mdWriteLocks is a FIXED-SIZE pool of mutexes bucketed by FNV-1a hash of the
+// plan file path. A per-path map would grow without bound (one mutex leaked
+// per plan file ever locked — L12); a fixed pool keeps mutual exclusion for
+// same-path writers while capping memory at mdWriteLockBuckets mutexes.
+// Distinct paths sharing a bucket serialize harmlessly.
+const mdWriteLockBuckets = 64
+
+var mdWriteLocks [mdWriteLockBuckets]sync.Mutex
 
 // LockMarkdownWrite serializes read-modify-write rewrites of a single plan
 // markdown file within the process. ApprovePlan runs Synthesize's
@@ -21,10 +31,9 @@ import (
 //	unlock := plan.LockMarkdownWrite(path)
 //	defer unlock()
 func LockMarkdownWrite(filePath string) func() {
-	m, _ := mdWriteLocks.LoadOrStore(filePath, &sync.Mutex{})
-	mu := m.(*sync.Mutex)
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(filePath))
+	mu := &mdWriteLocks[h.Sum32()%mdWriteLockBuckets]
 	mu.Lock()
 	return mu.Unlock
 }
-
-var mdWriteLocks sync.Map // plan file path -> *sync.Mutex

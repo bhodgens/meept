@@ -36,6 +36,13 @@ func FuzzExtractFencedBlocks(f *testing.F) {
 		"plain prose, no fences",
 		"```js\nconsole.log('hi');\n```",
 		"```ts\nconst x: number = 1;\n```",
+		// The FULL production marker names (L15b) — jsTSLintFences in
+		// filter_lint_script.go carries ```javascript/```typescript
+		// alongside the ```js/```ts shorthands, and the corpus previously
+		// only fuzzed the shorthands.
+		"```javascript\nconsole.log('hi');\n```",
+		"```typescript\nconst x: number = 1;\n```",
+		"```javascript\nconsole.log('a');\n```\nprose between\n```typescript\nconst b: number = 2;\n```",
 		"```python\nprint('hi')\n```",
 		"```py\nx = 1\n```",
 		"```js\nconsole.log('a');\n```\nprose between\n```js\nconsole.log('b');\n```",
@@ -59,7 +66,15 @@ func FuzzExtractFencedBlocks(f *testing.F) {
 				checkBlocks(t, output, []int{b.start}, []int{b.end}, []string{b.code})
 			}
 		}
-		// Multi-fence path with the production marker sets.
+		// Multi-fence path with the production marker sets: the JS/TS set
+		// is jsTSLintFences verbatim (filter_lint_script.go) — including
+		// the full ```javascript/```typescript names — plus the Python
+		// pair. Multi-fence pass exercises extractFencedMulti directly the
+		// way JSLintFilter invokes it.
+		jsTsBlocks := extractFencedMulti(output, []string{"```javascript", "```js", "```typescript", "```ts"})
+		for _, b := range jsTsBlocks {
+			checkBlocks(t, output, []int{b.start}, []int{b.end}, []string{b.code})
+		}
 		pyBlocks := extractFencedMulti(output, []string{"```python", "```py"})
 		for _, b := range pyBlocks {
 			checkBlocks(t, output, []int{b.start}, []int{b.end}, []string{b.code})
