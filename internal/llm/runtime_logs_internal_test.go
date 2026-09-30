@@ -174,6 +174,91 @@ func TestProcessLogger_StdoutStderrShareFile_Concurrent(t *testing.T) {
 	wg.Wait()
 }
 
+// TestRotatingWriter_CloseConcurrentWithWriteAndTruncate pins the Close data
+// race (mutexio finding, fixed in 47ed44f4 / nolint-reasoned in a933a3ba):
+// Close nil-ed the shared *os.File pointer WITHOUT w.mu while the auto-restart
+// path's Truncate read it under the lock — a genuine -race hit on the
+// StopAll/auto-restart overlap. Close now holds w.mu across the close
+// sequence, is idempotent (second Close sees *w.file == nil and no-ops), and
+// Truncate after Close is a correct no-op. Run with -race to catch a
+// regression; it also fails functionally if Close double-closes (os.File.Close
+// on an already-closed file errors) or panics on a nil deref.
+func TestRotatingWriter_CloseConcurrentWithWriteAndTruncate(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	pl, err := OpenProcessLogger("127.0.0.1", "9127")
+	if err != nil {
+		t.Fatalf("OpenProcessLogger: %v", err)
+	}
+
+	const writers = 4
+	const perWriter = 64 * 1024
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for range writers {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			chunk := bytes.Repeat([]byte("o"), perWriter)
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, err := pl.Stdout().Write(chunk); err != nil {
+					t.Errorf("stdout write during close: %v", err)
+					return
+				}
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			chunk := bytes.Repeat([]byte("e"), perWriter)
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, err := pl.Stderr().Write(chunk); err != nil {
+					t.Errorf("stderr write during close: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			pl.Truncate()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := pl.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+		close(stop)
+	}()
+	wg.Wait()
+
+	// Close is idempotent: a second call must not double-close the file
+	// (which would error) nor panic.
+	if err := pl.Close(); err != nil {
+		t.Errorf("second Close must be a no-op, got: %v", err)
+	}
+	// Truncate after Close is a best-effort no-op, never a panic.
+	pl.Truncate()
+}
+
 // TestPerModelFanOut verifies that logToEndpoint fans an event out to every
 // per-model logger registered against an endpoint. This satisfies spec section
 // 3 "Per-model event fan-out: simulated health transition on a shared process

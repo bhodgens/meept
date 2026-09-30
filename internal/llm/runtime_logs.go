@@ -117,12 +117,12 @@ func newSharedRotatingWriter(filePtr **os.File, writtenPtr *int64, atLineEndPtr 
 // spawns a fresh process (not when merging providers into a running process).
 // If the truncate fails or the file is closed, this is a best-effort no-op.
 func (w *rotatingWriter) Truncate() {
-	if w == nil || w.file == nil || *w.file == nil {
+	if w == nil {
 		return
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if *w.file == nil {
+	if w.file == nil || *w.file == nil {
 		return
 	}
 	if err := (*w.file).Truncate(0); err == nil {
@@ -148,7 +148,8 @@ func (w *rotatingWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.file == nil || *w.file == nil {
-		// Fallback: write to stderr.
+		// Fallback: write to stderr. Checked under the lock: Close writes
+		// the shared pointer under the same mutex (race, 47ed44f4 follow-up).
 		fmt.Fprintf(os.Stderr, "%s %s", w.prefix, p)
 		return len(p), nil
 	}
