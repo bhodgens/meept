@@ -947,7 +947,16 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				AgentType:  config.AgentIDPlanner,
 				Summary:    extractSummary(desc),
 			}
-			return d.routeToPlan(ctx, desc, planIntent, conversationID)
+			// sessionID, NOT the thread-resolved conversationID: the plan
+			// route links plan SourceSession / plan_sessions (and, on the
+			// quickplan arm, createTask → LinkSession) with this id, all
+			// session-store lookup keys. The compound/plan detected routes
+			// pass the session-level id for the same reason (90eb0f45);
+			// this slash-route site had the same failure: work created via
+			// /plan inside a non-general thread was invisible to every
+			// digest/recall lookup. See the thread-isolation contract at
+			// RouteToAgent.
+			return d.routeToPlan(ctx, desc, planIntent, sessionID)
 		}
 		skillName, skillInput := d.parseSkillInvocation(input)
 		if skill := d.getSkill(skillName); skill != nil {
@@ -2932,9 +2941,15 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// A platform-labeled turn with session continuity (a completed prior
 	// task) first gets the recall answer: "did the change get made? where
 	// is the file?" mislabels as platform under the 8B classifier (run
-	// 39), and the canned dump destroyed the continuity answer. If the
-	// digest has a prior task, recall wins; genuine introspection turns
-	// have no prior task and fall through unchanged.
+	// 39), and the canned dump destroyed the continuity answer. Recall
+	// (H1 fix, recall_answer.go) now gates on SHAPE, not the intent
+	// label: genuine recall-labeled verdicts were already rewritten to
+	// recall by the platform-recall arbitration above, so before the
+	// label check dropped this branch could never answer and only fell
+	// through to the canned dump; with the label check gone it also
+	// covers genuine platform-labeled follow-ups, answering via the
+	// shape gate. If the digest has a prior task, recall wins; genuine
+	// introspection turns have no prior task and fall through unchanged.
 	if result.Intent.Type == string(IntentPlatform) && !result.AgentOverrideApplied {
 		if answer, handled := d.RecallAnswer(ctx, result, sessionConversationID, false); handled && answer != "" {
 			d.recordAgent(config.AgentIDChat)
@@ -3020,7 +3035,13 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 
 	// No active loop, or queue closed/full -- run normally
 	// Build context message with memory refs
-	contextMsg := d.buildContextMessage(result, conversationID)
+	// Session-context digest (the executing-agent context block):
+	// sessionConversationID, NOT the thread-resolved id — the digest's
+	// GetTasksForSession JOINs session_tasks on the session-level
+	// conversation id (d045a450 fixed the recall branch only; this call
+	// site had the same A5 failure class, so a threaded conversation's
+	// executing agent lost the digest block entirely).
+	contextMsg := d.buildContextMessage(result, sessionConversationID)
 
 	// Recall continuity (option 3, issue #58 follow-up): answer
 	// follow-up questions about prior work directly from the stored task
@@ -3089,7 +3110,11 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		if result.Task != nil {
 			excludeID = result.Task.ID
 		}
-		if digest := d.buildSessionContextDigestExcluding(conversationID, excludeID); digest != nil && !digest.IsEmpty() {
+		// sessionConversationID, not the thread-resolved id: the digest
+		// JOINs session_tasks on the session-level conversation id, so a
+		// thread-scoped key finds no links and the guard fallback arms
+		// empty — the same A5 failure class as the digest block above.
+		if digest := d.buildSessionContextDigestExcluding(sessionConversationID, excludeID); digest != nil && !digest.IsEmpty() {
 			agent.SetGuardFallback(BuildSessionContextBlock(digest))
 		}
 	}
