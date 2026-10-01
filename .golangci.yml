@@ -65,6 +65,11 @@ linters:
     - intrange           # Use integer range in for loops
     - modernize          # Modern Go idioms
 
+    # Custom analyzers (module plugins; binary must be built via
+    # `golangci-lint custom` per .custom-gcl.yml — see Makefile lint
+    # target). Also run standalone by pre-commit hooks (defense in depth).
+    - mutexio            # I/O under mutex (tools/analyzers/mutexio)
+
     # DISABLED 2026-06-19 (see docs/20260618-checkreview.md for rationale):
     # - goconst     (712 findings, cosmetic; would force extracting every repeated string)
     # - gocritic    (307 findings, mostly stylistic; subset curated into other linters)
@@ -125,6 +130,11 @@ linters:
     sloglint:
       key-naming-case: snake
       args-on-sep-lines: false
+
+    custom:
+      mutexio:
+        type: module
+        description: I/O under mutex (tools/analyzers/mutexio)
 
 issues:
   max-issues-per-linter: 50

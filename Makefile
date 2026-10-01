@@ -697,8 +697,16 @@ clean:
 
 lint: gosec
 	@echo "Running linter..."
-	@which golangci-lint > /dev/null 2>&1 || (echo "Install: brew install golangci-lint" && exit 1)
-	golangci-lint run ./...
+	@# Prefer the custom binary (embeds the mutexio module plugin so
+	@# //nolint:mutexio is honored natively and no "unknown linters"
+	@# warning is printed). Falls back to plain golangci-lint, which
+	@# still passes but emits the benign warning (golangci-lint#1450).
+	@if [ -x ./custom-gcl ]; then \
+		./custom-gcl run ./...; \
+	else \
+		which golangci-lint > /dev/null 2>&1 || (echo "Install: brew install golangci-lint (or run: golangci-lint custom)" && exit 1); \
+		golangci-lint run ./...; \
+	fi
 
 gosec:
 	@echo "Running gosec security scan (G201, G202)..."

@@ -263,9 +263,7 @@ func goldClusterAround(rng *rand.Rand, center []float64, n int) [][]float64 {
 	return out
 }
 
-// nolint:U1000 // reserved for per-intent retention reporting
-// nolint:U1000 // reserved for per-intent retention reporting
-type prefilterStoreMeta struct {
+type prefilterStoreMeta struct { //nolint:unused // reserved for per-intent retention reporting; also suppressed for standalone staticcheck below
 	Examples []struct {
 		Intent string `json:"intent"`
 	} `json:"examples"`

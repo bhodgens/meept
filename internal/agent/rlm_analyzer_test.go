@@ -450,10 +450,9 @@ func buildFixtureTraces(t *testing.T, store *mockTraceStore) {
 	}
 }
 
-// nolint:U1000 // test helper reserved for future tests
 //
 //lint:ignore U1000 test helper reserved for future tests
-func slogLogger(t *testing.T) *slog.Logger {
+func slogLogger(t *testing.T) *slog.Logger { //nolint:unused // test helper reserved for future tests
 	return slog.New(&testHandler{t: t})
 }
 

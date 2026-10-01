@@ -131,3 +131,5 @@ raw_responses.jsonl
 /analysis/
 /mem-recall.txt
 /references/
+*.got.txt
+custom-gcl

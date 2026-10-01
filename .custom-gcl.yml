@@ -1,0 +1,15 @@
+# Build config for the custom golangci-lint binary that embeds the
+# repo's own analyzers as module plugins. Build with:
+#
+#   golangci-lint custom
+#
+# then run the resulting ./custom-gcl in place of golangci-lint (the
+# Makefile's lint targets and CI do this automatically when the binary
+# is present). Required so golangci natively knows the `mutexio`
+# linter name and honors //nolint:mutexio without the
+# "unknown linters in //nolint directives" warning (golangci-lint#1450).
+version: v2.13.1
+plugins:
+  - module: github.com/caimlas/meept
+    path: .
+    import: github.com/caimlas/meept/tools/analyzers/mutexio/gclplugin

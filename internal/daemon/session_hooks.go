@@ -113,8 +113,7 @@ func metadataToJSON(m map[string]any) string {
 // teardown latency is not affected by network I/O or message bus congestion.
 // The hook returns immediately and only logs errors asynchronously.
 //
-// nolint:U1000 // methods used via SessionEndHook interface indirection
-type asyncSessionEndHook struct {
+type asyncSessionEndHook struct { //nolint:unused // methods used via SessionEndHook interface indirection
 	bus    *bus.MessageBus
 	logger *slog.Logger
 	mu     sync.Mutex
