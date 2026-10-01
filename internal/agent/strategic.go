@@ -345,9 +345,18 @@ func (sp *StrategicPlanner) SetValidToolNames(names map[string]bool) {
 // validateToolHint applies the valid-tool-name gate to a single planner-
 // emitted hint. Empty hints pass through unchanged (absence of a hint is not
 // an error), and an unset/empty valid set skips validation (legacy behavior).
+// A hint that resolves through the dialect table (config.ToolHintAgent:
+// "code", "debug", "json", ...) is VALID even when it is not a literal tool
+// name — those hints are the executor's routing vocabulary, and nulling them
+// (the 2026-09-30 e2e finding) silently disabled every downstream
+// tool-hint consumer including the output-filter chain's
+// filtersEnabledFor gate.
 func (sp *StrategicPlanner) validateToolHint(taskID, hint string) string {
 	if hint == "" {
 		return ""
+	}
+	if _, isDialect := config.ToolHintAgent(hint); isDialect {
+		return hint
 	}
 	sp.validToolNamesMu.RLock()
 	valid := sp.validToolNames

@@ -1206,6 +1206,28 @@
       ]
     },
     {
+      "id": "output-filters-04",
+      "suite": "output-filters",
+      "diff": "S",
+      "title": "expected_language=zh: Chinese step result passes the default chain (script detection, zero config)",
+      "paths": [
+        "internal/validator/filter_language.go",
+        "internal/config/schema.go"
+      ]
+    },
+    {
+      "id": "output-filters-05",
+      "suite": "output-filters",
+      "diff": "M",
+      "title": "expected_language=fr + user word table: French rejected under en, passes under fr (config decides; data makes Latin-script detection possible)",
+      "paths": [
+        "internal/validator/filter_language.go",
+        "internal/validator/filter_builtin.go",
+        "internal/daemon/filter_wiring.go",
+        "internal/agent/strategic.go"
+      ]
+    },
+    {
       "id": "refusal-01",
       "suite": "refusal",
       "diff": "M",

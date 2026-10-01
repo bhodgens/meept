@@ -30,6 +30,9 @@ type StepRow struct {
 	State       string
 	Result      string
 	Sequence    int
+	// FilterError is the last language/lint rejection reason recorded by
+	// the output-filter chain ("" when the step was never rejected).
+	FilterError string
 }
 
 // openTasksDB opens tasks.db read-only with WAL + busy timeout, mirroring
@@ -77,7 +80,7 @@ func Tasks(t testing.TB, dbPath string) []TaskRow {
 func Steps(t testing.TB, dbPath, taskID string) []StepRow {
 	t.Helper()
 	db := openTasksDB(t, dbPath)
-	rows, err := db.Query(`SELECT id, task_id, description, COALESCE(state,''), COALESCE(result,''), COALESCE(sequence,0) FROM task_steps WHERE task_id = ? ORDER BY sequence`, taskID)
+	rows, err := db.Query(`SELECT id, task_id, description, COALESCE(state,''), COALESCE(result,''), COALESCE(sequence,0), COALESCE(filter_error,'') FROM task_steps WHERE task_id = ? ORDER BY sequence`, taskID)
 	if err != nil {
 		t.Fatalf("harness: query steps: %v", err)
 	}
@@ -85,7 +88,7 @@ func Steps(t testing.TB, dbPath, taskID string) []StepRow {
 	var out []StepRow
 	for rows.Next() {
 		var r StepRow
-		if err := rows.Scan(&r.ID, &r.TaskID, &r.Description, &r.State, &r.Result, &r.Sequence); err != nil {
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.Description, &r.State, &r.Result, &r.Sequence, &r.FilterError); err != nil {
 			t.Fatalf("harness: scan step: %v", err)
 		}
 		out = append(out, r)

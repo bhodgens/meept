@@ -583,6 +583,30 @@ The validator detects mismatches between agent claims and evidence:
 - Checks all completed steps have `Validated = true`
 - **Validation retry loop**: On validation failure, steps are re-queued up to `MaxValidationLoops` (default 2) before escalating to human review
 
+#### Output Filter Chain
+
+Post-step content filters (milter-style, frozen stage order: evidence
+marking → filters → evidence gate → review → verification). Enabled by
+default; `daemon.output_filters.enabled = false` restores the byte-identical
+legacy path.
+
+- **Built-in filters**: `json_format` (JSON-shape repair), `language_<code>`
+  (wrong-language rejection), `lint_go` / `lint_python` / `lint_js`
+  (host-adaptive syntax checks on fenced code — a missing toolchain never
+  causes a rejection)
+- **Configurable output language**: `daemon.output_filters.expected_language`
+  (default `en`) sets which language the language filter treats as correct.
+  Chinese, Japanese, Korean, Russian, Arabic, Greek, Hebrew, Hindi, and Thai
+  work with zero extra configuration (per-rune script detection). Other
+  Latin-script languages (French, Spanish, ...) are enabled by dropping a
+  word list (one word per line, >= 20 words) at
+  `$MEEPT_HOME/validator/lang/<code>.txt` — data, not code; no rebuild.
+  The literal filter name `language_en` is a compat alias resolving to
+  `expected_language`, so existing configs follow the setting.
+- **Bounded rejection**: a filter rejection requeues the step consuming
+  filter retries (`max_filter_retries`, default 2, independent of validation
+  retries); exhaustion fails the step honestly (`rejected_exhausted`)
+
 #### Checkpoints
 
 Git-based checkpoints enable recovery:
