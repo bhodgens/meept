@@ -68,7 +68,8 @@ Daemon level, `~/.meept/meept.json5`:
         "enabled":            true,  // ON by default (2026-09-22)
         "max_passes":         2,     // rewrite sweeps before chain fail
         "max_filter_retries": 2,     // independent of validation retries
-        "filters":            []     // empty = host-adaptive defaults
+        "filters":            [],    // empty = host-adaptive defaults
+        "expected_language":  "en"   // language filter's target language
     }
 }
 ```
@@ -80,6 +81,41 @@ host": the always-safe content filters (`json_format`, `language_en`,
 host (`lint_python` when python3 exists, `lint_js` when node exists). A
 fresh install without node never sees lint_js rejections caused by the
 missing binary rather than by the content. Set `enabled: false` to opt out.
+
+### Configuring the output language
+
+`expected_language` sets which language the language filter treats as
+correct (default `en`). A maintainer who wants the daemon to produce and
+accept French output sets:
+
+```json5
+daemon: {
+  output_filters: {
+    expected_language: "fr",
+  },
+}
+```
+
+The literal filter name `language_en` in `filters` is a compatibility
+alias: it always resolves to `expected_language`, not hardcoded English.
+A chain can also name a code explicitly (`language_fr`, `language_zh`) —
+an explicit code wins over the config.
+
+Language support comes in two tiers:
+
+- **Script languages need no data.** Chinese (`zh`), Japanese (`ja`),
+  Korean (`ko`), Russian (`ru`), Arabic (`ar`), Greek (`el`), Hebrew
+  (`he`), Hindi (`hi`), and Thai (`th`) are detected authoritatively
+  per-rune. Setting `expected_language: "zh"` works with zero extra
+  configuration.
+- **Latin-script languages need a word table.** English and German ship
+  built in. For any other Latin-script language (French, Spanish,
+  Portuguese, ...), drop a word list at
+  `$MEEPT_HOME/validator/lang/<code>.txt` — one lowercase word per line,
+  `#` comments allowed, at least 20 words. Function words work best
+  (articles, pronouns, common verbs). Detection scores every loaded
+  table's hit-rate against the text; the winner at rate >= 0.5 is the
+  detected language. No Go changes, no rebuild — restart the daemon.
 
 Inspect with the CLI:
 

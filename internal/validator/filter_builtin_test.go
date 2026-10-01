@@ -56,12 +56,28 @@ func TestBuiltinRegistry_TypeDispatch(t *testing.T) {
 		t.Fatalf("language_en Name() = %q", got)
 	}
 
+	// Compat alias: the bare "language_en" name resolves to the CONFIG's
+	// expected_language (default en), not hardcoded English.
 	langDe, err := NewBuiltinFilter("language_en", BuiltinConfig{ExpectedLang: "de"})
 	if err != nil {
 		t.Fatalf("language_en(de): %v", err)
 	}
 	if got := langDe.Name(); got != "language_de" {
 		t.Fatalf("language_en(de) Name() = %q, want language_de", got)
+	}
+
+	// Any code: language_<code> with an explicit inline code wins.
+	langFr, err := NewBuiltinFilter("language_fr", BuiltinConfig{ExpectedLang: "en"})
+	if err != nil {
+		t.Fatalf("language_fr: %v", err)
+	}
+	if got := langFr.Name(); got != "language_fr" {
+		t.Fatalf("language_fr Name() = %q, want language_fr", got)
+	}
+
+	// Prefix with no code is a config error, not a panic.
+	if _, err := NewBuiltinFilter("language_", BuiltinConfig{}); err == nil {
+		t.Fatalf("language_ accepted; want error naming the code requirement")
 	}
 
 	lintF, err := NewBuiltinFilter("lint_go", BuiltinConfig{GofmtBin: "gofmt", GoBin: "go"})

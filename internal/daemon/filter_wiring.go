@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"log/slog"
+	"path/filepath"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/config"
@@ -37,12 +38,25 @@ func wireOutputFilterChain(c *Components, cfg *config.Config, scheduler *agent.T
 		return
 	}
 
+	// Load user-supplied language word tables ($MEEPT_HOME/validator/lang)
+	// BEFORE the chain is built so detection sees them on the first step.
+	// Per-file problems Warn but never disable the stage.
+	langDir := filepath.Join(config.MeeptHome(), "validator", "lang")
+	if err := validator.LoadLanguageWordTables(langDir); err != nil {
+		logger.Warn("some user language word tables failed to load; they are skipped",
+			"dir", langDir,
+			"error", err,
+		)
+	}
+
 	// Resolve each configured name against the builtin registry; an
 	// unknown name is a config error logged at Warn with the valid set,
 	// and skips the whole stage (never a partial chain).
 	filters := make([]validator.OutputFilter, 0, len(names))
 	for _, name := range names {
-		f, err := validator.NewBuiltinFilter(name, validator.BuiltinConfig{})
+		f, err := validator.NewBuiltinFilter(name, validator.BuiltinConfig{
+			ExpectedLang: ofs.ExpectedLanguage,
+		})
 		if err != nil {
 			logger.Warn("invalid output_filters entry; filter stage disabled",
 				"filter", name,

@@ -701,6 +701,13 @@ type OutputFiltersConfig struct {
 	// Filters lists the builtin filter names to run, in order
 	// (json_format, language_en, lint_go).
 	Filters []string `json:"filters" toml:"filters"`
+	// ExpectedLanguage is the language code the language filter treats as
+	// correct output ("en", "de", "zh", ...). Default "en". A maintainer
+	// wanting French output sets "fr" and provides a word list (see
+	// LanguageFilter docs); CJK/other-script languages need no list.
+	// The literal filter name "language_en" in Filters stays a compat
+	// alias: it resolves to THIS code, not hardcoded English.
+	ExpectedLanguage string `json:"expected_language" toml:"expected_language"`
 }
 
 // VerificationDefaults holds daemon-level verification defaults.

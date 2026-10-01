@@ -2,8 +2,12 @@ package validator
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/caimlas/meept/internal/task"
@@ -43,10 +47,80 @@ var (
 	germanCueSet = parseWordList(germanCues)
 )
 
+// extraLangTables holds user-supplied word tables for Latin-script
+// languages beyond the built-in en/de pairs, keyed by language code.
+// Loaded once per process from $MEEPT_HOME/validator/lang/<code>.txt
+// (one word per line, # comments allowed) by LoadLanguageWordTables —
+// wired at daemon boot BEFORE the filter chain is built. A maintainer
+// adding French output support drops a ~200-word function-word list
+// (articles, pronouns, common verbs) into validator/lang/fr.txt and sets
+// output_filters.expected_language = "fr": no Go, no rebuild.
+//
+// Thread-safety: written once before the chain exists, read-only after —
+// guarded by loadMu for tests that load per-case.
+var (
+	extraLangTables map[string]map[string]struct{}
+	loadMu          sync.Mutex
+)
+
+// LoadLanguageWordTables reads every <code>.txt under
+// $MEEPT_HOME/validator/lang into the detection tables. Missing dir is
+// the normal case (no user tables); per-file errors are collected and
+// returned so the daemon can Warn without skipping the other files.
+// Safe to call multiple times: later calls REPLACE earlier tables.
+// File I/O happens BEFORE the lock; only the final table swap is
+// synchronized (mutexio: never hold a mutex across I/O).
+func LoadLanguageWordTables(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // no user tables — normal
+		}
+		return fmt.Errorf("language word tables: %w", err)
+	}
+	tables := make(map[string]map[string]struct{})
+	var errs []error
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+			continue
+		}
+		code := strings.TrimSuffix(e.Name(), ".txt")
+		if code == "" || code == "en" || code == "de" {
+			continue // built-ins are code-defined; user files can't shadow them
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read %s: %w", e.Name(), err))
+			continue
+		}
+		words := parseWordList(string(raw))
+		if len(words) < 20 {
+			errs = append(errs, fmt.Errorf("%s: %d words — need >= 20 for a usable hit-rate table (one word per line)", e.Name(), len(words)))
+			continue
+		}
+		tables[code] = words
+	}
+	loadMu.Lock()
+	extraLangTables = tables
+	loadMu.Unlock()
+	return errors.Join(errs...)
+}
+
+// lookupExtraLangSet returns the user table for code, or nil.
+func lookupExtraLangSet(code string) map[string]struct{} {
+	loadMu.Lock()
+	defer loadMu.Unlock()
+	return extraLangTables[code]
+}
+
 func parseWordList(list string) map[string]struct{} {
 	set := make(map[string]struct{}, 256)
 	for w := range strings.FieldsSeq(list) {
-		set[w] = struct{}{}
+		w = strings.TrimSpace(w)
+		if w == "" || strings.HasPrefix(w, "#") {
+			continue
+		}
+		set[strings.ToLower(w)] = struct{}{}
 	}
 	return set
 }
@@ -89,6 +163,9 @@ func detectedLanguage(text string) (string, float64) {
 	latinWords := 0
 	englishHits := 0
 	germanHits := 0
+	// Per-code hit counts for user-supplied tables, materialized lazily:
+	// the common case (no user tables) never allocates it.
+	extraHits := map[string]int{}
 
 	for _, field := range strings.FieldsFunc(text, func(r rune) bool {
 		return !unicode.IsLetter(r) && r != '\''
@@ -110,6 +187,15 @@ func detectedLanguage(text string) (string, float64) {
 		}
 		if _, ok := germanCueSet[word]; ok {
 			germanHits++
+		}
+		// User tables: one lookup per loaded language per word. The map
+		// is usually empty; snap it once per call, not per word.
+		if extraLangTables != nil {
+			for code, set := range snapshotExtraTables() {
+				if _, ok := set[word]; ok {
+					extraHits[code]++
+				}
+			}
 		}
 	}
 
@@ -138,14 +224,36 @@ func detectedLanguage(text string) (string, float64) {
 	}
 	englishRate := float64(englishHits) / float64(latinWords)
 	germanRate := float64(germanHits) / float64(latinWords)
-	switch {
-	case englishRate >= germanRate && englishRate >= 0.5:
-		return "en", englishRate
-	case germanRate > englishRate && germanRate >= 0.5:
-		return "de", germanRate
-	default:
-		return "", max64(englishRate, germanRate)
+	bestCode, bestRate := "en", englishRate
+	if germanRate > bestRate {
+		bestCode, bestRate = "de", germanRate
 	}
+	for code, hits := range extraHits {
+		rate := float64(hits) / float64(latinWords)
+		if rate > bestRate {
+			bestCode, bestRate = code, rate
+		}
+	}
+	if bestRate >= 0.5 {
+		return bestCode, bestRate
+	}
+	return "", max64(englishRate, germanRate)
+}
+
+// snapshotExtraTables copies the extra-table map header (code -> set) so
+// iteration does not hold loadMu. The sets themselves are read-only after
+// load; the snapshot is of the OUTER map only.
+func snapshotExtraTables() map[string]map[string]struct{} {
+	loadMu.Lock()
+	defer loadMu.Unlock()
+	if extraLangTables == nil {
+		return nil
+	}
+	out := make(map[string]map[string]struct{}, len(extraLangTables))
+	for code, set := range extraLangTables {
+		out[code] = set
+	}
+	return out
 }
 
 func max64(a, b float64) float64 {
