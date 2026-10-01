@@ -94,7 +94,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func StripPromptCacheBoundary\(s string\) string](<#StripPromptCacheBoundary>)
 - [func SuperviseArgv\(parentPID, reportFD, deathFD int, spawn \[\]string\) \[\]string](<#SuperviseArgv>)
 - [func SupportedRuntimes\(\) \[\]string](<#SupportedRuntimes>)
-- [func SweepStaleSpawnRecords\(records \[\]SpawnRecord, maxAge time.Duration, now func\(\) time.Time\) \[\]int](<#SweepStaleSpawnRecords>)
+- [func SweepStaleSpawnRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, maxAge time.Duration, now func\(\) time.Time\) \[\]int](<#SweepStaleSpawnRecords>)
 - [func ToolChoiceOf\(opts \[\]ChatOption\) string](<#ToolChoiceOf>)
 - [func ToolChoiceValid\(v string\) bool](<#ToolChoiceValid>)
 - [func ToolConstraintForRuntime\(rt RuntimeType\) string](<#ToolConstraintForRuntime>)
@@ -643,6 +643,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(m \*RuntimeManager\) StatusForProvider\(providerID string\) \(RuntimeStatus, bool\)](<#RuntimeManager.StatusForProvider>)
   - [func \(m \*RuntimeManager\) StopAll\(ctx context.Context\) error](<#RuntimeManager.StopAll>)
   - [func \(m \*RuntimeManager\) StopProvider\(ctx context.Context, providerID string\) error](<#RuntimeManager.StopProvider>)
+  - [func \(m \*RuntimeManager\) SweepCandidates\(\) \[\]\*RuntimeConfig](<#RuntimeManager.SweepCandidates>)
   - [func \(m \*RuntimeManager\) SweepOrphanRuntimes\(waitAfterTerm time.Duration, records \[\]SpawnRecord\) \[\]int](<#RuntimeManager.SweepOrphanRuntimes>)
 - [type RuntimeProcInfo](<#RuntimeProcInfo>)
   - [func ListRuntimeProcesses\(\) \(\[\]RuntimeProcInfo, error\)](<#ListRuntimeProcesses>)
@@ -667,6 +668,8 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func PruneStaleOperatorRecords\(records \[\]SpawnRecord\) \[\]SpawnRecord](<#PruneStaleOperatorRecords>)
   - [func ReadSpawnRecord\(pidFile string\) \(SpawnRecord, error\)](<#ReadSpawnRecord>)
   - [func ScanSpawnRecords\(dir string\) \(\[\]SpawnRecord, error\)](<#ScanSpawnRecords>)
+- [type StaleRecordReap](<#StaleRecordReap>)
+  - [func SweepStaleSpawnRecordsWithAges\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, maxAge time.Duration, now func\(\) time.Time\) \[\]StaleRecordReap](<#SweepStaleSpawnRecordsWithAges>)
 - [type Status](<#Status>)
 - [type StreamAbortedError](<#StreamAbortedError>)
   - [func \(e \*StreamAbortedError\) Error\(\) string](<#StreamAbortedError.Error>)
@@ -1771,13 +1774,13 @@ SupportedRuntimes returns the list of supported runtime types.
 <a name="SweepStaleSpawnRecords"></a>
 ## func SweepStaleSpawnRecords
 
-	func SweepStaleSpawnRecords(records []SpawnRecord, maxAge time.Duration, now func() time.Time) []int
+	func SweepStaleSpawnRecords(cfgs []*RuntimeConfig, records []SpawnRecord, maxAge time.Duration, now func() time.Time) []int
 
-SweepStaleSpawnRecords reaps runtimes that the ppid==1 match of the boot orphan sweep cannot see through the ownership guard: a record older than maxAge whose pid is still ALIVE, re\-parented to init, and whose command line matches the record's argv \(issue \#54 — two orphaned llama\-servers survived \-\-keep runs whose daemons were SIGKILLed\). The PID file's ModTime is the record age proxy.
+SweepStaleSpawnRecords reaps runtimes that the ppid==1 match of the boot orphan sweep cannot see through the ownership guard: a record older than maxAge whose pid is still ALIVE, re\-parented to init, and whose command line matches the record's argv \(issue \#54\). The PID file's ModTime is the record age proxy.
 
-Guards, in order: a record at or under maxAge is skipped; a dead pid is skipped \(the existing orphan sweep and record pruning own dead\-pid cleanup — double\-processing here would race a replacement spawn\); a process whose parent is not init is skipped \(a live meept daemon owns it\); a command line that does not match the record's argv is skipped \(matchesSpawnCommand, the same identity\-revalidation helper the boot sweep matches with\). A surviving pid keeps its handles.
+cfgs are the endpoint configs for the RuntimeHasLiveOwner veto \(nil disables the veto\): a stale record whose command line matches an endpoint recording a DIFFERENT live owner is left alone, exactly as the boot sweep leaves it. The F57/F58 contract the boot sweep enforces via sweepableRecord applies here too: a record whose runtime opted OUT of daemon\-driven stopping \(AutoStop=false, e.g. an operator\-started \`meept runtime start\`\) is never reaped, whatever its age.
 
-maxAge is a parameter so tests can pin the boundary; production callers pass spawnRecordStaleAfter. now is likewise a test seam. Returns the pids confirmed gone. Best\-effort, like every sweep: never returns an error.
+Returns the pids confirmed gone. Best\-effort, like every sweep: never returns an error.
 
 <a name="ToolChoiceOf"></a>
 ## func ToolChoiceOf
@@ -6900,6 +6903,13 @@ StopAll stops all running runtimes that have auto\_stop\_on\_exit=true. Processe
 
 StopProvider stops a specific provider's runtime \(and the shared subprocess\).
 
+<a name="RuntimeManager.SweepCandidates"></a>
+### func \(\*RuntimeManager\) SweepCandidates
+
+	func (m *RuntimeManager) SweepCandidates() []*RuntimeConfig
+
+SweepCandidates is the exported read of sweepCandidates for the daemon call site \(internal/daemon/orphan.go\), which threads the configs into the stale\-record sweep so its live\-owner veto matches the manager sweep's \(audit finding H2, 2026\-09\-29 bughunt\). Snapshot under the manager lock.
+
 <a name="RuntimeManager.SweepOrphanRuntimes"></a>
 ### func \(\*RuntimeManager\) SweepOrphanRuntimes
 
@@ -7111,6 +7121,27 @@ ReadSpawnRecord reads and parses the record written beside pidFile.
 	func ScanSpawnRecords(dir string) ([]SpawnRecord, error)
 
 ScanSpawnRecords returns every parseable record in dir \(glob \*.cmd\). An unreadable or invalid entry is skipped so one corrupt file cannot hide the rest of the records, and a missing dir yields no records and no error — a scan failure must never abort the sweep.
+
+<a name="StaleRecordReap"></a>
+## type StaleRecordReap
+
+SweepStaleSpawnRecords reaps runtimes that the ppid==1 match of the boot orphan sweep cannot see through the ownership guard: a record older than maxAge whose pid is still ALIVE, re\-parented to init, and whose command line matches the record's argv \(issue \#54 — two orphaned llama\-servers survived \-\-keep runs whose daemons were SIGKILLed\). The PID file's ModTime is the record age proxy.
+
+Guards, in order: a record at or under maxAge is skipped; a dead pid is skipped \(the existing orphan sweep and record pruning own dead\-pid cleanup — double\-processing here would race a replacement spawn\); a process whose parent is not init is skipped \(a live meept daemon owns it\); a command line that does not match the record's argv is skipped \(matchesSpawnCommand, the same identity\-revalidation helper the boot sweep matches with\). A surviving pid keeps its handles.
+
+maxAge is a parameter so tests can pin the boundary; production callers pass spawnRecordStaleAfter. now is likewise a test seam. Returns the pids confirmed gone. Best\-effort, like every sweep: never returns an error. StaleRecordReap is one stale\-record runtime the sweep confirmed reaped: the pid and the record age \(PID\-file mtime relative to the sweep's clock\) captured BEFORE the reap removed the PID file. The age travels with the result because callers that log it \(internal/daemon/orphan.go\) would otherwise stat a PID file the sweep has already deleted — which always read as a 0s age \(audit finding L1\).
+
+	type StaleRecordReap struct {
+	    PID int
+	    Age time.Duration
+	}
+
+<a name="SweepStaleSpawnRecordsWithAges"></a>
+### func SweepStaleSpawnRecordsWithAges
+
+	func SweepStaleSpawnRecordsWithAges(cfgs []*RuntimeConfig, records []SpawnRecord, maxAge time.Duration, now func() time.Time) []StaleRecordReap
+
+SweepStaleSpawnRecordsWithAges is SweepStaleSpawnRecords returning the reaped pids WITH the record age observed at stat time \(see StaleRecordReap\).
 
 <a name="Status"></a>
 ## type Status

@@ -7645,7 +7645,7 @@ ProcessAmendment processes a pending amendment request.
 
 	func (d *Dispatcher) RecallAnswer(ctx context.Context, result *DispatchResult, conversationID string, wait bool) (string, bool)
 
-RecallAnswer is the option\-3 continuity answer for a recall\-intent follow\-up. handled=false means the caller should fall through to the normal LLM path \(no prior task, or nothing to say without an LLM\).
+RecallAnswer is the option\-3 continuity answer for a follow\-up question about prior work. The dispatcher gates the call on SHAPE \(referencesPriorWork && isInterrogative, or the platform\-labeled sibling\), never on the intent label: the 8B classifier labels the same question recall/chat/work/platform across runs, so a label check here made the shape\-gated branch a no\-op for every non\-recall label. handled=false means the caller should fall through to the normal LLM path \(no prior task, or nothing to say without an LLM\).
 
 <a name="Dispatcher.RecordDispatch"></a>
 ### func \(\*Dispatcher\) RecordDispatch
