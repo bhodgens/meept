@@ -1,12 +1,15 @@
 # golangci-lint configuration for meept
 # https://golangci-lint.run/usage/configuration/
 #
-# NOTE: the "Found unknown linters in //nolint directives: goerr113, mutexio,
+# NOTE: the "Found unknown linters in //nolint directives: mutexio,
 # u1000" warning is expected and intentionally left in place — there is no
-# config knob to allow-list custom nolint names (golangci-lint#1450), these
-# directives are consumed by our own analyzers via `make analyzers`, and
+# config knob to allow-list custom nolint names (golangci-lint#1450), and
 # registering them as golangci-lint plugins would require a plugin build
-# pipeline. Do not remove the //nolint:mutexio / //nolint:u1000 directives.
+# pipeline. These directives are consumed by the repo's own tooling:
+#   //nolint:mutexio -> tools/analyzers/mutexio (make analyzers, pre-commit hook)
+#   //nolint:U1000   -> .githooks/pre-commit-u1000 (staticcheck U1000 gate)
+# Do not remove them. The former //nolint:goerr113 directives were dead
+# (no linter or hook consumed that name) and were removed 2026-09-30.
 #
 # Curated 2026-06-19 after a full audit (see docs/20260618-checkreview.md).
 # The goal: enable linters that catch real bugs at acceptable noise; disable

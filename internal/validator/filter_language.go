@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -250,9 +251,7 @@ func snapshotExtraTables() map[string]map[string]struct{} {
 		return nil
 	}
 	out := make(map[string]map[string]struct{}, len(extraLangTables))
-	for code, set := range extraLangTables {
-		out[code] = set
-	}
+	maps.Copy(out, extraLangTables)
 	return out
 }
 

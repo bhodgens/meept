@@ -144,7 +144,7 @@ func (h *CompressionHandler) Execute(ctx context.Context, toolName string, args 
 	case "mcc_stats":
 		return h.execStats(args)
 	default:
-		return nil, fmt.Errorf("unknown compression tool: %s", toolName) //nolint:goerr113 // invalid tool name
+		return nil, fmt.Errorf("unknown compression tool: %s", toolName)
 	}
 }
 

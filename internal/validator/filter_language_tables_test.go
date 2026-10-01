@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,11 +37,11 @@ sont était étaient a ai as ont avons avez sera seront être avoir fait faire p
 
 	// The French-expecting filter passes French output...
 	f := NewLanguageFilter("fr")
-	if r := f.Process(nil, nil, "le chat est sur la table et il est très content"); r.Outcome != FilterPass {
+	if r := f.Process(context.TODO(), nil, "le chat est sur la table et il est très content"); r.Outcome != FilterPass {
 		t.Fatalf("french output vs language_fr: %+v, want pass", r)
 	}
 	// ...and still fails English output.
-	if r := f.Process(nil, nil, "the cat is on the table and it is very happy to see it"); r.Outcome != FilterFail {
+	if r := f.Process(context.TODO(), nil, "the cat is on the table and it is very happy to see it"); r.Outcome != FilterFail {
 		t.Fatalf("english output vs language_fr: %+v, want fail", r)
 	}
 }

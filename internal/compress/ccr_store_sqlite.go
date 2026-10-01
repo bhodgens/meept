@@ -404,5 +404,5 @@ func (s *sqliteStore) Close() error {
 
 // Errors
 var (
-	ErrStoreClosed = fmt.Errorf("CCR store is closed") //nolint:goerr113 // sentinel error
+	ErrStoreClosed = fmt.Errorf("CCR store is closed")
 )
