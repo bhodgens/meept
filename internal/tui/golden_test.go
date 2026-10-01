@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,9 @@ func normalizeGoldenView(t *testing.T, raw string) string {
 	// Chat HH:MM timestamps: replace any 2-digit-colon-2-digit token so
 	// wall-clock message headers never break the golden.
 	stripped = replaceClockTokens(stripped)
+	// Month-day date cells ("Aug 21"): wall-clock derived for any
+	// fixture younger than years — normalize like clock tokens.
+	stripped = monthDayRe.ReplaceAllString(stripped, "mmm dd")
 	// Trim trailing whitespace per line + trailing blank lines: lipgloss
 	// padding varies with terminal quirks but content must not.
 	lines := strings.Split(stripped, "\n")
@@ -71,6 +75,12 @@ func normalizeGoldenView(t *testing.T, raw string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// monthDayRe matches a month-abbreviation + day token ("Aug 21") —
+// the date half of the sessions/plan table's "Jan 02 15:04" cells.
+// These are wall-clock derived for any fixture younger than years, so
+// they are normalized like clock tokens (see the hazard note above).
+var monthDayRe = regexp.MustCompile(`\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}\b`)
 
 // replaceClockTokens rewrites HH:MM tokens to a fixed placeholder.
 func replaceClockTokens(s string) string {

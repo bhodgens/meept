@@ -5,8 +5,8 @@ sessions  (2)
 │last activity                               ││                            │
 │────────────────────────────────────────────││id:       sess-alpha        │
 │────────────────                            ││name:     alpha             │
-│ alpha session                 Aug 21 HH:MM ││created:  Aug 21 HH:MM      │
-│ beta session                  Aug 21 HH:MM ││activity: Aug 21            │
+│ alpha session                 mmm dd HH:MM ││created:  mmm dd HH:MM      │
+│ beta session                  mmm dd HH:MM ││activity: mmm dd            │
 │                                            ││                            │
 │                                            ││--- plans ---               │
 │                                            ││no plans                    │

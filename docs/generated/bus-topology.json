@@ -785,19 +785,19 @@
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 881,
+        "line": 890,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 935,
+        "line": 944,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 2066,
+        "line": 2075,
         "payload_keys": [],
         "via_helper": true
       },
@@ -884,7 +884,7 @@
     "pair.session_created": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 1721,
+        "line": 1730,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1534,7 +1534,7 @@
       },
       {
         "file": "internal/daemon/session_hooks.go",
-        "line": 151,
+        "line": 150,
         "payload_keys": [],
         "via_const": true
       }
@@ -1840,7 +1840,7 @@
     "task.approved": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 2060,
+        "line": 2069,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1940,19 +1940,19 @@
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 589,
+        "line": 598,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 1651,
+        "line": 1660,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 1663,
+        "line": 1672,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2003,7 +2003,7 @@
     "task.interview": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 999,
+        "line": 1008,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2062,7 +2062,7 @@
     "task.pending_approval": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 1970,
+        "line": 1979,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2076,13 +2076,13 @@
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 872,
+        "line": 881,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 926,
+        "line": 935,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2116,7 +2116,7 @@
     "task.rejected": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 2096,
+        "line": 2105,
         "payload_keys": [],
         "via_helper": true
       }
