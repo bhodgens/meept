@@ -91,7 +91,7 @@ class WebSocketService {
   /// real one threw synchronously before the kIsWeb guard existed).
   @visibleForTesting
   static Future<String?> Function(int retryCount)?
-      diagnoseConnectFailureOverride;
+  diagnoseConnectFailureOverride;
 
   /// Timestamp when the connection was last established (null when disconnected).
   DateTime? _connectedAt;
@@ -126,10 +126,16 @@ class WebSocketService {
     int? port,
     String? apiKey,
     StorageService? storage,
+    String scheme = 'wss',
   }) : _host = host ?? AppConstants.defaultApiHost,
        _port = port ?? AppConstants.defaultApiPort,
+       _scheme = scheme,
        _apiKey = apiKey,
        _storage = storage;
+
+  /// URL scheme for the upgrade request: 'wss' (production default) or
+  /// 'ws' (test-only; the e2e stub serves plain HTTP/WS on loopback).
+  final String _scheme;
 
   /// Create a WebSocketService using persisted host/port/API key from
   /// [storage].
@@ -370,7 +376,7 @@ class WebSocketService {
     }
 
     try {
-      final uri = Uri.parse('wss://$_host:$_port$wsPath');
+      final uri = Uri.parse('$_scheme://$_host:$_port$wsPath');
 
       // Use Authorization header for WebSocket authentication on
       // desktop/mobile platforms.  Flutter Web's underlying browser

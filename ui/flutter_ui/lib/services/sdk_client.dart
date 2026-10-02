@@ -64,19 +64,23 @@ class SdkApiClient {
   // Construction
   // ------------------------------------------------------------------
 
-  SdkApiClient({required String host, int? port, String? apiKey})
-    : baseUrl = 'https://$host:${port ?? AppConstants.defaultApiPort}',
-      _dio = Dio(
-        BaseOptions(
-          baseUrl: 'https://$host:${port ?? AppConstants.defaultApiPort}',
-          connectTimeout: AppConstants.connectionTimeout,
-          receiveTimeout: AppConstants.receiveTimeout,
-          headers: {
-            'Content-Type': 'application/json',
-            if (apiKey != null) 'Authorization': 'Bearer $apiKey',
-          },
-        ),
-      ) {
+  SdkApiClient({
+    required String host,
+    int? port,
+    String? apiKey,
+    String scheme = 'https',
+  }) : baseUrl = '$scheme://$host:${port ?? AppConstants.defaultApiPort}',
+       _dio = Dio(
+         BaseOptions(
+           baseUrl: '$scheme://$host:${port ?? AppConstants.defaultApiPort}',
+           connectTimeout: AppConstants.connectionTimeout,
+           receiveTimeout: AppConstants.receiveTimeout,
+           headers: {
+             'Content-Type': 'application/json',
+             if (apiKey != null) 'Authorization': 'Bearer $apiKey',
+           },
+         ),
+       ) {
     // Configure TLS with certificate pinning on native platforms.
     // Web uses the browser's default HTTP client with browser TLS handling.
     if (!kIsWeb) {
