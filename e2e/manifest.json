@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generated": "2026-09-29",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet.",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side: cd ui/flutter_ui && flutter test test/e2e runs gui-flows (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01) against a wire-shape stub; the pre-commit-e2e Go hook does not scan Dart files, so that command is the gate (add to CI/lint-ci when the Flutter toolchain is present).",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -507,6 +507,12 @@
       "name": "tui-flows",
       "dir": "e2e/suites/tui-flows",
       "status": "implemented"
+    },
+    {
+      "name": "gui-flows",
+      "dir": "ui/flutter_ui/test/e2e",
+      "status": "implemented",
+      "note": "Dart-side: run via cd ui/flutter_ui && flutter test test/e2e (not go test)"
     }
   ],
   "scenarios": [
@@ -2250,6 +2256,72 @@
       "paths": [
         "internal/tui/models/chat.go",
         "internal/tui/app.go"
+      ]
+    },
+    {
+      "id": "tui-steer-01",
+      "suite": "tui-flows",
+      "diff": "M",
+      "title": "ctrl+s steering: lifecycle adoption + stable thread keys make the seam live; the flow runs the real ctrl+s path and SKIPs with the precise remaining seam (headless EventStream delivery) until that wiring lands",
+      "paths": [
+        "internal/tui/events.go",
+        "internal/tui/models/chat.go",
+        "internal/agent/thread_router.go"
+      ]
+    },
+    {
+      "id": "tui-plans-01",
+      "suite": "tui-flows",
+      "diff": "S",
+      "title": "plans view renders a created plan (title, count, draft state) via the real plan.create RPC + list_by_session seam",
+      "paths": [
+        "internal/tui/models/plans.go"
+      ]
+    },
+    {
+      "id": "tui-tasks-01",
+      "suite": "tui-flows",
+      "diff": "S",
+      "title": "task submit appears as a row in the tasks view (store row asserted pre-boot, table separator rendered)",
+      "paths": [
+        "internal/tui/models/tasks.go"
+      ]
+    },
+    {
+      "id": "gui-terminal-01",
+      "suite": "gui-flows",
+      "diff": "M",
+      "title": "terminal-before-ack ordering: pendingTurns resolves, reply in provider state and rendered (pins audit findings 19-21)",
+      "paths": [
+        "ui/flutter_ui/lib/providers/chat_provider.dart",
+        "ui/flutter_ui/test/e2e/"
+      ]
+    },
+    {
+      "id": "gui-session-01",
+      "suite": "gui-flows",
+      "diff": "M",
+      "title": "session switch reloads transcript and RETAINS the departed session's pendingTurns (F20 anti-wipe pin)",
+      "paths": [
+        "ui/flutter_ui/lib/providers/chat_provider.dart"
+      ]
+    },
+    {
+      "id": "gui-quota-01",
+      "suite": "gui-flows",
+      "diff": "S",
+      "title": "quota_wait surfaces the waiting row; later terminal resolves it",
+      "paths": [
+        "ui/flutter_ui/lib/providers/chat_provider.dart"
+      ]
+    },
+    {
+      "id": "gui-stream-01",
+      "suite": "gui-flows",
+      "diff": "M",
+      "title": "ordered streaming deltas land as one bubble; concatenation delivered exactly once via terminal (documents the replace-by-id gap)",
+      "paths": [
+        "ui/flutter_ui/lib/providers/chat_provider.dart"
       ]
     }
   ]
