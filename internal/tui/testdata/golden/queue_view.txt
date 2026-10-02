@@ -1,21 +1,26 @@
  meept
-job queue
-
-
-╭──────────────────────────────────────────────────────────────────────────╮
-│  pending: 2  │  processing: 0  │  completed: 5  │  failed: 0             │
-╰──────────────────────────────────────────────────────────────────────────╯
-filter: pending
-
-╭──────────────────────────────────────────────────────────────────────────────────────────╮
-│ id                    type          priority    state         task                       │
-│──────────────────────────────────────────────────────────────────────────────────────────│
-│ job-1                 one_off       normal      pending       task-1                     │
-│ job-2                 project_task  high        completed     -                          │
-│                                                                                          │
-│                                                                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────╯
-
-r: refresh | p/f/c/a: filter | R: retry | ?: help
- ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ j/k navigate │ r refresh │ tab
- toggle view │ ^X y sidebar │ /test/project │ verbosity: quiet
+job queue                                                                   ╭───────────────────────╮
+                                                                            │  meept dev (commit:   │
+                                                                            │    unknown, built:    │
+╭─────────────────────────────────────────────────╮                         │       unknown)        │
+│  pending: 2  │  processing: 0  │  completed: 5  │                         │  ▾ status             │
+│  │  failed: 0                                   │                         │   daemon:             │
+╰─────────────────────────────────────────────────╯                         │ disconnected          │
+filter: pending                                                             │  ▾ agent activity     │
+                                                                            │   no active agents    │
+╭──────────────────────────────────────────────────────────────────────────╮│   workers: none       │
+│ id                    type          priority    state         task       ││  ▾ tasks              │
+│──────────────────────────────────────────────────────────────────────────││   no active tasks     │
+│ job-1                 one_off       normal      pend                     ││  ▸ plan               │
+│ job-2                 project_task  high        comp                     ││  ▾ recent memory      │
+│                                                                          ││   ...                 │
+│                                                                          ││                       │
+╰──────────────────────────────────────────────────────────────────────────╯│ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
+                                                                            │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
+r: refresh | p/f/c/a: filter | R: retry | ?: help                           │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
+                                                                            │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
+                                                                            │                       │
+                                                                            ╰───────────────────────╯
+ ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ j/k
+ navigate │ r refresh │ tab toggle view │
+ /test/project │ verbosity: quiet

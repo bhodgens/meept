@@ -411,8 +411,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
   Future<void> loadMessages() async {
     final generation = ++_loadGeneration;
 
-    // Clear messages while loading
-    state = const ChatState(messages: [], isLoading: true, error: null);
+    // Clear messages while loading. copyWith (NOT a fresh ChatState): the
+    // F20 wipe class — a reload mid-turn must not drop pendingTurns, per
+    // the copyWith contract below (scopes-2 audit MED, 2026-09-18).
+    state = state.copyWith(messages: const [], isLoading: true, error: null);
 
     // Cancel any existing WS subscription before the HTTP fetch
     _wsChatSubscription?.cancel();
@@ -462,7 +464,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
       state = state.copyWith(messages: messages, isLoading: false);
     } catch (e) {
       if (_disposed) return;
-      state = state.copyWith(messages: [], isLoading: false, error: e.toString());
+      state = state.copyWith(
+        messages: [],
+        isLoading: false,
+        error: e.toString(),
+      );
     }
 
     if (_disposed || generation != _loadGeneration) return;
@@ -497,12 +503,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
           state.pendingTurns.forEach((pendingId, pt) {
             if (frameTurnId == null || pt.turnId == frameTurnId) {
               noteTurnProgress(
-                  pt.turnId,
-                  progress.stage.isNotEmpty
-                      ? progress.stage
-                      : (progress.message.isNotEmpty
+                pt.turnId,
+                progress.stage.isNotEmpty
+                    ? progress.stage
+                    : (progress.message.isNotEmpty
                           ? progress.message
-                          : 'working'));
+                          : 'working'),
+              );
             }
           });
         });
@@ -600,7 +607,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
         // Render the reply as an assistant bubble unless the reply already
         // arrived via the regular chat_message WS push (dedupe by content
         // against the most recent assistant bubble).
-        if (event.reply.isNotEmpty && !_lastAssistantContentEquals(event.reply)) {
+        if (event.reply.isNotEmpty &&
+            !_lastAssistantContentEquals(event.reply)) {
           final reply = ChatMessage(
             id: 'turn_${event.turnId}',
             role: 'assistant',
@@ -735,7 +743,14 @@ class ChatNotifier extends StateNotifier<ChatState> {
       _consumeEarlyTerminal(ack.turnId);
       return ack;
     } catch (e) {
-      if (_disposed) return ChatSubmitAck(turnId: '', conversationId: '', sessionId: '', accepted: false, note: e.toString());
+      if (_disposed)
+        return ChatSubmitAck(
+          turnId: '',
+          conversationId: '',
+          sessionId: '',
+          accepted: false,
+          note: e.toString(),
+        );
       String errorStr;
       if (e is DioException) {
         final code = e.response?.statusCode;
@@ -746,7 +761,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
         errorStr = e.toString();
       }
       state = state.copyWith(error: errorStr);
-      return ChatSubmitAck(turnId: '', conversationId: '', sessionId: '', accepted: false, note: errorStr);
+      return ChatSubmitAck(
+        turnId: '',
+        conversationId: '',
+        sessionId: '',
+        accepted: false,
+        note: errorStr,
+      );
     } finally {
       _isSending = false;
     }
@@ -1030,9 +1051,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // F20: copyWith preserves pendingTurns — steering while a turn is
       // in flight must not drop it.
       _lastFailedSend = null;
-      state = state.copyWith(
-        isLoading: false,
-      );
+      state = state.copyWith(isLoading: false);
     } catch (e) {
       if (_disposed) return;
       // Extract URL from DioException for better error messages.
@@ -1176,17 +1195,41 @@ class ChatNotifier extends StateNotifier<ChatState> {
         ttsNotifier.speak(message.content);
       }
 
-      // Replace or update existing message by id if it exists
-      final existingIndex = state.messages.indexWhere(
-        (m) => m.id == message.id,
-      );
+      // Streaming accumulation (gui-stream-01): mid-turn chat_message
+      // deltas carry no id, so ChatMessage.fromBackendMessage parses every
+      // delta to id == ''. Replace-by-id collapsed them all onto one
+      // empty-id slot — only the LAST chunk survived. An id-less assistant
+      // delta must instead APPEND to the in-flight assistant stream bubble
+      // (the trailing message when it is also an empty-id assistant
+      // bubble), preserving order. Distinct-id replacement (finalized
+      // replies, history refreshes) is unchanged.
+      final isIdlessAssistantDelta =
+          message.id.isEmpty && message.role == 'assistant';
+      final last = state.messages.isEmpty ? null : state.messages.last;
+      final isStreamBubble =
+          last != null && last.id.isEmpty && last.role == 'assistant';
 
       List<ChatMessage> newMessages;
-      if (existingIndex >= 0) {
+      if (isIdlessAssistantDelta && isStreamBubble) {
+        // Accumulate into the one stream bubble, in order.
         newMessages = [...state.messages];
-        newMessages[existingIndex] = message;
-      } else {
+        newMessages[newMessages.length - 1] = last.copyWith(
+          content: last.content + message.content,
+        );
+      } else if (isIdlessAssistantDelta) {
+        // First delta of a stream: open the stream bubble.
         newMessages = [...state.messages, message];
+      } else {
+        // Replace or update existing message by id if it exists
+        final existingIndex = state.messages.indexWhere(
+          (m) => m.id == message.id,
+        );
+        if (existingIndex >= 0) {
+          newMessages = [...state.messages];
+          newMessages[existingIndex] = message;
+        } else {
+          newMessages = [...state.messages, message];
+        }
       }
 
       if (newMessages.length > _maxMessages) {

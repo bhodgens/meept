@@ -1,22 +1,25 @@
  meept
-sessions  (2)
-╭────────────────────────────────────────────╮╭────────────────────────────╮
-│ title                         created      ││alpha session               │
-│last activity                               ││                            │
-│────────────────────────────────────────────││id:       sess-alpha        │
-│────────────────                            ││name:     alpha             │
-│ alpha session                 mmm dd HH:MM ││created:  mmm dd HH:MM      │
-│ beta session                  mmm dd HH:MM ││activity: mmm dd            │
-│                                            ││                            │
-│                                            ││--- plans ---               │
-│                                            ││no plans                    │
-│                                            ││                            │
-│                                            ││                            │
-│                                            ││                            │
-│                                            │╰────────────────────────────╯
-│                                            │
-╰────────────────────────────────────────────╯
-
-n: new | d: archive | D: delete | r: refresh | enter: details | up/down: navigate | f: search | ?: help
- ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ ^X y sidebar │ /test/project │
- verbosity: quiet
+sessions  (2)                                                                                          ╭───────────────────────╮
+╭───────────────────╮╭────────────────────────────╮                                                    │  meept dev (commit:   │
+│ title             ││alpha session               │                                                    │    unknown, built:    │
+│created       last ││                            │                                                    │       unknown)        │
+│activity           ││id:       sess-alpha        │                                                    │  ▾ status             │
+│───────────────────││name:     alpha             │                                                    │   daemon:             │
+│───────────────────││created:  mmm dd HH:MM      │                                                    │ disconnected          │
+│────────────       ││activity: mmm dd            │                                                    │  ▾ agent activity     │
+│ alpha session     ││                            │                                                    │   no active agents    │
+│ beta session      ││--- plans ---               │                                                    │   workers: none       │
+│                   ││no plans                    │                                                    │  ▾ tasks              │
+│                   ││                            │                                                    │   no active tasks     │
+│                   ││                            │                                                    │  ▸ plan               │
+│                   ││                            │                                                    │  ▾ recent memory      │
+│                   │╰────────────────────────────╯                                                    │   ...                 │
+│                   │                                                                                  │                       │
+│                   │                                                                                  │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
+│                   │                                                                                  │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
+╰───────────────────╯                                                                                  │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
+                                                                                                       │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
+n: new | d: archive | D: delete | r: refresh | enter: details | up/down: navigate | f: search | ?: help│                       │
+                                                                                                       ╰───────────────────────╯
+ ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │
+ /test/project │ verbosity: quiet

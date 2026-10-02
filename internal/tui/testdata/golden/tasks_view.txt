@@ -1,22 +1,26 @@
  meept
-tasks   tasks   jobs   lineage    [all]
-╭────────────────────────────────────────────────────────────────────────────────────────╮
-│ name             state     agent         steps    progress      memory      updated    │
-│────────────────────────────────────────────────────────────────────────────────────────│
-│ write the gold…  ✓ done    -             2/2      ████████ 2/2  ⚡0⬅0       e          │
-│                                                                                        │
-│                                                                                        │
-│                                                                                        │
-│                                                                                        │
-│                                                                                        │
-│                                                                                        │
-│                                                                                        │
-╰────────────────────────────────────────────────────────────────────────────────────────╯
-╭──────────────────────────────────────────────────────────────────────────╮
-│                                                                          │
-│  select a job to view details                                            │
-│                                                                          │
-╰──────────────────────────────────────────────────────────────────────────╯
-r: refresh | tab: jobs view | t: lineage | f: filter | <-/->: collapse/expand | enter: details | ?: help
- ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ j/k navigate │ enter details │
- r refresh │ tab toggle view │ ^X y sidebar │ /test/project │ verbosity: quiet
+tasks   tasks   jobs   lineage    [all]                                                                                                                    ╭───────────────────────╮
+╭────────────────────────────────────────────────────────────────────────────────────────╮                                                                 │  meept dev (commit:   │
+│ name             state     agent         steps    progress      memory      updated    │                                                                 │    unknown, built:    │
+│────────────────────────────────────────────────────────────────────────────────────────│                                                                 │       unknown)        │
+│ write the gold…  ✓ done    -             2/2      ██                                   │                                                                 │  ▾ status             │
+│                                                                                        │                                                                 │   daemon:             │
+│                                                                                        │                                                                 │ disconnected          │
+│                                                                                        │                                                                 │  ▾ agent activity     │
+│                                                                                        │                                                                 │   no active agents    │
+│                                                                                        │                                                                 │   workers: none       │
+│                                                                                        │                                                                 │  ▾ tasks              │
+│                                                                                        │                                                                 │   no active tasks     │
+╰────────────────────────────────────────────────────────────────────────────────────────╯                                                                 │  ▸ plan               │
+╭─────────────────────────────────────────────────╮                                                                                                        │  ▾ recent memory      │
+│                                                 │                                                                                                        │   ...                 │
+│  select a job to view details                   │                                                                                                        │                       │
+│                                                 │                                                                                                        │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
+╰─────────────────────────────────────────────────╯                                                                                                        │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
+r: refresh | tab: jobs view | t: lineage | f: filter | <-/->: collapse/expand | enter: details | ?: help                                                   │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
+                                                                                                                                                           │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
+                                                                                                                                                           │                       │
+                                                                                                                                                           ╰───────────────────────╯
+ ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ j/k
+ navigate │ enter details │ r refresh │ tab toggle
+ view │ /test/project │ verbosity: quiet

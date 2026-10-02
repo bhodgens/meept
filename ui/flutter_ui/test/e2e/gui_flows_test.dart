@@ -14,7 +14,10 @@
 //                      waiting row; a later terminal resolves it.
 //   gui-stream-01    TestStreamingTurnAccumulatesAndFinalizes
 //                    - ordered chat_message deltas accumulate into ONE
-//                      rendered message, finalized exactly once.
+//                      rendered message carrying the deltas' concatenation,
+//                      finalized exactly once; PLUS
+//                      TestReloadMidTurnRetainsPendingTurns — loadMessages
+//                      mid-turn RETAINS pendingTurns (F20 reload pin).
 //
 // Every flow drives the REAL ChatNotifier (pumpRealApp — no service mocks)
 // against the StubDaemon and asserts BOTH provider state AND rendered
@@ -727,22 +730,35 @@ void main() {
       final state = container.read(chatProvider(sessionId));
       expect(state.error, isNull);
 
-      // Streaming shape: the ordered deltas must NOT fan out into five
-      // separate assistant bubbles.
+      // THE ACCUMULATION PIN: the rendered transcript must carry the
+      // ordered concatenation built from the DELTAS THEMSELVES — the
+      // stream bubble is opened by the first delta and grown by every
+      // subsequent delta in arrival order, so the assistant text equals
+      // 'zero one two three four' BEFORE the terminal lands. (The
+      // terminal's content-dedupe then suppresses its own second copy.)
       final assistantBubbles = state.messages
           .where((m) => m.role == 'assistant')
           .toList();
       expect(
         assistantBubbles.length,
-        lessThanOrEqualTo(2),
+        1,
         reason:
-            '5 deltas must collapse into at most the streamed bubble plus '
-            'the finalized bubble — never 5 separate messages; '
+            'the 5 deltas must accumulate into exactly ONE assistant '
+            'bubble — never 5 fan-out messages, never a lone last-delta '
+            'bubble; '
+            'messages=${state.messages.map((m) => '${m.role}:${m.content}').toList()}',
+      );
+      expect(
+        assistantBubbles.single.content,
+        full,
+        reason:
+            'the stream bubble must be the ordered concatenation of the '
+            'deltas themselves ("$full"), accumulated in arrival order; '
             'messages=${state.messages.map((m) => '${m.role}:${m.content}').toList()}',
       );
 
-      // The final transcript contains the concatenation IN ORDER (the full
-      // joined text arrives with the terminal event).
+      // The finalized transcript contains the concatenation IN ORDER (the
+      // full joined text arrives with the terminal event).
       expect(
         state.messages.any((m) => m.role == 'assistant' && m.content == full),
         isTrue,
@@ -769,6 +785,66 @@ void main() {
         reason: 'exactly one rendered bubble carries the full text',
       );
       expect(find.byType(PendingTurnIndicator), findsNothing);
+    });
+
+    testWidgets('TestReloadMidTurnRetainsPendingTurns — loadMessages mid-turn '
+        'RETAINS pendingTurns (F20 reload-wipe pin)', (tester) async {
+      const turnId = 'turn-reload-01';
+      const sessionId = 'e2e-session';
+
+      daemon.enqueueChatTurn(
+        turnId: turnId,
+        sessionId: sessionId,
+        // A single non-terminal progress event: the turn stays in flight
+        // across the reload — nothing resolves it during this flow.
+        events: const [
+          StubSseEvent('agent_progress', {'stage': 'thinking'}),
+        ],
+      );
+      final wsFrames = <Map<String, dynamic>>[];
+      final container = await pumpAndAwaitSubscribe(
+        tester,
+        daemon: daemon,
+        sessionId: sessionId,
+        wsFrames: wsFrames,
+      );
+
+      await submitAndAwaitRegistration(
+        tester,
+        container,
+        sessionId,
+        text: 'in flight across reload',
+        expectedTurnId: turnId,
+      );
+      expect(
+        container.read(chatProvider(sessionId)).pendingTurns.keys,
+        contains(turnId),
+        reason: 'precondition: the turn must be tracked before reloading',
+      );
+
+      // Reload the SAME session's history mid-turn (the F20 wipe was the
+      // fresh ChatState(messages: [], isLoading: true, ...) reset inside
+      // loadMessages dropping the map).
+      await tester.runAsync(() async {
+        await container.read(chatProvider(sessionId).notifier).loadMessages();
+      });
+      await tester.pump();
+
+      final reloaded = container.read(chatProvider(sessionId));
+      expect(reloaded.isLoading, isFalse, reason: 'reload completed');
+      expect(
+        reloaded.pendingTurns.keys,
+        contains(turnId),
+        reason:
+            'F20 reload pin: loadMessages must NOT wipe pendingTurns — '
+            'the in-flight turn must survive the loading-state reset; '
+            'pendingTurns=${reloaded.pendingTurns.keys.toList()}',
+      );
+      expect(
+        find.byType(PendingTurnIndicator),
+        findsOneWidget,
+        reason: 'the retained in-flight turn must still render its row',
+      );
     });
   });
 }

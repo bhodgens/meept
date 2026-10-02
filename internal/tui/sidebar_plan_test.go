@@ -81,8 +81,8 @@ func TestSidebar_PlanPanel_EmptyState(t *testing.T) {
 	}
 
 	out := s.renderPlanPanel()
-	if !strings.Contains(out, "Plan") {
-		t.Errorf("expected header to contain %q, got: %s", "Plan", out)
+	if !strings.Contains(out, "plan") {
+		t.Errorf("expected header to contain %q, got: %s", "plan", out)
 	}
 	// PlanView renders "no phases" when empty.
 	if !strings.Contains(out, "no phases") {
@@ -123,8 +123,8 @@ func TestSidebar_PlanPanel_NilPlanViewSafe(t *testing.T) {
 
 	// Should not panic and should return the header + placeholder.
 	out := s.renderPlanPanel()
-	if !strings.Contains(out, "Plan") {
-		t.Errorf("expected header to contain %q, got: %s", "Plan", out)
+	if !strings.Contains(out, "plan") {
+		t.Errorf("expected header to contain %q, got: %s", "plan", out)
 	}
 	if !strings.Contains(out, "no active plan") {
 		t.Errorf("expected nil placeholder, got: %s", out)

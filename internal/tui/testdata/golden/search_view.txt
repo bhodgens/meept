@@ -1,4 +1,26 @@
  meept
-search unavailable
- ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ enter open │ esc back │ j/k
- navigate │ tab scope │ ^X y sidebar │ /test/project │ verbosity: quiet
+search unavailable╭───────────────────────╮
+                  │  meept dev (commit:   │
+                  │    unknown, built:    │
+                  │       unknown)        │
+                  │  ▾ status             │
+                  │   daemon:             │
+                  │ disconnected          │
+                  │  ▾ agent activity     │
+                  │   no active agents    │
+                  │   workers: none       │
+                  │  ▾ tasks              │
+                  │   no active tasks     │
+                  │  ▸ plan               │
+                  │  ▾ recent memory      │
+                  │   ...                 │
+                  │                       │
+                  │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
+                  │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
+                  │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
+                  │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
+                  │                       │
+                  ╰───────────────────────╯
+ ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ enter
+ open │ esc back │ j/k navigate │ tab scope │
+ /test/project │ verbosity: quiet

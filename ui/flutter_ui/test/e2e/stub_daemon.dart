@@ -441,15 +441,13 @@ class StubDaemon {
             : <String, dynamic>{};
         switch (msg['type']) {
           case 'ping':
-            socket.add(jsonEncode({'type': 'pong'}));
+            _safeSocketAdd(socket, {'type': 'pong'});
           case 'subscribe':
             final channel = payload['channel'] ?? 'all';
-            socket.add(
-              jsonEncode({
-                'type': 'subscribed',
-                'data': {'channel': channel},
-              }),
-            );
+            _safeSocketAdd(socket, {
+              'type': 'subscribed',
+              'data': {'channel': channel},
+            });
             final sid = payload['session_id'];
             if (sid is String && sid.isNotEmpty) {
               _wsChatSubscriptions.add(sid);
@@ -489,4 +487,15 @@ class StubDaemon {
   /// ([Stream.first] on the socket itself would detach the server-side
   /// listener).
   Stream<Map<String, dynamic>> wsFrames() => _wsFrameQueue.stream;
+
+  /// Add a frame to [socket], ignoring a sink already closed by the peer
+  /// (the GUI churns its WS connection across loadMessages reloads; a
+  /// reply racing that close must not crash the stub's listen handler).
+  void _safeSocketAdd(WebSocket socket, Map<String, dynamic> frame) {
+    try {
+      socket.add(jsonEncode(frame));
+    } on StateError {
+      // Sink closed — the client is gone; nothing to reply to.
+    }
+  }
 }

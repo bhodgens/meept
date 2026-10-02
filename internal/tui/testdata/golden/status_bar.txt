@@ -1,2 +1,3 @@
- ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ esc normal │ enter send │ ^X y
- sidebar │ /test/project │ verbosity: quiet
+ ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ esc
+ normal │ enter send │ /test/project │ verbosity:
+ quiet

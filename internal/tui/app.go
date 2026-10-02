@@ -764,8 +764,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 
-		// Calculate responsive layout based on terminal width
-		a.calculateLayout()
+		// Calculate responsive layout based on terminal width. A
+		// compact -> non-compact transition re-inits the sidebar (its
+		// Init starts the event stream); the returned cmd MUST be
+		// delivered through the event loop, not spawned, so the
+		// poll-loop ticks it schedules are owned by the program.
+		layoutCmd := a.calculateLayout()
 
 		// Calculate reserved height for chrome (header + status bar)
 		chromeHeight := 1 // status bar
@@ -803,6 +807,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.agents.SetSize(mainWidth, msg.Height-chromeHeight)
 		}
 
+		if layoutCmd != nil {
+			return a, layoutCmd
+		}
 		return a, nil
 
 	case tea.KeyPressMsg:
@@ -2774,7 +2781,20 @@ func (a *App) renderHeader() string {
 // Compact: < 80 cols (no sidebar, single panel)
 // Standard: 80-120 cols (narrow sidebar 25 chars)
 // Wide: > 120 cols (normal sidebar up to 35 chars)
-func (a *App) calculateLayout() {
+//
+// Degenerate zero-size resizes are ignored: bubbletea v2 always delivers an
+// initial WindowSizeMsg{0,0} (output without a TTY reports no size at all)
+// before the real terminal dimensions arrive. Acting on that first pass
+// hid the sidebar before ConnectSuccessMsg could run sidebar.Init, so the
+// event stream never started (no bus.subscribe) and ctrl+s steering was
+// dead for the whole session — the headless e2e tui-steer-01 seam.
+func (a *App) calculateLayout() tea.Cmd {
+	if a.width <= 0 {
+		return nil
+	}
+
+	wasCompact := a.layoutMode == LayoutCompact
+
 	switch {
 	case a.width < 80:
 		a.layoutMode = LayoutCompact
@@ -2784,10 +2804,22 @@ func (a *App) calculateLayout() {
 		a.layoutMode = LayoutWide
 	}
 
-	// Auto-hide sidebar in compact mode
-	if a.layoutMode == LayoutCompact && a.sidebar.IsVisible() {
-		a.sidebar.SetVisible(false)
+	// Auto-hide sidebar in compact mode; restore it (and re-run Init) when
+	// the terminal grows back out of compact. The re-init is the point:
+	// sidebar.Init starts the event stream (bus.subscribe + poll loop), so
+	// a one-way hide left steering (ctrl+s) and progress delivery dead
+	// after any shrink/grow round-trip.
+	if a.layoutMode == LayoutCompact {
+		if a.sidebar.IsVisible() {
+			a.sidebar.SetVisible(false)
+		}
+		return nil
 	}
+	if wasCompact && !a.sidebar.IsVisible() {
+		a.sidebar.SetVisible(true)
+		return a.sidebar.Init()
+	}
+	return nil
 }
 
 // getWindowTitle returns the terminal title string for the tea.View WindowTitle field.

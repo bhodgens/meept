@@ -1113,13 +1113,13 @@ func (s *SidebarModel) View() string {
 	// Click Y is relative to sidebar content area (lipgloss handles border offset)
 	s.panelHeaderY = make(map[SidebarPanel]int)
 	panelNames := map[string]SidebarPanel{
-		"Status":         PanelStatus,
-		"Agent Activity": PanelAgentActivity,
-		"Tasks":          PanelTasks,
-		"Plan":           PanelPlan,
-		"Recent Memory":  PanelMemory,
-		"Metrics":        PanelMetrics,
-		"Activity":       PanelActivityFeed,
+		"status":         PanelStatus,
+		"agent activity": PanelAgentActivity,
+		"tasks":          PanelTasks,
+		"plan":           PanelPlan,
+		"recent memory":  PanelMemory,
+		"metrics":        PanelMetrics,
+		"activity":       PanelActivityFeed,
 	}
 	// Panel lines start at Y=0 relative to content area
 	panelStartY := 0
@@ -1199,12 +1199,12 @@ func (s *SidebarModel) renderPanelHeader(title string, panel SidebarPanel) strin
 func (s *SidebarModel) renderStatusPanel() string {
 	var b strings.Builder
 
-	b.WriteString(s.renderPanelHeader("Status", PanelStatus))
+	b.WriteString(s.renderPanelHeader("status", PanelStatus))
 	b.WriteString("\n")
 
 	if s.expandedPanels[PanelStatus] {
 		if s.statusData == nil {
-			b.WriteString(s.styles.Muted.Render("  Loading..."))
+			b.WriteString(s.styles.Muted.Render("  loading..."))
 		} else {
 			// Connection status
 			connStatus := "disconnected"
@@ -1221,22 +1221,22 @@ func (s *SidebarModel) renderStatusPanel() string {
 			valueStyle := lipgloss.NewStyle().
 				Foreground(ColorForeground)
 
-			b.WriteString(labelStyle.Render("  Daemon:"))
+			b.WriteString(labelStyle.Render("  daemon:"))
 			b.WriteString(connStyle.Render(connStatus))
 			b.WriteString("\n")
 
 			if s.statusData.DaemonRunning {
 				if s.statusData.Uptime != "" {
-					b.WriteString(labelStyle.Render("  Uptime:"))
+					b.WriteString(labelStyle.Render("  uptime:"))
 					b.WriteString(valueStyle.Render(s.statusData.Uptime))
 					b.WriteString("\n")
 				}
 
-				b.WriteString(labelStyle.Render("  Agents:"))
+				b.WriteString(labelStyle.Render("  agents:"))
 				b.WriteString(valueStyle.Render(fmt.Sprintf("%d active", s.statusData.ActiveWorkers)))
 				b.WriteString("\n")
 
-				b.WriteString(labelStyle.Render("  Tasks:"))
+				b.WriteString(labelStyle.Render("  tasks:"))
 				b.WriteString(valueStyle.Render(fmt.Sprintf("%d pending", s.statusData.PendingTasks)))
 				b.WriteString("\n")
 			}
@@ -1249,12 +1249,12 @@ func (s *SidebarModel) renderStatusPanel() string {
 func (s *SidebarModel) renderAgentActivityPanel() string {
 	var b strings.Builder
 
-	b.WriteString(s.renderPanelHeader("Agent Activity", PanelAgentActivity))
+	b.WriteString(s.renderPanelHeader("agent activity", PanelAgentActivity))
 	b.WriteString("\n")
 
 	if s.expandedPanels[PanelAgentActivity] {
 		if len(s.agentActivityData) == 0 {
-			b.WriteString(s.styles.Muted.Render("  No active agents"))
+			b.WriteString(s.styles.Muted.Render("  no active agents"))
 			b.WriteString("\n")
 		} else {
 			for i, agent := range s.agentActivityData {
@@ -1404,12 +1404,12 @@ func (s *SidebarModel) renderWorkersPanel() string {
 func (s *SidebarModel) renderTasksPanel() string {
 	var b strings.Builder
 
-	b.WriteString(s.renderPanelHeader("Tasks", PanelTasks))
+	b.WriteString(s.renderPanelHeader("tasks", PanelTasks))
 	b.WriteString("\n")
 
 	if s.expandedPanels[PanelTasks] {
 		if len(s.tasksData) == 0 {
-			b.WriteString(s.styles.Muted.Render("  No active tasks"))
+			b.WriteString(s.styles.Muted.Render("  no active tasks"))
 			b.WriteString("\n")
 		} else {
 			for i, task := range s.tasksData {
@@ -1533,7 +1533,7 @@ func (s *SidebarModel) renderTasksPanel() string {
 func (s *SidebarModel) renderPlanPanel() string {
 	var b strings.Builder
 
-	b.WriteString(s.renderPanelHeader("Plan", PanelPlan))
+	b.WriteString(s.renderPanelHeader("plan", PanelPlan))
 	b.WriteString("\n")
 
 	if s.expandedPanels[PanelPlan] {
@@ -1572,12 +1572,12 @@ func (s *SidebarModel) SetPlanPhases(phases []components.PhaseRow) {
 func (s *SidebarModel) renderMemoryPanel() string {
 	var b strings.Builder
 
-	b.WriteString(s.renderPanelHeader("Recent Memory", PanelMemory))
+	b.WriteString(s.renderPanelHeader("recent memory", PanelMemory))
 	b.WriteString("\n")
 
 	if s.expandedPanels[PanelMemory] {
 		if len(s.memoryData) == 0 {
-			b.WriteString(s.styles.Muted.Render("  No recent memories"))
+			b.WriteString(s.styles.Muted.Render("  no recent memories"))
 			b.WriteString("\n")
 		} else {
 			for i, mem := range s.memoryData {
@@ -1615,7 +1615,7 @@ func (s *SidebarModel) renderMemoryPanel() string {
 func (s *SidebarModel) renderMetricsPanel() string {
 	var b strings.Builder
 
-	b.WriteString(s.renderPanelHeader("Metrics", PanelMetrics))
+	b.WriteString(s.renderPanelHeader("metrics", PanelMetrics))
 	b.WriteString("\n")
 
 	if s.expandedPanels[PanelMetrics] {
@@ -1668,12 +1668,12 @@ func (s *SidebarModel) renderMetricsPanel() string {
 func (s *SidebarModel) renderActivityFeedPanel() string {
 	var b strings.Builder
 
-	b.WriteString(s.renderPanelHeader("Activity", PanelActivityFeed))
+	b.WriteString(s.renderPanelHeader("activity", PanelActivityFeed))
 	b.WriteString("\n")
 
 	if s.expandedPanels[PanelActivityFeed] {
 		if len(s.activityFeed) == 0 {
-			b.WriteString(s.styles.Muted.Render("  No recent activity"))
+			b.WriteString(s.styles.Muted.Render("  no recent activity"))
 			b.WriteString("\n")
 		} else {
 			for i, item := range s.activityFeed {

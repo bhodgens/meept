@@ -85,6 +85,14 @@ class WebSocketService {
   Timer? _pongTimeoutTimer;
   final _random = Random();
 
+  /// Frames queued while disconnected (issue: silent subscribe loss across
+  /// reconnects). Every frame passed to [send] while offline is queued here
+  /// and flushed in order on the next successful connect, so a subscribe
+  /// (or data frame) issued mid-reconnect is delivered instead of dropped.
+  /// Bounded by [_maxPendingFrames]; the oldest frame is dropped when full.
+  final List<Map<String, dynamic>> _pendingFrames = [];
+  static const int _maxPendingFrames = 256;
+
   /// Test seam (F22 pin): when non-null, the reconnect loop calls this
   /// instead of [_diagnoseConnectFailure]. Tests inject a throwing
   /// diagnoser to prove the loop survives a diagnosis failure (on web the
@@ -294,10 +302,16 @@ class WebSocketService {
     }
   }
 
-  /// Send any subscribe messages that were queued before the connection
-  /// was fully established.
+  /// Send any frames that were queued while disconnected (oldest first),
+  /// then replay the tracked subscriptions.
+  ///
+  /// The daemon's subscribe handling is idempotent (session filters are a
+  /// set), so a queued subscribe that is also replayed from the tracking
+  /// maps double-sends harmlessly — losing it entirely is the bug this
+  /// prevents.
   void _flushPendingSubscriptions() {
     if (!isConnected) return;
+    _flushPendingFrames();
     for (final sessionId in _chatSubscriptions.keys) {
       send({'type': 'subscribe', 'channel': 'chat', 'session_id': sessionId});
     }
@@ -570,6 +584,7 @@ class WebSocketService {
     _disposed = true;
     _wasExplicitlyDisconnected = true;
     _cleanupChannel();
+    _pendingFrames.clear();
     _chatSubscriptions.clear();
     _jobsSubscribed = false;
     _metricsSubscribed = false;
@@ -583,9 +598,34 @@ class WebSocketService {
     _connectionSubject.close();
   }
 
+  /// Queue a frame sent while disconnected, bounded at
+  /// [_maxPendingFrames] (oldest dropped). Explicit teardown
+  /// ([disconnect]) clears the queue; [pause] preserves it.
+  void _queuePendingFrame(Map<String, dynamic> message) {
+    if (_disposed) return;
+    while (_pendingFrames.length >= _maxPendingFrames) {
+      _pendingFrames.removeAt(0);
+    }
+    _pendingFrames.add(message);
+  }
+
+  /// Flush queued frames in order. Only call while connected — each frame
+  /// goes through [send], so a frame racing a mid-flush disconnect is
+  /// re-queued instead of lost.
+  void _flushPendingFrames() {
+    if (_pendingFrames.isEmpty) return;
+    final frames = List<Map<String, dynamic>>.of(_pendingFrames);
+    _pendingFrames.clear();
+    for (final frame in frames) {
+      send(frame);
+    }
+  }
+
   void send(Map<String, dynamic> message) {
     if (!isConnected) {
-      _errorSubject.addSafe('Cannot send: not connected');
+      // Queue instead of dropping: a subscribe issued while disconnected
+      // (or racing a reconnect) must be delivered after reconnect.
+      _queuePendingFrame(message);
       return;
     }
     _channel?.sink.add(jsonEncode(message));
