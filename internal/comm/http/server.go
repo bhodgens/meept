@@ -450,6 +450,14 @@ func (h *WebSocketHub) SubscribeSession(wc *wsConn, sessionID string) {
 }
 
 // UnsubscribeSession removes a session filter for the given connection.
+// An explicit unsubscribe means "stop sending me this session's events":
+// an empty filter map is deliberately LEFT in place so the connection
+// stays suppressed for non-subscribed sessions (least-surprise opt-out,
+// pinned by the ws-filter-05 e2e scenario). Deleting the entry would
+// silently return the connection to broadcast mode — delivering events
+// the client explicitly opted out of (2026-10-01 fix-wave: the pin test
+// asserting broadcast-restore failed exactly this scenario and the
+// cleanup was reverted).
 func (h *WebSocketHub) UnsubscribeSession(wc *wsConn, sessionID string) {
 	h.sessMu.Lock()
 	defer h.sessMu.Unlock()
@@ -2533,6 +2541,16 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 type WSMessage struct {
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data,omitempty"`
+	// Flat-frame aliases: the Flutter client (ui/flutter_ui
+	// /lib/services/websocket_service.dart) sends subscribe/unsubscribe
+	// WITHOUT a {data:{...}} envelope, e.g.
+	//   {"type":"subscribe","channel":"chat","session_id":"..."}
+	// The read loop decodes the frame into WSMessage, so capturing these
+	// top-level keys lets handleWSSubscribe/handleWSUnsubscribe arm the
+	// session-side filter for BOTH shapes. The enveloped shape keeps
+	// working unchanged (backward compatible).
+	Channel   string `json:"channel,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // handleWSMessage processes incoming WebSocket messages.
@@ -2561,7 +2579,8 @@ func (s *Server) handleWSSubscribe(wc *wsConn, msg *WSMessage) {
 		return
 	}
 
-	// Extract channel from msg.Data
+	// Extract channel from msg.Data (enveloped shape) or from the flat
+	// top-level frame aliases (Flutter client shape).
 	var channel string
 	var sessionID string
 	if msg.Data != nil {
@@ -2574,6 +2593,12 @@ func (s *Server) handleWSSubscribe(wc *wsConn, msg *WSMessage) {
 				sessionID = sid
 			}
 		}
+	}
+	if channel == "" {
+		channel = msg.Channel
+	}
+	if sessionID == "" {
+		sessionID = msg.SessionID
 	}
 	if channel == "" {
 		// Default channel
@@ -2607,7 +2632,8 @@ func (s *Server) handleWSUnsubscribe(wc *wsConn, msg *WSMessage) {
 		return
 	}
 
-	// Extract channel and session_id from msg.Data
+	// Extract channel and session_id from msg.Data (enveloped shape) or
+	// from the flat top-level frame aliases (Flutter client shape).
 	var channel string
 	var sessionID string
 	if msg.Data != nil {
@@ -2620,6 +2646,12 @@ func (s *Server) handleWSUnsubscribe(wc *wsConn, msg *WSMessage) {
 				sessionID = sid
 			}
 		}
+	}
+	if channel == "" {
+		channel = msg.Channel
+	}
+	if sessionID == "" {
+		sessionID = msg.SessionID
 	}
 
 	if sessionID != "" {
