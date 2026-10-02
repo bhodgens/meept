@@ -32,69 +32,76 @@ void main() {
     WebSocketService.diagnoseConnectFailureOverride = null;
   });
 
-  test(
-    'F22: reconnect loop keeps retrying when the connect-failure '
-    'diagnoser throws (web abort regression)',
-    () async {
-      var diagnoserCalls = 0;
-      WebSocketService.diagnoseConnectFailureOverride =
-          (int retryCount) async {
-        diagnoserCalls++;
-        // Throw like io.HttpClient() did on the web platform.
-        throw UnsupportedError('Mocked web platform failure');
-      };
+  test('F22: reconnect loop keeps retrying when the connect-failure '
+      'diagnoser throws (web abort regression)', () async {
+    var diagnoserCalls = 0;
+    WebSocketService.diagnoseConnectFailureOverride = (int retryCount) async {
+      diagnoserCalls++;
+      // Throw like io.HttpClient() did on the web platform.
+      throw UnsupportedError('Mocked web platform failure');
+    };
 
-      final service = WebSocketService(
-        host: '127.0.0.1',
-        port: 1, // reserved port: connection refused, no listener
-      );
+    final service = WebSocketService(
+      host: '127.0.0.1',
+      port: 1, // reserved port: connection refused, no listener
+    );
 
-      Object? escaped;
-      final connectFuture = service.connect().catchError((Object e) {
-        escaped = e;
-        return;
-      });
+    Object? escaped;
+    final connectFuture = service.connect().catchError((Object e) {
+      escaped = e;
+      return;
+    });
 
-      // First connect attempt fails -> catch block runs the diagnoser
-      // (which throws) -> the loop MUST continue to the backoff anyway.
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      expect(
-        diagnoserCalls,
-        greaterThanOrEqualTo(1),
-        reason: 'diagnoser ran for the first failed attempt',
-      );
+    // Wait-for-effect instead of fixed sleeps: under parallel-suite
+    // load the fixed 300ms/1.5s waits fired before the loop's backoff
+    // completed (deterministic FAIL in the full flutter test run).
+    // Poll until the condition holds, bounded — same budget as the old
+    // sleeps plus slack.
+    Future<void> waitUntil(bool Function() cond, Duration budget) async {
+      final deadline = DateTime.now().add(budget);
+      while (!cond() && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
 
-      // Past the 1s backoff: the SECOND attempt fails and the diagnoser
-      // runs again — proof the loop is still alive after a throwing
-      // diagnosis (the regression ended the loop right here).
-      await Future<void>.delayed(const Duration(seconds: 1, milliseconds: 500));
-      expect(
-        diagnoserCalls,
-        greaterThanOrEqualTo(2),
-        reason: 'F22: retry loop aborted when the diagnoser threw',
-      );
-      expect(
-        escaped,
-        isNull,
-        reason: 'F22: diagnoser error escaped the retry loop',
-      );
+    // First connect attempt fails -> catch block runs the diagnoser
+    // (which throws) -> the loop MUST continue to the backoff anyway.
+    await waitUntil(() => diagnoserCalls >= 1, const Duration(seconds: 3));
+    expect(
+      diagnoserCalls,
+      greaterThanOrEqualTo(1),
+      reason: 'diagnoser ran for the first failed attempt',
+    );
 
-      // Third cycle for good measure (backoff grows: 1s, 2s, 4s — the
-      // third attempt may land past this window, so >= 2 is the contract;
-      // the point is the loop is STILL alive, not dead).
-      await Future<void>.delayed(const Duration(seconds: 2));
-      expect(
-        diagnoserCalls,
-        greaterThanOrEqualTo(2),
-        reason: 'F22: loop dead after two cycles',
-      );
-      expect(escaped, isNull);
+    // Past the 1s backoff: the SECOND attempt fails and the diagnoser
+    // runs again — proof the loop is still alive after a throwing
+    // diagnosis (the regression ended the loop right here).
+    await waitUntil(() => diagnoserCalls >= 2, const Duration(seconds: 5));
+    expect(
+      diagnoserCalls,
+      greaterThanOrEqualTo(2),
+      reason: 'F22: retry loop aborted when the diagnoser threw',
+    );
+    expect(
+      escaped,
+      isNull,
+      reason: 'F22: diagnoser error escaped the retry loop',
+    );
 
-      // Tear down: explicit disconnect ends the loop cleanly.
-      WebSocketService.diagnoseConnectFailureOverride = null;
-      service.disconnect();
-      await connectFuture.timeout(const Duration(seconds: 5));
-    },
-    timeout: const Timeout(Duration(seconds: 30)),
-  );
+    // Third cycle for good measure (backoff grows: 1s, 2s, 4s — the
+    // third attempt may land past this window, so >= 2 is the contract;
+    // the point is the loop is STILL alive, not dead).
+    await Future<void>.delayed(const Duration(seconds: 2));
+    expect(
+      diagnoserCalls,
+      greaterThanOrEqualTo(2),
+      reason: 'F22: loop dead after two cycles',
+    );
+    expect(escaped, isNull);
+
+    // Tear down: explicit disconnect ends the loop cleanly.
+    WebSocketService.diagnoseConnectFailureOverride = null;
+    service.disconnect();
+    await connectFuture.timeout(const Duration(seconds: 5));
+  }, timeout: const Timeout(Duration(seconds: 30)));
 }
