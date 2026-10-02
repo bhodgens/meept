@@ -101,6 +101,16 @@ func (d *tuiDriver) sendKey(key string) {
 	d.program.Send(keyPressMsg(key))
 }
 
+// typeText sends one KeyPressMsg per rune WITH Text set — the shape the
+// bubbles textarea v2 inserts from (its default case inserts msg.Text;
+// a Text-less rune key inserts nothing). tui-steer-01 needs this to
+// drive real chat input through the TUI's own typing path.
+func (d *tuiDriver) typeText(text string) {
+	for _, r := range text {
+		d.program.Send(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+}
+
 // settle sends a trailing window message as an ordering barrier: when it
 // returns, every earlier message has been processed by the loop.
 func (d *tuiDriver) settle() {

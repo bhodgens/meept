@@ -129,7 +129,15 @@ func (tr *ThreadRouter) GetThreadConversationID(ctx context.Context, sessionID, 
 	}
 
 	topic := tr.detectTopic(input)
-	threadID := tr.generateThreadID(sessionID, topic)
+	// Key the thread on the session's PRIMARY id, not the caller's
+	// conversation id: silent migration (ensureThread) stores the
+	// migrated general thread under generateThreadID(sess.ID, ...), so
+	// generating the lookup key from the conv id guarantees a miss on
+	// every turn — a fresh thread (and fresh conv id) per turn, which
+	// orphaned the steering queue and broke the TUI's conversation-id
+	// matching (tui-steer-01 finding, 2026-10-01). sess.ID is the stable
+	// identity; the conv id varies by entry path.
+	threadID := tr.generateThreadID(sess.ID, topic)
 
 	thread, err := tr.ensureThread(sess, threadID, topic)
 	if err != nil {

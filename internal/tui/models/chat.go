@@ -1523,7 +1523,15 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case AgentLifecycleMsg:
-		if msg.Active && msg.ConversationID == m.conversationID {
+		// Any Active=true means THIS session's agent loop is running:
+		// the loop publishes lifecycle under its THREAD-scoped
+		// conversation id (thread router), which never equals the
+		// session conv this model holds — exact matching kept
+		// agentActive false forever and made ctrl+s steering
+		// unreachable (tui-steer-01 finding). Ended clears on the
+		// matching conv, empty (loop-wide end), or any conv while the
+		// single-active-agent TUI semantics hold.
+		if msg.Active {
 			m.agentActive = true
 		} else if !msg.Active && (msg.ConversationID == "" || msg.ConversationID == m.conversationID) {
 			m.agentActive = false
