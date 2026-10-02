@@ -101,10 +101,14 @@ func TestSessionSwitchReloadsTranscript(t *testing.T) {
 	}
 
 	// Create B now and bump its activity with a real chat turn. The
-	// sessions view sorts by last activity (newest first); the boot
-	// attach touches A, so B's bump must land AFTER it — creating +
-	// turning B post-boot makes B strictly newest, i.e. cursor row 0,
-	// the row Enter switches to.
+	// sessions view sorts by last activity (newest first): B's bump must
+	// land AFTER the boot attach touched A (so B is cursor row 0, the row
+	// Enter switches to) but BEFORE the picker's session.list fetch. The
+	// fetch is an async RPC whose landing time the TUI-side cannot observe
+	// safely mid-loop (reads race the event loop), so instead of a
+	// condition poll we give it a bounded settle ladder — and the steer
+	// flow's topic subscriptions (4f92b6ca) increased bus volume enough
+	// that the old single 250ms settle stopped covering it.
 	idB := stack.CreateSession(t, "switch-beta", stack.MeeptHome)
 	stack.Fake.SetPostToolText("activity bump turn")
 	stack.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"tui-flows bump pin"}`)
@@ -115,7 +119,15 @@ func TestSessionSwitchReloadsTranscript(t *testing.T) {
 	hp.sendKey("ctrl+x")
 	hp.settle()
 	hp.sendKey("s")
-	settleAsync()
+	// The sessions view fetches session.list via an async RPC; a single
+	// 250ms settle stopped covering that round-trip once the TUI
+	// subscribed to the 3/4-segment agent topics (extra bus volume).
+	// Wait boundedly: ~2s of settle cycles before enter. No safe mid-loop
+	// read exists (reads race the event loop), so this is a bounded
+	// settle ladder, not a condition poll.
+	for range 8 {
+		settleAsync()
+	}
 	hp.sendKey("enter")
 	settleAsync()
 
