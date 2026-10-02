@@ -45,6 +45,14 @@ func DefaultEventStreamConfig() *EventStreamConfig {
 	return &EventStreamConfig{
 		Topics: []string{
 			"agent.*",
+			// 3/4-segment agent topics (lifecycle, steer/followup queue):
+			// matchWildcard requires equal segment counts, so "agent.*"
+			// cannot see them — without these the TUI never learns an
+			// agent went active (agentActive stays false, ctrl+s steering
+			// dead) and SteeringInjectedMsg never arrives (e2e finding
+			// tui-steer-01, 2026-10-01).
+			"agent.*.*",
+			"agent.*.*.*",
 			"agent.event.*",
 			"agent.progress.*",
 			"task.*",
