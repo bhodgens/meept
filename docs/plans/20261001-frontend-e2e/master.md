@@ -154,10 +154,15 @@ After all four children reach REVIEWED:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-tui-flows-extension | PENDING | 0 | |
-| 02-gui-flows-infrastructure | PENDING | 0 | |
-| 03-gui-flows-tests | PENDING | 0 | |
-| 04-manifest-policy | PENDING | 0 | |
+| 01-tui-flows-extension | COMPLETE | 2 | plans/tasks flows landed (ea5e8d17); steer exposed 3 production bugs, fixed (4f92b6ca, 61726448); flow SKIPs on the last seam (headless EventStream delivery) with a self-healing gate |
+| 02-gui-flows-infrastructure | COMPLETE | 1 | 42035372; scheme injection seam + HttpOverrides note; wire shapes verified against Go handlers |
+| 03-gui-flows-tests | COMPLETE | 1 | 4 GUI flows green; 2 production findings filed (addStreamMessage replace-by-id; loadMessages:415 pendingTurns wipe) |
+| 04-manifest-policy | COMPLETE | 1 | 7ac003b3; gui-flows Dart-side entry + policy sentence |
+
+Integration gates: E2E_EXIT=0 (52 ok), FLUTTER_EXIT=0 (14 tests), UNIT_EXIT=0
+(tui + agent). Commits: 7bfcd074 (plan), ea5e8d17, 4f92b6ca, 42035372,
+61726448, 7ac003b3 + session-switch determinism fix (see 61726448 follow-up
+commit list).
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
