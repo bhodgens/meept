@@ -88,6 +88,12 @@ class StubDaemon {
   final Map<String, int> _submitCountsByTurn = {};
   final List<Map<String, dynamic>> _submittedBodies = [];
   List<Map<String, dynamic>> _sessions = const [];
+
+  /// Per-session scripted bodies for GET /api/v1/sessions/{id}/messages.
+  /// Unscripted sessions fall back to the empty-history shape
+  /// ({messages: [], total: 0}) pinned in stub_daemon_test.dart.
+  final Map<String, ({List<Map<String, dynamic>> messages, int total})>
+  _sessionMessages = {};
   int _submitCount = 0;
   final Set<WebSocket> _wsSockets = {};
   final Set<String> _wsChatSubscriptions = {};
@@ -140,6 +146,23 @@ class StubDaemon {
   /// field names must already match the Go session service's JSON keys).
   void enqueueSessionList(List<Map<String, dynamic>> sessions) {
     _sessions = List.of(sessions);
+  }
+
+  /// Script the GET /api/v1/sessions/{id}/messages body for one session.
+  ///
+  /// [messages] is the array of raw session.Message maps (field names must
+  /// already match the Go session service's JSON keys); [total] mirrors
+  /// handleSessionMessages' semantics — the session's FULL count, not the
+  /// page length — and defaults to the array length.
+  void enqueueSessionMessages(
+    String sessionId,
+    List<Map<String, dynamic>> messages, {
+    int? total,
+  }) {
+    _sessionMessages[sessionId] = (
+      messages: List.of(messages),
+      total: total ?? messages.length,
+    );
   }
 
   /// Push [event] to every connected WebSocket client immediately
@@ -214,10 +237,11 @@ class StubDaemon {
       ).firstMatch(path);
       if (req.method == 'GET' && messagesMatch != null) {
         // handleSessionMessages shape: messages guaranteed non-null array,
-        // total = the session's FULL count (stub: 0).
+        // total = the session's FULL count (not the page length).
+        final scripted = _sessionMessages[messagesMatch.group(1)];
         return _writeJson(req, 200, {
-          'messages': <Map<String, dynamic>>[],
-          'total': 0,
+          'messages': scripted?.messages ?? <Map<String, dynamic>>[],
+          'total': scripted?.total ?? 0,
         });
       }
       if (req.method == 'GET' && path == '/api/v1/config/client') {

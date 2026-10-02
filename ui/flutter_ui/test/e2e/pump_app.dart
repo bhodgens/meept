@@ -9,7 +9,7 @@
 // seam: no production base-url parameters were added.
 //
 // DO NOT import from production code — test/e2e only.
-import 'package:flutter/material.dart' show SizedBox;
+import 'package:flutter/material.dart' show MaterialApp, SizedBox, Widget;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -96,23 +96,35 @@ List<Override> stubOverrides(StubDaemon daemon) {
   ];
 }
 
-/// Pump a minimal widget inside a ProviderScope wired with the REAL
-/// provider graph (real [chatProvider] family entry for [sessionId]) whose
-/// HTTP/WS clients point at [daemon].
+/// Pump [child] (the real widget surface under test) inside a
+/// ProviderScope wired with the REAL provider graph (real [chatProvider]
+/// family entry for [sessionId]) whose HTTP/WS clients point at [daemon].
 ///
-/// Watching the real chatProvider here is deliberate: it constructs the real
-/// ChatNotifier, which starts its WebSocket connect loop and auto-loads
+/// Watching the real chatProvider here is deliberate: it constructs the
+/// real ChatNotifier, which starts its WebSocket connect loop and auto-loads
 /// message history from the stub — the same surface a real session sees.
+/// [child] defaults to a SizedBox for provider-only smoke tests; widget
+/// flows pass their real surface (e.g. ChatMessageList) so rendered output
+/// is asserted against the production widgets.
 ///
 /// Returns the [ProviderContainer] for reads/writes from the test.
 (ProviderContainer, StubDaemon) pumpRealApp(
   WidgetTester tester, {
   required StubDaemon daemon,
   String sessionId = 'e2e-session',
+  Widget? child,
 }) {
   final container = ProviderContainer(overrides: stubOverrides(daemon));
   tester.pumpWidget(
-    UncontrolledProviderScope(container: container, child: const SizedBox()),
+    // MaterialApp supplies the MaterialLocalizations the real chat
+    // surface's SelectionArea/MarkdownBody widgets require; no providers
+    // are touched (the overrides below are the only DI seam).
+    MaterialApp(
+      home: UncontrolledProviderScope(
+        container: container,
+        child: child ?? const SizedBox(),
+      ),
+    ),
   );
   // Construct the real provider family entry (real ChatNotifier).
   container.read(chatProvider(sessionId).notifier);
