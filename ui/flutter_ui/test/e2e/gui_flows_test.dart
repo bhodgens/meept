@@ -18,6 +18,11 @@
 //                      finalized exactly once; PLUS
 //                      TestReloadMidTurnRetainsPendingTurns — loadMessages
 //                      mid-turn RETAINS pendingTurns (F20 reload pin).
+//   gui-stream-02    TestThinkingTimerSurvivesMidStreamDeltas
+//                    - the thinking elapsed-timer (isAgentProcessing /
+//                      thinkingStartedAt) SURVIVES id-less mid-stream
+//                      assistant deltas and clears only when the turn's
+//                      terminal event resolves the pending turn.
 //
 // Every flow drives the REAL ChatNotifier (pumpRealApp — no service mocks)
 // against the StubDaemon and asserts BOTH provider state AND rendered
@@ -844,6 +849,183 @@ void main() {
         find.byType(PendingTurnIndicator),
         findsOneWidget,
         reason: 'the retained in-flight turn must still render its row',
+      );
+    });
+  });
+
+  // --------------------------------------------------------------------
+  // gui-stream-02
+  // --------------------------------------------------------------------
+  group('gui-stream-02: thinking timer survives mid-stream deltas', () {
+    late StubDaemon daemon;
+    setUp(() async {
+      daemon = await StubDaemon.start();
+    });
+    tearDown(() async {
+      await daemon.dispose();
+    });
+
+    testWidgets('TestThinkingTimerSurvivesMidStreamDeltas — isAgentProcessing/'
+        'thinkingStartedAt survive EVERY id-less delta mid-turn and clear '
+        'only on the turn terminal', (tester) async {
+      const turnId = 'turn-stream-02';
+      const sessionId = 'e2e-session';
+      // Script the turn with ZERO events: the submit endpoint mints the
+      // turnId (registering pendingTurns) but auto-broadcasts nothing —
+      // the frames below are pushed manually so the flow can assert
+      // BETWEEN them (mid-stream state is the whole point of this pin).
+      daemon.enqueueChatTurn(turnId: turnId, sessionId: sessionId, events: []);
+      final wsFrames = <Map<String, dynamic>>[];
+      final container = await pumpAndAwaitSubscribe(
+        tester,
+        daemon: daemon,
+        sessionId: sessionId,
+        wsFrames: wsFrames,
+      );
+
+      await submitAndAwaitRegistration(
+        tester,
+        container,
+        sessionId,
+        text: 'stream with a live thinking timer',
+        expectedTurnId: turnId,
+      );
+      final submitState = container.read(chatProvider(sessionId));
+      expect(
+        submitState.isAgentProcessing,
+        isTrue,
+        reason: 'precondition: submit arms the processing indicator',
+      );
+      expect(
+        submitState.thinkingStartedAt,
+        isNotNull,
+        reason: 'precondition: submit arms the thinking timer',
+      );
+
+      // FIRST delta: an id-less assistant chat_message with non-empty
+      // content — exactly the frame class that used to drop the timer.
+      daemon.broadcastWsEvent(
+        const StubSseEvent('chat_message', {
+          'content': 'first delta ',
+          'role': 'assistant',
+          'session_id': sessionId,
+        }),
+      );
+      await waitFor(
+        tester,
+        () => container
+            .read(chatProvider(sessionId))
+            .messages
+            .where((m) => m.role == 'assistant')
+            .isNotEmpty,
+        reason: 'the first delta must open the stream bubble',
+      );
+      final afterFirstDelta = container.read(chatProvider(sessionId));
+      // THE PIN: the thinking timer must survive the mid-stream delta.
+      expect(
+        afterFirstDelta.isAgentProcessing,
+        isTrue,
+        reason:
+            'an id-less assistant delta is a mid-stream accumulation '
+            'frame, NOT completion — isAgentProcessing must still be '
+            'true; messages='
+            '${afterFirstDelta.messages.map((m) => '${m.role}:${m.content}').toList()}',
+      );
+      expect(
+        afterFirstDelta.thinkingStartedAt,
+        isNotNull,
+        reason:
+            'the thinking elapsed-timer must not drop on the first '
+            'mid-stream delta',
+      );
+      expect(
+        find.byType(PendingTurnIndicator),
+        findsOneWidget,
+        reason: 'the turn is still in flight mid-stream',
+      );
+
+      // MORE deltas: the timer must survive every one of them. Frames
+      // arrive on the real socket loop, so each chunk waits through
+      // tester.runAsync (waitFor) — pump() alone never services it.
+      var accumulated = 'first delta ';
+      for (final chunk in ['second ', 'third ', 'fourth']) {
+        daemon.broadcastWsEvent(
+          StubSseEvent('chat_message', {
+            'content': chunk,
+            'role': 'assistant',
+            'session_id': sessionId,
+          }),
+        );
+        accumulated += chunk;
+        await waitFor(
+          tester,
+          () =>
+              container.read(chatProvider(sessionId)).messages.last.content ==
+              accumulated,
+          reason: 'delta "$chunk" must accumulate into the stream bubble',
+        );
+        final midState = container.read(chatProvider(sessionId));
+        expect(
+          midState.isAgentProcessing,
+          isTrue,
+          reason: 'isAgentProcessing must survive delta "$chunk"',
+        );
+        expect(
+          midState.thinkingStartedAt,
+          isNotNull,
+          reason: 'the thinking timer must survive delta "$chunk"',
+        );
+      }
+      final streamed = container
+          .read(chatProvider(sessionId))
+          .messages
+          .where((m) => m.role == 'assistant')
+          .map((m) => m.content)
+          .join();
+      expect(
+        streamed,
+        'first delta second third fourth',
+        reason: 'precondition: all four deltas accumulated in order',
+      );
+
+      // TERMINAL: the turn.terminal frame (relayed as agent_progress
+      // carrying turn_id + handler_case) resolves the pending turn —
+      // THIS is where the timer stops.
+      daemon.broadcastWsEvent(
+        StubSseEvent('agent_progress', {
+          // isTurnTerminalPayload identifies a terminal by turn_id AND
+          // handler_case — broadcastWsEvent does not inject turn_id the
+          // way the scripted-turn path does, so carry it explicitly.
+          'turn_id': turnId,
+          'handler_case': 'direct_reply',
+          'status': 'completed',
+          // Empty reply: the deltas already delivered the text, so the
+          // terminal must not append a duplicate bubble either.
+          'reply': '',
+          'duration_ms': 12,
+          'session_id': sessionId,
+        }),
+      );
+      await waitFor(
+        tester,
+        () => container.read(chatProvider(sessionId)).pendingTurns.isEmpty,
+        reason: 'the terminal must resolve the streaming turn',
+      );
+      final terminalState = container.read(chatProvider(sessionId));
+      expect(
+        terminalState.isAgentProcessing,
+        isFalse,
+        reason: 'the terminal event must clear isAgentProcessing',
+      );
+      expect(
+        terminalState.thinkingStartedAt,
+        isNull,
+        reason: 'the terminal event must null thinkingStartedAt',
+      );
+      expect(
+        find.byType(PendingTurnIndicator),
+        findsNothing,
+        reason: 'the resolved turn must not render a pending row',
       );
     });
   });

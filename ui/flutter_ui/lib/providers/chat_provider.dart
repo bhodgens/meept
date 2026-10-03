@@ -1236,11 +1236,19 @@ class ChatNotifier extends StateNotifier<ChatState> {
         newMessages = newMessages.sublist(newMessages.length - _maxMessages);
       }
 
-      // When an assistant message arrives, the agent has finished producing
-      // its response — stop the processing indicator.  User/system messages
-      // don't signal completion.
+      // An assistant message with a DISTINCT id is a finalized reply or
+      // history-refresh message — the turn that produced it is done; stop
+      // the processing indicator. Id-less assistant messages are mid-stream
+      // accumulation deltas (gui-stream-01): every delta carries non-empty
+      // content while the turn is STILL running, so clearing here would
+      // drop the thinking elapsed-timer on the very first delta. The turn
+      // ends via turn.terminal (_consumeTurnTerminal clears
+      // isAgentProcessing/thinkingStartedAt) or via this distinct-id path
+      // (non-streaming replies, history refreshes).
       final newIsAgentProcessing =
-          (message.role == 'assistant' && message.content.isNotEmpty)
+          (message.role == 'assistant' &&
+              message.id.isNotEmpty &&
+              message.content.isNotEmpty)
           ? false
           : state.isAgentProcessing;
 
