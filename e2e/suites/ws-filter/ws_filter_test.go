@@ -419,17 +419,17 @@ func synthPayload(sess, marker string) map[string]any {
 
 // TestWSSynthesizedProgressFilteredAndRateLimited pins the
 // agent.progress.synthesized relay path. The topic reaches WS clients over
-// TWO independent surfaces, both asserted here:
+// exactly ONE surface (server.go transformBusEventToWS drops the topic for
+// the generic wildcard relay):
 //
 //   - handleWSProgress: the SynthesizedProgressEvent decoded and re-emitted
 //     as a flat agent_progress frame — session-filtered AND rate-limited
 //     (100ms default interval): 10 back-to-back events deliver far fewer
-//     than 10 on that surface;
-//   - handleWSEvent: the generic "event" surface — session-filtered but
-//     NOT rate-limited, so all 10 arrive there.
+//     than 10. The generic "event" surface is asserted ABSENT (the wildcard
+//     agent.*.* relay must not double-deliver on the same connection).
 //
 // The rate-limit assertion targets the agent_progress frames specifically;
-// the filter assertion applies to both surfaces.
+// the filter assertion applies to that surface.
 func TestWSSynthesizedProgressFilteredAndRateLimited(t *testing.T) {
 	s := start(t)
 	sessS := "session-wsfilter-06-s"
@@ -457,7 +457,7 @@ func TestWSSynthesizedProgressFilteredAndRateLimited(t *testing.T) {
 
 	// Session S's client: count the agent_progress (rate-limited) frames.
 	deliveredS := 0
-	gotEvent := false
+	gotGenericEvent := false
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		f := wsS.tryRecv(time.Until(deadline))
@@ -471,11 +471,11 @@ func TestWSSynthesizedProgressFilteredAndRateLimited(t *testing.T) {
 		case "agent_progress":
 			deliveredS++
 		case "event":
-			gotEvent = true
+			gotGenericEvent = true
 		}
 	}
-	if !gotEvent {
-		t.Fatalf("ws-filter-06: generic event surface delivered none of %d synthesized events", total)
+	if gotGenericEvent {
+		t.Fatalf("ws-filter-06: generic event surface delivered synthesized events; the wildcard relay must NOT double-deliver (typed agent_progress is the only surface)")
 	}
 	if deliveredS == 0 {
 		t.Fatalf("ws-filter-06: agent_progress surface delivered none of %d synthesized events", total)

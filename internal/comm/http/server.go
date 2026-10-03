@@ -713,6 +713,15 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 		return nil
 	}
 
+	// agent.progress.synthesized is relayed exclusively by the dedicated
+	// handleWSProgress subscription at :571, which emits the typed
+	// agent_progress frame; the generic wildcard relay (agent.*.* at :540)
+	// emitting it again here as type "event" would double-deliver the same
+	// event on the same connection, so drop it before classification.
+	if topic == "agent.progress.synthesized" {
+		return nil
+	}
+
 	// Unmarshal the payload once for inspection (best-effort; payload stays nil on failure)
 	var payload map[string]any
 	if len(msg.Payload) > 0 {
@@ -2605,17 +2614,20 @@ func (s *Server) handleWSSubscribe(wc *wsConn, msg *WSMessage) {
 		channel = "all"
 	}
 
+	// Register session filter for progress event filtering BEFORE the ack:
+	// a client that fires a turn on "subscribed" receipt must have its
+	// early events evaluated with the filter already armed, or they are
+	// dropped (ack/filter-arm race).
+	if sessionID != "" {
+		s.wsHub.SubscribeSession(wc, sessionID)
+	}
+
 	subscribeData, _ := json.Marshal(map[string]string{"channel": channel})
 	if err := wc.sendJSON(WSMessage{
 		Type: "subscribed",
 		Data: subscribeData,
 	}); err != nil {
 		s.logger.Debug("ws subscribed send failed", "error", err)
-	}
-
-	// Register session filter for progress event filtering.
-	if sessionID != "" {
-		s.wsHub.SubscribeSession(wc, sessionID)
 	}
 
 	s.logger.Debug("ws client subscribed", "remote", wc.conn.RemoteAddr(), "channel", channel, "session", sessionID)
