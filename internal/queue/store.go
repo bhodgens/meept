@@ -393,6 +393,18 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Claim semantics: job.AgentID is a SOFT PREFERENCE, not exclusivity.
+	// A claiming worker with a non-empty agentID prefers its own jobs (the
+	// ORDER BY pins them first) but can still claim unassigned jobs; a
+	// worker with an EMPTY agentID has no agent filter at all and may claim
+	// ANY pending job, including pinned ones. This is deliberate: pool
+	// workers are generic executors, the agent persona (model, tools,
+	// prompt) rides the job payload and is resolved by the job processor,
+	// so any worker can run any job. Do not "fix" the empty-agentID query
+	// to skip pinned jobs without also changing the pool's construction
+	// (internal/worker/pool.go AddWorker starts every worker with an empty
+	// agentID).
+
 	// Build query with optional agent filtering
 	// Jobs can be claimed if:
 	// - They have no agent_id (unassigned, any agent can claim)

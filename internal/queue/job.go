@@ -117,7 +117,9 @@ func (j *Job) WithMaxRetries(n int) *Job {
 	return j
 }
 
-// WithAgentID sets the target agent for this job.
+// WithAgentID sets the target agent as a soft scheduling preference:
+// pinned jobs sort first for that agent's workers, but any unpinned
+// worker may still claim the job; see ClaimNextForAgent in store.go.
 func (j *Job) WithAgentID(agentID string) *Job {
 	j.AgentID = agentID
 	return j
