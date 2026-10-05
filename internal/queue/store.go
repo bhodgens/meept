@@ -20,8 +20,15 @@ import (
 var ErrNoJobAvailable = errors.New("no job available")
 
 // ErrJobAlreadyClaimed is returned when a job cannot be claimed because it is
-// not found or already claimed by another worker.
+// already claimed by another worker or does not exist.
 var ErrJobAlreadyClaimed = errors.New("job not found or already claimed")
+
+// ErrJobNotClaimable is returned by Complete when the job is not in a
+// claimable (claimed/processing) state. Jobs keep the same ID across
+// Retry/Requeue, so this fires for stale or duplicate completion events —
+// e.g. a completion for attempt 1 arriving after the job was requeued for
+// attempt 2 — and callers must not treat it as a fresh completion.
+var ErrJobNotClaimable = errors.New("job not in a claimable state for completion")
 
 // Store provides SQLite persistence for jobs.
 type Store struct {
@@ -406,7 +413,7 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 			ORDER BY
 			  interactive DESC,
 			  CASE WHEN agent_id = ? THEN 0 ELSE 1 END,
-			  priority DESC, created_at ASC
+			  priority DESC, created_at ASC, id ASC
 			LIMIT 10`
 		args = []any{now, now, agentID, agentID}
 	} else {
@@ -417,7 +424,7 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 			WHERE state = 'pending'
 			  AND (due_at IS NULL OR due_at <= ?)
 			  AND (next_retry_at IS NULL OR next_retry_at <= ?)
-			ORDER BY interactive DESC, priority DESC, created_at ASC
+			ORDER BY interactive DESC, priority DESC, created_at ASC, id ASC
 			LIMIT 10`
 		args = []any{now, now}
 	}
@@ -489,13 +496,26 @@ func (s *Store) Complete(jobID string, result any) error {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = s.db.Exec(`
+	res, err := s.db.Exec(`
 		UPDATE jobs SET state = 'completed', result = ?, updated_at = ?
-		WHERE id = ?`,
+		WHERE id = ? AND state IN ('claimed', 'processing')`,
 		string(resultJSON), now, jobID)
 
 	if err != nil {
 		return fmt.Errorf("failed to complete job: %w", err)
+	}
+
+	// State guard: jobs keep the same ID across Retry/Requeue, so a
+	// RowsAffected==0 here means a stale or duplicate completion event (the
+	// job is pending/failed/completed — e.g. requeued for attempt 2). The
+	// earlier result must not be overwritten and the caller must not
+	// publish a fresh completion.
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read completion rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrJobNotClaimable
 	}
 
 	s.logger.Info("Job completed", "id", jobID)
@@ -558,6 +578,13 @@ func (s *Store) Fail(jobID, errMsg string) error {
 // retryBackoffBase is the base delay for exponential retry backoff.
 const retryBackoffBase = 2 * time.Second
 
+// retryBackoffCap bounds the exponential retry backoff. Rate-limit failures
+// that miss the quota-class regex take this generic retry path and would
+// otherwise re-hit the provider every few seconds until max_retries;
+// failures WITH a parseable reset take the quota-deferral path
+// (Store.Requeue) instead.
+const retryBackoffCap = 30 * time.Second
+
 // Requeue resets a job that hit a PROVIDER WAIT (llm.ThrottleBackoffError,
 // QuotaResetError / ErrAllModelsQuotaBlocked — tree 03 leaf 03, D9) to
 // pending for a future claim at notBefore, WITHOUT incrementing
@@ -617,7 +644,7 @@ func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 }
 
 // Retry resets a failed job for retry with exponential backoff.
-// Backoff follows: 2s, 4s, 8s (capped at 8s).
+// Backoff follows: 2s, 4s, 8s, 16s, 30s (capped at 30s).
 func (s *Store) Retry(jobID string) error {
 	now := time.Now().UTC()
 
@@ -642,9 +669,9 @@ func (s *Store) Retry(jobID string) error {
 		return fmt.Errorf("failed to get retry count: %w", err)
 	}
 
-	// Calculate exponential backoff: 2s * 2^retryCount, capped at 8s
+	// Calculate exponential backoff: 2s * 2^retryCount, capped at 30s
 	backoffMultiplier := 1 << retryCount // 2^retryCount: 1, 2, 4, 8, ...
-	backoff := min(retryBackoffBase*time.Duration(backoffMultiplier), 8*time.Second)
+	backoff := min(retryBackoffBase*time.Duration(backoffMultiplier), retryBackoffCap)
 
 	nextRetryAt := now.Add(backoff)
 
@@ -808,9 +835,69 @@ func (s *Store) ListByState(state JobState, limit int) ([]*Job, error) {
 		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 		FROM jobs
 		WHERE state = ?
-		ORDER BY interactive DESC, priority DESC, created_at ASC
+		ORDER BY interactive DESC, priority DESC, created_at ASC, id ASC
 		LIMIT ?`,
 		string(state), limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*Job
+	for rows.Next() {
+		job, err := s.scanJobRows(rows)
+		if err != nil {
+			s.logger.Error("Failed to scan job", "error", err)
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate jobs: %w", err)
+	}
+
+	return jobs, nil
+}
+
+// ListByStateAfter returns jobs in a given state, ordered exactly like
+// ListByState (interactive DESC, priority DESC, created_at ASC, id ASC),
+// but starting strictly AFTER the keyset position identified by
+// (afterInteractive, afterPriority, afterCreatedAt, afterID). This supports
+// deterministic keyset pagination over large pending tables so the Claim
+// slow path can scan past head-of-line parked jobs without re-reading
+// earlier rows.
+func (s *Store) ListByStateAfter(state JobState, limit int, afterInteractive bool, afterPriority int, afterCreatedAt time.Time, afterID string) ([]*Job, error) {
+	const selectBase = `SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
+		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+		FROM jobs
+		WHERE state = ?`
+	const orderBy = ` ORDER BY interactive DESC, priority DESC, created_at ASC, id ASC
+		LIMIT ?`
+
+	query := selectBase + orderBy
+	args := []any{string(state), limit}
+
+	// A zero cursor (zero time AND empty id) selects the first page with no
+	// keyset filter — no real row can carry either marker (created_at is
+	// NOT NULL and RFC3339-formatted; id is the primary key).
+	if !afterCreatedAt.IsZero() || afterID != "" {
+		createdAfter := afterCreatedAt.UTC().Format(time.RFC3339)
+		query = selectBase + `
+		  AND (interactive < ? OR
+		       (interactive = ? AND priority < ?) OR
+		       (interactive = ? AND priority = ? AND created_at > ?) OR
+		       (interactive = ? AND priority = ? AND created_at = ? AND id > ?))` + orderBy
+		args = []any{
+			string(state),
+			boolToInt(afterInteractive),
+			boolToInt(afterInteractive), int(afterPriority),
+			boolToInt(afterInteractive), int(afterPriority), createdAfter,
+			boolToInt(afterInteractive), int(afterPriority), createdAfter, afterID,
+			limit,
+		}
+	}
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query jobs: %w", err)
 	}

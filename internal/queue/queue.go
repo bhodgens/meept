@@ -202,42 +202,87 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 		return claimedJob, nil
 	}
 
-	// Slow path: list pending jobs and skip cancelled-task ones.
+	// Slow path: page through pending jobs (keyset pagination) and skip
+	// cancelled-task ones. A single fixed window (ListByState(..., 50))
+	// starves claimable jobs parked behind 50+ head-of-line pending jobs
+	// (quota-deferred jobs carry a future next_retry_at), so we keep
+	// fetching the next page until a claimable job is found, a partial page
+	// ends the table, or the hard scan bound is hit.
 	cancelFn := q.isTaskCancelled
 
-	pendingJobs, err := q.store.ListByState(StatePending, 50)
-	if err != nil {
-		return nil, err
-	}
+	const (
+		pageSize    = 50
+		maxScanRows = 500
+	)
 
-	// Find first claimable, non-cancelled job
 	now := time.Now().UTC()
 	var targetJob *Job
-	for _, job := range pendingJobs {
-		// Skip jobs scheduled for the future (due_at not yet reached)
-		if job.DueAt != nil && !job.DueAt.IsZero() && job.DueAt.After(now) {
-			continue
+	scanned := 0
+
+	var (
+		afterInteractive bool
+		afterPriority    int
+		afterCreatedAt   time.Time
+		afterID          string
+	)
+
+	for targetJob == nil {
+		page, err := q.store.ListByStateAfter(StatePending, pageSize, afterInteractive, afterPriority, afterCreatedAt, afterID)
+		if err != nil {
+			return nil, err
 		}
-		// Skip jobs with retry backoff not yet elapsed
-		if job.NextRetryAt != nil && !job.NextRetryAt.IsZero() && job.NextRetryAt.After(now) {
-			continue
-		}
-		// Skip jobs targeted to a different agent
-		if agentID != "" && job.AgentID != "" && job.AgentID != agentID {
-			continue
-		}
-		// Skip cancelled tasks
-		if job.TaskID != "" {
-			if cancelled, _ := cancelFn(job.TaskID); cancelled {
-				q.logger.Debug("Skipping job from cancelled task", KeyJobID, job.ID, "task_id", job.TaskID)
-				continue
-			}
-		}
-		// Check if worker can claim this job
-		if job.CanBeClaimedBy(caps) {
-			targetJob = job
+		if len(page) == 0 {
 			break
 		}
+
+		for _, job := range page {
+			scanned++
+			// Skip jobs scheduled for the future (due_at not yet reached)
+			if job.DueAt != nil && !job.DueAt.IsZero() && job.DueAt.After(now) {
+				continue
+			}
+			// Skip jobs with retry backoff not yet elapsed
+			if job.NextRetryAt != nil && !job.NextRetryAt.IsZero() && job.NextRetryAt.After(now) {
+				continue
+			}
+			// Skip jobs targeted to a different agent
+			if agentID != "" && job.AgentID != "" && job.AgentID != agentID {
+				continue
+			}
+			// Skip cancelled tasks
+			if job.TaskID != "" {
+				if cancelled, _ := cancelFn(job.TaskID); cancelled {
+					q.logger.Debug("Skipping job from cancelled task", KeyJobID, job.ID, "task_id", job.TaskID)
+					continue
+				}
+			}
+			// Check if worker can claim this job
+			if job.CanBeClaimedBy(caps) {
+				targetJob = job
+				break
+			}
+		}
+
+		if targetJob != nil {
+			break
+		}
+
+		// Stop on a partial page (end of the pending table) or the hard
+		// scan bound — Claim must terminate even when every pending row is
+		// parked.
+		if len(page) < pageSize || scanned >= maxScanRows {
+			if scanned >= maxScanRows {
+				q.logger.Debug("Claim scan hit row bound with no claimable job",
+					KeyJobID, "", "scanned", scanned, "bound", maxScanRows)
+			}
+			break
+		}
+
+		last := page[len(page)-1]
+		afterInteractive = last.Interactive
+		afterPriority = int(last.Priority)
+		afterCreatedAt = last.CreatedAt
+		afterID = last.ID
 	}
 
 	if targetJob == nil {
@@ -288,6 +333,10 @@ func (q *PersistentQueue) Complete(ctx context.Context, jobID string, result any
 	}
 
 	if err := q.store.Complete(jobID, result); err != nil {
+		// Stale/duplicate completion (job requeued or already completed):
+		// do NOT publish queue.job.completed — subscribers (the tactical
+		// scheduler) must not process attempt-1 results as fresh ones. The
+		// worker logs the error; that is the acceptable outcome.
 		return err
 	}
 

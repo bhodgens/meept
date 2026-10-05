@@ -1215,6 +1215,30 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		return nil // Not a step-backed job, ignore
 	}
 
+	// B2 stale-completion guard: jobs keep the same ID across Retry/Requeue,
+	// so a completion event for a job that is no longer claimed/processing
+	// (it was requeued for attempt 2, or already completed) is stale. The
+	// step-state shape alone cannot discriminate — StepScheduled is the
+	// de-facto in-flight state (dispatch sets it and StepRunning is never
+	// set) — so the queue job's state is authoritative. Guard runs only
+	// when a queue is wired (always the case in production).
+	if ts.queue != nil {
+		if job, jobErr := ts.queue.Get(ctx, jobID); jobErr == nil && job != nil &&
+			job.State != queue.StateClaimed && job.State != queue.StateProcessing &&
+			job.State != queue.StateCompleted {
+			// pending/failed/dead = the job was requeued or failed after the
+			// event's attempt: stale. StateCompleted is FRESH, not stale —
+			// PersistentQueue.Complete sets 'completed' BEFORE publishing the
+			// event, so every legitimate completion observes 'completed' here.
+			ts.logger.Warn("stale completion event for requeued job",
+				"job_id", jobID,
+				"step_id", step.ID,
+				"state", string(job.State),
+			)
+			return nil // without processing: no result write, no events
+		}
+	}
+
 	// Check if this step belongs to a pair session
 	if ts.pairManager != nil {
 		if session, isPair := ts.pairManager.GetSessionByStep(step.ID); isPair {
@@ -2833,9 +2857,11 @@ func (ts *TacticalScheduler) failBlockedDependents(taskID, failedStepID string) 
 				continue
 			}
 			blocked := false
+			blockedBy := ""
 			for _, dep := range s.DependsOn {
 				if failedIDs[dep] {
 					blocked = true
+					blockedBy = dep
 					break
 				}
 			}
@@ -2851,7 +2877,7 @@ func (ts *TacticalScheduler) failBlockedDependents(taskID, failedStepID string) 
 			ts.logger.Warn("Dependent step terminalized as failed (blocked by failed step)",
 				"task_id", taskID,
 				"step_id", s.ID,
-				"failed_dep", failedStepID,
+				"failed_dep", blockedBy,
 			)
 		}
 		if !changed {
