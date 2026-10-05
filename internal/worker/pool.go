@@ -27,6 +27,11 @@ type Pool struct {
 	bus       *bus.MessageBus
 	logger    *slog.Logger
 
+	// wakeUnregister maps worker ID → the unregister func returned by
+	// WakeNotifier.WakeWaiter, so RemoveWorker/Stop can deregister the
+	// worker's wake channel (no waiter/channel leak). Guarded by mu.
+	wakeUnregister map[string]func()
+
 	mu        sync.RWMutex
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -64,13 +69,14 @@ func NewPool(cfg PoolConfig) (*Pool, error) {
 	}
 
 	return &Pool{
-		workers:     make(map[string]*Worker),
-		queue:       cfg.Queue,
-		processor:   cfg.Processor,
-		bus:         cfg.MessageBus,
-		logger:      cfg.Logger,
-		defaultCaps: cfg.DefaultCaps,
-		idleTimeout: cfg.IdleTimeout,
+		workers:        make(map[string]*Worker),
+		wakeUnregister: make(map[string]func()),
+		queue:          cfg.Queue,
+		processor:      cfg.Processor,
+		bus:            cfg.MessageBus,
+		logger:         cfg.Logger,
+		defaultCaps:    cfg.DefaultCaps,
+		idleTimeout:    cfg.IdleTimeout,
 	}, nil
 }
 
@@ -131,6 +137,17 @@ func (p *Pool) Start(ctx context.Context, workerCount int) error {
 // called again without requiring a new NewPool — the startOnce guard,
 // context, and worker map are all reset.
 func (p *Pool) Stop(ctx context.Context) error {
+	// Unregister every remaining worker's wake channel up front (Stop's
+	// cleanup; no waiter/channel leak into the queue). Done before the
+	// cancel==nil early return so workers added without Start() are also
+	// cleaned up.
+	p.mu.Lock()
+	for id, unregister := range p.wakeUnregister {
+		unregister()
+		delete(p.wakeUnregister, id)
+	}
+	p.mu.Unlock()
+
 	p.mu.Lock()
 	if p.cancel == nil {
 		p.mu.Unlock()
@@ -156,7 +173,8 @@ func (p *Pool) Stop(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	// Reset the pool so Start() can be called again (A-16).
+	// Reset the pool so Start() can be called again (A-16). Wake
+	// channels were already unregistered above.
 	p.mu.Lock()
 	p.workers = make(map[string]*Worker)
 	p.startOnce = sync.Once{}
@@ -171,18 +189,36 @@ func (p *Pool) AddWorker(caps []string, agentID string) (*Worker, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// If the queue supports wake notification, register a buffered wake
+	// channel for this worker so Enqueue signals it directly (event-driven
+	// claim instead of the 1s poll). The unregister func is tracked per
+	// worker and invoked in RemoveWorker/Stop.
+	var wakeCh chan struct{}
+	var unregister func()
+	if wn, ok := p.queue.(queue.WakeNotifier); ok {
+		wakeCh = make(chan struct{}, 1)
+		unregister = wn.WakeWaiter(wakeCh)
+	}
+
 	worker, err := NewWorker(Config{
 		Capabilities: caps,
 		AgentID:      agentID,
 		Queue:        p.queue,
 		Processor:    p.processor,
 		Logger:       p.logger,
+		WakeCh:       wakeCh,
 	})
 	if err != nil {
+		if unregister != nil {
+			unregister()
+		}
 		return nil, fmt.Errorf("failed to create worker: %w", err)
 	}
 
 	p.workers[worker.ID] = worker
+	if unregister != nil {
+		p.wakeUnregister[worker.ID] = unregister
+	}
 	p.logger.Info("Worker added to pool", "id", worker.ID)
 
 	p.publishEvent("worker.started", map[string]any{
@@ -202,6 +238,12 @@ func (p *Pool) RemoveWorker(workerID string) error {
 		return fmt.Errorf("worker not found: %s", workerID)
 	}
 	delete(p.workers, workerID)
+	// Deregister the worker's wake channel before stopping it so the
+	// queue stops signaling a dead worker.
+	if unregister, ok := p.wakeUnregister[workerID]; ok {
+		unregister()
+		delete(p.wakeUnregister, workerID)
+	}
 	p.mu.Unlock()
 
 	// Stop the worker

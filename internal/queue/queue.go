@@ -95,6 +95,13 @@ type PersistentQueue struct {
 
 	mu     sync.RWMutex
 	closed bool
+
+	// Wake plumbing: Enqueue non-blockingly signals registered waiter
+	// channels so workers claim immediately instead of polling. The send
+	// loop snapshots the waiter set under wakeMu but sends OUTSIDE the
+	// lock (mutexio: no channel ops under mutex).
+	wakeMu      sync.Mutex
+	wakeWaiters map[chan<- struct{}]struct{}
 }
 
 // NewPersistentQueue creates a new persistent queue.
@@ -114,6 +121,7 @@ func NewPersistentQueue(dbPath string, msgBus *bus.MessageBus, logger *slog.Logg
 		logger:          logger,
 		isTaskCancelled: func(taskID string) (bool, string) { return false, "" }, // Default: no tasks cancelled
 		hasCancelFilter: false,
+		wakeWaiters:     make(map[chan<- struct{}]struct{}),
 	}
 
 	logger.Info("Persistent queue initialized", "path", dbPath)
@@ -154,6 +162,22 @@ func (q *PersistentQueue) Enqueue(ctx context.Context, job *Job) error {
 
 	if err := q.store.Insert(job); err != nil {
 		return err
+	}
+
+	// Wake registered waiters (non-blocking; snapshot under wakeMu, send
+	// outside it per mutexio). Signals are dropped when a waiter channel
+	// is full: a worker mid-job claims on its next loop anyway.
+	q.wakeMu.Lock()
+	waiters := make([]chan<- struct{}, 0, len(q.wakeWaiters))
+	for ch := range q.wakeWaiters {
+		waiters = append(waiters, ch)
+	}
+	q.wakeMu.Unlock()
+	for _, ch := range waiters {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
 	}
 
 	// Publish event
@@ -512,7 +536,41 @@ func (q *PersistentQueue) Close() error {
 	}
 
 	q.closed = true
+	// Clear wake waiters: closed queue never enqueues again, so channels
+	// must not outlive it.
+	q.wakeMu.Lock()
+	q.wakeWaiters = make(map[chan<- struct{}]struct{})
+	q.wakeMu.Unlock()
 	return q.store.Close() //nolint:mutexio // one-time teardown guarded by closed flag
+}
+
+// WakeNotifier is an optional interface a Queue may implement to let
+// workers register a channel that Enqueue signals (non-blocking) on every
+// new job — event-driven wake-up instead of fixed-interval polling.
+// Deliberately separate from Queue so queue implementations without wake
+// support stay drop-in (the pool type-asserts).
+type WakeNotifier interface {
+	// WakeWaiter registers ch for wake signals on Enqueue and returns an
+	// unregister func that removes it (call on worker stop; idempotent).
+	WakeWaiter(ch chan<- struct{}) (unregister func())
+}
+
+// WakeWaiter registers ch as a wake waiter signaled (non-blocking) by
+// Enqueue. The returned unregister func removes ch from the waiter set;
+// it is safe to call multiple times.
+func (q *PersistentQueue) WakeWaiter(ch chan<- struct{}) (unregister func()) {
+	q.wakeMu.Lock()
+	q.wakeWaiters[ch] = struct{}{}
+	q.wakeMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			q.wakeMu.Lock()
+			delete(q.wakeWaiters, ch)
+			q.wakeMu.Unlock()
+		})
+	}
 }
 
 func (q *PersistentQueue) publishEvent(topic string, data map[string]any) {

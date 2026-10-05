@@ -37,6 +37,10 @@ type Worker struct {
 	queue     queue.Queue
 	processor JobProcessor
 	logger    *slog.Logger
+	// wakeCh is the queue-driven wake signal (see Config.WakeCh). Stored
+	// as a nil-able channel: a nil channel in a select blocks forever,
+	// which is exactly the legacy poll-only behavior.
+	wakeCh <-chan struct{}
 	// providerPolicyCfg is the tree-03 failure-policy config (same
 	// values the LLM clients use; set once at wiring via
 	// SetProviderPolicy). Nil = package defaults.
@@ -56,6 +60,12 @@ type Config struct {
 	Queue        queue.Queue
 	Processor    JobProcessor
 	Logger       *slog.Logger
+	// WakeCh, when non-nil, is signaled by the queue (WakeNotifier) when a
+	// job is enqueued: the run loop claims immediately instead of waiting
+	// out its poll timer. Nil = poll-only legacy behavior (a nil channel
+	// in a select blocks forever, so the wake case is simply never ready —
+	// no special-casing needed).
+	WakeCh <-chan struct{}
 }
 
 // NewWorker creates a new worker.
@@ -82,6 +92,7 @@ func NewWorker(cfg Config) (*Worker, error) {
 		queue:        cfg.Queue,
 		processor:    cfg.Processor,
 		logger:       cfg.Logger,
+		wakeCh:       cfg.WakeCh,
 		done:         make(chan struct{}),
 	}, nil
 }
@@ -206,10 +217,18 @@ func (w *Worker) run(ctx context.Context) {
 			waitTime = idleBackoff
 		}
 
+		// Wait before next poll — interrupted early by a wake signal
+		// (queue signaled an Enqueue) or context cancellation. A nil
+		// wakeCh (legacy poll-only config) blocks forever in its select
+		// case, leaving the timer as the only wake source.
+		wakeTimer := time.NewTimer(waitTime)
 		select {
 		case <-ctx.Done():
+			wakeTimer.Stop()
 			return
-		case <-time.After(waitTime):
+		case <-w.wakeCh:
+			wakeTimer.Stop()
+		case <-wakeTimer.C:
 		}
 	}
 }
