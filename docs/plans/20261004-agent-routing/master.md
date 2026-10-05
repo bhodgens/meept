@@ -254,11 +254,11 @@ Output: APPROVED or list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-worker-wakeup | PENDING | 0 | |
-| 02-quota-aware-selection | PENDING | 0 | |
-| 03-successor-hints | PENDING | 0 | |
-| 04-claim-pinning-docs | PENDING | 0 | |
-| 05-routing-telemetry | PENDING | 0 | |
+| 01-worker-wakeup | COMPLETE | 1 | 5bebb778; deviation accepted: Stop unregisters before cancel==nil early return (leak fix) |
+| 02-quota-aware-selection | COMPLETE | 1 | c586a001; producer exists (llm.Resolver.EndpointBlocked/GetAliasHealth) - wiring deferred, report-only |
+| 03-successor-hints | COMPLETE | 1 | 377d9747; deviations accepted: report.go field, rebuild pinned as JSON round-trip, ungated extraction; orchestrator rune-safe truncation fix |
+| 04-claim-pinning-docs | COMPLETE | 1 | 961a14e8 |
+| 05-routing-telemetry | COMPLETE | 1 | c586a001; metrics-store aggregation deferred (follow-up) |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
