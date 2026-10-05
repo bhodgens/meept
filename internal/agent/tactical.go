@@ -126,6 +126,11 @@ type TacticalScheduler struct {
 	// quotaDeferralMu protects the two quota-deferral counters.
 	quotaDeferralMu sync.Mutex
 
+	// telemetry records routing decisions as fire-and-forget bus events
+	// (agent-routing tree leaf 05). Constructed in NewTacticalScheduler
+	// when the bus is non-nil; every wire point nil-guards it.
+	telemetry *RoutingTelemetry
+
 	// validationRetries counts validation-retry attempts per step ID.
 	// task.TaskStep.ValidationRetryCount has no DB column (StepStore.Update
 	// never writes validation_retry_count), so the value reloaded with
@@ -196,6 +201,12 @@ type TacticalScheduler struct {
 	// 2026-09-05 SQLITE_BUSY panic (GetByID returning (nil, err) at the
 	// step-state refresh) deterministically. Production never sets it.
 	stepStoreReadHook func(id string, byJob bool) (*task.TaskStep, error)
+
+	// health, when non-nil, reports whether the routed agent's provider
+	// endpoint is parked or cooling (agent-routing tree leaf 02). selectAgent
+	// keeps the hint table's route regardless — the warning is advisory only,
+	// never a re-route. Nil = byte-identical legacy routing.
+	health AgentHealthSource
 }
 
 // sessionStoreReader is the narrow session lookup the scheduler needs.
@@ -341,6 +352,15 @@ func (ts *TacticalScheduler) SetContextWindowProvider(fn func(agentID string) in
 	}
 }
 
+// SetAgentHealthSource installs the optional endpoint-park/cooldown probe
+// consulted by selectAgent (agent-routing tree leaf 02). nil is ignored
+// (leaves legacy routing active), mirroring SetHandoffPropagator.
+func (ts *TacticalScheduler) SetAgentHealthSource(src AgentHealthSource) {
+	if src != nil {
+		ts.health = src
+	}
+}
+
 // contextWindowFor resolves the executor model's context window for an
 // agent ID. A nil provider yields 0 (unknown window = legacy behavior).
 func (ts *TacticalScheduler) contextWindowFor(agentID string) int {
@@ -466,6 +486,7 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 		contextWindowProvider:  cfg.ContextWindowProvider,
 		allotmentCfg:           allotmentCfg,
 		filterRetries:          make(map[string]int),
+		telemetry:              NewRoutingTelemetry(cfg.Bus, cfg.Logger),
 	}
 }
 
@@ -2560,7 +2581,32 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 // explore/researcher hints all fell through to the chat persona).
 func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 	if agentID, ok := config.ToolHintAgent(step.ToolHint); ok {
+		// Routing telemetry (agent-routing tree leaf 05): fire-and-forget
+		// record of the hint-table hit, before any advisory checks below.
+		if ts.telemetry != nil {
+			ts.telemetry.RecordHintRoute(step.ID, agentID, "hint_table")
+		}
+		// Quota-aware routing (agent-routing tree leaf 02): the hint table
+		// stays authoritative for capability matching — the route NEVER
+		// changes here. When the health source is wired and the routed
+		// agent's endpoint is parked/cooling, publish an advisory warning
+		// so observers see why the step may stall. Nil source (or the chat
+		// fallback branch below, which has no endpoint mapping) = silent,
+		// byte-identical legacy behavior.
+		if ts.health != nil && ts.health.AgentParkedOrCooling(agentID) {
+			ts.publishEvent("routing.warning", map[string]any{
+				"step_id":  step.ID,
+				"agent_id": agentID,
+				"reason":   "endpoint_parked_or_cooling",
+			})
+		}
 		return agentID
+	}
+	// Routing telemetry (agent-routing tree leaf 05): the hint resolved to
+	// nothing — record the miss plus the chat-fallback decision.
+	if ts.telemetry != nil {
+		ts.telemetry.RecordHintMiss(step.ID, step.ToolHint)
+		ts.telemetry.RecordHintRoute(step.ID, config.AgentIDChat, "chat_fallback")
 	}
 	return config.AgentIDChat
 }
@@ -2574,6 +2620,12 @@ func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 func (ts *TacticalScheduler) assignStepAgent(step *task.TaskStep) {
 	if step.AgentID == "" {
 		step.AgentID = ts.selectAgent(step)
+		return
+	}
+	// Routing telemetry (agent-routing tree leaf 05): the strategist's
+	// explicit assignment wins — record it as an "explicit" decision.
+	if ts.telemetry != nil {
+		ts.telemetry.RecordHintRoute(step.ID, step.AgentID, "explicit")
 	}
 }
 
@@ -3096,6 +3148,11 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 				"handoff_count", handoffCount,
 				"max", ts.maxHandoffSteps,
 			)
+			// Routing telemetry (agent-routing tree leaf 05): the handoff
+			// was rejected by the rate limit.
+			if ts.telemetry != nil {
+				ts.telemetry.RecordHandoff(req.TaskID, req.FromStepID, req.ToAgentID, false)
+			}
 			return fmt.Errorf("handoff rate limit reached: task %s already has %d handoff steps (max: %d)", req.TaskID, handoffCount, ts.maxHandoffSteps)
 		}
 	}
@@ -3163,6 +3220,11 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 			return fmt.Errorf("failed to process handoff amendment: %w", err)
 		}
 		if !reply.Success {
+			// Routing telemetry (agent-routing tree leaf 05): the handoff
+			// amendment was rejected.
+			if ts.telemetry != nil {
+				ts.telemetry.RecordHandoff(req.TaskID, req.FromStepID, req.ToAgentID, false)
+			}
 			return fmt.Errorf("handoff amendment rejected: %s", reply.Message)
 		}
 
@@ -3254,6 +3316,11 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 	}
 
 	// 12. Publish event
+	// Routing telemetry (agent-routing tree leaf 05): the handoff step was
+	// created — record the accepted outcome alongside task.handoff_created.
+	if ts.telemetry != nil {
+		ts.telemetry.RecordHandoff(req.TaskID, req.FromStepID, req.ToAgentID, true)
+	}
 	ts.publishEvent("task.handoff_created", map[string]any{
 		KeyTaskID:    req.TaskID,
 		KeyStepID:    newStepID,
