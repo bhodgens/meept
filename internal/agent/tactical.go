@@ -85,6 +85,11 @@ type StepJobPayload struct {
 	// Task.LinkedSessions at schedule time, it rides the payload so the
 	// interactive stamp is evaluable and auditable on the job itself.
 	SessionID string `json:"session_id,omitempty"`
+	// SuggestedNextHint is the finished step's ADVISORY successor hint
+	// (agent-routing tree leaf 03): rides the payload round-trip so a
+	// re-scheduled step keeps its persisted hint. Nothing consumes it for
+	// routing — the adoption happens in OnJobCompleted.
+	SuggestedNextHint string `json:"suggested_next_hint,omitempty"`
 }
 
 // TacticalScheduler schedules ready steps as queue jobs and handles completion callbacks.
@@ -293,6 +298,7 @@ func stepJobPayloadFromStep(step *task.TaskStep) StepJobPayload {
 		AccumulatedContext:   step.AccumulatedContext,
 		ValidationRetryCount: step.ValidationRetryCount,
 		SessionID:            step.SessionID,
+		SuggestedNextHint:    step.SuggestedNextHint,
 	}
 }
 
@@ -1318,6 +1324,12 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		// envelope carries it (F75: the daemon does not emit it today, so
 		// the aggregation below is only live for producers that do).
 		TokenUsage int `json:"token_usage,omitempty"`
+		// SuggestedNextHint is the finished step's ADVISORY successor
+		// suggestion (agent-routing tree leaf 03), placed on the envelope
+		// by the daemon's step-job processor. Adopted below: persisted onto
+		// the step and measured via one routing.telemetry event. Nothing
+		// consumes it for routing in this tree.
+		SuggestedNextHint string `json:"suggested_next_hint,omitempty"`
 	}
 	if err := json.Unmarshal(result, &execResult); err != nil {
 		ts.logger.Debug("Failed to parse execution result", "step_id", step.ID, "error", err)
@@ -1366,6 +1378,29 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		if err := ts.stepStore.Update(step); err != nil {
 			ts.logger.Warn("Failed to persist step token usage", "step_id", step.ID, "error", err)
 		}
+	}
+
+	// Successor hint adoption (agent-routing tree leaf 03): a non-empty
+	// advisory suggested_next_hint on the completion envelope is persisted
+	// onto the step and measured with ONE routing.telemetry event. Purely
+	// observability — nothing in this tree reads the field for routing; the
+	// sanctioned next-step channel remains request_handoff.
+	if execResult.SuggestedNextHint != "" {
+		step.SuggestedNextHint = execResult.SuggestedNextHint
+		if err := ts.stepStore.Update(step); err != nil {
+			// Log-only, matching the neighboring evidence-persist error
+			// handling: a failed advisory write must never fail the step.
+			ts.logger.Warn("Failed to persist step successor hint", "step_id", step.ID, "error", err)
+		}
+		ts.publishEvent("routing.telemetry", map[string]any{
+			"step_id":             step.ID,
+			"task_id":             step.TaskID,
+			"suggested_next_hint": step.SuggestedNextHint,
+		})
+		ts.logger.Debug("Adopted successor hint from step result",
+			"step_id", step.ID,
+			"suggested_next_hint", step.SuggestedNextHint,
+		)
 	}
 
 	// Claim-vs-evidence contract (e2e run 7 rkl3Th): the step claims file

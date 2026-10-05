@@ -8340,6 +8340,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		// narration), for the gate's claim-vs-evidence contrast. Parse
 		// failure leaves claims empty — narration without a parseable
 		// report is just prose, not structured claims.
+		// (Successor-hint projection lives below, ungated — leaf 03.)
 		if report := agent.ExtractReport(response); report != nil {
 			claims := make([]string, 0, len(report.Accomplished))
 			claims = append(claims, report.Accomplished...)
@@ -8349,6 +8350,26 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	if isStepJob {
 		result["step_id"] = stepPayload.StepID
 		result["task_id"] = stepPayload.TaskID
+		// Successor hint projection (agent-routing tree leaf 03): the
+		// finished turn's report-level ADVISORY suggested_next_hint rides
+		// the envelope so tactical.OnJobCompleted can persist it and emit
+		// routing.telemetry. Trimmed and defensively truncated to 64
+		// chars — it is model output, and the envelope must not become a
+		// channel for unbounded prose. Extracted ONLY from the structured
+		// report field, never from nested response prose; an unparseable
+		// or hint-less report omits the key entirely. NOTE: this lives
+		// OUTSIDE the toolEvidence gate above — the hint must survive even
+		// when the processor runs without a bus/evidence collector wired.
+		if report := agent.ExtractReport(response); report != nil {
+			if hint := strings.TrimSpace(report.SuggestedNextHint); hint != "" {
+				// Rune-safe truncation: byte-slicing hint[:64] can split a
+				// multi-byte rune and put invalid UTF-8 in the envelope.
+				if runes := []rune(hint); len(runes) > 64 {
+					hint = string(runes[:64])
+				}
+				result["suggested_next_hint"] = hint
+			}
+		}
 	}
 
 	return result, nil

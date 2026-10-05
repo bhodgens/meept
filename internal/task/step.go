@@ -250,6 +250,12 @@ type TaskStep struct {
 	ReviewReason string `json:"review_reason,omitempty"`
 	// ReviewAt is the RFC3339 timestamp of the verdict write.
 	ReviewAt string `json:"review_at,omitempty"`
+	// SuggestedNextHint is the finished step's ADVISORY suggestion for who
+	// works next (agent-routing tree leaf 03): copied from the step-job
+	// envelope by OnJobCompleted and persisted for observability. Nothing
+	// in this tree consumes it for routing — the only sanctioned next-step
+	// channel remains request_handoff.
+	SuggestedNextHint string `json:"suggested_next_hint,omitempty"`
 	// SessionID records the originating session for provenance (tree 04
 	// leaf 02, audit R4): the tactical scheduler copies it into
 	// StepJobPayload and uses it to evaluate the interactive stamp at
@@ -488,6 +494,9 @@ func (s *StepStore) migrate() error {
 		"ALTER TABLE task_steps ADD COLUMN conversation_id TEXT",
 		// Originating-session provenance (tree 04 leaf 02, audit R4).
 		"ALTER TABLE task_steps ADD COLUMN session_id TEXT",
+		// Successor hint (agent-routing tree leaf 03): advisory
+		// suggested-next hint copied from the finished step-job envelope.
+		"ALTER TABLE task_steps ADD COLUMN suggested_next_hint TEXT",
 		// Output-filter retry accounting (output-filters tree, leaf 03):
 		// filter rejections persist their own counter + last reason beside
 		// the evidence-validation verdict columns.
@@ -523,8 +532,8 @@ func (s *StepStore) Create(step *TaskStep) error {
 		                        filter_retry_count, filter_error,
 		                        token_usage, memory_refs, accumulated_context, model_override,
 		                        checklist, phase, checkpoint_gate, is_handoff, conversation_id,
-		                        session_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                        session_id, suggested_next_hint, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		step.ID,
 		step.TaskID,
 		step.Description,
@@ -553,6 +562,7 @@ func (s *StepStore) Create(step *TaskStep) error {
 		step.IsHandoff,
 		nullableString(step.ConversationID),
 		nullableString(step.SessionID),
+		nullableString(step.SuggestedNextHint),
 		step.CreatedAt.Format(time.RFC3339),
 		step.UpdatedAt.Format(time.RFC3339),
 	)
@@ -607,7 +617,7 @@ func (s *StepStore) Update(step *TaskStep) error {
 		    validation_error = ?, filter_retry_count = ?, filter_error = ?,
 		    token_usage = ?, memory_refs = ?, accumulated_context = ?,
 		    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, is_handoff = ?,
-		    conversation_id = ?, session_id = ?, updated_at = ?
+		    conversation_id = ?, session_id = ?, suggested_next_hint = ?, updated_at = ?
 		WHERE id = ?`,
 		step.Description,
 		nullableString(depsJSON),
@@ -635,6 +645,7 @@ func (s *StepStore) Update(step *TaskStep) error {
 		step.IsHandoff,
 		nullableString(step.ConversationID),
 		nullableString(step.SessionID),
+		nullableString(step.SuggestedNextHint),
 		now,
 		step.ID,
 	)
@@ -749,8 +760,8 @@ func (s *StepStore) GetByID(id string) (*TaskStep, error) {
 		       filter_retry_count, filter_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
 		       checklist, phase, checkpoint_gate, is_handoff, conversation_id,
-		       session_id, created_at, updated_at
-		FROM task_steps WHERE id = ?`, id)
+		       session_id, suggested_next_hint, created_at, updated_at
+		       FROM task_steps WHERE id = ?`, id)
 
 	return s.scanStep(row)
 }
@@ -764,8 +775,8 @@ func (s *StepStore) GetByJobID(jobID string) (*TaskStep, error) {
 		       filter_retry_count, filter_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
 		       checklist, phase, checkpoint_gate, is_handoff, conversation_id,
-		       session_id, created_at, updated_at
-		FROM task_steps WHERE job_id = ?`, jobID)
+		       session_id, suggested_next_hint, created_at, updated_at
+		       FROM task_steps WHERE job_id = ?`, jobID)
 
 	return s.scanStep(row)
 }
@@ -779,9 +790,9 @@ func (s *StepStore) ListByTaskID(taskID string) ([]*TaskStep, error) {
 		       filter_retry_count, filter_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
 		       checklist, phase, checkpoint_gate, is_handoff, conversation_id,
-		       session_id, created_at, updated_at
-		FROM task_steps
-		WHERE task_id = ?
+		       session_id, suggested_next_hint, created_at, updated_at
+		       FROM task_steps
+		       WHERE task_id = ?
 		ORDER BY sequence ASC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list steps: %w", err)
@@ -1234,8 +1245,8 @@ func (s *StepStore) ReplaceWithSubSteps(stepID string, subSteps []*TaskStep) err
 			                        filter_retry_count, filter_error,
 			                        token_usage, memory_refs, accumulated_context, model_override,
 			                        checklist, phase, checkpoint_gate, is_handoff, conversation_id,
-			                        session_id, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                        session_id, suggested_next_hint, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			ss.ID,
 			ss.TaskID,
 			ss.Description,
@@ -1264,6 +1275,7 @@ func (s *StepStore) ReplaceWithSubSteps(stepID string, subSteps []*TaskStep) err
 			ss.IsHandoff,
 			nullableString(ss.ConversationID),
 			nullableString(ss.SessionID),
+			nullableString(ss.SuggestedNextHint),
 			ss.CreatedAt.Format(time.RFC3339),
 			ss.UpdatedAt.Format(time.RFC3339),
 		)
@@ -1297,6 +1309,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		checkpointGate                      bool
 		isHandoff                           bool
 		conversationID, sessionID           sql.NullString
+		suggestedNextHint                   sql.NullString
 		createdAt, updatedAt                string
 	)
 
@@ -1306,7 +1319,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		&filterRetryCount, &filterError,
 		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride,
 		&checklist, &phase, &checkpointGate, &isHandoff, &conversationID,
-		&sessionID, &createdAt, &updatedAt)
+		&sessionID, &suggestedNextHint, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrStepNotFound
@@ -1319,7 +1332,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		recommendations, evidence, claims, validated, validationError,
 		filterRetryCount, filterError,
 		memoryRefs, accumulatedContext, modelOverride, checklist, phase,
-		checkpointGate, isHandoff, conversationID, sessionID, createdAt, updatedAt), nil
+		checkpointGate, isHandoff, conversationID, sessionID, suggestedNextHint, createdAt, updatedAt), nil
 }
 
 func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
@@ -1338,6 +1351,7 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 		checkpointGate                      bool
 		isHandoff                           bool
 		conversationID, sessionID           sql.NullString
+		suggestedNextHint                   sql.NullString
 		createdAt, updatedAt                string
 	)
 
@@ -1347,7 +1361,7 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 		&filterRetryCount, &filterError,
 		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride,
 		&checklist, &phase, &checkpointGate, &isHandoff, &conversationID,
-		&sessionID, &createdAt, &updatedAt)
+		&sessionID, &suggestedNextHint, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1357,7 +1371,7 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 		recommendations, evidence, claims, validated, validationError,
 		filterRetryCount, filterError,
 		memoryRefs, accumulatedContext, modelOverride, checklist, phase,
-		checkpointGate, isHandoff, conversationID, sessionID, createdAt, updatedAt), nil
+		checkpointGate, isHandoff, conversationID, sessionID, suggestedNextHint, createdAt, updatedAt), nil
 }
 
 func buildStep(id, taskID, description, state string,
@@ -1369,7 +1383,7 @@ func buildStep(id, taskID, description, state string,
 	memoryRefs, accumulatedContext, modelOverride, checklist, phase sql.NullString,
 	checkpointGate bool,
 	isHandoff bool,
-	conversationID, sessionID sql.NullString,
+	conversationID, sessionID, suggestedNextHint sql.NullString,
 	createdAt, updatedAt string) *TaskStep {
 
 	step := &TaskStep{
@@ -1434,6 +1448,9 @@ func buildStep(id, taskID, description, state string,
 	}
 	if sessionID.Valid {
 		step.SessionID = sessionID.String
+	}
+	if suggestedNextHint.Valid {
+		step.SuggestedNextHint = suggestedNextHint.String
 	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {

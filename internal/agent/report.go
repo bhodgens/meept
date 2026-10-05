@@ -28,6 +28,13 @@ type AgentReport struct {
 	// SuggestedNextAgent is the ID of the agent that should handle follow-up.
 	SuggestedNextAgent string `json:"suggested_next_agent,omitempty"`
 
+	// SuggestedNextHint is the finished agent's ADVISORY (free-form,
+	// bounded at extraction) suggestion for who or what should pick up the
+	// next step (agent-routing tree leaf 03). Purely observability — the
+	// sanctioned routing channel remains SuggestedNextAgent +
+	// request_handoff; nothing in this tree consumes the hint for routing.
+	SuggestedNextHint string `json:"suggested_next_hint,omitempty"`
+
 	// UserDecisionNeeded indicates if user input is required to proceed.
 	UserDecisionNeeded bool `json:"user_decision_needed"`
 
