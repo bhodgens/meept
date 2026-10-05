@@ -408,8 +408,15 @@ func TestParallelStepsDependencyCascade(t *testing.T) {
 	]}`)
 
 	// The doomed step: identical failing calls until the breaker refuses.
+	// UNBOUNDED script (not ScriptN(6)): the escalation/replan ladder
+	// recreates the doomed step with the same marker, and every doomed
+	// attempt must keep hitting the failing tool call so the breaker
+	// trips per attempt. A finite script let post-exhaustion replanned
+	// attempts fall through to the default success text and "complete"
+	// without doing work (exposed when worker wake-up made the ladder
+	// fast enough to exhaust the script within one run).
 	doomed := `{"path":"` + doomedPath + `","content":"x","direct":true}`
-	s.Fake.ScriptN(6,
+	s.Fake.Script(
 		harness.And(harness.IsExecutorRequest(),
 			harness.Not(harness.IsPlannerRequest()),
 			harness.MessageContains(doomedMarker)),

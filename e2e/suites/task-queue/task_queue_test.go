@@ -526,8 +526,15 @@ func TestQueuedJobSurvivesRestartAndIsHonestlyResolved(t *testing.T) {
 	if preJob == nil {
 		t.Fatalf("job %s not found in queue.db after enqueue", jobID)
 	}
-	if preJob.State != string(queue.StatePending) {
-		t.Fatalf("job state after enqueue = %q, want pending", preJob.State)
+	// pending OR claimed: worker wake-up (event-driven claim) can move the
+	// job out of pending within milliseconds of the enqueue RPC, so the
+	// persistence assertion accepts either — both prove the row is durable
+	// in queue.db before the restart. The post-restart loop below already
+	// grades every reachable state honestly.
+	switch preJob.State {
+	case string(queue.StatePending), string(queue.StateClaimed), string(queue.StateProcessing):
+	default:
+		t.Fatalf("job state after enqueue = %q, want pending/claimed/processing", preJob.State)
 	}
 	if preJob.UpdatedAt == "" {
 		t.Fatalf("job %s has no updated_at baseline in queue.db", jobID)
