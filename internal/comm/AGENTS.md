@@ -35,6 +35,44 @@ Future agents adding new bus topics: declare stable, single-shape topics as
 `internal/agent/topics.go`) and publish via `bus.PublishT` / subscribe via
 `bus.SubscribeT`. Give any WS-visible payload a `WSClass()` method.
 
+## The per-connection session filter is (channel, session)-scoped
+
+`WebSocketHub` keeps one entry per connection (`wsConnSubs`): `sessions` is the
+channel-agnostic grant set, `suppressed` is a `wsSuppression{channel, session}`
+opt-out ledger. Both relay paths call `ShouldSend(wc, eventType, sessionID)`,
+which resolves the event's channel through `wsEventChannel` (`chat_message` →
+`chat`, `agent_progress` → `progress`, everything else → `all`).
+
+Three rules, all pinned:
+
+- **The GRANT is channel-agnostic, the OPT-OUT is not.** The Flutter client
+  subscribes to one session three times — `subscribeToChat` (`chat`),
+  `subscribeToAgentProgress` and `subscribeToTurnTerminal` (both `progress`)
+  — and `unsubscribeFromChat` sends ONE `unsubscribe` frame naming `chat`.
+  A connection-blind filter map made that single frame silence all three
+  streams: navigating away from a session in the GUI also dropped its
+  progress and turn-terminal, and the turn false-stalled to the 120 s
+  liveness timer. A subscribe re-arms only ITS channel; an unsubscribe mutes
+  only its own.
+- **An unsubscribe never deletes the grant.** It records a suppression, so a
+  connection that unsubscribed stays suppressed for non-subscribed sessions
+  (least-surprise opt-out; deleting the entry returned the connection to
+  broadcast mode and re-delivered what the client opted out of — pinned by the
+  ws-filter-05 e2e scenario). A channel-LESS unsubscribe records the `all`
+  channel and therefore suppresses the session on every channel, which is the
+  connection-wide opt-out an old client meant.
+- **A session-less event broadcasts to everyone.** Both relay call sites carry
+  the `eventSessionID == "" ||` bypass. `SynthesizedProgressEvent.SessionID`
+  derives from the source `AgentEvent.ConversationID`, which is empty for a
+  session-less event; filtering on `""` matched no filter set and dropped the
+  progress line for every armed connection while every other relay path
+  broadcast it. `ShouldSend` is a pure filter query and deliberately does NOT
+  repeat this rule — the bypass belongs at the call sites, where the decision
+  is made.
+
+Both subscribe frame shapes keep working: the `{type,data:{channel,session_id}}`
+envelope and the flat Flutter frame `{type,channel,session_id}`.
+
 ## Bus topics: typed when stable, raw when open-ended
 
 New bus topics with stable, single-shape payloads are declared as

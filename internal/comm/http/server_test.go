@@ -1602,7 +1602,7 @@ func TestShouldSendProgress_BroadcastMode(t *testing.T) {
 
 func TestShouldSendProgress_SingleSessionMatch(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilWSConn, "sess1")
+	hub.SubscribeSession(nilWSConn, "sess1", wsChannelAll)
 
 	if !hub.ShouldSendProgress(nilWSConn, "sess1") {
 		t.Error("should send when session matches")
@@ -1611,7 +1611,7 @@ func TestShouldSendProgress_SingleSessionMatch(t *testing.T) {
 
 func TestShouldSendProgress_SingleSessionNoMatch(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilWSConn, "sess1")
+	hub.SubscribeSession(nilWSConn, "sess1", wsChannelAll)
 
 	if hub.ShouldSendProgress(nilWSConn, "sess2") {
 		t.Error("should not send when session does not match")
@@ -1620,8 +1620,8 @@ func TestShouldSendProgress_SingleSessionNoMatch(t *testing.T) {
 
 func TestShouldSendProgress_MultiSessionAllMatch(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilWSConn, "sess1")
-	hub.SubscribeSession(nilWSConn, "sess2")
+	hub.SubscribeSession(nilWSConn, "sess1", wsChannelAll)
+	hub.SubscribeSession(nilWSConn, "sess2", wsChannelAll)
 
 	if !hub.ShouldSendProgress(nilWSConn, "sess1") || !hub.ShouldSendProgress(nilWSConn, "sess2") {
 		t.Error("should send for all subscribed sessions")
@@ -1630,7 +1630,7 @@ func TestShouldSendProgress_MultiSessionAllMatch(t *testing.T) {
 
 func TestShouldSendProgress_MultiSessionPartialMatch(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilWSConn, "sess1")
+	hub.SubscribeSession(nilWSConn, "sess1", wsChannelAll)
 
 	if hub.ShouldSendProgress(nilWSConn, "sess3") {
 		t.Error("should not send to non-subscribed session")
@@ -1642,8 +1642,8 @@ func TestShouldSendProgress_MultiSessionPartialMatch(t *testing.T) {
 
 func TestShouldSendProgress_AfterUnsubscribe(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilWSConn, "sess1")
-	hub.SubscribeSession(nilWSConn, "sess2")
+	hub.SubscribeSession(nilWSConn, "sess1", wsChannelAll)
+	hub.SubscribeSession(nilWSConn, "sess2", wsChannelAll)
 
 	// Should match before unsubscribe
 	if !hub.ShouldSendProgress(nilWSConn, "sess1") {
@@ -1653,7 +1653,9 @@ func TestShouldSendProgress_AfterUnsubscribe(t *testing.T) {
 		t.Error("should send for sess2 before unsubscribe")
 	}
 
-	hub.UnsubscribeSession(nilWSConn, "sess1")
+	// No channel named: a catch-all opt-out, which suppresses the session on
+	// every channel (the pre-H6 connection-wide behavior).
+	hub.UnsubscribeSession(nilWSConn, "sess1", "")
 
 	// sess1 removed, sess2 should still match
 	if hub.ShouldSendProgress(nilWSConn, "sess1") {
@@ -1666,7 +1668,7 @@ func TestShouldSendProgress_AfterUnsubscribe(t *testing.T) {
 
 func TestShouldSendProgress_Concurrent(t *testing.T) {
 	hub := NewWebSocketHub(nil)
-	hub.SubscribeSession(nilWSConn, "sess-a")
+	hub.SubscribeSession(nilWSConn, "sess-a", wsChannelAll)
 
 	var wg sync.WaitGroup
 	for range 100 {
@@ -1684,7 +1686,7 @@ func TestShouldSendProgress_MultipleConns(t *testing.T) {
 	conn2 := (*wsConn)(nil)
 	_ = conn1
 
-	hub.SubscribeSession(conn1, "sess-x")
+	hub.SubscribeSession(conn1, "sess-x", wsChannelAll)
 
 	// conn1 subscribed, conn2 broadcast
 	if !hub.ShouldSendProgress(conn1, "sess-x") {
@@ -1796,7 +1798,7 @@ func TestHandleWSProgress_SessionFiltering_Scoped(t *testing.T) {
 		Timestamp: time.Now(),
 	}
 
-	hub.SubscribeSession(nilWSConn, "scoped-123")
+	hub.SubscribeSession(nilWSConn, "scoped-123", wsChannelAll)
 
 	if !hub.ShouldSendProgress(nilWSConn, "scoped-123") {
 		t.Error("subscribe to scoped-123 => should send")

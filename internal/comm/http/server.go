@@ -329,10 +329,73 @@ type WebSocketHub struct {
 	clients map[*wsConn]struct{}
 	logger  *slog.Logger
 
-	// sessionSubs tracks which sessions each connection subscribes to,
-	// used for session-scoped progress event filtering.
-	sessionSubs map[*wsConn]map[string]struct{}
+	// sessionSubs tracks each connection's session filter set, used for
+	// session-scoped event filtering. See wsConnSubs for the shape: the
+	// session grants are channel-agnostic and the OPT-OUTS are keyed by
+	// (channel, session), so a client's `unsubscribeFromChat(session)` frame
+	// stops chat for that session without silencing the progress/terminal
+	// streams the same connection subscribed to under `progress`.
+	sessionSubs map[*wsConn]*wsConnSubs
 	sessMu      sync.RWMutex
+}
+
+// wsConnSubs is one connection's session filter set.
+//
+// sessions is the set of session ids the connection subscribed to (via any
+// channel). An ABSENT wsConnSubs (no map entry) is broadcast mode — a
+// connection that never subscribed receives every session's events.
+//
+// suppressed is the per-(channel, session) opt-out ledger: every explicit
+// unsubscribe frame records one entry, and an entry whose channel is
+// wsChannelAll suppresses that session on EVERY channel. This is what keeps
+// the ws-filter-05 contract (an explicit unsubscribe leaves the connection
+// suppressed for non-subscribed sessions) intact while making an unsubscribe
+// channel-scoped instead of connection-wide.
+type wsConnSubs struct {
+	sessions   map[string]struct{}
+	suppressed map[wsSuppression]struct{}
+}
+
+// wsSuppression is one (channel, session) opt-out. channel is one of the
+// wsChannel* constants below; wsChannelAll means "every channel".
+type wsSuppression struct {
+	channel string
+	session string
+}
+
+// Subscription channels the WS relay understands. The Flutter client labels
+// its subscriptions `chat` and `progress` (ui/flutter_ui/lib/services/
+// websocket_service.dart); wsChannelAll is the legacy default a subscribe
+// frame falls back to when it names no channel, and the catch-all channel for
+// event types that are not chat- or progress-scoped.
+const (
+	wsChannelAll      = "all"
+	wsChannelChat     = "chat"
+	wsChannelProgress = "progress"
+)
+
+// wsEventChannel maps a frontend WS event type to the subscription channel
+// that scopes it. Types outside the chat/progress split (job_update,
+// metrics_update, plan_update, the generic "event") are scoped by the session
+// set alone, so they resolve to wsChannelAll.
+func wsEventChannel(eventType string) string {
+	switch eventType {
+	case "chat_message":
+		return wsChannelChat
+	case "agent_progress":
+		return wsChannelProgress
+	default:
+		return wsChannelAll
+	}
+}
+
+// normalizeChannel maps a client-supplied channel onto the internal set.
+// An empty/missing channel is the legacy default (wsChannelAll).
+func normalizeChannel(channel string) string {
+	if channel == "" {
+		return wsChannelAll
+	}
+	return channel
 }
 
 // progressRateLimiter prevents spamming WebSocket clients with rapid progress updates.
@@ -399,7 +462,7 @@ func NewWebSocketHub(logger *slog.Logger) *WebSocketHub {
 	}
 	return &WebSocketHub{
 		clients:     make(map[*wsConn]struct{}),
-		sessionSubs: make(map[*wsConn]map[string]struct{}),
+		sessionSubs: make(map[*wsConn]*wsConnSubs),
 		logger:      logger,
 	}
 }
@@ -439,45 +502,134 @@ func (h *WebSocketHub) ClientCount() int {
 }
 
 // SubscribeSession records that this websocket connection is interested
-// in progress events for the given session ID.
-func (h *WebSocketHub) SubscribeSession(wc *wsConn, sessionID string) {
+// in events for the given session ID on the given channel.
+//
+// The GRANT is channel-agnostic on purpose: the session set is shared by every
+// stream the connection subscribed to (chat, progress, turn-terminal), because
+// delivery is decided per event type — a chat_message only consults the chat
+// channel's opt-outs, an agent_progress frame only the progress channel's
+// (see ShouldSend). That is what lets `subscribeToAgentProgress(session)` and
+// `subscribeToTurnTerminal(session)`, which the Flutter client issues as two
+// separate `progress`-channel frames, keep working as one grant.
+//
+// A subscribe is an explicit opt-IN, so it clears this channel's suppression
+// for the session (and the catch-all one, which is a connection-wide opt-out
+// any re-subscribe reverses) — that is what makes the GUI's dispose ->
+// re-subscribe cycle restore delivery instead of leaving the session muted
+// forever. It deliberately does NOT clear ANOTHER channel's suppression:
+// re-subscribing progress must not silently re-arm chat.
+func (h *WebSocketHub) SubscribeSession(wc *wsConn, sessionID, channel string) {
+	if sessionID == "" {
+		return
+	}
+	channel = normalizeChannel(channel)
 	h.sessMu.Lock()
 	defer h.sessMu.Unlock()
-	if h.sessionSubs[wc] == nil {
-		h.sessionSubs[wc] = make(map[string]struct{})
+	subs := h.sessionSubs[wc]
+	if subs == nil {
+		subs = &wsConnSubs{}
+		h.sessionSubs[wc] = subs
 	}
-	h.sessionSubs[wc][sessionID] = struct{}{}
+	if subs.sessions == nil {
+		subs.sessions = make(map[string]struct{})
+	}
+	if subs.suppressed == nil {
+		subs.suppressed = make(map[wsSuppression]struct{})
+	}
+	subs.sessions[sessionID] = struct{}{}
+	delete(subs.suppressed, wsSuppression{channel: channel, session: sessionID})
+	delete(subs.suppressed, wsSuppression{channel: wsChannelAll, session: sessionID})
 }
 
-// UnsubscribeSession removes a session filter for the given connection.
-// An explicit unsubscribe means "stop sending me this session's events":
-// an empty filter map is deliberately LEFT in place so the connection
-// stays suppressed for non-subscribed sessions (least-surprise opt-out,
-// pinned by the ws-filter-05 e2e scenario). Deleting the entry would
-// silently return the connection to broadcast mode — delivering events
-// the client explicitly opted out of (2026-10-01 fix-wave: the pin test
-// asserting broadcast-restore failed exactly this scenario and the
-// cleanup was reverted).
-func (h *WebSocketHub) UnsubscribeSession(wc *wsConn, sessionID string) {
+// UnsubscribeSession records a per-(channel, session) opt-out for the given
+// connection.
+//
+// An explicit unsubscribe means "stop sending me this session's events on
+// this channel": the grant is never REMOVED from the session set, because
+// doing so silently returned the connection to broadcast mode for every
+// stream and delivered events the client explicitly opted out of (2026-10-01
+// fix-wave: the pin test asserting broadcast-restore failed exactly this
+// scenario and the cleanup was reverted). Instead the pair lands in the
+// suppression ledger, so the connection stays suppressed for that session —
+// on this channel — which is the ws-filter-05 contract.
+//
+// Channel scoping is the point (bughunt wave H6): the Flutter client's
+// unsubscribeFromChat(session) frame names `chat`, and it must NOT silence the
+// `progress` stream the same connection armed through subscribeToAgentProgress
+// / subscribeToTurnTerminal. Passing no channel records a wsChannelAll
+// suppression, which suppresses the session on every channel (the
+// connection-wide opt-out an old channel-less client meant).
+func (h *WebSocketHub) UnsubscribeSession(wc *wsConn, sessionID, channel string) {
+	if sessionID == "" {
+		return
+	}
 	h.sessMu.Lock()
 	defer h.sessMu.Unlock()
-	if subs := h.sessionSubs[wc]; subs != nil {
-		delete(subs, sessionID)
+	subs := h.sessionSubs[wc]
+	if subs == nil {
+		// Deliberately CREATE the entry: an unsubscribe from a connection
+		// that never subscribed must still leave it suppressed rather than
+		// silently in broadcast mode (least-surprise opt-out).
+		subs = &wsConnSubs{}
+		h.sessionSubs[wc] = subs
 	}
+	if subs.suppressed == nil {
+		subs.suppressed = make(map[wsSuppression]struct{})
+	}
+	subs.suppressed[wsSuppression{channel: normalizeChannel(channel), session: sessionID}] = struct{}{}
 }
 
-// ShouldSendProgress reports whether this connection should receive a progress
-// event for the given session ID. Returns true when the connection has no
-// session filters (broadcast mode) or explicitly subscribed to this session.
-func (h *WebSocketHub) ShouldSendProgress(wc *wsConn, sessionID string) bool {
+// ShouldSend reports whether this connection should receive an event of
+// eventType for sessionID. Returns true when the connection has no session
+// filters (broadcast mode) or explicitly subscribed to this session on this
+// event's channel.
+//
+// Channel scoping (bughunt wave H6): a chat_message only consults the `chat`
+// channel's opt-outs and an agent_progress frame only the `progress` one's, so
+// unsubscribing from one stream leaves the others delivering for the same
+// session. Event types outside the chat/progress split (job_update,
+// metrics_update, the generic "event") resolve to wsChannelAll, which is the
+// channel a channel-less client unsubscribes — unchanged behavior for them.
+//
+// This is a pure filter query and deliberately does NOT special-case an empty
+// sessionID: the session-less broadcast bypass lives at the two relay call
+// sites (`eventSessionID == "" || h.ShouldSend(...)`), mirroring each other,
+// so the rule is visible where the decision is made instead of hidden in a
+// helper whose contract then differs from what its callers read.
+func (h *WebSocketHub) ShouldSend(wc *wsConn, eventType, sessionID string) bool {
+	channel := wsEventChannel(eventType)
+
 	h.sessMu.RLock()
 	defer h.sessMu.RUnlock()
 	subs := h.sessionSubs[wc]
 	if subs == nil {
 		return true // no filters = broadcast to all
 	}
-	_, ok := subs[sessionID]
-	return ok
+	if _, ok := subs.sessions[sessionID]; !ok {
+		return false
+	}
+	if _, blocked := subs.suppressed[wsSuppression{channel: channel, session: sessionID}]; blocked {
+		return false
+	}
+	if channel != wsChannelAll {
+		// A catch-all unsubscribe (no channel named) is the connection-wide
+		// opt-out: it suppresses the session on every channel.
+		if _, blocked := subs.suppressed[wsSuppression{channel: wsChannelAll, session: sessionID}]; blocked {
+			return false
+		}
+	}
+	return true
+}
+
+// ShouldSendProgress reports whether this connection should receive a progress
+// event for the given session ID. Returns true when the connection has no
+// session filters (broadcast mode) or explicitly subscribed to this session.
+//
+// The relay call sites apply the empty-session broadcast bypass themselves, so
+// this helper answers the filter question alone: a session that was never
+// subscribed is not matched, an empty session id matches nothing either.
+func (h *WebSocketHub) ShouldSendProgress(wc *wsConn, sessionID string) bool {
+	return h.ShouldSend(wc, "agent_progress", sessionID)
 }
 
 // Broadcast sends a typed message to all connected WebSocket clients.
@@ -620,7 +772,10 @@ func (s *Server) handleWSEvent(msg *models.BusMessage) {
 	h.mu.RLock()
 	conns := make([]*wsConn, 0, len(h.clients))
 	for wc := range h.clients {
-		if eventSessionID == "" || h.ShouldSendProgress(wc, eventSessionID) {
+		// eventSessionID == "" broadcasts to every connection (backward
+		// compat with pre-filter clients); ShouldSend applies the
+		// per-(channel, session) opt-outs on top of the session set.
+		if eventSessionID == "" || h.ShouldSend(wc, eventType, eventSessionID) {
 			conns = append(conns, wc)
 		}
 	}
@@ -685,7 +840,14 @@ func (s *Server) handleWSProgress(msg *models.BusMessage) {
 	h.mu.RLock()
 	conns := make([]*wsConn, 0, len(h.clients))
 	for wc := range h.clients {
-		if h.ShouldSendProgress(wc, event.SessionID) {
+		// Empty session id broadcasts to every connection, mirroring the
+		// generic wildcard relay (bughunt wave H7): event.SessionID derives
+		// from the AgentEvent's ConversationID, which is empty for a
+		// session-less event, and filtering on "" matched no filter set —
+		// the progress line then vanished for every armed client while
+		// every other relay path broadcast it. A session that IS present
+		// stays session-filtered (and channel-scoped on `progress`).
+		if event.SessionID == "" || h.ShouldSend(wc, "agent_progress", event.SessionID) {
 			conns = append(conns, wc)
 		}
 	}
@@ -2611,15 +2773,16 @@ func (s *Server) handleWSSubscribe(wc *wsConn, msg *WSMessage) {
 	}
 	if channel == "" {
 		// Default channel
-		channel = "all"
+		channel = wsChannelAll
 	}
+	channel = normalizeChannel(channel)
 
 	// Register session filter for progress event filtering BEFORE the ack:
 	// a client that fires a turn on "subscribed" receipt must have its
 	// early events evaluated with the filter already armed, or they are
 	// dropped (ack/filter-arm race).
 	if sessionID != "" {
-		s.wsHub.SubscribeSession(wc, sessionID)
+		s.wsHub.SubscribeSession(wc, sessionID, channel)
 	}
 
 	subscribeData, _ := json.Marshal(map[string]string{"channel": channel})
@@ -2667,14 +2830,16 @@ func (s *Server) handleWSUnsubscribe(wc *wsConn, msg *WSMessage) {
 	}
 
 	if sessionID != "" {
-		s.wsHub.UnsubscribeSession(wc, sessionID)
-		s.logger.Debug("ws client unsubscribed", "remote", wc.conn.RemoteAddr(), "channel", channel, "session", sessionID)
+		s.wsHub.UnsubscribeSession(wc, sessionID, channel)
+		s.logger.Debug("ws client unsubscribed", "remote", wc.conn.RemoteAddr(), "channel", normalizeChannel(channel), "session", sessionID)
 	} else if channel != "" {
-		// Unsubscribe all sessions for this channel:
-		// remove all session filters on this connection since the channel is gone.
+		// Unsubscribe all sessions for this channel: the channel is gone, so
+		// drop every session filter on this connection and return it to
+		// broadcast mode (the pre-H6 semantics, kept for the channel-level
+		// frame that carries no session_id — ws-filter-05).
 		s.wsHub.sessMu.Lock()
 		if subs, ok := s.wsHub.sessionSubs[wc]; ok {
-			for sid := range subs {
+			for sid := range subs.sessions {
 				s.logger.Debug("ws auto-unsubscribed all sessions", "remote", wc.conn.RemoteAddr(), "channel", channel, "session", sid)
 			}
 			delete(s.wsHub.sessionSubs, wc)
