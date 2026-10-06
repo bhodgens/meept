@@ -8,7 +8,7 @@ import (
 // TestCodexExtraHeaders_OnWire proves the configured extra headers land on
 // the /responses request; static application only — no session sentinel.
 func TestCodexExtraHeaders_OnWire(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[],"usage":{"input_tokens":0,"output_tokens":0}}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 
 	cfg := &ModelConfig{
 		BaseURL:    srv.URL,
@@ -39,7 +39,7 @@ func TestCodexExtraHeaders_OnWire(t *testing.T) {
 // TestCodexExtraHeaders_OverrideDefaults pins that config headers are
 // applied after the built-in Cloudflare/client headers and win per key.
 func TestCodexExtraHeaders_OverrideDefaults(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 
 	cfg := &ModelConfig{
 		BaseURL:    srv.URL,
@@ -67,7 +67,7 @@ func TestCodexExtraHeaders_OverrideDefaults(t *testing.T) {
 // TestCodexExtraHeaders_AbsentOrEmptySendsNothing covers the no-config and
 // empty-value cases.
 func TestCodexExtraHeaders_AbsentOrEmptySendsNothing(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 
 	client := newCodexClientForTest(t, srv.URL)
 	if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hello"}}); err != nil {
@@ -79,7 +79,7 @@ func TestCodexExtraHeaders_AbsentOrEmptySendsNothing(t *testing.T) {
 	}
 
 	// Empty-string values are never sent.
-	srv2, ch2 := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv2, ch2 := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	cfg2 := &ModelConfig{
 		BaseURL:      srv2.URL,
 		ModelID:      "gpt-5.1-codex",

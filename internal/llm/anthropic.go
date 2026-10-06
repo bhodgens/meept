@@ -447,6 +447,33 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 				return nil, err
 			}
 
+			// Empty-completion classification (parity with the openai
+			// Chat loop, internal/llm/AGENTS.md): a 200-OK body with
+			// blank/whitespace content and no tool_use block is a
+			// provider FLAKE — Classify(0) returns FailureNone and would
+			// otherwise surface it with no retry. Re-dispatch IMMEDIATELY
+			// within the short budget (no plan sleep: a blank body is not a
+			// rate-limit window) and return the BARE sentinel on
+			// exhaustion so the agent loop's generic branch records the
+			// alias failure and rotation lands on the local fallback.
+			// Refusal/quota/overflow early-exits above keep precedence.
+			if errors.Is(err, ErrEmptyResponse) {
+				lastErr = err
+				c.logger.Warn("Empty completion, retrying",
+					"provider", effCfg.ProviderID,
+					"model", effCfg.ModelID,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				if attempt < shortRetries {
+					continue
+				}
+				// Ledger the burned blank completions (every 200-OK
+				// attempt carried a real prompt).
+				c.recordUsageStore(effCfg, TokenUsage{}, true, ErrEmptyResponse.Message, 0, chatOpts)
+				return nil, err
+			}
+
 			// D4/D7: classify FIRST. The request layer already resolved
 			// quota shapes (rate_limit_error / quota_exceeded / 402) to
 			// QuotaResetError, so a surviving error is a bare throttle or
@@ -699,6 +726,28 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 			// (F-A1, streaming path): the payload must be trimmed, not
 			// re-sent.
 			if _, ok := errors.AsType[*ContextOverflowError](err); ok {
+				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+				return nil, err
+			}
+
+			// Empty-completion classification (streaming twin of the
+			// non-streaming branch above; internal/llm/AGENTS.md): a
+			// clean stream with no text, no tool_use and no thinking
+			// answer is the provider flake — bounded immediate
+			// re-dispatch, BARE sentinel on exhaustion so the alias
+			// failure path classifies it as empty.
+			if errors.Is(err, ErrEmptyResponse) {
+				lastErr = err
+				c.logger.Warn("Empty completion, retrying (stream)",
+					"provider", effCfg.ProviderID,
+					"model", effCfg.ModelID,
+					"attempt", attempt,
+					"max_retries", shortRetries,
+				)
+				if attempt < shortRetries {
+					continue
+				}
+				c.recordUsageStore(effCfg, TokenUsage{}, true, ErrEmptyResponse.Message, 0, chatOpts)
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -1518,7 +1567,10 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 		)
 	}
 
-	return c.parseResponse(&apiResp), nil
+	// Empty-completion classification happens INSIDE parseResponse, so the
+	// sentinel flows through this return and the Chat/ChatWithProgress retry
+	// loops treat it as a flake (bare sentinel on exhaustion).
+	return c.parseResponse(&apiResp)
 }
 
 // doStreamingRequest performs a streaming HTTP request to Anthropic's API.
@@ -1897,6 +1949,17 @@ func (c *AnthropicClient) buildResponseFromBlocks(blocks []contentBlockAccum, st
 		finalContent = fmt.Sprintf("[Thinking]\n%s\n\n[Response]\n%s", thinking.String(), finalContent)
 	}
 
+	// Empty-completion classification (streaming twin of the non-streaming
+	// parser; see internal/llm/AGENTS.md). A clean stream that ends with no
+	// tool_use block and no non-blank answer text produced NOTHING — surface
+	// the BARE ErrEmptyResponse sentinel so the retry loop re-dispatches it
+	// and the alias failure path rotates, instead of completing the turn
+	// with an empty reply. Judge the RAW answer text: a thinking-only reply
+	// leaves it blank and must classify.
+	if err := classifyAnthropicEmpty(toolCalls, content.String()); err != nil {
+		return nil, err
+	}
+
 	return &Response{
 		Content:   finalContent,
 		ToolCalls: toolCalls,
@@ -1912,8 +1975,44 @@ func (c *AnthropicClient) buildResponseFromBlocks(blocks []contentBlockAccum, st
 	}, nil
 }
 
-// parseResponse converts an Anthropic API response to our internal Response format.
-func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) *Response {
+// classifyAnthropicEmpty is the shared empty-completion gate for BOTH anthropic
+// response parsers (non-streaming parseResponse and the streaming
+// buildResponseFromBlocks). A reply carrying no tool_use block and no
+// non-blank answer text is the provider flake described in
+// internal/llm/AGENTS.md: the BARE ErrEmptyResponse sentinel is returned so the
+// retry loops re-dispatch immediately and the alias failure path rotates to
+// the local fallback instead of completing the turn with an empty reply.
+//
+// answerText is the RAW answer text (before the [Thinking]/[Response]
+// decoration): a thinking-only reply leaves it blank and must classify, since
+// the caller still has no answer. Whitespace-only is the same failure —
+// leading whitespace on REAL content passes byte-identical.
+func classifyAnthropicEmpty(toolCalls []ToolCall, answerText string) error {
+	if len(toolCalls) == 0 && strings.TrimSpace(answerText) == "" {
+		return ErrEmptyResponse
+	}
+	return nil
+}
+
+// parseResponse converts an Anthropic API response to our internal Response
+// format.
+//
+// Empty-completion classification (parity with the openai parser, L4 of the
+// 2026-10-05 bughunt): a 200-OK body that carries NO tool_use block and only
+// blank/whitespace text — or extended-thinking output with no answer text at
+// all — is the "model said nothing" provider flake, NOT a success with empty
+// content. It returns the BARE ErrEmptyResponse sentinel so the retry loops
+// re-dispatch it immediately within the short budget and the agent loop's
+// generic branch records the alias failure (rotation lands on the local
+// fallback) instead of terminalizing the turn with garbage. Leading
+// whitespace on REAL content passes byte-identical (only a fully-blank
+// completion classifies), mirroring client.go's parseResponseWithTools.
+//
+// Ordering matches the openai parser: callers must run the refusal/quota
+// detection FIRST (doRequest already does — a stop_reason:"refusal" with no
+// text returns a typed RefusalError there), so a refusal can never be
+// reclassified as an empty flake.
+func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) (*Response, error) {
 	var content strings.Builder
 	var toolCalls []ToolCall
 	var thinking strings.Builder
@@ -1946,6 +2045,14 @@ func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) *Response {
 		finalContent = fmt.Sprintf("[Thinking]\n%s\n\n[Response]\n%s", thinking.String(), finalContent)
 	}
 
+	// Empty-completion classification (see the doc comment). A thinking-only
+	// reply that produced no answer text is ALSO blank to the caller once the
+	// [Thinking]/[Response] wrapper is stripped, so the shared gate judges
+	// the raw answer text.
+	if err := classifyAnthropicEmpty(toolCalls, content.String()); err != nil {
+		return nil, err
+	}
+
 	return &Response{
 		Content:   finalContent,
 		ToolCalls: toolCalls,
@@ -1958,7 +2065,7 @@ func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) *Response {
 		},
 		Model:        apiResp.Model,
 		FinishReason: apiResp.StopReason,
-	}
+	}, nil
 }
 
 // Close closes the client and releases resources.

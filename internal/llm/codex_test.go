@@ -138,7 +138,7 @@ func TestCodexAccountIDStdEncodingPadding(t *testing.T) {
 // --- Task 2: request shape ---
 
 func TestCodexChatRequestShape(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[],"usage":{"input_tokens":0,"output_tokens":0}}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	client := newCodexClientForTest(t, srv.URL,
 		WithCodexTokenResolver(&stubTokenResolver{token: makeJWT(t, "acct-shape")}, "openai-codex"),
 	)
@@ -215,7 +215,7 @@ func TestCodexChatRequestShape(t *testing.T) {
 }
 
 func TestCodexChatAccountIDHeaderOmitted(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	client := newCodexClientForTest(t, srv.URL,
 		WithCodexTokenResolver(&stubTokenResolver{token: makeJWT(t, "")}, "openai-codex"),
 	)
@@ -233,7 +233,7 @@ func TestCodexChatAccountIDHeaderOmitted(t *testing.T) {
 }
 
 func TestCodexChatAPIKeyFallback(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	cfg := &ModelConfig{BaseURL: srv.URL, ModelID: "m", ProviderID: "openai-codex", APIKey: "sk-static"}
 	client := NewCodexClient(cfg)
 	if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "x"}}); err != nil {
@@ -250,7 +250,7 @@ func TestCodexChatAPIKeyFallback(t *testing.T) {
 }
 
 func TestCodexChatToolsShape(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	client := newCodexClientForTest(t, srv.URL)
 	tools := []ToolDefinition{{
 		Type: "function",
@@ -299,6 +299,9 @@ func TestCodexChatResponseParsing(t *testing.T) {
 		name string
 		body string
 		want Response
+		// wantErr, when set, asserts the completion classifies as this
+		// error instead of returning a success (L4: blank completions).
+		wantErr error
 	}{
 		{
 			name: "message only",
@@ -328,9 +331,13 @@ func TestCodexChatResponseParsing(t *testing.T) {
 			want: Response{Content: "ab", Model: "gpt-5.1-codex", FinishReason: "stop"},
 		},
 		{
-			name: "empty output",
-			body: `{"output":[]}`,
-			want: Response{Model: "gpt-5.1-codex", FinishReason: "stop"},
+			// L4: a blank completion is a provider flake, not a success
+			// with empty content — it now classifies as ErrEmptyResponse
+			// (asserted in TestCodexChat_BlankCompletionExhaustsToBareSentinel).
+			name:    "empty output classifies as empty",
+			body:    `{"output":[]}`,
+			want:    Response{Model: "gpt-5.1-codex", FinishReason: "stop"},
+			wantErr: ErrEmptyResponse,
 		},
 	}
 	for _, tt := range tests {
@@ -338,6 +345,15 @@ func TestCodexChatResponseParsing(t *testing.T) {
 			srv, _ := newCodexTestServer(t, codexResponder{status: 200, body: tt.body})
 			client := newCodexClientForTest(t, srv.URL)
 			resp, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "x"}})
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Chat err = %v, want %v", err, tt.wantErr)
+				}
+				if resp != nil {
+					t.Fatalf("resp = %+v, want nil on an empty completion", resp)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Chat: %v", err)
 			}
@@ -572,7 +588,7 @@ func TestCodexUserAgentShape(t *testing.T) {
 // is computed a single time — init or first request — and not rebuilt per
 // request like the upstream perf issue (openai/codex#36210).
 func TestCodexUserAgentComputedOnce(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	client := newCodexClientForTest(t, srv.URL)
 	before := codexUAInvocations.Load()
 	for range 3 {

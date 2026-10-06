@@ -233,15 +233,20 @@ func (w *rotatingWriter) rotateLocked() {
 // The mutex guards the shared *os.File pointer: the auto-restart path calls
 // Truncate concurrently, and an unlocked nil-write here raced it (found by
 // the race detector on the StopAll/auto-restart overlap).
+//
+// Every early return is under w.mu, and the nil-receiver check comes FIRST:
+// a nil *rotatingWriter has no mutex to lock, so a `w == nil` test folded into
+// the same condition as the file check dereferenced w in the branch body and
+// panicked instead of returning (bughunt wave L6). There is deliberately no
+// pre-lock fast path here or in Write/Truncate: reading w.file outside the
+// lock is exactly the race Close was hardened against.
 func (w *rotatingWriter) Close() error {
-	if w == nil || w.file == nil {
-		w.mu.Lock()
-		defer w.mu.Unlock()
+	if w == nil {
 		return nil
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if *w.file == nil {
+	if w.file == nil || *w.file == nil {
 		return nil
 	}
 	//nolint:mutexio // f.Close is shared-file lifecycle, not request I/O; the mutex serializes Close vs Truncate on the same pointer

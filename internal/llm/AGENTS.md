@@ -22,22 +22,49 @@ boundaries:
   explicit `errors.As` quota early-exit BEFORE the
   `RateLimitError`/retryable-status checks. A new retry loop must
   preserve this — a 429 quota window is hours, and the default
-  3-attempt loop would burn it.
+  3-attempt loop would burn it. (`CodexClient` classifies every
+  transport failure through `codexErrorFromResponse` in one place and
+  has no per-status retry loop, so it needs no such early-exit; its one
+  retry wrapper re-dispatches ONLY the empty-completion lane.)
 - **Empty/whitespace completions are provider flakes, not fatal errors.**
-  A 200-OK body whose `content` is blank or whitespace-only (and carries
-  no tool calls) classifies as `ErrEmptyResponse`
-  (`parseResponseWithTools` trims; a bare `"\n\n"` body is empty, while
-  `"\n\nok"` passes byte-identical — leading whitespace on real content
-  is normal for agnes-2.5-flash). The retry loops (openai
-  non-streaming/streaming-delta/ChatWithProgress) re-dispatch it
-  IMMEDIATELY within the short budget — no plan sleep, it is not a
-  rate-limit window — and surface the BARE sentinel on exhaustion so it
-  is an alias failure: the agent loop's generic branch records it and
-  rotation lands on the local fallback instead of completing the turn
-  with garbage. The refusal/quota/overflow early-exits keep precedence
-  (a `content_filter` finish reason with empty text is still a refusal,
-  never an empty retry). The streaming path treats a clean stream with
-  no content, no calls, and no reasoning the same way.
+  EVERY client classifies them, not just the openai ones: a 200-OK body
+  that produces no answer — blank or whitespace-only text, no tool call,
+  no reasoning — is `ErrEmptyResponse`, not a success with empty
+  content. Per-client sites:
+  - openai non-streaming: `parseResponseWithTools` (trimmed; leading
+    whitespace on real content passes byte-identical, so agnes-2.5-flash's
+    `"\n\nok"` is never misread as empty);
+  - openai streaming-delta: the stream terminator, same trim rule over
+    content + reasoning;
+  - anthropic: `classifyAnthropicEmpty`, shared by the non-streaming
+    `parseResponse` and the streaming `buildResponseFromBlocks`. It
+    judges the RAW answer text (pre `[Thinking]/[Response]` decoration),
+    so a thinking-only reply classifies, and it exempts any reply
+    carrying a `tool_use` block — the tool call IS the answer;
+  - codex: `parseResponse` and `parseResponsesSSE`, judging
+    output_text + reasoning together and exempting `function_call`.
+
+  Every retry loop re-dispatches the sentinel IMMEDIATELY within the
+  short budget — no plan sleep, a served-but-blank body is not a
+  rate-limit window — and surfaces the BARE sentinel on exhaustion
+  (never a wrapped `ClientError`), so it is an alias failure: the agent
+  loop's generic branch records it and rotation lands on the local
+  fallback instead of completing the turn with garbage. The loops:
+  openai `Chat` / `ChatWithProgress` / `ChatWithDeltaCallback`,
+  anthropic `Chat` / `ChatWithProgress`, and codex's
+  `doRequestWithEmptyRetry` (its single wrapper covers both the
+  non-streaming and the streaming-delta caller, and retries ONLY the
+  empty lane — every other codex failure keeps the single-shot shape so
+  a 429/quota window is not double-retried).
+
+  Ordering is load-bearing: the refusal/quota/overflow early-exits keep
+  precedence over the empty branch, at both the loop level and the
+  parser level (anthropic's `stop_reason:"refusal"` is detected before
+  `parseResponse` runs, so a refusal with no text is a `RefusalError`,
+  never an empty retry). A new client or a new retry loop must preserve
+  that ordering, and exhaustion must return the bare sentinel by
+  POINTER identity — `errors.Is` also matches through a wrap, so it is
+  not a sufficient pin.
 - **All-blocked is a distinct error.** When every alias candidate is
   quota-blocked, the Resolver returns `ErrAllModelsQuotaBlocked` — never a
   blocked model.

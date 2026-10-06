@@ -115,9 +115,15 @@ func TestClientChat_WhitespaceCompletionExhaustsToEmptySentinel(t *testing.T) {
 	if !errors.Is(err, ErrEmptyResponse) {
 		t.Fatalf("err = %v, want ErrEmptyResponse", err)
 	}
-	var clientErr *ClientError
-	if errors.As(err, &clientErr) && clientErr.Message != ErrEmptyResponse.Message {
-		t.Errorf("sentinel mutated: %q, want %q", clientErr.Message, ErrEmptyResponse.Message)
+	// Identity check (L5): errors.Is also matches THROUGH a wrap, so only
+	// pointer identity proves the bare sentinel surfaced — a wrapping
+	// ClientError would still classify as an alias failure but loses the
+	// "empty response" verdict the agent loop's generic branch relies on.
+	// This is the non-streaming Chat loop; the streaming-delta loop's twin
+	// is TestChatWithDeltaCallback_StreamEmptyExhaustionIsBareSentinel.
+	if err != error(ErrEmptyResponse) { //nolint:errorlint // deliberate pointer-identity check on the bare sentinel
+		t.Fatalf("err identity = %p (%T: %v), want the bare ErrEmptyResponse sentinel (%p)",
+			err, err, err, error(ErrEmptyResponse))
 	}
 	if got := atomic.LoadInt32(&hits); got != int32(fastFailurePolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
 		t.Errorf("server hits = %d, want %d (ShortRetries budget)", got, fastFailurePolicyCfg.ShortRetries)
@@ -199,6 +205,37 @@ func TestChatWithDeltaCallback_EmptyStreamSurfacesEmptySentinel(t *testing.T) {
 	}
 	if got := hits.Load(); got != int32(fastFailurePolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
 		t.Errorf("server hits = %d, want %d (short budget)", got, fastFailurePolicyCfg.ShortRetries)
+	}
+}
+
+// TestClientChatWithProgress_EmptyExhaustionIsBareSentinel is the third
+// empty-completion retry loop (L5): ChatWithProgress's loop is a SIBLING of
+// Chat's, not a delegate, so it needs its own bare-sentinel identity pin. A
+// 1-indexed/0-indexed bound mistake here would surface the historical
+// "All N attempts failed" ClientError wrap instead — errors.Is still matches
+// through that wrap, so only pointer identity catches it.
+func TestClientChatWithProgress_EmptyExhaustionIsBareSentinel(t *testing.T) {
+	var hits int32
+	seq := []scriptedResponse{
+		{status: http.StatusOK, body: whitespaceChatBody()},
+	}
+	srv := newScriptedServer(t, seq, &hits)
+	defer srv.Close()
+
+	c := newFailurePolicyTestClient(t, srv, fastFailurePolicyCfg)
+	_, err := c.ChatWithProgress(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		func(ProgressStage, string) {},
+	)
+	if !errors.Is(err, ErrEmptyResponse) {
+		t.Fatalf("err = %v, want ErrEmptyResponse", err)
+	}
+	if err != error(ErrEmptyResponse) { //nolint:errorlint // deliberate pointer-identity check on the bare sentinel
+		t.Fatalf("err identity = %p (%T: %v), want the bare ErrEmptyResponse sentinel (%p)",
+			err, err, err, error(ErrEmptyResponse))
+	}
+	if got := atomic.LoadInt32(&hits); got != int32(fastFailurePolicyCfg.ShortRetries) { //nolint:gosec // G115: ShortRetries is a small config int (bounded ≤ 10)
+		t.Errorf("server hits = %d, want %d (ShortRetries budget)", got, fastFailurePolicyCfg.ShortRetries)
 	}
 }
 

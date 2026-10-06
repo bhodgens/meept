@@ -18,7 +18,7 @@ import (
 // on the wire when WithTaskScope supplies one, and that the same sentinel
 // works on any other config header name.
 func TestCodexSessionAffinity_SentinelOnWire(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[],"usage":{"input_tokens":0,"output_tokens":0}}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 
 	cfg := &ModelConfig{
 		BaseURL:    srv.URL,
@@ -42,7 +42,7 @@ func TestCodexSessionAffinity_SentinelOnWire(t *testing.T) {
 
 	// Same sentinel substitution under a different header name, and the
 	// task scope does not leak into unrelated headers.
-	srv2, ch2 := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv2, ch2 := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	cfg2 := &ModelConfig{
 		BaseURL:    srv2.URL,
 		ModelID:    "gpt-5.1-codex",
@@ -71,7 +71,7 @@ func TestCodexSessionAffinity_SentinelOnWire(t *testing.T) {
 // session_id header slot (codex-rs contract) is populated from
 // WithTaskScope even without any ExtraHeaders config.
 func TestCodexSessionAffinity_BuiltInSlotFromTaskScope(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 
 	client := newCodexClientForTest(t, srv.URL)
 	if _, err := client.Chat(context.Background(),
@@ -91,7 +91,7 @@ func TestCodexSessionAffinity_BuiltInSlotFromTaskScope(t *testing.T) {
 // omitted from the wire.
 func TestCodexSessionAffinity_NoSessionOmitsHeader(t *testing.T) {
 	// Built-in slot: no WithTaskScope → header absent.
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	client := newCodexClientForTest(t, srv.URL)
 	if _, err := client.Chat(context.Background(),
 		[]ChatMessage{{Role: RoleUser, Content: "hello"}}); err != nil {
@@ -104,7 +104,7 @@ func TestCodexSessionAffinity_NoSessionOmitsHeader(t *testing.T) {
 
 	// Sentinel in ExtraHeaders with no scope → substituted value is empty →
 	// header omitted, not sent as a literal sentinel or empty string.
-	srv2, ch2 := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv2, ch2 := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	cfg2 := &ModelConfig{
 		BaseURL:    srv2.URL,
 		ModelID:    "gpt-5.1-codex",
@@ -128,7 +128,7 @@ func TestCodexSessionAffinity_NoSessionOmitsHeader(t *testing.T) {
 	}
 
 	// WithTaskScope with an empty session id behaves the same as no scope.
-	srv3, ch3 := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv3, ch3 := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	client3 := newCodexClientForTest(t, srv3.URL)
 	if _, err := client3.Chat(context.Background(),
 		[]ChatMessage{{Role: RoleUser, Content: "hello"}},
@@ -145,7 +145,7 @@ func TestCodexSessionAffinity_NoSessionOmitsHeader(t *testing.T) {
 // session_id value in ExtraHeaders is sent verbatim (static pinning remains
 // possible) and wins over the built-in slot via apply-last ordering.
 func TestCodexSessionAffinity_StaticConfigStillLiteral(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 
 	cfg := &ModelConfig{
 		BaseURL:    srv.URL,

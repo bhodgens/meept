@@ -285,6 +285,18 @@ func (c *CodexClient) parseResponsesSSE(body io.Reader, cfg *ModelConfig, onDelt
 	if len(acc.toolCalls) > 0 {
 		finish = "tool_calls"
 	}
+
+	// Empty-completion classification (streaming twin of parseResponse): a
+	// stream that terminates cleanly at response.completed but produced no
+	// text, no reasoning and no tool call is the provider flake — return the
+	// BARE sentinel so doRequestWithEmptyRetry re-dispatches and the alias
+	// failure path rotates instead of completing the turn with blank text.
+	if len(acc.toolCalls) == 0 &&
+		strings.TrimSpace(content) == "" &&
+		strings.TrimSpace(reasoning) == "" {
+		return nil, ErrEmptyResponse
+	}
+
 	return &Response{
 		Content:      content,
 		Reasoning:    reasoning,
@@ -325,7 +337,7 @@ func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []Chat
 	effCfg := withRequestModelOverride(cfg, chatOpts)
 
 	payload := c.buildPayload(messages, effCfg, chatOpts, true)
-	resp, err := c.doRequest(ctx, payload, effCfg, chatOpts.sessionID, onDelta)
+	resp, err := c.doRequestWithEmptyRetry(ctx, payload, effCfg, chatOpts.sessionID, onDelta)
 	if err != nil {
 		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error())
 		return nil, err

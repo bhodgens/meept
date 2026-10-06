@@ -235,7 +235,7 @@ func TestCodexSSEStreamToolCall(t *testing.T) {
 // TestCodexSSEStreamNonStreamingFallback pins the split decision: Chat
 // (no callback) keeps stream:false + Accept: application/json.
 func TestCodexSSEStreamNonStreamingFallback(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[],"usage":{"input_tokens":1,"output_tokens":2}}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":2}}`})
 	client := newCodexClientForTest(t, srv.URL)
 	resp, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "x"}})
 	if err != nil {
@@ -262,7 +262,7 @@ func TestCodexSSEStreamNonStreamingFallback(t *testing.T) {
 // must keep the non-streaming shape. Progress callbacks are the UX layer;
 // deltas are opt-in via ChatWithDeltaCallback.
 func TestCodexChatWithProgressStillNonStreaming(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	client := newCodexClientForTest(t, srv.URL)
 	if _, err := client.ChatWithProgress(context.Background(),
 		[]ChatMessage{{Role: RoleUser, Content: "x"}},
@@ -610,7 +610,7 @@ func TestCodexStreamRequestMarshal(t *testing.T) {
 // TestCodexNilDeltaFallsBackToChat pins the StreamingChatter nil-callback
 // contract: no callback means the non-streaming exchange.
 func TestCodexNilDeltaFallsBackToChat(t *testing.T) {
-	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[]}`})
+	srv, ch := newCodexTestServer(t, codexResponder{status: 200, body: `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`})
 	client := newCodexClientForTest(t, srv.URL)
 	if _, err := client.ChatWithDeltaCallback(context.Background(),
 		[]ChatMessage{{Role: RoleUser, Content: "x"}}, nil); err != nil {

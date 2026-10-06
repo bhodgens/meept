@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -345,7 +346,7 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 	effCfg := withRequestModelOverride(cfg, chatOpts)
 
 	payload := c.buildPayload(messages, effCfg, chatOpts, false)
-	resp, err := c.doRequest(ctx, payload, effCfg, chatOpts.sessionID, nil)
+	resp, err := c.doRequestWithEmptyRetry(ctx, payload, effCfg, chatOpts.sessionID, nil)
 	if err != nil {
 		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error())
 		return nil, err
@@ -609,11 +610,55 @@ func (c *CodexClient) doRequest(ctx context.Context, payload *codexResponsesPayl
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, &ClientError{Message: "failed to parse response", Cause: err}
 	}
-	return c.parseResponse(&parsed, cfg), nil
+	return c.parseResponse(&parsed, cfg)
+}
+
+// doRequestWithEmptyRetry wraps doRequest with the empty-completion retry
+// contract of internal/llm/AGENTS.md: a blank/whitespace completion with no
+// tool call is a provider FLAKE, re-dispatched IMMEDIATELY within the short
+// budget (no plan sleep — a served-but-blank body is not a rate-limit window)
+// and surfaced as the BARE ErrEmptyResponse sentinel on exhaustion so the
+// agent loop's generic branch records the alias failure and rotation lands on
+// the local fallback instead of terminalizing the turn with an empty reply.
+//
+// ONLY the empty sentinel is retried: every other failure keeps Codex's
+// existing single-shot shape (its transport errors are already classified by
+// codexErrorFromResponse for the caller's PM rotation, and short-retrying
+// them here would double-retry a 429/quota window). Codex had no retry loop
+// before this — this is the empty-completion lane only.
+func (c *CodexClient) doRequestWithEmptyRetry(ctx context.Context, payload *codexResponsesPayload, cfg *ModelConfig, sessionID string, onDelta DeltaCallback) (*Response, error) {
+	var lastErr error
+	for attempt := 1; attempt <= DefaultEmptyCompletionRetries; attempt++ {
+		resp, err := c.doRequest(ctx, payload, cfg, sessionID, onDelta)
+		if err == nil {
+			return resp, nil
+		}
+		if !errors.Is(err, ErrEmptyResponse) {
+			return nil, err
+		}
+		lastErr = err
+		c.logger.Warn("Empty completion, retrying (codex)",
+			"provider", cfg.ProviderID,
+			"model", cfg.ModelID,
+			"attempt", attempt,
+			"max_retries", DefaultEmptyCompletionRetries,
+		)
+	}
+	return nil, lastErr
 }
 
 // parseResponse converts the Responses output items into the common Response.
-func (c *CodexClient) parseResponse(parsed *codexResponsesResponse, cfg *ModelConfig) *Response {
+//
+// Empty-completion classification (parity with the openai and anthropic
+// parsers): a 200-OK body with no output_text and no function call produced
+// NOTHING the caller can send — return the BARE ErrEmptyResponse sentinel
+// instead of a success with empty content, so the caller rotates to the local
+// fallback rather than completing the turn with garbage. A reasoning summary
+// ALONE is not an answer (the agent loop would have nothing to reply with), so
+// it classifies too — the same rule this client's streaming parser applies.
+// Whitespace-only output_text is the same failure; leading whitespace on REAL
+// content passes byte-identical.
+func (c *CodexClient) parseResponse(parsed *codexResponsesResponse, cfg *ModelConfig) (*Response, error) {
 	resp := &Response{
 		Model: cfg.ModelID,
 	}
@@ -662,7 +707,18 @@ func (c *CodexClient) parseResponse(parsed *codexResponsesResponse, cfg *ModelCo
 	} else {
 		resp.FinishReason = "stop"
 	}
-	return resp
+
+	// Empty-completion classification (see the doc comment). Reasoning
+	// summaries alone are not an answer — the caller would have nothing to
+	// reply with — so judge text+reasoning TOGETHER, matching the openai
+	// streaming parser's rule.
+	if !hasFunctionCall &&
+		strings.TrimSpace(resp.Content) == "" &&
+		strings.TrimSpace(resp.Reasoning) == "" {
+		return nil, ErrEmptyResponse
+	}
+
+	return resp, nil
 }
 
 // Ensure CodexClient satisfies Chatter.

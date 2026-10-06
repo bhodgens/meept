@@ -180,9 +180,13 @@ func TestProcessLogger_StdoutStderrShareFile_Concurrent(t *testing.T) {
 // path's Truncate read it under the lock — a genuine -race hit on the
 // StopAll/auto-restart overlap. Close now holds w.mu across the close
 // sequence, is idempotent (second Close sees *w.file == nil and no-ops), and
-// Truncate after Close is a correct no-op. Run with -race to catch a
-// regression; it also fails functionally if Close double-closes (os.File.Close
-// on an already-closed file errors) or panics on a nil deref.
+// Truncate after Close is a correct no-op. It also fails functionally if Close
+// double-closes (os.File.Close on an already-closed file errors) or panics on
+// a nil deref.
+//
+// NOTE: the concurrency loop below only trips -race probabilistically (it was
+// observed firing ~2 runs in 8), so it is NOT the pin for the invariant.
+// TestRotatingWriter_LockOrderIsDeterministic below pins it deterministically.
 func TestRotatingWriter_CloseConcurrentWithWriteAndTruncate(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
@@ -257,6 +261,156 @@ func TestRotatingWriter_CloseConcurrentWithWriteAndTruncate(t *testing.T) {
 	}
 	// Truncate after Close is a best-effort no-op, never a panic.
 	pl.Truncate()
+}
+
+// TestRotatingWriter_CloseNilReceiver_NoPanic pins bughunt wave L6: Close's
+// guard read `if w == nil || w.file == nil { w.mu.Lock() ... }`, which
+// dereferences the NIL receiver inside the branch body and panics instead of
+// returning. Latent (every production constructor sets a non-nil out writer)
+// but wrong, and the guard that reads as defensive is the panicking one.
+//
+// Close on a nil *rotatingWriter must be a silent no-op — the io.Closer-ish
+// contract the ProcessLogger.Close nil-guard above relies on.
+func TestRotatingWriter_CloseNilReceiver_NoPanic(t *testing.T) {
+	var w *rotatingWriter
+	if err := w.Close(); err != nil {
+		t.Errorf("Close on a nil writer returned %v, want nil", err)
+	}
+	// Also via the exported wrapper's nil-guard path.
+	var p *ProcessLogger
+	if err := p.Close(); err != nil {
+		t.Errorf("ProcessLogger.Close on nil returned %v, want nil", err)
+	}
+	// And a writer that exists but never got a file pointer (the
+	// OpenProcessLogger MkdirAll-failure shape).
+	var nilFile *os.File
+	w2 := newSharedRotatingWriter(&nilFile, new(int64), new(bool), filepath.Join(t.TempDir(), "x.log"), "out: ", &sync.Mutex{})
+	if err := w2.Close(); err != nil {
+		t.Errorf("Close on a writer with a nil file pointer returned %v, want nil", err)
+	}
+	// Same for a writer whose *os.File pointer itself is nil.
+	w3 := newSharedRotatingWriter(nil, new(int64), new(bool), filepath.Join(t.TempDir(), "x.log"), "out: ", &sync.Mutex{})
+	if err := w3.Close(); err != nil {
+		t.Errorf("Close on a writer with a nil **os.File returned %v, want nil", err)
+	}
+}
+
+// TestRotatingWriter_CloseIsIdempotent pins the other half of bf6150c2's
+// invariant: Close is idempotent. The SECOND Close must be a no-op that
+// reports nil — double-closing an *os.File returns os.ErrClosed, and the
+// ProcessLogger.Close path can be reached twice (StopAll plus the deferred
+// cleanup in the spawn path).
+func TestRotatingWriter_CloseIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	pl, err := OpenProcessLogger("127.0.0.1", "9191")
+	if err != nil {
+		t.Fatalf("OpenProcessLogger: %v", err)
+	}
+	if _, err := pl.Stdout().Write([]byte("idempotence probe\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// First Close closes the shared file and nils the shared pointer.
+	if err := pl.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+	if pl.out.file == nil || *pl.out.file != nil {
+		t.Fatal("Close did not nil the shared *os.File pointer")
+	}
+	// Second and third Close: no-ops, nil error, no panic.
+	for i := range 2 {
+		if err := pl.Close(); err != nil {
+			t.Errorf("Close call %d after close returned %v, want nil (Close must be idempotent)", i+2, err)
+		}
+	}
+	// The partner writer (stderr) shares the pointer and must observe the
+	// close, and closing it too must also be a no-op.
+	if err := pl.err.Close(); err != nil {
+		t.Errorf("partner (stderr) Close after close returned %v, want nil", err)
+	}
+	// Truncate after Close stays a correct no-op.
+	pl.Truncate()
+}
+
+// TestRotatingWriter_LockOrderIsDeterministic is the DETERMINISTIC pin for
+// the invariant the concurrent test above only catches ~2 runs in 8.
+//
+// bf6150c2's contract is that every path touching the shared *os.File pointer
+// takes w.mu BEFORE it reads or writes that pointer: no pre-lock fast path
+// anywhere, which is what makes the Close-vs-Truncate race impossible rather
+// than merely unlikely. The old concurrency test proves that only by winning a
+// scheduling lottery.
+//
+// This test proves it by construction instead: hold w.mu from the test, fire
+// each method on another goroutine, and assert it CANNOT complete while the
+// lock is held. A method with an early return guarded by a pre-lock read of
+// w.file (the regression shape) returns immediately and fails here on every
+// run; a method that takes the lock first blocks, deterministically, forever
+// until the test releases it.
+//
+// It also pins the nil-receiver asymmetry: a nil *rotatingWriter must return
+// WITHOUT trying to lock (it has no mutex), which is the same property L6
+// fixed — so the nil case is checked here too rather than only above.
+func TestRotatingWriter_LockOrderIsDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	pl, err := OpenProcessLogger("127.0.0.1", "9192")
+	if err != nil {
+		t.Fatalf("OpenProcessLogger: %v", err)
+	}
+	defer pl.Close()
+
+	for _, tc := range []struct {
+		name string
+		call func(w *rotatingWriter)
+	}{
+		{"Close", func(w *rotatingWriter) { _ = w.Close() }},
+		{"Truncate", func(w *rotatingWriter) { w.Truncate() }},
+		{"Write", func(w *rotatingWriter) { _, _ = w.Write([]byte("probe\n")) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Hold the shared lock: the writers share one mutex, so this
+			// blocks both the out and err paths.
+			pl.out.mu.Lock()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				tc.call(pl.out)
+			}()
+
+			select {
+			case <-done:
+				pl.out.mu.Unlock()
+				t.Fatalf("%s completed while w.mu was held: it has a pre-lock fast path, so its read of the shared *os.File is outside the lock (Close/Truncate race)", tc.name)
+			case <-time.After(250 * time.Millisecond):
+				// Correct: the method is blocked on the lock it must take
+				// before touching the shared pointer.
+			}
+			pl.out.mu.Unlock()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s never completed after the lock was released (deadlock)", tc.name)
+			}
+		})
+	}
+
+	// A nil writer has no mutex to lock, so its Close must return without
+	// one — this is the L6 fix, asserted under the same lock-order lens.
+	var nilWriter *rotatingWriter
+	nilDone := make(chan struct{})
+	go func() {
+		defer close(nilDone)
+		_ = nilWriter.Close()
+	}()
+	select {
+	case <-nilDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close on a nil writer blocked: it tried to lock a mutex it does not have")
+	}
 }
 
 // TestPerModelFanOut verifies that logToEndpoint fans an event out to every
