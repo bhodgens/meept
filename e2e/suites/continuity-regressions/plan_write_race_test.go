@@ -171,7 +171,7 @@ func TestPlanWriteSerialization_ApproveRaceKeepsOriginAndAppliedMarker(t *testin
 // the given proposal id's plan_id stamp appears with the wanted state, and
 // returns the plan id. This is the regression for the two coordinated
 // listing breaks: (a) sink plans used to be stored with NULL project_id
-// which `WHERE project_id = ?` with '' could never match, and (b) the
+// which `WHERE project_id = ?` with ” could never match, and (b) the
 // evolver never submitted its plans, so they sat in draft forever. The
 // identity match still uses the plan-file stamp — proposal id ↔ plan id —
 // recovered from the sink directory.

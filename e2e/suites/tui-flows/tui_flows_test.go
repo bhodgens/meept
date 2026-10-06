@@ -35,6 +35,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/caimlas/meept/e2e/harness"
 	"github.com/caimlas/meept/internal/tui"
 )
@@ -141,33 +143,247 @@ func TestSessionSwitchReloadsTranscript(t *testing.T) {
 	}
 }
 
-// TestAgentTabRendersTableRows covers tui-agent-tab-01: the agents view
-// renders at a fixed size without the zero-width-viewport class of bugs
-// (a width-0 viewport renders no rows) — the view must come up populated
-// with its header/state, not blank or "unavailable".
-func TestAgentTabRendersTableRows(t *testing.T) {
-	stack := harness.Start(t)
-	_ = stack.CreateSession(t, "agents-session", stack.MeeptHome)
+// employeeDefinition is the agents.create payload for the panel fixture.
+// It satisfies every validation the hire path enforces — a trigger
+// (BotDefinition.Validate), a constitution whose amendment_policy
+// requires_approval is true (a design invariant), and a well-formed
+// constraints block — so agents.list returns a row the panel can render.
+func employeeDefinition(id, marker string) map[string]any {
+	return map[string]any{
+		"id":      id,
+		"name":    "Quartz Watcher",
+		"prompt":  "You are the Quartz Watcher for the e2e agents panel.",
+		"tools":   []string{"web_fetch"},
+		"enabled": true,
+		"triggers": []map[string]any{
+			{"type": "cron", "schedule": "0 4 * * *", "enabled": true},
+		},
+		"constitution": map[string]any{
+			"purpose":       "watch the " + marker + " fixtures",
+			"role":          "Quartz Watcher",
+			"charter":       "Watch. Never delete.",
+			"autonomy_tier": "tier_2_propose",
+			"escalates_to":  []string{"user"},
+			"never":         []string{"merge to main"},
+			"constraints": map[string]any{
+				"tools_allowed":      []string{"web_fetch"},
+				"tools_forbidden":    []string{"shell_execute"},
+				"risk_ceiling":       "medium",
+				"daily_budget_cents": 50,
+			},
+			"amendment_policy": map[string]any{
+				"self_propose_allowed": false,
+				"requires_approval":    true,
+				"frozen_fields":        []string{"constraints.never", "constraints.risk_ceiling"},
+			},
+			"version":     1,
+			"authored_by": "user",
+		},
+	}
+}
 
-	hp := startTUIAgainst(t, stack)
+// seedEmployee hires one employee through the REAL agents.create RPC and
+// proves agents.list returns it — the exact seam the panel's
+// fetchAgents/agentsListMsg path consumes (internal/tui/agents_panel.go:308).
+// Without a store-backed row the panel can only ever render its empty
+// header, and "renders something" stops proving anything about the table.
+func seedEmployee(t *testing.T, stack *harness.Stack, id, marker string) {
+	t.Helper()
+	created := harness.DialRPC(t, stack.SocketPath).CallResult("agents.create",
+		employeeDefinition(id, marker))
+	if got, _ := created["id"].(string); got != id {
+		t.Fatalf("agents.create returned id %q, want %q: %v", got, id, created)
+	}
+	list := harness.DialRPC(t, stack.SocketPath).CallResult("agents.list", nil)
+	agents, _ := list["agents"].([]any)
+	found := false
+	for _, a := range agents {
+		m, ok := a.(map[string]any)
+		if !ok {
+			continue
+		}
+		if got, _ := m["id"].(string); got == id {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("agents.list did not return the created employee %q: %v", id, list)
+	}
+}
+
+// openAgentsView boots the TUI, switches to the agents view through the
+// palette key flow, and returns the finished model. The palette switch is
+// the real operator path (ctrl+x → 'e') and it also runs the view's
+// Init → agents.list fetch, so the panel is populated before View().
+func openAgentsView(t *testing.T, stack *harness.Stack, opts ...tuiOption) *tui.App {
+	t.Helper()
+	hp := startTUIAgainst(t, stack, opts...)
 	settleAsync()
-
 	hp.sendKey("ctrl+x")
 	hp.settle()
 	hp.sendKey("e") // palette action: agents view
+	// Two settles: the view switch runs initCurrentView → AgentsPanel.Init
+	// (agents.list round-trip) and then the list response lands as a
+	// separate message; one settle can race the response.
 	settleAsync()
-
+	settleAsync()
 	app := hp.finish()
 	if app.ActiveView() != tui.ViewAgents {
 		t.Fatalf("currentView = %v, want agents view", app.ActiveView())
 	}
+	return app
+}
+
+// TestAgentTabRendersTableRows covers tui-agent-tab-01: the agents view
+// renders POPULATED — its own header, its column titles, the store-backed
+// employee row, and its help line — and does so at a fixed size AND after
+// a resize round-trip back out of a compact viewport.
+//
+// Why each assertion can fail (the pre-fix version asserted only
+// `!strings.Contains(view, "agents unavailable")` and
+// `strings.TrimSpace(view) != ""`, both structurally unreachable: the
+// first string is only emitted when a.agents == nil and NewApp always
+// constructs the panel, and View() always appends the status bar, so
+// deleting AgentsPanel.View() outright still passed):
+//
+//   - the header ("agents" + the list/approvals/audit tab strip) and
+//     the column titles come ONLY from AgentsPanel.View → renderHeader /
+//     the table — nothing else in the app emits them;
+//   - the employee row can only come from the agents.list RPC, so it is
+//     a cross-boundary assertion, not a rendering echo;
+//   - the absence check pins that these markers are agents-view-specific
+//     rather than incidental to any view;
+//   - the compact leg is the zero-width-viewport regression class itself:
+//     SetSize sizes the table on BOTH axes and repopulates from cache, so
+//     a regression that drops the repopulation renders the header with an
+//     empty body.
+func TestAgentTabRendersTableRows(t *testing.T) {
+	const marker = "quartzwatcher"
+	stack := harness.Start(t)
+	_ = stack.CreateSession(t, "agents-session", stack.MeeptHome)
+	seedEmployee(t, stack, marker, marker)
+
+	// Leg 1: the default fixed size (100x30).
+	app := openAgentsView(t, stack)
 	view := app.View().Content
-	if strings.Contains(view, "agents unavailable") {
-		t.Fatalf("agents panel not constructed")
+
+	// The panel's own identifying content — all three render only from
+	// AgentsPanel.View().
+	for _, want := range []string{
+		"agents",                      // renderHeader title
+		"list",                        // active sub-view tab
+		"approvals",                   // sub-view tabs
+		"audit",                       // sub-view tabs
+		"id",                          // column title
+		"drift",                       // column title
+		"findings",                    // column title
+		"last run",                    // column title
+		"r: refresh | enter: details", // renderHelpHint
+		marker,                        // the store-backed row
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("agents view missing %q — the panel did not render its own "+
+				"content (zero-width-viewport regression class):\n%s", want, view)
+		}
 	}
-	if strings.TrimSpace(view) == "" {
-		t.Fatal("agents view rendered empty (zero-size viewport class)")
+	// The count badge proves the ROW COUNT reached the model, not just a
+	// hardcoded header: renderHeader prints "(N agents)".
+	if !strings.Contains(view, "(1 agents)") {
+		t.Fatalf("agents view header count is not \"(1 agents)\" — the "+
+			"agents.list fetch did not populate the panel:\n%s", view)
 	}
+
+	// Absence: the same view with NO employee cannot carry the row, so
+	// the marker above came from the fetch and not from the shell.
+	emptyStack := harness.Start(t)
+	_ = emptyStack.CreateSession(t, "agents-empty", emptyStack.MeeptHome)
+	emptyApp := openAgentsView(t, emptyStack)
+	emptyView := emptyApp.View().Content
+	if strings.Contains(emptyView, marker) {
+		t.Fatalf("agents view shows the employee row %q without any employee "+
+			"hired — the assertion above is not load-bearing:\n%s", marker, emptyView)
+	}
+	if !strings.Contains(emptyView, "(0 agents)") {
+		t.Fatalf("empty agents view header count is not \"(0 agents)\":\n%s", emptyView)
+	}
+
+	// Absence in a DIFFERENT view: the sessions view renders neither the
+	// agents sub-view tabs nor the employees panel columns. The help lines
+	// are NOT usable discriminators here — the sessions view ends with
+	// "r: refresh | enter: details" too — so the markers are the panel's
+	// own sub-view tabs and column titles.
+	sessionsApp := openViewWithKey(t, stack, "s") // palette action: sessions
+	sessionsView := sessionsApp.View().Content
+	for _, foreign := range []string{
+		"1: list | 2: approvals | 3: audit", // agents sub-view help line
+		"last run",                          // agents column title
+		"findings",                          // agents column title
+	} {
+		if strings.Contains(sessionsView, foreign) {
+			t.Fatalf("the sessions view renders the agents-panel marker %q — the "+
+				"agents markers are not agents-view-specific:\n%s", foreign, sessionsView)
+		}
+	}
+
+	// Leg 2: a COMPACT viewport (width < 80 → LayoutCompact, sidebar
+	// hidden) still renders the header and the row — the panel sizes its
+	// table on both axes and must not fall off a size cliff. At 40
+	// columns the id column truncates the marker to "quartzwatch…"
+	// (truncate(str, 18) + the table's own ellipsis), so the compact leg
+	// asserts the TRUNCATED form: the row is present, the marker is
+	// simply narrower.
+	compact := openAgentsView(t, stack, WithSize(40, 20)).View().Content
+	compactMarker := marker
+	if len(compactMarker) > 11 {
+		compactMarker = compactMarker[:11] + "…"
+	}
+	if !strings.Contains(compact, compactMarker) {
+		t.Fatalf("agents view at 40x20 dropped the employee row %q (or its truncated form %q) "+
+			"(degenerate-resize regression class):\n%s", marker, compactMarker, compact)
+	}
+	if !strings.Contains(compact, "agents") || !strings.Contains(compact, "(1 agents)") {
+		t.Fatalf("agents view at 40x20 lost its header/count:\n%s", compact)
+	}
+
+	// Leg 3: the resize ROUND TRIP — boot compact, then grow back to the
+	// fixed size and re-render. SetSize repopulates the table from the
+	// cached agents; a regression that only clears rows would show an
+	// empty body here while the header still renders.
+	hp := startTUIAgainst(t, stack, WithSize(40, 20))
+	settleAsync()
+	hp.sendKey("ctrl+x")
+	hp.settle()
+	hp.sendKey("e") // palette action: agents view
+	settleAsync()
+	settleAsync()
+	hp.program.Send(tea.WindowSizeMsg{Width: 100, Height: 30}) // grow back
+	settleAsync()
+	roundTrip := hp.finish().View().Content
+	// The re-grown render is 100 columns wide, so the full marker is
+	// visible again — but assert BOTH forms so the leg stays honest about
+	// what it proves (the row survived the round-trip, not that the
+	// truncation is a specific width).
+	if !strings.Contains(roundTrip, marker) && !strings.Contains(roundTrip, marker[:11]+"…") {
+		t.Fatalf("agents view lost the employee row %q after a compact→wide "+
+			"resize round-trip:\n%s", marker, roundTrip)
+	}
+	if !strings.Contains(roundTrip, "(1 agents)") {
+		t.Fatalf("agents view header count lost after the resize round-trip:\n%s",
+			roundTrip)
+	}
+}
+
+// openViewWithKey boots the TUI, runs one palette action key, and returns
+// the finished model. Used for the absence leg: another view, same driver.
+func openViewWithKey(t *testing.T, stack *harness.Stack, key string) *tui.App {
+	t.Helper()
+	hp := startTUIAgainst(t, stack)
+	settleAsync()
+	hp.sendKey("ctrl+x")
+	hp.settle()
+	hp.sendKey(key)
+	settleAsync()
+	return hp.finish()
 }
 
 // TestQuotaWaitSurfacesAsWaitIndicator covers tui-quota-01: a parked

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-09-29",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side: cd ui/flutter_ui && flutter test test/e2e runs gui-flows (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01) against a wire-shape stub; the pre-commit-e2e Go hook does not scan Dart files, so that command is the gate (add to CI/lint-ci when the Flutter toolchain is present).",
+  "generated": "2026-10-06",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -250,6 +250,15 @@
     ],
     "internal/workspace/": [
       "session-binding"
+    ],
+    "ui/flutter_ui/lib/": [
+      "gui-flows"
+    ],
+    "ui/flutter_ui/test/": [
+      "gui-flows"
+    ],
+    "ui/flutter_ui/": [
+      "gui-flows"
     ]
   },
   "suites": [
@@ -512,7 +521,14 @@
       "name": "gui-flows",
       "dir": "ui/flutter_ui/test/e2e",
       "status": "implemented",
-      "note": "Dart-side: run via cd ui/flutter_ui && flutter test test/e2e (not go test)"
+      "runner": "dart",
+      "command": [
+        "flutter",
+        "test",
+        "test/e2e"
+      ],
+      "workdir": "ui/flutter_ui",
+      "note": "Dart tier: run from ui/flutter_ui as `flutter test test/e2e`. scripts/e2e-affected.sh dispatches on runner=dart; make e2e-affected-area AREA=gui-flows runs it."
     }
   ],
   "scenarios": [
@@ -2320,6 +2336,15 @@
       "suite": "gui-flows",
       "diff": "M",
       "title": "ordered streaming deltas land as one bubble; concatenation delivered exactly once via terminal (documents the replace-by-id gap)",
+      "paths": [
+        "ui/flutter_ui/lib/providers/chat_provider.dart"
+      ]
+    },
+    {
+      "id": "gui-stream-02",
+      "suite": "gui-flows",
+      "diff": "M",
+      "title": "thinking timer (isAgentProcessing/thinkingStartedAt) survives every id-less mid-stream assistant delta and clears only on the turn terminal",
       "paths": [
         "ui/flutter_ui/lib/providers/chat_provider.dart"
       ]

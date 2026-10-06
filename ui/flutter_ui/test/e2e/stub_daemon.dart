@@ -27,10 +27,16 @@
 //                                 `status {"connected":true}` welcome frame,
 //                                 `pong` replies, `subscribed` acks, and
 //                                 `{type, data}` event frames shaped like
-//                                 transformBusEventToWS relays. Frames are
-//                                 broadcast to every socket; the client's own
-//                                 subscription filters do the session routing
-//                                 exactly as they do against the real daemon.
+//                                 transformBusEventToWS relays. Event
+//                                 frames honor the daemon's PER-CONNECTION
+//                                 session filter (see broadcastWsEvent and
+//                                 _shouldSend below, mirroring
+//                                 WebSocketHub.ShouldSend in
+//                                 internal/comm/http/server.go:597): a
+//                                 connection that armed no filter gets
+//                                 broadcast; one that subscribed receives
+//                                 only its granted sessions, minus any
+//                                 channel-scoped unsubscribes.
 //
 // DO NOT import from production code — test/e2e only.
 import 'dart:async';
@@ -66,6 +72,70 @@ class StubSseEvent {
   const StubSseEvent(this.type, this.payload);
 }
 
+/// One connection's WS filter state — the Dart twin of the Go
+/// `wsConnSubs` struct (internal/comm/http/server.go:354).
+class _WsConnSubs {
+  /// Sessions this connection has explicitly SUBSCRIBED to. A subscribe is
+  /// an opt-IN that clears any suppression recorded for the same session
+  /// (SubscribeSession, server.go:518-540).
+  final Set<String> sessions = {};
+
+  /// `(channel, session)` opt-outs recorded by unsubscribe frames.
+  /// Channel "" normalizes to "all" (normalizeChannel, server.go:571).
+  final Set<(String, String)> suppressed = {};
+
+  void subscribe(String sessionId) {
+    sessions.add(sessionId);
+    suppressed.removeWhere((entry) => entry.$2 == sessionId);
+  }
+
+  void unsubscribe(String sessionId, String channel) {
+    suppressed.add((channel.isEmpty ? _wsChannelAll : channel, sessionId));
+  }
+}
+
+const String _wsChannelAll = 'all';
+const String _wsChannelChat = 'chat';
+const String _wsChannelProgress = 'progress';
+
+/// The subscription channel that scopes an event type (wsEventChannel,
+/// internal/comm/http/server.go:381): `chat_message` is chat-scoped,
+/// `agent_progress` is progress-scoped, everything else falls back to the
+/// legacy catch-all "all".
+String _wsEventChannel(String eventType) {
+  switch (eventType) {
+    case 'chat_message':
+      return _wsChannelChat;
+    case 'agent_progress':
+      return _wsChannelProgress;
+    default:
+      return _wsChannelAll;
+  }
+}
+
+/// The delivery decision — the stub's byte-for-byte mirror of
+/// WebSocketHub.ShouldSend (internal/comm/http/server.go:597-623).
+bool _shouldSend(_WsConnSubs? subs, String eventType, String sessionId) {
+  if (sessionId.isEmpty) {
+    return true; // session-less event: nothing to match, broadcast
+  }
+  if (subs == null) {
+    return true; // no filters = broadcast to all
+  }
+  if (!subs.sessions.contains(sessionId)) {
+    return false;
+  }
+  final channel = _wsEventChannel(eventType);
+  if (subs.suppressed.contains((channel, sessionId))) {
+    return false;
+  }
+  if (channel != _wsChannelAll &&
+      subs.suppressed.contains((_wsChannelAll, sessionId))) {
+    return false; // channel-less unsubscribe = connection-wide opt-out
+  }
+  return true;
+}
+
 class _ScriptedTurn {
   final String turnId;
   final String sessionId;
@@ -97,6 +167,17 @@ class StubDaemon {
   int _submitCount = 0;
   final Set<WebSocket> _wsSockets = {};
   final Set<String> _wsChatSubscriptions = {};
+
+  /// Per-connection WS filter state, keyed by the server-side socket.
+  ///
+  /// Mirrors WebSocketHub.wsConnSubs (internal/comm/http/server.go:354):
+  /// a SUBSCRIBED session set plus a CHANNEL-SCOPED SUPPRESSION set, both
+  /// created on the first subscribe OR unsubscribe. A connection absent
+  /// from this map has sent neither frame and is therefore in broadcast
+  /// mode (ShouldSend: `subs == nil` → true). One present but carrying
+  /// no session in `.sessions` is filtered — suppression without a grant
+  /// still suppresses, which is the documented least-surprise opt-out.
+  final Map<WebSocket, _WsConnSubs> _wsSessionFilters = {};
   bool _disposed = false;
 
   StubDaemon._();
@@ -129,6 +210,54 @@ class StubDaemon {
 
   /// Session ids seen in `subscribe` frames on the /ws channel.
   Set<String> get wsChatSubscriptions => Set.unmodifiable(_wsChatSubscriptions);
+
+  /// Number of /ws connections this stub has accepted so far.
+  ///
+  /// Connections are identified to tests by ACCEPT ORDER (index
+  /// [0, wsConnectionCount)), because the server-side *WebSocket a
+  /// subscribe frame arms belongs to the server's accept loop while the
+  /// socket a test holds is the client's end of the same pipe — two
+  /// distinct objects that never compare equal.
+  int get wsConnectionCount => _wsSockets.length;
+
+  /// The session ids connection [index] has SUBSCRIBED to, or null when
+  /// that connection armed no filter at all (broadcast mode).
+  Set<String>? sessionFilterOfConnection(int index) {
+    final socket = _wsSocketAt(index);
+    if (socket == null) return null;
+    final subs = _wsSessionFilters[socket];
+    return subs == null ? null : Set.unmodifiable(subs.sessions);
+  }
+
+  /// Whether the stub would deliver an event of [eventType] for
+  /// [sessionId] to connection [index] — the stub's mirror of
+  /// WebSocketHub.ShouldSend (internal/comm/http/server.go:597), which
+  /// ShouldSendProgress now delegates to (server.go:628):
+  ///
+  ///   * a session-less event goes to everyone (it cannot be matched
+  ///     against any filter, so filtering it would drop it for all);
+  ///   * a connection with no filter entry is in broadcast mode;
+  ///   * otherwise the session must be a member of the granted session
+  ///     set, and must not carry a suppression for this event's channel
+  ///     (a channel-less unsubscribe is the connection-wide opt-out and
+  ///     suppresses on every channel).
+  bool shouldSend(int index, String eventType, String sessionId) {
+    final socket = _wsSocketAt(index);
+    if (socket == null) return false; // unknown connection: never delivered
+    return _shouldSend(_wsSessionFilters[socket], eventType, sessionId);
+  }
+
+  /// [shouldSend] for the `agent_progress` channel — the progress-frame
+  /// variant the relay uses (ShouldSendProgress).
+  bool shouldSendProgress(int index, String sessionId) =>
+      shouldSend(index, 'agent_progress', sessionId);
+
+  /// The server-side socket at accept position [index], or null once the
+  /// connection has closed.
+  WebSocket? _wsSocketAt(int index) {
+    if (index < 0 || index >= _wsSockets.length) return null;
+    return _wsSockets.elementAt(index);
+  }
 
   /// Script one turn: the submit endpoint will mint exactly [turnId], and the
   /// stream/socket endpoints will push [events] for it.
@@ -165,17 +294,46 @@ class StubDaemon {
     );
   }
 
-  /// Push [event] to every connected WebSocket client immediately
+  /// Push [event] to every connected WebSocket client the daemon's
+  /// per-connection session filter selects for it
   /// (transformBusEventToWS envelope: {"type": <type>, "data": <payload>}).
+  ///
+  /// PARITY (was a stub-vs-real gap — this used to fan out to every
+  /// socket unconditionally, which made cross-session suppression
+  /// structurally untestable in the gui-flows tier): the real relay
+  /// derives an event session id from `session_id`, falling back to
+  /// `conversation_id`, then keeps the connection only when the id is
+  /// empty (nothing to filter on) or ShouldSendProgress(wc, id) says
+  /// yes (internal/comm/http/server.go:599-627 and :472). Unsubscribing
+  /// the last session returns that connection to broadcast mode on both
+  /// sides — the Go hub keeps the (now empty) map entry rather than
+  /// deleting it (server.go:455-467 documents exactly that).
   void broadcastWsEvent(StubSseEvent event) {
     final data = Map<String, dynamic>.from(event.payload);
     data['type'] = event.type; // client flatten() re-promotes it to the top
     final frame = jsonEncode({'type': event.type, 'data': data});
+
+    // Relay-site session id: session_id first, conversation_id as the
+    // fallback for events that only carry the internal id
+    // (agent.progress, tool.execution.progress, agent.event.*).
+    final sessionKey = data['session_id'];
+    final String sessionId;
+    if (sessionKey is String && sessionKey.isNotEmpty) {
+      sessionId = sessionKey;
+    } else {
+      final conv = data['conversation_id'];
+      sessionId = conv is String ? conv : '';
+    }
+
     for (final socket in List.of(_wsSockets)) {
+      if (!_shouldSend(_wsSessionFilters[socket], event.type, sessionId)) {
+        continue; // filtered out for this connection (not delivered)
+      }
       try {
         socket.add(frame);
       } catch (_) {
         _wsSockets.remove(socket);
+        _wsSessionFilters.remove(socket);
       }
     }
   }
@@ -189,6 +347,7 @@ class StubDaemon {
       } catch (_) {}
     }
     _wsSockets.clear();
+    _wsSessionFilters.clear();
     for (final inbound in _wsInbound) {
       if (!inbound.isClosed) await inbound.close();
     }
@@ -436,26 +595,62 @@ class StubDaemon {
         }
         if (!inbound.isClosed) inbound.add(msg);
         final dataField = msg['data'];
-        final payload = dataField is Map
+        final envelope = dataField is Map
             ? dataField.map((k, v) => MapEntry('$k', v))
             : <String, dynamic>{};
+        // BOTH shapes parse, envelope wins on conflict — the real
+        // handler's WSMessage carries `data` PLUS top-level
+        // `channel`/`session_id` flat-frame aliases (server.go:2550-2563,
+        // added by 5073c159 "WS subscribe accepts the Flutter client's
+        // flat frame shape"), and handleWSSubscribe reads the envelope
+        // first, then falls back to the aliases (server.go:2595-2611).
+        // The Flutter client sends the FLAT shape
+        // ({type, channel, session_id}, no data envelope), so a stub that
+        // only read `data` would never arm this connection's session
+        // filter against the real daemon — it would sit in permanent
+        // broadcast mode and cross-session suppression would be
+        // untestable.
+        String? field(String name) {
+          final v = envelope[name];
+          if (v is String && v.isNotEmpty) return v;
+          final top = msg[name];
+          return top is String && top.isNotEmpty ? top : null;
+        }
+
         switch (msg['type']) {
           case 'ping':
             _safeSocketAdd(socket, {'type': 'pong'});
           case 'subscribe':
-            final channel = payload['channel'] ?? 'all';
+            final channel = field('channel') ?? 'all';
+            // The real handler arms the per-connection session filter
+            // BEFORE sending the ack (handleWSSubscribe,
+            // internal/comm/http/server.go:2617-2623), so a client that
+            // fires a turn on "subscribed" receipt does not lose the
+            // early events to an ack/filter-arm race. Same order here.
+            final sid = field('session_id');
+            if (sid != null) {
+              _wsChatSubscriptions.add(sid);
+              (_wsSessionFilters[socket] ??= _WsConnSubs()).subscribe(sid);
+            }
             _safeSocketAdd(socket, {
               'type': 'subscribed',
               'data': {'channel': channel},
             });
-            final sid = payload['session_id'];
-            if (sid is String && sid.isNotEmpty) {
-              _wsChatSubscriptions.add(sid);
-            }
           case 'unsubscribe':
-            final sid = payload['session_id'];
-            if (sid is String && sid.isNotEmpty) {
+            final sid = field('session_id');
+            if (sid != null && sid.isNotEmpty) {
               _wsChatSubscriptions.remove(sid);
+              // Unsubscribe records a CHANNEL-SCOPED opt-out and
+              // deliberately CREATES the entry even for a connection that
+              // never subscribed (UnsubscribeSession,
+              // internal/comm/http/server.go:561-579) — so an unsubscribe
+              // is never a silent no-op. The session STAYS granted; only
+              // delivery on that channel stops (a later subscribe clears
+              // the suppression, SubscribeSession server.go:536-539).
+              (_wsSessionFilters[socket] ??= _WsConnSubs()).unsubscribe(
+                sid,
+                field('channel') ?? '',
+              );
             }
           default:
             break;
@@ -463,11 +658,13 @@ class StubDaemon {
       },
       onDone: () {
         _wsSockets.remove(socket);
+        _wsSessionFilters.remove(socket);
         inbound.close();
         _wsInbound.remove(inbound);
       },
       onError: (_) {
         _wsSockets.remove(socket);
+        _wsSessionFilters.remove(socket);
         inbound.close();
         _wsInbound.remove(inbound);
       },

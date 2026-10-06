@@ -22,6 +22,22 @@ import 'package:meept_ui/services/sdk_client.dart' show ChatSubmitAck;
 import 'pump_app.dart';
 import 'stub_daemon.dart';
 
+/// One raw WS client the stub accepted:
+///   - the ACCEPT INDEX (the identity the stub's session filter is keyed
+///     by — the client-side socket a test holds is a different object from
+///     the server-side socket a subscribe frame arms),
+///   - the client socket,
+///   - the frames received ON that socket (server→client), and
+///   - a live count of frames that socket has SENT (client→server), used
+///     as a per-connection delivery fence: waiting on the daemon-wide
+///     `wsFrames()` queue instead would match another connection's frame.
+typedef WsClient = (
+  int,
+  WebSocket,
+  List<Map<String, dynamic>>,
+  List<Map<String, dynamic>>,
+);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   useRealHttp();
@@ -255,11 +271,15 @@ void main() {
       final pong = await nextFrame();
       expect(pong['type'], 'pong');
 
-      // subscribe -> subscribed ack, session recorded. The ack's channel
-      // is 'all' for the client's FLAT subscribe frame — byte-parity with
-      // the real daemon's handleWSSubscribe, which parses only the
-      // {type,data} envelope and defaults an unparsed channel to "all"
-      // (the client-side stream `where` clauses own session routing).
+      // subscribe -> subscribed ack, session recorded. The ack echoes the
+      // channel the client actually sent: handleWSSubscribe reads
+      // channel/session_id from the {type,data} envelope FIRST and only
+      // then falls back to the WSMessage top-level `channel`/`session_id`
+      // flat aliases (internal/comm/http/server.go:2595-2611; those aliases
+      // were added by 5073c159 "WS subscribe accepts the Flutter client's
+      // flat frame shape"). So the FLAT frame below acks channel 'chat'
+      // and arms this connection's session filter — before 5073c159 the
+      // daemon ignored flat fields and answered 'all'.
       ws.add(
         jsonEncode({
           'type': 'subscribe',
@@ -269,10 +289,13 @@ void main() {
       );
       final subscribed = await nextFrame();
       expect(subscribed['type'], 'subscribed');
-      expect((subscribed['data'] as Map)['channel'], 'all');
+      expect((subscribed['data'] as Map)['channel'], 'chat');
+      // The flat frame armed THIS connection's session filter (accept
+      // index 0 — the only /ws connection this test opened).
+      expect(daemon.sessionFilterOfConnection(0), {'e2e-session'});
 
-      // A wrapped {type, data:{channel,...}} frame DOES parse (the Go
-      // handler's envelope path).
+      // A wrapped {type, data:{channel,...}} frame parses on the same
+      // terms (the Go handler's envelope path) and is idempotent here.
       ws.add(
         jsonEncode({
           'type': 'subscribe',
@@ -296,6 +319,338 @@ void main() {
       final dataField = eventFrame['data'] as Map;
       expect(dataField['stage'], 'thinking');
       expect(dataField['type'], 'agent_progress');
+    });
+
+    // ------------------------------------------------------------------
+    // Per-connection session filter (parity with WebSocketHub).
+    //
+    // The stub used to fan every event out to every socket, which made
+    // cross-session suppression STRUCTURALLY untestable: no gui-flows
+    // scenario could ever prove the client ignores another session's
+    // turn, because the stub never suppressed anything. The real relay
+    // (internal/comm/http/server.go:599-627) keeps a connection only when
+    // the event carries no session id or ShouldSendProgress(wc, id) says
+    // yes — nil filter = broadcast, otherwise strict membership
+    // (server.go:472-481). These tests pin that rule on the stub.
+    //
+    // Connections are addressed by ACCEPT INDEX, not by socket object:
+    // the server-side socket a subscribe frame arms belongs to the
+    // stub's accept loop, while a test holds the client's end of the
+    // same pipe — two distinct objects that never compare equal.
+    // ------------------------------------------------------------------
+    group('StubDaemon per-connection session filter (ShouldSendProgress)', () {
+      late StubDaemon daemon;
+
+      setUp(() async {
+        daemon = await StubDaemon.start();
+      });
+
+      tearDown(() async {
+        await daemon.dispose();
+      });
+
+      /// Open one raw WS client at the next accept index, collecting its
+      /// inbound (server→client) frames and its outbound (client→server)
+      /// frames.
+      Future<WsClient> openClient() async {
+        final index = daemon.wsConnectionCount;
+        final ws = await WebSocket.connect('ws://127.0.0.1:${daemon.port}/ws');
+        addTearDown(ws.close);
+        final frames = <Map<String, dynamic>>[];
+        final outbound = <Map<String, dynamic>>[];
+        final sub = ws.cast<String>().listen(
+          (raw) => frames.add(jsonDecode(raw) as Map<String, dynamic>),
+          onError: (_) {},
+        );
+        addTearDown(sub.cancel);
+        // Drain the welcome frame so later assertions count only events.
+        await _waitFrames(frames, (f) => f['type'] == 'status');
+        // The stub mirrors every inbound frame onto wsFrames(); that queue is
+        // daemon-wide, so this per-client subscription records only what
+        // THIS connection sent.
+        final mirror = daemon.wsFrames().listen((f) {
+          if (f['type'] != 'pong') outbound.add(f);
+        });
+        addTearDown(mirror.cancel);
+        return (index, ws, frames, outbound);
+      }
+
+      /// Subscribe connection [index] to [sessionId] with the client's
+      /// FLAT frame shape ({type, channel, session_id}, no data envelope)
+      /// and wait for that socket's own `subscribed` ack. The ack is sent
+      /// AFTER the filter is armed on both sides (the Go handler arms
+      /// before replying), so an ack receipt means "this connection is now
+      /// filtered" — and it is per-connection, so a re-subscribe cannot
+      /// match the previous ack still sitting in the list.
+      Future<void> subscribeFlat(
+        int index,
+        WebSocket ws,
+        List<Map<String, dynamic>> frames,
+        List<Map<String, dynamic>> outbound,
+        String sessionId, {
+        String channel = 'chat',
+      }) async {
+        final sent = outbound.where((f) => f['type'] == 'subscribe').length;
+        ws.add(
+          jsonEncode({
+            'type': 'subscribe',
+            'channel': channel,
+            'session_id': sessionId,
+          }),
+        );
+        await _waitCount(outbound, 'subscribe', sent + 1);
+        await _waitFrames(frames, (f) => f['type'] == 'subscribed');
+        expect(
+          daemon.shouldSendProgress(index, 'never-subscribed'),
+          isFalse,
+          reason: 'precondition: connection $index must be armed',
+        );
+      }
+
+      test('an UNARMED connection is in broadcast mode (no filter = every '
+          'session), like the Go nil-map rule', () async {
+        final (index, ws, frames, outbound) = await openClient();
+
+        expect(
+          daemon.sessionFilterOfConnection(index),
+          isNull,
+          reason: 'a connection that never subscribed arms no filter',
+        );
+        expect(daemon.shouldSendProgress(index, 'any-session'), isTrue);
+        expect(daemon.shouldSendProgress(index, 'another-session'), isTrue);
+
+        daemon.broadcastWsEvent(
+          const StubSseEvent('agent_progress', {
+            'stage': 'thinking',
+            'session_id': 'any-session',
+          }),
+        );
+        await _waitFrames(frames, (f) => f['type'] == 'agent_progress');
+      });
+
+      test('an ARMED connection receives ONLY its own session; another '
+          "session's event is suppressed (the cross-session pin)", () async {
+        final (myIndex, myWs, myFrames, myOut) = await openClient();
+        final (theirIndex, theirWs, theirFrames, theirOut) = await openClient();
+
+        await subscribeFlat(myIndex, myWs, myFrames, myOut, 'session-mine');
+        await subscribeFlat(
+          theirIndex,
+          theirWs,
+          theirFrames,
+          theirOut,
+          'session-theirs',
+        );
+
+        // Both filters armed, each with exactly one session.
+        expect(daemon.sessionFilterOfConnection(myIndex), {'session-mine'});
+        expect(daemon.sessionFilterOfConnection(theirIndex), {
+          'session-theirs',
+        });
+        expect(daemon.shouldSendProgress(myIndex, 'session-mine'), isTrue);
+        expect(
+          daemon.shouldSendProgress(myIndex, 'session-theirs'),
+          isFalse,
+          reason: 'strict membership — my connection is not in their set',
+        );
+
+        // Count only EVENT frames from here on: the per-connection frame
+        // lists still hold each socket's own `subscribed` ack, which is a
+        // control frame, not a relayed event.
+        int events(List<Map<String, dynamic>> fs) =>
+            fs.where((f) => f['type'] == 'agent_progress').length;
+
+        // An event for THEIR session must reach only them.
+        daemon.broadcastWsEvent(
+          const StubSseEvent('agent_progress', {
+            'stage': 'thinking',
+            'session_id': 'session-theirs',
+          }),
+        );
+        await _waitFrames(theirFrames, (f) => f['type'] == 'agent_progress');
+        expect(
+          events(myFrames),
+          0,
+          reason:
+              'cross-session suppression: a connection that subscribed to '
+              'session-mine must NOT receive session-theirs progress '
+              '(the real daemon drops it at server.go:623)',
+        );
+
+        // The mirror image: MY event reaches me and not them.
+        daemon.broadcastWsEvent(
+          const StubSseEvent('agent_progress', {
+            'stage': 'planning',
+            'session_id': 'session-mine',
+          }),
+        );
+        await _waitFrames(myFrames, (f) => f['type'] == 'agent_progress');
+        expect(
+          events(theirFrames),
+          1,
+          reason:
+              'suppression is symmetric — their connection still holds only '
+              'the ONE event for their own session',
+        );
+      });
+
+      test('conversation_id is the filter key when session_id is absent '
+          '(agent.progress / tool.execution.progress shape)', () async {
+        final (index, ws, frames, outbound) = await openClient();
+        await subscribeFlat(index, ws, frames, outbound, 'conv-only');
+
+        expect(daemon.shouldSendProgress(index, 'conv-only'), isTrue);
+        expect(daemon.shouldSendProgress(index, 'other-conv'), isFalse);
+
+        daemon.broadcastWsEvent(
+          const StubSseEvent('agent_progress', {
+            'stage': 'tool',
+            'conversation_id': 'conv-only',
+          }),
+        );
+        await _waitFrames(frames, (f) => f['type'] == 'agent_progress');
+      });
+
+      test('an event with NO session id reaches every connection (backward '
+          'compat: nothing to filter on)', () async {
+        final (myIndex, myWs, myFrames, myOut) = await openClient();
+        final (theirIndex, theirWs, theirFrames, theirOut) = await openClient();
+        await subscribeFlat(myIndex, myWs, myFrames, myOut, 'session-mine');
+        await subscribeFlat(
+          theirIndex,
+          theirWs,
+          theirFrames,
+          theirOut,
+          'session-theirs',
+        );
+
+        daemon.broadcastWsEvent(
+          const StubSseEvent('agent_progress', {'stage': 'daemon-wide'}),
+        );
+        await _waitFrames(myFrames, (f) => f['type'] == 'agent_progress');
+        await _waitFrames(theirFrames, (f) => f['type'] == 'agent_progress');
+      });
+
+      test('unsubscribing records a CHANNEL-SCOPED opt-out: the session '
+          'stays granted, and a channel-less unsubscribe suppresses '
+          'every channel (UnsubscribeSession server.go:561-579 + '
+          'ShouldSend server.go:612-621)', () async {
+        final (index, ws, frames, outbound) = await openClient();
+        await subscribeFlat(index, ws, frames, outbound, 'session-mine');
+        expect(daemon.shouldSendProgress(index, 'session-mine'), isTrue);
+
+        // The client's own release frame carries BOTH channel and
+        // session_id (websocket_service.dart _releaseSessionChannel).
+        ws.add(
+          jsonEncode({
+            'type': 'unsubscribe',
+            'channel': 'chat',
+            'session_id': 'session-mine',
+          }),
+        );
+        await _waitCount(outbound, 'unsubscribe', 1);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        // The grant is untouched — unsubscribe is an opt-OUT, not a
+        // revocation (server.go:578 records only the suppression).
+        expect(daemon.sessionFilterOfConnection(index), {'session-mine'});
+        // chat_message is chat-scoped, so the chat unsubscribe stops it.
+        expect(
+          daemon.shouldSend(index, 'chat_message', 'session-mine'),
+          isFalse,
+        );
+        // agent_progress is progress-scoped and keeps delivering.
+        expect(daemon.shouldSendProgress(index, 'session-mine'), isTrue);
+
+        // A channel-LESS unsubscribe is the connection-wide opt-out.
+        ws.add(
+          jsonEncode({'type': 'unsubscribe', 'session_id': 'session-mine'}),
+        );
+        await _waitCount(outbound, 'unsubscribe', 2);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(
+          daemon.shouldSendProgress(index, 'session-mine'),
+          isFalse,
+          reason: 'the catch-all suppression covers every channel',
+        );
+        expect(
+          daemon.shouldSend(index, 'chat_message', 'session-mine'),
+          isFalse,
+        );
+
+        // Re-subscribing is an opt-IN that clears the suppression.
+        await subscribeFlat(index, ws, frames, outbound, 'session-mine');
+        expect(
+          daemon.shouldSendProgress(index, 'session-mine'),
+          isTrue,
+          reason: "SubscribeSession clears that session's suppressions",
+        );
+      });
+
+      test('an unsubscribe from a connection that NEVER subscribed still '
+          'suppresses (the entry is created, not skipped — the '
+          'least-surprise opt-out, server.go:568-574)', () async {
+        final (index, ws, frames, outbound) = await openClient();
+
+        // Precondition: unarmed = broadcast.
+        expect(daemon.shouldSendProgress(index, 'session-mine'), isTrue);
+
+        ws.add(
+          jsonEncode({'type': 'unsubscribe', 'session_id': 'session-mine'}),
+        );
+        await _waitCount(outbound, 'unsubscribe', 1);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        expect(
+          daemon.sessionFilterOfConnection(index),
+          isEmpty,
+          reason:
+              'the grant set is empty — suppression alone still suppresses, '
+              'because ShouldSend rejects a session outside .sessions before '
+              'it ever consults .suppressed',
+        );
+        expect(daemon.shouldSendProgress(index, 'session-mine'), isFalse);
+      });
+
+      test('a scripted turn reaches its own session and is suppressed for a '
+          'different subscribed session (end-to-end relay parity)', () async {
+        final (myIndex, myWs, myFrames, myOut) = await openClient();
+        final (theirIndex, theirWs, theirFrames, theirOut) = await openClient();
+        await subscribeFlat(myIndex, myWs, myFrames, myOut, 'session-mine');
+        await subscribeFlat(
+          theirIndex,
+          theirWs,
+          theirFrames,
+          theirOut,
+          'session-theirs',
+        );
+
+        daemon.enqueueChatTurn(
+          turnId: 'turn-filter-01',
+          sessionId: 'session-mine',
+          events: const [
+            StubSseEvent('agent_progress', {'stage': 'thinking'}),
+          ],
+        );
+        final res = await httpPost(
+          '${daemon.baseUrl}/api/v1/chat/submit',
+          body: {
+            'message': 'hello',
+            'conversation_id': 'session-mine',
+            'source_client': 'flutter_ui',
+          },
+        );
+        expect(res.statusCode, 200);
+
+        await _waitFrames(myFrames, (f) => f['type'] == 'agent_progress');
+        expect(
+          theirFrames.where((f) => f['type'] == 'agent_progress'),
+          isEmpty,
+          reason:
+              'the scripted turn belongs to session-mine; a connection '
+              'filtered to session-theirs must not see it',
+        );
+      });
     });
 
     test('GET /api/v1/sessions/{id}/messages returns messages+total', () async {
@@ -383,8 +738,10 @@ void main() {
         // its subscribe frame for this session before the submit. (The
         // client's subscribe frames are FLAT — {type, channel, session_id}
         // without a data envelope, identical to what it sends the real
-        // daemon; the daemon's session filter for these lives in the
-        // client-side stream `where` clauses, not handleWSSubscribe.)
+        // daemon. That shape arms the stub's per-connection session filter
+        // through the same top-level aliases handleWSSubscribe reads
+        // (server.go:2595-2611), so a turn's own frames reach this socket
+        // while another session's are suppressed.)
         bool subscribedSeen() => wsFrames.any(
           (f) =>
               f['type'] == 'subscribe' &&
@@ -445,6 +802,51 @@ void main() {
 // --------------------------------------------------------------------
 // tiny http helpers (dart:io, no package:http dependency)
 // --------------------------------------------------------------------
+
+/// Bounded wait until [frames] holds a frame satisfying [match].
+///
+/// Raw socket frames arrive on the stub's real event loop, so a bare
+/// `expect` right after a `daemon.broadcastWsEvent(...)` would race the
+/// write. A miss fails with the frames actually seen rather than timing
+/// out silently.
+Future<void> _waitFrames(
+  List<Map<String, dynamic>> frames,
+  bool Function(Map<String, dynamic>) match,
+) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (DateTime.now().isBefore(deadline)) {
+    if (frames.any(match)) return;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  fail(
+    'timed out waiting for a matching WS frame; frames seen: '
+    '${frames.map((f) => f['type']).toList()}',
+  );
+}
+
+/// Bounded wait until [outbound] holds at least [count] frames of type
+/// [type].
+///
+/// Counting, not matching: a re-subscribe must not be satisfied by the
+/// PREVIOUS ack still sitting in the list, and the daemon-wide
+/// `wsFrames()` queue would happily match another connection's frame. The
+/// caller passes the list it has already seen, so the fence is per-frame.
+Future<void> _waitCount(
+  List<Map<String, dynamic>> outbound,
+  String type,
+  int count,
+) async {
+  int seen() => outbound.where((f) => f['type'] == type).length;
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (DateTime.now().isBefore(deadline)) {
+    if (seen() >= count) return;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  fail(
+    'timed out waiting for #$count inbound "$type" frame(s); saw '
+    '${outbound.map((f) => f['type']).toList()}',
+  );
+}
 
 /// Plain http result (status line + drained body), returned by the test
 /// helpers below.
