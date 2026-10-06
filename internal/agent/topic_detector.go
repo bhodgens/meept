@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+
+	"github.com/caimlas/meept/internal/session"
 )
 
 // TopicDetector identifies conversation topics from user input using
@@ -114,12 +116,18 @@ func (td *TopicDetector) Detect(input string) string {
 // GenerateThreadID creates a deterministic thread ID from a session ID
 // and topic label, using the last 4 runes of sessionID (or the full
 // string if shorter than 4 characters).
+//
+// The topic is slug-sanitized (session.ThreadSlug) so a label carrying
+// "-thread-", a '.' or a path separator cannot mint a thread id whose
+// unwrapped base (see session.ResolveThreadConversationID) is not a real
+// conversation id. Determinism is preserved: the same topic always yields
+// the same slug.
 func (td *TopicDetector) GenerateThreadID(sessionID, topic string) string {
 	suffix := sessionID
 	if len(suffix) > 4 {
 		suffix = suffix[len(suffix)-4:]
 	}
-	return "thread-" + topic + "-" + suffix
+	return "thread-" + session.ThreadSlug(topic) + "-" + suffix
 }
 
 // containsWordBoundary reports whether keyword appears in s as a whole

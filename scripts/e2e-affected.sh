@@ -74,38 +74,63 @@ import json, sys
 
 manifest = json.load(open(sys.argv[1]))
 mode = sys.argv[2] if len(sys.argv) > 2 else "dirs"
-suites_by_name = {s["name"]: s["dir"] for s in manifest.get("suites", [])}
+suites_by_name = {s["name"]: s for s in manifest.get("suites", [])}
 path_map = manifest.get("path_map", {})
 
 paths = [ln.strip() for ln in open(sys.argv[3]) if ln.strip()]
 matched = set()
 go_changed = 0
+dart_changed = 0
 for p in paths:
     if p.endswith(".go"):
         go_changed = 1
+    if p.endswith(".dart"):
+        dart_changed = 1
     for prefix, names in path_map.items():
         if p == prefix or p.startswith(prefix):
             matched.update(n for n in names if n in suites_by_name)
 
+# Split by runner so a Dart-tier suite (e.g. gui-flows, whose dir is
+# ui/flutter_ui/test/e2e and is driven by `flutter test`, not `go test`)
+# never lands in the go test package list.
+go_dirs, go_names, dart_suites = [], [], []
 for name in sorted(matched):
-    if mode == "names":
-        print(name)
+    suite = suites_by_name[name]
+    if suite.get("runner") == "dart":
+        dart_suites.append(name)
     else:
-        print(suites_by_name[name])
+        go_names.append(name)
+        go_dirs.append(suite["dir"])
+
+if mode == "names":
+    # --list contract: affected SUITE NAMES (both tiers).
+    for name in go_names:
+        print(name)
+    for name in dart_suites:
+        print(name)
+else:
+    for d in go_dirs:
+        print(d)
+print("---DART---")
+for name in dart_suites:
+    print(name)
 print("---META---")
 print("go_changed=%d" % go_changed)
+print("dart_changed=%d" % dart_changed)
 print("matched=%d" % (1 if matched else 0))
 PYEOF
 )"
 
 if [ "$LIST_ONLY" = "1" ]; then
-    printf '%s\n' "$map_out" | awk '/^---META---$/{exit} NF{print}'
+    printf '%s\n' "$map_out" | awk '/^---DART---$|^---META---$/{exit} NF{print}'
     exit 0
 fi
 
-dirs="$(printf '%s\n' "$map_out" | awk '/^---META---$/{exit} NF{print}')"
+dirs="$(printf '%s\n' "$map_out" | awk '/^---DART---$|^---META---$/{exit} NF{print}')"
+dart_suites="$(printf '%s\n' "$map_out" | awk '/^---DART---$/{f=1;next} /^---META---$/{f=0} f{print}')"
 meta="$(printf '%s\n' "$map_out" | awk '/^---META---$/{f=1;next} f')"
 go_changed="$(printf '%s\n' "$meta" | sed -n 's/^go_changed=//p')"
+dart_changed="$(printf '%s\n' "$meta" | sed -n 's/^dart_changed=//p')"
 matched="$(printf '%s\n' "$meta" | sed -n 's/^matched=//p')"
 
 # Suites whose dirs do not exist yet (manifest status: todo) are pending.
@@ -126,7 +151,7 @@ if [ -n "$pending" ]; then
     done
 fi
 
-if [ -z "$run_dirs" ]; then
+if [ -z "$run_dirs" ] && [ -z "$dart_suites" ]; then
     if [ "$go_changed" = "1" ]; then
         if [ "$matched" = "1" ]; then
             echo "e2e-affected: all affected suites are pending — falling back to the smoke suite."
@@ -134,6 +159,13 @@ if [ -z "$run_dirs" ]; then
             echo "e2e-affected: no path_map hit, but Go files changed — running the smoke suite."
         fi
         run_dirs=" $SMOKE_DIR"
+    elif [ "$dart_changed" = "1" ]; then
+        # Dart changed but nothing mapped: there is no Go suite to fall
+        # back to, and silently passing would be the same decorative gate
+        # M12 closed. Say so loudly instead.
+        echo "e2e-affected: Dart files changed but no suite matched — NOTHING RAN." >&2
+        echo "e2e-affected: add a path_map entry + suite in e2e/manifest.json." >&2
+        exit 1
     else
         echo "e2e-affected: no relevant changed paths — nothing to do."
         exit 0
@@ -146,9 +178,56 @@ for d in $run_dirs; do
     set -- "$@" "./$d/..."
 done
 
-echo "e2e-affected: running hermetic e2e suites:"
-for d in $run_dirs; do
-    echo "  - $d"
-done
+if [ -n "$run_dirs" ]; then
+    echo "e2e-affected: running hermetic Go e2e suites:"
+    for d in $run_dirs; do
+        echo "  - $d"
+    done
+    go test -tags e2e -count=1 -p 2 "$@"
+    go_rc=$?
+else
+    go_rc=0
+fi
 
-exec go test -tags e2e -count=1 -p 2 "$@"
+# Dart tier: each affected suite carries its own runner command in the
+# manifest (runner: dart, command: [...], workdir: ...). Run them in
+# sequence and aggregate a failing exit code — a Dart suite must fail the
+# gate exactly like a Go one does.
+dart_rc=0
+if [ -n "$dart_suites" ]; then
+    echo ""
+    echo "e2e-affected: running Dart e2e suites:"
+    for name in $dart_suites; do
+        spec="$(python3 - "$MANIFEST" "$name" <<'PYEOF'
+import json, shlex, sys
+manifest = json.load(open(sys.argv[1]))
+suite = next((s for s in manifest.get("suites", []) if s["name"] == sys.argv[2]), None)
+if suite is None:
+    print("")
+    sys.exit(0)
+cmd = suite.get("command") or []
+print(" ".join([shlex.quote(c) for c in cmd] + [shlex.quote(suite.get("workdir", "."))]))
+PYEOF
+)"
+        [ -z "$spec" ] && continue
+        # The last field is the workdir; the rest is the command.
+        workdir="${spec##* }"
+        cmdline="${spec% *}"
+        echo "  - $name ($cmdline in $workdir)"
+        if [ ! -d "$workdir" ]; then
+            echo "    skipped: workdir $workdir does not exist"
+            continue
+        fi
+        if ! command -v "${cmdline%% *}" >/dev/null 2>&1; then
+            echo "    skipped: ${cmdline%% *} not found on PATH (Flutter toolchain absent)"
+            continue
+        fi
+        # shellcheck disable=SC2086  # cmdline is intentionally word-split.
+        ( cd "$workdir" && $cmdline ) || dart_rc=1
+    done
+fi
+
+if [ "$go_rc" != "0" ]; then
+    exit "$go_rc"
+fi
+exit "$dart_rc"
