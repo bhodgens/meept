@@ -73,9 +73,29 @@ class WebSocketService {
   /// firing, permanently blocking reconnection.
   Completer<void>? _streamDone;
 
-  // Channel subscription tracking
-  final Map<String, SessionSubscription> _chatSubscriptions = {};
-  final Map<String, SessionSubscription> _progressSubscriptions = {};
+  // Channel subscription tracking.
+  //
+  // Holds are refcounted per (channel, session) pair. The daemon arms and
+  // releases a session filter per CHANNEL (internal/comm/http/server.go —
+  // wsConnSubs/UnsubscribeSession/ShouldSend/wsEventChannel: a chat_message
+  // consults the `chat` opt-out, an agent_progress the `progress` one), and a
+  // subscribe re-arms the session. Three logical streams therefore need three
+  // separate holds over one session id, and every one of them must be
+  // released — a stream that drops its own hold without telling the daemon
+  // leaves the channel armed forever.
+  //
+  // Per-channel counting is also the correct shape against a daemon whose
+  // filter is still channel-blind (an older build): releasing all holds for a
+  // session ends with the same "session suppressed" state either way, so the
+  // client never depends on the daemon's half to avoid leaking a grant.
+  //
+  // Channels mirror the values the daemon understands: 'chat' (the
+  // chat_message relay) and 'progress' (agent_progress, which also carries
+  // turn.terminal).
+  static const String channelChat = 'chat';
+  static const String channelProgress = 'progress';
+
+  final Map<String, Map<String, int>> _channelSessionRefs = {};
   bool _jobsSubscribed = false;
   bool _metricsSubscribed = false;
   bool _plansSubscribed = false;
@@ -312,15 +332,17 @@ class WebSocketService {
   void _flushPendingSubscriptions() {
     if (!isConnected) return;
     _flushPendingFrames();
-    for (final sessionId in _chatSubscriptions.keys) {
-      send({'type': 'subscribe', 'channel': 'chat', 'session_id': sessionId});
-    }
-    for (final sessionId in _progressSubscriptions.keys) {
-      send({
-        'type': 'subscribe',
-        'channel': 'progress',
-        'session_id': sessionId,
-      });
+    // One subscribe frame per (channel, session) pair the client holds. The
+    // daemon's filter is keyed by session alone, so re-subscribing a session
+    // already held on another channel is a harmless idempotent re-arm.
+    for (final entry in _channelSessionRefs.entries) {
+      for (final channel in entry.value.keys) {
+        send({
+          'type': 'subscribe',
+          'channel': channel,
+          'session_id': entry.key,
+        });
+      }
     }
     if (_jobsSubscribed) {
       send({'type': 'subscribe', 'channel': 'jobs'});
@@ -585,7 +607,7 @@ class WebSocketService {
     _wasExplicitlyDisconnected = true;
     _cleanupChannel();
     _pendingFrames.clear();
-    _chatSubscriptions.clear();
+    _channelSessionRefs.clear();
     _jobsSubscribed = false;
     _metricsSubscribed = false;
     _plansSubscribed = false;
@@ -653,12 +675,7 @@ class WebSocketService {
   /// [sessionId]. The Flutter client manages the server-side subscription
   /// request internally.
   Stream<Map<String, dynamic>> subscribeToChat(String sessionId) {
-    // Track the subscription even if not connected yet; it will be
-    // flushed once the connection is established.
-    _chatSubscriptions[sessionId] = SessionSubscription(sessionId);
-    if (isConnected) {
-      send({'type': 'subscribe', 'channel': 'chat', 'session_id': sessionId});
-    }
+    _retainSessionChannel(channelChat, sessionId);
 
     return _messageSubject.stream.where((m) {
       final type = m['type'] as String?;
@@ -669,13 +686,12 @@ class WebSocketService {
 
   /// Unsubscribe from a chat session.
   ///
-  /// Removes the entry from [_chatSubscriptions] and sends an unsubscribe
-  /// message if currently connected.
+  /// Drops this caller's chat-channel hold. The wire `unsubscribe` frame is
+  /// sent only when NO other logical stream still needs the session filter —
+  /// the daemon cannot distinguish channels, so a chat unsubscribe sent while
+  /// progress/turn-terminal still hold the session would suppress those too.
   void unsubscribeFromChat(String sessionId) {
-    _chatSubscriptions.remove(sessionId);
-    if (isConnected) {
-      send({'type': 'unsubscribe', 'channel': 'chat', 'session_id': sessionId});
-    }
+    _releaseSessionChannel(channelChat, sessionId);
   }
 
   /// Subscribe to job queue updates via WebSocket.
@@ -724,15 +740,7 @@ class WebSocketService {
   /// responsible for managing the server-side subscription (typically
   /// by sending a `subscribe` message with `channel: 'progress'`).
   Stream<Map<String, dynamic>> subscribeToAgentProgress(String sessionId) {
-    // Track the subscription so it can be flushed once connected.
-    _progressSubscriptions[sessionId] = SessionSubscription(sessionId);
-    if (isConnected) {
-      send({
-        'type': 'subscribe',
-        'channel': 'progress',
-        'session_id': sessionId,
-      });
-    }
+    _retainSessionChannel(channelProgress, sessionId);
 
     return _messageSubject.stream.where((m) {
       final type = m['type'] as String?;
@@ -748,15 +756,11 @@ class WebSocketService {
   }
 
   /// Unsubscribe from agent progress updates for a session.
+  ///
+  /// Drops ONE progress-channel hold. The wire frame is deferred while the
+  /// chat channel or a second progress stream still holds the session filter.
   void unsubscribeFromAgentProgress(String sessionId) {
-    _progressSubscriptions.remove(sessionId);
-    if (isConnected) {
-      send({
-        'type': 'unsubscribe',
-        'channel': 'progress',
-        'session_id': sessionId,
-      });
-    }
+    _releaseSessionChannel(channelProgress, sessionId);
   }
 
   /// Subscribe to session title updates via WebSocket.
@@ -787,14 +791,11 @@ class WebSocketService {
   //  session→conversation correlation, which never reaches the client —
   //  the client keys turns by session).
   Stream<Map<String, dynamic>> subscribeToTurnTerminal(String sessionId) {
-    _progressSubscriptions[sessionId] = SessionSubscription(sessionId);
-    if (isConnected) {
-      send({
-        'type': 'subscribe',
-        'channel': 'progress',
-        'session_id': sessionId,
-      });
-    }
+    // turn.terminal rides the progress channel, so this is a SECOND hold on
+    // the same (channel, session) pair that subscribeToAgentProgress takes —
+    // which is exactly why the pair is refcounted: dropping one stream must
+    // not tear down the session filter the other still needs.
+    _retainSessionChannel(channelProgress, sessionId);
 
     return _messageSubject.stream.where((m) {
       final type = m['type'] as String?;
@@ -812,8 +813,62 @@ class WebSocketService {
   }
 
   /// Unsubscribe from turn terminal updates for a session.
+  ///
+  /// Drops the turn-terminal stream's own hold (see
+  /// [subscribeToTurnTerminal]); the session filter survives while the
+  /// progress or chat stream still holds it.
   void unsubscribeFromTurnTerminal(String sessionId) {
-    unsubscribeFromAgentProgress(sessionId);
+    _releaseSessionChannel(channelProgress, sessionId);
+  }
+
+  /// Record one more holder of the ([channel], [sessionId]) filter and arm it
+  /// on the daemon when connected.
+  ///
+  /// Refcounted per (channel, session) pair because the daemon's session
+  /// filter is channel-blind: it can only be armed or disarmed for a whole
+  /// session, never for one channel of it (see the note on
+  /// [_channelSessionRefs]).
+  void _retainSessionChannel(String channel, String sessionId) {
+    // Track the hold even if not connected yet; it is flushed once the
+    // connection is established (see _flushPendingSubscriptions).
+    final channels = _channelSessionRefs.putIfAbsent(
+      sessionId,
+      () => <String, int>{},
+    );
+    channels[channel] = (channels[channel] ?? 0) + 1;
+    if (isConnected) {
+      send({
+        'type': 'subscribe',
+        'channel': channel,
+        'session_id': sessionId,
+      });
+    }
+  }
+
+  /// Drop one holder of the ([channel], [sessionId]) filter.
+  ///
+  /// The wire `unsubscribe` frame is emitted once the LAST holder of THAT
+  /// channel goes away — the daemon scopes an opt-out to one channel, so
+  /// releasing `chat` must not silence the `progress` stream that still holds
+  /// the same session. Releasing a session's final hold overall is reported in
+  /// [hasSessionChannelHolds] for tests and diagnostics.
+  void _releaseSessionChannel(String channel, String sessionId) {
+    final channels = _channelSessionRefs[sessionId];
+    if (channels == null) return;
+    final remaining = (channels[channel] ?? 0) - 1;
+    if (remaining > 0) {
+      channels[channel] = remaining;
+      return;
+    }
+    channels.remove(channel);
+    if (channels.isEmpty) _channelSessionRefs.remove(sessionId);
+    if (isConnected) {
+      send({
+        'type': 'unsubscribe',
+        'channel': channel,
+        'session_id': sessionId,
+      });
+    }
   }
 
   /// Typed turn-terminal stream (leaf 05 interface contract): same source
@@ -924,11 +979,4 @@ extension _SafeAdd<T> on Subject<T> {
   void addSafe(T value) {
     if (!isClosed) add(value);
   }
-}
-
-/// Tracks active per-session chat subscriptions.
-/// Used to ensure only relevant messages are forwarded to a session.
-class SessionSubscription {
-  final String sessionId;
-  const SessionSubscription(this.sessionId);
 }

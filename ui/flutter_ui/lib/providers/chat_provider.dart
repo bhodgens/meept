@@ -388,9 +388,62 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Timer to reset _isSending flag if it gets stuck (safety mechanism)
   Timer? _sendingTimeoutTimer;
 
-  /// Fallback timer to clear isAgentProcessing if no WS event arrives
-  /// after an HTTP response that included a synchronous reply.
+  /// Bounded fallback that stops the thinking indicator when the turn's
+  /// terminal event never arrives.
+  ///
+  /// ARMED: whenever the indicator is armed with a turn that is expected to
+  /// resolve via `turn.terminal` (submit/steer/follow-up ack), a timer is set
+  /// for [kProcessingFallbackGrace] — comfortably longer than a healthy turn's
+  /// reply, short enough that a dropped socket cannot leave the GUI spinning
+  /// forever. This is the only non-terminal path that clears the indicator:
+  /// the primary path is `_consumeTurnTerminal`, and the fallback exists for
+  /// the case it never fires (parked-then-dropped, dropped socket, daemon
+  /// restart). On fire it clears the indicator but keeps `pendingTurns` — a
+  /// late terminal still renders the reply (the liveness watchdog already
+  /// handles that class), so this degrades the indicator, never the transcript.
+  ///
+  /// It is CANCELLED by every path that clears the indicator for a real
+  /// reason: a consumed terminal, a system/error frame, a rejected submit, a
+  /// send failure, and dispose.
   Timer? _processingFallbackTimer;
+
+  /// Grace period before the bounded fallback clears the thinking indicator.
+  static const Duration kProcessingFallbackGrace = Duration(seconds: 45);
+
+  /// Arm the bounded fallback for a turn whose terminal event has not landed.
+  ///
+  /// Re-arming is idempotent: a turn already tracked keeps its original
+  /// deadline unless a NEW turn is armed while one is outstanding (that is the
+  /// real stall case the fallback exists for).
+  void _armProcessingFallback() {
+    if (!(_processingFallbackTimer?.isActive ?? false)) {
+      _processingFallbackTimer = Timer(kProcessingFallbackGrace, () {
+        _processingFallbackTimer = null;
+        _clearProcessingIndicator();
+      });
+    }
+  }
+
+  /// Stop the thinking indicator without touching pending turns.
+  ///
+  /// Used by the bounded fallback and by the error/system paths: the
+  /// indicator is a view of the agent's activity, while [ChatState.pendingTurns]
+  /// is the truth about which turns are still outstanding. A late terminal
+  /// still renders.
+  void _clearProcessingIndicator() {
+    if (!state.isAgentProcessing && state.thinkingStartedAt == null) return;
+    state = state.copyWith(
+      isAgentProcessing: false,
+      thinkingStartedAt: null,
+      currentProgress: null,
+    );
+  }
+
+  /// Cancel the bounded fallback — a real event drove the transition.
+  void _cancelProcessingFallback() {
+    _processingFallbackTimer?.cancel();
+    _processingFallbackTimer = null;
+  }
 
   /// Maximum time to wait for send to complete before auto-resetting
   static const _sendingTimeout = Duration(seconds: 60);
@@ -416,11 +469,19 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // the copyWith contract below (scopes-2 audit MED, 2026-09-18).
     state = state.copyWith(messages: const [], isLoading: true, error: null);
 
-    // Cancel any existing WS subscription before the HTTP fetch
-    _wsChatSubscription?.cancel();
-    _wsChatSubscription = null;
-    _progressSubscription?.cancel();
-    _progressSubscription = null;
+    // Re-arm the WS subscriptions BEFORE the HTTP fetch, not after (L3).
+    //
+    // Cancelling first and re-subscribing after `await getMessagesPage` left a
+    // window — the length of the HTTP round trip — in which mid-turn deltas
+    // (chat_message relays and, more importantly, the turn.terminal that ends
+    // the turn) were neither delivered nor queued: the old listener was gone
+    // and the new one did not exist yet. A turn whose terminal landed in that
+    // window false-stalled until the liveness watchdog fired 120 s later.
+    //
+    // Re-subscribing first means frames that arrive DURING the fetch are
+    // delivered normally; the fetch result is applied afterwards, and the
+    // generation check below drops a result from a superseded load.
+    _ensureSubscriptions();
 
     // Fetch messages from the HTTP API. The initial load grabs the LAST
     // page (most recent window) so huge sessions don't fetch everything;
@@ -471,17 +532,27 @@ class ChatNotifier extends StateNotifier<ChatState> {
       );
     }
 
-    if (_disposed || generation != _loadGeneration) return;
+    }
 
-    // Set up WS subscription AFTER the HTTP fetch completes
-    _wsChatSubscription = websocket.subscribeToChat(sessionId).listen((
+  /// Arm (or keep) this notifier's three per-session WS subscriptions:
+  /// `chat_message` relays, `agent_progress`, and the `turn.terminal` frames
+  /// that ride the progress channel.
+  ///
+  /// Idempotent and safe to call on every [loadMessages]: it re-arms a
+  /// missing subscription and leaves a live one alone. Calling it BEFORE the
+  /// history fetch (rather than after) is what closes the L3 delivery window
+  /// — there is never a moment where the chat/progress/terminal streams of a
+  /// reloading session are unsubscribed.
+  void _ensureSubscriptions() {
+    if (_disposed) return;
+
+    _wsChatSubscription ??= websocket.subscribeToChat(sessionId).listen((
       message,
     ) {
       addStreamMessage(message);
     });
 
-    // Subscribe to agent progress for this session
-    _progressSubscription = websocket
+    _progressSubscription ??= websocket
         .subscribeToAgentProgress(sessionId)
         .listen((message) {
           if (_disposed) return;
@@ -514,14 +585,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
           });
         });
 
-    // Subscribe to turn.terminal relays for this session
-    // (async-turn-migration leaf 05). Terminal frames arrive classified as
-    // agent_progress; the subscription filters them by payload shape.
-    // Cancel any previous terminal subscription first — loadMessages() can
-    // run more than once per provider, and reassigning without cancelling
-    // leaks a listener that double-delivers terminals (scopes-2 audit LOW).
-    _turnTerminalSubscription?.cancel();
-    _turnTerminalSubscription = websocket
+    // turn.terminal relays (async-turn-migration leaf 05) arrive classified as
+    // agent_progress; the subscription filters them by payload shape. It is a
+    // SEPARATE stream from agent progress, so it carries its own hold on the
+    // session's progress-channel filter (see WebSocketService).
+    _turnTerminalSubscription ??= websocket
         .subscribeToTurnTerminal(sessionId)
         .listen((message) {
           if (_disposed) return;
@@ -540,17 +608,45 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// consumed on ack registration — never dropped.
   void _handleTurnTerminal(TurnTerminalEvent event) {
     final turn = state.pendingTurns[event.turnId];
-    // Foreign/untracked turn: buffer it — the ack may still be in flight.
+    // Foreign/untracked turn: buffer it — the ack may still be in flight, OR
+    // the turn was tracked before a `/clear` and its terminal landed after
+    // the conversation was wiped (see [clearMessages] / _drainEarlyTerminals).
     if (turn == null) {
       _earlyTerminals[event.turnId] = event;
+      _drainEarlyTerminals();
       return;
     }
     _consumeTurnTerminal(event, turn);
   }
 
   /// Ephemeral early-event buffer (F19): turn.terminal events that raced
-  /// their submit ack. Consumed (and drained) on ack registration.
+  /// their submit ack. Consumed (and drained) on ack registration, and by
+  /// [_drainEarlyTerminals] for any turn that became tracked by another route.
   final Map<String, TurnTerminalEvent> _earlyTerminals = {};
+
+  /// Apply every buffered terminal whose turn is now tracked.
+  ///
+  /// [clearMessages] preserves `pendingTurns` across a `/clear` (TUI parity —
+  /// the TUI's ClearConversation never forgets in-flight turns), so a
+  /// terminal that lands after the wipe still has a tracked turn and must
+  /// render. Before this drain existed, such a terminal sat in [_earlyTerminals]
+  /// forever: the submit-ack registration it was buffered for had already
+  /// happened, so nothing would ever consume it and the reply was silently
+  /// lost.
+  void _drainEarlyTerminals() {
+    if (_earlyTerminals.isEmpty) return;
+    final ready = <String, TurnTerminalEvent>{};
+    _earlyTerminals.removeWhere((turnId, event) {
+      if (!state.pendingTurns.containsKey(turnId)) return false;
+      ready[turnId] = event;
+      return true;
+    });
+    for (final event in ready.values) {
+      final turn = state.pendingTurns[event.turnId];
+      if (turn == null) continue;
+      _consumeTurnTerminal(event, turn);
+    }
+  }
 
   /// Consume any early-buffered terminal event for [turnId], if present.
   /// Called on ack registration so a fast daemon's terminal is applied
@@ -573,17 +669,29 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // Parked (quota) turns are NOT resolved: the daemon will resume the
     // turn automatically and a later terminal event will arrive. Downgrade
     // the pending entry to the parked state with honest, non-error text.
+    //
+    // The turn is still live, so the thinking indicator stays armed — but the
+    // bounded fallback must not fire while the daemon owns the turn: the
+    // resume can take arbitrarily long (quota parks for hours). Parked is an
+    // explicit daemon state, so disarm the fallback and let the resume's
+    // terminal (or the liveness watchdog, which re-arms on progress) drive
+    // the next transition.
     if (event.status == TurnTerminalEvent.statusParked) {
       final parked = turn.copyWith(
         status: PendingTurnStatus.parked,
         progressText: 'waiting for provider quota — will resume automatically',
       );
       turns[event.turnId] = parked;
+      _cancelProcessingFallback();
       state = state.copyWith(pendingTurns: turns);
       return;
     }
 
     turns.remove(event.turnId);
+
+    // The terminal is the turn's real end signal, so the bounded fallback has
+    // done its job: cancel it here rather than leaving it armed.
+    _cancelProcessingFallback();
 
     switch (event.status) {
       case TurnTerminalEvent.statusFailed:
@@ -739,11 +847,16 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // stalled turn is NOT terminal — a late terminal event still renders
       // the reply and clears the stalled state.
       _armLivenessTimer(ack.turnId);
+      // Bounded fallback for the case the terminal never arrives at all
+      // (dropped socket, daemon restart, parked-then-dropped): the
+      // indicator must not spin forever. `_consumeEarlyTerminal` below
+      // cancels it again if the reply was already buffered.
+      _armProcessingFallback();
       // F19: a terminal event that raced the ack is applied immediately.
       _consumeEarlyTerminal(ack.turnId);
       return ack;
     } catch (e) {
-      if (_disposed)
+      if (_disposed) {
         return ChatSubmitAck(
           turnId: '',
           conversationId: '',
@@ -751,6 +864,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
           accepted: false,
           note: e.toString(),
         );
+      }
       String errorStr;
       if (e is DioException) {
         final code = e.response?.statusCode;
@@ -992,6 +1106,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
             // F20: copyWith preserves pendingTurns (existing in-flight
             // turns survive a rejected send).
             _lastFailedSend = null;
+            _cancelProcessingFallback();
             state = state.copyWith(
               isLoading: false,
               isAgentProcessing: false,
@@ -1012,6 +1127,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
           final turns = Map<String, PendingTurn>.from(state.pendingTurns);
           turns[ack.turnId] = pending;
           _armLivenessTimer(ack.turnId);
+          // Bounded fallback: if the terminal never arrives the indicator
+          // stops itself instead of spinning forever. Cancelled again by
+          // `_consumeTurnTerminal` when the reply does land.
+          _armProcessingFallback();
           _lastFailedSend = null;
           // F20: copyWith preserves pendingTurns — `turns` already carries
           // the pre-send in-flight turns (copied from state.pendingTurns
@@ -1048,10 +1167,34 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // the async submit path. Steer/followup are control-plane calls: the
       // daemon either queues them or errors, and both outcomes surface via
       // existing WS events.
+      //
+      // The send itself is done here — the daemon's steer/follow-up queue
+      // resolves it and the REPLY arrives on the turn/chat WS streams, not in
+      // this response. So this path owns the indicator's lifetime: arm the
+      // bounded fallback (there is no terminal event of its own to cancel it)
+      // and keep the indicator armed only while a turn is genuinely still
+      // outstanding. `_doSend` unconditionally set isAgentProcessing on entry
+      // (for the steer/follow-up bubbles it appended) and the early return
+      // below only cleared isLoading, so a steer that produced no tracked turn
+      // left the GUI spinning with no event that could ever stop it.
+      //
       // F20: copyWith preserves pendingTurns — steering while a turn is
       // in flight must not drop it.
       _lastFailedSend = null;
-      state = state.copyWith(isLoading: false);
+      if (state.pendingTurns.isEmpty) {
+        // No turn is outstanding: nothing will clear the indicator for us, so
+        // the steer's own indicator must be released immediately.
+        _cancelProcessingFallback();
+        state = state.copyWith(
+          isLoading: false,
+          isAgentProcessing: false,
+          thinkingStartedAt: null,
+        );
+      } else {
+        // A turn is still in flight — keep the indicator and bound it.
+        _armProcessingFallback();
+        state = state.copyWith(isLoading: false);
+      }
     } catch (e) {
       if (_disposed) return;
       // Extract URL from DioException for better error messages.
@@ -1066,7 +1209,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
       }
       // F20: copyWith preserves pendingTurns — a failed send must not
       // drop in-flight turns.
-      state = state.copyWith(isLoading: false, error: errorStr);
+      _cancelProcessingFallback();
+      state = state.copyWith(
+        isLoading: false,
+        isAgentProcessing: false,
+        thinkingStartedAt: null,
+        error: errorStr,
+      );
     } finally {
       _sendingTimeoutTimer?.cancel();
       _sendingTimeoutTimer = null;
@@ -1172,8 +1321,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
           content: contentText,
           timestamp: DateTime.now(),
         );
-        _processingFallbackTimer?.cancel();
-        _processingFallbackTimer = null;
+        _cancelProcessingFallback();
         // copyWith (NOT fresh ChatState): a fresh constructor drops
         // state.pendingTurns — the F20 regression class (scopes-2 audit
         // MED, 2026-09-18). An error frame mid-turn must not erase
@@ -1195,12 +1343,9 @@ class ChatNotifier extends StateNotifier<ChatState> {
         ttsNotifier.speak(message.content);
       }
 
-      // Streaming accumulation (gui-stream-01): mid-turn chat_message
-      // deltas carry no id, so ChatMessage.fromBackendMessage parses every
-      // delta to id == ''. Replace-by-id collapsed them all onto one
-      // empty-id slot — only the LAST chunk survived. An id-less assistant
-      // delta must instead APPEND to the in-flight assistant stream bubble
-      // (the trailing message when it is also an empty-id assistant
+      // Streaming accumulation (gui-stream-01): an id-less assistant delta is
+      // a mid-turn accumulation frame and must APPEND to the in-flight stream
+      // bubble (the trailing message when it is also an empty-id assistant
       // bubble), preserving order. Distinct-id replacement (finalized
       // replies, history refreshes) is unchanged.
       final isIdlessAssistantDelta =
@@ -1236,35 +1381,38 @@ class ChatNotifier extends StateNotifier<ChatState> {
         newMessages = newMessages.sublist(newMessages.length - _maxMessages);
       }
 
-      // An assistant message with a DISTINCT id is a finalized reply or
-      // history-refresh message — the turn that produced it is done; stop
-      // the processing indicator. Id-less assistant messages are mid-stream
-      // accumulation deltas (gui-stream-01): every delta carries non-empty
-      // content while the turn is STILL running, so clearing here would
-      // drop the thinking elapsed-timer on the very first delta. The turn
-      // ends via turn.terminal (_consumeTurnTerminal clears
-      // isAgentProcessing/thinkingStartedAt) or via this distinct-id path
-      // (non-streaming replies, history refreshes).
-      final newIsAgentProcessing =
-          (message.role == 'assistant' &&
-              message.id.isNotEmpty &&
-              message.content.isNotEmpty)
-          ? false
-          : state.isAgentProcessing;
-
-      // Cancel the fallback timer — the WS event drove the state transition.
-      if (!newIsAgentProcessing) {
-        _processingFallbackTimer?.cancel();
-        _processingFallbackTimer = null;
-      }
-
-      state = state.copyWith(
-        messages: newMessages,
-        isAgentProcessing: newIsAgentProcessing,
-        thinkingStartedAt: newIsAgentProcessing
-            ? state.thinkingStartedAt
-            : null,
-      );
+      // Does this chat_message END a turn?  (bughunt wave H3)
+      //
+      // A `chat_message` frame is NEVER a completion signal on its own, and it
+      // must not be treated as one.
+      //
+      // The old gate here was `role == 'assistant' && id.isNotEmpty &&
+      // content.isNotEmpty`, added by c4dc25ee to distinguish a finalized
+      // reply from a mid-stream delta. In production that arm is DEAD: the WS
+      // relay injects `payload["id"] = msg.ID` into EVERY relayed
+      // chat_message (internal/comm/http/server.go, transformBusEventToWS) and
+      // the only publisher of the topic (internal/agent/handler.go
+      // publishChatMessage) never sets `id`, so `id.isEmpty` is never true and
+      // the branch could never fire. The GUI's only non-terminal path for
+      // clearing the thinking indicator was therefore unreachable: a missed
+      // turn.terminal left the spinner running forever.
+      //
+      // The real terminal signals, and they are both reachable:
+      //  * `turn.terminal`, consumed by [_consumeTurnTerminal] — the
+      //    authoritative end-of-turn event. It clears the indicator itself.
+      //  * the bounded fallback [_armProcessingFallback] — the honest
+      //    backstop for a terminal that never arrives (dropped socket, daemon
+      //    restart, parked-then-dropped). Bounded, so it cannot hang.
+      //
+      // So a chat_message leaves the indicator exactly as it found it. It is
+      // a content frame: mid-stream deltas must NOT clear it (that is what
+      // c4dc25ee was fixing) and a finalized reply must not be the thing that
+      // clears it either — the turn's own terminal owns that.
+      //
+      // Note also that the reply the terminal carries is deduped against this
+      // very bubble by [_lastAssistantContentEquals], so no reply is lost by
+      // refusing to read content as a completion signal.
+      state = state.copyWith(messages: newMessages);
     } catch (e) {
       final errorMessage = ChatMessage(
         id: 'error_${DateTime.now().millisecondsSinceEpoch}',
@@ -1272,8 +1420,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         content: 'Failed to process message: $e',
         timestamp: DateTime.now(),
       );
-      _processingFallbackTimer?.cancel();
-      _processingFallbackTimer = null;
+      _cancelProcessingFallback();
       // copyWith: preserve pendingTurns (F20 regression class).
       state = state.copyWith(
         messages: [...state.messages, errorMessage],
@@ -1363,9 +1510,32 @@ class ChatNotifier extends StateNotifier<ChatState> {
     state = state.copyWith(error: null);
   }
 
-  /// Clear all messages
+  /// Clear the visible conversation (`/clear`, and `/new` via
+  /// chat_input.dart) WITHOUT forgetting work that is still in flight.
+  ///
+  /// TUI parity (bughunt wave L2): the TUI's ClearConversation empties
+  /// `messages` and the session message caches and nothing else — it never
+  /// drops pending turns, so a `/clear` mid-turn still shows the turn's row
+  /// and its reply still lands. This handler used `state = const ChatState()`,
+  /// a fresh state that silently wiped `pendingTurns`, `isAgentProcessing`,
+  /// `currentProgress` and the late-failure badge: the GUI lost track of the
+  /// in-flight turn, its terminal could no longer resolve it (it would be
+  /// buffered as "untracked" and never drained), and the indicator vanished
+  /// mid-turn.
+  ///
+  /// So a clear keeps the parts of the state that describe live work and
+  /// resets only the transcript plus the error slot. Liveness timers keep
+  /// running for the retained turns, and any terminal already buffered for a
+  /// tracked turn is drained by [_drainEarlyTerminals] on its arrival.
   void clearMessages() {
-    state = const ChatState();
+    state = state.copyWith(
+      messages: const [],
+      error: null,
+      // Retained deliberately: pendingTurns (TUI parity), isAgentProcessing +
+      // thinkingStartedAt (the turn is still running), currentProgress, and
+      // lateFailureCount (a badge the user has not acknowledged yet).
+    );
+    _drainEarlyTerminals();
   }
 
   @override
@@ -1373,8 +1543,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _disposed = true;
     _sendingTimeoutTimer?.cancel();
     _sendingTimeoutTimer = null;
-    _processingFallbackTimer?.cancel();
-    _processingFallbackTimer = null;
+    _cancelProcessingFallback();
     _wsChatSubscription?.cancel();
     _wsChatSubscription = null;
     _progressSubscription?.cancel();
@@ -1385,7 +1554,15 @@ class ChatNotifier extends StateNotifier<ChatState> {
       timer.cancel();
     }
     _livenessTimers.clear();
+    // Release ALL THREE per-session holds (chat, agent-progress,
+    // turn-terminal). The daemon scopes an opt-out per channel, so releasing
+    // only the chat one left the session armed for progress/terminal for the
+    // lifetime of the connection; releasing only one also leaks a grant
+    // against a channel-blind daemon. Each release drops exactly the hold
+    // this notifier took, so two notifiers on one session stay independent.
     websocket.unsubscribeFromChat(sessionId);
+    websocket.unsubscribeFromAgentProgress(sessionId);
+    websocket.unsubscribeFromTurnTerminal(sessionId);
     super.dispose();
   }
 }
