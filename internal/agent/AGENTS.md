@@ -71,13 +71,25 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
   only a second guard trip (or an errored retry) ships the canned
   line. The handler choke point (`handleChatRequest`) stays
   single-shot — it cannot continue a loop.
-- **Completion events are deduplicated by queue-job state.** Jobs keep
-  the same ID across retry/requeue; `OnJobCompleted` drops a completion
-  whose queue job is no longer `claimed`/`processing`/`completed`
-  (`completed` is fresh — the queue sets it before publishing the event).
-  Queue-side, `Store.Complete` rejects non-claimable states with
-  `ErrJobNotClaimable` and `PersistentQueue.Complete` does not publish the
-  event for them; the HTTP/RPC surface maps that error to 409.
+- **Completion events are deduplicated by queue-job state AND execution
+  attempt.** Jobs keep the same ID across retry/requeue; `OnJobCompleted`
+  drops a completion whose queue job is no longer
+  `claimed`/`processing`/`completed` (`completed` is fresh — the queue sets
+  it before publishing the event). Queue-side, `Store.Complete` rejects
+  non-claimable states with `ErrJobNotClaimable` and `PersistentQueue.Complete`
+  does not publish the event for them; the HTTP/RPC surface maps that error to
+  409.
+  State alone is not sufficient once a cluster reclaim can reset a
+  still-executing job to `pending` and another worker re-claim it: state then
+  reads `claimed` while the in-flight worker holds the OLDER attempt, so the
+  guard asks the ATTEMPT question via the optional `completionFreshChecker`
+  capability (`CompletionIsFresh(ctx, jobID, claimToken)`, satisfied
+  structurally by the queue). The queue owns the authoritative predicate —
+  never re-implement the token/state rule in `internal/agent`. A queue without
+  that method falls back to the state-only test, so the guard is correct under
+  both shapes, and a requeued/failed job is rejected by both. When the job
+  cannot be read (`ok=false`) the guard fails OPEN: dead jobs cannot be
+  completed.
 - **Quota failures surface to the user.** Terminal
   `*llm.QuotaResetError` in a step job publishes the existing
   `agent.quota_wait` event and appends a user-language quota sentence

@@ -1227,6 +1227,29 @@ func (ts *TacticalScheduler) terminalizeStepFailedAfterFilter(step *task.TaskSte
 	})
 }
 
+// completionFreshChecker is the optional queue capability the stale-completion
+// guard probes for: "does this job still accept a completion presented for THIS
+// execution attempt?"
+//
+// It is declared HERE, structurally, rather than in internal/queue, for two
+// reasons. (1) Go interfaces are satisfied structurally, so a queue that grows
+// the method satisfies this one with no edit on either side — the guard
+// upgrades itself the moment the queue can answer the attempt question. (2)
+// The queue owns the authoritative predicate (it folds in state AND the claim
+// token/epoch); re-implementing that logic in internal/agent would create a
+// second, driftable copy of the freshness rule — exactly the disagreement H5
+// is about.
+//
+// ok=false means the job could not be read (deleted/dead row, store error).
+// Callers must then fail OPEN, preserving the pre-existing behaviour: a dead
+// job cannot be completed, so dropping it is neither correct nor necessary.
+type completionFreshChecker interface {
+	// CompletionIsFresh reports whether a completion for jobID presented on
+	// behalf of claimToken should be treated as fresh. An empty claimToken
+	// means "caller holds no attempt" and asks the state-only predicate.
+	CompletionIsFresh(ctx context.Context, jobID, claimToken string) (fresh, ok bool)
+}
+
 // OnJobCompleted handles a completed job by updating the step, promoting
 // newly unblocked steps, and checking task completion.
 func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, result json.RawMessage) error {
@@ -1249,8 +1272,41 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	// de-facto in-flight state (dispatch sets it and StepRunning is never
 	// set) — so the queue job's state is authoritative. Guard runs only
 	// when a queue is wired (always the case in production).
+	//
+	// H5: job STATE alone is not sufficient once a cluster reclaim can reset
+	// a still-executing job to 'pending' and another worker re-claim it under
+	// a NEWER attempt. State then reads 'claimed' — "accept" — while the
+	// in-flight worker holds the OLDER attempt, and its completion would be
+	// processed as fresh, terminalizing the step with a result the queue has
+	// already superseded. So the guard asks the ATTEMPT question, not the
+	// state question, and keys on the claim token the worker carried.
+	//
+	// Layer 1 (attempt-aware): when the queue can answer "is this completion
+	// fresh for THIS attempt" (completionFreshChecker), the queue's own
+	// predicate decides — it already folds in state AND token, with the
+	// token-less state-only fallback for callers that hold no attempt. Layer 2
+	// (state-only): any queue without that capability falls back to the
+	// original state test, so the guard is CORRECT UNDER BOTH SHAPES: an
+	// epoch/token-aware queue is consulted and honoured; a state-only queue
+	// keeps exactly the pre-H5 behaviour. Neither layer is ever weaker than
+	// the other, and the original bug stays blocked on both: a requeued or
+	// failed job reads 'pending'/'failed', which BOTH layers reject.
 	if ts.queue != nil {
-		if job, jobErr := ts.queue.Get(ctx, jobID); jobErr == nil && job != nil &&
+		if checker, isAttemptAware := ts.queue.(completionFreshChecker); isAttemptAware {
+			// The event carries no attempt token today (queue.job.completed
+			// publishes job_id + result), so the token-less predicate is
+			// asked, which degrades to the state-only rule for this queue's
+			// own rows and becomes token-exact the moment the event starts
+			// carrying claim_token. Either way the queue — not a local
+			// re-implementation — owns the freshness verdict.
+			if fresh, ok := checker.CompletionIsFresh(ctx, jobID, ""); ok && !fresh {
+				ts.logger.Warn("stale completion event for superseded attempt",
+					"job_id", jobID,
+					"step_id", step.ID,
+				)
+				return nil // without processing: no result write, no events
+			}
+		} else if job, jobErr := ts.queue.Get(ctx, jobID); jobErr == nil && job != nil &&
 			job.State != queue.StateClaimed && job.State != queue.StateProcessing &&
 			job.State != queue.StateCompleted {
 			// pending/failed = the job was requeued or failed after the

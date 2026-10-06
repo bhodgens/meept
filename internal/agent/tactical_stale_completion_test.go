@@ -185,11 +185,11 @@ func TestOnJobCompleted_FreshCompletionStillProcessed(t *testing.T) {
 }
 
 // errStaleBoom and mustB2Job are file-local helpers.
-var errStaleBoom = errorStale{}
+var errStaleBoom = staleError{}
 
-type errorStale struct{}
+type staleError struct{}
 
-func (errorStale) Error() string { return "boom" }
+func (staleError) Error() string { return "boom" }
 
 func mustB2Job(t *testing.T, step *task.TaskStep) *queue.Job {
 	t.Helper()
