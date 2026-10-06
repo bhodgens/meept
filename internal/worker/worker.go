@@ -50,6 +50,11 @@ type Worker struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	wg     *sync.WaitGroup // optional: pool WaitGroup for tracking actual goroutine lifecycle
+	// claimToken is the attempt token of the job currently in flight
+	// (audit H4), taken from the claim. It is what the completion presents,
+	// so the queue can tell this worker's completion apart from a superseded
+	// attempt's. Guarded by mu like CurrentJob.
+	claimToken string
 }
 
 // Config holds worker configuration.
@@ -268,6 +273,7 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 	w.mu.Lock()
 	w.setState(StateClaiming)
 	w.CurrentJob = job
+	w.claimToken = job.ClaimToken
 	w.setStateWithJob(StateProcessing, job.ID)
 	w.mu.Unlock()
 
@@ -299,9 +305,26 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 		"agent_id", agentID,
 	)
 
-	// Mark as processing
-	if err := w.queue.MarkProcessing(ctx, job.ID); err != nil {
-		w.logger.Error("Failed to mark job as processing", "job", job.ID, "error", err)
+	// Mark as processing. ErrJobStateLocked means this attempt lost the race
+	// to a terminal state (the job was completed or dead-lettered by someone
+	// else, audit L8) — the work is pointless, so skip execution entirely
+	// rather than running a job nobody will accept a result for. Any other
+	// error is non-fatal and logged, exactly as before: the claim is already
+	// ours and Complete's own guard is the authority on the write.
+	markErr := w.queue.MarkProcessing(ctx, job.ID)
+	if markErr != nil && errors.Is(markErr, queue.ErrJobStateLocked) {
+		w.mu.Lock()
+		w.CurrentJob = nil
+		w.claimToken = ""
+		w.LastActive = time.Now()
+		w.setStateWithError(StateError, job.ID, markErr)
+		w.mu.Unlock()
+		w.logger.Warn("Job reached a terminal state before processing began; dropping attempt",
+			"job", job.ID, "worker_id", w.ID)
+		return true, nil
+	}
+	if markErr != nil {
+		w.logger.Error("Failed to mark job as processing", "job", job.ID, "error", markErr)
 	}
 
 	// Start heartbeat for cluster queue if supported.
@@ -331,6 +354,8 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 
 	w.mu.Lock()
 	w.CurrentJob = nil
+	claimToken := w.claimToken
+	w.claimToken = ""
 	w.LastActive = time.Now()
 
 	if processErr != nil {
@@ -381,16 +406,46 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 		return true, processErr
 	}
 
-	// Success
-	w.JobsComplete++
+	// Success — the ACTUAL queue outcome decides the counters and the state.
+	//
+	// Ordering matters (audit H4): JobsComplete++ used to run BEFORE Complete,
+	// so a rejected completion (ErrJobNotClaimable — a superseded attempt) both
+	// counted a job the queue never accepted AND returned an error that skipped
+	// the run loop's `else if processed` branch, leaving the error backoff
+	// un-reset and logging a successful job as a processing failure.
+	//
+	// So: release w.mu, ask the queue, then record what the queue actually did.
+	// The claim token (captured with the CurrentJob clear above) rides along so
+	// the queue can tell this attempt apart from a superseded one — and so a
+	// retry of the SAME request is idempotent success rather than a 409.
+	//
+	// w.mu is dropped across the queue call: it is I/O (SQLite + a bus
+	// publish), and holding the worker lock across it is exactly what the
+	// mutex-scope rule forbids — every concurrent GetState/GetStats/
+	// GetCurrentJob reader would stall for the duration of the write.
+	w.mu.Unlock()
+
+	completeErr := w.completeJob(ctx, job.ID, result, claimToken)
+
+	w.mu.Lock()
 	w.setStateWithJob(StateComplete, job.ID)
 	w.mu.Unlock()
 
-	// Mark job as completed
-	if err := w.queue.Complete(ctx, job.ID, result); err != nil {
-		w.logger.Error("Failed to mark job as completed", "job", job.ID, "error", err)
-		return true, err
+	if completeErr != nil {
+		// The queue refused the completion: this attempt is superseded (the job
+		// was requeued, reclaimed, or re-executed). The work genuinely ran, so
+		// it is not a JobsFailed, and it is not a JobsComplete either — the
+		// queue never recorded it. Returning nil keeps the run loop's
+		// `else if processed` branch (backoff reset) on the honest path that the
+		// processor actually took.
+		w.logger.Warn("Job completion refused by the queue; attempt superseded",
+			"worker_id", w.ID, "job_id", job.ID, "error", completeErr)
+		return true, nil
 	}
+
+	w.mu.Lock()
+	w.JobsComplete++
+	w.mu.Unlock()
 
 	w.logger.Info("DONE job completed",
 		"worker_id", w.ID,
@@ -555,6 +610,27 @@ func (w *Worker) requeueOnProviderWait(ctx context.Context, job *queue.Job, proc
 		"resume_at", resumeAt.Format(time.RFC3339),
 	)
 	return true
+}
+
+// completeJob completes a job on behalf of THIS execution attempt (audit H4).
+//
+// Queues that understand claim tokens get CompleteAttempt, so the store can
+// distinguish an idempotent retry of this attempt's completion (success,
+// nothing republished) from a completion whose attempt has been superseded
+// (ErrJobNotClaimable). Queues without token support keep the token-less
+// Complete — the pre-H4 contract — so the optional-interface probe never
+// changes behaviour for an implementation that did not opt in.
+//
+// Returns the queue's error verbatim; the caller decides what it means for the
+// counters (tryProcessJob treats a refusal as a superseded attempt, not a
+// processing failure).
+func (w *Worker) completeJob(ctx context.Context, jobID string, result any, claimToken string) error {
+	if claimToken != "" {
+		if ac, ok := w.queue.(queue.AttemptCompleter); ok {
+			return ac.CompleteAttempt(ctx, jobID, result, claimToken)
+		}
+	}
+	return w.queue.Complete(ctx, jobID, result)
 }
 
 // providerPolicy resolves the injected failure-policy config or the

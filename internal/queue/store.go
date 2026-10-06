@@ -13,6 +13,8 @@ import (
 
 	"crypto/ed25519"
 
+	"github.com/caimlas/meept/pkg/id"
+
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
 
@@ -24,11 +26,21 @@ var ErrNoJobAvailable = errors.New("no job available")
 var ErrJobAlreadyClaimed = errors.New("job not found or already claimed")
 
 // ErrJobNotClaimable is returned by Complete when the job is not in a
-// claimable (claimed/processing) state. Jobs keep the same ID across
-// Retry/Requeue, so this fires for stale or duplicate completion events —
-// e.g. a completion for attempt 1 arriving after the job was requeued for
-// attempt 2 — and callers must not treat it as a fresh completion.
+// claimable (claimed/processing) state for the attempt that is completing
+// it. Jobs keep the same ID across Retry/Requeue, so this fires for stale
+// or duplicate completion events — e.g. a completion for attempt 1 arriving
+// after the job was requeued for attempt 2, or after a cluster reclaim
+// re-executed it under a newer claim token. A same-attempt retry of an
+// ALREADY-completed job is NOT this error: that is idempotent success (see
+// CompleteAttempt).
 var ErrJobNotClaimable = errors.New("job not in a claimable state for completion")
+
+// ErrJobStateLocked is returned when a generic state update (UpdateState —
+// i.e. MarkProcessing) targets a job that can no longer change state: it is
+// terminal (completed/dead) or does not exist. Symmetric with
+// ErrJobNotClaimable: a late MarkProcessing from a worker whose attempt was
+// superseded must not resurrect a finished job into 'processing'.
+var ErrJobStateLocked = errors.New("job not in an updatable state")
 
 // Store provides SQLite persistence for jobs.
 type Store struct {
@@ -93,7 +105,12 @@ CREATE TABLE IF NOT EXISTS jobs (
 	error         TEXT,
 	created_at    TEXT NOT NULL,
 	updated_at    TEXT NOT NULL,
-	due_at        TEXT
+	due_at        TEXT,
+	-- claim_token identifies the CURRENT execution attempt (audit H4).
+	-- ClaimNextForAgent/ClaimNextByID write a fresh token on every claim;
+	-- CompleteAttempt matches it, so a completion carries attempt identity,
+	-- not just job state. NULL on a never-claimed job.
+	claim_token   TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_state_priority ON jobs(state, priority DESC, created_at);
@@ -172,6 +189,13 @@ func (s *Store) migrate() error {
 		// SQLite applies DEFAULT 0 to pre-existing rows on ADD COLUMN, which
 		// is exactly the required backfill: old jobs are background.
 		{"jobs", "interactive", "ALTER TABLE jobs ADD COLUMN interactive INTEGER DEFAULT 0"},
+		// Completion epoch/token (audit H4). Existing rows get NULL, which
+		// reads back as "never claimed under a token" — CompleteAttempt then
+		// falls back to the legacy state-only predicate (see
+		// tokenMatches), so an in-flight job on an upgraded database still
+		// completes. No backfill write is needed or wanted: fabricating a
+		// token for an attempt nobody holds would be a lie.
+		{"jobs", "claim_token", "ALTER TABLE jobs ADD COLUMN claim_token TEXT"},
 	}
 
 	for _, mig := range legacyMigrations {
@@ -334,8 +358,8 @@ func (s *Store) Insert(job *Job) error {
 
 	_, err := s.db.Exec(`
 		INSERT INTO jobs (id, task_id, agent_id, type, priority, state, payload, required_caps,
-		                  max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                  max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, claim_token)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID,
 		nullableString(job.TaskID),
 		nullableString(job.AgentID),
@@ -353,6 +377,7 @@ func (s *Store) Insert(job *Job) error {
 		job.CreatedAt.Format(time.RFC3339),
 		job.UpdatedAt.Format(time.RFC3339),
 		dueAt,
+		nullableString(job.ClaimToken),
 	)
 
 	if err != nil {
@@ -368,7 +393,7 @@ func (s *Store) Insert(job *Job) error {
 func (s *Store) GetByID(id string) (*Job, error) {
 	row := s.db.QueryRow(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at, claim_token
 		FROM jobs WHERE id = ?`, id)
 
 	return s.scanJob(row)
@@ -416,7 +441,7 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 	if agentID != "" {
 		query = `
 			SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-			       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+			       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at, claim_token
 			FROM jobs
 			WHERE state = 'pending'
 			  AND (due_at IS NULL OR due_at <= ?)
@@ -431,7 +456,7 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 	} else {
 		query = `
 			SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-			       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+			       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at, claim_token
 			FROM jobs
 			WHERE state = 'pending'
 			  AND (due_at IS NULL OR due_at <= ?)
@@ -468,11 +493,16 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 		return nil, ErrNoJobAvailable
 	}
 
-	// Claim the job (reuse now from above since it's already in the same transaction)
+	// Claim the job (reuse now from above since it's already in the same transaction).
+	// A FRESH claim_token is minted for every claim: the token is the
+	// execution attempt's identity (audit H4). A completion that presents an
+	// older token belongs to a superseded attempt and is refused, while the
+	// same token completing twice is idempotent.
+	claimToken := newClaimToken()
 	claimResult, err := tx.Exec(`
-		UPDATE jobs SET state = 'claimed', claimed_by = ?, updated_at = ?
+		UPDATE jobs SET state = 'claimed', claimed_by = ?, claim_token = ?, updated_at = ?
 		WHERE id = ? AND state = 'pending'`,
-		workerID, now, claimableJob.ID)
+		workerID, claimToken, now, claimableJob.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim job: %w", err)
 	}
@@ -488,50 +518,230 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 
 	claimableJob.State = StateClaimed
 	claimableJob.ClaimedBy = workerID
+	claimableJob.ClaimToken = claimToken
 	s.logger.Info("Job claimed", "id", claimableJob.ID, "worker", workerID, "agent", claimableJob.AgentID)
 	return claimableJob, nil
 }
 
 // UpdateState updates a job's state.
+//
+// State guard (audit L8): the write is refused when the row is TERMINAL
+// (completed/dead) or absent. Without it, a late MarkProcessing from a worker
+// whose attempt was superseded resurrects a finished job into 'processing',
+// and Complete can then never settle it — the asymmetry was with Complete's
+// own guard. Callers treat ErrJobStateLocked as "my attempt lost the race",
+// which is exactly what it is.
+//
+// Only UpdateState's single production caller (MarkProcessing) touches a
+// claimed/processing row, so the predicate stays general rather than pinning
+// the exact old state: any non-terminal state is updatable.
 func (s *Store) UpdateState(jobID string, state JobState) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE jobs SET state = ?, updated_at = ? WHERE id = ?`,
+	res, err := s.db.Exec(`
+		UPDATE jobs SET state = ?, updated_at = ?
+		WHERE id = ? AND state NOT IN ('completed', 'dead')`,
 		string(state), now, jobID)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to update job state: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read state update rows affected: %w", err)
+	}
+	if affected == 0 {
+		s.logger.Warn("Refused state update for a terminal or missing job",
+			"id", jobID, "requested_state", string(state))
+		return ErrJobStateLocked
+	}
+	return nil
 }
 
 // Complete marks a job as completed with a result.
+//
+// LEGACY, TOKEN-LESS PATH — kept for callers that do not hold a claim token
+// (bus/RPC/HTTP surfaces, tests). It applies the state-only guard: the job
+// must be claimed/processing. A second completion of the same job fails with
+// ErrJobNotClaimable, which is the pre-H4 contract those callers were built
+// against. Workers and anything holding an attempt use CompleteAttempt, which
+// additionally distinguishes a legitimate retry from a superseded attempt.
 func (s *Store) Complete(jobID string, result any) error {
+	_, err := s.CompleteAttempt(jobID, result, "")
+	return err
+}
+
+// CompletionDisposition reports how a Complete* call resolved, so the queue
+// layer (and a caller that must decide whether to publish) can tell a fresh
+// completion from an idempotent retry and from a superseded attempt.
+type CompletionDisposition int
+
+const (
+	// CompletionApplied means this call performed the state transition and the
+	// completion is new — publish the completion event.
+	CompletionApplied CompletionDisposition = iota
+	// CompletionIdempotent means the job was already completed by the SAME
+	// claim token: a retry of a request that already succeeded. Success (nil
+	// error), but publish NO second event.
+	CompletionIdempotent
+)
+
+// CompleteAttempt marks a job completed on behalf of the attempt identified by
+// claimToken (audit H4). Three outcomes, distinguished by (state, token):
+//
+//   - state in (claimed, processing) AND token matches → CompletionApplied.
+//   - state == completed AND token matches → CompletionIdempotent. The
+//     IDENTICAL request retried by the same worker is idempotent success:
+//     the first result stands, nothing is overwritten, and the caller
+//     publishes no second event.
+//   - anything else → ErrJobNotClaimable. This is the stale/double-completion
+//     case: the job moved on (requeued, reclaimed, re-claimed as attempt 2)
+//     so the presented token belongs to a SUPERSEDED attempt.
+//
+// An empty claimToken degrades to the legacy state-only predicate (see
+// Complete), which keeps every token-less caller on its existing contract
+// after the migration adds the column.
+func (s *Store) CompleteAttempt(jobID string, result any, claimToken string) (CompletionDisposition, error) {
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
+		return CompletionApplied, fmt.Errorf("failed to marshal result: %w", err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.db.Exec(`
-		UPDATE jobs SET state = 'completed', result = ?, updated_at = ?
-		WHERE id = ? AND state IN ('claimed', 'processing')`,
-		string(resultJSON), now, jobID)
 
-	if err != nil {
-		return fmt.Errorf("failed to complete job: %w", err)
+	// Step 1 — the fresh transition. The token predicate is part of the WHERE
+	// clause so the guard is enforced by the database, not by a read-then-write
+	// race. Token-less callers keep the pre-H4 state-only predicate.
+	// Args are appended in PLACEHOLDER ORDER: result, updated_at, id, then the
+	// optional claim token (which the predicate appends last).
+	claimPredicate := `state IN ('claimed', 'processing')`
+	args := []any{string(resultJSON), now, jobID}
+	if claimToken != "" {
+		claimPredicate += ` AND claim_token = ?`
+		args = append(args, claimToken)
 	}
 
-	// State guard: jobs keep the same ID across Retry/Requeue, so a
-	// RowsAffected==0 here means a stale or duplicate completion event (the
-	// job is pending/failed/completed — e.g. requeued for attempt 2). The
-	// earlier result must not be overwritten and the caller must not
-	// publish a fresh completion.
+	res, err := s.db.Exec(fmt.Sprintf(`
+		UPDATE jobs SET state = 'completed', result = ?, updated_at = ?
+		WHERE id = ? AND %s`, claimPredicate), args...)
+	if err != nil {
+		return CompletionApplied, fmt.Errorf("failed to complete job: %w", err)
+	}
+
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("failed to read completion rows affected: %w", err)
+		return CompletionApplied, fmt.Errorf("failed to read completion rows affected: %w", err)
 	}
-	if affected == 0 {
-		return ErrJobNotClaimable
+	if affected > 0 {
+		s.logger.Info("Job completed", "id", jobID, "claim_token", claimToken)
+		return CompletionApplied, nil
 	}
 
-	s.logger.Info("Job completed", "id", jobID)
-	return nil
+	// Step 2 — the idempotent retry. Only reachable when this call presented a
+	// token: the row is already 'completed' under the SAME attempt, i.e. the
+	// identical request arriving twice. The first result is left untouched.
+	if claimToken != "" {
+		var (
+			state       string
+			storedToken sql.NullString
+		)
+		scanErr := s.db.QueryRow(`SELECT state, claim_token FROM jobs WHERE id = ?`, jobID).
+			Scan(&state, &storedToken)
+		if scanErr == nil &&
+			state == string(StateCompleted) && storedToken.Valid && storedToken.String == claimToken {
+			s.logger.Debug("Idempotent completion retry for the same claim token", "id", jobID)
+			return CompletionIdempotent, nil
+		}
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			s.logger.Warn("Completion for an unknown job", "id", jobID)
+		}
+	}
+
+	// Jobs keep the same ID across Retry/Requeue/Reclaim, so a refusal here
+	// means a stale or double completion event from a SUPERSEDED attempt (the
+	// token moved on) or a job that was never claimable. The earlier result must
+	// not be overwritten and the caller must not publish a fresh completion.
+	return CompletionApplied, ErrJobNotClaimable
+}
+
+// CompletionIsFresh reports whether a completion event should be published for
+// this disposition. An idempotent retry is NOT fresh: the first completion
+// already published, and republishing would double-count the job downstream
+// (task finalization, memory sync).
+func (d CompletionDisposition) CompletionIsFresh() bool {
+	return d == CompletionApplied
+}
+
+// CompletionFresh inspects a job's completion state from the CALLER's side
+// (audit H4/H5): does this queue job still accept a completion for the attempt
+// identified by claimToken?
+//
+// This is the primitive the stale-completion guard needs. Job state alone
+// cannot answer it: a job that a cluster reclaim reset to 'pending' and then
+// re-executed is 'claimed' under a NEWER token, while the in-flight worker
+// still holds the OLD one — so state says "claimed" (accepting) and attempt
+// identity says "superseded" (rejecting). Only the token decides.
+//
+// Returned verdict:
+//   - true  → accept: state is completed, or claimed/processing under THIS
+//     token (the event is fresh, or a retry of it).
+//   - false → drop as stale: the attempt is superseded (a newer claim token is
+//     live), or the job is not in a completable state.
+//   - ok=false → the job could not be read; the caller must fail open exactly
+//     as it did before this helper existed.
+//
+// An empty claimToken falls back to the state-only predicate, which is the
+// pre-token contract for callers that hold no attempt (and for rows migrated
+// from a database that predates the column).
+func (s *Store) CompletionIsFresh(jobID, claimToken string) (fresh, ok bool) {
+	row := s.db.QueryRow(`SELECT state, claim_token FROM jobs WHERE id = ?`, jobID)
+	var (
+		state       string
+		storedToken sql.NullString
+	)
+	if err := row.Scan(&state, &storedToken); err != nil {
+		return false, false
+	}
+
+	if state == string(StateCompleted) {
+		// Completed: fresh unless a DIFFERENT (newer) attempt has already
+		// taken the job over, which the state alone cannot express — a
+		// completed row keeps the token of the attempt that completed it, and
+		// a re-claim mints a new one.
+		return claimToken == "" || !storedToken.Valid || storedToken.String == claimToken, true
+	}
+
+	if state != string(StateClaimed) && state != string(StateProcessing) {
+		// pending/failed: the attempt was requeued; stale.
+		return false, true
+	}
+	if claimToken == "" || !storedToken.Valid {
+		// Token-less caller (or a pre-migration row): state-only predicate.
+		return true, true
+	}
+	return storedToken.String == claimToken, true
+}
+
+// PendingGate returns the next_retry_at a pending job is parked at, or the zero
+// time when the job is absent or immediately claimable (audit M2: the wake
+// scheduler needs to know WHEN a closed claim gate opens, which is not
+// derivable from the transition's own arguments alone for Retry).
+func (s *Store) PendingGate(jobID string) time.Time {
+	var next sql.NullString
+	if err := s.db.QueryRow(`SELECT next_retry_at FROM jobs WHERE id = ?`, jobID).Scan(&next); err != nil || !next.Valid {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, next.String)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// newClaimToken mints a claim token for one execution attempt. crypto/rand
+// via pkg/id: never time.Now().UnixNano() or math/rand (Predictable ID rule),
+// and the zero-suffix fallback is the documented entropy-exhaustion signal.
+func newClaimToken() string {
+	return id.Generate("claim-")
 }
 
 // Fail marks a job as failed with an error message.
@@ -631,6 +841,7 @@ func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 		    error = NULL,
 		    interactive = interactive,
 		    next_retry_at = ?,
+		    claim_token = NULL,
 		    updated_at = ?
 		WHERE id = ? AND state IN ('failed', 'claimed', 'processing')`,
 		notBefore.UTC().Format(time.RFC3339), now.Format(time.RFC3339), jobID)
@@ -694,6 +905,7 @@ func (s *Store) Retry(jobID string) error {
 		    claimed_by = NULL,
 		    error = NULL,
 		    next_retry_at = ?,
+		    claim_token = NULL,
 		    updated_at = ?
 		WHERE id = ? AND state IN ('failed', 'claimed')`,
 		nextRetryAt.Format(time.RFC3339), now.Format(time.RFC3339), jobID)
@@ -723,6 +935,22 @@ func (s *Store) Retry(jobID string) error {
 // ResetToPending resets a claimed/processing job back to pending state,
 // clearing the claimed_by, result, and error fields. This is used when
 // a node is unreachable and its jobs need to be re-handled by another node.
+//
+// claim_token is RETIRED (set to NULL), not carried over (audit H5). A reclaim
+// declares "the attempt holding this token is abandoned": every worker still
+// executing that attempt is, by definition, on a token nobody owns any more.
+// Clearing it is what makes the reclaim SAFE for an in-flight worker — the
+// moment the job is re-claimed, the new claim mints a fresh token, and the
+// abandoned attempt's completion presents a stale one. Store.CompleteAttempt
+// and Store.CompletionIsFresh both key on that token, so the stale completion
+// is refused (ErrJobNotClaimable) instead of overwriting the re-executed
+// attempt's result, and the downstream stale-completion guard can SEE the
+// supersession rather than inferring it from job state.
+//
+// The claim_token = NULL is also why the "already retired" case is
+// indistinguishable from a pre-migration row: both mean "no live attempt", and
+// both resolve to the state-only predicate for a token-less caller. That is the
+// backward-compatible fallback, not a hole.
 func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := s.db.ExecContext(ctx, `
@@ -733,6 +961,7 @@ func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
 		    error = NULL,
 		    timeout_at = NULL,
 		    last_heartbeat_at = NULL,
+		    claim_token = NULL,
 		    updated_at = ?
 		WHERE id = ? AND state IN ('claimed', 'processing')`,
 		now, jobID)
@@ -761,12 +990,13 @@ func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
 // runs — claims written by THIS process must never be reset. RFC3339 truncates
 // to seconds, so callers pass claimsBefore.Add(-time.Second) to stay safe.
 //
-// The reset mirrors ResetToPending exactly: claimed_by/result/error and the
-// cluster claim columns are cleared, retry_count and next_retry_at are
-// PRESERVED so a re-claimed orphan keeps its original retry budget/backoff
-// (a crash is not a job failure). Updates run in a single transaction so a
-// crash mid-sweep cannot leave a half-reset mix of states. Returns the
-// number of jobs that were reset.
+// The reset mirrors ResetToPending exactly: claimed_by/result/error, the
+// cluster claim columns AND claim_token are cleared (a retired attempt must
+// not be able to complete a re-executed job — audit H5), while retry_count
+// and next_retry_at are PRESERVED so a re-claimed orphan keeps its original
+// retry budget/backoff (a crash is not a job failure). Updates run in a single
+// transaction so a crash mid-sweep cannot leave a half-reset mix of states.
+// Returns the number of jobs that were reset.
 func (s *Store) ResetStaleClaimsAtStartup(ctx context.Context, claimsBefore time.Time) (int, error) {
 	// Snapshot: how many jobs qualify right now, for the return value.
 	// The UPDATE below re-checks the same predicates under the transaction,
@@ -815,6 +1045,7 @@ func (s *Store) ResetStaleClaimsAtStartup(ctx context.Context, claimsBefore time
 		    error = NULL,
 		    timeout_at = NULL,
 		    last_heartbeat_at = NULL,
+		    claim_token = NULL,
 		    updated_at = ?
 		WHERE state IN ('claimed', 'processing')
 		  AND updated_at < ?`,
@@ -844,7 +1075,7 @@ func (s *Store) ResetStaleClaimsAtStartup(ctx context.Context, claimsBefore time
 func (s *Store) ListByState(state JobState, limit int) ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at, claim_token
 		FROM jobs
 		WHERE state = ?
 		ORDER BY interactive DESC, priority DESC, created_at ASC, id ASC
@@ -880,7 +1111,7 @@ func (s *Store) ListByState(state JobState, limit int) ([]*Job, error) {
 // earlier rows.
 func (s *Store) ListByStateAfter(state JobState, limit int, afterInteractive bool, afterPriority int, afterCreatedAt time.Time, afterID string) ([]*Job, error) {
 	const selectBase = `SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at, claim_token
 		FROM jobs
 		WHERE state = ?`
 	const orderBy = ` ORDER BY interactive DESC, priority DESC, created_at ASC, id ASC
@@ -902,9 +1133,9 @@ func (s *Store) ListByStateAfter(state JobState, limit int, afterInteractive boo
 		args = []any{
 			string(state),
 			boolToInt(afterInteractive),
-			boolToInt(afterInteractive), int(afterPriority),
-			boolToInt(afterInteractive), int(afterPriority), createdAfter,
-			boolToInt(afterInteractive), int(afterPriority), createdAfter, afterID,
+			boolToInt(afterInteractive), afterPriority,
+			boolToInt(afterInteractive), afterPriority, createdAfter,
+			boolToInt(afterInteractive), afterPriority, createdAfter, afterID,
 			limit,
 		}
 	}
@@ -935,7 +1166,7 @@ func (s *Store) ListByStateAfter(state JobState, limit int, afterInteractive boo
 func (s *Store) ListByTaskID(taskID string) ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at, claim_token
 		FROM jobs
 		WHERE task_id = ?
 		ORDER BY created_at ASC`,
@@ -964,7 +1195,7 @@ func (s *Store) ListByTaskID(taskID string) ([]*Job, error) {
 func (s *Store) ListByAgentID(agentID string, limit int) ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
+		       max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at, claim_token
 		FROM jobs
 		WHERE agent_id = ? AND state = 'pending'
 		ORDER BY interactive DESC, priority DESC, created_at ASC
@@ -1389,16 +1620,16 @@ func (s *Store) scanJob(row *sql.Row) (*Job, error) {
 		capsJSON                         string
 		interactive                      int
 		createdAt, updatedAt             string
-		dueAt, nextRetryAt               sql.NullString
+		dueAt, nextRetryAt, claimToken   sql.NullString
 	)
 
 	err := row.Scan(&id, &taskID, &agentID, &jobType, &priority, &state, &payload, &capsJSON,
-		&maxRetries, &retryCount, &interactive, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt, &nextRetryAt)
+		&maxRetries, &retryCount, &interactive, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt, &nextRetryAt, &claimToken)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, interactive, claimedBy, result, errMsg, createdAt, updatedAt, dueAt, nextRetryAt)
+	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, interactive, claimedBy, result, errMsg, createdAt, updatedAt, dueAt, nextRetryAt, claimToken)
 }
 
 func (s *Store) scanJobRows(rows *sql.Rows) (*Job, error) {
@@ -1410,21 +1641,21 @@ func (s *Store) scanJobRows(rows *sql.Rows) (*Job, error) {
 		capsJSON                         string
 		interactive                      int
 		createdAt, updatedAt             string
-		dueAt, nextRetryAt               sql.NullString
+		dueAt, nextRetryAt, claimToken   sql.NullString
 	)
 
 	err := rows.Scan(&id, &taskID, &agentID, &jobType, &priority, &state, &payload, &capsJSON,
-		&maxRetries, &retryCount, &interactive, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt, &nextRetryAt)
+		&maxRetries, &retryCount, &interactive, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt, &nextRetryAt, &claimToken)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, interactive, claimedBy, result, errMsg, createdAt, updatedAt, dueAt, nextRetryAt)
+	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, interactive, claimedBy, result, errMsg, createdAt, updatedAt, dueAt, nextRetryAt, claimToken)
 }
 
 func (s *Store) buildJob(id string, taskID, agentID sql.NullString, jobType, state, payload, capsJSON string,
 	priority, maxRetries, retryCount, interactive int, claimedBy, result, errMsg sql.NullString,
-	createdAt, updatedAt string, dueAt, nextRetryAt sql.NullString) (*Job, error) {
+	createdAt, updatedAt string, dueAt, nextRetryAt, claimToken sql.NullString) (*Job, error) {
 
 	job := &Job{
 		ID:          id,
@@ -1445,6 +1676,9 @@ func (s *Store) buildJob(id string, taskID, agentID sql.NullString, jobType, sta
 	}
 	if claimedBy.Valid {
 		job.ClaimedBy = claimedBy.String
+	}
+	if claimToken.Valid {
+		job.ClaimToken = claimToken.String
 	}
 	if result.Valid {
 		job.Result = json.RawMessage(result.String)
@@ -1500,11 +1734,16 @@ func (s *Store) ClaimNextByID(jobID, workerID string) (*Job, error) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Fresh claim token for this attempt (audit H4) — same contract as
+	// ClaimNextForAgent: the token is the attempt identity a completion
+	// must present.
+	claimToken := newClaimToken()
+
 	// Try to claim the specific job
 	result, err := tx.Exec(`
-		UPDATE jobs SET state = 'claimed', claimed_by = ?, updated_at = ?
+		UPDATE jobs SET state = 'claimed', claimed_by = ?, claim_token = ?, updated_at = ?
 		WHERE id = ? AND state = 'pending'`,
-		workerID, now, jobID)
+		workerID, claimToken, now, jobID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim job: %w", err)
 	}

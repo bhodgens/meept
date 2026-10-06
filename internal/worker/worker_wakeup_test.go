@@ -43,16 +43,18 @@ func (q *wakeFakeQueue) Claim(_ context.Context, _ string, _ []string, _ string)
 	return job, nil
 }
 
-func (q *wakeFakeQueue) MarkProcessing(context.Context, string) error    { return nil }
-func (q *wakeFakeQueue) Complete(context.Context, string, any) error     { return nil }
-func (q *wakeFakeQueue) Fail(context.Context, string, error) error       { return nil }
-func (q *wakeFakeQueue) Retry(context.Context, string) error             { return nil }
-func (q *wakeFakeQueue) Get(context.Context, string) (*queue.Job, error) { return nil, nil }
+func (q *wakeFakeQueue) MarkProcessing(context.Context, string) error { return nil }
+func (q *wakeFakeQueue) Complete(context.Context, string, any) error  { return nil }
+func (q *wakeFakeQueue) Fail(context.Context, string, error) error    { return nil }
+func (q *wakeFakeQueue) Retry(context.Context, string) error          { return nil }
+func (q *wakeFakeQueue) Get(context.Context, string) (*queue.Job, error) {
+	return nil, nil //nolint:nilnil // test stub: "job not found" is the intended shape
+}
 func (q *wakeFakeQueue) ListByState(context.Context, queue.JobState, int) ([]*queue.Job, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: "no jobs" is the intended shape
 }
 func (q *wakeFakeQueue) ListByTaskID(context.Context, string) ([]*queue.Job, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: "no jobs" is the intended shape
 }
 
 func (q *wakeFakeQueue) Close() error { return nil }
@@ -62,7 +64,7 @@ func (q *wakeFakeQueue) Stats(context.Context) (*queue.QueueStats, error) {
 }
 
 func (q *wakeFakeQueue) RecoverFromDeadLetter(context.Context, string) (*queue.Job, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: "not recovered" is the intended shape
 }
 
 func (q *wakeFakeQueue) ListDeadLetter(context.Context, int) ([]*queue.Job, error) {
@@ -94,7 +96,7 @@ func (q *wakeFakeQueue) setArmed(v bool) {
 type noopProcessor struct{}
 
 func (noopProcessor) Process(_ context.Context, _ *queue.Job) (any, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // stub processor: nothing to return, nothing failed
 }
 
 // TestWorker_WakeClaimsImmediately: Claim must run within 50ms of the
@@ -116,8 +118,7 @@ func TestWorker_WakeClaimsImmediately(t *testing.T) {
 		t.Fatalf("NewWorker: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := w.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -151,10 +152,7 @@ func TestWorker_WakeClaimsImmediately(t *testing.T) {
 	}
 
 	claimDeadline := wakeStart.Add(50 * time.Millisecond)
-	for {
-		if q.claimCount() >= 2 {
-			break
-		}
+	for q.claimCount() < 2 {
 		if time.Now().After(claimDeadline) {
 			t.Fatalf("Claim did not run within 50ms of wake signal (claims=%d)", q.claimCount())
 		}

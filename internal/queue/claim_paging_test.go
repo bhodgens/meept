@@ -50,7 +50,7 @@ func TestClaimSlowPath_PagesBeyondHeadOfLineParkedJobs(t *testing.T) {
 	parkedRetryAt := base.Add(2 * time.Hour)
 
 	// 60 parked jobs, staggered created_at so ordering is deterministic.
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		job := mustNewJob(t, JobTypeOneOff, map[string]string{"prompt": "parked"})
 		job.CreatedAt = base.Add(time.Duration(i) * time.Second)
 		job.UpdatedAt = job.CreatedAt
@@ -88,7 +88,7 @@ func TestClaimSlowPath_BoundedScan(t *testing.T) {
 	base := time.Now().UTC().Add(-time.Hour)
 	parkedRetryAt := base.Add(2 * time.Hour)
 
-	for i := 0; i < 520; i++ {
+	for i := range 520 {
 		job := mustNewJob(t, JobTypeOneOff, map[string]string{"prompt": "parked"})
 		job.CreatedAt = base.Add(time.Duration(i) * time.Second)
 		job.UpdatedAt = job.CreatedAt

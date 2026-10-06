@@ -84,7 +84,7 @@ func TestPool_StopUnregistersWake(t *testing.T) {
 		t.Fatalf("NewPool: %v", err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := p.AddWorker(nil, ""); err != nil {
 			t.Fatalf("AddWorker %d: %v", i, err)
 		}

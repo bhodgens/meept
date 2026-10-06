@@ -30,6 +30,45 @@ type ClusterQueue struct {
 	closeOnce sync.Once
 }
 
+// attemptCompleter is the optional queue surface for attempt-scoped completion
+// (audit H4). A wrapped Queue that supports claim tokens exposes it; one that
+// does not falls back to the token-less Complete (the pre-H4 contract). Kept
+// separate from Queue for the same reason WakeNotifier is: implementations
+// without token support must stay drop-in.
+type attemptCompleter interface {
+	CompleteAttempt(ctx context.Context, jobID string, result any, claimToken string) error
+}
+
+// AttemptCompleter is the EXPORTED form of attemptCompleter, for callers in
+// other packages (internal/worker) that must present a claim token when
+// completing. Declaring the contract in one place keeps the worker's optional
+// probe and ClusterQueue's forwarder from drifting into two different
+// signatures — a mismatch would silently degrade the worker to the token-less
+// path and lose idempotent-retry handling without any error.
+type AttemptCompleter interface {
+	// CompleteAttempt completes jobID on behalf of the execution attempt
+	// identified by claimToken. A retry presenting the same token for an
+	// already-completed job succeeds WITHOUT republishing; a superseded
+	// token returns ErrJobNotClaimable.
+	CompleteAttempt(ctx context.Context, jobID string, result any, claimToken string) error
+}
+
+// wakeNotifier is the local alias for the WakeNotifier contract ClusterQueue
+// forwards to its wrapped Queue.
+type wakeNotifier interface {
+	WakeWaiter(ch chan<- struct{}) (unregister func())
+}
+
+// claimableSignaler is the package-internal seam for "this transition left a
+// job claimable, so wake the waiters" (audit M2). ClusterQueue's reclaim is a
+// fifth such transition and lives outside PersistentQueue, so it reaches the
+// same fan-out through this interface rather than by duplicating it. Unexported
+// on purpose: it is an internal contract between the two queue
+// implementations, not a surface external Queue implementations must satisfy.
+type claimableSignaler interface {
+	signalClaimable()
+}
+
 // ClusterQueueConfig holds configuration for the distributed queue.
 type ClusterQueueConfig struct {
 	DefaultClaimTimeout     time.Duration
@@ -45,6 +84,10 @@ type ClaimRecord struct {
 	TimeoutAt    time.Time
 	IsReplica    bool
 	ManagingNode string
+	// ClaimToken is the attempt token the claim minted (audit H4). Recorded
+	// so a terminal transition can present the attempt it is settling, and so
+	// a reclaim knows which attempt it is retiring.
+	ClaimToken string
 }
 
 // DefaultClusterQueueConfig returns a config with sensible defaults.
@@ -98,6 +141,7 @@ func (cq *ClusterQueue) Claim(ctx context.Context, workerID string, caps []strin
 		TimeoutAt:    time.Now().UTC().Add(cq.cfg.DefaultClaimTimeout),
 		IsReplica:    false,
 		ManagingNode: cq.localNodeID,
+		ClaimToken:   job.ClaimToken,
 	}
 	cq.mu.Unlock()
 
@@ -105,10 +149,19 @@ func (cq *ClusterQueue) Claim(ctx context.Context, workerID string, caps []strin
 }
 
 // Complete marks a job as completed and synchronizes the event to the cluster.
+//
+// The local claim record is REMOVED here (audit L10). It used to be kept, so
+// Stats().LocalClaims — served straight to RPC clients as cluster.claims —
+// over-counted every completed job until the next reclaim sweep happened to
+// touch it. The record is terminal bookkeeping, not live-claim state: keeping a
+// completed job in the claim set is what made Heartbeat able to extend the
+// timeout of a job that no longer exists in flight.
 func (cq *ClusterQueue) Complete(ctx context.Context, jobID string, result any) error {
-	// Record the claim record before completing
+	// Take AND delete the claim record: the job is terminal, so it must not
+	// remain in the live-claim set.
 	cq.mu.Lock()
 	record, ok := cq.claimed[jobID]
+	delete(cq.claimed, jobID)
 	cq.mu.Unlock()
 
 	if ok {
@@ -120,6 +173,43 @@ func (cq *ClusterQueue) Complete(ctx context.Context, jobID string, result any) 
 		}
 	}
 
+	// Present this attempt's token so the wrapped queue can tell an idempotent
+	// retry (same attempt) from a superseded one (audit H4).
+	if ok && record.ClaimToken != "" {
+		if ac, isAttempt := cq.Queue.(attemptCompleter); isAttempt {
+			return ac.CompleteAttempt(ctx, jobID, result, record.ClaimToken)
+		}
+	}
+	return cq.Queue.Complete(ctx, jobID, result)
+}
+
+// CompleteAttempt completes the job on behalf of an attempt token held by the
+// CALLER (the worker), rather than by the claim record this node kept (audit
+// H4). A worker that claimed through the ClusterQueue holds the token; the
+// token is the authority, the record is bookkeeping. Falls through to Complete
+// when no token is supplied.
+func (cq *ClusterQueue) CompleteAttempt(ctx context.Context, jobID string, result any, claimToken string) error {
+	if claimToken == "" {
+		return cq.Complete(ctx, jobID, result)
+	}
+
+	// Same terminal bookkeeping as Complete (L10): the local record goes away
+	// with the completion, whether the completion came through here or through
+	// the wrapped queue directly.
+	cq.mu.Lock()
+	record, ok := cq.claimed[jobID]
+	delete(cq.claimed, jobID)
+	cq.mu.Unlock()
+
+	if ok && cq.store != nil {
+		if err := cq.store.RecordClaimEvent(ctx, jobID, record.ClaimedBy, "complete"); err != nil {
+			cq.logger.Warn("cluster_queue: failed to record claim event", "job_id", jobID, "error", err)
+		}
+	}
+
+	if ac, isAttempt := cq.Queue.(attemptCompleter); isAttempt {
+		return ac.CompleteAttempt(ctx, jobID, result, claimToken)
+	}
 	return cq.Queue.Complete(ctx, jobID, result)
 }
 
@@ -127,6 +217,7 @@ func (cq *ClusterQueue) Complete(ctx context.Context, jobID string, result any) 
 func (cq *ClusterQueue) Fail(ctx context.Context, jobID string, err error) error {
 	cq.mu.Lock()
 	record, ok := cq.claimed[jobID]
+	delete(cq.claimed, jobID)
 	cq.mu.Unlock()
 
 	if ok && cq.store != nil {
@@ -150,7 +241,9 @@ func (cq *ClusterQueue) reclaimJobUnlocked(ctx context.Context, jobID, reason st
 		}
 	}
 
-	// 2. Reset job state to PENDING in the store
+	// 2. Reset job state to PENDING in the store. This retires the attempt's
+	// claim_token (audit H5), so a worker still executing that attempt can no
+	// longer complete the job once the job is re-executed under a new one.
 	if cq.store != nil {
 		if err := cq.store.ResetToPending(ctx, jobID); err != nil {
 			cq.logger.Warn("cluster_queue: failed to reset job to pending",
@@ -166,6 +259,13 @@ func (cq *ClusterQueue) reclaimJobUnlocked(ctx context.Context, jobID, reason st
 	cq.mu.Lock()
 	delete(cq.claimed, jobID)
 	cq.mu.Unlock()
+
+	// 3b. The job is claimable again — wake local waiters so this node's
+	// workers claim it immediately instead of waiting out their idle poll
+	// timer (audit M2; the bus event below is the cluster-wide signal).
+	if notifier, isNotifier := cq.Queue.(claimableSignaler); isNotifier {
+		notifier.signalClaimable()
+	}
 
 	// 4. Publish bus event so subscribers across the cluster are notified
 	if cq.bus != nil {
@@ -186,6 +286,27 @@ func (cq *ClusterQueue) reclaimJobUnlocked(ctx context.Context, jobID, reason st
 	)
 
 	return nil
+}
+
+// WakeWaiter forwards wake-waiter registration to the wrapped Queue when it
+// supports wake notification (audit M2).
+//
+// ClusterQueue embeds Queue, and WakeNotifier is deliberately NOT part of the
+// Queue interface — so without this forwarder the worker's pool-side type
+// assertion (internal/worker/pool.go) silently FAILS in cluster mode and the
+// whole pool degrades to poll-only wake-up with no error anywhere. Declaring
+// the method here is what keeps cluster mode on the same event-driven path as
+// single-node mode.
+//
+// A wrapped Queue that does not support wake notification gets a no-op
+// unregister: workers then poll, which is the pre-existing behaviour for such
+// implementations, not a regression.
+func (cq *ClusterQueue) WakeWaiter(ch chan<- struct{}) (unregister func()) {
+	if wn, ok := cq.Queue.(wakeNotifier); ok {
+		return wn.WakeWaiter(ch)
+	}
+	cq.logger.Debug("cluster_queue: wrapped queue does not support wake notification; worker will poll")
+	return func() {}
 }
 
 // ReclaimJob reclaims a claimed job back to pending state due to node failure
@@ -295,6 +416,22 @@ func (cq *ClusterQueue) Stats(ctx context.Context) (*ClusterQueueStats, error) {
 		LocalNode:   cq.localNodeID,
 	}, nil
 }
+
+// Interface assertions for the optional surfaces ClusterQueue forwards. The
+// WakeNotifier one matters: the worker's pool-side assertion on a cluster queue
+// had no compile-time counterpart here, so dropping the forwarder would
+// silently degrade cluster mode to poll-only wake-up with nothing failing
+// (audit M2).
+//
+// _ Queue is deliberately NOT asserted: ClusterQueue.Stats returns
+// *ClusterQueueStats and shadows the embedded Queue.Stats, so ClusterQueue is
+// not, and was never, a drop-in Queue. Pre-existing, outside this change's
+// scope; recorded here so nobody re-adds the assertion and thinks it passes.
+var (
+	_ WakeNotifier     = (*ClusterQueue)(nil)
+	_ attemptCompleter = (*ClusterQueue)(nil)
+	_ AttemptCompleter = (*ClusterQueue)(nil)
+)
 
 // Close releases resources held by the cluster queue. It is safe to call
 // multiple times; only the first call closes the stop channel.

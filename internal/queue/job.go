@@ -57,8 +57,15 @@ type Job struct {
 	// flag at enqueue time. Claim ordering puts interactive jobs first
 	// (SHARED-CONVENTIONS §4.4). Evaluated ONCE at enqueue; never expires
 	// mid-life (audit R4 accepted semantics).
-	Interactive bool            `json:"interactive,omitempty"`
-	ClaimedBy   string          `json:"claimed_by,omitempty"`
+	Interactive bool   `json:"interactive,omitempty"`
+	ClaimedBy   string `json:"claimed_by,omitempty"`
+	// ClaimToken identifies the CURRENT execution attempt (audit H4). It is
+	// minted by every Claim and is the only thing that tells two completions
+	// of the same job ID apart: the attempt that still holds it wins, a
+	// superseded attempt is refused, and the same attempt retrying is
+	// idempotent. Empty on a job that was never claimed (or claimed before
+	// the token column existed).
+	ClaimToken  string          `json:"claim_token,omitempty"`
 	Result      json.RawMessage `json:"result,omitempty"`
 	Error       string          `json:"error,omitempty"`
 	CreatedAt   time.Time       `json:"created_at"`

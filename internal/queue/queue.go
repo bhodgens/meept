@@ -96,6 +96,13 @@ type PersistentQueue struct {
 	mu     sync.RWMutex
 	closed bool
 
+	// scanBoundWarnAt is the next time the Claim scan-bound Warn may be
+	// emitted (audit L1). Claim runs per worker per poll, so an unbounded
+	// Warn fires once per worker per poll — exactly while an operator is
+	// diagnosing the starvation it reports. Rate-limited, not latched: the
+	// signal must stay visible for as long as the condition persists.
+	scanBoundWarnAt time.Time
+
 	// Wake plumbing: Enqueue non-blockingly signals registered waiter
 	// channels so workers claim immediately instead of polling. The send
 	// loop snapshots the waiter set under wakeMu but sends OUTSIDE the
@@ -151,6 +158,68 @@ func (q *PersistentQueue) DB() *sql.DB {
 	return q.store.DB()
 }
 
+// signalClaimable fans a wake signal out to every registered waiter
+// (non-blocking). ONE method, called from EVERY transition that leaves a job
+// claimable (audit M2) — not just Enqueue. Previously only Enqueue woke
+// waiters, so a job returned to 'pending' by Retry/Requeue/
+// RecoverFromDeadLetter sat unnoticed until the worker's poll timer fired,
+// adding up to maxIdleBackoff (15s) of latency with no log line anywhere.
+//
+// Sends are dropped when a waiter channel is full: that worker is already
+// awake (or mid-job and will claim on its next loop), so dropping is
+// strictly better than blocking the writer. Sends happen OUTSIDE wakeMu
+// (mutexio: no channel ops under a mutex).
+//
+// Safe to call while holding q.mu: the send is non-blocking and the snapshot
+// lock (wakeMu) is separate, so it cannot extend the critical section by
+// anything the scheduler does not already account for.
+func (q *PersistentQueue) signalClaimable() {
+	q.wakeMu.Lock()
+	waiters := make([]chan<- struct{}, 0, len(q.wakeWaiters))
+	for ch := range q.wakeWaiters {
+		waiters = append(waiters, ch)
+	}
+	q.wakeMu.Unlock()
+	for _, ch := range waiters {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// signalClaimableAt schedules a wake fan-out for the moment a job parked until
+// notBefore BECOMES claimable (audit M2).
+//
+// Why this exists rather than a bare signalClaimable on the retry path: Retry
+// and Requeue park a job at a FUTURE next_retry_at (exponential backoff, or a
+// provider-wait resume time). Waking waiters at the moment of the transition is
+// useless for them — every woken worker re-polls, finds the claim gate closed,
+// and goes back to sleep, so the job is STILL discovered only on a poll timer
+// (up to maxIdleBackoff = 15s of dead time after the gate opens). The wake has
+// to land on the far side of the gate, which is what this does.
+//
+// The immediate signalClaimable at transition time is still emitted as well:
+// a worker that happens to be mid-idle may already be about to poll, and the
+// extra claim attempt costs nothing when the gate is closed.
+//
+// A pending timer outliving Close is harmless: Close empties the waiter set,
+// so a late fan-out signals nobody. Timer handles are deliberately not tracked
+// or cancelled — an unbounded registry would be its own leak, and the failure
+// mode is a no-op wake.
+func (q *PersistentQueue) signalClaimableAt(notBefore time.Time) {
+	delay := time.Until(notBefore)
+	if delay <= 0 {
+		// Already claimable; the caller's immediate signal covers it.
+		return
+	}
+	time.AfterFunc(delay, func() {
+		q.signalClaimable()
+		q.logger.Debug("Woke waiters for a claim gate that opened",
+			"not_before", notBefore.UTC().Format(time.RFC3339))
+	})
+}
+
 // Enqueue adds a job to the queue.
 func (q *PersistentQueue) Enqueue(ctx context.Context, job *Job) error {
 	q.mu.Lock()
@@ -164,21 +233,8 @@ func (q *PersistentQueue) Enqueue(ctx context.Context, job *Job) error {
 		return err
 	}
 
-	// Wake registered waiters (non-blocking; snapshot under wakeMu, send
-	// outside it per mutexio). Signals are dropped when a waiter channel
-	// is full: a worker mid-job claims on its next loop anyway.
-	q.wakeMu.Lock()
-	waiters := make([]chan<- struct{}, 0, len(q.wakeWaiters))
-	for ch := range q.wakeWaiters {
-		waiters = append(waiters, ch)
-	}
-	q.wakeMu.Unlock()
-	for _, ch := range waiters {
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
-	}
+	// A new job is claimable — wake registered waiters.
+	q.signalClaimable()
 
 	// Publish event
 	q.publishEvent("queue.enqueue", map[string]any{
@@ -298,9 +354,9 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 			if scanned >= maxScanRows {
 				// Warn, not Debug: hitting the bound means claimable work may
 				// exist past the scan window (bounded starvation tradeoff) —
-				// operators should see it.
-				q.logger.Warn("Claim scan hit row bound with no claimable job",
-					"scanned", scanned, "bound", maxScanRows)
+				// operators should see it. Rate-limited (audit L1) because
+				// this runs once per worker per poll.
+				q.warnScanBound(scanned, maxScanRows)
 			}
 			break
 		}
@@ -351,7 +407,29 @@ func (q *PersistentQueue) MarkProcessing(ctx context.Context, jobID string) erro
 }
 
 // Complete marks a job as completed with a result.
+//
+// LEGACY, TOKEN-LESS entry point: it completes "whatever attempt currently
+// holds the job" (the pre-H4 contract), which the bus/RPC/HTTP surfaces depend
+// on. Workers hold a claim token and use CompleteAttempt.
 func (q *PersistentQueue) Complete(ctx context.Context, jobID string, result any) error {
+	return q.CompleteAttempt(ctx, jobID, result, "")
+}
+
+// CompleteAttempt marks the job completed on behalf of the execution attempt
+// identified by claimToken (audit H4) — the token the claim returned on
+// Job.ClaimToken.
+//
+// Publication rule, which is the whole point of the disposition:
+//
+//   - applied    → publish queue.job.completed (a fresh completion).
+//   - idempotent → return nil WITHOUT publishing. The identical request
+//     arriving twice from the same attempt is a success the caller can act on;
+//     republishing would double-count the job downstream (task finalization,
+//     memory sync). This is what a retrying client gets instead of a 409.
+//   - superseded (ErrJobNotClaimable) → return the error, publish nothing.
+//     The job moved on (requeued, reclaimed, re-claimed), so the presented
+//     token belongs to an attempt nobody is executing any more.
+func (q *PersistentQueue) CompleteAttempt(ctx context.Context, jobID string, result any, claimToken string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -359,12 +437,16 @@ func (q *PersistentQueue) Complete(ctx context.Context, jobID string, result any
 		return fmt.Errorf("queue is closed")
 	}
 
-	if err := q.store.Complete(jobID, result); err != nil {
+	disposition, err := q.store.CompleteAttempt(jobID, result, claimToken)
+	if err != nil {
 		// Stale/duplicate completion (job requeued or already completed):
 		// do NOT publish queue.job.completed — subscribers (the tactical
 		// scheduler) must not process attempt-1 results as fresh ones. The
 		// worker logs the error; that is the acceptable outcome.
 		return err
+	}
+	if !disposition.CompletionIsFresh() {
+		return nil
 	}
 
 	q.publishEvent("queue.job.completed", map[string]any{
@@ -409,6 +491,13 @@ func (q *PersistentQueue) Retry(ctx context.Context, jobID string) error {
 		return err
 	}
 
+	// The job is back to pending but parked at a future next_retry_at (the
+	// retry backoff). Wake now for a worker that is about to poll anyway, and
+	// wake AGAIN when the gate opens — the second one is the one that removes
+	// the poll-timer discovery latency (audit M2).
+	q.signalClaimable()
+	q.signalClaimableAt(q.store.PendingGate(jobID))
+
 	q.publishEvent("queue.job.retry", map[string]any{
 		KeyJobID: jobID,
 	})
@@ -436,6 +525,12 @@ func (q *PersistentQueue) Requeue(ctx context.Context, jobID string, notBefore t
 	if err := q.store.Requeue(jobID, notBefore); err != nil {
 		return err
 	}
+
+	// Claimable again once notBefore arrives (the next_retry_at gate) — wake
+	// now for a worker already polling, and again when the gate opens, which is
+	// what removes the poll-timer discovery latency (audit M2).
+	q.signalClaimable()
+	q.signalClaimableAt(notBefore)
 
 	q.publishEvent("queue.job.requeue", map[string]any{
 		KeyJobID:     jobID,
@@ -491,6 +586,10 @@ func (q *PersistentQueue) RecoverFromDeadLetter(ctx context.Context, jobID strin
 		return nil, err
 	}
 
+	// A recovered job is pending and immediately claimable — wake waiters
+	// (audit M2: this transition had no wake signal at all).
+	q.signalClaimable()
+
 	q.publishEvent("queue.job.recovered", map[string]any{
 		KeyJobID: jobID,
 	})
@@ -526,7 +625,17 @@ func (q *PersistentQueue) ResetStaleClaimsAtStartup(ctx context.Context, claimsB
 		return 0, fmt.Errorf("queue is closed")
 	}
 
-	return q.store.ResetStaleClaimsAtStartup(ctx, claimsBefore)
+	reset, err := q.store.ResetStaleClaimsAtStartup(ctx, claimsBefore)
+	if err != nil {
+		return reset, err
+	}
+	// A live path (daemon boot), and every reset job is claimable again —
+	// wake waiters so the pool starts on the work instead of after its first
+	// idle poll (audit M2).
+	if reset > 0 {
+		q.signalClaimable()
+	}
+	return reset, nil
 }
 
 // Close closes the queue.
@@ -545,6 +654,31 @@ func (q *PersistentQueue) Close() error {
 	q.wakeWaiters = make(map[chan<- struct{}]struct{})
 	q.wakeMu.Unlock()
 	return q.store.Close() //nolint:mutexio // one-time teardown guarded by closed flag
+}
+
+// scanBoundWarnInterval bounds how often the Claim scan-bound Warn may fire
+// (audit L1). Long enough that a starvation episode produces a readable handful
+// of lines instead of one per worker per poll; short enough that an operator
+// watching a still-starved queue keeps seeing it move.
+const scanBoundWarnInterval = 30 * time.Second
+
+// warnScanBound emits the scan-bound Warn at most once per
+// scanBoundWarnInterval, and logs every suppressed hit at Debug so the flood
+// stays diagnosable in a debug-level capture without polluting Warn. Callers
+// hold q.mu (the whole Claim does), which is also what serializes the throttle:
+// no extra lock, and no I/O outside the existing critical section.
+func (q *PersistentQueue) warnScanBound(scanned, bound int) {
+	now := time.Now()
+	if now.Before(q.scanBoundWarnAt) {
+		q.logger.Debug("Claim scan hit row bound (suppressed)",
+			"scanned", scanned, "bound", bound,
+			"next_warn_after", q.scanBoundWarnAt)
+		return
+	}
+	q.scanBoundWarnAt = now.Add(scanBoundWarnInterval)
+	q.logger.Warn("Claim scan hit row bound with no claimable job",
+		"scanned", scanned, "bound", bound,
+		"warn_throttled_to", scanBoundWarnInterval)
 }
 
 // WakeNotifier is an optional interface a Queue may implement to let
@@ -592,6 +726,14 @@ func (q *PersistentQueue) publishEvent(topic string, data map[string]any) {
 
 // Ensure PersistentQueue implements Queue interface.
 var _ Queue = (*PersistentQueue)(nil)
+
+// PersistentQueue is the reference implementation of both optional
+// attempt-scoped surfaces: the worker probes for AttemptCompleter to present a
+// claim token, and ClusterQueue forwards WakeNotifier to it.
+var (
+	_ AttemptCompleter = (*PersistentQueue)(nil)
+	_ WakeNotifier     = (*PersistentQueue)(nil)
+)
 
 // Handler handles queue-related requests on the message bus.
 type Handler struct {
