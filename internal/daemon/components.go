@@ -3021,6 +3021,53 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				return 0
 			})
 
+			// Quota-health producer (agent-routing tree leaf 02 deferred
+			// follow-up): feeds TacticalScheduler.selectAgent's advisory
+			// routing.warning with real Resolver state. Agent→model mirrors
+			// the context-window provider above (explicit spec.Model wins,
+			// then the agent's own alias via modelRefForAgent's precedence,
+			// else the default model ref); the adapter itself is nil-safe so
+			// an absent resolver or unknown agent leaves routing untouched.
+			tacticalScheduler.SetAgentHealthSource(agent.NewAgentHealthAdapter(
+				func(agentID string) (agent.AgentModelBinding, bool) {
+					resolver := c.LLMResolver
+					if resolver == nil {
+						return agent.AgentModelBinding{}, false
+					}
+					ref := ""
+					alias := ""
+					if c.AgentRegistry != nil {
+						if spec, ok := c.AgentRegistry.GetSpec(agentID); ok {
+							ref = spec.Model
+						}
+					}
+					if ref == "" && agentID != "" && resolver.HasAlias(agentID) {
+						// No explicit model on the spec: the registry's
+						// modelRefForAgent lets the agent ride a same-named
+						// alias.
+						ref = agentID
+						alias = agentID
+					}
+					if ref == "" && c.ModelsConfig != nil {
+						ref = c.ModelsConfig.Model // default model ref fallback
+					}
+					if ref == "" {
+						return agent.AgentModelBinding{}, false
+					}
+					mc := resolver.ResolveRef(ref)
+					if mc == nil {
+						return agent.AgentModelBinding{}, false
+					}
+					// An explicit spec.Model may itself name an alias — then
+					// its rotation/cooldown health is queryable too.
+					if alias == "" && resolver.HasAlias(ref) {
+						alias = ref
+					}
+					return agent.AgentModelBinding{Config: mc, Alias: alias}, true
+				},
+				c.LLMResolver,
+			))
+
 			// Create bus pair orchestrator for channel-based agent pairing (Option C)
 			busPairOrchestrator := agent.NewPairOrchestrator(agent.PairOrchestratorDeps{
 				Registry: c.AgentRegistry,
