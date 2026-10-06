@@ -137,6 +137,13 @@ go test -race ./internal/llm/ -run 'Quota' -count=1
 - Agent state transitions: running -> quota_wait -> blocked (at 24h), with
   Clear returning to running/idle.
 - Quota blocks are in-memory only; a platform restart re-probes providers.
+- A quota-deferred step job is requeued with `Store.Requeue` (state pending,
+  `next_retry_at` gate at the reset time, retry_count NOT consumed). A job
+  row can never be re-completed out of a non-claimable state:
+  `Store.Complete` requires `claimed`/`processing` and returns
+  `ErrJobNotClaimable` otherwise, so a stale completion event for attempt 1
+  cannot overwrite attempt 2's outcome. `internal/queue.Retry` (short-cycle
+  rate limits) caps exponential backoff at 30s (`retryBackoffCap`).
 
 ## Known open gaps (audited 2026-08-31)
 

@@ -71,6 +71,13 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
   only a second guard trip (or an errored retry) ships the canned
   line. The handler choke point (`handleChatRequest`) stays
   single-shot — it cannot continue a loop.
+- **Completion events are deduplicated by queue-job state.** Jobs keep
+  the same ID across retry/requeue; `OnJobCompleted` drops a completion
+  whose queue job is no longer `claimed`/`processing`/`completed`
+  (`completed` is fresh — the queue sets it before publishing the event).
+  Queue-side, `Store.Complete` rejects non-claimable states with
+  `ErrJobNotClaimable` and `PersistentQueue.Complete` does not publish the
+  event for them; the HTTP/RPC surface maps that error to 409.
 - **Quota failures surface to the user.** Terminal
   `*llm.QuotaResetError` in a step job publishes the existing
   `agent.quota_wait` event and appends a user-language quota sentence

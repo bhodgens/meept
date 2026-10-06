@@ -214,7 +214,8 @@ before reading source.
 
 The chat path is the user's only window into the daemon. Full contracts (async turns,
 errored steps, per-session working dirs, no global active-project fallback,
-machine-shaped-output guard + one bounded loop-seam rewrite retry) live in `internal/agent/AGENTS.md`. Short form: turns are
+machine-shaped-output guard + one bounded loop-seam rewrite retry, completion
+events deduplicated by queue-job state) live in `internal/agent/AGENTS.md`. Short form: turns are
 async, errored steps never pass review, and projects bind PER SESSION with no global
 fallback. `session_id` and `conversation_id` are distinct; new code handles both.
 

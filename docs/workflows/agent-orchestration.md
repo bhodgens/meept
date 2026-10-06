@@ -147,6 +147,59 @@ When `HandoffUseAmendment` is enabled and an `AmendmentSubmitter` is configured,
 - Wiring: `internal/agent/orchestrator.go` — subscribes to `orchestrator.handoff`
 - Registration: `internal/daemon/components.go` — registers tool with bus and agent existence check
 
+## Tactical Routing Surfaces (2026-10)
+
+The tactical scheduler (`internal/agent/tactical.go`) owns step→agent
+routing after a plan is decomposed. Several observability surfaces were
+added in the 2026-10-04 agent-routing tree (docs/plans/20261004-agent-routing/):
+
+### Routing telemetry
+
+`RoutingTelemetry` (constructed with the scheduler when a bus is wired)
+publishes fire-and-forget bus events; a telemetry failure never affects
+routing.
+
+| topic | payload | when |
+|-------|---------|------|
+| `routing.decision` | `step_id, agent_id, source` | every selection: `hint_table` (tool-hint table hit), `chat_fallback` (unrouted hint), `explicit` (strategist-assigned `step.AgentID`) |
+| `routing.hint_miss` | `step_id, tool_hint, resolved_to: "chat"` | a hint with no entry in `config.ToolHintAgent` |
+| `routing.handoff_outcome` | `task_id, from_step_id, to_agent_id, accepted` | handoff accepted, rate-limit-rejected, or amendment-rejected |
+| `routing.telemetry` | `step_id, task_id, suggested_next_hint` | a step result carried an advisory successor hint |
+
+The topics currently have no in-tree subscriber — they exist for offline
+analysis and a future metrics aggregator. `docs/generated/bus-topology.md`
+tracks them (regenerate with `make graphs` if you add topics; note the
+generator ignores wrapper methods named exactly `publish`).
+
+### Advisory successor hints
+
+A step's final report may carry a `suggested_next_hint` string. The
+daemon's step-job envelope projects it (trimmed, rune-safe truncated to
+64 chars) and `OnJobCompleted` persists it on the `TaskStep` and emits
+`routing.telemetry`. It is advisory only — nothing routes on it; the
+sanctioned next-agent channel remains `request_handoff`.
+
+### Quota-aware warning (no re-route)
+
+`selectAgent` keeps the tool-hint table authoritative. When the wired
+health source reports the selected agent's endpoint parked/cooling
+(`AgentHealthAdapter` over `llm.Resolver.EndpointBlocked` /
+`HasHealthyModels`, wired in components.go), the scheduler publishes
+`routing.warning` (`reason: "endpoint_parked_or_cooling"`) and keeps the
+route. Routing decisions never change based on health — the warning only
+explains why a step may stall.
+
+### Stale-completion guard
+
+Jobs keep the same ID across retry/requeue, so a late `queue.job.completed`
+event for an earlier attempt is possible. `OnJobCompleted` drops
+completions whose queue job is no longer `claimed`/`processing`/`completed`
+(pending/failed = requeued or failed for another attempt). `completed` is
+fresh, not stale: the queue sets it BEFORE publishing the event, so every
+legitimate completion observes it. The queue-side `Store.Complete` guard
+(`WHERE state IN ('claimed','processing')` + `ErrJobNotClaimable`) backs
+this up; the HTTP/RPC surface maps that error to 409 Conflict.
+
 ## Configuration
 
 ```toml

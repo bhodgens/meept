@@ -71,6 +71,28 @@ Constant interactivity can starve background work — acceptable per D11's
 user-first intent; scheduler/system jobs remain fairness-bounded by their
 own retry/due mechanics.
 
+### Claim Mechanics (fast path, slow path, paging)
+
+`Claim` has two paths:
+
+- **fast path** — when no task-cancellation filter is installed, a single
+  atomic transaction (`Store.ClaimNextForAgent`) selects and claims the
+  next job. Production always installs the interrupt-aware cancellation
+  callback, so this path effectively only runs in tests.
+- **slow path** — the production path. Because cancellation must be
+  checked per candidate, `Claim` pages through pending jobs in
+  claim-order windows of 50 (keyset pagination via
+  `Store.ListByStateAfter`, hard bound 500 rows per claim attempt) and
+  skips future-`due_at`, future-`next_retry_at`, other-agent, cancelled,
+  and caps-mismatched jobs. Keyset pagination is why a wall of parked
+  pending jobs (e.g. quota-deferred steps with a future `next_retry_at`)
+  cannot starve claimable work behind the first window; hitting the
+  500-row bound logs a Warn because claimable work may exist past it.
+
+A job with `agent_id` set is a soft preference (its pinned workers sort it
+first), not exclusivity — see `ClaimNextForAgent` in
+`internal/queue/store.go`.
+
 ### Retry Logic Integration
 
 Jobs benefit from the multi-layer retry system:

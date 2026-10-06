@@ -38,7 +38,11 @@ meept uses a worker pool to dequeue and process jobs from the internal job queue
 ```
 
 **key properties:**
-- workers poll the queue with exponential backoff (1s to 15s when idle)
+- workers claim jobs either on their poll timer (exponential backoff, 1s to
+  15s when idle) or immediately on a wake signal: queues implementing
+  `queue.WakeNotifier` signal each worker's registered channel on every
+  `Enqueue` (non-blocking, signals drop when the worker is mid-job), so the
+  typical step-to-step hop pays no poll latency
 - each worker can be tagged with an `agent_id` for agent-specific job routing
 - the pool supports dynamic scaling (add/remove workers at runtime)
 - a monitoring goroutine publishes pool status every 30 seconds
@@ -93,9 +97,17 @@ each worker runs a polling loop that:
 
 ### agent-specific routing
 
-workers are tagged with an `AgentID` field. when a job has `agent_id` set in its payload, only a worker with a matching `AgentID` can claim it. if `agent_id` is empty, any worker with matching capabilities can claim the job.
+workers are tagged with an `AgentID` field. `job.agent_id` is a **soft
+preference, not exclusivity**: the claiming agent's own jobs sort first
+(`ORDER BY ... CASE WHEN agent_id = ? THEN 0 ELSE 1 END`), but any worker
+whose `AgentID` is empty has no agent filter at all and may claim pinned
+jobs. this is deliberate — pool workers are generic executors; the agent
+persona (model, tools, prompt) rides the job payload and is resolved by
+the job processor (`internal/worker/pool.go` starts every worker with an
+empty `agentID`).
 
-job priority order: targeted agent match > priority > creation time.
+job priority order: interactive > targeted agent match > priority >
+creation time (`id ASC` as the deterministic final tiebreak).
 
 ### idle backoff
 
@@ -105,6 +117,22 @@ when no jobs are available, workers use exponential backoff:
 - backoff resets to 1 second when work is found
 
 on errors: backoff doubles up to 30 seconds.
+
+### wake-up (event-driven claim)
+
+when the queue implements `queue.WakeNotifier` (the production
+`PersistentQueue` does), `Pool.AddWorker` registers a buffered(1) channel
+per worker. `Enqueue` sends a non-blocking signal to every registered
+channel after the insert commits; the worker's sleep `select` wakes on it
+and claims immediately. properties:
+
+- a full channel drops the signal (the worker is mid-job and will claim on
+  its next loop anyway)
+- a nil channel (queue without wake support, or legacy config) blocks
+  forever in the select — byte-identical to the old poll-only behavior
+- a wake does NOT reset idle backoff growth; only found work does
+- `RemoveWorker`/`Stop` unregister the channel (no waiter leak; `Stop`
+  cleans up even when the pool was never started)
 
 ### state machine
 

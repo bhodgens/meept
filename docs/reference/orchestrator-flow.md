@@ -64,7 +64,7 @@ if delivered == 0 {
 
 | Responsibility | Details |
 |---------------|---------|
-| **Subscribes to 4 topics** | `orchestrator.plan`, `orchestrator.schedule`, `queue.job.completed`, `queue.job.failed` |
+| **Subscribes to 22 topics** | plan/schedule/handoff (`orchestrator.plan`, `orchestrator.replan`, `orchestrator.schedule`, `orchestrator.handoff`), job outcomes (`queue.job.completed`, `queue.job.failed`), amendments, pair/collaboration/team sessions, `tool.execution.complete`, `llm.context_compressed` — full table in `Orchestrator.Start` (internal/agent/orchestrator.go) |
 | **Delegates plan requests** | Calls `StrategicPlanner.Plan()` |
 | **Delegates schedule requests** | Calls `TacticalScheduler.ScheduleReadySteps()` |
 | **Handles job completion/failure** | Routes to TacticalScheduler callbacks |
