@@ -244,7 +244,11 @@ remains dev-workflow-only.
 Full rules live in `internal/comm/AGENTS.md`. Short form: only `chat_message` topics
 produce `type: "chat_message"` (everything else is `agent_progress`); `chat.response`
 is never WS-relayed; typed `bus.Topic[T]` for stable payloads, raw `Publish` for
-multi-shape; a bus proxy registration needs a live responder on both sides.
+multi-shape; a bus proxy registration needs a live responder on both sides. The
+per-connection session filter is `(channel, session)`-scoped — a chat
+unsubscribe must not silence progress/turn-terminal for the same session, an
+unsubscribe records a suppression rather than deleting the grant, and a
+session-less event broadcasts to every connection.
 
 ### Quota errors are not failures (quota-reset-resilience)
 
@@ -252,8 +256,9 @@ Full invariants live in `internal/llm/AGENTS.md` (quota blocks, endpoint cooldow
 refusals, alias resolution, universal parking, slot gate). Short form: a
 `*llm.QuotaResetError` is never an alias failure and never short-retried; check
 `ErrAllModelsQuotaBlocked` / `ErrAllEndpointsBlocked` with `errors.Is`. An
-empty/whitespace completion from a provider IS an alias failure: the client
-retries it immediately within the short budget, then the `ErrEmptyResponse`
+empty/whitespace completion from ANY provider IS an alias failure — every
+client classifies it (openai, anthropic, codex): the client retries it
+immediately within the short budget, then the bare `ErrEmptyResponse`
 sentinel rotates to the fallback (never surfaced as a completed turn).
 
 ### Opt-in defaults and evolver wiring
@@ -459,7 +464,7 @@ All config uses **JSON5** format. Templates in `config/`, copied on
 
 - **Main**: `~/.meept/meept.json5`
 - **Models**: `config/models.json5` (capability-based resolution)
-- **MCP servers**: `~/.meept/mcp_servers.json5` (22 preconfigured, 7 enabled
+- **MCP servers**: `~/.meept/mcp_servers.json5` (22 preconfigured, 8 enabled
   by default — incl. `obscura` browser MCP, enabled; `excel` xlsx fallback,
   disabled). Every stdio entry carries `install_hint`; `meept doctor`
   surfaces it and `meept doctor --fix --install-missing` runs hints

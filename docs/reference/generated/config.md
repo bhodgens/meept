@@ -232,6 +232,7 @@ Package config provides configuration loading and validation for meept.
 - [type OAuthProviderEntry](<#OAuthProviderEntry>)
 - [type OrchestratorConfig](<#OrchestratorConfig>)
 - [type OutputFiltersConfig](<#OutputFiltersConfig>)
+  - [func \(c \*OutputFiltersConfig\) Validate\(\) error](<#OutputFiltersConfig.Validate>)
 - [type PTYConfig](<#PTYConfig>)
 - [type PacingConfig](<#PacingConfig>)
 - [type ParakeetConfig](<#ParakeetConfig>)
@@ -3359,8 +3360,25 @@ OutputFiltersConfig holds daemon\-level output\-filter defaults \(output\-filter
 	    // LanguageFilter docs); CJK/other-script languages need no list.
 	    // The literal filter name "language_en" in Filters stays a compat
 	    // alias: it resolves to THIS code, not hardcoded English.
+	    //
+	    // Spelled loosely on purpose: the code is normalized before use, so
+	    // "EN", "en-US", and "fr" all work (see
+	    // validator.NormalizeLanguageCode). A code detection can never name
+	    // is a startup error, not a filter that silently rejects everything —
+	    // see Validate.
 	    ExpectedLanguage string `json:"expected_language" toml:"expected_language"`
 	}
+
+<a name="OutputFiltersConfig.Validate"></a>
+### func \(\*OutputFiltersConfig\) Validate
+
+	func (c *OutputFiltersConfig) Validate() error
+
+Validate checks \[daemon.output\_filters\]. expected\_language is fail\-fast \(bughunt wave M5\): an unknown code used to pass through verbatim, match no word table, and reject EVERY prose output — including correct output — burning filter retries to rejected\_exhausted on the chat path, signalled only by a lang= reason string. An unknown code now fails at config load, where the mistake is visible and costs nothing.
+
+A code is accepted when detection can name it without user data \(validator.KnownLanguageCode\) or when the operator shipped the word table that makes it detectable \($MEEPT\_HOME/validator/lang/\<code\>.txt\). Both tests use the validator's normalizer, so the accepted set is exactly the set of codes the filter can match — never a second, drifting list.
+
+Empty keeps the frozen default and is always valid.
 
 <a name="PTYConfig"></a>
 ## type PTYConfig

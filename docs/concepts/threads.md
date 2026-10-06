@@ -131,15 +131,46 @@ CREATE INDEX idx_session_threads_session ON session_threads(session_id);
 CREATE INDEX idx_session_threads_active ON session_threads(session_id, is_active);
 ```
 
+### Thread id shape and the resolve fail-safe contract
+
+A thread's conversation id is the session's conversation id with the thread id
+appended: `<base conv id>-thread-<slug>-<hex>`. That composite id is NOT a key
+the session store indexes, so anything that has to get from such an id back to
+its owning session goes through
+`session.ResolveThreadConversationID`
+(`internal/session/thread_resolve.go`).
+
+**The unwrap is fail-safe, and that is load-bearing.** It runs only after two
+DIRECT lookups (by conversation id, then by session primary id) have missed,
+and it trims at the LAST `-thread-` before re-looking the base. So:
+
+- An id that merely CONTAINS `-thread-` can never shadow a real session — the
+  direct lookups already had their chance.
+- A false trigger (a base that is not a real conversation id) resolves to
+  `nil` — a clean miss, **never** a wrong-session binding.
+- The residual cost is a LOST binding, not a mis-binding: callers degrade the
+  way they do for any unknown id (e.g. a step job with no session working dir).
+
+**Mint paths must slug-sanitize.** Because the unwrap keys on `-thread-`, every
+thread-id mint site runs the topic label through `session.ThreadSlug` first, so
+the separator — plus `.`, `/` and every other non-alphanumeric rune — cannot
+appear in a thread id. Mint sites: `session.CreateThreadInSession`,
+`services.CreateThread` (`internal/services/thread_service.go`), and
+`TopicDetector.GenerateThreadID` (`internal/agent/topic_detector.go`). A label
+reaching any of those unsanitized is a latent lost-binding even though it cannot
+mis-bind. Display code must render `thread.TopicLabel`, never the slug — the
+slug is lossy by design.
+
 ### Key Files
 
 | File | Purpose |
 |------|---------|
 | `internal/session/thread.go` | Thread struct, ThreadRouter |
 | `internal/session/thread_store.go` | Thread CRUD interface |
+| `internal/session/thread_resolve.go` | Thread-id → owning-session unwrap, `ThreadSlug` |
 | `internal/session/thread_summary.go` | Cross-thread summary injection |
 | `internal/session/thread_migration.go` | Schema migration |
-| `internal/agent/topic_detector.go` | Keyword-based topic detection |
+| `internal/agent/topic_detector.go` | Keyword-based topic detection, thread-id minting |
 | `cmd/meept/thread.go` | CLI commands |
 | `internal/tui/thread_indicator.go` | TUI thread display |
 

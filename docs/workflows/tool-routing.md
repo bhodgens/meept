@@ -61,7 +61,8 @@ command you would rather run yourself.
 
 ### Default Enabled Set
 
-Only the zero-config servers are enabled by default (no API keys or external services required):
+The catalog holds 22 entries; **8 ship enabled by default**. Six are the
+zero-config servers (no API keys or external services required):
 
 | server | runtime | category | purpose |
 |--------|---------|----------|---------|
@@ -72,7 +73,16 @@ Only the zero-config servers are enabled by default (no API keys or external ser
 | `git` | uvx | vcs | local git repo operations (log, diff, blame) |
 | `time` | uvx | data | timezone-aware time and conversion |
 
-The remaining 15 servers ship `enabled: false` because they need API keys, OAuth credentials, external platform instances, or a natively-installed binary. Enable only the ones you want.
+Two more default to enabled because they run locally with no credential:
+
+| server | runtime | category | purpose |
+|--------|---------|----------|---------|
+| `searxng` | uvx | search | SearXNG metasearch over stdio MCP |
+| `obscura` | native binary | browser | Obscura headless browser engine (see below) |
+
+The remaining 14 servers ship `enabled: false` because they need API keys,
+OAuth credentials, external platform instances, or a natively-installed binary.
+Enable only the ones you want.
 
 The `cua-driver` entry (category `automation`) adds background desktop computer-use via a native binary — install commands, enable steps, and its LOW/HIGH risk-rule table are documented under [Cua-Driver Computer-Use Integration](external-integrations.md#cua-driver-computer-use-integration).
 

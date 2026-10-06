@@ -147,6 +147,10 @@ Package agent provides the agent loop and related components.
 - [type AgentEvent](<#AgentEvent>)
 - [type AgentEventData](<#AgentEventData>)
 - [type AgentEventType](<#AgentEventType>)
+- [type AgentHealthAdapter](<#AgentHealthAdapter>)
+  - [func NewAgentHealthAdapter\(lookup AgentModelLookup, resolver HealthResolver\) \*AgentHealthAdapter](<#NewAgentHealthAdapter>)
+  - [func \(a \*AgentHealthAdapter\) AgentParkedOrCooling\(agentID string\) bool](<#AgentHealthAdapter.AgentParkedOrCooling>)
+- [type AgentHealthSource](<#AgentHealthSource>)
 - [type AgentIDSource](<#AgentIDSource>)
 - [type AgentLifecyclePayload](<#AgentLifecyclePayload>)
 - [type AgentLoop](<#AgentLoop>)
@@ -246,6 +250,8 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) TurnParker\(\) \*TurnParker](<#AgentLoop.TurnParker>)
 - [type AgentMemoryConfig](<#AgentMemoryConfig>)
 - [type AgentMessage](<#AgentMessage>)
+- [type AgentModelBinding](<#AgentModelBinding>)
+- [type AgentModelLookup](<#AgentModelLookup>)
 - [type AgentRegistry](<#AgentRegistry>)
   - [func NewAgentRegistry\(cfg RegistryConfig\) \*AgentRegistry](<#NewAgentRegistry>)
   - [func \(r \*AgentRegistry\) CapabilitiesMap\(\) \*CapabilitiesMap](<#AgentRegistry.CapabilitiesMap>)
@@ -815,6 +821,7 @@ Package agent provides the agent loop and related components.
 - [type HallucinationResult](<#HallucinationResult>)
 - [type HallucinationSensitivity](<#HallucinationSensitivity>)
 - [type HandoffRequest](<#HandoffRequest>)
+- [type HealthResolver](<#HealthResolver>)
 - [type HookBatchExecutor](<#HookBatchExecutor>)
   - [func NewHookBatchExecutor\(\) \*HookBatchExecutor](<#NewHookBatchExecutor>)
   - [func \(e \*HookBatchExecutor\) AddHook\(h \*HTTPHook\)](<#HookBatchExecutor.AddHook>)
@@ -1364,6 +1371,11 @@ Package agent provides the agent loop and related components.
   - [func \(rt \*RoutingTable\) ActorFor\(intent string\) string](<#RoutingTable.ActorFor>)
   - [func \(rt \*RoutingTable\) ReviewerFor\(intent string\) string](<#RoutingTable.ReviewerFor>)
   - [func \(rt \*RoutingTable\) SetRoute\(intent, actorID, reviewerID string\)](<#RoutingTable.SetRoute>)
+- [type RoutingTelemetry](<#RoutingTelemetry>)
+  - [func NewRoutingTelemetry\(bus \*bus.MessageBus, logger \*slog.Logger\) \*RoutingTelemetry](<#NewRoutingTelemetry>)
+  - [func \(rt \*RoutingTelemetry\) RecordHandoff\(taskID, fromStepID, toAgentID string, accepted bool\)](<#RoutingTelemetry.RecordHandoff>)
+  - [func \(rt \*RoutingTelemetry\) RecordHintMiss\(stepID, toolHint string\)](<#RoutingTelemetry.RecordHintMiss>)
+  - [func \(rt \*RoutingTelemetry\) RecordHintRoute\(stepID, agentID, source string\)](<#RoutingTelemetry.RecordHintRoute>)
 - [type RoutingValidation](<#RoutingValidation>)
 - [type RunRecoverer](<#RunRecoverer>)
   - [func NewRunRecoverer\(basePath string, checkpointInterval int\) \(\*RunRecoverer, error\)](<#NewRunRecoverer>)
@@ -1561,6 +1573,7 @@ Package agent provides the agent loop and related components.
   - [func \(ts \*TacticalScheduler\) OnJobFailed\(ctx context.Context, jobID, jobErr string\) error](<#TacticalScheduler.OnJobFailed>)
   - [func \(ts \*TacticalScheduler\) ScheduleReadySteps\(ctx context.Context, taskID string\) error](<#TacticalScheduler.ScheduleReadySteps>)
   - [func \(ts \*TacticalScheduler\) SelectAgentForHint\(toolHint string\) string](<#TacticalScheduler.SelectAgentForHint>)
+  - [func \(ts \*TacticalScheduler\) SetAgentHealthSource\(src AgentHealthSource\)](<#TacticalScheduler.SetAgentHealthSource>)
   - [func \(ts \*TacticalScheduler\) SetBurstDetector\(det \*metrics.BurstDetector\)](<#TacticalScheduler.SetBurstDetector>)
   - [func \(ts \*TacticalScheduler\) SetContextWindowProvider\(fn func\(agentID string\) int\)](<#TacticalScheduler.SetContextWindowProvider>)
   - [func \(ts \*TacticalScheduler\) SetFilterChain\(fc \*validator.FilterChain\)](<#TacticalScheduler.SetFilterChain>)
@@ -3332,6 +3345,42 @@ AgentEventType identifies the type of agent lifecycle event.
 	    AgentEventChatClientDisconnected AgentEventType = "chat_client_disconnected"
 	)
 
+<a name="AgentHealthAdapter"></a>
+## type AgentHealthAdapter
+
+AgentHealthAdapter is the producer for AgentHealthSource \(agent\-routing tree leaf 02 deferred follow\-up\): it answers TacticalScheduler's AgentParkedOrCooling\(agentID\) probe from the quota/endpoint health state that already lives on the llm.Resolver, which is per\-MODEL \(EndpointBlocked\) and per\-ALIAS \(HasHealthyModels\), not per\-agent — this adapter bridges the agentID → model\-config gap via an AgentModelLookup.
+
+Semantics: unknown agent → false \(never parked\); unresolvable model or nil resolver → false \(conservative: routing proceeds unchanged\); endpoint blocked → true; alias with no healthy models → true. An agent with no dedicated alias is judged on endpoint state only — "" never queries HasHealthyModels, so a default\-model agent is not spuriously parked by an unrelated alias name.
+
+	type AgentHealthAdapter struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewAgentHealthAdapter"></a>
+### func NewAgentHealthAdapter
+
+	func NewAgentHealthAdapter(lookup AgentModelLookup, resolver HealthResolver) *AgentHealthAdapter
+
+NewAgentHealthAdapter builds the adapter. Both arguments are used as\-is; nil\-safety is enforced per\-call, so a nil resolver \(or nil adapter\) simply reports false and leaves tactical routing on the legacy path.
+
+<a name="AgentHealthAdapter.AgentParkedOrCooling"></a>
+### func \(\*AgentHealthAdapter\) AgentParkedOrCooling
+
+	func (a *AgentHealthAdapter) AgentParkedOrCooling(agentID string) bool
+
+AgentParkedOrCooling implements AgentHealthSource.
+
+<a name="AgentHealthSource"></a>
+## type AgentHealthSource
+
+AgentHealthSource reports whether an agent's provider endpoint is currently parked or in cooldown \(agent\-routing tree leaf 02\). Producer wiring is OPTIONAL: an unwired \(nil\) source keeps selectAgent byte\-identical to the legacy routing path.
+
+This leaf defines only the consumer side. The park/cooldown state itself lives in internal/llm \(Resolver.endpointBlocks, alias cooldowns, the agent TurnParker\); no per\-agent producer exists there today — see the leaf\-02 report for wiring options.
+
+	type AgentHealthSource interface {
+	    AgentParkedOrCooling(agentID string) bool
+	}
+
 <a name="AgentIDSource"></a>
 ## type AgentIDSource
 
@@ -4050,6 +4099,23 @@ AgentMessage represents an incoming message to the agent.
 	    Source         string `json:"source"`
 	}
 
+<a name="AgentModelBinding"></a>
+## type AgentModelBinding
+
+AgentModelBinding is the per\-agent model info the health adapter needs.
+
+	type AgentModelBinding struct {
+	    Config *llm.ModelConfig
+	    Alias  string
+	}
+
+<a name="AgentModelLookup"></a>
+## type AgentModelLookup
+
+AgentModelLookup resolves an agent ID to the model it would serve with: Config is the concrete \*llm.ModelConfig the resolver produced for the agent's model ref \(nil when the ref does not resolve\), and Alias is the agent's dedicated alias name \("" when the agent rides the default model\). The producer wiring in internal/daemon/components.go mirrors the registry's model selection: explicit spec.Model wins, else spec.ID when the resolver has a matching alias, else the default model ref with no alias.
+
+	type AgentModelLookup func(agentID string) (AgentModelBinding, bool)
+
 <a name="AgentRegistry"></a>
 ## type AgentRegistry
 
@@ -4320,6 +4386,13 @@ AgentReport represents the structured report from an agent's response.
 	
 	    // SuggestedNextAgent is the ID of the agent that should handle follow-up.
 	    SuggestedNextAgent string `json:"suggested_next_agent,omitempty"`
+	
+	    // SuggestedNextHint is the finished agent's ADVISORY (free-form,
+	    // bounded at extraction) suggestion for who or what should pick up the
+	    // next step (agent-routing tree leaf 03). Purely observability — the
+	    // sanctioned routing channel remains SuggestedNextAgent +
+	    // request_handoff; nothing in this tree consumes the hint for routing.
+	    SuggestedNextHint string `json:"suggested_next_hint,omitempty"`
 	
 	    // UserDecisionNeeded indicates if user input is required to proceed.
 	    UserDecisionNeeded bool `json:"user_decision_needed"`
@@ -9247,6 +9320,22 @@ HandoffRequest represents a handoff request payload from the request\_handoff to
 	    Reason        string `json:"reason,omitempty"`
 	    PartialResult string `json:"partial_result,omitempty"`
 	    InjectAfter   bool   `json:"inject_after"`
+	}
+
+<a name="HealthResolver"></a>
+## type HealthResolver
+
+HealthResolver is the narrow slice of \*llm.Resolver the adapter reads. Naming it locally keeps the adapter testable with a fake and decouples it from resolver internals \(quota blocks, endpoint cooldowns live there\).
+
+	type HealthResolver interface {
+	    // EndpointBlocked reports whether the model's endpoint (EndpointKey:
+	    // base-URL host + credential) is under a timeout cooldown (tree 02
+	    // leaf 04, D10). A nil cfg reports false.
+	    EndpointBlocked(cfg *llm.ModelConfig) bool
+	    // HasHealthyModels reports whether the alias has at least one model
+	    // that can serve a request right now (not cooldown-, quota- or
+	    // endpoint-blocked). An unknown alias reports false.
+	    HasHealthyModels(aliasName string) bool
 	}
 
 <a name="HookBatchExecutor"></a>
@@ -14496,6 +14585,45 @@ ReviewerFor returns the reviewer agent ID for the given intent, or the fallback 
 
 SetRoute allows overriding \(or adding\) a route for a specific intent. Pass empty strings for actorID or reviewerID to leave that side unchanged.
 
+<a name="RoutingTelemetry"></a>
+## type RoutingTelemetry
+
+RoutingTelemetry records routing decisions as bus events.
+
+Fire\-and\-forget: nil bus = all methods no\-op; publish failures are logged at Debug and swallowed \(telemetry must never fail a step\). Topics owned by this recorder: routing.decision, routing.hint\_miss, routing.handoff\_outcome \(routing.telemetry belongs to the successor\-hints leaf — do not publish it\).
+
+	type RoutingTelemetry struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewRoutingTelemetry"></a>
+### func NewRoutingTelemetry
+
+	func NewRoutingTelemetry(bus *bus.MessageBus, logger *slog.Logger) *RoutingTelemetry
+
+NewRoutingTelemetry creates a routing telemetry recorder. A nil logger falls back to slog.Default\(\); a nil bus makes every Record\* method a no\-op.
+
+<a name="RoutingTelemetry.RecordHandoff"></a>
+### func \(\*RoutingTelemetry\) RecordHandoff
+
+	func (rt *RoutingTelemetry) RecordHandoff(taskID, fromStepID, toAgentID string, accepted bool)
+
+RecordHandoff publishes "routing.handoff\_outcome": \{task\_id, from\_step\_id, to\_agent\_id, accepted\}.
+
+<a name="RoutingTelemetry.RecordHintMiss"></a>
+### func \(\*RoutingTelemetry\) RecordHintMiss
+
+	func (rt *RoutingTelemetry) RecordHintMiss(stepID, toolHint string)
+
+RecordHintMiss publishes "routing.hint\_miss": \{step\_id, tool\_hint, resolved\_to: "chat"\}.
+
+<a name="RoutingTelemetry.RecordHintRoute"></a>
+### func \(\*RoutingTelemetry\) RecordHintRoute
+
+	func (rt *RoutingTelemetry) RecordHintRoute(stepID, agentID, source string)
+
+RecordHintRoute publishes "routing.decision": \{step\_id, agent\_id, source\} — source ∈ "hint\_table"|"explicit"|"chat\_fallback".
+
 <a name="RoutingValidation"></a>
 ## type RoutingValidation
 
@@ -15834,6 +15962,11 @@ StepJobPayload is the payload stored in a queue job for a task step.
 	    // Task.LinkedSessions at schedule time, it rides the payload so the
 	    // interactive stamp is evaluable and auditable on the job itself.
 	    SessionID string `json:"session_id,omitempty"`
+	    // SuggestedNextHint is the finished step's ADVISORY successor hint
+	    // (agent-routing tree leaf 03): rides the payload round-trip so a
+	    // re-scheduled step keeps its persisted hint. Nothing consumes it for
+	    // routing — the adoption happens in OnJobCompleted.
+	    SuggestedNextHint string `json:"suggested_next_hint,omitempty"`
 	}
 
 <a name="StopDecision"></a>
@@ -16286,6 +16419,13 @@ ScheduleReadySteps finds ready steps for a task and enqueues them as jobs. Steps
 	func (ts *TacticalScheduler) SelectAgentForHint(toolHint string) string
 
 SelectAgentForHint exports selectAgent so the tactical orchestrator \(and other callers outside the agent package\) can pick an executor agent ID for a tool hint without constructing a full TaskStep.
+
+<a name="TacticalScheduler.SetAgentHealthSource"></a>
+### func \(\*TacticalScheduler\) SetAgentHealthSource
+
+	func (ts *TacticalScheduler) SetAgentHealthSource(src AgentHealthSource)
+
+SetAgentHealthSource installs the optional endpoint\-park/cooldown probe consulted by selectAgent \(agent\-routing tree leaf 02\). nil is ignored \(leaves legacy routing active\), mirroring SetHandoffPropagator.
 
 <a name="TacticalScheduler.SetBurstDetector"></a>
 ### func \(\*TacticalScheduler\) SetBurstDetector
@@ -17411,6 +17551,8 @@ Detect is safe for concurrent use.
 	func (td *TopicDetector) GenerateThreadID(sessionID, topic string) string
 
 GenerateThreadID creates a deterministic thread ID from a session ID and topic label, using the last 4 runes of sessionID \(or the full string if shorter than 4 characters\).
+
+The topic is slug\-sanitized \(session.ThreadSlug\) so a label carrying "\-thread\-", a '.' or a path separator cannot mint a thread id whose unwrapped base \(see session.ResolveThreadConversationID\) is not a real conversation id. Determinism is preserved: the same topic always yields the same slug.
 
 <a name="TopicDetectorOption"></a>
 ## type TopicDetectorOption

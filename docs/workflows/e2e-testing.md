@@ -8,9 +8,11 @@ tests go. Enforcement lives in the pre-commit hook (check [18/18]).
 | Tier | Command | What it is |
 |------|---------|------------|
 | **Fast (hermetic)** | `make e2e-fast` | Go tests under `e2e/suites/` with the `e2e` build tag. Fresh binaries, sandboxed `HOME`/`MEEPT_HOME`, fake LLM. Never touches `~/.meept` or a live daemon. Seconds per suite. Runs in CI (code-quality.yml, job `e2e-fast`) and in the pre-commit hook via the affected-suite gate. |
+| **Fast, Dart tier** | `make e2e-affected-area AREA=gui-flows` | The `gui-flows` suite: Flutter widget/provider tests under `ui/flutter_ui/test/e2e`, driven by `flutter test test/e2e` (NOT `go test`). Runs in CI (code-quality.yml, job `e2e-gui`) and via the affected-suite gate when a `ui/**` path changes. |
 | **Live-model** | `make e2e-chat` | `scripts/e2e-naive-user-chat.sh` drives a real daemon with a real model through a naive-user chat comparison. Slow, costs tokens, needs a configured local daemon. Local-only by design — never in CI. Its scenario also ships as the hermetic twin `e2e/suites/naive-user-chat/` (manifest-registered; CI + pre-commit coverage for the A0-A6 contract). |
 
-Single suite: `make e2e-fast-area AREA=smoke`.
+Single suite: `make e2e-fast-area AREA=smoke` (Go) or
+`make e2e-affected-area AREA=gui-flows` (any tier, Go or Dart).
 
 ## Writing a suite
 
@@ -43,11 +45,15 @@ Two structures matter to the tooling:
 {
   "path_map": {
     "internal/rpc/": ["rpc-ping", "chat-submit", "session-binding"],
-    "internal/comm/": ["ws-classification", "ws-filter", "..."]
+    "internal/comm/": ["ws-classification", "ws-filter", "http-auth", "http-stream"],
+    "ui/flutter_ui/": ["gui-flows"]
   },
   "suites": [
     {"name": "smoke", "dir": "e2e/suites/smoke", "status": "implemented"},
-    {"name": "rpc-ping", "dir": "e2e/suites/rpc-ping", "status": "todo"}
+    {"name": "rpc-ping", "dir": "e2e/suites/rpc-ping", "status": "todo"},
+    {"name": "gui-flows", "dir": "ui/flutter_ui/test/e2e", "status": "implemented",
+     "runner": "dart", "command": ["flutter", "test", "test/e2e"],
+     "workdir": "ui/flutter_ui"}
   ],
   "scenarios": [
     {"id": "rpc-ping-01", "suite": "rpc-ping", "diff": "S",
@@ -61,10 +67,21 @@ Two structures matter to the tooling:
   as NEW for the coverage rule (below).
 - `suites[].dir`: where the suite's tests live. `status: todo` suites have no
   dir yet; the affected script reports them as pending and skips them.
+- `suites[].runner`: `go` (default) or `dart`. A non-Go runner MUST also carry
+  `command` (argv) and `workdir`; the affected script dispatches on it instead
+  of passing the dir to `go test`. `gui-flows` is the only Dart tier today.
 - `scenarios`: the human/agent-readable inventory of what each suite covers
   (id, owning suite, size estimate, one-line title, representative paths).
 
 When you add a package or suite, update this manifest in the same commit.
+
+**Manifest completeness is pinned, not policed.** `e2e/suites/manifest/`
+(`manifest-01`) asserts that every declared suite is reachable from some
+`path_map` key, that every `path_map` key names a declared suite, that every
+`.dart` file under `ui/flutter_ui/lib/` selects a suite, and that every
+scenario's `paths` match a key. A suite no key selects can never run, and it
+fails silently — which is exactly how `gui-flows` sat unreachable for the
+lifetime of its five scenarios.
 
 ## Affected script (`scripts/e2e-affected.sh`)
 
@@ -79,10 +96,16 @@ make e2e-affected                              # same, --from-diff
 
 Behavior:
 
-- Affected suite dirs that exist → `go test -tags e2e -count=1 -p 2` on them.
+- Affected Go suite dirs that exist → `go test -tags e2e -count=1 -p 2` on them.
+- Affected suites with `runner: dart` → their `command` run from their
+  `workdir` (skipped with a printed note when the Flutter toolchain is
+  absent). A failing Dart suite fails the gate exactly like a Go one.
 - Affected suites still `todo` → reported and skipped.
 - No path_map hit but Go files changed → runs the smoke suite as fallback so
   the gate never silently passes.
+- Dart files changed but nothing mapped → **exit 1** (there is no Go suite to
+  fall back to, and passing silently would be the same decorative gate).
+- Both tiers can be affected at once; each runs, and the worst exit code wins.
 - No relevant paths (docs only, etc.) → no-op, exit 0.
 
 bash-3.2 compatible (macOS); python3 does the JSON parsing.
