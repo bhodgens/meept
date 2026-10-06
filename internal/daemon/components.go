@@ -551,6 +551,107 @@ func newRefusingBackend(reason error) runtime.ExecutionBackend {
 	return builtin.NewRefusingBackend(reason)
 }
 
+// agentModelBindingFor resolves an agent id to the (model config, alias) pair
+// the AgentHealthAdapter needs to ask the resolver's quota/endpoint health.
+//
+// It exists as a named helper (not an inline closure) so the adapter wiring
+// is testable without booting the daemon, and it mirrors the registry's
+// model selection — modelRefForAgent's precedence: an explicit spec.Model
+// wins, else the agent's own same-named alias, else the default model ref.
+//
+// ALIAS RESOLUTION IS THE POINT (bughunt wave M1). An alias is a bare name
+// ("coder"), NOT a "provider/model" ref, so resolver.ResolveRef(alias) ->
+// llm.ResolveModelRef returns nil for it (providers.go requires a "/" split)
+// and the pre-fix closure returned (binding{}, false) for every agent whose
+// AGENT.md declares no `model:` — which is every shipped agent. The alias
+// branch of AgentHealthAdapter was therefore unreachable in production and
+// no routing.warning was ever emitted.
+//
+// The alias branch reads the alias's CURRENT member through the resolver's
+// READ-ONLY accessors, never through ResolveForAlias: this lookup runs on
+// every TacticalScheduler.selectAgent decision, and ResolveForAlias MUTATES
+// alias health (it advances the rotation cursor and clears the
+// cooldown/failure counters on every call), so using it as a probe would
+// heal the very park it exists to detect.
+//
+// A failure to resolve is NOT "not parked": it surfaces as
+// (binding{}, false), which the adapter reads conservatively as "route
+// normally" — the pre-existing semantic for an unresolvable model.
+func agentModelBindingFor(resolver *llm.Resolver, registry *agent.AgentRegistry, modelsCfg *config.ModelsConfig, agentID string) (agent.AgentModelBinding, bool) {
+	if resolver == nil {
+		return agent.AgentModelBinding{}, false
+	}
+
+	ref := ""
+	if registry != nil {
+		if spec, ok := registry.GetSpec(agentID); ok {
+			ref = spec.Model
+		}
+	}
+
+	if ref == "" && agentID != "" && resolver.HasAlias(agentID) {
+		// No explicit model on the spec: the registry's modelRefForAgent lets
+		// the agent ride a same-named alias.
+		mc, ok := aliasCurrentModel(resolver, agentID)
+		if !ok {
+			return agent.AgentModelBinding{}, false
+		}
+		return agent.AgentModelBinding{Config: mc, Alias: agentID}, true
+	}
+
+	if ref == "" && modelsCfg != nil {
+		ref = modelsCfg.Model // default model ref fallback
+	}
+	if ref == "" {
+		return agent.AgentModelBinding{}, false
+	}
+
+	// An explicit spec.Model may be a "provider/model" ref OR name an alias;
+	// try the ref form first and fall through to the alias form when it does
+	// not resolve (an alias-named Model is still a bare name to ResolveRef).
+	if mc := resolver.ResolveRef(ref); mc != nil {
+		alias := ""
+		if resolver.HasAlias(ref) {
+			alias = ref
+		}
+		return agent.AgentModelBinding{Config: mc, Alias: alias}, true
+	}
+	if resolver.HasAlias(ref) {
+		if mc, ok := aliasCurrentModel(resolver, ref); ok {
+			return agent.AgentModelBinding{Config: mc, Alias: ref}, true
+		}
+	}
+	return agent.AgentModelBinding{}, false
+}
+
+// aliasCurrentModel returns the model an alias currently points at, WITHOUT
+// touching resolver health state (GetAllModelsForAlias hands back a copy and
+// GetAliasHealth only reads the rotation cursor).
+//
+// The returned model is the alias's current cursor entry, NOT a
+// health-screened pick, and that is deliberate: this is a health PROBE. The
+// caller asks "is the model this agent would serve under cooldown/quota?", so
+// the reported model must be the current entry even when THAT one is blocked.
+// ResolveForAlias would instead rotate past it (and mutate the cursor) on
+// every call.
+//
+// ok is false when the alias is unknown or has no resolvable members.
+func aliasCurrentModel(resolver *llm.Resolver, alias string) (*llm.ModelConfig, bool) {
+	models, ok := resolver.GetAllModelsForAlias(alias)
+	if !ok || len(models) == 0 {
+		return nil, false
+	}
+	idx := 0
+	if cur, _, _, ok := resolver.GetAliasHealth(alias); ok && cur >= 0 && cur < len(models) {
+		idx = cur
+	}
+	mc := models[idx]
+	if mc == nil {
+		return nil, false
+	}
+	return mc, true
+}
+
 // NewComponents creates all daemon components from configuration.
 // NewComponents creates agent components. If modelsCfg is non-nil, it uses the
 // injected config instead of loading from disk.
@@ -3030,40 +3131,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// an absent resolver or unknown agent leaves routing untouched.
 			tacticalScheduler.SetAgentHealthSource(agent.NewAgentHealthAdapter(
 				func(agentID string) (agent.AgentModelBinding, bool) {
-					resolver := c.LLMResolver
-					if resolver == nil {
-						return agent.AgentModelBinding{}, false
-					}
-					ref := ""
-					alias := ""
-					if c.AgentRegistry != nil {
-						if spec, ok := c.AgentRegistry.GetSpec(agentID); ok {
-							ref = spec.Model
-						}
-					}
-					if ref == "" && agentID != "" && resolver.HasAlias(agentID) {
-						// No explicit model on the spec: the registry's
-						// modelRefForAgent lets the agent ride a same-named
-						// alias.
-						ref = agentID
-						alias = agentID
-					}
-					if ref == "" && c.ModelsConfig != nil {
-						ref = c.ModelsConfig.Model // default model ref fallback
-					}
-					if ref == "" {
-						return agent.AgentModelBinding{}, false
-					}
-					mc := resolver.ResolveRef(ref)
-					if mc == nil {
-						return agent.AgentModelBinding{}, false
-					}
-					// An explicit spec.Model may itself name an alias — then
-					// its rotation/cooldown health is queryable too.
-					if alias == "" && resolver.HasAlias(ref) {
-						alias = ref
-					}
-					return agent.AgentModelBinding{Config: mc, Alias: alias}, true
+					return agentModelBindingFor(c.LLMResolver, c.AgentRegistry, c.ModelsConfig, agentID)
 				},
 				c.LLMResolver,
 			))

@@ -12,6 +12,7 @@ import (
 
 	"github.com/caimlas/meept/internal/pathutil"
 	"github.com/caimlas/meept/internal/secrets"
+	"github.com/caimlas/meept/internal/validator"
 )
 
 // Agent ID constants used throughout the codebase as identifiers. These are
@@ -707,7 +708,47 @@ type OutputFiltersConfig struct {
 	// LanguageFilter docs); CJK/other-script languages need no list.
 	// The literal filter name "language_en" in Filters stays a compat
 	// alias: it resolves to THIS code, not hardcoded English.
+	//
+	// Spelled loosely on purpose: the code is normalized before use, so
+	// "EN", "en-US", and "fr" all work (see
+	// validator.NormalizeLanguageCode). A code detection can never name
+	// is a startup error, not a filter that silently rejects everything —
+	// see Validate.
 	ExpectedLanguage string `json:"expected_language" toml:"expected_language"`
+}
+
+// Validate checks [daemon.output_filters]. expected_language is fail-fast
+// (bughunt wave M5): an unknown code used to pass through verbatim, match
+// no word table, and reject EVERY prose output — including correct
+// output — burning filter retries to rejected_exhausted on the chat path,
+// signalled only by a lang= reason string. An unknown code now fails at
+// config load, where the mistake is visible and costs nothing.
+//
+// A code is accepted when detection can name it without user data
+// (validator.KnownLanguageCode) or when the operator shipped the word
+// table that makes it detectable
+// ($MEEPT_HOME/validator/lang/<code>.txt). Both tests use the validator's
+// normalizer, so the accepted set is exactly the set of codes the filter
+// can match — never a second, drifting list.
+//
+// Empty keeps the frozen default and is always valid.
+func (c *OutputFiltersConfig) Validate() error {
+	if c.ExpectedLanguage == "" {
+		return nil
+	}
+	if validator.KnownLanguageCode(c.ExpectedLanguage) {
+		return nil
+	}
+	code, ok := validator.NormalizeLanguageCode(c.ExpectedLanguage)
+	if !ok {
+		return fmt.Errorf("daemon.output_filters.expected_language: invalid value %q (want an ISO-639 code such as \"en\", \"de\", \"zh\", \"fr\")", c.ExpectedLanguage)
+	}
+	langDir := filepath.Join(MeeptHome(), "validator", "lang")
+	if validator.HasLanguageWordTable(c.ExpectedLanguage, langDir) {
+		return nil
+	}
+	return fmt.Errorf("daemon.output_filters.expected_language: unknown language %q — no built-in detection for it and no word table at %s (drop a <code>.txt word list there, or use one of the detected languages)",
+		c.ExpectedLanguage, filepath.Join(langDir, code+".txt"))
 }
 
 // VerificationDefaults holds daemon-level verification defaults.
@@ -4092,6 +4133,13 @@ func (c *Config) ValidateAll() error {
 
 	if err := c.ACP.Validate(); err != nil {
 		return fmt.Errorf("acp config: %w", err)
+	}
+
+	// Validate [daemon.output_filters] expected_language (bughunt wave
+	// M5): an unknown code is a startup error, never a filter that
+	// rejects every output.
+	if err := c.Daemon.OutputFilters.Validate(); err != nil {
+		return fmt.Errorf("daemon config: %w", err)
 	}
 
 	return nil

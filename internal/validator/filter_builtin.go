@@ -42,10 +42,19 @@ var knownBuiltinFilters = []string{
 // (default en), NOT hardcoded English.
 const languageFilterPrefix = "language_"
 
-// langOrDefault maps an empty configured language to the default "en".
+// langOrDefault maps an empty configured language to the default "en"
+// and normalizes a configured one, so `expected_language: "EN"` and
+// "en-US" resolve to the same code the detector returns instead of a
+// string no word table can ever match (bughunt wave M5). A malformed
+// code is left to NewLanguageFilter, which normalizes, warns, and falls
+// back to the default — langOrDefault never invents a different
+// language on its own.
 func langOrDefault(code string) string {
 	if code == "" {
-		return "en"
+		return DefaultLanguageCode
+	}
+	if norm, ok := NormalizeLanguageCode(code); ok {
+		return norm
 	}
 	return code
 }
@@ -100,8 +109,10 @@ func NewBuiltinFilter(name string, cfg BuiltinConfig) (OutputFilter, error) {
 			return nil, perr
 		}
 		// language_<code> with an explicit inline code: that code wins
-		// over the config.
-		return NewLanguageFilter(code), nil
+		// over the config. It goes through langOrDefault so the registry
+		// name and the filter's comparison agree on the spelling
+		// (language_EN is language_en, not a bucket nothing matches).
+		return NewLanguageFilter(langOrDefault(code)), nil
 	}
 	return nil, fmt.Errorf("%w %q (known: %s, or language_<code>)",
 		errUnknownBuiltin, name, strings.Join(knownBuiltinFilters, ", "))

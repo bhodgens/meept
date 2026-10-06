@@ -78,7 +78,7 @@ func TestAgentHealthAdapterNilResolver(t *testing.T) {
 	bindings := map[string]AgentModelBinding{
 		"coder": {Config: &llm.ModelConfig{ModelID: "m1"}, Alias: "coder"},
 	}
-	var adapter *AgentHealthAdapter = NewAgentHealthAdapter(testHealthLookup(bindings), nil)
+	var adapter = NewAgentHealthAdapter(testHealthLookup(bindings), nil)
 	if adapter.AgentParkedOrCooling("coder") {
 		t.Fatal("nil resolver must report false")
 	}
