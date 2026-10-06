@@ -32,6 +32,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # golangci-lint --new-from-rev needs the merge base with main,
+          # which a shallow (default depth 1) clone does not have.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -52,13 +56,32 @@ jobs:
         run: go vet ./...
 
       - name: golangci-lint (build from source; prebuilt binaries lag the toolchain)
-        # --new-from-rev: the repo carries ~1100 lines of pre-existing
-        # golangci findings across every package (make lint has been red
-        # for a long time); gating on new code blocks regressions without
-        # failing on that debt. Paydown tracked separately.
+        # --new-from-rev: gates NEW findings only. Measured at ee0de064 with
+        # the config-load bug fixed: a repo-wide `golangci-lint run ./...`
+        # reports 13 issues, all from 565b0ef7, so the debt is ~13 findings,
+        # not the ~1100 an earlier comment here claimed -- that number was
+        # never verified and was the same comment that hid the dead gate
+        # below. --new-from-rev is kept as the policy (block regressions
+        # without failing on that debt); paydown of those 13 is separate.
+        #
+        # This step GATES. It used to end in `|| true`, which swallowed
+        # every failure mode including a config that cannot be loaded --
+        # so the gate read green while `golangci-lint run` was exiting 3
+        # with `build linters: plugin(mutexio): plugin "mutexio" not
+        # found` (audit H2/M3, .hermes/audits/2026-10-05-bughunt-wave.md).
+        # No tolerant fallback here: --new-from-rev is what absorbs the
+        # pre-existing debt, so a red step means a real regression or a
+        # real tool/config error. Do not re-add `|| true`; if you need to
+        # re-baseline after a deliberate bulk edit, fix forward instead.
         run: |
           go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-          $(go env GOPATH)/bin/golangci-lint run --timeout=10m --new-from-rev=$(git merge-base origin/main HEAD) || true
+          base=$(git merge-base origin/main HEAD)
+          if [ -z "$base" ]; then
+            echo "ERROR: could not resolve merge-base with origin/main (shallow clone?)." >&2
+            exit 1
+          fi
+          echo "Gating new findings against ${base}"
+          $(go env GOPATH)/bin/golangci-lint run --timeout=10m --new-from-rev="$base"
 
       - name: gosec (G201, G202)
         run: |

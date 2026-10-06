@@ -132,4 +132,18 @@ raw_responses.jsonl
 /mem-recall.txt
 /references/
 *.got.txt
+# Golden-test render artifacts (internal/tui/testdata/golden/*.got.txt).
+# Already covered by the blanket *.got.txt above; listed explicitly so the
+# intent survives a refactor of that pattern, and so they can never be
+# staged by accident while a golden test is failing/flaky.
+internal/tui/testdata/golden/*.got.txt
 custom-gcl
+
+# Fuzz corpus crashers (internal/security/testdata/fuzz/). Go writes here
+# ONLY for inputs that failed a fuzz target, so an untracked entry is a stale
+# reproducer: the bug it caught is fixed, the target no longer exercises the
+# case, and the file passes forever while looking like live evidence. Keep
+# crashers out of the tree; the target + its assertions are the regression.
+# A crasher that is STILL reproducible should be reduced into an ordinary
+# table test in internal/security/*_test.go instead.
+internal/security/testdata/fuzz/

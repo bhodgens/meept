@@ -265,3 +265,24 @@ jobs:
       # The live-model tier (make e2e-chat) stays local-only by design.
       - name: Run hermetic e2e suites
         run: make e2e-fast
+
+  e2e-gui:
+    runs-on: ubuntu-latest
+    name: E2E GUI (Dart tier)
+    steps:
+      - uses: actions/checkout@v4
+
+      # The gui-flows suite (ui/flutter_ui/test/e2e) is a DART suite: it
+      # drives the real ChatProvider against a wire-shape stub daemon and
+      # is driven by `flutter test`, not `go test`. It was unreachable by
+      # CI until the manifest gained ui/** path_map keys plus a
+      # runner: dart row (audit M12) — this job is what makes the mapping
+      # real. It needs the Flutter SDK only; the stubs need no daemon,
+      # model, or secrets.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Run the gui-flows e2e suite
+        run: make e2e-affected-area AREA=gui-flows

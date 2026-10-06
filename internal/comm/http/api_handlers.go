@@ -12,11 +12,11 @@ import (
 	"time"
 
 	configCli "github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
-	"github.com/caimlas/meept/internal/queue"
 )
 
 // DispatchSubmitter is the interface for cross-daemon task dispatch.

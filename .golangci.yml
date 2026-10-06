@@ -3,13 +3,33 @@
 #
 # NOTE: the "Found unknown linters in //nolint directives: mutexio,
 # u1000" warning is expected and intentionally left in place — there is no
-# config knob to allow-list custom nolint names (golangci-lint#1450), and
-# registering them as golangci-lint plugins would require a plugin build
-# pipeline. These directives are consumed by the repo's own tooling:
-#   //nolint:mutexio -> tools/analyzers/mutexio (make analyzers, pre-commit hook)
+# config knob to allow-list custom nolint names (golangci-lint#1450).
+# Registering these as golangci-lint plugins is NOT an option: a module
+# plugin only loads inside a binary built by `golangci-lint custom`, so
+# registering one makes this whole config unloadable by a stock
+# golangci-lint (see the NOTE in linters.enable below). These directives
+# are consumed by the repo's own tooling instead:
+#   //nolint:mutexio -> tools/analyzers/mutexio (make analyzers, CI
+#                      "mutexio analyzer" step, pre-commit hook [3/18])
 #   //nolint:U1000   -> .githooks/pre-commit-u1000 (staticcheck U1000 gate)
 # Do not remove them. The former //nolint:goerr113 directives were dead
 # (no linter or hook consumed that name) and were removed 2026-09-30.
+#
+# Repo analyzers are enforced OUTSIDE golangci-lint, as standalone
+# singlechecker binaries (tools/analyzers/*). A stock golangci-lint
+# install is all this config needs; no `golangci-lint custom` build.
+#   mutexio    -> make mutexio     (also: make analyzers, make lint-ci,
+#                                   ci.yml "mutexio analyzer",
+#                                   code-quality.yml "Run mutexio",
+#                                   .githooks/pre-commit-mutexio [3/18])
+#   predid     -> make predid      (also: make analyzers, make lint-ci,
+#                                   ci.yml "predid analyzer")
+#   fieldguard -> go run ./tools/analyzers/fieldguard/... (code-quality.yml)
+#   selflock   -> go run ./tools/analyzers/selflock/...
+# (verified 2026-10-06: the old `custom:` module-plugin registration made
+# every stock golangci-lint run fail to load the config, so the plugin
+# registration was removed and the standalone analyzer made the single
+# enforcement point — H2 in .hermes/audits/2026-10-05-bughunt-wave.md.)
 #
 # Curated 2026-06-19 after a full audit (see docs/20260618-checkreview.md).
 # The goal: enable linters that catch real bugs at acceptable noise; disable
@@ -65,10 +85,16 @@ linters:
     - intrange           # Use integer range in for loops
     - modernize          # Modern Go idioms
 
-    # Custom analyzers (module plugins; binary must be built via
-    # `golangci-lint custom` per .custom-gcl.yml — see Makefile lint
-    # target). Also run standalone by pre-commit hooks (defense in depth).
-    - mutexio            # I/O under mutex (tools/analyzers/mutexio)
+    # NOTE: the repo's own analyzers (mutexio, predid, fieldguard,
+    # selflock) are NOT listed here and must not be. Registering one
+    # under settings.custom with `type: module` makes .golangci.yml
+    # unloadable by a plain `golangci-lint`: the plugin only exists
+    # inside a bespoke binary built with `golangci-lint custom`
+    # (44 MB, gitignored, and never built by CI or the pre-commit
+    # chain), so the whole linter set dies with
+    # `build linters: plugin(mutexio): plugin "mutexio" not found`.
+    # They are enforced standalone instead — see the enforcement table
+    # below and `make analyzers`.
 
     # DISABLED 2026-06-19 (see docs/20260618-checkreview.md for rationale):
     # - goconst     (712 findings, cosmetic; would force extracting every repeated string)
@@ -130,11 +156,6 @@ linters:
     sloglint:
       key-naming-case: snake
       args-on-sep-lines: false
-
-    custom:
-      mutexio:
-        type: module
-        description: I/O under mutex (tools/analyzers/mutexio)
 
 issues:
   max-issues-per-linter: 50

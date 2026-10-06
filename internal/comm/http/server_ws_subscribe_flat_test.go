@@ -58,7 +58,7 @@ func TestWSSubscribe_FlatFrameArmsSessionFilter(t *testing.T) {
 		})
 		msgBus.Publish("chat_message", &models.BusMessage{
 			ID: id, Type: models.MessageTypeEvent, Source: "test",
-			Topic: "chat_message",
+			Topic:     "chat_message",
 			Timestamp: time.Now().UTC(), Payload: payload,
 		})
 	}
@@ -107,7 +107,7 @@ func TestWSSubscribe_EnvelopedFrameStillWorks(t *testing.T) {
 	})
 	msgBus.Publish("chat_message", &models.BusMessage{
 		ID: "evt-env", Type: models.MessageTypeEvent, Source: "test",
-		Topic: "chat_message",
+		Topic:     "chat_message",
 		Timestamp: time.Now().UTC(), Payload: payload,
 	})
 	if msg, ok := wsReadOne(conn, 2*time.Second); !ok {
@@ -132,7 +132,7 @@ func TestWSUnsubscribe_FlatFrameRemovesSessionFilter(t *testing.T) {
 		})
 		msgBus.Publish("chat_message", &models.BusMessage{
 			ID: id, Type: models.MessageTypeEvent, Source: "test",
-			Topic: "chat_message",
+			Topic:     "chat_message",
 			Timestamp: time.Now().UTC(), Payload: payload,
 		})
 	}
