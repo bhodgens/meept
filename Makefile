@@ -49,11 +49,11 @@ help:
 	@echo "  bench            Run benchmarks"
 	@echo ""
 	@echo "Development:"
-	@echo "  lint             Run golangci-lint"
+	@echo "  lint             Run golangci-lint + gosec + the mutexio analyzer"
 	@echo "  fmt              Format code"
 	@echo "  vet              Run go vet"
 	@echo "  graphs           Regenerate connectivity graphs (bus/RPC/HTTP/WS)"
-	@echo "  graphs-check     Verify connectivity graphs are fresh (local only; not wired into CI — see Makefile:graphs-check)"
+	@echo "  graphs-check     Verify connectivity graphs are fresh (CI: code-quality.yml generated-artifacts)"
 	@echo "  compare-prep     Clone competitor repos into TMPDIR/meept-compare"
 	@echo "  mod-tidy         Tidy go modules"
 	@echo "  clean            Remove build artifacts"
@@ -695,18 +695,26 @@ clean:
 	@cd $(FLUTTER_UI_DIR) && flutter clean 2>/dev/null || true
 	go clean -cache -testcache
 
-lint: gosec
+# lint = stock golangci-lint + gosec + the repo analyzers that used to be
+# registered as golangci MODULE PLUGINS.
+#
+# A module plugin only exists inside a binary built by `golangci-lint
+# custom` (44 MB, gitignored, never built by CI or the pre-commit
+# chain), so registering mutexio under settings.custom made this whole
+# golangci config UNLOADABLE by any stock golangci-lint: every run died
+# with `build linters: plugin(mutexio): plugin "mutexio" not found`
+# (exit 3). The old `if [ -x ./custom-gcl ] ... else plain
+# golangci-lint` fallback was therefore dead code — the else branch
+# could never succeed. Fixed 2026-10-06 (audit H2,
+# .hermes/audits/2026-10-05-bughunt-wave.md): the plugin registration is
+# gone and the STANDALONE analyzer is the single enforcement point.
+# mutexio is a prerequisite here so `make lint` keeps enforcing what the
+# plugin claimed to; within one make run it still executes only once even
+# though `lint-ci` also pulls it in via `analyzers`.
+lint: gosec mutexio
 	@echo "Running linter..."
-	@# Prefer the custom binary (embeds the mutexio module plugin so
-	@# //nolint:mutexio is honored natively and no "unknown linters"
-	@# warning is printed). Falls back to plain golangci-lint, which
-	@# still passes but emits the benign warning (golangci-lint#1450).
-	@if [ -x ./custom-gcl ]; then \
-		./custom-gcl run ./...; \
-	else \
-		which golangci-lint > /dev/null 2>&1 || (echo "Install: brew install golangci-lint (or run: golangci-lint custom)" && exit 1); \
-		golangci-lint run ./...; \
-	fi
+	@which golangci-lint > /dev/null 2>&1 || (echo "Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest (or: brew install golangci-lint)" && exit 1)
+	golangci-lint run ./...
 
 gosec:
 	@echo "Running gosec security scan (G201, G202)..."
@@ -794,14 +802,13 @@ graphs:
 
 # graphs-check verifies the generated connectivity artifacts are fresh.
 #
-# NOT WIRED INTO CI OR THE PRE-COMMIT CHAIN: on this tree `--check` is red
-# until docs/generated/* is regenerated, and the generator still embeds
-# absolute line offsets, so any edit above a publish/subscribe site invalidates
-# the artifact again (audit F66). Wire this into .github/workflows/ci.yml only
-# after both are true:
-#   1. `make graphs` has been run and its docs/generated/* changes committed;
-#   2. scripts/gen-connectivity-graph.py emits symbol identity instead of raw
-#      line numbers (so the check fails on topology drift, not on insertions).
+# WIRED INTO CI: .github/workflows/code-quality.yml (job
+# "generated-artifacts") runs this as a hard gate. The stale comment
+# below claimed otherwise (audit M4, 2026-10-05 bughunt) — corrected.
+# The generator still embeds absolute line offsets (audit F66), so any
+# edit above a publish/subscribe site invalidates the artifact again:
+# after editing Go source, run `make graphs` and commit the result in
+# the same commit.
 .PHONY: graphs-check
 graphs-check:
 	@python3 scripts/gen-connectivity-graph.py --check
@@ -1493,7 +1500,7 @@ e2e-chat:
 #   make e2e-fast-area AREA=smoke  # one suite dir (e2e/suites/<AREA>)
 #   make e2e-affected              # only suites affected by the working diff
 #                                  # (scripts/e2e-affected.sh --from-diff)
-.PHONY: e2e-fast e2e-fast-area e2e-affected
+.PHONY: e2e-fast e2e-fast-area e2e-affected e2e-affected-area
 e2e-fast:
 	go test -tags e2e ./e2e/... -p 2
 
@@ -1506,3 +1513,30 @@ e2e-fast-area:
 
 e2e-affected:
 	bash scripts/e2e-affected.sh --from-diff
+
+# One affected tier by NAME, regardless of the diff — the way to run a
+# suite CI runs. AREA=gui-flows dispatches to the Dart tier (flutter test)
+# via the manifest's suites[].runner/command/workdir; any other name runs
+# its Go dir under e2e/suites/. This is the entry point the CI e2e-gui job
+# calls, so the Flutter suite is reachable without a local diff.
+e2e-affected-area:
+	@if [ -z "$(AREA)" ]; then \
+		echo "usage: make e2e-affected-area AREA=<suite name from e2e/manifest.json>"; \
+		exit 2; \
+	fi
+	@python3 -c "import json,sys; m=json.load(open('e2e/manifest.json')); \
+	sys.exit(0 if any(s['name']=='$(AREA)' for s in m['suites']) else \
+	print('unknown suite: $(AREA) (see e2e/manifest.json suites[])') or 1)"
+	@runner="$$(python3 -c "import json; m=json.load(open('e2e/manifest.json')); \
+	print(next(s.get('runner','go') for s in m['suites'] if s['name']=='$(AREA)'))")"; \
+	if [ "$$runner" = "dart" ]; then \
+		cmd=$$(python3 -c "import json,shlex; m=json.load(open('e2e/manifest.json')); \
+	s=next(s for s in m['suites'] if s['name']=='$(AREA)'); \
+	print(' '.join(shlex.quote(c) for c in (s.get('command') or ['flutter','test'])))"); \
+		dir=$$(python3 -c "import json; m=json.load(open('e2e/manifest.json')); \
+	print(next(s for s in m['suites'] if s['name']=='$(AREA)').get('workdir','.'))"); \
+		echo "make e2e-affected-area: dart tier — $$cmd (in $$dir)"; \
+		cd "$$dir" && $$cmd; \
+	else \
+		go test -tags e2e -count=1 -p 2 ./e2e/suites/$(AREA)/...; \
+	fi
