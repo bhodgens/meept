@@ -66,7 +66,7 @@ func newHeadlessAppQueue(t *testing.T, w, h int) *headlessProgram {
 	hp := newHeadlessApp(t, w, h)
 	old := time.Now().Add(-40 * 24 * time.Hour).Format(time.RFC3339)
 	setJSONStub(t, hp, "queue.stats", map[string]any{
-		"by_state":   map[string]int{"pending": 2, "completed": 5},
+		"by_state":    map[string]int{"pending": 2, "completed": 5},
 		"by_priority": map[string]int{"normal": 7},
 	})
 	setJSONStub(t, hp, "queue.list", map[string]any{
@@ -103,4 +103,3 @@ func setJSONStub(t *testing.T, hp *headlessProgram, method string, v any) {
 	t.Helper()
 	hp.stub.setResult(method, v)
 }
-

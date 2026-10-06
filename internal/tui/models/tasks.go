@@ -260,27 +260,34 @@ func (m *TasksModel) setTasksColumns() {
 	m.table.SetRows([]table.Row{})
 
 	// Task view columns: Name | State | Agent | Steps | Progress | Memory | Updated
-	available := m.width - 10 // borders/padding
-	nameW := available * 22 / 100
-	stateW := 8
-	agentW := 12
-	stepsW := 7
-	progressW := 12
-	memoryW := 10
-	updatedW := 10
-
-	if nameW < 15 {
-		nameW = 15
-	}
+	//
+	// The widths come from tableutil.FitWidths, NOT from hand-computed
+	// percentages: the old "name gets 22% of width-10, the rest are fixed"
+	// plus a floor of 15 on name summed to 74 columns of text while the
+	// viewport held only 53 at an 80-col terminal, so bubbles/table rendered
+	// a box ~37 columns WIDER than its container and MaxWidth-truncated
+	// every cell — which is why the tasks golden showed "██" where
+	// renderProgressBar always emits "████████ 2/2" (bughunt M9).
+	//
+	// min carries the width each column needs to show its OWN value without
+	// truncation: the progress column must fit a full 8-cell bar plus " n/m",
+	// and the state column a "✓ done" icon label. Proportional shares alone
+	// starve them at 80 columns; the elastic columns (name) absorb the
+	// remainder instead.
+	mins := []int{15, 7, 6, 5, 12, 6, 5}
+	weights := []int{22, 8, 12, 7, 12, 10, 10}
+	widths := tableutil.FitWidthsMin(
+		tableutil.ContentBudget(m.table.Width(), len(mins)), mins, weights,
+	)
 
 	m.table.SetColumns([]table.Column{
-		{Title: "name", Width: nameW},
-		{Title: ColState, Width: stateW},
-		{Title: "agent", Width: agentW},
-		{Title: "steps", Width: stepsW},
-		{Title: "progress", Width: progressW},
-		{Title: "memory", Width: memoryW},
-		{Title: "updated", Width: updatedW},
+		{Title: "name", Width: widths[0]},
+		{Title: ColState, Width: widths[1]},
+		{Title: "agent", Width: widths[2]},
+		{Title: "steps", Width: widths[3]},
+		{Title: "progress", Width: widths[4]},
+		{Title: "memory", Width: widths[5]},
+		{Title: "updated", Width: widths[6]},
 	})
 }
 
@@ -617,6 +624,21 @@ func (m *TasksModel) updateTasksTable() {
 	tasks := m.filterTasks()
 	rows := make([]table.Row, len(tasks))
 
+	// The progress column's width is a function of the CURRENT column set
+	// (setTasksColumns fits it to the viewport), so read it back rather than
+	// re-deriving the layout here.
+	progressCol := 0
+	for i, c := range m.table.Columns() {
+		if c.Title == "progress" {
+			progressCol = i
+			break
+		}
+	}
+	progressColWidth := 0
+	if cols := m.table.Columns(); progressCol < len(cols) {
+		progressColWidth = cols[progressCol].Width
+	}
+
 	for i, task := range tasks {
 		// State with icon
 		stateIcon := m.getStateIcon(task.State)
@@ -641,8 +663,15 @@ func (m *TasksModel) updateTasksTable() {
 			stepsStr = fmt.Sprintf("%d/%d", task.CompletedJobs, task.TotalJobs)
 		}
 
-		// Progress bar
-		progress := m.renderProgressBar(task.CompletedJobs, task.TotalJobs, 8)
+		// Progress bar. The bar WIDTH is derived from the column the bar renders
+		// into, not fixed at 8: a fixed-width bar plus its " n/m" label needs 12
+		// columns, which the column cannot hold inside an 80-col terminal once the
+		// sidebar takes its 25 (M9). bubbles/table MaxWidth-truncates the cell
+		// from the right, so a fixed bar lost the label and the golden came to
+		// read "██" — renderProgressBar's output truncated, with the task counts
+		// gone. Scaling the bar keeps the whole cell meaningful at any width: the
+		// " n/m" counts always render, the bar takes whatever is left.
+		progress := m.renderProgressBar(task.CompletedJobs, task.TotalJobs, progressBarWidth(progressColWidth, task.CompletedJobs, task.TotalJobs))
 
 		// Memory indicators: ⚡refs ⬅inherited
 		memRefs := len(task.MemoryRefs)
@@ -707,6 +736,27 @@ func (m *TasksModel) getStateIcon(state string) string {
 	default:
 		return "? " + types.TruncateString(state, 4)
 	}
+}
+
+// progressBarWidth returns how many cells of bar renderProgressBar may draw
+// inside a progress column of colWidth cells, given the counts.
+//
+// renderProgressBar always emits "<bar> <completed>/<total>", so the label
+// (" 2/2" is 4 cells; counts grow with the task count) is not optional — if
+// the bar takes the whole column, bubbles/table MaxWidth-truncates the tail
+// and the counts vanish, which is the truncated cell the golden captured. The
+// bar gets whatever the label leaves; below one cell the bar is dropped
+// entirely so the label still renders in full.
+func progressBarWidth(colWidth, completed, total int) int {
+	label := 1 + len(fmt.Sprintf("%d/%d", completed, total)) // space + "n/m"
+	bar := colWidth - label
+	if bar < 1 {
+		return 0
+	}
+	// Keep a full bar well under the column at wide sizes rather than
+	// stretching a 2/2 task across 40 cells.
+	const maxBar = 8
+	return min(bar, maxBar)
 }
 
 func (m *TasksModel) renderProgressBar(completed, total, width int) string {
@@ -782,6 +832,7 @@ func (m *TasksModel) View() string {
 	b.WriteString("\n")
 
 	// Detail panel (preview, not full modal)
+	b.WriteString("\n")
 	switch {
 	case m.viewMode == ViewModeTasks && m.selectedTask != nil:
 		b.WriteString(m.renderTaskPreview())
@@ -792,9 +843,26 @@ func (m *TasksModel) View() string {
 	}
 
 	// Help hint
+	//
+	// The hint is 104 columns of literal text and the table beside it is 53;
+	// lipgloss pads a style block to its widest line, so a bare Render made
+	// the whole view 104 wide and the sidebar join pushed it to 155 — past
+	// the 80-column terminal (M9). Wrapping to the container keeps every
+	// hint readable inside the panel instead of overflowing the screen.
+	//
+	// No MarginTop here either: a margin block pads EVERY line to the block's
+	// widest content, which materialized a full-width blank pad row. The
+	// separating blank line is written explicitly above.
 	hintStyle := lipgloss.NewStyle().
 		Foreground(paletteColor("textMuted")).
-		MarginTop(1)
+		Width(m.width).
+		MaxWidth(m.width)
+
+	// The detail panel above ends without a trailing newline, so the hint is
+	// separated explicitly: without it the two render as ONE line (a
+	// 51-column border edge followed by a 55-column hint = 106 columns), and
+	// the whole view inherits that width (M9).
+	b.WriteString("\n")
 
 	if m.viewMode == ViewModeTasks {
 		b.WriteString(hintStyle.Render("r: refresh | tab: jobs view | t: lineage | f: filter | <-/->: collapse/expand | enter: details | ?: help"))
@@ -1057,7 +1125,13 @@ func (m *TasksModel) renderEmptyDetail() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(paletteColor("border")).
 		Padding(1, 2).
-		Width(m.width - 4)
+		// Cap the border, not just the content: lipgloss sizes a bordered
+		// block to max(content, Width)+padding, so a Width that exceeds the
+		// container is clamped by Width while a longer CONTENT line is not
+		// — the block then grows past its parent and, joined against the
+		// sidebar, past the terminal (M9). MaxWidth is the outer bound.
+		Width(max(m.width-4, 1)).
+		MaxWidth(max(m.width-4, 1))
 
 	content := lipgloss.NewStyle().
 		Foreground(paletteColor("textMuted")).

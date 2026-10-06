@@ -1146,6 +1146,54 @@ func TestChatModel_AgentLifecycle_StartSetsActive(t *testing.T) {
 	}
 }
 
+// H8 (bughunt 2026-10-05): a background agent in session A must NOT arm
+// session B's chat model. The lifecycle payload carries the loop's
+// THREAD-SCOPED conversation id ("<session conv>-thread-<topic>-<n>"); the
+// stable key is the session-conversation PREFIX, so the thread-scoped form of
+// THIS session matches (the ctrl+s-steer fix) while another session's id is
+// rejected (the steer-bleed fix).
+func TestChatModel_AgentLifecycle_ThreadScopedOwnSessionStartsActive(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	threadScoped := model.conversationID + "-thread-code-1"
+	msg := AgentLifecycleMsg{Active: true, ConversationID: threadScoped}
+	model.Update(msg)
+
+	if !model.agentActive {
+		t.Error("expected agentActive=true for a thread-scoped id of THIS session (ctrl+s steering must stay reachable)")
+	}
+}
+
+func TestChatModel_AgentLifecycle_ForeignSessionDoesNotStartActive(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	msg := AgentLifecycleMsg{Active: true, ConversationID: "conv-other-session-thread-code-1"}
+	model.Update(msg)
+
+	if model.agentActive {
+		t.Error("expected agentActive=false for ANOTHER session's loop (steer-bleed must stay blocked)")
+	}
+}
+
+func TestChatModel_AgentLifecycle_ForeignSessionEndDoesNotClearOwnActive(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	own := AgentLifecycleMsg{Active: true, ConversationID: model.conversationID}
+	model.Update(own)
+	if !model.agentActive {
+		t.Fatal("setup: own-session start did not arm agentActive")
+	}
+
+	foreignEnd := AgentLifecycleMsg{Active: false, ConversationID: "conv-other-session"}
+	model.Update(foreignEnd)
+	if !model.agentActive {
+		t.Error("another session's loop END must not clear THIS session's agentActive")
+	}
+}
+
 func TestChatModel_AgentLifecycle_EndClearsState(t *testing.T) {
 	model := newTestChatModel()
 	model.SetSize(80, 24)

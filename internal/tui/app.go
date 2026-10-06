@@ -715,12 +715,21 @@ func (a *App) fetchCurrentProject() tea.Msg {
 		return ProjectInfoUpdatedMsg{}
 	}
 
+	// Snapshot the session under loadSessionMu: a.currentSession is written
+	// by App.Update on the event-loop goroutine (SessionLoadedMsg and the
+	// project-bind paths), while THIS cmd runs on a tea.Batch commands
+	// goroutine. Reading the pointer + its ProjectID unlocked raced the
+	// write (-race, golden queue view, fix-wave 2026-10-06).
+	a.loadSessionMu.Lock()
+	session := a.currentSession
+	a.loadSessionMu.Unlock()
+
 	// No current session or no project binding -> empty project indicator.
-	if a.currentSession == nil || a.currentSession.ProjectID == "" {
+	if session == nil || session.ProjectID == "" {
 		return ProjectInfoUpdatedMsg{}
 	}
 
-	projectID := a.currentSession.ProjectID
+	projectID := session.ProjectID
 	p, err := a.rpc.GetProject(projectID)
 	if err != nil {
 		// The bound project may have been unregistered, or the daemon may
@@ -1118,7 +1127,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.statusMessageTime = time.Now()
 			}
 
+			// Write a.currentSession under loadSessionMu: fetchCurrentProject
+			// (a tea.Batch cmd) snapshots the pointer under the same mutex —
+			// the event-loop write and the commands-goroutine read raced
+			// (-race, fix-wave 2026-10-06).
+			a.loadSessionMu.Lock()
 			a.currentSession = msg.Session
+			a.loadSessionMu.Unlock()
 			// Wire up session ID for tasks FilterMine feature
 			a.tasks.SetCurrentSession(msg.Session.ID)
 			// Wire up session ID for plans filtering
@@ -1176,7 +1191,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 		if msg.Session != nil {
+			a.loadSessionMu.Lock()
 			a.currentSession = msg.Session
+			a.loadSessionMu.Unlock()
 			a.sessionMgr.SetSession(msg.Session)
 			// Wire up session ID for tasks FilterMine feature
 			a.tasks.SetCurrentSession(msg.Session.ID)
@@ -1206,7 +1223,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case models.SessionSwitchToChatMsg:
 		// Switch to selected session AND switch view to chat
 		if msg.Session != nil {
+			a.loadSessionMu.Lock()
 			a.currentSession = msg.Session
+			a.loadSessionMu.Unlock()
 			a.sessionMgr.SetSession(msg.Session)
 			// Wire up session ID for tasks FilterMine feature
 			a.tasks.SetCurrentSession(msg.Session.ID)
@@ -2805,13 +2824,17 @@ func (a *App) calculateLayout() tea.Cmd {
 	}
 
 	// Auto-hide sidebar in compact mode; restore it (and re-run Init) when
-	// the terminal grows back out of compact. The re-init is the point:
-	// sidebar.Init starts the event stream (bus.subscribe + poll loop), so
-	// a one-way hide left steering (ctrl+s) and progress delivery dead
-	// after any shrink/grow round-trip.
+	// the terminal grows back out of compact. The stop/re-arm is the point:
+	// sidebar.Init starts the event stream (bus.subscribe + poll loop), so a
+	// one-way hide left steering (ctrl+s) and progress delivery dead after
+	// any shrink/grow round-trip. The shrink half must Stop the stream for
+	// the same reason — EventStream.Stop is idempotent and Start re-arms it,
+	// so the grow half gets a FRESH subscription instead of discovering the
+	// still-running one and no-oping (bughunt M10).
 	if a.layoutMode == LayoutCompact {
 		if a.sidebar.IsVisible() {
 			a.sidebar.SetVisible(false)
+			a.sidebar.Cleanup()
 		}
 		return nil
 	}

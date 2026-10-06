@@ -1,17 +1,17 @@
  meept
 plans   all   active   pending   completed   (1/1)                                                                                        ╭───────────────────────╮
-╭───────────────────────────────────────────────────────────────────────────╮                                                             │  meept dev (commit:   │
-│ title            state       phases    steps     progress      updated    │                                                             │    unknown, built:    │
-│───────────────────────────────────────────────────────────────────────────│                                                             │       unknown)        │
-│ rewrite the pa…  ● draft     0         1/4       ██░                      │                                                             │  ▾ status             │
-│                                                                           │                                                             │   daemon:             │
-│                                                                           │                                                             │ disconnected          │
-│                                                                           │                                                             │  ▾ agent activity     │
-│                                                                           │                                                             │   no active agents    │
-│                                                                           │                                                             │   workers: none       │
-│                                                                           │                                                             │  ▾ tasks              │
-│                                                                           │                                                             │   no active tasks     │
-╰───────────────────────────────────────────────────────────────────────────╯                                                             │  ▸ plan               │
+╭─────────────────────────────────────────────────────╮                                                                                   │  meept dev (commit:   │
+│ title           state   pha…  ste…  progre…  updat… │                                                                                   │    unknown, built:    │
+│─────────────────────────────────────────────────────│                                                                                   │       unknown)        │
+│ rewrite the p…  ● dra…  0     1/4   ██░░░░…  HH:MM… │                                                                                   │  ▾ status             │
+│                                                     │                                                                                   │   daemon:             │
+│                                                     │                                                                                   │ disconnected          │
+│                                                     │                                                                                   │  ▾ agent activity     │
+│                                                     │                                                                                   │   no active agents    │
+│                                                     │                                                                                   │   workers: none       │
+│                                                     │                                                                                   │  ▾ tasks              │
+│                                                     │                                                                                   │   no active tasks     │
+╰─────────────────────────────────────────────────────╯                                                                                   │  ▸ plan               │
 ╭─────────────────────────────────────────────────╮                                                                                       │  ▾ recent memory      │
 │                                                 │                                                                                       │   ...                 │
 │  select a plan to view details                  │                                                                                       │                       │

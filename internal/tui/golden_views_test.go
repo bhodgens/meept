@@ -36,25 +36,33 @@ func switchView(t *testing.T, hp *headlessProgram, key string) {
 	hp.send(keyPress(rune(key[0]), 0))
 }
 
-
-// retryWithFreshApp runs attempt up to 4 times, each with a freshly built
+// retryWithFreshApp runs attempt up to 2 times, each with a freshly built
 // app, and returns on the first attempt whose finished view contains
-// wantIn. The remaining nondeterminism this absorbs is goroutine
-// scheduling of async cmd results (fetch/load) relative to the scripted
-// sends — an attempt whose load landed late produces a wrong view and is
-// discarded whole (fresh app, fresh goroutines); no state leaks between
-// attempts.
+// wantIn.
+//
+// The retry is bounded at TWO and REPORTS the attempt number on failure
+// (the discarded attempt is logged). The earlier 4-attempt loop silently
+// swallowed real mismatches: an attempt whose render never reached the
+// expected state was thrown away whole, so a genuine render regression could
+// pass whenever it was flaky, and the golden never recorded which attempt
+// it came from (bughunt M9). Two attempts absorb the one real source of
+// nondeterminism — goroutine scheduling of async cmd results relative to the
+// scripted sends, which costs at most one rerun — and no more.
 func retryWithFreshApp(t *testing.T, wantIn string, attempt func(t *testing.T) *App) *App {
 	t.Helper()
 	var last *App
-	for range 4 {
+	for i := range 2 {
 		app := attempt(t)
 		last = app
 		if strings.Contains(app.View().Content, wantIn) {
+			if i > 0 {
+				t.Logf("golden for %q needed %d attempts (async cmd landed late)", wantIn, i+1)
+			}
 			return app
 		}
+		t.Logf("attempt %d/%d never reached %q; discarding and retrying", i+1, 2, wantIn)
 	}
-	t.Fatalf("view never reached expected state %q after 4 attempts; last:\n%s", wantIn, last.View().Content)
+	t.Fatalf("view never reached expected state %q after 2 attempts; last:\n%s", wantIn, last.View().Content)
 	return last
 }
 
@@ -113,13 +121,26 @@ func TestGoldenSessionsView(t *testing.T) {
 }
 
 // newHeadlessAppSessions is the sessions-golden world: the stub RPC server
-// serves two sessions with a STABLE relative-time cell (last_activity 40
-// days in the past lands in the "Jan 2" absolute-date branch of
-// formatRelativeTime — accepted documented hazard, see golden_test.go).
+// serves two sessions whose timestamps are FROZEN (not derived from
+// time.Now()), so the rendered "mmm dd HH:MM" cells are stable forever and
+// the month/day never needs normalizing to pass.
+//
+// The freeze is what makes the month a real assertion: with a
+// time.Now()-derived stamp the fixture would roll over at a month boundary
+// and the old month+day normalizer (`\b(Jan|…|Dec) \d{1,2}\b`) hid the diff,
+// making a wrong-month render indistinguishable from a right one (bughunt
+// M8). monthDayRe still normalizes the month NAME for any future
+// wall-clock fixture, but no shipped fixture depends on it.
+//
+// 2023-03-14 09:26 UTC is deliberately far in the past so
+// formatRelativeTime keeps taking the absolute-date branch
+// (">= 30d"), which is the stable branch by construction.
+const goldenSessionStamp = "2023-03-14T09:26:53Z"
+
 func newHeadlessAppSessions(t *testing.T, w, h int) *headlessProgram {
 	t.Helper()
 	hp := newHeadlessApp(t, w, h)
-	old := time.Now().Add(-40 * 24 * time.Hour).Format(time.RFC3339)
+	old := goldenSessionStamp
 	sessions := []types.Session{
 		{ID: "sess-alpha", Name: "alpha", Description: "alpha session", CreatedAt: old, LastActivity: old},
 		{ID: "sess-beta", Name: "beta", Description: "beta session", CreatedAt: old, LastActivity: old},
@@ -133,7 +154,14 @@ func newHeadlessAppSessions(t *testing.T, w, h int) *headlessProgram {
 }
 
 func TestGoldenTasksView(t *testing.T) {
-	app := retryWithFreshApp(t, "write the gold", func(t *testing.T) *App {
+	// The pre-flight probe used to look for the task name ("write the gold"),
+	// but the name column is now sized to the container (M9) so a 27-char
+	// name is truncated at 80 columns — the probe went stale and the retry
+	// loop silently retried four times before failing. Probe for the
+	// progress counts instead: renderProgressBar always emits "n/m", it sits
+	// in the LAST column, and it is exactly the content the pre-fix layout
+	// truncated away.
+	app := retryWithFreshApp(t, "2/2", func(t *testing.T) *App {
 		hp := newHeadlessAppTasks(t, goldenWidth, goldenHeight)
 		switchView(t, hp, "t")
 		settleAsync()

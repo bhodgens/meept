@@ -1523,17 +1523,28 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case AgentLifecycleMsg:
-		// Any Active=true means THIS session's agent loop is running:
-		// the loop publishes lifecycle under its THREAD-scoped
-		// conversation id (thread router), which never equals the
-		// session conv this model holds — exact matching kept
-		// agentActive false forever and made ctrl+s steering
-		// unreachable (tui-steer-01 finding). Ended clears on the
-		// matching conv, empty (loop-wide end), or any conv while the
-		// single-active-agent TUI semantics hold.
+		// The loop publishes lifecycle under its OWN conversation id, which
+		// the thread router has already rewritten to a thread-scoped id
+		// (internal/agent/thread_router.go:140-151 ->
+		// Session.GetOrCreateThread mints "<session conv id>-thread-<topic>-<n>"
+		//; internal/agent/loop.go:2785 publishes that value verbatim). So the
+		// payload NEVER equals the session conv id this model holds and exact
+		// matching kept agentActive false forever — the bug that made ctrl+s
+		// steering unreachable (tui-steer-01).
+		//
+		// The stable key is the SESSION CONVERSATION PREFIX that both forms
+		// share: agentStartedFor reports whether msg.ConversationID belongs to
+		// the session this model is bound to. That survives the loop's
+		// conversation-id indirection (the thread suffix is stripped) while
+		// still rejecting another session's loop, so a background agent in
+		// session A can no longer steal the user's first message in session B.
+		//
+		// Ended clears on the same key, plus the loop-wide empty id.
 		if msg.Active {
-			m.agentActive = true
-		} else if !msg.Active && (msg.ConversationID == "" || msg.ConversationID == m.conversationID) {
+			if m.agentStartedFor(msg.ConversationID) {
+				m.agentActive = true
+			}
+		} else if msg.ConversationID == "" || m.agentStartedFor(msg.ConversationID) {
 			m.agentActive = false
 			m.steerMode = false
 			m.queueStatus = nil
@@ -3360,9 +3371,46 @@ func (m *ChatModel) GetMessages() []ChatMessage {
 // Steering and Follow-Up Queue Methods
 // ============================================================================
 
-// SetAgentActive updates the agent active state.
+// agentStartedFor reports whether an agent-lifecycle conversation id belongs
+// to the session this model is bound to.
+//
+// The daemon resolves a turn's conversation id BEFORE the loop runs
+// (internal/agent/handler.go:759-769): a chat.submit carrying session_id
+// resolves to the session's OWN conversation id, and only then does the
+// thread router re-key it for the LLM continuity lane
+// (internal/agent/dispatcher.go:2915-2926 ->
+// internal/agent/thread_router.go:140-151). Session.GetOrCreateThread mints a
+// thread id as "<session conv id>-thread-<topic>-<n>"
+// (internal/session/session.go:163), so the id the loop publishes
+// (internal/agent/loop.go:2785) is that suffixed form — never equal to the
+// session conv id the model holds.
+//
+// Comparing the SESSION CONVERSATION PREFIX is the stable key: it matches
+// both the bare session conv and any of its thread-scoped forms, and
+// rejects a different session's loop. Exact equality matches neither the
+// thread-scoped form (so ctrl+s steering was dead, tui-steer-01) nor nothing
+// at all (so a background agent in session A armed session B and the user's
+// first message in B was queued as a steer into A).
+func (m *ChatModel) agentStartedFor(conversationID string) bool {
+	if conversationID == "" {
+		// Loop-wide/unspecified id: cannot prove it is another session.
+		return true
+	}
+	mine := m.conversationID
+	if mine == "" {
+		return false
+	}
+	if conversationID == mine {
+		return true
+	}
+	// Thread-scoped form of THIS session's conversation.
+	return strings.HasPrefix(conversationID, mine+"-thread-")
+}
+
+// SetAgentActive updates the agent active state. It applies only when the
+// conversation id belongs to this model's session (see agentStartedFor).
 func (m *ChatModel) SetAgentActive(active bool, conversationID string) {
-	if conversationID == "" || conversationID == m.conversationID {
+	if m.agentStartedFor(conversationID) {
 		m.agentActive = active
 		if !active {
 			m.steerMode = false

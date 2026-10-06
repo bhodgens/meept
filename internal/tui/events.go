@@ -43,18 +43,34 @@ type EventStreamConfig struct {
 // DefaultEventStreamConfig returns default configuration.
 func DefaultEventStreamConfig() *EventStreamConfig {
 	return &EventStreamConfig{
+		// Topic patterns MUST be pairwise non-overlapping. bus.subscribe
+		// creates ONE COLLECTOR PER MATCHING PATTERN (internal/rpc/proxy.go:
+		// 452-456) and bus.poll returns every buffered record with no dedupe
+		// (:553-558), so a topic matched by two patterns is delivered to the
+		// TUI TWICE. The viz handlers absorb the duplicate (map-keyed pending
+		// buffer, viz/dispatch.go:360) but the activity feed renders
+		// RecentEvents(10) verbatim (sidebar.go:676-695), so every duplicated
+		// event appears twice on screen.
+		//
+		// matchWildcard requires EQUAL SEGMENT COUNTS (internal/bus/bus.go:
+		// 440), so the three agent forms below are mutually exclusive by
+		// construction. They are also the complete coverage: the narrower
+		// "agent.event.*" / "agent.progress.*" patterns that once sat here
+		// are strict subsets of "agent.*.*" and added nothing but a second
+		// delivery per event (bughunt H9).
+		//
+		// The 3- and 4-segment forms are load-bearing, not redundant:
+		// "agent.*" cannot see them, and without them the TUI never learns an
+		// agent went active (agentActive stays false, ctrl+s steering dead)
+		// and SteeringInjectedMsg never arrives (e2e finding tui-steer-01,
+		// 2026-10-01).
+		//
+		// TestTopicPatternsAreNonOverlapping pins this invariant across every
+		// published agent.* topic in the repo.
 		Topics: []string{
 			"agent.*",
-			// 3/4-segment agent topics (lifecycle, steer/followup queue):
-			// matchWildcard requires equal segment counts, so "agent.*"
-			// cannot see them — without these the TUI never learns an
-			// agent went active (agentActive stays false, ctrl+s steering
-			// dead) and SteeringInjectedMsg never arrives (e2e finding
-			// tui-steer-01, 2026-10-01).
 			"agent.*.*",
 			"agent.*.*.*",
-			"agent.event.*",
-			"agent.progress.*",
 			"task.*",
 			"step.*",
 			"queue.*",
@@ -89,6 +105,11 @@ func NewEventStream(rpc *RPCClient, cfg *EventStreamConfig) *EventStream {
 }
 
 // Start begins polling for events.
+//
+// Re-arming: done is re-made here, so a Stop -> Start cycle resumes
+// normally. The channel is allocated once in NewEventStream and closed by
+// Stop, so without the re-make the second Start handed back a stream whose
+// done channel was already closed — any future closer panicked.
 func (es *EventStream) Start() tea.Cmd {
 	es.mu.Lock()
 	if es.running {
@@ -96,6 +117,7 @@ func (es *EventStream) Start() tea.Cmd {
 		return nil
 	}
 	es.running = true
+	es.done = make(chan struct{})
 	es.mu.Unlock()
 
 	// Subscribe to topics synchronously to ensure subscription is ready before polling
@@ -129,7 +151,9 @@ func (es *EventStream) subscribe() {
 	es.subscriptionID = resp.SubscriptionID
 }
 
-// Stop stops the event stream.
+// Stop stops the event stream. It is idempotent: the running guard is taken
+// under the same mutex that closes done, so a second Stop — including one
+// racing a Stop from another goroutine — returns without closing twice.
 func (es *EventStream) Stop() {
 	es.mu.Lock()
 	if !es.running {
@@ -143,6 +167,10 @@ func (es *EventStream) Stop() {
 	// Snapshot subscription state before releasing the lock so the RPC
 	// call below does not perform I/O while holding the mutex.
 	subID := es.subscriptionID
+	// Clear it under the lock: a Start whose subscribe() fails (disconnected
+	// socket) must not leave Poll() polling a subscription id that no longer
+	// exists on the daemon.
+	es.subscriptionID = ""
 	es.mu.Unlock()
 
 	// Unsubscribe if we have a subscription

@@ -46,6 +46,7 @@ type SessionsModel struct {
 	selected     *types.Session
 	width        int
 	height       int
+	detailWidth  int // outer width of the right-hand detail pane, from SetSize
 	loading      bool
 	plansLoading bool
 	err          error
@@ -55,6 +56,11 @@ type SessionsModel struct {
 	showingDetail bool
 	showingHelp   bool
 }
+
+// detailGap is the horizontal space the sessions view leaves between the
+// table pane and the detail pane (each carries a one-cell border, so the
+// join needs no explicit gap).
+const detailGap = 4
 
 // SessionsRPCClient interface for the sessions model.
 type SessionsRPCClient interface {
@@ -124,25 +130,29 @@ func (m *SessionsModel) SetSize(width, height int) {
 	// Both axes must be set: the table viewport starts at width 0, and a
 	// zero-width viewport renders no rows (header only, blank body).
 	detailWidth := max(width/3, 30)
-	tableWidth := width - detailWidth - 4
+	m.detailWidth = detailWidth
+	// The table viewport gets what is left AFTER the detail pane and the gap
+	// between them. Clamped so a narrow pane cannot produce a negative (and
+	// therefore 1-column) table width.
+	tableWidth := max(width-detailWidth-detailGap, 1)
 	tableutil.Size(&m.table, tableWidth, tableHeight)
 
 	m.setSessionsColumns()
 }
 
 func (m *SessionsModel) setSessionsColumns() {
-	titleW := m.width*38/100 - 2
-	createdW := 12
-	activityW := 14
-
-	if titleW < 15 {
-		titleW = 15
-	}
+	// Fitted to the viewport (tableutil.FitWidthsMin): the fixed 12+14
+	// columns plus a 15-column title floor overflow a narrow pane, so
+	// bubbles/table rendered a box wider than its container and truncated
+	// every cell (M9).
+	mins := []int{15, 12, 14}
+	weights := []int{38, 12, 14}
+	widths := tableutil.FitWidthsMin(tableutil.ContentBudget(m.table.Width(), len(mins)), mins, weights)
 
 	m.table.SetColumns([]table.Column{
-		{Title: "title", Width: titleW},
-		{Title: "created", Width: createdW},
-		{Title: "last activity", Width: activityW},
+		{Title: "title", Width: widths[0]},
+		{Title: "created", Width: widths[1]},
+		{Title: "last activity", Width: widths[2]},
 	})
 
 	// Repopulate rows from cached data so resize doesn't wipe the table.
@@ -453,19 +463,22 @@ func (m *SessionsModel) View() string {
 
 	// Split into left (table) and right (detail) panes
 	detailWidth := max(m.width/3, 30)
-	tableWidth := m.width - detailWidth - 4
 
-	// Table
+	// Table. No Width here: lipgloss treats Width as a floor on the border
+	// block, so it re-expanded the (already fitted) table past the pane and
+	// pushed the join past the terminal. MaxWidth is the bound that matters.
 	tableStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(paletteColor("border")).
-		Width(tableWidth)
+		BorderForeground(paletteColor("border"))
 
-	// Detail pane
+	// Detail pane. Same: Width is a floor, MaxWidth is the ceiling. Without
+	// MaxWidth the bordered block grew to the detail CONTENT's width, so a
+	// long "created:" value rendered a pane wider than the space it was
+	// allocated (M9).
 	detailStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(paletteColor("primary")).
-		Width(detailWidth).
+		MaxWidth(detailWidth).
 		Height(m.height - 8)
 
 	var detailContent string
@@ -474,6 +487,8 @@ func (m *SessionsModel) View() string {
 	} else {
 		detailContent = lipgloss.NewStyle().
 			Foreground(paletteColor("textMuted")).
+			Width(max(detailWidth-4, 1)).
+			MaxWidth(max(detailWidth-4, 1)).
 			Italic(true).
 			Render("select a session")
 	}
@@ -482,11 +497,16 @@ func (m *SessionsModel) View() string {
 	b.WriteString(joined)
 	b.WriteString("\n")
 
-	// Help hint
+	// Help hint. Wrapped to the pane rather than rendered bare: this literal is
+	// 88 columns and lipgloss pads a style block to its widest line, so the
+	// hint — not the panes — was setting the view's width (M9). MarginTop is
+	// dropped for the same reason a margin block pads every line.
 	hintStyle := lipgloss.NewStyle().
 		Foreground(paletteColor("textMuted")).
-		MarginTop(1)
+		Width(m.width).
+		MaxWidth(m.width)
 
+	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("n: new | d: archive | D: delete | r: refresh | enter: details | up/down: navigate | f: search | ?: help"))
 
 	return b.String()
@@ -512,12 +532,20 @@ func (m *SessionsModel) renderSessionDetail() string {
 		return ""
 	}
 
+	// The value column carries every field's content, so it is the one that
+	// must be bounded: a bare 10-column label style plus an unbounded value
+	// lets one long field (a full "created: 2023-03-14 09:26" stamp) stretch
+	// the block past its pane, and the pane is then joined against the table
+	// and the sidebar (M9). The value column takes the pane's inner width
+	// minus the label.
+	inner := max(m.detailWidth-4, 1)
 	labelStyle := lipgloss.NewStyle().
 		Foreground(paletteColor("textMuted")).
 		Width(10)
-
 	valueStyle := lipgloss.NewStyle().
-		Foreground(paletteColor("textPrimary"))
+		Foreground(paletteColor("textPrimary")).
+		Width(max(inner-10, 1)).
+		MaxWidth(max(inner-10, 1))
 
 	var content strings.Builder
 

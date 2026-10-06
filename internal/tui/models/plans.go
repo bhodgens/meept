@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/table"
@@ -36,6 +37,12 @@ type PlansModel struct {
 	err       error
 	filter    PlanFilter
 	sessionID string
+
+	// sessionMu guards sessionID: SetSession writes it on the event-loop
+	// goroutine while fetchPlans (a tea.Cmd) reads it on the commands
+	// goroutine (bughunt fix-wave 2026-10-06, caught by -race in the
+	// golden plans view).
+	sessionMu sync.Mutex
 
 	// UI state
 	showingDetail bool
@@ -102,8 +109,24 @@ type PlanActionMsg struct {
 }
 
 // SetSession sets the session ID to filter plans for.
+//
+// fetchPlans runs as a tea.Cmd on a SEPARATE goroutine (bubbletea
+// handleCommands), while SetSession runs on the event-loop goroutine inside
+// App.Update. The plain string field needs its own lock or the two race
+// (-race caught this via the golden plans view: SetSession wrote while a
+// fetchPlans cmd from the PREVIOUS session read it).
 func (m *PlansModel) SetSession(sessionID string) {
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
 	m.sessionID = sessionID
+}
+
+// currentSessionID returns the session filter under the same lock fetchPlans
+// reads it with.
+func (m *PlansModel) currentSessionID() string {
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
+	return m.sessionID
 }
 
 // SetSize updates the model dimensions.
@@ -131,25 +154,24 @@ func (m *PlansModel) setPlansColumns() {
 	m.table.SetRows([]table.Row{})
 
 	// Plan view columns: Title | State | Phases | Steps | Progress | Updated
-	available := m.width - 10 // borders/padding
-	titleW := available * 26 / 100
-	stateW := 10
-	phasesW := 8
-	stepsW := 8
-	progressW := 12
-	updatedW := 10
-
-	if titleW < 15 {
-		titleW = 15
-	}
+	//
+	// Fitted to the viewport via tableutil.FitWidthsMin rather than
+	// hand-computed percentages: the fixed columns alone sum to 48 plus a
+	// 15-column title floor, which overruns a narrow pane and makes
+	// bubbles/table render a box wider than its container with every cell
+	// MaxWidth-truncated (M9). progress keeps room for an 8-cell bar plus
+	// its " n/m" label; title absorbs the surplus.
+	mins := []int{15, 10, 8, 8, 12, 10}
+	weights := []int{26, 10, 8, 8, 12, 10}
+	widths := tableutil.FitWidthsMin(tableutil.ContentBudget(m.table.Width(), len(mins)), mins, weights)
 
 	m.table.SetColumns([]table.Column{
-		{Title: "title", Width: titleW},
-		{Title: ColState, Width: stateW},
-		{Title: "phases", Width: phasesW},
-		{Title: "steps", Width: stepsW},
-		{Title: "progress", Width: progressW},
-		{Title: "updated", Width: updatedW},
+		{Title: "title", Width: widths[0]},
+		{Title: ColState, Width: widths[1]},
+		{Title: "phases", Width: widths[2]},
+		{Title: "steps", Width: widths[3]},
+		{Title: "progress", Width: widths[4]},
+		{Title: "updated", Width: widths[5]},
 	})
 }
 
@@ -160,8 +182,8 @@ func (m *PlansModel) Init() tea.Cmd {
 
 func (m *PlansModel) fetchPlans() tea.Msg {
 	var params map[string]any
-	if m.sessionID != "" {
-		params = map[string]any{"session_id": m.sessionID}
+	if id := m.currentSessionID(); id != "" {
+		params = map[string]any{"session_id": id}
 	}
 
 	raw, err := m.rpc.Call("plan.list_by_session", params)

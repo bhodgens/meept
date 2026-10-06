@@ -85,18 +85,27 @@ func (m *QueueModel) SetSize(width, height int) {
 	// zero-width viewport renders no rows (header only, blank body).
 	tableutil.Size(&m.table, width, tableHeight)
 
-	// Update column widths based on available space
-	remaining := width - 54 // ID(20) + type(12) + priority(10) + state(12)
-	taskWidth := max(remaining, 10)
+	// Update column widths based on available space.
+	//
+	// Fitted to the viewport (tableutil.FitWidthsMin) rather than computed
+	// from the pane width: the fixed columns are 54 wide before the task
+	// column, so a narrow pane (55 - 25 sidebar at 80 cols) made
+	// bubbles/table render a box wider than its container and
+	// MaxWidth-truncate every cell (M9). All FIVE columns are fitted
+	// together — sizing the four fixed ones and then handing the leftover to
+	// "task" double-counted the space and re-overflowed.
+	mins := []int{18, 8, 8, 8, 20}
+	weights := []int{18, 8, 8, 8, 20}
+	widths := tableutil.FitWidthsMin(tableutil.ContentBudget(m.table.Width(), len(mins)), mins, weights)
 	// SetColumns re-renders the installed rows, so clear them before the column
 	// list can change; the repopulate below restores them.
 	m.table.SetRows([]table.Row{})
 	m.table.SetColumns([]table.Column{
-		{Title: "id", Width: 20},
-		{Title: "type", Width: 12},
-		{Title: "priority", Width: 10},
-		{Title: ColState, Width: 12},
-		{Title: "task", Width: taskWidth},
+		{Title: "id", Width: widths[0]},
+		{Title: "type", Width: widths[1]},
+		{Title: "priority", Width: widths[2]},
+		{Title: ColState, Width: widths[3]},
+		{Title: "task", Width: widths[4]},
 	})
 
 	// Repopulate rows from cached data so a resize does not blank the table.

@@ -68,7 +68,7 @@ func normalizeGoldenView(t *testing.T, raw string) string {
 	// padding varies with terminal quirks but content must not.
 	lines := strings.Split(stripped, "\n")
 	for i, l := range lines {
-		lines[i] = strings.TrimRight(l, " \t")
+		lines[i] = strings.TrimRight(l, " 	")
 	}
 	for len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
@@ -78,9 +78,17 @@ func normalizeGoldenView(t *testing.T, raw string) string {
 
 // monthDayRe matches a month-abbreviation + day token ("Aug 21") —
 // the date half of the sessions/plan table's "Jan 02 15:04" cells.
-// These are wall-clock derived for any fixture younger than years, so
-// they are normalized like clock tokens (see the hazard note above).
-var monthDayRe = regexp.MustCompile(`\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}\b`)
+//
+// The DAY is deliberately NOT captured. An earlier `\b(Jan|…|Dec) \d{1,2}\b`
+// collapsed month AND day to one token, so "Aug 21" and "Aug 1" normalized
+// identically: a zero-padded-vs-single-digit regression (and any wrong day)
+// was undetectable in every golden. The token below captures only the month
+// name, leaving the day digits byte-for-byte compared; the month itself
+// stays normalized because it is the one component that genuinely moves at a
+// month boundary. Moot in practice now that the sessions fixture freezes its
+// timestamp to a fixed date (golden_views_test.go), but retained so any
+// future wall-clock fixture still has a stable month.
+var monthDayRe = regexp.MustCompile(`\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b`)
 
 // replaceClockTokens rewrites HH:MM tokens to a fixed placeholder.
 func replaceClockTokens(s string) string {
@@ -135,8 +143,19 @@ func assertGolden(t *testing.T, name, content string) {
 		"^X ", "^S ", "^P ", "^C ", "^X y", "^B ", "^V ",
 		"Task: ", "Steps: ",
 		"Make sure the meept daemon is running:",
-		"Aug ", "Jan ", // month abbreviations in date cells (time.Format)
-		"HH:MM", ":SS", // clock placeholders from replaceClockTokens
+		// Month abbreviations in date cells (time.Format), INCLUDING the
+		// column-truncated forms ("Mar 14" → "M…"/"Ma…" in a narrow
+		// sessions-table cell; a clock placeholder truncated at a column
+		// boundary leaves a lone "HH:M" whose trailing M strips only if
+		// the clock placeholder is replaced FIRST). The sessions fixture
+		// freezes its timestamp, so this covers a fixed month too — the
+		// names are enumerated rather than pattern-matched because the
+		// uppercase check itself is the assertion.
+		"HH:MM…", "HH:MM", "HH:", // clock placeholders from replaceClockTokens — LONGEST FIRST
+		"Jan ", "Feb ", "Mar ", "Apr ", "May ", "Jun ",
+		"Jul ", "Aug ", "Sep ", "Oct ", "Nov ", "Dec ",
+		"Ja…", "Fe…", "Ma…", "Ap…", "Ju…", // truncated 2-letter months
+		"J…", "F…", "M…", "A…", "S…", "O…", "N…", "D…", // truncated single-letter months
 		"D: delete", "R: retry",
 	}
 	for i, line := range strings.Split(normalized, "\n") {
@@ -182,7 +201,6 @@ func resetStatusApp(app *App) {
 	app.statusMessage = ""
 	app.statusMessageTime = time.Now().Add(-time.Hour)
 }
-
 
 // settleAsync gives async cmd goroutines (fetch results that land outside
 // any event-loop ordering — e.g. the session plans panel's "loading..." →
