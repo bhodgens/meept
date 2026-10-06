@@ -296,8 +296,11 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 		// parked.
 		if len(page) < pageSize || scanned >= maxScanRows {
 			if scanned >= maxScanRows {
-				q.logger.Debug("Claim scan hit row bound with no claimable job",
-					KeyJobID, "", "scanned", scanned, "bound", maxScanRows)
+				// Warn, not Debug: hitting the bound means claimable work may
+				// exist past the scan window (bounded starvation tradeoff) —
+				// operators should see it.
+				q.logger.Warn("Claim scan hit row bound with no claimable job",
+					"scanned", scanned, "bound", maxScanRows)
 			}
 			break
 		}

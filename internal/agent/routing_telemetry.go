@@ -27,7 +27,7 @@ func NewRoutingTelemetry(bus *bus.MessageBus, logger *slog.Logger) *RoutingTelem
 	return &RoutingTelemetry{bus: bus, logger: logger}
 }
 
-// publish is the shared fire-and-forget core: nil bus/nil receiver = no-op;
+// emit is the shared fire-and-forget core: nil bus/nil receiver = no-op;
 // marshal failures are logged at Debug and swallowed so telemetry can never
 // fail a routing decision.
 func (rt *RoutingTelemetry) emit(topic string, data map[string]any) {

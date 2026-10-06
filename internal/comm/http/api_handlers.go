@@ -16,6 +16,7 @@ import (
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
+	"github.com/caimlas/meept/internal/queue"
 )
 
 // DispatchSubmitter is the interface for cross-daemon task dispatch.
@@ -190,6 +191,11 @@ func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
 		s.writeError(w, http.StatusGatewayTimeout, err.Error())
 	case errors.Is(err, services.ErrUnavailable):
 		s.writeError(w, http.StatusServiceUnavailable, err.Error())
+	case errors.Is(err, queue.ErrJobNotClaimable):
+		// Completing a job that is not claimed/processing (pending, failed,
+		// already completed — e.g. requeued for another attempt) is a state
+		// conflict, not a server fault.
+		s.writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, services.ErrInternal):
 		s.logger.Error("service error", "error", err)
 		s.writeError(w, http.StatusInternalServerError, "internal server error")

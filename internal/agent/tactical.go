@@ -1253,10 +1253,13 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		if job, jobErr := ts.queue.Get(ctx, jobID); jobErr == nil && job != nil &&
 			job.State != queue.StateClaimed && job.State != queue.StateProcessing &&
 			job.State != queue.StateCompleted {
-			// pending/failed/dead = the job was requeued or failed after the
-			// event's attempt: stale. StateCompleted is FRESH, not stale —
-			// PersistentQueue.Complete sets 'completed' BEFORE publishing the
-			// event, so every legitimate completion observes 'completed' here.
+			// pending/failed = the job was requeued or failed after the
+			// event's attempt: stale. (Dead jobs never reach this check:
+			// moveToDead DELETES the row, so Get returns nil and the guard
+			// fails open — acceptable, dead jobs cannot be completed.)
+			// StateCompleted is FRESH, not stale — PersistentQueue.Complete
+			// sets 'completed' BEFORE publishing the event, so every
+			// legitimate completion observes 'completed' here.
 			ts.logger.Warn("stale completion event for requeued job",
 				"job_id", jobID,
 				"step_id", step.ID,
