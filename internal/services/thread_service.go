@@ -40,8 +40,16 @@ func (t *ThreadService) CreateThread(ctx context.Context, req CreateThreadReques
 	}
 
 	now := time.Now().UTC()
+	// Slug-sanitize the label (bughunt L11): the thread id is concatenated
+	// into "thread-<label>-<hex>", and ResolveThreadConversationID unwraps a
+	// thread conversation id on the LAST "-thread-". A label carrying that
+	// infix (or a '.' or path separator) would mint an id whose unwrapped
+	// base is not a real conversation id. The unwrap is fail-safe (nil, never
+	// a wrong session), but a lost session binding is still a lost binding —
+	// so the shape is removed at mint time. See session.ThreadSlug.
+	slug := session.ThreadSlug(req.TopicLabel)
 	thread := &session.Thread{
-		ID:             "thread-" + req.TopicLabel + "-" + id.Generate(""),
+		ID:             "thread-" + slug + "-" + id.Generate(""),
 		SessionID:      req.SessionID,
 		TopicLabel:     req.TopicLabel,
 		ConversationID: req.ConversationID,

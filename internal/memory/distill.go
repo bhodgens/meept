@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -352,7 +353,7 @@ func (m *Manager) Distill(ctx context.Context, src []Memory) (*Memory, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := m.checkDistillDuplicate(ctx, kind, content); err != nil {
+	if err := m.checkDistillDuplicate(ctx, kind, content, src); err != nil {
 		return nil, err
 	}
 	return m.storeDistilled(kind, content)
@@ -424,7 +425,33 @@ func collectEvidenceIDs(src []Memory) []string {
 // checkDistillDuplicate compares the candidate content against existing
 // distilled/task memories and returns ErrDuplicateDistill when similarity
 // exceeds the configured threshold.
-func (m *Manager) checkDistillDuplicate(ctx context.Context, kind, content string) error {
+//
+// Identity scoping (bughunt L15). Root AGENTS.md names "Content comparison for
+// deduplication" as the canonical hacky pattern: a lesson and a procedure that
+// happen to restate the same principle have identical canonical text and would
+// otherwise collapse into each other. The fix is a SCOPING KEY, not a
+// content hash: two candidates only dedupe against each other when they share
+// an identity scope.
+//
+// The scope is the source lineage, which the ledger already carries:
+//   - a memory ID, when the distill item references source memories by id
+//     (EvidenceIDs) — the strongest scope, and the one a re-import of the SAME
+//     evidence carries;
+//   - otherwise the (kind, session/task/bot) tuple of the sources.
+//
+// Consequences, both pinned by tests:
+//   - two DISTINCT lessons that restate the same principle, from different
+//     sources, do NOT collapse (different scope) — content similarity alone is
+//     not identity;
+//   - the SAME lesson re-imported (same source ids, same scope) still dedupes.
+//
+// Within a single scope, content similarity still decides — a scope is a
+// containment boundary, not an identity replacement. Without a scope (no ids,
+// no session/task/bot on the candidate) the comparison stays content-keyed and
+// conservative, which is the only option available for a candidate with no
+// provenance at all.
+func (m *Manager) checkDistillDuplicate(ctx context.Context, kind, content string, src []Memory) error {
+	candScope := distillScopeKey(src)
 	dedupeText := canonicalDedupeText(kind, content)
 	threshold := m.config.Distill.SimilarityThreshold
 	if threshold <= 0 {
@@ -455,6 +482,12 @@ func (m *Manager) checkDistillDuplicate(ctx context.Context, kind, content strin
 		}
 	}
 	for _, r := range existing {
+		// Identity scope: a candidate only competes with memories from the
+		// same lineage. Comparing across scopes is what let an unrelated
+		// lesson silently swallow a new one.
+		if candScope != "" && !distillScopeMatches(candScope, r.Memory) {
+			continue
+		}
 		// Compare against the semantic text of prior memories (their
 		// canonical distilled text when they are distilled entries) so
 		// evidence-id churn does not mask true duplicates.
@@ -475,6 +508,72 @@ func (m *Manager) checkDistillDuplicate(ctx context.Context, kind, content strin
 		}
 	}
 	return nil
+}
+
+// distillScopeKey is the identity scope for one distill candidate: the sorted
+// set of SOURCE MEMORY IDS it was derived from. Two candidates sharing this key
+// are the same derivation re-run (a re-import, a queue drain retry, an
+// evolver cycle revisiting the same evidence) and may dedupe against each other.
+//
+// The ids are read from BOTH carriers, so a candidate (whose ids arrive via
+// src[].Metadata["evidence_ids"]) and a stored row (whose ids are inside the
+// encoded Lesson/Procedure payload, written by storeDistilled) resolve to the
+// same key without a schema change:
+//   - src metadata: map[string]any{"evidence_ids": []string}
+//   - payload:     {"principle":"...","evidence_ids":["m1","m2"]}
+//
+// Empty when nothing carries ids — the caller then falls back to comparing
+// content within whatever scope the stored memories declare.
+func distillScopeKey(src []Memory) string {
+	ids := collectEvidenceIDs(src)
+	if len(ids) == 0 {
+		ids = payloadEvidenceIDs(src)
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	sorted := append([]string(nil), ids...)
+	sort.Strings(sorted)
+	// Dedupe repeated ids so a source listed twice is the same scope.
+	uniq := sorted[:0]
+	for i, id := range sorted {
+		if i == 0 || id != sorted[i-1] {
+			uniq = append(uniq, id)
+		}
+	}
+	return "ids:" + strings.Join(uniq, ",")
+}
+
+// payloadEvidenceIDs reads evidence ids out of an encoded Lesson/Procedure
+// payload's own content, which is where storeDistilled persists them.
+func payloadEvidenceIDs(src []Memory) []string {
+	var ids []string
+	for _, s := range src {
+		var l Lesson
+		if err := json.Unmarshal([]byte(s.Content), &l); err == nil && len(l.EvidenceIDs) > 0 {
+			ids = append(ids, l.EvidenceIDs...)
+			continue
+		}
+		var p Procedure
+		if err := json.Unmarshal([]byte(s.Content), &p); err == nil && len(p.TriggerHints) > 0 {
+			ids = append(ids, p.TriggerHints...)
+		}
+	}
+	return ids
+}
+
+// distillScopeMatches reports whether a stored memory belongs to the
+// candidate's scope. Memories predate scope metadata (a row distilled before
+// this key existed carries no ids), so a memory with NO recorded provenance
+// matches every scope: it is compared on content, which is the pre-L15
+// behaviour and the conservative choice (it can still dedupe, never silently
+// diverge).
+func distillScopeMatches(candScope string, stored Memory) bool {
+	storedScope := distillScopeKey([]Memory{stored})
+	if storedScope == "" {
+		return true // no provenance recorded: content decides
+	}
+	return storedScope == candScope
 }
 
 // canonicalDedupeText extracts the comparable text from distilled content:

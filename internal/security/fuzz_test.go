@@ -46,15 +46,40 @@ func FuzzInputSanitizer(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, text string) {
+		inputValid := utf8.ValidString(text)
 		for _, s := range sanitizers {
 			res := s.Sanitize(text)
 
-			// Escaping is zero-width-space insertion, never byte
-			// corruption: valid-UTF-8 input must produce valid-UTF-8
-			// output. (Arbitrary fuzz bytes pass through unchanged, so
-			// invalid-UTF-8 in -> invalid out is acceptable.)
-			if utf8.ValidString(text) && !utf8.ValidString(res.CleanText) {
+			// Escaping is zero-width-space INSERTION, never byte
+			// corruption, so the target's contract is symmetric in the
+			// two directions, and BOTH must be asserted:
+			//
+			//   valid input  -> valid output   (never corrupt a clean body)
+			//   invalid input -> invalid output (pass through untouched;
+			//                     the sanitizer's patterns are UTF-8
+			//                     regexes, so a byte-level rewrite of
+			//                     invalid input would be CORRUPTION, not
+			//                     escaping)
+			//
+			// The second clause is the case the stale corpus entry
+			// (testdata/fuzz/FuzzInputSanitizer/828d5059791d0353, a bare
+			// 0xE0 byte) exercises. Gating BOTH arms on
+			// utf8.ValidString(text) — the shape that was there — made the
+			// invariant vacuous for exactly that input and turned the
+			// reproducer into a permanently-passing no-op that misled the
+			// next auditor.
+			//
+			// One nuance is asserted rather than assumed: a hostile input
+			// can still be MODIFIED (WasModified) while remaining invalid,
+			// because a zero-width space is itself valid UTF-8 inserted
+			// beside an invalid byte. That is not corruption, so the
+			// invariant stays on validity, not on byte-identity.
+			switch {
+			case inputValid && !utf8.ValidString(res.CleanText):
 				t.Fatalf("valid UTF-8 input produced invalid UTF-8 CleanText (strictness %v): %q", s.Strictness, res.CleanText)
+			case !inputValid && utf8.ValidString(res.CleanText):
+				t.Fatalf("invalid UTF-8 input was silently REPAIRED into valid UTF-8 (strictness %v): %q -> %q",
+					s.Strictness, text, res.CleanText)
 			}
 
 			// Raw (unescaped) boundary markers must never survive: each is

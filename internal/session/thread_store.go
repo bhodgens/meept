@@ -240,7 +240,13 @@ func CreateThreadInSession(session *Session, topicLabel string) *Thread {
 		session.Threads = make(map[string]*Thread)
 	}
 
-	threadID := "thread-" + topicLabel + "-" + id.Generate("")
+	// Slug-sanitize the label (bughunt L11): the thread id becomes part of
+	// ConversationID as "<conv id>-thread-<slug>-<hex>", and
+	// ResolveThreadConversationID unwraps on the LAST "-thread-". An
+	// unsanitized label containing "-thread-" (or a '.' or path separator)
+	// would mint an id whose unwrapped base is not a real conversation id —
+	// fail-safe, but it loses the session binding. See ThreadSlug.
+	threadID := "thread-" + ThreadSlug(topicLabel) + "-" + id.Generate("")
 
 	// Deactivate other threads
 	for _, t := range session.Threads {

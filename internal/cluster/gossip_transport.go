@@ -134,6 +134,11 @@ func (t *GossipTransport) Stop() error {
 	return nil
 }
 
+// maxConcurrentPeerSends bounds the number of in-flight peer-send goroutines
+// per SendEvent fan-out. SendEvent acquires a slot BEFORE spawning, so the
+// bound holds even when the event targets more peers than there are slots.
+const maxConcurrentPeerSends = 32
+
 // SendEvent sends a cluster event to all known active peers via TCP.
 // This is called by the GossipEngine after publishing an event locally.
 // Uses a buffered channel to bound the number of concurrent send goroutines.
@@ -156,7 +161,15 @@ func (t *GossipTransport) SendEvent(event *models.ClusterEvent) {
 
 	// Limit concurrent send goroutines to prevent unbounded growth.
 	// Most clusters have far fewer peers than this limit.
-	sem := make(chan struct{}, 32)
+	//
+	// The slot is ACQUIRED HERE, before the goroutine spawns (bughunt L7):
+	// sendToPeer's deferred `<-sem` was the ONLY read of this channel and no
+	// write existed anywhere, so every send goroutine blocked forever on the
+	// deferred receive — one permanently parked goroutine per peer per event,
+	// and a semaphore that bounded nothing. Acquiring synchronously makes
+	// "acquire before spawn, release in the goroutine" the enforced shape: at
+	// most maxConcurrentPeerSends sends are ever in flight.
+	sem := make(chan struct{}, maxConcurrentPeerSends)
 
 	for nodeID, member := range members {
 		if nodeID == t.localNode {
@@ -169,7 +182,14 @@ func (t *GossipTransport) SendEvent(event *models.ClusterEvent) {
 		}
 
 		peerAddr := t.peerGossipAddr(member)
-		go t.sendToPeer(sem, peerAddr, nodeID, data, event.EventID)
+		// Copy the payload per peer: sendToPeer does
+		// append(data, '\n') which may reallocate or write in place —
+		// sharing the backing array across concurrent goroutines is a
+		// data race (caught by -race in the L7 semaphore pin).
+		payload := make([]byte, len(data))
+		copy(payload, data)
+		sem <- struct{}{}
+		go t.sendToPeer(sem, peerAddr, nodeID, payload, event.EventID)
 	}
 }
 

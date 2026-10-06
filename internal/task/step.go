@@ -576,6 +576,38 @@ func (s *StepStore) Create(step *TaskStep) error {
 	return nil
 }
 
+// stepUpdateQuery is the full-width single-step UPDATE. stepPhaseUpdateQuery
+// (UpdatePhaseSteps) MUST assign exactly the same columns in the same order:
+// the batch path re-writes every column, so a column present in one statement
+// and missing from the other is silently DROPPED on that path with no error
+// (bughunt M11: `suggested_next_hint` was written by Update and dropped by
+// UpdatePhaseSteps, so a hint adopted during a completion evaporated on the
+// next phase transition). Both are package constants so a parity test can
+// compare them directly — TestStepStore_UpdateAndUpdatePhaseStepsAgreeOnColumns.
+const (
+	stepUpdateQuery = `
+		UPDATE task_steps
+		SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
+		    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
+		    recommendations = ?, evidence = ?, claims = ?, validated = ?,
+		    validation_error = ?, filter_retry_count = ?, filter_error = ?,
+		    token_usage = ?, memory_refs = ?, accumulated_context = ?,
+		    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, is_handoff = ?,
+		    conversation_id = ?, session_id = ?, suggested_next_hint = ?, updated_at = ?
+		WHERE id = ?`
+
+	stepPhaseUpdateQuery = `
+			UPDATE task_steps
+			SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
+			    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
+			    recommendations = ?, evidence = ?, claims = ?, validated = ?,
+			    validation_error = ?, filter_retry_count = ?, filter_error = ?,
+			    token_usage = ?, memory_refs = ?, accumulated_context = ?,
+			    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, is_handoff = ?,
+			    conversation_id = ?, session_id = ?, suggested_next_hint = ?, updated_at = ?
+			WHERE id = ?`
+)
+
 // Update updates an existing task step and records state transitions.
 //
 // A-09 FIX: The SELECT, UPDATE, and state-transition INSERT are wrapped in a
@@ -609,16 +641,7 @@ func (s *StepStore) Update(step *TaskStep) error {
 	checklistJSON := encodeChecklist(step.Checklist)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err = tx.ExecContext(ctx, `
-		UPDATE task_steps
-		SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
-		    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
-		    recommendations = ?, evidence = ?, claims = ?, validated = ?,
-		    validation_error = ?, filter_retry_count = ?, filter_error = ?,
-		    token_usage = ?, memory_refs = ?, accumulated_context = ?,
-		    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, is_handoff = ?,
-		    conversation_id = ?, session_id = ?, suggested_next_hint = ?, updated_at = ?
-		WHERE id = ?`,
+	_, err = tx.ExecContext(ctx, stepUpdateQuery,
 		step.Description,
 		nullableString(depsJSON),
 		nullableString(step.ToolHint),
@@ -684,6 +707,14 @@ func (s *StepStore) Update(step *TaskStep) error {
 // for bulk field updates (ConversationID, AccumulatedContext, etc.) where the
 // State field is not changing. If individual state transitions are needed,
 // call Update per step.
+//
+// The SET list here is FULL WIDTH on purpose: it mirrors Update's column set
+// exactly. This path re-writes every column, so any column missing here is
+// SILENTLY dropped on a phase transition — a field set on one path (e.g. a
+// `suggested_next_hint` adopted during a completion) evaporates on the phase
+// path with no error. Adding a column to task_steps means adding it to BOTH
+// statements plus this arg list; the placeholder and argument counts must stay
+// equal (a mismatch surfaces as a runtime bind error on the first step).
 func (s *StepStore) UpdatePhaseSteps(steps []*TaskStep) error {
 	ctx := context.Background()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -702,16 +733,7 @@ func (s *StepStore) UpdatePhaseSteps(steps []*TaskStep) error {
 		memoryRefsJSON := encodeStringSlice(step.MemoryRefs)
 		checklistJSON := encodeChecklist(step.Checklist)
 
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE task_steps
-			SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
-			    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
-			    recommendations = ?, evidence = ?, claims = ?, validated = ?,
-			    validation_error = ?, filter_retry_count = ?, filter_error = ?,
-			    token_usage = ?, memory_refs = ?, accumulated_context = ?,
-			    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, is_handoff = ?,
-			    conversation_id = ?, session_id = ?, updated_at = ?
-			WHERE id = ?`,
+		if _, err := tx.ExecContext(ctx, stepPhaseUpdateQuery,
 			step.Description,
 			nullableString(depsJSON),
 			nullableString(step.ToolHint),
@@ -738,6 +760,7 @@ func (s *StepStore) UpdatePhaseSteps(steps []*TaskStep) error {
 			step.IsHandoff,
 			nullableString(step.ConversationID),
 			nullableString(step.SessionID),
+			nullableString(step.SuggestedNextHint),
 			now,
 			step.ID,
 		); err != nil {

@@ -622,3 +622,40 @@ func TestCreateThread_GeneratesUniqueIDs(t *testing.T) {
 		ids[thread.ID] = true
 	}
 }
+
+// TestCreateThread_SlugSanitizesHostileTopicLabel is the L11 pin for the
+// service mint path. A user-supplied topic label is attacker-influenced input:
+// concatenating it raw into "thread-<label>-<hex>" would let a label carrying
+// "-thread-" (or a '.' or a path separator) mint a thread id whose unwrapped
+// base (session.ResolveThreadConversationID) is not a real conversation id.
+// The unwrap is fail-safe — nil, never a wrong-session binding — but the shape
+// is removed at mint time so the binding is never lost in the first place.
+// TopicLabel (the human-readable label) is preserved byte-identical.
+func TestCreateThread_SlugSanitizesHostileTopicLabel(t *testing.T) {
+	t.Parallel()
+	store, sessID := newThreadTestStore(t)
+	s := NewThreadService(store)
+
+	hostile := "a-thread-conv-victim/../../etc"
+	thread, err := s.CreateThread(context.Background(), CreateThreadRequest{
+		SessionID:  sessID,
+		TopicLabel: hostile,
+	})
+	if err != nil {
+		t.Fatalf("CreateThread() error: %v", err)
+	}
+	for _, bad := range []string{session.ThreadIDSeparator, ".", "/", "\\"} {
+		if strings.Contains(thread.ID, bad) {
+			t.Errorf("minted thread ID %q must not contain %q", thread.ID, bad)
+		}
+	}
+	if !strings.HasPrefix(thread.ID, "thread-") {
+		t.Errorf("minted thread ID %q must keep the thread- prefix", thread.ID)
+	}
+	// The DISPLAY label keeps the user's text verbatim — the slug is for the
+	// id only.
+	if thread.TopicLabel != hostile {
+		t.Errorf("TopicLabel = %q, want the original label %q (slug applies to the ID only)",
+			thread.TopicLabel, hostile)
+	}
+}
