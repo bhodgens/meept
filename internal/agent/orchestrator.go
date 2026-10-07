@@ -415,6 +415,9 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 	var event struct {
 		JobID  string          `json:"job_id"`
 		Result json.RawMessage `json:"result"`
+		// ClaimToken is the attempt that produced this completion (bughunt H2).
+		// Empty on the token-less legacy shape, which the guard handles.
+		ClaimToken string `json:"claim_token"`
 	}
 	if err := json.Unmarshal(msg.Payload, &event); err != nil {
 		o.logger.Error("Failed to parse job completed event", "error", err)
@@ -427,7 +430,7 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 	// previous ralph-replan early return) left the task non-terminal, so
 	// waitForTaskCompletion blocked until its 10-minute cap — meept-bench
 	// timed out even after answer.txt was written.
-	if err := o.tactical.OnJobCompleted(ctx, event.JobID, event.Result); err != nil {
+	if err := o.tactical.OnJobCompleted(ctx, event.JobID, event.Result, event.ClaimToken); err != nil {
 		o.logger.Error("Failed to handle job completion",
 			"job_id", event.JobID,
 			"error", err,

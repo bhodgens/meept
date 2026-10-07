@@ -90,6 +90,16 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
   both shapes, and a requeued/failed job is rejected by both. When the job
   cannot be read (`ok=false`) the guard fails OPEN: dead jobs cannot be
   completed.
+  The capability MUST be forwarded on every real queue type, or the guard is
+  dead code (bughunt H2): `Store.CompletionIsFresh` existed but
+  `PersistentQueue` held `store` as an unexported field without embedding it, so
+  the method never reached the queue's method set and the assertion always
+  failed. `PersistentQueue` and `ClusterQueue` both forward it now, and
+  `TestQueueExposesAttemptCapabilities` asserts the real types satisfy it — a
+  hand-rolled test double that declares the missing method cannot catch this.
+  `queue.job.completed` carries `claim_token`, so the guard asks the
+  token-exact question rather than degrading to the state-only one; an empty
+  token (an older publisher) still falls back correctly.
 - **Quota failures surface to the user.** Terminal
   `*llm.QuotaResetError` in a step job publishes the existing
   `agent.quota_wait` event and appends a user-language quota sentence
