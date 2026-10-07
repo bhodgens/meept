@@ -244,31 +244,8 @@ func parseHandoffSections(summary string) map[string]string {
 	return sections
 }
 
-// thinkBlockRe matches inline <think>...</think> reasoning blocks
-// (case-insensitive, across newlines). Some thinking models inline their
-// chain-of-thought into the assistant content even when asked not to.
-var thinkBlockRe = regexp.MustCompile(`(?is)<think>.*?</think>`)
-
-// unclosedThinkRe matches a leading <think> block whose closing tag never
-// arrives (e.g. a truncated/stop-sequence-ended response): everything from
-// the opening tag to end-of-string.
-var unclosedThinkRe = regexp.MustCompile(`(?is)^\s*<think>.*$`)
-
-// reasoningContentLineRe matches a leading "reasoning_content": "..." text
-// fragment some servers inline at the top of the content when the reasoning
-// channel is misconfigured.
-var reasoningContentLineRe = regexp.MustCompile(`(?is)^\s*"?reasoning_content"?\s*:\s*"(?:[^"\\]|\\.)*"\s*`)
-
 // stripThinking removes leaked chain-of-thought from model output so
-// summaries never carry reasoning text. Handles: any number of closed
-// <think>...</think> blocks anywhere in the string, a leading unclosed
-// <think> block, and a leading reasoning_content fragment. The result is
-// trimmed. Chain-of-thought arriving in Response.Reasoning never reaches
-// here — the client parses that into a separate field, which
-// summarization ignores.
-func stripThinking(content string) string {
-	out := thinkBlockRe.ReplaceAllString(content, "")
-	out = unclosedThinkRe.ReplaceAllString(out, "")
-	out = reasoningContentLineRe.ReplaceAllString(out, "")
-	return strings.TrimSpace(out)
-}
+// summaries never carry reasoning text. Chain-of-thought arriving in
+// Response.Reasoning never reaches here — the client parses that into a
+// separate field, which summarization ignores.
+func stripThinking(content string) string { return StripThinking(content) }
