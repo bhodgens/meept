@@ -563,44 +563,52 @@ func payloadEvidenceIDs(src []Memory) []string {
 }
 
 // distillScopeMatches reports whether a stored memory belongs to the
-// candidate's scope. Memories predate scope metadata (a row distilled before
-// this key existed carries no ids), so a memory with NO recorded provenance
-// matches every scope: it is compared on content, which is the pre-L15
-// behaviour and the conservative choice (it can still dedupe, never silently
-// diverge).
-// A stored row with NO recorded provenance matches ANY candidate, so the
-// comparison falls back to content similarity. That is deliberate for the
-// no-provenance candidate (nothing better exists) and is pinned by
-// TestDistill_NoEvidenceIDsStillDedupesOnContent.
+// candidate's scope, i.e. whether the candidate may COMPETE with it.
+//
+// Direction matters and is asymmetric on purpose (bughunt M2, owner decision
+// "exclude"):
+//
+//   - candidate HAS a scope, stored row has none → NO MATCH. The stored row
+//     predates evidence_ids, so nothing links it to this lineage. Comparing on
+//     content alone is what let an unrelated legacy lesson swallow a new one —
+//     the exact failure the identity scope was added to stop. A near-duplicate
+//     that lands twice is VISIBLE and cheap; a silently swallowed lesson is
+//     neither.
+//   - candidate HAS a scope, stored row has the same scope → match.
+//   - candidate HAS a scope, stored row has a DIFFERENT scope → no match.
+//   - candidate has NO scope → match everything. Nothing better exists for a
+//     candidate with no provenance, and failing closed here would let unbounded
+//     duplicates accumulate. This is the pre-L15 behaviour, pinned by
+//     TestDistill_NoEvidenceIDsStillDedupesOnContent.
+//
+// The cost of the exclude rule is that near-duplicates can re-admit during the
+// transition, until every legacy row carries evidence ids. That is the intended
+// trade: visible duplicates over invisible data loss.
 func distillScopeMatches(candScope string, stored Memory) bool {
+	if candScope == "" {
+		return true // candidate has no identity to compare on
+	}
 	storedScope := distillScopeKey([]Memory{stored})
 	if storedScope == "" {
-		return true // no provenance recorded: content decides
+		return false // legacy row: not provably this lineage (bughunt M2)
 	}
 	return storedScope == candScope
 }
 
-// TODO(bughunt-2026-10-06): the scope fallback above is a CONTENT comparison —
-// the exact pattern root AGENTS.md names as hacky and requires a TODO for. It is
-// retained deliberately (opt-in feature, Distill is off by default) because a
-// candidate with no provenance has no identity to compare on, and failing
-// closed would let unbounded duplicates accumulate.
+// TODO(bughunt-2026-10-07): the exclude rule above re-admits near-duplicates
+// while legacy rows lack evidence_ids. Backfill removes the transition cost
+// entirely: re-stamp existing distilled rows with the ids their Lesson/Procedure
+// payloads already carry (storeDistilled writes them), then this TODO closes.
 //
-// The residual gap is the TRANSITION period: rows written BEFORE evidence_ids
-// existed carry no scope, so a scoped candidate still competes against them on
-// content alone — the same-lineage lesson can be swallowed by an unrelated
-// legacy row. Closing it needs an owner decision, not a drive-by:
+// Until then the exclude direction is the deliberate trade — a duplicate is
+// visible, a swallowed lesson is not — and blast radius stays opt-in (Distill
+// is off by default).
 //
-//   (a) BACKFILL — re-stamp existing distilled rows with the evidence ids their
-//       Lesson/Procedure payloads already carry, then drop the fallback; or
-//   (b) EXCLUDE — a scoped candidate skips unscoped rows entirely, which is
-//       strictly safer (a duplicate is visible; a swallowed lesson is not) but
-//       re-admits near-duplicates during the transition.
-//
-// Neither is chosen here: (a) is a data migration and (b) trades a duplicate for
-// a silent loss, which is a product decision. Blast radius is opt-in only.
-
-// canonicalDedupeText extracts the comparable text from distilled content:
+// DECIDED by the owner 2026-10-07 as option (b) EXCLUDE, over (a) BACKFILL:
+// (a) is a data migration on user rows, and it has to be right for every
+// legacy row shape; (b) is one line, cannot lose data, and can be revised later
+// once a backfill proves out. Option (a) remains the follow-up, not a
+// rejection.// canonicalDedupeText extracts the comparable text from distilled content:
 // the principle for lessons, title+steps for procedures, falling back to the
 // raw content for non-distilled entries.
 func canonicalDedupeText(kind, content string) string {

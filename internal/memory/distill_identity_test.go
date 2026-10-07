@@ -173,3 +173,57 @@ func TestDistill_NoEvidenceIDsStillDedupesOnContent(t *testing.T) {
 		t.Fatal("a no-provenance re-import must still dedupe on content")
 	}
 }
+
+
+// TestDistill_ScopedCandidateNotSwallowedByLegacyUnscopedRow is the bughunt M2
+// pin for the owner-decided EXCLUDE direction.
+//
+// The residual gap the identity scope left: rows distilled BEFORE evidence_ids
+// existed carry no scope. distillScopeMatches used to treat an unscoped stored
+// row as matching EVERY candidate, so during the transition a scoped candidate
+// still competed against legacy rows on content alone — and an unrelated legacy
+// lesson could swallow a new one. That is the precise failure the scope was
+// added to stop.
+//
+// This seeds a LEGACY row directly (a stored lesson with no evidence_ids — no
+// Distill call, because Distill now stamps them), then distills a SCOPED
+// candidate whose summarizer emits the byte-identical principle. Under the old
+// fallback the candidate was classified a duplicate and thrown away.
+//
+// Expectation after the fix: the candidate is STORED. A near-duplicate landing
+// twice is visible and cheap; a silently swallowed lesson is neither.
+func TestDistill_ScopedCandidateNotSwallowedByLegacyUnscopedRow(t *testing.T) {
+	mgr := mustDistillManager(t)
+	defer mgr.Close()
+	mgr.config.Distill = config.MemoryDistillConfig{Enabled: true, SimilarityThreshold: 0.8}
+
+	// Seed a legacy row: a stored lesson with NO evidence ids, exactly the shape
+	// a row predating the scope key has on disk.
+	legacyContent, err := EncodeLesson(Lesson{
+		Principle: strings.Repeat("always verify the migration plan ", 4),
+		Because:   "seeding a legacy unscoped row",
+		// EvidenceIDs intentionally empty — that IS the legacy shape.
+	})
+	if err != nil {
+		t.Fatalf("EncodeLesson: %v", err)
+	}
+	if _, err := mgr.Store(context.Background(), Memory{
+		Content:  legacyContent,
+		Type:     MemoryTypeTask,
+		Category: DomainLesson,
+	}); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	// The scoped candidate summarizes to the BYTE-IDENTICAL principle, so pure
+	// content comparison would call it a duplicate.
+	mgr.SetDistillSummarizer(&fakeDistillSummarizer{
+		lessonPayload: `{"principle":"` + strings.Repeat("always verify the migration plan ", 4) + `"}`,
+	})
+
+	if _, err := mgr.Distill(context.Background(),
+		[]Memory{distillSource("a new scoped observation", "mem-new")}); err != nil {
+		t.Fatalf("a legacy unscoped row must not swallow a scoped candidate "+
+			"(bughunt M2): %v", err)
+	}
+}
