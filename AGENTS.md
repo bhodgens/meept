@@ -292,6 +292,14 @@ for new features.** Existing unit tests may be updated for bug fixes only.
   `make e2e-affected` (suites affected by the working diff, via
   `scripts/e2e-affected.sh`). The fast tier is hermetic and runs in CI;
   `make e2e-chat` is the live-model tier, local-only.
+- Scratch-bin hygiene: the harness builds meept-daemon/meept once per test
+  process into `$TMPDIR/meept-e2e-bin*`. A detached watchdog reaper
+  (`e2e/harness/daemon.go`) removes that dir seconds after the test
+  process exits; a 24h-age sweep runs at first harness use, and `make
+  e2e-clean-tmp` is the standalone/belt-and-braces sweep wired into all
+  three `make e2e-*` Go targets. Do not reintroduce an ownerless
+  `os.MkdirTemp("", "meept-e2e-bin...")` — an earlier version of the
+  harness leaked one ~136 MiB dir per test process (219 GiB observed).
 - Enforcement: pre-commit check [18/18] (`pre-commit-e2e`) runs the affected
   suites on staged `internal/|pkg/|cmd/` Go changes and blocks commits that
   add files under a NEW package directory without an e2e suite + manifest
