@@ -141,6 +141,36 @@ concurrent-send data race deserves its own investigation rather than a drive-by.
 `internal/shadow`'s `-race` failure is the documented ephemeral-port exhaustion
 (`dial tcp 127.0.0.1:51299: can't assign requested address`), not a race.
 
+### Second triage: the full-suite repro's other 24 failures
+
+A later full-suite run (`/tmp/tui-repro.log`, 103 ok) failed 24 tests across 4
+packages. Classified:
+
+- **23 are the documented ephemeral-port exhaustion** — every one carries
+  `dial tcp 127.0.0.1:NNNNN: connect: can't assign requested address`, the exact
+  error in AGENTS.md's `-p 2` note. Packages: `internal/tools/builtin`,
+  `internal/tools/mcp/transport`, `internal/transport`. Not code defects;
+  the documented remedy is bounded package parallelism.
+- **1 is a wall-clock assertion in a package this wave touched**:
+  `TestWorker_RetryWakesIdleWorker` — `re-claim after the retry gate opened took
+  3.999392s, want < 400ms` (`internal/worker/worker_retry_wakeup_test.go:112`).
+
+That one is the SAME class as the TUI golden flake, and it is deliberately NOT
+"fixed" by widening the budget, because its margin is the assertion:
+
+> 400ms is a margin a poll cycle cannot sneak under, so a regression fails the
+> pin instead of merely slowing it down.
+
+A poll-only worker rediscovers the job on its idle backoff (starts at 1s,
+doubles), so any threshold above ~1s stops discriminating. The observed 3.999s
+under full-suite load is the port-exhausted run starving the scheduler, not a
+wake regression.
+
+Measured: 3/3 in isolation (1.10-1.59s), 5/5 under 4-way load, 6/6 under 6-way
+load. Left as-is; recorded here so the next reader knows it was triaged, not
+skipped. **If it recurs, the fix is CI-side** (bound `-p` in the full-suite job),
+not a wider constant.
+
 ## Deliberately not done
 
 1. **`TestGoldenTasksView` flake** — out of scope (no `internal/tui` file in this
