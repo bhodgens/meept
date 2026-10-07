@@ -2,6 +2,7 @@ package plan
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -182,6 +183,71 @@ func TestManagerCreatePlanSlugCollisionDisambiguates(t *testing.T) {
 	}
 	if !strings.Contains(string(secondData), "- plan_id: "+second.ID) {
 		t.Errorf("second plan file does not carry its plan_id; got:\n%s", secondData)
+	}
+}
+
+// TestManagerCreatePlan_ConcurrentSameTitleNeverClobbers (bughunt M1) is the pin
+// the sequential collision test could not provide.
+//
+// TestManagerCreatePlanSlugCollisionDisambiguates calls CreatePlan twice in
+// sequence, so it passes against the OLD stat-then-write loop: the second call
+// observed the first file already on disk. Two CONCURRENT calls both observe
+// "missing" and both pick the same suffix, so both write the same path — the
+// exact clobber the guard exists to prevent, just at a narrower window. This
+// test runs them in parallel and asserts every plan gets its own file and keeps
+// its own plan_id on disk.
+func TestManagerCreatePlan_ConcurrentSameTitleNeverClobbers(t *testing.T) {
+	mgr, dir := setupTestManagerWithDir(t)
+	ctx := context.Background()
+
+	const n = 8
+	start := make(chan struct{})
+	paths := make([]string, n)
+	ids := make([]string, n)
+	errs := make([]error, n)
+
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // release the herd so the calls genuinely race
+			p, err := mgr.CreatePlan(ctx, "Refactor Auth System", "desc", "proj-1", dir, fmt.Sprintf("sess-%03d", i))
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			paths[i] = p.FilePath
+			ids[i] = p.ID
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("CreatePlan[%d]: %v", i, err)
+		}
+	}
+
+	seen := make(map[string]int, n)
+	for i, p := range paths {
+		if prev, dup := seen[p]; dup {
+			t.Fatalf("plans %d and %d share file path %q; one clobbers the other", prev, i, p)
+		}
+		seen[p] = i
+	}
+
+	// Every plan's own plan_id must survive on disk: the clobber's signature is
+	// one file carrying another plan's meta.
+	for i, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read plan file %s: %v", p, err)
+		}
+		if !strings.Contains(string(data), "- plan_id: "+ids[i]) {
+			t.Errorf("plan file %s does not carry plan %d's own plan_id; got:\n%s", p, i, data)
+		}
 	}
 }
 

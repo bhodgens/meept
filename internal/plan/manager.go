@@ -77,33 +77,68 @@ func (m *PlanManager) GetPlansForSession(ctx context.Context, sessionID string) 
 	return m.store.GetPlansForSession(ctx, sessionID)
 }
 
+// reservePlanFilePath atomically reserves an unused plan file path for slug,
+// creating an empty placeholder with O_CREATE|O_EXCL so exactly one concurrent
+// caller can win each candidate name (bughunt M1).
+//
+// A stat-then-write loop is NOT atomic: two callers both observe "missing" and
+// both proceed to the same name. O_EXCL makes the create itself the test, so the
+// loser simply advances to the next suffix.
+func reservePlanFilePath(dir, slug string, logger *slog.Logger) (string, error) {
+	// The plan directory may not exist yet on a fresh workspace. The previous
+	// stat-then-write shape never needed it to (os.Stat on a missing path simply
+	// reported "not exist"), so creating it here keeps that contract.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create plan dir %s: %w", dir, err)
+	}
+	for n := 1; ; n++ {
+		name := slug + ".md"
+		if n > 1 {
+			name = fmt.Sprintf("%s-%d.md", slug, n)
+		}
+		candidate := filepath.Join(dir, name)
+		f, err := os.OpenFile(candidate, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			// Reserved. Close immediately; the caller writes the real content.
+			if cerr := f.Close(); cerr != nil {
+				return "", fmt.Errorf("close plan file placeholder %s: %w", candidate, cerr)
+			}
+			if n > 1 {
+				logger.Info("plan file name collision; disambiguating", "file", candidate)
+			}
+			return candidate, nil
+		}
+		if !os.IsExist(err) {
+			return "", fmt.Errorf("reserve plan file %s: %w", candidate, err)
+		}
+		// EEXIST: this candidate is taken, try the next suffix.
+	}
+}
+
 // CreatePlan creates a new plan, stores it, writes the initial plan.md, and
 // publishes a plan.created event.
 func (m *PlanManager) CreatePlan(ctx context.Context, title, description, projectID, projectPath, sessionID string) (*Plan, error) {
 	dir := m.resolvePlanDir(projectPath)
 	filePath := filepath.Join(dir, slugify(title)+".md")
 
-	// Never clobber an existing plan file. slugify(title) can collide with
-	// a plan from an earlier run (a common title like "plan the refactor"
-	// recurs across sessions); WritePlanMarkdown overwrites unconditionally,
-	// which used to silently re-stamp the old plan's plan_id/created meta
-	// while the store held two plans pointing at one file. Disambiguate
-	// with a -2, -3, ... suffix instead (mirrors the repo plan_id seq).
-	if _, err := os.Stat(filePath); err == nil {
-		for n := 2; ; n++ {
-			candidate := filepath.Join(dir, fmt.Sprintf("%s-%d.md", slugify(title), n))
-			_, statErr := os.Stat(candidate)
-			if statErr != nil && !os.IsNotExist(statErr) {
-				return nil, fmt.Errorf("stat plan file %s: %w", candidate, statErr)
-			}
-			if os.IsNotExist(statErr) {
-				filePath = candidate
-				break
-			}
-		}
-		m.logger.Info("plan file name collision; disambiguating", "title", title, "file", filePath)
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("stat plan file %s: %w", filePath, err)
+	// Never clobber an existing plan file. slugify(title) can collide with a
+	// plan from an earlier run (a common title like "plan the refactor" recurs
+	// across sessions); WritePlanMarkdown overwrites unconditionally, which used
+	// to silently re-stamp the old plan's plan_id/created meta while the store
+	// held two plans pointing at one file. Disambiguate with a -2, -3, ...
+	// suffix instead (mirrors the repo plan_id seq).
+	//
+	// The name is RESERVED with an atomic O_CREATE|O_EXCL create (bughunt M1), not
+	// chosen with stat-then-write: two concurrent CreatePlan calls with the same
+	// title both saw the base name missing and both picked "-2", so both wrote to
+	// the same path — the exact clobber this guard exists to prevent, just at a
+	// narrower window. The reserve-then-write loop lets exactly one caller win
+	// each candidate; the loser advances to the next suffix. The placeholder file
+	// is immediately closed and later overwritten by WritePlanMarkdown, so the
+	// window in which an empty file is visible is a single write long.
+	filePath, err := reservePlanFilePath(dir, slugify(title), m.logger)
+	if err != nil {
+		return nil, err
 	}
 
 	plan := NewPlan(title, description, projectID, filePath, sessionID)
