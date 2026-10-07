@@ -744,8 +744,42 @@ func newClaimToken() string {
 	return id.Generate("claim-")
 }
 
-// Fail marks a job as failed with an error message.
+// Fail marks a job as failed with an error message. It is the token-less
+// legacy shape: no attempt identity is presented, so no claim-token predicate
+// is applied (bughunt H1). Callers that hold an attempt MUST use FailAttempt —
+// see its doc comment for why the unguarded form can kill a live attempt.
 func (s *Store) Fail(jobID, errMsg string) error {
+	_, err := s.FailAttempt(jobID, errMsg, "")
+	return err
+}
+
+// FailAttempt marks a job failed on behalf of the attempt identified by
+// claimToken — the attempt-exact twin of CompleteAttempt (bughunt H1).
+//
+// Before this existed, Fail was the ONLY job-state write in this file with a
+// bare `WHERE id = ?`: no state predicate, no token predicate. The worker holds
+// the attempt's claim token and uses it for its SUCCESS path
+// (completeJob -> CompleteAttempt) but dropped it for its FAILURE path, so a
+// LATE failure from a SUPERSEDED attempt could move the LIVE attempt's job to
+// `failed` — the exact twin of the H4 completion bug, on the sibling write.
+// The superseding paths (Retry, Requeue, ResetToPending) all null the token, so
+// the attempt is detectable; Fail simply never looked.
+//
+// Outcomes mirror CompleteAttempt:
+//
+//   - state in (claimed, processing) AND token matches → CompletionApplied.
+//   - state == failed AND token matches → CompletionIdempotent: the identical
+//     request retried by the same worker. Success, no second dead-letter move,
+//     no second log line.
+//   - anything else → ErrJobNotClaimable. The job moved on (requeued, reclaimed,
+//     re-claimed as a later attempt) or is terminal, so the presented token
+//     belongs to an attempt nobody is executing any more. The LIVE job's state
+//     and error text are left untouched.
+//
+// An empty claimToken degrades to the legacy state-only predicate, so every
+// token-less caller (the bus queue.fail handler, the RPC FailRequest path) keeps
+// its existing behaviour.
+func (s *Store) FailAttempt(jobID, errMsg, claimToken string) (CompletionDisposition, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Use BEGIN IMMEDIATE so the retry_count read and the state update are
@@ -754,7 +788,7 @@ func (s *Store) Fail(jobID, errMsg string) error {
 	// StateFailed, and neither trigger dead-lettering.
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("begin fail tx: %w", err)
+		return CompletionApplied, fmt.Errorf("begin fail tx: %w", err)
 	}
 	defer func() {
 		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) {
@@ -762,29 +796,90 @@ func (s *Store) Fail(jobID, errMsg string) error {
 		}
 	}()
 
+	// The token predicate lives in the WHERE clause so the DATABASE refuses a
+	// superseded attempt, not a read-then-write check that a concurrent claim
+	// could slip between.
+	//
+	// A token-PRESENT caller (a worker holding an attempt) is held to the
+	// strict shape: the row must be claimed/processing AND carry its token.
+	// A token-LESS caller keeps the ORIGINAL bare `WHERE id = ?` semantics —
+	// Fail has always been callable on any existing job (the dead-letter tests
+	// fail a freshly-inserted PENDING job), and narrowing that path here would
+	// be a behaviour change nobody asked for. Args are appended in PLACEHOLDER
+	// ORDER: state, error, updated_at, id, then the optional claim token.
+	predicate := `id = ?`
+	args := []any{string(StateFailed), errMsg, now, jobID}
+	if claimToken != "" {
+		predicate = `id = ? AND state IN ('claimed', 'processing') AND claim_token = ?`
+		args = append(args, claimToken)
+	}
+
 	var retryCount, maxRetries int
 	row := tx.QueryRow(`SELECT retry_count, max_retries FROM jobs WHERE id = ?`, jobID)
 	if err := row.Scan(&retryCount, &maxRetries); err != nil {
-		return fmt.Errorf("failed to get retry count: %w", err)
+		return CompletionApplied, fmt.Errorf("failed to get retry count: %w", err)
 	}
 
 	newState := StateFailed
 	if retryCount >= maxRetries {
 		newState = StateDead
 	}
+	// failed/dead are computed AFTER the predicate is built, so the first two
+	// args must carry the resolved state rather than a pre-computed StateFailed.
+	args[0] = string(newState)
 
-	if _, err := tx.Exec(`
+	res, err := tx.Exec(fmt.Sprintf(`
 		UPDATE jobs SET state = ?, error = ?, updated_at = ?
-		WHERE id = ?`,
-		string(newState), errMsg, now, jobID); err != nil {
-		return fmt.Errorf("failed to update job failure: %w", err)
+		WHERE %s`, predicate), args...)
+	if err != nil {
+		return CompletionApplied, fmt.Errorf("failed to update job failure: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return CompletionApplied, fmt.Errorf("failed to read failure rows affected: %w", err)
+	}
+	if affected == 0 {
+		// Nothing matched: either the attempt is superseded, or the job is
+		// already terminal. A token-PRESENT caller reaches this only when its
+		// attempt no longer owns the row — refuse rather than overwrite the
+		// live attempt's state. Roll back so the retry_count read above
+		// leaves no trace.
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			s.logger.Debug("fail tx rollback (no rows affected)", "error", err)
+		}
+		if claimToken != "" {
+			// Distinguish the idempotent retry (same attempt already failed
+			// this row) from a genuinely superseded attempt, so a duplicate
+			// request is success and a stale one is refused.
+			var (
+				state       string
+				storedToken sql.NullString
+			)
+			scanErr := s.db.QueryRow(`SELECT state, claim_token FROM jobs WHERE id = ?`, jobID).
+				Scan(&state, &storedToken)
+			if scanErr == nil &&
+				(state == string(StateFailed) || state == string(StateDead)) &&
+				storedToken.Valid && storedToken.String == claimToken {
+				s.logger.Debug("Idempotent failure retry for the same claim token", "id", jobID)
+				return CompletionIdempotent, nil
+			}
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				s.logger.Warn("Failure reported for an unknown job", "id", jobID)
+			}
+			s.logger.Warn("Refused failure from a superseded attempt",
+				"id", jobID, "claim_token", claimToken)
+		} else {
+			s.logger.Warn("Refused state update for a terminal or missing job",
+				"id", jobID, "requested_state", string(StateFailed))
+		}
+		return CompletionApplied, ErrJobNotClaimable
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit fail tx: %w", err)
+		return CompletionApplied, fmt.Errorf("commit fail tx: %w", err)
 	}
 
-	s.logger.Info("Job failed", "id", jobID, "state", newState, "error", errMsg)
+	s.logger.Info("Job failed", "id", jobID, "state", newState, "error", errMsg, "claim_token", claimToken)
 
 	// Move to dead letter if too many retries. Done after commit so a
 	// dead-letter move failure does not roll back the state transition.
@@ -794,7 +889,7 @@ func (s *Store) Fail(jobID, errMsg string) error {
 		}
 	}
 
-	return nil
+	return CompletionApplied, nil
 }
 
 // retryBackoffBase is the base delay for exponential retry backoff.

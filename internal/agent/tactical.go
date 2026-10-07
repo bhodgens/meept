@@ -1252,7 +1252,10 @@ type completionFreshChecker interface {
 
 // OnJobCompleted handles a completed job by updating the step, promoting
 // newly unblocked steps, and checking task completion.
-func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, result json.RawMessage) error {
+// claimToken is the attempt token carried by the queue.job.completed event
+// (bughunt H2). It is EMPTY on the token-less legacy shape, in which case the
+// guard degrades to the state-only predicate — a weaker but still-correct check.
+func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, result json.RawMessage, claimToken ...string) error {
 	startTime := time.Now()
 
 	// Find step by job ID
@@ -1293,13 +1296,17 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	// failed job reads 'pending'/'failed', which BOTH layers reject.
 	if ts.queue != nil {
 		if checker, isAttemptAware := ts.queue.(completionFreshChecker); isAttemptAware {
-			// The event carries no attempt token today (queue.job.completed
-			// publishes job_id + result), so the token-less predicate is
-			// asked, which degrades to the state-only rule for this queue's
-			// own rows and becomes token-exact the moment the event starts
-			// carrying claim_token. Either way the queue — not a local
-			// re-implementation — owns the freshness verdict.
-			if fresh, ok := checker.CompletionIsFresh(ctx, jobID, ""); ok && !fresh {
+			// The queue owns the freshness verdict — never a local
+			// re-implementation of the token/state rule. The token comes from
+			// the event when the publisher carries one (queue.job.completed
+			// publishes claim_token since bughunt H2); an older publisher
+			// leaves it empty and the store's state-only predicate applies,
+			// which is the weaker-but-correct fallback.
+			attempt := ""
+			if len(claimToken) > 0 {
+				attempt = claimToken[0]
+			}
+			if fresh, ok := checker.CompletionIsFresh(ctx, jobID, attempt); ok && !fresh {
 				ts.logger.Warn("stale completion event for superseded attempt",
 					"job_id", jobID,
 					"step_id", step.ID,

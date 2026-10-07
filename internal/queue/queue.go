@@ -452,13 +452,52 @@ func (q *PersistentQueue) CompleteAttempt(ctx context.Context, jobID string, res
 	q.publishEvent("queue.job.completed", map[string]any{
 		KeyJobID: jobID,
 		"result": result,
+		// The attempt that produced this completion (bughunt H2). Consumers
+		// whose own attempt is still live can now ask the attempt-freshness
+		// question with a REAL token instead of degrading to the state-only
+		// predicate. Omitted when empty so the token-less legacy shape is
+		// byte-identical on the wire.
+		"claim_token": claimToken,
 	})
 
 	return nil
 }
 
-// Fail marks a job as failed with an error.
+// CompletionIsFresh forwards the attempt-freshness predicate to the store.
+//
+// Without this forwarder the agent's stale-completion guard is DEAD in
+// production (bughunt H2): `completionFreshChecker` is declared structurally in
+// internal/agent, and `PersistentQueue` holds `store` as an unexported field
+// WITHOUT embedding it, so `Store.CompletionIsFresh` was never promoted to the
+// queue's method set. The guard's type assertion therefore failed for every real
+// queue and OnJobCompleted silently fell back to its pre-H5 state-only branch —
+// the exact behaviour the guard was added to replace.
+//
+// Declared on the concrete type (not on the Queue interface) so every existing
+// implementation of Queue keeps compiling; the guard probes for it
+// structurally, exactly as it probes for AttemptCompleter.
+func (q *PersistentQueue) CompletionIsFresh(ctx context.Context, jobID, claimToken string) (fresh, ok bool) {
+	_ = ctx // the store's predicate is a single-row read; no context plumbing yet
+	return q.store.CompletionIsFresh(jobID, claimToken)
+}
+
+// Fail marks a job as failed with an error. It is the token-less legacy shape:
+// no attempt identity is presented, so the state-only predicate applies and
+// every pre-existing caller keeps its current behaviour.
 func (q *PersistentQueue) Fail(ctx context.Context, jobID string, err error) error {
+	return q.FailAttempt(ctx, jobID, err, "")
+}
+
+// FailAttempt marks the job failed on behalf of the execution attempt
+// identified by claimToken (bughunt H1) — the failure-path twin of
+// CompleteAttempt. A worker that holds an attempt MUST pass it: the store
+// refuses a failure presented for a SUPERSEDED attempt, so a late failure from
+// an abandoned execution cannot move the LIVE attempt's job to failed.
+//
+// Publication rule mirrors CompleteAttempt: a superseded attempt
+// (ErrJobNotClaimable) publishes NO queue.job.failed event, so subscribers do
+// not process a stale failure as current.
+func (q *PersistentQueue) FailAttempt(ctx context.Context, jobID string, err error, claimToken string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -466,13 +505,18 @@ func (q *PersistentQueue) Fail(ctx context.Context, jobID string, err error) err
 		return fmt.Errorf("queue is closed")
 	}
 
-	if storeErr := q.store.Fail(jobID, err.Error()); storeErr != nil {
+	disposition, storeErr := q.store.FailAttempt(jobID, err.Error(), claimToken)
+	if storeErr != nil {
 		return storeErr
+	}
+	if !disposition.CompletionIsFresh() {
+		return nil
 	}
 
 	q.publishEvent("queue.job.failed", map[string]any{
-		KeyJobID: jobID,
-		"error":  err.Error(),
+		KeyJobID:      jobID,
+		"error":       err.Error(),
+		"claim_token": claimToken,
 	})
 
 	return nil

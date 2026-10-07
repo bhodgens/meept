@@ -53,6 +53,35 @@ type AttemptCompleter interface {
 	CompleteAttempt(ctx context.Context, jobID string, result any, claimToken string) error
 }
 
+// AttemptFailer is the failure-path twin of AttemptCompleter (bughunt H1).
+//
+// Declared here, beside AttemptCompleter, for the same reason: the worker's
+// optional probe and ClusterQueue's forwarder must not drift into two
+// signatures — a mismatch would silently drop the claim token and leave
+// Store.Fail's unguarded write in place with no error anywhere.
+type AttemptFailer interface {
+	// FailAttempt fails jobID on behalf of the execution attempt identified by
+	// claimToken. A retry presenting the same token for an already-failed job
+	// succeeds WITHOUT republishing; a superseded token returns
+	// ErrJobNotClaimable and leaves the live attempt's state untouched.
+	FailAttempt(ctx context.Context, jobID string, err error, claimToken string) error
+}
+
+// attemptFailer is the local alias ClusterQueue forwards through.
+type attemptFailer interface {
+	FailAttempt(ctx context.Context, jobID string, err error, claimToken string) error
+}
+
+// attemptFreshChecker is the local alias ClusterQueue forwards the
+// attempt-freshness predicate through. The CONSUMER (internal/agent) declares
+// its own structurally identical interface — Go's structural typing makes the
+// two satisfy each other without an import — so declaring the shape here keeps
+// this forwarder from drifting into a signature the agent's assertion misses
+// (which is what made the guard dead in production, bughunt H2).
+type attemptFreshChecker interface {
+	CompletionIsFresh(ctx context.Context, jobID, claimToken string) (fresh, ok bool)
+}
+
 // wakeNotifier is the local alias for the WakeNotifier contract ClusterQueue
 // forwards to its wrapped Queue.
 type wakeNotifier interface {
@@ -307,6 +336,35 @@ func (cq *ClusterQueue) WakeWaiter(ch chan<- struct{}) (unregister func()) {
 	}
 	cq.logger.Debug("cluster_queue: wrapped queue does not support wake notification; worker will poll")
 	return func() {}
+}
+
+// CompletionIsFresh forwards the attempt-freshness predicate to the wrapped
+// Queue when it supports it (bughunt H2).
+//
+// ClusterQueue embeds Queue, so a capability declared only on the concrete
+// *PersistentQueue is invisible through the embedded interface — without this
+// forwarder the agent's stale-completion guard degrades to its state-only
+// fallback in cluster mode while working in single-node mode. Same shape and
+// same reason as the WakeWaiter forwarder above: a missing forwarder makes the
+// consumer's type assertion fail silently, with no error anywhere.
+func (cq *ClusterQueue) CompletionIsFresh(ctx context.Context, jobID, claimToken string) (fresh, ok bool) {
+	if c, isAttemptAware := cq.Queue.(attemptFreshChecker); isAttemptAware {
+		return c.CompletionIsFresh(ctx, jobID, claimToken)
+	}
+	// The wrapped queue cannot answer the attempt question. ok=false makes the
+	// guard fail OPEN, preserving its documented pre-existing behaviour.
+	return false, false
+}
+
+// FailAttempt forwards the attempt-aware failure to the wrapped Queue when it
+// supports it (bughunt H1). A cluster worker holds the claim token for its
+// in-flight attempt; without this the token is dropped and a superseded
+// attempt's late failure can move the LIVE attempt's job to failed.
+func (cq *ClusterQueue) FailAttempt(ctx context.Context, jobID string, err error, claimToken string) error {
+	if fa, isAttemptAware := cq.Queue.(attemptFailer); isAttemptAware {
+		return fa.FailAttempt(ctx, jobID, err, claimToken)
+	}
+	return cq.Queue.Fail(ctx, jobID, err)
 }
 
 // ReclaimJob reclaims a claimed job back to pending state due to node failure

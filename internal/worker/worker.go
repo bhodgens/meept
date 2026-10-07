@@ -385,8 +385,13 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 		w.setStateWithError(StateError, job.ID, processErr)
 		w.mu.Unlock()
 
-		// Mark job as failed
-		if err := w.queue.Fail(ctx, job.ID, processErr); err != nil {
+		// Mark job as failed. The attempt token captured above is PRESENTED
+		// (bughunt H1): the success path uses it (completeJob ->
+		// CompleteAttempt), so the failure path must too. Without it the store
+		// cannot tell this failure from one arriving after the attempt was
+		// superseded, and a late failure could move the LIVE attempt's job to
+		// failed.
+		if err := w.failJob(ctx, job.ID, processErr, claimToken); err != nil {
 			w.logger.Error("Failed to mark job as failed", "job", job.ID, "error", err)
 		}
 
@@ -621,6 +626,24 @@ func (w *Worker) requeueOnProviderWait(ctx context.Context, job *queue.Job, proc
 // Complete — the pre-H4 contract — so the optional-interface probe never
 // changes behaviour for an implementation that did not opt in.
 //
+// failJob marks the job failed on behalf of THIS execution attempt
+// (bughunt H1). The attempt-exact twin of completeJob: the success path has
+// presented its claim token since H4, so the failure path must too. Without it,
+// Store.Fail has no predicate beyond `WHERE id = ?` and a late failure from a
+// superseded attempt can move the LIVE attempt's job to `failed`.
+//
+// Queues that understand claim tokens get FailAttempt; queues without token
+// support keep the token-less Fail, so the optional-interface probe never
+// changes behaviour for an implementation that did not opt in.
+func (w *Worker) failJob(ctx context.Context, jobID string, jobErr error, claimToken string) error {
+	if claimToken != "" {
+		if fa, ok := w.queue.(queue.AttemptFailer); ok {
+			return fa.FailAttempt(ctx, jobID, jobErr, claimToken)
+		}
+	}
+	return w.queue.Fail(ctx, jobID, jobErr)
+}
+
 // Returns the queue's error verbatim; the caller decides what it means for the
 // counters (tryProcessJob treats a refusal as a superseded attempt, not a
 // processing failure).

@@ -52,7 +52,11 @@ func (a *attemptAwareQueue) CompletionIsFresh(_ context.Context, _ string, claim
 	return !a.staleVerdict, true
 }
 
-func (a *attemptAwareQueue) lastToken() string { //nolint:unused // kept as a debug accessor for future pins
+// lastToken is the token the guard last asked the queue about. It is the pin
+// for H2's second leg: the guard must present the token carried by the
+// queue.job.completed event, NOT the empty token that degraded the attempt
+// question to the state-only predicate.
+func (a *attemptAwareQueue) lastToken() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if len(a.askedTokens) == 0 {
@@ -316,5 +320,65 @@ func (a attemptStateAware) CompletionIsFresh(ctx context.Context, jobID, claimTo
 		return true, true
 	default:
 		return false, true
+	}
+}
+
+
+// TestOnJobCompleted_GuardPresentsTheEventsClaimToken pins H2's second leg.
+//
+// The wave threaded `claim_token` through the queue.job.completed event but
+// never proved the guard USES it: it passed "" before, which
+// Store.CompletionIsFresh treats as the state-only predicate, so the guard could
+// never distinguish a superseded attempt even with the forwarder in place. This
+// asserts the token reaching the predicate is the one the event carried.
+//
+// The `attemptAwareQueue` double records what it was asked, so the assertion is
+// on the value that crossed the boundary — not on a fixture constant.
+func TestOnJobCompleted_GuardPresentsTheEventsClaimToken(t *testing.T) {
+	const eventToken = "claim-token-from-the-event"
+
+	ts, msgBus, cleanup := newTacticalTestSetup(t)
+	defer cleanup()
+
+	q, err := queue.NewPersistentQueue(t.TempDir()+"/h5-token.db", msgBus, nil)
+	if err != nil {
+		t.Fatalf("NewPersistentQueue: %v", err)
+	}
+	defer q.Close()
+
+	wrapper := &attemptAwareQueue{Queue: q, staleVerdict: false}
+	ts.queue = wrapper
+
+	parentTask := task.NewTask("h5-token", "token plumbing")
+	parentTask.TotalJobs = 1
+	parentTask.SetState(task.StateExecuting)
+	if err := ts.taskStore.Create(parentTask); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	step := task.NewTaskStep(parentTask.ID, "do the work", 0)
+	step.State = task.StepScheduled
+	if err := ts.stepStore.Create(step); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if err := q.Enqueue(t.Context(), mustB2Job(t, step)); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	claimed, err := q.Claim(t.Context(), "worker-h5-tok", nil, "")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if err := ts.stepStore.SetJobID(step.ID, claimed.ID); err != nil {
+		t.Fatalf("SetJobID: %v", err)
+	}
+
+	resultJSON, _ := json.Marshal(map[string]string{"result": "done"})
+	if err := ts.OnJobCompleted(t.Context(), claimed.ID, resultJSON, eventToken); err != nil {
+		t.Fatalf("OnJobCompleted: %v", err)
+	}
+
+	if got := wrapper.lastToken(); got != eventToken {
+		t.Errorf("guard asked the queue about token %q, want the event's %q — "+
+			"an empty token degrades the attempt question to state-only (bughunt H2)",
+			got, eventToken)
 	}
 }
