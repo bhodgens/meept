@@ -469,18 +469,23 @@ func (c *Conversation) AddUserMessageWithParts(content string, parts []llm.Conte
 }
 
 // AddAssistantMessage is a convenience method to add an assistant message.
+// The content passes through llm.StripThinking before append, so inline
+// <think> reasoning never persists in history. The message is kept even
+// when the content strips to empty (it may carry ToolCalls downstream).
 func (c *Conversation) AddAssistantMessage(content string) {
 	c.AddMessage(llm.ChatMessage{
 		Role:    llm.RoleAssistant,
-		Content: content,
+		Content: llm.StripThinking(content),
 	})
 }
 
 // AddAssistantMessageWithToolCalls adds an assistant message with tool calls.
+// Only the Content field is stripped; tool call arguments are data (JSON),
+// never reasoning prose, and are passed through untouched.
 func (c *Conversation) AddAssistantMessageWithToolCalls(content string, toolCalls []llm.ToolCall) {
 	c.AddMessage(llm.ChatMessage{
 		Role:      llm.RoleAssistant,
-		Content:   content,
+		Content:   llm.StripThinking(content),
 		ToolCalls: toolCalls,
 	})
 }
@@ -554,11 +559,20 @@ func (c *Conversation) Clear() {
 
 // RestoreFromMessages replaces the conversation's message history with the provided messages.
 // Preserves system prompt and other config. Re-classifies all messages for importance tracking.
+// Assistant content is stripped once here (not routed through the add
+// methods) so legacy persisted history that already carries inline
+// <think> reasoning is cleaned without touching non-assistant messages or
+// tool call arguments.
 func (c *Conversation) RestoreFromMessages(messages []llm.ChatMessage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages = make([]llm.ChatMessage, len(messages))
 	copy(c.messages, messages)
+	for i := range c.messages {
+		if c.messages[i].Role == llm.RoleAssistant {
+			c.messages[i].Content = llm.StripThinking(c.messages[i].Content)
+		}
+	}
 	c.messageTypes = make([]MessageClassification, len(messages))
 	for i, msg := range messages {
 		isFirstUserMsg := i == 0 && msg.Role == llm.RoleUser
