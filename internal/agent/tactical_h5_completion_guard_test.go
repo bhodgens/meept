@@ -323,7 +323,6 @@ func (a attemptStateAware) CompletionIsFresh(ctx context.Context, jobID, claimTo
 	}
 }
 
-
 // TestOnJobCompleted_GuardPresentsTheEventsClaimToken pins H2's second leg.
 //
 // The wave threaded `claim_token` through the queue.job.completed event but
