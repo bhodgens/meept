@@ -204,12 +204,31 @@ func resetStatusApp(app *App) {
 
 // settleAsync gives async cmd goroutines (fetch results that land outside
 // any event-loop ordering — e.g. the session plans panel's "loading..." →
-// "no plans" flip) time to deliver before finish()+assert. A bounded sleep
-// is deliberately used INSTEAD of polling View() on the live model: reads
-// while the loop runs would race it (bubbletea's own startup resize can
-// land after any send barrier). The stub RPC server answers in
-// microseconds, so 100ms is generous.
-const settleAsyncDelay = 100 * time.Millisecond
+// "no plans" flip) time to deliver before finish()+assert.
+//
+// A bounded sleep is deliberately used INSTEAD of polling View() on the live
+// model: reads while the loop runs would race it (bubbletea's own startup
+// resize can land after any send barrier). The corollary is that the wait MUST
+// happen BEFORE finish() — a poll after finish() can never help, because
+// finish() stops the loop and the render is then frozen (verified: polling a
+// finished queue app for its loaded rows for 3s never sees them).
+//
+// The budget is therefore a SLEEP, and its size is the whole reliability of
+// these goldens. 100ms assumed an idle machine, which is why
+// TestGoldenTasksView, TestGoldenMemoryView, TestGoldenQueueView,
+// TestGoldenSearchView, TestGoldenSidebar and
+// TestKeybindingOverrideRemapsPaletteAction each failed at least once under
+// `-p 2` full-suite load while passing in isolation (bughunt 2026-10-06).
+//
+// Sizing: the stub answers in microseconds, so the real cost is scheduler
+// contention among parallel test binaries. Measured — 200/300/400ms were each
+// clean over 3 runs against a 4-way parallel load, at 15.8s / 17.9s / 20.2s of
+// package time (13.5s at the original 100ms). 300ms is chosen as the knee: 3x
+// the value that was observed failing, and 3x the smallest value that passed,
+// for 4.4s of suite time. A larger budget only buys insurance against a slower
+// machine than any of these runs; if that happens the right fix is a delivery
+// signal, not a bigger constant.
+const settleAsyncDelay = 300 * time.Millisecond
 
 func settleAsync() { time.Sleep(settleAsyncDelay) }
 
