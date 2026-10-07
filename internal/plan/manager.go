@@ -83,6 +83,29 @@ func (m *PlanManager) CreatePlan(ctx context.Context, title, description, projec
 	dir := m.resolvePlanDir(projectPath)
 	filePath := filepath.Join(dir, slugify(title)+".md")
 
+	// Never clobber an existing plan file. slugify(title) can collide with
+	// a plan from an earlier run (a common title like "plan the refactor"
+	// recurs across sessions); WritePlanMarkdown overwrites unconditionally,
+	// which used to silently re-stamp the old plan's plan_id/created meta
+	// while the store held two plans pointing at one file. Disambiguate
+	// with a -2, -3, ... suffix instead (mirrors the repo plan_id seq).
+	if _, err := os.Stat(filePath); err == nil {
+		for n := 2; ; n++ {
+			candidate := filepath.Join(dir, fmt.Sprintf("%s-%d.md", slugify(title), n))
+			_, statErr := os.Stat(candidate)
+			if statErr != nil && !os.IsNotExist(statErr) {
+				return nil, fmt.Errorf("stat plan file %s: %w", candidate, statErr)
+			}
+			if os.IsNotExist(statErr) {
+				filePath = candidate
+				break
+			}
+		}
+		m.logger.Info("plan file name collision; disambiguating", "title", title, "file", filePath)
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("stat plan file %s: %w", filePath, err)
+	}
+
 	plan := NewPlan(title, description, projectID, filePath, sessionID)
 
 	if err := m.store.CreatePlan(ctx, plan); err != nil {

@@ -3,7 +3,9 @@ package plan
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -133,6 +135,53 @@ func TestManagerCreatePlan(t *testing.T) {
 	}
 	if plans[0].ID != plan.ID {
 		t.Errorf("linked plan ID: got %q, want %q", plans[0].ID, plan.ID)
+	}
+}
+
+func TestManagerCreatePlanSlugCollisionDisambiguates(t *testing.T) {
+	mgr, dir := setupTestManagerWithDir(t)
+	ctx := context.Background()
+
+	first, err := mgr.CreatePlan(ctx, "Refactor Auth System", "first", "proj-1", dir, "sess-001")
+	if err != nil {
+		t.Fatalf("first CreatePlan: %v", err)
+	}
+	second, err := mgr.CreatePlan(ctx, "Refactor Auth System", "second", "proj-1", dir, "sess-002")
+	if err != nil {
+		t.Fatalf("second CreatePlan (same title): %v", err)
+	}
+
+	if first.FilePath == second.FilePath {
+		t.Fatalf("same-title plans share a file path %q; the second CreatePlan clobbers the first", first.FilePath)
+	}
+	if first.ID == second.ID {
+		t.Fatal("plan IDs should differ")
+	}
+
+	// The first plan's meta must be untouched: the original plan_id is
+	// still on disk and the second plan's ID is not in the first file.
+	firstData, err := os.ReadFile(first.FilePath)
+	if err != nil {
+		t.Fatalf("read first plan file: %v", err)
+	}
+	if !strings.Contains(string(firstData), "- plan_id: "+first.ID) {
+		t.Errorf("first plan file lost its own plan_id; got:\n%s", firstData)
+	}
+	if strings.Contains(string(firstData), second.ID) {
+		t.Errorf("first plan file was overwritten with the second plan's meta:\n%s", firstData)
+	}
+
+	// The second plan lands on a -2 disambiguated name.
+	wantSecond := filepath.Join(filepath.Dir(first.FilePath), "refactor-auth-system-2.md")
+	if second.FilePath != wantSecond {
+		t.Errorf("second plan path: got %q, want %q", second.FilePath, wantSecond)
+	}
+	secondData, err := os.ReadFile(second.FilePath)
+	if err != nil {
+		t.Fatalf("read second plan file: %v", err)
+	}
+	if !strings.Contains(string(secondData), "- plan_id: "+second.ID) {
+		t.Errorf("second plan file does not carry its plan_id; got:\n%s", secondData)
 	}
 }
 
