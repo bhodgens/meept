@@ -115,6 +115,21 @@ rejections consume `FilterRetryCount` (cap `max_filter_retries`) and never
 validation retries, and vice versa. Every filter action logs
 `stage=output_filter` with `action=pass|rewrite|fail|rejected_exhausted`.
 
+## Reasoning never persists in conversation history
+
+Every assistant message entering a `Conversation` passes through
+`llm.StripThinking` before append (`AddAssistantMessage`,
+`AddAssistantMessageWithToolCalls`, and once in `RestoreFromMessages` for
+legacy history). Inline `<think>` reasoning on inline-tag wire forms
+(llama.cpp `reasoning_format:"none"`, mlx_lm) therefore never replays in
+multi-turn context — stale reasoning in history degrades deepseek-style
+models (plan tree docs/plans/20261007-reasoning-history-strip). Tool call
+arguments are data, never stripped; empty-after-strip content stays (it may
+carry ToolCalls). The strip is silent and unconditional: it is not a retry
+lane, not a filter rejection, and consumes no retry counter. Separate-channel
+reasoning (`reasoning_content`/`reasoning`) was already safe — the client
+parses it into `Response.Reasoning`, which never enters history.
+
 ## session_id vs conversation_id
 
 `session_id` (primary key, e.g. `session-abc123`) and `conversation_id`

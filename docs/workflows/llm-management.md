@@ -265,6 +265,41 @@ invalid tool-call output impossible.
 | OpenAI-compat structured outputs | `response_format: {type:"json_schema"}` | `"json_schema"` | JSON Schema instead of GBNF; enum tightness may be lower depending on server |
 | MLX-server, Ollama, most remote APIs | none | `""` (default) | No grammar attached — not an error |
 
+## Reasoning Strip (history hygiene)
+
+Reasoning models reach meept in two wire forms. In the SEPARATE-CHANNEL form
+the server returns reasoning in `reasoning_content` (DeepSeek-style) or
+`reasoning` (mlx_lm-style) fields; the client parses those into
+`Response.Reasoning` (`internal/llm/client.go`), which never enters
+conversation history. In the INLINE-TAG form the server embeds
+`<think>...</think>` inside `content` (llama.cpp with
+`reasoning_format:"none"`, mlx_lm, some raw APIs).
+
+Inline reasoning in multi-turn history degrades reasoning models (stale
+chain-of-thought replays every turn — DeepSeek-family model cards call this
+out explicitly). Meept strips it at the source of history:
+
+- `llm.StripThinking` (`internal/llm/reasoning_strip.go`) removes closed
+  `<think>` blocks anywhere, a leading unclosed block (truncated replies),
+  and a leading `reasoning_content` text fragment.
+- `Conversation.AddAssistantMessage` /
+  `AddAssistantMessageWithToolCalls` (`internal/agent/conversation.go`)
+  apply the strip before append, before the importance classification sees
+  the content. Tool call arguments are data (JSON) and pass untouched.
+  An empty-after-strip content stays in history (it may carry ToolCalls).
+- `Conversation.RestoreFromMessages` strips assistant content once, so
+  legacy persisted history that already carries tags is cleaned on reload.
+
+Summarization strips via the same function (the summarizer's
+`stripThinking` delegates to it), so summaries never carry reasoning text.
+
+The strip is silent and unconditional — it is not a retry, a filter
+rejection, or a quota lane. `meept doctor` reports the reasoning wire form
+per local endpoint (`reasoning:*` checks, report-only): a separate channel
+is ok; inline tags warn that the endpoint burns output tokens on reasoning
+(enable `--jinja` with a reasoning parser on llama.cpp, or
+`reasoning_format`, to split the channel).
+
 ### Configuration
 
 ```toml
