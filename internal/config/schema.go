@@ -687,9 +687,18 @@ type DaemonConfig struct {
 }
 
 // OutputFiltersConfig holds daemon-level output-filter defaults
-// (output-filters tree, leaf 04). Enabled defaults to FALSE: the filter
-// stage is opt-in until config turns it on, keeping the completion path
-// byte-identical for existing installs.
+// (output-filters tree, leaf 04).
+//
+// Enabled defaults to TRUE (2026-09-22 decision, set in Defaults() below): the
+// filter stage is part of the shipped validation pipeline, and the chain is
+// host-adaptive — an empty filters list resolves to the always-safe content
+// filters plus whatever script linters exist on this host, so a machine without
+// node/python never sees linter rejections from a missing binary.
+//
+// The zero VALUE of this field is still false, which is what a config that
+// omits the key entirely decodes to. That comment previously claimed the default
+// was FALSE and contradicted Defaults(); corrected here so the two agree
+// (bughunt L2).
 type OutputFiltersConfig struct {
 	// Enabled gates the output-filter stage in the step-completion path.
 	Enabled bool `json:"enabled" toml:"enabled"`

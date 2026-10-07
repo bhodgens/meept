@@ -568,6 +568,10 @@ func payloadEvidenceIDs(src []Memory) []string {
 // matches every scope: it is compared on content, which is the pre-L15
 // behaviour and the conservative choice (it can still dedupe, never silently
 // diverge).
+// A stored row with NO recorded provenance matches ANY candidate, so the
+// comparison falls back to content similarity. That is deliberate for the
+// no-provenance candidate (nothing better exists) and is pinned by
+// TestDistill_NoEvidenceIDsStillDedupesOnContent.
 func distillScopeMatches(candScope string, stored Memory) bool {
 	storedScope := distillScopeKey([]Memory{stored})
 	if storedScope == "" {
@@ -575,6 +579,26 @@ func distillScopeMatches(candScope string, stored Memory) bool {
 	}
 	return storedScope == candScope
 }
+
+// TODO(bughunt-2026-10-06): the scope fallback above is a CONTENT comparison —
+// the exact pattern root AGENTS.md names as hacky and requires a TODO for. It is
+// retained deliberately (opt-in feature, Distill is off by default) because a
+// candidate with no provenance has no identity to compare on, and failing
+// closed would let unbounded duplicates accumulate.
+//
+// The residual gap is the TRANSITION period: rows written BEFORE evidence_ids
+// existed carry no scope, so a scoped candidate still competes against them on
+// content alone — the same-lineage lesson can be swallowed by an unrelated
+// legacy row. Closing it needs an owner decision, not a drive-by:
+//
+//   (a) BACKFILL — re-stamp existing distilled rows with the evidence ids their
+//       Lesson/Procedure payloads already carry, then drop the fallback; or
+//   (b) EXCLUDE — a scoped candidate skips unscoped rows entirely, which is
+//       strictly safer (a duplicate is visible; a swallowed lesson is not) but
+//       re-admits near-duplicates during the transition.
+//
+// Neither is chosen here: (a) is a data migration and (b) trades a duplicate for
+// a silent loss, which is a product decision. Blast radius is opt-in only.
 
 // canonicalDedupeText extracts the comparable text from distilled content:
 // the principle for lessons, title+steps for procedures, falling back to the
