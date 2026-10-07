@@ -416,6 +416,44 @@ func newDaemon(t testing.TB, s *Stack) *Daemon {
 	return &Daemon{t: t, stack: s, logPath: filepath.Join(s.Work, "daemon.log")}
 }
 
+// binDirManager owns the per-process scratch dir holding the freshly
+// built meept-daemon + meept binaries. Before this, every `go test`
+// process leaked one ~136 MiB meept-e2e-bin* dir under $TMPDIR (1,600+
+// dirs / 219 GiB observed on one machine): MkdirTemp had no owner and
+// nothing deleted it.
+//
+// Cleanup model (bin reaper): at dir creation the harness spawns a
+// DETACHED /bin/sh watchdog that polls the owning test process's PID and
+// removes the dir shortly after that PID exits. This covers every exit
+// path — normal return, panic, os.Exit, and kill -9 — because the
+// watchdog is reparented to init and outlives the test process. In-process
+// t.Cleanup or time.AfterFunc CANNOT do this job: the Go test binary for a
+// package exits as soon as its tests finish, so any in-process timer dies
+// with the dir still on disk (proven by a live suite run). Warm relink
+// costs ~10s per pair, so immediate per-test removal is also wrong; one
+// dir per process lifetime is the correct granularity. Orphaned dirs that
+// outlive the watchdog itself (process-group kill) fall back to the
+// binSweepAge sweep and make e2e-clean-tmp.
+type binDirManager struct {
+	mu   sync.Mutex
+	dir  string
+	err  error
+	done chan struct{} // non-nil while/after the first build; closed at completion
+}
+
+// binReaperPollInterval is how often the detached watchdog checks for the
+// owner's exit. A var so the hygiene self-test can shrink it.
+var binReaperPollInterval = 2 * time.Second
+
+// binReaperGrace is how long the watchdog waits after owner exit before
+// removing the dir. A var so the hygiene self-test can shrink it.
+var binReaperGrace = 3 * time.Second
+
+// binSweepAge is the age beyond which a meept-e2e-bin* dir in $TMPDIR is
+// considered orphaned (no live test process can still be using it). The
+// fallback layer for dirs whose watchdog died with its process group.
+const binSweepAge = 24 * time.Hour
+
 var (
 	// repoRoot is resolved once, at the first harness use, from this
 	// file's own location (e2e/harness/), so the build works regardless
@@ -425,43 +463,161 @@ var (
 		return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 	}()
 
-	buildBinaries = sync.OnceValues(func() (string, error) {
-		dir, err := os.MkdirTemp("", "meept-e2e-bin")
-		if err != nil {
-			return "", err
-		}
-		for _, target := range []struct{ pkg, out string }{
-			{"./cmd/meept-daemon", "meept-daemon"},
-			{"./cmd/meept", "meept"},
-		} {
-			bin := filepath.Join(dir, target.out)
-			cmd := exec.Command("go", "build", "-o", bin, target.pkg)
-			cmd.Dir = repoRoot
-			var stderr bytes.Buffer
-			cmd.Stderr = &stderr
-			if err := cmd.Run(); err != nil {
-				return "", fmt.Errorf("go build %s: %w: %s", target.pkg, err, strings.TrimSpace(stderr.String()))
-			}
-		}
-		return dir, nil
-	})
+	binDir = &binDirManager{}
 )
 
+// sweepOnce runs the stale-dir sweep at most once per process.
+var sweepOnce sync.Once
+
+// sweepStaleBinDirs removes meept-e2e-bin* dirs in tmpDir older than
+// olderThan. Best-effort: per-entry errors are ignored; the return is the
+// removed count (informational). Never touches dirs inside the age floor,
+// so a concurrently live test run is safe.
+func sweepStaleBinDirs(tmpDir string, olderThan time.Duration) int {
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		return 0
+	}
+	cutoff := time.Now().Add(-olderThan)
+	removed := 0
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "meept-e2e-bin") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		if os.RemoveAll(filepath.Join(tmpDir, e.Name())) == nil {
+			removed++
+		}
+	}
+	return removed
+}
+
+// spawnBinReaper starts the detached watchdog for dir on behalf of owner
+// PID. It uses /bin/sh -c with a polling loop — no extra helper binary,
+// no SIGCHLD coupling — and must be called AFTER the binaries exist.
+//
+//	sh -c 'while kill -0 PID 2>/dev/null; do sleep POLL; done; sleep GRACE;
+//	       rm -rf DIR'
+//
+// kill -0 probes liveness without signaling. On macOS, launchd reaps the
+// zombie promptly once the owner exits, so kill -0 turns false within a
+// poll interval or two.
+func spawnBinReaper(dir string, ownerPid int) {
+	script := fmt.Sprintf(
+		`while kill -0 %d 2>/dev/null; do sleep %g; done; sleep %g; rm -rf "$0"`,
+		ownerPid, binReaperPollInterval.Seconds(), binReaperGrace.Seconds())
+	cmd := exec.Command("/bin/sh", "-c", script, dir)
+	// Deliberately NOT attached to the test process: Setpgid detaches the
+	// watchdog from the test binary's process group so a group-wide
+	// Ctrl-C does not kill it mid-flight. stdout/stderr stay nil (discard).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Best-effort: if the spawn fails, the 24h sweep and
+	// `make e2e-clean-tmp` remain the cleanup layers.
+	_ = cmd.Start()
+	if cmd.Process != nil {
+		// Do not wait on it; the watchdog is independent. Release the
+		// PID so it does not become a zombie child of this process.
+		go func() { _ = cmd.Wait() }()
+	}
+}
+
+// acquire returns the per-process scratch bin dir, building it on first
+// use. The dir is owned by the whole test process; no per-test refcount
+// is needed (the detached reaper removes it when the process exits).
+// A build failure is cached for the life of the process, matching the
+// old sync.OnceValues semantics. The build runs WITHOUT the lock held
+// (mutexio): concurrent acquirers wait on the done channel.
+func (b *binDirManager) acquire(t testing.TB) (string, error) {
+	sweepOnce.Do(func() { sweepStaleBinDirs(os.TempDir(), binSweepAge) }) // best-effort orphan cleanup
+
+	b.mu.Lock()
+	if b.dir != "" || b.err != nil {
+		dir, err := b.dir, b.err
+		b.mu.Unlock()
+		return dir, err
+	}
+	if b.done != nil {
+		// Another goroutine is building right now: wait, then read
+		// the published result.
+		done := b.done
+		b.mu.Unlock()
+		<-done
+		b.mu.Lock()
+		dir, err := b.dir, b.err
+		b.mu.Unlock()
+		return dir, err
+	}
+	b.done = make(chan struct{})
+	b.mu.Unlock()
+
+	// Build path — no lock held (mutexio).
+	dir, buildErr := buildScratchBinaries()
+	if buildErr == nil {
+		// Arm the detached reaper BEFORE publishing the dir.
+		// ownerPid is the test process itself; when it exits for any
+		// reason, the binaries go with it.
+		spawnBinReaper(dir, os.Getpid())
+	}
+
+	b.mu.Lock()
+	if buildErr != nil {
+		b.err = buildErr
+	} else {
+		b.dir = dir
+	}
+	close(b.done)
+	b.mu.Unlock()
+	return dir, buildErr
+}
+
+// buildScratchBinaries creates the scratch dir and links both binaries
+// into it. No locking: callers serialize.
+func buildScratchBinaries() (string, error) {
+	dir, err := os.MkdirTemp("", "meept-e2e-bin")
+	if err != nil {
+		return "", err
+	}
+	for _, target := range []struct{ pkg, out string }{
+		{"./cmd/meept-daemon", "meept-daemon"},
+		{"./cmd/meept", "meept"},
+	} {
+		bin := filepath.Join(dir, target.out)
+		cmd := exec.Command("go", "build", "-o", bin, target.pkg)
+		cmd.Dir = repoRoot
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			// Remove the half-built dir synchronously; no lock is
+			// held on this path (mutexio-clean), and nothing was
+			// published yet.
+			os.RemoveAll(dir)
+			return "", fmt.Errorf("go build %s: %w: %s", target.pkg, err, strings.TrimSpace(stderr.String()))
+		}
+	}
+	return dir, nil
+}
+
 // CLIPath returns the path of a freshly built meept binary (built once per
-// test-process into a shared temp dir; never the repo's bin/).
+// test-process into a shared temp dir; never the repo's bin/). The scratch
+// dir is removed by a detached watchdog shortly after this process exits.
 func CLIPath(t testing.TB) string {
 	t.Helper()
-	dir, err := buildBinaries()
+	dir, err := binDir.acquire(t)
 	if err != nil {
 		t.Fatalf("harness: build binaries: %v", err)
 	}
 	return filepath.Join(dir, "meept")
 }
 
-// DaemonPath returns the freshly built meept-daemon binary path.
+// DaemonPath returns the freshly built meept-daemon binary path. The
+// scratch dir is removed by a detached watchdog shortly after this process
+// exits.
 func DaemonPath(t testing.TB) string {
 	t.Helper()
-	dir, err := buildBinaries()
+	dir, err := binDir.acquire(t)
 	if err != nil {
 		t.Fatalf("harness: build binaries: %v", err)
 	}

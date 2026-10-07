@@ -20,7 +20,10 @@ package harness
 // the legacy shape routing via the daemon round-trips in each test.
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -142,5 +145,101 @@ func TestHarnessPlannerScripting(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "PLANMARKER-XYZ") {
 		t.Fatalf("planned file has unexpected content: %q", data)
+	}
+}
+
+// TestHarnessBinDirReaper proves the detached reaper end to end, in a
+// CHILD go test process: the child acquires the bin dir (real build), then
+// exits; the parent waits for the reaper to fire and asserts the dir is
+// gone. This is the only faithful way to test the reaper — in-process, any
+// timer dies with the test process, which is exactly the flaw that makes
+// the reaper necessary.
+func TestHarnessBinDirReaper(t *testing.T) {
+	tmp := t.TempDir()
+	// The child shares this process's package; -run matches only the
+	// helper below. MEEPT_BIN_REAPER_PROBE points TMPDIR at tmp so the
+	// dir lands where we can watch it. poll/grace shrunk via ldflags
+	// would be overkill: the defaults (2s/3s) keep this test under 15s.
+	//nolint:gosec // G702: re-exec of this test binary (os.Args[0]) to run
+	// the in-package helper test as a child process; args are fixed
+	// literals, no untrusted input.
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestHelperBinDirChild$", "-test.v")
+	cmd.Env = append(os.Environ(), "MEEPT_BIN_REAPER_PROBE=1", "TMPDIR="+tmp)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("child test process failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "MEEPT_BIN_DIR_CREATED:") {
+		t.Fatalf("child never reported the bin dir:\n%s", out)
+	}
+	dir := strings.TrimSpace(strings.SplitN(
+		strings.Split(string(out), "MEEPT_BIN_DIR_CREATED:")[1], "\n", 2)[0])
+
+	// The reaper polls at binReaperPollInterval and waits
+	// binReaperGrace after owner exit: allow a generous ceiling.
+	deadline := time.Now().Add(binReaperPollInterval + binReaperGrace + 20*time.Second)
+	for {
+		//nolint:gosec // G703: dir is the MkdirTemp path echoed by our
+		// own child test process, not untrusted input.
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			return // reaper fired: pass
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("bin dir %s still present %.0fs after child exit", dir,
+				time.Since(deadline.Add(binReaperPollInterval+binReaperGrace)).Seconds()+30)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// TestHelperBinDirChild runs ONLY as a child of TestHarnessBinDirReaper.
+func TestHelperBinDirChild(t *testing.T) {
+	if os.Getenv("MEEPT_BIN_REAPER_PROBE") == "" {
+		t.Skip("helper: run via TestHarnessBinDirReaper")
+	}
+	dir, err := binDir.acquire(t)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	for _, bin := range []string{"meept-daemon", "meept"} {
+		if _, err := os.Stat(filepath.Join(dir, bin)); err != nil {
+			t.Fatalf("binary %s missing after acquire: %v", bin, err)
+		}
+	}
+	// Signal the dir path to the parent BEFORE exiting: the reaper must
+	// remove it even though this process never cleans up.
+	fmt.Printf("MEEPT_BIN_DIR_CREATED:%s\n", dir)
+}
+
+// TestHarnessBinDirSweep proves sweepStaleBinDirs removes only
+// meept-e2e-bin* dirs past the age floor — never fresh ones and never
+// unrelated entries.
+func TestHarnessBinDirSweep(t *testing.T) {
+	tmp := t.TempDir()
+	fresh := filepath.Join(tmp, "meept-e2e-bin-fresh")
+	stale := filepath.Join(tmp, "meept-e2e-bin-stale")
+	unrelated := filepath.Join(tmp, "meept-e2e-keepme")
+	for _, d := range []string{fresh, stale, unrelated} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	old := time.Now().Add(-2 * binSweepAge)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	removed := sweepStaleBinDirs(tmp, binSweepAge)
+
+	if removed != 1 {
+		t.Fatalf("sweep removed %d dirs, want exactly 1", removed)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale dir survived the sweep (stat err=%v)", err)
+	}
+	for _, keep := range []string{fresh, unrelated} {
+		if _, err := os.Stat(keep); err != nil {
+			t.Fatalf("fresh/unrelated dir %s was removed: %v", keep, err)
+		}
 	}
 }

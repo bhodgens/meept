@@ -1500,18 +1500,37 @@ e2e-chat:
 #   make e2e-fast-area AREA=smoke  # one suite dir (e2e/suites/<AREA>)
 #   make e2e-affected              # only suites affected by the working diff
 #                                  # (scripts/e2e-affected.sh --from-diff)
+#
+# e2e-clean-tmp removes $TMPDIR/meept-e2e-bin* scratch-build dirs older than
+# 1 day (crash leftovers; live harness dirs have fresh mtimes and survive).
+# The refcounted harness (e2e/harness/daemon.go) cleans up after itself;
+# this is the belt-and-braces sweep, run automatically before each e2e
+# target and standalone when needed.
+.PHONY: e2e-clean-tmp
+e2e-clean-tmp:
+	@if [ -n "$${TMPDIR:-}" ] && [ -d "$$TMPDIR" ]; then \
+		found=$$(find "$$TMPDIR" -maxdepth 1 -name 'meept-e2e-bin*' -type d -mtime +1 2>/dev/null); \
+		if [ -n "$$found" ]; then \
+			echo "e2e-clean-tmp: removing stale scratch dirs:"; \
+			echo "$$found" | head -5; \
+			printf '%s\n' "$$found" | xargs rm -rf; \
+		else \
+			echo "e2e-clean-tmp: no stale meept-e2e-bin* dirs"; \
+		fi; \
+	fi
+
 .PHONY: e2e-fast e2e-fast-area e2e-affected e2e-affected-area
-e2e-fast:
+e2e-fast: e2e-clean-tmp
 	go test -tags e2e ./e2e/... -p 2
 
-e2e-fast-area:
+e2e-fast-area: e2e-clean-tmp
 	@if [ -z "$(AREA)" ]; then \
 		echo "usage: make e2e-fast-area AREA=<suite dir under e2e/suites>"; \
 		exit 2; \
 	fi
 	go test -tags e2e ./e2e/suites/$(AREA)/... -p 2
 
-e2e-affected:
+e2e-affected: e2e-clean-tmp
 	bash scripts/e2e-affected.sh --from-diff
 
 # One affected tier by NAME, regardless of the diff — the way to run a
