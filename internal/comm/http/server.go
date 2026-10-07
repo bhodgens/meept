@@ -354,6 +354,19 @@ type WebSocketHub struct {
 type wsConnSubs struct {
 	sessions   map[string]struct{}
 	suppressed map[wsSuppression]struct{}
+
+	// suppressedAll is the CONNECTION-WIDE opt-out: a client that unsubscribed
+	// a channel without naming a session wants nothing from that connection
+	// any more.
+	//
+	// It is a flag, not a bulk delete of the maps (bughunt H3). The handler
+	// used to `delete(h.sessionSubs, wc)` on this input, which dropped every
+	// granted session on every channel and returned the connection to BROADCAST
+	// mode — re-delivering exactly the events the client had opted out of, the
+	// failure this whole filter exists to prevent. A flag suppresses delivery
+	// while KEEPING the grants, so a later re-subscribe restores delivery
+	// without the client re-subscribing every session by hand.
+	suppressedAll bool
 }
 
 // wsSuppression is one (channel, session) opt-out. channel is one of the
@@ -539,6 +552,11 @@ func (h *WebSocketHub) SubscribeSession(wc *wsConn, sessionID, channel string) {
 	subs.sessions[sessionID] = struct{}{}
 	delete(subs.suppressed, wsSuppression{channel: channel, session: sessionID})
 	delete(subs.suppressed, wsSuppression{channel: wsChannelAll, session: sessionID})
+	// A subscribe is an explicit opt back IN, so it also lifts a
+	// connection-wide opt-out (bughunt H3). Without this the flag would mute
+	// the connection permanently: the client unsubscribed channel-wide, then
+	// re-subscribed one session to resume work, and delivery never returned.
+	subs.suppressedAll = false
 }
 
 // UnsubscribeSession records a per-(channel, session) opt-out for the given
@@ -579,6 +597,28 @@ func (h *WebSocketHub) UnsubscribeSession(wc *wsConn, sessionID, channel string)
 	subs.suppressed[wsSuppression{channel: normalizeChannel(channel), session: sessionID}] = struct{}{}
 }
 
+// SuppressAll records a connection-wide opt-out: every session, every channel,
+// nothing delivered (bughunt H3).
+//
+// This replaces the handler's previous behaviour on the same input — an
+// `unsubscribe` frame naming a CHANNEL but no session — which deleted the
+// connection's whole sessionSubs entry. Deleting the entry does not suppress
+// delivery: ShouldSend treats an absent entry as BROADCAST mode, so the
+// connection received every session's events again, including the ones it had
+// explicitly unsubscribed from. A flag suppresses delivery and keeps the grants,
+// so a later SubscribeSession re-arms without the client re-enrolling every
+// session by hand.
+func (h *WebSocketHub) SuppressAll(wc *wsConn) {
+	h.sessMu.Lock()
+	defer h.sessMu.Unlock()
+	subs := h.sessionSubs[wc]
+	if subs == nil {
+		subs = &wsConnSubs{}
+		h.sessionSubs[wc] = subs
+	}
+	subs.suppressedAll = true
+}
+
 // ShouldSend reports whether this connection should receive an event of
 // eventType for sessionID. Returns true when the connection has no session
 // filters (broadcast mode) or explicitly subscribed to this session on this
@@ -604,6 +644,10 @@ func (h *WebSocketHub) ShouldSend(wc *wsConn, eventType, sessionID string) bool 
 	subs := h.sessionSubs[wc]
 	if subs == nil {
 		return true // no filters = broadcast to all
+	}
+	// Connection-wide opt-out: deliver nothing, whatever the grants say.
+	if subs.suppressedAll {
+		return false
 	}
 	if _, ok := subs.sessions[sessionID]; !ok {
 		return false
@@ -2833,18 +2877,18 @@ func (s *Server) handleWSUnsubscribe(wc *wsConn, msg *WSMessage) {
 		s.wsHub.UnsubscribeSession(wc, sessionID, channel)
 		s.logger.Debug("ws client unsubscribed", "remote", wc.conn.RemoteAddr(), "channel", normalizeChannel(channel), "session", sessionID)
 	} else if channel != "" {
-		// Unsubscribe all sessions for this channel: the channel is gone, so
-		// drop every session filter on this connection and return it to
-		// broadcast mode (the pre-H6 semantics, kept for the channel-level
-		// frame that carries no session_id — ws-filter-05).
-		s.wsHub.sessMu.Lock()
-		if subs, ok := s.wsHub.sessionSubs[wc]; ok {
-			for sid := range subs.sessions {
-				s.logger.Debug("ws auto-unsubscribed all sessions", "remote", wc.conn.RemoteAddr(), "channel", channel, "session", sid)
-			}
-			delete(s.wsHub.sessionSubs, wc)
-		}
-		s.wsHub.sessMu.Unlock()
+		// Channel-level frame with no session_id: the client wants nothing
+		// more from this connection. Record a CONNECTION-WIDE opt-out.
+		//
+		// It used to `delete(s.wsHub.sessionSubs, wc)` here, which is the
+		// regression bughunt H3 closed: deleting the entry does not suppress
+		// delivery, it ENABLES broadcast mode (ShouldSend returns true for a
+		// connection with no filter set), so the client immediately started
+		// receiving every session's events again — including the ones it had
+		// explicitly unsubscribed from. The grants are now kept and a flag
+		// suppresses delivery, so a re-subscribe re-arms cleanly.
+		s.wsHub.SuppressAll(wc)
+		s.logger.Debug("ws connection-wide unsubscribe", "remote", wc.conn.RemoteAddr(), "channel", channel)
 	}
 }
 

@@ -364,13 +364,20 @@ func TestWSNoFilterStaysInBroadcastMode(t *testing.T) {
 
 // TestWSUnsubscribeRestoresDelivery covers both unsubscribe forms:
 //
-//  1. session-level unsubscribe ({session_id}) — the per-session filter
-//     for that session is removed; the connection stops matching it
-//     (ShouldSendProgress consults the remaining filter set);
-//  2. channel-level unsubscribe ({channel}) — ALL session filters on the
-//     connection are dropped (the map is deleted), returning the
-//     connection to broadcast mode, so the formerly filtered session's
-//     events are delivered again.
+//  1. session-level unsubscribe ({session_id}) — an explicit opt-out is
+//     recorded for that (channel, session); the connection stops matching
+//     it, and it does NOT return to broadcast mode;
+//  2. channel-level unsubscribe ({channel}, no session_id) — a
+//     CONNECTION-WIDE opt-out, recorded as a flag that suppresses delivery
+//     while KEEPING the grants (bughunt H3).
+//
+// CORRECTED 2026-10-06 (bughunt H3). This test previously asserted the
+// OPPOSITE for case 2: it required delivery to be RESTORED, pinning the
+// handler's old `delete(sessionSubs[wc])` behaviour. That delete does not
+// suppress delivery — an absent filter set means BROADCAST mode — so it
+// re-delivered the very events the client had opted out of, and it would
+// have blocked the fix. The contract is now: a channel-level opt-out
+// mutes everything, and a re-subscribe re-arms it.
 func TestWSUnsubscribeRestoresDelivery(t *testing.T) {
 	s := start(t)
 	ws := dialWSS(t, s)
@@ -392,11 +399,18 @@ func TestWSUnsubscribeRestoresDelivery(t *testing.T) {
 	publishA("WSFILTER05-STOPPED")
 	waitAbsent(t, ws, "WSFILTER05-STOPPED", "event after session unsubscribe", 3*time.Second)
 
-	// Channel-level unsubscribe drops ALL session filters on the
-	// connection → broadcast mode → A's events delivered again.
+	// Channel-level unsubscribe is a CONNECTION-WIDE opt-out: A stays muted.
+	// It used to be re-delivered here (the old delete-the-entry behaviour).
 	ws.unsubscribeChannel("all")
-	publishA("WSFILTER05-RESTORED-CHANNEL")
-	waitMarker(t, ws, "WSFILTER05-RESTORED-CHANNEL", "event after channel unsubscribe", 15*time.Second)
+	publishA("WSFILTER05-STILL-MUTED-CHANNEL")
+	waitAbsent(t, ws, "WSFILTER05-STILL-MUTED-CHANNEL", "event after channel-wide unsubscribe", 3*time.Second)
+
+	// Re-subscribing is an explicit opt back IN: delivery resumes. This is
+	// why the fix keeps the grants instead of deleting the entry — without
+	// them the client would have to re-enrol every session by hand.
+	ws.subscribeSession("session-wsfilter-05-a")
+	publishA("WSFILTER05-RESTORED-BY-RESUBSCRIBE")
+	waitMarker(t, ws, "WSFILTER05-RESTORED-BY-RESUBSCRIBE", "event after re-subscribe", 15*time.Second)
 }
 
 // ---------------------------------------------------------------------------

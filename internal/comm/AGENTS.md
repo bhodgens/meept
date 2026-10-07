@@ -58,9 +58,21 @@ Three rules, all pinned:
   connection that unsubscribed stays suppressed for non-subscribed sessions
   (least-surprise opt-out; deleting the entry returned the connection to
   broadcast mode and re-delivered what the client opted out of — pinned by the
-  ws-filter-05 e2e scenario). A channel-LESS unsubscribe records the `all`
-  channel and therefore suppresses the session on every channel, which is the
-  connection-wide opt-out an old client meant.
+  ws-filter-05 e2e scenario). A channel-LESS unsubscribe on a NAMED session
+  records the `all` channel and therefore suppresses that session on every
+  channel, which is the connection-wide opt-out an old client meant.
+- **A channel-level unsubscribe with NO session sets a FLAG, never deletes.**
+  `handleWSUnsubscribe` routes `{channel, no session_id}` to
+  `SuppressAll`, which sets `wsConnSubs.suppressedAll` and KEEPS the grants
+  (bughunt H3). It used to `delete(sessionSubs[wc])`, which does not suppress
+  delivery at all: `ShouldSend` treats an absent filter set as BROADCAST mode,
+  so the connection immediately began receiving every session's events again —
+  including the ones it had explicitly unsubscribed from, the exact failure this
+  filter exists to prevent. `SubscribeSession` clears the flag, so a client that
+  unsubscribed channel-wide and then re-subscribed one session resumes normally
+  instead of staying muted forever. The ws-filter-05 e2e scenario asserts this
+  contract; it previously asserted the OPPOSITE (that delivery was restored) and
+  would have blocked the fix.
 - **A session-less event broadcasts to everyone.** Both relay call sites carry
   the `eventSessionID == "" ||` bypass. `SynthesizedProgressEvent.SessionID`
   derives from the source `AgentEvent.ConversationID`, which is empty for a
