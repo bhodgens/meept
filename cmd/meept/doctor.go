@@ -132,6 +132,9 @@ func runDoctor(fix, installMissing bool) error {
 	checks = append(checks, checkConfigReadable())
 	checks = append(checks, checkDiskFreeDoctor(stateDirPath))
 	checks = append(checks, checkModelsDoctor()...)
+	if reasoningCfg, cfgErr := llm.LoadProvidersConfigDefault(); cfgErr == nil {
+		checks = append(checks, checkReasoningDoctor(reasoningCfg)...)
+	}
 
 	// Build the sweep inputs once: the report path and the --fix reaper share
 	// them, so they can never disagree about what counts as an orphan. Configs

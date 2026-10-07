@@ -165,6 +165,8 @@ Checks performed:
 | data-dir-writable | state dir accepts writes |
 | config-parse | config file is readable |
 | disk-free | at least 200MB free on the state filesystem (warn below threshold) |
+| models:* | each lifecycle model path present/missing (`models:<provider>`; warn when missing) |
+| reasoning:* | reasoning wire form of each local reasoning-capable endpoint (`reasoning:<provider>`): ok = separate reasoning channel; warn = inline `<think>` tags or untagged reasoning in content; down endpoints are reported as skipped, never failures |
 | orphan-children | meept child processes re-parented to init after a crash |
 | daemon-health | included when the platform is reachable (`daemon.health` RPC) |
 
