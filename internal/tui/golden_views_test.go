@@ -48,6 +48,46 @@ func switchView(t *testing.T, hp *headlessProgram, key string) {
 // it came from (bughunt M9). Two attempts absorb the one real source of
 // nondeterminism — goroutine scheduling of async cmd results relative to the
 // scripted sends, which costs at most one rerun — and no more.
+// goldenSettleTimeout bounds how long a single attempt waits for its async
+// fetch to land. The stub RPC answers in microseconds, so this is generous on an
+// idle machine; the point is that it is BOUNDED POLLING rather than a fixed
+// sleep. Under `-p 2` full-suite load (and ~4x again under -race) a 100ms fixed
+// sleep is too short for the async reply to traverse the socket, dispatch the
+// cmd, and re-render — which is why TestGoldenTasksView failed only under load
+// while passing in isolation and at -count=6.
+const goldenSettleTimeout = 10 * time.Second
+
+// goldenSettlePoll is the interval between render checks. Small enough to detect
+// a settled view promptly, large enough not to spin.
+const goldenSettlePoll = 20 * time.Millisecond
+
+// settleUntilRendered drives attempt() then waits, BOUNDED, for the FINISHED
+// app's view to contain wantIn.
+//
+// Why poll the finished app instead of lengthening settleAsync's fixed sleep:
+// `finish()` has already stopped the event loop (p.Run returned), so View() is
+// the race-free single-goroutine read headless_test.go's concurrency contract
+// requires — the same condition captureView relies on. Polling a LIVE View()
+// mid-loop is what that contract forbids; polling the stopped model is safe by
+// construction. That makes the wait deterministic in the property that matters
+// (the render eventually contains wantIn) rather than probabilistic in a sleep
+// duration.
+func settleUntilRendered(t *testing.T, wantIn string, attempt func(t *testing.T) *App) *App {
+	t.Helper()
+	app := attempt(t)
+	deadline := time.Now().Add(goldenSettleTimeout)
+	for {
+		if strings.Contains(app.View().Content, wantIn) {
+			return app
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("view never rendered %q within %s; content:\n%s",
+				wantIn, goldenSettleTimeout, app.View().Content)
+		}
+		time.Sleep(goldenSettlePoll)
+	}
+}
+
 func retryWithFreshApp(t *testing.T, wantIn string, attempt func(t *testing.T) *App) *App {
 	t.Helper()
 	var last *App
@@ -161,7 +201,7 @@ func TestGoldenTasksView(t *testing.T) {
 	// progress counts instead: renderProgressBar always emits "n/m", it sits
 	// in the LAST column, and it is exactly the content the pre-fix layout
 	// truncated away.
-	app := retryWithFreshApp(t, "2/2", func(t *testing.T) *App {
+	app := settleUntilRendered(t, "2/2", func(t *testing.T) *App {
 		hp := newHeadlessAppTasks(t, goldenWidth, goldenHeight)
 		switchView(t, hp, "t")
 		settleAsync()
