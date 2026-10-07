@@ -174,7 +174,6 @@ func TestDistill_NoEvidenceIDsStillDedupesOnContent(t *testing.T) {
 	}
 }
 
-
 // TestDistill_ScopedCandidateNotSwallowedByLegacyUnscopedRow is the bughunt M2
 // pin for the owner-decided EXCLUDE direction.
 //
