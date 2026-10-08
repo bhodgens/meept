@@ -1068,7 +1068,7 @@
     "queue.job.failed": [
       {
         "file": "internal/queue/queue.go",
-        "line": 516,
+        "line": 517,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1076,7 +1076,7 @@
     "queue.job.recovered": [
       {
         "file": "internal/queue/queue.go",
-        "line": 637,
+        "line": 638,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1084,7 +1084,7 @@
     "queue.job.requeue": [
       {
         "file": "internal/queue/queue.go",
-        "line": 579,
+        "line": 580,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1098,7 +1098,7 @@
       },
       {
         "file": "internal/queue/queue.go",
-        "line": 545,
+        "line": 546,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1136,7 +1136,7 @@
     "queue.result": [
       {
         "file": "internal/queue/queue.go",
-        "line": 912,
+        "line": 913,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2849,7 +2849,7 @@
     "queue.claim": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.claim",
         "via_handler_table": true
       }
@@ -2857,7 +2857,7 @@
     "queue.complete": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.complete",
         "via_handler_table": true
       }
@@ -2865,7 +2865,7 @@
     "queue.dead_letter": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.dead_letter",
         "via_handler_table": true
       }
@@ -2873,7 +2873,7 @@
     "queue.dead_stats": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.dead_stats",
         "via_handler_table": true
       }
@@ -2881,7 +2881,7 @@
     "queue.enqueue": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.enqueue",
         "via_handler_table": true
       }
@@ -2889,7 +2889,7 @@
     "queue.fail": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.fail",
         "via_handler_table": true
       }
@@ -2897,7 +2897,7 @@
     "queue.get": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.get",
         "via_handler_table": true
       }
@@ -2933,7 +2933,7 @@
     "queue.list": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.list",
         "via_handler_table": true
       }
@@ -2941,7 +2941,7 @@
     "queue.recover": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.recover",
         "via_handler_table": true
       }
@@ -3017,7 +3017,7 @@
     "queue.retry": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.retry",
         "via_handler_table": true
       }
@@ -3025,7 +3025,7 @@
     "queue.stats": [
       {
         "file": "internal/queue/queue.go",
-        "line": 803,
+        "line": 804,
         "subscriber_id": "topics:queue.stats",
         "via_handler_table": true
       }
