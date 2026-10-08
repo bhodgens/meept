@@ -455,8 +455,9 @@ func (q *PersistentQueue) CompleteAttempt(ctx context.Context, jobID string, res
 		// The attempt that produced this completion (bughunt H2). Consumers
 		// whose own attempt is still live can now ask the attempt-freshness
 		// question with a REAL token instead of degrading to the state-only
-		// predicate. Omitted when empty so the token-less legacy shape is
-		// byte-identical on the wire.
+		// predicate. The key is ALWAYS present in the payload JSON: on the
+		// token-less legacy shape (q.Complete) it carries "" and consumers
+		// treat "" as the state-only fallback by design.
 		"claim_token": claimToken,
 	})
 

@@ -317,3 +317,65 @@ func TestPersistentQueue_CompletionEventCarriesClaimToken(t *testing.T) {
 		t.Fatal("timeout waiting for the completion event")
 	}
 }
+
+// TestPersistentQueue_CompletionEventEmptyClaimTokenKeyPresent pins the empty-
+// token wire shape: the claim_token KEY is always present in the completion
+// payload JSON, even when the event is published via the token-less legacy
+// q.Complete path (which passes ""). The map literal in CompleteAttempt has no
+// omitempty, so an empty token marshals as "claim_token":"" — NOT as an absent
+// key. Consumers rely on "" meaning "state-only fallback by design", which only
+// works if the key itself never disappears.
+func TestPersistentQueue_CompletionEventEmptyClaimTokenKeyPresent(t *testing.T) {
+	ctx := context.Background()
+	msgBus := bus.New(nil, nil)
+	q, err := NewPersistentQueue(filepath.Join(t.TempDir(), "emptytok.db"), msgBus, nil)
+	if err != nil {
+		t.Fatalf("NewPersistentQueue failed: %v", err)
+	}
+	t.Cleanup(func() { _ = q.Close() })
+
+	sub := msgBus.Subscribe("test-empty-token-shape", "queue.job.completed")
+	defer msgBus.Unsubscribe(sub)
+
+	job := mustNewJob(t, JobTypeOneOff, map[string]string{"prompt": "empty-token"})
+	if err := q.store.Insert(job); err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+	claimed, err := q.Claim(ctx, "worker-empty", nil, "")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if claimed.ClaimToken == "" {
+		t.Fatal("claim returned an empty token")
+	}
+
+	// Complete via the LEGACY token-less path, which passes "" as the claim
+	// token — the exact shape this test pins.
+	if err := q.Complete(ctx, job.ID, map[string]string{"result": "legacy"}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	select {
+	case msg := <-sub.Channel:
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal completion payload: %v", err)
+		}
+		raw, ok := payload["claim_token"]
+		if !ok {
+			t.Fatalf("completion payload has NO claim_token key (payload: %s) — "+
+				"the empty-token wire shape regressed to key omission", msg.Payload)
+		}
+		var token *string
+		if err := json.Unmarshal(raw, &token); err != nil {
+			t.Fatalf("unmarshal claim_token value %s: %v", raw, err)
+		}
+		if token == nil {
+			t.Errorf("claim_token marshalled as null, want \"\"")
+		} else if *token != "" {
+			t.Errorf("legacy completion claim_token = %q, want \"\"", *token)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for the legacy completion event")
+	}
+}
