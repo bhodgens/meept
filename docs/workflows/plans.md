@@ -65,7 +65,9 @@ When a plan is approved, `PlanManager.Synthesize()` creates the task hierarchy:
 ```
 plan.approved bus event
   -> PlanManager.Synthesize()
+    -> CLAIM: draft/approved -> synthesizing, stamp a lease   (see below)
     -> Create parent Task linked to Plan.TaskID
+    -> Persist task_id + state=executing, CLEAR the lease in the same write
     -> For each PlanPhase:
         -> Create child Task with parent_id
         -> Parse steps from plan.md section
@@ -73,6 +75,33 @@ plan.approved bus event
     -> Publish task.planned
     -> TacticalScheduler picks up as usual
 ```
+
+#### Synthesis is claimed, and the claim is leased
+
+`synthesizing` is a lease state, not a lifecycle stage. Synthesis creates a task
+BEFORE it can record `task_id`, so a plan that failed mid-pass used to be left
+at `draft` with an empty `task_id` — indistinguishable from a plan that had never
+been expanded. With `plans.approval.require_approval: false` (the default) the
+auto-approver re-submitted exactly those plans on every pass, and each pass
+created a fresh parent task plus one child per phase. This is not theoretical:
+797 draft plans produced 20.7M orphan tasks at ~14k/s and a 145 GB log.
+
+The rules that stop it:
+
+- **Claim before creating anything.** `ClaimPlanSynthesis` moves the plan to
+  `synthesizing` with a lease (`synthesis_lease_until`) using a conditional
+  update, so exactly one expander can hold a plan.
+- **A live lease blocks a second expander.** This holds even when `task_id` is
+  empty — the `task_id` guard cannot see that case, which is why the claim
+  exists.
+- **An expired lease is re-claimable.** A crashed expander strands its plan for
+  at most the lease duration (5 min), not forever.
+- **Retries are bounded.** `synthesis_attempts` counts failed passes; after
+  `MaxSynthesisAttempts` (3) the plan is parked in `failed`, a terminal state
+  that neither the auto-approver nor `Synthesize` will re-enter.
+
+Successful synthesis clears the lease in the same write that records
+`task_id`, so a completed expansion never looks claimed.
 
 ### Progress Flowback
 

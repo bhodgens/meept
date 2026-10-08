@@ -45,6 +45,19 @@ type PlanManager struct {
 	mu           sync.RWMutex      // protects phaseTaskMap and taskPlanMap
 }
 
+// synthesisLeaseDuration is how long a synthesis claim stays live. A crash
+// mid-expansion leaves the claim behind; the lease bounds how long that plan is
+// stranded before it can be re-claimed. Generous relative to a synthesis pass
+// (a handful of task writes), short enough that a restart recovers promptly.
+const synthesisLeaseDuration = 5 * time.Minute
+
+// MaxSynthesisAttempts bounds how many times one plan may be expanded before it
+// is parked in StateFailed. Without it a plan that fails synthesis for a
+// persistent reason (a malformed plan.md, an unwritable worktree) is re-entered
+// on every auto-approve pass forever — the same unbounded loop, one plan at a
+// time (bughunt 2026-10-08).
+const MaxSynthesisAttempts = 3
+
 // NewPlanManager creates a new PlanManager.
 func NewPlanManager(store PlanStore, bus *bus.MessageBus, cfg config.PlansConfig, taskCreator TaskCreator, logger *slog.Logger) *PlanManager {
 	if logger == nil {
@@ -440,6 +453,68 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 		return nil
 	}
 
+	// CLAIM before creating anything (bughunt 2026-10-08). The TaskID guard
+	// above is correct but unreachable after a mid-expansion failure: this
+	// function creates the parent task ~20 lines BEFORE it records task_id, so
+	// any error in between (a failed CreateTaskStep, the depends_on resolution,
+	// a daemon restart) returned with the task created and task_id never
+	// written — leaving the plan at draft+empty-task_id, indistinguishable from
+	// a plan that had never been expanded. With plan approval auto-granted, the
+	// next SubmitPlan re-fired the state CAS and re-expanded, forever:
+	// 797 draft plans produced 20.7M orphan tasks at ~14k/s.
+	//
+	// Claiming first makes "expanded but died" a VISIBLE state instead of an
+	// invisible one. The lease means a live claim blocks a concurrent expander,
+	// while an expired one (the daemon died) is re-claimable so a single dead
+	// claim cannot strand a plan forever.
+	claimed, err := m.store.ClaimPlanSynthesis(ctx, planID, synthesisLeaseDuration)
+	if err != nil {
+		return fmt.Errorf("claim plan for synthesis: %w", err)
+	}
+	if !claimed {
+		// Someone else holds the claim, or the plan is not claimable. Either
+		// way there is nothing to do — crucially, NOT an error, because the
+		// loser of a race must not bubble up into the caller that then retries.
+		m.logger.Info("synthesize: plan already claimed or not claimable, skipping",
+			"plan_id", planID, "state", plan.State)
+		return nil
+	}
+
+	// Past this point the plan is OURS and carries a lease. Every failure path
+	// must release or park it, or the plan would stay claimed forever.
+	release := func(park bool) {
+		var relErr error
+		if park {
+			relErr = m.store.ParkPlanSynthesis(ctx, planID)
+		} else {
+			relErr = m.store.ReleasePlanSynthesis(ctx, planID)
+		}
+		if relErr != nil {
+			m.logger.Error("failed to release synthesis claim", "plan_id", planID, "error", relErr)
+		}
+	}
+
+	// Bound the retries: a plan that cannot be expanded is parked (terminal)
+	// rather than re-entered on every auto-approve pass.
+	defer func() {
+		if fresh, gerr := m.store.GetPlan(ctx, planID); gerr == nil &&
+			fresh.TaskID == "" && fresh.State == StateSynthesizing {
+			// attempts counts this pass PLUS everything before it. ReleasePlanSynthesis
+			// is what persists the increment, so the value must be read BEFORE the
+			// decision — reading it after (or relying on the row) sees a stale 0 and
+			// the plan never reaches the park threshold (bughunt 2026-10-08: the bound
+			// has to actually bound).
+			attempts := fresh.SynthesisAttempts + 1
+			if attempts >= MaxSynthesisAttempts {
+				m.logger.Warn("plan synthesis exceeded max attempts; parking",
+					"plan_id", planID, "attempts", attempts)
+				release(true)
+			} else {
+				release(false)
+			}
+		}
+	}()
+
 	phases, err := m.store.GetPhases(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get phases: %w", err)
@@ -489,6 +564,10 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 	// Store the parent TaskID on the plan.
 	plan.TaskID = parentTask.ID
 	plan.State = StateExecuting
+	// The claim is discharged by this write: the lease column is cleared in the
+	// SAME statement that records task_id, so there is no window in which a
+	// successful expansion still looks claimed.
+	plan.SynthesisLeaseUntil = nil
 
 	// Track parent task -> plan mapping for OnTaskCompleted.
 	m.mu.Lock()

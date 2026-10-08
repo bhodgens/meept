@@ -1,6 +1,9 @@
 package plan
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // PlanStore persists plan metadata, phases, sessions, and signoffs.
 type PlanStore interface {
@@ -13,6 +16,24 @@ type PlanStore interface {
 	ListPlansBySession(ctx context.Context, sessionID string) ([]*Plan, error)
 	ListPlansByState(ctx context.Context, state PlanState, limit int) ([]*Plan, error)
 	SetPlanState(ctx context.Context, id string, state PlanState) error
+
+	// ClaimPlanSynthesis atomically claims a plan for task expansion: it moves
+	// the plan into StateSynthesizing and stamps a lease, but only if the plan
+	// is still claimable and no live lease is outstanding. Returns true only for
+	// the caller that won the claim. This is what makes Synthesize safe to
+	// retry — without it a crash between CreateTask and the task_id write left
+	// the plan indistinguishable from a never-expanded one, and the
+	// auto-approver re-expanded it forever (bughunt 2026-10-08: 797 plans ->
+	// 20.7M orphan tasks at ~14k/s).
+	ClaimPlanSynthesis(ctx context.Context, id string, lease time.Duration) (bool, error)
+
+	// ReleasePlanSynthesis returns a claimed plan to StateDraft after a failed
+	// expansion and increments its attempt counter.
+	ReleasePlanSynthesis(ctx context.Context, id string) error
+
+	// ParkPlanSynthesis moves an over-retry plan to StateFailed so the pump
+	// cannot spin on it.
+	ParkPlanSynthesis(ctx context.Context, id string) error
 
 	// UpdatePlanStateConditional atomically transitions a plan from
 	// fromState to toState. Returns true if the transition succeeded

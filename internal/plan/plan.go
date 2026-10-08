@@ -14,11 +14,19 @@ const (
 	StateDraft           PlanState = "draft"
 	StatePendingApproval PlanState = "pending_approval"
 	StateApproved        PlanState = "approved"
-	StateExecuting       PlanState = "executing"
-	StateCompleted       PlanState = "completed"
-	StateConfirmed       PlanState = "confirmed"
-	StateCancelled       PlanState = "cancelled"
-	StateFailed          PlanState = "failed"
+	// StateSynthesizing is a LEASE STATE, not a lifecycle stage: a plan is
+	// claimed into it for the duration of PlanManager.Synthesize so a crash
+	// mid-expansion cannot leave the plan looking untouched (bughunt 2026-10-08
+	// runaway: 20.7M orphan tasks from 797 repeatedly re-expanded plans).
+	// Synthesize creates the parent task BEFORE it can record task_id, so
+	// "draft + empty task_id" was ambiguous between "never expanded" and
+	// "expanded, then died". Claiming first removes the ambiguity.
+	StateSynthesizing PlanState = "synthesizing"
+	StateExecuting    PlanState = "executing"
+	StateCompleted    PlanState = "completed"
+	StateConfirmed    PlanState = "confirmed"
+	StateCancelled    PlanState = "cancelled"
+	StateFailed       PlanState = "failed"
 )
 
 func (s PlanState) IsTerminal() bool {
@@ -42,23 +50,31 @@ func (s PhaseState) IsTerminal() bool {
 
 // Plan represents a project-scoped plan with a plan.md source of truth.
 type Plan struct {
-	ID              string           `json:"id"`
-	Title           string           `json:"title"`
-	Description     string           `json:"description,omitempty"`
-	FilePath        string           `json:"file_path"`
-	ProjectID       string           `json:"project_id,omitempty"`
-	State           PlanState        `json:"state"`
-	CreatedAt       time.Time        `json:"created_at"`
-	UpdatedAt       time.Time        `json:"updated_at"`
-	ApprovedAt      *time.Time       `json:"approved_at,omitempty"`
-	ConfirmedAt     *time.Time       `json:"confirmed_at,omitempty"`
-	ApprovedBy      string           `json:"approved_by,omitempty"`
-	ConfirmedBy     string           `json:"confirmed_by,omitempty"`
-	TaskID          string           `json:"task_id,omitempty"`
-	SourceSession   string           `json:"source_session,omitempty"`
-	RevisionCount   int              `json:"revision_count,omitempty"`
-	Phases          []PlanPhase      `json:"phases,omitempty"`
-	PlanningContext *PlanningContext `json:"planning_context,omitempty"`
+	ID          string     `json:"id"`
+	Title       string     `json:"title"`
+	Description string     `json:"description,omitempty"`
+	FilePath    string     `json:"file_path"`
+	ProjectID   string     `json:"project_id,omitempty"`
+	State       PlanState  `json:"state"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	ApprovedAt  *time.Time `json:"approved_at,omitempty"`
+	ConfirmedAt *time.Time `json:"confirmed_at,omitempty"`
+	ApprovedBy  string     `json:"approved_by,omitempty"`
+	ConfirmedBy string     `json:"confirmed_by,omitempty"`
+	TaskID      string     `json:"task_id,omitempty"`
+	// SynthesisAttempts counts failed Synthesize passes. It bounds the retry
+	// loop: a plan that cannot be expanded is parked after
+	// MaxSynthesisAttempts rather than re-expanded forever.
+	SynthesisAttempts int `json:"synthesis_attempts,omitempty"`
+	// SynthesisLeaseUntil is when a StateSynthesizing claim expires. A claim
+	// older than this is treated as abandoned (the daemon died mid-expansion)
+	// and may be re-claimed, so one dead claim cannot strand a plan forever.
+	SynthesisLeaseUntil *time.Time       `json:"synthesis_lease_until,omitempty"`
+	SourceSession       string           `json:"source_session,omitempty"`
+	RevisionCount       int              `json:"revision_count,omitempty"`
+	Phases              []PlanPhase      `json:"phases,omitempty"`
+	PlanningContext     *PlanningContext `json:"planning_context,omitempty"`
 }
 
 // PlanPhase represents a named phase within a plan.

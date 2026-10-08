@@ -77,6 +77,8 @@ func (s *SQLiteStore) migrate() error {
 		approved_by TEXT,
 		confirmed_by TEXT,
 		revision_count INTEGER DEFAULT 0,
+		synthesis_attempts INTEGER DEFAULT 0,
+		synthesis_lease_until TEXT,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	);
@@ -143,6 +145,17 @@ func (s *SQLiteStore) migrate() error {
 		return fmt.Errorf("failed to normalize NULL project_id: %w", err)
 	}
 
+	// Synthesis lease columns (bughunt 2026-10-08 runaway). See
+	// PlanManager.Synthesize: a plan is claimed into StateSynthesizing with a
+	// lease before any task is created, so a crash mid-expansion cannot leave
+	// the plan indistinguishable from one that was never expanded.
+	if err := s.addColumnIfMissing("plans", "synthesis_attempts", "INTEGER DEFAULT 0"); err != nil {
+		return fmt.Errorf("failed to add synthesis_attempts column: %w", err)
+	}
+	if err := s.addColumnIfMissing("plans", "synthesis_lease_until", "TEXT"); err != nil {
+		return fmt.Errorf("failed to add synthesis_lease_until column: %w", err)
+	}
+
 	return nil
 }
 
@@ -201,7 +214,8 @@ func (s *SQLiteStore) DB() *sql.DB {
 
 const planColumns = `id, title, description, file_path, project_id, state, task_id,
 	source_session, approved_at, confirmed_at, approved_by, confirmed_by,
-	revision_count, created_at, updated_at`
+	revision_count, synthesis_attempts, synthesis_lease_until,
+created_at, updated_at`
 
 func (s *SQLiteStore) CreatePlan(ctx context.Context, p *Plan) error {
 	_, err := s.db.ExecContext(ctx, `
@@ -244,7 +258,8 @@ func (s *SQLiteStore) UpdatePlan(ctx context.Context, p *Plan) error {
 		UPDATE plans
 		SET title = ?, description = ?, file_path = ?, project_id = ?, state = ?,
 		    task_id = ?, source_session = ?, approved_at = ?, confirmed_at = ?,
-		    approved_by = ?, confirmed_by = ?, revision_count = ?, updated_at = ?
+		    approved_by = ?, confirmed_by = ?, revision_count = ?,
+		    synthesis_attempts = ?, synthesis_lease_until = ?, updated_at = ?
 		WHERE id = ?`,
 		p.Title,
 		nullableString(p.Description),
@@ -258,6 +273,8 @@ func (s *SQLiteStore) UpdatePlan(ctx context.Context, p *Plan) error {
 		nullableString(p.ApprovedBy),
 		nullableString(p.ConfirmedBy),
 		p.RevisionCount,
+		p.SynthesisAttempts,
+		nullableTime(p.SynthesisLeaseUntil),
 		p.UpdatedAt.Format(time.RFC3339),
 		p.ID,
 	)
@@ -358,6 +375,97 @@ func (s *SQLiteStore) UpdatePlanStateConditional(ctx context.Context, id string,
 	}
 	affected, _ := res.RowsAffected()
 	return affected == 1, nil
+}
+
+// ClaimPlanSynthesis atomically claims a plan for expansion: it moves the plan
+// into StateSynthesizing and stamps a lease, but ONLY if the plan is still in a
+// claimable state and is not already claimed by a live lease. Returns true if
+// this caller won the claim.
+//
+// This is the guard that was missing (bughunt 2026-10-08). Synthesize used to
+// create the parent task and only THEN record task_id, so a crash or error in
+// between left the plan at draft+empty-task_id — indistinguishable from a plan
+// that had never been expanded. With RequireApproval=false the auto-approver
+// re-submitted such a plan forever, and each pass created a fresh parent task
+// plus one child task per phase: 797 plans produced 20.7M tasks at ~14k/s.
+//
+// Claiming BEFORE any task is created makes "expanded but died" a visible state
+// (StateSynthesizing with an expired lease) rather than an invisible one. An
+// expired lease is re-claimable so one dead claim cannot strand a plan, and a
+// live lease blocks a second expander so the same plan cannot be expanded twice
+// concurrently.
+func (s *SQLiteStore) ClaimPlanSynthesis(ctx context.Context, id string, lease time.Duration) (bool, error) {
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+	leaseUntil := now.Add(lease).Format(time.RFC3339)
+	// The expiry comparison is INCLUSIVE of the same second. RFC3339 stores whole
+	// seconds, so a lease stamped in the same second as the comparison truncates
+	// onto the same value and a strict "<=" would (correctly for a live lease,
+	// wrongly for an expired one) refuse to reclaim. Adding a second to the
+	// comparison instant makes the boundary deterministic: a lease is live until
+	// its stamped second has fully passed. The asymmetry is deliberate — an
+	// over-eager reclaim is harmless because the claim is a compare-and-set and
+	// only one caller can win the row — whereas a stale "still live" verdict
+	// would strand a crashed plan forever, which is the bug this fixes.
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE plans
+		SET state = ?, synthesis_lease_until = ?, updated_at = ?
+		WHERE id = ?
+		  AND task_id IS NULL
+		  AND state IN (?, ?, ?)
+		  AND (synthesis_lease_until IS NULL OR synthesis_lease_until = ''
+		       OR synthesis_lease_until <= ?)`,
+		string(StateSynthesizing), leaseUntil, nowStr, id,
+		string(StateDraft),        // never expanded
+		string(StateApproved),     // approved but not yet expanded
+		string(StateSynthesizing), // a previous expander DIED; reclaim if expired
+		now.Add(time.Second).Format(time.RFC3339))
+	if err != nil {
+		return false, fmt.Errorf("failed to claim plan for synthesis: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim plan rows affected: %w", err)
+	}
+	return affected == 1, nil
+}
+
+// ReleasePlanSynthesis returns a claimed plan to StateDraft on a FAILED
+// expansion and increments its attempt counter, so the caller can bound retries.
+// A successful expansion does not call this — it moves the plan to
+// StateExecuting with its task_id via UpdatePlan.
+func (s *SQLiteStore) ReleasePlanSynthesis(ctx context.Context, id string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE plans
+		SET state = ?, synthesis_lease_until = NULL,
+		    synthesis_attempts = synthesis_attempts + 1, updated_at = ?
+		WHERE id = ? AND state = ?`,
+		string(StateDraft), now, id, string(StateSynthesizing))
+	if err != nil {
+		return fmt.Errorf("failed to release plan synthesis claim: %w", err)
+	}
+	return nil
+}
+
+// ParkPlanSynthesis moves an over-retry plan out of the synthesis path so the
+// pump cannot spin on it. StateFailed is terminal, which stops both the
+// auto-approver (which only acts on draft) and any further Synthesize attempt.
+func (s *SQLiteStore) ParkPlanSynthesis(ctx context.Context, id string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	// The counter is incremented here too, not only on release: parking is what
+	// stops the retries, so the row that records WHY it stopped must carry the
+	// attempt count (bughunt 2026-10-08). Without this the parked row reported 0
+	// attempts and the bound looked like it had never fired.
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE plans SET state = ?, synthesis_lease_until = NULL,
+		       synthesis_attempts = synthesis_attempts + 1, updated_at = ?
+		WHERE id = ? AND state = ?`,
+		string(StateFailed), now, id, string(StateSynthesizing))
+	if err != nil {
+		return fmt.Errorf("failed to park plan synthesis: %w", err)
+	}
+	return nil
 }
 
 // ---------- Phase operations ----------
@@ -644,11 +752,13 @@ func (s *SQLiteStore) scanPlan(row *sql.Row) (*Plan, error) {
 		approvedAt, confirmedAt    sql.NullString
 		approvedBy, confirmedBy    sql.NullString
 		revisionCount              int
+		synthesisAttempts          sql.NullInt64
+		leaseUntil                 sql.NullString
 	)
 
 	err := row.Scan(&id, &title, &description, &filePath, &projectID, &state, &taskID,
 		&sourceSession, &approvedAt, &confirmedAt, &approvedBy, &confirmedBy,
-		&revisionCount, &createdAt, &updatedAt)
+		&revisionCount, &synthesisAttempts, &leaseUntil, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrPlanNotFound
@@ -658,7 +768,8 @@ func (s *SQLiteStore) scanPlan(row *sql.Row) (*Plan, error) {
 
 	return buildPlan(id, title, filePath, state, createdAt, updatedAt,
 		description, projectID, taskID, sourceSession,
-		approvedAt, confirmedAt, approvedBy, confirmedBy, revisionCount)
+		approvedAt, confirmedAt, approvedBy, confirmedBy, revisionCount,
+		synthesisAttempts, leaseUntil)
 }
 
 func (s *SQLiteStore) scanPlans(rows *sql.Rows) ([]*Plan, error) {
@@ -672,11 +783,13 @@ func (s *SQLiteStore) scanPlans(rows *sql.Rows) ([]*Plan, error) {
 			approvedAt, confirmedAt    sql.NullString
 			approvedBy, confirmedBy    sql.NullString
 			revisionCount              int
+			synthesisAttempts          sql.NullInt64
+			leaseUntil                 sql.NullString
 		)
 
 		err := rows.Scan(&id, &title, &description, &filePath, &projectID, &state, &taskID,
 			&sourceSession, &approvedAt, &confirmedAt, &approvedBy, &confirmedBy,
-			&revisionCount, &createdAt, &updatedAt)
+			&revisionCount, &synthesisAttempts, &leaseUntil, &createdAt, &updatedAt)
 		if err != nil {
 			s.logger.Error("Failed to scan plan row", "error", err)
 			continue
@@ -684,7 +797,8 @@ func (s *SQLiteStore) scanPlans(rows *sql.Rows) ([]*Plan, error) {
 
 		p, err := buildPlan(id, title, filePath, state, createdAt, updatedAt,
 			description, projectID, taskID, sourceSession,
-			approvedAt, confirmedAt, approvedBy, confirmedBy, revisionCount)
+			approvedAt, confirmedAt, approvedBy, confirmedBy, revisionCount,
+			synthesisAttempts, leaseUntil)
 		if err != nil {
 			s.logger.Error("Failed to build plan", "error", err)
 			continue
@@ -700,7 +814,7 @@ func (s *SQLiteStore) scanPlans(rows *sql.Rows) ([]*Plan, error) {
 func buildPlan(id, title, filePath, state, createdAt, updatedAt string,
 	description, projectID, taskID, sourceSession sql.NullString,
 	approvedAt, confirmedAt, approvedBy, confirmedBy sql.NullString,
-	revisionCount int) (*Plan, error) {
+	revisionCount int, synthesisAttempts sql.NullInt64, leaseUntil sql.NullString) (*Plan, error) {
 
 	p := &Plan{
 		ID:            id,
@@ -708,6 +822,14 @@ func buildPlan(id, title, filePath, state, createdAt, updatedAt string,
 		FilePath:      filePath,
 		State:         PlanState(state),
 		RevisionCount: revisionCount,
+	}
+	if synthesisAttempts.Valid {
+		p.SynthesisAttempts = int(synthesisAttempts.Int64)
+	}
+	if leaseUntil.Valid && leaseUntil.String != "" {
+		if lt, err := time.Parse(time.RFC3339, leaseUntil.String); err == nil {
+			p.SynthesisLeaseUntil = &lt
+		}
 	}
 
 	if description.Valid {

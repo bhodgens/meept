@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/plan"
@@ -23,6 +24,18 @@ type stubPlanStore struct {
 func newStubPlanStore() *stubPlanStore {
 	return &stubPlanStore{phases: make(map[string][]*plan.PlanPhase)}
 }
+
+// The synthesis-claim CAS (bughunt 2026-10-08) is part of PlanStore, so this
+// stub implements it. It grants the claim unconditionally: these tests exercise
+// the orchestrator's phase handling, not synthesis arbitration, and a stub that
+// always refused the claim would silently skip expansion under test.
+func (s *stubPlanStore) ClaimPlanSynthesis(_ context.Context, _ string, _ time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (s *stubPlanStore) ReleasePlanSynthesis(_ context.Context, _ string) error { return nil }
+
+func (s *stubPlanStore) ParkPlanSynthesis(_ context.Context, _ string) error { return nil }
 
 func (s *stubPlanStore) CreatePlan(_ context.Context, p *plan.Plan) error { return nil }
 func (s *stubPlanStore) GetPlan(_ context.Context, id string) (*plan.Plan, error) {
