@@ -147,3 +147,10 @@ custom-gcl
 # A crasher that is STILL reproducible should be reduced into an ordinary
 # table test in internal/security/*_test.go instead.
 internal/security/testdata/fuzz/
+
+# Runtime plan-manager stubs: the PlanManager writes docs/plans under the
+# session's project path (internal/plan/manager.go resolvePlanDir), so test
+# turns minted auto-created "status: planning" templates into the source tree.
+# Real hand-authored plans are committed deliberately; generated stubs are not.
+internal/agent/docs/plans/
+docs/plans/sealed-plan*.md
