@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,6 +63,17 @@ func NewRegistry(dbPath string, msgBus *bus.MessageBus, logger *slog.Logger) (*R
 	return reg, nil
 }
 
+// taskEventPrefix namespaces NOTIFICATIONS, kept strictly separate from the
+// command topics the registry's request handler subscribes to. See
+// publishEvent for why conflating the two self-replicates.
+const taskEventPrefix = "task.ev."
+
+// taskEventTopic maps a command topic to its notification topic. Publishing a
+// notification on the command topic itself is what created the runaway loop.
+func taskEventTopic(commandTopic string) string {
+	return taskEventPrefix + strings.TrimPrefix(commandTopic, "task.")
+}
+
 // Create creates a new task.
 func (r *Registry) Create(ctx context.Context, name, description string) (*Task, error) {
 	r.mu.Lock()
@@ -76,7 +88,7 @@ func (r *Registry) Create(ctx context.Context, name, description string) (*Task,
 		return nil, err
 	}
 
-	r.publishEvent("task.create", map[string]any{
+	r.publishEvent(taskEventTopic("task.create"), map[string]any{
 		KeyTaskID: task.ID,
 		"name":    task.Name,
 	})
@@ -105,7 +117,7 @@ func (r *Registry) Update(ctx context.Context, task *Task) error {
 		return err
 	}
 
-	r.publishEvent("task.update", map[string]any{
+	r.publishEvent(taskEventTopic("task.update"), map[string]any{
 		KeyTaskID: task.ID,
 		"state":   task.State.String(),
 	})
@@ -126,7 +138,7 @@ func (r *Registry) Delete(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	r.publishEvent("task.delete", map[string]any{
+	r.publishEvent(taskEventTopic("task.delete"), map[string]any{
 		KeyTaskID: taskID,
 	})
 
@@ -192,7 +204,7 @@ func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskSta
 		return err
 	}
 
-	r.publishEvent("task.update", map[string]any{
+	r.publishEvent(taskEventTopic("task.update"), map[string]any{
 		KeyTaskID: task.ID,
 		"state":   task.State.String(),
 	})
@@ -221,7 +233,7 @@ func (r *Registry) LinkSession(ctx context.Context, taskID, sessionID string) er
 		return err
 	}
 
-	r.publishEvent("task.link", map[string]any{
+	r.publishEvent(taskEventTopic("task.link"), map[string]any{
 		KeyTaskID:    taskID,
 		"session_id": sessionID,
 	})
@@ -242,7 +254,7 @@ func (r *Registry) UnlinkSession(ctx context.Context, taskID, sessionID string) 
 		return err
 	}
 
-	r.publishEvent("task.unlink", map[string]any{
+	r.publishEvent(taskEventTopic("task.unlink"), map[string]any{
 		KeyTaskID:    taskID,
 		"session_id": sessionID,
 	})
@@ -292,7 +304,7 @@ func (r *Registry) IncrementJobCount(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	r.publishEvent("task.update", map[string]any{
+	r.publishEvent(taskEventTopic("task.update"), map[string]any{
 		KeyTaskID: task.ID,
 		"state":   task.State.String(),
 	})
@@ -331,7 +343,7 @@ func (r *Registry) CompleteJob(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	r.publishEvent("task.update", map[string]any{
+	r.publishEvent(taskEventTopic("task.update"), map[string]any{
 		KeyTaskID: task.ID,
 		"state":   task.State.String(),
 	})
@@ -363,7 +375,7 @@ func (r *Registry) FailJob(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	r.publishEvent("task.update", map[string]any{
+	r.publishEvent(taskEventTopic("task.update"), map[string]any{
 		KeyTaskID: task.ID,
 		"state":   task.State.String(),
 	})
@@ -427,8 +439,40 @@ func (r *Registry) Close() error {
 	return lastErr
 }
 
+// publishEvent publishes a state-change NOTIFICATION on the event namespace.
+//
+// WHY THE "task.ev." PREFIX IS LOAD-BEARING. Every event this registry emits
+// used to be published on the SAME topic the registry's own request handler
+// subscribes to. NewTaskRegistry subscribes "task.create", "task.update",
+// "task.delete", "task.link" and "task.unlink" (registry.go:475-486) and routes
+// every message on them through handleMessage, which for "task.create" calls
+// handleCreate -> registry.Create. publishEvent emitted a MessageTypeEvent on
+// "task.create", SubscriptionHandler.Start applies NO message-type filter
+// (internal/bus/handler.go:43-56), so the handler received the registry's own
+// notification, read its "name" field, and created a new task — which published
+// another "task.create", forever.
+//
+// That self-replication is what produced the 2026-10-08 incident: 513,000,000
+// task rows (150 GB tasks.db) and a 145 GB meept.log at ~10,000-14,000
+// rows/second, filling a 927 GB disk to 95%. Every row was named after the
+// evolver plan title carried in the notification payload, which is why the rows
+// looked like plan work rather than a plumbing bug.
+//
+// The event namespace is now distinct from the command namespace, so a
+// notification can never be mistaken for a command. Nothing subscribed to the
+// old event topics as events (the only subscriber was this handler), so no
+// consumer migration is required.
 func (r *Registry) publishEvent(topic string, data map[string]any) {
 	if r.bus == nil {
+		return
+	}
+
+	// Guard the invariant in code, not just in convention: a notification must
+	// never land on a command topic, because the registry subscribes to those
+	// and will execute them.
+	if strings.HasPrefix(topic, "task.") && !strings.HasPrefix(topic, taskEventPrefix) {
+		r.logger.Error("refusing to publish a task event on a command topic",
+			"topic", topic, "required_prefix", taskEventPrefix)
 		return
 	}
 
