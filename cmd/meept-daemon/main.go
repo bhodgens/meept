@@ -169,7 +169,17 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if debug {
 		levelName = "debug"
 	}
-	_, logLevel := installDaemonLogger(os.Stderr, levelName)
+
+	// Cap the daemon log in-process. The spawners (cmd/meept/daemon.go:171,
+	// internal/services/daemon_service.go:149) hand the child a raw O_APPEND fd,
+	// which cannot be rotated from outside without the child writing to an
+	// unlinked inode — the shape that let meept.log reach 145 GB on 2026-10-08.
+	// Writing through a capped writer here is the only place that can actually
+	// reclaim space. Teed with stderr so foreground runs still print.
+	logPath := filepath.Join(stateDir, "meept.log")
+	logOut, closeLog := newRotatingLogWriter(logPath, appCfg.Daemon.LogMaxBytes, os.Stderr)
+	defer func() { _ = closeLog() }()
+	_, logLevel := installDaemonLogger(logOut, levelName)
 
 	// Build daemon config from app config
 	daemonCfg := &daemon.Config{

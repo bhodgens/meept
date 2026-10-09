@@ -666,10 +666,16 @@ type LSPServerConfig struct {
 //gendoc:desc Configuration for the daemon process including socket, logging, and data directory.
 //gendoc:example [daemon] socket_path = "~/.meept/meept.sock"
 type DaemonConfig struct {
-	SocketPath         string        `json:"socket_path"         toml:"socket_path"`
-	PIDFile            string        `json:"pid_file"             toml:"pid_file"`
-	LogLevel           string        `json:"log_level"             toml:"log_level"`
-	DataDir            string        `json:"data_dir"             toml:"data_dir"`
+	SocketPath string `json:"socket_path"         toml:"socket_path"`
+	PIDFile    string `json:"pid_file"             toml:"pid_file"`
+	LogLevel   string `json:"log_level"             toml:"log_level"`
+	// LogMaxBytes caps $MEEPT_HOME/meept.log. 0 or less selects
+	// logrotate.DefaultMaxBytes (256 MiB). Three generations are retained, so the
+	// worst-case cost is 3x this value. This exists because the log was
+	// previously opened with a bare O_APPEND and never capped: on 2026-10-08 a
+	// runaway task loop drove it to 145 GB and filled a 927 GB disk.
+	LogMaxBytes        int64         `json:"log_max_bytes" toml:"log_max_bytes"`
+	DataDir            string        `json:"data_dir" toml:"data_dir"`
 	ShutdownTimeout    time.Duration `json:"shutdown_timeout"     toml:"shutdown_timeout"`
 	ChatTimeoutSeconds int           `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
 	// DefaultWorkingDir is the LAST-RESORT working directory for a chat or
