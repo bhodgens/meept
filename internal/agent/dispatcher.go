@@ -213,6 +213,21 @@ type DispatchResult struct {
 	MemoryIDs []string `json:"memory_ids,omitempty"`
 	// Plan is the created plan if plan routing was triggered.
 	Plan *plan.Plan `json:"plan,omitempty"`
+	// HandoffDepth counts report-router handoffs taken to reach this result.
+	//
+	// It exists because the report router's cycle guard
+	// (report_router.go:80, `params.Depth >= r.maxDepth` -> ForceNotify) was
+	// unreachable from the dispatcher: the handoff site hardcoded `Depth: 0`
+	// on every hop, so Depth never grew and `Depth >= maxDepth` (default 5) was
+	// never true. Two agents that name each other as SuggestedNextAgent
+	// therefore recursed forever, and each hop created a task row via
+	// createTask -> taskStore.Create (dispatcher.go:2447). Measured on
+	// 2026-10-08: ~10,000-14,000 task rows/second, 513M rows in tasks.db
+	// (150 GB), a 145 GB meept.log, and a 927 GB disk at 95%.
+	//
+	// Zero means "fresh, non-handoff dispatch". Each handoff carries
+	// parent+1 so the router's existing guard terminates the chain.
+	HandoffDepth int `json:"handoff_depth,omitempty"`
 	// ClassificationNotice is a user-facing notice about classification degradation
 	// (e.g., LLM classifier failed and fallback was used). Empty when classification
 	// succeeded normally.
@@ -3144,12 +3159,18 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	)
 	displayResponse := StripReport(response)
 
-	// Use report router to determine next action
+	// Use report router to determine next action.
+	//
+	// Depth MUST be the real handoff count, not a literal 0. Hardcoding 0 here
+	// made the router's own cycle guard (report_router.go:80,
+	// `params.Depth >= r.maxDepth` -> ForceNotify) permanently false, so a pair
+	// of agents that route to each other recursed without bound and wrote a task
+	// row per hop. See DispatchResult.HandoffDepth for the incident numbers.
 	routeResult := d.router.Route(ctx, RouteParams{
 		Report:  report,
 		Action:  action,
 		AgentID: result.AgentID,
-		Depth:   0,
+		Depth:   result.HandoffDepth,
 	})
 
 	// If routing suggests a next agent, handle the handoff
@@ -3176,6 +3197,9 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 			// Preserve multimodal parts for the next hop so attachments are
 			// not silently dropped during report-router handoffs.
 			Parts: result.Parts,
+			// Carry the hop count forward so the router's maxDepth guard
+			// terminates a mutual-routing pair instead of recursing forever.
+			HandoffDepth: result.HandoffDepth + 1,
 		}
 		// Recursively route to the next agent
 		return d.RouteToAgent(ctx, nextResult, conversationID)
