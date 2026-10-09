@@ -92,6 +92,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [func SetGBNFConstrained\(on bool\)](<#SetGBNFConstrained>)
 - [func SpawnRecordPath\(pidFile string\) string](<#SpawnRecordPath>)
 - [func StripPromptCacheBoundary\(s string\) string](<#StripPromptCacheBoundary>)
+- [func StripThinking\(content string\) string](<#StripThinking>)
 - [func SuperviseArgv\(parentPID, reportFD, deathFD int, spawn \[\]string\) \[\]string](<#SuperviseArgv>)
 - [func SupportedRuntimes\(\) \[\]string](<#SupportedRuntimes>)
 - [func SweepStaleSpawnRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, maxAge time.Duration, now func\(\) time.Time\) \[\]int](<#SweepStaleSpawnRecords>)
@@ -1756,6 +1757,13 @@ SpawnRecordPath returns the durable record path for a runtime PID file: the PID 
 	func StripPromptCacheBoundary(s string) string
 
 StripPromptCacheBoundary removes the PromptCacheBoundary sentinel and any surrounding blank\-line separators from a system prompt string. This must be called before sending the prompt to any provider so the internal marker is never leaked to the API.
+
+<a name="StripThinking"></a>
+## func StripThinking
+
+	func StripThinking(content string) string
+
+StripThinking removes reasoning wire\-forms from model content text: closed \<think\>...\</think\> blocks anywhere, a leading unclosed \<think\> block, and a leading reasoning\_content fragment. Trimmed. Exported so the agent loop / conversation layer can strip history\-side too.
 
 <a name="SuperviseArgv"></a>
 ## func SuperviseArgv

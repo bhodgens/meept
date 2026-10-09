@@ -1569,7 +1569,7 @@ Package agent provides the agent loop and related components.
   - [func NewTacticalScheduler\(cfg TacticalSchedulerConfig\) \*TacticalScheduler](<#NewTacticalScheduler>)
   - [func \(ts \*TacticalScheduler\) GetJobByID\(ctx context.Context, jobID string\) \(\*queue.Job, error\)](<#TacticalScheduler.GetJobByID>)
   - [func \(ts \*TacticalScheduler\) HandleHandoff\(ctx context.Context, msg \*models.BusMessage\) error](<#TacticalScheduler.HandleHandoff>)
-  - [func \(ts \*TacticalScheduler\) OnJobCompleted\(ctx context.Context, jobID string, result json.RawMessage\) error](<#TacticalScheduler.OnJobCompleted>)
+  - [func \(ts \*TacticalScheduler\) OnJobCompleted\(ctx context.Context, jobID string, result json.RawMessage, claimToken ...string\) error](<#TacticalScheduler.OnJobCompleted>)
   - [func \(ts \*TacticalScheduler\) OnJobFailed\(ctx context.Context, jobID, jobErr string\) error](<#TacticalScheduler.OnJobFailed>)
   - [func \(ts \*TacticalScheduler\) ScheduleReadySteps\(ctx context.Context, taskID string\) error](<#TacticalScheduler.ScheduleReadySteps>)
   - [func \(ts \*TacticalScheduler\) SelectAgentForHint\(toolHint string\) string](<#TacticalScheduler.SelectAgentForHint>)
@@ -6784,14 +6784,14 @@ AddAnchorMessage adds a message that is exempt from truncation. Anchor messages 
 
 	func (c *Conversation) AddAssistantMessage(content string)
 
-AddAssistantMessage is a convenience method to add an assistant message.
+AddAssistantMessage is a convenience method to add an assistant message. The content passes through llm.StripThinking before append, so inline \<think\> reasoning never persists in history. The message is kept even when the content strips to empty \(it may carry ToolCalls downstream\).
 
 <a name="Conversation.AddAssistantMessageWithToolCalls"></a>
 ### func \(\*Conversation\) AddAssistantMessageWithToolCalls
 
 	func (c *Conversation) AddAssistantMessageWithToolCalls(content string, toolCalls []llm.ToolCall)
 
-AddAssistantMessageWithToolCalls adds an assistant message with tool calls.
+AddAssistantMessageWithToolCalls adds an assistant message with tool calls. Only the Content field is stripped; tool call arguments are data \(JSON\), never reasoning prose, and are passed through untouched.
 
 <a name="Conversation.AddMessage"></a>
 ### func \(\*Conversation\) AddMessage
@@ -7045,7 +7045,7 @@ RemoveLast removes and returns the last message.
 
 	func (c *Conversation) RestoreFromMessages(messages []llm.ChatMessage)
 
-RestoreFromMessages replaces the conversation's message history with the provided messages. Preserves system prompt and other config. Re\-classifies all messages for importance tracking.
+RestoreFromMessages replaces the conversation's message history with the provided messages. Preserves system prompt and other config. Re\-classifies all messages for importance tracking. Assistant content is stripped once here \(not routed through the add methods\) so legacy persisted history that already carries inline \<think\> reasoning is cleaned without touching non\-assistant messages or tool call arguments.
 
 <a name="Conversation.SetBranchPoint"></a>
 ### func \(\*Conversation\) SetBranchPoint
@@ -7509,6 +7509,21 @@ DispatchResult is the result of dispatching a request.
 	    MemoryIDs []string `json:"memory_ids,omitempty"`
 	    // Plan is the created plan if plan routing was triggered.
 	    Plan *plan.Plan `json:"plan,omitempty"`
+	    // HandoffDepth counts report-router handoffs taken to reach this result.
+	    //
+	    // It exists because the report router's cycle guard
+	    // (report_router.go:80, `params.Depth >= r.maxDepth` -> ForceNotify) was
+	    // unreachable from the dispatcher: the handoff site hardcoded `Depth: 0`
+	    // on every hop, so Depth never grew and `Depth >= maxDepth` (default 5) was
+	    // never true. Two agents that name each other as SuggestedNextAgent
+	    // therefore recursed forever, and each hop created a task row via
+	    // createTask -> taskStore.Create (dispatcher.go:2447). Measured on
+	    // 2026-10-08: ~10,000-14,000 task rows/second, 513M rows in tasks.db
+	    // (150 GB), a 145 GB meept.log, and a 927 GB disk at 95%.
+	    //
+	    // Zero means "fresh, non-handoff dispatch". Each handoff carries
+	    // parent+1 so the router's existing guard terminates the chain.
+	    HandoffDepth int `json:"handoff_depth,omitempty"`
 	    // ClassificationNotice is a user-facing notice about classification degradation
 	    // (e.g., LLM classifier failed and fallback was used). Empty when classification
 	    // succeeded normally.
@@ -16395,9 +16410,9 @@ HandleHandoff processes a handoff request: creates a new task step for the targe
 <a name="TacticalScheduler.OnJobCompleted"></a>
 ### func \(\*TacticalScheduler\) OnJobCompleted
 
-	func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, result json.RawMessage) error
+	func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, result json.RawMessage, claimToken ...string) error
 
-OnJobCompleted handles a completed job by updating the step, promoting newly unblocked steps, and checking task completion.
+OnJobCompleted handles a completed job by updating the step, promoting newly unblocked steps, and checking task completion. claimToken is the attempt token carried by the queue.job.completed event \(bughunt H2\). It is EMPTY on the token\-less legacy shape, in which case the guard degrades to the state\-only predicate — a weaker but still\-correct check.
 
 <a name="TacticalScheduler.OnJobFailed"></a>
 ### func \(\*TacticalScheduler\) OnJobFailed

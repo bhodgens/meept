@@ -822,7 +822,7 @@
     "plan.approved": [
       {
         "file": "internal/plan/manager.go",
-        "line": 258,
+        "line": 271,
         "payload_keys": [],
         "via_helper": true
       }
@@ -830,7 +830,7 @@
     "plan.cancelled": [
       {
         "file": "internal/plan/manager.go",
-        "line": 408,
+        "line": 421,
         "payload_keys": [],
         "via_helper": true
       }
@@ -838,7 +838,7 @@
     "plan.completed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 729,
+        "line": 808,
         "payload_keys": [],
         "via_helper": true
       }
@@ -846,7 +846,7 @@
     "plan.confirmed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 383,
+        "line": 396,
         "payload_keys": [],
         "via_helper": true
       }
@@ -854,7 +854,7 @@
     "plan.created": [
       {
         "file": "internal/plan/manager.go",
-        "line": 168,
+        "line": 181,
         "payload_keys": [],
         "via_helper": true
       }
@@ -862,7 +862,7 @@
     "plan.executing": [
       {
         "file": "internal/plan/manager.go",
-        "line": 587,
+        "line": 666,
         "payload_keys": [],
         "via_helper": true
       }
@@ -870,7 +870,7 @@
     "plan.phase_completed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 654,
+        "line": 733,
         "payload_keys": [],
         "via_helper": true
       }
@@ -878,7 +878,7 @@
     "plan.rejected": [
       {
         "file": "internal/plan/manager.go",
-        "line": 293,
+        "line": 306,
         "payload_keys": [],
         "via_helper": true
       }
@@ -886,7 +886,7 @@
     "plan.revised": [
       {
         "file": "internal/plan/manager.go",
-        "line": 338,
+        "line": 351,
         "payload_keys": [],
         "via_helper": true
       }
@@ -894,7 +894,7 @@
     "plan.submitting": [
       {
         "file": "internal/plan/manager.go",
-        "line": 201,
+        "line": 214,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1825,7 +1825,7 @@
     "task.cancelled": [
       {
         "file": "internal/task/registry.go",
-        "line": 815,
+        "line": 859,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1847,7 +1847,7 @@
       },
       {
         "file": "internal/task/registry.go",
-        "line": 79,
+        "line": 91,
         "payload_keys": [],
         "via_helper": true
       },
@@ -1868,7 +1868,7 @@
       },
       {
         "file": "internal/task/registry.go",
-        "line": 129,
+        "line": 141,
         "payload_keys": [],
         "via_helper": true
       },
@@ -1979,7 +1979,7 @@
       },
       {
         "file": "internal/task/registry.go",
-        "line": 224,
+        "line": 236,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2086,7 +2086,7 @@
     "task.result": [
       {
         "file": "internal/task/registry.go",
-        "line": 581,
+        "line": 625,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2150,7 +2150,7 @@
       },
       {
         "file": "internal/task/registry.go",
-        "line": 245,
+        "line": 257,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2171,31 +2171,31 @@
       },
       {
         "file": "internal/task/registry.go",
-        "line": 108,
+        "line": 120,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/task/registry.go",
-        "line": 195,
+        "line": 207,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/task/registry.go",
-        "line": 295,
+        "line": 307,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/task/registry.go",
-        "line": 334,
+        "line": 346,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/task/registry.go",
-        "line": 366,
+        "line": 378,
         "payload_keys": [],
         "via_helper": true
       },
@@ -3454,7 +3454,7 @@
     "task.cancel": [
       {
         "file": "internal/task/registry.go",
-        "line": 475,
+        "line": 519,
         "subscriber_id": "topics:task.cancel",
         "via_handler_table": true
       }
@@ -3475,7 +3475,7 @@
     "task.create": [
       {
         "file": "internal/task/registry.go",
-        "line": 475,
+        "line": 519,
         "subscriber_id": "topics:task.create",
         "via_handler_table": true
       }
@@ -3483,7 +3483,7 @@
     "task.delete": [
       {
         "file": "internal/task/registry.go",
-        "line": 475,
+        "line": 519,
         "subscriber_id": "topics:task.delete",
         "via_handler_table": true
       }
@@ -3498,7 +3498,7 @@
     "task.get": [
       {
         "file": "internal/task/registry.go",
-        "line": 475,
+        "line": 519,
         "subscriber_id": "topics:task.get",
         "via_handler_table": true
       }
@@ -3506,7 +3506,7 @@
     "task.link": [
       {
         "file": "internal/task/registry.go",
-        "line": 475,
+        "line": 519,
         "subscriber_id": "topics:task.link",
         "via_handler_table": true
       }
@@ -3514,7 +3514,7 @@
     "task.list": [
       {
         "file": "internal/task/registry.go",
-        "line": 475,
+        "line": 519,
         "subscriber_id": "topics:task.list",
         "via_handler_table": true
       }
@@ -3522,7 +3522,7 @@
     "task.list_extended": [
       {
         "file": "internal/task/registry.go",
-        "line": 475,
+        "line": 519,
         "subscriber_id": "topics:task.list_extended",
         "via_handler_table": true
       }
@@ -3614,7 +3614,7 @@
     "task.steps": [
       {
         "file": "internal/task/registry.go",
-        "line": 475,
+        "line": 519,
         "subscriber_id": "topics:task.steps",
         "via_handler_table": true
       }
@@ -3622,7 +3622,7 @@
     "task.unlink": [
       {
         "file": "internal/task/registry.go",
-        "line": 475,
+        "line": 519,
         "subscriber_id": "topics:task.unlink",
         "via_handler_table": true
       }
@@ -3630,7 +3630,7 @@
     "task.update": [
       {
         "file": "internal/task/registry.go",
-        "line": 475,
+        "line": 519,
         "subscriber_id": "topics:task.update",
         "via_handler_table": true
       }

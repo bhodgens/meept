@@ -1909,10 +1909,16 @@ ContextDiscoveryConfig configures provider context\-length discovery \(DECISIONS
 DaemonConfig holds daemon\-specific settings.
 
 	type DaemonConfig struct {
-	    SocketPath         string        `json:"socket_path"         toml:"socket_path"`
-	    PIDFile            string        `json:"pid_file"             toml:"pid_file"`
-	    LogLevel           string        `json:"log_level"             toml:"log_level"`
-	    DataDir            string        `json:"data_dir"             toml:"data_dir"`
+	    SocketPath string `json:"socket_path"         toml:"socket_path"`
+	    PIDFile    string `json:"pid_file"             toml:"pid_file"`
+	    LogLevel   string `json:"log_level"             toml:"log_level"`
+	    // LogMaxBytes caps $MEEPT_HOME/meept.log. 0 or less selects
+	    // logrotate.DefaultMaxBytes (256 MiB). Three generations are retained, so the
+	    // worst-case cost is 3x this value. This exists because the log was
+	    // previously opened with a bare O_APPEND and never capped: on 2026-10-08 a
+	    // runaway task loop drove it to 145 GB and filled a 927 GB disk.
+	    LogMaxBytes        int64         `json:"log_max_bytes" toml:"log_max_bytes"`
+	    DataDir            string        `json:"data_dir" toml:"data_dir"`
 	    ShutdownTimeout    time.Duration `json:"shutdown_timeout"     toml:"shutdown_timeout"`
 	    ChatTimeoutSeconds int           `json:"chat_timeout_seconds" toml:"chat_timeout_seconds"` // Chat response timeout in seconds (default: 120)
 	    // DefaultWorkingDir is the LAST-RESORT working directory for a chat or
@@ -3340,7 +3346,11 @@ OrchestratorConfig holds hierarchical orchestrator settings.
 <a name="OutputFiltersConfig"></a>
 ## type OutputFiltersConfig
 
-OutputFiltersConfig holds daemon\-level output\-filter defaults \(output\-filters tree, leaf 04\). Enabled defaults to FALSE: the filter stage is opt\-in until config turns it on, keeping the completion path byte\-identical for existing installs.
+OutputFiltersConfig holds daemon\-level output\-filter defaults \(output\-filters tree, leaf 04\).
+
+Enabled defaults to TRUE \(2026\-09\-22 decision, set in Defaults\(\) below\): the filter stage is part of the shipped validation pipeline, and the chain is host\-adaptive — an empty filters list resolves to the always\-safe content filters plus whatever script linters exist on this host, so a machine without node/python never sees linter rejections from a missing binary.
+
+The zero VALUE of this field is still false, which is what a config that omits the key entirely decodes to. That comment previously claimed the default was FALSE and contradicted Defaults\(\); corrected here so the two agree \(bughunt L2\).
 
 	type OutputFiltersConfig struct {
 	    // Enabled gates the output-filter stage in the step-completion path.

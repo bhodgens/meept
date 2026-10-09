@@ -496,6 +496,11 @@ All config uses **JSON5** format. Templates in `config/`, copied on
   client via `rendering.ui_theme` — see `docs/configuration/theming.md`.
 - **Client**: `~/.meept/client.json5` (TUI keybindings)
 - **Log level**: `log_level` field in `~/.meept/meept.json5` (NOT env vars)
+- **Log size cap**: `daemon.log_max_bytes` bounds `~/.meept/meept.log` (default
+  256 MiB, 3 retained generations, worst case 3x). Enforced in-process by
+  `internal/logrotate` — a spawner holds the log fd open for the daemon's whole
+  life, so a parent-side rotate leaves the daemon appending to an unlinked file
+  and the cap stops binding.
 
 See `docs/configuration/` for full reference.
 
