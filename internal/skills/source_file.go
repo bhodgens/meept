@@ -17,6 +17,50 @@ import (
 type FileSource struct {
 	tiers  []DiscoveryTier
 	logger *slog.Logger
+
+	// noFrontmatter accumulates the skill paths whose file had no YAML
+	// frontmatter during ONE scan, so the scan emits a single aggregated line
+	// instead of one WARN per skill. See flushNoFrontmatter.
+	noFrontmatter []string
+}
+
+// noteNoFrontmatter records a frontmatter-less skill for the current scan
+// rather than logging it immediately.
+//
+// WHY AGGREGATED. On 2026-10-10 this line was 40.9% of the entire daemon log
+// (~7,500 of every 18,000 sampled lines). It fires once per skill per scan,
+// and FileSource.Discover is invoked ~253 times per daemon boot (1,011 scans
+// across 4 boots on the measured machine), so the per-skill form produced
+// tens of thousands of identical WARN lines to report what is, for a directory
+// of hand-written markdown, entirely normal: a skill file without frontmatter
+// is parsed successfully using its slug as the name.
+//
+// It stays WARN (not DEBUG) because it is a real authoring signal — the skill
+// loses its declared name and description — but it is a per-SCAN fact, so it
+// belongs in one summary line with the count and a bounded sample of paths.
+func (s *FileSource) noteNoFrontmatter(path string) {
+	s.noFrontmatter = append(s.noFrontmatter, path)
+}
+
+// flushNoFrontmatter emits at most one aggregated WARN for the scan that just
+// finished, then resets the accumulator. Safe to call when nothing was
+// recorded: it emits nothing.
+func (s *FileSource) flushNoFrontmatter(scan string) {
+	n := len(s.noFrontmatter)
+	if n == 0 {
+		return
+	}
+	const maxSample = 5
+	attrs := []any{"scan", scan, "count", n}
+	if n <= maxSample {
+		attrs = append(attrs, "paths", s.noFrontmatter)
+	} else {
+		attrs = append(attrs,
+			"paths", s.noFrontmatter[:maxSample],
+			"paths_truncated", n-maxSample)
+	}
+	s.logger.Warn("Skill files have no frontmatter, using slug as name", attrs...)
+	s.noFrontmatter = s.noFrontmatter[:0]
 }
 
 // NewFileSource creates a FileSource that scans the given directory tiers.
@@ -73,6 +117,7 @@ func (s *FileSource) Discover(ctx context.Context) ([]*Skill, error) {
 		return result[i].Name < result[j].Name
 	})
 
+	s.flushNoFrontmatter("discover")
 	s.logger.Info("FileSource discovery complete",
 		"count", len(result),
 		"tiers", len(s.tiers),
@@ -113,6 +158,9 @@ func (s *FileSource) DiscoverMetadata(ctx context.Context) ([]*SkillIndexEntry, 
 		return result[i].Name < result[j].Name
 	})
 
+	// The metadata-only path emits no summary line of its own, so this is the
+	// only place its accumulated frontmatter warnings can surface.
+	s.flushNoFrontmatter("metadata")
 	return result, nil
 }
 
@@ -168,9 +216,7 @@ func (s *FileSource) loadSkillFile(path string, priority int, skills map[string]
 	skill, err := ParseSkillFile(path)
 	if err != nil {
 		if errors.Is(err, ErrNoFrontmatter) {
-			s.logger.Warn("Skill file has no frontmatter, using slug as name",
-				"path", path,
-			)
+			s.noteNoFrontmatter(path)
 		} else {
 			s.logger.Warn("Failed to parse skill file",
 				"path", path,
@@ -325,9 +371,7 @@ func (s *FileSource) loadSkillMetadata(path string, priority int, entries map[st
 	entry, err := ParseSkillMetadataOnly(path)
 	if err != nil {
 		if errors.Is(err, ErrNoFrontmatter) {
-			s.logger.Warn("Skill file has no frontmatter, using slug as name",
-				"path", path,
-			)
+			s.noteNoFrontmatter(path)
 		} else {
 			s.logger.Warn("Failed to parse skill metadata",
 				"path", path,
