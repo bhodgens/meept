@@ -509,6 +509,15 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
 
+	// Refuse writes/deletes of the daemon's own config and credential state
+	// BEFORE the permission and fence checks, because both can be disabled
+	// per-session (--nofence) and neither is about daemon-owned files. See
+	// config_guard.go: on 2026-10-09 a benchmark probe wrote "probed." over a
+	// 30 KB operator config through this tool and the daemon stopped booting.
+	if err := guardProtectedConfigPath(resolved, false); err != nil {
+		return nil, err
+	}
+
 	// Permission check
 	if t.checker != nil && !t.checker.CheckPath(resolved) {
 		return nil, fmt.Errorf("access denied: %s", resolved)
@@ -715,6 +724,15 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any,
 	resolved, err := resolvePathSecure(ctx, rawPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+
+	// Refuse writes/deletes of the daemon's own config and credential state
+	// BEFORE the permission and fence checks, because both can be disabled
+	// per-session (--nofence) and neither is about daemon-owned files. See
+	// config_guard.go: on 2026-10-09 a benchmark probe wrote "probed." over a
+	// 30 KB operator config through this tool and the daemon stopped booting.
+	if err := guardProtectedConfigPath(resolved, false); err != nil {
+		return nil, err
 	}
 
 	// Permission check
