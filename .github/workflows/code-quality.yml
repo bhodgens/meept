@@ -235,7 +235,25 @@ jobs:
         # -p 2: unbounded package parallelism opens enough concurrent
         # localhost sockets to exhaust the ephemeral port range (the same
         # rule the macOS sweeps already enforce via make test).
-        run: go test -p 2 ./... -v -coverprofile=coverage.out
+        # bash -o pipefail keeps the go test exit code through tee, so the
+        # job still fails on red while the record step gets the full output.
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -p 2 ./... -v -coverprofile=coverage.out 2>&1 | tee test-output.txt
+
+      - name: Record per-test results (efficacy history)
+        if: always()
+        run: python3 scripts/test-record.py < test-output.txt || true
+
+      - name: Upload test results history (90-day accumulation)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-history-${{ github.run_id }}
+          path: test-history/results.jsonl
+          retention-days: 90
+          if-no-files-found: ignore
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4

@@ -66,6 +66,10 @@ go test -p 2 ./... -v
 go test -p 2 -race ./...
 go test -p 2 ./... -coverprofile=coverage.out && go tool cover -html=coverage.out
 make test            # canonical full suite (short mode, -p 2)
+make test-record     # run the suite and append per-test results to
+                     # $MEEPT_HOME/test-history/results.jsonl (test-efficacy history)
+make test-efficacy   # per-test flake rate / failure count / avg time table
+                     # (scripts/test-efficacy.py over the recorded history)
 
 # Run
 ./bin/meept-daemon -f           # Daemon foreground

@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui build-gui-dist test test-verbose test-cover test-race bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install install-cli install-desktop setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui build-gui-dist test test-verbose test-cover test-race test-record test-efficacy bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install install-cli install-desktop setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -569,9 +569,14 @@ sync-config:
 # Testing
 # =============================================================================
 
+# Canonical suite. Every run is recorded into the test-efficacy history
+# (test-history/results.jsonl) as a side effect — no separate target needed.
+# Output stays human-readable: -v text streams through tee, then the recorder
+# parses the saved copy. Exit code is go test's, via pipefail.
 test:
+	@mkdir -p test-history
 	@echo "Running tests (short mode, package parallelism $(TEST_PACKAGE_PARALLELISM))..."
-	go test $(GO_TEST_PACKAGE_FLAGS) ./... -short
+	@bash -o pipefail -c 'go test $(GO_TEST_PACKAGE_FLAGS) ./... -short -v 2>&1 | tee test-history/last-run.log; rc=$$?; python3 scripts/test-record.py < test-history/last-run.log || true; exit $$rc'
 
 test-verbose:
 	@echo "Running tests (verbose, package parallelism $(TEST_PACKAGE_PARALLELISM))..."
@@ -591,6 +596,16 @@ test-race:
 test-multiuser:
 	@echo "Running multiuser cluster-pooling integration tests (race, 10x)..."
 	go test ./tests/integration/ -run "TestMultiuserUsersSync" -race -count=10 -v
+
+# Record one run's per-test results into $MEEPT_HOME/test-history/results.jsonl.
+# Same suite as `make test`; the recorder parses -json output on stdin.
+test-record:
+	@echo "Running tests with efficacy recording (short mode, package parallelism $(TEST_PACKAGE_PARALLELISM))..."
+	@go test $(GO_TEST_PACKAGE_FLAGS) ./... -short -json 2>&1 | python3 scripts/test-record.py
+
+# Render the per-test efficacy table (flake rate, failure count, avg time).
+test-efficacy:
+	@python3 scripts/test-efficacy.py $(EFFICACY_ARGS)
 
 # Repopulate the 3-node totem multiuser test cluster (totem1/2/3, root SSH).
 # provision = deps + repo + build + config; start/stop/status/sync/teardown

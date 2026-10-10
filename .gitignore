@@ -26,6 +26,7 @@ Thumbs.db
 # Testing
 .pytest_cache/
 .coverage
+test-history/
 htmlcov/
 .mypy_cache/
 __pycache__/
