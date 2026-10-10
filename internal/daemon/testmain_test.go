@@ -36,5 +36,31 @@ func TestMain(m *testing.M) {
 			panic(err)
 		}
 	}
+	// HOME must be pinned too, and for the same reason. skills.AutoDiscoverHermes
+	// defaults to true (internal/config/schema.go:2343) and discovery.go:44
+	// derives the source dir as filepath.Join(homeDir, ".hermes", "skills") — from
+	// HOME, not MEEPT_HOME. So a daemon booted by this package walked the
+	// OPERATOR's real ~/.hermes/skills (83 entries on this machine) on every run.
+	// Under `go test -p 2` that scan is enough to push TestDaemonStartup past its
+	// 10x50ms wait for status "running": measured 1.11s failing under load versus
+	// 0.26s passing in isolation, with the only log lines in the window being
+	// "Skill file has no frontmatter" from ~/.hermes/skills.
+	//
+	// This is the same defect class as the MEEPT_HOME pin above: a test that
+	// reads operator state instead of fixture state. Only the operator's HOME is
+	// redirected, never their real home directory contents, and an explicit HOME
+	// still wins so CI can point at a fixture.
+	if os.Getenv("MEEPT_TEST_PINNED_HOME") == "" {
+		fakeHome := filepath.Join(os.TempDir(), "meept-daemon-testhome")
+		if err := os.MkdirAll(filepath.Join(fakeHome, ".hermes"), 0o700); err != nil {
+			panic(err)
+		}
+		if err := os.Setenv("HOME", fakeHome); err != nil {
+			panic(err)
+		}
+		// Go caches its own home lookups; clear them so the new HOME takes effect.
+		os.Unsetenv("USERPROFILE") // windows equivalent, ignored on darwin
+		_ = os.Setenv("MEEPT_TEST_PINNED_HOME", "1")
+	}
 	os.Exit(m.Run())
 }
