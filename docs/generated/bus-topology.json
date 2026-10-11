@@ -496,7 +496,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2457,
+        "line": 2463,
         "payload_keys": [
           "event"
         ]
@@ -505,7 +505,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2114,
+        "line": 2120,
         "payload_keys": [
           "event"
         ]
@@ -1572,7 +1572,7 @@
     "session.result": [
       {
         "file": "internal/session/session.go",
-        "line": 1740,
+        "line": 1765,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1649,7 +1649,7 @@
       },
       {
         "file": "internal/session/session.go",
-        "line": 2565,
+        "line": 2590,
         "payload_keys": []
       }
     ],
@@ -2394,7 +2394,7 @@
     "worker.stop": [
       {
         "file": "internal/session/session.go",
-        "line": 2221,
+        "line": 2246,
         "payload_keys": [
           "action",
           "worker_id"
@@ -3060,7 +3060,7 @@
     "session.attach": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.attach",
         "via_handler_table": true
       }
@@ -3068,7 +3068,7 @@
     "session.branch.navigate": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.branch.navigate",
         "via_handler_table": true
       }
@@ -3076,7 +3076,7 @@
     "session.branches.list": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.branches.list",
         "via_handler_table": true
       }
@@ -3084,7 +3084,7 @@
     "session.create": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.create",
         "via_handler_table": true
       }
@@ -3092,7 +3092,7 @@
     "session.delete": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.delete",
         "via_handler_table": true
       }
@@ -3100,7 +3100,7 @@
     "session.detach": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.detach",
         "via_handler_table": true
       }
@@ -3108,7 +3108,7 @@
     "session.fork": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.fork",
         "via_handler_table": true
       }
@@ -3116,7 +3116,7 @@
     "session.generate_description": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.generate_description",
         "via_handler_table": true
       }
@@ -3124,7 +3124,7 @@
     "session.get": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.get",
         "via_handler_table": true
       }
@@ -3132,7 +3132,7 @@
     "session.get_child_tasks": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.get_child_tasks",
         "via_handler_table": true
       }
@@ -3140,7 +3140,7 @@
     "session.get_most_recent": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.get_most_recent",
         "via_handler_table": true
       }
@@ -3148,7 +3148,7 @@
     "session.list": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.list",
         "via_handler_table": true
       }
@@ -3156,7 +3156,7 @@
     "session.messages.get": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.messages.get",
         "via_handler_table": true
       }
@@ -3164,7 +3164,7 @@
     "session.messages.save": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.messages.save",
         "via_handler_table": true
       }
@@ -3172,7 +3172,7 @@
     "session.refresh_title": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.refresh_title",
         "via_handler_table": true
       }
@@ -3314,7 +3314,7 @@
     "session.set_foreground": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.set_foreground",
         "via_handler_table": true
       }
@@ -3322,7 +3322,7 @@
     "session.set_last_user_message": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.set_last_user_message",
         "via_handler_table": true
       }
@@ -3330,7 +3330,7 @@
     "session.set_nofence": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.set_nofence",
         "via_handler_table": true
       }
@@ -3338,7 +3338,7 @@
     "session.stop": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.stop",
         "via_handler_table": true
       }
@@ -3346,7 +3346,7 @@
     "session.thread.current": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.thread.current",
         "via_handler_table": true
       }
@@ -3354,7 +3354,7 @@
     "session.thread.delete": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.thread.delete",
         "via_handler_table": true
       }
@@ -3362,7 +3362,7 @@
     "session.thread.list": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.thread.list",
         "via_handler_table": true
       }
@@ -3370,7 +3370,7 @@
     "session.thread.new": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.thread.new",
         "via_handler_table": true
       }
@@ -3378,7 +3378,7 @@
     "session.thread.switch": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.thread.switch",
         "via_handler_table": true
       }
@@ -3386,7 +3386,7 @@
     "session.tree.get": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.tree.get",
         "via_handler_table": true
       }
@@ -3394,7 +3394,7 @@
     "session.update_description": [
       {
         "file": "internal/session/session.go",
-        "line": 1519,
+        "line": 1544,
         "subscriber_id": "topics:session.update_description",
         "via_handler_table": true
       }

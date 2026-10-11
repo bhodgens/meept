@@ -132,6 +132,14 @@ type Session struct {
 	// branches. Persisted via Store.SetGoalID (goal_id column).
 	GoalID string `json:"goal_id,omitempty"`
 
+	// EmployeeID is the explicitly bound employee (AI employee id) for this
+	// session (goal-completion follow-up #5). Empty = unbound: chat-path
+	// goal anchoring falls back to the daemon's sole employee (or stays
+	// goal-less when zero or several exist). Set when a chat session is
+	// explicitly routed to an employee. Persisted via Store.SetEmployeeID
+	// (employee_id column), mirroring the goal_id precedent.
+	EmployeeID string `json:"employee_id,omitempty"`
+
 	// Thread-based context partitioning (NEW)
 	Threads        map[string]*Thread `json:"threads,omitempty"` // threadID -> Thread
 	ActiveThreadID string             `json:"active_thread_id,omitempty"`
@@ -739,6 +747,23 @@ func (s *MemoryStore) SetGoalID(sessionID, goalID string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	session.GoalID = goalID
+	return nil
+}
+
+// SetEmployeeID persists the explicitly bound employee on a session
+// (goal-completion follow-up #5). An empty employeeID clears the binding.
+// MemoryStore returns the same *Session pointer from Get, so the assignment
+// is the persistence; this exists for parity with SQLiteStore (which writes
+// the employee_id column).
+func (s *MemoryStore) SetEmployeeID(sessionID, employeeID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.EmployeeID = employeeID
 	return nil
 }
 

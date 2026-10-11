@@ -1266,6 +1266,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			// employee.SessionGoalBinder seam structurally.
 			if components.SessionStore != nil {
 				agentRPCHandler.SetSessionGoalBinder(components.SessionStore)
+				// Session employee binding (goal-completion follow-up
+				// #5): agents.employees.bind_session persists via the
+				// session store's SetEmployeeID; the goal-anchor
+				// adapter reads the same column for per-session
+				// employee attribution.
+				agentRPCHandler.SetSessionEmployeeBinder(components.SessionStore)
 			}
 			agentHandlers := agentRPCHandler.Handlers()
 			for method, handler := range agentHandlers {

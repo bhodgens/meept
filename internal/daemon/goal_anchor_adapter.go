@@ -1,13 +1,15 @@
 package daemon
 
 // goalAnchorAdapter adapts the employee goal store + employee roster onto
-// agent.GoalAnchorStore (goal-completion leaf 03 Task 2). It lives in the
-// daemon because the resolution rule needs BOTH subsystems: sessions do not
-// carry an employee binding, so the "session's employee" resolves to the
-// daemon's SOLE configured employee — "" when zero or several exist, which
-// keeps the implicit-goal branch off rather than mis-attributing chat work.
-// This mirrors the planCreatorAdapter seam: internal/agent must not import
-// internal/employee (goal_loop.go imports agent — import cycle).
+// agent.GoalAnchorStore (goal-completion leaf 03 Task 2; binding extended in
+// follow-up #5). It lives in the daemon because the resolution rule needs
+// BOTH subsystems: a session's employee resolves from the session's explicit
+// employee_id binding when set (agents.employees.bind_session), falling back
+// to the daemon's SOLE configured employee for unbound sessions — "" when
+// neither path resolves, which keeps the implicit-goal branch off rather
+// than mis-attributing chat work. This mirrors the planCreatorAdapter seam:
+// internal/agent must not import internal/employee (goal_loop.go imports
+// agent — import cycle).
 
 import (
 	"context"
@@ -58,6 +60,7 @@ type goalAnchorAdapter struct {
 var _ interface {
 	SessionGoalID(sessionID string) string
 	SoleEmployeeID() string
+	SessionEmployeeID(sessionID string) string
 	SoleActiveGoalID(ctx context.Context, employeeID string) string
 	EnsureImplicitGoal(ctx context.Context, employeeID, title string) string
 } = (*goalAnchorAdapter)(nil)
@@ -83,9 +86,11 @@ func (a *goalAnchorAdapter) SessionGoalID(sessionID string) string {
 	return sess.GoalID
 }
 
-// SoleEmployeeID resolves the session-attributed employee: the daemon's
-// sole configured employee. Zero or multiple employees => "" (no reliable
-// per-session employee binding exists in the session model today).
+// SoleEmployeeID resolves the daemon's sole configured employee. Zero or
+// multiple employees => "" (the per-session disambiguation lives in
+// SessionEmployeeID). Retained for compatibility: unbound sessions fall
+// back to this from resolveGoalID, so single-employee installs keep their
+// existing behavior.
 func (a *goalAnchorAdapter) SoleEmployeeID() string {
 	if a.roster == nil {
 		return ""
@@ -95,6 +100,37 @@ func (a *goalAnchorAdapter) SoleEmployeeID() string {
 		return ""
 	}
 	return ids[0]
+}
+
+// SessionEmployeeID resolves the employee a session's chat work is
+// attributed to (goal-completion follow-up #5): the session's explicitly
+// bound employee when it is still on the roster, else the daemon's sole
+// employee (single-employee fallback), else "". A binding to an employee
+// no longer on the roster (retired/hired-away) degrades to the fallback
+// rather than attributing work to a dead employee.
+func (a *goalAnchorAdapter) SessionEmployeeID(sessionID string) string {
+	bound := ""
+	if a.sessions != nil && sessionID != "" {
+		if sess := a.sessions.Get(sessionID); sess != nil {
+			bound = sess.EmployeeID
+		}
+	}
+	if bound == "" {
+		// Unbound session: legacy single-employee fallback.
+		return a.SoleEmployeeID()
+	}
+	// Validate the binding against the live roster so a retired employee
+	// never receives new work.
+	if a.roster != nil {
+		if ids, err := a.roster.ListEmployeeIDs(context.Background()); err == nil {
+			for _, id := range ids {
+				if id == bound {
+					return bound
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // SoleActiveGoalID returns the employee's single active NON-implicit goal

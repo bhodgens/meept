@@ -207,6 +207,7 @@ func (f *fakeStore) SetProject(string, string, string) error                    
 func (f *fakeStore) SetWorktree(string, string, string) error                        { return nil }
 func (f *fakeStore) SetDetectionContext(string, *session.DetectionContext) error     { return nil }
 func (f *fakeStore) SetGoalID(string, string) error                                  { return nil }
+func (f *fakeStore) SetEmployeeID(string, string) error                              { return nil }
 func (f *fakeStore) ClearMessages(string) error                                      { return nil }
 func (f *fakeStore) UpdateSessionsProjectPath(context.Context, string, string) error { return nil }
 

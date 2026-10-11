@@ -14,9 +14,11 @@ package agent
 // package cannot import internal/employee (goal_loop.go imports agent —
 // an import cycle). The daemon injects a GoalAnchorStore adapter over
 // *employee.GoalStore + the employee roster, exactly like the
-// planManager seam. When no employee is resolvable, resolveGoalID
-// returns "" and the plan stays goal-less (legacy-legal; chat without
-// employees must keep working — hard requirement).
+// planManager seam. Employee resolution prefers the session's explicitly
+// bound employee (session employee_id column, follow-up #5) and falls
+// back to the daemon's sole employee; when neither resolves,
+// resolveGoalID returns "" and the plan stays goal-less (legacy-legal;
+// chat without employees must keep working — hard requirement).
 
 import (
 	"context"
@@ -36,7 +38,16 @@ type GoalAnchorStore interface {
 	// sessions to: the sole configured employee. Returns "" when zero or
 	// multiple employees exist (no reliable per-session binding) — the
 	// implicit branch stays off rather than mis-attributing work.
+	// Retained for compatibility: resolveGoalID consults
+	// SessionEmployeeID first and falls back to this when the session is
+	// unbound (single-employee installs keep working unchanged).
 	SoleEmployeeID() string
+	// SessionEmployeeID resolves the employee a chat session's work is
+	// attributed to (goal-completion follow-up #5): the session's
+	// explicitly bound employee when set, else the daemon's sole employee,
+	// else "" (zero or multiple employees and no binding — the implicit
+	// branch stays off rather than mis-attributing work).
+	SessionEmployeeID(sessionID string) string
 	// SoleActiveGoalID returns the employee's single active non-implicit
 	// goal id (C6 branch 2), or "" when zero or multiple exist.
 	SoleActiveGoalID(ctx context.Context, employeeID string) string
@@ -67,11 +78,16 @@ func (d *Dispatcher) resolveGoalID(ctx context.Context, sessionID, planTitle str
 		return gid
 	}
 
-	// Branches 2 and 3 need an employee. Sessions do not carry an
-	// employee binding; the anchor resolves the daemon's sole employee,
-	// and "" means the chat install has zero or several — leave the plan
-	// unanchored.
-	employeeID := d.goalAnchor.SoleEmployeeID()
+	// Branches 2 and 3 need an employee. Prefer the session's explicitly
+	// bound employee (employee_id column; set when a chat session is
+	// routed to an employee), falling back to the daemon's sole employee
+	// for unbound sessions — single-employee installs keep working
+	// unchanged, and "" means neither path resolved (leave the plan
+	// unanchored).
+	employeeID := d.goalAnchor.SessionEmployeeID(sessionID)
+	if employeeID == "" {
+		employeeID = d.goalAnchor.SoleEmployeeID()
+	}
 	if employeeID == "" {
 		return ""
 	}

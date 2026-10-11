@@ -29,6 +29,7 @@ type stubGoalAnchor struct {
 
 func (s *stubGoalAnchor) SessionGoalID(sessionID string) string { return s.sessionGoalID }
 func (s *stubGoalAnchor) SoleEmployeeID() string                { return s.soleEmployee }
+func (s *stubGoalAnchor) SessionEmployeeID(_ string) string     { return "" }
 func (s *stubGoalAnchor) SoleActiveGoalID(_ context.Context, employeeID string) string {
 	return s.soleActiveID
 }

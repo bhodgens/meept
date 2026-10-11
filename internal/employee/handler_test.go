@@ -91,6 +91,8 @@ func TestRPCHandler_Handlers_Registration(t *testing.T) {
 		"agents.migrate",
 		// session goal binding (goal-completion leaf 03)
 		"agents.goals.bind_session",
+		// session employee binding (goal-completion follow-up #5)
+		"agents.employees.bind_session",
 	}
 
 	for _, m := range required {

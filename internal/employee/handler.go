@@ -75,6 +75,11 @@ type RPCHandler struct {
 	// internal/session directly beyond this narrow seam (and tests inject
 	// stubs). Nil means agents.goals.bind_session returns a clear error.
 	sessionGoals SessionGoalBinder
+
+	// sessionEmployees persists the explicitly bound session employee
+	// (goal-completion follow-up #5). Same injection seam as sessionGoals;
+	// nil means agents.employees.bind_session returns a clear error.
+	sessionEmployees SessionEmployeeBinder
 }
 
 // SessionGoalBinder is the narrow session-store surface bind_session needs:
@@ -145,8 +150,12 @@ func (h *RPCHandler) Handlers() map[string]func(context.Context, json.RawMessage
 		// Session goal binding (goal-completion leaf 03, contract C6
 		// branch 1): the seam TUI/GUI exposure defers to.
 		"agents.goals.bind_session": h.handleGoalsBindSession,
-		"agents.goals.approve":      h.handleGoalsApprove,
-		"agents.goals.reject":       h.handleGoalsReject,
+		// Session employee binding (goal-completion follow-up #5): the
+		// seam the daemon's goal-anchor adapter reads for per-session
+		// employee attribution. Handler in handler_session_employee.go.
+		"agents.employees.bind_session": h.handleEmployeesBindSession,
+		"agents.goals.approve":          h.handleGoalsApprove,
+		"agents.goals.reject":           h.handleGoalsReject,
 
 		// Audit (spec line 539)
 		"agents.audit.list":    h.handleAuditList,
@@ -431,11 +440,19 @@ func (h *RPCHandler) handleTrigger(ctx context.Context, raw json.RawMessage) (an
 	if err != nil {
 		return nil, fmt.Errorf("trigger: %w", err)
 	}
-	return map[string]any{
+	resp := map[string]any{
 		"id":         req.ID,
 		"status":     "triggered",
 		"invocation": result,
-	}, nil
+	}
+	// A cap-blocked round reports skipped + skip_reason at the envelope
+	// level too, so RPC clients don't have to unwrap "invocation" to see
+	// the round was not completed (goal-completion finding #3).
+	if result.Status == "skipped" {
+		resp["status"] = result.Status
+		resp["skip_reason"] = result.SkipReason
+	}
+	return resp, nil
 }
 
 // handleSteer handles agents.steer (leaf 04, contract C5):

@@ -185,6 +185,11 @@ func (s *SQLiteStore) migrate() error {
 	// no backfill (empty goal_id is legacy-legal per SHARED-CONVENTIONS C3).
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN goal_id TEXT DEFAULT ''", "goal_id")
 
+	// Add the explicitly bound session employee (goal-completion follow-up
+	// #5). TEXT DEFAULT '' means "unbound"; pre-existing rows need no
+	// backfill — unbound sessions fall back to sole-employee resolution.
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN employee_id TEXT DEFAULT ''", "employee_id")
+
 	// Add worktree association columns to sessions
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN worktree_id TEXT DEFAULT ''", "worktree_id")
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN worktree_path TEXT DEFAULT ''", "worktree_path")
@@ -586,7 +591,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 	defer s.mu.RUnlock()
 
 	row := s.db.QueryRow(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id, employee_id
 		FROM sessions
 		ORDER BY last_activity DESC
 		LIMIT 1`) //nolint:mutexio // mutex serializes sqlite connection access
@@ -598,7 +603,7 @@ func (s *SQLiteStore) getByColumn(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id, employee_id
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -635,9 +640,10 @@ func (s *SQLiteStore) scanSessionRow(scan func(dest ...any) error) *Session {
 		lastUserMessageAt         sql.NullString
 		detectionContextJSON      sql.NullString
 		goalID                    sql.NullString
+		employeeID                sql.NullString
 	)
 
-	err := scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID, &foreground, &lastUserMessageAt, &detectionContextJSON, &goalID)
+	err := scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID, &foreground, &lastUserMessageAt, &detectionContextJSON, &goalID, &employeeID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			s.logger.Error("Failed to scan session", "error", err)
@@ -689,6 +695,9 @@ func (s *SQLiteStore) scanSessionRow(scan func(dest ...any) error) *Session {
 	if goalID.Valid {
 		session.GoalID = goalID.String
 	}
+	if employeeID.Valid {
+		session.EmployeeID = employeeID.String
+	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		session.CreatedAt = t
@@ -713,7 +722,7 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path, s.owner_id, s.foreground, s.last_user_message_at, s.detection_context, s.goal_id
+		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path, s.owner_id, s.foreground, s.last_user_message_at, s.detection_context, s.goal_id, s.employee_id
 		FROM sessions s
 		ORDER BY s.archived ASC, s.last_activity DESC`) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
@@ -1305,7 +1314,7 @@ func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id, employee_id
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -1461,6 +1470,28 @@ func (s *SQLiteStore) SetGoalID(sessionID, goalID string) error {
 	) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to set goal for session: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// SetEmployeeID persists the explicitly bound employee on a session
+// (goal-completion follow-up #5). An empty employeeID clears the binding.
+// Mirrors SetGoalID: bumps last_activity and returns an error when the
+// session does not exist.
+func (s *SQLiteStore) SetEmployeeID(sessionID, employeeID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(
+		`UPDATE sessions SET employee_id = ?, last_activity = ? WHERE id = ?`,
+		employeeID, time.Now().UTC().Format(time.RFC3339), sessionID,
+	) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to set employee for session: %w", err)
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {

@@ -119,6 +119,9 @@ type Store interface {
 	// SetGoalID persists the explicitly bound goal on a session
 	// (goal-completion leaf 03, C6 branch 1). An empty goalID clears it.
 	SetGoalID(sessionID, goalID string) error
+	// SetEmployeeID persists the explicitly bound employee on a session
+	// (goal-completion follow-up #5). An empty employeeID clears it.
+	SetEmployeeID(sessionID, employeeID string) error
 
 	// F-04 FIX: Allow per-session fence override for --nofence CLI flag.
 	SetNoFence(sessionID string, noFence bool) error
