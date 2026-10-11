@@ -88,7 +88,16 @@ func TestChatHandler_WaitForTaskCompletion_StallFires(t *testing.T) {
 // task terminalizes.
 func TestChatHandler_WaitForTaskCompletion_ProgressResetsStall(t *testing.T) {
 	h := newTestChatHandlerWithStores(t)
-	h.SetSyncWaitStall(400*time.Millisecond, time.Hour)
+	// The stall window MUST exceed the 2s poll interval (handler.go): the
+	// poller compares fingerprints of CONSECUTIVE samples, and this test's
+	// oscillating churn can alias — an even number of toggles between two
+	// polls leaves the observed state unchanged. With stall < poll, one
+	// aliased poll fires the degraded reply on wall-clock phase alone
+	// (caught by the test-efficacy history, 2026-10-10: failed under
+	// -count=5, passed single). At 6s, even two consecutive aliased polls
+	// (max age 4s) cannot fire — but a REGRESSION that never resets the
+	// stall timer still fires by the 8s poll, so the pin keeps its teeth.
+	h.SetSyncWaitStall(6*time.Second, time.Hour)
 
 	tk := task.NewTask("progressing task", "progress-resets-stall pin")
 	tk.State = task.StateExecuting
@@ -98,12 +107,15 @@ func TestChatHandler_WaitForTaskCompletion_ProgressResetsStall(t *testing.T) {
 
 	stop := make(chan struct{})
 	go func() {
-		// Keep the fingerprint changing every 150ms (well inside the 400ms
-		// stall window) by toggling the task state through the
+		// Keep the fingerprint changing every 150ms (well inside any real
+		// progress cadence) by toggling the task state through the
 		// single-connection task-store pool (writes serialize with the
-		// poller's reads there). After ~3s of churn, finalize the task.
+		// poller's reads there). The churn MUST outlive the stall window
+		// (6s) plus a poll: if the reset logic regresses, the degraded
+		// reply fires at the ~8s poll while the task is still churning.
+		// After ~9s, finalize the task.
 		toggled := false
-		for range 20 {
+		for range 60 {
 			select {
 			case <-stop:
 				return
