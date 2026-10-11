@@ -334,10 +334,26 @@ func (a *planCreatorAdapter) CreatePlan(ctx context.Context, title, description,
 		return employee.PlanRef{}, err
 	}
 	return employee.PlanRef{
-		ID:    p.ID,
-		State: string(p.State),
+		ID:     p.ID,
+		State:  string(p.State),
+		GoalID: p.GoalID,
 	}, nil
 }
+
+// SetPlanGoal persists the goal linkage on the stored plan row
+// (goal-completion leaf 02, C6): the GoalLoop stamps Plan.GoalID right after
+// CreatePlan returns, so every goal-loop plan traces to its owning goal.
+// Compile-time guard below keeps the adapter in sync with the optional
+// employee.PlanGoalSetter interface.
+func (a *planCreatorAdapter) SetPlanGoal(ctx context.Context, planID, goalID string) error {
+	if a.planMgr == nil {
+		return fmt.Errorf("plan manager not configured")
+	}
+	return a.planMgr.SetPlanGoal(ctx, planID, goalID)
+}
+
+// Compile-time guard: planCreatorAdapter must satisfy employee.PlanGoalSetter.
+var _ employee.PlanGoalSetter = (*planCreatorAdapter)(nil)
 
 // Compile-time guard: planCreatorAdapter must satisfy employee.PlanCreator.
 var _ employee.PlanCreator = (*planCreatorAdapter)(nil)

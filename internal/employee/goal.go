@@ -138,6 +138,12 @@ const (
 	SourceSelfProposed GoalSource = "self_proposed"
 	// SourceAuditFinding is a goal created to remediate an audit finding.
 	SourceAuditFinding GoalSource = "audit_finding"
+	// SourceImplicit is a goal auto-created to anchor chat-path Plans that
+	// arrived with no explicit goal. ValidateGoalSource treats it as valid at
+	// every tier and it never requires signoff; implicit goals auto-retire
+	// when their last active plan completes and no new plan references them
+	// for 30 days.
+	SourceImplicit GoalSource = "implicit"
 )
 
 // --------------------------------------------------------------------------
@@ -759,6 +765,44 @@ func (s *GoalStore) Retire(ctx context.Context, id string, now time.Time) error 
 	}
 	s.log.InfoContext(ctx, "employee goal retired", "goal_id", id, "retired_at", now)
 	return nil
+}
+
+// EnsureImplicitGoal returns the employee's active SourceImplicit goal,
+// creating one when none exists (goal-completion leaf 02, C2/C6). It anchors
+// chat-path Plans that arrived with no explicit goal: the first call creates
+// a goal with Source=SourceImplicit, State=GoalActive, Health=GoalUnknown and
+// Title/Mandate set to title; subsequent calls return the same goal (filtered
+// via ListActive + Source check), so repeated chat turns share one anchor per
+// employee. A non-implicit active goal never satisfies the lookup — implicit
+// anchoring must not hijack operator-assigned goals.
+func (s *GoalStore) EnsureImplicitGoal(ctx context.Context, employeeID, title string) (*Goal, error) {
+	if employeeID == "" {
+		return nil, errors.New("ensure implicit goal: empty employee id")
+	}
+	goals, err := s.ListActive(ctx, employeeID)
+	if err != nil {
+		return nil, fmt.Errorf("ensure implicit goal: list active: %w", err)
+	}
+	for _, g := range goals {
+		if g != nil && g.Source == SourceImplicit {
+			return g, nil
+		}
+	}
+
+	g := &Goal{
+		EmployeeID: employeeID,
+		Title:      title,
+		Mandate:    title,
+		State:      GoalActive,
+		Source:     SourceImplicit,
+		Health:     GoalUnknown,
+	}
+	if err := s.Create(ctx, g); err != nil {
+		return nil, fmt.Errorf("ensure implicit goal: create: %w", err)
+	}
+	s.log.InfoContext(ctx, "implicit goal created",
+		"goal_id", g.ID, "employee_id", employeeID, "title", title)
+	return g, nil
 }
 
 // --------------------------------------------------------------------------

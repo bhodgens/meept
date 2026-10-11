@@ -487,12 +487,15 @@ func TestValidateGoalSource(t *testing.T) {
 		{"tier1 + trigger", SourceTrigger, Tier1Reactive, false},
 		{"tier1 + self_proposed (rejected)", SourceSelfProposed, Tier1Reactive, true},
 		{"tier1 + audit_finding", SourceAuditFinding, Tier1Reactive, false},
+		{"tier1 + implicit", SourceImplicit, Tier1Reactive, false},
 		{"tier2 + user", SourceUser, Tier2Propose, false},
 		{"tier2 + trigger", SourceTrigger, Tier2Propose, false},
 		{"tier2 + self_proposed", SourceSelfProposed, Tier2Propose, false},
 		{"tier2 + audit_finding", SourceAuditFinding, Tier2Propose, false},
+		{"tier2 + implicit", SourceImplicit, Tier2Propose, false},
 		{"tier3 + user", SourceUser, Tier3Autonomous, false},
 		{"tier3 + self_proposed", SourceSelfProposed, Tier3Autonomous, false},
+		{"tier3 + implicit", SourceImplicit, Tier3Autonomous, false},
 		{"unknown tier", SourceUser, AutonomyTier(99), true},
 	}
 	for _, tt := range tests {

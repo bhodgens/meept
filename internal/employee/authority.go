@@ -261,8 +261,11 @@ type StaticEscalationGraph map[string]Constitution
 //   - Tier 1 (Reactive): rejects SourceSelfProposed (tier-1 employees are
 //     reactive-only and cannot self-propose goals).
 //   - Tier 2 (Propose): requires a human/user source for externally-assigned
-//     goals, but allows self_proposed, trigger, and audit_finding sources.
+//     goals, but allows self_proposed, trigger, audit_finding, and implicit
+//     sources.
 //   - Tier 3 (Autonomous): all sources are valid.
+//
+// SourceImplicit is valid at every tier and never requires signoff (C2).
 //
 // Returns nil if the source is valid for the tier; an error describing the
 // mismatch otherwise.

@@ -176,6 +176,10 @@ type PlanRef struct {
 	// ApproverID matches the employee's escalates_to OR ApproverID is
 	// "system" (for auto-approved tier-1 plans).
 	ApproverID string `json:"approver_id,omitempty"`
+	// GoalID is the owning goal this plan pursues (C3/C6). Stamped from the
+	// loop's active goal at Plan() time; empty when the loop has no active
+	// goal (legacy-legal).
+	GoalID string `json:"goal_id,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +197,17 @@ type PlanRef struct {
 // implementations should document this as future work.
 type PlanCreator interface {
 	CreatePlan(ctx context.Context, title, description, projectID, sessionID string) (PlanRef, error)
+}
+
+// PlanGoalSetter is the optional second half of the plan-creation contract
+// (goal-completion leaf 02, C6): implementations that can persist the goal
+// linkage on the created plan row (e.g. the daemon's PlanManager adapter,
+// which writes Plan.GoalID through its store) implement it so the GoalLoop
+// can stamp Plan.GoalID after CreatePlan returns. The GoalLoop type-asserts
+// the planner to this interface and skips the call when the planner cannot
+// persist the linkage.
+type PlanGoalSetter interface {
+	SetPlanGoal(ctx context.Context, planID, goalID string) error
 }
 
 // Reflector is the LLM chatter used for ASSESS and REFLECT prompts. It is
@@ -316,6 +331,16 @@ type GoalLoop struct {
 	speakSessionID      string
 	speakConversationID string
 	speakNotifiedRound  bool
+
+	// Steer-of-episode state (leaf 04, contract C5). pendingSteer holds
+	// steer TriggerEvents queued by Steer while no Decide re-entry has
+	// consumed them yet; lastDrainedSteer is the most recent drain (test +
+	// observability seam). Guarded by steerMu (NOT mu: the drain sites run
+	// under the manager's invoke mutex, and mu is held across in-round
+	// snapshot reads — a second lock would risk ordering violations).
+	steerMu           sync.Mutex
+	pendingSteer      []TriggerEvent
+	lastDrainedSteer  *TriggerEvent
 }
 
 // EmitMetricFunc is the callback signature for emitting telemetry from the
@@ -707,9 +732,32 @@ func (l *GoalLoop) Plan(ctx context.Context, candidate CandidatePlan) (PlanRef, 
 	projectID := l.employeeID
 	sessionID := id.Generate(goalLoopIDPrefix)
 
+	// C6: the created plan traces to the loop's active goal, if any. The
+	// lookup failure is non-fatal — a plan without goal linkage still
+	// executes (empty GoalID is legacy-legal per C3).
+	goal, goalErr := l.lookupActiveGoal(ctx)
+	if goalErr != nil {
+		logger.Debug("plan: goal lookup failed; creating plan without goal_id",
+			"error", goalErr)
+		goal = nil
+	}
+
 	ref, err := planner.CreatePlan(ctx, candidate.Title, candidate.Description, projectID, sessionID)
 	if err != nil {
 		return PlanRef{}, fmt.Errorf("create plan: %w", err)
+	}
+
+	// Stamp the goal linkage on the ref and, when the planner supports it,
+	// persist it on the stored plan row. Persist failure is logged but does
+	// not fail plan creation — the in-memory ref still carries the linkage.
+	if goal != nil {
+		ref.GoalID = goal.ID
+		if setter, ok := planner.(PlanGoalSetter); ok {
+			if setErr := setter.SetPlanGoal(ctx, ref.ID, goal.ID); setErr != nil {
+				logger.Warn("plan: failed to persist goal_id on plan row",
+					"plan_id", ref.ID, "goal_id", goal.ID, "error", setErr)
+			}
+		}
 	}
 
 	// Thread the candidate's prompt through the PlanRef so Execute can use it
@@ -1285,6 +1333,11 @@ func (l *GoalLoop) decideTier1(ctx context.Context, trigger TriggerEvent, logger
 // Execute is deferred until ApproveAndExecute is called after signoff.
 // G2: GoalLoop blocks ASSESS if the number of active plans is already at
 // MaxActivePlans.
+//
+// Goal source note (C2): SourceImplicit goals are treated exactly like
+// SourceTrigger goals here — plans on an implicit goal enter the same
+// pending path with no additional signoff requirement, and CanExecutePlan
+// accepts ApproverID "system" at every tier.
 func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger *slog.Logger) error {
 	// G2: Multi-plan concurrency check.
 	l.mu.Lock()
@@ -1377,6 +1430,10 @@ func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger
 // the candidate to plan signoff (tier-2 pending-plan path). G2: MaxActivePlans
 // cap is enforced before Assess and re-checked per candidate, mirroring
 // decideTier2. G7: tier-3 plans are self-approved; ApproverID is "system".
+//
+// Goal source note (C2): SourceImplicit goals run the same path as
+// SourceTrigger goals — no additional signoff gate is applied to plans
+// anchored on an implicit goal.
 func (l *GoalLoop) decideTier3(ctx context.Context, trigger TriggerEvent, logger *slog.Logger) error {
 	// Read constitution under lock.
 	l.mu.Lock()
@@ -1664,6 +1721,17 @@ func buildAssessUserPrompt(c *Constitution, trigger TriggerEvent) string {
 		sb.WriteString("**payload:**\n")
 		sb.WriteString(truncate(string(trigger.Payload), 4000))
 		sb.WriteString("\n")
+	}
+
+	// Steer-of-episode (leaf 04, contract C5): a steer trigger renders the
+	// user's steering text as a first-class instruction line so the assess
+	// LLM re-routes the running episode. Empty content renders nothing (an
+	// empty steer payload is never a dangling "User steering:").
+	if trigger.Source == "steer" {
+		var sp steerTriggerPayload
+		if err := json.Unmarshal(trigger.Payload, &sp); err == nil && strings.TrimSpace(sp.Content) != "" {
+			sb.WriteString("\n**User steering: " + sp.Content + "**\n")
+		}
 	}
 
 	sb.WriteString("\n# task\n\n")

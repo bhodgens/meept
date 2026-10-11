@@ -446,3 +446,194 @@ func triggerKey(t *TriggerEvent) string {
 	}
 	return t.Source + "|" + t.Topic
 }
+
+// ---------------------------------------------------------------------------
+// Steer-of-episode (goal-completion tree leaf 04, contract C5)
+// ---------------------------------------------------------------------------
+
+// steerTriggerPayload is the wire shape of a steer TriggerEvent's payload
+// (contract C5: {"source":"steer","content":...} — source lives on the
+// event itself, content is the user's steering text).
+type steerTriggerPayload struct {
+	Content string `json:"content"`
+}
+
+// Steer delivers user steering to this employee's goal-loop episode
+// (contract C5). Returns (queued, err):
+//
+//   - No active episode — no parked episode for this employee AND no active
+//     goal (the loop exposes no in-flight marker; the active goal plus the
+//     parker's H4 dedup map are the reliable "is something running" signal)
+//     → no-op returning (false, nil). Steering a quiet employee is not an
+//     error.
+//   - Active episode → enqueue a resume trigger TriggerEvent{Source:
+//     "steer", Payload: {"content": content}} on the loop's pending-steer
+//     queue. The next Decide/re-entry drains it and re-runs the episode
+//     with Source="steer"; buildAssessUserPrompt renders the steering text
+//     into the assess prompt. queued=true.
+//
+// The queue drains at the two goal-round entry points: Decide (pre-round,
+// coalescing a steer that arrived while the invoke mutex was held into the
+// round about to start) and triggerViaGoalLoop (post-round, re-entering
+// Decide with Source="steer" when steering arrived during a round).
+// Steer never blocks on the invoke mutex — Manager.SteerEmployee holds it,
+// so a blocking drain would self-deadlock.
+func (l *GoalLoop) Steer(_ context.Context, content string) (bool, error) {
+	l.mu.Lock()
+	logger := l.logger
+	l.mu.Unlock()
+
+	l.steerMu.Lock()
+	parked := l.hasParkedEpisodeLocked()
+	if !parked && len(l.pendingSteer) == 0 {
+		// No parked episode and no steer already queued: consult the
+		// active goal. A nil store/lookup or lookup error is a quiet
+		// employee by definition (we cannot prove an episode, so never
+		// queue a stray trigger).
+		active, err := l.hasActiveGoalSnapshot()
+		if err != nil || !active {
+			l.steerMu.Unlock()
+			logger.Debug("steer ignored: no active episode",
+				"employee_id", l.employeeID,
+				"goal_lookup_err", err != nil,
+			)
+			return false, nil
+		}
+	}
+	trigger := TriggerEvent{
+		Source:  "steer",
+		Payload: mustSteerPayload(content),
+		FiredAt: time.Now().UTC(),
+	}
+	l.pendingSteer = append(l.pendingSteer, trigger)
+	l.steerMu.Unlock()
+	logger.Info("goal episode steering queued",
+		"employee_id", l.employeeID,
+		"content_length", len(content),
+	)
+	return true, nil
+}
+
+// hasParkedEpisodeLocked reports whether the parker currently holds a
+// parked episode for this employee. Caller holds steerMu. The parker field
+// is set once at wiring time and read-only afterwards (park.go), so no
+// additional lock handoff is needed.
+func (l *GoalLoop) hasParkedEpisodeLocked() bool {
+	return l.parker != nil && l.parker.HasParkedEpisode(l.employeeID)
+}
+
+// hasActiveGoalSnapshot reports whether the employee has an active goal
+// (the "episode in flight" signal for a loop without a parked record).
+// Snapshot-then-IO: reads the dependencies under l.mu, does the lookup
+// outside the lock (mutexio rule).
+func (l *GoalLoop) hasActiveGoalSnapshot() (bool, error) {
+	l.mu.Lock()
+	lookup := l.goalLookup
+	store := l.goalStore
+	l.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), goalLookupTimeout)
+	defer cancel()
+	if lookup != nil {
+		goal, err := lookup.ActiveGoal(ctx, l.employeeID)
+		if err != nil {
+			return false, err
+		}
+		return goal != nil, nil
+	}
+	if store == nil {
+		return false, nil
+	}
+	goals, err := store.ListActive(ctx, l.employeeID)
+	if err != nil {
+		return false, err
+	}
+	return len(goals) > 0, nil
+}
+
+// goalLookupTimeout bounds the active-goal lookup inside Steer. Steer runs
+// under the manager's invoke mutex, so it must never hang on a stuck store.
+const goalLookupTimeout = 5 * time.Second
+
+// mustSteerPayload encodes the steer content. json.Marshal on a plain
+// string field cannot fail; a failure still returns valid empty JSON so a
+// steer trigger never carries a nil payload.
+func mustSteerPayload(content string) []byte {
+	raw, err := json.Marshal(steerTriggerPayload{Content: content})
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return raw
+}
+
+// PendingSteerCount reports how many steer triggers are queued. Test and
+// observability seam.
+func (l *GoalLoop) PendingSteerCount() int {
+	if l == nil {
+		return 0
+	}
+	l.steerMu.Lock()
+	defer l.steerMu.Unlock()
+	return len(l.pendingSteer)
+}
+
+// DrainedSteerTrigger returns the most recently drained steer trigger and
+// whether one was available. Test seam for the drain path.
+func (l *GoalLoop) DrainedSteerTrigger() (TriggerEvent, bool) {
+	if l == nil {
+		return TriggerEvent{}, false
+	}
+	l.steerMu.Lock()
+	defer l.steerMu.Unlock()
+	if l.lastDrainedSteer == nil {
+		return TriggerEvent{}, false
+	}
+	return *l.lastDrainedSteer, true
+}
+
+// drainPendingSteer pops one queued steer trigger, if any. Called at the
+// goal-round entry points (decideSteer or triggerViaGoalLoop post-round).
+func (l *GoalLoop) drainPendingSteer() (TriggerEvent, bool) {
+	l.steerMu.Lock()
+	defer l.steerMu.Unlock()
+	if len(l.pendingSteer) == 0 {
+		return TriggerEvent{}, false
+	}
+	trigger := l.pendingSteer[0]
+	l.pendingSteer = l.pendingSteer[1:]
+	drained := trigger
+	l.lastDrainedSteer = &drained
+	return trigger, true
+}
+
+// decideSteer processes one pending steer trigger by re-entering Decide
+// with Source="steer". Called by the post-round drain in
+// triggerViaGoalLoop (manager.go) once the invoke mutex is already held.
+// The steer trigger carries the user's content; the assess prompt renders
+// it via buildAssessUserPrompt's steer branch.
+func (l *GoalLoop) decideSteer(ctx context.Context, trigger TriggerEvent, logger *slog.Logger) {
+	if err := l.Decide(ctx, trigger); err != nil {
+		logger.Warn("steered goal round failed",
+			"employee_id", l.employeeID,
+			"error", err,
+		)
+	}
+}
+
+// HasParkedEpisode reports whether the parker holds any parked episode for
+// the given employee (the H4 dedup map is the authoritative parked-episode
+// registry — entries exist exactly while a record is queued on the shared
+// parker). Nil-receiver safe: a nil parker never has parked episodes.
+func (p *EpisodeParker) HasParkedEpisode(employeeID string) bool {
+	if p == nil {
+		return false
+	}
+	p.dedupMu.Lock()
+	defer p.dedupMu.Unlock()
+	for key := range p.parkedEpisodes {
+		if prefix := employeeID + ":"; strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}

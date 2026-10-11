@@ -63,6 +63,10 @@ type Plan struct {
 	ApprovedBy  string     `json:"approved_by,omitempty"`
 	ConfirmedBy string     `json:"confirmed_by,omitempty"`
 	TaskID      string     `json:"task_id,omitempty"`
+	// GoalID is the owning goal; implicit-goal ID when chat-created. Empty
+	// on legacy rows ("no goal" is legacy-legal); new writes always set it
+	// when the owning goal is known (SHARED-CONVENTIONS C3).
+	GoalID string `json:"goal_id,omitempty"`
 	// SynthesisAttempts counts failed Synthesize passes. It bounds the retry
 	// loop: a plan that cannot be expanded is parked after
 	// MaxSynthesisAttempts rather than re-expanded forever.

@@ -67,6 +67,10 @@ type Task struct {
 	ContextQuery string `json:"context_query,omitempty"`
 	// InheritedFrom is the parent task ID this task was derived from.
 	InheritedFrom string `json:"inherited_from,omitempty"`
+	// GoalID is the owning goal this task fulfills; implicit-goal ID when
+	// chat-created. Empty on legacy rows ("no goal" is legacy-legal); new
+	// writes always set it when the owning goal is known (SHARED-CONVENTIONS C3).
+	GoalID string `json:"goal_id,omitempty"`
 	// CreatedMemories are memory IDs created during task execution.
 	CreatedMemories []string `json:"created_memories,omitempty"`
 	// AssignedAgent is the agent ID assigned to this task.

@@ -156,6 +156,12 @@ func (s *SQLiteStore) migrate() error {
 		return fmt.Errorf("failed to add synthesis_lease_until column: %w", err)
 	}
 
+	// Goal linkage (goal-completion leaf 02, C3): every plan traces to its
+	// owning goal. Legacy rows keep NULL goal_id, which scans to "".
+	if err := s.addColumnIfMissing("plans", "goal_id", "TEXT"); err != nil {
+		return fmt.Errorf("failed to add goal_id column: %w", err)
+	}
+
 	return nil
 }
 
@@ -214,15 +220,15 @@ func (s *SQLiteStore) DB() *sql.DB {
 
 const planColumns = `id, title, description, file_path, project_id, state, task_id,
 	source_session, approved_at, confirmed_at, approved_by, confirmed_by,
-	revision_count, synthesis_attempts, synthesis_lease_until,
+	revision_count, synthesis_attempts, synthesis_lease_until, goal_id,
 created_at, updated_at`
 
 func (s *SQLiteStore) CreatePlan(ctx context.Context, p *Plan) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO plans (id, title, description, file_path, project_id, state, task_id,
 		                   source_session, approved_at, confirmed_at, approved_by, confirmed_by,
-		                   revision_count, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   revision_count, created_at, updated_at, goal_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID,
 		p.Title,
 		nullableString(p.Description),
@@ -238,6 +244,7 @@ func (s *SQLiteStore) CreatePlan(ctx context.Context, p *Plan) error {
 		p.RevisionCount,
 		p.CreatedAt.Format(time.RFC3339),
 		p.UpdatedAt.Format(time.RFC3339),
+		nullableString(p.GoalID),
 	)
 	if err != nil {
 		s.logger.Error("Failed to create plan", "id", p.ID, "error", err)
@@ -259,7 +266,7 @@ func (s *SQLiteStore) UpdatePlan(ctx context.Context, p *Plan) error {
 		SET title = ?, description = ?, file_path = ?, project_id = ?, state = ?,
 		    task_id = ?, source_session = ?, approved_at = ?, confirmed_at = ?,
 		    approved_by = ?, confirmed_by = ?, revision_count = ?,
-		    synthesis_attempts = ?, synthesis_lease_until = ?, updated_at = ?
+		    synthesis_attempts = ?, synthesis_lease_until = ?, goal_id = ?, updated_at = ?
 		WHERE id = ?`,
 		p.Title,
 		nullableString(p.Description),
@@ -275,6 +282,7 @@ func (s *SQLiteStore) UpdatePlan(ctx context.Context, p *Plan) error {
 		p.RevisionCount,
 		p.SynthesisAttempts,
 		nullableTime(p.SynthesisLeaseUntil),
+		nullableString(p.GoalID),
 		p.UpdatedAt.Format(time.RFC3339),
 		p.ID,
 	)
@@ -753,12 +761,12 @@ func (s *SQLiteStore) scanPlan(row *sql.Row) (*Plan, error) {
 		approvedBy, confirmedBy    sql.NullString
 		revisionCount              int
 		synthesisAttempts          sql.NullInt64
-		leaseUntil                 sql.NullString
+		leaseUntil, goalID         sql.NullString
 	)
 
 	err := row.Scan(&id, &title, &description, &filePath, &projectID, &state, &taskID,
 		&sourceSession, &approvedAt, &confirmedAt, &approvedBy, &confirmedBy,
-		&revisionCount, &synthesisAttempts, &leaseUntil, &createdAt, &updatedAt)
+		&revisionCount, &synthesisAttempts, &leaseUntil, &goalID, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrPlanNotFound
@@ -769,7 +777,7 @@ func (s *SQLiteStore) scanPlan(row *sql.Row) (*Plan, error) {
 	return buildPlan(id, title, filePath, state, createdAt, updatedAt,
 		description, projectID, taskID, sourceSession,
 		approvedAt, confirmedAt, approvedBy, confirmedBy, revisionCount,
-		synthesisAttempts, leaseUntil)
+		synthesisAttempts, leaseUntil, goalID)
 }
 
 func (s *SQLiteStore) scanPlans(rows *sql.Rows) ([]*Plan, error) {
@@ -784,12 +792,12 @@ func (s *SQLiteStore) scanPlans(rows *sql.Rows) ([]*Plan, error) {
 			approvedBy, confirmedBy    sql.NullString
 			revisionCount              int
 			synthesisAttempts          sql.NullInt64
-			leaseUntil                 sql.NullString
+			leaseUntil, goalID         sql.NullString
 		)
 
 		err := rows.Scan(&id, &title, &description, &filePath, &projectID, &state, &taskID,
 			&sourceSession, &approvedAt, &confirmedAt, &approvedBy, &confirmedBy,
-			&revisionCount, &synthesisAttempts, &leaseUntil, &createdAt, &updatedAt)
+			&revisionCount, &synthesisAttempts, &leaseUntil, &goalID, &createdAt, &updatedAt)
 		if err != nil {
 			s.logger.Error("Failed to scan plan row", "error", err)
 			continue
@@ -798,7 +806,7 @@ func (s *SQLiteStore) scanPlans(rows *sql.Rows) ([]*Plan, error) {
 		p, err := buildPlan(id, title, filePath, state, createdAt, updatedAt,
 			description, projectID, taskID, sourceSession,
 			approvedAt, confirmedAt, approvedBy, confirmedBy, revisionCount,
-			synthesisAttempts, leaseUntil)
+			synthesisAttempts, leaseUntil, goalID)
 		if err != nil {
 			s.logger.Error("Failed to build plan", "error", err)
 			continue
@@ -814,7 +822,7 @@ func (s *SQLiteStore) scanPlans(rows *sql.Rows) ([]*Plan, error) {
 func buildPlan(id, title, filePath, state, createdAt, updatedAt string,
 	description, projectID, taskID, sourceSession sql.NullString,
 	approvedAt, confirmedAt, approvedBy, confirmedBy sql.NullString,
-	revisionCount int, synthesisAttempts sql.NullInt64, leaseUntil sql.NullString) (*Plan, error) {
+	revisionCount int, synthesisAttempts sql.NullInt64, leaseUntil, goalID sql.NullString) (*Plan, error) {
 
 	p := &Plan{
 		ID:            id,
@@ -840,6 +848,9 @@ func buildPlan(id, title, filePath, state, createdAt, updatedAt string,
 	}
 	if taskID.Valid {
 		p.TaskID = taskID.String
+	}
+	if goalID.Valid {
+		p.GoalID = goalID.String
 	}
 	if sourceSession.Valid {
 		p.SourceSession = sourceSession.String

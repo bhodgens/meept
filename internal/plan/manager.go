@@ -83,6 +83,23 @@ func (m *PlanManager) GetPlan(ctx context.Context, planID string) (*Plan, error)
 	return m.store.GetPlan(ctx, planID)
 }
 
+// SetPlanGoal stamps the owning goal onto a stored plan row
+// (goal-completion leaf 02, C6 storage half). It satisfies the employee
+// package's PlanGoalSetter contract via the daemon's planCreatorAdapter, so
+// GoalLoop.Plan persists Plan.GoalID right after CreatePlan returns. Errors
+// surface to the caller (the GoalLoop logs them as non-fatal).
+func (m *PlanManager) SetPlanGoal(ctx context.Context, planID, goalID string) error {
+	p, err := m.store.GetPlan(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("set plan goal: get plan: %w", err)
+	}
+	p.GoalID = goalID
+	if err := m.store.UpdatePlan(ctx, p); err != nil {
+		return fmt.Errorf("set plan goal: update plan: %w", err)
+	}
+	return nil
+}
+
 // GetPlansForSession returns the plans linked to a session (read-through
 // to the store). Used by the dispatcher's quickplan Session execution
 // context block (quickplan-mode leaf 02).
