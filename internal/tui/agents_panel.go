@@ -39,6 +39,7 @@ const (
 	agentsViewDetail                         // drill-in: constitution / goals / audit / state
 	agentsViewApprovals                      // tier-2 plans awaiting user signoff
 	agentsViewAudit                          // severity-colored audit findings
+	agentsViewGoals                          // goal list w/ health for the selected employee
 )
 
 // AgentsPanel is the Bubbletea Model for the employees panel.
@@ -58,11 +59,18 @@ type AgentsPanel struct {
 	// Detail snapshot fetched on drill-in.
 	detail *AgentDetail
 
+	// Cached goals for the selected employee (drives the goals sub-view).
+	goals []AgentGoal
+
 	// UI state.
 	subView agentsSubView
 	table   table.Model
-	width   int
-	height  int
+	// goalsTable backs the goals sub-view (key 4): one row per goal for the
+	// selected employee, health-colored. Sized on both axes via tableutil.Size
+	// alongside the main table (see the table invariant in AGENTS.md).
+	goalsTable table.Model
+	width      int
+	height     int
 
 	// countdownTick gates the 30s countdown refresh (quotaCountdownTickMsg):
 	// while any agent is quota-hit the panel re-renders its cached episode
@@ -193,14 +201,28 @@ func NewAgentsPanel(rpc AgentsRPCClient) *AgentsPanel {
 		Bold(true)
 	t.SetStyles(s)
 
+	gt := table.New(
+		table.WithColumns([]table.Column{
+			{Title: "title", Width: 24},
+			{Title: "health", Width: 10},
+			{Title: "state", Width: 10},
+			{Title: "plan", Width: 16},
+			{Title: "gate", Width: 24},
+		}),
+		table.WithFocused(true),
+		table.WithHeight(10),
+	)
+	gt.SetStyles(s)
+
 	return &AgentsPanel{
-		rpc:     rpc,
-		table:   t,
-		subView: agentsViewList,
+		rpc:        rpc,
+		table:      t,
+		goalsTable: gt,
+		subView:    agentsViewList,
 	}
 }
 
-// SetSize updates the panel dimensions and resizes the table.
+// SetSize updates the panel dimensions and resizes the tables.
 func (p *AgentsPanel) SetSize(width, height int) {
 	p.width = width
 	p.height = height
@@ -209,11 +231,16 @@ func (p *AgentsPanel) SetSize(width, height int) {
 	// Both axes must be set: the table viewport starts at width 0, and a
 	// zero-width viewport renders no rows (header only, blank body).
 	tableutil.Size(&p.table, width, tableHeight)
+	tableutil.Size(&p.goalsTable, width, tableHeight)
 	p.resizeColumns()
+	p.resizeGoalColumns()
 
 	// Repopulate rows from cached data so a resize does not blank the table.
 	if len(p.agents) > 0 {
 		p.updateAgentsTable()
+	}
+	if len(p.goals) > 0 {
+		p.updateGoalsTable()
 	}
 }
 
@@ -242,6 +269,30 @@ func (p *AgentsPanel) resizeColumns() {
 		{Title: "cost", Width: costW},
 		{Title: "findings", Width: findingsW},
 		{Title: "last run", Width: lastW},
+	})
+}
+
+// resizeGoalColumns fits the goals table to the current width. Same
+// clear-before-SetColumns discipline as resizeColumns: the goals rows are
+// repopulated from cache by SetSize / the goals fetch.
+func (p *AgentsPanel) resizeGoalColumns() {
+	p.goalsTable.SetRows([]table.Row{})
+
+	if p.width < 30 {
+		return
+	}
+	available := p.width - 10
+	titleW := max(available*30/100, 14)
+	healthW := 10
+	stateW := 10
+	planW := 16
+	gateW := max(available-titleW-healthW-stateW-planW, 8)
+	p.goalsTable.SetColumns([]table.Column{
+		{Title: "title", Width: titleW},
+		{Title: "health", Width: healthW},
+		{Title: "state", Width: stateW},
+		{Title: "plan", Width: planW},
+		{Title: "gate", Width: gateW},
 	})
 }
 
@@ -432,6 +483,31 @@ func (p *AgentsPanel) fetchDetail() tea.Msg {
 	return agentsDetailMsg{detail: detail}
 }
 
+// goalsListMsg carries the agents.goals.list response for the goals sub-view.
+type goalsListMsg struct {
+	goals []AgentGoal
+	err   error
+}
+
+func (p *AgentsPanel) fetchGoals() tea.Msg {
+	if p.selectedID == "" {
+		return goalsListMsg{err: fmt.Errorf("no agent selected")}
+	}
+	raw, err := p.rpc.Call("agents.goals.list", map[string]any{
+		"employee_id": p.selectedID,
+	})
+	if err != nil {
+		return goalsListMsg{err: fmt.Errorf("agents.goals.list: %w", err)}
+	}
+	var resp struct {
+		Goals []AgentGoal `json:"goals"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return goalsListMsg{err: fmt.Errorf("unmarshal goals: %w", err)}
+	}
+	return goalsListMsg{goals: resp.Goals}
+}
+
 // agentActionMsg carries the result of a pause/resume/approve/reject/resolve.
 type agentActionMsg struct {
 	action string
@@ -485,6 +561,20 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 		}
 		p.err = nil
 		p.detail = msg.detail
+		// Keep the goals cache in sync with the drill-in snapshot so the
+		// goals sub-view renders without a separate round-trip.
+		p.goals = msg.detail.ActiveGoals
+		p.updateGoalsTable()
+		return nil
+
+	case goalsListMsg:
+		if msg.err != nil {
+			p.err = msg.err
+			return nil
+		}
+		p.err = nil
+		p.goals = msg.goals
+		p.updateGoalsTable()
 		return nil
 
 	case agentActionMsg:
@@ -644,6 +734,18 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 			p.subView = agentsViewAudit
 			return p.fetchDetail
 
+		case "4":
+			// goals sub-view: one row per goal for the selected employee,
+			// health-colored (parity with the Flutter goals pane).
+			if p.selectedID == "" && len(p.agents) > 0 {
+				idx := p.table.Cursor()
+				if idx >= 0 && idx < len(p.agents) {
+					p.selectedID = p.agents[idx].ID
+				}
+			}
+			p.subView = agentsViewGoals
+			return p.fetchGoals
+
 		case "up", "down", "j", "k":
 			var cmd tea.Cmd
 			p.table, cmd = p.table.Update(msg)
@@ -653,6 +755,10 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 
 	// Pass other messages to the table.
 	var cmd tea.Cmd
+	if p.subView == agentsViewGoals {
+		p.goalsTable, cmd = p.goalsTable.Update(msg)
+		return cmd
+	}
 	p.table, cmd = p.table.Update(msg)
 	return cmd
 }
@@ -851,6 +957,9 @@ func (p *AgentsPanel) View() string {
 	if p.subView == agentsViewAudit {
 		return p.renderAudit()
 	}
+	if p.subView == agentsViewGoals {
+		return p.renderGoals()
+	}
 
 	if p.loading && len(p.agents) == 0 {
 		return p.renderLoading()
@@ -896,6 +1005,7 @@ func (p *AgentsPanel) renderHeader() string {
 		{"list", agentsViewList},
 		{"approvals", agentsViewApprovals},
 		{"audit", agentsViewAudit},
+		{"goals", agentsViewGoals},
 	}
 	var tabParts []string
 	for _, t := range tabs {
@@ -917,7 +1027,7 @@ func (p *AgentsPanel) renderHelpHint() string {
 	hintStyle := lipgloss.NewStyle().
 		Foreground(Current().TextMuted).
 		MarginTop(1)
-	return hintStyle.Render("r: refresh | enter: details | 1: list | 2: approvals | 3: audit | esc: back")
+	return hintStyle.Render("r: refresh | enter: details | 1: list | 2: approvals | 3: audit | 4: goals | esc: back")
 }
 
 func (p *AgentsPanel) renderLoading() string {
@@ -1233,6 +1343,8 @@ func (p *AgentsPanel) renderAudit() string {
 	return b.String()
 }
 
+// renderGoalLine renders one goal (health dot, title, plan, gate) inside the
+// agent detail view.
 func (p *AgentsPanel) renderGoalLine(g AgentGoal) string {
 	healthColor := Current().TextMuted
 	healthLabel := g.Health
@@ -1258,6 +1370,102 @@ func (p *AgentsPanel) renderGoalLine(g AgentGoal) string {
 			Render(" gate: " + truncate(g.Gate.Command, 24))
 	}
 	return fmt.Sprintf("%s %s (%s)%s%s", dot, title, healthLabel, plan, gate)
+}
+
+// updateGoalsTable rebuilds the goals-table rows from the cached goals slice.
+// Rows are written through tableutil.SetRows so every row is normalized to the
+// current column count (bubbles/table panics on wider rows).
+func (p *AgentsPanel) updateGoalsTable() {
+	rows := make([]table.Row, len(p.goals))
+	for i, g := range p.goals {
+		plan := orNA(g.ActivePlanID)
+		gate := ""
+		if g.Gate != nil && g.Gate.Command != "" {
+			gate = g.Gate.Command
+		}
+		rows[i] = table.Row{
+			truncate(g.Title, 24),
+			g.Health,
+			g.State,
+			truncate(plan, 16),
+			truncate(gate, 24),
+		}
+	}
+	tableutil.SetRows(&p.goalsTable, rows)
+	// Preserve the cursor across rebuilds (same rule as updateAgentsTable).
+	if n := len(rows); n > 0 {
+		if cur := p.goalsTable.Cursor(); cur >= 0 && cur < n {
+			p.goalsTable.SetCursor(cur)
+		} else {
+			p.goalsTable.GotoTop()
+		}
+	}
+}
+
+// healthBadge colors the goal-health label (pure text; the table styles cells
+// as plain strings, so the color rides in the cell render below).
+func (p *AgentsPanel) healthBadge(health string) string {
+	color := Current().TextMuted
+	switch health {
+	case "healthy":
+		color = Current().Success
+	case "at_risk":
+		color = Current().Warning
+	case "broken":
+		color = Current().ErrorC
+	}
+	return lipgloss.NewStyle().Foreground(color).Bold(true).Render(health)
+}
+
+// renderGoals renders the goals sub-view: one table row per goal for the
+// selected employee, mirroring the audit findings view (renderAudit). The
+// table is sized through tableutil.Size in SetSize and populated through
+// tableutil.SetRows in updateGoalsTable — the TUI table invariant.
+func (p *AgentsPanel) renderGoals() string {
+	var b strings.Builder
+	b.WriteString(p.renderHeader())
+	b.WriteString("\n\n")
+
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(Current().Warning).
+		Bold(true)
+
+	name := p.selectedID
+	if p.detail != nil && p.detail.Agent.Name != "" {
+		name = p.detail.Agent.Name
+	}
+	b.WriteString(sectionStyle.Render(fmt.Sprintf("--- goals (%d) — %s ---",
+		len(p.goals), truncate(name, 24))))
+	b.WriteString("\n\n")
+
+	if len(p.goals) == 0 {
+		empty := lipgloss.NewStyle().
+			Foreground(Current().TextMuted).
+			Italic(true).
+			Width(max(p.width-4, 20)).
+			Align(lipgloss.Center).
+			Padding(2, 0)
+		b.WriteString(empty.Render("no goals for this employee"))
+		b.WriteString("\n")
+	} else {
+		tableStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(Current().Border)
+		b.WriteString(tableStyle.Render(p.goalsTable.View()))
+		b.WriteString("\n")
+
+		// Health legend with the same coloring the health column uses.
+		b.WriteString(p.healthBadge("healthy") + "  " +
+			p.healthBadge("at_risk") + "  " +
+			p.healthBadge("broken") + "\n")
+	}
+
+	b.WriteString("\n")
+	hint := lipgloss.NewStyle().Foreground(Current().TextMuted)
+	b.WriteString(hint.Render("r: refresh | enter: details | 1: list | 4: goals | esc: back"))
+	b.WriteString("\n")
+
+	return b.String()
 }
 
 func (p *AgentsPanel) renderFindingLine(f AgentFinding) string {

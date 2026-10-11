@@ -323,6 +323,10 @@ func (h *RPCHandler) handleCreate(ctx context.Context, raw json.RawMessage) (any
 		Tools:        req.Tools,
 		Enabled:      req.Enabled,
 		Constitution: req.Constitution,
+		// Leaf 05: forward declared goals (createRequest.Goals, leaf 01)
+		// into the hire flow so an employee definition's `goals:` array
+		// creates its GoalSpecs — not just the direct manager.Hire path.
+		Goals: req.Goals,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("hire: %w", err)

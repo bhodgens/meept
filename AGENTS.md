@@ -98,7 +98,9 @@ make gui-connect-check          # Static self-check of the installed GUI connect
 ./bin/meept agents create <def.json5>   # Register new employee
 ./bin/meept agents pause <id> / resume <id>
 ./bin/meept agents goals [--employee=<id>]
+./bin/meept agents goal-create <employee-id> --title T --mandate M [--gate-command CMD] [--source user|trigger]
 ./bin/meept agents set-gate <goal-id> --command="go test -p 2 ./..."
+./bin/meept agents steer <id> <content...>  # deliver steering to a running episode
 ./bin/meept agents audit <id> [--since=6h]
 
 # Plans

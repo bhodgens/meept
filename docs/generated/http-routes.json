@@ -291,28 +291,28 @@
     "path": "GET /api/v1/agents/{id}/audit",
     "handler": "h.handleAuditList",
     "file": "internal/employee/api_handlers.go",
-    "line": 78
+    "line": 80
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/agents/{id}/constitution",
     "handler": "h.handleConstitutionGet",
     "file": "internal/employee/api_handlers.go",
-    "line": 71
+    "line": 72
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/agents/{id}/goals",
     "handler": "h.handleGoalsList",
     "file": "internal/employee/api_handlers.go",
-    "line": 74
+    "line": 75
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/agents/{id}/goals/{gid}",
     "handler": "h.handleGoalsGet",
     "file": "internal/employee/api_handlers.go",
-    "line": 75
+    "line": 77
   },
   {
     "method": "ANY",
@@ -1152,7 +1152,7 @@
     "path": "PATCH /api/v1/agents/{id}/constitution",
     "handler": "h.handleConstitutionAmend",
     "file": "internal/employee/api_handlers.go",
-    "line": 72
+    "line": 73
   },
   {
     "method": "ANY",
@@ -1187,7 +1187,7 @@
     "path": "POST /api/v1/agents/{id}/audit/{fid}/resolve",
     "handler": "h.handleAuditResolve",
     "file": "internal/employee/api_handlers.go",
-    "line": 79
+    "line": 81
   },
   {
     "method": "ANY",
@@ -1195,6 +1195,13 @@
     "handler": "s.handleAgentsDelegate",
     "file": "internal/comm/web/server.go",
     "line": 365
+  },
+  {
+    "method": "ANY",
+    "path": "POST /api/v1/agents/{id}/goals",
+    "handler": "h.handleGoalsCreate",
+    "file": "internal/employee/api_handlers.go",
+    "line": 76
   },
   {
     "method": "ANY",
@@ -1209,6 +1216,13 @@
     "handler": "h.handleResume",
     "file": "internal/employee/api_handlers.go",
     "line": 69
+  },
+  {
+    "method": "ANY",
+    "path": "POST /api/v1/agents/{id}/steer",
+    "handler": "h.handleSteerHTTP",
+    "file": "internal/employee/api_handlers.go",
+    "line": 70
   },
   {
     "method": "ANY",
@@ -2013,7 +2027,7 @@
     "path": "PUT /api/v1/agents/{id}/goals/{gid}/gate",
     "handler": "h.handleGoalsSetGate",
     "file": "internal/employee/api_handlers.go",
-    "line": 76
+    "line": 78
   },
   {
     "method": "ANY",
@@ -2279,21 +2293,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7315
+    "line": 7336
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7326
+    "line": 7347
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7307
+    "line": 7328
   },
   {
     "method": "GET",
@@ -2447,7 +2461,7 @@
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1399
+    "line": 1406
   },
   {
     "method": "GET",
@@ -2475,7 +2489,7 @@
     "path": "severity",
     "handler": "",
     "file": "internal/employee/api_handlers.go",
-    "line": 410
+    "line": 455
   },
   {
     "method": "GET",
@@ -2489,7 +2503,7 @@
     "path": "since",
     "handler": "",
     "file": "internal/employee/api_handlers.go",
-    "line": 407
+    "line": 452
   },
   {
     "method": "GET",
@@ -2503,7 +2517,7 @@
     "path": "status",
     "handler": "",
     "file": "internal/employee/api_handlers.go",
-    "line": 208
+    "line": 210
   },
   {
     "method": "GET",

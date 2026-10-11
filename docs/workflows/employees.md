@@ -114,8 +114,8 @@ a goal complete after a user-defined shell check passes in the employee's
 project directory.
 
 Configure it per goal in the employee definition (this block is **live**:
-`goals:` is parsed by `Manager.Hire` — each entry creates a goal via
-`GoalStore.Create`, per-goal `gate` included):
+`goals:` is parsed via `HireRequest.Goals` in `Manager.Hire` — each entry
+creates a goal via `GoalStore.Create`, per-goal `gate` included):
 
 ```json5
 {
@@ -429,9 +429,10 @@ New endpoints under `/api/v1/agents/*`. The existing `/api/v1/bot/{id}/trigger` 
 | `/api/v1/agents/{id}/pause` | POST | operator pause |
 | `/api/v1/agents/{id}/resume` | POST | operator resume |
 | `/api/v1/agents/{id}/constitution` | GET, PATCH | view / propose amendment |
-| `/api/v1/agents/{id}/goals` | GET | list goals with health |
+| `/api/v1/agents/{id}/goals` | GET, POST | list goals with health; create a goal (`GoalSpec` body, same shape as `meept agents goal-create`) |
 | `/api/v1/agents/{id}/goals/{gid}` | GET | goal detail |
 | `/api/v1/agents/{id}/goals/{gid}/gate` | PUT | set or clear the completion gate |
+| `/api/v1/agents/{id}/steer` | POST | deliver steering to a running episode (`{"content":"..."}`; response carries `steer_queued`) |
 | `/api/v1/agents/{id}/audit` | GET | findings, filterable by `?since=&severity=` |
 | `/api/v1/agents/{id}/audit/{fid}/resolve` | POST | resolve finding |
 | `/api/v1/agents/migrate` | POST | run migration scan, returns proposed constitutions |
@@ -451,8 +452,10 @@ New methods under the `agents.` namespace. Existing `bot.*` methods are removed 
 | `agents.trigger` | programmatic trigger (used internally by webhook handler) |
 | `agents.amend` | propose constitution amendment, routes to Plan signoff |
 | `agents.goals.list`, `agents.goals.get` | goal listing |
+| `agents.goals.create` | create a goal (params are a `GoalSpec`: `{"employee_id","title","mandate","source","gate"}`; `source` `user|trigger`). Same surface as `meept agents goal-create` / `POST /api/v1/agents/{id}/goals`. |
 | `agents.goals.approve`, `agents.goals.reject` | plan signoff |
 | `agents.goals.bind_session` | bind a session to an active goal (params `{"session_id","goal_id"}`; empty `goal_id` unbinds). Chat-path plan creation anchors to the session's bound goal first (C6). |
+| `agents.steer` | deliver steering to a running episode (params `{"employee_id","content"}`; see "Steering an employee"). Response carries `steer_queued` so callers distinguish delivery from a quiet-employee no-op. |
 | `agents.audit.list`, `agents.audit.resolve` | findings |
 | `agents.migrate` | migration scan |
 

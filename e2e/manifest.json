@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generated": "2026-10-06",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -42,7 +42,8 @@
       "output-filters",
       "refusal",
       "naive-user-chat",
-      "continuity-regressions"
+      "continuity-regressions",
+      "goal-completion"
     ],
     "internal/validator/": [
       "output-filters",
@@ -55,7 +56,8 @@
     "internal/task/": [
       "task-state",
       "step-pipeline",
-      "task-queue"
+      "task-queue",
+      "goal-completion"
     ],
     "internal/worker/": [
       "goal-loop"
@@ -83,7 +85,8 @@
     "internal/session/": [
       "session-binding",
       "state-restart",
-      "state-identity"
+      "state-identity",
+      "goal-completion"
     ],
     "internal/memory/": [
       "memory-persistence"
@@ -123,7 +126,8 @@
       "security-tls"
     ],
     "internal/employee/": [
-      "goal-loop"
+      "goal-loop",
+      "goal-completion"
     ],
     "internal/acp/": [
       "acp-wire"
@@ -198,7 +202,8 @@
       "step-pipeline",
       "state-restart",
       "continuity-regressions",
-      "plan-lifecycle"
+      "plan-lifecycle",
+      "goal-completion"
     ],
     "internal/preferences/": [
       "smoke"
@@ -529,6 +534,11 @@
       ],
       "workdir": "ui/flutter_ui",
       "note": "Dart tier: run from ui/flutter_ui as `flutter test test/e2e`. scripts/e2e-affected.sh dispatches on runner=dart; make e2e-affected-area AREA=gui-flows runs it."
+    },
+    {
+      "name": "goal-completion",
+      "dir": "e2e/suites/goal-completion",
+      "status": "implemented"
     }
   ],
   "scenarios": [
@@ -2020,7 +2030,7 @@
       "id": "naive-user-chat-05",
       "suite": "naive-user-chat",
       "diff": "M",
-      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge — the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge \u2014 the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
       "paths": [
         "internal/agent/loop.go",
         "internal/agent/reply_guard.go"
@@ -2143,7 +2153,7 @@
       "id": "plan-lifecycle-02",
       "suite": "plan-lifecycle",
       "diff": "M",
-      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write — file parses at every observation",
+      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write \u2014 file parses at every observation",
       "paths": [
         "internal/plan/manager.go",
         "internal/plan/filelock.go",
@@ -2347,6 +2357,49 @@
       "title": "thinking timer (isAgentProcessing/thinkingStartedAt) survives every id-less mid-stream assistant delta and clears only on the turn terminal",
       "paths": [
         "ui/flutter_ui/lib/providers/chat_provider.dart"
+      ]
+    },
+    {
+      "id": "goal-completion-01",
+      "suite": "goal-completion",
+      "diff": "L",
+      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger \u2014 plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
+      "paths": [
+        "internal/employee/manager.go",
+        "internal/employee/goal_loop.go",
+        "internal/employee/park.go"
+      ]
+    },
+    {
+      "id": "goal-completion-02",
+      "suite": "goal-completion",
+      "diff": "S",
+      "title": "create-via-rpc: agents.goals.create registers the goal and agents.goals.list shows it (state active, health unknown)",
+      "paths": [
+        "internal/employee/handler.go",
+        "internal/employee/manager.go"
+      ]
+    },
+    {
+      "id": "goal-completion-03",
+      "suite": "goal-completion",
+      "diff": "M",
+      "title": "implicit anchoring: chat-created plan anchors on the sole active goal; with no employee the plan row's goal_id stays empty (C6 precedence branches 2/none)",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/agent/goal_resolution.go",
+        "internal/daemon/goal_anchor_adapter.go"
+      ]
+    },
+    {
+      "id": "goal-completion-04",
+      "suite": "goal-completion",
+      "diff": "M",
+      "title": "steer: mid-trigger agents.steer returns steer_queued=true, logs the queued steering, and re-enters assess with the steering text; an idle employee returns steer_queued=false with no error",
+      "paths": [
+        "internal/employee/manager.go",
+        "internal/employee/park.go",
+        "internal/employee/goal_loop.go"
       ]
     }
   ]

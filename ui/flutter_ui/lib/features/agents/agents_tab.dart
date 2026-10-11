@@ -42,6 +42,34 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
   String? _goalsForId;
   Timer? _quotaTimer;
 
+  // Worst goal health across the loaded goals (worst-health-wins):
+  // broken > at_risk > healthy > unknown. Drives the aggregate health
+  // badge on the goals pane header.
+  String get _worstGoalHealth {
+    var worst = 'unknown';
+    var worstRank = 0;
+    for (final g in _goals) {
+      final rank = switch (g.health) {
+        'broken' => 3,
+        'at_risk' => 2,
+        'healthy' => 1,
+        _ => 0,
+      };
+      if (rank > worstRank) {
+        worstRank = rank;
+        worst = g.health;
+      }
+    }
+    return worst;
+  }
+
+  Color get _goalsHealthColor => switch (_worstGoalHealth) {
+    'healthy' => CyberpunkColors.greenSuccess,
+    'at_risk' => CyberpunkColors.orangePrimary,
+    'broken' => CyberpunkColors.redAlert,
+    _ => CyberpunkColors.midGray,
+  };
+
   @override
   void initState() {
     super.initState();
@@ -405,6 +433,24 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             color: CyberpunkColors.midGray,
           ),
         ),
+        // Aggregate health badge (GUI parity with the TUI goals view):
+        // worst-health-wins across the loaded goals for this agent.
+        if (_goals.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(Icons.circle, size: 8, color: _goalsHealthColor),
+              const SizedBox(width: 6),
+              Text(
+                'health: ${_worstGoalHealth.toLowerCase()}',
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: _goalsHealthColor,
+                  fontSize: 10,
+                ),
+              ),
+            ],
+          ),
+        ],
         if (quotaLines.isNotEmpty) ...[
           const SizedBox(height: 8),
           for (final line in quotaLines)
