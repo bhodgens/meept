@@ -63,6 +63,7 @@ func newAgentsCmd() *cobra.Command {
 	cmd.AddCommand(newAgentsDeleteCmd())
 	cmd.AddCommand(newAgentsPauseCmd())
 	cmd.AddCommand(newAgentsResumeCmd())
+	cmd.AddCommand(newAgentsTriggerCmd())
 	cmd.AddCommand(newAgentsSteerCmd())
 	cmd.AddCommand(newAgentsAmendCmd())
 	cmd.AddCommand(newAgentsMigrateCmd())

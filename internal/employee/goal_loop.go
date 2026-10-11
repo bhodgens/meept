@@ -228,6 +228,23 @@ type GoalLookup interface {
 	ActiveGoal(ctx context.Context, employeeID string) (*Goal, error)
 }
 
+// DecideSkip carries the reason a round was short-circuited before doing
+// any work (goal-completion finding #3). It is set by decideTier2/
+// decideTier3 when the MaxActivePlans cap blocks the round and cleared at
+// the start of every Decide. The Manager reads it after Decide to report
+// status "skipped" instead of "completed".
+type DecideSkip struct {
+	// Reason is a stable machine-readable token: DecideSkipMaxActivePlans.
+	Reason string
+	// ActiveCount and Max are the cap state at skip time (for logs/UX).
+	ActiveCount int
+	Max         int
+}
+
+// DecideSkipMaxActivePlans is the skip reason used when the employee's
+// MaxActivePlans cap (pending + executing plans) blocked the round.
+const DecideSkipMaxActivePlans = "max_active_plans"
+
 // ---------------------------------------------------------------------------
 // GoalLoop
 // ---------------------------------------------------------------------------
@@ -318,6 +335,12 @@ type GoalLoop struct {
 	// any) is not in a failed state. Guarded by mu.
 	lastGateState        GateState
 	lastGateFailedOutput string
+
+	// lastDecideSkip carries the skip signal from the most recent Decide
+	// round (goal-completion finding #3): non-nil when the round was
+	// short-circuited before doing work (e.g. MaxActivePlans cap). Cleared
+	// at the start of every round. Guarded by mu.
+	lastDecideSkip *DecideSkip
 
 	// Speak routing (leaf 11: harness-routed speak). speakRouter delivers
 	// the round's final output as a SpeakNotify on employee.notify when
@@ -980,12 +1003,27 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 			case gateErr != nil:
 				logger.Warn("quality gate could not run", "error", gateErr)
 				health = GoalAtRisk
+			case gateRes.Skipped:
+				// Skip-on-unchanged (leaf 08): the workspace hasn't changed
+				// since the last failure. INFO outcome line so operators can
+				// tell a skip from a silent round (finding #2).
+				logger.Info("quality gate skipped",
+					"goal_id", l.activeGoalID(ctx),
+					"gate_command", gateCfg.Command,
+					"reason", gateRes.Reason)
+				health = GoalAtRisk
 			case gateRes.Passed:
-				logger.Debug("quality gate passed")
 				l.mu.Lock()
 				l.lastGateFailedOutput = ""
 				l.mu.Unlock()
 			default:
+				// Failed run: INFO outcome line without the raw output (it
+				// may contain code — it lives in the feedback block and the
+				// audit record's hash).
+				logger.Info("quality gate failed",
+					"goal_id", l.activeGoalID(ctx),
+					"gate_command", gateCfg.Command,
+					"output_len", len(gateRes.Output))
 				health = GoalAtRisk
 			}
 		}
@@ -1055,7 +1093,10 @@ func (l *GoalLoop) gateConfigForGoal(ctx context.Context) *GateConfig {
 
 // runCompletionGate executes the configured quality gate via RunGate,
 // threading GateState across rounds and recording failures as feedback.
-// Output is only ever logged at debug level (it may contain code).
+// Output is only ever logged at debug level (it may contain code); the
+// outcome itself is logged at INFO with goal id, gate command, outcome,
+// and duration (goal-completion finding #2) — the audit record only
+// stores a hash, so this line is the operator's trace of a gate run.
 func (l *GoalLoop) runCompletionGate(ctx context.Context, cfg GateConfig, logger *slog.Logger) (*GateResult, error) {
 	l.mu.Lock()
 	prev := l.lastGateState
@@ -1074,7 +1115,8 @@ func (l *GoalLoop) runCompletionGate(ctx context.Context, cfg GateConfig, logger
 	// Tamper-evident audit chain (leaf 02): every completed gate run is
 	// chained. Failures are logged, never fatal (master.md C5). The goal ID
 	// comes from the loop's active goal; empty when none is active.
-	l.emitGateResult(ctx, l.activeGoalID(ctx), *res, time.Since(gateStart))
+	goalID := l.activeGoalID(ctx)
+	l.emitGateResult(ctx, goalID, *res, time.Since(gateStart))
 	l.mu.Lock()
 	l.lastGateState = state
 	if res.Passed {
@@ -1085,6 +1127,15 @@ func (l *GoalLoop) runCompletionGate(ctx context.Context, cfg GateConfig, logger
 	// On a SKIPPED run, keep the previous failure output as pending
 	// feedback (the failure is still unresolved).
 	l.mu.Unlock()
+
+	// INFO outcome line (finding #2). The command is a config value (not
+	// output) so it is safe here; the raw gate output stays debug-only.
+	logger.Info("quality gate passed",
+		"goal_id", goalID,
+		"gate_command", cfg.Command,
+		"duration_ms", time.Since(gateStart).Milliseconds(),
+		"skipped", res.Skipped,
+		"outcome", "passed")
 	logger.Debug("completion gate finished", "passed", res.Passed, "skipped", res.Skipped)
 	return res, nil
 }
@@ -1277,6 +1328,13 @@ func (l *GoalLoop) Decide(ctx context.Context, trigger TriggerEvent) error {
 		return errors.New("decide: no constitution configured")
 	}
 
+	// Clear the skip signal at round entry (finding #3): only the current
+	// round's outcome is observable, never a stale one from an earlier
+	// trigger.
+	l.mu.Lock()
+	l.lastDecideSkip = nil
+	l.mu.Unlock()
+
 	tier := constitution.AutonomyTier
 	switch tier {
 	case Tier1Reactive:
@@ -1354,9 +1412,17 @@ func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger
 	// Check if the active goal already has too many concurrent plans.
 	if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
 		if !goal.CanAddActivePlan(maxActive) {
-			logger.Debug("tier2 assess skipped: too many active plans",
+			logger.Info("tier2 assess skipped: too many active plans",
 				"max", maxActive,
-				"active_count", len(goal.ActivePlans()))
+				"active_count", len(goal.ActivePlans()),
+				"skip_reason", DecideSkipMaxActivePlans)
+			l.mu.Lock()
+			l.lastDecideSkip = &DecideSkip{
+				Reason:      DecideSkipMaxActivePlans,
+				ActiveCount: len(goal.ActivePlans()),
+				Max:         maxActive,
+			}
+			l.mu.Unlock()
 			return nil
 		}
 	}
@@ -1450,9 +1516,17 @@ func (l *GoalLoop) decideTier3(ctx context.Context, trigger TriggerEvent, logger
 	}
 	if goal, err := l.lookupActiveGoal(ctx); err == nil && goal != nil {
 		if !goal.CanAddActivePlan(maxActive) {
-			logger.Debug("tier3 assess skipped: too many active plans",
+			logger.Info("tier3 assess skipped: too many active plans",
 				"max", maxActive,
-				"active_count", len(goal.ActivePlans()))
+				"active_count", len(goal.ActivePlans()),
+				"skip_reason", DecideSkipMaxActivePlans)
+			l.mu.Lock()
+			l.lastDecideSkip = &DecideSkip{
+				Reason:      DecideSkipMaxActivePlans,
+				ActiveCount: len(goal.ActivePlans()),
+				Max:         maxActive,
+			}
+			l.mu.Unlock()
 			return nil
 		}
 	}
@@ -1690,6 +1764,21 @@ func (l *GoalLoop) LastAssessmentTime() time.Time {
 // EmployeeID returns the owning employee's identifier.
 func (l *GoalLoop) EmployeeID() string {
 	return l.employeeID
+}
+
+// LastDecideSkip reports why the most recent Decide round was
+// short-circuited (goal-completion finding #3), or nil when the round ran
+// normally. Read by Manager.triggerViaGoalLoop after Decide so a
+// cap-blocked trigger reports status "skipped" instead of "completed".
+// Safe for concurrent use.
+func (l *GoalLoop) LastDecideSkip() *DecideSkip {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.lastDecideSkip == nil {
+		return nil
+	}
+	skip := *l.lastDecideSkip
+	return &skip
 }
 
 // ---------------------------------------------------------------------------
