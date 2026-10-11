@@ -145,3 +145,19 @@ Re-run until ALL TREES COMPLIANT: True.
 - The biggest single risk is leaf 02's migration order: two stores (plan, task) plus the employee goals table all gain columns — each leaf touches its own store only; do not cross-edit.
 - Leaf 03 touches internal/agent, which has hard invariants (session_id vs conversation_id, async turns). Point the implementer at internal/agent/AGENTS.md before it writes anything.
 - Employee-goal gates persist behind an enable switch (`27f2963e`); leaf 01 must not bypass that flag for per-goal gates.
+
+## Post-execution findings (leaf 05, open follow-ups — not part of this tree)
+
+1. `internal/employee/wiring.go shouldShareDB`: with `bots.enabled=false` the goal
+   store gets a standalone DB whose `employee_goals` FK references `bot_definitions`
+   (only present in bots.db) — every goal insert fails with `no such table:
+   main.bot_definitions`. Standalone-DB schema is broken; suites work around it via
+   the `employees.defaults.gate.enabled`/`bots.enabled` overlay.
+2. Gate pass/fail logs at debug only; audit record stores only a SHA-256 — no INFO
+   trace of a passing gate for operator debugging.
+3. `decideTier3` silently drops candidates at the `max_active_plans=1` default while
+   `Trigger` still returns `status:completed` — silent no-op triggers.
+4. TUI `fetchDetail` calls `agents.goals.list` redundantly beside `agents.get`.
+5. Multi-employee installs: no session→employee binding exists, so the C6 implicit
+   branch keys on the daemon's SOLE employee; multi-employee chat stays goal-less.
+   `GoalAnchorStore.SoleEmployeeID` is the seam to replace.
