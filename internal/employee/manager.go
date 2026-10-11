@@ -154,6 +154,10 @@ type TriggerResult struct {
 	InvocationID string    `json:"invocation_id"`
 	StartedAt    time.Time `json:"started_at"`
 	Status       string    `json:"status"`
+	// SkipReason explains a Status of "skipped" (e.g. "max_active_plans"
+	// when the employee's plan cap blocked the round). Empty for the
+	// completed/triggered/error statuses.
+	SkipReason string `json:"skip_reason,omitempty"`
 }
 
 // Review summarizes the current state of an employee for the
@@ -529,6 +533,14 @@ type Manager struct {
 	goalStore         *GoalStore
 	auditStore        *AuditStore
 
+	// standaloneEmployeeDBs lists the *sql.DB handles whose bot_definitions
+	// table is a standalone stub (wiring's non-shared path). Hire mirrors
+	// the new employee's ID into each so the employee_id FK resolves for
+	// goals/findings created after the hire. Nil/empty on the shared-DB
+	// path. Written once by wiring before the Manager is used; read-only
+	// afterwards (no lock needed).
+	standaloneEmployeeDBs []*sql.DB
+
 	// auditChain is the hash-chained audit log's database handle, wired by
 	// the daemon for the agents.audit.verify RPC (tamper-evident audit log
 	// leaf 03). Nil when the chain store is not configured. Guarded by mu;
@@ -765,6 +777,44 @@ func (m *Manager) SetAuditChain(db *sql.DB) {
 	m.mu.Lock()
 	m.auditChain = db
 	m.mu.Unlock()
+}
+
+// SetStandaloneEmployeeDBs registers the standalone (non-shared) employee
+// DB handles whose bot_definitions stub must learn about every hired
+// employee. Called once by the daemon wiring after store construction; nil
+// entries are skipped. On the shared-DB path the wiring never calls this —
+// the real bot_definitions is shared and needs no mirroring.
+func (m *Manager) SetStandaloneEmployeeDBs(dbs []*sql.DB) {
+	filtered := dbs[:0]
+	for _, db := range dbs {
+		if db != nil {
+			filtered = append(filtered, db)
+		}
+	}
+	if len(filtered) == 0 {
+		return
+	}
+	m.standaloneEmployeeDBs = filtered
+}
+
+// mirrorEmployeeIntoStandaloneDBs inserts the employee ID into every
+// registered standalone bot_definitions stub (INSERT OR IGNORE, best
+// effort). A mirror failure degrades to "goal/finding inserts for this
+// employee fail FK validation" and is logged, never fatal to Hire.
+func (m *Manager) mirrorEmployeeIntoStandaloneDBs(ctx context.Context, employeeID string) {
+	if len(m.standaloneEmployeeDBs) == 0 || employeeID == "" {
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, db := range m.standaloneEmployeeDBs {
+		if _, err := db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO bot_definitions (id, data, created_at, updated_at) VALUES (?, '{}', ?, ?)`,
+			employeeID, now, now,
+		); err != nil {
+			m.logger.Warn("hire: mirror employee into standalone db failed",
+				"employee_id", employeeID, "error", err)
+		}
+	}
 }
 
 // AuditChain returns the wired audit-chain database handle. May be nil when
@@ -1147,6 +1197,10 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 	if err := m.botManager.CreateBot(ctx, def); err != nil {
 		return nil, fmt.Errorf("hire: create bot: %w", err)
 	}
+	// Standalone employee DBs keep a schema-only bot_definitions stub; the
+	// new employee's ID must be mirrored in or every later goal/finding
+	// insert for them fails FK validation.
+	m.mirrorEmployeeIntoStandaloneDBs(ctx, req.ID)
 	// Persist the constitution. If this fails we attempt to roll back
 	// the bot creation so we don't end up with a constitutionless
 	// employee (which would fail every subsequent Get/Review).
@@ -1491,6 +1545,7 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 	// the single round-entry site — so every round can notify exactly once.
 	loop.SetSpeakContext(id, "goal-"+id)
 	decideErr := loop.Decide(ctx, trigger)
+	skip := loop.LastDecideSkip()
 	invokeMu.Unlock()
 
 	result := &TriggerResult{
@@ -1506,6 +1561,21 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 		})
 		m.emitBudgetMetric(ctx, id)
 		return result, fmt.Errorf("goal-loop decide: %w", decideErr)
+	}
+	if skip != nil {
+		// The round was short-circuited (e.g. MaxActivePlans cap) — a
+		// skipped round is not a completed one. The skip reason propagates
+		// so RPC/CLI consumers can surface it instead of silently no-op'ing
+		// (goal-completion finding #3).
+		result.Status = "skipped"
+		result.SkipReason = skip.Reason
+		m.emitMetric("employee.invocations", 1, map[string]string{
+			"employee_id": id,
+			"tier":        tierTag,
+			"outcome":     "skipped",
+		})
+		m.emitBudgetMetric(ctx, id)
+		return result, nil
 	}
 	result.Status = "completed"
 	m.emitMetric("employee.invocations", 1, map[string]string{

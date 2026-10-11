@@ -535,8 +535,17 @@ func (s *GoalStore) migrate() error {
 			return fmt.Errorf("pragma %q: %w", pragma, err)
 		}
 	}
-	_, err := s.db.Exec(schema)
-	if err != nil {
+	// The employee_goals FK references bot_definitions(id), a table the
+	// bot store owns. Every database this store opens must contain the
+	// referenced table or every INSERT fails with
+	// "no such table: main.bot_definitions". CREATE TABLE IF NOT EXISTS
+	// keeps this a no-op on the shared bots.db (where the real, populated
+	// bot_definitions already exists) and creates an empty schema-only
+	// stub on standalone databases — FK enforcement stays real.
+	if _, err := s.db.Exec(botDefinitionsStubSQL); err != nil {
+		return fmt.Errorf("ensure bot_definitions: %w", err)
+	}
+	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("schema: %w", err)
 	}
 	// Migration: add recent_findings column if it doesn't exist (added for

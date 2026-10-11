@@ -45,6 +45,15 @@ A Goal is a long-lived mandate owned by an employee. "Keep CI green for main bra
 - Each Goal tracks its active Plan and plan history.
 - Goals are stored in the `employee_goals` SQLite table alongside `bot_definitions`.
 
+**Standalone employee databases.** When `bots.enabled=false`, the goal and
+audit stores open their own SQLite files under `employees/`
+(`goals.db`, `audit.db`) instead of sharing `bots.db`. Each store's
+migration creates a schema-only `bot_definitions` stub so the
+`employee_id` FOREIGN KEY resolves, and wiring mirrors the existing
+roster into the stub; `Hire` mirrors every later employee the same way.
+The FK stays enforced everywhere — a goal for an ID with no
+`bot_definitions` row is rejected in both wirings.
+
 ### GoalLoop
 
 The GoalLoop is the per-tier runtime that decides what the employee does next. Three operations cycle:
@@ -163,6 +172,9 @@ Semantics (`internal/employee/gate.go`):
   cannot complete until the workspace changes and the gate re-runs green.
 - Gate output may contain code and is therefore never logged above debug level;
   gate runs are recorded in the employee audit trail.
+- Every completed gate run also logs one INFO line (`quality gate
+  passed|failed|skipped` with `goal_id`, `gate_command`, and duration) so gate
+  outcomes are visible in the daemon log without inspecting the audit chain.
 
 ### Tamper-evident audit chain
 
@@ -354,6 +366,7 @@ meept agents update <id> <definition.json5>
 meept agents delete <id>                       # stops + deletes; confirms unless --force
 meept agents pause <id>                        # operator pause
 meept agents resume <id>                       # operator resume (only un-pause path)
+meept agents trigger <id> [payload-json]       # invoke the goal loop now; a cap-blocked round prints "employee busy: active plan cap reached (skipped)"
 meept agents amend <id> --field=<key> <value>  # propose constitution amendment (routes to Plan signoff)
 ```
 
@@ -455,6 +468,7 @@ New methods under the `agents.` namespace. Existing `bot.*` methods are removed 
 | `agents.goals.create` | create a goal (params are a `GoalSpec`: `{"employee_id","title","mandate","source","gate"}`; `source` `user|trigger`). Same surface as `meept agents goal-create` / `POST /api/v1/agents/{id}/goals`. |
 | `agents.goals.approve`, `agents.goals.reject` | plan signoff |
 | `agents.goals.bind_session` | bind a session to an active goal (params `{"session_id","goal_id"}`; empty `goal_id` unbinds). Chat-path plan creation anchors to the session's bound goal first (C6). |
+| `agents.employees.bind_session` | bind a session to an employee (params `{"session_id","employee_id"}`; empty `employee_id` unbinds). The goal-anchor adapter prefers the session's bound employee when attributing chat-path goals, falling back to the daemon's sole employee for unbound sessions (goal resolution C6). |
 | `agents.steer` | deliver steering to a running episode (params `{"employee_id","content"}`; see "Steering an employee"). Response carries `steer_queued` so callers distinguish delivery from a quiet-employee no-op. |
 | `agents.audit.list`, `agents.audit.resolve` | findings |
 | `agents.migrate` | migration scan |

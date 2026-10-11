@@ -1721,6 +1721,12 @@ func NewAuditStoreFromDB(db *sql.DB) (*AuditStore, error) {
 }
 
 func (s *AuditStore) migrate() error {
+	// Same bot_definitions FK requirement as the goal store: standalone
+	// audit.db files need the referenced table to exist (see
+	// botDefinitionsStubSQL in wiring.go). No-op on the shared bots.db.
+	if _, err := s.db.Exec(botDefinitionsStubSQL); err != nil {
+		return fmt.Errorf("ensure bot_definitions: %w", err)
+	}
 	_, err := s.db.Exec(auditSchemaSQL)
 	return err
 }

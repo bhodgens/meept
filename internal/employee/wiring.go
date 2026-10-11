@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/bot"
@@ -159,6 +160,19 @@ func NewManagerFromConfig(
 		result.GoalStore = gs
 	}
 
+	// Standalone mode: the goal DB's bot_definitions table is the
+	// schema-only stub created by migrate(). The employee FK must still
+	// resolve for the CURRENT roster, so mirror every existing bot
+	// definition into the stub (INSERT OR IGNORE — idempotent across
+	// restarts). Bot removal does not remove the mirror row: goals
+	// outlive their employee's definition, matching the shared-DB contract
+	// where the row is the FK anchor. Best-effort: a roster read failure
+	// skips mirroring (wiring must not fail because the roster is
+	// momentarily unreadable).
+	if sharedDB == nil && botStore != nil && gs != nil {
+		mirrorRosterIntoStandalone(ctx, botStore, gs.db, empLog)
+	}
+
 	// Construct AuditStore. Same sharing pattern.
 	var as *AuditStore
 	if sharedDB != nil {
@@ -172,6 +186,11 @@ func NewManagerFromConfig(
 			"error", err)
 	} else {
 		result.AuditStore = as
+	}
+
+	// Mirror the roster into the audit DB's stub too (same FK shape).
+	if sharedDB == nil && botStore != nil && as != nil {
+		mirrorRosterIntoStandalone(ctx, botStore, as.db, empLog)
 	}
 
 	// Construct the audit chain store (tamper-evident-audit-log leaf 02)
@@ -212,6 +231,19 @@ func NewManagerFromConfig(
 	// "component=employee-wiring component=employee-manager ..." into a
 	// single record with duplicated/competing keys.
 	mgr := NewManagerWithStores(botMgr, botStore, cs, gs, as, logger)
+	// Standalone mode: register the goal/audit DB handles so Hire mirrors
+	// new employees into their bot_definitions stubs (the wiring-time
+	// mirrorRosterIntoStandalone pass only covers the pre-existing roster).
+	if sharedDB == nil {
+		var standaloneDBs []*sql.DB
+		if gs != nil {
+			standaloneDBs = append(standaloneDBs, gs.db)
+		}
+		if as != nil {
+			standaloneDBs = append(standaloneDBs, as.db)
+		}
+		mgr.SetStandaloneEmployeeDBs(standaloneDBs)
+	}
 	result.Manager = mgr
 
 	// Hand the chain handle to the RPC layer (agents.audit.verify). The
@@ -257,6 +289,51 @@ func shouldShareDB(cfg *config.Config, botStore *bot.Store) bool {
 	}
 	return cfg.Employees.Enabled && cfg.Bots.Enabled
 }
+
+// mirrorRosterIntoStandalone copies every bot definition ID from the bot
+// store into a standalone employee DB's bot_definitions stub so the
+// employee_id FK keeps resolving for the current roster. INSERT OR IGNORE
+// keeps it idempotent across restarts. Best-effort: errors are logged and
+// swallowed — a roster read or mirror failure degrades to "new goals for
+// that employee fail FK validation" instead of failing daemon startup.
+func mirrorRosterIntoStandalone(ctx context.Context, botStore *bot.Store, db *sql.DB, log *slog.Logger) {
+	defs, err := botStore.List(ctx)
+	if err != nil {
+		log.Warn("employee wiring: mirror roster into standalone db failed (list)",
+			"error", err)
+		return
+	}
+	for _, def := range defs {
+		if def.ID == "" {
+			continue
+		}
+		if _, err := db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO bot_definitions (id, data, created_at, updated_at) VALUES (?, '{}', ?, ?)`,
+			def.ID,
+			def.CreatedAt.UTC().Format(time.RFC3339),
+			def.UpdatedAt.UTC().Format(time.RFC3339),
+		); err != nil {
+			log.Warn("employee wiring: mirror roster into standalone db failed (insert)",
+				"employee_id", def.ID, "error", err)
+		}
+	}
+}
+
+// botDefinitionsStubSQL creates an empty, schema-only bot_definitions
+// table matching internal/bot/store.go's definition. Employee tables
+// (employee_goals, employee_audit_findings) declare FOREIGN KEY
+// (employee_id) REFERENCES bot_definitions(id); when the wiring routes a
+// store onto a standalone database (bots disabled → no real bot store in
+// that file), the referenced table would not exist and every insert would
+// fail with "no such table: main.bot_definitions". Applying this stub in
+// each store's migrate() keeps the FK enforced — it stays a no-op on the
+// shared bots.db, where the real bot_definitions already exists.
+const botDefinitionsStubSQL = `CREATE TABLE IF NOT EXISTS bot_definitions (
+    id          TEXT PRIMARY KEY,
+    data        TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);`
 
 // newGoalStoreFromDB wraps an existing *sql.DB connection for the goal
 // store. This mirrors NewGoalStore but skips the open step. Defined here

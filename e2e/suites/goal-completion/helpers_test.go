@@ -419,15 +419,14 @@ type GoalHealthRow struct {
 	Health string
 }
 
-// Goals reads every employee_goals row from the stack's goal store. When
-// bots are enabled the goal store shares the bots database (the
-// employee_goals FOREIGN KEY on bot_definitions), so try the shared bots.db
-// first and fall back to the standalone employees/goals.db.
+// Goals reads every employee_goals row from the stack's goal store. The
+// goal store runs standalone at employees/goals.db; a bots.db fallback is
+// kept for stacks that explicitly re-enable shared wiring.
 func Goals(t *testing.T, s *harness.Stack) []GoalHealthRow {
 	t.Helper()
-	goalsDB := filepath.Join(s.MeeptHome, "bots", "bots.db")
+	goalsDB := GoalsDBPath(s)
 	if _, err := os.Stat(goalsDB); err != nil {
-		goalsDB = GoalsDBPath(s)
+		goalsDB = filepath.Join(s.MeeptHome, "bots", "bots.db")
 	}
 	db := openRO(t, goalsDB)
 	rows, err := db.Query(`SELECT id, COALESCE(title,''), COALESCE(state,''), COALESCE(health,'') FROM employee_goals ORDER BY created_at`)
@@ -487,14 +486,14 @@ func reflectReply() string {
 }
 
 // goalStack starts a scratch daemon with the employee goal layer fully
-// operational: bots enabled (the goal store's employee_goals table declares
-// a FOREIGN KEY on bot_definitions, so it must share the bots database —
-// the production "employees layer over bots" wiring) and the goal-completion
-// gate kill switch on. Extra overlays merge on top; later keys win.
+// operational: the goal-completion gate kill switch on. The goal store
+// runs standalone (employees/goals.db) — its bot_definitions FK is kept
+// resolvable by the standalone stub + roster mirroring in wiring.go, so
+// bots.enabled no longer needs to be forced on. Extra overlays merge on
+// top; later keys win.
 func goalStack(t *testing.T, extra map[string]any) *harness.Stack {
 	t.Helper()
 	overlay := map[string]any{
-		"bots.enabled":                    true,
 		"employees.defaults.gate.enabled": true,
 	}
 	for k, v := range extra {
