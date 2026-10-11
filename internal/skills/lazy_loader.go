@@ -132,11 +132,19 @@ func (l *LazySkillLoader) loadAndCache(ctx context.Context, key string) (*Skill,
 	skill, err := ParseSkillFile(indexEntry.Path)
 	if err != nil {
 		if errors.Is(err, ErrNoFrontmatter) {
-			// Missing frontmatter — still usable, just warn.
-			l.logger.Warn("Skill file has no frontmatter, using slug as name",
+			// Missing frontmatter: ParseSkillFile returns (nil, ErrNoFrontmatter)
+			// here — unlike the index path, it does NOT return a slug-derived
+			// entry alongside the error. Falling through with nil skill used to
+			// nil-pointer-panic at the Debug log below (lazy_loader.go:161,
+			// SIGSEGV in loadAndCache, observed 2026-10-10: the running daemon
+			// crashed the first time an agent loaded a frontmatter-less skill).
+			// Skip the file and return a real error instead.
+			l.stats.Errors++
+			l.logger.Warn("Skill file has no frontmatter, skipping",
 				"name", key,
 				"path", indexEntry.Path,
 			)
+			return nil, fmt.Errorf("skill %s has no frontmatter; add YAML frontmatter with a name and description", key)
 		} else {
 			l.stats.Errors++
 			l.logger.Warn("Failed to load skill",
