@@ -657,6 +657,7 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) SetDefaultWorkingDir\(dir string\)](<#Dispatcher.SetDefaultWorkingDir>)
   - [func \(d \*Dispatcher\) SetDriftDetector\(det \*SessionDriftDetector\)](<#Dispatcher.SetDriftDetector>)
   - [func \(d \*Dispatcher\) SetFenceController\(fc FenceController\)](<#Dispatcher.SetFenceController>)
+  - [func \(d \*Dispatcher\) SetGoalAnchor\(anchor GoalAnchorStore\)](<#Dispatcher.SetGoalAnchor>)
   - [func \(d \*Dispatcher\) SetInputHasher\(fn func\(message string\) string\)](<#Dispatcher.SetInputHasher>)
   - [func \(d \*Dispatcher\) SetInstructionParser\(parser \*InstructionParser\)](<#Dispatcher.SetInstructionParser>)
   - [func \(d \*Dispatcher\) SetInstructionStore\(store \*preferences.Store\)](<#Dispatcher.SetInstructionStore>)
@@ -792,6 +793,7 @@ Package agent provides the agent loop and related components.
   - [func \(t \*GetDatasetOverviewTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#GetDatasetOverviewTool.Invoke>)
   - [func \(t \*GetDatasetOverviewTool\) Name\(\) string](<#GetDatasetOverviewTool.Name>)
   - [func \(t \*GetDatasetOverviewTool\) Parameters\(\) llm.FunctionParameters](<#GetDatasetOverviewTool.Parameters>)
+- [type GoalAnchorStore](<#GoalAnchorStore>)
 - [type GuardConfig](<#GuardConfig>)
   - [func DefaultGuardConfig\(\) GuardConfig](<#DefaultGuardConfig>)
   - [func \(c GuardConfig\) Normalized\(\) GuardConfig](<#GuardConfig.Normalized>)
@@ -7800,6 +7802,13 @@ Wiring model: the dispatcher registers the detector as the prefilter's embedding
 
 SetFenceController wires the shared fence checker so dispatched sessions bind their project path as the sandbox root and honor \-\-nofence.
 
+<a name="Dispatcher.SetGoalAnchor"></a>
+### func \(\*Dispatcher\) SetGoalAnchor
+
+	func (d *Dispatcher) SetGoalAnchor(anchor GoalAnchorStore)
+
+SetGoalAnchor wires the goal\-resolution store after construction \(same post\-construction seam as SetPlanManager/SetSessionStore: the daemon builds the dispatcher before the employee subsystem\). Nil is a no\-op.
+
 <a name="Dispatcher.SetInputHasher"></a>
 ### func \(\*Dispatcher\) SetInputHasher
 
@@ -9031,6 +9040,29 @@ Name returns the tool name.
 	func (t *GetDatasetOverviewTool) Parameters() llm.FunctionParameters
 
 Parameters returns the tool parameters.
+
+<a name="GoalAnchorStore"></a>
+## type GoalAnchorStore
+
+GoalAnchorStore is the narrow surface the dispatcher needs to resolve a session's goal at plan\-creation time. The daemon adapts \*employee.GoalStore plus the employee roster onto it; tests inject stubs. Every method degrades to its empty answer \("", ""\) rather than erroring: a failed goal anchor must never fail a dispatch.
+
+	type GoalAnchorStore interface {
+	    // SessionGoalID returns the goal explicitly bound to the session
+	    // (C6 branch 1). Returns "" when unset OR no longer active — a
+	    // retired/paused bound goal must not anchor new plans.
+	    SessionGoalID(sessionID string) string
+	    // SoleEmployeeID returns the employee the daemon attributes chat
+	    // sessions to: the sole configured employee. Returns "" when zero or
+	    // multiple employees exist (no reliable per-session binding) — the
+	    // implicit branch stays off rather than mis-attributing work.
+	    SoleEmployeeID() string
+	    // SoleActiveGoalID returns the employee's single active non-implicit
+	    // goal id (C6 branch 2), or "" when zero or multiple exist.
+	    SoleActiveGoalID(ctx context.Context, employeeID string) string
+	    // EnsureImplicitGoal create-or-reuses the employee's SourceImplicit
+	    // goal titled from the plan title (C6 branch 3). Returns "" on error.
+	    EnsureImplicitGoal(ctx context.Context, employeeID, title string) string
+	}
 
 <a name="GuardConfig"></a>
 ## type GuardConfig
