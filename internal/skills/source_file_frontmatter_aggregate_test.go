@@ -15,21 +15,24 @@ func captureLogger(buf *bytes.Buffer) *slog.Logger {
 	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
 
-// writeSkillDir creates n frontmatter-less skill files under a temp tier.
+// writeSkillDir creates n frontmatter-less skills in the real layout:
+// one directory per skill containing SKILL.md. slugFromPath derives the name
+// from the parent directory, so this is what makes each slug distinct.
 func writeSkillDir(t *testing.T, n int) string {
 	t.Helper()
-	dir := t.TempDir()
+	root := t.TempDir()
 	for i := 0; i < n; i++ {
-		// No YAML frontmatter: ParseSkillFile falls back to the slug as the name.
-		// Distinct slug per file so the count assertion is exact; the earlier
-		// version reused a letter and collided, loading fewer skills than n.
-		body := "# Skill " + itoa(i) + "\n\nSome guidance.\n"
 		name := "skill-number-" + itoa(i)
-		if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(body), 0o600); err != nil {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("mkdir skill %d: %v", i, err)
+		}
+		body := "# Skill " + itoa(i) + "\n\nSome guidance.\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600); err != nil {
 			t.Fatalf("write skill %d: %v", i, err)
 		}
 	}
-	return dir
+	return root
 }
 
 func itoa(i int) string {
@@ -61,17 +64,21 @@ func TestFrontmatterWarningsAreAggregatedPerScan(t *testing.T) {
 	var buf bytes.Buffer
 	src := NewFileSource([]DiscoveryTier{{Path: dir, Priority: 1}}, captureLogger(&buf))
 
-	// NOTE: ParseSkillFile returns a valid slug-derived entry ALONGSIDE
-	// ErrNoFrontmatter, but loadSkillFile treats the error branch as fatal and
-	// skips the file. So a frontmatter-less file yields a WARNING here, not a
-	// loaded skill — the skill is skipped, which is exactly why the condition
-	// is worth one aggregated line rather than N.
+	// Lenient contract restored: frontmatter-less files now LOAD with the slug
+	// as the name, alongside the aggregated warning. Earlier, when
+	// ParseSkillFile discarded them, this asserted 0 loaded — that assertion
+	// pinned the defect, not the contract.
 	skills, err := src.Discover(context.Background())
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-	if len(skills) != 0 {
-		t.Fatalf("frontmatter-less files should be skipped, got %d skills loaded", len(skills))
+	if len(skills) != n {
+		t.Fatalf("loaded %d skills, want %d (lenient contract: slug names)", len(skills), n)
+	}
+	for _, sk := range skills {
+		if sk.Name == "" {
+			t.Fatal("a loaded skill has an empty name; slug fallback did not run")
+		}
 	}
 
 	out := buf.String()
@@ -127,8 +134,11 @@ func TestNoFrontmatterWarningWhenAllSkillsAreWellFormed(t *testing.T) {
 	dir := t.TempDir()
 	good := "---\nname: proper-skill\ndescription: has frontmatter\n---\n\nBody.\n"
 	for i := 0; i < 3; i++ {
-		if err := os.WriteFile(filepath.Join(dir, "good"+itoa(i)+".md"),
-			[]byte(good), 0o600); err != nil {
+		d := filepath.Join(dir, "good"+itoa(i))
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte(good), 0o600); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 	}

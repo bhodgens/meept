@@ -24,6 +24,15 @@ type FileSource struct {
 	noFrontmatter []string
 }
 
+// ensureLogger guards struct-literal construction, which bypasses
+// NewFileSource's nil-logger default. Call at the top of both scan entry
+// points so no logging path can dereference a nil logger mid-scan.
+func (s *FileSource) ensureLogger() {
+	if s.logger == nil {
+		s.logger = slog.Default()
+	}
+}
+
 // noteNoFrontmatter records a frontmatter-less skill for the current scan
 // rather than logging it immediately.
 //
@@ -82,6 +91,7 @@ func (s *FileSource) Name() string {
 // Discover scans all configured tiers and returns discovered skills.
 // Higher-priority tiers (lower Priority value) shadow lower ones.
 func (s *FileSource) Discover(ctx context.Context) ([]*Skill, error) {
+	s.ensureLogger()
 	skills := make(map[string]*Skill)
 
 	// Sort tiers by priority (lowest priority value first processed, so higher
@@ -128,6 +138,7 @@ func (s *FileSource) Discover(ctx context.Context) ([]*Skill, error) {
 
 // DiscoverMetadata scans all tiers and returns skill metadata entries (no bodies).
 func (s *FileSource) DiscoverMetadata(ctx context.Context) ([]*SkillIndexEntry, error) {
+	s.ensureLogger()
 	entries := make(map[string]*SkillIndexEntry)
 
 	sortedTiers := make([]DiscoveryTier, len(s.tiers))
@@ -215,15 +226,23 @@ func (s *FileSource) scanTier(ctx context.Context, tier DiscoveryTier, skills ma
 func (s *FileSource) loadSkillFile(path string, priority int, skills map[string]*Skill, skillDir string) {
 	skill, err := ParseSkillFile(path)
 	if err != nil {
-		if errors.Is(err, ErrNoFrontmatter) {
-			s.noteNoFrontmatter(path)
-		} else {
-			s.logger.Warn("Failed to parse skill file",
-				"path", path,
-				"error", err,
-			)
+		if !errors.Is(err, ErrNoFrontmatter) || skill == nil {
+			// A hard parse error, or a frontmatter-less file whose lenient
+			// contract produced no usable skill: record and skip.
+			if errors.Is(err, ErrNoFrontmatter) {
+				s.noteNoFrontmatter(path)
+			} else {
+				s.logger.Warn("Failed to parse skill file",
+					"path", path,
+					"error", err,
+				)
+			}
+			return
 		}
-		return
+		// Lenient contract: a usable skill arrived ALONGSIDE ErrNoFrontmatter.
+		// Keep it; the slug name was filled in by ParseSkillFile. The condition
+		// is still worth one aggregated line per scan.
+		s.noteNoFrontmatter(path)
 	}
 
 	if skill.Name == "" {

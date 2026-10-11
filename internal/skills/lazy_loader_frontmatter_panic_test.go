@@ -31,9 +31,15 @@ import (
 // the caller dereferences.
 func TestLazyLoaderNoFrontmatterReturnsErrorNotPanic(t *testing.T) {
 	tmpDir := t.TempDir()
-	// A skill file with no YAML frontmatter — the exact incident shape.
+	// A skill with no YAML frontmatter, in the real <dir>/SKILL.md layout —
+	// the exact incident shape. (slugFromPath uses the parent DIRECTORY name,
+	// so a flat file's slug would be the temp dir, not the skill.)
 	body := "# Some Skill\n\nMarkdown body only, no frontmatter block.\n"
-	skillPath := filepath.Join(tmpDir, "no-frontmatter.md")
+	skillDir := filepath.Join(tmpDir, "no-frontmatter")
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	skillPath := filepath.Join(skillDir, "SKILL.md")
 	if err := os.WriteFile(skillPath, []byte(body), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -50,15 +56,22 @@ func TestLazyLoaderNoFrontmatterReturnsErrorNotPanic(t *testing.T) {
 	})
 	loader := NewLazySkillLoader(idx, WithCacheSize(10))
 
+	// Restored lenient contract: the skill LOADS, with the slug as its name and
+	// ErrNoFrontmatter reported alongside. (When ParseSkillFile discarded the
+	// skill, this call crashed the daemon with a nil dereference — that panic
+	// is what this file originally pinned.)
 	skill, err := loader.Load(context.Background(), "no-frontmatter")
-	if err == nil {
-		t.Fatalf("Load returned (%v, nil error); a frontmatter-less skill must be an error", skill)
+	if err != nil {
+		t.Fatalf("Load failed under the lenient contract: %v", err)
 	}
-	if skill != nil {
-		t.Fatalf("Load returned a non-nil skill alongside an error: %+v", skill)
+	if skill == nil {
+		t.Fatal("Load returned nil skill")
 	}
-	if !strings.Contains(err.Error(), "frontmatter") {
-		t.Fatalf("error should name the frontmatter problem, got: %v", err)
+	if skill.Name != "no-frontmatter" {
+		t.Fatalf("name = %q, want the slug", skill.Name)
+	}
+	if !strings.Contains(skill.Body, "Markdown body only") {
+		t.Fatalf("body = %q, want the full text as body", skill.Body)
 	}
 }
 
@@ -68,25 +81,42 @@ func TestLazyLoaderNoFrontmatterReturnsErrorNotPanic(t *testing.T) {
 // recovered at all.)
 func TestLazyLoaderRecoversAfterNoFrontmatter(t *testing.T) {
 	tmpDir := t.TempDir()
-	bad := filepath.Join(tmpDir, "broken.md")
+	badDir := filepath.Join(tmpDir, "broken")
+	if err := os.MkdirAll(badDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	bad := filepath.Join(badDir, "SKILL.md")
 	if err := os.WriteFile(bad, []byte("# no frontmatter here\n"), 0o600); err != nil {
 		t.Fatalf("write bad: %v", err)
 	}
-	goodPath := createTestSkillFile(t, tmpDir, "good-skill",
-		"---\nname: test-skill\ndescription: A test skill\n---\n\n# Test Skill\n\nBody.\n")
+	goodDir := filepath.Join(tmpDir, "good-skill")
+	if err := os.MkdirAll(goodDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	goodPath := filepath.Join(goodDir, "SKILL.md")
+	if err := os.WriteFile(goodPath,
+		[]byte("---\nname: test-skill\ndescription: A test skill\n---\n\n# Test Skill\n\nBody.\n"), 0o600); err != nil {
+		t.Fatalf("write good: %v", err)
+	}
 
 	idx := NewSkillIndex()
 	idx.Index(&SkillIndexEntry{Name: "broken", Path: bad})
 	idx.Index(&SkillIndexEntry{Name: "good-skill", Path: goodPath})
 	loader := NewLazySkillLoader(idx, WithCacheSize(10))
 
-	if _, err := loader.Load(context.Background(), "broken"); err == nil {
-		t.Fatal("broken skill loaded without error")
+	// The broken skill now loads leniently (slug name) instead of refusing.
+	broken, err := loader.Load(context.Background(), "broken")
+	if err != nil {
+		t.Fatalf("broken skill failed to load leniently: %v", err)
+	}
+	if broken.Name != "broken" {
+		t.Fatalf("broken skill name = %q, want slug", broken.Name)
 	}
 
+	// And the healthy skill still loads with its declared frontmatter name.
 	skill, err := loader.Load(context.Background(), "good-skill")
 	if err != nil {
-		t.Fatalf("healthy skill failed after a frontmatter refusal: %v", err)
+		t.Fatalf("healthy skill failed: %v", err)
 	}
 	if skill == nil || skill.Name != "test-skill" {
 		t.Fatalf("healthy skill = %+v, want name test-skill", skill)

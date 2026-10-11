@@ -131,20 +131,24 @@ func (l *LazySkillLoader) loadAndCache(ctx context.Context, key string) (*Skill,
 	// Parse full skill from file
 	skill, err := ParseSkillFile(indexEntry.Path)
 	if err != nil {
-		if errors.Is(err, ErrNoFrontmatter) {
-			// Missing frontmatter: ParseSkillFile returns (nil, ErrNoFrontmatter)
-			// here — unlike the index path, it does NOT return a slug-derived
-			// entry alongside the error. Falling through with nil skill used to
-			// nil-pointer-panic at the Debug log below (lazy_loader.go:161,
-			// SIGSEGV in loadAndCache, observed 2026-10-10: the running daemon
-			// crashed the first time an agent loaded a frontmatter-less skill).
-			// Skip the file and return a real error instead.
-			l.stats.Errors++
-			l.logger.Warn("Skill file has no frontmatter, skipping",
+		if errors.Is(err, ErrNoFrontmatter) && skill != nil {
+			// Lenient contract (restored): a usable skill arrived ALONGSIDE
+			// ErrNoFrontmatter, with the slug as its name. Warn and use it.
+			// (When ParseSkillFile still discarded the skill on this error, the
+			// fall-through here nil-pointer-panicked at the Debug log below —
+			// SIGSEGV in loadAndCache, 2026-10-10, daemon down. The nil guard
+			// below the branch remains as a backstop.)
+			l.logger.Warn("Skill file has no frontmatter, using slug as name",
 				"name", key,
 				"path", indexEntry.Path,
 			)
-			return nil, fmt.Errorf("skill %s has no frontmatter; add YAML frontmatter with a name and description", key)
+		} else if errors.Is(err, ErrNoFrontmatter) {
+			l.stats.Errors++
+			l.logger.Warn("Skill file has no frontmatter and no usable content, skipping",
+				"name", key,
+				"path", indexEntry.Path,
+			)
+			return nil, fmt.Errorf("skill %s has no frontmatter and no loadable content", key)
 		} else {
 			l.stats.Errors++
 			l.logger.Warn("Failed to load skill",
@@ -160,6 +164,11 @@ func (l *LazySkillLoader) loadAndCache(ctx context.Context, key string) (*Skill,
 
 	// Evict if at capacity
 	l.evictIfNeeded()
+
+	if skill == nil {
+		l.stats.Errors++
+		return nil, fmt.Errorf("skill %s parsed to nil", key)
+	}
 
 	// Add to cache
 	l.cache[key] = &cacheEntry{skill: skill}
