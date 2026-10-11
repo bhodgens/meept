@@ -72,7 +72,9 @@ cmd_provision() {
   node totem1 "mkdir -p /root/git && tar xzf /tmp/meept-head.tar.gz -C /root/git/ 2>/dev/null || true; ls $REPO_DIR/cmd/meept-daemon >/dev/null && echo repo-present"
 
   echo "== build on totem1"
-  node totem1 "cd $REPO_DIR && go build -o bin/meept-daemon ./cmd/meept-daemon && go build -o bin/meept ./cmd/meept && echo build-ok"
+  # GOTOOLCHAIN inline: the remote host's shell has no pin, and its ambient
+  # Go may be newer than go.mod's toolchain (x/tools export-data break).
+  node totem1 "cd $REPO_DIR && GOTOOLCHAIN=\$(sed -n 's/^toolchain[[:space:]]//p' go.mod | head -1) go build -o bin/meept-daemon ./cmd/meept-daemon && GOTOOLCHAIN=\$(sed -n 's/^toolchain[[:space:]]//p' go.mod | head -1) go build -o bin/meept ./cmd/meept && echo build-ok"
 
   echo "== distribute binaries + source to totem2/3"
   for h in totem2 totem3; do

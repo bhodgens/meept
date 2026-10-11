@@ -23,6 +23,12 @@
 
 set -u -o pipefail
 
+# Pin the toolchain to go.mod's `toolchain` line for standalone runs (make
+# targets already export GOTOOLCHAIN). See .githooks/pre-commit:35-45.
+if [ -z "${GOTOOLCHAIN:-}" ] || [ "${GOTOOLCHAIN:-}" = "auto" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^toolchain[[:space:]]//p' "$PWD/go.mod" 2>/dev/null | head -1)"
+fi
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 

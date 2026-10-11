@@ -20,6 +20,15 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      # The "Verify Go SDK compiles" step below is this workflow's only go
+      # invocation; without setup-go it ran the runner's preinstalled ambient
+      # Go. Pin it to go.mod so the smoke test runs the toolchain the module
+      # declares, matching every other workflow in the repo.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
       - name: Install OpenAPI Generator CLI
         run: npm install -g @openapitools/openapi-generator-cli
 

@@ -24,6 +24,13 @@
 
 set -uo pipefail
 
+# Pin the toolchain to go.mod's `toolchain` line (go env queries and the go
+# build below must run under the pinned toolchain, not ambient Go). See
+# .githooks/pre-commit:35-45.
+if [ -z "${GOTOOLCHAIN:-}" ] || [ "${GOTOOLCHAIN:-}" = "auto" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^toolchain[[:space:]]//p' "$PWD/go.mod" 2>/dev/null | head -1)"
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT_OVERRIDE=""
 KEEP=""

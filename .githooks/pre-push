@@ -4,6 +4,19 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Pin the toolchain the bench build uses to go.mod's `toolchain` line.
+# WHY: the bench tree (~/git/meept-bench) has no toolchain directive, so
+# GOTOOLCHAIN=auto would pick the ambient Go — on machines with a newer
+# local Go that breaks x/tools-linked gates the same way the pre-commit
+# pin fixed (see .githooks/pre-commit:35-45). auto resolves to the pin;
+# any other explicit value wins as a deliberate probe.
+if [ -z "$GOTOOLCHAIN" ] || [ "$GOTOOLCHAIN" = "auto" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^toolchain[[:space:]]//p' "$PWD/go.mod" | head -1)"
+fi
+if [ -z "$GOTOOLCHAIN" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^go[[:space:]]//p' "$PWD/go.mod" | head -1)"
+fi
+
 "$SCRIPT_DIR/pre-push-bench" || exit 1
 
 exit 0
