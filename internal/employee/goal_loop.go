@@ -338,9 +338,9 @@ type GoalLoop struct {
 	// observability seam). Guarded by steerMu (NOT mu: the drain sites run
 	// under the manager's invoke mutex, and mu is held across in-round
 	// snapshot reads — a second lock would risk ordering violations).
-	steerMu           sync.Mutex
-	pendingSteer      []TriggerEvent
-	lastDrainedSteer  *TriggerEvent
+	steerMu          sync.Mutex
+	pendingSteer     []TriggerEvent
+	lastDrainedSteer *TriggerEvent
 }
 
 // EmitMetricFunc is the callback signature for emitting telemetry from the
