@@ -158,6 +158,25 @@ Re-run until ALL TREES COMPLIANT: True.
 3. `decideTier3` silently drops candidates at the `max_active_plans=1` default while
    `Trigger` still returns `status:completed` — silent no-op triggers.
 4. TUI `fetchDetail` calls `agents.goals.list` redundantly beside `agents.get`.
+   RESOLVED AS FALSE PREMISE (follow-up #5 fix pass, 2026-10-11): `agents.get`
+   (handler `handleGet` -> `Manager.GetEmployee`) returns
+   `*Employee{BotDefinition, Constitution}` with NO goals field — the
+   `active_goals` mirror the finding assumes does not exist on the wire (only
+   `agents.review`'s `Review` struct carries `active_goals`, and nothing serves
+   it at `agents.get`). The `agents.goals.list` call in `fetchDetail` is the
+   ONLY source of `detail.ActiveGoals`; dropping it would blank the goals
+   sub-view. Call NOT removed; if a mirror is ever added to `handleGet`, that
+   is the moment to revisit.
 5. Multi-employee installs: no session→employee binding exists, so the C6 implicit
    branch keys on the daemon's SOLE employee; multi-employee chat stays goal-less.
    `GoalAnchorStore.SoleEmployeeID` is the seam to replace.
+   FIXED (2026-10-11): sessions gained an `employee_id` column
+   (`Store.SetEmployeeID`, mirroring the goal_id precedent) plus the
+   `agents.employees.bind_session` RPC seam
+   (internal/employee/handler_session_employee.go). `GoalAnchorStore` gained
+   `SessionEmployeeID(sessionID)`: the adapter prefers the session's bound
+   employee (validated against the live roster so retired employees never
+   receive work), falling back to `SoleEmployeeID` for unbound sessions —
+   single-employee installs behave exactly as before. UI for employee
+   selection is deliberately deferred (binding seam + adapter precedence is
+   the deliverable).
