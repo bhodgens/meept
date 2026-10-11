@@ -9055,7 +9055,16 @@ GoalAnchorStore is the narrow surface the dispatcher needs to resolve a session'
 	    // sessions to: the sole configured employee. Returns "" when zero or
 	    // multiple employees exist (no reliable per-session binding) — the
 	    // implicit branch stays off rather than mis-attributing work.
+	    // Retained for compatibility: resolveGoalID consults
+	    // SessionEmployeeID first and falls back to this when the session is
+	    // unbound (single-employee installs keep working unchanged).
 	    SoleEmployeeID() string
+	    // SessionEmployeeID resolves the employee a chat session's work is
+	    // attributed to (goal-completion follow-up #5): the session's
+	    // explicitly bound employee when set, else the daemon's sole employee,
+	    // else "" (zero or multiple employees and no binding — the implicit
+	    // branch stays off rather than mis-attributing work).
+	    SessionEmployeeID(sessionID string) string
 	    // SoleActiveGoalID returns the employee's single active non-implicit
 	    // goal id (C6 branch 2), or "" when zero or multiple exist.
 	    SoleActiveGoalID(ctx context.Context, employeeID string) string
