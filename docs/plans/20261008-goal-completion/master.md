@@ -107,11 +107,18 @@ See SHARED-CONVENTIONS.md §3 (single source of truth — do not restate).
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-goal-ingestion | PENDING | 0 | |
-| 02-goal-linkage | PENDING | 0 | |
-| 03-anchor-chat-path | PENDING | 0 | |
-| 04-steer-episode | PENDING | 0 | |
-| 05-e2e-and-docs | PENDING | 0 | |
+| 01-goal-ingestion | COMPLETE | 1 | 0204a1ee; U1000+errors-gate fixes in-review |
+| 02-goal-linkage | COMPLETE | 1 | 0b6348b5 |
+| 03-anchor-chat-path | COMPLETE | 1 | c170661f; gofmt follow-up 75a99fbd |
+| 04-steer-episode | COMPLETE | 1 | 0204a1ee (co-committed with 01) |
+| 05-e2e-and-docs | COMPLETE | 1 | bdb338ef + graphs 97b6dcf0 |
+
+Tree COMPLETE 2026-10-11 — 100% leaf completion. Integration gate: full
+unit sweep green (2 known flaky websearch/ssrf tests pass in isolation
+and on re-run — pre-existing, unrelated packages), make e2e-fast 54/54
+suites ok incl. goal-completion, make build ok, graphs-check ok,
+docs-check ok. Commits: 0b6348b5, 0204a1ee, c170661f, 75a99fbd,
+bdb338ef, 97b6dcf0.
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
