@@ -116,6 +116,9 @@ type Store interface {
 	// resolves that directory at turn time after a daemon restart. A nil
 	// context clears it.
 	SetDetectionContext(sessionID string, dc *DetectionContext) error
+	// SetGoalID persists the explicitly bound goal on a session
+	// (goal-completion leaf 03, C6 branch 1). An empty goalID clears it.
+	SetGoalID(sessionID, goalID string) error
 
 	// F-04 FIX: Allow per-session fence override for --nofence CLI flag.
 	SetNoFence(sessionID string, noFence bool) error

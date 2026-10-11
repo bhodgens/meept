@@ -126,6 +126,12 @@ type Session struct {
 	// list/read APIs filter by owner unless the viewer is nil (unfiltered).
 	OwnerID string `json:"owner_id,omitempty"`
 
+	// GoalID is the explicitly bound goal for this session (goal-completion
+	// leaf 03, C6 branch 1). Empty = no explicit binding; chat-path plan
+	// creation falls through to the sole-active-goal / implicit-goal
+	// branches. Persisted via Store.SetGoalID (goal_id column).
+	GoalID string `json:"goal_id,omitempty"`
+
 	// Thread-based context partitioning (NEW)
 	Threads        map[string]*Thread `json:"threads,omitempty"` // threadID -> Thread
 	ActiveThreadID string             `json:"active_thread_id,omitempty"`
@@ -716,6 +722,23 @@ func (s *MemoryStore) SetDetectionContext(sessionID string, dc *DetectionContext
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	session.DetectionContext = dc
+	return nil
+}
+
+// SetGoalID persists the explicitly bound goal on a session (goal-completion
+// leaf 03, C6 branch 1). An empty goalID clears the binding. MemoryStore
+// returns the same *Session pointer from Get, so the assignment is the
+// persistence; this exists for parity with SQLiteStore (which writes the
+// goal_id column).
+func (s *MemoryStore) SetGoalID(sessionID, goalID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.GoalID = goalID
 	return nil
 }
 

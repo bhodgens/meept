@@ -180,6 +180,11 @@ func (s *SQLiteStore) migrate() error {
 	// "no context"; pre-existing rows need no backfill.
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN detection_context TEXT DEFAULT ''", "detection_context")
 
+	// Add the explicitly bound session goal (goal-completion leaf 03, C6
+	// branch 1). TEXT DEFAULT '' means "no binding"; pre-existing rows need
+	// no backfill (empty goal_id is legacy-legal per SHARED-CONVENTIONS C3).
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN goal_id TEXT DEFAULT ''", "goal_id")
+
 	// Add worktree association columns to sessions
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN worktree_id TEXT DEFAULT ''", "worktree_id")
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN worktree_path TEXT DEFAULT ''", "worktree_path")
@@ -581,7 +586,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 	defer s.mu.RUnlock()
 
 	row := s.db.QueryRow(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id
 		FROM sessions
 		ORDER BY last_activity DESC
 		LIMIT 1`) //nolint:mutexio // mutex serializes sqlite connection access
@@ -593,7 +598,7 @@ func (s *SQLiteStore) getByColumn(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -629,9 +634,10 @@ func (s *SQLiteStore) scanSessionRow(scan func(dest ...any) error) *Session {
 		foreground                bool
 		lastUserMessageAt         sql.NullString
 		detectionContextJSON      sql.NullString
+		goalID                    sql.NullString
 	)
 
-	err := scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID, &foreground, &lastUserMessageAt, &detectionContextJSON)
+	err := scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID, &foreground, &lastUserMessageAt, &detectionContextJSON, &goalID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			s.logger.Error("Failed to scan session", "error", err)
@@ -680,6 +686,9 @@ func (s *SQLiteStore) scanSessionRow(scan func(dest ...any) error) *Session {
 			session.DetectionContext = &dc
 		}
 	}
+	if goalID.Valid {
+		session.GoalID = goalID.String
+	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		session.CreatedAt = t
@@ -704,7 +713,7 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path, s.owner_id, s.foreground, s.last_user_message_at, s.detection_context
+		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path, s.owner_id, s.foreground, s.last_user_message_at, s.detection_context, s.goal_id
 		FROM sessions s
 		ORDER BY s.archived ASC, s.last_activity DESC`) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
@@ -1296,7 +1305,7 @@ func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -1430,6 +1439,28 @@ func (s *SQLiteStore) SetDetectionContext(sessionID string, dc *DetectionContext
 	) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to set detection context for session: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// SetGoalID persists the explicitly bound goal on a session (goal-completion
+// leaf 03, C6 branch 1). An empty goalID clears the binding. Mirrors
+// SetDetectionContext: bumps last_activity and returns an error when the
+// session does not exist.
+func (s *SQLiteStore) SetGoalID(sessionID, goalID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(
+		`UPDATE sessions SET goal_id = ?, last_activity = ? WHERE id = ?`,
+		goalID, time.Now().UTC().Format(time.RFC3339), sessionID,
+	) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return fmt.Errorf("failed to set goal for session: %w", err)
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {

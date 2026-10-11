@@ -1260,6 +1260,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// execution/storage layer; only the RPC surface changes.
 		if components.EmployeeManager != nil {
 			agentRPCHandler := employeepkg.NewRPCHandler(components.EmployeeManager)
+			// Session goal binding (goal-completion leaf 03 Task 3):
+			// agents.goals.bind_session persists via the session store's
+			// SetGoalID (C6 branch 1). session.Store satisfies the
+			// employee.SessionGoalBinder seam structurally.
+			if components.SessionStore != nil {
+				agentRPCHandler.SetSessionGoalBinder(components.SessionStore)
+			}
 			agentHandlers := agentRPCHandler.Handlers()
 			for method, handler := range agentHandlers {
 				rpcServer.RegisterHandler(method, handler)

@@ -452,6 +452,7 @@ New methods under the `agents.` namespace. Existing `bot.*` methods are removed 
 | `agents.amend` | propose constitution amendment, routes to Plan signoff |
 | `agents.goals.list`, `agents.goals.get` | goal listing |
 | `agents.goals.approve`, `agents.goals.reject` | plan signoff |
+| `agents.goals.bind_session` | bind a session to an active goal (params `{"session_id","goal_id"}`; empty `goal_id` unbinds). Chat-path plan creation anchors to the session's bound goal first (C6). |
 | `agents.audit.list`, `agents.audit.resolve` | findings |
 | `agents.migrate` | migration scan |
 

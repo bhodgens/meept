@@ -148,6 +148,16 @@ func reservePlanFilePath(dir, slug string, logger *slog.Logger) (string, error) 
 // CreatePlan creates a new plan, stores it, writes the initial plan.md, and
 // publishes a plan.created event.
 func (m *PlanManager) CreatePlan(ctx context.Context, title, description, projectID, projectPath, sessionID string) (*Plan, error) {
+	return m.CreatePlanWithGoal(ctx, title, description, projectID, projectPath, sessionID, "")
+}
+
+// CreatePlanWithGoal is CreatePlan with the owning goal id stamped on the
+// plan BEFORE the store write (goal-completion leaf 03, SHARED-CONVENTIONS
+// C6): the chat path resolves the session's goal via the dispatcher's
+// GoalAnchorStore and persists the linkage atomically with creation instead
+// of a follow-up SetPlanGoal update. An empty goalID is legacy-legal
+// (chat with no resolvable employee keeps working).
+func (m *PlanManager) CreatePlanWithGoal(ctx context.Context, title, description, projectID, projectPath, sessionID, goalID string) (*Plan, error) {
 	dir := m.resolvePlanDir(projectPath)
 	filePath := filepath.Join(dir, slugify(title)+".md")
 
@@ -172,6 +182,7 @@ func (m *PlanManager) CreatePlan(ctx context.Context, title, description, projec
 	}
 
 	plan := NewPlan(title, description, projectID, filePath, sessionID)
+	plan.GoalID = goalID
 
 	if err := m.store.CreatePlan(ctx, plan); err != nil {
 		return nil, fmt.Errorf("create plan: %w", err)

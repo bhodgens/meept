@@ -4896,6 +4896,27 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Wire the chat-path goal anchor (goal-completion leaf 03 Task 2):
+	// the dispatcher resolves a session's goal at plan-creation time via
+	// agent.GoalAnchorStore. Wired here (after the employee subsystem)
+	// because the adapter needs EmployeeGoalStore + the live roster; nil
+	// components keep the anchor inert and plans goal-less. The
+	// goal-anchor RPC seam (agents.goals.bind_session) is wired at RPC
+	// registration in daemon.go.
+	if c.Dispatcher != nil && c.EmployeeGoalStore != nil && c.SessionStore != nil {
+		if sqliteStore, ok := c.SessionStore.(*session.SQLiteStore); ok {
+			c.Dispatcher.SetGoalAnchor(newGoalAnchorAdapter(
+				sqliteStore,
+				c.EmployeeGoalStore,
+				managerEmployeeSource{m: c.EmployeeManager},
+				c.Logger.With("component", "goal-anchor"),
+			))
+			c.Logger.Info("chat-path goal anchor wired to dispatcher")
+		} else {
+			c.Logger.Warn("goal anchor unavailable: session store is not the SQLite store")
+		}
+	}
+
 	// Start gossip engine (cluster mode)
 	if c.ClusterEngine != nil {
 		if err := c.ClusterEngine.Start(ctx); err != nil {

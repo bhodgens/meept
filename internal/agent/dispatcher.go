@@ -342,6 +342,7 @@ type Dispatcher struct {
 	router            *ReportRouter
 	modelParser       *ModelReassignmentParser
 	planManager       *plan.PlanManager
+	goalAnchor        GoalAnchorStore
 	metricsStore      *metrics.Store
 
 	// inputHasher, when non-nil, derives the salted input_hash persisted in
@@ -2015,7 +2016,14 @@ func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, 
 		summary = truncateString(input, 100)
 	}
 
-	p, err := d.planManager.CreatePlan(ctx, summary, input, "", "", sessionID)
+	// C6 goal anchoring (goal-completion leaf 03): resolve the session's
+	// goal BEFORE creating the plan so the linkage is written atomically
+	// with the plan row. Empty result (no anchor / no session goal / no
+	// resolvable employee) keeps the plan goal-less — chat without
+	// employees must keep working.
+	goalID := d.resolveGoalID(ctx, sessionID, summary)
+
+	p, err := d.planManager.CreatePlanWithGoal(ctx, summary, input, "", "", sessionID, goalID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plan: %w", err)
 	}

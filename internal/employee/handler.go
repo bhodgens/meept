@@ -68,6 +68,29 @@ var constitutionFields = map[string]struct{}{
 type RPCHandler struct {
 	manager *Manager
 	logger  *slog.Logger
+
+	// sessionGoals persists the explicitly bound session goal
+	// (goal-completion leaf 03 Task 3). The daemon injects
+	// components.SessionStore; package employee must not import
+	// internal/session directly beyond this narrow seam (and tests inject
+	// stubs). Nil means agents.goals.bind_session returns a clear error.
+	sessionGoals SessionGoalBinder
+}
+
+// SessionGoalBinder is the narrow session-store surface bind_session needs:
+// persisting (or clearing, with an empty goalID) a session's goal binding.
+// Satisfied structurally by session.Store after leaf 03 Task 1.
+type SessionGoalBinder interface {
+	SetGoalID(sessionID, goalID string) error
+}
+
+// SetSessionGoalBinder injects the session-goal persistence seam. Nil is
+// ignored (typed-nil guard per docs/agents/coding-practices.md).
+func (h *RPCHandler) SetSessionGoalBinder(b SessionGoalBinder) {
+	if b == nil {
+		return
+	}
+	h.sessionGoals = b
 }
 
 // NewRPCHandler creates a new RPC handler for employee operations.
@@ -119,8 +142,11 @@ func (h *RPCHandler) Handlers() map[string]func(context.Context, json.RawMessage
 		"agents.goals.create":   h.handleGoalsCreate,
 		"agents.goals.get":      h.handleGoalsGet,
 		"agents.goals.set_gate": h.handleGoalsSetGate,
-		"agents.goals.approve":  h.handleGoalsApprove,
-		"agents.goals.reject":   h.handleGoalsReject,
+		// Session goal binding (goal-completion leaf 03, contract C6
+		// branch 1): the seam TUI/GUI exposure defers to.
+		"agents.goals.bind_session": h.handleGoalsBindSession,
+		"agents.goals.approve":      h.handleGoalsApprove,
+		"agents.goals.reject":       h.handleGoalsReject,
 
 		// Audit (spec line 539)
 		"agents.audit.list":    h.handleAuditList,
@@ -212,6 +238,14 @@ type goalRejectRequest struct {
 	GoalID string `json:"goal_id"`
 	PlanID string `json:"plan_id"`
 	Reason string `json:"reason"`
+}
+
+// bindSessionRequest is the agents.goals.bind_session params shape
+// (goal-completion leaf 03 Task 3). An empty goal_id clears the session's
+// binding (unbind); a non-empty one must reference an active goal.
+type bindSessionRequest struct {
+	SessionID string `json:"session_id"`
+	GoalID    string `json:"goal_id"`
 }
 
 type auditListRequest struct {
@@ -544,6 +578,44 @@ func (h *RPCHandler) handleGoalsSetGate(ctx context.Context, raw json.RawMessage
 		return nil, fmt.Errorf("set gate: %w", err)
 	}
 	return g, nil
+}
+
+// handleGoalsBindSession handles agents.goals.bind_session (goal-completion
+// leaf 03 Task 3): validates the goal is active and writes the session goal
+// binding via the injected SessionGoalBinder. An empty goal_id clears the
+// binding (unbind) and skips goal validation — there is nothing to check.
+// TUI/GUI exposure is deferred; this RPC is the seam.
+func (h *RPCHandler) handleGoalsBindSession(ctx context.Context, raw json.RawMessage) (any, error) {
+	if h.manager == nil {
+		return nil, errNotConfigured
+	}
+	if h.sessionGoals == nil {
+		return nil, fmt.Errorf("session goal binding unavailable: session store not wired")
+	}
+	var req bindSessionRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, fmt.Errorf("invalid request: %w", err)
+	}
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if req.GoalID != "" {
+		goal, err := h.manager.GetGoal(ctx, req.GoalID)
+		if err != nil {
+			return nil, fmt.Errorf("get goal: %w", err)
+		}
+		if goal.State != GoalActive {
+			return nil, fmt.Errorf("goal %s is %s, only active goals can bind a session", req.GoalID, goal.State.String())
+		}
+	}
+	if err := h.sessionGoals.SetGoalID(req.SessionID, req.GoalID); err != nil {
+		return nil, fmt.Errorf("bind session goal: %w", err)
+	}
+	return map[string]any{
+		"session_id": req.SessionID,
+		"goal_id":    req.GoalID,
+		"bound":      req.GoalID != "",
+	}, nil
 }
 
 func (h *RPCHandler) handleGoalsApprove(ctx context.Context, raw json.RawMessage) (any, error) {
