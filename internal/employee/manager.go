@@ -77,6 +77,10 @@ type HireRequest struct {
 	Tools        []string
 	Enabled      bool
 	Constitution map[string]any
+	// Goals are created for the new employee after the employee row is
+	// persisted (leaf 01). Each spec's EmployeeID is forced to req.ID.
+	// Any goal failure is joined into the returned error (errors.Join).
+	Goals []GoalSpec
 }
 
 // UpdateRequest is the input shape for Manager.UpdateEmployee. Constitution
@@ -1157,6 +1161,24 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 	m.setCachedConstitution(req.ID, c)
 	m.logger.Info("employee hired",
 		"employee_id", req.ID, "tier", c.AutonomyTier.String())
+
+	// Leaf 01: create any goals declared on the hire request. The employee
+	// row (and constitution) exist by now, so CreateGoal can resolve the
+	// tier for its source validation. Failures are collected and joined so
+	// the caller sees every broken spec, not just the first.
+	if len(req.Goals) > 0 {
+		var goalErrs []error
+		for i, spec := range req.Goals {
+			spec.EmployeeID = req.ID
+			if _, err := m.CreateGoal(ctx, spec); err != nil {
+				goalErrs = append(goalErrs, fmt.Errorf("goal[%d] %q: %w", i, spec.Title, err))
+			}
+		}
+		if err := errors.Join(goalErrs...); err != nil {
+			return nil, fmt.Errorf("hire: create goals: %w", err)
+		}
+	}
+
 	return &Employee{BotDefinition: def, Constitution: c}, nil
 }
 
@@ -1495,6 +1517,66 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 	return result, nil
 }
 
+// SteerEmployee delivers user steering to an employee's running goal-loop
+// episode (leaf 04, contract C5). It acquires the SAME per-employee invoke
+// mutex as triggerViaGoalLoop, so steering serializes against an in-flight
+// round instead of interleaving with it; the queued steer trigger is then
+// drained by the post-round hook below (or the pre-round Decide drain).
+//
+// Returns (queued, err): queued=false means the employee had no active
+// episode (no parked episode, no active goal) and the steer was a no-op —
+// steering a quiet employee is not an error. Employees without a
+// registered GoalLoop are quiet by definition.
+//
+// Lock scope mirrors triggerViaGoalLoop: the mutex is held ONLY across
+// loop.Steer / the steer-decide dispatch. Steer itself does no I/O under
+// the manager mutex beyond its bounded goal lookup (mutexio rule).
+func (m *Manager) SteerEmployee(ctx context.Context, id, content string) (bool, error) {
+	loop := m.GetGoalLoop(id)
+	if loop == nil {
+		// No loop registered: nothing can be running for this employee
+		// through the goal-loop path. Quiet no-op (contract C5).
+		m.logger.Debug("steer ignored: employee has no goal loop", "employee_id", id)
+		return false, nil
+	}
+
+	invokeMu := m.acquireInvokeMutex(id)
+	invokeMu.Lock()
+	// Hold the invoke mutex ONLY across the Steer dispatch (same scope as
+	// triggerViaGoalLoop's Decide call — no other I/O under this lock).
+	queued, steerErr := loop.Steer(ctx, content)
+	if !queued && steerErr == nil {
+		// No active episode: nothing to do; release and report.
+		invokeMu.Unlock()
+		return false, nil
+	}
+	// A steer arrived while a round was NOT in flight (we hold the mutex)
+	// but an episode exists (parked or goal-active): drain it immediately
+	// by re-entering Decide with Source="steer". This is the resume
+	// path — the trigger re-runs the episode and the assess prompt
+	// carries the steering text.
+	if trigger, ok := loop.drainPendingSteer(); ok {
+		// Speak context (harness-eval leaf 11): same round-entry setup
+		// as triggerViaGoalLoop so a steered round can notify once.
+		loop.SetSpeakContext(id, "goal-"+id)
+		loop.decideSteer(ctx, trigger, m.logger)
+	}
+	invokeMu.Unlock()
+
+	if steerErr != nil {
+		m.emitMetric("employee.invocations", 1, map[string]string{
+			"employee_id": id,
+			"tier":        "",
+			"outcome":     "error",
+		})
+		return queued, fmt.Errorf("goal-loop steer: %w", steerErr)
+	}
+	m.emitMetric("employee.steers", 1, map[string]string{
+		"employee_id": id,
+	})
+	return queued, nil
+}
+
 // emitBudgetMetric is a best-effort helper that emits the employee.budget.burn
 // gauge from the bot manager's state. If the lookup fails, the gauge is
 // skipped (do not emit a zero). Extracted to avoid duplication between the
@@ -1779,6 +1861,54 @@ func allAgentIDs(newID string, known map[string]struct{}) []string {
 // --------------------------------------------------------------------------
 // Manager: goals (Phase 5 stubs that delegate to GoalStore)
 // --------------------------------------------------------------------------
+
+// CreateGoal validates spec and persists a new goal via the goal store.
+// It is the production ingestion seam behind agents.goals.create (RPC),
+// POST /api/v1/agents/{id}/goals (HTTP), meept agents goal-create (CLI),
+// and the goals array on HireRequest.
+//
+// Validation is two-stage: GoalSpec.Validate (structural) plus
+// ValidateGoalSource (tier-sensitive, using the employee's cached or stored
+// constitution). A missing constitution rejects tier-sensitive sources with
+// a clear error; "user" and "trigger" sources pass without a constitution
+// because ValidateGoalSource accepts them at every tier.
+func (m *Manager) CreateGoal(ctx context.Context, spec GoalSpec) (*Goal, error) {
+	if m.goalStore == nil {
+		return nil, ErrNotImplemented
+	}
+	if err := spec.Validate(); err != nil {
+		return nil, fmt.Errorf("create goal: %w", err)
+	}
+
+	// Tier-sensitive source check. Resolve the employee's tier from the
+	// constitution cache, falling back to the store; when neither has one,
+	// reject sources whose validity depends on the tier.
+	source := GoalSource(spec.Source)
+	if source == "" {
+		source = SourceUser
+	}
+	c, ok := m.cachedConstitution(spec.EmployeeID)
+	if !ok && m.constitutionStore != nil {
+		if loaded, err := m.constitutionStore.Get(ctx, spec.EmployeeID); err == nil {
+			c = loaded
+			ok = true
+		}
+	}
+	if !ok {
+		if source == SourceSelfProposed || source == SourceAuditFinding {
+			return nil, fmt.Errorf("create goal: no constitution for employee %q; source %q requires a known autonomy tier",
+				spec.EmployeeID, source)
+		}
+	} else if err := ValidateGoalSource(source, c.AutonomyTier); err != nil {
+		return nil, fmt.Errorf("create goal: %w", err)
+	}
+
+	g := spec.toGoal(time.Now().UTC())
+	if err := m.goalStore.Create(ctx, g); err != nil {
+		return nil, fmt.Errorf("create goal: %w", err)
+	}
+	return g, nil
+}
 
 // ListGoals lists goals, optionally filtered by employee_id. Empty
 // employeeID returns all goals across all employees.

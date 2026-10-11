@@ -109,12 +109,14 @@ func (h *RPCHandler) Handlers() map[string]func(context.Context, json.RawMessage
 		"agents.pause":   h.handlePause,
 		"agents.resume":  h.handleResume,
 		"agents.trigger": h.handleTrigger,
+		"agents.steer":   h.handleSteer,
 
 		// Constitution amendment (spec line 536)
 		"agents.amend": h.handleAmend,
 
 		// Goals (spec lines 537-538)
 		"agents.goals.list":     h.handleGoalsList,
+		"agents.goals.create":   h.handleGoalsCreate,
 		"agents.goals.get":      h.handleGoalsGet,
 		"agents.goals.set_gate": h.handleGoalsSetGate,
 		"agents.goals.approve":  h.handleGoalsApprove,
@@ -160,6 +162,8 @@ type createRequest struct {
 	Tools        []string         `json:"tools,omitempty"`
 	Enabled      bool             `json:"enabled"`
 	Constitution map[string]any   `json:"constitution"`
+	// Goals are created for the new employee (leaf 01, contract C4).
+	Goals []GoalSpec `json:"goals,omitempty"`
 	// RawDefinition preserves unknown fields for forward compatibility.
 	RawDefinition map[string]json.RawMessage `json:"-"`
 }
@@ -178,6 +182,14 @@ type updateRequest struct {
 type triggerRequest struct {
 	ID      string         `json:"id"`
 	Payload map[string]any `json:"payload,omitempty"`
+}
+
+// steerRequest is the agents.steer params shape (leaf 04, contract C5).
+// Both fields are required: a steer without content is a client bug, not a
+// no-op signal.
+type steerRequest struct {
+	ID      string `json:"employee_id"`
+	Content string `json:"content"`
 }
 
 type amendRequest struct {
@@ -388,6 +400,38 @@ func (h *RPCHandler) handleTrigger(ctx context.Context, raw json.RawMessage) (an
 	}, nil
 }
 
+// handleSteer handles agents.steer (leaf 04, contract C5):
+// params {"employee_id":..., "content":...}. The response carries
+// steer_queued so clients can distinguish a delivered steering from a
+// quiet-employee no-op.
+func (h *RPCHandler) handleSteer(ctx context.Context, raw json.RawMessage) (any, error) {
+	if h.manager == nil {
+		return nil, errNotConfigured
+	}
+	var req steerRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, fmt.Errorf("invalid steer request: %w", err)
+	}
+	if req.ID == "" {
+		return nil, fmt.Errorf("employee_id is required")
+	}
+	if req.Content == "" {
+		return nil, fmt.Errorf("content is required")
+	}
+	queued, err := h.manager.SteerEmployee(ctx, req.ID, req.Content)
+	if err != nil {
+		return nil, fmt.Errorf("steer: %w", err)
+	}
+	// status stays "ok" for both outcomes — a quiet-employee no-op is a
+	// successful call (contract C5); steer_queued carries the distinction
+	// the CLI/TUI render ("steer queued" vs "employee idle (no-op)").
+	return map[string]any{
+		"id":           req.ID,
+		"status":       "ok",
+		"steer_queued": queued,
+	}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Constitution amendment handler (spec line 536)
 //
@@ -444,6 +488,25 @@ func (h *RPCHandler) handleGoalsList(ctx context.Context, raw json.RawMessage) (
 		return nil, fmt.Errorf("list goals: %w", err)
 	}
 	return map[string]any{"goals": goals}, nil
+}
+
+// handleGoalsCreate handles agents.goals.create (leaf 01, contract C4):
+// params are a GoalSpec JSON; the response is {"goal": <Goal>}.
+func (h *RPCHandler) handleGoalsCreate(ctx context.Context, raw json.RawMessage) (any, error) {
+	if h.manager == nil {
+		return nil, errNotConfigured
+	}
+	var spec GoalSpec
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &spec); err != nil {
+			return nil, fmt.Errorf("invalid request: %w", err)
+		}
+	}
+	goal, err := h.manager.CreateGoal(ctx, spec)
+	if err != nil {
+		return nil, fmt.Errorf("create goal: %w", err)
+	}
+	return map[string]any{"goal": goal}, nil
 }
 
 func (h *RPCHandler) handleGoalsGet(ctx context.Context, raw json.RawMessage) (any, error) {

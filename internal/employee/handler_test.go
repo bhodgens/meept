@@ -79,6 +79,10 @@ func TestRPCHandler_Handlers_Registration(t *testing.T) {
 		// goals (spec lines 537-538)
 		"agents.goals.list", "agents.goals.get", "agents.goals.set_gate",
 		"agents.goals.approve", "agents.goals.reject",
+		// goal creation (leaf 01, contract C4)
+		"agents.goals.create",
+		// steer-of-episode (leaf 04, contract C5)
+		"agents.steer",
 		// audit (spec line 539)
 		"agents.audit.list", "agents.audit.resolve",
 		// audit chain verification (tamper-evident audit log leaf 03)

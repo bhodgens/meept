@@ -113,7 +113,9 @@ the gate decides *when it may claim success*. An autonomous run may only mark
 a goal complete after a user-defined shell check passes in the employee's
 project directory.
 
-Configure it per goal in the employee definition:
+Configure it per goal in the employee definition (this block is **live**:
+`goals:` is parsed by `Manager.Hire` — each entry creates a goal via
+`GoalStore.Create`, per-goal `gate` included):
 
 ```json5
 {
@@ -366,6 +368,7 @@ meept agents migrate --apply <id>              # write proposed constitution to 
 
 ```bash
 meept agents goals [--employee=<id>]           # list goals with health (red/yellow/green)
+meept agents goal-create <employee-id> --title T --mandate M [--gate-command CMD] [--source user|trigger]
 meept agents goal <goal-id>                    # goal detail + active plan + history
 meept agents goal <goal-id> --approve <plan-id>
 meept agents goal <goal-id> --reject <plan-id> --reason="..."
@@ -379,6 +382,24 @@ meept agents audit <id> --resolve <finding-id> --as=false_positive
 ```
 
 UI text is lowercase per CLAUDE.md convention (e.g., "approve", "reject", "pause", "resume").
+
+### Steering an employee
+
+```bash
+meept agents steer <id> <content...>           # deliver steering to a running episode
+```
+
+Steering is the goal-loop counterpart of chat steering: the content re-enters
+the employee's running (or parked) episode as a `source=steer` trigger, and the
+next assess renders it as a `User steering: <content>` line so the episode
+re-routes around the operator's direction. Steering a quiet employee (no
+parked episode, no active goal) is a no-op — the CLI prints
+`employee idle (no-op)`; a delivered steering prints `steer queued`. The same
+surface exists as RPC `agents.steer` (`{"employee_id":..., "content":...}`) and
+HTTP `POST /api/v1/agents/{id}/steer` (`{"content":"..."}`). Implemented in
+`GoalLoop.Steer` / `Manager.SteerEmployee` (`internal/employee/`); steering
+serializes against an in-flight round on the same per-employee invoke mutex as
+`Trigger`.
 
 ---
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -62,10 +63,12 @@ func newAgentsCmd() *cobra.Command {
 	cmd.AddCommand(newAgentsDeleteCmd())
 	cmd.AddCommand(newAgentsPauseCmd())
 	cmd.AddCommand(newAgentsResumeCmd())
+	cmd.AddCommand(newAgentsSteerCmd())
 	cmd.AddCommand(newAgentsAmendCmd())
 	cmd.AddCommand(newAgentsMigrateCmd())
 	cmd.AddCommand(newAgentsGoalsCmd())
 	cmd.AddCommand(newAgentsGoalCmd())
+	cmd.AddCommand(newAgentsGoalCreateCmd())
 	cmd.AddCommand(newAgentsSetGateCmd())
 	cmd.AddCommand(newAgentsAuditCmd())
 
@@ -625,6 +628,65 @@ func newAgentsResumeCmd() *cobra.Command {
 			}
 
 			fmt.Printf("resumed agent: %s\n", agentID)
+			return nil
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// agents steer
+// ---------------------------------------------------------------------------
+
+// newAgentsSteerCmd builds `meept agents steer <id> <content...>` (leaf 04,
+// contract C5): deliver user steering to the employee's running goal-loop
+// episode. Steering a quiet employee is a no-op, not an error.
+func newAgentsSteerCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "steer <id> <content...>",
+		Short: "steer a running employee episode",
+		Long: `Deliver steering to an AI employee's running goal-loop episode.
+
+The steering text re-enters the employee's episode (assess) as a
+source=steer trigger, so a running or parked episode re-routes around the
+user's direction. steering a quiet employee is a no-op, not an error.
+
+Examples:
+  meept agents steer researcher "focus on the flaky auth tests first"
+  meept agents steer ci-monitor "skip the deploy checks tonight"`,
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			agentID := args[0]
+			content := strings.Join(args[1:], " ")
+
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			rawResult, err := client.Call("agents.steer", map[string]any{
+				"employee_id": agentID,
+				"content":     content,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to steer agent: %w", err)
+			}
+
+			var resultMap map[string]any
+			if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if errMsg := rpcError(resultMap); errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+
+			queued, _ := resultMap["steer_queued"].(bool)
+			if queued {
+				fmt.Printf("steer queued\n")
+			} else {
+				fmt.Printf("employee idle (no-op)\n")
+			}
 			return nil
 		},
 	}
@@ -1232,6 +1294,92 @@ Examples:
 	cmd.Flags().StringVar(&approvePlanID, "approve", "", "approve a plan for this goal")
 	cmd.Flags().StringVar(&rejectPlanID, "reject", "", "reject a plan for this goal")
 	cmd.Flags().StringVar(&reason, "reason", "", "rejection reason (use with --reject)")
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// agents goal-create
+// ---------------------------------------------------------------------------
+
+func newAgentsGoalCreateCmd() *cobra.Command {
+	var (
+		title       string
+		mandate     string
+		gateCommand string
+		source      string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "goal-create <employee-id>",
+		Short: "create a goal for an employee",
+		Long: `Create a goal for an AI employee via agents.goals.create.
+
+Examples:
+  meept agents goal-create emp_abc --title "keep main shippable" --mandate "every commit on main passes CI"
+  meept agents goal-create emp_abc --title "nightly report" --mandate "..." --source trigger
+  meept agents goal-create emp_abc --title "t" --mandate "m" --gate-command "go test ./..."`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if title == "" {
+				return fmt.Errorf("title is required (--title)")
+			}
+			if mandate == "" {
+				return fmt.Errorf("mandate is required (--mandate)")
+			}
+			if source != "" && source != "user" && source != "trigger" {
+				return fmt.Errorf("source must be \"user\" or \"trigger\"")
+			}
+
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			params := map[string]any{
+				"employee_id": args[0],
+				"title":       title,
+				"mandate":     mandate,
+			}
+			if source != "" {
+				params["source"] = source
+			}
+			if gateCommand != "" {
+				params["gate"] = map[string]any{"command": gateCommand}
+			}
+
+			rawResult, err := client.Call("agents.goals.create", params)
+			if err != nil {
+				return fmt.Errorf("failed to create goal: %w", err)
+			}
+			var resultMap map[string]any
+			if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+			if errMsg := rpcError(resultMap); errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+			goal, _ := resultMap["goal"].(map[string]any)
+			if goal == nil {
+				return fmt.Errorf("unexpected response: missing goal")
+			}
+			fmt.Printf("goal created: %s (health: %s)\n",
+				getStringOr(goal, "id", ""),
+				getStringOr(goal, "health", "unknown"))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&title, "title", "", "short goal title")
+	cmd.Flags().StringVar(&mandate, "mandate", "", "durable objective in plain prose")
+	cmd.Flags().StringVar(&gateCommand, "gate-command", "", "optional completion gate command (must exit 0)")
+	cmd.Flags().StringVar(&source, "source", "", "goal source: \"user\" (default) or \"trigger\"")
+	if err := cmd.MarkFlagRequired("title"); err != nil {
+		// The flag was just added above, so this cannot fail.
+		log.Printf("agents: warning: MarkFlagRequired(title) failed: %v", err)
+	}
+	if err := cmd.MarkFlagRequired("mandate"); err != nil {
+		log.Printf("agents: warning: MarkFlagRequired(mandate) failed: %v", err)
+	}
 	return cmd
 }
 

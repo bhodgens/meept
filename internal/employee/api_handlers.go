@@ -67,11 +67,13 @@ func (h *AgentAPIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/agents/{id}/trigger", h.handleTrigger)
 	mux.HandleFunc("POST /api/v1/agents/{id}/pause", h.handlePause)
 	mux.HandleFunc("POST /api/v1/agents/{id}/resume", h.handleResume)
+	mux.HandleFunc("POST /api/v1/agents/{id}/steer", h.handleSteerHTTP)
 
 	mux.HandleFunc("GET /api/v1/agents/{id}/constitution", h.handleConstitutionGet)
 	mux.HandleFunc("PATCH /api/v1/agents/{id}/constitution", h.handleConstitutionAmend)
 
 	mux.HandleFunc("GET /api/v1/agents/{id}/goals", h.handleGoalsList)
+	mux.HandleFunc("POST /api/v1/agents/{id}/goals", h.handleGoalsCreate)
 	mux.HandleFunc("GET /api/v1/agents/{id}/goals/{gid}", h.handleGoalsGet)
 	mux.HandleFunc("PUT /api/v1/agents/{id}/goals/{gid}/gate", h.handleGoalsSetGate)
 
@@ -303,6 +305,32 @@ func (h *AgentAPIHandler) handleResume(w http.ResponseWriter, r *http.Request) {
 	h.dispatch(w, r, "agents.resume", map[string]string{"id": id})
 }
 
+// handleSteerHTTP handles POST /api/v1/agents/{id}/steer (leaf 04, contract
+// C5). Body: {"content": "..."}; the employee id comes from the path.
+// Routes to agents.steer, which reports steer_queued so the caller can tell
+// a delivered steering from a quiet-employee no-op.
+func (h *AgentAPIHandler) handleSteerHTTP(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		h.writeError(w, http.StatusBadRequest, "agent id is required")
+		return
+	}
+	var body struct {
+		Content string `json:"content"`
+	}
+	if !h.readJSON(w, r, &body) {
+		return
+	}
+	if strings.TrimSpace(body.Content) == "" {
+		h.writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	h.dispatch(w, r, "agents.steer", map[string]any{
+		"employee_id": id,
+		"content":     body.Content,
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Constitution (spec line 516)
 // ---------------------------------------------------------------------------
@@ -359,6 +387,23 @@ func (h *AgentAPIHandler) handleGoalsList(w http.ResponseWriter, r *http.Request
 		return
 	}
 	h.dispatch(w, r, "agents.goals.list", map[string]string{"employee_id": id})
+}
+
+// handleGoalsCreate handles POST /api/v1/agents/{id}/goals (leaf 01,
+// contract C4). Body: GoalSpec JSON. The path employee id overrides any
+// body employee_id.
+func (h *AgentAPIHandler) handleGoalsCreate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		h.writeError(w, http.StatusBadRequest, "agent id is required")
+		return
+	}
+	var spec GoalSpec
+	if !h.readJSON(w, r, &spec) {
+		return
+	}
+	spec.EmployeeID = id
+	h.dispatch(w, r, "agents.goals.create", spec)
 }
 
 // handleGoalsGet handles GET /api/v1/agents/{id}/goals/{gid}.
