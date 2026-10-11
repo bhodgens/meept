@@ -186,6 +186,25 @@ GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 TEST_PACKAGE_PARALLELISM ?= 2
 GO_TEST_PACKAGE_FLAGS := -p $(TEST_PACKAGE_PARALLELISM)
 
+# Pin every go invocation in every recipe to the toolchain go.mod declares.
+# WHY: GOTOOLCHAIN=auto (the default) never downgrades, so a machine with a
+# newer local Go (e.g. 1.27) runs the gates itself — and its v5 export data
+# is unreadable to the pinned golang.org/x/tools our analyzers (mutexio,
+# selflock, fieldguard) link. Every Go-file commit then dies in a wall of
+# bogus "undefined: yaml" typecheck errors. go.mod's `toolchain` line is the
+# single source of truth; the `go` line is the fallback for modules without
+# a toolchain directive. An ambient value of auto resolves to the pin (auto
+# always picks the newer ambient Go — the failure this pin prevents);
+# any other explicit GOTOOLCHAIN still wins as a deliberate probe.
+GOTOOLCHAIN ?= $(shell sed -n 's/^toolchain[[:space:]]//p' go.mod | head -1)
+ifeq ($(strip $(GOTOOLCHAIN)),auto)
+GOTOOLCHAIN := $(shell sed -n 's/^toolchain[[:space:]]//p' go.mod | head -1)
+endif
+ifeq ($(strip $(GOTOOLCHAIN)),)
+GOTOOLCHAIN := $(shell sed -n 's/^go[[:space:]]//p' go.mod | head -1)
+endif
+export GOTOOLCHAIN
+
 # Flutter GUI directory and platform (needed by multiple targets)
 FLUTTER_UI_DIR := ui/flutter_ui
 ifeq ($(shell uname -s),Darwin)

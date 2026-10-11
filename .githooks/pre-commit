@@ -28,6 +28,22 @@
 
 set -e
 
+# Pin the toolchain every sub-hook's go invocation uses (go run/list/vet/build
+# and the x/tools-linked analyzers) to go.mod's `toolchain` line. WHY:
+# GOTOOLCHAIN=auto never downgrades, so a newer local Go writes export data
+# the pinned golang.org/x/tools cannot decode and every analyzer gate fails
+# with bogus typecheck errors. An explicitly-set GOTOOLCHAIN in the calling
+# environment wins (deliberate probes stay possible:
+#   GOTOOLCHAIN=auto .githooks/pre-commit
+# ); unset or auto resolves to the pin, because auto always picks the newer
+# ambient Go — the exact failure this pin exists to prevent.
+if [ -z "$GOTOOLCHAIN" ] || [ "$GOTOOLCHAIN" = "auto" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^toolchain[[:space:]]//p' "$PWD/go.mod" | head -1)"
+fi
+if [ -z "$GOTOOLCHAIN" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^go[[:space:]]//p' "$PWD/go.mod" | head -1)"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo ""
