@@ -145,6 +145,19 @@ func ParseSkillFile(path string) (*Skill, error) {
 
 	skill, err := ParseSkillText(string(data))
 	if err != nil {
+		if errors.Is(err, ErrNoFrontmatter) && skill != nil {
+			// Lenient contract (7fff4e72): frontmatter is optional and the slug
+			// stands in for the missing name. ParseSkillText returns a valid
+			// skill alongside ErrNoFrontmatter; pass BOTH through so callers can
+			// warn and still use the skill. This wrapper used to discard the
+			// skill on any error, which contradicted ParseSkillText's contract
+			// and made every frontmatter-less skill unloadable — culminating in
+			// the 2026-10-10 nil-dereference panic in lazy_loader, which had
+			// been written against the documented contract, not this behaviour.
+			skill.Name = slugFromPath(path)
+			skill.Path = path
+			return skill, err
+		}
 		return nil, &ParseError{
 			Path:    path,
 			Message: "failed to parse",

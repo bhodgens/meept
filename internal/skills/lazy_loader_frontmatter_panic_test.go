@@ -92,3 +92,41 @@ func TestLazyLoaderRecoversAfterNoFrontmatter(t *testing.T) {
 		t.Fatalf("healthy skill = %+v, want name test-skill", skill)
 	}
 }
+
+// TestParseSkillFileLenientFrontmatterContract pins the ORIGINAL documented
+// behaviour (7fff4e72, 2026-05-14): "YAML frontmatter is optional." A
+// frontmatter-less file must come back as a usable skill PLUS ErrNoFrontmatter,
+// with the slug as the name — not nil.
+//
+// ParseSkillFile (added later, in the Go rewrite 557d9ecf) discarded the skill
+// on any error, silently breaking that contract for every caller. That is what
+// made all frontmatter-less Hermes skills unloadable, and it culminated in the
+// nil-dereference panic pinned above: lazy_loader had been written against the
+// documented contract, then patched around the wrapper's actual behaviour.
+// This test holds the wrapper to the contract so the two cannot drift apart
+// again.
+func TestParseSkillFileLenientFrontmatterContract(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "my-plain-skill")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(path, []byte("# Just markdown\n\nNo frontmatter.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	skill, err := ParseSkillFile(path)
+	if skill == nil {
+		t.Fatalf("ParseSkillFile returned nil skill with %v; the lenient contract is broken", err)
+	}
+	if !errors.Is(err, ErrNoFrontmatter) {
+		t.Fatalf("err = %v, want ErrNoFrontmatter alongside the usable skill", err)
+	}
+	if skill.Name != "my-plain-skill" {
+		t.Fatalf("name = %q, want the directory slug", skill.Name)
+	}
+	if skill.Body == "" {
+		t.Fatal("body is empty; the full text should become the body")
+	}
+}
