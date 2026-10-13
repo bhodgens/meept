@@ -134,6 +134,7 @@ Package config provides configuration loading and validation for meept.
   - [func \(s \*ConfigSyncer\) Start\(ctx context.Context\)](<#ConfigSyncer.Start>)
   - [func \(s \*ConfigSyncer\) Status\(\) SyncStatus](<#ConfigSyncer.Status>)
   - [func \(s \*ConfigSyncer\) Stop\(\)](<#ConfigSyncer.Stop>)
+- [type ConflictConfig](<#ConflictConfig>)
 - [type ContextDiscoveryConfig](<#ContextDiscoveryConfig>)
 - [type DaemonConfig](<#DaemonConfig>)
 - [type DetectionConfig](<#DetectionConfig>)
@@ -1893,6 +1894,23 @@ Status returns current sync status information.
 
 Stop halts the periodic pull loop.
 
+<a name="ConflictConfig"></a>
+## type ConflictConfig
+
+ConflictConfig gates LLM conflict detection on the L1 claim\-extraction path \(tree 02, SHARED\-CONVENTIONS §2.3\). When enabled, each extraction batch is recalled against existing claims and one memory\-model call decides per candidate: store / merge / supersede / skip. Any detector failure fails open to store\-all — extraction availability never depends on the conflict LLM.
+
+	type ConflictConfig struct {
+	    // Enabled turns on conflict detection in the L1 extract handler.
+	    // Default false (opt-in-defaults rule: an extra LLM call per extraction
+	    // batch is a product decision per SHARED-CONVENTIONS §2.3).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // TopK is the maximum number of similar existing claims recalled per
+	    // candidate for the conflict prompt. Default 5.
+	    TopK int `json:"top_k" toml:"top_k"`
+	    // MaxBatch caps candidates per conflict LLM call. Default 20.
+	    MaxBatch int `json:"max_batch" toml:"max_batch"`
+	}
+
 <a name="ContextDiscoveryConfig"></a>
 ## type ContextDiscoveryConfig
 
@@ -2616,6 +2634,12 @@ KnowledgeConfig gates the knowledge\-asset store \(SQLite pages \+ FTS5 full\-te
 	    // MaxPages bounds the stored page count (oldest-ingested evicted at
 	    // ingest time; <= 0 means unbounded). Default 0 (unbounded).
 	    MaxPages int `json:"max_pages" toml:"max_pages"`
+	    // CodeDirs lists Go repository roots indexed on the consolidation
+	    // tick by the go/ast code indexer (one CODE page per *.go file plus
+	    // an intra-repo call-edge table powering knowledge.ImpactedBy).
+	    // vendor/, testdata/, hidden dirs, and *_test.go files are always
+	    // skipped. Default empty = code indexing disabled.
+	    CodeDirs []string `json:"code_dirs" toml:"code_dirs"`
 	}
 
 <a name="LLMAdaptiveTimeoutConfig"></a>
@@ -2980,6 +3004,25 @@ MemoryConfig holds memory subsystem settings.
 	    // Default OFF: when disabled the knowledge_* tools are not registered
 	    // and nothing reaches prompts. See KnowledgeConfig.
 	    Knowledge KnowledgeConfig `json:"knowledge" toml:"knowledge"`
+	    // Conflict holds LLM conflict detection for distilled claim extraction
+	    // (tree 02). Default OFF: when disabled the L1 extract handler stores
+	    // candidates directly — no recall, no conflict LLM call. See
+	    // ConflictConfig.
+	    Conflict ConflictConfig `json:"conflict" toml:"conflict"`
+	    // L0Enabled turns on the raw-conversation L0 tier (tree 01 layered
+	    // async distillation): conversation turns are appended to
+	    // <memory.data_dir>/l0/YYYY-MM-DD.jsonl and distilled asynchronously
+	    // into L1 claims + L2 session scenes via the persistent queue.
+	    // Default false (opt-in-defaults rule; nothing records and no
+	    // memory.l1_extract / memory.l2_scene job is enqueued until set).
+	    //
+	    //gendoc:desc L0 raw-conversation tier: append-only daily JSONL of conversation turns distilled asynchronously into L1 claims (memory.l1_extract) and L2 session-scene files (memory.l2_scene) on the persistent queue; retention prunes whole daily files on the consolidation tick.
+	    //gendoc:example [memory] l0_enabled = true, l0_retention_days = 30
+	    L0Enabled bool `json:"l0_enabled" toml:"l0_enabled"`
+	    // L0RetentionDays is the retention window for daily L0 files: whole
+	    // files older than this many days are pruned during the consolidation
+	    // pass (no new ticker). Default 30; <= 0 disables pruning.
+	    L0RetentionDays int `json:"l0_retention_days" toml:"l0_retention_days"`
 	}
 
 <a name="MemoryConfig.GetLimitsForProject"></a>

@@ -55,6 +55,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(bs \*BridgeStore\) Close\(\) error](<#BridgeStore.Close>)
   - [func \(bs \*BridgeStore\) Count\(ctx context.Context\) \(int, error\)](<#BridgeStore.Count>)
   - [func \(bs \*BridgeStore\) DeleteBridge\(ctx context.Context, id string\) error](<#BridgeStore.DeleteBridge>)
+  - [func \(bs \*BridgeStore\) ListBridges\(ctx context.Context\) \(\[\]BridgeRecord, error\)](<#BridgeStore.ListBridges>)
   - [func \(bs \*BridgeStore\) ListBridgesByEvidence\(ctx context.Context, evidenceID string\) \(\[\]BridgeRecord, error\)](<#BridgeStore.ListBridgesByEvidence>)
   - [func \(bs \*BridgeStore\) MarkVerified\(ctx context.Context, id string\) error](<#BridgeStore.MarkVerified>)
   - [func \(bs \*BridgeStore\) PutBridge\(ctx context.Context, rec BridgeRecord\) error](<#BridgeStore.PutBridge>)
@@ -82,6 +83,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(c \*Compactor\) CompactTurns\(turns \[\]TurnRecord\) \[\]TurnRecord](<#Compactor.CompactTurns>)
   - [func \(c \*Compactor\) Config\(\) CompactionConfig](<#Compactor.Config>)
   - [func \(c \*Compactor\) GenerateSummary\(ctx context.Context, turns \[\]TurnRecord\) string](<#Compactor.GenerateSummary>)
+- [type ConflictWiring](<#ConflictWiring>)
 - [type ConsolidationBackend](<#ConsolidationBackend>)
 - [type ConsolidationReport](<#ConsolidationReport>)
 - [type Consolidator](<#Consolidator>)
@@ -93,6 +95,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(c \*Consolidator\) SetBridgeComponents\(store \*BridgeStore, gen BridgeGenerator\)](<#Consolidator.SetBridgeComponents>)
   - [func \(c \*Consolidator\) SetBridgeVerifier\(ver BridgeVerifier\)](<#Consolidator.SetBridgeVerifier>)
   - [func \(c \*Consolidator\) SetKnowledgeDirIngest\(fn func\(ctx context.Context\)\)](<#Consolidator.SetKnowledgeDirIngest>)
+  - [func \(c \*Consolidator\) SetL0Prune\(fn func\(ctx context.Context\)\)](<#Consolidator.SetL0Prune>)
   - [func \(c \*Consolidator\) StartPeriodicConsolidation\(ctx context.Context, interval time.Duration, olderThanHours int\)](<#Consolidator.StartPeriodicConsolidation>)
   - [func \(c \*Consolidator\) Stop\(\)](<#Consolidator.Stop>)
 - [type ConsolidatorConfig](<#ConsolidatorConfig>)
@@ -213,6 +216,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) Close\(\) error](<#Manager.Close>)
   - [func \(m \*Manager\) Config\(\) config.MemoryConfig](<#Manager.Config>)
   - [func \(m \*Manager\) Consolidate\(ctx context.Context\) \(\*ConsolidationReport, error\)](<#Manager.Consolidate>)
+  - [func \(m \*Manager\) Consolidator\(\) \*Consolidator](<#Manager.Consolidator>)
   - [func \(m \*Manager\) DataDir\(\) string](<#Manager.DataDir>)
   - [func \(m \*Manager\) Delete\(ctx context.Context, id string\) error](<#Manager.Delete>)
   - [func \(m \*Manager\) Distill\(ctx context.Context, src \[\]Memory\) \(\*Memory, error\)](<#Manager.Distill>)
@@ -244,11 +248,13 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) ListAutoClaims\(ctx context.Context, createdAfter time.Time, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListAutoClaims>)
   - [func \(m \*Manager\) ListAutoClaimsFiltered\(ctx context.Context, opts ListAutoClaimsOptions\) \(items \[\]MemoryResult, total int, err error\)](<#Manager.ListAutoClaimsFiltered>)
   - [func \(m \*Manager\) ListExpiredClaims\(ctx context.Context, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListExpiredClaims>)
+  - [func \(m \*Manager\) ListMergeClaims\(ctx context.Context, createdAfter time.Time, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListMergeClaims>)
   - [func \(m \*Manager\) ListPendingReviews\(ctx context.Context, before time.Time\) \(decisions, predictions \[\]MemoryResult, err error\)](<#Manager.ListPendingReviews>)
   - [func \(m \*Manager\) MarkResolved\(ctx context.Context, predictionID, outcome string\) \(string, error\)](<#Manager.MarkResolved>)
   - [func \(m \*Manager\) MarkSuperseded\(ctx context.Context, oldID, newID string\) \(redirectedEdges int, auditID string, err error\)](<#Manager.MarkSuperseded>)
   - [func \(m \*Manager\) MemvidClient\(\) \*memvid.Client](<#Manager.MemvidClient>)
   - [func \(m \*Manager\) NetVotes\(ctx context.Context, ids \[\]string\) \(map\[string\]int, error\)](<#Manager.NetVotes>)
+  - [func \(m \*Manager\) NewRecallStore\(\) conflict.RecallStore](<#Manager.NewRecallStore>)
   - [func \(m \*Manager\) OpenFactStore\(dbPath string\) \(\*FactStore, error\)](<#Manager.OpenFactStore>)
   - [func \(m \*Manager\) Personality\(\) \*PersonalityMemory](<#Manager.Personality>)
   - [func \(m \*Manager\) PromoteClaim\(ctx context.Context, claimID string\) error](<#Manager.PromoteClaim>)
@@ -272,6 +278,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) SetDistillSummarizer\(s DistillSummarizer\)](<#Manager.SetDistillSummarizer>)
   - [func \(m \*Manager\) SetDualStore\(ds \*DualStore\)](<#Manager.SetDualStore>)
   - [func \(m \*Manager\) SetEpistemicDetector\(d \*EpistemicDetector\)](<#Manager.SetEpistemicDetector>)
+  - [func \(m \*Manager\) SetL0Prune\(fn func\(ctx context.Context\)\)](<#Manager.SetL0Prune>)
   - [func \(m \*Manager\) SetVerdictAuditor\(a VerdictAuditor\)](<#Manager.SetVerdictAuditor>)
   - [func \(m \*Manager\) StartPeriodicConsolidation\(ctx context.Context\)](<#Manager.StartPeriodicConsolidation>)
   - [func \(m \*Manager\) StartPrefetchService\(ctx context.Context\)](<#Manager.StartPrefetchService>)
@@ -993,6 +1000,13 @@ Count returns the number of persisted bridges \(distinct memory IDs in the side 
 
 DeleteBridge removes a bridge \(vector \+ metadata\) by ID. Deleting a non\-existent bridge is a no\-op, matching VectorShard.Delete semantics.
 
+<a name="BridgeStore.ListBridges"></a>
+### func \(\*BridgeStore\) ListBridges
+
+	func (bs *BridgeStore) ListBridges(ctx context.Context) ([]BridgeRecord, error)
+
+ListBridges returns every persisted bridge record \(side\-table scan\) with content \+ typed metadata filled in. This is the visibility surface \(branch 09 B06\): the CLI/TUI memory listing uses it to show bridge rows with their verified flag and evidence count. Unlike the recall path, the listing must see unverified bridges too — visibility is not a quality gate.
+
 <a name="BridgeStore.ListBridgesByEvidence"></a>
 ### func \(\*BridgeStore\) ListBridgesByEvidence
 
@@ -1280,6 +1294,25 @@ Config returns a copy of the compactor's configuration.
 
 GenerateSummary returns a human\-readable summary of the given turns. When the compactor's LLM config is set it is used; otherwise a heuristic summary is produced.
 
+<a name="ConflictWiring"></a>
+## type ConflictWiring
+
+ConflictWiring is the optional conflict\-detection configuration handed to the DistillWorker. Nil \(or Enabled=false\) bypasses detection entirely: no recall, no LLM call \(SHARED\-CONVENTIONS §2.3\).
+
+	type ConflictWiring struct {
+	    // Enabled turns conflict detection on for L1 extraction batches.
+	    Enabled bool
+	    // TopK caps recalled existing claims per candidate (default 5).
+	    TopK int
+	    // MaxBatch caps candidates per conflict LLM call (default 20).
+	    MaxBatch int
+	    // LLM performs the conflict-detection completion (the memory_model slot
+	    // chatter, adapted to conflict.LLM by the daemon wiring).
+	    LLM conflict.LLM
+	    // Logger receives per-decision and fail-open lines. May be nil.
+	    Logger *slog.Logger
+	}
+
 <a name="ConsolidationBackend"></a>
 ## type ConsolidationBackend
 
@@ -1405,6 +1438,13 @@ SetBridgeVerifier wires the entailment verifier \(branch 09 B03\) into the bridg
 	func (c *Consolidator) SetKnowledgeDirIngest(fn func(ctx context.Context))
 
 SetKnowledgeDirIngest wires the knowledge watched\-dir ingest pass \(tree 04 L2\) into the periodic consolidation pass. The caller supplies a closure over the knowledge store and the configured ingest dir \(typically a call to knowledge.SyncDir\); nil disables the pass \(the default\). The pass also no\-ops when memory.knowledge.enabled or ingest\_dir is unset — the closure is only wired under those conditions by the daemon.
+
+<a name="Consolidator.SetL0Prune"></a>
+### func \(\*Consolidator\) SetL0Prune
+
+	func (c *Consolidator) SetL0Prune(fn func(ctx context.Context))
+
+SetL0Prune wires the L0 retention pass \(tree 01 L3\) into the periodic consolidation run. The closure encapsulates l0.Prune with the configured L0 dir and retention window; nil disables the pass \(the default\). The daemon wires it only under memory.l0\_enabled with a positive l0\_retention\_days.
 
 <a name="Consolidator.StartPeriodicConsolidation"></a>
 ### func \(\*Consolidator\) StartPeriodicConsolidation
@@ -1540,6 +1580,10 @@ DistillWorkerConfig holds construction parameters for DistillWorker.
 	    // Enqueuer, when non-nil, is used to chain one L2 job after each L1
 	    // success. Nil = chaining disabled (L3 wiring decides).
 	    Enqueuer JobEnqueuer
+	    // Conflict, when non-nil with Enabled=true, runs LLM conflict detection
+	    // over each L1 extraction batch before storing (tree 02 leaf L2). Nil or
+	    // disabled: candidates are stored directly — no recall, no LLM call.
+	    Conflict *ConflictWiring
 	    Logger   *slog.Logger
 	}
 
@@ -2454,6 +2498,13 @@ Config returns the memory configuration.
 
 Consolidate runs memory consolidation \(SQLite backend only\).
 
+<a name="Manager.Consolidator"></a>
+### func \(\*Manager\) Consolidator
+
+	func (m *Manager) Consolidator() *Consolidator
+
+Consolidator returns the manager's consolidator \(nil before Initialize\). Exposed for daemon boot wiring \(branch 09 B06\): the bridge generation and verification components attach to the consolidator, not the manager.
+
 <a name="Manager.DataDir"></a>
 ### func \(\*Manager\) DataDir
 
@@ -2673,6 +2724,13 @@ MinConfidence/MaxConfidence are inclusive bounds over the claim's extraction\-ti
 
 ListExpiredClaims returns non\-rejected claims whose valid\_to is in the past at call time, newest first, up to limit \(default 20\). Claims with no valid\_to \(unbounded\) are never returned. Surfaced by the memory tool / CLI so users can see what has silently aged out of trust\-weighted results.
 
+<a name="Manager.ListMergeClaims"></a>
+### func \(\*Manager\) ListMergeClaims
+
+	func (m *Manager) ListMergeClaims(ctx context.Context, createdAfter time.Time, limit int) ([]MemoryResult, error)
+
+ListMergeClaims returns claims stamped conflict\_action=merge \(created by a conflict merge decision\), newest first, optionally filtered by createdAfter. Backs the memory.listConflicts RPC / \`meept memory conflicts\` CLI. Follows the ListAutoClaims pattern: broad claim search, metadata filtered post\-query.
+
 <a name="Manager.ListPendingReviews"></a>
 ### func \(\*Manager\) ListPendingReviews
 
@@ -2709,6 +2767,13 @@ MemvidClient returns the memvid client if active.
 	func (m *Manager) NetVotes(ctx context.Context, ids []string) (map[string]int, error)
 
 NetVotes returns the summed vote delta for each given memory ID using one batched query. Missing entries have no votes \(net 0\).
+
+<a name="Manager.NewRecallStore"></a>
+### func \(\*Manager\) NewRecallStore
+
+	func (m *Manager) NewRecallStore() conflict.RecallStore
+
+NewRecallStore returns the Manager adapted to the conflict package's RecallStore seam \(exported for the daemon wiring and tests\).
 
 <a name="Manager.OpenFactStore"></a>
 ### func \(\*Manager\) OpenFactStore
@@ -2870,6 +2935,13 @@ SetDualStore wires the cluster\-aware DualStore so that memory writes can be mir
 	func (m *Manager) SetEpistemicDetector(d *EpistemicDetector)
 
 SetEpistemicDetector configures the detector used by the post\-Store hook to run LLM\-driven relationship detection for epistemic memories. Pass nil to disable the hook \(defence\-in\-depth: a nil detector is a no\-op\).
+
+<a name="Manager.SetL0Prune"></a>
+### func \(\*Manager\) SetL0Prune
+
+	func (m *Manager) SetL0Prune(fn func(ctx context.Context))
+
+SetL0Prune forwards the L0 retention closure \(tree 01 L3\) onto the consolidator so the daemon wires L0 retention without reaching into manager internals. Nil\-safe: a nil closure leaves the consolidator's default \(pass disabled\). Requires Initialize to have run \(the consolidator is constructed there\); before that the call is a no\-op.
 
 <a name="Manager.SetVerdictAuditor"></a>
 ### func \(\*Manager\) SetVerdictAuditor

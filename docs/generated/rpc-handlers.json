@@ -372,6 +372,12 @@
     "line": 57
   },
   {
+    "topic": "memory.bridges",
+    "handler": "func(ctx context.Context, _ json.RawMessage",
+    "file": "internal/daemon/memory_rpc.go",
+    "line": 92
+  },
+  {
     "topic": "memory.export",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/daemon/memory_rpc.go",
@@ -388,6 +394,12 @@
     "handler": "h.handleListAutoClaims",
     "file": "internal/rpc/epistemic.go",
     "line": 43
+  },
+  {
+    "topic": "memory.listConflicts",
+    "handler": "h.handleListConflicts",
+    "file": "internal/rpc/epistemic.go",
+    "line": 49
   },
   {
     "topic": "memory.listExpired",
