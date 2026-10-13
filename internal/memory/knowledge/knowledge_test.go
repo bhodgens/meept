@@ -218,7 +218,7 @@ func TestEviction(t *testing.T) {
 	ctx := context.Background()
 
 	base := time.Now().UTC().Add(-10 * time.Hour)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, err := s.Ingest(ctx, Page{
 			Title:      fmt.Sprintf("Page %d", i),
 			Body:       fmt.Sprintf("body %d", i),
@@ -298,7 +298,7 @@ func TestSearchRanking(t *testing.T) {
 func TestSearchLimit(t *testing.T) {
 	s := newTestStore(t, 0)
 	ctx := context.Background()
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		if _, err := s.Ingest(ctx, Page{Title: fmt.Sprintf("Widget %d", i), Body: "widget widget widget"}); err != nil {
 			t.Fatalf("Ingest %d: %v", i, err)
 		}
