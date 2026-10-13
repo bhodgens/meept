@@ -247,9 +247,78 @@ func (t *KnowledgeIngestTool) Execute(ctx context.Context, args map[string]any) 
 	}, nil
 }
 
+// KnowledgeImpactTool answers "what breaks if I change this symbol": the
+// one-hop callers of a Go symbol from the code index's call-edge table
+// ([memory.knowledge] code_dirs indexing, tree 04 leaf L3). Wraps the
+// codeindex impact surface via a narrow function seam — same style as the
+// KnowledgeStore interface above, but impact is one query, so the seam is
+// a func rather than an interface.
+type KnowledgeImpactTool struct {
+	tools.ToolDefaults
+	// impactedBy returns the one-hop callers of symbol. Supplied by the
+	// daemon wiring as a closure over the concrete knowledge store.
+	impactedBy func(ctx context.Context, symbol string) ([]string, error)
+}
+
+// NewKnowledgeImpactTool constructs the tool bound to the given impact
+// closure (a wiring-time wrapper over codeindex.ImpactedBy).
+func NewKnowledgeImpactTool(impactedBy func(ctx context.Context, symbol string) ([]string, error)) *KnowledgeImpactTool {
+	return &KnowledgeImpactTool{impactedBy: impactedBy}
+}
+
+func (t *KnowledgeImpactTool) Name() string     { return "knowledge_impact" }
+func (t *KnowledgeImpactTool) Category() string { return "memory" }
+
+func (t *KnowledgeImpactTool) Description() string {
+	return "Impact analysis over the indexed Go code: given a symbol name " +
+		"(bare like \"Alpha\" or package-qualified like \"pkg.Alpha\"), return " +
+		"the one-hop callers from the indexed call graph. Answer \"what breaks " +
+		"if I change this symbol\" before editing. Requires memory.knowledge " +
+		"code_dirs indexing to have run."
+}
+
+func (t *KnowledgeImpactTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: schemaTypeObject,
+		Properties: map[string]llm.ParameterProperty{
+			"symbol": {
+				Type:        schemaTypeString,
+				Description: "The Go symbol to query (bare or package-qualified).",
+			},
+		},
+		Required: []string{"symbol"},
+	}
+}
+
+func (t *KnowledgeImpactTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.impactedBy == nil {
+		return nil, fmt.Errorf("knowledge impact not configured")
+	}
+	symbol := asStringArg(args["symbol"])
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol is required")
+	}
+	callers, err := t.impactedBy(ctx, symbol)
+	if err != nil {
+		return nil, fmt.Errorf("knowledge impact: %w", err)
+	}
+	if callers == nil {
+		callers = []string{}
+	}
+	return map[string]any{
+		"success": true,
+		"symbol":  symbol,
+		"callers": callers,
+	}, nil
+}
+
+func (t *KnowledgeImpactTool) IsReadOnly(map[string]any) bool        { return true }
+func (t *KnowledgeImpactTool) IsConcurrencySafe(map[string]any) bool { return true }
+
 // Ensure the knowledge tools satisfy the Tool interface.
 var (
 	_ tools.Tool = (*KnowledgeSearchTool)(nil)
 	_ tools.Tool = (*KnowledgeReadTool)(nil)
 	_ tools.Tool = (*KnowledgeIngestTool)(nil)
+	_ tools.Tool = (*KnowledgeImpactTool)(nil)
 )

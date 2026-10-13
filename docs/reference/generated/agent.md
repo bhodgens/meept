@@ -2330,6 +2330,7 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "knowledge_search": "memory_read",
 	    "knowledge_read":   "memory_read",
 	    "knowledge_ingest": "memory_write",
+	    "knowledge_impact": "memory_read",
 	
 	    "retain":            "memory_write",
 	    "recall":            "memory_read",

@@ -226,6 +226,15 @@ type Components struct {
 	// processor via distillRouter (see l0_wiring.go).
 	DistillWorker *memory.DistillWorker
 
+	// KnowledgeStore is the consolidation-side knowledge-asset store
+	// (tree 04): opened by wireKnowledgeAssets when memory.knowledge is
+	// enabled with ingest_dir or code_dirs configured, holding the
+	// watched-dir sync + code-index passes onto the consolidation tick.
+	// Distinct from the lazy handle registerBuiltinTools opens for the
+	// knowledge_* tools (WAL + busy_timeout makes the two-handle layout
+	// safe); closed in stopComponents. Nil when disabled or failed open.
+	KnowledgeStore *knowledge.Store
+
 	// Memvid and multi-agent
 	MemvidClient  *memvid.Client
 	AgentRegistry *agent.AgentRegistry
@@ -2023,6 +2032,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	c.DistillWorker = wireL0Distill(c.AgentLoop, c.MemoryManager, l0Enqueuer, distillChatter, cfg.Memory, logger)
 
+	// Knowledge-asset consolidation passes (tree 04 L4): watched-dir sync
+	// + code index on the consolidation tick. Best-effort; nil when
+	// disabled. The store handle is closed in stopComponents.
+	c.KnowledgeStore = wireKnowledgeAssets(c, cfg, logger)
+
 	wireFileWatcherHook(c.AgentLoop, *cfg, msgBus, logger)
 	// Wire HTTP hooks from config (each entry becomes a session lifecycle hook)
 	wireHTTPHooks(c.AgentLoop, *cfg, msgBus, logger)
@@ -2583,7 +2597,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// dedicated directory under the daemon data dir, opened lazily inside
 	// registerBuiltinTools only when enabled.
 	knowledgeDataDir := filepath.Join(cfg.Daemon.DataDir, "knowledge")
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore)
 
 	// json_extract (dedicated extraction model from the extract_model
 	// slot). Registered even when ExtractClient is nil: the tool's
@@ -5458,6 +5472,18 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		}
 	}
 
+	// Close the knowledge-asset consolidation store AFTER the memory
+	// manager (the consolidator's tick passes write through this handle;
+	// manager teardown stops the consolidator). The tools' own lazy
+	// handle is separate and closed by its owner (registerBuiltinTools
+	// keeps it function-local — the process exit reclaims the WAL).
+	if c.KnowledgeStore != nil {
+		if err := c.KnowledgeStore.Close(); err != nil {
+			c.Logger.Warn("Failed to close knowledge store", "error", err)
+		}
+		c.KnowledgeStore = nil
+	}
+
 	// Stop managed per-session AgentLoops and the agent worker pool before
 	// stopping the singleton loop. Managed loops are created on demand by
 	// AgentLoopManager.GetOrCreate; drain them so in-flight work completes.
@@ -6077,6 +6103,8 @@ func registerBuiltinTools(
 	mcpManager *mcp.Manager,
 	knowledgeCfg config.KnowledgeConfig,
 	knowledgeDataDir string,
+	knowledgeConsolidationStore *knowledge.Store,
+	knowledgeStoreOut **knowledge.Store,
 ) {
 	readCache := builtin.NewReadCache(30)
 
@@ -6325,19 +6353,35 @@ func registerBuiltinTools(
 	// Knowledge-asset tools ([memory.knowledge], tree 04, disabled by
 	// default). Disabled => the tools are absent from the registry
 	// entirely (SHARED-CONVENTIONS §2.5: nothing enters prompts). The
-	// store opens lazily here — a failed open is non-fatal (tools stay
-	// unregistered, an honest Warn is logged).
+	// consolidation-side store (knowledgeStore, opened by
+	// wireKnowledgeAssets earlier in NewComponents) is shared when
+	// available; otherwise (consolidation passes skipped — no
+	// ingest_dir/code_dirs — or failed open) a fallback handle is opened
+	// HERE and parked on knowledgeStoreOut so stopComponents closes it at
+	// daemon shutdown (a function-local defer would close it as soon as
+	// this function returns). A failed open is non-fatal: the tools stay
+	// unregistered, an honest Error is logged.
 	if knowledgeCfg.Enabled {
-		knowledgeStore, kErr := knowledge.New(knowledgeDataDir, knowledgeCfg.MaxPages, logger.With("component", "knowledge-store"))
-		if kErr != nil {
-			logger.Error("knowledge tools disabled: store open failed", "error", kErr, "data_dir", knowledgeDataDir)
-		} else {
-			toolStore := knowledge.NewToolStore(knowledgeStore)
-			registry.Register(builtin.NewKnowledgeSearchTool(toolStore))
-			registry.Register(builtin.NewKnowledgeReadTool(toolStore))
-			registry.Register(builtin.NewKnowledgeIngestTool(toolStore))
-			logger.Info("knowledge tools registered", "data_dir", knowledgeDataDir, "max_pages", knowledgeCfg.MaxPages)
+		knowledgeStore := knowledgeConsolidationStore
+		if knowledgeStore == nil {
+			ks, kErr := knowledge.New(knowledgeDataDir, knowledgeCfg.MaxPages, logger.With("component", "knowledge-store"))
+			if kErr != nil {
+				logger.Error("knowledge tools disabled: store open failed", "error", kErr, "data_dir", knowledgeDataDir)
+				return
+			}
+			knowledgeStore = ks
+			if knowledgeStoreOut != nil {
+				*knowledgeStoreOut = ks
+			}
 		}
+		toolStore := knowledge.NewToolStore(knowledgeStore)
+		registry.Register(builtin.NewKnowledgeSearchTool(toolStore))
+		registry.Register(builtin.NewKnowledgeReadTool(toolStore))
+		registry.Register(builtin.NewKnowledgeIngestTool(toolStore))
+		// knowledge_impact completes the family (tree 04 L4): the
+		// code-index impact surface, bound to the same store.
+		registerKnowledgeImpactTool(registry, knowledgeStore)
+		logger.Info("knowledge tools registered", "data_dir", knowledgeDataDir, "max_pages", knowledgeCfg.MaxPages)
 	}
 
 	// skills_create / skills_patch (skill authoring). Unconditionally

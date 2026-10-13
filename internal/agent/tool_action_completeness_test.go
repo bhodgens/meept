@@ -119,6 +119,7 @@ func TestEveryRegisteredToolResolves(t *testing.T) {
 	check("knowledge_search")
 	check("knowledge_read")
 	check("knowledge_ingest")
+	check("knowledge_impact")
 	check("mcp_servers")
 	check("resolve")
 }

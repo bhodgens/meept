@@ -196,6 +196,7 @@ Analytics:
 	rootCmd.AddCommand(newKeysCmd())
 	rootCmd.AddCommand(newEvalCmd())
 	rootCmd.AddCommand(newSoulCmd())
+	rootCmd.AddCommand(newKnowledgeCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "\nError: %v\n\n", err)

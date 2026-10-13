@@ -297,6 +297,7 @@ var ToolActionMap = map[string]string{
 	"knowledge_search": "memory_read",
 	"knowledge_read":   "memory_read",
 	"knowledge_ingest": "memory_write",
+	"knowledge_impact": "memory_read",
 	// Memory claim-curation family (granted to librarian/verifier-style
 	// agents): writes mutate claim state, reads only query it. Same
 	// read/write split as the core memory tools above (bughunt H7 class:
