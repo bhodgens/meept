@@ -81,15 +81,15 @@ drift.
 |------|--------|-------|
 | T01-L1 l0-recorder | COMPLETE 2026-10-13 | commit 13c14b56; -race clean; ReadSession takes l0 dir |
 | T01-L2 async-worker | COMPLETE 2026-10-13 | commit 3d902682; worker.Process matches worker.JobProcessor shape; L2 summary derived (no 2nd LLM call) |
-| T01-L3 wiring+e2e | PENDING | |
+| T01-L3 wiring+e2e | COMPLETE 2026-10-13 | commit eb997b5c; session-end hook seam; day-boundary marker fix; e2e suite green; shared-file hunks pre-swept by 370a1057 (verified in-commit) |
 | T02-L1 conflict-detector | COMPLETE 2026-10-13 | commit 9b87968c; 13/13 tests, -race clean; additive RecallStore.EmbeddingsAccepted |
-| T02-L2 merge wiring | PENDING | |
+| T02-L2 merge wiring | COMPLETE 2026-10-13 | commit 4cd352fb; recall adapter uses MatchAny FTS (SearchSemantic AND-binds, structurally blind to near-conflicts); e2e scenarios in memory-persistence |
 | T03-L1 review-cli-rpc | COMPLETE 2026-10-13 | re-scoped → review-filters-audit; commit c83f97c5; daemon wiring rode into sibling commit bcf1e87c (intact at daemon.go:1181) |
 | T03-L2 audit+daemon-only wiring | SUPERSEDED | folded into re-scoped L1 (audit done there); daemon-only was already true |
 | T03-L3 tui-review-view | PENDING | Q6b; now leaf L2 of tree 03 |
 | T04-L1 knowledge-store | COMPLETE 2026-10-13 | commit 47d99578; additive Page.UnresolvedLinks accepted; -race clean |
 | T04-L2 knowledge-tools | COMPLETE 2026-10-13 | commit e3f82864; consolidation hook absorbed into sibling 03dfcf3a (intact); ToolActionMap entries + config default false |
-| T04-L3 code-index | PENDING | Q7b; wave 2 parallel with T04-L2 |
+| T04-L3 code-index | COMPLETE 2026-10-13 | commit 8cd51ede; additive code_edges schema; suffix-based bare-symbol matching documented as v1 heuristic |
 | T04-L4 knowledge-e2e | PENDING | |
 | Root integration review | PENDING | full `make test` + `make e2e-fast` + `make graphs-check` (graphs need regen — reviewQueue params changed) |
 
