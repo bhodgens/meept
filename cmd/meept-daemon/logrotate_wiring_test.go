@@ -21,9 +21,9 @@ func TestNewRotatingLogWriterCapsTheFile(t *testing.T) {
 
 	chunk := bytes.Repeat([]byte("l"), 255)
 	chunk = append(chunk, '\n')
-	for i := 0; i < 256; i++ {
+	for range 256 {
 		if _, err := w.Write(chunk); err != nil {
-			t.Fatalf("write %d: %v", i, err)
+			t.Fatalf("write: %v", err)
 		}
 	}
 	if err := closeLog(); err != nil {
