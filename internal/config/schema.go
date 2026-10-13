@@ -88,6 +88,7 @@ type Config struct {
 	Calendar            CalendarConfig            `json:"calendar"           toml:"calendar"`
 	Tooling             ToolingConfig             `json:"tooling"            toml:"tooling"`
 	Compaction          CompactionConfig          `json:"compaction"         toml:"compaction"`
+	Spill               SpillConfig               `json:"spill"              toml:"spill"`
 	Session             SessionConfig             `json:"session"            toml:"session"`
 	Cluster             ClusterConfig             `json:"cluster"             toml:"cluster"`
 	Bots                BotsConfig                `json:"bots"                toml:"bots"`
@@ -572,6 +573,21 @@ type CompactionConfig struct {
 	IterativeUpdates  bool    `json:"iterative_updates"  toml:"iterative_updates"`
 	TrackFileOps      bool    `json:"track_file_ops"     toml:"track_file_ops"`
 	TimeoutSeconds    int     `json:"timeout_seconds"    toml:"timeout_seconds"`
+	// SpillEnabled turns on tool-output spilling in pruneToolOutputs: pruned
+	// tool outputs are written to $MEEPT_HOME/spill/<session_id>/ and replaced
+	// with a re-read pointer line instead of the irreversible truncation text.
+	// Opt-in, default false (spilling is disabled unless explicitly enabled).
+	SpillEnabled bool `json:"spill_enabled" toml:"spill_enabled"`
+}
+
+// SpillConfig configures the tool-output spill store under
+// $MEEPT_HOME/spill/ (written by the compactor when compaction.spill_enabled
+// is true; swept by the spill retention sweep).
+type SpillConfig struct {
+	// RetentionDays is how long spilled tool outputs are kept before the
+	// retention sweep deletes them. Default 30. Consumed by the spill
+	// retention sweep (plans/context-reduction/08-spill-retention.md).
+	RetentionDays int `json:"retention_days" toml:"retention_days"`
 }
 
 // SessionConfig holds session persistence and branching settings.
@@ -3663,6 +3679,10 @@ func DefaultConfig() *Config {
 			IterativeUpdates:  true,
 			TrackFileOps:      true,
 			TimeoutSeconds:    30,
+			SpillEnabled:      false,
+		},
+		Spill: SpillConfig{
+			RetentionDays: 30,
 		},
 		Session: SessionConfig{
 			Persistence:                  false,

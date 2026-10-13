@@ -20,6 +20,14 @@ type CompactorConfig struct {
 	Strategy          string // "structured" | "handoff" | "off"
 	TrackFileOps      bool
 	TimeoutSeconds    int
+	// SpillEnabled turns on tool-output spilling in pruneToolOutputs: pruned
+	// tool outputs are written to $MEEPT_HOME/spill/<session_id>/ and replaced
+	// with a re-read pointer instead of the irreversible truncation text.
+	// Opt-in, default false (byte-identical legacy behavior when off).
+	SpillEnabled bool
+
+	// spill is the lazily-built spill service (spill enabled only).
+	spill *SpillService
 }
 
 func DefaultCompactorConfig() CompactorConfig {
@@ -128,6 +136,9 @@ type ContextCompactor struct {
 	mu          sync.RWMutex
 	fileOps     *FileOperationSet
 	lastSummary string
+	// spillSessionID is the session id used for spill directory naming. Set
+	// via SetSpillSessionID; empty falls back to "default".
+	spillSessionID string
 }
 
 func NewContextCompactor(cfg CompactorConfig, summarizer Chatter, tokenizer Tokenizer, logger *slog.Logger) *ContextCompactor {
@@ -138,6 +149,31 @@ func NewContextCompactor(cfg CompactorConfig, summarizer Chatter, tokenizer Toke
 		tokenizer = &HeuristicTokenizer{}
 	}
 	return &ContextCompactor{config: cfg, summarizer: summarizer, tokenizer: tokenizer, logger: logger, fileOps: NewFileOperationSet()}
+}
+
+// spillService returns the compactor's SpillService, building it lazily on
+// first use when spill is enabled. Nil-receiver safe.
+func (c *ContextCompactor) spillService() *SpillService {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.config.spill == nil {
+		c.config.spill = NewSpillService("")
+	}
+	return c.config.spill
+}
+
+// SetSpillSessionID sets the session id used for spill directory naming.
+// Nil-receiver safe; mirrors the Set* nil-guard convention.
+func (c *ContextCompactor) SetSpillSessionID(sessionID string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.spillSessionID = sessionID
 }
 
 func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) CompactResult {
@@ -842,10 +878,23 @@ func (c *ContextCompactor) pruneToolOutputs(messages []ChatMessage) []ChatMessag
 
 	for _, cand := range candidates {
 		orig := result[cand.index]
-		truncationNotice := fmt.Sprintf("[Output truncated — %d tokens saved]", cand.tokens)
+		content := fmt.Sprintf("[Output truncated — %d tokens saved]", cand.tokens)
+
+		// Spill: when enabled, write the raw output to disk and point at it
+		// instead of irreversibly truncating. Write failure falls back to the
+		// truncation text — spilling never fails the turn.
+		if c.config.SpillEnabled {
+			svc := c.spillService()
+			if pointer, err := svc.Spill(context.Background(), c.spillSessionID, orig.Content); err != nil {
+				c.logger.Debug("spill write failed; falling back to truncation", "error", err)
+			} else {
+				content = pointer
+			}
+		}
+
 		result[cand.index] = ChatMessage{
 			Role:       orig.Role,
-			Content:    truncationNotice,
+			Content:    content,
 			Name:       orig.Name,
 			ToolCalls:  orig.ToolCalls,
 			ToolCallID: orig.ToolCallID,
