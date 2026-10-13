@@ -2108,6 +2108,21 @@ func (m *Manager) LLM() llm.Chatter {
 	return m.llm
 }
 
+// SetL0Prune forwards the L0 retention closure (tree 01 L3) onto the
+// consolidator so the daemon wires L0 retention without reaching into
+// manager internals. Nil-safe: a nil closure leaves the consolidator's
+// default (pass disabled). Requires Initialize to have run (the
+// consolidator is constructed there); before that the call is a no-op.
+func (m *Manager) SetL0Prune(fn func(ctx context.Context)) {
+	m.mu.RLock()
+	c := m.consolidator
+	m.mu.RUnlock()
+	if c == nil {
+		return
+	}
+	c.SetL0Prune(fn)
+}
+
 // SetEpistemicDetector configures the detector used by the post-Store hook
 // to run LLM-driven relationship detection for epistemic memories.
 // Pass nil to disable the hook (defence-in-depth: a nil detector is a no-op).
@@ -2143,6 +2158,15 @@ func (m *Manager) BridgeStore() *BridgeStore {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.bridgeStore
+}
+
+// Consolidator returns the manager's consolidator (nil before Initialize).
+// Exposed for daemon boot wiring (branch 09 B06): the bridge generation and
+// verification components attach to the consolidator, not the manager.
+func (m *Manager) Consolidator() *Consolidator {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.consolidator
 }
 
 // invalidateBridgesForMemoryLogged is the mutation-seam wrapper around

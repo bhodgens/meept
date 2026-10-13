@@ -1343,13 +1343,53 @@ type MemoryConfig struct {
 	// Default OFF: when disabled the knowledge_* tools are not registered
 	// and nothing reaches prompts. See KnowledgeConfig.
 	Knowledge KnowledgeConfig `json:"knowledge" toml:"knowledge"`
+	// Conflict holds LLM conflict detection for distilled claim extraction
+	// (tree 02). Default OFF: when disabled the L1 extract handler stores
+	// candidates directly — no recall, no conflict LLM call. See
+	// ConflictConfig.
+	Conflict ConflictConfig `json:"conflict" toml:"conflict"`
+	// L0Enabled turns on the raw-conversation L0 tier (tree 01 layered
+	// async distillation): conversation turns are appended to
+	// <memory.data_dir>/l0/YYYY-MM-DD.jsonl and distilled asynchronously
+	// into L1 claims + L2 session scenes via the persistent queue.
+	// Default false (opt-in-defaults rule; nothing records and no
+	// memory.l1_extract / memory.l2_scene job is enqueued until set).
+	//
+	//gendoc:desc L0 raw-conversation tier: append-only daily JSONL of conversation turns distilled asynchronously into L1 claims (memory.l1_extract) and L2 session-scene files (memory.l2_scene) on the persistent queue; retention prunes whole daily files on the consolidation tick.
+	//gendoc:example [memory] l0_enabled = true, l0_retention_days = 30
+	L0Enabled bool `json:"l0_enabled" toml:"l0_enabled"`
+	// L0RetentionDays is the retention window for daily L0 files: whole
+	// files older than this many days are pruned during the consolidation
+	// pass (no new ticker). Default 30; <= 0 disables pruning.
+	L0RetentionDays int `json:"l0_retention_days" toml:"l0_retention_days"`
+}
+
+// ConflictConfig gates LLM conflict detection on the L1 claim-extraction
+// path (tree 02, SHARED-CONVENTIONS §2.3). When enabled, each extraction
+// batch is recalled against existing claims and one memory-model call
+// decides per candidate: store / merge / supersede / skip. Any detector
+// failure fails open to store-all — extraction availability never depends
+// on the conflict LLM.
+//
+//gendoc:desc LLM conflict detection over distilled claims (batch store/merge/supersede/skip decisions on the L1 extraction path, fail-open to store-all on any detector error).
+//gendoc:example [memory.conflict] enabled = true
+type ConflictConfig struct {
+	// Enabled turns on conflict detection in the L1 extract handler.
+	// Default false (opt-in-defaults rule: an extra LLM call per extraction
+	// batch is a product decision per SHARED-CONVENTIONS §2.3).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// TopK is the maximum number of similar existing claims recalled per
+	// candidate for the conflict prompt. Default 5.
+	TopK int `json:"top_k" toml:"top_k"`
+	// MaxBatch caps candidates per conflict LLM call. Default 20.
+	MaxBatch int `json:"max_batch" toml:"max_batch"`
 }
 
 // KnowledgeConfig gates the knowledge-asset store (SQLite pages + FTS5
 // full-text index + link graph; tree 04). Entirely opt-in: the wiki
 // (internal/selfimprove) is a separate store with a separate code path.
 //
-//gendoc:desc Knowledge-asset store (knowledge_search/read/ingest tools, FTS5 full-text over ingested markdown pages) with optional watched-dir ingestion on the consolidation tick.
+//gendoc:desc Knowledge-asset store (knowledge_search/read/ingest tools, FTS5 full-text over ingested markdown pages) with optional watched-dir markdown ingestion and go/ast code indexing (CODE pages + call-edge impact analysis) on the consolidation tick.
 //gendoc:example [memory.knowledge] enabled = true
 type KnowledgeConfig struct {
 	// Enabled turns on the knowledge store and registers the
@@ -1365,6 +1405,12 @@ type KnowledgeConfig struct {
 	// MaxPages bounds the stored page count (oldest-ingested evicted at
 	// ingest time; <= 0 means unbounded). Default 0 (unbounded).
 	MaxPages int `json:"max_pages" toml:"max_pages"`
+	// CodeDirs lists Go repository roots indexed on the consolidation
+	// tick by the go/ast code indexer (one CODE page per *.go file plus
+	// an intra-repo call-edge table powering knowledge.ImpactedBy).
+	// vendor/, testdata/, hidden dirs, and *_test.go files are always
+	// skipped. Default empty = code indexing disabled.
+	CodeDirs []string `json:"code_dirs" toml:"code_dirs"`
 }
 
 // MemoryBridgesConfig gates offline bridging-fact generation in the
@@ -3118,7 +3164,21 @@ func DefaultConfig() *Config {
 				Enabled:   false,
 				IngestDir: "",
 				MaxPages:  0,
+				CodeDirs:  nil,
 			},
+			// Conflict detection: opt-in, disabled by default
+			// (SHARED-CONVENTIONS §2.3 — when off the L1 handler stores
+			// candidates directly with no recall and no extra LLM call).
+			Conflict: ConflictConfig{
+				Enabled:  false,
+				TopK:     5,
+				MaxBatch: 20,
+			},
+			// L0 raw-conversation tier: opt-in, disabled by default
+			// (opt-in-defaults rule — nothing records until
+			// memory.l0_enabled; retention default 30 days).
+			L0Enabled:       false,
+			L0RetentionDays: 30,
 			Task: TaskMemoryConfig{
 				Enabled: true,
 				Domains: []string{"general", "code", "commands"},

@@ -221,7 +221,32 @@
       "ingest_dir": "",
       // Page cap at ingest time (<= 0 = unbounded).
       "max_pages": 0,
+      // Go repo roots for the go/ast code indexer (one CODE page per
+      // *.go file + intra-repo call-edge table; vendor/, testdata/,
+      // hidden dirs, and *_test.go skipped). Empty = code indexing
+      // disabled.
+      "code_dirs": [],
     },
+    // Conflict detection: before distilled claims are stored, similar
+    // existing claims are recalled and one memory-model call decides per
+    // candidate: store / merge / supersede / skip. Any detector failure
+    // fails open (all candidates stored plainly). Opt-in (default false):
+    // disabled means zero extra LLM calls on the extraction path.
+    "conflict": {
+      "enabled": false,
+      // Existing claims recalled per candidate for the conflict prompt.
+      "top_k": 5,
+      // Candidates per conflict LLM call.
+      "max_batch": 20,
+    },
+    // L0 raw-conversation tier (layered async distillation): every turn is
+    // appended to <data_dir>/l0/YYYY-MM-DD.jsonl and distilled off the turn
+    // path into L1 claims (memory.l1_extract) and L2 session scenes
+    // (memory.l2_scene) on the persistent queue. Opt-in (default false).
+    "l0_enabled": false,
+    // Whole daily L0 files older than this many days are pruned on the
+    // consolidation tick. <= 0 disables pruning. Default 30.
+    "l0_retention_days": 30,
   },
 
   // Memvid service connection

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/memory/conflict"
 	"github.com/caimlas/meept/internal/queue"
 )
 
@@ -45,8 +46,8 @@ const markerScanLimit = 200
 
 // L1ExtractPayload is the memory.l1_extract payload (SHARED-CONVENTIONS §2.2).
 type L1ExtractPayload struct {
-	SessionID string `json:"session_id"`
-	L0Path    string `json:"l0_path"`
+	SessionID  string `json:"session_id"`
+	L0Path     string `json:"l0_path"`
 	SinceMsgID string `json:"since_msg_id,omitempty"`
 }
 
@@ -88,6 +89,10 @@ type DistillWorkerConfig struct {
 	// Enqueuer, when non-nil, is used to chain one L2 job after each L1
 	// success. Nil = chaining disabled (L3 wiring decides).
 	Enqueuer JobEnqueuer
+	// Conflict, when non-nil with Enabled=true, runs LLM conflict detection
+	// over each L1 extraction batch before storing (tree 02 leaf L2). Nil or
+	// disabled: candidates are stored directly — no recall, no LLM call.
+	Conflict *ConflictWiring
 	Logger   *slog.Logger
 }
 
@@ -97,6 +102,7 @@ type DistillWorker struct {
 	llm      DistillLLM
 	dataDir  string
 	enqueuer JobEnqueuer
+	conflict *ConflictWiring
 	logger   *slog.Logger
 }
 
@@ -107,6 +113,7 @@ func NewDistillWorker(cfg DistillWorkerConfig) *DistillWorker {
 		llm:      cfg.LLM,
 		dataDir:  cfg.DataDir,
 		enqueuer: cfg.Enqueuer,
+		conflict: cfg.Conflict,
 		logger:   cfg.Logger,
 	}
 	if w.logger == nil {
@@ -192,7 +199,7 @@ func (w *DistillWorker) handleL1Extract(ctx context.Context, payload []byte) (an
 	if err != nil {
 		return nil, err
 	}
-	if marker != "" && marker == p.SinceMsgID {
+	if marker != "" && (marker == p.SinceMsgID || markerPosCoversFileEnd(p.L0Path, p.SessionID, marker)) {
 		// Duplicate enqueue: this window is already fully distilled.
 		w.chainL2(ctx, p.SessionID)
 		return map[string]any{"status": "suppressed", "session_id": p.SessionID}, nil
@@ -205,6 +212,7 @@ func (w *DistillWorker) handleL1Extract(ctx context.Context, payload []byte) (an
 
 	lastID := p.SinceMsgID
 	stored := 0
+	merged := 0
 	if len(recs) > 0 {
 		prompt := fmt.Sprintf(ambientExtractionPromptTemplate, strings.Join(formatL0Conversation(recs), "\n"))
 		raw, err := w.llm.DistillComplete(ctx, prompt)
@@ -215,17 +223,9 @@ func (w *DistillWorker) handleL1Extract(ctx context.Context, payload []byte) (an
 		if err != nil {
 			return nil, fmt.Errorf("distill l1: parse candidates: %w", err)
 		}
-		for _, c := range candidates {
-			if _, err := w.manager.StoreClaim(ctx, Claim{
-				Text:       c.Text,
-				Premises:   c.Premises,
-				Source:     c.Source,
-				Confidence: c.Confidence,
-				Status:     ClaimStatusAuto,
-			}); err != nil {
-				return nil, fmt.Errorf("distill l1: store claim: %w", err)
-			}
-			stored++
+		stored, merged, err = w.storeCandidates(ctx, candidates)
+		if err != nil {
+			return nil, err
 		}
 		lastID = recs[len(recs)-1].ID
 	}
@@ -235,11 +235,83 @@ func (w *DistillWorker) handleL1Extract(ctx context.Context, payload []byte) (an
 	}
 	w.chainL2(ctx, p.SessionID)
 	return map[string]any{
-		"status":        "ok",
-		"session_id":    p.SessionID,
-		"claims_stored": stored,
-		"l0_progress":   lastID,
+		"status":          "ok",
+		"session_id":      p.SessionID,
+		"claims_stored":   stored,
+		"conflict_merged": merged,
+		"l0_progress":     lastID,
 	}, nil
+}
+
+// storeCandidates stores the extraction candidates, applying the conflict
+// consumer rule when conflict wiring is enabled (tree 02 leaf L2). It returns
+// (stored, merged, err): stored counts claims written (store/merge/supersede
+// decisions), merged counts merge decisions specifically.
+//
+// Fail-open contract (SHARED-CONVENTIONS §2.3): detection runs through
+// detectConflicts, which degrades to all-store on any error — extraction
+// never fails because of conflict detection. Store errors after a decision
+// still fail the job (the queue retry re-runs the window; claims are
+// content-deduped downstream).
+func (w *DistillWorker) storeCandidates(ctx context.Context, candidates []AmbientCandidate) (int, int, error) {
+	// Build the conflict candidate list once; nil wiring/disabled skips.
+	var ccands []conflictCandidate
+	if w.conflict != nil && w.conflict.Enabled && len(candidates) > 0 {
+		ccands = make([]conflictCandidate, len(candidates))
+		for i, c := range candidates {
+			ccands[i] = conflictCandidate{
+				Idx: i,
+				Cand: conflict.Candidate{
+					ID:      fmt.Sprintf("cand-%d", i),
+					Content: c.Text,
+					Metadata: map[string]string{
+						"type":       c.Type,
+						"confidence": fmt.Sprintf("%.2f", c.Confidence),
+					},
+				},
+			}
+		}
+	}
+
+	var decisions []conflict.Decision
+	if len(ccands) > 0 {
+		var recall conflict.RecallStore
+		if w.manager != nil {
+			recall = w.manager.NewRecallStore()
+		}
+		decisions = detectConflicts(ctx, w.conflict, recall, ccands)
+	}
+
+	stored := 0
+	merged := 0
+	for i, c := range candidates {
+		claim := Claim{
+			Text:       c.Text,
+			Premises:   c.Premises,
+			Source:     c.Source,
+			Confidence: c.Confidence,
+			Status:     ClaimStatusAuto,
+		}
+		if decisions != nil {
+			id, err := w.applyConflictDecision(ctx, ccands[i], decisions[i], claim)
+			if err != nil {
+				return stored, merged, err
+			}
+			if id != "" {
+				stored++
+				if decisions[i].Action == conflict.ActionMerge {
+					merged++
+				}
+			}
+			continue
+		}
+		// Conflict detection disabled: plain store (pre-detector behavior).
+		if _, err := w.manager.StoreClaim(ctx, claim); err != nil {
+			return stored, merged, fmt.Errorf("distill l1: store claim: %w", err)
+		}
+		stored++
+	}
+	return stored, merged, nil
 }
 
 // l0ProgressMarker returns the newest l0_progress position for the session
@@ -430,8 +502,8 @@ func (w *DistillWorker) segmentScenes(ctx context.Context, recs []l0Record) ([]s
 	return valid, nil
 }
 
-func (w *DistillWorker) l0Dir() string  { return filepath.Join(w.dataDir, "l0") }
-func (w *DistillWorker) l2Dir() string  { return filepath.Join(w.dataDir, "l2") }
+func (w *DistillWorker) l0Dir() string { return filepath.Join(w.dataDir, "l0") }
+func (w *DistillWorker) l2Dir() string { return filepath.Join(w.dataDir, "l2") }
 func (w *DistillWorker) l0DayPath(date string) string {
 	return filepath.Join(w.l0Dir(), date+".jsonl")
 }
@@ -563,6 +635,13 @@ type l0Record struct {
 // the given session (when non-empty), and returns records strictly after
 // sinceID (empty sinceID reads from the start). A missing file is an empty
 // slice, mirroring l0 reader semantics.
+//
+// Day-boundary fallback (tree 01 L3): a sinceID that does not appear in
+// THIS day's file (the marker lives in a previous day's file) reads from
+// the start instead of returning nothing — otherwise the first turn of
+// every new day would silently distill zero lines and the marker would
+// strand in yesterday's file forever. IDs are unique (pkg/id), so the
+// fallback cannot re-read an already-distilled window within the day.
 func readL0Records(path, sessionID, sinceID string) ([]l0Record, error) {
 	f, err := os.Open(path) // #nosec G304 -- path is caller-supplied data-dir path
 	if err != nil {
@@ -575,6 +654,7 @@ func readL0Records(path, sessionID, sinceID string) ([]l0Record, error) {
 
 	var out []l0Record
 	seen := sinceID == ""
+	sinceFound := sinceID == ""
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for sc.Scan() {
@@ -589,6 +669,7 @@ func readL0Records(path, sessionID, sinceID string) ([]l0Record, error) {
 		if !seen {
 			if rec.ID == sinceID {
 				seen = true
+				sinceFound = true
 			}
 			continue
 		}
@@ -600,5 +681,30 @@ func readL0Records(path, sessionID, sinceID string) ([]l0Record, error) {
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("distill: scan %s: %w", path, err)
 	}
+	if !sinceFound {
+		// sinceID lives in another day's file (or was lost): restart the
+		// window at the beginning of this file.
+		return readL0RecordsFromStart(path, sessionID)
+	}
 	return out, nil
+}
+
+// readL0RecordsFromStart is readL0Records with an empty sinceID (used only
+// by the day-boundary fallback above).
+func readL0RecordsFromStart(path, sessionID string) ([]l0Record, error) {
+	return readL0Records(path, sessionID, "")
+}
+
+// markerPosCoversFileEnd reports whether the session's l0_progress marker
+// sits on the session's LAST record in the payload's day file — i.e. the
+// requested window (anything after sinceID) contains no undistilled lines
+// and the job is a duplicate no-op. Cheap single scan of an already-open
+// file shape; used only for the suppression check (the window read itself
+// happens after).
+func markerPosCoversFileEnd(l0Path, sessionID, marker string) bool {
+	recs, err := readL0RecordsFromStart(l0Path, sessionID)
+	if err != nil || len(recs) == 0 {
+		return false
+	}
+	return recs[len(recs)-1].ID == marker
 }

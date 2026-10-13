@@ -45,11 +45,17 @@ type Consolidator struct {
 	// keeps internal/memory free of an import cycle: the knowledge
 	// package's adapter imports builtin, which imports this package.
 	knowledgeDirIngest func(ctx context.Context)
-	mu                 sync.Mutex
-	running            bool
-	lastRun            *time.Time
-	stopChan           chan struct{}
-	stopOnce           sync.Once // Guards against double-close of stopChan
+	// l0Prune drives the optional L0 retention pass (tree 01 L3): a
+	// closure over l0.Prune with the configured data dir + retention
+	// window. A func field (not the l0 dir/maxAgeDays pair) keeps the
+	// gating decision (memory.l0_enabled + l0_retention_days) with the
+	// daemon wiring. Nil (the default) = pass disabled; see runL0PrunePass.
+	l0Prune  func(ctx context.Context)
+	mu       sync.Mutex
+	running  bool
+	lastRun  *time.Time
+	stopChan chan struct{}
+	stopOnce sync.Once // Guards against double-close of stopChan
 }
 
 // ConsolidatorConfig holds configuration for the consolidator.
@@ -179,6 +185,12 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 	// No-op unless a knowledge store is wired (SetKnowledgeStore) AND
 	// memory.knowledge.enabled AND ingest_dir is set. Best-effort.
 	c.runKnowledgeDirIngestPass(ctx)
+
+	// L0 retention pass (tree 01 L3). Reuses this timer (no new ticker):
+	// prunes whole daily L0 files past the retention window. No-op unless
+	// a prune closure is wired (SetL0Prune) — i.e. memory.l0_enabled with
+	// a positive l0_retention_days. Best-effort.
+	c.runL0PrunePass(ctx)
 
 	report.Duration = time.Since(start)
 
@@ -395,6 +407,31 @@ func (c *Consolidator) SetKnowledgeDirIngest(fn func(ctx context.Context)) {
 func (c *Consolidator) runKnowledgeDirIngestPass(ctx context.Context) {
 	c.mu.Lock()
 	fn := c.knowledgeDirIngest
+	c.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	fn(ctx)
+}
+
+// SetL0Prune wires the L0 retention pass (tree 01 L3) into the periodic
+// consolidation run. The closure encapsulates l0.Prune with the configured
+// L0 dir and retention window; nil disables the pass (the default). The
+// daemon wires it only under memory.l0_enabled with a positive
+// l0_retention_days.
+func (c *Consolidator) SetL0Prune(fn func(ctx context.Context)) {
+	c.mu.Lock()
+	c.l0Prune = fn
+	c.mu.Unlock()
+}
+
+// runL0PrunePass runs L0 retention on the consolidation tick. No-op unless
+// a closure is wired (SetL0Prune). Best-effort: failures are logged, never
+// abort consolidation. No mutex is held across the dir I/O (repo rule) —
+// the snapshot happens under the lock.
+func (c *Consolidator) runL0PrunePass(ctx context.Context) {
+	c.mu.Lock()
+	fn := c.l0Prune
 	c.mu.Unlock()
 	if fn == nil {
 		return
