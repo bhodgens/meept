@@ -23,7 +23,8 @@ func TestAdapterRoundtrip(t *testing.T) {
 	defer s.Close() //nolint:errcheck // test cleanup
 
 	var ks builtin.KnowledgeStore = NewToolStore(s)
-	if _, ok := ks.(builtin.KnowledgeStore); !ok {
+	_ = ks // compile-time satisfaction check (assertion below covers the runtime form)
+	if _, ok := any(NewToolStore(s)).(builtin.KnowledgeStore); !ok {
 		t.Fatal("NewToolStore does not satisfy builtin.KnowledgeStore")
 	}
 

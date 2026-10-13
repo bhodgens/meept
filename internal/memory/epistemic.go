@@ -310,22 +310,9 @@ func (m *Manager) StoreQuestion(ctx context.Context, q Question) (string, error)
 	})
 }
 
-// updateMetadataField loads a memory, sets a metadata key, and writes a new
-// version via StoreVersioned.
-func (m *Manager) updateMetadataField(ctx context.Context, id, key string, value any) error {
-	mem, err := m.GetByID(ctx, id)
-	if err != nil {
-		return fmt.Errorf("load memory %s: %w", id, err)
-	}
-	if mem.Metadata == nil {
-		mem.Metadata = make(map[string]any)
-	}
-	mem.Metadata[key] = value
-	if _, err := m.StoreVersioned(ctx, *mem, StoreOptions{CreateVersion: true, ParentID: id}); err != nil {
-		return fmt.Errorf("store versioned: %w", err)
-	}
-	return nil
-}
+// updateMetadataField was removed (T03-L1): versioned status writes leaked
+// non-current rows into Search (no is_current filter) — verdicts stamp
+// metadata in place via stampMetadataInPlace instead.
 
 // PromoteClaim transitions an auto claim to promoted status.
 func (m *Manager) PromoteClaim(ctx context.Context, claimID string) error {
@@ -827,11 +814,8 @@ func generateAuditID() string {
 // Suppress unused-import warnings until later tasks wire these into use.
 var _ = context.Background
 
-// logCalibration records a promote/reject verdict for the confidence
-// calibration dataset. Best-effort: calibration never fails the transition.
-func (m *Manager) logCalibration(ctx context.Context, claimID, verdict string, mem *Memory) {
-	m.logCalibrationReason(ctx, claimID, verdict, mem, "")
-}
+// logCalibration (no-reason variant) was folded into logCalibrationReason
+// with an empty reason (T03-L1).
 
 // logCalibrationReason is logCalibration with an optional human verdict
 // reason (leaf T03-L1). The raw reason lands here (calibration log), while

@@ -54,7 +54,10 @@ func topSimilar(ctx context.Context, store RecallStore, c Candidate, k int) ([]R
 
 	results, err := store.Search(ctx, c.Content, k)
 	if err != nil {
-		// Fail open: recall is an optimization, not a gate.
+		// Fail open: recall is an optimization, not a gate. The nil error
+		// is deliberate — DetectBatch treats "nothing recalled" as
+		// skip-detection, and a recall outage must not fail the batch.
+		//nolint:nilerr // fail-open by contract (SHARED-CONVENTIONS §2.3)
 		return nil, nil
 	}
 	if len(results) == 0 {
@@ -134,6 +137,7 @@ func jaccard(a, b map[string]bool) float64 {
 // recalled (or on recall error) are simply absent.
 func recallBatch(ctx context.Context, store RecallStore, cands []Candidate, perCandidate int) (map[int][]RecallTarget, error) {
 	if store == nil {
+		//nolint:nilnil // nil store = recall disabled; absent keys mean "nothing recalled" (fail-open contract)
 		return nil, nil
 	}
 	out := make(map[int][]RecallTarget, len(cands))

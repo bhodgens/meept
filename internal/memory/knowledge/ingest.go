@@ -211,11 +211,8 @@ func (s *Store) evictOldest(ctx context.Context, keepID string) {
 	if s.maxPages <= 0 {
 		return
 	}
-	keepBudget := s.maxPages - 1
-	if keepBudget < 0 {
-		keepBudget = 0
-	}
-	// Survivors are the newest maxPages rows; everything older is a victim
+	// Survivors are the newest maxPages rows (the just-written page is
+	// exempt for this round); everything beyond the cap is a victim
 	// (oldest-evicted-first policy).
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, title FROM knowledge_pages
@@ -239,6 +236,10 @@ LIMIT -1 OFFSET ?`,
 		victims = append(victims, v)
 	}
 	rows.Close() //nolint:sqlclosecheck // closed before deletes so deletes don't run under an open cursor
+	if rowsErr := rows.Err(); rowsErr != nil {
+		s.logger.Warn("knowledge eviction scan failed", "error", rowsErr)
+		return
+	}
 	if len(victims) == 0 {
 		return
 	}

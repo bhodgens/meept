@@ -581,11 +581,7 @@ func deriveSceneSummary(recs []l0Record, ids []string) string {
 	}
 	text := strings.Join(parts, " ")
 	sentences := strings.Split(text, ". ")
-	n := 3
-	if len(sentences) < n {
-		n = len(sentences)
-	}
-	summary := strings.TrimSpace(strings.Join(sentences[:n], ". "))
+	summary := strings.TrimSpace(strings.Join(sentences[:min(3, len(sentences))], ". "))
 	if runes := []rune(summary); len(runes) > 280 {
 		summary = string(runes[:277]) + "..."
 	}

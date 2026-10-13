@@ -110,7 +110,7 @@ func TestSanitizeForStoreVariants(t *testing.T) {
 // limit caps the result.
 func TestReadSinceMarkerAndLimit(t *testing.T) {
 	rec, dir := newTestRecorder(t, time.UTC)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := rec.Append("s", "user", "m", nil); err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
@@ -171,14 +171,12 @@ func TestIDUniquenessAcrossAppends(t *testing.T) {
 	path := rec.DatePath(date)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			if err := rec.Append("s", "user", "x", nil); err != nil {
 				t.Errorf("append: %v", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

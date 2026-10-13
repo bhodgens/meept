@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -12,7 +11,7 @@ import (
 
 func testLogger(t *testing.T) *slog.Logger {
 	t.Helper()
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // fakeLLM is a deterministic LLM for tests. It records the prompts it was

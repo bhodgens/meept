@@ -205,10 +205,6 @@ func (h *EpistemicHandler) handleRecordReview(ctx context.Context, params json.R
 	}, nil
 }
 
-type claimIDParams struct {
-	ID string `json:"id"`
-}
-
 // verdictParams extends the claim-id envelope with the optional human
 // verdict reason (leaf T03-L1, ≤512B — enforced by the Manager).
 type verdictParams struct {

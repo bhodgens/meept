@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
@@ -274,9 +275,7 @@ func (m *Manager) storeClaimWithMetadata(ctx context.Context, c Claim, text stri
 	if c.Rev != 0 {
 		meta["rev"] = c.Rev
 	}
-	for k, v := range extra {
-		meta[k] = v
-	}
+	maps.Copy(meta, extra)
 	id, err := m.Store(ctx, Memory{
 		Type:     MemoryTypeClaim,
 		Category: "claim",

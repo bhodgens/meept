@@ -159,10 +159,10 @@ func renderExpr(expr ast.Expr) string {
 	case *ast.MapType:
 		return "map[" + renderExpr(t.Key) + "]" + renderExpr(t.Value)
 	case *ast.ChanType:
-		switch {
-		case t.Dir == ast.RECV:
+		switch t.Dir {
+		case ast.RECV:
 			return "<-chan " + renderExpr(t.Value)
-		case t.Dir == ast.SEND:
+		case ast.SEND:
 			return "chan<- " + renderExpr(t.Value)
 		default:
 			return "chan " + renderExpr(t.Value)

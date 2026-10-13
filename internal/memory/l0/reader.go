@@ -3,6 +3,7 @@ package l0
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -37,7 +38,7 @@ func readLines(path string, fn func(Record) error) error {
 			continue // torn/corrupt line: skip, keep scanning
 		}
 		if err := fn(rec); err != nil {
-			if err == errStop {
+			if errors.Is(err, errStop) {
 				return nil
 			}
 			return err

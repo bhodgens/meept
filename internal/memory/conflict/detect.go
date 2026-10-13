@@ -209,7 +209,7 @@ func parseLLMDecisions(body string, batchLen int) (map[int]Decision, error) {
 		if idx < 0 || idx >= batchLen {
 			continue
 		}
-		action := Action(w.Action)
+		action := w.Action
 		if !validAction(action) {
 			continue
 		}

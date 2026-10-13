@@ -90,10 +90,7 @@ func (m *Manager) ListAutoClaimsFiltered(ctx context.Context, opts ListAutoClaim
 	if limit <= 0 {
 		limit = 20
 	}
-	offset := opts.Offset
-	if offset < 0 {
-		offset = 0
-	}
+	offset := max(opts.Offset, 0)
 
 	results, err := m.Search(ctx, MemoryQuery{
 		Type:  MemoryTypeClaim,
@@ -133,10 +130,7 @@ func (m *Manager) ListAutoClaimsFiltered(ctx context.Context, opts ListAutoClaim
 	if offset >= total {
 		return nil, total, nil
 	}
-	end := offset + limit
-	if end > total {
-		end = total
-	}
+	end := min(offset+limit, total)
 	return matched[offset:end], total, nil
 }
 

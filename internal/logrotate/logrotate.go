@@ -114,15 +114,20 @@ func (c *CapSize) rotateLocked() error {
 }
 
 // Close closes the underlying file. It is idempotent.
+//
+// The mutex guards the file-handle swap (Write/rotate/Close race), not the
+// Close syscall itself: the handle is snapshotted under the lock, nil'd
+// immediately so a concurrent writer reopens, and the syscall runs outside
+// the lock (mutexio rule — no I/O under mutex).
 func (c *CapSize) Close() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.f == nil {
+	f := c.f
+	c.f = nil
+	c.mu.Unlock()
+	if f == nil {
 		return nil
 	}
-	err := c.f.Close()
-	c.f = nil
-	return err
+	return f.Close()
 }
 
 // Size reports the current size of the live log file in bytes. It returns an
