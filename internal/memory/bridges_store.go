@@ -275,6 +275,61 @@ func (bs *BridgeStore) ListBridgesByEvidence(ctx context.Context, evidenceID str
 	return out, nil
 }
 
+// listAllBridges returns every persisted bridge record (side-table scan).
+// Used by the B03 verification pass, which must see unverified bridges too —
+// unlike the recall path, verification is not allowed to skip them.
+func (bs *BridgeStore) listAllBridges(ctx context.Context) ([]BridgeRecord, error) {
+	rows, err := bs.db.QueryContext(ctx, `SELECT DISTINCT memory_id FROM bridge_meta`) //nolint:mutexio // single connection, serialized by driver
+	if err != nil {
+		return nil, fmt.Errorf("bridge store: list all: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BridgeRecord
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			continue
+		}
+		rec := BridgeRecord{ID: id, Metadata: map[string]any{}}
+		if err := bs.loadBridgeMetadata(ctx, id, &rec); err != nil {
+			bs.log.Warn("bridge store: skipping unreadable bridge in list", "id", id, "error", err)
+			continue
+		}
+		// The fact text lives in the vector shard's own metadata table
+		// (same sqlite file); fetch it for the entailment prompt.
+		if err := bs.db.QueryRowContext(ctx,
+			`SELECT content FROM metadata WHERE memory_id = ?`, id).Scan(&rec.Content); err != nil { //nolint:mutexio // single connection, serialized by driver
+			rec.Content = "" // verified against IDs alone if content is gone
+		}
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("bridge store: iterate list all: %w", err)
+	}
+	return out, nil
+}
+
+// MarkVerified re-persists a bridge's verified flag (metadata + typed field)
+// without touching its vector row — the survivor path of VerifyBridges.
+func (bs *BridgeStore) MarkVerified(ctx context.Context, id string) error {
+	tx, err := bs.db.BeginTx(ctx, nil) //nolint:mutexio // single sqlite connection, one tx at a time (matches shard internals)
+	if err != nil {
+		return fmt.Errorf("bridge store: begin mark verified: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() //nolint:mutexio // rollback bound to the tx above
+	for _, kv := range [][2]string{
+		{BridgeMetaVerified, `"true"`},
+	} {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR REPLACE INTO bridge_meta (memory_id, key, value) VALUES (?, ?, ?)
+		`, id, kv[0], kv[1]); err != nil { //nolint:mutexio // tx bound to protected conn
+			return fmt.Errorf("bridge store: mark verified %s: %w", id, err)
+		}
+	}
+	return tx.Commit() //nolint:mutexio // commit bound to the tx above
+}
+
 // Count returns the number of persisted bridges (distinct memory IDs in the
 // side table — not raw rows, which are one per (memory_id, key) pair).
 func (bs *BridgeStore) Count(ctx context.Context) (int, error) {

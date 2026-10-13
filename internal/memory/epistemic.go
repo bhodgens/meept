@@ -676,6 +676,9 @@ func (m *Manager) MarkSuperseded(ctx context.Context, oldID, newID string) (redi
 	if err := m.markVersionNonCurrent(ctx, oldID); err != nil {
 		return 0, "", fmt.Errorf("mark old non-current: %w", err)
 	}
+	// The superseded claim is no longer a current fact: bridges citing it
+	// as evidence are cascade-invalidated (branch 09 B03).
+	m.invalidateBridgesForMemoryLogged(ctx, oldID)
 
 	// Write superseded edge.
 	auditID = generateAuditID()

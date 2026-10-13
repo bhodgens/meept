@@ -524,3 +524,25 @@ func ProcedureGrammar() string {
 	b.WriteString("hints-or-close ::= (\",\" ws \"\\\"trigger_hints\\\"\" ws \":\" ws string-array)? ws\n")
 	return b.String()
 }
+
+// BridgeVerdictGrammar returns the GBNF grammar forcing the bridge
+// entailment-verdict JSON output — exactly the shape internal/memory's
+// bridge verifier decodes (branch 09, leaf B03). Declared shape:
+//
+//	{"supported": true|false, "reason": string}
+//
+// `supported` is forced to the literal true/false tokens (a JSON bool is not
+// a GBNF builtin) and `reason` accepts any string. Pair with WithRawGrammar
+// (llama.cpp wire format, local endpoints only; the attach is endpoint-gated
+// inside the client, so cloud chatters never see the field). Never returns
+// an empty string.
+func BridgeVerdictGrammar() string {
+	var b strings.Builder
+	// llama.cpp requires the first rule to be named `root`.
+	b.WriteString("root ::= \"{\" ws \"\\\"supported\\\"\" ws \":\" ws supported-lit \",\" ws \"\\\"reason\\\"\" ws \":\" ws string ws \"}\"\n")
+	b.WriteString("ws ::= [ \\t\\n]*\n")
+	b.WriteString("string ::= \"\\\"\" char* \"\\\"\"\n")
+	b.WriteString("char ::= [^\"\\\\]\n")
+	b.WriteString("supported-lit ::= \"true\" | \"false\"\n")
+	return b.String()
+}

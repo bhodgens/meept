@@ -1381,6 +1381,9 @@ func (m *Manager) StoreVersioned(ctx context.Context, mem Memory, opts StoreOpti
 		if err := m.markVersionNonCurrent(ctx, opts.ParentID); err != nil {
 			m.logger.Warn("Failed to mark version non-current", "error", err)
 		}
+		// The old version is no longer a current fact: bridges citing it
+		// as evidence are cascade-invalidated (branch 09 B03).
+		m.invalidateBridgesForMemoryLogged(ctx, opts.ParentID)
 
 		// Get current version number
 		currentVersion := m.getCurrentVersion(ctx, mem.ID)
@@ -1693,6 +1696,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	if m.episodic != nil {
 		err := m.episodic.Delete(ctx, id)
 		if err == nil {
+			m.invalidateBridgesForMemoryLogged(ctx, id)
 			return nil
 		}
 		if !errors.Is(err, ErrNotFound) {
@@ -1704,6 +1708,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	if m.task != nil {
 		err := m.task.Delete(ctx, id)
 		if err == nil {
+			m.invalidateBridgesForMemoryLogged(ctx, id)
 			return nil
 		}
 		if !errors.Is(err, ErrNotFound) {
@@ -2138,6 +2143,24 @@ func (m *Manager) BridgeStore() *BridgeStore {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.bridgeStore
+}
+
+// invalidateBridgesForMemoryLogged is the mutation-seam wrapper around
+// invalidateBridgesForMemory (branch 09 B03): best-effort provenance cascade
+// on source-memory mutation, logged at debug on success and warn on failure.
+// Never fails the source mutation itself.
+func (m *Manager) invalidateBridgesForMemoryLogged(ctx context.Context, memoryID string) {
+	m.mu.RLock()
+	bs := m.bridgeStore
+	m.mu.RUnlock()
+	if bs == nil {
+		return
+	}
+	if err := invalidateBridgesForMemory(ctx, bs, memoryID); err != nil {
+		m.logger.Warn("bridge cascade-invalidation failed", "memory_id", memoryID, "error", err)
+	} else {
+		m.logger.Debug("bridge cascade-invalidation complete", "memory_id", memoryID)
+	}
 }
 
 // CalibrationLogger returns the configured calibration logger, or nil.

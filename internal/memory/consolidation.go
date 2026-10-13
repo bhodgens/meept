@@ -33,11 +33,23 @@ type Consolidator struct {
 	// of config; see runBridgeGenerationPass.
 	bridgeStore *BridgeStore
 	bridgeGen   BridgeGenerator
-	mu          sync.Mutex
-	running     bool
-	lastRun     *time.Time
-	stopChan    chan struct{}
-	stopOnce    sync.Once // Guards against double-close of stopChan
+	// bridgeVerifier drives the optional entailment-verification stage of
+	// the bridge pass (branch 09 B03). Nil (the default) = bridges persist
+	// unverified even with memory.bridges.verify=true — the verifier needs
+	// a wired local-model chatter (SetBridgeVerifier).
+	bridgeVerifier BridgeVerifier
+	// knowledgeDirIngest drives the optional knowledge dir-ingest pass
+	// (tree 04 L2): a closure over the knowledge store + watched dir.
+	// Nil (the default) = pass disabled regardless of config; see
+	// runKnowledgeDirIngestPass. A func field (not a *knowledge.Store)
+	// keeps internal/memory free of an import cycle: the knowledge
+	// package's adapter imports builtin, which imports this package.
+	knowledgeDirIngest func(ctx context.Context)
+	mu                 sync.Mutex
+	running            bool
+	lastRun            *time.Time
+	stopChan           chan struct{}
+	stopOnce           sync.Once // Guards against double-close of stopChan
 }
 
 // ConsolidatorConfig holds configuration for the consolidator.
@@ -162,6 +174,12 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 	// like the epistemic pass — a bridge failure never aborts consolidation.
 	c.runBridgeGenerationPass(ctx)
 
+	// Knowledge dir-ingest pass (tree 04 L2). Reuses this timer (no new
+	// ticker): ingests new/changed *.md from the configured watched dir.
+	// No-op unless a knowledge store is wired (SetKnowledgeStore) AND
+	// memory.knowledge.enabled AND ingest_dir is set. Best-effort.
+	c.runKnowledgeDirIngestPass(ctx)
+
 	report.Duration = time.Since(start)
 
 	c.logger.Info("Consolidation complete",
@@ -259,6 +277,7 @@ func (c *Consolidator) runBridgeGenerationPass(ctx context.Context) {
 	c.mu.Lock()
 	store := c.bridgeStore
 	gen := c.bridgeGen
+	ver := c.bridgeVerifier
 	c.mu.Unlock()
 	if store == nil || gen == nil {
 		return
@@ -294,8 +313,24 @@ func (c *Consolidator) runBridgeGenerationPass(ctx context.Context) {
 			"generated", generated, "rejected", rejected, "error", err)
 		return
 	}
+
+	// Entailment verification (branch 09 B03): same pass, immediately after
+	// generation. When cfg.Verify is on, unsupported bridges are DELETED
+	// before they can ever be retrievable and survivors get verified=true.
+	// The verifier may be unwired (no local model available) — then bridges
+	// persist unverified and the pass logs the gap once at debug.
+	kept, dropped := 0, 0
+	if cfg.Verify && ver != nil {
+		kept, dropped, err = VerifyBridges(ctx, store, ver, cfg)
+		if err != nil {
+			c.logger.Warn("bridge generation pass: verification failed",
+				"kept", kept, "dropped", dropped, "error", err)
+			return
+		}
+	}
 	c.logger.Info("bridge generation pass complete",
-		"generated", generated, "rejected", rejected)
+		"generated", generated, "rejected", rejected,
+		"verified", kept, "dropped_unsupported", dropped)
 }
 
 // recentMemoriesForBridges gathers the candidate memory pool for bridge
@@ -330,6 +365,43 @@ func (c *Consolidator) SetBridgeComponents(store *BridgeStore, gen BridgeGenerat
 	c.mu.Unlock()
 }
 
+// SetBridgeVerifier wires the entailment verifier (branch 09 B03) into the
+// bridge pass. Optional: with no verifier wired, bridges persist unverified
+// (verified="false") even when memory.bridges.verify=true — the quality gate
+// needs a local-model chatter to run. Pass nil to detach.
+func (c *Consolidator) SetBridgeVerifier(ver BridgeVerifier) {
+	c.mu.Lock()
+	c.bridgeVerifier = ver
+	c.mu.Unlock()
+}
+
+// SetKnowledgeDirIngest wires the knowledge watched-dir ingest pass (tree 04
+// L2) into the periodic consolidation pass. The caller supplies a closure
+// over the knowledge store and the configured ingest dir (typically a call
+// to knowledge.SyncDir); nil disables the pass (the default). The pass also
+// no-ops when memory.knowledge.enabled or ingest_dir is unset — the closure
+// is only wired under those conditions by the daemon.
+func (c *Consolidator) SetKnowledgeDirIngest(fn func(ctx context.Context)) {
+	c.mu.Lock()
+	c.knowledgeDirIngest = fn
+	c.mu.Unlock()
+}
+
+// runKnowledgeDirIngestPass runs the knowledge watched-dir ingest (tree 04
+// L2) on the consolidation tick. No-op unless a closure is wired
+// (SetKnowledgeDirIngest). Best-effort: failures are logged, never abort
+// consolidation. No mutex is held across the dir I/O (repo rule) — the
+// snapshot happens under the lock.
+func (c *Consolidator) runKnowledgeDirIngestPass(ctx context.Context) {
+	c.mu.Lock()
+	fn := c.knowledgeDirIngest
+	c.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	fn(ctx)
+}
+
 // runAccessBasedExpiration performs access-based memory expiration.
 // MEM-11 FIX: accumulate Store/Delete error counts instead of silently
 // discarding them.  The report's Expired field now only reflects cleanly
@@ -345,6 +417,11 @@ func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) *Consolidat
 		c.logger.Debug("skipping access-based expiration", "reason", err.Error())
 		return &ConsolidationReport{}
 	}
+
+	// Snapshot the bridge store once for cascade-invalidation below; the
+	// pointer read is the only lock-held operation (repo mutex-scope rule:
+	// no lock across the per-memory store I/O in the loop).
+	bridgeStore := c.manager.BridgeStore()
 
 	var expiredCount int
 	var storeErrors, deleteErrors int
@@ -370,6 +447,18 @@ func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) *Consolidat
 			// Continue processing other memories
 		} else {
 			expiredCount++
+			// The expired memory is gone: bridges citing it as evidence
+			// are cascade-invalidated (branch 09 B03). The bridge store
+			// snapshot was taken under the lock above; all I/O stays
+			// outside it (repo mutex-scope rule).
+			if bridgeStore != nil {
+				if ierr := invalidateBridgesForMemory(ctx, bridgeStore, mem.ID); ierr != nil {
+					c.logger.Warn("bridge cascade-invalidation failed (expiry)",
+						"memory_id", mem.ID, "error", ierr)
+				} else {
+					c.logger.Debug("bridge cascade-invalidation complete (expiry)", "memory_id", mem.ID)
+				}
+			}
 		}
 	}
 
