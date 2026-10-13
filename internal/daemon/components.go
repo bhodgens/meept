@@ -1843,6 +1843,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 					shardTypes = append(shardTypes, vector.CodeShard)
 				case "archive":
 					shardTypes = append(shardTypes, vector.ArchiveShard)
+				case "bridge":
+					shardTypes = append(shardTypes, vector.BridgeShard)
 				}
 			}
 

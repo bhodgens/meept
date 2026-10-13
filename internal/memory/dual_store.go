@@ -286,7 +286,19 @@ func (s *DualStore) StoreMemory(ctx context.Context, mem *Memory) error {
 // publishMemoryGossip broadcasts a locally-written memory to gossip peers
 // non-blocking. The publish happens outside the DualStore mutex to avoid
 // holding the lock during I/O (CLAUDE.md mutex-scope rule).
+//
+// GOSSIP EXCLUSION SITE (branch 09 / B01): derived bridging facts — memories
+// tagged metadata["unit_type"] == "bridge" (stored in the vector package's
+// BridgeShard) — never replicate. They are recomputed per node from that
+// node's own memories; replicating them would echo derived data into peers'
+// recall paths. ShardTypeBridge.GossipEligible() (internal/memory/vector/
+// shard_manager.go) is the shard-level half of the same contract.
 func (s *DualStore) publishMemoryGossip(pub GossipPublisher, mem *Memory) {
+	if mem != nil && mem.Metadata != nil {
+		if ut, ok := mem.Metadata["unit_type"].(string); ok && ut == "bridge" {
+			return // derived, node-local — never replicate
+		}
+	}
 	payload := models.MemoryStoredPayload{
 		ID:        mem.ID,
 		Type:      string(mem.Type),

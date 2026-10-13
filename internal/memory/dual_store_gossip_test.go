@@ -40,6 +40,14 @@ func (m *mockGossipPublisher) getLastEvent() (publishedEvent, bool) {
 	return m.events[len(m.events)-1], true
 }
 
+func (m *mockGossipPublisher) getEvents() []publishedEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]publishedEvent, len(m.events))
+	copy(out, m.events)
+	return out
+}
+
 func TestDualStore_SetGossipPublisher(t *testing.T) {
 	dir := t.TempDir()
 	ds, err := NewDualStore(dir, "test-node", slog.Default())

@@ -23,6 +23,12 @@ const (
 	CodeShard ShardType = "code"
 	// ArchiveShard - DISK only, 128-dim, cold storage (90+ days)
 	ArchiveShard ShardType = "archive"
+	// BridgeShard - ALWAYS in RAM, 256-dim, precomputed cross-memory bridging
+	// facts (IndexRAG). Always-loaded by design: bridge counts are ~25-35% of
+	// memory units but each is small, and bridges are admitted at recall time
+	// (k_b cap), so recall latency must not pay a shard-load on first bridge
+	// hit.
+	BridgeShard ShardType = "bridge"
 )
 
 // ShardDimension returns the recommended dimension for a shard type.
@@ -32,7 +38,7 @@ func (s ShardType) Dimension() int {
 		return Dim768
 	case RecentShard:
 		return Dim512
-	case ProjectShard, CodeShard:
+	case ProjectShard, CodeShard, BridgeShard:
 		return Dim256
 	case ArchiveShard:
 		return Dim128
@@ -43,7 +49,19 @@ func (s ShardType) Dimension() int {
 
 // IsAlwaysLoaded returns true if this shard type should always be in RAM.
 func (s ShardType) IsAlwaysLoaded() bool {
-	return s == ConsolidatedShard || s == RecentShard
+	return s == ConsolidatedShard || s == RecentShard || s == BridgeShard
+}
+
+// GossipEligible returns true if memories of this shard type may be replicated
+// to cluster peers via the dual_store gossip path.
+//
+// BridgeShard is excluded (returns false): bridges are DERIVED, node-local
+// data — each node recomputes them from its own memories, so replicating them
+// would echo derived facts back into peers' recall paths and risk feedback
+// loops. The dual_store exclusion site that consults this predicate is
+// DualStore.publishMemoryGossip (internal/memory/dual_store.go).
+func (s ShardType) GossipEligible() bool {
+	return s != BridgeShard
 }
 
 // ShardManager orchestrates multiple vector shards with LRU-based eviction.
@@ -92,8 +110,9 @@ func NewShardManager(cfg ShardManagerConfig) (*ShardManager, error) {
 		maxRAMShards: cfg.MaxRAMShards,
 	}
 
-	// Pre-load always-loaded shards
-	for _, st := range []ShardType{ConsolidatedShard, RecentShard} {
+	// Pre-load always-loaded shards (BridgeShard is always-loaded by design —
+	// see the BridgeShard comment above).
+	for _, st := range []ShardType{ConsolidatedShard, RecentShard, BridgeShard} {
 		if err := m.loadShard(st); err != nil {
 			m.logger.Warn("failed to pre-load shard", "type", st, "error", err)
 		}
