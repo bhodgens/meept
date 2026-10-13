@@ -86,11 +86,11 @@ drift.
 | T02-L2 merge wiring | COMPLETE 2026-10-13 | commit 4cd352fb; recall adapter uses MatchAny FTS (SearchSemantic AND-binds, structurally blind to near-conflicts); e2e scenarios in memory-persistence |
 | T03-L1 review-cli-rpc | COMPLETE 2026-10-13 | re-scoped → review-filters-audit; commit c83f97c5; daemon wiring rode into sibling commit bcf1e87c (intact at daemon.go:1181) |
 | T03-L2 audit+daemon-only wiring | SUPERSEDED | folded into re-scoped L1 (audit done there); daemon-only was already true |
-| T03-L3 tui-review-view | PENDING | Q6b; now leaf L2 of tree 03 |
+| T03-L3 tui-review-view | COMPLETE 2026-10-13 | leaf L2 of tree 03; commit on main after 8cd51ede; key v, tableutil rules honored, status count rides modal fetches; GUI deviation documented in gui_inventory.json |
 | T04-L1 knowledge-store | COMPLETE 2026-10-13 | commit 47d99578; additive Page.UnresolvedLinks accepted; -race clean |
 | T04-L2 knowledge-tools | COMPLETE 2026-10-13 | commit e3f82864; consolidation hook absorbed into sibling 03dfcf3a (intact); ToolActionMap entries + config default false |
 | T04-L3 code-index | COMPLETE 2026-10-13 | commit 8cd51ede; additive code_edges schema; suffix-based bare-symbol matching documented as v1 heuristic |
-| T04-L4 knowledge-e2e | PENDING | |
+| T04-L4 knowledge-e2e | COMPLETE 2026-10-13 | knowledge_wiring.go closures, knowledge_impact tool, e2e suite (3 scenarios) green, knowledge stats CLI; docs-check green |
 | Root integration review | PENDING | full `make test` + `make e2e-fast` + `make graphs-check` (graphs need regen — reviewQueue params changed) |
 
 ## Integration Test Plan
