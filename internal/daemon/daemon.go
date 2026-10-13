@@ -1976,6 +1976,20 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Metrics collector is started automatically by NewCollector
 
+	// Spill retention sweep (plans/context-reduction/08-spill-retention.md):
+	// async at startup + every 24h, so a large spill tree never delays
+	// readiness. retention_days <= 0 disables the sweep inside SweepSpill
+	// itself; the loop still runs (cheap no-op) so a config reload via
+	// restart picks up the new value. Shutdown cancels ctx, stopping the
+	// ticker goroutine.
+	if d.fullConfig != nil {
+		retention := d.fullConfig.Spill.RetentionDays
+		go llm.SpillRetentionLoop(ctx, llm.SpillRetentionOptions{
+			RetentionDays: retention,
+			Logger:        d.logger,
+		})
+	}
+
 	// Start plan handler (subscribes to task events for plan progress tracking)
 	if d.planHandler != nil {
 		if err := d.planHandler.Start(ctx); err != nil {
