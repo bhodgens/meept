@@ -1175,17 +1175,31 @@ func (c *AnthropicClient) buildRequest(cfg *ModelConfig, messages []ChatMessage,
 		req.AnthropicVersion = bedrockAnthropicVersion
 	}
 
-	// When prompt caching is enabled and the system prompt contains the
-	// boundary marker, split into cacheable blocks with cache_control markers.
-	// The boundary is consumed by BuildSystemPromptBlocks and never sent to
-	// the API. When caching is disabled or no boundary is present, strip any
-	// stray boundary markers and send as a plain string.
+	// Prompt-cache classification (tree 03 leaf L03). The static/dynamic
+	// partition is derived by splitting ONLY on the PromptCacheBoundary
+	// sentinel — never on blank lines — so a static section containing blank
+	// lines is carried whole into the Static block and the cache_control
+	// breakpoint lands at the true static/session boundary. Callers that
+	// built structured blocks pass them via WithSystemBlocks and are mapped
+	// 1:1; the flat string falls back to BuildSystemPromptBlocks' boundary
+	// split. The boundary is consumed and never sent to the API. When
+	// caching is disabled or no boundary is present, strip any stray
+	// boundary markers and send as a plain string.
+	//
+	// Breakpoints (Anthropic allows up to 4): cache_control is emitted on
+	// the trailing Static block AND on the trailing Session block (2 total)
+	// when prompt caching is enabled — the Session breakpoint makes the
+	// growing session tail cacheable across turns.
 	if c.config.PromptCache.IsEnabled() && strings.Contains(systemPrompt, PromptCacheBoundary) {
-		sections := strings.Split(systemPrompt, "\n\n")
-		blocks := BuildSystemPromptBlocks(sections)
+		var blocks []SystemPromptBlock
+		if len(opts.systemBlocks) > 0 {
+			blocks = opts.systemBlocks
+		} else {
+			blocks = BuildSystemPromptBlocks(SplitSystemPromptOnBoundary(systemPrompt))
+		}
 		for _, b := range blocks {
 			block := anthropicSystemBlock{Type: "text", Text: b.Text}
-			if b.CacheScope == CacheScopeStatic {
+			if b.CacheScope == CacheScopeStatic || b.CacheScope == CacheScopeSession {
 				block.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
 			}
 			req.SystemBlocks = append(req.SystemBlocks, block)

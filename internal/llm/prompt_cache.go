@@ -75,6 +75,24 @@ func BuildSystemPromptBlocks(sections []string) []SystemPromptBlock {
 	return blocks
 }
 
+// SplitSystemPromptOnBoundary splits a flat system prompt on the
+// PromptCacheBoundary sentinel ONLY — never on blank lines — returning
+// sections in the shape ClassifyPromptSections/BuildSystemPromptBlocks expect:
+// the static text before the boundary, the boundary itself, and the dynamic
+// text after it. The separator newlines around the sentinel are consumed so
+// block text matches the pre-L03 byte-for-byte output for well-formed
+// prompts. A prompt without the boundary returns as a single-element slice
+// (all-static classification).
+func SplitSystemPromptOnBoundary(s string) []string {
+	idx := strings.Index(s, PromptCacheBoundary)
+	if idx < 0 {
+		return []string{s}
+	}
+	before := strings.TrimSuffix(s[:idx], "\n\n")
+	after := strings.TrimPrefix(s[idx+len(PromptCacheBoundary):], "\n\n")
+	return []string{before, PromptCacheBoundary, after}
+}
+
 // StripPromptCacheBoundary removes the PromptCacheBoundary sentinel and any
 // surrounding blank-line separators from a system prompt string. This must be
 // called before sending the prompt to any provider so the internal marker is
