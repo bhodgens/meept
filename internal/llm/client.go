@@ -499,7 +499,27 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 	}
 
 	if len(chatOpts.tools) > 0 {
-		payload["tools"] = chatOpts.tools
+		// Stable wire order: sort a COPY by tool name. The tools slice
+		// may come straight from a shared registry (insertion order, not
+		// alphabetical), and any insertion-order drift shuffles the wire
+		// bytes — the #1 prefix-cache buster under --jinja, where tools
+		// render before the system prompt. The copy keeps registry state
+		// untouched. OpenAI-compatible path only; the Anthropic client
+		// marshals its own tools.
+		sorted := make([]ToolDefinition, len(chatOpts.tools))
+		copy(sorted, chatOpts.tools)
+		sort.Slice(sorted, func(i, j int) bool {
+			return sorted[i].Function.Name < sorted[j].Function.Name
+		})
+		payload["tools"] = sorted
+	}
+
+	// Session-scoped prompt-cache routing hint (OpenAI spec): requests
+	// sharing a key route to the same backend, raising prefix-hit rates
+	// for per-session prefixes. omitempty semantics: absent session id
+	// means the field never reaches the wire (never an empty string).
+	if chatOpts.sessionID != "" {
+		payload["prompt_cache_key"] = chatOpts.sessionID
 	}
 
 	// Force a tool call when the model opted in AND the caller marked this
@@ -555,7 +575,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 
 	// Check cache
 	if c.tokenCache != nil && c.keyBuilder != nil {
-		cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
+		cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			return cached.Response, nil
 		}
@@ -752,7 +772,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 
 		// Store in cache
 		if c.tokenCache != nil && c.keyBuilder != nil {
-			cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
+			cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 
@@ -812,7 +832,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 
 	// Check cache
 	if c.tokenCache != nil && c.keyBuilder != nil {
-		cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
+		cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			reportProgress(ProgressStageDone, "Cache hit")
 			return cached.Response, nil
@@ -1007,7 +1027,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 
 		// Store in cache
 		if c.tokenCache != nil && c.keyBuilder != nil {
-			cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
+			cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 
@@ -1073,6 +1093,14 @@ type chatOptions struct {
 	// opting in (ModelConfig.ToolChoice) and on tools being present; see
 	// resolveToolChoice.
 	toolChoice string
+	// systemBlocks carries structured system-prompt blocks (tree 03 leaf
+	// L03) built upstream via BuildSystemPromptBlocks, when the caller has
+	// them. When present, the Anthropic client maps them 1:1 onto wire
+	// system blocks (cache_control per CacheScope) instead of re-deriving
+	// static/dynamic sections from the flat string. Nil/empty falls back to
+	// the flat-string path, which splits ONLY on the boundary sentinel —
+	// never on blank lines.
+	systemBlocks []SystemPromptBlock
 	// assistantPrefill is a partial assistant message appended after the
 	// caller's messages (WithAssistantPrefill): llama-server continues the
 	// assistant turn from it instead of generating free-form prose. Empty =
@@ -1279,6 +1307,19 @@ func withRequestModelOverride(cfg *ModelConfig, o *chatOptions) *ModelConfig {
 	eff.ProviderID = providerID
 	eff.ModelID = modelID
 	return &eff
+}
+
+// WithSystemBlocks carries structured system-prompt blocks (tree 03 leaf L03)
+// built upstream via BuildSystemPromptBlocks. When present, the Anthropic
+// client maps them 1:1 onto wire system blocks with per-scope cache_control
+// instead of re-deriving static/dynamic sections from the flat system string —
+// so a static section containing blank lines is never re-partitioned. Nil or
+// empty falls back to the flat-string path. Blocks are request-scoped state,
+// like every other chatOptions field.
+func WithSystemBlocks(blocks []SystemPromptBlock) ChatOption {
+	return func(o *chatOptions) {
+		o.systemBlocks = blocks
+	}
 }
 
 // WithAdapter sets the LoRA adapter path to use for this request. The

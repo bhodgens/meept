@@ -542,6 +542,9 @@ type CompactionAgentConfig struct {
 	TrackFileOps      bool
 	TimeoutSeconds    int
 	TriggerRatio      float64
+	// SpillEnabled turns on tool-output spilling in pruneToolOutputs
+	// (compaction.spill_enabled; opt-in, default false).
+	SpillEnabled bool
 }
 
 // DefaultAgentConfig returns a configuration with sensible defaults.
@@ -2462,6 +2465,7 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 				SummaryFormat:     loop.config.Compaction.SummaryFormat,
 				TrackFileOps:      loop.config.Compaction.TrackFileOps,
 				TimeoutSeconds:    loop.config.Compaction.TimeoutSeconds,
+				SpillEnabled:      loop.config.Compaction.SpillEnabled,
 			}
 			var compactorModel llm.Chatter
 			if loop.llm != nil {
@@ -2469,6 +2473,7 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 			}
 			if compactorModel != nil {
 				compactor := llm.NewContextCompactor(compactorCfg, compactorModel, tokenizer, loop.logger)
+				compactor.SetSpillSessionID(loop.currentSessionID)
 				firewall.SetCompactor(compactor, loop.config.Compaction.TriggerRatio)
 				loop.logger.Info("context compaction enabled",
 					"summary_format", loop.config.Compaction.SummaryFormat,
@@ -2616,6 +2621,7 @@ func (l *AgentLoop) SetCompactionConfig(cfg config.CompactionConfig) {
 		TrackFileOps:      cfg.TrackFileOps,
 		TimeoutSeconds:    cfg.TimeoutSeconds,
 		TriggerRatio:      cfg.TriggerRatio,
+		SpillEnabled:      cfg.SpillEnabled,
 	}
 }
 
@@ -6791,10 +6797,27 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 
 	// Set memory context on conversation and freeze snapshot for prefix caching
 	if len(contextParts) > 0 {
-		// Join all context parts into a single string
+		// Apply the token budget to the STRUCTURED items before joining:
+		// whole lowest-ranked items are dropped (relevance order preserved)
+		// instead of cutting the joined string mid-item (leaf L05). Items
+		// are rendered as "- " bullets to match prompt assembly.
+		bulleted := make([]string, len(contextParts))
+		for i, part := range contextParts {
+			bulleted[i] = "- " + part
+		}
+		budgeted := EnforceMemoryItemBudget(bulleted, MaxMemoryContextTokens)
+		if len(budgeted) != len(bulleted) {
+			l.logger.Debug("Memory context truncated due to token budget",
+				"original_items", len(bulleted),
+				"kept_items", len(budgeted)-1, // minus marker
+				"budget_tokens", MaxMemoryContextTokens,
+			)
+		}
+
+		// Join the budgeted items into a single string
 		var fullContext strings.Builder
-		for _, part := range contextParts {
-			fullContext.WriteString("- " + part + "\n")
+		for _, part := range budgeted {
+			fullContext.WriteString(part + "\n")
 		}
 
 		// Set the memory context on the conversation
@@ -7112,6 +7135,92 @@ func (l *AgentLoop) injectProjectContext(builder *PromptBuilder) {
 	}
 }
 
+// memoryBudgetTruncatedMarker is appended to the memory context when the
+// token budget dropped any item (observability: the model and logs can see
+// the context is incomplete).
+const memoryBudgetTruncatedMarker = "\n\n...[memory truncated due to token budget]..."
+
+// EnforceMemoryItemBudget drops WHOLE lowest-ranked items from a relevance-
+// ordered item list (last item first) until the estimated token count of the
+// joined context fits maxTokens. Items that fit are never touched, and the
+// relevance order of kept items is preserved. When anything was dropped the
+// "...[memory truncated due to token budget]..." marker is appended so the
+// incompleteness stays observable.
+//
+// If a SINGLE item alone exceeds the budget, that item is kept (truncated
+// via its own 300-rune per-item truncation upstream) instead of dropped —
+// dropping it would empty the context entirely — and the marker is appended.
+func EnforceMemoryItemBudget(items []string, maxTokens int) []string {
+	if maxTokens <= 0 || len(items) == 0 {
+		return items
+	}
+
+	join := func(parts []string) string { return strings.Join(parts, "\n") }
+	estimate := llm.EstimateTokenCountHeuristic
+
+	if estimate(join(items)) <= maxTokens {
+		return items // everything fits; nothing dropped
+	}
+
+	// Greedy keep in relevance order: walk from the top-ranked item and stop
+	// at the first item that no longer fits. Everything after it is dropped
+	// whole. Prefix +1 accounts for the "\n" separator after each item.
+	kept := 0
+	running := 0
+	for i, item := range items {
+		next := running + estimate(item)
+		if i > 0 {
+			next++ // "\n" separator
+		}
+		if next > maxTokens {
+			break
+		}
+		running = next
+		kept++
+	}
+
+	if kept == 0 {
+		// Single oversized item: keep it (its 300-rune per-item truncation
+		// upstream is the item-shaped last resort) rather than dropping
+		// everything. Append the marker so the over-budget state stays
+		// observable.
+		result := make([]string, 0, len(items)+1)
+		result = append(result, items...)
+		result = append(result, memoryBudgetTruncatedMarker)
+		return result
+	}
+
+	result := make([]string, kept, kept+1)
+	copy(result, items[:kept])
+	result = append(result, memoryBudgetTruncatedMarker)
+	return result
+}
+
+// SplitMemoryItems splits an assembled memory context string back into its
+// structured items. A new item starts at each line beginning with the "- "
+// bullet written by RunWithTask; continuation lines (multi-line memory
+// content, the budget marker) stay attached to the preceding item so a
+// whole-item drop never orphans them.
+func SplitMemoryItems(context string) []string {
+	lines := strings.Split(context, "\n")
+	var items []string
+	var current []string
+	flush := func() {
+		if len(current) > 0 {
+			items = append(items, strings.Join(current, "\n"))
+			current = current[:0]
+		}
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "- ") && len(current) > 0 {
+			flush()
+		}
+		current = append(current, line)
+	}
+	flush()
+	return items
+}
+
 // buildSystemPromptWithContextAndSkills constructs system prompt with both memory and skill context.
 // Memory context is bounded to MaxMemoryContextTokens to prevent context domination.
 // Uses frozen memory snapshot from conversation for API prefix caching efficiency (Hermes pattern).
@@ -7156,19 +7265,22 @@ func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, c
 	if conv.HasMemorySnapshot() {
 		memoryContext := conv.BuildPromptWithSnapshot()
 		if memoryContext != "" {
-			// Apply token budget if context is too large
+			// Defensive re-enforcement of the token budget. The primary
+			// whole-item budgeting happens at assembly time in RunWithTask
+			// (over the structured, relevance-ordered items, BEFORE
+			// SetMemoryContext). This site guards snapshots arriving via
+			// other paths and must never cut mid-item either: split on
+			// the "- " bullet lines and drop WHOLE lowest-ranked items,
+			// preserving the order of what fits. Dropped items leave the
+			// observability marker.
 			budgetTokens := MaxMemoryContextTokens
-			estimatedTokens := llm.EstimateTokenCountHeuristic(memoryContext)
-
-			if estimatedTokens > budgetTokens {
-				// Truncate context proportionally
-				ratio := float64(budgetTokens) / float64(estimatedTokens)
-				truncateLen := int(float64(len(memoryContext)) * ratio)
-				if truncateLen > 0 {
-					memoryContext = memoryContext[:truncateLen] + "\n\n...[memory truncated due to token budget]..."
-				}
+			items := SplitMemoryItems(memoryContext)
+			budgeted := EnforceMemoryItemBudget(items, budgetTokens)
+			memoryContext = strings.Join(budgeted, "\n")
+			if len(budgeted) != len(items) {
 				l.logger.Debug("Memory context truncated due to token budget",
-					"original_tokens", estimatedTokens,
+					"original_items", len(items),
+					"kept_items", len(budgeted)-1, // minus marker
 					"budget_tokens", budgetTokens,
 				)
 			}

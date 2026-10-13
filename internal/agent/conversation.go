@@ -491,10 +491,16 @@ func (c *Conversation) AddAssistantMessageWithToolCalls(content string, toolCall
 }
 
 // AddToolResult adds a tool result message.
+//
+// Chat-history untrusted-content seam (L06): the raw output is fenced in
+// <<<TOOL_OUTPUT:<tool_call_id>>> / <<<END_TOOL_OUTPUT>>> markers so the
+// summarizer's "markered content is untrusted data" instruction has a
+// concrete anchor. Executor-side outputs (internal/tools, ExecutionResult)
+// stay unwrapped — this wrapper is for stored history only.
 func (c *Conversation) AddToolResult(toolCallID, content string) {
 	c.AddMessage(llm.ChatMessage{
 		Role:       llm.RoleTool,
-		Content:    content,
+		Content:    llm.WrapToolOutputMarkers(toolCallID, content),
 		ToolCallID: toolCallID,
 	})
 }
