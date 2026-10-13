@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -50,11 +51,49 @@ func (i memoryListItem) Title() string {
 func (i memoryListItem) Description() string {
 	memType := i.item.GetType()
 	score := i.item.RelevanceScore
+	// Bridge-tagged units (metadata unit_type=bridge) show their verified
+	// flag + evidence count so derived facts are distinguishable from
+	// source memories (branch 09 B06). Lowercase per repo UI convention.
+	if meta := i.item.Metadata; meta != nil {
+		if unitType, _ := meta["unit_type"].(string); unitType == "bridge" {
+			verified, _ := meta["verified"].(string)
+			return fmt.Sprintf("[bridge] verified: %s | evidence: %d | score: %.2f",
+				bridgeVerifiedText(verified), bridgeEvidenceCount(meta), score)
+		}
+	}
 	return fmt.Sprintf("[%s] score: %.2f", memType, score)
 }
 
 func (i memoryListItem) FilterValue() string {
 	return i.item.Content
+}
+
+// bridgeVerifiedText renders the bridge verified metadata flag
+// ("true"/"false") as a lowercase word; unknown values render as "unknown".
+func bridgeVerifiedText(verified string) string {
+	switch verified {
+	case "true":
+		return "yes"
+	case "false":
+		return "no"
+	default:
+		return "unknown"
+	}
+}
+
+// bridgeEvidenceCount reads evidence_ids out of bridge metadata, tolerating
+// both the JSON-string and pre-decoded array shapes.
+func bridgeEvidenceCount(meta map[string]any) int {
+	switch ev := meta["evidence_ids"].(type) {
+	case string:
+		var ids []string
+		if err := json.Unmarshal([]byte(ev), &ids); err == nil {
+			return len(ids)
+		}
+	case []any:
+		return len(ev)
+	}
+	return 0
 }
 
 // NewMemoryModel creates a new memory model.
@@ -367,6 +406,16 @@ func (m *MemoryModel) renderDetail(width int) string {
 	}
 
 	content += labelStyle.Render("relevance:") + valueStyle.Render(fmt.Sprintf("%.2f", item.RelevanceScore)) + "\n"
+
+	// Bridge-tagged units (metadata unit_type=bridge) show provenance in
+	// the detail panel (branch 09 B06). Lowercase per repo UI convention.
+	if meta := item.Metadata; meta != nil {
+		if unitType, _ := meta["unit_type"].(string); unitType == "bridge" {
+			verified, _ := meta["verified"].(string)
+			content += labelStyle.Render("bridge:") + valueStyle.Render(
+				fmt.Sprintf("verified: %s | evidence: %d", bridgeVerifiedText(verified), bridgeEvidenceCount(meta))) + "\n"
+		}
+	}
 
 	if item.CreatedAt != "" {
 		content += labelStyle.Render("created:") + valueStyle.Render(item.CreatedAt) + "\n"

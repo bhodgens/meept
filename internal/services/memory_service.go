@@ -108,6 +108,73 @@ func (s *MemoryService) Export(ctx context.Context, format, category string) ([]
 	return json.MarshalIndent(results, "", "  ")
 }
 
+// BridgeInfo is one bridging-fact row for the visibility surface (branch 09
+// B06): the CLI/TUI memory command renders these as [bridge] rows with the
+// verified flag and evidence count.
+type BridgeInfo struct {
+	ID            string         `json:"id"`
+	Content       string         `json:"content"`
+	Verified      bool           `json:"verified"`
+	EvidenceIDs   []string       `json:"evidence_ids"`
+	EvidenceCount int            `json:"evidence_count"`
+	CreatedAt     string         `json:"created_at,omitempty"`
+	Entity        string         `json:"entity,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+}
+
+// Bridges lists every persisted bridging fact. Unavailable (not an error
+// payload) when no bridge store is wired: the visibility surface reports the
+// empty state honestly instead of failing.
+func (s *MemoryService) Bridges(ctx context.Context) ([]BridgeInfo, error) {
+	if s.manager == nil {
+		return nil, wrapError("memory", "Bridges", ErrUnavailable)
+	}
+	store := s.manager.BridgeStore()
+	if store == nil {
+		return nil, wrapError("memory", "Bridges", ErrUnavailable)
+	}
+	records, err := store.ListBridges(ctx)
+	if err != nil {
+		return nil, wrapError("memory", "Bridges", err)
+	}
+	out := make([]BridgeInfo, 0, len(records))
+	for _, rec := range records {
+		info := BridgeInfo{
+			ID:            rec.ID,
+			Content:       rec.Content,
+			Verified:      rec.Verified,
+			EvidenceIDs:   rec.EvidenceIDs,
+			EvidenceCount: len(rec.EvidenceIDs),
+			Metadata:      rec.Metadata,
+		}
+		if !rec.CreatedAt.IsZero() {
+			info.CreatedAt = rec.CreatedAt.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		if e, ok := rec.Metadata["entity"].(string); ok {
+			info.Entity = e
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
+// BridgeCount returns the number of persisted bridging facts (0 when no
+// bridge store is wired — the count is a display figure, not an error).
+func (s *MemoryService) BridgeCount(ctx context.Context) int {
+	if s.manager == nil {
+		return 0
+	}
+	store := s.manager.BridgeStore()
+	if store == nil {
+		return 0
+	}
+	n, err := store.Count(ctx)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
 // VectorSearchRequest contains parameters for vector search.
 type VectorSearchRequest struct {
 	Query      string   `json:"query"`

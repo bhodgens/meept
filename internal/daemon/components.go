@@ -220,6 +220,11 @@ type Components struct {
 	// Memory
 	MemoryManager *memory.Manager
 	MemoryHandler *memory.Handler
+	// DistillWorker consumes memory.l1_extract / memory.l2_scene queue
+	// jobs (tree 01 layered async distillation). Nil unless
+	// memory.l0_enabled is set. Routed through the worker pool's
+	// processor via distillRouter (see l0_wiring.go).
+	DistillWorker *memory.DistillWorker
 
 	// Memvid and multi-agent
 	MemvidClient  *memvid.Client
@@ -1985,7 +1990,38 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 		wireEpistemicDetector(c.MemoryManager, epistemicChatter, cfg.Memory, logger)
 		wireEpistemicHook(c.AgentLoop, c.MemoryManager, epistemicChatter, cfg.Memory, logger)
+
+		// Bridge subsystem (branch 09). Opens the bridge shard under the
+		// daemon data dir and wires the consolidator's generation +
+		// verification components. All of it stays dormant unless
+		// memory.bridges.enabled is true (default off); see
+		// bridges_wiring.go.
+		bridgeChatter := epistemicChatter
+		wireBridges(c.MemoryManager, bridgeChatter, cfg.Memory, cfg.Daemon.DataDir, logger)
 	}
+
+	// L0 raw-conversation tier (tree 01 L3). Gated on memory.l0_enabled
+	// (default false — nothing records). Wires the session-end record +
+	// enqueue hook, the consolidator prune closure, and returns the
+	// DistillWorker for queue registration below. The enqueuer is the
+	// daemon's own persistent queue (satisfies memory.JobEnqueuer); nil
+	// queue just means L1 jobs are never enqueued (recording continues).
+	var l0Enqueuer memory.JobEnqueuer
+	if c.Queue != nil {
+		if pq, ok := c.Queue.(*queue.PersistentQueue); ok {
+			l0Enqueuer = pq
+		}
+	}
+	// Same chatter preference as the epistemic path: memory_model client >
+	// LLMProvider > LLMClient (SHARED-CONVENTIONS §2.2 memory_model slot).
+	distillChatter := c.LLMProvider
+	if c.MemoryModelClient != nil {
+		distillChatter = c.MemoryModelClient
+	}
+	if distillChatter == nil {
+		distillChatter = c.LLMClient
+	}
+	c.DistillWorker = wireL0Distill(c.AgentLoop, c.MemoryManager, l0Enqueuer, distillChatter, cfg.Memory, logger)
 
 	wireFileWatcherHook(c.AgentLoop, *cfg, msgBus, logger)
 	// Wire HTTP hooks from config (each entry becomes a session lifecycle hook)
@@ -3469,6 +3505,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		jobProc.WithTaskStore(taskStore)
 	}
 	c.JobProcessor = jobProc
+
+	// BEGIN tree-01-L3 distill worker registration (APPEND-ONLY block —
+	// the registration site is contended; add siblings as separate blocks).
+	// When L0 is enabled, memory.l1_extract / memory.l2_scene jobs route to
+	// the DistillWorker; every other job type falls through to the agent
+	// processor unchanged. When L0 is disabled this is a no-op and
+	// c.JobProcessor stays the bare agent processor.
+	if c.DistillWorker != nil {
+		c.JobProcessor = &distillRouter{agent: jobProc, distill: c.DistillWorker}
+	}
+	// END tree-01-L3 distill worker registration.
 
 	// Create worker pool
 	if c.Queue != nil && c.JobProcessor != nil {
@@ -5400,6 +5447,14 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		if err := c.MemoryManager.Close(); err != nil {
 			c.Logger.Error("Failed to close memory manager", "error", err)
 			lastErr = err
+		}
+		// The bridge store owns its own sqlite handle (bridge.vec.db);
+		// close it after the manager (invalidation may still reference
+		// the store during manager teardown).
+		if bs := c.MemoryManager.BridgeStore(); bs != nil {
+			if err := bs.Close(); err != nil {
+				c.Logger.Warn("Failed to close bridge store", "error", err)
+			}
 		}
 	}
 

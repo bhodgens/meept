@@ -5,14 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/spf13/cobra"
 )
 
 func newMemoryCmd() *cobra.Command {
 	var limit int
+	var bridgesOnly bool
 
 	cmd := &cobra.Command{
 		Use:   "memory [query]",
@@ -21,11 +26,13 @@ func newMemoryCmd() *cobra.Command {
 
 Without arguments, lists recent memories.
 With a query, searches for matching memories.
+With --bridges, lists bridging facts instead of memories.
 
 Examples:
   meept memory                    # List recent memories
   meept memory "project setup"    # Search for specific memories
-  meept memory -n 50 "config"     # Search with custom limit`,
+  meept memory -n 50 "config"     # Search with custom limit
+  meept memory --bridges          # List bridging facts`,
 	}
 
 	cmd.AddCommand(newMemoryExportCmd())
@@ -35,12 +42,18 @@ Examples:
 	cmd.AddCommand(newMemoryPromoteCmd())
 	cmd.AddCommand(newMemoryRejectCmd())
 	cmd.AddCommand(newMemoryExpiredCmd())
+	cmd.AddCommand(newMemoryL0Cmd())
+	cmd.AddCommand(newMemoryConflictsCmd())
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 10, "Maximum number of results")
+	cmd.Flags().BoolVar(&bridgesOnly, "bridges", false, "List bridging facts instead of searching memories")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		query := ""
 		if len(args) > 0 {
 			query = strings.Join(args, " ")
+		}
+		if bridgesOnly {
+			return runMemoryBridges(limit)
 		}
 		return runMemorySearch(query, limit)
 	}
@@ -149,11 +162,118 @@ func runMemorySearch(query string, limit int) error {
 		if item.CreatedAt != "" {
 			fmt.Printf(" | Created: %s", item.CreatedAt)
 		}
+		// Bridge-tagged rows (metadata unit_type=bridge, written by the
+		// BridgeStore) surface their verified flag + evidence count so the
+		// derived nature stays visible next to source memories.
+		if meta := item.Metadata; meta != nil {
+			if unitType, _ := meta["unit_type"].(string); unitType == "bridge" {
+				verified, _ := meta["verified"].(string)
+				evCount := bridgeEvidenceCount(meta)
+				fmt.Printf(" | verified: %s | evidence: %d", bridgeVerifiedText(verified), evCount)
+			}
+		}
 		fmt.Printf("\033[0m\n")
 	}
 
 	fmt.Printf("\n%d result(s)\n", len(items))
 	return nil
+}
+
+// runMemoryBridges lists persisted bridging facts via the memory.bridges RPC
+// (branch 09 B06). Lowercase output, one row per bridge: id, verified flag,
+// evidence count, entity, content.
+func runMemoryBridges(limit int) error {
+	client, err := connectDaemon()
+	if err != nil {
+		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
+	}
+	defer client.Close()
+
+	rawResult, err := client.Call("memory.bridges", map[string]any{})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unavailable") {
+			fmt.Println("no bridges (bridge generation is disabled; enable memory.bridges.enabled)")
+			return nil
+		}
+		return fmt.Errorf("failed to list bridges: %w", err)
+	}
+
+	var result struct {
+		Bridges []struct {
+			ID            string         `json:"id"`
+			Content       string         `json:"content"`
+			Verified      bool           `json:"verified"`
+			EvidenceCount int            `json:"evidence_count"`
+			CreatedAt     string         `json:"created_at"`
+			Entity        string         `json:"entity"`
+			Metadata      map[string]any `json:"metadata"`
+		} `json:"bridges"`
+	}
+	if err := json.Unmarshal(rawResult, &result); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if len(result.Bridges) == 0 {
+		fmt.Println("no bridges (bridge generation is disabled or has produced none yet; enable memory.bridges.enabled)")
+		return nil
+	}
+
+	shown := result.Bridges
+	if limit > 0 && len(shown) > limit {
+		shown = shown[:limit]
+	}
+	for i, b := range shown {
+		verified := "no"
+		if b.Verified {
+			verified = "yes"
+		}
+		content := strings.ReplaceAll(b.Content, "\n", " ")
+		runes := []rune(content)
+		if len(runes) > 80 {
+			content = string(runes[:77]) + "..."
+		}
+		entity := b.Entity
+		if entity == "" {
+			entity = "-"
+		}
+		fmt.Printf("\n%s[bridge %d] %s%s\n", "\033[35m", i+1, "verified: "+verified, "\033[0m")
+		fmt.Printf("    %s\n", content)
+		fmt.Printf("    \033[90mid: %s | evidence: %d | entity: %s", b.ID, b.EvidenceCount, entity)
+		if b.CreatedAt != "" {
+			fmt.Printf(" | created: %s", b.CreatedAt)
+		}
+		fmt.Printf("\033[0m\n")
+	}
+	fmt.Printf("\n%d bridge(s)\n", len(shown))
+	return nil
+}
+
+// bridgeEvidenceCount reads evidence_ids out of bridge metadata, tolerating
+// both the JSON-string and pre-decoded array shapes.
+func bridgeEvidenceCount(meta map[string]any) int {
+	switch ev := meta["evidence_ids"].(type) {
+	case string:
+		var ids []string
+		if err := json.Unmarshal([]byte(ev), &ids); err == nil {
+			return len(ids)
+		}
+	case []any:
+		return len(ev)
+	}
+	return 0
+}
+
+// bridgeVerifiedText renders the verified metadata flag ("true"/"false")
+// as a lowercase word; unknown values render as "unknown".
+func bridgeVerifiedText(verified string) string {
+	switch verified {
+	case "true":
+		return "yes"
+	case "false":
+		return "no"
+	default:
+		return "unknown"
+	}
 }
 
 func getTypeColor(memType string) string {
@@ -567,6 +687,85 @@ Examples:
 	return cmd
 }
 
+func newMemoryConflictsCmd() *cobra.Command {
+	var since string
+
+	cmd := &cobra.Command{
+		Use:   "conflicts",
+		Short: "list claims created by conflict merge decisions",
+		Long: `List claims the conflict detector created by merging candidates into
+existing claims (metadata conflict_action=merge).
+
+Each row shows the merged claim, the old claims it superseded, and the
+detector's reason — the audit trail for automated merges.
+
+Examples:
+  meept memory conflicts                  # all merge claims (max 50)
+  meept memory conflicts --since=48h      # merges from the last 48 hours`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			params := map[string]any{}
+			if since != "" {
+				d, err := time.ParseDuration(since)
+				if err != nil {
+					return fmt.Errorf("invalid --since duration %q: %w", since, err)
+				}
+				params["since_hours"] = int(d.Hours())
+			}
+
+			rawResult, err := client.Call("memory.listConflicts", params)
+			if err != nil {
+				return fmt.Errorf("failed to list conflict merges: %w", err)
+			}
+
+			var result struct {
+				Memories []struct {
+					Memory struct {
+						ID        string         `json:"id"`
+						Content   string         `json:"content"`
+						CreatedAt string         `json:"created_at"`
+						Metadata  map[string]any `json:"metadata"`
+					} `json:"memory"`
+				} `json:"memories"`
+			}
+			if err := json.Unmarshal(rawResult, &result); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if len(result.Memories) == 0 {
+				fmt.Println("no conflict merge claims")
+				return nil
+			}
+			for _, m := range result.Memories {
+				text := strings.ReplaceAll(m.Memory.Content, "\n", " ")
+				runes := []rune(text)
+				if len(runes) > 80 {
+					text = string(runes[:80])
+				}
+				targets := "[]"
+				if raw, ok := m.Memory.Metadata["conflict_targets"].([]any); ok && len(raw) > 0 {
+					ids := make([]string, 0, len(raw))
+					for _, t := range raw {
+						if s, ok := t.(string); ok {
+							ids = append(ids, s)
+						}
+					}
+					targets = strings.Join(ids, ",")
+				}
+				fmt.Printf("%s  targets=%s  %s\n", m.Memory.ID, targets, text)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&since, "since", "", "only merges newer than this duration ago (e.g. 48h)")
+	return cmd
+}
+
 func newMemoryRejectCmd() *cobra.Command {
 	var reason string
 
@@ -655,4 +854,89 @@ func renderReviewQueue(result map[string]any) {
 	} else {
 		fmt.Printf("\n%d item(s) pending review\n", total)
 	}
+}
+
+// --- L0 raw-conversation tier (tree 01) ---
+
+func newMemoryL0Cmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "l0",
+		Short: "l0 raw-conversation store operations",
+		Long: `Observability for the L0 raw-conversation tier (layered async
+distillation). Reads <memory.data_dir>/l0/ directly — no daemon required.`,
+	}
+	cmd.AddCommand(newMemoryL0StatsCmd())
+	return cmd
+}
+
+// newMemoryL0StatsCmd builds `meept memory l0 stats`: file count, line
+// count, and oldest date across the daily JSONL files. Direct file reads
+// over the configured memory.data_dir; a missing l0 dir reports zeroes
+// (not an error — l0 may never have been enabled).
+func newMemoryL0StatsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "stats",
+		Short: "show l0 file/line counts and oldest date",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.LoadDefault()
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+			dataDir := cfg.Memory.DataDir
+			if dataDir == "" {
+				dataDir = config.MeeptPath("memory")
+			}
+			return runL0Stats(filepath.Join(dataDir, "l0"))
+		},
+	}
+}
+
+// runL0Stats scans the daily YYYY-MM-DD.jsonl files in dir and prints file
+// count, total line count, and the oldest date. Torn/blank lines still
+// count as lines (they are on disk); only files matching the frozen daily
+// layout are considered.
+func runL0Stats(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("l0: no files (l0 recording not enabled or no turns recorded)")
+			return nil
+		}
+		return fmt.Errorf("l0: read dir: %w", err)
+	}
+
+	files := 0
+	lines := 0
+	oldest := ""
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		dateStr, ok := strings.CutSuffix(name, ".jsonl")
+		if !ok {
+			continue
+		}
+		if _, err := time.Parse("2006-01-02", dateStr); err != nil {
+			continue // not a daily file; skip
+		}
+		files++
+		if oldest == "" || dateStr < oldest {
+			oldest = dateStr
+		}
+		n, err := countLines(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("l0: count lines in %s: %w", name, err)
+		}
+		lines += n
+	}
+
+	fmt.Printf("files: %d\n", files)
+	fmt.Printf("lines: %d\n", lines)
+	if oldest == "" {
+		fmt.Println("oldest: (none)")
+	} else {
+		fmt.Printf("oldest: %s\n", oldest)
+	}
+	return nil
 }

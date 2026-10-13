@@ -81,4 +81,19 @@ func registerMemoryRPCHandlers(server *rpc.Server, memSvc *services.MemoryServic
 		}
 		return stats, nil
 	})
+
+	// memory.bridges — bridge visibility surface (branch 09 B06). Lists
+	// every persisted bridging fact with its verified flag and evidence
+	// count; backs `meept memory --bridges` and the TUI memory browser's
+	// bridge badge. Bridges live in the manager's BridgeStore (wired at
+	// boot when memory.bridges is enabled); with no store wired this
+	// returns "memory service unavailable", which the CLI renders as the
+	// honest empty state.
+	server.RegisterHandler("memory.bridges", func(ctx context.Context, _ json.RawMessage) (any, error) {
+		bridges, err := memSvc.Bridges(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"bridges": bridges, "count": len(bridges)}, nil
+	})
 }

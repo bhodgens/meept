@@ -275,6 +275,15 @@ func (bs *BridgeStore) ListBridgesByEvidence(ctx context.Context, evidenceID str
 	return out, nil
 }
 
+// ListBridges returns every persisted bridge record (side-table scan) with
+// content + typed metadata filled in. This is the visibility surface (branch
+// 09 B06): the CLI/TUI memory listing uses it to show bridge rows with their
+// verified flag and evidence count. Unlike the recall path, the listing must
+// see unverified bridges too — visibility is not a quality gate.
+func (bs *BridgeStore) ListBridges(ctx context.Context) ([]BridgeRecord, error) {
+	return bs.listAllBridges(ctx)
+}
+
 // listAllBridges returns every persisted bridge record (side-table scan).
 // Used by the B03 verification pass, which must see unverified bridges too —
 // unlike the recall path, verification is not allowed to skip them.

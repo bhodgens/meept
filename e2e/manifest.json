@@ -89,7 +89,9 @@
       "goal-completion"
     ],
     "internal/memory/": [
-      "memory-persistence"
+      "memory-persistence",
+      "bridges",
+      "memory-layered-distill"
     ],
     "internal/auth/": [
       "auth-multiuser"
@@ -420,6 +422,16 @@
     {
       "name": "memory-persistence",
       "dir": "e2e/suites/memory-persistence",
+      "status": "implemented"
+    },
+    {
+      "name": "memory-layered-distill",
+      "dir": "e2e/suites/memory-layered-distill",
+      "status": "implemented"
+    },
+    {
+      "name": "bridges",
+      "dir": "e2e/suites/bridges",
       "status": "implemented"
     },
     {
@@ -1687,6 +1699,68 @@
       "paths": [
         "internal/memory/manager.go",
         "internal/memory/dual_store.go"
+      ]
+    },
+    {
+      "id": "memory-persistence-03",
+      "suite": "memory-persistence",
+      "diff": "M",
+      "title": "conflict merge decision supersedes the target claim and stamps merge metadata; detector failure fails open to plain store",
+      "paths": [
+        "internal/memory/distill_async.go",
+        "internal/memory/conflict_wiring.go"
+      ]
+    },
+    {
+      "id": "memory-layered-distill-01",
+      "suite": "memory-layered-distill",
+      "diff": "M",
+      "title": "seeded conversation via the real l0 recorder -> l1_extract job stores a status=auto claim -> chained l2_scene job writes an llm-segmented scene file -> queue stats show zero dead-letters",
+      "paths": [
+        "internal/memory/l0/",
+        "internal/memory/distill_async.go",
+        "internal/daemon/l0_wiring.go",
+        "internal/queue/"
+      ]
+    },
+    {
+      "id": "memory-layered-distill-02",
+      "suite": "memory-layered-distill",
+      "diff": "M",
+      "title": "duplicate l1 enqueue for an already-distilled window is suppressed by the l0_progress marker (no second claim set, no second extraction llm call)",
+      "paths": [
+        "internal/memory/distill_async.go"
+      ]
+    },
+    {
+      "id": "memory-layered-distill-03",
+      "suite": "memory-layered-distill",
+      "diff": "M",
+      "title": "l1 llm error propagates to the queue retry path and the marker never advances; a retry after the failure stores the claim (window not lost)",
+      "paths": [
+        "internal/memory/distill_async.go"
+      ]
+    },
+    {
+      "id": "bridges-01",
+      "suite": "bridges",
+      "diff": "M",
+      "title": "enable -> generate against a seeded store via a mocked generator -> recall admits at most k_b bridges -> delete the source memory -> its bridges are cascade-invalidated",
+      "paths": [
+        "internal/memory/bridges.go",
+        "internal/memory/bridges_store.go",
+        "internal/memory/bridges_verify.go"
+      ]
+    },
+    {
+      "id": "bridges-02",
+      "suite": "bridges",
+      "diff": "S",
+      "title": "daemon boot wires the bridge store under memory.bridges.enabled and the CLI memory --bridges surface answers through the live RPC; disabled default renders the honest empty state",
+      "paths": [
+        "internal/daemon/bridges_wiring.go",
+        "internal/daemon/memory_rpc.go",
+        "cmd/meept/memory.go"
       ]
     },
     {
