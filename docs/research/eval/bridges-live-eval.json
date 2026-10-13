@@ -1,0 +1,1435 @@
+{
+  "schema_version": 1,
+  "eval": "bridges-on-off-recall",
+  "mode": "live",
+  "run_at": "2026-10-13T20:29:42Z",
+  "note": "LIVE run against local llama-server (LFM2.5-8B-A1B Q4_K_M, 127.0.0.1:8401, temp 0.2, max_tokens 2048). Mock grader unchanged. 2026-10-13.",
+  "config": {
+    "kb": 0,
+    "top_k": 0,
+    "match_threshold": 0,
+    "bridge_df_max": 0,
+    "verify": false,
+    "live": false
+  },
+  "fixture_path": "tools/bridges-eval/fixtures/bridges-fixture.json",
+  "fixture_hash": "66623d5d53c5d3ce9b746b03",
+  "config_hash": "893275a4af9c16daba3711dd",
+  "bridge_pool": {
+    "generated": 6,
+    "verified": 6,
+    "entities": [
+      "atlasdb",
+      "delta 9",
+      "hermes flag",
+      "ipsec",
+      "kxbridge",
+      "waku"
+    ]
+  },
+  "arms": {
+    "a": {
+      "arm": "a",
+      "questions": 24,
+      "errors": 0,
+      "correctness_pct": 87.5,
+      "mean_context_tokens": 363.583,
+      "mean_latency_ms": 1399.339,
+      "bridge_query_count": 0,
+      "bridges_included_total": 0,
+      "bridges_included_avg_per_query": 0,
+      "bridges_excluded_total": 0,
+      "bridges_available": 0
+    },
+    "b": {
+      "arm": "b",
+      "questions": 24,
+      "errors": 0,
+      "correctness_pct": 87.5,
+      "mean_context_tokens": 401.5,
+      "mean_latency_ms": 1614.934,
+      "bridge_query_count": 24,
+      "bridges_included_total": 48,
+      "bridges_included_avg_per_query": 2,
+      "bridges_excluded_total": 96,
+      "bridges_available": 6
+    }
+  },
+  "pass_criteria": {
+    "correctness_non_regression": true,
+    "token_reduction": false,
+    "correctness_gain": false,
+    "pass": false,
+    "rule": "pass = (corrB >= corrA - 2pp AND tokensB <= tokensA*0.9) OR (corrB >= corrA + 3pp AND tokensB ~= tokensA)"
+  },
+  "questions": [
+    {
+      "question_id": "q-01",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 346,
+      "latency_ms": 1541.043,
+      "sources_selected": [
+        "mem-0002",
+        "mem-0010",
+        "mem-0009",
+        "mem-0003",
+        "mem-0011",
+        "mem-0007",
+        "mem-0006",
+        "mem-0001"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "AtlasDB restore time fell from 9 hours to 4 hours after the codec upgrade."
+    },
+    {
+      "question_id": "q-02",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 363,
+      "latency_ms": 1341.884,
+      "sources_selected": [
+        "mem-0001",
+        "mem-0011",
+        "mem-0003",
+        "mem-0008",
+        "mem-0009",
+        "mem-0007",
+        "mem-0006",
+        "mem-0002"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "AtlasDB uses delta\u202f9 compression for its cold storage, which holds 40\u202fTB."
+    },
+    {
+      "question_id": "q-03",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 359,
+      "latency_ms": 916.953,
+      "sources_selected": [
+        "mem-0001",
+        "mem-0002",
+        "mem-0003",
+        "mem-0011",
+        "mem-0009",
+        "mem-0004",
+        "mem-0005",
+        "mem-0006"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "AtlasDB backups run nightly at 02:00."
+    },
+    {
+      "question_id": "q-04",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 376,
+      "latency_ms": 1316.98,
+      "sources_selected": [
+        "mem-0011",
+        "mem-0001",
+        "mem-0002",
+        "mem-0006",
+        "mem-0003",
+        "mem-0004",
+        "mem-0005",
+        "mem-0008"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "Delta\u202f9 provides faster restore times than zstd\u202f19, which offers smaller archive sizes."
+    },
+    {
+      "question_id": "q-05",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 356,
+      "latency_ms": 954.075,
+      "sources_selected": [
+        "mem-0003",
+        "mem-0010",
+        "mem-0009",
+        "mem-0007",
+        "mem-0006",
+        "mem-0008",
+        "mem-0001",
+        "mem-0002"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The kxbridge replica is keeping a warm copy in Dublin during the AtlasDB migration."
+    },
+    {
+      "question_id": "q-06",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 345,
+      "latency_ms": 1616.71,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0004",
+        "mem-0011",
+        "mem-0008",
+        "mem-0003",
+        "mem-0002",
+        "mem-0009",
+        "mem-0001"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "KXBridge handles cross\u2011region replication between Dublin and Frankfurt, replicating at 2\u202fGB per minute."
+    },
+    {
+      "question_id": "q-07",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 364,
+      "latency_ms": 1120.634,
+      "sources_selected": [
+        "mem-0008",
+        "mem-0007",
+        "mem-0003",
+        "mem-0010",
+        "mem-0006",
+        "mem-0009",
+        "mem-0002",
+        "mem-0005"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "KXBridge falls back to the public relay."
+    },
+    {
+      "question_id": "q-08",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 1,
+      "correct": false,
+      "correctness_pct": 50,
+      "context_tokens": 347,
+      "latency_ms": 2210.239,
+      "sources_selected": [
+        "mem-0004",
+        "mem-0008",
+        "mem-0011",
+        "mem-0009",
+        "mem-0007",
+        "mem-0010",
+        "mem-0001",
+        "mem-0003"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "KXBridge uses the IPsec tunnel for replication traffic, and it was renewed by the network team in January."
+    },
+    {
+      "question_id": "q-09",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 377,
+      "latency_ms": 1324.543,
+      "sources_selected": [
+        "mem-0005",
+        "mem-0006",
+        "mem-0008",
+        "mem-0003",
+        "mem-0009",
+        "mem-0007",
+        "mem-0004",
+        "mem-0012"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "Enabling the hermes flag doubles ingest throughput but adds a 15\u202f% CPU overhead."
+    },
+    {
+      "question_id": "q-10",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 364,
+      "latency_ms": 1369.321,
+      "sources_selected": [
+        "mem-0006",
+        "mem-0005",
+        "mem-0009",
+        "mem-0003",
+        "mem-0008",
+        "mem-0007",
+        "mem-0010",
+        "mem-0002"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The hermes flag rollout review is scheduled for April, where it will decide whether the 15\u202fpercent CPU overhead is acceptable."
+    },
+    {
+      "question_id": "q-11",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 371,
+      "latency_ms": 1854.732,
+      "sources_selected": [
+        "mem-0005",
+        "mem-0006",
+        "mem-0001",
+        "mem-0012",
+        "mem-0002",
+        "mem-0003",
+        "mem-0004",
+        "mem-0007"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "They are frozen until the April rollout review of the hermes flag to decide if the 15\u202f% CPU overhead is acceptable."
+    },
+    {
+      "question_id": "q-12",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 371,
+      "latency_ms": 1065.537,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0009",
+        "mem-0006",
+        "mem-0008",
+        "mem-0005",
+        "mem-0007",
+        "mem-0003",
+        "mem-0012"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The edge fleet has 320 nodes across 12 sites."
+    },
+    {
+      "question_id": "q-13",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 371,
+      "latency_ms": 911.566,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0009",
+        "mem-0007",
+        "mem-0006",
+        "mem-0008",
+        "mem-0003",
+        "mem-0005",
+        "mem-0012"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The peak telemetry rate from the edge fleet is 50,000 messages per second."
+    },
+    {
+      "question_id": "q-14",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 365,
+      "latency_ms": 1116.568,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0009",
+        "mem-0011",
+        "mem-0008",
+        "mem-0007",
+        "mem-0003",
+        "mem-0005",
+        "mem-0006"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The waku relay layer carries telemetry for the edge fleet."
+    },
+    {
+      "question_id": "q-15",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 1,
+      "correct": false,
+      "correctness_pct": 50,
+      "context_tokens": 371,
+      "latency_ms": 1427.123,
+      "sources_selected": [
+        "mem-0009",
+        "mem-0012",
+        "mem-0007",
+        "mem-0010",
+        "mem-0006",
+        "mem-0003",
+        "mem-0008",
+        "mem-0005"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "It reduced telemetry latency from 800\u202fms to 120\u202fms and halved relay memory usage."
+    },
+    {
+      "question_id": "q-16",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 370,
+      "latency_ms": 1313.395,
+      "sources_selected": [
+        "mem-0007",
+        "mem-0008",
+        "mem-0009",
+        "mem-0006",
+        "mem-0003",
+        "mem-0002",
+        "mem-0005",
+        "mem-0001"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The ipsec tunnel was renewed in January and is set to last for two years."
+    },
+    {
+      "question_id": "q-17",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 370,
+      "latency_ms": 1128.334,
+      "sources_selected": [
+        "mem-0003",
+        "mem-0006",
+        "mem-0008",
+        "mem-0007",
+        "mem-0009",
+        "mem-0002",
+        "mem-0001",
+        "mem-0005"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The AtlasDB migration is going to the Frankfurt region and is planned for March."
+    },
+    {
+      "question_id": "q-18",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 359,
+      "latency_ms": 1306.421,
+      "sources_selected": [
+        "mem-0003",
+        "mem-0004",
+        "mem-0008",
+        "mem-0001",
+        "mem-0007",
+        "mem-0002",
+        "mem-0005",
+        "mem-0009"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "KXBridge replicates between Dublin and Frankfurt, and it keeps a warm copy for AtlasDB."
+    },
+    {
+      "question_id": "q-19",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 1,
+      "correct": false,
+      "correctness_pct": 50,
+      "context_tokens": 371,
+      "latency_ms": 1448.722,
+      "sources_selected": [
+        "mem-0009",
+        "mem-0010",
+        "mem-0012",
+        "mem-0007",
+        "mem-0008",
+        "mem-0006",
+        "mem-0005",
+        "mem-0003"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The waku relay had 800\u202fms latency before the Go rewrite and carries telemetry for the edge fleet."
+    },
+    {
+      "question_id": "q-20",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 358,
+      "latency_ms": 1308.226,
+      "sources_selected": [
+        "mem-0001",
+        "mem-0011",
+        "mem-0008",
+        "mem-0010",
+        "mem-0009",
+        "mem-0003",
+        "mem-0007",
+        "mem-0006"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "Delta\u202f9 won on restore speed, and the cold tier is 40\u202fTB."
+    },
+    {
+      "question_id": "q-21",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 365,
+      "latency_ms": 1927.048,
+      "sources_selected": [
+        "mem-0004",
+        "mem-0008",
+        "mem-0009",
+        "mem-0003",
+        "mem-0007",
+        "mem-0005",
+        "mem-0010",
+        "mem-0006"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The ipsec tunnel connects Dublin and Frankfurt, and KXBridge uses it for replication."
+    },
+    {
+      "question_id": "q-22",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 358,
+      "latency_ms": 1305.913,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0009",
+        "mem-0011",
+        "mem-0008",
+        "mem-0003",
+        "mem-0007",
+        "mem-0004",
+        "mem-0006"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The edge fleet peaks at 50k messages per second, carried by the waku relay layer."
+    },
+    {
+      "question_id": "q-23",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 364,
+      "latency_ms": 2126.241,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0009",
+        "mem-0002",
+        "mem-0003",
+        "mem-0006",
+        "mem-0008",
+        "mem-0007",
+        "mem-0005"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The v3 upgrade of the delta\u202f9 codec cut AtlasDB restore time from 9\u202fhours to 4\u202fhours, making the upgraded codec the winner of the restore\u2011speed comparison."
+    },
+    {
+      "question_id": "q-24",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 1,
+      "correct": false,
+      "correctness_pct": 50,
+      "context_tokens": 365,
+      "latency_ms": 1631.94,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0005",
+        "mem-0006",
+        "mem-0008",
+        "mem-0009",
+        "mem-0007",
+        "mem-0003",
+        "mem-0011"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 12,
+        "sources": 12,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The pending decision is whether to enable the hermes flag, which would double ingest throughput."
+    },
+    {
+      "question_id": "q-01",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 400,
+      "latency_ms": 1240.898,
+      "sources_selected": [
+        "mem-0002",
+        "mem-0010",
+        "mem-0009",
+        "mem-0003",
+        "mem-0011",
+        "mem-0007"
+      ],
+      "bridges_selected": [
+        "bridge-87b271874a215a0d",
+        "bridge-1c77570919acc90d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "After the v3 upgrade, AtlasDB restore time fell from 9 hours to 4 hours."
+    },
+    {
+      "question_id": "q-02",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 418,
+      "latency_ms": 1463.74,
+      "sources_selected": [
+        "mem-0001",
+        "mem-0011",
+        "mem-0003",
+        "mem-0008",
+        "mem-0009",
+        "mem-0007"
+      ],
+      "bridges_selected": [
+        "bridge-87b271874a215a0d",
+        "bridge-1c77570919acc90d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "AtlasDB uses delta\u202f9 compression for cold storage, and its cold tier is 40\u202fTB."
+    },
+    {
+      "question_id": "q-03",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 406,
+      "latency_ms": 984.338,
+      "sources_selected": [
+        "mem-0001",
+        "mem-0002",
+        "mem-0003",
+        "mem-0011",
+        "mem-0009",
+        "mem-0004"
+      ],
+      "bridges_selected": [
+        "bridge-87b271874a215a0d",
+        "bridge-1c77570919acc90d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "AtlasDB backups run nightly at 02:00."
+    },
+    {
+      "question_id": "q-04",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 423,
+      "latency_ms": 2401.227,
+      "sources_selected": [
+        "mem-0011",
+        "mem-0001",
+        "mem-0002",
+        "mem-0006",
+        "mem-0003",
+        "mem-0004"
+      ],
+      "bridges_selected": [
+        "bridge-1c77570919acc90d",
+        "bridge-87b271874a215a0d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "Delta\u202f9 outperforms zstd\u202f19 for AtlasDB by delivering faster restore speeds, while zstd\u202f19 provides smaller archive sizes."
+    },
+    {
+      "question_id": "q-05",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 431,
+      "latency_ms": 1318.034,
+      "sources_selected": [
+        "mem-0003",
+        "mem-0010",
+        "mem-0009",
+        "mem-0007",
+        "mem-0006",
+        "mem-0008"
+      ],
+      "bridges_selected": [
+        "bridge-71aa470079d8ca30",
+        "bridge-87b271874a215a0d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The kxbridge replica keeps a warm copy in Dublin during the AtlasDB migration."
+    },
+    {
+      "question_id": "q-06",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 1,
+      "correct": false,
+      "correctness_pct": 50,
+      "context_tokens": 397,
+      "latency_ms": 1753.764,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0004",
+        "mem-0011",
+        "mem-0008",
+        "mem-0003",
+        "mem-0002"
+      ],
+      "bridges_selected": [
+        "bridge-71aa470079d8ca30",
+        "bridge-1c77570919acc90d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The kxbridge replica keeps a warm copy in Dublin during the migration and replicates at 2\u202fGB per minute."
+    },
+    {
+      "question_id": "q-07",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 393,
+      "latency_ms": 1513.618,
+      "sources_selected": [
+        "mem-0008",
+        "mem-0007",
+        "mem-0003",
+        "mem-0010",
+        "mem-0006",
+        "mem-0009"
+      ],
+      "bridges_selected": [
+        "bridge-f35a9d053bc0f418",
+        "bridge-71aa470079d8ca30"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "KXBridge falls back to the public relay."
+    },
+    {
+      "question_id": "q-08",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 1,
+      "correct": false,
+      "correctness_pct": 50,
+      "context_tokens": 390,
+      "latency_ms": 2252.088,
+      "sources_selected": [
+        "mem-0004",
+        "mem-0008",
+        "mem-0011",
+        "mem-0009",
+        "mem-0007",
+        "mem-0010"
+      ],
+      "bridges_selected": [
+        "bridge-71aa470079d8ca30",
+        "bridge-1c77570919acc90d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "KXBridge uses the IPsec tunnel for replication traffic, and the network team renewed it."
+    },
+    {
+      "question_id": "q-09",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 411,
+      "latency_ms": 1314.044,
+      "sources_selected": [
+        "mem-0005",
+        "mem-0006",
+        "mem-0008",
+        "mem-0003",
+        "mem-0009",
+        "mem-0007"
+      ],
+      "bridges_selected": [
+        "bridge-93285eee7ead57a9",
+        "bridge-71aa470079d8ca30"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "Enabling the hermes flag doubles ingest throughput but adds a 15\u202f% CPU overhead."
+    },
+    {
+      "question_id": "q-10",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 403,
+      "latency_ms": 1779.101,
+      "sources_selected": [
+        "mem-0006",
+        "mem-0005",
+        "mem-0009",
+        "mem-0003",
+        "mem-0008",
+        "mem-0007"
+      ],
+      "bridges_selected": [
+        "bridge-93285eee7ead57a9",
+        "bridge-1c77570919acc90d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The hermes flag rollout review is in April, and it will decide if the 15 percent CPU overhead is acceptable."
+    },
+    {
+      "question_id": "q-11",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 431,
+      "latency_ms": 1429.375,
+      "sources_selected": [
+        "mem-0005",
+        "mem-0006",
+        "mem-0001",
+        "mem-0012",
+        "mem-0002",
+        "mem-0003"
+      ],
+      "bridges_selected": [
+        "bridge-93285eee7ead57a9",
+        "bridge-87b271874a215a0d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The ingest pipeline changes are frozen until the hermes flag rollout review in April."
+    },
+    {
+      "question_id": "q-12",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 398,
+      "latency_ms": 1090.199,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0009",
+        "mem-0006",
+        "mem-0008",
+        "mem-0005",
+        "mem-0007"
+      ],
+      "bridges_selected": [
+        "bridge-f35a9d053bc0f418",
+        "bridge-71aa470079d8ca30"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The edge fleet consists of 320 nodes spread across 12 sites."
+    },
+    {
+      "question_id": "q-13",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 393,
+      "latency_ms": 1063.664,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0009",
+        "mem-0007",
+        "mem-0006",
+        "mem-0008",
+        "mem-0003"
+      ],
+      "bridges_selected": [
+        "bridge-f35a9d053bc0f418",
+        "bridge-71aa470079d8ca30"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The peak telemetry rate from the edge fleet is 50,000 messages per second."
+    },
+    {
+      "question_id": "q-14",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 374,
+      "latency_ms": 964.534,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0009",
+        "mem-0011",
+        "mem-0008",
+        "mem-0007",
+        "mem-0003"
+      ],
+      "bridges_selected": [
+        "bridge-1c77570919acc90d",
+        "bridge-f35a9d053bc0f418"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The waku relay layer carries telemetry for the edge fleet."
+    },
+    {
+      "question_id": "q-15",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 371,
+      "latency_ms": 1959.398,
+      "sources_selected": [
+        "mem-0009",
+        "mem-0012",
+        "mem-0007",
+        "mem-0010",
+        "mem-0006",
+        "mem-0003"
+      ],
+      "bridges_selected": [
+        "bridge-a1a7b797e8f3326c",
+        "bridge-f35a9d053bc0f418"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "It cut telemetry latency from 800\u202fms to 120\u202fms and reduced relay memory use by half."
+    },
+    {
+      "question_id": "q-16",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 382,
+      "latency_ms": 1724.557,
+      "sources_selected": [
+        "mem-0007",
+        "mem-0008",
+        "mem-0009",
+        "mem-0006",
+        "mem-0003",
+        "mem-0002"
+      ],
+      "bridges_selected": [
+        "bridge-f35a9d053bc0f418",
+        "bridge-a1a7b797e8f3326c"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The ipsec tunnel was renewed in January and is valid for two years."
+    },
+    {
+      "question_id": "q-17",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 436,
+      "latency_ms": 1072.491,
+      "sources_selected": [
+        "mem-0003",
+        "mem-0006",
+        "mem-0008",
+        "mem-0007",
+        "mem-0009",
+        "mem-0002"
+      ],
+      "bridges_selected": [
+        "bridge-87b271874a215a0d",
+        "bridge-71aa470079d8ca30"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The AtlasDB migration is planned for March to the Frankfurt region."
+    },
+    {
+      "question_id": "q-18",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 431,
+      "latency_ms": 1614.148,
+      "sources_selected": [
+        "mem-0003",
+        "mem-0004",
+        "mem-0008",
+        "mem-0001",
+        "mem-0007",
+        "mem-0002"
+      ],
+      "bridges_selected": [
+        "bridge-87b271874a215a0d",
+        "bridge-71aa470079d8ca30"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "KXBridge replicates between Dublin and Frankfurt, and it keeps a warm copy for AtlasDB."
+    },
+    {
+      "question_id": "q-19",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 1,
+      "correct": false,
+      "correctness_pct": 50,
+      "context_tokens": 380,
+      "latency_ms": 1658.763,
+      "sources_selected": [
+        "mem-0009",
+        "mem-0010",
+        "mem-0012",
+        "mem-0007",
+        "mem-0008",
+        "mem-0006"
+      ],
+      "bridges_selected": [
+        "bridge-a1a7b797e8f3326c",
+        "bridge-f35a9d053bc0f418"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The waku relay had 800\u202fms latency before the Go rewrite and carries telemetry for the edge fleet."
+    },
+    {
+      "question_id": "q-20",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 411,
+      "latency_ms": 1652.724,
+      "sources_selected": [
+        "mem-0001",
+        "mem-0011",
+        "mem-0008",
+        "mem-0010",
+        "mem-0009",
+        "mem-0003"
+      ],
+      "bridges_selected": [
+        "bridge-87b271874a215a0d",
+        "bridge-1c77570919acc90d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "Delta\u202f9 won on restore speed, and the cold tier is 40\u202fTB."
+    },
+    {
+      "question_id": "q-21",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 396,
+      "latency_ms": 1978.85,
+      "sources_selected": [
+        "mem-0004",
+        "mem-0008",
+        "mem-0009",
+        "mem-0003",
+        "mem-0007",
+        "mem-0005"
+      ],
+      "bridges_selected": [
+        "bridge-f35a9d053bc0f418",
+        "bridge-71aa470079d8ca30"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The KXBridge service, which uses the ipsec tunnel for replication, connects Dublin and Frankfurt."
+    },
+    {
+      "question_id": "q-22",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 392,
+      "latency_ms": 1524.973,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0009",
+        "mem-0011",
+        "mem-0008",
+        "mem-0003",
+        "mem-0007"
+      ],
+      "bridges_selected": [
+        "bridge-71aa470079d8ca30",
+        "bridge-1c77570919acc90d"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The edge fleet peaks at 50k messages per second, and its telemetry is carried by the waku relay layer."
+    },
+    {
+      "question_id": "q-23",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 366,
+      "latency_ms": 3052.934,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0009",
+        "mem-0002",
+        "mem-0003",
+        "mem-0006",
+        "mem-0008",
+        "mem-0007"
+      ],
+      "bridges_selected": [
+        "bridge-f35a9d053bc0f418"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The v3 upgrade of the delta\u202f9 codec reduced AtlasDB restore time from 9\u202fhours to 4\u202fhours, making it the faster codec."
+    },
+    {
+      "question_id": "q-24",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 1,
+      "correct": false,
+      "correctness_pct": 50,
+      "context_tokens": 403,
+      "latency_ms": 1950.96,
+      "sources_selected": [
+        "mem-0010",
+        "mem-0005",
+        "mem-0006",
+        "mem-0008",
+        "mem-0009",
+        "mem-0007"
+      ],
+      "bridges_selected": [
+        "bridge-93285eee7ead57a9",
+        "bridge-71aa470079d8ca30"
+      ],
+      "selection_stats": {
+        "total": 18,
+        "sources": 12,
+        "bridges_included": 2,
+        "bridges_excluded": 4
+      },
+      "answer": "The pending decision is whether to enable the hermes flag, which would double ingest throughput."
+    }
+  ]
+}

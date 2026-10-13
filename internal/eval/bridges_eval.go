@@ -848,7 +848,7 @@ func (c *liveAnswerClient) answer(question, injected string) (string, error) {
 			{"role": "user", "content": "Context:\n" + injected + "\n\nQuestion: " + question},
 		},
 		"temperature": 0.2,
-		"max_tokens":  512,
+		"max_tokens":  2048,
 	})
 	if err != nil {
 		return "", err
@@ -875,7 +875,8 @@ func (c *liveAnswerClient) answer(question, injected string) (string, error) {
 	var out struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
@@ -885,7 +886,15 @@ func (c *liveAnswerClient) answer(question, injected string) (string, error) {
 	if len(out.Choices) == 0 {
 		return "", fmt.Errorf("eval: live endpoint returned no choices")
 	}
-	return strings.TrimSpace(out.Choices[0].Message.Content), nil
+	msg := out.Choices[0].Message
+	ans := strings.TrimSpace(msg.Content)
+	if ans == "" {
+		// Reasoning models (LFM2.5 via llama-server) can burn all max_tokens on
+		// reasoning_content before emitting any content; fall back to the
+		// reasoning text so the answer is not silently empty.
+		ans = strings.TrimSpace(msg.ReasoningContent)
+	}
+	return ans, nil
 }
 
 func truncateLive(b []byte, n int) string {
