@@ -116,13 +116,36 @@ from canonical-claim selection.
   (`{action: "memory.claim.verdict", claim_id, verdict, reason_hash}` —
   hash the reason, never store raw text in the chain; raw reason stays in
   calibration log).
-- Offline verdict: `meept memory verdict` falls back to direct store access
-  (open the claim store path from config; same `Manager` code path, not raw
-  SQL) when RPC dial fails; print which mode was used.
+- Verdict is DAEMON-ONLY (resolved Q5b): `meept memory verdict` talks RPC
+  exclusively. When the daemon is unreachable, print a clear error with the
+  remedy (`start the daemon with meept-daemon -f, then retry`) and exit
+  non-zero. No offline store-write path exists in this tree.
 - Docs: `docs/workflows/memory.md` — "Human Review Queue" section: filters,
-  verdict semantics, offline asymmetry, audit behavior, TUI/GUI deferral note.
+  verdict semantics, daemon-only requirement, audit behavior, TUI view
+  (L3), GUI deferral note.
 - e2e suite per Integration Test Plan incl. auditlog chain verification.
 
 **Verify:** `make e2e-fast-area AREA=memory-review-governance && go vet ./internal/memory/... ./cmd/meept/...`.
+
+**Do NOT commit.**
+
+### Leaf L3 — tui-review-view (Wave 3, after L2)
+
+**Scope (resolved Q6b — parity satisfied in-tree):**
+- `internal/tui` review view: a table of pending auto claims
+  (columns: id, confidence, category, age, content preview) sized via
+  `internal/tui/tableutil.Size` and populated via `tableutil.SetRows`
+  (both required — bubbles/table renders nothing at width 0).
+- Keys: `p` promote selected, `r` reject selected, `enter` detail,
+  `esc` close. All UI text lowercase. Commands go through the same
+  `memory.review.*` RPC methods — no second write path.
+- Command palette entry `memory review`; status-bar count of pending
+  claims when the review RPC is cheap (skip if it adds a per-turn call).
+- GUI parity: a Flutter panel is OUT OF SCOPE here; the deviation is
+  documented in the L2 docs section (GUI follows in a later tree).
+- Tests: TUI component tests for table sizing + key handling with a fake
+  review client.
+
+**Verify:** `go build ./... && go test ./internal/tui/ -run Review -count=1`.
 
 **Do NOT commit.**

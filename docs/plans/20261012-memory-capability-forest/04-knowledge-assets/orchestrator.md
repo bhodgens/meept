@@ -5,10 +5,10 @@ contract, §5 waves).
 
 **Goal:** Port TAM's Wiki-as-memory-asset in meept's idiom: an opt-in
 knowledge store of link-graphed markdown pages, agent-callable retrieval
-tools, and directory ingestion. v1 scope per OPEN-QUESTIONS Q7: watched-dir
-markdown + explicit `knowledge_ingest` tool. NO crawler, NO CodeGraph —
-meept already has RepoMap for code; duplicating TAM's CodeGraph is out of
-scope.
+tools, and directory ingestion — PLUS CodeGraph-style Go code indexing
+(resolved Q7b). v1 ingestion scope: watched-dir markdown, explicit
+`knowledge_ingest` tool, and a `go/ast` code indexer for Go repositories.
+NO web crawlers.
 
 **Architecture:** New subpackage `internal/memory/knowledge`. SQLite store
 (FTS5 over page bodies, links table for the graph). Tools
@@ -38,7 +38,8 @@ consent flag; it does not flip any evolver default.
   `[[Page Title]]` (resolved to page_id at ingest when the target exists or
   later exists — stored unresolved, resolved at read time; no dangling-link
   errors).
-- Config: `[memory.knowledge] enabled=false, ingest_dir="", max_pages=1000`.
+- Config: `[memory.knowledge] enabled=false, ingest_dir="", max_pages=1000,
+  code_dirs=[]`.
 
 ## Child Index (inline leaves)
 
@@ -46,15 +47,16 @@ consent flag; it does not flip any evolver default.
 |------|------|-------|------|
 | L1 knowledge-store | 1 | store pkg: schema, upsert, FTS search, link graph | 70K |
 | L2 knowledge-tools | 2 | tool wiring + watched-dir ingestion | 70K |
-| L3 knowledge-e2e | 3 | e2e suite + config templates + docs | 50K |
+| L3 code-index | 2 | go/ast symbol+call-graph indexer → code pages | 80K |
+| L4 knowledge-e2e | 3 | e2e suite + config templates + docs | 50K |
 
 ## Dispatch Protocol
 
 Standard (root master). L1 brief inlines the §2.5 Page struct and the three
-tool schemas verbatim. L2 registers tools — coordinate with the ToolRegistry
-single-file risk: `internal/tools/builtin` registration is file-per-tool
-(add `knowledge.go`), so no shared-file contention expected; verify at
-dispatch.
+tool schemas verbatim. L2 and L3 both run in wave 2 but touch disjoint
+packages (`internal/tools/builtin`+`knowledge/adapter` vs
+`internal/memory/knowledge/codeindex`) — no shared-file contention. L4 is
+wave 3 and covers both features in one suite.
 
 ## Review Checklist
 
@@ -64,6 +66,8 @@ Root checklist plus:
       (no ambient injection in v1 — TAM parity is "called on demand")
 - [ ] Upsert by title+source hash; re-ingest updates body + ingested_at
 - [ ] `max_pages` enforced at ingest (oldest-evicted, log the eviction)
+- [ ] Code index skips `vendor/`, `testdata/`, `_test.go`; call edges only
+      resolve intra-repo (no phantom external callers)
 - [ ] evolver wiki (`internal/selfimprove/`) untouched — verify by diff
 
 ## Coding Conventions
@@ -74,10 +78,11 @@ across I/O, lowercase UI text, no `os.Getwd()`, GPL/AGPL dep license stop.
 
 ## Integration Test Plan
 
-L3 e2e suite `memory-knowledge-assets`: ingest 3 linked pages →
+L4 e2e suite `memory-knowledge-assets`: ingest 3 linked pages →
 `knowledge_search` returns ranked hits → `knowledge_read` resolves a
-`[[wikilink]]` → upsert same title updates in place → disabled-config run
-shows zero knowledge tools in the tool list.
+`[[wikilink]]` → upsert same title updates in place → code-index a fixture
+repo → `knowledge_search` finds a symbol → impact query returns its caller
+→ disabled-config run shows zero knowledge tools in the tool list.
 
 ## Completion Tracking Table
 
@@ -85,7 +90,8 @@ shows zero knowledge tools in the tool list.
 |------|--------|-------|
 | L1 knowledge-store | PENDING | |
 | L2 knowledge-tools | PENDING | |
-| L3 knowledge-e2e | PENDING | |
+| L3 code-index | PENDING | parallel with L2, disjoint packages |
+| L4 knowledge-e2e | PENDING | |
 
 ## Leaf definitions
 
@@ -129,7 +135,39 @@ shows zero knowledge tools in the tool list.
 
 **Do NOT commit.**
 
-### Leaf L3 — knowledge-e2e (Wave 3)
+### Leaf L3 — code-index (Wave 2, parallel with L2)
+
+**Scope (resolved Q7b — CodeGraph-style indexing for Go code):**
+- `internal/memory/knowledge/codeindex/indexer.go` — walk `code_dirs`
+  (default empty = disabled), parse each `*.go` file with `go/ast` +
+  `go/parser` (stdlib, no new deps; skip `vendor/`, `testdata/`,
+  `_test.go` by default):
+  - One CODE page per file: `{title: "code:<pkg-path>", body: package,
+    imports, top-level decl signatures}`.
+  - Symbol table rows: func/method/type/var/const names with file:line.
+  - Call edges: intra-repo calls between indexed functions (from
+    `ast.CallExpr` resolved against the symbol table; unresolved →
+    external, stored as unresolved links).
+- Ingest into the SAME knowledge store as CODE-kind pages
+  (`source: "code:<relpath>"`) so `knowledge_search` covers code and docs
+  in one query; re-index upserts by path (changed-file detection by
+  content hash, mirroring L2's dir-ingest diff).
+- Impact-analysis helper: `ImpactedBy(symbol string) []string` — one-hop
+  callers from the call-edge table (TAM's "changing this might affect
+  those" v1: single hop, no transitive closure).
+- Retrigger: index runs on consolidation tick alongside L2's dir ingest
+  (same timer, no new ticker); full re-index on `code_dirs` change.
+- Tests: fixture repo under `internal/memory/knowledge/codeindex/testdata/`
+  — index it, assert symbol count, one known call edge, one impacted-by
+  result, upsert-idempotency.
+- License note: `go/ast`/`go/parser` are stdlib — no new dependency, no
+  license gate needed.
+
+**Verify:** `go build ./... && go test ./internal/memory/knowledge/... -count=1`.
+
+**Do NOT commit.**
+
+### Leaf L4 — knowledge-e2e (Wave 3)
 
 **Scope:**
 - e2e suite `e2e/suites/memory-knowledge-assets/` per Integration Test Plan

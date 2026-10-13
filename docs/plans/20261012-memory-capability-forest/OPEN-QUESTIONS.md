@@ -1,6 +1,23 @@
 # OPEN-QUESTIONS.md — Memory Capability Forest
 
-Summary: 7 questions, 2 blocking (Q1, Q5). Resolve before wave-1 dispatch.
+Summary: ALL RESOLVED by user 2026-10-12. Decisions below are binding plan
+contracts; leaves already reflect them.
+
+| Q | Decision | Plan effect |
+|---|----------|-------------|
+| Q1 | **(a) Defer** L3 persona | Tree 01 unchanged (L0 + L1/L2 only) |
+| Q5 | **(b) Daemon-only** verdicts | Tree 03 L2: offline fallback REMOVED; `meept memory verdict` errors clearly when daemon unreachable |
+| Q2 | **(b) Port LLM scene segmentation** | Tree 01 L2: L2 scenes are LLM-segmented (scene-name + message_ids per segment), not session-per-day |
+| Q3 | **(a) 30 days** L0 retention | unchanged |
+| Q4 | **(a) batched budget** | unchanged |
+| Q6 | **(b) Include TUI view** | Tree 03 gains L3: TUI review view (parity rule satisfied in-tree) |
+| Q7 | **(b) Also port code indexing** | Tree 04 gains L4: CodeGraph-style Go code index via go/ast into the knowledge store |
+
+Historical context for each question is preserved below the table.
+
+---
+
+Original questions (resolved):
 
 ## Tree 01 — layered async distill
 

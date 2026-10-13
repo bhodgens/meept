@@ -119,10 +119,10 @@ in waves so no two in-flight leaves share a package:
 
 - Wave 1: T01-L0 recorder · T03-review CLI/RPC · T04-knowledge store
   (three disjoint packages: `l0/`, `review/`+cmd, `knowledge/`)
-- Wave 2: T01-async worker (queue wiring) · T02-conflict detector
-  (`internal/memory/conflict/`) · T04-retrieval tools
-- Wave 3: integration leaves — manager/loop wiring, prompt-stability split,
-  e2e suites, docs.
+Wave 2: T01-async worker (queue wiring) · T02-conflict detector
+  (`internal/memory/conflict/`) · T04-retrieval tools · T04-code-index
+Wave 3: integration leaves — T01 wiring+e2e, T02 wiring, T03 audit+TUI,
+  T04 e2e, docs. T03-L3 (TUI) runs after T03-L2 in wave 3.
 
 Wave 3 is strictly serial (single integration leaf per tree, then root
 integration review).

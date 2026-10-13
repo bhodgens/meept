@@ -110,9 +110,15 @@ dead-letters. Plus: kill mid-extract → restart → job re-claimed (idempotency
   metadata `l0_progress` on a session-marker memory, matching existing
   metadata patterns). LLM failure → return error (queue retry/backoff/DLQ
   handles it — do NOT add a private retry loop).
-- `handleL2Scene`: aggregate the session's day-file into a scene summary via
-  one `memory_model` call; write to `<data_dir>/l2/<session>-<date>.json`
-  (`{session_id, date, summary, source_message_ids}`).
+- `handleL2Scene`: segment the session's L0 lines into scenes via ONE
+  `memory_model` call (LLM scene segmentation per resolved Q2b — output
+  schema: `[{scene_name, message_ids}]`, mirroring TAM's
+  `SceneSegment` shape) → write one scene file per segment to
+  `<data_dir>/l2/<session>-<date>-<scene>.json`
+  (`{session_id, date, scene_name, summary, source_message_ids,
+  segment_method: "llm"}`). Parse failure → fall back to ONE
+  whole-session scene (`segment_method: "fallback"`) so an L2 job never
+  dead-letters on a malformed segmentation response.
 - Enqueue trigger: end of the ambient extraction hook — one L1 job per
   session-day with new L0 lines (dedupe by marker), one L2 job after L1
   completes (chained inside the handler's success path).

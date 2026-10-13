@@ -21,10 +21,10 @@ reuses `internal/queue.PersistentQueue`; no Redis.
 
 | Tree | Directory | Scope | Leaves | Est. context/leaf |
 |------|-----------|-------|--------|-------------------|
-| 01 | `01-layered-async-distill/` | L0 raw tier + async L1/L2/L3 distill pipeline | 4 | 60-90K |
-| 02 | `02-conflict-merge/` | LLM batch conflict detection with merge decisions | 3 | 50-80K |
-| 03 | `03-human-governance/` | Review queue CLI/RPC, verdicts, audit | 3 | 50-70K |
-| 04 | `04-knowledge-assets/` | Opt-in wiki-page knowledge store + retrieval tools | 3 | 60-80K |
+| 01 | `01-layered-async-distill/` | L0 raw tier + async L1/L2 distill pipeline (LLM scene segmentation) | 3 | 60-90K |
+| 02 | `02-conflict-merge/` | LLM batch conflict detection with merge decisions | 2 | 50-80K |
+| 03 | `03-human-governance/` | Review queue CLI/RPC + TUI view, verdicts, audit | 3 | 50-70K |
+| 04 | `04-knowledge-assets/` | Opt-in knowledge store: wiki pages + Go code index | 4 | 60-80K |
 
 Conventions, frozen contracts, waves: `SHARED-CONVENTIONS.md` (all leaves and
 orchestrators reference it; nothing re-declares it).
@@ -80,15 +80,17 @@ drift.
 | Leaf | Status | Notes |
 |------|--------|-------|
 | T01-L1 l0-recorder | PENDING | |
-| T01-L2 async-worker | PENDING | |
+| T01-L2 async-worker | PENDING | LLM scene segmentation (Q2b) |
 | T01-L3 wiring+e2e | PENDING | |
 | T02-L1 conflict-detector | PENDING | |
 | T02-L2 merge wiring | PENDING | |
 | T03-L1 review-cli-rpc | PENDING | |
-| T03-L2 audit+wiring | PENDING | |
+| T03-L2 audit+daemon-only wiring | PENDING | Q5b: no offline verdict path |
+| T03-L3 tui-review-view | PENDING | Q6b |
 | T04-L1 knowledge-store | PENDING | |
 | T04-L2 knowledge-tools | PENDING | |
-| T04-L3 knowledge-e2e | PENDING | |
+| T04-L3 code-index | PENDING | Q7b; wave 2 parallel with T04-L2 |
+| T04-L4 knowledge-e2e | PENDING | |
 | Root integration review | PENDING | full `make test` + `make e2e-fast` + `make graphs-check` |
 
 ## Integration Test Plan
