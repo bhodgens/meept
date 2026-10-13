@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/spf13/cobra"
@@ -90,6 +91,7 @@ func isNoSuchTable(err error) bool {
 	if err == nil {
 		return false
 	}
-	const prefix = "no such table:"
-	return len(err.Error()) >= len(prefix) && err.Error()[:len(prefix)] == prefix
+	// Contains, not prefix: the caller wraps the scan error
+	// ("count call edges: ..."), so the sentinel sits mid-string.
+	return strings.Contains(err.Error(), "no such table:")
 }

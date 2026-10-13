@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/memory"
@@ -70,7 +71,11 @@ func wireVerdictAuditor(memMgr *memory.Manager, dataDir string, logger *slog.Log
 	if memMgr == nil {
 		return
 	}
-	store, err := auditlog.OpenStore(dataDir, logger)
+	// audit_chain.db lives INSIDE the memory data dir. OpenStore takes a
+	// FILE path — passing the bare data dir handed SQLite a directory and
+	// every boot failed with "unable to open database file (14)",
+	// silently disabling verdict auditing (observed live 2026-10-13).
+	store, err := auditlog.OpenStore(filepath.Join(dataDir, "audit_chain.db"), logger)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("memory verdict auditing disabled: audit chain store init failed",

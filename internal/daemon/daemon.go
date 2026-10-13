@@ -1179,6 +1179,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			// the RPC surface goes live, so every verdict is chain-audited
 			// (durable-then-ack). Failure is non-fatal (auditing disabled).
 			wireVerdictAuditor(memMgr, memMgr.DataDir(), logger)
+			// Calibration logger: every promote/reject verdict appends one
+			// line to <memory data dir>/claim_verdicts.jsonl (confidence-
+			// calibration dataset). Nil-safe; never blocks a verdict.
+			memMgr.SetCalibrationLogger(memory.NewCalibrationLogger(memMgr.DataDir(), logger))
 			epistemicHandler := rpc.NewEpistemicHandler(memMgr)
 			epistemicHandler.RegisterEpistemicHandlers(rpcServer)
 			logger.Info("Epistemic memory RPC handlers registered")

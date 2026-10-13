@@ -2015,22 +2015,6 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// DistillWorker for queue registration below. The enqueuer is the
 	// daemon's own persistent queue (satisfies memory.JobEnqueuer); nil
 	// queue just means L1 jobs are never enqueued (recording continues).
-	var l0Enqueuer memory.JobEnqueuer
-	if c.Queue != nil {
-		if pq, ok := c.Queue.(*queue.PersistentQueue); ok {
-			l0Enqueuer = pq
-		}
-	}
-	// Same chatter preference as the epistemic path: memory_model client >
-	// LLMProvider > LLMClient (SHARED-CONVENTIONS §2.2 memory_model slot).
-	distillChatter := c.LLMProvider
-	if c.MemoryModelClient != nil {
-		distillChatter = c.MemoryModelClient
-	}
-	if distillChatter == nil {
-		distillChatter = c.LLMClient
-	}
-	c.DistillWorker = wireL0Distill(c.AgentLoop, c.MemoryManager, l0Enqueuer, distillChatter, cfg.Memory, logger)
 
 	// Knowledge-asset consolidation passes (tree 04 L4): watched-dir sync
 	// + code index on the consolidation tick. Best-effort; nil when
@@ -2399,6 +2383,31 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		c.Queue = jobQueue
 		c.QueueHandler = queue.NewHandler(jobQueue, msgBus, logger)
 	}
+
+	// L0 raw-conversation tier (tree 01 L3) — wired AFTER the persistent
+	// queue exists: the session-end hook enqueues memory.l1_extract jobs
+	// through c.Queue, so wiring it before queue creation silently ran
+	// with a nil enqueuer (L0 lines recorded, zero distill jobs ever
+	// enqueued — observed live 2026-10-13). Gated on memory.l0_enabled
+	// (default false — nothing records). The enqueuer is the daemon's
+	// own persistent queue (satisfies memory.JobEnqueuer); nil queue
+	// just means L1 jobs are never enqueued (recording continues).
+	var l0Enqueuer memory.JobEnqueuer
+	if c.Queue != nil {
+		if pq, ok := c.Queue.(*queue.PersistentQueue); ok {
+			l0Enqueuer = pq
+		}
+	}
+	// Same chatter preference as the epistemic path: memory_model client >
+	// LLMProvider > LLMClient (SHARED-CONVENTIONS §2.2 memory_model slot).
+	distillChatter := c.LLMProvider
+	if c.MemoryModelClient != nil {
+		distillChatter = c.MemoryModelClient
+	}
+	if distillChatter == nil {
+		distillChatter = c.LLMClient
+	}
+	c.DistillWorker = wireL0Distill(c.AgentLoop, c.MemoryManager, l0Enqueuer, distillChatter, cfg.Memory, logger)
 
 	// Create task registry (before agent registry so task store can be shared)
 	tasksDB := filepath.Join(cfg.Daemon.DataDir, "tasks.db")
