@@ -113,6 +113,8 @@ type CommandPaletteKeys struct {
 	NewSession    string `json:"new_session"`    // Create new session (default: "n")
 	RenameSession string `json:"rename_session"` // Rename current session (default: "r")
 	Projects      string `json:"projects"`       // Open projects dialog (default: "o")
+	// MemoryReview opens the claim review modal (leaf T03-L2). "" disables.
+	MemoryReview string `json:"memory_review"`
 }
 
 // SessionConfig defines session behavior settings.
@@ -173,6 +175,7 @@ func DefaultClientConfig() *ClientConfig {
 				NewSession:    "n",
 				RenameSession: "r",
 				Projects:      "o",
+				MemoryReview:  "v",
 			},
 		},
 		Session: SessionConfig{

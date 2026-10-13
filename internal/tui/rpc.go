@@ -454,6 +454,49 @@ func (c *RPCClient) QueryMemory(query string, limit int) (*types.MemoryQueryResp
 	return &resp, nil
 }
 
+// ReviewQueue calls the daemon's memory.reviewQueue method (the same
+// surface the `meept memory review` CLI uses; leaf T03-L2).
+func (c *RPCClient) ReviewQueue(params *tuimodels.ReviewQueueParams) (*tuimodels.ReviewQueueResponse, error) {
+	var p any
+	if params != nil {
+		p = params
+	}
+	result, err := c.Call("memory.reviewQueue", p)
+	if err != nil {
+		return nil, err
+	}
+	var resp tuimodels.ReviewQueueResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse review queue response: %w", err)
+	}
+	return &resp, nil
+}
+
+// PromoteClaim promotes one auto claim via memory.promoteClaim (optional
+// human verdict reason; enforced ≤512B daemon-side).
+func (c *RPCClient) PromoteClaim(id, reason string) error {
+	params := map[string]string{"id": id}
+	if reason != "" {
+		params["reason"] = reason
+	}
+	if _, err := c.Call("memory.promoteClaim", params); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RejectClaim rejects one auto claim via memory.rejectClaim.
+func (c *RPCClient) RejectClaim(id, reason string) error {
+	params := map[string]string{"id": id}
+	if reason != "" {
+		params["reason"] = reason
+	}
+	if _, err := c.Call("memory.rejectClaim", params); err != nil {
+		return err
+	}
+	return nil
+}
+
 // GetRecentMemories retrieves the most recent memories.
 func (c *RPCClient) GetRecentMemories(limit int) (*types.MemoryQueryResponse, error) {
 	params := map[string]any{

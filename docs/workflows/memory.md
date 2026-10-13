@@ -106,6 +106,46 @@ All three are size-capped at 10 MiB with one rotated generation
 (`<name>.jsonl.1`). They contain raw conversation text: they live outside
 the repo and are gitignored — never commit them.
 
+### Human Review Queue
+
+Auto-extracted claims (`status=auto`) await a human verdict. The review
+queue is one surface with three clients — every verdict, from any client,
+goes through the same daemon path (`Manager.PromoteClaimWithReason` /
+`RejectClaimWithReason`), writes the calibration row, and (when an
+auditor is wired) one `memory.claim.verdict` auditlog entry:
+
+| Surface | Entry point |
+|---------|-------------|
+| CLI | `meept memory review` (list), `meept memory promote ID [--reason S]`, `meept memory reject ID [--reason S]` |
+| TUI | command palette → `memory review` (or the `v` palette key) |
+| RPC | `memory.reviewQueue` (list: `min_confidence`, `max_confidence`, `older_than`, `limit` ≤200, `offset`), `memory.promoteClaim {id, reason?}`, `memory.rejectClaim {id, reason?}` |
+
+Verdict reasons are optional, capped at 512 bytes (same cap as the
+usefulness-vote reason), stored as claim metadata `verdict_reason`, and
+hash-entered into the audit chain (sha256 first-16, raw text stays only
+in the calibration log). Review scope is `status=auto` claims only —
+promoted/rejected are final states and drop out of every query.
+
+TUI review view (`internal/tui`, `MemoryReviewModal`):
+
+- Columns: `id`, `confidence`, `category`, `age`, `preview` (content
+  truncated to 60 chars; the column itself is fitted to the viewport).
+- Keys: `j/k` navigate, `enter` detail panel, `p` promote the selected
+  claim, `r` reject it, `esc` closes the detail panel first, then the
+  modal. After a verdict the list refreshes from the daemon, dropping the
+  verdict-ed row while keeping the cursor stable; the status bar shows
+  `N claims to review (v)` whenever the queue fetch reported a nonzero
+  total (the indicator rides the modal's own fetches — no extra per-turn
+  RPC). The TUI panel records no reason; use the CLI `--reason` flag when
+  one is warranted.
+- The keybinding is configurable (`client.json5`:
+  `keybindings.command_palette.memory_review`, default `v`).
+
+GUI parity: a Flutter review panel is deliberately deferred to a later
+tree (documented deviation `palette:memory review` in
+`internal/tui/testdata/gui_inventory.json`). Until it lands, GUI users
+reach the same verdicts through the RPC methods or the CLI.
+
 ### Claim Temporal Validity
 
 Claims carry optional temporal bounds and a monotonic revision counter.
@@ -380,6 +420,71 @@ improve, before `enabled` is flipped for any installation. See
 `plans/context-reduction/09-bridges/05-bridge-eval.md` for the pass
 criteria. Nobody enables bridges by default on the strength of the feature
 alone.
+
+## Knowledge Assets (opt-in)
+
+The `[memory.knowledge]` block gates a SEPARATE knowledge-asset store
+(tree 04): SQLite pages with an FTS5 full-text index and a link graph, at
+`<daemon.data_dir>/knowledge/knowledge.db`. This is **not** the evolver
+wiki (`internal/selfimprove`) — separate store, separate schema, separate
+code path; the wiki stays evolver-only and is never reachable from the
+inference path.
+
+### Why default-off
+
+`memory.knowledge.enabled` defaults to **false** (opt-in-defaults rule:
+wiki→inference reachability is a product decision). When disabled, nothing
+is stored and no `knowledge_*` tool exists — nothing from this store can
+enter a prompt. All agent access is on-demand through explicit tool calls;
+there is no ambient injection.
+
+### Tools
+
+| Tool | Class | Purpose |
+|------|-------|---------|
+| `knowledge_search` | memory_read | FTS5 BM25 search; `{query, limit?}` (default 5, cap 20) → ranked hits |
+| `knowledge_read` | memory_read | full page by ID; resolves `[[wikilinks]]` to page IDs where the target exists |
+| `knowledge_ingest` | memory_write | upsert a page; identity is title+source hash, so re-ingesting the same pair replaces the body in place |
+| `knowledge_impact` | memory_read | one-hop callers of a Go symbol from the code-index call-edge table ("what breaks if I change this") |
+
+### Watched-dir ingestion
+
+`memory.knowledge.ingest_dir` names a directory of markdown files synced
+into the store on the periodic **consolidation tick** (no new ticker):
+every `*.md` file becomes a page titled by its relative path, with source
+`dir:<relpath>` making the identity stable across syncs. Unchanged files
+(byte-identical content) are skipped by content hash, so repeated ticks
+are cheap. Passes are best-effort: failures log a warning, never abort
+consolidation.
+
+### Code indexing (`code_dirs`)
+
+`memory.knowledge.code_dirs` lists Go repository roots indexed on the same
+consolidation tick by the `go/ast` code indexer (stdlib only, no new
+dependencies). Each `*.go` file becomes a CODE page (`title =
+"code:<pkg-path>:<file>"`, body = package clause + imports + top-level
+declaration signatures, `source = "code:<relpath>"`) so code and documents
+answer one `knowledge_search` query. The indexer also records intra-repo
+call edges; `knowledge_impact` reads them. Skip rules: `vendor/`,
+`testdata/`, hidden dirs, and `*_test.go` are never indexed; unresolved
+(external) callees are never stored as edges; unchanged files skip the
+upsert by content hash.
+
+### Eviction
+
+`memory.knowledge.max_pages` caps the stored page count at ingest time
+(oldest-ingested page evicted when the cap is hit, eviction logged;
+`<= 0` = unbounded). A full store still serves search/read — only ingests
+evict.
+
+### Operator visibility
+
+`meept knowledge stats` prints page count, code-page count, and call-edge
+count via a direct read-only peek at the store file (no daemon required;
+honors `MEEPT_HOME` config resolution). The e2e suite
+(`e2e/suites/memory-knowledge-assets/`) covers ingest → search → wikilink
+read → upsert-in-place, code-index → search → impact, and the disabled
+control (zero `knowledge_*` tools offered to the model).
 
 ## Observability
 

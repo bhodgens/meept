@@ -6,6 +6,7 @@
     { "key": "t", "label": "tasks", "description": "switch to tasks view", "gui": true },
     { "key": "q", "label": "queue", "description": "switch to queue view", "gui": false },
     { "key": "m", "label": "memory", "description": "switch to memory view", "gui": false },
+    { "key": "v", "label": "memory review", "description": "review pending auto-claims (promote/reject)", "gui": false },
     { "key": "p", "label": "plans", "description": "switch to plans view", "gui": true },
     { "key": "e", "label": "agents", "description": "switch to employees view", "gui": true },
     { "key": "y", "label": "toggle sidebar", "description": "show/hide sidebar", "gui": false },
@@ -35,6 +36,7 @@
   "deviations": {
     "palette:queue": "no flutter queue route yet (documented deviation, command_palette.dart header comment)",
     "palette:memory": "no flutter memory route yet (documented deviation, command_palette.dart header comment)",
+    "palette:memory review": "claim review panel is TUI-only this tree (leaf T03-L2 deferral); the GUI review panel follows in a later tree — verdicts are reachable via RPC (memory.promoteClaim/memory.rejectClaim) and the `meept memory review/promote/reject` CLI meanwhile",
     "palette:toggle sidebar": "no flutter sidebar surface (documented deviation, command_palette.dart header comment)",
     "palette:users": "users awareness is CLI-managed; TUI read-only modal (documented deviation)",
     "shortcut:ctrl+m": "markdown rendering toggle is TUI-only; the GUI renders markdown natively",

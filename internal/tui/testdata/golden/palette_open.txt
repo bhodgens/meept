@@ -13,6 +13,8 @@
                │    [e]  agents - switch to employees view      │
                │    [y]  toggle sidebar - show/hide sidebar     │
                │    [o]  projects - manage projects             │
+               │    [v]  memory review - review pending auto-   │
+               │  claims (promote/reject)                       │
                │    [u]  users - multi-user awareness (manage   │
                │  via cli)                                      │
                │    [n]  new session - create a new session     │

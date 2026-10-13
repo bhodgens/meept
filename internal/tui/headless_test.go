@@ -253,6 +253,10 @@ func newHeadlessAppSocket(t *testing.T, socketPath string, w, h int) *headlessPr
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
 	app.plans = models.NewPlansModel(rpc)
+	// The review modal also holds the client; re-wire it to the live stub
+	// client like every sub-model above (createTestApp built it against the
+	// dead placeholder client before the swap).
+	app.memoryReview = models.NewMemoryReviewModal(rpc)
 
 	var out bytes.Buffer
 	var in bytes.Buffer

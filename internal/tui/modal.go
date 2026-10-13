@@ -28,6 +28,7 @@ const (
 	ModalProjectPicker
 	ModalPendingChanges
 	ModalUsers
+	ModalMemoryReview
 )
 
 // ModalItem represents an item in a modal menu.
@@ -201,6 +202,7 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 		{Key: keys.ViewAgents, Label: "agents", Description: "switch to employees view"},
 		{Key: keys.Sidebar, Label: "toggle sidebar", Description: "show/hide sidebar"},
 		{Key: keys.Projects, Label: "projects", Description: "manage projects"},
+		{Key: keys.MemoryReview, Label: "memory review", Description: "review pending auto-claims (promote/reject)"},
 		{Key: "u", Label: "users", Description: "multi-user awareness (manage via cli)"},
 		{Key: keys.NewSession, Label: "new session", Description: "create a new session"},
 		{Key: keys.RenameSession, Label: "edit description", Description: "edit session description"},

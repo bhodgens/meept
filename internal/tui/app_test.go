@@ -45,6 +45,7 @@ func createTestApp() *App {
 	// Create modals
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
+	app.memoryReview = models.NewMemoryReviewModal(rpc)
 	// Initialize notification manager
 	app.notifications = components.NewNotificationManager()
 	// Set sizes on sub-models

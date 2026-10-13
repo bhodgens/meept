@@ -148,6 +148,8 @@ type App struct {
 	branchPicker        *BranchPickerModal
 	projectPicker       *ProjectPickerModal
 	usersModal          *UsersModal
+	memoryReview        *models.MemoryReviewModal
+	memoryReviewPending int // status-bar pending-claims count (0 hides it)
 	pendingChangesModal *modals.PendingChangesModal
 	pendingChangesCount int // status bar indicator (0 hides it)
 	acpLive             int // live non-closed acp sessions; 0 hides the token
@@ -347,6 +349,7 @@ func NewApp(socketPath string, cwd string) *App {
 	}
 	app.projectPicker = NewProjectPickerModal(styles, rpc)
 	app.usersModal = NewUsersModal(styles)
+	app.memoryReview = models.NewMemoryReviewModal(rpc)
 	app.pendingChangesModal = modals.NewPendingChangesModal(&changesRPCAPI{rpc: rpc})
 
 	// Initialize slash autocomplete
@@ -809,6 +812,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.queue.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.memory.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.plans.SetSize(mainWidth, msg.Height-chromeHeight)
+		if a.memoryReview != nil {
+			a.memoryReview.SetSize(mainWidth, msg.Height-chromeHeight)
+		}
 		if a.search != nil {
 			a.search.SetSize(mainWidth, msg.Height-chromeHeight)
 		}
@@ -2095,6 +2101,44 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.pendingChangesCount = msg.Count
 		return a, nil
 
+	case models.ReviewVerdictMsg:
+		// Surface the verdict outcome; the modal itself refreshes its table
+		// via the returned command.
+		if msg.Err != nil {
+			a.statusMessage = fmt.Sprintf("memory review: %v", msg.Err)
+			a.statusMessageTime = time.Now()
+			return a, tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+		}
+		a.statusMessage = fmt.Sprintf("claim %s %sd", msg.ClaimID, msg.Verdict)
+		a.statusMessageTime = time.Now()
+		if cmd := a.memoryReview.Update(msg); cmd != nil {
+			// The modal's own refresh cmd carries the updated queue; the
+			// status count refreshes when that lands.
+			return a, tea.Batch(cmd, tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			}))
+		}
+		return a, tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+
+	case models.ReviewQueueMsg:
+		// A review-queue fetch landed (from the modal's Show or a verdict
+		// refresh): update the status-bar pending count and feed the modal
+		// its items (the modal is only keyed when the overlay is active, so
+		// fetch results must be delivered here).
+		if a.memoryReview != nil {
+			a.memoryReview.Update(msg)
+		}
+		if msg.Err != nil {
+			a.memoryReviewPending = 0
+			return a, nil
+		}
+		a.memoryReviewPending = msg.Total
+		return a, nil
+
 	case pendingChangesTickMsg:
 		return a, tea.Batch(a.refreshPendingChangesCount(), a.pendingChangesTick())
 
@@ -2351,6 +2395,12 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalProjectPicker
 			a.projectPicker.Show()
 			return a, a.projectPicker.RefreshProjects()
+		case keys.MemoryReview:
+			if keys.MemoryReview != "" && a.memoryReview != nil {
+				a.activeModal = ModalMemoryReview
+				return a, a.memoryReview.Show()
+			}
+			return a, nil
 		case "u":
 			// users awareness modal (v1 read-only; actions shell out to the
 			// meept users cli on the daemon host).
@@ -2387,6 +2437,19 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalNone
 		}
 		return a, nil
+
+	case ModalMemoryReview:
+		if a.memoryReview == nil {
+			a.activeModal = ModalNone
+			return a, nil
+		}
+		// Forward the original KeyMsg (the model matches on msg.String(),
+		// which handles both runes and named keys like enter/esc).
+		cmd := a.memoryReview.Update(msg)
+		if !a.memoryReview.IsVisible() {
+			a.activeModal = ModalNone
+		}
+		return a, cmd
 
 	case ModalConfirm:
 		if a.confirmModal != nil {
@@ -2717,6 +2780,11 @@ func (a *App) renderModalOverlay() string {
 			return ""
 		}
 		return a.usersModal.View(a.width, a.height)
+	case ModalMemoryReview:
+		if a.memoryReview == nil {
+			return ""
+		}
+		return a.memoryReview.View()
 	}
 	return ""
 }
@@ -2931,6 +2999,12 @@ func (a *App) renderStatusBar() string {
 		// and only when no transient status message is taking the bar.
 		if a.pendingChangesCount > 0 {
 			parts = append(parts, a.styles.Warning.Render(fmt.Sprintf("%d pending changes (ctrl+d)", a.pendingChangesCount)))
+		}
+
+		// Pending auto-claims indicator (leaf T03-L2): refreshed by the
+		// review modal's queue fetches — no extra per-turn RPC.
+		if a.memoryReviewPending > 0 {
+			parts = append(parts, a.styles.Warning.Render(fmt.Sprintf("%d claims to review (v)", a.memoryReviewPending)))
 		}
 
 		if a.acpLive > 0 {
