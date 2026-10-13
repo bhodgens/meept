@@ -1336,6 +1336,30 @@ type MemoryConfig struct {
 	// Usefulness holds memory usefulness voting settings. See
 	// MemoryUsefulnessConfig.
 	Usefulness MemoryUsefulnessConfig `json:"usefulness" toml:"usefulness"`
+	// Bridges holds cross-memory bridging-fact generation settings
+	// (IndexRAG stage 2, branch 09). Default OFF. See MemoryBridgesConfig.
+	Bridges MemoryBridgesConfig `json:"bridges" toml:"bridges"`
+}
+
+// MemoryBridgesConfig gates offline bridging-fact generation in the
+// Consolidator (branch 09 leaf B02). The whole pass no-ops unless Enabled —
+// generation NEVER runs on the chat inference path.
+type MemoryBridgesConfig struct {
+	// Enabled turns on bridge generation in the periodic consolidation
+	// pass. Default false (opt-in until validated by the bridge eval).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// KB is the recall-path cap: the maximum number of bridging facts
+	// admitted into a single assembled context (leaf B04 consumes this).
+	// Default 2.
+	KB int `json:"kb" toml:"kb"`
+	// BridgeDFMax is the inclusive upper bound of the bridge-entity
+	// document-frequency window; the lower bound is fixed at 2. Entities
+	// rarer than 2 are not shared; entities more frequent than this are
+	// too generic to bridge. Default 10.
+	BridgeDFMax int `json:"bridge_df_max" toml:"bridge_df_max"`
+	// Verify controls entailment verification of generated bridges (leaf
+	// B03). Default true.
+	Verify bool `json:"verify" toml:"verify"`
 }
 
 // MemoryUsefulnessConfig holds memory usefulness voting settings driving
@@ -3055,6 +3079,12 @@ func DefaultConfig() *Config {
 				Enabled:             false,
 				SimilarityThreshold: 0.85,
 				MinRelevance:        0.6,
+			},
+			Bridges: MemoryBridgesConfig{
+				Enabled:     false,
+				KB:          2,
+				BridgeDFMax: 10,
+				Verify:      true,
 			},
 			Task: TaskMemoryConfig{
 				Enabled: true,

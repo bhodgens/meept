@@ -1890,7 +1890,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				logger.Warn("Failed to create shard manager, vector search disabled", "error", err)
 			} else {
 				// Create adapter to implement VectorSearcher interface
-				vectorSearcher = memory.NewShardManagerVectorSearcher(shardMgr, shardTypes)
+				vectorSearcher = memory.NewShardManagerVectorSearcher(shardMgr, shardTypes,
+					memory.WithBridgeCap(cfg.Memory.Bridges.KB))
 				logger.Info("Vector shard manager initialized",
 					"base_path", cfg.Memory.Embeddings.ShardBasePath,
 					"max_ram_shards", cfg.Memory.Embeddings.MaxRAMShards,

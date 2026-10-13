@@ -93,6 +93,9 @@ type Manager struct {
 	// runs in a background goroutine. See SetEpistemicDetector.
 	detector *EpistemicDetector
 
+	// Bridge shard store (branch 09, optional). See SetBridgeStore.
+	bridgeStore *BridgeStore
+
 	// Prefetch cache and service for automatic context retrieval (Hermes pattern)
 	prefetchCache    sync.Map // map[string]string - query -> cached context
 	prefetchQueue    chan prefetchRequest
@@ -109,6 +112,10 @@ type Manager struct {
 	// CalibrationLogger records promote/reject verdicts on auto-claims
 	// (confidence calibration dataset). Nil = disabled.
 	calibration *CalibrationLogger
+
+	// verdictAuditor receives one audit record per claim verdict (leaf
+	// T03-L1). Nil = auditing disabled (best-effort, never blocks).
+	verdictAuditor VerdictAuditor
 
 	// DualStore reference for cluster-aware routing (Phase 3 dual-DB).
 	// When non-nil, the manager can publish local memory writes to gossip
@@ -2114,6 +2121,23 @@ func (m *Manager) SetCalibrationLogger(c *CalibrationLogger) {
 	m.mu.Lock()
 	m.calibration = c
 	m.mu.Unlock()
+}
+
+// SetBridgeStore wires the bridge shard store (branch 09). When set, the
+// consolidator's periodic pass can generate bridging facts into it (still
+// gated on memory.bridges.enabled). Nil-safe (a nil store disables the
+// bridge pass).
+func (m *Manager) SetBridgeStore(bs *BridgeStore) {
+	m.mu.Lock()
+	m.bridgeStore = bs
+	m.mu.Unlock()
+}
+
+// BridgeStore returns the configured bridge store, or nil if none is set.
+func (m *Manager) BridgeStore() *BridgeStore {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.bridgeStore
 }
 
 // CalibrationLogger returns the configured calibration logger, or nil.

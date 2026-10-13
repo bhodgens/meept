@@ -275,10 +275,11 @@ func (bs *BridgeStore) ListBridgesByEvidence(ctx context.Context, evidenceID str
 	return out, nil
 }
 
-// Count returns the number of persisted bridges (by vector row).
+// Count returns the number of persisted bridges (distinct memory IDs in the
+// side table — not raw rows, which are one per (memory_id, key) pair).
 func (bs *BridgeStore) Count(ctx context.Context) (int, error) {
 	var n int
-	if err := bs.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bridge_meta`).Scan(&n); err != nil { //nolint:mutexio // single connection, serialized by driver
+	if err := bs.db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT memory_id) FROM bridge_meta`).Scan(&n); err != nil { //nolint:mutexio // single connection, serialized by driver
 		return 0, fmt.Errorf("bridge store: count: %w", err)
 	}
 	return n, nil

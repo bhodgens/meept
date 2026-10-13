@@ -28,11 +28,16 @@ type Consolidator struct {
 	logger   *slog.Logger
 	llm      llm.Chatter       // optional: if nil, falls back to date-based grouping
 	embedder EmbeddingProvider // optional: if set, enables semantic similarity clustering
-	mu       sync.Mutex
-	running  bool
-	lastRun  *time.Time
-	stopChan chan struct{}
-	stopOnce sync.Once // Guards against double-close of stopChan
+	// bridgeStore + bridgeGen drive the optional bridge-generation pass
+	// (branch 09 B02). Both nil (the default) = pass disabled regardless
+	// of config; see runBridgeGenerationPass.
+	bridgeStore *BridgeStore
+	bridgeGen   BridgeGenerator
+	mu          sync.Mutex
+	running     bool
+	lastRun     *time.Time
+	stopChan    chan struct{}
+	stopOnce    sync.Once // Guards against double-close of stopChan
 }
 
 // ConsolidatorConfig holds configuration for the consolidator.
@@ -152,6 +157,11 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 	// logged but do not abort consolidation.
 	report.EpistemicEdgesDetected = c.runEpistemicDetectionPass(ctx)
 
+	// Bridge generation pass (branch 09 B02). Offline-only: runs here in
+	// the Consolidator background pass, NEVER on the chat path. Best-effort
+	// like the epistemic pass — a bridge failure never aborts consolidation.
+	c.runBridgeGenerationPass(ctx)
+
 	report.Duration = time.Since(start)
 
 	c.logger.Info("Consolidation complete",
@@ -235,6 +245,89 @@ func (c *Consolidator) runEpistemicDetectionPass(ctx context.Context) int {
 		}
 	}
 	return persisted
+}
+
+// runBridgeGenerationPass runs the bridge-generation pass (branch 09 B02)
+// over recent episodic memories, gated on memory.bridges.enabled. No-op
+// unless a BridgeStore AND a generator are wired (SetBridgeComponents) AND
+// the manager's config enables bridges — the default config leaves the pass
+// dormant with zero LLM calls. Best-effort: failures are logged, never abort
+// consolidation. No mutex is held across the LLM or store I/O (repo rule).
+func (c *Consolidator) runBridgeGenerationPass(ctx context.Context) {
+	// Snapshot components + config under the lock; all I/O below happens
+	// outside it.
+	c.mu.Lock()
+	store := c.bridgeStore
+	gen := c.bridgeGen
+	c.mu.Unlock()
+	if store == nil || gen == nil {
+		return
+	}
+	var cfg BridgesConfig
+	if c.manager != nil {
+		mcfg := c.manager.Config().Bridges
+		cfg = BridgesConfig{
+			Enabled:     mcfg.Enabled,
+			BridgeDFMax: mcfg.BridgeDFMax,
+			Verify:      mcfg.Verify,
+		}
+	}
+	if !cfg.Enabled {
+		return
+	}
+
+	results, err := c.recentMemoriesForBridges(ctx)
+	if err != nil {
+		c.logger.Warn("bridge generation pass: gather memories failed", "error", err)
+		return
+	}
+	if len(results) < 2 {
+		return
+	}
+	memories := make([]Memory, len(results))
+	for i, r := range results {
+		memories[i] = r.Memory
+	}
+	generated, rejected, err := GenerateBridges(ctx, store, gen, cfg, memories)
+	if err != nil {
+		c.logger.Warn("bridge generation pass: generation failed",
+			"generated", generated, "rejected", rejected, "error", err)
+		return
+	}
+	c.logger.Info("bridge generation pass complete",
+		"generated", generated, "rejected", rejected)
+}
+
+// recentMemoriesForBridges gathers the candidate memory pool for bridge
+// generation: recent episodic + task memories, bounded to the last 30 days
+// of activity like the epistemic pass.
+func (c *Consolidator) recentMemoriesForBridges(ctx context.Context) ([]MemoryResult, error) {
+	if c.manager == nil {
+		return nil, nil
+	}
+	recent, err := c.manager.GetRecent(ctx, 500)
+	if err != nil {
+		return nil, err
+	}
+	cutoff := time.Now().Add(-30 * 24 * time.Hour)
+	out := make([]MemoryResult, 0, len(recent))
+	for _, r := range recent {
+		if r.Memory.CreatedAt.Before(cutoff) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// SetBridgeComponents wires the bridge store + generator into the periodic
+// consolidation pass. Both must be non-nil for the pass to run; pass nils to
+// disable (defence-in-depth alongside the config gate).
+func (c *Consolidator) SetBridgeComponents(store *BridgeStore, gen BridgeGenerator) {
+	c.mu.Lock()
+	c.bridgeStore = store
+	c.bridgeGen = gen
+	c.mu.Unlock()
 }
 
 // runAccessBasedExpiration performs access-based memory expiration.

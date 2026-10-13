@@ -469,6 +469,29 @@ func LessonGrammar() string {
 	return b.String()
 }
 
+// BridgeGrammar returns the GBNF grammar forcing the bridge-generation JSON
+// output — a bare JSON array of {text, evidence_ids} objects, exactly the
+// shape internal/memory's GenerateBridges decodes (branch 09, leaf B02).
+// Declared shape:
+//
+//	[ {"text": string, "evidence_ids": [string, ...]}, ... ]
+//
+// Pair with WithRawGrammar to attach it as payload["grammar"] (llama.cpp wire
+// format, local endpoints only; the attach itself is endpoint-gated inside
+// the client, so cloud chatters never see the field). Never returns an empty
+// string.
+func BridgeGrammar() string {
+	var b strings.Builder
+	// llama.cpp requires the first rule to be named `root`.
+	b.WriteString("root ::= \"[\" ws (bridge-fact (\",\" ws bridge-fact)*)? ws \"]\"\n")
+	b.WriteString("ws ::= [ \\t\\n]*\n")
+	b.WriteString("string ::= \"\\\"\" char* \"\\\"\"\n")
+	b.WriteString("char ::= [^\"\\\\]\n")
+	b.WriteString("string-array ::= \"[\" ws (string (\",\" ws string)*)? ws \"]\"\n")
+	b.WriteString("bridge-fact ::= \"{\" ws \"\\\"text\\\"\" ws \":\" ws string \",\" ws \"\\\"evidence_ids\\\"\" ws \":\" ws string-array ws \"}\"\n")
+	return b.String()
+}
+
 // ProcedureGrammar returns the GBNF grammar forcing the distill procedure
 // JSON object — exactly the shape internal/memory's EncodeProcedure /
 // DecodeProcedure (via normalizeDistillPayload) accepts as its primary
