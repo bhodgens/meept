@@ -210,6 +210,18 @@
     },
     // Per-project character limit overrides (keyed by project path)
     "project_overrides": {},
+    // Knowledge-asset store: FTS5 full-text over ingested pages plus the
+    // knowledge_search/read/ingest tools. Opt-in (default false); when
+    // disabled nothing is stored and no knowledge_* tool is registered.
+    "knowledge": {
+      "enabled": false,
+      // Watched directory: *.md files here are ingested on the
+      // consolidation tick (unchanged files skipped by content hash).
+      // Empty = no dir syncing.
+      "ingest_dir": "",
+      // Page cap at ingest time (<= 0 = unbounded).
+      "max_pages": 0,
+    },
   },
 
   // Memvid service connection

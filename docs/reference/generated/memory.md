@@ -21,18 +21,24 @@ Package memory provides memory storage and retrieval for meept.
 - [func EffectiveAutoTrustWeight\(configured float64\) float64](<#EffectiveAutoTrustWeight>)
 - [func EncodeLesson\(l Lesson\) \(string, error\)](<#EncodeLesson>)
 - [func EncodeProcedure\(p Procedure\) \(string, error\)](<#EncodeProcedure>)
+- [func EnqueueL1\(ctx context.Context, q JobEnqueuer, p L1ExtractPayload\) \(string, error\)](<#EnqueueL1>)
+- [func EnqueueL2\(ctx context.Context, q JobEnqueuer, p L2ScenePayload\) \(string, error\)](<#EnqueueL2>)
 - [func ExtractJSONFromLLM\(s string\) string](<#ExtractJSONFromLLM>)
 - [func FormatMemoryWithFreshness\(content string, updatedAt \*time.Time\) string](<#FormatMemoryWithFreshness>)
+- [func GenerateBridges\(ctx context.Context, store \*BridgeStore, gen BridgeGenerator, cfg BridgesConfig, memories \[\]Memory\) \(generated int, rejected int, err error\)](<#GenerateBridges>)
 - [func IsDistillDomain\(domain string\) bool](<#IsDistillDomain>)
 - [func IsEpistemicType\(t MemoryType\) bool](<#IsEpistemicType>)
 - [func MemoryFreshnessText\(ageDays int\) string](<#MemoryFreshnessText>)
 - [func MigrateToDualDB\(dataDir string, nodeID string, logger \*slog.Logger\) error](<#MigrateToDualDB>)
 - [func ParseMetadata\(jsonStr string\) map\[string\]any](<#ParseMetadata>)
+- [func ReasonHash\(reason string\) string](<#ReasonHash>)
 - [func RotateIfNeeded\(path string, maxBytes int64\) error](<#RotateIfNeeded>)
+- [func SanitizeForStore\(s string\) string](<#SanitizeForStore>)
 - [func ScoreCandidate\(mem Memory, netVotes int, accesses int, now time.Time, w Weights\) float64](<#ScoreCandidate>)
 - [func StampFacts\(facts \[\]MemoryFact, ownerID, sourceSession string, at time.Time\)](<#StampFacts>)
 - [func Usefulness\(sumVotes, accesses int, ageDays float64, w Weights\) float64](<#Usefulness>)
 - [func ValidateDistilledContent\(category, content string\) error](<#ValidateDistilledContent>)
+- [func VerifyBridges\(ctx context.Context, store \*BridgeStore, verifier BridgeVerifier, cfg BridgesConfig\) \(kept int, dropped int, err error\)](<#VerifyBridges>)
 - [type AmbientCandidate](<#AmbientCandidate>)
   - [func ParseAmbientCandidates\(raw \[\]byte\) \(\[\]AmbientCandidate, error\)](<#ParseAmbientCandidates>)
 - [type AmbientClassifierLLM](<#AmbientClassifierLLM>)
@@ -41,9 +47,26 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(ex \*AmbientExtractor\) Extract\(ctx context.Context, messages \[\]string\) \(\[\]AmbientCandidate, error\)](<#AmbientExtractor.Extract>)
   - [func \(ex \*AmbientExtractor\) WriteCandidates\(ctx context.Context, candidates \[\]AmbientCandidate\) \(\[\]string, error\)](<#AmbientExtractor.WriteCandidates>)
 - [type AmbientExtractorConfig](<#AmbientExtractorConfig>)
+- [type BridgeGenerator](<#BridgeGenerator>)
+  - [func NewBridgeGenerator\(client llm.Chatter\) BridgeGenerator](<#NewBridgeGenerator>)
+- [type BridgeRecord](<#BridgeRecord>)
+- [type BridgeStore](<#BridgeStore>)
+  - [func NewBridgeStore\(path string\) \(\*BridgeStore, error\)](<#NewBridgeStore>)
+  - [func \(bs \*BridgeStore\) Close\(\) error](<#BridgeStore.Close>)
+  - [func \(bs \*BridgeStore\) Count\(ctx context.Context\) \(int, error\)](<#BridgeStore.Count>)
+  - [func \(bs \*BridgeStore\) DeleteBridge\(ctx context.Context, id string\) error](<#BridgeStore.DeleteBridge>)
+  - [func \(bs \*BridgeStore\) ListBridgesByEvidence\(ctx context.Context, evidenceID string\) \(\[\]BridgeRecord, error\)](<#BridgeStore.ListBridgesByEvidence>)
+  - [func \(bs \*BridgeStore\) MarkVerified\(ctx context.Context, id string\) error](<#BridgeStore.MarkVerified>)
+  - [func \(bs \*BridgeStore\) PutBridge\(ctx context.Context, rec BridgeRecord\) error](<#BridgeStore.PutBridge>)
+  - [func \(bs \*BridgeStore\) SearchByEmbedding\(ctx context.Context, embedding \[\]float32, k int\) \(\[\]BridgeRecord, error\)](<#BridgeStore.SearchByEmbedding>)
+  - [func \(bs \*BridgeStore\) WithLogger\(l \*slog.Logger\) \*BridgeStore](<#BridgeStore.WithLogger>)
+- [type BridgeVerifier](<#BridgeVerifier>)
+  - [func NewBridgeEvidenceVerifier\(client llm.Chatter\) BridgeVerifier](<#NewBridgeEvidenceVerifier>)
+- [type BridgesConfig](<#BridgesConfig>)
 - [type CalibrationLogger](<#CalibrationLogger>)
   - [func NewCalibrationLogger\(dataDir string, log \*slog.Logger\) \*CalibrationLogger](<#NewCalibrationLogger>)
   - [func \(c \*CalibrationLogger\) LogVerdict\(ctx context.Context, claimID, verdict string, mem \*Memory\)](<#CalibrationLogger.LogVerdict>)
+  - [func \(c \*CalibrationLogger\) LogVerdictReason\(ctx context.Context, claimID, verdict string, mem \*Memory, reason string\)](<#CalibrationLogger.LogVerdictReason>)
 - [type Claim](<#Claim>)
 - [type ClaimStatus](<#ClaimStatus>)
   - [func \(s ClaimStatus\) IsEligibleCanonical\(\) bool](<#ClaimStatus.IsEligibleCanonical>)
@@ -67,13 +90,21 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(c \*Consolidator\) LastRun\(\) \*time.Time](<#Consolidator.LastRun>)
   - [func \(c \*Consolidator\) MergeRelated\(ctx context.Context, memories \[\]MemoryResult\) \(\[\]Summary, error\)](<#Consolidator.MergeRelated>)
   - [func \(c \*Consolidator\) Run\(ctx context.Context, olderThanHours int\) \(\*ConsolidationReport, error\)](<#Consolidator.Run>)
+  - [func \(c \*Consolidator\) SetBridgeComponents\(store \*BridgeStore, gen BridgeGenerator\)](<#Consolidator.SetBridgeComponents>)
+  - [func \(c \*Consolidator\) SetBridgeVerifier\(ver BridgeVerifier\)](<#Consolidator.SetBridgeVerifier>)
+  - [func \(c \*Consolidator\) SetKnowledgeDirIngest\(fn func\(ctx context.Context\)\)](<#Consolidator.SetKnowledgeDirIngest>)
   - [func \(c \*Consolidator\) StartPeriodicConsolidation\(ctx context.Context, interval time.Duration, olderThanHours int\)](<#Consolidator.StartPeriodicConsolidation>)
   - [func \(c \*Consolidator\) Stop\(\)](<#Consolidator.Stop>)
 - [type ConsolidatorConfig](<#ConsolidatorConfig>)
 - [type Decision](<#Decision>)
 - [type DistillItem](<#DistillItem>)
+- [type DistillLLM](<#DistillLLM>)
 - [type DistillQueueSummary](<#DistillQueueSummary>)
 - [type DistillSummarizer](<#DistillSummarizer>)
+- [type DistillWorker](<#DistillWorker>)
+  - [func NewDistillWorker\(cfg DistillWorkerConfig\) \*DistillWorker](<#NewDistillWorker>)
+  - [func \(w \*DistillWorker\) Process\(ctx context.Context, job \*queue.Job\) \(any, error\)](<#DistillWorker.Process>)
+- [type DistillWorkerConfig](<#DistillWorkerConfig>)
 - [type DualStore](<#DualStore>)
   - [func NewDualStore\(dataDir string, nodeID string, logger \*slog.Logger\) \(\*DualStore, error\)](<#NewDualStore>)
   - [func \(s \*DualStore\) Close\(\) error](<#DualStore.Close>)
@@ -141,6 +172,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(h \*Handler\) Start\(ctx context.Context\) error](<#Handler.Start>)
   - [func \(h \*Handler\) Stop\(ctx context.Context\) error](<#Handler.Stop>)
 - [type IndexResult](<#IndexResult>)
+- [type JobEnqueuer](<#JobEnqueuer>)
 - [type KnowledgeGraph](<#KnowledgeGraph>)
   - [func NewKnowledgeGraph\(cfg KnowledgeGraphConfig\) \*KnowledgeGraph](<#NewKnowledgeGraph>)
   - [func \(g \*KnowledgeGraph\) AddEdge\(ctx context.Context, edge MemoryEdge\) error](<#KnowledgeGraph.AddEdge>)
@@ -167,12 +199,16 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(g \*KnowledgeGraph\) Initialize\(ctx context.Context\) error](<#KnowledgeGraph.Initialize>)
   - [func \(g \*KnowledgeGraph\) RankResults\(ctx context.Context, results \[\]MemoryResult, alpha float64\) \(\[\]MemoryResult, error\)](<#KnowledgeGraph.RankResults>)
 - [type KnowledgeGraphConfig](<#KnowledgeGraphConfig>)
+- [type L1ExtractPayload](<#L1ExtractPayload>)
+- [type L2ScenePayload](<#L2ScenePayload>)
 - [type Lesson](<#Lesson>)
   - [func DecodeLesson\(content string\) \(\*Lesson, error\)](<#DecodeLesson>)
+- [type ListAutoClaimsOptions](<#ListAutoClaimsOptions>)
 - [type Manager](<#Manager>)
   - [func NewManager\(cfg ManagerConfig\) \*Manager](<#NewManager>)
   - [func \(m \*Manager\) AddMemoryRelation\(ctx context.Context, sourceID, targetID string, edgeType EdgeType, weight float64\) error](<#Manager.AddMemoryRelation>)
   - [func \(m \*Manager\) Backend\(\) string](<#Manager.Backend>)
+  - [func \(m \*Manager\) BridgeStore\(\) \*BridgeStore](<#Manager.BridgeStore>)
   - [func \(m \*Manager\) CalibrationLogger\(\) \*CalibrationLogger](<#Manager.CalibrationLogger>)
   - [func \(m \*Manager\) Close\(\) error](<#Manager.Close>)
   - [func \(m \*Manager\) Config\(\) config.MemoryConfig](<#Manager.Config>)
@@ -206,6 +242,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) IsMemvidActive\(\) bool](<#Manager.IsMemvidActive>)
   - [func \(m \*Manager\) LLM\(\) llm.Chatter](<#Manager.LLM>)
   - [func \(m \*Manager\) ListAutoClaims\(ctx context.Context, createdAfter time.Time, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListAutoClaims>)
+  - [func \(m \*Manager\) ListAutoClaimsFiltered\(ctx context.Context, opts ListAutoClaimsOptions\) \(items \[\]MemoryResult, total int, err error\)](<#Manager.ListAutoClaimsFiltered>)
   - [func \(m \*Manager\) ListExpiredClaims\(ctx context.Context, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListExpiredClaims>)
   - [func \(m \*Manager\) ListPendingReviews\(ctx context.Context, before time.Time\) \(decisions, predictions \[\]MemoryResult, err error\)](<#Manager.ListPendingReviews>)
   - [func \(m \*Manager\) MarkResolved\(ctx context.Context, predictionID, outcome string\) \(string, error\)](<#Manager.MarkResolved>)
@@ -215,22 +252,27 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) OpenFactStore\(dbPath string\) \(\*FactStore, error\)](<#Manager.OpenFactStore>)
   - [func \(m \*Manager\) Personality\(\) \*PersonalityMemory](<#Manager.Personality>)
   - [func \(m \*Manager\) PromoteClaim\(ctx context.Context, claimID string\) error](<#Manager.PromoteClaim>)
+  - [func \(m \*Manager\) PromoteClaimWithReason\(ctx context.Context, claimID, reason string\) error](<#Manager.PromoteClaimWithReason>)
   - [func \(m \*Manager\) QueueDistill\(item DistillItem\)](<#Manager.QueueDistill>)
   - [func \(m \*Manager\) QueuePrefetch\(query string, maxItems int\)](<#Manager.QueuePrefetch>)
   - [func \(m \*Manager\) RecordReview\(ctx context.Context, decisionID, actualOutcome string\) \(float64, string, error\)](<#Manager.RecordReview>)
   - [func \(m \*Manager\) RecordSessionMemories\(ctx context.Context, sessionID string, memoryIDs \[\]string\) error](<#Manager.RecordSessionMemories>)
+  - [func \(m \*Manager\) RecordVerdict\(claimID, verdict, reasonHash string\) error](<#Manager.RecordVerdict>)
   - [func \(m \*Manager\) RecordVote\(id string, delta int, reason string\) error](<#Manager.RecordVote>)
   - [func \(m \*Manager\) RejectClaim\(ctx context.Context, claimID string\) error](<#Manager.RejectClaim>)
+  - [func \(m \*Manager\) RejectClaimWithReason\(ctx context.Context, claimID, reason string\) error](<#Manager.RejectClaimWithReason>)
   - [func \(m \*Manager\) RelevantDistilled\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.RelevantDistilled>)
   - [func \(m \*Manager\) ScopedManager\(botID string\) \*ScopedMemoryManager](<#Manager.ScopedManager>)
   - [func \(m \*Manager\) Search\(ctx context.Context, query MemoryQuery\) \(\[\]MemoryResult, error\)](<#Manager.Search>)
   - [func \(m \*Manager\) SearchHybrid\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.SearchHybrid>)
   - [func \(m \*Manager\) SearchSemantic\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.SearchSemantic>)
   - [func \(m \*Manager\) SearchWithGraph\(ctx context.Context, query MemoryQuery, alpha float64\) \(\[\]MemoryResult, error\)](<#Manager.SearchWithGraph>)
+  - [func \(m \*Manager\) SetBridgeStore\(bs \*BridgeStore\)](<#Manager.SetBridgeStore>)
   - [func \(m \*Manager\) SetCalibrationLogger\(c \*CalibrationLogger\)](<#Manager.SetCalibrationLogger>)
   - [func \(m \*Manager\) SetDistillSummarizer\(s DistillSummarizer\)](<#Manager.SetDistillSummarizer>)
   - [func \(m \*Manager\) SetDualStore\(ds \*DualStore\)](<#Manager.SetDualStore>)
   - [func \(m \*Manager\) SetEpistemicDetector\(d \*EpistemicDetector\)](<#Manager.SetEpistemicDetector>)
+  - [func \(m \*Manager\) SetVerdictAuditor\(a VerdictAuditor\)](<#Manager.SetVerdictAuditor>)
   - [func \(m \*Manager\) StartPeriodicConsolidation\(ctx context.Context\)](<#Manager.StartPeriodicConsolidation>)
   - [func \(m \*Manager\) StartPrefetchService\(ctx context.Context\)](<#Manager.StartPrefetchService>)
   - [func \(m \*Manager\) Stats\(\) \*MemoryStats](<#Manager.Stats>)
@@ -243,6 +285,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) StoreVersioned\(ctx context.Context, mem Memory, opts StoreOptions\) \(string, error\)](<#Manager.StoreVersioned>)
   - [func \(m \*Manager\) Task\(\) \*TaskMemory](<#Manager.Task>)
   - [func \(m \*Manager\) UpdateGraphMetrics\(ctx context.Context\) error](<#Manager.UpdateGraphMetrics>)
+  - [func \(m \*Manager\) VerdictAuditor\(\) VerdictAuditor](<#Manager.VerdictAuditor>)
 - [type ManagerConfig](<#ManagerConfig>)
 - [type Memory](<#Memory>)
   - [func \(m \*Memory\) MetadataJSON\(\) string](<#Memory.MetadataJSON>)
@@ -334,11 +377,14 @@ Package memory provides memory storage and retrieval for meept.
 - [type SearchMatch](<#SearchMatch>)
 - [type SearchParams](<#SearchParams>)
 - [type SearchTraceResult](<#SearchTraceResult>)
+- [type SearcherOption](<#SearcherOption>)
+  - [func WithBridgeCap\(kb int\) SearcherOption](<#WithBridgeCap>)
 - [type Session](<#Session>)
 - [type ShardManagerVectorSearcher](<#ShardManagerVectorSearcher>)
-  - [func NewShardManagerVectorSearcher\(manager \*vector.ShardManager, shardTypes \[\]vector.ShardType\) \*ShardManagerVectorSearcher](<#NewShardManagerVectorSearcher>)
+  - [func NewShardManagerVectorSearcher\(manager \*vector.ShardManager, shardTypes \[\]vector.ShardType, opts ...SearcherOption\) \*ShardManagerVectorSearcher](<#NewShardManagerVectorSearcher>)
   - [func \(s \*ShardManagerVectorSearcher\) Manager\(\) \*vector.ShardManager](<#ShardManagerVectorSearcher.Manager>)
   - [func \(s \*ShardManagerVectorSearcher\) Search\(ctx context.Context, query string, limit int\) \(\[\]VectorSearchResult, error\)](<#ShardManagerVectorSearcher.Search>)
+  - [func \(s \*ShardManagerVectorSearcher\) SetBridgeCap\(kb int\)](<#ShardManagerVectorSearcher.SetBridgeCap>)
 - [type SpanRecord](<#SpanRecord>)
   - [func \(s \*SpanRecord\) IsAgentSpan\(\) bool](<#SpanRecord.IsAgentSpan>)
 - [type SpanRecordSlice](<#SpanRecordSlice>)
@@ -404,6 +450,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func PlanUsefulEviction\(candidates \[\]MemoryResult, netVotes map\[string\]int, now time.Time, cfg UsefulEvictionConfig\) UsefulnessEvictionPlan](<#PlanUsefulEviction>)
 - [type VectorSearchResult](<#VectorSearchResult>)
 - [type VectorSearcher](<#VectorSearcher>)
+- [type VerdictAuditor](<#VerdictAuditor>)
 - [type ViewTraceResult](<#ViewTraceResult>)
 - [type VoteRecord](<#VoteRecord>)
 - [type Weights](<#Weights>)
@@ -411,6 +458,34 @@ Package memory provides memory storage and retrieval for meept.
 
 
 ## Constants
+
+<a name="MaxBridgeSourceMemories"></a>Bridge generation caps \(IndexRAG paper §3.2.2; branch 09 contract 2\).
+
+	const (
+	    // MaxBridgeSourceMemories is the maximum number of candidate source
+	    // memories fed to the generator per bridge entity.
+	    MaxBridgeSourceMemories = 5
+	    // MaxBridgeFactsPerSource is the maximum number of extracted facts
+	    // (entities) kept per source memory when building the prompt.
+	    MaxBridgeFactsPerSource = 8
+	)
+
+<a name="BridgeMetaUnitType"></a>Bridge metadata keys — the canonical on\-disk contract \(branch 09, root contract 4\). Written exactly as these string constants; recall\-path tag checks \(B04\) match on BridgeMetaUnitType == BridgeUnitTypeValue.
+
+	const (
+	    // BridgeMetaUnitType is always BridgeUnitTypeValue ("bridge").
+	    BridgeMetaUnitType = "unit_type"
+	    // BridgeMetaEvidenceIDs is a JSON array of source memory ID strings.
+	    BridgeMetaEvidenceIDs = "evidence_ids"
+	    // BridgeMetaCreatedAt is an RFC3339 timestamp.
+	    BridgeMetaCreatedAt = "created_at"
+	    // BridgeMetaVerified is the string "true" or "false" (B03 flips it).
+	    BridgeMetaVerified = "verified"
+	
+	    // BridgeUnitTypeValue is the metadata value stored under
+	    // BridgeMetaUnitType for every persisted bridge.
+	    BridgeUnitTypeValue = "bridge"
+	)
 
 <a name="TypeLesson"></a>Distilled memory types and domains \(loop\-economics leaf 15\).
 
@@ -433,6 +508,15 @@ Lessons are distilled principles \("always X before Y because Z"\); procedures a
 	    MaxProcedureSteps = 20
 	)
 
+<a name="MemoryJobL1Extract"></a>Queue job types for the async distill pipeline \(SHARED\-CONVENTIONS §2.2\).
+
+	const (
+	    // MemoryJobL1Extract distills raw L0 lines into auto-status claims.
+	    MemoryJobL1Extract queue.JobType = "memory.l1_extract"
+	    // MemoryJobL2Scene segments a session-day into scene summary files.
+	    MemoryJobL2Scene queue.JobType = "memory.l2_scene"
+	)
+
 <a name="DomainGeneral"></a>Default memory domain constants.
 
 	const (
@@ -449,6 +533,10 @@ Lessons are distilled principles \("always X before Y because Z"\); procedures a
 	    ViewTraceResponseBytesBudget = 150000 // ~150 KB total response budget
 	    ViewSpansMaxIDs              = 200    // max span_ids per view_spans call
 	)
+
+<a name="BridgeMetaEntities"></a>BridgeMetaEntities is the memory\-metadata key carrying the comma\-separated entity list a bridge candidate was extracted from. Stage\-1 AKU extraction \(when it exists\) writes this key; the v1 fallback extractor reads it and, when absent, extracts from Content directly.
+
+	const BridgeMetaEntities = "entities"
 
 <a name="CurrentSchemaVersion"></a>CurrentSchemaVersion is the current index schema version.
 
@@ -482,6 +570,10 @@ Lessons are distilled principles \("always X before Y because Z"\); procedures a
 
 	const MaxReasonBytes = 512
 
+<a name="MaxVerdictReasonBytes"></a>MaxVerdictReasonBytes caps the verdict reason stored in claim metadata — same cap as the usefulness\-vote reason \(memory\_vote convention\).
+
+	const MaxVerdictReasonBytes = 512
+
 <a name="PotentialContradictionThreshold"></a>PotentialContradictionThreshold is the lower bound below DefaultDetectionThreshold. Candidates in \[PotentialContradictionThreshold, DefaultDetectionThreshold\) are written as potential\_contradicts edges with low weight for review surfacing.
 
 	const PotentialContradictionThreshold = 0.4
@@ -489,6 +581,15 @@ Lessons are distilled principles \("always X before Y because Z"\); procedures a
 <a name="ReportArtifactType"></a>
 
 	const ReportArtifactType = "report_markdown"
+
+<a name="VerdictAction"></a>VerdictAuditPayloadKeys are the canonical payload keys of a memory.claim.verdict audit entry \(frozen contract, leaf T03\-L1\):
+
+	{action: "memory.claim.verdict", claim_id, verdict, reason_hash}
+	
+
+reason\_hash is the first 16 hex chars of sha256\(reason\); an empty reason hashes the empty string.
+
+	const VerdictAction = "memory.claim.verdict"
 
 ## Variables
 
@@ -516,9 +617,25 @@ Lessons are distilled principles \("always X before Y because Z"\); procedures a
 	    MemoryTypeQuestion,
 	}
 
+<a name="ErrBridgeGenerate"></a>ErrBridgeGenerate wraps every generator transport failure so callers can distinguish "LLM unavailable" from per\-bridge rejections.
+
+	var ErrBridgeGenerate = errors.New("bridge generation: llm call failed")
+
+<a name="ErrBridgeMissingEvidence"></a>ErrBridgeMissingEvidence is returned when a bridge write carries no evidence IDs \(branch rule: no provenance, no ship\).
+
+	var ErrBridgeMissingEvidence = errors.New("bridge write rejected: evidence_ids is empty (no provenance, no ship)")
+
+<a name="ErrBridgeVerify"></a>ErrBridgeVerify wraps every verifier transport failure so callers can distinguish "LLM unavailable" from per\-bridge drops.
+
+	var ErrBridgeVerify = errors.New("bridge verification: llm call failed")
+
 <a name="ErrNotFound"></a>ErrNotFound is returned when a memory is not found.
 
 	var ErrNotFound = errors.New("memory not found")
+
+<a name="ErrVerdictReasonTooLong"></a>ErrVerdictReasonTooLong is returned when a verdict reason exceeds MaxVerdictReasonBytes.
+
+	var ErrVerdictReasonTooLong = errors.New("verdict reason exceeds 512 bytes")
 
 <a name="ClusterBySimilarity"></a>
 ## func ClusterBySimilarity
@@ -555,6 +672,20 @@ EncodeLesson validates caps and serializes a Lesson to stored content JSON.
 
 EncodeProcedure validates caps and serializes a Procedure to stored content.
 
+<a name="EnqueueL1"></a>
+## func EnqueueL1
+
+	func EnqueueL1(ctx context.Context, q JobEnqueuer, p L1ExtractPayload) (string, error)
+
+EnqueueL1 enqueues one memory.l1\_extract job.
+
+<a name="EnqueueL2"></a>
+## func EnqueueL2
+
+	func EnqueueL2(ctx context.Context, q JobEnqueuer, p L2ScenePayload) (string, error)
+
+EnqueueL2 enqueues one memory.l2\_scene job.
+
 <a name="ExtractJSONFromLLM"></a>
 ## func ExtractJSONFromLLM
 
@@ -568,6 +699,20 @@ ExtractJSONFromLLM extracts the first \{...\} block from an LLM response, tolera
 	func FormatMemoryWithFreshness(content string, updatedAt *time.Time) string
 
 FormatMemoryWithFreshness appends a staleness caveat to memory content when the memory was last updated more than one day ago. If updatedAt is nil the content is returned unchanged.
+
+<a name="GenerateBridges"></a>
+## func GenerateBridges
+
+	func GenerateBridges(ctx context.Context, store *BridgeStore, gen BridgeGenerator, cfg BridgesConfig, memories []Memory) (generated int, rejected int, err error)
+
+GenerateBridges runs the bridge\-generation pass over the given candidate memories \(branch 09 leaf B02\):
+
+1. No\-op \(zero LLM calls\) unless cfg.Enabled.
+2. Extract per\-memory facts \(entities\), cap at MaxBridgeFactsPerSource.
+3. Compute document frequency per entity; bridge\-eligible entities are those with 2 \<= df \<= cfg.BridgeDFMax.
+4. Per eligible entity, cap candidates at MaxBridgeSourceMemories, call the generator, decode the JSON array, and persist via PutBridge \(evidence validation inherited\). When the model cites no evidence\_ids, the candidate source IDs are supplied as provenance.
+
+Returns the number of bridges persisted and the number of generator responses rejected \(malformed JSON, empty after evidence filtering, or failed writes\). A generator transport error aborts the pass with an error wrapping ErrBridgeGenerate.
 
 <a name="IsDistillDomain"></a>
 ## func IsDistillDomain
@@ -613,12 +758,28 @@ All operations are destructive after step 2 \(files are moved\); a backup direct
 
 ParseMetadata parses a JSON string into metadata.
 
+<a name="ReasonHash"></a>
+## func ReasonHash
+
+	func ReasonHash(reason string) string
+
+ReasonHash returns the first 16 hex chars of sha256\(reason\). An empty reason hashes to the sha256 of the empty string \(stable sentinel\).
+
 <a name="RotateIfNeeded"></a>
 ## func RotateIfNeeded
 
 	func RotateIfNeeded(path string, maxBytes int64) error
 
 RotateIfNeeded rotates path to path\+".1" when the file currently exceeds maxBytes. The previous .1 generation is overwritten, so at most two generations of the log exist \(current \+ .1\). Rename on the same filesystem is atomic, so a crash mid\-rotation leaves either the old file or the rotated one, never a partial copy. A missing file is not an error \(nothing to rotate\).
+
+<a name="SanitizeForStore"></a>
+## func SanitizeForStore
+
+	func SanitizeForStore(s string) string
+
+SanitizeForStore strips injected \`\<memory\-context\>...\</memory\-context\>\` spans \(with surrounding whitespace\) from s. Memory\-recording paths call it before persisting raw content so a memory that was echoed back into a conversation cannot be re\-recorded and feed back into future prompts \(feedback\-loop guard, mirrors TAM l0\-recorder.ts\).
+
+This is the narrow export surface for subpackages \(internal/memory/l0\); the stripping logic lives here and must not be duplicated by callers.
 
 <a name="ScoreCandidate"></a>
 ## func ScoreCandidate
@@ -652,6 +813,18 @@ sumVotes is the signed net total of votes \(\+1/\-1 each\).
 	func ValidateDistilledContent(category, content string) error
 
 ValidateDistilledContent rejects malformed stored distilled JSON at read time. Content for a memory whose category is "lesson" or "procedure" must parse as the corresponding structure; anything else returns ErrMalformedDistilled. Non\-distill categories return nil.
+
+<a name="VerifyBridges"></a>
+## func VerifyBridges
+
+	func VerifyBridges(ctx context.Context, store *BridgeStore, verifier BridgeVerifier, cfg BridgesConfig) (kept int, dropped int, err error)
+
+VerifyBridges runs the entailment\-verification pass over every persisted bridge \(branch 09 leaf B03\):
+
+- cfg.Verify false \(or a nil store/verifier\): no\-op — zero verifier calls, every bridge stays exactly as persisted \(verified="false"\). Verify is a quality gate, NOT a recall gate; recall\-side weighting of unverified bridges is leaf B04's k\_b concern.
+- cfg.Verify true: one verifier call per bridge \(v1; batching is a follow\-up\). Unsupported verdicts DELETE the bridge before it can ever be retrievable; survivors get verified=true re\-persisted.
+
+Returns \(kept, dropped\) counts. A verifier transport error aborts the pass with an error wrapping ErrBridgeVerify; bridges already processed keep their state \(best\-effort partial progress is preserved\).
 
 <a name="AmbientCandidate"></a>
 ## type AmbientCandidate
@@ -739,6 +912,157 @@ AmbientExtractorConfig holds construction parameters for AmbientExtractor.
 	    RawResponseHook func(prompt, rawBody string)
 	}
 
+<a name="BridgeGenerator"></a>
+## type BridgeGenerator
+
+BridgeGenerator produces grammar\-constrained bridging\-fact JSON for one bridge entity over its candidate sources. Pluggable for tests, mirroring the DistillSummarizer pattern.
+
+	type BridgeGenerator interface {
+	    // GenerateBridgeFacts returns the raw model output (a JSON array of
+	    // {"text", "evidence_ids"} objects) for the given entity.
+	    GenerateBridgeFacts(ctx context.Context, entity string, sources []Memory) (string, error)
+	}
+
+<a name="NewBridgeGenerator"></a>
+### func NewBridgeGenerator
+
+	func NewBridgeGenerator(client llm.Chatter) BridgeGenerator
+
+NewBridgeGenerator builds the production generator over a chatter.
+
+<a name="BridgeRecord"></a>
+## type BridgeRecord
+
+BridgeRecord is the typed representation of one bridging fact in the BridgeShard.
+
+	type BridgeRecord struct {
+	    // ID is the bridge's unique memory ID (primary key in the shard).
+	    ID  string
+	    // Content is the human-readable bridging fact text.
+	    Content string
+	    // Embedding is the pre-computed vector; PutBridge does NOT call an
+	    // embedding model (generation, B02, owns that).
+	    Embedding []float32
+	    // Metadata carries any extra key/value pairs beyond the four canonical
+	    // bridge keys; canonical keys set here are overwritten by the typed
+	    // fields below.
+	    Metadata map[string]any
+	    // EvidenceIDs are the source memory IDs this bridge was derived from.
+	    // Mandatory: empty at write time is rejected (ErrBridgeMissingEvidence).
+	    EvidenceIDs []string
+	    // CreatedAt is the bridge creation time (RFC3339 in metadata).
+	    CreatedAt time.Time
+	    // Verified reports whether entailment verification (B03) passed.
+	    Verified bool
+	}
+
+<a name="BridgeStore"></a>
+## type BridgeStore
+
+BridgeStore provides typed CRUD over the vector package's BridgeShard. It owns the bridge.vec.db file directly \(not via ShardManager\) so the store can manage its own sqlite handle and metadata side table; the ShardManager's BridgeShard remains available for read\-side integration \(recall path, B04\) through the standard GetShard flow.
+
+	type BridgeStore struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewBridgeStore"></a>
+### func NewBridgeStore
+
+	func NewBridgeStore(path string) (*BridgeStore, error)
+
+NewBridgeStore opens \(creating if needed\) the bridge shard at path.
+
+<a name="BridgeStore.Close"></a>
+### func \(\*BridgeStore\) Close
+
+	func (bs *BridgeStore) Close() error
+
+Close closes the shard and the side\-table handle.
+
+<a name="BridgeStore.Count"></a>
+### func \(\*BridgeStore\) Count
+
+	func (bs *BridgeStore) Count(ctx context.Context) (int, error)
+
+Count returns the number of persisted bridges \(distinct memory IDs in the side table — not raw rows, which are one per \(memory\_id, key\) pair\).
+
+<a name="BridgeStore.DeleteBridge"></a>
+### func \(\*BridgeStore\) DeleteBridge
+
+	func (bs *BridgeStore) DeleteBridge(ctx context.Context, id string) error
+
+DeleteBridge removes a bridge \(vector \+ metadata\) by ID. Deleting a non\-existent bridge is a no\-op, matching VectorShard.Delete semantics.
+
+<a name="BridgeStore.ListBridgesByEvidence"></a>
+### func \(\*BridgeStore\) ListBridgesByEvidence
+
+	func (bs *BridgeStore) ListBridgesByEvidence(ctx context.Context, evidenceID string) ([]BridgeRecord, error)
+
+ListBridgesByEvidence returns every bridge whose evidence\_ids contain the given source memory ID. B03 invalidation calls this on source\-memory update/delete/expiry.
+
+<a name="BridgeStore.MarkVerified"></a>
+### func \(\*BridgeStore\) MarkVerified
+
+	func (bs *BridgeStore) MarkVerified(ctx context.Context, id string) error
+
+MarkVerified re\-persists a bridge's verified flag \(metadata \+ typed field\) without touching its vector row — the survivor path of VerifyBridges.
+
+<a name="BridgeStore.PutBridge"></a>
+### func \(\*BridgeStore\) PutBridge
+
+	func (bs *BridgeStore) PutBridge(ctx context.Context, rec BridgeRecord) error
+
+PutBridge validates and persists one bridge record. Write\-time validation: empty EvidenceIDs \(after trimming\) is rejected with ErrBridgeMissingEvidence and nothing is persisted.
+
+<a name="BridgeStore.SearchByEmbedding"></a>
+### func \(\*BridgeStore\) SearchByEmbedding
+
+	func (bs *BridgeStore) SearchByEmbedding(ctx context.Context, embedding []float32, k int) ([]BridgeRecord, error)
+
+SearchByEmbedding runs a KNN search over the bridge shard and enriches hits with their canonical metadata. This is a store\-level primitive — the recall path \(B04\) applies the k\_b cap on top of it.
+
+<a name="BridgeStore.WithLogger"></a>
+### func \(\*BridgeStore\) WithLogger
+
+	func (bs *BridgeStore) WithLogger(l *slog.Logger) *BridgeStore
+
+WithLogger sets the store's logger \(used for best\-effort warnings\).
+
+<a name="BridgeVerifier"></a>
+## type BridgeVerifier
+
+BridgeVerifier decides whether one bridging fact is entailed by its source memories. Pluggable for tests, mirroring the BridgeGenerator pattern.
+
+	type BridgeVerifier interface {
+	    // VerifyBridge returns (supported, reason, err) for one bridge record.
+	    // supported=true marks the bridge entailed by its evidence.
+	    VerifyBridge(ctx context.Context, rec BridgeRecord) (bool, string, error)
+	}
+
+<a name="NewBridgeEvidenceVerifier"></a>
+### func NewBridgeEvidenceVerifier
+
+	func NewBridgeEvidenceVerifier(client llm.Chatter) BridgeVerifier
+
+NewBridgeEvidenceVerifier builds the production entailment verifier over a chatter. The verdict is grammar\-constrained \(llm.BridgeVerdictGrammar\) — no free\-text parsing.
+
+<a name="BridgesConfig"></a>
+## type BridgesConfig
+
+BridgesConfig carries the bridge\-generation knob values \(memory.bridges.\* in internal/config\). Mirrored here so GenerateBridges stays decoupled from the config package's full schema.
+
+	type BridgesConfig struct {
+	    // Enabled gates the entire pass: false (the default) makes
+	    // GenerateBridges a no-op with zero LLM calls.
+	    Enabled bool
+	    // BridgeDFMax is the inclusive upper bound of the bridge-entity
+	    // document-frequency window (lower bound fixed at 2).
+	    BridgeDFMax int
+	    // Verify reports whether entailment verification (B03) should run on
+	    // generated bridges. Generation only records it on the record.
+	    Verify bool
+	}
+
 <a name="CalibrationLogger"></a>
 ## type CalibrationLogger
 
@@ -761,6 +1085,13 @@ NewCalibrationLogger creates a logger writing into the memory data dir. Empty da
 	func (c *CalibrationLogger) LogVerdict(ctx context.Context, claimID, verdict string, mem *Memory)
 
 LogVerdict appends one verdict record. Snapshot the path under the lock, write outside it \(mutexio rule\); a write error disables the logger.
+
+<a name="CalibrationLogger.LogVerdictReason"></a>
+### func \(\*CalibrationLogger\) LogVerdictReason
+
+	func (c *CalibrationLogger) LogVerdictReason(ctx context.Context, claimID, verdict string, mem *Memory, reason string)
+
+LogVerdictReason is LogVerdict with an optional human verdict reason \(leaf T03\-L1\). Empty reason omits the field so existing consumers see byte\-identical records for the no\-reason path.
 
 <a name="Claim"></a>
 ## type Claim
@@ -1054,6 +1385,27 @@ When no embedder is set but an LLM client is configured, LLM\-based topic groupi
 
 Run performs a single consolidation pass.
 
+<a name="Consolidator.SetBridgeComponents"></a>
+### func \(\*Consolidator\) SetBridgeComponents
+
+	func (c *Consolidator) SetBridgeComponents(store *BridgeStore, gen BridgeGenerator)
+
+SetBridgeComponents wires the bridge store \+ generator into the periodic consolidation pass. Both must be non\-nil for the pass to run; pass nils to disable \(defence\-in\-depth alongside the config gate\).
+
+<a name="Consolidator.SetBridgeVerifier"></a>
+### func \(\*Consolidator\) SetBridgeVerifier
+
+	func (c *Consolidator) SetBridgeVerifier(ver BridgeVerifier)
+
+SetBridgeVerifier wires the entailment verifier \(branch 09 B03\) into the bridge pass. Optional: with no verifier wired, bridges persist unverified \(verified="false"\) even when memory.bridges.verify=true — the quality gate needs a local\-model chatter to run. Pass nil to detach.
+
+<a name="Consolidator.SetKnowledgeDirIngest"></a>
+### func \(\*Consolidator\) SetKnowledgeDirIngest
+
+	func (c *Consolidator) SetKnowledgeDirIngest(fn func(ctx context.Context))
+
+SetKnowledgeDirIngest wires the knowledge watched\-dir ingest pass \(tree 04 L2\) into the periodic consolidation pass. The caller supplies a closure over the knowledge store and the configured ingest dir \(typically a call to knowledge.SyncDir\); nil disables the pass \(the default\). The pass also no\-ops when memory.knowledge.enabled or ingest\_dir is unset — the closure is only wired under those conditions by the daemon.
+
 <a name="Consolidator.StartPeriodicConsolidation"></a>
 ### func \(\*Consolidator\) StartPeriodicConsolidation
 
@@ -1119,6 +1471,16 @@ DistillItem is a queued distillation request originating from a reflection colle
 	    EvidenceIDs []string `json:"evidence_ids,omitempty"`
 	}
 
+<a name="DistillLLM"></a>
+## type DistillLLM
+
+DistillLLM is the narrow LLM interface for distill jobs, mirroring the AmbientClassifierLLM precedent \(defined locally to avoid an import cycle on internal/llm\). The daemon adapts its resolved memory\_model slot chatter \(memory\_model client \> general provider \> general client\) to this.
+
+	type DistillLLM interface {
+	    // DistillComplete sends one distill prompt and returns the raw JSON body.
+	    DistillComplete(ctx context.Context, prompt string) ([]byte, error)
+	}
+
 <a name="DistillQueueSummary"></a>
 ## type DistillQueueSummary
 
@@ -1137,6 +1499,48 @@ DistillSummarizer condenses a set of source memories into the structured JSON pa
 
 	type DistillSummarizer interface {
 	    SummarizeForDistill(ctx context.Context, kind string, sources []Memory) (string, error)
+	}
+
+<a name="DistillWorker"></a>
+## type DistillWorker
+
+DistillWorker consumes memory.l1\_extract / memory.l2\_scene queue jobs.
+
+	type DistillWorker struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewDistillWorker"></a>
+### func NewDistillWorker
+
+	func NewDistillWorker(cfg DistillWorkerConfig) *DistillWorker
+
+NewDistillWorker constructs a distill worker.
+
+<a name="DistillWorker.Process"></a>
+### func \(\*DistillWorker\) Process
+
+	func (w *DistillWorker) Process(ctx context.Context, job *queue.Job) (any, error)
+
+Process dispatches one queue job by type. LLM and store failures return an error — the queue's retry/backoff/dead\-letter path owns failure handling \(no private retry loop\).
+
+<a name="DistillWorkerConfig"></a>
+## type DistillWorkerConfig
+
+DistillWorkerConfig holds construction parameters for DistillWorker.
+
+	type DistillWorkerConfig struct {
+	    // Manager stores L1 claims and the per-session L0 progress markers.
+	    Manager *Manager
+	    // LLM runs extraction and scene-segmentation prompts. Nil LLM: L1 fails
+	    // (queue retry/backoff applies); L2 degrades to the fallback scene.
+	    LLM DistillLLM
+	    // DataDir is the memory data dir (<dataDir>/l0, <dataDir>/l2).
+	    DataDir string
+	    // Enqueuer, when non-nil, is used to chain one L2 job after each L1
+	    // success. Nil = chaining disabled (L3 wiring decides).
+	    Enqueuer JobEnqueuer
+	    Logger   *slog.Logger
 	}
 
 <a name="DualStore"></a>
@@ -1724,6 +2128,15 @@ IndexResult holds both index rows and metadata from a build.
 	    Meta TraceIndexMeta
 	}
 
+<a name="JobEnqueuer"></a>
+## type JobEnqueuer
+
+JobEnqueuer is the minimal queue surface the distill pipeline needs. Adapted to the real queue API: \*queue.PersistentQueue satisfies it via Queue.Enqueue\(ctx, \*Job\). No handler registry exists in internal/queue — dispatch is worker.JobProcessor.Process — so DistillWorker exposes a matching Process method for the wiring leaf \(T01\-L3\) to hand to a worker.
+
+	type JobEnqueuer interface {
+	    Enqueue(ctx context.Context, job *queue.Job) error
+	}
+
 <a name="KnowledgeGraph"></a>
 ## type KnowledgeGraph
 
@@ -1915,6 +2328,29 @@ KnowledgeGraphConfig holds configuration for the knowledge graph.
 	    CacheTTL      time.Duration // Cache validity (default: 5m)
 	}
 
+<a name="L1ExtractPayload"></a>
+## type L1ExtractPayload
+
+L1ExtractPayload is the memory.l1\_extract payload \(SHARED\-CONVENTIONS §2.2\).
+
+	type L1ExtractPayload struct {
+	    SessionID  string `json:"session_id"`
+	    L0Path     string `json:"l0_path"`
+	    SinceMsgID string `json:"since_msg_id,omitempty"`
+	}
+
+<a name="L2ScenePayload"></a>
+## type L2ScenePayload
+
+L2ScenePayload is the memory.l2\_scene payload \(SHARED\-CONVENTIONS §2.2\).
+
+	type L2ScenePayload struct {
+	    SessionID string `json:"session_id"`
+	    // SinceTS is RFC3339; its calendar date selects the L0 day file and the
+	    // scene file names. The scene pass covers the full session-day.
+	    SinceTS string `json:"since_ts"`
+	}
+
 <a name="Lesson"></a>
 ## type Lesson
 
@@ -1932,6 +2368,26 @@ Lesson is a distilled principle with supporting evidence references.
 	func DecodeLesson(content string) (*Lesson, error)
 
 DecodeLesson parses stored content into a Lesson, rejecting malformed JSON. evidence\_ids elements are coerced to strings when the producer emitted numbers \(small models emit \[101, 102\] for \["101", "102"\]\); elements that are neither strings nor numbers are dropped rather than failing the whole lesson. Only the decode path is tolerant — EncodeLesson stays strict.
+
+<a name="ListAutoClaimsOptions"></a>
+## type ListAutoClaimsOptions
+
+ListAutoClaimsOptions filters the review queue \(leaf T03\-L1\). Nil pointer fields mean "no bound".
+
+	type ListAutoClaimsOptions struct {
+	    // MinConfidence / MaxConfidence are inclusive bounds over the claim's
+	    // extraction-time confidence. Claims without a parseable confidence
+	    // (-1 sentinel) never match a confidence-bounded query.
+	    MinConfidence *float64
+	    MaxConfidence *float64
+	    // OlderThan keeps only claims created before now-OlderThan (stale
+	    // claims surface first for review).
+	    OlderThan *time.Duration
+	    // Limit caps returned items (<= 0 defaults to 20).
+	    Limit int
+	    // Offset skips the first N matches (pagination window; < 0 treated as 0).
+	    Offset int
+	}
 
 <a name="Manager"></a>
 ## type Manager
@@ -1962,6 +2418,13 @@ AddMemoryRelation creates a relationship between two memories.
 	func (m *Manager) Backend() string
 
 Backend returns the active backend name.
+
+<a name="Manager.BridgeStore"></a>
+### func \(\*Manager\) BridgeStore
+
+	func (m *Manager) BridgeStore() *BridgeStore
+
+BridgeStore returns the configured bridge store, or nil if none is set.
 
 <a name="Manager.CalibrationLogger"></a>
 ### func \(\*Manager\) CalibrationLogger
@@ -2194,6 +2657,15 @@ IsMemvidActive returns true if memvid is the active backend.
 
 ListAutoClaims returns claims with status=auto, optionally filtered by created\_after for incremental review prompts.
 
+<a name="Manager.ListAutoClaimsFiltered"></a>
+### func \(\*Manager\) ListAutoClaimsFiltered
+
+	func (m *Manager) ListAutoClaimsFiltered(ctx context.Context, opts ListAutoClaimsOptions) (items []MemoryResult, total int, err error)
+
+ListAutoClaimsFiltered returns status=auto claims matching the filter options, plus the TOTAL count of matching claims \(before offset/limit\) so callers can paginate. Ordering follows Search \(relevance, then created\_at descending\).
+
+MinConfidence/MaxConfidence are inclusive bounds over the claim's extraction\-time confidence. OlderThan keeps only claims created before now\-OlderThan \(stale claims first for review\). Limit \<= 0 defaults to 20; Offset \< 0 is treated as 0.
+
 <a name="Manager.ListExpiredClaims"></a>
 ### func \(\*Manager\) ListExpiredClaims
 
@@ -2259,6 +2731,13 @@ Personality returns the personality memory subsystem.
 
 PromoteClaim transitions an auto claim to promoted status.
 
+<a name="Manager.PromoteClaimWithReason"></a>
+### func \(\*Manager\) PromoteClaimWithReason
+
+	func (m *Manager) PromoteClaimWithReason(ctx context.Context, claimID, reason string) error
+
+PromoteClaimWithReason promotes an auto claim, recording an optional human verdict reason \(capped at MaxVerdictReasonBytes\) as claim metadata \`verdict\_reason\` and in the calibration log. The auditlog entry \(when an auditor is wired\) is written BEFORE the status transition — durable\-then\-ack.
+
 <a name="Manager.QueueDistill"></a>
 ### func \(\*Manager\) QueueDistill
 
@@ -2287,6 +2766,13 @@ RecordReview closes a decision with the actual outcome and scores the expected\-
 
 RecordSessionMemories creates temporal edges between memories from a session.
 
+<a name="Manager.RecordVerdict"></a>
+### func \(\*Manager\) RecordVerdict
+
+	func (m *Manager) RecordVerdict(claimID, verdict, reasonHash string) error
+
+RecordVerdict delivers the verdict to the wired auditor. Returns an error when an auditor is wired and rejects the entry \(durable\-then\-ack: the verdict transition is aborted before the status write so the audit chain never misses a verdict that was acknowledged\).
+
 <a name="Manager.RecordVote"></a>
 ### func \(\*Manager\) RecordVote
 
@@ -2300,6 +2786,13 @@ RecordVote records a usefulness vote \(\+1 or \-1\) on a memory with an optional
 	func (m *Manager) RejectClaim(ctx context.Context, claimID string) error
 
 RejectClaim transitions a claim to rejected status.
+
+<a name="Manager.RejectClaimWithReason"></a>
+### func \(\*Manager\) RejectClaimWithReason
+
+	func (m *Manager) RejectClaimWithReason(ctx context.Context, claimID, reason string) error
+
+RejectClaimWithReason rejects a claim with an optional verdict reason \(same cap, metadata key, and audit semantics as PromoteClaimWithReason\).
 
 <a name="Manager.RelevantDistilled"></a>
 ### func \(\*Manager\) RelevantDistilled
@@ -2343,6 +2836,13 @@ SearchSemantic performs vector similarity search for memories. If the vector sto
 
 SearchWithGraph searches memories and applies graph\-aware ranking. The alpha parameter controls PageRank influence: 0 = pure relevance, 1 = pure PageRank.
 
+<a name="Manager.SetBridgeStore"></a>
+### func \(\*Manager\) SetBridgeStore
+
+	func (m *Manager) SetBridgeStore(bs *BridgeStore)
+
+SetBridgeStore wires the bridge shard store \(branch 09\). When set, the consolidator's periodic pass can generate bridging facts into it \(still gated on memory.bridges.enabled\). Nil\-safe \(a nil store disables the bridge pass\).
+
 <a name="Manager.SetCalibrationLogger"></a>
 ### func \(\*Manager\) SetCalibrationLogger
 
@@ -2370,6 +2870,13 @@ SetDualStore wires the cluster\-aware DualStore so that memory writes can be mir
 	func (m *Manager) SetEpistemicDetector(d *EpistemicDetector)
 
 SetEpistemicDetector configures the detector used by the post\-Store hook to run LLM\-driven relationship detection for epistemic memories. Pass nil to disable the hook \(defence\-in\-depth: a nil detector is a no\-op\).
+
+<a name="Manager.SetVerdictAuditor"></a>
+### func \(\*Manager\) SetVerdictAuditor
+
+	func (m *Manager) SetVerdictAuditor(a VerdictAuditor)
+
+SetVerdictAuditor wires the auditlog adapter that receives one entry per verdict. Nil\-safe: a nil auditor disables verdict auditing \(best\-effort — auditing is never required for a verdict to proceed\).
 
 <a name="Manager.StartPeriodicConsolidation"></a>
 ### func \(\*Manager\) StartPeriodicConsolidation
@@ -2456,6 +2963,13 @@ Task returns the task memory subsystem \(SQLite backend only\).
 	func (m *Manager) UpdateGraphMetrics(ctx context.Context) error
 
 UpdateGraphMetrics recomputes PageRank and community detection.
+
+<a name="Manager.VerdictAuditor"></a>
+### func \(\*Manager\) VerdictAuditor
+
+	func (m *Manager) VerdictAuditor() VerdictAuditor
+
+VerdictAuditor returns the configured verdict auditor, or nil.
 
 <a name="ManagerConfig"></a>
 ## type ManagerConfig
@@ -3308,6 +3822,20 @@ SearchTraceResult is the response from SearchTrace.
 	    Matches   []SearchMatch `json:"matches"`
 	}
 
+<a name="SearcherOption"></a>
+## type SearcherOption
+
+SearcherOption customises a ShardManagerVectorSearcher.
+
+	type SearcherOption func(*ShardManagerVectorSearcher)
+
+<a name="WithBridgeCap"></a>
+### func WithBridgeCap
+
+	func WithBridgeCap(kb int) SearcherOption
+
+WithBridgeCap sets the balanced\-selection bridge cap \(memory.bridges.kb\). Non\-positive values fall back to vector.DefaultBridgeKB at selection time.
+
 <a name="Session"></a>
 ## type Session
 
@@ -3339,7 +3867,7 @@ ShardManagerVectorSearcher wraps vector.ShardManager to implement the VectorSear
 <a name="NewShardManagerVectorSearcher"></a>
 ### func NewShardManagerVectorSearcher
 
-	func NewShardManagerVectorSearcher(manager *vector.ShardManager, shardTypes []vector.ShardType) *ShardManagerVectorSearcher
+	func NewShardManagerVectorSearcher(manager *vector.ShardManager, shardTypes []vector.ShardType, opts ...SearcherOption) *ShardManagerVectorSearcher
 
 NewShardManagerVectorSearcher creates a new vector searcher backed by ShardManager. If shardTypes is nil or empty, defaults to consolidated and recent shards.
 
@@ -3356,6 +3884,13 @@ Manager returns the underlying ShardManager for advanced operations.
 	func (s *ShardManagerVectorSearcher) Search(ctx context.Context, query string, limit int) ([]VectorSearchResult, error)
 
 Search implements the VectorSearcher interface.
+
+<a name="ShardManagerVectorSearcher.SetBridgeCap"></a>
+### func \(\*ShardManagerVectorSearcher\) SetBridgeCap
+
+	func (s *ShardManagerVectorSearcher) SetBridgeCap(kb int)
+
+SetBridgeCap updates the balanced\-selection bridge cap \(memory.bridges.kb\) at runtime. Nil\-receiver safe: a nil searcher has nothing to configure. Non\-positive values fall back to vector.DefaultBridgeKB at selection time.
 
 <a name="SpanRecord"></a>
 ## type SpanRecord
@@ -3943,6 +4478,15 @@ VectorSearcher is the interface the Manager uses for semantic/vector search. Thi
 
 	type VectorSearcher interface {
 	    Search(ctx context.Context, query string, limit int) ([]VectorSearchResult, error)
+	}
+
+<a name="VerdictAuditor"></a>
+## type VerdictAuditor
+
+VerdictAuditor receives one audit record per claim verdict \(promote/reject\). Implemented in internal/daemon wiring by an adapter over \*auditlog.Store — the memory package must not import internal/auditlog \(leaf T03\-L1, mirroring the internal/employee injection pattern\). A returned error propagates to the verdict caller: the audit entry is durable\-then\-acknowledged.
+
+	type VerdictAuditor interface {
+	    RecordVerdict(claimID, verdict, reasonHash string) error
 	}
 
 <a name="ViewTraceResult"></a>

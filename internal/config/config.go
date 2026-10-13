@@ -312,6 +312,7 @@ func expandConfigPaths(cfg *Config) {
 	cfg.Daemon.PIDFile = expandPath(cfg.Daemon.PIDFile)
 	cfg.Daemon.DataDir = expandPath(cfg.Daemon.DataDir)
 	cfg.Memory.DataDir = expandPath(cfg.Memory.DataDir)
+	cfg.Memory.Knowledge.IngestDir = expandPath(cfg.Memory.Knowledge.IngestDir)
 	cfg.Queue.DBPath = expandPath(cfg.Queue.DBPath)
 	cfg.Isolation.BaseDir = expandPath(cfg.Isolation.BaseDir)
 	cfg.MCP.ConfigFile = expandPath(cfg.MCP.ConfigFile)

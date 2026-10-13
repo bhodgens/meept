@@ -1339,6 +1339,32 @@ type MemoryConfig struct {
 	// Bridges holds cross-memory bridging-fact generation settings
 	// (IndexRAG stage 2, branch 09). Default OFF. See MemoryBridgesConfig.
 	Bridges MemoryBridgesConfig `json:"bridges" toml:"bridges"`
+	// Knowledge holds the knowledge-asset store settings (tree 04).
+	// Default OFF: when disabled the knowledge_* tools are not registered
+	// and nothing reaches prompts. See KnowledgeConfig.
+	Knowledge KnowledgeConfig `json:"knowledge" toml:"knowledge"`
+}
+
+// KnowledgeConfig gates the knowledge-asset store (SQLite pages + FTS5
+// full-text index + link graph; tree 04). Entirely opt-in: the wiki
+// (internal/selfimprove) is a separate store with a separate code path.
+//
+//gendoc:desc Knowledge-asset store (knowledge_search/read/ingest tools, FTS5 full-text over ingested markdown pages) with optional watched-dir ingestion on the consolidation tick.
+//gendoc:example [memory.knowledge] enabled = true
+type KnowledgeConfig struct {
+	// Enabled turns on the knowledge store and registers the
+	// knowledge_search / knowledge_read / knowledge_ingest tools.
+	// Default false (opt-in-defaults rule; wiki→inference reachability
+	// is a product decision per SHARED-CONVENTIONS §2.5).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// IngestDir is the watched directory of *.md files ingested on the
+	// periodic consolidation tick (source "dir:<relpath>", content-hash
+	// diff skips unchanged files). Empty disables dir syncing. Supports
+	// "~/"" prefixes.
+	IngestDir string `json:"ingest_dir" toml:"ingest_dir"`
+	// MaxPages bounds the stored page count (oldest-ingested evicted at
+	// ingest time; <= 0 means unbounded). Default 0 (unbounded).
+	MaxPages int `json:"max_pages" toml:"max_pages"`
 }
 
 // MemoryBridgesConfig gates offline bridging-fact generation in the
@@ -3085,6 +3111,13 @@ func DefaultConfig() *Config {
 				KB:          2,
 				BridgeDFMax: 10,
 				Verify:      true,
+			},
+			// Knowledge store: opt-in, disabled by default (SHARED-CONVENTIONS
+			// §2.5 — nothing reaches prompts until memory.knowledge.enabled).
+			Knowledge: KnowledgeConfig{
+				Enabled:   false,
+				IngestDir: "",
+				MaxPages:  0,
 			},
 			Task: TaskMemoryConfig{
 				Enabled: true,

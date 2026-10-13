@@ -182,6 +182,7 @@ Package config provides configuration loading and validation for meept.
 - [type HooksConfig](<#HooksConfig>)
 - [type InstructionConfig](<#InstructionConfig>)
 - [type IsolationConfig](<#IsolationConfig>)
+- [type KnowledgeConfig](<#KnowledgeConfig>)
 - [type LLMAdaptiveTimeoutConfig](<#LLMAdaptiveTimeoutConfig>)
 - [type LLMBrokerConfig](<#LLMBrokerConfig>)
 - [type LLMConfig](<#LLMConfig>)
@@ -202,6 +203,7 @@ Package config provides configuration loading and validation for meept.
   - [func DefaultMediaConfig\(\) MediaConfig](<#DefaultMediaConfig>)
   - [func EffectiveMediaConfig\(cfg MediaConfig\) MediaConfig](<#EffectiveMediaConfig>)
 - [type MemoryBackend](<#MemoryBackend>)
+- [type MemoryBridgesConfig](<#MemoryBridgesConfig>)
 - [type MemoryCachingConfig](<#MemoryCachingConfig>)
 - [type MemoryCategoryLimit](<#MemoryCategoryLimit>)
 - [type MemoryConfig](<#MemoryConfig>)
@@ -309,6 +311,7 @@ Package config provides configuration loading and validation for meept.
 - [type SkillsEvolverConfig](<#SkillsEvolverConfig>)
 - [type SkillsStateConfig](<#SkillsStateConfig>)
 - [type SkillsWikiConfig](<#SkillsWikiConfig>)
+- [type SpillConfig](<#SpillConfig>)
 - [type SyncConfig](<#SyncConfig>)
 - [type SyncStatus](<#SyncStatus>)
 - [type TTSBehaviorConfig](<#TTSBehaviorConfig>)
@@ -1598,6 +1601,11 @@ CompactionConfig configures LLM\-based context compaction.
 	    IterativeUpdates  bool    `json:"iterative_updates"  toml:"iterative_updates"`
 	    TrackFileOps      bool    `json:"track_file_ops"     toml:"track_file_ops"`
 	    TimeoutSeconds    int     `json:"timeout_seconds"    toml:"timeout_seconds"`
+	    // SpillEnabled turns on tool-output spilling in pruneToolOutputs: pruned
+	    // tool outputs are written to $MEEPT_HOME/spill/<session_id>/ and replaced
+	    // with a re-read pointer line instead of the irreversible truncation text.
+	    // Opt-in, default false (spilling is disabled unless explicitly enabled).
+	    SpillEnabled bool `json:"spill_enabled" toml:"spill_enabled"`
 	}
 
 <a name="Config"></a>
@@ -1636,6 +1644,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    Calendar            CalendarConfig            `json:"calendar"           toml:"calendar"`
 	    Tooling             ToolingConfig             `json:"tooling"            toml:"tooling"`
 	    Compaction          CompactionConfig          `json:"compaction"         toml:"compaction"`
+	    Spill               SpillConfig               `json:"spill"              toml:"spill"`
 	    Session             SessionConfig             `json:"session"            toml:"session"`
 	    Cluster             ClusterConfig             `json:"cluster"             toml:"cluster"`
 	    Bots                BotsConfig                `json:"bots"                toml:"bots"`
@@ -2588,6 +2597,27 @@ IsolationConfig holds task isolation settings.
 	    AutoTest    bool   `json:"auto_test"     toml:"auto_test"`
 	}
 
+<a name="KnowledgeConfig"></a>
+## type KnowledgeConfig
+
+KnowledgeConfig gates the knowledge\-asset store \(SQLite pages \+ FTS5 full\-text index \+ link graph; tree 04\). Entirely opt\-in: the wiki \(internal/selfimprove\) is a separate store with a separate code path.
+
+	type KnowledgeConfig struct {
+	    // Enabled turns on the knowledge store and registers the
+	    // knowledge_search / knowledge_read / knowledge_ingest tools.
+	    // Default false (opt-in-defaults rule; wiki→inference reachability
+	    // is a product decision per SHARED-CONVENTIONS §2.5).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // IngestDir is the watched directory of *.md files ingested on the
+	    // periodic consolidation tick (source "dir:<relpath>", content-hash
+	    // diff skips unchanged files). Empty disables dir syncing. Supports
+	    // "~/"" prefixes.
+	    IngestDir string `json:"ingest_dir" toml:"ingest_dir"`
+	    // MaxPages bounds the stored page count (oldest-ingested evicted at
+	    // ingest time; <= 0 means unbounded). Default 0 (unbounded).
+	    MaxPages int `json:"max_pages" toml:"max_pages"`
+	}
+
 <a name="LLMAdaptiveTimeoutConfig"></a>
 ## type LLMAdaptiveTimeoutConfig
 
@@ -2864,6 +2894,29 @@ MemoryBackend defines the storage backend for memory.
 	    MemoryBackendSQLite MemoryBackend = "sqlite"
 	)
 
+<a name="MemoryBridgesConfig"></a>
+## type MemoryBridgesConfig
+
+MemoryBridgesConfig gates offline bridging\-fact generation in the Consolidator \(branch 09 leaf B02\). The whole pass no\-ops unless Enabled — generation NEVER runs on the chat inference path.
+
+	type MemoryBridgesConfig struct {
+	    // Enabled turns on bridge generation in the periodic consolidation
+	    // pass. Default false (opt-in until validated by the bridge eval).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // KB is the recall-path cap: the maximum number of bridging facts
+	    // admitted into a single assembled context (leaf B04 consumes this).
+	    // Default 2.
+	    KB  int `json:"kb" toml:"kb"`
+	    // BridgeDFMax is the inclusive upper bound of the bridge-entity
+	    // document-frequency window; the lower bound is fixed at 2. Entities
+	    // rarer than 2 are not shared; entities more frequent than this are
+	    // too generic to bridge. Default 10.
+	    BridgeDFMax int `json:"bridge_df_max" toml:"bridge_df_max"`
+	    // Verify controls entailment verification of generated bridges (leaf
+	    // B03). Default true.
+	    Verify bool `json:"verify" toml:"verify"`
+	}
+
 <a name="MemoryCachingConfig"></a>
 ## type MemoryCachingConfig
 
@@ -2920,6 +2973,13 @@ MemoryConfig holds memory subsystem settings.
 	    // Usefulness holds memory usefulness voting settings. See
 	    // MemoryUsefulnessConfig.
 	    Usefulness MemoryUsefulnessConfig `json:"usefulness" toml:"usefulness"`
+	    // Bridges holds cross-memory bridging-fact generation settings
+	    // (IndexRAG stage 2, branch 09). Default OFF. See MemoryBridgesConfig.
+	    Bridges MemoryBridgesConfig `json:"bridges" toml:"bridges"`
+	    // Knowledge holds the knowledge-asset store settings (tree 04).
+	    // Default OFF: when disabled the knowledge_* tools are not registered
+	    // and nothing reaches prompts. See KnowledgeConfig.
+	    Knowledge KnowledgeConfig `json:"knowledge" toml:"knowledge"`
 	}
 
 <a name="MemoryConfig.GetLimitsForProject"></a>
@@ -4458,6 +4518,18 @@ SkillsWikiConfig configures the wiki knowledge store \(arXiv:2608.27454\). The s
 	type SkillsWikiConfig struct {
 	    Enabled bool   `json:"enabled" toml:"enabled"` // default true
 	    Dir     string `json:"dir"     toml:"dir"`     // default "~/.meept/wiki"
+	}
+
+<a name="SpillConfig"></a>
+## type SpillConfig
+
+SpillConfig configures the tool\-output spill store under $MEEPT\_HOME/spill/ \(written by the compactor when compaction.spill\_enabled is true; swept by the spill retention sweep\).
+
+	type SpillConfig struct {
+	    // RetentionDays is how long spilled tool outputs are kept before the
+	    // retention sweep deletes them. Default 30. Consumed by the spill
+	    // retention sweep (plans/context-reduction/08-spill-retention.md).
+	    RetentionDays int `json:"retention_days" toml:"retention_days"`
 	}
 
 <a name="SyncConfig"></a>

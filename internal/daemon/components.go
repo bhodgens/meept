@@ -44,6 +44,7 @@ import (
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
+	"github.com/caimlas/meept/internal/memory/knowledge"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
@@ -2542,7 +2543,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if transcriptChatter == nil {
 		transcriptChatter = c.SummarizerClient
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager)
+	// Knowledge-asset store data dir ([memory.knowledge], tree 04): a
+	// dedicated directory under the daemon data dir, opened lazily inside
+	// registerBuiltinTools only when enabled.
+	knowledgeDataDir := filepath.Join(cfg.Daemon.DataDir, "knowledge")
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir)
 
 	// json_extract (dedicated extraction model from the extract_model
 	// slot). Registered even when ExtractClient is nil: the tool's
@@ -6015,6 +6020,8 @@ func registerBuiltinTools(
 	skillRegistry *skills.Registry,
 	tokenStore llm.TokenResolver,
 	mcpManager *mcp.Manager,
+	knowledgeCfg config.KnowledgeConfig,
+	knowledgeDataDir string,
 ) {
 	readCache := builtin.NewReadCache(30)
 
@@ -6258,6 +6265,24 @@ func registerBuiltinTools(
 			"timeout_seconds", transcriptCfg.TimeoutSeconds,
 			"fallback_output_dir", transcriptCfg.FallbackOutputDir,
 		)
+	}
+
+	// Knowledge-asset tools ([memory.knowledge], tree 04, disabled by
+	// default). Disabled => the tools are absent from the registry
+	// entirely (SHARED-CONVENTIONS §2.5: nothing enters prompts). The
+	// store opens lazily here — a failed open is non-fatal (tools stay
+	// unregistered, an honest Warn is logged).
+	if knowledgeCfg.Enabled {
+		knowledgeStore, kErr := knowledge.New(knowledgeDataDir, knowledgeCfg.MaxPages, logger.With("component", "knowledge-store"))
+		if kErr != nil {
+			logger.Error("knowledge tools disabled: store open failed", "error", kErr, "data_dir", knowledgeDataDir)
+		} else {
+			toolStore := knowledge.NewToolStore(knowledgeStore)
+			registry.Register(builtin.NewKnowledgeSearchTool(toolStore))
+			registry.Register(builtin.NewKnowledgeReadTool(toolStore))
+			registry.Register(builtin.NewKnowledgeIngestTool(toolStore))
+			logger.Info("knowledge tools registered", "data_dir", knowledgeDataDir, "max_pages", knowledgeCfg.MaxPages)
+		}
 	}
 
 	// skills_create / skills_patch (skill authoring). Unconditionally

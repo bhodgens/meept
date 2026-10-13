@@ -290,6 +290,13 @@ var ToolActionMap = map[string]string{
 	ToolMemoryGetContext: "memory_read",
 	ToolMemoryStore:      "memory_write",
 	ToolMemoryDelete:     "memory_write",
+	// Knowledge-asset family (tree 04): same read/write split as the
+	// core memory tools. Without these entries the tool name becomes the
+	// action and BuiltinRules denies it ("Unknown action", bughunt H7
+	// class).
+	"knowledge_search": "memory_read",
+	"knowledge_read":   "memory_read",
+	"knowledge_ingest": "memory_write",
 	// Memory claim-curation family (granted to librarian/verifier-style
 	// agents): writes mutate claim state, reads only query it. Same
 	// read/write split as the core memory tools above (bughunt H7 class:

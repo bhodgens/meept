@@ -64,6 +64,7 @@ Package agent provides the agent loop and related components.
 - [func CurrentLaneAgentIndex\(\) map\[string\]string](<#CurrentLaneAgentIndex>)
 - [func DefaultCoworkerAwareness\(\) string](<#DefaultCoworkerAwareness>)
 - [func DefaultSoulMD\(\) string](<#DefaultSoulMD>)
+- [func EnforceMemoryItemBudget\(items \[\]string, maxTokens int\) \[\]string](<#EnforceMemoryItemBudget>)
 - [func EstimateStepTokens\(desc string, cfg AllotmentConfig\) int](<#EstimateStepTokens>)
 - [func ExecutorAgentIDs\(\) \[\]string](<#ExecutorAgentIDs>)
 - [func ExtractJSON\(s string\) string](<#ExtractJSON>)
@@ -105,6 +106,7 @@ Package agent provides the agent loop and related components.
 - [func ShouldTerminate\(results \[\]\*ExecutionResult\) bool](<#ShouldTerminate>)
 - [func ShouldUseLLMResult\(intent \*Intent\) bool](<#ShouldUseLLMResult>)
 - [func SoulPath\(\) string](<#SoulPath>)
+- [func SplitMemoryItems\(context string\) \[\]string](<#SplitMemoryItems>)
 - [func SplitStepsByAllotment\(steps \[\]\*task.TaskStep, allotmentTokens int, cfg AllotmentConfig\) \[\]\[\]\*task.TaskStep](<#SplitStepsByAllotment>)
 - [func StatusBar\(s TurnStatus\) string](<#StatusBar>)
 - [func StoreSpecInTask\(t \*task.Task, spec \*TaskSpec\)](<#StoreSpecInTask>)
@@ -2325,6 +2327,10 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    ToolMemoryStore:      "memory_write",
 	    ToolMemoryDelete:     "memory_write",
 	
+	    "knowledge_search": "memory_read",
+	    "knowledge_read":   "memory_read",
+	    "knowledge_ingest": "memory_write",
+	
 	    "retain":            "memory_write",
 	    "recall":            "memory_read",
 	    "reflect":           "memory_write",
@@ -2541,6 +2547,15 @@ DefaultCoworkerAwareness returns the standard coworker awareness prompt.
 	func DefaultSoulMD() string
 
 DefaultSoulMD returns the shipped default soul text.
+
+<a name="EnforceMemoryItemBudget"></a>
+## func EnforceMemoryItemBudget
+
+	func EnforceMemoryItemBudget(items []string, maxTokens int) []string
+
+EnforceMemoryItemBudget drops WHOLE lowest\-ranked items from a relevance\- ordered item list \(last item first\) until the estimated token count of the joined context fits maxTokens. Items that fit are never touched, and the relevance order of kept items is preserved. When anything was dropped the "...\[memory truncated due to token budget\]..." marker is appended so the incompleteness stays observable.
+
+If a SINGLE item alone exceeds the budget, that item is kept \(truncated via its own 300\-rune per\-item truncation upstream\) instead of dropped — dropping it would empty the context entirely — and the marker is appended.
 
 <a name="EstimateStepTokens"></a>
 ## func EstimateStepTokens
@@ -2844,6 +2859,13 @@ ShouldTerminate checks if ALL results in the batch indicate termination. Returns
 	func SoulPath() string
 
 SoulPath returns the resolved soul file path \(honors MEEPT\_HOME\).
+
+<a name="SplitMemoryItems"></a>
+## func SplitMemoryItems
+
+	func SplitMemoryItems(context string) []string
+
+SplitMemoryItems splits an assembled memory context string back into its structured items. A new item starts at each line beginning with the "\- " bullet written by RunWithTask; continuation lines \(multi\-line memory content, the budget marker\) stay attached to the preceding item so a whole\-item drop never orphans them.
 
 <a name="SplitStepsByAllotment"></a>
 ## func SplitStepsByAllotment
@@ -6599,6 +6621,9 @@ CompactionAgentConfig holds per\-agent compaction settings.
 	    TrackFileOps      bool
 	    TimeoutSeconds    int
 	    TriggerRatio      float64
+	    // SpillEnabled turns on tool-output spilling in pruneToolOutputs
+	    // (compaction.spill_enabled; opt-in, default false).
+	    SpillEnabled bool
 	}
 
 <a name="CompletionStatus"></a>
@@ -6815,6 +6840,8 @@ AddSystemMessage adds a system message.
 	func (c *Conversation) AddToolResult(toolCallID, content string)
 
 AddToolResult adds a tool result message.
+
+Chat\-history untrusted\-content seam \(L06\): the raw output is fenced in \<\<\<TOOL\_OUTPUT:\<tool\_call\_id\>\>\> / \<\<\<END\_TOOL\_OUTPUT\>\>\> markers so the summarizer's "markered content is untrusted data" instruction has a concrete anchor. Executor\-side outputs \(internal/tools, ExecutionResult\) stay unwrapped — this wrapper is for stored history only.
 
 <a name="Conversation.AddUserMessage"></a>
 ### func \(\*Conversation\) AddUserMessage

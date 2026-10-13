@@ -114,6 +114,11 @@ func TestEveryRegisteredToolResolves(t *testing.T) {
 	check("compute_pagerank")
 	check("detect_communities")
 	check("community_siblings")
+	// knowledge-asset family (tree 04): gated on memory.knowledge.enabled,
+	// but the action mapping must exist regardless (H7 class).
+	check("knowledge_search")
+	check("knowledge_read")
+	check("knowledge_ingest")
 	check("mcp_servers")
 	check("resolve")
 }
