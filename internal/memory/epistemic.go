@@ -329,6 +329,35 @@ func (m *Manager) updateMetadataField(ctx context.Context, id, key string, value
 
 // PromoteClaim transitions an auto claim to promoted status.
 func (m *Manager) PromoteClaim(ctx context.Context, claimID string) error {
+	return m.PromoteClaimWithReason(ctx, claimID, "")
+}
+
+// PromoteClaimWithReason promotes an auto claim, recording an optional human
+// verdict reason (capped at MaxVerdictReasonBytes) as claim metadata
+// `verdict_reason` and in the calibration log. The auditlog entry (when an
+// auditor is wired) is written BEFORE the status transition — durable-then-ack.
+func (m *Manager) PromoteClaimWithReason(ctx context.Context, claimID, reason string) error {
+	return m.verdictClaim(ctx, claimID, ClaimStatusPromoted, "promote", reason)
+}
+
+// RejectClaim transitions a claim to rejected status.
+func (m *Manager) RejectClaim(ctx context.Context, claimID string) error {
+	return m.RejectClaimWithReason(ctx, claimID, "")
+}
+
+// RejectClaimWithReason rejects a claim with an optional verdict reason (same
+// cap, metadata key, and audit semantics as PromoteClaimWithReason).
+func (m *Manager) RejectClaimWithReason(ctx context.Context, claimID, reason string) error {
+	return m.verdictClaim(ctx, claimID, ClaimStatusRejected, "reject", reason)
+}
+
+// verdictClaim is the shared promote/reject path: validate status, write the
+// auditlog entry (durable-then-ack), log calibration, then transition status
+// and record the reason in claim metadata.
+func (m *Manager) verdictClaim(ctx context.Context, claimID string, target ClaimStatus, verb, reason string) error {
+	if len(reason) > MaxVerdictReasonBytes {
+		return fmt.Errorf("%w: got %d bytes, max %d", ErrVerdictReasonTooLong, len(reason), MaxVerdictReasonBytes)
+	}
 	mem, err := m.GetByID(ctx, claimID)
 	if err != nil {
 		return fmt.Errorf("load claim %s: %w", claimID, err)
@@ -339,21 +368,48 @@ func (m *Manager) PromoteClaim(ctx context.Context, claimID string) error {
 	if asString(mem.Metadata["status"]) != string(ClaimStatusAuto) {
 		return fmt.Errorf("claim %s is not auto (status=%q)", claimID, mem.Metadata["status"])
 	}
-	m.logCalibration(ctx, claimID, "promote", mem)
-	return m.updateMetadataField(ctx, claimID, "status", string(ClaimStatusPromoted))
+	// Durable-then-ack: the audit entry lands before the status write, so an
+	// acknowledged verdict is always already in the chain. Audit failure
+	// aborts the verdict (the calibration log is written after it for the
+	// same reason — no acknowledged verdict may escape the chain).
+	if err := m.RecordVerdict(claimID, verb, ReasonHash(reason)); err != nil {
+		return err
+	}
+	m.logCalibrationReason(ctx, claimID, verb, mem, reason)
+	// Status + reason are stamped IN PLACE on the claim row: a versioned
+	// write mints a new row ID and leaves the old row (still status=auto)
+	// visible to Search, which does not filter is_current — the review queue
+	// would count the same claim twice (leaf review checklist: rejected
+	// claims must be excluded from all queries). In-place keeps claim ID
+	// stable; row versioning remains reserved for supersede lineage.
+	if mem.Metadata == nil {
+		mem.Metadata = make(map[string]any)
+	}
+	mem.Metadata["status"] = string(target)
+	if reason != "" {
+		mem.Metadata["verdict_reason"] = reason
+	}
+	if err := m.stampMetadataInPlace(ctx, mem); err != nil {
+		return fmt.Errorf("stamp verdict on claim %s: %w", claimID, err)
+	}
+	return nil
 }
 
-// RejectClaim transitions a claim to rejected status.
-func (m *Manager) RejectClaim(ctx context.Context, claimID string) error {
-	mem, err := m.GetByID(ctx, claimID)
-	if err != nil {
-		return fmt.Errorf("load claim %s: %w", claimID, err)
-	}
-	if mem.Type != MemoryTypeClaim {
-		return fmt.Errorf("memory %s is type %s, not claim", claimID, mem.Type)
-	}
-	m.logCalibration(ctx, claimID, "reject", mem)
-	return m.updateMetadataField(ctx, claimID, "status", string(ClaimStatusRejected))
+// ListAutoClaimsOptions filters the review queue (leaf T03-L1). Nil pointer
+// fields mean "no bound".
+type ListAutoClaimsOptions struct {
+	// MinConfidence / MaxConfidence are inclusive bounds over the claim's
+	// extraction-time confidence. Claims without a parseable confidence
+	// (-1 sentinel) never match a confidence-bounded query.
+	MinConfidence *float64
+	MaxConfidence *float64
+	// OlderThan keeps only claims created before now-OlderThan (stale
+	// claims surface first for review).
+	OlderThan *time.Duration
+	// Limit caps returned items (<= 0 defaults to 20).
+	Limit int
+	// Offset skips the first N matches (pagination window; < 0 treated as 0).
+	Offset int
 }
 
 // ListAutoClaims returns claims with status=auto, optionally filtered by
@@ -771,11 +827,18 @@ var _ = context.Background
 // logCalibration records a promote/reject verdict for the confidence
 // calibration dataset. Best-effort: calibration never fails the transition.
 func (m *Manager) logCalibration(ctx context.Context, claimID, verdict string, mem *Memory) {
+	m.logCalibrationReason(ctx, claimID, verdict, mem, "")
+}
+
+// logCalibrationReason is logCalibration with an optional human verdict
+// reason (leaf T03-L1). The raw reason lands here (calibration log), while
+// the audit chain only ever sees its hash.
+func (m *Manager) logCalibrationReason(ctx context.Context, claimID, verdict string, mem *Memory, reason string) {
 	m.mu.RLock()
 	cal := m.calibration
 	m.mu.RUnlock()
 	if cal == nil {
 		return
 	}
-	cal.LogVerdict(ctx, claimID, verdict, mem)
+	cal.LogVerdictReason(ctx, claimID, verdict, mem, reason)
 }

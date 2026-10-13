@@ -208,16 +208,23 @@ type claimIDParams struct {
 	ID string `json:"id"`
 }
 
+// verdictParams extends the claim-id envelope with the optional human
+// verdict reason (leaf T03-L1, ≤512B — enforced by the Manager).
+type verdictParams struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason,omitempty"`
+}
+
 func (h *EpistemicHandler) handlePromoteClaim(ctx context.Context, params json.RawMessage) (any, error) {
 	mgr, err := h.managerOrErr()
 	if err != nil {
 		return nil, err
 	}
-	var p claimIDParams
+	var p verdictParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	if err := mgr.PromoteClaim(ctx, p.ID); err != nil {
+	if err := mgr.PromoteClaimWithReason(ctx, p.ID, p.Reason); err != nil {
 		return nil, err
 	}
 	return map[string]any{"status": "promoted"}, nil
@@ -228,11 +235,11 @@ func (h *EpistemicHandler) handleRejectClaim(ctx context.Context, params json.Ra
 	if err != nil {
 		return nil, err
 	}
-	var p claimIDParams
+	var p verdictParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	if err := mgr.RejectClaim(ctx, p.ID); err != nil {
+	if err := mgr.RejectClaimWithReason(ctx, p.ID, p.Reason); err != nil {
 		return nil, err
 	}
 	return map[string]any{"status": "rejected"}, nil
@@ -404,19 +411,47 @@ func (h *EpistemicHandler) handleReviewQueue(ctx context.Context, params json.Ra
 	if err != nil {
 		return nil, err
 	}
-	var p listAutoClaimsParams
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
+	// Filter/pagination params (leaf T03-L1): min_confidence/max_confidence
+	// are floats, older_than is a Go duration string ("72h"), limit defaults
+	// to 50 and caps at 200, offset paginates. The legacy since_hours key
+	// still works as an alias for older_than.
+	var p struct {
+		SinceHours    int      `json:"since_hours,omitempty"`
+		MinConfidence *float64 `json:"min_confidence,omitempty"`
+		MaxConfidence *float64 `json:"max_confidence,omitempty"`
+		OlderThan     string   `json:"older_than,omitempty"`
+		Limit         int      `json:"limit,omitempty"`
+		Offset        int      `json:"offset,omitempty"`
 	}
-	since := time.Now().Add(-time.Duration(p.SinceHours) * time.Hour)
-	if p.SinceHours <= 0 {
-		since = time.Time{}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("invalid params: %w", err)
+		}
 	}
-	limit := p.Limit
-	if limit <= 0 {
-		limit = 50
+	opts := memory.ListAutoClaimsOptions{
+		MinConfidence: p.MinConfidence,
+		MaxConfidence: p.MaxConfidence,
+		Limit:         p.Limit,
+		Offset:        p.Offset,
 	}
-	autoClaims, err := mgr.ListAutoClaims(ctx, since, limit)
+	switch {
+	case p.OlderThan != "":
+		d, err := time.ParseDuration(p.OlderThan)
+		if err != nil {
+			return nil, fmt.Errorf("invalid older_than: %w", err)
+		}
+		opts.OlderThan = &d
+	case p.SinceHours > 0:
+		d := time.Duration(p.SinceHours) * time.Hour
+		opts.OlderThan = &d
+	}
+	if opts.Limit <= 0 {
+		opts.Limit = 50
+	}
+	if opts.Limit > 200 {
+		opts.Limit = 200
+	}
+	autoClaims, total, err := mgr.ListAutoClaimsFiltered(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -426,6 +461,7 @@ func (h *EpistemicHandler) handleReviewQueue(ctx context.Context, params json.Ra
 	}
 	return map[string]any{
 		"auto_claims":         autoClaims,
+		"total":               total,
 		"pending_decisions":   decisions,
 		"pending_predictions": predictions,
 	}, nil

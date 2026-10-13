@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/caimlas/meept/internal/memory"
 	"github.com/spf13/cobra"
 )
 
@@ -441,18 +442,27 @@ func newMemorySupersedeCmd() *cobra.Command {
 }
 
 func newMemoryPromoteCmd() *cobra.Command {
+	var reason string
+
 	cmd := &cobra.Command{
 		Use:   "promote ID",
 		Short: "promote an auto-claim to confirmed status",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(reason) > memory.MaxVerdictReasonBytes {
+				return fmt.Errorf("reason exceeds %d bytes (got %d)", memory.MaxVerdictReasonBytes, len(reason))
+			}
 			client, err := connectDaemon()
 			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()
 
-			_, err = client.Call("memory.promoteClaim", map[string]string{"id": args[0]})
+			params := map[string]any{"id": args[0]}
+			if reason != "" {
+				params["reason"] = reason
+			}
+			_, err = client.Call("memory.promoteClaim", params)
 			if err != nil {
 				return fmt.Errorf("failed to promote claim: %w", err)
 			}
@@ -461,6 +471,7 @@ func newMemoryPromoteCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&reason, "reason", "", "optional verdict reason (max 512 bytes, stored with the claim)")
 	return cmd
 }
 
@@ -557,18 +568,27 @@ Examples:
 }
 
 func newMemoryRejectCmd() *cobra.Command {
+	var reason string
+
 	cmd := &cobra.Command{
 		Use:   "reject ID",
 		Short: "reject an auto-claim",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(reason) > memory.MaxVerdictReasonBytes {
+				return fmt.Errorf("reason exceeds %d bytes (got %d)", memory.MaxVerdictReasonBytes, len(reason))
+			}
 			client, err := connectDaemon()
 			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()
 
-			_, err = client.Call("memory.rejectClaim", map[string]string{"id": args[0]})
+			params := map[string]any{"id": args[0]}
+			if reason != "" {
+				params["reason"] = reason
+			}
+			_, err = client.Call("memory.rejectClaim", params)
 			if err != nil {
 				return fmt.Errorf("failed to reject claim: %w", err)
 			}
@@ -577,6 +597,7 @@ func newMemoryRejectCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&reason, "reason", "", "optional verdict reason (max 512 bytes, stored with the claim)")
 	return cmd
 }
 

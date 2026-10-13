@@ -21,6 +21,10 @@ type calibrationRecord struct {
 	Confidence float64 `json:"confidence"`
 	Text       string  `json:"text"` // claim text (raw user content — gitignored path only)
 	SourceType string  `json:"source_type,omitempty"`
+	// Reason is the optional human verdict reason (leaf T03-L1). Raw text
+	// is fine here: this file is the gitignored calibration dataset; the
+	// audit chain only ever sees ReasonHash(reason).
+	Reason string `json:"reason,omitempty"`
 }
 
 // CalibrationLogger appends claim verdicts to <dataDir>/claim_verdicts.jsonl.
@@ -50,6 +54,13 @@ func NewCalibrationLogger(dataDir string, log *slog.Logger) *CalibrationLogger {
 // LogVerdict appends one verdict record. Snapshot the path under the lock,
 // write outside it (mutexio rule); a write error disables the logger.
 func (c *CalibrationLogger) LogVerdict(ctx context.Context, claimID, verdict string, mem *Memory) {
+	c.LogVerdictReason(ctx, claimID, verdict, mem, "")
+}
+
+// LogVerdictReason is LogVerdict with an optional human verdict reason
+// (leaf T03-L1). Empty reason omits the field so existing consumers see
+// byte-identical records for the no-reason path.
+func (c *CalibrationLogger) LogVerdictReason(ctx context.Context, claimID, verdict string, mem *Memory, reason string) {
 	if c == nil {
 		return
 	}
@@ -66,6 +77,9 @@ func (c *CalibrationLogger) LogVerdict(ctx context.Context, claimID, verdict str
 		Confidence: confFloat(mem.Metadata["confidence"]),
 		Text:       mem.Content,
 		SourceType: string(mem.Type),
+	}
+	if reason != "" {
+		rec.Reason = reason
 	}
 	if err := appendJSONL(path, rec); err != nil {
 		c.mu.Lock()
