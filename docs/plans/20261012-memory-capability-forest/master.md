@@ -91,7 +91,11 @@ drift.
 | T04-L2 knowledge-tools | COMPLETE 2026-10-13 | commit e3f82864; consolidation hook absorbed into sibling 03dfcf3a (intact); ToolActionMap entries + config default false |
 | T04-L3 code-index | COMPLETE 2026-10-13 | commit 8cd51ede; additive code_edges schema; suffix-based bare-symbol matching documented as v1 heuristic |
 | T04-L4 knowledge-e2e | COMPLETE 2026-10-13 | knowledge_wiring.go closures, knowledge_impact tool, e2e suite (3 scenarios) green, knowledge stats CLI; docs-check green |
-| Root integration review | PENDING | full `make test` + `make e2e-fast` + `make graphs-check` (graphs need regen — reviewQueue params changed) |
+| Root integration review | COMPLETE 2026-10-13 | `make test` 10433 results / 6 fails = documented port-exhaustion class, all 6 green isolated; `make e2e-fast` 57/57 suites ok (after argvalidate fence-strip fix for sibling d1d6a415); `make lint-ci`: forest-owned findings ZERO (39 residual are sibling/pre-existing, none in forest files); `make graphs`+`make graphs-check` green; `make docs-check` green |
+
+## Completion timestamp
+
+Forest COMPLETE 2026-10-13, completeness 100% (12/12 leaves COMPLETE incl. 1 SUPERSEDED-by-design).
 
 ## Integration Test Plan
 
