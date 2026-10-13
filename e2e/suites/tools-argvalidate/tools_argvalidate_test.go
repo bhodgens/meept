@@ -64,9 +64,15 @@ func mkCodeSession(t *testing.T, name string) *harness.Stack {
 
 // assertRejectionEnvelope verifies one tool-result envelope carries a failure
 // (success=false) whose error text contains every given substring.
+//
+// Tool content arrives wrapped in the untrusted-content fence
+// (<<<TOOL_OUTPUT:id>>> ... <<<END_TOOL_OUTPUT>>>, added at
+// Conversation.AddToolResult by the untrusted-markers plan) — strip it
+// before parsing the envelope JSON.
 func assertRejectionEnvelope(t *testing.T, f *harness.FakeLLM, wantParts ...string) {
 	t.Helper()
 	for _, raw := range toolResultTexts(f) {
+		raw = stripToolOutputFence(raw)
 		var env struct {
 			Success bool   `json:"success"`
 			Error   string `json:"error"`
@@ -86,6 +92,20 @@ func assertRejectionEnvelope(t *testing.T, f *harness.FakeLLM, wantParts ...stri
 		}
 	}
 	t.Fatalf("no rejection envelope containing %v; results:\n%s", wantParts, toolResultsJoined(f))
+}
+
+// stripToolOutputFence removes a surrounding tool-output untrusted-content
+// fence if present, returning the inner payload unchanged otherwise.
+func stripToolOutputFence(s string) string {
+	const endTag = "<<<END_TOOL_OUTPUT>>>"
+	if !strings.HasPrefix(s, "<<<TOOL_OUTPUT:") || !strings.HasSuffix(s, endTag) {
+		return s
+	}
+	interior := s[len("<<<TOOL_OUTPUT:") : len(s)-len(endTag)]
+	if i := strings.Index(interior, ">>>"); i >= 0 {
+		return strings.TrimSpace(interior[i+len(">>>"):])
+	}
+	return s
 }
 
 // tools-argvalidate-01: task_create{} is rejected before execution; no task
