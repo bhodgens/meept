@@ -46,6 +46,7 @@ func (h *EpistemicHandler) RegisterEpistemicHandlers(server *Server) {
 	server.RegisterHandler("memory.listPendingReviews", h.handleListPendingReviews)
 	server.RegisterHandler("memory.findCanonical", h.handleFindCanonical)
 	server.RegisterHandler("memory.reviewQueue", h.handleReviewQueue)
+	server.RegisterHandler("memory.listConflicts", h.handleListConflicts)
 }
 
 type retainClaimParams struct {
@@ -465,4 +466,39 @@ func (h *EpistemicHandler) handleReviewQueue(ctx context.Context, params json.Ra
 		"pending_decisions":   decisions,
 		"pending_predictions": predictions,
 	}, nil
+}
+
+type listConflictsParams struct {
+	SinceHours int `json:"since_hours,omitempty"`
+	Limit      int `json:"limit,omitempty"`
+}
+
+// handleListConflicts returns claims created by conflict merge decisions
+// (metadata conflict_action=merge), optionally filtered by age. Backs
+// `meept memory conflicts --since=48h` for post-hoc audit of what the
+// conflict detector merged (tree 02 leaf L2).
+func (h *EpistemicHandler) handleListConflicts(ctx context.Context, params json.RawMessage) (any, error) {
+	mgr, err := h.managerOrErr()
+	if err != nil {
+		return nil, err
+	}
+	var p listConflictsParams
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("invalid params: %w", err)
+		}
+	}
+	since := time.Now().Add(-time.Duration(p.SinceHours) * time.Hour)
+	if p.SinceHours <= 0 {
+		since = time.Time{}
+	}
+	limit := p.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	claims, err := mgr.ListMergeClaims(ctx, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"memories": claims}, nil
 }
