@@ -1,0 +1,222 @@
+{
+  "memories": [
+    {
+      "id": "mem-0001",
+      "session_id": "sess-alpha",
+      "content": "Project AtlasDB uses delta 9 compression for cold storage. The cold tier holds 40 TB. Backups for AtlasDB run nightly at 02:00.",
+      "entities": "delta 9,atlasdb"
+    },
+    {
+      "id": "mem-0002",
+      "session_id": "sess-bravo",
+      "content": "The delta 9 codec was upgraded to v3 last quarter. After the v3 upgrade, AtlasDB restore time dropped from 9 hours to 4 hours.",
+      "entities": "delta 9,atlasdb"
+    },
+    {
+      "id": "mem-0003",
+      "session_id": "sess-charlie",
+      "content": "AtlasDB migration to the Frankfurt region is planned for March. The kxbridge replica keeps a warm copy in Dublin during the migration.",
+      "entities": "atlasdb,kxbridge"
+    },
+    {
+      "id": "mem-0004",
+      "session_id": "sess-delta",
+      "content": "KXBridge service handles cross-region replication between Dublin and Frankfurt. KXBridge currently replicates at 2 GB per minute.",
+      "entities": "kxbridge"
+    },
+    {
+      "id": "mem-0005",
+      "session_id": "sess-echo",
+      "content": "The hermes flag controls feature rollout for the ingest pipeline. Enabling the hermes flag doubles ingest throughput but adds 15 percent CPU overhead.",
+      "entities": "hermes flag"
+    },
+    {
+      "id": "mem-0006",
+      "session_id": "sess-foxtrot",
+      "content": "The ingest pipeline team froze changes until the hermes flag rollout review in April. The rollout review will decide if the 15 percent CPU overhead is acceptable.",
+      "entities": "hermes flag"
+    },
+    {
+      "id": "mem-0007",
+      "session_id": "sess-golf",
+      "content": "The ipsec tunnel between the two datacenters was renewed for two years. The renewal was signed off by the network team in January.",
+      "entities": "ipsec"
+    },
+    {
+      "id": "mem-0008",
+      "session_id": "sess-hotel",
+      "content": "KXBridge depends on the ipsec tunnel for replication traffic between Dublin and Frankfurt. If the ipsec tunnel goes down, KXBridge falls back to the public relay.",
+      "entities": "ipsec,kxbridge"
+    },
+    {
+      "id": "mem-0009",
+      "session_id": "sess-india",
+      "content": "The waku relay layer carries telemetry for the edge fleet. The waku relay layer was rewritten in Go last year.",
+      "entities": "waku"
+    },
+    {
+      "id": "mem-0010",
+      "session_id": "sess-juliet",
+      "content": "The edge fleet has 320 nodes across 12 sites. Telemetry from the edge fleet peaks at 50k messages per second.",
+      "entities": "waku"
+    },
+    {
+      "id": "mem-0011",
+      "session_id": "sess-kilo",
+      "content": "AtlasDB cold storage compression tests compared delta 9 against zstd 19. Delta 9 won on restore speed; zstd 19 won on archive size.",
+      "entities": "delta 9,atlasdb"
+    },
+    {
+      "id": "mem-0012",
+      "session_id": "sess-lima",
+      "content": "The waku relay rewrite in Go cut telemetry latency from 800 milliseconds to 120 milliseconds. The Go rewrite also reduced relay memory use by half.",
+      "entities": "waku"
+    }
+  ],
+  "questions": [
+    {
+      "id": "q-01",
+      "question": "what changed about atlasdb restore time after the codec upgrade?",
+      "expected_facts": ["restore time dropped from 9 hours to 4 hours"],
+      "source_memory_ids": ["mem-0002"]
+    },
+    {
+      "id": "q-02",
+      "question": "what compression does atlasdb use for cold storage and how large is the cold tier?",
+      "expected_facts": ["delta 9 compression", "40 tb"],
+      "source_memory_ids": ["mem-0001"]
+    },
+    {
+      "id": "q-03",
+      "question": "when do atlasdb backups run?",
+      "expected_facts": ["nightly at 02:00"],
+      "source_memory_ids": ["mem-0001"]
+    },
+    {
+      "id": "q-04",
+      "question": "how does delta 9 compare against zstd 19 for atlasdb?",
+      "expected_facts": ["delta 9 won on restore speed", "zstd 19 won on archive size"],
+      "source_memory_ids": ["mem-0011"]
+    },
+    {
+      "id": "q-05",
+      "question": "what is keeping a warm copy in dublin during the atlasdb migration?",
+      "expected_facts": ["kxbridge replica"],
+      "source_memory_ids": ["mem-0003"]
+    },
+    {
+      "id": "q-06",
+      "question": "what does kxbridge do and at what rate does it replicate?",
+      "expected_facts": ["cross-region replication between dublin and frankfurt", "2 gb per minute"],
+      "source_memory_ids": ["mem-0004"]
+    },
+    {
+      "id": "q-07",
+      "question": "what happens to kxbridge if the ipsec tunnel goes down?",
+      "expected_facts": ["falls back to the public relay"],
+      "source_memory_ids": ["mem-0008"]
+    },
+    {
+      "id": "q-08",
+      "question": "what network link does kxbridge use for replication traffic and who renewed it?",
+      "expected_facts": ["ipsec tunnel", "renewed for two years"],
+      "source_memory_ids": ["mem-0007", "mem-0008"]
+    },
+    {
+      "id": "q-09",
+      "question": "how does the hermes flag affect ingest throughput and cpu?",
+      "expected_facts": ["doubles ingest throughput", "15 percent cpu overhead"],
+      "source_memory_ids": ["mem-0005"]
+    },
+    {
+      "id": "q-10",
+      "question": "when is the hermes flag rollout review and what will it decide?",
+      "expected_facts": ["april", "whether the 15 percent cpu overhead is acceptable"],
+      "source_memory_ids": ["mem-0006"]
+    },
+    {
+      "id": "q-11",
+      "question": "why are ingest pipeline changes frozen?",
+      "expected_facts": ["hermes flag rollout review"],
+      "source_memory_ids": ["mem-0006"]
+    },
+    {
+      "id": "q-12",
+      "question": "how many nodes does the edge fleet have and where are they spread?",
+      "expected_facts": ["320 nodes", "12 sites"],
+      "source_memory_ids": ["mem-0010"]
+    },
+    {
+      "id": "q-13",
+      "question": "what is the peak telemetry rate from the edge fleet?",
+      "expected_facts": ["50k messages per second"],
+      "source_memory_ids": ["mem-0010"]
+    },
+    {
+      "id": "q-14",
+      "question": "what carries telemetry for the edge fleet?",
+      "expected_facts": ["waku relay layer"],
+      "source_memory_ids": ["mem-0009"]
+    },
+    {
+      "id": "q-15",
+      "question": "what did the waku relay rewrite in go change?",
+      "expected_facts": ["latency from 800 milliseconds to 120 milliseconds", "memory use by half"],
+      "source_memory_ids": ["mem-0012"]
+    },
+    {
+      "id": "q-16",
+      "question": "when was the ipsec tunnel renewed and for how long?",
+      "expected_facts": ["january", "two years"],
+      "source_memory_ids": ["mem-0007"]
+    },
+    {
+      "id": "q-17",
+      "question": "where is the atlasdb migration going and when is it planned?",
+      "expected_facts": ["frankfurt", "march"],
+      "source_memory_ids": ["mem-0003"]
+    },
+    {
+      "id": "q-18",
+      "question": "which two regions does kxbridge replicate between and which service keeps a warm copy for atlasdb?",
+      "expected_facts": ["dublin and frankfurt", "kxbridge"],
+      "source_memory_ids": ["mem-0003", "mem-0004"]
+    },
+    {
+      "id": "q-19",
+      "question": "what latency did the waku relay have before the go rewrite and what carries telemetry for the edge fleet?",
+      "expected_facts": ["800 milliseconds", "waku relay layer"],
+      "source_memory_ids": ["mem-0009", "mem-0012"]
+    },
+    {
+      "id": "q-20",
+      "question": "which compression codec won on restore speed for atlasdb cold storage tests and how big is the cold tier?",
+      "expected_facts": ["delta 9", "40 tb"],
+      "source_memory_ids": ["mem-0001", "mem-0011"]
+    },
+    {
+      "id": "q-21",
+      "question": "what connects the dublin and frankfurt datacenters and which service uses it for replication?",
+      "expected_facts": ["ipsec tunnel", "kxbridge"],
+      "source_memory_ids": ["mem-0007", "mem-0008"]
+    },
+    {
+      "id": "q-22",
+      "question": "what telemetry volume does the edge fleet peak at and which layer carries it?",
+      "expected_facts": ["50k messages per second", "waku relay layer"],
+      "source_memory_ids": ["mem-0009", "mem-0010"]
+    },
+    {
+      "id": "q-23",
+      "question": "how did the codec upgrade affect atlasdb and which codec won the restore speed comparison?",
+      "expected_facts": ["restore time dropped from 9 hours to 4 hours", "delta 9"],
+      "source_memory_ids": ["mem-0002", "mem-0011"]
+    },
+    {
+      "id": "q-24",
+      "question": "what decision is pending about the hermes flag and what throughput change would enabling it cause?",
+      "expected_facts": ["15 percent cpu overhead is acceptable", "doubles ingest throughput"],
+      "source_memory_ids": ["mem-0005", "mem-0006"]
+    }
+  ]
+}
