@@ -635,17 +635,32 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Warn("Failed to create daemon control", "error", err)
 	}
 
-	// Create metrics store
-	metricsStore, err := metrics.NewStore(&metrics.StoreConfig{
-		DatabasePath:  filepath.Join(cfg.StateDir, "metrics.db"),
-		BatchSize:     100,
-		FlushInterval: 10 * time.Second,
-	})
-	if err != nil {
-		logger.Warn("Failed to create metrics store", "error", err)
+	// Create metrics store — unless NewComponents already opened it for the
+	// token cache (context-reduction L02). The cache-enabled path constructs
+	// the store at <data_dir>/metrics.db inside components.go and hands the
+	// handle back on Components.MetricsStore; reusing it here avoids two
+	// SQLite writer connections to the same file (the pre-L02 shape also
+	// double-wired the coordinator via SetMetricsStore below). Cache
+	// disabled => MetricsStore is nil and this open runs exactly as before.
+	var metricsStore *metrics.Store
+	if components != nil && components.MetricsStore != nil {
+		metricsStore = components.MetricsStore
+		logger.Info("Reusing metrics store opened for token cache coordinator")
+	} else {
+		metricsStore, err = metrics.NewStore(&metrics.StoreConfig{
+			DatabasePath:  filepath.Join(cfg.StateDir, "metrics.db"),
+			BatchSize:     100,
+			FlushInterval: 10 * time.Second,
+		})
+		if err != nil {
+			logger.Warn("Failed to create metrics store", "error", err)
+		}
 	}
 
-	// Wire metrics store to cache coordinator (created in NewComponents before metrics store existed)
+	// Wire metrics store to cache coordinator. With the L02 construction-time
+	// wiring the coordinator already holds this same store; the nil-safe
+	// setter is kept as a no-op-in-practice belt-and-braces for any path
+	// where the cache predates the store.
 	if metricsStore != nil && components != nil && components.TokenCache != nil {
 		components.TokenCache.SetMetricsStore(metricsStore)
 	}
@@ -1160,6 +1175,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 
 		// Epistemic memory RPC handlers
 		if memMgr := nilSafeMemoryManager(components); memMgr != nil && memMgr.IsInitialized() {
+			// Leaf T03-L1: wire the auditlog-backed verdict auditor before
+			// the RPC surface goes live, so every verdict is chain-audited
+			// (durable-then-ack). Failure is non-fatal (auditing disabled).
+			wireVerdictAuditor(memMgr, memMgr.DataDir(), logger)
 			epistemicHandler := rpc.NewEpistemicHandler(memMgr)
 			epistemicHandler.RegisterEpistemicHandlers(rpcServer)
 			logger.Info("Epistemic memory RPC handlers registered")

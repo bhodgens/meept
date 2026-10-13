@@ -217,6 +217,52 @@ func (b *CacheKeyBuilder) Build(prompt, modelID string, messages []ChatMessage) 
 	return key
 }
 
+// SystemPromptSections splits a system-prompt string into its boundary-
+// delimited sections for BuildPrefixAwareKey. This is the single split point
+// between the live client cache path and the prefix-aware key builder — do
+// not re-implement the sentinel scan elsewhere.
+func SystemPromptSections(systemPrompt string) []string {
+	if systemPrompt == "" {
+		return nil
+	}
+	return strings.Split(systemPrompt, PromptCacheBoundary)
+}
+
+// SystemPromptOf extracts the first system-role message's content, or "" when
+// the message list carries no system message.
+func SystemPromptOf(messages []ChatMessage) string {
+	for _, m := range messages {
+		if m.Role == RoleSystem {
+			return m.Content
+		}
+	}
+	return ""
+}
+
+// BuildPrefixAwareKeyWithFiles is the live-path entry point: it builds the
+// prefix-aware key (static:dynamic:messages segments) and then applies the
+// same file-aware hashing Build applies, so a cached response is still
+// invalidated when a referenced file changes.
+func (b *CacheKeyBuilder) BuildPrefixAwareKeyWithFiles(modelID string, systemPrompt []string, messages []ChatMessage) CacheKey {
+	key := b.BuildPrefixAwareKey(modelID, systemPrompt, messages)
+	if b.FileAware {
+		var allText strings.Builder
+		for _, s := range systemPrompt {
+			allText.WriteString(s)
+			allText.WriteByte('\n')
+		}
+		for _, m := range messages {
+			allText.WriteString(m.Content)
+			allText.WriteByte('\n')
+		}
+		paths := b.ExtractFileReferences(allText.String())
+		if len(paths) > 0 {
+			key.FileHashes = b.ComputeFileHashes(paths)
+		}
+	}
+	return key
+}
+
 // cleanExtractedPath normalises a raw extracted path string: trims surrounding
 // punctuation and whitespace, strips trailing dots, and returns empty if the
 // result is too short to be a plausible file path.

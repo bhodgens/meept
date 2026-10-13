@@ -267,6 +267,17 @@ type Components struct {
 	// Token cache for LLM responses
 	TokenCache *llm.TokenCacheCoordinator
 
+	// MetricsStore is the app-level metrics.db store that the token cache
+	// coordinator records cache.hit / cache.miss / cache.eviction into
+	// (context-reduction L02). Non-nil only when [llm.cache] enabled=true:
+	// the cache is the only component that derives its store need purely
+	// from NewComponents config, so ownership follows the cache. When nil,
+	// daemon.New still opens the store itself and wires everything exactly
+	// as before (cache disabled => no behavior change). When non-nil,
+	// daemon.New REUSES this handle instead of opening a second connection
+	// to the same SQLite file.
+	MetricsStore *metrics.Store
+
 	// Pricing syncer for dynamic model pricing
 	PricingSyncer *llm.PricingSyncer
 
@@ -766,8 +777,27 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			if cfg.LLM.Cache.DefaultTTLMin > 0 {
 				cacheCfg.DefaultTTL = time.Duration(cfg.LLM.Cache.DefaultTTLMin) * time.Minute
 			}
+			// Metrics store for cache.hit / cache.miss / cache.eviction
+			// (context-reduction L02). Built BEFORE the coordinator so it
+			// is passed at construction — never a nil store on the stock
+			// wiring. The handle is exposed on Components.MetricsStore so
+			// daemon.New reuses it for every other consumer instead of
+			// opening a second connection to the same SQLite file. A load
+			// failure degrades to a nil store (cache metrics dark, cache
+			// itself fully functional) rather than blocking startup — the
+			// same posture as every other metrics-store consumer.
+			metricsStore, mErr := metrics.NewStore(&metrics.StoreConfig{
+				DatabasePath:  filepath.Join(cfg.Daemon.DataDir, "metrics.db"),
+				BatchSize:     100,
+				FlushInterval: 10 * time.Second,
+			})
+			if mErr != nil {
+				logger.Warn("Cache metrics store unavailable: cache.hit/cache.miss will not be recorded", "error", mErr)
+			} else {
+				c.MetricsStore = metricsStore
+			}
 			var err error
-			tokenCache, err = llm.NewTokenCacheCoordinatorWithMetrics(cacheCfg, nil)
+			tokenCache, err = llm.NewTokenCacheCoordinatorWithMetrics(cacheCfg, c.MetricsStore)
 			if err != nil {
 				logger.Warn("Failed to create token cache", "error", err)
 			} else {
@@ -776,6 +806,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 					"l2_enabled", cacheCfg.L2Enabled,
 					"db_path", cacheCfg.L2DBPath,
 					"default_ttl", cacheCfg.DefaultTTL,
+					"metrics_enabled", c.MetricsStore != nil,
 				)
 			}
 		}
