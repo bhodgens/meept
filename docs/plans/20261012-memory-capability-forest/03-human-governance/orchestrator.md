@@ -38,10 +38,19 @@ deviation is documented in `docs/workflows/memory.md`, not silently dropped.
 
 ## Child Index (inline leaves)
 
+**RE-SCOPED at pre-dispatch drift audit (2026-10-12):** original L1's RPC
+methods and CLI verbs ALREADY EXIST (`internal/rpc/epistemic.go:35-48` —
+`memory.reviewQueue`, `memory.promoteClaim`, `memory.rejectClaim`,
+`memory.listAutoClaims`; `cmd/meept/memory.go` — `review`, `promote ID`,
+`reject ID`). Old L1 is SUPERSEDED. Remaining work consolidated:
+
 | Leaf | Wave | Scope | Est. |
 |------|------|-------|------|
-| L1 review-cli-rpc | 1 | review pkg + RPC methods + CLI verbs | 70K |
-| L2 audit-wiring | 3 | auditlog entries, offline verdict mode, docs, e2e | 60K |
+| L1 review-filters-audit | 1 | queue filters/pagination + verdict --reason + auditlog entries | 70K |
+| L2 tui-review-view | 3 | TUI review table + docs + e2e | 70K |
+
+Old L2 (audit-wiring) folded into L1; old L3 (TUI) is the new L2 with docs+e2e.
+Daemon-only verdicts (Q5b) is ALREADY TRUE — CLI is RPC-only today.
 
 ## Dispatch Protocol
 
@@ -87,49 +96,35 @@ from canonical-claim selection.
 
 ## Leaf definitions
 
-### Leaf L1 — review-cli-rpc (Wave 1)
+### Leaf L1 — review-filters-audit (Wave 1; re-scoped, supersedes old L1+L2)
 
-**Scope:**
-- `internal/memory/review/queue.go` — `Queue.List(filter) ([]Item, total int, err error)`
-  over `Manager.ListAutoClaims` (existing, `epistemic.go:359`) with
-  confidence-band + age filters and stable ordering (created_at ASC — oldest
-  first, review-frontier semantics).
-- RPC: two methods per Interface Contracts above, in the existing memory
-  RPC handler area (follow `rpc-package-patterns` conventions — handler map
-  registration, typed request/response, error mapping).
-- CLI `cmd/meept/memory.go`: `meept memory review [--status=auto]
-  [--min-confidence=F] [--limit=N]` (table output: id, conf, category, age,
-  content preview) and `meept memory verdict <claim-id> promote|reject
-  [--reason=S]`. RPC-first; offline fallback lands in L2 — L1 returns a
-  clear "daemon unreachable" error.
-- Tests: queue filter/pagination unit tests (new package bootstrap tier);
-  CLI arg parsing tests.
+**Scope (ONLY the missing parts — the RPC methods and CLI verbs exist):**
+- Extend `memory.reviewQueue` handler (`internal/rpc/epistemic.go:48`):
+  params `{min_confidence?, max_confidence?, older_than?, limit? (default
+  50, cap 200), offset?}` → response gains `total`. Backing query:
+  extend `Manager.ListAutoClaims` with an options struct (keep the
+  existing signature working; add `ListAutoClaimsFiltered`).
+- Verdict reason: `memory.promoteClaim`/`memory.rejectClaim` accept
+  optional `reason` (≤512B, same cap as `memory_vote`); stored as claim
+  metadata `verdict_reason`.
+- Auditlog (the genuinely missing piece — nothing in internal/memory
+  imports internal/auditlog today): one canonical-JSON entry per verdict,
+  `{action: "memory.claim.verdict", claim_id, verdict, reason_hash}` —
+  hash the reason (sha256 first 16 hex), never store raw text in the
+  chain. Raw reason stays in the calibration log (existing
+  `logCalibration` path, extended to carry the reason). Wire the auditlog
+  writer via a narrow interface injected at daemon startup (memory pkg
+  must not import employee-style heavy wiring; follow
+  `internal/employee/wiring.go` injection pattern).
+- CLI: `--reason=S` flag on `meept memory promote/reject`.
+- Tests: filter/pagination table tests; reason-cap rejection; audit-entry
+  written-before-ack ordering (fake audit sink).
 
-**Verify:** `go build ./... && go test ./internal/memory/review/ ./cmd/meept/ -run 'Review|Verdict' -count=1`.
-
-**Do NOT commit.**
-
-### Leaf L2 — audit-wiring (Wave 3)
-
-**Scope:**
-- Auditlog: append one canonical-JSON entry per verdict
-  (`{action: "memory.claim.verdict", claim_id, verdict, reason_hash}` —
-  hash the reason, never store raw text in the chain; raw reason stays in
-  calibration log).
-- Verdict is DAEMON-ONLY (resolved Q5b): `meept memory verdict` talks RPC
-  exclusively. When the daemon is unreachable, print a clear error with the
-  remedy (`start the daemon with meept-daemon -f, then retry`) and exit
-  non-zero. No offline store-write path exists in this tree.
-- Docs: `docs/workflows/memory.md` — "Human Review Queue" section: filters,
-  verdict semantics, daemon-only requirement, audit behavior, TUI view
-  (L3), GUI deferral note.
-- e2e suite per Integration Test Plan incl. auditlog chain verification.
-
-**Verify:** `make e2e-fast-area AREA=memory-review-governance && go vet ./internal/memory/... ./cmd/meept/...`.
+**Verify:** `go build ./internal/memory/... ./internal/rpc/... ./cmd/meept/ && go test ./internal/memory/ ./internal/rpc/ -run 'Review|Claim|Verdict|AutoClaims' -count=1`.
 
 **Do NOT commit.**
 
-### Leaf L3 — tui-review-view (Wave 3, after L2)
+### Leaf L2 — tui-review-view (Wave 3, after L1)
 
 **Scope (resolved Q6b — parity satisfied in-tree):**
 - `internal/tui` review view: a table of pending auto claims
@@ -143,9 +138,13 @@ from canonical-claim selection.
   claims when the review RPC is cheap (skip if it adds a per-turn call).
 - GUI parity: a Flutter panel is OUT OF SCOPE here; the deviation is
   documented in the L2 docs section (GUI follows in a later tree).
+- Docs + e2e (folded from old L2): `docs/workflows/memory.md` "Human
+  Review Queue" section (filters, reason, audit behavior, TUI keys, GUI
+  deferral); e2e assertions added to the suite covering reason+audit via
+  RPC round-trip.
 - Tests: TUI component tests for table sizing + key handling with a fake
   review client.
 
-**Verify:** `go build ./... && go test ./internal/tui/ -run Review -count=1`.
+**Verify:** `go build ./... && go test ./internal/tui/ -run Review -count=1 && go vet ./internal/memory/... ./cmd/meept/...`.
 
 **Do NOT commit.**
