@@ -107,6 +107,46 @@ func (m *PlanManager) GetPlansForSession(ctx context.Context, sessionID string) 
 	return m.store.GetPlansForSession(ctx, sessionID)
 }
 
+// maxStrandedRecoverScan bounds how many stranded-synthesis plans one
+// recovery pass will consider (SQLite LIMIT). Stranded rows are rare and
+// small; this cap prevents a pathological table from stalling startup.
+const maxStrandedRecoverScan = 100
+
+// RecoverStrandedSynthesis is the DRIVER for the synthesis lease (bughunt
+// M10). It returns plans left in StateSynthesizing with an EXPIRED synthesis
+// lease back to StateApproved, so the normal approval -> synthesis path can
+// re-drive them. Without this driver, StateSynthesizing is a terminal sink: a
+// crash (or a cancelled ctx) between ClaimPlanSynthesis and the UpdatePlan
+// that records task_id stranded the plan forever — the lease made the row
+// re-claimable but nothing ever claimed it. Only EXPIRED leases are reclaimed:
+// the reclaim is a compare-and-set (the lease predicate is part of its UPDATE),
+// so a concurrent expander that re-claimed the row wins and this loses — the
+// safe verdict, a live lease is never stomped.
+//
+// A store that does not expose the SynthesisReclaimer capability is skipped
+// silently (test doubles, alternative backends stay valid PlanStores).
+func (m *PlanManager) RecoverStrandedSynthesis(ctx context.Context) (int, error) {
+	reclaimer, ok := m.store.(SynthesisReclaimer)
+	if !ok {
+		return 0, nil
+	}
+	plans, err := m.store.ListPlansByState(ctx, StateSynthesizing, maxStrandedRecoverScan)
+	if err != nil {
+		return 0, fmt.Errorf("plan: list stranded synthesis: %w", err)
+	}
+	recovered := 0
+	for _, p := range plans {
+		won, err := reclaimer.ReclaimExpiredSynthesis(ctx, p.ID)
+		if err != nil {
+			return recovered, fmt.Errorf("plan: reclaim stranded synthesis %s: %w", p.ID, err)
+		}
+		if won {
+			recovered++
+		}
+	}
+	return recovered, nil
+}
+
 // reservePlanFilePath atomically reserves an unused plan file path for slug,
 // creating an empty placeholder with O_CREATE|O_EXCL so exactly one concurrent
 // caller can win each candidate name (bughunt M1).

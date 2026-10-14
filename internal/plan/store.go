@@ -61,3 +61,17 @@ type PlanStore interface {
 	// Counts
 	CountPlansBySessionAndState(ctx context.Context, sessionID string) (map[PlanState]int, error)
 }
+
+// SynthesisReclaimer is the OPTIONAL store capability behind stranded-synthesis
+// recovery. It is deliberately not part of PlanStore: a store that does not
+// support lease reclaim (test doubles, alternative backends) stays a valid
+// PlanStore, and the manager skips recovery for it instead of failing to
+// compile. The daemon's SQLite store implements it.
+type SynthesisReclaimer interface {
+	// ReclaimExpiredSynthesis returns a plan claimed into StateSynthesizing
+	// with an EXPIRED lease back to StateApproved, clearing the lease, so the
+	// normal approval -> synthesis path can re-drive it. Returns true only for
+	// the caller that won the compare-and-set. A LIVE lease must never be
+	// stomped: the lease predicate is part of the update, not a prior read.
+	ReclaimExpiredSynthesis(ctx context.Context, id string) (bool, error)
+}

@@ -1130,12 +1130,29 @@ func (l *GoalLoop) runCompletionGate(ctx context.Context, cfg GateConfig, logger
 
 	// INFO outcome line (finding #2). The command is a config value (not
 	// output) so it is safe here; the raw gate output stays debug-only.
-	logger.Info("quality gate passed",
+	//
+	// The message and outcome MUST derive from the result: this line used to be
+	// a hardcoded "quality gate passed"/outcome:"passed" even for a FAILED or
+	// SKIPPED gate, so the INFO stream carried a contradictory pair against the
+	// correct line Reflect logs for the same run and an operator grepping
+	// "passed" read failures as passes. Same wording as Reflect's lines.
+	gateMessage := "quality gate passed"
+	outcome := "passed"
+	reason := ""
+	switch {
+	case res.Skipped:
+		gateMessage, outcome = "quality gate skipped", "skipped"
+		reason = res.Reason
+	case !res.Passed:
+		gateMessage, outcome = "quality gate failed", "failed"
+	}
+	logger.Info(gateMessage,
 		"goal_id", goalID,
 		"gate_command", cfg.Command,
 		"duration_ms", time.Since(gateStart).Milliseconds(),
 		"skipped", res.Skipped,
-		"outcome", "passed")
+		"outcome", outcome,
+		"reason", reason)
 	logger.Debug("completion gate finished", "passed", res.Passed, "skipped", res.Skipped)
 	return res, nil
 }

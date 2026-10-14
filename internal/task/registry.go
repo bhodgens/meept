@@ -855,8 +855,11 @@ func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any
 		return nil, err
 	}
 
-	// Publish cancellation event
-	h.registry.publishEvent("task.cancelled", map[string]any{
+	// Publish cancellation event. MUST go through taskEventTopic: a raw
+	// "task.cancelled" lacks the task.ev. notification prefix and publishEvent's
+	// self-replication guard refuses it, so the cancel notification was dropped
+	// with an Error log while every sibling publish in this file used the helper.
+	h.registry.publishEvent(taskEventTopic("task.cancelled"), map[string]any{
 		KeyTaskID: params.ID,
 		"reason":  reason,
 		"message": msgText,

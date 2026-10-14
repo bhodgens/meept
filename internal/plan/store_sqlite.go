@@ -476,6 +476,51 @@ func (s *SQLiteStore) ParkPlanSynthesis(ctx context.Context, id string) error {
 	return nil
 }
 
+// ReclaimExpiredSynthesis is the recovery half of ClaimPlanSynthesis: it
+// returns a plan abandoned mid-expansion (state synthesizing, no task_id,
+// lease gone) to StateApproved so the normal approval -> synthesis path can
+// re-drive it.
+//
+// Without this, StateSynthesizing is a TERMINAL SINK rather than a lease
+// state. ClaimPlanSynthesis accepts a synthesizing row whose lease expired, but
+// Synthesize is only ever CALLED from ApprovePlan — which is reached only from
+// SubmitPlan (draft only) or the approve RPC (pending_approval only). So a
+// crash (or a cancelled ctx) between the claim and the UpdatePlan that records
+// task_id left the plan claimed forever: the 5-minute lease made the row
+// re-claimable, but nothing ever claimed it (bughunt 2026-10-13, M10).
+//
+// The lease predicate is part of the UPDATE, not a read-then-write: a
+// concurrent expander that re-claimed the row (stamping a fresh lease) between
+// the recovery's list and this call must never be stomped — the compare-and-set
+// loses, which is the safe verdict. Only expired leases are reclaimed.
+func (s *SQLiteStore) ReclaimExpiredSynthesis(ctx context.Context, id string) (bool, error) {
+	now := time.Now().UTC()
+	// Same inclusive boundary as ClaimPlanSynthesis: a lease is live until its
+	// stamped second has fully passed (RFC3339 stores whole seconds).
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE plans
+		SET state = ?, synthesis_lease_until = NULL, updated_at = ?
+		WHERE id = ?
+		  AND state = ?
+		  AND task_id IS NULL
+		  AND (synthesis_lease_until IS NULL OR synthesis_lease_until = ''
+		       OR synthesis_lease_until <= ?)`,
+		string(StateApproved), now.Format(time.RFC3339), id,
+		string(StateSynthesizing), now.Add(time.Second).Format(time.RFC3339))
+	if err != nil {
+		return false, fmt.Errorf("failed to reclaim expired plan synthesis: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("reclaim plan rows affected: %w", err)
+	}
+	return affected == 1, nil
+}
+
+// Compile-time guard: the SQLite store provides the optional synthesis-recovery
+// capability the manager's startup recovery type-asserts.
+var _ SynthesisReclaimer = (*SQLiteStore)(nil)
+
 // ---------- Phase operations ----------
 
 const phaseColumns = `id, plan_id, name, sequence, total_steps, completed_steps, failed_steps, state, produces, consumes, task_id`
