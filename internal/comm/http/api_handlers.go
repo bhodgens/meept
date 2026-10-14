@@ -3836,12 +3836,24 @@ func (s *Server) handleEpistemicRetainPrediction(w http.ResponseWriter, r *http.
 
 func (s *Server) handleEpistemicPromoteClaim(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	s.epistemicRPC(w, r, "memory.promoteClaim", map[string]string{"id": id})
+	// The optional human verdict reason rides the body (≤512B, enforced by
+	// the Manager). It used to be dropped here, making the reason_hash audit
+	// chain and the calibration dataset RPC/TUI-only over HTTP (bughunt M11).
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = s.readJSON(w, r, &body) // empty/absent body is valid: reason stays ""
+	s.epistemicRPC(w, r, "memory.promoteClaim", map[string]string{"id": id, "reason": body.Reason})
 }
 
 func (s *Server) handleEpistemicRejectClaim(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	s.epistemicRPC(w, r, "memory.rejectClaim", map[string]string{"id": id})
+	// Same reason forwarding as promote (bughunt M11).
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = s.readJSON(w, r, &body)
+	s.epistemicRPC(w, r, "memory.rejectClaim", map[string]string{"id": id, "reason": body.Reason})
 }
 
 func (s *Server) handleEpistemicRecordReview(w http.ResponseWriter, r *http.Request) {
