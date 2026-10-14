@@ -126,6 +126,9 @@
    "runtime-guards",
    "continuity-regressions"
   ],
+  "internal/logrotate/": [
+   "logrotate"
+  ],
   "internal/security/": [
    "security-fence",
    "security-tls"
@@ -280,6 +283,11 @@
   {
    "name": "rpc-ping",
    "dir": "e2e/suites/rpc-ping",
+   "status": "implemented"
+  },
+  {
+   "name": "logrotate",
+   "dir": "e2e/suites/logrotate",
    "status": "implemented"
   },
   {
