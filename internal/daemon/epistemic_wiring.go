@@ -139,12 +139,19 @@ func wireEpistemicDetector(memoryMgr *memory.Manager, chatter llm.Chatter, memCf
 	logger.Info("epistemic detector wired")
 }
 
-func wireEpistemicHook(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, chatter llm.Chatter, memCfg config.MemoryConfig, logger *slog.Logger) {
-	if agentLoop == nil || memoryMgr == nil || chatter == nil {
-		return
+// buildAmbientExtractor constructs the AmbientExtractor from the epistemic
+// config (ambient extraction gate + raw-response retention). Returns nil when
+// ambient extraction is disabled or the LLM chatter is unavailable — the
+// turn-terminal memory-capture subscriber (memory_capture.go) runs this
+// extractor over each completed turn's exchange; the loop-level epistemic
+// hook seam is retired from the daemon's wiring (SetEpistemicHook stays in
+// internal/agent for a separate post-soak cleanup leaf).
+func buildAmbientExtractor(memoryMgr *memory.Manager, chatter llm.Chatter, memCfg config.MemoryConfig, logger *slog.Logger) *memory.AmbientExtractor {
+	if memoryMgr == nil || chatter == nil {
+		return nil
 	}
 	if !memCfg.Epistemic.AmbientExtraction.Enabled {
-		return
+		return nil
 	}
 	// Raw-response retention: the (prompt, rawBody) pair per classifier call,
 	// written to the memory data dir (gitignored). Training/calibration data
@@ -155,29 +162,12 @@ func wireEpistemicHook(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, ch
 		rw := &rawResponseWriter{path: filepath.Join(dataDir, "raw_responses.jsonl"), log: logger}
 		rawHook = rw.write
 	}
-	extractor := memory.NewAmbientExtractor(memory.AmbientExtractorConfig{
+	return memory.NewAmbientExtractor(memory.AmbientExtractorConfig{
 		Manager:         memoryMgr,
 		Classifier:      newAmbientClassifierAdapter(chatter),
 		Logger:          logger.With("component", "ambient-extractor"),
 		RawResponseHook: rawHook,
 	})
-	// Calibration log: rejected ambient candidates land in the memory data
-	// dir. Nil (no data dir) = logging disabled; never blocks extraction.
-	var rejectedLogger *agent.RejectedCandidateLogger
-	if dataDir := memoryMgr.DataDir(); dataDir != "" {
-		rejectedLogger = agent.NewRejectedCandidateLogger(dataDir, logger)
-	}
-	hook := agent.NewEpistemicHook(agent.EpistemicHookConfig{
-		Cfg:            memCfg.Epistemic,
-		Extractor:      extractor,
-		Logger:         logger.With("component", "epistemic-hook"),
-		RejectedLogger: rejectedLogger,
-	})
-	agentLoop.SetEpistemicHook(hook)
-	logger.Info("epistemic hook wired",
-		"ambient_extraction", true,
-		"max_per_turn", memCfg.Epistemic.AmbientExtraction.MaxPerTurn,
-	)
 }
 
 // wireFileWatcherHook creates a FileWatcherHook from the daemon config and

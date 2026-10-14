@@ -86,7 +86,7 @@
     "agent.progress.synthesized": [
       {
         "file": "internal/daemon/components.go",
-        "line": 1848,
+        "line": 1856,
         "payload_keys": []
       }
     ],
@@ -161,7 +161,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8836,
+        "line": 8857,
         "payload_keys": []
       }
     ],
@@ -514,7 +514,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3061,
+        "line": 3082,
         "payload_keys": []
       }
     ],
@@ -535,7 +535,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4972,
+        "line": 4993,
         "payload_keys": [
           "name",
           "tags",
@@ -822,7 +822,7 @@
     "plan.approved": [
       {
         "file": "internal/plan/manager.go",
-        "line": 339,
+        "line": 351,
         "payload_keys": [],
         "via_helper": true
       }
@@ -830,7 +830,7 @@
     "plan.cancelled": [
       {
         "file": "internal/plan/manager.go",
-        "line": 489,
+        "line": 501,
         "payload_keys": [],
         "via_helper": true
       }
@@ -838,7 +838,7 @@
     "plan.completed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 876,
+        "line": 888,
         "payload_keys": [],
         "via_helper": true
       }
@@ -846,7 +846,7 @@
     "plan.confirmed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 464,
+        "line": 476,
         "payload_keys": [],
         "via_helper": true
       }
@@ -854,7 +854,7 @@
     "plan.created": [
       {
         "file": "internal/plan/manager.go",
-        "line": 249,
+        "line": 261,
         "payload_keys": [],
         "via_helper": true
       }
@@ -862,7 +862,7 @@
     "plan.executing": [
       {
         "file": "internal/plan/manager.go",
-        "line": 734,
+        "line": 746,
         "payload_keys": [],
         "via_helper": true
       }
@@ -870,7 +870,7 @@
     "plan.phase_completed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 801,
+        "line": 813,
         "payload_keys": [],
         "via_helper": true
       }
@@ -878,7 +878,7 @@
     "plan.rejected": [
       {
         "file": "internal/plan/manager.go",
-        "line": 374,
+        "line": 386,
         "payload_keys": [],
         "via_helper": true
       }
@@ -886,7 +886,7 @@
     "plan.revised": [
       {
         "file": "internal/plan/manager.go",
-        "line": 419,
+        "line": 431,
         "payload_keys": [],
         "via_helper": true
       }
@@ -894,7 +894,7 @@
     "plan.submitting": [
       {
         "file": "internal/plan/manager.go",
-        "line": 282,
+        "line": 294,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1716,7 +1716,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8096,
+        "line": 8117,
         "payload_keys": []
       }
     ],
@@ -2237,13 +2237,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6739,
+        "line": 6760,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 6776,
+        "line": 6797,
         "payload_keys": [],
         "via_const": true
       }
@@ -2428,7 +2428,7 @@
     "agent.event.*": [
       {
         "file": "internal/daemon/components.go",
-        "line": 1818,
+        "line": 1826,
         "subscriber_id": "progress-synthesizer"
       }
     ],
@@ -2602,7 +2602,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3039,
+        "line": 3060,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2617,7 +2617,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3859,
+        "line": 3880,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -3402,7 +3402,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8023,
+        "line": 8044,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3688,7 +3688,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8180,
+        "line": 8201,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

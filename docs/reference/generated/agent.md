@@ -2556,7 +2556,7 @@ DefaultSoulMD returns the shipped default soul text.
 
 EnforceMemoryItemBudget drops WHOLE lowest\-ranked items from a relevance\- ordered item list \(last item first\) until the estimated token count of the joined context fits maxTokens. Items that fit are never touched, and the relevance order of kept items is preserved. When anything was dropped the "...\[memory truncated due to token budget\]..." marker is appended so the incompleteness stays observable.
 
-If a SINGLE item alone exceeds the budget, that item is kept \(truncated via its own 300\-rune per\-item truncation upstream\) instead of dropped — dropping it would empty the context entirely — and the marker is appended.
+If a SINGLE item alone exceeds the budget, that item \(the top\-ranked one\) is kept on its own — truncated via its own 300\-rune per\-item truncation upstream — and every lower\-ranked item is dropped, rather than emptying the context entirely; the marker is appended.
 
 <a name="EstimateStepTokens"></a>
 ## func EstimateStepTokens
@@ -3400,7 +3400,7 @@ AgentParkedOrCooling implements AgentHealthSource.
 
 AgentHealthSource reports whether an agent's provider endpoint is currently parked or in cooldown \(agent\-routing tree leaf 02\). Producer wiring is OPTIONAL: an unwired \(nil\) source keeps selectAgent byte\-identical to the legacy routing path.
 
-This leaf defines only the consumer side. The park/cooldown state itself lives in internal/llm \(Resolver.endpointBlocks, alias cooldowns, the agent TurnParker\); no per\-agent producer exists there today — see the leaf\-02 report for wiring options.
+This leaf defines the consumer side. The park/cooldown state itself lives in internal/llm \(Resolver.endpointBlocks, alias cooldowns, the agent TurnParker\); the per\-agent producer is AgentHealthAdapter \(agent\_health\_adapter.go\), which bridges agentID → model config via an AgentModelLookup and reads that Resolver state, and internal/daemon/components.go wires it with SetAgentHealthSource.
 
 	type AgentHealthSource interface {
 	    AgentParkedOrCooling(agentID string) bool

@@ -220,6 +220,14 @@ type Components struct {
 	// Memory
 	MemoryManager *memory.Manager
 	MemoryHandler *memory.Handler
+	// AmbientExtractor is the epistemic ambient-extraction engine built
+	// from memory.epistemic.ambient_extraction config (see
+	// epistemic_wiring.go buildAmbientExtractor). Nil unless ambient
+	// extraction is enabled and a memory_model/LLM chatter resolved.
+	// Consumed by the turn-terminal memory-capture subscriber
+	// (memory_capture.go); the retired loop-level epistemic hook no longer
+	// receives it.
+	AmbientExtractor *memory.AmbientExtractor
 	// DistillWorker consumes memory.l1_extract / memory.l2_scene queue
 	// jobs (tree 01 layered async distillation). Nil unless
 	// memory.l0_enabled is set. Routed through the worker pool's
@@ -1998,7 +2006,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			epistemicChatter = c.LLMClient
 		}
 		wireEpistemicDetector(c.MemoryManager, epistemicChatter, cfg.Memory, logger)
-		wireEpistemicHook(c.AgentLoop, c.MemoryManager, epistemicChatter, cfg.Memory, logger)
+		c.AmbientExtractor = buildAmbientExtractor(c.MemoryManager, epistemicChatter, cfg.Memory, logger)
 
 		// Bridge subsystem (branch 09). Opens the bridge shard under the
 		// daemon data dir and wires the consolidator's generation +
@@ -2385,7 +2393,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	// L0 raw-conversation tier (tree 01 L3) — wired AFTER the persistent
-	// queue exists: the session-end hook enqueues memory.l1_extract jobs
+	// queue exists: the capture path enqueues memory.l1_extract jobs
 	// through c.Queue, so wiring it before queue creation silently ran
 	// with a nil enqueuer (L0 lines recorded, zero distill jobs ever
 	// enqueued — observed live 2026-10-13). Gated on memory.l0_enabled
@@ -2407,7 +2415,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if distillChatter == nil {
 		distillChatter = c.LLMClient
 	}
-	c.DistillWorker = wireL0Distill(c.AgentLoop, c.MemoryManager, l0Enqueuer, distillChatter, cfg.Memory, logger)
+	l0c := buildL0Components(c.MemoryManager, l0Enqueuer, cfg.Memory, logger)
+	c.DistillWorker = wireL0Distill(l0c, c.MemoryManager, distillChatter, cfg.Memory, logger)
+
+	// Turn-terminal memory capture (option C, plan
+	// docs/plans/20261013-turn-terminal-capture): the turn.terminal
+	// subscriber replaces the retired session-end l0_record hook and the
+	// loop-level epistemic hook — both were loop-local seams that
+	// dispatched/task-scoped loops never received. Recording pieces come
+	// from l0c (nil = L0 recording disabled); ambient extraction from the
+	// epistemic-built extractor (nil = ambient disabled); the message
+	// source is the daemon session store. Same AFTER-queue placement rule
+	// as above (live-gate lesson, commit c941327e).
+	WireMemoryCapture(msgBus, c.SessionStore,
+		l0cRecorder(l0c), l0cEnqueuer(l0c), c.AmbientExtractor, logger)
 
 	// Create task registry (before agent registry so task store can be shared)
 	tasksDB := filepath.Join(cfg.Daemon.DataDir, "tasks.db")

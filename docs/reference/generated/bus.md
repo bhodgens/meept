@@ -9,6 +9,7 @@ Package bus provides a channel\-based pub/sub message bus.
 ## Index
 
 - Constants
+- [func MatchWildcard\(pattern, topic string\) bool](<#MatchWildcard>)
 - [func PublishBlockingT\[T any\]\(b \*MessageBus, t Topic\[T\], source string, payload T\) int](<#PublishBlockingT>)
 - [func PublishT\[T any\]\(b \*MessageBus, t Topic\[T\], source string, payload T\) int](<#PublishT>)
 - [func SetPanicOnUndrainedSubscription\(enabled bool\)](<#SetPanicOnUndrainedSubscription>)
@@ -71,6 +72,13 @@ Package bus provides a channel\-based pub/sub message bus.
 	    EventQueuePersisted        = "agent.queue.persisted"
 	    EventQueueStatus           = "agent.queue.status"
 	)
+
+<a name="MatchWildcard"></a>
+## func MatchWildcard
+
+	func MatchWildcard(pattern, topic string) bool
+
+MatchWildcard is the exported form of the bus's topic matcher. The TUI's topic\-overlap guard previously tested a hand\-rolled MIRROR of this function, so a semantics change here left the guard green while the daemon double\-delivered \(bughunt LOW\); consumers must test against this.
 
 <a name="PublishBlockingT"></a>
 ## func PublishBlockingT

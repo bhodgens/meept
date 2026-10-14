@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"time"
 
-	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
@@ -109,26 +107,21 @@ func conflictWiring(memCfg config.MemoryConfig, chatter llm.Chatter, logger *slo
 	}
 }
 
-// wireL0Distill wires the L0 raw-conversation tier (tree 01 leaf L3) when
-// memory.l0_enabled is set. Three parts, all best-effort:
-//
-//  1. A session-end hook on the agent loop appends the turn's dialogue to
-//     <dataDir>/l0/YYYY-MM-DD.jsonl (append errors logged, never fail the
-//     turn) and enqueues ONE memory.l1_extract job per turn with the
-//     payload position = the marker-free start (""). The worker's own
-//     l0_progress marker (memory-distill side, advanced only on full
-//     success) is what suppresses duplicate/re-run work — the enqueue
-//     itself stays marker-free so a killed worker's window re-runs.
-//  2. l0.Prune is wired onto the Manager's consolidator so retention runs
-//     on the existing consolidation ticker (no new goroutine).
-//  3. A DistillWorker is returned for the queue-layer registration
-//     (components.go appends it to the worker pool's processor set).
-//
-// The hook fires per TURN (not only when ambient extraction is enabled):
-// L0 recording is the raw tier and must not silently depend on the
-// epistemic extraction gate. Memory-manager nil (memory disabled) is a
-// no-op — no recorder, no prune, no worker.
-func wireL0Distill(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, enqueuer memory.JobEnqueuer, chatter llm.Chatter, memCfg config.MemoryConfig, logger *slog.Logger) *memory.DistillWorker {
+// l0Components holds the L0 recording pieces the turn-terminal memory-capture
+// subscriber needs (plan docs/plans/20261013-turn-terminal-capture/plan.md —
+// the session-end l0_record hook is retired; capture moved to the
+// turn.terminal subscriber).
+type l0Components struct {
+	recorder *l0.Recorder
+	enqueuer memory.JobEnqueuer
+	dataDir  string
+}
+
+// buildL0Components wires the L0 raw-conversation tier's recording pieces when
+// memory.l0_enabled is set: the recorder, retention pruning, and the enqueuer
+// handle. Returns nil when L0 is disabled (memory manager nil, flag off, or no
+// data dir) — no recorder, no prune.
+func buildL0Components(memoryMgr *memory.Manager, enqueuer memory.JobEnqueuer, memCfg config.MemoryConfig, logger *slog.Logger) *l0Components {
 	if memoryMgr == nil || !memCfg.L0Enabled {
 		return nil
 	}
@@ -157,14 +150,40 @@ func wireL0Distill(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, enqueu
 		})
 	}
 
-	if agentLoop != nil {
-		agentLoop.HookRegistry().RegisterSessionEndHook("l0_record", agent.HookPriorityMonitor+2, &l0RecordHook{
-			recorder: recorder,
-			l0Dir:    l0Dir,
-			enqueuer: enqueuer,
-			logger:   logger.With("component", "l0-record"),
-		})
+	return &l0Components{recorder: recorder, enqueuer: enqueuer, dataDir: dataDir}
+}
+
+// l0cRecorder / l0cEnqueuer are nil-safe accessors: a nil l0Components means
+// L0 is disabled and the memory-capture subscriber gets a nil recorder/enqueuer
+// (nil-safe pieces in WireMemoryCapture).
+func l0cRecorder(l0c *l0Components) *l0.Recorder {
+	if l0c == nil {
+		return nil
 	}
+	return l0c.recorder
+}
+
+func l0cEnqueuer(l0c *l0Components) memory.JobEnqueuer {
+	if l0c == nil {
+		return nil
+	}
+	return l0c.enqueuer
+}
+
+// wireL0Distill wires the L0 distillation worker when memory.l0_enabled is
+// set, for queue-layer registration (components.go appends it to the worker
+// pool's processor set). Turn recording itself no longer happens here: the
+// session-end l0_record hook was retired in favor of the turn-terminal
+// memory-capture subscriber (memory_capture.go), which captures EVERY turn
+// shape — direct, dispatched/task-scoped, relayed — where the old
+// hook-registry seam missed task-scoped loops entirely
+// (.github/ISSUES/task-loops-no-hook-registry-l0-ambient.md). Memory-manager
+// nil (memory disabled) stays a no-op — no worker.
+func wireL0Distill(l0c *l0Components, memoryMgr *memory.Manager, chatter llm.Chatter, memCfg config.MemoryConfig, logger *slog.Logger) *memory.DistillWorker {
+	if l0c == nil || memoryMgr == nil || !memCfg.L0Enabled {
+		return nil
+	}
+	dataDir := l0c.dataDir
 
 	worker := memory.NewDistillWorker(memory.DistillWorkerConfig{
 		Manager: memoryMgr,
@@ -173,7 +192,7 @@ func wireL0Distill(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, enqueu
 		// Enqueuer: L1 jobs chain one L2 scene job per success. The
 		// persistent queue (same instance as the enqueue side) satisfies
 		// memory.JobEnqueuer.
-		Enqueuer: enqueuer,
+		Enqueuer: l0c.enqueuer,
 		// Conflict: live, configured detector when memory.conflict.enabled
 		// is set (bughunt M1); nil otherwise keeps the pre-detector path.
 		Conflict: conflictWiring(memCfg, chatter, logger),
@@ -181,67 +200,6 @@ func wireL0Distill(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, enqueu
 	})
 	logger.Info("l0 distill wired", "data_dir", dataDir, "retention_days", memCfg.L0RetentionDays)
 	return worker
-}
-
-// l0RecordHook is the session-end hook that persists the turn's dialogue as
-// L0 lines and kicks off async distillation. Implements agent.SessionEndHook
-// (the same seam as memoryFactExtractHook). Best-effort: append/enqueue
-// errors are logged and never propagate — a failed L0 write must not fail
-// the user's turn.
-type l0RecordHook struct {
-	recorder *l0.Recorder
-	l0Dir    string // <dataDir>/l0 — read side for window positioning
-	enqueuer memory.JobEnqueuer
-	logger   *slog.Logger
-}
-
-func (h *l0RecordHook) OnSessionEnd(ctx context.Context, state agent.SessionLifecycleState, result agent.SessionLifecycleResult) error {
-	if h.recorder == nil {
-		return nil
-	}
-	sessionID := state.SessionID
-	if sessionID == "" {
-		return nil
-	}
-	if result.UserMessage != "" {
-		if err := h.recorder.Append(sessionID, "user", result.UserMessage, nil); err != nil {
-			h.logger.Warn("l0 append failed", "session_id", sessionID, "error", err)
-		}
-	}
-	if result.AssistantMessage != "" {
-		if err := h.recorder.Append(sessionID, "assistant", result.AssistantMessage, nil); err != nil {
-			h.logger.Warn("l0 append failed", "session_id", sessionID, "error", err)
-		}
-	}
-
-	// Async distill: one L1 job per turn with new L0 lines. since_msg_id is
-	// today's last record BEFORE this append ("" on the day's first turn):
-	// the window is "today's lines after that position". The worker's
-	// l0_progress marker (advanced only on full success) suppresses
-	// duplicate/re-run work — when the marker already sits at the payload
-	// position the run short-circuits with status "suppressed", and on
-	// other shapes the worker re-reads only the undistilled tail. Enqueue
-	// failure is logged, never fails the turn.
-	if h.enqueuer == nil || result.UserMessage == "" && result.AssistantMessage == "" {
-		return nil
-	}
-	date := time.Now().Format("2006-01-02")
-	l0Path := h.recorder.DatePath(date)
-	sinceID := ""
-	if recs, err := l0.ReadSession(h.l0Dir, date, sessionID); err == nil && len(recs) > 1 {
-		// >1: the just-appended line is the last one; everything before it
-		// was already covered by earlier turns' jobs.
-		sinceID = recs[len(recs)-2].ID
-	}
-	payload := memory.L1ExtractPayload{
-		SessionID:  sessionID,
-		L0Path:     l0Path,
-		SinceMsgID: sinceID,
-	}
-	if _, err := memory.EnqueueL1(ctx, h.enqueuer, payload); err != nil {
-		h.logger.Warn("l1 enqueue failed", "session_id", sessionID, "error", err)
-	}
-	return nil
 }
 
 // appendDistillProcessor composes the distill processor with the daemon's

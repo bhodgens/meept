@@ -1932,8 +1932,8 @@ UserMessage returns a human\-readable error message from any LLM error type. It 
 
 WrapToolOutputMarkers fences a raw tool output in untrusted\-content markers for storage in conversation history. The raw output itself is preserved byte\-identical, with two bounded exceptions:
 
-- An embedded END marker in arbitrary output is neutralized with a zero\-width joiner \(the same rule security.PromptGuard.WrapToolOutput applies\) so a prompt\-injection payload cannot close the fence early.
-- Content that is ALREADY exactly one well\-formed fence \(the conditional security\-orchestrator wrap, keyed on tool name\) passes through untouched — its END marker is a deliberate close, not an injection.
+- Content that is ALREADY exactly one well\-formed fence \(the conditional security\-orchestrator wrap, keyed on tool name — applied upstream in the loop before this seam\) is returned UNCHANGED. Re\-wrapping it would emit a SECOND start marker and a SECOND end marker, doubling the fence in stored history \(bughunt M5\); its END marker is a deliberate close, not an injection, and its start marker is already sanitized by security.PromptGuard.
+- Otherwise, embedded boundary markers in arbitrary output are neutralized with a zero\-width joiner \(the same rule security.PromptGuard.WrapToolOutput applies\) so a prompt\-injection payload can neither close the fence early NOR open a spurious one — BOTH the END and the START marker are neutralized.
 
 <a name="WriteSpawnRecord"></a>
 ## func WriteSpawnRecord

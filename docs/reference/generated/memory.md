@@ -28,6 +28,8 @@ Package memory provides memory storage and retrieval for meept.
 - [func GenerateBridges\(ctx context.Context, store \*BridgeStore, gen BridgeGenerator, cfg BridgesConfig, memories \[\]Memory\) \(generated int, rejected int, err error\)](<#GenerateBridges>)
 - [func IsDistillDomain\(domain string\) bool](<#IsDistillDomain>)
 - [func IsEpistemicType\(t MemoryType\) bool](<#IsEpistemicType>)
+- [func LocalDayKey\(t time.Time\) string](<#LocalDayKey>)
+- [func LocalDayStart\(t time.Time\) time.Time](<#LocalDayStart>)
 - [func MemoryFreshnessText\(ageDays int\) string](<#MemoryFreshnessText>)
 - [func MigrateToDualDB\(dataDir string, nodeID string, logger \*slog.Logger\) error](<#MigrateToDualDB>)
 - [func ParseMetadata\(jsonStr string\) map\[string\]any](<#ParseMetadata>)
@@ -292,7 +294,6 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) StoreVersioned\(ctx context.Context, mem Memory, opts StoreOptions\) \(string, error\)](<#Manager.StoreVersioned>)
   - [func \(m \*Manager\) Task\(\) \*TaskMemory](<#Manager.Task>)
   - [func \(m \*Manager\) UpdateGraphMetrics\(ctx context.Context\) error](<#Manager.UpdateGraphMetrics>)
-  - [func \(m \*Manager\) VerdictAuditor\(\) VerdictAuditor](<#Manager.VerdictAuditor>)
 - [type ManagerConfig](<#ManagerConfig>)
 - [type Memory](<#Memory>)
   - [func \(m \*Memory\) MetadataJSON\(\) string](<#Memory.MetadataJSON>)
@@ -734,6 +735,20 @@ IsDistillDomain reports whether a task\-domain string is a distill domain.
 	func IsEpistemicType(t MemoryType) bool
 
 IsEpistemicType reports whether a MemoryType is one of the epistemic types \(claim, decision, prediction, question\).
+
+<a name="LocalDayKey"></a>
+## func LocalDayKey
+
+	func LocalDayKey(t time.Time) string
+
+LocalDayKey returns the LOCAL calendar day \(YYYY\-MM\-DD\) of t. It names L0 day files, L2 scene files, and the L2 payload's date selection.
+
+<a name="LocalDayStart"></a>
+## func LocalDayStart
+
+	func LocalDayStart(t time.Time) time.Time
+
+LocalDayStart returns midnight of t's LOCAL calendar day, stamped in UTC so day keys compare as plain dates \(retention cutoff arithmetic in the l0 package\).
 
 <a name="MemoryFreshnessText"></a>
 ## func MemoryFreshnessText
@@ -1584,7 +1599,12 @@ DistillWorkerConfig holds construction parameters for DistillWorker.
 	    // over each L1 extraction batch before storing (tree 02 leaf L2). Nil or
 	    // disabled: candidates are stored directly — no recall, no LLM call.
 	    Conflict *ConflictWiring
-	    Logger   *slog.Logger
+	    // Now supplies the worker's wall clock in the LOCAL frame (the L0/L2
+	    // calendar convention above). Nil = time.Now. Test seam for the L2 day
+	    // derivation: without it the chained day is unassertable off the wall
+	    // clock.
+	    Now    func() time.Time
+	    Logger *slog.Logger
 	}
 
 <a name="DualStore"></a>
@@ -2390,8 +2410,10 @@ L2ScenePayload is the memory.l2\_scene payload \(SHARED\-CONVENTIONS §2.2\).
 
 	type L2ScenePayload struct {
 	    SessionID string `json:"session_id"`
-	    // SinceTS is RFC3339; its calendar date selects the L0 day file and the
-	    // scene file names. The scene pass covers the full session-day.
+	    // SinceTS is RFC3339 bearing the offset of the LOCAL frame that names the
+	    // L0 day files (see the L0/L2 calendar convention below); its calendar
+	    // date selects the L0 day file and the scene file names. The scene pass
+	    // covers the full session-day.
 	    SinceTS string `json:"since_ts"`
 	}
 
@@ -2955,9 +2977,7 @@ SetVerdictAuditor wires the auditlog adapter that receives one entry per verdict
 
 	func (m *Manager) StartPeriodicConsolidation(ctx context.Context)
 
-StartPeriodicConsolidation starts background consolidation.
-
-This is an alternative to the scheduler\-based consolidation job wired in daemon/components.go \(MemoryOptimizerAdapter\). The scheduler approach is preferred in production because it benefits from cron expressions, logging, and job dependency tracking. Use this method only when running without a scheduler \(e.g., tests or embedded mode\).
+StartPeriodicConsolidation starts background consolidation on the consolidator's own ticker. This is the ALWAYS\-ON driver for the four consolidator passes \(episodic decay, L0 prune, knowledge ingest/index, bridge generation\): nothing else drives them on a stock install — the scheduler\-based memory\_consolidate job exists but is never seeded by default, so without this call the passes were inert on a fresh boot \(bughunt M3\). The daemon passes a Run\-scoped ctx, so shutdown cancels it; Consolidator.Stop \(from Manager.Close\) is the second stop path. Idempotent: the consolidator's ticker goroutine is guarded by its own stop\-once.
 
 <a name="Manager.StartPrefetchService"></a>
 ### func \(\*Manager\) StartPrefetchService
@@ -3035,13 +3055,6 @@ Task returns the task memory subsystem \(SQLite backend only\).
 	func (m *Manager) UpdateGraphMetrics(ctx context.Context) error
 
 UpdateGraphMetrics recomputes PageRank and community detection.
-
-<a name="Manager.VerdictAuditor"></a>
-### func \(\*Manager\) VerdictAuditor
-
-	func (m *Manager) VerdictAuditor() VerdictAuditor
-
-VerdictAuditor returns the configured verdict auditor, or nil.
 
 <a name="ManagerConfig"></a>
 ## type ManagerConfig
