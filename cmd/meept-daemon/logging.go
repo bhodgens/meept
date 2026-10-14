@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"log/slog"
+	"os"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/logrotate"
@@ -45,6 +46,25 @@ func installDaemonLogger(out io.Writer, level string) (*slog.Logger, slog.Level)
 		"log_level", resolved.String(),
 		"source", "daemon.log_level")
 	return logger, resolved
+}
+
+// consoleWriter returns os.Stderr when it is a terminal (foreground run) and
+// nil otherwise.
+//
+// In a detached spawn the child's stderr is a raw O_APPEND fd on the same
+// meept.log the rotating writer caps (the spawners hand the file fd as the
+// child's Stdout/Stderr to capture pre-logger output). Teeing to that fd would
+// write every slog line TWICE — once through the capped writer, once through
+// the uncapped fd — and after the first rotation the fd appends to a
+// renamed-then-unlinked inode: unbounded, unreclaimable growth, the exact shape
+// d8baa793 was written to stop (bughunt H3). Teeing only on a terminal keeps
+// exactly ONE writer on the log file in the detached case while foreground
+// runs still print.
+func consoleWriter() io.Writer {
+	if fi, err := os.Stderr.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+		return os.Stderr
+	}
+	return nil
 }
 
 // newRotatingLogWriter returns an io.Writer for the daemon log that is capped at

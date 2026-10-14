@@ -11,6 +11,7 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
+	"github.com/caimlas/meept/internal/memory/conflict"
 	"github.com/caimlas/meept/internal/memory/l0"
 	"github.com/caimlas/meept/internal/queue"
 )
@@ -50,6 +51,62 @@ func (a *l0ChatterAdapter) DistillComplete(ctx context.Context, prompt string) (
 		return nil, fmt.Errorf("distill chatter returned nil response")
 	}
 	return []byte(resp.Content), nil
+}
+
+// conflictChatterAdapter adapts llm.Chatter to the conflict package's LLM seam
+// (memory.DistillLLM twin): identical single-prompt low-temperature shape, so
+// the memory_model slot serves both L0 distill and conflict detection.
+type conflictChatterAdapter struct {
+	chatter llm.Chatter
+}
+
+var _ conflict.LLM = (*conflictChatterAdapter)(nil)
+
+func newConflictLLMAdapter(chatter llm.Chatter) conflict.LLM {
+	if chatter == nil {
+		return nil
+	}
+	return &conflictChatterAdapter{chatter: chatter}
+}
+
+func (a *conflictChatterAdapter) Complete(ctx context.Context, prompt string) ([]byte, error) {
+	resp, err := a.chatter.Chat(ctx, []llm.ChatMessage{
+		{Role: llm.RoleUser, Content: prompt},
+	}, llm.WithTemperature(0.2), llm.DisableThinking())
+	if err != nil {
+		return nil, fmt.Errorf("conflict chatter: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("conflict chatter returned nil response")
+	}
+	return []byte(resp.Content), nil
+}
+
+// conflictWiring returns the DistillWorker's conflict-detection wiring when
+// the opt-in memory.conflict.enabled is set, or nil otherwise. This is what
+// makes the memory.conflict.* config actually reach a live detector: before
+// this, DistillWorkerConfig.Conflict was never constructed anywhere, so the
+// flag was a no-op and memory.listConflicts could only ever be empty
+// (bughunt M1).
+func conflictWiring(memCfg config.MemoryConfig, chatter llm.Chatter, logger *slog.Logger) *memory.ConflictWiring {
+	if !memCfg.Conflict.Enabled {
+		return nil
+	}
+	topK := memCfg.Conflict.TopK
+	if topK <= 0 {
+		topK = conflict.DefaultRecallPerCandidate
+	}
+	maxBatch := memCfg.Conflict.MaxBatch
+	if maxBatch <= 0 {
+		maxBatch = conflict.DefaultMaxBatch
+	}
+	return &memory.ConflictWiring{
+		Enabled:  true,
+		TopK:     topK,
+		MaxBatch: maxBatch,
+		LLM:      newConflictLLMAdapter(chatter),
+		Logger:   logger.With("component", "conflict-detection"),
+	}
 }
 
 // wireL0Distill wires the L0 raw-conversation tier (tree 01 leaf L3) when
@@ -117,6 +174,9 @@ func wireL0Distill(agentLoop *agent.AgentLoop, memoryMgr *memory.Manager, enqueu
 		// persistent queue (same instance as the enqueue side) satisfies
 		// memory.JobEnqueuer.
 		Enqueuer: enqueuer,
+		// Conflict: live, configured detector when memory.conflict.enabled
+		// is set (bughunt M1); nil otherwise keeps the pre-detector path.
+		Conflict: conflictWiring(memCfg, chatter, logger),
 		Logger:   logger.With("component", "distill-worker"),
 	})
 	logger.Info("l0 distill wired", "data_dir", dataDir, "retention_days", memCfg.L0RetentionDays)
@@ -168,7 +228,7 @@ func (h *l0RecordHook) OnSessionEnd(ctx context.Context, state agent.SessionLife
 	date := time.Now().Format("2006-01-02")
 	l0Path := h.recorder.DatePath(date)
 	sinceID := ""
-	if recs, err := l0.ReadSession(filepath.Join(h.l0Dir, date), sessionID, ""); err == nil && len(recs) > 1 {
+	if recs, err := l0.ReadSession(h.l0Dir, date, sessionID); err == nil && len(recs) > 1 {
 		// >1: the just-appended line is the last one; everything before it
 		// was already covered by earlier turns' jobs.
 		sinceID = recs[len(recs)-2].ID

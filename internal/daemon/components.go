@@ -1896,7 +1896,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			// Create shard manager
 			shardMgr, err := vector.NewShardManager(vector.ShardManagerConfig{
-				BasePath:     cfg.Memory.Embeddings.ShardBasePath,
+				BasePath:     shardBasePath(cfg.Daemon.DataDir, cfg.Memory.Embeddings.ShardBasePath),
 				MaxRAMShards: cfg.Memory.Embeddings.MaxRAMShards,
 				Embedder:     embedder,
 				Logger:       logger.With("component", "vector-shards"),
@@ -6376,21 +6376,30 @@ func registerBuiltinTools(
 			ks, kErr := knowledge.New(knowledgeDataDir, knowledgeCfg.MaxPages, logger.With("component", "knowledge-store"))
 			if kErr != nil {
 				logger.Error("knowledge tools disabled: store open failed", "error", kErr, "data_dir", knowledgeDataDir)
-				return
-			}
-			knowledgeStore = ks
-			if knowledgeStoreOut != nil {
-				*knowledgeStoreOut = ks
+				// Not fatal here — only the knowledge tool family is skipped.
+				// Previously this was a bare `return` that aborted the WHOLE
+				// registerBuiltinTools call, silently gutting the rest of the
+				// registry (memory, task, scheduler, image/video, tool_view).
+				// Leave knowledgeStore nil; the guard below skips this family
+				// while every later registration still happens (bughunt H2).
+				knowledgeStore = nil
+			} else {
+				knowledgeStore = ks
+				if knowledgeStoreOut != nil {
+					*knowledgeStoreOut = ks
+				}
 			}
 		}
-		toolStore := knowledge.NewToolStore(knowledgeStore)
-		registry.Register(builtin.NewKnowledgeSearchTool(toolStore))
-		registry.Register(builtin.NewKnowledgeReadTool(toolStore))
-		registry.Register(builtin.NewKnowledgeIngestTool(toolStore))
-		// knowledge_impact completes the family (tree 04 L4): the
-		// code-index impact surface, bound to the same store.
-		registerKnowledgeImpactTool(registry, knowledgeStore)
-		logger.Info("knowledge tools registered", "data_dir", knowledgeDataDir, "max_pages", knowledgeCfg.MaxPages)
+		if knowledgeStore != nil {
+			toolStore := knowledge.NewToolStore(knowledgeStore)
+			registry.Register(builtin.NewKnowledgeSearchTool(toolStore))
+			registry.Register(builtin.NewKnowledgeReadTool(toolStore))
+			registry.Register(builtin.NewKnowledgeIngestTool(toolStore))
+			// knowledge_impact completes the family (tree 04 L4): the
+			// code-index impact surface, bound to the same store.
+			registerKnowledgeImpactTool(registry, knowledgeStore)
+			logger.Info("knowledge tools registered", "data_dir", knowledgeDataDir, "max_pages", knowledgeCfg.MaxPages)
+		}
 	}
 
 	// skills_create / skills_patch (skill authoring). Unconditionally

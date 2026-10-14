@@ -177,7 +177,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// Writing through a capped writer here is the only place that can actually
 	// reclaim space. Teed with stderr so foreground runs still print.
 	logPath := filepath.Join(stateDir, "meept.log")
-	logOut, closeLog := newRotatingLogWriter(logPath, appCfg.Daemon.LogMaxBytes, os.Stderr)
+	logOut, closeLog := newRotatingLogWriter(logPath, appCfg.Daemon.LogMaxBytes, consoleWriter())
 	defer func() { _ = closeLog() }()
 	_, logLevel := installDaemonLogger(logOut, levelName)
 
@@ -188,6 +188,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		StateDir:                    appCfg.Daemon.DataDir,
 		ShutdownTimeout:             appCfg.ShutdownTimeout(),
 		LogLevel:                    logLevel,
+		LogStream:                   logOut,
 		FullConfig:                  appCfg,
 		AllowedPaths:                appCfg.Security.AllowedPaths,
 		BlockedPaths:                appCfg.Security.BlockedPaths,

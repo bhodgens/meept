@@ -63,10 +63,15 @@ func (a *verdictAuditor) RecordVerdict(claimID, verdict, reasonHash string) erro
 }
 
 // wireVerdictAuditor injects the auditlog-backed verdict auditor into the
-// memory manager at daemon startup. The chain store is opened next to the
-// memory data dir (audit_chain.db) unless one is already wired on the shared
-// employee DB — auditing failure is non-fatal: a nil auditor simply disables
-// audit entries (best-effort, never blocks a verdict).
+// memory manager at daemon startup. The chain store is opened at
+// <memory data dir>/audit_chain.db (a file path — the bare data dir handed
+// SQLite a directory and every boot failed, silently disabling verdict
+// auditing). The store handle is process-lifetime: a fresh one is opened each
+// boot and not explicitly closed in stopComponents — acceptable because the
+// process exit reclaims it (SQLite flushes on close and the OS releases the
+// lock at exit), and there is no in-process restart that reopens it while the
+// old one is live. Auditing failure is non-fatal: a nil auditor simply
+// disables audit entries (best-effort, never blocks a verdict).
 func wireVerdictAuditor(memMgr *memory.Manager, dataDir string, logger *slog.Logger) {
 	if memMgr == nil {
 		return

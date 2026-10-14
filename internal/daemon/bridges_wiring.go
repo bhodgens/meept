@@ -20,6 +20,20 @@ import (
 // Failure is non-fatal: bridges are an optional quality feature, so a store
 // that cannot open logs a warning and leaves the manager bridge-less
 // (generation no-ops, invalidation no-ops, the CLI reports no bridges).
+// shardBasePath resolves the ONE directory the vector shard manager and the
+// bridge store share, so the recall side reads the file generation writes.
+// Falls back to <dataDir>/memory/shards when memory.embeddings.shard_base_path
+// is unset. The vector package's own fallback ($HOME/.meept/memory/shards)
+// must NOT be reached by the boot wiring, or generation writes one file and
+// recall reads another — a split-brain that silently disables bridged recall
+// (bughunt M4).
+func shardBasePath(dataDir, configured string) string {
+	if configured != "" {
+		return configured
+	}
+	return filepath.Join(dataDir, "memory", "shards")
+}
+
 func wireBridges(memoryMgr *memory.Manager, chatter llm.Chatter, memCfg config.MemoryConfig, dataDir string, logger *slog.Logger) {
 	if memoryMgr == nil || !memoryMgr.IsInitialized() {
 		return
@@ -29,7 +43,7 @@ func wireBridges(memoryMgr *memory.Manager, chatter llm.Chatter, memCfg config.M
 		return
 	}
 
-	bridgePath := filepath.Join(dataDir, "bridge.vec.db")
+	bridgePath := filepath.Join(shardBasePath(dataDir, memCfg.Embeddings.ShardBasePath), "bridge.vec.db")
 	store, err := memory.NewBridgeStore(bridgePath)
 	if err != nil {
 		logger.Warn("bridge store open failed; bridge generation/recall/visibility disabled",

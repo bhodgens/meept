@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -126,6 +127,16 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	LogLevel        slog.Level
 
+	// LogStream is where the daemon writes its slog output. When set (the
+	// daemon binary hands it the capped rotating writer), ALL daemon logging
+	// flows through the cap; when nil (tests, callers that do not manage a
+	// log file) it falls back to os.Stderr. Without this seam the daemon
+	// wrote to os.Stderr unconditionally, so a detached spawn's inherited
+	// raw fd on meept.log received the entire, uncapped log while the capped
+	// writer also wrote the same file — the unbounded-growth shape
+	// d8baa793 was written to stop (bughunt H3).
+	LogStream io.Writer
+
 	// Optional pre-loaded full config (used when --config flag is provided)
 	FullConfig *config.Config
 
@@ -170,7 +181,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 
 	// Set up logging
 	opts := &slog.HandlerOptions{Level: cfg.LogLevel}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, opts))
+	// Route the daemon's logging through the caller-provided capped writer
+	// when one is supplied (the daemon binary hands it the logrotate cap);
+	// fall back to os.Stderr otherwise. This is what makes the log cap the
+	// only writer on meept.log in a detached spawn (bughunt H3).
+	logDest := io.Writer(os.Stderr)
+	if cfg.LogStream != nil {
+		logDest = cfg.LogStream
+	}
+	logger := slog.New(slog.NewTextHandler(logDest, opts))
 
 	// Use pre-loaded config if provided (e.g. from --config flag), otherwise load defaults
 	var fullCfg *config.Config
@@ -941,6 +960,16 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// Restore plan-task mappings for executing plans that survived restart.
 		if err := planManagerInst.RestoreMappings(context.Background()); err != nil {
 			logger.Warn("failed to restore plan-task mappings", "error", err)
+		}
+
+		// Recover stranded synthesis (bughunt M10): return plans left in
+		// StateSynthesizing with an EXPIRED lease to StateApproved so the
+		// normal path re-drives them. Without this a crash/cancel between the
+		// claim and the task_id write stranded the plan permanently. Best-effort.
+		if recovered, err := planManagerInst.RecoverStrandedSynthesis(context.Background()); err != nil {
+			logger.Warn("failed to recover stranded plan synthesis", "error", err)
+		} else if recovered > 0 {
+			logger.Info("recovered stranded plan synthesis", "count", recovered)
 		}
 	}
 
