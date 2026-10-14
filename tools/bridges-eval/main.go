@@ -65,10 +65,25 @@ func main() {
 	defer cancel()
 
 	rep := eval.LoadReport(*outPath, fHash, cfg.ConfigHash())
-	rep.RunAt = time.Now().UTC().Format(time.RFC3339)
+	// Record the config this run actually used. LoadReport only resumes an
+	// artifact whose ConfigHash matches cfg.ConfigHash(), so cfg here is
+	// authoritative — and the persisted config block MUST re-hash to
+	// config_hash (it previously stayed at its zero value because nothing ever
+	// assigned rep.Config, so the committed artifacts carried kb:0/top_k:0/...
+	// that contradicted the run and did not reproduce config_hash).
+	rep.Config = cfg
 	rep.Mode = modeLabel(*live)
-	rep.Note = "synthetic hermetic run (scripted generator/verifier + mock grader). Live-model runs against the local llama-server stack are a follow-up; use --live to enable."
 	rep.FixturePath = *fixturePath
+	// RunAt/Note describe the run that produced the measured rows. A resume
+	// reuses those rows rather than re-measuring them, so it must not relabel
+	// them as a new run (a live artifact resumed without the model would
+	// otherwise be re-stamped as freshly run). Write both only for a fresh
+	// report; a resumed artifact keeps the timestamp/note of the run that
+	// actually measured its rows.
+	if rep.RunAt == "" {
+		rep.RunAt = time.Now().UTC().Format(time.RFC3339)
+		rep.Note = "synthetic hermetic run (scripted generator/verifier + mock grader). Live-model runs against the local llama-server stack are a follow-up; use --live to enable."
+	}
 
 	var answer eval.AnswerFunc
 	if *live {

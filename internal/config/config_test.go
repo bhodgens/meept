@@ -96,6 +96,33 @@ func TestExpandConfigPathsLearning(t *testing.T) {
 	}
 }
 
+// TestExpandConfigPathsCodeDirs pins the LOW finding at config.go:315: every
+// other Memory.Knowledge path (IngestDir) and the Memory/Queue paths pass
+// through expandPath, but the CodeDirs slice was missed. An unexpanded
+// "~/git/meept" entry reaches codeindex.IndexGoDirs, os.Stat fails, and the
+// whole code-index pass dies with a warn every consolidation tick.
+func TestExpandConfigPathsCodeDirs(t *testing.T) {
+	homeDir, _ := os.UserHomeDir()
+	cfg := DefaultConfig()
+	cfg.Memory.Knowledge.CodeDirs = []string{"~/git/meept", "/abs/already/expanded", "~/other/repo"}
+
+	expandConfigPaths(cfg)
+
+	want := []string{
+		filepath.Join(homeDir, "git", "meept"),
+		"/abs/already/expanded",
+		filepath.Join(homeDir, "other", "repo"),
+	}
+	if len(cfg.Memory.Knowledge.CodeDirs) != len(want) {
+		t.Fatalf("CodeDirs len = %d, want %d", len(cfg.Memory.Knowledge.CodeDirs), len(want))
+	}
+	for i := range want {
+		if cfg.Memory.Knowledge.CodeDirs[i] != want[i] {
+			t.Errorf("CodeDirs[%d] = %q, want %q", i, cfg.Memory.Knowledge.CodeDirs[i], want[i])
+		}
+	}
+}
+
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 

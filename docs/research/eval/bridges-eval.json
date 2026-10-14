@@ -5,11 +5,11 @@
   "run_at": "2026-10-13T17:12:14Z",
   "note": "synthetic hermetic run (scripted generator/verifier + mock grader). Live-model runs against the local llama-server stack are a follow-up; use --live to enable.",
   "config": {
-    "kb": 0,
-    "top_k": 0,
-    "match_threshold": 0,
-    "bridge_df_max": 0,
-    "verify": false,
+    "kb": 2,
+    "top_k": 8,
+    "match_threshold": 0.6,
+    "bridge_df_max": 10,
+    "verify": true,
     "live": false
   },
   "fixture_path": "tools/bridges-eval/fixtures/bridges-fixture.json",

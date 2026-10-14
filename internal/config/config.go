@@ -313,6 +313,13 @@ func expandConfigPaths(cfg *Config) {
 	cfg.Daemon.DataDir = expandPath(cfg.Daemon.DataDir)
 	cfg.Memory.DataDir = expandPath(cfg.Memory.DataDir)
 	cfg.Memory.Knowledge.IngestDir = expandPath(cfg.Memory.Knowledge.IngestDir)
+	// CodeDirs is a slice; expand each entry like the other path slices below.
+	// Without this a "~/git/meept" entry reaches codeindex.IndexGoDirs
+	// unexpanded, os.Stat fails, and the whole code-index pass dies with a
+	// warn on every consolidation tick.
+	for i, p := range cfg.Memory.Knowledge.CodeDirs {
+		cfg.Memory.Knowledge.CodeDirs[i] = expandPath(p)
+	}
 	cfg.Queue.DBPath = expandPath(cfg.Queue.DBPath)
 	cfg.Isolation.BaseDir = expandPath(cfg.Isolation.BaseDir)
 	cfg.MCP.ConfigFile = expandPath(cfg.MCP.ConfigFile)

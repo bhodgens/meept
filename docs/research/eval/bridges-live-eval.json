@@ -5,12 +5,12 @@
   "run_at": "2026-10-13T20:29:42Z",
   "note": "LIVE run against local llama-server (LFM2.5-8B-A1B Q4_K_M, 127.0.0.1:8401, temp 0.2, max_tokens 2048). Mock grader unchanged. 2026-10-13.",
   "config": {
-    "kb": 0,
-    "top_k": 0,
-    "match_threshold": 0,
-    "bridge_df_max": 0,
-    "verify": false,
-    "live": false
+    "kb": 2,
+    "top_k": 8,
+    "match_threshold": 0.6,
+    "bridge_df_max": 10,
+    "verify": true,
+    "live": true
   },
   "fixture_path": "tools/bridges-eval/fixtures/bridges-fixture.json",
   "fixture_hash": "66623d5d53c5d3ce9b746b03",
