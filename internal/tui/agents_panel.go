@@ -252,47 +252,52 @@ func (p *AgentsPanel) resizeColumns() {
 	if p.width < 30 {
 		return
 	}
-	available := p.width - 10
-	idW := max(available*22/100, 12)
-	statusW := 10
-	tierW := 16
-	driftW := 8
-	costW := 10
-	findingsW := 8
-	lastW := available - idW - statusW - tierW - driftW - costW - findingsW
-	lastW = max(lastW, 8)
+	// Fitted to the viewport budget (tableutil.FitWidthsMin) rather than
+	// hand-computed against p.width-10: tableutil.Size sets the table
+	// viewport to width-2, so the real cell-text budget is
+	// ContentBudget(viewport, 7) = width-16. The old percentage split
+	// (id 22% + a fixed 52 for the rest) overflowed the bordered box at the
+	// 80x24 default (mainWidth 55 → 7 columns demanded 72 against a 39
+	// budget) and bubbles/table MaxWidth-truncated every cell (M12). All
+	// SEVEN columns are fitted together — a leftover handed to "last run"
+	// after fixing the others double-counted the space.
+	mins := []int{12, 8, 8, 6, 6, 8, 8}
+	weights := []int{22, 10, 16, 8, 10, 8, 12}
+	widths := tableutil.FitWidthsMin(tableutil.ContentBudget(p.table.Width(), len(mins)), mins, weights)
 	p.table.SetColumns([]table.Column{
-		{Title: "id", Width: idW},
-		{Title: "status", Width: statusW},
-		{Title: "tier", Width: tierW},
-		{Title: "drift", Width: driftW},
-		{Title: "cost", Width: costW},
-		{Title: "findings", Width: findingsW},
-		{Title: "last run", Width: lastW},
+		{Title: "id", Width: widths[0]},
+		{Title: "status", Width: widths[1]},
+		{Title: "tier", Width: widths[2]},
+		{Title: "drift", Width: widths[3]},
+		{Title: "cost", Width: widths[4]},
+		{Title: "findings", Width: widths[5]},
+		{Title: "last run", Width: widths[6]},
 	})
 }
 
-// resizeGoalColumns fits the goals table to the current width. Same
-// clear-before-SetColumns discipline as resizeColumns: the goals rows are
-// repopulated from cache by SetSize / the goals fetch.
+// resizeGoalColumns fits the goals table to the current width through the
+// same tableutil path as its siblings (M12). Same clear-before-SetColumns
+// discipline as resizeColumns: the goals rows are repopulated from cache by
+// SetSize / the goals fetch.
 func (p *AgentsPanel) resizeGoalColumns() {
 	p.goalsTable.SetRows([]table.Row{})
 
 	if p.width < 30 {
 		return
 	}
-	available := p.width - 10
-	titleW := max(available*30/100, 14)
-	healthW := 10
-	stateW := 10
-	planW := 16
-	gateW := max(available-titleW-healthW-stateW-planW, 8)
+	// All FIVE columns fitted together against the viewport budget; the old
+	// `available := p.width-10` math used the outer width and floored "gate"
+	// at 8, so the columns summed past the width-2 viewport and the bordered
+	// box rendered wider than its container (M12).
+	mins := []int{14, 8, 8, 10, 8}
+	weights := []int{30, 10, 10, 16, 20}
+	widths := tableutil.FitWidthsMin(tableutil.ContentBudget(p.goalsTable.Width(), len(mins)), mins, weights)
 	p.goalsTable.SetColumns([]table.Column{
-		{Title: "title", Width: titleW},
-		{Title: "health", Width: healthW},
-		{Title: "state", Width: stateW},
-		{Title: "plan", Width: planW},
-		{Title: "gate", Width: gateW},
+		{Title: "title", Width: widths[0]},
+		{Title: "health", Width: widths[1]},
+		{Title: "state", Width: widths[2]},
+		{Title: "plan", Width: widths[3]},
+		{Title: "gate", Width: widths[4]},
 	})
 }
 

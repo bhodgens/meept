@@ -131,10 +131,13 @@ func (m *SessionsModel) SetSize(width, height int) {
 	// zero-width viewport renders no rows (header only, blank body).
 	detailWidth := max(width/3, 30)
 	m.detailWidth = detailWidth
-	// The table viewport gets what is left AFTER the detail pane and the gap
-	// between them. Clamped so a narrow pane cannot produce a negative (and
-	// therefore 1-column) table width.
-	tableWidth := max(width-detailWidth-detailGap, 1)
+	// The panes join edge-to-edge (lipgloss.JoinHorizontal with no
+	// separator, each carrying its own border), so the table viewport gets
+	// exactly what the detail pane leaves. The old `width-detailWidth-4`
+	// reserved a phantom 4-column gap that was never rendered, stealing the
+	// width the date columns needed (M14). Clamped so a narrow pane cannot
+	// produce a non-positive table width.
+	tableWidth := max(width-detailWidth, 1)
 	tableutil.Size(&m.table, tableWidth, tableHeight)
 
 	m.setSessionsColumns()

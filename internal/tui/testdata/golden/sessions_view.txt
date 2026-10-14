@@ -1,19 +1,19 @@
  meept
 sessions  (2)                                          ╭───────────────────────╮
-╭───────────────────╮╭──────────────────────────╮      │  meept dev (commit:   │
-│ title     c…  la… ││alpha session             │      │    unknown, built:    │
-│───────────────────││                          │      │       unknown)        │
-│ alpha s…  M…  Ma… ││id:       sess-alpha      │      │  ▾ status             │
-│ beta se…  M…  Ma… ││name:     alpha           │      │   daemon:             │
-│                   ││created:  mmm dd 14 HH:MM    │      │ disconnected          │
-│                   ││activity: mmm dd 14          │      │  ▾ agent activity     │
-│                   ││                          │      │   no active agents    │
-│                   ││--- plans ---             │      │   workers: none       │
-│                   ││no plans                  │      │  ▾ tasks              │
-│                   ││                          │      │   no active tasks     │
-│                   ││                          │      │  ▸ plan               │
-│                   ││                          │      │  ▾ recent memory      │
-╰───────────────────╯╰──────────────────────────╯      │   ...                 │
+╭───────────────────────╮╭──────────────────────────╮  │  meept dev (commit:   │
+│ title       cr…  las… ││alpha session             │  │    unknown, built:    │
+│───────────────────────││                          │  │       unknown)        │
+│ alpha ses…  Ma…  mmm dd… ││id:       sess-alpha      │  │  ▾ status             │
+│ beta sess…  Ma…  mmm dd… ││name:     alpha           │  │   daemon:             │
+│                       ││created:  mmm dd 14 HH:MM    │  │ disconnected          │
+│                       ││activity: mmm dd 14          │  │  ▾ agent activity     │
+│                       ││                          │  │   no active agents    │
+│                       ││--- plans ---             │  │   workers: none       │
+│                       ││no plans                  │  │  ▾ tasks              │
+│                       ││                          │  │   no active tasks     │
+│                       ││                          │  │  ▸ plan               │
+│                       ││                          │  │  ▾ recent memory      │
+╰───────────────────────╯╰──────────────────────────╯  │   ...                 │
                                                        │                       │
 n: new | d: archive | D: delete | r: refresh | enter:  │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
 details | up/down: navigate | f: search | ?: help      │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │

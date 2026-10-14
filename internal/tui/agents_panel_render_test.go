@@ -5,6 +5,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"charm.land/bubbles/v2/table"
+
+	"github.com/caimlas/meept/internal/tui/tableutil"
 )
 
 type stubAgentsRPC struct{}
@@ -124,5 +128,39 @@ func TestAgentsPanel_GoalsViewResizeKeepsRows(t *testing.T) {
 	}
 	if !strings.Contains(p.View(), "keep main shippable") {
 		t.Error("goals view body is empty after a resize")
+	}
+}
+
+// columnWidthSum returns the summed cell-text widths of a table and the
+// content budget its viewport leaves for that many cells.
+func columnWidthSum(tbl table.Model) (sum, budget int) {
+	cols := tbl.Columns()
+	for _, c := range cols {
+		sum += c.Width
+	}
+	return sum, tableutil.ContentBudget(tbl.Width(), len(cols))
+}
+
+// M12 pin: the agents + goals tables must size their columns through
+// tableutil (FitWidthsMin/ContentBudget) so the summed widths never exceed
+// the viewport's cell-text budget. The pre-fix hand-computed widths summed
+// to 72 against a 39 budget at the 80x24 default (panel width 55 = 80 minus
+// the 25-column sidebar) and rendered a bordered box wider than its
+// container. Checked at the default layout and at a narrow width.
+func TestAgentsPanel_ColumnWidthsFitContentBudget(t *testing.T) {
+	for _, width := range []int{55, 30, 120} {
+		p := NewAgentsPanel(stubAgentsRPC{})
+		p.SetSize(width, 24)
+		if sum, budget := columnWidthSum(p.table); sum > budget {
+			t.Errorf("agents table at width %d: columns sum %d > content budget %d (viewport %d)",
+				width, sum, budget, p.table.Width())
+		}
+
+		p.subView = agentsViewGoals
+		p.SetSize(width, 24)
+		if sum, budget := columnWidthSum(p.goalsTable); sum > budget {
+			t.Errorf("goals table at width %d: columns sum %d > content budget %d (viewport %d)",
+				width, sum, budget, p.goalsTable.Width())
+		}
 	}
 }
