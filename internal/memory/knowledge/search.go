@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/pkg/sqlite"
-	"github.com/jmoiron/sqlx"
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
 
@@ -130,10 +129,23 @@ WHERE l.from_id = ?`, id)
 		ToID            string `db:"to_id"`
 		UnresolvedTitle string `db:"unresolved_title"`
 	}
+	// Iterated explicitly with rows.Close (bughunt LOW): rows.StructScan does
+	// NOT close rows on a scan error, and with the store's single pooled
+	// connection that leak would wedge every later query on this handle.
 	var linkRows []linkRow
-	if err := sqlx.StructScan(rows, &linkRows); err != nil { //nolint:sqlclosecheck // StructScan closes rows itself
-		return Page{}, fmt.Errorf("scan knowledge links: %w", err)
+	for rows.Next() {
+		var lr linkRow
+		if err := rows.StructScan(&lr); err != nil {
+			_ = rows.Close()
+			return Page{}, fmt.Errorf("scan knowledge links: %w", err)
+		}
+		linkRows = append(linkRows, lr)
 	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return Page{}, fmt.Errorf("iterate knowledge links: %w", err)
+	}
+	_ = rows.Close()
 
 	seen := map[string]bool{}
 	for _, lr := range linkRows {

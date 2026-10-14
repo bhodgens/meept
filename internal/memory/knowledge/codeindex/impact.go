@@ -1,13 +1,10 @@
 package codeindex
 
 import (
-	"context"
 	"fmt"
 	"go/ast"
 	"go/token"
 	"strings"
-
-	"github.com/caimlas/meept/internal/memory/knowledge"
 )
 
 // renderPageBody renders one file's CODE page body: package clause,
@@ -200,10 +197,4 @@ func renderExpr(expr ast.Expr) string {
 	default:
 		return "…"
 	}
-}
-
-// ImpactOf is a thin alias kept for call-site readability; identical to
-// ImpactedBy (one-hop callers of symbol).
-func ImpactOf(ctx context.Context, store *knowledge.Store, symbol string) ([]string, error) {
-	return ImpactedBy(ctx, store, symbol)
 }

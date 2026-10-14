@@ -2279,7 +2279,7 @@
     "path": "designation",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 4105
+    "line": 4117
   },
   {
     "method": "GET",
@@ -2370,7 +2370,7 @@
     "path": "limit",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 4110
+    "line": 4122
   },
   {
     "method": "GET",
@@ -2405,7 +2405,7 @@
     "path": "name",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 4171
+    "line": 4183
   },
   {
     "method": "GET",
@@ -2566,7 +2566,7 @@
     "path": "topic",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 3876
+    "line": 3888
   },
   {
     "method": "GET",

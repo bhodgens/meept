@@ -3,6 +3,7 @@ package knowledge
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // This file extends the knowledge-store schema ADDITIVELY (tree 04 leaf L3):
@@ -110,11 +111,17 @@ func (s *Store) Callers(ctx context.Context, symbol string) ([]string, error) {
 	if err := s.ensureCodeEdgesSchema(ctx); err != nil {
 		return nil, err
 	}
+	// Escape LIKE wildcards in the symbol so a name containing _ or % matches
+	// only itself (bughunt LOW: do_thing previously also matched symbols whose
+	// qualified forms differ at that character). ESCAPE '\' is SQLite's
+	// standard form; the v1 suffix heuristic (pkg.Func) is preserved because a
+	// dot carries no wildcard meaning in LIKE.
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(symbol)
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT from_symbol FROM code_edges
-		 WHERE to_symbol = ? OR to_symbol LIKE ?
+		 WHERE to_symbol = ? OR to_symbol LIKE ? ESCAPE '\'
 		 ORDER BY from_symbol`,
-		symbol, "%."+symbol,
+		symbol, "%."+escaped,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query callers of %s: %w", symbol, err)

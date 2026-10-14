@@ -38,13 +38,6 @@ func (m *Manager) SetVerdictAuditor(a VerdictAuditor) {
 	m.mu.Unlock()
 }
 
-// VerdictAuditor returns the configured verdict auditor, or nil.
-func (m *Manager) VerdictAuditor() VerdictAuditor {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.verdictAuditor
-}
-
 // RecordVerdict delivers the verdict to the wired auditor. Returns an error
 // when an auditor is wired and rejects the entry (durable-then-ack: the
 // verdict transition is aborted before the status write so the audit chain
