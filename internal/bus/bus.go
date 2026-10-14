@@ -427,6 +427,14 @@ func (b *MessageBus) HasSubscribers(topic string) bool {
 	return false
 }
 
+// MatchWildcard is the exported form of the bus's topic matcher. The TUI's
+// topic-overlap guard previously tested a hand-rolled MIRROR of this function,
+// so a semantics change here left the guard green while the daemon
+// double-delivered (bughunt LOW); consumers must test against this.
+func MatchWildcard(pattern, topic string) bool {
+	return matchWildcard(pattern, topic)
+}
+
 // matchWildcard checks if a pattern matches a topic.
 // Pattern "agent.*" matches "agent.status" but not "agent.sub.topic".
 func matchWildcard(pattern, topic string) bool {

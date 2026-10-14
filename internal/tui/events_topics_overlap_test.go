@@ -3,25 +3,9 @@ package tui
 import (
 	"strings"
 	"testing"
-)
 
-// matchWildcardSeg mirrors internal/bus matchWildcard (equal segment counts).
-func matchWildcardSeg(pattern, topic string) bool {
-	if !strings.Contains(pattern, "*") {
-		return pattern == topic
-	}
-	pp := strings.Split(pattern, ".")
-	tp := strings.Split(topic, ".")
-	if len(pp) != len(tp) {
-		return false
-	}
-	for i, part := range pp {
-		if part != "*" && part != tp[i] {
-			return false
-		}
-	}
-	return true
-}
+	"github.com/caimlas/meept/internal/bus"
+)
 
 // TestTopicPatternsAreNonOverlapping pins the H9 invariant (bughunt
 // 2026-10-05): no topic may match MORE THAN ONE pattern in
@@ -68,7 +52,7 @@ func TestTopicPatternsAreNonOverlapping(t *testing.T) {
 		matches := 0
 		var matched []string
 		for _, p := range patterns {
-			if matchWildcardSeg(p, topic) {
+			if bus.MatchWildcard(p, topic) {
 				matches++
 				matched = append(matched, p)
 			}
@@ -94,7 +78,7 @@ func TestTopicPatternsAreNonOverlapping(t *testing.T) {
 			if synth == "" {
 				continue
 			}
-			if matchWildcardSeg(a, synth) && matchWildcardSeg(b, synth) {
+			if bus.MatchWildcard(a, synth) && bus.MatchWildcard(b, synth) {
 				t.Errorf("patterns %q and %q overlap: both match %q", a, b, synth)
 			}
 		}
@@ -136,7 +120,7 @@ func TestTopicPatternsOverlapNonVacuity(t *testing.T) {
 			if synth == "" {
 				continue
 			}
-			if matchWildcardSeg(preH9[i], synth) && matchWildcardSeg(preH9[j], synth) {
+			if bus.MatchWildcard(preH9[i], synth) && bus.MatchWildcard(preH9[j], synth) {
 				found = true
 			}
 		}

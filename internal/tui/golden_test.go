@@ -62,8 +62,12 @@ func normalizeGoldenView(t *testing.T, raw string) string {
 	// wall-clock message headers never break the golden.
 	stripped = replaceClockTokens(stripped)
 	// Month-day date cells ("Aug 21"): wall-clock derived for any
-	// fixture younger than years — normalize like clock tokens.
-	stripped = monthDayRe.ReplaceAllString(stripped, "mmm dd")
+	// fixture younger than years — normalize like clock tokens. The
+	// replacement emits ONLY the normalized month: an earlier "mmm dd"
+	// replacement appended a phantom " dd" (3 columns) that no real View()
+	// ever rendered, inflating every fixture and defeating its own width
+	// assertion (bughunt LOW; the day digits stay compared below).
+	stripped = monthDayRe.ReplaceAllString(stripped, "mmm")
 	// Trim trailing whitespace per line + trailing blank lines: lipgloss
 	// padding varies with terminal quirks but content must not.
 	lines := strings.Split(stripped, "\n")

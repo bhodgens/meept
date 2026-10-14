@@ -3,10 +3,10 @@ sessions  (2)                                          ╭───────�
 ╭───────────────────────╮╭──────────────────────────╮  │  meept dev (commit:   │
 │ title       cr…  las… ││alpha session             │  │    unknown, built:    │
 │───────────────────────││                          │  │       unknown)        │
-│ alpha ses…  Ma…  mmm dd… ││id:       sess-alpha      │  │  ▾ status             │
-│ beta sess…  Ma…  mmm dd… ││name:     alpha           │  │   daemon:             │
-│                       ││created:  mmm dd 14 HH:MM    │  │ disconnected          │
-│                       ││activity: mmm dd 14          │  │  ▾ agent activity     │
+│ alpha ses…  Ma…  mmm… ││id:       sess-alpha      │  │  ▾ status             │
+│ beta sess…  Ma…  mmm… ││name:     alpha           │  │   daemon:             │
+│                       ││created:  mmm 14 HH:MM    │  │ disconnected          │
+│                       ││activity: mmm 14          │  │  ▾ agent activity     │
 │                       ││                          │  │   no active agents    │
 │                       ││--- plans ---             │  │   workers: none       │
 │                       ││no plans                  │  │  ▾ tasks              │

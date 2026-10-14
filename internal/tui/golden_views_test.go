@@ -51,6 +51,7 @@ func switchView(t *testing.T, hp *headlessProgram, key string) {
 func retryWithFreshApp(t *testing.T, wantIn string, attempt func(t *testing.T) *App) *App {
 	t.Helper()
 	var last *App
+	var discarded []string
 	for i := range 2 {
 		app := attempt(t)
 		last = app
@@ -60,9 +61,15 @@ func retryWithFreshApp(t *testing.T, wantIn string, attempt func(t *testing.T) *
 			}
 			return app
 		}
+		// Keep the discarded attempt's render: if attempt 2 passes, a real
+		// render regression can hide behind one flaky attempt, so the
+		// discarded content must stay inspectable, not just counted
+		// (bughunt LOW: the earlier loop discarded it whole).
+		discarded = append(discarded, app.View().Content)
 		t.Logf("attempt %d/%d never reached %q; discarding and retrying", i+1, 2, wantIn)
 	}
-	t.Fatalf("view never reached expected state %q after 2 attempts; last:\n%s", wantIn, last.View().Content)
+	t.Fatalf("view never reached expected state %q after 2 attempts; last:\n%s\n\n=== discarded attempt 1 ===\n%s",
+		wantIn, last.View().Content, discarded[0])
 	return last
 }
 
