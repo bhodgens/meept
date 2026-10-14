@@ -325,11 +325,23 @@ type planCreatorAdapter struct {
 // employee.PlanCreator signature. projectPath defaults to "" (the plan
 // manager resolves it from the project ID). Returns a PlanRef with the
 // plan's ID, state, and empty prompt (the GoalLoop fills in the prompt).
+// CreatePlan creates the plan through the PlanManager, persisting the goal
+// linkage ATOMICALLY when a goal is known (CreatePlanWithGoal) instead of the
+// old create-then-SetPlanGoal patch write: a failure between the two writes
+// silently dropped the linkage (bughunt LOW). The optional
+// employee.PlanGoalSetter contract remains satisfied for callers that still
+// stamp a goal after creation.
 func (a *planCreatorAdapter) CreatePlan(ctx context.Context, title, description, projectID, sessionID string) (employee.PlanRef, error) {
+	return a.CreatePlanWithGoal(ctx, title, description, projectID, sessionID, "")
+}
+
+// CreatePlanWithGoal is CreatePlan with the owning goal id, persisted in the
+// same INSERT as the plan row (employee.PlanCreatorWithGoal contract).
+func (a *planCreatorAdapter) CreatePlanWithGoal(ctx context.Context, title, description, projectID, sessionID, goalID string) (employee.PlanRef, error) {
 	if a.planMgr == nil {
 		return employee.PlanRef{}, fmt.Errorf("plan manager not configured")
 	}
-	p, err := a.planMgr.CreatePlan(ctx, title, description, projectID, "", sessionID)
+	p, err := a.planMgr.CreatePlanWithGoal(ctx, title, description, projectID, "", sessionID, goalID)
 	if err != nil {
 		return employee.PlanRef{}, err
 	}

@@ -199,6 +199,16 @@ type PlanCreator interface {
 	CreatePlan(ctx context.Context, title, description, projectID, sessionID string) (PlanRef, error)
 }
 
+// PlanCreatorWithGoal is the optional atomic goal-linkage half of plan
+// creation: implementations persist Plan.GoalID in the SAME write as the plan
+// row (the daemon's planCreatorAdapter maps it to PlanManager.
+// CreatePlanWithGoal). The GoalLoop prefers it over the create-then-SetPlanGoal
+// patch write, which silently dropped the linkage when the second write failed
+// (bughunt LOW). Fall back to PlanCreator + PlanGoalSetter when absent.
+type PlanCreatorWithGoal interface {
+	CreatePlanWithGoal(ctx context.Context, title, description, projectID, sessionID, goalID string) (PlanRef, error)
+}
+
 // PlanGoalSetter is the optional second half of the plan-creation contract
 // (goal-completion leaf 02, C6): implementations that can persist the goal
 // linkage on the created plan row (e.g. the daemon's PlanManager adapter,
@@ -765,20 +775,35 @@ func (l *GoalLoop) Plan(ctx context.Context, candidate CandidatePlan) (PlanRef, 
 		goal = nil
 	}
 
-	ref, err := planner.CreatePlan(ctx, candidate.Title, candidate.Description, projectID, sessionID)
+	// Atomic goal linkage first (bughunt LOW): CreatePlanWithGoal persists the
+	// goal id in the same INSERT as the plan row, so a crash or store error
+	// cannot leave a plan whose goal_id silently never landed.
+	var ref PlanRef
+	var err error
+	if goal != nil {
+		if withGoal, ok := planner.(PlanCreatorWithGoal); ok {
+			ref, err = withGoal.CreatePlanWithGoal(ctx, candidate.Title, candidate.Description, projectID, sessionID, goal.ID)
+		} else {
+			ref, err = planner.CreatePlan(ctx, candidate.Title, candidate.Description, projectID, sessionID)
+		}
+	} else {
+		ref, err = planner.CreatePlan(ctx, candidate.Title, candidate.Description, projectID, sessionID)
+	}
 	if err != nil {
 		return PlanRef{}, fmt.Errorf("create plan: %w", err)
 	}
 
-	// Stamp the goal linkage on the ref and, when the planner supports it,
-	// persist it on the stored plan row. Persist failure is logged but does
-	// not fail plan creation — the in-memory ref still carries the linkage.
+	// Legacy patch path: only when the planner cannot link atomically.
+	// Persist failure is now an ERROR log (previously Warn); the in-memory ref
+	// still carries the linkage for this episode.
 	if goal != nil {
 		ref.GoalID = goal.ID
-		if setter, ok := planner.(PlanGoalSetter); ok {
-			if setErr := setter.SetPlanGoal(ctx, ref.ID, goal.ID); setErr != nil {
-				logger.Warn("plan: failed to persist goal_id on plan row",
-					"plan_id", ref.ID, "goal_id", goal.ID, "error", setErr)
+		if _, atomic := planner.(PlanCreatorWithGoal); !atomic {
+			if setter, ok := planner.(PlanGoalSetter); ok {
+				if setErr := setter.SetPlanGoal(ctx, ref.ID, goal.ID); setErr != nil {
+					logger.Error("plan: failed to persist goal_id on plan row",
+						"plan_id", ref.ID, "goal_id", goal.ID, "error", setErr)
+				}
 			}
 		}
 	}

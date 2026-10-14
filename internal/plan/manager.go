@@ -220,12 +220,23 @@ func (m *PlanManager) CreatePlanWithGoal(ctx context.Context, title, description
 	if err != nil {
 		return nil, err
 	}
+	// The reserve created a real placeholder file. Every failure AFTER this
+	// point must remove it, or the slug is consumed forever (the next plan of
+	// the same title silently becomes -2) and an empty .md accumulates per
+	// failure (bughunt LOW). Best-effort: the store row is the source of
+	// truth, the placeholder is only the lease on the name.
+	defer func() {
+		if err != nil {
+			_ = os.Remove(filePath)
+		}
+	}()
 
 	plan := NewPlan(title, description, projectID, filePath, sessionID)
 	plan.GoalID = goalID
 
 	if err := m.store.CreatePlan(ctx, plan); err != nil {
-		return nil, fmt.Errorf("create plan: %w", err)
+		err = fmt.Errorf("create plan: %w", err)
+		return nil, err
 	}
 
 	if sessionID != "" {
@@ -243,7 +254,8 @@ func (m *PlanManager) CreatePlanWithGoal(ctx context.Context, title, description
 	plan.State = StateDraft
 	plan.UpdatedAt = time.Now().UTC()
 	if err := m.store.SetPlanState(ctx, plan.ID, StateDraft); err != nil {
-		return nil, fmt.Errorf("set plan state to draft: %w", err)
+		err = fmt.Errorf("set plan state to draft: %w", err)
+		return nil, err
 	}
 
 	m.publishEvent("plan.created", map[string]any{
