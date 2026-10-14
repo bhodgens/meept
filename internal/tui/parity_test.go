@@ -111,6 +111,29 @@ func TestParityPaletteCommands(t *testing.T) {
 			"(ui/flutter_ui/lib/widgets/command_palette.dart) or document the deviation in "+
 			"testdata/gui_inventory.json deviations: %v", missingInGUI)
 	}
+
+	// A gui:false deviation must carry a justification entry (bughunt LOW:
+	// the deviations map was consulted only by TestParityShortcuts, so a
+	// palette deviation's justification could be deleted — or never written —
+	// and nothing failed). Empty beats wrong is not the rule here: the entry
+	// must be present AND non-empty, because an operator reading the manifest
+	// is owed the reason.
+	for _, want := range inv.PaletteCommands {
+		if want.GUI {
+			continue
+		}
+		just, ok := inv.Deviations["palette:"+want.Label]
+		if !ok {
+			t.Errorf("palette %q is marked gui:false but has no deviations entry "+
+				`"palette:%s" — document WHY the GUI does not carry it (AGENTS.md parity rule)`,
+				want.Label, want.Label)
+			continue
+		}
+		if strings.TrimSpace(just) == "" {
+			t.Errorf("palette %q: deviations entry for %q is empty — the justification is the point",
+				want.Label, "palette:"+want.Label)
+		}
+	}
 }
 
 func TestParityShortcuts(t *testing.T) {
