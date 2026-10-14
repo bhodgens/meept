@@ -30,9 +30,21 @@ type MemoryReviewModal struct {
 	loading  bool
 	err      error
 
+	// Pagination state (bughunt M13): offset/total make claims beyond the
+	// first page reachable; the RPC caps limit at 200.
+	offset   int
+	total    int // total pending claims daemon-side (all pages)
+	pageSize int
+	hasNext  bool // true when more pages exist beyond the current one
+	fetching bool // a page fetch is in flight (no new fetch while true)
+
 	width  int
 	height int
 }
+
+// reviewPageSize is the page size the review modal requests. The RPC accepts
+// up to 200; 50 keeps a page scannable in the table viewport.
+const reviewPageSize = 50
 
 // reviewPreviewMax caps the content-preview column width (chars).
 const reviewPreviewMax = 60
@@ -114,8 +126,9 @@ func NewMemoryReviewModal(rpc ReviewRPCClient) *MemoryReviewModal {
 	t.SetStyles(s)
 
 	return &MemoryReviewModal{
-		rpc:   rpc,
-		table: t,
+		rpc:      rpc,
+		table:    t,
+		pageSize: reviewPageSize,
 	}
 }
 
@@ -217,13 +230,43 @@ func (m *MemoryReviewModal) Init() tea.Cmd {
 	return m.fetchQueue
 }
 
-// fetchQueue issues the memory.reviewQueue RPC (same method the CLI uses).
+// fetchQueue issues the memory.reviewQueue RPC (same method the CLI uses)
+// for the CURRENT page.
 func (m *MemoryReviewModal) fetchQueue() tea.Msg {
-	resp, err := m.rpc.ReviewQueue(&ReviewQueueParams{Limit: 50})
+	pageSize := m.pageSize
+	if pageSize <= 0 {
+		pageSize = reviewPageSize
+	}
+	resp, err := m.rpc.ReviewQueue(&ReviewQueueParams{Limit: pageSize, Offset: m.offset})
 	if err != nil {
 		return ReviewQueueMsg{Err: fmt.Errorf("review queue: %w", err)}
 	}
 	return ReviewQueueMsg{Items: resp.AutoClaims, Total: resp.Total}
+}
+
+// nextPage advances one page and refetches. No-op on the last page or while a
+// fetch is in flight.
+func (m *MemoryReviewModal) nextPage() tea.Cmd {
+	if m.fetching || !m.hasNext {
+		return nil
+	}
+	m.offset += m.pageSize
+	m.fetching = true
+	return m.fetchQueue
+}
+
+// prevPage goes back one page and refetches. No-op on the first page or while
+// a fetch is in flight.
+func (m *MemoryReviewModal) prevPage() tea.Cmd {
+	if m.fetching || m.offset == 0 {
+		return nil
+	}
+	m.offset -= m.pageSize
+	if m.offset < 0 {
+		m.offset = 0
+	}
+	m.fetching = true
+	return m.fetchQueue
 }
 
 // Show makes the modal visible and returns the fetch command.
@@ -250,12 +293,22 @@ func (m *MemoryReviewModal) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case ReviewQueueMsg:
 		m.loading = false
+		m.fetching = false
 		if msg.Err != nil {
 			m.err = msg.Err
 			return nil
 		}
 		m.err = nil
 		m.items = msg.Items
+		m.total = msg.Total
+		m.hasNext = m.offset+len(m.items) < m.total
+		// A page that scrolled out of range (claims were reviewed while
+		// paging): fall back to the last valid page.
+		if len(m.items) == 0 && m.offset > 0 {
+			m.offset = max(0, m.offset-m.pageSize)
+			m.fetching = true
+			return m.fetchQueue
+		}
 		// Keep the cursor stable across refreshes; bubbles/table clamps
 		// the cursor inside SetRows when the list shrank.
 		m.reviewRows()
@@ -277,6 +330,16 @@ func (m *MemoryReviewModal) Update(msg tea.Msg) tea.Cmd {
 			return m.verdictSelected("promote", m.rpc.PromoteClaim)
 		case "r":
 			return m.verdictSelected("reject", m.rpc.RejectClaim)
+		case "[", "left":
+			if m.selected == nil {
+				return m.prevPage()
+			}
+			return nil
+		case "]", "right":
+			if m.selected == nil {
+				return m.nextPage()
+			}
+			return nil
 		case KeyEnter:
 			if m.selected != nil {
 				// Detail already open; esc closes it.
@@ -323,6 +386,23 @@ func (m *MemoryReviewModal) verdictSelected(verdict string, apply func(id, reaso
 	}
 }
 
+// pageTitle is the modal title: the honest page range (claims 1-50 of 120),
+// not the in-page count — the status count and the title must agree on the
+// same quantity (bughunt M13).
+func (m *MemoryReviewModal) pageTitle() string {
+	if m.total == 0 {
+		return "memory review — 0 pending"
+	}
+	first := m.offset + 1
+	last := m.offset + len(m.items)
+	last = min(last, m.total)
+	title := fmt.Sprintf("memory review — claims %d-%d of %d", first, last, m.total)
+	if m.hasNext || m.offset > 0 {
+		title += "  ([/] page)"
+	}
+	return title
+}
+
 // View renders the review view.
 func (m *MemoryReviewModal) View() string {
 	if m.width == 0 {
@@ -335,7 +415,7 @@ func (m *MemoryReviewModal) View() string {
 		Bold(true).
 		Foreground(paletteColor("warning")).
 		MarginBottom(1)
-	b.WriteString(titleStyle.Render(fmt.Sprintf("memory review — %d pending", len(m.items))))
+	b.WriteString(titleStyle.Render(m.pageTitle()))
 	b.WriteString("\n\n")
 
 	switch {
