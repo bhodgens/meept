@@ -7147,9 +7147,10 @@ const memoryBudgetTruncatedMarker = "\n\n...[memory truncated due to token budge
 // "...[memory truncated due to token budget]..." marker is appended so the
 // incompleteness stays observable.
 //
-// If a SINGLE item alone exceeds the budget, that item is kept (truncated
-// via its own 300-rune per-item truncation upstream) instead of dropped —
-// dropping it would empty the context entirely — and the marker is appended.
+// If a SINGLE item alone exceeds the budget, that item (the top-ranked
+// one) is kept on its own — truncated via its own 300-rune per-item
+// truncation upstream — and every lower-ranked item is dropped, rather than
+// emptying the context entirely; the marker is appended.
 func EnforceMemoryItemBudget(items []string, maxTokens int) []string {
 	if maxTokens <= 0 || len(items) == 0 {
 		return items
@@ -7180,12 +7181,16 @@ func EnforceMemoryItemBudget(items []string, maxTokens int) []string {
 	}
 
 	if kept == 0 {
-		// Single oversized item: keep it (its 300-rune per-item truncation
-		// upstream is the item-shaped last resort) rather than dropping
-		// everything. Append the marker so the over-budget state stays
-		// observable.
-		result := make([]string, 0, len(items)+1)
-		result = append(result, items...)
+		// The top-ranked item ALONE exceeds the budget: keep only that one
+		// item (its 300-rune per-item truncation upstream is the item-shaped
+		// last resort) rather than dropping everything and emptying the
+		// context — but NEVER keep the items that did not fit. Appending
+		// items... here would bypass the budget wholesale while the marker
+		// still claimed truncation (bughunt M6). The marker keeps the
+		// over-budget state observable. len(items) >= 1 is guaranteed: the
+		// empty list returned above.
+		result := make([]string, 0, 2)
+		result = append(result, items[0])
 		result = append(result, memoryBudgetTruncatedMarker)
 		return result
 	}

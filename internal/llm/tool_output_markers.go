@@ -25,6 +25,11 @@ import (
 const (
 	// ToolOutputMarkerEnd closes a tool-output untrusted-content fence.
 	ToolOutputMarkerEnd = "<<<END_TOOL_OUTPUT>>>"
+
+	// toolOutputMarkerStartPrefix is the literal that opens a tool-output
+	// fence, before the tool_call_id anchor. Shared by the fence-shape
+	// detector and the embedded-marker neutralizer so the two never drift.
+	toolOutputMarkerStartPrefix = "<<<TOOL_OUTPUT:"
 )
 
 // ToolOutputMarkerStart returns the START marker for a tool result,
@@ -38,18 +43,29 @@ func ToolOutputMarkerStart(toolCallID string) string {
 // markers for storage in conversation history. The raw output itself is
 // preserved byte-identical, with two bounded exceptions:
 //
-//   - An embedded END marker in arbitrary output is neutralized with a
-//     zero-width joiner (the same rule security.PromptGuard.WrapToolOutput
-//     applies) so a prompt-injection payload cannot close the fence early.
 //   - Content that is ALREADY exactly one well-formed fence (the conditional
-//     security-orchestrator wrap, keyed on tool name) passes through
-//     untouched — its END marker is a deliberate close, not an injection.
+//     security-orchestrator wrap, keyed on tool name — applied upstream in the
+//     loop before this seam) is returned UNCHANGED. Re-wrapping it would emit
+//     a SECOND start marker and a SECOND end marker, doubling the fence in
+//     stored history (bughunt M5); its END marker is a deliberate close, not
+//     an injection, and its start marker is already sanitized by
+//     security.PromptGuard.
+//   - Otherwise, embedded boundary markers in arbitrary output are neutralized
+//     with a zero-width joiner (the same rule security.PromptGuard.WrapToolOutput
+//     applies) so a prompt-injection payload can neither close the fence early
+//     NOR open a spurious one — BOTH the END and the START marker are
+//     neutralized.
 func WrapToolOutputMarkers(toolCallID, output string) string {
-	start := ToolOutputMarkerStart(toolCallID)
-	neutralized := output
-	if !isCompleteToolOutputFence(output) {
-		neutralized = strings.ReplaceAll(output, ToolOutputMarkerEnd, "<<<END\u200dTOOL_OUTPUT>>>")
+	if isCompleteToolOutputFence(output) {
+		return output
 	}
+	start := ToolOutputMarkerStart(toolCallID)
+	// Neutralize embedded boundary markers so neither the closing marker nor a
+	// nested opening marker in arbitrary tool output can reshape the fence.
+	// Breaking the literal marker text with a zero-width joiner means no exact
+	// match remains for boundary scanners or injection detection.
+	neutralized := strings.ReplaceAll(output, ToolOutputMarkerEnd, "<<<END\u200dTOOL_OUTPUT>>>")
+	neutralized = strings.ReplaceAll(neutralized, toolOutputMarkerStartPrefix, "<<<TOOL_OUTPUT\u200d:")
 	return fmt.Sprintf("%s\n%s\n%s", start, neutralized, ToolOutputMarkerEnd)
 }
 
@@ -60,7 +76,7 @@ func WrapToolOutputMarkers(toolCallID, output string) string {
 // WrapSkillOutput produce; re-neutralizing it would corrupt deliberate
 // fences.
 func isCompleteToolOutputFence(content string) bool {
-	const startPrefix = "<<<TOOL_OUTPUT:"
+	const startPrefix = toolOutputMarkerStartPrefix
 	if !strings.HasPrefix(content, startPrefix) {
 		return false
 	}

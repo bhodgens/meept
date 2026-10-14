@@ -173,3 +173,34 @@ func TestMemoryBudgetOversizedSingleItemTruncates(t *testing.T) {
 		t.Error("truncated-marker suffix missing after keeping oversized item over budget")
 	}
 }
+
+// TestMemoryBudgetOversizedFirstItemKeepsOnlyIt pins the MULTI-item
+// degenerate path (bughunt M6): when the FIRST (highest-ranked) item alone
+// exceeds the budget, ONLY that single item is kept — never the whole list,
+// which would bypass the budget while still appending the truncation marker.
+func TestMemoryBudgetOversizedFirstItemKeepsOnlyIt(t *testing.T) {
+	big := memoryItem("big", 5000) // ~25000 chars ≈ 8334 tokens, alone over budget
+	small1 := memoryItem("s1", 20)
+	small2 := memoryItem("s2", 20)
+	budget := 100
+
+	got := EnforceMemoryItemBudget([]string{big, small1, small2}, budget)
+
+	// Bounded: exactly the oversized item plus the marker — not all three.
+	if len(got) != 2 {
+		t.Fatalf("result item count = %d, want 2 (oversized item + marker): %#v", len(got), got)
+	}
+	if got[0] != big {
+		t.Errorf("top-ranked oversized item not kept verbatim:\n got %q", got[0])
+	}
+	if got[1] != memoryBudgetTruncatedMarker {
+		t.Errorf("truncated marker missing or not last: %q", got[1])
+	}
+	joined := joinBudgeted(got)
+	if strings.Contains(joined, small1) || strings.Contains(joined, small2) {
+		t.Errorf("items that did not fit are present — budget bypassed:\n%s", joined)
+	}
+	if n := strings.Count(joined, "- memory-"); n != 1 {
+		t.Errorf("kept %d memory items, want exactly 1", n)
+	}
+}
