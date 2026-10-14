@@ -109,6 +109,22 @@ type PersistentQueue struct {
 	// lock (mutexio: no channel ops under mutex).
 	wakeMu      sync.Mutex
 	wakeWaiters map[chan<- struct{}]struct{}
+
+	// Claim-gate timer registry (bughunt LOW). signalClaimableAt parks a
+	// wake fan-out on a far-future next_retry_at; the timers were previously
+	// untracked, so a far-future notBefore kept the queue, its store and its
+	// logger reachable for the whole wait and the callback still fired after
+	// Close. timers is keyed by a monotonic sequence number (a *time.Timer
+	// pointer is only available AFTER the timer is armed, so the id is what
+	// lets the entry be registered before the callback can run). Close stops
+	// and drops every entry.
+	//
+	// Both fields are guarded by wakeMu, NOT by mu: the timer callback must
+	// not have to take the queue's main lock to discover the queue is closed,
+	// and signalClaimableAt is called while mu is already held.
+	wakeStopped bool
+	timerSeq    uint64
+	timers      map[uint64]*time.Timer
 }
 
 // NewPersistentQueue creates a new persistent queue.
@@ -129,6 +145,7 @@ func NewPersistentQueue(dbPath string, msgBus *bus.MessageBus, logger *slog.Logg
 		isTaskCancelled: func(taskID string) (bool, string) { return false, "" }, // Default: no tasks cancelled
 		hasCancelFilter: false,
 		wakeWaiters:     make(map[chan<- struct{}]struct{}),
+		timers:          make(map[uint64]*time.Timer),
 	}
 
 	logger.Info("Persistent queue initialized", "path", dbPath)
@@ -203,21 +220,63 @@ func (q *PersistentQueue) signalClaimable() {
 // a worker that happens to be mid-idle may already be about to poll, and the
 // extra claim attempt costs nothing when the gate is closed.
 //
-// A pending timer outliving Close is harmless: Close empties the waiter set,
-// so a late fan-out signals nobody. Timer handles are deliberately not tracked
-// or cancelled — an unbounded registry would be its own leak, and the failure
-// mode is a no-op wake.
+// A timer that outlives Close is a no-op, not a late wake: the registry is
+// drained and every timer stopped by Close, and the callback re-checks
+// wakeStopped under wakeMu before doing anything at all (bughunt LOW — the
+// timers used to be untracked, so a far-future notBefore kept the queue, its
+// store and its logger reachable for the whole wait and the callback still ran
+// after Close).
 func (q *PersistentQueue) signalClaimableAt(notBefore time.Time) {
 	delay := time.Until(notBefore)
 	if delay <= 0 {
 		// Already claimable; the caller's immediate signal covers it.
 		return
 	}
-	time.AfterFunc(delay, func() {
-		q.signalClaimable()
-		q.logger.Debug("Woke waiters for a claim gate that opened",
-			"not_before", notBefore.UTC().Format(time.RFC3339))
-	})
+
+	// Register the entry BEFORE arming the timer. A *time.Timer pointer only
+	// exists after time.AfterFunc returns, and the callback can already be
+	// running on another P by then — registering the id first means the
+	// callback can always see (and delete) its own entry, and the arming
+	// goroutine can tell a torn-down entry from a live one.
+	q.wakeMu.Lock()
+	if q.wakeStopped {
+		q.wakeMu.Unlock()
+		return
+	}
+	q.timerSeq++
+	id := q.timerSeq
+	q.timers[id] = nil // placeholder: this entry exists, the timer is not armed yet
+	q.wakeMu.Unlock()
+
+	t := time.AfterFunc(delay, func() { q.fireClaimableAt(id, notBefore) })
+
+	q.wakeMu.Lock()
+	_, registered := q.timers[id]
+	if registered {
+		q.timers[id] = t
+	}
+	q.wakeMu.Unlock()
+	if !registered {
+		// Close (or the callback itself) already dropped the entry while the
+		// timer was being armed: stop it so nothing fires after close.
+		t.Stop()
+	}
+}
+
+// fireClaimableAt is the claim-gate timer callback. It is a no-op after Close
+// and removes its own registry entry, so the map holds only armed timers.
+func (q *PersistentQueue) fireClaimableAt(id uint64, notBefore time.Time) {
+	q.wakeMu.Lock()
+	if q.wakeStopped {
+		q.wakeMu.Unlock()
+		return
+	}
+	delete(q.timers, id)
+	q.wakeMu.Unlock()
+
+	q.signalClaimable()
+	q.logger.Debug("Woke waiters for a claim gate that opened",
+		"not_before", notBefore.UTC().Format(time.RFC3339))
 }
 
 // Enqueue adds a job to the queue.
@@ -483,8 +542,10 @@ func (q *PersistentQueue) CompletionIsFresh(ctx context.Context, jobID, claimTok
 }
 
 // Fail marks a job as failed with an error. It is the token-less legacy shape:
-// no attempt identity is presented, so the state-only predicate applies and
-// every pre-existing caller keeps its current behaviour.
+// no attempt identity is presented, so the state allow-list applies instead of
+// the claim-token predicate — a job still in play (pending/claimed/processing/
+// failed) can be failed, a 'completed' or 'dead' one cannot (bughunt M8:
+// ErrJobNotClaimable is returned and NO queue.job.failed event is published).
 func (q *PersistentQueue) Fail(ctx context.Context, jobID string, err error) error {
 	return q.FailAttempt(ctx, jobID, err, "")
 }
@@ -497,7 +558,9 @@ func (q *PersistentQueue) Fail(ctx context.Context, jobID string, err error) err
 //
 // Publication rule mirrors CompleteAttempt: a superseded attempt
 // (ErrJobNotClaimable) publishes NO queue.job.failed event, so subscribers do
-// not process a stale failure as current.
+// not process a stale failure as current. The same holds for the token-less
+// refusal (bughunt M8): a 'completed'/'dead' job is not rewritten and nothing
+// is published.
 func (q *PersistentQueue) FailAttempt(ctx context.Context, jobID string, err error, claimToken string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -693,11 +756,26 @@ func (q *PersistentQueue) Close() error {
 	}
 
 	q.closed = true
-	// Clear wake waiters: closed queue never enqueues again, so channels
-	// must not outlive it.
+	// Clear wake waiters and stop every pending claim-gate timer. A closed
+	// queue must not signal anyone, must not keep its store and logger
+	// reachable through an armed timer, and must not run a timer callback
+	// after Close (bughunt LOW). wakeStopped is set under the same lock that
+	// guards the registry, so a callback racing this teardown either observes
+	// it and no-ops or cannot have been registered in the first place.
 	q.wakeMu.Lock()
+	q.wakeStopped = true
 	q.wakeWaiters = make(map[chan<- struct{}]struct{})
+	pending := make([]*time.Timer, 0, len(q.timers))
+	for _, t := range q.timers {
+		if t != nil {
+			pending = append(pending, t)
+		}
+	}
+	q.timers = make(map[uint64]*time.Timer)
 	q.wakeMu.Unlock()
+	for _, t := range pending {
+		t.Stop() // idempotent: an already-fired timer reports false
+	}
 	return q.store.Close() //nolint:mutexio // one-time teardown guarded by closed flag
 }
 

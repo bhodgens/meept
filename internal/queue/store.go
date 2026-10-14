@@ -745,9 +745,14 @@ func newClaimToken() string {
 }
 
 // Fail marks a job as failed with an error message. It is the token-less
-// legacy shape: no attempt identity is presented, so no claim-token predicate
-// is applied (bughunt H1). Callers that hold an attempt MUST use FailAttempt —
-// see its doc comment for why the unguarded form can kill a live attempt.
+// legacy shape: no attempt identity is presented, so the claim-token predicate
+// is not applied (bughunt H1). Callers that hold an attempt MUST use
+// FailAttempt — see its doc comment for why the unguarded form can kill a live
+// attempt.
+//
+// Token-less callers are still held to the failability state allow-list
+// (bughunt M8): a job that is 'completed' or 'dead' cannot be failed, and the
+// call returns ErrJobNotClaimable.
 func (s *Store) Fail(jobID, errMsg string) error {
 	_, err := s.FailAttempt(jobID, errMsg, "")
 	return err
@@ -776,9 +781,12 @@ func (s *Store) Fail(jobID, errMsg string) error {
 //     belongs to an attempt nobody is executing any more. The LIVE job's state
 //     and error text are left untouched.
 //
-// An empty claimToken degrades to the legacy state-only predicate, so every
-// token-less caller (the bus queue.fail handler, the RPC FailRequest path) keeps
-// its existing behaviour.
+// An empty claimToken degrades to the failability state allow-list instead of
+// the claim-token predicate: pending/claimed/processing/failed may be failed,
+// 'completed' and 'dead' may NOT (ErrJobNotClaimable). Every token-less caller
+// (the bus queue.fail handler, the RPC FailRequest path, an operator
+// force-failing a stuck job) keeps its ability to fail work that is still in
+// play while losing the ability to rewrite a finished job (bughunt M8).
 func (s *Store) FailAttempt(jobID, errMsg, claimToken string) (CompletionDisposition, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -802,12 +810,23 @@ func (s *Store) FailAttempt(jobID, errMsg, claimToken string) (CompletionDisposi
 	//
 	// A token-PRESENT caller (a worker holding an attempt) is held to the
 	// strict shape: the row must be claimed/processing AND carry its token.
-	// A token-LESS caller keeps the ORIGINAL bare `WHERE id = ?` semantics —
-	// Fail has always been callable on any existing job (the dead-letter tests
-	// fail a freshly-inserted PENDING job), and narrowing that path here would
-	// be a behaviour change nobody asked for. Args are appended in PLACEHOLDER
-	// ORDER: state, error, updated_at, id, then the optional claim token.
-	predicate := `id = ?`
+	//
+	// A token-LESS caller (the bus queue.fail handler, the RPC/HTTP
+	// FailRequest path, an operator force-failing a stuck job) is held to the
+	// state ALLOW-LIST below: it may fail a job that is still in play —
+	// 'pending', 'claimed', 'processing', 'failed' — but NOT a job that cannot
+	// be failed: 'completed' (the work succeeded and the result stands) and
+	// 'dead' (already retired to the dead-letter table). This is a DELIBERATE
+	// contract change from the pre-H4 bare `WHERE id = ?`, which accepted ANY
+	// state and let POST /queue/jobs/{id}/fail mark a finished job failed and
+	// publish queue.job.failed for it. The refusal is ErrJobNotClaimable, the
+	// same sentinel Complete uses, so the HTTP surface maps it to 409 — and
+	// PersistentQueue.FailAttempt publishes NOTHING for it, exactly as the
+	// completion surface does.
+	//
+	// Args are appended in PLACEHOLDER ORDER: state, error, updated_at, id,
+	// then the optional claim token.
+	predicate := `id = ? AND state IN ('pending', 'claimed', 'processing', 'failed')`
 	args := []any{string(StateFailed), errMsg, now, jobID}
 	if claimToken != "" {
 		predicate = `id = ? AND state IN ('claimed', 'processing') AND claim_token = ?`
@@ -839,10 +858,12 @@ func (s *Store) FailAttempt(jobID, errMsg, claimToken string) (CompletionDisposi
 		return CompletionApplied, fmt.Errorf("failed to read failure rows affected: %w", err)
 	}
 	if affected == 0 {
-		// Nothing matched: either the attempt is superseded, or the job is
-		// already terminal. A token-PRESENT caller reaches this only when its
-		// attempt no longer owns the row — refuse rather than overwrite the
-		// live attempt's state. Roll back so the retry_count read above
+		// Nothing matched: either the attempt is superseded, or the job is in
+		// a state that cannot be failed. A token-PRESENT caller reaches this
+		// only when its attempt no longer owns the row — refuse rather than
+		// overwrite the live attempt's state. A token-LESS caller reaches this
+		// when the row is 'completed'/'dead' (bughunt M8) — refuse rather than
+		// rewrite a finished job. Roll back so the retry_count read above
 		// leaves no trace.
 		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
 			s.logger.Debug("fail tx rollback (no rows affected)", "error", err)

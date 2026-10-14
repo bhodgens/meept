@@ -391,8 +391,32 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 		// cannot tell this failure from one arriving after the attempt was
 		// superseded, and a late failure could move the LIVE attempt's job to
 		// failed.
-		if err := w.failJob(ctx, job.ID, processErr, claimToken); err != nil {
-			w.logger.Error("Failed to mark job as failed", "job", job.ID, "error", err)
+		//
+		// The REFUSAL is terminal for this path (bughunt M7). This mirrors the
+		// success path's handling of a refused completion (see below): when the
+		// store answers ErrJobNotClaimable, the attempt was superseded — the job
+		// was requeued, reclaimed, or re-executed under a NEWER claim token — and
+		// nobody is executing THIS attempt any more. Falling through to Retry in
+		// that case is not a no-op: Store.Retry's predicate
+		// (`WHERE id = ? AND state IN ('failed','claimed')`) admits 'claimed',
+		// so the stale failure would yank the LIVE re-claim back to pending
+		// (retry_count+1, claim_token=NULL) and the live attempt's completion
+		// would then be refused — its work discarded. So: no retry, no
+		// dead-letter decision, return early. Genuine failures (the store
+		// accepted the write) keep the existing retry policy byte-identically.
+		failErr := w.failJob(ctx, job.ID, processErr, claimToken)
+		if failErr != nil {
+			if errors.Is(failErr, queue.ErrJobNotClaimable) {
+				// Same shape as the refused-completion branch below: the work
+				// genuinely ran and errored, so the process error is surfaced
+				// (the run loop's error backoff and the operator's log line stay
+				// honest), but the queue refused to record it as THIS attempt's
+				// failure and the job is not ours to retry.
+				w.logger.Warn("Job failure refused by the queue; attempt superseded",
+					"worker_id", w.ID, "job_id", job.ID, "error", failErr, "process_error", processErr)
+				return true, processErr
+			}
+			w.logger.Error("Failed to mark job as failed", "job", job.ID, "error", failErr)
 		}
 
 		// Check if we can retry - but NOT for non-retryable errors
