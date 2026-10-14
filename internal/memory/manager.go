@@ -1159,13 +1159,15 @@ func (m *Manager) Consolidate(ctx context.Context) (*ConsolidationReport, error)
 	return m.consolidator.Run(ctx, hours)
 }
 
-// StartPeriodicConsolidation starts background consolidation.
-//
-// This is an alternative to the scheduler-based consolidation job wired in
-// daemon/components.go (MemoryOptimizerAdapter). The scheduler approach is
-// preferred in production because it benefits from cron expressions, logging,
-// and job dependency tracking. Use this method only when running without a
-// scheduler (e.g., tests or embedded mode).
+// StartPeriodicConsolidation starts background consolidation on the
+// consolidator's own ticker. This is the ALWAYS-ON driver for the four
+// consolidator passes (episodic decay, L0 prune, knowledge ingest/index,
+// bridge generation): nothing else drives them on a stock install — the
+// scheduler-based memory_consolidate job exists but is never seeded by
+// default, so without this call the passes were inert on a fresh boot
+// (bughunt M3). The daemon passes a Run-scoped ctx, so shutdown cancels it;
+// Consolidator.Stop (from Manager.Close) is the second stop path. Idempotent:
+// the consolidator's ticker goroutine is guarded by its own stop-once.
 func (m *Manager) StartPeriodicConsolidation(ctx context.Context) {
 	m.mu.RLock()
 	if !m.initialized || m.consolidator == nil {

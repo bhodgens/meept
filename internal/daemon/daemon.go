@@ -2023,6 +2023,19 @@ func (d *Daemon) Run(ctx context.Context) error {
 		})
 	}
 
+	// Consolidation tick (bughunt M3): start the memory manager's own periodic
+	// consolidation pass. This is the ALWAYS-ON driver for episodic decay, the
+	// L0 retention prune, knowledge watched-dir ingest + code index, and bridge
+	// generation/verification — the scheduler-based memory_consolidate job is
+	// an alternative path but nothing seeds it by default, so without this the
+	// four passes never ran on a stock install. Run-scoped ctx: shutdown
+	// cancels the ticker goroutine; Manager.Close's Consolidator.Stop is the
+	// backstop. StartPeriodicConsolidation is internally guarded (nil
+	// consolidator, unstarted manager) and its goroutine stops on ctx.Done.
+	if d.components != nil && d.components.MemoryManager != nil {
+		d.components.MemoryManager.StartPeriodicConsolidation(ctx)
+	}
+
 	// Start plan handler (subscribes to task events for plan progress tracking)
 	if d.planHandler != nil {
 		if err := d.planHandler.Start(ctx); err != nil {
