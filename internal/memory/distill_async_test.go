@@ -96,7 +96,13 @@ func newDistillTestManager(t *testing.T) *Manager {
 // (dataDir, l0Path, records written).
 func writeL0Fixture(t *testing.T, dataDir, sessionID string, n int) (string, string, []l0Record) {
 	t.Helper()
-	date := time.Now().Format("2006-01-02")
+	return writeL0FixtureOn(t, dataDir, sessionID, n, LocalDayKey(time.Now()))
+}
+
+// writeL0FixtureOn is writeL0Fixture with an explicit local day key (the H4
+// evening pin fixes the day rather than deriving it from the wall clock).
+func writeL0FixtureOn(t *testing.T, dataDir, sessionID string, n int, date string) (string, string, []l0Record) {
+	t.Helper()
 	dir := filepath.Join(dataDir, "l0")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir l0: %v", err)
@@ -466,6 +472,67 @@ func TestL2SceneUnknownIDsOnlySegmentDroppedAndRestKept(t *testing.T) {
 	files := l2Files(t, dataDir)
 	if len(files) != 1 || files[0].SceneName != "real scene" {
 		t.Fatalf("want exactly the valid scene, got %+v", files)
+	}
+}
+
+// TestChainL2EveningLocalDayReadsSameDayFile is the H4 pin: an L1 success at
+// 18:00 local in a zone west of UTC chains an L2 job that must resolve the
+// SAME local day file the recorder wrote. Pre-fix, chainL2 stamped UTC, so
+// the payload resolved to the NEXT day for every local time in the last
+// `offset` hours of the day, the pass read a day file that did not exist
+// yet, and it reported scenes:0 with no error and no log.
+func TestChainL2EveningLocalDayReadsSameDayFile(t *testing.T) {
+	mgr := newDistillTestManager(t)
+	session := "sess-l2-evening"
+
+	// Negative offset: 18:00 local on 2026-03-10 is already 2026-03-11 UTC —
+	// exactly the window that used to break. Fixed zone, not time.Local, so
+	// the pin holds under TZ=UTC too.
+	loc := time.FixedZone("test-utc-06", -6*60*60)
+	evening := time.Date(2026, 3, 10, 18, 0, 0, 0, loc)
+	localDay := LocalDayKey(evening)
+	if utcDay := evening.UTC().Format("2006-01-02"); utcDay == localDay {
+		t.Fatalf("fixture is not in the failing window: local %s == utc %s", localDay, utcDay)
+	}
+
+	dataDir, _, recs := writeL0FixtureOn(t, t.TempDir(), session, 3, localDay)
+
+	seg := segmentationJSON([2]any{"evening scene", recordIDs(recs)})
+	llm := &fakeDistillLLM{script: []fakeDistillEntry{{match: "", response: seg}}}
+	chain := &fakeEnqueuer{}
+	w := NewDistillWorker(DistillWorkerConfig{
+		Manager:  mgr,
+		LLM:      llm,
+		DataDir:  dataDir,
+		Enqueuer: chain,
+		Now:      func() time.Time { return evening },
+		Logger:   slog.New(slog.DiscardHandler),
+	})
+
+	w.chainL2(context.Background(), session)
+	if len(chain.jobs) != 1 {
+		t.Fatalf("chained jobs = %d, want 1", len(chain.jobs))
+	}
+	var p L2ScenePayload
+	if err := json.Unmarshal(chain.jobs[0].Payload, &p); err != nil {
+		t.Fatalf("chained l2 payload: %v", err)
+	}
+	ts, err := time.Parse(time.RFC3339, p.SinceTS)
+	if err != nil {
+		t.Fatalf("parse chained since_ts %q: %v", p.SinceTS, err)
+	}
+	if got := LocalDayKey(ts); got != localDay {
+		t.Fatalf("chained l2 day = %s, want %s (since_ts %q)", got, localDay, p.SinceTS)
+	}
+
+	// The chained job must FIND the day's records: pre-fix this returned
+	// {"status":"ok","scenes":0} and wrote no scene file.
+	res, err := w.Process(context.Background(), chain.jobs[0])
+	if err != nil {
+		t.Fatalf("l2 process: %v", err)
+	}
+	if n := res.(map[string]any)["scenes"].(int); n != 1 {
+		t.Fatalf("l2 chained at 18:00 local wrote %d scenes, want 1 (res %v)", n, res)
 	}
 }
 

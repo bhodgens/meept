@@ -76,7 +76,7 @@ func (r *Recorder) Append(sessionID, role, content string, meta map[string]any) 
 	}
 	line = append(line, '\n')
 
-	path := filepath.Join(dir, now.Format("2006-01-02")+".jsonl")
+	path := filepath.Join(dir, memory.LocalDayKey(now)+".jsonl")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("l0: create dir %s: %w", dir, err)
 	}

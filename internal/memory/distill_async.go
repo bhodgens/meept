@@ -54,8 +54,10 @@ type L1ExtractPayload struct {
 // L2ScenePayload is the memory.l2_scene payload (SHARED-CONVENTIONS §2.2).
 type L2ScenePayload struct {
 	SessionID string `json:"session_id"`
-	// SinceTS is RFC3339; its calendar date selects the L0 day file and the
-	// scene file names. The scene pass covers the full session-day.
+	// SinceTS is RFC3339 bearing the offset of the LOCAL frame that names the
+	// L0 day files (see the L0/L2 calendar convention below); its calendar
+	// date selects the L0 day file and the scene file names. The scene pass
+	// covers the full session-day.
 	SinceTS string `json:"since_ts"`
 }
 
@@ -93,7 +95,12 @@ type DistillWorkerConfig struct {
 	// over each L1 extraction batch before storing (tree 02 leaf L2). Nil or
 	// disabled: candidates are stored directly — no recall, no LLM call.
 	Conflict *ConflictWiring
-	Logger   *slog.Logger
+	// Now supplies the worker's wall clock in the LOCAL frame (the L0/L2
+	// calendar convention above). Nil = time.Now. Test seam for the L2 day
+	// derivation: without it the chained day is unassertable off the wall
+	// clock.
+	Now    func() time.Time
+	Logger *slog.Logger
 }
 
 // DistillWorker consumes memory.l1_extract / memory.l2_scene queue jobs.
@@ -103,6 +110,7 @@ type DistillWorker struct {
 	dataDir  string
 	enqueuer JobEnqueuer
 	conflict *ConflictWiring
+	now      func() time.Time
 	logger   *slog.Logger
 }
 
@@ -114,7 +122,11 @@ func NewDistillWorker(cfg DistillWorkerConfig) *DistillWorker {
 		dataDir:  cfg.DataDir,
 		enqueuer: cfg.Enqueuer,
 		conflict: cfg.Conflict,
+		now:      cfg.Now,
 		logger:   cfg.Logger,
+	}
+	if w.now == nil {
+		w.now = time.Now
 	}
 	if w.logger == nil {
 		w.logger = slog.Default()
@@ -361,9 +373,15 @@ func (w *DistillWorker) chainL2(ctx context.Context, sessionID string) {
 	if w.enqueuer == nil {
 		return
 	}
+	// Stamp the LOCAL frame, not UTC: the payload's calendar date selects the
+	// L0 day file, and the recorder names those files by local date (see the
+	// L0/L2 calendar convention above). RFC3339 keeps the offset, so
+	// time.Parse + LocalDayKey in handleL2Scene yield the same local day the
+	// recorder wrote — a UTC stamp resolved to tomorrow's file for every
+	// evening session west of UTC (audit H4).
 	payload := L2ScenePayload{
 		SessionID: sessionID,
-		SinceTS:   time.Now().UTC().Format(time.RFC3339),
+		SinceTS:   w.now().Format(time.RFC3339),
 	}
 	if _, err := EnqueueL2(ctx, w.enqueuer, payload); err != nil {
 		w.logger.Warn("distill: chain l2 enqueue failed", "session_id", sessionID, "error", err)
@@ -404,13 +422,21 @@ func (w *DistillWorker) handleL2Scene(ctx context.Context, payload []byte) (any,
 	if err != nil {
 		return nil, fmt.Errorf("distill: l2 payload since_ts: %w", err)
 	}
-	date := ts.Format("2006-01-02")
+	// The payload carries an offset-bearing RFC3339 stamp, so the day it
+	// resolves to is the same LOCAL day the recorder named the file with
+	// (L0/L2 calendar convention above).
+	date := LocalDayKey(ts)
 
 	recs, err := readL0Records(w.l0DayPath(date), p.SessionID, "")
 	if err != nil {
 		return nil, err
 	}
 	if len(recs) == 0 {
+		// Not an error (a session may genuinely have no lines that day), but
+		// it must not be silent: a day-frame mismatch here is exactly how H4
+		// lost whole evenings with a "scenes:0" ok.
+		w.logger.Warn("distill: l2 scene pass found no l0 records for session-day",
+			"session_id", p.SessionID, "date", date, "path", w.l0DayPath(date))
 		return map[string]any{"status": "ok", "session_id": p.SessionID, "scenes": 0}, nil
 	}
 
@@ -500,6 +526,29 @@ func (w *DistillWorker) segmentScenes(ctx context.Context, recs []l0Record) ([]s
 		valid = append(valid, sceneSegment{SceneName: name, MessageIDs: ids})
 	}
 	return valid, nil
+}
+
+// --- L0/L2 calendar convention -------------------------------------------
+//
+// L0 day files are named by the LOCAL calendar date of the recorder's clock
+// (internal/memory/l0/recorder.go NewRecorder; loc defaults to time.Local),
+// and the L2 scene pass resolves the same day file from its payload
+// timestamp. Every derivation of an L0/L2 day from a timestamp in this
+// package or its l0 subpackage MUST use this frame. A UTC-stamped day — the
+// pre-fix chainL2 behaviour — resolves to TOMORROW for every local time west
+// of UTC between (24-offset) and midnight, so an evening L2 pass reads a day
+// file that does not exist yet, finds no records, and silently reports
+// {"status":"ok","scenes":0} with no error and no log (audit H4).
+
+// LocalDayKey returns the LOCAL calendar day (YYYY-MM-DD) of t. It names L0
+// day files, L2 scene files, and the L2 payload's date selection.
+func LocalDayKey(t time.Time) string { return t.Format("2006-01-02") }
+
+// LocalDayStart returns midnight of t's LOCAL calendar day, stamped in UTC so
+// day keys compare as plain dates (retention cutoff arithmetic in the l0
+// package).
+func LocalDayStart(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func (w *DistillWorker) l0Dir() string { return filepath.Join(w.dataDir, "l0") }

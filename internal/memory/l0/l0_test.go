@@ -222,7 +222,9 @@ func TestAppendWithFixedClock(t *testing.T) {
 // dates — the fixture is built relative to today.
 func TestPruneBoundaryAtCutoff(t *testing.T) {
 	dir := t.TempDir()
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	// Build the fixture in the same LOCAL day frame Prune computes its cutoff
+	// in (l0 files are named by local date — audit H4).
+	today := memory.LocalDayStart(time.Now())
 
 	mk := func(day time.Time) string {
 		name := day.Format("2006-01-02") + ".jsonl"
@@ -232,9 +234,9 @@ func TestPruneBoundaryAtCutoff(t *testing.T) {
 		}
 		return name
 	}
-	cutoffDay := mk(today.AddDate(0, 0, -7))  // exactly at cutoff: survives
-	olderDay := mk(today.AddDate(0, 0, -8))   // one past cutoff: deleted
-	recentDay := mk(today.AddDate(0, 0, -1))  // survives
+	cutoffDay := mk(today.AddDate(0, 0, -7)) // exactly at cutoff: survives
+	olderDay := mk(today.AddDate(0, 0, -8))  // one past cutoff: deleted
+	recentDay := mk(today.AddDate(0, 0, -1)) // survives
 	_, _ = cutoffDay, recentDay
 
 	// Unrelated files are never touched.

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/caimlas/meept/internal/memory"
 )
 
 // datePath is the shared path layout: <dir>/YYYY-MM-DD.jsonl.
@@ -33,7 +35,14 @@ func Prune(dir string, maxAgeDays int) (int, error) {
 	// Cutoff is the oldest day that survives: today minus maxAgeDays. A file
 	// dated exactly at the cutoff SURVIVES (boundary is exclusive below it),
 	// so maxAgeDays=1 keeps today and yesterday.
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	//
+	// The day frame is the LOCAL calendar date — the same frame the recorder
+	// names L0 files with (recorder.go via memory.LocalDayKey; audit H4). A
+	// UTC-truncated cutoff against locally-named files moved the boundary by
+	// a day for every local time west of UTC between (24-offset) and
+	// midnight, deleting (or keeping) a file up to a day off its documented
+	// age.
+	today := memory.LocalDayStart(time.Now())
 	cutoff := today.AddDate(0, 0, -maxAgeDays)
 
 	removed := 0
