@@ -33,15 +33,19 @@ Rules:
 - No markdown, no commentary, no trailing text.`
 
 // buildPrompt renders the full LLM prompt for one batch of candidates with
-// their recalled targets. batchOffset is the global index of the batch's
-// first candidate, so `candidate` fields in the answer refer to positions in
-// the whole DetectBatch input.
+// their recalled targets. Candidate numbering is BATCH-LOCAL (0-based within
+// this batch): parseLLMDecisions validates indices against the batch length
+// and resolveDecision maps them onto the batch, so the model must see and
+// echo batch-local numbers. The previous global numbering (batchOffset+i)
+// made every answer for batch 2+ parse as out-of-range and fail open to
+// "store" (bughunt 2026-10-14). batchOffset stays in the signature for
+// prompt-context completeness; it must NOT appear in the heading.
 func buildPrompt(cands []Candidate, recalls map[int][]RecallTarget, batchOffset int) string {
 	var b strings.Builder
 	b.WriteString(systemPrompt)
 	b.WriteString("\n\n## CANDIDATES\n")
 	for i, c := range cands {
-		fmt.Fprintf(&b, "\n### candidate %d\ncontent: %s\n", batchOffset+i, c.Content)
+		fmt.Fprintf(&b, "\n### candidate %d\ncontent: %s\n", i, c.Content)
 		targets := recalls[i]
 		if len(targets) == 0 {
 			b.WriteString("recalled targets: (none)\n")

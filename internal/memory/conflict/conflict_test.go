@@ -239,9 +239,61 @@ func TestDetectBatchSplitsAtMaxBatchSize(t *testing.T) {
 			t.Errorf("decision[%d].Action = %q, want store (empty batch answer fills store)", i, dec.Action)
 		}
 	}
-	// Second batch prompt must contain the global numbering offset.
-	if !strings.Contains(llm.Calls[1], "fact number 20") {
-		t.Errorf("second batch prompt missing candidate 20 content; got: %.200s", llm.Calls[1])
+	// Second batch prompt must use BATCH-LOCAL numbering (candidate 0 is
+	// the batch's first candidate, here global 20). Global numbering
+	// ("fact number 20" under heading "candidate 20") made the model echo
+	// 20-24, which the parser rejected as out-of-range for a 5-candidate
+	// batch and failed open to store (bughunt 2026-10-14).
+	if !strings.Contains(llm.Calls[1], "### candidate 0\ncontent: fact number 20") {
+		t.Errorf("second batch prompt missing batch-local candidate 0 (global 20); got: %.200s", llm.Calls[1])
+	}
+	if strings.Contains(llm.Calls[1], "### candidate 20") {
+		t.Errorf("second batch prompt still uses global candidate numbering; got: %.200s", llm.Calls[1])
+	}
+}
+
+// TestDetectBatchSecondBatchAnswersApply pins the regression: a model that
+// answers every batch with BATCH-LOCAL candidate numbers must see its
+// merge/skip decisions applied to batch 2+ candidates, not fail-opened to
+// store. Before the batch-local numbering fix the model echoing the numbers
+// it was shown (20-24 for the second batch of 25) had every entry rejected
+// as out-of-range.
+func TestDetectBatchSecondBatchAnswersApply(t *testing.T) {
+	store := &fakeStore{
+		vector: true,
+		results: []RecallResult{
+			{MemoryID: "mem-1", Content: "deploy runs at noon UTC"},
+		},
+	}
+	llm := &fakeLLM{Responses: [][]byte{
+		// Batch 1 (candidates 0-19): all store.
+		[]byte(`[]`),
+		// Batch 2 (candidates 20-24): batch-local numbers, one merge + skip.
+		[]byte(`[
+			{"candidate":0,"action":"merge","target_ids":["mem-1"],"merged_content":"fact 20 merged","reason":"dup"},
+			{"candidate":1,"action":"skip","target_ids":["mem-1"],"merged_content":"","reason":"near-dup"},
+			{"candidate":2,"action":"store","target_ids":[],"merged_content":"","reason":"new"},
+			{"candidate":3,"action":"store","target_ids":[],"merged_content":"","reason":"new"},
+			{"candidate":4,"action":"store","target_ids":[],"merged_content":"","reason":"new"}
+		]`)},
+	}
+	d := NewDetector(DetectorConfig{LLM: llm, Store: store, Logger: testLogger(t), MaxBatch: 20})
+
+	got := d.DetectBatch(context.Background(), candidates(25))
+
+	if len(got) != 25 {
+		t.Fatalf("got %d decisions, want 25", len(got))
+	}
+	if got[20].Action != ActionMerge {
+		t.Errorf("decision[20].Action = %q, want merge (batch-local 0 applied)", got[20].Action)
+	}
+	if got[21].Action != ActionSkip {
+		t.Errorf("decision[21].Action = %q, want skip (batch-local 1 applied)", got[21].Action)
+	}
+	for i := 22; i < 25; i++ {
+		if got[i].Action != ActionStore {
+			t.Errorf("decision[%d].Action = %q, want store", i, got[i].Action)
+		}
 	}
 }
 
