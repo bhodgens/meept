@@ -1,10 +1,16 @@
 package llm
 
 import (
+	"encoding/json"
+	"net"
 	"net/url"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/tailscale/hujson"
 )
 
 func TestConfigLoads(t *testing.T) {
@@ -140,6 +146,46 @@ func TestConfigLoads(t *testing.T) {
 			t.Errorf("providers %s and %s both use loopback port %s", prev, name, port)
 		}
 		seenPort[port] = name
+	}
+
+	// Provider ports must also avoid the daemon's OWN transport.http
+	// listener (the GUI endpoint): a runtime sharing that port number made
+	// every install one bind-race away from the spawn guard refusing the
+	// runtime or a client hitting the wrong server (2026-10-14: the MLX
+	// classifier shipped on :8081, the GUI TLS port). Read the shipped
+	// config/meept.json5's transport.http addr directly — internal/config
+	// cannot be imported from here (import cycle), and the precedence to
+	// mirror is ListenAddr's: addr, else the port alias, else the
+	// 127.0.0.1:8081 binding default (internal/comm/http NewServer).
+	transportPorts := map[string]struct{}{"8081": {}} // NewServer default
+	const meeptCfgPath = "../../config/meept.json5"
+	if raw, err := os.ReadFile(meeptCfgPath); err == nil {
+		if std, err := hujson.Standardize(raw); err == nil {
+			var mc struct {
+				Transport struct {
+					HTTP struct {
+						Addr string `json:"addr"`
+						Port int    `json:"port"`
+					} `json:"http"`
+				} `json:"transport"`
+			}
+			if json.Unmarshal(std, &mc) == nil {
+				if a := mc.Transport.HTTP.Addr; a != "" {
+					if _, port, err := net.SplitHostPort(a); err == nil {
+						transportPorts[port] = struct{}{}
+					}
+				} else if mc.Transport.HTTP.Port > 0 {
+					transportPorts[strconv.Itoa(mc.Transport.HTTP.Port)] = struct{}{}
+				}
+			}
+		}
+		// Missing/unparseable file: the 8081 default above still guards.
+	}
+	for name, port := range seenPort {
+		if _, clash := transportPorts[port]; clash {
+			t.Errorf("provider %s uses loopback port %s, the daemon transport.http (GUI) port — "+
+				"give the runtime its own port", name, port)
+		}
 	}
 
 	// Verify lfm-1.2b-q8 model (primary small model)
