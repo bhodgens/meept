@@ -83,18 +83,35 @@ func (v *llmBridgeVerifier) VerifyBridge(ctx context.Context, rec BridgeRecord) 
 }
 
 // bridgeEvidenceContent returns the evidence memory's content when the
-// generator embedded it in metadata (v1 generation does not), else empty —
-// the IDs alone still let a local model judge entailment from what it can
-// see; empty evidence content is treated as unverifiable by the prompt.
+// generator embedded it in metadata, else empty — the IDs alone still let a
+// local model judge entailment from what it can see; empty evidence content
+// is treated as unverifiable by the prompt.
 func bridgeEvidenceContent(rec BridgeRecord, evidenceID string) string {
 	if rec.Metadata == nil {
 		return ""
 	}
-	key := "evidence_content_" + evidenceID
+	key := BridgeMetaEvidenceContentPrefix + evidenceID
 	if s, ok := rec.Metadata[key].(string); ok {
 		return s
 	}
 	return ""
+}
+
+// bridgeHasEvidenceContent reports whether ANY evidence_content_<id> key is
+// present in the record's metadata. A record with none cannot be judged: the
+// verifier's prompt shows empty excerpts, so its verdict measures the missing
+// inputs, not the fact (bughunt 2026-10-14 — verify=true deleted every
+// pre-fix bridge on that basis).
+func bridgeHasEvidenceContent(rec BridgeRecord) bool {
+	if rec.Metadata == nil {
+		return false
+	}
+	for _, ev := range rec.EvidenceIDs {
+		if s, ok := rec.Metadata[BridgeMetaEvidenceContentPrefix+ev].(string); ok && s != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // VerifyBridges runs the entailment-verification pass over every persisted
@@ -139,12 +156,26 @@ func verifyBridgesListed(ctx context.Context, store *BridgeStore, verifier Bridg
 	}
 	kept, dropped := 0, 0
 	for _, rec := range bridges {
+		// Can this bridge be judged at all? A record with NO
+		// evidence_content_<id> metadata shows the verifier empty
+		// excerpts, so any negative verdict measures the missing prompt
+		// inputs, not the fact. Skipping the judgeable check first is
+		// what keeps verify=true (the default) from destroying every
+		// pre-fix bridge (bughunt 2026-10-14): bridges persisted before
+		// generation embedded evidence content are retained unverified
+		// instead of deleted on "unsupported".
+		judgeable := bridgeHasEvidenceContent(rec)
 		supported, _, verr := verifier.VerifyBridge(ctx, rec)
 		if verr != nil {
 			// Malformed verdict output is a per-bridge failure, not a
 			// transport failure: fail CLOSED (drop the bridge) rather
-			// than leaving an unverifiable fact permanently retrievable.
+			// than leaving an unverifiable fact permanently retrievable
+			// — but only when the verifier actually SAW the sources.
 			if errors.Is(verr, errBridgeVerdictMalformed) {
+				if !judgeable {
+					kept++ // retained, stays verified="false"
+					continue
+				}
 				if derr := store.DeleteBridge(ctx, rec.ID); derr != nil {
 					return kept, dropped, fmt.Errorf("bridge verification: delete %s: %w", rec.ID, derr)
 				}
@@ -156,6 +187,12 @@ func verifyBridgesListed(ctx context.Context, store *BridgeStore, verifier Bridg
 			return kept, dropped, fmt.Errorf("%w: bridge %s: %w", ErrBridgeVerify, rec.ID, verr)
 		}
 		if !supported {
+			if !judgeable {
+				// Same blind-record rule for an explicit unsupported
+				// verdict: not evidence of anything about the fact.
+				kept++
+				continue
+			}
 			// Unsupported: DELETE before it is ever retrievable.
 			if derr := store.DeleteBridge(ctx, rec.ID); derr != nil {
 				return kept, dropped, fmt.Errorf("bridge verification: delete %s: %w", rec.ID, derr)

@@ -155,27 +155,66 @@ func TestVerifyDropsUnsupported(t *testing.T) {
 	ctx := context.Background()
 
 	seedBridge(t, bs, "bridge-bad", []string{"mem-1", "mem-2"})
+	// Give the record evidence content so the verifier is judging real
+	// inputs (a blind record is retained unverified — see
+	// TestVerifyUnsupportedBlindBridgeKept).
+	rec := seedBridge(t, bs, "bridge-bad-evidence", []string{"mem-1", "mem-2"})
+	rec.Metadata = map[string]any{
+		BridgeMetaEvidenceContentPrefix + "mem-1": "deploy runs at noon UTC",
+		BridgeMetaEvidenceContentPrefix + "mem-2": "rollback takes 5 minutes",
+	}
+	if err := bs.PutBridge(ctx, rec); err != nil {
+		t.Fatalf("reseed with evidence content: %v", err)
+	}
 
 	ver := &fakeBridgeVerifier{supported: false, reason: "not entailed by the sources"}
 	kept, dropped, err := VerifyBridges(ctx, bs, ver, BridgesConfig{Enabled: true, Verify: true})
 	if err != nil {
 		t.Fatalf("VerifyBridges: %v", err)
 	}
-	if kept != 0 || dropped != 1 {
-		t.Errorf("kept=%d dropped=%d, want 0/1", kept, dropped)
+	if kept != 1 || dropped != 1 {
+		t.Errorf("kept=%d dropped=%d, want 1/1 (blind bridge retained, judged bridge dropped)", kept, dropped)
 	}
-	// The unsupported bridge must be DELETED, absent from search.
-	hits, err := bs.SearchByEmbedding(ctx, hashBridgeEmbedding("bridging fact for bridge-bad"), 10)
+	// The unsupported JUDGEABLE bridge must be DELETED, absent from search.
+	hits, err := bs.SearchByEmbedding(ctx, hashBridgeEmbedding("bridging fact for bridge-bad-evidence"), 10)
 	if err != nil {
 		t.Fatalf("SearchByEmbedding: %v", err)
 	}
 	for _, h := range hits {
-		if h.ID == "bridge-bad" {
+		if h.ID == "bridge-bad-evidence" {
 			t.Error("unsupported bridge still retrievable after verification")
 		}
 	}
-	if n, err := bs.Count(ctx); err != nil || n != 0 {
-		t.Errorf("Count after drop = %d (err %v), want 0", n, err)
+	if n, err := bs.Count(ctx); err != nil || n != 1 {
+		t.Errorf("Count after drop = %d (err %v), want 1 (the blind record)", n, err)
+	}
+}
+
+// TestVerifyUnsupportedBlindBridgeKept pins the bughunt 2026-10-14 rule: a
+// record with NO evidence_content metadata cannot be judged — the verifier's
+// prompt showed empty excerpts, so an "unsupported" verdict measures the
+// missing prompt inputs, not the fact. It is retained unverified, never
+// deleted.
+func TestVerifyUnsupportedBlindBridgeKept(t *testing.T) {
+	bs, err := NewBridgeStore(t.TempDir() + "/bridge.vec.db")
+	if err != nil {
+		t.Fatalf("NewBridgeStore: %v", err)
+	}
+	defer bs.Close()
+	ctx := context.Background()
+
+	seedBridge(t, bs, "bridge-blind", []string{"mem-1"})
+
+	ver := &fakeBridgeVerifier{supported: false, reason: "not entailed by the sources"}
+	kept, dropped, err := VerifyBridges(ctx, bs, ver, BridgesConfig{Enabled: true, Verify: true})
+	if err != nil {
+		t.Fatalf("VerifyBridges: %v", err)
+	}
+	if kept != 1 || dropped != 0 {
+		t.Errorf("kept=%d dropped=%d, want 1/0 (blind record never deleted on unsupported)", kept, dropped)
+	}
+	if n, err := bs.Count(ctx); err != nil || n != 1 {
+		t.Errorf("Count = %d (err %v), want 1", n, err)
 	}
 }
 
@@ -321,7 +360,9 @@ func TestVerifyTransportErrorAborts(t *testing.T) {
 // TestVerifyMalformedVerdictDropsBridge: a verifier returning unparseable
 // output counts the bridge as dropped (fail-closed) — though the grammar
 // makes this a transport-level impossibility in production, the fake proves
-// the decode path rejects garbage rather than passing it through.
+// the decode path rejects garbage rather than passing it through. The
+// seeded record carries evidence_content metadata, so the fail-closed rule
+// (which requires the verifier to have SEEN the sources) applies.
 func TestVerifyMalformedVerdictDropsBridge(t *testing.T) {
 	bs, err := NewBridgeStore(t.TempDir() + "/bridge.vec.db")
 	if err != nil {
@@ -329,7 +370,13 @@ func TestVerifyMalformedVerdictDropsBridge(t *testing.T) {
 	}
 	defer bs.Close()
 	ctx := context.Background()
-	seedBridge(t, bs, "bridge-junk", []string{"mem-1"})
+	rec := seedBridge(t, bs, "bridge-junk", []string{"mem-1"})
+	rec.Metadata = map[string]any{
+		BridgeMetaEvidenceContentPrefix + "mem-1": "deploy runs at noon UTC",
+	}
+	if err := bs.PutBridge(ctx, rec); err != nil {
+		t.Fatalf("reseed with evidence content: %v", err)
+	}
 
 	// A verifier whose verdict JSON is malformed: exercised through the
 	// PRODUCTION verifier path by feeding it a chatter with junk content.
@@ -340,7 +387,32 @@ func TestVerifyMalformedVerdictDropsBridge(t *testing.T) {
 		t.Fatalf("VerifyBridges: %v", err)
 	}
 	if kept != 0 || dropped != 1 {
-		t.Errorf("kept=%d dropped=%d, want 0/1 (malformed verdict = drop, fail-closed)", kept, dropped)
+		t.Errorf("kept=%d dropped=%d, want 0/1 (malformed verdict with evidence content = drop, fail-closed)", kept, dropped)
+	}
+}
+
+// TestVerifyMalformedVerdictKeepsBlindBridge pins the bughunt 2026-10-14
+// guard: a record with NO evidence_content metadata cannot be judged — the
+// verifier's prompt showed empty excerpts, so its (malformed or not)
+// verdict measures the missing inputs, not the fact. The malformed-verdict
+// fail-closed rule must NOT delete it; it is retained unverified.
+func TestVerifyMalformedVerdictKeepsBlindBridge(t *testing.T) {
+	bs, err := NewBridgeStore(t.TempDir() + "/bridge.vec.db")
+	if err != nil {
+		t.Fatalf("NewBridgeStore: %v", err)
+	}
+	defer bs.Close()
+	ctx := context.Background()
+	seedBridge(t, bs, "bridge-blind", []string{"mem-1"}) // no evidence content
+
+	fc := &fakeGrammarChatter{resp: &llm.Response{Content: `not json at all`}}
+	ver := NewBridgeEvidenceVerifier(fc)
+	kept, dropped, err := VerifyBridges(ctx, bs, ver, BridgesConfig{Enabled: true, Verify: true})
+	if err != nil {
+		t.Fatalf("VerifyBridges: %v", err)
+	}
+	if kept != 1 || dropped != 0 {
+		t.Errorf("kept=%d dropped=%d, want 1/0 (no evidence content = not judgeable, keep unverified)", kept, dropped)
 	}
 }
 

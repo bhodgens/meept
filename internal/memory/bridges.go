@@ -30,6 +30,19 @@ const (
 // when absent, extracts from Content directly.
 const BridgeMetaEntities = "entities"
 
+// BridgeMetaEvidenceContentPrefix prefixes a source memory ID to form the
+// bridge-record metadata key carrying that source's content
+// ("evidence_content_<id>"). Generation writes it (persistBridgeFacts); the
+// B03 entailment verifier reads it (bridgeEvidenceContent). Evidence text is
+// capped by maxBridgeEvidenceContentRunes at write time so a large source
+// memory cannot bloat the shard metadata.
+const BridgeMetaEvidenceContentPrefix = "evidence_content_"
+
+// maxBridgeEvidenceContentRunes caps each evidence_content_<id> metadata
+// value. Long enough for a full paragraph; the verifier's purpose is
+// entailment checking, not full-document replay.
+const maxBridgeEvidenceContentRunes = 2000
+
 // BridgesConfig carries the bridge-generation knob values (memory.bridges.*
 // in internal/config). Mirrored here so GenerateBridges stays decoupled from
 // the config package's full schema.
@@ -258,6 +271,15 @@ func persistBridgeFacts(ctx context.Context, store *BridgeStore, entity string, 
 	for _, c := range candidates {
 		candidateIDs[c.ID] = true
 	}
+	// evidence_content_<id> carries each source's text so the B03 entailment
+	// verifier (bridgeEvidenceContent) can show the model what the fact must
+	// be grounded in. Without it, verify=true (the default) prompts with
+	// empty excerpts and deletes every bridge as unsupported
+	// (bughunt 2026-10-14).
+	evidenceContent := make(map[string]any, len(candidates))
+	for _, c := range candidates {
+		evidenceContent[BridgeMetaEvidenceContentPrefix+c.ID] = truncateBridgeEvidenceContent(c.Content)
+	}
 	for _, fact := range facts {
 		text := strings.TrimSpace(fact.Text)
 		if text == "" {
@@ -281,6 +303,11 @@ func persistBridgeFacts(ctx context.Context, store *BridgeStore, entity string, 
 				continue
 			}
 		}
+		md := make(map[string]any, 1+len(evidenceContent))
+		md["entity"] = entity
+		for k, v := range evidenceContent {
+			md[k] = v
+		}
 		rec := BridgeRecord{
 			ID:          id.Generate("bridge-"),
 			Content:     text,
@@ -288,9 +315,7 @@ func persistBridgeFacts(ctx context.Context, store *BridgeStore, entity string, 
 			EvidenceIDs: evIDs,
 			CreatedAt:   time.Now().UTC(),
 			Verified:    false, // B03 entailment flips this
-			Metadata: map[string]any{
-				"entity": entity,
-			},
+			Metadata:    md,
 		}
 		if err := store.PutBridge(ctx, rec); err != nil {
 			rejected++
@@ -299,6 +324,16 @@ func persistBridgeFacts(ctx context.Context, store *BridgeStore, entity string, 
 		generated++
 	}
 	return generated, rejected
+}
+
+// truncateBridgeEvidenceContent caps evidence text at
+// maxBridgeEvidenceContentRunes (rune-safe) for the bridge metadata.
+func truncateBridgeEvidenceContent(content string) string {
+	runes := []rune(content)
+	if len(runes) <= maxBridgeEvidenceContentRunes {
+		return content
+	}
+	return string(runes[:maxBridgeEvidenceContentRunes])
 }
 
 // filterBridgeEvidence keeps only IDs present in the candidate set, trimmed.

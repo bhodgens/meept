@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -160,7 +161,11 @@ func (bs *BridgeStore) PutBridge(ctx context.Context, rec BridgeRecord) error {
 	return nil
 }
 
-// putBridgeMetadata writes the canonical metadata side table rows.
+// putBridgeMetadata writes the side-table rows for a bridge: the four
+// canonical keys PLUS every extra key the record carries (e.g.
+// evidence_content_<id> from generation). Persisting only the canonical four
+// silently dropped every extra key at write time — the verifier then saw no
+// evidence content at all (bughunt 2026-10-14).
 func (bs *BridgeStore) putBridgeMetadata(ctx context.Context, id string, md map[string]any) error {
 	tx, err := bs.db.BeginTx(ctx, nil) //nolint:mutexio // single sqlite connection, one tx at a time (matches shard internals)
 	if err != nil {
@@ -168,7 +173,12 @@ func (bs *BridgeStore) putBridgeMetadata(ctx context.Context, id string, md map[
 	}
 	defer func() { _ = tx.Rollback() }() //nolint:mutexio // rollback bound to the tx above
 
-	for _, key := range []string{BridgeMetaUnitType, BridgeMetaEvidenceIDs, BridgeMetaCreatedAt, BridgeMetaVerified} {
+	keys := make([]string, 0, len(md))
+	for k := range md {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
 		v, err := json.Marshal(md[key])
 		if err != nil {
 			return fmt.Errorf("marshal %s: %w", key, err)
@@ -337,6 +347,72 @@ func (bs *BridgeStore) MarkVerified(ctx context.Context, id string) error {
 		}
 	}
 	return tx.Commit() //nolint:mutexio // commit bound to the tx above
+}
+
+// setBridgeMeta writes one side-table row via its own transaction. Used for
+// the evidence-content reseed (bughunt 2026-10-14): bridges persisted before
+// generation embedded evidence_content_<id> have none, so putBridgeMetadata's
+// replace-only write cannot add it later.
+func (bs *BridgeStore) setBridgeMeta(ctx context.Context, id, key, value string) error {
+	tx, err := bs.db.BeginTx(ctx, nil) //nolint:mutexio // single sqlite connection, one tx at a time
+	if err != nil {
+		return fmt.Errorf("bridge store: begin set meta %s: %w", key, err)
+	}
+	defer func() { _ = tx.Rollback() }() //nolint:mutexio // rollback bound to the tx above
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR REPLACE INTO bridge_meta (memory_id, key, value) VALUES (?, ?, ?)
+	`, id, key, value); err != nil { //nolint:mutexio // tx bound to protected conn
+		return fmt.Errorf("bridge store: set meta %s: %w", key, err)
+	}
+	return tx.Commit() //nolint:mutexio // commit bound to the tx above
+}
+
+// HasEvidenceContent reports whether the bridge's persisted metadata carries
+// any evidence_content_<id> row — i.e. whether a verifier prompt can show the
+// model its sources. Records without it are not judgeable: VerifyBridges
+// refuses to fail them closed on a malformed/unsupported verdict.
+func (bs *BridgeStore) HasEvidenceContent(ctx context.Context, id string) (bool, error) {
+	rows, err := bs.db.QueryContext(ctx, `
+		SELECT value FROM bridge_meta WHERE memory_id = ? AND key LIKE ? ESCAPE '\'
+	`, id, `evidence\__%`) //nolint:mutexio // single connection, serialized by driver
+	if err != nil {
+		return false, fmt.Errorf("bridge store: evidence content probe: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			continue
+		}
+		// key = "evidence_content_<id>"; require a non-empty decoded string.
+		var s string
+		if json.Unmarshal([]byte(v), &s) == nil && s != "" {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// ReseedEvidenceContent writes the evidence_content_<id> rows for a bridge
+// whose sources are supplied by the caller (sourceID → content). Returns the
+// number of rows written. This backfills pre-evidence bridges so the B03
+// verifier can judge them (bughunt 2026-10-14).
+func (bs *BridgeStore) ReseedEvidenceContent(ctx context.Context, id string, sources map[string]string) (int, error) {
+	written := 0
+	for srcID, content := range sources {
+		if strings.TrimSpace(srcID) == "" || strings.TrimSpace(content) == "" {
+			continue
+		}
+		enc, err := json.Marshal(truncateBridgeEvidenceContent(content))
+		if err != nil {
+			return written, fmt.Errorf("bridge store: encode evidence content: %w", err)
+		}
+		if err := bs.setBridgeMeta(ctx, id, BridgeMetaEvidenceContentPrefix+srcID, string(enc)); err != nil {
+			return written, err
+		}
+		written++
+	}
+	return written, nil
 }
 
 // Count returns the number of persisted bridges (distinct memory IDs in the
