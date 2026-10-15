@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1216,10 +1217,19 @@ func (c *AnthropicClient) buildRequest(cfg *ModelConfig, messages []ChatMessage,
 		req.StopSequences = opts.stopSequences
 	}
 
-	// Add tools if present
+	// Add tools if present — sorted COPY by name (stable wire order). The
+	// tools slice may come straight from a shared registry (insertion
+	// order), and any insertion-order drift shuffles the wire bytes: the
+	// #1 prefix-cache buster. The copy keeps registry state untouched
+	// (bughunt 2026-10-14: the sort existed only on the OpenAI client).
 	if len(opts.tools) > 0 {
-		req.Tools = make([]anthropicTool, len(opts.tools))
-		for i, tool := range opts.tools {
+		sortedTools := make([]ToolDefinition, len(opts.tools))
+		copy(sortedTools, opts.tools)
+		sort.Slice(sortedTools, func(i, j int) bool {
+			return sortedTools[i].Function.Name < sortedTools[j].Function.Name
+		})
+		req.Tools = make([]anthropicTool, len(sortedTools))
+		for i, tool := range sortedTools {
 			schema, err := json.Marshal(tool.Function.Parameters)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal tool schema: %w", err)

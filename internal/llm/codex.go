@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -446,8 +447,16 @@ func (c *CodexClient) buildPayload(messages []ChatMessage, cfg *ModelConfig, cha
 	payload.Instructions = strings.Join(systemParts, "\n\n")
 
 	if len(chatOpts.tools) > 0 {
-		tools := make([]map[string]any, len(chatOpts.tools))
-		for i, td := range chatOpts.tools {
+		// Stable wire order: sorted COPY by name (same rule as the OpenAI
+		// client — insertion-order drift shuffles the wire bytes and busts
+		// provider-side prefix caches; bughunt 2026-10-14).
+		sorted := make([]ToolDefinition, len(chatOpts.tools))
+		copy(sorted, chatOpts.tools)
+		sort.Slice(sorted, func(i, j int) bool {
+			return sorted[i].Function.Name < sorted[j].Function.Name
+		})
+		tools := make([]map[string]any, len(sorted))
+		for i, td := range sorted {
 			tool := map[string]any{
 				"type": "function",
 			}

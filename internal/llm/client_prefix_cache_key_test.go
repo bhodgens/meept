@@ -125,3 +125,55 @@ func TestClientCacheUsesPrefixAwareKey(t *testing.T) {
 		t.Fatalf("cache Hits = %d, want >= 2 (seeded lookup + re-ask)", stats.Hits)
 	}
 }
+
+// TestLiveCacheKeySplitsOnBoundarySentinel pins the bughunt 2026-10-14 fix:
+// the LIVE client path (SystemPromptSections) must classify a boundary-
+// carrying system prompt into static/dynamic sections, not fold the dynamic
+// tail into the static hash. Before the fix SystemPromptSections used
+// strings.Split, which CONSUMES the sentinel — ClassifyPromptSections never
+// saw a section equal to it and treated everything as static, so a per-turn
+// dynamic tail changed the "static" hash and defeated the prefix split.
+func TestLiveCacheKeySplitsOnBoundarySentinel(t *testing.T) {
+	staticText := "STATIC CONSTITUTION"
+	dynamicA := "MEMORY A"
+	dynamicB := "MEMORY B"
+	promptA := staticText + "\n\n" + PromptCacheBoundary + "\n\n" + dynamicA
+	promptB := staticText + "\n\n" + PromptCacheBoundary + "\n\n" + dynamicB
+
+	sectionsA := SystemPromptSections(promptA)
+	sectionsB := SystemPromptSections(promptB)
+
+	// The boundary must survive as its OWN element (ClassifyPromptSections'
+	// recognition rule).
+	foundBoundary := false
+	for _, s := range sectionsA {
+		if s == PromptCacheBoundary {
+			foundBoundary = true
+		}
+	}
+	if !foundBoundary {
+		t.Fatalf("SystemPromptSections lost the boundary sentinel; sections = %q", sectionsA)
+	}
+
+	static, dynamic := ClassifyPromptSections(sectionsA)
+	if len(static) != 1 || static[0] != staticText {
+		t.Fatalf("static = %q, want [%q]", static, staticText)
+	}
+	if len(dynamic) != 1 || dynamic[0] != dynamicA {
+		t.Fatalf("dynamic = %q, want [%q]", dynamic, dynamicA)
+	}
+
+	// The STATIC hash must be identical when only the dynamic tail changed.
+	keyBuilder := NewCacheKeyBuilder(false)
+	msgs := []ChatMessage{{Role: RoleSystem, Content: "x"}}
+	keyA := keyBuilder.BuildPrefixAwareKey("m", sectionsA, msgs)
+	keyB := keyBuilder.BuildPrefixAwareKey("m", sectionsB, msgs)
+	if keyA.PromptHash[:16] != keyB.PromptHash[:16] {
+		t.Fatalf("static hash moved when only dynamic changed:\n A=%q\n B=%q",
+			keyA.PromptHash[:16], keyB.PromptHash[:16])
+	}
+	// And the DYNAMIC hash must differ.
+	if keyA.PromptHash[17:33] == keyB.PromptHash[17:33] {
+		t.Fatalf("dynamic hash identical for different dynamic tails: %q", keyA.PromptHash)
+	}
+}
