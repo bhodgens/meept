@@ -82,6 +82,12 @@ func (h *EpistemicHook) AfterTurn(ctx context.Context, intent string, messages [
 		h.logger.Warn("epistemic hook extract failed", "error", err, "intent", intent)
 		return nil, nil
 	}
+	// Claim gates (reject band / category / max-per-turn) now live in the
+	// extractor itself (WriteCandidates filters — bughunt 2026-10-14), so
+	// EVERY consumer gets them. The hook keeps only the calibration
+	// logging: splitFiltered runs for the rejected-candidates JSONL, and
+	// its PASSED output is deliberately discarded (WriteCandidates
+	// re-filters — idempotent, same gates, zero double-writes).
 	threshold := h.cfg.AmbientExtraction.ConfidenceThreshold
 	if threshold <= 0 {
 		threshold = 0.7 // spec default (mirrors filterAmbientCandidates)
@@ -95,7 +101,7 @@ func (h *EpistemicHook) AfterTurn(ctx context.Context, intent string, messages [
 	for _, c := range h.cfg.AmbientExtraction.ExcludeCategories {
 		excludedCat[c] = struct{}{}
 	}
-	candidates, rejected := splitFiltered(candidates, threshold, rejectBelow, excludedCat, maxPerTurn)
+	_, rejected := splitFiltered(candidates, threshold, rejectBelow, excludedCat, maxPerTurn)
 	if h.rejectedLogger != nil {
 		h.rejectedLogger.LogRejected(intent, threshold, rejected)
 	}

@@ -167,6 +167,16 @@ func buildAmbientExtractor(memoryMgr *memory.Manager, chatter llm.Chatter, memCf
 		Classifier:      newAmbientClassifierAdapter(chatter),
 		Logger:          logger.With("component", "ambient-extractor"),
 		RawResponseHook: rawHook,
+		// Claim gates (bughunt 2026-10-14): the extractor now owns the
+		// reject-band/category/max-per-turn filtering, so the
+		// turn-terminal capture subscriber enforces exactly what the
+		// retired loop hook did. ConfidenceThreshold deliberately NOT
+		// passed — the corrected calibration design stores the middle
+		// band for librarian review (splitFiltered's contract), same as
+		// the hook.
+		RejectBelow:       memCfg.Epistemic.AmbientExtraction.RejectBelow,
+		MaxPerTurn:        memCfg.Epistemic.AmbientExtraction.MaxPerTurn,
+		ExcludeCategories: memCfg.Epistemic.AmbientExtraction.ExcludeCategories,
 	})
 }
 

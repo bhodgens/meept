@@ -85,11 +85,13 @@ func TestEpistemicHookHappyPath(t *testing.T) {
 	if len(fake.writeCalls) != 1 {
 		t.Errorf("expected 1 WriteCandidates call, got %d", len(fake.writeCalls))
 	}
-	// Post-calibration: the confidence threshold no longer drops — the
-	// "low conf" candidate is stored for librarian review. Only the
-	// excluded-category candidate is gated.
-	if len(fake.writeCalls[0]) != 2 {
-		t.Errorf("expected 2 stored candidates (low conf kept for review), got %d", len(fake.writeCalls[0]))
+	// Post-calibration the hook no longer pre-filters: the gates live in
+	// the extractor's WriteCandidates (bughunt 2026-10-14) so every
+	// consumer — including the capture subscriber — gets them. The hook
+	// forwards the RAW candidates and keeps splitFiltered only for the
+	// rejected-candidates calibration log. 3 candidates in, 3 forwarded.
+	if len(fake.writeCalls[0]) != 3 {
+		t.Errorf("expected 3 raw candidates forwarded (gates moved to the extractor), got %d", len(fake.writeCalls[0]))
 	}
 }
 

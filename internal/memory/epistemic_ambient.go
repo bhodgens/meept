@@ -38,24 +38,83 @@ type AmbientExtractorConfig struct {
 	// classifier call — the calibration/training pair. Raw conversation
 	// text: write only to gitignored paths. Nil = disabled.
 	RawResponseHook func(prompt, rawBody string)
+
+	// Claim gates (mirrors of the retired loop-level EpistemicHook gates).
+	// Every consumer of Extract+WriteCandidates — the loop hook AND the
+	// turn-terminal capture subscriber — gets identical filtering, so the
+	// gates can no longer be skipped by a caller that forgets them
+	// (bughunt 2026-10-14: the capture subscriber stored raw, unfiltered
+	// candidates). Zero values match the hook's spec defaults.
+	// RejectBelow hard-drops candidates under this confidence ("reject
+	// band"); 0 = disabled (legacy binary behavior).
+	RejectBelow float64
+	// MaxPerTurn caps stored candidates per Extract window; <= 0 resolves
+	// to the spec default (3).
+	MaxPerTurn int
+	// ExcludeCategories drops candidates in these categories.
+	ExcludeCategories []string
+}
+
+// DefaultAmbientMaxPerTurn mirrors the retired hook's spec default.
+const DefaultAmbientMaxPerTurn = 3
+
+// FilterCandidates applies the configured claim gates: reject-band drop,
+// category exclusion, and the per-turn cap. Returns the survivors and the
+// rejected remainder (candidate + reason) for calibration logging.
+func (ex *AmbientExtractor) FilterCandidates(in []AmbientCandidate) (passed []AmbientCandidate, rejected []AmbientCandidate, reasons []string) {
+	maxPerTurn := ex.maxPerTurn
+	if maxPerTurn <= 0 {
+		maxPerTurn = DefaultAmbientMaxPerTurn
+	}
+	excluded := make(map[string]struct{}, len(ex.excludeCategories))
+	for _, c := range ex.excludeCategories {
+		excluded[c] = struct{}{}
+	}
+	for _, c := range in {
+		switch {
+		case c.Confidence < ex.rejectBelow:
+			rejected = append(rejected, c)
+			reasons = append(reasons, "reject_band")
+		case isExcludedCategory(c.Category, excluded):
+			rejected = append(rejected, c)
+			reasons = append(reasons, "category")
+		case len(passed) >= maxPerTurn:
+			rejected = append(rejected, c)
+			reasons = append(reasons, "max_per_turn")
+		default:
+			passed = append(passed, c)
+		}
+	}
+	return passed, rejected, reasons
+}
+
+func isExcludedCategory(cat string, excluded map[string]struct{}) bool {
+	_, ok := excluded[cat]
+	return ok
 }
 
 // AmbientExtractor runs the ambient-extraction LLM prompt over a conversation
 // window and persists the resulting claim candidates as auto claims.
 type AmbientExtractor struct {
-	manager    *Manager
-	classifier AmbientClassifierLLM
-	logger     *slog.Logger
-	rawHook    func(prompt, rawBody string)
+	manager           *Manager
+	classifier        AmbientClassifierLLM
+	logger            *slog.Logger
+	rawHook           func(prompt, rawBody string)
+	rejectBelow       float64
+	maxPerTurn        int
+	excludeCategories []string
 }
 
 // NewAmbientExtractor constructs an extractor from the given configuration.
 func NewAmbientExtractor(cfg AmbientExtractorConfig) *AmbientExtractor {
 	ex := &AmbientExtractor{
-		manager:    cfg.Manager,
-		classifier: cfg.Classifier,
-		logger:     cfg.Logger,
-		rawHook:    cfg.RawResponseHook,
+		manager:           cfg.Manager,
+		classifier:        cfg.Classifier,
+		logger:            cfg.Logger,
+		rawHook:           cfg.RawResponseHook,
+		rejectBelow:       cfg.RejectBelow,
+		maxPerTurn:        cfg.MaxPerTurn,
+		excludeCategories: cfg.ExcludeCategories,
 	}
 	if ex.logger == nil {
 		ex.logger = slog.Default()
@@ -122,14 +181,27 @@ func (ex *AmbientExtractor) Extract(ctx context.Context, messages []string) ([]A
 	return candidates, nil
 }
 
-// WriteCandidates persists each candidate as an auto-claim and returns the
-// resulting memory IDs.
+// WriteCandidates filters candidates through the configured claim gates
+// (FilterCandidates) and persists each survivor as an auto-claim, returning
+// the resulting memory IDs. Filtering lives HERE — not at the callers — so
+// every consumer (loop hook, turn-terminal capture subscriber) gets the same
+// gates (bughunt 2026-10-14: the capture subscriber stored raw candidates).
+// Rejected candidates are logged at debug with their reason.
 func (ex *AmbientExtractor) WriteCandidates(ctx context.Context, candidates []AmbientCandidate) ([]string, error) {
 	if ex == nil || ex.manager == nil {
 		return nil, errors.New("ambient extractor not configured")
 	}
-	ids := make([]string, 0, len(candidates))
-	for _, c := range candidates {
+	passed, rejected, reasons := ex.FilterCandidates(candidates)
+	for i, c := range rejected {
+		reason := "unknown"
+		if i < len(reasons) {
+			reason = reasons[i]
+		}
+		ex.logger.Debug("ambient candidate rejected",
+			"reason", reason, "confidence", c.Confidence, "category", c.Category)
+	}
+	ids := make([]string, 0, len(passed))
+	for _, c := range passed {
 		id, err := ex.manager.StoreClaim(ctx, Claim{
 			Text:       c.Text,
 			Premises:   c.Premises,
