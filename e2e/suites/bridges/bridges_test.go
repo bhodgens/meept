@@ -165,6 +165,63 @@ func TestBridgesDaemonWiring(t *testing.T) {
 	}
 }
 
+// TestBridgesDaemonRecall drives the finding-2 recall fix end to end
+// (bughunt 2026-10-14): with bridges enabled and a bridge pre-seeded into
+// the daemon's REAL bridge shard (pre-boot, same file the boot wiring
+// opens), a memory.vector.search query over the daemon RPC must return the
+// bridge — Manager.Search/SearchSemantic now merge the bridge shard's
+// own-space recall. Before the fix the embedder-space search could never
+// see the hash-space shard and every generated bridge was unreachable.
+func TestBridgesDaemonRecall(t *testing.T) {
+	const bridgeText = "projectx deploys ship on fridays"
+	var bridgePath string
+
+	s := harness.Start(t,
+		harness.WithConfigOverlay(map[string]any{
+			"memory.bridges.enabled":       true,
+			"memory.bridges.kb":            2,
+			"memory.bridges.bridge_df_max": 10,
+		}),
+		harness.WithPreBootHook(func(st *harness.Stack) error {
+			// Pre-seed the daemon's bridge shard in the SAME directory the
+			// boot wiring resolves (shardBasePath: <dataDir>/memory/shards
+			// where dataDir = <state>/memory — see wireBridges).
+			bridgePath = filepath.Join(st.StateDir, "memory", "shards", "bridge.vec.db")
+			if err := os.MkdirAll(filepath.Dir(bridgePath), 0o755); err != nil {
+				return err
+			}
+			bs, err := memory.NewBridgeStore(bridgePath)
+			if err != nil {
+				return err
+			}
+			defer bs.Close()
+			rec := memory.BridgeRecord{
+				ID:          "bridge-recall-e2e",
+				Content:     bridgeText,
+				Embedding:   hashBridgeEmbeddingForTest(bridgeText),
+				EvidenceIDs: []string{"mem-seed-1"},
+				Metadata: map[string]any{
+					memory.BridgeMetaUnitType: memory.BridgeUnitTypeValue,
+				},
+			}
+			return bs.PutBridge(context.Background(), rec)
+		}),
+	)
+
+	// The daemon is up; query through the REAL RPC surface. The CLI calls
+	// memory.vector.search -> MemoryService.VectorSearch ->
+	// Manager.SearchSemantic -> mergeBridges.
+	out, stderr := s.RunCLI(t, 30*time.Second, false,
+		"memory", "vector", "search", "projectx deploy friday", "-n", "10")
+	combined := out + stderr
+	if strings.Contains(combined, "error") || strings.Contains(combined, "failed") {
+		t.Fatalf("memory vector search failed against a live daemon:\n%s\n%s", out, stderr)
+	}
+	if !strings.Contains(combined, bridgeText) {
+		t.Fatalf("bridge not surfaced in daemon recall:\nstdout: %s\nstderr: %s", out, stderr)
+	}
+}
+
 // TestBridgesDisabledDefault: the default config (no overlay) leaves the
 // daemon bridge-less — `meept memory --bridges` reports the honest empty
 // state instead of failing (the memory.bridges RPC is unavailable with no
