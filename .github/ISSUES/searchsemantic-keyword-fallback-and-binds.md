@@ -1,7 +1,10 @@
 # SearchSemantic keyword fallback AND-binds multi-word queries — semantic-ish recall misses near-matches
 
 Found: 2026-10-13, memory capability forest (tree 02 leaf L2, commit 4cd352fb).
-Status: OPEN — not fixed by the forest (workaround shipped in the conflict path only).
+Status: RESOLVED 2026-10-14 — commit fd732d17 (MatchAny + prefix terms on all
+three fallback sites; repro pinned by TestSearchSemanticFallbackFindsNearMatch).
+The ranking-preserving token-overlap re-rank (option b) remains a deferred
+follow-up; option (a) shipped as the issue's documented acceptable first step.
 
 ## The defect
 
