@@ -165,6 +165,31 @@ RE_CONST_DECL = re.compile(
     r'^\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+(?:[A-Za-z_][A-Za-z0-9_\[\]*.]+\s+)?=\s*"([^"]+)"'
 )
 
+# Typed-bus topics (internal/bus/topic.go): `var TopicX = bus.NewTopic[T]("name")`
+# declares the topic name ONCE; delivery goes through the generic helpers
+# PublishT/PublishBlockingT/SubscribeT, which the raw .Publish/.Subscribe
+# regexes above cannot see (their topic is a Topic[T] variable, not a string).
+# Pass 0 below harvests declarations; the RE_*_TYPED patterns attribute the
+# generic call sites to the harvested topic names.
+RE_NEWTOPIC_DECL = re.compile(
+    r'([A-Za-z_][A-Za-z0-9_.]*)\s*=\s*bus\.NewTopic\[[^\]]*\]\(\s*"([^"]+)"'
+)
+
+# PublishT(b, TopicX, source, payload) / PublishBlockingT(...) — the topic is
+# the 2nd positional arg (an identifier: local or pkg-qualified).
+RE_PUBLISH_TYPED = re.compile(
+    r'(?:PublishT|PublishBlockingT)\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_.]*)\s*,'
+)
+
+# SubscribeT(b, id, TopicX, fn) — the topic is the 3rd positional arg. The
+# id arg is a quoted string in every current call site, so anchor it
+# explicitly; the generic any-arg idiom cannot backtrack across a quoted
+# id to reach the topic ([^,()] stops at commas, so the id group must be
+# consumed by its own pattern, not the wildcard).
+RE_SUBSCRIBE_TYPED = re.compile(
+    r'SubscribeT\(\s*[^,]+,\s*"(?:[^"]*)"\s*,\s*([A-Za-z_][A-Za-z0-9_.]*)\s*,'
+)
+
 
 # ---------------------------------------------------------------------------
 # Structural bus-reachability analysis (the anti-fabrication guard)
@@ -709,6 +734,9 @@ def extract_bus_topology():
     publishers = defaultdict(list)   # topic -> [{file, line, payload_keys}]
     subscribers = defaultdict(list)  # topic -> [{file, line, subscriber_id}]
 
+    # Typed-bus Topic[T] vars: identifier (bare name) -> wire topic name.
+    typed_topic_table = {}
+
     go_files = list(find_go_files())
 
     # Pass 0: build the package-level string-constant table so identifier args
@@ -727,6 +755,14 @@ def extract_bus_topology():
             if m:
                 const_table[m.group(1)] = m.group(2)
                 const_table_by_dir.setdefault(fpath.parent, {})[m.group(1)] = m.group(2)
+            # Typed-bus topic declarations: TopicX (possibly pkg-qualified in
+            # call sites) -> wire name. Global table: Topic[T] vars are
+            # package-level and referenced cross-package by design.
+            tm = RE_NEWTOPIC_DECL.search(line)
+            if tm:
+                topic_var = tm.group(1).split(".")[-1]
+                typed_topic_table[topic_var] = tm.group(2)
+                const_table_by_dir.setdefault(fpath.parent, {})[topic_var] = tm.group(2)
 
     # Pass 1: collect direct publishes and wrapper-publish helpers.
     # publish_helpers maps helperName -> [(file, line)] of its Publish var site.
@@ -762,6 +798,20 @@ def extract_bus_topology():
                     "file": rel(fpath),
                     "line": i,
                     "payload_keys": sorted(payload_keys),
+                })
+
+            # Typed-bus publishes: PublishT/PublishBlockingT(b, TopicX, ...)
+            # resolve TopicX through the harvested NewTopic table.
+            for m in RE_PUBLISH_TYPED.finditer(line):
+                topic = typed_topic_table.get(m.group(1).split(".")[-1])
+                if topic is None:
+                    continue
+                payload_keys = _extract_payload_keys(lines, i - 1)
+                publishers[topic].append({
+                    "file": rel(fpath),
+                    "line": i,
+                    "payload_keys": sorted(payload_keys),
+                    "typed": True,
                 })
 
             # Concatenated-literal publishes ("push." + sessID) produce a
@@ -977,6 +1027,22 @@ def extract_bus_topology():
                                 })
                             break
                     break
+
+            # Typed-bus subscribes: SubscribeT(b, id, TopicX, fn) — resolve
+            # TopicX through the harvested NewTopic table. Subscriber id is
+            # the quoted 2nd arg when present, else the raw text.
+            for m in RE_SUBSCRIBE_TYPED.finditer(line):
+                topic = typed_topic_table.get(m.group(1).split(".")[-1])
+                if topic is None:
+                    continue
+                id_m = re.search(r'SubscribeT\(\s*[^,]+,\s*"([^"]*)"', line)
+                sub_id = id_m.group(1) if id_m else "SubscribeT"
+                subscribers[topic].append({
+                    "file": rel(fpath),
+                    "line": i,
+                    "subscriber_id": sub_id,
+                    "typed": True,
+                })
 
             for regex, wild in ((RE_SUBSCRIBE, False), (RE_SUBSCRIBE_WILDCARD, True)):
                 for m in regex.finditer(line):

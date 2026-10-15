@@ -48,7 +48,9 @@ func installDaemonLogger(out io.Writer, level string) (*slog.Logger, slog.Level)
 	return logger, resolved
 }
 
-// consoleWriter returns os.Stderr when it is a terminal (foreground run) and
+// consoleWriter returns the writer slog console output should tee to:
+// os.Stderr when it is a terminal (foreground run) or a real file that is
+// NOT the rotating log itself (a log-capturing harness or supervisor), and
 // nil otherwise.
 //
 // In a detached spawn the child's stderr is a raw O_APPEND fd on the same
@@ -57,14 +59,37 @@ func installDaemonLogger(out io.Writer, level string) (*slog.Logger, slog.Level)
 // write every slog line TWICE — once through the capped writer, once through
 // the uncapped fd — and after the first rotation the fd appends to a
 // renamed-then-unlinked inode: unbounded, unreclaimable growth, the exact shape
-// d8baa793 was written to stop (bughunt H3). Teeing only on a terminal keeps
-// exactly ONE writer on the log file in the detached case while foreground
-// runs still print.
-func consoleWriter() io.Writer {
-	if fi, err := os.Stderr.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
-		return os.Stderr
+// d8baa793 was written to stop (bughunt H3). So stderr is dropped as a console
+// sink only when it IS the capped log file (same dev+inode). A DIFFERENT file
+// on stderr is a deliberate capture (e2e harness daemon.log, supervisor
+// pipes-as-files, systemd) — teeing to it keeps those consumers working; it
+// was the silent loss of that capture that broke every log-asserting e2e
+// suite after d8baa793 (only the pre-logger "daemon starting" line, written
+// before installDaemonLogger, ever reached daemon.log).
+func consoleWriter(logPath string) io.Writer {
+	fi, err := os.Stderr.Stat()
+	if err != nil {
+		return nil
 	}
-	return nil
+	if fi.Mode()&os.ModeCharDevice != 0 {
+		return os.Stderr // terminal: foreground run, always tee
+	}
+	if fi.Mode().IsRegular() && !sameFile(fi, logPath) {
+		return os.Stderr // a different regular file: deliberate capture, tee
+	}
+	return nil // stderr IS the rotating log (spawner-handed fd): no tee
+}
+
+// sameFile reports whether the already-statted stderr refers to the same
+// file as logPath (device + inode comparison; a path-based equality is not
+// enough because the spawner's fd and the cap writer's path are opened
+// independently and may differ by symlink).
+func sameFile(stderrFi os.FileInfo, logPath string) bool {
+	logFi, err := os.Stat(logPath)
+	if err != nil {
+		return false // log not created yet → stderr cannot be it
+	}
+	return os.SameFile(stderrFi, logFi)
 }
 
 // newRotatingLogWriter returns an io.Writer for the daemon log that is capped at

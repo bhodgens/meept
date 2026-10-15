@@ -2282,6 +2282,14 @@
         ]
       }
     ],
+    "turn.terminal": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 1676,
+        "payload_keys": [],
+        "typed": true
+      }
+    ],
     "worker.add": [
       {
         "file": "internal/rpc/proxy.go",
@@ -3733,6 +3741,14 @@
         "line": 755,
         "subscriber_id": "slice:topics:turn.*",
         "via_topic_slice": true
+      }
+    ],
+    "turn.terminal": [
+      {
+        "file": "internal/daemon/memory_capture.go",
+        "line": 67,
+        "subscriber_id": "memory-capture",
+        "typed": true
       }
     ],
     "worker.*": [
