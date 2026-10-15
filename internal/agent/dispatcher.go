@@ -2454,7 +2454,7 @@ func (d *Dispatcher) dispatchConsumesTask(intent *Intent) bool {
 // that will handle this task; it is persisted on the task via
 // WithAssignedAgent so downstream consumers know the routing decision at
 // dispatch time.
-func (d *Dispatcher) createTask(_ context.Context, input string, intent *Intent, sessionID, agentID string) *task.Task {
+func (d *Dispatcher) createTask(ctx context.Context, input string, intent *Intent, sessionID, agentID string) *task.Task {
 	// Create task summary
 	summary := intent.Summary
 	if summary == "" {
@@ -2464,6 +2464,14 @@ func (d *Dispatcher) createTask(_ context.Context, input string, intent *Intent,
 	t := task.NewTask(summary, input)
 	t.WithAssignedAgent(agentID)
 	t.LinkSession(sessionID)
+	// C3 goal carry-through (bughunt 2026-10-14): a quickplan task is the
+	// executing sibling of the plan routeToPlan just anchored, so it gets
+	// the same goal. resolveGoalID is the C6 precedence (session bind >
+	// employee bind > sole active > implicit) and returns "" when nothing
+	// applies — legacy goal-less tasks stay legal.
+	if t.GoalID == "" {
+		t.GoalID = d.resolveGoalID(ctx, sessionID, summary)
+	}
 
 	// Store task
 	if d.taskStore != nil {

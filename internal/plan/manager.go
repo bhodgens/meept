@@ -32,6 +32,15 @@ type TaskCreator interface {
 	ScheduleSteps(ctx context.Context, taskID string) error
 }
 
+// TaskGoalSetter is the optional seam a TaskCreator implements when the
+// backing task store can persist a task's owning goal (goal-completion C3).
+// Synthesize stamps the plan's GoalID onto every task it creates through it;
+// a creator without the seam keeps working (goal-less tasks stay legacy-legal)
+// (bughunt 2026-10-14: plans carried goal_id, synthesized tasks did not).
+type TaskGoalSetter interface {
+	SetGoalID(ctx context.Context, taskID, goalID string) error
+}
+
 // PlanManager orchestrates plan lifecycle: creation, approval, synthesis
 // into tasks, progress tracking, and confirmation.
 type PlanManager struct {
@@ -105,6 +114,23 @@ func (m *PlanManager) SetPlanGoal(ctx context.Context, planID, goalID string) er
 // context block (quickplan-mode leaf 02).
 func (m *PlanManager) GetPlansForSession(ctx context.Context, sessionID string) ([]*Plan, error) {
 	return m.store.GetPlansForSession(ctx, sessionID)
+}
+
+// stampTaskGoal carries a plan's goal onto a synthesized task through the
+// optional TaskGoalSetter seam. Best-effort: a creator without the seam or a
+// failed stamp logs a Warn and leaves the task goal-less (legacy-legal).
+func (m *PlanManager) stampTaskGoal(ctx context.Context, taskID, goalID string) {
+	if goalID == "" {
+		return
+	}
+	setter, ok := m.taskCreator.(TaskGoalSetter)
+	if !ok {
+		return
+	}
+	if err := setter.SetGoalID(ctx, taskID, goalID); err != nil {
+		m.logger.Warn("failed to stamp plan goal onto task",
+			"task_id", taskID, "goal_id", goalID, "error", err)
+	}
 }
 
 // maxStrandedRecoverScan bounds how many stranded-synthesis plans one
@@ -634,6 +660,12 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 		return fmt.Errorf("create parent task: %w", err)
 	}
 
+	// Carry the plan's goal onto the parent task (goal-completion C3, via
+	// the optional TaskGoalSetter seam). Best-effort with a Warn: a creator
+	// without the seam (or a failed stamp) leaves a goal-less task, which
+	// stays legacy-legal (bughunt 2026-10-14).
+	m.stampTaskGoal(ctx, parentTask.ID, plan.GoalID)
+
 	// Link the plan's source session to the parent task.
 	if plan.SourceSession != "" {
 		if err := m.taskCreator.LinkSession(ctx, parentTask.ID, plan.SourceSession); err != nil {
@@ -671,6 +703,9 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 		m.phaseTaskMap[childTask.ID] = phase.ID
 		m.taskPlanMap[childTask.ID] = planID
 		m.mu.Unlock()
+
+		// Carry the plan's goal onto the phase child task (same C3 seam).
+		m.stampTaskGoal(ctx, childTask.ID, plan.GoalID)
 
 		// Persist the child task ID on the phase for recovery after restart.
 		phase.TaskID = childTask.ID

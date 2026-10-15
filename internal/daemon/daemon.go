@@ -2830,6 +2830,12 @@ func (a *taskCreatorAdapter) CreateTask(ctx context.Context, name, description s
 	return a.registry.Create(ctx, name, description)
 }
 
+// SetGoalID forwards the plan system's TaskGoalSetter seam onto the registry
+// (goal-completion C3): synthesized tasks inherit the plan's goal.
+func (a *taskCreatorAdapter) SetGoalID(ctx context.Context, taskID, goalID string) error {
+	return a.registry.SetGoalID(ctx, taskID, goalID)
+}
+
 func (a *taskCreatorAdapter) CreateTaskStep(ctx context.Context, taskID, description string, sequence int) (*task.TaskStep, error) {
 	step := task.NewTaskStep(taskID, description, sequence)
 	if err := a.registry.StepStore().Create(step); err != nil {

@@ -211,6 +211,37 @@ func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskSta
 	return nil
 }
 
+// SetGoalID stamps the owning goal onto a task (goal-completion C3): the
+// task's GoalID is persisted in the same UPDATE the registry already owns,
+// so a plan-level goal survives synthesis (bughunt 2026-10-14: Plan rows
+// carried goal_id but the tasks synthesized FROM them did not). A task
+// that does not exist returns an error.
+func (r *Registry) SetGoalID(ctx context.Context, taskID, goalID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return fmt.Errorf("registry is closed")
+	}
+
+	t, err := r.store.GetByID(taskID)
+	if err != nil {
+		return err
+	}
+	if t == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	t.GoalID = goalID
+	if err := r.store.Update(t); err != nil {
+		return err
+	}
+	r.publishEvent(taskEventTopic("task.update"), map[string]any{
+		KeyTaskID: t.ID,
+		"goal_id": goalID,
+	})
+	return nil
+}
+
 // LinkSession links a session to a task.
 func (r *Registry) LinkSession(ctx context.Context, taskID, sessionID string) error {
 	r.mu.Lock()
