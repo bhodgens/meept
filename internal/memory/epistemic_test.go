@@ -27,6 +27,74 @@ func newTestManager(t *testing.T) *Manager {
 	return mgr
 }
 
+// TestSearchMergesBridgeRecall pins the finding-2 recall fix (bughunt
+// 2026-10-14): a generated bridge must appear in Manager.Search results,
+// queried in the bridge shard's own hash space (not the embedder space that
+// could never see it), capped at kb, tagged Source="bridge".
+func TestSearchMergesBridgeRecall(t *testing.T) {
+	m := newTestManager(t)
+	ctx := context.Background()
+
+	// Seed a source memory so the search has a hit besides the bridge.
+	if _, err := m.Store(ctx, Memory{
+		Type:     MemoryTypeEpisodic,
+		Category: "conversation",
+		Content:  "deploy runs at noon UTC",
+	}); err != nil {
+		t.Fatalf("store source: %v", err)
+	}
+
+	bs, err := NewBridgeStore(t.TempDir() + "/bridge.vec.db")
+	if err != nil {
+		t.Fatalf("NewBridgeStore: %v", err)
+	}
+	defer bs.Close()
+	rec := BridgeRecord{
+		ID:          "bridge-recall-1",
+		Content:     "deploys and rollbacks share the noon window",
+		Embedding:   hashBridgeEmbedding("deploys and rollbacks share the noon window"),
+		EvidenceIDs: []string{"mem-x"},
+	}
+	if err := bs.PutBridge(ctx, rec); err != nil {
+		t.Fatalf("PutBridge: %v", err)
+	}
+	m.SetBridgeStore(bs)
+
+	results, err := m.Search(ctx, MemoryQuery{Query: "deploy noon rollback", Limit: 10, MatchAny: true, PrefixTerms: true})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	var sawBridge bool
+	for _, r := range results {
+		if r.Source == "bridge" {
+			sawBridge = true
+			if r.Memory.ID != rec.ID {
+				t.Errorf("bridge result ID = %q, want %q", r.Memory.ID, rec.ID)
+			}
+			if r.Memory.Content != rec.Content {
+				t.Errorf("bridge content = %q, want %q", r.Memory.Content, rec.Content)
+			}
+		}
+	}
+	if !sawBridge {
+		t.Fatalf("no bridge result in search output; results: %+v", results)
+	}
+
+	// Without a wired store the same search must not fail and must not
+	// contain bridge rows (nil-store posture: supplement, never failure).
+	m.SetBridgeStore(nil)
+	results, err = m.Search(ctx, MemoryQuery{Query: "deploy noon rollback", Limit: 10, MatchAny: true, PrefixTerms: true})
+	if err != nil {
+		t.Fatalf("Search without bridge store: %v", err)
+	}
+	for _, r := range results {
+		if r.Source == "bridge" {
+			t.Errorf("bridge result present with nil store: %+v", r)
+		}
+	}
+}
+
 // TestSearchSemanticFallbackFindsNearMatch pins the bughunt 2026-10-14 fix
 // (.github/ISSUES/searchsemantic-keyword-fallback-and-binds.md): the keyword
 // fallback must surface a near-match. Two defects stacked before the fix —

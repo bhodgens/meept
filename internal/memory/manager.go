@@ -17,6 +17,7 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	"github.com/caimlas/meept/internal/memory/vector"
 	"github.com/caimlas/meept/internal/security"
 )
 
@@ -704,12 +705,80 @@ func (m *Manager) Search(ctx context.Context, query MemoryQuery) ([]MemoryResult
 		results, err := m.searchViaMemvid(ctx, query)
 		if err != nil {
 			m.logger.Warn("Memvid search failed, trying SQLite fallback", "error", err)
-			return m.searchViaSQLite(ctx, query)
+			results, err = m.searchViaSQLite(ctx, query)
+			if err != nil {
+				return nil, err
+			}
+			return m.mergeBridges(ctx, query.Query, results)
 		}
-		return results, nil
+		return m.mergeBridges(ctx, query.Query, results)
 	}
 
-	return m.searchViaSQLite(ctx, query)
+	results, err := m.searchViaSQLite(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return m.mergeBridges(ctx, query.Query, results)
+}
+
+// mergeBridges appends the bridge store's own-space recall to a result set
+// (bughunt 2026-10-14, finding 2 recall half): bridges live in a 256-dim
+// lexical-hash vector space, so the embedder-space shard search could never
+// retrieve them and generated bridges were dead on arrival for recall.
+// SearchBridgesByQuery queries the bridge shard in ITS space; hits convert
+// to MemoryResult{Source: "bridge"} and are appended after the source units,
+// capped at memory.bridges.kb (the SelectBalanced k_b contract) and deduped
+// by ID. Best-effort: a missing/closed store or a search error is logged at
+// debug and the source results return unchanged — bridges are a supplement,
+// never a failure.
+func (m *Manager) mergeBridges(ctx context.Context, queryText string, results []MemoryResult) ([]MemoryResult, error) {
+	m.mu.RLock()
+	bs := m.bridgeStore
+	kb := m.config.Bridges.KB
+	m.mu.RUnlock()
+	if bs == nil || queryText == "" {
+		return results, nil
+	}
+	if kb <= 0 {
+		kb = vector.DefaultBridgeKB
+	}
+	bridges, err := bs.SearchBridgesByQuery(ctx, queryText, kb)
+	if err != nil {
+		m.logger.Debug("bridge recall skipped", "error", err)
+		return results, nil
+	}
+	seen := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		seen[r.Memory.ID] = struct{}{}
+	}
+	out := results
+	appended := 0
+	for _, b := range bridges {
+		if appended >= kb {
+			break
+		}
+		if _, dup := seen[b.ID]; dup {
+			continue
+		}
+		seen[b.ID] = struct{}{}
+		out = append(out, MemoryResult{
+			Memory: Memory{
+				ID:      b.ID,
+				Content: b.Content,
+				Type:    MemoryTypeEpisodic,
+				Metadata: map[string]any{
+					BridgeMetaUnitType: BridgeUnitTypeValue,
+				},
+			},
+			RelevanceScore: 0.5, // below source FTS hits; supplementary pool
+			Source:         "bridge",
+		})
+		appended++
+	}
+	if appended > 0 {
+		m.logger.Debug("bridge recall appended", "count", appended, "kb", kb)
+	}
+	return out, nil
 }
 
 // searchViaMemvid searches memories through the memvid service.

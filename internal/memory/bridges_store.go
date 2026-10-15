@@ -212,6 +212,18 @@ func (bs *BridgeStore) DeleteBridge(ctx context.Context, id string) error {
 	return nil
 }
 
+// SearchBridgesByQuery runs a KNN search over the bridge shard using the
+// SAME lexical-hash embedding generation writes (hashBridgeEmbedding, 256
+// bytes-to-bucket). No external embedder is involved: bridges are stored
+// and queried in their own vector space, so recall works with or without
+// memory.embeddings configured. Results carry unit_type=bridge metadata so
+// SelectBalanced's cap applies downstream (bughunt 2026-10-14 — the recall
+// half of the dimension-mismatch finding: the embedder-space search could
+// never see the hash-space bridge shard).
+func (bs *BridgeStore) SearchBridgesByQuery(ctx context.Context, query string, k int) ([]BridgeRecord, error) {
+	return bs.SearchByEmbedding(ctx, hashBridgeEmbedding(query), k)
+}
+
 // SearchByEmbedding runs a KNN search over the bridge shard and enriches hits
 // with their canonical metadata. This is a store-level primitive — the recall
 // path (B04) applies the k_b cap on top of it.
