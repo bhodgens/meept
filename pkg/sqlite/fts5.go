@@ -134,6 +134,33 @@ func sanitizeTerm(term string) string {
 	return strings.TrimSpace(sb.String())
 }
 
+// SanitizeQueryOpPrefixes converts a raw user query into a safe FTS5 MATCH
+// expression joining tokens with the given boolean operator, with each token
+// as a PREFIX query ("term"*). FTS5's default unicode61 tokenizer does not
+// stem, so an exact "friday" never matches stored "Fridays" — prefix
+// matching recovers the near-miss recall a semantic-search fallback owes its
+// callers (bughunt 2026-10-14: SearchSemantic with MatchAny still returned 0
+// hits for "deploy friday afternoons" over stored "user deploys on Fridays").
+func SanitizeQueryOpPrefixes(raw, operator string) string {
+	q := NewFTS5Query()
+	if operator == "OR" {
+		q.Or()
+	}
+	quotedTerms := make([]string, 0, 8)
+	for t := range strings.FieldsSeq(raw) {
+		if sanitized := sanitizeTerm(t); sanitized != "" {
+			// The star goes OUTSIDE the quotes: "term"* is the FTS5
+			// prefix-query form; "term*" is a literal string containing a
+			// star and matches nothing.
+			quotedTerms = append(quotedTerms, fmt.Sprintf("%q*", sanitized))
+		}
+	}
+	if len(quotedTerms) == 0 {
+		return ""
+	}
+	return strings.Join(quotedTerms, " "+q.operator+" ")
+}
+
 // SanitizeQuery converts a raw user query into a safe FTS5 MATCH expression.
 // Each whitespace-separated token is quoted for safety.
 func SanitizeQuery(raw string) string {

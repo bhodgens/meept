@@ -204,7 +204,12 @@ func (e *EpisodicMemory) SearchOptions(ctx context.Context, p SearchParams) ([]M
 	if p.MatchAny {
 		op = "OR"
 	}
-	safeQuery := sqlite.SanitizeQueryOp(p.Query, op)
+	var safeQuery string
+	if p.PrefixTerms {
+		safeQuery = sqlite.SanitizeQueryOpPrefixes(p.Query, op)
+	} else {
+		safeQuery = sqlite.SanitizeQueryOp(p.Query, op)
+	}
 	if safeQuery == "" {
 		return e.GetRecent(ctx, p.Limit)
 	}

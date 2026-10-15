@@ -93,6 +93,11 @@ type MemoryQuery struct {
 	// instead of the default ALL-token (AND). Useful for relevance ranking,
 	// where partial term overlap should still surface documents.
 	MatchAny bool `json:"match_any,omitempty"`
+	// PrefixTerms turns each FTS5 token into a prefix query ("term"*), so
+	// "friday" matches stored "Fridays" (the default tokenizer does not
+	// stem). Set by the semantic/hybrid keyword fallbacks, whose re-ranking
+	// tolerates the wider candidate pool (bughunt 2026-10-14).
+	PrefixTerms bool `json:"prefix_terms,omitempty"`
 }
 
 // MemoryStats holds aggregate statistics about stored memories.

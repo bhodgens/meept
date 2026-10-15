@@ -27,6 +27,41 @@ func newTestManager(t *testing.T) *Manager {
 	return mgr
 }
 
+// TestSearchSemanticFallbackFindsNearMatch pins the bughunt 2026-10-14 fix
+// (.github/ISSUES/searchsemantic-keyword-fallback-and-binds.md): the keyword
+// fallback must surface a near-match. Two defects stacked before the fix —
+// the AND-bind required every token, and the non-stemming tokenizer meant
+// even MatchAny's exact tokens ("friday") missed stored "Fridays".
+// MatchAny + prefix terms recovers it.
+func TestSearchSemanticFallbackFindsNearMatch(t *testing.T) {
+	m := newTestManager(t)
+	ctx := context.Background()
+	if _, err := m.Store(ctx, Memory{
+		Type:     MemoryTypeEpisodic,
+		Category: "conversation",
+		Content:  "user deploys on Fridays",
+	}); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	results, err := m.SearchSemantic(ctx, "deploy friday afternoons", 10)
+	if err != nil {
+		t.Fatalf("SearchSemantic: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("semantic fallback returned 0 results for a near-match query")
+	}
+	found := false
+	for _, r := range results {
+		if r.Memory.Content == "user deploys on Fridays" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("near-match not in results: %+v", results)
+	}
+}
+
 func TestClaimTemporalFields(t *testing.T) {
 	vt := time.Now().UTC().Add(-time.Hour)
 	c := Claim{

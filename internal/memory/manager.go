@@ -815,9 +815,10 @@ func (m *Manager) searchViaSQLite(ctx context.Context, query MemoryQuery) ([]Mem
 
 	if searchEpisodic && m.episodic != nil {
 		episodicResults, err := m.episodic.SearchOptions(ctx, SearchParams{
-			Query:    query.Query,
-			Limit:    query.Limit,
-			MatchAny: query.MatchAny,
+			Query:       query.Query,
+			Limit:       query.Limit,
+			MatchAny:    query.MatchAny,
+			PrefixTerms: query.PrefixTerms,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("episodic search failed: %w", err)
@@ -827,10 +828,11 @@ func (m *Manager) searchViaSQLite(ctx context.Context, query MemoryQuery) ([]Mem
 
 	if searchTask && m.task != nil {
 		taskResults, err := m.task.SearchOptions(ctx, SearchParams{
-			Query:    query.Query,
-			Domain:   query.Domain,
-			Limit:    query.Limit,
-			MatchAny: query.MatchAny,
+			Query:       query.Query,
+			Domain:      query.Domain,
+			Limit:       query.Limit,
+			MatchAny:    query.MatchAny,
+			PrefixTerms: query.PrefixTerms,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("task search failed: %w", err)
@@ -1980,11 +1982,20 @@ func (m *Manager) SearchSemantic(ctx context.Context, query string, limit int) (
 		return memResults, nil
 	}
 
-	// Fallback to keyword search
+	// Fallback to keyword search. MatchAny + PrefixTerms (bughunt 2026-10-14,
+	// .github/ISSUES/searchsemantic-keyword-fallback-and-binds.md): the
+	// default AND-bind required EVERY query token to appear, and the FTS5
+	// tokenizer does not stem, so even MatchAny returned 0 hits for
+	// "deploy friday afternoons" over stored "user deploys on Fridays".
+	// OR + prefix matching widens recall; FTS rank still orders best first.
+	// The ranking-preserving token-overlap re-rank (issue option b) is the
+	// deferred follow-up.
 	m.logger.Debug("Vector store not configured, falling back to keyword search for SearchSemantic")
 	return m.Search(ctx, MemoryQuery{
-		Query: query,
-		Limit: limit,
+		Query:       query,
+		Limit:       limit,
+		MatchAny:    true,
+		PrefixTerms: true,
 	})
 }
 
@@ -2004,10 +2015,15 @@ func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]
 
 	// If vector store is available, perform hybrid search
 	if m.vectorStore != nil {
-		// Get keyword results
+		// Get keyword results. MatchAny + PrefixTerms (bughunt 2026-10-14,
+		// same near-miss blindness as the SearchSemantic fallback): the
+		// hybrid merge re-ranks by score, so the wider OR+prefix pool only
+		// improves what the re-rank sees.
 		keywordResults, err := m.searchViaSQLite(ctx, MemoryQuery{
-			Query: query,
-			Limit: limit * 2, // Fetch more to re-rank
+			Query:       query,
+			Limit:       limit * 2, // Fetch more to re-rank
+			MatchAny:    true,
+			PrefixTerms: true,
 		})
 		if err != nil {
 			keywordResults = []MemoryResult{}
@@ -2074,11 +2090,14 @@ func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]
 		return results, nil
 	}
 
-	// Fallback to keyword search
+	// Fallback to keyword search. MatchAny + PrefixTerms (bughunt 2026-10-14,
+	// same near-miss blindness as the SearchSemantic fallback).
 	m.logger.Debug("Vector store not configured, falling back to keyword search for SearchHybrid")
 	return m.Search(ctx, MemoryQuery{
-		Query: query,
-		Limit: limit,
+		Query:       query,
+		Limit:       limit,
+		MatchAny:    true,
+		PrefixTerms: true,
 	})
 }
 

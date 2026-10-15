@@ -175,6 +175,12 @@ type SearchParams struct {
 	Limit int
 	// MatchAny relaxes FTS matching to ANY-token (OR joined).
 	MatchAny bool
+	// PrefixTerms turns each token into an FTS5 prefix query ("term"*).
+	// The default tokenizer does not stem, so "friday" never matches stored
+	// "Fridays"; prefix matching restores near-miss recall for the
+	// semantic-search fallback (bughunt 2026-10-14). Only set by callers
+	// whose ranking tolerates a wider candidate pool.
+	PrefixTerms bool
 }
 
 // SearchOptions finds task memories with full option control.
@@ -187,7 +193,12 @@ func (t *TaskMemory) SearchOptions(ctx context.Context, p SearchParams) ([]Memor
 	if p.MatchAny {
 		op = "OR"
 	}
-	safeQuery := sqlite.SanitizeQueryOp(p.Query, op)
+	var safeQuery string
+	if p.PrefixTerms {
+		safeQuery = sqlite.SanitizeQueryOpPrefixes(p.Query, op)
+	} else {
+		safeQuery = sqlite.SanitizeQueryOp(p.Query, op)
+	}
 	if safeQuery == "" {
 		return t.GetRecent(ctx, p.Domain, p.Limit)
 	}
