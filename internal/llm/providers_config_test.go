@@ -181,10 +181,10 @@ func TestConfigLoads(t *testing.T) {
 		}
 		// Missing/unparseable file: the 8081 default above still guards.
 	}
-	for name, port := range seenPort {
+	for port, provName := range seenPort {
 		if _, clash := transportPorts[port]; clash {
 			t.Errorf("provider %s uses loopback port %s, the daemon transport.http (GUI) port — "+
-				"give the runtime its own port", name, port)
+				"give the runtime its own port", provName, port)
 		}
 	}
 
