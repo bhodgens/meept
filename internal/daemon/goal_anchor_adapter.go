@@ -56,6 +56,22 @@ type goalAnchorAdapter struct {
 	logger   *slog.Logger
 }
 
+// resolveSession returns the session row for a chat-supplied id. The chat
+// path passes the CONVERSATION id (CLI/TUI omit conversation_id, so submit
+// rewrites session_id to conv-…), while the bind surfaces key goal/employee
+// bindings on the PRIMARY session id. Try the primary key first, then the
+// conversation column (bughunt 2026-10-14: conv-… misses made branch 1 and
+// the employee binding unreachable on the CLI/TUI surfaces).
+func (a *goalAnchorAdapter) resolveSession(id string) *session.Session {
+	if a.sessions == nil || id == "" {
+		return nil
+	}
+	if sess := a.sessions.Get(id); sess != nil {
+		return sess
+	}
+	return a.sessions.GetByConversationID(id)
+}
+
 // Compile-time guard: the adapter must satisfy agent.GoalAnchorStore.
 var _ interface {
 	SessionGoalID(sessionID string) string
@@ -72,7 +88,7 @@ func (a *goalAnchorAdapter) SessionGoalID(sessionID string) string {
 	if a.sessions == nil || sessionID == "" {
 		return ""
 	}
-	sess := a.sessions.Get(sessionID)
+	sess := a.resolveSession(sessionID)
 	if sess == nil || sess.GoalID == "" {
 		return ""
 	}
@@ -111,7 +127,7 @@ func (a *goalAnchorAdapter) SoleEmployeeID() string {
 func (a *goalAnchorAdapter) SessionEmployeeID(sessionID string) string {
 	bound := ""
 	if a.sessions != nil && sessionID != "" {
-		if sess := a.sessions.Get(sessionID); sess != nil {
+		if sess := a.resolveSession(sessionID); sess != nil {
 			bound = sess.EmployeeID
 		}
 	}

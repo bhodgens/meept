@@ -69,6 +69,42 @@ func TestGoalAnchorAdapter_SessionEmployeeIDPrefersBinding(t *testing.T) {
 	}
 }
 
+// TestGoalAnchorAdapter_ResolvesByConversationID pins the bughunt 2026-10-14
+// id fix: the chat path hands the anchor the CONVERSATION id (CLI/TUI omit
+// conversation_id so submit rewrites session_id to conv-…), while bind
+// surfaces key goal/employee on the PRIMARY session id. Both lookups must
+// resolve through the conversation column.
+func TestGoalAnchorAdapter_ResolvesByConversationID(t *testing.T) {
+	bots, goals := newAdapterTestGoalStore(t)
+	seedEmployee(t, bots, "emp9")
+	store := newAdapterTestSessionStore(t)
+
+	sess, err := store.Create("conv-bound")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.SetEmployeeID(sess.ID, "emp9"); err != nil {
+		t.Fatalf("SetEmployeeID: %v", err)
+	}
+	// A real active goal row (FK requires the seeded employee).
+	g, err := goals.EnsureImplicitGoal(context.Background(), "emp9", "conv goal")
+	if err != nil {
+		t.Fatalf("EnsureImplicitGoal: %v", err)
+	}
+	if err := store.SetGoalID(sess.ID, g.ID); err != nil {
+		t.Fatalf("SetGoalID: %v", err)
+	}
+
+	a := newGoalAnchorAdapter(store, goals, fakeRoster{ids: []string{"emp1", "emp9"}}, nil)
+
+	if got := a.SessionEmployeeID(sess.ConversationID); got != "emp9" {
+		t.Errorf("SessionEmployeeID(conv-…) = %q, want emp9 via conversation fallback", got)
+	}
+	if got := a.SessionGoalID(sess.ConversationID); got != g.ID {
+		t.Errorf("SessionGoalID(conv-…) = %q, want %s via conversation fallback", got, g.ID)
+	}
+}
+
 // TestGoalAnchorAdapter_SessionEmployeeIDDegradations pins the inert paths:
 // nil sessions store, empty session id, and a dangling binding.
 func TestGoalAnchorAdapter_SessionEmployeeIDDegradations(t *testing.T) {
