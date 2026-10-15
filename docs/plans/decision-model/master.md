@@ -174,7 +174,7 @@ Wave order: 01 → 02 → (03 ∥ 04) → integration gates.
 
 | Leaf | Status | Commit | Notes |
 |------|--------|--------|-------|
-| 01 | PENDING | — | |
+| 01 | DONE | 44f8f073 | config slot + knobs + resolver field; tests in internal/config/decision_model_test.go + internal/llm/resolver_decision_model_test.go |
 | 02 | PENDING | — | |
 | 03 | PENDING | — | |
 | 04 | PENDING | — | |
