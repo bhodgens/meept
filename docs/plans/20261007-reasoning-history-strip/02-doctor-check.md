@@ -31,7 +31,8 @@ auto-fix, never restart, never mutate config.
   reading the type (grep `type ProviderConfig` / `type ModelConfig` in
   internal/llm) — do NOT trust this doc over the source.
 - Known local endpoints on this machine: :8080 (local-gguf, llama.cpp
-  --jinja), :8081 (local-mlx), :8083 (local mlx_lm), :8084 (local-extract,
+  --jinja), :8143 (local-mlx; was :8081, which is the GUI TLS port),
+  :8083 (local mlx_lm), :8084 (local-extract,
   completion-only — not reasoning-capable, must be skipped).
 
 ## Tasks

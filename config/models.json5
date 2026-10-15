@@ -135,7 +135,12 @@
     "local-mlx": {
       "api": "openai",
       "options": {
-        "baseURL": "http://127.0.0.1:8081/v1"
+        // :8143 — dedicated classifier port. This was :8081, which is ALSO
+        // the daemon's transport.http (GUI) port: a runtime sharing the
+        // GUI listener's port number made every install one race away
+        // from the spawn guard refusing the classifier (port held) or a
+        // client hitting the wrong server (2026-10-14, this install).
+        "baseURL": "http://127.0.0.1:8143/v1"
       },
       "lifecycle": {
         "runtime": "mlx",
@@ -143,7 +148,7 @@
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/mlx-classifier.pid",
-        "spawn_command": ["mlx_lm", "server", "--model", "${MODEL_PATH}", "--port", "8081"],
+        "spawn_command": ["mlx_lm", "server", "--model", "${MODEL_PATH}", "--port", "8143"],
         "spawn_timeout_seconds": 90,
         "health_check": {
           "endpoint": "/health",

@@ -107,8 +107,11 @@ system prompt — so the template is not at fault.
 not render the tool list and the model emits no call at all.
 
 Port layout for the local endpoints: 8080 llama.cpp general driver,
-8081 mlx combined-sft, 8082 the prompt-router sidecar (reserved — not a
-provider port), 8083 mlx general, 8084 llama.cpp extractor.
+8081 the daemon's transport.http (GUI TLS listener — NOT a provider
+port), 8082 the prompt-router sidecar (reserved — not a provider
+port), 8083 mlx general, 8084 llama.cpp extractor, 8143 mlx
+combined-sft classifier. 8143 was :8081, which collided with the GUI
+listener (2026-10-14).
 `internal/llm/providers_config_test.go` fails the build if two providers
 claim one loopback port, or if any provider claims 8082.
 

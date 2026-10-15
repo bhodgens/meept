@@ -1306,7 +1306,7 @@ wait_for_runtime() {
 # written when the config was rewritten) replaces the old HTTP_PORT+1/+2
 # arithmetic, which after 20d02738 pointed the "general" wait at a port nothing
 # binds and paid a spurious 120s warning on every run (audit F68).
-MLX_CLASS_PORT="$(map_port 8081)"   # template's classifier runtime
+MLX_CLASS_PORT="$(map_port 8143)"   # template's classifier runtime (was 8081 = GUI TLS port, 2026-10-14)
 MLX_GEN_PORT="$(map_port 8083)"     # template's general (mlx) runtime
 if [ -n "$MLX_CLASS_PORT" ]; then
   wait_for_runtime "$MLX_CLASS_PORT" "classifier" || true
