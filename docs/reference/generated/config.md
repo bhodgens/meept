@@ -1607,6 +1607,15 @@ CompactionConfig configures LLM\-based context compaction.
 	    // with a re-read pointer line instead of the irreversible truncation text.
 	    // Opt-in, default false (spilling is disabled unless explicitly enabled).
 	    SpillEnabled bool `json:"spill_enabled" toml:"spill_enabled"`
+	    // DecisionEnabled opts the decision-model-only compaction lane in
+	    // (decision-model tree, leaf 04): each history entry is scored by the
+	    // decision model and entries below DecisionKeepBar are dropped verbatim.
+	    // Default false — the existing summarizer stays the default lane, and
+	    // with no decision_model configured this knob is ignored entirely.
+	    DecisionEnabled bool `json:"decision_enabled" toml:"decision_enabled"`
+	    // DecisionKeepBar is the score (0-4 rubric) a history entry must reach
+	    // to survive decision-model compaction. Default 2.
+	    DecisionKeepBar int `json:"decision_keep_bar" toml:"decision_keep_bar"`
 	}
 
 <a name="Config"></a>
@@ -3264,6 +3273,22 @@ ModelsConfig represents the models.json5 configuration structure.
 	    // PlannerModel is the dedicated model for the strategic planner; empty
 	    // = planner uses its agent default (local 8B).
 	    PlannerModel string `json:"planner_model"`
+	    // DecisionModel is the dedicated decision model (Jev-style typed
+	    // decision endpoint: fixed labels, calibrated probabilities, no
+	    // generated tokens). Empty = decision-model features disabled (gates
+	    // confirmation-only, compaction summarizer). Never defaults to
+	    // small_model (decision-model tree leaf 01).
+	    DecisionModel string `json:"decision_model"`
+	    // DecisionEscalationThreshold is the confidence above which a
+	    // decision-model answer is trusted without escalation. 0 = treat every
+	    // answer as below-threshold (escalate).
+	    DecisionEscalationThreshold float64 `json:"decision_escalation_threshold"`
+	    // DecisionGateEnabled is the opt-in irreversibility gate hook on
+	    // destructive tool calls. Requires decision_model. Default false.
+	    DecisionGateEnabled bool `json:"decision_gate_enabled"`
+	    // DecisionGateTools lists the tool names the gate consults. Empty =
+	    // sensible defaults chosen by the gate implementation.
+	    DecisionGateTools []string `json:"decision_gate_tools"`
 	    // RefusalModel is the global default refusal fallback target
 	    // (provider/model ref or alias name; refusal-fallback tree 02).
 	    // Empty = no global default; a per-agent spec refusal_model overrides

@@ -36,6 +36,21 @@
   // no global default; a per-agent AGENT.md refusal_model overrides this.
   "refusal_model": "",
 
+  // Dedicated decision model: Jev-style typed decision endpoint (fixed
+  // labels, calibrated probabilities, no generated tokens). Empty =
+  // decision-model features disabled (tier routing keeps legacy behavior,
+  // tool gates keep confirmation-only flow, compaction keeps summarization).
+  "decision_model": "",
+  // Confidence above which a decision-model answer is trusted without
+  // escalation. 0 = treat every answer as below-threshold (escalate).
+  // "decision_escalation_threshold": 0.85,
+  // Opt-in irreversibility gate hook on destructive tool calls. Requires
+  // decision_model. Default false.
+  // "decision_gate_enabled": true,
+  // Tool names the gate consults. Empty = sensible defaults chosen by the
+  // gate implementation.
+  // "decision_gate_tools": ["shell"],
+
   // Dedicated model for ambient epistemic extraction + distill
   // summarization. Empty = falls back to the general chat client. Point
   // this at a small, cheap model.

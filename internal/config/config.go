@@ -382,6 +382,22 @@ type ModelsConfig struct {
 	// PlannerModel is the dedicated model for the strategic planner; empty
 	// = planner uses its agent default (local 8B).
 	PlannerModel string `json:"planner_model"`
+	// DecisionModel is the dedicated decision model (Jev-style typed
+	// decision endpoint: fixed labels, calibrated probabilities, no
+	// generated tokens). Empty = decision-model features disabled (gates
+	// confirmation-only, compaction summarizer). Never defaults to
+	// small_model (decision-model tree leaf 01).
+	DecisionModel string `json:"decision_model"`
+	// DecisionEscalationThreshold is the confidence above which a
+	// decision-model answer is trusted without escalation. 0 = treat every
+	// answer as below-threshold (escalate).
+	DecisionEscalationThreshold float64 `json:"decision_escalation_threshold"`
+	// DecisionGateEnabled is the opt-in irreversibility gate hook on
+	// destructive tool calls. Requires decision_model. Default false.
+	DecisionGateEnabled bool `json:"decision_gate_enabled"`
+	// DecisionGateTools lists the tool names the gate consults. Empty =
+	// sensible defaults chosen by the gate implementation.
+	DecisionGateTools []string `json:"decision_gate_tools"`
 	// RefusalModel is the global default refusal fallback target
 	// (provider/model ref or alias name; refusal-fallback tree 02).
 	// Empty = no global default; a per-agent spec refusal_model overrides

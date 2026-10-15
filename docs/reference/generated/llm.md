@@ -588,6 +588,8 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(r \*Resolver\) BlockQuotaCredential\(aliasName, credentialKey string, unblockAt time.Time\)](<#Resolver.BlockQuotaCredential>)
   - [func \(r \*Resolver\) BlockQuotaEntry\(aliasName, providerID, modelID string, unblockAt time.Time\)](<#Resolver.BlockQuotaEntry>)
   - [func \(r \*Resolver\) ClearQuotaBlocks\(aliasName string\)](<#Resolver.ClearQuotaBlocks>)
+  - [func \(r \*Resolver\) DecisionModel\(\) \*ModelConfig](<#Resolver.DecisionModel>)
+  - [func \(r \*Resolver\) DecisionModelName\(\) string](<#Resolver.DecisionModelName>)
   - [func \(r \*Resolver\) DefaultModel\(\) \*ModelConfig](<#Resolver.DefaultModel>)
   - [func \(r \*Resolver\) EffectiveSchemaMode\(providerID, modelID, globalMode string\) string](<#Resolver.EffectiveSchemaMode>)
   - [func \(r \*Resolver\) EndpointBlockUntil\(cfg \*ModelConfig\) time.Time](<#Resolver.EndpointBlockUntil>)
@@ -5999,6 +6001,22 @@ ProvidersConfig represents the full models.json5 configuration.
 	    // PlannerModel is the dedicated model for the strategic planner; empty
 	    // = planner uses its agent default (local 8B).
 	    PlannerModel string `json:"planner_model"`
+	    // DecisionModel is the dedicated decision model (Jev-style typed
+	    // decision endpoint: fixed labels, calibrated probabilities, no
+	    // generated tokens). Empty = decision-model features disabled (gates
+	    // confirmation-only, compaction summarizer). Never defaults to
+	    // small_model (decision-model tree leaf 01).
+	    DecisionModel string `json:"decision_model"`
+	    // DecisionEscalationThreshold is the confidence above which a
+	    // decision-model answer is trusted without escalation. 0 = treat every
+	    // answer as below-threshold (escalate).
+	    DecisionEscalationThreshold float64 `json:"decision_escalation_threshold"`
+	    // DecisionGateEnabled is the opt-in irreversibility gate hook on
+	    // destructive tool calls. Requires decision_model. Default false.
+	    DecisionGateEnabled bool `json:"decision_gate_enabled"`
+	    // DecisionGateTools lists the tool names the gate consults. Empty =
+	    // sensible defaults chosen by the gate implementation.
+	    DecisionGateTools []string `json:"decision_gate_tools"`
 	    // RefusalModel is the global default refusal fallback target
 	    // (provider/model ref or alias name; refusal-fallback tree 02).
 	    // Empty = no global default; a per-agent spec refusal_model overrides
@@ -6389,6 +6407,20 @@ BlockQuotaEntry records a quota block for a provider/model pair.
 	func (r *Resolver) ClearQuotaBlocks(aliasName string)
 
 ClearQuotaBlocks clears all quota blocks for an alias.
+
+<a name="Resolver.DecisionModel"></a>
+### func \(\*Resolver\) DecisionModel
+
+	func (r *Resolver) DecisionModel() *ModelConfig
+
+DecisionModel returns the dedicated decision\-model configuration, or nil when no decision\_model slot is configured \(features disabled\).
+
+<a name="Resolver.DecisionModelName"></a>
+### func \(\*Resolver\) DecisionModelName
+
+	func (r *Resolver) DecisionModelName() string
+
+DecisionModelName returns "provider/model\-id" for the configured decision model, or "" when unset/nil \(decision\-model features disabled\).
 
 <a name="Resolver.DefaultModel"></a>
 ### func \(\*Resolver\) DefaultModel

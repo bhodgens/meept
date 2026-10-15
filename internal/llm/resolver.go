@@ -48,6 +48,7 @@ type Resolver struct {
 	config        *ProvidersConfig
 	defaultModel  *ModelConfig
 	smallModel    *ModelConfig
+	decisionModel *ModelConfig
 	allModels     []*ModelConfig
 	aliases       map[string]*AliasEntry
 	health        map[string]*AliasHealth
@@ -93,6 +94,16 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 	}
 	if cfg.SmallModel != "" {
 		r.smallModel = ResolveModelRef(cfg.SmallModel, cfg)
+	}
+	// Decision model slot (decision-model tree leaf 01): resolved only when
+	// explicitly configured. Empty slot = nil = every decision-model feature
+	// stays disabled (never falls back to small_model or the default model).
+	if cfg.DecisionModel != "" {
+		r.decisionModel = ResolveModelRef(cfg.DecisionModel, cfg)
+		if r.decisionModel == nil {
+			r.logger.Warn("decision_model ref does not resolve to a configured model; decision-model features disabled",
+				"ref", cfg.DecisionModel)
+		}
 	}
 
 	// Load model aliases
@@ -183,6 +194,24 @@ func (r *Resolver) DefaultModel() *ModelConfig {
 // SmallModel returns the small/fast model configuration.
 func (r *Resolver) SmallModel() *ModelConfig {
 	return r.smallModel
+}
+
+// DecisionModel returns the dedicated decision-model configuration, or nil
+// when no decision_model slot is configured (features disabled).
+func (r *Resolver) DecisionModel() *ModelConfig {
+	if r == nil || r.decisionModel == nil {
+		return nil
+	}
+	return r.decisionModel
+}
+
+// DecisionModelName returns "provider/model-id" for the configured decision
+// model, or "" when unset/nil (decision-model features disabled).
+func (r *Resolver) DecisionModelName() string {
+	if r == nil || r.decisionModel == nil {
+		return ""
+	}
+	return r.decisionModel.ProviderID + "/" + r.decisionModel.ModelID
 }
 
 // ImageModel returns the configured image-generation model, if any.
@@ -1336,6 +1365,7 @@ func (r *Resolver) SetPricingSyncer(ps *PricingSyncer) {
 	}
 	enrich(r.defaultModel)
 	enrich(r.smallModel)
+	enrich(r.decisionModel)
 }
 
 // SetContextLimits applies discovered context lengths to the resolver's
@@ -1420,6 +1450,7 @@ func (r *Resolver) SetContextLimits(discovered map[string]int, override bool, lo
 	}
 	apply(r.defaultModel)
 	apply(r.smallModel)
+	apply(r.decisionModel)
 }
 
 // quotaEntryKey returns a unique key for a provider/model pair.

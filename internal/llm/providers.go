@@ -115,6 +115,22 @@ type ProvidersConfig struct {
 	// PlannerModel is the dedicated model for the strategic planner; empty
 	// = planner uses its agent default (local 8B).
 	PlannerModel string `json:"planner_model"`
+	// DecisionModel is the dedicated decision model (Jev-style typed
+	// decision endpoint: fixed labels, calibrated probabilities, no
+	// generated tokens). Empty = decision-model features disabled (gates
+	// confirmation-only, compaction summarizer). Never defaults to
+	// small_model (decision-model tree leaf 01).
+	DecisionModel string `json:"decision_model"`
+	// DecisionEscalationThreshold is the confidence above which a
+	// decision-model answer is trusted without escalation. 0 = treat every
+	// answer as below-threshold (escalate).
+	DecisionEscalationThreshold float64 `json:"decision_escalation_threshold"`
+	// DecisionGateEnabled is the opt-in irreversibility gate hook on
+	// destructive tool calls. Requires decision_model. Default false.
+	DecisionGateEnabled bool `json:"decision_gate_enabled"`
+	// DecisionGateTools lists the tool names the gate consults. Empty =
+	// sensible defaults chosen by the gate implementation.
+	DecisionGateTools []string `json:"decision_gate_tools"`
 	// RefusalModel is the global default refusal fallback target
 	// (provider/model ref or alias name; refusal-fallback tree 02).
 	// Empty = no global default; a per-agent spec refusal_model overrides
@@ -312,6 +328,18 @@ func MergeProvidersConfig(base, overlay *ProvidersConfig) *ProvidersConfig {
 	}
 	if overlay.PlannerModel != "" {
 		out.PlannerModel = overlay.PlannerModel
+	}
+	if overlay.DecisionModel != "" {
+		out.DecisionModel = overlay.DecisionModel
+	}
+	if overlay.DecisionGateEnabled {
+		out.DecisionGateEnabled = overlay.DecisionGateEnabled
+	}
+	if len(overlay.DecisionGateTools) > 0 {
+		out.DecisionGateTools = append([]string(nil), overlay.DecisionGateTools...)
+	}
+	if overlay.DecisionEscalationThreshold != 0 {
+		out.DecisionEscalationThreshold = overlay.DecisionEscalationThreshold
 	}
 	if overlay.RefusalModel != "" {
 		out.RefusalModel = overlay.RefusalModel

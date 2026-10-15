@@ -578,6 +578,15 @@ type CompactionConfig struct {
 	// with a re-read pointer line instead of the irreversible truncation text.
 	// Opt-in, default false (spilling is disabled unless explicitly enabled).
 	SpillEnabled bool `json:"spill_enabled" toml:"spill_enabled"`
+	// DecisionEnabled opts the decision-model-only compaction lane in
+	// (decision-model tree, leaf 04): each history entry is scored by the
+	// decision model and entries below DecisionKeepBar are dropped verbatim.
+	// Default false — the existing summarizer stays the default lane, and
+	// with no decision_model configured this knob is ignored entirely.
+	DecisionEnabled bool `json:"decision_enabled" toml:"decision_enabled"`
+	// DecisionKeepBar is the score (0-4 rubric) a history entry must reach
+	// to survive decision-model compaction. Default 2.
+	DecisionKeepBar int `json:"decision_keep_bar" toml:"decision_keep_bar"`
 }
 
 // SpillConfig configures the tool-output spill store under
@@ -3819,6 +3828,8 @@ func DefaultConfig() *Config {
 			TrackFileOps:      true,
 			TimeoutSeconds:    30,
 			SpillEnabled:      false,
+			DecisionEnabled:   false, // decision-model compaction lane: opt-in (decision-model leaf 01)
+			DecisionKeepBar:   2,
 		},
 		Spill: SpillConfig{
 			RetentionDays: 30,
