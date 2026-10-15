@@ -60,10 +60,10 @@ func TestReviewQueue_RPC_FiltersPaginationTotal(t *testing.T) {
 
 	mk := func(f float64) *float64 { return &f }
 	cases := []struct {
-		name       string
-		params     map[string]any
-		wantItems  int
-		wantTotal  int
+		name      string
+		params    map[string]any
+		wantItems int
+		wantTotal int
 	}{
 		{"empty params", map[string]any{}, 4, 4},
 		{"min_confidence", map[string]any{"min_confidence": 0.5}, 3, 3}, // 0.9, 0.8, 0.5

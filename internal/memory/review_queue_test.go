@@ -259,48 +259,48 @@ func TestListAutoClaimsFiltered(t *testing.T) {
 			wantCount: 2, wantTotal: 2,
 		},
 		{
-			name: "max_confidence inclusive",
-			opts: ListAutoClaimsOptions{MaxConfidence: mk(0.5)},
+			name:      "max_confidence inclusive",
+			opts:      ListAutoClaimsOptions{MaxConfidence: mk(0.5)},
 			wantCount: 3, wantTotal: 3, // 0.5, 0.2, 0.0
 		},
 		{
-			name: "confidence band",
-			opts: ListAutoClaimsOptions{MinConfidence: mk(0.3), MaxConfidence: mk(0.7)},
+			name:      "confidence band",
+			opts:      ListAutoClaimsOptions{MinConfidence: mk(0.3), MaxConfidence: mk(0.7)},
 			wantCount: 1, wantTotal: 1, // only 0.5
 		},
 		{
-			name: "older_than excludes fresh claims",
-			opts: ListAutoClaimsOptions{OlderThan: mkDur(time.Hour)},
+			name:      "older_than excludes fresh claims",
+			opts:      ListAutoClaimsOptions{OlderThan: mkDur(time.Hour)},
 			wantCount: 0, wantTotal: 0,
 		},
 		{
-			name: "older_than zero keeps everything",
-			opts: ListAutoClaimsOptions{OlderThan: mkDur(0)},
+			name:      "older_than zero keeps everything",
+			opts:      ListAutoClaimsOptions{OlderThan: mkDur(0)},
 			wantCount: 4, wantTotal: 4,
 		},
 		{
-			name: "limit paginates",
-			opts: ListAutoClaimsOptions{Limit: 2},
+			name:      "limit paginates",
+			opts:      ListAutoClaimsOptions{Limit: 2},
 			wantCount: 2, wantTotal: 4,
 		},
 		{
-			name: "limit and offset",
-			opts: ListAutoClaimsOptions{Limit: 2, Offset: 2},
+			name:      "limit and offset",
+			opts:      ListAutoClaimsOptions{Limit: 2, Offset: 2},
 			wantCount: 2, wantTotal: 4,
 		},
 		{
-			name: "offset past end",
-			opts: ListAutoClaimsOptions{Limit: 2, Offset: 10},
+			name:      "offset past end",
+			opts:      ListAutoClaimsOptions{Limit: 2, Offset: 10},
 			wantCount: 0, wantTotal: 4,
 		},
 		{
-			name: "negative offset treated as zero",
-			opts: ListAutoClaimsOptions{Offset: -5},
+			name:      "negative offset treated as zero",
+			opts:      ListAutoClaimsOptions{Offset: -5},
 			wantCount: 4, wantTotal: 4,
 		},
 		{
-			name: "limit zero defaults",
-			opts: ListAutoClaimsOptions{Limit: 0},
+			name:      "limit zero defaults",
+			opts:      ListAutoClaimsOptions{Limit: 0},
 			wantCount: 4, wantTotal: 4,
 		},
 	}
