@@ -18,7 +18,7 @@ func buildMemoryFields() []Field {
 	exp := &mem.Expiration
 	ver := &mem.Versioning
 	return []Field{
-		NewSelectField("memory.backend", "backend", string(mem.Backend), []string{"memvid", "sqlite"}),
+		NewSelectField("memory.backend", "backend", string(mem.Backend), []string{"local", "sqlite", "memvid"}),
 		NewTextField("memory.data_dir", "data dir", mem.DataDir),
 		NewNumberField("memory.consolidation_interval_hours", "consolidation interval hours", mem.ConsolidationIntervalHours),
 		NewToggleField("memory.episodic.enabled", "episodic enabled", ep.Enabled),

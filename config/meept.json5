@@ -142,7 +142,7 @@
 
   // Memory configuration
   "memory": {
-    "backend": "memvid",  // "memvid" (default) or "sqlite"
+    "backend": "local",  // "local" (default, built-in SQLite store), "sqlite" (legacy alias), or "memvid" (legacy: uses the memvid service when [memvid] enabled)
     "data_dir": "~/.meept/memory",
     "consolidation_interval_hours": 6,
     "episodic": {
@@ -517,7 +517,7 @@
   // MCP server configuration
   "mcp": {
     "enabled": false,
-    "config_file": "~/.meept/mcp_servers.json",
+    "config_file": "~/.meept/mcp_servers.json5",
   },
 
   // Plugins configuration

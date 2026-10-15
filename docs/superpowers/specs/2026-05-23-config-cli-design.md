@@ -277,7 +277,7 @@ Agent drilldown: role (text), description (text), tools (multi-select from regis
 
 | Field | Type | Key Path |
 |-------|------|----------|
-| backend | Select (memvid/sqlite) | `memory.backend` |
+| backend | Select (local/sqlite/memvid) | `memory.backend` |
 | data dir | Text | `memory.data_dir` |
 | consolidation interval | Number | `memory.consolidation_interval_hours` |
 | episodic enabled | Toggle | `memory.episodic.enabled` |

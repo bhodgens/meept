@@ -211,33 +211,43 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 
-	// Determine backend strategy
-	wantMemvid := m.config.Backend == "" || m.config.Backend == config.MemoryBackendMemvid
-	wantSQLite := m.config.Backend == config.MemoryBackendSQLite
-
-	// Try memvid if it's the desired backend
-	if wantMemvid && m.memvidCfg.Enabled {
-		m.memvid = memvid.NewClient(memvid.ClientConfig{
-			Endpoint: m.memvidCfg.Endpoint,
-			Zone:     "default",
-			Timeout:  time.Duration(m.memvidCfg.Timeout) * time.Second,
-		})
-
-		if m.memvid.IsAvailable(ctx) {
-			m.useMemvid = true
-			m.logger.Info("Memvid backend active",
-				"endpoint", m.memvidCfg.Endpoint,
-			)
-		} else {
-			m.logger.Warn("Memvid configured but unavailable, falling back to SQLite",
-				"endpoint", m.memvidCfg.Endpoint,
-			)
-			m.memvid = nil
-			wantSQLite = true // fall back
-		}
-	} else if wantMemvid && !m.memvidCfg.Enabled {
-		m.logger.Info("Memvid backend selected but not enabled in [memvid] config, using SQLite")
+	// Determine backend strategy. Backend values:
+	//   - "local"  (default): built-in SQLite store, no service attempt
+	//   - "sqlite": legacy alias of "local" (explicit, not fallthrough)
+	//   - "memvid": legacy name - try the memvid service when [memvid]
+	//     enabled = true, fall back to the local store otherwise
+	//   - "": unset - historically behaved like "memvid", so it keeps
+	//     that exact behavior instead of silently changing
+	var wantMemvid, wantSQLite bool
+	switch m.config.Backend {
+	case config.MemoryBackendLocal, config.MemoryBackendSQLite:
+		// Built-in local store.
 		wantSQLite = true
+	case "", config.MemoryBackendMemvid:
+		// Legacy value: attempt the memvid service (aliasing preserves the
+		// old behavior exactly), falling back to the local store below.
+		wantMemvid = true
+		if wantMemvid && m.memvidCfg.Enabled {
+			m.memvid = memvid.NewClient(memvid.ClientConfig{
+				Endpoint: m.memvidCfg.Endpoint,
+				Zone:     "default",
+				Timeout:  time.Duration(m.memvidCfg.Timeout) * time.Second,
+			})
+
+			if m.memvid.IsAvailable(ctx) {
+				m.useMemvid = true
+				m.logger.Info("Memvid backend active",
+					"endpoint", m.memvidCfg.Endpoint,
+				)
+			} else {
+				m.logger.Warn("Memvid configured but unavailable, falling back to local SQLite store",
+					"endpoint", m.memvidCfg.Endpoint,
+				)
+				m.memvid = nil
+			}
+		} else {
+			m.logger.Info("Memvid backend selected but not enabled in [memvid] config, using the built-in local store")
+		}
 	}
 
 	// Initialize SQLite backends when needed (explicit sqlite backend, or memvid fallback)

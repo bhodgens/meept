@@ -2909,13 +2909,26 @@ MemoryBackend defines the storage backend for memory.
 
 	type MemoryBackend string
 
-<a name="MemoryBackendMemvid"></a>
+<a name="MemoryBackendLocal"></a>
 
 	const (
-	    // MemoryBackendMemvid uses the memvid service as the primary backend.
-	    MemoryBackendMemvid MemoryBackend = "memvid"
-	    // MemoryBackendSQLite uses local SQLite as the backend.
+	    // MemoryBackendLocal uses the built-in local SQLite store (episodic FTS5 +
+	    // task memory under memory.data_dir). This is the default: no external
+	    // service is required.
+	    MemoryBackendLocal MemoryBackend = "local"
+	    // MemoryBackendSQLite is a legacy alias of MemoryBackendLocal: the
+	    // built-in store has always been SQLite-backed, so the value keeps its
+	    // exact historical behavior.
 	    MemoryBackendSQLite MemoryBackend = "sqlite"
+	    // MemoryBackendMemvid is the legacy default name. Despite the name it
+	    // never meant "always use the memvid HTTP service": with [memvid]
+	    // enabled = false (the shipped default) it resolves to the built-in
+	    // local store, and with the service enabled it uses memvid with a
+	    // local-store fallback. Kept for existing configs; prefer "local"
+	    // for the built-in store.
+	    //
+	    // Deprecated: use "local" unless you run the memvid service.
+	    MemoryBackendMemvid MemoryBackend = "memvid"
 	)
 
 <a name="MemoryBridgesConfig"></a>
@@ -2969,7 +2982,10 @@ MemoryCategoryLimit holds character limit settings for a memory category.
 MemoryConfig holds memory subsystem settings.
 
 	type MemoryConfig struct {
-	    // Backend specifies the storage backend: "memvid" (default) or "sqlite"
+	    // Backend specifies the storage backend: "local" (default, the built-in
+	    // SQLite store), "sqlite" (legacy alias of "local"), or "memvid"
+	    // (legacy name - uses the memvid HTTP service when [memvid] enabled,
+	    // falling back to the local store otherwise)
 	    Backend                    MemoryBackend     `json:"backend"                      toml:"backend"`
 	    DataDir                    string            `json:"data_dir"                     toml:"data_dir"`
 	    ConsolidationIntervalHours int               `json:"consolidation_interval_hours" toml:"consolidation_interval_hours"`

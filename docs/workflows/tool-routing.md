@@ -183,7 +183,7 @@ mcp_enabled = true
 
 [tools.mcp]
 servers = [
-  "~/.meept/mcp_servers.json"
+  "~/.meept/mcp_servers.json5"
 ]
 auto_discover = true
 

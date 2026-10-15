@@ -141,9 +141,9 @@ secret_key = ""  # Required for JWT
 
 [mcp]
 enabled = false
-config_file = "~/.meept/mcp_servers.json"
-# MCP servers are configured in a separate JSON file.
-# Example mcp_servers.json:
+config_file = "~/.meept/mcp_servers.json5"
+# MCP servers are configured in a separate JSON5 file.
+# Example mcp_servers.json5:
 # {
 #   "servers": [
 #     {

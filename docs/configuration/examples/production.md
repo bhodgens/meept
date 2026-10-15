@@ -102,7 +102,7 @@ secret_key = "${MEEPT_WEB_SECRET}"
 
 [mcp]
 enabled = true
-config_file = "~/.meept/mcp_servers.json"
+config_file = "~/.meept/mcp_servers.json5"
 
 [acp]
 enabled = false
@@ -321,7 +321,7 @@ auto_approve_patterns = ["*.md", "LICENSE", "*.txt", "*.json"]
 }
 ```
 
-### ~/.meept/mcp_servers.json
+### ~/.meept/mcp_servers.json5
 
 ```json
 {

@@ -728,7 +728,7 @@ Meept implements a multi-tiered memory architecture with different storage backe
 **Configuration:**
 ```toml
 [memory]
-backend = "memvid"  # or "sqlite"
+backend = "local"  # built-in SQLite store; "sqlite" is a legacy alias; "memvid" uses the memvid service when [memvid] enabled
 data_dir = "~/.meept/memory"
 consolidation_interval_hours = 6
 
@@ -1688,7 +1688,7 @@ snapshot_caching_enabled = true
 
 # Memory
 [memory]
-backend = "memvid"
+backend = "local"
 
 [memory.embeddings]
 enabled = true

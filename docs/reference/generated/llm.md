@@ -1881,7 +1881,7 @@ SystemPromptOf extracts the first system\-role message's content, or "" when the
 
 	func SystemPromptSections(systemPrompt string) []string
 
-SystemPromptSections splits a system\-prompt string into its boundary\- delimited sections for BuildPrefixAwareKey. This is the single split point between the live client cache path and the prefix\-aware key builder — do not re\-implement the sentinel scan elsewhere.
+SystemPromptSections splits a flat system\-prompt string into the sections BuildPrefixAwareKey expects: static text before the boundary, the boundary itself, then the dynamic text. SplitSystemPromptOnBoundary \(not a bare strings.Split\) is REQUIRED here: ClassifyPromptSections only recognizes the boundary when it is its OWN element, and strings.Split consumes the sentinel — which folded dynamic text into the static hash on the live cache path \(bughunt 2026\-10\-14\).
 
 <a name="ToolChoiceOf"></a>
 ## func ToolChoiceOf

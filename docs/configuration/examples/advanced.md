@@ -45,7 +45,7 @@ flush_interval_seconds = 60
 max_metrics_age_hours = 24
 
 [memory]
-backend = "memvid"
+backend = "local"
 data_dir = "~/.meept/memory"
 consolidation_interval_hours = 4
 
@@ -159,7 +159,7 @@ secret_key = "${MEEPT_WEB_SECRET}"
 
 [mcp]
 enabled = true
-config_file = "~/.meept/mcp_servers.json"
+config_file = "~/.meept/mcp_servers.json5"
 
 [acp]
 enabled = false

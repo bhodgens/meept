@@ -47,6 +47,7 @@ Package memory provides memory storage and retrieval for meept.
 - [type AmbientExtractor](<#AmbientExtractor>)
   - [func NewAmbientExtractor\(cfg AmbientExtractorConfig\) \*AmbientExtractor](<#NewAmbientExtractor>)
   - [func \(ex \*AmbientExtractor\) Extract\(ctx context.Context, messages \[\]string\) \(\[\]AmbientCandidate, error\)](<#AmbientExtractor.Extract>)
+  - [func \(ex \*AmbientExtractor\) FilterCandidates\(in \[\]AmbientCandidate\) \(passed \[\]AmbientCandidate, rejected \[\]AmbientCandidate, reasons \[\]string\)](<#AmbientExtractor.FilterCandidates>)
   - [func \(ex \*AmbientExtractor\) WriteCandidates\(ctx context.Context, candidates \[\]AmbientCandidate\) \(\[\]string, error\)](<#AmbientExtractor.WriteCandidates>)
 - [type AmbientExtractorConfig](<#AmbientExtractorConfig>)
 - [type BridgeGenerator](<#BridgeGenerator>)
@@ -57,10 +58,13 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(bs \*BridgeStore\) Close\(\) error](<#BridgeStore.Close>)
   - [func \(bs \*BridgeStore\) Count\(ctx context.Context\) \(int, error\)](<#BridgeStore.Count>)
   - [func \(bs \*BridgeStore\) DeleteBridge\(ctx context.Context, id string\) error](<#BridgeStore.DeleteBridge>)
+  - [func \(bs \*BridgeStore\) HasEvidenceContent\(ctx context.Context, id string\) \(bool, error\)](<#BridgeStore.HasEvidenceContent>)
   - [func \(bs \*BridgeStore\) ListBridges\(ctx context.Context\) \(\[\]BridgeRecord, error\)](<#BridgeStore.ListBridges>)
   - [func \(bs \*BridgeStore\) ListBridgesByEvidence\(ctx context.Context, evidenceID string\) \(\[\]BridgeRecord, error\)](<#BridgeStore.ListBridgesByEvidence>)
   - [func \(bs \*BridgeStore\) MarkVerified\(ctx context.Context, id string\) error](<#BridgeStore.MarkVerified>)
   - [func \(bs \*BridgeStore\) PutBridge\(ctx context.Context, rec BridgeRecord\) error](<#BridgeStore.PutBridge>)
+  - [func \(bs \*BridgeStore\) ReseedEvidenceContent\(ctx context.Context, id string, sources map\[string\]string\) \(int, error\)](<#BridgeStore.ReseedEvidenceContent>)
+  - [func \(bs \*BridgeStore\) SearchBridgesByQuery\(ctx context.Context, query string, k int\) \(\[\]BridgeRecord, error\)](<#BridgeStore.SearchBridgesByQuery>)
   - [func \(bs \*BridgeStore\) SearchByEmbedding\(ctx context.Context, embedding \[\]float32, k int\) \(\[\]BridgeRecord, error\)](<#BridgeStore.SearchByEmbedding>)
   - [func \(bs \*BridgeStore\) WithLogger\(l \*slog.Logger\) \*BridgeStore](<#BridgeStore.WithLogger>)
 - [type BridgeVerifier](<#BridgeVerifier>)
@@ -146,6 +150,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(e \*EpisodicMemory\) GetByCategory\(ctx context.Context, category string, limit int\) \(\[\]MemoryResult, error\)](<#EpisodicMemory.GetByCategory>)
   - [func \(e \*EpisodicMemory\) GetByID\(ctx context.Context, id string\) \(\*MemoryResult, error\)](<#EpisodicMemory.GetByID>)
   - [func \(e \*EpisodicMemory\) GetByTimeRange\(ctx context.Context, start, end time.Time, limit int\) \(\[\]MemoryResult, error\)](<#EpisodicMemory.GetByTimeRange>)
+  - [func \(e \*EpisodicMemory\) GetNewestByCategoryAndMetadata\(ctx context.Context, category, key, value string\) \(MemoryResult, bool, error\)](<#EpisodicMemory.GetNewestByCategoryAndMetadata>)
   - [func \(e \*EpisodicMemory\) GetNewestTimestamp\(ctx context.Context\) \(\*time.Time, error\)](<#EpisodicMemory.GetNewestTimestamp>)
   - [func \(e \*EpisodicMemory\) GetOldMemories\(ctx context.Context, olderThan time.Time, limit int\) \(\[\]MemoryResult, error\)](<#EpisodicMemory.GetOldMemories>)
   - [func \(e \*EpisodicMemory\) GetOldestTimestamp\(ctx context.Context\) \(\*time.Time, error\)](<#EpisodicMemory.GetOldestTimestamp>)
@@ -546,9 +551,17 @@ Lessons are distilled principles \("always X before Y because Z"\); procedures a
 
 	const BridgeMetaEntities = "entities"
 
+<a name="BridgeMetaEvidenceContentPrefix"></a>BridgeMetaEvidenceContentPrefix prefixes a source memory ID to form the bridge\-record metadata key carrying that source's content \("evidence\_content\_\<id\>"\). Generation writes it \(persistBridgeFacts\); the B03 entailment verifier reads it \(bridgeEvidenceContent\). Evidence text is capped by maxBridgeEvidenceContentRunes at write time so a large source memory cannot bloat the shard metadata.
+
+	const BridgeMetaEvidenceContentPrefix = "evidence_content_"
+
 <a name="CurrentSchemaVersion"></a>CurrentSchemaVersion is the current index schema version.
 
 	const CurrentSchemaVersion = 1
+
+<a name="DefaultAmbientMaxPerTurn"></a>DefaultAmbientMaxPerTurn mirrors the retired hook's spec default.
+
+	const DefaultAmbientMaxPerTurn = 3
 
 <a name="DefaultAutoClaimTrustWeight"></a>DefaultAutoClaimTrustWeight is the default trust weight applied to ambient\-extracted claims. Configurable via EpistemicConfig.AutoTrustWeight.
 
@@ -912,12 +925,19 @@ NewAmbientExtractor constructs an extractor from the given configuration.
 
 Extract runs the ambient extraction prompt over the given messages and returns filtered candidates. Returns nil, nil when the classifier is nil \(graceful zero\-value behaviour\).
 
+<a name="AmbientExtractor.FilterCandidates"></a>
+### func \(\*AmbientExtractor\) FilterCandidates
+
+	func (ex *AmbientExtractor) FilterCandidates(in []AmbientCandidate) (passed []AmbientCandidate, rejected []AmbientCandidate, reasons []string)
+
+FilterCandidates applies the configured claim gates: reject\-band drop, category exclusion, and the per\-turn cap. Returns the survivors and the rejected remainder \(candidate \+ reason\) for calibration logging.
+
 <a name="AmbientExtractor.WriteCandidates"></a>
 ### func \(\*AmbientExtractor\) WriteCandidates
 
 	func (ex *AmbientExtractor) WriteCandidates(ctx context.Context, candidates []AmbientCandidate) ([]string, error)
 
-WriteCandidates persists each candidate as an auto\-claim and returns the resulting memory IDs.
+WriteCandidates filters candidates through the configured claim gates \(FilterCandidates\) and persists each survivor as an auto\-claim, returning the resulting memory IDs. Filtering lives HERE — not at the callers — so every consumer \(loop hook, turn\-terminal capture subscriber\) gets the same gates \(bughunt 2026\-10\-14: the capture subscriber stored raw candidates\). Rejected candidates are logged at debug with their reason.
 
 <a name="AmbientExtractorConfig"></a>
 ## type AmbientExtractorConfig
@@ -932,6 +952,21 @@ AmbientExtractorConfig holds construction parameters for AmbientExtractor.
 	    // classifier call — the calibration/training pair. Raw conversation
 	    // text: write only to gitignored paths. Nil = disabled.
 	    RawResponseHook func(prompt, rawBody string)
+	
+	    // Claim gates (mirrors of the retired loop-level EpistemicHook gates).
+	    // Every consumer of Extract+WriteCandidates — the loop hook AND the
+	    // turn-terminal capture subscriber — gets identical filtering, so the
+	    // gates can no longer be skipped by a caller that forgets them
+	    // (bughunt 2026-10-14: the capture subscriber stored raw, unfiltered
+	    // candidates). Zero values match the hook's spec defaults.
+	    // RejectBelow hard-drops candidates under this confidence ("reject
+	    // band"); 0 = disabled (legacy binary behavior).
+	    RejectBelow float64
+	    // MaxPerTurn caps stored candidates per Extract window; <= 0 resolves
+	    // to the spec default (3).
+	    MaxPerTurn int
+	    // ExcludeCategories drops candidates in these categories.
+	    ExcludeCategories []string
 	}
 
 <a name="BridgeGenerator"></a>
@@ -1015,6 +1050,13 @@ Count returns the number of persisted bridges \(distinct memory IDs in the side 
 
 DeleteBridge removes a bridge \(vector \+ metadata\) by ID. Deleting a non\-existent bridge is a no\-op, matching VectorShard.Delete semantics.
 
+<a name="BridgeStore.HasEvidenceContent"></a>
+### func \(\*BridgeStore\) HasEvidenceContent
+
+	func (bs *BridgeStore) HasEvidenceContent(ctx context.Context, id string) (bool, error)
+
+HasEvidenceContent reports whether the bridge's persisted metadata carries any evidence\_content\_\<id\> row — i.e. whether a verifier prompt can show the model its sources. Records without it are not judgeable: VerifyBridges refuses to fail them closed on a malformed/unsupported verdict.
+
 <a name="BridgeStore.ListBridges"></a>
 ### func \(\*BridgeStore\) ListBridges
 
@@ -1042,6 +1084,20 @@ MarkVerified re\-persists a bridge's verified flag \(metadata \+ typed field\) w
 	func (bs *BridgeStore) PutBridge(ctx context.Context, rec BridgeRecord) error
 
 PutBridge validates and persists one bridge record. Write\-time validation: empty EvidenceIDs \(after trimming\) is rejected with ErrBridgeMissingEvidence and nothing is persisted.
+
+<a name="BridgeStore.ReseedEvidenceContent"></a>
+### func \(\*BridgeStore\) ReseedEvidenceContent
+
+	func (bs *BridgeStore) ReseedEvidenceContent(ctx context.Context, id string, sources map[string]string) (int, error)
+
+ReseedEvidenceContent writes the evidence\_content\_\<id\> rows for a bridge whose sources are supplied by the caller \(sourceID → content\). Returns the number of rows written. This backfills pre\-evidence bridges so the B03 verifier can judge them \(bughunt 2026\-10\-14\).
+
+<a name="BridgeStore.SearchBridgesByQuery"></a>
+### func \(\*BridgeStore\) SearchBridgesByQuery
+
+	func (bs *BridgeStore) SearchBridgesByQuery(ctx context.Context, query string, k int) ([]BridgeRecord, error)
+
+SearchBridgesByQuery runs a KNN search over the bridge shard using the SAME lexical\-hash embedding generation writes \(hashBridgeEmbedding, 256 bytes\-to\-bucket\). No external embedder is involved: bridges are stored and queried in their own vector space, so recall works with or without memory.embeddings configured. Results carry unit\_type=bridge metadata so SelectBalanced's cap applies downstream \(bughunt 2026\-10\-14 — the recall half of the dimension\-mismatch finding: the embedder\-space search could never see the hash\-space bridge shard\).
 
 <a name="BridgeStore.SearchByEmbedding"></a>
 ### func \(\*BridgeStore\) SearchByEmbedding
@@ -1902,6 +1958,13 @@ GetByID retrieves a single memory by its ID. Returns nil, nil if the memory is n
 	func (e *EpisodicMemory) GetByTimeRange(ctx context.Context, start, end time.Time, limit int) ([]MemoryResult, error)
 
 GetByTimeRange retrieves memories within a time range.
+
+<a name="EpisodicMemory.GetNewestByCategoryAndMetadata"></a>
+### func \(\*EpisodicMemory\) GetNewestByCategoryAndMetadata
+
+	func (e *EpisodicMemory) GetNewestByCategoryAndMetadata(ctx context.Context, category, key, value string) (MemoryResult, bool, error)
+
+GetNewestByCategoryAndMetadata returns the newest \(rowid\-desc\) memory in category whose metadata\_json carries \`"key":"value"\` for the given pair. Direct row scan rather than a full\-category fetch: keyed lookups must not degrade into a bounded newest\-N scan that misses once the category grows \(the L0 progress marker consumed GetByCategory\(200\) this way and lost suppression for any session whose newest marker fell outside the window — bughunt 2026\-10\-14\). json\_extract on the metadata document; ok=false when no row matches.
 
 <a name="EpisodicMemory.GetNewestTimestamp"></a>
 ### func \(\*EpisodicMemory\) GetNewestTimestamp
@@ -3211,6 +3274,11 @@ MemoryQuery describes a search request against the memory system.
 	    // instead of the default ALL-token (AND). Useful for relevance ranking,
 	    // where partial term overlap should still surface documents.
 	    MatchAny bool `json:"match_any,omitempty"`
+	    // PrefixTerms turns each FTS5 token into a prefix query ("term"*), so
+	    // "friday" matches stored "Fridays" (the default tokenizer does not
+	    // stem). Set by the semantic/hybrid keyword fallbacks, whose re-ranking
+	    // tolerates the wider candidate pool (bughunt 2026-10-14).
+	    PrefixTerms bool `json:"prefix_terms,omitempty"`
 	}
 
 <a name="MemoryResult"></a>
@@ -3893,6 +3961,12 @@ SearchParams carries search options shared by task and episodic stores.
 	    Limit int
 	    // MatchAny relaxes FTS matching to ANY-token (OR joined).
 	    MatchAny bool
+	    // PrefixTerms turns each token into an FTS5 prefix query ("term"*).
+	    // The default tokenizer does not stem, so "friday" never matches stored
+	    // "Fridays"; prefix matching restores near-miss recall for the
+	    // semantic-search fallback (bughunt 2026-10-14). Only set by callers
+	    // whose ranking tolerates a wider candidate pool.
+	    PrefixTerms bool
 	}
 
 <a name="SearchTraceResult"></a>

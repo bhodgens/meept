@@ -112,10 +112,10 @@ Meept supports MCP for external tool integration:
 ```toml
 [mcp]
 enabled = false
-config_file = "~/.meept/mcp_servers.json"
+config_file = "~/.meept/mcp_servers.json5"
 ```
 
-### MCP Server Configuration (`mcp_servers.json`)
+### MCP Server Configuration (`mcp_servers.json5`)
 
 ```json
 {
