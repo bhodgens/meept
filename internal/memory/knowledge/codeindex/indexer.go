@@ -56,6 +56,9 @@ type IndexReport struct {
 	// that failed to parse (error recorded in Errors — one bad file
 	// never aborts the pass).
 	FilesSkipped int
+	// FilesRemoved counts pages dropped because their file vanished from
+	// the indexed dirs (pass 3 stale-source sweep).
+	FilesRemoved int
 	// SymbolsFound counts symbols in the in-memory symbol table after
 	// the pass (all parsed files, changed or not).
 	SymbolsFound int
@@ -66,11 +69,18 @@ type IndexReport struct {
 }
 
 // Ingester is the narrow store surface the indexer needs: page upsert,
-// stored-page read (content-hash diff), and call-edge replacement.
+// stored-page read (content-hash diff), call-edge replacement, and page
+// listing + delete-by-source for stale-file cleanup.
 type Ingester interface {
 	Ingest(ctx context.Context, page knowledge.Page) (string, error)
 	Read(ctx context.Context, id string) (knowledge.Page, error)
 	ReplaceCallEdges(ctx context.Context, fromFile string, edges []knowledge.CallEdge) error
+	// ListSources returns every page source with the given prefix (empty
+	// prefix = all), used to find pages whose file vanished from the dirs.
+	ListSources(ctx context.Context, prefix string) ([]string, error)
+	// DeleteBySource removes the page (and its links) with this source.
+	// Missing source → no-op.
+	DeleteBySource(ctx context.Context, source string) error
 }
 
 // compile-time check: the concrete knowledge store satisfies the seam.
@@ -106,13 +116,16 @@ func IndexGoDirs(ctx context.Context, store Ingester, dirs []string, logger *slo
 	}
 
 	// Pass 1: walk all dirs, parse every eligible file, build the
-	// global symbol table. Parse failures are non-fatal.
-	files, symbols, err := parseTrees(ctx, dirs, &rep)
+	// global symbol table. Parse failures are non-fatal. The FileSet is
+	// returned with the parsed trees: positions are only resolvable on
+	// the SAME fset the parser registered them on (a fresh one yields
+	// line 0 for every position — bughunt 2026-10-14, from_line was
+	// always 0).
+	files, symbols, fset, err := parseTrees(ctx, dirs, &rep)
 	if err != nil {
 		return IndexReport{}, err
 	}
 	rep.SymbolsFound = len(symbols)
-	fset := token.NewFileSet()
 
 	// Pass 2: per file — content-hash diff against the stored page,
 	// ingest when new/changed, rewrite call edges either way (an
@@ -154,6 +167,30 @@ func IndexGoDirs(ctx context.Context, store Ingester, dirs []string, logger *slo
 		}
 	}
 
+	// Pass 3: drop pages whose file vanished from the indexed dirs. A
+	// deleted *.go previously kept its CODE page and its call edges
+	// forever, so knowledge_impact kept reporting callers from files that
+	// no longer exist (bughunt 2026-10-14 — IndexGoDirs only ingested).
+	if existing, err := store.ListSources(ctx, "code:"); err != nil {
+		rep.Errors = append(rep.Errors, fmt.Sprintf("list sources: %v", err))
+	} else {
+		for _, src := range existing {
+			rel := strings.TrimPrefix(src, "code:")
+			if _, ok := files[rel]; ok {
+				continue
+			}
+			if err := store.DeleteBySource(ctx, src); err != nil {
+				rep.Errors = append(rep.Errors, fmt.Sprintf("delete stale %s: %v", src, err))
+				continue
+			}
+			if err := store.ReplaceCallEdges(ctx, rel, nil); err != nil {
+				rep.Errors = append(rep.Errors, fmt.Sprintf("drop edges %s: %v", rel, err))
+				continue
+			}
+			rep.FilesRemoved++
+		}
+	}
+
 	logger.Debug("codeindex pass complete",
 		"dirs", len(dirs),
 		"files_indexed", rep.FilesIndexed,
@@ -189,7 +226,7 @@ type indexedFile struct {
 // (skip rules applied), build the global symbol table keyed by
 // package-qualified name. Per-file failures land in rep.Errors; only
 // dir-level failures (missing dir, walk error, ctx cancel) return an error.
-func parseTrees(ctx context.Context, dirs []string, rep *IndexReport) (map[string]*indexedFile, map[string]symbol, error) {
+func parseTrees(ctx context.Context, dirs []string, rep *IndexReport) (map[string]*indexedFile, map[string]symbol, *token.FileSet, error) {
 	files := map[string]*indexedFile{}
 	fset := token.NewFileSet()
 	symbols := map[string]symbol{}
@@ -197,10 +234,10 @@ func parseTrees(ctx context.Context, dirs []string, rep *IndexReport) (map[strin
 	for _, dir := range dirs {
 		info, err := os.Stat(dir)
 		if err != nil {
-			return nil, nil, fmt.Errorf("codeindex: stat %s: %w", dir, err)
+			return nil, nil, nil, fmt.Errorf("codeindex: stat %s: %w", dir, err)
 		}
 		if !info.IsDir() {
-			return nil, nil, fmt.Errorf("codeindex: %s is not a directory", dir)
+			return nil, nil, nil, fmt.Errorf("codeindex: %s is not a directory", dir)
 		}
 		walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
 			if ctx.Err() != nil {
@@ -248,10 +285,10 @@ func parseTrees(ctx context.Context, dirs []string, rep *IndexReport) (map[strin
 			return nil
 		})
 		if walkErr != nil {
-			return nil, nil, fmt.Errorf("codeindex: walk %s: %w", dir, walkErr)
+			return nil, nil, nil, fmt.Errorf("codeindex: walk %s: %w", dir, walkErr)
 		}
 	}
-	return files, symbols, nil
+	return files, symbols, fset, nil
 }
 
 // skipDirName reports whether a directory is excluded from indexing.

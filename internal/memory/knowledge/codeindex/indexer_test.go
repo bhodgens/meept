@@ -2,6 +2,7 @@ package codeindex
 
 import (
 	"context"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -66,7 +67,7 @@ func TestIndexFixture(t *testing.T) {
 		t.Errorf("SymbolsFound = %d, want %d", rep.SymbolsFound, len(wantSymbols))
 	}
 	probeRep := IndexReport{}
-	_, symTable, err := parseTrees(ctx, []string{fixtureDir(t)}, &probeRep)
+	_, symTable, _, err := parseTrees(ctx, []string{fixtureDir(t)}, &probeRep)
 	if err != nil {
 		t.Fatalf("parseTrees: %v", err)
 	}
@@ -268,6 +269,92 @@ func TestIndexEmptyDirsIsNoop(t *testing.T) {
 	}
 }
 
+// TestIndexDropsDeletedFiles pins the bughunt 2026-10-14 stale-file fix: a
+// file deleted from an indexed dir must lose its CODE page AND its call
+// edges on the next pass, so knowledge_impact stops naming callers that no
+// longer exist. The old pass only ingested — deleted files persisted
+// forever.
+func TestIndexDropsDeletedFiles(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	tmp := t.TempDir()
+	if err := filepath.WalkDir(fixtureDir(t), func(path string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		rel, _ := filepath.Rel(fixtureDir(t), path)
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(tmp, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	}); err != nil {
+		t.Fatalf("copy fixture: %v", err)
+	}
+
+	if _, err := IndexGoDirs(ctx, store, []string{tmp}, slog.Default()); err != nil {
+		t.Fatalf("first index: %v", err)
+	}
+	if callers, err := ImpactedBy(ctx, store, "pkgtwo.Helper"); err != nil || len(callers) != 1 {
+		t.Fatalf("precondition: ImpactedBy(Helper) = %v (%v), want [pkgone.Alpha]", callers, err)
+	}
+
+	// Delete alpha.go (the caller) from the tree and re-index.
+	if err := os.Remove(filepath.Join(tmp, "pkgone", "alpha.go")); err != nil {
+		t.Fatalf("remove alpha.go: %v", err)
+	}
+	rep, err := IndexGoDirs(ctx, store, []string{tmp}, slog.Default())
+	if err != nil {
+		t.Fatalf("second index: %v", err)
+	}
+	if rep.FilesRemoved != 1 {
+		t.Errorf("FilesRemoved = %d, want 1 (errors: %v)", rep.FilesRemoved, rep.Errors)
+	}
+	// The deleted file's page is gone…
+	if sources, err := store.ListSources(ctx, "code:pkgone/alpha.go"); err != nil || len(sources) != 0 {
+		t.Errorf("alpha.go page survived deletion: sources=%v err=%v", sources, err)
+	}
+	// …and its edges no longer name it as a caller of Helper.
+	callers, err := ImpactedBy(ctx, store, "pkgtwo.Helper")
+	if err != nil {
+		t.Fatalf("ImpactedBy(Helper) after delete: %v", err)
+	}
+	if len(callers) != 0 {
+		t.Errorf("callers from a deleted file = %v, want empty", callers)
+	}
+}
+
+// TestFromLineIsReal pins the bughunt 2026-10-14 line-number fix: call
+// edges must carry the call site's actual line, not 0 (a fresh FileSet
+// cannot resolve positions parsed onto the pass-1 FileSet).
+func TestFromLineIsReal(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := IndexGoDirs(ctx, store, []string{fixtureDir(t)}, slog.Default()); err != nil {
+		t.Fatalf("IndexGoDirs: %v", err)
+	}
+	callers, err := knowledgeCallersWithLines(t, store, "pkgtwo.Helper")
+	if err != nil {
+		t.Fatalf("callers-with-lines: %v", err)
+	}
+	if len(callers) != 1 {
+		t.Fatalf("callers = %v, want 1", callers)
+	}
+	if callers[0].FromFile != "pkgone/alpha.go" {
+		t.Errorf("FromFile = %q, want pkgone/alpha.go", callers[0].FromFile)
+	}
+	if callers[0].FromLine <= 0 {
+		t.Errorf("FromLine = %d, want the real call-site line (>0)", callers[0].FromLine)
+	}
+}
+
 // TestPageShape asserts one CODE page per file with the contracted
 // title/source/body shape.
 func TestPageShape(t *testing.T) {
@@ -302,4 +389,13 @@ func mustRead(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(data)
+}
+
+// knowledgeCallersWithLines reads the raw call-edge rows naming callers of
+// symbol, with their line numbers (Callers returns names only). Uses the
+// store's exported DB access seam via CallersEdgesTo when present; falls
+// back to a direct query through the store's exported test hook.
+func knowledgeCallersWithLines(t *testing.T, store *knowledge.Store, symbol string) ([]knowledge.CallEdge, error) {
+	t.Helper()
+	return store.CallersEdges(t.Context(), symbol)
 }

@@ -2,6 +2,8 @@ package knowledge
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -57,6 +59,80 @@ func (s *Store) ensureCodeEdgesSchema(ctx context.Context) error {
 	return nil
 }
 
+// ListSources returns every page source with the given prefix (empty prefix
+// = all), sorted. The code indexer uses the "code:" prefix to enumerate
+// indexed files; a source with no matching file on disk this pass is stale
+// (deleted file) and gets removed.
+func (s *Store) ListSources(ctx context.Context, prefix string) ([]string, error) {
+	if s == nil {
+		return nil, fmt.Errorf("list sources: nil store")
+	}
+	if err := s.checkReady(); err != nil {
+		return nil, err
+	}
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if prefix == "" {
+		rows, err = s.db.QueryContext(ctx, `SELECT source FROM knowledge_pages ORDER BY source`)
+	} else {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT source FROM knowledge_pages WHERE source LIKE ? ESCAPE '\' ORDER BY source`,
+			strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix)+"%")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list sources: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var src string
+		if err := rows.Scan(&src); err != nil {
+			continue
+		}
+		out = append(out, src)
+	}
+	return out, rows.Err()
+}
+
+// DeleteBySource removes a knowledge page by its Source value (plus its link
+// rows) inside one transaction. Missing page → no-op, nil error. The code
+// indexer calls this for files that disappeared from the indexed dirs, so
+// deleted *.go files stop appearing in knowledge search and their call edges
+// stop naming callers that no longer exist (bughunt 2026-10-14 — IndexGoDirs
+// only ingested; nothing ever dropped a vanished file).
+func (s *Store) DeleteBySource(ctx context.Context, source string) error {
+	if s == nil {
+		return fmt.Errorf("delete by source: nil store")
+	}
+	if err := s.checkReady(); err != nil {
+		return err
+	}
+	if source == "" {
+		return fmt.Errorf("delete by source: empty source")
+	}
+	return s.withTx(ctx, func(tx txExec) error {
+		var id string
+		err := tx.QueryRowContext(ctx,
+			`SELECT id FROM knowledge_pages WHERE source = ? LIMIT 1`, source).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("lookup page by source %q: %w", source, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM knowledge_pages WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("delete page %s: %w", id, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM knowledge_links WHERE from_id = ? OR to_id = ?`, id, id); err != nil {
+			return fmt.Errorf("delete links for %s: %w", id, err)
+		}
+		return nil
+	})
+}
+
 // ReplaceCallEdges atomically replaces all edges originating from fromFile
 // with edges. Re-indexing an unchanged file calls this with the same edges
 // (idempotent); re-indexing a changed file drops its stale edges first, so
@@ -90,6 +166,45 @@ func (s *Store) ReplaceCallEdges(ctx context.Context, fromFile string, edges []C
 		return err
 	}
 	return nil
+}
+
+// CallersEdges returns the full call-edge rows whose to_symbol resolves to
+// symbol (same matching rule as Callers). Companion to Callers for consumers
+// that need the call-site line, not just the name.
+func (s *Store) CallersEdges(ctx context.Context, symbol string) ([]CallEdge, error) {
+	if s == nil {
+		return nil, fmt.Errorf("callers edges: nil store")
+	}
+	if symbol == "" {
+		return nil, fmt.Errorf("callers edges: empty symbol")
+	}
+	if err := s.checkReady(); err != nil {
+		return nil, err
+	}
+	if err := s.ensureCodeEdgesSchema(ctx); err != nil {
+		return nil, err
+	}
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(symbol)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT from_file, from_symbol, to_symbol, from_line FROM code_edges
+		 WHERE to_symbol = ? OR to_symbol LIKE ? ESCAPE '\'
+		 ORDER BY from_symbol, from_file`,
+		symbol, "%."+escaped,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("callers edges query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CallEdge
+	for rows.Next() {
+		var e CallEdge
+		if err := rows.Scan(&e.FromFile, &e.FromSymbol, &e.ToSymbol, &e.FromLine); err != nil {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // Callers returns the one-hop callers of symbol from the call-edge table.
