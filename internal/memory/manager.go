@@ -2048,7 +2048,7 @@ func (m *Manager) SearchSemantic(ctx context.Context, query string, limit int) (
 				Source:         "semantic",
 			})
 		}
-		return memResults, nil
+		return m.mergeBridges(ctx, query, memResults)
 	}
 
 	// Fallback to keyword search. MatchAny + PrefixTerms (bughunt 2026-10-14,
