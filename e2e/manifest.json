@@ -118,6 +118,7 @@
   "internal/daemon/": [
    "daemon-lifecycle",
    "memory-knowledge-assets",
+   "memory-turn-capture",
    "project-binding",
    "state-restart"
   ],
@@ -566,6 +567,11 @@
   {
    "name": "memory-knowledge-assets",
    "dir": "e2e/suites/memory-knowledge-assets",
+   "status": "implemented"
+  },
+  {
+   "name": "memory-turn-capture",
+   "dir": "e2e/suites/memory-turn-capture",
    "status": "implemented"
   }
  ],
@@ -2522,6 +2528,35 @@
    "title": "disabled config (default) exposes zero knowledge_* tools in the executor tool list",
    "paths": [
     "internal/daemon/components.go"
+   ]
+  },
+  {
+   "id": "memory-turn-capture-01",
+   "suite": "memory-turn-capture",
+   "diff": "M",
+   "title": "completed DIRECT chat turn: the turn.terminal subscriber appends the user+assistant L0 lines and both the ambient extraction and the chained memory.l1_extract job land status=auto claims",
+   "paths": [
+    "internal/daemon/memory_capture.go",
+    "internal/memory/distill_async.go"
+   ]
+  },
+  {
+   "id": "memory-turn-capture-02",
+   "suite": "memory-turn-capture",
+   "diff": "M",
+   "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID — task reply reaches L0 + status=auto claim",
+   "paths": [
+    "internal/daemon/memory_capture.go",
+    "internal/agent/handler.go"
+   ]
+  },
+  {
+   "id": "memory-turn-capture-03",
+   "suite": "memory-turn-capture",
+   "diff": "S",
+   "title": "failed turn (provider 500): the subscriber records zero L0 lines and zero claims for the session",
+   "paths": [
+    "internal/daemon/memory_capture.go"
    ]
   }
  ]

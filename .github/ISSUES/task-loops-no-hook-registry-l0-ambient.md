@@ -1,7 +1,25 @@
 # Task-scoped agent loops do not inherit the hook registry — L0 recording and ambient extraction silently skipped for dispatched turns
 
+> **RESOLVED (2026-10-14, option c)** — capture moved off the hook registry
+> onto a `turn.terminal` bus subscriber: see
+> `internal/daemon/memory_capture.go` (WireMemoryCapture; the session-end
+> `l0_record` hook and the loop-level epistemic hook were retired in the
+> same change). Every loop type emits turn.terminal through the single
+> `publishTurnTerminal` funnel, so dispatched/task-scoped turns are captured
+> on the same seam as direct turns. Analysis below kept for history.
+> **Follow-up RESOLVED same day:** the e2e probe `memory-turn-capture-02`
+> found the relay terminal event for dispatched turns carries
+> `SessionID == ConversationID ==` the session's *conversation* id (tasks
+> are linked by the conversation id the chat handler passes the
+> dispatcher), while the message store keys by the primary session id —
+> the subscriber's store lookup missed and the task's reply was not
+> captured. Fixed by a `GetByConversationID` fallback in the subscriber's
+> session resolution (memory_capture.go `capture()`); the tripwire test is
+> flipped to positive assertions (L0 exchange + status=auto claim for a
+> dispatched turn).
+
 Found: 2026-10-13 live scratch-daemon gate (memory capability forest follow-up).
-Status: OPEN — product decision needed before fixing.
+Status: RESOLVED (option c landed 2026-10-14; relay-path follow-up above).
 
 ## The gap
 

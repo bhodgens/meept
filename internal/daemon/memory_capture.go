@@ -118,10 +118,24 @@ func (mc *memoryCapture) capture(ev agent.TurnTerminalEvent) {
 		return
 	}
 	// Resolve the capture session: ev.SessionID if non-empty, else
-	// ev.ConversationID (contract step 2).
+	// ev.ConversationID (contract step 2). For RELAYED task turns both
+	// fields carry the session's CONVERSATION id (conv-…), not the primary
+	// session id — createTask links tasks by the conversation id the chat
+	// handler passes the dispatcher, and publishTaskTerminalRelay overwrites
+	// sessionID with that linked id. The message store keys messages by the
+	// PRIMARY session id, so resolve the real session via
+	// GetByConversationID when direct lookups miss (observed live: the
+	// task's reply recorded no L0 without this fallback).
 	captureSession := ev.SessionID
 	if captureSession == "" {
 		captureSession = ev.ConversationID
+	}
+	if !mc.storeHasMessages(captureSession) {
+		if sess := mc.store.GetByConversationID(captureSession); sess != nil && sess.ID != captureSession {
+			mc.logger.Debug("memory capture: resolved session by conversation id",
+				"given", captureSession, "session_id", sess.ID)
+			captureSession = sess.ID
+		}
 	}
 
 	// Step 3: last user message from the store. Not found → skip the whole
@@ -146,6 +160,14 @@ func (mc *memoryCapture) capture(ev agent.TurnTerminalEvent) {
 	if mc.extractor != nil && ev.Reply != "" {
 		mc.runAmbient(captureSession, ev.TurnID, userMsg, ev.Reply)
 	}
+}
+
+// storeHasMessages reports whether the store has any messages keyed under
+// this exact id (cheap probe used to decide whether the conversation-id
+// fallback should run).
+func (mc *memoryCapture) storeHasMessages(sessionID string) bool {
+	total, err := mc.store.GetMessageCount(sessionID)
+	return err == nil && total > 0
 }
 
 // lastUserMessage fetches the last page of messages and scans backwards for

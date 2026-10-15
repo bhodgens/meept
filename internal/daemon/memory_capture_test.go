@@ -470,6 +470,44 @@ func TestMemoryCaptureSessionFallbackToConversationID(t *testing.T) {
 	}, "2 L0 records via conversation-id fallback")
 }
 
+// RELAYED task turns carry SessionID == ConversationID == the session's
+// CONVERSATION id (conv-…) — publishTaskTerminalRelay overwrites sessionID
+// with the linked id, while the message store keys messages by the PRIMARY
+// session id. The subscriber must resolve the real session via
+// GetByConversationID or the task's reply is never captured (live-observed
+// defect, fixed by the fallback).
+func TestMemoryCaptureRelayConversationIDResolvesPrimarySession(t *testing.T) {
+	b, store, recorder, enq, _, dataDir, sessionID := newCaptureHarness(t)
+	sub := WireMemoryCapture(b, store, recorder, enq, nil, captureLogger())
+	defer b.Unsubscribe(sub)
+
+	// Point the created session's ConversationID at a conv- id, then seed
+	// the exchange under the PRIMARY session id (persistExchange shape).
+	sess := store.Get(sessionID)
+	if sess == nil {
+		t.Fatalf("session %s missing", sessionID)
+	}
+	convID := "conv-relaytest1"
+	sess.ConversationID = convID
+	seedUserMessage(t, store, sessionID, "dispatched task prompt")
+
+	publishTurnTerminal(t, b, agent.TurnTerminalEvent{
+		ConversationID: convID, // relay shape: both fields carry the conv id
+		SessionID:      convID,
+		Status:         "completed",
+		Reply:          "task reply text",
+	})
+
+	date := time.Now().Format("2006-01-02")
+	waitFor(t, 2*time.Second, func() bool {
+		recs, err := l0.ReadSession(filepath.Join(dataDir, "l0"), date, sessionID)
+		if err != nil || len(recs) != 2 {
+			return false
+		}
+		return recs[0].Content == "dispatched task prompt" && recs[1].Content == "task reply text"
+	}, "2 L0 records under the PRIMARY session id via GetByConversationID fallback")
+}
+
 // The last (not the first) user message in the store is the exchange's user
 // side.
 func TestMemoryCaptureUsesLastUserMessage(t *testing.T) {

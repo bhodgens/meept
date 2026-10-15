@@ -300,8 +300,14 @@ tier and moves claim extraction off the turn path:
   `<memory.data_dir>/l0/YYYY-MM-DD.jsonl` (one JSON object per line:
   `{id, ts, session_id, role, content, meta}`, append-only). Injected
   `<memory-context>` spans are stripped before persisting (feedback-loop
-  guard). Recording happens in a session-end hook: append errors are logged
-  and never fail the turn.
+  guard). Recording is turn-terminal driven: a daemon bus subscriber on
+  `turn.terminal` (`internal/daemon/memory_capture.go`, gated on
+  `memory.l0_enabled`) appends the user message and the final reply for
+  every turn that ends `status=completed` — direct chat turns AND
+  dispatched/task-scoped turns alike, where the retired session-end
+  `l0_record` hook never fired (task loops do not inherit the primary hook
+  registry; see `.github/ISSUES/task-loops-no-hook-registry-l0-ambient.md`).
+  Append errors are logged and never fail the turn.
 - **L1** — `memory.l1_extract` queue jobs distill a session's undistilled L0
   window into `status=auto` claims via the ambient extraction prompt. The
   per-session progress marker (an episodic memory, category `l0_progress`)
@@ -313,7 +319,11 @@ tier and moves claim extraction off the turn path:
   is malformed — an L2 job never dead-letters on a malformed segmentation).
 
 Everything is gated on `memory.l0_enabled` (default **false**): disabled
-means nothing records and no distill job is ever enqueued.
+means nothing records and no distill job is ever enqueued. The capture
+subscriber's ambient epistemic extraction additionally gates on
+`memory.epistemic.ambient_extraction.enabled` (default **false**) — with the
+gate off, L0 lines and L1 distill jobs still run, but no turn-side ambient
+`status=auto` claims are written (the L1 job's own extraction is unaffected).
 
 ### Configuration
 
