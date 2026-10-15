@@ -333,6 +333,14 @@ gui-connect-setup: config-bootstrap
 gui-connect-check:
 	@MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py check
 
+# gui-connect-probe: LIVE probe against a running daemon — TLS + cert pin,
+# /api/v1/health, WebSocket upgrade with the GUI key (expect 101) and with a
+# bogus key (expect 418). Use after (re)starting the daemon to prove the
+# installed GUI's connect path end to end.
+.PHONY: gui-connect-probe
+gui-connect-probe:
+	@MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py probe
+
 
 hooks:
 	@echo "Installing git hooks (core.hooksPath -> .githooks)..."
@@ -564,9 +572,11 @@ install: install-install-order
 	@$(MAKE) install-cli
 	@echo ""
 	@echo "Install complete. Config: $(MEEPT_HOME)/meept.json5"
-	@echo "  GUI endpoint: $$(MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py endpoint)"
+	@echo "  GUI endpoint: https://$$(MEEPT_HOME=$(MEEPT_HOME) python3 scripts/gui-daemon-connect.py endpoint) (TLS, self-signed cert)"
 	@echo "  GUI key:      embedded from $(MEEPT_HOME)/dev_key at build time"
+	@echo "  NOTE: the endpoint is HTTPS — a plain http:// URL will not connect."
 	@echo "  Restart the daemon to load the transport settings, then launch the GUI."
+	@echo "  Verify a running daemon:  make gui-connect-probe"
 
 # sync-config: merge shipped config/{skills,agents,prompts} into the meept
 # home ($MEEPT_HOME, default ~/.meept) with no-clobber semantics
