@@ -37,12 +37,8 @@ const (
 // memory. Markers are plain episodic memories whose metadata carries
 // session_id and l0_progress (the last fully-processed L0 message ID);
 // append-only semantics: each advance stores a NEW marker row and readers
-// take the newest (newest-rowid-first GetByCategory order).
+// take the newest (keyed rowid-desc lookup).
 const markerCategory = "l0_progress"
-
-// markerScanLimit bounds the GetByCategory scan when locating a session's
-// newest progress marker.
-const markerScanLimit = 200
 
 // L1ExtractPayload is the memory.l1_extract payload (SHARED-CONVENTIONS §2.2).
 type L1ExtractPayload struct {
@@ -327,24 +323,22 @@ func (w *DistillWorker) storeCandidates(ctx context.Context, candidates []Ambien
 }
 
 // l0ProgressMarker returns the newest l0_progress position for the session
-// ("" when none).
+// ("" when none). Keyed lookup on the metadata pair — never a bounded
+// newest-N category scan, which silently lost suppression for any session
+// whose newest marker fell outside the window (bughunt 2026-10-14).
 func (w *DistillWorker) l0ProgressMarker(ctx context.Context, sessionID string) (string, error) {
 	epi := w.manager.Episodic()
 	if epi == nil {
 		return "", errors.New("distill: episodic store unavailable for l0 marker")
 	}
-	results, err := epi.GetByCategory(ctx, markerCategory, markerScanLimit)
+	res, ok, err := epi.GetNewestByCategoryAndMetadata(ctx, markerCategory, "session_id", sessionID)
 	if err != nil {
 		return "", fmt.Errorf("distill: read l0 marker: %w", err)
 	}
-	// GetByCategory orders newest-rowid first: the first session match is
-	// the newest marker row.
-	for _, r := range results {
-		if asString(r.Memory.Metadata["session_id"]) == sessionID {
-			return asString(r.Memory.Metadata["l0_progress"]), nil
-		}
+	if !ok {
+		return "", nil
 	}
-	return "", nil
+	return asString(res.Memory.Metadata["l0_progress"]), nil
 }
 
 // advanceMarker appends a new marker row for the session. Append-only: never

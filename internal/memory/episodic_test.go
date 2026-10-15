@@ -202,6 +202,55 @@ func TestEpisodicMemoryGetByCategory(t *testing.T) {
 	}
 }
 
+// TestGetNewestByCategoryAndMetadataBeyondWindow pins the keyed marker
+// lookup (bughunt 2026-10-14): a row whose metadata matches must be found
+// even when hundreds of newer same-category rows push it far past any
+// newest-N scan window. The old GetByCategory(200) scan lost the L0
+// progress marker for exactly this shape.
+func TestGetNewestByCategoryAndMetadataBeyondWindow(t *testing.T) {
+	tmpDir := t.TempDir()
+	ctx := context.Background()
+
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
+		DataDir: filepath.Join(tmpDir, "episodic"),
+	})
+	if err := mem.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+	defer mem.Close()
+
+	for i := 0; i < 250; i++ {
+		if _, err := mem.Store(ctx, "filler", "l0_progress", map[string]any{
+			"session_id":  "other",
+			"l0_progress": "filler",
+		}); err != nil {
+			t.Fatalf("store filler %d: %v", i, err)
+		}
+	}
+	if _, err := mem.Store(ctx, "target marker", "l0_progress", map[string]any{
+		"session_id":  "target",
+		"l0_progress": "msg-99",
+	}); err != nil {
+		t.Fatalf("store target: %v", err)
+	}
+
+	res, ok, err := mem.GetNewestByCategoryAndMetadata(ctx, "l0_progress", "session_id", "target")
+	if err != nil {
+		t.Fatalf("keyed lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("keyed lookup missed the target row beyond the scan window")
+	}
+	if got, _ := res.Memory.Metadata["l0_progress"].(string); got != "msg-99" {
+		t.Fatalf("l0_progress = %q, want msg-99", got)
+	}
+
+	// And a miss is a clean ok=false.
+	if _, ok, err := mem.GetNewestByCategoryAndMetadata(ctx, "l0_progress", "session_id", "absent"); err != nil || ok {
+		t.Fatalf("absent key: ok=%v err=%v, want ok=false", ok, err)
+	}
+}
+
 func TestEpisodicMemoryDelete(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()

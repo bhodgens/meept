@@ -352,6 +352,38 @@ func (e *EpisodicMemory) GetByCategory(ctx context.Context, category string, lim
 	return e.scanResults(rows, false)
 }
 
+// GetNewestByCategoryAndMetadata returns the newest (rowid-desc) memory in
+// category whose metadata_json carries `"key":"value"` for the given pair.
+// Direct row scan rather than a full-category fetch: keyed lookups must not
+// degrade into a bounded newest-N scan that misses once the category grows
+// (the L0 progress marker consumed GetByCategory(200) this way and lost
+// suppression for any session whose newest marker fell outside the window —
+// bughunt 2026-10-14). json_extract on the metadata document; ok=false when
+// no row matches.
+func (e *EpisodicMemory) GetNewestByCategoryAndMetadata(ctx context.Context, category, key, value string) (MemoryResult, bool, error) {
+	rows, err := e.store.GetDB().QueryContext(ctx, `
+		SELECT id, content, category, metadata_json, created_at
+		FROM episodic_memories
+		WHERE category = ?
+		  AND json_extract(metadata_json, '$.' || ?) = ?
+		ORDER BY rowid DESC
+		LIMIT 1
+	`, category, key, value)
+	if err != nil {
+		return MemoryResult{}, false, fmt.Errorf("failed keyed category lookup: %w", err)
+	}
+	defer rows.Close()
+
+	results, err := e.scanResults(rows, false)
+	if err != nil {
+		return MemoryResult{}, false, err
+	}
+	if len(results) == 0 {
+		return MemoryResult{}, false, nil
+	}
+	return results[0], true, nil
+}
+
 // GetByTimeRange retrieves memories within a time range.
 func (e *EpisodicMemory) GetByTimeRange(ctx context.Context, start, end time.Time, limit int) ([]MemoryResult, error) {
 	rows, err := e.store.GetDB().QueryContext(ctx, `
