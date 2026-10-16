@@ -83,8 +83,9 @@ func (t *TaintBeforeToolCall) checkShellTaint(ctx context.Context, toolCall llm.
 						"violation", violation.Error(),
 					)
 					return BlockResult{
-						Block:  true,
-						Reason: "command contains potentially injected external data: " + pattern,
+						Block:     true,
+						Reason:    "command contains potentially injected external data: " + pattern,
+						HardError: true,
 					}
 				}
 				t.logger.Debug("shell command contains external data but blocking disabled",
@@ -132,8 +133,9 @@ func (t *TaintBeforeToolCall) checkNetworkTaint(ctx context.Context, toolCall ll
 						"violation", violation.Error(),
 					)
 					return BlockResult{
-						Block:  true,
-						Reason: "URL may contain sensitive data: " + pattern,
+						Block:     true,
+						Reason:    "URL may contain sensitive data: " + pattern,
+						HardError: true,
 					}
 				}
 			}
@@ -173,8 +175,9 @@ func (t *TaintBeforeToolCall) checkMessageTaint(ctx context.Context, toolCall ll
 				"violation", violation.Error(),
 			)
 			return BlockResult{
-				Block:  true,
-				Reason: "message contains untrusted data",
+				Block:     true,
+				Reason:    "message contains untrusted data",
+				HardError: true,
 			}
 		}
 	}

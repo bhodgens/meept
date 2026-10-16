@@ -62,7 +62,7 @@ func (s *SecurityBeforeToolCall) scanShellCommand(ctx context.Context, toolCall 
 			"command", truncateString(args.Command, 80),
 			"reason", reason,
 		)
-		return BlockResult{Block: true, Reason: reason}
+		return BlockResult{Block: true, Reason: reason, HardError: true}
 	}
 
 	if warning {

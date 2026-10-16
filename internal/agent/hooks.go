@@ -26,6 +26,12 @@ const (
 type BlockResult struct {
 	Block  bool
 	Reason string // human-readable reason if blocked
+	// HardError marks a SECURITY deny (injection, taint violation,
+	// scanner block): the tool call is refused, not deferred. The loop
+	// surfaces it as a failed execution result instead of a confirmation
+	// prompt — re-invoking with confirmed=true must NEVER bypass a
+	// security refusal. Decision-gate denies stay soft (they ASK).
+	HardError bool
 }
 
 // OverrideResult is returned by AfterToolCallHook.

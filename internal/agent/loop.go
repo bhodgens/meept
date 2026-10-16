@@ -7882,34 +7882,52 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 		}
 		// BeforeToolCall hooks (decision-model leaf 03): run the registry's
 		// before-tool-call hooks per call. On Block, the call is denied
-		// WITHOUT execution and the model receives a phase-1
-		// ConfirmationResponse-shaped tool result (requires_confirmation=true)
-		// mirroring ConfirmationResponse in internal/tools/builtin/
-		// confirmation.go — the existing confirm flow (re-invoke with
-		// confirmed=true) picks it up. The hook itself only DECIDES
-		// allow-vs-ask; it never executes anything.
+		// WITHOUT execution. Two deny flavors:
+		//   - HardError (security/taint denies): a FAILED execution result —
+		//     feeding the repeat breaker and error surfaces. Never a
+		//     confirmation prompt; re-invoking with confirmed=true must not
+		//     bypass a security refusal.
+		//   - Soft block (decision gate): the phase-1 ConfirmationResponse
+		//     shape (requires_confirmation=true) mirroring ConfirmationResponse
+		//     in internal/tools/builtin/confirmation.go — the existing confirm
+		//     flow (re-invoke with confirmed=true) picks it up. The hook
+		//     itself only DECIDES allow-vs-ask; it never executes anything.
 		if l.hookRegistry != nil {
 			if block := l.hookRegistry.RunBeforeToolCalls(ctx, tc); block.Block {
 				l.logger.Info("tool call denied by before-tool-call hook",
 					"tool", tc.Function.Name,
 					"reason", block.Reason,
+					"hard_error", block.HardError,
 				)
-				results[i] = &ExecutionResult{
+				denied := &ExecutionResult{
 					ToolCallID: tc.ID,
-					Success:    true,
+					// HardError = failure (real error semantics);
+					// soft deny = success=false-free confirmation
+					// handshake (Success true, not IsBreakableRepeat —
+					// a policy ask is not a doomed input).
+					Success: !block.HardError,
+				}
+				if block.HardError {
+					denied.Result = map[string]any{
+						"error":  "blocked by security policy",
+						"reason": block.Reason,
+						"tool":   tc.Function.Name,
+					}
+				} else {
 					// Phase-1 confirmation shape: mirrors builtin.
 					// ConfirmationResponse so the model re-invokes with
 					// confirmed=true on approval. Not IsBreakableRepeat —
-					// a policy deny is not a doomed input.
-					Result: map[string]any{
+					// a policy ask is not a doomed input.
+					denied.Result = map[string]any{
 						"requires_confirmation": true,
 						"action":                tc.Function.Name,
 						"reversible":            false,
 						"summary":               block.Reason,
 						"confirm_arg":           "confirmed",
-					},
-					IsBreakableRepeat: false,
+					}
+					denied.IsBreakableRepeat = false
 				}
+				results[i] = denied
 				continue
 			}
 		}

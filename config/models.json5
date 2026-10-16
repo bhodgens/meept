@@ -48,8 +48,8 @@
   // decision_model. Default false.
   // "decision_gate_enabled": true,
   // Tool names the gate consults. Empty = sensible defaults chosen by the
-  // gate implementation.
-  // "decision_gate_tools": ["shell"],
+  // gate implementation (shell, file_write).
+  // "decision_gate_tools": ["shell", "file_write"],
 
   // Dedicated model for ambient epistemic extraction + distill
   // summarization. Empty = falls back to the general chat client. Point
