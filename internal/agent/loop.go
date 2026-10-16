@@ -545,6 +545,13 @@ type CompactionAgentConfig struct {
 	// SpillEnabled turns on tool-output spilling in pruneToolOutputs
 	// (compaction.spill_enabled; opt-in, default false).
 	SpillEnabled bool
+	// DecisionEnabled opts the decision-model compaction lane in
+	// (compaction.decision_enabled; opt-in, default false — the legacy
+	// summarizer stays the default when no decision model is defined).
+	DecisionEnabled bool
+	// DecisionKeepBar is the score (0-4) an entry must reach to survive
+	// decision-model compaction (compaction.decision_keep_bar, default 2).
+	DecisionKeepBar int
 }
 
 // DefaultAgentConfig returns a configuration with sensible defaults.
@@ -2451,6 +2458,9 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 				MaxSummaryLevel:           loop.config.MaxSummaryLevel,
 				SummaryLevelThreshold:     loop.config.SummaryLevelThreshold,
 				OverflowStrategy:          loop.config.OverflowStrategy,
+				DecisionCompaction:        loop.config.Compaction.DecisionEnabled,
+				DecisionKeepBar:           loop.config.Compaction.DecisionKeepBar,
+				DecisionClient:            llm.NewDecisionClient(loop.resolver, loop.logger),
 			},
 			nil, // summaryModel - uses inner by default
 			loop.logger,
@@ -2622,6 +2632,8 @@ func (l *AgentLoop) SetCompactionConfig(cfg config.CompactionConfig) {
 		TimeoutSeconds:    cfg.TimeoutSeconds,
 		TriggerRatio:      cfg.TriggerRatio,
 		SpillEnabled:      cfg.SpillEnabled,
+		DecisionEnabled:   cfg.DecisionEnabled,
+		DecisionKeepBar:   cfg.DecisionKeepBar,
 	}
 }
 

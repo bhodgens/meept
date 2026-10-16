@@ -1313,6 +1313,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			ClassifierModel: lifecycleCfg.ClassifierModel,
 			SummarizerModel: lifecycleCfg.SummarizerModel,
 			ExtractModel:    lifecycleCfg.ExtractModel,
+			DecisionModel:   lifecycleCfg.DecisionModel,
 		}
 		inUse := llm.BuildModelsInUse(agentRefs, slots, lifecycleCfg.ModelAliases, lifecycleCfg.DisabledProviders)
 		if len(inUse) > 0 {

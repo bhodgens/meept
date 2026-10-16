@@ -289,6 +289,7 @@ func computeInUseModels(cfg *llm.ProvidersConfig, pc *llm.ProviderConfig, provid
 		SmallModel:      cfg.SmallModel,
 		ClassifierModel: cfg.ClassifierModel,
 		SummarizerModel: cfg.SummarizerModel,
+		DecisionModel:   cfg.DecisionModel,
 	}
 	inUse := llm.BuildModelsInUse(agentRefs, slots, cfg.ModelAliases, cfg.DisabledProviders)
 	if len(inUse) == 0 {
