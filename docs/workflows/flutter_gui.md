@@ -60,12 +60,16 @@ When no transient message is set, segments render in code order, joined by `' ·
 | 3 | keybind hint | derived from `selectedTabIndex` (constructor param) | tab-specific: chat=`^k focus · / cmd · ^f find · ^v verbosity`, sessions=`dbl-click open · ⌫ archive`, other=`j/k navigate · enter select` |
 | 4 | project | `currentProjectProvider` | `[name branch*]` (git mode, `*` appended when dirty) or `[local:name]`; **omitted entirely** when project is not active |
 | 5 | verbosity | `verbosityProvider` | `verbosity: quiet\|normal\|verbose` — see [verbosity](#verbosity) below |
+| 6 | acp | `acpStatusProvider` | `acp:<n>` live agents; omitted when 0 |
+| 7 | branch | `sessionBranchProvider` (status_bar.dart) | `branch: <topic.lowercase>` — active thread topic label, fetched via `GET /api/v1/sessions/{id}/threads/active` only when the session has a `leaf_message_id`; **conditional** (TUI parity with app.go's `branch: <name>` span) |
+| 8 | pending changes | `sessionPendingChangesProvider` (status_bar.dart) | `<n> pending changes` in warning color via `SdkApiClient.listPendingChanges` for the active session; **conditional**, only while > 0 (TUI parity) |
+| 9 | claims to review | `memoryReviewPendingProvider` (status_bar.dart) | `<n> claims to review` in warning color via `GET /api/v1/memory/review-queue` (the REST bridge to the same `memory.reviewQueue` RPC the TUI uses); **conditional**, only while > 0 (TUI parity) |
 
 The status bar is always rendered on the home scaffold; it does not disappear on modals or dialogs. Project names are truncated to 16 grapheme clusters (`chars.length > 16`) using `String.characters` (grapheme-aware) to avoid splitting surrogate pairs.
 
 ### Command palette
 
-Triggered by `Cmd+X` on macOS, `Ctrl+X` everywhere else (`ui/flutter_ui/lib/widgets/command_palette.dart`). This matches the TUI `ctl-x` leader key intentionally — keyboard shortcuts stay uniform across surfaces per `CLAUDE.md`.
+Triggered by `Ctrl+X` on every platform (`ui/flutter_ui/lib/widgets/command_palette.dart`) — identical to the TUI `ctl-x` leader key per the UI-conventions parity rule (the former macOS-only `Cmd+X` variant was removed; same for `Ctrl+K` focus and `Ctrl+F` find). GUI palette keys themselves are hardcoded and not client-configurable (see the note in `config/client.json5`).
 
 The palette is a modal overlay with a queryable list. Items:
 

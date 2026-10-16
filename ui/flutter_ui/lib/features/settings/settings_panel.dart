@@ -922,16 +922,17 @@ class _FormSections extends StatelessWidget {
             },
           ),
           const SizedBox(height: 10),
-          // Modifier key preference (ctrl vs cmd for leader shortcut)
+          // Modifier key preference (LEGACY: shortcuts are ctrl-only now —
+          // this field is kept for stored-pref compatibility and is ignored
+          // by the shortcut layer; do not advertise cmd here.)
           FormBuilderDropdown<String>(
             name: SettingsFields.modifierKey,
             decoration: InputDecoration(
-              labelText: 'modifier key for shortcuts',
+              labelText: 'modifier key for shortcuts (legacy, ctrl only)',
               labelStyle: CyberpunkTypography.bodySmall.copyWith(
                 color: CyberpunkColors.lightGray,
               ),
-              helperText:
-                  'ctrl (default) or cmd for cmd+x, cmd+k, cmd+f shortcuts',
+              helperText: 'shortcuts use ctrl on all platforms (tui parity)',
               helperStyle: CyberpunkTypography.bodySmall.copyWith(
                 color: CyberpunkColors.midGray,
                 fontSize: 9,

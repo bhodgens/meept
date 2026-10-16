@@ -1,10 +1,9 @@
-// Platform detection via compile-time constants for web compatibility
-// Runtime checks use platformService where needed (see LeaderKeyController._isMacOS)
+// App-wide keyboard shortcuts. All bindings use Ctrl on every platform
+// (TUI parity — identical keys across surfaces per the repo UI conventions).
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/preferences_provider.dart';
 
 /// App-wide intent types for keyboard shortcuts.
 abstract class AppIntent extends Intent {
@@ -60,18 +59,12 @@ class GlobalSearchIntent extends AppIntent {
 ///
 /// Previously this class hosted a two-stage "leader key" state machine
 /// (leader + follow-up character). It has been replaced by a command
-/// palette: pressing the leader combo (Cmd+X mac / Ctrl+X other) now
-/// invokes [onShowCommandPalette] which opens a modal palette dialog.
+/// palette: pressing Ctrl+X (all platforms, TUI parity) now invokes
+/// [onShowCommandPalette] which opens a modal palette dialog.
 /// All former `onTabSelected` / `onNavigate` / etc. callbacks are
 /// retained because they are still used by direct shortcuts and by
 /// the palette's selection handler in `HomeScreen`.
 class LeaderKeyController extends ChangeNotifier {
-  static bool get _isMacOS {
-    // Use compile-time constant: true only on macOS native builds
-    // On web and non-macOS native, returns false (defaults to ctrl+x)
-    return const bool.fromEnvironment('os.macos');
-  }
-
   /// Whether branches are enabled (from session.branches_enabled config).
   /// Defaults to false (branches disabled, use threads instead).
   bool branchesEnabled = false;
@@ -104,7 +97,7 @@ class LeaderKeyController extends ChangeNotifier {
   /// The Flutter equivalent is the search panel route.
   VoidCallback? onFuzzyFinder;
 
-  /// Set this callback to open the in-session find bar (Cmd+F / Ctrl+F).
+  /// Set this callback to open the in-session find bar (Ctrl+F, TUI parity).
   VoidCallback? onInSessionFind;
 
   /// Set this callback to open global search (single `f` key from
@@ -112,6 +105,11 @@ class LeaderKeyController extends ChangeNotifier {
   /// before navigating — the controller fires on every unmodified `f`
   /// press, leaving route-gating to the widget layer.
   VoidCallback? onGlobalSearch;
+
+  /// Stop the current turn (Ctrl+C, TUI parity — the TUI quits on
+  /// double-press; the GUI has no quit semantics, so a single press stops
+  /// the active turn instead). Optional: when null, Ctrl+C is ignored.
+  VoidCallback? onStopCurrentTurn;
 
   /// Open the command palette dialog (replaces the former leader mode).
   VoidCallback? onShowCommandPalette;
@@ -122,23 +120,19 @@ class LeaderKeyController extends ChangeNotifier {
   /// Optional callback for go_router navigation.
   void Function(String path)? onNavigate;
 
+  // Ctrl on ALL platforms (TUI parity — identical keys across surfaces per
+  // the repo UI conventions; Ctrl+V precedent). No Cmd variants.
   static LogicalKeySet get leaderKeySet {
-    return _isMacOS
-        ? LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyX)
-        : LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyX);
+    return LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyX);
   }
 
   static LogicalKeySet get focusInputKeySet {
-    return _isMacOS
-        ? LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyK)
-        : LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyK);
+    return LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyK);
   }
 
-  /// Cmd+F (macOS) / Ctrl+F (other) — open in-session find bar.
+  /// Ctrl+F — open in-session find bar (TUI parity, all platforms).
   static LogicalKeySet get findKeySet {
-    return _isMacOS
-        ? LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyF)
-        : LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyF);
+    return LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyF);
   }
 
   /// Handle a raw key event directly (Focus widget dispatch path).
@@ -168,6 +162,12 @@ class LeaderKeyController extends ChangeNotifier {
       return KeyEventResult.handled;
     }
 
+    // --- Ctrl+C stop current turn (TUI parity; no quit semantics in GUI) ---
+    if (_isCtrlKeyTrigger(event, LogicalKeyboardKey.keyC)) {
+      onStopCurrentTurn?.call();
+      return KeyEventResult.handled;
+    }
+
     // --- Ctrl+S steer toggle (all platforms, TUI parity) ---
     if (_isCtrlKeyTrigger(event, LogicalKeyboardKey.keyS)) {
       onToggleSteer?.call();
@@ -192,7 +192,8 @@ class LeaderKeyController extends ChangeNotifier {
   }
 
   /// Plain-Ctrl (no meta/shift/alt) trigger check, used for the TUI-parity
-  /// Ctrl+S / Ctrl+T / Ctrl+P bindings which are identical on all platforms.
+  /// Ctrl+C / Ctrl+S / Ctrl+T / Ctrl+P bindings which are identical on all
+  /// platforms.
   static bool _isCtrlKeyTrigger(KeyEvent event, LogicalKeyboardKey key) {
     if (event is! KeyDownEvent) return false;
     if (event.logicalKey != key) return false;
@@ -203,9 +204,6 @@ class LeaderKeyController extends ChangeNotifier {
   static bool _isLeaderTrigger(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     if (event.logicalKey != LogicalKeyboardKey.keyX) return false;
-    if (_isMacOS) {
-      return HardwareKeyboard.instance.isMetaPressed;
-    }
     return HardwareKeyboard.instance.isControlPressed;
   }
 
@@ -218,22 +216,17 @@ class LeaderKeyController extends ChangeNotifier {
     return HardwareKeyboard.instance.isControlPressed;
   }
 
+  /// Detect Ctrl+K on ALL platforms (parity with TUI — same key everywhere).
   static bool _isFocusInputTrigger(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     if (event.logicalKey != LogicalKeyboardKey.keyK) return false;
-    if (_isMacOS) {
-      return HardwareKeyboard.instance.isMetaPressed;
-    }
     return HardwareKeyboard.instance.isControlPressed;
   }
 
-  /// Detect Cmd+F / Ctrl+F for in-session find.
+  /// Detect Ctrl+F for in-session find (all platforms, TUI parity).
   static bool _isFindTrigger(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     if (event.logicalKey != LogicalKeyboardKey.keyF) return false;
-    if (_isMacOS) {
-      return HardwareKeyboard.instance.isMetaPressed;
-    }
     return HardwareKeyboard.instance.isControlPressed;
   }
 }
@@ -246,12 +239,12 @@ class LeaderKeyController extends ChangeNotifier {
 /// command palette.
 ///
 /// Uses CallbackShortcuts to intercept system-reserved key combinations
-/// (Cmd+X/Ctrl+X for command palette, Cmd+K/Ctrl+K for focus input, etc.)
-/// before Flutter's default text editing shortcuts consume them.
+/// (Ctrl+X for command palette, Ctrl+K for focus input, etc.) before
+/// Flutter's default text editing shortcuts consume them.
 ///
-/// The modifier key (ctrl vs cmd) for leader, focus input, and find
-/// shortcuts is configurable via [modifierKeyProvider] ("ctrl" or "cmd").
-/// Defaults to "ctrl" on all platforms.
+/// All bindings use Ctrl on every platform (TUI parity — identical keys
+/// across surfaces per the repo UI conventions; the former per-platform
+/// Cmd-vs-Ctrl preference was removed).
 class AppShortcuts extends ConsumerStatefulWidget {
   final Widget child;
   final LeaderKeyController controller;
@@ -267,75 +260,29 @@ class AppShortcuts extends ConsumerStatefulWidget {
 }
 
 class _AppShortcutsState extends ConsumerState<AppShortcuts> {
-  /// Get the current modifier preference ("ctrl" or "cmd").
-  String get _modifier => ref.read(modifierKeyProvider);
-
-  /// Check if the user prefers cmd as the modifier.
-  bool get _useCmd => _modifier == 'cmd';
-
   @override
   Widget build(BuildContext context) {
     // Use CallbackShortcuts to intercept system-reserved key combos
     // before Flutter's default text editing shortcuts consume them.
-    // This is necessary because Cmd+X (Cut), Cmd+K, Cmd+F, etc. are
+    // This is necessary because Ctrl+K, Ctrl+F, etc. would otherwise be
     // handled by Flutter's EditableText widgets by default.
-    //
-    // We register BOTH ctrl and cmd variants, but only fire the callback
-    // if the pressed modifier matches the user's preference. This ensures
-    // the shortcut works regardless of which modifier is actually pressed,
-    // while respecting the user's configured preference.
     return CallbackShortcuts(
       bindings: {
-        // Leader key → command palette
-        // Register both variants, but check preference in callback
-        const SingleActivator(
-          LogicalKeyboardKey.keyX,
-          meta: true,
-          control: false,
-        ): () {
-          if (_useCmd) widget.controller.onShowCommandPalette?.call();
-        },
-        const SingleActivator(
-          LogicalKeyboardKey.keyX,
-          meta: false,
-          control: true,
-        ): () {
-          if (!_useCmd) widget.controller.onShowCommandPalette?.call();
-        },
+        // Ctrl+X → command palette (TUI parity, all platforms)
+        const SingleActivator(LogicalKeyboardKey.keyX, control: true): () =>
+            widget.controller.onShowCommandPalette?.call(),
         // Ctrl+V → cycle verbosity (all platforms, TUI parity)
-        // Always uses Ctrl, never Cmd
         const SingleActivator(LogicalKeyboardKey.keyV, control: true): () =>
             widget.controller.onCycleVerbosity?.call(),
-        // Cmd+K / Ctrl+K → focus input (follows modifier preference)
-        const SingleActivator(
-          LogicalKeyboardKey.keyK,
-          meta: true,
-          control: false,
-        ): () {
-          if (_useCmd) widget.controller.onFocusInput?.call();
-        },
-        const SingleActivator(
-          LogicalKeyboardKey.keyK,
-          meta: false,
-          control: true,
-        ): () {
-          if (!_useCmd) widget.controller.onFocusInput?.call();
-        },
-        // Cmd+F / Ctrl+F → in-session find (follows modifier preference)
-        const SingleActivator(
-          LogicalKeyboardKey.keyF,
-          meta: true,
-          control: false,
-        ): () {
-          if (_useCmd) widget.controller.onInSessionFind?.call();
-        },
-        const SingleActivator(
-          LogicalKeyboardKey.keyF,
-          meta: false,
-          control: true,
-        ): () {
-          if (!_useCmd) widget.controller.onInSessionFind?.call();
-        },
+        // Ctrl+K → focus input (TUI parity, all platforms)
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () =>
+            widget.controller.onFocusInput?.call(),
+        // Ctrl+F → in-session find (TUI parity, all platforms)
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
+            widget.controller.onInSessionFind?.call(),
+        // Ctrl+C → stop current turn (TUI parity; no quit semantics in GUI)
+        const SingleActivator(LogicalKeyboardKey.keyC, control: true): () =>
+            widget.controller.onStopCurrentTurn?.call(),
       },
       child: Focus(
         autofocus: true,

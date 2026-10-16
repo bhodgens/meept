@@ -126,6 +126,25 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
     };
     _leaderController.onShowCommandPalette = _showCommandPalette;
     _leaderController.onCycleVerbosity = _cycleVerbosity;
+    // Ctrl+C (TUI parity): stop the current turn when one is active; the
+    // GUI has no quit semantics, so an idle press is a no-op.
+    _leaderController.onStopCurrentTurn = () {
+      final session = _selectedSession ?? ref.read(activeSessionProvider);
+      final sid = session?.id;
+      if (sid == null) {
+        showStatusMessage(ref, 'no active session');
+        return;
+      }
+      final state = ref.read(chatProvider(sid));
+      if (!state.isAgentProcessing && !state.isLoading) {
+        showStatusMessage(ref, 'nothing to stop');
+        return;
+      }
+      ref
+          .read(chatProvider(sid).notifier)
+          .sendSteer(sessionId: sid, text: '/stop');
+      showStatusMessage(ref, 'stop requested');
+    };
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_onConnectionChanged(ref.read(connectionStateProvider)));
@@ -288,6 +307,18 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
         break;
       case 'edit description':
         _showEditDescriptionDialog();
+        break;
+      default:
+        // Items carrying a route/page target navigate directly (memory,
+        // memory review, users). Unhandled items without a target are
+        // ignored.
+        if (item.route != null) {
+          context.push(item.route!);
+        } else if (item.page != null) {
+          Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: item.page!));
+        }
         break;
     }
   }

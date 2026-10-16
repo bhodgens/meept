@@ -5,6 +5,57 @@ import '../theme/typography.dart';
 import '../providers/providers.dart';
 import '../providers/status_message_provider.dart';
 import '../providers/acp_status_provider.dart';
+import '../widgets/thread_selector.dart' show threadServiceProvider;
+
+/// Pending-changes count for a session (status-bar span, TUI parity with
+/// internal/tui/app.go renderStatusBar "N pending changes"). Reuses the
+/// same client method the changes panel fetches with
+/// (`SdkApiClient.listPendingChanges`); nothing else cached this count, so
+/// this provider owns the fetch. Cached per session — the count refreshes
+/// when the session changes or the provider is invalidated.
+final sessionPendingChangesProvider = FutureProvider.autoDispose
+    .family<int, String>((ref, sessionId) async {
+      final client = ref.watch(sdkClientProvider);
+      final raw = await client.listPendingChanges(sessionId);
+      return raw.length;
+    });
+
+/// Daemon-global pending auto-claims count for the status bar (TUI parity:
+/// "N claims to review", fed by the same memory.reviewQueue RPC the TUI
+/// review modal uses, reached through the daemon's REST bridge
+/// GET /api/v1/memory/review-queue). Gated on an active session so the
+/// widget tests stay hermetic (no network without a session).
+final memoryReviewPendingProvider = FutureProvider.autoDispose<int>((
+  ref,
+) async {
+  final session = ref.watch(activeSessionProvider);
+  if (session == null) return 0;
+  final client = ref.watch(sdkClientProvider);
+  try {
+    final res = await client.dio.get('/api/v1/memory/review-queue');
+    final data = res.data;
+    if (data is Map) {
+      return (data['total'] as num?)?.toInt() ?? 0;
+    }
+    return 0;
+  } catch (e) {
+    debugPrint('[status-bar] review-queue fetch failed: $e');
+    return 0;
+  }
+});
+
+/// Active thread branch label for a session (TUI parity: app.go shows
+/// "branch: <name>" when the session has a leaf message and branches are
+/// enabled; the GUI equivalent is the active thread's topic label, fetched
+/// only when the session actually has messages).
+final sessionBranchProvider = FutureProvider.autoDispose
+    .family<String?, String>((ref, sessionId) async {
+      final session = ref.watch(activeSessionProvider);
+      if (session == null || session.leafMessageId == null) return null;
+      final service = ref.watch(threadServiceProvider);
+      final thread = await service.getActiveThread(sessionId);
+      return thread?.topicLabel;
+    });
 
 /// Single-line status bar pinned at the bottom of the HomeScreen.
 /// Mirrors TUI renderStatusBar (internal/tui/app.go:2236-2289).
@@ -16,6 +67,8 @@ import '../providers/acp_status_provider.dart';
 /// - Keybind hints: very light gray (almost white)
 /// - Project path: orange
 /// - Verbosity: very light gray
+/// - Branch: very light gray (active thread topic label, TUI parity)
+/// - Pending changes / claims to review: warning yellow, only while > 0
 class StatusBar extends ConsumerWidget {
   final int selectedTabIndex;
   const StatusBar({super.key, required this.selectedTabIndex});
@@ -66,6 +119,47 @@ class StatusBar extends ConsumerWidget {
       spans.add(TextSpan(text: 'acp:${acp.liveCount}', style: _lightStyle));
     }
 
+    // Thread branch indicator (TUI parity: app.go "branch: <name>" when the
+    // session has a leaf message). Muted/secondary styling.
+    final sid = ref.watch(activeSessionProvider)?.id;
+    if (sid != null && sid.isNotEmpty) {
+      final branch = ref.watch(sessionBranchProvider(sid)).valueOrNull;
+      if (branch != null && branch.isNotEmpty) {
+        spans.add(_separator());
+        spans.add(
+          TextSpan(text: 'branch: ${branch.toLowerCase()}', style: _lightStyle),
+        );
+      }
+
+      // Pending changes indicator (TUI parity): warning color, only shown
+      // while changes await review.
+      final pendingChanges = ref
+          .watch(sessionPendingChangesProvider(sid))
+          .valueOrNull;
+      if (pendingChanges != null && pendingChanges > 0) {
+        spans.add(_separator());
+        spans.add(
+          TextSpan(
+            text: '$pendingChanges pending changes',
+            style: _warningStyle,
+          ),
+        );
+      }
+
+      // Pending auto-claims indicator (TUI parity): warning color, only
+      // shown while claims await review.
+      final pendingClaims = ref.watch(memoryReviewPendingProvider).valueOrNull;
+      if (pendingClaims != null && pendingClaims > 0) {
+        spans.add(_separator());
+        spans.add(
+          TextSpan(
+            text: '$pendingClaims claims to review',
+            style: _warningStyle,
+          ),
+        );
+      }
+    }
+
     return _bar(
       child: Row(
         children: [
@@ -110,6 +204,10 @@ class StatusBar extends ConsumerWidget {
   // Very light gray for keybind hints and verbosity
   TextStyle get _lightStyle =>
       _baseStyle.copyWith(color: CyberpunkColors.veryLightGray);
+
+  // Warning color for pending counts (matches TUI styles.Warning spans)
+  TextStyle get _warningStyle =>
+      _baseStyle.copyWith(color: CyberpunkColors.yellowWarning);
 
   InlineSpan _separator() => TextSpan(
     text: ' · ',
