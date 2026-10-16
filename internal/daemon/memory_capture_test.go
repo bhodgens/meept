@@ -64,7 +64,6 @@ type fakeClassifier struct {
 	mu        sync.Mutex
 	calls     int
 	panics    bool
-	extractMu sync.Mutex // held during a panic call to keep it synchronous
 }
 
 func (c *fakeClassifier) ExtractCandidates(_ context.Context, _ string) ([]byte, error) {

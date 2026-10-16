@@ -7868,6 +7868,39 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 			}
 			continue
 		}
+		// BeforeToolCall hooks (decision-model leaf 03): run the registry's
+		// before-tool-call hooks per call. On Block, the call is denied
+		// WITHOUT execution and the model receives a phase-1
+		// ConfirmationResponse-shaped tool result (requires_confirmation=true)
+		// mirroring ConfirmationResponse in internal/tools/builtin/
+		// confirmation.go — the existing confirm flow (re-invoke with
+		// confirmed=true) picks it up. The hook itself only DECIDES
+		// allow-vs-ask; it never executes anything.
+		if l.hookRegistry != nil {
+			if block := l.hookRegistry.RunBeforeToolCalls(ctx, tc); block.Block {
+				l.logger.Info("tool call denied by before-tool-call hook",
+					"tool", tc.Function.Name,
+					"reason", block.Reason,
+				)
+				results[i] = &ExecutionResult{
+					ToolCallID: tc.ID,
+					Success:    true,
+					// Phase-1 confirmation shape: mirrors builtin.
+					// ConfirmationResponse so the model re-invokes with
+					// confirmed=true on approval. Not IsBreakableRepeat —
+					// a policy deny is not a doomed input.
+					Result: map[string]any{
+						"requires_confirmation": true,
+						"action":                tc.Function.Name,
+						"reversible":            false,
+						"summary":               block.Reason,
+						"confirm_arg":           "confirmed",
+					},
+					IsBreakableRepeat: false,
+				}
+				continue
+			}
+		}
 		toExecute = append(toExecute, tc)
 		executeIdx = append(executeIdx, i)
 	}
@@ -9110,6 +9143,19 @@ func (l *AgentLoop) HookRegistry() *HookRegistry {
 		return nil
 	}
 	return l.hookRegistry
+}
+
+// SetBeforeToolCallHook registers a BeforeToolCallHook on the loop's hook
+// registry under the given name (decision-model leaf 03 wiring seam; follows
+// the nil-guarded Set* injection pattern). Nil-safe on both the loop and the
+// registry and the hook: any nil is a silent no-op, so wiring the gate on a
+// loop without a registry (or with the feature disabled) never panics and
+// never alters behavior.
+func (l *AgentLoop) SetBeforeToolCallHook(name string, priority HookPriority, hook BeforeToolCallHook) {
+	if l == nil || l.hookRegistry == nil || hook == nil {
+		return
+	}
+	l.hookRegistry.RegisterBeforeToolCall(name, priority, hook)
 }
 
 // loadAgentsContext loads AGENTS.md and related project convention context

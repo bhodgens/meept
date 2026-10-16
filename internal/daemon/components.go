@@ -774,6 +774,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Create LLM client with budget tracking
 	llmCfg := createLLMConfig(c.ModelsConfig, logger)
 	var budgetTracker *llm.Budget
+	// Decision-model irreversibility gate (decision-model leaf 03). Built in
+	// the resolver block below when decision_gate_enabled; registered onto
+	// the hook registry at the hook-wiring block. Nil = feature off.
+	var decisionGate *builtin.DecisionGateHook
 	if llmCfg != nil {
 		// Create budget tracker from config. llmBudgetConfigFromConfig applies the
 		// single global switch (llm.budget.enabled) and is the only place budget
@@ -906,6 +910,28 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			quotaCfg := llm.ConfigFromSchema(&cfg.LLM.QuotaRetry)
 			c.LLMResolver.SetQuotaConfig(&quotaCfg)
 			logger.Debug("LLM resolver initialized")
+
+			// Decision-model irreversibility gate (decision-model tree leaf
+			// 03, docs/plans/decision-model/03-irreversibility-gate.md).
+			// Constructed ONLY when decision_gate_enabled is true (opt-in:
+			// zero behavior change for existing installs); registration onto
+			// the hook registry happens below at the hook-wiring block.
+			// Unconfigured decision_model → Available()==false → the gate
+			// never fires even when armed (fail-open semantics live in the
+			// hook itself).
+			if providersCfg.DecisionGateEnabled {
+				decisionGate = builtin.NewDecisionGateHook(
+					llm.NewDecisionClient(c.LLMResolver, logger.With("component", "decision-client")),
+					providersCfg.DecisionEscalationThreshold,
+					providersCfg.DecisionGateTools,
+					logger,
+				)
+				decisionGate.SetEnabled(true)
+				logger.Info("decision gate armed",
+					"threshold", providersCfg.DecisionEscalationThreshold,
+					"tools", providersCfg.DecisionGateTools,
+				)
+			}
 		}
 
 		// Create pricing syncer for dynamic model pricing
@@ -1658,6 +1684,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if secretHook := agent.NewSecretObfuscationHook(secretObfuscator, logger.With("hook", "secret-obfuscation")); secretHook != nil {
 		hookRegistry.RegisterTransformContext("secret-obfuscation", agent.HookPriorityCritical, secretHook)
 		logger.Info("Registered secret obfuscation hook")
+	}
+
+	// Decision-model irreversibility gate (decision-model leaf 03): deny
+	// destructive tool calls when the decision model's confidence is below
+	// decision_escalation_threshold; the loop converts the deny into the
+	// phase-1 confirmation shape. High priority (after security-critical,
+	// before normal hooks). Nil (feature off / no resolver) = not registered.
+	if decisionGate != nil {
+		hookRegistry.RegisterBeforeToolCall("decision-gate", agent.HookPriorityHigh, decisionGate)
+		logger.Info("Registered decision gate BeforeToolCall hook")
 	}
 
 	agentOpts = append(agentOpts, agent.WithEventEmitter(emitter), agent.WithHookRegistry(hookRegistry))
