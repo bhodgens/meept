@@ -222,6 +222,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.handleDispatchCommand(cmd.Args)
 	case "debugsession":
 		return h.executeDebugSession()
+	case "session":
+		return h.executeSession()
 	case "worktree":
 		return h.executeWorktree(cmd.Args)
 	case "eval":
@@ -2075,6 +2077,48 @@ func (h *CommandHandler) executeProjectRename(args []string) *CommandResult {
 		Output:         fmt.Sprintf("renamed project to '%s'", newName),
 		RefreshProject: true,
 	}
+}
+
+// executeSession shows the current session's id, title, and working directory
+// from the client's already-loaded chat state. No RPC unless the local session
+// state is empty and the client is connected.
+func (h *CommandHandler) executeSession() *CommandResult {
+	var sb strings.Builder
+	sessionID := ""
+
+	if h.getChatModel != nil {
+		if chat := h.getChatModel(); chat != nil {
+			sessionID = chat.SessionID()
+		}
+	}
+
+	if sessionID == "" {
+		return &CommandResult{Output: "no active session"}
+	}
+
+	fmt.Fprintf(&sb, "session id: %s\n", sessionID)
+
+	// Fall back to a single session.get RPC only if the daemon is reachable;
+	// everything else is local state. The RPC supplies the title/workdir that
+	// the TUI does not cache itself.
+	if h.rpc != nil && h.rpc.IsConnected() {
+		if session, err := h.rpc.GetSession(sessionID); err == nil && session != nil {
+			title := session.Name
+			if title == "" {
+				title = session.Description
+			}
+			if title != "" {
+				fmt.Fprintf(&sb, "title:      %s\n", title)
+			}
+			if session.ProjectPath != "" {
+				fmt.Fprintf(&sb, "workdir:    %s\n", session.ProjectPath)
+			} else if session.WorktreePath != "" {
+				fmt.Fprintf(&sb, "workdir:    %s\n", session.WorktreePath)
+			}
+		}
+	}
+
+	return &CommandResult{Output: strings.TrimRight(sb.String(), "\n")}
 }
 
 // executeDebugSession displays detailed information about the current session.

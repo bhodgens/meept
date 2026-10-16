@@ -169,7 +169,7 @@ func TestApp_RenderTabs(t *testing.T) {
 	tabs := ansi.Strip(app.renderTabs())
 
 	// Check that all tabs are present
-	expectedTabs := []string{"chat", "sessions", "tasks", "queue", "memory", "plans"}
+	expectedTabs := []string{"chat", "sessions", "tasks", "queue", "memory", "plans", "agents"}
 	for _, tab := range expectedTabs {
 		if !strings.Contains(tabs, tab) {
 			t.Errorf("expected tabs to contain %q", tab)

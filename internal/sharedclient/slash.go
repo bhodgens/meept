@@ -58,7 +58,6 @@ var builtinCommands = map[string]struct{}{
 	"stop":      {},
 	"status":    {},
 	"vim":       {},
-	"session":   {},
 	"task":      {},
 	"cancel":    {},
 	"amend":     {},
@@ -71,7 +70,17 @@ var builtinCommands = map[string]struct{}{
 	"plan":      {},
 	"review":    {},
 	"project":   {},
-	"mcp":       {},
+	// "worktree", "dnd", "remember", "implement-improvements", "eval",
+	// "facts": handled by the TUI CommandHandler (internal/tui/command_handler.go
+	// executeBuiltin). They must be registered here so IsBuiltin gates them into
+	// executeBuiltin instead of falling through to template invocation, and so
+	// slash autocomplete offers them.
+	"worktree":               {},
+	"dnd":                    {},
+	"remember":               {},
+	"implement-improvements": {},
+	"eval":                   {},
+	"facts":                  {},
 	// "skill" is a built-in that dispatches to the skill command handler at
 	// runtime (resolved via RPC). Autocomplete only shows the static command
 	// name "/skill"; subcommand autocomplete (specific skill names) would
@@ -88,8 +97,8 @@ var builtinCommands = map[string]struct{}{
 	// Debug session: dump all known data about the current session.
 	"debugsession": {},
 
-	// Reset: clear conversation history for the current session.
-	"reset": {},
+	// Session: show current session info (id/title/workdir).
+	"session": {},
 }
 
 // CommandTasks is the "tasks" command name, exported for compatibility with tui/constants.go.

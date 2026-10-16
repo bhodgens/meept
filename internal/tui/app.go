@@ -15,6 +15,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
@@ -2819,8 +2820,8 @@ func (a *App) renderHeader() string {
 	case sessionName != "" && desc != "":
 		// Both name and description
 		maxDescWidth := width - len(sessionName) - 5
-		if maxDescWidth > 10 && len(desc) > maxDescWidth {
-			desc = desc[:maxDescWidth-3] + "..."
+		if maxDescWidth > 10 && ansi.StringWidth(desc) > maxDescWidth {
+			desc = ansi.Truncate(desc, maxDescWidth-3, "...")
 		}
 		content = sessionName + " │ " + desc
 	case sessionName != "":
@@ -2937,6 +2938,7 @@ func (a *App) renderTabs() string {
 		{"queue", ViewQueue},
 		{"memory", ViewMemory},
 		{"plans", ViewPlans},
+		{"agents", ViewAgents},
 	}
 
 	renderedTabs := make([]string, 0, len(tabs))
@@ -3266,7 +3268,7 @@ func (a *App) handleStopWorkChildTasks(msg StopWorkChildTasksMsg) tea.Cmd {
 		sessionID := msg.SessionID
 		a.confirmModal.Show(
 			"stop work",
-			fmt.Sprintf("Stop current work? There are %d active tasks.", msg.ChildTaskCount),
+			fmt.Sprintf("stop current work? there are %d active tasks.", msg.ChildTaskCount),
 			func() tea.Cmd {
 				return a.doStopSession(sessionID)
 			},
