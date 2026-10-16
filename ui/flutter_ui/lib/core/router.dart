@@ -78,6 +78,13 @@ final GoRouter router = GoRouter(
         return const NoTransitionPage(child: _LayoutShell(tab: HomeTab.agents));
       },
     ),
+    GoRoute(
+      path: '/queue',
+      name: 'queue',
+      pageBuilder: (context, state) {
+        return const NoTransitionPage(child: _LayoutShell(tab: HomeTab.queue));
+      },
+    ),
 
     // --- Full-screen routes ---
     // Every panel route vetoes a system pop (the browser Back button, the OS
@@ -337,6 +344,9 @@ extension AppRouterExtension on BuildContext {
 
   /// Navigate to the agents tab (replace current entry).
   void goAgents() => go('/agents');
+
+  /// Navigate to the queue tab (replace current entry).
+  void goQueue() => go('/queue');
 
   /// Navigate to the settings screen (replace current entry).
   void goSettings() => go('/settings');

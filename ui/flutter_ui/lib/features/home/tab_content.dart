@@ -10,6 +10,7 @@ import '../sessions/sessions_overview_tab.dart';
 import '../plans/plans_tab.dart';
 import '../tasks/tasks_tab.dart';
 import '../agents/agents_tab.dart';
+import '../queue/queue_tab.dart' as queue;
 import '../../models/api_models.dart';
 
 /// Tab content router - displays the selected tab's content
@@ -39,6 +40,8 @@ class TabContent extends ConsumerWidget {
         return const TasksTab();
       case HomeTab.agents:
         return const AgentsTab();
+      case HomeTab.queue:
+        return const queue.QueueTab();
     }
   }
 }

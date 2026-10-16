@@ -96,8 +96,8 @@ class _ConnectionDetailsDialog extends ConsumerWidget {
   }
 }
 
-/// Home tab enum - 5 tabs
-enum HomeTab { chat, sessions, plans, tasks, agents }
+/// Home tab enum - 6 tabs
+enum HomeTab { chat, sessions, plans, tasks, agents, queue }
 
 /// Connection status dot - small indicator in toolbar.
 /// Tapping opens a popup menu with details, disconnect/reconnect actions.
@@ -205,6 +205,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     'plans',
     'tasks',
     'agents',
+    'queue',
   ];
 
   /// Route paths corresponding to each tab index.
@@ -214,6 +215,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     '/plans',
     '/tasks',
     '/agents',
+    '/queue',
   ];
 
   bool _initialLoadDone = false;
@@ -266,6 +268,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // equivalent is the search tool panel.
     _leaderController.onFuzzyFinder = () =>
         unawaited(_navigateGuarded(context.goToolSearch));
+    // Ctrl+C (TUI parity): stop the current turn when one is active; the
+    // GUI has no quit semantics, so an idle press is a no-op.
+    _leaderController.onStopCurrentTurn = () {
+      final session = ref.read(activeSessionProvider);
+      final sid = session?.id;
+      if (sid == null) {
+        showStatusMessage(ref, 'no active session');
+        return;
+      }
+      final state = ref.read(chatProvider(sid));
+      if (!state.isAgentProcessing && !state.isLoading) {
+        showStatusMessage(ref, 'nothing to stop');
+        return;
+      }
+      ref
+          .read(chatProvider(sid).notifier)
+          .sendSteer(sessionId: sid, text: '/stop');
+      showStatusMessage(ref, 'stop requested');
+    };
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_onConnectionChanged(ref.read(connectionStateProvider)));
       // Apply the router-forced initial tab if present.
@@ -539,6 +560,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         break;
       case 'projects':
         _leaderController.onBranches?.call();
+        break;
+      default:
+        // Items carrying a route/page target navigate directly (memory,
+        // memory review, users). Unhandled items without a target are
+        // ignored.
+        if (item.route != null) {
+          context.push(item.route!);
+        } else if (item.page != null) {
+          Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: item.page!));
+        }
         break;
     }
   }
