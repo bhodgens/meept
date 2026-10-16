@@ -340,6 +340,19 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(cs \*CredentialStore\) List\(\) \[\]string](<#CredentialStore.List>)
   - [func \(cs \*CredentialStore\) Set\(providerID, apiKey string\) error](<#CredentialStore.Set>)
 - [type CutResult](<#CutResult>)
+- [type DecisionClient](<#DecisionClient>)
+  - [func NewDecisionClient\(r \*Resolver, logger \*slog.Logger\) \*DecisionClient](<#NewDecisionClient>)
+  - [func \(d \*DecisionClient\) Ask\(ctx context.Context, q DecisionQuestion\) \(\*DecisionResult, error\)](<#DecisionClient.Ask>)
+  - [func \(d \*DecisionClient\) Available\(\) bool](<#DecisionClient.Available>)
+  - [func \(d \*DecisionClient\) ModelName\(\) string](<#DecisionClient.ModelName>)
+- [type DecisionCompactor](<#DecisionCompactor>)
+  - [func NewDecisionCompactor\(client \*DecisionClient, keepBar int, logger \*slog.Logger\) \*DecisionCompactor](<#NewDecisionCompactor>)
+  - [func \(dc \*DecisionCompactor\) Chat\(ctx context.Context, messages \[\]ChatMessage, \_ ...ChatOption\) \(\*Response, error\)](<#DecisionCompactor.Chat>)
+  - [func \(dc \*DecisionCompactor\) ChatWithProgress\(ctx context.Context, messages \[\]ChatMessage, \_ ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#DecisionCompactor.ChatWithProgress>)
+  - [func \(dc \*DecisionCompactor\) Compact\(ctx context.Context, entries \[\]ChatMessage, currentTask string\) \[\]ChatMessage](<#DecisionCompactor.Compact>)
+  - [func \(dc \*DecisionCompactor\) Config\(\) \*ModelConfig](<#DecisionCompactor.Config>)
+- [type DecisionQuestion](<#DecisionQuestion>)
+- [type DecisionResult](<#DecisionResult>)
 - [type DeltaCallback](<#DeltaCallback>)
 - [type DeltaCallbackWithAttempt](<#DeltaCallbackWithAttempt>)
 - [type FailureClass](<#FailureClass>)
@@ -889,6 +902,19 @@ This gives the context firewall's boundary\-preservation instruction \(structure
 	)
 
 ## Variables
+
+<a name="ErrDecisionUnavailable"></a>
+
+	var (
+	    // ErrDecisionUnavailable means no decision model is configured
+	    // (decision_model slot empty or unresolvable). Callers must treat it as
+	    // "feature disabled", never a turn failure.
+	    ErrDecisionUnavailable = errors.New("decision model not configured")
+	
+	    // ErrDecisionParse means the model's answer token did not exactly match
+	    // any of the question's option labels (after trim + case folding).
+	    ErrDecisionParse = errors.New("decision answer does not match any option")
+	)
 
 <a name="CanonicalProviders"></a>CanonicalProviders is the master list of supported providers.
 
@@ -3863,6 +3889,19 @@ ContextFirewallConfig configures context budget and summarization behavior.
 	    // Valid values: "drop" (keep system + last N), "summarize" (legacy partial),
 	    // "restart" (summarize full conversation, fresh context). Default: "restart".
 	    OverflowStrategy string
+	    // DecisionCompaction opts the decision-model compaction lane in
+	    // (decision-model tree leaf 04; compaction.decision_enabled, default
+	    // false). When true AND DecisionClient.Available(), the compressor's
+	    // stage-2 summarizer is the DecisionCompactor score-and-drop lane;
+	    // otherwise the legacy summarizer passes through byte-identically.
+	    DecisionCompaction bool
+	    // DecisionKeepBar is the score (0-4 rubric) a history entry must reach
+	    // to survive decision-model compaction (compaction.decision_keep_bar,
+	    // default 2). Ignored when DecisionCompaction is false.
+	    DecisionKeepBar int
+	    // DecisionClient is the typed-decision seam (leaf 02). Nil or
+	    // unavailable → the decision lane never activates.
+	    DecisionClient *DecisionClient
 	}
 
 <a name="ContextOverflowError"></a>
@@ -4013,6 +4052,129 @@ Set stores an API key for a provider.
 	    SystemMsgs     []ChatMessage
 	    SplitTurn      bool
 	    SplitTurnIndex int
+	}
+
+<a name="DecisionClient"></a>
+## type DecisionClient
+
+DecisionClient asks typed questions against the configured decision model. It is resolver\-backed: construction takes the Resolver \(leaf 01 owns the decisionModel slot\) and resolves the serving Chatter through the SAME path the classifier's endpoint uses — resolver model config \-\> createChatterFor — never a new transport.
+
+	type DecisionClient struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewDecisionClient"></a>
+### func NewDecisionClient
+
+	func NewDecisionClient(r *Resolver, logger *slog.Logger) *DecisionClient
+
+NewDecisionClient builds a DecisionClient over the Resolver. When no decision model is configured \(DecisionModel\(\) == nil\), Available\(\) is false and every Ask returns ErrDecisionUnavailable.
+
+<a name="DecisionClient.Ask"></a>
+### func \(\*DecisionClient\) Ask
+
+	func (d *DecisionClient) Ask(ctx context.Context, q DecisionQuestion) (*DecisionResult, error)
+
+Ask asks ONE typed question against the decision model and parses the single\-token answer back to an option label.
+
+Serving shape: State \+ Prompt \+ numbered Options are rendered into one chat prompt and sent as a max\_tokens=1, temperature\-0 completion. The answer is parsed trim \+ case\-insensitive, exact match against the option labels; any mismatch is ErrDecisionParse. Raw map: label logprobs when the provider returns them; otherwise argmax\-only with Confidence 1.0 — the documented degradation \(no calibrated distribution available without logprobs\).
+
+<a name="DecisionClient.Available"></a>
+### func \(\*DecisionClient\) Available
+
+	func (d *DecisionClient) Available() bool
+
+Available reports whether a decision model is configured. False means every decision\-model feature stays disabled \(leaf\-01 semantics: the slot never falls back to small\_model or the default model\).
+
+<a name="DecisionClient.ModelName"></a>
+### func \(\*DecisionClient\) ModelName
+
+	func (d *DecisionClient) ModelName() string
+
+ModelName returns "provider/model\-id" of the decision model, or "" when unconfigured.
+
+<a name="DecisionCompactor"></a>
+## type DecisionCompactor
+
+DecisionCompactor: decision\-model\-only compaction lane \(decision\-model tree leaf 04, docs/plans/decision\-model/04\-decision\-compaction.md, Contract E in master.md\).
+
+Score\-and\-drop compaction: every history entry gets ONE score question \("does this entry still matter for the current task?" 0\-4 rubric, entry text as State\) against the DecisionClient. Entries scoring \>= keepBar stay VERBATIM; below\-bar entries are dropped — survivors are never rewritten. Any client error on an entry keeps that entry \(fail open: keep context rather than lose it\), logging Warn once per Compact run, not per entry.
+
+The lane replaces the summarizer Chatter at ContextCompressor stage 2 ONLY when the decision model is configured AND the opt\-in knob is true; otherwise the existing summarizer stays the default lane byte\-identically \(see selectSummarizerForCompressor\). The Chatter seam is chat\-shaped \(Chat / ChatWithProgress / Config\), so the compactor implements it and adapts the compressor's summarizeWithLLM message shape \(system messages \+ one user message of "\[role\]: content" lines\) into per\-entry score questions, emitting the survivors as a summary\-style system message so the compressor's stage\-2 contract holds.
+
+	type DecisionCompactor struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewDecisionCompactor"></a>
+### func NewDecisionCompactor
+
+	func NewDecisionCompactor(client *DecisionClient, keepBar int, logger *slog.Logger) *DecisionCompactor
+
+NewDecisionCompactor builds the decision\-model compaction lane. A nil client or a client whose Available\(\) is false degrades to keep\-everything \(fail open\); keepBar \<= 0 falls back to the default bar of 2.
+
+<a name="DecisionCompactor.Chat"></a>
+### func \(\*DecisionCompactor\) Chat
+
+	func (dc *DecisionCompactor) Chat(ctx context.Context, messages []ChatMessage, _ ...ChatOption) (*Response, error)
+
+Chat satisfies the Chatter seam so the compactor can sit in the summarizer arg of NewContextCompressor. The compressor's summarizeWithLLM sends system messages plus ONE user prompt that embeds the old history as "\[role\]: content" lines; Chat extracts those lines as per\-entry score questions and returns the survivors as the summary content, preserving the compressor's stage\-2 message contract.
+
+<a name="DecisionCompactor.ChatWithProgress"></a>
+### func \(\*DecisionCompactor\) ChatWithProgress
+
+	func (dc *DecisionCompactor) ChatWithProgress(ctx context.Context, messages []ChatMessage, _ ProgressCallback, opts ...ChatOption) (*Response, error)
+
+ChatWithProgress satisfies Chatter; progress reporting is not applicable to a typed\-decision lane.
+
+<a name="DecisionCompactor.Compact"></a>
+### func \(\*DecisionCompactor\) Compact
+
+	func (dc *DecisionCompactor) Compact(ctx context.Context, entries []ChatMessage, currentTask string) []ChatMessage
+
+Compact scores each non\-system entry with ONE decision\-model question and returns the system messages plus entries scoring \>= keepBar, in original order, verbatim. Entries with a client error are kept \(fail open\). A tool result that survives keeps its parent assistant tool\_call entry, mirroring keepTail's pairing rule, so the API never sees an orphaned tool result.
+
+<a name="DecisionCompactor.Config"></a>
+### func \(\*DecisionCompactor\) Config
+
+	func (dc *DecisionCompactor) Config() *ModelConfig
+
+Config satisfies Chatter; the lane rides the decision model's resolver config, so it reports an empty ModelConfig \(the compressor never reads it\).
+
+<a name="DecisionQuestion"></a>
+## type DecisionQuestion
+
+DecisionQuestion is one typed question for the decision model.
+
+	type DecisionQuestion struct {
+	    // State is the serialized context the question is asked against
+	    // (rendered state).
+	    State string
+	    // Type is the question kind: "choice" | "score" | "noul".
+	    Type string
+	    // Prompt is the question text.
+	    Prompt string
+	    // Options are the choice labels; each must be ONE token after render.
+	    Options []string
+	    // Threshold is the escalate-above bar, 0-1 (Contract B).
+	    Threshold float64
+	}
+
+<a name="DecisionResult"></a>
+## type DecisionResult
+
+DecisionResult is the parsed answer for one DecisionQuestion.
+
+	type DecisionResult struct {
+	    // Answer is the canonical option label that was chosen.
+	    Answer string
+	    // Confidence is the calibrated 0-1 probability of the answer — a
+	    // calibration signal, NOT accuracy. When the provider returns no
+	    // logprobs, this degrades to 1.0 (argmax-only; see Ask).
+	    Confidence float64
+	    // Raw is the label→probability distribution. Full when the provider
+	    // returns logprobs over the option tokens; argmax-only otherwise.
+	    Raw map[string]float64
 	}
 
 <a name="DeltaCallback"></a>
@@ -5097,6 +5259,10 @@ ModelSlots bundles the six slot fields from ProvidersConfig / models.json5.
 	    // (refusal_model slot). Included so its local runtime pre-warms at
 	    // boot instead of being found dead on first fallback.
 	    RefusalModel string
+	    // DecisionModel is the dedicated decision model slot (decision-model
+	    // tree leaf 04 inuse follow-up). Included so its local runtime
+	    // pre-warms at boot instead of failing on first decision question.
+	    DecisionModel string
 	}
 
 <a name="ModelStore"></a>

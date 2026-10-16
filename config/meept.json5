@@ -982,6 +982,12 @@
     "iterative_updates": true,         // Merge old summary with new messages
     "track_file_ops": true,            // Cumulative file operation tracking
     "timeout_seconds": 30,             // Timeout for compaction LLM call
+    // Decision-model compaction lane (requires decision_model in
+    // models.json5). Default false — the summarizer stays the default lane.
+    // "decision_enabled": true,
+    // Score (0-4 rubric) an entry must reach to survive decision
+    // compaction. Default 2.
+    // "decision_keep_bar": 2,
   },
 
   // Session persistence and branching

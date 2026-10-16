@@ -20,6 +20,10 @@ type ModelSlots struct {
 	// (refusal_model slot). Included so its local runtime pre-warms at
 	// boot instead of being found dead on first fallback.
 	RefusalModel string
+	// DecisionModel is the dedicated decision model slot (decision-model
+	// tree leaf 04 inuse follow-up). Included so its local runtime
+	// pre-warms at boot instead of failing on first decision question.
+	DecisionModel string
 }
 
 // AgentModelRef is a minimal view of an agent definition used by
@@ -93,6 +97,7 @@ func BuildModelsInUse(
 	add(slots.SummarizerModel)
 	add(slots.ExtractModel)
 	add(slots.RefusalModel)
+	add(slots.DecisionModel)
 
 	// 3. Alias expansion: every configured alias's full member list is
 	// included. Alias members are explicitly configured failover targets

@@ -255,6 +255,19 @@ type ContextFirewallConfig struct {
 	// Valid values: "drop" (keep system + last N), "summarize" (legacy partial),
 	// "restart" (summarize full conversation, fresh context). Default: "restart".
 	OverflowStrategy string
+	// DecisionCompaction opts the decision-model compaction lane in
+	// (decision-model tree leaf 04; compaction.decision_enabled, default
+	// false). When true AND DecisionClient.Available(), the compressor's
+	// stage-2 summarizer is the DecisionCompactor score-and-drop lane;
+	// otherwise the legacy summarizer passes through byte-identically.
+	DecisionCompaction bool
+	// DecisionKeepBar is the score (0-4 rubric) a history entry must reach
+	// to survive decision-model compaction (compaction.decision_keep_bar,
+	// default 2). Ignored when DecisionCompaction is false.
+	DecisionKeepBar int
+	// DecisionClient is the typed-decision seam (leaf 02). Nil or
+	// unavailable → the decision lane never activates.
+	DecisionClient *DecisionClient
 }
 
 // ContextFirewall wraps a Chatter and enforces context budgets.
@@ -403,6 +416,12 @@ func NewContextFirewall(
 	if summaryModel == nil {
 		summaryModel = inner
 	}
+
+	// Decision-model compaction lane (leaf 04): replaces the summarizer at
+	// compressor stage 2 ONLY when the opt-in knob is on and the decision
+	// model is available; otherwise summaryModel passes through unchanged
+	// (byte-identical legacy lane).
+	summaryModel = selectSummarizerForCompressor(cfg, summaryModel)
 
 	if tokenizer == nil {
 		tokenizer = &HeuristicTokenizer{}
