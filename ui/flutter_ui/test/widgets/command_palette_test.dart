@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/widgets/command_palette.dart';
 
 void main() {
-  testWidgets('shows all 9 items with labels', (tester) async {
+  testWidgets('shows all 12 items with labels', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -16,11 +16,32 @@ void main() {
       ),
     );
     await tester.pump();
+    expect(CommandPalette.defaultItems.length, 12);
     expect(find.text('chat'), findsOneWidget);
     expect(find.text('sessions'), findsOneWidget);
     expect(find.text('agents'), findsOneWidget);
     expect(find.text('new session'), findsOneWidget);
     expect(find.text('find…'), findsOneWidget);
+    expect(find.text('memory'), findsOneWidget);
+    expect(find.text('memory review'), findsOneWidget);
+    expect(find.text('users'), findsOneWidget);
+  });
+
+  testWidgets('manifest parity: agents key e, edit description key r', (
+    tester,
+  ) async {
+    final items = {
+      for (final i in CommandPalette.defaultItems) i.label: i.keybinding,
+    };
+    // TUI ViewAgents default (internal/tui/config.go ViewAgents: 'e') and
+    // the gui_inventory.json manifest — the GUI must carry identical keys.
+    expect(items['agents'], 'e');
+    // TUI RenameSession default ('r').
+    expect(items['edit description'], 'r');
+    // Manifest keys for the memory-family items.
+    expect(items['memory'], 'm');
+    expect(items['memory review'], 'v');
+    expect(items['users'], 'u');
   });
 
   testWidgets('arrow down moves selection; enter activates', (tester) async {

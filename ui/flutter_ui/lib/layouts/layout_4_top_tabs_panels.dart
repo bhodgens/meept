@@ -19,24 +19,129 @@
 /// +----------------------------------------------------------+
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/providers.dart';
+import '../services/websocket_service.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
 
-class Layout4TopTabsPanels extends StatefulWidget {
+/// Tab flash state for the top tab bar (GUI parity with the TUI's
+/// tabFlash: a '●' marks a tab whose task/plan event stream delivered an
+/// event while it was not the active tab; the dot clears when the tab is
+/// activated). ValueNotifier-based so the layout needs no provider
+/// plumbing; one notifier instance per [TabFlashController].
+class TabFlashController {
+  /// Per-tab unread/event dots. Index matches the tab bar index.
+  final List<ValueNotifier<bool>> tabs;
+
+  TabFlashController({int tabCount = 5})
+    : tabs = List.generate(tabCount, (_) => ValueNotifier<bool>(false));
+
+  /// Map a tab label to its notifier index (null when unknown).
+  int? indexOf(String label) {
+    const names = ['chat', 'sessions', 'plans', 'tasks', 'agents'];
+    final i = names.indexOf(label);
+    return i >= 0 ? i : null;
+  }
+
+  /// Mark [index] as having unseen events (only meaningful when it is not
+  /// the active tab; the caller decides).
+  void flash(int index) {
+    if (index >= 0 && index < tabs.length) tabs[index].value = true;
+  }
+
+  /// Clear the dot on [index] (tab activation).
+  void clear(int index) {
+    if (index >= 0 && index < tabs.length) tabs[index].value = false;
+  }
+
+  void dispose() {
+    for (final t in tabs) {
+      t.dispose();
+    }
+  }
+}
+
+/// Feeds a [TabFlashController] from the websocket message stream: any
+/// task/plan event ('job_update', 'plan_update') arriving while its tab is
+/// not active sets that tab's dot. Mirrors the TUI app.go tabFlash wiring
+/// (task events flash ViewTasks, plan events flash ViewPlans).
+///
+/// Returns a subscription the caller must cancel on dispose.
+StreamSubscription<Map<String, dynamic>> bindTabFlash({
+  required WebSocketService websocket,
+  required TabFlashController controller,
+  required int Function() activeTabIndex,
+}) {
+  return websocket.messageStream.listen((msg) {
+    final type = msg['type'] as String?;
+    final target = switch (type) {
+      WsEventTypes.jobUpdate => 3, // tasks tab
+      WsEventTypes.planUpdate => 2, // plans tab
+      _ => null,
+    };
+    if (target == null) return;
+    if (activeTabIndex() == target) return;
+    controller.flash(target);
+  });
+}
+
+class Layout4TopTabsPanels extends ConsumerStatefulWidget {
   const Layout4TopTabsPanels({super.key});
 
   @override
-  State<Layout4TopTabsPanels> createState() => _Layout4TopTabsPanelsState();
+  ConsumerState<Layout4TopTabsPanels> createState() =>
+      _Layout4TopTabsPanelsState();
 }
 
-class _Layout4TopTabsPanelsState extends State<Layout4TopTabsPanels> {
+class _Layout4TopTabsPanelsState extends ConsumerState<Layout4TopTabsPanels> {
   bool _leftPanelExpanded = true;
   bool _rightPanelExpanded = true;
   int _selectedTab = 0;
+  late final TabFlashController _tabFlash;
+  StreamSubscription<Map<String, dynamic>>? _flashSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabFlash = TabFlashController();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Bind the flash feed to the app's websocket once a provider scope is
+    // above this widget. Tolerates preview/test trees without a
+    // ProviderScope (the layout still renders; only the dot feed is off).
+    if (_flashSub == null) {
+      try {
+        final ws = ref.read(websocketProvider);
+        _flashSub = bindTabFlash(
+          websocket: ws,
+          controller: _tabFlash,
+          activeTabIndex: () => _selectedTab,
+        );
+      } catch (_) {
+        // No ProviderScope above (layout preview, smoke tests): the tab
+        // bar renders without the event-dot feed.
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _flashSub?.cancel();
+    _tabFlash.dispose();
+    super.dispose();
+  }
 
   void selectTab(int index) {
     setState(() => _selectedTab = index);
+    // Clear the event dot on activation (TUI tabFlash semantics).
+    _tabFlash.clear(index);
   }
 
   @override
@@ -124,14 +229,21 @@ class _HeaderWithTabs extends StatelessWidget {
               ),
             ),
           ),
-          child: const Row(
-            children: [
-              _TabButton('chat', 0),
-              _TabButton('sessions', 1),
-              _TabButton('plans', 2),
-              _TabButton('tasks', 3),
-              _TabButton('agents', 4),
-            ],
+          child: Builder(
+            builder: (context) {
+              final flash = context
+                  .findAncestorStateOfType<_Layout4TopTabsPanelsState>()
+                  ?._tabFlash;
+              return Row(
+                children: [
+                  _TabButton('chat', 0, flash: flash),
+                  _TabButton('sessions', 1, flash: flash),
+                  _TabButton('plans', 2, flash: flash),
+                  _TabButton('tasks', 3, flash: flash),
+                  _TabButton('agents', 4, flash: flash),
+                ],
+              );
+            },
           ),
         ),
       ],
@@ -142,8 +254,9 @@ class _HeaderWithTabs extends StatelessWidget {
 class _TabButton extends StatelessWidget {
   final String label;
   final int index;
+  final TabFlashController? flash;
 
-  const _TabButton(this.label, this.index);
+  const _TabButton(this.label, this.index, {this.flash});
 
   @override
   Widget build(BuildContext context) {
@@ -152,6 +265,7 @@ class _TabButton extends StatelessWidget {
             ?._selectedTab ??
         0;
     final isSelected = selectedTab == index;
+    final dot = flash?.tabs[index];
 
     return Expanded(
       child: GestureDetector(
@@ -175,15 +289,42 @@ class _TabButton extends StatelessWidget {
               ),
             ),
           ),
-          child: Text(
-            label.toLowerCase(),
-            textAlign: TextAlign.center,
-            style: CyberpunkTypography.label.copyWith(
-              color: isSelected
-                  ? CyberpunkColors.orangePrimary
-                  : CyberpunkColors.lightGray,
-              letterSpacing: 1.5,
-            ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label.toLowerCase(),
+                textAlign: TextAlign.center,
+                style: CyberpunkTypography.label.copyWith(
+                  color: isSelected
+                      ? CyberpunkColors.orangePrimary
+                      : CyberpunkColors.lightGray,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              // Unread-event dot (TUI tabFlash '●' parity): set by
+              // bindTabFlash when task/plan events arrive on this tab
+              // while inactive; cleared on activation (selectTab).
+              if (dot != null)
+                ValueListenableBuilder<bool>(
+                  valueListenable: dot,
+                  builder: (context, hasDot, _) => Visibility(
+                    visible: hasDot,
+                    maintainSize: true,
+                    maintainAnimation: true,
+                    maintainState: true,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Icon(
+                        Icons.circle,
+                        size: 6,
+                        color: CyberpunkColors.orangePrimary,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),

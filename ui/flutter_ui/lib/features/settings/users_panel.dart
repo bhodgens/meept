@@ -28,6 +28,11 @@ import '../../theme/typography.dart';
 class UsersPanel extends ConsumerStatefulWidget {
   const UsersPanel({super.key});
 
+  /// Static builder so the command palette can push this panel directly
+  /// (no dedicated go_router route yet).
+  static WidgetBuilder get builder =>
+      (_) => const UsersPanel();
+
   @override
   ConsumerState<UsersPanel> createState() => _UsersPanelState();
 }

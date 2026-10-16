@@ -210,16 +210,67 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     );
   }
 
+  /// Rename dialog: mirrors the TUI rename modal (default key 'r').
+  /// Submits through [SessionNotifier.renameSession], which hits the same
+  /// PATCH /api/v1/sessions/{id} description endpoint the TUI's
+  /// renameSession RPC path uses.
+  Future<void> _showRenameDialog(String sessionId, String currentTitle) async {
+    final value = await showDialog<String>(
+      context: context,
+      builder: (_) => const _RenameDialog(),
+    );
+    if (value == null || value.isEmpty) return;
+    if (!mounted) return;
+    await ref.read(sessionProvider.notifier).renameSession(sessionId, value);
+    final error = ref.read(sessionProvider).error;
+    if (!mounted) return;
+    if (error == null) {
+      showStatusMessage(ref, 'renamed: ${value.toLowerCase()}');
+    } else {
+      showStatusMessage(ref, 'rename failed: $error');
+    }
+  }
+
+  /// Unarchive via the notifier (archive toggled off) — same status-message
+  /// feedback pattern as archive/delete.
+  Future<void> _unarchiveSession(String sessionId, String title) async {
+    final notifier = ref.read(sessionProvider.notifier);
+    await notifier.unarchiveSession(sessionId);
+    final error = ref.read(sessionProvider).error;
+    if (!mounted) return;
+    if (error == null) {
+      showStatusMessage(ref, 'unarchived: ${title.toLowerCase()}');
+    } else {
+      showStatusMessage(ref, 'unarchive failed: $error');
+    }
+  }
+
   void _showContextMenu(BuildContext context, Session session) {
     showMenu<String>(
       context: context,
       position: const RelativeRect.fromLTRB(0, 0, 0, 0),
-      items: const [
-        PopupMenuItem(value: 'delete', child: Text('delete permanently')),
+      items: [
+        const PopupMenuItem(value: 'rename', child: Text('rename')),
+        PopupMenuItem(
+          value: session.archived ? 'unarchive' : 'archive',
+          child: Text(session.archived ? 'unarchive' : 'archive'),
+        ),
+        const PopupMenuItem(value: 'delete', child: Text('delete permanently')),
       ],
     ).then((value) {
-      if (value == 'delete') {
-        _showDeleteConfirmation(session.id, session.title);
+      switch (value) {
+        case 'rename':
+          _showRenameDialog(session.id, session.title);
+          break;
+        case 'archive':
+          _showArchiveConfirmation(session.id, session.title);
+          break;
+        case 'unarchive':
+          _unarchiveSession(session.id, session.title);
+          break;
+        case 'delete':
+          _showDeleteConfirmation(session.id, session.title);
+          break;
       }
     });
   }
@@ -426,17 +477,84 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                   ],
                 ),
               ),
-              IconButton(
-                tooltip: 'archive session',
-                icon: const Icon(Icons.archive_outlined, size: 16),
-                color: CyberpunkColors.orangeDark,
-                onPressed: () =>
-                    _showArchiveConfirmation(session.id, session.title),
-              ),
+              if (session.archived)
+                IconButton(
+                  tooltip: 'unarchive session',
+                  icon: const Icon(Icons.unarchive, size: 16),
+                  color: CyberpunkColors.orangeDark,
+                  onPressed: () => _unarchiveSession(session.id, session.title),
+                )
+              else
+                IconButton(
+                  tooltip: 'archive session',
+                  icon: const Icon(Icons.archive_outlined, size: 16),
+                  color: CyberpunkColors.orangeDark,
+                  onPressed: () =>
+                      _showArchiveConfirmation(session.id, session.title),
+                ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Rename dialog: owns its TextEditingController so the controller's
+/// lifetime matches the dialog widget's (a caller-owned controller is
+/// disposed before the dialog's exit animation finishes rebuilding the
+/// TextField, tripping use-after-dispose assertions).
+class _RenameDialog extends StatefulWidget {
+  const _RenameDialog();
+
+  @override
+  State<_RenameDialog> createState() => _RenameDialogState();
+}
+
+class _RenameDialogState extends State<_RenameDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: CyberpunkColors.darkGray,
+      title: Text(
+        'rename session',
+        style: CyberpunkTypography.bodyMedium.copyWith(
+          color: CyberpunkColors.orangePrimary,
+        ),
+      ),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        style: CyberpunkTypography.bodyMedium,
+        decoration: const InputDecoration(
+          isDense: true,
+          border: OutlineInputBorder(),
+        ),
+        onSubmitted: (value) => Navigator.pop(context, value.trim()),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            'cancel',
+            style: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.midGray,
+            ),
+          ),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text('rename', style: CyberpunkTypography.bodyMedium),
+        ),
+      ],
     );
   }
 }

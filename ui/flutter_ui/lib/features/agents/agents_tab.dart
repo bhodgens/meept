@@ -17,14 +17,17 @@ import 'quota_status.dart';
 
 /// Agents tab - displays all available agents.
 ///
-/// S3: This is the Flutter full-window agents view. The menubar app
+/// This is the Flutter full-window agents view. The menubar app
 /// (menubar/MeeptMenuBar/Views/AgentsView.swift) is a separate native
 /// Swift implementation for the macOS menu bar. Both surfaces query
 /// the same REST API (/api/v1/agents/*) but serve different UX roles:
-/// - Swift menubar tab: quick status, pause/resume, approve plans
-/// - Flutter full window: detailed constitution editing, audit review
+/// - Swift menubar tab: quick status, approve plans
+/// - Flutter full window: detailed constitution editing, audit review,
+///   plus pause/resume and status chips (GUI parity with the TUI agents
+///   panel — previously deferred to the menubar app, now wired here over
+///   the same POST /api/v1/agents/{id}/pause|resume endpoints).
 ///
-/// Currently this widget shows the employee grid plus a goals pane
+/// The widget shows the employee grid plus a goals pane
 /// (health, gate command, approve/reject) when an agent is selected.
 class AgentsTab extends ConsumerStatefulWidget {
   const AgentsTab({super.key});
@@ -41,6 +44,13 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
   String? _goalsError;
   String? _goalsForId;
   Timer? _quotaTimer;
+
+  /// Agent ids paused (or resumed) from THIS client this session. The
+  /// agents.list payload carries no status field (it returns employee
+  /// definitions without runtime state), so a pause/resume is recorded
+  /// here until the daemon surfaces status in the list payload — the same
+  /// reason the TUI seeds its status from events.
+  final Set<String> _pausedLocally = {};
 
   // Worst goal health across the loaded goals (worst-health-wins):
   // broken > at_risk > healthy > unknown. Drives the aggregate health
@@ -198,6 +208,43 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     }
   }
 
+  /// Pause or resume [agent] via POST /api/v1/agents/{id}/pause|resume
+  /// (internal/employee/api_handlers.go:68-69), then refresh the agent
+  /// list so the status chip reflects the new state.
+  Future<void> _togglePause(Agent agent, {required bool pause}) async {
+    final client = ref.read(sdkClientProvider);
+    try {
+      if (pause) {
+        await client.pauseAgent(agent.id);
+        _pausedLocally.add(agent.id);
+      } else {
+        await client.resumeAgent(agent.id);
+        _pausedLocally.remove(agent.id);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(pause ? 'pause failed: $e' : 'resume failed: $e'),
+          ),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          pause
+              ? 'paused: ${agent.name.toLowerCase()}'
+              : 'resumed: ${agent.name.toLowerCase()}',
+        ),
+        duration: const Duration(milliseconds: 2500),
+      ),
+    );
+    await ref.read(agentProvider.notifier).loadAgents();
+  }
+
   @override
   Widget build(BuildContext context) {
     final agentState = ref.watch(agentProvider);
@@ -331,6 +378,15 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     final useDeviceTime = ref
         .watch(renderingPrefsProvider)
         .useDeviceTimeForQuota;
+    // Status chip (GUI parity with TUI agents_panel.go statusBadge): the
+    // agents.list payload carries no status field (it returns employee
+    // definitions), so the base state is derived client-side — a quota
+    // episode or locally-paused agent renders its state, everything else
+    // renders 'running'.
+    final paused = _pausedLocally.contains(agent.id);
+    final status = paused
+        ? 'paused'
+        : (quotaState != null ? 'quota_wait' : 'running');
     return InkWell(
       key: ValueKey('agent-tile-${agent.id}'),
       onTap: () {
@@ -381,6 +437,31 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                _AgentStatusChip(status: status),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (paused)
+                  IconButton(
+                    tooltip: 'resume agent',
+                    icon: const Icon(Icons.play_arrow, size: 16),
+                    color: CyberpunkColors.greenSuccess,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () => _togglePause(agent, pause: false),
+                  )
+                else
+                  IconButton(
+                    tooltip: 'pause agent',
+                    icon: const Icon(Icons.pause, size: 16),
+                    color: CyberpunkColors.orangeDark,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () => _togglePause(agent, pause: true),
+                  ),
               ],
             ),
             if (quotaState != null) ...[
@@ -513,6 +594,41 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Lowercase status chip mirroring TUI agents_panel.go statusBadge color
+/// semantics: running → success, paused/quota_wait → warning, error →
+/// error, unknown states → muted text.
+class _AgentStatusChip extends StatelessWidget {
+  final String status;
+
+  const _AgentStatusChip({required this.status});
+
+  Color get _color => switch (status) {
+    'running' => CyberpunkColors.greenSuccess,
+    'paused' || 'quota_wait' => CyberpunkColors.yellowWarning,
+    'error' => CyberpunkColors.redAlert,
+    _ => CyberpunkColors.midGray,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: _color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        status.toLowerCase(),
+        style: CyberpunkTypography.bodySmall.copyWith(
+          color: _color,
+          fontSize: 9,
+          fontFamily: 'SourceCodePro',
+        ),
+      ),
     );
   }
 }

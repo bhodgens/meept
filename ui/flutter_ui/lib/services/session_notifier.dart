@@ -184,6 +184,25 @@ class SessionNotifier extends StateNotifier<SessionState> {
     }
   }
 
+  /// Rename a session (same daemon endpoint the TUI rename uses: the TUI's
+  /// renameSession calls RPC UpdateSessionDescription, which lands on
+  /// PATCH /api/v1/sessions/{id} {"description": ...}). Updates the local
+  /// list in place so no round-trip is needed.
+  Future<void> renameSession(String sessionId, String title) async {
+    try {
+      await sdkClient.updateSessionDescription(sessionId, title);
+      final updated = state.sessions.map((s) {
+        if (s.id == sessionId) {
+          return s.copyWith(title: title, description: title);
+        }
+        return s;
+      }).toList();
+      state = state.copyWith(sessions: updated, error: null);
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
+    }
+  }
+
   /// Unarchive a session. Mutates local state to flip the flag and re-sorts.
   Future<void> unarchiveSession(String sessionId) async {
     try {

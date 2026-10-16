@@ -5,13 +5,13 @@
     { "key": "s", "label": "sessions", "description": "switch to sessions view", "gui": true },
     { "key": "t", "label": "tasks", "description": "switch to tasks view", "gui": true },
     { "key": "q", "label": "queue", "description": "switch to queue view", "gui": false },
-    { "key": "m", "label": "memory", "description": "switch to memory view", "gui": false },
-    { "key": "v", "label": "memory review", "description": "review pending auto-claims (promote/reject)", "gui": false },
+    { "key": "m", "label": "memory", "description": "switch to memory view", "gui": true },
+    { "key": "v", "label": "memory review", "description": "review pending auto-claims (promote/reject)", "gui": true },
     { "key": "p", "label": "plans", "description": "switch to plans view", "gui": true },
     { "key": "e", "label": "agents", "description": "switch to employees view", "gui": true },
     { "key": "y", "label": "toggle sidebar", "description": "show/hide sidebar", "gui": false },
     { "key": "o", "label": "projects", "description": "manage projects", "gui": true },
-    { "key": "u", "label": "users", "description": "multi-user awareness (manage via cli)", "gui": false },
+    { "key": "u", "label": "users", "description": "multi-user awareness (manage via cli)", "gui": true },
     { "key": "n", "label": "new session", "description": "create a new session", "gui": true },
     { "key": "r", "label": "edit description", "description": "edit session description", "gui": true },
     { "key": "f", "label": "find...", "description": "search sessions and tasks", "gui": true }
@@ -35,13 +35,14 @@
   ],
   "deviations": {
     "palette:queue": "no flutter queue route yet (documented deviation, command_palette.dart header comment)",
-    "palette:memory": "no flutter memory route yet (documented deviation, command_palette.dart header comment)",
-    "palette:memory review": "claim review panel is TUI-only this tree (leaf T03-L2 deferral); the GUI review panel follows in a later tree — verdicts are reachable via RPC (memory.promoteClaim/memory.rejectClaim) and the `meept memory review/promote/reject` CLI meanwhile",
     "palette:toggle sidebar": "no flutter sidebar surface (documented deviation, command_palette.dart header comment)",
-    "palette:users": "users awareness is CLI-managed; TUI read-only modal (documented deviation)",
     "shortcut:ctrl+m": "markdown rendering toggle is TUI-only; the GUI renders markdown natively",
     "shortcut:ctrl+d": "pending-changes review modal is TUI-only today; GUI review lives in the diff panel",
     "shortcut:ctrl+b": "branches disabled by default in both surfaces; shortcut only bound when branches_enabled",
+    "shortcut:ctrl+c": "GUI semantics differ: single press stops the active turn (sends /stop) instead of TUI double-press quit — the GUI has no quit concept",
+    "status:branch": "CONDITIONAL both surfaces (session has a leaf message): TUI shows 'branch: <session name>'; GUI shows the active thread topic label via GET /api/v1/sessions/{id}/threads/active (status_bar.dart sessionBranchProvider)",
+    "status:pending changes": "CONDITIONAL both surfaces (>0): 'N pending changes' in warning color; TUI counts from the pending-changes registry, GUI via SdkApiClient.listPendingChanges (status_bar.dart sessionPendingChangesProvider)",
+    "status:claims to review": "CONDITIONAL both surfaces (>0): 'N claims to review' in warning color; both fed by the memory.reviewQueue RPC — GUI via GET /api/v1/memory/review-queue (status_bar.dart memoryReviewPendingProvider)",
     "status:connection dot": "● connection indicator renders as an ANSI dot; GUI shows a colored badge (same semantics, different glyph)"
   }
 }

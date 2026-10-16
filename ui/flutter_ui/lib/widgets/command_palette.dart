@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../features/memory/memory_review_panel.dart';
+import '../features/settings/users_panel.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
 
@@ -9,15 +11,30 @@ class CommandPaletteItem {
   final String keybinding;
   final String label;
   final String description;
+
+  /// go_router location to navigate to on selection (null for items the
+  /// host screen dispatches itself, e.g. tab switches).
+  final String? route;
+
+  /// Widget to push when [route] is null but the item has a direct page
+  /// target (no registered route yet — memory review, users).
+  final WidgetBuilder? page;
+
   const CommandPaletteItem({
     required this.keybinding,
     required this.label,
     required this.description,
+    this.route,
+    this.page,
   });
 }
 
 /// Keyboard-navigable command palette overlay. Renders the project's lowercase
 /// UI convention; navigation mirrors TUI modal.go (j/k arrows + enter).
+///
+/// Items with a [CommandPaletteItem.route] push that go_router route; items
+/// with a [CommandPaletteItem.page] push that widget directly (used where no
+/// route is registered yet, e.g. memory review and users).
 class CommandPalette extends StatefulWidget {
   final List<CommandPaletteItem> items;
   final void Function(CommandPaletteItem item) onSelected;
@@ -29,52 +46,76 @@ class CommandPalette extends StatefulWidget {
   });
 
   /// Matches TUI modal.go:192-205, adapted to Flutter surfaces.
-  /// Omitted TUI items: queue view, memory view, toggle sidebar (no Flutter route).
-  static List<CommandPaletteItem> get defaultItems => const [
-    CommandPaletteItem(
+  /// Omitted TUI items: queue view, toggle sidebar (no Flutter route; see
+  /// internal/tui/testdata/gui_inventory.json deviations).
+  static List<CommandPaletteItem> get defaultItems => [
+    const CommandPaletteItem(
       keybinding: 'c',
       label: 'chat',
       description: 'switch to chat view',
     ),
-    CommandPaletteItem(
+    const CommandPaletteItem(
       keybinding: 's',
       label: 'sessions',
       description: 'switch to sessions view',
     ),
-    CommandPaletteItem(
+    const CommandPaletteItem(
       keybinding: 'p',
       label: 'plans',
       description: 'switch to plans view',
     ),
-    CommandPaletteItem(
+    const CommandPaletteItem(
       keybinding: 't',
       label: 'tasks',
       description: 'switch to tasks view',
     ),
-    CommandPaletteItem(
-      keybinding: 'a',
+    // TUI ViewAgents default key (internal/tui/config.go:172) — parity.
+    const CommandPaletteItem(
+      keybinding: 'e',
       label: 'agents',
       description: 'switch to employees view',
     ),
-    CommandPaletteItem(
+    const CommandPaletteItem(
       keybinding: 'f',
       label: 'find…',
       description: 'search sessions and tasks',
     ),
-    CommandPaletteItem(
+    const CommandPaletteItem(
       keybinding: 'n',
       label: 'new session',
       description: 'create a new session',
     ),
-    CommandPaletteItem(
-      keybinding: 'e',
+    // TUI RenameSession default key (internal/tui/config.go:176) — parity.
+    const CommandPaletteItem(
+      keybinding: 'r',
       label: 'edit description',
       description: 'edit session description',
     ),
-    CommandPaletteItem(
+    const CommandPaletteItem(
       keybinding: 'o',
       label: 'projects',
       description: 'manage projects',
+    ),
+    // MemoryPanel is routed at core/router.dart (/tools/memory).
+    const CommandPaletteItem(
+      keybinding: 'm',
+      label: 'memory',
+      description: 'switch to memory view',
+      route: '/tools/memory',
+    ),
+    // TUI memory-review modal key (ViewMemoryReview 'v') — parity.
+    CommandPaletteItem(
+      keybinding: 'v',
+      label: 'memory review',
+      description: 'review pending auto-claims (promote/reject)',
+      page: MemoryReviewPanel.builder,
+    ),
+    // TUI users modal key (ViewUsers 'u') — parity; read-only awareness.
+    CommandPaletteItem(
+      keybinding: 'u',
+      label: 'users',
+      description: 'multi-user awareness (manage via cli)',
+      page: UsersPanel.builder,
     ),
   ];
 
