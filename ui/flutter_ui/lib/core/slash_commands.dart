@@ -19,7 +19,15 @@ class SlashCommand {
 /// Registry of all available slash commands.
 class SlashCommandRegistry {
   final List<SlashCommand> _builtIn = [];
-  final List<SlashCommand> _custom = [];
+
+  /// Custom commands fetched from the daemon (prompt templates).
+  ///
+  /// Backed by a static list so EVERY registry instance in the process
+  /// observes the same daemon-provided set: the chat input keeps its own
+  /// instance for ghost text / Enter dispatch while the autocomplete popup
+  /// has a separate one, and both must list custom commands once they are
+  /// fetched at chat init (GUI parity with the TUI's MergeCommands flow).
+  static final List<SlashCommand> _custom = [];
 
   SlashCommandRegistry() {
     _builtIn.addAll(_defaultCommands);
@@ -41,11 +49,15 @@ class SlashCommandRegistry {
     return matches.isEmpty ? null : matches.first;
   }
 
-  /// Add custom commands (fetched from daemon API).
+  /// Replace the custom commands (fetched from daemon API).
+  ///
+  /// Names that collide with a built-in command are dropped so a custom
+  /// template can never shadow local handling (e.g. /status).
   void setCustomCommands(List<SlashCommand> commands) {
+    final builtInNames = _builtIn.map((c) => c.name).toSet();
     _custom
       ..clear()
-      ..addAll(commands);
+      ..addAll(commands.where((c) => !builtInNames.contains(c.name)));
   }
 }
 
@@ -85,6 +97,13 @@ const _defaultCommands = <SlashCommand>[
   SlashCommand(name: '/interrupt', description: 'interrupt active agent'),
   SlashCommand(name: '/tasks', description: 'list tasks'),
   SlashCommand(name: '/diff', description: 'show git diff'),
+  SlashCommand(name: '/eval', description: 'show eval runs', usage: '/eval'),
+  SlashCommand(
+    name: '/facts',
+    description: 'show active memory facts',
+    usage: '/facts [kind|query]',
+  ),
+  SlashCommand(name: '/prompts', description: 'open the prompts panel'),
   SlashCommand(
     name: '/edit',
     description: 'edit a file',

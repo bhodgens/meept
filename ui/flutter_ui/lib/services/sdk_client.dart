@@ -1257,6 +1257,78 @@ class SdkApiClient {
     return _post('/api/v1/changes/journal/$id/revert');
   }
 
+  // ===== Custom Slash Commands (prompt templates) =====
+  //
+  // GUI parity with the TUI's templates.list RPC flow (MergeCommands into
+  // slash autocomplete). The daemon serves the same data over HTTP at
+  // GET /api/v1/templates as a bare JSON array of {name, description}.
+
+  /// Returns the daemon's custom slash-command (prompt template) list.
+  ///
+  /// Each entry carries `name` and `description`; names already include the
+  /// leading `/` (e.g. `/migrate`). A non-array body is tolerated as an
+  /// empty list — custom commands are optional autocomplete sugar, so a
+  /// wrong shape degrades silently instead of blocking chat init.
+  Future<List<Map<String, dynamic>>> listCustomCommands() async {
+    try {
+      final response = await _dio.get('/api/v1/templates');
+      final data = response.data;
+      if (data is! List) return <Map<String, dynamic>>[];
+      return data
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Calls `session.get_child_tasks` via the bus/call RPC bridge.
+  ///
+  /// Returns the raw child-task list (currently the session's worker ids —
+  /// mirrors the daemon-side handler's `tasks` array). Used by the GUI
+  /// /stop flow to mirror the TUI's child-task confirmation modal.
+  Future<List<String>> getChildTasks({required String sessionId}) async {
+    final envelope = await _post(
+      '/api/v1/bus/call',
+      body: {
+        'method': 'session.get_child_tasks',
+        'params': {'session_id': sessionId},
+      },
+    );
+    final inner = envelope['result'];
+    if (inner is! Map) return const [];
+    final tasks = inner['tasks'];
+    if (tasks is! List) return const [];
+    return tasks.map((t) => t.toString()).toList(growable: false);
+  }
+
+  /// Calls `session.stop` via the bus/call RPC bridge — the same RPC the
+  /// TUI's StopSession flow uses. Returns `{status, session_id,
+  /// workers_stopped}` on success.
+  Future<Map<String, dynamic>> stopSession({required String sessionId}) async {
+    final envelope = await _post(
+      '/api/v1/bus/call',
+      body: {
+        'method': 'session.stop',
+        'params': {'session_id': sessionId},
+      },
+    );
+    final inner = envelope['result'];
+    if (inner is Map<String, dynamic>) return inner;
+    if (envelope.containsKey('status')) return envelope;
+    throw StateError('stopSession: unexpected envelope shape: $envelope');
+  }
+
+  /// Returns the daemon's default model via GET /api/v1/models/default.
+  ///
+  /// Shape (services.ModelInfo): `{provider, model, full_name, base_url,
+  /// context_limit, max_output, capabilities, is_default, input_cost,
+  /// output_cost}`.
+  Future<Map<String, dynamic>> getDefaultModel() async {
+    return _get('/api/v1/models/default');
+  }
+
   // ===== Prompt Templates =====
   //
   // Mirrors the daemon's PromptService HTTP surface:
@@ -1905,6 +1977,77 @@ class SdkApiClient {
     } on DioException catch (e) {
       throw _handleError(e);
     }
+  }
+
+  // ===== Agent Pause/Resume (agents_tab.dart parity with TUI agents panel)
+  // ===== POST /api/v1/agents/{id}/pause and /resume
+  // ===== (internal/employee/api_handlers.go RegisterRoutes). =====
+
+  /// POST /api/v1/agents/{id}/pause — pause an agent. Returns the RPC
+  /// result envelope ({"id": ..., "status": "paused"}).
+  Future<Map<String, dynamic>> pauseAgent(String agentId) async {
+    try {
+      return await _post('/api/v1/agents/$agentId/pause');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// POST /api/v1/agents/{id}/resume — resume a paused agent. Returns the
+  /// RPC result envelope ({"id": ..., "status": "resumed"}).
+  Future<Map<String, dynamic>> resumeAgent(String agentId) async {
+    try {
+      return await _post('/api/v1/agents/$agentId/resume');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  // ===== Memory Review Queue (memory_review_panel.dart; TUI
+  // ===== memory_review_modal parity via the same memory.reviewQueue RPC
+  // ===== surface the TUI and CLI `meept memory review` use). =====
+
+  /// Fetches one page of the auto-claim review queue via the
+  /// `memory.reviewQueue` RPC (POST /api/v1/bus/call).
+  ///
+  /// The REST alias GET /api/v1/memory/review-queue drops filter/pagination
+  /// params (it forwards nil params daemon-side), so pagination rides the
+  /// bus/call bridge — the same method the TUI calls. Returns the RPC
+  /// result: {auto_claims: [...], total: N, pending_decisions: [...],
+  /// pending_predictions: [...]}. Claim items are Memory JSON
+  /// ({id, content, type, category, metadata{status,confidence},
+  /// created_at}).
+  Future<Map<String, dynamic>> listMemoryReviewQueue({
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final envelope = await _post(
+      '/api/v1/bus/call',
+      body: {
+        'method': 'memory.reviewQueue',
+        'params': {'limit': limit, 'offset': offset},
+      },
+    );
+    final inner = envelope['result'];
+    if (inner is Map<String, dynamic>) return inner;
+    // Some daemon configurations return the result inline (no envelope).
+    if (envelope.containsKey('auto_claims')) return envelope;
+    throw StateError(
+      'listMemoryReviewQueue: unexpected envelope shape: $envelope',
+    );
+  }
+
+  /// promote_claim — accept a pending auto claim (the promote half of the
+  /// review verdict; reject already exists as [rejectClaim]).
+  Future<Map<String, dynamic>> promoteClaim({
+    required String id,
+    bool confirmed = false,
+    String reason = '',
+  }) async {
+    return _post(
+      '/api/v1/memory/claims/$id/promote',
+      body: {'confirmed': confirmed, 'reason': reason},
+    );
   }
 }
 

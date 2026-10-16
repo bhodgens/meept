@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/path_utils.dart' show expandTilde;
+import '../../core/router.dart' show router;
 import '../../core/slash_commands.dart';
 import '../../models/api_models.dart' show Attachment;
 import '../../services/sdk_client.dart' show SdkApiClient;
@@ -15,6 +16,8 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import '../../providers/status_message_provider.dart';
+import '../../providers/tab_activation_provider.dart';
+import '../home/home_screen.dart' show HomeTab;
 import 'slash_autocomplete.dart';
 
 /// Image file extensions that should be uploaded as multimodal image parts
@@ -193,6 +196,9 @@ class _ChatInputState extends ConsumerState<ChatInput>
     // input rendering; if it fails, we silently fall back to no suggestions.
     unawaited(_loadSkillNames());
     unawaited(_loadProjectPaths());
+    // Fire-and-forget fetch of the daemon's custom slash commands (prompt
+    // templates) so they autocomplete — TUI MergeCommands parity.
+    unawaited(_loadCustomCommands());
   }
 
   @override
@@ -965,6 +971,445 @@ class _ChatInputState extends ConsumerState<ChatInput>
     }
   }
 
+  /// Show a monospace output dialog — the same presentation /debugsession
+  /// uses. Shared by the read-only informational commands (/usage, /status,
+  /// /model, /diff, /eval, /facts, /session).
+  void _showCommandOutput(String title, String body) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: Text(
+          title,
+          style: const TextStyle(fontFamily: 'SourceCodePro', fontSize: 14),
+        ),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            body,
+            style: TextStyle(
+              fontFamily: 'SourceCodePro',
+              fontSize: 12,
+              color: CyberpunkColors.greenSuccess,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// /usage — daemon token/budget usage (TUI parity: executeUsage reads the
+  /// same daemon status totals).
+  Future<void> _showUsage() async {
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      final status = await sdk.getDaemonStatusRaw();
+      final budget = status['budget'];
+      final buf = StringBuffer();
+      buf.writeln('usage statistics:');
+      buf.writeln();
+      if (budget is Map) {
+        String num(Object? v) => v?.toString() ?? '?';
+        buf.writeln('tokens hourly used:       ${num(budget['hourly_used'])}');
+        buf.writeln(
+          'tokens hourly remaining:  ${num(budget['hourly_remaining'])}',
+        );
+        buf.writeln('tokens daily used:        ${num(budget['daily_used'])}');
+        buf.writeln(
+          'tokens daily remaining:   ${num(budget['daily_remaining'])}',
+        );
+        buf.writeln(
+          'cost daily used:          \$${num(budget['daily_cost_used'])}',
+        );
+        buf.writeln(
+          'cost daily limit:         \$${num(budget['daily_cost_limit'])}',
+        );
+        buf.writeln('rpm current:              ${num(budget['rpm_current'])}');
+        buf.writeln('rpm limit:                ${num(budget['rpm_limit'])}');
+      } else {
+        buf.writeln('budget tracking not available');
+      }
+
+      // 24h model/agent usage from live metrics (best effort).
+      try {
+        final metrics = await sdk.getLiveMetrics();
+        final totals = metrics['totals'];
+        if (totals is Map) {
+          buf.writeln();
+          buf.writeln('last 24h:');
+          buf.writeln('  calls:      ${totals['calls'] ?? 0}');
+          buf.writeln('  tokens in:  ${totals['tokens_in'] ?? 0}');
+          buf.writeln('  tokens out: ${totals['tokens_out'] ?? 0}');
+        }
+        final models = metrics['models'];
+        if (models is List && models.isNotEmpty) {
+          buf.writeln();
+          buf.writeln('by model:');
+          for (final m in models) {
+            if (m is Map) {
+              buf.writeln(
+                '  ${m['id']}: ${m['calls'] ?? 0} calls '
+                '(${m['tokens_in'] ?? 0} in / ${m['tokens_out'] ?? 0} out)',
+              );
+            }
+          }
+        }
+      } catch (_) {
+        // Metrics enrichment is best effort — totals omitted on failure.
+      }
+
+      if (mounted) {
+        _resetInputState();
+        _showCommandOutput('usage', buf.toString());
+      }
+    } catch (e) {
+      debugPrint('[chat_input] /usage failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('usage failed: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
+  }
+
+  /// /status — daemon status readout (TUI parity: executeStatus). The GUI
+  /// cannot reach the TUI's worker/task RPC aggregates over this transport,
+  /// so this shows the daemon process state + runtime health that the HTTP
+  /// status endpoint exposes.
+  Future<void> _showStatus() async {
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      final raw = await sdk.getDaemonStatusRaw();
+      final buf = StringBuffer();
+      buf.writeln('platform status:');
+      buf.writeln();
+      buf.writeln('daemon:');
+      buf.writeln('  state:    ${raw['state'] ?? '?'}');
+      buf.writeln('  running:  ${raw['running'] ?? false}');
+      buf.writeln('  pid:      ${raw['pid'] ?? '?'}');
+      buf.writeln('  uptime:   ${raw['uptime'] ?? '?'}');
+      final runtimes = raw['runtimes'];
+      if (runtimes is Map && runtimes.isNotEmpty) {
+        buf.writeln();
+        buf.writeln('runtimes:');
+        runtimes.forEach((id, rt) {
+          if (rt is Map) {
+            buf.writeln(
+              '  $id: ${rt['running'] == true ? 'running' : 'stopped'}'
+              '${rt['healthy'] == true ? '' : ' (unhealthy)'}',
+            );
+          }
+        });
+      }
+      final budget = raw['budget'];
+      if (budget is Map) {
+        buf.writeln();
+        buf.writeln(
+          'budget: within=${budget['within_budget'] ?? '?'} '
+          'hourly=${budget['hourly_used'] ?? '?'}/${budget['hourly_remaining'] ?? '?'}',
+        );
+      }
+
+      if (mounted) {
+        _resetInputState();
+        _showCommandOutput('status', buf.toString());
+      }
+    } catch (e) {
+      debugPrint('[chat_input] /status failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('status failed: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
+  }
+
+  /// /model — show the daemon's current default model (read-only view; the
+  /// full model management UI lives in settings).
+  Future<void> _showModel() async {
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      final model = await sdk.getDefaultModel();
+      final buf = StringBuffer();
+      buf.writeln('current model:');
+      buf.writeln();
+      buf.writeln('  provider:  ${model['provider'] ?? '?'}');
+      buf.writeln('  model:     ${model['model'] ?? '?'}');
+      final fullName = model['full_name'];
+      if (fullName is String && fullName.isNotEmpty) {
+        buf.writeln('  full name: $fullName');
+      }
+      final ctx = model['context_limit'];
+      if (ctx != null) buf.writeln('  context:   $ctx');
+      final maxOut = model['max_output'];
+      if (maxOut != null) buf.writeln('  max out:   $maxOut');
+      final caps = model['capabilities'];
+      if (caps is List && caps.isNotEmpty) {
+        buf.writeln('  caps:      ${caps.join(', ')}');
+      }
+
+      if (mounted) {
+        _resetInputState();
+        _showCommandOutput('model', buf.toString());
+      }
+    } catch (e) {
+      debugPrint('[chat_input] /model failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('model lookup failed: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
+  }
+
+  /// /diff — show the session's staged pending changes (the daemon-side
+  /// write-staging surface). Full review/accept/reject lives in the changes
+  /// panel (/tools/changes); this is the quick read-only glance.
+  Future<void> _showDiff() async {
+    final session = ref.read(activeSessionProvider);
+    final sessionId = session?.id ?? widget.sessionId;
+    if (sessionId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('no active session'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+      return;
+    }
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      final pending = await sdk.listPendingChanges(sessionId);
+      if (!mounted) return;
+      if (pending.isEmpty) {
+        showStatusMessage(ref, 'diff: no pending changes');
+        _resetInputState();
+        return;
+      }
+      final buf = StringBuffer();
+      buf.writeln(
+        'pending changes (${pending.length}) — review in /tools/changes:',
+      );
+      for (final change in pending) {
+        buf.writeln();
+        buf.writeln(
+          '--- ${change['file_path'] ?? '?'} '
+          '(${change['created_at'] ?? '?'}) ---',
+        );
+        final diff = change['diff'];
+        if (diff is String && diff.isNotEmpty) {
+          // Cap per-file diff body so one huge change can't flood the dialog.
+          final text = diff.length > 2000
+              ? '${diff.substring(0, 2000)}…'
+              : diff;
+          buf.write(text);
+        }
+      }
+      _resetInputState();
+      _showCommandOutput('diff', buf.toString());
+    } catch (e) {
+      debugPrint('[chat_input] /diff failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('diff failed: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
+  }
+
+  /// /eval — surface the eval-runs panel. The panel already exists in the
+  /// agents tab; this routes to it rather than reimplementing the listing.
+  ///
+  /// The agents tab renders EvalRunsPanel only when an agent is active, so
+  /// activating the tab alone is not always enough — a follow-up owns that
+  /// layout. Navigate to /agents and report via status message.
+  void _showEvalRuns() {
+    ref.read(tabActivationProvider.notifier).state = HomeTab.agents;
+    showStatusMessage(ref, 'eval runs: see agents tab panel');
+    _resetInputState();
+  }
+
+  /// /facts — surface the facts panel (same agents-tab pane as eval runs).
+  void _showFacts() {
+    ref.read(tabActivationProvider.notifier).state = HomeTab.agents;
+    showStatusMessage(ref, 'facts: see agents tab panel');
+    _resetInputState();
+  }
+
+  /// /prompts — navigate to the prompt-editor tool panel.
+  void _openPrompts() {
+    _resetInputState();
+    unawaited(
+      Future<void>(() async {
+        // Router navigation must happen after the current frame; the input
+        // may live inside the tool-panel shell that is being replaced.
+        // `go` matches the goToolPrompts helper (replace, not push).
+        await Future<void>.delayed(Duration.zero);
+        router.go('/tools/prompts');
+      }),
+    );
+  }
+
+  /// /session — show current session id/title from the provider-layer
+  /// session state (no network round trip needed).
+  void _showSessionInfo() {
+    final session = ref.read(activeSessionProvider);
+    final buf = StringBuffer();
+    buf.writeln('current session:');
+    buf.writeln();
+    if (session == null) {
+      buf.writeln('  id:    ${widget.sessionId}');
+      buf.writeln('  title: (not loaded)');
+    } else {
+      buf.writeln('  id:      ${session.id}');
+      buf.writeln('  title:   ${session.title}');
+      if (session.conversationId != null &&
+          session.conversationId!.isNotEmpty) {
+        buf.writeln('  conv:    ${session.conversationId}');
+      }
+      if (session.projectId != null && session.projectId!.isNotEmpty) {
+        buf.writeln('  project: ${session.projectId}');
+      }
+      buf.writeln(
+        '  created: ${session.createdAt.toIso8601String().substring(0, 19)}',
+      );
+      final last = session.lastActivity;
+      if (last != null) {
+        buf.writeln('  active:  ${last.toIso8601String().substring(0, 19)}');
+      }
+    }
+
+    _resetInputState();
+    _showCommandOutput('session', buf.toString());
+  }
+
+  /// /stop — stop all work for the current session via the same
+  /// session.stop RPC the TUI uses (replaces the old steer-message '/stop').
+  ///
+  /// Mirrors the TUI modal semantics: fetch the session's child tasks
+  /// first; when any are active, confirm with the user before stopping.
+  Future<void> _handleStopCommand() async {
+    final sessionId = widget.sessionId;
+    if (sessionId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('no active session'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+      return;
+    }
+
+    final sdk = ref.read(sdkClientProvider);
+
+    // Child-task probe is best effort: on failure stop immediately (the
+    // TUI treats a probe error the same way — it ignores the error and
+    // stops).
+    var childTasks = const <String>[];
+    try {
+      childTasks = await sdk.getChildTasks(sessionId: sessionId);
+    } catch (e) {
+      debugPrint('[chat_input] /stop child-task probe failed: $e');
+    }
+
+    if (!mounted) return;
+
+    if (childTasks.isNotEmpty) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: CyberpunkColors.darkGray,
+          title: const Text(
+            'stop work',
+            style: TextStyle(fontFamily: 'SourceCodePro', fontSize: 14),
+          ),
+          content: Text(
+            'stop current work? there are ${childTasks.length} active tasks.',
+            style: CyberpunkTypography.bodyMedium,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('stop'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) {
+        _resetInputState();
+        return;
+      }
+    }
+
+    try {
+      final result = await sdk.stopSession(sessionId: sessionId);
+      final stopped = result['workers_stopped'];
+      final count = stopped is List ? stopped.length : 0;
+      if (mounted) {
+        showStatusMessage(ref, 'session stopped ($count workers)');
+        _resetInputState();
+      }
+    } catch (e) {
+      debugPrint('[chat_input] /stop failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('stop failed: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Fetch the daemon's custom slash commands (prompt templates) and feed
+  /// them into the registry so they autocomplete (GUI parity with the TUI's
+  /// fetchTemplateNames -> TemplateNamesLoadedMsg -> MergeCommands flow).
+  /// Fire-and-forget at chat init: failure just means no custom entries.
+  Future<void> _loadCustomCommands() async {
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      final raw = await sdk.listCustomCommands();
+      final commands = raw
+          .map(
+            (t) => SlashCommand(
+              name: t['name'] as String? ?? '',
+              description: t['description'] as String? ?? 'custom command',
+            ),
+          )
+          .where((c) => c.name.isNotEmpty)
+          .toList();
+      _slashRegistry.setCustomCommands(commands);
+    } catch (e) {
+      debugPrint('[chat_input] custom command fetch failed: $e');
+    }
+  }
+
   /// Try to handle a slash command locally.
   ///
   /// Returns true if the command was consumed and should NOT be sent
@@ -976,6 +1421,12 @@ class _ChatInputState extends ConsumerState<ChatInput>
 
     switch (command) {
       case '/new':
+        // KNOWN SEMANTIC DIVERGENCE (TUI parity): the TUI's /new clears the
+        // conversation in place (executeNew -> ClearConversation), while the
+        // GUI's /new creates a brand-new session. Both are intentional for
+        // now; cross-surface alignment is a tracked follow-up decision (GUI
+        // slash-command parity leaf, 2026-10 audit). Do not "fix" one side
+        // without the other.
         _history.add(widget.sessionId, text);
         _createNewSession();
         return true;
@@ -985,9 +1436,41 @@ class _ChatInputState extends ConsumerState<ChatInput>
         return true;
       case '/stop':
         _history.add(widget.sessionId, text);
-        ref
-            .read(chatProvider(widget.sessionId).notifier)
-            .sendSteer(sessionId: widget.sessionId, text: '/stop');
+        // GUI parity: stop via the session.stop RPC (with child-task
+        // confirmation), matching the TUI — not a steer message.
+        unawaited(_handleStopCommand());
+        return true;
+      case '/usage':
+        _history.add(widget.sessionId, text);
+        unawaited(_showUsage());
+        return true;
+      case '/status':
+        _history.add(widget.sessionId, text);
+        unawaited(_showStatus());
+        return true;
+      case '/model':
+        _history.add(widget.sessionId, text);
+        unawaited(_showModel());
+        return true;
+      case '/diff':
+        _history.add(widget.sessionId, text);
+        unawaited(_showDiff());
+        return true;
+      case '/eval':
+        _history.add(widget.sessionId, text);
+        _showEvalRuns();
+        return true;
+      case '/facts':
+        _history.add(widget.sessionId, text);
+        _showFacts();
+        return true;
+      case '/prompts':
+        _history.add(widget.sessionId, text);
+        _openPrompts();
+        return true;
+      case '/session':
+        _history.add(widget.sessionId, text);
+        _showSessionInfo();
         return true;
       case '/debugsession':
         _history.add(widget.sessionId, text);
