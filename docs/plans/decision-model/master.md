@@ -174,10 +174,18 @@ Wave order: 01 → 02 → (03 ∥ 04) → integration gates.
 
 | Leaf | Status | Commit | Notes |
 |------|--------|--------|-------|
-| 01 | DONE | 44f8f073 | config slot + knobs + resolver field; tests in internal/config/decision_model_test.go + internal/llm/resolver_decision_model_test.go |
-| 02 | PENDING | — | |
-| 03 | PENDING | — | |
-| 04 | PENDING | — | |
+| 01 | COMPLETE 2026-10-15 | 44f8f073 | slot + knobs + resolver accessor; docs-generate done |
+| 02 | COMPLETE 2026-10-15 | 9885a7c4 | DecisionClient seam; Chat-shaped adaptation of Chatter |
+| 03 | COMPLETE 2026-10-15 | 0de7b385 | DecisionGateHook + deny seam in executeToolCalls; opt-in via decision_gate_enabled |
+| 04 | COMPLETE 2026-10-15 | 28abf787 | DecisionCompactor + firewall lane; inuse slot |
+| Integration | COMPLETE 2026-10-15 | a6d005a2 | loop wiring (firewall literal + CompactionAgentConfig) + components/runtime slot literals |
+
+Tree COMPLETE 2026-10-15 — 5/5 units committed, 100%.
+
+Deferred (user-answered, not built): Contract C confidence-driven tier
+routing (`ResolveModelTierWithConfidence`) — design frozen in master.md
+Contract C section. Calibration campaign for the decision thresholds is
+a separate effort before any gate escalates real traffic.
 
 ## Integration gates
 
