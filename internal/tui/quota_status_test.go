@@ -27,6 +27,14 @@ func TestFormatDuration(t *testing.T) {
 		{90 * time.Second, "1m"}, // truncated, not rounded
 		{30 * time.Second, "0m"},
 		{0, "0m"},
+		// Negative inputs: NO sentinel — the bare formatter truncates
+		// toward zero exactly like the llm and Flutter formatters (sentinel
+		// layering documented in format_duration.go).
+		{-90 * time.Second, "-1m"},
+		{-30 * time.Second, "0m"},
+		{-time.Millisecond, "0m"},
+		{-(time.Hour + 30*time.Minute), "-90m"},
+		{-24 * time.Hour, "-1440m"},
 	}
 	for _, tt := range tests {
 		got := FormatDuration(tt.in)
@@ -77,6 +85,43 @@ func TestFormatQuotaCountdown(t *testing.T) {
 }
 
 // ---------- badges ----------
+
+// TestFormatZoneLabel pins the numeric-offset zone-label contract shared
+// with Flutter's _daemonZoneLabel (ui/flutter_ui/lib/features/agents/
+// quota_status.dart): "UTC" for a zero offset, "+h"/"-h" (two-digit,
+// zero-padded hours) when the minute component is zero, "+h:mm"/"-h:mm"
+// otherwise — never an abbreviation like "MST". A fixed instant in a fixed
+// zone must render byte-identically on both surfaces (the Dart test
+// 'zone label parity (fixed instant)' mirrors this table).
+func TestFormatZoneLabel(t *testing.T) {
+	// Fixed instant: 2026-09-02 12:05 UTC, rendered in each fixed zone.
+	instant := time.Date(2026, 9, 2, 12, 5, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		loc  *time.Location
+		want string
+	}{
+		{"UTC renders UTC", time.UTC, "UTC"},
+		{"whole hour positive", time.FixedZone("daemon", 2*3600), "+02"},
+		{"negative whole hour", time.FixedZone("edt", -4*3600), "-04"},
+		{"half hour", time.FixedZone("ist", -(5*3600 + 30*60)), "-05:30"},
+		{"odd quarter", time.FixedZone("nep", 5*3600+45*60), "+05:45"},
+	}
+	for _, tt := range tests {
+		if got := formatZoneLabel(instant.In(tt.loc)); got != tt.want {
+			t.Errorf("%s: formatZoneLabel = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+
+	// renderQuotaTime byte-match on the fixed instant: "HH:MM +offset".
+	// 12:05 UTC renders as 14:05 in the +02 zone.
+	if got, want := renderQuotaTime(instant.In(time.FixedZone("daemon", 2*3600))), "14:05 +02"; got != want {
+		t.Errorf("renderQuotaTime = %q, want %q", got, want)
+	}
+	if got, want := renderQuotaTime(instant), "12:05 UTC"; got != want {
+		t.Errorf("renderQuotaTime UTC = %q, want %q", got, want)
+	}
+}
 
 // TestQuotaWaitLabel pins the leaf 04 status-label contract (TUI + Flutter
 // parity, lowercase): a quota-class wait renders "quota_wait · reset HH:MM",
@@ -255,7 +300,8 @@ func TestRenderQuotaDetailLines(t *testing.T) {
 
 	// M9 daemon-local fixture: 12:00 UTC == 14:00 in +02:00. The detail
 	// line must render the wall-clock EMBEDDED in the value (14:00), not
-	// UTC (the pre-M9 bug) and not device-local.
+	// UTC (the pre-M9 bug) and not device-local, plus the NUMERIC zone
+	// label (byte-matched to Flutter's _daemonZoneLabel).
 	until := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	untilDaemon := until.In(time.FixedZone("daemon", 2*60*60))
 
@@ -264,14 +310,8 @@ func TestRenderQuotaDetailLines(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want 2: %v", len(lines), lines)
 	}
-	if !strings.HasPrefix(lines[0], "primary: claude-opus-4 (blocked until ") {
-		t.Errorf("line 0 = %q, want primary model with blocked-until", lines[0])
-	}
-	if !strings.Contains(lines[0], "14:00") {
-		t.Errorf("line 0 = %q, want daemon-local HH:MM (14:00, embedded offset)", lines[0])
-	}
-	if strings.Contains(lines[0], "UTC") {
-		t.Errorf("line 0 = %q, must not render UTC under daemon display", lines[0])
+	if want := "primary: claude-opus-4 (blocked until 14:00 +02)"; lines[0] != want {
+		t.Errorf("line 0 = %q, want exact byte-match %q (daemon wall-clock + numeric offset)", lines[0], want)
 	}
 	if lines[1] != "active: glm-4.7" {
 		t.Errorf("line 1 = %q, want %q", lines[1], "active: glm-4.7")

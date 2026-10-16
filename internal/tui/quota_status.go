@@ -8,6 +8,14 @@
 // in Flutter (ui/flutter_ui/lib/features/agents/quota_status.dart) — do not
 // change the strings without updating the GUI side.
 //
+// Negative-input sentinel layering (byte-match contract, all three sides):
+// the badge layer owns past-due rendering ("resets soon" —
+// QuotaCountdownTextAt here, quotaCountdownText in Flutter's
+// quota_status.dart); the countdown-string layer owns "soon"
+// (FormatQuotaCountdownAt here); the BARE formatters (FormatDuration here,
+// errors_quota.go formatDuration, Flutter's formatDuration) carry no
+// sentinel and truncate negatives toward zero like any other input.
+//
 // M9 timezone convention: quota timestamps ride the wire as RFC3339 with the
 // DAEMON's offset embedded (producers Format(time.RFC3339)). Surfaces render
 // DAEMON-LOCAL time by default — the HH:MM shown is the wall-clock in the
@@ -68,14 +76,43 @@ func renderQuotaHHmm(t time.Time) string {
 	return t.Format("15:04")
 }
 
-// renderQuotaTime is renderQuotaHHmm plus the zone abbreviation, used by the
-// detail view where the zone matters ("15:04 MST"). The zone shown is the
-// daemon's when rendering daemon-local, the client's otherwise.
+// renderQuotaTime is renderQuotaHHmm plus a numeric zone label, used by the
+// detail view where the zone matters. The zone shown is the daemon's when
+// rendering daemon-local, the client's otherwise.
+//
+// Byte-match contract: the label is a NUMERIC UTC offset — "+h", "+h:mm", or
+// "UTC" for zero — never an abbreviation like "MST" (abbreviations are
+// ambiguous and unparseable; the Flutter side's _daemonZoneLabel emits the
+// same numeric shapes). formatZoneLabel is the single shape both surfaces
+// must byte-match on a fixed instant.
 func renderQuotaTime(t time.Time) string {
 	if QuotaTimeDisplay == TimeDisplayLocal {
 		t = t.Local()
 	}
-	return t.Format("15:04 MST")
+	return t.Format("15:04") + " " + formatZoneLabel(t)
+}
+
+// formatZoneLabel renders t's zone offset as the deterministic numeric
+// shapes the Flutter _daemonZoneLabel emits: "UTC" when the offset is zero,
+// "+h"/"-h" (two-digit, zero-padded hours: "+02") when the minutes component
+// is zero, "+h:mm"/"-h:mm" otherwise. Sign: '-' for negative offsets only.
+func formatZoneLabel(t time.Time) string {
+	_, offsetSec := t.Zone()
+	offsetMin := offsetSec / 60
+	if offsetMin == 0 {
+		return "UTC"
+	}
+	sign := "+"
+	if offsetMin < 0 {
+		sign = "-"
+		offsetMin = -offsetMin
+	}
+	h := offsetMin / 60
+	m := offsetMin % 60
+	if m == 0 {
+		return fmt.Sprintf("%s%02d", sign, h)
+	}
+	return fmt.Sprintf("%s%02d:%02d", sign, h, m)
 }
 
 // Park lifecycle reason strings mirrored from

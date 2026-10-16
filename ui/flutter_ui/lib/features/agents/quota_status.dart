@@ -9,6 +9,21 @@ import 'package:flutter/material.dart';
 /// FormatQuotaCountdown (internal/tui/quota_status.go) — do not change the
 /// strings without updating the TUI side.
 ///
+/// Negative-input sentinel layering (byte-match contract, all three sides —
+/// internal/llm/errors_quota.go, internal/tui/quota_status.go + format_duration.go,
+/// and ui/flutter_ui/lib/utils/format_duration.dart): the BADGE layer owns
+/// past-due rendering ("resets soon" — quotaCountdownText below); the TUI
+/// countdown-string layer owns "soon" (FormatQuotaCountdownAt); the bare
+/// formatDuration has NO sentinel and truncates negatives toward zero.
+///
+/// REFRESH CADENCE contract: the countdown/label text refreshes on a 30s
+/// cadence. The TUI does this via its 30s quotaCountdownTick
+/// (internal/tui/agents_panel.go scheduleQuotaCountdownTick). The Flutter
+/// agents tab currently uses a 1s Timer.periodic
+/// (agents_tab.dart _startQuotaTimer) — it should move to 30s to match
+/// (single-line follow-up owned by the agents_tab leaf); until then the
+/// badge text itself is cadence-independent and byte-identical.
+///
 /// M9 timezone convention: the wire RFC3339 carries the DAEMON's offset.
 /// Surfaces render DAEMON-LOCAL wall-clock by default — never UTC, never
 /// the device zone. `useDeviceTimeForQuota` (settings toggle, default
@@ -27,7 +42,12 @@ const bool useDeviceTimeForQuota = false;
 
 /// Daemon zone label for the detail line, from the daemon offset minutes
 /// embedded in the RFC3339 value ("+02" / "-05:30" / "UTC" for Z).
-/// Mirrors the zone abbreviation the TUI detail line renders.
+/// Byte-match contract (zone layer): BOTH surfaces render a NUMERIC UTC
+/// offset — never an abbreviation like "MST". The TUI side computes the same
+/// shapes via formatZoneLabel in internal/tui/quota_status.go; a fixed
+/// instant in a fixed zone must render byte-identically on both sides
+/// (see the zone-label table tests in quota_status_test.go and
+/// test/quota_status_test.dart).
 String _daemonZoneLabel(int? offsetMinutes) {
   if (offsetMinutes == null) return '';
   if (offsetMinutes == 0) return 'UTC';
@@ -215,7 +235,8 @@ class _BlockedBadge extends StatelessWidget {
 /// the pre-M9 implementation rendered — or client-local when
 /// [useDeviceTime] is on. A zone hint ("+02") is appended when rendering
 /// the daemon clock from a different client zone, mirroring the TUI
-/// detail line's "15:04 MST".
+/// detail line's numeric zone label ("15:04 +02"; formatZoneLabel in
+/// internal/tui/quota_status.go).
 List<String> quotaDetailLines(
   String? primaryModel,
   String? fallbackModel,

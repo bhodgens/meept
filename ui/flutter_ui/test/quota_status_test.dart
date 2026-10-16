@@ -11,18 +11,22 @@ import 'package:meept_ui/utils/format_duration.dart';
 
 void main() {
   group('formatDuration', () {
-    test('returns resuming… for negative durations', () {
+    test('negative durations truncate toward zero (no sentinel — parity)', () {
+      // Sentinel layering: the BARE formatter has no negative sentinel on
+      // any side — negatives flow through the same truncation path as the
+      // Go formatters (format_duration.go / errors_quota.go), e.g. "-1m".
+      // Past-due wording ("resets soon"/"soon") lives in the badge and
+      // countdown-string layers, not here.
       // Dart normalises Duration(hours: -1) to positive, so construct
-      // a truly negative duration via milliseconds.
+      // truly negative durations via milliseconds.
+      expect(formatDuration(const Duration(milliseconds: -1)), equals('0m'));
+      expect(formatDuration(const Duration(seconds: -90)), equals('-1m'));
+      expect(formatDuration(const Duration(seconds: -30)), equals('0m'));
       expect(
-        formatDuration(const Duration(milliseconds: -1)),
-        equals('resuming…'),
+        formatDuration(const Duration(milliseconds: -(90 * 60 * 1000))),
+        equals('-90m'),
       );
-      expect(
-        formatDuration(const Duration(hours: -1, minutes: -30)),
-        equals('resuming…'),
-      );
-      expect(formatDuration(const Duration(days: -1)), equals('resuming…'));
+      expect(formatDuration(const Duration(days: -1)), equals('-1440m'));
     });
 
     test('formats hours+minutes >= 1h', () {
@@ -772,6 +776,52 @@ void main() {
         ),
         equals('throttle gave up · action required'),
       );
+    });
+  });
+
+  // Zone-label parity (fixed instant): BOTH surfaces render a NUMERIC UTC
+  // offset — never an abbreviation like "MST". Mirrors TestFormatZoneLabel
+  // in internal/tui/quota_status_test.go; the same fixed instant and fixed
+  // offsets must produce byte-identical labels on the TUI side.
+  group('zone label parity (fixed instant)', () {
+    // 2026-09-02 12:05 UTC — the exact fixture used by TestFormatZoneLabel.
+    final instantEpoch = DateTime.parse(
+      '2026-09-02T12:05:00Z',
+    ).millisecondsSinceEpoch;
+
+    String hhmmAt(int offsetMinutes) {
+      // Wall-clock AT the given offset, device-zone-independent: UTC epoch
+      // time shifted by the offset.
+      final t = DateTime.fromMillisecondsSinceEpoch(
+        instantEpoch,
+        isUtc: true,
+      ).add(Duration(minutes: offsetMinutes));
+      return '${t.hour.toString().padLeft(2, '0')}:'
+          '${t.minute.toString().padLeft(2, '0')}';
+    }
+
+    test('detail line renders numeric offsets byte-matched to the TUI', () {
+      final cases = <int, String>{
+        0: 'UTC',
+        120: '+02',
+        -240: '-04',
+        -(5 * 60 + 30): '-05:30',
+        5 * 60 + 45: '+05:45',
+      };
+      cases.forEach((offsetMinutes, label) {
+        final lines = quotaDetailLines(
+          'claude-opus-4',
+          'glm-4.7',
+          instantEpoch,
+          waitUntilOffsetMinutes: offsetMinutes,
+        );
+        final wall = hhmmAt(offsetMinutes);
+        expect(
+          lines[0],
+          equals('primary: claude-opus-4 (blocked until $wall $label)'),
+          reason: 'offset $offsetMinutes must render "$label" (TUI parity)',
+        );
+      });
     });
   });
 

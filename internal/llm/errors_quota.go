@@ -150,6 +150,14 @@ func classifyQuotaDecision(statusCode int, body []byte, providerDetail *Provider
 // formatDuration formats a duration for user-facing display. Values are
 // truncated to the minute (never rounded up): a 90s wait shows as "1m", so
 // the user is never told more time remains than actually does.
+//
+// Negative-input sentinel layering (byte-match contract, all three sides —
+// this bare formatter, internal/tui/format_duration.go FormatDuration, and
+// Flutter's ui/flutter_ui/lib/utils/format_duration.dart): the bare
+// formatter has NO negative sentinel — negatives truncate toward zero the
+// same as positives (e.g. "-1m"). Past-due wording lives in higher layers:
+// "resets soon" on the badge layer, "soon" in the TUI's
+// FormatQuotaCountdownAt.
 func formatDuration(d time.Duration) string {
 	d = d.Truncate(time.Minute)
 	if d >= time.Hour {

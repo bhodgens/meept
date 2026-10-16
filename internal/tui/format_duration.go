@@ -15,8 +15,14 @@ import (
 //   - >= 1h, minutes == 0 -> "2h"
 //   - < 1h               -> "45m" (0m for sub-minute remains)
 //
-// Past-due durations are handled by FormatQuotaCountdown ("resets soon"),
-// not here; a negative input formats via truncation like the llm helper.
+// Negative-input sentinel layering (byte-match contract, all three sides —
+// internal/llm/errors_quota.go formatDuration, this file, and
+// ui/flutter_ui/lib/utils/format_duration.dart): the BARE formatter has no
+// sentinel — negative inputs truncate toward zero exactly like positive ones
+// (e.g. "-1m"). Past-due wording is owned by higher layers: "resets soon" by
+// the badge layer (QuotaCountdownText here; quotaCountdownText in Flutter's
+// quota_status.dart), "soon" by the TUI countdown-string layer
+// (FormatQuotaCountdownAt). Do not add a negative branch here.
 func FormatDuration(d time.Duration) string {
 	d = d.Truncate(time.Minute)
 	if d >= time.Hour {
