@@ -304,6 +304,17 @@ type Components struct {
 	// Pricing syncer for dynamic model pricing
 	PricingSyncer *llm.PricingSyncer
 
+	// TeardownCoordinator releases upstream provider resources when a
+	// session ends (session-affinity leaf 06). Non-nil when the daemon
+	// boot reached the LLM wiring; stopped by IdleReaperStop and swept by
+	// ShutdownSweep on the shutdown path.
+	TeardownCoordinator *llm.TeardownCoordinator
+	// TeardownIdleReaper is the leaf-05 idle reaper wired to fire
+	// SessionEventIdle through the teardown coordinator. Nil until
+	// constructed; started in buildLLMComponents, stopped next to
+	// SessionStore.Close().
+	TeardownIdleReaper *session.IdleReaper
+
 	// ContextDiscovery syncs provider context lengths into resolver
 	// models (llm-resilience-forest tree 05 leaf 01). Nil when disabled
 	// (the default).
@@ -315,6 +326,12 @@ type Components struct {
 
 	// Local LLM runtime lifecycle manager
 	ContainerManager *llm.RuntimeManager
+
+	// ProviderManager is the multi-provider chatter (session-affinity
+	// leaf 06): held on Components so the teardown wiring can attach the
+	// session-activity feed after the session store exists (the PM is
+	// constructed before the store in this function).
+	ProviderManager *llm.ProviderManager
 
 	// MCP integration
 	MCPManager *mcp.Manager
@@ -508,6 +525,26 @@ type Components struct {
 
 	Logger *slog.Logger
 }
+
+// teardownStoreHook adapts *llm.TeardownCoordinator onto the session
+// store's session.SessionLifecycleHook interface. The coordinator's
+// OnSessionEvent takes a plain string event because internal/llm must not
+// import internal/session (session already imports llm for its
+// summarizer bridge — the import would cycle), so this tiny bridge
+// converts the event kind. Archive, delete, and idle all funnel to the
+// same async dispatch: every teardown-relevant moment releases the
+// session's upstream resources.
+type teardownStoreHook struct {
+	coordinator *llm.TeardownCoordinator
+}
+
+// OnSessionEvent implements session.SessionLifecycleHook.
+func (h teardownStoreHook) OnSessionEvent(ctx context.Context, sessionID string, event session.SessionEvent) {
+	h.coordinator.OnSessionEvent(ctx, sessionID, string(event))
+}
+
+// compile-time proof the bridge satisfies the store's hook interface.
+var _ session.SessionLifecycleHook = teardownStoreHook{}
 
 // buildRuntimeConfig maps [runtime] config into the runtime package's Config,
 // normalizing env-policy defaults and warning loudly when the legacy
@@ -959,6 +996,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.LLMResolver.SetPricingSyncer(pricingSyncer)
 		}
 
+		// Session teardown (session-affinity leaf 06, master Contract 6):
+		// the coordinator subscribes to the session store's lifecycle hook
+		// and fans archive/delete/idle events out to the adapters. Keyed on
+		// the resolver's session→endpoint snapshot — the SAME key the sticky
+		// map remembers (leaf 01's WithTaskScope accounting session id), so
+		// the lookup always matches what was served. The llama adapter
+		// reference-counts over the snapshot: only the LAST session on an
+		// endpoint triggers an erase.
+		if c.LLMResolver != nil {
+			endpointsFn := c.LLMResolver.SessionEndpoints
+			teardownTimeout := cfg.LLM.SessionAffinity.TeardownTimeout
+			adapters := []llm.TeardownAdapter{
+				llm.NewLlamaServerTeardown(c.ContainerManager, endpointsFn, teardownTimeout, logger.With("component", "llama-teardown")),
+				llm.NewCloudTeardown(logger.With("component", "cloud-teardown")),
+			}
+			c.TeardownCoordinator = llm.NewTeardownCoordinator(adapters, endpointsFn, teardownTimeout, logger.With("component", "teardown-coordinator"))
+		}
+
 		// Context-length discovery (llm-resilience-forest tree 05 leaf 01,
 		// DECISIONS.md D13). Constructed ONLY when enabled: disabled is the
 		// default and must mean zero behavior change (no syncer, no
@@ -1241,6 +1296,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// c.LLMResolver is constructed earlier in this function, so the
 			// wire is always non-nil here.
 			pm.SetStickyEndpointResolver(c.LLMResolver)
+			c.ProviderManager = pm
 
 			// Dynamically register OAuth-backed LLM providers that have
 			// stored tokens but are not already in the static config.
@@ -2262,6 +2318,50 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			sessionStore.SetTurnGossipPublisher(c.DualStore)
 		}
 		c.SessionStore = sessionStore
+	}
+
+	// Session teardown wiring (session-affinity leaf 06). The coordinator
+	// is constructed in the LLM block above (resolver must exist first:
+	// the endpoint snapshot is its teardown key source); here it becomes
+	// the store's lifecycle hook — session archive → hook → coordinator →
+	// adapter → erase — and the leaf-05 idle reaper starts feeding it
+	// SessionEventIdle. The hook adapter is the tiny structural bridge:
+	// llm.TeardownCoordinator.OnSessionEvent takes a plain string event
+	// (internal/llm must not import internal/session), so this closure
+	// converts session.SessionEvent -> coordinator. Typed-nil safe: a nil
+	// coordinator is skipped (the store without a hook is the normal state
+	// per Contract 5).
+	if c.TeardownCoordinator != nil && c.SessionStore != nil {
+		coordinator := c.TeardownCoordinator
+		c.SessionStore.SetLifecycleHook(teardownStoreHook{coordinator: coordinator})
+		// The activity tracker is SHARED with the LLM call path: the
+		// ProviderManager feed (SetSessionActivityCallback below) records
+		// every successful scoped LLM call here, and the reaper reads the
+		// same data. A tracker fed by nothing would make idle reaping
+		// dormant (leaf 05 wiring note).
+		activityTracker := session.NewActivityTracker()
+		idleReaper := session.NewIdleReaper(activityTracker, teardownStoreHook{coordinator: coordinator}, logger.With("component", "idle-reaper"))
+		idleReaper.SetIdleRelease(cfg.LLM.SessionAffinity.IdleRelease)
+		idleReaper.Start()
+		c.TeardownIdleReaper = idleReaper
+		// Feed: PM success seam (leaf 04's reportSessionEndpoint) →
+		// RecordActivity. ClientID is unused by the reaper; the endpoint
+		// identity goes to the log for operational tracing only.
+		if pm := c.ProviderManager; pm != nil {
+			pm.SetSessionActivityCallback(func(sessionID, endpointKey, providerID, modelID string) {
+				activityTracker.RecordActivity(sessionID, "")
+				logger.Debug("session LLM activity",
+					"session_id", sessionID,
+					"endpoint_key", endpointKey,
+					"provider", providerID,
+					"model", modelID,
+				)
+			})
+		}
+		logger.Info("session teardown wired",
+			"idle_release", cfg.LLM.SessionAffinity.IdleRelease.String(),
+			"teardown_timeout", cfg.LLM.SessionAffinity.TeardownTimeout.String(),
+		)
 	}
 
 	// Parked-turn persistence (durability for D9 universal parking):
@@ -5544,6 +5644,14 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.EmbeddingWorker != nil {
 		c.EmbeddingWorker.Stop()
 		c.Logger.Info("Session embedding worker stopped")
+	}
+
+	// Stop the session teardown idle reaper (session-affinity leaf 06)
+	// before closing the session store: Stop joins its goroutine, so no
+	// idle tick can fire into a closed store.
+	if c.TeardownIdleReaper != nil {
+		c.TeardownIdleReaper.Stop()
+		c.Logger.Info("session idle reaper stopped")
 	}
 
 	if c.SessionStore != nil {

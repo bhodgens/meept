@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
@@ -72,6 +73,21 @@ func NewTerminalService(workingDir string, bus *bus.MessageBus, logger *slog.Log
 		maxHistory:   100,
 		workingDir:   workingDir,
 		sessionStore: make(map[string]*TerminalSession),
+	}
+}
+
+// SetFenceChecker wires a fence checker into the terminal service's shell tool.
+func (svc *TerminalService) SetFenceChecker(fc builtin.FenceChecker) {
+	if svc.shellTool != nil {
+		svc.shellTool.SetFenceChecker(fc)
+	}
+}
+
+// SetSecurityOrchestrator wires a security orchestrator into the terminal
+// service's shell tool.
+func (svc *TerminalService) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
+	if svc.shellTool != nil {
+		svc.shellTool.SetSecurityOrchestrator(orch)
 	}
 }
 

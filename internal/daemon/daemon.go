@@ -2228,6 +2228,16 @@ func (d *Daemon) shutdown() error {
 		}
 	}
 
+	// Session teardown sweep (session-affinity leaf 06): synchronous,
+	// budget-bounded (TeardownTimeout * min(8, len(sessions))) release of
+	// every remembered session endpoint BEFORE the runtimes stop — an
+	// erase after StopAll would hit a dead llama-server. Best-effort by
+	// contract: errors are logged inside the sweep, never block shutdown.
+	if d.components != nil && d.components.TeardownCoordinator != nil {
+		d.components.TeardownCoordinator.ShutdownSweep(ctx)
+		d.logger.Info("session teardown sweep complete")
+	}
+
 	// Stop local LLM runtimes
 	if d.components != nil && d.components.ContainerManager != nil {
 		if err := d.components.ContainerManager.StopAll(ctx); err != nil {

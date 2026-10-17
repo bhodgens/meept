@@ -127,6 +127,15 @@ type ProviderManager struct {
 	// SetStickyEndpointResolver (components.go constructs the resolver
 	// before the manager, so no re-wire race exists in production).
 	stickyResolver *Resolver
+	// sessionActivity is the optional callback fired from
+	// reportSessionEndpoint on every successful scoped LLM call
+	// (session-affinity leaf 06): it feeds the daemon's shared
+	// session.ActivityTracker so the idle reaper sees LLM traffic as
+	// activity. Signature takes the raw parts (sessionID, endpointKey,
+	// provider, model) so internal/llm needs no session import (the
+	// import direction session -> llm forbids the reverse). Nil =
+	// no-op. Guarded by mu; wired via SetSessionActivityCallback.
+	sessionActivity func(sessionID, endpointKey, providerID, modelID string)
 	// sessionAffinity is the resolved llm.session_affinity config
 	// propagated onto OpenAI-compatible Client chatters
 	// (SetSessionAffinityConfig, session-affinity tree leaf 02). Nil =
@@ -204,8 +213,28 @@ func (pm *ProviderManager) reportSessionEndpoint(entry *ProviderEntry, opts []Ch
 			"provider", entry.Config.ProviderID,
 			"model", entry.Config.ModelID,
 		)
+		pm.mu.RLock()
+		activity := pm.sessionActivity
+		pm.mu.RUnlock()
+		if activity != nil {
+			activity(probe.sessionID, key, entry.Config.ProviderID, entry.Config.ModelID)
+		}
 		return
 	}
+}
+
+// SetSessionActivityCallback wires the daemon-side activity feed (leaf 06):
+// on every successful scoped LLM call the manager invokes callback with the
+// serving endpoint identity so the caller can record session activity (the
+// idle reaper's data source). Nil-receiver and nil-callback safe; wiring
+// happens once at daemon construction, before any request can succeed.
+func (pm *ProviderManager) SetSessionActivityCallback(callback func(sessionID, endpointKey, providerID, modelID string)) {
+	if pm == nil || callback == nil {
+		return
+	}
+	pm.mu.Lock()
+	pm.sessionActivity = callback
+	pm.mu.Unlock()
 }
 
 // SetQuotaMaxWait caps how far into the future a provider credential stays
