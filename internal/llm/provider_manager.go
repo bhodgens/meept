@@ -119,6 +119,14 @@ type ProviderManager struct {
 	// clients keep their package defaults (30s throttle / 1h floor / 24h
 	// horizon). Guarded by mu.
 	failurePolicy *FailurePolicyConfig
+	// stickyResolver is the *llm.Resolver the session-endpoint
+	// preference map lives on (session-affinity tree leaf 04, master
+	// Contract 4). Nil (unwired) = the reporting seam below is inert —
+	// no preference is ever recorded, PreferredEndpoint always misses.
+	// Guarded by mu; wired ONCE at daemon construction via
+	// SetStickyEndpointResolver (components.go constructs the resolver
+	// before the manager, so no re-wire race exists in production).
+	stickyResolver *Resolver
 	// sessionAffinity is the resolved llm.session_affinity config
 	// propagated onto OpenAI-compatible Client chatters
 	// (SetSessionAffinityConfig, session-affinity tree leaf 02). Nil =
@@ -129,6 +137,75 @@ type ProviderManager struct {
 	lastHealthCheck time.Time
 	stopChan        chan struct{}
 	initialized     bool
+}
+
+// SetStickyEndpointResolver wires the resolver backing the per-session
+// endpoint preference map (session-affinity tree leaf 04, master Contract
+// 4). Nil disables the seam (typed-nil setter rule, AGENTS.md). Call once
+// at daemon wiring time — components.go constructs the resolver before the
+// manager, so a re-wire with a different resolver is not a supported
+// operation (the setter panics on a non-nil re-wire to surface wiring
+// order bugs in tests and daemon startup alike).
+func (pm *ProviderManager) SetStickyEndpointResolver(r *Resolver) {
+	if pm == nil {
+		return
+	}
+	if r == nil {
+		return // typed-nil setter rule: no-op, never clears a wired resolver
+	}
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	if pm.stickyResolver != nil && pm.stickyResolver != r {
+		panic("llm: SetStickyEndpointResolver re-wired to a different resolver")
+	}
+	pm.stickyResolver = r
+}
+
+// reportSessionEndpoint is THE single success-reporting seam for the
+// session-endpoint preference map (leaf 04). It is called from BOTH
+// non-streaming and streaming success paths (Chat / chatWithAttemptTaggedDeltas)
+// — two call sites, ONE seam function, one writer: RememberSessionEndpoint.
+// Never add a second reporting path from the client layer (OpenAI /
+// Anthropic / Codex clients do NOT report: this manager is the only
+// component that sees the provider rotation outcome together with the
+// request's WithTaskScope session scope, which is exactly the choke point
+// Contract 4 demands).
+//
+// EndpointKey = host + credential fingerprint — the same identity the
+// endpoint-level timeout cooldowns use (Resolver.endpointBlocks), so a
+// remembered preference and a cooldown skip refer to the same object.
+//
+// Debug-level logging only; session IDs and endpoint keys never reach
+// Info+ logs (leaf checklist: "No session content logged").
+func (pm *ProviderManager) reportSessionEndpoint(entry *ProviderEntry, opts []ChatOption) {
+	if entry == nil || entry.Config == nil {
+		return
+	}
+	pm.mu.RLock()
+	resolver := pm.stickyResolver
+	pm.mu.RUnlock()
+	if resolver == nil {
+		return
+	}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		probe := &chatOptions{}
+		opt(probe)
+		if probe.sessionID == "" {
+			continue
+		}
+		key := EndpointKey(entry.Config)
+		resolver.RememberSessionEndpoint(probe.sessionID, key)
+		resolver.logger.Debug("Session endpoint preference reported",
+			"session_id", probe.sessionID,
+			"endpoint_key", key,
+			"provider", entry.Config.ProviderID,
+			"model", entry.Config.ModelID,
+		)
+		return
+	}
 }
 
 // SetQuotaMaxWait caps how far into the future a provider credential stays
@@ -168,7 +245,9 @@ func (pm *ProviderManager) SetFailurePolicyConfig(cfg *FailurePolicyConfig) {
 // SetSessionAffinityConfig propagates the resolved llm.session_affinity
 // config onto every OpenAI-compatible Client chatter this manager owns
 // (existing and future), mirroring SetFailurePolicyConfig. Anthropic
-// (leaf 03) and Codex (wire-mandated header) chatters are unaffected.
+// chatters get the same config via the shared AffinityConfig shape (leaf
+// 03: the client reads only Enabled+AnthropicHeader); Codex
+// (wire-mandated header) chatters are unaffected.
 // Nil-receiver and nil-config safe; a nil cfg disables the header.
 func (pm *ProviderManager) SetSessionAffinityConfig(cfg *AffinityConfig) {
 	if pm == nil {
@@ -179,6 +258,9 @@ func (pm *ProviderManager) SetSessionAffinityConfig(cfg *AffinityConfig) {
 	pm.sessionAffinity = cfg
 	for _, entry := range pm.providers {
 		if c, ok := entry.Chatter.(*Client); ok {
+			c.SetSessionAffinityConfig(cfg)
+		}
+		if c, ok := entry.Chatter.(*AnthropicClient); ok {
 			c.SetSessionAffinityConfig(cfg)
 		}
 	}
@@ -485,6 +567,14 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 
 		// Success
 		pm.recordSuccess(entry, resp, latency)
+
+		// Session-endpoint preference reporting (leaf 04 reporting seam,
+		// master Contract 4): a success that carries a session scope
+		// (WithTaskScope) records the serving EndpointKey as that
+		// session's preferred endpoint on the resolver — the resolve-time
+		// hook then serves the session from the same endpoint while it
+		// stays healthy. No-op unless SetStickyEndpointResolver wired.
+		pm.reportSessionEndpoint(entry, opts)
 
 		// A served request proves the credential's quota window has lifted:
 		// clear any persisted quota block for it.
@@ -877,6 +967,15 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 		}
 
 		pm.recordSuccess(entry, resp, latency)
+
+		// Session-endpoint preference reporting (leaf 04 reporting seam):
+		// streaming twin of the non-streaming hook above — same ONE seam
+		// function, same writer. ChatWithProgress passes through
+		// entry.Chatter.Chat (plain-Chatter streaming-capable clients
+		// deliver deltas inside Chat), so this covers all three manager
+		// entry points.
+		pm.reportSessionEndpoint(entry, opts)
+
 		pm.mu.Lock()
 		pm.clearQuotaCredential(entry)
 		pm.mu.Unlock()
@@ -1311,6 +1410,9 @@ func (pm *ProviderManager) AddProvider(cfg *ModelConfig, priority int) {
 	}
 	if pm.sessionAffinity != nil {
 		if c, ok := entry.Chatter.(*Client); ok {
+			c.SetSessionAffinityConfig(pm.sessionAffinity)
+		}
+		if c, ok := entry.Chatter.(*AnthropicClient); ok {
 			c.SetSessionAffinityConfig(pm.sessionAffinity)
 		}
 	}

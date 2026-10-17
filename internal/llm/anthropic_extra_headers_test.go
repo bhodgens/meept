@@ -159,3 +159,107 @@ func TestAnthropicExtraHeaders_AbsentOrEmptyConfigSendsNothing(t *testing.T) {
 		t.Error("empty-value extra header must be omitted from the request")
 	}
 }
+
+// newAffinityClient builds an AnthropicClient against srv with the given
+// affinity config and extra headers.
+func newAffinityClient(srvURL string, affinity *AffinityConfig, extra map[string]string) *AnthropicClient {
+	cfg := &ModelConfig{
+		ProviderID:   "anthropic",
+		ModelID:      "claude-sonnet-4-5",
+		BaseURL:      srvURL,
+		APIKey:       "sk-test",
+		ExtraHeaders: extra,
+	}
+	client := NewAnthropicClient(cfg)
+	if affinity != nil {
+		client.SetSessionAffinityConfig(affinity)
+	}
+	return client
+}
+
+// TestAnthropicAffinityHeader pins the session-affinity contract on the
+// Anthropic client (session-affinity tree leaf 03): sentinel substitution
+// in extra headers + the default AnthropicHeader, with the same precedence
+// rule as the OpenAI-compatible client (explicit extra_headers wins).
+func TestAnthropicAffinityHeader(t *testing.T) {
+	const sess = "sess-anthropic-1"
+
+	t.Run("default header present on non-streaming scoped call", func(t *testing.T) {
+		srv, hdrs := newAnthropicHeaderServer(t, false)
+		client := newAffinityClient(srv.URL, &AffinityConfig{Enabled: true, AnthropicHeader: "X-Session-Id"}, nil)
+		if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}}, WithTaskScope("task", sess)); err != nil {
+			t.Fatalf("chat: %v", err)
+		}
+		if got := hdrs().Get("X-Session-Id"); got != sess {
+			t.Errorf("x-session-id = %q, want %q", got, sess)
+		}
+	})
+
+	t.Run("default header present on streaming scoped call", func(t *testing.T) {
+		srv, hdrs := newAnthropicHeaderServer(t, true)
+		client := newAffinityClient(srv.URL, &AffinityConfig{Enabled: true, AnthropicHeader: "X-Session-Id"}, nil)
+		if _, err := client.ChatWithProgress(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}},
+			func(ProgressStage, string) {}, WithTaskScope("task", sess)); err != nil {
+			t.Fatalf("chat with progress: %v", err)
+		}
+		if got := hdrs().Get("X-Session-Id"); got != sess {
+			t.Errorf("x-session-id = %q, want %q", got, sess)
+		}
+	})
+
+	t.Run("absent when session scope empty", func(t *testing.T) {
+		srv, hdrs := newAnthropicHeaderServer(t, false)
+		client := newAffinityClient(srv.URL, &AffinityConfig{Enabled: true, AnthropicHeader: "X-Session-Id"}, nil)
+		if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}}); err != nil {
+			t.Fatalf("chat: %v", err)
+		}
+		if got := hdrs().Get("X-Session-Id"); got != "" {
+			t.Errorf("x-session-id = %q, want absent", got)
+		}
+	})
+
+	t.Run("absent when disabled", func(t *testing.T) {
+		srv, hdrs := newAnthropicHeaderServer(t, false)
+		client := newAffinityClient(srv.URL, &AffinityConfig{Enabled: false, AnthropicHeader: "X-Session-Id"}, nil)
+		if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}}, WithTaskScope("task", sess)); err != nil {
+			t.Fatalf("chat: %v", err)
+		}
+		if got := hdrs().Get("X-Session-Id"); got != "" {
+			t.Errorf("x-session-id = %q, want absent", got)
+		}
+	})
+
+	t.Run("explicit extra_headers entry with same key wins", func(t *testing.T) {
+		srv, hdrs := newAnthropicHeaderServer(t, false)
+		client := newAffinityClient(srv.URL, &AffinityConfig{Enabled: true, AnthropicHeader: "X-Session-Id"},
+			map[string]string{"X-Session-Id": "explicit-value"})
+		if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}}, WithTaskScope("task", sess)); err != nil {
+			t.Fatalf("chat: %v", err)
+		}
+		if got := hdrs().Get("X-Session-Id"); got != "explicit-value" {
+			t.Errorf("x-session-id = %q, want explicit-value", got)
+		}
+	})
+
+	t.Run("sentinel in extra_headers resolves to session id", func(t *testing.T) {
+		srv, hdrs := newAnthropicHeaderServer(t, false)
+		client := newAffinityClient(srv.URL, nil, map[string]string{"X-Req-Session": "${session_id}"})
+		if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}}, WithTaskScope("task", sess)); err != nil {
+			t.Fatalf("chat: %v", err)
+		}
+		if got := hdrs().Get("X-Req-Session"); got != sess {
+			t.Errorf("x-req-session = %q, want %q", got, sess)
+		}
+	})
+
+	t.Run("sentinel with empty scope omits header", func(t *testing.T) {
+		srv, hdrs := newAnthropicHeaderServer(t, false)
+		client := newAffinityClient(srv.URL, nil, map[string]string{"X-Req-Session": "${session_id}"})
+		if _, err := client.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}}); err != nil {
+			t.Fatalf("chat: %v", err)
+		}
+		if got := hdrs().Get("X-Req-Session"); got != "" {
+			t.Errorf("x-req-session = %q, want absent", got)
+		}
+	})
+}

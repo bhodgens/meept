@@ -64,6 +64,12 @@ type AnthropicClient struct {
 	// failurePolicy is the injected tree-02 policy config (leaf 03 Task 5):
 	// ShortRetries bounds both anthropic retry loops; nil-safe default 3.
 	failurePolicy *FailurePolicyConfig
+	// sessionAffinity is the injected llm.session_affinity config
+	// (session-affinity tree leaf 03). Read by applyAnthropicAffinityHeader
+	// on both request-builder paths; nil disables the Anthropic header.
+	// Guarded by configMu (set via SetSessionAffinityConfig, read on the
+	// request path alongside the config copy).
+	sessionAffinity *AffinityConfig
 }
 
 // SetQuotaMaxWait sets the quota wait upper bound. Nil-receiver safe.
@@ -421,7 +427,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
 
 	for attempt := 1; attempt <= shortRetries; attempt++ {
-		resp, err := c.doRequest(ctx, reqBody, effCfg)
+		resp, err := c.doRequest(ctx, reqBody, effCfg, chatOpts.sessionID)
 		if err != nil {
 			// Refusal errors never re-enter the short-retry loop: the
 			// serving model declined by policy — retrying the SAME model
@@ -703,7 +709,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 			reportProgress(ProgressStageThinking, "Model is thinking...")
 		}
 
-		resp, err := c.doStreamingRequest(ctx, reqBody, effCfg, reportProgress)
+		resp, err := c.doStreamingRequest(ctx, reqBody, effCfg, reportProgress, chatOpts.sessionID)
 		if err != nil {
 			// Refusal errors never re-enter the short-retry loop: the
 			// serving model declined by policy — retrying the SAME model
@@ -1334,22 +1340,71 @@ func (c *AnthropicClient) applyAnthropicAuth(ctx context.Context, httpReq *http.
 
 // applyAnthropicExtraHeaders writes the static configured extra HTTP
 // headers (ModelConfig.ExtraHeaders, models.json5 `extra_headers`) onto
-// req. Called after applyAnthropicAuth so config headers can override the
-// defaults (e.g. a custom anthropic-version). Values are sent verbatim —
-// no per-request substitution. On Bedrock the SigV4 signature covers a
-// fixed header set (content-type, host, x-amz-*), so config headers ride
-// unsigned — valid, but overriding a signed x-amz-* header would break
-// auth, so x-amz-* keys should not be configured on Bedrock providers.
-func (c *AnthropicClient) applyAnthropicExtraHeaders(httpReq *http.Request) {
+// req, then applies the default session affinity header. Called after
+// applyAnthropicAuth so config headers can override the defaults (e.g. a
+// custom anthropic-version). Values exactly equal to
+// sessionIDHeaderSentinel ("${session_id}") are substituted with
+// sessionID (exact full-value match, matching client.go applyExtraHeaders
+// semantics); a header whose value is empty after substitution is never
+// sent. The default llm.session_affinity.anthropic_header is set when
+// enabled and the request carries a non-empty session scope, but an
+// explicit extra_headers entry with the same key always wins (same
+// precedence rule as the OpenAI-compatible applyAffinityHeader, leaf 02).
+// On Bedrock the SigV4 signature covers a fixed header set (content-type,
+// host, x-amz-*), so config headers ride unsigned — valid, but overriding
+// a signed x-amz-* header would break auth, so x-amz-* keys should not be
+// configured on Bedrock providers.
+func (c *AnthropicClient) applyAnthropicExtraHeaders(httpReq *http.Request, sessionID string) {
 	for k, v := range c.config.ExtraHeaders {
+		if v == sessionIDHeaderSentinel {
+			v = sessionID
+		}
 		if v == "" {
 			continue
 		}
 		httpReq.Header.Set(k, v)
 	}
+	c.applyAnthropicAffinityHeader(httpReq, sessionID)
 }
 
-func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicRequest, cfg *ModelConfig) (*Response, error) {
+// applyAnthropicAffinityHeader sets the DEFAULT session affinity header on
+// req when enabled, the Anthropic header name is configured, and the
+// request carries a non-empty session scope. Must run AFTER
+// applyAnthropicExtraHeaders: the req.Header.Get(key) == "" check makes an
+// explicit extra_headers entry with the same key win (leaf 02 Contract 3
+// precedence, mirrored from client.go applyAffinityHeader). Empty
+// sessionID => header omitted, never sent empty.
+func (c *AnthropicClient) applyAnthropicAffinityHeader(httpReq *http.Request, sessionID string) {
+	c.configMu.RLock()
+	affinity := c.sessionAffinity
+	c.configMu.RUnlock()
+	if affinity == nil || !affinity.Enabled {
+		return
+	}
+	if affinity.AnthropicHeader == "" || sessionID == "" {
+		return
+	}
+	if httpReq.Header.Get(affinity.AnthropicHeader) != "" {
+		return
+	}
+	httpReq.Header.Set(affinity.AnthropicHeader, sessionID)
+}
+
+// SetSessionAffinityConfig injects the resolved llm.session_affinity config
+// onto this Anthropic client (session-affinity tree leaf 03). Nil-receiver
+// and nil-config safe; a nil cfg disables the Anthropic affinity header.
+// Propagated by ProviderManager.SetSessionAffinityConfig, mirroring the
+// OpenAI-compatible Client wiring.
+func (c *AnthropicClient) SetSessionAffinityConfig(cfg *AffinityConfig) {
+	if c == nil {
+		return
+	}
+	c.configMu.Lock()
+	defer c.configMu.Unlock()
+	c.sessionAffinity = cfg
+}
+
+func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicRequest, cfg *ModelConfig, sessionID string) (*Response, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
@@ -1369,7 +1424,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 	if err := c.applyAnthropicAuth(ctx, httpReq, body); err != nil {
 		return nil, err
 	}
-	c.applyAnthropicExtraHeaders(httpReq)
+	c.applyAnthropicExtraHeaders(httpReq, sessionID)
 
 	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
@@ -1599,7 +1654,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 // doStreamingRequest performs a streaming HTTP request to Anthropic's API.
 // It processes server-sent events and reports progress via the callback.
-func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthropicRequest, cfg *ModelConfig, progress func(ProgressStage, string)) (*Response, error) {
+func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthropicRequest, cfg *ModelConfig, progress func(ProgressStage, string), sessionID string) (*Response, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
@@ -1619,7 +1674,7 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 	if err := c.applyAnthropicAuth(ctx, httpReq, body); err != nil {
 		return nil, err
 	}
-	c.applyAnthropicExtraHeaders(httpReq)
+	c.applyAnthropicExtraHeaders(httpReq, sessionID)
 
 	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
