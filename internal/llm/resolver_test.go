@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -603,3 +604,195 @@ func TestResolver_SetRoutingLogger_NilGuard(t *testing.T) {
 		t.Error("expected routingLogger to remain nil after SetRoutingLogger(nil)")
 	}
 }
+
+// stickyTwoEndpointAliasConfig builds a two-endpoint alias for the sticky
+// endpoint preference tests (session-affinity leaf 04): openai/gpt-a and
+// xai/grok sit on DIFFERENT hosts (different EndpointKeys), so Remember +
+// Preferred have distinct keys to distinguish.
+func stickyTwoEndpointAliasConfig() *ProvidersConfig {
+	return &ProvidersConfig{
+		Providers: map[string]ProviderConfig{
+			"openai": {
+				API: "openai",
+				Options: ProviderOptionsConfig{
+					BaseURL: "https://api.openai.example/v1",
+					APIKey:  fakeAPIKeyA,
+				},
+				Models: map[string]ModelDef{
+					"gpt-a": {Name: "gpt-a", Capabilities: []string{"completion"}},
+				},
+			},
+			"xai": {
+				API: "openai",
+				Options: ProviderOptionsConfig{
+					BaseURL: "https://api.x.ai/v1",
+					APIKey:  fakeAPIKeyB,
+				},
+				Models: map[string]ModelDef{
+					"grok": {Name: "grok", Capabilities: []string{"completion"}},
+				},
+			},
+		},
+		ModelAliases: map[string]ModelAliasEntry{
+			"medium": {Models: []string{"openai/gpt-a", "xai/grok"}},
+		},
+	}
+}
+
+// newStickyTestResolver is the leaf-04 test constructor (Error-level logs:
+// the sticky path logs at Debug by design). Named newStickyPrefResolver —
+// resolver_caller_test.go already owns newStickyTestResolver (leaf 03's
+// sticky-caller fixture with a different signature).
+func newStickyPrefResolver(t *testing.T) *Resolver {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	return NewResolver(stickyTwoEndpointAliasConfig(), logger)
+}
+
+// TestStickyEndpointPreference pins master Contract 4 (session-affinity
+// leaf 04): a remembered healthy endpoint is tried FIRST during alias
+// resolution; unknown session / blocked preferred endpoint fall back to
+// normal ordering; the map is LRU-capped; SessionEndpoints snapshots.
+func TestStickyEndpointPreference(t *testing.T) {
+	r := newStickyPrefResolver(t)
+
+	gptA := r.aliases["medium"].Models[0]
+	keyA := EndpointKey(gptA)
+
+	// Empty sessionID is a no-op (Contract 4).
+	r.RememberSessionEndpoint("", keyA)
+	if _, ok := r.PreferredEndpoint(""); ok {
+		t.Fatal("empty sessionID must never be remembered")
+	}
+
+	// Unknown session: no preference, resolution falls back to normal order.
+	if _, ok := r.PreferredEndpoint("s1"); ok {
+		t.Fatal("unknown session must have no preferred endpoint")
+	}
+	mc, err := r.ResolveForAlias("medium", "s1")
+	if err != nil {
+		t.Fatalf("ResolveForAlias unknown session: %v", err)
+	}
+	if mc.ModelID != "gpt-a" {
+		t.Fatalf("unknown session must resolve to rotation head (gpt-a), got %s", mc.ModelID)
+	}
+
+	// Remember the successful serve; the preference must come back.
+	r.RememberSessionEndpoint("s1", keyA)
+	if got, ok := r.PreferredEndpoint("s1"); !ok || got != keyA {
+		t.Fatalf("PreferredEndpoint(s1) = %q, %v; want %q, true", got, ok, keyA)
+	}
+
+	// Rotate away (throttle on gptA arms the endpoint block + alias
+	// cooldown), clear ONLY the alias cooldown so the endpoint block stays
+	// (same whitelist pattern as TestEndpointBlock_SameEndpointModelSkipped)
+	// — rotation lands on xai/grok for the scoped session too, because the
+	// preferred endpoint is endpoint-BLOCKED and must be skipped.
+	r.RecordAliasFailure("medium", throttleErr(), gptA)
+	health := r.health["medium"]
+	health.CooldownUntil = time.Time{}
+	health.ConsecutiveFails = 0
+	mc, err = r.ResolveForAlias("medium", "s1")
+	if err != nil {
+		t.Fatalf("ResolveForAlias with blocked preference: %v", err)
+	}
+	if mc.ProviderID != "xai" {
+		t.Fatalf("endpoint-blocked preference must be skipped (want xai/grok), got %s/%s", mc.ProviderID, mc.ModelID)
+	}
+
+	// Cooldown cleared: the preference is healthy again and must win the
+	// resolve — stickiness over rotation position.
+	health.CooldownUntil = time.Time{}
+	r.endpointBlocks = make(map[string]time.Time)
+	mc, err = r.ResolveForAlias("medium", "s1")
+	if err != nil {
+		t.Fatalf("ResolveForAlias with healthy preference: %v", err)
+	}
+	if mc.ModelID != "gpt-a" {
+		t.Fatalf("healthy preferred endpoint must be tried FIRST (want gpt-a), got %s/%s", mc.ProviderID, mc.ModelID)
+	}
+
+	// A DIFFERENT session without a preference keeps normal ordering from
+	// the (session-s1-moved) cursor — the read-side hook never mutates
+	// another session's resolution beyond the cursor it legitimately
+	// shares. The invariant under test: no panic, deterministic head.
+	if _, err := r.ResolveForAlias("medium", "s2"); err != nil {
+		t.Fatalf("ResolveForAlias other session: %v", err)
+	}
+
+	// Quota-blocked preferred candidate is skipped (precedence: quota >
+	// sticky). The local fallback (zai/glm-4.7) is the rotation head of
+	// createTestConfig's coder alias — use THAT alias for the quota leg so
+	// the block state cannot collide with the medium fixtures above.
+	qr := newEndpointTestResolver(t)
+	qr.SetQuotaConfig(&QuotaWaitConfig{Enabled: true})
+	qgptA := qr.aliases["mixed"].Models[0]
+	qKeyA := EndpointKey(qgptA)
+	qr.RememberSessionEndpoint("sq", qKeyA)
+	if _, ok := qr.PreferredEndpoint("sq"); !ok {
+		t.Fatal("preference must be remembered while healthy")
+	}
+	unblock := time.Now().Add(time.Hour)
+	qr.BlockQuotaEntry("mixed", qgptA.ProviderID, qgptA.ModelID, unblock)
+	qmc, qerr := qr.ResolveForAlias("mixed", "sq")
+	if qerr != nil {
+		t.Fatalf("ResolveForAlias quota-blocked preference: %v", qerr)
+	}
+	if qmc.ProviderID != "xai" {
+		t.Fatalf("quota-blocked preferred candidate must be skipped (want xai/grok), got %s/%s", qmc.ProviderID, qmc.ModelID)
+	}
+
+	// Unknown endpoint key: never remembered (dropped, not stored).
+	r2 := newStickyPrefResolver(t)
+	r2.RememberSessionEndpoint("s9", "totally-unknown-key")
+	if _, ok := r2.PreferredEndpoint("s9"); ok {
+		t.Fatal("unknown endpoint key must not be remembered as a preference")
+	}
+
+	// LRU eviction at the cap: shrink the cap for a cheap test (var is
+	// test-only per its doc comment), remember cap+1 sessions, assert the
+	// oldest is evicted and the newest survives, then restore.
+	origCap := stickySessionEndpointCap
+	stickySessionEndpointCap = 8
+	defer func() { stickySessionEndpointCap = origCap }()
+	r3 := newStickyPrefResolver(t)
+	keyX := EndpointKey(r3.aliases["medium"].Models[0])
+	r3.RememberSessionEndpoint("old-session", keyX)
+	for i := 0; i < 8; i++ {
+		r3.RememberSessionEndpoint(fmt.Sprintf("filler-%d", i), keyX)
+	}
+	if _, ok := r3.PreferredEndpoint("old-session"); ok {
+		t.Fatal("oldest session must be LRU-evicted at cap")
+	}
+	if _, ok := r3.PreferredEndpoint("filler-7"); !ok {
+		t.Fatal("newest session must survive LRU eviction")
+	}
+	if len(r3.sessionEndpoints) > 8 {
+		t.Fatalf("map must stay bounded at cap, got %d", len(r3.sessionEndpoints))
+	}
+
+	// SessionEndpoints returns a mutex-safe copy (leaf 06 seam): mutating
+	// the snapshot must not touch resolver state.
+	snap := r3.SessionEndpoints()
+	if len(snap) == 0 {
+		t.Fatal("snapshot must carry remembered sessions")
+	}
+	for k := range snap {
+		delete(snap, k)
+	}
+	if len(r3.SessionEndpoints()) == 0 {
+		t.Fatal("mutating the snapshot must not affect resolver state")
+	}
+
+	// Overwrite-on-success: same session reporting a different healthy key
+	// replaces the entry (single map slot per session).
+	other := EndpointKey(r3.aliases["medium"].Models[1])
+	r3.RememberSessionEndpoint("filler-7", other)
+	if got, _ := r3.PreferredEndpoint("filler-7"); got != other {
+		t.Fatalf("overwrite-on-success failed: got %q, want %q", got, other)
+	}
+	if len(r3.sessionEndpoints) > 8 {
+		t.Fatalf("overwrite must not grow the map, got %d", len(r3.sessionEndpoints))
+	}
+}
+

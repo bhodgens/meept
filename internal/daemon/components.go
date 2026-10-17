@@ -1235,6 +1235,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				IdleRelease:     cfg.LLM.SessionAffinity.IdleRelease,
 				TeardownTimeout: cfg.LLM.SessionAffinity.TeardownTimeout,
 			})
+			// Session-endpoint preference (session-affinity tree leaf 04,
+			// master Contract 4): the resolver owns the sticky map; the PM
+			// reports successful serves through the single reporting seam.
+			// c.LLMResolver is constructed earlier in this function, so the
+			// wire is always non-nil here.
+			pm.SetStickyEndpointResolver(c.LLMResolver)
 
 			// Dynamically register OAuth-backed LLM providers that have
 			// stored tokens but are not already in the static config.

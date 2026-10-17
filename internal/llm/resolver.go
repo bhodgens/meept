@@ -71,7 +71,39 @@ type Resolver struct {
 	// now is the injected clock (SHARED-CONVENTIONS §5) used by the
 	// endpoint/alias-block paths for lazy expiry checks. Nil = time.Now.
 	now func() time.Time
+
+	// sessionEndpoints maps sessionID -> EndpointKey(cfg) of the endpoint
+	// that last served that session successfully (session-affinity tree
+	// leaf 04, master Contract 4). It deliberately lives ON THE RESOLVER
+	// next to endpointBlocks: the same mutex guards both, and the
+	// resolve-time healthy-candidate gate needs isQuotaBlocked /
+	// isEndpointBlocked, which are r.mu-locked helpers.
+	//
+	// In-memory only, never persisted; LRU-bounded at
+	// stickySessionEndpointCap sessions. A success overwrites on every
+	// call (Contract 4); quota blocks, endpoint cooldowns, and refusal
+	// policy take precedence over the preference at resolve time.
+	//
+	// Consumers: RememberSessionEndpoint (writer, one reporting seam —
+	// ProviderManager.reportSessionEndpoint, provider_manager.go),
+	// PreferredEndpoint
+	// (resolve-time reader), SessionEndpoints (leaf-06 teardown
+	// coordinator's point-in-time snapshot).
+	sessionEndpoints map[string]string
+	// sessionEndpointOrder maps sessionID -> index into sessionEndpointLRU
+	// (-1 = evicted, slice compaction pending). The order slice is the LRU
+	// list: front = least recently used (evicted first at cap).
+	sessionEndpointOrder map[string]int
+	// sessionEndpointLRU holds session IDs in use recency order; see
+	// sessionEndpointOrder. Guarded by mu (all three fields together).
+	sessionEndpointLRU []string
 }
+
+// stickySessionEndpointCap bounds the per-session endpoint preference map
+// (master Contract 4: cap 1024 sessions). Exposed as a var, not a const,
+// ONLY for the eviction test to exercise the LRU path without allocating
+// 1024 sessions; production code must never reassign it.
+var stickySessionEndpointCap = 1024
 
 // NewResolver creates a new model resolver.
 func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
@@ -80,12 +112,14 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 	}
 
 	r := &Resolver{
-		config:         cfg,
-		allModels:      GetAllModels(cfg),
-		aliases:        make(map[string]*AliasEntry),
-		health:         make(map[string]*AliasHealth),
-		endpointBlocks: make(map[string]time.Time),
-		logger:         logger,
+		config:               cfg,
+		allModels:            GetAllModels(cfg),
+		aliases:              make(map[string]*AliasEntry),
+		health:               make(map[string]*AliasHealth),
+		endpointBlocks:       make(map[string]time.Time),
+		sessionEndpoints:     make(map[string]string),
+		sessionEndpointOrder: make(map[string]int),
+		logger:               logger,
 	}
 
 	// Resolve default and small models
@@ -488,7 +522,7 @@ func (r *Resolver) FindByProvider(providerID string) []*ModelConfig {
 // It returns the currently active model for the given alias.
 // When callerKey is non-empty and BalancedStickyRequests is true, the caller
 // is pinned to a single model within the alias.
-func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelConfig, error) {
+func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelConfig, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -503,8 +537,8 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 	// Sticky requests: resolve before alias-level rotation so a caller pinned
 	// to a failed model releases its pin and re-pins to a healthy model,
 	// while callers pinned to unaffected models keep their pins.
-	if alias.BalancedStickyRequests && callerKey != "" {
-		return r.resolveStickyCaller(alias, aliasName, health, callerKey, now), nil
+	if alias.BalancedStickyRequests && sessionID != "" {
+		return r.resolveStickyCaller(alias, aliasName, health, sessionID, now), nil
 	}
 
 	reverted := false
@@ -602,6 +636,69 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 		)
 	}
 
+	// Alias resolution order: default reversion / alias cooldown / quota
+	// blocks / endpoint blocks run above (block precedence UNCHANGED).
+	// BELOW here, after every filter, the winner is re-validated and only
+	// then is the session's sticky endpoint preference consulted — a
+	// remembered key belonging to a HEALTHY candidate of THIS alias moves
+	// to the front by OVERWRITING health.CurrentIndex with that
+	// candidate's index; an unknown or BLOCKED key (quota-blocked,
+	// endpoint-cooldown-blocked, or caught by the armed alias-level
+	// timeout block) degrades to the winner chosen above. A preference can
+	// never rescue a blocked winner: the health filters already ran on the
+	// chosen index, so an all-blocked alias errors out before the hook
+	// runs, and the hook's chosen index is re-validated against BOTH
+	// filters. This is a READ-side preference: no rotation cursor, no
+	// sticky pin, no shared-state mutation — resolution remains
+	// request-scoped (WithResolvedModel), the next resolve for any other
+	// session (or with no scope) is byte-identical to pre-leaf-04.
+	//
+	// Block precedence preserved exactly (Contract 4 / review checklist):
+	// quota blocks > endpoint blocks > alias blocks > stickiness.
+	if sessionID != "" {
+		// NOTE: r.mu is already held here — read the map through the
+		// locked helper, never through PreferredEndpoint (self-deadlock;
+		// the selflock analyzer class).
+		if preferredKey, ok := preferredEndpointLocked(r, sessionID); ok {
+			for idx, candidate := range alias.Models {
+				if EndpointKey(candidate) != preferredKey {
+					continue
+				}
+				// The remembered endpoint belongs to a candidate of THIS
+				// alias. Serve it FIRST only when it is healthy under the
+				// SAME filters that gated the rotation winner above (not
+				// quota-blocked, not endpoint-cooldown-blocked, not caught
+				// by the armed alias-level timeout block — all three via
+				// the same isQuotaBlocked / isEndpointBlocked predicates).
+				blocked := (r.quotaEnabled() && r.isQuotaBlocked(health, candidate)) ||
+					r.isEndpointBlocked(health, candidate)
+				if !blocked {
+					if idx != health.CurrentIndex {
+						r.logger.Debug("Sticky session endpoint preference moving candidate to front",
+							"alias", aliasName,
+							"session_id", sessionID,
+							"endpoint_key", preferredKey,
+							"provider", candidate.ProviderID,
+							"model", candidate.ModelID,
+							"prev_index", health.CurrentIndex,
+							"new_index", idx,
+						)
+						health.CurrentIndex = idx
+					}
+				}
+				// Either way the scan ends at the FIRST alias candidate
+				// carrying the key: models sharing an endpoint are
+				// interchangeable from the stickiness contract's point of
+				// view (EndpointKey is the identity), so the first match
+				// is deterministic and preserves rotation-order stability.
+				break
+			}
+			// No alias candidate carries the key: preference stale for
+			// this alias (key belongs to a different alias only, or the
+			// config changed) — the winner chosen above stands unchanged.
+		}
+	}
+
 	// Return the active model — but only if it survived BOTH filters. The
 	// quota pass and endpoint pass each rotate using their own predicate,
 	// so sequential passes can hand the cursor back and forth: with
@@ -659,6 +756,164 @@ func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelCo
 	}
 
 	return nil, fmt.Errorf("all models in alias %q exhausted", aliasName)
+}
+
+// RememberSessionEndpoint records the endpoint (host + credential
+// fingerprint, EndpointKey) that just served sessionID successfully.
+// CONTRACT (master.md Contract 4, leaf 04): overwrites on EVERY success;
+// no-op when sessionID == "". The single reporting seam lives in the agent
+// loop's chatWithFailoverRaw success path (internal/agent/loop.go — search
+// "leaf 04 reporting seam" there): it is the one choke point that sees both
+// the session scope (WithTaskScope sessionID) and the serving EndpointKey
+// (it holds the resolved *ModelConfig). Never call it from client-level
+// success paths — one seam, not two.
+//
+// Storage: in-memory LRU map capped at stickySessionEndpointCap (1024)
+// sessions, guarded by the Resolver mutex, never persisted; the
+// least-recently-used session is evicted at cap. The endpoint key is only
+// kept when it currently belongs to a HEALTHY candidate of SOME alias (not
+// quota-blocked, not endpoint-blocked, not caught by an armed alias-level
+// block) — an unknown or currently-blocked endpoint key is dropped rather
+// than remembered as a preference (Contract 4's precedence rule).
+func (r *Resolver) RememberSessionEndpoint(sessionID, endpointKey string) {
+	if r == nil || sessionID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Healthy-candidate gate: scan the aliases this key belongs to. The
+	// SAME EndpointKey can serve multiple aliases (medium / thinkhard share
+	// a host+credential); if ANY of them currently serves it healthy, the
+	// preference is legitimate — the resolve-time gate re-checks against
+	// the alias being resolved, which is the authoritative one.
+	for aliasName, alias := range r.aliases {
+		health := r.getOrCreateHealth(aliasName)
+		if r.rememberSessionEndpointIfHealthy(alias, health, endpointKey) {
+			r.rememberSessionEndpointLocked(sessionID, endpointKey)
+			r.logger.Debug("Remembered session endpoint preference",
+				"session_id", sessionID,
+				"endpoint_key", endpointKey,
+			)
+			return
+		}
+	}
+	// Unknown or fully-blocked endpoint key: drop rather than remember —
+	// stickiness must never resurrect a preference for an endpoint that
+	// cannot currently serve any candidate.
+	r.logger.Debug("Session endpoint preference not remembered (no healthy candidate carries the key)",
+		"session_id", sessionID,
+		"endpoint_key", endpointKey,
+	)
+}
+
+// PreferredEndpoint returns the remembered endpoint key for sessionID, if
+// any. Consulted BEFORE candidate ordering during alias resolution; the
+// resolve-time gate (stickyEndpointHook) re-validates health against the
+// alias actually being resolved, so a stale preference degrades to normal
+// ordering rather than pinning to a blocked endpoint.
+func (r *Resolver) PreferredEndpoint(sessionID string) (string, bool) {
+	if r == nil || sessionID == "" {
+		return "", false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return preferredEndpointLocked(r, sessionID)
+}
+
+// preferredEndpointLocked is the map read shared by PreferredEndpoint and
+// the in-resolve hook (which already holds r.mu and must not re-lock).
+func preferredEndpointLocked(r *Resolver, sessionID string) (string, bool) {
+	keyA, ok := r.sessionEndpoints[sessionID]
+	return keyA, ok
+}
+
+// rememberSessionEndpointIfHealthy reports whether keyA belongs to a
+// candidate of alias that would be served by normal ordering right now —
+// i.e. the candidate exists AND is neither quota-blocked, endpoint-blocked,
+// nor caught by an armed alias-level block (leaf 06 teardown consumers must
+// never receive keys stickiness itself would refuse to serve). Used by the
+// RememberSessionEndpoint LRU path; the resolve-time hook performs the same
+// checks independently. Callers must hold r.mu.
+func (r *Resolver) rememberSessionEndpointIfHealthy(alias *AliasEntry, health *AliasHealth, keyA string) bool {
+	for _, m := range alias.Models {
+		if EndpointKey(m) != keyA {
+			continue
+		}
+		if r.quotaEnabled() && r.isQuotaBlocked(health, m) {
+			return false
+		}
+		if r.isEndpointBlocked(health, m) {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+// rememberSessionEndpointLocked records a successful chat completion:
+// sessionID mapped to the serving endpoint key, LRU order refreshed,
+// evicting the least-recently-used session when the map is at capacity
+// (stickySessionEndpointCap). Overwrites refresh recency (Contract 4).
+// sessionID=="" must never reach this path (guarded by RememberSessionEndpoint;
+// a defensive no-op here as well). endpointKey=="" clears any stale entry —
+// an unknown serving endpoint must never masquerade as a preference.
+// Callers must hold r.mu.
+func (r *Resolver) rememberSessionEndpointLocked(sessionID, endpointKey string) {
+	if r.sessionEndpoints == nil {
+		r.sessionEndpoints = make(map[string]string, stickySessionEndpointCap)
+	}
+	// Remove any existing LRU slot for this session. order[s]==-1 marks a
+	// tombstoned (already-evicted) session; a fresh session has no entry at
+	// all — the two-value map read distinguishes them (AGENTS.md two-value
+	// rule; a plain lookup returns 0 for missing keys, which would slice
+	// LRU[0:0] and corrupt the front of the list). The idx bounds check
+	// self-heals any residual inconsistency (a session whose order entry
+	// points past a list that shrank underneath it, e.g. across a cap
+	// change): a stale slot is dropped and the session is re-appended
+	// fresh below, so the map and the list converge instead of panicking.
+	if idx, present := r.sessionEndpointOrder[sessionID]; present && idx != -1 && idx >= 0 && idx < len(r.sessionEndpointLRU) {
+		if r.sessionEndpointLRU[idx] == sessionID {
+			r.sessionEndpointLRU = append(r.sessionEndpointLRU[:idx], r.sessionEndpointLRU[idx+1:]...)
+		}
+	}
+	delete(r.sessionEndpointOrder, sessionID)
+	if endpointKey == "" {
+		delete(r.sessionEndpoints, sessionID)
+		return
+	}
+	r.sessionEndpoints[sessionID] = endpointKey
+	r.sessionEndpointOrder[sessionID] = len(r.sessionEndpointLRU)
+	r.sessionEndpointLRU = append(r.sessionEndpointLRU, sessionID)
+	if len(r.sessionEndpointLRU) > stickySessionEndpointCap {
+		oldest := r.sessionEndpointLRU[0]
+		r.sessionEndpointLRU = r.sessionEndpointLRU[1:]
+		delete(r.sessionEndpoints, oldest)
+		delete(r.sessionEndpointOrder, oldest)
+		r.logger.Debug("Evicted session endpoint preference (LRU cap)",
+			"sessions_stored", len(r.sessionEndpoints),
+		)
+	}
+}
+
+// SessionEndpoints returns a mutex-safe SNAPSHOT of the session → endpoint
+// map for the leaf-06 teardown coordinator (master Contract 6: "add a narrow
+// resolver accessor if needed, e.g. SessionEndpoints() map[string]string
+// snapshot, mutex-safe copy"). Callers get a copy; mutating it never touches
+// resolver state. The map is a point-in-time view — teardown reference
+// counting must tolerate concurrent successes adding entries. A nil receiver
+// returns nil (typed-nil setter rule, AGENTS.md).
+func (r *Resolver) SessionEndpoints() map[string]string {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]string, len(r.sessionEndpoints))
+	for sessionID, endpointKey := range r.sessionEndpoints {
+		out[sessionID] = endpointKey
+	}
+	return out
 }
 
 // inCooldown reports whether the alias-level cooldown is active at now.
