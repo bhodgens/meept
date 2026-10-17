@@ -55,6 +55,9 @@ type RLMAnalyzer struct {
 	emitter       *TelemetryEmitter // Phase 3: HALO-style self-tracing
 	runID         string            // Phase 3: telemetry run ID
 	knownTraceIDs []string          // loaded on first Analyze call
+	// scopeProvider, when set, supplies the owning loop's task/session
+	// scope for LLM calls (leaf 01 session-affinity).
+	scopeProvider chatScopeProvider
 }
 
 // NewRLMAnalyzer creates an analyzer for the given trace store.
@@ -330,7 +333,7 @@ func (a *RLMAnalyzer) invokeLLM(ctx context.Context, run *analyzerRun, prompt st
 		{Role: llm.RoleUser, Content: prompt},
 	}
 
-	result, err := a.llmClient.Chat(ctx, messages)
+	result, err := a.llmClient.Chat(ctx, messages, prependScope(a.scopeProvider, nil)...)
 
 	// Emit telemetry if enabled (fire-and-forget — never block main path).
 	if a.emitter != nil && a.emitter.IsEnabled() {

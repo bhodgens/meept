@@ -334,6 +334,10 @@ type LLMClassifier struct {
 	// reconfigures the client, and retries once.
 	resolver  *llm.Resolver // nil = no failover (legacy behavior)
 	aliasName string        // e.g. "classifier"; required when resolver != nil
+
+	// scopeProvider, when set, supplies the owning loop's task/session
+	// scope for classification LLM calls (leaf 01 session-affinity).
+	scopeProvider chatScopeProvider
 }
 
 // atomicBool is a sync-compatible boolean backed by atomic.Int32.
@@ -373,6 +377,10 @@ type LLMClassifierConfig struct {
 	// AliasName is the resolver alias used for failover (e.g. "classifier").
 	// Required when Resolver != nil; ignored otherwise.
 	AliasName string
+
+	// ScopeProvider, when set, supplies the owning loop's task/session
+	// scope for classification LLM calls (leaf 01 session-affinity).
+	ScopeProvider chatScopeProvider
 }
 
 func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifier {
@@ -399,6 +407,8 @@ func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifi
 
 		resolver:  cfg.Resolver,
 		aliasName: cfg.AliasName,
+
+		scopeProvider: cfg.ScopeProvider,
 
 		servedModel: resolvedModelID(cfg.ModelConfig),
 	}
@@ -496,9 +506,11 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	defer cancel()
 
 	resp, err := c.chatWithFailover(timeoutCtx, messages,
-		llm.WithMaxTokens(c.tokenCap),
-		llm.WithTemperature(0.1),
-		noThinkingOpt(),
+		prependScope(c.scopeProvider, []llm.ChatOption{
+			llm.WithMaxTokens(c.tokenCap),
+			llm.WithTemperature(0.1),
+			noThinkingOpt(),
+		})...
 	)
 	if err != nil {
 		// Cache the failure so future requests skip this endpoint.
@@ -611,8 +623,10 @@ func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemo
 	defer cancel()
 
 	resp, err := c.client.Chat(timeoutCtx, messages,
-		llm.WithMaxTokens(effectiveClassificationCap(c.modelConfig)),
-		llm.WithTemperature(0.1),
+		prependScope(c.scopeProvider, []llm.ChatOption{
+			llm.WithMaxTokens(effectiveClassificationCap(c.modelConfig)),
+			llm.WithTemperature(0.1),
+		})...
 	)
 	if err != nil {
 		c.unavailable.Store(true)

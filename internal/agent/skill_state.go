@@ -439,6 +439,15 @@ func NewSkillStateRuntime(loop *AgentLoop, cfg SkillStateConfig, logger *slog.Lo
 	return r
 }
 
+// loopScopeProvider returns the owning loop as the chat scope provider
+// (nil-safe: a runtime built with a nil loop has no scope).
+func (r *SkillStateRuntime) loopScopeProvider() chatScopeProvider {
+	if r == nil || r.loop == nil {
+		return nil
+	}
+	return r.loop
+}
+
 // WithToolRunner injects the tool execution seam.
 func (r *SkillStateRuntime) WithToolRunner(runner stateToolRunner) *SkillStateRuntime {
 	r.toolRunner = runner
@@ -499,6 +508,7 @@ func (r *SkillStateRuntime) Run(ctx context.Context, skill *skills.Skill, input,
 		}
 
 		var opts []llm.ChatOption
+		opts = prependScope(r.loopScopeProvider(), opts)
 		if llm.GBNFConstrainedEnabled() {
 			opts = append(opts, llm.WithRawGrammar(stateGBNFGrammar))
 		}

@@ -608,6 +608,9 @@ type SynthesizeTracesTool struct {
 		Error(string, ...any)
 	}
 	llmClient *llm.Client
+	// scopeProvider, when set, supplies the owning loop's task/session
+	// scope for the synthesis LLM call (leaf 01 session-affinity).
+	scopeProvider chatScopeProvider
 }
 
 // NewSynthesizeTracesTool creates the synthesis tool.
@@ -666,7 +669,7 @@ func (t *SynthesizeTracesTool) Invoke(ctx context.Context, args map[string]any) 
 			{Role: llm.RoleSystem, Content: "You are a trace analysis synthesizer. Summarize patterns, anomalies, and insights across multiple execution traces."},
 			{Role: llm.RoleUser, Content: fmt.Sprintf("%s\n\n%s", prompt, combined)},
 		}
-		result, err := t.llmClient.Chat(ctx, messages)
+		result, err := t.llmClient.Chat(ctx, messages, prependScope(t.scopeProvider, nil)...)
 		if err != nil {
 			return nil, fmt.Errorf("synthesis LLM call failed: %w", err)
 		}

@@ -1289,3 +1289,49 @@ func TestAgentLoop_SessionConversation(t *testing.T) {
 		t.Fatal("SessionConversation should return distinct conversations for distinct IDs")
 	}
 }
+
+// TestScopeOptionsPrependsTaskScope guards the scopeOptions helper (leaf 01
+// of docs/plans/20261016-session-affinity): it reads the ACCOUNTING fields
+// (currentTaskID + turnAccountingSessionID) under l.mu.RLock — never
+// currentSessionID (AUDIT FIX H11) — returns nil when both are empty, and
+// returns one WithTaskScope option otherwise whose application sets both
+// values on chatOptions.
+func TestScopeOptionsPrependsTaskScope(t *testing.T) {
+	t.Run("empty scope returns nil", func(t *testing.T) {
+		loop := NewAgentLoop("test-session", "/tmp")
+		require.NotNil(t, loop)
+		assert.Nil(t, loop.scopeOptions())
+	})
+
+	t.Run("set scope prepends WithTaskScope", func(t *testing.T) {
+		loop := NewAgentLoop("test-session", "/tmp")
+		require.NotNil(t, loop)
+		loop.mu.Lock()
+		loop.currentTaskID = "task-1"
+		loop.turnAccountingSessionID = "session-1"
+		loop.mu.Unlock()
+
+		opts := loop.scopeOptions()
+		require.Len(t, opts, 1)
+
+		// Applying the option must set both values on chatOptions. The
+		// struct is unexported in internal/llm, so assert behaviorally:
+		// run the option through a real Client whose per-session budget is
+		// already at its cap — the scope sessionID makes Chat trip the
+		// per-session limit (exceeded-before-send), proving the option
+		// carried session-1 into chatOpts.sessionID.
+		budget := llm.NewBudget(llm.BudgetConfig{PerSessionBudget: 10}, nil)
+		budget.RecordUsageWithScope(llm.TokenUsage{TotalTokens: 100}, "", "session-1")
+		client := llm.NewClient(&llm.ModelConfig{
+			BaseURL:   "http://scope-options.invalid", // must never be reached
+			ModelID:   "test-model",
+			MaxTokens: 10,
+		}, llm.WithBudget(budget))
+		resp, err := client.Chat(context.Background(),
+			[]llm.ChatMessage{{Role: llm.RoleUser, Content: "hi"}},
+			opts...)
+		assert.Nil(t, resp)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "per-session token budget exceeded")
+	})
+}

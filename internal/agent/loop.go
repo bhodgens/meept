@@ -3177,6 +3177,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		agentID := l.agentID
 		userMsg := userMessage
 		duration := time.Since(begin)
+		rc.SetScopeProvider(l)
 
 		// G118: goroutine intentionally outlives request context —
 		// background reflection persistence; loopCtx cancels when RunOnce
@@ -8705,6 +8706,23 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		WithReflectionCollector(l.reflectionCollector),
 		WithUsageTracker(l.usageTracker),
 		WithShadowManager(l.shadowMgr),
+		WithSkillStateRuntime(l.skillStateRuntime),
+
+		// --- Session-affinity scope threading (leaf 01): the reflection
+		// collector learns ITS owning loop so per-turn classifier calls
+		// carry that loop's scope. SkillStateRuntime already holds the
+		// loop pointer it was built with (NewSkillStateRuntime(l)), and
+		// clones re-wire it via WithSkillStateRuntime above; both read
+		// their serving loop's scope through loopScopeProvider/scopeOptions
+		// at call time. The intent analyzer and LLM classifier are wired
+		// daemon-side (dispatcher) where the loop does not yet exist —
+		// their scopeProvider stays nil there (call sites remain
+		// nil-safe), matching this leaf's no-placeholder-IDs contract.
+		func(l2 *AgentLoop) {
+			if rc := l.reflectionCollector; rc != nil {
+				rc.SetScopeProvider(l2)
+			}
+		},
 
 		// --- Cache + progress ---
 		WithResultCache(l.cache),

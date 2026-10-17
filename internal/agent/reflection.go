@@ -40,6 +40,9 @@ type ReflectionEngine struct {
 	llmClient  llm.Chatter
 	logger     *slog.Logger
 	editAvail  bool // Whether file edit tool is available (for testing)
+	// scopeProvider, when set, supplies the owning loop's task/session
+	// scope for the fix-request LLM call (leaf 01 session-affinity).
+	scopeProvider chatScopeProvider
 }
 
 // NewReflectionEngine creates a new reflection engine with default config
@@ -256,7 +259,7 @@ func (re *ReflectionEngine) requestFix(ctx context.Context, fixRequest string, f
 		{Role: llm.RoleUser, Content: prompt},
 	}
 
-	response, err := re.llmClient.Chat(ctx, messages)
+	response, err := re.llmClient.Chat(ctx, messages, prependScope(re.scopeProvider, nil)...)
 	if err != nil {
 		re.logger.Warn("LLM request failed", "error", err)
 		return nil, err

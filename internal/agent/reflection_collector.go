@@ -27,9 +27,23 @@ type ReflectionCollector struct {
 	queue       *proposalQueue
 	logger      *slog.Logger
 
+	// scopeProvider, when set, supplies the owning loop's task/session
+	// scope for the classifier LLM call (leaf 01 session-affinity).
+	scopeProvider chatScopeProvider
+
 	// classifierRunOnce, if non-nil, overrides the classifier call for tests.
 	// The test substitutes a function returning a canned LLM output string.
 	classifierRunOnce func(ctx context.Context, prompt, convID string) (string, error)
+}
+
+// SetScopeProvider wires the owning agent loop so per-turn classifier LLM
+// calls carry the loop's current task/session scope (leaf 01
+// session-affinity). Nil guard prevents typed-nil panic.
+func (rc *ReflectionCollector) SetScopeProvider(provider chatScopeProvider) {
+	if provider == nil {
+		return
+	}
+	rc.scopeProvider = provider
 }
 
 // NewReflectionCollector constructs a collector wired to the given classifier,
@@ -88,10 +102,10 @@ func (rc *ReflectionCollector) ReflectTurn(ctx context.Context, traj ReflectionT
 		}
 	} else if rc.classifier != nil {
 		// Call classifier via the Chat interface.
-		opts := []llm.ChatOption{
+		opts := prependScope(rc.scopeProvider, []llm.ChatOption{
 			llm.WithMaxTokens(500),
 			llm.WithTemperature(0.2),
-		}
+		})
 		messages := []llm.ChatMessage{
 			{Role: llm.RoleSystem, Content: "You are a self-reflection assistant. Output ONLY valid JSON."},
 			{Role: llm.RoleUser, Content: prompt},

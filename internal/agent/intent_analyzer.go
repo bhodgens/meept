@@ -50,6 +50,10 @@ type IntentAnalyzer struct {
 	// (issue #30). Nil is allowed — attribution is skipped.
 	modelConfig *llm.ModelConfig
 
+	// scopeProvider, when set, supplies the owning loop's task/session
+	// scope for LLM calls (leaf 01 session-affinity).
+	scopeProvider chatScopeProvider
+
 	// servedModel is the resolved "provider/model" of the endpoint the
 	// analyzer is currently configured to serve from (provenance, leaf 01
 	// of classifier-observability). Initialized from the constructor's
@@ -231,11 +235,12 @@ func (ia *IntentAnalyzer) AnalyzeTrueIntent(ctx context.Context, input string, s
 
 	messages := ia.buildAnalysisMessages(input, sessionContext)
 
-	resp, err := ia.chatWithFailover(ctx, messages,
+	opts := prependScope(ia.scopeProvider, []llm.ChatOption{
 		llm.WithMaxTokens(ia.tokenCap),
 		llm.WithTemperature(0.2),
 		noThinkingOpt(),
-	)
+	})
+	resp, err := ia.chatWithFailover(ctx, messages, opts...)
 	if err != nil {
 		ia.logger.Warn("intent analysis failed", "error", err)
 		return nil, fmt.Errorf("intent analysis failed: %w", err)
