@@ -33,6 +33,12 @@ type SQLiteStore struct {
 	embeddingDim       int
 	busyTimeoutMs      int
 	designationHistory DesignationHistoryStore
+
+	// lifecycleHook is the Contract 5 teardown notification hook. Access
+	// is guarded by mu and fire points collect under the lock, then invoke
+	// outside it (see storeLifecycleMixin in lifecycle.go).
+	storeLifecycleMixin
+
 	// turnGossip, when set, receives a PublishTurn call for each message
 	// written by SaveMessages. The publisher is responsible for any
 	// cluster broadcast; the session store's contract is purely local.
@@ -755,24 +761,31 @@ func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 // Delete removes a session by ID.
 func (s *SQLiteStore) Delete(id string) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	result, err := s.db.Exec("DELETE FROM sessions WHERE id = ?", id) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
+		s.mu.Unlock()
 		s.logger.Error("Failed to delete session", "id", id, "error", err)
 		return false
 	}
 
 	rows, err := result.RowsAffected()
 	if err != nil {
+		s.mu.Unlock()
 		s.logger.Warn("Failed to read RowsAffected after Delete", "id", id, "error", err)
 		return false
 	}
-	if rows > 0 {
-		s.logger.Info("Session deleted", "id", id)
-		return true
+	if rows == 0 {
+		s.mu.Unlock()
+		return false
 	}
-	return false
+	// Collect the hook fire under the lock; invoke AFTER unlock (repo
+	// invariant: never hold a mutex across the hook call).
+	fires := s.collectLocked(s.logger, SessionEventDelete, id)
+	s.mu.Unlock()
+
+	s.logger.Info("Session deleted", "id", id)
+	fireLifecycle(s.logger, fires...)
+	return true
 }
 
 // Attach adds a client to a session.
@@ -1122,19 +1135,30 @@ func (s *SQLiteStore) UpdateName(sessionID, name string) error {
 // Archive sets the archived flag on a session. Pass archived=true to archive,
 // false to unarchive. Returns an error if the session doesn't exist or the
 // update fails. Error message contains "not found" when no row matches.
+// Archiving (teardown) fires the SessionLifecycleHook with SessionEventArchive
+// outside the store lock; unarchiving does not fire the hook.
 func (s *SQLiteStore) Archive(sessionID string, archived bool) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	result, err := s.db.Exec("UPDATE sessions SET archived = ? WHERE id = ?", archived, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("failed to update archived flag: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		s.mu.Unlock()
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
+	// Collect under the lock; fire after unlock.
+	var fires []lifecycleFire
+	if archived {
+		fires = s.collectLocked(s.logger, SessionEventArchive, sessionID)
+	}
+	s.mu.Unlock()
+
+	fireLifecycle(s.logger, fires...)
 	return nil
 }
 

@@ -119,6 +119,12 @@ type Store interface {
 	// SetGoalID persists the explicitly bound goal on a session
 	// (goal-completion leaf 03, C6 branch 1). An empty goalID clears it.
 	SetGoalID(sessionID, goalID string) error
+	// SetLifecycleHook wires the session teardown notification hook
+	// (session-affinity plan Contract 5). The hook fires on every
+	// archive/delete path and from the idle reaper. Typed-nil safe:
+	// SetLifecycleHook(nil) and SetLifecycleHook((*T)(nil)) are no-ops.
+	// Hook failures never propagate to store callers.
+	SetLifecycleHook(hook SessionLifecycleHook)
 	// SetEmployeeID persists the explicitly bound employee on a session
 	// (goal-completion follow-up #5). An empty employeeID clears it.
 	SetEmployeeID(sessionID, employeeID string) error

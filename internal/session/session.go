@@ -256,6 +256,11 @@ type MemoryStore struct {
 	sessions map[string]*Session
 	messages map[string][]Message // sessionID -> messages
 	logger   *slog.Logger
+
+	// lifecycleHook is the Contract 5 teardown notification hook. Access
+	// is guarded by mu and fire points collect under the lock, then invoke
+	// outside it (see storeLifecycleMixin in lifecycle.go).
+	storeLifecycleMixin
 }
 
 // NewMemoryStore creates a new in-memory session store.
@@ -432,15 +437,20 @@ func (s *MemoryStore) GetForViewer(_ context.Context, viewer *Viewer, id string)
 // Delete removes a session.
 func (s *MemoryStore) Delete(id string) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if _, exists := s.sessions[id]; !exists {
+		s.mu.Unlock()
 		return false
 	}
 
 	delete(s.sessions, id)
 	delete(s.messages, id)
+	// Collect the hook fire under the lock; invoke AFTER unlock (repo
+	// invariant: never hold a mutex across the hook call).
+	fires := s.collectLocked(s.logger, SessionEventDelete, id)
+	s.mu.Unlock()
+
 	s.logger.Info("Session deleted", "id", id)
+	fireLifecycle(s.logger, fires...)
 	return true
 }
 
@@ -626,15 +636,25 @@ func (s *MemoryStore) UpdateName(sessionID, name string) error {
 
 // Archive sets the archived flag on a session. Pass archived=true to archive,
 // false to unarchive. Returns an error if the session doesn't exist.
+// Archiving (teardown) fires the SessionLifecycleHook with SessionEventArchive
+// outside the store lock; unarchiving does not fire the hook.
 func (s *MemoryStore) Archive(sessionID string, archived bool) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	session, exists := s.sessions[sessionID]
 	if !exists {
+		s.mu.Unlock()
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	session.Archived = archived
+	// Collect under the lock; fire after unlock.
+	var fires []lifecycleFire
+	if archived {
+		fires = s.collectLocked(s.logger, SessionEventArchive, sessionID)
+	}
+	s.mu.Unlock()
+
+	fireLifecycle(s.logger, fires...)
 	return nil
 }
 
