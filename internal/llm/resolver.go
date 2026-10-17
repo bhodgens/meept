@@ -916,6 +916,28 @@ func (r *Resolver) SessionEndpoints() map[string]string {
 	return out
 }
 
+// ForgetSessionEndpoint drops the sticky preference for one session
+// (session-affinity integration fix: the PM failure path calls this when
+// the remembered endpoint actually FAILED, so the next resolve cannot
+// re-pull the dead endpoint to the front and ping-pong on it — rotation
+// must make progress first; the memory re-arms on the next success via
+// RememberSessionEndpoint, which also heals teardown refcounting). No-op
+// on a nil receiver or empty session; an unknown session is already
+// forgotten. Calls the LOCKED helper directly: the public path's
+// healthy-candidate gate would reject an empty key (no candidate carries
+// it) and fall through to "not remembered" without ever clearing. The
+// helper's empty-key branch performs the tombstone-correct LRU slot
+// removal (two-value order read + bounds self-heal) — a second
+// hand-rolled removal here would diverge from that logic.
+func (r *Resolver) ForgetSessionEndpoint(sessionID string) {
+	if r == nil || sessionID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rememberSessionEndpointLocked(sessionID, "")
+}
+
 // inCooldown reports whether the alias-level cooldown is active at now.
 // Callers must hold Resolver.mu.
 func (h *AliasHealth) inCooldown(now time.Time) bool {

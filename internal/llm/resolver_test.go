@@ -796,3 +796,42 @@ func TestStickyEndpointPreference(t *testing.T) {
 	}
 }
 
+
+// TestForgetSessionEndpoint pins the sticky-failure fix (session-affinity
+// integration): a remembered endpoint must be droppable so rotation makes
+// progress instead of ping-ponging on a dead endpoint, and the drop must
+// go through the tombstone-correct LRU removal (no dangling order entry).
+func TestForgetSessionEndpoint(t *testing.T) {
+	r := newStickyPrefResolver(t)
+
+	gptA := r.aliases["medium"].Models[0]
+	keyA := EndpointKey(gptA)
+
+	r.RememberSessionEndpoint("s1", keyA)
+	if _, ok := r.PreferredEndpoint("s1"); !ok {
+		t.Fatal("precondition: preference must be set")
+	}
+
+	// Forget: preference gone, LRU slot removed, map stays consistent.
+	r.ForgetSessionEndpoint("s1")
+	if _, ok := r.PreferredEndpoint("s1"); ok {
+		t.Fatal("forgotten session must have no preferred endpoint")
+	}
+	if len(r.sessionEndpointOrder) != len(r.sessionEndpoints) {
+		t.Fatalf("order/map divergence after forget: order=%d map=%d",
+			len(r.sessionEndpointOrder), len(r.sessionEndpoints))
+	}
+
+	// Re-arm on the next success (rotation heals the memory).
+	r.RememberSessionEndpoint("s1", keyA)
+	got, ok := r.PreferredEndpoint("s1")
+	if !ok || got != keyA {
+		t.Fatalf("preference must re-arm after forget: ok=%v key=%q", ok, got)
+	}
+
+	// Nil receiver and empty/unknown session are no-ops.
+	var nilR *Resolver
+	nilR.ForgetSessionEndpoint("s1")
+	r.ForgetSessionEndpoint("")
+	r.ForgetSessionEndpoint("never-remembered")
+}

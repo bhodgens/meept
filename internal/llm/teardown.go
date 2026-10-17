@@ -21,6 +21,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -83,25 +84,61 @@ type endpointBaseURLer interface {
 // TeardownBaseURL resolves a runtime endpoint key to its base URL via the
 // provider registered against it (Contract 6's teardown accessor). The
 // lookup mirrors EndpointBaseURL but keys on the ENDPOINT (the teardown
-// coordinator only ever sees keys, not provider ids). A nil manager or an
-// unknown endpoint returns false: a down or unregistered runtime has no
-// cache worth erasing, and the erase must never guess a base URL.
+// coordinator only ever sees keys, not provider ids).
+//
+// The coordinator's keys come from the Resolver snapshot, whose shape is
+// EndpointKey(cfg) = "host|credential" (models.go) — NOT the runtime key
+// "llama-cpp:<host>:<port>" this map is indexed by. Two shapes, one host:
+// so resolution falls back to a HOST match over registered endpoints. The
+// fallback is safe for the teardown use: erasing the KV cache of the one
+// llama-server listening on that host is the intent, host:port collisions
+// between two llama runtimes on one host do not occur in practice (each
+// runtime binds a distinct port; the host|credential key carries no port,
+// so port disambiguation is impossible from the snapshot side anyway).
+// A nil manager or an unknown endpoint returns false: a down or
+// unregistered runtime has no cache worth erasing, and the erase must
+// never guess a base URL.
 func (m *RuntimeManager) TeardownBaseURL(endpointKey string) (string, bool) {
 	if m == nil || endpointKey == "" {
 		return "", false
 	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Exact runtime-key match first (test stubs and any future caller
+	// that stores runtime-shaped keys).
 	providerID := m.endpointProviderLocked(endpointKey)
 	ep, ok := m.endpoints[endpointKey]
-	var baseURL string
-	if ok && ep != nil && ep.hc != nil {
-		baseURL = ep.hc.baseURL
+	if ok && ep != nil && ep.hc != nil && providerID != endpointKey {
+		return ep.hc.baseURL, ep.hc.baseURL != ""
 	}
-	m.mu.Unlock()
-	if providerID == "" || baseURL == "" {
+	// Host fallback: EndpointKey(cfg) snapshot keys are "host|credential".
+	// Extract the host portion and match it against registered endpoints'
+	// health-checker base URLs.
+	host := endpointKey
+	if i := strings.IndexByte(host, '|'); i >= 0 {
+		host = host[:i]
+	}
+	if host == "" {
 		return "", false
 	}
-	return baseURL, true
+	// Deterministic choice when several endpoints share the host: sort
+	// keys. A host with multiple llama runtimes cannot be disambiguated
+	// from a port-less key; the first registered wins and the erase still
+	// targets a live runtime on that host.
+	keys := make([]string, 0, len(m.endpoints))
+	for k, ep := range m.endpoints {
+		if ep == nil || ep.hc == nil || ep.hc.baseURL == "" {
+			continue
+		}
+		if eHost, _ := hostPortFromBaseURL(ep.hc.baseURL); eHost == host {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return "", false
+	}
+	sort.Strings(keys)
+	return m.endpoints[keys[0]].hc.baseURL, true
 }
 
 // LlamaServerTeardown erases the KV cache of a local llama-server endpoint
