@@ -131,6 +131,12 @@ type Client struct {
 	// pacer is the adaptive 429 pacer (tree 02 leaf 05, D15). Nil =
 	// feature off, zero overhead (typed-nil guard in SetPacer).
 	pacer *AdaptivePacer
+
+	// sessionAffinity is the injected llm.session_affinity config
+	// (session-affinity tree leaf 02). Nil = header off (SetSession-
+	// AffinityConfig guard; the daemon wires DefaultConfig() defaults).
+	// Read by applyAffinityHeader on both request-builder paths.
+	sessionAffinity *AffinityConfig
 }
 
 // DefaultQuotaMaxWait mirrors config.DefaultQuotaRetryMaxWait without
@@ -366,6 +372,63 @@ func (c *Client) applyExtraHeaders(req *http.Request, cfg *ModelConfig, sessionI
 		}
 		req.Header.Set(k, v)
 	}
+}
+
+// AffinityConfig mirrors the canonical config.SessionAffinityConfig
+// (llm.session_affinity knobs, session-affinity tree leaf 02 Contract 1).
+// Defined locally to avoid the internal/llm -> internal/config import
+// cycle (internal/config transitively imports internal/llm); the canonical
+// type satisfies this shape 1:1 and the daemon maps onto it at the wiring
+// point, mirroring SetFailurePolicyConfig (failure_policy.go precedent).
+// IdleRelease and TeardownTimeout are carried for leaf 06's teardown
+// adapters; the OpenAI-compatible client itself reads only Enabled+Header.
+type AffinityConfig struct {
+	// Enabled sends session headers. Default true (daemon wiring).
+	Enabled bool
+	// Header is the OpenAI-compatible affinity header name. Default
+	// "session_id"; empty disables the header.
+	Header string
+	// AnthropicHeader is the Anthropic affinity header name (leaf 03).
+	AnthropicHeader string
+	// IdleRelease is the no-LLM-call window before teardown fires (leaf 06).
+	IdleRelease time.Duration
+	// TeardownTimeout is the per-teardown-call HTTP timeout (leaf 06).
+	TeardownTimeout time.Duration
+}
+
+// SetSessionAffinityConfig injects the resolved llm.session_affinity config.
+// Nil-receiver safe; a nil cfg disables the affinity header (the daemon
+// wires DefaultConfig() defaults, so production keeps the header on).
+// Nil-safe on the fields too: an empty Header or an unset session scope
+// simply omits the header (applyAffinityHeader).
+func (c *Client) SetSessionAffinityConfig(cfg *AffinityConfig) {
+	if c == nil {
+		return
+	}
+	c.sessionAffinity = cfg
+}
+
+// applyAffinityHeader sets the DEFAULT session affinity header on req when
+// enabled, the header name is configured, and the request carries a
+// non-empty session scope. Runs AFTER applyExtraHeaders and checks
+// req.Header.Get(key) == "" first, so an explicit extra_headers entry with
+// the same key always wins (leaf 02 Contract 3 precedence; this is the ONE
+// shared implementation for the streaming and non-streaming request
+// builders — both call sites sit directly after applyExtraHeaders).
+// The ${session_id} sentinel substitution in applyExtraHeaders is
+// unchanged and independent of this path. Empty sessionID => header
+// omitted, never sent empty.
+func (c *Client) applyAffinityHeader(req *http.Request, sessionID string) {
+	if c == nil || c.sessionAffinity == nil || !c.sessionAffinity.Enabled {
+		return
+	}
+	if c.sessionAffinity.Header == "" || sessionID == "" {
+		return
+	}
+	if req.Header.Get(c.sessionAffinity.Header) != "" {
+		return
+	}
+	req.Header.Set(c.sessionAffinity.Header, sessionID)
 }
 
 // WithUploadStore sets the upload store for resolving image file references.
@@ -1653,8 +1716,11 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 	// Apply extra headers (e.g. X-GitHub-Api-Version for GitHub Models).
 	// Also substitutes the "${session_id}" sentinel from ModelConfig
 	// extras so config-driven per-session headers (x-opencode-session)
-	// work on the non-streaming path.
+	// work on the non-streaming path. Then the default session affinity
+	// header (llm.session_affinity) — after extras, so an explicit
+	// extra_headers entry with the same key wins.
 	c.applyExtraHeaders(req, cfg, sessionID)
+	c.applyAffinityHeader(req, sessionID)
 
 	// Time the HTTP request
 	start := time.Now()
@@ -2473,8 +2539,11 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	// Apply extra headers (e.g. X-GitHub-Api-Version for GitHub Models).
 	// Also substitutes the "${session_id}" sentinel from ModelConfig
 	// extras so config-driven per-session headers (x-opencode-session)
-	// work on the streaming path.
+	// work on the streaming path. Then the default session affinity
+	// header (llm.session_affinity) — after extras, so an explicit
+	// extra_headers entry with the same key wins.
 	c.applyExtraHeaders(req, cfg, sessionID)
+	c.applyAffinityHeader(req, sessionID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

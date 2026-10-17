@@ -201,6 +201,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SessionConversation\(id string\) \*Conversation](<#AgentLoop.SessionConversation>)
   - [func \(l \*AgentLoop\) SetActive\(v bool\)](<#AgentLoop.SetActive>)
   - [func \(l \*AgentLoop\) SetAutonomous\(autonomous bool\)](<#AgentLoop.SetAutonomous>)
+  - [func \(l \*AgentLoop\) SetBeforeToolCallHook\(name string, priority HookPriority, hook BeforeToolCallHook\)](<#AgentLoop.SetBeforeToolCallHook>)
   - [func \(l \*AgentLoop\) SetBranchManager\(mgr any\)](<#AgentLoop.SetBranchManager>)
   - [func \(l \*AgentLoop\) SetBudgetConfig\(total int, opts BudgetHierarchyOptions\)](<#AgentLoop.SetBudgetConfig>)
   - [func \(l \*AgentLoop\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentLoop.SetCapabilityIndex>)
@@ -1282,6 +1283,7 @@ Package agent provides the agent loop and related components.
   - [func \(rc \*ReflectionCollector\) DrainPendingProposals\(\) \(\[\]ReflectionProposal, error\)](<#ReflectionCollector.DrainPendingProposals>)
   - [func \(rc \*ReflectionCollector\) ReflectInactiveSessions\(ctx context.Context\)](<#ReflectionCollector.ReflectInactiveSessions>)
   - [func \(rc \*ReflectionCollector\) ReflectTurn\(ctx context.Context, traj ReflectionTrajectory\) error](<#ReflectionCollector.ReflectTurn>)
+  - [func \(rc \*ReflectionCollector\) SetScopeProvider\(provider chatScopeProvider\)](<#ReflectionCollector.SetScopeProvider>)
 - [type ReflectionConfig](<#ReflectionConfig>)
   - [func DefaultReflectionConfig\(\) ReflectionConfig](<#DefaultReflectionConfig>)
 - [type ReflectionEngine](<#ReflectionEngine>)
@@ -1289,6 +1291,7 @@ Package agent provides the agent loop and related components.
   - [func NewReflectionEngineWithConfig\(logger \*slog.Logger, linter \*lint.Registry, testRunner \*lint.TestRunner, llmClient llm.Chatter, config ReflectionConfig\) \*ReflectionEngine](<#NewReflectionEngineWithConfig>)
   - [func \(re \*ReflectionEngine\) RunReflection\(ctx context.Context, editedFiles \[\]string\) \(\*ReflectionResult, error\)](<#ReflectionEngine.RunReflection>)
   - [func \(re \*ReflectionEngine\) SetEditAvailability\(avail bool\)](<#ReflectionEngine.SetEditAvailability>)
+  - [func \(re \*ReflectionEngine\) SetScopeProvider\(provider chatScopeProvider\)](<#ReflectionEngine.SetScopeProvider>)
 - [type ReflectionProposal](<#ReflectionProposal>)
 - [type ReflectionResult](<#ReflectionResult>)
 - [type ReflectionTrajectory](<#ReflectionTrajectory>)
@@ -1627,13 +1630,14 @@ Package agent provides the agent loop and related components.
   - [func \(to \*TeamOrchestrator\) Name\(\) string](<#TeamOrchestrator.Name>)
   - [func \(to \*TeamOrchestrator\) ReceiveResult\(ctx context.Context, sessionID string, result TeamMemberResultSubmission\) error](<#TeamOrchestrator.ReceiveResult>)
   - [func \(to \*TeamOrchestrator\) Start\(ctx context.Context\) error](<#TeamOrchestrator.Start>)
-  - [func \(to \*TeamOrchestrator\) Status\(ctx context.Context, sessionID string\) \(\*TeamSessionState, error\)](<#TeamOrchestrator.Status>)
+  - [func \(to \*TeamOrchestrator\) Status\(ctx context.Context, sessionID string\) \(\*TeamSessionStateSnapshot, error\)](<#TeamOrchestrator.Status>)
   - [func \(to \*TeamOrchestrator\) Stop\(ctx context.Context\) error](<#TeamOrchestrator.Stop>)
 - [type TeamOrchestratorDeps](<#TeamOrchestratorDeps>)
 - [type TeamPreset](<#TeamPreset>)
   - [func GetTeamPreset\(name string\) \(\*TeamPreset, error\)](<#GetTeamPreset>)
   - [func ListTeamPresets\(\) \[\]TeamPreset](<#ListTeamPresets>)
 - [type TeamSessionState](<#TeamSessionState>)
+- [type TeamSessionStateSnapshot](<#TeamSessionStateSnapshot>)
 - [type TeamStartRequest](<#TeamStartRequest>)
 - [type TeamStatus](<#TeamStatus>)
 - [type TelemetryEmitter](<#TelemetryEmitter>)
@@ -3756,6 +3760,13 @@ SetActive atomically sets the has\-pending\-work flag.
 
 SetAutonomous marks the loop for AUTONOMOUS \(job\-driven, headless\) execution. Staging tools consult the marker via the execution context \(executeToolCalls injects it\) and write directly instead of staging a pending change that no later turn can accept. Guarded by mu.
 
+<a name="AgentLoop.SetBeforeToolCallHook"></a>
+### func \(\*AgentLoop\) SetBeforeToolCallHook
+
+	func (l *AgentLoop) SetBeforeToolCallHook(name string, priority HookPriority, hook BeforeToolCallHook)
+
+SetBeforeToolCallHook registers a BeforeToolCallHook on the loop's hook registry under the given name \(decision\-model leaf 03 wiring seam; follows the nil\-guarded Set\* injection pattern\). Nil\-safe on both the loop and the registry and the hook: any nil is a silent no\-op, so wiring the gate on a loop without a registry \(or with the feature disabled\) never panics and never alters behavior.
+
 <a name="AgentLoop.SetBranchManager"></a>
 ### func \(\*AgentLoop\) SetBranchManager
 
@@ -5281,6 +5292,12 @@ BlockResult is returned by BeforeToolCallHook.
 	type BlockResult struct {
 	    Block  bool
 	    Reason string // human-readable reason if blocked
+	    // HardError marks a SECURITY deny (injection, taint violation,
+	    // scanner block): the tool call is refused, not deferred. The loop
+	    // surfaces it as a failed execution result instead of a confirmation
+	    // prompt — re-invoking with confirmed=true must NEVER bypass a
+	    // security refusal. Decision-gate denies stay soft (they ASK).
+	    HardError bool
 	}
 
 <a name="BudgetAllocation"></a>
@@ -6625,6 +6642,13 @@ CompactionAgentConfig holds per\-agent compaction settings.
 	    // SpillEnabled turns on tool-output spilling in pruneToolOutputs
 	    // (compaction.spill_enabled; opt-in, default false).
 	    SpillEnabled bool
+	    // DecisionEnabled opts the decision-model compaction lane in
+	    // (compaction.decision_enabled; opt-in, default false — the legacy
+	    // summarizer stays the default when no decision model is defined).
+	    DecisionEnabled bool
+	    // DecisionKeepBar is the score (0-4) an entry must reach to survive
+	    // decision-model compaction (compaction.decision_keep_bar, default 2).
+	    DecisionKeepBar int
 	}
 
 <a name="CompletionStatus"></a>
@@ -8370,6 +8394,7 @@ EscalationLevel tracks escalation history for a task.
 	    FirstFailure string    `json:"first_failure,omitempty"`
 	    ReplanResult string    `json:"replan_result,omitempty"`
 	    Timestamp    time.Time `json:"timestamp"`
+	    Seq          uint64    `json:"seq"` // Monotonic ordering tiebreaker (S1-8)
 	}
 
 <a name="EscalationManager"></a>
@@ -10190,6 +10215,10 @@ UnmarkUnavailable clears the unavailable flag, allowing immediate retries.
 	    // AliasName is the resolver alias used for failover (e.g. "classifier").
 	    // Required when Resolver != nil; ignored otherwise.
 	    AliasName string
+	
+	    // ScopeProvider, when set, supplies the owning loop's task/session
+	    // scope for classification LLM calls (leaf 01 session-affinity).
+	    ScopeProvider chatScopeProvider
 	}
 
 <a name="LLMMessage"></a>
@@ -13709,6 +13738,13 @@ ReflectInactiveSessions is the periodic\-timer entry point. For MVP it is a stub
 
 ReflectTurn runs per\-turn reflection. Builds a prompt from the trajectory, calls the classifier, validates confidence, and queues proposals.
 
+<a name="ReflectionCollector.SetScopeProvider"></a>
+### func \(\*ReflectionCollector\) SetScopeProvider
+
+	func (rc *ReflectionCollector) SetScopeProvider(provider chatScopeProvider)
+
+SetScopeProvider wires the owning agent loop so per\-turn classifier LLM calls carry the loop's current task/session scope \(leaf 01 session\-affinity\). Nil guard prevents typed\-nil panic.
+
 <a name="ReflectionConfig"></a>
 ## type ReflectionConfig
 
@@ -13765,6 +13801,13 @@ RunReflection executes a single\-pass reflection check after code edits. Note: T
 	func (re *ReflectionEngine) SetEditAvailability(avail bool)
 
 SetEditAvailability sets whether file edit is available
+
+<a name="ReflectionEngine.SetScopeProvider"></a>
+### func \(\*ReflectionEngine\) SetScopeProvider
+
+	func (re *ReflectionEngine) SetScopeProvider(provider chatScopeProvider)
+
+SetScopeProvider wires the owning agent loop so fix\-request LLM calls carry the loop's current task/session scope \(leaf 01 session\-affinity\). Nil guard prevents typed\-nil panic.
 
 <a name="ReflectionProposal"></a>
 ## type ReflectionProposal
@@ -15518,7 +15561,7 @@ GetDominantIntent returns the most frequent intent in session.
 
 	func (t *SessionTracker) GetIdleSessions(idleDuration time.Duration) []*TrackerSessionState
 
-GetIdleSessions returns sessions that have been idle for the specified duration.
+GetIdleSessions returns deep copies of sessions that have been idle for the specified duration. S1\-9: Previously returned live pointers; now returns snapshots so callers can safely iterate without racing mutations.
 
 <a name="SessionTracker.GetIntentCounts"></a>
 ### func \(\*SessionTracker\) GetIntentCounts
@@ -15546,7 +15589,7 @@ GetLastIntent returns a copy of the most recent intent.
 
 	func (t *SessionTracker) GetSession(sessionID string) *TrackerSessionState
 
-GetSession returns session state \(read\-only lookup, no cleanup\).
+GetSession returns a deep copy of session state \(read\-only lookup, no cleanup\). S1\-5: Previously returned a live pointer, allowing callers to race with RecordIntent/RecordMetrics mutations. Now returns a snapshot copy.
 
 <a name="SessionTracker.PersistIdleSessions"></a>
 ### func \(\*SessionTracker\) PersistIdleSessions
@@ -16990,9 +17033,9 @@ Start subscribes to team.start and begins processing team requests.
 <a name="TeamOrchestrator.Status"></a>
 ### func \(\*TeamOrchestrator\) Status
 
-	func (to *TeamOrchestrator) Status(ctx context.Context, sessionID string) (*TeamSessionState, error)
+	func (to *TeamOrchestrator) Status(ctx context.Context, sessionID string) (*TeamSessionStateSnapshot, error)
 
-Status returns the current status of a team session.
+Status returns a snapshot of the current status of a team session. S1\-10: Previously returned a live pointer whose MemberResults map could be mutated by ReceiveResult during caller iteration. Now returns a deep copy \(TeamSessionStateSnapshot\) with no mutex.
 
 <a name="TeamOrchestrator.Stop"></a>
 ### func \(\*TeamOrchestrator\) Stop
@@ -17062,6 +17105,22 @@ TeamSessionState holds the runtime state of an active team session. All fields m
 	    FinalOutput   string                       `json:"final_output,omitempty"`
 	    StartTime     time.Time                    `json:"start_time"`
 	    // contains filtered or unexported fields
+	}
+
+<a name="TeamSessionStateSnapshot"></a>
+## type TeamSessionStateSnapshot
+
+TeamSessionStateSnapshot is a mutex\-free deep copy of TeamSessionState, safe for callers to iterate without racing concurrent writes \(S1\-10\).
+
+	type TeamSessionStateSnapshot struct {
+	    SessionID     string                       `json:"session_id"`
+	    TaskID        string                       `json:"task_id"`
+	    LeadAgent     string                       `json:"lead_agent"`
+	    Roster        []string                     `json:"roster"`
+	    Phase         string                       `json:"phase"`
+	    MemberResults map[string]*TeamMemberResult `json:"member_results,omitempty"`
+	    FinalOutput   string                       `json:"final_output,omitempty"`
+	    StartTime     time.Time                    `json:"start_time"`
 	}
 
 <a name="TeamStartRequest"></a>

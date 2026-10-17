@@ -123,6 +123,19 @@
     //   "default_estimate": "1h",
     //   "defer_check_interval": "10m"
     // },
+    // Session affinity - send a stable per-session header on every LLM
+    // request so affinity-aware backends (llama-server) can pin a session
+    // to one GPU/replica. Default ON; unknown headers are ignored by
+    // gateways that do not support them. An empty "header" disables the
+    // OpenAI-compatible affinity header; "anthropic_header" is consumed
+    // by the Anthropic client.
+    // "session_affinity": {
+    //   "enabled": true,
+    //   "header": "session_id",
+    //   "anthropic_header": "session_id",
+    //   "idle_release": "30m",
+    //   "teardown_timeout": "5s"
+    // },
     // HTTP-level metrics collection
     "metrics": {
       "enabled": true,

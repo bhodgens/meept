@@ -119,6 +119,11 @@ type ProviderManager struct {
 	// clients keep their package defaults (30s throttle / 1h floor / 24h
 	// horizon). Guarded by mu.
 	failurePolicy *FailurePolicyConfig
+	// sessionAffinity is the resolved llm.session_affinity config
+	// propagated onto OpenAI-compatible Client chatters
+	// (SetSessionAffinityConfig, session-affinity tree leaf 02). Nil =
+	// header off. Guarded by mu.
+	sessionAffinity *AffinityConfig
 
 	// Circuit breaker state
 	lastHealthCheck time.Time
@@ -156,6 +161,25 @@ func (pm *ProviderManager) SetFailurePolicyConfig(cfg *FailurePolicyConfig) {
 	for _, entry := range pm.providers {
 		if c, ok := entry.Chatter.(*Client); ok {
 			c.SetFailurePolicyConfig(cfg)
+		}
+	}
+}
+
+// SetSessionAffinityConfig propagates the resolved llm.session_affinity
+// config onto every OpenAI-compatible Client chatter this manager owns
+// (existing and future), mirroring SetFailurePolicyConfig. Anthropic
+// (leaf 03) and Codex (wire-mandated header) chatters are unaffected.
+// Nil-receiver and nil-config safe; a nil cfg disables the header.
+func (pm *ProviderManager) SetSessionAffinityConfig(cfg *AffinityConfig) {
+	if pm == nil {
+		return
+	}
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.sessionAffinity = cfg
+	for _, entry := range pm.providers {
+		if c, ok := entry.Chatter.(*Client); ok {
+			c.SetSessionAffinityConfig(cfg)
 		}
 	}
 }
@@ -1283,6 +1307,11 @@ func (pm *ProviderManager) AddProvider(cfg *ModelConfig, priority int) {
 	if pm.failurePolicy != nil {
 		if c, ok := entry.Chatter.(*Client); ok {
 			c.SetFailurePolicyConfig(pm.failurePolicy)
+		}
+	}
+	if pm.sessionAffinity != nil {
+		if c, ok := entry.Chatter.(*Client); ok {
+			c.SetSessionAffinityConfig(pm.sessionAffinity)
 		}
 	}
 

@@ -865,6 +865,18 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			PacingMinInterval:      fp.Pacing.MinInterval,
 			PacingMaxInterval:      fp.Pacing.MaxInterval,
 		})
+		// Session affinity (session-affinity tree leaf 02): the
+		// OpenAI-compatible client sends llm.session_affinity.header
+		// on every request by default (DefaultConfig() enables it);
+		// Anthropic (leaf 03) and Codex are wired separately.
+		sa := cfg.LLM.SessionAffinity
+		c.LLMClient.SetSessionAffinityConfig(&llm.AffinityConfig{
+			Enabled:         sa.Enabled,
+			Header:          sa.Header,
+			AnthropicHeader: sa.AnthropicHeader,
+			IdleRelease:     sa.IdleRelease,
+			TeardownTimeout: sa.TeardownTimeout,
+		})
 		if fp.Pacing.Enabled {
 			llmMetricsStore, mErr := llm.NewMetricsStoreForPacing(filepath.Join(cfg.Daemon.DataDir, "llm_metrics.db"))
 			if mErr != nil {
@@ -1213,6 +1225,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Quota persistence (quota-reset-resilience): block quota'd
 			// credentials across requests, capped by llm.quota_retry.max_wait.
 			pm.SetQuotaMaxWait(cfg.LLM.QuotaRetry.MaxWait)
+			// Session affinity (session-affinity tree leaf 02): propagate
+			// llm.session_affinity onto every OpenAI-compatible chatter
+			// (existing and future), mirroring SetQuotaMaxWait wiring.
+			pm.SetSessionAffinityConfig(&llm.AffinityConfig{
+				Enabled:         cfg.LLM.SessionAffinity.Enabled,
+				Header:          cfg.LLM.SessionAffinity.Header,
+				AnthropicHeader: cfg.LLM.SessionAffinity.AnthropicHeader,
+				IdleRelease:     cfg.LLM.SessionAffinity.IdleRelease,
+				TeardownTimeout: cfg.LLM.SessionAffinity.TeardownTimeout,
+			})
 
 			// Dynamically register OAuth-backed LLM providers that have
 			// stored tokens but are not already in the static config.

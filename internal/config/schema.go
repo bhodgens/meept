@@ -921,8 +921,40 @@ type LLMConfig struct {
 	// ContextDiscovery configures provider context-length discovery
 	// (llm-resilience-forest tree 05 leaf 01). Default OFF.
 	ContextDiscovery ContextDiscoveryConfig `json:"context_discovery" toml:"context_discovery"`
-	Metrics          LLMMetricsConfig       `json:"metrics"           toml:"metrics"`
-	Cache            LLMSimpleFeatureConfig `json:"cache"             toml:"cache"`
+	// SessionAffinity configures session affinity headers sent to
+	// inference providers (session-affinity tree, Contract 1). Default
+	// ON: unknown headers are ignored by gateways that do not support
+	// them, so sending is safe by default.
+	SessionAffinity SessionAffinityConfig  `json:"session_affinity" toml:"session_affinity"`
+	Metrics         LLMMetricsConfig       `json:"metrics"           toml:"metrics"`
+	Cache           LLMSimpleFeatureConfig `json:"cache"             toml:"cache"`
+}
+
+// SessionAffinityConfig configures per-session affinity headers sent on
+// every LLM request so affinity-aware backends can pin a session to one
+// GPU/replica (session-affinity tree leaf 02, Contract 1 — frozen shape;
+// siblings compile against it).
+//
+// JSON5 key: llm.session_affinity (quoted keys). Default ON with header
+// name "session_id". An empty Header after a user override disables the
+// OpenAI-compatible affinity header; an empty AnthropicHeader disables
+// the Anthropic one (leaf 03 consumes AnthropicHeader; leaf 06 consumes
+// IdleRelease + TeardownTimeout).
+type SessionAffinityConfig struct {
+	// Enabled sends session headers on all clients. Default true.
+	Enabled bool `json:"enabled"          toml:"enabled"`
+	// Header is the OpenAI-compatible affinity header name. Default
+	// "session_id".
+	Header string `json:"header"           toml:"header"`
+	// AnthropicHeader is the Anthropic affinity header name. Default
+	// "session_id".
+	AnthropicHeader string `json:"anthropic_header" toml:"anthropic_header"`
+	// IdleRelease is how long a session may go without an LLM call
+	// before upstream teardown fires (leaf 06). Default 30m.
+	IdleRelease time.Duration `json:"idle_release"     toml:"idle_release"`
+	// TeardownTimeout is the per-teardown-call HTTP timeout (leaf 06).
+	// Default 5s.
+	TeardownTimeout time.Duration `json:"teardown_timeout" toml:"teardown_timeout"`
 }
 
 // ContextDiscoveryConfig configures provider context-length discovery
@@ -1053,6 +1085,18 @@ const (
 	DefaultQuotaRetryMaxWait            = 24 * time.Hour
 	DefaultQuotaRetryDefaultEstimate    = time.Hour
 	DefaultQuotaRetryDeferCheckInterval = 10 * time.Minute
+)
+
+// Defaults for llm.session_affinity (session-affinity tree leaf 02,
+// Contract 1). Mirrors the DefaultQuotaRetry* / DefaultFailurePolicy*
+// constant pattern so Normalize-style helpers and tests share one SSOT.
+const (
+	// DefaultSessionAffinityIdleRelease: no LLM call for this long =>
+	// upstream teardown fires (leaf 06 consumption).
+	DefaultSessionAffinityIdleRelease = 30 * time.Minute
+	// DefaultSessionAffinityTeardownTimeout: per-teardown-call HTTP
+	// timeout (leaf 06 consumption).
+	DefaultSessionAffinityTeardownTimeout = 5 * time.Second
 )
 
 // GetEnabled returns Enabled. Part of the getter surface llm.ConfigFromSchema
@@ -3156,6 +3200,17 @@ func DefaultConfig() *Config {
 				// behavior change and zero network traffic when off.
 				Enabled:  false,
 				Interval: DefaultContextDiscoveryInterval,
+			},
+			SessionAffinity: SessionAffinityConfig{
+				// Default ON (session-affinity tree): unknown headers
+				// are ignored by gateways that do not support them.
+				// An empty header name after override disables the
+				// corresponding client's affinity header.
+				Enabled:         true,
+				Header:          "session_id",
+				AnthropicHeader: "session_id",
+				IdleRelease:     DefaultSessionAffinityIdleRelease,
+				TeardownTimeout: DefaultSessionAffinityTeardownTimeout,
 			},
 			Metrics: LLMMetricsConfig{
 				Enabled:             true,

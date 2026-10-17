@@ -269,3 +269,166 @@ func TestResolveModelRefParsesExtraHeaders(t *testing.T) {
 		t.Errorf("x-opencode-session = %q, want sentinel %q", got, sessionIDHeaderSentinel)
 	}
 }
+
+// affinityChatHandler records the full session_id header value (plus a
+// has-flag) so tests can assert presence/absence and exact value.
+func affinityChatHandler(t *testing.T, seen *map[string]string) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*seen = map[string]string{"session_id": r.Header.Get("session_id")}
+		resp := map[string]any{
+			"id": "chatcmpl-affinity", "object": "chat.completion", "created": 1,
+			"model": "test-model",
+			"choices": []map[string]any{
+				{"index": 0, "finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": "ok"}},
+			},
+			"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+}
+
+func affinityTestClient(serverURL string, affinity *AffinityConfig, extras map[string]string) *Client {
+	opts := []ClientOption{}
+	if extras != nil {
+		opts = append(opts, WithExtraHeaders(extras))
+	}
+	c := NewClient(&ModelConfig{
+		BaseURL:   serverURL,
+		ModelID:   "test-model",
+		MaxTokens: 10,
+	}, opts...)
+	c.SetSessionAffinityConfig(affinity)
+	return c
+}
+
+// TestAffinityHeaderSent pins the default-on session affinity header
+// (session-affinity tree leaf 02, Contract 3): enabled + named header +
+// non-empty session scope => the header rides every OpenAI-compatible
+// request; empty scope or disabled config => header omitted; an explicit
+// extra_headers entry with the same key wins.
+func TestAffinityHeaderSent(t *testing.T) {
+	enabled := &AffinityConfig{Enabled: true, Header: "session_id"}
+
+	t.Run("sent when enabled and scoped", func(t *testing.T) {
+		var seen map[string]string
+		server := httptest.NewServer(affinityChatHandler(t, &seen))
+		defer server.Close()
+
+		client := affinityTestClient(server.URL, enabled, nil)
+		if _, err := client.Chat(context.Background(),
+			[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+			WithTaskScope("task-1", "session-abc123")); err != nil {
+			t.Fatalf("Chat failed: %v", err)
+		}
+		if seen["session_id"] != "session-abc123" {
+			t.Errorf("wire session_id = %q, want session-abc123", seen["session_id"])
+		}
+	})
+
+	t.Run("streaming path also sends it", func(t *testing.T) {
+		var seen map[string]string
+		sse := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			seen = map[string]string{"session_id": r.Header.Get("session_id")}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		})
+		server := httptest.NewServer(sse)
+		defer server.Close()
+
+		client := affinityTestClient(server.URL, enabled, nil)
+		if _, err := client.ChatWithDeltaCallback(context.Background(),
+			[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+			func(string) error { return nil },
+			WithTaskScope("task-1", "session-stream")); err != nil {
+			t.Fatalf("ChatWithDeltaCallback failed: %v", err)
+		}
+		if seen["session_id"] != "session-stream" {
+			t.Errorf("wire session_id (streaming) = %q, want session-stream", seen["session_id"])
+		}
+	})
+
+	t.Run("omitted when session scope empty", func(t *testing.T) {
+		var seen map[string]string
+		server := httptest.NewServer(affinityChatHandler(t, &seen))
+		defer server.Close()
+
+		client := affinityTestClient(server.URL, enabled, nil)
+		if _, err := client.Chat(context.Background(),
+			[]ChatMessage{{Role: RoleUser, Content: "hi"}}); err != nil {
+			t.Fatalf("Chat failed: %v", err)
+		}
+		if _, present := seen["session_id"]; present && seen["session_id"] != "" {
+			t.Errorf("wire session_id = %q, want absent (empty scope)", seen["session_id"])
+		}
+	})
+
+	t.Run("omitted when disabled", func(t *testing.T) {
+		var seen map[string]string
+		server := httptest.NewServer(affinityChatHandler(t, &seen))
+		defer server.Close()
+
+		client := affinityTestClient(server.URL, &AffinityConfig{Enabled: false, Header: "session_id"}, nil)
+		if _, err := client.Chat(context.Background(),
+			[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+			WithTaskScope("task-1", "session-abc123")); err != nil {
+			t.Fatalf("Chat failed: %v", err)
+		}
+		if _, present := seen["session_id"]; present && seen["session_id"] != "" {
+			t.Errorf("wire session_id = %q, want absent (disabled)", seen["session_id"])
+		}
+	})
+
+	t.Run("omitted when header name empty", func(t *testing.T) {
+		var seen map[string]string
+		server := httptest.NewServer(affinityChatHandler(t, &seen))
+		defer server.Close()
+
+		client := affinityTestClient(server.URL, &AffinityConfig{Enabled: true, Header: ""}, nil)
+		if _, err := client.Chat(context.Background(),
+			[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+			WithTaskScope("task-1", "session-abc123")); err != nil {
+			t.Fatalf("Chat failed: %v", err)
+		}
+		if _, present := seen["session_id"]; present && seen["session_id"] != "" {
+			t.Errorf("wire session_id = %q, want absent (empty header name)", seen["session_id"])
+		}
+	})
+
+	t.Run("explicit extra_headers entry wins", func(t *testing.T) {
+		var seen map[string]string
+		server := httptest.NewServer(affinityChatHandler(t, &seen))
+		defer server.Close()
+
+		client := affinityTestClient(server.URL, enabled,
+			map[string]string{"session_id": "explicit-override"})
+		if _, err := client.Chat(context.Background(),
+			[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+			WithTaskScope("task-1", "session-abc123")); err != nil {
+			t.Fatalf("Chat failed: %v", err)
+		}
+		if seen["session_id"] != "explicit-override" {
+			t.Errorf("wire session_id = %q, want explicit-override (extra_headers wins)", seen["session_id"])
+		}
+	})
+
+	t.Run("nil config keeps header off", func(t *testing.T) {
+		var seen map[string]string
+		server := httptest.NewServer(affinityChatHandler(t, &seen))
+		defer server.Close()
+
+		// Untouched legacy constructor path: no SetSessionAffinityConfig
+		// call, nil affinity => no header (the daemon wires defaults).
+		client := NewClient(&ModelConfig{BaseURL: server.URL, ModelID: "test-model", MaxTokens: 10})
+		if _, err := client.Chat(context.Background(),
+			[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+			WithTaskScope("task-1", "session-abc123")); err != nil {
+			t.Fatalf("Chat failed: %v", err)
+		}
+		if _, present := seen["session_id"]; present && seen["session_id"] != "" {
+			t.Errorf("wire session_id = %q, want absent (nil affinity config)", seen["session_id"])
+		}
+	})
+}

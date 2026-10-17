@@ -125,6 +125,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func NewAdaptivePacer\(store \*metrics.Store, cfg PacingConfig\) \*AdaptivePacer](<#NewAdaptivePacer>)
   - [func \(p \*AdaptivePacer\) Observe\(v PolicyVerdict, providerID string\)](<#AdaptivePacer.Observe>)
   - [func \(p \*AdaptivePacer\) Wait\(ctx context.Context, providerID string\) error](<#AdaptivePacer.Wait>)
+- [type AffinityConfig](<#AffinityConfig>)
 - [type AgentModelRef](<#AgentModelRef>)
 - [type AgentReasoningConfig](<#AgentReasoningConfig>)
   - [func \(a \*AgentReasoningConfig\) ClampEffort\(effort string\) string](<#AgentReasoningConfig.ClampEffort>)
@@ -244,6 +245,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(c \*Client\) SetMetricsStore\(store \*metrics.Store\)](<#Client.SetMetricsStore>)
   - [func \(c \*Client\) SetPacer\(p \*AdaptivePacer\)](<#Client.SetPacer>)
   - [func \(c \*Client\) SetQuotaMaxWait\(d time.Duration\)](<#Client.SetQuotaMaxWait>)
+  - [func \(c \*Client\) SetSessionAffinityConfig\(cfg \*AffinityConfig\)](<#Client.SetSessionAffinityConfig>)
   - [func \(c \*Client\) SetUsageStore\(store \*appmetrics.Store\)](<#Client.SetUsageStore>)
   - [func \(c \*Client\) SwitchModel\(config \*ModelConfig\) error](<#Client.SwitchModel>)
 - [type ClientError](<#ClientError>)
@@ -547,6 +549,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(pm \*ProviderManager\) SetCostOptimized\(enabled bool\)](<#ProviderManager.SetCostOptimized>)
   - [func \(pm \*ProviderManager\) SetFailurePolicyConfig\(cfg \*FailurePolicyConfig\)](<#ProviderManager.SetFailurePolicyConfig>)
   - [func \(pm \*ProviderManager\) SetQuotaMaxWait\(d time.Duration\)](<#ProviderManager.SetQuotaMaxWait>)
+  - [func \(pm \*ProviderManager\) SetSessionAffinityConfig\(cfg \*AffinityConfig\)](<#ProviderManager.SetSessionAffinityConfig>)
   - [func \(pm \*ProviderManager\) SetUsageStore\(store \*appmetrics.Store\)](<#ProviderManager.SetUsageStore>)
   - [func \(pm \*ProviderManager\) StartHealthChecks\(ctx context.Context\)](<#ProviderManager.StartHealthChecks>)
   - [func \(pm \*ProviderManager\) Stop\(\)](<#ProviderManager.Stop>)
@@ -2096,6 +2099,25 @@ Wait sleeps until the next outbound request to providerID is allowed and claims 
 
 Ticket\-style reservation \(concurrent\-Wait gap fix\): the slot is RESERVED under the pacer mutex BEFORE the sleep, computed against the provider's reservation timeline rather than the wall clock. Each concurrent Wait therefore owns a distinct start instant spaced one enforced gap apart and wakes into its own slot; previously every concurrent Wait read the same lastClaim, computed the same wait against now, and all woke together \(zero enforced gap\). Ctx cancellation abandons the caller's slot — the reservation already consumed the timeline position, mirroring a request that was canceled after pacing admitted it.
 
+<a name="AffinityConfig"></a>
+## type AffinityConfig
+
+AffinityConfig mirrors the canonical config.SessionAffinityConfig \(llm.session\_affinity knobs, session\-affinity tree leaf 02 Contract 1\). Defined locally to avoid the internal/llm \-\> internal/config import cycle \(internal/config transitively imports internal/llm\); the canonical type satisfies this shape 1:1 and the daemon maps onto it at the wiring point, mirroring SetFailurePolicyConfig \(failure\_policy.go precedent\). IdleRelease and TeardownTimeout are carried for leaf 06's teardown adapters; the OpenAI\-compatible client itself reads only Enabled\+Header.
+
+	type AffinityConfig struct {
+	    // Enabled sends session headers. Default true (daemon wiring).
+	    Enabled bool
+	    // Header is the OpenAI-compatible affinity header name. Default
+	    // "session_id"; empty disables the header.
+	    Header string
+	    // AnthropicHeader is the Anthropic affinity header name (leaf 03).
+	    AnthropicHeader string
+	    // IdleRelease is the no-LLM-call window before teardown fires (leaf 06).
+	    IdleRelease time.Duration
+	    // TeardownTimeout is the per-teardown-call HTTP timeout (leaf 06).
+	    TeardownTimeout time.Duration
+	}
+
 <a name="AgentModelRef"></a>
 ## type AgentModelRef
 
@@ -3218,6 +3240,13 @@ SetPacer injects the adaptive 429 pacer \(tree 02 leaf 05, D15\). Nil pacer \(or
 	func (c *Client) SetQuotaMaxWait(d time.Duration)
 
 SetQuotaMaxWait sets the quota wait upper bound. Nil\-receiver safe.
+
+<a name="Client.SetSessionAffinityConfig"></a>
+### func \(\*Client\) SetSessionAffinityConfig
+
+	func (c *Client) SetSessionAffinityConfig(cfg *AffinityConfig)
+
+SetSessionAffinityConfig injects the resolved llm.session\_affinity config. Nil\-receiver safe; a nil cfg disables the affinity header \(the daemon wires DefaultConfig\(\) defaults, so production keeps the header on\). Nil\-safe on the fields too: an empty Header or an unset session scope simply omits the header \(applyAffinityHeader\).
 
 <a name="Client.SetUsageStore"></a>
 ### func \(\*Client\) SetUsageStore
@@ -6006,6 +6035,13 @@ SetFailurePolicyConfig propagates a failure\-policy config onto every OpenAI\-co
 	func (pm *ProviderManager) SetQuotaMaxWait(d time.Duration)
 
 SetQuotaMaxWait caps how far into the future a provider credential stays quota\-blocked after a QuotaResetError \(block horizon = min\(ResetAt, now\+d\)\). Zero or negative restores DefaultQuotaMaxWait. No\-op on a nil receiver to honor the typed\-nil setter rule \(AGENTS.md\).
+
+<a name="ProviderManager.SetSessionAffinityConfig"></a>
+### func \(\*ProviderManager\) SetSessionAffinityConfig
+
+	func (pm *ProviderManager) SetSessionAffinityConfig(cfg *AffinityConfig)
+
+SetSessionAffinityConfig propagates the resolved llm.session\_affinity config onto every OpenAI\-compatible Client chatter this manager owns \(existing and future\), mirroring SetFailurePolicyConfig. Anthropic \(leaf 03\) and Codex \(wire\-mandated header\) chatters are unaffected. Nil\-receiver and nil\-config safe; a nil cfg disables the header.
 
 <a name="ProviderManager.SetUsageStore"></a>
 ### func \(\*ProviderManager\) SetUsageStore

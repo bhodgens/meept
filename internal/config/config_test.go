@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExpandEnvVars(t *testing.T) {
@@ -144,6 +145,68 @@ func TestDefaultConfig(t *testing.T) {
 
 	if cfg.Agents.CapabilityMatchEnabled != false {
 		t.Error("Default agents.capability_match_enabled should be false")
+	}
+}
+
+// TestSessionAffinityDefaults pins llm.session_affinity (session-affinity
+// tree leaf 02, Contract 1): all five fields defaulted in DefaultConfig,
+// and a JSON5 override flips enabled off and empties the header (empty
+// header after override disables the OpenAI-compat affinity header).
+func TestSessionAffinityDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.LLM.SessionAffinity.Enabled != true {
+		t.Error("Default llm.session_affinity.enabled should be true")
+	}
+	if cfg.LLM.SessionAffinity.Header != "session_id" {
+		t.Errorf("Default session_affinity.header = %q, want \"session_id\"", cfg.LLM.SessionAffinity.Header)
+	}
+	if cfg.LLM.SessionAffinity.AnthropicHeader != "session_id" {
+		t.Errorf("Default session_affinity.anthropic_header = %q, want \"session_id\"", cfg.LLM.SessionAffinity.AnthropicHeader)
+	}
+	if cfg.LLM.SessionAffinity.IdleRelease != 30*time.Minute {
+		t.Errorf("Default session_affinity.idle_release = %v, want 30m", cfg.LLM.SessionAffinity.IdleRelease)
+	}
+	if cfg.LLM.SessionAffinity.TeardownTimeout != 5*time.Second {
+		t.Errorf("Default session_affinity.teardown_timeout = %v, want 5s", cfg.LLM.SessionAffinity.TeardownTimeout)
+	}
+}
+
+func TestSessionAffinityJSON5Override(t *testing.T) {
+	f, err := os.CreateTemp("", "meept*.json5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+
+	content := `{
+		"llm": {
+			"session_affinity": {
+				"enabled": false,
+				"header": ""
+			}
+		}
+	}`
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	cfg, err := LoadJSON5Config(f.Name())
+	if err != nil {
+		t.Fatalf("LoadJSON5Config failed: %v", err)
+	}
+
+	if cfg.LLM.SessionAffinity.Enabled != false {
+		t.Error("session_affinity.enabled = true, want false after override")
+	}
+	if cfg.LLM.SessionAffinity.Header != "" {
+		t.Errorf("session_affinity.header = %q, want empty after override", cfg.LLM.SessionAffinity.Header)
+	}
+	// Unspecified fields keep the DefaultConfig() baseline (Load seeds
+	// defaults before unmarshal).
+	if cfg.LLM.SessionAffinity.IdleRelease != 30*time.Minute {
+		t.Errorf("session_affinity.idle_release = %v, want 30m (default kept)", cfg.LLM.SessionAffinity.IdleRelease)
 	}
 }
 
