@@ -131,6 +131,9 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start process: %w", err)
 	}
 
+	// t.cmd is set BEFORE the remaining field assignments. If any of those
+	// panic, Close() will still kill the live child process because it checks
+	// t.cmd != nil regardless of t.running. This closes the orphan-window bug.
 	t.cmd = cmd
 	t.stdin = stdin
 	t.stdoutFile = stdout
@@ -316,80 +319,81 @@ func (t *StdioTransport) Close() error {
 	// Collect under lock, release, then operate (CLAUDE.md mutex-scope rule).
 	t.mu.Lock()
 
-	if !t.running.Load() {
-		t.mu.Unlock()
-		return nil
-	}
-
-	t.running.Store(false)
-
-	// Snapshot fields needed for the blocking teardown.
+	// Snapshot fields needed for the blocking teardown, and flip running
+	// here so relayStdout sees a consistent state; all I/O happens after
+	// the unlock (mutex-scope rule).
 	cmdCancel := t.cmdCancel
 	cmd := t.cmd
+	stdin := t.stdin
 	stdoutFile := t.stdoutFile
 	relayDone := t.relayDone
 	stderrDone := t.stderrDone
-
-	// Close stdin to signal EOF to the subprocess (still under lock so
-	// relayStdout sees a consistent running=false state).
-	if t.stdin != nil {
-		t.stdin.Close()
-	}
+	t.stdin = nil
+	t.running.Store(false)
 
 	t.mu.Unlock()
+
+	// Close stdin to signal EOF to the subprocess.
+	if stdin != nil {
+		stdin.Close()
+	}
 
 	// Cancel context outside the lock (defence in depth alongside Kill).
 	if cmdCancel != nil {
 		cmdCancel()
 	}
 
-	if cmd == nil || cmd.Process == nil {
-		// Close stdout file to unblock relayStdout
+	// CRITICAL FIX: Always kill the child process if t.cmd is non-nil,
+	// regardless of t.running. This closes the orphan-window bug: if a
+	// panic occurs between cmd.Start() and t.running.Store(true), t.running
+	// remains false but t.cmd is non-nil (the child is alive). Close() must
+	// still kill it. (running was already cleared under the lock above.)
+	if cmd != nil && cmd.Process != nil {
+		// Give the process a chance to exit gracefully
+		done := make(chan error, 1)
+		go func() {
+			done <- cmd.Wait()
+		}()
+
+		select {
+		case <-done:
+			// Process exited — pipes are now closed, relayStdout will unblock
+		case <-time.After(5 * time.Second):
+			// Force kill — this closes the process and its pipes
+			if killErr := cmd.Process.Kill(); killErr != nil {
+				slog.Warn("force kill MCP process", "error", killErr)
+			}
+			<-done
+		}
+
+		// Wait for the relay goroutine to finish before closing stdoutFile,
+		// otherwise we race with relayStdout's read.
+		if relayDone != nil {
+			select {
+			case <-relayDone:
+			case <-time.After(2 * time.Second):
+				// Relay didn't exit in time; don't block forever
+			}
+		}
+
+		// Wait for stderr drain goroutine to finish as well.
+		if stderrDone != nil {
+			select {
+			case <-stderrDone:
+			case <-time.After(2 * time.Second):
+				// stderr drain didn't exit in time; don't block forever
+			}
+		}
+
+		// Close stdout file after relayStdout has exited.
 		if stdoutFile != nil {
 			stdoutFile.Close()
 		}
-		return nil
-	}
-
-	// Give the process a chance to exit gracefully
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-done:
-		// Process exited — pipes are now closed, relayStdout will unblock
-	case <-time.After(5 * time.Second):
-		// Force kill — this closes the process and its pipes
-		if killErr := cmd.Process.Kill(); killErr != nil {
-			slog.Warn("force kill MCP process", "error", killErr)
+	} else {
+		// cmd is nil — just close stdout file to unblock relayStdout
+		if stdoutFile != nil {
+			stdoutFile.Close()
 		}
-		<-done
-	}
-
-	// Wait for the relay goroutine to finish before closing stdoutFile,
-	// otherwise we race with relayStdout's read.
-	if relayDone != nil {
-		select {
-		case <-relayDone:
-		case <-time.After(2 * time.Second):
-			// Relay didn't exit in time; don't block forever
-		}
-	}
-
-	// Wait for stderr drain goroutine to finish as well.
-	if stderrDone != nil {
-		select {
-		case <-stderrDone:
-		case <-time.After(2 * time.Second):
-			// stderr drain didn't exit in time; don't block forever
-		}
-	}
-
-	// Close stdout file after relayStdout has exited.
-	if stdoutFile != nil {
-		stdoutFile.Close()
 	}
 
 	return nil
