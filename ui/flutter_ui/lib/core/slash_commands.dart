@@ -131,4 +131,21 @@ const _defaultCommands = <SlashCommand>[
     usage: '/skill [name|search <query>]',
   ),
   SlashCommand(name: '/debugsession', description: 'show session debug info'),
+  // TUI parity: /dnd toggles do-not-disturb via notifications.set_dnd RPC.
+  // The Dart client has no generic RPC-call helper (WebSocket is event-stream
+  // only), so this command is a placeholder with a deviation note.
+  SlashCommand(
+    name: '/dnd',
+    description: 'toggle do-not-disturb (suppresses toasts)',
+    usage: '/dnd [on|off]',
+  ),
+  // TUI parity: /implement-improvements reviews/applies queued improvement
+  // proposals via daemon RPCs. The Dart client has no generic RPC-call
+  // helper for this endpoint, so this command is a placeholder with a
+  // deviation note.
+  SlashCommand(
+    name: '/implement-improvements',
+    description: 'review and apply or skip pending improvement proposals',
+    usage: '/implement-improvements [list|apply <id>|skip <id>]',
+  ),
 ];
