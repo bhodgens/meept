@@ -115,6 +115,32 @@ type Config struct {
 	Browser             BrowserConfig             `json:"browser"             toml:"browser"`
 	Transcript          TranscriptConfig          `json:"transcript"          toml:"transcript"`
 	MultiUser           MultiUserConfig           `json:"multiuser"           toml:"multiuser"`
+	Hermes              HermesConfig              `json:"hermes"               toml:"hermes"`
+}
+
+// HermesConfig configures the native Hermes gateway interop ([hermes]):
+// meept drives a running Hermes API Server over HTTP (status, one-shot
+// chat, async runs with steer/stop, session reads). Disabled by default —
+// enabling it is an explicit user decision. The API key NEVER lives in
+// meept.json5: api_key_env names the environment variable Hermes' key is
+// read from at call time.
+//
+//gendoc:section hermes
+//gendoc:desc Native Hermes gateway interop: HTTP client config for the Hermes API Server (status/chat/runs/sessions). Key via env indirection only.
+//gendoc:example [hermes] enabled = true, base_url = "http://127.0.0.1:8642"
+type HermesConfig struct {
+	// Enabled turns on the hermes builtin tool family (default: false).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// BaseURL is the Hermes gateway API Server root (default:
+	// "http://127.0.0.1:8642", Hermes' documented default).
+	BaseURL string `json:"base_url" toml:"base_url"`
+	// APIKeyEnv names the environment variable carrying the Hermes
+	// API_SERVER_KEY. Env indirection ONLY — the key itself must never
+	// be stored in meept config files.
+	APIKeyEnv string `json:"api_key_env" toml:"api_key_env"`
+	// TimeoutSeconds bounds a single client request (default 300 —
+	// synchronous chat turns are long).
+	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
 }
 
 // BrowserConfig configures the headless browser automation tool family
@@ -3126,6 +3152,12 @@ func DefaultConfig() *Config {
 		MultiUser: MultiUserConfig{
 			Enabled:   false,
 			UsersFile: "~/.meept/users.json5",
+		},
+		Hermes: HermesConfig{
+			Enabled:        false,
+			BaseURL:        "http://127.0.0.1:8642",
+			APIKeyEnv:      "HERMES_API_SERVER_KEY",
+			TimeoutSeconds: 300,
 		},
 		LLM: LLMConfig{
 			ModelsDir: "~/.meept/models",

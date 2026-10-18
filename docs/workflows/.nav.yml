@@ -5,6 +5,8 @@ nav:
   - security.md
   - memory.md
   - llm-management.md
+  - session-affinity.md
+  - hermes.md
   - code-intelligence.md
   - context-firewall.md
   - self-improvement.md

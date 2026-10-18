@@ -1031,6 +1031,20 @@
     "reminder_advance_minutes": 10,
   },
 
+  // Native Hermes gateway interop: meept drives a running Hermes API Server
+  // over HTTP (status / one-shot chat / async runs with steer+stop / session
+  // reads) and exposes it to agents as the `hermes` builtin tool.
+  // Disabled by default. The API key NEVER lives in this file: api_key_env
+  // names the environment variable carrying Hermes' API_SERVER_KEY
+  // (export HERMES_API_SERVER_KEY=... alongside API_SERVER_ENABLED=true in
+  // Hermes' .env).
+  "hermes": {
+    "enabled": false,                     // master switch; tool family absent when false
+    "base_url": "http://127.0.0.1:8642",  // Hermes gateway default endpoint
+    "api_key_env": "HERMES_API_SERVER_KEY", // env indirection ONLY — never the key itself
+    "timeout_seconds": 300,               // sync chat turns are long
+  },
+
   // Speech-to-text configuration (client-side: TUI and Flutter)
   "stt": {
     "enabled": false,

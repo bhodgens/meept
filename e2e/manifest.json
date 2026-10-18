@@ -145,6 +145,12 @@
   "internal/acp/": [
    "acp-wire"
   ],
+  "internal/hermes/": [
+   "hermes-client"
+  ],
+  "e2e/suites/hermes-client": [
+   "hermes-client"
+  ],
   "cmd/meept/": [
    "cli-surface"
   ],
@@ -324,6 +330,11 @@
   {
    "name": "gui-pairing",
    "dir": "e2e/suites/gui-pairing",
+   "status": "implemented"
+  },
+  {
+   "name": "hermes-client",
+   "dir": "e2e/suites/hermes-client",
    "status": "implemented"
   },
   {
