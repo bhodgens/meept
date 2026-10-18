@@ -149,13 +149,10 @@ func (b *BwrapBackend) Execute(ctx context.Context, cmd Command) (*CommandResult
 
 	workDir := cmd.Dir
 	if workDir == "" {
-		// No explicit workdir: fall back to the daemon CWD so the child has
-		// SOME writable location; bwrap refuses to start without one.
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("bwrap: resolve default workdir: %w", err)
-		}
-		workDir = cwd
+		// No explicit workdir: fall back to os.TempDir() (writable, not the
+		// daemon CWD) so the child has SOME writable location; bwrap refuses
+		// to start without one.
+		workDir = os.TempDir()
 	}
 	if !dirExists(workDir) {
 		return nil, fmt.Errorf("bwrap: working directory does not exist: %s", workDir)
