@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"io"
 	"log/slog"
@@ -175,7 +176,7 @@ func runOAuthConnect(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  visit: %s\n", authURL)
 		fmt.Printf("  %s\n", providerCfg.VerifyHint)
 		fmt.Print("  code: ")
-		code, err := readPastedCode(os.Stdin)
+		code, err := readPastedCodeWithState(os.Stdin, state)
 		if err != nil {
 			return fmt.Errorf("read pasted code: %w", err)
 		}
@@ -301,4 +302,45 @@ func readPastedCode(r io.Reader) (string, error) {
 		return "", fmt.Errorf("empty code")
 	}
 	return code, nil
+}
+
+// readPastedCodeWithState reads a pasted authorization code from r. If the pasted
+// value contains a '#' separator (as Anthropic's console callback shows code#state),
+// it splits it and verifies the state part against the expected state using
+// constant-time comparison. If the state matches, only the code part is returned.
+// If no '#' is present, the bare code is accepted (existing behavior preserved).
+// This is necessary because the paste-back flow may or may not include the state
+// depending on how the user copies from the callback page.
+func readPastedCodeWithState(r io.Reader, expectedState string) (string, error) {
+	scanner := bufio.NewScanner(r)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", fmt.Errorf("read code: %w", err)
+		}
+		return "", fmt.Errorf("no code entered")
+	}
+	pasted := strings.TrimSpace(scanner.Text())
+	if pasted == "" {
+		return "", fmt.Errorf("empty code")
+	}
+
+	// Check for Anthropic's code#state format
+	if idx := strings.Index(pasted, "#"); idx != -1 {
+		codePart := pasted[:idx]
+		statePart := pasted[idx+1:]
+		if codePart == "" {
+			return "", fmt.Errorf("empty code in pasted value")
+		}
+		// Constant-time compare to prevent timing attacks
+		if subtle.ConstantTimeCompare([]byte(statePart), []byte(expectedState)) != 1 {
+			return "", fmt.Errorf("oauth state mismatch (copy the full code#state value from the callback page)")
+		}
+		return codePart, nil
+	}
+
+	// No '#' present: accept bare code for backward compatibility.
+	// Existing users who copy only the code (without state) from the callback
+	// page will continue to work. The state verification only applies when
+	// the state is explicitly included in the pasted value.
+	return pasted, nil
 }
