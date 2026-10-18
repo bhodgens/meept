@@ -180,6 +180,7 @@ Package config provides configuration loading and validation for meept.
 - [type HTTPHookConfig](<#HTTPHookConfig>)
 - [type HTTPTransportConfig](<#HTTPTransportConfig>)
   - [func \(c HTTPTransportConfig\) ListenAddr\(\) string](<#HTTPTransportConfig.ListenAddr>)
+- [type HermesConfig](<#HermesConfig>)
 - [type HooksConfig](<#HooksConfig>)
 - [type InstructionConfig](<#InstructionConfig>)
 - [type IsolationConfig](<#IsolationConfig>)
@@ -1693,6 +1694,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    Browser             BrowserConfig             `json:"browser"             toml:"browser"`
 	    Transcript          TranscriptConfig          `json:"transcript"          toml:"transcript"`
 	    MultiUser           MultiUserConfig           `json:"multiuser"           toml:"multiuser"`
+	    Hermes              HermesConfig              `json:"hermes"               toml:"hermes"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -2603,6 +2605,26 @@ ListenAddr returns the address the HTTP listener should bind.
 Precedence: Addr when set \(it carries the full host:port, including host\-less forms such as ":8081"\), else "127.0.0.1:\<Port\>" when Port is set, else "" — callers then fall through to the binding default in internal/comm/http \(NewServer: "127.0.0.1:8081"\).
 
 Every consumer of the config's HTTP address MUST resolve it through this method rather than reading Addr directly, so the \`port\` alias cannot be silently dropped again \(see the Port field doc for the incident\).
+
+<a name="HermesConfig"></a>
+## type HermesConfig
+
+HermesConfig configures the native Hermes gateway interop \(\[hermes\]\): meept drives a running Hermes API Server over HTTP \(status, one\-shot chat, async runs with steer/stop, session reads\). Disabled by default — enabling it is an explicit user decision. The API key NEVER lives in meept.json5: api\_key\_env names the environment variable Hermes' key is read from at call time.
+
+	type HermesConfig struct {
+	    // Enabled turns on the hermes builtin tool family (default: false).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // BaseURL is the Hermes gateway API Server root (default:
+	    // "http://127.0.0.1:8642", Hermes' documented default).
+	    BaseURL string `json:"base_url" toml:"base_url"`
+	    // APIKeyEnv names the environment variable carrying the Hermes
+	    // API_SERVER_KEY. Env indirection ONLY — the key itself must never
+	    // be stored in meept config files.
+	    APIKeyEnv string `json:"api_key_env" toml:"api_key_env"`
+	    // TimeoutSeconds bounds a single client request (default 300 —
+	    // synchronous chat turns are long).
+	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	}
 
 <a name="HooksConfig"></a>
 ## type HooksConfig
