@@ -141,7 +141,13 @@ func (c *Client) refreshTools(ctx context.Context) error {
 
 	c.mu.Lock()
 	c.tools = result.Tools
+	toolCount := len(c.tools)
 	c.mu.Unlock()
+
+	c.logger.Info("discovered MCP tools",
+		"name", c.name,
+		"count", toolCount,
+	)
 
 	return nil
 }
@@ -289,12 +295,16 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 			}
 		case "resource":
 			// SECURITY: Validate resource URI to prevent path traversal injection
-			// Malicious MCP servers could inject file:// URIs pointing to sensitive files
+			// Malicious MCP servers could inject file:// URIs pointing to sensitive files.
+			// Block ANY URI whose scheme is "file" (case-insensitive).
 			if block.Resource != nil && block.Resource.URI != "" {
 				uri := block.Resource.URI
-				// Reject URIs that look like local file paths
-				if strings.HasPrefix(uri, "file://") && (strings.Contains(uri, "/etc/") || strings.Contains(uri, "/../") || strings.HasPrefix(uri, "file:///")) {
-					uri = "[blocked: potential path traversal]"
+				// Extract scheme: everything up to the first ":"
+				if idx := strings.Index(uri, ":"); idx > 0 {
+					scheme := strings.ToLower(uri[:idx])
+					if scheme == "file" {
+						uri = "[blocked: file URI not allowed]"
+					}
 				}
 				fmt.Fprintf(&text, "[resource: %s]", uri)
 			} else {
