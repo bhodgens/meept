@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // StrictnessLevel controls how aggressively the sanitizer filters input.
@@ -351,7 +352,8 @@ func (s *InputSanitizer) detectPatterns(text string) []Warning {
 	return threats
 }
 
-// sanitizeStructure escapes special tokens and strips role markers.
+// sanitizeStructure escapes special tokens, strips role markers, and removes
+// C0 control characters (except tab, newline, carriage return).
 func (s *InputSanitizer) sanitizeStructure(text string) (string, bool) {
 	modified := false
 
@@ -386,6 +388,25 @@ func (s *InputSanitizer) sanitizeStructure(text string) (string, bool) {
 			modified = true
 			text = newText
 		}
+	}
+
+	// Strip C0 control characters (U+0000–U+001F, U+007F) except tab, newline, carriage return.
+	// Operate on runes to preserve UTF-8 correctness.
+	var sb strings.Builder
+	for _, r := range text {
+		switch r {
+		case '	', '\n', '\r':
+			sb.WriteRune(r)
+		default:
+			if unicode.IsControl(r) {
+				modified = true
+				continue // skip control characters
+			}
+			sb.WriteRune(r)
+		}
+	}
+	if modified {
+		text = sb.String()
 	}
 
 	return text, modified
