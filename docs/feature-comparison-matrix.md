@@ -60,6 +60,7 @@
 | MCP client | X (22 preconfigured stdio entries, each with an `install_hint`; **enabled count corrected 2026-10-05 — the catalog is 22 entries, and `obscura` is the one enabled by default besides the zero-config set**) | - | X | X | X | X | Limited | - | X |
 | MCP server mode | X | - | - | - | - | - | - | - | - |
 | ACP client (drive external agents) | X (opt-in, default off) | - | - | - | - | ~ (ACP server for editors) | ~ (`opencode acp`) | - | - |
+| Native Hermes interop (drive a Hermes gateway over HTTP) | X (opt-in `[hermes]`; `hermes` tool: status/chat/run/runs/steer/stop/sessions/messages; v1 chat needs explicit session_id) | - | - | - | - | - (is the remote agent) | - | - | - |
 | Parallel tool execution | X (semaphore) | X | X | X (resource-class) | X | X | X | X | X |
 | Tool streaming progress | X | - | - | - | - | - | - | - | - |
 | Browser automation | X (opt-in `[browser]`; SSRF-guarded headless Chrome tool family) | - | - | X (Playwright) | - | ~ | - | - | ~ |
