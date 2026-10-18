@@ -123,6 +123,13 @@ func VerifyChain(ctx context.Context, db *sql.DB) (VerifyResult, error) {
 	if err := rows.Err(); err != nil {
 		return VerifyResult{}, fmt.Errorf("verify chain rows: %w", err)
 	}
-	res.OK = true
+	// An empty chain (zero records) is NOT considered verified — this closes
+	// the tamper-evidence gap where a truncated-to-zero log would silently pass.
+	if res.Records == 0 {
+		res.OK = false
+		res.Reason = "empty chain"
+	} else {
+		res.OK = true
+	}
 	return res, nil
 }

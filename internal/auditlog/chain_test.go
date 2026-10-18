@@ -69,8 +69,9 @@ func TestVerifyChain_EmptyAndGood(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyChain empty: %v", err)
 	}
-	if !res.OK || res.Records != 0 {
-		t.Fatalf("empty chain must verify: %+v", res)
+	// Empty chain should now fail verification (tamper-evidence fix).
+	if res.OK || res.Records != 0 || res.Reason != "empty chain" {
+		t.Fatalf("empty chain must NOT verify: %+v", res)
 	}
 
 	s, err := OpenStoreFromDB(db, nil)
