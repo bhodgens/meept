@@ -56,6 +56,12 @@ func (a *recordingAdapter) Teardown(ctx context.Context, sessionID, endpointKey 
 	return a.err
 }
 
+// SweepTeardown mirrors Teardown: the double records the same way for both
+// paths (callers that care distinguish by which coordinator entry ran).
+func (a *recordingAdapter) SweepTeardown(ctx context.Context, sessionID, endpointKey string) error {
+	return a.Teardown(ctx, sessionID, endpointKey)
+}
+
 func (a *recordingAdapter) recorded() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()

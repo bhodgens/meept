@@ -132,6 +132,11 @@ type AgentRegistry struct {
 	// the planner agent's loop (issue #53 direction 4). Nil = the planner
 	// loop uses the shared chain like every other loop.
 	plannerChatter llm.Chatter
+
+	// sharedChatter mirrors RegistryConfig.SharedChatter: the daemon-wide
+	// ProviderManager for every registry-built loop (nil = single-client
+	// chain, byte-identical to the pre-SharedChatter behavior).
+	sharedChatter llm.Chatter
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -206,6 +211,22 @@ type RegistryConfig struct {
 	// dedicated client. Nil = every loop uses the shared chain (pre-slot
 	// behavior, byte-identical).
 	PlannerChatter llm.Chatter
+
+	// SharedChatter is the daemon-wide chatter for registry-built loops —
+	// the ProviderManager when multi-provider wiring is on, nil otherwise.
+	// When set, EVERY loop (not just the planner) is built on it via
+	// WithLLMChatter, LLMClient remaining the fallback for callers that
+	// never wire a manager. Without this, dispatched chat/specialist loops
+	// ran on the single default client: WithResolvedModel named a provider
+	// the client cannot reach (requestModelOverride lane 2 rejects a
+	// cross-provider selection), so alias rotation and the session-affinity
+	// reporting seam never engaged for dispatched turns — observed live by
+	// the session-affinity e2e suites (rotation: every attempt redialed the
+	// same dead endpoint; teardown: the endpoint snapshot stayed empty).
+	// Model-switcher semantics are unaffected: a ProviderManager has no
+	// single config to retarget, and chatWithFailoverRaw carries the
+	// resolution request-scoped via WithResolvedModel.
+	SharedChatter llm.Chatter
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -221,6 +242,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		memvid:                cfg.MemvidClient,
 		taskStore:             cfg.TaskStore,
 		llm:                   cfg.LLMClient,
+		sharedChatter:         cfg.SharedChatter,
 		resolver:              cfg.Resolver,
 		bus:                   cfg.MessageBus,
 		security:              cfg.SecurityChecker,
@@ -477,12 +499,24 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		if plannerChatterLive(r.plannerChatter) {
 			if spec.ID == config.AgentIDPlanner {
 				opts = append(opts, WithLLMChatter(r.plannerChatter))
+			} else if plannerChatterLive(r.sharedChatter) {
+				// Multi-provider wiring: the manager honors WithResolvedModel
+				// for the loop's alias and owns rotation/reporting. The
+				// single client cannot serve another provider's model
+				// (requestModelOverride lane 2), so it must not take the
+				// loop when the manager is wired.
+				opts = append(opts, WithLLMChatter(r.sharedChatter))
 			} else {
 				opts = append(opts, WithLLMClient(r.llm))
 			}
+		} else if plannerChatterLive(r.sharedChatter) {
+			opts = append(opts, WithLLMChatter(r.sharedChatter))
 		} else {
 			opts = append(opts, WithLLMClient(r.llm))
 		}
+	} else if plannerChatterLive(r.sharedChatter) {
+		// r.llm nil but a manager is wired: still prefer the manager.
+		opts = append(opts, WithLLMChatter(r.sharedChatter))
 	}
 
 	if r.resolver != nil {

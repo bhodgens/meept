@@ -56,6 +56,13 @@ type TeardownAdapter interface {
 	// Teardown is best-effort: bounded by TeardownTimeout, errors are
 	// returned not panicked; callers log and continue.
 	Teardown(ctx context.Context, sessionID, endpointKey string) error
+	// SweepTeardown is the daemon-shutdown path: every session with a
+	// remembered endpoint gets its release, WITHOUT the live-session
+	// reference count. At shutdown all sessions end simultaneously, so
+	// per-session refcounting would make each session see the others and
+	// nothing would erase (observed live: 2 sessions on one endpoint
+	// produced 0 erases); the runtimes stop right after the sweep anyway.
+	SweepTeardown(ctx context.Context, sessionID, endpointKey string) error
 }
 
 // llamaEndpointPrefix is the runtime prefix ComputeEndpointKey uses for
@@ -65,12 +72,32 @@ type TeardownAdapter interface {
 // LlamaServerTeardown may erase.
 const llamaEndpointPrefix = string(RuntimeLlamaCpp) + ":"
 
-// localModelsEndpointKey is the endpoint key the synthetic local-models
-// provider registers (register_local_model.go: llmLocalEndpointKey). The
-// literal is duplicated as a teardown-local constant so teardown does not
-// reach into registration internals; both must stay in sync (a drift is
-// caught by the Handles test over ComputeEndpointKey output).
-const localModelsEndpointKey = "llama-cpp:127.0.0.1"
+// isLlamaSnapshotKey reports whether endpointKey has the RESOLVER
+// SNAPSHOT shape EndpointKey(cfg) = "<host>|<credential>" whose host part
+// resolves to a known llama runtime. The resolver's session→endpoint map
+// (the teardown coordinator's only key source) stores exactly this shape
+// — the runtime-key prefix check alone never matched it, so in a live
+// daemon the llama adapter never fired and every erase fell to
+// CloudTeardown's no-op (leaf 07 GAP B). A snapshot key is llama-shaped
+// when RuntimeManager.TeardownBaseURL can resolve its host portion to a
+// registered endpoint; a nil manager cannot answer, so the key claims
+// llama ownership only if its credential part is non-empty AND the host
+// is not resolvable as a cloud endpoint — resolved conservatively here as
+// "has a host|credential shape"; the actual erase still refuses unknown
+// endpoints inside Teardown (TeardownBaseURL miss -> nothing to erase).
+// The credential part ("provider:key:<hex>" / "provider:oauth:<x>" /
+// "provider:default") never contains "|", so the split is unambiguous.
+func isLlamaSnapshotKey(endpointKey string, manager endpointBaseURLer) bool {
+	host, cred, ok := strings.Cut(endpointKey, "|")
+	if !ok || host == "" || cred == "" {
+		return false
+	}
+	if manager == nil {
+		return false
+	}
+	_, resolvable := manager.TeardownBaseURL(endpointKey)
+	return resolvable
+}
 
 // endpointBaseURLer resolves an endpoint key to a base URL for teardown.
 // *RuntimeManager satisfies it; a nil resolver or an unresolvable key
@@ -125,12 +152,23 @@ func (m *RuntimeManager) TeardownBaseURL(endpointKey string) (string, bool) {
 	// keys. A host with multiple llama runtimes cannot be disambiguated
 	// from a port-less key; the first registered wins and the erase still
 	// targets a live runtime on that host.
+	//
+	// Comparison identity: EndpointKey(cfg) stores url.Host (host:PORT —
+	// models.go endpointHost), so the registered side must be compared in
+	// the same shape. hostPortFromBaseURL alone returns the BARE hostname
+	// and never matched a port-bearing snapshot host — the GAP B remnant
+	// that kept Handles() false for every live llama endpoint (the erase
+	// fell to CloudTeardown's no-op). endpointHost yields host:port for
+	// both sides; the bare-hostname comparison is kept as a fallback for
+	// port-less legacy keys.
 	keys := make([]string, 0, len(m.endpoints))
 	for k, ep := range m.endpoints {
 		if ep == nil || ep.hc == nil || ep.hc.baseURL == "" {
 			continue
 		}
-		if eHost, _ := hostPortFromBaseURL(ep.hc.baseURL); eHost == host {
+		eHost := endpointHost(ep.hc.baseURL)
+		eHostOnly, _ := hostPortFromBaseURL(ep.hc.baseURL)
+		if eHost == host || eHostOnly == host {
 			keys = append(keys, k)
 		}
 	}
@@ -178,10 +216,23 @@ func NewLlamaServerTeardown(manager *RuntimeManager, endpointsFn func() map[stri
 	}
 }
 
-// Handles reports whether endpointKey is a llama.cpp runtime endpoint
-// (the only kind with a KV cache to erase).
+// Handles reports whether endpointKey is a llama.cpp endpoint — either a
+// runtime-shaped key ("llama-cpp:<host>:<port>", ComputeEndpointKey) or a
+// resolver-snapshot key ("<host>|<credential>", EndpointKey(cfg)) whose
+// host resolves to a registered live llama runtime via the manager. The
+// snapshot shape is what the teardown coordinator actually receives from
+// the resolver's session→endpoint map (leaf 07 GAP B: the prefix check
+// alone never matched it, so the llama adapter never fired in a live
+// daemon); an unresolvable key claims nothing, and the erase still
+// refuses unknown endpoints inside Teardown.
 func (t *LlamaServerTeardown) Handles(endpointKey string) bool {
-	return strings.HasPrefix(endpointKey, llamaEndpointPrefix)
+	if strings.HasPrefix(endpointKey, llamaEndpointPrefix) {
+		return true
+	}
+	if t == nil || !strings.Contains(endpointKey, "|") {
+		return false
+	}
+	return isLlamaSnapshotKey(endpointKey, t.manager)
 }
 
 // otherSessionsOnEndpoint counts sessions — other than sessionID — still
@@ -196,12 +247,8 @@ func (t *LlamaServerTeardown) otherSessionsOnEndpoint(sessionID, endpointKey str
 	return n
 }
 
-// Teardown POSTs the erase route to the endpoint's base URL when sessionID
-// is the last session on it. Skips (nil) when other sessions still map to
-// the same endpoint (never erase a live session's cache out from under it)
-// or when the endpoint is not a currently-known runtime. The HTTP call is
-// bounded by the configured timeout; every skip and every error is logged,
-// never propagated to a turn or an archive.
+// Teardown POSTs the erase route when sessionID is the last session on the
+// endpoint (live-session reference count over the resolver snapshot).
 func (t *LlamaServerTeardown) Teardown(ctx context.Context, sessionID, endpointKey string) error {
 	if t == nil || !t.Handles(endpointKey) {
 		return nil
@@ -219,6 +266,23 @@ func (t *LlamaServerTeardown) Teardown(ctx context.Context, sessionID, endpointK
 			return nil
 		}
 	}
+	return t.erase(ctx, sessionID, endpointKey)
+}
+
+// SweepTeardown is the shutdown path: no reference count (all sessions end
+// together; see the interface comment). One erase per session with a
+// remembered endpoint.
+func (t *LlamaServerTeardown) SweepTeardown(ctx context.Context, sessionID, endpointKey string) error {
+	if t == nil || !t.Handles(endpointKey) {
+		return nil
+	}
+	return t.erase(ctx, sessionID, endpointKey)
+}
+
+// erase resolves the endpoint's base URL and POSTs the erase route. Shared
+// by the live-event and sweep paths; every skip/error is logged by the
+// callers or returned for the coordinator's best-effort handling.
+func (t *LlamaServerTeardown) erase(ctx context.Context, sessionID, endpointKey string) error {
 	if t.manager == nil {
 		return nil
 	}
@@ -229,7 +293,13 @@ func (t *LlamaServerTeardown) Teardown(ctx context.Context, sessionID, endpointK
 			"endpoint_key", endpointKey)
 		return nil
 	}
-	url := strings.TrimRight(baseURL, "/") + llamaServerEraseRoute
+	// The provider baseURL carries the OpenAI-compatible version prefix
+	// ("/v1") meept's chat clients need; llama-server's slot route lives at
+	// the server ROOT (pinned route registration above). Strip the version
+	// suffix before appending the route — POST <base>/v1/slots/0 answers
+	// 404 (observed live by the session-teardown e2e).
+	baseForRoute := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+	url := baseForRoute + llamaServerEraseRoute
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return fmt.Errorf("teardown: build erase request: %w", err)
@@ -268,7 +338,14 @@ func NewCloudTeardown(logger *slog.Logger) *CloudTeardown {
 }
 
 // Handles matches every non-llama endpoint key: anything that is not a
-// llama.cpp runtime is a cloud/API endpoint as far as teardown cares.
+// llama.cpp runtime (or a resolver-snapshot key that resolves to a live
+// llama runtime — see LlamaServerTeardown.Handles, GAP B) is a cloud/API
+// endpoint as far as teardown cares. The llama check here is prefix-only:
+// the cloud adapter never holds the runtime manager, so a snapshot key
+// this adapter sees is by definition not a resolvable llama endpoint when
+// the llama adapter (wired with the manager) declined it first — the
+// coordinator consults adapters in order and the llama adapter precedes
+// the cloud one in the daemon wiring (components.go).
 func (t *CloudTeardown) Handles(endpointKey string) bool {
 	return endpointKey != "" && !strings.HasPrefix(endpointKey, llamaEndpointPrefix)
 }
@@ -282,6 +359,12 @@ func (t *CloudTeardown) Teardown(_ context.Context, sessionID, endpointKey strin
 			"endpoint_key", endpointKey)
 	}
 	return nil
+}
+
+// SweepTeardown mirrors Teardown: cloud endpoints have nothing to release,
+// at shutdown or any time.
+func (t *CloudTeardown) SweepTeardown(ctx context.Context, sessionID, endpointKey string) error {
+	return t.Teardown(ctx, sessionID, endpointKey)
 }
 
 // TeardownCoordinator fans session lifecycle events out to the teardown
@@ -299,8 +382,16 @@ type TeardownCoordinator struct {
 	adapters []TeardownAdapter
 	// endpointsFn returns the session→endpoint snapshot (resolver).
 	endpointsFn func() map[string]string
-	timeout     time.Duration
-	logger      *slog.Logger
+	// identityResolve resolves a session id to its OTHER identity
+	// (primary id -> conversation id). The snapshot keys on the ACCOUNTING
+	// id (the WithTaskScope value, conv-* for interactive turns) while the
+	// store's lifecycle hook fires with the PRIMARY id (session-*) — the
+	// documented session_id/conversation_id duality. On a snapshot miss
+	// under the given id the coordinator asks this seam once and retries
+	// with the returned identity. Nil = single-identity lookups only.
+	identityResolve func(sessionID string) (string, bool)
+	timeout         time.Duration
+	logger          *slog.Logger
 
 	// mu guards inFlight only. NEVER held across an adapter call or a
 	// resolver/manager method (lock-order rule: snapshots only).
@@ -327,14 +418,42 @@ func NewTeardownCoordinator(adapters []TeardownAdapter, endpointsFn func() map[s
 
 // endpointForSession resolves the endpoint key a session last used from
 // the snapshot. Missing session (never served, or already evicted from
-// the LRU) -> nothing to tear down.
-func (c *TeardownCoordinator) endpointForSession(sessionID string) (string, bool) {
+// the LRU) -> nothing to tear down. The duality rule (root AGENTS.md):
+// the lookup resolves BOTH identities — the id as given, then (on miss)
+// the alternate identity via identityResolve — because the snapshot keys
+// on the accounting id while lifecycle events arrive with the primary id.
+// The THIRD return is the identity the snapshot actually keys the session
+// under (the resolved alternate on a duality hit): refcounting and logs
+// must use it, or the session's own snapshot row reads as "another
+// session on this endpoint" and the erase skips itself.
+func (c *TeardownCoordinator) endpointForSession(sessionID string) (string, string, bool) {
 	if c.endpointsFn == nil {
-		return "", false
+		return "", sessionID, false
 	}
 	snapshot := c.endpointsFn()
 	key, ok := snapshot[sessionID]
-	return key, ok && key != ""
+	if ok && key != "" {
+		return key, sessionID, true
+	}
+	if c.identityResolve != nil {
+		if alt, found := c.identityResolve(sessionID); found && alt != "" && alt != sessionID {
+			if key, ok = snapshot[alt]; ok && key != "" {
+				return key, alt, true
+			}
+		}
+	}
+	return "", sessionID, false
+}
+
+// SetIdentityResolver wires the primary-id -> conversation-id seam used on
+// a snapshot miss (the session_id/conversation_id duality: lifecycle events
+// carry the primary id, the snapshot keys on the accounting id). Nil
+// disables the retry. Call once at daemon wiring time, before any event.
+func (c *TeardownCoordinator) SetIdentityResolver(resolve func(sessionID string) (string, bool)) {
+	if c == nil || resolve == nil {
+		return
+	}
+	c.identityResolve = resolve
 }
 
 // OnSessionEvent implements session.SessionLifecycleHook for daemon wiring
@@ -369,12 +488,17 @@ func (f TeardownHookFunc) OnSessionEvent(ctx context.Context, sessionID string, 
 // value), so the lookup is exactly the key the preference was remembered
 // under.
 func (c *TeardownCoordinator) dispatch(ctx context.Context, sessionID string) {
-	endpointKey, ok := c.endpointForSession(sessionID)
+	endpointKey, snapshotID, ok := c.endpointForSession(sessionID)
 	if !ok {
 		c.logger.Debug("teardown: session has no remembered endpoint",
 			"session_id", sessionID)
 		return
 	}
+	// snapshotID is the identity the snapshot keys this session under
+	// (differs from sessionID on a duality hit): the adapter's reference
+	// count scans the snapshot for OTHER sessions on the endpoint, so the
+	// dispatch id must match the snapshot's keying or the session excludes
+	// itself and the erase skips.
 	for _, adapter := range c.adapters {
 		if adapter == nil || !adapter.Handles(endpointKey) {
 			continue
@@ -386,7 +510,7 @@ func (c *TeardownCoordinator) dispatch(ctx context.Context, sessionID string) {
 					err = fmt.Errorf("teardown adapter panicked: %v", r)
 				}
 			}()
-			return adapter.Teardown(callCtx, sessionID, endpointKey)
+			return adapter.Teardown(callCtx, snapshotID, endpointKey)
 		}()
 		cancel()
 		if err != nil {
@@ -394,6 +518,7 @@ func (c *TeardownCoordinator) dispatch(ctx context.Context, sessionID string) {
 			// failure never fails the archive/delete caller.
 			c.logger.Warn("teardown: adapter failed",
 				"session_id", sessionID,
+				"snapshot_id", snapshotID,
 				"endpoint_key", endpointKey,
 				"error", err)
 		}
@@ -467,7 +592,10 @@ func (c *TeardownCoordinator) ShutdownSweep(ctx context.Context) {
 						err = fmt.Errorf("teardown adapter panicked: %v", r)
 					}
 				}()
-				return adapter.Teardown(callCtx, sessionID, endpointKey)
+				// Sweep path: NO live-session reference count — every
+				// session ends together at shutdown, so refcounting would
+				// skip every erase (each session sees the others).
+				return adapter.SweepTeardown(callCtx, sessionID, endpointKey)
 			}()
 			cancel()
 			if err != nil {

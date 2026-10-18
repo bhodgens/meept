@@ -163,3 +163,76 @@ boundaries:
   turn). New client transports that honor `max_concurrency` must go
   through `acquireConcurrencyLimit` so they inherit the two-lane
   behavior.
+
+## Session affinity headers, sticky rotation, and upstream teardown
+(session-affinity tree; user-facing doc `docs/workflows/session-affinity.md`)
+
+- **Headers are default-on and never sent empty.** Every OpenAI-compatible
+  request path (`applyAffinityHeader` — BOTH the streaming and
+  non-streaming builders, immediately after `applyExtraHeaders`) and every
+  Anthropic request path (`applyAnthropicAffinityHeader`) sets
+  `llm.session_affinity.header` / `.anthropic_header` when the request
+  carries a non-empty session scope and no explicit `extra_headers` entry
+  with the same key (extras win per key — Contract 3 precedence). An
+  empty scope or an empty configured header omits the header entirely.
+  The `${session_id}` sentinel substitution in `applyExtraHeaders` is
+  independent and unchanged. Codex keeps its wire-mandated
+  `session_id` header. Config reaches clients ONLY through
+  `SetSessionAffinityConfig` (daemon wiring / ProviderManager
+  propagation, mirroring `SetFailurePolicyConfig`) — clients never read
+  config directly.
+- **The header value is the turn's ACCOUNTING session id**
+  (`chatOptions.sessionID`, stamped by `chatWithFailoverRaw` from
+  `turnAccountingSessionID`; leaf 01 threads the same scope through the
+  secondary call sites). Never source it from `currentSessionID`.
+- **Sticky rotation precedence is frozen** (Contract 4): quota blocks >
+  endpoint cooldowns > alias blocks > stickiness. The per-session
+  endpoint map has ONE writer (`ProviderManager.reportSessionEndpoint`,
+  on success, overwriting) and one reader seam
+  (`Resolver.ResolveForAlias`'s resolve-time hook); the remembered
+  endpoint moves to the front only when it is healthy under the SAME
+  filters that gated the rotation winner. In-memory only (LRU 1024),
+  never persisted.
+- **Teardown is best-effort and never fails a turn, an archive, or a
+  shutdown.** `TeardownCoordinator` fans archive/delete/idle events to
+  adapters asynchronously; `ShutdownSweep` (daemon stop, before
+  `ContainerManager.StopAll`) is synchronous under a bounded budget. The
+  erase route is the VERIFIED `POST <base>/slots/0?action=erase`
+  (pinned llama.cpp tools/server/server.cpp:286 +
+  server-context.cpp:4796; the adapter strips the provider baseURL's
+  `/v1` version prefix first — the slot route lives at the server root).
+  `Teardown` (live events) reference-counts over the snapshot and never
+  erases while other live sessions map to the endpoint;
+  `SweepTeardown` (daemon stop) does NOT reference-count — every session
+  ends together at shutdown, so per-session refcounting would skip every
+  erase. `CloudTeardown` is the explicit no-op for non-llama endpoints.
+- **Teardown identity and wiring (leaf-07 gap fixes, verified by the
+  unskipped e2e proofs):**
+  - `LlamaServerTeardown.Handles` accepts BOTH key shapes: the runtime
+    `llama-cpp:<host>:<port>` prefix AND the resolver-snapshot
+    `host|credential` shape (resolved through the manager — an
+    unresolvable key claims nothing). `RuntimeManager.TeardownBaseURL`'s
+    host fallback compares `endpointHost` (host:PORT, the EndpointKey
+    shape) on both sides; the bare-hostname compare is the legacy
+    fallback only.
+  - The `RuntimeManager` MUST be constructed BEFORE the teardown
+    adapters: the llama adapter captures the manager pointer at
+    construction, and the later position left it nil for the daemon's
+    lifetime (unit tests pass with an explicitly-constructed manager;
+    only the wiring order exposes the nil).
+  - `TeardownCoordinator.SetIdentityResolver` wires the
+    session_id/conversation_id duality seam (root AGENTS.md): lifecycle
+    events carry the PRIMARY id, the snapshot keys on the ACCOUNTING id;
+    on a miss the coordinator retries under the alternate identity and
+    dispatches with the SNAPSHOT id so reference counting sees the
+    session's own row.
+- **A plain 5xx alias failure arms an endpoint block** (GAP A fix):
+  `VerdictForFailure` unwraps ANY `*APIError` in the wrap chain (the
+  streaming client's short-retry exhaustion wraps the 5xx in a
+  `ClientError`), and `RecordAliasFailure` arms the endpoint cooldown for
+  BOTH the throttle and server-error classes. This is what disqualifies a
+  dead remembered endpoint at the sticky hook — without it the resolve
+  re-pulled the failed member to the front and the turn ping-ponged on it
+  while the healthy peer served zero requests. Blocks expire on the alias
+  timeout and clear lazily via expiry + success, like every other block
+  map.

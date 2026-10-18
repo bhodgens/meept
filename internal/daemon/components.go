@@ -996,6 +996,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.LLMResolver.SetPricingSyncer(pricingSyncer)
 		}
 
+		// Runtime manager construction happens HERE, before the teardown
+		// wiring below: the llama teardown adapter captures the manager
+		// POINTER at construction. Constructing it later (its old position
+		// was after the provider block) left the adapter holding a nil
+		// manager for the daemon's lifetime — Handles() could never resolve
+		// a snapshot key to a live runtime and every erase fell to
+		// CloudTeardown's no-op (session-affinity leaf-07 live-gate finding:
+		// hermetic unit tests pass with an explicitly-constructed manager;
+		// only the real wiring order exposes the nil).
+		c.ContainerManager = llm.NewRuntimeManager(logger)
+
 		// Session teardown (session-affinity leaf 06, master Contract 6):
 		// the coordinator subscribes to the session store's lifecycle hook
 		// and fans archive/delete/idle events out to the adapters. Keyed on
@@ -1313,8 +1324,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		c.LLMProvider = c.LLMClient
 	}
 
-	// Create runtime manager and scan providers for lifecycle configs
-	c.ContainerManager = llm.NewRuntimeManager(logger)
+	// (Runtime manager construction moved above the teardown wiring — the
+	// adapter captures the manager pointer at construction.)
+
 	lifecycleCfg, lifecycleCfgErr := llm.LoadProvidersConfigDefault()
 	if lifecycleCfgErr != nil {
 		logger.Debug("No providers config available for runtime scanning", "error", lifecycleCfgErr)
@@ -2333,6 +2345,18 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// per Contract 5).
 	if c.TeardownCoordinator != nil && c.SessionStore != nil {
 		coordinator := c.TeardownCoordinator
+		// session_id/conversation_id duality (root AGENTS.md): the store
+		// fires lifecycle events with the PRIMARY session id while the
+		// sticky/teardown snapshot keys on the ACCOUNTING (conversation)
+		// id — wire the primary->conversation seam so a miss retries under
+		// the alternate identity instead of silently dropping the teardown.
+		coordinator.SetIdentityResolver(func(sessionID string) (string, bool) {
+			s := c.SessionStore.Get(sessionID)
+			if s == nil || s.ConversationID == "" || s.ConversationID == sessionID {
+				return "", false
+			}
+			return s.ConversationID, true
+		})
 		c.SessionStore.SetLifecycleHook(teardownStoreHook{coordinator: coordinator})
 		// The activity tracker is SHARED with the LLM call path: the
 		// ProviderManager feed (SetSessionActivityCallback below) records
@@ -2895,9 +2919,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 
 		c.AgentRegistry = agent.NewAgentRegistry(agent.RegistryConfig{
-			MemvidClient:          c.MemvidClient,
-			TaskStore:             taskStore,
-			LLMClient:             c.LLMClient,
+			MemvidClient: c.MemvidClient,
+			TaskStore:    taskStore,
+			LLMClient:    c.LLMClient,
+			// SharedChatter: the ProviderManager when multi-provider wiring
+			// is on (session-affinity/leaf-07 finding). Without it every
+			// registry-built loop ran on the single default client, whose
+			// requestModelOverride rejects a cross-provider WithResolvedModel —
+			// alias rotation and the session-endpoint reporting seam never
+			// engaged for dispatched turns (both session-affinity e2e suites
+			// observed this live). Nil when no manager exists (single-provider
+			// installs keep the historical single-client chain).
+			SharedChatter: func() llm.Chatter {
+				if pm, ok := c.LLMProvider.(*llm.ProviderManager); ok && pm != nil {
+					return pm
+				}
+				return nil
+			}(),
 			Resolver:              c.LLMResolver,
 			MessageBus:            msgBus,
 			SecurityChecker:       c.SecurityChecker,

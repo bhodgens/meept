@@ -1146,6 +1146,22 @@ func (r *Resolver) candidatesJSON(candidates []*ModelConfig) string {
 // FailureQuota verdict (QuotaResetError) unwraps through so the quota
 // class is preserved; anything else is FailureNone (alias cooldown still
 // applies, but no endpoint block).
+//
+// Sticky-rotation correction (session-affinity leaf 07, GAP A): the
+// unwrapped status now comes from ANY *APIError in the wrap chain, not
+// just a top-level one. The streaming client's short-retry exhaustion
+// wraps the 503 APIError in a ClientError ("streaming failed after N
+// attempts"); with the top-level-only check that failure classified
+// FailureNone, armed NO endpoint block, and the resolve-time sticky hook
+// re-pulled the dead endpoint to the front on every resolve — the alias
+// cursor rotated to the healthy member but the next attempt went to the
+// corpse again (observed end-to-end by the session-affinity rotation
+// proof: A and B alternating new_index 1/0 while B served zero requests).
+// Status-bearing 5xx is FailureServerError under Classify, which the
+// endpoint-cooldown arm below treats like the throttle class for block
+// purposes — a dead endpoint's whole base URL must lose stickiness until
+// the block expires (cleared lazily by expiry + a later success, the
+// same single pattern as every other block map).
 func VerdictForFailure(err error) PolicyVerdict {
 	if err == nil {
 		return PolicyVerdict{Class: FailureNone}
@@ -1157,7 +1173,8 @@ func VerdictForFailure(err error) PolicyVerdict {
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return PolicyVerdict{Class: FailureThrottle, Reason: "transport_timeout"}
 	}
-	if apiErr, ok := errors.AsType[*APIError](err); ok {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
 		return Classify(apiErr.StatusCode, nil, []byte(apiErr.Detail), time.Now())
 	}
 	return PolicyVerdict{Class: FailureNone}
@@ -1258,11 +1275,20 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 		health.TimeoutBlockUntil = r.clock().Add(blockDuration)
 	}
 
-	// Endpoint-level cooldown on throttle/timeouts (D10 primary path).
-	// Transport timeouts and bare 429s both land here (audit M4 seam);
+	// Endpoint-level cooldown on throttle/timeout/server-error (D10
+	// primary path + GAP A sticky correction). Transport timeouts, bare
+	// 429s, and — since the GAP A fix — any wrap-chain 5xx land here;
 	// quota-shaped verdicts are excluded — quota has its own block maps
 	// and must never short-circuit into timeout cooldowns (D4/D7).
-	if v := VerdictForFailure(err); v.Class == FailureThrottle && failedModel != nil {
+	//
+	// The 5xx arm is what makes sticky rotation follow health: a plain
+	// 5xx used to arm nothing, so the resolve-time sticky hook
+	// (preferredEndpointLocked) kept re-pulling the dead remembered
+	// endpoint to the front and the turn ping-ponged on it (GAP A).
+	// FailureServerError is Classify's verdict for any 5xx — the same
+	// bounded-retry-then-move-on semantics the throttle class gets.
+	if v := VerdictForFailure(err); failedModel != nil &&
+		(v.Class == FailureThrottle || v.Class == FailureServerError) {
 		if r.endpointBlocks == nil {
 			r.endpointBlocks = make(map[string]time.Time)
 		}

@@ -87,7 +87,9 @@
    "session-binding",
    "state-restart",
    "state-identity",
-   "goal-completion"
+   "goal-completion",
+   "session-affinity",
+   "session-teardown"
   ],
   "internal/memory/": [
    "bridges",
@@ -125,7 +127,9 @@
   "internal/llm/": [
    "daemon-lifecycle",
    "runtime-guards",
-   "continuity-regressions"
+   "continuity-regressions",
+   "session-affinity",
+   "session-teardown"
   ],
   "internal/logrotate/": [
    "logrotate"
@@ -273,6 +277,12 @@
   ],
   "ui/flutter_ui/": [
    "gui-flows"
+  ],
+  "e2e/suites/session-affinity": [
+   "session-affinity"
+  ],
+  "e2e/suites/session-teardown": [
+   "session-teardown"
   ]
  },
  "suites": [
@@ -572,6 +582,16 @@
   {
    "name": "memory-turn-capture",
    "dir": "e2e/suites/memory-turn-capture",
+   "status": "implemented"
+  },
+  {
+   "name": "session-affinity",
+   "dir": "e2e/suites/session-affinity",
+   "status": "implemented"
+  },
+  {
+   "name": "session-teardown",
+   "dir": "e2e/suites/session-teardown",
    "status": "implemented"
   }
  ],
@@ -2557,6 +2577,66 @@
    "title": "failed turn (provider 500): the subscriber records zero L0 lines and zero claims for the session",
    "paths": [
     "internal/daemon/memory_capture.go"
+   ]
+  },
+  {
+   "id": "session-affinity-01",
+   "suite": "session-affinity",
+   "diff": "M",
+   "title": "two sessions against a header-recording stub: every scoped request carries session_id with its own conversation id, never the other session's",
+   "paths": [
+    "internal/llm/client.go",
+    "internal/agent/loop.go"
+   ]
+  },
+  {
+   "id": "session-affinity-02",
+   "suite": "session-affinity",
+   "diff": "S",
+   "title": "empty-scope internal calls reach the endpoint with NO session_id header; scoped calls carry exactly the owning session",
+   "paths": [
+    "internal/agent/loop.go",
+    "internal/agent/loop_scope.go"
+   ]
+  },
+  {
+   "id": "session-affinity-03",
+   "suite": "session-affinity",
+   "diff": "L",
+   "title": "sticky rotation follows health (SKIPPED, documented blocker): alias cursor rotates to member B but the sticky hook re-pulls dead member A; see the suite's doc comment",
+   "paths": [
+    "internal/llm/resolver.go",
+    "internal/llm/provider_manager.go"
+   ]
+  },
+  {
+   "id": "session-teardown-01",
+   "suite": "session-teardown",
+   "diff": "M",
+   "title": "archive fires exactly one POST /slots/0?action=erase (SKIPPED, documented blocker: snapshot key shape host|cred vs llama-cpp: prefix); see the suite's package comment",
+   "paths": [
+    "internal/llm/teardown.go",
+    "internal/session/lifecycle.go",
+    "internal/daemon/components.go"
+   ]
+  },
+  {
+   "id": "session-teardown-02",
+   "suite": "session-teardown",
+   "diff": "M",
+   "title": "daemon-stop sweep fires exactly one erase per active session (SKIPPED, same blocker as session-teardown-01)",
+   "paths": [
+    "internal/llm/teardown.go",
+    "internal/daemon/daemon.go"
+   ]
+  },
+  {
+   "id": "session-teardown-03",
+   "suite": "session-teardown",
+   "diff": "S",
+   "title": "cloud-configured provider fires zero erases across archive + stop (SKIPPED with the suite; cloud no-op covered by internal/llm teardown unit tests)",
+   "paths": [
+    "internal/llm/teardown.go"
    ]
   }
  ]
