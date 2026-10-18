@@ -165,7 +165,7 @@ func pushEffectsKey(req *PushRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("push effect key: marshal sessions: %w", err)
 	}
-	return effects.EffectKey("push.notify", string(sessionsJSON), req.Source, string(req.Type), req.Content), nil
+	return effects.PushNotifyKey(string(sessionsJSON), req.Source, string(req.Type), req.Content), nil
 }
 
 // publishToSessions performs the actual bus delivery: one publish on

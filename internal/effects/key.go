@@ -25,3 +25,21 @@ func EffectKey(parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(normalized, "\x1f")))
 	return hex.EncodeToString(sum[:])
 }
+
+// GitPushKey constructs the effect key for a git push operation.
+// It takes the remote path and the commit SHA, omitting sessionID since
+// the same-SHA push is idempotent. This preserves the exact key composition
+// used by internal/backup/git_ops.go:270.
+func GitPushKey(remotePath, headSHA string) string {
+	return EffectKey("backup.git_push", remotePath, headSHA)
+}
+
+// PushNotifyKey constructs the effect key for a push notification.
+// It takes the marshaled session IDs JSON, source, type, and content,
+// preserving the exact key composition used by internal/services/push_service.go:168.
+func PushNotifyKey(sessionsJSON, source, typ, content string) string {
+	return EffectKey("push.notify", sessionsJSON, source, typ, content)
+}
+
+// New effect types must add a named constructor here to enforce the
+// documented key convention and ensure existing ledgers keep matching.

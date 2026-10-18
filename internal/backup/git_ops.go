@@ -267,7 +267,7 @@ func GitAddCommitPushWithLedger(repo *git.Repository, ledger effects.Ledger, fil
 		return false, Wrap("git_effects_head", err)
 	}
 	headSHA := head.Hash().String()
-	key := effects.EffectKey("backup.git_push", remotePath, headSHA)
+	key := effects.GitPushKey(remotePath, headSHA)
 
 	receipt, reused, err := effects.Run(context.Background(), ledger, key, effects.EffectMeta{
 		Tool:               "backup.git_push",
