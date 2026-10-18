@@ -1102,6 +1102,20 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 	}
 
+	// Wire the same fence + security orchestrator the agent-path shell tool
+	// gets (components.go registerTools) into the TerminalService shell.
+	// Without this the terminal RPC path runs with only the built-in
+	// RiskCritical blocklist while the agent path is fenced (bughunt
+	// 2026-10-15 A1).
+	if svcRegistry.Terminal != nil {
+		if components.FenceChecker != nil {
+			svcRegistry.Terminal.SetFenceChecker(components.FenceChecker)
+		}
+		if components.SecurityOrchestrator != nil {
+			svcRegistry.Terminal.SetSecurityOrchestrator(components.SecurityOrchestrator)
+		}
+	}
+
 	// Wire upload store into agent loop for vision pre-flight image resolution.
 	// The UploadService satisfies llm.UploadStore via its Load method.
 	if svcRegistry.Upload != nil && components.AgentLoop != nil {
