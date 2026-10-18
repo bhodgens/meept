@@ -248,6 +248,13 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		} else {
 			m.logger.Info("Memvid backend selected but not enabled in [memvid] config, using the built-in local store")
 		}
+	default:
+		// Unknown backend value: log a warning and fall back to the built-in
+		// local store. Deliberately does NOT attempt memvid (unlike the
+		// empty/memvid case): a typo must not silently enable a remote
+		// backend the operator never named.
+		m.logger.Warn("unknown memory backend value, falling back to local store", "backend", m.config.Backend)
+		wantSQLite = true
 	}
 
 	// Initialize SQLite backends when needed (explicit sqlite backend, or memvid fallback)

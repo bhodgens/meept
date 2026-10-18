@@ -50,12 +50,13 @@ type Consolidator struct {
 	// window. A func field (not the l0 dir/maxAgeDays pair) keeps the
 	// gating decision (memory.l0_enabled + l0_retention_days) with the
 	// daemon wiring. Nil (the default) = pass disabled; see runL0PrunePass.
-	l0Prune  func(ctx context.Context)
-	mu       sync.Mutex
-	running  bool
-	lastRun  *time.Time
-	stopChan chan struct{}
-	stopOnce sync.Once // Guards against double-close of stopChan
+	l0Prune   func(ctx context.Context)
+	mu        sync.Mutex
+	running   bool
+	lastRun   *time.Time
+	stopChan  chan struct{}
+	stopOnce  sync.Once // Guards against double-close of stopChan
+	startOnce sync.Once // Guards StartPeriodicConsolidation against double-start
 }
 
 // ConsolidatorConfig holds configuration for the consolidator.
@@ -922,26 +923,30 @@ func (c *Consolidator) deduplicateTasks(ctx context.Context) (int, error) {
 }
 
 // StartPeriodicConsolidation starts a background goroutine that runs
-// consolidation at the specified interval.
+// consolidation at the specified interval. Guarded by startOnce: a second
+// call is a no-op (bughunt 2026-10-15 hazard: an unguarded second caller
+// started a second ticker; boot calls it exactly once today).
 func (c *Consolidator) StartPeriodicConsolidation(ctx context.Context, interval time.Duration, olderThanHours int) {
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+	c.startOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-c.stopChan:
-				return
-			case <-ticker.C:
-				_, err := c.Run(ctx, olderThanHours)
-				if err != nil {
-					c.logger.Error("Periodic consolidation failed", "error", err)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-c.stopChan:
+					return
+				case <-ticker.C:
+					_, err := c.Run(ctx, olderThanHours)
+					if err != nil {
+						c.logger.Error("Periodic consolidation failed", "error", err)
+					}
 				}
 			}
-		}
-	}()
+		}()
+	})
 }
 
 // Stop stops the periodic consolidation.

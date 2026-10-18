@@ -62,9 +62,6 @@ type BridgesConfig struct {
 // distinguish "LLM unavailable" from per-bridge rejections.
 var ErrBridgeGenerate = errors.New("bridge generation: llm call failed")
 
-// errBridgeMalformed wraps unparseable generator output (counted, not fatal).
-var errBridgeMalformed = errors.New("bridge generation: malformed model output")
-
 // BridgeGenerator produces grammar-constrained bridging-fact JSON for one
 // bridge entity over its candidate sources. Pluggable for tests, mirroring
 // the DistillSummarizer pattern.

@@ -12,7 +12,9 @@ import (
 func TestManager_BackendDefaultCase(t *testing.T) {
 	// Test that an unknown backend value triggers a warning and falls back to local store
 	var buf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		Level: slog.LevelWarn,
+	}))
 
 	cfg := ManagerConfig{
 		Config: config.MemoryConfig{
