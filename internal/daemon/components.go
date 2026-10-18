@@ -2844,6 +2844,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	c.ACPManager = acpMgr
 	RegisterACPTools(c.ToolRegistry, c.ACPManager)
 
+	// Hermes gateway interop (hermes-interop leaf 02): the `hermes`
+	// builtin tool when [hermes] enabled=true and the API key resolves
+	// from hermes.api_key_env; nil-safe no-op otherwise.
+	RegisterHermesTools(c.ToolRegistry, cfg.Hermes)
+
 	// Register /remember tool for agents to propose improvements (Thread E)
 	c.ToolRegistry.Register(builtin.NewRememberTool(".meept/improvements.md"))
 	logger.Info("Registered /remember tool")
