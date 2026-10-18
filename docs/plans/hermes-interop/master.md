@@ -138,8 +138,21 @@ Wave order: 01 → 02 → 03 (serial; 02 consumes 01's API, 03 documents it).
 | Leaf | Status | Commit | Notes |
 |------|--------|--------|-------|
 | 01 | COMPLETE 2026-10-18 | 90da68e8 (+e7c37a6d gendoc) | HermesConfig + internal/hermes client; 17 client tests; e2e suite hermes-client added |
-| 02 | PENDING | — | |
-| 03 | PENDING | — | |
+| 02 | COMPLETE 2026-10-18 | 1ed9948f | 8 verbs + RegisterHermesTools at components.go:2850; 21 tests |
+| 03 | COMPLETE 2026-10-18 | edcfac1d | docs/workflows/hermes.md extended (nav pre-existing); v1 session_id limitation + error semantics documented; matrix row added |
+
+Tree COMPLETE 2026-10-18 — 3/3 leaves committed, 100%. Integration gate:
+both binaries build; hermes/config/tools.builtin suites green (-count=1).
+
+## Follow-ups (post-tree)
+
+- `internal/hermes` client: add `CreateSession` (POST /api/sessions) + `chat`
+  verb auto-create when session_id empty (Contract C's original shape).
+- Repo-owner env: `tools/analyzers/predid`+`mutexio` fail on any package
+  with "export data version 5 > maximum supported 4" when run directly —
+  analyzer binaries older than go1.27.2 stdlib. `make lint-ci` passes
+  (different invocation); direct `go run ./tools/analyzers/...` is what
+  breaks.
 
 ## Integration gates
 
