@@ -34,6 +34,9 @@ type CommandResult struct {
 	SetProjectID string
 	// RefreshProject requests the app to re-fetch project info (e.g. after rename).
 	RefreshProject bool
+	// NewSession requests the app to create and switch to a brand-new
+	// session (parity with the GUI's /new).
+	NewSession bool
 }
 
 // CommandResultMsg is a bubbletea message containing a command result.
@@ -174,8 +177,10 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 	switch cmd.Name {
 	case "help":
 		return h.executeHelp(cmd.Args)
-	case "new", "clear":
+	case "new":
 		return h.executeNew()
+	case "clear":
+		return h.executeClear()
 	case "retry":
 		return h.executeRetry()
 	case "undo":
@@ -247,7 +252,8 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	var sb strings.Builder
 	sb.WriteString("available commands:\n\n")
 	sb.WriteString("  /help [command]     show help for commands\n")
-	sb.WriteString("  /new, /clear        start fresh conversation\n")
+	sb.WriteString("  /new                create a new session (kept history)\n")
+	sb.WriteString("  /clear              clear the current conversation in place\n")
 	sb.WriteString("  /retry              retry last response\n")
 	sb.WriteString("  /undo               remove last exchange\n")
 	sb.WriteString("  /usage              show token usage for session\n")
@@ -292,13 +298,14 @@ with a command name, shows detailed help for that command.`,
 
 		"new": `usage: /new
 
-start a fresh conversation. clears the current conversation history
-and begins a new session. same as /clear.`,
+create a brand-new session. the current session's history is kept
+under its own session; you switch to an empty one. same as the
+gui's /new. use /clear to wipe the current conversation in place.`,
 
 		"clear": `usage: /clear
 
-clear the current conversation. starts fresh with no history.
-same as /new.`,
+clear the current conversation in place (the session and its
+history remain). use /new to create a brand-new session instead.`,
 
 		"retry": `usage: /retry
 
@@ -514,8 +521,18 @@ examples:
 	}
 }
 
-// executeNew starts a fresh conversation.
+// executeNew creates a brand-new session (GUI /new parity): the app handles
+// the NewSession action by creating a session via the daemon and switching to
+// it. The old conversation's history stays intact under its own session.
 func (h *CommandHandler) executeNew() *CommandResult {
+	return &CommandResult{
+		Output:     "creating new session...",
+		NewSession: true,
+	}
+}
+
+// executeClear clears the current conversation in place.
+func (h *CommandHandler) executeClear() *CommandResult {
 	return &CommandResult{
 		Output:            "conversation cleared",
 		ClearConversation: true,

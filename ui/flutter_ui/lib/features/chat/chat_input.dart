@@ -1421,12 +1421,10 @@ class _ChatInputState extends ConsumerState<ChatInput>
 
     switch (command) {
       case '/new':
-        // KNOWN SEMANTIC DIVERGENCE (TUI parity): the TUI's /new clears the
-        // conversation in place (executeNew -> ClearConversation), while the
-        // GUI's /new creates a brand-new session. Both are intentional for
-        // now; cross-surface alignment is a tracked follow-up decision (GUI
-        // slash-command parity leaf, 2026-10 audit). Do not "fix" one side
-        // without the other.
+        // Creates a brand-new session via the daemon; the old session's
+        // history stays under its own session. The TUI's /new does the
+        // same (GUI parity). /clear wipes the current conversation in
+        // place on both surfaces.
         _history.add(widget.sessionId, text);
         _createNewSession();
         return true;

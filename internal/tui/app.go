@@ -1962,6 +1962,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+			// Handle /new - create a brand-new session (GUI parity).
+			if msg.Result.NewSession {
+				return a, a.createSession(a.clientConfig.Session.DefaultName)
+			}
+
 			// Handle project refresh (e.g. after rename).
 			if msg.Result.RefreshProject {
 				return a, tea.Batch(
