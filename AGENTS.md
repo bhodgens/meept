@@ -6,7 +6,10 @@ Guidance for AI coding agents working in this repository.
 summaries; the full contracts live next to the code:
 
 ```
-internal/llm/     -> internal/llm/AGENTS.md     (quota blocks, refusals, alias resolution)
+internal/llm/     -> internal/llm/AGENTS.md     (quota blocks, refusals, alias resolution,
+                                                 session affinity headers, sticky rotation,
+                                                 upstream teardown)
+internal/session/ -> internal/session/AGENTS.md (lifecycle hooks, idle reaper)
 internal/daemon/  -> internal/daemon/AGENTS.md  (runtime lifecycle, spawn guards)
 internal/agent/   -> internal/agent/AGENTS.md   (chat contracts, output filters, session IDs)
 internal/comm/    -> internal/comm/AGENTS.md    (WS classification, bus topics)
@@ -130,7 +133,8 @@ make e2e-sweep-selftest       # CI: offline sweep grading/completion/CLI regress
 
 # Git hooks (bash >= 3.2; sub-hooks run under whatever `bash` is on PATH, so the
 # suite also executes on the Linux CI runner)
-make hooks                # core.hooksPath -> .githooks (17 pre-commit checks)
+make hooks                # core.hooksPath -> .githooks (18 pre-commit checks +
+                          # pre-push chain: e2e-affected gate, then bench gate)
 # Package-classification rule for those hooks: a staged package's state comes
 # from `go list -e` STDOUT only. {{.Error}} prints there, while stderr carries
 # progress noise ("go: downloading ..." on a cold GOMODCACHE) that must never be
@@ -282,6 +286,19 @@ Full rules live in `internal/daemon/AGENTS.md`. Short form: runtimes are long-li
 daemon children — never spawn into a served endpoint, never kill another instance's
 runtime, only `StartupOrphanSweep` reaps orphans, sweep before spawn, and a local
 classifier that never becomes healthy fails startup (F-D8).
+
+### Session affinity headers and upstream teardown
+
+Full rules live in `internal/llm/AGENTS.md` (header plumbing, sticky rotation,
+teardown adapters; `docs/workflows/session-affinity.md` is the user-facing doc).
+Short form: affinity headers are DEFAULT-ON (`llm.session_affinity`, header
+`session_id`) on the OpenAI-compatible, Anthropic, and Codex clients — an empty
+scope sends NO header, never an empty value; sticky endpoint preference is a
+request-scoped READ whose precedence is quota blocks > endpoint cooldowns >
+alias blocks > stickiness; teardown (KV-cache erase on session archive/delete/
+idle/shutdown) is best-effort with the verified route `POST /slots/0?action=erase`
+and NEVER fails a turn, an archive, or a shutdown; cloud providers are an
+explicit no-op.
 
 ## Coding Practices
 

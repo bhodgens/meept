@@ -2614,7 +2614,7 @@
    "id": "session-affinity-03",
    "suite": "session-affinity",
    "diff": "L",
-   "title": "sticky rotation follows health (SKIPPED, documented blocker): alias cursor rotates to member B but the sticky hook re-pulls dead member A; see the suite's doc comment",
+   "title": "sticky rotation follows health: a 5xx now arms an endpoint cooldown (server-error class), so the remembered dead endpoint is disqualified and the healthy rotation winner actually serves; see the suite's doc comment",
    "paths": [
     "internal/llm/resolver.go",
     "internal/llm/provider_manager.go"
@@ -2624,7 +2624,7 @@
    "id": "session-teardown-01",
    "suite": "session-teardown",
    "diff": "M",
-   "title": "archive fires exactly one POST /slots/0?action=erase (SKIPPED, documented blocker: snapshot key shape host|cred vs llama-cpp: prefix); see the suite's package comment",
+   "title": "archive fires exactly one POST /slots/0?action=erase: LlamaServerTeardown.Handles accepts the host|credential snapshot key shape and the erase route strips /v1; see the suite's package comment",
    "paths": [
     "internal/llm/teardown.go",
     "internal/session/lifecycle.go",
@@ -2635,7 +2635,7 @@
    "id": "session-teardown-02",
    "suite": "session-teardown",
    "diff": "M",
-   "title": "daemon-stop sweep fires exactly one erase per active session (SKIPPED, same blocker as session-teardown-01)",
+   "title": "daemon-stop sweep fires exactly one erase per active session: SweepTeardown erases without a live-session reference count (all sessions end together at shutdown); see the suite's package comment",
    "paths": [
     "internal/llm/teardown.go",
     "internal/daemon/daemon.go"
@@ -2645,7 +2645,7 @@
    "id": "session-teardown-03",
    "suite": "session-teardown",
    "diff": "S",
-   "title": "cloud-configured provider fires zero erases across archive + stop (SKIPPED with the suite; cloud no-op covered by internal/llm teardown unit tests)",
+   "title": "cloud-configured provider fires zero erases across archive + stop (cloud no-op is key-shape-agnostic; TeardownBaseURL's endpointHost compare keeps cloud endpoints out of the llama adapter)",
    "paths": [
     "internal/llm/teardown.go"
    ]

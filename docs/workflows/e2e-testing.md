@@ -137,6 +137,26 @@ MEEPT_SKIP_E2E=1 git commit -m "..."
 
 `--no-verify` also bypasses (bypasses all 18 checks — emergencies only).
 
+## The push-boundary second line (`pre-push-e2e`)
+
+`pre-commit-e2e` gates at commit time, and a commit-time gate can be
+bypassed (`--no-verify`, `MEEPT_SKIP_E2E=1`, or a hook run killed
+mid-sweep). `pre-push-e2e` is the last local checkpoint before a commit
+reaches the remote: on every `git push` it diffs each pushed ref
+(`remote_sha..local_sha`), feeds the changed paths to
+`scripts/e2e-affected.sh`, and runs exactly the affected hermetic suites
+— same mapping, same suite runner, push boundary instead of commit
+boundary. A red suite blocks the push. A new branch with no tracking ref
+runs the smoke suite instead, so the gate never degrades to a no-op.
+
+```bash
+MEEPT_E2E_SKIP=1 git push   # loud skip of this gate only (emergencies)
+```
+
+CI's `make e2e-fast` (job `e2e-fast`) is the third, remote-enforced line;
+the push gate is what makes the local bypass non-shippable before CI
+even starts.
+
 ## NO-NEW-UNIT-TESTS policy
 
 **All new feature tests go in the e2e tier. Existing unit tests may be

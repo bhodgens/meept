@@ -564,11 +564,34 @@ extract_feature_name() {
 - [glm-5.2 Model](https://z.ai/) - Z.ai language model
 - CLAUDE.md - Project-specific guidelines
 
-## Pre-push: bench regression gate (pre-push → pre-push-bench)
+## Pre-push chain (pre-push → pre-push-e2e → pre-push-bench)
 
-Before every `git push`, runs the meept-bench regression suite
-(9 tasks, ~2 min) against the local daemon and diffs the result against
-the committed baseline (`~/git/meept-bench/results/baseline/regression.jsonl`).
+`git push` runs two gates in `.githooks/pre-push`, in order:
+
+### 1. pre-push-e2e — affected hermetic e2e gate (push boundary)
+
+The pre-commit e2e check (18/18) can be bypassed at commit time
+(`--no-verify`, `MEEPT_SKIP_E2E=1`, or a hook run killed mid-sweep). This
+gate is the last local checkpoint before a commit reaches the remote: for
+each pushed ref it diffs `remote_sha..local_sha`, feeds the changed paths
+to `scripts/e2e-affected.sh` (mapped through `e2e/manifest.json`), and runs
+exactly the affected hermetic suites. A red suite blocks the push.
+
+- **New branch, no tracking ref** → the smoke suite runs instead, so the
+  gate stays non-decorative.
+- **No changed files** (up-to-date, or deletion) → no-op.
+- Runs BEFORE the bench gate because it needs no running daemon and fails
+  fast.
+
+```bash
+MEEPT_E2E_SKIP=1 git push   # loud skip of this gate only (emergencies)
+```
+
+### 2. pre-push-bench — bench regression gate
+
+Runs the meept-bench regression suite (9 tasks, ~2 min) against the local
+daemon and diffs the result against the committed baseline
+(`~/git/meept-bench/results/baseline/regression.jsonl`).
 
 - **Regressed or errored** → push blocked, scorecard path printed.
 - **Daemon unreachable** → push blocked with instructions (the gate is

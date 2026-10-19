@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+#
+# pre-push-e2e — push-boundary e2e gate for the NO-NEW-UNIT-TESTS policy.
+#
+# pre-commit-e2e (check 18/18) gates the affected hermetic e2e suites at
+# COMMIT time. This hook closes the bypass hole: a commit that skipped or
+# broke that gate (--no-verify, MEEPT_SKIP_E2E=1, or a hook run that was
+# killed mid-sweep) still cannot LAND on the remote while any affected
+# hermetic e2e suite is red. CI's `make e2e-fast` (code-quality.yml, job
+# e2e-fast) is the second line; this gate runs locally at the push
+# boundary, before anything reaches the remote at all.
+#
+# For each ref being pushed, the changed paths (remote_sha..local_sha) are
+# fed to scripts/e2e-affected.sh, which maps them through
+# e2e/manifest.json and runs exactly the affected suites. A failing suite
+# blocks the push. A pushed diff with no mapped feature paths is a no-op
+# (same as pre-commit-e2e).
+#
+# New branch with no usable base (remote_sha all-zeros and no tracking
+# ref): the smoke suite runs instead — the gate stays non-decorative,
+# same fallback philosophy as scripts/e2e-affected.sh.
+#
+# Skip (emergencies only — prints a loud warning):
+#   MEEPT_E2E_SKIP=1 git push
+# `git push --no-verify` bypasses every pre-push hook (bench gate
+# included).
+#
+# bash-3.2 compatible; toolchain pin mirrors .githooks/pre-push:30-38.
+
+set -u -o pipefail
+
+if [ -z "${GOTOOLCHAIN:-}" ] || [ "${GOTOOLCHAIN:-}" = "auto" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^toolchain[[:space:]]//p' "$PWD/go.mod" 2>/dev/null | head -1)"
+fi
+if [ -z "${GOTOOLCHAIN:-}" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^go[[:space:]]//p' "$PWD/go.mod" 2>/dev/null | head -1)"
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+ZERO="0000000000000000000000000000000000000000"
+
+if [ "${MEEPT_E2E_SKIP:-0}" = "1" ]; then
+    echo ""
+    echo "============================================================"
+    echo "  !!! PUSH E2E GATE SKIPPED — MEEPT_E2E_SKIP=1 !!!"
+    echo "  The affected hermetic e2e suites were NOT run before this"
+    echo "  push. Emergencies only; re-run the gate before the next"
+    echo "  push:  scripts/e2e-affected.sh --from-diff"
+    echo "============================================================"
+    exit 0
+fi
+
+REMOTE_NAME="${1:-origin}"
+
+TMP="$(mktemp "${TMPDIR:-/tmp}/pre-push-e2e.XXXXXX")"
+trap 'rm -f "$TMP"' EXIT
+
+failed=0
+ran=0
+
+# Git feeds one line per ref: <local ref> SP <local sha> SP <remote ref>
+# SP <remote sha> LF. remote sha all-zeros = new branch; local sha
+# all-zeros = branch deletion. Annotated tags arrive peeled
+# (<sha>^{}).
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -n "${local_ref:-}" ] || continue
+    local_sha="${local_sha%\^{}}"
+    remote_sha="${remote_sha%\^{}}"
+
+    if [ "$local_sha" = "$ZERO" ]; then
+        echo "pre-push-e2e: $local_ref is a deletion — nothing to check."
+        continue
+    fi
+    if [ "$local_sha" = "$remote_sha" ]; then
+        echo "pre-push-e2e: $local_ref already up to date — nothing to check."
+        continue
+    fi
+
+    base="$remote_sha"
+    if [ "$base" = "$ZERO" ]; then
+        # New branch: use the remote-tracking ref as the base when one
+        # exists; otherwise fall back to the smoke suite below.
+        tracking="refs/remotes/${REMOTE_NAME}/$(basename "$local_ref")"
+        if base="$(git rev-parse --verify -q "$tracking")"; then
+            echo "pre-push-e2e: new branch $local_ref — checking against tracking ref $tracking."
+        else
+            base=""
+        fi
+    fi
+
+    if [ -n "$base" ]; then
+        git diff --name-only "$base..$local_sha" > "$TMP" || exit 1
+        if [ ! -s "$TMP" ]; then
+            echo "pre-push-e2e: $local_ref has no changed files — nothing to do."
+            continue
+        fi
+        echo "pre-push-e2e: checking $(wc -l < "$TMP" | tr -d ' ') changed file(s) on $local_ref..."
+        ran=1
+        if ! scripts/e2e-affected.sh < "$TMP"; then
+            echo "pre-push-e2e: FAIL — affected hermetic e2e suite(s) are red for $local_ref."
+            failed=1
+        fi
+    else
+        echo "pre-push-e2e: new branch $local_ref with no tracking ref — running the smoke suite."
+        ran=1
+        if ! go test -tags e2e -count=1 -p 2 ./e2e/suites/smoke/...; then
+            echo "pre-push-e2e: FAIL — smoke suite is red for $local_ref."
+            failed=1
+        fi
+    fi
+done
+
+if [ "$failed" = "1" ]; then
+    echo ""
+    echo "============================================================"
+    echo "  PUSH BLOCKED: affected hermetic e2e suite(s) FAILED."
+    echo "  Fix the suite (or the feature code) and re-push. The gate"
+    echo "  is the point — a red feature commit must not land on the"
+    echo "  remote."
+    echo "  Emergency skip (loud, in the transcript):"
+    echo "    MEEPT_E2E_SKIP=1 git push"
+    echo "============================================================"
+    exit 1
+fi
+
+if [ "$ran" = "0" ]; then
+    echo "pre-push-e2e: no pushed ref had changed files — nothing to run."
+else
+    echo "pre-push-e2e: OK — all affected hermetic e2e suites passed."
+fi
+exit 0

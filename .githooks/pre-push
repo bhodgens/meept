@@ -1,5 +1,12 @@
 #!/opt/homebrew/bin/bash
-# Pre-push hook: runs pre-push-bench (bench regression gate).
+# Pre-push hook: runs pre-push-e2e (affected hermetic e2e suites over the
+# pushed diff), then pre-push-bench (bench regression gate).
+#
+# WHY two gates: pre-commit-e2e (check 18/18) can be bypassed at commit
+# time (--no-verify, MEEPT_SKIP_E2E=1, or a hook run killed mid-sweep).
+# The push boundary is the last local checkpoint before a commit reaches
+# the remote; the e2e gate runs first because it needs no running daemon,
+# and it fails fast before the ~2 min bench gate starts.
 # Other pre-push checks can be chained here.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,6 +24,7 @@ if [ -z "$GOTOOLCHAIN" ]; then
     export GOTOOLCHAIN="$(sed -n 's/^go[[:space:]]//p' "$PWD/go.mod" | head -1)"
 fi
 
+"$SCRIPT_DIR/pre-push-e2e" "$remote" || exit 1
 "$SCRIPT_DIR/pre-push-bench" || exit 1
 
 exit 0
