@@ -1056,6 +1056,7 @@
     "base_url": "http://127.0.0.1:8642",  // Hermes gateway default endpoint
     "api_key_env": "HERMES_API_SERVER_KEY", // env indirection ONLY — never the key itself
     "timeout_seconds": 300,               // sync chat turns are long
+    "auto_approve": false,                // false = `approve` verb asks the meept user first; true = forward decisions to the gateway directly
   },
 
   // Speech-to-text configuration (client-side: TUI and Flutter)

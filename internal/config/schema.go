@@ -141,6 +141,10 @@ type HermesConfig struct {
 	// TimeoutSeconds bounds a single client request (default 300 —
 	// synchronous chat turns are long).
 	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	// AutoApprove forwards hermes `approve` verb decisions to the remote
+	// gateway WITHOUT meept-side user confirmation (default false —
+	// the approve verb returns a phase-1 confirmation prompt first).
+	AutoApprove bool `json:"auto_approve" toml:"auto_approve"`
 }
 
 // BrowserConfig configures the headless browser automation tool family
@@ -3168,6 +3172,7 @@ func DefaultConfig() *Config {
 			BaseURL:        "http://127.0.0.1:8642",
 			APIKeyEnv:      "HERMES_API_SERVER_KEY",
 			TimeoutSeconds: 300,
+			AutoApprove:    false,
 		},
 		LLM: LLMConfig{
 			ModelsDir: "~/.meept/models",

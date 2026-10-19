@@ -2629,6 +2629,10 @@ HermesConfig configures the native Hermes gateway interop \(\[hermes\]\): meept 
 	    // TimeoutSeconds bounds a single client request (default 300 —
 	    // synchronous chat turns are long).
 	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	    // AutoApprove forwards hermes `approve` verb decisions to the remote
+	    // gateway WITHOUT meept-side user confirmation (default false —
+	    // the approve verb returns a phase-1 confirmation prompt first).
+	    AutoApprove bool `json:"auto_approve" toml:"auto_approve"`
 	}
 
 <a name="HooksConfig"></a>

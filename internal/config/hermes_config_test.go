@@ -22,6 +22,9 @@ func TestHermesConfig_DisabledByDefault(t *testing.T) {
 	if cfg.Hermes.TimeoutSeconds != 300 {
 		t.Errorf("timeout_seconds = %d, want 300", cfg.Hermes.TimeoutSeconds)
 	}
+	if cfg.Hermes.AutoApprove {
+		t.Error("auto_approve should default to false (approve verb must ask the user first)")
+	}
 }
 
 // TestHermesConfig_JSON5RoundTrip proves the config section loads from the
@@ -37,6 +40,7 @@ func TestHermesConfig_JSON5RoundTrip(t *testing.T) {
     "base_url": "http://192.168.1.50:9000",
     "api_key_env": "MY_HERMES_KEY",
     "timeout_seconds": 30,
+    "auto_approve": true,
   },
 }
 `
@@ -59,6 +63,9 @@ func TestHermesConfig_JSON5RoundTrip(t *testing.T) {
 	}
 	if h.TimeoutSeconds != 30 {
 		t.Errorf("timeout_seconds = %d, want 30", h.TimeoutSeconds)
+	}
+	if !h.AutoApprove {
+		t.Error("auto_approve = false, want true (round-trip)")
 	}
 }
 
