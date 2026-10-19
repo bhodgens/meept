@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -232,6 +233,112 @@ func TestClient_SessionMessages(t *testing.T) {
 	}
 	if !strings.Contains(s.lastReq.URL.RawQuery, "limit=50") {
 		t.Errorf("limit query missing: %q", s.lastReq.URL.RawQuery)
+	}
+}
+
+// --- CreateSession model lock + SetSessionModel (session/model extension) --
+
+func TestClient_CreateSession_ExplicitIDWithModelLock(t *testing.T) {
+	s := newStubServer(t)
+	s.handle("/api/sessions", http.StatusCreated, `{"object":"hermes.session","session":{"id":"mine","model":"glm-5.3"}}`)
+	c := newTestClient(s.srv.URL)
+	detail, err := c.CreateSession(context.Background(), CreateSessionOptions{
+		ID: "mine", Model: "glm-5.3", Provider: "zai", RequireModelLock: true,
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if detail.ID != "mine" || detail.Model != "glm-5.3" {
+		t.Errorf("detail = %+v", detail)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(bytes.NewReader(s.lastBody)).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["id"] != "mine" || body["require_model_lock"] != true {
+		t.Errorf("body = %v, want id + require_model_lock", body)
+	}
+	if body["model"] != "glm-5.3" || body["provider"] != "zai" {
+		t.Errorf("body = %v, want model + provider", body)
+	}
+}
+
+func TestClient_CreateSession_LockUnavailable409(t *testing.T) {
+	s := newStubServer(t)
+	s.handle("/api/sessions", http.StatusConflict, `{"error":{"message":"Requested Browser model lock cannot be routed","code":"model_lock_unavailable"}}`)
+	c := newTestClient(s.srv.URL)
+	_, err := c.CreateSession(context.Background(), CreateSessionOptions{ID: "x", Model: "bogus", RequireModelLock: true})
+	// 409s that are NOT code=session_exists reuse the phase-1 conflict
+	// sentinel (pinned in client_ext_test.go for approval_not_pending).
+	// The upstream body — which names model_lock_unavailable — rides in
+	// the wrapped error text for the operator to read.
+	if !errors.Is(err, ErrHermesSessionForeign) {
+		t.Errorf("model_lock_unavailable 409 should reuse the conflict sentinel, got %v", err)
+	}
+	if errors.Is(err, ErrHermesSessionExists) {
+		t.Errorf("model_lock_unavailable must not classify as session_exists")
+	}
+	if !strings.Contains(err.Error(), "model_lock_unavailable") {
+		t.Errorf("error text must carry the upstream code, got %v", err)
+	}
+}
+
+func TestClient_SetSessionModel(t *testing.T) {
+	s := newStubServer(t)
+	s.handle("/api/sessions/s1/model", http.StatusOK, `{"object":"hermes.session.model_lock","session_id":"s1","runtime":{"provider":"zai","model":"glm-5.3","route_source":"model_routes","model_lock":"accepted"}}`)
+	c := newTestClient(s.srv.URL)
+	res, err := c.SetSessionModel(context.Background(), "s1", "zai", "glm-5.3")
+	if err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+	if res.SessionID != "s1" || res.Runtime.Model != "glm-5.3" || res.Runtime.ModelLock != "accepted" {
+		t.Errorf("res = %+v", res)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(bytes.NewReader(s.lastBody)).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["require_model_lock"] != true || body["model"] != "glm-5.3" || body["provider"] != "zai" {
+		t.Errorf("body = %v", body)
+	}
+}
+
+func TestClient_SetSessionModel_Validation(t *testing.T) {
+	c := newTestClient("http://127.0.0.1:1")
+	if _, err := c.SetSessionModel(context.Background(), "", "p", "m"); err == nil {
+		t.Error("want error for empty session id")
+	}
+	if _, err := c.SetSessionModel(context.Background(), "s1", "", ""); err == nil {
+		t.Error("want error when neither provider nor model given")
+	}
+}
+
+func TestClient_ListSessions_UpstreamDataShape(t *testing.T) {
+	s := newStubServer(t)
+	s.handle("/api/sessions", http.StatusOK, `{"object":"list","data":[{"id":"s1","started_at":1760000000.5,"model":"glm","source":"api_server","title":"t"}],"limit":50,"offset":0,"has_more":false}`)
+	c := newTestClient(s.srv.URL)
+	list, err := c.ListSessions(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != "s1" || list[0].Model != "glm" {
+		t.Fatalf("list = %+v", list)
+	}
+	if !strings.Contains(list[0].Created(), "1760000000") {
+		t.Errorf("Created() = %q, want started_at passthrough", list[0].Created())
+	}
+}
+
+func TestClient_SessionMessages_UpstreamDataShape(t *testing.T) {
+	s := newStubServer(t)
+	s.handle("/api/sessions/s1/messages", http.StatusOK, `{"object":"list","session_id":"s1","data":[{"role":"user","content":"hey"}]}`)
+	c := newTestClient(s.srv.URL)
+	msgs, err := c.SessionMessages(context.Background(), "s1", 0)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Role != "user" {
+		t.Fatalf("msgs = %+v", msgs)
 	}
 }
 
