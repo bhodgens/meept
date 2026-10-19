@@ -147,7 +147,7 @@ field; 03 consumes 02's seam).
 | Leaf | Status | Commit | Notes |
 |------|--------|--------|-------|
 | 01 | COMPLETE 2026-10-19 | 57093292 | field+validate+template+docs; [acp] section ADDED to config/meept.json5 (none existed); docs/workflows/acp.md mode list deferred to leaf 03 per deviation note |
-| 02 | PENDING | | |
+| 02 | COMPLETE 2026-10-19 | 3d8128e3 | Decisioner seam + fail-closed lane + 13 tests + e2e acp-wire scenarios; threshold flows via m.cfg (no extra Manager field); permissive/deny byte-identical pins green |
 | 03 | PENDING | | |
 | Integration | PENDING | | |
 
