@@ -52,6 +52,19 @@ func (m *Manager) SetDecisionClient(d Decisioner) {
 	m.mu.Unlock()
 }
 
+// HasDecisionClient reports whether a decision seam is currently injected.
+// Read-only inspection for wiring tests (acp-permission-decision leaf 03):
+// the daemon layer asserts SetDecisionClient was applied without reaching
+// into unexported state. Nil-safe.
+func (m *Manager) HasDecisionClient() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.decision != nil
+}
+
 // NewManager constructs a Manager from an already-loaded catalog.
 // Tests override startFn after construction; production uses Start.
 func NewManager(cfg config.ACPConfig, catalog *config.ACPAgentsConfig) *Manager {

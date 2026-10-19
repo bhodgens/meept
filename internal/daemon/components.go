@@ -815,6 +815,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// the resolver block below when decision_gate_enabled; registered onto
 	// the hook registry at the hook-wiring block. Nil = feature off.
 	var decisionGate *builtin.DecisionGateHook
+	// Shared decision-model client (acp-permission-decision leaf 03,
+	// Contract C): ONE *llm.DecisionClient instance serves both consumers —
+	// the tool-call gate hook above and the ACP permission lane below —
+	// constructed in the resolver block when EITHER is enabled. The
+	// interface type holds *llm.DecisionClient (satisfies both seams); nil
+	// when neither consumer needs it (zero overhead, no slot resolved).
+	var decisionClient acp.Decisioner
 	if llmCfg != nil {
 		// Create budget tracker from config. llmBudgetConfigFromConfig applies the
 		// single global switch (llm.budget.enabled) and is the only place budget
@@ -961,16 +968,26 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.Debug("LLM resolver initialized")
 
 			// Decision-model irreversibility gate (decision-model tree leaf
-			// 03, docs/plans/decision-model/03-irreversibility-gate.md).
-			// Constructed ONLY when decision_gate_enabled is true (opt-in:
-			// zero behavior change for existing installs); registration onto
-			// the hook registry happens below at the hook-wiring block.
-			// Unconfigured decision_model → Available()==false → the gate
-			// never fires even when armed (fail-open semantics live in the
-			// hook itself).
+			// 03, docs/plans/decision-model/03-irreversibility-gate.md) +
+			// the ACP permission decision lane (acp-permission-decision
+			// leaf 03, Contract C). The ONE shared *llm.DecisionClient is
+			// constructed when EITHER consumer needs it: the gate hook is
+			// opt-in on decision_gate_enabled; the ACP lane opts in on
+			// [acp] permission_mode == "decision" (and only arms when
+			// [acp] enabled is also true). Neither on => no client built at
+			// all (zero overhead). Either on with an unconfigured
+			// decision_model slot => Available()==false => the gate stays
+			// inert (fail-open) and the ACP lane fails closed per-session
+			// (unavailable) — both without behavior change for installs
+			// that opted out. Registration onto the hook registry happens
+			// below at the hook-wiring block.
+			acpWantsDecision := cfg.ACP.Enabled && cfg.ACP.PermissionMode == "decision"
+			if providersCfg.DecisionGateEnabled || acpWantsDecision {
+				decisionClient = llm.NewDecisionClient(c.LLMResolver, logger.With("component", "decision-client"))
+			}
 			if providersCfg.DecisionGateEnabled {
 				decisionGate = builtin.NewDecisionGateHook(
-					llm.NewDecisionClient(c.LLMResolver, logger.With("component", "decision-client")),
+					decisionClient,
 					providersCfg.DecisionEscalationThreshold,
 					providersCfg.DecisionGateTools,
 					logger,
@@ -2837,11 +2854,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// re-registered as cache-gated wrappers; off => no-op.
 	applyDeterministicToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
 
-	acpMgr, acpErr := applyACPFromConfig(cfg.ACP)
+	acpMgr, acpErr := applyACPFromConfig(cfg.ACP, decisionClient)
 	if acpErr != nil {
 		return nil, acpErr
 	}
 	c.ACPManager = acpMgr
+	if acpMgr != nil && acpMgr.HasDecisionClient() {
+		// applyACPFromConfig stays log-free (zero-log contract); the single
+		// Info line for the armed lane lives here (acp-permission-decision
+		// leaf 03).
+		logger.Info("acp permission decision lane armed", "threshold", cfg.ACP.DecisionThreshold)
+	}
 	RegisterACPTools(c.ToolRegistry, c.ACPManager)
 
 	// Hermes gateway interop (hermes-interop leaf 02): the `hermes`

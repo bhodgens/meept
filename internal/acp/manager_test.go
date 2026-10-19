@@ -604,6 +604,34 @@ func TestManager_SetDecisionClient_NilSafe(t *testing.T) {
 	m2.SetDecisionClient(&stubDecisioner{available: true})
 }
 
+// TestManager_HasDecisionClient pins the read-only inspection seam added
+// for the daemon wiring tests (acp-permission-decision leaf 03): false on a
+// fresh manager and on a nil receiver, true after SetDecisionClient, false
+// again after clearing with nil.
+func TestManager_HasDecisionClient(t *testing.T) {
+	t.Parallel()
+
+	var m *Manager
+	if m.HasDecisionClient() {
+		t.Fatal("nil receiver: HasDecisionClient() = true, want false (nil-safe)")
+	}
+
+	m2 := NewManager(testACPConfig(true, 3), testAgents(
+		config.ACPAgentEntry{ID: "echo", Command: []string{"agent"}, Enabled: true},
+	))
+	if m2.HasDecisionClient() {
+		t.Fatal("fresh manager: HasDecisionClient() = true, want false")
+	}
+	m2.SetDecisionClient(&stubDecisioner{available: true})
+	if !m2.HasDecisionClient() {
+		t.Fatal("after SetDecisionClient: HasDecisionClient() = false, want true")
+	}
+	m2.SetDecisionClient(nil)
+	if m2.HasDecisionClient() {
+		t.Fatal("after clearing: HasDecisionClient() = true, want false")
+	}
+}
+
 // TestManager_DecisionModeStampsSessionConfig pins that decision mode
 // threads the injected Decisioner + cfg threshold into the SessionConfig
 // handed to startFn.

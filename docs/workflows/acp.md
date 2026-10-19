@@ -32,9 +32,45 @@ answered according to `[acp] permission_mode`:
 
 - `permissive` (default): auto-approve and log
 - `deny`: auto-deny and log
+- `decision`: ask the decision model (the resolved `decision_model` slot) and
+  **fail closed** — approve only when the decider explicitly answers `allow`
+  with confidence at or above `[acp] decision_threshold`; every other outcome
+  cancels the request
 
 The wire layer (`Transport`) correlates JSON-RPC ids, fans notifications,
 and can `Reply` to inbound requests.
+
+### Decision mode
+
+Each decision-mode request asks one typed `noul` question — options
+`allow` / `deny`, prompt "May this action run?", state = the agent id plus
+the raw permission params truncated to 300 runes (v1 parses nothing). The
+ask is bounded by a fixed 15 s timeout; a slow decider never wedges the
+wire loop.
+
+Outcomes appear as a `permission_decision` session event whose text is
+`allow`, `deny`, or a deny-reason token:
+
+| Token | Cause |
+|-------|-------|
+| `no_decisioner` | no decision client injected at wiring time |
+| `unavailable` | client present but the `decision_model` slot resolves nothing |
+| `ask_error` | the Ask call errored (transport, unavailability, parse failure) |
+| `deny` | the decider answered `deny` |
+| `answer_deny` | the answer was neither `allow` nor `deny` (noise treated as deny) |
+| `low_confidence` | answered `allow` below `decision_threshold` |
+
+Fail-closed is deliberate and the OPPOSITE polarity of the tool-call decision
+gate (`decision_gate_enabled`, which fails open): a permission request guards
+an external side effect inside someone else's agent session, so a down
+decider must not silently grant it.
+
+Independence: the lane's knobs live under `[acp]` only
+(`permission_mode`, `decision_threshold`). Enabling decision mode requires a
+configured `decision_model` slot but never reads or flips
+`decision_gate_enabled`, `decision_escalation_threshold`, or
+`compaction.decision_*`. The daemon shares ONE decision client instance
+between the tool-call gate and the ACP lane when both are enabled.
 
 ## Configuration
 
@@ -46,7 +82,8 @@ and can `Reply` to inbound requests.
     dial_timeout: 10,
     call_timeout: 120,
     max_agents: 3,
-    permission_mode: "permissive"
+    permission_mode: "permissive",
+    decision_threshold: 0.5
   }
 }
 ```
