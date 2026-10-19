@@ -32,9 +32,24 @@ type Manager struct {
 	cfg      config.ACPConfig
 	agents   []config.ACPAgentEntry
 	startFn  startFunc
+	decision Decisioner
 	mu       sync.Mutex
 	sessions map[string]*Session
 	pending  map[string]*startWait
+}
+
+// SetDecisionClient injects the permission lane's decision seam. Nil-safe
+// per the repo setter rule; nil clears it (decision mode then fails closed
+// with no_decisioner). The threshold is NOT a setter arg — it already lives
+// on m.cfg (ACPConfig.DecisionThreshold, leaf 01) and flows through at
+// SessionConfig construction.
+func (m *Manager) SetDecisionClient(d Decisioner) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.decision = d
+	m.mu.Unlock()
 }
 
 // NewManager constructs a Manager from an already-loaded catalog.
@@ -98,6 +113,7 @@ func (m *Manager) GetOrCreate(ctx context.Context, agentID, workdir string) (*Se
 	w := &startWait{done: make(chan struct{})}
 	m.pending[agentID] = w
 	fn := m.startFn
+	dec := m.decision
 	m.mu.Unlock()
 
 	cwd := entry.Cwd
@@ -113,6 +129,14 @@ func (m *Manager) GetOrCreate(ctx context.Context, agentID, workdir string) (*Se
 		DialTimeout:    time.Duration(m.cfg.DialTimeout) * time.Second,
 		CallTimeout:    time.Duration(m.cfg.CallTimeout) * time.Second,
 		PermissionMode: m.cfg.PermissionMode,
+	}
+	// Decision seam + threshold flow ONLY in decision mode: permissive/deny
+	// SessionConfigs stay byte-identical to the pre-decision lane. The
+	// threshold is read straight off m.cfg (leaf 01's ACPConfig field) — no
+	// separate Manager field.
+	if sc.PermissionMode == "decision" {
+		sc.Decision = dec
+		sc.DecisionThreshold = m.cfg.DecisionThreshold
 	}
 	if fn == nil {
 		fn = Start

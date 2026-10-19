@@ -13,11 +13,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 )
 
 // stubAgentBin builds the fake ACP agent from internal/acp testdata —
@@ -173,4 +175,166 @@ func TestACPWire_CatalogStubAgentHandshakeSendErrors(t *testing.T) {
 	}
 	// StopAll idempotent.
 	mgr.StopAll()
+}
+
+// stubDecisioner is the injected decision layer for the decision-mode
+// scenario: scripted answer + confidence, recording the questions asked.
+// It satisfies acp.Decisioner from OUTSIDE the package — the same shape
+// *llm.DecisionClient satisfies (contract B: no adapter needed).
+type stubDecisioner struct {
+	available  bool
+	answer     string
+	confidence float64
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (d *stubDecisioner) Available() bool { return d.available }
+
+func (d *stubDecisioner) Ask(_ context.Context, _ llm.DecisionQuestion) (*llm.DecisionResult, error) {
+	d.mu.Lock()
+	d.calls++
+	d.mu.Unlock()
+	return &llm.DecisionResult{Answer: d.answer, Confidence: d.confidence}, nil
+}
+
+func (d *stubDecisioner) count() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
+}
+
+// collectEvents drains a session's event stream until the given text shows
+// up on a permission_decision event (or the deadline passes), returning
+// everything it saw.
+func collectEvents(t *testing.T, sess *acp.Session, want string, timeout time.Duration) []acp.SessionEvent {
+	t.Helper()
+	deadline := time.After(timeout)
+	var seen []acp.SessionEvent
+	for {
+		select {
+		case ev := <-sess.Events():
+			seen = append(seen, ev)
+			if ev.Kind == "permission_decision" && ev.Text == want {
+				return seen
+			}
+		case <-deadline:
+			t.Fatalf("no permission_decision %q event within %v (saw %+v)", want, timeout, seen)
+			return seen
+		}
+	}
+}
+
+// TestACPWire_DecisionModeAllowDeny extends acp-wire-02's surface: the fake
+// agent sends session/requestPermission during a prompt; the manager is in
+// permission_mode "decision" with an injected stub Decisioner. An allow
+// answer must select allow-once on the wire (the agent's prompt completes
+// and echoes); a deny answer must cancel the request (the fake agent
+// still completes its turn with a cancelled outcome — the contract is the
+// reply frame, so we assert the permission_decision event + Send result).
+func TestACPWire_DecisionModeAllowDeny(t *testing.T) {
+	bin := stubAgentBin(t)
+
+	run := func(t *testing.T, answer string, wantEvent string) {
+		t.Helper()
+		stub := &stubDecisioner{available: true, answer: answer, confidence: 1.0}
+		catalog := &config.ACPAgentsConfig{Agents: []config.ACPAgentEntry{
+			{ID: "perm-agent", Command: []string{bin, "-mode", "permission"}, Enabled: true},
+		}}
+		mgr := acp.NewManager(config.ACPConfig{
+			Enabled:           true,
+			DialTimeout:       30,
+			CallTimeout:       20,
+			MaxAgents:         4,
+			PermissionMode:    "decision",
+			DecisionThreshold: 0.5,
+		}, catalog)
+		mgr.SetDecisionClient(stub)
+		t.Cleanup(mgr.StopAll)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		sess, err := mgr.GetOrCreate(ctx, "perm-agent", t.TempDir())
+		if err != nil {
+			t.Fatalf("GetOrCreate: %v", err)
+		}
+
+		// The fake agent fires requestPermission mid-prompt; the lane's
+		// decision must be observable both on the event stream and via a
+		// completed wire round trip.
+		sendCtx, sendCancel := context.WithTimeout(ctx, 20*time.Second)
+		defer sendCancel()
+		type sendRes struct {
+			text string
+			err  error
+		}
+		ch := make(chan sendRes, 1)
+		go func() {
+			text, err := sess.Send(sendCtx, "decide")
+			ch <- sendRes{text, err}
+		}()
+		seen := collectEvents(t, sess, wantEvent, 15*time.Second)
+		res := <-ch
+		if res.err != nil {
+			t.Fatalf("Send: %v", res.err)
+		}
+		if stub.count() != 1 {
+			t.Fatalf("decisioner asked %d times, want 1", stub.count())
+		}
+		// The permission_request event must still be on the stream (stays,
+		// now carrying the decision text on this lane).
+		var sawReq bool
+		for _, ev := range seen {
+			if ev.Kind == "permission_request" {
+				sawReq = true
+			}
+		}
+		if !sawReq {
+			t.Fatalf("permission_request event missing: %+v", seen)
+		}
+	}
+
+	t.Run("allow", func(t *testing.T) { run(t, "allow", "allow") })
+	t.Run("deny", func(t *testing.T) { run(t, "deny", "deny") })
+}
+
+// TestACPWire_DecisionModeFailClosed pins the fail-closed posture end to
+// end: decision mode
+// WITHOUT a configured Decisioner (nil seam — the daemon never wired one)
+// must fail CLOSED: the request is cancelled ("no_decisioner") yet the
+// wire round trip still completes (a cancelled outcome is a valid reply).
+func TestACPWire_DecisionModeFailClosed(t *testing.T) {
+	bin := stubAgentBin(t)
+	catalog := &config.ACPAgentsConfig{Agents: []config.ACPAgentEntry{
+		{ID: "perm-agent", Command: []string{bin, "-mode", "permission"}, Enabled: true},
+	}}
+	mgr := acp.NewManager(config.ACPConfig{
+		Enabled:           true,
+		DialTimeout:       30,
+		CallTimeout:       20,
+		MaxAgents:         4,
+		PermissionMode:    "decision",
+		DecisionThreshold: 0.5,
+	}, catalog)
+	// No SetDecisionClient call — the fail-closed posture.
+	t.Cleanup(mgr.StopAll)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	sess, err := mgr.GetOrCreate(ctx, "perm-agent", t.TempDir())
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+	sendCtx, sendCancel := context.WithTimeout(ctx, 20*time.Second)
+	defer sendCancel()
+	ch := make(chan error, 1)
+	go func() {
+		_, err := sess.Send(sendCtx, "decide")
+		ch <- err
+	}()
+	collectEvents(t, sess, "no_decisioner", 15*time.Second)
+	if err := <-ch; err != nil {
+		t.Fatalf("Send after cancelled permission: %v", err)
+	}
 }

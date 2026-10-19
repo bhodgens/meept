@@ -583,3 +583,91 @@ func execGoBuild(t *testing.T, _, out string) string {
 	}
 	return out
 }
+
+// ---------------------------------------------------------------------------
+// Decision-lane wiring (acp-permission-decision leaf 02, Contract B)
+// ---------------------------------------------------------------------------
+
+// TestManager_SetDecisionClient_NilSafe pins the repo setter rule: every
+// Set* tolerates a nil receiver and a nil value without panicking.
+func TestManager_SetDecisionClient_NilSafe(t *testing.T) {
+	t.Parallel()
+
+	var m *Manager
+	m.SetDecisionClient(nil)                              // nil receiver: no panic
+	m.SetDecisionClient(&stubDecisioner{available: true}) // nil receiver again
+
+	m2 := NewManager(testACPConfig(true, 3), testAgents(
+		config.ACPAgentEntry{ID: "echo", Command: []string{"agent"}, Enabled: true},
+	))
+	m2.SetDecisionClient(nil) // clearing is legal
+	m2.SetDecisionClient(&stubDecisioner{available: true})
+}
+
+// TestManager_DecisionModeStampsSessionConfig pins that decision mode
+// threads the injected Decisioner + cfg threshold into the SessionConfig
+// handed to startFn.
+func TestManager_DecisionModeStampsSessionConfig(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{}
+	acpCfg := testACPConfig(true, 3)
+	acpCfg.PermissionMode = "decision"
+	acpCfg.DecisionThreshold = 0.7
+	m := NewManager(acpCfg, testAgents(
+		config.ACPAgentEntry{ID: "echo", Command: []string{"agent"}, Enabled: true},
+	))
+	attachStart(m, rec)
+	dec := &stubDecisioner{available: true}
+	m.SetDecisionClient(dec)
+
+	if _, err := m.GetOrCreate(context.Background(), "echo", "/work"); err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.configs) != 1 {
+		t.Fatalf("start configs = %d, want 1", len(rec.configs))
+	}
+	sc := rec.configs[0]
+	if sc.Decision != Decisioner(dec) {
+		t.Fatalf("SessionConfig.Decision = %v, want the injected decisioner", sc.Decision)
+	}
+	if sc.DecisionThreshold != 0.7 {
+		t.Fatalf("SessionConfig.DecisionThreshold = %v, want 0.7 (from cfg)", sc.DecisionThreshold)
+	}
+}
+
+// TestManager_NonDecisionModeLeavesLaneNil pins the byte-identical
+// non-decision lane: permissive/deny never receive a Decisioner or
+// threshold, even when one is injected on the manager.
+func TestManager_NonDecisionModeLeavesLaneNil(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []string{"permissive", "deny"} {
+		t.Run(mode, func(t *testing.T) {
+			rec := &startRecorder{}
+			acpCfg := testACPConfig(true, 3)
+			acpCfg.PermissionMode = mode
+			acpCfg.DecisionThreshold = 0.5
+			m := NewManager(acpCfg, testAgents(
+				config.ACPAgentEntry{ID: "echo", Command: []string{"agent"}, Enabled: true},
+			))
+			attachStart(m, rec)
+			m.SetDecisionClient(&stubDecisioner{available: true})
+
+			if _, err := m.GetOrCreate(context.Background(), "echo", "/work"); err != nil {
+				t.Fatalf("GetOrCreate: %v", err)
+			}
+			rec.mu.Lock()
+			defer rec.mu.Unlock()
+			sc := rec.configs[0]
+			if sc.Decision != nil {
+				t.Fatalf("SessionConfig.Decision = %v, want nil in %s mode", sc.Decision, mode)
+			}
+			if sc.DecisionThreshold != 0 {
+				t.Fatalf("SessionConfig.DecisionThreshold = %v, want 0 in %s mode", sc.DecisionThreshold, mode)
+			}
+		})
+	}
+}

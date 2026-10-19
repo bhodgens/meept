@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -25,6 +26,12 @@ type SessionConfig struct {
 	DialTimeout    time.Duration
 	CallTimeout    time.Duration
 	PermissionMode string
+	// Decision is the permission lane's decision client, set ONLY when
+	// PermissionMode == "decision" (zero value = disabled lane).
+	Decision Decisioner
+	// DecisionThreshold is the confidence bar for the decision lane
+	// ([acp] decision_threshold). Zero value = disabled lane.
+	DecisionThreshold float64
 }
 
 // SessionState is the lifecycle state of an ACP session.
@@ -316,6 +323,12 @@ func (s *Session) onNotice(n Notification) {
 
 func (s *Session) handlePermission(n Notification) {
 	mode := s.cfg.PermissionMode
+	if mode == "decision" {
+		s.handlePermissionDecision(n)
+		return
+	}
+	// permissive / deny lanes: byte-identical pre-decision behavior, no new
+	// parses on these paths (Contract B).
 	approved := mode == "permissive"
 	kind := "denied"
 	var result any
@@ -330,6 +343,52 @@ func (s *Session) handlePermission(n Notification) {
 		}
 	}
 	s.emit(SessionEvent{Kind: "permission_request", Text: kind})
+	if err := s.tr.Reply(*n.ID, result, nil); err != nil {
+		s.emit(SessionEvent{Kind: "error", Text: err.Error()})
+	}
+}
+
+// handlePermissionDecision is the fail-CLOSED decision lane (Contract B).
+// Runs on the Transport Serve goroutine: s.cfg is immutable after Start, so
+// its fields are read without s.mu — and s.mu is NEVER held across Ask
+// (mutexio). handlePermission has no caller context, so the Ask is bounded
+// by decisionAskTimeout off context.Background().
+func (s *Session) handlePermissionDecision(n Notification) {
+	askCtx, cancel := context.WithTimeout(context.Background(), decisionAskTimeout)
+	defer cancel()
+	outcome := decidePermission(askCtx, s.cfg.Decision, s.cfg.DecisionThreshold,
+		renderDecisionState(s.cfg.AgentID, n.Params))
+	switch outcome.text {
+	case decisionTextNoDecisioner, decisionTextUnavailable:
+		slog.Default().Warn("acp permission denied: decision layer unavailable",
+			"component", "acp",
+			"agent", s.cfg.AgentID,
+			"reason", outcome.text,
+		)
+	case decisionTextAskError:
+		slog.Default().Warn("acp permission denied: decision ask failed",
+			"component", "acp",
+			"agent", s.cfg.AgentID,
+		)
+	case decisionTextDeny, decisionTextAnswerDeny, decisionTextLowConfidence:
+		slog.Default().Info("acp permission denied by decision",
+			"component", "acp",
+			"agent", s.cfg.AgentID,
+			"reason", outcome.text,
+		)
+	}
+	result := map[string]any{
+		"outcome": map[string]any{"outcome": "cancelled"},
+	}
+	if outcome.allow {
+		result = map[string]any{
+			"outcome": map[string]any{"outcome": "selected", "optionId": "allow-once"},
+		}
+	}
+	// The permission_request event stays; on this lane only it carries the
+	// decision text instead of the hardcoded approved/denied (Contract B).
+	s.emit(SessionEvent{Kind: "permission_request", Text: outcome.text})
+	s.emit(SessionEvent{Kind: "permission_decision", Text: outcome.text})
 	if err := s.tr.Reply(*n.ID, result, nil); err != nil {
 		s.emit(SessionEvent{Kind: "error", Text: err.Error()})
 	}
