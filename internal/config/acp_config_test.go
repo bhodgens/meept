@@ -26,6 +26,9 @@ func TestDefaultConfig_ACP(t *testing.T) {
 	if acp.PermissionMode != "permissive" {
 		t.Errorf("acp.permission_mode default = %q, want permissive", acp.PermissionMode)
 	}
+	if acp.DecisionThreshold != 0.5 {
+		t.Errorf("acp.decision_threshold default = %v, want 0.5", acp.DecisionThreshold)
+	}
 	if err := acp.Validate(); err != nil {
 		t.Errorf("default acp config should validate: %v", err)
 	}
@@ -39,6 +42,35 @@ func TestACPConfig_Validate(t *testing.T) {
 	ok := valid()
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
+	}
+
+	// "decision" is a valid mode when decision_threshold is in (0, 1].
+	dec := valid()
+	dec.PermissionMode = "decision"
+	dec.DecisionThreshold = 0.75
+	if err := dec.Validate(); err != nil {
+		t.Errorf("permission_mode \"decision\" with threshold 0.75 rejected: %v", err)
+	}
+	edge := valid()
+	edge.PermissionMode = "decision"
+	edge.DecisionThreshold = 1
+	if err := edge.Validate(); err != nil {
+		t.Errorf("permission_mode \"decision\" with threshold 1 rejected: %v", err)
+	}
+
+	// Outside decision mode the knob is unused: an explicit zero is accepted
+	// even though the default is 0.5.
+	zero := valid()
+	zero.PermissionMode = "permissive"
+	zero.DecisionThreshold = 0
+	if err := zero.Validate(); err != nil {
+		t.Errorf("permission_mode \"permissive\" with threshold 0 rejected: %v", err)
+	}
+	denyZero := valid()
+	denyZero.PermissionMode = "deny"
+	denyZero.DecisionThreshold = 0
+	if err := denyZero.Validate(); err != nil {
+		t.Errorf("permission_mode \"deny\" with threshold 0 rejected: %v", err)
 	}
 
 	cases := []struct {
@@ -80,6 +112,30 @@ func TestACPConfig_Validate(t *testing.T) {
 			name:    "permission_mode unknown",
 			mutate:  func(c *ACPConfig) { c.PermissionMode = "ask" },
 			wantSub: "permission_mode",
+		},
+		{
+			name: "decision mode zero threshold",
+			mutate: func(c *ACPConfig) {
+				c.PermissionMode = "decision"
+				c.DecisionThreshold = 0
+			},
+			wantSub: "decision_threshold",
+		},
+		{
+			name: "decision mode negative threshold",
+			mutate: func(c *ACPConfig) {
+				c.PermissionMode = "decision"
+				c.DecisionThreshold = -0.5
+			},
+			wantSub: "decision_threshold",
+		},
+		{
+			name: "decision mode threshold above one",
+			mutate: func(c *ACPConfig) {
+				c.PermissionMode = "decision"
+				c.DecisionThreshold = 1.5
+			},
+			wantSub: "decision_threshold",
 		},
 	}
 	for _, tc := range cases {

@@ -111,6 +111,7 @@ dial_timeout = 10
 call_timeout = 120
 max_agents = 3
 permission_mode = "permissive"
+decision_threshold = 0.5
 
 [plugins]
 enabled = true

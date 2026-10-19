@@ -755,12 +755,17 @@ LoadACPAgents loads ACP agent catalog configuration from a JSON5 file. If the fi
 ACPConfig holds Agent Client Protocol client settings.
 
 	type ACPConfig struct {
-	    Enabled        bool   `json:"enabled"         toml:"enabled"`
-	    AgentsFile     string `json:"agents_file"     toml:"agents_file"`
-	    DialTimeout    int    `json:"dial_timeout"    toml:"dial_timeout"`
-	    CallTimeout    int    `json:"call_timeout"    toml:"call_timeout"`
-	    MaxAgents      int    `json:"max_agents"      toml:"max_agents"`
-	    PermissionMode string `json:"permission_mode" toml:"permission_mode"`
+	    Enabled        bool   `json:"enabled"           toml:"enabled"`
+	    AgentsFile     string `json:"agents_file"       toml:"agents_file"`
+	    DialTimeout    int    `json:"dial_timeout"      toml:"dial_timeout"`
+	    CallTimeout    int    `json:"call_timeout"      toml:"call_timeout"`
+	    MaxAgents      int    `json:"max_agents"        toml:"max_agents"`
+	    PermissionMode string `json:"permission_mode"   toml:"permission_mode"`
+	    // DecisionThreshold is the confidence bar for permission_mode "decision"
+	    // (valid range (0, 1]; only read in that mode, so zero is accepted for
+	    // the other modes). Independent of decision_gate_enabled /
+	    // compaction.decision_* knobs — [acp] owns its own knobs.
+	    DecisionThreshold float64 `json:"decision_threshold" toml:"decision_threshold"`
 	}
 
 <a name="ACPConfig.Validate"></a>

@@ -2497,12 +2497,17 @@ type MCPConfig struct {
 
 // ACPConfig holds Agent Client Protocol client settings.
 type ACPConfig struct {
-	Enabled        bool   `json:"enabled"         toml:"enabled"`
-	AgentsFile     string `json:"agents_file"     toml:"agents_file"`
-	DialTimeout    int    `json:"dial_timeout"    toml:"dial_timeout"`
-	CallTimeout    int    `json:"call_timeout"    toml:"call_timeout"`
-	MaxAgents      int    `json:"max_agents"      toml:"max_agents"`
-	PermissionMode string `json:"permission_mode" toml:"permission_mode"`
+	Enabled        bool   `json:"enabled"           toml:"enabled"`
+	AgentsFile     string `json:"agents_file"       toml:"agents_file"`
+	DialTimeout    int    `json:"dial_timeout"      toml:"dial_timeout"`
+	CallTimeout    int    `json:"call_timeout"      toml:"call_timeout"`
+	MaxAgents      int    `json:"max_agents"        toml:"max_agents"`
+	PermissionMode string `json:"permission_mode"   toml:"permission_mode"`
+	// DecisionThreshold is the confidence bar for permission_mode "decision"
+	// (valid range (0, 1]; only read in that mode, so zero is accepted for
+	// the other modes). Independent of decision_gate_enabled /
+	// compaction.decision_* knobs — [acp] owns its own knobs.
+	DecisionThreshold float64 `json:"decision_threshold" toml:"decision_threshold"`
 }
 
 // Validate checks the [acp] section. Invalid timeouts, agent caps, or
@@ -2520,8 +2525,13 @@ func (c *ACPConfig) Validate() error {
 	switch c.PermissionMode {
 	case "permissive", "deny":
 		return nil
+	case "decision":
+		if c.DecisionThreshold <= 0 || c.DecisionThreshold > 1 {
+			return fmt.Errorf("decision_threshold must be in (0, 1] when permission_mode is \"decision\"")
+		}
+		return nil
 	default:
-		return fmt.Errorf("permission_mode must be \"permissive\" or \"deny\"")
+		return fmt.Errorf("permission_mode must be \"permissive\", \"deny\", or \"decision\"")
 	}
 }
 
@@ -3545,12 +3555,13 @@ func DefaultConfig() *Config {
 			ConfigFile: "~/.meept/mcp_servers.json5",
 		},
 		ACP: ACPConfig{
-			Enabled:        false,
-			AgentsFile:     "~/.meept/acp_agents.json5",
-			DialTimeout:    10,
-			CallTimeout:    120,
-			MaxAgents:      3,
-			PermissionMode: "permissive",
+			Enabled:           false,
+			AgentsFile:        "~/.meept/acp_agents.json5",
+			DialTimeout:       10,
+			CallTimeout:       120,
+			MaxAgents:         3,
+			PermissionMode:    "permissive",
+			DecisionThreshold: 0.5,
 		},
 		Plugins: PluginsConfig{
 			Enabled:   true,

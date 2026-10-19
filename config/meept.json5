@@ -533,6 +533,19 @@
     "config_file": "~/.meept/mcp_servers.json5",
   },
 
+  // ACP (Agent Client Protocol) client configuration
+  // permission_mode: "permissive" approves every session/requestPermission,
+  // "deny" cancels every request, "decision" asks the decision model and
+  // fails closed (cancel) whenever the decider is unavailable, errors, or
+  // answers "deny". decision_threshold: minimum confidence (0-1] required to
+  // approve in "decision" mode; independent of decision_gate_enabled and
+  // compaction.decision_* (the [acp] section owns its own knobs).
+  "acp": {
+    "enabled": false,
+    "permission_mode": "permissive",
+    "decision_threshold": 0.5,
+  },
+
   // Plugins configuration
   "plugins": {
     "enabled": true,

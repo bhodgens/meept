@@ -358,7 +358,8 @@ ACP (Agent Client Protocol) clients are configured in the `[acp]` section of `me
 | `dial_timeout` | `10` | Seconds to wait for the subprocess JSON-RPC handshake. |
 | `call_timeout` | `120` | Seconds to wait for an ACP method call. |
 | `max_agents` | `3` | Concurrent ACP subprocesses (1–32). |
-| `permission_mode` | `"permissive"` | `"permissive"` or `"deny"`. |
+| `permission_mode` | `"permissive"` | `"permissive"`, `"deny"`, or `"decision"`. `"decision"` gates each `session/requestPermission` through the decision model and fails closed: unavailable decider, error, `deny` answer, or confidence below `decision_threshold` all cancel the request. |
+| `decision_threshold` | `0.5` | Minimum confidence (range `(0, 1]`, required when `permission_mode = "decision"`) for the decider's `allow` answer to approve a permission request. Independent of `decision_gate_enabled` / `compaction.decision_*` — the `[acp]` section owns its own knobs. Ignored by the other modes. |
 
 The catalog template ships at `config/acp_agents.json5` (copied to `~/.meept/acp_agents.json5` on install). Each entry has its own `enabled` flag (also false by default), independent of `[acp] enabled`.
 
@@ -370,6 +371,7 @@ dial_timeout = 10
 call_timeout = 120
 max_agents = 3
 permission_mode = "permissive"
+decision_threshold = 0.5
 ```
 
 ## Supported Runtimes
