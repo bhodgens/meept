@@ -29,6 +29,10 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 
 Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 
+teardown.go releases upstream provider resources when a session ends \(session\-affinity tree leaf 06, master Contract 6\). Local llama.cpp endpoints get a KV\-cache erase POST; cloud providers get an explicit no\-op type so the "cloud has nothing to release" decision is visible in code, not prose. The TeardownCoordinator subscribes to the session store's SessionLifecycleHook \(Contract 5\) and fans out async per event; daemon shutdown runs a synchronous, budget\-bounded sweep.
+
+Lock\-order rule: the coordinator never holds its own mutex while calling into the resolver, the runtime manager, or an adapter. It takes SNAPSHOTS \(resolver.SessionEndpoints, manager lookups\) under no lock at all — its own mutex only guards its small bookkeeping maps — so no lock ordering cycle with the resolver/store locks can exist. Teardown is best\-effort by contract: no error from this file can fail a turn, an archive, or a shutdown.
+
 ## Index
 
 - Constants
@@ -140,6 +144,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(c \*AnthropicClient\) Config\(\) \*ModelConfig](<#AnthropicClient.Config>)
   - [func \(c \*AnthropicClient\) SetFailurePolicyConfig\(cfg \*FailurePolicyConfig\)](<#AnthropicClient.SetFailurePolicyConfig>)
   - [func \(c \*AnthropicClient\) SetQuotaMaxWait\(d time.Duration\)](<#AnthropicClient.SetQuotaMaxWait>)
+  - [func \(c \*AnthropicClient\) SetSessionAffinityConfig\(cfg \*AffinityConfig\)](<#AnthropicClient.SetSessionAffinityConfig>)
   - [func \(c \*AnthropicClient\) SetUsageStore\(store \*appmetrics.Store\)](<#AnthropicClient.SetUsageStore>)
 - [type AnthropicClientOption](<#AnthropicClientOption>)
   - [func WithAnthropicBudget\(budget \*Budget\) AnthropicClientOption](<#WithAnthropicBudget>)
@@ -263,6 +268,11 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func WithTokenCache\(cache ResponseCache\) ClientOption](<#WithTokenCache>)
   - [func WithTokenResolver\(tr TokenResolver, provider string\) ClientOption](<#WithTokenResolver>)
   - [func WithUploadStore\(store UploadStore\) ClientOption](<#WithUploadStore>)
+- [type CloudTeardown](<#CloudTeardown>)
+  - [func NewCloudTeardown\(logger \*slog.Logger\) \*CloudTeardown](<#NewCloudTeardown>)
+  - [func \(t \*CloudTeardown\) Handles\(endpointKey string\) bool](<#CloudTeardown.Handles>)
+  - [func \(t \*CloudTeardown\) SweepTeardown\(ctx context.Context, sessionID, endpointKey string\) error](<#CloudTeardown.SweepTeardown>)
+  - [func \(t \*CloudTeardown\) Teardown\(\_ context.Context, sessionID, endpointKey string\) error](<#CloudTeardown.Teardown>)
 - [type CodexClient](<#CodexClient>)
   - [func NewCodexClient\(cfg \*ModelConfig, opts ...CodexClientOption\) \*CodexClient](<#NewCodexClient>)
   - [func \(c \*CodexClient\) Chat\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) \(\*Response, error\)](<#CodexClient.Chat>)
@@ -334,6 +344,8 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(e \*ContextSizeExceededError\) Error\(\) string](<#ContextSizeExceededError.Error>)
   - [func \(e \*ContextSizeExceededError\) NonRetryable\(\) bool](<#ContextSizeExceededError.NonRetryable>)
   - [func \(e \*ContextSizeExceededError\) SuggestionsString\(\) string](<#ContextSizeExceededError.SuggestionsString>)
+- [type CoordinatorHook](<#CoordinatorHook>)
+  - [func \(h \*CoordinatorHook\) OnSessionEvent\(ctx context.Context, sessionID string, event string\)](<#CoordinatorHook.OnSessionEvent>)
 - [type CostRecord](<#CostRecord>)
 - [type CredentialStore](<#CredentialStore>)
   - [func NewCredentialStore\(stateDir string\) \(\*CredentialStore, error\)](<#NewCredentialStore>)
@@ -417,8 +429,14 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
 - [type LFMLoader](<#LFMLoader>)
   - [func NewLFMLoader\(baseModel, modelPath string, logger \*slog.Logger\) \*LFMLoader](<#NewLFMLoader>)
   - [func \(l \*LFMLoader\) LoadAllAdapters\(registry \*AdapterRegistry\) error](<#LFMLoader.LoadAllAdapters>)
+- [type LifecycleEvent](<#LifecycleEvent>)
 - [type LimitBudget](<#LimitBudget>)
 - [type LivePrice](<#LivePrice>)
+- [type LlamaServerTeardown](<#LlamaServerTeardown>)
+  - [func NewLlamaServerTeardown\(manager \*RuntimeManager, endpointsFn func\(\) map\[string\]string, timeout time.Duration, logger \*slog.Logger\) \*LlamaServerTeardown](<#NewLlamaServerTeardown>)
+  - [func \(t \*LlamaServerTeardown\) Handles\(endpointKey string\) bool](<#LlamaServerTeardown.Handles>)
+  - [func \(t \*LlamaServerTeardown\) SweepTeardown\(ctx context.Context, sessionID, endpointKey string\) error](<#LlamaServerTeardown.SweepTeardown>)
+  - [func \(t \*LlamaServerTeardown\) Teardown\(ctx context.Context, sessionID, endpointKey string\) error](<#LlamaServerTeardown.Teardown>)
 - [type LoadedAdapter](<#LoadedAdapter>)
 - [type MetricsRecorder](<#MetricsRecorder>)
 - [type ModelAliasEntry](<#ModelAliasEntry>)
@@ -549,7 +567,9 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(pm \*ProviderManager\) SetCostOptimized\(enabled bool\)](<#ProviderManager.SetCostOptimized>)
   - [func \(pm \*ProviderManager\) SetFailurePolicyConfig\(cfg \*FailurePolicyConfig\)](<#ProviderManager.SetFailurePolicyConfig>)
   - [func \(pm \*ProviderManager\) SetQuotaMaxWait\(d time.Duration\)](<#ProviderManager.SetQuotaMaxWait>)
+  - [func \(pm \*ProviderManager\) SetSessionActivityCallback\(callback func\(sessionID, endpointKey, providerID, modelID string\)\)](<#ProviderManager.SetSessionActivityCallback>)
   - [func \(pm \*ProviderManager\) SetSessionAffinityConfig\(cfg \*AffinityConfig\)](<#ProviderManager.SetSessionAffinityConfig>)
+  - [func \(pm \*ProviderManager\) SetStickyEndpointResolver\(r \*Resolver\)](<#ProviderManager.SetStickyEndpointResolver>)
   - [func \(pm \*ProviderManager\) SetUsageStore\(store \*appmetrics.Store\)](<#ProviderManager.SetUsageStore>)
   - [func \(pm \*ProviderManager\) StartHealthChecks\(ctx context.Context\)](<#ProviderManager.StartHealthChecks>)
   - [func \(pm \*ProviderManager\) Stop\(\)](<#ProviderManager.Stop>)
@@ -613,22 +633,26 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(r \*Resolver\) FindByCapabilities\(caps \[\]string\) \[\]\*ModelConfig](<#Resolver.FindByCapabilities>)
   - [func \(r \*Resolver\) FindByProvider\(providerID string\) \[\]\*ModelConfig](<#Resolver.FindByProvider>)
   - [func \(r \*Resolver\) FindCheapest\(caps \[\]string\) \*ModelConfig](<#Resolver.FindCheapest>)
+  - [func \(r \*Resolver\) ForgetSessionEndpoint\(sessionID string\)](<#Resolver.ForgetSessionEndpoint>)
   - [func \(r \*Resolver\) GetAliasHealth\(aliasName string\) \(currentIndex int, consecutiveFails int, cooldownUntil time.Time, ok bool\)](<#Resolver.GetAliasHealth>)
   - [func \(r \*Resolver\) GetAllModelsForAlias\(aliasName string\) \(\[\]\*ModelConfig, bool\)](<#Resolver.GetAllModelsForAlias>)
   - [func \(r \*Resolver\) HasAlias\(aliasName string\) bool](<#Resolver.HasAlias>)
   - [func \(r \*Resolver\) HasHealthyModels\(aliasName string\) bool](<#Resolver.HasHealthyModels>)
   - [func \(r \*Resolver\) ImageModel\(\) \*ModelConfig](<#Resolver.ImageModel>)
+  - [func \(r \*Resolver\) PreferredEndpoint\(sessionID string\) \(string, bool\)](<#Resolver.PreferredEndpoint>)
   - [func \(r \*Resolver\) QuotaBlockedUntil\(credentialKey string\) time.Time](<#Resolver.QuotaBlockedUntil>)
   - [func \(r \*Resolver\) RecordAliasFailure\(aliasName string, err error, failedModel \*ModelConfig\)](<#Resolver.RecordAliasFailure>)
   - [func \(r \*Resolver\) RecordAliasSuccess\(aliasName string\)](<#Resolver.RecordAliasSuccess>)
   - [func \(r \*Resolver\) RecordAliasSuccessModel\(aliasName string, model \*ModelConfig\)](<#Resolver.RecordAliasSuccessModel>)
+  - [func \(r \*Resolver\) RememberSessionEndpoint\(sessionID, endpointKey string\)](<#Resolver.RememberSessionEndpoint>)
   - [func \(r \*Resolver\) ResolveEscalationRef\(ref string\) \(string, error\)](<#Resolver.ResolveEscalationRef>)
-  - [func \(r \*Resolver\) ResolveForAlias\(aliasName string, callerKey string\) \(\*ModelConfig, error\)](<#Resolver.ResolveForAlias>)
+  - [func \(r \*Resolver\) ResolveForAlias\(aliasName string, sessionID string\) \(\*ModelConfig, error\)](<#Resolver.ResolveForAlias>)
   - [func \(r \*Resolver\) ResolveForSkill\(skill \*SkillRequirements, currentModel \*ModelConfig\) \(\*ModelConfig, error\)](<#Resolver.ResolveForSkill>)
   - [func \(r \*Resolver\) ResolveGeneration\(ref, kind string\) \(\*ModelConfig, error\)](<#Resolver.ResolveGeneration>)
   - [func \(r \*Resolver\) ResolveModelTier\(tier string, fallback string\) string](<#Resolver.ResolveModelTier>)
   - [func \(r \*Resolver\) ResolveRef\(ref string\) \*ModelConfig](<#Resolver.ResolveRef>)
   - [func \(r \*Resolver\) RotateToNextModel\(aliasName string\) \(\*ModelConfig, error\)](<#Resolver.RotateToNextModel>)
+  - [func \(r \*Resolver\) SessionEndpoints\(\) map\[string\]string](<#Resolver.SessionEndpoints>)
   - [func \(r \*Resolver\) SetContextLimits\(discovered map\[string\]int, override bool, logger \*slog.Logger\)](<#Resolver.SetContextLimits>)
   - [func \(r \*Resolver\) SetPricingSyncer\(ps \*PricingSyncer\)](<#Resolver.SetPricingSyncer>)
   - [func \(r \*Resolver\) SetQuotaConfig\(cfg \*QuotaWaitConfig\)](<#Resolver.SetQuotaConfig>)
@@ -676,6 +700,7 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(m \*RuntimeManager\) StopProvider\(ctx context.Context, providerID string\) error](<#RuntimeManager.StopProvider>)
   - [func \(m \*RuntimeManager\) SweepCandidates\(\) \[\]\*RuntimeConfig](<#RuntimeManager.SweepCandidates>)
   - [func \(m \*RuntimeManager\) SweepOrphanRuntimes\(waitAfterTerm time.Duration, records \[\]SpawnRecord\) \[\]int](<#RuntimeManager.SweepOrphanRuntimes>)
+  - [func \(m \*RuntimeManager\) TeardownBaseURL\(endpointKey string\) \(string, bool\)](<#RuntimeManager.TeardownBaseURL>)
 - [type RuntimeProcInfo](<#RuntimeProcInfo>)
   - [func ListRuntimeProcesses\(\) \(\[\]RuntimeProcInfo, error\)](<#ListRuntimeProcesses>)
 - [type RuntimeProcLister](<#RuntimeProcLister>)
@@ -721,6 +746,14 @@ Package llm provides LLM client functionality for OpenAI\-compatible APIs.
   - [func \(s \*TaskSummarizer\) SummarizeSession\(ctx context.Context, messages \[\]ChatMessage\) \(SessionSummaryResult, error\)](<#TaskSummarizer.SummarizeSession>)
   - [func \(s \*TaskSummarizer\) SummarizeTaskTitle\(ctx context.Context, messages \[\]ChatMessage, maxLen int\) \(TaskTitleResult, error\)](<#TaskSummarizer.SummarizeTaskTitle>)
 - [type TaskTitleResult](<#TaskTitleResult>)
+- [type TeardownAdapter](<#TeardownAdapter>)
+- [type TeardownCoordinator](<#TeardownCoordinator>)
+  - [func NewTeardownCoordinator\(adapters \[\]TeardownAdapter, endpointsFn func\(\) map\[string\]string, timeout time.Duration, logger \*slog.Logger\) \*TeardownCoordinator](<#NewTeardownCoordinator>)
+  - [func \(c \*TeardownCoordinator\) OnSessionEvent\(ctx context.Context, sessionID string, event string\)](<#TeardownCoordinator.OnSessionEvent>)
+  - [func \(c \*TeardownCoordinator\) SetIdentityResolver\(resolve func\(sessionID string\) \(string, bool\)\)](<#TeardownCoordinator.SetIdentityResolver>)
+  - [func \(c \*TeardownCoordinator\) ShutdownSweep\(ctx context.Context\)](<#TeardownCoordinator.ShutdownSweep>)
+- [type TeardownHookFunc](<#TeardownHookFunc>)
+  - [func \(f TeardownHookFunc\) OnSessionEvent\(ctx context.Context, sessionID string, event string\)](<#TeardownHookFunc.OnSessionEvent>)
 - [type ThrottleBackoffError](<#ThrottleBackoffError>)
   - [func AsThrottleBackoffError\(err error\) \(\*ThrottleBackoffError, bool\)](<#AsThrottleBackoffError>)
   - [func \(e \*ThrottleBackoffError\) Error\(\) string](<#ThrottleBackoffError.Error>)
@@ -2279,6 +2312,13 @@ SetFailurePolicyConfig injects the tree\-02 failure\-policy config \(leaf 03 Tas
 
 SetQuotaMaxWait sets the quota wait upper bound. Nil\-receiver safe.
 
+<a name="AnthropicClient.SetSessionAffinityConfig"></a>
+### func \(\*AnthropicClient\) SetSessionAffinityConfig
+
+	func (c *AnthropicClient) SetSessionAffinityConfig(cfg *AffinityConfig)
+
+SetSessionAffinityConfig injects the resolved llm.session\_affinity config onto this Anthropic client \(session\-affinity tree leaf 03\). Nil\-receiver and nil\-config safe; a nil cfg disables the Anthropic affinity header. Propagated by ProviderManager.SetSessionAffinityConfig, mirroring the OpenAI\-compatible Client wiring.
+
 <a name="AnthropicClient.SetUsageStore"></a>
 ### func \(\*AnthropicClient\) SetUsageStore
 
@@ -3370,6 +3410,43 @@ WithTokenResolver sets the OAuth token resolver and provider name for the client
 
 WithUploadStore sets the upload store for resolving image file references.
 
+<a name="CloudTeardown"></a>
+## type CloudTeardown
+
+CloudTeardown is the explicit no\-op for cloud providers \(OpenAI, Anthropic, Codex, ...\): no upstream session API exists, so there is nothing to release. The type exists so the decision is visible in code \(Contract 6\), not folded into a silent default.
+
+	type CloudTeardown struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewCloudTeardown"></a>
+### func NewCloudTeardown
+
+	func NewCloudTeardown(logger *slog.Logger) *CloudTeardown
+
+NewCloudTeardown builds the cloud no\-op adapter.
+
+<a name="CloudTeardown.Handles"></a>
+### func \(\*CloudTeardown\) Handles
+
+	func (t *CloudTeardown) Handles(endpointKey string) bool
+
+Handles matches every non\-llama endpoint key: anything that is not a llama.cpp runtime \(or a resolver\-snapshot key that resolves to a live llama runtime — see LlamaServerTeardown.Handles, GAP B\) is a cloud/API endpoint as far as teardown cares. The llama check here is prefix\-only: the cloud adapter never holds the runtime manager, so a snapshot key this adapter sees is by definition not a resolvable llama endpoint when the llama adapter \(wired with the manager\) declined it first — the coordinator consults adapters in order and the llama adapter precedes the cloud one in the daemon wiring \(components.go\).
+
+<a name="CloudTeardown.SweepTeardown"></a>
+### func \(\*CloudTeardown\) SweepTeardown
+
+	func (t *CloudTeardown) SweepTeardown(ctx context.Context, sessionID, endpointKey string) error
+
+SweepTeardown mirrors Teardown: cloud endpoints have nothing to release, at shutdown or any time.
+
+<a name="CloudTeardown.Teardown"></a>
+### func \(\*CloudTeardown\) Teardown
+
+	func (t *CloudTeardown) Teardown(_ context.Context, sessionID, endpointKey string) error
+
+Teardown is a no\-op returning nil. It logs at Debug \(never Info: a no\-op per archive would be log spam\) and never fails.
+
 <a name="CodexClient"></a>
 ## type CodexClient
 
@@ -4012,6 +4089,22 @@ NonRetryable marks ContextSizeExceededError as non\-retryable
 	func (e *ContextSizeExceededError) SuggestionsString() string
 
 
+
+<a name="CoordinatorHook"></a>
+## type CoordinatorHook
+
+CoordinatorHook adapts \*TeardownCoordinator to a string\-typed OnSessionEvent hook \(structural seam for callers whose event type is a plain string; the daemon wires the coordinator DIRECTLY — its OnSessionEvent already matches session.SessionLifecycleHook's shape\). The event kind is deliberately not differentiated: archive, delete, and idle ALL release the session's upstream resources.
+
+	type CoordinatorHook struct {
+	    Coordinator *TeardownCoordinator
+	}
+
+<a name="CoordinatorHook.OnSessionEvent"></a>
+### func \(\*CoordinatorHook\) OnSessionEvent
+
+	func (h *CoordinatorHook) OnSessionEvent(ctx context.Context, sessionID string, event string)
+
+OnSessionEvent forwards any event kind to the coordinator's async dispatch.
 
 <a name="CostRecord"></a>
 ## type CostRecord
@@ -4774,6 +4867,24 @@ NewLFMLoader creates a new LFMLoader with the given base model identifier.
 
 LoadAllAdapters loads enabled adapters matching the base model. Highest \-vN wins per domain. Incomplete adapter dirs are skipped. Fallback is set to "general" if present, else the first ready adapter by domain name.
 
+<a name="LifecycleEvent"></a>
+## type LifecycleEvent
+
+LifecycleEvent mirrors session.SessionEvent for the internal/llm side of the hook seam. Values match the internal/session constants 1:1; the daemon wiring converts. \(internal/llm cannot import internal/session.\)
+
+	type LifecycleEvent string
+
+<a name="LifecycleArchive"></a>
+
+	const (
+	    // LifecycleArchive mirrors session.SessionEventArchive.
+	    LifecycleArchive LifecycleEvent = "archive"
+	    // LifecycleDelete mirrors session.SessionEventDelete.
+	    LifecycleDelete LifecycleEvent = "delete"
+	    // LifecycleIdle mirrors session.SessionEventIdle.
+	    LifecycleIdle LifecycleEvent = "idle"
+	)
+
 <a name="LimitBudget"></a>
 ## type LimitBudget
 
@@ -4798,6 +4909,43 @@ LivePrice holds a dynamically fetched price for a model.
 	    Source     string  // "openrouter", "together", or "catalog"
 	    FetchedAt  time.Time
 	}
+
+<a name="LlamaServerTeardown"></a>
+## type LlamaServerTeardown
+
+LlamaServerTeardown erases the KV cache of a local llama\-server endpoint when the LAST session using it goes away. Endpoints are shared between sessions: the skip decision \(reference count over the resolver's session→endpoint snapshot\) lives HERE so every erase path — lifecycle event or shutdown sweep — inherits it.
+
+	type LlamaServerTeardown struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewLlamaServerTeardown"></a>
+### func NewLlamaServerTeardown
+
+	func NewLlamaServerTeardown(manager *RuntimeManager, endpointsFn func() map[string]string, timeout time.Duration, logger *slog.Logger) *LlamaServerTeardown
+
+NewLlamaServerTeardown builds the llama\-server teardown adapter. timeout \<= 0 falls back to DefaultSessionAffinityTeardownTimeout's daemon\-wired value \(the llm.session\_affinity default, 5s\).
+
+<a name="LlamaServerTeardown.Handles"></a>
+### func \(\*LlamaServerTeardown\) Handles
+
+	func (t *LlamaServerTeardown) Handles(endpointKey string) bool
+
+Handles reports whether endpointKey is a llama.cpp endpoint — either a runtime\-shaped key \("llama\-cpp:\<host\>:\<port\>", ComputeEndpointKey\) or a resolver\-snapshot key \("\<host\>|\<credential\>", EndpointKey\(cfg\)\) whose host resolves to a registered live llama runtime via the manager. The snapshot shape is what the teardown coordinator actually receives from the resolver's session→endpoint map \(leaf 07 GAP B: the prefix check alone never matched it, so the llama adapter never fired in a live daemon\); an unresolvable key claims nothing, and the erase still refuses unknown endpoints inside Teardown.
+
+<a name="LlamaServerTeardown.SweepTeardown"></a>
+### func \(\*LlamaServerTeardown\) SweepTeardown
+
+	func (t *LlamaServerTeardown) SweepTeardown(ctx context.Context, sessionID, endpointKey string) error
+
+SweepTeardown is the shutdown path: no reference count \(all sessions end together; see the interface comment\). One erase per session with a remembered endpoint.
+
+<a name="LlamaServerTeardown.Teardown"></a>
+### func \(\*LlamaServerTeardown\) Teardown
+
+	func (t *LlamaServerTeardown) Teardown(ctx context.Context, sessionID, endpointKey string) error
+
+Teardown POSTs the erase route when sessionID is the last session on the endpoint \(live\-session reference count over the resolver snapshot\).
 
 <a name="LoadedAdapter"></a>
 ## type LoadedAdapter
@@ -5487,6 +5635,8 @@ Leaf scope: RetryAt is always zero, Park and GiveUp always false — schedules a
 
 VerdictForFailure maps a failure into the leaf\-01 policy vocabulary, adding the transport seam audit M4 requires: status\-bearing errors go through Classify; transport timeouts \(context deadline, net.Error timeout\) reach this path WITHOUT an HTTP status/body and would otherwise never fire endpoint cooldowns — inverting D10's purpose. A wrapped FailureQuota verdict \(QuotaResetError\) unwraps through so the quota class is preserved; anything else is FailureNone \(alias cooldown still applies, but no endpoint block\).
 
+Sticky\-rotation correction \(session\-affinity leaf 07, GAP A\): the unwrapped status now comes from ANY \*APIError in the wrap chain, not just a top\-level one. The streaming client's short\-retry exhaustion wraps the 503 APIError in a ClientError \("streaming failed after N attempts"\); with the top\-level\-only check that failure classified FailureNone, armed NO endpoint block, and the resolve\-time sticky hook re\-pulled the dead endpoint to the front on every resolve — the alias cursor rotated to the healthy member but the next attempt went to the corpse again \(observed end\-to\-end by the session\-affinity rotation proof: A and B alternating new\_index 1/0 while B served zero requests\). Status\-bearing 5xx is FailureServerError under Classify, which the endpoint\-cooldown arm below treats like the throttle class for block purposes — a dead endpoint's whole base URL must lose stickiness until the block expires \(cleared lazily by expiry \+ a later success, the same single pattern as every other block map\).
+
 <a name="PricingSyncer"></a>
 ## type PricingSyncer
 
@@ -6036,12 +6186,26 @@ SetFailurePolicyConfig propagates a failure\-policy config onto every OpenAI\-co
 
 SetQuotaMaxWait caps how far into the future a provider credential stays quota\-blocked after a QuotaResetError \(block horizon = min\(ResetAt, now\+d\)\). Zero or negative restores DefaultQuotaMaxWait. No\-op on a nil receiver to honor the typed\-nil setter rule \(AGENTS.md\).
 
+<a name="ProviderManager.SetSessionActivityCallback"></a>
+### func \(\*ProviderManager\) SetSessionActivityCallback
+
+	func (pm *ProviderManager) SetSessionActivityCallback(callback func(sessionID, endpointKey, providerID, modelID string))
+
+SetSessionActivityCallback wires the daemon\-side activity feed \(leaf 06\): on every successful scoped LLM call the manager invokes callback with the serving endpoint identity so the caller can record session activity \(the idle reaper's data source\). Nil\-receiver and nil\-callback safe; wiring happens once at daemon construction, before any request can succeed.
+
 <a name="ProviderManager.SetSessionAffinityConfig"></a>
 ### func \(\*ProviderManager\) SetSessionAffinityConfig
 
 	func (pm *ProviderManager) SetSessionAffinityConfig(cfg *AffinityConfig)
 
-SetSessionAffinityConfig propagates the resolved llm.session\_affinity config onto every OpenAI\-compatible Client chatter this manager owns \(existing and future\), mirroring SetFailurePolicyConfig. Anthropic \(leaf 03\) and Codex \(wire\-mandated header\) chatters are unaffected. Nil\-receiver and nil\-config safe; a nil cfg disables the header.
+SetSessionAffinityConfig propagates the resolved llm.session\_affinity config onto every OpenAI\-compatible Client chatter this manager owns \(existing and future\), mirroring SetFailurePolicyConfig. Anthropic chatters get the same config via the shared AffinityConfig shape \(leaf 03: the client reads only Enabled\+AnthropicHeader\); Codex \(wire\-mandated header\) chatters are unaffected. Nil\-receiver and nil\-config safe; a nil cfg disables the header.
+
+<a name="ProviderManager.SetStickyEndpointResolver"></a>
+### func \(\*ProviderManager\) SetStickyEndpointResolver
+
+	func (pm *ProviderManager) SetStickyEndpointResolver(r *Resolver)
+
+SetStickyEndpointResolver wires the resolver backing the per\-session endpoint preference map \(session\-affinity tree leaf 04, master Contract 4\). Nil disables the seam \(typed\-nil setter rule, AGENTS.md\). Call once at daemon wiring time — components.go constructs the resolver before the manager, so a re\-wire with a different resolver is not a supported operation \(the setter panics on a non\-nil re\-wire to surface wiring order bugs in tests and daemon startup alike\).
 
 <a name="ProviderManager.SetUsageStore"></a>
 ### func \(\*ProviderManager\) SetUsageStore
@@ -6673,6 +6837,13 @@ FindByProvider returns all models from a specific provider.
 
 FindCheapest finds the cheapest model with the specified capabilities.
 
+<a name="Resolver.ForgetSessionEndpoint"></a>
+### func \(\*Resolver\) ForgetSessionEndpoint
+
+	func (r *Resolver) ForgetSessionEndpoint(sessionID string)
+
+ForgetSessionEndpoint drops the sticky preference for one session \(session\-affinity integration fix: the PM failure path calls this when the remembered endpoint actually FAILED, so the next resolve cannot re\-pull the dead endpoint to the front and ping\-pong on it — rotation must make progress first; the memory re\-arms on the next success via RememberSessionEndpoint, which also heals teardown refcounting\). No\-op on a nil receiver or empty session; an unknown session is already forgotten. Calls the LOCKED helper directly: the public path's healthy\-candidate gate would reject an empty key \(no candidate carries it\) and fall through to "not remembered" without ever clearing. The helper's empty\-key branch performs the tombstone\-correct LRU slot removal \(two\-value order read \+ bounds self\-heal\) — a second hand\-rolled removal here would diverge from that logic.
+
 <a name="Resolver.GetAliasHealth"></a>
 ### func \(\*Resolver\) GetAliasHealth
 
@@ -6712,6 +6883,13 @@ Because non\-current models are always considered available, this function HasHe
 	func (r *Resolver) ImageModel() *ModelConfig
 
 ImageModel returns the configured image\-generation model, if any.
+
+<a name="Resolver.PreferredEndpoint"></a>
+### func \(\*Resolver\) PreferredEndpoint
+
+	func (r *Resolver) PreferredEndpoint(sessionID string) (string, bool)
+
+PreferredEndpoint returns the remembered endpoint key for sessionID, if any. Consulted BEFORE candidate ordering during alias resolution; the resolve\-time gate \(stickyEndpointHook\) re\-validates health against the alias actually being resolved, so a stale preference degrades to normal ordering rather than pinning to a blocked endpoint.
 
 <a name="Resolver.QuotaBlockedUntil"></a>
 ### func \(\*Resolver\) QuotaBlockedUntil
@@ -6755,6 +6933,15 @@ The consecutive\-failure streak, alias cooldown, and armed alias\-level timeout 
 
 The expired quota/endpoint block sweeps are run unconditionally regardless of identity: they only ever delete EXPIRED entries, so they never release an active block early — they exist to bound map growth and must not depend on which model happened to succeed.
 
+<a name="Resolver.RememberSessionEndpoint"></a>
+### func \(\*Resolver\) RememberSessionEndpoint
+
+	func (r *Resolver) RememberSessionEndpoint(sessionID, endpointKey string)
+
+RememberSessionEndpoint records the endpoint \(host \+ credential fingerprint, EndpointKey\) that just served sessionID successfully. CONTRACT \(master.md Contract 4, leaf 04\): overwrites on EVERY success; no\-op when sessionID == "". The single reporting seam lives in the agent loop's chatWithFailoverRaw success path \(internal/agent/loop.go — search "leaf 04 reporting seam" there\): it is the one choke point that sees both the session scope \(WithTaskScope sessionID\) and the serving EndpointKey \(it holds the resolved \*ModelConfig\). Never call it from client\-level success paths — one seam, not two.
+
+Storage: in\-memory LRU map capped at stickySessionEndpointCap \(1024\) sessions, guarded by the Resolver mutex, never persisted; the least\-recently\-used session is evicted at cap. The endpoint key is only kept when it currently belongs to a HEALTHY candidate of SOME alias \(not quota\-blocked, not endpoint\-blocked, not caught by an armed alias\-level block\) — an unknown or currently\-blocked endpoint key is dropped rather than remembered as a preference \(Contract 4's precedence rule\).
+
 <a name="Resolver.ResolveEscalationRef"></a>
 ### func \(\*Resolver\) ResolveEscalationRef
 
@@ -6765,7 +6952,7 @@ ResolveEscalationRef resolves an escalation target — an alias name or a "provi
 <a name="Resolver.ResolveForAlias"></a>
 ### func \(\*Resolver\) ResolveForAlias
 
-	func (r *Resolver) ResolveForAlias(aliasName string, callerKey string) (*ModelConfig, error)
+	func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelConfig, error)
 
 ResolveForAlias resolves an alias to a specific model, handling rotation. It returns the currently active model for the given alias. When callerKey is non\-empty and BalancedStickyRequests is true, the caller is pinned to a single model within the alias.
 
@@ -6812,6 +6999,13 @@ RotateToNextModel forces rotation to the next model in an alias and resets failu
 Lock discipline: the entire rotation runs under the single Resolver.mu regime, so cursor mutation is atomic — no torn reads between the index check and the write \(stress\-verified by TestResolver\_RotateToNextModel\_ConcurrentStress under \-race\).
 
 Concurrent\-session design limitation: the rotation cursor \(AliasHealth.CurrentIndex\) is PER\-ALIAS, not per\-session or per\-caller. Two concurrent sessions resolving the same alias share one cursor, so a rotation issued by session A moves the next resolve for every other un\-pinned session on that alias. This is accepted, documented behavior — rotation is best\-effort failover, and callers must treat the returned model as "a healthy candidate now", not "a stable model across calls". Callers that need a stable model use sticky pins \(BalancedStickyRequests \+ a callerKey to ResolveForAlias\), which pin per\-caller and are released by model identity on rotation.
+
+<a name="Resolver.SessionEndpoints"></a>
+### func \(\*Resolver\) SessionEndpoints
+
+	func (r *Resolver) SessionEndpoints() map[string]string
+
+SessionEndpoints returns a mutex\-safe SNAPSHOT of the session → endpoint map for the leaf\-06 teardown coordinator \(master Contract 6: "add a narrow resolver accessor if needed, e.g. SessionEndpoints\(\) map\[string\]string snapshot, mutex\-safe copy"\). Callers get a copy; mutating it never touches resolver state. The map is a point\-in\-time view — teardown reference counting must tolerate concurrent successes adding entries. A nil receiver returns nil \(typed\-nil setter rule, AGENTS.md\).
 
 <a name="Resolver.SetContextLimits"></a>
 ### func \(\*Resolver\) SetContextLimits
@@ -7296,6 +7490,15 @@ SweepCandidates is the exported read of sweepCandidates for the daemon call site
 
 SweepOrphanRuntimes stops every runtime a previous meept generation left behind: endpoint configs whose auto\_stop\_on\_exit is true, a process whose parent is init, and a command line equal to the endpoint's spawn command — or, for an endpoint whose current config no longer validates, to a durable spawn record's argv \(records are the config\-independent source\). An endpoint with a live recorded owner is skipped. Returns the pids confirmed gone \(nil when nothing matched\). It never returns an error: a failed sweep must not block daemon start.
 
+<a name="RuntimeManager.TeardownBaseURL"></a>
+### func \(\*RuntimeManager\) TeardownBaseURL
+
+	func (m *RuntimeManager) TeardownBaseURL(endpointKey string) (string, bool)
+
+TeardownBaseURL resolves a runtime endpoint key to its base URL via the provider registered against it \(Contract 6's teardown accessor\). The lookup mirrors EndpointBaseURL but keys on the ENDPOINT \(the teardown coordinator only ever sees keys, not provider ids\).
+
+The coordinator's keys come from the Resolver snapshot, whose shape is EndpointKey\(cfg\) = "host|credential" \(models.go\) — NOT the runtime key "llama\-cpp:\<host\>:\<port\>" this map is indexed by. Two shapes, one host: so resolution falls back to a HOST match over registered endpoints. The fallback is safe for the teardown use: erasing the KV cache of the one llama\-server listening on that host is the intent, host:port collisions between two llama runtimes on one host do not occur in practice \(each runtime binds a distinct port; the host|credential key carries no port, so port disambiguation is impossible from the snapshot side anyway\). A nil manager or an unknown endpoint returns false: a down or unregistered runtime has no cache worth erasing, and the erase must never guess a base URL.
+
 <a name="RuntimeProcInfo"></a>
 ## type RuntimeProcInfo
 
@@ -7751,6 +7954,79 @@ TaskTitleResult holds the result of a task title generation.
 	    TokensUsed int
 	    Truncated  bool
 	}
+
+<a name="TeardownAdapter"></a>
+## type TeardownAdapter
+
+TeardownAdapter releases upstream resources for one session.
+
+	type TeardownAdapter interface {
+	    // Handles reports whether this adapter owns the endpoint kind.
+	    Handles(endpointKey string) bool
+	    // Teardown is best-effort: bounded by TeardownTimeout, errors are
+	    // returned not panicked; callers log and continue.
+	    Teardown(ctx context.Context, sessionID, endpointKey string) error
+	    // SweepTeardown is the daemon-shutdown path: every session with a
+	    // remembered endpoint gets its release, WITHOUT the live-session
+	    // reference count. At shutdown all sessions end simultaneously, so
+	    // per-session refcounting would make each session see the others and
+	    // nothing would erase (observed live: 2 sessions on one endpoint
+	    // produced 0 erases); the runtimes stop right after the sweep anyway.
+	    SweepTeardown(ctx context.Context, sessionID, endpointKey string) error
+	}
+
+<a name="TeardownCoordinator"></a>
+## type TeardownCoordinator
+
+TeardownCoordinator fans session lifecycle events out to the teardown adapters. It implements session.SessionLifecycleHook — the internal/llm package cannot import internal/session \(import cycle: internal/session is imported by packages llm depends on via the daemon graph\), so the daemon wiring adapts the narrow OnSessionEvent shape through the small adapter in this file \(coordinatorHook\).
+
+OnSessionEvent is ASYNC per event \(a goroutine bounded by TeardownTimeout\): the store invokes the hook on its archive path and must not block on HTTP. ShutdownSweep is the synchronous counterpart for daemon shutdown.
+
+	type TeardownCoordinator struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTeardownCoordinator"></a>
+### func NewTeardownCoordinator
+
+	func NewTeardownCoordinator(adapters []TeardownAdapter, endpointsFn func() map[string]string, timeout time.Duration, logger *slog.Logger) *TeardownCoordinator
+
+NewTeardownCoordinator builds the coordinator over its adapters. timeout \<= 0 falls back to the 5s llm.session\_affinity default.
+
+<a name="TeardownCoordinator.OnSessionEvent"></a>
+### func \(\*TeardownCoordinator\) OnSessionEvent
+
+	func (c *TeardownCoordinator) OnSessionEvent(ctx context.Context, sessionID string, event string)
+
+OnSessionEvent implements session.SessionLifecycleHook for daemon wiring \(the event parameter types as session.SessionEvent at the call site; the plain string here keeps internal/llm free of the internal/session import, which would cycle — internal/session already imports internal/ llm for its summarizer bridge\). The event kind is deliberately not differentiated: archive, delete, and idle ALL release the session's upstream resources; the endpoint snapshot lookup is the only gate.
+
+<a name="TeardownCoordinator.SetIdentityResolver"></a>
+### func \(\*TeardownCoordinator\) SetIdentityResolver
+
+	func (c *TeardownCoordinator) SetIdentityResolver(resolve func(sessionID string) (string, bool))
+
+SetIdentityResolver wires the primary\-id \-\> conversation\-id seam used on a snapshot miss \(the session\_id/conversation\_id duality: lifecycle events carry the primary id, the snapshot keys on the accounting id\). Nil disables the retry. Call once at daemon wiring time, before any event.
+
+<a name="TeardownCoordinator.ShutdownSweep"></a>
+### func \(\*TeardownCoordinator\) ShutdownSweep
+
+	func (c *TeardownCoordinator) ShutdownSweep(ctx context.Context)
+
+ShutdownSweep tears down every session with a remembered endpoint, SYNCHRONOUSLY, under a total budget of TeardownTimeout \* min\(sweepMaxSessions, len\(sessions\)\). Errors and overruns are logged, never returned to the shutdown path \(shutdown must always complete\). Sessions without a remembered endpoint are skipped \(nothing to release\).
+
+<a name="TeardownHookFunc"></a>
+## type TeardownHookFunc
+
+TeardownHookFunc adapts a plain function to the session store's SessionLifecycleHook interface for the daemon wiring \(the coordinator takes a string event; the store's interface carries session.SessionEvent, which internal/llm cannot name — the daemon converts with string\(event\) and wraps the closure in this type\).
+
+	type TeardownHookFunc func(ctx context.Context, sessionID string, event string)
+
+<a name="TeardownHookFunc.OnSessionEvent"></a>
+### func \(TeardownHookFunc\) OnSessionEvent
+
+	func (f TeardownHookFunc) OnSessionEvent(ctx context.Context, sessionID string, event string)
+
+OnSessionEvent satisfies the store\-side hook shape.
 
 <a name="ThrottleBackoffError"></a>
 ## type ThrottleBackoffError

@@ -1522,7 +1522,7 @@ SetL0Prune wires the L0 retention pass \(tree 01 L3\) into the periodic consolid
 
 	func (c *Consolidator) StartPeriodicConsolidation(ctx context.Context, interval time.Duration, olderThanHours int)
 
-StartPeriodicConsolidation starts a background goroutine that runs consolidation at the specified interval.
+StartPeriodicConsolidation starts a background goroutine that runs consolidation at the specified interval. Guarded by startOnce: a second call is a no\-op \(bughunt 2026\-10\-15 hazard: an unguarded second caller started a second ticker; boot calls it exactly once today\).
 
 <a name="Consolidator.Stop"></a>
 ### func \(\*Consolidator\) Stop

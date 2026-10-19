@@ -86,7 +86,7 @@
     "agent.progress.synthesized": [
       {
         "file": "internal/daemon/components.go",
-        "line": 1994,
+        "line": 2006,
         "payload_keys": []
       }
     ],
@@ -161,7 +161,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9073,
+        "line": 9096,
         "payload_keys": []
       }
     ],
@@ -514,7 +514,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3290,
+        "line": 3313,
         "payload_keys": []
       }
     ],
@@ -535,7 +535,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5201,
+        "line": 5224,
         "payload_keys": [
           "name",
           "tags",
@@ -1716,7 +1716,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8333,
+        "line": 8356,
         "payload_keys": []
       }
     ],
@@ -2224,7 +2224,7 @@
     "team.error": [
       {
         "file": "internal/agent/team_orchestrator.go",
-        "line": 559,
+        "line": 524,
         "payload_keys": [
           "error",
           "session_id"
@@ -2235,7 +2235,7 @@
     "team.result": [
       {
         "file": "internal/agent/team_orchestrator.go",
-        "line": 333,
+        "line": 320,
         "payload_keys": [],
         "via_const": true
       }
@@ -2243,13 +2243,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6976,
+        "line": 6999,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 7013,
+        "line": 7036,
         "payload_keys": [],
         "via_const": true
       }
@@ -2442,7 +2442,7 @@
     "agent.event.*": [
       {
         "file": "internal/daemon/components.go",
-        "line": 1964,
+        "line": 1976,
         "subscriber_id": "progress-synthesizer"
       }
     ],
@@ -2616,7 +2616,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3268,
+        "line": 3291,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2631,7 +2631,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4088,
+        "line": 4111,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -3416,7 +3416,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8260,
+        "line": 8283,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3668,7 +3668,7 @@
     "team.start": [
       {
         "file": "internal/agent/team_orchestrator.go",
-        "line": 127,
+        "line": 114,
         "subscriber_id": "team-orchestrator"
       }
     ],
@@ -3702,7 +3702,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8417,
+        "line": 8440,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

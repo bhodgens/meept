@@ -1630,14 +1630,13 @@ Package agent provides the agent loop and related components.
   - [func \(to \*TeamOrchestrator\) Name\(\) string](<#TeamOrchestrator.Name>)
   - [func \(to \*TeamOrchestrator\) ReceiveResult\(ctx context.Context, sessionID string, result TeamMemberResultSubmission\) error](<#TeamOrchestrator.ReceiveResult>)
   - [func \(to \*TeamOrchestrator\) Start\(ctx context.Context\) error](<#TeamOrchestrator.Start>)
-  - [func \(to \*TeamOrchestrator\) Status\(ctx context.Context, sessionID string\) \(\*TeamSessionStateSnapshot, error\)](<#TeamOrchestrator.Status>)
+  - [func \(to \*TeamOrchestrator\) Status\(ctx context.Context, sessionID string\) \(\*TeamSessionState, error\)](<#TeamOrchestrator.Status>)
   - [func \(to \*TeamOrchestrator\) Stop\(ctx context.Context\) error](<#TeamOrchestrator.Stop>)
 - [type TeamOrchestratorDeps](<#TeamOrchestratorDeps>)
 - [type TeamPreset](<#TeamPreset>)
   - [func GetTeamPreset\(name string\) \(\*TeamPreset, error\)](<#GetTeamPreset>)
   - [func ListTeamPresets\(\) \[\]TeamPreset](<#ListTeamPresets>)
 - [type TeamSessionState](<#TeamSessionState>)
-- [type TeamSessionStateSnapshot](<#TeamSessionStateSnapshot>)
 - [type TeamStartRequest](<#TeamStartRequest>)
 - [type TeamStatus](<#TeamStatus>)
 - [type TelemetryEmitter](<#TelemetryEmitter>)
@@ -8394,7 +8393,6 @@ EscalationLevel tracks escalation history for a task.
 	    FirstFailure string    `json:"first_failure,omitempty"`
 	    ReplanResult string    `json:"replan_result,omitempty"`
 	    Timestamp    time.Time `json:"timestamp"`
-	    Seq          uint64    `json:"seq"` // Monotonic ordering tiebreaker (S1-8)
 	}
 
 <a name="EscalationManager"></a>
@@ -13979,6 +13977,22 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // dedicated client. Nil = every loop uses the shared chain (pre-slot
 	    // behavior, byte-identical).
 	    PlannerChatter llm.Chatter
+	
+	    // SharedChatter is the daemon-wide chatter for registry-built loops —
+	    // the ProviderManager when multi-provider wiring is on, nil otherwise.
+	    // When set, EVERY loop (not just the planner) is built on it via
+	    // WithLLMChatter, LLMClient remaining the fallback for callers that
+	    // never wire a manager. Without this, dispatched chat/specialist loops
+	    // ran on the single default client: WithResolvedModel named a provider
+	    // the client cannot reach (requestModelOverride lane 2 rejects a
+	    // cross-provider selection), so alias rotation and the session-affinity
+	    // reporting seam never engaged for dispatched turns — observed live by
+	    // the session-affinity e2e suites (rotation: every attempt redialed the
+	    // same dead endpoint; teardown: the endpoint snapshot stayed empty).
+	    // Model-switcher semantics are unaffected: a ProviderManager has no
+	    // single config to retarget, and chatWithFailoverRaw carries the
+	    // resolution request-scoped via WithResolvedModel.
+	    SharedChatter llm.Chatter
 	}
 
 <a name="RejectedCandidateLogger"></a>
@@ -15561,7 +15575,7 @@ GetDominantIntent returns the most frequent intent in session.
 
 	func (t *SessionTracker) GetIdleSessions(idleDuration time.Duration) []*TrackerSessionState
 
-GetIdleSessions returns deep copies of sessions that have been idle for the specified duration. S1\-9: Previously returned live pointers; now returns snapshots so callers can safely iterate without racing mutations.
+GetIdleSessions returns sessions that have been idle for the specified duration.
 
 <a name="SessionTracker.GetIntentCounts"></a>
 ### func \(\*SessionTracker\) GetIntentCounts
@@ -15589,7 +15603,7 @@ GetLastIntent returns a copy of the most recent intent.
 
 	func (t *SessionTracker) GetSession(sessionID string) *TrackerSessionState
 
-GetSession returns a deep copy of session state \(read\-only lookup, no cleanup\). S1\-5: Previously returned a live pointer, allowing callers to race with RecordIntent/RecordMetrics mutations. Now returns a snapshot copy.
+GetSession returns session state \(read\-only lookup, no cleanup\).
 
 <a name="SessionTracker.PersistIdleSessions"></a>
 ### func \(\*SessionTracker\) PersistIdleSessions
@@ -17033,9 +17047,9 @@ Start subscribes to team.start and begins processing team requests.
 <a name="TeamOrchestrator.Status"></a>
 ### func \(\*TeamOrchestrator\) Status
 
-	func (to *TeamOrchestrator) Status(ctx context.Context, sessionID string) (*TeamSessionStateSnapshot, error)
+	func (to *TeamOrchestrator) Status(ctx context.Context, sessionID string) (*TeamSessionState, error)
 
-Status returns a snapshot of the current status of a team session. S1\-10: Previously returned a live pointer whose MemberResults map could be mutated by ReceiveResult during caller iteration. Now returns a deep copy \(TeamSessionStateSnapshot\) with no mutex.
+Status returns the current status of a team session.
 
 <a name="TeamOrchestrator.Stop"></a>
 ### func \(\*TeamOrchestrator\) Stop
@@ -17105,22 +17119,6 @@ TeamSessionState holds the runtime state of an active team session. All fields m
 	    FinalOutput   string                       `json:"final_output,omitempty"`
 	    StartTime     time.Time                    `json:"start_time"`
 	    // contains filtered or unexported fields
-	}
-
-<a name="TeamSessionStateSnapshot"></a>
-## type TeamSessionStateSnapshot
-
-TeamSessionStateSnapshot is a mutex\-free deep copy of TeamSessionState, safe for callers to iterate without racing concurrent writes \(S1\-10\).
-
-	type TeamSessionStateSnapshot struct {
-	    SessionID     string                       `json:"session_id"`
-	    TaskID        string                       `json:"task_id"`
-	    LeadAgent     string                       `json:"lead_agent"`
-	    Roster        []string                     `json:"roster"`
-	    Phase         string                       `json:"phase"`
-	    MemberResults map[string]*TeamMemberResult `json:"member_results,omitempty"`
-	    FinalOutput   string                       `json:"final_output,omitempty"`
-	    StartTime     time.Time                    `json:"start_time"`
 	}
 
 <a name="TeamStartRequest"></a>
