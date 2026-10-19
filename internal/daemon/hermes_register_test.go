@@ -49,3 +49,18 @@ func TestRegisterHermesTools_EnabledWithKeyRegistersHermes(t *testing.T) {
 		t.Fatalf("RegisterHermesTools(enabled+key) names = %v, want [hermes]", names)
 	}
 }
+
+func TestRegisterHermesTools_AutoApproveRegisters(t *testing.T) {
+	cfg := config.DefaultConfig().Hermes
+	cfg.Enabled = true
+	cfg.AutoApprove = true
+	cfg.APIKeyEnv = "MEEPT_TEST_HERMES_KEY"
+	t.Setenv("MEEPT_TEST_HERMES_KEY", "secret-value")
+
+	reg := tools.NewRegistry(slog.Default())
+	RegisterHermesTools(reg, cfg)
+	names := reg.Names()
+	if len(names) != 1 || names[0] != "hermes" {
+		t.Fatalf("RegisterHermesTools(auto_approve) names = %v, want [hermes]", names)
+	}
+}

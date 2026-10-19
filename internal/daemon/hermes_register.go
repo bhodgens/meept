@@ -38,6 +38,6 @@ func RegisterHermesTools(reg *tools.Registry, cfg config.HermesConfig) {
 		timeout = 300 * time.Second
 	}
 	client := hermes.NewClient(cfg.BaseURL, apiKey, timeout)
-	reg.Register(builtin.NewHermesTool(client))
-	slog.Info("hermes tool registered", "base_url", cfg.BaseURL)
+	reg.Register(builtin.NewHermesTool(client, cfg.AutoApprove))
+	slog.Info("hermes tool registered", "base_url", cfg.BaseURL, "auto_approve", cfg.AutoApprove)
 }
