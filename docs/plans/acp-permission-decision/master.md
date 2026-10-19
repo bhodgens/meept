@@ -146,7 +146,7 @@ field; 03 consumes 02's seam).
 
 | Leaf | Status | Commit | Notes |
 |------|--------|--------|-------|
-| 01 | PENDING | | |
+| 01 | COMPLETE 2026-10-19 | 57093292 | field+validate+template+docs; [acp] section ADDED to config/meept.json5 (none existed); docs/workflows/acp.md mode list deferred to leaf 03 per deviation note |
 | 02 | PENDING | | |
 | 03 | PENDING | | |
 | Integration | PENDING | | |
