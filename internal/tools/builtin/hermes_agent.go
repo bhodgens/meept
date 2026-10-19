@@ -2,8 +2,10 @@ package builtin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,15 +15,15 @@ import (
 )
 
 const (
-	hermesToolName   = "hermes"
-	hermesVerbStatus = "status"
-	hermesVerbChat   = "chat"
-	hermesVerbRun    = "run"
-	hermesVerbRuns   = "runs"
-	hermesVerbSteer  = "steer"
-	hermesVerbStop   = "stop"
-	hermesVerbSess   = "sessions"
-	hermesVerbMsgs   = "messages"
+	hermesToolName    = "hermes"
+	hermesVerbStatus  = "status"
+	hermesVerbChat    = "chat"
+	hermesVerbRun     = "run"
+	hermesVerbRuns    = "runs"
+	hermesVerbSteer   = "steer"
+	hermesVerbStop    = "stop"
+	hermesVerbSess    = "sessions"
+	hermesVerbMsgs    = "messages"
 	hermesVerbCreate  = "create_session"
 	hermesVerbModel   = "set_model"
 	hermesVerbApprove = "approve"
@@ -88,9 +90,12 @@ func (t *HermesTool) Category() string { return "agent" }
 func (t *HermesTool) Description() string {
 	return "Drive a remote Hermes agent gateway over HTTP. verb=status probes health and capabilities; " +
 		"verb=chat runs one synchronous turn and returns its reply (omit session_id to auto-create a fresh hermes session; " +
-		"the reply carries the session_id in use); " +
+		"the reply carries the session_id in use; stream=true runs the turn as an event stream and adds a progress " +
+		"timeline of the tools it ran); " +
 		"verb=run submits an async run (optional session_id binds it to a session; returns run_id); " +
-		"verb=runs polls a run (status + output when terminal); verb=steer sends mid-run guidance; verb=stop cancels a run; " +
+		"verb=runs polls a run (status + output when terminal) — pass wait=true to block on the run's event stream " +
+		"until it reaches a terminal state (collect_events=true adds a timeline of the tools it ran); " +
+		"verb=steer sends mid-run guidance; verb=stop cancels a run; " +
 		"verb=approve resolves a pending run approval {run_id, decision approve|once|session|always|deny, reason?} — " +
 		"unless hermes.auto_approve is on, the first call returns a confirmation request and the decision is only " +
 		"forwarded on the confirmed=true re-invoke; " +
@@ -152,6 +157,18 @@ func (t *HermesTool) Parameters() llm.FunctionParameters {
 			"confirmed": {
 				Type:        schemaTypeBoolean,
 				Description: "Set true on the re-invoke after the user confirms a requires_confirmation response (approve).",
+			},
+			"wait": {
+				Type:        schemaTypeBoolean,
+				Description: "Block until the run reaches a terminal state via its event stream instead of polling once (runs).",
+			},
+			"collect_events": {
+				Type:        schemaTypeBoolean,
+				Description: "With wait=true, return a timeline array of the run's tool.started/completed events plus the terminal event (runs).",
+			},
+			"stream": {
+				Type:        schemaTypeBoolean,
+				Description: "Run the chat turn as an event stream: the reply aggregates assistant deltas and the result carries a progress timeline (chat).",
 			},
 			"action": {
 				Type:        schemaTypeString,
@@ -452,7 +469,11 @@ func (t *HermesTool) status(ctx context.Context) (map[string]any, error) {
 // fresh hermes session first (Contract P2-C: CreateSession with a title
 // derived from the input's first 40 chars), then runs the turn on it; the
 // payload reports the session id in use either way plus
-// created_session_id when the tool minted the session.
+// created_session_id when the tool minted the session. With stream=true
+// (Contract P2-D) the turn runs over POST /api/sessions/{id}/chat/stream
+// instead: assistant.delta text is aggregated into the reply and the tool
+// timeline rides a progress array; auto-create still runs BEFORE the
+// stream call. Without stream the legacy sync path is untouched.
 func (t *HermesTool) chat(ctx context.Context, args map[string]any) (map[string]any, error) {
 	sessionID := strings.TrimSpace(hermesArgString(args, "session_id"))
 	input := hermesArgString(args, "input")
@@ -468,6 +489,9 @@ func (t *HermesTool) chat(ctx context.Context, args map[string]any) (map[string]
 		}
 		sessionID = detail.ID
 		createdID = detail.ID
+	}
+	if hermesArgBool(args, "stream") {
+		return t.chatStream(ctx, args, sessionID, createdID)
 	}
 	res, err := t.client.ChatSync(ctx, sessionID, input,
 		hermes.ChatOptions{
@@ -495,6 +519,51 @@ func (t *HermesTool) chat(ctx context.Context, args map[string]any) (map[string]
 		payload["created_session_id"] = createdID
 	}
 	return payload, nil
+}
+
+// chatStream runs a streaming chat turn (Contract P2-D): aggregate
+// assistant.delta text into the reply, collect the tool timeline into a
+// progress array, and map the terminal event (completed -> success,
+// failed -> error with the payload message, cancelled -> {cancelled:true}
+// result). The result shape equals the sync chat payload plus progress.
+func (t *HermesTool) chatStream(ctx context.Context, args map[string]any, sessionID, createdID string) (map[string]any, error) {
+	ch, err := t.client.StreamChat(ctx, sessionID, hermesArgString(args, "input"), hermes.ChatOptions{
+		Provider:   hermesArgString(args, "provider"),
+		Model:      hermesArgString(args, "model"),
+		SessionKey: strings.TrimSpace(hermesArgString(args, "session_key")),
+	})
+	if err != nil {
+		return nil, err
+	}
+	terminal, termData, text, timeline, err := hermesDrainStream(ctx, ch)
+	if err != nil {
+		return nil, fmt.Errorf("hermes chat stream: %w", err)
+	}
+	payload := map[string]any{
+		"session_id": sessionID,
+		"reply":      text,
+		"progress":   hermesTimelineAny(timeline),
+	}
+	if createdID != "" {
+		payload["session_created"] = true
+		payload["created_session_id"] = createdID
+	}
+	switch terminal {
+	case "run.completed":
+		return payload, nil
+	case "run.cancelled":
+		payload["status"] = "cancelled"
+		payload["cancelled"] = true
+		return payload, nil
+	case "run.failed":
+		msg := hermesTerminalMessage(termData)
+		if msg == "" {
+			msg = "chat stream failed"
+		}
+		return nil, fmt.Errorf("hermes chat stream failed: %s", msg)
+	default:
+		return nil, errors.New("hermes chat stream ended without a terminal run event")
+	}
 }
 
 // hermesSessionTitle derives the auto-create session title from the first
@@ -577,8 +646,16 @@ func (t *HermesTool) run(ctx context.Context, args map[string]any) (map[string]a
 	}, nil
 }
 
-// runs polls one run: status + output when terminal.
+// runs polls one run: status + output when terminal. With wait=true
+// (Contract P2-D) it blocks on the run's SSE event stream until the
+// terminal run.* event (ctx-bounded) instead of polling once;
+// collect_events=true additionally returns the tool timeline (timeline
+// array: tool.started/completed names in stream order + the terminal
+// event). Without wait the legacy poll path is untouched.
 func (t *HermesTool) runs(ctx context.Context, args map[string]any) (map[string]any, error) {
+	if hermesArgBool(args, "wait") {
+		return t.runsWait(ctx, args, hermesArgBool(args, "collect_events"))
+	}
 	st, err := t.client.RunStatus(ctx, hermesArgString(args, "run_id"))
 	if err != nil {
 		return nil, err
@@ -590,6 +667,139 @@ func (t *HermesTool) runs(ctx context.Context, args map[string]any) (map[string]
 		"error":      st.Error,
 		"session_id": st.SessionID,
 	}, nil
+}
+
+// hermesStreamTerminals are the SSE run lifecycle events that end a
+// stream (mirrors the client-side terminal set in internal/hermes/sse.go).
+var hermesStreamTerminals = map[string]bool{
+	"run.completed": true,
+	"run.failed":    true,
+	"run.cancelled": true,
+}
+
+// hermesToolTimelineEvents are the tool lifecycle events collected into
+// the runs-wait timeline / chat-stream progress arrays (Contract P2-D:
+// tool.started/completed names in order + the terminal run.* event).
+var hermesToolTimelineEvents = map[string]bool{
+	"tool.started":   true,
+	"tool.completed": true,
+	"tool.failed":    true,
+}
+
+// hermesDrainStream consumes an SSE event channel until it closes,
+// aggregating assistant.delta text and the tool timeline. It returns the
+// terminal event type ("" when the stream ended without one), the
+// terminal payload (nil when absent/unparsable), the aggregated assistant
+// text, and the timeline. A ctx cancel that cuts the stream before the
+// terminal event is reported as the ctx error.
+func hermesDrainStream(ctx context.Context, ch <-chan hermes.Event) (terminal string, termData map[string]any, text string, timeline []map[string]any, err error) {
+	var sb strings.Builder
+	for ev := range ch {
+		switch {
+		case ev.Type == "assistant.delta":
+			var d struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(ev.Data, &d) == nil {
+				sb.WriteString(d.Text)
+			}
+		case hermesToolTimelineEvents[ev.Type]:
+			entry := map[string]any{"event": ev.Type}
+			var d struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(ev.Data, &d) == nil && d.Name != "" {
+				entry["name"] = d.Name
+			}
+			timeline = append(timeline, entry)
+		}
+		if hermesStreamTerminals[ev.Type] {
+			terminal = ev.Type
+			termData = map[string]any{}
+			if json.Unmarshal(ev.Data, &termData) != nil {
+				termData = nil
+			}
+			timeline = append(timeline, map[string]any{"event": ev.Type})
+			break // the pump closes the channel right after the terminal
+		}
+	}
+	if terminal == "" && ctx.Err() != nil {
+		return "", nil, sb.String(), timeline, ctx.Err()
+	}
+	return terminal, termData, sb.String(), timeline, nil
+}
+
+// hermesTerminalMessage extracts the human-readable failure text from a
+// terminal event payload (message wins, error is the fallback).
+func hermesTerminalMessage(termData map[string]any) string {
+	for _, k := range []string{"message", "error"} {
+		if s, ok := termData[k].(string); ok && strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// hermesTimelineAny projects the collected timeline onto a JSON-friendly
+// []any (always non-nil for a stable result shape).
+func hermesTimelineAny(timeline []map[string]any) []any {
+	out := make([]any, 0, len(timeline))
+	for _, e := range timeline {
+		out = append(out, e)
+	}
+	return out
+}
+
+// runsWait blocks on GET /v1/runs/{id}/events until the terminal run.*
+// event (ctx-bounded) and maps it per Contract P2-D: run.completed ->
+// success payload (final status/result from the poll document, degrading
+// to the event payload when the follow-up poll fails); run.failed ->
+// error carrying the payload message; run.cancelled -> {cancelled:true}
+// result, not an error.
+func (t *HermesTool) runsWait(ctx context.Context, args map[string]any, collect bool) (map[string]any, error) {
+	runID := strings.TrimSpace(hermesArgString(args, "run_id"))
+	ch, err := t.client.StreamRunEvents(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	terminal, termData, _, timeline, err := hermesDrainStream(ctx, ch)
+	if err != nil {
+		return nil, fmt.Errorf("hermes run %s wait: %w", runID, err)
+	}
+	payload := map[string]any{"run_id": runID}
+	if collect {
+		payload["timeline"] = hermesTimelineAny(timeline)
+	}
+	switch terminal {
+	case "run.completed":
+		st, serr := t.client.RunStatus(ctx, runID)
+		if serr != nil {
+			// The terminal event is ground truth for success; a
+			// follow-up poll failure degrades to the event payload.
+			payload["status"] = "completed"
+			if out := hermesTerminalMessage(termData); out != "" {
+				payload["result"] = out
+			}
+			return payload, nil
+		}
+		payload["status"] = st.Status
+		payload["result"] = st.FinalText()
+		payload["error"] = st.Error
+		payload["session_id"] = st.SessionID
+		return payload, nil
+	case "run.cancelled":
+		payload["status"] = "cancelled"
+		payload["cancelled"] = true
+		return payload, nil
+	case "run.failed":
+		msg := hermesTerminalMessage(termData)
+		if msg == "" {
+			msg = "run failed"
+		}
+		return nil, fmt.Errorf("hermes run %s failed: %s", runID, msg)
+	default:
+		return nil, fmt.Errorf("hermes run %s wait: stream ended without a terminal run event", runID)
+	}
 }
 
 // steer delivers mid-run guidance at the next tool boundary.
@@ -785,6 +995,21 @@ func hermesArgNumber(args map[string]any, key string) float64 {
 		return float64(v)
 	default:
 		return 0
+	}
+}
+
+// hermesArgBool reads an optional bool arg. JSON-decoded tool calls can
+// deliver bools as strings, so "true"/"1" parse as true (wait/
+// collect_events/stream are model-facing args).
+func hermesArgBool(args map[string]any, key string) bool {
+	switch v := args[key].(type) {
+	case bool:
+		return v
+	case string:
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		return err == nil && b
+	default:
+		return false
 	}
 }
 

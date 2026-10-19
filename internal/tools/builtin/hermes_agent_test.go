@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/hermes"
 )
@@ -968,6 +970,512 @@ func TestHermesTool_ReadOnlyApproveJobs(t *testing.T) {
 	for _, verb := range []string{"approve", "jobs"} {
 		if tool.IsReadOnly(withHermesVerb(map[string]any{}, verb)) {
 			t.Errorf("verb %s IsReadOnly = true, want false (conservative)", verb)
+		}
+	}
+}
+
+// --- p2-04: streaming (runs wait/collect_events, chat stream) ----------------
+
+// hermesSSEFlusher writes raw SSE bytes and flushes them (p2-02 test pattern).
+func hermesSSEFlusher(w http.ResponseWriter) http.Flusher {
+	f, ok := w.(http.Flusher)
+	if !ok {
+		panic("httptest response is not a flusher")
+	}
+	return f
+}
+
+// hermesWriteSSE writes one SSE frame and flushes it.
+func hermesWriteSSE(w http.ResponseWriter, f http.Flusher, event, data string) {
+	io.WriteString(w, "event: "+event+"\ndata: "+data+"\n\n")
+	f.Flush()
+}
+
+func TestHermesTool_RunsWaitToTerminal(t *testing.T) {
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/runs/r1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			f := hermesSSEFlusher(w)
+			io.WriteString(w, ": keepalive\n\n")
+			f.Flush()
+			hermesWriteSSE(w, f, "tool.started", `{"name":"terminal"}`)
+			hermesWriteSSE(w, f, "tool.completed", `{"name":"terminal"}`)
+			hermesWriteSSE(w, f, "run.completed", `{"status":"completed"}`)
+		case "/v1/runs/r1":
+			fmt.Fprint(w, `{"run_id":"r1","status":"completed","output":"all done","session_id":"s1"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	out, err := tool.Execute(context.Background(), withHermesVerb(map[string]any{
+		"run_id": "r1", "wait": true,
+	}, "runs"))
+	if err != nil {
+		t.Fatalf("runs wait: %v", err)
+	}
+	m := hermesResultPayload(t, out)
+	if m["status"] != "completed" {
+		t.Errorf("status = %v, want completed", m["status"])
+	}
+	if m["result"] != "all done" {
+		t.Errorf("result = %v, want 'all done'", m["result"])
+	}
+	if m["session_id"] != "s1" {
+		t.Errorf("session_id = %v, want s1", m["session_id"])
+	}
+	if _, ok := m["timeline"]; ok {
+		t.Errorf("timeline must be absent without collect_events: %v", m)
+	}
+}
+
+func TestHermesTool_RunsWaitCollectEventsTimeline(t *testing.T) {
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/runs/r2/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			f := hermesSSEFlusher(w)
+			hermesWriteSSE(w, f, "tool.started", `{"name":"terminal"}`)
+			hermesWriteSSE(w, f, "assistant.delta", `{"text":"working"}`)
+			hermesWriteSSE(w, f, "tool.completed", `{"name":"terminal"}`)
+			hermesWriteSSE(w, f, "run.completed", `{"status":"completed"}`)
+		case "/v1/runs/r2":
+			fmt.Fprint(w, `{"run_id":"r2","status":"completed","output":"done"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	out, err := tool.Execute(context.Background(), withHermesVerb(map[string]any{
+		"run_id": "r2", "wait": true, "collect_events": true,
+	}, "runs"))
+	if err != nil {
+		t.Fatalf("runs wait+collect: %v", err)
+	}
+	m := hermesResultPayload(t, out)
+	tl, ok := m["timeline"].([]any)
+	if !ok {
+		t.Fatalf("timeline = %#v, want array", m["timeline"])
+	}
+	// tool.started, tool.completed, run.completed (assistant.delta is not
+	// part of the tool timeline).
+	if len(tl) != 3 {
+		t.Fatalf("timeline len = %d, want 3: %v", len(tl), tl)
+	}
+	e0 := tl[0].(map[string]any)
+	if e0["event"] != "tool.started" || e0["name"] != "terminal" {
+		t.Errorf("timeline[0] = %v", e0)
+	}
+	e1 := tl[1].(map[string]any)
+	if e1["event"] != "tool.completed" || e1["name"] != "terminal" {
+		t.Errorf("timeline[1] = %v", e1)
+	}
+	e2 := tl[2].(map[string]any)
+	if e2["event"] != "run.completed" {
+		t.Errorf("timeline[2] = %v, want terminal run.completed", e2)
+	}
+	if m["status"] != "completed" {
+		t.Errorf("status = %v", m["status"])
+	}
+}
+
+func TestHermesTool_RunsWaitFailedTerminalIsError(t *testing.T) {
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/runs/r3/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			f := hermesSSEFlusher(w)
+			hermesWriteSSE(w, f, "tool.started", `{"name":"browser"}`)
+			hermesWriteSSE(w, f, "run.failed", `{"message":"upstream exploded"}`)
+		case "/v1/runs/r3":
+			fmt.Fprint(w, `{"run_id":"r3","status":"failed","error":"upstream exploded"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	_, err := tool.Execute(context.Background(), withHermesVerb(map[string]any{
+		"run_id": "r3", "wait": true,
+	}, "runs"))
+	if err == nil {
+		t.Fatal("run.failed terminal must surface as an error result")
+	}
+	if !strings.Contains(err.Error(), "upstream exploded") {
+		t.Fatalf("failed error = %q, want the payload message", err.Error())
+	}
+}
+
+func TestHermesTool_RunsWaitCancelledTerminalIsResult(t *testing.T) {
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/runs/r4/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			f := hermesSSEFlusher(w)
+			hermesWriteSSE(w, f, "run.cancelled", `{"status":"cancelled"}`)
+		case "/v1/runs/r4":
+			fmt.Fprint(w, `{"run_id":"r4","status":"cancelled"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	out, err := tool.Execute(context.Background(), withHermesVerb(map[string]any{
+		"run_id": "r4", "wait": true,
+	}, "runs"))
+	if err != nil {
+		t.Fatalf("run.cancelled must NOT be an error: %v", err)
+	}
+	m := hermesResultPayload(t, out)
+	if m["cancelled"] != true {
+		t.Errorf("cancelled = %v, want true", m["cancelled"])
+	}
+	if m["status"] != "cancelled" {
+		t.Errorf("status = %v, want cancelled", m["status"])
+	}
+}
+
+func TestHermesTool_RunsWaitContextCancelMidStream(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/runs/r5/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			f := hermesSSEFlusher(w)
+			hermesWriteSSE(w, f, "tool.started", `{"name":"first"}`)
+			select {
+			case <-r.Context().Done():
+			case <-release:
+			}
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := tool.Execute(ctx, withHermesVerb(map[string]any{
+			"run_id": "r5", "wait": true,
+		}, "runs"))
+		done <- err
+	}()
+	// Let the stream deliver its first event, then cancel.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("ctx cancel mid-stream must return an error")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want errors.Is context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Execute did not return after ctx cancel")
+	}
+}
+
+func TestHermesTool_RunsLegacyPollUnchangedWithoutWait(t *testing.T) {
+	// Regression pin: no wait arg -> exactly one GET /v1/runs/r1 (the poll
+	// path), never the SSE events endpoint, and the legacy payload shape.
+	for _, waitVal := range []any{nil, false} {
+		args := map[string]any{"run_id": "r1"}
+		if waitVal != nil {
+			args["wait"] = waitVal
+		}
+		tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/runs/r1/events" {
+				t.Errorf("SSE endpoint hit without wait (wait=%v)", waitVal)
+			}
+			if r.Method != http.MethodGet || r.URL.Path != "/v1/runs/r1" {
+				t.Errorf("request = %s %s, want GET /v1/runs/r1", r.Method, r.URL.Path)
+			}
+			fmt.Fprint(w, `{"run_id":"r1","status":"completed","result":"done"}`)
+		})
+		out, err := tool.Execute(context.Background(), withHermesVerb(args, "runs"))
+		if err != nil {
+			t.Fatalf("runs (wait=%v): %v", waitVal, err)
+		}
+		m := hermesResultPayload(t, out)
+		if m["run_id"] != "r1" || m["status"] != "completed" || m["result"] != "done" {
+			t.Fatalf("legacy payload changed (wait=%v): %v", waitVal, m)
+		}
+		if _, ok := m["timeline"]; ok {
+			t.Fatalf("legacy payload must not carry a timeline: %v", m)
+		}
+		if _, ok := m["cancelled"]; ok {
+			t.Fatalf("legacy payload must not carry cancelled: %v", m)
+		}
+	}
+}
+
+func TestHermesTool_ChatStreamAggregatesDeltasWithProgress(t *testing.T) {
+	var gotBody map[string]any
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/capabilities":
+			fmt.Fprint(w, hermesCapsBody())
+		case "/api/sessions/s1/chat/stream":
+			if r.Method != http.MethodPost {
+				t.Errorf("stream method = %s, want POST", r.Method)
+			}
+			dec := json.NewDecoder(r.Body)
+			_ = dec.Decode(&gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			f := hermesSSEFlusher(w)
+			hermesWriteSSE(w, f, "assistant.delta", `{"text":"Hel"}`)
+			hermesWriteSSE(w, f, "assistant.delta", `{"text":"lo world"}`)
+			hermesWriteSSE(w, f, "tool.started", `{"name":"terminal"}`)
+			hermesWriteSSE(w, f, "tool.completed", `{"name":"terminal"}`)
+			hermesWriteSSE(w, f, "run.completed", `{"status":"completed"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	out, err := tool.Execute(context.Background(), withHermesVerb(map[string]any{
+		"session_id": "s1", "input": "say hello", "stream": true,
+	}, "chat"))
+	if err != nil {
+		t.Fatalf("chat stream: %v", err)
+	}
+	if gotBody["input"] != "say hello" {
+		t.Errorf("stream body = %v", gotBody)
+	}
+	m := hermesResultPayload(t, out)
+	if m["reply"] != "Hello world" {
+		t.Errorf("reply = %v, want aggregated 'Hello world'", m["reply"])
+	}
+	if m["session_id"] != "s1" {
+		t.Errorf("session_id = %v, want s1", m["session_id"])
+	}
+	prog, ok := m["progress"].([]any)
+	if !ok {
+		t.Fatalf("progress = %#v, want array", m["progress"])
+	}
+	if len(prog) != 3 {
+		t.Fatalf("progress len = %d, want 3 (2 tool + terminal): %v", len(prog), prog)
+	}
+	p0 := prog[0].(map[string]any)
+	if p0["event"] != "tool.started" || p0["name"] != "terminal" {
+		t.Errorf("progress[0] = %v", p0)
+	}
+	p2 := prog[2].(map[string]any)
+	if p2["event"] != "run.completed" {
+		t.Errorf("progress[2] = %v, want terminal", p2)
+	}
+}
+
+func TestHermesTool_ChatStreamAutoCreatesSession(t *testing.T) {
+	var got []string
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/capabilities":
+			fmt.Fprint(w, hermesCapsBody())
+		case "/api/sessions":
+			got = append(got, "POST /api/sessions")
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"object":"hermes.session","session":{"id":"s-new","source":"api_server"}}`)
+		case "/api/sessions/s-new/chat/stream":
+			got = append(got, "POST /api/sessions/s-new/chat/stream")
+			w.Header().Set("Content-Type", "text/event-stream")
+			f := hermesSSEFlusher(w)
+			hermesWriteSSE(w, f, "assistant.delta", `{"text":"hi"}`)
+			hermesWriteSSE(w, f, "run.completed", `{"status":"completed"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	out, err := tool.Execute(context.Background(), withHermesVerb(map[string]any{
+		"input": "hello", "stream": true,
+	}, "chat"))
+	if err != nil {
+		t.Fatalf("chat stream auto-create: %v", err)
+	}
+	// Interplay pin: create-session runs BEFORE the stream call.
+	want := []string{"POST /api/sessions", "POST /api/sessions/s-new/chat/stream"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("requests = %v, want %v", got, want)
+	}
+	m := hermesResultPayload(t, out)
+	if m["session_id"] != "s-new" || m["created_session_id"] != "s-new" || m["session_created"] != true {
+		t.Fatalf("payload = %v", m)
+	}
+	if m["reply"] != "hi" {
+		t.Errorf("reply = %v, want 'hi'", m["reply"])
+	}
+}
+
+func TestHermesTool_ChatStreamFailedTerminalIsError(t *testing.T) {
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/capabilities":
+			fmt.Fprint(w, hermesCapsBody())
+		case "/api/sessions/s1/chat/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			f := hermesSSEFlusher(w)
+			hermesWriteSSE(w, f, "assistant.delta", `{"text":"partial"}`)
+			hermesWriteSSE(w, f, "run.failed", `{"message":"model blew up"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	_, err := tool.Execute(context.Background(), withHermesVerb(map[string]any{
+		"session_id": "s1", "input": "hi", "stream": true,
+	}, "chat"))
+	if err == nil {
+		t.Fatal("run.failed terminal must surface as an error result")
+	}
+	if !strings.Contains(err.Error(), "model blew up") {
+		t.Fatalf("failed error = %q, want the payload message", err.Error())
+	}
+}
+
+func TestHermesTool_ChatStreamCancelledTerminalIsResult(t *testing.T) {
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/capabilities":
+			fmt.Fprint(w, hermesCapsBody())
+		case "/api/sessions/s1/chat/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			f := hermesSSEFlusher(w)
+			hermesWriteSSE(w, f, "assistant.delta", `{"text":"partial reply"}`)
+			hermesWriteSSE(w, f, "run.cancelled", `{"status":"cancelled"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	out, err := tool.Execute(context.Background(), withHermesVerb(map[string]any{
+		"session_id": "s1", "input": "hi", "stream": true,
+	}, "chat"))
+	if err != nil {
+		t.Fatalf("run.cancelled must NOT be an error: %v", err)
+	}
+	m := hermesResultPayload(t, out)
+	if m["cancelled"] != true {
+		t.Errorf("cancelled = %v, want true", m["cancelled"])
+	}
+	if m["reply"] != "partial reply" {
+		t.Errorf("reply = %v, want the aggregated partial text", m["reply"])
+	}
+}
+
+func TestHermesTool_ChatStreamContextCancelMidStream(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/capabilities":
+			fmt.Fprint(w, hermesCapsBody())
+		case "/api/sessions/s1/chat/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			f := hermesSSEFlusher(w)
+			hermesWriteSSE(w, f, "assistant.delta", `{"text":"start"}`)
+			select {
+			case <-r.Context().Done():
+			case <-release:
+			}
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := tool.Execute(ctx, withHermesVerb(map[string]any{
+			"session_id": "s1", "input": "hi", "stream": true,
+		}, "chat"))
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("ctx cancel mid-stream must return an error")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want errors.Is context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Execute did not return after ctx cancel")
+	}
+}
+
+func TestHermesTool_ChatLegacySyncUnchangedWithoutStream(t *testing.T) {
+	// Regression pin: no stream arg -> exactly one POST /api/sessions/s1/chat
+	// (the sync path), never the /chat/stream endpoint, legacy payload shape.
+	for _, streamVal := range []any{nil, false} {
+		args := map[string]any{"session_id": "s1", "input": "hi"}
+		if streamVal != nil {
+			args["stream"] = streamVal
+		}
+		tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/v1/capabilities":
+				fmt.Fprint(w, hermesCapsBody())
+			case "/api/sessions/s1/chat":
+				if r.Method != http.MethodPost {
+					t.Errorf("method = %s", r.Method)
+				}
+				fmt.Fprint(w, `{"type":"hermes.session.chat.completion","message":{"role":"assistant","content":"sync reply"}}`)
+			case "/api/sessions/s1/chat/stream":
+				t.Errorf("stream endpoint hit without stream=true (stream=%v)", streamVal)
+			default:
+				t.Errorf("unexpected path %s", r.URL.Path)
+			}
+		})
+		out, err := tool.Execute(context.Background(), withHermesVerb(args, "chat"))
+		if err != nil {
+			t.Fatalf("chat (stream=%v): %v", streamVal, err)
+		}
+		m := hermesResultPayload(t, out)
+		if m["reply"] != "sync reply" || m["session_id"] != "s1" {
+			t.Fatalf("legacy chat payload changed (stream=%v): %v", streamVal, m)
+		}
+		if _, ok := m["progress"]; ok {
+			t.Fatalf("legacy chat payload must not carry progress: %v", m)
+		}
+	}
+}
+
+func TestHermesTool_ChatStreamCapabilityGate(t *testing.T) {
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/capabilities" {
+			fmt.Fprint(w, hermesCapsBody("session_chat"))
+			return
+		}
+		t.Errorf("no stream call expected when session_chat is off: %s", r.URL.Path)
+	})
+	_, err := tool.Execute(context.Background(), withHermesVerb(map[string]any{
+		"session_id": "s1", "input": "hi", "stream": true,
+	}, "chat"))
+	if err == nil || !strings.Contains(err.Error(), "does not advertise the session_chat capability") {
+		t.Fatalf("gate error = %v", err)
+	}
+}
+
+func TestHermesTool_RunsWaitStreamErrorSurface(t *testing.T) {
+	// Non-2xx on the SSE subscribe (typed error, nil channel) surfaces as
+	// the tool error, translated like every other hermes failure.
+	tool, _ := newHermesTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/runs/r9/events" {
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"error":"unauthorized"}`)
+			return
+		}
+		t.Errorf("unexpected path %s", r.URL.Path)
+	})
+	_, err := tool.Execute(context.Background(), withHermesVerb(map[string]any{
+		"run_id": "r9", "wait": true,
+	}, "runs"))
+	if err == nil || !errors.Is(err, hermes.ErrHermesAuth) {
+		t.Fatalf("err = %v, want translated ErrHermesAuth", err)
+	}
+}
+
+func TestHermesTool_DescriptionCoversStreamingArgs(t *testing.T) {
+	d := NewHermesTool(nil, false).Description()
+	for _, want := range []string{"wait", "collect_events", "stream"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("description missing %q: %s", want, d)
 		}
 	}
 }
