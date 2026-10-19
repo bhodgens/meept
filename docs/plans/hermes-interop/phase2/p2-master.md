@@ -120,11 +120,18 @@ touch-up only if text is now wrong.
 
 | Leaf | Status | Commit | Notes |
 |------|--------|--------|-------|
-| p2-01 | PENDING | — | client REST + auto_approve knob |
-| p2-02 | PENDING | — | sse.go |
-| p2-03 | PENDING | — | tool verbs + gating |
-| p2-04 | PENDING | — | streaming in tool |
-| p2-05 | PENDING | — | docs |
+| p2-01 | COMPLETE 2026-10-19 | bcefdff9 (+test commit) | CreateSession (w/ model-lock opts), SessionKey header, RunApproval, Jobs CRUD, SetSessionModel; AutoApprove knob; orchestrator finished the consent-stalled tail |
+| p2-02 | COMPLETE 2026-10-19 | 20b55ce3 | sse.go: StreamRunEvents + StreamChat, keepalive skip, 4MiB lines, timeout-less stream client; 9 tests -race |
+| p2-03 | COMPLETE 2026-10-19 | 3dd4e7e9 | 12 verbs (approve two-phase, jobs CRUD, chat auto-create, session_key, create_session/set_model); gating on REAL upstream flags (run_submission, session_chat, run_steer/stop, run_approval_response, session_model_lock); jobs ungated (no upstream flag); NewHermesTool(client, autoApprove) |
+| p2-04 | COMPLETE 2026-10-19 | 38d6cdf5 | runs wait/collect_events + chat stream; terminal mapping (completed/failed/cancelled); legacy paths pinned byte-identical; 13 tests -race |
+| p2-05 | COMPLETE 2026-10-19 | e16e31c9 | hermes.md rewritten (12-verb table, gating, continuity, approval, streaming, jobs); matrix row fixed; sibling's uncommitted 10-verb edits absorbed; subagent commit was consent-denied, orchestrator committed after verification |
+
+Tree COMPLETE 2026-10-19 — 5/5 leaves committed, 100%. Integration gate:
+both binaries build; hermes/config/tools.builtin/daemon suites green
+(-count=1). Phase-2 scope delivered in full: approval relay (two-phase
+confirm, auto_approve default false), SSE streaming (runs wait +
+collect_events, chat stream), session continuity (create-session,
+session_key header), jobs verbs, capability gating on real upstream flags.
 
 ## Non-goals
 
