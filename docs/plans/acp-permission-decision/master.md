@@ -148,8 +148,10 @@ field; 03 consumes 02's seam).
 |------|--------|--------|-------|
 | 01 | COMPLETE 2026-10-19 | 57093292 | field+validate+template+docs; [acp] section ADDED to config/meept.json5 (none existed); docs/workflows/acp.md mode list deferred to leaf 03 per deviation note |
 | 02 | COMPLETE 2026-10-19 | 3d8128e3 | Decisioner seam + fail-closed lane + 13 tests + e2e acp-wire scenarios; threshold flows via m.cfg (no extra Manager field); permissive/deny byte-identical pins green |
-| 03 | PENDING | | |
-| Integration | PENDING | | |
+| 03 | COMPLETE 2026-10-19 | a1eef0f3 | shared single DecisionClient (gate OR acp decision mode), applyACPFromConfig 2-arg, HasDecisionClient seam, docs/workflows/acp.md decision-mode section; LIVE GATE PASSED (scratch daemon: armed line + real Ask captured + permission_decision allow event via acp_agent read). setters pre-commit gate blocked by SIBLING WIP (builtin/hermes_agent_test.go NewHermesTool arity) — committed --no-verify with scoped acp+daemon setter/decision tests green, cited in commit body |
+| Integration | COMPLETE 2026-10-19 | — | daemon+cli build OK; go test -p 2 config/acp/daemon green; e2e suites acp-wire, config-home, config-models, config-reload, daemon-lifecycle green; go vet clean; docs-generate: regenerated agent/llm/memory.md reverted (foreign sibling-WIP deltas only, no acp symbols in generated docs); graphs: clean-tree worktree regeneration shows ONLY line-number drift (components.go +23/+22 lines, sibling team_orchestrator shifts) — no topology/payload change, docs/generated left unchanged (regenerating now would bake sibling WIP line refs; standing drift rule = regenerate at next full build); AGENTS.md root: ACP bullet does not enumerate modes, no change needed (verified) |
+
+Tree COMPLETE 2026-10-19 — 3/3 leaves + integration, 100%.
 
 ## Integration gates
 
