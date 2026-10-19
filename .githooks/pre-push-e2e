@@ -56,19 +56,55 @@ fi
 REMOTE_NAME="${1:-origin}"
 
 TMP="$(mktemp "${TMPDIR:-/tmp}/pre-push-e2e.XXXXXX")"
-trap 'rm -f "$TMP"' EXIT
+REFS_FILE="${TMP}.refs"
+trap 'rm -f "$TMP" "$REFS_FILE"' EXIT
 
 failed=0
 ran=0
 
-# Git feeds one line per ref: <local ref> SP <local sha> SP <remote ref>
-# SP <remote sha> LF. remote sha all-zeros = new branch; local sha
-# all-zeros = branch deletion. Annotated tags arrive peeled
+# Git feeds one line per ref on stdin: <local ref> SP <local sha> SP
+# <remote ref> SP <remote sha> LF. remote sha all-zeros = new branch;
+# local sha all-zeros = branch deletion. Annotated tags arrive peeled
 # (<sha>^{}).
+#
+# Manual invocation (documented in .githooks/README.md "Testing Hooks")
+# has no ref lines on a TTY stdin; synthesize one for the current
+# branch so the gate can be exercised without a real push. The
+# all-zero remote sha routes through the tracking-ref lookup below.
+if [ -t 0 ]; then
+    BR="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    if [ -z "$BR" ]; then
+        echo "pre-push-e2e: detached HEAD — run via git push instead."
+        exit 0
+    fi
+    LSHA="$(git rev-parse "refs/heads/${BR}")"
+    # Prefer the branch's configured upstream (@{u}): that is exactly
+    # what a plain `git push` would compare against. Fall back to the
+    # calling remote name when the branch has no upstream configured —
+    # a missing tracking ref routes to the smoke suite below.
+    if USHA="$(git rev-parse --quiet "@{u}")"; then
+        UREF="$(git for-each-ref --format='%(refname)' "@{u}")"
+        printf 'refs/heads/%s %s %s %s\n' "$BR" "$LSHA" "$UREF" "$USHA" > "$REFS_FILE"
+        echo "pre-push-e2e: manual run — checking current branch $BR against its upstream ($UREF)."
+    else
+        printf 'refs/heads/%s %s refs/remotes/%s/%s %s\n' \
+            "$BR" "$LSHA" "${REMOTE_NAME}" "$BR" "$ZERO" > "$REFS_FILE"
+        echo "pre-push-e2e: manual run — $BR has no upstream; synthesized $REMOTE_NAME ref line (smoke fallback if no tracking ref)."
+    fi
+else
+    cat > "$REFS_FILE"
+fi
+
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_ref:-}" ] || continue
-    local_sha="${local_sha%\^{}}"
-    remote_sha="${remote_sha%\^{}}"
+    # Annotated tags arrive peeled (<sha>^{}); strip the marker via a
+    # variable-holding pattern. The naive "${sha%\^{}}" is a shell
+    # gotcha: the \{-escapes make the first } close the expansion,
+    # appending a literal } to every sha (silent in the up-to-date
+    # test, fatal in the diff range).
+    PEEL='^{}'
+    local_sha="${local_sha%"$PEEL"}"
+    remote_sha="${remote_sha%"$PEEL"}"
 
     if [ "$local_sha" = "$ZERO" ]; then
         echo "pre-push-e2e: $local_ref is a deletion — nothing to check."
@@ -111,7 +147,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             failed=1
         fi
     fi
-done
+done < "$REFS_FILE"
 
 if [ "$failed" = "1" ]; then
     echo ""
