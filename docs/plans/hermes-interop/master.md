@@ -146,8 +146,11 @@ both binaries build; hermes/config/tools.builtin suites green (-count=1).
 
 ## Follow-ups (post-tree)
 
-- `internal/hermes` client: add `CreateSession` (POST /api/sessions) + `chat`
-  verb auto-create when session_id empty (Contract C's original shape).
+- (LANDED 2026-10-19) `internal/hermes` client: `CreateSession`
+  (POST /api/sessions) + `chat` verb auto-create when `session_id` is
+  empty (Contract C's original shape); plus `SetSessionModel`
+  (POST /api/sessions/{id}/model) exposed as the `set_model` verb and
+  `create_session` verb — 10 verbs total.
 - Repo-owner env: `tools/analyzers/predid`+`mutexio` fail on any package
   with "export data version 5 > maximum supported 4" when run directly —
   analyzer binaries older than go1.27.2 stdlib. `make lint-ci` passes
