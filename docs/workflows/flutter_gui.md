@@ -64,6 +64,7 @@ When no transient message is set, segments render in code order, joined by `' ·
 | 7 | branch | `sessionBranchProvider` (status_bar.dart) | `branch: <topic.lowercase>` — active thread topic label, fetched via `GET /api/v1/sessions/{id}/threads/active` only when the session has a `leaf_message_id`; **conditional** (TUI parity with app.go's `branch: <name>` span) |
 | 8 | pending changes | `sessionPendingChangesProvider` (status_bar.dart) | `<n> pending changes` in warning color via `SdkApiClient.listPendingChanges` for the active session; **conditional**, only while > 0 (TUI parity) |
 | 9 | claims to review | `memoryReviewPendingProvider` (status_bar.dart) | `<n> claims to review` in warning color via `GET /api/v1/memory/review-queue` (the REST bridge to the same `memory.reviewQueue` RPC the TUI uses); **conditional**, only while > 0 (TUI parity) |
+| 10 | acp permissions pending | `acpPermissionProvider` (status_bar.dart) | `<n> acp permissions pending` in warning color while the human relay has pending requests (TUI parity: `acp perms: N pending` — the label strings differ deliberately per surface, see [acp](acp.md) "Surface label parity note"); **conditional**, only while > 0; relay-global, not session-gated |
 
 The status bar is always rendered on the home scaffold; it does not disappear on modals or dialogs. Project names are truncated to 16 grapheme clusters (`chars.length > 16`) using `String.characters` (grapheme-aware) to avoid splitting surrogate pairs.
 
@@ -149,6 +150,25 @@ Mirrors the TUI's `d` / `shift+d` keys with pointer affordances. See [session.md
 A `FutureProvider.family<Session, String>` (`sessionDetailFamily` in `ui/flutter_ui/lib/providers/session_detail.dart`) provides per-id caching for the sessions detail pane.
 
 `SessionsDetailPane` accepts an optional `sessionId`; when provided it consumes `sessionDetailFamily(sessionId)` instead of re-fetching, so navigation from the sessions list into a detail view reuses the cached row data. `HomeScreen` also warms the cache for the `default` session on connect.
+
+### ACP permission relay dialog
+
+TUI-parity surface for the human permission relay (full contract in
+[acp.md](acp.md) "Relay surfaces"). `ui/flutter_ui/lib/providers/acp_permission_provider.dart`
+subscribes via `websocket.subscribeToAcpPermissions()` to the WS
+`agent_progress` frames on `acp.permission.requested`/`.resolved`
+(race-safe snapshot merge; an HTTP-resolve elsewhere dismisses the dialog
+through the resolved frame, same as the TUI modal walking its FIFO queue).
+`ui/flutter_ui/lib/widgets/acp_permission_dialog.dart` shows
+"AcpPermissionDialog" — title `acp permission request (xN)` while
+requests stack — with lowercase `allow`/`deny` buttons that POST
+`/api/v1/acp/permissions/resolve`; a failed resolve keeps the dialog open
+and retains the error for retry. The dialog host is mounted by the
+`MaterialApp.builder` in `ui/flutter_ui/lib/core/router.dart` above the
+Navigator (via `rootNavigatorKey`) so it renders regardless of the active
+route, mirroring the TUI's `runModal` layering; it is web-safe (no
+`dart:io`). The status bar shows the `<n> acp permissions pending` span
+(segment 10 above) while any request awaits an answer.
 
 ### Layout modes
 

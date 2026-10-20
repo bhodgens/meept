@@ -21,7 +21,12 @@ misclassified lifecycle events appear as blank messages.
 Quota events on `agent.quota_wait` MUST be classified as `agent_progress`, never
 `chat_message`. Classification derives from each payload's `WSClass()` marker
 (`internal/comm/wsclass`) where the payload is typed (currently
-`turn.terminal`/`TurnTerminalEvent`); all other topics classify through the
+`turn.terminal`/`TurnTerminalEvent` and the ACP relay's
+`acp.permission.requested`/`.resolved` typed topics carrying
+`bus.ACPPermissionEvent`, which marker-classify as `agent_progress`; they
+only reach WS because the proxy subscription list includes the 3-segment
+`acp.*.*` wildcard — the bare `*` matches single-segment topics only); all
+other topics classify through the
 legacy topic-prefix table in `transformBusEventToWS` (kept as a labeled
 fallback until every WS-visible topic is typed). Switch coverage is enforced by
 the `exhaustive` linter (`//exhaustive:enforce` on

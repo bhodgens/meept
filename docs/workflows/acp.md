@@ -36,6 +36,9 @@ answered according to `[acp] permission_mode`:
   **fail closed** — approve only when the decider explicitly answers `allow`
   with confidence at or above `[acp] decision_threshold`; every other outcome
   cancels the request
+- `human`: pause each request for a person to answer over the pending-permission
+  relay (see "Human mode (permission relay)" below); an unanswered request
+  cancels fail-closed after `[acp] relay_timeout`
 
 The wire layer (`Transport`) correlates JSON-RPC ids, fans notifications,
 and can `Reply` to inbound requests.
@@ -72,6 +75,113 @@ configured `decision_model` slot but never reads or flips
 `compaction.decision_*`. The daemon shares ONE decision client instance
 between the tool-call gate and the ACP lane when both are enabled.
 
+### Human mode (permission relay)
+
+`permission_mode = "human"` puts a person in the loop for every inbound
+`session/requestPermission`. The pending registry lives in
+`internal/acp/relay.go` (the only package that knows ACP request ids);
+bus/RPC/HTTP/TUI/GUI are consumers. Flow, fail-closed at every step:
+
+```
+requestPermission arrives
+  -> register PendingPermission {id "perm-…", agent_id, session_id,
+     request_id, summary (300-rune render of raw params), created_at}
+     - registry full (32 pending)  -> immediate deny + WARN reason "full"
+  -> emit permission_requested (text = pending id) + publish typed bus
+     topic acp.permission.requested -> WS frame (agent_progress) to every
+     surface listening; no listener = the wait STILL runs (a reconnecting
+     GUI can answer) with an INFO "no listener, waiting for reconnect"
+  -> wait on select: human resolve vs relay_timeout timer
+     - resolve allow -> ACP reply {outcome: "selected", optionId:
+       "allow-once"}; agent proceeds
+     - resolve deny  -> ACP reply {outcome: "cancelled"}
+     - timeout       -> ACP reply {outcome: "cancelled"} + WARN
+       "acp permission denied: human relay timed out"
+  -> emit permission_resolved (text: "allow" | "deny" | "timeout") +
+     publish acp.permission.resolved (decision + reason)
+```
+
+`relay_timeout` (seconds, default 120) is enforced `> 0` by config
+validation only when `permission_mode = "human"` or
+`decision_escalate_to_human = true`; a non-positive value at runtime falls
+back to the 120 s default inside the session. v1 answer verbs are exactly
+`allow` / `deny` — there is no "always"; the resolve boundary
+(RPC/HTTP/CLI) rejects any other verb before touching the registry, so a
+typo never becomes a silent deny.
+
+### Decision-lane escalation (`decision_escalate_to_human`)
+
+With `permission_mode = "decision"` and
+`decision_escalate_to_human = true`, every NON-allow decision outcome
+(`deny`, `answer_deny`, `low_confidence`, `ask_error`, `no_decisioner`,
+`unavailable`) routes into the SAME human relay wait instead of cancelling
+outrightly. An `allow` outcome never touches the relay. The terminal
+`permission_request`/`permission_decision` event texts are:
+
+| Outcome | Text | ACP reply |
+|---------|------|-----------|
+| relay allow | `escalated_human_allow` | selected / allow-once |
+| relay deny | `escalated_human_deny` | cancelled |
+| relay timeout | `deny` (parent cancel semantics kept) | cancelled |
+| escalate armed, relay not wired | original decision text + WARN reason `escalated_human_no_relay` | cancelled |
+
+Fail-closed polarity is preserved: `escalate = false` leaves the decision
+lane byte-identical to the parent tree, and every escalation failure path
+cancels exactly like a plain decision deny.
+
+### Relay surfaces
+
+| Surface | Entry point | Notes |
+|---------|-------------|-------|
+| TUI | `internal/tui/acp_permission.go` modal | FIFO queue per request; `y` allow, `n` deny, `esc` dismiss-without-answering (stays pending, timeout fails it); auto-dismiss on the resolved frame from ANY surface + toast; failed resolve keeps the modal for retry |
+| GUI | `ui/flutter_ui/lib/widgets/acp_permission_dialog.dart` + `acp_permission_provider.dart` | dialog host in `MaterialApp.builder` (rootNavigatorKey), allow/deny buttons POST the resolve route; status-bar badge while pending |
+| CLI | `meept acp permissions list [--json]`, `meept acp permissions resolve <id> allow\|deny` | `cmd/meept/acp_cmd.go`; bad verb refused before any daemon call |
+| HTTP | `GET /api/v1/acp/permissions`, `POST /api/v1/acp/permissions/resolve` `{id, decision}` | `internal/comm/http/acp_status.go`; disabled/nil manager = 200 with `{"enabled": false, "pending": []}` |
+| RPC | `acp.permissions.list`, `acp.permissions.resolve {id, decision}` | `internal/rpc/acp.go`; registered even with a nil manager (list = empty, resolve = not-found) |
+
+Resolve error sentinels (frozen strings): `acp: relay request not found`,
+`acp: relay request already answered`, `acp: relay pending queue full`.
+First answer wins; concurrent resolves of one id get
+`already answered`.
+
+### Events and topics
+
+Session event kinds (internal/acp `SessionEvent.Kind`):
+
+| Kind | Emitted by | Text |
+|------|-----------|------|
+| `permission_request` | permissive/deny/decision lanes | `approved`/`denied` or decision outcome text (escalation: the table above) |
+| `permission_decision` | decision lane (+ escalation) | outcome / `escalated_human_*` text |
+| `permission_requested` | human relay wait | the pending id (`perm-…`) |
+| `permission_resolved` | human relay wait | `allow` / `deny` / `timeout` |
+
+Bus + WS (typed `bus.Topic[T]`, payload `bus.ACPPermissionEvent`; keys
+`id`, `agent_id`, `session_id`, `summary`, `created_at`, plus
+`decision`/`reason` on the resolved frame):
+
+| Topic | WS type | decision | reason |
+|-------|---------|----------|--------|
+| `acp.permission.requested` | `agent_progress` | empty | empty |
+| `acp.permission.resolved` | `agent_progress` | `allow`/`deny` | `answered` / `timeout` (the fail-closed reject reasons `no_relay`/`full` land in the WARN log fields, not on a published frame — nothing reached the registry/surfaces in those paths) |
+
+The payload carries a `wsclass` marker (`WSClass()` → progress), so
+classification is marker-driven, never the legacy prefix table — relay
+frames must never render as `chat_message` (blank-bubble invariant). WS
+relay requires the `acp.*.*` wildcard in the proxy subscription list
+(`internal/comm/http/server.go`): `bus.matchWildcard` compares segment
+counts, so the leading `*` alone never matches these 3-segment topics —
+the same gap was pinned and fixed in the TUI's EventStream list.
+
+### Surface label parity note
+
+The pending-count label differs per surface BY DESIGN: the TUI renders
+`acp perms: N pending` (modal footer + status bar after esc-dismiss) and
+the GUI status bar renders `N acp permissions pending`. Both strings fit
+their surface's column width and vocabulary precedent (TUI terse status
+tokens; GUI sentence-style `<n> … pending` spans, e.g. "n pending
+changes", "n claims to review"). The capability itself is at full parity;
+no code change is planned — this note is the record.
+
 ## Configuration
 
 ```json5
@@ -83,7 +193,9 @@ between the tool-call gate and the ACP lane when both are enabled.
     call_timeout: 120,
     max_agents: 3,
     permission_mode: "permissive",
-    decision_threshold: 0.5
+    decision_threshold: 0.5,
+    relay_timeout: 120,
+    decision_escalate_to_human: false
   }
 }
 ```
@@ -106,6 +218,21 @@ when ACP is off or the manager is nil (still 200). When enabled, each agent has
 Security: `acp_agent` verbs `launch`/`send` are HIGH; `read`/`stop` are LOW.
 See [http-api](../reference/http-api.md#acp-client-agents). The Flutter GUI
 consumes this endpoint in the same tree (leaf 09).
+
+## HTTP relay surface
+
+With the human relay armed (`permission_mode = "human"`, or `"decision"` +
+`decision_escalate_to_human`), two more endpoints share the same auth
+middleware:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/acp/permissions` | Pending permission snapshot: `{"enabled": true, "pending": [{id, agent_id, session_id, summary, created_at}]}`; disabled/nil manager = 200 `{"enabled": false, "pending": []}` |
+| POST | `/api/v1/acp/permissions/resolve` | Body `{"id": "perm-…", "decision": "allow"\|"deny"}`; echo `{"decision": …, "reason": "answered"}`; 400 on missing id or a verb other than allow/deny |
+
+RPC equivalents: `acp.permissions.list` / `acp.permissions.resolve`. CLI:
+`meept acp permissions list [--json]` / `meept acp permissions resolve <id>
+allow|deny`.
 
 ## Edge Cases
 

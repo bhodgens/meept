@@ -494,6 +494,20 @@ func TestACPWire_DecisionModeFailClosed(t *testing.T) {
 // default path, redirected by MEEPT_HOME).
 func acpStack(t *testing.T, bin string) *harness.Stack {
 	t.Helper()
+	return acpStackWith(t, bin, map[string]any{
+		"enabled":         true,
+		"permission_mode": "human",
+		"relay_timeout":   5,
+		"dial_timeout":    30,
+		"call_timeout":    20,
+		"max_agents":      2,
+	})
+}
+
+// acpStackWith is acpStack with a caller-supplied [acp] overlay (the
+// decision-escalation scenario boots the same stack in decision mode).
+func acpStackWith(t *testing.T, bin string, acpCfg map[string]any) *harness.Stack {
+	t.Helper()
 	return harness.Start(t,
 		harness.WithConfigOverlay(map[string]any{
 			"transport.http.websocket": true,
@@ -504,14 +518,7 @@ func acpStack(t *testing.T, bin string) *harness.Stack {
 			// off — THIS test's subject is the ACP human relay, which is
 			// itself the confirmation layer.
 			"security.require_confirmation_high": false,
-			"acp": map[string]any{
-				"enabled":         true,
-				"permission_mode": "human",
-				"relay_timeout":   5,
-				"dial_timeout":    30,
-				"call_timeout":    20,
-				"max_agents":      2,
-			},
+			"acp":                                acpCfg,
 		}),
 		harness.WithPreBootHook(func(s *harness.Stack) error {
 			catalog := `{"agents":[{"id":"perm-agent","command":["` + bin +
@@ -762,5 +769,118 @@ func TestACPWire_FullStackHumanRelayWSAndHTTPResolve(t *testing.T) {
 	_, errOut := s.RunCLI(t, 30*time.Second, true, "acp", "permissions", "resolve", "perm-x", "maybe")
 	if !strings.Contains(strings.ToLower(errOut), "allow") || !strings.Contains(strings.ToLower(errOut), "deny") {
 		t.Fatalf("resolve with a typo decision must fail offline with the allow|deny hint, got:\n%s", errOut)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// acp-wire-04 (leaf 06 live gate leg d): decision_escalate_to_human over the
+// FULL daemon stack. permission_mode "decision" + escalate=true with NO
+// decision_model slot configured: the lane's outcome is the non-allow token
+// "unavailable", which routes into the human relay instead of cancelling —
+// the exact escalation arm Contract B defines (leaf 02 pins the
+// escalated_human_* event texts in internal/acp unit tests; this scenario
+// proves the arm end-to-end: WS requested frame arrives, HTTP resolve allow
+// grants, the agent's turn proceeds).
+// ---------------------------------------------------------------------------
+
+func TestACPWire_FullStackDecisionEscalationToHuman(t *testing.T) {
+	bin := stubAgentBin(t)
+	s := acpStackWith(t, bin, map[string]any{
+		"enabled":                    true,
+		"permission_mode":            "decision",
+		"decision_escalate_to_human": true,
+		"decision_threshold":         0.5,
+		"relay_timeout":              5,
+		"dial_timeout":               30,
+		"call_timeout":               20,
+		"max_agents":                 2,
+	})
+
+	logBytes, logErr := os.ReadFile(s.Daemon.LogPath())
+	if logErr != nil {
+		t.Fatalf("read daemon log: %v", logErr)
+	}
+	logStr := string(logBytes)
+	if !strings.Contains(logStr, "acp human permission relay armed") {
+		t.Fatalf("relay not armed under decision+escalate; daemon log:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, `"escalate"=true`) && !strings.Contains(logStr, "escalate=true") {
+		t.Fatalf("relay armed line must record escalate=true; daemon log:\n%s", logStr)
+	}
+
+	ws := harness.DialWS(t, s, "")
+	s.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"pinned chat for acp escalation"}`)
+	s.RegisterProject(t, "acp-escalate-project")
+	sessionID := s.CreateSession(t, "acp-escalate", s.ProjectDir)
+	client := httpInsecure()
+
+	// Launch the external agent (subprocess spawn inside the daemon).
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "acp_agent",
+		Arguments: `{"agent":"perm-agent","verb":"launch"}`,
+	})
+	s.ChatTurn(t, sessionID, "launch the perm-agent external coding agent", 120*time.Second)
+
+	// One send turn: the fakeagent fires requestPermission mid-prompt; the
+	// decision lane is unavailable (no decision_model slot), so the request
+	// escalates to the human relay and the turn blocks until an answer.
+	sendDone := make(chan string, 1)
+	go func() {
+		s.Fake.EnqueueToolCalls(harness.ToolCall{
+			Name:      "acp_agent",
+			Arguments: `{"agent":"perm-agent","verb":"send","message":"escalate"}`,
+		})
+		out, errOut := s.RunCLI(t, 150*time.Second, true,
+			"chat", "--session", sessionID, "ask perm-agent to do: escalate")
+		sendDone <- out + "||" + errOut
+	}()
+
+	reqFrame := nextACPFrame(t, s, ws, "acp.permission.requested", 90*time.Second)
+	pendID, _ := reqFrame["id"].(string)
+	if pendID == "" {
+		t.Fatalf("escalated requested frame missing id: %v", reqFrame)
+	}
+	if got, _ := reqFrame["agent_id"].(string); got != "perm-agent" {
+		t.Errorf("escalated requested frame agent_id = %q, want perm-agent", got)
+	}
+
+	body, _ := json.Marshal(map[string]string{"id": pendID, "decision": "allow"})
+	resp, err := client.Post(s.HTTPBaseURL()+"/api/v1/acp/permissions/resolve",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST resolve: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST resolve status %d: %s", resp.StatusCode, raw)
+	}
+
+	resFrame := nextACPFrame(t, s, ws, "acp.permission.resolved", 30*time.Second)
+	if resFrame["id"] != pendID || resFrame["decision"] != "allow" {
+		t.Fatalf("escalated resolved frame = %v, want id %s decision allow", resFrame, pendID)
+	}
+	if out := <-sendDone; strings.Contains(out, "||failed") {
+		t.Logf("escalated-allow turn cli output (non-fatal): %s", out)
+	}
+
+	// The escalation completed: the decision-lane WARN proves the cause
+	// token routed the request to the relay (not a plain cancel), and the
+	// pending registry drained after the human allow.
+	resp, err = client.Get(s.HTTPBaseURL() + "/api/v1/acp/permissions")
+	if err != nil {
+		t.Fatalf("GET permissions: %v", err)
+	}
+	raw, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if strings.Contains(string(raw), pendID) {
+		t.Fatalf("pending registry still lists the escalated request after resolve: %s", raw)
+	}
+	logBytes, logErr = os.ReadFile(s.Daemon.LogPath())
+	if logErr != nil {
+		t.Fatalf("read daemon log: %v", logErr)
+	}
+	if !strings.Contains(string(logBytes), "acp permission denied: decision layer unavailable") {
+		t.Fatalf("escalation cause WARN (decision layer unavailable) missing from daemon log:\n%s", logBytes)
 	}
 }

@@ -188,6 +188,7 @@ Analytics:
 	rootCmd.AddCommand(newSyncCmd())
 	rootCmd.AddCommand(newChangesCmd())
 	rootCmd.AddCommand(newEffectsCmd())
+	rootCmd.AddCommand(newACPCmd())
 	rootCmd.AddCommand(newRoutingCmd())
 	rootCmd.AddCommand(newMigrateCmd())
 	rootCmd.AddCommand(newLearningCmd())

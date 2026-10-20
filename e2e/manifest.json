@@ -2149,6 +2149,20 @@
    ]
   },
   {
+   "id": "acp-wire-04",
+   "suite": "acp-wire",
+   "diff": "L",
+   "title": "Decision-lane escalation to the human relay (full stack): decision mode + decision_escalate_to_human with no decision_model slot routes the unavailable outcome to the relay; WS requested frame, HTTP resolve allow, registry drains",
+   "paths": [
+    "internal/acp/manager.go",
+    "internal/acp/session.go",
+    "internal/daemon/acp_register.go",
+    "internal/bus/acp_topics.go",
+    "internal/rpc/acp.go",
+    "internal/comm/http/server.go"
+   ]
+  },
+  {
    "id": "naive-user-chat-01",
    "suite": "naive-user-chat",
    "diff": "L",
