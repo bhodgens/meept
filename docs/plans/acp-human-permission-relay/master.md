@@ -192,7 +192,7 @@ Wave order: 01 → 02 → 03 → (04 ∥ 05) → 06 → integration gates.
 
 | Leaf | Status | Commit | Notes |
 |------|--------|--------|-------|
-| 01 | PENDING | | |
+| 01 | COMPLETE 2026-10-19 | 08e55aa0 | human mode + relay_timeout(120) + decision_escalate_to_human(false); conditional bounds; four-mode verbatim error pinned; setters gate green at HEAD directly |
 | 02 | PENDING | | |
 | 03 | PENDING | | |
 | 04 | PENDING | | |
