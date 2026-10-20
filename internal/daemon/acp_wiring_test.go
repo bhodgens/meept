@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/acp"
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -220,11 +222,215 @@ func TestApplyACPFromConfig_StopAllIdempotent(t *testing.T) {
 
 	mgr, err := applyACPFromConfig(cfg, nil)
 	if err != nil {
-		t.Fatalf("applyACPFromConfig: %v", err)
+		t.Fatalf("applyACPFromConfig error = %v", err)
 	}
 	if mgr == nil {
 		t.Fatal("manager is nil")
 	}
 	mgr.StopAll()
 	mgr.StopAll()
+}
+
+// ---------------------------------------------------------------------------
+// Human relay notifier wiring (acp-human-permission-relay leaf 03,
+// Contract C). The bus-backed notifier arms the relay seam for mode
+// "human" and for decision mode with decision_escalate_to_human; every
+// other config leaves the manager byte-identical (no relay, zero logs).
+// ---------------------------------------------------------------------------
+
+// TestApplyACPFromConfig_HumanModeArmsRelay pins Contract C: human mode +
+// a bus → the manager carries BOTH relay halves (HasPermissionRelay true).
+func TestApplyACPFromConfig_HumanModeArmsRelay(t *testing.T) {
+	cfg := acpEnabledConfig(t, "human")
+	cfg.RelayTimeout = 30
+	msgBus := bus.New(nil, slog.Default())
+	t.Cleanup(msgBus.Close)
+
+	mgr, err := applyACPFromConfig(cfg, nil, msgBus)
+	if err != nil {
+		t.Fatalf("applyACPFromConfig(human) error = %v", err)
+	}
+	if mgr == nil {
+		t.Fatal("applyACPFromConfig(human) manager = nil")
+	}
+	t.Cleanup(mgr.StopAll)
+
+	if !mgr.HasPermissionRelay() {
+		t.Fatal("human mode: manager.HasPermissionRelay() = false, want true (relay + notifier not wired)")
+	}
+}
+
+// TestApplyACPFromConfig_DecisionEscalationArmsRelay pins the escalation
+// lane: decision mode + decision_escalate_to_human + a bus → relay armed.
+func TestApplyACPFromConfig_DecisionEscalationArmsRelay(t *testing.T) {
+	cfg := acpEnabledConfig(t, "decision")
+	cfg.DecisionThreshold = 0.5
+	cfg.DecisionEscalateToHuman = true
+	cfg.RelayTimeout = 30
+	msgBus := bus.New(nil, slog.Default())
+	t.Cleanup(msgBus.Close)
+
+	mgr, err := applyACPFromConfig(cfg, stubACPDecisioner{available: true}, msgBus)
+	if err != nil {
+		t.Fatalf("applyACPFromConfig(decision+escalate) error = %v", err)
+	}
+	if mgr == nil {
+		t.Fatal("manager = nil")
+	}
+	t.Cleanup(mgr.StopAll)
+
+	if !mgr.HasPermissionRelay() {
+		t.Fatal("decision_escalate_to_human: relay not armed")
+	}
+	if !mgr.HasDecisionClient() {
+		t.Fatal("decision mode must still carry the decider")
+	}
+}
+
+// TestApplyACPFromConfig_PermissiveModeNoRelay pins the mode gate: the
+// same notifier-eligible bus passed with mode "permissive" must NOT arm
+// the relay — permissive/deny behavior stays byte-identical.
+func TestApplyACPFromConfig_PermissiveModeNoRelay(t *testing.T) {
+	cfg := acpEnabledConfig(t, "permissive")
+	msgBus := bus.New(nil, slog.Default())
+	t.Cleanup(msgBus.Close)
+
+	mgr, err := applyACPFromConfig(cfg, nil, msgBus)
+	if err != nil {
+		t.Fatalf("applyACPFromConfig(permissive) error = %v", err)
+	}
+	if mgr == nil {
+		t.Fatal("manager = nil")
+	}
+	t.Cleanup(mgr.StopAll)
+
+	if mgr.HasPermissionRelay() {
+		t.Fatal("permissive mode: relay armed, want none")
+	}
+}
+
+// TestApplyACPFromConfig_HumanModeNilBusFailsClosed pins fail-closed
+// layering: human mode with no bus (nil msgBus at construction) is NOT an
+// error — the manager simply keeps no relay and sessions cancel
+// immediately (internal/acp TestSession_HumanNilRelayFailsClosed).
+func TestApplyACPFromConfig_HumanModeNilBusFailsClosed(t *testing.T) {
+	cfg := acpEnabledConfig(t, "human")
+
+	mgr, err := applyACPFromConfig(cfg, nil, nil)
+	if err != nil {
+		t.Fatalf("applyACPFromConfig(human, nil bus) error = %v, want nil", err)
+	}
+	if mgr == nil {
+		t.Fatal("manager = nil")
+	}
+	t.Cleanup(mgr.StopAll)
+
+	if mgr.HasPermissionRelay() {
+		t.Fatal("nil bus must leave the manager without a relay (fails closed)")
+	}
+}
+
+// TestApplyACPFromConfig_DisabledNoRelayZeroLogs pins the zero-log
+// disabled contract THROUGH the new bus parameter: nothing wired, nothing
+// logged, (nil, nil) returned.
+func TestApplyACPFromConfig_DisabledNoRelayZeroLogs(t *testing.T) {
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	msgBus := bus.New(nil, slog.Default())
+	t.Cleanup(msgBus.Close)
+
+	mgr, err := applyACPFromConfig(config.DefaultConfig().ACP, nil, msgBus)
+	if err != nil || mgr != nil {
+		t.Fatalf("applyACPFromConfig(disabled) = (%v, %v), want (nil, nil)", mgr, err)
+	}
+	if strings.Contains(strings.ToLower(buf.String()), "acp") {
+		t.Fatalf("disabled path logged acp: %q", buf.String())
+	}
+	if total := msgBus.Stats()["_total"]; total != 0 {
+		t.Fatalf("disabled path left %d bus subscriptions", total)
+	}
+}
+
+// TestACPBusNotifierPublishes pins the notifier itself: requested returns
+// true iff a subscriber is listening (PublishT receiver count), and both
+// frames carry the frozen payload keys on their topics.
+func TestACPBusNotifierPublishes(t *testing.T) {
+	msgBus := bus.New(nil, slog.Default())
+	t.Cleanup(msgBus.Close)
+
+	var gotRequested, gotResolved bus.ACPPermissionEvent
+	subA := bus.SubscribeT(msgBus, "test-req", bus.TopicACPPermissionRequested, func(p bus.ACPPermissionEvent) {
+		gotRequested = p
+	})
+	subB := bus.SubscribeT(msgBus, "test-res", bus.TopicACPPermissionResolved, func(p bus.ACPPermissionEvent) {
+		gotResolved = p
+	})
+	t.Cleanup(func() {
+		msgBus.Unsubscribe(subA)
+		msgBus.Unsubscribe(subB)
+	})
+
+	n := &acpBusNotifier{bus: msgBus, logger: slog.Default()}
+	p := acp.PendingPermission{
+		ID:        "perm-1",
+		AgentID:   "codex",
+		SessionID: "sess-a",
+		Summary:   "tool: bash",
+		CreatedAt: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC),
+	}
+	if !n.NotifyPermissionRequested(p) {
+		t.Fatal("NotifyPermissionRequested with listeners = false, want true")
+	}
+	n.NotifyPermissionResolved(p, "allow", "answered")
+
+	// SubscribeT delivers on a reader goroutine: poll with a deadline.
+	deadline := time.Now().Add(2 * time.Second)
+	for (gotRequested.ID == "" || gotResolved.ID == "") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if gotRequested.ID != "perm-1" || gotRequested.AgentID != "codex" ||
+		gotRequested.SessionID != "sess-a" || gotRequested.Summary != "tool: bash" {
+		t.Fatalf("requested frame = %+v", gotRequested)
+	}
+	if gotRequested.CreatedAt == "" {
+		t.Error("requested frame missing created_at")
+	}
+	if gotResolved.Decision != "allow" || gotResolved.Reason != "answered" {
+		t.Fatalf("resolved frame = %+v", gotResolved)
+	}
+}
+
+// TestACPBusNotifierNoListenerReturnsFalse pins the reconnect contract's
+// notifier half: with no subscribers, NotifyPermissionRequested reports
+// false (the session keeps waiting until timeout; a late subscriber can
+// still answer via RPC).
+func TestACPBusNotifierNoListenerReturnsFalse(t *testing.T) {
+	msgBus := bus.New(nil, slog.Default())
+	t.Cleanup(msgBus.Close)
+
+	n := &acpBusNotifier{bus: msgBus, logger: slog.Default()}
+	if n.NotifyPermissionRequested(acp.PendingPermission{ID: "perm-x"}) {
+		t.Fatal("no-listener NotifyPermissionRequested = true, want false")
+	}
+	// Resolved is fire-and-forget (no return); must not panic.
+	n.NotifyPermissionResolved(acp.PendingPermission{ID: "perm-x"}, "deny", "timeout")
+}
+
+// TestACPBusNotifierNilSafe pins the repo setter/nil guard rule: a zero
+// notifier must degrade (false / no panic), never crash the Serve
+// goroutine the calls run on.
+func TestACPBusNotifierNilSafe(t *testing.T) {
+	var n *acpBusNotifier
+	if n.NotifyPermissionRequested(acp.PendingPermission{}) {
+		t.Error("nil notifier reported a listener")
+	}
+	n.NotifyPermissionResolved(acp.PendingPermission{}, "deny", "no_relay")
+	zero := &acpBusNotifier{}
+	if zero.NotifyPermissionRequested(acp.PendingPermission{}) {
+		t.Error("zero-value notifier reported a listener")
+	}
 }
