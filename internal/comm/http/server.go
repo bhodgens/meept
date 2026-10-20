@@ -738,6 +738,16 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 			"queue.*", "queue.*.*", "plan.*", "plan.*.*",
 			"turn.*",
 			"terminal.*", "daemon.*", "collaboration.*", "pair.*",
+			// acp.*.* (acp-human-permission-relay leaf 03, Contract C):
+			// the human relay's acp.permission.requested/.resolved are
+			// 3-segment typed topics; the leading "*" matches only
+			// single-segment topics (bus.matchWildcard compares segment
+			// counts), so without this pattern the WS relay drops every
+			// permission frame and the TUI/GUI surfaces (leaf 04/05)
+			// never see a pending request. Frames classify via the
+			// wsclass marker path (typedPayloadDecoders) as
+			// agent_progress — never chat_message.
+			"acp.*.*",
 			// Employee notify (leaf 11, harness-routed speak):
 			// employee.notify carries detached goal-round notifications.
 			// Forwarded as the generic "event" type — NEVER classified as
@@ -1797,6 +1807,8 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/mcp/servers", s.handleMCPServersList)
 		mux.HandleFunc("PUT /api/v1/mcp/servers/{name}/enabled", s.handleMCPServerSetEnabled)
 		mux.HandleFunc("GET /api/v1/acp/agents", s.handleACPAgentsList)
+		mux.HandleFunc("GET /api/v1/acp/permissions", s.handleACPPermissionsList)
+		mux.HandleFunc("POST /api/v1/acp/permissions/resolve", s.handleACPPermissionsResolve)
 
 		// Epistemic memory endpoints (dispatched via rpcCall to memory.* handlers)
 		mux.HandleFunc("POST /api/v1/memory/claims", s.handleEpistemicRetainClaim)

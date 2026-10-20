@@ -190,6 +190,50 @@ func TestEveryPathMapKeyNamesADeclaredSuite(t *testing.T) {
 	}
 }
 
+// scenariolessSuites is the explicit allowlist for the reverse coverage
+// check below. Both are whole-suite runs with no per-scenario granularity
+// by design: smoke is the pre-push-e2e fallback suite, and logrotate is
+// driven by its daemon-level test file. Adding a suite here needs a
+// justification comment; a NEW suite with real test files must register
+// scenarios instead.
+var scenariolessSuites = map[string]bool{
+	"smoke":     true, // fallback suite; runs wholesale (pre-push-e2e, make e2e-fast)
+	"logrotate": true, // single daemon-level test file, no scenario breakdown
+}
+
+// TestEveryMappedSuiteHasScenarios closes the gap the scenario→suite
+// direction misses: a declared, path-mapped suite with ZERO scenarios[]
+// entries runs in the affected gate but documents no coverage — audit
+// found hermes-client exactly this way (two real test files, no
+// scenarios, gate green). Every implemented suite reachable from a
+// path_map key must register at least one scenario unless allowlisted.
+func TestEveryMappedSuiteHasScenarios(t *testing.T) {
+	m := loadManifest(t)
+
+	hasScenario := map[string]bool{}
+	for _, sc := range m.Scenarios {
+		hasScenario[sc.Suite] = true
+	}
+	reachable := map[string]bool{}
+	for _, names := range m.PathMap {
+		for _, n := range names {
+			reachable[n] = true
+		}
+	}
+	for _, s := range m.Suites {
+		if s.Status != "implemented" || !reachable[s.Name] {
+			continue // todo/deferred and unmapped suites are pinned elsewhere
+		}
+		if hasScenario[s.Name] || scenariolessSuites[s.Name] {
+			continue
+		}
+		t.Errorf("suite %q is implemented and path-mapped but registers ZERO "+
+			"scenarios[] entries — its coverage is invisible to reviewers and "+
+			"the scenario index. Add scenario entries for its test files, or "+
+			"allowlist it in scenariolessSuites with a justification.", s.Name)
+	}
+}
+
 // TestFlutterSurfaceIsCovered pins the specific M12 regression: every
 // Dart file under ui/flutter_ui/lib must select the gui-flows suite, so a
 // Flutter client change cannot pass CI running nothing. It walks the real

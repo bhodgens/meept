@@ -90,7 +90,15 @@ func Start(ctx context.Context, cfg SessionConfig) (*Session, error) {
 
 	name := cfg.Command[0]
 	args := cfg.Command[1:]
-	cmd := exec.CommandContext(ctx, name, args...)
+	// The ACP subprocess is a LONG-LIVED daemon child: it must not die
+	// with the turn-scoped context that first launched it
+	// (acp-human-permission-relay leaf 03 full-stack e2e: the launch
+	// turn's RPC ctx cancel killed the agent between turns and left a
+	// closed session in the registry — "send: closed"). Detach the
+	// process lifetime from the caller; the handshake/dial wait below
+	// still honors the caller ctx so a canceled GetOrCreate never hangs.
+	procCtx := context.WithoutCancel(ctx)
+	cmd := exec.CommandContext(procCtx, name, args...)
 	if cfg.Cwd != "" {
 		cmd.Dir = cfg.Cwd
 	}

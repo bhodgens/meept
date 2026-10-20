@@ -11,6 +11,7 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/comm/wsclass"
 )
 
@@ -41,9 +42,17 @@ func reflectTypeKey(v wsclass.WSClassified) string {
 //     is caught even though this table has never heard of it.
 func TestEveryWSClassifiedHasDecoderEntry(t *testing.T) {
 	// The expectation table: every known WSClassified payload type maps
-	// to exactly one typed topic name keying typedPayloadDecoders.
-	expectations := map[string]string{
-		reflectTypeKey(agent.TurnTerminalEvent{}): agent.TopicTurnTerminal.Name,
+	// to the typed topic name(s) keying typedPayloadDecoders. Most
+	// payloads own exactly one topic; a payload reused across sibling
+	// topics (bus.ACPPermissionEvent on acp.permission.requested +
+	// .resolved, leaf 03) lists all of them — every listed topic must
+	// have a decoder entry.
+	expectations := map[string][]string{
+		reflectTypeKey(agent.TurnTerminalEvent{}): {agent.TopicTurnTerminal.Name},
+		reflectTypeKey(bus.ACPPermissionEvent{}): {
+			bus.TopicACPPermissionRequested.Name,
+			bus.TopicACPPermissionResolved.Name,
+		},
 	}
 
 	// Layer 2: discover implementers module-wide via the type checker.
@@ -53,13 +62,15 @@ func TestEveryWSClassifiedHasDecoderEntry(t *testing.T) {
 	}
 
 	for typeName := range discovered {
-		topic, ok := expectations[typeName]
+		topics, ok := expectations[typeName]
 		if !ok {
 			t.Errorf("payload type %s implements wsclass.WSClassified but is not registered in this test: add a typedPayloadDecoders entry in server_wsclass.go (decode fn + topic) and a row in this test's expectations table — a new WS-visible typed topic without a decoder entry silently regresses to legacy prefix classification", typeName)
 			continue
 		}
-		if _, ok := typedPayloadDecoders[topic]; !ok {
-			t.Errorf("WSClassified payload %s (topic %q) has NO typedPayloadDecoders entry: new WS-visible typed topics silently regress to legacy prefix classification", typeName, topic)
+		for _, topic := range topics {
+			if _, ok := typedPayloadDecoders[topic]; !ok {
+				t.Errorf("WSClassified payload %s (topic %q) has NO typedPayloadDecoders entry: new WS-visible typed topics silently regress to legacy prefix classification", typeName, topic)
+			}
 		}
 	}
 	if t.Failed() {
@@ -70,10 +81,11 @@ func TestEveryWSClassifiedHasDecoderEntry(t *testing.T) {
 	// expectation (catches stale entries too).
 	for topic := range typedPayloadDecoders {
 		registered := false
-		for _, want := range expectations {
-			if want == topic {
-				registered = true
-				break
+		for _, wants := range expectations {
+			for _, want := range wants {
+				if want == topic {
+					registered = true
+				}
 			}
 		}
 		if !registered {

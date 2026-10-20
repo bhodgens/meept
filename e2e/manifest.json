@@ -1,6 +1,6 @@
 {
  "version": 1,
- "generated": "2026-10-06",
+ "generated": "2026-10-19",
  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
  "path_map": {
   "e2e/suites/smoke": [
@@ -12,19 +12,22 @@
   "internal/rpc/": [
    "rpc-ping",
    "chat-submit",
-   "session-binding"
+   "session-binding",
+   "acp-wire"
   ],
   "internal/comm/": [
    "ws-classification",
    "ws-filter",
    "http-auth",
-   "http-stream"
+   "http-stream",
+   "acp-wire"
   ],
   "internal/transport/": [
    "rpc-ping"
   ],
   "internal/bus/": [
-   "ws-classification"
+   "ws-classification",
+   "acp-wire"
   ],
   "internal/services/": [
    "chat-submit",
@@ -122,7 +125,8 @@
    "memory-knowledge-assets",
    "memory-turn-capture",
    "project-binding",
-   "state-restart"
+   "state-restart",
+   "acp-wire"
   ],
   "internal/llm/": [
    "daemon-lifecycle",
@@ -848,6 +852,26 @@
    "paths": [
     "internal/daemon/daemon.go",
     "internal/comm/http/pairing.go"
+   ]
+  },
+  {
+   "id": "hermes-client-01",
+   "suite": "hermes-client",
+   "diff": "S",
+   "title": "client wire contract against a real gateway stub: config disabled by default, capabilities TTL, sync chat, run lifecycle, typed busy/foreign/auth error classification",
+   "paths": [
+    "internal/hermes/client.go",
+    "internal/hermes/sse.go"
+   ]
+  },
+  {
+   "id": "hermes-client-02",
+   "suite": "hermes-client",
+   "diff": "S",
+   "title": "session-model capability: chat auto-creates a session, create_session mints one, set_model gated on session_model_lock, upstream list shapes, session_exists 409 classified distinctly from foreign-session 409",
+   "paths": [
+    "internal/hermes/client.go",
+    "internal/tools/builtin/hermes_agent.go"
    ]
   },
   {
@@ -2108,6 +2132,20 @@
    "paths": [
     "internal/acp/manager.go",
     "internal/config/acp.go"
+   ]
+  },
+  {
+   "id": "acp-wire-03",
+   "suite": "acp-wire",
+   "diff": "L",
+   "title": "Human permission relay daemon surface: WS requested/resolved frames (agent_progress), HTTP list/resolve, RPC resolve incl. timeout fail-closed, CLI acp permissions list/resolve",
+   "paths": [
+    "internal/acp/manager.go",
+    "internal/bus/acp_topics.go",
+    "internal/daemon/acp_notifier.go",
+    "internal/rpc/acp.go",
+    "internal/comm/http/server.go",
+    "cmd/meept/acp_cmd.go"
    ]
   },
   {

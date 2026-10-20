@@ -2854,7 +2854,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// re-registered as cache-gated wrappers; off => no-op.
 	applyDeterministicToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
 
-	acpMgr, acpErr := applyACPFromConfig(cfg.ACP, decisionClient)
+	// msgBus (the NewComponents parameter): c.msgBus is only stored later
+	// in this function, so the relay notifier takes the local directly.
+	acpMgr, acpErr := applyACPFromConfig(cfg.ACP, decisionClient, msgBus)
 	if acpErr != nil {
 		return nil, acpErr
 	}
@@ -2864,6 +2866,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Info line for the armed lane lives here (acp-permission-decision
 		// leaf 03).
 		logger.Info("acp permission decision lane armed", "threshold", cfg.ACP.DecisionThreshold)
+	}
+	if acpMgr != nil && acpMgr.HasPermissionRelay() {
+		// One single lowercase Info line for the armed human relay (leaf 03,
+		// Contract C) — same shape as the decision-lane line above.
+		logger.Info("acp human permission relay armed",
+			"mode", cfg.ACP.PermissionMode,
+			"escalate", cfg.ACP.DecisionEscalateToHuman,
+			"timeout_s", cfg.ACP.RelayTimeout,
+		)
 	}
 	RegisterACPTools(c.ToolRegistry, c.ACPManager)
 

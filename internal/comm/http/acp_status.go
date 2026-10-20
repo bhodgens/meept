@@ -39,3 +39,77 @@ func (s *Server) handleACPAgentsList(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeJSON(w, http.StatusOK, result)
 }
+
+// handleACPPermissionsList handles GET /api/v1/acp/permissions — the human
+// relay pending snapshot (acp-human-permission-relay leaf 03, Contract C).
+// Nil rpcCall returns 200 with the disabled envelope (acp_status.go
+// precedent), never 500.
+func (s *Server) handleACPPermissionsList(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeJSON(w, http.StatusOK, acpDisabledPermissions())
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "acp.permissions.list", json.RawMessage("{}"))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, strings.ToLower(err.Error()))
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// acpPermissionsList is the GET /api/v1/acp/permissions disabled envelope
+// (pending always an empty array, never null — TUI/GUI decode shapes).
+type acpPermissionsList struct {
+	Enabled bool            `json:"enabled" yaml:"enabled"`
+	Pending []acpPendingRow `json:"pending" yaml:"pending"`
+}
+
+// acpPendingRow is one pending human relay request in the HTTP envelope
+// (frozen keys: id, agent_id, session_id, summary, created_at).
+type acpPendingRow struct {
+	ID        string `json:"id" yaml:"id"`
+	AgentID   string `json:"agent_id" yaml:"agent_id"`
+	SessionID string `json:"session_id" yaml:"session_id"`
+	Summary   string `json:"summary" yaml:"summary"`
+	CreatedAt string `json:"created_at" yaml:"created_at"`
+}
+
+func acpDisabledPermissions() acpPermissionsList {
+	return acpPermissionsList{Enabled: false, Pending: []acpPendingRow{}}
+}
+
+// handleACPPermissionsResolve handles POST /api/v1/acp/permissions/resolve.
+// Body: {"id": "...", "decision": "allow"|"deny"}. The verb is validated
+// here too (400 on a bad body) so the GUI/CLI never pays an RPC round trip
+// for a typo, and the relay never sees a normalizable-but-wrong string:
+// explicit allow|deny only.
+func (s *Server) handleACPPermissionsResolve(w http.ResponseWriter, r *http.Request) {
+	if s.rpcCall == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "acp service not available")
+		return
+	}
+	var body struct {
+		ID       string `json:"id"`
+		Decision string `json:"decision"`
+	}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	body.ID = strings.TrimSpace(body.ID)
+	body.Decision = strings.ToLower(strings.TrimSpace(body.Decision))
+	if body.ID == "" || (body.Decision != "allow" && body.Decision != "deny") {
+		s.writeError(w, http.StatusBadRequest, "id and decision (allow|deny) are required")
+		return
+	}
+	params, err := json.Marshal(body)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to encode request")
+		return
+	}
+	result, err := s.rpcCall(r.Context(), "acp.permissions.resolve", params)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, strings.ToLower(err.Error()))
+		return
+	}
+	s.writeJSON(w, http.StatusOK, result)
+}

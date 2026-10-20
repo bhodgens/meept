@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/comm/wsclass"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -18,12 +19,26 @@ func decodeTurnTerminalWSClass(raw json.RawMessage) (wsclass.WSClassified, error
 	return ev, nil
 }
 
+// decodeACPPermissionWSClass unmarshals an acp.permission.* payload into
+// the frozen bus.ACPPermissionEvent struct (acp-human-permission-relay
+// leaf 03). The marker classifies the frame as agent_progress — never
+// chat_message.
+func decodeACPPermissionWSClass(raw json.RawMessage) (wsclass.WSClassified, error) {
+	var ev bus.ACPPermissionEvent
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		return nil, err
+	}
+	return ev, nil
+}
+
 // typedPayloadDecoders maps topic names to decoders for payloads with
 // WSClass markers. Entries exist only for topics migrated to Topic[T]
-// (currently: turn.terminal). Legacy fallback still classifies any
-// topic missing here.
+// (turn.terminal; acp.permission.requested/.resolved). Legacy fallback
+// still classifies any topic missing here.
 var typedPayloadDecoders = map[string]func(json.RawMessage) (wsclass.WSClassified, error){
-	agent.TopicTurnTerminal.Name: decodeTurnTerminalWSClass,
+	agent.TopicTurnTerminal.Name:         decodeTurnTerminalWSClass,
+	bus.TopicACPPermissionRequested.Name: decodeACPPermissionWSClass,
+	bus.TopicACPPermissionResolved.Name:  decodeACPPermissionWSClass,
 }
 
 // classifyTypedPayload decodes msg's payload into a typed value carrying
