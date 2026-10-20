@@ -112,7 +112,7 @@ is that pinned decision, revisited on user request (2026-10-19).
 
 | Leaf | Status | Commit | Notes |
 |------|--------|--------|-------|
-| 01 | PENDING | | |
+| 01 | COMPLETE 2026-10-20 | 6bcd5cd6 | PermissionOption exported + parsePermissionOptions + resolveAlwaysOptionID (allow_always > allow&always > ""->allow-once chain) + alwaysOutcomeResult; Relay.Resolve accepts "always"; PendingPermission.Options cap 16 at register AND published snapshot; bus ACPPermissionEvent gains additive options key (mirrored struct, no bus->acp import); rpc/http/cli validators + 400 text + help gain always; fakeagent NEW permission-always mode (old mode params byte-identical — subprocess legs untouched); 8 acp + 1 bus + rpc + http + daemon + e2e acp-wire-05 HumanModeAlwaysEcho tests; 1 sanctioned pin edit: rpc/acp_test.go invalid-decision list dropped "ALWAYS" (superseded v1 pin, boundary still refuses unknown verbs); gates green x2; sibling WIP (chat.go, components.go, teardown, hooks) excluded |
 | 02 | PENDING | | |
 | Integration | PENDING | | |
 
