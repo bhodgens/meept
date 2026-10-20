@@ -113,8 +113,10 @@ is that pinned decision, revisited on user request (2026-10-19).
 | Leaf | Status | Commit | Notes |
 |------|--------|--------|-------|
 | 01 | COMPLETE 2026-10-20 | 6bcd5cd6 | PermissionOption exported + parsePermissionOptions + resolveAlwaysOptionID (allow_always > allow&always > ""->allow-once chain) + alwaysOutcomeResult; Relay.Resolve accepts "always"; PendingPermission.Options cap 16 at register AND published snapshot; bus ACPPermissionEvent gains additive options key (mirrored struct, no bus->acp import); rpc/http/cli validators + 400 text + help gain always; fakeagent NEW permission-always mode (old mode params byte-identical — subprocess legs untouched); 8 acp + 1 bus + rpc + http + daemon + e2e acp-wire-05 HumanModeAlwaysEcho tests; 1 sanctioned pin edit: rpc/acp_test.go invalid-decision list dropped "ALWAYS" (superseded v1 pin, boundary still refuses unknown verbs); gates green x2; sibling WIP (chat.go, components.go, teardown, hooks) excluded |
-| 02 | PENDING | | |
-| Integration | PENDING | | |
+| 02 | COMPLETE 2026-10-20 | da511d98 | TUI a/A key + conditional footer gated on allow_always option (mirrors resolveAlwaysOptionID chain) + options decode + toast handles always; GUI AcpPermissionOption/hasAlwaysOption + third button key acp-permission-always iff offered; SURFACE GAP CLOSED by leaf: GET /api/v1/acp/permissions was dropping options (GUI catch-up could never render the button) -> ACPPendingPermissionStatus.Options additive + passthrough test; docs x9 pages incl. SUPERSEDED append to relay master.md; tui 22s/rpc green, flutter 28 acp tests pass, dart format clean; sibling /dnd WIP (chat_input, slash_commands, chat_input_test, command_handler) excluded |
+| Integration | COMPLETE 2026-10-20 | — | acp-wire e2e ok 27.6s; acp/bus/daemon/comm-http sweeps ok; graphs+reference-docs freshness at clean-HEAD worktree = ZERO diff; sibling-WIP files never staged |
+
+Tree COMPLETE 2026-10-20 — 2/2 leaves + integration, 100%.
 
 ## Integration gates
 
