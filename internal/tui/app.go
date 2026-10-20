@@ -154,6 +154,12 @@ type App struct {
 	pendingChangesModal *modals.PendingChangesModal
 	pendingChangesCount int // status bar indicator (0 hides it)
 	acpLive             int // live non-closed acp sessions; 0 hides the token
+	// ACP human-permission relay (acp-human-permission-relay leaf 04,
+	// Contract D): FIFO queue of pending relay requests; the modal shows
+	// the head. acpPermPending mirrors the queue count for the status bar
+	// while the modal overlay replaces the bar (0 hides the token).
+	acpPermissionModal *ACPPermissionModal
+	acpPermPending     int
 
 	// Current session
 	currentSession *types.Session
@@ -1791,6 +1797,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						a.tabFlashTime = time.Now()
 					}
 				}
+			// ACP human-permission relay frames (acp-human-permission-relay
+			// leaf 04, Contract D). The daemon's notifier publishes the
+			// typed topics (internal/bus/acp_topics.go); the WS/bus proxy
+			// delivers them into this pump as agent_progress-class events
+			// with the frozen ACPPermissionEvent payload keys.
+			case bus.TopicACPPermissionRequested.Name:
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					if cmd := a.handleACPPermissionRequested(payloadMap); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
+			case bus.TopicACPPermissionResolved.Name:
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					if cmd := a.handleACPPermissionResolved(payloadMap); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
+
 			case "agent.quota_wait":
 				if a.agents == nil {
 					break // panel not constructed yet; never dereference nil
@@ -2006,6 +2030,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusMessage = ""
 		}
 		return a, nil
+
+	case ACPPermissionResolveResultMsg:
+		// Relay answer RPC outcome (acp-human-permission-relay leaf 04).
+		return a, a.handleACPPermissionResolveResult(msg)
 
 	case StopWorkChildTasksMsg:
 		return a, a.handleStopWorkChildTasks(msg)
@@ -2529,6 +2557,13 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		a.activeModal = ModalNone
 		return a, nil
+
+	case ModalACPPermission:
+		if a.acpPermissionModal == nil {
+			a.activeModal = ModalNone
+			return a, nil
+		}
+		return a, a.handleACPPermissionModalKey(keyStr)
 	}
 
 	return a, nil
@@ -2791,6 +2826,11 @@ func (a *App) renderModalOverlay() string {
 			return ""
 		}
 		return a.memoryReview.View()
+	case ModalACPPermission:
+		if a.acpPermissionModal == nil {
+			return ""
+		}
+		return a.acpPermissionModal.View(a.width, a.height)
 	}
 	return ""
 }
@@ -3016,6 +3056,15 @@ func (a *App) renderStatusBar() string {
 
 		if a.acpLive > 0 {
 			parts = append(parts, a.styles.Muted.Render(fmt.Sprintf("acp:%d", a.acpLive)))
+		}
+
+		// ACP human-permission relay pending count (leaf 04, Contract D):
+		// the modal footer owns the line while the modal is open (a modal
+		// overlay replaces the status bar entirely); this token surfaces
+		// the queue after esc-dismiss so pending requests are never
+		// silently invisible.
+		if a.acpPermPending > 0 {
+			parts = append(parts, a.styles.Warning.Render(a.acpPermPendingLine()))
 		}
 
 		// Add context-sensitive quick actions

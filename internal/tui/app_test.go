@@ -217,6 +217,25 @@ func TestApp_RenderStatusBar_ACPToken(t *testing.T) {
 	}
 }
 
+// TestApp_RenderStatusBar_ACPPermPendingToken pins the relay pending-count
+// token (acp-human-permission-relay leaf 04, Contract D): while the modal
+// overlay is open it owns the line, but after an esc-dismiss the status bar
+// must keep "acp perms: N pending" visible so pending requests are never
+// silently invisible.
+func TestApp_RenderStatusBar_ACPPermPendingToken(t *testing.T) {
+	app := createTestApp()
+	statusBar := app.renderStatusBar()
+	if strings.Contains(statusBar, "acp perms") {
+		t.Error("expected no pending token when acpPermPending=0")
+	}
+
+	app.acpPermPending = 3
+	statusBar = app.renderStatusBar()
+	if !strings.Contains(statusBar, "acp perms: 3 pending") {
+		t.Errorf("expected pending token in status bar, got %q", ansi.Strip(statusBar))
+	}
+}
+
 func TestApp_RenderError(t *testing.T) {
 	app := createTestApp()
 	app.err = &testError{"connection failed"}

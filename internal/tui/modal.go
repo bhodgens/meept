@@ -29,6 +29,10 @@ const (
 	ModalPendingChanges
 	ModalUsers
 	ModalMemoryReview
+	// ModalACPPermission is the human-permission relay modal
+	// (acp-human-permission-relay leaf 04, Contract D). Appended last so
+	// existing enum values are untouched.
+	ModalACPPermission
 )
 
 // ModalItem represents an item in a modal menu.

@@ -82,6 +82,13 @@ func DefaultEventStreamConfig() *EventStreamConfig {
 			"conversation.*",
 			"plan.*",
 			"turn.terminal",
+			// ACP human-permission relay (acp-human-permission-relay
+			// leaf 04, Contract D): acp.permission.requested/.resolved
+			// are 3-segment topics — matchWildcard needs equal segment
+			// counts, so "acp.*" would NOT match them (the same gap
+			// leaf 03 fixed in the WS-proxy list). Non-overlapping with
+			// every pattern above.
+			"acp.*.*",
 		},
 		BufferSize:   50,
 		PollInterval: 500 * time.Millisecond,

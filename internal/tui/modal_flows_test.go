@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/tui/modals"
 	"github.com/caimlas/meept/internal/tui/types"
 )
@@ -192,4 +196,222 @@ func keyPressMsgFor(key string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: rune(key[0])}
 	}
 	return tea.KeyPressMsg{Code: rune(key[0])}
+}
+
+// ---------------------------------------------------------------------------
+// ACP human-permission relay modal flows (acp-human-permission-relay
+// leaf 04, Contract D).
+//
+// Keys: y = allow, n = deny, esc = dismiss without answering (the request
+// stays pending for the daemon timeout) — the exact y/n/esc vocabulary of
+// the destructive-confirm precedent (ConfirmationModel), per the leaf's
+// "reuse modal accept/decline keys" instruction. The modal is NOT a global
+// keybinding, so no palette/inventory change is needed.
+// ---------------------------------------------------------------------------
+
+func acpRequestedEvent(id, agent, session, summary string) BusEvent {
+	return BusEvent{
+		Topic: bus.TopicACPPermissionRequested.Name,
+		Type:  "event",
+		Payload: map[string]any{
+			"id":         id,
+			"agent_id":   agent,
+			"session_id": session,
+			"summary":    summary,
+			"created_at": time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+}
+
+func acpResolvedEvent(id, decision, reason string) BusEvent {
+	return BusEvent{
+		Topic: bus.TopicACPPermissionResolved.Name,
+		Type:  "event",
+		Payload: map[string]any{
+			"id":       id,
+			"decision": decision,
+			"reason":   reason,
+		},
+	}
+}
+
+func sendACPEvents(h *headlessProgram, events ...BusEvent) {
+	h.send(EventStreamDataMsg{Events: events})
+	h.settle(goldenWidth, goldenHeight)
+}
+
+func TestACPModal_OpenOnRequestedFrame(t *testing.T) {
+	hp := newHeadlessApp(t, goldenWidth, goldenHeight)
+	settleAsync()
+
+	sendACPEvents(hp, acpRequestedEvent("perm-1", "ag-1", "sess-1", "run tool: bash rm -rf"))
+	app := hp.finish(goldenWidth, goldenHeight)
+
+	if app.activeModal != ModalACPPermission {
+		t.Fatalf("requested frame did not open the permission modal (activeModal=%v)", app.activeModal)
+	}
+	if app.acpPermissionModal == nil {
+		t.Fatal("acpPermissionModal not lazily constructed")
+	}
+	view := ansi.Strip(app.acpPermissionModal.View(goldenWidth, goldenHeight))
+	for _, want := range []string{"ag-1", "sess-1", "run tool: bash rm -rf", "perm-1"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("modal view missing %q, got:\n%s", want, view)
+		}
+	}
+	// pending-count line (Contract D item 1; rendered in the modal footer —
+	// a modal overlay replaces the status bar, so the status bar cannot
+	// carry it while open)
+	if !strings.Contains(view, "acp perms: 1 pending") {
+		t.Errorf("modal view missing pending line, got:\n%s", view)
+	}
+}
+
+func TestACPModal_FIFOQueueAndAnswerWalk(t *testing.T) {
+	hp := newHeadlessApp(t, goldenWidth, goldenHeight)
+	settleAsync()
+	hp.stub.setResult("acp.permissions.resolve", map[string]any{"id": "perm-1", "decision": "allow", "reason": "answered"})
+
+	sendACPEvents(hp,
+		acpRequestedEvent("perm-1", "ag-1", "sess-1", "first summary"),
+		acpRequestedEvent("perm-2", "ag-2", "sess-2", "second summary"),
+	)
+	app := hp.finish(goldenWidth, goldenHeight)
+
+	if app.acpPermPending != 2 {
+		t.Fatalf("pending queue = %d, want 2", app.acpPermPending)
+	}
+	// Head shown = first arrival (FIFO).
+	view := ansi.Strip(app.acpPermissionModal.View(goldenWidth, goldenHeight))
+	if !strings.Contains(view, "ag-1") || strings.Contains(view, "second summary") {
+		t.Errorf("modal should show the FIFO head, got:\n%s", view)
+	}
+	if !strings.Contains(view, "acp perms: 2 pending") {
+		t.Errorf("pending line should read 2, got:\n%s", view)
+	}
+
+	// y on the head answers allow via RPC acp.permissions.resolve.
+	app.Update(keyPressMsgFor("y"))
+	if app.acpPermissionModal.dispatchCount != 1 {
+		t.Fatalf("y did not dispatch resolve for the head (dispatchCount=%d, want 1)", app.acpPermissionModal.dispatchCount)
+	}
+	if app.acpPermissionModal.lastDispatchID != "perm-1" {
+		t.Fatalf("dispatch targeted %q, want perm-1", app.acpPermissionModal.lastDispatchID)
+	}
+	if !app.acpPermissionModal.queue[0].answerDispatched {
+		t.Error("head should be marked answered after dispatch (double-press guard)")
+	}
+
+	// The resolved frame dismisses the head and advances the queue.
+	app.Update(EventStreamDataMsg{Events: []BusEvent{acpResolvedEvent("perm-1", "allow", "answered")}})
+	if app.activeModal != ModalACPPermission {
+		t.Fatalf("queue not empty: modal should stay open showing the next head (activeModal=%v)", app.activeModal)
+	}
+	if app.acpPermPending != 1 {
+		t.Fatalf("pending queue = %d, want 1 after walking head", app.acpPermPending)
+	}
+	view2 := ansi.Strip(app.acpPermissionModal.View(goldenWidth, goldenHeight))
+	if !strings.Contains(view2, "ag-2") || !strings.Contains(view2, "acp perms: 1 pending") {
+		t.Errorf("next head not shown after resolve, got:\n%s", view2)
+	}
+
+	// Resolving the last one dismisses the modal.
+	app.Update(EventStreamDataMsg{Events: []BusEvent{acpResolvedEvent("perm-2", "deny", "timeout")}})
+	if app.activeModal != ModalNone {
+		t.Fatalf("empty queue should dismiss modal (activeModal=%v)", app.activeModal)
+	}
+	if app.acpPermPending != 0 {
+		t.Fatalf("pending queue = %d, want 0", app.acpPermPending)
+	}
+}
+
+func TestACPModal_EscDismissesKeepingPending(t *testing.T) {
+	hp := newHeadlessApp(t, goldenWidth, goldenHeight)
+	settleAsync()
+
+	sendACPEvents(hp, acpRequestedEvent("perm-1", "ag-1", "sess-1", "leave me pending"))
+	app := hp.finish(goldenWidth, goldenHeight)
+
+	app.Update(keyPressMsgFor("esc"))
+	if app.activeModal != ModalNone {
+		t.Fatalf("esc should dismiss the modal (activeModal=%v)", app.activeModal)
+	}
+	if app.acpPermPending != 1 {
+		t.Fatalf("esc must leave the request pending (count=%d, want 1)", app.acpPermPending)
+	}
+	// A NEW requested frame reopens the modal on the still-pending FIFO
+	// head (dismiss-without-answering never drops the queue; there is no
+	// global rebind key — the leaf's no-new-keybinding rule).
+	app.Update(EventStreamDataMsg{Events: []BusEvent{acpRequestedEvent("perm-2", "ag-2", "sess-2", "second")}})
+	if app.activeModal != ModalACPPermission {
+		t.Fatalf("new frame should reopen modal on queued head (activeModal=%v)", app.activeModal)
+	}
+	if app.acpPermPending != 2 {
+		t.Fatalf("dismissed head must survive (count=%d, want 2)", app.acpPermPending)
+	}
+	view := ansi.Strip(app.acpPermissionModal.View(goldenWidth, goldenHeight))
+	if !strings.Contains(view, "leave me pending") {
+		t.Errorf("reopen should show FIFO head perm-1, got:\n%s", view)
+	}
+}
+
+func TestACPModal_ResolvedFrameFromElsewhere(t *testing.T) {
+	hp := newHeadlessApp(t, goldenWidth, goldenHeight)
+	settleAsync()
+
+	sendACPEvents(hp, acpRequestedEvent("perm-1", "ag-1", "sess-1", "answered by gui"))
+	app := hp.finish(goldenWidth, goldenHeight)
+
+	// Another client answered — the frame dismisses the modal even though
+	// this client never pressed a key.
+	app.Update(EventStreamDataMsg{Events: []BusEvent{acpResolvedEvent("perm-1", "deny", "answered")}})
+	if app.activeModal != ModalNone {
+		t.Fatalf("resolved frame should dismiss modal (activeModal=%v)", app.activeModal)
+	}
+	if app.acpPermPending != 0 {
+		t.Fatalf("pending queue = %d, want 0", app.acpPermPending)
+	}
+}
+
+func TestACPModal_ResolveFailureKeepsModalRetryable(t *testing.T) {
+	hp := newHeadlessApp(t, goldenWidth, goldenHeight)
+	settleAsync()
+
+	// One event that makes the resolve RPC return a JSON-RPC error
+	// envelope: the stub is an in-process server, so serve() answers
+	// unknown methods with {"ok":true}; instead of socket teardown (whose
+	// reconnect retries stall the loop), map the resolve method to a
+	// handler-side failure by NOT setting a result and closing the
+	// listener afterwards is racy — use the deterministic path: keep the
+	// stub alive but answer resolve with an error envelope.
+	hp.stub.setError("acp.permissions.resolve", "daemon is restarting")
+
+	sendACPEvents(hp, acpRequestedEvent("perm-1", "ag-1", "sess-1", "unreachable daemon"))
+	app := hp.finish(goldenWidth, goldenHeight)
+
+	_, cmd := app.Update(keyPressMsgFor("n"))
+	if cmd == nil {
+		t.Fatal("n should dispatch an resolve RPC cmd")
+	}
+	// Drive the dispatched RPC to completion synchronously.
+	result := cmd()
+	app.Update(result)
+
+	if app.activeModal != ModalACPPermission {
+		t.Fatalf("RPC failure must keep the modal open (activeModal=%v)", app.activeModal)
+	}
+	if app.acpPermPending != 1 {
+		t.Fatalf("RPC failure must keep the request pending (count=%d, want 1)", app.acpPermPending)
+	}
+	if app.acpPermissionModal.queue[0].answerDispatched {
+		t.Error("failed dispatch must RESET the answer flag so the key press can retry")
+	}
+	// Retry: the answer key dispatches again.
+	_, cmd2 := app.Update(keyPressMsgFor("n"))
+	if cmd2 == nil {
+		t.Fatal("retry after failure must re-dispatch resolve")
+	}
+	if app.acpPermissionModal.dispatchCount != 2 {
+		t.Fatalf("dispatchCount = %d, want 2 after retry", app.acpPermissionModal.dispatchCount)
+	}
 }

@@ -94,7 +94,8 @@ func (h *headlessProgram) quit() {
 type rpcStub struct {
 	listener net.Listener
 	mu       sync.Mutex
-	results  map[string]any // method -> result value (marshaled per call)
+	results  map[string]any    // method -> result value (marshaled per call)
+	errors   map[string]string // method -> JSON-RPC error message
 
 	socketPath string
 	t          *testing.T
@@ -113,7 +114,7 @@ func newRPCStub(t *testing.T) *rpcStub {
 	if err != nil {
 		t.Fatalf("rpc stub: listen: %v", err)
 	}
-	s := &rpcStub{listener: l, results: map[string]any{}, socketPath: path, t: t}
+	s := &rpcStub{listener: l, results: map[string]any{}, errors: map[string]string{}, socketPath: path, t: t}
 	go s.acceptLoop()
 	t.Cleanup(func() {
 		l.Close()
@@ -128,6 +129,15 @@ func (s *rpcStub) setResult(method string, result any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.results[method] = result
+}
+
+// setError maps one RPC method to a JSON-RPC ERROR envelope (code -32000),
+// exercising the client-side failure path deterministically (no socket
+// teardown, no reconnect-retry stalls in the event loop).
+func (s *rpcStub) setError(method string, message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.errors[method] = message
 }
 
 func (s *rpcStub) acceptLoop() {
@@ -162,15 +172,18 @@ func (s *rpcStub) serve(conn net.Conn) {
 		}
 		s.mu.Lock()
 		result := s.results[req.Method]
+		errMsg := s.errors[req.Method]
 		s.mu.Unlock()
-		if result == nil {
-			result = map[string]any{"ok": true}
+		resp := map[string]any{"jsonrpc": "2.0", "id": req.ID}
+		if errMsg != "" {
+			resp["error"] = map[string]any{"code": -32000, "message": errMsg}
+		} else {
+			if result == nil {
+				result = map[string]any{"ok": true}
+			}
+			resp["result"] = result
 		}
-		respData, err := json.Marshal(map[string]any{
-			"jsonrpc": "2.0",
-			"id":      req.ID,
-			"result":  result,
-		})
+		respData, err := json.Marshal(resp)
 		if err != nil {
 			return
 		}
