@@ -371,6 +371,35 @@ class SdkApiClient {
     }
   }
 
+  /// Returns GET /api/v1/acp/permissions envelope
+  /// `{enabled: bool, pending: [...]}` (acp-human-permission-relay leaf 05,
+  /// Contract C route; leaf 03 handler never returns 500 for a disabled
+  /// relay, so callers get an empty `pending` list rather than an error).
+  Future<Map<String, dynamic>> getAcpPermissions() async {
+    try {
+      return await _get('/api/v1/acp/permissions');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// POST /api/v1/acp/permissions/resolve with `{id, decision}`. The daemon
+  /// validates decision explicitly as "allow" or "deny" (400 otherwise);
+  /// callers must pass one of those lowercase verbs.
+  Future<Map<String, dynamic>> resolveAcpPermission({
+    required String id,
+    required String decision,
+  }) async {
+    try {
+      return await _post(
+        '/api/v1/acp/permissions/resolve',
+        body: {'id': id, 'decision': decision},
+      );
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   // ===== Chat =====
 
   /// Sends a chat message and returns the raw JSON response map.
@@ -1150,6 +1179,20 @@ class SdkApiClient {
   }
 
   // ===== Reflection =====
+
+  /// Returns the daemon's DND state via `GET /api/v1/notifications/dnd`
+  /// (`{enabled: bool}`) — the HTTP surface of the `notifications.get_dnd`
+  /// RPC the TUI's /dnd reads.
+  Future<Map<String, dynamic>> getDndState() async {
+    return _get('/api/v1/notifications/dnd');
+  }
+
+  /// Sets daemon-side do-not-disturb via `POST /api/v1/notifications/dnd`
+  /// — the HTTP surface of the `notifications.set_dnd` RPC the TUI's /dnd
+  /// calls. Returns `{enabled: bool}` (the resulting state).
+  Future<Map<String, dynamic>> setDnd({required bool enabled}) async {
+    return _post('/api/v1/notifications/dnd', body: {'enabled': enabled});
+  }
 
   /// Returns the raw `proposals` array from
   /// `GET /api/v1/reflection/proposals`.

@@ -35,7 +35,16 @@ import '../providers/tool_exit_guard.dart';
 ///   /tools/prompts    -> PromptPanel
 ///   /tools/calendar   -> CalendarPanel
 ///   /tools/metrics    -> MetricsPanel
+/// Root navigator key for the GoRouter. Also the seam
+/// AcpPermissionDialogHost pushes/pops its dialog route through (it is
+/// mounted in the MaterialApp builder ABOVE the Navigator, so it cannot
+/// use its own context for Navigator.of).
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>(
+  debugLabel: 'root',
+);
+
 final GoRouter router = GoRouter(
+  navigatorKey: rootNavigatorKey,
   initialLocation: '/',
   debugLogDiagnostics: true,
   routes: [

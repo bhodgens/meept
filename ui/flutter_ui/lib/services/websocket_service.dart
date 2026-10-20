@@ -755,6 +755,28 @@ class WebSocketService {
     });
   }
 
+  /// Subscribe to ACP human-relay permission frames
+  /// (acp-human-permission-relay leaf 05, Contract E).
+  ///
+  /// The daemon classifies `acp.permission.requested` /
+  /// `acp.permission.resolved` bus frames as `agent_progress`
+  /// (internal/bus ACPPermissionEvent.WSClass) and tags them with
+  /// `source_topic`. Permission frames are RELAY-global, not per-chat-session:
+  /// a frame whose payload carries a session_id is delivered by the hub only
+  /// to connections that granted that session; a frame without one broadcasts
+  /// to every connection (handleWSEvent bypass). So this stream filters
+  /// globally by `source_topic` and takes NO (channel, session) hold — the
+  /// surfaces (status bar badge, permission dialog) live outside any one
+  /// session's subscription lifecycle.
+  Stream<Map<String, dynamic>> subscribeToAcpPermissions() {
+    return _messageSubject.stream.where((m) {
+      if (m['type'] != WsEventTypes.agentProgress) return false;
+      final topic = m['source_topic'] as String?;
+      return topic == 'acp.permission.requested' ||
+          topic == 'acp.permission.resolved';
+    });
+  }
+
   /// Unsubscribe from agent progress updates for a session.
   ///
   /// Drops ONE progress-channel hold. The wire frame is deferred while the
@@ -837,11 +859,7 @@ class WebSocketService {
     );
     channels[channel] = (channels[channel] ?? 0) + 1;
     if (isConnected) {
-      send({
-        'type': 'subscribe',
-        'channel': channel,
-        'session_id': sessionId,
-      });
+      send({'type': 'subscribe', 'channel': channel, 'session_id': sessionId});
     }
   }
 

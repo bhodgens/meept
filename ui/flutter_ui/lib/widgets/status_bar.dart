@@ -5,6 +5,7 @@ import '../theme/typography.dart';
 import '../providers/providers.dart';
 import '../providers/status_message_provider.dart';
 import '../providers/acp_status_provider.dart';
+import '../providers/acp_permission_provider.dart';
 import '../widgets/thread_selector.dart' show threadServiceProvider;
 
 /// Pending-changes count for a session (status-bar span, TUI parity with
@@ -158,6 +159,21 @@ class StatusBar extends ConsumerWidget {
           ),
         );
       }
+    }
+
+    // ACP human-relay pending permissions (leaf 05 Contract E; TUI parity:
+    // the relay status line). Relay-global — NOT session-gated: a pending
+    // request can outlive/precede any one session view. Warning color,
+    // only shown while requests await an answer.
+    final acpPending = ref.watch(acpPermissionProvider).count;
+    if (acpPending > 0) {
+      spans.add(_separator());
+      spans.add(
+        TextSpan(
+          text: '$acpPending acp permissions pending',
+          style: _warningStyle,
+        ),
+      );
     }
 
     return _bar(

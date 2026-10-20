@@ -20,6 +20,7 @@ import 'core/router.dart';
 import 'features/pairing/pairing_gate.dart';
 import 'providers/providers.dart';
 import 'providers/tool_exit_guard.dart';
+import 'widgets/acp_permission_dialog.dart';
 
 /// The app's Riverpod container, set by [main] before `runApp` and published
 /// here so code that runs outside the widget tree can read the same providers
@@ -326,7 +327,12 @@ class CyberpunkApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: ref.watch(appThemeProvider),
       builder: (context, child) {
-        return _AppLifecycleWrapper(child: child!);
+        // AcpPermissionDialogHost floats the relay dialog over every route
+        // (leaf 05 Contract E); it renders nothing itself and pushes the
+        // dialog via the router's root navigator key.
+        return _AppLifecycleWrapper(
+          child: Stack(children: [child!, const AcpPermissionDialogHost()]),
+        );
       },
     );
   }
