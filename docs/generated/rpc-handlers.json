@@ -3,7 +3,19 @@
     "topic": "acp.list",
     "handler": "h.handleList",
     "file": "internal/rpc/acp.go",
-    "line": 38
+    "line": 45
+  },
+  {
+    "topic": "acp.permissions.list",
+    "handler": "h.handlePermissionsList",
+    "file": "internal/rpc/acp.go",
+    "line": 46
+  },
+  {
+    "topic": "acp.permissions.resolve",
+    "handler": "h.handlePermissionsResolve",
+    "file": "internal/rpc/acp.go",
+    "line": 47
   },
   {
     "topic": "agent.workers.list",

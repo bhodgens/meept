@@ -9,10 +9,13 @@ Package bus provides a channel\-based pub/sub message bus.
 ## Index
 
 - Constants
+- Variables
 - [func MatchWildcard\(pattern, topic string\) bool](<#MatchWildcard>)
 - [func PublishBlockingT\[T any\]\(b \*MessageBus, t Topic\[T\], source string, payload T\) int](<#PublishBlockingT>)
 - [func PublishT\[T any\]\(b \*MessageBus, t Topic\[T\], source string, payload T\) int](<#PublishT>)
 - [func SetPanicOnUndrainedSubscription\(enabled bool\)](<#SetPanicOnUndrainedSubscription>)
+- [type ACPPermissionEvent](<#ACPPermissionEvent>)
+  - [func \(ACPPermissionEvent\) WSClass\(\) wsclass.WSClass](<#ACPPermissionEvent.WSClass>)
 - [type Config](<#Config>)
   - [func DefaultConfig\(\) \*Config](<#DefaultConfig>)
 - [type MessageBus](<#MessageBus>)
@@ -73,6 +76,15 @@ Package bus provides a channel\-based pub/sub message bus.
 	    EventQueueStatus           = "agent.queue.status"
 	)
 
+## Variables
+
+<a name="TopicACPPermissionRequested"></a>TopicACPPermissionRequested fires when a permission\_mode "human" \(or decision\-lane escalated\) session/requestPermission enters the pending registry. TopicACPPermissionResolved fires when the wait terminates \(answered, timeout, or fail\-closed rejections\). Typed Topic\[T\] per internal/comm/AGENTS.md: the payload is stable and single\-shape.
+
+	var (
+	    TopicACPPermissionRequested = NewTopic[ACPPermissionEvent]("acp.permission.requested")
+	    TopicACPPermissionResolved  = NewTopic[ACPPermissionEvent]("acp.permission.resolved")
+	)
+
 <a name="MatchWildcard"></a>
 ## func MatchWildcard
 
@@ -102,6 +114,35 @@ Marshal\-failure policy: json.Marshal of T fails only for channels, funcs, or re
 	func SetPanicOnUndrainedSubscription(enabled bool)
 
 SetPanicOnUndrainedSubscription enables/disables error\-level logging mode for testing. When enabled, Publish\(\) logs at Error level if no subscribers exist for the topic.
+
+<a name="ACPPermissionEvent"></a>
+## type ACPPermissionEvent
+
+ACPPermissionEvent is the frozen bus/WS payload for the human permission relay \(acp\-human\-permission\-relay leaf 03, Contract C\). The daemon\-side notifier \(internal/daemon/acp\_notifier.go\) adapts the internal/acp PendingPermission value into this shape and publishes it on TopicACPPermissionRequested / TopicACPPermissionResolved.
+
+The payload lives in internal/bus — NOT internal/acp — so HTTP/WS/TUI/GUI consumers can decode it without pulling the ACP client into their dependency closure \(internal/acp must not gain a bus dep; the daemon does the adaptation, per the leaf's import\-cycle note\). wsclass imports nothing from internal/, so bus \-\> wsclass is cycle\-free \(same direction as agent \-\> wsclass\).
+
+Wire keys are frozen \(leaf 03 task 1\): id, agent\_id, session\_id, summary, created\_at \(\+ decision/reason on the resolved frame\).
+
+	type ACPPermissionEvent struct {
+	    ID        string `json:"id"`
+	    AgentID   string `json:"agent_id"`
+	    SessionID string `json:"session_id"`
+	    Summary   string `json:"summary"`
+	    CreatedAt string `json:"created_at"` // RFC3339 stamp of registration
+	    // Decision + Reason are empty on the requested frame and carry the
+	    // terminal answer ("allow"/"deny", "answered"/"timeout"/"no_relay"/
+	    // "full") on the resolved frame.
+	    Decision string `json:"decision,omitempty"`
+	    Reason   string `json:"reason,omitempty"`
+	}
+
+<a name="ACPPermissionEvent.WSClass"></a>
+### func \(ACPPermissionEvent\) WSClass
+
+	func (ACPPermissionEvent) WSClass() wsclass.WSClass
+
+WSClass implements wsclass.WSClassified: ACP permission frames are lifecycle signals and MUST render as progress — never chat\_message \(AGENTS.md WS classification invariant: a chat\_message frame opens a blank bubble in the Flutter GUI\).
 
 <a name="Config"></a>
 ## type Config
