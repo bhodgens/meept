@@ -514,7 +514,7 @@ meept status
 
 # Start coding session
 meept chat "Please help me implement authentication middleware"
-```
+
 # List jobs
 meept jobs
 
