@@ -2163,6 +2163,19 @@
    ]
   },
   {
+   "id": "acp-wire-05",
+   "suite": "acp-wire",
+   "diff": "M",
+   "title": "Always-allow human relay echo (acp-always-allow leaf 01): permission-always fakeagent offers an allow_always option; resolve \"always\" -> the agent receives selected/allow-always (optionId passthrough), the pending snapshot surfaces the offered options, resolved event text carries always",
+   "paths": [
+    "internal/acp/relay.go",
+    "internal/acp/session.go",
+    "internal/bus/acp_topics.go",
+    "internal/daemon/acp_notifier.go",
+    "internal/rpc/acp.go"
+   ]
+  },
+  {
    "id": "naive-user-chat-01",
    "suite": "naive-user-chat",
    "diff": "L",

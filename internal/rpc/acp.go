@@ -130,8 +130,10 @@ func (h *ACPHandler) permissionsList() ACPPermissionsResult {
 
 // handlePermissionsResolve answers {id, decision}. The decision verb is
 // validated HERE, at the RPC boundary — the relay's internal normalize
-// ("anything not allow -> deny") must never turn a typo into a silent deny
-// on a user-facing surface.
+// ("anything not allow/always -> deny") must never turn a typo into a
+// silent deny on a user-facing surface. "always" is a human-only verb
+// (acp-always-allow leaf 01): the reply echo shape is unchanged and the
+// reason stays "answered".
 func (h *ACPHandler) handlePermissionsResolve(_ context.Context, params json.RawMessage) (any, error) {
 	var p struct {
 		ID       string `json:"id"`
@@ -145,8 +147,8 @@ func (h *ACPHandler) handlePermissionsResolve(_ context.Context, params json.Raw
 	if p.ID == "" {
 		return nil, fmt.Errorf("invalid params: id is required")
 	}
-	if p.Decision != "allow" && p.Decision != "deny" {
-		return nil, fmt.Errorf("invalid params: decision must be \"allow\" or \"deny\"")
+	if p.Decision != "allow" && p.Decision != "deny" && p.Decision != "always" {
+		return nil, fmt.Errorf("invalid params: decision must be \"allow\", \"deny\", or \"always\"")
 	}
 	if h == nil || h.manager == nil {
 		return nil, fmt.Errorf("permission not found: %s", p.ID)

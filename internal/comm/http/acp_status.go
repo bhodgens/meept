@@ -79,10 +79,11 @@ func acpDisabledPermissions() acpPermissionsList {
 }
 
 // handleACPPermissionsResolve handles POST /api/v1/acp/permissions/resolve.
-// Body: {"id": "...", "decision": "allow"|"deny"}. The verb is validated
-// here too (400 on a bad body) so the GUI/CLI never pays an RPC round trip
-// for a typo, and the relay never sees a normalizable-but-wrong string:
-// explicit allow|deny only.
+// Body: {"id": "...", "decision": "allow"|"deny"|"always"}. The verb is
+// validated here too (400 on a bad body) so the GUI/CLI never pays an RPC
+// round trip for a typo, and the relay never sees a normalizable-but-wrong
+// string: explicit allow|deny|always only ("always" is the human-only
+// acp-always-allow verb, leaf 01).
 func (s *Server) handleACPPermissionsResolve(w http.ResponseWriter, r *http.Request) {
 	if s.rpcCall == nil {
 		s.writeError(w, http.StatusServiceUnavailable, "acp service not available")
@@ -97,8 +98,8 @@ func (s *Server) handleACPPermissionsResolve(w http.ResponseWriter, r *http.Requ
 	}
 	body.ID = strings.TrimSpace(body.ID)
 	body.Decision = strings.ToLower(strings.TrimSpace(body.Decision))
-	if body.ID == "" || (body.Decision != "allow" && body.Decision != "deny") {
-		s.writeError(w, http.StatusBadRequest, "id and decision (allow|deny) are required")
+	if body.ID == "" || (body.Decision != "allow" && body.Decision != "deny" && body.Decision != "always") {
+		s.writeError(w, http.StatusBadRequest, "id and decision (allow|deny|always) are required")
 		return
 	}
 	params, err := json.Marshal(body)

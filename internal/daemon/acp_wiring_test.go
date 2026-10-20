@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -432,5 +433,78 @@ func TestACPBusNotifierNilSafe(t *testing.T) {
 	zero := &acpBusNotifier{}
 	if zero.NotifyPermissionRequested(acp.PendingPermission{}) {
 		t.Error("zero-value notifier reported a listener")
+	}
+}
+
+// TestACPBusNotifierSurfacesOptions pins the acp-always-allow leaf 01
+// adaptation: the offered-options snapshot crosses the seam into the bus
+// payload's additive `options` key with the raw {optionId,name,kind} labels,
+// and the resolved frame may now carry decision "always".
+func TestACPBusNotifierSurfacesOptions(t *testing.T) {
+	msgBus := bus.New(nil, slog.Default())
+	t.Cleanup(msgBus.Close)
+
+	var gotRequested bus.ACPPermissionEvent
+	deadlineDone := make(chan struct{})
+	sub := bus.SubscribeT(msgBus, "test-opts", bus.TopicACPPermissionRequested, func(p bus.ACPPermissionEvent) {
+		if len(p.Options) > 0 {
+			gotRequested = p
+			close(deadlineDone)
+		}
+	})
+	t.Cleanup(func() { msgBus.Unsubscribe(sub) })
+
+	n := &acpBusNotifier{bus: msgBus, logger: slog.Default()}
+	p := acp.PendingPermission{
+		ID:        "perm-opt",
+		AgentID:   "codex",
+		SessionID: "sess-a",
+		Summary:   "tool: bash",
+		CreatedAt: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC),
+		Options: []acp.PermissionOption{
+			{OptionID: "once", Name: "Allow once", Kind: "allow_once"},
+			{OptionID: "forever", Name: "Allow always", Kind: "allow_always"},
+		},
+	}
+	if !n.NotifyPermissionRequested(p) {
+		t.Fatal("NotifyPermissionRequested with listeners = false, want true")
+	}
+	n.NotifyPermissionResolved(p, "always", "answered")
+
+	select {
+	case <-deadlineDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("options never reached the bus payload")
+	}
+	if len(gotRequested.Options) != 2 {
+		t.Fatalf("options = %+v, want 2", gotRequested.Options)
+	}
+	if gotRequested.Options[1].OptionID != "forever" || gotRequested.Options[1].Kind != "allow_always" {
+		t.Fatalf("option passthrough = %+v", gotRequested.Options[1])
+	}
+
+	// Wire-key proof: the published payload decodes the additive options
+	// array with the exact {optionId,name,kind} keys.
+	raw, err := json.Marshal(gotRequested)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	opts, ok := decoded["options"].([]any)
+	if !ok || len(opts) != 2 {
+		t.Fatalf("wire options = %v, want 2-entry array (%s)", decoded["options"], raw)
+	}
+	first, ok := opts[1].(map[string]any)
+	if !ok || first["optionId"] != "forever" || first["name"] != "Allow always" || first["kind"] != "allow_always" {
+		t.Fatalf("wire option keys = %v, want {optionId,name,kind}", opts[1])
+	}
+	// Frozen keys stay (additive contract — old consumers unaffected).
+	for _, key := range []string{"id", "agent_id", "session_id", "summary", "created_at"} {
+		if _, ok := decoded[key]; !ok {
+			t.Errorf("payload lost frozen key %q: %s", key, raw)
+		}
 	}
 }

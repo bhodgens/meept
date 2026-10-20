@@ -438,6 +438,108 @@ func TestACPWire_HumanModeAllowDenyTimeout(t *testing.T) {
 	}
 }
 
+// TestACPWire_HumanModeAlwaysEcho covers acp-wire-05 (acp-always-allow
+// leaf 01, Contract A): the permission-always fakeagent offers an options
+// array with an allow_always entry; the human relay resolves "always"; the
+// fakeagent must RECEIVE the selected/allow-always echo (design decision
+// 1 — meept transports, the agent's own optionId rides the reply). The
+// agent echoes the received outcome into its prompt text; the manager's
+// Send result carries the proof. The offered options also surface on the
+// pending snapshot (additive event payload).
+func TestACPWire_HumanModeAlwaysEcho(t *testing.T) {
+	bin := stubAgentBin(t)
+	rl := acp.NewRelay()
+	notif := &relayNotifier{}
+	catalog := &config.ACPAgentsConfig{Agents: []config.ACPAgentEntry{
+		{ID: "always-agent", Command: []string{bin, "-mode", "permission-always"}, Enabled: true},
+	}}
+	mgr := acp.NewManager(config.ACPConfig{
+		Enabled:        true,
+		DialTimeout:    30,
+		CallTimeout:    20,
+		MaxAgents:      4,
+		PermissionMode: "human",
+		RelayTimeout:   10,
+	}, catalog)
+	mgr.SetPermissionRelay(rl, notif)
+	t.Cleanup(mgr.StopAll)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	sess, err := mgr.GetOrCreate(ctx, "always-agent", t.TempDir())
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+
+	sendCtx, sendCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer sendCancel()
+	type sendRes struct {
+		text string
+		err  error
+	}
+	ch := make(chan sendRes, 1)
+	go func() {
+		text, err := sess.Send(sendCtx, "always-please")
+		ch <- sendRes{text, err}
+	}()
+
+	id := waitForPermissionEvent(t, sess, "permission_requested", 15*time.Second)
+	if id == "" {
+		t.Fatal("permission_requested event must carry the pending id")
+	}
+
+	// The pending snapshot surfaces the offered options (raw agent labels).
+	var options []acp.PermissionOption
+	for _, p := range <-pollPending(mgr) {
+		if p.ID == id {
+			options = p.Options
+		}
+	}
+	if len(options) != 3 {
+		t.Fatalf("pending options = %+v, want the 3 offered entries", options)
+	}
+	if options[2].OptionID != "allow-always" || options[2].Kind != "allow_always" {
+		t.Fatalf("allow_always entry = %+v, want the agent's own label", options[2])
+	}
+
+	if err := rl.Resolve(id, "always"); err != nil {
+		t.Fatalf("Resolve always: %v", err)
+	}
+	if got := waitForPermissionEvent(t, sess, "permission_resolved", 20*time.Second); got != "always" {
+		t.Fatalf("permission_resolved text = %q, want always", got)
+	}
+
+	res := <-ch
+	if res.err != nil {
+		t.Fatalf("Send after always resolution: %v", res.err)
+	}
+	// The fakeagent echoes what it RECEIVED: "always-please
+	// perm:selected/allow-always" is the optionId passthrough proof.
+	if !strings.Contains(res.text, "perm:selected/allow-always") {
+		t.Fatalf("agent echo = %q, want selected/allow-always", res.text)
+	}
+}
+
+// pollPending drains the manager's registry snapshot until it is empty or
+// one read yields rows (the entry leaves the registry the moment the
+// waiting session consumes the answer, so the caller races the consume —
+// an empty read after the resolve is the drain proof, not an error).
+func pollPending(mgr *acp.Manager) <-chan []acp.PendingPermission {
+	out := make(chan []acp.PendingPermission, 1)
+	go func() {
+		defer close(out)
+		for i := 0; i < 200; i++ {
+			if p := mgr.PendingPermissions(); len(p) > 0 {
+				out <- p
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		out <- nil
+	}()
+	return out
+}
+
 // TestACPWire_DecisionModeFailClosed pins the fail-closed posture end to
 // end: decision mode
 // WITHOUT a configured Decisioner (nil seam — the daemon never wired one)

@@ -302,3 +302,40 @@ func TestACPPermissionsResolve_RPCError(t *testing.T) {
 		t.Fatal("RPC error surfaced as 200")
 	}
 }
+
+func TestACPPermissionsResolve_AlwaysForwards(t *testing.T) {
+	// acp-always-allow leaf 01: the HTTP surface gains "always" with the
+	// same {id,decision} shape; a bad verb is still a 400 before any RPC.
+	var gotParams json.RawMessage
+	s := &Server{
+		rpcCall: func(_ context.Context, _ string, params json.RawMessage) (any, error) {
+			gotParams = params
+			return map[string]any{"id": "perm-1", "decision": "always", "reason": "answered"}, nil
+		},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/acp/permissions/resolve",
+		strings.NewReader(`{"id":"perm-1","decision":"always"}`))
+	w := httptest.NewRecorder()
+
+	s.handleACPPermissionsResolve(w, req)
+
+	if resp := w.Result(); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var forwarded map[string]string
+	if err := json.Unmarshal(gotParams, &forwarded); err != nil {
+		t.Fatalf("params decode: %v (%s)", err, gotParams)
+	}
+	if forwarded["id"] != "perm-1" || forwarded["decision"] != "always" {
+		t.Errorf("forwarded params = %v", forwarded)
+	}
+
+	// Still a 400 for unknown verbs.
+	bad := httptest.NewRequest(http.MethodPost, "/api/v1/acp/permissions/resolve",
+		strings.NewReader(`{"id":"perm-1","decision":"maybe"}`))
+	badW := httptest.NewRecorder()
+	s.handleACPPermissionsResolve(badW, bad)
+	if resp := badW.Result(); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad-verb status = %d, want 400", resp.StatusCode)
+	}
+}

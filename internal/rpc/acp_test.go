@@ -325,7 +325,7 @@ func TestACPHandler_PermissionsResolve_NilManager(t *testing.T) {
 func TestACPHandler_PermissionsResolve_InvalidDecision(t *testing.T) {
 	// Explicit RPC-boundary validation: a typo must NEVER silently deny
 	// (relay-level normalize must not be relied on here).
-	for _, decision := range []string{"", "ALWAYS", "yes", "nope"} {
+	for _, decision := range []string{"", "yes", "nope"} {
 		t.Run("decision_"+decision, func(t *testing.T) {
 			mgr, _ := acpEnabledRelayManager(t)
 			h := NewACPHandler(mgr)
@@ -472,5 +472,47 @@ func assertJSONYAMLTags(t *testing.T, typ reflect.Type, want map[string]string) 
 		if got := f.Tag.Get("yaml"); got != key {
 			t.Errorf("%s.%s yaml tag = %q, want %q", typ.Name(), field, got, key)
 		}
+	}
+}
+
+func TestACPHandler_PermissionsResolve_AlwaysAccepted(t *testing.T) {
+	// acp-always-allow leaf 01 (Contract A): "always" is the third valid
+	// verb at the RPC boundary; the reply echo shape is unchanged and the
+	// reason stays "answered".
+	mgr, rl := acpEnabledRelayManager(t)
+	if _, err := rl.Register(acp.PendingPermission{ID: "perm-aw", AgentID: "codex", SessionID: "s1"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	h := NewACPHandler(mgr)
+	srv := New(&Config{SocketPath: ""}, nil, nil)
+	h.RegisterACPMethods(srv)
+
+	res, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+		json.RawMessage(`{"id":"perm-aw","decision":"always"}`))
+	if err != nil {
+		t.Fatalf("resolve always: %v", err)
+	}
+	raw, mErr := json.Marshal(res)
+	if mErr != nil {
+		t.Fatalf("marshal: %v", mErr)
+	}
+	var echoed struct {
+		ID       string `json:"id"`
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	if uErr := json.Unmarshal(raw, &echoed); uErr != nil {
+		t.Fatalf("decode %s: %v", raw, uErr)
+	}
+	if echoed.ID != "perm-aw" || echoed.Decision != "always" {
+		t.Errorf("echo = %+v, want id perm-aw decision always", echoed)
+	}
+	if echoed.Reason != "answered" {
+		t.Errorf("reason = %q, want answered", echoed.Reason)
+	}
+	// Case/whitespace normalization applies to the new verb too.
+	if _, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+		json.RawMessage(`{"id":"perm-aw","decision":" ALWAYS "}`)); err == nil {
+		t.Fatal("double resolve accepted, want already-answered error")
 	}
 }

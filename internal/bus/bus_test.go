@@ -2,6 +2,7 @@ package bus
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -413,4 +414,67 @@ func TestPublishBlocking_WorksWhenBufferHasSpace(t *testing.T) {
 
 	assert.Equal(t, 1, delivered)
 	assert.Less(t, elapsed, 100*time.Millisecond, "blocking publish should return immediately when buffer has space")
+}
+
+// TestACPPermissionEvent_OptionsKeyAdditive pins the acp-always-allow leaf
+// 01 contract: the frozen requested/resolved payload keys stay, and the
+// additive `options` array carries the agent's raw {optionId,name,kind}
+// labels — old consumers decode by key and are unaffected.
+func TestACPPermissionEvent_OptionsKeyAdditive(t *testing.T) {
+	ev := ACPPermissionEvent{
+		ID:        "perm-1",
+		AgentID:   "codex",
+		SessionID: "sess-a",
+		Summary:   "tool: bash",
+		CreatedAt: "2026-10-20T00:00:00Z",
+		Options: []ACPPermissionOption{
+			{OptionID: "once", Name: "Allow once", Kind: "allow_once"},
+			{OptionID: "forever", Name: "Allow always", Kind: "allow_always"},
+		},
+	}
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"id", "agent_id", "session_id", "summary", "created_at", "options"} {
+		if _, ok := decoded[key]; !ok {
+			t.Errorf("payload missing key %q: %s", key, raw)
+		}
+	}
+	opts, ok := decoded["options"].([]any)
+	if !ok || len(opts) != 2 {
+		t.Fatalf("options = %v, want 2 entries", decoded["options"])
+	}
+	first, ok := opts[1].(map[string]any)
+	if !ok {
+		t.Fatalf("options[1] = %T", opts[1])
+	}
+	if first["optionId"] != "forever" || first["name"] != "Allow always" || first["kind"] != "allow_always" {
+		t.Errorf("option keys = %v, want raw agent labels", first)
+	}
+
+	// An event without options omits the key entirely (additive, not
+	// required): old-frame publishers keep their exact wire shape.
+	if !strings.Contains(string(raw), `"options"`) {
+		t.Fatal("options key missing")
+	}
+	bare, err := json.Marshal(ACPPermissionEvent{ID: "perm-2"})
+	if err != nil {
+		t.Fatalf("marshal bare: %v", err)
+	}
+	if strings.Contains(string(bare), `"options"`) {
+		t.Errorf("empty options must omit the key, got %s", bare)
+	}
+	// Decision may now be "always" (no schema change — free-form string).
+	alw, err := json.Marshal(ACPPermissionEvent{ID: "perm-3", Decision: "always", Reason: "answered"})
+	if err != nil {
+		t.Fatalf("marshal always: %v", err)
+	}
+	if !strings.Contains(string(alw), `"decision":"always"`) {
+		t.Errorf("always decision not encoded: %s", alw)
+	}
 }

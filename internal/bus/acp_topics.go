@@ -4,6 +4,18 @@ import (
 	"github.com/caimlas/meept/internal/comm/wsclass"
 )
 
+// ACPPermissionOption mirrors the internal/acp PermissionOption wire shape
+// ({optionId,name,kind}) — bus must NOT import internal/acp (the daemon
+// does the adaptation), so the tags are duplicated here deliberately: keep
+// them in sync with internal/acp/session.go. Raw agent labels pass through
+// untouched; acp-always-allow leaf 01 renders the allow_always affordance
+// from the kind.
+type ACPPermissionOption struct {
+	OptionID string `json:"optionId"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+}
+
 // ACPPermissionEvent is the frozen bus/WS payload for the human permission
 // relay (acp-human-permission-relay leaf 03, Contract C). The daemon-side
 // notifier (internal/daemon/acp_notifier.go) adapts the internal/acp
@@ -18,16 +30,22 @@ import (
 // as agent -> wsclass).
 //
 // Wire keys are frozen (leaf 03 task 1): id, agent_id, session_id, summary,
-// created_at (+ decision/reason on the resolved frame).
+// created_at (+ decision/reason on the resolved frame). Options is the
+// additive acp-always-allow key (leaf 01): present on frames whose agent
+// offered options, omitted otherwise — old consumers decode by key and are
+// unaffected.
 type ACPPermissionEvent struct {
 	ID        string `json:"id"`
 	AgentID   string `json:"agent_id"`
 	SessionID string `json:"session_id"`
 	Summary   string `json:"summary"`
 	CreatedAt string `json:"created_at"` // RFC3339 stamp of registration
+	// Options are the agent-offered permission options (raw labels),
+	// bounded by the relay at register time (omitted when none).
+	Options []ACPPermissionOption `json:"options,omitempty"`
 	// Decision + Reason are empty on the requested frame and carry the
-	// terminal answer ("allow"/"deny", "answered"/"timeout"/"no_relay"/
-	// "full") on the resolved frame.
+	// terminal answer ("allow"/"always"/"deny", "answered"/"timeout"/
+	// "no_relay"/"full") on the resolved frame.
 	Decision string `json:"decision,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 }

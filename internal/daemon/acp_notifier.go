@@ -41,7 +41,7 @@ func (n *acpBusNotifier) NotifyPermissionRequested(p acp.PendingPermission) bool
 }
 
 // NotifyPermissionResolved publishes the terminal shape (decision
-// "allow"/"deny", reason "answered"/"timeout"/"no_relay"/"full").
+// "allow"/"always"/"deny", reason "answered"/"timeout"/"no_relay"/"full").
 func (n *acpBusNotifier) NotifyPermissionResolved(p acp.PendingPermission, decision, reason string) {
 	if n == nil || n.bus == nil {
 		return
@@ -61,11 +61,24 @@ func (n *acpBusNotifier) NotifyPermissionResolved(p acp.PendingPermission, decis
 }
 
 // toACPEvent maps the internal/acp snapshot to the frozen bus payload
-// (keys: id, agent_id, session_id, summary, created_at + decision/reason).
+// (keys: id, agent_id, session_id, summary, created_at + decision/reason;
+// the additive options key carries the agent's raw labels — acp-always-
+// allow leaf 01).
 func toACPEvent(p acp.PendingPermission, decision, reason string) bus.ACPPermissionEvent {
 	created := ""
 	if !p.CreatedAt.IsZero() {
 		created = p.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	var options []bus.ACPPermissionOption
+	if len(p.Options) > 0 {
+		options = make([]bus.ACPPermissionOption, 0, len(p.Options))
+		for _, o := range p.Options {
+			options = append(options, bus.ACPPermissionOption{
+				OptionID: o.OptionID,
+				Name:     o.Name,
+				Kind:     o.Kind,
+			})
+		}
 	}
 	return bus.ACPPermissionEvent{
 		ID:        p.ID,
@@ -73,6 +86,7 @@ func toACPEvent(p acp.PendingPermission, decision, reason string) bus.ACPPermiss
 		SessionID: p.SessionID,
 		Summary:   p.Summary,
 		CreatedAt: created,
+		Options:   options,
 		Decision:  decision,
 		Reason:    reason,
 	}

@@ -15,7 +15,7 @@ import (
 // newACPCmd builds `meept acp` — the ACP (Agent Client Protocol) surface.
 // The permissions subcommand tree (acp-human-permission-relay leaf 03,
 // Contract C) drives the human permission relay: list what a paused
-// external-agent is waiting on, answer allow/deny.
+// external-agent is waiting on, answer allow/deny/always.
 func newACPCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "acp",
@@ -31,6 +31,8 @@ Examples:
   meept acp permissions list                    # pending permission requests
   meept acp permissions list --json             # machine-readable output
   meept acp permissions resolve <id> allow      # approve one request
+  meept acp permissions resolve <id> always     # approve and let the agent
+                                                # persist the grant
   meept acp permissions resolve <id> deny       # cancel one request`,
 	}
 
@@ -153,11 +155,15 @@ func newACPPermissionsListCmd() *cobra.Command {
 
 func newACPPermissionsResolveCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "resolve <id> <allow|deny>",
+		Use:   "resolve <id> <allow|deny|always>",
 		Short: "answer one pending permission request",
 		Long: `Answer one pending human relay request by id.
 
-allow approves the request (ACP selected/allow-once); deny cancels it.
+allow approves the request (ACP selected/allow-once); deny cancels it;
+always approves with the agent's own allow_always option when it offers
+one (the AGENT persists the grant — meept transports the choice and
+remembers nothing itself). An agent without an allow_always option
+resolves "always" exactly like "allow".
 The verb is validated offline before any daemon call — a typo can never
 silently deny.`,
 		Args: cobra.ExactArgs(2),
@@ -167,8 +173,8 @@ silently deny.`,
 			if id == "" {
 				return fmt.Errorf("acp: permission id is required")
 			}
-			if decision != "allow" && decision != "deny" {
-				return fmt.Errorf("acp: decision must be \"allow\" or \"deny\" (got %q)", args[1])
+			if decision != "allow" && decision != "deny" && decision != "always" {
+				return fmt.Errorf("acp: decision must be \"allow\", \"deny\", or \"always\" (got %q)", args[1])
 			}
 
 			client, err := connectDaemon()

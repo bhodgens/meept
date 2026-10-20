@@ -42,12 +42,15 @@ const maxPendingPermissions = 32
 // escalate modes; leaf 01). Mirrors the [acp] relay_timeout default.
 const defaultRelayTimeout = 120 * time.Second
 
-// Relay-lane decision verbs (v1, frozen): "allow" maps to
-// selected/allow-once on the wire, anything else (including "deny") maps to
-// cancelled. No "always" option in v1 (optionId passthrough deferred).
+// Relay-lane decision verbs: "allow" maps to selected/allow-once on the
+// wire, "always" (acp-always-allow leaf 01) maps to selected/<agent's own
+// allow_always optionId — the AGENT persists the grant, meept transports
+// only. Anything else (including "deny") maps to cancelled. The verb
+// match here is exact; API-boundary layers lowercase before calling.
 const (
-	relayDecisionAllow = "allow"
-	relayDecisionDeny  = "deny"
+	relayDecisionAllow  = "allow"
+	relayDecisionDeny   = "deny"
+	relayDecisionAlways = "always"
 )
 
 // Relay-lane permission_resolved event texts and notifier reasons (frozen,
@@ -80,9 +83,26 @@ type PermissionNotifier interface {
 	// Resolve until the timeout (a GUI that reconnects can still answer).
 	NotifyPermissionRequested(p PendingPermission) bool
 	// NotifyPermissionResolved publishes the terminal shape after the
-	// wait completes (decision "allow"/"deny"; reason "answered",
-	// "timeout", "no_relay", "full").
+	// wait completes (decision "allow"/"always"/"deny"; reason
+	// "answered", "timeout", "no_relay", "full").
 	NotifyPermissionResolved(p PendingPermission, decision, reason string)
+}
+
+// maxPermissionOptions bounds the offered-options snapshot carried on a
+// pending request (acp-always-allow leaf 01, Contract A): the array is
+// agent-controlled, so register truncates rather than trusting the size
+// into every bus/TUI/GUI consumer.
+const maxPermissionOptions = 16
+
+// capPermissionOptions returns options truncated to maxPermissionOptions —
+// a fresh slice, never an in-place re-slice of the caller's array.
+func capPermissionOptions(options []PermissionOption) []PermissionOption {
+	if len(options) <= maxPermissionOptions {
+		return options
+	}
+	out := make([]PermissionOption, maxPermissionOptions)
+	copy(out, options)
+	return out
 }
 
 // PendingPermission is the surfaced record of one unanswered
@@ -96,13 +116,22 @@ type PendingPermission struct {
 	RequestID any    // JSON-RPC id echoed for resolve calls
 	Summary   string // bounded 300-rune render of the raw params
 	// (renderDecisionState budget — shared render)
+	// Options are the agent-offered permission options from the raw
+	// requestPermission params, capped at maxPermissionOptions and passed
+	// through with the agent's own labels (acp-always-allow leaf 01: the
+	// surfaces render the allow_always affordance from the kind).
+	Options   []PermissionOption
 	CreatedAt time.Time // registration stamp
 }
 
 // relayDecision is one terminal answer delivered to the waiting session.
+// `always` is the scope flag of an allow answer (text carries the verb):
+// it only ever rides with allow=true, and only from a human relay answer —
+// the decision lane never votes always (master.md design decision 4).
 type relayDecision struct {
-	text  string // "allow" | "deny"
-	allow bool
+	text   string // "allow" | "always" | "deny"
+	allow  bool
+	always bool
 }
 
 // relayEntry is a registry row: the snapshot, the wait channel, and the
@@ -141,6 +170,9 @@ func (r *Relay) Register(p PendingPermission) (<-chan relayDecision, error) {
 	if p.CreatedAt.IsZero() {
 		p.CreatedAt = time.Now()
 	}
+	if len(p.Options) > maxPermissionOptions {
+		p.Options = capPermissionOptions(p.Options)
+	}
 	e := &relayEntry{p: p, ch: make(chan relayDecision, 1)}
 
 	r.mu.Lock()
@@ -168,7 +200,8 @@ func (r *Relay) Register(p PendingPermission) (<-chan relayDecision, error) {
 
 // Resolve delivers a terminal answer for id exactly once. The first call
 // wins; later calls see ErrRelayAnswered, unknown ids ErrRelayNotFound.
-// Anything that is not "allow" normalizes to the fail-closed deny verb.
+// "allow" and "always" grant; anything else normalizes to the fail-closed
+// deny verb (the always flag never rides with a deny).
 func (r *Relay) Resolve(id string, decision string) error {
 	if r == nil {
 		return ErrRelayNotFound
@@ -187,8 +220,11 @@ func (r *Relay) Resolve(id string, decision string) error {
 	r.mu.Unlock()
 
 	d := relayDecision{text: relayDecisionDeny, allow: false}
-	if decision == relayDecisionAllow {
+	switch decision {
+	case relayDecisionAllow:
 		d = relayDecision{text: relayDecisionAllow, allow: true}
+	case relayDecisionAlways:
+		d = relayDecision{text: relayDecisionAlways, allow: true, always: true}
 	}
 	// Buffered channel (cap 1): the send never blocks, so the once-guard
 	// runs safely outside the registry lock.
@@ -228,10 +264,12 @@ func (r *Relay) remove(id string) {
 }
 
 // relayVerdict is the shared wait's result: allow the request or cancel
-// it, plus the permission_resolved event text.
+// it, plus the permission_resolved event text. always marks a human
+// "always" grant (reply echoes the agent's allow_always option).
 type relayVerdict struct {
-	allow bool
-	text  string // "allow" | "deny" | "timeout"
+	allow  bool
+	always bool
+	text   string // "allow" | "always" | "deny" | "timeout"
 }
 
 // relayPermissionWait runs the Contract B human wait for one request and
@@ -249,7 +287,11 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 		RequestID: requestID,
 		// Reuse the decision lane's bounded render (drift 2) — one
 		// 300-rune budget, not two.
-		Summary:   renderDecisionState(s.cfg.AgentID, rawParams),
+		Summary: renderDecisionState(s.cfg.AgentID, rawParams),
+		// Agent-offered options ride along for the surfaces (additive,
+		// capped — acp-always-allow leaf 01). Cap here so the published
+		// snapshot and the registry entry carry the same bounded array.
+		Options:   capPermissionOptions(parsePermissionOptions(rawParams)),
 		CreatedAt: time.Now(),
 	}
 	ch, err := s.cfg.Relay.Register(p)
@@ -294,7 +336,7 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 		s.cfg.Relay.remove(p.ID)
 		s.emit(SessionEvent{Kind: "permission_resolved", Text: d.text})
 		s.cfg.Notifier.NotifyPermissionResolved(p, d.text, relayReasonAnswer)
-		return relayVerdict{allow: d.allow, text: d.text}
+		return relayVerdict{allow: d.allow, always: d.always, text: d.text}
 	case <-timer.C:
 		s.cfg.Relay.remove(p.ID)
 		slog.Default().Warn("acp permission denied: human relay timed out",

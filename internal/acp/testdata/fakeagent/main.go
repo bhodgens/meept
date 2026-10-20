@@ -1,6 +1,6 @@
 // Fake ACP agent for internal/acp tests. Speaks newline JSON-RPC on stdio.
 //
-//	-mode echo|slow|die|badhandshake|permission
+//	-mode echo|slow|die|badhandshake|permission|permission-always
 package main
 
 import (
@@ -45,11 +45,12 @@ func reply(id *int64, result any) {
 }
 
 func main() {
-	mode := flag.String("mode", "echo", "echo|slow|die|badhandshake|permission")
+	mode := flag.String("mode", "echo", "echo|slow|die|badhandshake|permission|permission-always")
 	flag.Parse()
 
 	dec := json.NewDecoder(os.Stdin)
 	sessionID := "sess-fake"
+	replyEcho := ""
 	for {
 		var m msg
 		if err := dec.Decode(&m); err != nil {
@@ -100,20 +101,41 @@ func main() {
 			if *mode == "slow" {
 				time.Sleep(5 * time.Second)
 			}
-			if *mode == "permission" {
+			if *mode == "permission" || *mode == "permission-always" {
 				permID := int64(99001)
+				params := json.RawMessage(`{"sessionId":"sess-fake"}`)
+				if *mode == "permission-always" {
+					// acp-always-allow e2e: offer options WITH an
+					// allow_always entry, exactly like a capability-
+					// declaring ACP agent.
+					params = json.RawMessage(`{"sessionId":"sess-fake",` +
+						`"toolCall":{"title":"rm -rf scratch"},` +
+						`"options":[` +
+						`{"optionId":"reject-once","name":"Reject","kind":"reject_once"},` +
+						`{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},` +
+						`{"optionId":"allow-always","name":"Allow always","kind":"allow_always"}]}`)
+				}
 				write(msg{
 					JSONRPC: "2.0",
 					ID:      &permID,
 					Method:  "session/requestPermission",
-					Params:  json.RawMessage(`{"sessionId":"sess-fake"}`),
+					Params:  params,
 				})
 				var replyMsg msg
 				if err := dec.Decode(&replyMsg); err != nil {
 					return
 				}
+				if *mode == "permission-always" {
+					// Echo the received reply outcome into the prompt
+					// reply so the harness can assert what meept sent
+					// the AGENT (selected/<optionId> echo proof).
+					replyEcho = replyOutcome(replyMsg.Result)
+				}
 			}
 			text := promptText(m.Params)
+			if replyEcho != "" {
+				text += " perm:" + replyEcho
+			}
 			chunk, err := json.Marshal(map[string]any{
 				"sessionId": sessionID,
 				"update": map[string]any{
@@ -137,6 +159,26 @@ func main() {
 			}
 		}
 	}
+}
+
+// replyOutcome renders the outcome of a requestPermission reply frame as
+// "<outcome>/<optionId>" (or "<outcome>" with no optionId, or "error" for
+// an error frame) — the acp-always-allow permission-always mode echoes it
+// back so the harness can assert exactly what the client selected.
+func replyOutcome(result json.RawMessage) string {
+	var r struct {
+		Outcome struct {
+			Outcome  string `json:"outcome"`
+			OptionID string `json:"optionId"`
+		} `json:"outcome"`
+	}
+	if len(result) == 0 || json.Unmarshal(result, &r) != nil || r.Outcome.Outcome == "" {
+		return "error"
+	}
+	if r.Outcome.OptionID == "" {
+		return r.Outcome.Outcome
+	}
+	return r.Outcome.Outcome + "/" + r.Outcome.OptionID
 }
 
 func promptText(params json.RawMessage) string {

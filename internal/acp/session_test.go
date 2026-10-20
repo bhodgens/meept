@@ -1481,3 +1481,225 @@ func TestSession_EarlyPermissionNoSessionIDRace(t *testing.T) {
 		t.Fatalf("sessionID = %q, want sess-fake", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Always-allow relay (acp-always-allow leaf 01, master.md Contract A)
+// ---------------------------------------------------------------------------
+
+func TestResolveAlwaysOptionID(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params string
+		want   string
+	}{
+		{"exact kind allow_always", `{"sessionId":"s","options":[{"optionId":"deny-it","name":"Reject","kind":"reject_once"},{"optionId":"stay-once","name":"Allow once","kind":"allow_once"},{"optionId":"stay-always","name":"Allow always","kind":"allow_always"}]}`, "stay-always"},
+		{"kind contains allow+always", `{"sessionId":"s","options":[{"optionId":"go","name":"Keep going","kind":"allow-always"}]}`, "go"},
+		{"no always option", `{"sessionId":"s","options":[{"optionId":"once","name":"Allow once","kind":"allow_once"}]}`, ""},
+		{"reject_always does not match", `{"sessionId":"s","options":[{"optionId":"never","name":"Always reject","kind":"reject_always"}]}`, ""},
+		{"no options", `{"sessionId":"s"}`, ""},
+		{"empty params", ``, ""},
+		{"malformed params", `{not json`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveAlwaysOptionID([]byte(tc.params)); got != tc.want {
+				t.Fatalf("resolveAlwaysOptionID(%s) = %q, want %q", tc.params, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSession_HumanRelayAlways: the third human verb echoes the agent's OWN
+// allow_always-kind optionId (design decision 1 — meept is a transport, it
+// persists nothing), the resolved event text carries "always", and the
+// pending snapshot surfaces the offered options.
+func TestSession_HumanRelayAlways(t *testing.T) {
+	params := `{"sessionId":"sess-h","toolCall":{"title":"rm -rf scratch"},"options":[` +
+		`{"optionId":"reject-once","name":"Reject","kind":"reject_once"},` +
+		`{"optionId":"my-once","name":"Proceed once","kind":"allow_once"},` +
+		`{"optionId":"my-always","name":"Proceed always","kind":"allow_always"}]}`
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, params)
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if err := rl.Resolve(reqEv.Text, "always"); err != nil {
+		t.Fatalf("Resolve always: %v", err)
+	}
+
+	resp := readReplyFrame(t, fromClient)
+	if outcome, optionID := outcomeOf(t, resp); outcome != "selected" || optionID != "my-always" {
+		t.Fatalf("reply = %q/%q, want selected/my-always", outcome, optionID)
+	}
+	events := drainEvents(s)
+	if got := findEvent(events, "permission_resolved"); got != "always" {
+		t.Fatalf("permission_resolved text = %q, want always", got)
+	}
+	rc := notif.lastResolved()
+	if rc.decision != "always" || rc.reason != "answered" {
+		t.Fatalf("resolved call = %+v, want always/answered", rc)
+	}
+	p := notif.lastRequested()
+	if len(p.Options) != 3 {
+		t.Fatalf("pending Options = %+v, want the 3 offered entries", p.Options)
+	}
+	if p.Options[2].OptionID != "my-always" || p.Options[2].Kind != "allow_always" || p.Options[2].Name != "Proceed always" {
+		t.Fatalf("always option passthrough = %+v, want raw agent labels", p.Options[2])
+	}
+}
+
+// TestSession_HumanRelayAlwaysFallsBackToAllow: an agent that offers no
+// allow_always option must NEVER error or deny on "always" — it resolves
+// like "allow" through the allow_once echo chain (design decision 2).
+func TestSession_HumanRelayAlwaysFallsBackToAllow(t *testing.T) {
+	params := `{"sessionId":"sess-h","toolCall":{"title":"rm -rf scratch"},"options":[` +
+		`{"optionId":"reject-once","name":"Reject","kind":"reject_once"},` +
+		`{"optionId":"my-once","name":"Proceed once","kind":"allow_once"}]}`
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, params)
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if err := rl.Resolve(reqEv.Text, "always"); err != nil {
+		t.Fatalf("Resolve always: %v", err)
+	}
+	resp := readReplyFrame(t, fromClient)
+	if outcome, optionID := outcomeOf(t, resp); outcome != "selected" || optionID != "my-once" {
+		t.Fatalf("reply = %q/%q, want selected/my-once (allow_once fallback)", outcome, optionID)
+	}
+	if got := findEvent(drainEvents(s), "permission_resolved"); got != "always" {
+		t.Fatalf("permission_resolved text = %q, want always", got)
+	}
+}
+
+// TestSession_HumanRelayAlwaysNoOptions pins the legacy literal tail of the
+// chain: no options offered at all -> defaultAllowOptionID, still no error.
+func TestSession_HumanRelayAlwaysNoOptions(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if err := rl.Resolve(reqEv.Text, "always"); err != nil {
+		t.Fatalf("Resolve always: %v", err)
+	}
+	resp := readReplyFrame(t, fromClient)
+	if outcome, optionID := outcomeOf(t, resp); outcome != "selected" || optionID != defaultAllowOptionID {
+		t.Fatalf("reply = %q/%q, want selected/%s", outcome, optionID, defaultAllowOptionID)
+	}
+	if p := notif.lastRequested(); p.Options != nil {
+		t.Fatalf("pending Options = %+v, want nil when the agent offered none", p.Options)
+	}
+}
+
+// TestSession_DecisionEscalationHumanAlways: the escalation relay inherits
+// human answers, so it gains "always" via the shared wait — the reply names
+// the allow_always option while the decision lane's own model options stay
+// allow/deny (design decision 4).
+func TestSession_DecisionEscalationHumanAlways(t *testing.T) {
+	params := `{"sessionId":"sess-h","toolCall":{"title":"rm -rf scratch"},"options":[` +
+		`{"optionId":"my-once","name":"Proceed once","kind":"allow_once"},` +
+		`{"optionId":"my-always","name":"Proceed always","kind":"allow_always"}]}`
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	stub := &stubDecisioner{available: true, res: denyResult()}
+	s, fromClient, toClient := decisionHarnessSession(t, escalationCfg(stub, rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, params)
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if err := rl.Resolve(reqEv.Text, "always"); err != nil {
+		t.Fatalf("Resolve always: %v", err)
+	}
+	resp := readReplyFrame(t, fromClient)
+	if outcome, optionID := outcomeOf(t, resp); outcome != "selected" || optionID != "my-always" {
+		t.Fatalf("reply = %q/%q, want selected/my-always", outcome, optionID)
+	}
+	events := drainEvents(s)
+	if got := findEvent(events, "permission_decision"); got != "escalated_human_allow" {
+		t.Fatalf("permission_decision text = %q, want escalated_human_allow", got)
+	}
+	if got := findEvent(events, "permission_resolved"); got != "always" {
+		t.Fatalf("permission_resolved text = %q, want always", got)
+	}
+}
+
+func TestRelay_ResolveAlwaysVerb(t *testing.T) {
+	rl := NewRelay()
+	ch, err := rl.Register(PendingPermission{ID: "perm-always"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := rl.Resolve("perm-always", "always"); err != nil {
+		t.Fatalf("Resolve always: %v", err)
+	}
+	d := <-ch
+	if !d.allow || d.text != "always" || !d.always {
+		t.Fatalf("decision = %+v, want allow/text=always/always=true", d)
+	}
+	// Second answer still lands as already-answered (exactly-once unchanged).
+	if err := rl.Resolve("perm-always", "allow"); !errors.Is(err, ErrRelayAnswered) {
+		t.Fatalf("double resolve = %v, want ErrRelayAnswered", err)
+	}
+	// Normalization unchanged: anything not allow/always is deny, and the
+	// verb match is exact (upper-case "ALWAYS" never reaches the relay from
+	// the API layers, which lowercase first).
+	other := make(chan relayDecision, 1)
+	_ = other
+	if _, err := rl.Register(PendingPermission{ID: "perm-shout"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := rl.Resolve("perm-shout", "ALWAYS"); err != nil {
+		t.Fatalf("Resolve ALWAYS: %v", err)
+	}
+	if got := len(rl.Pending()); got != 0 {
+		t.Fatalf("Pending after answers = %d, want 0", got)
+	}
+}
+
+// TestRelay_OptionsCappedAtRegister: the offered-options snapshot is bounded
+// at maxPermissionOptions entries (Contract A: cap at register time).
+func TestRelay_OptionsCappedAtRegister(t *testing.T) {
+	opts := make([]PermissionOption, maxPermissionOptions+4)
+	for i := range opts {
+		opts[i] = PermissionOption{OptionID: fmt.Sprintf("opt-%d", i), Name: "Opt", Kind: "allow_once"}
+	}
+	rl := NewRelay()
+	if _, err := rl.Register(PendingPermission{ID: "perm-cap", Options: opts}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	got := rl.Pending()
+	if len(got) != 1 || len(got[0].Options) != maxPermissionOptions {
+		t.Fatalf("Options len = %d, want %d", len(got[0].Options), maxPermissionOptions)
+	}
+	// The caller's slice must not be mutated by the cap.
+	if len(opts) != maxPermissionOptions+4 {
+		t.Fatalf("caller options mutated: len = %d", len(opts))
+	}
+}
+
+// TestSession_HumanRelayOptionsCapped: the lane parses the raw params into
+// the pending snapshot and caps over-long offers before publish.
+func TestSession_HumanRelayOptionsCapped(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString(`{"sessionId":"sess-h","toolCall":{"title":"rm -rf scratch"},"options":[`)
+	for i := 0; i < maxPermissionOptions+4; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		fmt.Fprintf(&sb, `{"optionId":"opt-%d","name":"Opt %d","kind":"allow_once"}`, i, i)
+	}
+	sb.WriteString(`]}`)
+
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, _, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 5*time.Second))
+	sendPermissionRequest(t, toClient, sb.String())
+	waitForEvent(t, s, "permission_requested", 5*time.Second)
+
+	p := notif.lastRequested()
+	if len(p.Options) != maxPermissionOptions {
+		t.Fatalf("published Options = %d, want cap %d", len(p.Options), maxPermissionOptions)
+	}
+}

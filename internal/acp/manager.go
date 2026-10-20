@@ -114,8 +114,8 @@ func (m *Manager) PendingPermissions() []PendingPermission {
 // surface). It is the manager-side accessor for Relay.Resolve so consumers
 // never hold the registry directly: the manager stays the single owner of
 // the seam. Nil-safe: a manager without a relay reports ErrRelayNotFound.
-// Decision normalization ("anything not allow -> deny") lives inside the
-// relay; callers at API boundaries validate the verb explicitly BEFORE
+// Decision normalization ("anything not allow/always -> deny") lives inside
+// the relay; callers at API boundaries validate the verb explicitly BEFORE
 // calling (leaf 03 context 4) so a typo never silently denies.
 func (m *Manager) ResolvePermission(id string, decision string) error {
 	if m == nil {

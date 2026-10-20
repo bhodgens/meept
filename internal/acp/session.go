@@ -368,12 +368,57 @@ func (s *Session) onNotice(n Notification) {
 // agents that don't send an options list.
 const defaultAllowOptionID = "allow-once"
 
-// permissionOption is one entry of the ACP requestPermission params'
-// options array (PermissionOption: optionId + name + kind).
-type permissionOption struct {
+// PermissionOption is one entry of the ACP requestPermission params'
+// options array (optionId + name + kind). Exported for the relay snapshot
+// (PendingPermission.Options) and the daemon notifier's bus payload —
+// internal/bus mirrors the {optionId,name,kind} wire tags rather than
+// importing this package (no import cycle).
+type PermissionOption struct {
 	OptionID string `json:"optionId"`
 	Name     string `json:"name"`
 	Kind     string `json:"kind"`
+}
+
+// parsePermissionOptions decodes the requestPermission params' options
+// array. nil-safe on absent/malformed params (the lane never errors on a
+// weird agent payload — the reply chain falls back).
+func parsePermissionOptions(rawParams []byte) []PermissionOption {
+	if len(rawParams) == 0 {
+		return nil
+	}
+	var p struct {
+		Options []PermissionOption `json:"options"`
+	}
+	if err := json.Unmarshal(rawParams, &p); err != nil || len(p.Options) == 0 {
+		return nil
+	}
+	return p.Options
+}
+
+// resolveAlwaysOptionID picks the optionId of the agent's own allow_always
+// option (acp-always-allow master.md Contract A, design decision 1: meept
+// is a TRANSPORT for "always" — the reply echoes the agent's id and the
+// AGENT persists the grant). Matching: kind == "allow_always" first (the
+// ACP spec token), then a kind containing BOTH "allow" and "always"
+// (case-insensitive); an option with an empty id never matches. Returns ""
+// when no option looks like always — the caller then falls back to the
+// resolveAllowOptionID chain, so "always" on an agent that offers no
+// allow_always option resolves exactly like "allow" (never errors, never
+// silently denies).
+func resolveAlwaysOptionID(rawParams []byte) string {
+	options := parsePermissionOptions(rawParams)
+	for _, o := range options {
+		if o.OptionID != "" && o.Kind == "allow_always" {
+			return o.OptionID
+		}
+	}
+	for _, o := range options {
+		kind := strings.ToLower(o.Kind)
+		if o.OptionID != "" && strings.Contains(kind, "allow") && strings.Contains(kind, "always") {
+			return o.OptionID
+		}
+	}
+	return ""
 }
 
 // resolveAllowOptionID picks the optionId of the allow-once option the
@@ -384,17 +429,12 @@ type permissionOption struct {
 // token), then a kind containing "allow", then a name that is exactly
 // (case-insensitive) one of the allow-once phrasings.
 func resolveAllowOptionID(rawParams []byte) string {
-	if len(rawParams) == 0 {
-		return defaultAllowOptionID
-	}
-	var p struct {
-		Options []permissionOption `json:"options"`
-	}
-	if err := json.Unmarshal(rawParams, &p); err != nil || len(p.Options) == 0 {
+	options := parsePermissionOptions(rawParams)
+	if options == nil {
 		return defaultAllowOptionID
 	}
 	fallback := defaultAllowOptionID
-	for _, o := range p.Options {
+	for _, o := range options {
 		if o.OptionID == "" {
 			continue
 		}
@@ -409,7 +449,7 @@ func resolveAllowOptionID(rawParams []byte) string {
 	if fallback != defaultAllowOptionID {
 		return fallback
 	}
-	for _, o := range p.Options {
+	for _, o := range options {
 		if o.OptionID == "" {
 			continue
 		}
@@ -428,6 +468,21 @@ func resolveAllowOptionID(rawParams []byte) string {
 func allowOutcomeResult(rawParams []byte) map[string]any {
 	return map[string]any{
 		"outcome": map[string]any{"outcome": "selected", "optionId": resolveAllowOptionID(rawParams)},
+	}
+}
+
+// alwaysOutcomeResult builds the "selected" reply for a human "always"
+// answer: the agent's OWN allow_always optionId when offered (the agent
+// persists the grant — meept transports, it never memorizes), else the
+// resolveAllowOptionID chain (allow_once echo -> defaultAllowOptionID), so
+// "always" degrades exactly like "allow" for agents without the capability.
+func alwaysOutcomeResult(rawParams []byte) map[string]any {
+	optionID := resolveAlwaysOptionID(rawParams)
+	if optionID == "" {
+		optionID = resolveAllowOptionID(rawParams)
+	}
+	return map[string]any{
+		"outcome": map[string]any{"outcome": "selected", "optionId": optionID},
 	}
 }
 
@@ -479,21 +534,27 @@ func (s *Session) handlePermissionHuman(n Notification) {
 			"reason", relayReasonNoWire,
 		)
 		s.emit(SessionEvent{Kind: "permission_resolved", Text: relayDecisionDeny})
-		s.replyPermissionOutcome(n, false)
+		s.replyPermissionOutcome(n, relayVerdict{})
 		return
 	}
 	verdict := s.relayPermissionWait(*n.ID, n.Params)
-	s.replyPermissionOutcome(n, verdict.allow)
+	s.replyPermissionOutcome(n, verdict)
 }
 
 // replyPermissionOutcome writes the ACP reply frame for one permission
-// request: allow -> selected/<offered allow-once optionId>, otherwise
-// cancelled (v1 has no "always" verb; frozen by master.md user decisions).
-func (s *Session) replyPermissionOutcome(n Notification, allow bool) {
+// request: allow -> selected/<offered allow-once optionId>, always ->
+// selected/<offered allow_always optionId (fallback chain above)>,
+// otherwise cancelled. The human relay lane (and its escalation twin) is
+// the only caller path that can report always — the decision-lane model
+// options stay [allow deny] (master.md design decision 4).
+func (s *Session) replyPermissionOutcome(n Notification, verdict relayVerdict) {
 	var result any
-	if allow {
+	switch {
+	case verdict.always:
+		result = alwaysOutcomeResult(n.Params)
+	case verdict.allow:
 		result = allowOutcomeResult(n.Params)
-	} else {
+	default:
 		result = cancelledResult()
 	}
 	if err := s.tr.Reply(*n.ID, result, nil); err != nil {
@@ -575,13 +636,16 @@ func (s *Session) handleDecisionEscalation(n Notification, outcome decisionOutco
 		)
 		s.emit(SessionEvent{Kind: "permission_request", Text: outcome.text})
 		s.emit(SessionEvent{Kind: "permission_decision", Text: outcome.text})
-		s.replyPermissionOutcome(n, false)
+		s.replyPermissionOutcome(n, relayVerdict{})
 		return
 	}
 	verdict := s.relayPermissionWait(*n.ID, n.Params)
 	text := outcome.text
 	switch verdict.text {
-	case relayDecisionAllow:
+	case relayDecisionAllow, relayDecisionAlways:
+		// A human "always" is still a human ALLOW (scope differs; the
+		// reply echo does that) — the decision lane itself can never
+		// vote always (design decision 4).
 		text = escalatedTextAllow
 	case relayDecisionDeny:
 		text = escalatedTextDeny
@@ -591,5 +655,5 @@ func (s *Session) handleDecisionEscalation(n Notification, outcome decisionOutco
 	}
 	s.emit(SessionEvent{Kind: "permission_request", Text: text})
 	s.emit(SessionEvent{Kind: "permission_decision", Text: text})
-	s.replyPermissionOutcome(n, verdict.allow)
+	s.replyPermissionOutcome(n, verdict)
 }
