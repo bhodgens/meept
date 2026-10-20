@@ -2512,6 +2512,15 @@ type ACPConfig struct {
 	// the other modes). Independent of decision_gate_enabled /
 	// compaction.decision_* knobs — [acp] owns its own knobs.
 	DecisionThreshold float64 `json:"decision_threshold" toml:"decision_threshold"`
+	// RelayTimeout is the human-relay wait, in seconds, for permission_mode
+	// "human" and for decision-lane escalation (decision_escalate_to_human).
+	// Must be > 0 only when the relay is actually reachable — mode "human" or
+	// escalation on; unused elsewhere, so a non-positive value is accepted.
+	RelayTimeout int `json:"relay_timeout" toml:"relay_timeout"`
+	// DecisionEscalateToHuman routes every NON-allow outcome in
+	// permission_mode "decision" through the human relay instead of
+	// cancelling outright. Default false keeps the fail-closed cancel.
+	DecisionEscalateToHuman bool `json:"decision_escalate_to_human" toml:"decision_escalate_to_human"`
 }
 
 // Validate checks the [acp] section. Invalid timeouts, agent caps, or
@@ -2527,16 +2536,22 @@ func (c *ACPConfig) Validate() error {
 		return fmt.Errorf("max_agents must be between 1 and 32")
 	}
 	switch c.PermissionMode {
-	case "permissive", "deny":
-		return nil
+	case "permissive", "deny", "human":
 	case "decision":
 		if c.DecisionThreshold <= 0 || c.DecisionThreshold > 1 {
 			return fmt.Errorf("decision_threshold must be in (0, 1] when permission_mode is \"decision\"")
 		}
-		return nil
 	default:
-		return fmt.Errorf("permission_mode must be \"permissive\", \"deny\", or \"decision\"")
+		return fmt.Errorf("permission_mode must be \"permissive\", \"deny\", \"decision\", or \"human\"")
 	}
+	// The relay wait only binds when the relay is actually reachable:
+	// permission_mode "human" or decision-lane escalation. Elsewhere a
+	// non-positive relay_timeout is unused and accepted (same convention
+	// as decision_threshold outside "decision" mode).
+	if (c.PermissionMode == "human" || c.DecisionEscalateToHuman) && c.RelayTimeout <= 0 {
+		return fmt.Errorf("relay_timeout must be > 0 when permission_mode is \"human\" or decision_escalate_to_human is enabled")
+	}
+	return nil
 }
 
 // PluginsConfig holds plugin settings.
@@ -3560,13 +3575,15 @@ func DefaultConfig() *Config {
 			ConfigFile: "~/.meept/mcp_servers.json5",
 		},
 		ACP: ACPConfig{
-			Enabled:           false,
-			AgentsFile:        "~/.meept/acp_agents.json5",
-			DialTimeout:       10,
-			CallTimeout:       120,
-			MaxAgents:         3,
-			PermissionMode:    "permissive",
-			DecisionThreshold: 0.5,
+			Enabled:                 false,
+			AgentsFile:              "~/.meept/acp_agents.json5",
+			DialTimeout:             10,
+			CallTimeout:             120,
+			MaxAgents:               3,
+			PermissionMode:          "permissive",
+			DecisionThreshold:       0.5,
+			RelayTimeout:            120,
+			DecisionEscalateToHuman: false,
 		},
 		Plugins: PluginsConfig{
 			Enabled:   true,

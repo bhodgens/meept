@@ -29,6 +29,12 @@ func TestDefaultConfig_ACP(t *testing.T) {
 	if acp.DecisionThreshold != 0.5 {
 		t.Errorf("acp.decision_threshold default = %v, want 0.5", acp.DecisionThreshold)
 	}
+	if acp.RelayTimeout != 120 {
+		t.Errorf("acp.relay_timeout default = %d, want 120", acp.RelayTimeout)
+	}
+	if acp.DecisionEscalateToHuman {
+		t.Error("acp.decision_escalate_to_human default = true, want false")
+	}
 	if err := acp.Validate(); err != nil {
 		t.Errorf("default acp config should validate: %v", err)
 	}
@@ -71,6 +77,34 @@ func TestACPConfig_Validate(t *testing.T) {
 	denyZero.DecisionThreshold = 0
 	if err := denyZero.Validate(); err != nil {
 		t.Errorf("permission_mode \"deny\" with threshold 0 rejected: %v", err)
+	}
+
+	// "human" is a valid mode: each permission request pauses for a human
+	// answer over the relay. relay_timeout applies, but the mode itself
+	// needs no extra knobs.
+	hum := valid()
+	hum.PermissionMode = "human"
+	if err := hum.Validate(); err != nil {
+		t.Errorf("permission_mode \"human\" rejected: %v", err)
+	}
+
+	// relay_timeout is enforced only when the relay is actually reachable:
+	// mode "human" OR decision_escalate_to_human. Elsewhere a non-positive
+	// value is accepted (unused), same convention as decision_threshold.
+	for _, mode := range []string{"permissive", "deny"} {
+		idle := valid()
+		idle.PermissionMode = mode
+		idle.RelayTimeout = 0
+		if err := idle.Validate(); err != nil {
+			t.Errorf("relay_timeout 0 rejected in %q mode with escalation off: %v", mode, err)
+		}
+		esc := valid()
+		esc.PermissionMode = mode
+		esc.RelayTimeout = 0
+		esc.DecisionEscalateToHuman = true
+		if err := esc.Validate(); err == nil || !strings.Contains(err.Error(), "relay_timeout") {
+			t.Errorf("relay_timeout 0 with escalation on in %q mode: error %v must mention relay_timeout", mode, err)
+		}
 	}
 
 	cases := []struct {
@@ -137,6 +171,31 @@ func TestACPConfig_Validate(t *testing.T) {
 			},
 			wantSub: "decision_threshold",
 		},
+		{
+			name: "human mode zero relay_timeout",
+			mutate: func(c *ACPConfig) {
+				c.PermissionMode = "human"
+				c.RelayTimeout = 0
+			},
+			wantSub: "relay_timeout",
+		},
+		{
+			name: "human mode negative relay_timeout",
+			mutate: func(c *ACPConfig) {
+				c.PermissionMode = "human"
+				c.RelayTimeout = -3
+			},
+			wantSub: "relay_timeout",
+		},
+		{
+			name: "decision mode escalation on zero relay_timeout",
+			mutate: func(c *ACPConfig) {
+				c.PermissionMode = "decision"
+				c.DecisionEscalateToHuman = true
+				c.RelayTimeout = 0
+			},
+			wantSub: "relay_timeout",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,6 +209,14 @@ func TestACPConfig_Validate(t *testing.T) {
 				t.Errorf("error %q does not contain %q", err, tc.wantSub)
 			}
 		})
+	}
+
+	// The mode-list error is a user-facing contract: pin it verbatim.
+	bad := valid()
+	bad.PermissionMode = "ask"
+	if err := bad.Validate(); err == nil ||
+		err.Error() != `permission_mode must be "permissive", "deny", "decision", or "human"` {
+		t.Errorf("permission_mode error = %v, want the four-mode verbatim message", err)
 	}
 }
 

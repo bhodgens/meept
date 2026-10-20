@@ -537,13 +537,21 @@
   // permission_mode: "permissive" approves every session/requestPermission,
   // "deny" cancels every request, "decision" asks the decision model and
   // fails closed (cancel) whenever the decider is unavailable, errors, or
-  // answers "deny". decision_threshold: minimum confidence (0-1] required to
-  // approve in "decision" mode; independent of decision_gate_enabled and
-  // compaction.decision_* (the [acp] section owns its own knobs).
+  // answers "deny", "human" pauses each request for a person to answer
+  // (allow/deny) over the pending-permission relay. decision_threshold:
+  // minimum confidence (0-1] required to approve in "decision" mode;
+  // independent of decision_gate_enabled and compaction.decision_* (the
+  // [acp] section owns its own knobs). relay_timeout: seconds to wait for
+  // the human answer before the request is cancelled fail-closed (must be
+  // > 0 in "human" mode or when decision_escalate_to_human is on).
+  // decision_escalate_to_human: in "decision" mode, route every NON-allow
+  // outcome to the human relay instead of cancelling outright.
   "acp": {
     "enabled": false,
     "permission_mode": "permissive",
     "decision_threshold": 0.5,
+    "relay_timeout": 120,
+    "decision_escalate_to_human": false,
   },
 
   // Plugins configuration

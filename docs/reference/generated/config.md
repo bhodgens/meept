@@ -766,6 +766,15 @@ ACPConfig holds Agent Client Protocol client settings.
 	    // the other modes). Independent of decision_gate_enabled /
 	    // compaction.decision_* knobs — [acp] owns its own knobs.
 	    DecisionThreshold float64 `json:"decision_threshold" toml:"decision_threshold"`
+	    // RelayTimeout is the human-relay wait, in seconds, for permission_mode
+	    // "human" and for decision-lane escalation (decision_escalate_to_human).
+	    // Must be > 0 only when the relay is actually reachable — mode "human" or
+	    // escalation on; unused elsewhere, so a non-positive value is accepted.
+	    RelayTimeout int `json:"relay_timeout" toml:"relay_timeout"`
+	    // DecisionEscalateToHuman routes every NON-allow outcome in
+	    // permission_mode "decision" through the human relay instead of
+	    // cancelling outright. Default false keeps the fail-closed cancel.
+	    DecisionEscalateToHuman bool `json:"decision_escalate_to_human" toml:"decision_escalate_to_human"`
 	}
 
 <a name="ACPConfig.Validate"></a>
