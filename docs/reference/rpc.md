@@ -636,6 +636,66 @@ Get detailed task information.
 }
 ```
 
+### ACP Methods
+
+#### `acp.list` - List ACP Agents
+
+Reports the ACP client catalog and live session state. Registered even when the ACP manager is nil (disabled config): the result is then the `{"enabled": false, "agents": []}` envelope, never an error.
+
+**Response (enabled):**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 21,
+  "result": {
+    "enabled": true,
+    "agents": [
+      {"id": "codex", "enabled": true, "running": true, "state": "ready"}
+    ]
+  }
+}
+```
+
+#### `acp.permissions.list` - Pending Human-Relay Permissions
+
+With `[acp] permission_mode = "human"` (or decision-lane escalation), each inbound `session/requestPermission` becomes a pending record until a person answers or `relay_timeout` fails it closed. This method returns the pending queue. Nil/disabled manager: `{"enabled": false, "pending": []}`.
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 22,
+  "result": {
+    "enabled": true,
+    "pending": [
+      {
+        "id": "perm28ba51714f5ec50b",
+        "agent_id": "codex",
+        "session_id": "sess-…",
+        "summary": "Agent: codex\nPermission request: {\"sessionId\":\"sess-…\"}",
+        "created_at": "2026-10-19T21:44:02Z"
+      }
+    ]
+  }
+}
+```
+
+#### `acp.permissions.resolve` - Answer a Permission Request
+
+**Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "acp.permissions.resolve",
+  "params": {"id": "perm28ba51714f5ec50b", "decision": "allow"},
+  "id": 23
+}
+```
+
+`decision` must be exactly `"allow"` or `"deny"` — anything else is rejected at the RPC boundary (a typo never silently denies). One answer per id: a second resolve returns a `permission already answered` error; an unknown id returns `permission not found`. The resolved frame publishes to the `acp.permission.resolved` topic so every surface (TUI/GUI) dismisses the entry.
+
+See [Acp](../workflows/acp.md) for the full relay flow and fail-closed semantics.
+
 ## Error Handling
 
 ### Error Response Format

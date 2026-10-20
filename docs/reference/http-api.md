@@ -873,6 +873,8 @@ When enabled, the WebSocket handler subscribes to the message bus and broadcasts
 | GET | `/api/v1/mcp/servers` | List configured MCP client servers + runtime stats | — |
 | PUT | `/api/v1/mcp/servers/{name}/enabled` | Toggle a client server's enabled flag | — |
 | GET | `/api/v1/acp/agents` | List ACP client agents + live session state | — |
+| GET | `/api/v1/acp/permissions` | List pending ACP human-relay permission requests | — |
+| POST | `/api/v1/acp/permissions/resolve` | Answer an ACP permission request (`{id, decision}`) | — |
 
 The MCP endpoints allow AI agents (Claude Code, Cline, etc.) to interact with meept via the Model Context Protocol.
 
@@ -965,6 +967,8 @@ These endpoints report meept's ACP *client* catalog (the external agents meept l
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/acp/agents` | List catalog agents with enabled/running/state |
+| GET | `/api/v1/acp/permissions` | Pending human-relay permission requests (`{"enabled": …, "pending": […]}`; disabled/nil manager returns 200 with an empty list — never 500) |
+| POST | `/api/v1/acp/permissions/resolve` | Answer one request: body `{"id": "<perm id>", "decision": "allow" \| "deny"}`; 400 on a malformed body/decision |
 
 ```bash
 curl http://localhost:8081/api/v1/acp/agents

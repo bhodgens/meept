@@ -213,7 +213,7 @@ Running `meept chat` with no message argument opens the interactive TUI. In addi
 
 **Slash Commands** (type `/` in the input for autocomplete; full list via `/help`):
 
-Core built-ins include: `/help`, `/new` (create a new session; old history is kept under its session), `/clear` (wipe the current conversation in place), `/retry`, `/undo`, `/usage`, `/stop`, `/status`, `/vim`, `/session`, `/task`, `/tasks`, `/cancel`, `/amend`, `/interrupt`, `/diff`, `/model`, `/compact`, `/edit`, `/plan`, `/review`, `/project`, `/mcp`, `/skill`. Skills are also invocable as slash commands by name. `/new` and `/clear` behave identically in the TUI and the GUI.
+Core built-ins include: `/help`, `/new` (create a new session; old history is kept under its session), `/clear` (wipe the current conversation in place), `/retry`, `/undo`, `/usage`, `/stop`, `/status`, `/vim`, `/session`, `/task` (alias of `/tasks`), `/tasks`, `/cancel`, `/amend`, `/interrupt`, `/diff`, `/model`, `/compact`, `/edit`, `/plan`, `/review`, `/project`, `/skill`. Skills are also invocable as slash commands by name. `/new` and `/clear` behave identically in the TUI and the GUI.
 
 Note: MCP server enable/disable is managed through the interactive config editor (`meept config`, section "mcp servers") or HTTP — not a TUI menu.
 
@@ -442,6 +442,7 @@ Verified against the binary. Run `meept <command> --help` for flags.
 
 | Command | Subcommands | Purpose |
 |---------|-------------|---------|
+| `meept acp` | agents, permissions (list, resolve) | ACP client catalog + human permission relay (see [Acp](../workflows/acp.md)) |
 | `meept analytics` | errors, export, models, summary | Agent performance and model metrics |
 | `meept backup` | list, push | Database backups |
 | `meept benchmark` | — | SWE-bench-style regression benchmarks |
