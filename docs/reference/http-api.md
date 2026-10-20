@@ -21,6 +21,14 @@ When enabled, include the API key in the Authorization header:
 curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8081/api/v1/chat
 ```
 
+**First-run pairing** (arms only when `require_auth` is on with no explicit
+`api_keys` and no auth store — see `internal/comm/http/pairing.go`):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/pair/status` | Report whether pairing is armed (loopback only) |
+| POST | `/api/v1/pair/exchange` | Exchange the single-use console-printed code for the dev key (one time) |
+
 ## Endpoints
 
 ### Health
@@ -35,9 +43,13 @@ curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8081/api/v1/chat
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/v1/chat` | Send a chat message |
+| POST | `/api/v1/chat/submit` | Submit a turn without waiting (async; result via WS/stream) |
 | GET | `/api/v1/chat/stream` | SSE stream of tool/agent progress events |
 | GET | `/api/v1/chat/queue/{id}` | Get queue status for a conversation |
 | POST | `/api/v1/chat/with-agent` | Send a message with agent steering |
+| POST | `/api/v1/chat/steer` | Steer the running turn for a conversation (convenience alias of `POST /api/v1/queue/steer`) |
+| POST | `/api/v1/chat/steer-explicit` | Steer a specific session by explicit id |
+| POST | `/api/v1/chat/followup` | Queue a follow-up message (convenience alias of `POST /api/v1/queue/followup`) |
 
 **Example:**
 ```bash
@@ -142,6 +154,19 @@ curl -X POST http://localhost:8081/api/v1/chat/with-agent \
 | POST | `/api/v1/memory/query` | Search memories |
 | GET | `/api/v1/memory/recent` | Get recent memories |
 | POST | `/api/v1/memory/export` | Export memories |
+| GET | `/api/v1/memory/facts` | List stored facts |
+| POST | `/api/v1/memory/claims` | Retain an epistemic claim |
+| POST | `/api/v1/memory/claims/{id}/promote` | Promote an auto-claim to confirmed |
+| POST | `/api/v1/memory/claims/{id}/reject` | Reject an auto-claim |
+| POST | `/api/v1/memory/decisions` | Retain an epistemic decision |
+| POST | `/api/v1/memory/decisions/{id}/review` | Record a review on a decision |
+| POST | `/api/v1/memory/predictions` | Retain an epistemic prediction |
+| POST | `/api/v1/memory/predictions/{id}/resolve` | Mark a prediction resolved |
+| POST | `/api/v1/memory/supersede` | Mark a memory superseded (two-phase confirm) |
+| GET | `/api/v1/memory/canonical` | Find the canonical memory for a query |
+| GET | `/api/v1/memory/review-queue` | Pending epistemic reviews (requires RPC wiring) |
+| GET | `/api/v1/memory/auto-claims` | List auto-grade claims (requires RPC wiring) |
+| POST | `/api/v1/memory/auto-claims/purge` | Purge auto-claims (requires RPC wiring) |
 
 **Example:**
 ```bash
@@ -261,6 +286,17 @@ Response: `{"status": "queued"}`
 | GET | `/api/v1/sessions/{id}/tree` | Get session tree structure |
 | GET | `/api/v1/sessions/{id}/messages` | Get session messages (query params: `offset`, `limit`) |
 | POST | `/api/v1/sessions/{id}/compact` | Trigger compaction on a session |
+| GET | `/api/v1/sessions/{id}/designation` | Get a session's designation status |
+| POST | `/api/v1/sessions/{id}/acknowledge` | Acknowledge a designated session, clearing its designation |
+| GET | `/api/v1/sessions/designated` | List designated sessions |
+| PUT | `/api/v1/sessions/designated/{id}` | Acknowledge a designated session by id |
+| GET | `/api/v1/sessions/{id}/threads` | List conversation threads of a session |
+| POST | `/api/v1/sessions/{id}/threads` | Create a thread |
+| GET | `/api/v1/sessions/{id}/threads/active` | Get the session's active thread |
+| PUT | `/api/v1/sessions/{id}/threads/active` | Set the session's active thread |
+| GET | `/api/v1/sessions/{id}/threads/{threadID}` | Get one thread |
+| DELETE | `/api/v1/sessions/{id}/threads/{threadID}` | Delete a thread |
+| GET | `/api/v1/sessions/{sid}/pending-changes` | List pending changes staged for human review in a session |
 
 **Most Recent:**
 ```bash
@@ -337,6 +373,11 @@ Archived sessions are preserved (no row deletion): messages, branches, embedding
 | GET | `/api/v1/skills/{slug}` | Get skill details |
 | GET | `/api/v1/skills/{slug}/ui` | Get skill UI descriptor |
 | POST | `/api/v1/skills/{slug}/execute` | Execute skill |
+| GET | `/api/v1/skills/stats` | Skill usage statistics (requires RPC wiring) |
+| GET | `/api/v1/skills/{slug}/history` | Skill execution history (requires RPC wiring) |
+| POST | `/api/v1/skills/{slug}/archive` | Archive a skill (requires RPC wiring) |
+| POST | `/api/v1/skills/{slug}/restore` | Restore an archived skill (requires RPC wiring) |
+| POST | `/api/v1/skills/evolve` | Trigger the closed-loop skill evolution cycle (requires RPC wiring) |
 
 **UI Descriptor:**
 ```bash
@@ -419,6 +460,7 @@ Response: `{"result": ...}` or `{"error": "..."}`
 | POST | `/api/v1/daemon/restart` | Restart platform |
 | POST | `/api/v1/daemon/start` | Start platform |
 | POST | `/api/v1/daemon/stop` | Stop platform |
+| GET | `/api/v1/cluster/metrics` | Gossip-engine cluster metrics (empty object when no cluster is wired, stable shape) |
 
 ### Models
 
@@ -512,6 +554,8 @@ Returns counters for summarization failures, dropped messages, compaction events
 | GET | `/api/v1/config/agents/{id}` | Get agent config |
 | POST | `/api/v1/config/agents/{id}` | Save agent |
 | DELETE | `/api/v1/config/agents/{id}` | Delete agent |
+| GET | `/api/v1/config/orchestrator` | Get orchestrator config |
+| PUT | `/api/v1/config/orchestrator` | Update orchestrator config |
 
 **Main config is loopback-only in BOTH directions.** `GET` and `POST
 /api/v1/config/main` are refused with 403 for any client whose connection does
@@ -715,6 +759,7 @@ Response: `{"status": "checked out"}`
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/v1/search` | Cross-resource search |
+| POST | `/api/v1/search/semantic` | Semantic (vector) search with keyword fallback |
 
 **Search:**
 ```bash
@@ -730,6 +775,8 @@ Response: `{"results": [...], "count": N}`
 |--------|------|-------------|
 | GET | `/ws/notifications` | WebSocket for real-time notifications |
 | GET | `/api/v1/notifications` | Poll notifications (query param: `since`) |
+| GET | `/api/v1/notifications/dnd` | Get do-not-disturb state (requires RPC wiring) |
+| POST | `/api/v1/notifications/dnd` | Set do-not-disturb state (requires RPC wiring) |
 
 Notifications are available when a `NotificationEmitter` is configured. The WebSocket endpoint pushes events as they occur; the HTTP endpoint supports polling.
 
@@ -1001,6 +1048,104 @@ When `[acp] enabled = true`, `agents` lists catalog entries:
 ```
 
 `state` is `ready`, `busy`, `closed`, `starting`, or empty when no live session. `uptime_s` is 0 until sessions track uptime. The Flutter GUI consumes this endpoint (leaf 09).
+
+### Uploads
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/uploads` | Create an upload: `multipart/form-data` with a `file` field, or JSON with base64 `data` (415 on any other content type; 503 when the upload service is unwired) |
+| GET | `/api/v1/uploads/{id}` | Fetch an uploaded file |
+| GET | `/api/v1/uploads/{id}/metadata` | Fetch an upload's metadata |
+| DELETE | `/api/v1/uploads/{id}` | Delete an upload |
+
+### Change Review (pending changes + journal)
+
+Write tools can stage changes for human review (containment leaf 07). See [change review](../workflows/change-review.md).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/sessions/{sid}/pending-changes` | List pending changes for a session |
+| POST | `/api/v1/pending-changes/{id}/accept` | Accept one pending change |
+| POST | `/api/v1/pending-changes/{id}/reject` | Reject one pending change |
+| GET | `/api/v1/changes/journal` | List the applied-change journal |
+| POST | `/api/v1/changes/journal/{id}/revert` | Revert one journaled change |
+
+### User Instructions
+
+Optional endpoints (registered when the daemon wires the instructions handler) for standing automation rules — see [user instructions](../workflows/user-instructions.md).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/instructions` | List instructions |
+| GET | `/api/v1/instructions/{id}` | Get one instruction |
+| POST | `/api/v1/instructions` | Create an instruction |
+| PUT | `/api/v1/instructions/{id}` | Update an instruction |
+| DELETE | `/api/v1/instructions/{id}` | Delete an instruction |
+| POST | `/api/v1/instructions/preview` | Preview an instruction without persisting |
+
+### Eval Runs
+
+Optional endpoints (registered with the daemon's eval option) — run oracle checks and score pass^k.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/eval/runs` | Run an oracle command k times, record pass^k |
+| GET | `/api/v1/eval/runs` | List stored eval runs |
+| GET | `/api/v1/eval/runs/{id}` | Get one eval run |
+
+### Prompt Templates
+
+4-tier template discovery (`meept prompts` counterpart).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/prompts` | List prompt templates |
+| GET | `/api/v1/prompts/{path}` | Get one template |
+| PUT | `/api/v1/prompts/{path}` | Write a template |
+| DELETE | `/api/v1/prompts/{path}` | Delete a template |
+| POST | `/api/v1/prompts/validate` | Validate template content |
+
+### Reasoning
+
+Budget/tier introspection (requires RPC wiring).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/reasoning/tiers` | List reasoning tiers |
+| GET | `/api/v1/reasoning/budgets` | Get reasoning budgets |
+| POST | `/api/v1/reasoning/budgets` | Set reasoning budgets |
+| GET | `/api/v1/reasoning/agents` | List agents with reasoning config |
+
+### Reflection Proposals
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/reflection/proposals` | List pending reflection proposals |
+| POST | `/api/v1/reflection/proposals/{id}/apply` | Apply a proposal |
+| POST | `/api/v1/reflection/proposals/{id}/skip` | Skip a proposal |
+| POST | `/api/v1/reflection/remember` | Create a manual proposal and append it to the queue |
+
+### Dispatch
+
+Cross-daemon task dispatch (CLI counterpart: `meept dispatch`).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/dispatch` | Submit a task to a remote node |
+| GET | `/api/v1/dispatch/{id}/status` | Query a dispatch job's status |
+| GET | `/api/v1/dispatch/{id}/results` | Fetch a dispatch job's results |
+
+### Filesystem
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/filesystem/browse` | Browse a directory listing (symlinks resolved, hidden dirs excluded unless the path is under one) |
+
+### Compression Stats
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/compression/stats` | Context-compression counters: `{entry_count, total_saved, retrieval_count, by_strategy}` (registered only when a stats getter is wired) |
 
 ## Error Responses
 

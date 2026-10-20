@@ -1111,6 +1111,7 @@ Meept provides built-in tools and supports MCP (Model Context Protocol) for exte
 - Memory: `memory_store`, `memory_search`, `memory_get_context`
 - Platform: `platform_agents`, `platform_status`, `platform_tools`, `delegate_task`, `request_handoff`
 - ACP: `acp_agent` (launch/send/read/stop against cataloged ACP agents; `[acp]` disabled by default)
+- Hermes: `hermes` (drive a remote Hermes gateway API server: status/chat/run/runs/steer/stop/wait/approve/jobs/sessions/session-model verbs with capability gating; `[hermes]` disabled by default, registration needs the API key from `api_key_env`)
 - Git: `git_commit`, `git_diff`, `git_status`
 - Browser: `browser_navigate`, `browser_click`, `browser_type`, `browser_read_text`, `browser_screenshot`, `browser_close` (opt-in, `[browser] enabled`; SSRF-guarded headless Chrome — see [Browser Automation](workflows/browser-automation.md))
 - Vision: no dedicated tool — multimodal image input flows through chat (`image_url` content parts); the agent loop runs a vision pre-flight that describes undescribed images before the main turn and caches the descriptions into memory (searchable)
@@ -1606,6 +1607,7 @@ Three media specialists sit beside that roster: `image-gen` and `video-gen` each
 | **Distributed Cluster** | P2P mesh networking with gossip protocol, distributed task queue, WireGuard sync, and cluster CLI commands |
 | **MCP Server** | Expose Meept as an MCP server for external agent platforms with tool discovery and execution |
 | **ACP Client** | Drive external ACP agents (Codex via codex-acp, OpenCode, others) as full agents over JSON-RPC stdio. Catalog `~/.meept/acp_agents.json5`. `[acp] enabled` defaults false. `permission_mode` is `permissive` (default), `deny`, `decision` (model vote, fail closed), or `human` (pause each request for a person over the TUI/GUI/CLI/HTTP relay, timeout cancels fail-closed). Status: `GET /api/v1/acp/agents`; pending relay: `GET /api/v1/acp/permissions`. See [Acp](workflows/acp.md). |
+| **Decision Model** | Additive `decision_model` slot (models.json5) serving typed Jev-style decisions (fixed label set, calibrated confidence): opt-in irreversibility gate for destructive tool calls (`decision_gate_enabled` + `decision_gate_tools` allowlist; fails open when the decision layer is down), and an opt-in score-and-drop compaction lane (`compaction.decision_enabled`, `decision_keep_bar`) that replaces summarizer compaction only when enabled. See [decision-model plan](plans/decision-model/master.md) and [acp](workflows/acp.md) decision mode. |
 | **Meept-Lite TUI** | Minimalistic alternative TUI using termbox-go with shared library (`sharedclient`) for code reuse |
 | **Desktop Notifications** | macOS native notifications via platform event emitter, WebSocket, and UNUserNotificationCenter |
 | **Analytics System** | Agent performance analytics, response quality analysis, benchmark framework, and CLI analytics commands. The `model_performance` aggregation table tracks per-model metrics (requests, errors, latency, tokens) with period-based aggregation. The `error_records` table tracks individual errors with `limit_type`, `retry_attempts`, and `final_outcome` for retry analysis. |
@@ -1631,6 +1633,7 @@ Three media specialists sit beside that roster: `image-gen` and `video-gen` each
 | **macOS MenuBar** | Native SwiftUI monitoring and control app with desktop notifications |
 | **MCP Server** | Expose Meept as MCP server for external agent platforms |
 | **ACP Client** | Drive Codex/OpenCode/other ACP agents as peers (`acp_agent`; `[acp]` off by default) |
+| **Hermes Interop** | Native HTTP client for a running Hermes gateway API server (`hermes` builtin tool; `[hermes]` off by default, env-var API key; REST + SSE streaming + approval relay). See [Hermes interop](workflows/hermes.md). |
 | **Distributed Cluster** | P2P mesh networking with gossip protocol for multi-node coordination |
 | **Flutter GUI** | Cross-platform GUI client (desktop + web) with chat, sessions, tasks, agents, metrics panels, live rendering prefs and theme picker |
 
@@ -1751,7 +1754,7 @@ retention = 30
 # Status
 ./bin/meept status                 # Show platform status
 ./bin/meept agents                 # List agents
-./bin/meept tools                  # List tools
+# `meept tools` was removed; tools surface via the TUI and `meept mcp-chat-server`
 
 # Branch
 ./bin/meept branch list <session>  # List branches in a session

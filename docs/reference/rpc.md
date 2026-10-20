@@ -696,6 +696,36 @@ With `[acp] permission_mode = "human"` (or decision-lane escalation), each inbou
 
 See [Acp](../workflows/acp.md) for the full relay flow and fail-closed semantics.
 
+### Effects Methods
+
+#### `effects.list` - Effect Ledger Records
+
+Lists external-effect ledger records (oldest `claimed_at` first). Params: `{"state": "claimed"|"receipted"|"completed"|"abandoned", "key": "<effect key>"}` — both optional; empty state defaults to pending (claimed + receipted). Terminal states resolve only with a `key` (the pinned ledger surface cannot enumerate them; without a key the answer is an empty list). An unwired ledger answers `{"effects": [], "count": 0}`, never an error. CLI: `meept effects list`.
+
+**Response:**
+```json
+{"jsonrpc": "2.0", "id": 24,
+ "result": {"effects": [{"key": "…", "state": "claimed", "tool": "git_push", "task_id": "…", "session_id": "…", "provider_idempotent": false, "claimed_at": "2026-10-19T21:44:02Z"}], "count": 1}}
+```
+
+#### `effects.reconcile` - Reconcile One Record
+
+Human reconciliation of a crash-left record. Params: `{"key": "<effect key>", "action": "complete"|"abandon", "receipt": <optional JSON receipt>, "reason": "<optional, abandon>"}`. `complete` records an optional receipt (claimed -> receipted) then completes; `abandon` records the reason. Nothing here re-executes the effect. Errors: `key is required`, `invalid action`, `effects service not available` (nil ledger). CLI: `meept effects reconcile <key> --complete` / `--abandon --reason '…'`.
+
+See [Effects](../workflows/effects.md) for the ledger state machine.
+
+### Routing Methods
+
+#### `routing.recent` - Recent Routing Decisions
+
+Last N model-routing decisions from the routing log. Params: `{"limit": 20}` (default 20). Result: `{"decisions": [...], "count": N}`. A daemon running without a routing log registers nothing — the method is absent, not empty.
+
+#### `routing.by_model` - Decisions Filtered by Model
+
+Params: `{"model_id": "<chosen model id>", "limit": 50}` — `model_id` required, `limit` default 50. Result: `{"decisions": [...], "count": N}`. CLI: `meept routing recent` / `meept routing by-model`.
+
+See [Routing decisions](../workflows/routing-decisions.md).
+
 ## Error Handling
 
 ### Error Response Format

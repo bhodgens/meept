@@ -13,7 +13,10 @@ All commands support these global flags:
 ```bash
 --socket, -s     Unix socket path (default: ~/.meept/meept.sock)
 --state-dir, -d  State directory (default: ~/.meept)
+--cwd            Set working directory for the session
 --debug          Enable debug output (--debug or --debug=file, use '-' for stderr)
+--transport      Transport: rpc (default) or http
+--http-url       HTTP base URL for the daemon when --transport=http (default: https://localhost:8081)
 ```
 
 ## Commands
@@ -32,9 +35,6 @@ meept chat "What's the weather like?"
 # Send to specific session
 meept chat --session session-abc123 "continue implementing that feature"
 
-# Shorthand for --session
-
-
 # Open TUI to specific session
 meept chat --session session-abc123
 
@@ -46,6 +46,8 @@ echo "Hello world" | meept chat -
 - `--session` - Target specific session by ID (canonical format: `session-XXXXXXXXXXXXXXXX`)
 - `--project` - Bind session to named project
 - `--nofence` - Disable path fencing for this session
+- `--cwd` - Set working directory for the session
+- `--await` - `wait` (default) blocks for the turn result; `off` fires and forgets
 
 **Behavior:**
 - `meept chat` (no args) - Opens TUI to most recent session
@@ -253,11 +255,14 @@ The unified `meept agents` namespace manages AI employees — persistent, consti
 meept agents list                              # all employees, status, tier, drift score
 meept agents show <id>                         # full definition: constitution, state, goals, recent findings
 meept agents create <definition.json5>         # validates constitution; refuses without one
+meept agents validate <definition.json5>       # offline structural validation, no daemon needed
 meept agents update <id> <definition.json5>
 meept agents delete <id>                       # stops + deletes; confirms unless --force
 meept agents pause <id>                        # operator pause
 meept agents resume <id>                       # operator resume (only un-pause path)
 meept agents amend <id> --field=<key> <value>  # propose constitution amendment (routes to Plan signoff)
+meept agents trigger <id> [payload-json]       # invoke the goal loop now
+meept agents steer <id> <content...>           # deliver steering to a running episode
 ```
 
 #### Migration
@@ -271,6 +276,8 @@ meept agents migrate --apply <id>              # write proposed constitution to 
 
 ```bash
 meept agents goals [--employee=<id>]           # list goals with health (red/yellow/green)
+meept agents goal-create <employee-id> --title T --mandate M [--gate-command CMD] [--source user|trigger]
+meept agents set-gate <goal-id> --command="..." # set/clear a goal's completion gate
 meept agents goal <goal-id>                    # goal detail + active plan + history
 meept agents goal <goal-id> --approve <plan-id>
 meept agents goal <goal-id> --reject <plan-id> --reason="..."
@@ -447,24 +454,31 @@ Verified against the binary. Run `meept <command> --help` for flags.
 | `meept backup` | list, push | Database backups |
 | `meept benchmark` | — | SWE-bench-style regression benchmarks |
 | `meept bots` | — | Removed; see `meept agents` |
-| `meept branch` | list, navigate, tree, summary | Session branches (disabled by default) |
+| `meept branch` | fork, list, navigate, tree, summary | Session branches (disabled by default) |
 | `meept cache` | clear, inspect, invalidate, status | Token cache management |
 | `meept calendar` | auth, today | Google Calendar integration |
 | `meept changes` | list, revert | Pending-change staging review |
 | `meept cluster` | debug, init, join, keygen, leave, remote, start, status | P2P cluster mesh |
 | `meept config` | get, list, oauth, set, sync | Config editor + dot-notation get/set (`rendering.ui_theme`, `llm.default_model`, …). `config oauth connect <provider>` runs subscription logins — providers: `github-models`, `google-oauth`, `google-calendar`, `xai-oauth` (SuperGrok), `openai-codex` (ChatGPT Plus/Pro), `anthropic-sub` (Claude Pro/Max). See [OAuth Providers](../workflows/auth.md). |
 | `meept daemon` | restart, start, status, stop | Platform lifecycle |
-| `meept dispatch` | — | Dispatch tasks to cluster nodes |
-| `meept halo` | — | HALO-style trace analysis |
+| `meept dispatch` | results, status, submit | Dispatch tasks to cluster nodes |
+| `meept doctor` | — | Diagnose and repair the meept installation (`--fix`, `--install-missing`) |
+| `meept effects` | list, reconcile | External-effect idempotency ledger (see [Effects](../workflows/effects.md)) |
+| `meept eval` | list, run, show | Run oracle checks and score pass^k |
+| `meept halo` | compact, report | HALO-style trace analysis |
 | `meept improvements` | apply, list, skip | Improvement proposal workflow |
 | `meept init` | — | Initialize AGENTS.md files for a project |
 | `meept instructions` | — | Manage user instructions |
 | `meept jobs` | — (aliases: `tasks`) | List scheduled jobs |
+| `meept keys` | add, list, revoke | Manage user API keys (multi-user mode) |
+| `meept knowledge` | stats | Knowledge-asset store visibility |
+| `meept lanes` | — (`--json`) | Print the intent routing table (lane to agent) |
 | `meept learning` | auto-train, consolidate, dataset-stats, feedback, list, snapshot, status, train | LoRA learning pipeline |
-| `meept memory` | export, promote, reject, review, supersede, vector (+ root search) | Memory operations |
+| `meept memory` | conflicts, expired, export, l0, promote, reject, review, supersede, vector (+ root search) | Memory operations |
 | `meept migrate` | — | Migrate local data stores to dual-DB layout |
 | `meept mcp-chat-server` | — | Expose meept as an MCP server |
-| `meept plans` | approve, confirm, list, reject, show | Plan lifecycle |
+| `meept model` | list, pull, test | Manage local GGUF models (Hugging Face pull + probe) |
+| `meept plans` | approve, confirm, draft, edit-draft, list, reject, seal, show, show-draft | Plan lifecycle |
 | `meept projects` | add, list, remove, status, sync | Project registry and worktrees |
 | `meept prompts` | edit, list, show, validate | Prompt templates |
 | `meept q` | analyze, status | Q Agent meta-optimization |
@@ -482,6 +496,7 @@ Verified against the binary. Run `meept <command> --help` for flags.
 | `meept thread` | current, delete, list, new, switch | Conversation threads in a session |
 | `meept token` | generate, list, revoke | API tokens |
 | `meept tts` | voices | Text-to-speech voices |
+| `meept users` | add, list, remove | Manage daemon users (multi-user mode) |
 | `meept workers` | list, scale, status | Worker pool |
 
 Developer-only: `meept dev` (config/model/test helpers), `meept completion` (shell completions), `meept version`.
@@ -517,32 +532,23 @@ meept memory "authentication"
 ## Exit Codes
 
 - `0` - Success
-- `1` - General error
-- `2` - Platform not running
-- `3` - Invalid command or arguments
-- `4` - Permission denied
-- `5` - Network/connection error
+- `1` - General error (including connection/socket failures — the root
+  handler prints daemon-not-running hints and exits 1)
+- `2` - Usage/validation errors on specific commands (`meept eval` usage
+  errors; `plans seal` invalid seals)
 
 ## Configuration
 
-The CLI reads configuration from:
-- `~/.meept/meept.toml` - Main configuration
-- `~/.meept/cli.toml` - CLI-specific settings
+The CLI resolves its socket/state defaults through `config.MeeptHome()`
+(`internal/config/home.go`): `$MEEPT_HOME/meept.sock` and `$MEEPT_HOME` when the
+env var is set, else `~/.meept` — explicit `--socket`/`--state-dir` flags still
+win.
 
-Key CLI configuration options:
+Config files are **JSON5** (`internal/config` LoadDefault prefers `meept.json5`,
+falling back to legacy `meept.toml` for backward compatibility):
 
-```toml
-[cli]
-default_socket = "~/.meept/meept.sock"
-default_state_dir = "~/.meept"
-log_level = "info"
-color_output = true
+- `~/.meept/meept.json5` — main daemon configuration (honors `MEEPT_HOME`)
+- `~/.meept/client.json5` — client/TUI settings (keybindings)
 
-[cli.chat]
-default_agent = "chat"
-auto_attach_session = true
-
-[cli.memory]
-default_search_limit = 10
-search_timeout = 30
-```
+See [Configuration](../configuration/) and `docs/agents/projects-and-workdirs.md`
+for the full home-directory rules; `meept config` opens the interactive editor.

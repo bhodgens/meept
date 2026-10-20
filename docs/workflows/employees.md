@@ -362,6 +362,7 @@ The unified `meept agents` namespace replaces `meept bots`. Hard cutover.
 meept agents list                              # all employees, status, tier, drift score
 meept agents show <id>                         # full definition: constitution, state, goals, recent findings
 meept agents create <definition.json5>         # validates constitution; refuses without one
+meept agents validate <definition.json5>       # offline structural validation, no daemon needed
 meept agents update <id> <definition.json5>
 meept agents delete <id>                       # stops + deletes; confirms unless --force
 meept agents pause <id>                        # operator pause
@@ -382,6 +383,7 @@ meept agents migrate --apply <id>              # write proposed constitution to 
 ```bash
 meept agents goals [--employee=<id>]           # list goals with health (red/yellow/green)
 meept agents goal-create <employee-id> --title T --mandate M [--gate-command CMD] [--source user|trigger]
+meept agents set-gate <goal-id> --command="..." # set/clear a goal's completion gate
 meept agents goal <goal-id>                    # goal detail + active plan + history
 meept agents goal <goal-id> --approve <plan-id>
 meept agents goal <goal-id> --reject <plan-id> --reason="..."
