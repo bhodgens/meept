@@ -74,7 +74,7 @@ Get comprehensive platform status information.
     "tokens_remaining": 985000,
     "budget_used": 0.15,
     "budget_remaining": 9.85,
-    "registered_methods": ["ping", "status", "chat.send", "chat.stream"],
+    "registered_methods": ["ping", "status", "chat", "chat.submit"],
     "bus_subscribers": 5
   }
 }
@@ -142,19 +142,26 @@ Get message bus statistics.
 
 ### Chat Methods
 
-#### `chat.send` - Send Message
+> `chat.send` and `chat.stream` were never registered handlers and have been
+> removed from this page; the live chat surface is `chat` (legacy blocking
+> proxy) and `chat.submit` (async ack + event delivery).
 
-Send a message and get immediate response.
+#### `chat` - Send Message (Legacy Sync Proxy)
+
+Blocking round-trip: forwards the request onto the bus as `chat.request` and
+waits for the matching `chat.response` (bounded by the chat proxy timeout).
+Deprecated in favour of `chat.submit` + `turn.terminal` events.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "chat.send",
+  "method": "chat",
   "id": 5,
   "params": {
     "message": "What's the weather like?",
     "session_id": "session-abc123",
+    "conversation_id": "conv-abc123",
     "agent_id": "chat"
   }
 }
@@ -166,76 +173,72 @@ Send a message and get immediate response.
   "jsonrpc": "2.0",
   "id": 5,
   "result": {
-    "response": "I don't have access to real-time weather data, but I can help you find weather APIs or build a weather application.",
-    "session_id": "session-abc123",
-    "agent_id": "chat",
-    "tokens_used": 45,
-    "tool_calls": 0
+    "reply": "I don't have access to real-time weather data, but I can help you find weather APIs or build a weather application.",
+    "conversation_id": "conv-abc123",
+    "session_id": "session-abc123"
   }
 }
 ```
 
-#### `chat.stream` - Streaming Response
+#### `chat.submit` - Submit Message (Async Turn)
 
-Send a message and receive streaming responses.
+Fire-and-forget submit: validates, publishes `chat.request` with a `turn_id`,
+and returns the ack immediately — it never waits for agent work. The result
+arrives later on the `turn.terminal` bus topic (via `bus.subscribe`/`bus.poll`
+or the WebSocket feed). There is no per-chunk RPC streaming; incremental
+progress comes from `agent_progress` events on those subscriptions.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "chat.stream",
+  "method": "chat.submit",
   "id": 6,
   "params": {
     "message": "Write a Go function to calculate Fibonacci",
     "session_id": "session-abc123",
-    "agent_id": "coder"
+    "agent_id": "coder",
+    "turn_id": "turn-optional-for-idempotent-retry"
   }
 }
 ```
 
-**Response (streaming):**
+**Response (ack):**
 ```json
 {
   "jsonrpc": "2.0",
   "id": 6,
   "result": {
-    "chunk": "Here's a Go function",
-    "complete": false
-  }
-}
-
-{
-  "jsonrpc": "2.0",
-  "id": 6,
-  "result": {
-    "chunk": " to calculate Fibonacci numbers",
-    "complete": false
-  }
-}
-
-{
-  "jsonrpc": "2.0",
-  "id": 6,
-  "result": {
-    "chunk": ":",
-    "complete": true,
-    "tokens_used": 120,
-    "tool_calls": 2
+    "turn_id": "turn-…",
+    "conversation_id": "conv-…",
+    "session_id": "session-abc123",
+    "accepted": true,
+    "note": ""
   }
 }
 ```
 
+Optional params: `conversation_id`, `source_client`, `model`, `parts`.
+Passing an already-seen `turn_id` is an idempotent retry: the same ack
+returns with `"accepted": true` and note `"turn already submitted; result
+arrives via turn.terminal"` — the work is never published twice.
+
 ### Session Methods
 
-#### `sessions.list` - List Sessions
+> The plural `sessions.list` / `sessions.create` / `sessions.attach` names on
+> this page were stale; the registered surface is singular `session.*`
+> (only `sessions.archive` / `sessions.designated` /
+> `sessions.designated_acknowledge` are plural).
 
-Get list of active sessions.
+#### `session.list` - List Sessions
+
+Get list of sessions. Optional params: `{"limit": 50}`.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "sessions.list",
+  "method": "session.list",
   "id": 7
 }
 ```
@@ -249,36 +252,40 @@ Get list of active sessions.
     "sessions": [
       {
         "id": "session-abc123",
+        "name": "refactor auth",
+        "conversation_id": "conv-abc123",
         "created_at": "2026-04-18T10:30:00Z",
         "last_activity": "2026-04-18T10:45:00Z",
-        "agent_id": "coder",
-        "message_count": 15
+        "attached_clients": ["tui-1"],
+        "project_id": "proj-1",
+        "project_path": "/Users/example/app"
       },
       {
         "id": "session-def456",
+        "name": "",
+        "conversation_id": "conv-def456",
         "created_at": "2026-04-18T09:15:00Z",
         "last_activity": "2026-04-18T09:20:00Z",
-        "agent_id": "chat",
-        "message_count": 3
+        "attached_clients": []
       }
-    ],
-    "count": 2
+    ]
   }
 }
 ```
 
-#### `sessions.create` - Create Session
+#### `session.create` - Create Session
 
-Create a new session.
+Create a new session. Params: `{"name": "...", "description": "...", "project_id": "...", "project_path": "...", "detection_context": {"cwd": "..."}, "no_fence": false}` — all optional. Project binding is per-session: explicit `project_id`/`project_path`, else the detection-context CWD resolved into a project, else the session stays unbound (never the global active project).
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "sessions.create",
+  "method": "session.create",
   "id": 8,
   "params": {
-    "agent_id": "coder"
+    "name": "refactor auth",
+    "detection_context": {"cwd": "/Users/example/app"}
   }
 }
 ```
@@ -289,54 +296,62 @@ Create a new session.
   "jsonrpc": "2.0",
   "id": 8,
   "result": {
-    "session_id": "session-ghi789",
-    "agent_id": "coder",
-    "created_at": "2026-04-18T11:00:00Z"
+    "id": "session-ghi789",
+    "name": "refactor auth",
+    "conversation_id": "conv-ghi789",
+    "created_at": "2026-04-18T11:00:00Z",
+    "last_activity": "2026-04-18T11:00:00Z",
+    "attached_clients": [],
+    "project_id": "proj-1",
+    "project_path": "/Users/example/app"
   }
 }
 ```
 
-#### `sessions.attach` - Attach to Session
+#### `session.attach` - Attach to Session
 
-Attach to an existing session.
+Attach a client to an existing session.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "sessions.attach",
+  "method": "session.attach",
   "id": 9,
   "params": {
-    "session_id": "session-abc123"
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 9,
-  "result": {
     "session_id": "session-abc123",
-    "agent_id": "coder",
-    "message_count": 15,
-    "last_message": "2026-04-18T10:45:00Z"
+    "client_id": "cli-1"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "result": {
+    "status": "attached"
   }
 }
 ```
 
 ### Job Methods
 
-#### `jobs.list` - List Jobs
+> The `jobs.*` names on this page were stale; the registered scheduler
+> surface is `scheduler.*` (`list_jobs`, `add_job`, `remove_job`, `get_job`,
+> `run_job`, `pause_job`, `resume_job`, `validate_schedule`, `status`).
 
-Get list of scheduled and running jobs.
+#### `scheduler.list_jobs` - List Jobs
+
+Get list of scheduled and running jobs. Optional params:
+`{"type": "shell", "tags": ["ops"], "enabled": true}` (filters).
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "jobs.list",
+  "method": "scheduler.list_jobs",
   "id": 10
 }
 ```
@@ -353,10 +368,11 @@ Get list of scheduled and running jobs.
         "name": "Daily backup",
         "type": "shell",
         "schedule": "0 2 * * *",
-        "status": "scheduled",
+        "enabled": true,
         "next_run": "2026-04-19T02:00:00Z",
         "last_run": "2026-04-18T02:00:00Z",
-        "created_at": "2026-04-15T10:00:00Z"
+        "run_count": 3,
+        "is_running": false
       }
     ],
     "count": 1
@@ -364,21 +380,24 @@ Get list of scheduled and running jobs.
 }
 ```
 
-#### `jobs.create` - Create Job
+#### `scheduler.add_job` - Create Job
 
-Create a new scheduled job.
+Create a new scheduled job. Params: `{"name", "type", "schedule", "enabled", "tags", "id"}` plus exactly one type-specific config — `agent_config` (`{"prompt", "context", "model", "agent_id", "max_tokens", "temperature"}`), `shell_config` (`{"command", "args", "work_dir", "env", "timeout", "capture_output"}`), or `reminder_config`. Job types: `agent`, `shell`, `reminder`, `optimization`, `security`, `learning`, `interval`.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "jobs.create",
+  "method": "scheduler.add_job",
   "id": 11,
   "params": {
     "name": "Health check",
     "schedule": "*/5 * * * *",
     "type": "agent",
-    "prompt": "Check system health and report any issues"
+    "enabled": true,
+    "agent_config": {
+      "prompt": "Check system health and report any issues"
+    }
   }
 }
 ```
@@ -390,22 +409,20 @@ Create a new scheduled job.
   "id": 11,
   "result": {
     "job_id": "job-456",
-    "name": "Health check",
-    "status": "scheduled",
     "next_run": "2026-04-18T11:05:00Z"
   }
 }
 ```
 
-#### `jobs.cancel` - Cancel Job
+#### `scheduler.remove_job` - Cancel Job
 
-Cancel a scheduled job.
+Remove (cancel) a scheduled job.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "jobs.cancel",
+  "method": "scheduler.remove_job",
   "id": 12,
   "params": {
     "job_id": "job-123"
@@ -419,29 +436,36 @@ Cancel a scheduled job.
   "jsonrpc": "2.0",
   "id": 12,
   "result": {
-    "job_id": "job-123",
-    "status": "cancelled"
+    "success": true,
+    "job_id": "job-123"
   }
 }
 ```
 
 ### Memory Methods
 
-#### `memory.search` - Search Memory
+> `memory.search` was stale; the registered search twin is `memory.query`
+> (plus `memory.recent` and `memory.vector.search`). `memory.store` was
+> stale; content storage is registered on the epistemic surface as
+> `memory.retainClaim` / `memory.retainDecision` / `memory.retainPrediction`.
 
-Search long-term memory.
+#### `memory.query` - Search Memory
+
+Search long-term memory. The bus consumer currently parses only
+`{"query": "...", "limit": 10}` (limit default 10; empty query or `"*"`
+returns recent memories). The richer `MemoryQuery` fields (`type`,
+`category`, `domain`, `min_relevance`, `match_any`, `prefix_terms`) exist on
+the internal search model, not all of them on this RPC path.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "memory.search",
+  "method": "memory.query",
   "id": 13,
   "params": {
     "query": "authentication patterns",
-    "type": "task",
-    "limit": 10,
-    "min_relevance": 0.3
+    "limit": 10
   }
 }
 ```
@@ -458,30 +482,34 @@ Search long-term memory.
         "content": "We implemented JWT authentication middleware",
         "type": "task",
         "category": "code",
-        "relevance": 0.85,
-        "source": "fts5"
+        "relevance_score": 0.85,
+        "created_at": "2026-04-18T10:00:00Z",
+        "source": "task:code"
       }
     ],
-    "count": 1,
-    "query": "authentication patterns"
+    "count": 1
   }
 }
 ```
 
-#### `memory.store` - Store Memory
+#### `memory.retainClaim` - Store Memory (Epistemic Claim)
 
-Store information in long-term memory.
+Store a claim in long-term memory. Params:
+`{"text", "premises", "source", "confidence", "tags"}`. Related:
+`memory.retainDecision` (`{"call", "alternatives", "expected_outcome", "review_at", "premises"}`)
+and `memory.retainPrediction` (`{"forecast", "horizon", "related_decision"}`).
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "memory.store",
+  "method": "memory.retainClaim",
   "id": 14,
   "params": {
-    "content": "User prefers concise responses",
-    "type": "episodic",
-    "category": "preferences"
+    "text": "User prefers concise responses",
+    "source": "observation",
+    "confidence": 0.9,
+    "tags": ["preferences"]
   }
 }
 ```
@@ -492,25 +520,30 @@ Store information in long-term memory.
   "jsonrpc": "2.0",
   "id": 14,
   "result": {
-    "success": true,
-    "memory_id": "mem-def456",
-    "type": "episodic",
-    "category": "preferences"
+    "id": "mem-def456"
   }
 }
 ```
 
 ### Task Methods
 
-#### `tasks.list` - List Tasks
+> The plural `tasks.*` names on this page were stale; the registered surface
+> is singular `task.*` (`create`, `get`, `list`, `list_extended`, `update`,
+> `cancel`, `delete`, `link`, `unlink`, `steps`, plus direct `task.approve` /
+> `task.reject` / `task.amend.submit`). Task status lives in the `state`
+> field (pending, planning, awaiting_approval, executing, testing, completed,
+> failed, rejected, cancelled).
 
-Get list of background tasks.
+#### `task.list` - List Tasks
+
+Get list of background tasks. Optional params:
+`{"state": "executing", "limit": 100}` (limit default 100).
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "tasks.list",
+  "method": "task.list",
   "id": 15
 }
 ```
@@ -526,64 +559,66 @@ Get list of background tasks.
         "id": "task-123",
         "name": "Fix authentication bug",
         "description": "JWT validation failing for expired tokens",
-        "status": "in_progress",
+        "state": "executing",
         "assigned_agent": "coder",
         "created_at": "2026-04-18T09:00:00Z",
-        "updated_at": "2026-04-18T10:30:00Z"
+        "updated_at": "2026-04-18T10:30:00Z",
+        "total_jobs": 3,
+        "completed_jobs": 1,
+        "failed_jobs": 0
       }
-    ],
-    "count": 1
+    ]
   }
 }
 ```
 
-#### `tasks.create` - Create Task
+#### `task.create` - Create Task
 
-Create a new background task.
+Create a new background task. Params: `{"name", "description"}` only — the
+registry returns the full task object.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "tasks.create",
+  "method": "task.create",
   "id": 16,
   "params": {
+    "name": "Implement rate limiting",
+    "description": "Add rate limiting middleware to API"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "result": {
+    "id": "task-456",
     "name": "Implement rate limiting",
     "description": "Add rate limiting middleware to API",
-    "agent_id": "coder"
+    "state": "pending",
+    "created_at": "2026-04-18T11:00:00Z",
+    "updated_at": "2026-04-18T11:00:00Z"
   }
 }
 ```
 
-**Response:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 16,
-  "result": {
-    "task_id": "task-456",
-    "name": "Implement rate limiting",
-    "status": "pending",
-    "assigned_agent": "coder",
-    "created_at": "2026-04-18T11:00:00Z"
-  }
-}
-```
+#### `task.update` - Update Task
 
-#### `tasks.update` - Update Task
-
-Update task status or properties.
+Update task properties. Params: `{"id", "name", "description", "state", "project_dir"}` — `id` selects the task; there is no notes field.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "tasks.update",
+  "method": "task.update",
   "id": 17,
   "params": {
-    "task_id": "task-123",
-    "status": "completed",
-    "notes": "Fixed by updating token expiration check"
+    "id": "task-123",
+    "state": "completed"
   }
 }
 ```
@@ -594,14 +629,14 @@ Update task status or properties.
   "jsonrpc": "2.0",
   "id": 17,
   "result": {
-    "task_id": "task-123",
-    "status": "completed",
+    "id": "task-123",
+    "state": "completed",
     "updated_at": "2026-04-18T11:15:00Z"
   }
 }
 ```
 
-#### `tasks.get` - Get Task
+#### `task.get` - Get Task
 
 Get detailed task information.
 
@@ -609,10 +644,10 @@ Get detailed task information.
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "tasks.get",
+  "method": "task.get",
   "id": 18,
   "params": {
-    "task_id": "task-123"
+    "id": "task-123"
   }
 }
 ```
@@ -626,12 +661,15 @@ Get detailed task information.
     "id": "task-123",
     "name": "Fix authentication bug",
     "description": "JWT validation failing for expired tokens",
-    "status": "completed",
+    "state": "completed",
+    "project_dir": "/Users/example/app",
     "assigned_agent": "coder",
     "created_at": "2026-04-18T09:00:00Z",
     "updated_at": "2026-04-18T11:15:00Z",
-    "completed_at": "2026-04-18T11:15:00Z",
-    "notes": "Fixed by updating token expiration check"
+    "goal_id": "goal-1",
+    "total_jobs": 3,
+    "completed_jobs": 3,
+    "failed_jobs": 0
   }
 }
 ```
@@ -740,11 +778,7 @@ See [Routing decisions](../workflows/routing-decisions.md).
   "id": 999,
   "error": {
     "code": -32601,
-    "message": "Method not found",
-    "data": {
-      "method": "invalid.method",
-      "available_methods": ["ping", "status", "chat.send"]
-    }
+    "message": "method not found: invalid.method"
   }
 }
 ```
