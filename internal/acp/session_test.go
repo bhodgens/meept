@@ -289,10 +289,16 @@ func decisionHarnessSession(t *testing.T, cfg SessionConfig) (*Session, *io.Pipe
 // with the given raw params (or a default sessionId payload when empty).
 func sendPermissionRequest(t *testing.T, toClient io.Writer, params string) {
 	t.Helper()
+	sendPermissionRequestID(t, toClient, 7, params)
+}
+
+// sendPermissionRequestID writes one inbound session/requestPermission frame
+// with an explicit JSON-RPC id (multi-request pins correlate replies by id).
+func sendPermissionRequestID(t *testing.T, toClient io.Writer, id int64, params string) {
+	t.Helper()
 	if params == "" {
 		params = `{"sessionId":"sess-h","toolCall":{"title":"rm -rf scratch"}}`
 	}
-	id := int64(7)
 	msg := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      id,
@@ -1155,5 +1161,323 @@ func TestSession_PermissionLanesUnchanged(t *testing.T) {
 				t.Fatalf("non-decision lanes must not emit permission_decision, got %q", got)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Head-of-line blocking fix: permission waits must not block the read loop
+// ---------------------------------------------------------------------------
+
+// TestSession_PermissionWaitDoesNotBlockUpdates is the head-of-line pin:
+// while a human-relay permission request is unresolved (the relay wait
+// would formerly block Transport.Serve for up to relay_timeout), a burst
+// of session/update notifications must still be read and delivered, and
+// the permission reply must still arrive correctly after Resolve.
+func TestSession_PermissionWaitDoesNotBlockUpdates(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 30*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if reqEv.Text == "" {
+		t.Fatal("permission_requested event must carry the pending id")
+	}
+
+	// Burst of session/update notifications while the permission is
+	// unresolved. The old synchronous dispatch never read these: the read
+	// loop sat inside relayPermissionWait.
+	const burst = 25
+	enc := json.NewEncoder(toClient)
+	for i := range burst {
+		chunk, err := json.Marshal(map[string]any{
+			"sessionId": "sess-h",
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"content":       map[string]string{"type": "text", "text": fmt.Sprintf("chunk-%d ", i)},
+			},
+		})
+		if err != nil {
+			t.Fatalf("marshal chunk %d: %v", i, err)
+		}
+		notif := Notification{JSONRPC: "2.0", Method: MethodSessionUpdate, Params: chunk}
+		if err := enc.Encode(notif); err != nil {
+			t.Fatalf("write update %d: %v", i, err)
+		}
+	}
+
+	// All chunks must be delivered WITHOUT resolving the permission.
+	deadline := time.After(5 * time.Second)
+	got := 0
+	for got < burst {
+		select {
+		case ev := <-s.events:
+			if ev.Kind == "message_chunk" {
+				got++
+			}
+		case <-deadline:
+			t.Fatalf("only %d/%d session/update chunks delivered while permission pending — read loop blocked", got, burst)
+		}
+	}
+
+	// No reply frame may have been written yet (permission still open),
+	// and after Resolve the SAME reader gets the reply — one decoder on
+	// the pipe, so no frame can be lost to a competing reader.
+	type peek struct {
+		resp Response
+		err  error
+	}
+	peekCh := make(chan peek, 1)
+	go func() {
+		var resp Response
+		peekCh <- peek{resp, json.NewDecoder(fromClient).Decode(&resp)}
+	}()
+	select {
+	case p := <-peekCh:
+		if p.err == nil {
+			t.Fatalf("reply frame written before resolve: %+v", p.resp)
+		}
+		t.Fatalf("reply reader failed before resolve: %v", p.err)
+	case <-time.After(200 * time.Millisecond):
+		// expected: nothing written yet; the goroutine stays blocked on
+		// the pipe and will deliver the post-resolve reply below.
+	}
+
+	// Now resolve: the reply must still arrive correctly, correlated by id.
+	if err := rl.Resolve(reqEv.Text, "allow"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	var resp Response
+	select {
+	case p := <-peekCh:
+		if p.err != nil {
+			t.Fatalf("read reply frame: %v", p.err)
+		}
+		resp = p.resp
+	case <-time.After(5 * time.Second):
+		t.Fatal("no reply frame within 5s of resolve")
+	}
+	if resp.ID != 7 {
+		t.Fatalf("reply id = %d, want 7 (JSON-RPC correlation)", resp.ID)
+	}
+	if outcome, optionID := outcomeOf(t, resp); outcome != "selected" || optionID != "allow-once" {
+		t.Fatalf("reply outcome = %q/%q, want selected/allow-once", outcome, optionID)
+	}
+}
+
+// TestSession_SecondPermissionWhileFirstPending proves a second
+// session/requestPermission arriving while the first is still waiting is
+// handled, not dropped: both register as pendings and both get replies
+// correlated to their own ids.
+func TestSession_SecondPermissionWhileFirstPending(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 30*time.Second))
+
+	sendPermissionRequestID(t, toClient, 11, `{"sessionId":"sess-h","toolCall":{"title":"first"}}`)
+	first := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	sendPermissionRequestID(t, toClient, 12, `{"sessionId":"sess-h","toolCall":{"title":"second"}}`)
+	second := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if first.Text == second.Text {
+		t.Fatalf("second permission request reused the first pending id %q", first.Text)
+	}
+	if got := len(rl.Pending()); got != 2 {
+		t.Fatalf("Pending = %d, want 2 (second request must not be dropped)", got)
+	}
+
+	if err := rl.Resolve(second.Text, "allow"); err != nil {
+		t.Fatalf("Resolve second: %v", err)
+	}
+	if err := rl.Resolve(first.Text, "deny"); err != nil {
+		t.Fatalf("Resolve first: %v", err)
+	}
+
+	// Both replies arrive (order free — JSON-RPC correlates by id).
+	seen := map[int64]string{}
+	for range 2 {
+		resp := readReplyFrame(t, fromClient)
+		outcome, _ := outcomeOf(t, resp)
+		seen[resp.ID] = outcome
+	}
+	if seen[11] != "cancelled" {
+		t.Fatalf("reply for id 11 = %q, want cancelled (deny)", seen[11])
+	}
+	if seen[12] != "selected" {
+		t.Fatalf("reply for id 12 = %q, want selected (allow)", seen[12])
+	}
+}
+
+// TestTransport_CloseCancelsPermissionWait: closing the transport ends an
+// in-flight human relay wait instead of letting the goroutine linger for
+// the full relay timeout.
+func TestTransport_CloseCancelsPermissionWait(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, _, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 5*time.Minute))
+
+	sendPermissionRequest(t, toClient, "")
+	waitForEvent(t, s, "permission_requested", 5*time.Second)
+
+	start := time.Now()
+	if err := s.tr.Close(); err != nil {
+		t.Logf("close: %v", err)
+	}
+	// The wait must exit promptly with a fail-closed deny.
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev := <-s.events:
+			if ev.Kind == "permission_resolved" {
+				if ev.Text != relayDecisionDeny {
+					t.Fatalf("permission_resolved text = %q, want deny on close", ev.Text)
+				}
+				if d := time.Since(start); d > 3*time.Second {
+					t.Fatalf("relay wait took %v to notice Close", d)
+				}
+				if got := len(rl.Pending()); got != 0 {
+					t.Fatalf("pending registry after close = %d, want 0", got)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("Close did not cancel the in-flight relay wait within 3s")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Offered-option resolution (item 2): allow replies must name an optionId
+// the agent actually offered.
+// ---------------------------------------------------------------------------
+
+func TestResolveAllowOptionID(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params string
+		want   string
+	}{
+		{"no options -> legacy literal", `{"sessionId":"s"}`, "allow-once"},
+		{"empty params -> legacy literal", ``, "allow-once"},
+		{"kind allow_once wins", `{"sessionId":"s","options":[{"optionId":"deny-it","name":"Reject","kind":"reject_once"},{"optionId":"custom-yes","name":"Proceed","kind":"allow_once"}]}`, "custom-yes"},
+		{"kind containing allow", `{"sessionId":"s","options":[{"optionId":"nope","name":"No","kind":"reject_once"},{"optionId":"go","name":"Go","kind":"allow_always"}]}`, "go"},
+		{"name fallback allow once", `{"sessionId":"s","options":[{"optionId":"r","name":"Reject","kind":"reject_once"},{"optionId":"a1","name":"Allow Once","kind":"other"}]}`, "a1"},
+		{"name fallback allow", `{"sessionId":"s","options":[{"optionId":"opt-a","name":"Allow","kind":""}]}`, "opt-a"},
+		{"no match -> legacy literal", `{"sessionId":"s","options":[{"optionId":"x","name":"Something","kind":"weird"}]}`, "allow-once"},
+		{"empty optionId skipped", `{"sessionId":"s","options":[{"optionId":"","name":"Allow","kind":"allow_once"},{"optionId":"real","name":"Allow","kind":"allow_once"}]}`, "real"},
+		{"malformed params -> legacy literal", `{not json`, "allow-once"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveAllowOptionID([]byte(tc.params)); got != tc.want {
+				t.Fatalf("resolveAllowOptionID(%s) = %q, want %q", tc.params, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSession_PermissionAllowUsesOfferedOptionID: an agent offering custom
+// option ids gets a reply naming the offered allow-once id — on the
+// permissive, human-relay, and decision lanes.
+func TestSession_PermissionAllowUsesOfferedOptionID(t *testing.T) {
+	params := `{"sessionId":"sess-h","toolCall":{"title":"rm -rf scratch"},"options":[` +
+		`{"optionId":"reject-once","name":"Reject","kind":"reject_once"},` +
+		`{"optionId":"my-allow","name":"Proceed once","kind":"allow_once"}]}`
+
+	t.Run("permissive lane", func(t *testing.T) {
+		s, fromClient, toClient := decisionHarnessSession(t, SessionConfig{
+			AgentID:        "lane",
+			PermissionMode: "permissive",
+		})
+		sendPermissionRequest(t, toClient, params)
+		resp := readReplyFrame(t, fromClient)
+		if outcome, optionID := outcomeOf(t, resp); outcome != "selected" || optionID != "my-allow" {
+			t.Fatalf("reply = %q/%q, want selected/my-allow", outcome, optionID)
+		}
+		drainEvents(s)
+	})
+
+	t.Run("human relay lane", func(t *testing.T) {
+		rl := NewRelay()
+		notif := &stubNotifier{listener: true}
+		s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 5*time.Second))
+		sendPermissionRequest(t, toClient, params)
+		reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+		if err := rl.Resolve(reqEv.Text, "allow"); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		resp := readReplyFrame(t, fromClient)
+		if outcome, optionID := outcomeOf(t, resp); outcome != "selected" || optionID != "my-allow" {
+			t.Fatalf("reply = %q/%q, want selected/my-allow", outcome, optionID)
+		}
+	})
+
+	t.Run("decision lane", func(t *testing.T) {
+		stub := &stubDecisioner{available: true, res: allowResult(1.0)}
+		s, fromClient, toClient := decisionHarnessSession(t, decisionCfg(stub, 0.5))
+		sendPermissionRequest(t, toClient, params)
+		resp := readReplyFrame(t, fromClient)
+		if outcome, optionID := outcomeOf(t, resp); outcome != "selected" || optionID != "my-allow" {
+			t.Fatalf("reply = %q/%q, want selected/my-allow", outcome, optionID)
+		}
+		drainEvents(s)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Item 5: s.sessionID data race — an agent may emit session/requestPermission
+// before session/new's reply lands (Start writes the id after Serve starts).
+// Run under -race. The stub agent (mode earlyperm) writes requestPermission
+// BEFORE replying to session/new, so the human-relay lane reads the session
+// id concurrently with Start's write.
+// ---------------------------------------------------------------------------
+
+func TestSession_EarlyPermissionNoSessionIDRace(t *testing.T) {
+	bin := fakeAgentBin(t)
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	s, err := Start(ctx, SessionConfig{
+		AgentID:        "earlyperm",
+		Command:        []string{bin, "-mode", "earlyperm"},
+		Cwd:            t.TempDir(),
+		DialTimeout:    30 * time.Second,
+		CallTimeout:    20 * time.Second,
+		PermissionMode: "human",
+		Relay:          rl,
+		Notifier:       notif,
+		RelayTimeout:   20 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Logf("close: %v", err)
+		}
+	})
+
+	// The early permission request registers before Start returns; answer
+	// every pending so the agent finishes its turn.
+	deadline := time.After(20 * time.Second)
+	for {
+		pendings := rl.Pending()
+		if len(pendings) > 0 {
+			for _, p := range pendings {
+				if err := rl.Resolve(p.ID, "allow"); err != nil && !errors.Is(err, ErrRelayAnswered) {
+					t.Logf("resolve %s: %v", p.ID, err)
+				}
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("early permission request never registered")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	// The surfaced SessionID must be the one Start eventually set — read
+	// through the same guarded path the race detector watches.
+	if got := s.getSessionID(); got != "sess-fake" {
+		t.Fatalf("sessionID = %q, want sess-fake", got)
 	}
 }

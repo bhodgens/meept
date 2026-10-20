@@ -167,7 +167,10 @@ func Start(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	if newRes.SessionID == "" {
 		newRes.SessionID = id.Generate("sess")
 	}
-	s.sessionID = newRes.SessionID
+	// Written under s.mu: the Serve goroutine (launched above) reads the
+	// session id in relayPermissionWait, and an agent may emit
+	// session/requestPermission before session/new replies land here.
+	s.setSessionID(newRes.SessionID)
 	s.setState(StateReady)
 	return s, nil
 }
@@ -198,6 +201,23 @@ func (s *Session) setState(st SessionState) {
 	s.mu.Lock()
 	s.state = st
 	s.mu.Unlock()
+}
+
+// setSessionID records the session id under s.mu. Start launches the
+// Serve goroutine before the session/new reply lands, and the permission
+// lanes (relayPermissionWait) read the id from that goroutine — an
+// unguarded write races an early session/requestPermission.
+func (s *Session) setSessionID(id string) {
+	s.mu.Lock()
+	s.sessionID = id
+	s.mu.Unlock()
+}
+
+// getSessionID returns the session id under s.mu (see setSessionID).
+func (s *Session) getSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionID
 }
 
 // Events returns the buffered event stream. Full buffer drops oldest.
@@ -243,7 +263,7 @@ func (s *Session) Send(ctx context.Context, text string) (string, error) {
 		StopReason string `json:"stopReason"`
 	}
 	err := s.tr.Call(callCtx, MethodSessionPrompt, map[string]any{
-		"sessionId": s.sessionID,
+		"sessionId": s.getSessionID(),
 		"prompt":    []map[string]string{{"type": "text", "text": text}},
 	}, &res)
 	if err != nil {
@@ -267,7 +287,7 @@ func (s *Session) Cancel() error {
 		return nil
 	}
 	if err := s.tr.Notify(MethodSessionCancel, map[string]any{
-		"sessionId": s.sessionID,
+		"sessionId": s.getSessionID(),
 	}); err != nil {
 		return fmt.Errorf("acp: cancel %s: %w", s.cfg.AgentID, err)
 	}
@@ -342,6 +362,82 @@ func (s *Session) onNotice(n Notification) {
 	}
 }
 
+// defaultAllowOptionID is the fallback optionId for allow replies when the
+// agent offered no options (or none that looks like allow-once). It is the
+// id the v1 lanes hardcoded; keeping it preserves today's behavior for
+// agents that don't send an options list.
+const defaultAllowOptionID = "allow-once"
+
+// permissionOption is one entry of the ACP requestPermission params'
+// options array (PermissionOption: optionId + name + kind).
+type permissionOption struct {
+	OptionID string `json:"optionId"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+}
+
+// resolveAllowOptionID picks the optionId of the allow-once option the
+// agent actually offered, falling back to defaultAllowOptionID when no
+// options are present or none matches. ACP agents are free to choose
+// their own ids; replying with an id the agent never offered names a
+// nonexistent option. Matching: kind "allow_once" first (the ACP spec
+// token), then a kind containing "allow", then a name that is exactly
+// (case-insensitive) one of the allow-once phrasings.
+func resolveAllowOptionID(rawParams []byte) string {
+	if len(rawParams) == 0 {
+		return defaultAllowOptionID
+	}
+	var p struct {
+		Options []permissionOption `json:"options"`
+	}
+	if err := json.Unmarshal(rawParams, &p); err != nil || len(p.Options) == 0 {
+		return defaultAllowOptionID
+	}
+	fallback := defaultAllowOptionID
+	for _, o := range p.Options {
+		if o.OptionID == "" {
+			continue
+		}
+		switch {
+		case o.Kind == "allow_once":
+			return o.OptionID
+		case fallback == defaultAllowOptionID &&
+			strings.Contains(strings.ToLower(o.Kind), "allow"):
+			fallback = o.OptionID
+		}
+	}
+	if fallback != defaultAllowOptionID {
+		return fallback
+	}
+	for _, o := range p.Options {
+		if o.OptionID == "" {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(o.Name)) {
+		case "allow once", "allow-once", "allow", "yes":
+			return o.OptionID
+		}
+	}
+	return defaultAllowOptionID
+}
+
+// allowOutcomeResult builds the ACP "selected" reply for one permission request,
+// naming an optionId the agent actually offered (falling back to the
+// legacy "allow-once" literal when nothing matches). Shared by the
+// permissive lane, the relay outcome reply, and the decision lane.
+func allowOutcomeResult(rawParams []byte) map[string]any {
+	return map[string]any{
+		"outcome": map[string]any{"outcome": "selected", "optionId": resolveAllowOptionID(rawParams)},
+	}
+}
+
+// cancelledResult builds the ACP "cancelled" reply (fail-closed deny).
+func cancelledResult() map[string]any {
+	return map[string]any{
+		"outcome": map[string]any{"outcome": "cancelled"},
+	}
+}
+
 func (s *Session) handlePermission(n Notification) {
 	mode := s.cfg.PermissionMode
 	if mode == "decision" {
@@ -359,13 +455,9 @@ func (s *Session) handlePermission(n Notification) {
 	var result any
 	if approved {
 		kind = "approved"
-		result = map[string]any{
-			"outcome": map[string]any{"outcome": "selected", "optionId": "allow-once"},
-		}
+		result = allowOutcomeResult(n.Params)
 	} else {
-		result = map[string]any{
-			"outcome": map[string]any{"outcome": "cancelled"},
-		}
+		result = cancelledResult()
 	}
 	s.emit(SessionEvent{Kind: "permission_request", Text: kind})
 	if err := s.tr.Reply(*n.ID, result, nil); err != nil {
@@ -374,10 +466,11 @@ func (s *Session) handlePermission(n Notification) {
 }
 
 // handlePermissionHuman is the fail-CLOSED human relay lane (Contract B).
-// Like the decision lane it runs on the Transport Serve goroutine, reads
-// s.cfg (immutable after Start) without s.mu, and NEVER holds s.mu across
-// the relay wait or the notifier calls (mutexio). Missing seams cancel
-// immediately — the pin mirrors TestSession_DecisionNilDecisionerDenies.
+// Like the decision lane it runs on a dedicated permission goroutine
+// (Transport.dispatchPermission, head-of-line fix), reads s.cfg (immutable
+// after Start) without s.mu, and NEVER holds s.mu across the relay wait
+// or the notifier calls (mutexio). Missing seams cancel immediately — the
+// pin mirrors TestSession_DecisionNilDecisionerDenies.
 func (s *Session) handlePermissionHuman(n Notification) {
 	if s.cfg.Relay == nil || s.cfg.Notifier == nil {
 		slog.Default().Warn("acp permission denied: human relay not wired",
@@ -394,18 +487,14 @@ func (s *Session) handlePermissionHuman(n Notification) {
 }
 
 // replyPermissionOutcome writes the ACP reply frame for one permission
-// request: allow -> selected/allow-once, otherwise cancelled (v1 has no
-// "always" verb; frozen by master.md user decisions).
+// request: allow -> selected/<offered allow-once optionId>, otherwise
+// cancelled (v1 has no "always" verb; frozen by master.md user decisions).
 func (s *Session) replyPermissionOutcome(n Notification, allow bool) {
 	var result any
 	if allow {
-		result = map[string]any{
-			"outcome": map[string]any{"outcome": "selected", "optionId": "allow-once"},
-		}
+		result = allowOutcomeResult(n.Params)
 	} else {
-		result = map[string]any{
-			"outcome": map[string]any{"outcome": "cancelled"},
-		}
+		result = cancelledResult()
 	}
 	if err := s.tr.Reply(*n.ID, result, nil); err != nil {
 		s.emit(SessionEvent{Kind: "error", Text: err.Error()})
@@ -413,12 +502,21 @@ func (s *Session) replyPermissionOutcome(n Notification, allow bool) {
 }
 
 // handlePermissionDecision is the fail-CLOSED decision lane (Contract B).
-// Runs on the Transport Serve goroutine: s.cfg is immutable after Start, so
-// its fields are read without s.mu — and s.mu is NEVER held across Ask
-// (mutexio). handlePermission has no caller context, so the Ask is bounded
-// by decisionAskTimeout off context.Background().
+// Runs on a dedicated permission goroutine (Transport.dispatchPermission,
+// head-of-line fix): s.cfg is immutable after Start, so its fields are
+// read without s.mu — and s.mu is NEVER held across Ask (mutexio).
+// handlePermission has no caller context, so the Ask is bounded by
+// decisionAskTimeout off the transport's ServeContext (Close cancels it).
 func (s *Session) handlePermissionDecision(n Notification) {
-	askCtx, cancel := context.WithTimeout(context.Background(), decisionAskTimeout)
+	// Derive the bounded Ask context from the transport lifetime so a
+	// Transport Close cancels an in-flight decision wait (head-of-line
+	// fix: permission handlers run on their own goroutine and must not
+	// outlive the transport).
+	base := context.Background()
+	if s.tr != nil {
+		base = s.tr.ServeContext()
+	}
+	askCtx, cancel := context.WithTimeout(base, decisionAskTimeout)
 	defer cancel()
 	outcome := decidePermission(askCtx, s.cfg.Decision, s.cfg.DecisionThreshold,
 		renderDecisionState(s.cfg.AgentID, n.Params))
@@ -449,13 +547,9 @@ func (s *Session) handlePermissionDecision(n Notification) {
 		s.handleDecisionEscalation(n, outcome)
 		return
 	}
-	result := map[string]any{
-		"outcome": map[string]any{"outcome": "cancelled"},
-	}
+	result := cancelledResult()
 	if outcome.allow {
-		result = map[string]any{
-			"outcome": map[string]any{"outcome": "selected", "optionId": "allow-once"},
-		}
+		result = allowOutcomeResult(n.Params)
 	}
 	// The permission_request event stays; on this lane only it carries the
 	// decision text instead of the hardcoded approved/denied (Contract B).

@@ -76,7 +76,26 @@ func main() {
 				"agentInfo":       map[string]string{"name": "fakeagent"},
 			})
 		case "session/new":
+			if *mode == "earlyperm" {
+				// Item-5 race pin: emit session/requestPermission BEFORE
+				// replying to session/new, so the permission goroutine
+				// reads s.sessionID concurrently with Start's write.
+				permID := int64(99002)
+				write(msg{
+					JSONRPC: "2.0",
+					ID:      &permID,
+					Method:  "session/requestPermission",
+					Params:  json.RawMessage(`{"sessionId":"sess-fake"}`),
+				})
+			}
 			reply(m.ID, map[string]any{"sessionId": sessionID})
+			if *mode == "earlyperm" {
+				// Consume the permission reply frame whenever it lands.
+				var replyMsg msg
+				if err := dec.Decode(&replyMsg); err != nil {
+					return
+				}
+			}
 		case "session/prompt":
 			if *mode == "slow" {
 				time.Sleep(5 * time.Second)

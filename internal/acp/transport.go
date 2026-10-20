@@ -26,6 +26,13 @@ type wireMessage struct {
 	Error   *RPCError       `json:"error,omitempty"`
 }
 
+// maxConcurrentPermissionDispatch bounds the per-transport permission
+// goroutines: session/requestPermission handlers can block for the full
+// relay/decision timeout, so they run off the read loop but never
+// unbounded. At the cap a new request is handled INLINE (never dropped) —
+// pathological, and the fail-closed lanes bound every wait anyway.
+const maxConcurrentPermissionDispatch = 32
+
 // Transport is a newline-delimited JSON-RPC 2.0 client over an io pair.
 type Transport struct {
 	in  io.Reader
@@ -38,15 +45,45 @@ type Transport struct {
 	nextID   int64
 	pending  map[int64]chan callResult
 	handlers []func(Notification)
+
+	// ctx is cancelled by Close; permission goroutines and the session's
+	// bounded waits derive cancellation from it (ServeContext/Done).
+	ctx    context.Context
+	cancel context.CancelFunc
+	// permSem caps concurrent session/requestPermission dispatch
+	// goroutines (head-of-line blocking fix: a permission wait must never
+	// block the read loop, or the agent's stdout pipe can back-pressure
+	// the agent process).
+	permSem chan struct{}
 }
 
 // NewTransport returns a Transport that reads from in and writes to out.
 func NewTransport(in io.Reader, out io.Writer) *Transport {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Transport{
 		in:      in,
 		out:     out,
 		pending: make(map[int64]chan callResult),
+		ctx:     ctx,
+		cancel:  cancel,
+		permSem: make(chan struct{}, maxConcurrentPermissionDispatch),
 	}
+}
+
+// ServeContext returns a context cancelled when the Transport is closed.
+// Permission-lane waits (decision Ask, relay wait) derive from it so
+// Close cancels in-flight permission handling.
+func (t *Transport) ServeContext() context.Context {
+	if t == nil || t.ctx == nil {
+		return context.Background()
+	}
+	return t.ctx
+}
+
+// Done is closed when the Transport is closed (ServeContext().Done()
+// shorthand for select sites).
+func (t *Transport) Done() <-chan struct{} {
+	return t.ServeContext().Done()
 }
 
 // Call sends a JSON-RPC request and waits for the matching response.
@@ -182,6 +219,11 @@ func (t *Transport) Close() error {
 	in, out := t.in, t.out
 	t.mu.Unlock()
 
+	// Cancel in-flight permission goroutines (ServeContext consumers).
+	if t.cancel != nil {
+		t.cancel()
+	}
+
 	var inErr, outErr error
 	if c, ok := in.(io.Closer); ok {
 		inErr = c.Close()
@@ -213,6 +255,36 @@ func (t *Transport) dropPending(id int64) {
 	t.mu.Unlock()
 }
 
+// dispatchPermission runs the handlers for one inbound
+// session/requestPermission request on its own goroutine, bounded by
+// permSem (maxConcurrentPermissionDispatch). At the cap the request is
+// handled INLINE on the read loop — slow but never dropped (fail-closed
+// lanes bound every wait, so the inline path cannot wedge forever).
+// Goroutines exit when the transport is closed: handlers derive their
+// bounded waits from ServeContext (see relayPermissionWait /
+// handlePermissionDecision).
+func (t *Transport) dispatchPermission(n Notification, handlers []func(Notification)) {
+	t.mu.Lock()
+	closed := t.closed
+	t.mu.Unlock()
+	if closed {
+		return
+	}
+	select {
+	case t.permSem <- struct{}{}:
+		go func() {
+			defer func() { <-t.permSem }()
+			for _, h := range handlers {
+				h(n)
+			}
+		}()
+	default:
+		for _, h := range handlers {
+			h(n)
+		}
+	}
+}
+
 func (t *Transport) dispatch(msg wireMessage) {
 	if msg.Method != "" {
 		n := Notification{
@@ -225,6 +297,17 @@ func (t *Transport) dispatch(msg wireMessage) {
 		handlers := make([]func(Notification), len(t.handlers))
 		copy(handlers, t.handlers)
 		t.mu.Unlock()
+		// Head-of-line blocking fix: session/requestPermission handlers
+		// can block for the relay/decision timeout (up to 120s), and the
+		// read loop must keep draining inbound frames while one waits —
+		// otherwise the agent's stdout pipe fills and back-pressures the
+		// agent process. JSON-RPC replies correlate by id, so permission
+		// replies may arrive out of order; everything else stays inline
+		// and ordered.
+		if n.Method == MethodSessionRequestPermission && n.ID != nil {
+			t.dispatchPermission(n, handlers)
+			return
+		}
 		for _, h := range handlers {
 			h(n)
 		}

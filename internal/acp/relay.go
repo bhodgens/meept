@@ -72,8 +72,8 @@ const (
 )
 
 // PermissionNotifier is the daemon-side publish seam for the relay lane.
-// Implementations must not block: calls run on the Transport Serve
-// goroutine with NO session lock held (mutexio).
+// Implementations must not block: calls run on a permission goroutine
+// (Transport.dispatchPermission) with NO session lock held (mutexio).
 type PermissionNotifier interface {
 	// NotifyPermissionRequested publishes the pending record. It returns
 	// false when no consumer is listening — the caller STILL waits for a
@@ -237,14 +237,15 @@ type relayVerdict struct {
 // relayPermissionWait runs the Contract B human wait for one request and
 // is the SINGLE code path shared by the "human" lane and the
 // decision-lane escalation (leaf 02 task 3). It NEVER holds s.mu and
-// calls the notifier with no locks held (mutexio); like the parent
-// decision lane it runs on the Transport Serve goroutine and reads
-// s.cfg, which is immutable after Start.
+// calls the notifier with no locks held (mutexio); it runs on a dedicated
+// permission goroutine (Transport.dispatchPermission) and reads s.cfg,
+// which is immutable after Start. A Transport Close ends the wait early
+// (fail-closed deny) via the ServeContext lifetime channel.
 func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerdict {
 	p := PendingPermission{
 		ID:        id.Generate("perm"),
 		AgentID:   s.cfg.AgentID,
-		SessionID: s.sessionID,
+		SessionID: s.getSessionID(),
 		RequestID: requestID,
 		// Reuse the decision lane's bounded render (drift 2) — one
 		// 300-rune budget, not two.
@@ -280,13 +281,21 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 	if wait <= 0 {
 		wait = defaultRelayTimeout
 	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	// closed is the transport-lifetime channel: Close cancels it so an
+	// in-flight human wait exits instead of lingering for the full relay
+	// timeout (the reply could not be written anyway). nil-safe: a bare
+	// Done() on a nil transport would panic, but the harness and Start
+	// always set s.tr; the nil receiver is handled inside Transport.Done.
+	closed := s.tr.Done()
 	select {
 	case d := <-ch:
 		s.cfg.Relay.remove(p.ID)
 		s.emit(SessionEvent{Kind: "permission_resolved", Text: d.text})
 		s.cfg.Notifier.NotifyPermissionResolved(p, d.text, relayReasonAnswer)
 		return relayVerdict{allow: d.allow, text: d.text}
-	case <-time.After(wait):
+	case <-timer.C:
 		s.cfg.Relay.remove(p.ID)
 		slog.Default().Warn("acp permission denied: human relay timed out",
 			"component", "acp",
@@ -296,5 +305,16 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 		s.emit(SessionEvent{Kind: "permission_resolved", Text: relayTextTimeout})
 		s.cfg.Notifier.NotifyPermissionResolved(p, relayDecisionDeny, relayReasonTimeout)
 		return relayVerdict{text: relayTextTimeout}
+	case <-closed:
+		// Transport closed mid-wait: fail closed and leave the registry.
+		s.cfg.Relay.remove(p.ID)
+		slog.Default().Warn("acp permission denied: transport closed during relay wait",
+			"component", "acp",
+			"agent", s.cfg.AgentID,
+			"pending", p.ID,
+		)
+		s.emit(SessionEvent{Kind: "permission_resolved", Text: relayDecisionDeny})
+		s.cfg.Notifier.NotifyPermissionResolved(p, relayDecisionDeny, relayReasonTimeout)
+		return relayVerdict{text: relayDecisionDeny}
 	}
 }
