@@ -299,6 +299,138 @@ func TestACPWire_DecisionModeAllowDeny(t *testing.T) {
 	t.Run("deny", func(t *testing.T) { run(t, "deny", "deny") })
 }
 
+// relayNotifier is the exported PermissionNotifier seam for the human
+// relay scenario: records publishes, always reports a listener (the test
+// resolves directly via the registry).
+type relayNotifier struct {
+	mu        sync.Mutex
+	requested int
+	resolved  int
+}
+
+func (n *relayNotifier) NotifyPermissionRequested(_ acp.PendingPermission) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.requested++
+	return true
+}
+
+func (n *relayNotifier) NotifyPermissionResolved(_ acp.PendingPermission, _, _ string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.resolved++
+}
+
+func (n *relayNotifier) counts() (requested, resolved int) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.requested, n.resolved
+}
+
+// waitForPermissionEvent drains events until the given kind arrives
+// (deadline fails the test) and returns the event text.
+func waitForPermissionEvent(t *testing.T, sess *acp.Session, kind string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case ev := <-sess.Events():
+			if ev.Kind == kind {
+				return ev.Text
+			}
+		case <-deadline:
+			t.Fatalf("no %q event within %v", kind, timeout)
+			return ""
+		}
+	}
+}
+
+// TestACPWire_HumanModeAllowDenyTimeout extends the decision-mode scenario
+// shape across the subprocess path for permission_mode "human"
+// (acp-human-permission-relay leaf 02): three prompts over one session —
+// relay-answered allow proceeds, relay-answered deny cancels (the fake
+// agent still completes its turn — the contract is the reply frame), and
+// an unanswered request times out fail-closed after relay_timeout.
+func TestACPWire_HumanModeAllowDenyTimeout(t *testing.T) {
+	bin := stubAgentBin(t)
+	rl := acp.NewRelay()
+	notif := &relayNotifier{}
+	catalog := &config.ACPAgentsConfig{Agents: []config.ACPAgentEntry{
+		{ID: "perm-agent", Command: []string{bin, "-mode", "permission"}, Enabled: true},
+	}}
+	mgr := acp.NewManager(config.ACPConfig{
+		Enabled:        true,
+		DialTimeout:    30,
+		CallTimeout:    20,
+		MaxAgents:      4,
+		PermissionMode: "human",
+		RelayTimeout:   2, // seconds — the unanswered third prompt fails closed
+	}, catalog)
+	mgr.SetPermissionRelay(rl, notif)
+	t.Cleanup(mgr.StopAll)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	sess, err := mgr.GetOrCreate(ctx, "perm-agent", t.TempDir())
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+
+	// runPrompt sends one turn and waits for the relay round trip. answer
+	// is the verb relayed from the harness ("" = never answer -> timeout).
+	// Returns the permission_resolved event text.
+	runPrompt := func(t *testing.T, text, answer string) string {
+		t.Helper()
+		sendCtx, sendCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer sendCancel()
+		ch := make(chan error, 1)
+		go func() {
+			_, err := sess.Send(sendCtx, text)
+			ch <- err
+		}()
+		// The lane surfaces the pending id BEFORE the reply frame lands,
+		// so the harness answerer never races the agent's block.
+		id := waitForPermissionEvent(t, sess, "permission_requested", 15*time.Second)
+		if id == "" {
+			t.Fatal("permission_requested event must carry the pending id")
+		}
+		if answer != "" {
+			if err := rl.Resolve(id, answer); err != nil {
+				t.Fatalf("Resolve(%q, %q): %v", id, answer, err)
+			}
+		}
+		resolvedText := waitForPermissionEvent(t, sess, "permission_resolved", 20*time.Second)
+		if err := <-ch; err != nil {
+			t.Fatalf("Send(%q) after %q resolution: %v", text, resolvedText, err)
+		}
+		return resolvedText
+	}
+
+	t.Run("allow", func(t *testing.T) {
+		if got := runPrompt(t, "grant", "allow"); got != "allow" {
+			t.Fatalf("permission_resolved text = %q, want allow", got)
+		}
+	})
+	t.Run("deny", func(t *testing.T) {
+		if got := runPrompt(t, "block", "deny"); got != "deny" {
+			t.Fatalf("permission_resolved text = %q, want deny", got)
+		}
+	})
+	t.Run("timeout", func(t *testing.T) {
+		if got := runPrompt(t, "ignore", ""); got != "timeout" {
+			t.Fatalf("permission_resolved text = %q, want timeout", got)
+		}
+	})
+
+	if got := len(mgr.PendingPermissions()); got != 0 {
+		t.Fatalf("PendingPermissions after round trips = %d, want 0", got)
+	}
+	nReq, nRes := notif.counts()
+	if nReq != 3 || nRes != 3 {
+		t.Fatalf("notifier calls = %d/%d, want 3/3", nReq, nRes)
+	}
+}
+
 // TestACPWire_DecisionModeFailClosed pins the fail-closed posture end to
 // end: decision mode
 // WITHOUT a configured Decisioner (nil seam — the daemon never wired one)

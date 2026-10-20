@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -617,6 +618,507 @@ func TestSession_DecisionSubprocessDenyEndToEnd(t *testing.T) {
 	}
 	if text := findEvent(drainEvents(s), "permission_decision"); text != "deny" {
 		t.Fatalf("permission_decision text = %q, want deny", text)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Human permission relay (acp-human-permission-relay leaf 02,
+// master.md Contract B)
+// ---------------------------------------------------------------------------
+
+// stubNotifier records the PermissionNotifier seam calls and replays a
+// fixed listener-availability answer for NotifyPermissionRequested.
+type stubNotifier struct {
+	mu        sync.Mutex
+	listener  bool // return value of NotifyPermissionRequested
+	requested []PendingPermission
+	resolved  []resolvedCall
+}
+
+type resolvedCall struct {
+	p        PendingPermission
+	decision string
+	reason   string
+}
+
+func (n *stubNotifier) NotifyPermissionRequested(p PendingPermission) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.requested = append(n.requested, p)
+	return n.listener
+}
+
+func (n *stubNotifier) NotifyPermissionResolved(p PendingPermission, decision, reason string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.resolved = append(n.resolved, resolvedCall{p, decision, reason})
+}
+
+func (n *stubNotifier) counts() (requested, resolved int) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.requested), len(n.resolved)
+}
+
+func (n *stubNotifier) lastRequested() PendingPermission {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.requested[len(n.requested)-1]
+}
+
+func (n *stubNotifier) lastResolved() resolvedCall {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.resolved[len(n.resolved)-1]
+}
+
+// waitForEvent reads session events until one with the given kind arrives
+// (or the deadline fails the test), returning the matched event.
+func waitForEvent(t *testing.T, s *Session, kind string, timeout time.Duration) SessionEvent {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case ev := <-s.events:
+			if ev.Kind == kind {
+				return ev
+			}
+		case <-deadline:
+			t.Fatalf("no %q event within %v", kind, timeout)
+			return SessionEvent{}
+		}
+	}
+}
+
+func humanRelayCfg(rl *Relay, notif PermissionNotifier, timeout time.Duration) SessionConfig {
+	return SessionConfig{
+		AgentID:        "human",
+		PermissionMode: "human",
+		Relay:          rl,
+		Notifier:       notif,
+		RelayTimeout:   timeout,
+	}
+}
+
+func escalationCfg(dec Decisioner, rl *Relay, notif PermissionNotifier, timeout time.Duration) SessionConfig {
+	cfg := decisionCfg(dec, 0.5)
+	cfg.Relay = rl
+	cfg.Notifier = notif
+	cfg.RelayTimeout = timeout
+	cfg.DecisionEscalateToHuman = true
+	return cfg
+}
+
+func TestSession_HumanRelayAllow(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	// The pending id surfaces on the frozen permission_requested event
+	// (drift 7: Text = the pending id, summary stays inside PendingPermission).
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if reqEv.Text == "" {
+		t.Fatal("permission_requested event must carry the pending id")
+	}
+	if err := rl.Resolve(reqEv.Text, "allow"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	resp := readReplyFrame(t, fromClient)
+	outcome, optionID := outcomeOf(t, resp)
+	if outcome != "selected" || optionID != "allow-once" {
+		t.Fatalf("reply outcome = %q/%q, want selected/allow-once", outcome, optionID)
+	}
+	events := drainEvents(s)
+	if got := findEvent(events, "permission_resolved"); got != "allow" {
+		t.Fatalf("permission_resolved text = %q, want allow", got)
+	}
+	// The relay lane uses its own frozen events; the parent-lane
+	// permission_decision must stay absent.
+	if got := findEvent(events, "permission_decision"); got != "" {
+		t.Fatalf("relay lane must not emit permission_decision, got %q", got)
+	}
+
+	nReq, nRes := notif.counts()
+	if nReq != 1 || nRes != 1 {
+		t.Fatalf("notifier calls = %d/%d, want 1/1", nReq, nRes)
+	}
+	p := notif.lastRequested()
+	if p.ID != reqEv.Text || p.AgentID != "human" || p.RequestID != int64(7) {
+		t.Fatalf("pending = %+v, want id=%q agent=human requestID=int64(7)", p, reqEv.Text)
+	}
+	if !strings.Contains(p.Summary, "human") || !strings.Contains(p.Summary, "rm -rf scratch") {
+		t.Fatalf("summary %q must reuse the bounded render (agent + request)", p.Summary)
+	}
+	if p.CreatedAt.IsZero() {
+		t.Fatal("pending CreatedAt must be stamped")
+	}
+	rc := notif.lastResolved()
+	if rc.decision != "allow" || rc.reason != "answered" {
+		t.Fatalf("resolved call = %+v, want allow/answered", rc)
+	}
+	// Answered pendings leave the registry (leaf 03's list must shrink).
+	if got := rl.Pending(); len(got) != 0 {
+		t.Fatalf("Pending after resolve = %d, want 0", len(got))
+	}
+}
+
+func TestSession_HumanRelayDeny(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if err := rl.Resolve(reqEv.Text, "deny"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	resp := readReplyFrame(t, fromClient)
+	if outcome, optionID := outcomeOf(t, resp); outcome != "cancelled" || optionID != "" {
+		t.Fatalf("reply outcome = %q/%q, want cancelled/\"\"", outcome, optionID)
+	}
+	if got := findEvent(drainEvents(s), "permission_resolved"); got != "deny" {
+		t.Fatalf("permission_resolved text = %q, want deny", got)
+	}
+	rc := notif.lastResolved()
+	if rc.decision != "deny" || rc.reason != "answered" {
+		t.Fatalf("resolved call = %+v, want deny/answered", rc)
+	}
+}
+
+func TestSession_HumanRelayTimeout(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 60*time.Millisecond))
+
+	sendPermissionRequest(t, toClient, "")
+	// Nobody answers: the fail-closed timer fires, cancelling the request.
+	resp := readReplyFrame(t, fromClient)
+	if outcome, _ := outcomeOf(t, resp); outcome != "cancelled" {
+		t.Fatalf("reply outcome = %q, want cancelled", outcome)
+	}
+	events := drainEvents(s)
+	if got := findEvent(events, "permission_requested"); got == "" {
+		t.Fatal("timeout lane must still surface permission_requested")
+	}
+	if got := findEvent(events, "permission_resolved"); got != "timeout" {
+		t.Fatalf("permission_resolved text = %q, want timeout", got)
+	}
+	rc := notif.lastResolved()
+	if rc.decision != "deny" || rc.reason != "timeout" {
+		t.Fatalf("resolved call = %+v, want deny/timeout", rc)
+	}
+	if got := rl.Pending(); len(got) != 0 {
+		t.Fatalf("timed-out pending must leave the registry, got %d", len(got))
+	}
+}
+
+func TestSession_HumanRelayNoListenerStillWaits(t *testing.T) {
+	// Reconnect contract (drift 5): a false return means NO listener right
+	// now — it must NOT cancel early. The wait continues to the deadline so
+	// a reconnecting surface can still answer; here it times out.
+	rl := NewRelay()
+	notif := &stubNotifier{listener: false}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 100*time.Millisecond))
+
+	sendPermissionRequest(t, toClient, "")
+	resp := readReplyFrame(t, fromClient)
+	if outcome, _ := outcomeOf(t, resp); outcome != "cancelled" {
+		t.Fatalf("reply outcome = %q, want cancelled", outcome)
+	}
+	if got := findEvent(drainEvents(s), "permission_resolved"); got != "timeout" {
+		t.Fatalf("permission_resolved text = %q, want timeout (no early cancel)", got)
+	}
+	nReq, _ := notif.counts()
+	if nReq != 1 {
+		t.Fatalf("requested notifications = %d, want 1 (listener=false still registers+publishes)", nReq)
+	}
+}
+
+func TestSession_HumanNilRelayFailsClosed(t *testing.T) {
+	// Fail-closed pin (like the parent's TestSession_DecisionNilDecisioner-
+	// Denies): human mode with the relay OR notifier seam missing must
+	// cancel immediately with a WARN, never wait, never hang the lane.
+	for _, tc := range []struct {
+		name  string
+		relay *Relay
+		notfn PermissionNotifier
+	}{
+		{"nil relay", nil, &stubNotifier{listener: true}},
+		{"nil notifier", NewRelay(), nil},
+		{"both nil", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(tc.relay, tc.notfn, 5*time.Second))
+			sendPermissionRequest(t, toClient, "")
+			resp := readReplyFrame(t, fromClient)
+			if outcome, _ := outcomeOf(t, resp); outcome != "cancelled" {
+				t.Fatalf("reply outcome = %q, want cancelled (fail closed)", outcome)
+			}
+			if got := findEvent(drainEvents(s), "permission_resolved"); got != "deny" {
+				t.Fatalf("permission_resolved text = %q, want deny", got)
+			}
+		})
+	}
+}
+
+func TestSession_HumanRelayFullRejectsFailsClosed(t *testing.T) {
+	// Drift 8: registry capped at maxPendingPermissions. When full, a new
+	// request is rejected with a WARN and cancelled immediately — the
+	// oldest pendings stay answerable.
+	rl := NewRelay()
+	for i := 0; i < maxPendingPermissions; i++ {
+		if _, err := rl.Register(PendingPermission{ID: fmt.Sprintf("perm-full-%d", i), AgentID: "pre"}); err != nil {
+			t.Fatalf("prefill register %d: %v", i, err)
+		}
+	}
+	notif := &stubNotifier{listener: true}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 2*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	resp := readReplyFrame(t, fromClient)
+	if outcome, _ := outcomeOf(t, resp); outcome != "cancelled" {
+		t.Fatalf("reply outcome = %q, want cancelled (full = fail closed)", outcome)
+	}
+	events := drainEvents(s)
+	if got := findEvent(events, "permission_requested"); got != "" {
+		t.Fatalf("full relay must not emit permission_requested, got %q", got)
+	}
+	if got := findEvent(events, "permission_resolved"); got != "deny" {
+		t.Fatalf("permission_resolved text = %q, want deny", got)
+	}
+	nReq, _ := notif.counts()
+	if nReq != 0 {
+		t.Fatalf("requested notifications = %d, want 0 (rejected before publish)", nReq)
+	}
+	if got := len(rl.Pending()); got != maxPendingPermissions {
+		t.Fatalf("Pending after rejection = %d, want %d (prefills untouched)", got, maxPendingPermissions)
+	}
+}
+
+func TestSession_DecisionEscalationAllow(t *testing.T) {
+	// Master Contract B escalation: decider denies, but the human relay is
+	// armed and answers allow -> selected/allow-once + escalated_human_allow.
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	stub := &stubDecisioner{available: true, res: denyResult()}
+	s, fromClient, toClient := decisionHarnessSession(t, escalationCfg(stub, rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if err := rl.Resolve(reqEv.Text, "allow"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	resp := readReplyFrame(t, fromClient)
+	if outcome, optionID := outcomeOf(t, resp); outcome != "selected" || optionID != "allow-once" {
+		t.Fatalf("reply outcome = %q/%q, want selected/allow-once", outcome, optionID)
+	}
+	events := drainEvents(s)
+	if got := findEvent(events, "permission_decision"); got != "escalated_human_allow" {
+		t.Fatalf("permission_decision text = %q, want escalated_human_allow", got)
+	}
+	if got := findEvent(events, "permission_resolved"); got != "allow" {
+		t.Fatalf("permission_resolved text = %q, want allow", got)
+	}
+}
+
+func TestSession_DecisionEscalationDeny(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	stub := &stubDecisioner{available: true, res: &llm.DecisionResult{Answer: "maybe", Confidence: 1.0}}
+	s, fromClient, toClient := decisionHarnessSession(t, escalationCfg(stub, rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if err := rl.Resolve(reqEv.Text, "deny"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	resp := readReplyFrame(t, fromClient)
+	if outcome, _ := outcomeOf(t, resp); outcome != "cancelled" {
+		t.Fatalf("reply outcome = %q, want cancelled", outcome)
+	}
+	if got := findEvent(drainEvents(s), "permission_decision"); got != "escalated_human_deny" {
+		t.Fatalf("permission_decision text = %q, want escalated_human_deny", got)
+	}
+}
+
+func TestSession_DecisionEscalationTimeout(t *testing.T) {
+	// Relay timeout on the escalation lane cancels with the parent's
+	// "deny" token (drift 6), not an escalated token.
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	stub := &stubDecisioner{available: true, res: allowResult(0.4)} // low_confidence without escalation
+	s, fromClient, toClient := decisionHarnessSession(t, escalationCfg(stub, rl, notif, 60*time.Millisecond))
+
+	sendPermissionRequest(t, toClient, "")
+	resp := readReplyFrame(t, fromClient)
+	if outcome, _ := outcomeOf(t, resp); outcome != "cancelled" {
+		t.Fatalf("reply outcome = %q, want cancelled", outcome)
+	}
+	events := drainEvents(s)
+	if got := findEvent(events, "permission_requested"); got == "" {
+		t.Fatal("armed escalation must run the relay wait (permission_requested missing)")
+	}
+	if got := findEvent(events, "permission_decision"); got != "deny" {
+		t.Fatalf("permission_decision text = %q, want deny (timeout -> parent semantics)", got)
+	}
+}
+
+func TestSession_DecisionEscalationDeciderAllowSkipsRelay(t *testing.T) {
+	// Leaf task: escalate=true + decider allow -> NO relay wait.
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	stub := &stubDecisioner{available: true, res: allowResult(1.0)}
+	s, fromClient, toClient := decisionHarnessSession(t, escalationCfg(stub, rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	resp := readReplyFrame(t, fromClient)
+	if outcome, optionID := outcomeOf(t, resp); outcome != "selected" || optionID != "allow-once" {
+		t.Fatalf("reply outcome = %q/%q, want selected/allow-once", outcome, optionID)
+	}
+	events := drainEvents(s)
+	if got := findEvent(events, "permission_decision"); got != "allow" {
+		t.Fatalf("permission_decision text = %q, want allow", got)
+	}
+	if got := findEvent(events, "permission_requested"); got != "" {
+		t.Fatalf("allow outcome must not touch the relay, got permission_requested %q", got)
+	}
+	if nReq, nRes := notif.counts(); nReq != 0 || nRes != 0 {
+		t.Fatalf("notifier calls = %d/%d, want 0/0", nReq, nRes)
+	}
+}
+
+func TestSession_DecisionEscalationNoRelayPlainCancel(t *testing.T) {
+	// Drift 6: escalate armed but the relay seam is nil -> plain cancel
+	// with the parent's outcome text + WARN, no relay events.
+	notif := &stubNotifier{listener: true}
+	stub := &stubDecisioner{available: true, res: denyResult()}
+	s, fromClient, toClient := decisionHarnessSession(t, escalationCfg(stub, nil, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	resp := readReplyFrame(t, fromClient)
+	if outcome, _ := outcomeOf(t, resp); outcome != "cancelled" {
+		t.Fatalf("reply outcome = %q, want cancelled", outcome)
+	}
+	events := drainEvents(s)
+	if got := findEvent(events, "permission_decision"); got != "deny" {
+		t.Fatalf("permission_decision text = %q, want deny (plain parent cancel)", got)
+	}
+	if got := findEvent(events, "permission_requested"); got != "" {
+		t.Fatalf("no relay wired -> no permission_requested, got %q", got)
+	}
+	if got := findEvent(events, "permission_resolved"); got != "" {
+		t.Fatalf("no relay wired -> no permission_resolved, got %q", got)
+	}
+}
+
+func TestSession_DecisionEscalateFalseByteIdentical(t *testing.T) {
+	// escalate=false decision behavior stays byte-identical to the parent
+	// tree pins — even when relay+notifier are present on the config, the
+	// deny outcome must cancel immediately with the original text and
+	// never touch the relay.
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	stub := &stubDecisioner{available: true, res: denyResult()}
+	cfg := escalationCfg(stub, rl, notif, 5*time.Second)
+	cfg.DecisionEscalateToHuman = false
+	s, fromClient, toClient := decisionHarnessSession(t, cfg)
+
+	sendPermissionRequest(t, toClient, "")
+	resp := readReplyFrame(t, fromClient)
+	if outcome, _ := outcomeOf(t, resp); outcome != "cancelled" {
+		t.Fatalf("reply outcome = %q, want cancelled", outcome)
+	}
+	events := drainEvents(s)
+	if got := findEvent(events, "permission_decision"); got != "deny" {
+		t.Fatalf("permission_decision text = %q, want deny (parent token)", got)
+	}
+	if got := findEvent(events, "permission_requested"); got != "" {
+		t.Fatalf("escalate=false must never run the relay, got permission_requested %q", got)
+	}
+	if nReq, nRes := notif.counts(); nReq != 0 || nRes != 0 {
+		t.Fatalf("notifier calls = %d/%d, want 0/0", nReq, nRes)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Relay registry unit surface (leaf 02 task 1, final bullets)
+// ---------------------------------------------------------------------------
+
+func TestRelay_ResolveSentinels(t *testing.T) {
+	rl := NewRelay()
+	if err := rl.Resolve("perm-nope", "allow"); !errors.Is(err, ErrRelayNotFound) {
+		t.Fatalf("unknown id error = %v, want ErrRelayNotFound", err)
+	}
+	if _, err := rl.Register(PendingPermission{ID: "perm-x"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := rl.Resolve("perm-x", "allow"); err != nil {
+		t.Fatalf("first Resolve: %v", err)
+	}
+	if err := rl.Resolve("perm-x", "allow"); !errors.Is(err, ErrRelayAnswered) {
+		t.Fatalf("double resolve error = %v, want ErrRelayAnswered", err)
+	}
+	// A non-allow verb is fail-closed deny, still a valid single answer.
+	if _, err := rl.Register(PendingPermission{ID: "perm-y"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := rl.Resolve("perm-y", "maybe"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if err := rl.Resolve("perm-y", "allow"); !errors.Is(err, ErrRelayAnswered) {
+		t.Fatalf("second resolve error = %v, want ErrRelayAnswered", err)
+	}
+}
+
+func TestRelay_RegisterCap(t *testing.T) {
+	rl := NewRelay()
+	for i := 0; i < maxPendingPermissions; i++ {
+		if _, err := rl.Register(PendingPermission{ID: fmt.Sprintf("perm-%d", i)}); err != nil {
+			t.Fatalf("Register %d: %v", i, err)
+		}
+	}
+	if _, err := rl.Register(PendingPermission{ID: "perm-over"}); !errors.Is(err, ErrRelayFull) {
+		t.Fatalf("over-cap Register = %v, want ErrRelayFull", err)
+	}
+	if got := len(rl.Pending()); got != maxPendingPermissions {
+		t.Fatalf("Pending = %d, want %d", got, maxPendingPermissions)
+	}
+	// One answered slot frees room for a new registration.
+	if err := rl.Resolve("perm-0", "deny"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, err := rl.Register(PendingPermission{ID: "perm-over"}); err != nil {
+		t.Fatalf("Register after free: %v", err)
+	}
+}
+
+func TestRelay_PendingSnapshots(t *testing.T) {
+	var rl *Relay
+	if got := rl.Pending(); got != nil {
+		t.Fatalf("nil receiver Pending = %v, want nil (nil-safe)", got)
+	}
+	rl = NewRelay()
+	now := time.Now()
+	if _, err := rl.Register(PendingPermission{ID: "perm-b", AgentID: "b", CreatedAt: now.Add(time.Second)}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, err := rl.Register(PendingPermission{ID: "perm-a", AgentID: "a", CreatedAt: now}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	got := rl.Pending()
+	if len(got) != 2 {
+		t.Fatalf("Pending len = %d, want 2", len(got))
+	}
+	if got[0].ID != "perm-a" || got[1].ID != "perm-b" {
+		t.Fatalf("Pending order = %q,%q, want created-asc perm-a,perm-b", got[0].ID, got[1].ID)
+	}
+	// Mutating the snapshot must not touch registry state.
+	got[0].AgentID = "mutated"
+	if again := rl.Pending(); again[0].AgentID != "a" {
+		t.Fatalf("Pending leaked internal state: %+v", again)
 	}
 }
 

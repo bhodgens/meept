@@ -33,6 +33,8 @@ type Manager struct {
 	agents   []config.ACPAgentEntry
 	startFn  startFunc
 	decision Decisioner
+	relay    *Relay
+	notifier PermissionNotifier
 	mu       sync.Mutex
 	sessions map[string]*Session
 	pending  map[string]*startWait
@@ -63,6 +65,48 @@ func (m *Manager) HasDecisionClient() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.decision != nil
+}
+
+// SetPermissionRelay injects the human relay registry + publish seam
+// (acp-human-permission-relay leaf 02, drift 3: ONE setter). Nil-safe per
+// the repo setter rule; nil relay/notifier clears the seam (human mode
+// then fails closed, decision escalation falls back to plain cancel). The
+// timeout + escalate flag are NOT setter args — they already live on
+// m.cfg (ACPConfig.RelayTimeout / DecisionEscalateToHuman, leaf 01) and
+// flow through at SessionConfig construction, like DecisionThreshold.
+func (m *Manager) SetPermissionRelay(relay *Relay, notifier PermissionNotifier) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.relay = relay
+	m.notifier = notifier
+	m.mu.Unlock()
+}
+
+// HasPermissionRelay reports whether BOTH relay halves (registry +
+// notifier) are currently injected. Read-only inspection for wiring
+// tests. Nil-safe.
+func (m *Manager) HasPermissionRelay() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.relay != nil && m.notifier != nil
+}
+
+// PendingPermissions returns the still-answerable human relay requests
+// (leaf 03's RPC surface). Nil-safe: a manager without a relay reports
+// none.
+func (m *Manager) PendingPermissions() []PendingPermission {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	rl := m.relay
+	m.mu.Unlock()
+	return rl.Pending()
 }
 
 // NewManager constructs a Manager from an already-loaded catalog.
@@ -127,6 +171,8 @@ func (m *Manager) GetOrCreate(ctx context.Context, agentID, workdir string) (*Se
 	m.pending[agentID] = w
 	fn := m.startFn
 	dec := m.decision
+	rl := m.relay
+	notf := m.notifier
 	m.mu.Unlock()
 
 	cwd := entry.Cwd
@@ -150,6 +196,22 @@ func (m *Manager) GetOrCreate(ctx context.Context, agentID, workdir string) (*Se
 	if sc.PermissionMode == "decision" {
 		sc.Decision = dec
 		sc.DecisionThreshold = m.cfg.DecisionThreshold
+	}
+	// Human relay lane (acp-human-permission-relay leaf 02, drift 3):
+	// stamped ONLY for mode "human", or mode "decision" with
+	// decision_escalate_to_human. RelayTimeout is read straight off m.cfg
+	// (seconds -> Duration, like DecisionThreshold / DialTimeout).
+	// permissive/deny/decision-without-escalate SessionConfigs stay
+	// byte-identical (relays zero-valued).
+	if sc.PermissionMode == "human" {
+		sc.Relay = rl
+		sc.Notifier = notf
+		sc.RelayTimeout = time.Duration(m.cfg.RelayTimeout) * time.Second
+	} else if sc.PermissionMode == "decision" && m.cfg.DecisionEscalateToHuman {
+		sc.Relay = rl
+		sc.Notifier = notf
+		sc.RelayTimeout = time.Duration(m.cfg.RelayTimeout) * time.Second
+		sc.DecisionEscalateToHuman = true
 	}
 	if fn == nil {
 		fn = Start

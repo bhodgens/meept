@@ -32,6 +32,19 @@ type SessionConfig struct {
 	// DecisionThreshold is the confidence bar for the decision lane
 	// ([acp] decision_threshold). Zero value = disabled lane.
 	DecisionThreshold float64
+	// Relay is the human permission relay registry, and Notifier its
+	// publish seam (acp-human-permission-relay leaf 02, Contract B).
+	// Stamped ONLY for mode "human", or mode "decision" with
+	// DecisionEscalateToHuman (zero values = relay lane disabled, lanes
+	// fail closed).
+	Relay    *Relay
+	Notifier PermissionNotifier
+	// RelayTimeout is the fail-closed human wait ([acp] relay_timeout,
+	// seconds in config -> Duration here). Zero = defaultRelayTimeout.
+	RelayTimeout time.Duration
+	// DecisionEscalateToHuman routes NON-allow decision outcomes through
+	// the relay wait before cancelling ([acp] decision_escalate_to_human).
+	DecisionEscalateToHuman bool
 }
 
 // SessionState is the lifecycle state of an ACP session.
@@ -327,6 +340,10 @@ func (s *Session) handlePermission(n Notification) {
 		s.handlePermissionDecision(n)
 		return
 	}
+	if mode == "human" {
+		s.handlePermissionHuman(n)
+		return
+	}
 	// permissive / deny lanes: byte-identical pre-decision behavior, no new
 	// parses on these paths (Contract B).
 	approved := mode == "permissive"
@@ -343,6 +360,45 @@ func (s *Session) handlePermission(n Notification) {
 		}
 	}
 	s.emit(SessionEvent{Kind: "permission_request", Text: kind})
+	if err := s.tr.Reply(*n.ID, result, nil); err != nil {
+		s.emit(SessionEvent{Kind: "error", Text: err.Error()})
+	}
+}
+
+// handlePermissionHuman is the fail-CLOSED human relay lane (Contract B).
+// Like the decision lane it runs on the Transport Serve goroutine, reads
+// s.cfg (immutable after Start) without s.mu, and NEVER holds s.mu across
+// the relay wait or the notifier calls (mutexio). Missing seams cancel
+// immediately — the pin mirrors TestSession_DecisionNilDecisionerDenies.
+func (s *Session) handlePermissionHuman(n Notification) {
+	if s.cfg.Relay == nil || s.cfg.Notifier == nil {
+		slog.Default().Warn("acp permission denied: human relay not wired",
+			"component", "acp",
+			"agent", s.cfg.AgentID,
+			"reason", relayReasonNoWire,
+		)
+		s.emit(SessionEvent{Kind: "permission_resolved", Text: relayDecisionDeny})
+		s.replyPermissionOutcome(n, false)
+		return
+	}
+	verdict := s.relayPermissionWait(*n.ID, n.Params)
+	s.replyPermissionOutcome(n, verdict.allow)
+}
+
+// replyPermissionOutcome writes the ACP reply frame for one permission
+// request: allow -> selected/allow-once, otherwise cancelled (v1 has no
+// "always" verb; frozen by master.md user decisions).
+func (s *Session) replyPermissionOutcome(n Notification, allow bool) {
+	var result any
+	if allow {
+		result = map[string]any{
+			"outcome": map[string]any{"outcome": "selected", "optionId": "allow-once"},
+		}
+	} else {
+		result = map[string]any{
+			"outcome": map[string]any{"outcome": "cancelled"},
+		}
+	}
 	if err := s.tr.Reply(*n.ID, result, nil); err != nil {
 		s.emit(SessionEvent{Kind: "error", Text: err.Error()})
 	}
@@ -377,6 +433,14 @@ func (s *Session) handlePermissionDecision(n Notification) {
 			"reason", outcome.text,
 		)
 	}
+	// Decision-lane escalation (master.md Contract B): ONLY a non-allow
+	// outcome with the relay seam fully wired routes to the human wait;
+	// an allow outcome never touches the relay, and escalate=false keeps
+	// the parent lane byte-identical.
+	if !outcome.allow && s.cfg.DecisionEscalateToHuman {
+		s.handleDecisionEscalation(n, outcome)
+		return
+	}
 	result := map[string]any{
 		"outcome": map[string]any{"outcome": "cancelled"},
 	}
@@ -392,4 +456,38 @@ func (s *Session) handlePermissionDecision(n Notification) {
 	if err := s.tr.Reply(*n.ID, result, nil); err != nil {
 		s.emit(SessionEvent{Kind: "error", Text: err.Error()})
 	}
+}
+
+// handleDecisionEscalation routes a NON-allow decision outcome to the
+// human relay before cancelling (drift 6): relay allow ->
+// escalated_human_allow + selected/allow-once; relay deny ->
+// escalated_human_deny + cancelled; relay timeout -> cancelled with the
+// parent's "deny" semantics. Escalate armed but the seam missing is a
+// plain cancel with a WARN — fail-closed polarity preserved.
+func (s *Session) handleDecisionEscalation(n Notification, outcome decisionOutcome) {
+	if s.cfg.Relay == nil || s.cfg.Notifier == nil {
+		slog.Default().Warn("acp decision escalation unavailable: human relay not wired",
+			"component", "acp",
+			"agent", s.cfg.AgentID,
+			"reason", escalatedTextNoWire,
+		)
+		s.emit(SessionEvent{Kind: "permission_request", Text: outcome.text})
+		s.emit(SessionEvent{Kind: "permission_decision", Text: outcome.text})
+		s.replyPermissionOutcome(n, false)
+		return
+	}
+	verdict := s.relayPermissionWait(*n.ID, n.Params)
+	text := outcome.text
+	switch verdict.text {
+	case relayDecisionAllow:
+		text = escalatedTextAllow
+	case relayDecisionDeny:
+		text = escalatedTextDeny
+	case relayTextTimeout:
+		// Timeout keeps parent cancel semantics: plain "deny" token.
+		text = decisionTextDeny
+	}
+	s.emit(SessionEvent{Kind: "permission_request", Text: text})
+	s.emit(SessionEvent{Kind: "permission_decision", Text: text})
+	s.replyPermissionOutcome(n, verdict.allow)
 }

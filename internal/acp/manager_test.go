@@ -666,6 +666,197 @@ func TestManager_DecisionModeStampsSessionConfig(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Human-relay wiring (acp-human-permission-relay leaf 02, Contract B)
+// ---------------------------------------------------------------------------
+
+// TestManager_SetPermissionRelay_NilSafe pins the repo setter rule for the
+// single relay seam setter (drift 3): nil receiver tolerates any args, and
+// a live manager tolerates nil relay / nil notifier (clearing is legal).
+func TestManager_SetPermissionRelay_NilSafe(t *testing.T) {
+	t.Parallel()
+
+	var m *Manager
+	m.SetPermissionRelay(nil, nil)                    // nil receiver: no panic
+	m.SetPermissionRelay(NewRelay(), &stubNotifier{}) // nil receiver again
+
+	m2 := NewManager(testACPConfig(true, 3), testAgents(
+		config.ACPAgentEntry{ID: "echo", Command: []string{"agent"}, Enabled: true},
+	))
+	m2.SetPermissionRelay(nil, nil) // clearing is legal
+	m2.SetPermissionRelay(NewRelay(), &stubNotifier{})
+	if !m2.HasPermissionRelay() {
+		t.Fatal("HasPermissionRelay after set = false, want true")
+	}
+	m2.SetPermissionRelay(nil, nil)
+	if m2.HasPermissionRelay() {
+		t.Fatal("HasPermissionRelay after clear = true, want false")
+	}
+	var nilRecv *Manager
+	if nilRecv.HasPermissionRelay() {
+		t.Fatal("nil receiver HasPermissionRelay = true, want false")
+	}
+}
+
+// TestManager_PendingPermissions_NilSafe pins leaf 03's read surface:
+// nil-safe empty on a nil manager and on a manager without a relay, and a
+// passthrough snapshot once a relay is wired.
+func TestManager_PendingPermissions_NilSafe(t *testing.T) {
+	t.Parallel()
+
+	var m *Manager
+	if got := m.PendingPermissions(); got != nil {
+		t.Fatalf("nil manager PendingPermissions = %v, want nil (nil-safe)", got)
+	}
+
+	m2 := NewManager(testACPConfig(true, 3), testAgents(
+		config.ACPAgentEntry{ID: "echo", Command: []string{"agent"}, Enabled: true},
+	))
+	if got := m2.PendingPermissions(); len(got) != 0 {
+		t.Fatalf("no-relay PendingPermissions = %v, want empty", got)
+	}
+
+	rl := NewRelay()
+	m2.SetPermissionRelay(rl, &stubNotifier{})
+	if _, err := rl.Register(PendingPermission{ID: "perm-live", AgentID: "echo"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	got := m2.PendingPermissions()
+	if len(got) != 1 || got[0].ID != "perm-live" {
+		t.Fatalf("PendingPermissions = %+v, want [perm-live]", got)
+	}
+}
+
+// TestManager_HumanModeStampsSessionConfig pins the human lane: relay,
+// notifier, and RelayTimeout (seconds -> time.Duration, off cfg like
+// DecisionThreshold) all flow into the SessionConfig handed to startFn.
+func TestManager_HumanModeStampsSessionConfig(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{}
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	acpCfg := testACPConfig(true, 3)
+	acpCfg.PermissionMode = "human"
+	acpCfg.RelayTimeout = 45
+	m := NewManager(acpCfg, testAgents(
+		config.ACPAgentEntry{ID: "echo", Command: []string{"agent"}, Enabled: true},
+	))
+	attachStart(m, rec)
+	m.SetPermissionRelay(rl, notif)
+
+	if _, err := m.GetOrCreate(context.Background(), "echo", "/work"); err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	sc := rec.configs[0]
+	if sc.Relay != rl {
+		t.Fatalf("SessionConfig.Relay = %v, want the injected relay", sc.Relay)
+	}
+	if sc.Notifier != notif {
+		t.Fatalf("SessionConfig.Notifier = %v, want the injected notifier", sc.Notifier)
+	}
+	if sc.RelayTimeout != 45*time.Second {
+		t.Fatalf("SessionConfig.RelayTimeout = %v, want 45s (cfg seconds -> Duration)", sc.RelayTimeout)
+	}
+}
+
+// TestManager_DecisionEscalateStampsSessionConfig pins drift 3/master:
+// decision mode + escalate=true stamps the relay lane (relay, notifier,
+// timeout, DecisionEscalateToHuman) and KEEPS the decision seam — both
+// lanes run in sequence.
+func TestManager_DecisionEscalateStampsSessionConfig(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{}
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	dec := &stubDecisioner{available: true}
+	acpCfg := testACPConfig(true, 3)
+	acpCfg.PermissionMode = "decision"
+	acpCfg.DecisionThreshold = 0.7
+	acpCfg.DecisionEscalateToHuman = true
+	acpCfg.RelayTimeout = 30
+	m := NewManager(acpCfg, testAgents(
+		config.ACPAgentEntry{ID: "echo", Command: []string{"agent"}, Enabled: true},
+	))
+	attachStart(m, rec)
+	m.SetDecisionClient(dec)
+	m.SetPermissionRelay(rl, notif)
+
+	if _, err := m.GetOrCreate(context.Background(), "echo", "/work"); err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	sc := rec.configs[0]
+	if sc.Decision != Decisioner(dec) || sc.DecisionThreshold != 0.7 {
+		t.Fatalf("decision seam lost under escalation: %+v", sc)
+	}
+	if sc.Relay != rl || sc.Notifier != PermissionNotifier(notif) {
+		t.Fatalf("escalation stamp missing relay/notifier: %+v", sc)
+	}
+	if sc.RelayTimeout != 30*time.Second {
+		t.Fatalf("SessionConfig.RelayTimeout = %v, want 30s", sc.RelayTimeout)
+	}
+	if !sc.DecisionEscalateToHuman {
+		t.Fatal("SessionConfig.DecisionEscalateToHuman = false, want true")
+	}
+}
+
+// TestManager_StampingMatrixNonHumanStaysUnstamped pins the byte-identical
+// fail-closed default (drift 3 + master): permissive/deny/decision-without-
+// escalate never receive relay fields even when a relay IS injected on the
+// manager.
+func TestManager_StampingMatrixNonHumanStaysUnstamped(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		mutate func(*config.ACPConfig)
+	}{
+		{"permissive", func(c *config.ACPConfig) { c.PermissionMode = "permissive" }},
+		{"deny", func(c *config.ACPConfig) { c.PermissionMode = "deny" }},
+		{"decision_no_escalate", func(c *config.ACPConfig) {
+			c.PermissionMode = "decision"
+			c.DecisionEscalateToHuman = false
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &startRecorder{}
+			acpCfg := testACPConfig(true, 3)
+			tc.mutate(&acpCfg)
+			acpCfg.RelayTimeout = 90
+			m := NewManager(acpCfg, testAgents(
+				config.ACPAgentEntry{ID: "echo", Command: []string{"agent"}, Enabled: true},
+			))
+			attachStart(m, rec)
+			m.SetPermissionRelay(NewRelay(), &stubNotifier{})
+
+			if _, err := m.GetOrCreate(context.Background(), "echo", "/work"); err != nil {
+				t.Fatalf("GetOrCreate: %v", err)
+			}
+			rec.mu.Lock()
+			defer rec.mu.Unlock()
+			sc := rec.configs[0]
+			if sc.Relay != nil {
+				t.Fatalf("SessionConfig.Relay = %v, want nil in %s", sc.Relay, tc.name)
+			}
+			if sc.Notifier != nil {
+				t.Fatalf("SessionConfig.Notifier = %v, want nil in %s", sc.Notifier, tc.name)
+			}
+			if sc.RelayTimeout != 0 {
+				t.Fatalf("SessionConfig.RelayTimeout = %v, want 0 in %s", sc.RelayTimeout, tc.name)
+			}
+			if sc.DecisionEscalateToHuman {
+				t.Fatalf("SessionConfig.DecisionEscalateToHuman = true in %s, want false", tc.name)
+			}
+		})
+	}
+}
+
 // TestManager_NonDecisionModeLeavesLaneNil pins the byte-identical
 // non-decision lane: permissive/deny never receive a Decisioner or
 // threshold, even when one is injected on the manager.
