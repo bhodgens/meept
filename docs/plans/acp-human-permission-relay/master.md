@@ -194,7 +194,7 @@ Wave order: 01 → 02 → 03 → (04 ∥ 05) → 06 → integration gates.
 |------|--------|--------|-------|
 | 01 | COMPLETE 2026-10-19 | 08e55aa0 | human mode + relay_timeout(120) + decision_escalate_to_human(false); conditional bounds; four-mode verbatim error pinned; setters gate green at HEAD directly |
 | 02 | COMPLETE 2026-10-19 | 93547738 | relay.go registry (cap 32 reject-new, sentinels, buffered once-guard) + human lane + escalation lane (shared relayPermissionWait); 20 session + manager matrix tests; e2e HumanModeAllowDenyTimeout; parent pins untouched |
-| 03 | PENDING | | |
+| 03 | COMPLETE 2026-10-19 | 7d079c52 + 9996bf53 + 9e4b6355 | bus typed topics + daemon notifier + rpc acp.permissions.list/resolve + http GET/POST routes + meept acp CLI + "acp.*.*" WS-proxy fix (latent gap: 3-seg topics matched no wildcard) + wsclass marker decode; DEFECT FOUND+FIXED: Start bound long-lived agent subprocess to turn ctx (context.WithoutCancel); full-stack e2e proof (real WS frame agent_progress, HTTP resolve, CLI, timeout fail-closed). errors hook blocked on 4 _ = tw.Flush sites — fixed to return/propagate (9996bf53 wiring tests were left unstaged by leaf, committed separately). graphs+docs regenerated from clean worktree (9e4b6355) |
 | 04 | PENDING | | |
 | 05 | PENDING | | |
 | 06 | PENDING | | |
