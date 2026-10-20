@@ -165,7 +165,10 @@ class AcpPermissionNotifier extends StateNotifier<AcpPermissionState> {
     state = state.copyWith(pending: map);
   }
 
-  /// POST the user's decision ("allow" | "deny") for [id]. On success the
+  /// POST the user's decision ("allow" | "deny" | "always") for [id]. The
+  /// decision string passes through untouched — the daemon validates the
+  /// verb at the RPC/HTTP boundary ("always" accepted since
+  /// acp-always-allow leaf 01). On success the
   /// entry is removed optimistically (the daemon's resolved echo frame is
   /// an idempotent no-op). On failure the entry STAYS — the request is
   /// still pending daemon-side until the relay times out — and

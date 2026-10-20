@@ -28,6 +28,10 @@ This tree adds:
 - v1 decision verbs: `allow` (maps to ACP selected/allow-once) and `deny`
   (maps to cancelled). No "always" option in v1 (optionId passthrough
   deferred; pinned here so nobody adds it silently).
+  - SUPERSEDED (2026-10-20, on user request): the "always" verb shipped in
+    the `docs/plans/acp-always-allow/` tree (relay echoes the agent's own
+    allow_always optionId; meept persists nothing). See that tree's
+    master.md for the revisited contract.
 - Timeout default 120 s, knob `[acp] relay_timeout`. Fail-closed: expired or
   unroutable requests cancel the permission, log warn, emit resolved event.
 - One pending registry lives in `internal/acp` (session-adjacent, the only

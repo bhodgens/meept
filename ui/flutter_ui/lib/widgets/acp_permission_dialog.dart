@@ -74,6 +74,18 @@ class AcpPermissionDialog extends ConsumerWidget {
               .resolve(request.id, 'deny'),
           child: const Text('deny'),
         ),
+        // Third answer button (acp-always-allow leaf 02, Contract B):
+        // rendered iff the agent offered an allow_always-kind option — an
+        // agent-declared capability. "always" echoes the agent's own option
+        // id; meept persists nothing (master.md design decision 1).
+        if (request.hasAlwaysOption)
+          TextButton(
+            key: const Key('acp-permission-always'),
+            onPressed: () => ref
+                .read(acpPermissionProvider.notifier)
+                .resolve(request.id, 'always'),
+            child: const Text('always'),
+          ),
         FilledButton(
           key: const Key('acp-permission-allow'),
           onPressed: () => ref

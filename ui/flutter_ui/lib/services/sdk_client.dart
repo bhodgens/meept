@@ -384,8 +384,8 @@ class SdkApiClient {
   }
 
   /// POST /api/v1/acp/permissions/resolve with `{id, decision}`. The daemon
-  /// validates decision explicitly as "allow" or "deny" (400 otherwise);
-  /// callers must pass one of those lowercase verbs.
+  /// validates decision explicitly as "allow", "deny", or "always" (400
+  /// otherwise); callers must pass one of those lowercase verbs.
   Future<Map<String, dynamic>> resolveAcpPermission({
     required String id,
     required String decision,

@@ -20,13 +20,21 @@ import (
 // tool ConfirmationModel precedent (tools.go / confirmation.go), per the
 // leaf's "reuse modal accept/decline keys" instruction; no new global
 // keybinding is introduced, so gui_inventory.json + parity_test.go are
-// untouched:
+// untouched. `a` (acp-always-allow leaf 02, Contract B) is a third ANSWER
+// key scoped to this modal only:
 //
 //	y    allow  -> RPC acp.permissions.resolve {id, decision: "allow"}
+//	a    always -> RPC acp.permissions.resolve {id, decision: "always"}
 //	n    deny   -> RPC acp.permissions.resolve {id, decision: "deny"}
 //	esc  dismiss WITHOUT answering; the request stays pending in the queue
 //	     (daemon relay_timeout fails it closed) and the status bar shows
 //	     "acp perms: N pending" until the next frame or answer.
+//
+// The footer advertises `a` ONLY when the FIFO head carries an
+// allow_always-kind agent option (agent-declared capability; graceful 3-key
+// footer otherwise). Pressing `a` on a head without the option is still a
+// valid "always" answer — the daemon resolves it exactly like "allow"
+// (acp-always-allow master.md design decision 2), never an error.
 //
 // Once y/n is pressed the head is marked answerDispatched: further answer
 // keys no-op until the acp.permission.resolved frame lands (or the resolve
@@ -46,7 +54,7 @@ type ACPPermissionModal struct {
 
 // acpPendingRequest is one queued relay request (decoded from the frozen
 // bus.ACPPermissionEvent wire keys: id, agent_id, session_id, summary,
-// created_at).
+// created_at, plus the additive options key from acp-always-allow leaf 01).
 type acpPendingRequest struct {
 	ID        string
 	AgentID   string
@@ -54,10 +62,75 @@ type acpPendingRequest struct {
 	Summary   string
 	CreatedAt string // RFC3339 as published; rendered as-is
 
+	// Options are the agent-offered permission options (raw labels,
+	// {optionId,name,kind}); nil when the frame carried none (old wire or
+	// an agent with no options array).
+	Options []acpPermissionOption
+
 	// answerDispatched guards double y/n presses after an answer was sent
 	// but before the resolved frame confirms it. A failed resolve RPC
 	// resets it (retry allowed).
 	answerDispatched bool
+}
+
+// acpPermissionOption is the TUI decode of one bus
+// bus.ACPPermissionOption wire entry ({optionId,name,kind}).
+type acpPermissionOption struct {
+	OptionID string
+	Name     string
+	Kind     string
+}
+
+// headOffersAlways reports whether the FIFO head carries an allow_always-
+// kind option — the agent-declared capability that gates the footer's `a`
+// hint. Matching mirrors internal/acp resolveAlwaysOptionID (the read
+// side of the same contract): kind == "allow_always" first (the ACP spec
+// token), then a kind containing BOTH "allow" and "always"
+// (case-insensitive). An option with an empty kind never matches.
+func headOffersAlways(opts []acpPermissionOption) bool {
+	for _, o := range opts {
+		if o.Kind == "allow_always" {
+			return true
+		}
+	}
+	for _, o := range opts {
+		kind := strings.ToLower(o.Kind)
+		if strings.Contains(kind, "allow") && strings.Contains(kind, "always") {
+			return true
+		}
+	}
+	return false
+}
+
+// decodeACPPermissionOptions turns the payload "options" key (a JSON array
+// of {optionId,name,kind} maps as it arrives through the map[string]any
+// decode) into the typed slice. Absent/malformed entries are skipped —
+// display polish never fails the modal (a head with undecodable options
+// just shows the 3-key footer).
+func decodeACPPermissionOptions(raw any) []acpPermissionOption {
+	list, ok := raw.([]any)
+	if !ok || len(list) == 0 {
+		return nil
+	}
+	out := make([]acpPermissionOption, 0, len(list))
+	for _, item := range list {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		opt := acpPermissionOption{}
+		opt.OptionID, _ = m["optionId"].(string)
+		opt.Name, _ = m["name"].(string)
+		opt.Kind, _ = m["kind"].(string)
+		if opt.OptionID == "" && opt.Name == "" && opt.Kind == "" {
+			continue
+		}
+		out = append(out, opt)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // NewACPPermissionModal constructs the relay modal.
@@ -112,26 +185,29 @@ func (a *App) acpPermPendingLine() string {
 
 // HandleKey processes a key for the modal. Returns:
 //
-//	("allow"|"deny", id) — the user answered the FIFO head; id is the
-//	                      target request (the flag is marked here so the
+//	("allow"|"always"|"deny", id) — the user answered the FIFO head; id is
+//	                      the target request (the flag is marked here so the
 //	                      App can dispatch the resolve RPC).
-//	("dismiss", "")      — esc: close the modal, queue preserved.
-//	("", "")             — key consumed without state change (repeat
+//	("dismiss", "")     — esc: close the modal, queue preserved.
+//	("", "")            — key consumed without state change (repeat
 //	                      press after dispatch, or empty queue).
 func (m *ACPPermissionModal) HandleKey(key string) (action, id string) {
 	head := m.head()
 	switch key {
 	case "esc":
 		return "dismiss", ""
-	case "y", "Y", "n", "N":
+	case "y", "Y", "a", "A", "n", "N":
 		if head == nil || head.answerDispatched {
 			return "", ""
 		}
 		head.answerDispatched = true
 		m.dispatchCount++
 		m.lastDispatchID = head.ID
-		if key == "y" || key == "Y" {
+		switch key {
+		case "y", "Y":
 			return "allow", head.ID
+		case "a", "A":
+			return "always", head.ID
 		}
 		return "deny", head.ID
 	}
@@ -194,7 +270,16 @@ func (m *ACPPermissionModal) View(screenW, screenH int) string {
 	b.WriteString("\n\n")
 
 	hintStyle := m.styles.Muted.Align(lipgloss.Center).Width(m.width - 4)
-	b.WriteString(hintStyle.Render("[y] allow · [n] deny · [esc] leave pending"))
+	// Conditional footer (acp-always-allow leaf 02, Contract B): the `a`
+	// hint appears ONLY when the head carries an allow_always-kind option
+	// — an agent-declared capability. Agents without the option keep the
+	// 3-key footer (graceful degradation; `a` still works as allow-once
+	// semantics daemon-side, it is simply not advertised).
+	footer := "[y] allow · [n] deny · [esc] leave pending"
+	if headOffersAlways(head.Options) {
+		footer = "[y] allow · [a] always · [n] deny · [esc] leave pending"
+	}
+	b.WriteString(hintStyle.Render(footer))
 
 	boxStyle := m.styles.ModalBox.Width(m.width)
 	content := boxStyle.Render(b.String())
@@ -249,6 +334,7 @@ func (a *App) handleACPPermissionRequested(payload map[string]any) tea.Cmd {
 		SessionID: sessionID,
 		Summary:   summary,
 		CreatedAt: createdAt,
+		Options:   decodeACPPermissionOptions(payload["options"]),
 	})
 	a.acpPermPending = a.acpPermissionModal.Count()
 	// The modal overlay owns the pending line while open; open it on the
@@ -317,12 +403,8 @@ func (a *App) handleACPPermissionModalKey(keyStr string) tea.Cmd {
 		// status bar carries "acp perms: N pending" until the next frame.
 		a.activeModal = ModalNone
 		return nil
-	case "allow", "deny":
-		decision := "allow"
-		if action == "deny" {
-			decision = "deny"
-		}
-		return a.rpcResolveACPPermission(id, decision)
+	case "allow", "always", "deny":
+		return a.rpcResolveACPPermission(id, action)
 	}
 	return nil
 }

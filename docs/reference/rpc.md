@@ -658,7 +658,7 @@ Reports the ACP client catalog and live session state. Registered even when the 
 
 #### `acp.permissions.list` - Pending Human-Relay Permissions
 
-With `[acp] permission_mode = "human"` (or decision-lane escalation), each inbound `session/requestPermission` becomes a pending record until a person answers or `relay_timeout` fails it closed. This method returns the pending queue. Nil/disabled manager: `{"enabled": false, "pending": []}`.
+With `[acp] permission_mode = "human"` (or decision-lane escalation), each inbound `session/requestPermission` becomes a pending record until a person answers or `relay_timeout` fails it closed. This method returns the pending queue. Rows carry the additive `options` key (agent-offered `{optionId,name,kind}` labels; omitted when the agent offered none) so a reconnecting surface can render the `allow_always` affordance from the snapshot alone. Nil/disabled manager: `{"enabled": false, "pending": []}`.
 
 **Response:**
 ```json
@@ -673,7 +673,11 @@ With `[acp] permission_mode = "human"` (or decision-lane escalation), each inbou
         "agent_id": "codex",
         "session_id": "sess-…",
         "summary": "Agent: codex\nPermission request: {\"sessionId\":\"sess-…\"}",
-        "created_at": "2026-10-19T21:44:02Z"
+        "created_at": "2026-10-19T21:44:02Z",
+        "options": [
+          {"optionId": "allow-once-1", "name": "Allow once", "kind": "allow_once"},
+          {"optionId": "always-1", "name": "Always allow in session", "kind": "allow_always"}
+        ]
       }
     ]
   }
@@ -692,7 +696,7 @@ With `[acp] permission_mode = "human"` (or decision-lane escalation), each inbou
 }
 ```
 
-`decision` must be exactly `"allow"` or `"deny"` — anything else is rejected at the RPC boundary (a typo never silently denies). One answer per id: a second resolve returns a `permission already answered` error; an unknown id returns `permission not found`. The resolved frame publishes to the `acp.permission.resolved` topic so every surface (TUI/GUI) dismisses the entry.
+`decision` must be exactly `"allow"`, `"deny"`, or `"always"` — anything else is rejected at the RPC boundary (a typo never silently denies). `always` echoes the agent's own `allow_always` option when it offers one (otherwise it resolves exactly like `allow`; meept persists nothing — see [Acp](../workflows/acp.md) "Always-allow semantics"). One answer per id: a second resolve returns a `permission already answered` error; an unknown id returns `permission not found`. The resolved frame publishes to the `acp.permission.resolved` topic so every surface (TUI/GUI) dismisses the entry.
 
 See [Acp](../workflows/acp.md) for the full relay flow and fail-closed semantics.
 

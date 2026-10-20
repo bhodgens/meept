@@ -1015,7 +1015,7 @@ These endpoints report meept's ACP *client* catalog (the external agents meept l
 |--------|------|-------------|
 | GET | `/api/v1/acp/agents` | List catalog agents with enabled/running/state |
 | GET | `/api/v1/acp/permissions` | Pending human-relay permission requests (`{"enabled": …, "pending": […]}`; disabled/nil manager returns 200 with an empty list — never 500) |
-| POST | `/api/v1/acp/permissions/resolve` | Answer one request: body `{"id": "<perm id>", "decision": "allow" \| "deny"}`; 400 on a malformed body/decision |
+| POST | `/api/v1/acp/permissions/resolve` | Answer one request: body `{"id": "<perm id>", "decision": "allow" \| "deny" \| "always"}`; 400 on a malformed body/decision |
 
 ```bash
 curl http://localhost:8081/api/v1/acp/agents

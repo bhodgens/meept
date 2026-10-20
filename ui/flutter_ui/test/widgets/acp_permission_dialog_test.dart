@@ -72,6 +72,7 @@ Map<String, dynamic> _requested({
   String agentId = 'claude',
   String sessionId = 'sess-1',
   String summary = 'write file outside workspace',
+  List<Map<String, dynamic>>? options,
 }) => {
   'type': 'agent_progress',
   'source_topic': 'acp.permission.requested',
@@ -80,7 +81,20 @@ Map<String, dynamic> _requested({
   'session_id': sessionId,
   'summary': summary,
   'created_at': '2026-10-19T12:34:56Z',
+  if (options != null) 'options': options,
 };
+
+// acp-always-allow leaf 01 wire shape: agent-offered options with an
+// allow_always entry.
+const _alwaysOptions = [
+  {'optionId': 'allow-once-1', 'name': 'Allow once', 'kind': 'allow_once'},
+  {
+    'optionId': 'always-1',
+    'name': 'Always allow in session',
+    'kind': 'allow_always',
+  },
+  {'optionId': 'reject-1', 'name': 'Reject', 'kind': 'reject_once'},
+];
 
 Map<String, dynamic> _resolved({String id = 'perm-aaaa1111'}) => {
   'type': 'agent_progress',
@@ -151,6 +165,93 @@ void main() {
       expect(find.text('request: perm-aaa'), findsOneWidget);
       expect(find.text('allow'), findsOneWidget);
       expect(find.text('deny'), findsOneWidget);
+      // No options on the request -> no third "always" button
+      // (agent-declared capability, acp-always-allow leaf 02).
+      expect(find.text('always'), findsNothing);
+      expect(find.byKey(const Key('acp-permission-always')), findsNothing);
+    });
+
+    testWidgets('always button renders iff options carry allow_always', (
+      tester,
+    ) async {
+      Widget wrap(AcpPendingPermission request) => ProviderScope(
+        overrides: [
+          sdkClientProvider.overrideWith((_) => client),
+          websocketProvider.overrideWith((_) => ws),
+        ],
+        child: MaterialApp(
+          home: Scaffold(body: AcpPermissionDialog(request: request)),
+        ),
+      );
+
+      await tester.pumpWidget(
+        wrap(
+          const AcpPendingPermission(
+            id: 'p1',
+            agentId: 'a',
+            sessionId: 's',
+            summary: 'x',
+            createdAt: '',
+            options: [
+              AcpPermissionOption(
+                optionId: 'allow-once-1',
+                name: 'Allow once',
+                kind: 'allow_once',
+              ),
+              AcpPermissionOption(
+                optionId: 'always-1',
+                name: 'Always allow in session',
+                kind: 'allow_always',
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(find.byKey(const Key('acp-permission-always')), findsOneWidget);
+      expect(find.text('always'), findsOneWidget);
+
+      // A loosely-named kind (contains allow + always, case-insensitive)
+      // counts too — mirrors resolveAlwaysOptionID's second pass.
+      await tester.pumpWidget(
+        wrap(
+          const AcpPendingPermission(
+            id: 'p2',
+            agentId: 'a',
+            sessionId: 's',
+            summary: 'x',
+            createdAt: '',
+            options: [
+              AcpPermissionOption(
+                optionId: 'alw',
+                name: 'Always',
+                kind: 'Allow-Always-scoped',
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(find.byKey(const Key('acp-permission-always')), findsOneWidget);
+
+      // Options without any allow_always-kind entry -> no always button.
+      await tester.pumpWidget(
+        wrap(
+          const AcpPendingPermission(
+            id: 'p3',
+            agentId: 'a',
+            sessionId: 's',
+            summary: 'x',
+            createdAt: '',
+            options: [
+              AcpPermissionOption(
+                optionId: 'allow-once-1',
+                name: 'Allow once',
+                kind: 'allow_once',
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(find.byKey(const Key('acp-permission-always')), findsNothing);
     });
 
     testWidgets('bounded summary truncates past 240 chars with ellipsis', (
@@ -221,6 +322,24 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
 
       expect(client.resolves.single, ['perm-aaaa1111', 'deny']);
+      expect(find.byKey(const Key('acp-permission-dialog')), findsNothing);
+    });
+
+    testWidgets('always tap POSTs always (options-carrying frame)', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_hostApp(client, ws));
+      await tester.pump();
+      ws.pushFrame(_requested(options: _alwaysOptions));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.byKey(const Key('acp-permission-always')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('acp-permission-always')));
+      await tester.pump(); // resolve POST future completes
+      await tester.pump(const Duration(milliseconds: 400)); // pop anim
+
+      expect(client.resolves.single, ['perm-aaaa1111', 'always']);
       expect(find.byKey(const Key('acp-permission-dialog')), findsNothing);
     });
 

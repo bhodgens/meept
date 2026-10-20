@@ -75,13 +75,18 @@ func (h *ACPHandler) list() ACPListResult {
 }
 
 // ACPPendingPermissionStatus is one still-answerable human relay request
-// (frozen keys: id, agent_id, session_id, summary, created_at).
+// (frozen keys: id, agent_id, session_id, summary, created_at; plus the
+// additive options key — the agent-offered {optionId,name,kind} labels —
+// from acp-always-allow leaf 01, so list consumers (GUI catch-up after a
+// reconnect missed the requested frame) can render the allow_always
+// affordance too).
 type ACPPendingPermissionStatus struct {
-	ID        string    `json:"id" yaml:"id"`
-	AgentID   string    `json:"agent_id" yaml:"agent_id"`
-	SessionID string    `json:"session_id" yaml:"session_id"`
-	Summary   string    `json:"summary" yaml:"summary"`
-	CreatedAt time.Time `json:"created_at" yaml:"created_at"`
+	ID        string                 `json:"id" yaml:"id"`
+	AgentID   string                 `json:"agent_id" yaml:"agent_id"`
+	SessionID string                 `json:"session_id" yaml:"session_id"`
+	Summary   string                 `json:"summary" yaml:"summary"`
+	CreatedAt time.Time              `json:"created_at" yaml:"created_at"`
+	Options   []acp.PermissionOption `json:"options,omitempty" yaml:"options,omitempty"`
 }
 
 // ACPPermissionsResult is the envelope returned by acp.permissions.list and
@@ -120,6 +125,7 @@ func (h *ACPHandler) permissionsList() ACPPermissionsResult {
 			SessionID: p.SessionID,
 			Summary:   p.Summary,
 			CreatedAt: p.CreatedAt,
+			Options:   p.Options,
 		})
 	}
 	// Enabled mirrors HasPermissionRelay: the pending list only ever fills

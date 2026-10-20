@@ -161,9 +161,13 @@ subscribes via `websocket.subscribeToAcpPermissions()` to the WS
 through the resolved frame, same as the TUI modal walking its FIFO queue).
 `ui/flutter_ui/lib/widgets/acp_permission_dialog.dart` shows
 "AcpPermissionDialog" — title `acp permission request (xN)` while
-requests stack — with lowercase `allow`/`deny` buttons that POST
+requests stack — with lowercase `allow`/`deny` buttons (plus a third
+`always` button rendered iff the requested frame's `options` carry an
+`allow_always`-kind entry; acp-always-allow leaf 02) that POST
 `/api/v1/acp/permissions/resolve`; a failed resolve keeps the dialog open
-and retains the error for retry. The dialog host is mounted by the
+and retains the error for retry. The status badge/count span is unchanged
+by the always option (pending count looks the same either way). The
+dialog host is mounted by the
 `MaterialApp.builder` in `ui/flutter_ui/lib/core/router.dart` above the
 Navigator (via `rootNavigatorKey`) so it renders regardless of the active
 route, mirroring the TUI's `runModal` layering; it is web-safe (no

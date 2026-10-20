@@ -94,20 +94,38 @@ requestPermission arrives
   -> wait on select: human resolve vs relay_timeout timer
      - resolve allow -> ACP reply {outcome: "selected", optionId:
        "allow-once"}; agent proceeds
+     - resolve always -> ACP reply {outcome: "selected", optionId: the
+       agent's own allow_always option (fallback: the allow-once chain)};
+       the AGENT persists the grant
      - resolve deny  -> ACP reply {outcome: "cancelled"}
      - timeout       -> ACP reply {outcome: "cancelled"} + WARN
        "acp permission denied: human relay timed out"
-  -> emit permission_resolved (text: "allow" | "deny" | "timeout") +
+  -> emit permission_resolved (text: "allow" | "always" | "deny" | "timeout") +
      publish acp.permission.resolved (decision + reason)
 ```
 
 `relay_timeout` (seconds, default 120) is enforced `> 0` by config
 validation only when `permission_mode = "human"` or
 `decision_escalate_to_human = true`; a non-positive value at runtime falls
-back to the 120 s default inside the session. v1 answer verbs are exactly
-`allow` / `deny` — there is no "always"; the resolve boundary
+back to the 120 s default inside the session. Human answer verbs are
+exactly `allow` / `deny` / `always` — the resolve boundary
 (RPC/HTTP/CLI) rejects any other verb before touching the registry, so a
-typo never becomes a silent deny.
+typo never becomes a silent deny. The decision lane (model vote) keeps
+`allow` / `deny` only; `always` is a human-only verb.
+
+### Always-allow semantics
+
+`always` makes meept a TRANSPORT, not a memory (acp-always-allow master.md
+design decisions 1-2). When a human answers "always", the ACP reply echoes
+the AGENT's own `allow_always`-kind optionId from its requestPermission
+`options` array — the agent persists the grant and stops re-asking within
+its own session/scope. Meept persists NOTHING: no policy store, no
+cross-session grants. An agent that offers no `allow_always` option (or no
+`options` array at all) resolves "always" exactly like "allow" (allow-once
+echo + default fallback) — never an error, never a silent deny. Surfaces
+render the affordance from the agent-declared capability: the TUI footer
+and the GUI dialog show the always key/button only when the pending
+request carries an `allow_always`-kind option.
 
 ### Decision-lane escalation (`decision_escalate_to_human`)
 
@@ -120,7 +138,7 @@ outrightly. An `allow` outcome never touches the relay. The terminal
 
 | Outcome | Text | ACP reply |
 |---------|------|-----------|
-| relay allow | `escalated_human_allow` | selected / allow-once |
+| relay allow / always | `escalated_human_allow` | selected / allow-once (always echoes the agent's own allow_always option when offered) |
 | relay deny | `escalated_human_deny` | cancelled |
 | relay timeout | `deny` (parent cancel semantics kept) | cancelled |
 | escalate armed, relay not wired | original decision text + WARN reason `escalated_human_no_relay` | cancelled |
@@ -133,9 +151,9 @@ cancels exactly like a plain decision deny.
 
 | Surface | Entry point | Notes |
 |---------|-------------|-------|
-| TUI | `internal/tui/acp_permission.go` modal | FIFO queue per request; `y` allow, `n` deny, `esc` dismiss-without-answering (stays pending, timeout fails it); auto-dismiss on the resolved frame from ANY surface + toast; failed resolve keeps the modal for retry |
-| GUI | `ui/flutter_ui/lib/widgets/acp_permission_dialog.dart` + `acp_permission_provider.dart` | dialog host in `MaterialApp.builder` (rootNavigatorKey), allow/deny buttons POST the resolve route; status-bar badge while pending |
-| CLI | `meept acp permissions list [--json]`, `meept acp permissions resolve <id> allow\|deny` | `cmd/meept/acp_cmd.go`; bad verb refused before any daemon call |
+| TUI | `internal/tui/acp_permission.go` modal | FIFO queue per request; `y` allow, `a` always, `n` deny, `esc` dismiss-without-answering (stays pending, timeout fails it); the footer advertises `[a] always` ONLY when the head carries an allow_always-kind option (agent-declared capability; 3-key footer otherwise); auto-dismiss on the resolved frame from ANY surface + toast; failed resolve keeps the modal for retry |
+| GUI | `ui/flutter_ui/lib/widgets/acp_permission_dialog.dart` + `acp_permission_provider.dart` | dialog host in `MaterialApp.builder` (rootNavigatorKey), allow/always/deny buttons POST the resolve route — the third `always` button renders iff the event's `options` carry an allow_always-kind entry; status-bar badge while pending |
+| CLI | `meept acp permissions list [--json]`, `meept acp permissions resolve <id> allow\|deny\|always` | `cmd/meept/acp_cmd.go`; bad verb refused before any daemon call |
 | HTTP | `GET /api/v1/acp/permissions`, `POST /api/v1/acp/permissions/resolve` `{id, decision}` | `internal/comm/http/acp_status.go`; disabled/nil manager = 200 with `{"enabled": false, "pending": []}` |
 | RPC | `acp.permissions.list`, `acp.permissions.resolve {id, decision}` | `internal/rpc/acp.go`; registered even with a nil manager (list = empty, resolve = not-found) |
 
@@ -153,16 +171,18 @@ Session event kinds (internal/acp `SessionEvent.Kind`):
 | `permission_request` | permissive/deny/decision lanes | `approved`/`denied` or decision outcome text (escalation: the table above) |
 | `permission_decision` | decision lane (+ escalation) | outcome / `escalated_human_*` text |
 | `permission_requested` | human relay wait | the pending id (`perm-…`) |
-| `permission_resolved` | human relay wait | `allow` / `deny` / `timeout` |
+| `permission_resolved` | human relay wait | `allow` / `always` / `deny` / `timeout` |
 
 Bus + WS (typed `bus.Topic[T]`, payload `bus.ACPPermissionEvent`; keys
-`id`, `agent_id`, `session_id`, `summary`, `created_at`, plus
+`id`, `agent_id`, `session_id`, `summary`, `created_at`, the additive
+`options` array (`{optionId,name,kind}`, omitted when the agent offered
+none), plus
 `decision`/`reason` on the resolved frame):
 
 | Topic | WS type | decision | reason |
 |-------|---------|----------|--------|
 | `acp.permission.requested` | `agent_progress` | empty | empty |
-| `acp.permission.resolved` | `agent_progress` | `allow`/`deny` | `answered` / `timeout` (the fail-closed reject reasons `no_relay`/`full` land in the WARN log fields, not on a published frame — nothing reached the registry/surfaces in those paths) |
+| `acp.permission.resolved` | `agent_progress` | `allow`/`always`/`deny` | `answered` / `timeout` (the fail-closed reject reasons `no_relay`/`full` land in the WARN log fields, not on a published frame — nothing reached the registry/surfaces in those paths) |
 
 The payload carries a `wsclass` marker (`WSClass()` → progress), so
 classification is marker-driven, never the legacy prefix table — relay
@@ -227,12 +247,12 @@ middleware:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/acp/permissions` | Pending permission snapshot: `{"enabled": true, "pending": [{id, agent_id, session_id, summary, created_at}]}`; disabled/nil manager = 200 `{"enabled": false, "pending": []}` |
-| POST | `/api/v1/acp/permissions/resolve` | Body `{"id": "perm-…", "decision": "allow"\|"deny"}`; echo `{"decision": …, "reason": "answered"}`; 400 on missing id or a verb other than allow/deny |
+| GET | `/api/v1/acp/permissions` | Pending permission snapshot: `{"enabled": true, "pending": [{id, agent_id, session_id, summary, created_at, options?}]}` (`options` is the additive agent-offered `{optionId,name,kind}` array, omitted when none); disabled/nil manager = 200 `{"enabled": false, "pending": []}` |
+| POST | `/api/v1/acp/permissions/resolve` | Body `{"id": "perm-…", "decision": "allow"\|"deny"\|"always"}`; echo `{"decision": …, "reason": "answered"}`; 400 on missing id or a verb other than allow/deny/always |
 
 RPC equivalents: `acp.permissions.list` / `acp.permissions.resolve`. CLI:
 `meept acp permissions list [--json]` / `meept acp permissions resolve <id>
-allow|deny`.
+allow|deny|always`.
 
 ## Edge Cases
 

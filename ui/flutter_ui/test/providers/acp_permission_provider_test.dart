@@ -94,6 +94,7 @@ Map<String, dynamic> _requested({
   String sessionId = 'sess-1',
   String summary = 'edit file outside workspace',
   String createdAt = '2026-10-19T12:00:00Z',
+  List<Map<String, dynamic>>? options,
 }) => {
   'type': 'agent_progress',
   'source_topic': 'acp.permission.requested',
@@ -102,6 +103,7 @@ Map<String, dynamic> _requested({
   'session_id': sessionId,
   'summary': summary,
   'created_at': createdAt,
+  if (options != null) 'options': options,
 };
 
 Map<String, dynamic> _resolved({
@@ -252,6 +254,57 @@ void main() {
       await notifier.resolve('a', 'deny');
       expect(client.resolves.single, ['a', 'deny']);
       expect(notifier.state.count, 0);
+    });
+
+    test('always POSTs decision always (provider passes it through)', () async {
+      // acp-always-allow leaf 02: the daemon accepts the third verb; the
+      // provider never validates the string locally.
+      ws.pushFrame(_requested(id: 'a'));
+      await notifier.resolve('a', 'always');
+      expect(client.resolves.single, ['a', 'always']);
+      expect(notifier.state.count, 0);
+    });
+
+    test('requested frame parses the additive options key', () {
+      ws.pushFrame(
+        _requested(
+          options: const [
+            {
+              'optionId': 'allow-once-1',
+              'name': 'Allow once',
+              'kind': 'allow_once',
+            },
+            {
+              'optionId': 'always-1',
+              'name': 'Always allow in session',
+              'kind': 'allow_always',
+            },
+          ],
+        ),
+      );
+      final head = notifier.state.head!;
+      expect(head.options.length, 2);
+      expect(head.options.first.optionId, 'allow-once-1');
+      expect(head.hasAlwaysOption, isTrue);
+    });
+
+    test('frame without options (or only once-kind) never has always', () {
+      ws.pushFrame(_requested(id: 'a'));
+      expect(notifier.state.head!.options, isEmpty);
+      expect(notifier.state.head!.hasAlwaysOption, isFalse);
+      ws.pushFrame(
+        _requested(
+          id: 'b',
+          options: const [
+            {
+              'optionId': 'allow-once-1',
+              'name': 'Allow once',
+              'kind': 'allow_once',
+            },
+          ],
+        ),
+      );
+      expect(notifier.state.pending['b']!.hasAlwaysOption, isFalse);
     });
 
     test('failed resolve keeps the entry and records the error', () async {

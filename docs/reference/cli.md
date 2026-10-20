@@ -449,7 +449,7 @@ Verified against the binary. Run `meept <command> --help` for flags.
 
 | Command | Subcommands | Purpose |
 |---------|-------------|---------|
-| `meept acp` | agents, permissions (list, resolve) | ACP client catalog + human permission relay (see [Acp](../workflows/acp.md)) |
+| `meept acp` | agents, permissions (list, resolve <id> allow\|deny\|always) | ACP client catalog + human permission relay (see [Acp](../workflows/acp.md)) |
 | `meept analytics` | errors, export, models, summary | Agent performance and model metrics |
 | `meept backup` | list, push | Database backups |
 | `meept benchmark` | — | SWE-bench-style regression benchmarks |

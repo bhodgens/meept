@@ -223,6 +223,28 @@ func acpRequestedEvent(id, agent, session, summary string) BusEvent {
 	}
 }
 
+// acpRequestedEventWithOptions builds a requested frame that ALSO carries
+// the additive "options" key (acp-always-allow leaf 01 wire shape: array of
+// {optionId,name,kind}), exactly how the WS/bus decode delivers it.
+func acpRequestedEventWithOptions(id, agent, session, summary string, options []map[string]any) BusEvent {
+	opts := make([]any, 0, len(options))
+	for _, o := range options {
+		opts = append(opts, o)
+	}
+	return BusEvent{
+		Topic: bus.TopicACPPermissionRequested.Name,
+		Type:  "event",
+		Payload: map[string]any{
+			"id":         id,
+			"agent_id":   agent,
+			"session_id": session,
+			"summary":    summary,
+			"created_at": time.Now().UTC().Format(time.RFC3339),
+			"options":    opts,
+		},
+	}
+}
+
 func acpResolvedEvent(id, decision, reason string) BusEvent {
 	return BusEvent{
 		Topic: bus.TopicACPPermissionResolved.Name,
@@ -413,5 +435,113 @@ func TestACPModal_ResolveFailureKeepsModalRetryable(t *testing.T) {
 	}
 	if app.acpPermissionModal.dispatchCount != 2 {
 		t.Fatalf("dispatchCount = %d, want 2 after retry", app.acpPermissionModal.dispatchCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// acp-always-allow leaf 02 (Contract B): the `a` key + conditional footer.
+// ---------------------------------------------------------------------------
+
+var acpAlwaysOptions = []map[string]any{
+	{"optionId": "allow-once-1", "name": "Allow once", "kind": "allow_once"},
+	{"optionId": "always-session-1", "name": "Always allow in session", "kind": "allow_always"},
+	{"optionId": "reject-1", "name": "Reject", "kind": "reject_once"},
+}
+
+func TestACPModal_AlwaysKeyResolvesAlways(t *testing.T) {
+	hp := newHeadlessApp(t, goldenWidth, goldenHeight)
+	settleAsync()
+	hp.stub.setResult("acp.permissions.resolve", map[string]any{"id": "perm-1", "decision": "always", "reason": "answered"})
+
+	sendACPEvents(hp, acpRequestedEventWithOptions("perm-1", "ag-1", "sess-1", "always me", acpAlwaysOptions))
+	app := hp.finish(goldenWidth, goldenHeight)
+
+	// Conditional footer shows the a hint when the head offers allow_always.
+	view := ansi.Strip(app.acpPermissionModal.View(goldenWidth, goldenHeight))
+	if !strings.Contains(view, "[a] always") {
+		t.Errorf("footer should advertise [a] always when head offers allow_always, got:\n%s", view)
+	}
+
+	// a on the head answers ALWAYS via RPC acp.permissions.resolve; the
+	// dispatched cmd carries decision "always" verbatim into the RPC
+	// params (leaf 01 accepts it at the boundary).
+	_, cmd := app.Update(keyPressMsgFor("a"))
+	if cmd == nil {
+		t.Fatal("a did not dispatch a resolve RPC cmd")
+	}
+	if app.acpPermissionModal.dispatchCount != 1 {
+		t.Fatalf("a did not dispatch resolve for the head (dispatchCount=%d, want 1)", app.acpPermissionModal.dispatchCount)
+	}
+	if app.acpPermissionModal.lastDispatchID != "perm-1" {
+		t.Fatalf("dispatch targeted %q, want perm-1", app.acpPermissionModal.lastDispatchID)
+	}
+	msg := cmd()
+	res, ok := msg.(ACPPermissionResolveResultMsg)
+	if !ok {
+		t.Fatalf("cmd produced %T, want ACPPermissionResolveResultMsg", msg)
+	}
+	if res.Decision != "always" {
+		t.Errorf("dispatched decision = %q, want always", res.Decision)
+	}
+	if res.Err != nil {
+		t.Errorf("resolve over the stub failed: %v", res.Err)
+	}
+	// double-press guard: a second a no-ops until the resolved frame.
+	action, _ := app.acpPermissionModal.HandleKey("a")
+	if action != "" {
+		t.Errorf("second a after dispatch = %q, want no-op", action)
+	}
+
+	// The always-resolved frame dismisses + toasts without choking: it is
+	// NOT an error toast (deny-only mapping), and the modal closes.
+	app.Update(EventStreamDataMsg{Events: []BusEvent{acpResolvedEvent("perm-1", "always", "answered")}})
+	if app.activeModal != ModalNone {
+		t.Fatalf("always-resolved frame should dismiss the modal (activeModal=%v)", app.activeModal)
+	}
+	if app.acpPermPending != 0 {
+		t.Fatalf("pending queue = %d, want 0", app.acpPermPending)
+	}
+	app.Update(tea.WindowSizeMsg{Width: goldenWidth, Height: goldenHeight})
+	toasts := ansi.Strip(app.notifications.View(goldenWidth))
+	if !strings.Contains(toasts, "always") {
+		t.Errorf("resolved toast should carry the always decision, got:\n%s", toasts)
+	}
+}
+
+func TestACPModal_FooterGatedByOptionsKey(t *testing.T) {
+	hp := newHeadlessApp(t, goldenWidth, goldenHeight)
+	settleAsync()
+
+	// Head WITHOUT an allow_always-kind option: 3-key footer (the [a]
+	// hint is an agent-declared capability, gracefully absent).
+	sendACPEvents(hp, acpRequestedEventWithOptions("perm-no", "ag-1", "sess-1", "no always here",
+		[]map[string]any{{"optionId": "allow-once-1", "name": "Allow once", "kind": "allow_once"}}))
+	app := hp.finish(goldenWidth, goldenHeight)
+	view := ansi.Strip(app.acpPermissionModal.View(goldenWidth, goldenHeight))
+	if strings.Contains(view, "[a] always") {
+		t.Errorf("footer must NOT advertise [a] always without the option, got:\n%s", view)
+	}
+	if !strings.Contains(view, "[y] allow") || !strings.Contains(view, "[n] deny") {
+		t.Errorf("3-key footer missing allow/deny hints, got:\n%s", view)
+	}
+
+	// Absent-options head (old wire shape) keeps the same 3-key footer.
+	app.Update(EventStreamDataMsg{Events: []BusEvent{acpRequestedEvent("perm-old", "ag-2", "sess-2", "legacy frame")}})
+	view2 := ansi.Strip(app.acpPermissionModal.View(goldenWidth, goldenHeight))
+	if strings.Contains(view2, "[a] always") {
+		t.Errorf("absent-options head must keep the 3-key footer, got:\n%s", view2)
+	}
+
+	// A head whose kind only loosely matches (contains allow+always,
+	// case-insensitive) still gates the footer — mirrors
+	// resolveAlwaysOptionID's second pass.
+	app3hp := newHeadlessApp(t, goldenWidth, goldenHeight)
+	settleAsync()
+	sendACPEvents(app3hp, acpRequestedEventWithOptions("perm-loose", "ag-1", "sess-1", "loose kind",
+		[]map[string]any{{"optionId": "alw", "name": "Always", "kind": "Allow-Always-scoped"}}))
+	app3 := app3hp.finish(goldenWidth, goldenHeight)
+	view3 := ansi.Strip(app3.acpPermissionModal.View(goldenWidth, goldenHeight))
+	if !strings.Contains(view3, "[a] always") {
+		t.Errorf("case-insensitive allow+always kind should gate the footer on, got:\n%s", view3)
 	}
 }

@@ -300,11 +300,74 @@ func TestACPHandler_PermissionsList_TagParity(t *testing.T) {
 		"SessionID": "session_id",
 		"Summary":   "summary",
 		"CreatedAt": "created_at",
+		"Options":   "options,omitempty",
 	})
 	assertJSONYAMLTags(t, reflect.TypeOf(ACPPermissionsResult{}), map[string]string{
 		"Enabled": "enabled",
 		"Pending": "pending",
 	})
+}
+
+func TestACPHandler_PermissionsList_OptionsPassthrough(t *testing.T) {
+	// acp-always-allow leaf 02: the list envelope carries the additive
+	// options key so a GUI that missed the requested frame (reconnect
+	// catch-up) can still render the allow_always affordance. A pending
+	// without options OMITS the key (omitempty) — frozen keys untouched.
+	mgr, rl := acpEnabledRelayManager(t)
+	if _, err := rl.Register(acp.PendingPermission{
+		ID:        "perm-opts",
+		AgentID:   "codex",
+		SessionID: "sess-abc",
+		Summary:   "tool exec: rm -rf",
+		Options: []acp.PermissionOption{
+			{OptionID: "allow-once-1", Name: "Allow once", Kind: "allow_once"},
+			{OptionID: "always-1", Name: "Always allow in session", Kind: "allow_always"},
+		},
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, err := rl.Register(acp.PendingPermission{
+		ID: "perm-bare", AgentID: "codex", SessionID: "sess-def", Summary: "no options",
+	}); err != nil {
+		t.Fatalf("Register bare: %v", err)
+	}
+
+	h := NewACPHandler(mgr)
+	srv := New(&Config{SocketPath: ""}, nil, nil)
+	h.RegisterACPMethods(srv)
+	res, err := srv.CallMethod(context.Background(), "acp.permissions.list", json.RawMessage("{}"))
+	if err != nil {
+		t.Fatalf("acp.permissions.list: %v", err)
+	}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded struct {
+		Pending []map[string]any `json:"pending"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(decoded.Pending) != 2 {
+		t.Fatalf("pending len = %d, want 2", len(decoded.Pending))
+	}
+	byID := map[string]map[string]any{}
+	for _, row := range decoded.Pending {
+		id, _ := row["id"].(string)
+		byID[id] = row
+	}
+	opts, ok := byID["perm-opts"]["options"].([]any)
+	if !ok || len(opts) != 2 {
+		t.Fatalf("options = %v, want 2-entry array", byID["perm-opts"]["options"])
+	}
+	o0, _ := opts[0].(map[string]any)
+	if o0["optionId"] != "allow-once-1" || o0["kind"] != "allow_once" {
+		t.Errorf("options[0] = %v, want wire keys {optionId,kind}", o0)
+	}
+	if _, present := byID["perm-bare"]["options"]; present {
+		t.Errorf("options key present on a no-options row: %v", byID["perm-bare"])
+	}
 }
 
 func TestACPHandler_PermissionsResolve_NilManager(t *testing.T) {
