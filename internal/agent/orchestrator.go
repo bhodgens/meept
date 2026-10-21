@@ -904,6 +904,12 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 		ToolCallID string `json:"tool_call_id"`
 		ToolName   string `json:"tool_name"`
 		Success    bool   `json:"success"`
+		// ConversationID is the accounting session id carried by
+		// tool.execution.complete (executor.go publishToolComplete); it
+		// threads the reflection LLM call's task scope (bughunt 2026-10-19
+		// M6: the engine is a daemon singleton, so scope must ride the
+		// call, never a wired provider).
+		ConversationID string `json:"conversation_id,omitempty"`
 		// EditedFiles contains file paths that were modified by the tool
 		EditedFiles []string `json:"edited_files,omitempty"`
 	}
@@ -928,6 +934,15 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 	o.wg.Go(func() {
 		reflectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
+		// Thread the event's accounting session id as the reflection
+		// call's task scope (bughunt 2026-10-19 M6): resolveCallScope
+		// inside ReflectionEngine prefers these per-call options over any
+		// wired provider, so the singleton engine's LLM calls carry the
+		// right affinity header + budget scope. Empty id = no scope (the
+		// engine falls back to its provider, normally nil).
+		if event.ConversationID != "" {
+			reflectCtx = WithScopeOptions(reflectCtx, []llm.ChatOption{llm.WithTaskScope("", event.ConversationID)})
+		}
 		result, err := o.reflectionEngine.RunReflection(reflectCtx, event.EditedFiles)
 		if err != nil {
 			o.logger.Error("Reflection failed",
