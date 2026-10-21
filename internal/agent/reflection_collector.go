@@ -27,24 +27,19 @@ type ReflectionCollector struct {
 	queue       *proposalQueue
 	logger      *slog.Logger
 
-	// scopeProvider, when set, supplies the owning loop's task/session
-	// scope for the classifier LLM call (leaf 01 session-affinity).
-	scopeProvider chatScopeProvider
-
 	// classifierRunOnce, if non-nil, overrides the classifier call for tests.
 	// The test substitutes a function returning a canned LLM output string.
 	classifierRunOnce func(ctx context.Context, prompt, convID string) (string, error)
 }
 
-// SetScopeProvider wires the owning agent loop so per-turn classifier LLM
-// calls carry the loop's current task/session scope (leaf 01
-// session-affinity). Nil guard prevents typed-nil panic.
-func (rc *ReflectionCollector) SetScopeProvider(provider chatScopeProvider) {
-	if provider == nil {
-		return
-	}
-	rc.scopeProvider = provider
-}
+// NOTE: the collector is a daemon-wide singleton SHARED by every session
+// clone (ConfigSnapshot propagates it). It must therefore hold NO
+// per-session mutable state: the owning loop's task/session scope is
+// captured at turn end and passed PER CALL to ReflectTurnWithScope. The
+// former SetScopeProvider seam re-pointed the shared collector at
+// whichever loop finished a turn last — an unsynchronized write read back
+// by a background goroutine, which misattributed session A's reflection
+// LLM call to session B's scope (and was a plain data race under -race).
 
 // NewReflectionCollector constructs a collector wired to the given classifier,
 // template loader, and proposal queue path. logger MUST be non-nil.
@@ -69,9 +64,19 @@ func NewReflectionCollector(
 	}
 }
 
-// ReflectTurn runs per-turn reflection. Builds a prompt from the trajectory,
-// calls the classifier, validates confidence, and queues proposals.
+// ReflectTurn runs per-turn reflection with no caller scope (see
+// ReflectTurnWithScope for the scoped form the loop uses). Builds a
+// prompt from the trajectory, calls the classifier, validates
+// confidence, and queues proposals.
 func (rc *ReflectionCollector) ReflectTurn(ctx context.Context, traj ReflectionTrajectory) error {
+	return rc.ReflectTurnWithScope(ctx, traj, nil)
+}
+
+// ReflectTurnWithScope is ReflectTurn with the owning loop's task/session
+// scope CAPTURED BY THE CALLER at turn end and passed per call. The
+// collector is shared across every session clone, so the scope must never
+// live on the collector: each concurrent turn carries its own.
+func (rc *ReflectionCollector) ReflectTurnWithScope(ctx context.Context, traj ReflectionTrajectory, scope []llm.ChatOption) error {
 	if !rc.cfg.Enabled {
 		return nil
 	}
@@ -101,11 +106,12 @@ func (rc *ReflectionCollector) ReflectTurn(ctx context.Context, traj ReflectionT
 			return fmt.Errorf("classifier run once failed: %w", runErr)
 		}
 	} else if rc.classifier != nil {
-		// Call classifier via the Chat interface.
-		opts := prependScope(rc.scopeProvider, []llm.ChatOption{
+		// Call classifier via the Chat interface. Scope options are the
+		// caller-captured per-call scope (never shared collector state).
+		opts := append(append([]llm.ChatOption(nil), scope...),
 			llm.WithMaxTokens(500),
 			llm.WithTemperature(0.2),
-		})
+		)
 		messages := []llm.ChatMessage{
 			{Role: llm.RoleSystem, Content: "You are a self-reflection assistant. Output ONLY valid JSON."},
 			{Role: llm.RoleUser, Content: prompt},

@@ -506,11 +506,11 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	defer cancel()
 
 	resp, err := c.chatWithFailover(timeoutCtx, messages,
-		prependScope(c.scopeProvider, []llm.ChatOption{
+		resolveCallScope(ctx, c.scopeProvider, []llm.ChatOption{
 			llm.WithMaxTokens(c.tokenCap),
 			llm.WithTemperature(0.1),
 			noThinkingOpt(),
-		})...
+		})...,
 	)
 	if err != nil {
 		// Cache the failure so future requests skip this endpoint.
@@ -623,10 +623,10 @@ func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemo
 	defer cancel()
 
 	resp, err := c.client.Chat(timeoutCtx, messages,
-		prependScope(c.scopeProvider, []llm.ChatOption{
+		resolveCallScope(ctx, c.scopeProvider, []llm.ChatOption{
 			llm.WithMaxTokens(effectiveClassificationCap(c.modelConfig)),
 			llm.WithTemperature(0.1),
-		})...
+		})...,
 	)
 	if err != nil {
 		c.unavailable.Store(true)

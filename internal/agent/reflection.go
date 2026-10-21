@@ -259,7 +259,7 @@ func (re *ReflectionEngine) requestFix(ctx context.Context, fixRequest string, f
 		{Role: llm.RoleUser, Content: prompt},
 	}
 
-	response, err := re.llmClient.Chat(ctx, messages, prependScope(re.scopeProvider, nil)...)
+	response, err := re.llmClient.Chat(ctx, messages, resolveCallScope(ctx, re.scopeProvider, nil)...)
 	if err != nil {
 		re.logger.Warn("LLM request failed", "error", err)
 		return nil, err

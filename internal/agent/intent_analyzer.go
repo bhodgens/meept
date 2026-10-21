@@ -94,6 +94,12 @@ type IntentAnalyzerConfig struct {
 	// make classifier failures honest during testing/iteration
 	// (classifier-observability leaf 02).
 	FailFast bool
+	// ScopeProvider, when set, supplies the owning loop's task/session
+	// scope for analysis LLM calls (leaf 01 session-affinity). Mirrors
+	// LLMClassifierConfig.ScopeProvider. Per-call scopes attached via
+	// WithScopeOptions on the context take precedence. Nil = unscoped
+	// calls, byte-identical to prior behavior.
+	ScopeProvider chatScopeProvider
 }
 
 // newIntentAnalyzer is the shared constructor; tokenCapOverride of 0 means
@@ -117,6 +123,7 @@ func newIntentAnalyzerWithConfig(cfg IntentAnalyzerConfig, client *llm.Client, l
 		aliasName:          cfg.AliasName,
 		modelConfig:        cfg.ModelConfig,
 		failFast:           cfg.FailFast,
+		scopeProvider:      cfg.ScopeProvider,
 		servedModel:        resolvedModelID(cfg.ModelConfig),
 	}
 }
@@ -235,7 +242,7 @@ func (ia *IntentAnalyzer) AnalyzeTrueIntent(ctx context.Context, input string, s
 
 	messages := ia.buildAnalysisMessages(input, sessionContext)
 
-	opts := prependScope(ia.scopeProvider, []llm.ChatOption{
+	opts := resolveCallScope(ctx, ia.scopeProvider, []llm.ChatOption{
 		llm.WithMaxTokens(ia.tokenCap),
 		llm.WithTemperature(0.2),
 		noThinkingOpt(),

@@ -333,7 +333,7 @@ func (a *RLMAnalyzer) invokeLLM(ctx context.Context, run *analyzerRun, prompt st
 		{Role: llm.RoleUser, Content: prompt},
 	}
 
-	result, err := a.llmClient.Chat(ctx, messages, prependScope(a.scopeProvider, nil)...)
+	result, err := a.llmClient.Chat(ctx, messages, resolveCallScope(ctx, a.scopeProvider, nil)...)
 
 	// Emit telemetry if enabled (fire-and-forget — never block main path).
 	if a.emitter != nil && a.emitter.IsEnabled() {
@@ -603,6 +603,18 @@ func (a *traceStoreReaderAdapter) ListSpans(spanIDs []string) ([]traceSpan, erro
 func NewRLMAnalyzerFromTraceStore(cfg RLMAnalyzerConfig, store *memory.TraceStore, llmClient *llm.Client, logger *slog.Logger) *RLMAnalyzer {
 	reader := &traceStoreReaderAdapter{store: store}
 	return NewRLMAnalyzer(cfg, reader, llmClient, logger)
+}
+
+// SetScopeProvider wires the owning loop's task/session scope for the
+// analyzer's LLM calls (leaf 01 session-affinity), mirroring the
+// established ReflectionEngine.SetScopeProvider shape. Nil guard prevents
+// the typed-nil panic. Per-call scopes attached via WithScopeOptions take
+// precedence over this provider (resolveCallScope).
+func (a *RLMAnalyzer) SetScopeProvider(provider chatScopeProvider) {
+	if provider == nil {
+		return
+	}
+	a.scopeProvider = provider
 }
 
 // -----------------------------------------------------------------------

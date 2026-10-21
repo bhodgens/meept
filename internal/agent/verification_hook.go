@@ -384,14 +384,11 @@ func (r *filteredToolRegistry) GetDefinitions() []llm.ToolDefinition {
 	return result
 }
 
-// SpawnVerifier implements VerifierSpawner. It creates a child AgentLoop with
-// a restricted tool set and the adversarial verifier prompt, runs it, and
-// returns the raw output.
-func (l *AgentLoop) SpawnVerifier(ctx context.Context, prompt string, modelRef string) (string, error) {
-	if l.registry == nil {
-		return "", fmt.Errorf("no tool registry available for verifier")
-	}
-
+// verifierChildOptions builds the LoopOption set for the verifier child
+// loop (restricted tools + the adversarial verifier prompt + the parent's
+// inherited wiring). Extracted from SpawnVerifier so the inheritance
+// contract (hook registry, resolver, refusal slot) is directly testable.
+func (l *AgentLoop) verifierChildOptions(modelRef string) []LoopOption {
 	// Create a filtered registry with only read-only tools.
 	filtered := &filteredToolRegistry{
 		parent:  l.registry,
@@ -401,7 +398,6 @@ func (l *AgentLoop) SpawnVerifier(ctx context.Context, prompt string, modelRef s
 	// Build verifier config: no verification on the verifier itself,
 	// limited iterations, system prompt override.
 	verifierConfig := l.config // shallow copy
-	verifierConfig.SystemPromptOveride = prompt
 	verifierConfig.MaxIterations = 20
 
 	// Create child loop with restricted tools.
@@ -420,6 +416,13 @@ func (l *AgentLoop) SpawnVerifier(ctx context.Context, prompt string, modelRef s
 		WithAgentSpec(l.spec),
 		WithGlobalRefusalModel(l.globalRefusalModel),
 	}
+	// Hook registry inheritance: the verifier child executes tools (the
+	// filtered read-only set) and must enforce the same security
+	// before-tool-call denies, decision gate, and transform hooks as its
+	// parent loop. Without it the child ran tools with hookRegistry == nil.
+	if l.hookRegistry != nil {
+		childOpts = append(childOpts, WithHookRegistry(l.hookRegistry))
+	}
 
 	// Use the verifier model if specified.
 	if modelRef != "" {
@@ -427,6 +430,23 @@ func (l *AgentLoop) SpawnVerifier(ctx context.Context, prompt string, modelRef s
 	} else {
 		childOpts = append(childOpts, WithModelRef(l.modelRef))
 	}
+	return childOpts
+}
+
+// SpawnVerifier implements VerifierSpawner. It creates a child AgentLoop with
+// a restricted tool set and the adversarial verifier prompt, runs it, and
+// returns the raw output.
+func (l *AgentLoop) SpawnVerifier(ctx context.Context, prompt string, modelRef string) (string, error) {
+	if l.registry == nil {
+		return "", fmt.Errorf("no tool registry available for verifier")
+	}
+
+	childOpts := l.verifierChildOptions(modelRef)
+	// The adversarial verifier prompt rides the config's system-prompt
+	// override slot (verifierChildOptions builds the base config).
+	childOpts = append(childOpts, func(c *AgentLoop) {
+		c.config.SystemPromptOveride = prompt
+	})
 
 	child := NewAgentLoop("verifier-"+l.sessionID, l.workingDir, childOpts...)
 	if child == nil {

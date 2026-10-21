@@ -137,6 +137,18 @@ type AgentRegistry struct {
 	// ProviderManager for every registry-built loop (nil = single-client
 	// chain, byte-identical to the pre-SharedChatter behavior).
 	sharedChatter llm.Chatter
+
+	// hookRegistry mirrors RegistryConfig.HookRegistry: the daemon-wide
+	// lifecycle hook registry every registry-built loop inherits (nil =
+	// no hooks wired; the security hardening and decision gate are then
+	// inert on dispatched turns — production wiring always sets it).
+	hookRegistry *HookRegistry
+
+	// compactionCfg mirrors RegistryConfig.Compaction: the user-facing
+	// [compaction] block carried into every registry-built loop BEFORE
+	// construction, so its ContextFirewall bakes the decision-compaction
+	// lane (resolver + decision_enabled).
+	compactionCfg config.CompactionConfig
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -227,6 +239,24 @@ type RegistryConfig struct {
 	// single config to retarget, and chatWithFailoverRaw carries the
 	// resolution request-scoped via WithResolvedModel.
 	SharedChatter llm.Chatter
+
+	// HookRegistry is the daemon-wide lifecycle hook registry (security
+	// before-tool-call HardError deny, decision gate, transform hooks).
+	// Registry-built loops MUST inherit it: without it every
+	// dispatcher-routed chat/specialist turn executes tools with
+	// l.hookRegistry == nil, silently bypassing the security hardening and
+	// the decision gate that the daemon template loop enforces. Nil = no
+	// hooks (tests, standalone use).
+	HookRegistry *HookRegistry
+
+	// Compaction carries the user-facing [compaction] config block into
+	// registry-built loops. The loop's ContextFirewall bakes its
+	// decision-compaction lane (DecisionEnabled + resolver-derived
+	// DecisionClient) AT CONSTRUCTION, so the config must arrive as a
+	// LoopOption — the post-construction SetCompactionConfig setter is too
+	// late for the firewall. Zero value keeps every lane off (pre-wiring
+	// behavior, byte-identical).
+	Compaction config.CompactionConfig
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -260,6 +290,8 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		sharedConvStore:       NewConversationStore(cfg.ConversationStoreSize),
 		globalRefusalModel:    cfg.GlobalRefusalModel,
 		plannerChatter:        cfg.PlannerChatter,
+		hookRegistry:          cfg.HookRegistry,
+		compactionCfg:         cfg.Compaction,
 	}
 
 	// Load global rules
@@ -485,6 +517,24 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		WithAgentConfig(agentCfg),
 		WithAgentID(spec.ID),
 		WithLoopLogger(r.logger.With("agent", spec.ID)),
+	}
+
+	// Hook registry inheritance (security-before-tool HardError deny,
+	// decision gate, transform hooks): the daemon template loop enforces
+	// these through its registry; registry-built loops that ran with
+	// l.hookRegistry == nil silently bypassed all of them on every
+	// dispatcher-routed turn. Nil-guarded: nil keeps no-hook behavior.
+	if r.hookRegistry != nil {
+		opts = append(opts, WithHookRegistry(r.hookRegistry))
+	}
+
+	// Compaction config BEFORE construction: the loop's ContextFirewall
+	// bakes the decision-compaction lane (DecisionEnabled + the
+	// resolver-derived DecisionClient) at NewAgentLoop time, so the
+	// config must arrive as an option, not via the post-construction
+	// setter (too late for the firewall's summarizer selection).
+	if r.compactionCfg != (config.CompactionConfig{}) {
+		opts = append(opts, WithCompactionConfig(r.compactionCfg))
 	}
 
 	if r.llm != nil {

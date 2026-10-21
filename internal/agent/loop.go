@@ -2446,22 +2446,7 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 		firewall := llm.NewContextFirewall(
 			loop.llm,
 			model,
-			llm.ContextFirewallConfig{
-				Enabled:                   true,
-				SummarizeHistory:          true,
-				ChunkLargeInputs:          true,
-				IterationBudgetRatio:      0.30,
-				ConversationBudgetRatio:   0.50,
-				ProactiveCompression:      loop.config.ProactiveCompression,
-				ModelContextLimit:         loop.config.ModelContextLimit,
-				HierarchicalSummarization: loop.config.HierarchicalSummarization,
-				MaxSummaryLevel:           loop.config.MaxSummaryLevel,
-				SummaryLevelThreshold:     loop.config.SummaryLevelThreshold,
-				OverflowStrategy:          loop.config.OverflowStrategy,
-				DecisionCompaction:        loop.config.Compaction.DecisionEnabled,
-				DecisionKeepBar:           loop.config.Compaction.DecisionKeepBar,
-				DecisionClient:            llm.NewDecisionClient(loop.resolver, loop.logger),
-			},
+			loop.contextFirewallConfig(),
 			nil, // summaryModel - uses inner by default
 			loop.logger,
 			tokenizer,
@@ -2613,6 +2598,58 @@ func (l *AgentLoop) SetContextFirewallConfig(fw config.LLMContextFirewallConfig)
 	l.config.MaxSummaryLevel = fw.MaxSummaryLevel
 	l.config.SummaryLevelThreshold = fw.SummaryLevelThreshold
 	l.config.OverflowStrategy = fw.OverflowStrategy
+}
+
+// contextFirewallConfig assembles the llm.ContextFirewallConfig the loop
+// bakes into its ContextFirewall at construction. Extracted from the
+// NewAgentLoop firewall block so tests can pin the decision-compaction
+// lane wiring (DecisionCompaction + DecisionClient over the loop's
+// resolver) without constructing a full firewall.
+func (l *AgentLoop) contextFirewallConfig() llm.ContextFirewallConfig {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return llm.ContextFirewallConfig{
+		Enabled:                   true,
+		SummarizeHistory:          true,
+		ChunkLargeInputs:          true,
+		IterationBudgetRatio:      0.30,
+		ConversationBudgetRatio:   0.50,
+		ProactiveCompression:      l.config.ProactiveCompression,
+		ModelContextLimit:         l.config.ModelContextLimit,
+		HierarchicalSummarization: l.config.HierarchicalSummarization,
+		MaxSummaryLevel:           l.config.MaxSummaryLevel,
+		SummaryLevelThreshold:     l.config.SummaryLevelThreshold,
+		OverflowStrategy:          l.config.OverflowStrategy,
+		DecisionCompaction:        l.config.Compaction.DecisionEnabled,
+		DecisionKeepBar:           l.config.Compaction.DecisionKeepBar,
+		DecisionClient:            llm.NewDecisionClient(l.resolver, l.logger),
+	}
+}
+
+// WithCompactionConfig wires the user-facing compaction config block into
+// the loop's AgentConfig BEFORE construction completes, so the
+// ContextFirewall baked inside NewAgentLoop sees DecisionEnabled and the
+// resolver-derived DecisionClient (decision-compaction lane). The
+// post-construction SetCompactionConfig setter runs too late for the
+// firewall — the summarizer selection is baked at construction — so
+// production wiring must pass this option (daemon template agentOpts and
+// the agent registry both do).
+func WithCompactionConfig(cfg config.CompactionConfig) LoopOption {
+	return func(l *AgentLoop) {
+		l.config.Compaction = CompactionAgentConfig{
+			Enabled:           cfg.Enabled,
+			ReserveTokens:     cfg.ReserveTokens,
+			KeepRecentTokens:  cfg.KeepRecentTokens,
+			MaxResponseTokens: cfg.MaxResponseTokens,
+			SummaryFormat:     cfg.SummaryFormat,
+			TrackFileOps:      cfg.TrackFileOps,
+			TimeoutSeconds:    cfg.TimeoutSeconds,
+			TriggerRatio:      cfg.TriggerRatio,
+			SpillEnabled:      cfg.SpillEnabled,
+			DecisionEnabled:   cfg.DecisionEnabled,
+			DecisionKeepBar:   cfg.DecisionKeepBar,
+		}
+	}
 }
 
 // SetCompactionConfig wires compaction settings from the user-facing config
@@ -3169,7 +3206,12 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// triggered it.
 	if l.reflectionCollector != nil && err == nil {
 		// Snapshot the inputs the goroutine needs before launching, since
-		// the next turn may overwrite loop fields.
+		// the next turn may overwrite loop fields. The scope options are
+		// captured HERE (synchronously, under the loop's lock inside
+		// scopeOptions) and passed per call: the collector is a shared
+		// singleton across every session clone, so re-pointing it at this
+		// loop (the former SetScopeProvider seam) misattributed
+		// concurrent sessions' reflection calls and raced.
 		rc := l.reflectionCollector
 		convSnapshot := conv
 		convID := conversationID
@@ -3177,7 +3219,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		agentID := l.agentID
 		userMsg := userMessage
 		duration := time.Since(begin)
-		rc.SetScopeProvider(l)
+		scopeSnapshot := l.scopeOptions()
 
 		// G118: goroutine intentionally outlives request context —
 		// background reflection persistence; loopCtx cancels when RunOnce
@@ -3190,7 +3232,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 			}()
 			traj := buildTrajectory(convSnapshot, convID, agentID, userMsg, outcomeFromErr(nil), duration)
 			traj.FinalResponse = response
-			if err := rc.ReflectTurn(context.Background(), traj); err != nil {
+			if err := rc.ReflectTurnWithScope(context.Background(), traj, scopeSnapshot); err != nil {
 				l.logger.Warn("reflection failed", "error", err)
 			}
 		})
@@ -7885,9 +7927,14 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 		// before-tool-call hooks per call. On Block, the call is denied
 		// WITHOUT execution. Two deny flavors:
 		//   - HardError (security/taint denies): a FAILED execution result —
-		//     feeding the repeat breaker and error surfaces. Never a
-		//     confirmation prompt; re-invoking with confirmed=true must not
-		//     bypass a security refusal.
+		//     its canonical Error field is set (like every other failure
+		//     shape) and the Result map keeps the structured
+		//     error/reason/tool keys. Denies are budget-FREE by design:
+		//     they never enter executeIdx, so l.repeatErr.Observe never
+		//     sees them — matching the post-failure contract below
+		//     ("Deterministic pre-execution denies ... must not burn the
+		//     budget"). Re-invoking with confirmed=true must not bypass a
+		//     security refusal.
 		//   - Soft block (decision gate): the phase-1 ConfirmationResponse
 		//     shape (requires_confirmation=true) mirroring ConfirmationResponse
 		//     in internal/tools/builtin/confirmation.go — the existing confirm
@@ -7909,6 +7956,7 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 					Success: !block.HardError,
 				}
 				if block.HardError {
+					denied.Error = "blocked by security policy: " + block.Reason
 					denied.Result = map[string]any{
 						"error":  "blocked by security policy",
 						"reason": block.Reason,
@@ -8709,20 +8757,19 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		WithSkillStateRuntime(l.skillStateRuntime),
 
 		// --- Session-affinity scope threading (leaf 01): the reflection
-		// collector learns ITS owning loop so per-turn classifier calls
-		// carry that loop's scope. SkillStateRuntime already holds the
-		// loop pointer it was built with (NewSkillStateRuntime(l)), and
-		// clones re-wire it via WithSkillStateRuntime above; both read
-		// their serving loop's scope through loopScopeProvider/scopeOptions
-		// at call time. The intent analyzer and LLM classifier are wired
-		// daemon-side (dispatcher) where the loop does not yet exist —
-		// their scopeProvider stays nil there (call sites remain
-		// nil-safe), matching this leaf's no-placeholder-IDs contract.
-		func(l2 *AgentLoop) {
-			if rc := l.reflectionCollector; rc != nil {
-				rc.SetScopeProvider(l2)
-			}
-		},
+		// collector is SHARED across clones and holds no per-loop state —
+		// each loop captures its own scope at turn end and passes it per
+		// ReflectTurnWithScope call (the former SetScopeProvider rewire
+		// here re-pointed the shared singleton at the newest clone: a
+		// race and a cross-session misattribution). SkillStateRuntime
+		// already holds the loop pointer it was built with
+		// (NewSkillStateRuntime(l)), and clones re-wire it via
+		// WithSkillStateRuntime above; both read their serving loop's
+		// scope through loopScopeProvider/scopeOptions at call time. The
+		// intent analyzer and LLM classifier are wired daemon-side
+		// (dispatcher) where the loop does not yet exist — their
+		// scopeProvider stays nil there (call sites remain nil-safe),
+		// matching this leaf's no-placeholder-IDs contract.
 
 		// --- Cache + progress ---
 		WithResultCache(l.cache),

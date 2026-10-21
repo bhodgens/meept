@@ -1,6 +1,10 @@
 package agent
 
-import "github.com/caimlas/meept/internal/llm"
+import (
+	"context"
+
+	"github.com/caimlas/meept/internal/llm"
+)
 
 // scopeOptions returns the loop's current task/session scope as prepended
 // ChatOptions. Mirrors chatWithFailoverRaw's prepending (loop.go, task-scope
@@ -49,6 +53,41 @@ func prependScope(provider chatScopeProvider, opts []llm.ChatOption) []llm.ChatO
 	return append(scope, opts...)
 }
 
+// --- Per-call scope threading (context seam) ---
+//
+// Singleton components (ReflectionEngine, RLMAnalyzer,
+// SynthesizeTracesTool, ReflectionCollector) are shared across sessions,
+// so a wire-once scopeProvider on them is either unwired (dead) or a
+// cross-session hazard (the ReflectionCollector race the leaf-01 audit
+// found). The per-call alternative: the CALLER — which knows the serving
+// session — attaches the captured scope options to the context, and the
+// secondary call site prefers them over any wired provider.
+
+type scopeOptionsCtxKey struct{}
+
+// WithScopeOptions attaches caller-captured task/session scope options to
+// ctx for secondary LLM call sites (resolveCallScope). Nil/empty opts are
+// a no-op passthrough.
+func WithScopeOptions(ctx context.Context, opts []llm.ChatOption) context.Context {
+	if ctx == nil || len(opts) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, scopeOptionsCtxKey{}, opts)
+}
+
+// resolveCallScope returns the per-call scope (WithScopeOptions) prepended
+// to opts when present, else falls back to the component's wired
+// scopeProvider (prependScope). Same ordering contract: scope options
+// first.
+func resolveCallScope(ctx context.Context, provider chatScopeProvider, opts []llm.ChatOption) []llm.ChatOption {
+	if ctx != nil {
+		if scoped, ok := ctx.Value(scopeOptionsCtxKey{}).([]llm.ChatOption); ok && len(scoped) > 0 {
+			return append(append([]llm.ChatOption(nil), scoped...), opts...)
+		}
+	}
+	return prependScope(provider, opts)
+}
+
 // SetScopeProvider wires the owning agent loop so fix-request LLM calls
 // carry the loop's current task/session scope (leaf 01
 // session-affinity). Nil guard prevents typed-nil panic.
@@ -58,4 +97,3 @@ func (re *ReflectionEngine) SetScopeProvider(provider chatScopeProvider) {
 	}
 	re.scopeProvider = provider
 }
-
