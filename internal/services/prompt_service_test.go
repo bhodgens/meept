@@ -215,23 +215,36 @@ func TestValidateTemplate(t *testing.T) {
 }
 
 func TestNormalizeName(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"interview", "planner/interview.md"},
-		{"planner/interview.md", "planner/interview.md"},
-		{"orchestrator/split.md", "orchestrator/split.md"},
-		{"/planner/foo.md", "planner/foo.md"},
-		{"reflection/turn", "reflection/turn.md"},
+	// Valid inputs: input -> expected normalized path.
+	valid := map[string]string{
+		"interview":                 "planner/interview.md",
+		"planner/interview.md":      "planner/interview.md",
+		"orchestrator/split.md":     "orchestrator/split.md",
+		"/planner/foo.md":           "planner/foo.md",
+		"reflection/turn":           "reflection/turn.md",
 	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := normalizeName(tt.input)
-			if got != tt.want {
-				t.Errorf("normalizeName(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
+	for input, want := range valid {
+		got, err := normalizeName(input)
+		if err != nil {
+			t.Errorf("normalizeName(%q) unexpected error: %v", input, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("normalizeName(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	// ".." traversal must be rejected — the whole point of the audit fix.
+	bad := []string{
+		"../etc/passwd",
+		"planner/../../etc/passwd",
+		"..",
+		"planner/..",
+	}
+	for _, input := range bad {
+		if got, err := normalizeName(input); err == nil {
+			t.Errorf("normalizeName(%q) = %q, want a \"..\" rejection error", input, got)
+		}
 	}
 }
 

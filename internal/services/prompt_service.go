@@ -290,7 +290,10 @@ func (s *PromptService) List() ([]PromptEntry, error) {
 // the raw file content (frontmatter NOT stripped — use Validate to test
 // rendering).
 func (s *PromptService) Get(name string) (PromptDetail, error) {
-	name = normalizeName(name)
+	name, err := normalizeName(name)
+	if err != nil {
+		return PromptDetail{}, err
+	}
 	for _, tier := range s.tiersSnapshot() {
 		full := filepath.Join(tier.dir, name)
 		body, err := os.ReadFile(full)
@@ -321,7 +324,10 @@ func (s *PromptService) Get(name string) (PromptDetail, error) {
 // (non-empty + parses as text/template after frontmatter stripping) before
 // writing.
 func (s *PromptService) Put(name, content string) error {
-	name = normalizeName(name)
+	name, err := normalizeName(name)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(content) == "" {
 		return fmt.Errorf("content must not be empty")
 	}
@@ -344,7 +350,10 @@ func (s *PromptService) Put(name, content string) error {
 // Delete removes the user-home override for the given name. Lower-tier
 // (bundled) templates remain untouched.
 func (s *PromptService) Delete(name string) error {
-	name = normalizeName(name)
+	name, err := normalizeName(name)
+	if err != nil {
+		return err
+	}
 	dest := s.UserOverridePath(name)
 	if err := os.Remove(dest); err != nil {
 		if os.IsNotExist(err) {
@@ -411,20 +420,34 @@ func ValidateTemplate(content string) error {
 // name has no extension and no directory component, it is treated as a
 // planner template (e.g., "interview" → "planner/interview.md"). Missing
 // .md extensions are appended.
-func normalizeName(name string) string {
+//
+// SECURITY (audit 2026-10-20): the result is a slash-relative path that Get /
+// Put / Delete join onto a tier directory. A ".." component (or a leading
+// absolute path) would escape that directory — Put/Delete writing outside the
+// tier and Get reading an arbitrary file. Both are rejected here, at the single
+// chokepoint all three operations share.
+func normalizeName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	name = strings.ReplaceAll(name, "\\", "/")
 	name = strings.TrimPrefix(name, "/")
+	if name == "" {
+		return "", fmt.Errorf("invalid prompt name: empty")
+	}
+	for _, seg := range strings.Split(name, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("invalid prompt name %q: \"..\" traversal is not allowed", name)
+		}
+	}
 	// Shorthand: bare name without slash → assume planner/.
 	if !strings.Contains(name, "/") {
 		base := strings.TrimSuffix(name, ".md")
-		return "planner/" + base + ".md"
+		return "planner/" + base + ".md", nil
 	}
 	// Ensure .md extension for path-qualified names.
 	if !strings.HasSuffix(strings.ToLower(name), ".md") {
 		name += ".md"
 	}
-	return name
+	return name, nil
 }
 
 // walkMarkdown recursively lists *.md files under root, returning paths
