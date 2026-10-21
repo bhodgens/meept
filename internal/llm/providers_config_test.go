@@ -181,11 +181,9 @@ func TestConfigLoads(t *testing.T) {
 		}
 		// Missing/unparseable file: the 8081 default above still guards.
 	}
-	for port, provName := range seenPort {
-		if _, clash := transportPorts[port]; clash {
-			t.Errorf("provider %s uses loopback port %s, the daemon transport.http (GUI) port — "+
-				"give the runtime its own port", provName, port)
-		}
+	for _, clash := range transportPortClashes(seenPort, transportPorts) {
+		t.Errorf("provider %s uses loopback port %s, the daemon transport.http (GUI) port — "+
+			"give the runtime its own port", clash.provName, clash.port)
 	}
 
 	// Verify lfm-1.2b-q8 model (primary small model)
@@ -223,4 +221,99 @@ func loopbackPort(baseURL string) string {
 		return ""
 	}
 	return u.Port()
+}
+
+// transportPortClash names one provider registered on a daemon transport.http
+// (GUI) port, as reported by the guard below.
+type transportPortClash struct {
+	port     string
+	provName string
+}
+
+// transportPortClashes is the extracted core predicate of the ac63861e
+// key/value-swap guard in TestConfigLoads (the `for port, provName := range
+// seenPort` loop). seenPort maps loopback port -> provider name; transportPorts
+// is the set of daemon transport.http ports. A clash is a provider whose
+// registered port is in transportPorts. Extracting it here lets
+// TestTransportPortClashGuard pin the guard against the key/value swap
+// mutation: if someone re-swaps the map pair (rangeing values as ports and
+// keys as names), this predicate flips and the pin test fails.
+func transportPortClashes(seenPort map[string]string, transportPorts map[string]struct{}) []transportPortClash {
+	var clashes []transportPortClash
+	for port, provName := range seenPort {
+		if _, clash := transportPorts[port]; clash {
+			clashes = append(clashes, transportPortClash{port: port, provName: provName})
+		}
+	}
+	// Map iteration order is random; sort for deterministic test output.
+	slices.SortFunc(clashes, func(a, b transportPortClash) int {
+		if a.port != b.port {
+			return strings.Compare(a.port, b.port)
+		}
+		return strings.Compare(a.provName, b.provName)
+	})
+	return clashes
+}
+
+// TestTransportPortClashGuard is the mutation pin for the transport.http port
+// guard in TestConfigLoads. Without it, re-swapping the seenPort map pair in
+// the guard silently disables it (the guard ranges over a map[string]string
+// keyed by port; swapping to `for provName, port := range seenPort` compiles
+// but never matches a transport port). The guard lives in TestConfigLoads and
+// cannot be extracted without this helper — the production config test is the
+// only caller, and this file is a _test.go, so the predicate is replicated
+// here (extracted from the guard's own range) and the guard is refactored to
+// call it. See transportPortClashes.
+func TestTransportPortClashGuard(t *testing.T) {
+	cases := []struct {
+		name           string
+		seenPort       map[string]string // port -> provider name
+		transportPorts map[string]struct{}
+		wantClashes    []transportPortClash
+	}{
+		{
+			name:           "provider on transport.http port fires guard",
+			seenPort:       map[string]string{"8081": "mlx-classifier"},
+			transportPorts: map[string]struct{}{"8081": {}},
+			wantClashes:    []transportPortClash{{port: "8081", provName: "mlx-classifier"}},
+		},
+		{
+			name: "distinct ports stay silent",
+			seenPort: map[string]string{
+				"8080": "local-gguf",
+				"9090": "zai",
+			},
+			transportPorts: map[string]struct{}{"8081": {}},
+			wantClashes:    nil,
+		},
+		{
+			name: "multiple providers, one clash",
+			seenPort: map[string]string{
+				"8080": "local-gguf",
+				"8081": "mlx-classifier",
+				"9090": "zai",
+			},
+			transportPorts: map[string]struct{}{"8081": {}, "8443": {}},
+			wantClashes:    []transportPortClash{{port: "8081", provName: "mlx-classifier"}},
+		},
+		{
+			name:           "empty seenPort is silent",
+			seenPort:       map[string]string{},
+			transportPorts: map[string]struct{}{"8081": {}},
+			wantClashes:    nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := transportPortClashes(tc.seenPort, tc.transportPorts)
+			if len(got) != len(tc.wantClashes) {
+				t.Fatalf("clashes = %v, want %v", got, tc.wantClashes)
+			}
+			for i := range got {
+				if got[i] != tc.wantClashes[i] {
+					t.Errorf("clash[%d] = %+v, want %+v", i, got[i], tc.wantClashes[i])
+				}
+			}
+		})
+	}
 }
