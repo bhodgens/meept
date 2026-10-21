@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,12 +41,30 @@ type SessionLifecycleHook interface {
 	OnSessionEvent(ctx context.Context, sessionID string, event SessionEvent)
 }
 
+// SessionLifecycleHookWithAlternate is the optional richer hook shape for
+// the session_id/conversation_id duality (root AGENTS.md). Stores capture
+// the session's ALTERNATE identity (its conversation id) under the store
+// lock BEFORE the row is deleted and hand it to hooks implementing this
+// interface; hooks that only implement SessionLifecycleHook keep the
+// primary-id-only call (byte-identical legacy behavior). The alternate id
+// exists because a post-delete store Get cannot resolve it: the delete
+// path fires the hook after the row is gone, so an identity resolver
+// that re-reads the store sees nothing (leaf: delete-path teardown
+// identity resolution). Empty alternateID means "none captured".
+type SessionLifecycleHookWithAlternate interface {
+	SessionLifecycleHook
+	OnSessionEventWithAlternate(ctx context.Context, sessionID, alternateID string, event SessionEvent)
+}
+
 // invokeLifecycleHook fires hook for one event, best-effort: nil and
 // typed-nil hooks are no-ops (the typed-nil interface trap: a
 // (*T)(nil) stored in the interface is non-nil but must not be invoked),
 // a panicking hook is recovered and logged at Warn, and nothing is ever
-// propagated to the Archive/Delete caller.
-func invokeLifecycleHook(hook SessionLifecycleHook, ctx context.Context, sessionID string, event SessionEvent) {
+// propagated to the Archive/Delete caller. When alternateID is non-empty
+// and the hook implements SessionLifecycleHookWithAlternate, the richer
+// call carries the pre-delete-captured alternate identity (conversation
+// id); otherwise the plain primary-id call fires.
+func invokeLifecycleHook(hook SessionLifecycleHook, ctx context.Context, sessionID, alternateID string, event SessionEvent) {
 	if hook == nil {
 		return
 	}
@@ -60,6 +79,10 @@ func invokeLifecycleHook(hook SessionLifecycleHook, ctx context.Context, session
 				"panic", r)
 		}
 	}()
+	if alt, ok := hook.(SessionLifecycleHookWithAlternate); ok && alternateID != "" && alternateID != sessionID {
+		alt.OnSessionEventWithAlternate(ctx, sessionID, alternateID, event)
+		return
+	}
 	hook.OnSessionEvent(ctx, sessionID, event)
 }
 
@@ -67,11 +90,15 @@ func invokeLifecycleHook(hook SessionLifecycleHook, ctx context.Context, session
 
 // lifecycleFire is a pending hook invocation collected under the store
 // lock and fired after the lock is released (never hold a mutex across
-// the hook call — repo invariant).
+// the hook call — repo invariant). alternateID is the session's alternate
+// identity (conversation id) captured UNDER THE STORE LOCK before any
+// deletion, so the fired event can resolve identity without a post-delete
+// store read ("" = none captured).
 type lifecycleFire struct {
-	hook      SessionLifecycleHook
-	sessionID string
-	event     SessionEvent
+	hook        SessionLifecycleHook
+	sessionID   string
+	alternateID string
+	event       SessionEvent
 }
 
 // fireLifecycle runs the pending invocations outside any store lock.
@@ -86,16 +113,24 @@ func fireLifecycle(logger *slog.Logger, fires ...lifecycleFire) {
 				"session_id", f.sessionID,
 				"event", string(f.event))
 		}
-		invokeLifecycleHook(f.hook, context.Background(), f.sessionID, f.event)
+		invokeLifecycleHook(f.hook, context.Background(), f.sessionID, f.alternateID, f.event)
 	}
 }
 
 // storeLifecycleMixin is embedded by both MemoryStore and SQLiteStore.
-// The hook field is guarded by the embedding store's own mutex — the
-// mixin's methods are called only while that lock is held for the field
-// access, exactly like every other store field.
+// The hook field is an atomic pointer: SetLifecycleHook is called
+// externally by the daemon AFTER store construction (internal/daemon
+// components.go teardown wiring) while store operations may already be
+// in flight, so the write is synchronized atomically rather than relying
+// on the embedding store's mutex (which SetLifecycleHook cannot take —
+// the mixin has no reference to it and a caller may already hold it).
 type storeLifecycleMixin struct {
-	lifecycleHook SessionLifecycleHook
+	lifecycleHook atomic.Pointer[lifecycleHookBox]
+}
+
+// lifecycleHookBox boxes the hook interface for atomic storage.
+type lifecycleHookBox struct {
+	hook SessionLifecycleHook
 }
 
 // SetLifecycleHook wires (or replaces) the teardown notification hook.
@@ -104,6 +139,8 @@ type storeLifecycleMixin struct {
 // typed-nil trap), so callers can pass maybe-nil hooks unguarded.
 // To detach a hook, call SetLifecycleHook again with a real hook; there is
 // deliberately no un-set (a store without a hook is the normal state).
+// Concurrent-safe: the field is an atomic pointer, so an external daemon
+// write racing with collectLocked reads never tears.
 func (m *storeLifecycleMixin) SetLifecycleHook(hook SessionLifecycleHook) {
 	if hook == nil {
 		return
@@ -111,20 +148,45 @@ func (m *storeLifecycleMixin) SetLifecycleHook(hook SessionLifecycleHook) {
 	if v := reflect.ValueOf(hook); v.Kind() == reflect.Pointer && v.IsNil() {
 		return
 	}
-	m.lifecycleHook = hook
+	m.lifecycleHook.Store(&lifecycleHookBox{hook: hook})
+}
+
+// hookLocked returns the currently-wired hook (nil when none).
+func (m *storeLifecycleMixin) hookLocked() SessionLifecycleHook {
+	if box := m.lifecycleHook.Load(); box != nil {
+		return box.hook
+	}
+	return nil
 }
 
 // collectLocked snapshots pending fires under the CALLER'S lock. Call it
 // only while the embedding store's mutex is held.
 func (m *storeLifecycleMixin) collectLocked(logger *slog.Logger, event SessionEvent, sessionIDs ...string) []lifecycleFire {
-	if m.lifecycleHook == nil || len(sessionIDs) == 0 {
+	hook := m.hookLocked()
+	if hook == nil || len(sessionIDs) == 0 {
 		return nil
 	}
 	fires := make([]lifecycleFire, 0, len(sessionIDs))
 	for _, id := range sessionIDs {
-		fires = append(fires, lifecycleFire{hook: m.lifecycleHook, sessionID: id, event: event})
+		fires = append(fires, lifecycleFire{hook: hook, sessionID: id, event: event})
 	}
 	return fires
+}
+
+// collectLockedWithAlternate snapshots a pending fire carrying the
+// session's alternate identity (conversation id). Call it under the
+// store lock BEFORE deleting the row — the whole point of the alternate
+// capture is that a post-delete store read cannot resolve it. An empty
+// or self-equal alternateID degrades to the plain collectLocked shape.
+func (m *storeLifecycleMixin) collectLockedWithAlternate(logger *slog.Logger, event SessionEvent, sessionID, alternateID string) []lifecycleFire {
+	hook := m.hookLocked()
+	if hook == nil {
+		return nil
+	}
+	if alternateID == sessionID {
+		alternateID = ""
+	}
+	return []lifecycleFire{{hook: hook, sessionID: sessionID, alternateID: alternateID, event: event}}
 }
 
 // --- IdleReaper ---
@@ -164,7 +226,10 @@ type IdleReaper struct {
 	stopOnce  sync.Once
 	stopChan  chan struct{}
 	stopped   chan struct{}
-	started   bool
+	// started is set inside startOnce.Do and read by Stop; atomic because
+	// Start and Stop can run on different goroutines (daemon wiring vs
+	// shutdown) with no other synchronization between them.
+	started atomic.Bool
 }
 
 // defaultIdleCheckInterval is the reaper's ticker period (leaf contract:
@@ -205,7 +270,7 @@ func (r *IdleReaper) SetIdleRelease(d time.Duration) {
 // the first call launches the goroutine.
 func (r *IdleReaper) Start() {
 	r.startOnce.Do(func() {
-		r.started = true
+		r.started.Store(true)
 		go r.run()
 	})
 }
@@ -216,7 +281,7 @@ func (r *IdleReaper) Stop() {
 	r.stopOnce.Do(func() {
 		close(r.stopChan)
 	})
-	if r.started {
+	if r.started.Load() {
 		<-r.stopped
 	}
 }
@@ -268,7 +333,9 @@ func (r *IdleReaper) reaperTick(ctx context.Context) {
 		r.tracker.mu.RUnlock()
 
 		now := time.Now()
+		seen := make(map[string]struct{}, len(snapshots))
 		for _, snap := range snapshots {
+			seen[snap.id] = struct{}{}
 			if now.Sub(snap.lastActivity) >= release {
 				if _, already := r.idleFired[snap.id]; !already {
 					r.idleFired[snap.id] = struct{}{}
@@ -276,6 +343,15 @@ func (r *IdleReaper) reaperTick(ctx context.Context) {
 				}
 			} else {
 				delete(r.idleFired, snap.id) // new activity re-arms the episode
+			}
+		}
+		// Evict episode state for sessions the tracker no longer knows
+		// (deleted sessions are Evict-ed from the tracker): without this
+		// idleFired grows monotonically, one stale entry per session ever
+		// served.
+		for id := range r.idleFired {
+			if _, live := seen[id]; !live {
+				delete(r.idleFired, id)
 			}
 		}
 	} else {

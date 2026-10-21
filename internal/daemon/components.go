@@ -534,17 +534,54 @@ type Components struct {
 // converts the event kind. Archive, delete, and idle all funnel to the
 // same async dispatch: every teardown-relevant moment releases the
 // session's upstream resources.
+//
+// It also implements session.SessionLifecycleHookWithAlternate: on the
+// delete path the store captures the session's conversation id UNDER ITS
+// LOCK before removing the row and hands it over, because the
+// post-delete identity resolver (a store Get) structurally cannot see a
+// deleted row. With the alternate id in hand the hook dispatches under
+// BOTH identities — the snapshot keys on the accounting id, so that
+// dispatch is the one that finds the endpoint.
 type teardownStoreHook struct {
 	coordinator *llm.TeardownCoordinator
+	// tracker, when non-nil, is evicted for the session on delete so the
+	// activity/idle-episode maps stay bounded (one entry per session ever
+	// served otherwise).
+	tracker *session.ActivityTracker
 }
 
 // OnSessionEvent implements session.SessionLifecycleHook.
 func (h teardownStoreHook) OnSessionEvent(ctx context.Context, sessionID string, event session.SessionEvent) {
-	h.coordinator.OnSessionEvent(ctx, sessionID, string(event))
+	h.dispatch(ctx, sessionID, "", event)
 }
 
-// compile-time proof the bridge satisfies the store's hook interface.
+// OnSessionEventWithAlternate implements
+// session.SessionLifecycleHookWithAlternate: the store hands over the
+// pre-delete-captured conversation id ("" when none was captured).
+func (h teardownStoreHook) OnSessionEventWithAlternate(ctx context.Context, sessionID, alternateID string, event session.SessionEvent) {
+	h.dispatch(ctx, sessionID, alternateID, event)
+}
+
+func (h teardownStoreHook) dispatch(ctx context.Context, sessionID, alternateID string, event session.SessionEvent) {
+	if event == session.SessionEventDelete && h.tracker != nil {
+		h.tracker.Evict(sessionID)
+		if alternateID != "" {
+			h.tracker.Evict(alternateID)
+		}
+	}
+	h.coordinator.OnSessionEvent(ctx, sessionID, string(event))
+	if alternateID != "" && alternateID != sessionID {
+		// Dispatch under the accounting identity too: the sticky/teardown
+		// snapshot keys on it and the deleted row can no longer feed the
+		// coordinator's identity resolver.
+		h.coordinator.OnSessionEvent(ctx, alternateID, string(event))
+	}
+}
+
+// compile-time proof the bridge satisfies the store's hook interface
+// (and the richer alternate-identity shape).
 var _ session.SessionLifecycleHook = teardownStoreHook{}
+var _ session.SessionLifecycleHookWithAlternate = teardownStoreHook{}
 
 // buildRuntimeConfig maps [runtime] config into the runtime package's Config,
 // normalizing env-policy defaults and warning loudly when the legacy
@@ -1669,6 +1706,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	} else if c.LLMClient != nil {
 		agentOpts = append(agentOpts, agent.WithLLMClient(c.LLMClient))
 	}
+	// Model resolver (decision-compaction lane + alias resolution): the
+	// template loop's ContextFirewall derives its DecisionClient from
+	// loop.resolver AT CONSTRUCTION — without the resolver the client is
+	// never Available() and selectSummarizerForCompressor always passes
+	// the legacy summarizer through, silently killing the
+	// compaction.decision_enabled lane for every clone too.
+	if c.LLMResolver != nil {
+		agentOpts = append(agentOpts, agent.WithResolver(c.LLMResolver))
+	}
+	// Compaction config must reach the loop BEFORE NewAgentLoop bakes the
+	// ContextFirewall (the firewall's summarizer selection is
+	// construction-time; the later SetCompactionConfig call only updates
+	// the loop config, not the already-built firewall).
+	agentOpts = append(agentOpts, agent.WithCompactionConfig(cfg.Compaction))
 	if c.SecurityChecker != nil {
 		agentOpts = append(agentOpts, agent.WithSecurityChecker(c.SecurityChecker))
 	}
@@ -2367,6 +2418,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// sticky/teardown snapshot keys on the ACCOUNTING (conversation)
 		// id — wire the primary->conversation seam so a miss retries under
 		// the alternate identity instead of silently dropping the teardown.
+		// NOTE: on the DELETE path this resolver is structurally blind
+		// (the store removes the row before firing the hook), so the
+		// store captures the conversation id under its lock and hands it
+		// to teardownStoreHook via SessionLifecycleHookWithAlternate;
+		// this resolver covers archive/idle events where the row lives.
 		coordinator.SetIdentityResolver(func(sessionID string) (string, bool) {
 			s := c.SessionStore.Get(sessionID)
 			if s == nil || s.ConversationID == "" || s.ConversationID == sessionID {
@@ -2374,14 +2430,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}
 			return s.ConversationID, true
 		})
-		c.SessionStore.SetLifecycleHook(teardownStoreHook{coordinator: coordinator})
-		// The activity tracker is SHARED with the LLM call path: the
+		// The activity tracker is SHARED with the LLM call path and with
+		// the store lifecycle hook (delete evicts the session's entry so
+		// the map stays bounded). Constructed BEFORE the hook wiring so
+		// both teardownStoreHook instances carry it.
+		activityTracker := session.NewActivityTracker()
+		storeHook := teardownStoreHook{coordinator: coordinator, tracker: activityTracker}
+		c.SessionStore.SetLifecycleHook(storeHook)
+		// The tracker is SHARED with the LLM call path: the
 		// ProviderManager feed (SetSessionActivityCallback below) records
 		// every successful scoped LLM call here, and the reaper reads the
 		// same data. A tracker fed by nothing would make idle reaping
 		// dormant (leaf 05 wiring note).
-		activityTracker := session.NewActivityTracker()
-		idleReaper := session.NewIdleReaper(activityTracker, teardownStoreHook{coordinator: coordinator}, logger.With("component", "idle-reaper"))
+		idleReaper := session.NewIdleReaper(activityTracker, storeHook, logger.With("component", "idle-reaper"))
 		idleReaper.SetIdleRelease(cfg.LLM.SessionAffinity.IdleRelease)
 		idleReaper.Start()
 		c.TeardownIdleReaper = idleReaper
@@ -2975,12 +3036,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				}
 				return nil
 			}(),
-			Resolver:              c.LLMResolver,
-			MessageBus:            msgBus,
-			SecurityChecker:       c.SecurityChecker,
-			ToolRegistry:          c.ToolRegistry,
-			ShadowManager:         c.ShadowManager,
-			Logger:                logger,
+			Resolver:        c.LLMResolver,
+			MessageBus:      msgBus,
+			SecurityChecker: c.SecurityChecker,
+			ToolRegistry:    c.ToolRegistry,
+			ShadowManager:   c.ShadowManager,
+			Logger:          logger,
+			// Hook registry inheritance: registry-built specialists must
+			// enforce the same security-before-tool deny, decision gate,
+			// and transform hooks as the daemon template loop.
+			HookRegistry: hookRegistry,
+			// Compaction config carried BEFORE loop construction so each
+			// registry-built loop's ContextFirewall bakes the
+			// decision-compaction lane (resolver + decision_enabled).
+			Compaction:            cfg.Compaction,
 			BundledAgentsPath:     resolveBundledPath("config/agents"),
 			BundledPromptsPath:    resolveBundledPath("config/prompts"),
 			Watchdog:              c.Watchdog,

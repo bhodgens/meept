@@ -15,9 +15,9 @@ import (
 // OnSessionEvent — the interface is notification-only — but tests can flip
 // panicOnCall to prove a panicking hook never breaks Archive/Delete callers.
 type recordingHook struct {
-	mu      sync.Mutex
-	events  []lifecycleEventRecord
-	onCall  func(sessionID string, event SessionEvent)
+	mu     sync.Mutex
+	events []lifecycleEventRecord
+	onCall func(sessionID string, event SessionEvent)
 }
 
 type lifecycleEventRecord struct {
@@ -236,14 +236,14 @@ func TestInvokeLifecycleHook_Safety(t *testing.T) {
 		t.Fatalf("unexpected panic: %v", err)
 	}
 	// nil interface: no-op
-	invokeLifecycleHook(nil, context.Background(), "s1", SessionEventDelete)
+	invokeLifecycleHook(nil, context.Background(), "s1", "", SessionEventDelete)
 	// typed-nil interface: no-op (the typed-nil trap)
 	var typedNil *recordingHook
-	invokeLifecycleHook(typedNil, context.Background(), "s1", SessionEventDelete)
+	invokeLifecycleHook(typedNil, context.Background(), "s1", "", SessionEventDelete)
 
 	// panicking hook: swallowed
 	boom := &recordingHook{onCall: func(string, SessionEvent) { panic("boom") }}
-	invokeLifecycleHook(boom, context.Background(), "s1", SessionEventArchive)
+	invokeLifecycleHook(boom, context.Background(), "s1", "", SessionEventArchive)
 }
 
 // --- idle reaper tests (leaf task 3) ---

@@ -761,6 +761,15 @@ func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 // Delete removes a session by ID.
 func (s *SQLiteStore) Delete(id string) bool {
 	s.mu.Lock()
+	// Capture the alternate identity (conversation_id) UNDER THE LOCK and
+	// BEFORE the row is gone: the lifecycle hook fires after the DELETE,
+	// so a hook that resolves identity via a post-delete store Get sees
+	// nothing (delete-path teardown identity resolution defect). Best
+	// effort: a query error only loses the alternate id, never the delete.
+	var conversationID string
+	if err := s.db.QueryRow("SELECT conversation_id FROM sessions WHERE id = ?", id).Scan(&conversationID); err != nil { //nolint:mutexio // mutex serializes sqlite connection access
+		s.logger.Debug("Delete: conversation_id capture failed (teardown alternate identity unavailable)", "id", id, "error", err)
+	}
 	result, err := s.db.Exec("DELETE FROM sessions WHERE id = ?", id) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		s.mu.Unlock()
@@ -779,8 +788,9 @@ func (s *SQLiteStore) Delete(id string) bool {
 		return false
 	}
 	// Collect the hook fire under the lock; invoke AFTER unlock (repo
-	// invariant: never hold a mutex across the hook call).
-	fires := s.collectLocked(s.logger, SessionEventDelete, id)
+	// invariant: never hold a mutex across the hook call). The fire
+	// carries the pre-delete-captured conversation id.
+	fires := s.collectLockedWithAlternate(s.logger, SessionEventDelete, id, conversationID)
 	s.mu.Unlock()
 
 	s.logger.Info("Session deleted", "id", id)

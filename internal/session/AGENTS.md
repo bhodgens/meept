@@ -9,10 +9,27 @@ The store exposes a `SessionLifecycleHook`
 (`lifecycle.go`: `OnSessionEvent(ctx, sessionID, SessionEvent)`) fired on
 archive, delete, and idle events. `SetLifecycleHook` wires ONE hook (the
 daemon's teardown coordinator adapter, `internal/daemon/components.go`
-`teardownStoreHook`); replace — never stack — hooks, and keep firing
-best-effort outside the store lock (`collectLocked` under the lock,
-`fireLifecycle` after unlock): a hook failure must never fail the archive
-or delete caller.
+`teardownStoreHook`); replace — never stack — hooks (the field is an
+atomic pointer: the daemon wires it externally after store
+construction), and keep firing best-effort outside the store lock
+(`collectLocked` under the lock, `fireLifecycle` after unlock): a hook
+failure must never fail the archive or delete caller.
+
+On the DELETE path the row is gone before the hook fires, so identity
+resolution via a post-delete store Get structurally cannot work. Both
+stores therefore capture the session's ALTERNATE identity (its
+conversation id) UNDER THE STORE LOCK before deletion
+(`collectLockedWithAlternate`) and hand it to hooks implementing the
+richer `SessionLifecycleHookWithAlternate`
+(`OnSessionEventWithAlternate(ctx, sessionID, alternateID, event)`);
+plain hooks keep the primary-id-only call. The daemon's
+`teardownStoreHook` dispatches under both identities so the
+accounting-id-keyed teardown snapshot is reachable on delete.
+
+The `ActivityTracker` is evicted on delete (same hook path) and the
+idle reaper prunes `idleFired` entries for sessions the tracker no
+longer knows — both maps stay bounded instead of growing one entry per
+session ever served.
 
 The `IdleReaper` (also `lifecycle.go`) reuses the shared `ActivityTracker`
 — the same data the LLM call path's activity callback feeds; a tracker fed

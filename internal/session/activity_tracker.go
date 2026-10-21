@@ -42,6 +42,23 @@ func (t *ActivityTracker) RecordActivity(sessionID, clientID string) {
 	state.ClientID = clientID
 }
 
+// Evict removes all state for a session (session deleted). Keeps the
+// activity map bounded: without eviction it grows monotonically — one
+// entry per session ever served, deleted sessions never removed.
+func (t *ActivityTracker) Evict(sessionID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.activity, sessionID)
+}
+
+// Len reports the number of tracked sessions (test/observability seam for
+// the eviction bound).
+func (t *ActivityTracker) Len() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return len(t.activity)
+}
+
 // GetActiveSessions returns session IDs whose last activity is within the
 // provided window relative to the current time.
 func (t *ActivityTracker) GetActiveSessions(window time.Duration) []string {

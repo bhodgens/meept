@@ -437,16 +437,23 @@ func (s *MemoryStore) GetForViewer(_ context.Context, viewer *Viewer, id string)
 // Delete removes a session.
 func (s *MemoryStore) Delete(id string) bool {
 	s.mu.Lock()
-	if _, exists := s.sessions[id]; !exists {
+	sess, exists := s.sessions[id]
+	if !exists {
 		s.mu.Unlock()
 		return false
+	}
+	// Capture the alternate identity under the lock BEFORE removal: the
+	// hook fires post-delete, where a store Get can no longer resolve it.
+	var conversationID string
+	if sess != nil {
+		conversationID = sess.ConversationID
 	}
 
 	delete(s.sessions, id)
 	delete(s.messages, id)
 	// Collect the hook fire under the lock; invoke AFTER unlock (repo
 	// invariant: never hold a mutex across the hook call).
-	fires := s.collectLocked(s.logger, SessionEventDelete, id)
+	fires := s.collectLockedWithAlternate(s.logger, SessionEventDelete, id, conversationID)
 	s.mu.Unlock()
 
 	s.logger.Info("Session deleted", "id", id)
