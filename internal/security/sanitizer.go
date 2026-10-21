@@ -352,10 +352,37 @@ func (s *InputSanitizer) detectPatterns(text string) []Warning {
 	return threats
 }
 
-// sanitizeStructure escapes special tokens, strips role markers, and removes
-// C0 control characters (except tab, newline, carriage return).
+// sanitizeStructure removes C0 control characters (except tab, newline,
+// carriage return) FIRST, then escapes special tokens and strips role
+// markers. The order is load-bearing: a marker split by a control char
+// ("Sys\x00tem:") evades the marker passes, and stripping controls LAST
+// would REASSEMBLE the live marker in the output.
 func (s *InputSanitizer) sanitizeStructure(text string) (string, bool) {
 	modified := false
+
+	// Strip C0 control characters (U+0000–U+001F, U+007F) except tab, newline, carriage return.
+	// Operate on runes to preserve UTF-8 correctness. Runs FIRST so a
+	// control-char-split marker is reassembled BEFORE the escape/strip
+	// passes see it (never after).
+	if strings.ContainsFunc(text, func(r rune) bool {
+		return unicode.IsControl(r) && r != '	' && r != '\n' && r != '\r'
+	}) {
+		var sb strings.Builder
+		sb.Grow(len(text))
+		for _, r := range text {
+			switch r {
+			case '	', '\n', '\r':
+				sb.WriteRune(r)
+			default:
+				if unicode.IsControl(r) {
+					continue // skip control characters
+				}
+				sb.WriteRune(r)
+			}
+		}
+		text = sb.String()
+		modified = true
+	}
 
 	// Escape boundary markers to prevent prompt injection boundary breakout
 	boundaryMarkers := []string{
@@ -388,25 +415,6 @@ func (s *InputSanitizer) sanitizeStructure(text string) (string, bool) {
 			modified = true
 			text = newText
 		}
-	}
-
-	// Strip C0 control characters (U+0000–U+001F, U+007F) except tab, newline, carriage return.
-	// Operate on runes to preserve UTF-8 correctness.
-	var sb strings.Builder
-	for _, r := range text {
-		switch r {
-		case '	', '\n', '\r':
-			sb.WriteRune(r)
-		default:
-			if unicode.IsControl(r) {
-				modified = true
-				continue // skip control characters
-			}
-			sb.WriteRune(r)
-		}
-	}
-	if modified {
-		text = sb.String()
 	}
 
 	return text, modified
