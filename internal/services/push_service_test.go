@@ -185,8 +185,8 @@ func (f *fakeStore) Close() error                           { return nil }
 // SetLifecycleHook satisfies the session-affinity leaf-05 addition to
 // session.Store (the fake is a stub: the hook is stored nowhere).
 func (f *fakeStore) SetLifecycleHook(session.SessionLifecycleHook) {}
-func (f *fakeStore) GetLeafMessageID(string) (int64, error) { return 0, nil }
-func (f *fakeStore) SetLeafMessageID(string, int64) error   { return nil }
+func (f *fakeStore) GetLeafMessageID(string) (int64, error)        { return 0, nil }
+func (f *fakeStore) SetLeafMessageID(string, int64) error          { return nil }
 func (f *fakeStore) GetMessagePath(string, int64) ([]session.Message, error) {
 	return nil, nil
 }
