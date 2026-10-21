@@ -154,3 +154,61 @@ after adversarial review of each fixer diff.
   user's WIP at that time; not re-audited here (file internal/comm/http/api_handlers.go
   is not in this wave's committed range).
 - No fix committed yet at report-write time; commit table appended after the fix wave.
+
+## FIX-WAVE DISPOSITION (appended 2026-10-20 ~01:40 MDT)
+
+13 commits, concern-split, explicit pathspecs; sibling WIP (dispatcher.go,
+escalation.go, handler.go, session_tracker.go, team_orchestrator.go, plan.go,
+go_lint.go, cmd/meept/chat.go, decision-model doc) left untouched in the tree.
+
+| Finding(s) | Commit |
+|---|---|
+| M1-M4, L1-L6 (llm sticky/teardown/affinity) | be01dd6b |
+| H2, M8, M9 (hermes status/session-key/mutex) | 2713d0d4 |
+| H1, H6 (mcp stdio race, vacuous test) | e98b38f1 |
+| H3, M7 (decision gate Answer bar, confirm bypass) | 8b1c2d6a |
+| M11 (sanitizer C0 ordering) | a2955a48 |
+| L9, L14, L16 (consolidator restart, dual_store LIKE) | 5715ce34 |
+| M5, L8 + daemon wiring legs of H4/H7 | e2f98297 |
+| H4, H5, H7, M6, L7 (agent scope/compaction/hooks) | 1b21708b |
+| L10 (port-guard mutation pin) | 5acf4d3b |
+| race in sibling's acp_wiring_test (found by wave gate) | 05de2989 |
+| L13 (TUI /task alias, /mcp doc ghost) | dd13ef38 |
+| M13 (GUI /dnd + /implement-improvements) | 23abf5ed |
+| M12 (pre-push-e2e @{u}, nested refs, shebang) | 23d4b5ff |
+| L15 (gofmt sweep) | f80bb3f0 |
+| this report | f6956725 |
+
+Sibling absorptions (content verified in-commit, not re-committed):
+- b4323721 (sibling) absorbed fixer F's acp head-of-line fix (M10),
+  resolveAllowOptionID (L12), setSessionID race (L11) + pins.
+- 7d079c52 (sibling) absorbed fixer D's hermes-client manifest scenarios +
+  reverse-completeness test (M14).
+- 407f58e4 (sibling) absorbed the sdk_client getDndState/setDnd methods the
+  GUI fix (23abf5ed) calls.
+- da511d98 (sibling) absorbed the docs/reference/cli.md edits.
+
+M6 sibling-owned wiring (NOT landed; proposed patches in fixer E report):
+dispatcher.go:635/649 classifier+intent scope threading and orchestrator.go:929
+reflection scope threading — both files are the sibling session's WIP.
+
+Gates at wave close: go build ./... OK; go vet OK; full suite 112 ok + 1
+environmental FAIL (builtin port exhaustion, green isolated); -race green on
+llm/hermes/mcp-transport/security/agent/session/memory/acp; step-pipeline e2e
+flake green isolated (19.9s); make e2e-affected: all suites ok except the
+documented step-pipeline flake. All fix commits used --no-verify because the
+pre-commit whole-tree build cannot pass while the sibling WIP is mid-edit
+(internal/agent referenced the removed SetScopeProvider during the window);
+every gate the hook would run passed directly first (recorded per skill rule).
+
+Disclosure ledger additions:
+- TestACPBusNotifierPublishes -race failure was in a SIBLING-committed test
+  (acp_wiring_test.go, not wave-owned); fixed anyway (no-delays rule), 05de2989.
+- 4 files remain gofmt-dirty at HEAD outside wave ownership
+  (decision_compactor_test.go, sanitizer_c0_test.go, oauth_pkce_state_test.go,
+  memory_turn_capture_test.go) — pre-commit fmt hook may flag them for their owner.
+- internal/daemon/memory_capture_test.go gofmt-dirty at HEAD (not touched).
+- /tmp/meept-red-f1 worktree (fixer E red-run evidence) left in place; remove
+  with `git worktree remove --force /tmp/meept-red-f1`.
+- mutexio/analyzers broken against ambient go 1.27 export data (pre-existing,
+  make targets unaffected due to GOTOOLCHAIN pin).
