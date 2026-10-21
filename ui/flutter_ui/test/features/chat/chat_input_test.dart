@@ -21,6 +21,68 @@ class _StubSdkClient extends SdkApiClient {
   Future<List<Map<String, dynamic>>> listAgents() async => [];
 }
 
+/// Stub that records the /dnd and /implement-improvements RPC surface so
+/// the dispatch test can assert the command hit the daemon client instead
+/// of falling through to the LLM as literal chat text.
+class _RecordingSdkClient extends _StubSdkClient {
+  final List<String> calls = [];
+  List<Map<String, dynamic>> proposals = [];
+  bool dndEnabled = false;
+
+  @override
+  Future<Map<String, dynamic>> getDndState() async {
+    calls.add('getDndState');
+    return {'enabled': dndEnabled};
+  }
+
+  @override
+  Future<Map<String, dynamic>> setDnd({required bool enabled}) async {
+    calls.add('setDnd:$enabled');
+    dndEnabled = enabled;
+    return {'enabled': enabled};
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getReflectionProposalsRaw() async {
+    calls.add('proposals');
+    return proposals;
+  }
+
+  @override
+  Future<Map<String, dynamic>> applyReflectionProposal(String id) async {
+    calls.add('apply:$id');
+    return {'status': 'applied', 'id': id};
+  }
+
+  @override
+  Future<Map<String, dynamic>> skipReflectionProposal(String id) async {
+    calls.add('skip:$id');
+    return {'status': 'skipped', 'id': id};
+  }
+}
+
+/// A [ChatNotifier] that records sendMessage calls — the dispatch test
+/// asserts locally-handled slash commands never reach it.
+class _RecordingChatNotifier extends _TestChatNotifier {
+  _RecordingChatNotifier({
+    required super.sdkClient,
+    required super.websocket,
+    required super.ttsNotifier,
+    required super.sessionId,
+  });
+
+  final List<String> sent = [];
+
+  @override
+  Future<void> sendMessage({
+    required String sessionId,
+    required String text,
+    String? agentId,
+  }) async {
+    sent.add(text);
+  }
+}
+
 /// A [ChatNotifier] whose [loadMessages] is a no-op so tests can set
 /// state directly without triggering a real HTTP fetch.
 class _TestChatNotifier extends ChatNotifier {
@@ -362,6 +424,150 @@ void main() {
       await tester.enterText(find.byType(TextField), '');
       await pumpBounded(tester, frames: 10);
       expect(find.byType(SlashAutocomplete), findsNothing);
+    });
+
+    // Dead-end slash command pins (99c366aa regression): /dnd and
+    // /implement-improvements must be handled LOCALLY through the daemon
+    // client, never sent to the LLM as literal chat text.
+    testWidgets('/dnd toggles daemon DND instead of sending chat text', (
+      tester,
+    ) async {
+      final sdk = _RecordingSdkClient();
+      final chat = _RecordingChatNotifier(
+        sdkClient: sdk,
+        websocket: _StubWebSocket(),
+        ttsNotifier: _StubTtsNotifier(),
+        sessionId: 'test-session',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            chatProvider('test-session').overrideWith((ref) => chat),
+            agentProvider.overrideWith(
+              (ref) =>
+                  AgentNotifier(sdkClient: sdk)..state = const AgentState(),
+            ),
+            activeAgentProvider.overrideWith((_) => null),
+            sdkClientProvider.overrideWith((_) => sdk),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(body: ChatInput(sessionId: 'test-session')),
+          ),
+        ),
+      );
+      await pumpBounded(tester);
+
+      await tester.enterText(find.byType(TextField), '/dnd on');
+      await pumpBounded(tester);
+      await tester.tap(find.byIcon(Icons.send));
+      await pumpBounded(tester, frames: 10);
+
+      expect(sdk.calls, contains('setDnd:true'));
+      expect(chat.sent, isEmpty, reason: '/dnd must not reach the LLM');
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        '',
+        reason: 'input must be cleared after local handling',
+      );
+      // Drain showStatusMessage's 2.5s auto-clear timer so the test does
+      // not end with a pending Timer.
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('/implement-improvements apply calls the reflection endpoint', (
+      tester,
+    ) async {
+      final sdk = _RecordingSdkClient();
+      final chat = _RecordingChatNotifier(
+        sdkClient: sdk,
+        websocket: _StubWebSocket(),
+        ttsNotifier: _StubTtsNotifier(),
+        sessionId: 'test-session',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            chatProvider('test-session').overrideWith((ref) => chat),
+            agentProvider.overrideWith(
+              (ref) =>
+                  AgentNotifier(sdkClient: sdk)..state = const AgentState(),
+            ),
+            activeAgentProvider.overrideWith((_) => null),
+            sdkClientProvider.overrideWith((_) => sdk),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(body: ChatInput(sessionId: 'test-session')),
+          ),
+        ),
+      );
+      await pumpBounded(tester);
+
+      await tester.enterText(
+        find.byType(TextField),
+        '/implement-improvements apply ab12cd3',
+      );
+      await pumpBounded(tester);
+      await tester.tap(find.byIcon(Icons.send));
+      await pumpBounded(tester, frames: 10);
+
+      expect(sdk.calls, contains('apply:ab12cd3'));
+      expect(
+        chat.sent,
+        isEmpty,
+        reason: '/implement-improvements must not reach the LLM',
+      );
+      // Drain showStatusMessage's 2.5s auto-clear timer.
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('/implement-improvements list shows the proposals dialog', (
+      tester,
+    ) async {
+      final sdk = _RecordingSdkClient()
+        ..proposals = [
+          {
+            'id': 'ab12cd3',
+            'type': 'skill',
+            'target': 'SKILL.md',
+            'confidence': 0.9,
+            'source': 'test',
+            'justification': 'do the thing',
+          },
+        ];
+      final chat = _RecordingChatNotifier(
+        sdkClient: sdk,
+        websocket: _StubWebSocket(),
+        ttsNotifier: _StubTtsNotifier(),
+        sessionId: 'test-session',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            chatProvider('test-session').overrideWith((ref) => chat),
+            agentProvider.overrideWith(
+              (ref) =>
+                  AgentNotifier(sdkClient: sdk)..state = const AgentState(),
+            ),
+            activeAgentProvider.overrideWith((_) => null),
+            sdkClientProvider.overrideWith((_) => sdk),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(body: ChatInput(sessionId: 'test-session')),
+          ),
+        ),
+      );
+      await pumpBounded(tester);
+
+      await tester.enterText(find.byType(TextField), '/implement-improvements');
+      await pumpBounded(tester);
+      await tester.tap(find.byIcon(Icons.send));
+      await pumpBounded(tester, frames: 10);
+
+      expect(sdk.calls, contains('proposals'));
+      expect(chat.sent, isEmpty);
+      // The shared command-output dialog surfaces the proposal id.
+      expect(find.text('improvements'), findsOneWidget);
+      expect(find.textContaining('ab12cd3'), findsWidgets);
     });
   });
 

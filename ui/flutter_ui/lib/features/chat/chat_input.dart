@@ -862,6 +862,148 @@ class _ChatInputState extends ConsumerState<ChatInput>
     }
   }
 
+  /// Handle `/dnd [on|off]` (TUI parity: executeDnd). With no argument it
+  /// toggles the daemon-side state read via notifications.get_dnd; with
+  /// on/off (and the TUI's true/false/1/0/yes/no spellings) it sets it
+  /// explicitly via notifications.set_dnd — both through the HTTP surface
+  /// of the same RPCs the TUI calls.
+  Future<void> _handleDndCommand(String arg) async {
+    bool? next;
+    if (arg.isNotEmpty) {
+      switch (arg.toLowerCase()) {
+        case 'on':
+        case 'true':
+        case '1':
+        case 'yes':
+          next = true;
+        case 'off':
+        case 'false':
+        case '0':
+        case 'no':
+          next = false;
+        default:
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('invalid argument: $arg (expected on|off)'),
+                backgroundColor: CyberpunkColors.redAlert,
+              ),
+            );
+          }
+          return;
+      }
+    }
+
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      if (next == null) {
+        final current = await sdk.getDndState();
+        next = current['enabled'] != true;
+      }
+      final result = await sdk.setDnd(enabled: next);
+      final enabled = result['enabled'] == true;
+      if (mounted) {
+        showStatusMessage(ref, 'do not disturb: ${enabled ? 'on' : 'off'}');
+        _resetInputState();
+      }
+    } catch (e) {
+      debugPrint('[chat_input] /dnd failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('dnd failed: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Handle `/implement-improvements [list|apply <id>|skip <id>]` (TUI
+  /// parity: executeImplementImprovements). The TUI reads the proposal
+  /// queue from .meept/improvements.md directly; the GUI goes through the
+  /// daemon's reflection HTTP endpoints (GET /api/v1/reflection/proposals,
+  /// POST .../{id}/apply|skip), which back onto the SAME queue — the GUI
+  /// process's cwd is not the daemon's, so a local read would target the
+  /// wrong file.
+  Future<void> _handleImplementImprovementsCommand(String arg) async {
+    final parts = arg.isEmpty ? const <String>[] : arg.split(RegExp(r'\s+'));
+    final sub = parts.isEmpty ? 'list' : parts[0].toLowerCase();
+
+    try {
+      final sdk = ref.read(sdkClientProvider);
+      if (sub == 'list' || sub.isEmpty) {
+        final proposals = await sdk.getReflectionProposalsRaw();
+        if (!mounted) return;
+        _resetInputState();
+        if (proposals.isEmpty) {
+          _showCommandOutput('improvements', 'no pending proposals');
+          return;
+        }
+        final buf = StringBuffer();
+        buf.writeln('pending proposals:');
+        buf.writeln();
+        for (final p in proposals) {
+          buf.writeln('[${p['id']}] ${p['type']} -> ${p['target']}');
+          buf.writeln(
+            '  confidence: ${p['confidence']}  source: ${p['source']}',
+          );
+          buf.writeln('  ${p['justification'] ?? ''}');
+          buf.writeln();
+        }
+        buf.writeln('use /implement-improvements apply <id> or skip <id>');
+        _showCommandOutput('improvements', buf.toString());
+        return;
+      }
+
+      if ((sub == 'apply' || sub == 'skip') && parts.length < 2) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('usage: /implement-improvements $sub <id>'),
+              backgroundColor: CyberpunkColors.redAlert,
+            ),
+          );
+        }
+        return;
+      }
+
+      final id = parts[1].trim();
+      if (sub == 'apply') {
+        await sdk.applyReflectionProposal(id);
+      } else if (sub == 'skip') {
+        await sdk.skipReflectionProposal(id);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'unknown subcommand: $sub (expected list|apply <id>|skip <id>)',
+              ),
+              backgroundColor: CyberpunkColors.redAlert,
+            ),
+          );
+        }
+        return;
+      }
+      if (mounted) {
+        final verb = sub == 'apply' ? 'applied' : 'skipped';
+        showStatusMessage(ref, '$verb proposal $id');
+        _resetInputState();
+      }
+    } catch (e) {
+      debugPrint('[chat_input] /implement-improvements failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('implement-improvements failed: $e'),
+            backgroundColor: CyberpunkColors.redAlert,
+          ),
+        );
+      }
+    }
+  }
+
   /// the change, reloads project paths so the typeahead includes the new
   /// path, and shows a transient status message.  Errors are surfaced via a
   /// SnackBar.
@@ -1528,6 +1670,16 @@ class _ChatInputState extends ConsumerState<ChatInput>
         _history.add(widget.sessionId, text);
         final arg = spaceIdx == -1 ? '' : text.substring(spaceIdx).trim();
         unawaited(_handleWorktreeCommand(arg));
+        return true;
+      case '/dnd':
+        _history.add(widget.sessionId, text);
+        final arg = spaceIdx == -1 ? '' : text.substring(spaceIdx).trim();
+        unawaited(_handleDndCommand(arg));
+        return true;
+      case '/implement-improvements':
+        _history.add(widget.sessionId, text);
+        final arg = spaceIdx == -1 ? '' : text.substring(spaceIdx).trim();
+        unawaited(_handleImplementImprovementsCommand(arg));
         return true;
       default:
         return false;

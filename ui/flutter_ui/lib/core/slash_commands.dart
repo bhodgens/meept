@@ -131,18 +131,20 @@ const _defaultCommands = <SlashCommand>[
     usage: '/skill [name|search <query>]',
   ),
   SlashCommand(name: '/debugsession', description: 'show session debug info'),
-  // TUI parity: /dnd toggles do-not-disturb via notifications.set_dnd RPC.
-  // The Dart client has no generic RPC-call helper (WebSocket is event-stream
-  // only), so this command is a placeholder with a deviation note.
+  // TUI parity: /dnd toggles do-not-disturb through the HTTP surface of
+  // the notifications.get_dnd / notifications.set_dnd RPCs — the same
+  // daemon RPCs the TUI's executeDnd calls (chat_input.dart
+  // _handleDndCommand).
   SlashCommand(
     name: '/dnd',
     description: 'toggle do-not-disturb (suppresses toasts)',
     usage: '/dnd [on|off]',
   ),
   // TUI parity: /implement-improvements reviews/applies queued improvement
-  // proposals via daemon RPCs. The Dart client has no generic RPC-call
-  // helper for this endpoint, so this command is a placeholder with a
-  // deviation note.
+  // proposals through the daemon's reflection endpoints
+  // (GET /api/v1/reflection/proposals, POST .../{id}/apply|skip), which
+  // back onto the same .meept/improvements.md queue the TUI reads
+  // directly (chat_input.dart _handleImplementImprovementsCommand).
   SlashCommand(
     name: '/implement-improvements',
     description: 'review and apply or skip pending improvement proposals',
