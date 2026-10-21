@@ -796,11 +796,10 @@ func TestStickyEndpointPreference(t *testing.T) {
 	}
 }
 
-
 // TestForgetSessionEndpoint pins the sticky-failure fix (session-affinity
 // integration): a remembered endpoint must be droppable so rotation makes
 // progress instead of ping-ponging on a dead endpoint, and the drop must
-// go through the tombstone-correct LRU removal (no dangling order entry).
+// splice the LRU slot out correctly (no dangling list entry).
 func TestForgetSessionEndpoint(t *testing.T) {
 	r := newStickyPrefResolver(t)
 
@@ -817,9 +816,9 @@ func TestForgetSessionEndpoint(t *testing.T) {
 	if _, ok := r.PreferredEndpoint("s1"); ok {
 		t.Fatal("forgotten session must have no preferred endpoint")
 	}
-	if len(r.sessionEndpointOrder) != len(r.sessionEndpoints) {
-		t.Fatalf("order/map divergence after forget: order=%d map=%d",
-			len(r.sessionEndpointOrder), len(r.sessionEndpoints))
+	if len(r.sessionEndpointLRU) != len(r.sessionEndpoints) {
+		t.Fatalf("LRU/map divergence after forget: lru=%d map=%d",
+			len(r.sessionEndpointLRU), len(r.sessionEndpoints))
 	}
 
 	// Re-arm on the next success (rotation heals the memory).

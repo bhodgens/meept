@@ -239,20 +239,25 @@ func (pm *ProviderManager) SetSessionActivityCallback(callback func(sessionID, e
 
 // forgetSessionEndpoint is the failure-side twin of reportSessionEndpoint
 // (session-affinity integration fix): when an attempt against a provider
-// FAILS, the session's sticky preference for that endpoint must drop, or
-// the resolver's sticky hook re-pulls the dead endpoint to the front on the
-// next resolve and the turn ping-pongs on it until the retry budget dies
-// (observed end-to-end by leaf 07's rotation proof). One helper, called
-// beside every recordFailure site; the resolver-side gate (quota/timeout/
-// alias blocks) remains the second line of defense. Scoped sessions only;
-// best-effort, never blocks the failure path.
-func (pm *ProviderManager) forgetSessionEndpoint(opts []ChatOption) {
+// FAILS, the session's sticky preference must drop — but ONLY when the
+// failed entry IS the remembered endpoint. An unconditional forget wiped
+// the preference whenever ANY rotated-to provider died, erasing the
+// healthy endpoint's stickiness mid-failover. The resolver-side
+// compare-and-forget (ForgetSessionEndpointIf) keeps this atomic with the
+// map read; the resolver-side gate (quota/timeout/alias blocks) remains
+// the second line of defense. Scoped sessions only; best-effort, never
+// blocks the failure path.
+func (pm *ProviderManager) forgetSessionEndpoint(entry *ProviderEntry, opts []ChatOption) {
+	if entry == nil || entry.Config == nil {
+		return
+	}
 	pm.mu.RLock()
 	resolver := pm.stickyResolver
 	pm.mu.RUnlock()
 	if resolver == nil {
 		return
 	}
+	failedKey := EndpointKey(entry.Config)
 	for _, opt := range opts {
 		if opt == nil {
 			continue
@@ -262,7 +267,7 @@ func (pm *ProviderManager) forgetSessionEndpoint(opts []ChatOption) {
 		if probe.sessionID == "" {
 			continue
 		}
-		resolver.ForgetSessionEndpoint(probe.sessionID)
+		resolver.ForgetSessionEndpointIf(probe.sessionID, failedKey)
 		return
 	}
 }
@@ -592,7 +597,7 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 				// Auth errors mean the provider is misconfigured or the key is
 				// bad — mark unhealthy so we skip it on future attempts.
 				pm.recordFailure(entry, err, latency)
-				pm.forgetSessionEndpoint(opts)
+				pm.forgetSessionEndpoint(entry, opts)
 				pm.logger.Warn("Auth error, marking provider unhealthy and rotating",
 					"provider", entry.Config.ProviderID,
 					"error", err,
@@ -616,7 +621,7 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 
 			default:
 				pm.recordFailure(entry, err, latency)
-				pm.forgetSessionEndpoint(opts)
+				pm.forgetSessionEndpoint(entry, opts)
 				pm.logger.Warn("Provider call failed, trying next",
 					"provider", entry.Config.ProviderID,
 					"error", err,
@@ -800,7 +805,7 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 
 			default:
 				pm.recordFailure(entry, err, latency)
-				pm.forgetSessionEndpoint(opts)
+				pm.forgetSessionEndpoint(entry, opts)
 				if progress != nil {
 					progress(ProgressStageDone, fmt.Sprintf("Provider %s failed: %v (%s)", entry.Config.ProviderID, err, latency.Round(time.Millisecond)))
 				}
@@ -812,6 +817,12 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 			progress(ProgressStageStreaming, fmt.Sprintf("Provider %s responded (%s)", entry.Config.ProviderID, latency.Round(time.Millisecond)))
 		}
 		pm.recordSuccess(entry, resp, latency)
+
+		// Session-endpoint preference reporting (leaf 04 reporting seam):
+		// the progress path's own success site — Chat, ChatWithProgress,
+		// and chatWithAttemptTaggedDeltas each report through this ONE
+		// seam function (one writer: RememberSessionEndpoint).
+		pm.reportSessionEndpoint(entry, opts)
 
 		// A served request proves the credential's quota window has lifted:
 		// clear any persisted quota block for it.
@@ -1020,7 +1031,7 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 
 			default:
 				pm.recordFailure(entry, err, latency)
-				pm.forgetSessionEndpoint(opts)
+				pm.forgetSessionEndpoint(entry, opts)
 				pm.logger.Warn("Provider streaming call failed, trying next",
 					"provider", entry.Config.ProviderID,
 					"error", err,
@@ -1033,10 +1044,9 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 
 		// Session-endpoint preference reporting (leaf 04 reporting seam):
 		// streaming twin of the non-streaming hook above — same ONE seam
-		// function, same writer. ChatWithProgress passes through
-		// entry.Chatter.Chat (plain-Chatter streaming-capable clients
-		// deliver deltas inside Chat), so this covers all three manager
-		// entry points.
+		// function, same writer. All three manager entry points (Chat,
+		// ChatWithProgress, chatWithAttemptTaggedDeltas) report on their
+		// OWN success sites.
 		pm.reportSessionEndpoint(entry, opts)
 
 		pm.mu.Lock()

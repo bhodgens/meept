@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -90,12 +91,14 @@ type Resolver struct {
 	// (resolve-time reader), SessionEndpoints (leaf-06 teardown
 	// coordinator's point-in-time snapshot).
 	sessionEndpoints map[string]string
-	// sessionEndpointOrder maps sessionID -> index into sessionEndpointLRU
-	// (-1 = evicted, slice compaction pending). The order slice is the LRU
-	// list: front = least recently used (evicted first at cap).
-	sessionEndpointOrder map[string]int
-	// sessionEndpointLRU holds session IDs in use recency order; see
-	// sessionEndpointOrder. Guarded by mu (all three fields together).
+	// sessionEndpointLRU holds session IDs in use-recency order: front =
+	// least recently used (evicted first at cap). It is the ONLY ordering
+	// record for the sticky map — membership is located by identity scan
+	// (slices.Index, trivial at the ≤1024 cap). A parallel index map was
+	// removed after its cached indexes went stale across splices (a
+	// re-remember then skipped removal, appended a duplicate ID, and the
+	// next eviction deleted a LIVE session's preference). Guarded by mu
+	// (both fields together).
 	sessionEndpointLRU []string
 }
 
@@ -112,14 +115,13 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 	}
 
 	r := &Resolver{
-		config:               cfg,
-		allModels:            GetAllModels(cfg),
-		aliases:              make(map[string]*AliasEntry),
-		health:               make(map[string]*AliasHealth),
-		endpointBlocks:       make(map[string]time.Time),
-		sessionEndpoints:     make(map[string]string),
-		sessionEndpointOrder: make(map[string]int),
-		logger:               logger,
+		config:           cfg,
+		allModels:        GetAllModels(cfg),
+		aliases:          make(map[string]*AliasEntry),
+		health:           make(map[string]*AliasHealth),
+		endpointBlocks:   make(map[string]time.Time),
+		sessionEndpoints: make(map[string]string),
+		logger:           logger,
 	}
 
 	// Resolve default and small models
@@ -640,21 +642,23 @@ func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelCo
 	// blocks / endpoint blocks run above (block precedence UNCHANGED).
 	// BELOW here, after every filter, the winner is re-validated and only
 	// then is the session's sticky endpoint preference consulted — a
-	// remembered key belonging to a HEALTHY candidate of THIS alias moves
-	// to the front by OVERWRITING health.CurrentIndex with that
-	// candidate's index; an unknown or BLOCKED key (quota-blocked,
-	// endpoint-cooldown-blocked, or caught by the armed alias-level
-	// timeout block) degrades to the winner chosen above. A preference can
-	// never rescue a blocked winner: the health filters already ran on the
-	// chosen index, so an all-blocked alias errors out before the hook
-	// runs, and the hook's chosen index is re-validated against BOTH
-	// filters. This is a READ-side preference: no rotation cursor, no
-	// sticky pin, no shared-state mutation — resolution remains
-	// request-scoped (WithResolvedModel), the next resolve for any other
-	// session (or with no scope) is byte-identical to pre-leaf-04.
+	// remembered key belonging to a HEALTHY candidate of THIS alias is
+	// served first by moving the REQUEST-LOCAL selection
+	// (selectedIdx) to that candidate's index; an unknown or BLOCKED
+	// key (quota-blocked, endpoint-cooldown-blocked, or caught by the
+	// armed alias-level timeout block) degrades to the winner chosen
+	// above. A preference can never rescue a blocked winner: the health
+	// filters already ran on the rotation cursor, so an all-blocked
+	// alias errors out before the hook runs, and the hook's chosen index
+	// is re-validated against BOTH filters. This is a READ-side
+	// preference: the shared rotation cursor (health.CurrentIndex) is
+	// NEVER repositioned by stickiness, so resolution remains
+	// request-scoped (WithResolvedModel) and the next resolve for any
+	// other session (or with no scope) is byte-identical to pre-leaf-04.
 	//
 	// Block precedence preserved exactly (Contract 4 / review checklist):
 	// quota blocks > endpoint blocks > alias blocks > stickiness.
+	selectedIdx := health.CurrentIndex
 	if sessionID != "" {
 		// NOTE: r.mu is already held here — read the map through the
 		// locked helper, never through PreferredEndpoint (self-deadlock;
@@ -673,17 +677,21 @@ func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelCo
 				blocked := (r.quotaEnabled() && r.isQuotaBlocked(health, candidate)) ||
 					r.isEndpointBlocked(health, candidate)
 				if !blocked {
-					if idx != health.CurrentIndex {
+					if idx != selectedIdx {
 						r.logger.Debug("Sticky session endpoint preference moving candidate to front",
 							"alias", aliasName,
 							"session_id", sessionID,
 							"endpoint_key", preferredKey,
 							"provider", candidate.ProviderID,
 							"model", candidate.ModelID,
-							"prev_index", health.CurrentIndex,
+							"prev_index", selectedIdx,
 							"new_index", idx,
 						)
-						health.CurrentIndex = idx
+						// Request-local reorder ONLY: the shared rotation
+						// cursor stays where the health filters left it,
+						// so unscoped/other-session callers see the
+						// pre-hook rotation order.
+						selectedIdx = idx
 					}
 				}
 				// Either way the scan ends at the FIRST alias candidate
@@ -705,13 +713,13 @@ func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelCo
 	// models=[A,B], A quota-blocked-only and B endpoint-blocked-only, the
 	// quota pass rotates A→B and the endpoint pass rotates B→A, returning
 	// the quota-blocked A (bughunt round-2 auditor 3, finding 1). Re-
-	// validate the winner and keep rotating past doubly-blocked models.
-	if (r.quotaEnabled() && r.isQuotaBlocked(health, alias.Models[health.CurrentIndex])) ||
-		r.isEndpointBlocked(health, alias.Models[health.CurrentIndex]) {
+	// validate the selection and keep rotating past doubly-blocked models.
+	if (r.quotaEnabled() && r.isQuotaBlocked(health, alias.Models[selectedIdx])) ||
+		r.isEndpointBlocked(health, alias.Models[selectedIdx]) {
 		n := len(alias.Models)
 		finalIdx := -1
 		for i := range n {
-			idx := (health.CurrentIndex + i) % n
+			idx := (selectedIdx + i) % n
 			blocked := r.isEndpointBlocked(health, alias.Models[idx]) ||
 				(r.quotaEnabled() && r.isQuotaBlocked(health, alias.Models[idx]))
 			if !blocked {
@@ -725,18 +733,24 @@ func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelCo
 			return nil, fmt.Errorf("%w: alias %q (all %d model(s) blocked)",
 				ErrAllModelsQuotaBlocked, aliasName, n)
 		}
-		if finalIdx != health.CurrentIndex {
+		if finalIdx != selectedIdx {
 			r.logger.Info("Rotated to jointly-unblocked candidate",
 				"alias", aliasName,
 				"new_index", finalIdx,
 			)
+			selectedIdx = finalIdx
+			// Re-validation can only fire when selectedIdx is still the
+			// cursor (a sticky-reordered index passed the same filters
+			// in the hook and is never blocked), so following the cursor
+			// here preserves the original rotation semantics without
+			// ever letting stickiness reposition it.
 			health.CurrentIndex = finalIdx
 		}
 	}
 
 	// Return the active model
-	if health.CurrentIndex < len(alias.Models) {
-		chosen := alias.Models[health.CurrentIndex]
+	if selectedIdx < len(alias.Models) {
+		chosen := alias.Models[selectedIdx]
 		// Persist the routing decision for later mining (Phase 4 student-learns-routing).
 		// Best-effort: swallow errors so routing observability never breaks serving.
 		if r.routingLogger != nil {
@@ -858,38 +872,30 @@ func (r *Resolver) rememberSessionEndpointIfHealthy(alias *AliasEntry, health *A
 // sessionID=="" must never reach this path (guarded by RememberSessionEndpoint;
 // a defensive no-op here as well). endpointKey=="" clears any stale entry —
 // an unknown serving endpoint must never masquerade as a preference.
+// LRU bookkeeping is the slice alone: the session's slot is found by
+// identity scan and spliced out before re-append, so no cached index can
+// go stale across a splice (the bug class the removed order map had).
 // Callers must hold r.mu.
 func (r *Resolver) rememberSessionEndpointLocked(sessionID, endpointKey string) {
 	if r.sessionEndpoints == nil {
 		r.sessionEndpoints = make(map[string]string, stickySessionEndpointCap)
 	}
-	// Remove any existing LRU slot for this session. order[s]==-1 marks a
-	// tombstoned (already-evicted) session; a fresh session has no entry at
-	// all — the two-value map read distinguishes them (AGENTS.md two-value
-	// rule; a plain lookup returns 0 for missing keys, which would slice
-	// LRU[0:0] and corrupt the front of the list). The idx bounds check
-	// self-heals any residual inconsistency (a session whose order entry
-	// points past a list that shrank underneath it, e.g. across a cap
-	// change): a stale slot is dropped and the session is re-appended
-	// fresh below, so the map and the list converge instead of panicking.
-	if idx, present := r.sessionEndpointOrder[sessionID]; present && idx != -1 && idx >= 0 && idx < len(r.sessionEndpointLRU) {
-		if r.sessionEndpointLRU[idx] == sessionID {
-			r.sessionEndpointLRU = append(r.sessionEndpointLRU[:idx], r.sessionEndpointLRU[idx+1:]...)
-		}
+	// Remove any existing LRU slot for this session by identity scan —
+	// the slice is the single source of recency truth, so there is no
+	// index to go stale and no duplicate-append window.
+	if idx := slices.Index(r.sessionEndpointLRU, sessionID); idx >= 0 {
+		r.sessionEndpointLRU = append(r.sessionEndpointLRU[:idx], r.sessionEndpointLRU[idx+1:]...)
 	}
-	delete(r.sessionEndpointOrder, sessionID)
 	if endpointKey == "" {
 		delete(r.sessionEndpoints, sessionID)
 		return
 	}
 	r.sessionEndpoints[sessionID] = endpointKey
-	r.sessionEndpointOrder[sessionID] = len(r.sessionEndpointLRU)
 	r.sessionEndpointLRU = append(r.sessionEndpointLRU, sessionID)
 	if len(r.sessionEndpointLRU) > stickySessionEndpointCap {
 		oldest := r.sessionEndpointLRU[0]
 		r.sessionEndpointLRU = r.sessionEndpointLRU[1:]
 		delete(r.sessionEndpoints, oldest)
-		delete(r.sessionEndpointOrder, oldest)
 		r.logger.Debug("Evicted session endpoint preference (LRU cap)",
 			"sessions_stored", len(r.sessionEndpoints),
 		)
@@ -926,9 +932,9 @@ func (r *Resolver) SessionEndpoints() map[string]string {
 // forgotten. Calls the LOCKED helper directly: the public path's
 // healthy-candidate gate would reject an empty key (no candidate carries
 // it) and fall through to "not remembered" without ever clearing. The
-// helper's empty-key branch performs the tombstone-correct LRU slot
-// removal (two-value order read + bounds self-heal) — a second
-// hand-rolled removal here would diverge from that logic.
+// helper's empty-key branch splices the session's LRU slot out by
+// identity scan — a second hand-rolled removal here would diverge from
+// that logic.
 func (r *Resolver) ForgetSessionEndpoint(sessionID string) {
 	if r == nil || sessionID == "" {
 		return
@@ -936,6 +942,28 @@ func (r *Resolver) ForgetSessionEndpoint(sessionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.rememberSessionEndpointLocked(sessionID, "")
+}
+
+// ForgetSessionEndpointIf is the compare-and-forget twin: it drops the
+// session's sticky preference ONLY when the remembered endpoint key
+// equals endpointKey. The PM failure path uses it so a failed attempt
+// against a DIFFERENT provider cannot wipe the preference for the
+// endpoint that actually served the session (an unconditional forget on
+// every failure erased healthy preferences whenever any rotated-to
+// provider died). Reports whether a preference was dropped. No-op on a
+// nil receiver, empty session, or empty endpointKey (an empty key is
+// never remembered, so it can never match).
+func (r *Resolver) ForgetSessionEndpointIf(sessionID, endpointKey string) bool {
+	if r == nil || sessionID == "" || endpointKey == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if got, ok := r.sessionEndpoints[sessionID]; !ok || got != endpointKey {
+		return false
+	}
+	r.rememberSessionEndpointLocked(sessionID, "")
+	return true
 }
 
 // inCooldown reports whether the alias-level cooldown is active at now.

@@ -405,6 +405,11 @@ func (c *Client) SetSessionAffinityConfig(cfg *AffinityConfig) {
 	if c == nil {
 		return
 	}
+	// Under configMu, mirroring the Anthropic twin (anthropic.go
+	// SetSessionAffinityConfig / applyAnthropicAffinityHeader): the PM
+	// propagates config while in-flight request builders read it.
+	c.configMu.Lock()
+	defer c.configMu.Unlock()
 	c.sessionAffinity = cfg
 }
 
@@ -419,16 +424,22 @@ func (c *Client) SetSessionAffinityConfig(cfg *AffinityConfig) {
 // unchanged and independent of this path. Empty sessionID => header
 // omitted, never sent empty.
 func (c *Client) applyAffinityHeader(req *http.Request, sessionID string) {
-	if c == nil || c.sessionAffinity == nil || !c.sessionAffinity.Enabled {
+	if c == nil {
 		return
 	}
-	if c.sessionAffinity.Header == "" || sessionID == "" {
+	c.configMu.RLock()
+	affinity := c.sessionAffinity
+	c.configMu.RUnlock()
+	if affinity == nil || !affinity.Enabled {
 		return
 	}
-	if req.Header.Get(c.sessionAffinity.Header) != "" {
+	if affinity.Header == "" || sessionID == "" {
 		return
 	}
-	req.Header.Set(c.sessionAffinity.Header, sessionID)
+	if req.Header.Get(affinity.Header) != "" {
+		return
+	}
+	req.Header.Set(affinity.Header, sessionID)
 }
 
 // WithUploadStore sets the upload store for resolving image file references.

@@ -118,10 +118,12 @@ type endpointBaseURLer interface {
 // "llama-cpp:<host>:<port>" this map is indexed by. Two shapes, one host:
 // so resolution falls back to a HOST match over registered endpoints. The
 // fallback is safe for the teardown use: erasing the KV cache of the one
-// llama-server listening on that host is the intent, host:port collisions
-// between two llama runtimes on one host do not occur in practice (each
-// runtime binds a distinct port; the host|credential key carries no port,
-// so port disambiguation is impossible from the snapshot side anyway).
+// llama-server listening on that host is the intent. NOTE the snapshot's
+// host portion DOES carry the port — EndpointKey stores endpointHost's
+// host:PORT — and the host-fallback comparison below relies on it, so
+// two llama runtimes on one host are disambiguated by the snapshot key's
+// port; only legacy port-less keys fall to the bare-hostname compare
+// (first registered wins).
 // A nil manager or an unknown endpoint returns false: a down or
 // unregistered runtime has no cache worth erasing, and the erase must
 // never guess a base URL.
@@ -132,10 +134,13 @@ func (m *RuntimeManager) TeardownBaseURL(endpointKey string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Exact runtime-key match first (test stubs and any future caller
-	// that stores runtime-shaped keys).
-	providerID := m.endpointProviderLocked(endpointKey)
-	ep, ok := m.endpoints[endpointKey]
-	if ok && ep != nil && ep.hc != nil && providerID != endpointKey {
+	// that stores runtime-shaped keys). An endpoint registered under
+	// this exact key resolves even with NO provider mapping: requiring
+	// one (endpointProviderLocked returns the key itself on a miss)
+	// made runtime-shaped keys without a mapping fall through to the
+	// host fallback, which cannot match the "llama-cpp:" prefix and
+	// returned false.
+	if ep, ok := m.endpoints[endpointKey]; ok && ep != nil && ep.hc != nil {
 		return ep.hc.baseURL, ep.hc.baseURL != ""
 	}
 	// Host fallback: EndpointKey(cfg) snapshot keys are "host|credential".
@@ -226,10 +231,17 @@ func NewLlamaServerTeardown(manager *RuntimeManager, endpointsFn func() map[stri
 // daemon); an unresolvable key claims nothing, and the erase still
 // refuses unknown endpoints inside Teardown.
 func (t *LlamaServerTeardown) Handles(endpointKey string) bool {
+	// Nil check FIRST: a typed-nil receiver must claim nothing — the
+	// prefix check below answers from constants alone, so without this
+	// ordering a nil *LlamaServerTeardown still claimed every
+	// runtime-shaped key.
+	if t == nil {
+		return false
+	}
 	if strings.HasPrefix(endpointKey, llamaEndpointPrefix) {
 		return true
 	}
-	if t == nil || !strings.Contains(endpointKey, "|") {
+	if !strings.Contains(endpointKey, "|") {
 		return false
 	}
 	return isLlamaSnapshotKey(endpointKey, t.manager)
@@ -389,7 +401,10 @@ type TeardownCoordinator struct {
 	// documented session_id/conversation_id duality. On a snapshot miss
 	// under the given id the coordinator asks this seam once and retries
 	// with the returned identity. Nil = single-identity lookups only.
+	// Guarded by identityMu (dispatchAsync goroutines read it while the
+	// daemon wiring may still call SetIdentityResolver).
 	identityResolve func(sessionID string) (string, bool)
+	identityMu      sync.RWMutex
 	timeout         time.Duration
 	logger          *slog.Logger
 
@@ -435,8 +450,15 @@ func (c *TeardownCoordinator) endpointForSession(sessionID string) (string, stri
 	if ok && key != "" {
 		return key, sessionID, true
 	}
-	if c.identityResolve != nil {
-		if alt, found := c.identityResolve(sessionID); found && alt != "" && alt != sessionID {
+	// Copy the resolver under identityMu, then CALL it with no lock held
+	// (the seam may take the session store's lock; the coordinator's
+	// lock-order rule forbids holding any of its own mutexes across an
+	// outside call).
+	c.identityMu.RLock()
+	resolve := c.identityResolve
+	c.identityMu.RUnlock()
+	if resolve != nil {
+		if alt, found := resolve(sessionID); found && alt != "" && alt != sessionID {
 			if key, ok = snapshot[alt]; ok && key != "" {
 				return key, alt, true
 			}
@@ -448,11 +470,15 @@ func (c *TeardownCoordinator) endpointForSession(sessionID string) (string, stri
 // SetIdentityResolver wires the primary-id -> conversation-id seam used on
 // a snapshot miss (the session_id/conversation_id duality: lifecycle events
 // carry the primary id, the snapshot keys on the accounting id). Nil
-// disables the retry. Call once at daemon wiring time, before any event.
+// disables the retry. Safe to call while dispatchAsync goroutines are in
+// flight: the write is guarded by identityMu, the same lock the dispatch
+// readers take.
 func (c *TeardownCoordinator) SetIdentityResolver(resolve func(sessionID string) (string, bool)) {
 	if c == nil || resolve == nil {
 		return
 	}
+	c.identityMu.Lock()
+	defer c.identityMu.Unlock()
 	c.identityResolve = resolve
 }
 
@@ -538,9 +564,15 @@ func (c *TeardownCoordinator) dispatchAsync(sessionID string) {
 }
 
 // ShutdownSweep tears down every session with a remembered endpoint,
-// SYNCHRONOUSLY, under a total budget of TeardownTimeout *
-// min(sweepMaxSessions, len(sessions)). Errors and overruns are logged,
-// never returned to the shutdown path (shutdown must always complete).
+// SYNCHRONOUSLY, under a bounded budget. The total worst case is
+// 2 * TeardownTimeout * min(sweepMaxSessions, len(sessions)): the
+// in-flight wait and the sweep itself are each bounded by the full
+// sweepBudget, and the wait can consume it entirely before the sweep
+// starts its own (same-sized) window. Splitting the budget was rejected:
+// it would halve the erase window for every healthy shutdown to fix a
+// bound that only a stuck in-flight adapter ever approaches, and the
+// shutdown contract is "always completes", not "completes in exactly N".
+// Errors and overruns are logged, never returned to the shutdown path.
 // Sessions without a remembered endpoint are skipped (nothing to release).
 func (c *TeardownCoordinator) ShutdownSweep(ctx context.Context) {
 	if c == nil {

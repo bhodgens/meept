@@ -196,7 +196,11 @@ boundaries:
 - **Teardown is best-effort and never fails a turn, an archive, or a
   shutdown.** `TeardownCoordinator` fans archive/delete/idle events to
   adapters asynchronously; `ShutdownSweep` (daemon stop, before
-  `ContainerManager.StopAll`) is synchronous under a bounded budget. The
+  `ContainerManager.StopAll`) is synchronous under a bounded budget —
+  the in-flight wait and the sweep each get the full
+  `TeardownTimeout*min(8,n)` window, so the worst-case total is 2x that
+  bound (deliberate: splitting would halve every healthy shutdown's
+  erase window). The
   erase route is the VERIFIED `POST <base>/slots/0?action=erase`
   (pinned llama.cpp tools/server/server.cpp:286 +
   server-context.cpp:4796; the adapter strips the provider baseURL's
