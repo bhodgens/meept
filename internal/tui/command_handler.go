@@ -193,6 +193,12 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeStatus()
 	case CmdTasks:
 		return h.executeTasks(cmd.Args)
+	case "task":
+		// /task is the documented alias of /tasks (docs/reference/cli.md):
+		// both list tasks. Registered in sharedclient.builtinCommands, so
+		// it must be handled here or IsBuiltin gates it into the
+		// "unknown command" default.
+		return h.executeTasks(cmd.Args)
 	case "cancel":
 		return h.executeCancel(cmd.Args)
 	case "amend":
