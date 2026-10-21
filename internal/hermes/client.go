@@ -268,7 +268,8 @@ func (e *APIError) Error() string {
 // do executes one authenticated JSON request. It returns the decoded JSON
 // body on 2xx (into out, when out is non-nil) and a classified error
 // otherwise. expectStatus accepts the documented success statuses (e.g. 200,
-// or 202 for run creation).
+// or 202 for run creation); when omitted, ANY 2xx is accepted and every
+// non-2xx response is classified as an error.
 func (c *Client) do(ctx context.Context, endpoint, method, path string, in, out any, expectStatus ...int) error {
 	return c.doHeaders(ctx, endpoint, method, path, in, out, nil, expectStatus...)
 }
@@ -309,11 +310,17 @@ func (c *Client) doHeaders(ctx context.Context, endpoint, method, path string, i
 		respClosing(resp.Body)
 	}()
 
-	ok := len(expectStatus) == 0
-	for _, s := range expectStatus {
-		if resp.StatusCode == s {
-			ok = true
-			break
+	// An omitted expectStatus means "any 2xx" — never "any status". A
+	// caller that genuinely wants a non-2xx body decoded as data must
+	// pass it explicitly.
+	ok := resp.StatusCode >= 200 && resp.StatusCode < 300
+	if len(expectStatus) > 0 {
+		ok = false
+		for _, s := range expectStatus {
+			if resp.StatusCode == s {
+				ok = true
+				break
+			}
 		}
 	}
 	if !ok {
@@ -421,21 +428,34 @@ func bodyHasErrorCode(body []byte, code string) bool {
 
 // Capabilities returns the gateway's feature flags + endpoint table. The
 // result is cached for capabilitiesTTL (60s) — one probe, not per call.
+//
+// No I/O under the mutex (repo invariant; mutexio analyzer): the cache
+// lookup happens under the lock, the HTTP request runs unlocked, and the
+// result is stored under a second lock. A duplicate concurrent fetch is
+// acceptable; a caller blocked behind another caller's request is not.
+// Failed probes are never cached — every capability-gated verb would
+// otherwise fail with a misleading "gateway does not advertise" for the
+// whole TTL.
 func (c *Client) Capabilities(ctx context.Context) (*Capabilities, error) {
 	c.capsMu.Lock()
-	defer c.capsMu.Unlock()
-
 	if c.caps != nil && time.Since(c.capsFetched) < capabilitiesTTL {
-		return c.caps, nil
+		cached := c.caps
+		c.capsMu.Unlock()
+		return cached, nil
 	}
+	c.capsMu.Unlock()
 
 	var caps Capabilities
 	if err := c.do(ctx, "GET /v1/capabilities", http.MethodGet, "/v1/capabilities", nil, &caps); err != nil {
 		return nil, err
 	}
+
+	c.capsMu.Lock()
 	c.caps = &caps
 	c.capsFetched = time.Now()
-	return c.caps, nil
+	stored := c.caps
+	c.capsMu.Unlock()
+	return stored, nil
 }
 
 // --- health --------------------------------------------------------------------

@@ -83,7 +83,7 @@ func (c *Client) StreamRunEvents(ctx context.Context, runID string) (<-chan Even
 		return nil, fmt.Errorf("hermes stream: run id required")
 	}
 	path := "/v1/runs/" + url.PathEscape(runID) + "/events"
-	return c.sseStream(ctx, "GET /v1/runs/{id}/events", http.MethodGet, path, nil)
+	return c.sseStream(ctx, "GET /v1/runs/{id}/events", http.MethodGet, path, nil, nil)
 }
 
 // StreamChat runs a streaming chat turn on an existing session
@@ -106,14 +106,21 @@ func (c *Client) StreamChat(ctx context.Context, sessionID, input string, opts C
 	if opts.Provider != "" {
 		payload["provider"] = opts.Provider
 	}
+	// Parity with the sync ChatSync path: a non-empty SessionKey rides
+	// the X-Hermes-Session-Key header; an empty one sends NO header.
+	headers, err := clientSessionKeyHeaders(opts.SessionKey)
+	if err != nil {
+		return nil, fmt.Errorf("hermes stream chat: %w", err)
+	}
 	path := "/api/sessions/" + url.PathEscape(sessionID) + "/chat/stream"
-	return c.sseStream(ctx, "POST /api/sessions/{id}/chat/stream", http.MethodPost, path, payload)
+	return c.sseStream(ctx, "POST /api/sessions/{id}/chat/stream", http.MethodPost, path, payload, headers)
 }
 
 // sseStream performs the request, classifies non-2xx synchronously (typed
 // error, nil channel), and on success starts the reader goroutine that
-// parses frames into the returned channel.
-func (c *Client) sseStream(ctx context.Context, endpoint, method, path string, in any) (<-chan Event, error) {
+// parses frames into the returned channel. headers may be nil; values are
+// never logged (the X-Hermes-Session-Key seam, shared with doHeaders).
+func (c *Client) sseStream(ctx context.Context, endpoint, method, path string, in any, headers map[string]string) (<-chan Event, error) {
 	var body *bytes.Reader
 	if in != nil {
 		buf, err := json.Marshal(in)
@@ -137,6 +144,9 @@ func (c *Client) sseStream(ctx context.Context, endpoint, method, path string, i
 	req.Header.Set("Accept", "text/event-stream")
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	resp, err := sseHTTPClient.Do(req)
