@@ -229,6 +229,26 @@ func (c *Client) ToLLMDefinitions() []llm.ToolDefinition {
 // This prevents memory exhaustion from malformed or malicious MCP server responses.
 const maxMCPToolResponseSize = 1 << 20 // 1MB
 
+// blockedFileURI is the placeholder echoed into the model context in place
+// of a file-scheme resource URI.
+const blockedFileURI = "[blocked: file URI not allowed]"
+
+// sanitizeResourceURI blocks ANY URI whose scheme is "file"
+// (case-insensitive, leading/trailing whitespace tolerated) and passes
+// everything else through unchanged. TrimSpace before scheme extraction
+// matters: a leading space (" file://x") shifts strings.Index(uri, ":")
+// past the scheme and the untrimmed prefix " file" never equals "file".
+func sanitizeResourceURI(uri string) string {
+	trimmed := strings.TrimSpace(uri)
+	if idx := strings.Index(trimmed, ":"); idx > 0 {
+		scheme := strings.ToLower(trimmed[:idx])
+		if scheme == "file" {
+			return blockedFileURI
+		}
+	}
+	return uri
+}
+
 // CallTool invokes a tool on the MCP server.
 func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[string]any) (*tools.ToolResult, error) {
 	if !c.connected.Load() {
@@ -298,15 +318,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 			// Malicious MCP servers could inject file:// URIs pointing to sensitive files.
 			// Block ANY URI whose scheme is "file" (case-insensitive).
 			if block.Resource != nil && block.Resource.URI != "" {
-				uri := block.Resource.URI
-				// Extract scheme: everything up to the first ":"
-				if idx := strings.Index(uri, ":"); idx > 0 {
-					scheme := strings.ToLower(uri[:idx])
-					if scheme == "file" {
-						uri = "[blocked: file URI not allowed]"
-					}
-				}
-				fmt.Fprintf(&text, "[resource: %s]", uri)
+				fmt.Fprintf(&text, "[resource: %s]", sanitizeResourceURI(block.Resource.URI))
 			} else {
 				text.WriteString("[resource]")
 			}

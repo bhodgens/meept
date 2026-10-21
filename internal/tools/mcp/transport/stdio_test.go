@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -195,5 +196,75 @@ func TestStdioTransport_InvalidCommand(t *testing.T) {
 	if err == nil {
 		transport.Close()
 		t.Error("expected error for invalid command")
+	}
+}
+
+// TestStdioTransport_SendConcurrentWithClose pins the Send/Close race:
+// Close() nils t.stdin under t.mu while Send/SendNotification read it, so
+// the write side MUST snapshot stdin under t.mu. Without the snapshot the
+// test fails under -race (data race on t.stdin) and/or panics with a nil
+// pointer dereference. With the fix, every Send either succeeds, times out,
+// or returns a clean error ("transport not running" / closed-pipe write
+// error) — the pre-fix contract that a concurrent write hits a closed pipe
+// and returns an error.
+func TestStdioTransport_SendConcurrentWithClose(t *testing.T) {
+	for i := range 5 {
+		transport := NewStdioTransport("cat", []string{}, Config{TimeoutMS: 200})
+		if err := transport.Start(context.Background()); err != nil {
+			t.Fatalf("iteration %d: Start failed: %v", i, err)
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for j := range 50 {
+				msg := []byte(`{"jsonrpc":"2.0","id":` + string(rune('a'+j%26)) + `,"method":"test"}`)
+				// Every outcome must be an error or a response —
+				// never a panic (nil stdin deref) or a race.
+				_, _ = transport.Send(context.Background(), msg)
+				_ = transport.SendNotification(context.Background(), msg)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			time.Sleep(time.Duration(i) * time.Millisecond)
+			if err := transport.Close(); err != nil {
+				t.Errorf("iteration %d: Close failed: %v", i, err)
+			}
+		}()
+		wg.Wait()
+
+		if transport.IsRunning() {
+			t.Errorf("iteration %d: transport still running after Close", i)
+		}
+	}
+}
+
+// TestStdioTransport_DoubleClose pins Close() idempotency: the first Close
+// must clear t.cmd under the lock so the second Close does not re-run
+// cmd.Wait ("exec: Wait was already called").
+func TestStdioTransport_DoubleClose(t *testing.T) {
+	transport := NewStdioTransport("cat", []string{}, DefaultConfig())
+	if err := transport.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if err := transport.Close(); err != nil {
+		t.Fatalf("first Close failed: %v", err)
+	}
+	// Second Close must be a no-op, not a panic or a Wait-reuse error.
+	if err := transport.Close(); err != nil {
+		t.Fatalf("second Close failed: %v", err)
+	}
+	// And Send after Close must return a clean error, not panic.
+	if _, err := transport.Send(context.Background(), []byte(`{}`)); err == nil {
+		t.Fatal("Send after Close succeeded, want error")
+	}
+	if err := transport.SendNotification(context.Background(), []byte(`{}`)); err == nil {
+		t.Fatal("SendNotification after Close succeeded, want error")
+	}
+	if pid := transport.ProcessID(); pid != 0 {
+		t.Fatalf("ProcessID after Close = %d, want 0", pid)
 	}
 }

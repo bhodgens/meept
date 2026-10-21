@@ -244,12 +244,24 @@ func (t *StdioTransport) Send(ctx context.Context, message []byte) ([]byte, erro
 	t.reqMu.Lock()
 	defer t.reqMu.Unlock()
 
+	// Snapshot stdin under t.mu: Close() nils it concurrently, and the
+	// running.Load() check above is TOCTOU-only. A nil snapshot means the
+	// transport was closed between the check and here. A non-nil snapshot
+	// whose pipe Close() already shut yields a write error — the pre-fix
+	// contract (concurrent write hits a closed pipe and returns an error).
+	t.mu.Lock()
+	stdin := t.stdin
+	t.mu.Unlock()
+	if stdin == nil {
+		return nil, fmt.Errorf("transport not running")
+	}
+
 	// Extract the request id so we can match the response and skip
 	// interleaved notifications or unrelated responses.
 	wantID := extractRPCID(message)
 
 	// Write message with newline
-	if _, err := t.stdin.Write(append(message, '\n')); err != nil {
+	if _, err := stdin.Write(append(message, '\n')); err != nil {
 		return nil, fmt.Errorf("failed to write message: %w", err)
 	}
 
@@ -307,7 +319,15 @@ func (t *StdioTransport) SendNotification(_ context.Context, message []byte) err
 	t.reqMu.Lock()
 	defer t.reqMu.Unlock()
 
-	if _, err := t.stdin.Write(append(message, '\n')); err != nil {
+	// Snapshot stdin under t.mu (same TOCTOU guard as Send).
+	t.mu.Lock()
+	stdin := t.stdin
+	t.mu.Unlock()
+	if stdin == nil {
+		return fmt.Errorf("transport not running")
+	}
+
+	if _, err := stdin.Write(append(message, '\n')); err != nil {
 		return fmt.Errorf("failed to write notification: %w", err)
 	}
 
@@ -329,6 +349,13 @@ func (t *StdioTransport) Close() error {
 	relayDone := t.relayDone
 	stderrDone := t.stderrDone
 	t.stdin = nil
+	// Clear t.cmd under the lock so a second Close() is idempotent: it
+	// snapshots nil and skips the teardown (which would re-run cmd.Wait —
+	// "exec: Wait was already called"). The orphan-window contract still
+	// holds because the FIRST Close always sees a non-nil cmd once Start
+	// assigned it.
+	t.cmd = nil
+	t.stdoutFile = nil
 	t.running.Store(false)
 
 	t.mu.Unlock()
