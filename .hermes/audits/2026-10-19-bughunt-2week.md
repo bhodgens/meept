@@ -188,9 +188,14 @@ Sibling absorptions (content verified in-commit, not re-committed):
   GUI fix (23abf5ed) calls.
 - da511d98 (sibling) absorbed the docs/reference/cli.md edits.
 
-M6 sibling-owned wiring (NOT landed; proposed patches in fixer E report):
-dispatcher.go:635/649 classifier+intent scope threading and orchestrator.go:929
-reflection scope threading — both files are the sibling session's WIP.
+M6 sibling-owned wiring: leg 2 (orchestrator.go reflection scope threading)
+LANDED as 7842fa6a after the file left the sibling's WIP set (red-then-green
+pin: TestOrchestrator_ReflectionThreadsConversationScope). Leg 1
+(dispatcher.go:635/649 classifier+intent scope threading) remains with the
+sibling session — dispatcher.go is still uncommitted WIP; proposed patch in
+fixer E's report (wrap the Classify/AnalyzeTrueIntent call sites with
+WithScopeOptions(ctx, []llm.ChatOption{llm.WithTaskScope("", conversationID)})
+where a conversation id is known).
 
 Gates at wave close: go build ./... OK; go vet OK; full suite 112 ok + 1
 environmental FAIL (builtin port exhaustion, green isolated); -race green on
