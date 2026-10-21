@@ -116,6 +116,23 @@ func (h *DecisionGateHook) BeforeToolCall(ctx context.Context, toolCall llm.Tool
 		return agent.BlockResult{}
 	}
 
+	// Confirm re-invoke bypass: the soft-deny Reason promises the model that
+	// re-invoking with confirmed=true picks the call up. Without this check
+	// the gate re-asks the decision client on EVERY invocation — a
+	// deterministic sub-threshold answer loops ask→deny forever (the args
+	// differ by confirmed:true, so the loop's cycle detector never fires)
+	// until the no-progress ladder vetoes. The established confirm shape is
+	// `confirmed, _ := args["confirmed"].(bool)` (epistemic_actions.go,
+	// hermes_agent.go); the loop renders confirm_arg:"confirmed" for soft
+	// denies (internal/agent/loop.go executeToolCalls). HardError security
+	// denies never reach here — this hook only ever produces soft denies.
+	if isConfirmedReinvoke(toolCall) {
+		h.logger.Debug("decision gate: confirmed re-invoke, skipping ask",
+			"tool", toolCall.Function.Name,
+		)
+		return agent.BlockResult{}
+	}
+
 	result, err := h.client.Ask(ctx, h.question(toolCall))
 	if err != nil {
 		// Fail OPEN — including ErrDecisionUnavailable and
@@ -129,7 +146,16 @@ func (h *DecisionGateHook) BeforeToolCall(ctx context.Context, toolCall llm.Tool
 		return agent.BlockResult{}
 	}
 
-	if result.Confidence >= h.threshold {
+	// TWO bars, mirroring the ACP lane (internal/acp/decision.go): the
+	// answer must be the exact affirmative option AND confidence must clear
+	// the threshold. The answer bar is load-bearing in production:
+	// llm.DecisionClient degrades to argmax-only and ALWAYS returns
+	// Confidence 1.0, so a confidence-only gate would allow even when the
+	// model answers "no". Any non-affirmative answer (including parse-shape
+	// noise) escalates to user confirmation.
+	if result != nil &&
+		strings.EqualFold(strings.TrimSpace(result.Answer), decisionGateAffirmative) &&
+		result.Confidence >= h.threshold {
 		h.logger.Debug("decision gate allows",
 			"tool", toolCall.Function.Name,
 			"answer", result.Answer,
@@ -138,18 +164,40 @@ func (h *DecisionGateHook) BeforeToolCall(ctx context.Context, toolCall llm.Tool
 		return agent.BlockResult{}
 	}
 
+	answer := ""
+	confidence := 0.0
+	if result != nil {
+		answer = result.Answer
+		confidence = result.Confidence
+	}
 	h.logger.Info("decision gate escalates to confirmation",
 		"tool", toolCall.Function.Name,
-		"answer", result.Answer,
-		"confidence", result.Confidence,
+		"answer", answer,
+		"confidence", confidence,
 		"threshold", h.threshold,
 	)
 	return agent.BlockResult{
 		Block: true,
 		Reason: fmt.Sprintf(
-			"decision gate: confidence %.2f below threshold %.2f (answer %q); user confirmation required",
-			result.Confidence, h.threshold, result.Answer),
+			"decision gate: answer %q with confidence %.2f does not clear the %q/%.2f bar; user confirmation required",
+			answer, confidence, decisionGateAffirmative, h.threshold),
 	}
+}
+
+// decisionGateAffirmative is the affirmative option label in the gate's
+// question() Options ([]string{"yes", "no"}). The Ask result must match it
+// exactly (trim + case-insensitive) for the gate to allow.
+const decisionGateAffirmative = "yes"
+
+// isConfirmedReinvoke reports whether the tool-call arguments carry
+// confirmed=true — the phase-1 confirm flow's re-invoke marker.
+func isConfirmedReinvoke(toolCall llm.ToolCall) bool {
+	args, err := toolCall.ParsedArguments()
+	if err != nil {
+		return false
+	}
+	confirmed, _ := args["confirmed"].(bool)
+	return confirmed
 }
 
 // question renders the noul question: tool name + one-line args summary in

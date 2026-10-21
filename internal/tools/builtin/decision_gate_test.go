@@ -157,6 +157,123 @@ func TestDecisionGate_LowConfidenceDenies(t *testing.T) {
 	}
 }
 
+// TestDecisionGate_ProductionShapeAnswerNoDenies pins the ANSWER bar with
+// the production result shape: llm.DecisionClient degrades to argmax-only
+// and ALWAYS returns Confidence 1.0 (internal/llm/decision_client.go), so a
+// confidence-only gate allows even when the model answers "no". The gate
+// must block unless the Answer matches the affirmative option ("yes").
+func TestDecisionGate_ProductionShapeAnswerNoDenies(t *testing.T) {
+	stub := &gateStubClient{result: &llm.DecisionResult{Answer: "no", Confidence: 1.0}}
+	hook := NewDecisionGateHook(gateTestClient(stub), 0.7, nil, nil)
+	hook.SetEnabled(true)
+
+	got := hook.BeforeToolCall(context.Background(), gateToolCall("shell", `{"command":"rm -rf /tmp/x"}`))
+	if !got.Block {
+		t.Fatal(`production-shape answer "no" @ Confidence 1.0 allowed, want deny`)
+	}
+	if !stub.called {
+		t.Fatal("client was not consulted")
+	}
+	if got.Reason == "" {
+		t.Fatal("deny reason empty")
+	}
+}
+
+// TestDecisionGate_ProductionShapeAnswerYesAllows: the affirmative answer at
+// the argmax confidence floor passes both bars.
+func TestDecisionGate_ProductionShapeAnswerYesAllows(t *testing.T) {
+	stub := &gateStubClient{result: &llm.DecisionResult{Answer: "yes", Confidence: 1.0}}
+	hook := NewDecisionGateHook(gateTestClient(stub), 0.7, nil, nil)
+	hook.SetEnabled(true)
+
+	got := hook.BeforeToolCall(context.Background(), gateToolCall("shell", `{"command":"rm -rf /tmp/x"}`))
+	if got.Block {
+		t.Fatalf(`answer "yes" @ Confidence 1.0 blocked: %+v`, got)
+	}
+}
+
+// TestDecisionGate_AffirmativeAnswerBelowThresholdDenies: the answer bar is
+// necessary but not sufficient — the confidence bar still applies (an
+// affirmative answer below the threshold escalates).
+func TestDecisionGate_AffirmativeAnswerBelowThresholdDenies(t *testing.T) {
+	stub := &gateStubClient{result: &llm.DecisionResult{Answer: "yes", Confidence: 0.3}}
+	hook := NewDecisionGateHook(gateTestClient(stub), 0.7, nil, nil)
+	hook.SetEnabled(true)
+
+	got := hook.BeforeToolCall(context.Background(), gateToolCall("shell", `{"command":"rm -rf /tmp/x"}`))
+	if !got.Block {
+		t.Fatal("affirmative answer below threshold allowed, want deny")
+	}
+}
+
+// TestDecisionGate_NonOptionAnswerDenies: an answer that is neither option
+// label (parse-shape noise) never allows — mirrors the ACP lane's
+// answer_deny treatment.
+func TestDecisionGate_NonOptionAnswerDenies(t *testing.T) {
+	for _, answer := range []string{"maybe", "", "allow", "YES OR NO"} {
+		stub := &gateStubClient{result: &llm.DecisionResult{Answer: answer, Confidence: 1.0}}
+		hook := NewDecisionGateHook(gateTestClient(stub), 0.7, nil, nil)
+		hook.SetEnabled(true)
+
+		got := hook.BeforeToolCall(context.Background(), gateToolCall("shell", `{"command":"rm -rf /tmp/x"}`))
+		if !got.Block {
+			t.Fatalf("answer %q @ Confidence 1.0 allowed, want deny", answer)
+		}
+	}
+	// Case/whitespace tolerance on the exact affirmative label.
+	stub := &gateStubClient{result: &llm.DecisionResult{Answer: " Yes ", Confidence: 1.0}}
+	hook := NewDecisionGateHook(gateTestClient(stub), 0.7, nil, nil)
+	hook.SetEnabled(true)
+	if got := hook.BeforeToolCall(context.Background(), gateToolCall("shell", `{}`)); got.Block {
+		t.Fatalf(`trimmed/case-folded "yes" blocked: %+v`, got)
+	}
+}
+
+// TestDecisionGate_ConfirmedReinvokeSkipsAsk pins the confirm-flow fix: a
+// soft deny promises "re-invoke with confirmed=true picks it up", so the
+// confirmed re-invoke must NOT re-ask the decision client (a deterministic
+// sub-threshold answer would loop ask→deny until the no-progress ladder
+// vetoes). Established confirm shape: args["confirmed"].(bool).
+func TestDecisionGate_ConfirmedReinvokeSkipsAsk(t *testing.T) {
+	// Stub that would deny if consulted.
+	stub := &gateStubClient{result: &llm.DecisionResult{Answer: "no", Confidence: 0.2}}
+	hook := NewDecisionGateHook(gateTestClient(stub), 0.7, nil, nil)
+	hook.SetEnabled(true)
+
+	got := hook.BeforeToolCall(context.Background(),
+		gateToolCall("shell", `{"command":"rm -rf /tmp/x","confirmed":true}`))
+	if got.Block {
+		t.Fatalf("confirmed re-invoke blocked: %+v", got)
+	}
+	if stub.called {
+		t.Fatal("confirmed re-invoke consulted the decision client (ask→deny loop not broken)")
+	}
+
+	// confirmed=false or absent → the gate asks as usual.
+	stub2 := &gateStubClient{result: &llm.DecisionResult{Answer: "no", Confidence: 0.2}}
+	hook2 := NewDecisionGateHook(gateTestClient(stub2), 0.7, nil, nil)
+	hook2.SetEnabled(true)
+	got2 := hook2.BeforeToolCall(context.Background(),
+		gateToolCall("shell", `{"command":"rm -rf /tmp/x","confirmed":false}`))
+	if !got2.Block {
+		t.Fatal("confirmed=false must still be gated")
+	}
+	if !stub2.called {
+		t.Fatal("confirmed=false must consult the decision client")
+	}
+
+	// Non-bool confirmed ("true" string) is not the established shape →
+	// still gated (no bypass via type confusion).
+	stub3 := &gateStubClient{result: &llm.DecisionResult{Answer: "no", Confidence: 0.2}}
+	hook3 := NewDecisionGateHook(gateTestClient(stub3), 0.7, nil, nil)
+	hook3.SetEnabled(true)
+	got3 := hook3.BeforeToolCall(context.Background(),
+		gateToolCall("shell", `{"command":"rm -rf /tmp/x","confirmed":"true"}`))
+	if !got3.Block {
+		t.Fatal(`confirmed:"true" (string) bypassed the gate; only bool true may`)
+	}
+}
+
 // TestDecisionGate_ZeroThresholdAlwaysAllows documents the threshold semantics
 // pinned in leaf 01 ("0 = treat every answer as below-threshold (escalate)")
 // is NOT the gate's reading when overridden: the hook compares confidence
