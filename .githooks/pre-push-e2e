@@ -82,8 +82,11 @@ if [ -t 0 ]; then
     # what a plain `git push` would compare against. Fall back to the
     # calling remote name when the branch has no upstream configured —
     # a missing tracking ref routes to the smoke suite below.
-    if USHA="$(git rev-parse --quiet "@{u}")"; then
-        UREF="$(git for-each-ref --format='%(refname)' "@{u}")"
+    # @{u} is not a ref PATTERN — for-each-ref matches nothing on it. Use
+    # rev-parse --symbolic-full-name to resolve the upstream ref name.
+    if UREF="$(git rev-parse --symbolic-full-name '@{u}' 2>/dev/null)" \
+        && [ -n "$UREF" ] \
+        && USHA="$(git rev-parse --verify -q "$UREF^{commit}")"; then
         printf 'refs/heads/%s %s %s %s\n' "$BR" "$LSHA" "$UREF" "$USHA" > "$REFS_FILE"
         echo "pre-push-e2e: manual run — checking current branch $BR against its upstream ($UREF)."
     else
@@ -119,7 +122,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     if [ "$base" = "$ZERO" ]; then
         # New branch: use the remote-tracking ref as the base when one
         # exists; otherwise fall back to the smoke suite below.
-        tracking="refs/remotes/${REMOTE_NAME}/$(basename "$local_ref")"
+        # Strip only the refs/heads/ prefix — basename would collapse
+        # refs/heads/feature/foo to foo and miss the tracking ref.
+        tracking="refs/remotes/${REMOTE_NAME}/${local_ref#refs/heads/}"
         if base="$(git rev-parse --verify -q "$tracking")"; then
             echo "pre-push-e2e: new branch $local_ref — checking against tracking ref $tracking."
         else

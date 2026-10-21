@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/bash
+#!/usr/bin/env bash
 # Pre-push hook: runs pre-push-e2e (affected hermetic e2e suites over the
 # pushed diff), then pre-push-bench (bench regression gate).
 #
