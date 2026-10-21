@@ -81,14 +81,19 @@ func (h *PTYHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// C-02 FIX: Apply fence check to working directory
+	// C-02 FIX: Apply fence check to working directory + command. The full
+	// command line (cmd + argv) is what actually executes, so the args must
+	// be folded into the fenced command string — checking req.Cmd alone left
+	// every path-like token in req.Args bypassing the fence (security audit
+	// 2026-10-20 CRIT). Joining argv is a safe widening: it can only make the
+	// fence reject more, never allow a token the shell form would hide.
 	if h.fenceChecker != nil {
 		workDir := req.Dir
 		if workDir == "" {
 			workDir = "."
 		}
-		if err := h.fenceChecker.CheckCommand(req.Cmd, workDir); err != nil {
-			h.logger.Warn("PTY session blocked by fence", "cmd", req.Cmd, "dir", workDir, "error", err)
+		if err := h.fenceChecker.CheckCommand(fenceCommandString(req.Cmd, req.Args), workDir); err != nil {
+			h.logger.Warn("PTY session blocked by fence", "cmd", req.Cmd, "args", req.Args, "dir", workDir, "error", err)
 			http.Error(w, "command blocked by security fence: "+err.Error(), http.StatusForbidden)
 			return
 		}
@@ -103,10 +108,14 @@ func (h *PTYHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
 		Cols: req.Cols,
 	}
 
-	// Convert env map to slice
+	// Convert env map to slice, rejecting loader-interposition keys.
 	if len(req.Env) > 0 {
 		cfg.Env = make([]string, 0, len(req.Env))
 		for k, v := range req.Env {
+			if err := rejectDangerousEnvKey(k); err != nil {
+				http.Error(w, "env rejected: "+err.Error(), http.StatusBadRequest)
+				return
+			}
 			cfg.Env = append(cfg.Env, fmt.Sprintf("%s=%s", k, v))
 		}
 	}
@@ -286,7 +295,53 @@ func (h *PTYHandler) closeSession(w http.ResponseWriter, r *http.Request, sessio
 
 // Helpers
 
-// generateSessionID returns a random session ID prefixed with "pty-".
+// fenceCommandString joins the PTY command and its argv into the single
+// command string the fence checker validates. The check is a deliberate
+// widening of the original req.Cmd-only check: any path-like token that lived
+// in req.Args (e.g. a shell invocation whose argument is a script path
+// outside the project root) is now surfaced to the fence, so the fence can
+// only reject more, never allow more. Args are space-joined without quoting:
+// the fence's tokenizeCommand already splits on whitespace and quotes, so a
+// quoted token round-trips correctly.
+func fenceCommandString(cmd string, args []string) string {
+	if len(args) == 0 {
+		return cmd
+	}
+	return cmd + " " + strings.Join(args, " ")
+}
+
+// dangerousEnvKeys are client-supplied environment variables that can load
+// attacker-controlled native code or redirect the process interpreter into a
+// payload. A PTY spawn is not a shell, but these keys still take effect in
+// the spawned binary's dynamic loader, so they must never be forwarded.
+var dangerousEnvKeys = map[string]struct{}{
+	"LD_PRELOAD":            {},
+	"LD_LIBRARY_PATH":       {},
+	"LD_AUDIT":              {},
+	"LD_DEBUG":              {},
+	"LD_USE_LOAD_PATH":      {},
+	"DYLD_INSERT_LIBRARIES": {},
+	"NODE_OPTIONS":          {},
+	"PYTHONPATH":            {},
+	"PERL5LIB":              {},
+	"NODE_PATH":             {},
+	"RUBYOPT":               {},
+}
+
+// rejectDangerousEnvKey reports an error when the env key is empty (a "K=V"
+// pair with no key is malformed and would produce a bogus "K=V" assignment)
+// or is a loader-interposition / interpreter-redirection key.
+func rejectDangerousEnvKey(key string) error {
+	if key == "" {
+		return fmt.Errorf("env key must not be empty")
+	}
+	if _, blocked := dangerousEnvKeys[strings.ToUpper(key)]; blocked {
+		return fmt.Errorf("environment variable %s is not allowed", key)
+	}
+	return nil
+}
+
+// generateSessionID returns a random session ID prefixed by "pty-".
 // It uses pkg/id (crypto/rand-backed) so the IDs are unpredictable; see
 // pkg/id for the documented zero-suffix fallback when crypto/rand fails.
 func generateSessionID() string {

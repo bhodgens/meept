@@ -1464,7 +1464,20 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 
 			// PTY session endpoints (if PTY manager is available)
 			if components.PTYManager != nil {
-				httpOpts = append(httpOpts, http.WithPTY(http.NewPTYHandler(components.PTYManager, logger)))
+				// Wire the same fence checker the TerminalService exec
+				// surface gets (bughunt 2026-10-15 A1 parity; security
+				// audit 2026-10-20 CRIT): without it the HTTP PTY
+				// endpoint spawned with NO path fence even when
+				// security.fence_enabled was on, so a session-less PTY
+				// could read/write outside the project root. With the
+				// shared checker wired, the endpoint is fail-closed in
+				// the same state as terminal/exec. FenceChecker is nil
+				// when fence is disabled, so this is a no-op by default.
+				var ptyOpts []http.PTYHandlerOption
+				if components.FenceChecker != nil {
+					ptyOpts = append(ptyOpts, http.WithFenceChecker(components.FenceChecker))
+				}
+				httpOpts = append(httpOpts, http.WithPTY(http.NewPTYHandler(components.PTYManager, logger, ptyOpts...)))
 				logger.Info("PTY session endpoints enabled", "path", "/api/v1/pty/*")
 			}
 
