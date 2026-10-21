@@ -61,9 +61,9 @@ func (f *failingRecorder) DatePath(date string) string { return f.inner.DatePath
 // fakeClassifier implements memory.AmbientClassifierLLM and can be armed to
 // panic, proving the subscriber recovers and keeps processing.
 type fakeClassifier struct {
-	mu        sync.Mutex
-	calls     int
-	panics    bool
+	mu     sync.Mutex
+	calls  int
+	panics bool
 }
 
 func (c *fakeClassifier) ExtractCandidates(_ context.Context, _ string) ([]byte, error) {

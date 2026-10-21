@@ -42,8 +42,8 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/e2e/harness"
-	_ "modernc.org/sqlite" // pure-Go sqlite driver (module dep of the daemon)
 	"github.com/caimlas/meept/internal/memory"
+	_ "modernc.org/sqlite" // pure-Go sqlite driver (module dep of the daemon)
 )
 
 // terminalEvent mirrors the frozen turn.terminal payload fields this suite

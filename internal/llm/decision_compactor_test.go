@@ -273,9 +273,9 @@ func TestDecisionCompactor_ChatterShape(t *testing.T) {
 func TestNewContextFirewall_DecisionLaneSelection(t *testing.T) {
 	firewallCfg := func() ContextFirewallConfig {
 		return ContextFirewallConfig{
-			Enabled:             true,
+			Enabled:              true,
 			ProactiveCompression: true,
-			ModelContextLimit:   100000,
+			ModelContextLimit:    100000,
 		}
 	}
 	legacyChatter := &compactionDecisionStub{answers: []string{"legacy summary"}}
@@ -375,7 +375,7 @@ func TestContextCompressor_DecisionLaneEndToEnd(t *testing.T) {
 
 func TestBuildModelsInUse_DecisionModelSlot(t *testing.T) {
 	slots := ModelSlots{
-		Model:        "local/main",
+		Model:         "local/main",
 		DecisionModel: "local/decision",
 	}
 	got := BuildModelsInUse(nil, slots, nil, nil)
