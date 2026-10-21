@@ -16,6 +16,14 @@ import (
 var protectedConfigNames = []string{
 	"meept.json5",
 	"meept.toml",
+	// mcp_servers.json5 configures which MCP subprocesses the daemon execs
+	// at startup (internal/daemon/components.go) and hot-reloads on change.
+	// A file_write here is a persistent RCE primitive: an agent drops an
+	// entry with an attacker "command" and the daemon later spawns it.
+	"mcp_servers.json5",
+	// dev_key is the per-installation API credential the GUI pairs against.
+	// An agent that can overwrite it can re-key the install.
+	"dev_key",
 }
 
 // protectedConfigDirs are MEEPT_HOME subdirectories that hold operator

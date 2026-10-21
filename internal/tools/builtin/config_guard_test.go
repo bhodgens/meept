@@ -104,6 +104,44 @@ func TestGuardRefusesNonexistentTargetUnderHome(t *testing.T) {
 	}
 }
 
+// TestGuardRefusesMCPServersConfig pins the MCP persistent-RCE gap: a file_write
+// to mcp_servers.json5 lets an agent register an MCP subprocess the daemon execs
+// at startup and hot-reloads on change, so it must be refused like the other
+// daemon-control files.
+func TestGuardRefusesMCPServersConfig(t *testing.T) {
+	home := withMeeptHome(t)
+	target := filepath.Join(home, "mcp_servers.json5")
+
+	// Create variant: the file does not exist yet.
+	if err := guardProtectedConfigPath(target, false); err == nil {
+		t.Fatal("guard allowed creating $MEEPT_HOME/mcp_servers.json5 (persistent RCE primitive)")
+	}
+	// Overwrite variant: the file already exists (the realistic agent path).
+	if err := os.WriteFile(target, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("seed mcp config: %v", err)
+	}
+	if err := guardProtectedConfigPath(target, false); err == nil {
+		t.Fatal("guard allowed overwriting $MEEPT_HOME/mcp_servers.json5")
+	}
+}
+
+// TestGuardRefusesDevKey pins that the per-installation pairing credential is
+// protected: an agent that rewrites it re-keys the whole install.
+func TestGuardRefusesDevKey(t *testing.T) {
+	home := withMeeptHome(t)
+	target := filepath.Join(home, "dev_key")
+
+	if err := os.WriteFile(target, []byte("seed-key"), 0o600); err != nil {
+		t.Fatalf("seed dev_key: %v", err)
+	}
+	if err := guardProtectedConfigPath(target, false); err == nil {
+		t.Fatal("guard allowed overwriting $MEEPT_HOME/dev_key")
+	}
+	if err := guardProtectedConfigPath(target, true); err == nil {
+		t.Fatal("guard allowed appending to $MEEPT_HOME/dev_key")
+	}
+}
+
 func TestGuardAllowsNormalPaths(t *testing.T) {
 	home := withMeeptHome(t)
 	work := t.TempDir()
