@@ -1255,7 +1255,8 @@ func (m *Manager) Consolidate(ctx context.Context) (*ConsolidationReport, error)
 // default, so without this call the passes were inert on a fresh boot
 // (bughunt M3). The daemon passes a Run-scoped ctx, so shutdown cancels it;
 // Consolidator.Stop (from Manager.Close) is the second stop path. Idempotent:
-// the consolidator's ticker goroutine is guarded by its own stop-once.
+// the consolidator's ticker goroutine is guarded by its own start flag
+// (tickerActive in Consolidator), so a repeat Start is a no-op until Stop.
 func (m *Manager) StartPeriodicConsolidation(ctx context.Context) {
 	m.mu.RLock()
 	if !m.initialized || m.consolidator == nil {

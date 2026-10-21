@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/pkg/models"
-	"github.com/caimlas/meept/pkg/sqlite"
 
 	_ "modernc.org/sqlite"
 )
@@ -521,10 +520,15 @@ func (s *DualStore) scanMemoriesFromDB(ctx context.Context, db *sql.DB, sourceNo
 		args = append(args, sourceNode.String)
 	}
 	if query.Query != "" {
-		safeQ := sqlite.SanitizeQuery(query.Query)
-		if safeQ != "" {
-			whereClauses = append(whereClauses, "content LIKE ?")
-			args = append(args, "%"+safeQ+"%")
+		// LIKE arm: escape wildcards in the RAW query and declare the
+		// escape character (pattern copied from episodic.go's LIKE
+		// fallback). The FTS-sanitized form must NOT be used here:
+		// SanitizeQuery quotes each token ('"a b"') so the literal quotes
+		// never match stored content, and unescaped % / _ act as wildcards.
+		escaped := escapeLikeWildcards(query.Query)
+		if strings.TrimSpace(escaped) != "" {
+			whereClauses = append(whereClauses, `content LIKE ? ESCAPE '\'`)
+			args = append(args, "%"+escaped+"%")
 		}
 	}
 

@@ -50,13 +50,15 @@ type Consolidator struct {
 	// window. A func field (not the l0 dir/maxAgeDays pair) keeps the
 	// gating decision (memory.l0_enabled + l0_retention_days) with the
 	// daemon wiring. Nil (the default) = pass disabled; see runL0PrunePass.
-	l0Prune   func(ctx context.Context)
-	mu        sync.Mutex
-	running   bool
-	lastRun   *time.Time
-	stopChan  chan struct{}
-	stopOnce  sync.Once // Guards against double-close of stopChan
-	startOnce sync.Once // Guards StartPeriodicConsolidation against double-start
+	l0Prune  func(ctx context.Context)
+	mu       sync.Mutex
+	running  bool
+	lastRun  *time.Time
+	stopChan chan struct{} // current cycle's stop channel; recreated per Start
+	// tickerActive guards StartPeriodicConsolidation against double-start
+	// and Stop against double-close, while still allowing Start→Stop→Start
+	// restarts (sync.Once made the Consolidator permanently single-use).
+	tickerActive bool
 }
 
 // ConsolidatorConfig holds configuration for the consolidator.
@@ -87,7 +89,6 @@ func NewConsolidator(cfg ConsolidatorConfig) *Consolidator {
 		logger:   cfg.Logger,
 		llm:      cfg.LLM,
 		embedder: cfg.Embedder,
-		stopChan: make(chan struct{}),
 	}
 }
 
@@ -923,38 +924,54 @@ func (c *Consolidator) deduplicateTasks(ctx context.Context) (int, error) {
 }
 
 // StartPeriodicConsolidation starts a background goroutine that runs
-// consolidation at the specified interval. Guarded by startOnce: a second
-// call is a no-op (bughunt 2026-10-15 hazard: an unguarded second caller
-// started a second ticker; boot calls it exactly once today).
+// consolidation at the specified interval. Guarded by the tickerActive
+// flag: a second call while the ticker is running is a no-op (bughunt
+// 2026-10-15 hazard: an unguarded second caller started a second
+// ticker). Unlike the sync.Once guard this replaced, Start works again
+// after Stop — the Consolidator is restartable, with a fresh stop
+// channel per cycle.
 func (c *Consolidator) StartPeriodicConsolidation(ctx context.Context, interval time.Duration, olderThanHours int) {
-	c.startOnce.Do(func() {
-		go func() {
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
+	c.mu.Lock()
+	if c.tickerActive {
+		c.mu.Unlock()
+		return
+	}
+	c.tickerActive = true
+	c.stopChan = make(chan struct{})
+	stopCh := c.stopChan
+	c.mu.Unlock()
 
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-c.stopChan:
-					return
-				case <-ticker.C:
-					_, err := c.Run(ctx, olderThanHours)
-					if err != nil {
-						c.logger.Error("Periodic consolidation failed", "error", err)
-					}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				_, err := c.Run(ctx, olderThanHours)
+				if err != nil {
+					c.logger.Error("Periodic consolidation failed", "error", err)
 				}
 			}
-		}()
-	})
+		}
+	}()
 }
 
 // Stop stops the periodic consolidation.
-// Safe to call multiple times - subsequent calls are no-ops.
+// Safe to call multiple times and safe before any Start - subsequent
+// calls are no-ops. A later Start restarts the ticker.
 func (c *Consolidator) Stop() {
-	c.stopOnce.Do(func() {
-		close(c.stopChan)
-	})
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.tickerActive {
+		return
+	}
+	c.tickerActive = false
+	close(c.stopChan)
 }
 
 // IsRunning returns true if consolidation is currently in progress.

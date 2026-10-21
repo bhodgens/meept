@@ -272,3 +272,84 @@ func TestGetMemoryCountByOwner(t *testing.T) {
 		t.Errorf("gossip count = %d, want 2", gossip)
 	}
 }
+
+// TestGetMemoriesQueryLiteralWildcards pins the LIKE-fallback fix: % and _
+// in the raw query must match LITERALLY (escapeLikeWildcards + ESCAPE '\'),
+// not act as SQL wildcards. Pre-fix the unescaped query made "100%" match
+// any row containing "100" and "a_c" match "abc".
+func TestGetMemoriesQueryLiteralWildcards(t *testing.T) {
+	ds := setupDualStoreRead(t)
+	ctx := context.Background()
+
+	store := func(id, content string, day int) {
+		t.Helper()
+		if err := ds.StoreMemory(ctx, &Memory{
+			ID:        id,
+			Type:      MemoryTypeEpisodic,
+			Category:  "q",
+			Content:   content,
+			CreatedAt: time.Date(2026, 5, day, 0, 0, 0, 0, time.UTC),
+		}); err != nil {
+			t.Fatalf("StoreMemory(%s): %v", id, err)
+		}
+	}
+	store("pct-literal", "discount is 100% off", 1)
+	store("pct-near", "cost 100 dollars", 2)
+	store("underscore-literal", "run a_c now", 3)
+	store("underscore-near", "run abc now", 4)
+
+	// "100%" must match ONLY the row containing the literal percent.
+	results, err := ds.GetMemories(ctx, &MemoryQuery{Query: "100%", Limit: 10})
+	if err != nil {
+		t.Fatalf("GetMemories: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf(`query "100%%": got %d results, want 1 (literal %% match)`, len(results))
+	}
+	if results[0].Memory.ID != "pct-literal" {
+		t.Errorf(`query "100%%": got %q, want pct-literal`, results[0].Memory.ID)
+	}
+
+	// "a_c" must match ONLY the row containing the literal underscore.
+	results, err = ds.GetMemories(ctx, &MemoryQuery{Query: "a_c", Limit: 10})
+	if err != nil {
+		t.Fatalf("GetMemories: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf(`query "a_c": got %d results, want 1 (literal _ match)`, len(results))
+	}
+	if results[0].Memory.ID != "underscore-literal" {
+		t.Errorf(`query "a_c": got %q, want underscore-literal`, results[0].Memory.ID)
+	}
+}
+
+// TestGetMemoriesQueryMultiWord pins the second half of the LIKE-fallback
+// fix: the LIKE arm uses the RAW query, not the FTS-sanitized form. Pre-fix
+// SanitizeQuery turned "alpha beta" into `"alpha" AND "beta"` — a pattern
+// with literal quotes and an AND operator that never matches stored content.
+// The raw contiguous phrase must match.
+func TestGetMemoriesQueryMultiWord(t *testing.T) {
+	ds := setupDualStoreRead(t)
+	ctx := context.Background()
+
+	if err := ds.StoreMemory(ctx, &Memory{
+		ID:        "multiword",
+		Type:      MemoryTypeEpisodic,
+		Category:  "q",
+		Content:   "the alpha beta release shipped",
+		CreatedAt: time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("StoreMemory: %v", err)
+	}
+
+	results, err := ds.GetMemories(ctx, &MemoryQuery{Query: "alpha beta", Limit: 10})
+	if err != nil {
+		t.Fatalf("GetMemories: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf(`two-word query "alpha beta": got %d results, want 1`, len(results))
+	}
+	if results[0].Memory.ID != "multiword" {
+		t.Errorf("got %q, want multiword", results[0].Memory.ID)
+	}
+}

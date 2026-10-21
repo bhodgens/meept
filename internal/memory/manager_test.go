@@ -18,9 +18,9 @@ func TestManager_BackendDefaultCase(t *testing.T) {
 
 	cfg := ManagerConfig{
 		Config: config.MemoryConfig{
-			Backend:    "sqlie", // typo, unknown value
-			Episodic:   config.EpisodicConfig{Enabled: true},
-			Task:       config.TaskMemoryConfig{Enabled: true},
+			Backend:  "sqlie", // typo, unknown value
+			Episodic: config.EpisodicConfig{Enabled: true},
+			Task:     config.TaskMemoryConfig{Enabled: true},
 		},
 		Logger: logger,
 	}
