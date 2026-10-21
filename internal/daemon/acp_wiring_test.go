@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -363,12 +364,28 @@ func TestACPBusNotifierPublishes(t *testing.T) {
 	msgBus := bus.New(nil, slog.Default())
 	t.Cleanup(msgBus.Close)
 
-	var gotRequested, gotResolved bus.ACPPermissionEvent
+	// SubscribeT delivers on a reader goroutine, so the captured payloads
+	// are guarded by a mutex: the closures write from the bus reader and
+	// the polling loop below reads from the test goroutine (a bare
+	// captured struct is a -race data race).
+	var (
+		gotMu                     sync.Mutex
+		gotRequested, gotResolved bus.ACPPermissionEvent
+	)
+	readGot := func() (bus.ACPPermissionEvent, bus.ACPPermissionEvent) {
+		gotMu.Lock()
+		defer gotMu.Unlock()
+		return gotRequested, gotResolved
+	}
 	subA := bus.SubscribeT(msgBus, "test-req", bus.TopicACPPermissionRequested, func(p bus.ACPPermissionEvent) {
+		gotMu.Lock()
 		gotRequested = p
+		gotMu.Unlock()
 	})
 	subB := bus.SubscribeT(msgBus, "test-res", bus.TopicACPPermissionResolved, func(p bus.ACPPermissionEvent) {
+		gotMu.Lock()
 		gotResolved = p
+		gotMu.Unlock()
 	})
 	t.Cleanup(func() {
 		msgBus.Unsubscribe(subA)
@@ -389,19 +406,24 @@ func TestACPBusNotifierPublishes(t *testing.T) {
 	n.NotifyPermissionResolved(p, "allow", "answered")
 
 	// SubscribeT delivers on a reader goroutine: poll with a deadline.
+	// The snapshots are LOCAL variables — the captured gotRequested/
+	// gotResolved are written only by the bus reader goroutine under
+	// gotMu and read only through readGot().
 	deadline := time.Now().Add(2 * time.Second)
-	for (gotRequested.ID == "" || gotResolved.ID == "") && time.Now().Before(deadline) {
+	req, res := readGot()
+	for (req.ID == "" || res.ID == "") && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
+		req, res = readGot()
 	}
-	if gotRequested.ID != "perm-1" || gotRequested.AgentID != "codex" ||
-		gotRequested.SessionID != "sess-a" || gotRequested.Summary != "tool: bash" {
-		t.Fatalf("requested frame = %+v", gotRequested)
+	if req.ID != "perm-1" || req.AgentID != "codex" ||
+		req.SessionID != "sess-a" || req.Summary != "tool: bash" {
+		t.Fatalf("requested frame = %+v", req)
 	}
-	if gotRequested.CreatedAt == "" {
+	if req.CreatedAt == "" {
 		t.Error("requested frame missing created_at")
 	}
-	if gotResolved.Decision != "allow" || gotResolved.Reason != "answered" {
-		t.Fatalf("resolved frame = %+v", gotResolved)
+	if res.Decision != "allow" || res.Reason != "answered" {
+		t.Fatalf("resolved frame = %+v", res)
 	}
 }
 
