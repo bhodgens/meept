@@ -129,6 +129,19 @@ func TestShellExecuteTool_ClassifyRisk(t *testing.T) {
 		// Pipes - evaluated segment by segment
 		{"cat file | grep pattern", RiskMedium},
 		{"cat file | rm -rf /", RiskCritical},
+
+		// Daemon credential material (audit M5 Phase 2c): literal path
+		// references classify CRITICAL (blocked), including inside pipes
+		// and chains, and `cat` loses its read-only MEDIUM downgrade.
+		{"cat ~/.meept/dev_key", RiskCritical},
+		{"cat /Users/x/.meept/dev_key", RiskCritical},
+		{"head -c 40 .meept/dev_key", RiskCritical},
+		{"echo hi | cat ~/.meept/dev_key", RiskCritical},
+		{"ls; cat ~/.meept/keys/api.json", RiskCritical},
+		{"cat ~/.meept/secrets/token", RiskCritical},
+		// Non-credential .meept paths stay at their normal risk.
+		{"cat ~/.meept/meept.json5", RiskMedium},
+		{"tail -f ~/.meept/meept.log", RiskMedium},
 	}
 
 	for _, tt := range tests {

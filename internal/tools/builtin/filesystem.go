@@ -136,6 +136,14 @@ func (t *ReadFileTool) executeRead(ctx context.Context, args map[string]any, pro
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
 
+	// Refuse reads of daemon credential material (dev_key, keys/, secrets/)
+	// BEFORE the permission and fence checks — same independence rationale
+	// as the write guard: both can be disabled per-session (--nofence) and
+	// neither is about daemon-owned credentials (audit M5 Phase 2c).
+	if err := guardSecretReadPath(resolved); err != nil {
+		return nil, err
+	}
+
 	// Permission check
 	if t.checker != nil && !t.checker.CheckPath(resolved) {
 		return nil, fmt.Errorf("access denied: %s", resolved)

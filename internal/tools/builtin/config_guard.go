@@ -139,6 +139,70 @@ func pathWithin(target, root string) bool {
 	return strings.HasPrefix(target, root+string(os.PathSeparator))
 }
 
+// secretReadNames are MEEPT_HOME files an agent tool must never READ: pure
+// credential material with no legitimate agent use (audit M5 Phase 2c — an
+// agent that reads dev_key can drive the whole authenticated HTTP surface,
+// including answering its own ACP permission requests before the approver
+// gate existed). Distinct from protectedConfigNames, which guards WRITES of
+// daemon config the agent may legitimately need to read (meept.json5).
+var secretReadNames = []string{
+	"dev_key",
+}
+
+// secretReadDirs are MEEPT_HOME subdirectories of credential material whose
+// contents an agent tool must never read.
+var secretReadDirs = []string{
+	"keys",    // credential material
+	"secrets", // credential material
+}
+
+// guardSecretReadPath refuses a READ whose target is MEEPT_HOME credential
+// material (dev_key, keys/, secrets/). Read-side sibling of
+// guardProtectedConfigPath with the same symlink-resolution discipline:
+// both sides are EvalSymlinks-ed so a symlink inside the home cannot point
+// out at (or into) a protected file. Missing targets fall back to the
+// lexical absolute path (a read of a nonexistent file fails later at
+// os.Stat anyway; the guard still classifies the intended target).
+//
+// Deliberately narrow: meept.json5 is NOT read-denied (agents legitimately
+// inspect non-secret config there); skills/ and agents/ are NOT read-denied
+// (skill and agent definitions are meant to be read).
+func guardSecretReadPath(resolved string) error {
+	home, err := filepath.EvalSymlinks(config.MeeptHome())
+	if err != nil {
+		// MeeptHome does not exist yet (fresh install): nothing to protect.
+		return nil
+	}
+	target, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		abs, aerr := filepath.Abs(resolved)
+		if aerr != nil {
+			return nil
+		}
+		target = resolveExistingAncestor(filepath.Clean(abs))
+	}
+	if !pathWithin(target, home) {
+		return nil
+	}
+	base := filepath.Base(target)
+	for _, name := range secretReadNames {
+		if base == name {
+			return fmt.Errorf(
+				"refusing to read %s: it is the daemon's credential material. "+
+					"An agent must never see the API key; the daemon and the GUI "+
+					"pairing flow read it directly", target)
+		}
+	}
+	for _, d := range secretReadDirs {
+		if pathWithin(target, filepath.Join(home, d)) {
+			return fmt.Errorf(
+				"refusing to read %s: it lives in the daemon-owned %s/ credential "+
+					"directory", target, d)
+		}
+	}
+	return nil
+}
+
 // resolveExistingAncestor returns the symlink-resolved form of the deepest
 // existing ancestor of path, with the non-existent remainder appended. A
 // not-yet-created file under an existing directory therefore still compares

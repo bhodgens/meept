@@ -84,6 +84,17 @@ var dangerousPattern = regexp.MustCompile(
 		`|iptables|nft|deluser|userdel|groupdel)\b`,
 )
 
+// credentialPathPattern matches shell commands that name the daemon's
+// credential material (audit M5 Phase 2c). Best-effort: literal path
+// references only — variable expansion ($HOME/.meept/dev_key), command
+// substitution and encoding bypass a string match, so the HARD guarantees
+// are the file_read guard (guardSecretReadPath) and the engine path_rules
+// (~/.meept/dev_key DecisionBlock); this pattern just makes the obvious
+// `cat ~/.meept/dev_key` fail at risk classification.
+var credentialPathPattern = regexp.MustCompile(
+	`(?i)\.meept[/\\](dev_key|keys[/\\]|secrets[/\\])`,
+)
+
 // shellMetaPattern matches shell metacharacters that can chain commands.
 // This includes: ; | && || $() ` ` > < >> << and newlines.
 var shellMetaPattern = regexp.MustCompile(`[;&|<>]|&&|\|\||[` + "`" + `]|\$\(|\n`)
@@ -800,6 +811,13 @@ func (t *ShellExecuteTool) classifyRiskSimple(command string) ShellCommandRisk {
 		return RiskCritical
 	}
 
+	// Daemon credential material (audit M5 Phase 2c) — same check as
+	// classifyRisk, applied per pipe/semicolon segment so a chained
+	// `echo x | cat ~/.meept/dev_key` cannot hide the reference.
+	if credentialPathPattern.MatchString(command) {
+		return RiskCritical
+	}
+
 	// Check dangerous patterns
 	if dangerousPattern.MatchString(command) {
 		return RiskHigh
@@ -835,6 +853,15 @@ func (t *ShellExecuteTool) classifyRisk(command string) ShellCommandRisk {
 
 	// Check for sudo
 	if baseCmd == "sudo" {
+		return RiskCritical
+	}
+
+	// Daemon credential material (audit M5 Phase 2c): any command naming
+	// dev_key/keys/secrets is CRITICAL — blocked outright at the call
+	// sites. Checked on the FULL command (not per segment) and before the
+	// readOnly downgrade so `cat ~/.meept/dev_key` can never ride the
+	// read-only allowlist at MEDIUM.
+	if credentialPathPattern.MatchString(command) {
 		return RiskCritical
 	}
 

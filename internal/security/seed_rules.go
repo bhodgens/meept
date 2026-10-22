@@ -183,6 +183,9 @@ func seedPathRules() []SeedPathRule {
 		{Pattern: "/etc/passwd", RuleType: DecisionBlock, RiskLevel: RiskCritical, Description: "System user database", Immutable: true},
 		{Pattern: "/etc/sudoers", RuleType: DecisionBlock, RiskLevel: RiskCritical, Description: "Sudo configuration", Immutable: true},
 		{Pattern: "~/.meept/security.db", RuleType: DecisionBlock, RiskLevel: RiskCritical, Description: "Security database (immutable)", Immutable: true},
+		{Pattern: "~/.meept/dev_key", RuleType: DecisionBlock, RiskLevel: RiskCritical, Description: "Per-installation API credential (audit M5 Phase 2c: an agent that reads it can drive the authenticated HTTP surface)", Immutable: true},
+		{Pattern: "~/.meept/keys/*", RuleType: DecisionBlock, RiskLevel: RiskCritical, Description: "Daemon credential material", Immutable: true},
+		{Pattern: "~/.meept/secrets/*", RuleType: DecisionBlock, RiskLevel: RiskCritical, Description: "Daemon credential material", Immutable: true},
 
 		// Blocked paths (immutable) - High
 		{Pattern: "~/.aws/*", RuleType: DecisionBlock, RiskLevel: RiskHigh, Description: "AWS credentials", Immutable: true},

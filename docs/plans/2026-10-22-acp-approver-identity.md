@@ -1,9 +1,10 @@
 # ACP approver identity: close the self-approval loop (audit M5)
 
-Status: Phase 1 (socket peercred gate) + Phase 2a (HTTP key-fingerprint
-attribution) IMPLEMENTED — see docs/workflows/acp.md "Approver identity".
-Phase 2b (key roles) and 2c (scanner denials) remain open. Design rationale
-and the verified attack chains are below.
+Status: Phase 1 (socket peercred gate), Phase 2a (HTTP key-fingerprint
+attribution) and Phase 2c (credential read denials) IMPLEMENTED — see
+docs/workflows/acp.md "Approver identity" and docs/workflows/security.md
+"Daemon credential guard". Phase 2b (key roles) remains open. Design
+rationale and the verified attack chains are below.
 
 ## Problem
 

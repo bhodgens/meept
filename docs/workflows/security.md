@@ -54,6 +54,12 @@ Autonomous agents require robust security to prevent misuse and protect sensitiv
 - **Implementation**: `internal/agent/loop.go`, `internal/tools/builtin/*.go`
 - **Full Documentation**: [Adversarial Input Defense](adversarial-input-defense.md)
 
+### Daemon credential guard (file tools + shell)
+- **Write guard** (`guardProtectedConfigPath`, `internal/tools/builtin/config_guard.go`): `file_write`/`file_delete` refuse MEEPT_HOME control files (`meept.json5`, `meept.toml`, `mcp_servers.json5`, `dev_key`) and credential/state dirs (`skills/`, `agents/`, `keys/`, `secrets/`). Independent of fence and permission checker (both can be disabled per-session). Added after the 2026-10-09 config-destruction incident; `mcp_servers.json5`/`dev_key` added by the 2026-10-20 security audit (persistent-RCE primitive).
+- **Read guard** (`guardSecretReadPath`, audit M5 Phase 2c): `file_read` refuses daemon CREDENTIAL material only — `dev_key`, `keys/`, `secrets/`. Deliberately narrow: `meept.json5`, logs, databases, skills and agent definitions stay readable. Symlink-resolved on both sides like the write guard.
+- **Shell classification**: commands naming `.meept/dev_key`, `.meept/keys/…` or `.meept/secrets/…` classify RiskCritical (blocked) before the read-only downgrade — `cat ~/.meept/dev_key` never rides the `cat` MEDIUM path. Best-effort string match (variable expansion bypasses it); the hard guarantees are the file_read guard plus engine path_rules (`~/.meept/dev_key` DecisionBlock, immutable).
+- **Engine path_rules**: `~/.meept/dev_key`, `~/.meept/keys/*`, `~/.meept/secrets/*` are seeded immutable DecisionBlock rules alongside `~/.ssh/*` and `security.db`.
+
 ### SSRF Guard (Web Tools)
 - **Scheme Allowlist**: Only `http`/`https` URLs are fetched; `ftp://`, `file://`, `gopher://`, etc. are rejected.
 - **IP Blocking**: URL hosts (literal IPs and resolved hostnames) are checked against a default blocklist covering loopback (`127/8`, `::1/128`), private ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`), link-local (`169.254/16` including the cloud-metadata endpoint `169.254.169.254`, `fe80::/10`), plus multicast and unspecified addresses. Every resolved IP must pass.

@@ -253,3 +253,95 @@ func TestDeleteFileToolRefusesConfigDelete(t *testing.T) {
 		t.Fatalf("config is gone after the delete attempt: %v", statErr)
 	}
 }
+
+// TestGuardRefusesDevKeyRead pins the read-side guard (audit M5 Phase 2c):
+// an agent that reads dev_key holds the API credential for the whole
+// authenticated HTTP surface.
+func TestGuardRefusesDevKeyRead(t *testing.T) {
+	home := withMeeptHome(t)
+	target := filepath.Join(home, "dev_key")
+	if err := os.WriteFile(target, []byte("seed-key"), 0o600); err != nil {
+		t.Fatalf("seed dev_key: %v", err)
+	}
+	if err := guardSecretReadPath(target); err == nil {
+		t.Fatal("read guard allowed $MEEPT_HOME/dev_key")
+	}
+}
+
+// TestGuardRefusesCredentialDirReads pins the keys/ and secrets/ read denial.
+func TestGuardRefusesCredentialDirReads(t *testing.T) {
+	home := withMeeptHome(t)
+	for _, dir := range []string{"keys", "secrets"} {
+		d := filepath.Join(home, dir)
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		f := filepath.Join(d, "cred.txt")
+		if err := os.WriteFile(f, []byte("s3cret"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", f, err)
+		}
+		if err := guardSecretReadPath(f); err == nil {
+			t.Fatalf("read guard allowed %s", f)
+		}
+	}
+}
+
+// TestGuardAllowsNonSecretReads pins the deliberate narrowness: daemon DATA
+// and non-secret config stay readable (meept.json5, meept.log, tasks.db,
+// skills/, agents/) — the read guard protects CREDENTIALS only.
+func TestGuardAllowsNonSecretReads(t *testing.T) {
+	home := withMeeptHome(t)
+	work := t.TempDir()
+
+	allowed := []string{
+		filepath.Join(work, "README.md"),
+		filepath.Join(home, "meept.json5"),
+		filepath.Join(home, "meept.log"),
+		filepath.Join(home, "tasks.db"),
+		filepath.Join(home, "skills", "x", "SKILL.md"),
+		filepath.Join(home, "agents", "chat", "AGENT.md"),
+	}
+	for _, p := range allowed {
+		if err := guardSecretReadPath(p); err != nil {
+			t.Fatalf("read guard blocked a legitimate path %s: %v", p, err)
+		}
+	}
+}
+
+// TestGuardReadFollowsSymlinks pins the symlink discipline: a symlink
+// elsewhere pointing AT dev_key is still refused (EvalSymlinks on the
+// target is the point of the check).
+func TestGuardReadFollowsSymlinks(t *testing.T) {
+	home := withMeeptHome(t)
+	real := filepath.Join(home, "dev_key")
+	if err := os.WriteFile(real, []byte("seed-key"), 0o600); err != nil {
+		t.Fatalf("seed dev_key: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "innocent.txt")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := guardSecretReadPath(link); err == nil {
+		t.Fatal("read guard followed a symlink away from dev_key")
+	}
+}
+
+// TestReadFileToolRefusesDevKey exercises the real tool end to end: no
+// fence, no permission checker wired (nil, nil) — the guard must fire on
+// path alone, exactly like the write guard in the 2026-10-09 incident.
+func TestReadFileToolRefusesDevKey(t *testing.T) {
+	home := withMeeptHome(t)
+	keyPath := filepath.Join(home, "dev_key")
+	if err := os.WriteFile(keyPath, []byte("super-secret-api-key"), 0o600); err != nil {
+		t.Fatalf("seed dev_key: %v", err)
+	}
+
+	tool := NewReadFileTool(nil, nil)
+	res, err := tool.Execute(context.Background(), map[string]any{"path": keyPath})
+	if err == nil {
+		t.Fatalf("file_read returned the dev_key: %v", res)
+	}
+	if !strings.Contains(err.Error(), "credential material") {
+		t.Fatalf("error = %v, want a credential-material refusal", err)
+	}
+}
