@@ -194,7 +194,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **GUI** | `ui/flutter_ui` (Flutter web + desktop) |
 | **Scheduling** | `internal/scheduler`, `internal/queue`, `internal/worker` |
 | **Skills** | `internal/skills`, `internal/selfimprove` |
-| **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/eval`, `internal/gate` |
+| **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/process`, `internal/eval`, `internal/gate` |
 
 See `docs/concepts/architecture.md` for full documentation.
 

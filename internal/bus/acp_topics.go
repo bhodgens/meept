@@ -48,6 +48,13 @@ type ACPPermissionEvent struct {
 	// "no_relay"/"full") on the resolved frame.
 	Decision string `json:"decision,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// Approver identifies WHO answered (audit M5 attribution): the
+	// rendered acp.Approver ("peercred:pid=…,uid=…", "http-key:<sha256
+	// prefix>", "in-process"). Empty on the requested frame and on
+	// timeout/no-relay resolutions; never carries raw credentials.
+	// Additive like Options — old consumers decode by key and are
+	// unaffected.
+	Approver string `json:"approver,omitempty"`
 }
 
 // WSClass implements wsclass.WSClassified: ACP permission frames are

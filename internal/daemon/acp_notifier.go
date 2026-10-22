@@ -36,13 +36,14 @@ func (n *acpBusNotifier) NotifyPermissionRequested(p acp.PendingPermission) bool
 	if n == nil || n.bus == nil {
 		return false
 	}
-	delivered := bus.PublishT(n.bus, bus.TopicACPPermissionRequested, "acp-relay", toACPEvent(p, "", ""))
+	delivered := bus.PublishT(n.bus, bus.TopicACPPermissionRequested, "acp-relay", toACPEvent(p, "", "", acp.Approver{}))
 	return delivered > 0
 }
 
 // NotifyPermissionResolved publishes the terminal shape (decision
-// "allow"/"always"/"deny", reason "answered"/"timeout"/"no_relay"/"full").
-func (n *acpBusNotifier) NotifyPermissionResolved(p acp.PendingPermission, decision, reason string) {
+// "allow"/"always"/"deny", reason "answered"/"timeout"/"no_relay"/"full",
+// approver = WHO answered, audit M5 attribution).
+func (n *acpBusNotifier) NotifyPermissionResolved(p acp.PendingPermission, decision, reason string, approver acp.Approver) {
 	if n == nil || n.bus == nil {
 		return
 	}
@@ -56,15 +57,17 @@ func (n *acpBusNotifier) NotifyPermissionResolved(p acp.PendingPermission, decis
 		"agent", p.AgentID,
 		"decision", decision,
 		"reason", reason,
+		"approver", approver.String(),
 	)
-	bus.PublishT(n.bus, bus.TopicACPPermissionResolved, "acp-relay", toACPEvent(p, decision, reason))
+	bus.PublishT(n.bus, bus.TopicACPPermissionResolved, "acp-relay", toACPEvent(p, decision, reason, approver))
 }
 
 // toACPEvent maps the internal/acp snapshot to the frozen bus payload
 // (keys: id, agent_id, session_id, summary, created_at + decision/reason;
 // the additive options key carries the agent's raw labels — acp-always-
-// allow leaf 01).
-func toACPEvent(p acp.PendingPermission, decision, reason string) bus.ACPPermissionEvent {
+// allow leaf 01; the additive approver key carries the rendered approver
+// identity — audit M5).
+func toACPEvent(p acp.PendingPermission, decision, reason string, approver acp.Approver) bus.ACPPermissionEvent {
 	created := ""
 	if !p.CreatedAt.IsZero() {
 		created = p.CreatedAt.UTC().Format(time.RFC3339)
@@ -80,6 +83,10 @@ func toACPEvent(p acp.PendingPermission, decision, reason string) bus.ACPPermiss
 			})
 		}
 	}
+	approverStr := ""
+	if approver.Kind != "" {
+		approverStr = approver.String()
+	}
 	return bus.ACPPermissionEvent{
 		ID:        p.ID,
 		AgentID:   p.AgentID,
@@ -89,5 +96,6 @@ func toACPEvent(p acp.PendingPermission, decision, reason string) bus.ACPPermiss
 		Options:   options,
 		Decision:  decision,
 		Reason:    reason,
+		Approver:  approverStr,
 	}
 }

@@ -149,6 +149,9 @@
   "internal/acp/": [
    "acp-wire"
   ],
+  "internal/process/": [
+   "acp-wire"
+  ],
   "internal/hermes/": [
    "hermes-client"
   ],
@@ -2173,6 +2176,26 @@
     "internal/bus/acp_topics.go",
     "internal/daemon/acp_notifier.go",
     "internal/rpc/acp.go"
+   ]
+  },
+  {
+   "id": "acp-wire-06",
+   "suite": "acp-wire",
+   "diff": "L",
+   "title": "Approver-identity gate (audit M5): a daemon-spawned agent dialing the daemon socket cannot list or resolve its own pending permission request (self-approval rejected, pending id hidden); a non-daemon-spawned socket peer (human-relay scenario LEG 2) still resolves",
+   "paths": [
+    "internal/rpc/acp.go",
+    "internal/rpc/server.go",
+    "internal/rpc/server_peercred_darwin.go",
+    "internal/rpc/server_peercred_linux.go",
+    "internal/process/ancestry.go",
+    "internal/acp/approver.go",
+    "internal/acp/relay.go",
+    "internal/acp/manager.go",
+    "internal/comm/http/acp_status.go",
+    "internal/daemon/acp_notifier.go",
+    "internal/bus/acp_topics.go",
+    "internal/config/schema.go"
    ]
   },
   {

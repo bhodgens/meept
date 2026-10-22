@@ -645,6 +645,7 @@ type resolvedCall struct {
 	p        PendingPermission
 	decision string
 	reason   string
+	approver Approver
 }
 
 func (n *stubNotifier) NotifyPermissionRequested(p PendingPermission) bool {
@@ -654,10 +655,10 @@ func (n *stubNotifier) NotifyPermissionRequested(p PendingPermission) bool {
 	return n.listener
 }
 
-func (n *stubNotifier) NotifyPermissionResolved(p PendingPermission, decision, reason string) {
+func (n *stubNotifier) NotifyPermissionResolved(p PendingPermission, decision, reason string, approver Approver) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.resolved = append(n.resolved, resolvedCall{p, decision, reason})
+	n.resolved = append(n.resolved, resolvedCall{p: p, decision: decision, reason: reason, approver: approver})
 }
 
 func (n *stubNotifier) counts() (requested, resolved int) {
@@ -1701,5 +1702,67 @@ func TestSession_HumanRelayOptionsCapped(t *testing.T) {
 	p := notif.lastRequested()
 	if len(p.Options) != maxPermissionOptions {
 		t.Fatalf("published Options = %d, want cap %d", len(p.Options), maxPermissionOptions)
+	}
+}
+
+// TestSession_HumanRelayApproverAttribution pins audit-M5 attribution: the
+// approver passed to ResolveWithApprover rides the decision into the
+// permission_resolved notification, so surfaces (and the bus event built
+// from it) can show WHO answered. Mirrors TestSession_HumanRelayAllow with
+// an attributed resolve.
+func TestSession_HumanRelayApproverAttribution(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, fromClient, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if reqEv.Text == "" {
+		t.Fatal("permission_requested event must carry the pending id")
+	}
+	approver := Approver{Kind: "peercred", PID: 4321, UID: 501}
+	if err := rl.ResolveWithApprover(reqEv.Text, "allow", approver); err != nil {
+		t.Fatalf("ResolveWithApprover: %v", err)
+	}
+
+	resp := readReplyFrame(t, fromClient)
+	outcome, _ := outcomeOf(t, resp)
+	if outcome != "selected" {
+		t.Fatalf("reply outcome = %q, want selected", outcome)
+	}
+
+	rc := notif.lastResolved()
+	if rc.decision != "allow" || rc.reason != "answered" {
+		t.Fatalf("resolved call = %+v, want allow/answered", rc)
+	}
+	if rc.approver != approver {
+		t.Fatalf("resolved approver = %+v, want %+v", rc.approver, approver)
+	}
+	if got, want := rc.approver.String(), "peercred:pid=4321,uid=501"; got != want {
+		t.Fatalf("approver render = %q, want %q", got, want)
+	}
+}
+
+// TestRelay_ResolveLegacyUnattributed pins the compatibility wrapper: the
+// 2-arg Resolve records an empty (unattributed) approver, rendering as
+// "unknown" — legacy callers keep working and stay visibly unattributed.
+func TestRelay_ResolveLegacyUnattributed(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	s, _, toClient := decisionHarnessSession(t, humanRelayCfg(rl, notif, 5*time.Second))
+
+	sendPermissionRequest(t, toClient, "")
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	if err := rl.Resolve(reqEv.Text, "deny"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	waitForEvent(t, s, "permission_resolved", 5*time.Second)
+
+	rc := notif.lastResolved()
+	if rc.approver.Kind != "" {
+		t.Fatalf("legacy Resolve approver = %+v, want zero (unattributed)", rc.approver)
+	}
+	if got := rc.approver.String(); got != "unknown" {
+		t.Fatalf("zero approver render = %q, want unknown", got)
 	}
 }

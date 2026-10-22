@@ -403,7 +403,7 @@ func TestACPBusNotifierPublishes(t *testing.T) {
 	if !n.NotifyPermissionRequested(p) {
 		t.Fatal("NotifyPermissionRequested with listeners = false, want true")
 	}
-	n.NotifyPermissionResolved(p, "allow", "answered")
+	n.NotifyPermissionResolved(p, "allow", "answered", acp.Approver{Kind: "test"})
 
 	// SubscribeT delivers on a reader goroutine: poll with a deadline.
 	// The snapshots are LOCAL variables — the captured gotRequested/
@@ -440,7 +440,7 @@ func TestACPBusNotifierNoListenerReturnsFalse(t *testing.T) {
 		t.Fatal("no-listener NotifyPermissionRequested = true, want false")
 	}
 	// Resolved is fire-and-forget (no return); must not panic.
-	n.NotifyPermissionResolved(acp.PendingPermission{ID: "perm-x"}, "deny", "timeout")
+	n.NotifyPermissionResolved(acp.PendingPermission{ID: "perm-x"}, "deny", "timeout", acp.Approver{})
 }
 
 // TestACPBusNotifierNilSafe pins the repo setter/nil guard rule: a zero
@@ -451,7 +451,7 @@ func TestACPBusNotifierNilSafe(t *testing.T) {
 	if n.NotifyPermissionRequested(acp.PendingPermission{}) {
 		t.Error("nil notifier reported a listener")
 	}
-	n.NotifyPermissionResolved(acp.PendingPermission{}, "deny", "no_relay")
+	n.NotifyPermissionResolved(acp.PendingPermission{}, "deny", "no_relay", acp.Approver{})
 	zero := &acpBusNotifier{}
 	if zero.NotifyPermissionRequested(acp.PendingPermission{}) {
 		t.Error("zero-value notifier reported a listener")
@@ -491,7 +491,7 @@ func TestACPBusNotifierSurfacesOptions(t *testing.T) {
 	if !n.NotifyPermissionRequested(p) {
 		t.Fatal("NotifyPermissionRequested with listeners = false, want true")
 	}
-	n.NotifyPermissionResolved(p, "always", "answered")
+	n.NotifyPermissionResolved(p, "always", "answered", acp.Approver{Kind: "test"})
 
 	select {
 	case <-deadlineDone:

@@ -10,3 +10,10 @@ import "net"
 func peerCredential(conn net.Conn) (uid int, ok bool) {
 	return 0, false
 }
+
+// peerProcessID is a stub for platforms without peer-PID support. The ACP
+// approver gate treats an unverifiable peer as unidentifiable and fails
+// closed on privileged methods (see internal/rpc/acp.go).
+func peerProcessID(conn net.Conn) (pid int, ok bool) {
+	return 0, false
+}

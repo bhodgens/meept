@@ -1,7 +1,9 @@
 # ACP approver identity: close the self-approval loop (audit M5)
 
-Status: DESIGN, not implemented. One-page spec from the 2026-10-20 security
-audit (finding M5, the last open HIGH). No code changes accompany this doc.
+Status: Phase 1 (socket peercred gate) + Phase 2a (HTTP key-fingerprint
+attribution) IMPLEMENTED — see docs/workflows/acp.md "Approver identity".
+Phase 2b (key roles) and 2c (scanner denials) remain open. Design rationale
+and the verified attack chains are below.
 
 ## Problem
 
@@ -117,7 +119,28 @@ The in-process dispatch has no kernel peer. Options, in increasing cost:
   key; the deny should apply to agent tool spawns only (the scanner knows the
   call site).
 
-### Config and rollout
+### Implementation notes (what actually landed)
+
+- Phase 1 shipped with an **accept-time ancestry walk** instead of the
+  SpawnedPIDRegistry: at socket accept the daemon fetches the kernel-verified
+  peer PID (`SO_PEERCRED` / `LOCAL_PEERPID`) and walks its ancestor chain
+  (`internal/process.IsDescendantOf`) once, while the peer is provably alive
+  (no PID-reuse race). `SpawnedByDaemon` rides the per-connection context;
+  the ACP handlers gate on it. Same security property (every agent-controlled
+  process is a daemon descendant), zero global registry state, no spawn-site
+  plumbing.
+- `[acp] approver_identity` shipped as `""`/`"enforce"` (gate ON by default)
+  with `"off"` as the escape hatch. The default-on choice was made under the
+  user's "implement it" directive; flag it again at review if the
+  opt-in-defaults policy requires.
+- e2e coverage: `acp-wire-06` (TestACPWire_SelfApprovalRejectedFullStack) —
+  a fakeagent in `selfapprove` mode dials the daemon socket from inside its
+  own daemon-spawned process; the probe asserts list=hidden and
+  resolve=REJECTED(self-approval). The human path stays pinned by LEG 2 of
+  TestACPWire_FullStackHumanRelayWSAndHTTPResolve (non-daemon-spawned socket
+  peer resolves successfully over the real peercred path).
+
+## Config and rollout
 
 - `[acp] approver_identity` (default: enforce=true, escape hatch "off").
   Security enforcement should not ship dark; docs/agents/opt-in-defaults.md

@@ -14,6 +14,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/errcls"
+	"github.com/caimlas/meept/internal/process"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -22,6 +23,42 @@ import (
 // Handlers (e.g., bus.subscribe) use this to derive long-lived contexts that are
 // cancelled when the client disconnects, preventing subscription leaks (Bug C8).
 type connectionDoneKey struct{}
+
+// PeerIdentity is the kernel-verified identity of a Unix-socket RPC peer
+// (audit M5). PID/UID come from SO_PEERCRED (Linux) / LOCAL_PEERPID +
+// LOCAL_PEERCRED (macOS) and cannot be forged by the connecting process.
+// HasPID/HasUID are false on platforms without peer-credential support,
+// where identity-dependent gates must fail closed.
+type PeerIdentity struct {
+	PID    int
+	UID    int
+	HasPID bool
+	HasUID bool
+	// SpawnedByDaemon is true when the peer PID is the daemon itself or a
+	// descendant of it (walked ONCE at accept time, while the peer is
+	// provably alive — a resolve-time walk would race PID reuse). Agent-
+	// controlled processes (shell-tool children, PTY sessions, MCP stdio
+	// servers) are daemon descendants; human surfaces (TUI, menubar, GUI)
+	// are not. Used by the ACP approver gate (audit M5).
+	SpawnedByDaemon bool
+}
+
+// peerIdentityKey is the context value key for the connection's PeerIdentity.
+// Handlers that need caller identity (ACP approver gate) read it from the
+// per-connection context built in handleConnection.
+type peerIdentityKey struct{}
+
+// PeerIdentityFromContext extracts the socket peer identity attached to a
+// connection-scoped context. ok is false when the context carries none
+// (in-process CallMethod paths — HTTP dispatch — attach no peer; they
+// identify themselves separately via acp.WithApprover).
+func PeerIdentityFromContext(ctx context.Context) (PeerIdentity, bool) {
+	if ctx == nil {
+		return PeerIdentity{}, false
+	}
+	p, ok := ctx.Value(peerIdentityKey{}).(PeerIdentity)
+	return p, ok
+}
 
 // Default timeouts.
 const (
@@ -323,11 +360,21 @@ func (s *Server) acceptLoop() {
 
 		// Kernel-enforced peer identity: extract the peer UID before any
 		// state is registered for the connection so rejected peers leave no
-		// trace behind a closed socket.
+		// trace behind a closed socket. The peer PID rides along for the
+		// ACP approver gate (audit M5): handlers read it from the
+		// connection context, never from the request payload.
 		uid, uidOK := peerCredential(conn)
+		pid, pidOK := peerProcessID(conn)
+		// Walk the ancestry ONCE, at accept time, while the peer is alive
+		// (audit M5). os.Getpid() is the daemon: every process an agent can
+		// control was spawned by it, so descendant-of-daemon == agent-
+		// controlled. Unverifiable PID (platform stub / lookup failure) is
+		// NOT flagged here; identity-dependent gates fail closed on their
+		// own when HasPID is false.
+		spawnedByDaemon := pidOK && (pid == os.Getpid() || process.IsDescendantOf(pid, os.Getpid()))
 		if uidOK {
 			if s.peerCredLog {
-				s.logger.Debug("rpc: connection accepted", "peer_uid", uid)
+				s.logger.Debug("rpc: connection accepted", "peer_uid", uid, "peer_pid", pid)
 			}
 			if len(s.allowedUIDs) > 0 && !s.allowedUIDs[uid] {
 				s.logger.Warn("rpc: connection rejected by uid allowlist",
@@ -343,13 +390,23 @@ func (s *Server) acceptLoop() {
 		s.connMu.Unlock()
 
 		s.connWg.Add(1)
-		go s.handleConnection(conn)
+		go s.handleConnection(conn, PeerIdentity{
+			PID:             pid,
+			UID:             uid,
+			HasPID:          pidOK,
+			HasUID:          uidOK,
+			SpawnedByDaemon: spawnedByDaemon,
+		})
 	}
 }
 
-func (s *Server) handleConnection(conn net.Conn) {
+func (s *Server) handleConnection(conn net.Conn, peer PeerIdentity) {
 	// Create connection-scoped context that cancels when we return
 	ctx, cancel := context.WithCancel(context.Background())
+	// Attach the kernel-verified peer identity so handlers can gate on
+	// caller identity (ACP approver check, audit M5). Value-only context
+	// key; handlers read it via PeerIdentityFromContext.
+	ctx = context.WithValue(ctx, peerIdentityKey{}, peer)
 	defer func() {
 		cancel() // Signal all handlers to stop
 		conn.Close()

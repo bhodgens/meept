@@ -84,8 +84,9 @@ type PermissionNotifier interface {
 	NotifyPermissionRequested(p PendingPermission) bool
 	// NotifyPermissionResolved publishes the terminal shape after the
 	// wait completes (decision "allow"/"always"/"deny"; reason
-	// "answered", "timeout", "no_relay", "full").
-	NotifyPermissionResolved(p PendingPermission, decision, reason string)
+	// "answered", "timeout", "no_relay", "full"; approver identifies WHO
+	// answered — zero Approver on timeout/no-relay paths, audit M5).
+	NotifyPermissionResolved(p PendingPermission, decision, reason string, approver Approver)
 }
 
 // maxPermissionOptions bounds the offered-options snapshot carried on a
@@ -128,10 +129,13 @@ type PendingPermission struct {
 // `always` is the scope flag of an allow answer (text carries the verb):
 // it only ever rides with allow=true, and only from a human relay answer —
 // the decision lane never votes always (master.md design decision 4).
+// approver records WHO answered (audit M5 attribution); Kind is empty for
+// internal resolves (registry-full/timeout paths never build a decision).
 type relayDecision struct {
-	text   string // "allow" | "always" | "deny"
-	allow  bool
-	always bool
+	text     string // "allow" | "always" | "deny"
+	allow    bool
+	always   bool
+	approver Approver
 }
 
 // relayEntry is a registry row: the snapshot, the wait channel, and the
@@ -203,6 +207,15 @@ func (r *Relay) Register(p PendingPermission) (<-chan relayDecision, error) {
 // "allow" and "always" grant; anything else normalizes to the fail-closed
 // deny verb (the always flag never rides with a deny).
 func (r *Relay) Resolve(id string, decision string) error {
+	return r.ResolveWithApprover(id, decision, Approver{})
+}
+
+// ResolveWithApprover is Resolve plus the approver identity (audit M5):
+// WHO answered rides on the decision into the session wait, the
+// permission_resolved notification and the bus event, so every approval is
+// attributable. A zero Approver means "unattributed" (legacy/internal
+// callers) and is recorded as Kind "" — surfaces render it as "unknown".
+func (r *Relay) ResolveWithApprover(id string, decision string, approver Approver) error {
 	if r == nil {
 		return ErrRelayNotFound
 	}
@@ -219,12 +232,12 @@ func (r *Relay) Resolve(id string, decision string) error {
 	e.answered = true
 	r.mu.Unlock()
 
-	d := relayDecision{text: relayDecisionDeny, allow: false}
+	d := relayDecision{text: relayDecisionDeny, allow: false, approver: approver}
 	switch decision {
 	case relayDecisionAllow:
-		d = relayDecision{text: relayDecisionAllow, allow: true}
+		d = relayDecision{text: relayDecisionAllow, allow: true, approver: approver}
 	case relayDecisionAlways:
-		d = relayDecision{text: relayDecisionAlways, allow: true, always: true}
+		d = relayDecision{text: relayDecisionAlways, allow: true, always: true, approver: approver}
 	}
 	// Buffered channel (cap 1): the send never blocks, so the once-guard
 	// runs safely outside the registry lock.
@@ -335,7 +348,7 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 	case d := <-ch:
 		s.cfg.Relay.remove(p.ID)
 		s.emit(SessionEvent{Kind: "permission_resolved", Text: d.text})
-		s.cfg.Notifier.NotifyPermissionResolved(p, d.text, relayReasonAnswer)
+		s.cfg.Notifier.NotifyPermissionResolved(p, d.text, relayReasonAnswer, d.approver)
 		return relayVerdict{allow: d.allow, always: d.always, text: d.text}
 	case <-timer.C:
 		s.cfg.Relay.remove(p.ID)
@@ -345,7 +358,7 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 			"pending", p.ID,
 		)
 		s.emit(SessionEvent{Kind: "permission_resolved", Text: relayTextTimeout})
-		s.cfg.Notifier.NotifyPermissionResolved(p, relayDecisionDeny, relayReasonTimeout)
+		s.cfg.Notifier.NotifyPermissionResolved(p, relayDecisionDeny, relayReasonTimeout, Approver{})
 		return relayVerdict{text: relayTextTimeout}
 	case <-closed:
 		// Transport closed mid-wait: fail closed and leave the registry.
@@ -356,7 +369,7 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 			"pending", p.ID,
 		)
 		s.emit(SessionEvent{Kind: "permission_resolved", Text: relayDecisionDeny})
-		s.cfg.Notifier.NotifyPermissionResolved(p, relayDecisionDeny, relayReasonTimeout)
+		s.cfg.Notifier.NotifyPermissionResolved(p, relayDecisionDeny, relayReasonTimeout, Approver{})
 		return relayVerdict{text: relayDecisionDeny}
 	}
 }

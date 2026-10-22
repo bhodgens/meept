@@ -2526,6 +2526,13 @@ type ACPConfig struct {
 	// permission_mode "decision" through the human relay instead of
 	// cancelling outright. Default false keeps the fail-closed cancel.
 	DecisionEscalateToHuman bool `json:"decision_escalate_to_human" toml:"decision_escalate_to_human"`
+	// ApproverIdentity controls the self-approval gate on
+	// acp.permissions.resolve / .list (audit M5). "" or "enforce" (the
+	// default) rejects callers that are the daemon or a daemon-spawned
+	// process (an agent answering its own permission request) and fails
+	// closed when the caller cannot be identified. "off" disables the
+	// gate (documented escape hatch; approvals stay attributed).
+	ApproverIdentity string `json:"approver_identity" toml:"approver_identity"`
 }
 
 // Validate checks the [acp] section. Invalid timeouts, agent caps, or
@@ -2555,6 +2562,11 @@ func (c *ACPConfig) Validate() error {
 	// as decision_threshold outside "decision" mode).
 	if (c.PermissionMode == "human" || c.DecisionEscalateToHuman) && c.RelayTimeout <= 0 {
 		return fmt.Errorf("relay_timeout must be > 0 when permission_mode is \"human\" or decision_escalate_to_human is enabled")
+	}
+	switch c.ApproverIdentity {
+	case "", "enforce", "off":
+	default:
+		return fmt.Errorf("approver_identity must be \"enforce\" or \"off\" (empty = enforce)")
 	}
 	return nil
 }

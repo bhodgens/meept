@@ -394,6 +394,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// Always register acp.list even when the manager is nil so HTTP
 		// GET /api/v1/acp/agents returns the disabled envelope, never 500.
 		acpRPCHandler := rpc.NewACPHandler(components.ACPManager)
+		// Approver-identity gate (audit M5): enforce by default;
+		// [acp] approver_identity="off" is the documented escape hatch.
+		acpRPCHandler.SetApproverEnforcement(fullCfg.ACP.ApproverIdentity != "off")
+		acpRPCHandler.SetLogger(logger)
 		acpRPCHandler.RegisterACPMethods(rpcServer)
 
 		// Register scheduler RPC handlers (direct Go handlers override bus proxy)

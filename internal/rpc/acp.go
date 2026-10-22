@@ -5,11 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/acp"
 )
+
+// ErrACPSelfApproval is returned when the caller of acp.permissions.resolve
+// (or .list) is the daemon itself or a process the daemon spawned — i.e. an
+// agent answering its own permission request (audit M5). The relay stays
+// untouched: the pending request remains answerable by a real human surface
+// until its timeout.
+var ErrACPSelfApproval = errors.New("acp: caller is daemon-spawned; self-approval is not permitted")
 
 // ACPListResult is the envelope returned by acp.list and GET /api/v1/acp/agents.
 type ACPListResult struct {
@@ -30,11 +38,91 @@ type ACPAgentStatus struct {
 // A nil manager is valid and reports the disabled envelope.
 type ACPHandler struct {
 	manager *acp.Manager
+	// enforceApprover gates acp.permissions.resolve/.list on caller
+	// identity (audit M5). Default true: daemon-spawned peers (agent-
+	// controlled processes) are rejected with ErrACPSelfApproval and
+	// peers whose identity cannot be verified fail closed. Set false
+	// only by [acp] approver_identity="off" (documented escape hatch).
+	enforceApprover bool
+	logger          *slog.Logger
 }
 
-// NewACPHandler creates a handler. manager may be nil.
+// NewACPHandler creates a handler. manager may be nil. The approver
+// identity gate is ON by default (fail-closed); see enforceApprover.
 func NewACPHandler(mgr *acp.Manager) *ACPHandler {
-	return &ACPHandler{manager: mgr}
+	return &ACPHandler{manager: mgr, enforceApprover: true, logger: slog.Default()}
+}
+
+// SetApproverEnforcement disables the self-approval gate. Wiring:
+// [acp] approver_identity="off" (daemon startup only).
+func (h *ACPHandler) SetApproverEnforcement(enforce bool) {
+	if h == nil {
+		return
+	}
+	h.enforceApprover = enforce
+}
+
+// SetLogger overrides the handler logger (nil restores slog.Default).
+func (h *ACPHandler) SetLogger(l *slog.Logger) {
+	if h == nil {
+		return
+	}
+	if l == nil {
+		l = slog.Default()
+	}
+	h.logger = l
+}
+
+// checkApprover enforces the self-approval gate (audit M5) for a
+// permission-surface call. It returns (approver, nil) when the caller may
+// proceed, or an error to reject:
+//
+//   - Socket callers (PeerIdentity in ctx): reject when the peer is the
+//     daemon or a daemon descendant (agent-controlled: shell-tool children,
+//     PTY sessions, MCP servers are ALL daemon-spawned). Human surfaces
+//     (TUI, menubar, GUI-over-RPC) are not daemon descendants and pass.
+//     Fail closed when the peer PID could not be verified.
+//   - In-process callers (no PeerIdentity — the HTTP boundary dispatches
+//     via CallMethod): allowed ONLY when they carry an explicit
+//     acp.Approver (the HTTP handler attaches the key fingerprint);
+//     an in-process call with no approver is an internal daemon path and
+//     is rejected — internal code must never answer a human gate.
+func (h *ACPHandler) checkApprover(ctx context.Context) (acp.Approver, error) {
+	if !h.enforceApprover {
+		// Gate off: still attribute when identity is available.
+		if peer, ok := PeerIdentityFromContext(ctx); ok && peer.HasPID {
+			return acp.Approver{Kind: "peercred", PID: peer.PID, UID: peer.UID}, nil
+		}
+		if a, ok := acp.ApproverFromContext(ctx); ok {
+			return a, nil
+		}
+		return acp.Approver{Kind: "in-process"}, nil
+	}
+
+	if peer, ok := PeerIdentityFromContext(ctx); ok {
+		if !peer.HasPID {
+			// Platform cannot verify the peer (e.g. the peercred stub):
+			// fail closed — an unverifiable caller must not answer a
+			// human gate.
+			return acp.Approver{}, fmt.Errorf("%w (peer identity unverifiable on this platform)", ErrACPSelfApproval)
+		}
+		if peer.SpawnedByDaemon {
+			h.logger.Warn("acp: rejected self-approval attempt",
+				"component", "acp",
+				"peer_pid", peer.PID,
+				"peer_uid", peer.UID,
+			)
+			return acp.Approver{}, ErrACPSelfApproval
+		}
+		return acp.Approver{Kind: "peercred", PID: peer.PID, UID: peer.UID}, nil
+	}
+
+	// No socket peer: in-process dispatch (HTTP boundary). Require an
+	// explicit approver attached by that boundary.
+	if a, ok := acp.ApproverFromContext(ctx); ok && a.Kind != "" {
+		return a, nil
+	}
+	return acp.Approver{}, fmt.Errorf("%w (in-process caller without approver identity)", ErrACPSelfApproval)
 }
 
 // RegisterACPMethods registers acp.list plus the human relay permission
@@ -107,7 +195,17 @@ type ACPPermissionResolveResult struct {
 	Reason   string `json:"reason" yaml:"reason"`
 }
 
-func (h *ACPHandler) handlePermissionsList(_ context.Context, _ json.RawMessage) (any, error) {
+func (h *ACPHandler) handlePermissionsList(ctx context.Context, _ json.RawMessage) (any, error) {
+	// Gate the pending-id surface too (audit M5): a daemon-spawned caller
+	// must not even enumerate the ids it could try to resolve. Rejected
+	// callers get the disabled envelope, not an error — list is a
+	// status/refresh surface and an agent polling it should see "nothing
+	// for you", never a hint that a gate exists to probe.
+	if h.enforceApprover {
+		if _, err := h.checkApprover(ctx); err != nil {
+			return ACPPermissionsResult{Enabled: false, Pending: []ACPPendingPermissionStatus{}}, nil
+		}
+	}
 	return h.permissionsList(), nil
 }
 
@@ -140,7 +238,14 @@ func (h *ACPHandler) permissionsList() ACPPermissionsResult {
 // silent deny on a user-facing surface. "always" is a human-only verb
 // (acp-always-allow leaf 01): the reply echo shape is unchanged and the
 // reason stays "answered".
-func (h *ACPHandler) handlePermissionsResolve(_ context.Context, params json.RawMessage) (any, error) {
+//
+// Approver identity (audit M5): the caller must NOT be the daemon or a
+// daemon-spawned process (an agent answering its own request). Socket
+// callers are gated on the kernel-verified peer PID (accept-time ancestry
+// walk); in-process callers (HTTP dispatch) must carry an explicit
+// acp.Approver. The resolved approver rides on the relay decision into the
+// permission_resolved notification and the bus event.
+func (h *ACPHandler) handlePermissionsResolve(ctx context.Context, params json.RawMessage) (any, error) {
 	var p struct {
 		ID       string `json:"id"`
 		Decision string `json:"decision"`
@@ -159,7 +264,11 @@ func (h *ACPHandler) handlePermissionsResolve(_ context.Context, params json.Raw
 	if h == nil || h.manager == nil {
 		return nil, fmt.Errorf("permission not found: %s", p.ID)
 	}
-	if err := h.manager.ResolvePermission(p.ID, p.Decision); err != nil {
+	approver, err := h.checkApprover(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.manager.ResolvePermissionWithApprover(p.ID, p.Decision, approver); err != nil {
 		switch {
 		case errors.Is(err, acp.ErrRelayNotFound):
 			return nil, fmt.Errorf("permission not found: %s", p.ID)

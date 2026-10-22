@@ -118,13 +118,21 @@ func (m *Manager) PendingPermissions() []PendingPermission {
 // the relay; callers at API boundaries validate the verb explicitly BEFORE
 // calling (leaf 03 context 4) so a typo never silently denies.
 func (m *Manager) ResolvePermission(id string, decision string) error {
+	return m.ResolvePermissionWithApprover(id, decision, Approver{})
+}
+
+// ResolvePermissionWithApprover is ResolvePermission plus the approver
+// identity (audit M5). The RPC boundary passes the kernel-verified socket
+// peer; the HTTP boundary passes the key fingerprint. A zero Approver keeps
+// the legacy unattributed behavior for internal callers.
+func (m *Manager) ResolvePermissionWithApprover(id string, decision string, approver Approver) error {
 	if m == nil {
 		return ErrRelayNotFound
 	}
 	m.mu.Lock()
 	rl := m.relay
 	m.mu.Unlock()
-	return rl.Resolve(id, decision)
+	return rl.ResolveWithApprover(id, decision, approver)
 }
 
 // NewManager constructs a Manager from an already-loaded catalog.

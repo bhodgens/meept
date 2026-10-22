@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +11,16 @@ import (
 	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/config"
 )
+
+// humanCtx returns a context carrying a test approver identity, mirroring
+// what the HTTP boundary attaches (httpApprover) before the in-process
+// dispatch. Permission-surface tests represent legitimate human callers;
+// the audit-M5 gate rejects unattributed in-process calls, so every
+// permissions.list / permissions.resolve test call carries one. Gate
+// behavior itself is pinned by TestACPHandler_ApproverGate_*.
+func humanCtx() context.Context {
+	return acp.WithApprover(context.Background(), acp.Approver{Kind: "test", Detail: "unit"})
+}
 
 func TestACPHandler_List_NilManager(t *testing.T) {
 	h := NewACPHandler(nil)
@@ -168,8 +179,9 @@ func TestACPListResult_JSONAndYAMLTags(t *testing.T) {
 // HasPermissionRelay() to report the seam as armed).
 type acpTestNotifier struct{}
 
-func (acpTestNotifier) NotifyPermissionRequested(_ acp.PendingPermission) bool        { return true }
-func (acpTestNotifier) NotifyPermissionResolved(_ acp.PendingPermission, _, _ string) {}
+func (acpTestNotifier) NotifyPermissionRequested(_ acp.PendingPermission) bool { return true }
+func (acpTestNotifier) NotifyPermissionResolved(_ acp.PendingPermission, _, _ string, _ acp.Approver) {
+}
 
 func acpEnabledRelayManager(t *testing.T) (*acp.Manager, *acp.Relay) {
 	t.Helper()
@@ -194,7 +206,7 @@ func TestACPHandler_PermissionsList_NilManager(t *testing.T) {
 	srv := New(&Config{SocketPath: ""}, nil, nil)
 	h.RegisterACPMethods(srv)
 
-	res, err := srv.CallMethod(context.Background(), "acp.permissions.list", json.RawMessage("{}"))
+	res, err := srv.CallMethod(humanCtx(), "acp.permissions.list", json.RawMessage("{}"))
 	if err != nil {
 		t.Fatalf("acp.permissions.list nil manager: %v", err)
 	}
@@ -216,7 +228,7 @@ func TestACPHandler_PermissionsList_DisabledManager(t *testing.T) {
 	srv := New(&Config{SocketPath: ""}, nil, nil)
 	h.RegisterACPMethods(srv)
 
-	res, err := srv.CallMethod(context.Background(), "acp.permissions.list", json.RawMessage("{}"))
+	res, err := srv.CallMethod(humanCtx(), "acp.permissions.list", json.RawMessage("{}"))
 	if err != nil {
 		t.Fatalf("acp.permissions.list disabled manager: %v", err)
 	}
@@ -244,7 +256,7 @@ func TestACPHandler_PermissionsList_EnabledRelay(t *testing.T) {
 	srv := New(&Config{SocketPath: ""}, nil, nil)
 	h.RegisterACPMethods(srv)
 
-	res, err := srv.CallMethod(context.Background(), "acp.permissions.list", json.RawMessage("{}"))
+	res, err := srv.CallMethod(humanCtx(), "acp.permissions.list", json.RawMessage("{}"))
 	if err != nil {
 		t.Fatalf("acp.permissions.list: %v", err)
 	}
@@ -335,7 +347,7 @@ func TestACPHandler_PermissionsList_OptionsPassthrough(t *testing.T) {
 	h := NewACPHandler(mgr)
 	srv := New(&Config{SocketPath: ""}, nil, nil)
 	h.RegisterACPMethods(srv)
-	res, err := srv.CallMethod(context.Background(), "acp.permissions.list", json.RawMessage("{}"))
+	res, err := srv.CallMethod(humanCtx(), "acp.permissions.list", json.RawMessage("{}"))
 	if err != nil {
 		t.Fatalf("acp.permissions.list: %v", err)
 	}
@@ -375,7 +387,7 @@ func TestACPHandler_PermissionsResolve_NilManager(t *testing.T) {
 	srv := New(&Config{SocketPath: ""}, nil, nil)
 	h.RegisterACPMethods(srv)
 
-	res, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+	res, err := srv.CallMethod(humanCtx(), "acp.permissions.resolve",
 		json.RawMessage(`{"id":"perm-x","decision":"allow"}`))
 	if err == nil {
 		t.Fatalf("nil manager resolve returned result %v, want not-found error", res)
@@ -395,7 +407,7 @@ func TestACPHandler_PermissionsResolve_InvalidDecision(t *testing.T) {
 			srv := New(&Config{SocketPath: ""}, nil, nil)
 			h.RegisterACPMethods(srv)
 
-			res, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+			res, err := srv.CallMethod(humanCtx(), "acp.permissions.resolve",
 				json.RawMessage(`{"id":"perm-1","decision":"`+decision+`"}`))
 			if err == nil {
 				t.Fatalf("decision %q accepted (result %v), want invalid-params error", decision, res)
@@ -413,7 +425,7 @@ func TestACPHandler_PermissionsResolve_MissingID(t *testing.T) {
 	srv := New(&Config{SocketPath: ""}, nil, nil)
 	h.RegisterACPMethods(srv)
 
-	res, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+	res, err := srv.CallMethod(humanCtx(), "acp.permissions.resolve",
 		json.RawMessage(`{"decision":"allow"}`))
 	if err == nil {
 		t.Fatalf("empty id accepted (result %v), want invalid-params error", res)
@@ -429,7 +441,7 @@ func TestACPHandler_PermissionsResolve_UnknownID(t *testing.T) {
 	srv := New(&Config{SocketPath: ""}, nil, nil)
 	h.RegisterACPMethods(srv)
 
-	_, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+	_, err := srv.CallMethod(humanCtx(), "acp.permissions.resolve",
 		json.RawMessage(`{"id":"perm-nope","decision":"allow"}`))
 	if err == nil {
 		t.Fatal("unknown id resolved, want not-found error")
@@ -454,7 +466,7 @@ func TestACPHandler_PermissionsResolve_HappyPathEchoes(t *testing.T) {
 	srv := New(&Config{SocketPath: ""}, nil, nil)
 	h.RegisterACPMethods(srv)
 
-	res, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+	res, err := srv.CallMethod(humanCtx(), "acp.permissions.resolve",
 		json.RawMessage(`{"id":"perm-42","decision":"allow"}`))
 	if err != nil {
 		t.Fatalf("resolve allow: %v", err)
@@ -479,7 +491,7 @@ func TestACPHandler_PermissionsResolve_HappyPathEchoes(t *testing.T) {
 	}
 
 	// Already-answered second call errors (exactly-once).
-	if _, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+	if _, err := srv.CallMethod(humanCtx(), "acp.permissions.resolve",
 		json.RawMessage(`{"id":"perm-42","decision":"deny"}`)); err == nil {
 		t.Fatal("double resolve accepted, want already-answered error")
 	}
@@ -550,7 +562,7 @@ func TestACPHandler_PermissionsResolve_AlwaysAccepted(t *testing.T) {
 	srv := New(&Config{SocketPath: ""}, nil, nil)
 	h.RegisterACPMethods(srv)
 
-	res, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+	res, err := srv.CallMethod(humanCtx(), "acp.permissions.resolve",
 		json.RawMessage(`{"id":"perm-aw","decision":"always"}`))
 	if err != nil {
 		t.Fatalf("resolve always: %v", err)
@@ -574,8 +586,133 @@ func TestACPHandler_PermissionsResolve_AlwaysAccepted(t *testing.T) {
 		t.Errorf("reason = %q, want answered", echoed.Reason)
 	}
 	// Case/whitespace normalization applies to the new verb too.
-	if _, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+	if _, err := srv.CallMethod(humanCtx(), "acp.permissions.resolve",
 		json.RawMessage(`{"id":"perm-aw","decision":" ALWAYS "}`)); err == nil {
 		t.Fatal("double resolve accepted, want already-answered error")
+	}
+}
+
+// socketCtx builds a connection-scoped context carrying a kernel-verified
+// peer identity, exactly as handleConnection does after acceptLoop's
+// ancestry walk. Tests use it to exercise the audit-M5 gate without a real
+// Unix socket.
+func socketCtx(peer PeerIdentity) context.Context {
+	return context.WithValue(context.Background(), peerIdentityKey{}, peer)
+}
+
+// TestACPHandler_ApproverGate_SelfApprovalRejected pins the core M5 fix: a
+// daemon-spawned caller (an agent's shell child, PTY session, or MCP server
+// — all daemon descendants) must NOT be able to answer a pending human
+// permission request, and the pending request must stay answerable by a
+// real human surface afterwards.
+func TestACPHandler_ApproverGate_SelfApprovalRejected(t *testing.T) {
+	mgr, rl := acpEnabledRelayManager(t)
+	if _, err := rl.Register(acp.PendingPermission{ID: "perm-self", AgentID: "codex", SessionID: "s1"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	h := NewACPHandler(mgr)
+	srv := New(&Config{SocketPath: ""}, nil, nil)
+	h.RegisterACPMethods(srv)
+
+	// The agent answers its own request over the socket from a
+	// daemon-spawned process.
+	agentCtx := socketCtx(PeerIdentity{PID: 4242, UID: 501, HasPID: true, HasUID: true, SpawnedByDaemon: true})
+	_, err := srv.CallMethod(agentCtx, "acp.permissions.resolve",
+		json.RawMessage(`{"id":"perm-self","decision":"allow"}`))
+	if !errors.Is(err, ErrACPSelfApproval) {
+		t.Fatalf("resolve from daemon-spawned peer: err = %v, want ErrACPSelfApproval", err)
+	}
+
+	// The agent must not even see the pending id.
+	res, lErr := srv.CallMethod(agentCtx, "acp.permissions.list", json.RawMessage("{}"))
+	if lErr != nil {
+		t.Fatalf("list from daemon-spawned peer: %v", lErr)
+	}
+	got := mustACPPermissions(t, res)
+	if got.Enabled || len(got.Pending) != 0 {
+		t.Fatalf("list leaked to daemon-spawned peer: %+v, want disabled empty envelope", got)
+	}
+
+	// The relay is untouched: a human surface (non-daemon-spawned socket
+	// peer, e.g. the TUI) can still answer the SAME request.
+	humanSocket := socketCtx(PeerIdentity{PID: 999, UID: 501, HasPID: true, HasUID: true})
+	if _, err := srv.CallMethod(humanSocket, "acp.permissions.resolve",
+		json.RawMessage(`{"id":"perm-self","decision":"allow"}`)); err != nil {
+		t.Fatalf("human socket resolve after rejected self-approval: %v", err)
+	}
+}
+
+// TestACPHandler_ApproverGate_UnverifiablePeerFailsClosed pins the
+// fail-closed rule: a socket peer whose PID the platform cannot verify
+// (peercred stub / lookup failure) must not answer the human gate.
+func TestACPHandler_ApproverGate_UnverifiablePeerFailsClosed(t *testing.T) {
+	mgr, rl := acpEnabledRelayManager(t)
+	if _, err := rl.Register(acp.PendingPermission{ID: "perm-fc", AgentID: "codex", SessionID: "s1"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	h := NewACPHandler(mgr)
+	srv := New(&Config{SocketPath: ""}, nil, nil)
+	h.RegisterACPMethods(srv)
+
+	noPID := socketCtx(PeerIdentity{HasPID: false, HasUID: true, UID: 501})
+	_, err := srv.CallMethod(noPID, "acp.permissions.resolve",
+		json.RawMessage(`{"id":"perm-fc","decision":"allow"}`))
+	if !errors.Is(err, ErrACPSelfApproval) {
+		t.Fatalf("unverifiable peer resolve: err = %v, want ErrACPSelfApproval (fail closed)", err)
+	}
+}
+
+// TestACPHandler_ApproverGate_InProcessNeedsApprover pins the HTTP-dispatch
+// rule: an in-process caller (no socket peer) is rejected unless the
+// boundary attached an explicit acp.Approver — internal daemon code must
+// never answer the human gate silently, while the HTTP handler's
+// httpApprover attachment keeps the GUI/CLI path working.
+func TestACPHandler_ApproverGate_InProcessNeedsApprover(t *testing.T) {
+	mgr, rl := acpEnabledRelayManager(t)
+	if _, err := rl.Register(acp.PendingPermission{ID: "perm-ip", AgentID: "codex", SessionID: "s1"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	h := NewACPHandler(mgr)
+	srv := New(&Config{SocketPath: ""}, nil, nil)
+	h.RegisterACPMethods(srv)
+
+	// Bare in-process call (what daemon-internal code would do): rejected.
+	if _, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+		json.RawMessage(`{"id":"perm-ip","decision":"allow"}`)); !errors.Is(err, ErrACPSelfApproval) {
+		t.Fatalf("bare in-process resolve: err = %v, want ErrACPSelfApproval", err)
+	}
+
+	// Attributed in-process call (what the HTTP boundary does): allowed.
+	if _, err := srv.CallMethod(humanCtx(), "acp.permissions.resolve",
+		json.RawMessage(`{"id":"perm-ip","decision":"allow"}`)); err != nil {
+		t.Fatalf("attributed in-process resolve: %v", err)
+	}
+}
+
+// TestACPHandler_ApproverGate_EnforcementOff pins the documented escape
+// hatch: [acp] approver_identity="off" disables rejection but approvals
+// stay attributed.
+func TestACPHandler_ApproverGate_EnforcementOff(t *testing.T) {
+	mgr, rl := acpEnabledRelayManager(t)
+	if _, err := rl.Register(acp.PendingPermission{ID: "perm-off", AgentID: "codex", SessionID: "s1"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	h := NewACPHandler(mgr)
+	h.SetApproverEnforcement(false)
+	srv := New(&Config{SocketPath: ""}, nil, nil)
+	h.RegisterACPMethods(srv)
+
+	agentCtx := socketCtx(PeerIdentity{PID: 4242, UID: 501, HasPID: true, HasUID: true, SpawnedByDaemon: true})
+	if _, err := srv.CallMethod(agentCtx, "acp.permissions.resolve",
+		json.RawMessage(`{"id":"perm-off","decision":"allow"}`)); err != nil {
+		t.Fatalf("enforcement off: daemon-spawned resolve rejected: %v", err)
+	}
+	// Unattributed in-process also passes with the gate off.
+	if _, err := rl.Register(acp.PendingPermission{ID: "perm-off2", AgentID: "codex", SessionID: "s1"}); err != nil {
+		t.Fatalf("Register 2: %v", err)
+	}
+	if _, err := srv.CallMethod(context.Background(), "acp.permissions.resolve",
+		json.RawMessage(`{"id":"perm-off2","decision":"deny"}`)); err != nil {
+		t.Fatalf("enforcement off: bare in-process resolve rejected: %v", err)
 	}
 }

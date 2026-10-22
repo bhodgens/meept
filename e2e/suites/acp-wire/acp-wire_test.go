@@ -310,9 +310,10 @@ func TestACPWire_DecisionModeAllowDeny(t *testing.T) {
 // relay scenario: records publishes, always reports a listener (the test
 // resolves directly via the registry).
 type relayNotifier struct {
-	mu        sync.Mutex
-	requested int
-	resolved  int
+	mu           sync.Mutex
+	requested    int
+	resolved     int
+	lastApprover acp.Approver
 }
 
 func (n *relayNotifier) NotifyPermissionRequested(_ acp.PendingPermission) bool {
@@ -322,10 +323,11 @@ func (n *relayNotifier) NotifyPermissionRequested(_ acp.PendingPermission) bool 
 	return true
 }
 
-func (n *relayNotifier) NotifyPermissionResolved(_ acp.PendingPermission, _, _ string) {
+func (n *relayNotifier) NotifyPermissionResolved(_ acp.PendingPermission, _, _ string, approver acp.Approver) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.resolved++
+	n.lastApprover = approver
 }
 
 func (n *relayNotifier) counts() (requested, resolved int) {
@@ -984,5 +986,123 @@ func TestACPWire_FullStackDecisionEscalationToHuman(t *testing.T) {
 	}
 	if !strings.Contains(string(logBytes), "acp permission denied: decision layer unavailable") {
 		t.Fatalf("escalation cause WARN (decision layer unavailable) missing from daemon log:\n%s", logBytes)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// acp-wire-06 (audit M5): the self-approval attack, full stack. A daemon-
+// spawned ACP agent (the fakeagent in selfapprove mode) registers a human
+// permission request, then dials the DAEMON'S OWN unix RPC socket and tries
+// to answer it: acp.permissions.list (must hide the pending id) and
+// acp.permissions.resolve (must reject — the agent's kernel-verified peer
+// PID is a daemon descendant, so the approver gate classifies it as
+// agent-controlled). The probe result lands in a file the test polls; the
+// legit human path stays proven by LEG 2 of the WS/HTTP resolve scenario
+// above (a non-daemon-spawned socket peer resolves successfully).
+// ---------------------------------------------------------------------------
+
+func TestACPWire_SelfApprovalRejectedFullStack(t *testing.T) {
+	bin := stubAgentBin(t)
+	work := t.TempDir()
+	resultFile := filepath.Join(work, "probe-result.txt")
+
+	s := harness.Start(t,
+		harness.WithConfigOverlay(map[string]any{
+			"transport.http.websocket":           true,
+			"security.require_confirmation_high": false,
+			"acp": map[string]any{
+				"enabled":         true,
+				"permission_mode": "human",
+				"relay_timeout":   5,
+				"dial_timeout":    30,
+				"call_timeout":    60,
+				"max_agents":      2,
+				// The gate under test: enforce (also the default).
+				"approver_identity": "enforce",
+			},
+		}),
+		harness.WithPreBootHook(func(st *harness.Stack) error {
+			// The agent gets the daemon's socket path (known pre-boot)
+			// and the probe-result file. The JSON5 catalog carries them
+			// as plain argv strings.
+			catalog := `{"agents":[{"id":"self-approver","command":["` + bin +
+				`","-mode","selfapprove","-socket","` + st.SocketPath +
+				`","-result-file","` + resultFile + `"],"enabled":true}]}`
+			if err := os.WriteFile(filepath.Join(st.MeeptHome, "acp_agents.json5"), []byte(catalog), 0o600); err != nil {
+				return err
+			}
+			chatSpec := filepath.Join(st.MeeptHome, "agents", "chat", "AGENT.md")
+			data, err := os.ReadFile(chatSpec)
+			if err != nil {
+				return err
+			}
+			patched := strings.Replace(string(data),
+				"additional_tools:\n", "additional_tools:\n  - acp_agent\n", 1)
+			if patched == string(data) {
+				return errors.New("chat AGENT.md has no additional_tools block to extend")
+			}
+			return os.WriteFile(chatSpec, []byte(patched), 0o644)
+		}),
+	)
+
+	s.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"pinned chat for acp M5 gate"}`)
+	s.RegisterProject(t, "acp-m5-project")
+	sessionID := s.CreateSession(t, "acp-m5", s.ProjectDir)
+
+	// Launch the self-approving agent.
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "acp_agent",
+		Arguments: `{"agent":"self-approver","verb":"launch"}`,
+	})
+	s.ChatTurn(t, sessionID, "launch the self-approver external agent", 120*time.Second)
+
+	// Send: the agent registers a permission request and immediately
+	// probes the daemon socket from inside its own (daemon-spawned)
+	// process. The tool blocks until the relay times out (5 s).
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "acp_agent",
+		Arguments: `{"agent":"self-approver","verb":"send","message":"do the thing"}`,
+	})
+	turnDone := make(chan struct{})
+	go func() {
+		defer close(turnDone)
+		s.ChatTurn(t, sessionID, "ask self-approver to do the thing", 150*time.Second)
+	}()
+
+	// Poll the probe-result file (written BEFORE the agent drains the
+	// timeout reply, so it lands while the turn is still running).
+	deadline := time.Now().Add(90 * time.Second)
+	var probe string
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(resultFile); err == nil && len(b) > 0 {
+			probe = strings.TrimSpace(string(b))
+			break
+		}
+		select {
+		case <-turnDone:
+			if b, err := os.ReadFile(resultFile); err == nil {
+				probe = strings.TrimSpace(string(b))
+			}
+		case <-time.After(250 * time.Millisecond):
+		}
+		if probe != "" {
+			break
+		}
+	}
+	<-turnDone
+	if probe == "" {
+		t.Fatalf("no probe result within budget; daemon log tail:\n%s", s.Daemon.LogTail())
+	}
+
+	// The gate assertions: the pending id stayed hidden and the resolve
+	// was rejected as self-approval — never "OK-SELF-APPROVED".
+	if !strings.Contains(probe, "list=hidden") {
+		t.Errorf("probe = %q, want list=hidden (pending id must not be visible to a daemon-spawned caller)", probe)
+	}
+	if !strings.Contains(probe, "resolve=REJECTED") || !strings.Contains(probe, "self-approval") {
+		t.Errorf("probe = %q, want resolve=REJECTED with a self-approval reason", probe)
+	}
+	if strings.Contains(probe, "OK-SELF-APPROVED") {
+		t.Fatalf("SELF-APPROVAL SUCCEEDED — the audit-M5 gate did not fire: %q", probe)
 	}
 }

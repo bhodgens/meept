@@ -254,6 +254,34 @@ RPC equivalents: `acp.permissions.list` / `acp.permissions.resolve`. CLI:
 `meept acp permissions list [--json]` / `meept acp permissions resolve <id>
 allow|deny|always`.
 
+### Approver identity (self-approval gate)
+
+`acp.permissions.resolve` and `.list` are gated on caller identity (audit
+M5): a permission request is the *human* gate, so an agent must not be able
+to answer its own request.
+
+- **Socket callers** are identified by the kernel-verified peer PID
+  (`SO_PEERCRED` on Linux, `LOCAL_PEERPID` on macOS). At accept time the
+  daemon walks the peer's ancestor chain (`internal/process.IsDescendantOf`);
+  a peer that IS the daemon or a daemon descendant — every shell-tool child,
+  PTY session, and MCP stdio server — is rejected with `ErrACPSelfApproval`
+  and sees only the disabled/empty list envelope. Human surfaces (TUI,
+  menubar, GUI-over-RPC) are not daemon-spawned and pass. A peer whose PID
+  cannot be verified fails closed.
+- **HTTP callers** dispatch in-process (no socket peer), so the boundary
+  attaches an `acp.Approver` fingerprint: `http-key:<sha256 prefix>` (never
+  the raw key) or `http-anonymous:<remote addr>` for a `require_auth=false`
+  loopback deployment. An in-process caller with NO attached approver is
+  rejected — internal daemon code must never silently answer the gate.
+- **Attribution**: the resolved approver rides the relay decision into the
+  `permission_resolved` notification and the `acp.permission.resolved` bus
+  event (`approver` key, additive), so every approval records WHO answered.
+- **Config**: `[acp] approver_identity` = `""`/`"enforce"` (default, gate on)
+  or `"off"` (documented escape hatch; approvals stay attributed).
+
+Phase 2b (key-role gating: only `role: human` keys may resolve over HTTP) is
+spec'd in `docs/plans/2026-10-22-acp-approver-identity.md`.
+
 ## Edge Cases
 
 - Missing catalog file loads as empty, not an error.
