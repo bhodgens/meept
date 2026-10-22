@@ -217,11 +217,11 @@ func TestValidateTemplate(t *testing.T) {
 func TestNormalizeName(t *testing.T) {
 	// Valid inputs: input -> expected normalized path.
 	valid := map[string]string{
-		"interview":                 "planner/interview.md",
-		"planner/interview.md":      "planner/interview.md",
-		"orchestrator/split.md":     "orchestrator/split.md",
-		"/planner/foo.md":           "planner/foo.md",
-		"reflection/turn":           "reflection/turn.md",
+		"interview":             "planner/interview.md",
+		"planner/interview.md":  "planner/interview.md",
+		"orchestrator/split.md": "orchestrator/split.md",
+		"/planner/foo.md":       "planner/foo.md",
+		"reflection/turn":       "reflection/turn.md",
 	}
 	for input, want := range valid {
 		got, err := normalizeName(input)
