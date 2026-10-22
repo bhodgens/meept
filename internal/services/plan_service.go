@@ -120,7 +120,37 @@ func (s *PlanService) List(ctx context.Context, projectID string, limit int) ([]
 	if err != nil {
 		return nil, wrapError("plan", "List", err)
 	}
+	// Merge evolver sink plans so the HTTP surface sees the full set
+	// (mirrors rpc/plan.go handleList). Sink plans are project-less and
+	// only surface when no project filter is applied.
+	if s.fallbackStore != nil && projectID == "" {
+		if sinkPlans, sinkErr := s.fallbackStore.ListPlans(ctx, "", limit); sinkErr == nil {
+			plans = appendSessionLessSinkPlans(plans, sinkPlans)
+		}
+	}
 	return plans, nil
+}
+
+// appendSessionLessSinkPlans appends sink plans that belong to no session
+// (SourceSession == ""), deduplicating by plan ID. Mirrors the helper in
+// internal/rpc/plan.go (the two packages cannot share it without an import
+// cycle through services).
+func appendSessionLessSinkPlans(plans, sinkPlans []*plan.Plan) []*plan.Plan {
+	seen := make(map[string]struct{}, len(plans)+len(sinkPlans))
+	for _, p := range plans {
+		seen[p.ID] = struct{}{}
+	}
+	for _, p := range sinkPlans {
+		if p == nil || p.SourceSession != "" {
+			continue
+		}
+		if _, dup := seen[p.ID]; dup {
+			continue
+		}
+		seen[p.ID] = struct{}{}
+		plans = append(plans, p)
+	}
+	return plans
 }
 
 // ListBySession returns plans linked to a session.
@@ -134,6 +164,16 @@ func (s *PlanService) ListBySession(ctx context.Context, sessionID string) ([]*p
 	plans, err := s.store.ListPlansBySession(ctx, sessionID)
 	if err != nil {
 		return nil, wrapError("plan", "ListBySession", err)
+	}
+	// Merge pending session-less evolver sink plans (mirrors rpc/plan.go
+	// handleListBySession): they belong to no session, so the session
+	// filter alone left the GUI plans tab empty while notifications
+	// advertised it (observed live 2026-10-22). Only PENDING_APPROVAL
+	// merges — the state awaiting operator action.
+	if s.fallbackStore != nil {
+		if sinkPlans, sinkErr := s.fallbackStore.ListPlansByState(ctx, plan.StatePendingApproval, 1000); sinkErr == nil {
+			plans = appendSessionLessSinkPlans(plans, sinkPlans)
+		}
 	}
 	return plans, nil
 }

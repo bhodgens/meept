@@ -303,9 +303,44 @@ func (h *PlanHandler) handleListBySession(ctx context.Context, params json.RawMe
 	if err != nil {
 		return nil, err
 	}
+	// Merge pending evolver sink plans (plan-sink leaf 01): they are
+	// deliberately global operator-oversight items with no session link, so
+	// a session-filtered query alone made the plans tab EMPTY while chat
+	// notifications advertised "[5] plans tab to review" (observed live
+	// 2026-10-22). Only PENDING_APPROVAL sink plans merge — that is the
+	// state awaiting operator action; merging every state would surface the
+	// historical draft/backlog population and bury the tab.
+	if h.fallbackStore != nil {
+		sinkPlans, sinkErr := h.fallbackStore.ListPlansByState(ctx, plan.StatePendingApproval, 1000)
+		if sinkErr == nil {
+			plans = appendSessionLessSinkPlans(plans, sinkPlans)
+		}
+	}
 	return map[string]any{
 		"plans": plans,
 	}, nil
+}
+
+// appendSessionLessSinkPlans appends sink plans that belong to no session
+// (SourceSession == ""), deduplicating by plan ID against the already-listed
+// plans. Session-bound sink plans are NOT appended: a session filter must
+// keep its meaning.
+func appendSessionLessSinkPlans(plans, sinkPlans []*plan.Plan) []*plan.Plan {
+	seen := make(map[string]struct{}, len(plans)+len(sinkPlans))
+	for _, p := range plans {
+		seen[p.ID] = struct{}{}
+	}
+	for _, p := range sinkPlans {
+		if p == nil || p.SourceSession != "" {
+			continue
+		}
+		if _, dup := seen[p.ID]; dup {
+			continue
+		}
+		seen[p.ID] = struct{}{}
+		plans = append(plans, p)
+	}
+	return plans
 }
 
 func (h *PlanHandler) handleCountBySession(ctx context.Context, params json.RawMessage) (any, error) {

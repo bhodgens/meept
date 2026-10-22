@@ -219,3 +219,68 @@ func TestPlanHandler_ListNoProjectFilterReturnsSinkPlans(t *testing.T) {
 		t.Fatalf("project-filtered list returned %+v, want only the shared project plan", plansP)
 	}
 }
+
+// TestPlanHandler_ListBySessionMergesSessionLessSinkPlans pins the empty
+// plans-tab bug (observed live 2026-10-22): the TUI/GUI plans tab fetches
+// via plan.list_by_session, which queried ONLY the shared store. Evolver
+// sink plans are session-less by design, so the tab showed zero plans while
+// chat notifications advertised "[5] plans tab to review". Session-less sink
+// plans must now merge into the by-session listing; session-BOUND sink plans
+// for OTHER sessions must not.
+func TestPlanHandler_ListBySessionMergesSessionLessSinkPlans(t *testing.T) {
+	dir := t.TempDir()
+
+	sharedStore, err := plan.NewSQLiteStore(filepath.Join(dir, "shared.db"), slog.Default())
+	if err != nil {
+		t.Fatalf("shared store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sharedStore.Close(); err != nil {
+			t.Logf("shared store close: %v", err)
+		}
+	})
+	sinkStore, err := plan.NewSQLiteStore(filepath.Join(dir, "sink.db"), slog.Default())
+	if err != nil {
+		t.Fatalf("sink store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sinkStore.Close(); err != nil {
+			t.Logf("sink store close: %v", err)
+		}
+	})
+
+	ctx := context.Background()
+	sinkMgr := plan.NewPlanManager(sinkStore, nil, config.Config{}.Plans, stubSinkTaskCreator{}, slog.Default())
+
+	// Session-less evolver plan in the sink (what the evolver writes).
+	sinkPlan := &plan.Plan{ID: "plan-sink-evolver", Title: "Skill evolution: archive x", State: plan.StatePendingApproval}
+	if err := sinkStore.CreatePlan(ctx, sinkPlan); err != nil {
+		t.Fatalf("seed sink plan: %v", err)
+	}
+	// Session-bound sink plan for a DIFFERENT session: must not leak.
+	otherPlan := &plan.Plan{ID: "plan-sink-other", Title: "bound elsewhere", State: plan.StatePendingApproval, SourceSession: "session-other"}
+	if err := sinkStore.CreatePlan(ctx, otherPlan); err != nil {
+		t.Fatalf("seed bound sink plan: %v", err)
+	}
+
+	sharedMgr := plan.NewPlanManager(sharedStore, nil, config.Config{}.Plans, nil, slog.Default())
+	h := NewPlanHandler(sharedMgr, sharedStore)
+	h.SetEvolverSink(sinkMgr, sinkStore)
+
+	raw, err := h.handleListBySession(ctx, json.RawMessage(`{"session_id":"session-abc"}`))
+	if err != nil {
+		t.Fatalf("list_by_session: %v", err)
+	}
+	resp, _ := raw.(map[string]any)
+	plans, _ := resp["plans"].([]*plan.Plan)
+	ids := map[string]bool{}
+	for _, p := range plans {
+		ids[p.ID] = true
+	}
+	if !ids["plan-sink-evolver"] {
+		t.Errorf("session-less sink plan missing from list_by_session: got %v", ids)
+	}
+	if ids["plan-sink-other"] {
+		t.Errorf("sink plan bound to another session leaked into list_by_session: got %v", ids)
+	}
+}
