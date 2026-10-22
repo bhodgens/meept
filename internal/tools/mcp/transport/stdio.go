@@ -176,10 +176,39 @@ func (t *StdioTransport) drainStderr() {
 	}
 }
 
+// mcpLineCap bounds a single newline-delimited JSON-RPC frame read from the
+// MCP subprocess stdout. A hostile or buggy server that emits a frame longer
+// than this (or a newline-free flood) is terminated rather than OOMing the
+// relay goroutine via an unbounded ReadBytes. 32 MiB leaves generous headroom
+// for large tool-result payloads while capping the worst-case per-line memory.
+const mcpLineCap = 32 << 20
+
 // stdoutLine is delivered by relayStdout for each line read from the subprocess.
 type stdoutLine struct {
 	data []byte
 	err  error
+}
+
+// readBoundedLine reads from r up to and including the next '\n', or until
+// EOF, and stops at mcpLineCap bytes when no newline has been seen yet. It
+// mirrors bufio.Reader.ReadBytes('\n') for normal-sized lines (trailing
+// newline included) but returns a descriptive error instead of growing the
+// buffer without bound when a single line exceeds mcpLineCap.
+func readBoundedLine(r *bufio.Reader) ([]byte, error) {
+	buf := make([]byte, 0, 4096)
+	for len(buf) < mcpLineCap {
+		b, err := r.ReadByte()
+		if err != nil {
+			// io.EOF (or a real read error): return what we have. A clean
+			// EOF at a line boundary leaves buf empty, matching ReadBytes.
+			return buf, err
+		}
+		buf = append(buf, b)
+		if b == '\n' {
+			return buf, nil
+		}
+	}
+	return buf, fmt.Errorf("mcp stdout line exceeds cap of %d bytes", mcpLineCap)
 }
 
 // rpcEnvelope is a minimal JSON-RPC message used to extract the id and
@@ -216,7 +245,10 @@ func (t *StdioTransport) relayStdout() {
 	defer close(t.relayDone)
 
 	for {
-		line, err := t.stdout.ReadBytes('\n')
+		// readBoundedLine caps each frame at mcpLineCap so a hostile/flooding
+		// MCP server cannot OOM this goroutine via an unbounded ReadBytes. An
+		// over-long line surfaces as a terminal error on the next Send().
+		line, err := readBoundedLine(t.stdout)
 		if !t.running.Load() {
 			return
 		}

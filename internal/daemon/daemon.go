@@ -1368,6 +1368,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
 			httpCfg.RateLimitPerMinute = fullCfg.Transport.HTTP.RateLimitRPM
 			httpCfg.RateLimitBurst = fullCfg.Transport.HTTP.RateLimitBurst
+			httpCfg.TrustXForwardedFor = fullCfg.Transport.HTTP.TrustXForwardedFor
 			// Multi-user authentication (opt-in). Prefer the shared store
 			// constructed in NewComponents (single instance shared with
 			// cluster user pooling); fall back to opening one here only

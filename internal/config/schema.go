@@ -897,6 +897,11 @@ type HTTPTransportConfig struct {
 	MCPPath        string   `json:"mcp_path"      toml:"mcp_path"`            // MCP endpoint path
 	RateLimitRPM   int      `json:"rate_limit_rpm"  toml:"rate_limit_rpm"`    // Per-IP request rate limit (0 = default 120 req/min)
 	RateLimitBurst int      `json:"rate_limit_burst" toml:"rate_limit_burst"` // Per-IP burst size (0 = default 30)
+	// TrustXForwardedFor keys the per-IP rate limiter on X-Forwarded-For /
+	// X-Real-IP. Only true when the listener sits behind a trusted proxy that
+	// rewrites those headers; default false keys on RemoteAddr so a remote
+	// client cannot rotate limiter buckets by spoofing XFF.
+	TrustXForwardedFor bool `json:"trust_xff"        toml:"trust_xff"`
 }
 
 // ListenAddr returns the address the HTTP listener should bind.

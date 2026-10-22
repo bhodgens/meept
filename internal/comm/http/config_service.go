@@ -167,8 +167,31 @@ func (s *ConfigService) LoadClientConfig() (string, error) {
 	return string(data), nil
 }
 
+// ValidateConfigJSON5 rejects malformed JSON5 before a config file is
+// written, mirroring configCli.ValidateMainConfigJSON5 so the sibling
+// client/models config writes are as safe as the main-config write. An
+// empty/whitespace-only body is rejected (a config must carry a JSON5
+// object or array); the check is syntactic, not semantic.
+func ValidateConfigJSON5(content string) error {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return fmt.Errorf("config content is empty")
+	}
+	if _, err := hujson.Standardize([]byte(content)); err != nil {
+		return fmt.Errorf("invalid JSON5: %w", err)
+	}
+	return nil
+}
+
 // SaveClientConfig saves the client.json5 content.
 func (s *ConfigService) SaveClientConfig(content string) error {
+	// Reject malformed JSON5 before touching the filesystem so a bad write
+	// (auth-gated, reachable by any client holding a key) cannot clobber
+	// the client config.
+	if err := ValidateConfigJSON5(content); err != nil {
+		return fmt.Errorf("invalid client config JSON5: %w", err)
+	}
+
 	path := s.getClientConfigPath()
 
 	//nolint:gosec // user config directory/file permissions
@@ -251,6 +274,13 @@ func (s *ConfigService) LoadModelsConfig() (string, error) {
 
 // SaveModelsConfig saves the models.json5 content.
 func (s *ConfigService) SaveModelsConfig(content string) error {
+	// Reject malformed JSON5 before touching the filesystem so a bad write
+	// (auth-gated, reachable by any client holding a key) cannot clobber
+	// models.json5 — which carries provider endpoint + key references.
+	if err := ValidateConfigJSON5(content); err != nil {
+		return fmt.Errorf("invalid models config JSON5: %w", err)
+	}
+
 	path := s.getModelsConfigPath()
 
 	//nolint:gosec // user config directory/file permissions

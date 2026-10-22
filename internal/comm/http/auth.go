@@ -231,7 +231,13 @@ func (rl *rateLimiter) allow(ip string) bool {
 // RateLimitMiddleware creates middleware that rate limits requests per IP.
 // limitPerMinute = max requests per minute, burst = max burst size.
 // Example: 100 req/min with burst of 20 allows 20 rapid requests, then 100/min sustained.
-func RateLimitMiddleware(limitPerMinute int, burst int) func(http.Handler) http.Handler {
+//
+// trustXFF gates whether the X-Forwarded-For / X-Real-IP headers are used to
+// key the per-IP limiter. When false (the default) the limiter keys on
+// r.RemoteAddr only, so a remote client cannot rotate limiter buckets by
+// sending a random X-Forwarded-For on each request. Set true only when the
+// listener sits behind a trusted proxy that rewrites those headers.
+func RateLimitMiddleware(limitPerMinute int, burst int, trustXFF bool) func(http.Handler) http.Handler {
 	rl := newRateLimiter(float64(limitPerMinute)/60.0, burst)
 
 	return func(next http.Handler) http.Handler {
@@ -242,7 +248,7 @@ func RateLimitMiddleware(limitPerMinute int, burst int) func(http.Handler) http.
 				return
 			}
 
-			ip := extractClientIP(r)
+			ip := extractClientIP(r, trustXFF)
 			if !rl.allow(ip) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
@@ -258,21 +264,26 @@ func RateLimitMiddleware(limitPerMinute int, burst int) func(http.Handler) http.
 	}
 }
 
-// extractClientIP extracts the client IP from the request.
-// It checks X-Forwarded-For and X-Real-IP headers first (if behind a proxy),
-// then falls back to RemoteAddr.
-func extractClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header (can contain multiple IPs, first is the client)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
+// extractClientIP extracts the client IP from the request. When trustXFF is
+// true (behind a trusted proxy that rewrites the headers) it checks
+// X-Forwarded-For and X-Real-IP first; otherwise it falls back to RemoteAddr
+// only, so a remote client cannot spoof or rotate the IP.
+func extractClientIP(r *http.Request, trustXFF bool) string {
+	// Forwarded headers are attacker-controllable unless a trusted proxy is
+	// rewriting them; only consult them when explicitly opted in.
+	if trustXFF {
+		// Check X-Forwarded-For header (can contain multiple IPs, first is the client)
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			ips := strings.Split(xff, ",")
+			if len(ips) > 0 {
+				return strings.TrimSpace(ips[0])
+			}
 		}
-	}
 
-	// Check X-Real-IP header
-	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
-		return realIP
+		// Check X-Real-IP header
+		if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+			return realIP
+		}
 	}
 
 	// Fall back to RemoteAddr

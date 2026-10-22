@@ -75,6 +75,7 @@ type ServerConfig struct {
 	FingerprintFile         string                // Path to write cert fingerprint for client discovery
 	RateLimitPerMinute      int                   // Per-IP request rate limit (0 = default 120 req/min)
 	RateLimitBurst          int                   // Per-IP burst size (0 = default 30)
+	TrustXForwardedFor      bool                  // When true, key the per-IP rate limiter on X-Forwarded-For/X-Real-IP (only behind a trusted proxy); default false keys on RemoteAddr
 	AuthStore               AuthStore             // Multi-user auth store; nil = legacy single-key mode
 }
 
@@ -1862,7 +1863,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 	if burst <= 0 {
 		burst = 30
 	}
-	rateLimitMiddleware := RateLimitMiddleware(limitPerMinute, burst)
+	rateLimitMiddleware := RateLimitMiddleware(limitPerMinute, burst, s.config.TrustXForwardedFor)
 
 	// Create auth middleware: multi-user store-backed validation REPLACES
 	// the legacy flat-key path when an AuthStore is configured; otherwise

@@ -215,9 +215,21 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.listener = listener
 
-	// Set socket permissions
+	// Set socket permissions. A failed chmod on some filesystems (NFS, a
+	// strict-umask mount) silently leaves the socket group/other-readable,
+	// exposing the full owner-trusted JSON-RPC registry to other local users.
+	// Verify the resulting mode via stat and escalate to Error (not Warn) so
+	// a weakened socket is visible in logs. The UID-allowlist at the accept
+	// loop (allowedUIDs) is the enforcement; this is the detection layer.
 	if err := os.Chmod(s.socketPath, 0o600); err != nil {
-		s.logger.Warn("rpc: failed to set socket permissions", "error", err)
+		s.logger.Error("rpc: failed to set socket permissions 0600; socket may be over-permissive",
+			"socket", s.socketPath, "error", err)
+	}
+	if st, err := os.Stat(s.socketPath); err == nil {
+		if perm := st.Mode().Perm() & 0o077; perm != 0 {
+			s.logger.Error("rpc: socket has group/other access bits; not owner-only",
+				"socket", s.socketPath, "perm", fmt.Sprintf("0%o", st.Mode().Perm()))
+		}
 	}
 
 	s.running.Store(true)
