@@ -1888,9 +1888,12 @@ func (h *ChatHandler) formatTaskCompletedMessage(name string, steps []TaskStepSu
 			if step.State != "completed" && step.State != "approved" {
 				icon = "x"
 			}
-			fmt.Fprintf(&sb, "%d. [%s] %s\n", i+1, icon, strings.ToLower(step.Description))
+			fmt.Fprintf(&sb, "%d. [%s] %s\n", i+1, icon, strings.ToLower(StripPromptScaffolding(step.Description)))
 			if step.Result != "" {
-				resultPreview := truncateString(step.Result, 80)
+				// Strip the machine claims/evidence envelope before previewing
+				// so the user sees prose, not {"evidence":["job ... completed
+				// by agent coder:... (screenshot evidence 2026-10-22).
+				resultPreview := truncateString(StripClaimsEvidenceOrProse(step.Result), 80)
 				fmt.Fprintf(&sb, "   %s\n", resultPreview)
 			}
 		}
@@ -2083,7 +2086,7 @@ func (h *ChatHandler) FormatEnhancedAsyncTaskAck(
 		if agentLabel == "" {
 			agentLabel = "agent"
 		}
-		desc := truncateString(step.Description, 50)
+		desc := truncateString(StripPromptScaffolding(step.Description), 50)
 		fmt.Fprintf(&sb, "- %s (%s)\n", strings.ToLower(desc), agentLabel)
 	}
 

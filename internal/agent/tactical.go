@@ -3105,7 +3105,11 @@ func (ts *TacticalScheduler) buildResultSummary(steps []map[string]any) string {
 				sb.WriteString(", ")
 			}
 			desc := s["description"].(string)
-			sb.WriteString(truncateString(desc, 40))
+			// Strip injected prompt scaffolding (session-context block /
+			// "## Your Task") — this summary rides the task.completed
+			// payload into the user's chat reply, and step descriptions
+			// carry the strategic-planner injection (strategic.go).
+			sb.WriteString(truncateString(StripPromptScaffolding(desc), 40))
 			shown++
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -58,11 +59,19 @@ func WireMemoryCapture(
 	logger = logger.With("component", "memory-capture")
 	mc := &memoryCapture{
 		store:     store,
-		recorder:  recorder,
 		enqueuer:  enqueuer,
 		extractor: extractor,
 		logger:    logger,
 		seen:      newCaptureLRU(memoryCaptureLRUSize),
+	}
+	// Typed-nil guard: recorder is a CONCRETE *l0.Recorder, and assigning
+	// it straight into the l0Appender interface field boxes a nil pointer
+	// as a non-nil interface — mc.recorder != nil then passes and Append
+	// derefs nil on EVERY captured turn (observed live 2026-10-22:
+	// "memory capture panicked ... nil pointer dereference" per turn with
+	// l0_enabled=false). Only assign a non-nil recorder.
+	if recorder != nil {
+		mc.recorder = recorder
 	}
 	return bus.SubscribeT(b, "memory-capture", agent.TopicTurnTerminal, mc.handleEvent)
 }
@@ -110,7 +119,8 @@ func (mc *memoryCapture) capture(ev agent.TurnTerminalEvent) {
 	defer func() {
 		if r := recover(); r != nil {
 			mc.logger.Error("memory capture panicked",
-				"conversation_id", ev.ConversationID, "panic", r)
+				"conversation_id", ev.ConversationID, "panic", r,
+				"stack", string(debug.Stack()))
 		}
 	}()
 

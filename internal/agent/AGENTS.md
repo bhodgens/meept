@@ -71,6 +71,17 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
   only a second guard trip (or an errored retry) ships the canned
   line. The handler choke point (`handleChatRequest`) stays
   single-shot — it cannot continue a loop.
+- **Prompt scaffolding never renders to the user.** Step descriptions
+  carry the strategic planner's session-context injection
+  (`strategic.go`: `## Session context ...` block + `## Your Task`
+  header). Every user-facing render of a step — the task-completed
+  card (`formatTaskCompletedMessage`), the async ack's subtask list
+  (`FormatEnhancedAsyncTaskAck`), and the payload summary
+  (`tactical.buildResultSummary`) — passes descriptions through
+  `StripPromptScaffolding` and step results through
+  `StripClaimsEvidenceOrProse` (the machine `{"evidence":[...]}`
+  envelope is prose-recovered, never shown raw). Live defect
+  2026-10-22: both leaked into the chat reply verbatim.
 - **Completion events are deduplicated by queue-job state AND execution
   attempt.** Jobs keep the same ID across retry/requeue; `OnJobCompleted`
   drops a completion whose queue job is no longer
