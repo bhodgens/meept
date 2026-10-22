@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -282,5 +283,68 @@ func TestParseRewakePayload(t *testing.T) {
 func TestRewake_NoteWithoutHookName(t *testing.T) {
 	if got := rewakeNote(RewakePayload{SessionID: "s"}); got != rewakeNotePrefix {
 		t.Errorf("rewakeNote bare = %q, want prefix %q", got, rewakeNotePrefix)
+	}
+}
+
+// TestRewake_BufferFullEvictsOldest pins the overflow policy: when the
+// buffered channel is full, the consumer evicts the OLDEST signal and keeps
+// the newest, instead of dropping the newest (the pre-fix behavior observed
+// live 2026-10-22: an idle coder loop held stale signals forever while every
+// fresh scheduler rewake was lost with "wake buffer full, dropping signal").
+func TestRewake_BufferFullEvictsOldest(t *testing.T) {
+	loop := newRewakeTestLoop(t)
+	mb := loop.bus
+
+	// Publish more signals than the channel can hold.
+	total := rewakeChannelCapacity + 3
+	for i := 0; i < total; i++ {
+		publishRewake(t, mb, RewakePayload{
+			SessionID: "",
+			HookType:  "scheduler_job",
+			HookName:  fmt.Sprintf("sig-%02d", i),
+			Source:    "timer",
+		})
+	}
+
+	// Wait for the pump to settle: the channel should be full with the
+	// NEWEST signals (the oldest were evicted). The window is generous
+	// because the pump goroutine competes with the rest of the package's
+	// tests (and -race overhead) for CPU.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(loop.rewakeCh) == rewakeChannelCapacity {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := len(loop.rewakeCh); got != rewakeChannelCapacity {
+		t.Fatalf("channel length = %d, want %d (pump did not settle)", got, rewakeChannelCapacity)
+	}
+
+	// Drain and check: the last signal published must be present, and the
+	// first (oldest) must have been evicted.
+	var names []string
+	for p := range loop.rewakeCh {
+		names = append(names, p.HookName)
+		if len(names) == rewakeChannelCapacity {
+			break
+		}
+	}
+	newest := fmt.Sprintf("sig-%02d", total-1)
+	oldest := "sig-00"
+	foundNewest, foundOldest := false, false
+	for _, n := range names {
+		if n == newest {
+			foundNewest = true
+		}
+		if n == oldest {
+			foundOldest = true
+		}
+	}
+	if !foundNewest {
+		t.Errorf("newest signal %s was dropped; buffered = %v", newest, names)
+	}
+	if foundOldest {
+		t.Errorf("oldest signal %s survived eviction; buffered = %v", oldest, names)
 	}
 }

@@ -120,10 +120,32 @@ func (l *AgentLoop) rewakeConsumer(sub *bus.Subscriber) {
 		select {
 		case l.rewakeCh <- payload:
 		default:
-			l.logger.Warn("async rewake: wake buffer full, dropping signal",
-				"session_id", payload.SessionID,
-				"hook_type", payload.HookType,
-			)
+			// Buffer full: evict the OLDEST signal and enqueue the new
+			// one. Dropping the newest instead (the previous behavior)
+			// let an idle loop hold stale signals indefinitely while
+			// every fresh scheduler/hook rewake was lost — observed
+			// live 2026-10-22 as a repeating hourly pair of drop
+			// warnings on an idle coder loop. A rewake is advisory and
+			// recency is what matters: the next turn should see the
+			// LATEST completed-hook event, not one from weeks ago.
+			select {
+			case stale := <-l.rewakeCh:
+				l.logger.Debug("async rewake: buffer full, evicting oldest signal",
+					"evicted_session_id", stale.SessionID,
+					"evicted_hook_type", stale.HookType,
+				)
+			default:
+			}
+			select {
+			case l.rewakeCh <- payload:
+			default:
+				// Still full (concurrent drain raced us): drop the new
+				// signal rather than block the bus dispatch path.
+				l.logger.Warn("async rewake: wake buffer full, dropping signal",
+					"session_id", payload.SessionID,
+					"hook_type", payload.HookType,
+				)
+			}
 		}
 	}
 }
