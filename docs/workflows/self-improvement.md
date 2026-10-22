@@ -118,6 +118,8 @@ Scheduled every 6 hours (configurable). Four passes:
 
 Every proposal passes the four-dimension verifier (`grounded_in_evidence`, `preserves_existing_value`, `specificity_and_reusability`, `safe_to_publish`) before being applied or planned.
 
+When `auto_apply` is false, accepted proposals become plans at the human gate. Two guards keep that queue bounded: a proposal whose plan is already OPEN (pending_approval, approved, synthesizing, executing) is SKIPPED, not re-planned, so a proposal sitting at the gate across N cycles produces one plan, not N; and a hard ceiling (`maxPendingEvolverPlans`, 50) stops new plans once the pending queue is full, so a machine proposer can never bury the operator's approval surface. Both skips increment the cycle report's `skipped` count.
+
 ### Shadow Training Loop
 
 Continuous. Captures production LLM traffic, scores against a teacher model, and produces LoRA training pairs. Trained adapters pass an eval gate before being hot-swapped into the serving alias. See [Shadow Training](./shadow-training.md).
