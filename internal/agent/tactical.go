@@ -3066,10 +3066,16 @@ func (ts *TacticalScheduler) buildStepSummaries(taskID string) []map[string]any 
 	summaries := make([]map[string]any, len(allSteps))
 	for i, s := range allSteps {
 		summaries[i] = map[string]any{
-			"id":                  s.ID,
-			"description":         s.Description,
-			"state":               string(s.State),
-			"result":              truncateString(s.Result, 400),
+			"id":          s.ID,
+			"description": s.Description,
+			"state":       string(s.State),
+			// Full-result cap raised from 400 (2026-10-22): the 400-char
+			// truncation cut the deliverable itself — a completed review
+			// task's answer lives in this field, and the chat relay
+			// (formatTaskCompletedMessage) had nothing fuller to show.
+			// The event payload stays bounded; the chat card re-caps at
+			// 12000.
+			"result":              truncateString(s.Result, 12000),
 			KeyAgentID:            s.AgentID,
 			"accumulated_context": truncateString(s.AccumulatedContext, 200),
 		}

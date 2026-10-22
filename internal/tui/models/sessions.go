@@ -57,11 +57,6 @@ type SessionsModel struct {
 	showingHelp   bool
 }
 
-// detailGap is the horizontal space the sessions view leaves between the
-// table pane and the detail pane (each carries a one-cell border, so the
-// join needs no explicit gap).
-const detailGap = 4
-
 // SessionsRPCClient interface for the sessions model.
 type SessionsRPCClient interface {
 	Call(method string, params any) (json.RawMessage, error)

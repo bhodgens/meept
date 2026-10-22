@@ -1889,15 +1889,20 @@ func (h *ChatHandler) formatTaskCompletedMessage(name string, steps []TaskStepSu
 				icon = "x"
 			}
 			fmt.Fprintf(&sb, "%d. [%s] %s\n", i+1, icon, strings.ToLower(StripPromptScaffolding(step.Description)))
-			if step.Result != "" {
-				// Strip the machine claims/evidence envelope before previewing
-				// so the user sees prose, not {"evidence":["job ... completed
-				// by agent coder:... (screenshot evidence 2026-10-22).
-				resultPreview := truncateString(StripClaimsEvidenceOrProse(step.Result), 80)
-				fmt.Fprintf(&sb, "   %s\n", resultPreview)
-			}
 		}
 		sb.WriteString("\n")
+
+		// The deliverable is the answer itself, in full. Before
+		// 2026-10-22 this card showed only an 80-char result preview
+		// per step, so a completed review/analysis task displayed its
+		// verdict nowhere in chat and the user had no way to reach it
+		// (live defect: a full project review sat in task_steps.result
+		// while the reply showed a truncated evidence envelope).
+		// Pick the newest completed/approved step's prose (envelope
+		// stripped) and render it unbounded-but-capped.
+		if answer := bestSummaryResult(steps); answer != "" {
+			fmt.Fprintf(&sb, "**result:**\n\n%s\n\n", truncateString(answer, 12000))
+		}
 	} else {
 		fmt.Fprintf(&sb, "completed %d/%d steps successfully.\n\n", completed, total)
 	}
@@ -2098,6 +2103,33 @@ func (h *ChatHandler) FormatEnhancedAsyncTaskAck(
 	sb.WriteString("you will receive updates as subtasks complete.\n")
 
 	return sb.String()
+}
+
+// bestSummaryResult picks the user-facing answer from step summaries (the
+// task.completed relay shape): the LAST completed/approved step with
+// non-empty envelope-stripped prose, since summaries arrive in step order.
+// Falls back to the last non-empty stripped result of any state (an
+// errored step's text may still carry the partial answer).
+func bestSummaryResult(steps []TaskStepSummary) string {
+	best := ""
+	fallback := ""
+	for _, s := range steps {
+		if s.Result == "" {
+			continue
+		}
+		stripped := StripClaimsEvidenceOrProse(s.Result)
+		if stripped == "" {
+			continue
+		}
+		if s.State == "completed" || s.State == "approved" {
+			best = stripped
+		}
+		fallback = stripped
+	}
+	if best != "" {
+		return best
+	}
+	return fallback
 }
 
 // bestStepResult picks the user-facing reply from executed steps: the

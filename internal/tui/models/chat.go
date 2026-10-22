@@ -3023,6 +3023,25 @@ func parseTaskResult(reply string) *taskResultInfo {
 	}
 }
 
+// planCountLine renders the plan card's count row. A plan with no phases
+// and no steps is a document proposal (evolver skill plans are markdown
+// files awaiting approval — they never compile into phases), so it gets a
+// description instead of the misleading literal "0 phases · 0 steps".
+func planCountLine(phaseCount, stepCount int) string {
+	if phaseCount == 0 && stepCount == 0 {
+		return "document proposal · no executable steps"
+	}
+	phaseStr := fmt.Sprintf("%d phase", phaseCount)
+	if phaseCount != 1 {
+		phaseStr += "s"
+	}
+	stepStr := fmt.Sprintf("%d step", stepCount)
+	if stepCount != 1 {
+		stepStr += "s"
+	}
+	return phaseStr + " · " + stepStr
+}
+
 // renderPlanNotification renders a styled inline notification for plan lifecycle events.
 func (m *ChatModel) renderPlanNotification(msg PlanNotificationMsg) string {
 	title := msg.Title
@@ -3033,37 +3052,28 @@ func (m *ChatModel) renderPlanNotification(msg PlanNotificationMsg) string {
 
 	switch msg.State {
 	case "submitting":
-		phaseStr := fmt.Sprintf("%d phase", msg.PhaseCount)
-		if msg.PhaseCount != 1 {
-			phaseStr += "s"
-		}
-		stepStr := fmt.Sprintf("%d step", msg.StepCount)
-		if msg.StepCount != 1 {
-			stepStr += "s"
-		}
+		// Evolver-origin plans are DOCUMENT proposals (a markdown file
+		// awaiting approval) with no executable phases — the store's
+		// plan_phases table is empty for them. Rendering the literal
+		// counts made every evolver card read "0 phases · 0 steps",
+		// which users correctly interpret as "nothing is happening"
+		// (live complaint 2026-10-22). Say what the plan IS instead.
+		countLine := planCountLine(msg.PhaseCount, msg.StepCount)
 		return fmt.Sprintf("┌ plan ready for review ──────────────────────────┐\n"+
 			"│ Plan: \"%s\"\n"+
-			"│ %s · %s\n"+
+			"│ %s\n"+
 			"│ [5] plans tab to review  ·  /plan approve %s\n"+
 			"└─────────────────────────────────────────────────┘",
-			title, phaseStr, stepStr,
+			title, countLine,
 			types.TruncateString(msg.PlanID, 16))
 
 	case "completed":
-		phaseStr := fmt.Sprintf("%d phase", msg.PhaseCount)
-		if msg.PhaseCount != 1 {
-			phaseStr += "s"
-		}
-		stepStr := fmt.Sprintf("%d step", msg.StepCount)
-		if msg.StepCount != 1 {
-			stepStr += "s"
-		}
 		return fmt.Sprintf("┌ plan completed ─────────────────────────────────┐\n"+
 			"│ Plan: \"%s\"\n"+
-			"│ %s · %s · awaiting confirmation\n"+
+			"│ %s · awaiting confirmation\n"+
 			"│ [5] plans tab to confirm\n"+
 			"└─────────────────────────────────────────────────┘",
-			title, phaseStr, stepStr)
+			title, planCountLine(msg.PhaseCount, msg.StepCount))
 
 	case "confirmed":
 		confirmedBy := msg.By

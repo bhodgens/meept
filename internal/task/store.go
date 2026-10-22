@@ -87,6 +87,7 @@ func (s *Store) migrate() error {
 		completed_jobs INTEGER DEFAULT 0,
 		failed_jobs    INTEGER DEFAULT 0,
 		created_at     TEXT NOT NULL,
+		started_at     TEXT,
 		updated_at     TEXT NOT NULL,
 		memory_refs       TEXT,
 		context_query     TEXT,
@@ -128,6 +129,12 @@ func (s *Store) migrate() error {
 		// Goal linkage (goal-completion leaf 02, C3): every task traces to
 		// its owning goal. Legacy rows keep NULL goal_id, which scans to "".
 		"ALTER TABLE tasks ADD COLUMN goal_id TEXT",
+		// Execution start stamp ("completed in 0s" defect, 2026-10-22):
+		// SetState sets StartedAt on pending→active, but the store never
+		// persisted it — the finalize path re-reads the task, StartedAt
+		// came back zero, and task.completed carried execution_time "0s"
+		// for a 35s job. Legacy rows keep NULL (scan to zero time).
+		"ALTER TABLE tasks ADD COLUMN started_at TEXT",
 	}
 
 	for _, m := range migrations {
@@ -151,9 +158,9 @@ func (s *Store) Create(task *Task) error {
 	_, err := s.db.Exec(`
 		INSERT INTO tasks (id, name, description, project_dir, workspace_dir, state,
 		                   git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
-		                   failed_jobs, created_at, updated_at, memory_refs, context_query,
+		                   failed_jobs, created_at, started_at, updated_at, memory_refs, context_query,
 		                   inherited_from, created_memories, assigned_agent, token_usage, goal_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.ID,
 		task.Name,
 		nullableString(task.Description),
@@ -167,6 +174,7 @@ func (s *Store) Create(task *Task) error {
 		task.CompletedJobs,
 		task.FailedJobs,
 		task.CreatedAt.Format(time.RFC3339),
+		nullableTimeString(task.StartedAt),
 		task.UpdatedAt.Format(time.RFC3339),
 		nullableString(memoryRefsJSON),
 		nullableString(task.ContextQuery),
@@ -191,7 +199,7 @@ func (s *Store) GetByID(id string) (*Task, error) {
 	row := s.db.QueryRow(`
 		SELECT id, name, description, project_dir, workspace_dir, state,
 		       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
-		       failed_jobs, created_at, updated_at, memory_refs, context_query,
+		       failed_jobs, created_at, started_at, updated_at, memory_refs, context_query,
 		       inherited_from, created_memories, assigned_agent, token_usage, goal_id
 		FROM tasks WHERE id = ?`, id)
 
@@ -241,7 +249,7 @@ func (s *Store) Update(task *Task) error {
 		UPDATE tasks
 		SET name = ?, description = ?, project_dir = ?, workspace_dir = ?, state = ?,
 		    git_repo = ?, memvid_zone = ?, metadata = ?, total_jobs = ?,
-		    completed_jobs = ?, failed_jobs = ?, updated_at = ?,
+		    completed_jobs = ?, failed_jobs = ?, updated_at = ?, started_at = COALESCE(?, started_at),
 		    memory_refs = ?, context_query = ?, inherited_from = ?,
 		    created_memories = ?, assigned_agent = ?, token_usage = ?, goal_id = ?
 		WHERE id = ?`,
@@ -257,6 +265,7 @@ func (s *Store) Update(task *Task) error {
 		task.CompletedJobs,
 		task.FailedJobs,
 		now,
+		nullableTimeString(task.StartedAt),
 		nullableString(memoryRefsJSON),
 		nullableString(task.ContextQuery),
 		nullableString(task.InheritedFrom),
@@ -294,7 +303,7 @@ func (s *Store) UpdateWithoutCounters(task *Task) error {
 	_, err := s.db.Exec(`
 		UPDATE tasks
 		SET name = ?, description = ?, project_dir = ?, workspace_dir = ?, state = ?,
-		    git_repo = ?, memvid_zone = ?, metadata = ?, updated_at = ?,
+		    git_repo = ?, memvid_zone = ?, metadata = ?, updated_at = ?, started_at = COALESCE(?, started_at),
 		    memory_refs = ?, context_query = ?, inherited_from = ?,
 		    created_memories = ?, assigned_agent = ?, token_usage = ?, goal_id = ?
 		WHERE id = ?`,
@@ -307,6 +316,7 @@ func (s *Store) UpdateWithoutCounters(task *Task) error {
 		nullableString(task.MemvidZone),
 		metadataJSON,
 		now,
+		nullableTimeString(task.StartedAt),
 		nullableString(memoryRefsJSON),
 		nullableString(task.ContextQuery),
 		nullableString(task.InheritedFrom),
@@ -449,7 +459,7 @@ func (s *Store) List(state *TaskState, limit int) ([]*Task, error) {
 		rows, err = s.db.Query(`
 			SELECT id, name, description, project_dir, workspace_dir, state,
 			       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
-			       failed_jobs, created_at, updated_at, memory_refs, context_query,
+			       failed_jobs, created_at, started_at, updated_at, memory_refs, context_query,
 			       inherited_from, created_memories, assigned_agent, token_usage, goal_id
 			       FROM tasks
 			       WHERE state = ?
@@ -459,7 +469,7 @@ func (s *Store) List(state *TaskState, limit int) ([]*Task, error) {
 		rows, err = s.db.Query(`
 			SELECT id, name, description, project_dir, workspace_dir, state,
 			       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
-			       failed_jobs, created_at, updated_at, memory_refs, context_query,
+			       failed_jobs, created_at, started_at, updated_at, memory_refs, context_query,
 			       inherited_from, created_memories, assigned_agent, token_usage, goal_id
 			       FROM tasks
 			       ORDER BY updated_at DESC
@@ -503,7 +513,7 @@ func (s *Store) ListActive() ([]*Task, error) {
 	rows, err := s.db.Query(`
 		SELECT id, name, description, project_dir, workspace_dir, state,
 		       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
-		       failed_jobs, created_at, updated_at, memory_refs, context_query,
+		       failed_jobs, created_at, started_at, updated_at, memory_refs, context_query,
 		       inherited_from, created_memories, assigned_agent, token_usage, goal_id
 		       FROM tasks
 		       WHERE state IN ('pending', 'planning', 'executing', 'testing')
@@ -588,7 +598,7 @@ func (s *Store) GetTasksForSession(sessionID string) ([]*Task, error) {
 	rows, err := s.db.Query(`
 		SELECT t.id, t.name, t.description, t.project_dir, t.workspace_dir, t.state,
 		       t.git_repo, t.memvid_zone, t.metadata, t.total_jobs, t.completed_jobs,
-		       t.failed_jobs, t.created_at, t.updated_at, t.memory_refs, t.context_query,
+		       t.failed_jobs, t.created_at, t.started_at, t.updated_at, t.memory_refs, t.context_query,
 		       t.inherited_from, t.created_memories, t.assigned_agent, t.token_usage, t.goal_id
 		FROM tasks t
 		JOIN session_tasks st ON t.id = st.task_id
@@ -638,6 +648,7 @@ func (s *Store) scanTask(row *sql.Row) (*Task, error) {
 		totalJobs, completedJobs int
 		failedJobs, tokenUsage   int
 		createdAt, updatedAt     string
+		startedAt                sql.NullString
 		memoryRefs, contextQuery sql.NullString
 		inheritedFrom            sql.NullString
 		createdMemories          sql.NullString
@@ -646,7 +657,7 @@ func (s *Store) scanTask(row *sql.Row) (*Task, error) {
 
 	err := row.Scan(&id, &name, &description, &projectDir, &workspaceDir, &state,
 		&gitRepo, &memvidZone, &metadata, &totalJobs, &completedJobs,
-		&failedJobs, &createdAt, &updatedAt, &memoryRefs, &contextQuery,
+		&failedJobs, &createdAt, &startedAt, &updatedAt, &memoryRefs, &contextQuery,
 		&inheritedFrom, &createdMemories, &assignedAgent, &tokenUsage, &goalID)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -657,7 +668,7 @@ func (s *Store) scanTask(row *sql.Row) (*Task, error) {
 
 	return s.buildTask(id, name, state, description, projectDir, workspaceDir,
 		gitRepo, memvidZone, metadata, totalJobs, completedJobs, failedJobs, tokenUsage,
-		createdAt, updatedAt, memoryRefs, contextQuery, inheritedFrom,
+		createdAt, startedAt, updatedAt, memoryRefs, contextQuery, inheritedFrom,
 		createdMemories, assignedAgent, goalID)
 }
 
@@ -670,6 +681,7 @@ func (s *Store) scanTaskRows(rows *sql.Rows) (*Task, error) {
 		totalJobs, completedJobs int
 		failedJobs, tokenUsage   int
 		createdAt, updatedAt     string
+		startedAt                sql.NullString
 		memoryRefs, contextQuery sql.NullString
 		inheritedFrom            sql.NullString
 		createdMemories          sql.NullString
@@ -678,7 +690,7 @@ func (s *Store) scanTaskRows(rows *sql.Rows) (*Task, error) {
 
 	err := rows.Scan(&id, &name, &description, &projectDir, &workspaceDir, &state,
 		&gitRepo, &memvidZone, &metadata, &totalJobs, &completedJobs,
-		&failedJobs, &createdAt, &updatedAt, &memoryRefs, &contextQuery,
+		&failedJobs, &createdAt, &startedAt, &updatedAt, &memoryRefs, &contextQuery,
 		&inheritedFrom, &createdMemories, &assignedAgent, &tokenUsage, &goalID)
 	if err != nil {
 		return nil, err
@@ -686,14 +698,14 @@ func (s *Store) scanTaskRows(rows *sql.Rows) (*Task, error) {
 
 	return s.buildTask(id, name, state, description, projectDir, workspaceDir,
 		gitRepo, memvidZone, metadata, totalJobs, completedJobs, failedJobs, tokenUsage,
-		createdAt, updatedAt, memoryRefs, contextQuery, inheritedFrom,
+		createdAt, startedAt, updatedAt, memoryRefs, contextQuery, inheritedFrom,
 		createdMemories, assignedAgent, goalID)
 }
 
 func (s *Store) buildTask(id, name, state string,
 	description, projectDir, workspaceDir, gitRepo, memvidZone, metadata sql.NullString,
 	totalJobs, completedJobs, failedJobs, tokenUsage int,
-	createdAt, updatedAt string,
+	createdAt string, startedAt sql.NullString, updatedAt string,
 	memoryRefs, contextQuery, inheritedFrom, createdMemories, assignedAgent, goalID sql.NullString) (*Task, error) {
 
 	task := &Task{
@@ -746,6 +758,11 @@ func (s *Store) buildTask(id, name, state string,
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		task.CreatedAt = t
 	}
+	if startedAt.Valid {
+		if t, err := time.Parse(time.RFC3339, startedAt.String); err == nil {
+			task.StartedAt = t
+		}
+	}
 	if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
 		task.UpdatedAt = t
 	}
@@ -758,6 +775,15 @@ func nullableString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullableTimeString formats a time for a nullable column; the zero time
+// stores NULL (legacy rows and not-yet-started tasks).
+func nullableTimeString(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t.Format(time.RFC3339)
 }
 
 // encodeStringSlice encodes a string slice as JSON.
