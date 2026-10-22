@@ -282,6 +282,92 @@ to answer its own request.
 Phase 2b (key-role gating: only `role: human` keys may resolve over HTTP) is
 spec'd in `docs/plans/2026-10-22-acp-approver-identity.md`.
 
+## Personas and agent-definition executors (design, landing in waves)
+
+Status: the persona lane and the `executor: acp` agent-definition branch are
+DESIGN-STAGE, spec'd and approved in
+[acp-employees.md](acp-employees.md) (decisions, phases, security analysis,
+evidence — that doc is the authority). The pieces below land in code waves;
+this section is the doc-side contract. What is ALREADY SHIPPED: the 9-entry
+default ACP agent catalog (`config/acp_agents.json5`, commit 13eb1c63) — the
+client, permission modes (permissive/deny/decision/human relay), approver
+identity, and the `acp_agent` tool as documented above.
+
+### The persona concept
+
+N named personas share ONE catalog entry. Each persona is its own subprocess
+session with its own argv tail (`command_args`, e.g. `-p <profile>` for a
+hermes persona) and its own permission mode. The catalog entry stays generic
+(one `hermes` entry, command `["hermes", "acp"]`); personas are defined by
+the agent definitions that reference it. "have bob check that issue" routes
+by agent name through the existing dispatcher — bob IS an agent definition
+(`config/agents/bob/AGENT.md`), appears in `agents list`, the TUI roster, and
+the GUI agents tab with no surface changes. A copy-pasteable example lives at
+`docs/examples/agents/bob-acp-hermes/AGENT.md`.
+
+### Agent-definition shape (`executor: acp`)
+
+Frontmatter (verbatim from the spec):
+
+```yaml
+id: bob
+name: bob
+role: executor
+executor: acp
+acp:
+  agent: hermes          # catalog id in acp_agents.json5
+  persona: bob           # session key; multi-session lane (dim 2B)
+  command_args: ["-p", "borg"]   # argv appended after the catalog command
+  permission_mode: human # optional override of [acp] permission_mode
+  decision_threshold: 0.7 # optional, only with permission_mode: decision
+```
+
+The fields flow through a 5-step pipeline (`AgentMetadata` →
+`parseMetadata` altMeta merge for underscore keys → `AgentSpec` →
+`definitionToSpec` → `mergeSpec`); skipping any step silently drops the
+field — see the spec's "Field pipeline" section. When
+`spec.Executor == "acp"`, the agent loop routes the turn to an `ACPExecutor`
+instead of the LLM `reasoningCycle` (wave 2; final agent text still passes
+the same output path — reply guard, scaffolding strip, filter chain).
+
+`command_args` is OPERATOR-AUTHORED config — same trust class as `command`
+in `acp_agents.json5`, never model-writable. Agent definitions are
+operator-only files.
+
+### `GetOrCreatePersona` contract (Manager multi-session lane)
+
+- New method: `GetOrCreatePersona(ctx, agentID, persona string, opts
+  PersonaOpts) (*Session, error)`. `PersonaOpts` carries CommandArgs
+  (appended to `entry.Command` at spawn), a PermissionMode override, a
+  DecisionThreshold override, and a Cwd override.
+- Session key becomes the composite `agentID + "\x00" + persona` in both
+  `m.sessions` and `m.pending`.
+- Back-compat: `GetOrCreate(ctx, agentID, workdir)` (no persona) keeps
+  working — it delegates with persona `""` and the key `agentID + "\x00"`,
+  so existing callers and tests see identical behavior. Every
+  permissive/deny `SessionConfig` without a persona stays byte-identical.
+- `SessionConfig` gains `Persona string` and `CommandArgs []string`.
+- `MaxAgents` now counts persona sessions (it already counts map entries;
+  the semantics widen). A runaway roster of 50 bobs hits `ErrMaxAgents`,
+  not fork-bomb.
+
+### Relay persona attribution
+
+`PendingPermission.AgentID` stays the catalog id; the struct gains
+`Persona string` so the human relay UI shows `hermes/bob`, not bare
+`hermes`. `renderDecisionState` includes the persona. Bus/WS session events
+gain the persona field additively; existing consumers ignore unknown fields.
+
+### Per-agent `permission_mode` override precedence
+
+Precedence: agent-definition `acp.permission_mode` (frontmatter) >
+`[acp] permission_mode` (global config fallback). The override flows through
+`PersonaOpts` into `SessionConfig.PermissionMode`; the decision/relay lane
+stamps follow the existing conditional-stamp rule (decision seam only in
+decision mode, relay only in human mode or decision+escalate). Kill switch
+unchanged: `[acp] enabled = false` disables every persona; per-entry
+`enabled: false` disables a catalog agent and every persona on it.
+
 ## Edge Cases
 
 - Missing catalog file loads as empty, not an error.
