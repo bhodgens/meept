@@ -1,0 +1,34 @@
+{
+  "findings": [
+    {
+      "severity": "HIGH",
+      "location": "internal/tools/mcp/transport/stdio.go:74-153",
+      "mechanism": "Subprocess leak on partial Start() failure: cmd.Start() succeeds but t.running is set after, leaving a window where a panic in relay goroutines could orphan the subprocess without Close() being called.",
+      "test": "go test -run TestStdioTransport_StartFailure ./internal/tools/mcp/transport/... and check for orphaned processes",
+      "evidence": "SOURCE -- stdio.go:129-142 shows cmd.Start() precedes t.running.Store(true)"
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "internal/tools/builtin/shell.go:402-409",
+      "mechanism": "working_dir path traversal not blocked when fenceChecker is nil: resolvePath returns absolute path but no containment check runs if fenceChecker is unconfigured.",
+      "test": "Call ShellExecuteTool.Execute with working_dir: \"../../\" and verify fence checker invocation",
+      "evidence": "SOURCE -- shell.go:402-409 shows resolvePath called, then fenceChecker check at line 412; if nil, no containment validation"
+    },
+    {
+      "severity": "LOW",
+      "location": "internal/tools/registry.go:565-630",
+      "mechanism": "ExecuteWithRetry masks non-retryable errors with 'unknown error during tool execution' when result.Success is false but err is nil.",
+      "test": "Register tool returning ToolResult{Success: false, Error: 'specific failure'} and call ExecuteWithRetry; error message will be generic",
+      "evidence": "SOURCE -- registry.go:576-587 shows lastErr set to generic message when result.Success is false"
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "internal/tools/mcp/client.go:233-321",
+      "mechanism": "MCP tool response content not tainted: CallTool returns success result without taint.TaintExternal label, treating MCP server output as trusted.",
+      "test": "Connect malicious MCP server returning injected instructions; verify agent treats content as trusted",
+      "evidence": "SOURCE -- client.go:316-321 shows NewSuccessResult(resultText) with no taint labeling"
+    }
+  ],
+  "gates_run": "go build ./internal/tools/...; go build ./internal/agent/...; go build ./internal/skills/...; go vet ./internal/tools/...; go vet ./internal/agent/...",
+  "report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-15-wave/05-tools.md"
+}

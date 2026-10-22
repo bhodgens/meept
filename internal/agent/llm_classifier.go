@@ -35,6 +35,13 @@ const (
 	// defaultUnavailableCooldown is how long the classifier treats the endpoint
 	// as unavailable after a failure, before retrying.
 	defaultUnavailableCooldown = 60 * time.Second
+	// defaultClassifierBootWait bounds how long a classification call
+	// waits for the F-D8 boot gate during the startup window before
+	// proceeding to the ordinary attempt/degrade path. It covers the
+	// observed boot window (chat accepted ~44s post-start while the
+	// classifier runtimes took up to ~74s to answer) without becoming an
+	// unbounded stall; the caller's context still caps the wait.
+	defaultClassifierBootWait = 90 * time.Second
 )
 
 // classifierLanes is the single source of truth for the intents the LLM
@@ -338,6 +345,16 @@ type LLMClassifier struct {
 	// scopeProvider, when set, supplies the owning loop's task/session
 	// scope for classification LLM calls (leaf 01 session-affinity).
 	scopeProvider chatScopeProvider
+
+	// bootReadiness, when set, carries the daemon's F-D8 classifier
+	// boot-gate outcome (see classifier_boot_readiness.go). Classification
+	// calls arriving while the gate is still open wait — bounded by
+	// bootWait and the caller's context — for the gate to resolve instead
+	// of dialing a runtime that is still spawning and silently degrading
+	// to keyword routing (plus arming the 60s unavailability cooldown)
+	// for the whole boot window.
+	bootReadiness *ClassifierBootReadiness
+	bootWait      time.Duration
 }
 
 // atomicBool is a sync-compatible boolean backed by atomic.Int32.
@@ -381,6 +398,21 @@ type LLMClassifierConfig struct {
 	// ScopeProvider, when set, supplies the owning loop's task/session
 	// scope for classification LLM calls (leaf 01 session-affinity).
 	ScopeProvider chatScopeProvider
+
+	// BootReadiness, when set, makes classification calls wait (bounded by
+	// BootWait, then by the call context) for the daemon's F-D8 classifier
+	// boot gate to resolve before dialing the classifier endpoint. This
+	// closes the boot-window misroute defect: chat.submit is accepted
+	// before the local classifier runtimes are healthy, and a classify
+	// call inside that window used to fail, arm the unavailability
+	// cooldown, and silently degrade the turn to keyword routing.
+	BootReadiness *ClassifierBootReadiness
+	// BootWait bounds the BootReadiness wait (default
+	// defaultClassifierBootWait). It is a LATENCY CAP for turns that
+	// arrive during boot, not the gate window itself: on expiry the call
+	// proceeds through the ordinary attempt/degrade path, so a wait can
+	// never hard-fail a turn.
+	BootWait time.Duration
 }
 
 func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifier {
@@ -393,6 +425,10 @@ func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifi
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = defaultClassifierTimeout
+	}
+	bootWait := cfg.BootWait
+	if bootWait <= 0 {
+		bootWait = defaultClassifierBootWait
 	}
 	return &LLMClassifier{
 		client:   cfg.Client,
@@ -411,6 +447,9 @@ func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifi
 		scopeProvider: cfg.ScopeProvider,
 
 		servedModel: resolvedModelID(cfg.ModelConfig),
+
+		bootReadiness: cfg.BootReadiness,
+		bootWait:      bootWait,
 	}
 }
 
@@ -459,6 +498,8 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	if c.client == nil {
 		return nil, fmt.Errorf("LLM classifier: no client configured")
 	}
+
+	c.awaitBootReadiness(ctx)
 
 	// Check if we've cached an "unavailable" status and haven't yet exceeded
 	// the cooldown window. With resolver failover configured, the cooldown
@@ -600,6 +641,8 @@ func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemo
 		return nil
 	}
 
+	c.awaitBootReadiness(ctx)
+
 	// Check cooldown before attempting per-request classification.
 	if c.unavailable.Load() {
 		c.unavailMu.RLock()
@@ -687,6 +730,32 @@ func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemo
 	}
 
 	return intents
+}
+
+// awaitBootReadiness blocks — bounded by c.bootWait and ctx — while the
+// daemon's F-D8 classifier boot gate is still resolving, so a chat submitted
+// inside the boot window is classified by a healthy runtime instead of
+// silently degrading to keyword routing. It never fails a call: on gate
+// failure, wait expiry, or context cancellation the caller proceeds through
+// the ordinary attempt path (which may degrade as before). Steady state
+// (gate resolved or no signal wired) costs one non-blocking channel read.
+func (c *LLMClassifier) awaitBootReadiness(ctx context.Context) {
+	awaitClassifierBoot(ctx, c.logger, c.bootReadiness, c.bootWait, "llm-classifier")
+}
+
+// SetBootReadiness wires the daemon's F-D8 classifier boot-gate signal onto
+// an already-constructed classifier (the daemon creates the dispatcher in
+// NewComponents, before Run() knows the gate outcome). Nil is a no-op per
+// the repo's setter nil-guard rule; the wait bound falls back to
+// defaultClassifierBootWait when unset.
+func (c *LLMClassifier) SetBootReadiness(b *ClassifierBootReadiness) {
+	if c == nil || b == nil {
+		return
+	}
+	c.bootReadiness = b
+	if c.bootWait <= 0 {
+		c.bootWait = defaultClassifierBootWait
+	}
 }
 
 // MarkUnavailable explicitly sets the classifier as unavailable, preventing

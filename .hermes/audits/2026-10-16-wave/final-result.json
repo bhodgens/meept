@@ -1,0 +1,8 @@
+{
+  "status": "fixed",
+  "files_changed": [
+    "internal/auditlog/chain.go",
+    "internal/auditlog/chain_test.go"
+  ],
+  "report_path": ".hermes/audits/2026-10-16-wave/fix-auditlog.md"
+}

@@ -1,0 +1,1 @@
+{"files_changed": ["ui/flutter_ui/lib/core/slash_commands.dart"], "gates_run": "dart analyze lib/core/slash_commands.dart (clean, exit 0)", "report_path": ".hermes/audits/2026-10-16-wave/fix-flutter-parity.md", "status": "fixed"}

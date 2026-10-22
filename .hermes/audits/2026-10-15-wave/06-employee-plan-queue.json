@@ -1,0 +1,48 @@
+{
+  "report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-15-wave/06-employee-plan-queue.md",
+  "findings": [
+    {
+      "location": "internal/plan/manager.go:142-160",
+      "mechanism": "StateSynthesizing is a LEASE STATE. Plans claimed into it with an EXPIRED lease are reclaimed by SynthesisReclaimer. Without this recovery driver, StateSynthesizing is a terminal sink.",
+      "severity": "MEDIUM",
+      "test": "Verify that SynthesisReclaimer.ReclaimExpiredSynthesis is called in Manager.SynthesizeRecovery and transitions expired StateSynthesizing plans back to StateDraft.",
+      "evidence": "Source code at internal/plan/manager.go:159 calls ListPlansByState(ctx, StateSynthesizing, ...) and store.ReclaimExpiredSynthesis(ctx, id)."
+    },
+    {
+      "location": "internal/worker/worker.go:422-433",
+      "mechanism": "The worker checks llm.IsNonRetryable(processErr) before retrying. Non-retryable errors go directly to dead letter. Retry is attempt-aware via claim_token.",
+      "severity": "LOW",
+      "test": "Verify that llm.IsNonRetryable correctly identifies quota/block errors and that queue.Retry is not called for those errors.",
+      "evidence": "Source code at internal/worker/worker.go:424-428 logs 'Non-retryable error - skipping retry' and skips the job.CanRetry() branch."
+    },
+    {
+      "location": "internal/employee/goal_loop.go:1125-1183",
+      "mechanism": "runCompletionGate executes cfg.Command via backend.Execute. The command is config-driven from GateConfig, which allows arbitrary shell commands. If config is user-editable, this is a command injection risk.",
+      "severity": "MEDIUM",
+      "test": "Verify that GateConfig.Command is validated/sanitized before execution, or that only whitelisted commands are allowed.",
+      "evidence": "Source code at internal/gate/gate.go:150-154 calls backend.Execute(ctx, runtime.Command{Cmd: cfg.Command, ...}) with no validation."
+    },
+    {
+      "location": "internal/gate/gate.go:159-162",
+      "mechanism": "GateResult.Passed is true iff res.ExitCode == 0. The outcome is correctly mapped to the gate result.",
+      "severity": "LOW",
+      "test": "Verify that a gate command exiting with code 1 results in Passed: false and that this triggers the GoalAtRisk health transition in goal_loop.go:1044-1053.",
+      "evidence": "Source code at internal/gate/gate.go:160 sets Passed: res.ExitCode == 0."
+    },
+    {
+      "location": "internal/employee/goal_loop.go:913-935",
+      "mechanism": "When statusFn() returns 'paused', Reflect is skipped. The goal health is set to GoalUnknown. This prevents progress while paused.",
+      "severity": "LOW",
+      "test": "Verify that a paused employee's goal health transitions to GoalUnknown and that no LLM calls are made during Reflect.",
+      "evidence": "Source code at internal/employee/goal_loop.go:914-934 checks statusFn() and returns GoalUnknown without calling reflectViaLLM."
+    },
+    {
+      "location": "internal/queue/store.go",
+      "mechanism": "Jobs use claim_token for atomic claiming. ClaimNextForAgent writes a fresh token on every claim; CompleteAttempt matches it. This prevents duplicate pickup.",
+      "severity": "LOW",
+      "test": "Verify that two workers racing to claim the same job results in only one success (ErrJobAlreadyClaimed for the loser).",
+      "evidence": "Source code at internal/queue/store.go defines claim_token column and ErrJobAlreadyClaimed error."
+    }
+  ],
+  "gates_run": "None executed (read-only audit)"
+}

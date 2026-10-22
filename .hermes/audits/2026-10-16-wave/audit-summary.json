@@ -1,0 +1,1 @@
+{"finding_count": 4, "report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-16-wave/security-auth.md", "top_finding": "Auth: pkce.go:16 panic on crypto/rand failure -- denial of service vector when OS entropy source fails"}

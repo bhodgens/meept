@@ -1,0 +1,1 @@
+{"status": "fixed", "files_changed": ["cmd/meept/oauth.go", "cmd/meept/oauth_pkce_state_test.go"], "report_path": ".hermes/audits/2026-10-16-wave/fix-pkce.md", "gates_run": "go build ./cmd/meept/... (passed); go vet ./cmd/meept/... (passed); go test -p 2 -run 'Pkce|PKCE|State' ./cmd/meept/... (passed)"}

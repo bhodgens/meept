@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -66,6 +67,14 @@ type IntentAnalyzer struct {
 	// failure instead of recording an alias failure and rotating. Default
 	// false — production keeps rotation.
 	failFast bool
+
+	// bootReadiness/bootWait mirror LLMClassifier's boot-gate wait (see
+	// classifier_boot_readiness.go): the analyzer dials the SAME local
+	// classifier endpoint, so an analysis call inside the daemon's boot
+	// window must wait for the F-D8 gate too instead of failing into the
+	// degraded chain.
+	bootReadiness *ClassifierBootReadiness
+	bootWait      time.Duration
 }
 
 // NewIntentAnalyzer creates a new IntentAnalyzer with the given LLM client and logger.
@@ -230,6 +239,25 @@ func (ia *IntentAnalyzer) buildAnalysisMessages(input string, sessionContext *Se
 	}
 }
 
+// awaitBootReadiness mirrors LLMClassifier's boot-gate wait: the analyzer
+// dials the same local classifier endpoint, so a call inside the daemon's
+// boot window waits (bounded, cancellable, never failing) for the F-D8 gate.
+func (ia *IntentAnalyzer) awaitBootReadiness(ctx context.Context) {
+	awaitClassifierBoot(ctx, &slogAdapter{l: ia.logger}, ia.bootReadiness, ia.bootWait, "intent-analyzer")
+}
+
+// SetBootReadiness wires the daemon's F-D8 classifier boot-gate signal onto
+// an already-constructed analyzer. Nil is a no-op (setter nil-guard rule).
+func (ia *IntentAnalyzer) SetBootReadiness(b *ClassifierBootReadiness) {
+	if ia == nil || b == nil {
+		return
+	}
+	ia.bootReadiness = b
+	if ia.bootWait <= 0 {
+		ia.bootWait = defaultClassifierBootWait
+	}
+}
+
 // AnalyzeTrueIntent performs a lightweight LLM-based analysis of the user's
 // true intent. sessionContext, when non-nil and non-empty, appends a compact
 // [Recent session activity] block to the user message so pronouns and
@@ -240,6 +268,7 @@ func (ia *IntentAnalyzer) AnalyzeTrueIntent(ctx context.Context, input string, s
 		return nil, fmt.Errorf("intent analyzer: no client configured")
 	}
 
+	ia.awaitBootReadiness(ctx)
 	messages := ia.buildAnalysisMessages(input, sessionContext)
 
 	opts := resolveCallScope(ctx, ia.scopeProvider, []llm.ChatOption{

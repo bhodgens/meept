@@ -4256,6 +4256,23 @@ func (d *Dispatcher) SetCapabilityMatcher(matcher *CapabilityMatcher) {
 	}
 }
 
+// SetClassifierBootReadiness wires the daemon's F-D8 classifier boot-gate
+// signal onto the dispatcher's LLM classifiers (LLMClassifier and
+// IntentAnalyzer), so classification calls arriving inside the boot window
+// wait — bounded, never failing — for the gate instead of silently
+// degrading to keyword routing. Nil is a no-op (setter nil-guard rule).
+func (d *Dispatcher) SetClassifierBootReadiness(b *ClassifierBootReadiness) {
+	if d == nil || b == nil {
+		return
+	}
+	if d.llmClassifier != nil {
+		d.llmClassifier.SetBootReadiness(b)
+	}
+	if d.intentAnalyzer != nil {
+		d.intentAnalyzer.SetBootReadiness(b)
+	}
+}
+
 // SetMetricsStore wires the metrics store for persistent dispatch logging.
 func (d *Dispatcher) SetMetricsStore(store *metrics.Store) {
 	if store != nil {

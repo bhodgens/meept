@@ -1,0 +1,1 @@
+{"report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-16-wave/daemon-runtime.md", "finding_count": 4, "top_finding": "CRITICAL: internal/runtime/bwrap.go:154 violates the os.Getwd() fallback invariant by using os.Getwd() as a default working directory when cmd.Dir is empty"}

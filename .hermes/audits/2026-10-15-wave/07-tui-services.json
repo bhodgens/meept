@@ -1,0 +1,54 @@
+{
+  "report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-15-wave/07-tui-services.md",
+  "gates_run": "grep -rn \"bubbles/table\" internal/tui/ --include=\"*.go\"; grep -n \"tableutil\\.Size\\|tableutil\\.SetRows\" internal/tui/models/ --include=\"*.go\"; grep -rn \"SetColumns\" internal/tui/ --include=\"*.go\"; grep -rn \"/help\\|/plan\\|/project\\|/dnd\" internal/tui/command_handler.go --include=\"*.go\"; read_file ui/flutter_ui/lib/core/slash_commands.dart",
+  "findings": [
+    {
+      "severity": "HIGH",
+      "location": "internal/tui/models/tasks.go:316-317",
+      "mechanism": "Cursor-based access to m.tasks/m.jobs array without guaranteed bounds sync with table cursor state; if table cursor desynchronizes from data length (e.g. via resize/filter), array index out of range panic occurs.",
+      "test": "Trigger a table resize or filter change while cursor is active, then access the cursor index directly against the data slice.",
+      "evidence": "SOURCE: internal/tui/models/tasks.go lines 308-317 show cursor used to index m.tasks/m.jobs without explicit bounds check against the slice length in all code paths.",
+      "confidence": "high"
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "internal/tui/models/sessions.go:893-902",
+      "mechanism": "selectedSession() accesses m.sessions[idx] where idx=m.table.Cursor(). While there's a bounds check, m.sessions is modified by SessionsUpdateMsg without holding a lock during the cursor-read phase, creating a race condition on concurrent update.",
+      "test": "Run with -race flag while triggering SessionsUpdateMsg during cursor navigation.",
+      "evidence": "SOURCE: internal/tui/models/sessions.go line 897-901 shows cursor-based access to m.sessions without mutex protection during the read.",
+      "confidence": "medium"
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "internal/tui/models/memory_review.go:165",
+      "mechanism": "bubbles/table cursor not reset when rows are cleared/repopulated during view switches. A stale cursor position can exceed the new row count, causing panic on subsequent cursor-based access.",
+      "test": "Switch view modes rapidly in memory review table and observe cursor behavior.",
+      "evidence": "SOURCE: internal/tui/models/memory_review.go line 165 comment notes cursor clamping behavior; SetRows called without explicit Cursor(0) reset.",
+      "confidence": "medium"
+    },
+    {
+      "severity": "LOW",
+      "location": "internal/tui/command_handler.go:269 vs ui/flutter_ui/lib/core/slash_commands.dart",
+      "mechanism": "TUI has /dnd command (do-not-disturb toggle) but Flutter GUI slash command registry does not include /dnd. Users on GUI cannot access DND functionality.",
+      "test": "Open Flutter GUI and attempt to use /dnd command; it should be absent from autocomplete and produce 'unknown command' error.",
+      "evidence": "SOURCE: TUI command_handler.go line 269 lists /dnd; GUI slash_commands.dart _defaultCommands (lines 65-134) does not include /dnd.",
+      "confidence": "high"
+    },
+    {
+      "severity": "LOW",
+      "location": "internal/tui/command_handler.go:274 vs ui/flutter_ui/lib/core/slash_commands.dart",
+      "mechanism": "TUI has /tasks command but Flutter GUI slash command registry does not include /tasks. GUI users cannot list tasks via slash command.",
+      "test": "Open Flutter GUI and attempt to use /tasks command; it should be absent from autocomplete.",
+      "evidence": "SOURCE: TUI command_handler.go line 274 lists /tasks; GUI slash_commands.dart does not include /tasks in _defaultCommands.",
+      "confidence": "high"
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "internal/services/session_service.go (multiple methods)",
+      "mechanism": "Service methods mutate shared sessions map. If any method fails to acquire the sync.RWMutex before read/write, concurrent access from RPC handlers and background processes causes data races.",
+      "test": "Run with -race flag while exercising session CRUD operations via RPC.",
+      "evidence": "SOURCE: internal/services/session_service.go uses sync.RWMutex but requires verification that ALL access paths acquire the lock.",
+      "confidence": "medium"
+    }
+  ]
+}

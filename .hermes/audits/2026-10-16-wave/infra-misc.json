@@ -1,0 +1,5 @@
+{
+  "finding_count": 5,
+  "report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-16-wave/infra-misc.md",
+  "top_finding": "UnixNano ID generation at internal/cluster/executor_bridge.go:192, gossip.go:349, grpc_handlers.go:229 violates the predictable-ID prevention rule (use pkg/id.Generate instead)"
+}

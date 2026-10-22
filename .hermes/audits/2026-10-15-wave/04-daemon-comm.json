@@ -1,0 +1,55 @@
+{
+  "report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-15-wave/04-daemon-comm.md",
+  "gates_run": "1. WS event classification: verified chat.response is NOT relayed (server.go:941-959, server_wsclass_test.go:42,70); only chat_message topics produce type \"chat_message\". 2. Per-connection session filter: wsConnSubs structure implements suppression   deletion; unsubscribe records suppression, session-less events broadcast. 3. Runtime spawn guards: StartupOrphanSweep called at daemon.go:1970; no other spawn paths bypass sweep. 4. Auth and pairing: dev_key never logged at info level (server.go:264-266); pairing code single-use via zeroization in pairing.go:138-140. 5. Bus topic integrity: typed Topic[T] enforces payload shape at compile time; raw Publish can miss subscribers if topic mistyped. 6. Log cap: daemon logger uses LogStream (logrotate cap) when set, falls back to os.Stderr for tests/callers; subprocess stderr writes outside rotation seam (components.go:7211, launchd.go:44).",
+  "findings": [
+    {
+      "severity": "LOW",
+      "location": "internal/comm/http/server.go:941-959",
+      "mechanism": "transformBusEventToWS explicitly filters out chat.response topic, returning nil (not relayed to WS clients). Test assertions in server_wsclass_test.go:42,70 confirm this invariant.",
+      "evidence": "grep -n 'chat\\.response' internal/comm/http/server_wsclass_test.go shows test asserts chat.response must return nil",
+      "test": "Run test: go test -v ./internal/comm/http/ -run TestTransformBusEventToWS"
+    },
+    {
+      "severity": "LOW",
+      "location": "internal/bus/bus.go:115-285",
+      "mechanism": "MessageBus.Publish silently drops messages with no subscribers (direct or wildcard) and logs at DEBUG level. PublishExternalOnly logs at DEBUG. PublishBlocking logs at WARN for dropped security-critical events.",
+      "evidence": "bus.go:172-202 shows no-subscriber logging logic; bus_test.go:321-347 tests debug logging behavior",
+      "test": "Run test: go test -v ./internal/bus/ -run TestPublish_DebugOnNoSubscribers"
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "internal/daemon/components.go:7211, internal/daemon/launchd.go:44",
+      "mechanism": "Subprocess stderr written directly to os.Stderr outside the logrotate rotation seam. While these are not daemon.log writes, unbounded subprocess output could fill disk.",
+      "evidence": "components.go:7211: cmd.Stderr = os.Stderr; launchd.go:44: cmd.Stderr = os.Stderr",
+      "test": "Verify subprocess stderr is bounded or redirected to a capped writer"
+    },
+    {
+      "severity": "LOW",
+      "location": "internal/comm/http/server.go:264-266",
+      "mechanism": "Dev key warning log includes \"default_key_visible\": false flag. The key value itself is never logged at any level.",
+      "evidence": "server.go:264-266: logger.Warn(\"using development API key\", \"hint\", ..., \"default_key_visible\", false)",
+      "test": "Grep for dev_key in logs: grep -rn 'dev_key' internal/ | grep -v 'DevAPIKey()'"
+    },
+    {
+      "severity": "LOW",
+      "location": "internal/comm/http/pairing.go:117-142",
+      "mechanism": "exchange() performs constant-time comparison and then immediately zeroizes p.code and p.printed, ensuring single-use. Code printed to os.Stdout (not slog), the designed delivery channel.",
+      "evidence": "pairing.go:138-140: p.code = ''; p.printed = ''; p.expiresAt = time.Time{}",
+      "test": "Call handleExchange twice with same code; second call should return failure"
+    },
+    {
+      "severity": "LOW",
+      "location": "internal/daemon/daemon.go:1970, internal/daemon/orphan.go:51",
+      "mechanism": "StartupOrphanSweep is the only path that reaps orphaned runtime processes. Called at daemon.go:1970 during startup. No other spawn paths bypass this sweep.",
+      "evidence": "daemon.go:1970: d.StartupOrphanSweep(); orphan.go:51: func (d *Daemon) StartupOrphanSweep()",
+      "test": "Search for os.StartProcess or similar spawn calls outside of StartupOrphanSweep context"
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "internal/bus/topic.go:37-48, internal/comm/AGENTS.md",
+      "mechanism": "Typed Topic[T] enforces payload shape agreement at compile time via PublishT/SubscribeT. Raw Publish can miss subscribers if topic name is mistyped; no compile-time check for raw Publish subscribers.",
+      "evidence": "topic.go:37-48: PublishT marshals and publishes; bus.go:115: Publish accepts any topic string",
+      "test": "Run make graphs and check docs/generated/bus-topology.md for topics with publishers but no subscribers"
+    }
+  ]
+}

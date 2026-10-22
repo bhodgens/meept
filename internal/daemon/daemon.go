@@ -1962,6 +1962,30 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	defer d.removePIDFile()
 
+	// Classifier boot-readiness signal (boot-window misroute fix): created
+	// and wired BEFORE the listeners start so a chat.submit accepted while
+	// the F-D8 gate below is still waiting for classifier health parks its
+	// classification call on the signal instead of dialing a runtime that
+	// is still spawning (observed live 2026-10-22: heuristic_fallback
+	// @0.55 routing with no user-visible degradation signal). Run() is the
+	// ONLY place that wires this, and every Run() path resolves it — gate
+	// passed/skipped → SignalReady, gate tripped → SignalFailed — so a
+	// classification call can never wait on a signal nobody closes.
+	var classifierBoot *agent.ClassifierBootReadiness
+	if d.components != nil && d.components.Dispatcher != nil {
+		classifierBoot = agent.NewClassifierBootReadiness()
+		d.components.Dispatcher.SetClassifierBootReadiness(classifierBoot)
+		// Safety net: every early-return path below (component start
+		// failures, gate trip) resolves the signal as FAILED so a parked
+		// classification call is released instead of waiting out its bound
+		// against a dying daemon. No-op once SignalReady has fired.
+		defer func() {
+			if !classifierBoot.Done() {
+				classifierBoot.SignalFailed()
+			}
+		}()
+	}
+
 	// Start all registry components (RPC server, etc.)
 	if err := d.registry.StartAll(ctx); err != nil {
 		// D5: Clean up any partially-initialized state.
@@ -2037,6 +2061,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 				return fmt.Errorf("classifier runtime health gate failed: %w", err)
 			}
 		}
+	}
+
+	// Boot gate resolved (passed, skipped as cloud-only/disabled, or no
+	// local runtimes at all): release any classification call parked in
+	// the boot window — the classifier endpoints are now the ones the
+	// gate proved healthy (or no gate applies).
+	if classifierBoot != nil {
+		classifierBoot.SignalReady()
+		d.logger.Info("Classifier boot readiness signaled — classification calls proceed at full fidelity",
+			"gate", "classifier-boot-gate")
 	}
 
 	// Metrics collector is started automatically by NewCollector

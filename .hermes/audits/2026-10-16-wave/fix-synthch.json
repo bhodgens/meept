@@ -1,0 +1,5 @@
+{
+  "status": "fixed",
+  "files_changed": ["internal/comm/http/api_handlers.go"],
+  "report_path": ".hermes/audits/2026-10-16-wave/fix-synthch.md"
+}

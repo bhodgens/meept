@@ -1,0 +1,5 @@
+{
+  "finding_count": 7,
+  "report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-16-wave/services-ui.md",
+  "top_finding": "internal/pty/session.go:324-370 - Potential process leak risk in timeout scenario where Close() kills process and waitLoop() reaps it; race condition between timeout-triggered Close() and natural process exit needs verification."
+}

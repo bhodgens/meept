@@ -1,0 +1,28 @@
+{
+  "report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-15-wave/01-agent-core.md",
+  "findings": [
+    {
+      "severity": "LOW",
+      "location": "internal/agent/prompt/loader.go:35",
+      "mechanism": "Comment forbidding os.Getwd() exists but no actual os.Getwd() call found in internal/agent; the comment is a reminder, not a bug.",
+      "test": "grep -rn \"os.Getwd()\" internal/agent/",
+      "evidence": "SOURCE -- grep result shows only comment and test assertion"
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "internal/agent/handler.go:1130-1131",
+      "mechanism": "WS chat_message push gating uses wsSessionID which may be empty for session-less connections; conversation_id-only requests could cause progress events to be suppressed for those connections.",
+      "test": "Trace WS filter in internal/comm/http/server.go to verify session_id->conversation_id fallback preserves progress events",
+      "evidence": "SOURCE -- handler.go:1130-1131, handler.go:791"
+    },
+    {
+      "severity": "LOW",
+      "location": "internal/agent/park_store_sqlite.go:101-102",
+      "mechanism": "Park store tracks both session_id and conversation_id per record but has no validation that they're populated correctly; a swap bug would silently corrupt tracking.",
+      "test": "Add sanity check in insert/update SQL or log when session_id and conversation_id are set",
+      "evidence": "SOURCE -- park_store_sqlite.go:101-102"
+    }
+  ],
+  "gates_run": "go build ./internal/agent/... (PASS); go vet ./internal/agent/... (PASS)",
+  "top_findings_count": 3
+}

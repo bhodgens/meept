@@ -1,0 +1,12 @@
+{
+  "status": "fixed",
+  "files_changed": [
+    "internal/tools/mcp/client.go",
+    "internal/tools/mcp/transport/stdio.go",
+    "internal/tools/registry_test.go",
+    "internal/tools/mcp/client_test.go",
+    ".hermes/audits/2026-10-16-wave/fix-tools.md"
+  ],
+  "report_path": ".hermes/audits/2026-10-16-wave/fix-tools.md",
+  "gates_run": "go build ./internal/tools/... PASSED; go vet ./internal/tools/... FAILED (pre-existing mockTool undefined); go test -p 2 -run 'Retry' ./internal/tools/... FAILED (pre-existing mockTool undefined); go test -p 2 -run 'FileURI|Resource' ./internal/tools/mcp PASSED (placeholder test)"
+}

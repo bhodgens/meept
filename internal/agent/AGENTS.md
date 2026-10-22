@@ -149,3 +149,21 @@ sends `session_id` as `conversation_id` in chat requests. WS subscriptions use
 `session_id`. Bus events carry `conversation_id`. New event/filter/routing code
 MUST handle both. The WS filter in `internal/comm/http/server.go` falls back
 from `session_id` to `conversation_id` — preserve this.
+
+## Classifier boot readiness: no silent degradation during the boot window
+
+The RPC socket serves `chat.submit` BEFORE the F-D8 classifier-boot gate
+resolves (deliberate: `ContainerManager.StartAll` is async so slow model loads
+do not delay socket readiness). A chat in that window used to dial the
+still-spawning classifier, fail, arm a 60s unavailability cooldown, and
+silently degrade to `heuristic_fallback` routing (live defect 2026-10-22:
+confidence 0.55 wrong-agent answer). `agent.ClassifierBootReadiness` is a
+one-shot signal created in `Run()` before listeners start and wired onto the
+Dispatcher's LLMClassifier + IntentAnalyzer (`SetClassifierBootReadiness`):
+`Classify`/`ClassifyMulti` and the analyzer wait (bounded, ctx-cancellable,
+default 90s) while the gate is open; `SignalReady` releases waiters to
+full-fidelity classification, `SignalFailed` releases them into the ordinary
+attempt/degrade path — a warmup failure NEVER hard-fails a turn. Steady state
+costs one non-blocking channel read. New classifier construction sites on the
+daemon boot path need the setter wired (the eval-only site in
+internal/eval/classifier_benchmark.go deliberately has no boot wiring).

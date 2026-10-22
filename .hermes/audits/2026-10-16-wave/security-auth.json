@@ -1,0 +1,5 @@
+{
+  "finding_count": 11,
+  "report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-16-wave/security-auth.md",
+  "top_finding": "PKCE state parameter not validated server-side -- CSRF vulnerability in OAuth flow (MEDIUM severity)"
+}

@@ -1,0 +1,55 @@
+{
+  "report_path": "/Users/caimlas/git/meept/.hermes/audits/2026-10-15-wave/05-tools.md",
+  "gates_run": "go test -p 2 ./internal/tools/... (registry, argvalidate, builtin); ./internal/skills/... (executor); ./internal/tools/mcp/... (manager, stdio transport)",
+  "findings": [
+    {
+      "severity": "HIGH",
+      "location": "internal/tools/builtin/file_find.go:144",
+      "mechanism": "filepath.WalkDir walks from resolved path without enforcing project-root containment; fenceChecker is optional and may be nil, allowing enumeration of arbitrary filesystem paths",
+      "evidence": "resolved path passed directly to filepath.WalkDir; t.fenceChecker != nil check is conditional",
+      "test": "file_find with working_dir set to / when fenceChecker is nil"
+    },
+    {
+      "severity": "HIGH",
+      "location": "internal/tools/mcp/manager.go:555-628",
+      "mechanism": "MCP CallTool returns server results directly without sanitization or fencing; unlike shell tool which runs sanitizeOutput via security orchestrator",
+      "evidence": "CallTool in manager.go returns tools.ToolResult with MCP server output unmodified",
+      "test": "MCP tool returning content with prompt-injection patterns or secrets"
+    },
+    {
+      "severity": "HIGH",
+      "location": "internal/tools/builtin/shell.go:470",
+      "mechanism": "exec.CommandContext(ctx, \"/bin/sh\", \"-c\", command) passes command string directly to shell; shellMetaPattern regex is defined but never applied to sanitize/escape metacharacters",
+      "evidence": "command string interpolated into /bin/sh -c without escaping; shellMetaPattern defined at line 89 but never used in Execute",
+      "test": "shell tool with command 'echo hello; rm -rf /tmp/test'"
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "internal/tools/mcp/transport/stdio.go:315-396; internal/tools/mcp/manager.go:766-857",
+      "mechanism": "MCP stdio subprocesses may become orphans on config reload; no global orphan sweep for MCP servers (daemon's StartupOrphanSweep covers local runtimes only)",
+      "evidence": "StopServer Close() kills cmd.Process after 5s grace; Reload phase 1 closes clients then phase 2 restarts; no periodic orphan reaper for MCP processes",
+      "test": "Start MCP stdio server, trigger reload that stops it, check if subprocess persists"
+    },
+    {
+      "severity": "MEDIUM",
+      "location": "internal/skills/executor.go:240-260",
+      "mechanism": "checkRequiredTools returns nil (no error) when e.toolAvailability == nil, meaning requires-tools frontmatter is completely ignored if executor is constructed without WithToolAvailability",
+      "evidence": "if !e.validatePrerequisites || e.toolAvailability == nil || len(skill.RequiresTools) == 0 { return nil }",
+      "test": "Skill with requires-tools: [file_edit] executed with executor lacking toolAvailability function"
+    },
+    {
+      "severity": "LOW",
+      "location": "internal/tools/builtin/file_find.go:133-136",
+      "mechanism": "max_results parameter accepts negative/zero float64 values without validation; defaults to 100 silently",
+      "evidence": "if maxVal, ok := args[\"max_results\"].(float64); ok && maxVal > 0 { maxResults = int(maxVal) }",
+      "test": "file_find with max_results: -5 or 0"
+    },
+    {
+      "severity": "LOW",
+      "location": "internal/tools/argvalidate.go:104-107",
+      "mechanism": "ValidateToolArgs checks type mismatch for number/integer parameters but does not validate range (negative/zero); range checks are delegated to tool Execute",
+      "evidence": "typeMismatch switches on wantType 'number'/'integer' and checks val.(float64) but does not check value magnitude",
+      "test": "Tool with 'count' parameter type integer accepting -1 or 0 without validation"
+    }
+  ]
+}
