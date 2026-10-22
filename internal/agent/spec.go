@@ -140,6 +140,31 @@ type AgentSpec struct {
 	// per-agent AGENT.md path, orthogonal to employees.defaults.gate.enabled
 	// (the employee kill switch).
 	Gate *RosterGateConfig `json:"gate,omitempty" yaml:"gate,omitempty"`
+	// Executor selects the turn producer for this agent: "" or "local" =
+	// the built-in LLM reasoning loop (default), "acp" = an external ACP
+	// harness named by ACP.Agent (see docs/workflows/acp-employees.md).
+	Executor string `json:"executor,omitempty"`
+	// ACP carries the external ACP harness binding used when Executor is
+	// "acp". Nil for local-loop agents.
+	ACP *ACPSpec `json:"acp,omitempty"`
+}
+
+// ACPSpec is the runtime form of the AGENT.md `acp:` block (executor: acp).
+// It mirrors agents.ACPAgentMetadata; definitionToSpec converts between them.
+type ACPSpec struct {
+	// Agent is the catalog id in acp_agents.json5 (e.g. "hermes").
+	Agent string `json:"agent"`
+	// Persona is the session key for the multi-session lane: N personas
+	// share one catalog entry. Empty = the catalog default session.
+	Persona string `json:"persona,omitempty"`
+	// CommandArgs are argv entries appended after the catalog command
+	// (e.g. ["-p", "borg"] selects the hermes profile).
+	CommandArgs []string `json:"command_args,omitempty"`
+	// PermissionMode overrides the global [acp] permission_mode for this
+	// agent (precedence: agent definition > global config). Empty = global.
+	PermissionMode string `json:"permission_mode,omitempty"`
+	// DecisionThreshold is only meaningful with permission_mode: decision.
+	DecisionThreshold float64 `json:"decision_threshold,omitempty"`
 }
 
 // BaselineTools are the tools available to all agents.

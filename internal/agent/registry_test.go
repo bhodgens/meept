@@ -957,6 +957,135 @@ func TestGate_MergeSpec_Reload(t *testing.T) {
 	}
 }
 
+// --- executor: acp field pipeline (docs/workflows/acp-employees.md) ---
+
+func TestExecutorACP_DefinitionToSpec(t *testing.T) {
+	r := &AgentRegistry{logger: silentLogger()}
+	def := &agents.AgentDefinition{
+		AgentMetadata: agents.AgentMetadata{
+			ID:       "bob",
+			Name:     "Bob",
+			Role:     "executor",
+			Executor: "acp",
+			ACP: &agents.ACPAgentMetadata{
+				Agent:             "hermes",
+				Persona:           "bob",
+				CommandArgs:       []string{"-p", "borg"},
+				PermissionMode:    "human",
+				DecisionThreshold: 0.7,
+			},
+		},
+	}
+
+	spec := r.definitionToSpec(def)
+	if spec.Executor != "acp" {
+		t.Errorf("definitionToSpec Executor = %q, want %q", spec.Executor, "acp")
+	}
+	if spec.ACP == nil {
+		t.Fatal("definitionToSpec ACP = nil, want mapped acp spec")
+	}
+	if spec.ACP.Agent != "hermes" {
+		t.Errorf("definitionToSpec ACP.Agent = %q, want %q", spec.ACP.Agent, "hermes")
+	}
+	if spec.ACP.Persona != "bob" {
+		t.Errorf("definitionToSpec ACP.Persona = %q, want %q", spec.ACP.Persona, "bob")
+	}
+	if len(spec.ACP.CommandArgs) != 2 || spec.ACP.CommandArgs[0] != "-p" || spec.ACP.CommandArgs[1] != "borg" {
+		t.Errorf("definitionToSpec ACP.CommandArgs = %v, want [-p borg]", spec.ACP.CommandArgs)
+	}
+	if spec.ACP.PermissionMode != "human" {
+		t.Errorf("definitionToSpec ACP.PermissionMode = %q, want %q", spec.ACP.PermissionMode, "human")
+	}
+	if spec.ACP.DecisionThreshold != 0.7 {
+		t.Errorf("definitionToSpec ACP.DecisionThreshold = %v, want 0.7", spec.ACP.DecisionThreshold)
+	}
+
+	// local-loop definition: empty executor, nil acp — no allocation.
+	def.Executor = ""
+	def.ACP = nil
+	spec = r.definitionToSpec(def)
+	if spec.Executor != "" {
+		t.Errorf("definitionToSpec Executor = %q, want empty (default local loop)", spec.Executor)
+	}
+	if spec.ACP != nil {
+		t.Errorf("definitionToSpec ACP = %+v, want nil for local-loop agent", spec.ACP)
+	}
+}
+
+func TestExecutorACP_MergeSpec_Override(t *testing.T) {
+	r := &AgentRegistry{logger: silentLogger()}
+	base := &AgentSpec{
+		ID:       "bob",
+		Name:     "Bob",
+		Role:     RoleExecutor,
+		Enabled:  true,
+		Executor: "acp",
+		ACP: &ACPSpec{
+			Agent:          "hermes",
+			Persona:        "bob",
+			CommandArgs:    []string{"-p", "borg"},
+			PermissionMode: "human",
+		},
+	}
+	def := &agents.AgentDefinition{
+		AgentMetadata: agents.AgentMetadata{ID: "bob", Name: "Bob", Role: "executor"},
+	}
+
+	// Omission preserves the base executor and acp block.
+	merged := r.mergeSpec(base, def)
+	if merged.Executor != "acp" {
+		t.Errorf("mergeSpec Executor = %q, want %q (preserve base on omission)", merged.Executor, "acp")
+	}
+	if merged.ACP == nil {
+		t.Fatal("mergeSpec ACP = nil, want preserved base acp (omission keeps current)")
+	}
+	if merged.ACP.Agent != "hermes" || merged.ACP.Persona != "bob" {
+		t.Errorf("mergeSpec ACP = %+v, want preserved base binding", merged.ACP)
+	}
+	if len(merged.ACP.CommandArgs) != 2 || merged.ACP.CommandArgs[0] != "-p" || merged.ACP.CommandArgs[1] != "borg" {
+		t.Errorf("mergeSpec ACP.CommandArgs = %v, want [-p borg] (preserve base)", merged.ACP.CommandArgs)
+	}
+	// The preserve path must not alias the base's acp block.
+	if merged.ACP == base.ACP {
+		t.Error("mergeSpec ACP aliases the base pointer, want a copy")
+	}
+
+	// A non-empty executor from the override wins.
+	def.Executor = "local"
+	merged = r.mergeSpec(base, def)
+	if merged.Executor != "local" {
+		t.Errorf("mergeSpec Executor = %q, want %q (prefer AGENT.md when non-empty)", merged.Executor, "local")
+	}
+
+	// A non-nil acp block from the override REPLACES the base wholesale —
+	// no per-field merge (half-overrides are deliberately impossible).
+	def.Executor = "acp"
+	def.ACP = &agents.ACPAgentMetadata{
+		Agent:             "codex",
+		CommandArgs:       []string{"--full-auto"},
+		DecisionThreshold: 0.9,
+	}
+	merged = r.mergeSpec(base, def)
+	if merged.ACP == nil {
+		t.Fatal("mergeSpec ACP = nil, want override acp block")
+	}
+	if merged.ACP.Agent != "codex" {
+		t.Errorf("mergeSpec ACP.Agent = %q, want %q (prefer AGENT.md)", merged.ACP.Agent, "codex")
+	}
+	if merged.ACP.Persona != "" {
+		t.Errorf("mergeSpec ACP.Persona = %q, want empty (wholesale replace, not per-field merge)", merged.ACP.Persona)
+	}
+	if merged.ACP.PermissionMode != "" {
+		t.Errorf("mergeSpec ACP.PermissionMode = %q, want empty (wholesale replace)", merged.ACP.PermissionMode)
+	}
+	if len(merged.ACP.CommandArgs) != 1 || merged.ACP.CommandArgs[0] != "--full-auto" {
+		t.Errorf("mergeSpec ACP.CommandArgs = %v, want [--full-auto]", merged.ACP.CommandArgs)
+	}
+	if merged.ACP.DecisionThreshold != 0.9 {
+		t.Errorf("mergeSpec ACP.DecisionThreshold = %v, want 0.9", merged.ACP.DecisionThreshold)
+	}
+}
+
 // --- Task-loop schema-mode wiring (chat-dispatch-ux leaf 04) ---
 
 // taskSchemaTool is a fixture tool for registry schema-mode tests. It is NOT

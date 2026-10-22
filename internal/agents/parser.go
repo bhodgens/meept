@@ -205,9 +205,30 @@ func parseMetadata(frontmatter string) (*AgentMetadata, error) {
 		MaxConversationTokens int               `yaml:"max_conversation_tokens"`
 		MaxMemoryRefs         int               `yaml:"max_memory_refs"`
 		TopP                  *float64          `yaml:"top_p"`
+		// Underscore-form variants of the nested acp: block keys, merged
+		// below exactly like the top-level entries. Executor needs no
+		// alt form.
+		ACP *struct {
+			CommandArgs       []string `yaml:"command_args"`
+			PermissionMode    string   `yaml:"permission_mode"`
+			DecisionThreshold float64  `yaml:"decision_threshold"`
+		} `yaml:"acp"`
 	}
 	if err := yaml.Unmarshal([]byte(frontmatter), &altMeta); err != nil {
 		return nil, fmt.Errorf("parse alt agent metadata: %w", err)
+	}
+
+	// camelCase variants of the acp: block keys (commandArgs, etc.), so
+	// both key forms round-trip through the parser.
+	var camelMeta struct {
+		ACP *struct {
+			CommandArgs       []string `yaml:"commandArgs"`
+			PermissionMode    string   `yaml:"permissionMode"`
+			DecisionThreshold float64  `yaml:"decisionThreshold"`
+		} `yaml:"acp"`
+	}
+	if err := yaml.Unmarshal([]byte(frontmatter), &camelMeta); err != nil {
+		return nil, fmt.Errorf("parse camel agent metadata: %w", err)
 	}
 
 	// Merge alternative field values if primary is empty/zero
@@ -240,6 +261,49 @@ func parseMetadata(frontmatter string) (*AgentMetadata, error) {
 	}
 	if meta.TopP == nil && altMeta.TopP != nil {
 		meta.TopP = altMeta.TopP
+	}
+
+	// Merge the nested acp: block variants field-by-field if primary is
+	// empty/zero (underscore form first, then camelCase form).
+	if meta.ACP != nil {
+		if altMeta.ACP != nil {
+			if len(meta.ACP.CommandArgs) == 0 && len(altMeta.ACP.CommandArgs) > 0 {
+				meta.ACP.CommandArgs = altMeta.ACP.CommandArgs
+			}
+			if meta.ACP.PermissionMode == "" && altMeta.ACP.PermissionMode != "" {
+				meta.ACP.PermissionMode = altMeta.ACP.PermissionMode
+			}
+			if meta.ACP.DecisionThreshold == 0 && altMeta.ACP.DecisionThreshold != 0 {
+				meta.ACP.DecisionThreshold = altMeta.ACP.DecisionThreshold
+			}
+		}
+		if camelMeta.ACP != nil {
+			if len(meta.ACP.CommandArgs) == 0 && len(camelMeta.ACP.CommandArgs) > 0 {
+				meta.ACP.CommandArgs = camelMeta.ACP.CommandArgs
+			}
+			if meta.ACP.PermissionMode == "" && camelMeta.ACP.PermissionMode != "" {
+				meta.ACP.PermissionMode = camelMeta.ACP.PermissionMode
+			}
+			if meta.ACP.DecisionThreshold == 0 && camelMeta.ACP.DecisionThreshold != 0 {
+				meta.ACP.DecisionThreshold = camelMeta.ACP.DecisionThreshold
+			}
+		}
+	}
+
+	// Validate the executor field: "" (default local loop), "local", and
+	// "acp" are the only accepted values; "acp" requires a non-nil acp
+	// block naming a catalog agent.
+	switch meta.Executor {
+	case "", "local":
+	case "acp":
+		if meta.ACP == nil {
+			return nil, fmt.Errorf("executor %q requires an acp: block (missing)", meta.Executor)
+		}
+		if meta.ACP.Agent == "" {
+			return nil, errors.New("executor \"acp\" requires acp.agent (catalog id in acp_agents.json5)")
+		}
+	default:
+		return nil, fmt.Errorf("unknown executor %q (want \"acp\", \"local\", or omitted)", meta.Executor)
 	}
 
 	return &meta, nil

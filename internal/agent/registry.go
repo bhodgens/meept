@@ -1217,6 +1217,31 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.Gate = &g
 	}
 
+	// Executor: a non-empty AGENT.md value wins; omission keeps the base.
+	if def.Executor != "" {
+		merged.Executor = def.Executor
+	} else {
+		merged.Executor = base.Executor
+	}
+
+	// ACP: a non-nil AGENT.md block REPLACES the base block wholesale.
+	// Per-field ACP merging is deliberately avoided: it invites
+	// half-overrides (e.g. a new agent id keeping the old persona's
+	// command_args). Omission (nil) preserves the base binding.
+	if def.ACP != nil {
+		merged.ACP = &ACPSpec{
+			Agent:             def.ACP.Agent,
+			Persona:           def.ACP.Persona,
+			CommandArgs:       append([]string(nil), def.ACP.CommandArgs...),
+			PermissionMode:    def.ACP.PermissionMode,
+			DecisionThreshold: def.ACP.DecisionThreshold,
+		}
+	} else if base.ACP != nil {
+		a := *base.ACP
+		a.CommandArgs = append([]string(nil), base.ACP.CommandArgs...)
+		merged.ACP = &a
+	}
+
 	// Tools: MERGE (union)
 	merged.AdditionalTools = mergeStringSlices(base.AdditionalTools, def.AdditionalTools)
 
@@ -1321,6 +1346,22 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 	if def.TopP != nil {
 		v := *def.TopP
 		spec.Constraints.TopP = &v
+	}
+
+	// Executor: "" (default local loop), "local", or "acp" (validated at
+	// parse time in internal/agents).
+	spec.Executor = def.Executor
+
+	// ACP binding: only allocated when the frontmatter carries an acp:
+	// block; nil-safe for local-loop agents.
+	if def.ACP != nil {
+		spec.ACP = &ACPSpec{
+			Agent:             def.ACP.Agent,
+			Persona:           def.ACP.Persona,
+			CommandArgs:       append([]string(nil), def.ACP.CommandArgs...),
+			PermissionMode:    def.ACP.PermissionMode,
+			DecisionThreshold: def.ACP.DecisionThreshold,
+		}
 	}
 
 	// Verification

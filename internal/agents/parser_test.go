@@ -390,3 +390,168 @@ Body.`,
 		})
 	}
 }
+
+// TestParseAgentText_ExecutorACP verifies the executor: acp frontmatter and
+// its nested acp: block round-trip in both underscore and camelCase key
+// forms, and that executor validation rejects missing/bad values
+// (docs/workflows/acp-employees.md field pipeline step 1-2).
+func TestParseAgentText_ExecutorACP(t *testing.T) {
+	checkACP := func(t *testing.T, acp *ACPAgentMetadata) {
+		t.Helper()
+		if acp == nil {
+			t.Fatal("ACP = nil, want parsed acp block")
+		}
+		if acp.Agent != "hermes" {
+			t.Errorf("ACP.Agent = %q, want %q", acp.Agent, "hermes")
+		}
+		if acp.Persona != "bob" {
+			t.Errorf("ACP.Persona = %q, want %q", acp.Persona, "bob")
+		}
+		if len(acp.CommandArgs) != 2 || acp.CommandArgs[0] != "-p" || acp.CommandArgs[1] != "borg" {
+			t.Errorf("ACP.CommandArgs = %v, want [-p borg]", acp.CommandArgs)
+		}
+		if acp.PermissionMode != "human" {
+			t.Errorf("ACP.PermissionMode = %q, want %q", acp.PermissionMode, "human")
+		}
+		if acp.DecisionThreshold != 0.7 {
+			t.Errorf("ACP.DecisionThreshold = %v, want 0.7", acp.DecisionThreshold)
+		}
+	}
+
+	t.Run("underscore keys", func(t *testing.T) {
+		input := `---
+id: bob
+name: Bob
+role: executor
+executor: acp
+acp:
+  agent: hermes
+  persona: bob
+  command_args: ["-p", "borg"]
+  permission_mode: human
+  decision_threshold: 0.7
+---
+
+# Bob
+
+Slaved hermes agent.`
+		def, err := ParseAgentText(input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if def.Executor != "acp" {
+			t.Errorf("Executor = %q, want %q", def.Executor, "acp")
+		}
+		checkACP(t, def.ACP)
+	})
+
+	t.Run("camelCase keys", func(t *testing.T) {
+		input := `---
+id: bob
+name: Bob
+role: executor
+executor: acp
+acp:
+  agent: hermes
+  persona: bob
+  commandArgs: ["-p", "borg"]
+  permissionMode: human
+  decisionThreshold: 0.7
+---
+
+# Bob
+
+Slaved hermes agent.`
+		def, err := ParseAgentText(input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if def.Executor != "acp" {
+			t.Errorf("Executor = %q, want %q", def.Executor, "acp")
+		}
+		checkACP(t, def.ACP)
+	})
+
+	t.Run("acp executor missing block errors", func(t *testing.T) {
+		input := `---
+id: bob
+name: Bob
+role: executor
+executor: acp
+---
+
+Body.`
+		if _, err := ParseAgentText(input); err == nil {
+			t.Error("expected error for executor: acp without acp block, got nil")
+		}
+	})
+
+	t.Run("acp executor missing agent errors", func(t *testing.T) {
+		input := `---
+id: bob
+name: Bob
+role: executor
+executor: acp
+acp:
+  persona: bob
+  command_args: ["-p", "borg"]
+---
+
+Body.`
+		if _, err := ParseAgentText(input); err == nil {
+			t.Error("expected error for executor: acp with empty acp.agent, got nil")
+		}
+	})
+
+	t.Run("unknown executor errors", func(t *testing.T) {
+		input := `---
+id: bob
+name: Bob
+role: executor
+executor: kubernetes
+---
+
+Body.`
+		if _, err := ParseAgentText(input); err == nil {
+			t.Error("expected error for unknown executor value, got nil")
+		}
+	})
+
+	t.Run("absent executor defaults empty", func(t *testing.T) {
+		input := `---
+id: bob
+name: Bob
+role: executor
+---
+
+Body.`
+		def, err := ParseAgentText(input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if def.Executor != "" {
+			t.Errorf("Executor = %q, want empty (default local loop)", def.Executor)
+		}
+		if def.ACP != nil {
+			t.Errorf("ACP = %+v, want nil for local-loop agent", def.ACP)
+		}
+	})
+
+	t.Run("explicit local executor accepted", func(t *testing.T) {
+		input := `---
+id: bob
+name: Bob
+role: executor
+executor: local
+---
+
+Body.`
+		def, err := ParseAgentText(input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if def.Executor != "local" {
+			t.Errorf("Executor = %q, want %q", def.Executor, "local")
+		}
+	})
+}

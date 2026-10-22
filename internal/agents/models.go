@@ -131,6 +131,36 @@ type AgentMetadata struct {
 	// is orthogonal to employees.defaults.gate.enabled (the employee kill
 	// switch).
 	Gate *GateMetadata `yaml:"gate,omitempty" json:"gate,omitempty"`
+
+	// Executor selects the turn producer for this agent: "" or "local" =
+	// the built-in LLM reasoning loop (default), "acp" = an external ACP
+	// harness named by ACP.Agent (see docs/workflows/acp-employees.md).
+	// Any other value is a parse error.
+	Executor string `yaml:"executor,omitempty" json:"executor,omitempty"`
+
+	// ACP carries the external ACP harness binding used when Executor is
+	// "acp". Nil for local-loop agents; required (with a non-empty Agent)
+	// when Executor is "acp".
+	ACP *ACPAgentMetadata `yaml:"acp,omitempty" json:"acp,omitempty"`
+}
+
+// ACPAgentMetadata is the AGENT.md frontmatter form of the `acp:` block
+// (executor: acp). The registry converts it to agent.ACPSpec. Underscore key
+// forms are canonical; camelCase variants are merged in parseMetadata.
+type ACPAgentMetadata struct {
+	// Agent is the catalog id in acp_agents.json5 (e.g. "hermes").
+	Agent string `yaml:"agent" json:"agent"`
+	// Persona is the session key for the multi-session lane: N personas
+	// share one catalog entry. Empty = the catalog default session.
+	Persona string `yaml:"persona,omitempty" json:"persona,omitempty"`
+	// CommandArgs are argv entries appended after the catalog command
+	// (e.g. ["-p", "borg"] selects the hermes profile).
+	CommandArgs []string `yaml:"command_args,omitempty" json:"command_args,omitempty"`
+	// PermissionMode optionally overrides the global [acp] permission_mode
+	// for this agent (precedence: agent definition > global config).
+	PermissionMode string `yaml:"permission_mode,omitempty" json:"permission_mode,omitempty"`
+	// DecisionThreshold is only meaningful with permission_mode: decision.
+	DecisionThreshold float64 `yaml:"decision_threshold,omitempty" json:"decision_threshold,omitempty"`
 }
 
 // GateMetadata is the AGENT.md frontmatter form of the roster quality gate.
