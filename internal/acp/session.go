@@ -18,7 +18,15 @@ import (
 
 // SessionConfig is the spawn/handshake configuration for one ACP session.
 type SessionConfig struct {
-	AgentID        string
+	AgentID string
+	// Persona is the multi-session persona name riding on the catalog
+	// agent (acp-employees dim 2B). Empty = the legacy no-persona lane;
+	// the SessionConfig stays byte-identical to the pre-persona shape.
+	Persona string
+	// CommandArgs are extra argv appended after Command at spawn (e.g.
+	// ["-p","borg"] selecting a hermes profile). Never mutated into
+	// Command; the spawn concatenates fresh slices.
+	CommandArgs    []string
 	Command        []string
 	Env            map[string]string
 	Cwd            string
@@ -89,7 +97,11 @@ func Start(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	}
 
 	name := cfg.Command[0]
-	args := cfg.Command[1:]
+	// Spawn argv = Command tail + CommandArgs (persona lane): fresh
+	// slices only, cfg.Command is never mutated.
+	args := make([]string, 0, len(cfg.Command)-1+len(cfg.CommandArgs))
+	args = append(args, cfg.Command[1:]...)
+	args = append(args, cfg.CommandArgs...)
 	// The ACP subprocess is a LONG-LIVED daemon child: it must not die
 	// with the turn-scoped context that first launched it
 	// (acp-human-permission-relay leaf 03 full-stack e2e: the launch
@@ -580,7 +592,7 @@ func (s *Session) handlePermissionDecision(n Notification) {
 	askCtx, cancel := context.WithTimeout(base, decisionAskTimeout)
 	defer cancel()
 	outcome := decidePermission(askCtx, s.cfg.Decision, s.cfg.DecisionThreshold,
-		renderDecisionState(s.cfg.AgentID, n.Params))
+		renderDecisionState(s.cfg.AgentID, s.cfg.Persona, n.Params))
 	switch outcome.text {
 	case decisionTextNoDecisioner, decisionTextUnavailable:
 		slog.Default().Warn("acp permission denied: decision layer unavailable",

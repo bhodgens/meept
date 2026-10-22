@@ -890,3 +890,463 @@ func TestManager_NonDecisionModeLeavesLaneNil(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Persona lane (acp-employees dim 2B, Multi-session Manager lane)
+// ---------------------------------------------------------------------------
+
+// TestManager_GetOrCreatePersona_DistinctSessions pins that two personas on
+// one catalog agent get their own sessions (two startFn calls, distinct
+// pointers) while the SessionConfig keeps the shared catalog identity.
+func TestManager_GetOrCreatePersona_DistinctSessions(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{}
+	m := NewManager(testACPConfig(true, 4), testAgents(
+		config.ACPAgentEntry{ID: "hermes", Command: []string{"hermes", "acp"}, Enabled: true},
+	))
+	attachStart(m, rec)
+
+	ctx := context.Background()
+	bob, err := m.GetOrCreatePersona(ctx, "hermes", "bob", "/work",
+		PersonaOpts{CommandArgs: []string{"-p", "borg"}})
+	if err != nil {
+		t.Fatalf("GetOrCreatePersona bob: %v", err)
+	}
+	alice, err := m.GetOrCreatePersona(ctx, "hermes", "alice", "/work",
+		PersonaOpts{CommandArgs: []string{"-p", "alice"}})
+	if err != nil {
+		t.Fatalf("GetOrCreatePersona alice: %v", err)
+	}
+	if bob == alice {
+		t.Fatal("two personas returned the same session")
+	}
+	if rec.calls() != 2 {
+		t.Fatalf("start called %d times, want 2", rec.calls())
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.configs[0].Persona != "bob" || rec.configs[1].Persona != "alice" {
+		t.Fatalf("SessionConfig.Persona = %q/%q, want bob/alice",
+			rec.configs[0].Persona, rec.configs[1].Persona)
+	}
+	for _, sc := range rec.configs {
+		if sc.AgentID != "hermes" {
+			t.Fatalf("SessionConfig.AgentID = %q, want hermes (catalog id)", sc.AgentID)
+		}
+		if len(sc.Command) != 2 || sc.Command[0] != "hermes" || sc.Command[1] != "acp" {
+			t.Fatalf("SessionConfig.Command = %v, want the untouched catalog command", sc.Command)
+		}
+	}
+	if got := rec.configs[0].CommandArgs; len(got) != 2 || got[0] != "-p" || got[1] != "borg" {
+		t.Fatalf("bob CommandArgs = %v, want [-p borg]", got)
+	}
+	if got := rec.configs[1].CommandArgs; len(got) != 2 || got[0] != "-p" || got[1] != "alice" {
+		t.Fatalf("alice CommandArgs = %v, want [-p alice]", got)
+	}
+	t.Cleanup(m.StopAll)
+}
+
+// TestManager_GetOrCreatePersona_SamePersonaDedups pins that the same
+// persona requested twice returns the cached session, and that a concurrent
+// second request dedups through the pending map (per-persona startWait).
+func TestManager_GetOrCreatePersona_SamePersonaDedups(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{delay: 30 * time.Millisecond}
+	m := NewManager(testACPConfig(true, 4), testAgents(
+		config.ACPAgentEntry{ID: "hermes", Command: []string{"hermes", "acp"}, Enabled: true},
+	))
+	attachStart(m, rec)
+
+	ctx := context.Background()
+	var first, second *Session
+	var err1, err2 error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		first, err1 = m.GetOrCreatePersona(ctx, "hermes", "bob", "/work", PersonaOpts{})
+	}()
+	go func() {
+		defer wg.Done()
+		second, err2 = m.GetOrCreatePersona(ctx, "hermes", "bob", "/work", PersonaOpts{})
+	}()
+	wg.Wait()
+	if err1 != nil || err2 != nil {
+		t.Fatalf("errors = %v/%v, want nil/nil", err1, err2)
+	}
+	if first != second {
+		t.Fatal("concurrent same-persona requests returned different sessions")
+	}
+	if rec.calls() != 1 {
+		t.Fatalf("start called %d times, want 1 (pending dedup per persona)", rec.calls())
+	}
+	// a cached hit does not re-start either
+	third, err := m.GetOrCreatePersona(ctx, "hermes", "bob", "/work", PersonaOpts{})
+	if err != nil {
+		t.Fatalf("cached GetOrCreatePersona: %v", err)
+	}
+	if third != first {
+		t.Fatal("cached GetOrCreatePersona returned a different session")
+	}
+	if rec.calls() != 1 {
+		t.Fatalf("start called %d times after cached hit, want 1", rec.calls())
+	}
+	t.Cleanup(m.StopAll)
+}
+
+// TestManager_GetOrCreate_DelegatesNoPersona pins the back-compat lane:
+// GetOrCreate stamps an empty persona, empty CommandArgs, and the catalog
+// defaults — byte-identical to the pre-persona SessionConfig — and shares
+// the map lane with GetOrCreatePersona(persona="").
+func TestManager_GetOrCreate_DelegatesNoPersona(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{}
+	m := NewManager(testACPConfig(true, 4), testAgents(
+		config.ACPAgentEntry{ID: "echo", Command: []string{"agent"}, Env: map[string]string{"K": "V"}, Enabled: true},
+	))
+	attachStart(m, rec)
+
+	ctx := context.Background()
+	viaLegacy, err := m.GetOrCreate(ctx, "echo", "/work")
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+	// persona "" through the new method hits the SAME key: no second start
+	viaExplicit, err := m.GetOrCreatePersona(ctx, "echo", "", "/work", PersonaOpts{})
+	if err != nil {
+		t.Fatalf("GetOrCreatePersona empty persona: %v", err)
+	}
+	if viaLegacy != viaExplicit {
+		t.Fatal("GetOrCreate and GetOrCreatePersona(\"\") returned different sessions")
+	}
+	if rec.calls() != 1 {
+		t.Fatalf("start called %d times, want 1", rec.calls())
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	sc := rec.configs[0]
+	if sc.Persona != "" {
+		t.Fatalf("SessionConfig.Persona = %q, want empty (no-persona lane)", sc.Persona)
+	}
+	if sc.CommandArgs != nil {
+		t.Fatalf("SessionConfig.CommandArgs = %v, want nil (byte-identical legacy shape)", sc.CommandArgs)
+	}
+	if sc.AgentID != "echo" || sc.Cwd != "/work" || sc.Env["K"] != "V" || sc.PermissionMode != "permissive" {
+		t.Fatalf("legacy SessionConfig drifted: %+v", sc)
+	}
+	t.Cleanup(m.StopAll)
+}
+
+// TestManager_GetOrCreatePersona_MaxAgentsCountsPersonas pins that the cap
+// now bounds total persona sessions: two personas on one agent exhaust
+// MaxAgents=2 and a third hits ErrMaxAgents.
+func TestManager_GetOrCreatePersona_MaxAgentsCountsPersonas(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{}
+	m := NewManager(testACPConfig(true, 2), testAgents(
+		config.ACPAgentEntry{ID: "hermes", Command: []string{"hermes", "acp"}, Enabled: true},
+	))
+	attachStart(m, rec)
+
+	ctx := context.Background()
+	if _, err := m.GetOrCreatePersona(ctx, "hermes", "bob", "/work", PersonaOpts{}); err != nil {
+		t.Fatalf("bob: %v", err)
+	}
+	if _, err := m.GetOrCreatePersona(ctx, "hermes", "alice", "/work", PersonaOpts{}); err != nil {
+		t.Fatalf("alice: %v", err)
+	}
+	_, err := m.GetOrCreatePersona(ctx, "hermes", "carol", "/work", PersonaOpts{})
+	if !errors.Is(err, ErrMaxAgents) {
+		t.Fatalf("error = %v, want ErrMaxAgents (cap counts persona sessions)", err)
+	}
+	t.Cleanup(m.StopAll)
+}
+
+// TestManager_GetOrCreatePersona_CwdOverride pins the opts.Cwd precedence:
+// an explicit Cwd beats both entry.Cwd and the workdir argument.
+func TestManager_GetOrCreatePersona_CwdOverride(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{}
+	m := NewManager(testACPConfig(true, 4), testAgents(
+		config.ACPAgentEntry{ID: "hermes", Command: []string{"agent"}, Cwd: "/catalog/cwd", Enabled: true},
+	))
+	attachStart(m, rec)
+
+	ctx := context.Background()
+	if _, err := m.GetOrCreatePersona(ctx, "hermes", "bob", "/session/workdir",
+		PersonaOpts{Cwd: "/persona/cwd"}); err != nil {
+		t.Fatalf("GetOrCreatePersona: %v", err)
+	}
+	// empty opts.Cwd keeps the existing resolution (entry.Cwd wins)
+	if _, err := m.GetOrCreatePersona(ctx, "hermes", "alice", "/session/workdir",
+		PersonaOpts{}); err != nil {
+		t.Fatalf("GetOrCreatePersona alice: %v", err)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if got := rec.configs[0].Cwd; got != "/persona/cwd" {
+		t.Fatalf("bob Cwd = %q, want /persona/cwd (opts override)", got)
+	}
+	if got := rec.configs[1].Cwd; got != "/catalog/cwd" {
+		t.Fatalf("alice Cwd = %q, want /catalog/cwd (entry wins over workdir)", got)
+	}
+	t.Cleanup(m.StopAll)
+}
+
+// TestManager_GetOrCreatePersona_PermissionModeOverride pins that the opts
+// override participates in the SAME conditional stamps: a human override on
+// a permissive manager stamps the relay seam; a decision override stamps
+// the decision seam + threshold; a permissive override on a human manager
+// stamps NEITHER.
+func TestManager_GetOrCreatePersona_PermissionModeOverride(t *testing.T) {
+	t.Parallel()
+
+	t.Run("human_override_stamps_relay", func(t *testing.T) {
+		rec := &startRecorder{}
+		rl := NewRelay()
+		notif := &stubNotifier{listener: true}
+		acpCfg := testACPConfig(true, 4)
+		acpCfg.PermissionMode = "permissive"
+		acpCfg.RelayTimeout = 42
+		m := NewManager(acpCfg, testAgents(
+			config.ACPAgentEntry{ID: "hermes", Command: []string{"agent"}, Enabled: true},
+		))
+		attachStart(m, rec)
+		m.SetPermissionRelay(rl, notif)
+
+		if _, err := m.GetOrCreatePersona(context.Background(), "hermes", "bob", "/work",
+			PersonaOpts{PermissionMode: "human"}); err != nil {
+			t.Fatalf("GetOrCreatePersona: %v", err)
+		}
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		sc := rec.configs[0]
+		if sc.PermissionMode != "human" {
+			t.Fatalf("PermissionMode = %q, want human (override)", sc.PermissionMode)
+		}
+		if sc.Relay != rl || sc.Notifier != PermissionNotifier(notif) {
+			t.Fatalf("human override did not stamp relay/notifier: %+v", sc)
+		}
+		if sc.RelayTimeout != 42*time.Second {
+			t.Fatalf("RelayTimeout = %v, want 42s", sc.RelayTimeout)
+		}
+		if sc.Decision != nil {
+			t.Fatalf("Decision = %v, want nil (override is human, not decision)", sc.Decision)
+		}
+		t.Cleanup(m.StopAll)
+	})
+
+	t.Run("decision_override_stamps_decision_seam", func(t *testing.T) {
+		rec := &startRecorder{}
+		dec := &stubDecisioner{available: true}
+		acpCfg := testACPConfig(true, 4)
+		acpCfg.PermissionMode = "permissive"
+		acpCfg.DecisionThreshold = 0.4
+		m := NewManager(acpCfg, testAgents(
+			config.ACPAgentEntry{ID: "hermes", Command: []string{"agent"}, Enabled: true},
+		))
+		attachStart(m, rec)
+		m.SetDecisionClient(dec)
+
+		// opts threshold overrides the cfg value
+		if _, err := m.GetOrCreatePersona(context.Background(), "hermes", "bob", "/work",
+			PersonaOpts{PermissionMode: "decision", DecisionThreshold: 0.9}); err != nil {
+			t.Fatalf("GetOrCreatePersona: %v", err)
+		}
+		// zero opts threshold falls back to cfg
+		if _, err := m.GetOrCreatePersona(context.Background(), "hermes", "alice", "/work",
+			PersonaOpts{PermissionMode: "decision"}); err != nil {
+			t.Fatalf("GetOrCreatePersona alice: %v", err)
+		}
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		bob := rec.configs[0]
+		if bob.Decision != Decisioner(dec) {
+			t.Fatalf("decision override did not stamp the seam: %+v", bob)
+		}
+		if bob.DecisionThreshold != 0.9 {
+			t.Fatalf("bob DecisionThreshold = %v, want 0.9 (opts override)", bob.DecisionThreshold)
+		}
+		alice := rec.configs[1]
+		if alice.DecisionThreshold != 0.4 {
+			t.Fatalf("alice DecisionThreshold = %v, want 0.4 (cfg fallback)", alice.DecisionThreshold)
+		}
+		if bob.Relay != nil || alice.Relay != nil {
+			t.Fatal("decision-without-escalate must not stamp the relay")
+		}
+		t.Cleanup(m.StopAll)
+	})
+
+	t.Run("permissive_override_stamps_nothing", func(t *testing.T) {
+		rec := &startRecorder{}
+		rl := NewRelay()
+		notif := &stubNotifier{listener: true}
+		acpCfg := testACPConfig(true, 4)
+		acpCfg.PermissionMode = "human"
+		acpCfg.RelayTimeout = 42
+		m := NewManager(acpCfg, testAgents(
+			config.ACPAgentEntry{ID: "hermes", Command: []string{"agent"}, Enabled: true},
+		))
+		attachStart(m, rec)
+		m.SetPermissionRelay(rl, notif)
+		m.SetDecisionClient(&stubDecisioner{available: true})
+
+		if _, err := m.GetOrCreatePersona(context.Background(), "hermes", "bob", "/work",
+			PersonaOpts{PermissionMode: "permissive"}); err != nil {
+			t.Fatalf("GetOrCreatePersona: %v", err)
+		}
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		sc := rec.configs[0]
+		if sc.PermissionMode != "permissive" {
+			t.Fatalf("PermissionMode = %q, want permissive (override)", sc.PermissionMode)
+		}
+		if sc.Relay != nil || sc.Notifier != nil || sc.RelayTimeout != 0 {
+			t.Fatalf("permissive override leaked relay stamps: %+v", sc)
+		}
+		if sc.Decision != nil || sc.DecisionThreshold != 0 {
+			t.Fatalf("permissive override leaked decision stamps: %+v", sc)
+		}
+		t.Cleanup(m.StopAll)
+	})
+}
+
+// TestManager_GetOrCreatePersona_CommandArgsNeverMutatesCatalog pins that
+// opts.CommandArgs are copied, not appended into the catalog entry's
+// Command slice (aliasing guard).
+func TestManager_GetOrCreatePersona_CommandArgsNeverMutatesCatalog(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{}
+	catalog := testAgents(
+		config.ACPAgentEntry{ID: "hermes", Command: []string{"hermes", "acp"}, Enabled: true},
+	)
+	m := NewManager(testACPConfig(true, 4), catalog)
+	attachStart(m, rec)
+
+	ctx := context.Background()
+	if _, err := m.GetOrCreatePersona(ctx, "hermes", "bob", "/work",
+		PersonaOpts{CommandArgs: []string{"-p", "borg"}}); err != nil {
+		t.Fatalf("GetOrCreatePersona: %v", err)
+	}
+	rec.mu.Lock()
+	sc := rec.configs[0]
+	rec.mu.Unlock()
+	if len(sc.Command) != 2 || sc.Command[0] != "hermes" || sc.Command[1] != "acp" {
+		t.Fatalf("SessionConfig.Command = %v, want untouched [hermes acp]", sc.Command)
+	}
+	// mutating the stamped CommandArgs must not touch the catalog or the
+	// SessionConfig.Command backing array
+	sc.CommandArgs[0] = "mutated"
+	rec.mu.Lock()
+	fresh := rec.configs[0]
+	rec.mu.Unlock()
+	if got := m.Agents()[0].Command; len(got) != 2 || got[0] != "hermes" || got[1] != "acp" {
+		t.Fatalf("catalog Command mutated: %v", got)
+	}
+	if fresh.Command[1] != "acp" {
+		t.Fatalf("SessionConfig.Command aliased CommandArgs: %v", fresh.Command)
+	}
+	t.Cleanup(m.StopAll)
+}
+
+// TestManager_StopPersona pins the per-persona stop lane: StopPersona
+// closes only the named persona's session; the sibling and the no-persona
+// lane survive. LiveSessions labels persona sessions "agent/persona".
+func TestManager_StopPersona(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{}
+	m := NewManager(testACPConfig(true, 4), testAgents(
+		config.ACPAgentEntry{ID: "hermes", Command: []string{"agent"}, Enabled: true},
+	))
+	attachStart(m, rec)
+
+	ctx := context.Background()
+	plain, err := m.GetOrCreate(ctx, "hermes", "/work")
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+	bob, err := m.GetOrCreatePersona(ctx, "hermes", "bob", "/work", PersonaOpts{})
+	if err != nil {
+		t.Fatalf("GetOrCreatePersona bob: %v", err)
+	}
+	alice, err := m.GetOrCreatePersona(ctx, "hermes", "alice", "/work", PersonaOpts{})
+	if err != nil {
+		t.Fatalf("GetOrCreatePersona alice: %v", err)
+	}
+
+	live := m.LiveSessions()
+	if len(live) != 3 {
+		t.Fatalf("LiveSessions = %v, want 3 entries", live)
+	}
+	if live["hermes"] != plain.State() {
+		t.Fatalf("LiveSessions[hermes] = %v, want the no-persona state", live["hermes"])
+	}
+	if _, ok := live["hermes/bob"]; !ok {
+		t.Fatalf("LiveSessions missing hermes/bob: %v", live)
+	}
+
+	if err := m.StopPersona("hermes", "bob"); err != nil {
+		t.Fatalf("StopPersona: %v", err)
+	}
+	if bob.State() != StateClosed {
+		t.Fatalf("bob state = %v, want StateClosed", bob.State())
+	}
+	if alice.State() == StateClosed || plain.State() == StateClosed {
+		t.Fatal("StopPersona closed a sibling session")
+	}
+	live = m.LiveSessions()
+	if _, ok := live["hermes/bob"]; ok {
+		t.Fatalf("LiveSessions still lists hermes/bob: %v", live)
+	}
+	// legacy Stop only touches the no-persona lane
+	if err := m.Stop("hermes"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if plain.State() != StateClosed {
+		t.Fatalf("plain state = %v, want StateClosed", plain.State())
+	}
+	if alice.State() == StateClosed {
+		t.Fatal("legacy Stop closed a persona session")
+	}
+	// StopAll closes the rest; idempotent
+	m.StopAll()
+	if alice.State() != StateClosed {
+		t.Fatalf("alice state = %v, want StateClosed after StopAll", alice.State())
+	}
+}
+
+// TestManager_GetOrCreatePersona_DisabledAndNotFound pins that the persona
+// lane honors the same gates as the legacy lane.
+func TestManager_GetOrCreatePersona_DisabledAndNotFound(t *testing.T) {
+	t.Parallel()
+
+	rec := &startRecorder{}
+	off := NewManager(testACPConfig(false, 3), testAgents(
+		config.ACPAgentEntry{ID: "hermes", Command: []string{"agent"}, Enabled: true},
+	))
+	attachStart(off, rec)
+	if _, err := off.GetOrCreatePersona(context.Background(), "hermes", "bob", "/work", PersonaOpts{}); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("error = %v, want ErrDisabled", err)
+	}
+
+	on := NewManager(testACPConfig(true, 3), testAgents(
+		config.ACPAgentEntry{ID: "hermes", Command: []string{"agent"}, Enabled: false},
+	))
+	attachStart(on, rec)
+	if _, err := on.GetOrCreatePersona(context.Background(), "hermes", "bob", "/work", PersonaOpts{}); !errors.Is(err, ErrAgentDisabled) {
+		t.Fatalf("error = %v, want ErrAgentDisabled", err)
+	}
+	if _, err := on.GetOrCreatePersona(context.Background(), "missing", "bob", "/work", PersonaOpts{}); !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("error = %v, want ErrAgentNotFound", err)
+	}
+	if rec.calls() != 0 {
+		t.Fatalf("start called %d times, want 0 (gated paths must not spawn)", rec.calls())
+	}
+}

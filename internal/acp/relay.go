@@ -113,6 +113,7 @@ func capPermissionOptions(options []PermissionOption) []PermissionOption {
 type PendingPermission struct {
 	ID        string // pkg/id.Generate("perm")
 	AgentID   string // catalog agent id
+	Persona   string // multi-session persona name ("" = no-persona lane)
 	SessionID string // ACP sessionId
 	RequestID any    // JSON-RPC id echoed for resolve calls
 	Summary   string // bounded 300-rune render of the raw params
@@ -296,11 +297,12 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 	p := PendingPermission{
 		ID:        id.Generate("perm"),
 		AgentID:   s.cfg.AgentID,
+		Persona:   s.cfg.Persona,
 		SessionID: s.getSessionID(),
 		RequestID: requestID,
 		// Reuse the decision lane's bounded render (drift 2) — one
 		// 300-rune budget, not two.
-		Summary: renderDecisionState(s.cfg.AgentID, rawParams),
+		Summary: renderDecisionState(s.cfg.AgentID, s.cfg.Persona, rawParams),
 		// Agent-offered options ride along for the surfaces (additive,
 		// capped — acp-always-allow leaf 01). Cap here so the published
 		// snapshot and the registry entry carry the same bounded array.
@@ -312,6 +314,7 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 		slog.Default().Warn("acp permission denied: human relay rejected the request",
 			"component", "acp",
 			"agent", s.cfg.AgentID,
+			"persona", s.cfg.Persona,
 			"pending", p.ID,
 			"reason", relayReasonFull,
 			"err", err,
@@ -329,6 +332,7 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 		slog.Default().Info("acp human permission relay: no listener, waiting for reconnect",
 			"component", "acp",
 			"agent", s.cfg.AgentID,
+			"persona", s.cfg.Persona,
 			"pending", p.ID,
 		)
 	}
@@ -355,6 +359,7 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 		slog.Default().Warn("acp permission denied: human relay timed out",
 			"component", "acp",
 			"agent", s.cfg.AgentID,
+			"persona", s.cfg.Persona,
 			"pending", p.ID,
 		)
 		s.emit(SessionEvent{Kind: "permission_resolved", Text: relayTextTimeout})
@@ -366,6 +371,7 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 		slog.Default().Warn("acp permission denied: transport closed during relay wait",
 			"component", "acp",
 			"agent", s.cfg.AgentID,
+			"persona", s.cfg.Persona,
 			"pending", p.ID,
 		)
 		s.emit(SessionEvent{Kind: "permission_resolved", Text: relayDecisionDeny})

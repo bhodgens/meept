@@ -125,10 +125,15 @@ func decidePermission(ctx context.Context, dec Decisioner, threshold float64, st
 // permission params enter the question state truncated, never whole.
 const decisionStateBudget = 300
 
-// renderDecisionState builds the question State: agent id + the raw
-// session/requestPermission params JSON, bounded. v1 parses nothing —
-// whatever the agent sent is what the decider sees (truncated).
-func renderDecisionState(agentID string, rawParams []byte) string {
+// renderDecisionState builds the question State: agent id (with the
+// persona suffix "agent/persona" when one is set, acp-employees dim 2B)
+// + the raw session/requestPermission params JSON, bounded. v1 parses
+// nothing — whatever the agent sent is what the decider sees (truncated).
+func renderDecisionState(agentID, persona string, rawParams []byte) string {
+	agent := agentID
+	if persona != "" {
+		agent += "/" + persona
+	}
 	params := string(rawParams)
 	if len([]rune(params)) > decisionStateBudget {
 		params = string([]rune(params)[:decisionStateBudget]) + "...(truncated)"
@@ -136,5 +141,5 @@ func renderDecisionState(agentID string, rawParams []byte) string {
 	if strings.TrimSpace(params) == "" {
 		params = "{}"
 	}
-	return fmt.Sprintf("Agent: %s\nPermission request: %s", agentID, params)
+	return fmt.Sprintf("Agent: %s\nPermission request: %s", agent, params)
 }

@@ -1,6 +1,10 @@
 // Fake ACP agent for internal/acp tests. Speaks newline JSON-RPC on stdio.
 //
-//	-mode echo|slow|die|badhandshake|permission|permission-always|selfapprove
+//	-mode echo|slow|die|badhandshake|permission|permission-always|selfapprove|argv
+//
+// argv: session/prompt replies with the fakeagent's own os.Args tail
+// ("argv=<a1>,<a2>,...") so tests can assert the spawn argv (persona-lane
+// CommandArgs concatenation).
 //
 // selfapprove (audit M5 e2e): after emitting session/requestPermission the
 // agent dials the DAEMON's own Unix RPC socket (-socket) and tries to answer
@@ -58,10 +62,16 @@ func reply(id *int64, result any) {
 }
 
 func main() {
-	mode := flag.String("mode", "echo", "echo|slow|die|badhandshake|permission|permission-always|selfapprove")
-	socket := flag.String("socket", "", "daemon unix RPC socket (selfapprove mode)")
-	resultFile := flag.String("result-file", "", "write the selfapprove probe result here (selfapprove mode)")
-	flag.Parse()
+	// persona-lane argv tests pass extra undefined flags (e.g. -p borg)
+	// after the catalog command; ContinueOnError keeps the process alive
+	// so the argv echo can read os.Args directly.
+	fs := flag.NewFlagSet("fakeagent", flag.ContinueOnError)
+	mode := fs.String("mode", "echo", "echo|slow|die|badhandshake|permission|permission-always|selfapprove|argv")
+	socket := fs.String("socket", "", "daemon unix RPC socket (selfapprove mode)")
+	resultFile := fs.String("result-file", "", "write the selfapprove probe result here (selfapprove mode)")
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "fakeagent flag parse: %v\n", err)
+	}
 
 	dec := json.NewDecoder(os.Stdin)
 	sessionID := "sess-fake"
@@ -178,6 +188,10 @@ func main() {
 				}
 			}
 			text := promptText(m.Params)
+			if *mode == "argv" {
+				// echo the spawn argv tail for CommandArgs assertions
+				text = "argv=" + strings.Join(os.Args[1:], ",")
+			}
 			if replyEcho != "" {
 				text += " perm:" + replyEcho
 			}

@@ -1766,3 +1766,115 @@ func TestRelay_ResolveLegacyUnattributed(t *testing.T) {
 		t.Fatalf("zero approver render = %q, want unknown", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Persona lane (acp-employees dim 2B)
+// ---------------------------------------------------------------------------
+
+// TestSession_CommandArgsAppendedToSpawnArgv pins that Start concatenates
+// Command + CommandArgs into the subprocess argv (asserted end-to-end via
+// the fakeagent argv mode, which echoes its own os.Args tail).
+func TestSession_CommandArgsAppendedToSpawnArgv(t *testing.T) {
+	bin := fakeAgentBin(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	s, err := Start(ctx, SessionConfig{
+		AgentID:     "hermes",
+		Persona:     "bob",
+		Command:     []string{bin, "-mode", "argv"},
+		CommandArgs: []string{"-p", "borg"},
+		Cwd:         t.TempDir(),
+		DialTimeout: 30 * time.Second,
+		CallTimeout: 20 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Logf("close: %v", err)
+		}
+	})
+	got, err := s.Send(ctx, "argv?")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	// fakeagent echoes "argv=<os.Args[1:] joined by ,>" — the CommandArgs
+	// must ride AFTER the catalog command tail, untouched by the flag pkg
+	// (unknown flags after flag.Parse are left in os.Args).
+	want := "argv=-mode,argv,-p,borg"
+	if got != want {
+		t.Fatalf("spawn argv echo = %q, want %q", got, want)
+	}
+}
+
+// TestSession_PersonaFlowsIntoRelayPending pins that a persona-stamped
+// session carries the persona on the PendingPermission record and renders
+// it into the bounded summary as "agent/persona".
+func TestSession_PersonaFlowsIntoRelayPending(t *testing.T) {
+	rl := NewRelay()
+	notif := &stubNotifier{listener: true}
+	cfg := humanRelayCfg(rl, notif, 5*time.Second)
+	cfg.Persona = "bob"
+	s, fromClient, toClient := decisionHarnessSession(t, cfg)
+
+	sendPermissionRequest(t, toClient, "")
+	reqEv := waitForEvent(t, s, "permission_requested", 5*time.Second)
+	p := notif.lastRequested()
+	if p.Persona != "bob" {
+		t.Fatalf("PendingPermission.Persona = %q, want bob", p.Persona)
+	}
+	if p.AgentID != "human" {
+		t.Fatalf("PendingPermission.AgentID = %q, want the catalog id", p.AgentID)
+	}
+	if !strings.Contains(p.Summary, "human/bob") {
+		t.Fatalf("summary %q must render the persona (human/bob)", p.Summary)
+	}
+	// resolve so the wait goroutine exits cleanly
+	if err := rl.Resolve(reqEv.Text, "deny"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	readReplyFrame(t, fromClient)
+}
+
+// TestRenderDecisionState_Persona pins the summary render: the persona
+// suffix appears when set, the shape is unchanged when empty, and the
+// 300-rune truncation budget still applies to the params body.
+func TestRenderDecisionState_Persona(t *testing.T) {
+	t.Parallel()
+
+	got := renderDecisionState("hermes", "bob", []byte(`{"x":1}`))
+	if !strings.Contains(got, "Agent: hermes/bob\n") {
+		t.Fatalf("render = %q, want the agent/persona header", got)
+	}
+	plain := renderDecisionState("hermes", "", []byte(`{"x":1}`))
+	if !strings.Contains(plain, "Agent: hermes\n") || strings.Contains(plain, "hermes/") {
+		t.Fatalf("no-persona render = %q, want the bare agent header", plain)
+	}
+	// truncation budget unchanged: >300 runes get the ...(truncated) tail
+	long := strings.Repeat("あ", decisionStateBudget+50)
+	tr := renderDecisionState("hermes", "bob", []byte(long))
+	if !strings.HasSuffix(tr, "...(truncated)") {
+		t.Fatalf("truncation lost: tail = %q", tr[len(tr)-30:])
+	}
+	if strings.Count(tr, "あ") != decisionStateBudget {
+		t.Fatalf("rune budget changed: got %d runes, want %d", strings.Count(tr, "あ"), decisionStateBudget)
+	}
+}
+
+// TestSession_DecisionLanePersonaInQuestionState pins that the decision
+// lane's question State carries the persona render too (shared helper).
+func TestSession_DecisionLanePersonaInQuestionState(t *testing.T) {
+	stub := &stubDecisioner{available: true, res: allowResult(1.0)}
+	cfg := decisionCfg(stub, 0.5)
+	cfg.AgentID = "hermes"
+	cfg.Persona = "bob"
+	_, fromClient, toClient := decisionHarnessSession(t, cfg)
+
+	sendPermissionRequest(t, toClient, "")
+	readReplyFrame(t, fromClient)
+	q := stub.lastQuestion()
+	if !strings.Contains(q.State, "Agent: hermes/bob\n") {
+		t.Fatalf("decision question state = %q, want the hermes/bob header", q.State)
+	}
+}
