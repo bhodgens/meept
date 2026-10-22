@@ -89,11 +89,17 @@ func (t *SessionTracker) RecordIntent(sessionID string, intent *Intent, agentID 
 	}
 }
 
-// GetSession returns session state (read-only lookup, no cleanup).
+// GetSession returns a deep copy of session state (read-only lookup, no cleanup).
+// S1-5: Previously returned a live pointer, allowing callers to race with
+// RecordIntent/RecordMetrics mutations. Now returns a snapshot copy.
 func (t *SessionTracker) GetSession(sessionID string) *TrackerSessionState {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.sessions[sessionID]
+	state, ok := t.sessions[sessionID]
+	if !ok {
+		return nil
+	}
+	return cloneTrackerSessionState(state)
 }
 
 // Cleanup removes expired sessions. Must be called with full Lock.
@@ -177,6 +183,24 @@ func (t *SessionTracker) GetIntentCounts(sessionID string) map[string]int {
 		counts[typ]++
 	}
 	return counts
+}
+
+// cloneTrackerSessionState creates a deep copy of TrackerSessionState so callers
+// can safely iterate slices without racing against RecordIntent/RecordMetrics.
+func cloneTrackerSessionState(state *TrackerSessionState) *TrackerSessionState {
+	cp := *state // shallow copy (value fields + slice/map headers)
+	// Deep-copy IntentHistory slice
+	if state.IntentHistory != nil {
+		cp.IntentHistory = make([]*Intent, len(state.IntentHistory))
+		for i, intent := range state.IntentHistory {
+			if intent != nil {
+				icp := *intent
+				cp.IntentHistory[i] = &icp
+			}
+		}
+	}
+	// Metrics is a value type (no pointers/slices), so the shallow copy is safe.
+	return &cp
 }
 
 func (t *SessionTracker) getOrCreateSession(sessionID string) *TrackerSessionState {
@@ -331,7 +355,9 @@ func (t *SessionTracker) RecordMetrics(sessionID string, metrics SessionMetrics)
 	state.Metrics = metrics
 }
 
-// GetIdleSessions returns sessions that have been idle for the specified duration.
+// GetIdleSessions returns deep copies of sessions that have been idle for the
+// specified duration. S1-9: Previously returned live pointers; now returns
+// snapshots so callers can safely iterate without racing mutations.
 func (t *SessionTracker) GetIdleSessions(idleDuration time.Duration) []*TrackerSessionState {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -341,7 +367,7 @@ func (t *SessionTracker) GetIdleSessions(idleDuration time.Duration) []*TrackerS
 
 	for _, state := range t.sessions {
 		if now.Sub(state.LastActivityAt) > idleDuration {
-			idle = append(idle, state)
+			idle = append(idle, cloneTrackerSessionState(state))
 		}
 	}
 

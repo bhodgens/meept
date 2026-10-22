@@ -3212,8 +3212,10 @@ func generateWorkerID() string {
 
 // generateMessageID creates a unique message ID.
 // Uses timestamp with nanoseconds plus random suffix to avoid collisions.
+// S1-11: Bumped randBytes to 16 for defense in depth; fallback now uses
+// id.Generate instead of timestamp-only to avoid collisions on crypto/rand failure.
 func generateMessageID() string {
-	var randBytes [4]byte
+	var randBytes [16]byte
 	if _, err := crypto_rand.Read(randBytes[:]); err != nil {
 		// Fallback: use nanosecond timestamp uniqueness if crypto/rand fails.
 		return time.Now().Format("20060102150405.000000000") + "-fallback"

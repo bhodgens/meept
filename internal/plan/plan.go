@@ -1,9 +1,9 @@
 package plan
 
 import (
-	"fmt"
-	"sync/atomic"
 	"time"
+
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // PlanState represents the lifecycle state of a plan.
@@ -111,25 +111,21 @@ type PlanSignoff struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-var planIDCounter atomic.Uint64
-
+// generatePlanID creates a unique, unpredictable plan ID using crypto/rand
+// (S2-19). This replaces the previous timestamp+counter approach whose IDs
+// could collide across restarts.
 func generatePlanID() string {
-	seq := planIDCounter.Add(1)
-	return fmt.Sprintf("plan-%s-%04d", time.Now().UTC().Format("20060102150405"), seq)
+	return id.Generate("plan-")
 }
 
-var phaseIDCounter atomic.Uint64
-
+// generatePhaseID creates a unique phase ID (S2-19).
 func generatePhaseID() string {
-	seq := phaseIDCounter.Add(1)
-	return fmt.Sprintf("phase-%s-%04d", time.Now().UTC().Format("20060102150405"), seq)
+	return id.Generate("phase-")
 }
 
-var signoffIDCounter atomic.Uint64
-
+// generateSignoffID creates a unique signoff ID (S2-19).
 func generateSignoffID() string {
-	seq := signoffIDCounter.Add(1)
-	return fmt.Sprintf("signoff-%s-%04d", time.Now().UTC().Format("20060102150405"), seq)
+	return id.Generate("signoff-")
 }
 
 // PlanningContext holds the result of a Prometheus-style pre-decomposition

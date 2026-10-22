@@ -101,6 +101,17 @@ func (gl *GoLinter) TypeCheck(ctx context.Context, dirPath string) ([]LinterResu
 	}
 
 	results, _ := parseGoErrors(stderr.String(), "")
+	// If parsing produced no matches but stderr has content, return the raw
+	// output as a build error rather than silently dropping it (S2-21).
+	if len(results) == 0 && stderr.Len() > 0 {
+		return []LinterResult{{
+			File:     "",
+			Line:     0,
+			Message:  strings.TrimSpace(stderr.String()),
+			Severity: "error",
+			Rule:     "build",
+		}}, nil
+	}
 	return results, nil
 }
 

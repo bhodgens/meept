@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
@@ -52,6 +53,7 @@ type EscalationLevel struct {
 	FirstFailure string    `json:"first_failure,omitempty"`
 	ReplanResult string    `json:"replan_result,omitempty"`
 	Timestamp    time.Time `json:"timestamp"`
+	Seq          uint64    `json:"seq"` // Monotonic ordering tiebreaker (S1-8)
 }
 
 // EscalationManager handles task escalation and re-planning when tasks fail.
@@ -66,6 +68,10 @@ type EscalationManager struct {
 
 	// Track escalation levels per task
 	escalations map[string]*EscalationLevel // taskID -> current level
+
+	// seq is a monotonic counter providing ordering that survives NTP
+	// clock adjustments (S1-8). Accessed atomically.
+	seq atomic.Uint64
 }
 
 // EscalationManagerConfig holds configuration for creating an EscalationManager.
@@ -171,6 +177,7 @@ func (em *EscalationManager) Escalate(ctx context.Context, failure FailureContex
 				OriginalTask: originalTaskDesc,
 				FirstFailure: failure.Error,
 				Timestamp:    time.Now(),
+				Seq:          em.seq.Add(1),
 			}
 			em.escalations[failure.TaskID] = level
 		}

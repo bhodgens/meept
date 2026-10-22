@@ -51,6 +51,19 @@ type TeamSessionState struct {
 	StartTime     time.Time                    `json:"start_time"`
 }
 
+// TeamSessionStateSnapshot is a mutex-free deep copy of TeamSessionState,
+// safe for callers to iterate without racing concurrent writes (S1-10).
+type TeamSessionStateSnapshot struct {
+	SessionID     string                       `json:"session_id"`
+	TaskID        string                       `json:"task_id"`
+	LeadAgent     string                       `json:"lead_agent"`
+	Roster        []string                     `json:"roster"`
+	Phase         string                       `json:"phase"`
+	MemberResults map[string]*TeamMemberResult `json:"member_results,omitempty"`
+	FinalOutput   string                       `json:"final_output,omitempty"`
+	StartTime     time.Time                    `json:"start_time"`
+}
+
 // SubtaskAssignment holds a subtask assignment for a team member.
 type SubtaskAssignment struct {
 	AgentID  string
@@ -379,19 +392,41 @@ func (to *TeamOrchestrator) AssignSubtask(ctx context.Context, sessionID string,
 	return nil
 }
 
-// Status returns the current status of a team session.
-func (to *TeamOrchestrator) Status(ctx context.Context, sessionID string) (*TeamSessionState, error) {
+// Status returns a snapshot of the current status of a team session.
+// S1-10: Previously returned a live pointer whose MemberResults map could
+// be mutated by ReceiveResult during caller iteration. Now returns a deep
+// copy (TeamSessionStateSnapshot) with no mutex.
+func (to *TeamOrchestrator) Status(ctx context.Context, sessionID string) (*TeamSessionStateSnapshot, error) {
 	val, ok := to.teams.Load(sessionID)
 	if !ok {
 		return nil, fmt.Errorf("team %q not found", sessionID)
 	}
-	// Caller receives a pointer to the live state. Document that callers
-	// should not mutate it without the struct's mutex. Acquire the read lock
-	// briefly to ensure we don't hand back a state in the middle of a write.
 	state := val.(*TeamSessionState)
 	state.mu.RLock()
 	defer state.mu.RUnlock()
-	return state, nil
+
+	// Deep-copy the MemberResults map
+	memberResults := make(map[string]*TeamMemberResult, len(state.MemberResults))
+	for k, v := range state.MemberResults {
+		if v != nil {
+			cp := *v
+			memberResults[k] = &cp
+		}
+	}
+
+	// Deep-copy the Roster slice
+	roster := append([]string(nil), state.Roster...)
+
+	return &TeamSessionStateSnapshot{
+		SessionID:     state.SessionID,
+		TaskID:        state.TaskID,
+		LeadAgent:     state.LeadAgent,
+		Roster:        roster,
+		Phase:         state.Phase,
+		MemberResults: memberResults,
+		FinalOutput:   state.FinalOutput,
+		StartTime:     state.StartTime,
+	}, nil
 }
 
 // BroadcastMessage sends a message to team members via the per-session

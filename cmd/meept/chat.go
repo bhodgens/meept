@@ -418,7 +418,7 @@ func runTUI(cwd string) error {
 
 func runTUIWithSession(cwd, sessionID string) error {
 	// The TUI requires RPC for event streaming and real-time updates.
-	// If --transport=http is set, warn and fall back to RPC.
+	// HTTP transport is not yet supported by the TUI.
 	if transportFlag == "http" {
 		return fmt.Errorf("TUI does not yet support --transport=http; use the default RPC transport or the Flutter web UI")
 	}

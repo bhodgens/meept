@@ -1260,7 +1260,10 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	}
 
 	// 4. Classify primary intent
-	intent, _ := d.classifyIntent(ctx, resolvedInput, memCtx)
+	intent, classifyErr := d.classifyIntent(ctx, resolvedInput, memCtx)
+	if classifyErr != nil {
+		d.logger.Warn("classifyIntent failed", "err", classifyErr)
+	}
 
 	// 4.5. One-way session-state upgrade (docs/plans/
 	// quickplan-session-upgrade/): a boundary-lane verdict upgrades to
@@ -2257,7 +2260,10 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 			resolvedInput := d.resolveAnaphora(combinedInput, memCtx)
 
 			// Classify and route normally.
-			intent, _ := d.classifyIntent(ctx, resolvedInput, memCtx)
+			intent, classifyErr := d.classifyIntent(ctx, resolvedInput, memCtx)
+			if classifyErr != nil {
+				d.logger.Warn("classifyIntent failed", "err", classifyErr)
+			}
 			intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
 			intent.TrueAnalysis = analysis
 
