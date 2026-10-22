@@ -43,8 +43,13 @@ func (jl *JSLinter) CompileCheck(ctx context.Context, filePath, relPath, content
 func (jl *JSLinter) typeScriptCheck(ctx context.Context, filePath, relPath, content string) ([]LinterResult, error) {
 	// Check if typescript is available
 	if !isCommandAvailable("tsc") {
-		// Try npx tsc
-		cmd := exec.CommandContext(ctx, "npx", "--yes", "typescript", "--version")
+		// Try npx tsc. Pin the major (typescript@5) so the --yes auto-install
+		// cannot fetch an unpinned @latest — a compromised or breaking
+		// typescript publish would then reach the probe (audit M11). Capped to
+		// the major still allows minor/patch updates; fully offline (no
+		// network fetch) is a follow-up decision since it would make JS/TS
+		// lint skip rather than auto-fetch when tsc is not locally installed.
+		cmd := exec.CommandContext(ctx, "npx", "--yes", "typescript@5", "--version")
 		if cmd.Run() != nil {
 			return nil, nil // Skip if not available
 		}
