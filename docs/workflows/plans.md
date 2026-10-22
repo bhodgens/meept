@@ -203,6 +203,20 @@ When a plan enters `pending_approval`, an inline message appears in chat:
 +--------------------------------------------------------------+
 ```
 
+Notification scoping: `plan.submitting` / `plan.completed` /
+`plan.confirmed` / `plan.rejected` events carry the plan's `session_id`
+(its `SourceSession`). The TUI renders a notification ONLY in the chat of
+the owning session; an explicitly empty `session_id` marks a
+machine-originated (evolver sink) plan that belongs to no chat and is
+dropped from inline rendering — it surfaces in the plans tab instead. A
+missing `session_id` key (legacy publisher) still renders best-effort.
+
+The plans tab (`plan.list_by_session` RPC and the HTTP
+`/api/v1/sessions/{id}/plans` route) merges the session-less PENDING evolver
+sink plans into the listing, so every "plans tab to review" advertisement
+resolves to visible rows. Session-bound sink plans for other sessions never
+leak across the filter.
+
 ## CLI Commands
 
 ### `meept plans list` - List Plans

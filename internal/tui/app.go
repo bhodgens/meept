@@ -1756,11 +1756,30 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Plan lifecycle events - inline chat notifications
 			case "plan.submitting", "plan.completed", "plan.confirmed", "plan.rejected":
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					// Session scoping: render the notification ONLY in the
+					// chat that owns the plan. An explicitly empty
+					// session_id marks a machine-originated (evolver sink)
+					// plan that belongs to no chat — dropping it here stops
+					// the "Skill evolution" box flood inside unrelated user
+					// turns (observed live 2026-10-22). A MISSING key is a
+					// legacy publisher: keep rendering (best-effort). Both
+					// session accessors are checked: the app's active
+					// session and the chat transcript binding can differ
+					// briefly during a session switch, and the plan belongs
+					// to whichever one is showing the transcript.
+					if sid, hasSID := payloadMap["session_id"].(string); hasSID {
+						if sid == "" || (sid != a.ActiveSessionID() && sid != a.ChatSessionID()) {
+							break
+						}
+					}
 					planMsg := models.PlanNotificationMsg{
 						Timestamp: e.Timestamp,
 					}
 					if v, ok := payloadMap["plan_id"].(string); ok {
 						planMsg.PlanID = v
+					}
+					if v, ok := payloadMap["session_id"].(string); ok {
+						planMsg.SessionID = v
 					}
 					if v, ok := payloadMap["title"].(string); ok {
 						planMsg.Title = v

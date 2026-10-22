@@ -672,7 +672,13 @@ type PlanNotificationMsg struct {
 	StepCount  int
 	By         string // who confirmed/rejected
 	Reason     string // rejection reason
-	Timestamp  time.Time
+	// SessionID is the session the plan belongs to. Empty means the plan
+	// belongs to NO chat (machine-originated evolver sink plan): the
+	// event pump drops those instead of rendering them into whatever
+	// conversation happens to be open (observed live 2026-10-22: nine
+	// "Skill evolution" boxes flooded an unrelated review turn).
+	SessionID string
+	Timestamp time.Time
 }
 
 // SteeringInjectedMsg signals that a steering message was injected into the queue.
