@@ -15,6 +15,7 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/skills"
 )
@@ -1494,5 +1495,143 @@ func TestEvolver_RunCycle_PassDFillGap_NoAutoApply(t *testing.T) {
 	skillPath := filepath.Join(dir, expectedSlug, "SKILL.md")
 	if _, err := os.Stat(skillPath); err == nil {
 		t.Errorf("skill file should not exist when AutoApply=false: %s", skillPath)
+	}
+}
+
+// newDedupeTestEvolver builds an Evolver wired to a REAL PlanManager (temp
+// SQLite store + temp sink dir) with AutoApply=false and RequireApproval=true
+// (submitted plans stay in pending_approval instead of auto-approving).
+func newDedupeTestEvolver(t *testing.T, usage UsageTracker, writer *Writer, registry *skills.Registry) (*Evolver, *plan.PlanManager, plan.PlanStore) {
+	t.Helper()
+	logger := slog.Default()
+	dir := t.TempDir()
+	store, err := plan.NewSQLiteStore(filepath.Join(dir, "plans.db"), logger)
+	if err != nil {
+		t.Fatalf("failed to create plan store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	cfg := config.PlansConfig{
+		Mode: "off",
+		Storage: config.PlansStorageConfig{
+			ExternalPath: filepath.Join(dir, "sink", "evolver"),
+		},
+	}
+	cfg.Approval.RequireApproval = true
+	planMgr := plan.NewPlanManager(store, nil, cfg, nil, logger)
+
+	evoCfg := defaultEvolverConfig()
+	evoCfg.AutoApply = false
+	evolver := NewEvolver(
+		usage, nil, writer, registry, nil,
+		newTestVerifier(true), &mockLLMChatter{}, planMgr,
+		evoCfg, logger,
+	)
+	return evolver, planMgr, store
+}
+
+// TestEvolver_SkipsDuplicatePendingPlan pins the unbounded-duplicate bug
+// (observed live 2026-10-22: 639 pending_approval copies of ~36 proposals,
+// the same archive re-proposed up to 18 times). A proposal whose plan is
+// already OPEN (pending_approval) must be SKIPPED on the next cycle, not
+// re-planned.
+func TestEvolver_SkipsDuplicatePendingPlan(t *testing.T) {
+	skillName := "dup-archive-target"
+	skillContent := "---\nname: dup-archive-target\ndescription: bad\n---\n\nbody"
+
+	dir := t.TempDir()
+	writer := NewWriter(dir, slog.Default())
+	_ = writer.WriteSkill(skillName, skillContent)
+	registry := skills.NewRegistry()
+	parsed, _ := skills.ParseSkillFile(filepath.Join(dir, skillName, "SKILL.md"))
+	registry.Register(parsed)
+
+	usage := newStubUsageTracker()
+	usage.SetLowPerformers([]*UsageStats{
+		{SkillName: skillName, InjectCount: 30, Effectiveness: 0.01},
+	})
+
+	evolver, _, store := newDedupeTestEvolver(t, usage, writer, registry)
+
+	// Cycle 1: the archive proposal becomes a pending plan.
+	report1, err := evolver.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("cycle 1 failed: %v", err)
+	}
+	if report1.Planned != 1 {
+		t.Fatalf("cycle 1: expected Planned=1, got %d (report: %+v)", report1.Planned, report1)
+	}
+
+	// Cycle 2: same proposal, plan still pending — must be skipped.
+	report2, err := evolver.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("cycle 2 failed: %v", err)
+	}
+	if report2.Planned != 0 {
+		t.Errorf("cycle 2: expected Planned=0 (duplicate skipped), got %d", report2.Planned)
+	}
+	if report2.Skipped != 1 {
+		t.Errorf("cycle 2: expected Skipped=1, got %d", report2.Skipped)
+	}
+
+	// The store holds exactly ONE plan for this proposal.
+	plans, err := store.ListPlansByState(context.Background(), plan.StatePendingApproval, 100)
+	if err != nil {
+		t.Fatalf("list plans: %v", err)
+	}
+	count := 0
+	for _, p := range plans {
+		if p.Title == "Skill evolution: archive "+skillName {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 plan for the proposal, got %d", count)
+	}
+}
+
+// TestEvolver_PendingCapBlocksNewPlans pins the hard ceiling: once
+// maxPendingEvolverPlans plans are pending, a new proposal is skipped
+// instead of adding to the queue.
+func TestEvolver_PendingCapBlocksNewPlans(t *testing.T) {
+	skillName := "cap-archive-target"
+	skillContent := "---\nname: cap-archive-target\ndescription: bad\n---\n\nbody"
+
+	dir := t.TempDir()
+	writer := NewWriter(dir, slog.Default())
+	_ = writer.WriteSkill(skillName, skillContent)
+	registry := skills.NewRegistry()
+	parsed, _ := skills.ParseSkillFile(filepath.Join(dir, skillName, "SKILL.md"))
+	registry.Register(parsed)
+
+	usage := newStubUsageTracker()
+	usage.SetLowPerformers([]*UsageStats{
+		{SkillName: skillName, InjectCount: 30, Effectiveness: 0.01},
+	})
+
+	evolver, planMgr, _ := newDedupeTestEvolver(t, usage, writer, registry)
+
+	// Fill the pending queue to the cap with unrelated plans.
+	ctx := context.Background()
+	for i := 0; i < maxPendingEvolverPlans; i++ {
+		p, err := planMgr.CreatePlan(ctx, fmt.Sprintf("filler plan %d", i), "", "", "", "")
+		if err != nil {
+			t.Fatalf("filler CreatePlan %d: %v", i, err)
+		}
+		if err := planMgr.SubmitPlan(ctx, p.ID); err != nil {
+			t.Fatalf("filler SubmitPlan %d: %v", i, err)
+		}
+	}
+
+	// The evolver's proposal must be blocked by the cap.
+	report, err := evolver.RunCycle(ctx)
+	if err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+	if report.Planned != 0 {
+		t.Errorf("expected Planned=0 at cap, got %d", report.Planned)
+	}
+	if report.Skipped != 1 {
+		t.Errorf("expected Skipped=1 at cap, got %d", report.Skipped)
 	}
 }

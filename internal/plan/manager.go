@@ -116,6 +116,40 @@ func (m *PlanManager) GetPlansForSession(ctx context.Context, sessionID string) 
 	return m.store.GetPlansForSession(ctx, sessionID)
 }
 
+// HasOpenPlanWithTitle reports whether a plan with the exact title exists in
+// an OPEN approval-or-execution state (pending_approval, approved,
+// synthesizing, executing). Machine proposers (the skill evolver) use it to
+// avoid re-creating the same proposal every cycle while an earlier one is
+// still waiting at the human gate or mid-flight — the unbounded-duplicate
+// bug that produced 639 pending + 922 executing copies of ~36 proposals
+// (observed live 2026-10-22). Draft/planning are deliberately NOT checked:
+// those are transient pre-submit states, and legacy draft piles must not
+// block a fresh proposal forever.
+func (m *PlanManager) HasOpenPlanWithTitle(ctx context.Context, title string) (bool, error) {
+	for _, state := range []PlanState{StatePendingApproval, StateApproved, StateSynthesizing, StateExecuting} {
+		plans, err := m.store.ListPlansByState(ctx, state, 1000)
+		if err != nil {
+			return false, fmt.Errorf("scan %s plans: %w", state, err)
+		}
+		for _, p := range plans {
+			if p.Title == title {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// CountPlansByState returns how many plans are in the given state (capped at
+// limit). Used by machine proposers to enforce a pending-queue ceiling.
+func (m *PlanManager) CountPlansByState(ctx context.Context, state PlanState, limit int) (int, error) {
+	plans, err := m.store.ListPlansByState(ctx, state, limit)
+	if err != nil {
+		return 0, fmt.Errorf("count %s plans: %w", state, err)
+	}
+	return len(plans), nil
+}
+
 // stampTaskGoal carries a plan's goal onto a synthesized task through the
 // optional TaskGoalSetter seam. Best-effort: a creator without the seam or a
 // failed stamp logs a Warn and leaves the task goal-less (legacy-legal).
@@ -322,6 +356,10 @@ func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
 		"title":       plan.Title,
 		"phase_count": len(phases),
 		"step_count":  totalSteps,
+		// session_id scopes the chat notification: an empty value marks a
+		// machine-originated (evolver sink) plan that belongs to NO chat
+		// and must never render inside a user's conversation.
+		"session_id": plan.SourceSession,
 	})
 
 	// Auto-approve if approval is not required.
@@ -414,6 +452,9 @@ func (m *PlanManager) RejectPlan(ctx context.Context, planID, sessionID, by, rea
 		"title":   plan.Title,
 		"by":      by,
 		"reason":  reason,
+		// Prefer the plan's owning session; fall back to the acting
+		// session so the notification scopes to a chat when possible.
+		"session_id": firstNonEmpty(plan.SourceSession, sessionID),
 	})
 
 	m.logger.Info("plan rejected", "plan_id", planID, "by", by)
@@ -503,6 +544,9 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 		"plan_id": planID,
 		"title":   plan.Title,
 		"by":      by,
+		// Prefer the plan's owning session; fall back to the acting
+		// session so the notification scopes to a chat when possible.
+		"session_id": firstNonEmpty(plan.SourceSession, sessionID),
 	})
 
 	m.logger.Info("plan confirmed", "plan_id", planID, "by", by)
@@ -925,6 +969,7 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 		"title":       plan.Title,
 		"phase_count": len(phases),
 		"step_count":  totalSteps,
+		"session_id":  plan.SourceSession,
 	})
 
 	m.logger.Info("plan completed", "plan_id", plan.ID)
@@ -1088,6 +1133,16 @@ func (m *PlanManager) resolvePlanDir(projectPath string) string {
 		defaultPath = "docs/plans"
 	}
 	return filepath.Join(projectPath, defaultPath)
+}
+
+// firstNonEmpty returns the first non-empty string, or "" when all are empty.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // publishEvent creates a BusMessage and publishes it to the message bus.

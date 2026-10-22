@@ -26,6 +26,14 @@ import (
 // stale and skipped.
 const patternPromotionRecencyWindow = 14 * 24 * time.Hour // 14 days
 
+// maxPendingEvolverPlans caps how many skill-evolution plans may sit in
+// pending_approval at once. A machine proposer must never bury the human
+// approval surface: once the operator's queue hits this ceiling, further
+// proposals are skipped (logged) until the queue is drained. Sized so a
+// single cycle's realistic proposal volume (~44 observed live) fits under
+// the cap while a multi-cycle pile-up cannot.
+const maxPendingEvolverPlans = 50
+
 // llmChatter is the narrow interface the evolver needs for LLM calls. Both
 // *llm.Client and llm.Chatter satisfy it; we accept the interface so tests
 // can inject a mock without constructing a full *llm.Client.
@@ -619,6 +627,40 @@ func (e *Evolver) processProposal(ctx context.Context, report *EvolutionReport, 
 		// AutoApply disabled: create a plan (if plan manager is available).
 		if e.planMgr != nil {
 			planTitle := fmt.Sprintf("Skill evolution: %s %s", proposal.Action, proposal.SkillName)
+			// Dedupe against an already-open plan for the SAME proposal
+			// (title = action + skill). The evolver re-runs on a schedule
+			// and re-proposes the same low-performing skills every cycle;
+			// without this check a proposal that sits at the human gate
+			// for N cycles produces N duplicate pending plans (observed
+			// live: 639 pending copies of ~36 proposals, 2026-10-22).
+			if dup, derr := e.planMgr.HasOpenPlanWithTitle(ctx, planTitle); derr != nil {
+				e.logger.Warn("evolver dedupe check failed; skipping proposal to be safe",
+					"skill", proposal.SkillName, "error", derr)
+				report.Skipped++
+				return
+			} else if dup {
+				e.logger.Info("open evolver plan already exists; skipping duplicate proposal",
+					"skill", proposal.SkillName, "action", string(proposal.Action))
+				report.Skipped++
+				report.Details = append(report.Details, proposal)
+				return
+			}
+			// Hard ceiling on the pending queue: a machine proposer must
+			// never bury the human approval surface. Once the cap is
+			// reached, further proposals are recorded as skipped until
+			// the operator drains the queue.
+			if pending, cerr := e.planMgr.CountPlansByState(ctx, plan.StatePendingApproval, maxPendingEvolverPlans+1); cerr != nil {
+				e.logger.Warn("evolver pending-count check failed; skipping proposal to be safe",
+					"skill", proposal.SkillName, "error", cerr)
+				report.Skipped++
+				return
+			} else if pending >= maxPendingEvolverPlans {
+				e.logger.Warn("evolver pending-plan cap reached; skipping proposal",
+					"skill", proposal.SkillName, "cap", maxPendingEvolverPlans)
+				report.Skipped++
+				report.Details = append(report.Details, proposal)
+				return
+			}
 			planDesc := proposal.Rationale
 			if proposal.CandidateContent != "" {
 				planDesc += "\n\nCandidate content:\n" + proposal.CandidateContent
