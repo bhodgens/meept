@@ -33,5 +33,102 @@
       "default_mode": "read-only",
       "enabled": false,
     },
+    {
+      // official adapter maintained by zed industries / the acp org; renamed
+      // from @zed-industries/claude-code-acp. needs node >= 22 and
+      // anthropic credentials (ANTHROPIC_API_KEY or claude login).
+      // source: https://github.com/agentclientprotocol/claude-agent-acp
+      "id": "claude",
+      "description": "Claude Code via the official claude-agent-acp adapter (https://github.com/agentclientprotocol/claude-agent-acp)",
+      "command": ["npx", "-y", "@agentclientprotocol/claude-agent-acp"],
+      "env": {},
+      "cwd": "",
+      "default_mode": "",
+      "enabled": false,
+    },
+    {
+      // gemini cli's native acp mode; --acp is the stable flag
+      // (--experimental-acp is a deprecated alias).
+      // source: https://github.com/google-gemini/gemini-cli (packages/cli/src/config/config.ts)
+      "id": "gemini",
+      "description": "Gemini CLI native acp mode (https://github.com/google-gemini/gemini-cli/pull/21171)",
+      "command": ["npx", "-y", "@google/gemini-cli", "--acp"],
+      "env": {},
+      "cwd": "",
+      "default_mode": "",
+      "enabled": false,
+    },
+    {
+      // kimi code cli's native acp server subcommand; requires prior
+      // `kimi login` in a terminal.
+      // source: https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-acp.html
+      "id": "kimi",
+      "description": "Kimi CLI native acp server (https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-acp.html)",
+      "command": ["kimi", "acp"],
+      "env": {},
+      "cwd": "",
+      "default_mode": "",
+      "enabled": false,
+    },
+    {
+      // qwen code's native acp mode; --acp graduated from --experimental-acp
+      // in qwen-code#1355.
+      // source: https://zed.dev/acp/agent/qwen-code
+      "id": "qwen",
+      "description": "Qwen Code native acp mode (https://github.com/QwenLM/qwen-code/pull/1355)",
+      "command": ["npx", "-y", "@qwen-code/qwen-code", "--acp"],
+      "env": {},
+      "cwd": "",
+      "default_mode": "",
+      "enabled": false,
+    },
+    {
+      // hermes agent (nous research) built-in acp server; requires the acp
+      // extra installed in the hermes checkout (`hermes acp --check` verifies).
+      // source: https://hermes-agent.nousresearch.com/docs/user-guide/features/acp
+      "id": "hermes",
+      "description": "Hermes Agent built-in acp server (https://hermes-agent.nousresearch.com/docs/user-guide/features/acp)",
+      "command": ["hermes", "acp"],
+      "env": {},
+      "cwd": "",
+      "default_mode": "",
+      "enabled": false,
+    },
+    {
+      // cline cli's native acp mode (the old cline-acp grpc bridge is
+      // archived); requires `cline auth` first.
+      // source: https://docs.cline.bot/usage/acp
+      "id": "cline",
+      "description": "Cline CLI native acp mode (https://docs.cline.bot/usage/acp)",
+      "command": ["npx", "-y", "cline", "--acp"],
+      "env": {},
+      "cwd": "",
+      "default_mode": "",
+      "enabled": false,
+    },
+    {
+      // opencode's native acp subcommand; requires `opencode auth login`.
+      // source: https://opencode.ai/v2/docs/cli/acp/
+      "id": "opencode",
+      "description": "OpenCode native acp server (https://opencode.ai/v2/docs/cli/acp/)",
+      "command": ["opencode", "acp"],
+      "env": {},
+      "cwd": "",
+      "default_mode": "",
+      "enabled": false,
+    },
+    {
+      // pi coding agent (mario zechner / earendil) via the community pi-acp
+      // adapter listed on agentclientprotocol.com; spawns `pi --mode rpc`,
+      // so pi must be installed separately (npm i -g @earendil-works/pi-coding-agent).
+      // source: https://github.com/svkozak/pi-acp
+      "id": "pi",
+      "description": "Pi coding agent via the pi-acp adapter (https://github.com/svkozak/pi-acp)",
+      "command": ["npx", "-y", "pi-acp"],
+      "env": {},
+      "cwd": "",
+      "default_mode": "",
+      "enabled": false,
+    },
   ],
 }
