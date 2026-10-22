@@ -84,3 +84,16 @@ The boot sweep (`StartupOrphanSweep`) remains the backstop: it reaps what
 self-termination cannot - a runtime whose supervisor was itself SIGKILLed, and
 anything left by an older build. Windows has no `ps`, so it gets no sweep
 (documented gap).
+
+## Typed-nil wiring: concrete pointers into interface fields
+
+A wiring function that takes a CONCRETE pointer (e.g. `*l0.Recorder`) and
+stores it directly into an INTERFACE field boxes nil-as-non-nil: the field's
+`!= nil` guard passes and the first method call derefs a nil receiver.
+`WireMemoryCapture` panicked on EVERY captured turn with `l0_enabled=false`
+(observed live 2026-10-22). Rule: assign concrete-pointer parameters into
+interface fields only behind an explicit `if p != nil` check, and pin each
+wiring seam with a nil-dependency test through the REAL wiring function
+(`memory_capture_typednil_test.go`), not through a hand-built struct. A panic
+recover that logs no stack makes this class undiagnosable from the log -
+capture `debug.Stack()` in recovers.
