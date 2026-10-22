@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -233,6 +234,79 @@ func TestLastWakeRoundtrip(t *testing.T) {
 	}
 	if !got.Equal(want) {
 		t.Errorf("lastWake = %v, want %v", got, want)
+	}
+}
+
+// TestLastWakeCorruptFileSelfHeals pins the regression observed live
+// 2026-09-05..2026-10-22: a torn last_wake.json (extra trailing '}') made
+// GetLastWake/advanceLastWake fail EVERY tick forever, because the caller
+// aborts before it can rewrite the file. The corrupt content must now
+// quarantine to last_wake.json.corrupt, read as the zero time, and let the
+// next SetLastWake succeed — full self-heal, no operator intervention.
+func TestLastWakeCorruptFileSelfHeals(t *testing.T) {
+	s := newClaimsTestScheduler(t)
+
+	corrupt := []byte(`{"last_wake":"2026-09-05T18:56:33.00406Z"}}`)
+	path := filepath.Join(s.dataDir, lastWakeFileName)
+	if err := os.WriteFile(path, corrupt, 0o600); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+
+	got, err := s.GetLastWake()
+	if err != nil {
+		t.Fatalf("GetLastWake on corrupt file must self-heal, got error: %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("corrupt lastWake = %v, want zero", got)
+	}
+
+	// Corrupt content is preserved for forensics and removed from the live path.
+	qPath := path + ".corrupt"
+	qData, err := os.ReadFile(qPath)
+	if err != nil {
+		t.Fatalf("quarantine file %s missing: %v", qPath, err)
+	}
+	if string(qData) != string(corrupt) {
+		t.Errorf("quarantine content = %q, want %q", qData, corrupt)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("live corrupt file must be removed, stat err = %v", err)
+	}
+
+	// The next write must succeed and round-trip: the watermark advances
+	// again (advanceLastWake no longer aborts).
+	want := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	if err := s.advanceLastWake(want); err != nil {
+		t.Fatalf("advanceLastWake after corrupt file: %v", err)
+	}
+	got, err = s.GetLastWake()
+	if err != nil {
+		t.Fatalf("GetLastWake after heal: %v", err)
+	}
+	if !got.Equal(want) {
+		t.Errorf("healed lastWake = %v, want %v", got, want)
+	}
+}
+
+// TestLastWakeCorruptTimestampSelfHeals covers the second quarantine path:
+// valid JSON, unparseable RFC3339 value.
+func TestLastWakeCorruptTimestampSelfHeals(t *testing.T) {
+	s := newClaimsTestScheduler(t)
+
+	path := filepath.Join(s.dataDir, lastWakeFileName)
+	if err := os.WriteFile(path, []byte(`{"last_wake":"not-a-timestamp"}`), 0o600); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+
+	got, err := s.GetLastWake()
+	if err != nil {
+		t.Fatalf("GetLastWake on corrupt timestamp must self-heal, got error: %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("corrupt lastWake = %v, want zero", got)
+	}
+	if _, err := os.Stat(path + ".corrupt"); err != nil {
+		t.Errorf("quarantine file missing: %v", err)
 	}
 }
 

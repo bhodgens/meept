@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,6 +172,16 @@ type lastWakeData struct {
 
 // readLastWake reads the persisted last wake time. Returns the zero time when
 // no file exists yet (fresh install).
+//
+// A CORRUPT file self-heals instead of poisoning every future tick: the
+// caller chain (advanceLastWake) aborts on a hard parse error BEFORE it can
+// rewrite the file, so returning the error made the damage permanent — the
+// hourly "failed to advance last wake" WARN observed live from 2026-09-05
+// until 2026-10-22 came from one torn write (pre-lastWakeWriteMu) that could
+// never be repaired. Unparseable content now quarantines to
+// last_wake.json.corrupt and reads as the zero time, so the next scheduled
+// tick rewrites a valid file. The zero time only widens the post-crash
+// catch-up window; it never loses a job.
 func readLastWake(dataDir string) (time.Time, error) {
 	if dataDir == "" {
 		return time.Time{}, nil
@@ -185,16 +196,30 @@ func readLastWake(dataDir string) (time.Time, error) {
 	}
 	var envelope lastWakeData
 	if err := json.Unmarshal(data, &envelope); err != nil {
-		return time.Time{}, fmt.Errorf("failed to parse last wake file: %w", err)
+		quarantineLastWake(path, data, err)
+		return time.Time{}, nil
 	}
 	if envelope.LastWake == "" {
 		return time.Time{}, nil
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, envelope.LastWake)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid last_wake %q: %w", envelope.LastWake, err)
+		quarantineLastWake(path, data, err)
+		return time.Time{}, nil
 	}
 	return parsed.UTC(), nil
+}
+
+// quarantineLastWake preserves a corrupt last-wake file for forensics and
+// removes it from the live path so the next write starts clean. Best-effort:
+// a failed quarantine still lets readLastWake return the zero time (the
+// corrupt content is simply re-read and re-quarantined next tick).
+func quarantineLastWake(path string, data []byte, cause error) {
+	qPath := path + ".corrupt"
+	_ = os.WriteFile(qPath, data, 0o600)
+	_ = os.Remove(path)
+	slog.Warn("scheduler: last wake file corrupt; quarantined and reset",
+		"path", path, "quarantined_to", qPath, "error", cause)
 }
 
 // lastWakeWriteMu serializes last-wake writers process-wide. All writers
