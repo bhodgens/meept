@@ -609,9 +609,10 @@ superseded and is now resolved).
 | 15 | MED config-write gate inconsistency | FIXED (validation half): JSON5 validate-before-write on SaveClientConfig/SaveModelsConfig. Loopback-gate half ACCEPTED: GUI writes config from remote baseUrl; gating breaks the documented remote flow | 348bfbf4 |
 | 16 | MED instruction.add injection surface | ACCEPTED (auth-gated owner surface; consent loop = product decision) | — |
 | M5-2c | dev_key readable by agent tools | FIXED: file_read guard + immutable engine path_rules + shell RiskCritical classification | 2be671d3 |
+| M5-2b-rank | (hardening) decision-model second opinion on allow-resolves | FIXED: tighten-only resolve rank, opt-in `[acp] resolve_rank` | aee49b0d |
+| M5-2b | (hardening) HTTP key roles gate the human surface | FIXED: auth.Key Role ("human"/"api"), role:"api" keys 403 on acp.permissions.resolve when multi-user auth is active; `meept keys add --role` | e886d4e3 |
 
-Tally: 1 CRIT + 3 HIGH + 6 MED fixed; 1 MED fixed in part (validation);
-6 MED/LOW accepted as documented owner-trust or product decisions.
-Phase 2b (HTTP key roles: only role:human keys resolve ACP permissions)
-remains open per docs/plans/2026-10-22-acp-approver-identity.md — needs
-auth-store key metadata (internal/auth Key has no Role field today).
+Tally: 1 CRIT + 3 HIGH + 6 MED fixed (+2 M5 hardening phases);
+1 MED fixed in part (validation); 6 MED/LOW accepted as documented
+owner-trust or product decisions. All M5 phases (1, 2a, 2b, 2b-rank,
+2c) landed; the self-approval surface is closed on both transports.
