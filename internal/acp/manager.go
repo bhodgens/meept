@@ -119,16 +119,29 @@ func (m *Manager) PendingPermissions() []PendingPermission {
 // the relay; callers at API boundaries validate the verb explicitly BEFORE
 // calling (leaf 03 context 4) so a typo never silently denies.
 func (m *Manager) ResolvePermission(id string, decision string) error {
-	return m.ResolvePermissionWithApprover(id, decision, Approver{})
+	return m.ResolvePermissionWithApprover(context.Background(), id, decision, Approver{})
 }
 
 // ResolvePermissionWithApprover is ResolvePermission plus the approver
 // identity (audit M5). The RPC boundary passes the kernel-verified socket
 // peer; the HTTP boundary passes the key fingerprint. A zero Approver keeps
 // the legacy unattributed behavior for internal callers.
-func (m *Manager) ResolvePermissionWithApprover(id string, decision string, approver Approver) error {
+//
+// When [acp] resolve_rank is on, an allow/always resolve that reaches here
+// (i.e. already past the identity gate at the RPC boundary) is offered to
+// the decision-model second opinion first: a confident "block" answer
+// returns ErrResolveRanked and the relay is left UNTOUCHED, so the pending
+// request stays answerable. The rank is tighten-only — it can reject an
+// allow but never approves and never sees a deny (resolve_rank.go).
+func (m *Manager) ResolvePermissionWithApprover(ctx context.Context, id string, decision string, approver Approver) error {
 	if m == nil {
 		return ErrRelayNotFound
+	}
+	// Tighten-only second opinion BEFORE the relay is touched: on a
+	// confident block the pending request must stay answerable, so the
+	// rank runs first and a rejection short-circuits without consuming it.
+	if err := m.rankResolve(ctx, id, decision, approver); err != nil {
+		return err
 	}
 	m.mu.Lock()
 	rl := m.relay

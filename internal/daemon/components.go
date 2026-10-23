@@ -1018,7 +1018,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// (unavailable) — both without behavior change for installs
 			// that opted out. Registration onto the hook registry happens
 			// below at the hook-wiring block.
-			acpWantsDecision := cfg.ACP.Enabled && cfg.ACP.PermissionMode == "decision"
+			acpWantsDecision := cfg.ACP.Enabled && (cfg.ACP.PermissionMode == "decision" || cfg.ACP.ResolveRank)
 			if providersCfg.DecisionGateEnabled || acpWantsDecision {
 				decisionClient = llm.NewDecisionClient(c.LLMResolver, logger.With("component", "decision-client"))
 			}

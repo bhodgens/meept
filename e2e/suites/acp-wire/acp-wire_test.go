@@ -1106,3 +1106,158 @@ func TestACPWire_SelfApprovalRejectedFullStack(t *testing.T) {
 		t.Fatalf("SELF-APPROVAL SUCCEEDED — the audit-M5 gate did not fire: %q", probe)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// acp-wire-07 (audit M5 Phase 2b-rank): the tighten-only decision-model
+// second opinion on human resolves. resolve_rank=true + a decision seam:
+// an allow that the rank denies at confidence is rejected with
+// ErrResolveRanked and the pending request STAYS ANSWERABLE (a following
+// deny still resolves it); an allow the rank confirms passes through; a
+// deny verb never consults the rank; resolve_rank=false never consults it.
+// The rank can only tighten — it never approves and never rescues.
+// ---------------------------------------------------------------------------
+
+func TestACPWire_ResolveRankTightenOnly(t *testing.T) {
+	bin := stubAgentBin(t)
+
+	newMgr := func(resolveRank bool, dec acp.Decisioner) (*acp.Manager, *acp.Relay, *relayNotifier) {
+		t.Helper()
+		rl := acp.NewRelay()
+		notif := &relayNotifier{}
+		mgr := acp.NewManager(config.ACPConfig{
+			Enabled:           true,
+			DialTimeout:       30,
+			CallTimeout:       20,
+			MaxAgents:         4,
+			PermissionMode:    "human",
+			RelayTimeout:      10,
+			DecisionThreshold: 0.5,
+			ResolveRank:       resolveRank,
+		}, &config.ACPAgentsConfig{Agents: []config.ACPAgentEntry{
+			{ID: "perm-agent", Command: []string{bin, "-mode", "permission"}, Enabled: true},
+		}})
+		mgr.SetPermissionRelay(rl, notif)
+		if dec != nil {
+			mgr.SetDecisionClient(dec)
+		}
+		t.Cleanup(mgr.StopAll)
+		return mgr, rl, notif
+	}
+
+	// pendingID starts one agent turn, waits for the permission_requested
+	// event, and returns the pending id (the Send goroutine keeps running
+	// until the request is resolved or times out).
+	pendingID := func(t *testing.T, mgr *acp.Manager, ctx context.Context) (*acp.Session, string) {
+		t.Helper()
+		sess, err := mgr.GetOrCreate(ctx, "perm-agent", t.TempDir())
+		if err != nil {
+			t.Fatalf("GetOrCreate: %v", err)
+		}
+		go func() {
+			sendCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			_, _ = sess.Send(sendCtx, "do the thing")
+		}()
+		id := waitForPermissionEvent(t, sess, "permission_requested", 15*time.Second)
+		if id == "" {
+			t.Fatal("permission_requested event must carry the pending id")
+		}
+		return sess, id
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	human := acp.Approver{Kind: "peercred", PID: 4242, UID: 501}
+
+	// Leg 1: rank DENIES the allow at confidence -> ErrResolveRanked, and
+	// the pending request survives: a following deny resolves it normally.
+	t.Run("deny-at-confidence blocks the allow, pending survives", func(t *testing.T) {
+		stub := &stubDecisioner{available: true, answer: "deny", confidence: 0.9}
+		mgr, _, _ := newMgr(true, stub)
+		sess, id := pendingID(t, mgr, ctx)
+
+		err := mgr.ResolvePermissionWithApprover(ctx, id, "allow", human)
+		if !errors.Is(err, acp.ErrResolveRanked) {
+			t.Fatalf("ranked allow err = %v, want ErrResolveRanked", err)
+		}
+		if got := len(mgr.PendingPermissions()); got != 1 {
+			t.Fatalf("pending after ranked rejection = %d, want 1 (must stay answerable)", got)
+		}
+		// The human can still deny it — the rank rejected the ALLOW, not
+		// the request.
+		if err := mgr.ResolvePermissionWithApprover(ctx, id, "deny", human); err != nil {
+			t.Fatalf("deny after ranked rejection: %v", err)
+		}
+		if got := waitForPermissionEvent(t, sess, "permission_resolved", 15*time.Second); got != "deny" {
+			t.Fatalf("permission_resolved = %q, want deny", got)
+		}
+		if stub.count() != 1 {
+			t.Fatalf("rank consulted %d times, want 1 (the deny verb must not rank)", stub.count())
+		}
+	})
+
+	// Leg 2: rank confirms the allow -> resolve proceeds; resolved event
+	// carries allow with the approver attribution.
+	t.Run("allow-at-confidence passes through", func(t *testing.T) {
+		stub := &stubDecisioner{available: true, answer: "allow", confidence: 0.9}
+		mgr, _, notif := newMgr(true, stub)
+		sess, id := pendingID(t, mgr, ctx)
+
+		if err := mgr.ResolvePermissionWithApprover(ctx, id, "allow", human); err != nil {
+			t.Fatalf("rank-confirmed allow: %v", err)
+		}
+		if got := waitForPermissionEvent(t, sess, "permission_resolved", 15*time.Second); got != "allow" {
+			t.Fatalf("permission_resolved = %q, want allow", got)
+		}
+		if notif.lastApprover != human {
+			t.Fatalf("approver = %+v, want %+v", notif.lastApprover, human)
+		}
+	})
+
+	// Leg 3: fail-open paths — low confidence, unavailable model, and
+	// resolve_rank=false all let the human allow through untouched.
+	t.Run("fail-open paths", func(t *testing.T) {
+		cases := []struct {
+			name      string
+			rank      bool
+			dec       acp.Decisioner
+			wantAsked int
+		}{
+			{"low-confidence deny fails open", true, &stubDecisioner{available: true, answer: "deny", confidence: 0.1}, 1},
+			{"no decision model fails open", true, &stubDecisioner{available: false, answer: "deny", confidence: 0.9}, 0},
+			{"resolve_rank off never consults", false, &stubDecisioner{available: true, answer: "deny", confidence: 0.9}, 0},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				stub, _ := tc.dec.(*stubDecisioner)
+				mgr, _, _ := newMgr(tc.rank, tc.dec)
+				sess, id := pendingID(t, mgr, ctx)
+				if err := mgr.ResolvePermissionWithApprover(ctx, id, "allow", human); err != nil {
+					t.Fatalf("allow on fail-open path: %v", err)
+				}
+				if got := waitForPermissionEvent(t, sess, "permission_resolved", 15*time.Second); got != "allow" {
+					t.Fatalf("permission_resolved = %q, want allow", got)
+				}
+				if stub != nil && stub.count() != tc.wantAsked {
+					t.Fatalf("rank consulted %d times, want %d", stub.count(), tc.wantAsked)
+				}
+			})
+		}
+	})
+
+	// Leg 4: a deny verb is never ranked even with the rank armed.
+	t.Run("deny verb never ranks", func(t *testing.T) {
+		stub := &stubDecisioner{available: true, answer: "allow", confidence: 0.9}
+		mgr, _, _ := newMgr(true, stub)
+		sess, id := pendingID(t, mgr, ctx)
+		if err := mgr.ResolvePermissionWithApprover(ctx, id, "deny", human); err != nil {
+			t.Fatalf("deny: %v", err)
+		}
+		if got := waitForPermissionEvent(t, sess, "permission_resolved", 15*time.Second); got != "deny" {
+			t.Fatalf("permission_resolved = %q, want deny", got)
+		}
+		if stub.count() != 0 {
+			t.Fatalf("rank consulted %d times for a deny, want 0", stub.count())
+		}
+	})
+}

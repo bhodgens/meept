@@ -2533,6 +2533,15 @@ type ACPConfig struct {
 	// closed when the caller cannot be identified. "off" disables the
 	// gate (documented escape hatch; approvals stay attributed).
 	ApproverIdentity string `json:"approver_identity" toml:"approver_identity"`
+	// ResolveRank turns on the tighten-only decision-model second opinion
+	// for allow/always resolves that PASSED the approver gate (audit M5
+	// Phase 2b-rank). The rank can only reject an allow (the pending
+	// request stays answerable); it never approves and never rescues an
+	// identity-gate rejection. Requires a configured decision_model slot;
+	// with no model, on rank error, or below decision_threshold the human
+	// verdict stands (fail-open is correct for a tighten-only layer).
+	// Opt-in, default false.
+	ResolveRank bool `json:"resolve_rank" toml:"resolve_rank"`
 }
 
 // Validate checks the [acp] section. Invalid timeouts, agent caps, or

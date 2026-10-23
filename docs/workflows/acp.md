@@ -276,11 +276,23 @@ to answer its own request.
 - **Attribution**: the resolved approver rides the relay decision into the
   `permission_resolved` notification and the `acp.permission.resolved` bus
   event (`approver` key, additive), so every approval records WHO answered.
+- **Resolve rank** (`[acp] resolve_rank`, opt-in, default false): a
+  tighten-only decision-model second opinion on allow/always resolves that
+  passed the identity gate. The rank (the `decision_model` slot, same
+  `Decisioner` seam as the permission-decision lane) can reject an allow
+  with `ErrResolveRanked` — the pending request stays answerable — but it
+  never approves, never sees a deny verb, and never rescues an identity-gate
+  rejection. No model, rank error, non-deny answer, or confidence below
+  `decision_threshold` all fail OPEN: the identity gate is the hard
+  boundary, and a dead ranker must not lock humans out of their own gate.
+  The agent-controlled summary rides the ranked state inside an
+  `<<<UNTRUSTED_REQUEST_SUMMARY>>>` fence.
 - **Config**: `[acp] approver_identity` = `""`/`"enforce"` (default, gate on)
   or `"off"` (documented escape hatch; approvals stay attributed).
 
-Phase 2b (key-role gating: only `role: human` keys may resolve over HTTP) is
-spec'd in `docs/plans/2026-10-22-acp-approver-identity.md`.
+Phase 2b proper (key-role gating: only `role: human` keys may resolve over
+HTTP) is spec'd in `docs/plans/2026-10-22-acp-approver-identity.md` — it
+needs a Role field on `internal/auth.Key` plus pairing-flow stamping.
 
 ## Personas and agent-definition executors (design, landing in waves)
 

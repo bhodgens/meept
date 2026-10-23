@@ -16,6 +16,7 @@ Package bus provides a channel\-based pub/sub message bus.
 - [func SetPanicOnUndrainedSubscription\(enabled bool\)](<#SetPanicOnUndrainedSubscription>)
 - [type ACPPermissionEvent](<#ACPPermissionEvent>)
   - [func \(ACPPermissionEvent\) WSClass\(\) wsclass.WSClass](<#ACPPermissionEvent.WSClass>)
+- [type ACPPermissionOption](<#ACPPermissionOption>)
 - [type Config](<#Config>)
   - [func DefaultConfig\(\) \*Config](<#DefaultConfig>)
 - [type MessageBus](<#MessageBus>)
@@ -122,7 +123,7 @@ ACPPermissionEvent is the frozen bus/WS payload for the human permission relay \
 
 The payload lives in internal/bus — NOT internal/acp — so HTTP/WS/TUI/GUI consumers can decode it without pulling the ACP client into their dependency closure \(internal/acp must not gain a bus dep; the daemon does the adaptation, per the leaf's import\-cycle note\). wsclass imports nothing from internal/, so bus \-\> wsclass is cycle\-free \(same direction as agent \-\> wsclass\).
 
-Wire keys are frozen \(leaf 03 task 1\): id, agent\_id, session\_id, summary, created\_at \(\+ decision/reason on the resolved frame\).
+Wire keys are frozen \(leaf 03 task 1\): id, agent\_id, session\_id, summary, created\_at \(\+ decision/reason on the resolved frame\). Options is the additive acp\-always\-allow key \(leaf 01\): present on frames whose agent offered options, omitted otherwise — old consumers decode by key and are unaffected.
 
 	type ACPPermissionEvent struct {
 	    ID        string `json:"id"`
@@ -130,11 +131,21 @@ Wire keys are frozen \(leaf 03 task 1\): id, agent\_id, session\_id, summary, cr
 	    SessionID string `json:"session_id"`
 	    Summary   string `json:"summary"`
 	    CreatedAt string `json:"created_at"` // RFC3339 stamp of registration
+	    // Options are the agent-offered permission options (raw labels),
+	    // bounded by the relay at register time (omitted when none).
+	    Options []ACPPermissionOption `json:"options,omitempty"`
 	    // Decision + Reason are empty on the requested frame and carry the
-	    // terminal answer ("allow"/"deny", "answered"/"timeout"/"no_relay"/
-	    // "full") on the resolved frame.
+	    // terminal answer ("allow"/"always"/"deny", "answered"/"timeout"/
+	    // "no_relay"/"full") on the resolved frame.
 	    Decision string `json:"decision,omitempty"`
 	    Reason   string `json:"reason,omitempty"`
+	    // Approver identifies WHO answered (audit M5 attribution): the
+	    // rendered acp.Approver ("peercred:pid=…,uid=…", "http-key:<sha256
+	    // prefix>", "in-process"). Empty on the requested frame and on
+	    // timeout/no-relay resolutions; never carries raw credentials.
+	    // Additive like Options — old consumers decode by key and are
+	    // unaffected.
+	    Approver string `json:"approver,omitempty"`
 	}
 
 <a name="ACPPermissionEvent.WSClass"></a>
@@ -143,6 +154,17 @@ Wire keys are frozen \(leaf 03 task 1\): id, agent\_id, session\_id, summary, cr
 	func (ACPPermissionEvent) WSClass() wsclass.WSClass
 
 WSClass implements wsclass.WSClassified: ACP permission frames are lifecycle signals and MUST render as progress — never chat\_message \(AGENTS.md WS classification invariant: a chat\_message frame opens a blank bubble in the Flutter GUI\).
+
+<a name="ACPPermissionOption"></a>
+## type ACPPermissionOption
+
+ACPPermissionOption mirrors the internal/acp PermissionOption wire shape \(\{optionId,name,kind\}\) — bus must NOT import internal/acp \(the daemon does the adaptation\), so the tags are duplicated here deliberately: keep them in sync with internal/acp/session.go. Raw agent labels pass through untouched; acp\-always\-allow leaf 01 renders the allow\_always affordance from the kind.
+
+	type ACPPermissionOption struct {
+	    OptionID string `json:"optionId"`
+	    Name     string `json:"name"`
+	    Kind     string `json:"kind"`
+	}
 
 <a name="Config"></a>
 ## type Config

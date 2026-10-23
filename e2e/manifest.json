@@ -2199,6 +2199,20 @@
    ]
   },
   {
+   "id": "acp-wire-07",
+   "suite": "acp-wire",
+   "diff": "M",
+   "title": "Resolve rank (audit M5 Phase 2b-rank): tighten-only decision-model second opinion on allow/always resolves - deny-at-confidence rejects with ErrResolveRanked and the pending request stays answerable; allow passes; deny verb never ranks; no model / low confidence / resolve_rank off all fail open",
+   "paths": [
+    "internal/acp/resolve_rank.go",
+    "internal/acp/manager.go",
+    "internal/rpc/acp.go",
+    "internal/daemon/acp_register.go",
+    "internal/daemon/components.go",
+    "internal/config/schema.go"
+   ]
+  },
+  {
    "id": "naive-user-chat-01",
    "suite": "naive-user-chat",
    "diff": "L",

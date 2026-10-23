@@ -37,7 +37,12 @@ func applyACPFromConfig(cfg config.ACPConfig, dec acp.Decisioner, msgBus ...*bus
 	if err != nil {
 		return nil, err
 	}
-	if cfg.PermissionMode == "decision" && dec != nil {
+	// The decision seam is injected when EITHER consumer needs it: the
+	// permission-decision lane (permission_mode "decision") or the
+	// tighten-only resolve rank (resolve_rank, audit M5 Phase 2b-rank —
+	// the rank runs in human mode, so gating injection on the decision
+	// lane alone would leave it nil there).
+	if (cfg.PermissionMode == "decision" || cfg.ResolveRank) && dec != nil {
 		mgr.SetDecisionClient(dec)
 	}
 	var busRef *bus.MessageBus

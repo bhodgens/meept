@@ -268,12 +268,17 @@ func (h *ACPHandler) handlePermissionsResolve(ctx context.Context, params json.R
 	if err != nil {
 		return nil, err
 	}
-	if err := h.manager.ResolvePermissionWithApprover(p.ID, p.Decision, approver); err != nil {
+	if err := h.manager.ResolvePermissionWithApprover(ctx, p.ID, p.Decision, approver); err != nil {
 		switch {
 		case errors.Is(err, acp.ErrRelayNotFound):
 			return nil, fmt.Errorf("permission not found: %s", p.ID)
 		case errors.Is(err, acp.ErrRelayAnswered):
 			return nil, fmt.Errorf("permission already answered: %s", p.ID)
+		case errors.Is(err, acp.ErrResolveRanked):
+			// Tighten-only decision-model rank (audit M5 Phase 2b-rank):
+			// a confident "block" second opinion rejected this allow. The
+			// pending request is untouched and stays answerable.
+			return nil, fmt.Errorf("allow rejected by decision-model rank; the request is still pending and can be denied or re-approved: %w", err)
 		default:
 			return nil, err
 		}

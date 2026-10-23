@@ -1,10 +1,12 @@
 # ACP approver identity: close the self-approval loop (audit M5)
 
 Status: Phase 1 (socket peercred gate), Phase 2a (HTTP key-fingerprint
-attribution) and Phase 2c (credential read denials) IMPLEMENTED — see
-docs/workflows/acp.md "Approver identity" and docs/workflows/security.md
-"Daemon credential guard". Phase 2b (key roles) remains open. Design
-rationale and the verified attack chains are below.
+attribution), Phase 2b-rank (tighten-only decision-model second opinion,
+user directive 2026-10-22) and Phase 2c (credential read denials)
+IMPLEMENTED — see docs/workflows/acp.md "Approver identity" and
+docs/workflows/security.md "Daemon credential guard". Phase 2b proper
+(key roles) remains open. Design rationale and the verified attack chains
+are below.
 
 ## Problem
 
@@ -113,6 +115,31 @@ The in-process dispatch has no kernel peer. Options, in increasing cost:
   key store with metadata). Resolve requires `role: human`. The dev_key stays
   role-less and CANNOT resolve. This is the real fix; it depends on the auth
   store's key-metadata schema, hence Phase 2.
+- 2b-rank. Permission-ranking second opinion (user directive 2026-10-22:
+  "through our own permission ranking model"): when a resolve PASSES the
+  identity gate and the verb is allow/always, the daemon may consult the
+  decision model (`[acp] decision_model` slot, the same `Decisioner` seam
+  the permission-decision lane uses) as a tighten-only second opinion.
+  Asymmetry rules, all load-bearing:
+  * The rank can only turn an allow-resolve into a rejection
+    (`ErrResolveRanked`) on an explicit "deny" answer at or above
+    `decision_threshold`; the pending request stays answerable. It NEVER
+    approves anything by itself and never rescues an identity-gate
+    rejection — the ranker input includes the agent-controlled summary,
+    so a prompt injection there must not be able to loosen the gate.
+  * A deny verb is never ranked (nothing to tighten).
+  * No decision model configured (`Available()==false`), rank error, a
+    malformed/non-"deny" answer, or confidence below `decision_threshold`
+    => the rank is skipped and the human verdict stands. Fail-OPEN is
+    correct for a tighten-only layer: the identity gate underneath is the
+    hard boundary, and a dead or flaky ranker must not lock humans out of
+    their own gate.
+  * The summary rides inside the repo's boundary-marker convention
+    (untrusted text), never as instruction-shaped prose.
+  Opt-in: `[acp] resolve_rank` (default false per opt-in-defaults.md);
+  arms only when a decision model is configured. Cost: an allow-resolve
+  blocks up to the decision ask timeout (15 s bound, decision lane
+  precedent) while the rank runs.
 - 2c. Interim mitigation while 2b is open: extend the shell scanner's
   protected-path list to deny READS of `~/.meept/dev_key` and
   `~/.meept/meept.sock` connections from tool-spawned commands, independent
