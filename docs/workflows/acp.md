@@ -287,12 +287,22 @@ to answer its own request.
   boundary, and a dead ranker must not lock humans out of their own gate.
   The agent-controlled summary rides the ranked state inside an
   `<<<UNTRUSTED_REQUEST_SUMMARY>>>` fence.
+- **Key roles** (`internal/auth`, audit M5 Phase 2b): when multi-user auth
+  is active, each stored key carries a role — `human` (default; may answer
+  the permission gate) or `api` (authenticates everywhere ordinary keys do,
+  but `POST /api/v1/acp/permissions/resolve` returns 403 for it before any
+  dispatch). Role-less legacy keys print and behave as human (no migration
+  lockout). Mint with `meept keys add <user> --role api`. Legacy
+  single-key mode (multiuser off) has no identities, so the role gate is
+  inert there by design — the socket peercred gate, fingerprint
+  attribution, and the resolve rank still apply.
 - **Config**: `[acp] approver_identity` = `""`/`"enforce"` (default, gate on)
   or `"off"` (documented escape hatch; approvals stay attributed).
 
-Phase 2b proper (key-role gating: only `role: human` keys may resolve over
-HTTP) is spec'd in `docs/plans/2026-10-22-acp-approver-identity.md` — it
-needs a Role field on `internal/auth.Key` plus pairing-flow stamping.
+Phase 2b (key-role gating: only `role: human` keys may resolve over HTTP
+when multi-user auth is active) is IMPLEMENTED — see "Key roles" above;
+the socket peercred gate plus fingerprint attribution plus resolve rank
+cover legacy single-key mode, which has no per-key identities.
 
 ## Personas and agent-definition executors (design, landing in waves)
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/acp"
+	"github.com/caimlas/meept/internal/auth"
 )
 
 // acpStatusList is the GET /api/v1/acp/agents envelope.
@@ -116,13 +117,25 @@ func (s *Server) handleACPPermissionsResolve(w http.ResponseWriter, r *http.Requ
 		s.writeError(w, http.StatusInternalServerError, "failed to encode request")
 		return
 	}
+	// Key-role gate (audit M5 Phase 2b): when multi-user auth is active,
+	// a role:"api" key may not answer the human permission gate — only
+	// role:"human" (or legacy role-less) keys may. An issued service key
+	// leaked to an agent therefore cannot self-approve over HTTP. Legacy
+	// single-key mode carries no Identity: the role gate degrades to the
+	// Phase 2a/2b-rank protections (fingerprint attribution, deny-by-
+	// default in-process gate, resolve rank), which is the documented
+	// owner-trust posture. LIST is NOT role-gated: it is a read/refresh
+	// surface the GUI polls, and pending ids are inert without a
+	// human-role or socket-verified resolve.
+	if id, ok := IdentityFromContext(r.Context()); ok && !auth.KeyRoleIsHuman(id.Role) {
+		s.writeError(w, http.StatusForbidden, "key role "+id.Role+" may not answer permission requests (requires role human)")
+		return
+	}
 	// Attach the approver identity (audit M5, Phase 2a attribution): the
 	// HTTP boundary has no kernel peer — the dispatch is in-process — so
 	// the caller identifies as the API key it authenticated with. The
 	// RPC-side gate rejects in-process callers that carry no approver, so
 	// this attachment is what keeps the GUI/CLI resolve path working.
-	// Key-role gating (only role:human may resolve) is the Phase 2b
-	// follow-up in docs/plans/2026-10-22-acp-approver-identity.md.
 	ctx := acp.WithApprover(r.Context(), httpApprover(r))
 	result, err := s.rpcCall(ctx, "acp.permissions.resolve", params)
 	if err != nil {

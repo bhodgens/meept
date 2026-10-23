@@ -26,10 +26,15 @@ Modify:
 meept users list
 meept users add <name>
 meept users remove <id>          # confirm prompt unless --yes
-meept keys add <user-id> [--label L] [--expires RFC3339|never]
+meept keys add <user-id> [--label L] [--expires RFC3339|never] [--role human|api]
 meept keys revoke <key-id>
-meept keys list [user-id]        # shows id/label/expiry, never raw keys
+meept keys list [user-id]        # shows id/label/role/expiry, never raw keys
 ```
+
+Role (audit M5 Phase 2b): `human` (the default) keys may answer acp
+permission requests; `api` keys authenticate ordinary surfaces but are
+refused 403 at `POST /api/v1/acp/permissions/resolve`. Role-less legacy
+store rows behave as human.
 
 Raw key printed EXACTLY ONCE at creation (same UX as `meept token
 generate`). All output lowercase per UI conventions.

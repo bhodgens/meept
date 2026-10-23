@@ -1893,6 +1893,19 @@
    ]
   },
   {
+   "id": "auth-multiuser-06",
+   "suite": "auth-multiuser",
+   "diff": "M",
+   "title": "key-role gate (audit M5 Phase 2b): role:api key refused 403 on acp permission resolve before dispatch; legacy role-less key reaches dispatch; api-role key still authenticates ordinary surfaces",
+   "paths": [
+    "internal/auth/store.go",
+    "internal/auth/users.go",
+    "internal/comm/http/identity.go",
+    "internal/comm/http/acp_status.go",
+    "cmd/meept/users_cmd.go"
+   ]
+  },
+  {
    "id": "audit-chain-01",
    "suite": "audit-chain",
    "diff": "M",

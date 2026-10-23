@@ -25,8 +25,9 @@ import (
 type authStack struct {
 	*harness.Stack
 	usersFile  string
-	goodKey    string // alice's never-expiring key
+	goodKey    string // alice's never-expiring key (role-less = legacy human)
 	expiredKey string // bob's expired key
+	apiKey     string // carol's never-expiring role:"api" key (M5 Phase 2b)
 }
 
 // startMultiUser boots the harness stack, then rewrites meept.json5 to
@@ -42,7 +43,8 @@ func startMultiUser(t *testing.T) *authStack {
 	a.usersFile = filepath.Join(s.StateDir, "users.json5")
 	store := `{"users":[` +
 		aliceJSON(t, &a.goodKey) + `,` +
-		bobJSON(t, &a.expiredKey) +
+		bobJSON(t, &a.expiredKey) + `,` +
+		carolJSON(t, &a.apiKey) +
 		`]}`
 	if err := os.WriteFile(a.usersFile, []byte(store), 0o600); err != nil {
 		t.Fatalf("write users store: %v", err)
@@ -287,5 +289,83 @@ func TestStubsNoOpAndRawKeysNeverPersisted(t *testing.T) {
 	}
 	if !strings.Contains(disk, sha256Hex(a.expiredKey)) {
 		t.Fatal("expected the sha256 hash of the expired key in the users store")
+	}
+}
+
+// carolJSON builds a user entry whose key carries role:"api" (audit M5
+// Phase 2b): a valid, never-expiring key that may authenticate ordinary
+// surfaces but may NOT answer the human permission gate.
+func carolJSON(t *testing.T, rawOut *string) string {
+	t.Helper()
+	raw := "e2e-carol-key-" + strings.Repeat("c", 32)
+	*rawOut = raw
+	return fmt.Sprintf(`{"id":"user-e2e-carol","name":"carol","keys":[{"id":"key-e2e-carol","hash":%s,"label":"svc","role":"api"}]}`,
+		quote(sha256Hex(raw)))
+}
+
+// postACPResolve posts a permission verdict to /api/v1/acp/permissions/resolve
+// with the given Authorization header. Returns status + body map. The ACP
+// manager is disabled in this suite's daemon, so a PAST-the-gate request
+// surfaces as "permission not found" (wrapped 500); the point of this helper
+// is the pre-dispatch status: 403 when the key-role gate fires.
+func (a *authStack) postACPResolve(t *testing.T, authHeader string) (int, map[string]any) {
+	t.Helper()
+	payload, _ := json.Marshal(map[string]any{
+		"id":       "perm-e2e-does-not-exist",
+		"decision": "allow",
+	})
+	req, err := http.NewRequest(http.MethodPost, a.HTTPBaseURL()+"/api/v1/acp/permissions/resolve", bytes.NewReader(payload)) //nolint:noctx // bounded test call
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	resp, err := authedClient().Do(req)
+	if err != nil {
+		t.Fatalf("resolve post: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var out map[string]any
+	_ = json.Unmarshal(body, &out)
+	return resp.StatusCode, out
+}
+
+// TestKeyRoleGateOnACPResolve (audit M5 Phase 2b) is the store-backed proof
+// of the key-role gate against a real daemon: alice's role-less (legacy
+// human) key passes the gate and reaches the RPC dispatch (unknown id ->
+// not-found, NOT 403), while carol's role:"api" key is refused 403 before
+// any dispatch. carol's key still authenticates ordinary surfaces (the
+// /health-exempt path uses chat/submit), proving the role restricts only
+// the human gate, not authentication.
+func TestKeyRoleGateOnACPResolve(t *testing.T) {
+	a := startMultiUser(t)
+
+	// Legacy role-less key (alice): gate passes, dispatch reaches the ACP
+	// handler, the unknown id surfaces as not-found — never 403.
+	code, body := a.postACPResolve(t, "Bearer "+a.goodKey)
+	if code == http.StatusForbidden {
+		t.Fatalf("role-less (legacy human) key was refused 403: %v", body)
+	}
+
+	// role:"api" key (carol): refused 403 before dispatch, with the
+	// role-naming message.
+	code, body = a.postACPResolve(t, "Bearer "+a.apiKey)
+	if code != http.StatusForbidden {
+		t.Fatalf("api-role key resolve status = %d (%v), want 403", code, body)
+	}
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "role api") {
+		t.Fatalf("403 body = %v, want the role-naming message", body)
+	}
+
+	// The same api-role key still AUTHENTICATES ordinary surfaces — the
+	// role gates the human permission surface only. Chat submit with it
+	// must not be 401/418 (403 here would also be wrong: the role gate is
+	// resolve-only). A 200 (accepted) proves auth + handler pass-through.
+	sess := a.CreateSession(t, "auth-role-gate", a.ProjectDir)
+	if code, body := a.postChatSubmit(t, sess, "Bearer "+a.apiKey); code != 200 {
+		t.Fatalf("api-role key chat submit = %d (%v), want 200 (role must not block ordinary auth)", code, body)
 	}
 }

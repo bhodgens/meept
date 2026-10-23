@@ -197,11 +197,22 @@ type keyRow struct {
 	UserID    string     `json:"user_id"`
 	UserName  string     `json:"user_name"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// Role is the key's role ("human" | "api"; empty legacy = human).
+	// Surface in list output so operators can see which keys cannot
+	// answer the human permission gate (audit M5 Phase 2b).
+	Role string `json:"role,omitempty"`
 }
 
-// runKeysAdd implements `meept keys add <user-id> [--label L] [--expires ...]`.
-// The raw key is printed EXACTLY ONCE and never persisted anywhere else.
-func runKeysAdd(path, userRef, label, expiresSpec string) error {
+// runKeysAdd implements `meept keys add <user-id> [--label L] [--expires ...]
+// [--role human|api]`. The raw key is printed EXACTLY ONCE and never
+// persisted anywhere else. An empty role means human (the default).
+func runKeysAdd(path, userRef, label, expiresSpec, role string) error {
+	if role == "" {
+		role = auth.KeyRoleHuman
+	}
+	if !auth.IsValidKeyRole(role) {
+		return fmt.Errorf("add key: invalid role %q (want %q or %q)", role, auth.KeyRoleHuman, auth.KeyRoleAPI)
+	}
 	expiryTime, hasExpiry, err := parseExpiry(expiresSpec)
 	if err != nil {
 		return err
@@ -218,15 +229,18 @@ func runKeysAdd(path, userRef, label, expiresSpec string) error {
 	if u == nil {
 		return fmt.Errorf("add key: unknown or ambiguous user %q", userRef)
 	}
-	rawKey, err := s.AddKey(u.ID, label, expiresAt)
+	rawKey, err := s.AddKeyWithRole(u.ID, label, expiresAt, role)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("created key for user %s (%s)\n", u.Name, u.ID)
+	fmt.Printf("created %s key for user %s (%s)\n", role, u.Name, u.ID)
 	fmt.Println()
 	fmt.Println(rawKey)
 	fmt.Println()
 	fmt.Println("store this api key now - it will not be shown again.")
+	if role == auth.KeyRoleAPI {
+		fmt.Println("note: role api keys cannot answer acp permission requests (human gate).")
+	}
 	return nil
 }
 
@@ -315,6 +329,7 @@ func runKeysList(path, userRef string, asJSON bool) error {
 				UserID:    u.ID,
 				UserName:  u.Name,
 				ExpiresAt: copyTime(k.ExpiresAt),
+				Role:      k.Role,
 			})
 		}
 	}
@@ -338,7 +353,7 @@ func runKeysList(path, userRef string, asJSON bool) error {
 
 	now := time.Now()
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "KEY ID	LABEL	USER	EXPIRES")
+	fmt.Fprintln(w, "KEY ID	LABEL	USER	ROLE	EXPIRES")
 	for _, r := range rows {
 		keyID := r.ID
 		if len(keyID) > 40 {
@@ -349,10 +364,15 @@ func runKeysList(path, userRef string, asJSON bool) error {
 		if expired {
 			expiry += " (expired)"
 		}
-		fmt.Fprintf(w, "%s	%s	%s	%s\n",
+		role := r.Role
+		if role == "" {
+			role = auth.KeyRoleHuman // legacy role-less rows print as human
+		}
+		fmt.Fprintf(w, "%s	%s	%s	%s	%s\n",
 			keyID,
 			r.Label,
 			strings.TrimSpace(r.UserName+" ("+r.UserID+")"),
+			role,
 			expiry)
 	}
 	w.Flush()
@@ -470,20 +490,25 @@ func newKeysAddCmd() *cobra.Command {
 	var (
 		label     string
 		expires   string
+		role      string
 		storePath string
 	)
 	cmd := &cobra.Command{
 		Use:   "add <user-id>",
 		Short: "add an api key for a user",
 		Long: `generate a new api key for a user. the raw key prints exactly once —
-copy it immediately; only its hash is stored.`,
+copy it immediately; only its hash is stored. the role flag marks the key
+for its consumer: "human" (default) keys may answer acp permission
+requests; "api" keys authenticate everywhere else but are refused at the
+human gate.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runKeysAdd(usersStorePath(storePath), args[0], label, expires)
+			return runKeysAdd(usersStorePath(storePath), args[0], label, expires, role)
 		},
 	}
 	cmd.Flags().StringVar(&label, "label", "", "human-readable label for the key")
 	cmd.Flags().StringVar(&expires, "expires", "", "expiry as RFC3339 (e.g. 2027-01-01T00:00:00Z) or \"never\"")
+	cmd.Flags().StringVar(&role, "role", "human", "key role: human (may answer acp permission requests) or api (may not)")
 	bindStoreFlag(cmd, &storePath)
 	return cmd
 }

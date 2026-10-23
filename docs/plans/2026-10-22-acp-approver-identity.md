@@ -1,12 +1,16 @@
 # ACP approver identity: close the self-approval loop (audit M5)
 
-Status: Phase 1 (socket peercred gate), Phase 2a (HTTP key-fingerprint
-attribution), Phase 2b-rank (tighten-only decision-model second opinion,
-user directive 2026-10-22) and Phase 2c (credential read denials)
-IMPLEMENTED — see docs/workflows/acp.md "Approver identity" and
-docs/workflows/security.md "Daemon credential guard". Phase 2b proper
-(key roles) remains open. Design rationale and the verified attack chains
-are below.
+Status: ALL PHASES IMPLEMENTED — 1 (socket peercred gate), 2a (HTTP
+key-fingerprint attribution), 2b (key roles: role:"api" keys refused 403
+on acp.permissions.resolve when multi-user auth is active; CLI
+`meept keys add --role`), 2b-rank (tighten-only decision-model second
+opinion, user directive 2026-10-22), and 2c (credential read denials).
+See docs/workflows/acp.md "Approver identity" and docs/workflows/security.md
+"Daemon credential guard". Note: the pairing flow exchanges the dev_key
+(file-based, not an auth-store entry), so it is deliberately outside role
+management — in single-key mode the role gate is inert and the
+peercred/attribution/rank layers carry the load.
+Design rationale and the verified attack chains are below.
 
 ## Problem
 

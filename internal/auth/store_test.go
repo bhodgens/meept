@@ -732,3 +732,71 @@ func TestListUsersIncludesForeign(t *testing.T) {
 func farFuture() time.Time {
 	return time.Now().UTC().AddDate(100, 0, 0)
 }
+
+// TestAddKeyWithRoleRoundsTrip pins the audit-M5 Phase 2b key roles: the
+// role persists (additive JSON field), Validate carries it on the
+// Identity, an invalid role is rejected, and AddKey's legacy signature
+// defaults to human so pre-role callers keep working.
+func TestAddKeyWithRoleRoundsTrip(t *testing.T) {
+	s := newTestStore(t)
+	alice, err := s.AddUser("alice")
+	if err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+
+	rawAPI, err := s.AddKeyWithRole(alice.ID, "svc", nil, KeyRoleAPI)
+	if err != nil {
+		t.Fatalf("AddKeyWithRole(api): %v", err)
+	}
+	ident, err := s.Validate(rawAPI, time.Now())
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if ident.Role != KeyRoleAPI {
+		t.Fatalf("identity role = %q, want %q", ident.Role, KeyRoleAPI)
+	}
+
+	if _, err := s.AddKeyWithRole(alice.ID, "bad", nil, "superuser"); err == nil {
+		t.Fatal("invalid role accepted")
+	}
+
+	// Legacy AddKey mints a human key.
+	rawHuman, err := s.AddKey(alice.ID, "laptop", nil)
+	if err != nil {
+		t.Fatalf("AddKey (legacy): %v", err)
+	}
+	ident, err = s.Validate(rawHuman, time.Now())
+	if err != nil {
+		t.Fatalf("Validate legacy: %v", err)
+	}
+	if !KeyRoleIsHuman(ident.Role) {
+		t.Fatalf("legacy AddKey role = %q, want human-capable", ident.Role)
+	}
+
+	// Reload from disk: role survives persistence.
+	reopened, err := NewStore(s.path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	ident, err = reopened.Validate(rawAPI, time.Now())
+	if err != nil {
+		t.Fatalf("Validate after reopen: %v", err)
+	}
+	if ident.Role != KeyRoleAPI {
+		t.Fatalf("persisted role = %q, want %q", ident.Role, KeyRoleAPI)
+	}
+}
+
+// TestKeyRoleHelpers pins the role vocabulary: empty (legacy rows) and
+// human are human-capable; api and anything unknown are not.
+func TestKeyRoleHelpers(t *testing.T) {
+	if !KeyRoleIsHuman("") || !KeyRoleIsHuman(KeyRoleHuman) {
+		t.Fatal("empty and human roles must be human-capable")
+	}
+	if KeyRoleIsHuman(KeyRoleAPI) {
+		t.Fatal("api role must not be human-capable")
+	}
+	if IsValidKeyRole("superuser") {
+		t.Fatal("unknown role must not validate")
+	}
+}

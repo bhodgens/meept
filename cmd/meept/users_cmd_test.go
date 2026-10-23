@@ -160,7 +160,7 @@ func TestRunCLIStoreRoundTrip(t *testing.T) {
 	expiry := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
 	storePath := usersStorePath("")
 	out = captureUsersStdout(t, func() {
-		_ = runKeysAdd(storePath, userID, "cli-test", expiry)
+		_ = runKeysAdd(storePath, userID, "cli-test", expiry, "")
 	})
 	rawKey := ""
 	rawCount := 0

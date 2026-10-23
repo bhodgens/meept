@@ -56,7 +56,7 @@ func UsersModalItems() []ModalItem {
 		{
 			Key:         "k",
 			Label:       "add api key",
-			Description: "cli: meept users keys add <user-id> [--label s] [--expires rfc3339]",
+			Description: "cli: meept users keys add <user-id> [--label s] [--expires rfc3339] [--role human|api]",
 			Disabled:    true,
 		},
 		{

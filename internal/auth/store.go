@@ -68,11 +68,13 @@ func (s *Store) Validate(rawKey string, now time.Time) (*Identity, error) {
 	var (
 		userID  string
 		keyID   string
+		role    string
 		expired bool
 	)
 	if found != nil {
 		userID = foundUser.ID
 		keyID = found.ID
+		role = found.Role
 		expired = found.ExpiresAt != nil && now.After(*found.ExpiresAt)
 	}
 	s.mu.RUnlock()
@@ -84,7 +86,7 @@ func (s *Store) Validate(rawKey string, now time.Time) (*Identity, error) {
 		return nil, fmt.Errorf("validate key %s: %w", keyID, ErrExpiredKey)
 	}
 
-	return &Identity{UserID: userID, UserName: foundUser.Name, KeyID: keyID}, nil
+	return &Identity{UserID: userID, UserName: foundUser.Name, KeyID: keyID, Role: role}, nil
 }
 
 // UserCount returns the number of users currently held by the store
@@ -132,12 +134,26 @@ func (s *Store) AddUser(name string) (*User, error) {
 // persisting only its sha256 hash. The raw key is returned exactly once.
 // expiresAt may be nil for a never-expiring key.
 func (s *Store) AddKey(userID string, label string, expiresAt *time.Time) (rawKey string, err error) {
+	return s.AddKeyWithRole(userID, label, expiresAt, KeyRoleHuman)
+}
+
+// AddKeyWithRole is AddKey plus the key's role (audit M5 Phase 2b). An
+// invalid role is rejected; "" normalizes to KeyRoleHuman (explicit, so new
+// stores never hold role-less rows). Only "api" keys are refused the human
+// permission gate.
+func (s *Store) AddKeyWithRole(userID string, label string, expiresAt *time.Time, role string) (rawKey string, err error) {
+	if !IsValidKeyRole(role) {
+		return "", fmt.Errorf("add key: invalid role %q (want %q or %q)", role, KeyRoleHuman, KeyRoleAPI)
+	}
+	if role == "" {
+		role = KeyRoleHuman
+	}
 	raw, hash, err := generateRawKey()
 	if err != nil {
 		return "", fmt.Errorf("add key: %w", err)
 	}
 
-	k := Key{ID: id.Generate("key-"), Hash: hash, Label: label, ExpiresAt: expiresAt}
+	k := Key{ID: id.Generate("key-"), Hash: hash, Label: label, ExpiresAt: expiresAt, Role: role}
 
 	s.mu.Lock()
 	idx := -1

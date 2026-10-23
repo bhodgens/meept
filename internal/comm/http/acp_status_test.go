@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/caimlas/meept/internal/auth"
 )
 
 type acpListEnvelope struct {
@@ -337,5 +340,96 @@ func TestACPPermissionsResolve_AlwaysForwards(t *testing.T) {
 	s.handleACPPermissionsResolve(badW, bad)
 	if resp := badW.Result(); resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("bad-verb status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// withIdentity attaches an auth.Identity to a request context the way the
+// StoreAuth middleware does, for exercising the key-role gate.
+func withIdentity(r *http.Request, role string) *http.Request {
+	id := &auth.Identity{UserID: "user-1", KeyID: "key-1", Role: role}
+	return r.WithContext(context.WithValue(r.Context(), ctxIdentityKey{}, id)) //nolint:staticcheck // keyed by unexported type per project convention
+}
+
+// TestACPPermissionsResolve_RoleGate pins the audit-M5 Phase 2b key-role
+// gate: a role:"api" key is refused 403 before any RPC dispatch;
+// role:"human" and legacy role-less identities pass; a request with no
+// Identity (legacy single-key auth mode) also passes — the gate only
+// tightens when the store knows the key.
+func TestACPPermissionsResolve_RoleGate(t *testing.T) {
+	cases := []struct {
+		name    string
+		role    string // "" with present=true means legacy role-less
+		present bool
+		wantOK  bool
+	}{
+		{"api role refused", "api", true, false},
+		{"human role allowed", "human", true, true},
+		{"legacy role-less allowed", "", true, true},
+		{"no identity (single-key mode) allowed", "", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var dispatched bool
+			s := &Server{
+				rpcCall: func(_ context.Context, _ string, _ json.RawMessage) (any, error) {
+					dispatched = true
+					return map[string]any{"id": "perm-1", "decision": "allow", "reason": "answered"}, nil
+				},
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/acp/permissions/resolve",
+				strings.NewReader(`{"id":"perm-1","decision":"allow"}`))
+			if tc.present {
+				req = withIdentity(req, tc.role)
+			}
+			w := httptest.NewRecorder()
+
+			s.handleACPPermissionsResolve(w, req)
+
+			resp := w.Result()
+			if tc.wantOK {
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("status = %d, want 200", resp.StatusCode)
+				}
+				if !dispatched {
+					t.Fatal("rpcCall not dispatched")
+				}
+				return
+			}
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", resp.StatusCode)
+			}
+			if dispatched {
+				t.Fatal("rpcCall dispatched despite role gate")
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if !strings.Contains(string(body), "role api") {
+				t.Fatalf("403 body = %s, want the role-naming message", body)
+			}
+		})
+	}
+}
+
+// TestACPPermissionsList_NotRoleGated pins the scoping decision: LIST is a
+// read/refresh surface the GUI polls; pending ids are inert without a
+// gated resolve, so an api-role identity still gets the snapshot.
+func TestACPPermissionsList_NotRoleGated(t *testing.T) {
+	var dispatched bool
+	s := &Server{
+		rpcCall: func(_ context.Context, _ string, _ json.RawMessage) (any, error) {
+			dispatched = true
+			return map[string]any{"enabled": true, "pending": []any{}}, nil
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/acp/permissions", http.NoBody)
+	req = withIdentity(req, auth.KeyRoleAPI)
+	w := httptest.NewRecorder()
+
+	s.handleACPPermissionsList(w, req)
+
+	if resp := w.Result(); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (list not role-gated)", resp.StatusCode)
+	}
+	if !dispatched {
+		t.Fatal("list rpcCall not dispatched for an api-role identity")
 	}
 }
