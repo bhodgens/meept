@@ -1,6 +1,6 @@
 ---
 title: ACP Employees (slaved external agents as agent definitions)
-status: design-approved, not implemented
+status: phase-1 partially landed (persona lane bdc1ae52, field pipeline d47eba12); ACPExecutor branch + wiring pending
 decided: 2026-10-22
 ---
 
@@ -52,9 +52,12 @@ flag) and its own permission lane.
 
 1. `AgentMetadata` (internal/agents/models.go): add `Executor string` and
    `ACP *ACPAgentMetadata` (agent, persona, command_args, permission_mode,
-   decision_threshold). Underscore variants (`command_args`) need the
-   altMeta merge in parser.go step 2.
-2. `parseMetadata` altMeta merge for underscore-form keys.
+   decision_threshold). Primary YAML tags are underscore form; camelCase
+   variants need the merge lane in parser.go step 2.
+2. `parseMetadata` altMeta merge for camelCase-form keys (landed reality:
+   primary tags are underscore form; altMeta/camelMeta merges make
+   `commandArgs`/`permissionMode`/`decisionThreshold` work too — yaml.v3
+   does not match camel keys against underscore tags).
 3. `AgentSpec` (internal/agent/spec.go): mirror fields.
 4. `definitionToSpec` (internal/agent/registry.go): map metadata -> spec.
 5. `mergeSpec` (internal/agent/registry.go): merge logic.
