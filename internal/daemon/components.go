@@ -6967,6 +6967,18 @@ func registerPlatformTools(
 		return ok
 	}
 	handoffTool := builtin.NewRequestHandoffTool(msgBus, agentExistFn)
+	// Unknown-target errors list the roster so the calling agent can
+	// self-correct (named-agent routing follow-up — roster agents outside
+	// the capability table, executor: acp employees included).
+	handoffTool.SetAgentLister(func() []string {
+		var names []string
+		for _, spec := range agentRegistry.ListSpecs() {
+			if spec != nil && spec.Enabled {
+				names = append(names, spec.ID)
+			}
+		}
+		return names
+	})
 	registry.Register(handoffTool)
 
 	// Request review tool (inline review during agent execution)

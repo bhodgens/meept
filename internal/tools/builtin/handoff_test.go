@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -471,5 +472,52 @@ func TestRequestHandoffTool_TerminateHint(t *testing.T) {
 	tool := NewRequestHandoffTool(bus, func(string) bool { return true })
 	if !tool.TerminateHint(nil) {
 		t.Error("TerminateHint should return true")
+	}
+}
+
+// Unknown-target errors list the roster when a lister is wired (named-agent
+// routing follow-up: executor: acp employees are roster members outside the
+// capability table, so the calling agent needs the actual names to
+// self-correct).
+func TestRequestHandoffTool_UnknownTargetListsRoster(t *testing.T) {
+	bus := &mockHandoffBus{}
+	exists := func(id string) bool { return id == "coder" }
+	tool := NewRequestHandoffTool(bus, exists)
+	tool.SetAgentLister(func() []string { return []string{"coder", "bob", "chat"} })
+
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"task_id":       "task-1",
+		"from_step_id":  "step-1",
+		"from_agent_id": "coder",
+		"to_agent_id":   "notrealagent",
+		"description":   "do the thing",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	hr, ok := result.(HandoffResult)
+	if !ok {
+		t.Fatalf("expected HandoffResult, got %T", result)
+	}
+	if hr.Success {
+		t.Fatal("unknown target must not report success")
+	}
+	for _, want := range []string{"notrealagent", "bob", "chat", "coder"} {
+		if !strings.Contains(hr.Error, want) {
+			t.Errorf("error %q must contain %q", hr.Error, want)
+		}
+	}
+
+	// Nil lister keeps the legacy message shape.
+	legacy := NewRequestHandoffTool(bus, exists)
+	res2, _ := legacy.Execute(context.Background(), map[string]any{
+		"task_id":      "task-1",
+		"from_step_id": "step-1",
+		"to_agent_id":  "notrealagent",
+		"description":  "do the thing",
+	})
+	hr2 := res2.(HandoffResult)
+	if strings.Contains(hr2.Error, "Available agents") {
+		t.Errorf("nil lister must keep the legacy error: %q", hr2.Error)
 	}
 }

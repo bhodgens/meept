@@ -2683,8 +2683,27 @@ func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 // not an override. (2026-09-08 audit LOW: scheduleStep clobbered
 // pair-session reviewer assignments because "review" has no hint-table
 // entry and fell through to chat.)
+//
+// Named-agent fallback (acp-employees follow-up): when the step carries no
+// explicit assignment, its description is scanned for an addressed roster
+// agent name ("hand the task to bob via request_handoff") BEFORE the hint
+// table consult. A user-named agent beats the capability table — the live
+// defect was the planner prose naming bob while the "git"/code hint routed
+// the step to committer. Registry-gated: a description that names no real
+// roster agent is byte-identical to the previous hint-table path.
 func (ts *TacticalScheduler) assignStepAgent(step *task.TaskStep) {
 	if step.AgentID == "" {
+		if named, ok := ts.namedAgentInText(step.Description); ok {
+			step.AgentID = named
+			if ts.telemetry != nil {
+				ts.telemetry.RecordHintRoute(step.ID, named, "name_match")
+			}
+			ts.logger.Info("Step agent assigned from roster name in description",
+				"step_id", step.ID,
+				"agent", named,
+			)
+			return
+		}
 		step.AgentID = ts.selectAgent(step)
 		return
 	}
@@ -2693,6 +2712,18 @@ func (ts *TacticalScheduler) assignStepAgent(step *task.TaskStep) {
 	if ts.telemetry != nil {
 		ts.telemetry.RecordHintRoute(step.ID, step.AgentID, "explicit")
 	}
+}
+
+// namedAgentInText resolves a roster-agent name addressed inside text
+// (step description, plan input) through the scheduler's registry. Nil
+// registry (test schedulers without one) or no resolvable name = false:
+// callers fall through to the hint table untouched.
+func (ts *TacticalScheduler) namedAgentInText(text string) (string, bool) {
+	if ts.registry == nil || text == "" {
+		return "", false
+	}
+	resolve := resolveNamedRosterAgent(ts.registry.ListSpecs())
+	return namedAgentInStepDescription(text, resolve)
 }
 
 // SelectAgentForHint exports selectAgent so the tactical orchestrator (and
@@ -3242,6 +3273,30 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 		)
 	}
 
+	// 4.5 Validate the handoff target exists in the registry (both agent
+	// kinds — local and executor: acp — are first-class roster members;
+	// the ACP executor is transparent here and binds at the target loop's
+	// runTurnProducer seam). A silent fallthrough to the hint table would
+	// run "handoff to bob" as the chat agent; fail explicitly instead and
+	// list the available names so the calling agent can self-correct.
+	// Nil registry (unwired test schedulers) skips the check.
+	if ts.registry != nil {
+		if _, ok := ts.registry.GetSpec(req.ToAgentID); !ok {
+			if ts.telemetry != nil {
+				ts.telemetry.RecordHandoff(req.TaskID, req.FromStepID, req.ToAgentID, false)
+			}
+			var names []string
+			for _, spec := range ts.registry.ListSpecs() {
+				if spec != nil && spec.Enabled {
+					names = append(names, spec.ID)
+				}
+			}
+			slices.Sort(names)
+			return fmt.Errorf("handoff target %q is not a known agent; available agents: %s",
+				req.ToAgentID, strings.Join(names, ", "))
+		}
+	}
+
 	// 5. Derive tool_hint from target agent if not provided
 	toolHint := req.ToolHint
 	if toolHint == "" {
@@ -3338,6 +3393,16 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 		newStep.ToolHint = toolHint
 		newStep.AccumulatedContext = accumulatedContext
 		newStep.IsHandoff = true
+		// Handoff target is an EXPLICIT assignment (mirrors the amendment
+		// path's metadata["agent_id"] which handleAddStep stamps onto the
+		// created step). Without this the direct path leaves AgentID empty
+		// and assignStepAgent re-derives the executor from the tool-hint
+		// table — agentIDToToolHint("bob")="chat" then routes a handoff
+		// addressed to bob through the chat agent. The target only ever
+		// survives via the hint round-trip for agents that happen to be IN
+		// the capability table (coder/debugger/...); roster agents outside
+		// it (every executor: acp employee included) silently lose it.
+		newStep.AgentID = req.ToAgentID
 
 		if req.InjectAfter && fromStep != nil {
 			newStep.DependsOn = []string{req.FromStepID}

@@ -3,6 +3,8 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -44,6 +46,11 @@ type RequestHandoffTool struct {
 	tools.ToolDefaults
 	bus         handoffBus
 	agentExists func(agentID string) bool
+	// agentLister optionally enumerates the roster for the unknown-target
+	// error message (named-agent routing follow-up: the calling agent can
+	// self-correct without a platform_agents round-trip). Nil = legacy
+	// message shape.
+	agentLister func() []string
 }
 
 // NewRequestHandoffTool creates a new request_handoff tool.
@@ -52,6 +59,15 @@ func NewRequestHandoffTool(bus handoffBus, agentExist func(agentID string) bool)
 		bus:         bus,
 		agentExists: agentExist,
 	}
+}
+
+// SetAgentLister wires the roster enumerator used to enrich the unknown
+// target error. Nil is a no-op (repo setter rule).
+func (t *RequestHandoffTool) SetAgentLister(lister func() []string) {
+	if t == nil {
+		return
+	}
+	t.agentLister = lister
 }
 
 func (t *RequestHandoffTool) Name() string { return "request_handoff" }
@@ -153,12 +169,19 @@ func (t *RequestHandoffTool) Execute(ctx context.Context, args map[string]any) (
 
 	// Validate target agent exists
 	if t.agentExists != nil && !t.agentExists(toAgentID) {
+		errMsg := fmt.Sprintf("agent %q not found. Use the platform_agents tool to discover available agents.", toAgentID)
+		if t.agentLister != nil {
+			if names := t.agentLister(); len(names) > 0 {
+				slices.Sort(names)
+				errMsg = fmt.Sprintf("agent %q not found. Available agents: %s", toAgentID, strings.Join(names, ", "))
+			}
+		}
 		return HandoffResult{
 			TaskID:      taskID,
 			ToAgentID:   toAgentID,
 			Description: description,
 			Success:     false,
-			Error:       fmt.Sprintf("agent %q not found. Use the platform_agents tool to discover available agents.", toAgentID),
+			Error:       errMsg,
 		}, nil
 	}
 

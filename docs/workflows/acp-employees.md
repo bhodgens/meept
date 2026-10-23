@@ -124,13 +124,29 @@ relay only in human mode or decision+escalate).
 
 ### Dispatcher routing
 
-"have bob check that issue" routes by agent name — the dispatcher already
-name-matches roster agents (keywordPatterns + classifier). No new intent
-type. Bob appears in `agents list`, the TUI roster, and the GUI agents tab
-with no surface changes, because he IS an agent definition. The only
-surface addition: `agents show bob` renders an `Executor:` section (acp,
-catalog agent, persona, permission mode) — lowercase, following the
-Verification section pattern.
+"have bob check that issue" routes by agent name through a dedicated
+NAME-MATCH stage in `ClassifyAndRoute` (internal/agent/
+`named_agent_route.go`, inserted before the prefilter/keyword/capability
+chain): a bounded, deterministic matcher detects an addressed roster agent
+(`have|get|let|make|ask|send|tell|assign <name>`, `@<name>`, anchored
+`<name> should|please|:|,`) and resolves the token against the registry's
+spec ids/names — a registry miss falls through to the normal chain, so a
+false positive requires a real roster name. A match routes the FULL turn
+directly to `RouteToAgent` with `DispatchResult.AgentID = <name>` and
+`IntentChat` semantics: no planner decomposition, no capability
+re-assignment, no new public intent type. When a turn does get decomposed,
+plan steps naming a roster agent get `step.AgentID` stamped (the tactical
+scheduler's description scan beats the tool-hint table), and a
+`request_handoff` step carries its target's `AgentID` explicitly — an
+unknown handoff target fails with the roster names listed. The session-loop
+cache is keyed per (session, agent) so a chat-built loop never swallows
+bob's turn. Local and executor: acp agents are first-class here — the ACP
+executor is transparent to routing and binds at the loop's
+`runTurnProducer` seam. Bob appears in `agents list`, the TUI roster, and
+the GUI agents tab with no surface changes, because he IS an agent
+definition. The only surface addition: `agents show bob` renders an
+`Executor:` section (acp, catalog agent, persona, permission mode) —
+lowercase, following the Verification section pattern.
 
 ## Security
 

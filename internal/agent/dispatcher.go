@@ -1035,6 +1035,66 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 3. Build memory context with thread-aware conversation ID
 	memCtx := d.buildMemoryContext(ctx, input, conversationID)
 
+	// 3.2. Named-agent routing (acp-employees follow-up): the message
+	// addresses a roster agent BY NAME ("have bob ...", "ask bob to ...",
+	// "@bob ...", "let bob ...", "bob should ...") — route the FULL turn
+	// directly to that agent's loop and stop. No prefilter vote, no LLM
+	// classification, no planner decomposition, no capability/keyword
+	// re-assignment. The live defect (2026-10-23): "have bob introduce
+	// himself and list two files" was planned and executed by committer;
+	// the planner's prose said "hand the task to bob via request_handoff"
+	// and the handoff never fired.
+	//
+	// Registry-gated by construction: the matcher resolves the candidate
+	// token against the registry's known spec ids/names; a miss falls
+	// through to the normal chain untouched, so a false positive requires
+	// the word to be a real roster agent name. executor: acp agents are
+	// first-class here — the ACP executor is transparent to routing; it
+	// binds at the loop's runTurnProducer seam, not here.
+	//
+	// sessionID is used for the RecordIntent/session tracking below; the
+	// thread-resolved conversationID rides the DispatchResult path exactly
+	// as the media-guard branch above shows (RouteToAgent re-resolves the
+	// thread id itself and keeps the session binding on the session-level
+	// id).
+	if d.registry != nil && agentOverride == "" && !strings.HasPrefix(strings.TrimSpace(input), "/") {
+		resolve := resolveNamedRosterAgent(d.registry.ListSpecs())
+		if namedID, ok := namedAgentCandidate(input, resolve); ok {
+			d.recordTotalDispatch()
+			d.recordClassificationMethod("name_match")
+			d.recordAgent(namedID)
+			d.recordIntentType(string(IntentChat))
+			nameIntent := &Intent{
+				Type:          string(IntentChat),
+				Confidence:    1.0,
+				AgentType:     namedID,
+				Summary:       extractSummary(input),
+				Method:        "name_match",
+				OriginalInput: input,
+			}
+			nameIntent.SuggestedMode = suggestMode(IntentChat, nameIntent.TrueAnalysis, input)
+			if d.sessionTracker != nil {
+				d.sessionTracker.RecordIntent(sessionID, nameIntent, namedID)
+			}
+			d.logger.Info("Named-agent route applied",
+				"agent", namedID,
+				"session", sessionID,
+			)
+			return &DispatchResult{
+				AgentID:              namedID,
+				Intent:               nameIntent,
+				MemoryContext:        memCtx.Results,
+				ModelDirective:       parseResult.Directive,
+				OriginalInput:        input,
+				Parts:                parts,
+				SuggestedMode:        nameIntent.SuggestedMode,
+				ExecutorModelRef:     executorModelRefFromDirective(parseResult.Directive),
+				RequestModel:         requestModel,
+				AgentOverrideApplied: true,
+			}, nil
+		}
+	}
+
 	// 3.25. STAGE-0 embedding prefilter (classifier-observability
 	// follow-up): unanimous kNN vote over labeled example vectors routes
 	// directly and skips the analyzer + router LLM calls entirely
@@ -2997,6 +3057,29 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 
 	// Check if there's an active agent loop for this conversation
 	queue, generation := d.registry.GetActiveQueue(conversationID)
+	if queue != nil {
+		// Named/override dispatch guard: an ACTIVE queue belongs to a
+		// specific agent's loop. Steering a "have bob ..." turn into an
+		// active CHAT loop would execute it with the wrong persona, the
+		// wrong AgentSpec — and for an executor: acp target, the ACP
+		// branch never fires because the reasoning loop belongs to
+		// another agent. When the explicit routing target differs from
+		// the active loop's agent, skip the queue lane entirely and let
+		// the turn run through resolveAgent(result.AgentID) below (which
+		// builds/evicts the per-agent session loop). Non-explicit
+		// dispatches keep the legacy steer/follow-up behavior.
+		if result.AgentOverrideApplied {
+			if qLoop := d.registry.GetActiveQueueLoop(conversationID); qLoop != nil &&
+				qLoop.GetAgentID() != result.AgentID {
+				d.logger.Info("Active queue belongs to a different agent; routing turn to the named agent",
+					"conversation", conversationID,
+					"active_agent", qLoop.GetAgentID(),
+					"target_agent", result.AgentID,
+				)
+				queue = nil
+			}
+		}
+	}
 	if queue != nil {
 		// BUG FIX: Before steering/following-up through the queue, ensure
 		// the queue's agent loop has the correct session-scoped workingDir.

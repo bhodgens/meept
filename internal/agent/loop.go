@@ -9136,6 +9136,20 @@ func (l *AgentLoop) GetSessionID() string {
 	return l.sessionID
 }
 
+// GetAgentID returns the agent identity this loop was built for
+// (WithAgentID; registry createLoop stamps spec.ID). Empty for loops
+// constructed without an identity — the daemon template loop, whose
+// sessions clone it via ConfigSnapshot and stamp the template's own id.
+// Safe to call concurrently; returns "" for a nil receiver.
+func (l *AgentLoop) GetAgentID() string {
+	if l == nil {
+		return ""
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.agentID
+}
+
 // SetDetectionContext wires the client-side detection context (CWD, detected
 // project, CLI args) captured at session creation. Nil-safe per CLAUDE.md
 // setter convention.

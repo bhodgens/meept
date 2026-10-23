@@ -68,9 +68,30 @@ func (m *Manager) GetOrCreate(sessionID string, workingDir string, opts ...LoopO
 	return loop, nil
 }
 
-// GetOrCreateWired returns an existing loop for sessionID, or creates a new
-// one whose configuration (LLM client, tools, skills, hooks) is mirrored
-// from template. The template is typically the daemon's singleton AgentLoop.
+// cacheKey namespaces the session-loop map by agent identity. Loops built
+// from the daemon template (agentID "" or "default" — the ChatHandler
+// interactive lane) keep the legacy bare-session key; loops built from a
+// real registry agent spec get a per-(session, agent) key.
+//
+// Why this exists (named-agent routing): with a bare-session key, "have bob
+// ..." on a conversation whose loop was first created for the chat template
+// returned the CACHED chat loop — the turn executed with the wrong persona
+// and, worse, the wrong AgentSpec, so an executor: acp target never entered
+// the ACP branch and the reply silently came from the local LLM loop. The
+// agent's spec/tool grants are loop identity, not session identity. Two
+// agents alternating on one conversation no longer evict/rebuild each
+// other's loop (each key is built once and reused).
+func cacheKey(sessionID, templateAgentID string) string {
+	if templateAgentID == "" || templateAgentID == "default" {
+		return sessionID
+	}
+	return sessionID + "\x00" + templateAgentID
+}
+
+// GetOrCreateWired returns an existing loop for (sessionID, template-agent),
+// or creates a new one whose configuration (LLM client, tools, skills,
+// hooks) is mirrored from template. The template is typically the daemon's
+// singleton AgentLoop or a registry agent loop.
 //
 // workingDir is the project directory for the new loop; it overrides any
 // value on the template (per-session isolation). All other config is copied
@@ -79,11 +100,13 @@ func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *Agent
 	// Collect stale loop under lock, Close it outside lock (CLAUDE.md mutex scope rule).
 	var staleLoop *AgentLoop
 
+	key := cacheKey(sessionID, template.GetAgentID())
+
 	func() {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
-		if loop, ok := m.loops[sessionID]; ok {
+		if loop, ok := m.loops[key]; ok {
 			// BUG FIX: If the session's project changed (workingDir differs from
 			// the cached loop's), evict the stale loop and create a fresh one.
 			// Without this, /project set would keep using the old project's
@@ -95,7 +118,7 @@ func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *Agent
 					"new_working_dir", workingDir,
 				)
 				staleLoop = loop
-				delete(m.loops, sessionID)
+				delete(m.loops, key)
 				// Fall through to create a new loop
 			} else {
 				return
@@ -114,7 +137,7 @@ func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *Agent
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if loop, ok := m.loops[sessionID]; ok {
+	if loop, ok := m.loops[key]; ok {
 		return loop, nil
 	}
 	if sessionID == "" {
@@ -129,7 +152,7 @@ func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *Agent
 
 	opts := template.ConfigSnapshot()
 	loop := NewAgentLoop(sessionID, workingDir, opts...)
-	m.loops[sessionID] = loop
+	m.loops[key] = loop
 	return loop, nil
 }
 
