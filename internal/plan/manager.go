@@ -577,6 +577,92 @@ func (m *PlanManager) CancelPlan(ctx context.Context, planID, reason string) err
 	return nil
 }
 
+// PruneStalePlans applies age-based retention to THIS manager's store (the
+// evolver sink points it at the dedicated plans-evolver store, so it only
+// ever touches machine-originated plans). For every plan whose UpdatedAt is
+// older than retentionDays:
+//   - draft / cancelled / failed rows are DELETED (row + its markdown file);
+//   - a stale pending_approval / planning / approved plan is CANCELLED first
+//     (never silently dropped) so a human queue drains instead of aging
+//     forever, then left for the next cycle's delete once terminal.
+//
+// Executing / synthesizing / completed / confirmed plans are never touched:
+// executing is live work, and completed/confirmed are the audit record of
+// applied changes. Returns counts of deleted and cancelled plans. A
+// retentionDays <= 0 disables the sweep (0,0,nil). Best-effort per plan: one
+// plan's error is logged and does not abort the sweep.
+//
+// Rationale (evolver decision brief 2026-10-22, item 4): the evolver sink
+// grew to 12,477 plans / 50 MB because nothing ever aged out a draft or a
+// proposal nobody reviewed. Creation-time caps bound the pending queue but
+// not the accumulated draft/cancelled history; this is the retention half.
+func (m *PlanManager) PruneStalePlans(ctx context.Context, retentionDays int) (deleted, cancelled int, err error) {
+	if m == nil || retentionDays <= 0 {
+		return 0, 0, nil
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
+
+	// Enumerate the states retention may act on. ListPlansByState is bounded
+	// by limit; pass a generous cap so a large backlog drains in one cycle
+	// (each pass is a cheap indexed scan). Terminal drafts/cancelled/failed
+	// are deleted; stale open states are cancelled.
+	deletable := []PlanState{StateDraft, StateCancelled, StateFailed}
+	cancellable := []PlanState{StatePendingApproval, StatePlanning, StateApproved}
+
+	for _, state := range cancellable {
+		plans, lerr := m.store.ListPlansByState(ctx, state, 10000)
+		if lerr != nil {
+			m.logger.Warn("retention: list plans failed", "state", state, "error", lerr)
+			err = lerr
+			continue
+		}
+		for _, p := range plans {
+			if p == nil || p.UpdatedAt.After(cutoff) {
+				continue
+			}
+			if cerr := m.CancelPlan(ctx, p.ID, fmt.Sprintf("retention: pending over %d days", retentionDays)); cerr != nil {
+				m.logger.Warn("retention: cancel stale plan failed", "plan_id", p.ID, "error", cerr)
+				err = cerr
+				continue
+			}
+			cancelled++
+		}
+	}
+
+	for _, state := range deletable {
+		plans, lerr := m.store.ListPlansByState(ctx, state, 10000)
+		if lerr != nil {
+			m.logger.Warn("retention: list plans failed", "state", state, "error", lerr)
+			err = lerr
+			continue
+		}
+		for _, p := range plans {
+			if p == nil || p.UpdatedAt.After(cutoff) {
+				continue
+			}
+			// Remove the markdown file first (best-effort: a missing or
+			// already-gone file is not a delete failure), then the row.
+			if p.FilePath != "" {
+				if rmErr := os.Remove(p.FilePath); rmErr != nil && !os.IsNotExist(rmErr) {
+					m.logger.Warn("retention: remove plan file failed", "plan_id", p.ID, "path", p.FilePath, "error", rmErr)
+				}
+			}
+			if derr := m.store.DeletePlan(ctx, p.ID); derr != nil {
+				m.logger.Warn("retention: delete stale plan failed", "plan_id", p.ID, "error", derr)
+				err = derr
+				continue
+			}
+			deleted++
+		}
+	}
+
+	if deleted > 0 || cancelled > 0 {
+		m.logger.Info("retention pruned stale plans",
+			"deleted", deleted, "cancelled", cancelled, "retention_days", retentionDays)
+	}
+	return deleted, cancelled, err
+}
+
 // ---------------------------------------------------------------------------
 // Synthesis
 // ---------------------------------------------------------------------------

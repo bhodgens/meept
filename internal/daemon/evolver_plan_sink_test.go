@@ -128,6 +128,45 @@ func TestEvolverPlanSink_MissingPlanDirRejected(t *testing.T) {
 	}
 }
 
+// TestEvolverPlanSink_NeverAutoApproves pins the item-3 guard (decision brief
+// 2026-10-22): the evolver sink ALWAYS requires human approval regardless of
+// the global plans.approval.require_approval. The 922-plan executing backlog
+// came from a brief window where the global flag was false, so SubmitPlan
+// auto-approved machine proposals and synthesized zero-phase tasks that could
+// never complete. Build the sink with RequireApproval=false globally and prove
+// a submitted evolver plan still lands in pending_approval, never approved.
+func TestEvolverPlanSink_NeverAutoApproves(t *testing.T) {
+	fixtureHome := t.TempDir()
+	sink := filepath.Join(fixtureHome, ".meept", "plans", "evolver")
+
+	cfg := config.DefaultConfig()
+	cfg.Skills.Evolver.Enabled = true
+	cfg.Skills.Evolver.PlanDir = sink
+	// Global config says approval NOT required - the sink must override it.
+	cfg.Plans.Approval.RequireApproval = false
+
+	evolverMgr, closeFn := buildEvolverPlanSinkFixture(t, cfg, fixtureHome)
+	defer closeFn()
+
+	created, err := evolverMgr.CreatePlan(context.Background(),
+		"Skill evolution: archive fake-skill", "test", "", "", "")
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	if err := evolverMgr.SubmitPlan(context.Background(), created.ID); err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+
+	got, err := evolverMgr.GetPlan(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("GetPlan: %v", err)
+	}
+	if got.State != plan.StatePendingApproval {
+		t.Fatalf("evolver sink plan state = %s, want %s (sink auto-approved despite the guard)",
+			got.State, plan.StatePendingApproval)
+	}
+}
+
 // buildEvolverPlanSinkFixture constructs the evolver-dedicated PlanManager
 // through newEvolverPlanManager — the actual daemon wiring function under
 // test — backed by a temp SQLite store, with HOME pinned to the fixture.

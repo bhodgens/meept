@@ -587,6 +587,25 @@ func (w *Writer) ReadSkill(name string) (string, error) {
 	return string(content), nil
 }
 
+// SkillExists reports whether the named skill is present on disk in any
+// discovery tier (or the Writer's own root). It mirrors ArchiveSkill's own
+// resolution + stat exactly (resolveSkillPath then os.Stat), so a caller that
+// gates an archive on this check sees the same truth the apply path will.
+//
+// The evolver's prune pass uses this to skip archive proposals for skills
+// that are ALREADY gone from disk - stale usage stats once drove Pass C to
+// propose archiving deleted skills, and every such apply failed with
+// ErrSkillNotFound (0/252 success record, decision brief 2026-10-22). An
+// empty name or a resolution/stat error reports false.
+func (w *Writer) SkillExists(name string) bool {
+	if w == nil || name == "" {
+		return false
+	}
+	sourcePath, _ := w.resolveSkillPath(name)
+	_, err := os.Stat(sourcePath)
+	return err == nil
+}
+
 // copyDir copies a directory tree from src to dst. Used as a fallback when
 // os.Rename fails due to cross-device links.
 func copyDir(src, dst string) error {

@@ -176,6 +176,22 @@ func (e *Evolver) RunCycle(ctx context.Context) (*EvolutionReport, error) {
 	// Pass D: fill coverage gaps from low-match queries.
 	e.passDFillGap(ctx, report)
 
+	// Retention: age out stale sink plans so the evolver plan store cannot
+	// grow unbounded (evolver decision brief 2026-10-22, item 4). Runs after
+	// the proposal passes so this cycle's fresh plans (UpdatedAt=now) are
+	// never eligible. Best-effort: a retention error is logged, never fails
+	// the cycle.
+	if e.planMgr != nil && e.cfg.PlanRetentionDays > 0 {
+		if deleted, cancelled, rerr := e.planMgr.PruneStalePlans(ctx, e.cfg.PlanRetentionDays); rerr != nil {
+			e.logger.Warn("evolver retention pass reported errors",
+				"deleted", deleted, "cancelled", cancelled, "error", rerr)
+		} else if deleted > 0 || cancelled > 0 {
+			e.logger.Info("evolver retention pass pruned sink plans",
+				"deleted", deleted, "cancelled", cancelled,
+				"retention_days", e.cfg.PlanRetentionDays)
+		}
+	}
+
 	e.logger.Info("evolution cycle complete",
 		"refined", report.Refined,
 		"promoted", report.Promoted,
@@ -533,6 +549,19 @@ func (e *Evolver) passCPrune(ctx context.Context, report *EvolutionReport) {
 	}
 
 	for _, stats := range lowPerformers {
+		// Stale-target guard (evolver decision brief 2026-10-22): the usage
+		// tracker can hold stats for skills whose directories are already
+		// gone. Proposing an archive for such a skill is guaranteed to fail
+		// at apply time with skills.ErrSkillNotFound - this is exactly why
+		// every one of the 252 recorded applications failed. Skip before
+		// spending a verifier LLM call or minting a doomed plan.
+		if e.writer != nil && !e.writer.SkillExists(stats.SkillName) {
+			e.logger.Debug("pass C: skipping archive proposal for skill absent from disk",
+				"skill", stats.SkillName)
+			report.Skipped++
+			continue
+		}
+
 		currentContent := ""
 		if e.writer != nil {
 			if content, err := e.writer.ReadSkill(stats.SkillName); err == nil {

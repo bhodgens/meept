@@ -2636,6 +2636,7 @@ type SkillsEvolverConfig struct {
 	AutoApply                  bool          `json:"auto_apply"                     toml:"auto_apply"`                   // Default false (requires plan approval)
 	RunOnStart                 bool          `json:"run_on_start"                   toml:"run_on_start"`                 // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
 	PlanDir                    string        `json:"plan_dir"                       toml:"plan_dir"`                     // Evolver plan sink; default "" -> ~/.meept/plans/evolver (user-scoped, machine-originated plans)
+	PlanRetentionDays          int           `json:"plan_retention_days"            toml:"plan_retention_days"`          // Default 14; sink plans older than this are auto-pruned each cycle (draft/cancelled/failed rows + md deleted, stale pending_approval cancelled). <=0 disables retention.
 }
 
 // DefaultEvolverPlanDir is the user-scoped sink where machine-originated
@@ -3632,6 +3633,7 @@ func DefaultConfig() *Config {
 				MinProposalConfidence:      0.7,
 				AutoApply:                  false,
 				RunOnStart:                 false,
+				PlanRetentionDays:          14,
 			},
 			Wiki: SkillsWikiConfig{
 				Enabled: true,

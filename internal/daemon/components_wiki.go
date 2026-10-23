@@ -205,13 +205,19 @@ func (c *Components) initializeSkillEvolver(cfg *config.Config, logger *slog.Log
 		logger,
 		evolverOpts...,
 	)
-	c.SkillEvolverSched = lifecycle.NewEvolverScheduler(
+	// run_on_start wiring fix (evolver decision brief 2026-10-22): the
+	// legacy constructor hardcodes runOnStart=true, so the config knob
+	// skills.evolver.run_on_start=false was NEVER read - every daemon
+	// restart burned a full ~10-minute, ~50-LLM-call evolution cycle.
+	c.SkillEvolverSched = lifecycle.NewEvolverSchedulerWithRunOnStart(
 		c.SkillEvolver,
 		cfg.Skills.Evolver.Interval,
+		cfg.Skills.Evolver.RunOnStart,
 		logger.With("component", "skill-evolver-scheduler"),
 	)
 	logger.Info("Skill evolver + scheduler initialized",
 		"interval", cfg.Skills.Evolver.Interval,
+		"run_on_start", cfg.Skills.Evolver.RunOnStart,
 		"auto_apply", cfg.Skills.Evolver.AutoApply,
 	)
 }
@@ -254,6 +260,14 @@ func (c *Components) newEvolverPlanManagerWithCreator(store plan.PlanStore, cfg 
 	}
 	evolverPlans := cfg.Plans
 	evolverPlans.Storage.ExternalPath = sink
+	// Never auto-approve evolver-sink plans (evolver decision brief
+	// 2026-10-22, item 3): the global plans.approval.require_approval was
+	// briefly false, so SubmitPlan auto-approved 900+ evolver proposals,
+	// synthesized zero-phase tasks that can never complete, and left them
+	// stuck in StateExecuting forever. The evolver sink is machine-origin
+	// and must ALWAYS require explicit human approval regardless of the
+	// global plans config, so that failure mode cannot recur.
+	evolverPlans.Approval.RequireApproval = true
 	return plan.NewPlanManager(store, c.msgBus, evolverPlans, creator, logger), nil
 }
 

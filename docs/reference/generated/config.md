@@ -775,6 +775,13 @@ ACPConfig holds Agent Client Protocol client settings.
 	    // permission_mode "decision" through the human relay instead of
 	    // cancelling outright. Default false keeps the fail-closed cancel.
 	    DecisionEscalateToHuman bool `json:"decision_escalate_to_human" toml:"decision_escalate_to_human"`
+	    // ApproverIdentity controls the self-approval gate on
+	    // acp.permissions.resolve / .list (audit M5). "" or "enforce" (the
+	    // default) rejects callers that are the daemon or a daemon-spawned
+	    // process (an agent answering its own permission request) and fails
+	    // closed when the caller cannot be identified. "off" disables the
+	    // gate (documented escape hatch; approvals stay attributed).
+	    ApproverIdentity string `json:"approver_identity" toml:"approver_identity"`
 	}
 
 <a name="ACPConfig.Validate"></a>
@@ -2607,6 +2614,11 @@ HTTPTransportConfig configures the HTTP REST transport.
 	    MCPPath        string   `json:"mcp_path"      toml:"mcp_path"`            // MCP endpoint path
 	    RateLimitRPM   int      `json:"rate_limit_rpm"  toml:"rate_limit_rpm"`    // Per-IP request rate limit (0 = default 120 req/min)
 	    RateLimitBurst int      `json:"rate_limit_burst" toml:"rate_limit_burst"` // Per-IP burst size (0 = default 30)
+	    // TrustXForwardedFor keys the per-IP rate limiter on X-Forwarded-For /
+	    // X-Real-IP. Only true when the listener sits behind a trusted proxy that
+	    // rewrites those headers; default false keys on RemoteAddr so a remote
+	    // client cannot rotate limiter buckets by spoofing XFF.
+	    TrustXForwardedFor bool `json:"trust_xff"        toml:"trust_xff"`
 	}
 
 <a name="HTTPTransportConfig.ListenAddr"></a>
@@ -4663,6 +4675,7 @@ SkillsEvolverConfig configures the skill evolver — the scheduled process that 
 	    AutoApply                  bool          `json:"auto_apply"                     toml:"auto_apply"`                   // Default false (requires plan approval)
 	    RunOnStart                 bool          `json:"run_on_start"                   toml:"run_on_start"`                 // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
 	    PlanDir                    string        `json:"plan_dir"                       toml:"plan_dir"`                     // Evolver plan sink; default "" -> ~/.meept/plans/evolver (user-scoped, machine-originated plans)
+	    PlanRetentionDays          int           `json:"plan_retention_days"            toml:"plan_retention_days"`          // Default 14; sink plans older than this are auto-pruned each cycle (draft/cancelled/failed rows + md deleted, stale pending_approval cancelled). <=0 disables retention.
 	}
 
 <a name="SkillsStateConfig"></a>

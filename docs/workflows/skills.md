@@ -261,6 +261,25 @@ surface:
 - `meept plans show/approve` work on them through the sink fallback in
   the plan RPC handler.
 
+Evolver plans NEVER auto-approve, regardless of the global
+`plans.approval.require_approval` setting: the sink PlanManager is built
+with `RequireApproval` forced true (internal/daemon/components_wiki.go),
+so a machine proposal always reaches the human gate. This closes the
+failure mode where a brief `require_approval=false` window auto-approved
+900+ zero-phase proposals that then stuck in `executing` forever (they
+synthesize no steps, so no completion event can ever fire).
+
+Sink retention: each evolution cycle ends with an age-based prune
+(`skills.evolver.plan_retention_days`, default 14; `<=0` disables).
+Draft/cancelled/failed plans older than the window are DELETED (row plus
+markdown file); stale `pending_approval`/`planning`/`approved` plans are
+CANCELLED first (never silently dropped) and deleted on a later cycle
+once terminal. Executing/synthesizing/completed/confirmed plans are never
+touched - executing is live work, completed/confirmed are the audit
+record of applied changes. This is the retention half of backlog control;
+the creation half is the pending-queue cap (`maxPendingEvolverPlans`)
+plus per-proposal dedupe against an already-open plan.
+
 ### CLI Reference
 
 ```bash
@@ -298,6 +317,7 @@ surface:
       auto_apply: false,
       run_on_start: false,
       plan_dir: "~/.meept/plans/evolver",  // sink for evolver-created plans
+      plan_retention_days: 14,             // age-based sink retention (<=0 disables)
     },
     wiki: {
       enabled: true,
