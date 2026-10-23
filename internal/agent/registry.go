@@ -133,6 +133,12 @@ type AgentRegistry struct {
 	// loop uses the shared chain like every other loop.
 	plannerChatter llm.Chatter
 
+	// acpExecutor is the shared external acp turn producer (dim 3A)
+	// stamped onto every loop this registry builds. Nil ([acp] disabled
+	// or no daemon wiring) leaves executor: acp turns failing loudly
+	// with ErrACPExecutorNotWired — never the local LLM loop.
+	acpExecutor *ACPExecutor
+
 	// sharedChatter mirrors RegistryConfig.SharedChatter: the daemon-wide
 	// ProviderManager for every registry-built loop (nil = single-client
 	// chain, byte-identical to the pre-SharedChatter behavior).
@@ -714,6 +720,14 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	// Wire the registry so the loop can register/unregister its queue
 	opts = append(opts, WithAgentRegistry(r))
 
+	// External acp turn producer (dim 3A): executor: acp loops route
+	// through it; nil leaves the branch failing loudly. The loop reads
+	// the registry's own field under r.mu below (createLoop callers
+	// already hold r.mu, so snapshot before appending the option).
+	if r.acpExecutor != nil {
+		opts = append(opts, WithACPExecutor(r.acpExecutor))
+	}
+
 	// Share a single ConversationStore across all agent loops so that
 	// cross-agent handoffs (dispatcher -> coder -> debugger, etc.) share
 	// the same conversation history keyed by conversationID.
@@ -874,6 +888,30 @@ func (r *AgentRegistry) CapabilitiesMap() *CapabilitiesMap {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.capabilitiesMap
+}
+
+// SetACPExecutor wires the external acp turn producer (dim 3A) onto this
+// registry: every loop createLoop builds afterwards inherits it. Nil
+// receiver and nil executor are no-ops (repo setter rule) — [acp]
+// disabled simply never calls this, and executor: acp turns then fail
+// loudly with ErrACPExecutorNotWired.
+func (r *AgentRegistry) SetACPExecutor(e *ACPExecutor) {
+	if r == nil || e == nil {
+		return
+	}
+	r.mu.Lock()
+	r.acpExecutor = e
+	r.mu.Unlock()
+}
+
+// ACPExecutor returns the wired external acp turn producer (nil = none).
+func (r *AgentRegistry) ACPExecutor() *ACPExecutor {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.acpExecutor
 }
 
 // SetTraceWriter wires the turn-trace persistence hook into every loop this

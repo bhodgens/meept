@@ -1,6 +1,6 @@
 ---
 title: ACP Employees (slaved external agents as agent definitions)
-status: phase-1 partially landed (persona lane bdc1ae52, field pipeline d47eba12); ACPExecutor branch + wiring pending
+status: phase-1 landed (persona lane bdc1ae52, field pipeline d47eba12, ACPExecutor branch + daemon wiring + agents show executor section)
 decided: 2026-10-22
 ---
 

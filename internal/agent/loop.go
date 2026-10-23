@@ -595,6 +595,7 @@ type AgentLoop struct {
 	resolver        *llm.Resolver        // Model resolver for alias resolution
 	modelRef        string               // Model reference from agent spec (can be alias or direct ref)
 	spec            *AgentSpec           // Agent specification (for inference parameter overrides)
+	acpExecutor     *ACPExecutor         // external acp turn producer (dim 3A); nil = local loop only. guarded by mu
 	executor        *Executor
 	registry        ToolRegistry
 	security        *security.PermissionChecker
@@ -3033,8 +3034,11 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		defer l.watchdog.UnregisterWorker(workerID)
 	}
 
-	// Run reasoning cycle
-	response, err = l.reasoningCycle(loopCtx, conv, conversationID)
+	// Run the turn producer: the executor branch (dim 3A) routes an
+	// executor: acp spec through the external ACP harness; every other
+	// spec keeps the local LLM reasoning cycle. The final text from
+	// either producer flows through the SAME post-processing below.
+	response, err = l.runTurnProducer(loopCtx, conv, conversationID, sanitizedMessage)
 	if err != nil {
 		l.logger.Error("Reasoning cycle failed",
 			"conversation", conversationID,
@@ -3128,7 +3132,11 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 			conv.AddAssistantMessage(finalResponse)
 			conv.AddUserMessage(replyGuardRewriteNudge)
 			conv.Truncate()
-			if retryResponse, retryErr := l.reasoningCycle(loopCtx, conv, conversationID); retryErr != nil {
+			// Re-enter the SAME turn-producer seam (dim 3A): an acp turn
+			// sends the rewrite nudge to the external harness (session/
+			// prompt), an LLM turn re-runs reasoningCycle with the nudge
+			// already in the conversation.
+			if retryResponse, retryErr := l.runTurnProducer(loopCtx, conv, conversationID, replyGuardRewriteNudge); retryErr != nil {
 				// The retry LLM call failed: ship the digest-aware
 				// fallback when armed, else the guarded replacement of
 				// the ORIGINAL reply — the caller's error contract is
@@ -8777,6 +8785,15 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 
 		// --- Quota episode tracking (shared singleton) ---
 		WithQuotaTracker(l.quotaTracker),
+
+		// --- External acp turn producer (dim 3A): clones inherit the
+		// daemon's executor so a session-scoped loop of an executor: acp
+		// agent routes identically to the singleton. ---
+		func(l2 *AgentLoop) {
+			if e := l.ACPExecutor(); e != nil {
+				l2.SetACPExecutor(e)
+			}
+		},
 
 		// --- Skills ---
 		WithCapabilityIndex(l.capabilityIndex),

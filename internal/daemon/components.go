@@ -2939,6 +2939,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	RegisterACPTools(c.ToolRegistry, c.ACPManager)
 
+	// External acp turn producer (acp-employees dim 3A): when the [acp]
+	// kill switch armed a manager, the singleton daemon loop gets the
+	// shared ACPExecutor so executor: acp agent definitions route their
+	// turns through the harness. Disabled ([acp] enabled=false -> nil
+	// manager): nothing is injected and the loop branch fails loudly
+	// only for a spec that actually declares executor: acp.
+	if acpMgr != nil && acpMgr.Enabled() {
+		if exec := agent.NewACPExecutor(acpMgr); exec != nil {
+			c.AgentLoop.SetACPExecutor(exec)
+			logger.Info("acp executor wired into the agent loop")
+		}
+	}
+
 	// Hermes gateway interop (hermes-interop leaf 02): the `hermes`
 	// builtin tool when [hermes] enabled=true and the API key resolves
 	// from hermes.api_key_env; nil-safe no-op otherwise.
@@ -3083,6 +3096,18 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Must run after registry construction — c.AgentRegistry is nil at
 		// the primary-loop wiring site (components.go:1422).
 		c.AgentRegistry.SetSchemaModeConfig(cfg.Agent.Tools)
+
+		// External acp turn producer (acp-employees dim 3A): mirror the
+		// singleton loop's wiring onto the registry so executor: acp
+		// roster loops (dispatcher-routed specialists) route through the
+		// same shared harness manager. Per-session clones inherit it via
+		// ConfigSnapshot. Disabled ([acp] off -> nil manager): no
+		// injection; the loop branch fails loudly only for an executor:
+		// acp spec.
+		if c.ACPManager != nil && c.ACPManager.Enabled() {
+			c.AgentRegistry.SetACPExecutor(agent.NewACPExecutor(c.ACPManager))
+			logger.Info("acp executor wired into the agent registry")
+		}
 
 		// Backward-compat notice: if a legacy ~/.meept/agents.json5 exists,
 		// warn the user that it is no longer read. One-time log per startup.

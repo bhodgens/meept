@@ -318,6 +318,13 @@ func newAgentsShowCmd() *cobra.Command {
 				fmt.Println(renderOutputFiltersSection(outputFilters))
 			}
 
+			// Executor binding (acp-employees dim 3A). Renders only when
+			// the definition declares a non-empty executor; lowercase per
+			// the repo UI convention.
+			if section := renderExecutorSection(resultMap); section != "" {
+				fmt.Println(section)
+			}
+
 			// Constitution summary.
 			if constitution, ok := resultMap["constitution"].(map[string]any); ok {
 				fmt.Println("\nConstitution:")
