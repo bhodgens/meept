@@ -181,8 +181,18 @@ func (e *Evolver) RunCycle(ctx context.Context) (*EvolutionReport, error) {
 	// the proposal passes so this cycle's fresh plans (UpdatedAt=now) are
 	// never eligible. Best-effort: a retention error is logged, never fails
 	// the cycle.
+	//
+	// The retention pass uses its OWN short-lived context, NOT the cycle's:
+	// by the time the proposal passes finish (~9 min of LLM calls), the
+	// cycle context has typically expired, so PruneStalePlans' store reads
+	// failed with "context deadline exceeded" and the prune never ran
+	// (observed live 2026-10-23). A fresh 30s budget is ample for the
+	// indexed state scans and bounded deletes.
 	if e.planMgr != nil && e.cfg.PlanRetentionDays > 0 {
-		if deleted, cancelled, rerr := e.planMgr.PruneStalePlans(ctx, e.cfg.PlanRetentionDays); rerr != nil {
+		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		deleted, cancelled, rerr := e.planMgr.PruneStalePlans(rctx, e.cfg.PlanRetentionDays)
+		cancel()
+		if rerr != nil {
 			e.logger.Warn("evolver retention pass reported errors",
 				"deleted", deleted, "cancelled", cancelled, "error", rerr)
 		} else if deleted > 0 || cancelled > 0 {
