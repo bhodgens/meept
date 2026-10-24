@@ -357,6 +357,10 @@ func (a *App) handleACPPermissionResolved(payload map[string]any) tea.Cmd {
 	}
 	decision, _ := payload["decision"].(string)
 	reason, _ := payload["reason"].(string)
+	// Approver names WHO answered on another surface (kernel-verified
+	// socket peer or HTTP key fingerprint — audit M5 attribution), riding
+	// the additive bus key from bus.ACPPermissionEvent.
+	approver, _ := payload["approver"].(string)
 
 	showingHead := a.activeModal == ModalACPPermission &&
 		a.acpPermissionModal.Count() > 0 &&
@@ -377,6 +381,9 @@ func (a *App) handleACPPermissionResolved(payload map[string]any) tea.Cmd {
 		}
 		if reason != "" {
 			body = fmt.Sprintf("%s (%s)", body, reason)
+		}
+		if approver != "" {
+			body = fmt.Sprintf("%s by %s", body, approver)
 		}
 		_, expiryCmd = a.notifications.Push(level, title, body)
 	}

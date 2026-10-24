@@ -110,6 +110,7 @@ Map<String, dynamic> _resolved({
   String id = 'perm-aaaa1111',
   String decision = 'allow',
   String reason = 'answered',
+  String? approver,
 }) => {
   'type': 'agent_progress',
   'source_topic': 'acp.permission.resolved',
@@ -120,6 +121,7 @@ Map<String, dynamic> _resolved({
   'created_at': '2026-10-19T12:00:00Z',
   'decision': decision,
   'reason': reason,
+  if (approver != null) 'approver': approver,
 };
 
 void main() {
@@ -167,6 +169,54 @@ void main() {
       ws.pushFrame(_requested(id: 'a'));
       ws.pushFrame(_resolved(id: 'zzz'));
       expect(notifier.state.count, 1);
+      expect(notifier.state.notice, isNull);
+    });
+
+    group('answered-elsewhere notice (TUI parity, audit M5 attribution)', () {
+      test('resolved frame for a still-pending entry sets the notice with '
+          'decision, reason, and approver', () {
+        ws.pushFrame(_requested(id: 'a'));
+        ws.pushFrame(
+          _resolved(
+            id: 'a',
+            decision: 'allow',
+            reason: 'answered',
+            approver: 'peercred:pid=900,uid=501',
+          ),
+        );
+        expect(notifier.state.count, 0);
+        final notice = notifier.state.notice!;
+        expect(notice, contains('allow'));
+        expect(notice, contains('(answered)'));
+        expect(notice, contains('by peercred:pid=900,uid=501'));
+      });
+
+      test('timeout resolution notices without an approver', () {
+        ws.pushFrame(_requested(id: 'a'));
+        ws.pushFrame(_resolved(id: 'a', decision: 'deny', reason: 'timeout'));
+        final notice = notifier.state.notice!;
+        expect(notice, contains('deny (timeout)'));
+        expect(notice, isNot(contains('by ')));
+      });
+
+      test(
+        'a locally-resolved entry does NOT get a notice (echo no-ops)',
+        () async {
+          ws.pushFrame(_requested(id: 'a'));
+          await notifier.resolve('a', 'allow');
+          expect(notifier.state.notice, isNull);
+          ws.pushFrame(_resolved(id: 'a')); // daemon echo
+          expect(notifier.state.notice, isNull);
+        },
+      );
+
+      test('clearNotice drops the one-shot', () {
+        ws.pushFrame(_requested(id: 'a'));
+        ws.pushFrame(_resolved(id: 'a'));
+        expect(notifier.state.notice, isNotNull);
+        notifier.clearNotice();
+        expect(notifier.state.notice, isNull);
+      });
     });
 
     test('frame with an empty id never enters the queue', () {

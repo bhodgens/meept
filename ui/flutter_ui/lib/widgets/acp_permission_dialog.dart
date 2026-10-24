@@ -150,6 +150,7 @@ class _AcpPermissionDialogHostState
   Widget build(BuildContext context) {
     ref.listen<AcpPermissionState>(acpPermissionProvider, (previous, next) {
       _syncDialog(next);
+      _showNotice(previous, next);
     });
     // First frame: the initial GET catch-up may land a head before any
     // listener callback fires (data can already be resolved at mount).
@@ -197,5 +198,23 @@ class _AcpPermissionDialogHostState
     if (navigator.canPop()) {
       navigator.pop();
     }
+  }
+
+  /// Surface the one-shot "answered elsewhere" notice (resolved frame for
+  /// an entry still pending locally — another surface or the timeout won
+  /// it; audit M5 attribution rides the approver text) as a snackbar, then
+  /// clear it so the state never replays the toast.
+  void _showNotice(AcpPermissionState? previous, AcpPermissionState next) {
+    final notice = next.notice;
+    if (notice == null || notice == previous?.notice) return;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(notice),
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    ref.read(acpPermissionProvider.notifier).clearNotice();
   }
 }

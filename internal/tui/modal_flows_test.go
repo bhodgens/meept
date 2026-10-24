@@ -246,20 +246,73 @@ func acpRequestedEventWithOptions(id, agent, session, summary string, options []
 }
 
 func acpResolvedEvent(id, decision, reason string) BusEvent {
+	return acpResolvedEventFull(id, decision, reason, "")
+}
+
+// acpResolvedEventFull carries the additive "approver" key (audit M5
+// attribution) when non-empty — the wire shape bus.ACPPermissionEvent
+// publishes on resolved frames answered by another surface.
+func acpResolvedEventFull(id, decision, reason, approver string) BusEvent {
+	payload := map[string]any{
+		"id":       id,
+		"decision": decision,
+		"reason":   reason,
+	}
+	if approver != "" {
+		payload["approver"] = approver
+	}
 	return BusEvent{
-		Topic: bus.TopicACPPermissionResolved.Name,
-		Type:  "event",
-		Payload: map[string]any{
-			"id":       id,
-			"decision": decision,
-			"reason":   reason,
-		},
+		Topic:   bus.TopicACPPermissionResolved.Name,
+		Type:    "event",
+		Payload: payload,
 	}
 }
 
 func sendACPEvents(h *headlessProgram, events ...BusEvent) {
 	h.send(EventStreamDataMsg{Events: events})
 	h.settle(goldenWidth, goldenHeight)
+}
+
+// TestACPModal_ResolvedToastCarriesApprover pins the audit-M5 attribution
+// render: a resolved frame answered on another surface names the approver
+// in the toast body, and a frame without the additive key toasts without a
+// dangling "by" (the same direct-Update idiom as the FIFO-walk test).
+func TestACPModal_ResolvedToastCarriesApprover(t *testing.T) {
+	hp := newHeadlessApp(t, goldenWidth, goldenHeight)
+	settleAsync()
+
+	sendACPEvents(hp,
+		acpRequestedEvent("perm-t1", "ag-1", "sess-1", "s"),
+		acpRequestedEvent("perm-t2", "ag-2", "sess-2", "s"),
+	)
+	app := hp.finish(goldenWidth, goldenHeight)
+
+	app.Update(EventStreamDataMsg{Events: []BusEvent{
+		acpResolvedEventFull("perm-t1", "allow", "answered", "peercred:pid=900,uid=501"),
+	}})
+	actives := app.notifications.Active()
+	if len(actives) == 0 {
+		t.Fatal("resolved frame did not toast")
+	}
+	last := actives[len(actives)-1]
+	if !strings.Contains(last.Message, "allow: perm-t1 (answered) by peercred:pid=900,uid=501") {
+		t.Errorf("toast body = %q, want decision: id (reason) by approver", last.Message)
+	}
+
+	app.Update(EventStreamDataMsg{Events: []BusEvent{
+		acpResolvedEvent("perm-t2", "deny", "timeout"),
+	}})
+	actives = app.notifications.Active()
+	if len(actives) == 0 {
+		t.Fatal("second resolved frame did not toast")
+	}
+	last = actives[len(actives)-1]
+	if !strings.Contains(last.Message, "deny: perm-t2 (timeout)") {
+		t.Errorf("toast body = %q, want deny: perm-t2 (timeout)", last.Message)
+	}
+	if strings.Contains(last.Message, " by ") {
+		t.Errorf("approverless toast carries a dangling 'by': %q", last.Message)
+	}
 }
 
 func TestACPModal_OpenOnRequestedFrame(t *testing.T) {

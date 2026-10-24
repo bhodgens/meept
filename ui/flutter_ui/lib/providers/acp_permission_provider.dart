@@ -26,10 +26,23 @@ class AcpPermissionState {
   /// next successful fetch/resolve).
   final String? error;
 
+  /// One-shot "answered elsewhere" toast text set when a resolved frame
+  /// removes an entry that was STILL pending locally — i.e. the answer came
+  /// from another surface (TUI/CLI) or the relay timed out. The dialog host
+  /// surfaces it as a snackbar and calls [AcpPermissionNotifier.clearNotice].
+  /// A local answer is never echoed here: resolve() removes the entry
+  /// optimistically, so the daemon's echo frame hits the documented
+  /// idempotent no-op path instead. (A deliberate deviation from the TUI,
+  /// which toasts every resolved frame — its modal has no optimistic
+  /// removal.) Carries the decision, reason, and approver attribution
+  /// (audit M5) when the frame supplies them.
+  final String? notice;
+
   const AcpPermissionState({
     this.pending = const {},
     this.enabled = false,
     this.error,
+    this.notice,
   });
 
   List<AcpPendingPermission> get queue => pending.values.toList();
@@ -43,11 +56,13 @@ class AcpPermissionState {
     Map<String, AcpPendingPermission>? pending,
     bool? enabled,
     Object? error = _unset,
+    Object? notice = _unset,
   }) {
     return AcpPermissionState(
       pending: pending ?? this.pending,
       enabled: enabled ?? this.enabled,
       error: identical(error, _unset) ? this.error : error as String?,
+      notice: identical(notice, _unset) ? this.notice : notice as String?,
     );
   }
 }
@@ -146,7 +161,23 @@ class AcpPermissionNotifier extends StateNotifier<AcpPermissionState> {
     final id = frame['id'] as String? ?? '';
     if (id.isEmpty) return;
     if (topic == 'acp.permission.resolved') {
-      _remove(id);
+      // An entry still pending locally when its resolved frame lands was
+      // answered elsewhere (another surface) or timed out: toast the
+      // decision + approver attribution (audit M5). A local answer took
+      // the optimistic _remove in resolve() first, so the daemon's echo
+      // frame hits the false branch — the documented idempotent no-op.
+      if (_remove(id)) {
+        final parts = <String>[
+          if ((frame['decision'] as String? ?? '').isNotEmpty)
+            frame['decision'] as String,
+          if ((frame['reason'] as String? ?? '').isNotEmpty)
+            '(${frame['reason']})',
+          if ((frame['approver'] as String? ?? '').isNotEmpty)
+            'by ${frame['approver']}',
+        ];
+        final body = parts.isEmpty ? id : '${parts.join(' ')} · $id';
+        state = state.copyWith(notice: 'permission resolved: $body');
+      }
       return;
     }
     if (topic == 'acp.permission.requested') {
@@ -157,12 +188,16 @@ class AcpPermissionNotifier extends StateNotifier<AcpPermissionState> {
     }
   }
 
-  void _remove(String id) {
+  /// Remove [id] from the queue; returns whether an entry was actually
+  /// removed (callers use the false case as the "already answered
+  /// locally" echo signal).
+  bool _remove(String id) {
     _addedAtMs.remove(id);
-    if (!state.pending.containsKey(id)) return;
+    if (!state.pending.containsKey(id)) return false;
     final map = Map<String, AcpPendingPermission>.from(state.pending)
       ..remove(id);
     state = state.copyWith(pending: map);
+    return true;
   }
 
   /// POST the user's decision ("allow" | "deny" | "always") for [id]. The
@@ -190,6 +225,11 @@ class AcpPermissionNotifier extends StateNotifier<AcpPermissionState> {
   /// Drop a locally-recorded error after the UI has surfaced it.
   void clearError() {
     if (state.error != null) state = state.copyWith(error: null);
+  }
+
+  /// Drop the one-shot resolved-elsewhere toast after the host surfaced it.
+  void clearNotice() {
+    if (state.notice != null) state = state.copyWith(notice: null);
   }
 
   @override

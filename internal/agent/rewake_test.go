@@ -307,10 +307,13 @@ func TestRewake_BufferFullEvictsOldest(t *testing.T) {
 	}
 
 	// Wait for the pump to settle: the channel should be full with the
-	// NEWEST signals (the oldest were evicted). The window is generous
-	// because the pump goroutine competes with the rest of the package's
-	// tests (and -race overhead) for CPU.
-	deadline := time.Now().Add(10 * time.Second)
+	// NEWEST signals (the oldest were evicted). The window must be very
+	// generous because the pump goroutine competes with the rest of the
+	// package's tests (and -race overhead) for CPU: under full-suite
+	// parallel load a 10s deadline observed a false "pump did not settle"
+	// failure (the len==capacity check itself is deterministic — the
+	// buffered channel can only hold rewakeChannelCapacity).
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		if len(loop.rewakeCh) == rewakeChannelCapacity {
 			break
