@@ -168,8 +168,14 @@ func Start(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	var newRes struct {
 		SessionID string `json:"sessionId"`
 	}
+	// mcpServers is REQUIRED by the acp v1 session/new schema (an empty
+	// list means "no servers"). Strict agents (hermes acp validates with
+	// pydantic) reject the call with -32602 "Field required" when the key
+	// is absent; the lenient fakeagent never did, so this only bit real
+	// harnesses (live smoke 2026-10-23).
 	if err := s.tr.Call(hctx, MethodSessionNew, map[string]any{
-		"cwd": cwd,
+		"cwd":        cwd,
+		"mcpServers": []any{},
 	}, &newRes); err != nil {
 		// Best-effort teardown during startup failure; the primary error below
 		// is what the caller sees.
