@@ -155,3 +155,7 @@ internal/security/testdata/fuzz/
 # Real hand-authored plans are committed deliberately; generated stubs are not.
 internal/agent/docs/plans/
 docs/plans/sealed-plan*.md
+
+# Probe/scratch MEEPT_HOME dirs from live-validation runs never belong in
+# the repo (they carry stale dev_keys, sockets, sqlite dbs, and binaries).
+.*-probe-home/
