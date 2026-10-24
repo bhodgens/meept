@@ -755,9 +755,17 @@ LoadACPAgents loads ACP agent catalog configuration from a JSON5 file. If the fi
 ACPConfig holds Agent Client Protocol client settings.
 
 	type ACPConfig struct {
-	    Enabled        bool   `json:"enabled"           toml:"enabled"`
-	    AgentsFile     string `json:"agents_file"       toml:"agents_file"`
-	    DialTimeout    int    `json:"dial_timeout"      toml:"dial_timeout"`
+	    Enabled    bool   `json:"enabled"     toml:"enabled"`
+	    AgentsFile string `json:"agents_file" toml:"agents_file"`
+	    // DialTimeout is the spawn-and-initialise wait, in seconds. The
+	    // default (60) covers cold starts of python/node ACP servers, which
+	    // exceed 10s (the hermes harness took ~25s: hooks scan + provider
+	    // init in the live smoke 2026-10-23).
+	    DialTimeout int `json:"dial_timeout" toml:"dial_timeout"`
+	    // CallTimeout is the per-RPC wait, in seconds. The default (600)
+	    // keeps a busy harness turn from being cut mid-flight: a single turn
+	    // can exceed 120s (hermes ran a 45s terminal tool and the full turn
+	    // blew past 120s in the live smoke 2026-10-23).
 	    CallTimeout    int    `json:"call_timeout"      toml:"call_timeout"`
 	    MaxAgents      int    `json:"max_agents"        toml:"max_agents"`
 	    PermissionMode string `json:"permission_mode"   toml:"permission_mode"`

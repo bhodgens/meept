@@ -14,11 +14,11 @@ func TestDefaultConfig_ACP(t *testing.T) {
 	if acp.AgentsFile != "~/.meept/acp_agents.json5" {
 		t.Errorf("acp.agents_file default = %q, want ~/.meept/acp_agents.json5", acp.AgentsFile)
 	}
-	if acp.DialTimeout != 10 {
-		t.Errorf("acp.dial_timeout default = %d, want 10", acp.DialTimeout)
+	if acp.DialTimeout != 60 {
+		t.Errorf("acp.dial_timeout default = %d, want 60", acp.DialTimeout)
 	}
-	if acp.CallTimeout != 120 {
-		t.Errorf("acp.call_timeout default = %d, want 120", acp.CallTimeout)
+	if acp.CallTimeout != 600 {
+		t.Errorf("acp.call_timeout default = %d, want 600", acp.CallTimeout)
 	}
 	if acp.MaxAgents != 3 {
 		t.Errorf("acp.max_agents default = %d, want 3", acp.MaxAgents)

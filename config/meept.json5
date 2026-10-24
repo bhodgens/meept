@@ -546,8 +546,15 @@
   // > 0 in "human" mode or when decision_escalate_to_human is on).
   // decision_escalate_to_human: in "decision" mode, route every NON-allow
   // outcome to the human relay instead of cancelling outright.
+  // dial_timeout: seconds to wait for the agent subprocess to spawn and
+  // finish the ACP handshake (60 covers python/node cold starts, which
+  // exceed 10s — live hermes smoke 2026-10-23). call_timeout: seconds per
+  // ACP RPC (600 keeps a busy harness turn from being cut mid-flight;
+  // single turns can exceed 120s — live hermes smoke 2026-10-23).
   "acp": {
     "enabled": false,
+    "dial_timeout": 60,
+    "call_timeout": 600,
     "permission_mode": "permissive",
     "decision_threshold": 0.5,
     "relay_timeout": 120,
