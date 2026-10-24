@@ -284,8 +284,11 @@ dependencies in daemon startup.
 
 Full rules live in `internal/daemon/AGENTS.md`. Short form: runtimes are long-lived
 daemon children — never spawn into a served endpoint, never kill another instance's
-runtime, only `StartupOrphanSweep` reaps orphans, sweep before spawn, and a local
-classifier that never becomes healthy fails startup (F-D8).
+runtime, only `StartupOrphanSweep` reaps orphans, sweep before spawn, a local
+classifier that never becomes healthy fails startup (F-D8), and client transports
+(RPC socket, HTTP/WS listener) come up BEFORE the F-D8 gate so clients can connect
+and enqueue during slow model loads (boot-window submits park on
+`ClassifierBootReadiness`).
 
 ### Session affinity headers and upstream teardown
 

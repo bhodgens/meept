@@ -65,6 +65,17 @@ and `classifier_boot_fail_fast: false` skip the gate. Keep the gate AFTER the
 StartAll goroutine: StartAll arms the health checkers, and a checker that
 was never started never reports healthy.
 
+**Client transports start BEFORE the gate.** The unified HTTP/WS listener
+(the GUI's only transport) starts in `Run` right after `components.Start`,
+deliberately ahead of the orphan sweep, runtime StartAll, and the F-D8 gate
+— a gate that blocks for minutes on model loads must not leave the GUI
+reporting "no daemon" while the RPC socket and queue are already live. A
+`chat.submit` accepted during the boot window parks on
+`ClassifierBootReadiness` (wired before any listener) and dispatches at full
+fidelity when the gate signals; a fatal gate trip stops the listener through
+the ordinary `shutdown()` path, so clients see a disconnect, never a
+half-booted server. Do not move the HTTP start back below the gate.
+
 A hard kill no longer leaks. Each runtime is spawned under a supervisor (the
 daemon binary in a hidden mode, `meept-daemon --supervise-parent <pid> -- <argv>`)
 that kills the runtime's process group - SIGTERM, then SIGKILL after 10s - once

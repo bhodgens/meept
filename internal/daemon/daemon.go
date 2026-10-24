@@ -2011,6 +2011,28 @@ func (d *Daemon) Run(ctx context.Context) error {
 		)
 	}
 
+	// Start the unified HTTP/WS listener EARLY — before the orphan sweep,
+	// runtime StartAll, and the F-D8 classifier boot gate (which can block
+	// for minutes on slow model loads). The GUI's only transport is this
+	// listener; nothing it needs at connect time (pairing, health, WS
+	// upgrade, chat.submit enqueue) depends on classifier health, and a
+	// submit accepted during the boot window parks on ClassifierBootReadiness
+	// (wired above) until the gate resolves. Starting it late made the GUI
+	// report "no daemon" for the whole runtime-health window even though the
+	// RPC socket and queue were already live.
+	//
+	// Failure-path note: if a later boot step fails (including the F-D8
+	// gate), d.shutdown() stops this server like every other listener — the
+	// GUI sees a disconnect instead of never having connected.
+	if d.httpServer != nil {
+		go func() {
+			if err := d.httpServer.Start(ctx); err != nil {
+				d.logger.Error("HTTP server error", "error", err)
+			}
+		}()
+		d.logger.Info("HTTP server starting", "addr", httpTransportAddr(d.fullConfig))
+	}
+
 	// WireGuard manager is config-only (no background goroutines);
 	// configuration is applied on-demand via syncWireGuardConfig.
 
@@ -2176,15 +2198,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 
-	// Start HTTP server for menubar app
-	if d.httpServer != nil {
-		go func() {
-			if err := d.httpServer.Start(ctx); err != nil {
-				d.logger.Error("HTTP server error", "error", err)
-			}
-		}()
-		d.logger.Info("HTTP server starting", "addr", httpTransportAddr(d.fullConfig))
-	}
+	// Start HTTP server for menubar app — moved earlier in Run() (right
+	// after components.Start) so the GUI can connect and enqueue during the
+	// runtime/classifier boot window.
 
 	d.status.Store(models.StatusRunning)
 	d.logger.Info("daemon: running",
