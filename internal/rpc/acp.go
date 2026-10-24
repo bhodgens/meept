@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,12 +27,18 @@ type ACPListResult struct {
 }
 
 // ACPAgentStatus is one catalog agent plus live-session fields.
+//
+// Personas is the additive per-persona detail (acp-employees persona lane):
+// the live persona names for this agent, sorted. It is OMITTED (never [])
+// on the no-persona-only wire shape, exactly like the permission surface's
+// persona key, so pre-persona consumers see byte-identical rows.
 type ACPAgentStatus struct {
-	ID      string `json:"id" yaml:"id"`
-	Enabled bool   `json:"enabled" yaml:"enabled"`
-	Running bool   `json:"running" yaml:"running"`
-	State   string `json:"state" yaml:"state"`
-	UptimeS int    `json:"uptime_s" yaml:"uptime_s"`
+	ID       string   `json:"id" yaml:"id"`
+	Enabled  bool     `json:"enabled" yaml:"enabled"`
+	Running  bool     `json:"running" yaml:"running"`
+	State    string   `json:"state" yaml:"state"`
+	UptimeS  int      `json:"uptime_s" yaml:"uptime_s"`
+	Personas []string `json:"personas,omitempty" yaml:"personas,omitempty"`
 }
 
 // ACPHandler provides the acp.list RPC method.
@@ -153,10 +160,32 @@ func (h *ACPHandler) list() ACPListResult {
 			ID:      entry.ID,
 			Enabled: entry.Enabled,
 		}
+		// Running-state spans EVERY lane of the catalog entry.
+		// Manager.LiveSessions externalizes the composite NUL session
+		// keys as bare "agentID" (no-persona lane) or "agentID/persona"
+		// (persona lanes — internal/acp/manager.go sessionLabel), and the
+		// employee executor chain always spawns via GetOrCreatePersona, so
+		// keying the lookup by the bare id alone never surfaced persona
+		// sessions as running (2026-10-23 e2e leaf report). Catalog agent
+		// ids contain no '/', so the "id/" prefix is unambiguous.
 		if ss, ok := live[entry.ID]; ok {
 			st.State = acpStateString(ss)
 			st.Running = ss != acp.StateClosed
 		}
+		prefix := entry.ID + "/"
+		var personas []string
+		for label, ss := range live {
+			name, found := strings.CutPrefix(label, prefix)
+			if !found || name == "" {
+				continue
+			}
+			personas = append(personas, name)
+			if ss != acp.StateClosed {
+				st.Running = true
+			}
+		}
+		sort.Strings(personas)
+		st.Personas = personas
 		agents = append(agents, st)
 	}
 	return ACPListResult{Enabled: true, Agents: agents}

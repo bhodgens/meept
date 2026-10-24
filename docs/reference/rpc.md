@@ -680,6 +680,8 @@ Get detailed task information.
 
 Reports the ACP client catalog and live session state. Registered even when the ACP manager is nil (disabled config): the result is then the `{"enabled": false, "agents": []}` envelope, never an error.
 
+`running` spans EVERY lane of a catalog entry: it is true when the no-persona session OR any persona-lane session of that agent is live (`state`/`uptime_s` still describe the no-persona lane). The additive `personas` key lists the agent's live persona names, sorted; it is omitted entirely when no persona lanes exist, so pre-persona consumers see byte-identical rows.
+
 **Response (enabled):**
 ```json
 {
@@ -688,7 +690,7 @@ Reports the ACP client catalog and live session state. Registered even when the 
   "result": {
     "enabled": true,
     "agents": [
-      {"id": "codex", "enabled": true, "running": true, "state": "ready"}
+      {"id": "codex", "enabled": true, "running": true, "state": "ready", "personas": ["alice", "bob"]}
     ]
   }
 }
