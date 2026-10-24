@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/acp"
+	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -79,6 +80,66 @@ var _ ACPSession = (*acp.Session)(nil)
 // across both paths.
 type ACPExecutor struct {
 	provider ACPSessionProvider
+
+	// mu guards rec (set post-construction by the daemon's metrics
+	// wiring, read on every turn).
+	mu  sync.RWMutex
+	rec TurnMetricRecorder
+}
+
+// TurnMetricRecorder is the narrow telemetry sink ACPExecutor rides for the
+// Phase-2 acp.persona.turns counter (docs/workflows/acp-employees.md).
+// *metrics.Store satisfies it via Record(name, value, tags) — the same
+// counter shape Dispatcher.SetMetricsStore and the token-cache metrics
+// already use, and the internal/agent twin of the employee.invocations
+// EmitMetricFunc style in internal/employee. Nil recorder = metrics dark,
+// turn path unaffected.
+type TurnMetricRecorder interface {
+	Record(name string, value float64, tags map[string]string)
+}
+
+// compile-time proof that the daemon's metrics.db store satisfies the
+// seam (structural match guards against a Record signature drift).
+var _ TurnMetricRecorder = (*metrics.Store)(nil)
+
+// ACPTurnsMetric is the per-persona acp turn counter emitted once per
+// completed ACP turn. Tags: agent (catalog agent id, spec.ACP.Agent),
+// persona (spec.ACP.Persona — an empty string is a valid tag value, the
+// bindingless persona lane), outcome (success|error|cancelled).
+const ACPTurnsMetric = "acp.persona.turns"
+
+// SetTurnMetricRecorder wires the acp.persona.turns sink after
+// construction (daemon metrics wiring). Nil receiver and nil recorder are
+// no-ops (repo setter rule).
+func (e *ACPExecutor) SetTurnMetricRecorder(rec TurnMetricRecorder) {
+	if e == nil || rec == nil {
+		return
+	}
+	e.mu.Lock()
+	e.rec = rec
+	e.mu.Unlock()
+}
+
+// recordTurn emits one acp.persona.turns datapoint. Read the recorder
+// under the lock, invoke outside it (mutex-scope rule, same pattern as
+// the employee goal loop's emitMetricFn reads).
+func (e *ACPExecutor) recordTurn(spec *AgentSpec, outcome string) {
+	e.mu.RLock()
+	rec := e.rec
+	e.mu.RUnlock()
+	if rec == nil {
+		return
+	}
+	agentID, persona := "", ""
+	if spec != nil && spec.ACP != nil {
+		agentID = spec.ACP.Agent
+		persona = spec.ACP.Persona
+	}
+	rec.Record(ACPTurnsMetric, 1, map[string]string{
+		"agent":   agentID,
+		"persona": persona,
+		"outcome": outcome,
+	})
 }
 
 // NewACPExecutor builds the executor on the daemon's acp manager. A nil
@@ -113,6 +174,12 @@ func (e *ACPExecutor) Run(
 	promptText string,
 	emit func(updateText string),
 ) (string, error) {
+	// acp.persona.turns deliberately does NOT fire on the two
+	// pre-turn wiring guards below (no executor injected, and a spec
+	// that declares executor: acp but carries no acp: binding — the
+	// latter has no agent/persona tags to speak of). Those are wiring
+	// failures, not turns: counting them would pollute the per-persona
+	// counter with datapoints for turns that never reached a harness.
 	if e == nil || e.provider == nil {
 		return "", ErrACPExecutorNotWired
 	}
@@ -125,9 +192,11 @@ func (e *ACPExecutor) Run(
 		DecisionThreshold: spec.ACP.DecisionThreshold,
 	})
 	if err != nil {
+		e.recordTurn(spec, "error")
 		return "", fmt.Errorf("acp executor: %w", err)
 	}
 	if sess == nil {
+		e.recordTurn(spec, "error")
 		return "", ErrNoACPSession
 	}
 
@@ -169,10 +238,32 @@ func (e *ACPExecutor) Run(
 	finalText, err := sess.Send(ctx, promptText)
 	close(done)
 	wg.Wait()
+	// Single terminal path per acp turn: everything after session
+	// resolution is one Send, so this one emit is exactly one datapoint
+	// per completed turn. No duration histogram: the existing turn
+	// timing sinks (TaskCollector's duration_ms column, metrics store
+	// 'step.duration' reader) are per-LLM-task shapes, not the tag-map
+	// counter style this metric rides — inventing a new store shape was
+	// out of scope (docs/workflows/acp-employees.md Phase 2).
+	e.recordTurn(spec, acpTurnOutcome(ctx, err))
 	if err != nil {
 		return "", fmt.Errorf("acp executor: %w", err)
 	}
 	return finalText, nil
+}
+
+// acpTurnOutcome classifies one completed turn for the outcome tag:
+// context cancellation (caller cancel or the session's CallTimeout
+// deadline) wins over the raw error text when the wait is provably
+// cancelled; a clean Send is success.
+func acpTurnOutcome(ctx context.Context, err error) string {
+	if err != nil {
+		if ctx.Err() != nil {
+			return "cancelled"
+		}
+		return "error"
+	}
+	return "success"
 }
 
 // emitACPUpdate forwards one session event to the emit callback. "done"

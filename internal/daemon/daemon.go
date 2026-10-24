@@ -781,6 +781,23 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Info("Retry metrics wired into agent loop")
 	}
 
+	// acp-employees Phase 2: per-persona turn counter
+	// (acp.persona.turns {agent, persona, outcome}). Ride the already
+	// open metrics.db Store (Record(name, value, tags) — the same
+	// counter shape as cache.hit/dispatch rows). Both executor homes
+	// get it: the singleton loop's executor and the registry's (roster
+	// loops + per-session clones share the registry instance's
+	// executor, and clones inherit it via ConfigSnapshot). Typed-nil
+	// guard: metricsStore == nil (store load failed) skips entirely.
+	if metricsStore != nil && components != nil {
+		if exec := components.AgentLoop.ACPExecutor(); exec != nil {
+			exec.SetTurnMetricRecorder(metricsStore)
+		}
+		if exec := components.AgentRegistry.ACPExecutor(); exec != nil {
+			exec.SetTurnMetricRecorder(metricsStore)
+		}
+	}
+
 	// Wire agent state persister (Phase 5). When config enables persistence,
 	// construct a SQLiteStatePersister sharing the metrics store's *sql.DB
 	// handle to avoid SQLite file-locking conflicts. The persister creates
