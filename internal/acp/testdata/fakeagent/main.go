@@ -1,6 +1,11 @@
 // Fake ACP agent for internal/acp tests. Speaks newline JSON-RPC on stdio.
 //
-//	-mode echo|slow|die|badhandshake|permission|permission-always|selfapprove|argv
+//	-mode echo|slow|die|badhandshake|permission|permission-always|selfapprove|argv|prompt
+//
+// prompt: session/prompt first emits a tool_call-ish session/update, then
+// replies with the deterministic text "acp-fake reply to: <prompt>" so an
+// e2e harness reply is distinguishable from both the bare echo and any
+// canned local-LLM text (acp-persona-route suite).
 //
 // argv: session/prompt replies with the fakeagent's own os.Args tail
 // ("argv=<a1>,<a2>,...") so tests can assert the spawn argv (persona-lane
@@ -66,7 +71,7 @@ func main() {
 	// after the catalog command; ContinueOnError keeps the process alive
 	// so the argv echo can read os.Args directly.
 	fs := flag.NewFlagSet("fakeagent", flag.ContinueOnError)
-	mode := fs.String("mode", "echo", "echo|slow|die|badhandshake|permission|permission-always|selfapprove|argv")
+	mode := fs.String("mode", "echo", "echo|slow|die|badhandshake|permission|permission-always|selfapprove|argv|prompt")
 	socket := fs.String("socket", "", "daemon unix RPC socket (selfapprove mode)")
 	resultFile := fs.String("result-file", "", "write the selfapprove probe result here (selfapprove mode)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -191,6 +196,28 @@ func main() {
 			if *mode == "argv" {
 				// echo the spawn argv tail for CommandArgs assertions
 				text = "argv=" + strings.Join(os.Args[1:], ",")
+			}
+			if *mode == "prompt" {
+				// acp-persona-route e2e: deterministic prefixed reply
+				// (distinguishable from both the bare echo and any
+				// canned local-LLM text), preceded by a tool_call-ish
+				// session/update to prove streamed updates ride the
+				// progress lane.
+				toolChunk, err := json.Marshal(map[string]any{
+					"sessionId": sessionID,
+					"update": map[string]any{
+						"sessionUpdate": "tool_call",
+						"title":         "fake-tool: processing the prompt",
+					},
+				})
+				if err == nil {
+					write(msg{
+						JSONRPC: "2.0",
+						Method:  "session/update",
+						Params:  toolChunk,
+					})
+				}
+				text = "acp-fake reply to: " + text
 			}
 			if replyEcho != "" {
 				text += " perm:" + replyEcho

@@ -1,6 +1,6 @@
 {
  "version": 1,
- "generated": "2026-10-19",
+ "generated": "2026-10-23",
  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
  "path_map": {
   "e2e/suites/smoke": [
@@ -46,7 +46,8 @@
    "refusal",
    "naive-user-chat",
    "continuity-regressions",
-   "goal-completion"
+   "goal-completion",
+   "acp-persona-route"
   ],
   "internal/validator/": [
    "output-filters",
@@ -147,7 +148,8 @@
    "goal-completion"
   ],
   "internal/acp/": [
-   "acp-wire"
+   "acp-wire",
+   "acp-persona-route"
   ],
   "internal/process/": [
    "acp-wire"
@@ -296,6 +298,9 @@
   ],
   "e2e/suites/session-teardown": [
    "session-teardown"
+  ],
+  "e2e/suites/acp-persona-route": [
+   "acp-persona-route"
   ]
  },
  "suites": [
@@ -610,6 +615,11 @@
   {
    "name": "session-teardown",
    "dir": "e2e/suites/session-teardown",
+   "status": "implemented"
+  },
+  {
+   "name": "acp-persona-route",
+   "dir": "e2e/suites/acp-persona-route",
    "status": "implemented"
   }
  ],
@@ -2763,6 +2773,59 @@
    "title": "cloud-configured provider fires zero erases across archive + stop (cloud no-op is key-shape-agnostic; TeardownBaseURL's endpointHost compare keeps cloud endpoints out of the llama adapter)",
    "paths": [
     "internal/llm/teardown.go"
+   ]
+  },
+  {
+   "id": "acp-persona-route-01",
+   "suite": "acp-persona-route",
+   "diff": "L",
+   "title": "named-agent chat turn routes executor:acp end-to-end: 'have bob ...' name match -> RouteToAgent -> per-agent loop -> executor branch -> fakeagent session/new (mcpServers) + session/prompt -> reply is the harness text; no planner task, no local-LLM canned reply; acp.list reports the catalog entry",
+   "paths": [
+    "internal/agent/named_agent_route.go",
+    "internal/agent/dispatcher.go",
+    "internal/agent/acp_executor.go",
+    "internal/agent/loop.go",
+    "internal/acp/manager.go",
+    "internal/acp/session.go",
+    "internal/daemon/components.go",
+    "internal/config/schema.go",
+    "internal/agents/discovery.go",
+    "internal/agent/registry.go",
+    "internal/rpc/acp.go"
+   ]
+  },
+  {
+   "id": "acp-persona-route-02",
+   "suite": "acp-persona-route",
+   "diff": "S",
+   "title": "registry-gated fall-through: 'have unknownbot X' matches the have-frame but resolves against no roster id -> normal classification chain (fake-LLM chat text), the ACP executor never enters, no task row",
+   "paths": [
+    "internal/agent/named_agent_route.go",
+    "internal/agent/dispatcher.go",
+    "internal/agent/registry.go"
+   ]
+  },
+  {
+   "id": "acp-persona-route-03",
+   "suite": "acp-persona-route",
+   "diff": "M",
+   "title": "handoff target validation: orchestrator.handoff with an unknown to_agent_id fails in HandleHandoff listing the roster (bob included, via bus.publish RPC + daemon log); a handoff to executor:acp bob passes the registry gate ('Handoff step created'); the request_handoff tool's unknown-target error (terminate lane) carries the same roster; 'have bob hand off to nosuchagent' still takes the named ACP route",
+   "paths": [
+    "internal/agent/tactical.go",
+    "internal/tools/builtin/handoff.go",
+    "internal/agent/named_agent_route.go",
+    "internal/rpc/server.go"
+   ]
+  },
+  {
+   "id": "acp-persona-route-04",
+   "suite": "acp-persona-route",
+   "diff": "S",
+   "title": "permission surface under permissive persona routing: acp.permissions.list answers with a well-formed envelope (no pending rows while permissive); any persona key present on a pending row must be a string (tolerant of the in-flight persona-tagging leaf)",
+   "paths": [
+    "internal/rpc/acp.go",
+    "internal/acp/relay.go",
+    "internal/daemon/acp_notifier.go"
    ]
   }
  ]
