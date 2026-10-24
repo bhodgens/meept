@@ -75,10 +75,13 @@ type acpPermissionsList struct {
 }
 
 // acpPendingRow is one pending human relay request in the HTTP envelope
-// (frozen keys: id, agent_id, session_id, summary, created_at).
+// (frozen keys: id, agent_id, session_id, summary, created_at; the
+// additive persona key mirrors the RPC status struct — present only when
+// the relay lane carries a persona, omitted otherwise).
 type acpPendingRow struct {
 	ID        string `json:"id" yaml:"id"`
 	AgentID   string `json:"agent_id" yaml:"agent_id"`
+	Persona   string `json:"persona,omitempty" yaml:"persona,omitempty"`
 	SessionID string `json:"session_id" yaml:"session_id"`
 	Summary   string `json:"summary" yaml:"summary"`
 	CreatedAt string `json:"created_at" yaml:"created_at"`

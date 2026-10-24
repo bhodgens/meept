@@ -167,10 +167,13 @@ func (h *ACPHandler) list() ACPListResult {
 // additive options key — the agent-offered {optionId,name,kind} labels —
 // from acp-always-allow leaf 01, so list consumers (GUI catch-up after a
 // reconnect missed the requested frame) can render the allow_always
-// affordance too).
+// affordance too; plus the additive persona key from the permission
+// surfaces phase-2 work — the multi-session persona that asked, empty on
+// the no-persona lane so old consumers see the exact prior wire shape).
 type ACPPendingPermissionStatus struct {
 	ID        string                 `json:"id" yaml:"id"`
 	AgentID   string                 `json:"agent_id" yaml:"agent_id"`
+	Persona   string                 `json:"persona,omitempty" yaml:"persona,omitempty"`
 	SessionID string                 `json:"session_id" yaml:"session_id"`
 	Summary   string                 `json:"summary" yaml:"summary"`
 	CreatedAt time.Time              `json:"created_at" yaml:"created_at"`
@@ -220,6 +223,7 @@ func (h *ACPHandler) permissionsList() ACPPermissionsResult {
 		out = append(out, ACPPendingPermissionStatus{
 			ID:        p.ID,
 			AgentID:   p.AgentID,
+			Persona:   p.Persona,
 			SessionID: p.SessionID,
 			Summary:   p.Summary,
 			CreatedAt: p.CreatedAt,

@@ -51,10 +51,13 @@ type acpAgentRow struct {
 }
 
 // acpPendingRow mirrors one acp.permissions.list pending entry (frozen
-// keys: id, agent_id, session_id, summary, created_at).
+// keys: id, agent_id, session_id, summary, created_at; plus the additive
+// persona key — the multi-session persona that asked, empty on the
+// no-persona lane).
 type acpPendingRow struct {
 	ID        string `json:"id"`
 	AgentID   string `json:"agent_id"`
+	Persona   string `json:"persona,omitempty"`
 	SessionID string `json:"session_id"`
 	Summary   string `json:"summary"`
 	CreatedAt string `json:"created_at"`

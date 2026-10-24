@@ -33,10 +33,13 @@ type ACPPermissionOption struct {
 // created_at (+ decision/reason on the resolved frame). Options is the
 // additive acp-always-allow key (leaf 01): present on frames whose agent
 // offered options, omitted otherwise — old consumers decode by key and are
-// unaffected.
+// unaffected. Persona is likewise additive (permission surfaces phase 2):
+// the multi-session persona that asked, omitted on the no-persona lane so
+// old-frame publishers keep their exact prior wire shape.
 type ACPPermissionEvent struct {
 	ID        string `json:"id"`
 	AgentID   string `json:"agent_id"`
+	Persona   string `json:"persona,omitempty"`
 	SessionID string `json:"session_id"`
 	Summary   string `json:"summary"`
 	CreatedAt string `json:"created_at"` // RFC3339 stamp of registration

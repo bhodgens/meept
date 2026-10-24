@@ -477,4 +477,18 @@ func TestACPPermissionEvent_OptionsKeyAdditive(t *testing.T) {
 	if !strings.Contains(string(alw), `"decision":"always"`) {
 		t.Errorf("always decision not encoded: %s", alw)
 	}
+
+	// Persona is additive (permission surfaces phase 2): a persona-lane
+	// frame carries the `persona` key; the no-persona lane omits it so
+	// old consumers see the exact prior wire shape.
+	withPersona, err := json.Marshal(ACPPermissionEvent{ID: "perm-4", AgentID: "hermes", Persona: "bob"})
+	if err != nil {
+		t.Fatalf("marshal persona: %v", err)
+	}
+	if !strings.Contains(string(withPersona), `"persona":"bob"`) {
+		t.Errorf("persona key not encoded: %s", withPersona)
+	}
+	if strings.Contains(string(bare), `"persona"`) {
+		t.Errorf("empty persona must omit the key, got %s", bare)
+	}
 }

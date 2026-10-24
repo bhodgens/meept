@@ -427,6 +427,66 @@ func TestACPBusNotifierPublishes(t *testing.T) {
 	}
 }
 
+// TestACPBusNotifierSurfacesPersona pins the permission surfaces phase-2
+// adaptation: the persona that asked crosses the notifier seam into the
+// bus payload's additive `persona` key, and the no-persona lane keeps the
+// exact prior wire shape (key omitted).
+func TestACPBusNotifierSurfacesPersona(t *testing.T) {
+	msgBus := bus.New(nil, slog.Default())
+	t.Cleanup(msgBus.Close)
+
+	var gotRequested bus.ACPPermissionEvent
+	done := make(chan struct{})
+	sub := bus.SubscribeT(msgBus, "test-persona", bus.TopicACPPermissionRequested, func(p bus.ACPPermissionEvent) {
+		if p.ID == "perm-persona" {
+			gotRequested = p
+			close(done)
+		}
+	})
+	t.Cleanup(func() { msgBus.Unsubscribe(sub) })
+
+	n := &acpBusNotifier{bus: msgBus, logger: slog.Default()}
+	if !n.NotifyPermissionRequested(acp.PendingPermission{
+		ID:        "perm-persona",
+		AgentID:   "hermes",
+		Persona:   "bob",
+		SessionID: "sess-a",
+		Summary:   "tool: bash",
+	}) {
+		t.Fatal("NotifyPermissionRequested with listeners = false, want true")
+	}
+	// No-persona lane: the frame must omit the key entirely.
+	if !n.NotifyPermissionRequested(acp.PendingPermission{
+		ID: "perm-legacy", AgentID: "codex", SessionID: "sess-b", Summary: "tool: ls",
+	}) {
+		t.Fatal("no-persona NotifyPermissionRequested = false, want true")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("persona never reached the bus payload")
+	}
+	if gotRequested.Persona != "bob" {
+		t.Errorf("requested frame Persona = %q, want \"bob\"", gotRequested.Persona)
+	}
+
+	raw, err := json.Marshal(gotRequested)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"persona":"bob"`) {
+		t.Errorf("persona key not encoded: %s", raw)
+	}
+	bare, err := json.Marshal(toACPEvent(acp.PendingPermission{ID: "perm-legacy", AgentID: "codex"}, "", "", acp.Approver{}))
+	if err != nil {
+		t.Fatalf("marshal bare: %v", err)
+	}
+	if strings.Contains(string(bare), `"persona"`) {
+		t.Errorf("no-persona lane must omit the key, got %s", bare)
+	}
+}
+
 // TestACPBusNotifierNoListenerReturnsFalse pins the reconnect contract's
 // notifier half: with no subscribers, NotifyPermissionRequested reports
 // false (the session keeps waiting until timeout; a late subscriber can

@@ -123,11 +123,12 @@ ACPPermissionEvent is the frozen bus/WS payload for the human permission relay \
 
 The payload lives in internal/bus — NOT internal/acp — so HTTP/WS/TUI/GUI consumers can decode it without pulling the ACP client into their dependency closure \(internal/acp must not gain a bus dep; the daemon does the adaptation, per the leaf's import\-cycle note\). wsclass imports nothing from internal/, so bus \-\> wsclass is cycle\-free \(same direction as agent \-\> wsclass\).
 
-Wire keys are frozen \(leaf 03 task 1\): id, agent\_id, session\_id, summary, created\_at \(\+ decision/reason on the resolved frame\). Options is the additive acp\-always\-allow key \(leaf 01\): present on frames whose agent offered options, omitted otherwise — old consumers decode by key and are unaffected.
+Wire keys are frozen \(leaf 03 task 1\): id, agent\_id, session\_id, summary, created\_at \(\+ decision/reason on the resolved frame\). Options is the additive acp\-always\-allow key \(leaf 01\): present on frames whose agent offered options, omitted otherwise — old consumers decode by key and are unaffected. Persona is likewise additive \(permission surfaces phase 2\): the multi\-session persona that asked, omitted on the no\-persona lane so old\-frame publishers keep their exact prior wire shape.
 
 	type ACPPermissionEvent struct {
 	    ID        string `json:"id"`
 	    AgentID   string `json:"agent_id"`
+	    Persona   string `json:"persona,omitempty"`
 	    SessionID string `json:"session_id"`
 	    Summary   string `json:"summary"`
 	    CreatedAt string `json:"created_at"` // RFC3339 stamp of registration

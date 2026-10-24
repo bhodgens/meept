@@ -309,6 +309,7 @@ func TestACPHandler_PermissionsList_TagParity(t *testing.T) {
 	assertJSONYAMLTags(t, reflect.TypeOf(ACPPendingPermissionStatus{}), map[string]string{
 		"ID":        "id",
 		"AgentID":   "agent_id",
+		"Persona":   "persona,omitempty",
 		"SessionID": "session_id",
 		"Summary":   "summary",
 		"CreatedAt": "created_at",
@@ -547,6 +548,83 @@ func assertJSONYAMLTags(t *testing.T, typ reflect.Type, want map[string]string) 
 		if got := f.Tag.Get("yaml"); got != key {
 			t.Errorf("%s.%s yaml tag = %q, want %q", typ.Name(), field, got, key)
 		}
+	}
+}
+
+func TestACPHandler_PermissionsList_PersonaAdditive(t *testing.T) {
+	// Permission surfaces phase 2: the list envelope carries the additive
+	// persona key. A persona-lane pending exposes WHO asked (agent/persona);
+	// the no-persona lane omits the key entirely so old consumers see the
+	// exact prior wire shape.
+	mgr, rl := acpEnabledRelayManager(t)
+	if _, err := rl.Register(acp.PendingPermission{
+		ID:        "perm-persona",
+		AgentID:   "hermes",
+		Persona:   "bob",
+		SessionID: "sess-p1",
+		Summary:   "tool exec: rm -rf",
+	}); err != nil {
+		t.Fatalf("Register persona lane: %v", err)
+	}
+	if _, err := rl.Register(acp.PendingPermission{
+		ID:        "perm-legacy",
+		AgentID:   "codex",
+		SessionID: "sess-l1",
+		Summary:   "tool exec: ls",
+	}); err != nil {
+		t.Fatalf("Register no-persona lane: %v", err)
+	}
+
+	h := NewACPHandler(mgr)
+	srv := New(&Config{SocketPath: ""}, nil, nil)
+	h.RegisterACPMethods(srv)
+
+	res, err := srv.CallMethod(humanCtx(), "acp.permissions.list", json.RawMessage("{}"))
+	if err != nil {
+		t.Fatalf("acp.permissions.list: %v", err)
+	}
+	got := mustACPPermissions(t, res)
+	if len(got.Pending) != 2 {
+		t.Fatalf("pending len = %d, want 2", len(got.Pending))
+	}
+	byID := map[string]ACPPendingPermissionStatus{}
+	for _, p := range got.Pending {
+		byID[p.ID] = p
+	}
+	if byID["perm-persona"].Persona != "bob" {
+		t.Errorf("persona-lane row Persona = %q, want \"bob\"", byID["perm-persona"].Persona)
+	}
+	if byID["perm-legacy"].Persona != "" {
+		t.Errorf("no-persona-lane row Persona = %q, want empty", byID["perm-legacy"].Persona)
+	}
+
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded struct {
+		Pending []map[string]any `json:"pending"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	sawPersona, sawOmit := false, false
+	for _, row := range decoded.Pending {
+		switch row["id"] {
+		case "perm-persona":
+			if v, ok := row["persona"].(string); !ok || v != "bob" {
+				t.Errorf("persona-lane wire persona = %v, want \"bob\"", row["persona"])
+			}
+			sawPersona = true
+		case "perm-legacy":
+			if _, ok := row["persona"]; ok {
+				t.Errorf("no-persona lane must OMIT the persona key, row = %v", row)
+			}
+			sawOmit = true
+		}
+	}
+	if !sawPersona || !sawOmit {
+		t.Fatalf("rows missing (sawPersona=%v sawOmit=%v): %s", sawPersona, sawOmit, raw)
 	}
 }
 

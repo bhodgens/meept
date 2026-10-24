@@ -173,6 +173,7 @@ func TestACPACPPermissionsList_FakeRPCCallReturnsEnvelope(t *testing.T) {
 				Pending: []acpPendingRow{{
 					ID:        "perm-1",
 					AgentID:   "codex",
+					Persona:   "bob",
 					SessionID: "sess-a",
 					Summary:   "run: rm -rf build",
 					CreatedAt: "2026-10-19T00:00:00Z",
@@ -199,6 +200,21 @@ func TestACPACPPermissionsList_FakeRPCCallReturnsEnvelope(t *testing.T) {
 	row := got.Pending[0]
 	if row.ID != "perm-1" || row.AgentID != "codex" || row.SessionID != "sess-a" {
 		t.Errorf("row = %+v", row)
+	}
+	// Permission surfaces phase 2: the handler passes the RPC envelope
+	// through verbatim, so the additive persona key rides the same struct —
+	// assert it survives the HTTP round trip on the wire.
+	var wire struct {
+		Pending []map[string]any `json:"pending"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("re-decode wire: %v", err)
+	}
+	if len(wire.Pending) != 1 {
+		t.Fatalf("wire pending = %v, want 1 row", wire.Pending)
+	}
+	if wire.Pending[0]["persona"] != "bob" {
+		t.Errorf("wire persona = %v, want \"bob\" (body %s)", wire.Pending[0]["persona"], w.Body)
 	}
 }
 

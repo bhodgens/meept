@@ -66,7 +66,8 @@ func (n *acpBusNotifier) NotifyPermissionResolved(p acp.PendingPermission, decis
 // (keys: id, agent_id, session_id, summary, created_at + decision/reason;
 // the additive options key carries the agent's raw labels — acp-always-
 // allow leaf 01; the additive approver key carries the rendered approver
-// identity — audit M5).
+// identity — audit M5; the additive persona key carries the persona that
+// asked — permission surfaces phase 2, "" on the no-persona lane).
 func toACPEvent(p acp.PendingPermission, decision, reason string, approver acp.Approver) bus.ACPPermissionEvent {
 	created := ""
 	if !p.CreatedAt.IsZero() {
@@ -90,6 +91,7 @@ func toACPEvent(p acp.PendingPermission, decision, reason string, approver acp.A
 	return bus.ACPPermissionEvent{
 		ID:        p.ID,
 		AgentID:   p.AgentID,
+		Persona:   p.Persona,
 		SessionID: p.SessionID,
 		Summary:   p.Summary,
 		CreatedAt: created,
