@@ -175,11 +175,46 @@ lowercase, following the Verification section pattern.
   "have bob check that issue" end-to-end with the existing catalog.
 - Phase 2 (hardening): per-persona metrics tags (employee.invocations-style:
   acp.persona.turns {agent, persona, outcome}), TUI/GUI persona display in
-  progress events, e2e suite (hermetic: fakeagent testdata extended with a
+  progress events (SHIPPED — see "Chat-surface harness attribution" below),
+  e2e suite (hermetic: fakeagent testdata extended with a
   persona-capable fake).
 - Phase 3 (compose): employee layer references ACP-backed agents as
   GoalLoop executors (WithExecutor seam already exists) — autonomous
   hermes-persona employees. Deferred; needs its own design pass.
+
+## Chat-surface harness attribution (TUI/GUI parity)
+
+`publishACPUpdate` (internal/agent/acp_executor.go) streams harness updates
+on `agent.progress` with keys `stage: "acp"`, `detail`, `agent_id`,
+`acp_agent` (catalog harness id) and `persona` (optional). Both chat surfaces
+attribute the pending progress line to the acting harness, lowercase per the
+UI-text rule; a frame without `acp_agent` (persona-only or bindingless spec)
+falls back to today's plain agent-name shape.
+
+- TUI (`internal/tui/models/chat.go` `acpAttribution`): the pending progress
+  line's agent segment renders
+  `🤖 <agent>[/<persona>] (acp: <harness>) │ <stage> │ → <detail>`,
+  e.g. `🤖 bob/worker (acp: hermes)`. Harness id is display-truncated
+  (agent/persona 12 runes, harness 16) like the plain name path.
+- GUI (`ui/flutter_ui` `AgentProgress.displayLabel` + AgentProgressIndicator):
+  the indicator's bold agent-label row renders
+  `<agent>[/<persona>] · acp <harness>` (e.g. `bob/worker · acp hermes`)
+  above the update text.
+
+Documented deviations (AGENTS.md UI parity rule):
+- The TUI folds the attribution into its single inline pipe-separated progress
+  line (its established shape); the GUI's indicator is a two-line stacked
+  widget (label row + message row), so the attribution lands on the label row
+  and the separator is the GUI's established ` · ` middle dot instead of the
+  TUI's `(acp: …)` parenthetical. Semantics are identical:
+  agent[/persona], harness id, lowercase, plain-shape fallback.
+- Wire path: the TUI reads the bus event directly (EventStreamDataMsg payload
+  map); the GUI receives raw `agent.progress` frames classified as the generic
+  `event` WS type (the legacy relay prefix table has no `agent.progress`
+  agent_progress case), so `WebSocketService.subscribeToAgentProgress`
+  additionally passes same-session `event` frames whose `source_topic` is
+  `agent.progress` AND `stage` is `acp` — scoped to acp only so no other
+  raw-frame traffic newly floods the GUI progress stream.
 
 ## Open questions
 

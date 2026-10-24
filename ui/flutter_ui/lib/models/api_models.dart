@@ -216,6 +216,33 @@ class AgentProgress {
   /// arrives on the agent.quota_wait bus topic). Null means no quota data.
   final AgentQuotaPayload? quota;
 
+  /// ACP harness attribution (acp-employees dim 3A). The ACP executor
+  /// streams harness updates onto the `agent.progress` bus topic tagged
+  /// `stage: "acp"` plus `acp_agent` (catalog harness id, e.g. "hermes")
+  /// and `persona` (optional) — internal/agent/acp_executor.go
+  /// publishACPUpdate. Empty [acpAgent] means this frame is not ACP and
+  /// the indicator keeps the plain agent shape. The generic wildcard relay
+  /// classifies raw `agent.progress` frames as the `event` type
+  /// (transformBusEventToWS legacy table), so the WS filter passes those
+  /// through to this stream alongside typed agent_progress frames.
+  final String acpAgent;
+  final String persona;
+
+  /// True when this frame carries ACP harness attribution.
+  bool get isAcp => acpAgent.isNotEmpty;
+
+  /// Attribution label for the chat progress indicator, mirroring the
+  /// TUI's `acpAttribution` (internal/tui/models/chat.go): "<agent>[/<persona>]
+  /// · acp <harness>", lowercase per the repo UI-text rule. Falls back to
+  /// the plain agent id when no harness id is present.
+  String get displayLabel {
+    final agent = agentId.toLowerCase();
+    if (acpAgent.isEmpty || agent.isEmpty) return agent;
+    final p = persona.toLowerCase();
+    final actor = p.isNotEmpty ? '$agent/$p' : agent;
+    return '$actor · acp ${acpAgent.toLowerCase()}';
+  }
+
   AgentProgress({
     required this.agentId,
     required this.message,
@@ -225,6 +252,8 @@ class AgentProgress {
     this.stage = '',
     this.textSoFar,
     this.quota,
+    this.acpAgent = '',
+    this.persona = '',
   });
 
   factory AgentProgress.fromJson(Map<String, dynamic> json) {
@@ -242,10 +271,20 @@ class AgentProgress {
 
     return AgentProgress(
       agentId: (data?['agent_id'] ?? json['agent_id'] ?? '') as String,
-      message: (data?['message'] ?? json['message'] ?? '') as String,
+      message:
+          (data?['message'] ??
+                  json['message'] ??
+                  // acp frames (agent.progress stage=acp) carry their update
+                  // text under "detail", not "message".
+                  data?['detail'] ??
+                  json['detail'] ??
+                  '')
+              as String,
       tier: coerceTier(data?['tier'] ?? json['tier'] ?? 1),
       sourceEvent: (data?['source_event'] ?? json['source_event']) as String?,
-      stage: (json['stage'] ?? '') as String,
+      stage: (data?['stage'] ?? json['stage'] ?? '') as String,
+      acpAgent: (data?['acp_agent'] ?? json['acp_agent'] ?? '') as String,
+      persona: (data?['persona'] ?? json['persona'] ?? '') as String,
       textSoFar: json['text_so_far'] as String?,
       quota: json['to'] != null ? AgentQuotaPayload.fromJson(json) : null,
       timestamp:

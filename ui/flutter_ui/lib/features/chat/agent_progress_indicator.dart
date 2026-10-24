@@ -85,7 +85,10 @@ class AgentProgressIndicator extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    progress.agentId.toLowerCase(),
+                    // agent id, with the " · acp <harness>" suffix when the
+                    // frame carries ACP attribution (parity with the TUI's
+                    // "bob (acp: hermes)" progress line; lowercase UI rule).
+                    progress.displayLabel,
                     style: CyberpunkTypography.bodySmall.copyWith(
                       color: agentColor,
                       fontWeight: FontWeight.bold,

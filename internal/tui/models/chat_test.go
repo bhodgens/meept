@@ -1804,3 +1804,99 @@ func TestIsImageFile(t *testing.T) {
 		}
 	}
 }
+
+// --- ACP harness progress attribution (stage=acp frames) ---
+
+func TestACPAttribution_FormatsAndFallbacks(t *testing.T) {
+	cases := []struct {
+		name     string
+		agent    string
+		acpAgent string
+		persona  string
+		want     string
+		wantOK   bool
+	}{
+		{
+			name:  "agent + harness + persona",
+			agent: "bob", acpAgent: "hermes", persona: "worker",
+			want: "bob/worker (acp: hermes)", wantOK: true,
+		},
+		{
+			name:  "persona empty -> agent name only",
+			agent: "bob", acpAgent: "hermes", persona: "",
+			want: "bob (acp: hermes)", wantOK: true,
+		},
+		{
+			name:  "lowercase per ui rule",
+			agent: "Bob", acpAgent: "Hermes", persona: "Worker",
+			want: "bob/worker (acp: hermes)", wantOK: true,
+		},
+		{
+			name:  "no harness id -> not an acp frame",
+			agent: "bob", acpAgent: "", persona: "worker",
+			want: "", wantOK: false,
+		},
+		{
+			name:  "no agent id -> no label",
+			agent: "", acpAgent: "hermes", persona: "",
+			want: "", wantOK: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := acpAttribution(tc.agent, tc.acpAgent, tc.persona)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v; want %v", ok, tc.wantOK)
+			}
+			if got != tc.want {
+				t.Errorf("acpAttribution(%q,%q,%q) = %q; want %q", tc.agent, tc.acpAgent, tc.persona, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestProgressState_Render_ACPFrame(t *testing.T) {
+	p := &ProgressState{
+		AgentID:     "bob",
+		Stage:       "acp",
+		ACPAgent:    "hermes",
+		Persona:     "worker",
+		CurrentTool: "reading the issue",
+	}
+	got := p.Render()
+	want := "🤖 bob/worker (acp: hermes) │ acp │ → reading the issue"
+	if got != want {
+		t.Errorf("Render() = %q; want %q", got, want)
+	}
+}
+
+func TestProgressState_Render_PersonaEmptyFallsBackToToday(t *testing.T) {
+	// acp frame whose persona is empty still attributes the harness, but a
+	// NON-acp frame (no acp_agent) keeps today's plain shape.
+	p := &ProgressState{AgentID: "bob", Stage: "thinking..."}
+	got := p.Render()
+	want := "🤖 bob │ thinking..."
+	if got != want {
+		t.Errorf("non-acp Render() = %q; want %q", got, want)
+	}
+}
+
+func TestChatModel_ProgressUpdateMsg_CarriesACPSession(t *testing.T) {
+	model := newTestChatModel()
+	model.progressState = &ProgressState{Stage: "thinking..."}
+	_ = model.Update(ProgressUpdateMsg{
+		AgentID:  "bob",
+		Stage:    "acp",
+		ACPAgent: "hermes",
+		Persona:  "worker",
+	})
+	if model.progressState.ACPAgent != "hermes" || model.progressState.Persona != "worker" {
+		t.Fatalf("acp attribution not carried: %+v", model.progressState)
+	}
+	// A later plain frame leaves the attribution in place (carried),
+	// while an acp frame without a harness id drops it.
+	_ = model.Update(ProgressUpdateMsg{Stage: "acp"})
+	if model.progressState.ACPAgent != "" || model.progressState.Persona != "" {
+		t.Errorf("bindingless acp frame should clear stale attribution, got %+v", model.progressState)
+	}
+}

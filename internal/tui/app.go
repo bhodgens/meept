@@ -1433,6 +1433,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							stage = v
 						}
 					}
+					// ACP harness attribution (internal/agent/acp_executor.go
+					// publishACPUpdate keys: acp_agent + persona).
+					if v, ok := payloadMap["acp_agent"].(string); ok {
+						progressMsg.ACPAgent = v
+					}
+					if v, ok := payloadMap["persona"].(string); ok {
+						progressMsg.Persona = v
+					}
 					if v, ok := payloadMap["percent"].(float64); ok {
 						progressMsg.Percent = v
 					} else if iteration, ok := payloadMap["iteration"].(float64); ok {

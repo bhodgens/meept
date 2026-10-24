@@ -739,6 +739,16 @@ class WebSocketService {
   /// [sessionId] and having type `agent_progress`.  The caller is
   /// responsible for managing the server-side subscription (typically
   /// by sending a `subscribe` message with `channel: 'progress'`).
+  ///
+  /// Also passes through raw `agent.progress` bus frames, which the WS
+  /// relay's legacy classification emits as the generic `event` type
+  /// (transformBusEventToWS: the `agent.*` prefix has no agent_progress
+  /// case). Those are exactly the ACP-harness updates
+  /// (internal/agent/acp_executor.go publishACPUpdate, stage=acp), so the
+  /// chat progress stream must carry them for the GUI's acp attribution to
+  /// render. The relay scopes `event`-type frames on the catch-all channel;
+  /// the session grant armed by the chat/progress holds already admits them
+  /// (ShouldSend checks the session set first), so no extra hold is taken.
   Stream<Map<String, dynamic>> subscribeToAgentProgress(String sessionId) {
     _retainSessionChannel(channelProgress, sessionId);
 
@@ -750,8 +760,13 @@ class WebSocketService {
       // session_id->conversation_id WS filter fallback.
       final sid = m['session_id'] as String?;
       final cid = m['conversation_id'] as String?;
-      return type == WsEventTypes.agentProgress &&
-          (sid == sessionId || cid == sessionId);
+      final sameSession = sid == sessionId || cid == sessionId;
+      if (!sameSession) return false;
+      if (type == WsEventTypes.agentProgress) return true;
+      // ACP-harness updates only: raw agent.progress frames with stage=acp.
+      return type == WsEventTypes.event &&
+          m['source_topic'] == 'agent.progress' &&
+          m['stage'] == 'acp';
     });
   }
 

@@ -623,10 +623,18 @@ type ChatTaskResultMsg struct {
 
 // ProgressUpdateMsg carries progress updates for the current pending message.
 type ProgressUpdateMsg struct {
-	AgentID       string
-	Stage         string
-	Percent       float64
-	CurrentTool   string
+	AgentID     string
+	Stage       string
+	Percent     float64
+	CurrentTool string
+	// ACPAgent / Persona carry the external-harness attribution from
+	// agent.progress frames published with stage=acp
+	// (internal/agent/acp_executor.go publishACPUpdate: payload keys
+	// "acp_agent" + "persona"). Empty on non-acp frames and on frames
+	// whose spec carries no binding — the renderer then falls back to
+	// the plain agent shape.
+	ACPAgent      string
+	Persona       string
 	TokensUsed    int
 	ContextResets int
 	ChatVisible   bool
@@ -706,10 +714,14 @@ type ChatToastMsg struct {
 
 // ProgressState holds current progress for display in chat.
 type ProgressState struct {
-	AgentID       string
-	Stage         string
-	Percent       float64
-	CurrentTool   string
+	AgentID     string
+	Stage       string
+	Percent     float64
+	CurrentTool string
+	// ACPAgent / Persona: harness attribution for stage=acp progress
+	// frames (see ProgressUpdateMsg). Empty means no acp tag.
+	ACPAgent      string
+	Persona       string
 	TokensUsed    int
 	ContextResets int
 	LastUpdate    time.Time
@@ -726,13 +738,18 @@ func (p *ProgressState) Render() string {
 
 	var parts []string
 
-	// Agent emoji + name
+	// Agent emoji + name (with acp harness attribution when the frame
+	// carries one; see acpAttribution).
 	if p.AgentID != "" {
-		agentDisplay := p.AgentID
-		if len(agentDisplay) > 12 {
-			agentDisplay = agentDisplay[:12]
+		if label, ok := acpAttribution(p.AgentID, p.ACPAgent, p.Persona); ok {
+			parts = append(parts, fmt.Sprintf("🤖 %s", label))
+		} else {
+			agentDisplay := p.AgentID
+			if len(agentDisplay) > 12 {
+				agentDisplay = agentDisplay[:12]
+			}
+			parts = append(parts, fmt.Sprintf("🤖 %s", agentDisplay))
 		}
-		parts = append(parts, fmt.Sprintf("🤖 %s", agentDisplay))
 	}
 
 	// Progress bar
@@ -765,6 +782,36 @@ func (p *ProgressState) Render() string {
 	}
 
 	return strings.Join(parts, " │ ")
+}
+
+// acpAttribution renders the harness attribution label for a stage=acp
+// progress frame: "<agent>[/<persona>] (acp: <harness>)", lowercase per the
+// repo UI-text rule, mirroring internal/acp's "agent/persona" display
+// convention (renderDecisionState). The inputs are the payload keys
+// published by internal/agent/acp_executor.go publishACPUpdate:
+// "agent_id", "acp_agent" (catalog harness id) and "persona" (optional).
+// ok=false when the frame carries no harness id — i.e. it is not an ACP
+// frame — and callers keep today's plain agent-name shape. A present but
+// empty persona shows the agent name alone (no "/").
+func acpAttribution(agentID, acpAgent, persona string) (string, bool) {
+	if agentID == "" || acpAgent == "" {
+		return "", false
+	}
+	actor := truncateRunes(strings.ToLower(strings.TrimSpace(agentID)), 12)
+	if p := strings.ToLower(strings.TrimSpace(persona)); p != "" {
+		actor += "/" + truncateRunes(p, 12)
+	}
+	return fmt.Sprintf("%s (acp: %s)", actor, truncateRunes(strings.ToLower(strings.TrimSpace(acpAgent)), 16)), true
+}
+
+// truncateRunes shortens s to at most n runes (rune-safe, unlike the
+// byte-slice truncation the plain agent-name path predates).
+func truncateRunes(s string, n int) string {
+	rs := []rune(s)
+	if len(rs) <= n {
+		return s
+	}
+	return string(rs[:n])
 }
 
 // IsComplete returns true if progress indicates completion.
@@ -1509,6 +1556,18 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		if msg.CurrentTool != "" {
 			m.progressState.CurrentTool = msg.CurrentTool
 		}
+		// ACP harness attribution (stage=acp frames): carried so the
+		// progress line names the acting harness. Non-acp frames leave
+		// the previous values; the acp stage itself overwrites Stage.
+		if msg.ACPAgent != "" {
+			m.progressState.ACPAgent = msg.ACPAgent
+			m.progressState.Persona = msg.Persona
+		} else if msg.Stage == "acp" {
+			// acp frame whose spec carried no binding (no acp_agent key):
+			// drop stale attribution so the plain shape renders.
+			m.progressState.ACPAgent = ""
+			m.progressState.Persona = ""
+		}
 		if msg.TokensUsed > 0 {
 			m.progressState.TokensUsed = msg.TokensUsed
 		}
@@ -2068,13 +2127,18 @@ func (m *ChatModel) renderProgressContent() string {
 
 	var parts []string
 
-	// Agent emoji + name
+	// Agent emoji + name (with acp harness attribution when the frame
+	// carries one; see acpAttribution).
 	if p.AgentID != "" {
-		agentDisplay := p.AgentID
-		if len(agentDisplay) > 12 {
-			agentDisplay = agentDisplay[:12]
+		if label, ok := acpAttribution(p.AgentID, p.ACPAgent, p.Persona); ok {
+			parts = append(parts, fmt.Sprintf("🤖 %s", label))
+		} else {
+			agentDisplay := p.AgentID
+			if len(agentDisplay) > 12 {
+				agentDisplay = agentDisplay[:12]
+			}
+			parts = append(parts, fmt.Sprintf("🤖 %s", agentDisplay))
 		}
-		parts = append(parts, fmt.Sprintf("🤖 %s", agentDisplay))
 	}
 
 	// Progress bar

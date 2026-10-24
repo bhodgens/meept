@@ -742,6 +742,9 @@ func (s *SidebarModel) handleProgressEvent(e BusEvent) tea.Cmd {
 		if v, ok := payloadMap["detail"].(string); ok {
 			currentTool = v
 		}
+		// ACP harness attribution (acp_executor.go publishACPUpdate keys).
+		acpAgent, _ := payloadMap["acp_agent"].(string)
+		persona, _ := payloadMap["persona"].(string)
 		if v, ok := payloadMap["percent"].(float64); ok {
 			percent = v
 		} else if iteration, ok := payloadMap["iteration"].(float64); ok {
@@ -760,6 +763,8 @@ func (s *SidebarModel) handleProgressEvent(e BusEvent) tea.Cmd {
 			Percent:     percent,
 			TokensUsed:  int(tokenCount),
 			CurrentTool: currentTool,
+			ACPAgent:    acpAgent,
+			Persona:     persona,
 		}
 	}
 }

@@ -35,6 +35,23 @@ List<String> _getTextStrings(Finder finder, WidgetTester tester) {
   return tester.widgetList<Text>(finder).map((t) => t.data ?? '').toList();
 }
 
+/// Factory for an ACP-attributed progress frame (acp-employees dim 3A).
+AgentProgress acpProgress({
+  String agentId = 'bob',
+  String acpAgent = 'hermes',
+  String persona = '',
+}) {
+  return AgentProgress(
+    agentId: agentId,
+    message: 'reading the issue',
+    tier: 1,
+    timestamp: DateTime(2026, 10, 23),
+    stage: 'acp',
+    acpAgent: acpAgent,
+    persona: persona,
+  );
+}
+
 // ===== Tier styling tests =====
 
 void main() {
@@ -364,6 +381,86 @@ void main() {
 
         expect(find.byType(Expanded), findsOneWidget);
         expect(find.byType(Column), findsOneWidget);
+      });
+    });
+
+    group('acp attribution', () {
+      test('displayLabel formats agent · acp harness', () {
+        expect(acpProgress().displayLabel, 'bob · acp hermes');
+      });
+
+      test('displayLabel includes persona when set', () {
+        expect(
+          acpProgress(persona: 'Worker').displayLabel,
+          'bob/worker · acp hermes',
+        );
+      });
+
+      test('displayLabel falls back to plain agent id when no harness', () {
+        expect(acpProgress(acpAgent: '').displayLabel, 'bob');
+      });
+
+      test(
+        'fromJson reads acp keys and detail text from a flattened frame',
+        () {
+          // Shape the WS relay produces for a raw agent.progress bus frame:
+          // {type: "event", data: {stage: "acp", detail, agent_id,
+          // acp_agent, persona, ...}} flattened by _flattenWSMessage.
+          final progress = AgentProgress.fromJson({
+            'type': 'event',
+            'source_topic': 'agent.progress',
+            'conversation_id': 'sess-1',
+            'stage': 'acp',
+            'detail': 'streaming thought',
+            'agent_id': 'bob',
+            'acp_agent': 'hermes',
+            'persona': 'worker',
+          });
+          expect(progress.isAcp, isTrue);
+          expect(progress.stage, 'acp');
+          expect(progress.message, 'streaming thought');
+          expect(progress.displayLabel, 'bob/worker · acp hermes');
+        },
+      );
+
+      test('fromJson without acp keys keeps the plain shape', () {
+        final progress = AgentProgress.fromJson({
+          'type': 'agent_progress',
+          'agent_id': 'coder',
+          'message': 'building',
+          'tier': 1,
+        });
+        expect(progress.isAcp, isFalse);
+        expect(progress.displayLabel, 'coder');
+      });
+
+      testWidgets('renders attributed label in the chat indicator', (
+        tester,
+      ) async {
+        await tester.pumpWidget(_buildWidget(progress: acpProgress()));
+        expect(find.text('bob · acp hermes'), findsOneWidget);
+        expect(find.text('reading the issue'), findsOneWidget);
+      });
+
+      testWidgets('persona-empty acp frame renders agent-only label', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          _buildWidget(progress: acpProgress(persona: '')),
+        );
+        expect(find.text('bob · acp hermes'), findsOneWidget);
+      });
+
+      testWidgets('non-acp frame keeps today\'s plain label', (tester) async {
+        await tester.pumpWidget(
+          _buildWidget(
+            progress: _makeProgress(
+              agentId: 'Bob',
+              message: 'building solution',
+            ),
+          ),
+        );
+        expect(find.text('bob'), findsOneWidget);
       });
     });
   });
