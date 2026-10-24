@@ -60,7 +60,7 @@
     "agent.progress": [
       {
         "file": "internal/agent/acp_executor.go",
-        "line": 314,
+        "line": 405,
         "payload_keys": [
           "agent_id",
           "detail",
@@ -171,7 +171,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9213,
+        "line": 9252,
         "payload_keys": []
       }
     ],
@@ -506,7 +506,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2618,
+        "line": 2651,
         "payload_keys": [
           "event"
         ]
@@ -515,7 +515,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2265,
+        "line": 2298,
         "payload_keys": [
           "event"
         ]
@@ -1726,7 +1726,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8473,
+        "line": 8512,
         "payload_keys": []
       }
     ],
@@ -2438,7 +2438,7 @@
     "*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 3132,
+        "line": 3145,
         "subscriber_id": "session.sessionID"
       }
     ],
@@ -3434,7 +3434,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8400,
+        "line": 8439,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3720,7 +3720,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8557,
+        "line": 8596,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

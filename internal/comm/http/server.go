@@ -995,6 +995,19 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 			// agent state transitions. They MUST render as progress — never
 			// chat_message (AGENTS.md WS classification invariant).
 			eventType = "agent_progress"
+		case topic == "agent.progress":
+			// Raw agent.progress frames (internal/agent/loop.go
+			// publishProgress/publishStreamDelta and acp_executor.go
+			// publishACPUpdate, stage=acp) are lifecycle progress, not
+			// generic events. Before 2026-10-24 they fell through to the
+			// default "event" bucket, which put them on the catch-all WS
+			// channel and forced the GUI's subscribeToAgentProgress to
+			// hand-pass stage=acp frames (TUI/GUI-parity leaf
+			// observation). Exact match, not prefix: the only sibling is
+			// agent.progress.synthesized, which is dropped above so the
+			// dedicated handleWSProgress path stays the single surface for
+			// it (no double-delivery; ws-filter-06 pin).
+			eventType = "agent_progress"
 		case strings.HasPrefix(topic, "turn."):
 			// Turn lifecycle events (turn.terminal, leaf
 			// 01-turn-terminal-event of the turn-lifecycle tree): the frozen

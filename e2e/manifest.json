@@ -757,6 +757,15 @@
    ]
   },
   {
+   "id": "ws-classification-06",
+   "suite": "ws-classification",
+   "diff": "S",
+   "title": "raw agent.progress (acp stage=acp shape) classifies as agent_progress, never generic event",
+   "paths": [
+    "internal/comm/http/server.go"
+   ]
+  },
+  {
    "id": "ws-filter-01",
    "suite": "ws-filter",
    "diff": "M",

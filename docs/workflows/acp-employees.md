@@ -174,13 +174,16 @@ lowercase, following the Verification section pattern.
   (5 steps) + ACPExecutor branch + `agents show` executor section. Ships
   "have bob check that issue" end-to-end with the existing catalog.
 - Phase 2 (hardening): per-persona metrics tags (employee.invocations-style:
-  acp.persona.turns {agent, persona, outcome}), TUI/GUI persona display in
+  acp.persona.turns {agent, persona, outcome}) (SHIPPED — emitted once per
+  completed acp turn in ACPExecutor.Run via a TurnMetricRecorder on the
+  metrics.db Store; wiring failures never counted), TUI/GUI persona display in
   progress events (SHIPPED — see "Chat-surface harness attribution" below),
   e2e suite (hermetic: fakeagent testdata extended with a
   persona-capable fake).
 - Phase 3 (compose): employee layer references ACP-backed agents as
   GoalLoop executors (WithExecutor seam already exists) — autonomous
   hermes-persona employees. Deferred; needs its own design pass.
+  → Design pass: [acp-employees-phase3.md](acp-employees-phase3.md) (dimensions D1–D6 open for decision).
 
 ## Chat-surface harness attribution (TUI/GUI parity)
 
@@ -209,12 +212,16 @@ Documented deviations (AGENTS.md UI parity rule):
   TUI's `(acp: …)` parenthetical. Semantics are identical:
   agent[/persona], harness id, lowercase, plain-shape fallback.
 - Wire path: the TUI reads the bus event directly (EventStreamDataMsg payload
-  map); the GUI receives raw `agent.progress` frames classified as the generic
-  `event` WS type (the legacy relay prefix table has no `agent.progress`
-  agent_progress case), so `WebSocketService.subscribeToAgentProgress`
-  additionally passes same-session `event` frames whose `source_topic` is
-  `agent.progress` AND `stage` is `acp` — scoped to acp only so no other
-  raw-frame traffic newly floods the GUI progress stream.
+  map); the GUI's `WebSocketService.subscribeToAgentProgress` accepts the
+  daemon's `agent_progress` frames. As of the 2026-10-24 WS-classification
+  fix the relay's legacy prefix table maps `agent.progress` directly to
+  `agent_progress` (internal/comm/http/server.go transformBusEventToWS), so
+  the client-side `event`+`source_topic=agent.progress`+`stage=acp`
+  passthrough added by 52407fee is RETIRED. Pairing a new GUI with an older
+  (pre-fix) daemon degrades gracefully: raw progress frames arrive as the
+  generic `event` type and are filtered out — the live progress line and its
+  turn-liveness refresh are missing, but the turn still completes via the
+  `turn.terminal` agent_progress frame that older daemons already classify.
 
 ## Open questions
 

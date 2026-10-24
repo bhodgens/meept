@@ -740,15 +740,20 @@ class WebSocketService {
   /// responsible for managing the server-side subscription (typically
   /// by sending a `subscribe` message with `channel: 'progress'`).
   ///
-  /// Also passes through raw `agent.progress` bus frames, which the WS
-  /// relay's legacy classification emits as the generic `event` type
-  /// (transformBusEventToWS: the `agent.*` prefix has no agent_progress
-  /// case). Those are exactly the ACP-harness updates
-  /// (internal/agent/acp_executor.go publishACPUpdate, stage=acp), so the
-  /// chat progress stream must carry them for the GUI's acp attribution to
-  /// render. The relay scopes `event`-type frames on the catch-all channel;
-  /// the session grant armed by the chat/progress holds already admits them
-  /// (ShouldSend checks the session set first), so no extra hold is taken.
+  /// Raw `agent.progress` bus frames — including the ACP-harness updates
+  /// (internal/agent/acp_executor.go publishACPUpdate, stage=acp) — are
+  /// classified `agent_progress` by the daemon itself since the 2026-10-24
+  /// legacy-table fix (transformBusEventToWS gained an exact
+  /// `agent.progress -> agent_progress` case), so they flow through the
+  /// primary type check above. The earlier workaround here passed them
+  /// through on `type == 'event' && source_topic == 'agent.progress'`
+  /// because the legacy table had no agent.progress case; it is retired.
+  /// Back-compat note: against an OLDER daemon (built before the
+  /// 2026-10-24 classification fix) raw progress frames still arrive as
+  /// the generic `event` type and are silently filtered out — the
+  /// session loses only the live progress line/turn-liveness refresh, and
+  /// the turn still completes via the `turn.terminal` agent_progress frame
+  /// (older daemons already classify `turn.*` correctly).
   Stream<Map<String, dynamic>> subscribeToAgentProgress(String sessionId) {
     _retainSessionChannel(channelProgress, sessionId);
 
@@ -762,11 +767,7 @@ class WebSocketService {
       final cid = m['conversation_id'] as String?;
       final sameSession = sid == sessionId || cid == sessionId;
       if (!sameSession) return false;
-      if (type == WsEventTypes.agentProgress) return true;
-      // ACP-harness updates only: raw agent.progress frames with stage=acp.
-      return type == WsEventTypes.event &&
-          m['source_topic'] == 'agent.progress' &&
-          m['stage'] == 'acp';
+      return type == WsEventTypes.agentProgress;
     });
   }
 

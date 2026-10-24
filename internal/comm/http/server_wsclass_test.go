@@ -46,6 +46,7 @@ func TestWSClassParity(t *testing.T) {
 		// asserted separately below.
 		{"agent.quota_wait", "agent_progress"},
 		{"agent.model_escalated", "agent_progress"},
+		{"agent.progress", "agent_progress"},
 		{"turn.terminal", "agent_progress"},
 		{"metrics.cpu", "metrics_update"},
 		{"task.completed", "job_update"},
@@ -110,5 +111,90 @@ func TestWSClassCorruptPayload(t *testing.T) {
 	}
 	if got := out["type"]; got != "agent_progress" {
 		t.Errorf("corrupt-payload type = %v, want agent_progress (fallback)", got)
+	}
+}
+
+// TestWSClassAgentProgressRawFrame pins the 2026-10-24 legacy-table fix:
+// a raw agent.progress bus frame — the exact acp_executor.go
+// publishACPUpdate shape (stage=acp + detail + agent_id + acp_agent +
+// persona + conversation_id) — classifies as agent_progress, NOT the
+// generic "event" bucket it fell into before. The fix routes the frame
+// onto the `progress` WS channel (wsEventChannel -> ShouldSend), so a
+// connection that only granted `progress` for the session receives it.
+// The payload keys must survive the transform verbatim (the GUI's
+// AgentProgress.fromJson reads detail/acp_agent/persona directly).
+func TestWSClassAgentProgressRawFrame(t *testing.T) {
+	acpPayload := map[string]any{
+		"conversation_id": "conv-acp-1",
+		"stage":           "acp",
+		"detail":          "streaming thought",
+		"agent_id":        "bob",
+		"acp_agent":       "hermes",
+		"persona":         "worker",
+		"timestamp":       "2026-10-24T00:00:00Z",
+	}
+	out := transformBusEventToWS(busMsg("agent.progress", acpPayload))
+	if out == nil {
+		t.Fatal("transformBusEventToWS(agent.progress) returned nil, want payload")
+	}
+	if got := out["type"]; got != "agent_progress" {
+		t.Errorf("type = %v, want agent_progress (legacy table maps agent.progress)", got)
+	}
+	if got := out["source_topic"]; got != "agent.progress" {
+		t.Errorf("source_topic = %v, want agent.progress", got)
+	}
+	// Passthrough keys the GUI/TUI surfaces read.
+	for _, k := range []string{"stage", "detail", "agent_id", "acp_agent", "persona", "conversation_id"} {
+		if out[k] != acpPayload[k] {
+			t.Errorf("payload key %q = %v, want %v (must survive the transform)", k, out[k], acpPayload[k])
+		}
+	}
+
+	// Channel routing: agent_progress resolves to the progress channel, so
+	// a progress-only grant (what subscribeToAgentProgress arms) admits it.
+	if ch := wsEventChannel("agent_progress"); ch != wsChannelProgress {
+		t.Errorf("wsEventChannel(agent_progress) = %q, want %q", ch, wsChannelProgress)
+	}
+	// Channel scoping note: the GRANT is channel-agnostic (SubscribeSession
+	// doc), so a session granted via chat alone still admits progress
+	// frames — only the OPT-OUT ledger is per-channel. Assert the
+	// progress-channel grant path, which is what subscribeToAgentProgress arms.
+	hub := NewWebSocketHub(nil)
+	wc := &wsConn{}
+	hub.SubscribeSession(wc, "conv-acp-1", wsChannelProgress)
+	if !hub.ShouldSend(wc, out["type"].(string), "conv-acp-1") {
+		t.Error("ShouldSend: progress-channel grant must deliver the reclassified agent.progress frame")
+	}
+	// A progress-channel opt-out silences it (per-channel suppression).
+	hub.UnsubscribeSession(wc, "conv-acp-1", wsChannelProgress)
+	if hub.ShouldSend(wc, "agent_progress", "conv-acp-1") {
+		t.Error("ShouldSend: progress-channel unsubscribe must suppress the frame")
+	}
+	// A chat-channel unsubscribe must NOT silence progress (H6 invariant).
+	wc2 := &wsConn{}
+	hub.SubscribeSession(wc2, "conv-acp-1", wsChannelProgress)
+	hub.UnsubscribeSession(wc2, "conv-acp-1", wsChannelChat)
+	if !hub.ShouldSend(wc2, "agent_progress", "conv-acp-1") {
+		t.Error("ShouldSend: chat-channel unsubscribe must not mute the progress stream")
+	}
+
+	// Sibling topic stays dropped: agent.progress.synthesized must NOT
+	// classify via this new case (dedicated handleWSProgress is its only
+	// surface; ws-filter-06 pins no double-delivery).
+	if out := transformBusEventToWS(busMsg("agent.progress.synthesized", acpPayload)); out != nil {
+		t.Errorf("agent.progress.synthesized: got type=%v, want nil (single-surface pin)", out["type"])
+	}
+
+	// Non-acp loop progress frames (publishProgress shape: iteration/
+	// token_count, no acp keys) reclassify too — same topic, same rule.
+	loopPayload := map[string]any{
+		"conversation_id": "conv-acp-1",
+		"iteration":       3,
+		"stage":           "executing",
+		"detail":          "running tools...",
+		"token_count":     120,
+	}
+	if out := transformBusEventToWS(busMsg("agent.progress", loopPayload)); out == nil || out["type"] != "agent_progress" {
+		t.Errorf("loop-stage agent.progress: got %v, want type agent_progress", out)
 	}
 }

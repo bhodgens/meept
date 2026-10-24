@@ -318,3 +318,68 @@ func TestWSTypedMarkerFirstClassification(t *testing.T) {
 		t.Fatalf("ws-classification-05: no chat_message bubble for the turn's assistant reply within 10s")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ws-classification-06 (S): raw agent.progress (incl. the acp stage=acp
+// payload shape) classifies as agent_progress, never the generic "event".
+// ---------------------------------------------------------------------------
+
+// TestWSAgentProgressClassifiesAsAgentProgress pins the 2026-10-24 legacy-
+// table fix: raw agent.progress frames published on the bus (the exact
+// acp_executor.go publishACPUpdate shape: stage=acp, detail, agent_id,
+// acp_agent, persona, conversation_id) must relay as type agent_progress,
+// NOT the generic "event" bucket they fell into before. The frame carries
+// only conversation_id (no session_id), so the un-subscribed connection
+// receives it via the session->conversation fallback; payload keys must
+// survive verbatim for the GUI/TUI surfaces. The sibling
+// agent.progress.synthesized topic must NOT also surface here (dedicated
+// handleWSProgress is its only surface — see the ws-filter-06 pin).
+func TestWSAgentProgressClassifiesAsAgentProgress(t *testing.T) {
+	s := start(t)
+	ws := harness.DialWS(t, s, "")
+
+	publishViaRPC(t, s, "agent.progress", map[string]any{
+		"conversation_id": "session-wsclass-06",
+		"stage":           "acp",
+		"detail":          "WSCLASS06-ACP-UPDATE",
+		"agent_id":        "wsclass-06-agent",
+		"acp_agent":       "hermes",
+		"persona":         "worker",
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+	})
+
+	ev := waitForType(t, ws, "agent.progress stage=acp", 15*time.Second, "agent_progress")
+	data := map[string]any{}
+	if err := json.Unmarshal(ev.Data, &data); err != nil {
+		t.Fatalf("ws-classification-06: agent_progress payload decode: %v (%s)", err, ev.Data)
+	}
+	if got, _ := data["source_topic"].(string); got != "agent.progress" {
+		t.Fatalf("ws-classification-06: source_topic = %v, want agent.progress", data["source_topic"])
+	}
+	// The acp attribution keys the surfaces read must pass through verbatim.
+	for key, want := range map[string]string{
+		"stage":     "acp",
+		"detail":    "WSCLASS06-ACP-UPDATE",
+		"agent_id":  "wsclass-06-agent",
+		"acp_agent": "hermes",
+		"persona":   "worker",
+	} {
+		if got, _ := data[key].(string); got != want {
+			t.Fatalf("ws-classification-06: payload[%s] = %q, want %q", key, got, want)
+		}
+	}
+	// Negative pin: the frame must not ALSO have arrived as type "event"
+	// (the pre-fix classification). The relay emits exactly one frame per
+	// publish; waiting on "event" past the matched agent_progress frame
+	// must time out with no WSCLASS06 marker inside.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		f := ws.RecvEvent(time.Until(deadline))
+		if f == nil {
+			break
+		}
+		if strings.Contains(string(f.Data), "WSCLASS06-ACP-UPDATE") && f.Type == "event" {
+			t.Fatalf("ws-classification-06: duplicate generic event frame — classification regressed")
+		}
+	}
+}

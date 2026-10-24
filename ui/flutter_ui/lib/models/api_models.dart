@@ -221,10 +221,11 @@ class AgentProgress {
   /// `stage: "acp"` plus `acp_agent` (catalog harness id, e.g. "hermes")
   /// and `persona` (optional) — internal/agent/acp_executor.go
   /// publishACPUpdate. Empty [acpAgent] means this frame is not ACP and
-  /// the indicator keeps the plain agent shape. The generic wildcard relay
-  /// classifies raw `agent.progress` frames as the `event` type
-  /// (transformBusEventToWS legacy table), so the WS filter passes those
-  /// through to this stream alongside typed agent_progress frames.
+  /// the indicator keeps the plain agent shape. The WS relay classifies
+  /// raw `agent.progress` frames as `agent_progress` directly
+  /// (transformBusEventToWS exact-match case, 2026-10-24), so these
+  /// frames arrive on the progress subscription without a client-side
+  /// event-type workaround.
   final String acpAgent;
   final String persona;
 

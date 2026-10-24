@@ -19,7 +19,15 @@ client creates a visible message bubble for every `chat_message` event —
 misclassified lifecycle events appear as blank messages.
 
 Quota events on `agent.quota_wait` MUST be classified as `agent_progress`, never
-`chat_message`. Classification derives from each payload's `WSClass()` marker
+`chat_message`. Raw `agent.progress` frames (loop.go publishProgress /
+publishStreamDelta, acp_executor.go publishACPUpdate with `stage: "acp"`)
+also classify as `agent_progress` via an exact-match case in the legacy
+table (added 2026-10-24; pinned by ws-classification-06) — before that
+they fell into the generic `event` bucket, which put lifecycle progress on
+the catch-all channel and forced a GUI-side passthrough (retired with the
+fix). `agent.progress.synthesized` stays DROPPED from the generic relay
+before classification — its single surface is the dedicated
+handleWSProgress path (no double-delivery; ws-filter-06 pin). Classification derives from each payload's `WSClass()` marker
 (`internal/comm/wsclass`) where the payload is typed (currently
 `turn.terminal`/`TurnTerminalEvent` and the ACP relay's
 `acp.permission.requested`/`.resolved` typed topics carrying
