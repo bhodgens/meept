@@ -139,12 +139,14 @@ func personaStack(t *testing.T, bin string) *harness.Stack {
 }
 
 // waitForACPLive polls the acp.list RPC surface until the daemon reports
-// the ACP subsystem enabled with the fakeagent catalog entry present.
-// NOTE: handleList keys running-state lookup by the exact catalog id, so
-// persona-lane sessions (composite label "acp-e2e/bob") do not surface
-// there — the harness reply text in the route test IS the persona-session
-// proof (only GetOrCreatePersona spawns the fakeagent).
-func waitForACPLive(t *testing.T, s *harness.Stack, wantCatalogID string, timeout time.Duration) {
+// the ACP subsystem enabled AND the fakeagent catalog entry running — the
+// persona-lane session "acp-e2e/bob" (spawned only by GetOrCreatePersona)
+// surfaces as running=true on the bare catalog id since the handleList
+// prefix-matching fix (pre-fix this could only ever wait on the entry
+// being present, and the harness reply text was the sole persona proof).
+// wantPersonas, when non-empty, additionally pins the additive personas
+// key on the row.
+func waitForACPLive(t *testing.T, s *harness.Stack, wantCatalogID string, wantPersonas []string, timeout time.Duration) {
 	t.Helper()
 	rpc := harness.DialRPC(t, s.SocketPath)
 	deadline := time.Now().Add(timeout)
@@ -157,14 +159,40 @@ func waitForACPLive(t *testing.T, s *harness.Stack, wantCatalogID string, timeou
 		seen, _ = res["agents"].([]any)
 		for _, a := range seen {
 			row, _ := a.(map[string]any)
-			if id, _ := row["id"].(string); id == wantCatalogID {
-				return
+			id, _ := row["id"].(string)
+			if id != wantCatalogID {
+				continue
 			}
+			if running, _ := row["running"].(bool); !running {
+				continue
+			}
+			if len(wantPersonas) > 0 && !rowContainsPersonas(row, wantPersonas) {
+				continue
+			}
+			return
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	t.Fatalf("acp.list never reported catalog entry %q within %v (agents: %v)\ndaemon log tail:\n%s",
-		wantCatalogID, timeout, seen, s.Daemon.LogTail())
+	t.Fatalf("acp.list never reported catalog entry %q running (personas %v) within %v (agents: %v)\ndaemon log tail:\n%s",
+		wantCatalogID, wantPersonas, timeout, seen, s.Daemon.LogTail())
+}
+
+// rowContainsPersonas checks the additive personas key on an acp.list row.
+func rowContainsPersonas(row map[string]any, want []string) bool {
+	rows, _ := row["personas"].([]any)
+	for _, w := range want {
+		found := false
+		for _, p := range rows {
+			if name, _ := p.(string); name == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -207,11 +235,13 @@ func TestNamedRouteTurnRepliesFromExternalHarness(t *testing.T) {
 		t.Fatalf("acp-persona-route-01: reply is the canned local-model / task-ack shape, not the harness: %q", reply)
 	}
 
-	// 4. The ACP subsystem + catalog entry are live on the RPC surface
-	//    (wiring proof; the persona session itself is proven by the
-	//    harness reply text above — acp.list keys running state by the
-	//    bare catalog id, so a persona-lane session shows as the entry).
-	waitForACPLive(t, s, "acp-e2e", 15*time.Second)
+	// 4. The ACP subsystem is live AND the persona-lane session surfaces:
+	//    acp.list reports the bare catalog entry "acp-e2e" as running=true
+	//    with persona "bob" — the handleList prefix-matching fix (the
+	//    persona session is only ever spawned via GetOrCreatePersona, so a
+	//    running bare row IS the persona lane; the harness reply text
+	//    above remains the chain proof).
+	waitForACPLive(t, s, "acp-e2e", []string{"bob"}, 15*time.Second)
 
 	// 5. The prompt text rode session/prompt intact (the harness echoes
 	//    what it received).
