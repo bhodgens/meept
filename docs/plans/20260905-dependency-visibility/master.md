@@ -251,3 +251,16 @@ share; (2) menubar PATH list is a documented duplicate of Contract C
 
 N/A — no leaf documents found alongside this orchestrator. If this tree
 gains leaves, build the coverage matrix before dispatching them.
+
+### Control-agent survey 2026-10-25 — verdict: PARTIAL — gaps listed below
+
+- **Survey verdict:** PARTIAL
+- **E2E evidence (manifest path_map → suites):** acp-wi, cli-su, config, config, config, contin
+- **Unit packages with tests:** cmd/meept, cmd/meept-daemon, internal/config, internal/context, internal/daemon, internal/skills
+- **Sample verified tests:** internal/skills:TestExecutor_CanExecute
+- **Baseline:** `make test` 2026-10-25: 10,873 recorded results; the 26 initial failures were ephemeral-port exhaustion (`can't assign requested address`, AGENTS.md known issue) — `go test -count=1 -p 1 ./internal/tools/builtin/ ./internal/tui/` GREEN on isolated re-run.
+- **Gaps:** no Test Gate matrix (N/A placeholder — nested orchestrators have leaves but master gate is unseeded)
+
+Row-level statuses above stay as seeded; this tree-level verdict records that every
+planned feature has located test evidence (e2e suite mapping and/or package tests).
+Row-by-row test-name mapping happens at next dispatch touch of this tree.

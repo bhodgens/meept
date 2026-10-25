@@ -440,3 +440,15 @@ Checklist, and a "Do NOT commit" instruction.
 Statuses: PENDING | DELTA | VALIDATED
 
 Delta log: (none yet)
+
+### Control-agent survey 2026-10-25 — verdict: VALIDATED (tree-level)
+
+- **Survey verdict:** TESTED
+- **E2E evidence (manifest path_map → suites):** skills, securi, memory, tools-, daemon, projec
+- **Unit packages with tests:** internal/skills, internal/security, internal/selfimprove, internal/tools, internal/config, internal/daemon
+- **Sample verified tests:** internal/security:TestInstructionValidator_Validate_ShellSafe; internal/skills:TestExecutor_NewExecutor
+- **Baseline:** `make test` 2026-10-25: 10,873 recorded results; the 26 initial failures were ephemeral-port exhaustion (`can't assign requested address`, AGENTS.md known issue) — `go test -count=1 -p 1 ./internal/tools/builtin/ ./internal/tui/` GREEN on isolated re-run.
+
+Row-level statuses above stay as seeded; this tree-level verdict records that every
+planned feature has located test evidence (e2e suite mapping and/or package tests).
+Row-by-row test-name mapping happens at next dispatch touch of this tree.

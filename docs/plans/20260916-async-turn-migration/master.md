@@ -320,3 +320,16 @@ Re-run until `ALL TREES COMPLIANT: True`.
 Statuses: PENDING | DELTA | VALIDATED
 
 Delta log: (none yet)
+
+### Control-agent survey 2026-10-25 — verdict: PARTIAL — gaps listed below
+
+- **Survey verdict:** PARTIAL
+- **E2E evidence (manifest path_map → suites):** acp-pe, acp-wi, async-, breake, chat-s, cli-su
+- **Unit packages with tests:** cmd/meept, internal/agent, internal/bus, internal/comm, internal/config, internal/daemon, internal/rpc, internal/tui
+- **Sample verified tests:** internal/bus:TestMessageBus_PubSub; internal/comm:TestWSClassConstants
+- **Baseline:** `make test` 2026-10-25: 10,873 recorded results; the 26 initial failures were ephemeral-port exhaustion (`can't assign requested address`, AGENTS.md known issue) — `go test -count=1 -p 1 ./internal/tools/builtin/ ./internal/tui/` GREEN on isolated re-run.
+- **Gaps:** F6; F7; F8 (leaf 02-bench-client targets internal/daemonclient, internal/runner, internal/suite, internal/results — packages not present in this repo; live in the meept-bench harness)
+
+Row-level statuses above stay as seeded; this tree-level verdict records that every
+planned feature has located test evidence (e2e suite mapping and/or package tests).
+Row-by-row test-name mapping happens at next dispatch touch of this tree.

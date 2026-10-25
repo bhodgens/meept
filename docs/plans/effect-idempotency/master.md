@@ -573,3 +573,15 @@ resolved forks: payload column, workspace-push target replacement).
 Statuses: PENDING | DELTA | VALIDATED
 
 Delta log: (none yet)
+
+### Control-agent survey 2026-10-25 — verdict: VALIDATED (tree-level)
+
+- **Survey verdict:** TESTED
+- **E2E evidence (manifest path_map → suites):** effect, backup, chat-s, daemon, goal-c
+- **Unit packages with tests:** internal/effects, internal/agent, internal/backup, internal/daemon, internal/rpc, internal/services
+- **Sample verified tests:** internal/services:TestPlanService_SinkFallback
+- **Baseline:** `make test` 2026-10-25: 10,873 recorded results; the 26 initial failures were ephemeral-port exhaustion (`can't assign requested address`, AGENTS.md known issue) — `go test -count=1 -p 1 ./internal/tools/builtin/ ./internal/tui/` GREEN on isolated re-run.
+
+Row-level statuses above stay as seeded; this tree-level verdict records that every
+planned feature has located test evidence (e2e suite mapping and/or package tests).
+Row-by-row test-name mapping happens at next dispatch touch of this tree.

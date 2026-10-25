@@ -129,3 +129,15 @@ After all leaves are committed:
 Statuses: PENDING | DELTA | VALIDATED
 
 Delta log: (none yet)
+
+### Control-agent survey 2026-10-25 — verdict: VALIDATED (tree-level)
+
+- **Survey verdict:** TESTED
+- **E2E evidence (manifest path_map → suites):** projec, sessio, daemon, securi, chat-s, gui-fl
+- **Unit packages with tests:** internal/agent, internal/comm, internal/project, internal/rpc, internal/session, internal/tools
+- **Sample verified tests:** internal/comm:TestWSClassConstants
+- **Baseline:** `make test` 2026-10-25: 10,873 recorded results; the 26 initial failures were ephemeral-port exhaustion (`can't assign requested address`, AGENTS.md known issue) — `go test -count=1 -p 1 ./internal/tools/builtin/ ./internal/tui/` GREEN on isolated re-run.
+
+Row-level statuses above stay as seeded; this tree-level verdict records that every
+planned feature has located test evidence (e2e suite mapping and/or package tests).
+Row-by-row test-name mapping happens at next dispatch touch of this tree.

@@ -193,3 +193,15 @@ Recorded Decisions override earlier approval-request wording in the leaves. No b
 Statuses: PENDING | DELTA | VALIDATED
 
 Delta log: (none yet)
+
+### Control-agent survey 2026-10-25 — verdict: VALIDATED (tree-level)
+
+- **Survey verdict:** TESTED
+- **E2E evidence (manifest path_map → suites):** acp-pe, acp-wi, async-, breake, config, config
+- **Unit packages with tests:** internal/agent, internal/comm, internal/config, tools/classifier-eval (py: test_result_privacy.py, test_provenance.py, test_hardening.py)
+- **Sample verified tests:** tools/classifier-eval:test_remap_false_rewrites; internal/comm:TestWSClassConstants
+- **Baseline:** `make test` 2026-10-25: 10,873 recorded results; the 26 initial failures were ephemeral-port exhaustion (`can't assign requested address`, AGENTS.md known issue) — `go test -count=1 -p 1 ./internal/tools/builtin/ ./internal/tui/` GREEN on isolated re-run.
+
+Row-level statuses above stay as seeded; this tree-level verdict records that every
+planned feature has located test evidence (e2e suite mapping and/or package tests).
+Row-by-row test-name mapping happens at next dispatch touch of this tree.
