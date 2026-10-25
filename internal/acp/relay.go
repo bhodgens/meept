@@ -37,6 +37,14 @@ var (
 // Drop-oldest was explicitly rejected in the plan (drift 8).
 const maxPendingPermissions = 32
 
+// maxPendingParamsBytes bounds the raw requestPermission params kept on a
+// pending entry for the resolve rank's target extraction. Truncate, don't
+// drop: the toolCall path/title sits deep in a content array (live finding
+// 2026-10-25 — the 300-rune Summary cut it off, so the ranker decided on
+// the options preamble alone). 4 KB is generous for a single edit/tool call
+// and caps the entry's memory footprint.
+const maxPendingParamsBytes = 4096
+
 // defaultRelayTimeout is the safety net when SessionConfig.RelayTimeout is
 // unset (the config layer enforces relay_timeout > 0 for human /
 // escalate modes; leaf 01). Mirrors the [acp] relay_timeout default.
@@ -106,6 +114,23 @@ func capPermissionOptions(options []PermissionOption) []PermissionOption {
 	return out
 }
 
+// capPendingParams returns a copy of raw requestPermission params truncated
+// to maxPendingParamsBytes (never an in-place re-slice; the caller's buffer
+// may be the transport's). nil/empty passes through.
+func capPendingParams(params []byte) []byte {
+	if len(params) == 0 {
+		return nil
+	}
+	if len(params) <= maxPendingParamsBytes {
+		out := make([]byte, len(params))
+		copy(out, params)
+		return out
+	}
+	out := make([]byte, maxPendingParamsBytes)
+	copy(out, params)
+	return out
+}
+
 // PendingPermission is the surfaced record of one unanswered
 // session/requestPermission. It is a pure value snapshot — the resolve
 // channel and once-guard live in the registry entry, so consumers (bus /
@@ -118,6 +143,13 @@ type PendingPermission struct {
 	RequestID any    // JSON-RPC id echoed for resolve calls
 	Summary   string // bounded 300-rune render of the raw params
 	// (renderDecisionState budget — shared render)
+	// Params is the raw requestPermission params, capped at
+	// maxPendingParamsBytes, for server-side re-reading by the resolve
+	// rank (audit M5 Phase 2b-rank): the 300-rune Summary truncation cut
+	// the toolCall target out of the ranker's reach (live finding
+	// 2026-10-25). INTERNAL ONLY — the RPC/HTTP/bus conversions map
+	// explicit fields, so this never reaches the wire.
+	Params []byte
 	// Options are the agent-offered permission options from the raw
 	// requestPermission params, capped at maxPermissionOptions and passed
 	// through with the agent's own labels (acp-always-allow leaf 01: the
@@ -306,7 +338,10 @@ func (s *Session) relayPermissionWait(requestID any, rawParams []byte) relayVerd
 		// Agent-offered options ride along for the surfaces (additive,
 		// capped — acp-always-allow leaf 01). Cap here so the published
 		// snapshot and the registry entry carry the same bounded array.
-		Options:   capPermissionOptions(parsePermissionOptions(rawParams)),
+		Options: capPermissionOptions(parsePermissionOptions(rawParams)),
+		// Raw params kept for the resolve rank's target extraction
+		// (internal-only field; never mapped onto a wire payload).
+		Params:    capPendingParams(rawParams),
 		CreatedAt: time.Now(),
 	}
 	ch, err := s.cfg.Relay.Register(p)

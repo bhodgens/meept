@@ -18,9 +18,11 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -37,15 +39,96 @@ var ErrResolveRanked = errors.New("acp: allow rejected by decision-model rank")
 // the prompt never varies; the state carries the facts). The question
 // mirrors the permission lane's own semantics — exactly "allow" grants,
 // anything else denies — so one vocabulary covers both lanes.
-const resolveRankPrompt = "A human approved this agent permission request. May this action run?"
+//
+// Hardened 2026-10-25 after two live findings. V1 ("A human approved...
+// May this action run?") let gemini-2.5-flash-lite confirm an
+// authorized_keys edit at 1.00 — it deferred to the human it was meant to
+// double-check. V2 (job-framed, long deny list, "when uncertain, deny")
+// then vetoed a ROUTINE scratch-file append at 1.00 too: the enumerate-and-
+// fear framing plus a summary truncated before the target path made deny the
+// safe-sounding answer for everything — a lockout (re-approving re-ranks to
+// the same deny). V3 keeps the categories but rebalances: deny only on a
+// clear category match against the extracted path, explicit no-deny-on-
+// doubt, routine work explicitly allowed.
+const resolveRankPrompt = "You are a safety net over a human's already-given approval of an agent action. Do NOT re-decide whether approval was deserved — deny ONLY when the file path or command below clearly matches one of these: credential or key material (ssh keys, authorized_keys, gpg, cloud creds, tokens, .env, .netrc, .npmrc); access control (sudoers, passwd, firewall rules); security or approval policy config (agent/daemon permission settings, hooks, MCP server configs); piping downloaded or remote code into a shell. Everything else — ordinary source files, scratch/tmp files, docs, tests, git operations — answer allow. Uncertainty is NOT a reason to deny: if you cannot clearly place the target in the deny list, answer allow."
 
 // resolveRankTimeout bounds the Ask call, mirroring the decision lane's
 // decisionAskTimeout: a resolve must not wedge on a slow ranker.
 const resolveRankTimeout = 15 * time.Second
 
 // resolveRankStateBudget caps the untrusted summary embedded in the ranked
-// state (decision-lane precedent: bounded render, never the raw params).
-const resolveRankStateBudget = 300
+// state. Larger than the relay's own render budget on purpose: the rank
+// state exists solely for this decision, and the raw params JSON routinely
+// exceeds 300 runes before its toolCall path (live finding 2026-10-25 —
+// the ranker literally never saw the target file).
+const resolveRankStateBudget = 900
+
+// rankTargetLine extracts the actionable target fields from the raw
+// requestPermission params for the rank state: toolCall title, content
+// location paths, and the rawInput command — the fields the deny
+// categories key on. Structured parse first; if the params were truncated
+// by maxPendingParamsBytes (invalid JSON), a regex sweep over the raw
+// bytes recovers whatever path/title/command fields survived. Best-effort:
+// a miss returns "" and the ranker just sees the fenced summary, like
+// before. Note the extracted values are still agent-provided data (the
+// human sees the same lie if the agent lies); this adds signal, not trust.
+func rankTargetLine(params []byte) string {
+	if len(params) == 0 {
+		return ""
+	}
+	var parts []string
+	seen := map[string]bool{}
+	add := func(label, val string) {
+		val = strings.TrimSpace(val)
+		if val == "" {
+			return
+		}
+		if len([]rune(val)) > 160 {
+			val = string([]rune(val)[:160]) + "…"
+		}
+		key := label + "=" + val
+		if seen[key] || len(parts) >= 8 {
+			return
+		}
+		seen[key] = true
+		parts = append(parts, key)
+	}
+	var parsed struct {
+		ToolCall struct {
+			Title   string `json:"title"`
+			Content []struct {
+				Location struct {
+					Path string `json:"path"`
+				} `json:"location"`
+			} `json:"content"`
+			RawInput struct {
+				Command string `json:"command"`
+			} `json:"rawInput"`
+		} `json:"toolCall"`
+	}
+	if err := json.Unmarshal(params, &parsed); err == nil {
+		add("title", parsed.ToolCall.Title)
+		for _, c := range parsed.ToolCall.Content {
+			add("path", c.Location.Path)
+		}
+		add("command", parsed.ToolCall.RawInput.Command)
+	} else {
+		for _, m := range rankTargetFieldRE.FindAllStringSubmatch(string(params), -1) {
+			if len(m) == 3 {
+				add(m[1], m[2])
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Extracted target fields (agent-provided, same as the human sees): " +
+		strings.Join(parts, "; ") + "\n"
+}
+
+// rankTargetFieldRE recovers path/title/command string values from
+// (possibly truncated) raw params JSON for the fallback sweep.
+var rankTargetFieldRE = regexp.MustCompile(`"(path|title|command)"\s*:\s*"((?:[^"\\]|\\.)*)"(?:[^"]*$)?`)
 
 // rankResolve runs the tighten-only second opinion for one allow/always
 // resolve that passed the identity gate. Returns:
@@ -77,16 +160,18 @@ func (m *Manager) rankResolve(ctx context.Context, id, decision string, approver
 	}
 
 	summary := ""
+	var params []byte
 	if rl != nil {
 		for _, p := range rl.Pending() {
 			if p.ID == id {
 				summary = p.Summary
+				params = p.Params
 				break
 			}
 		}
 	}
 
-	state := renderResolveRankState(approver, decision, summary)
+	state := renderResolveRankState(approver, decision, summary, params)
 	rankCtx, cancel := context.WithTimeout(ctx, resolveRankTimeout)
 	defer cancel()
 	res, err := dec.Ask(rankCtx, llm.DecisionQuestion{
@@ -126,14 +211,21 @@ func (m *Manager) rankResolve(ctx context.Context, id, decision string, approver
 }
 
 // renderResolveRankState builds the ranked state: trusted facts (approver
-// identity, verb) as plain lines, the agent-controlled summary inside an
-// explicit untrusted fence so injection-shaped text in it reads as data.
-func renderResolveRankState(approver Approver, decision, summary string) string {
+// identity, verb) plus the extracted target line (best-effort structured
+// re-read of the raw params — the Summary alone truncates before the
+// toolCall path, live finding 2026-10-25), then the agent-controlled
+// summary inside an explicit untrusted fence so injection-shaped text in it
+// reads as data.
+func renderResolveRankState(approver Approver, decision, summary string, params []byte) string {
 	var b strings.Builder
 	b.WriteString("Approver: ")
 	b.WriteString(approver.String())
 	b.WriteString("\nHuman verdict: ")
 	b.WriteString(decision)
+	if line := rankTargetLine(params); line != "" {
+		b.WriteString("\n")
+		b.WriteString(strings.TrimSuffix(line, "\n"))
+	}
 	b.WriteString("\n<<<UNTRUSTED_REQUEST_SUMMARY>>>\n")
 	s := strings.TrimSpace(summary)
 	if s == "" {

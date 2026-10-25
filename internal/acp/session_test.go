@@ -1878,3 +1878,38 @@ func TestSession_DecisionLanePersonaInQuestionState(t *testing.T) {
 		t.Fatalf("decision question state = %q, want the hermes/bob header", q.State)
 	}
 }
+
+// TestResolveRankTargetExtraction pins the live defect fix 2026-10-25:
+// the rank state must carry the toolCall target even when the params JSON
+// is large/truncated — the 300-rune Summary cut (V2 vetoed a benign edit
+// it literally could not see the path of). Covers: structured parse
+// (title + content path), regex fallback on truncated input, and the
+// empty-params miss.
+func TestResolveRankTargetExtraction(t *testing.T) {
+	// Structured: hermes edit-approval shape (title + content location).
+	full := []byte(`{"sessionId":"s","toolCall":{"title":"Approve edit: /tmp/a/note.txt","kind":"edit","content":[{"type":"diff","location":{"path":"/tmp/a/note.txt","kind":"file"}}],"rawInput":{"tool":"patch"}}}`)
+	line := rankTargetLine(full)
+	if !strings.Contains(line, "path=/tmp/a/note.txt") || !strings.Contains(line, "title=Approve edit:") {
+		t.Fatalf("structured extract missing fields: %q", line)
+	}
+
+	// Truncated params (invalid JSON): fallback sweep still finds the path.
+	trunc := full[:len(full)-12]
+	line = rankTargetLine(trunc)
+	if !strings.Contains(line, "/tmp/a/note.txt") {
+		t.Fatalf("fallback sweep missed path in truncated params: %q", line)
+	}
+
+	// Empty params: no line, and the state renders without it.
+	if got := rankTargetLine(nil); got != "" {
+		t.Fatalf("empty params must yield no target line, got %q", got)
+	}
+	state := renderResolveRankState(Approver{Kind: "test"}, "allow", "summary", nil)
+	if strings.Contains(state, "EXTRACTED_TARGET") {
+		t.Fatal("state carries an empty target fence")
+	}
+	state = renderResolveRankState(Approver{Kind: "test"}, "allow", "summary", full)
+	if !strings.Contains(state, "path=/tmp/a/note.txt") {
+		t.Fatalf("state missing extracted target: %q", state)
+	}
+}

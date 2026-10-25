@@ -286,7 +286,14 @@ to answer its own request.
   `decision_threshold` all fail OPEN: the identity gate is the hard
   boundary, and a dead ranker must not lock humans out of their own gate.
   The agent-controlled summary rides the ranked state inside an
-  `<<<UNTRUSTED_REQUEST_SUMMARY>>>` fence.
+  `<<<UNTRUSTED_REQUEST_SUMMARY>>>` fence, beside an extracted target line
+  (toolCall title / content paths / rawInput command re-read from the raw
+  params kept on the pending entry — the 300-rune summary truncation cut
+  the path out of the ranker's reach, live finding 2026-10-25). Prompt V3:
+  deny only on a clear deny-category match (credentials/keys, access
+  control, security-policy config, remote-code piping), never on
+  uncertainty — V1 under-flagged `authorized_keys`, V2 over-flagged a
+  benign scratch edit.
 - **Key roles** (`internal/auth`, audit M5 Phase 2b): when multi-user auth
   is active, each stored key carries a role — `human` (default; may answer
   the permission gate) or `api` (authenticates everywhere ordinary keys do,
