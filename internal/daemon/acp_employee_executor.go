@@ -21,12 +21,38 @@ type acpTurnRunner interface {
 	RunOnce(ctx context.Context, userMessage, conversationID string) (string, error)
 }
 
+// acpTurnAuditRecorder is the narrow employee-audit surface the adapter
+// rides for phase-3 D6 attribution: one AuditFinding per employee-driven
+// acp turn naming the serving registry agent, the acp harness, and the
+// persona. *employee.AuditStore satisfies it via Create — the same
+// precedent the goal loop's escalation writes follow (goal_loop.go
+// decideTier3 auditStore.Create, Severity/Checkpoint fields).
+// A nil recorder means attribution dark: the turn path is unaffected.
+type acpTurnAuditRecorder interface {
+	Create(ctx context.Context, f employee.AuditFinding) error
+}
+
+// compile-time proof that the employee audit store satisfies the seam.
+var _ acpTurnAuditRecorder = (*employee.AuditStore)(nil)
+
 // acpEmployeeExecutorAdapter implements bot.BotExecutor for an employee
 // whose BotDefinition.ExecutorAgent names an acp-backed registry agent
 // definition (acp-employees phase 3, D1-A/D2-B). Each EXECUTE turn routes
 // the userMessage through the REFERENCED agent's loop RunOnce — never
 // RunOnceWithParts — so harness output earns the same reply guard, output
 // filters, and security scan as a local employee turn.
+//
+// D6 observability attribution (phase 3): ExecuteBot stamps the caller
+// ctx with agent.WithACPTurnSource(employee, employeeID) before RunOnce.
+// The context value survives RunOnce -> RunOnceWithParts -> loopCtx
+// (context.WithCancel derives values) -> runTurnProducer ->
+// runACPTurn -> ACPExecutor.Run, so the executor's single
+// acp.persona.turns emission site tags employee-driven turns
+// source=employee (+ employee_id) while chat-slave turns stay
+// source=chat. The adapter emits NO metric datapoint itself — one
+// emission point, no double counting — and records one post-turn
+// AuditFinding naming agent/harness/persona when an audit recorder is
+// wired.
 //
 // Token counts are not available on the acp wire (session/prompt returns
 // stopReason only — docs/workflows/acp-employees-phase3.md D4), so
@@ -36,11 +62,18 @@ type acpTurnRunner interface {
 type acpEmployeeExecutorAdapter struct {
 	employeeID string
 	agentID    string
+	// harnessAgent + persona come from the referenced spec's acp block
+	// (spec.ACP.Agent / spec.ACP.Persona) at wiring time; they are only
+	// read for the audit-attribution finding, never for routing.
+	harnessAgent string
+	persona      string
 	// resolveLoop returns the referenced agent's loop. Built from the
 	// agent registry at wiring time; a function (not the registry
 	// concrete type) keeps the adapter unit-testable without a registry.
 	resolveLoop func(agentID string) (acpTurnRunner, error)
-	logger      *slog.Logger
+	// audit persists the per-turn attribution finding; nil = dark.
+	audit  acpTurnAuditRecorder
+	logger *slog.Logger
 }
 
 // ExecuteBot runs a single employee turn through the referenced agent's
@@ -63,8 +96,15 @@ func (a *acpEmployeeExecutorAdapter) ExecuteBot(ctx context.Context, systemPromp
 	// Conversation id scoped like the local adapter's so employee sessions
 	// never collide with user-driven conversations.
 	conversationID := id.Generate("bot-exec")
-	response, err := loop.RunOnce(ctx, userMessage, conversationID)
+	// D6: stamp the turn source on the caller ctx BEFORE RunOnce. The
+	// value survives every ctx derive inside the loop down to
+	// ACPExecutor.Run's single emission point, which tags the
+	// acp.persona.turns datapoint source=employee + employee_id —
+	// distinguishing it from a chat-slave turn on the same persona.
+	turnCtx := agent.WithACPTurnSource(ctx, agent.ACPTurnSourceEmployee, a.employeeID)
+	response, err := loop.RunOnce(turnCtx, userMessage, conversationID)
 	if err != nil {
+		a.recordTurnAudit(ctx, conversationID, "error")
 		a.logger.Warn("acp employee executor turn failed",
 			"employee_id", a.employeeID,
 			"executor_agent", a.agentID,
@@ -72,7 +112,38 @@ func (a *acpEmployeeExecutorAdapter) ExecuteBot(ctx context.Context, systemPromp
 			"error", err)
 		return "", 0, err
 	}
+	a.recordTurnAudit(ctx, conversationID, "success")
 	return response, 0, nil
+}
+
+// recordTurnAudit writes the D6 attribution finding: one employee audit
+// row per employee-driven acp turn naming the serving registry agent, the
+// acp harness, and the persona, so `meept agents audit` attributes remote
+// turns. Follows the goal-loop escalation precedent (SeverityInfo +
+// CheckpointPostTurn + ViolatedRule as the event key; Evidence carries
+// the linkage). Nil audit recorder = attribution dark. A write failure is
+// logged and never fails the turn — the turn already completed; the
+// finding is observability, not correctness (same posture as the
+// escalation audit write in goal_loop.go).
+func (a *acpEmployeeExecutorAdapter) recordTurnAudit(ctx context.Context, conversationID, outcome string) {
+	if a.audit == nil {
+		return
+	}
+	finding := employee.AuditFinding{
+		EmployeeID:   a.employeeID,
+		TurnID:       conversationID,
+		Severity:     employee.SeverityInfo,
+		Checkpoint:   employee.CheckpointPostTurn,
+		ViolatedRule: "acp_turn_attribution",
+		Evidence: fmt.Sprintf("acp turn served by executor_agent %q (harness %q, persona %q), outcome=%s",
+			a.agentID, a.harnessAgent, a.persona, outcome),
+	}
+	if err := a.audit.Create(ctx, finding); err != nil {
+		a.logger.Warn("acp employee executor audit attribution write failed (non-fatal)",
+			"employee_id", a.employeeID,
+			"executor_agent", a.agentID,
+			"error", err)
+	}
 }
 
 // Compile-time guard: acpEmployeeExecutorAdapter must satisfy bot.BotExecutor.
@@ -137,6 +208,7 @@ func effectiveACPPermissionMode(spec *agent.AgentSpec, globalMode string) string
 func employeeBotExecutor(emp employee.Employee, defaultExecutor bot.BotExecutor,
 	registry acpSpecSource, globalPermissionMode string,
 	resolveLoop func(agentID string) (acpTurnRunner, error),
+	audit acpTurnAuditRecorder,
 	logger *slog.Logger) (bot.BotExecutor, bool) {
 
 	if emp.ExecutorAgent == "" {
@@ -206,9 +278,12 @@ func employeeBotExecutor(emp employee.Employee, defaultExecutor bot.BotExecutor,
 	}
 
 	return &acpEmployeeExecutorAdapter{
-		employeeID:  emp.ID,
-		agentID:     emp.ExecutorAgent,
-		resolveLoop: resolveLoop,
-		logger:      logger.With("component", "acp-employee-executor", "employee_id", emp.ID),
+		employeeID:   emp.ID,
+		agentID:      emp.ExecutorAgent,
+		harnessAgent: spec.ACP.Agent,
+		persona:      spec.ACP.Persona,
+		resolveLoop:  resolveLoop,
+		audit:        audit,
+		logger:       logger.With("component", "acp-employee-executor", "employee_id", emp.ID),
 	}, false
 }

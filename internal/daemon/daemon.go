@@ -782,7 +782,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 
 	// acp-employees Phase 2: per-persona turn counter
-	// (acp.persona.turns {agent, persona, outcome}). Ride the already
+	// (acp.persona.turns {agent, persona, outcome, source}, source =
+	// chat|employee + employee_id on employee-driven turns — phase-3 D6
+	// ctx stamp via agent.WithACPTurnSource). Ride the already
 	// open metrics.db Store (Record(name, value, tags) — the same
 	// counter shape as cache.hit/dispatch rows). Both executor homes
 	// get it: the singleton loop's executor and the registry's (roster

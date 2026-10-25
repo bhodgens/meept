@@ -105,8 +105,55 @@ var _ TurnMetricRecorder = (*metrics.Store)(nil)
 // ACPTurnsMetric is the per-persona acp turn counter emitted once per
 // completed ACP turn. Tags: agent (catalog agent id, spec.ACP.Agent),
 // persona (spec.ACP.Persona — an empty string is a valid tag value, the
-// bindingless persona lane), outcome (success|error|cancelled).
+// bindingless persona lane), outcome (success|error|cancelled), and
+// source (chat|employee, acp-employees phase-3 D6): chat-slave turns
+// carry source=chat; employee-driven turns carry source=employee plus an
+// employee_id tag. The source rides a context value the employee adapter
+// injects before RunOnce, so the executor stays the single emission site
+// (no adapter-side datapoint, no double counting).
 const ACPTurnsMetric = "acp.persona.turns"
+
+// ACPTurnSource* are the source-tag values of ACPTurnsMetric (phase-3
+// D6). Absence of the context value means the chat lane.
+const (
+	ACPTurnSourceChat     = "chat"
+	ACPTurnSourceEmployee = "employee"
+)
+
+// acpTurnSourceKey scopes the turn-source context value (unexported
+// struct key, repo pattern per loop_park.go's resumedTurnKey).
+type acpTurnSourceKey struct{}
+
+// WithACPTurnSource stamps who is driving an acp turn onto ctx so
+// ACPExecutor.recordTurn can tag acp.persona.turns without the executor
+// knowing about employees. kind is ACPTurnSourceEmployee for employee
+// turns (employeeID names the employee; an empty id just omits the
+// employee_id tag); an empty kind returns ctx unchanged — the chat
+// default — so a mis-wired caller can never emit source:"".
+func WithACPTurnSource(ctx context.Context, kind, employeeID string) context.Context {
+	if kind == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, acpTurnSourceKey{}, acpTurnSource{kind: kind, employeeID: employeeID})
+}
+
+type acpTurnSource struct {
+	kind       string
+	employeeID string
+}
+
+// ACPTurnSourceFromContext reads the turn source stamped by
+// WithACPTurnSource. ok=false means the chat lane (no value present).
+func ACPTurnSourceFromContext(ctx context.Context) (kind, employeeID string, ok bool) {
+	if ctx == nil {
+		return "", "", false
+	}
+	src, valid := ctx.Value(acpTurnSourceKey{}).(acpTurnSource)
+	if !valid || src.kind == "" {
+		return "", "", false
+	}
+	return src.kind, src.employeeID, true
+}
 
 // SetTurnMetricRecorder wires the acp.persona.turns sink after
 // construction (daemon metrics wiring). Nil receiver and nil recorder are
@@ -122,8 +169,11 @@ func (e *ACPExecutor) SetTurnMetricRecorder(rec TurnMetricRecorder) {
 
 // recordTurn emits one acp.persona.turns datapoint. Read the recorder
 // under the lock, invoke outside it (mutex-scope rule, same pattern as
-// the employee goal loop's emitMetricFn reads).
-func (e *ACPExecutor) recordTurn(spec *AgentSpec, outcome string) {
+// the employee goal loop's emitMetricFn reads). The source tag comes
+// from ctx (WithACPTurnSource, phase-3 D6): an employee-driven turn also
+// carries employee_id; the chat lane defaults to source=chat with no
+// employee_id tag.
+func (e *ACPExecutor) recordTurn(ctx context.Context, spec *AgentSpec, outcome string) {
 	e.mu.RLock()
 	rec := e.rec
 	e.mu.RUnlock()
@@ -135,11 +185,20 @@ func (e *ACPExecutor) recordTurn(spec *AgentSpec, outcome string) {
 		agentID = spec.ACP.Agent
 		persona = spec.ACP.Persona
 	}
-	rec.Record(ACPTurnsMetric, 1, map[string]string{
+	source, employeeID, isEmployee := ACPTurnSourceFromContext(ctx)
+	if !isEmployee {
+		source = ACPTurnSourceChat
+	}
+	tags := map[string]string{
 		"agent":   agentID,
 		"persona": persona,
 		"outcome": outcome,
-	})
+		"source":  source,
+	}
+	if isEmployee && employeeID != "" {
+		tags["employee_id"] = employeeID
+	}
+	rec.Record(ACPTurnsMetric, 1, tags)
 }
 
 // NewACPExecutor builds the executor on the daemon's acp manager. A nil
@@ -192,11 +251,11 @@ func (e *ACPExecutor) Run(
 		DecisionThreshold: spec.ACP.DecisionThreshold,
 	})
 	if err != nil {
-		e.recordTurn(spec, "error")
+		e.recordTurn(ctx, spec, "error")
 		return "", fmt.Errorf("acp executor: %w", err)
 	}
 	if sess == nil {
-		e.recordTurn(spec, "error")
+		e.recordTurn(ctx, spec, "error")
 		return "", ErrNoACPSession
 	}
 
@@ -245,7 +304,7 @@ func (e *ACPExecutor) Run(
 	// 'step.duration' reader) are per-LLM-task shapes, not the tag-map
 	// counter style this metric rides — inventing a new store shape was
 	// out of scope (docs/workflows/acp-employees.md Phase 2).
-	e.recordTurn(spec, acpTurnOutcome(ctx, err))
+	e.recordTurn(ctx, spec, acpTurnOutcome(ctx, err))
 	if err != nil {
 		return "", fmt.Errorf("acp executor: %w", err)
 	}

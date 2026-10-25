@@ -17,12 +17,14 @@ import (
 
 // --- stubs (mirror the existing daemon wiring-test style) ---
 
-// stubACPLoop records RunOnce calls and returns a canned reply.
+// stubACPLoop records RunOnce calls (including the ctx it received, so
+// D6 ctx-stamping is assertable) and returns a canned reply.
 type stubACPLoop struct {
-	mu    sync.Mutex
-	calls []stubLoopCall
-	reply string
-	err   error
+	mu      sync.Mutex
+	calls   []stubLoopCall
+	reply   string
+	err     error
+	gotCtxs []context.Context
 }
 
 type stubLoopCall struct {
@@ -30,10 +32,11 @@ type stubLoopCall struct {
 	conversationID string
 }
 
-func (s *stubACPLoop) RunOnce(_ context.Context, userMessage, conversationID string) (string, error) {
+func (s *stubACPLoop) RunOnce(ctx context.Context, userMessage, conversationID string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, stubLoopCall{userMessage: userMessage, conversationID: conversationID})
+	s.gotCtxs = append(s.gotCtxs, ctx)
 	if s.err != nil {
 		return "", s.err
 	}
@@ -47,6 +50,42 @@ func (s *stubACPLoop) lastCall() (stubLoopCall, bool) {
 		return stubLoopCall{}, false
 	}
 	return s.calls[len(s.calls)-1], true
+}
+
+func (s *stubACPLoop) lastCtx() (context.Context, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.gotCtxs) == 0 {
+		return nil, false
+	}
+	return s.gotCtxs[len(s.gotCtxs)-1], true
+}
+
+// stubTurnAudit records AuditFinding writes for the D6 attribution test.
+type stubTurnAudit struct {
+	mu       sync.Mutex
+	findings []employee.AuditFinding
+	err      error
+}
+
+func (s *stubTurnAudit) Create(_ context.Context, f employee.AuditFinding) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
+	}
+	s.findings = append(s.findings, f)
+	return nil
+}
+
+func (s *stubTurnAudit) only(t *testing.T) employee.AuditFinding {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.findings) != 1 {
+		t.Fatalf("audit findings = %d, want 1 (%+v)", len(s.findings), s.findings)
+	}
+	return s.findings[0]
 }
 
 // stubSpecSource is an acpSpecSource over a plain map.
@@ -76,7 +115,7 @@ func acpSpec(mode string) *agent.AgentSpec {
 	return &agent.AgentSpec{
 		ID:       "bob",
 		Executor: "acp",
-		ACP:      &agent.ACPSpec{Agent: "hermes", PermissionMode: mode},
+		ACP:      &agent.ACPSpec{Agent: "hermes", Persona: "borg", PermissionMode: mode},
 	}
 }
 
@@ -205,7 +244,7 @@ func TestEmployeeBotExecutor_NonACPEmployeeUntouched(t *testing.T) {
 	// A BROKEN registry would be irrelevant: the empty-ExecutorAgent path
 	// must not read it at all (byte-identical path for non-acp employees).
 	src := stubSpecSource{specs: map[string]*agent.AgentSpec{}}
-	got, refuse := employeeBotExecutor(emp, sentinel, src, "permissive", resolve, logger)
+	got, refuse := employeeBotExecutor(emp, sentinel, src, "permissive", resolve, nil, logger)
 	if refuse {
 		t.Fatal("non-acp employee must never be refused")
 	}
@@ -227,7 +266,7 @@ func TestEmployeeBotExecutor_D1Validation(t *testing.T) {
 		var buf bytes.Buffer
 		logger := bufLogger(t, &buf)
 		src := stubSpecSource{specs: map[string]*agent.AgentSpec{}}
-		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, src, "decision", dummyResolver(), logger)
+		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, src, "decision", dummyResolver(), nil, logger)
 		if !refuse || got != nil {
 			t.Fatalf("unknown agent must refuse: got=%v refuse=%v", got, refuse)
 		}
@@ -242,7 +281,7 @@ func TestEmployeeBotExecutor_D1Validation(t *testing.T) {
 		src := stubSpecSource{specs: map[string]*agent.AgentSpec{
 			"bob": {ID: "bob", Executor: "local"},
 		}}
-		_, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, src, "decision", dummyResolver(), logger)
+		_, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, src, "decision", dummyResolver(), nil, logger)
 		if !refuse {
 			t.Fatal("non-acp target must refuse")
 		}
@@ -258,7 +297,7 @@ func TestEmployeeBotExecutor_D1Validation(t *testing.T) {
 		src := stubSpecSource{specs: map[string]*agent.AgentSpec{
 			"bob": {ID: "bob", Executor: "acp"},
 		}}
-		_, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, src, "decision", dummyResolver(), logger)
+		_, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, src, "decision", dummyResolver(), nil, logger)
 		if !refuse {
 			t.Fatal("executor: acp with nil acp block must refuse")
 		}
@@ -267,7 +306,7 @@ func TestEmployeeBotExecutor_D1Validation(t *testing.T) {
 	t.Run("nil registry refused", func(t *testing.T) {
 		var buf bytes.Buffer
 		logger := bufLogger(t, &buf)
-		_, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, nil, "decision", dummyResolver(), logger)
+		_, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, nil, "decision", dummyResolver(), nil, logger)
 		if !refuse {
 			t.Fatal("executor_agent with no registry must refuse (cannot validate)")
 		}
@@ -282,7 +321,7 @@ func TestEmployeeBotExecutor_D3TierPermissionGuard(t *testing.T) {
 		var buf bytes.Buffer
 		logger := bufLogger(t, &buf)
 		s := stubSpecSource{specs: map[string]*agent.AgentSpec{"bob": acpSpec("permissive")}}
-		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier3Autonomous), nil, s, "human", dummyResolver(), logger)
+		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier3Autonomous), nil, s, "human", dummyResolver(), nil, logger)
 		if !refuse || got != nil {
 			t.Fatalf("tier-3 permissive must refuse: got=%v refuse=%v", got, refuse)
 		}
@@ -297,7 +336,7 @@ func TestEmployeeBotExecutor_D3TierPermissionGuard(t *testing.T) {
 	t.Run("tier3 + global permissive (agent empty) refused", func(t *testing.T) {
 		var buf bytes.Buffer
 		logger := bufLogger(t, &buf)
-		_, refuse := employeeBotExecutor(acpEmployee(employee.Tier3Autonomous), nil, src, "permissive", dummyResolver(), logger)
+		_, refuse := employeeBotExecutor(acpEmployee(employee.Tier3Autonomous), nil, src, "permissive", dummyResolver(), nil, logger)
 		if !refuse {
 			t.Fatal("effective mode falls back to global permissive — must refuse")
 		}
@@ -306,7 +345,7 @@ func TestEmployeeBotExecutor_D3TierPermissionGuard(t *testing.T) {
 	t.Run("tier3 + human mode passes", func(t *testing.T) {
 		var buf bytes.Buffer
 		logger := bufLogger(t, &buf)
-		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier3Autonomous), nil, src, "human", dummyResolver(), logger)
+		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier3Autonomous), nil, src, "human", dummyResolver(), nil, logger)
 		if refuse || got == nil {
 			t.Fatalf("tier-3 human must wire: got=%v refuse=%v", got, refuse)
 		}
@@ -315,7 +354,7 @@ func TestEmployeeBotExecutor_D3TierPermissionGuard(t *testing.T) {
 	t.Run("tier2 + permissive warns and wires", func(t *testing.T) {
 		var buf bytes.Buffer
 		logger := bufLogger(t, &buf)
-		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, src, "permissive", dummyResolver(), logger)
+		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, src, "permissive", dummyResolver(), nil, logger)
 		if refuse || got == nil {
 			t.Fatalf("tier-2 permissive must warn-and-wire: got=%v refuse=%v", got, refuse)
 		}
@@ -328,7 +367,7 @@ func TestEmployeeBotExecutor_D3TierPermissionGuard(t *testing.T) {
 	t.Run("tier1 + permissive warns and wires", func(t *testing.T) {
 		var buf bytes.Buffer
 		logger := bufLogger(t, &buf)
-		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier1Reactive), nil, src, "permissive", dummyResolver(), logger)
+		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier1Reactive), nil, src, "permissive", dummyResolver(), nil, logger)
 		if refuse || got == nil {
 			t.Fatalf("tier-1 permissive must warn-and-wire: got=%v refuse=%v", got, refuse)
 		}
@@ -347,7 +386,7 @@ func TestEmployeeBotExecutor_D4CostWarnings(t *testing.T) {
 		logger := bufLogger(t, &buf)
 		emp := acpEmployee(employee.Tier2Propose)
 		emp.Constraints.DailyBudgetCents = 50
-		got, refuse := employeeBotExecutor(emp, nil, src, "", dummyResolver(), logger)
+		got, refuse := employeeBotExecutor(emp, nil, src, "", dummyResolver(), nil, logger)
 		if refuse || got == nil {
 			t.Fatalf("budget warning must not refuse: got=%v refuse=%v", got, refuse)
 		}
@@ -362,7 +401,7 @@ func TestEmployeeBotExecutor_D4CostWarnings(t *testing.T) {
 		logger := bufLogger(t, &buf)
 		emp := acpEmployee(employee.Tier2Propose)
 		emp.Constitution.Constraints.DailyBudgetCents = 25
-		if _, refuse := employeeBotExecutor(emp, nil, src, "", dummyResolver(), logger); refuse {
+		if _, refuse := employeeBotExecutor(emp, nil, src, "", dummyResolver(), nil, logger); refuse {
 			t.Fatal("must not refuse")
 		} else if !strings.Contains(buf.String(), "daily_budget_cents") {
 			t.Errorf("expected constitution budget WARN, got: %s", buf.String())
@@ -377,7 +416,7 @@ func TestEmployeeBotExecutor_D4CostWarnings(t *testing.T) {
 			{On: employee.EscalateOnCost, Match: "50", Reason: "budget"},
 			{On: employee.EscalateOnTool, Match: "shell_execute", Reason: "signoff"},
 		}
-		if _, refuse := employeeBotExecutor(emp, nil, src, "", dummyResolver(), logger); refuse {
+		if _, refuse := employeeBotExecutor(emp, nil, src, "", dummyResolver(), nil, logger); refuse {
 			t.Fatal("must not refuse")
 		}
 		msg := buf.String()
@@ -389,7 +428,7 @@ func TestEmployeeBotExecutor_D4CostWarnings(t *testing.T) {
 	t.Run("healthy acp employee logs nothing", func(t *testing.T) {
 		var buf bytes.Buffer
 		logger := bufLogger(t, &buf)
-		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier3Autonomous), nil, src, "decision", dummyResolver(), logger)
+		got, refuse := employeeBotExecutor(acpEmployee(employee.Tier3Autonomous), nil, src, "decision", dummyResolver(), nil, logger)
 		if refuse || got == nil {
 			t.Fatalf("tier-3 decision acp employee must wire: got=%v refuse=%v", got, refuse)
 		}
@@ -418,7 +457,7 @@ func TestEmployeeBotExecutor_ACPEmployeeGetsAdapter(t *testing.T) {
 	}
 	defaultEx := &sentinelExecutor{}
 	got, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), defaultEx, src, "", resolve,
-		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+		nil, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
 	if refuse {
 		t.Fatal("healthy reference must not refuse")
 	}
@@ -431,5 +470,148 @@ func TestEmployeeBotExecutor_ACPEmployeeGetsAdapter(t *testing.T) {
 	}
 	if defaultEx.called != 0 {
 		t.Error("default executor must not be invoked for an acp employee")
+	}
+}
+
+// --- D6: observability attribution (ctx source stamp + audit finding) ---
+
+// TestACPEmployeeExecutorAdapter_StampsTurnSourceCtx proves the adapter
+// side of design (b): ExecuteBot stamps the caller ctx with
+// source=employee + employee_id before RunOnce, so the executor's single
+// acp.persona.turns emission site can tag the datapoint. The stub loop
+// reads the stamp back through the agent-package helper (same ctx
+// round-trip the real loop performs down to ACPExecutor.Run).
+func TestACPEmployeeExecutorAdapter_StampsTurnSourceCtx(t *testing.T) {
+	t.Parallel()
+	loop := &stubACPLoop{reply: "done"}
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	a := &acpEmployeeExecutorAdapter{
+		employeeID: "alice", agentID: "bob", logger: logger,
+		resolveLoop: func(string) (acpTurnRunner, error) { return loop, nil },
+	}
+	if _, _, err := a.ExecuteBot(context.Background(), "", "x"); err != nil {
+		t.Fatalf("ExecuteBot: %v", err)
+	}
+	ctx, ok := loop.lastCtx()
+	if !ok {
+		t.Fatal("loop never called")
+	}
+	kind, empID, stamped := agent.ACPTurnSourceFromContext(ctx)
+	if !stamped || kind != agent.ACPTurnSourceEmployee || empID != "alice" {
+		t.Errorf("ctx source = (%q, %q, %v), want (employee, alice, true)", kind, empID, stamped)
+	}
+}
+
+// TestACPEmployeeExecutorAdapter_AuditAttribution proves the D6 audit
+// finding: one row per employee-driven acp turn (success AND failure
+// outcomes), naming the serving registry agent, harness, and persona via
+// the AuditFinding precedent fields.
+func TestACPEmployeeExecutorAdapter_AuditAttribution(t *testing.T) {
+	t.Parallel()
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	audit := &stubTurnAudit{}
+	a := &acpEmployeeExecutorAdapter{
+		employeeID: "alice", agentID: "bob",
+		harnessAgent: "hermes", persona: "borg",
+		audit: audit, logger: logger,
+		resolveLoop: func(string) (acpTurnRunner, error) { return &stubACPLoop{reply: "ok"}, nil },
+	}
+	if _, _, err := a.ExecuteBot(context.Background(), "", "work"); err != nil {
+		t.Fatalf("ExecuteBot: %v", err)
+	}
+	f := audit.only(t)
+	if f.EmployeeID != "alice" {
+		t.Errorf("EmployeeID = %q, want alice", f.EmployeeID)
+	}
+	if f.ViolatedRule != "acp_turn_attribution" {
+		t.Errorf("ViolatedRule = %q, want acp_turn_attribution", f.ViolatedRule)
+	}
+	if f.Severity != employee.SeverityInfo || f.Checkpoint != employee.CheckpointPostTurn {
+		t.Errorf("Severity/Checkpoint = %v/%v, want info/post_turn", f.Severity, f.Checkpoint)
+	}
+	if f.TurnID == "" {
+		t.Error("TurnID must carry the bot-exec conversation id")
+	}
+	for _, want := range []string{"bob", "hermes", "borg", "outcome=success"} {
+		if !strings.Contains(f.Evidence, want) {
+			t.Errorf("Evidence %q missing %q", f.Evidence, want)
+		}
+	}
+
+	// failure path: a failed turn still gets exactly one attribution row
+	// naming the outcome, and the error still propagates.
+	audit2 := &stubTurnAudit{}
+	a2 := &acpEmployeeExecutorAdapter{
+		employeeID: "alice", agentID: "bob", harnessAgent: "hermes", persona: "borg",
+		audit: audit2, logger: logger,
+		resolveLoop: func(string) (acpTurnRunner, error) {
+			return &stubACPLoop{err: errors.New("harness down")}, nil
+		},
+	}
+	if _, _, err := a2.ExecuteBot(context.Background(), "", "work"); err == nil {
+		t.Fatal("turn error must propagate")
+	}
+	ff := audit2.only(t)
+	if !strings.Contains(ff.Evidence, "outcome=error") {
+		t.Errorf("failed-turn Evidence %q missing outcome=error", ff.Evidence)
+	}
+}
+
+// TestACPEmployeeExecutorAdapter_AuditWriteFailureNonFatal pins the
+// posture: an audit write error NEVER fails a completed turn (the
+// escalation-audit precedent in goal_loop.go).
+func TestACPEmployeeExecutorAdapter_AuditWriteFailureNonFatal(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	logger := bufLogger(t, &buf)
+	a := &acpEmployeeExecutorAdapter{
+		employeeID: "alice", agentID: "bob", harnessAgent: "hermes", persona: "borg",
+		audit:  &stubTurnAudit{err: errors.New("db locked")},
+		logger: logger,
+		resolveLoop: func(string) (acpTurnRunner, error) {
+			return &stubACPLoop{reply: "fine"}, nil
+		},
+	}
+	out, tokens, err := a.ExecuteBot(context.Background(), "", "work")
+	if err != nil || out != "fine" || tokens != 0 {
+		t.Fatalf("audit write failure must not fail the turn: got (%q, %d, %v)", out, tokens, err)
+	}
+	if !strings.Contains(buf.String(), "audit attribution write failed") {
+		t.Errorf("expected WARN for the swallowed audit write, got: %s", buf.String())
+	}
+}
+
+// TestEmployeeBotExecutor_WiresAuditRecorder proves the wiring seam: the
+// audit recorder passed to employeeBotExecutor lands on the adapter and
+// fires per turn; nil keeps attribution dark without touching routing.
+func TestEmployeeBotExecutor_WiresAuditRecorder(t *testing.T) {
+	t.Parallel()
+	src := stubSpecSource{specs: map[string]*agent.AgentSpec{"bob": acpSpec("human")}}
+	audit := &stubTurnAudit{}
+	defaultLogger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	got, refuse := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, src, "",
+		dummyResolver(), audit, defaultLogger)
+	if refuse || got == nil {
+		t.Fatalf("healthy wiring: got=%v refuse=%v", got, refuse)
+	}
+	if _, _, err := got.ExecuteBot(context.Background(), "sys", "turn"); err != nil {
+		t.Fatalf("ExecuteBot: %v", err)
+	}
+	f := audit.only(t)
+	// harness/persona come from the referenced spec's acp block.
+	if !strings.Contains(f.Evidence, `executor_agent "bob"`) ||
+		!strings.Contains(f.Evidence, `harness "hermes"`) ||
+		!strings.Contains(f.Evidence, `persona "borg"`) {
+		t.Errorf("finding evidence %q must name agent + harness + persona", f.Evidence)
+	}
+
+	// nil audit recorder: attribution dark, turn path byte-identical.
+	got2, refuse2 := employeeBotExecutor(acpEmployee(employee.Tier2Propose), nil, src, "",
+		dummyResolver(), nil, defaultLogger)
+	if refuse2 || got2 == nil {
+		t.Fatalf("nil audit must still wire: refuse=%v", refuse2)
+	}
+	if out, _, err := got2.ExecuteBot(context.Background(), "sys", "turn"); err != nil || out != "ok" {
+		t.Fatalf("ExecuteBot with dark attribution = (%q, %v), want (ok, nil)", out, err)
 	}
 }

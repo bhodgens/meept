@@ -420,7 +420,8 @@ func (r *fakeTurnMetricRecorder) only(t *testing.T) recordedMetric {
 }
 
 // TestACPTurnMetrics_HappyPath proves one success datapoint per completed
-// turn with exact tags {agent, persona, outcome}.
+// turn with exact tags {agent, persona, outcome, source}; the chat lane
+// (no ctx source stamped) tags source=chat and carries no employee_id.
 func TestACPTurnMetrics_HappyPath(t *testing.T) {
 	provider := &fakeACPSessionProvider{sess: &fakeACPSession{reply: "all clear"}}
 	exec := newACPExecutorFromProvider(provider)
@@ -431,7 +432,7 @@ func TestACPTurnMetrics_HappyPath(t *testing.T) {
 		t.Fatalf("Run error = %v, want nil", err)
 	}
 	m := rec.only(t)
-	wantTags := map[string]string{"agent": "hermes", "persona": "bob", "outcome": "success"}
+	wantTags := map[string]string{"agent": "hermes", "persona": "bob", "outcome": "success", "source": "chat"}
 	if len(m.tags) != len(wantTags) {
 		t.Fatalf("tags = %v, want exactly %v", m.tags, wantTags)
 	}
@@ -439,6 +440,54 @@ func TestACPTurnMetrics_HappyPath(t *testing.T) {
 		if m.tags[k] != v {
 			t.Errorf("tag %q = %q, want %q", k, m.tags[k], v)
 		}
+	}
+}
+
+// TestACPTurnMetrics_EmployeeSourceTagged proves the D6 ctx-scoped source
+// tag: an employee-stamped ctx yields source=employee + employee_id on
+// the SAME single emission site (one datapoint, no adapter-side twin).
+func TestACPTurnMetrics_EmployeeSourceTagged(t *testing.T) {
+	provider := &fakeACPSessionProvider{sess: &fakeACPSession{reply: "done"}}
+	exec := newACPExecutorFromProvider(provider)
+	rec := &fakeTurnMetricRecorder{}
+	exec.SetTurnMetricRecorder(rec)
+
+	ctx := WithACPTurnSource(context.Background(), ACPTurnSourceEmployee, "alice")
+	if _, err := exec.Run(ctx, acpTestSpec(), "/w", "check", nil); err != nil {
+		t.Fatalf("Run error = %v, want nil", err)
+	}
+	m := rec.only(t)
+	wantTags := map[string]string{"agent": "hermes", "persona": "bob", "outcome": "success", "source": "employee", "employee_id": "alice"}
+	if len(m.tags) != len(wantTags) {
+		t.Fatalf("tags = %v, want exactly %v", m.tags, wantTags)
+	}
+	for k, v := range wantTags {
+		if m.tags[k] != v {
+			t.Errorf("tag %q = %q, want %q", k, m.tags[k], v)
+		}
+	}
+}
+
+// TestACPTurnSourceContext pins the ctx helper contract: empty kind is a
+// no-op stamp (chat default, source:"" can never leak), a stamped value
+// round-trips, a bare ctx reports ok=false, and a nil ctx never panics.
+func TestACPTurnSourceContext(t *testing.T) {
+	// empty kind must never stamp: the reader stays at the chat default.
+	blanked := WithACPTurnSource(context.Background(), "", "alice")
+	if kind, _, ok := ACPTurnSourceFromContext(blanked); ok {
+		t.Errorf("empty kind must not stamp, got kind=%q", kind)
+	}
+	ctx := WithACPTurnSource(context.Background(), ACPTurnSourceEmployee, "alice")
+	kind, empID, ok := ACPTurnSourceFromContext(ctx)
+	if !ok || kind != "employee" || empID != "alice" {
+		t.Errorf("read = (%q, %q, %v), want (employee, alice, true)", kind, empID, ok)
+	}
+	if _, _, ok := ACPTurnSourceFromContext(context.Background()); ok {
+		t.Error("bare ctx must report ok=false (chat lane)")
+	}
+	//nolint:staticcheck // nil ctx must not panic (defensive reader)
+	if _, _, ok := ACPTurnSourceFromContext(nil); ok {
+		t.Error("nil ctx must report ok=false")
 	}
 }
 
@@ -613,6 +662,37 @@ func TestACPTurnMetrics_LoopE2E(t *testing.T) {
 			t.Errorf("outcome = %q, want error", m.tags["outcome"])
 		}
 	})
+}
+
+// TestACPTurnMetrics_CtxPropagationThroughLoop is the D6 design-(b)
+// regression: RunOnce -> RunOnceWithParts -> loopCtx (WithCancel derive)
+// -> runTurnProducer -> runACPTurn -> ACPExecutor.Run MUST thread the
+// caller ctx's source stamp down to the executor's single emission
+// point. If any hop swaps in a fresh context, the datapoint silently
+// reverts to source=chat and employee attribution disappears.
+func TestACPTurnMetrics_CtxPropagationThroughLoop(t *testing.T) {
+	provider := &fakeACPSessionProvider{sess: &fakeACPSession{reply: "employee done"}}
+	exec := newACPExecutorFromProvider(provider)
+	rec := &fakeTurnMetricRecorder{}
+	exec.SetTurnMetricRecorder(rec)
+	chatter := newMockChatter(&llm.Response{Content: "never"})
+	loop := NewAgentLoop("acp-ctx-prop", "/tmp",
+		WithLLMChatter(chatter),
+		WithAgentSpec(acpTestSpec()),
+		WithACPExecutor(exec),
+		WithLoopLogger(silentLogger()),
+	)
+	ctx := WithACPTurnSource(context.Background(), ACPTurnSourceEmployee, "alice")
+	if _, err := loop.RunOnce(ctx, "have bob do the employee thing", "conv-acp-ctx-prop"); err != nil {
+		t.Fatalf("RunOnce error = %v", err)
+	}
+	m := rec.only(t)
+	if m.tags["source"] != "employee" {
+		t.Errorf("source tag = %q, want employee (ctx stamp lost somewhere between RunOnce and ACPExecutor.Run)", m.tags["source"])
+	}
+	if m.tags["employee_id"] != "alice" {
+		t.Errorf("employee_id tag = %q, want alice", m.tags["employee_id"])
+	}
 }
 
 // TestSetTurnMetricRecorder_NilSafe pins the repo setter rule: nil
