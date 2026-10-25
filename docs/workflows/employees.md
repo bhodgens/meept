@@ -114,6 +114,30 @@ The loop is tier-aware. Everything else in the system (storage, triggering, sign
 
 Spec reference: `docs/superpowers/specs/2026-06-23-ai-employee-design.md` lines 298–300.
 
+#### ACP-backed employees (`executor_agent`)
+
+An employee definition may carry `executor_agent: <agent-id>` naming an
+**agent definition** (config/agents or ~/.meept/agents) whose `executor: acp`
+block binds an external ACP harness. The employee's GoalLoop EXECUTE turns
+then route through that agent's loop (shared reply-guard/output-filter lane),
+not the local LLM executor — "bob the autonomous employee"
+(docs/workflows/acp-employees-phase3.md, decisions D1-A/D2-B).
+
+- The reference is validated at daemon wiring time: the target must exist and
+  be acp-backed; a broken reference logs an ERROR and the employee's goal loop
+  is **not registered** (the employee is inert until fixed; the daemon keeps
+  booting).
+- **Tier guard (D3-B):** a tier-3 autonomous acp employee with an *effective*
+  permission mode of `permissive` (agent `acp.permission_mode` override, else
+  global `[acp] permission_mode`) is refused at wiring — once the prompt is
+  sent, only the permission lane binds, and permissive disables it. Tier-1/2
+  with permissive get a warning only.
+- **Cost caveat (D4-A):** the acp wire carries no token usage today, so
+  `daily_budget_cents > 0` and `on: "cost"` escalation triggers cannot bind
+  remote turns. At wiring they log a WARN; enforce intent with
+  `max_invocations_per_day` and the permission lane instead.
+- `executor_agent` display in the TUI/GUI roster is a follow-up wave.
+
 ### Quality gate (completion gating)
 
 The quality gate is a **completion** check — orthogonal to the Constitution

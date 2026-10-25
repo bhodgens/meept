@@ -182,8 +182,10 @@ lowercase, following the Verification section pattern.
   persona-capable fake).
 - Phase 3 (compose): employee layer references ACP-backed agents as
   GoalLoop executors (WithExecutor seam already exists) — autonomous
-  hermes-persona employees. Deferred; needs its own design pass.
-  → Design pass: [acp-employees-phase3.md](acp-employees-phase3.md) (dimensions D1–D6 open for decision).
+  hermes-persona employees. Landed (core D1–D4): `executor_agent` on the
+  employee definition routes EXECUTE turns through the referenced acp agent's
+  loop; tier-3 × permissive is refused at wiring (D3-B), cost caps warn (D4-A).
+  → Design pass: [acp-employees-phase3.md](acp-employees-phase3.md) (dimensions D1–D6 decided).
 
 ## Chat-surface harness attribution (TUI/GUI parity)
 

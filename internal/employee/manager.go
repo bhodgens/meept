@@ -67,16 +67,21 @@ var ErrFrozenField = errors.New("employee: constitution field is frozen")
 // The Constitution map is the raw constitution as submitted by the caller;
 // the Manager validates it via Constitution.Validate before persisting.
 type HireRequest struct {
-	ID           string
-	Name         string
-	Description  string
-	Prompt       string
-	Model        string
-	Triggers     []bot.BotTrigger
-	MemoryScope  bot.MemoryScope
-	Tools        []string
-	Enabled      bool
-	Constitution map[string]any
+	ID          string
+	Name        string
+	Description string
+	Prompt      string
+	Model       string
+	Triggers    []bot.BotTrigger
+	MemoryScope bot.MemoryScope
+	Tools       []string
+	Enabled     bool
+	// ExecutorAgent names an acp-backed registry agent definition through
+	// which this employee's GoalLoop EXECUTE turns route (acp-employees
+	// phase 3, D1-A). Validated at daemon wiring time — see
+	// bot.BotDefinition.ExecutorAgent.
+	ExecutorAgent string
+	Constitution  map[string]any
 	// Goals are created for the new employee after the employee row is
 	// persisted (leaf 01). Each spec's EmployeeID is forced to req.ID.
 	// Any goal failure is joined into the returned error (errors.Join).
@@ -1184,15 +1189,16 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 	// runtime/trigger/tool fields; the constitution is persisted
 	// separately by the ConstitutionStore.
 	def := bot.BotDefinition{
-		ID:          req.ID,
-		Name:        req.Name,
-		Description: req.Description,
-		Prompt:      req.Prompt,
-		Model:       req.Model,
-		Triggers:    req.Triggers,
-		MemoryScope: req.MemoryScope,
-		Tools:       req.Tools,
-		Enabled:     req.Enabled,
+		ID:            req.ID,
+		Name:          req.Name,
+		Description:   req.Description,
+		Prompt:        req.Prompt,
+		Model:         req.Model,
+		Triggers:      req.Triggers,
+		MemoryScope:   req.MemoryScope,
+		Tools:         req.Tools,
+		Enabled:       req.Enabled,
+		ExecutorAgent: req.ExecutorAgent,
 	}
 	if err := m.botManager.CreateBot(ctx, def); err != nil {
 		return nil, fmt.Errorf("hire: create bot: %w", err)

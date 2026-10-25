@@ -45,6 +45,16 @@ func (e *Employee) Validate() error {
 	if err := e.BotDefinition.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("bot definition: %w", err))
 	}
+	// D1 shape check: an executor_agent reference must not carry
+	// surrounding whitespace (a whitespace-only value is a typo, not an
+	// absent reference). Target existence and acp-backing cannot be
+	// checked here — the agent registry is not reachable from the
+	// employee package — so the daemon wiring
+	// (selectEmployeeExecutor) validates the full reference at
+	// loop-construction time (docs/workflows/acp-employees-phase3.md).
+	if trimmed := strings.TrimSpace(e.ExecutorAgent); trimmed != e.ExecutorAgent {
+		errs = append(errs, fmt.Errorf("executor_agent %q has surrounding whitespace", e.ExecutorAgent))
+	}
 	if err := e.Constitution.Validate(e.ID); err != nil {
 		errs = append(errs, fmt.Errorf("constitution: %w", err))
 	}

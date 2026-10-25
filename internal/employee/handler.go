@@ -187,16 +187,19 @@ type createRequest struct {
 	// Employee is the full employee definition (BotDefinition + Constitution).
 	// We accept the raw bot definition shape plus a constitution field; the
 	// manager.Hire validates the constitution.
-	ID           string           `json:"id"`
-	Name         string           `json:"name"`
-	Description  string           `json:"description,omitempty"`
-	Prompt       string           `json:"prompt"`
-	Model        string           `json:"model,omitempty"`
-	Triggers     []bot.BotTrigger `json:"triggers,omitempty"`
-	MemoryScope  bot.MemoryScope  `json:"memory_scope,omitempty"`
-	Tools        []string         `json:"tools,omitempty"`
-	Enabled      bool             `json:"enabled"`
-	Constitution map[string]any   `json:"constitution"`
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
+	Prompt      string           `json:"prompt"`
+	Model       string           `json:"model,omitempty"`
+	Triggers    []bot.BotTrigger `json:"triggers,omitempty"`
+	MemoryScope bot.MemoryScope  `json:"memory_scope,omitempty"`
+	Tools       []string         `json:"tools,omitempty"`
+	Enabled     bool             `json:"enabled"`
+	// ExecutorAgent names an acp-backed registry agent through which the
+	// employee's GoalLoop EXECUTE turns route (acp-employees phase 3).
+	ExecutorAgent string         `json:"executor_agent,omitempty"`
+	Constitution  map[string]any `json:"constitution"`
 	// Goals are created for the new employee (leaf 01, contract C4).
 	Goals []GoalSpec `json:"goals,omitempty"`
 	// RawDefinition preserves unknown fields for forward compatibility.
@@ -322,16 +325,19 @@ func (h *RPCHandler) handleCreate(ctx context.Context, raw json.RawMessage) (any
 	// The manager.Hire validates the constitution (spec: agents.create
 	// validates the constitution, delegates to Manager.Hire).
 	employee, err := h.manager.Hire(ctx, HireRequest{
-		ID:           req.ID,
-		Name:         req.Name,
-		Description:  req.Description,
-		Prompt:       req.Prompt,
-		Model:        req.Model,
-		Triggers:     req.Triggers,
-		MemoryScope:  req.MemoryScope,
-		Tools:        req.Tools,
-		Enabled:      req.Enabled,
-		Constitution: req.Constitution,
+		ID:          req.ID,
+		Name:        req.Name,
+		Description: req.Description,
+		Prompt:      req.Prompt,
+		Model:       req.Model,
+		Triggers:    req.Triggers,
+		MemoryScope: req.MemoryScope,
+		Tools:       req.Tools,
+		Enabled:     req.Enabled,
+		// Forward the acp executor reference (phase 3, D1-A); the daemon
+		// wiring validates the target against the agent registry.
+		ExecutorAgent: req.ExecutorAgent,
+		Constitution:  req.Constitution,
 		// Leaf 05: forward declared goals (createRequest.Goals, leaf 01)
 		// into the hire flow so an employee definition's `goals:` array
 		// creates its GoalSpecs — not just the direct manager.Hire path.

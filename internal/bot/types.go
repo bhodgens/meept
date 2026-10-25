@@ -71,8 +71,17 @@ type BotDefinition struct {
 	Tools       []string       `json:"tools"`
 	Constraints BotConstraints `json:"constraints"`
 	Enabled     bool           `json:"enabled"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	// ExecutorAgent names a registry agent definition whose executor is
+	// "acp" (docs/workflows/acp-employees-phase3.md D1-A). When set, the
+	// employee's GoalLoop EXECUTE turn routes through that agent's loop
+	// instead of the default local executor. The reference is validated
+	// at daemon wiring time (the agent registry is only in scope there;
+	// see selectEmployeeExecutor in internal/daemon). Empty = no ACP
+	// executor; persistence is the JSON definition blob so the field
+	// round-trips with no schema change.
+	ExecutorAgent string    `json:"executor_agent,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func (d *BotDefinition) Validate() error {

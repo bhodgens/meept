@@ -5227,6 +5227,28 @@ func (c *Components) Start(ctx context.Context) error {
 					if !emp.HasConstitution() {
 						continue
 					}
+					// acp-employees phase 3 (D1-D4): an employee with
+					// executor_agent routes its EXECUTE turns through the
+					// referenced acp-backed agent's loop; the helper also
+					// enforces the tier-3×permissive guard and the cost
+					// warnings. Empty executor_agent keeps today's executor
+					// byte-identical. refuse=true disables this employee's
+					// loop (logged ERROR inside); the daemon keeps booting,
+					// matching the HasConstitution skip above. Typed-nil
+					// guard: a nil *AgentRegistry must not be boxed into the
+					// acpSpecSource interface (daemon AGENTS.md rule).
+					var specSrc acpSpecSource
+					if c.AgentRegistry != nil {
+						specSrc = c.AgentRegistry
+					}
+					globalMode := ""
+					if c.Config != nil {
+						globalMode = c.Config.ACP.PermissionMode
+					}
+					empExecutor, refuse := employeeBotExecutor(emp, executor, specSrc, globalMode, acpEmployeeLoopResolver(c.AgentRegistry), c.Logger)
+					if refuse {
+						continue
+					}
 					loop := employee.NewGoalLoop(
 						emp.ID, &emp.Constitution, goalStore,
 						c.Logger.With("component", "goal-loop", "employee_id", emp.ID),
@@ -5250,8 +5272,8 @@ func (c *Components) Start(ctx context.Context) error {
 							loop = loop.WithGateWorkdir(workdir)
 						}
 					}
-					if executor != nil {
-						loop = loop.WithExecutor(executor)
+					if empExecutor != nil {
+						loop = loop.WithExecutor(empExecutor)
 					}
 					// Leaf 02 (tier-3 plan): tier-3 autonomous employees get the
 					// ShouldEscalate gate so constitution-matching candidates are
