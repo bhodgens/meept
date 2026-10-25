@@ -65,7 +65,7 @@ binding and belongs to the agent definition. "Bob the chat slave" and "bob the
 autonomous employee" then share one binding, one persona session
 (acp_executor.go:77–79), one permission lane, one `agents show` section — no
 5-step field-pipeline duplication (acp-employees.md:51–65).
-**Decision: ____**
+**Decision: A (employee gains executor_agent referencing the agent definition)** (owner picks 2026-10-24; parent proceeding with the recommendations)
 
 ### D2 — Executor seam mechanics: what does the injected BotExecutor call?
 
@@ -86,7 +86,7 @@ C is the anti-pattern; A silently drops that whole lane. `ExecuteBot`'s
 `systemPrompt` stays unused-by-design (adapter precedent,
 employee_service_adapter.go:271–272); constitution prompt rides a steer/prefix
 lane or is documented advisory.
-**Decision: ____**
+**Decision: B (route through the referenced agent's loop; shared reply-guard/filter lane)** (owner picks 2026-10-24; parent proceeding with the recommendations)
 
 ### D3 — Tier semantics + escalation gate with a remote executor
 
@@ -108,7 +108,7 @@ are orthogonal controls and both must stay. C fuses two axes that legitimately
 diverge (a Tier2 propose employee can still need `human` mode). What Tier3
 means remotely: meept stops binding once the prompt is sent — only the
 permission lane binds (see Security).
-**Decision: ____**
+**Decision: B (plan gate + permission lane orthogonal; tier-3 acp employee must not ship permissive)** (owner picks 2026-10-24; parent proceeding with the recommendations)
 
 ### D4 — Cost/budget accounting gap
 
@@ -131,7 +131,7 @@ Recommendation: **A now, C in wire-forward code** (read `usage` from the
 prompt response iff present). B's fake precision would silently mis-fire cost
 escalation. Refuse to load (or loudly warn) an acp employee whose constitution
 has `On: "cost"` escalation triggers or `daily_budget_cents > 0`.
-**Decision: ____**
+**Decision: A now + C wire-forward (usage surfaced iff a future harness emits it); warn/refuse cost-bound acp employees** (owner picks 2026-10-24; parent proceeding with the recommendations)
 
 ### D5 — Steering a running acp employee
 
@@ -153,7 +153,7 @@ not support it today.**
 
 Recommendation: **A** (C explicitly unsafe). Revisit only if ACP gains a
 mid-turn input method.
-**Decision: ____**
+**Decision: A (defer mid-turn steering; steers land between turns)** (owner picks 2026-10-24; parent proceeding with the recommendations)
 
 ### D6 — Observability
 
@@ -172,7 +172,7 @@ them from chat-driven turns.
 Recommendation: **A**. `employee.invocations` (manager.go:1472ff) already
 counts the episode; the persona counter + audit attribution are the missing
 two bits; permission_decision events already exist in the acp lane.
-**Decision: ____**
+**Decision: A (persona counter shipped fe4cdc44; add employee attribution on audit findings)** (owner picks 2026-10-24; parent proceeding with the recommendations)
 
 ## Security
 
