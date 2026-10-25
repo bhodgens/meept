@@ -51,6 +51,115 @@ func TestExpandEnvVarsCycle(t *testing.T) {
 	}
 }
 
+// TestExpandEnvVarsDefaults pins the ${VAR:-default} shell-style default
+// syntax (mirrors the internal/llm/providers.go expander): a set var wins
+// over the default, an unset OR empty var falls back to the default, and a
+// default containing a nested $REF expands via the multi-pass loop.
+func TestExpandEnvVarsDefaults(t *testing.T) {
+	os.Setenv("DEF_SET_VAR", "real")
+	os.Setenv("DEF_EMPTY_VAR", "")
+	os.Setenv("DEF_HOME_BASE", "/home/nested")
+	defer os.Unsetenv("DEF_SET_VAR")
+	defer os.Unsetenv("DEF_EMPTY_VAR")
+	defer os.Unsetenv("DEF_HOME_BASE")
+	os.Unsetenv("DEF_UNSET_VAR")
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"set var wins over default", "${DEF_SET_VAR:-fallback}", "real"},
+		{"unset var uses default", "${DEF_UNSET_VAR:-fallback}", "fallback"},
+		{"empty var uses default", "${DEF_EMPTY_VAR:-fallback}", "fallback"},
+		{
+			"nested ref in default expands via multi-pass loop",
+			"${DEF_UNSET_VAR:-$DEF_HOME_BASE/models}",
+			"/home/nested/models",
+		},
+		{
+			"empty default for unset var",
+			"${DEF_UNSET_VAR:-}",
+			"",
+		},
+		{
+			"default with braces in surrounding text",
+			"prefix/${DEF_UNSET_VAR:-fb}/suffix",
+			"prefix/fb/suffix",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ExpandEnvVars(tt.input)
+			if err != nil {
+				t.Fatalf("ExpandEnvVars(%q) returned error: %v", tt.input, err)
+			}
+			if result != tt.expected {
+				t.Errorf("ExpandEnvVars(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestExpandEnvVarsLegacyBracedPassthrough pins the legacy braced-ANYTHING
+// branch: placeholders like ${MODEL_PATH} and ${session_id} are not valid
+// shell-name-with-default refs, must still match the pattern, go through
+// LookupEnv, and substitute empty when undefined (the runtime MODEL_PATH
+// substitution happens elsewhere, so load-time expansion to "" is the
+// contract here).
+func TestExpandEnvVarsLegacyBracedPassthrough(t *testing.T) {
+	os.Unsetenv("MODEL_PATH")
+	os.Unsetenv("session_id")
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"${MODEL_PATH}", ""},
+		{"${session_id}", ""},
+		{"hdr:${session_id}", "hdr:"},
+		{"${MODEL_PATH}/model.gguf", "/model.gguf"},
+	}
+
+	for _, tt := range tests {
+		result, err := ExpandEnvVars(tt.input)
+		if err != nil {
+			t.Fatalf("ExpandEnvVars(%q) returned error: %v", tt.input, err)
+		}
+		if result != tt.expected {
+			t.Errorf("ExpandEnvVars(%q) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
+// TestExpandEnvVarsPlainDollarUnchanged pins that the plain $VAR form keeps
+// its historical behavior alongside the new default syntax.
+func TestExpandEnvVarsPlainDollarUnchanged(t *testing.T) {
+	os.Setenv("PLAIN_VAR", "plain_value")
+	defer os.Unsetenv("PLAIN_VAR")
+	os.Unsetenv("PLAIN_UNDEFINED")
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"$PLAIN_VAR", "plain_value"},
+		{"$PLAIN_VAR/tail", "plain_value/tail"},
+		{"$PLAIN_UNDEFINED", ""},
+	}
+
+	for _, tt := range tests {
+		result, err := ExpandEnvVars(tt.input)
+		if err != nil {
+			t.Fatalf("ExpandEnvVars(%q) returned error: %v", tt.input, err)
+		}
+		if result != tt.expected {
+			t.Errorf("ExpandEnvVars(%q) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
 func TestEnvVarCycleErrorIs(t *testing.T) {
 	err := EnvVarCycleError{Input: "test"}
 	if !err.Is(err) {

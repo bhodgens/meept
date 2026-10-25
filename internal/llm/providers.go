@@ -31,6 +31,13 @@ type ProviderOptionsConfig struct {
 	BaseURL string `json:"baseURL"`
 	APIKey  string `json:"apiKey"` //nolint:gosec // field name, not a secret
 	Timeout int    `json:"timeout"`
+	// DefaultModel is the optional model id this provider serves by
+	// default. When it names a model present in the provider's Models
+	// map, deterministic model picks (daemon failover registration)
+	// prefer it; otherwise they fall back to the sorted-first model id.
+	// Empty = always sorted-first. Never map-iteration order: Go map
+	// ranging is random, so an unpinned pick is nondeterministic.
+	DefaultModel string `json:"defaultModel,omitempty"`
 	// ToolConstraint declares the grammar-constraint wire mode every model
 	// on this provider supports for tool calls: "llamacpp", "vllm", or
 	// "json_schema". Empty (default) = no constraint support. Per-model
@@ -516,44 +523,59 @@ func expandEnvVars(s string) string {
 		"session_id": true,
 	}
 
-	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
-		m := envVarPattern.FindStringSubmatch(match)
-		var varName, defVal string
-		hasDefault := false
-		switch {
-		case m[1] != "":
-			varName = m[1]
-			hasDefault = m[2] != ""
-			defVal = m[3]
-		case m[4] != "":
-			varName = m[4]
-		case m[5] != "":
-			varName = m[5]
-		}
+	// Iterate up to maxPasses so a ${VAR:-default} whose default itself
+	// contains a nested reference (the documented
+	// MEEPT_MODELS_DIR:-$HOME/.meept/models convention) gets its inner
+	// reference expanded on a later pass. Mirrors internal/config's
+	// ExpandEnvVars loop; a fixed-point check stops early when a pass
+	// changes nothing.
+	const maxPasses = 5
+	result := s
+	for range maxPasses {
+		prev := result
+		result = envVarPattern.ReplaceAllStringFunc(result, func(match string) string {
+			m := envVarPattern.FindStringSubmatch(match)
+			var varName, defVal string
+			hasDefault := false
+			switch {
+			case m[1] != "":
+				varName = m[1]
+				hasDefault = m[2] != ""
+				defVal = m[3]
+			case m[4] != "":
+				varName = m[4]
+			case m[5] != "":
+				varName = m[5]
+			}
 
-		// Skip placeholder variables - they will be expanded later
-		if placeholderVars[varName] {
-			return match
-		}
+			// Skip placeholder variables - they will be expanded later
+			if placeholderVars[varName] {
+				return match
+			}
 
-		var val string
-		if expandEnvScriptResolver != nil {
-			val, _ = expandEnvScriptResolver.Resolve(varName)
-		} else {
-			val, _ = os.LookupEnv(varName)
+			var val string
+			if expandEnvScriptResolver != nil {
+				val, _ = expandEnvScriptResolver.Resolve(varName)
+			} else {
+				val, _ = os.LookupEnv(varName)
+			}
+			if val != "" {
+				return val
+			}
+			// Unset or empty: fall back to ${VAR:-default} when the config
+			// declares one (e.g. MEEPT_MODELS_DIR defaults to the meept-scoped
+			// model store). Plain ${VAR} and $VAR keep the historical behavior:
+			// expand to empty.
+			if hasDefault {
+				return defVal
+			}
+			return ""
+		})
+		if result == prev {
+			break
 		}
-		if val != "" {
-			return val
-		}
-		// Unset or empty: fall back to ${VAR:-default} when the config
-		// declares one (e.g. MEEPT_MODELS_DIR defaults to the meept-scoped
-		// model store). Plain ${VAR} and $VAR keep the historical behavior:
-		// expand to empty.
-		if hasDefault {
-			return defVal
-		}
-		return ""
-	})
+	}
+	return result
 }
 
 // expandEnvScriptResolver is the process-wide env-script resolver used by

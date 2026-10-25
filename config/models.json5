@@ -54,13 +54,13 @@
   // Dedicated model for ambient epistemic extraction + distill
   // summarization. Empty = falls back to the general chat client. Point
   // this at a small, cheap model.
-  // "memory_model": "zai/glm-4.5-air",
+  // "memory_model": "",
 
   // Dedicated model for the strategic planner (issue #53 direction 4):
   // point planning at a stronger model without changing the general chat
   // model. Commented out (disabled) by default = the planner uses its
   // agent default (local 8B) via the usual planner alias chain.
-  // "planner_model": "zai/glm-5.2",
+  // "planner_model": "",
 
   // Image / video generation (same provider/id form as chat models)
   "image_model": "xai-oauth/grok-imagine-image-2.0",
@@ -74,7 +74,6 @@
         "local/lfm-8b-mlx-4bit",      // Alternate: same weights on mlx_lm (86.8% corpus accuracy 2026-09-06); no tool-call extraction
         "local-mlx/lfm-combined-sft", // A/B alternate: SFT specialist (287ms; schedule/chat/coding strong, platform/search/report/review 0%)
         "local/lfm-1.2b-q8",          // Fallback: fast, best-effort
-        "zai/glm-4.5-air",            // Fallback: remote API
         "ollama/llama3.2"             // Fallback: local Ollama
       ],
       "timeout": 10,
@@ -84,7 +83,6 @@
       "models": [
         "local/lfm-1.2b-q8",   // Primary: fast local model
         "local/lfm-8b-mlx-4bit",    // Fallback 1: LFM2.5-8B-A1B MLX 4-bit
-        "zai/glm-4.5-air",     // Fallback 2: remote API
         "ollama/llama3.2"      // Fallback 3: local Ollama
       ],
       "timeout": 15,
@@ -94,28 +92,27 @@
       "models": [
         "local/lfm-1.2b-q8",
         "local/lfm-8b-mlx-4bit",
-        "zai/glm-4.5-air",
         "ollama/llama3.2"
       ],
       "timeout": 15,
       "max_fails": 2
     },
     // coder/planner/analyst (operator decision, 2026-09-26): agnes primary
-    // (agnes-2.5-flash), LOCAL llama.cpp driver as fallback. Deliberately NO
-    // zai/ollama members — the intent is agnes with a local-only fallback
-    // chain, not a remote provider ladder.
+    // (agnes-3.0-flash), LOCAL llama.cpp driver as fallback. Deliberately NO
+    // remote-API/ollama members — the intent is agnes with a local-only
+    // fallback chain, not a remote provider ladder.
     "coder": {
-      "models": ["agnes/agnes-2.5-flash", "local-gguf/lfm-8b-gguf"],
+      "models": ["agnes/agnes-3.0-flash", "local-gguf/lfm-8b-gguf"],
       "timeout": 30,
       "max_fails": 3
     },
     "planner": {
-      "models": ["agnes/agnes-2.5-flash", "local-gguf/lfm-8b-gguf"],
+      "models": ["agnes/agnes-3.0-flash", "local-gguf/lfm-8b-gguf"],
       "timeout": 15,
       "max_fails": 2
     },
     "analyst": {
-      "models": ["agnes/agnes-2.5-flash", "local-gguf/lfm-8b-gguf"],
+      "models": ["agnes/agnes-3.0-flash", "local-gguf/lfm-8b-gguf"],
       "timeout": 20,
       "max_fails": 3
     },
@@ -159,7 +156,7 @@
       },
       "lifecycle": {
         "runtime": "mlx",
-        "model_path": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
+        "model_path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/lfm2.5-1.2b-combined-serialized-sft",
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/mlx-classifier.pid",
@@ -181,8 +178,8 @@
       "models": {
         "lfm-combined-sft": {
           // mlx_lm.server reports the model ID as the path passed via --model.
-          "name": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
-          "path": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
+          "name": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/lfm2.5-1.2b-combined-serialized-sft",
+          "path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/lfm2.5-1.2b-combined-serialized-sft",
           "capabilities": ["completion", "code", "reasoning"],
           "input_cost": 0.0,
           "output_cost": 0.0,
@@ -204,7 +201,7 @@
       },
       "lifecycle": {
         "runtime": "mlx",
-        "model_path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+        "model_path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/mlx-general.pid",
@@ -228,8 +225,8 @@
           // mlx_lm.server reports the model ID as the path passed via --model.
           // The "name" must match this ID so the daemon doesn't try to look
           // up a different model name on HuggingFace.
-          "name": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
-          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+          "name": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+          "path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
           "capabilities": ["completion", "code", "reasoning"],
           "input_cost": 0.0,
           "output_cost": 0.0,
@@ -246,8 +243,8 @@
           "max_concurrency": 2
         },
         "lfm-1.2b-q8": {
-          "name": "/Volumes/LLMs/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
-          "path": "/Volumes/LLMs/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
+          "name": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
+          "path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
           "capabilities": ["completion", "code", "reasoning"],
           "input_cost": 0.0,
           "output_cost": 0.0,
@@ -271,7 +268,7 @@
       },
       "lifecycle": {
         "runtime": "llama-cpp",
-        "model_path": "/Volumes/LLMs/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
+        "model_path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama-extract.pid",
@@ -293,8 +290,8 @@
       "models": {
         "lfm2-extract": {
           // llama-server reports the model ID as the path passed via --model.
-          "name": "/Volumes/LLMs/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
-          "path": "/Volumes/LLMs/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
+          "name": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
+          "path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf",
           "capabilities": ["completion"],
           "input_cost": 0.0,
           "output_cost": 0.0,
@@ -320,11 +317,16 @@
     "local-gguf": {
       "api": "openai",
       "options": {
+        // noAuth: loopback llama.cpp server has no API key. Without this the
+        // daemon's buildProviderConfigs skips the provider entirely and it
+        // never joins the ProviderManager failover pool (2026-10 outage:
+        // cloud quotas 429'd while this healthy local model was unreachable).
+        "noAuth": true,
         "baseURL": "http://127.0.0.1:8080/v1"
       },
       "lifecycle": {
         "runtime": "llama-cpp",
-        "model_path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
+        "model_path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama-general.pid",
@@ -355,7 +357,7 @@
           // GET /v1/models on :8080 reports "LFM2.5-8B-A1B-Q4_K_M.gguf"
           // for this --model path).
           "name": "LFM2.5-8B-A1B-Q4_K_M.gguf",
-          "path": "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
+          "path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2.5-8B-A1B-GGUF/LFM2.5-8B-A1B-Q4_K_M.gguf",
           "capabilities": ["completion", "code", "reasoning", "tool_use"],
           // tool_choice: "required" asks for a tool call on executor turns that
           // carry tools (the loop gates it on the agent's executor role, never
@@ -379,45 +381,6 @@
       }
     },
 
-    "zai": {
-      "api": "openai",
-      "options": {
-        "baseURL": "https://api.z.ai/api/coding/paas/v4",
-        "apiKey": "${ZAI_API_KEY}"
-      },
-      "models": {
-        "glm-5.2": {
-          "name": "glm-5.2",
-          "capabilities": ["completion", "code", "reasoning", "tool_use"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 128000,
-          "max_output": 8192,
-          "temperature": 0.7,
-          "top_p": 0.9
-        },
-        "glm-4.7": {
-          "name": "glm-4.7",
-          "capabilities": ["completion", "code", "reasoning", "tool_use"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 128000,
-          "max_output": 8192,
-          "temperature": 0.7,
-          "top_p": 0.9
-        },
-        "glm-4.5-air": {
-          "name": "glm-4.5-air",
-          "capabilities": ["completion", "code", "reasoning"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 32000,
-          "max_output": 4096,
-          "temperature": 0.7
-        }
-      }
-    },
-
     "agnes": {
       "api": "openai",
       "options": {
@@ -425,11 +388,13 @@
         // AGNRES_API_KEY: variable name as exported in ~/.bashrc (AGNES_API_KEY
         // is commented out there; do not "fix" this back to AGNES without
         // renaming the shell variable).
-        "apiKey": "${AGNRES_API_KEY}"
+        "apiKey": "${AGNRES_API_KEY}",
+        // defaultModel: the model id this provider serves by default.
+        "defaultModel": "agnes-3.0-flash"
       },
       "models": {
-        "agnes-2.5-flash": {
-          "name": "agnes-2.5-flash",
+        "agnes-3.0-flash": {
+          "name": "agnes-3.0-flash",
           "capabilities": ["completion", "code", "reasoning", "tool_use"],
           "input_cost": 0.0,
           "output_cost": 0.0,

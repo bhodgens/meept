@@ -13,8 +13,15 @@ import (
 	"github.com/tailscale/hujson"
 )
 
-// envVarPattern matches ${VAR_NAME} or $VAR_NAME patterns.
-var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
+// envVarPattern matches ${VAR_NAME}, ${VAR_NAME:-default}, or $VAR_NAME
+// patterns. Mirrors the 3-alternative shape in internal/llm/providers.go:
+// a default-capturing braced valid name, then the legacy braced ANYTHING
+// branch (placeholders like ${MODEL_PATH} / ${session_id} and other
+// non-shell-name strings), then the plain $NAME form.
+var envVarPattern = regexp.MustCompile(
+	`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}` + // ${VAR} or ${VAR:-default}
+		`|\$\{([^}]+)\}` + // legacy ${ANYTHING} (MODEL_PATH, session_id)
+		`|\$([A-Za-z_][A-Za-z0-9_]*)`) // plain $VAR
 
 // Load loads configuration from the specified TOML file.
 // Environment variables in the form ${VAR_NAME} or $VAR_NAME are expanded.
@@ -229,14 +236,41 @@ func ExpandEnvVars(s string) (string, error) {
 	for range maxPasses {
 		prev := result
 		result = envVarPattern.ReplaceAllStringFunc(result, func(match string) string {
-			var varName string
-			if strings.HasPrefix(match, "${") {
-				varName = match[2 : len(match)-1]
-			} else {
-				varName = match[1:]
+			// Re-parse the match to get the submatch groups (the callback
+			// only receives the matched string). Group layout:
+			//   1 = braced valid name (${VAR} / ${VAR:-default})
+			//   2 = the ":-default" capture (non-empty when a default was declared)
+			//   3 = the default value itself
+			//   4 = legacy braced ANYTHING (${MODEL_PATH}, ${session_id}, ...)
+			//   5 = plain $VAR
+			m := envVarPattern.FindStringSubmatch(match)
+			var varName, defVal string
+			hasDefault := false
+			switch {
+			case m[1] != "":
+				varName = m[1]
+				hasDefault = m[2] != ""
+				defVal = m[3]
+			case m[4] != "":
+				varName = m[4]
+			case m[5] != "":
+				varName = m[5]
 			}
 
-			if val, ok := os.LookupEnv(varName); ok {
+			val, ok := os.LookupEnv(varName)
+			if ok && val != "" {
+				return val
+			}
+			// Unset or empty with a declared default: use the default.
+			// No undefined-var warning — the config author supplied a
+			// fallback on purpose. A default containing a nested $REF is
+			// expanded on a later pass of the loop.
+			if hasDefault {
+				return defVal
+			}
+			if ok {
+				// Set but empty, no default: preserve existing behavior
+				// (empty substitution, no warning).
 				return val
 			}
 			// Log a warning for undefined env vars so empty substitutions
@@ -421,6 +455,13 @@ type ProviderOptions struct {
 	APIKey  string `json:"apiKey"` //nolint:gosec // field name, not a secret
 	Timeout int    `json:"timeout"`
 	NoAuth  bool   `json:"noAuth"` // FIX #0004 - true for providers that don't require API key (e.g., local LLMs)
+	// DefaultModel names the model this provider serves by default in the
+	// ProviderManager failover pool. Without it, buildProviderConfigs picks
+	// the sorted-first model id (deterministic; map order is random and once
+	// registered a stale agnes-2.0-flash instead of the configured default).
+	// Mirror of llm.ProviderOptionsConfig.DefaultModel — keep the JSON tags
+	// in sync.
+	DefaultModel string `json:"defaultModel,omitempty"`
 }
 
 // Model represents a model configuration.

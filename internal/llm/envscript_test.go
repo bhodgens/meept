@@ -294,6 +294,40 @@ func TestExpandEnvVarsDefaultSyntax(t *testing.T) {
 	}
 }
 
+// TestExpandEnvVarsNestedDefaultMultiPass pins the BUG-3 fix: a
+// ${VAR:-default} whose default contains a nested $REF must expand the
+// inner reference on a later pass (the documented
+// MEEPT_MODELS_DIR:-$HOME/.meept/models convention). The single-pass
+// implementation returned the literal "$HOME/.meept/models".
+func TestExpandEnvVarsNestedDefaultMultiPass(t *testing.T) {
+	isolateResolver(t)
+	prev := expandEnvScriptResolver
+	expandEnvScriptResolver = nil
+	t.Cleanup(func() { expandEnvScriptResolver = prev })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	unsetSentinel(t, "MEEPT_MODELS_DIR")
+
+	got := expandEnvVars("${MEEPT_MODELS_DIR:-$HOME/.meept/models}")
+	want := home + "/.meept/models"
+	if got != want {
+		t.Errorf("nested default: expandEnvVars = %q, want %q", got, want)
+	}
+
+	// Env set wins over the default (unchanged behavior).
+	t.Setenv("MEEPT_MODELS_DIR", "/Volumes/LLMs")
+	if got, want := expandEnvVars("${MEEPT_MODELS_DIR:-$HOME/.meept/models}"), "/Volumes/LLMs"; got != want {
+		t.Errorf("env set: expandEnvVars = %q, want %q", got, want)
+	}
+
+	// Placeholder variables are still never expanded, even multi-pass.
+	unsetSentinel(t, "MEEPT_MODELS_DIR")
+	if got, want := expandEnvVars("${MODEL_PATH}"), "${MODEL_PATH}"; got != want {
+		t.Errorf("placeholder eaten on multi-pass: expandEnvVars = %q, want %q", got, want)
+	}
+}
+
 func TestEnvScriptResolverConcurrent(t *testing.T) {
 	home := isolateResolver(t)
 	unsetSentinel(t, "MEEPT_TEST_VAR")

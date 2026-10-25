@@ -7292,6 +7292,12 @@ func findDot(s string) int {
 }
 
 // buildProviderConfigs converts ModelsConfig providers to LLM ModelConfig slice.
+//
+// Model pick per provider is DETERMINISTIC (a former range-over-map with a
+// break picked a random model whenever a provider declared several): the
+// provider option defaultModel wins when it names a model present in
+// provider.Models; otherwise the sorted-first model id is used. Map
+// iteration order is never consulted.
 func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger) []*llm.ModelConfig {
 	if cfg == nil || len(cfg.Providers) == 0 {
 		return nil
@@ -7303,10 +7309,18 @@ func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger) []*llm.
 		disabled[p] = true
 	}
 
+	// Sorted provider ids so priority assignment is deterministic too.
+	providerIDs := make([]string, 0, len(cfg.Providers))
+	for providerID := range cfg.Providers {
+		providerIDs = append(providerIDs, providerID)
+	}
+	sort.Strings(providerIDs)
+
 	var configs []*llm.ModelConfig
 	priority := 0
 
-	for providerID, provider := range cfg.Providers {
+	for _, providerID := range providerIDs {
+		provider := cfg.Providers[providerID]
 		if disabled[providerID] {
 			logger.Debug("Skipping disabled provider", "provider", providerID)
 			continue
@@ -7318,34 +7332,59 @@ func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger) []*llm.
 			continue
 		}
 
-		// Get the first model from this provider (or the default model)
-		for modelID, model := range provider.Models {
-			caps := make(map[string]bool)
-			for _, capName := range model.Capabilities {
-				caps[capName] = true
-			}
-
-			configs = append(configs, &llm.ModelConfig{
-				ProviderID:           providerID,
-				BaseURL:              provider.Options.BaseURL,
-				ModelID:              model.Name,
-				APIKey:               provider.Options.APIKey,
-				CostPerMillionInput:  model.InputCost,
-				CostPerMillionOutput: model.OutputCost,
-				MaxTokens:            model.MaxOutput,
-				Temperature:          model.Temperature,
-				ContextLimit:         model.ContextLimit,
-				Capabilities:         caps,
-			})
-
-			logger.Debug("Added provider config",
-				"provider", providerID,
-				"model", modelID,
-				"priority", priority,
-			)
-			priority++
-			break // Only use first model per provider for failover
+		if len(provider.Models) == 0 {
+			continue
 		}
+
+		// Deterministic model pick (FROZEN INTERFACE): defaultModel when
+		// it names an existing model, else sorted-first model id.
+		modelIDs := make([]string, 0, len(provider.Models))
+		for modelID := range provider.Models {
+			modelIDs = append(modelIDs, modelID)
+		}
+		sort.Strings(modelIDs)
+
+		pick := modelIDs[0]
+		pickReason := "sorted_first"
+		if provider.Options.DefaultModel != "" {
+			if _, exists := provider.Models[provider.Options.DefaultModel]; exists {
+				pick = provider.Options.DefaultModel
+				pickReason = "default_model_option"
+			} else {
+				logger.Debug("Provider defaultModel not found among its models; falling back to sorted-first",
+					"provider", providerID,
+					"default_model", provider.Options.DefaultModel,
+					"fallback", modelIDs[0],
+				)
+			}
+		}
+		model := provider.Models[pick]
+
+		caps := make(map[string]bool)
+		for _, capName := range model.Capabilities {
+			caps[capName] = true
+		}
+
+		configs = append(configs, &llm.ModelConfig{
+			ProviderID:           providerID,
+			BaseURL:              provider.Options.BaseURL,
+			ModelID:              model.Name,
+			APIKey:               provider.Options.APIKey,
+			CostPerMillionInput:  model.InputCost,
+			CostPerMillionOutput: model.OutputCost,
+			MaxTokens:            model.MaxOutput,
+			Temperature:          model.Temperature,
+			ContextLimit:         model.ContextLimit,
+			Capabilities:         caps,
+		})
+
+		logger.Debug("Added provider config",
+			"provider", providerID,
+			"model", pick,
+			"pick_reason", pickReason,
+			"priority", priority,
+		)
+		priority++
 	}
 
 	return configs

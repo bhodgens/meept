@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -54,17 +55,17 @@ func TestConfigLoads(t *testing.T) {
 		t.Errorf("classifier alias alternate = %v, want local/lfm-8b-mlx-4bit at [1]", classifierAlias.Models)
 	}
 
-	// Verify coder/planner/analyst aliases (operator decision, 2026-09-26):
-	// agnes/agnes-2.5-flash primary, local-gguf fallback — and NO zai/ollama
-	// members (the intent is agnes + local-only fallback, not a remote
-	// provider ladder).
+	// Verify coder/planner/analyst aliases (operator decision, 2026-09-26;
+	// model bumped 2026-10-24): agnes/agnes-3.0-flash primary, local-gguf
+	// fallback — and NO zai/ollama members (the intent is agnes + local-only
+	// fallback, not a remote provider ladder).
 	for _, id := range []string{"coder", "planner", "analyst"} {
 		alias, ok := cfg.ModelAliases[id]
 		if !ok {
 			t.Fatalf("%s alias not found", id)
 		}
-		if len(alias.Models) == 0 || alias.Models[0] != "agnes/agnes-2.5-flash" {
-			t.Errorf("%s alias primary = %v, want agnes/agnes-2.5-flash first", id, alias.Models)
+		if len(alias.Models) == 0 || alias.Models[0] != "agnes/agnes-3.0-flash" {
+			t.Errorf("%s alias primary = %v, want agnes/agnes-3.0-flash first", id, alias.Models)
 		}
 		if !slices.Contains(alias.Models, "local-gguf/lfm-8b-gguf") {
 			t.Errorf("%s alias = %v, want a local-gguf/lfm-8b-gguf fallback member", id, alias.Models)
@@ -88,12 +89,22 @@ func TestConfigLoads(t *testing.T) {
 	if !ok {
 		t.Fatal("lfm-8b-mlx-4bit model not found in local provider")
 	}
-	// 2026-09-25: the shipped config uses absolute /Volumes/LLMs model
-	// paths (this install keeps weights there; the ${MEEPT_MODELS_DIR:-...}
-	// default resolved under the sandbox HOME and broke the e2e classifier
-	// gate — 3e721ccb).
-	if lfm8b.Name != "/Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit" {
-		t.Errorf("lfm-8b-mlx-4bit name = %q, want /Volumes/LLMs/LiquidAI/LFM2.5-8B-A1B-MLX-4bit", lfm8b.Name)
+	// 2026-10-24: the shipped config roots model paths at
+	// ${MEEPT_MODELS_DIR:-$HOME/.meept/models} — the layout the
+	// make deps-models downloader writes. LoadProvidersConfig expands env
+	// vars at load time, so the expected value is built from the same
+	// default the config declares (MEEPT_MODELS_DIR wins when exported).
+	modelsDir := os.Getenv("MEEPT_MODELS_DIR")
+	if modelsDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatalf("cannot resolve HOME for the models-dir default: %v", err)
+		}
+		modelsDir = home + "/.meept/models"
+	}
+	wantMlxPath := modelsDir + "/LiquidAI/LFM2.5-8B-A1B-MLX-4bit"
+	if lfm8b.Name != wantMlxPath {
+		t.Errorf("lfm-8b-mlx-4bit name = %q, want %q", lfm8b.Name, wantMlxPath)
 	}
 	if lfm8b.MaxConcurrency != 2 {
 		t.Errorf("lfm-8b-mlx-4bit max_concurrency = %d, want 2", lfm8b.MaxConcurrency)
@@ -195,17 +206,34 @@ func TestConfigLoads(t *testing.T) {
 		t.Errorf("lfm-1.2b-q8 context_limit = %d, want 8192", lfm12b.ContextLimit)
 	}
 
-	// Verify zai provider has glm-5.2
-	zaiProvider, ok := cfg.Providers["zai"]
-	if !ok {
-		t.Fatal("zai provider not found")
+	// zai/glm removed from the shipped config 2026-10-24 (operator
+	// decision: glm quota windows exhausted mid-turn and the provider was
+	// dropped from both the install and the template). Pin its ABSENCE so
+	// a stale copy cannot sneak back in.
+	if _, ok := cfg.Providers["zai"]; ok {
+		t.Error("zai provider present, want removed (dropped 2026-10-24)")
 	}
-	glm52, ok := zaiProvider.Models["glm-5.2"]
-	if !ok {
-		t.Fatal("glm-5.2 model not found in zai provider")
+	for id, alias := range cfg.ModelAliases {
+		for _, m := range alias.Models {
+			if p, _, _ := strings.Cut(m, "/"); p == "zai" {
+				t.Errorf("alias %s still references zai member %q", id, m)
+			}
+		}
 	}
-	if glm52.Name != "glm-5.2" {
-		t.Errorf("glm-5.2 name = %q, want glm-5.2", glm52.Name)
+
+	// agnes: single current model + defaultModel naming it. The stale
+	// agnes-2.0-flash entry plus random map-order pool picks registered
+	// the wrong model on the wire (2026-10-23 outage); defaultModel makes
+	// the pick explicit and this pin keeps the stale entry out.
+	agnesProvider, ok := cfg.Providers["agnes"]
+	if !ok {
+		t.Fatal("agnes provider not found")
+	}
+	if _, ok := agnesProvider.Models["agnes-3.0-flash"]; !ok {
+		t.Errorf("agnes models = %v, want an agnes-3.0-flash entry", maps.Keys(agnesProvider.Models))
+	}
+	if agnesProvider.Options.DefaultModel != "agnes-3.0-flash" {
+		t.Errorf("agnes defaultModel = %q, want agnes-3.0-flash", agnesProvider.Options.DefaultModel)
 	}
 }
 

@@ -240,6 +240,26 @@ type quotaBody struct {
 	ResetAt time.Time
 }
 
+// quotaCodeAllowlist holds the case-insensitive substrings an error.type
+// string must contain to count as a quota code on its own. A generic
+// provider error type (e.g. agnes's "AgnesAI_error" on a bare 429) is NOT
+// quota-shaped: without this gate any error.type made classifyQuotaDecision
+// return true for every 429 whose body parsed, blocking the credential for
+// the whole MaxWait window on a plain rate limit.
+var quotaCodeAllowlist = []string{"quota", "usage_limit", "insufficient", "billing", "credit"}
+
+// isQuotaShapedCode reports whether a provider error type/status string
+// looks like a quota code (case-insensitive allowlist substring match).
+func isQuotaShapedCode(typ string) bool {
+	lower := strings.ToLower(typ)
+	for _, kw := range quotaCodeAllowlist {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 func parseQuotaBody(body []byte) *quotaBody {
 	// Try direct JSON first
 	var raw map[string]any
@@ -259,12 +279,8 @@ func parseQuotaBody(body []byte) *quotaBody {
 
 	// OpenAI/Codex shape: {"error":{"type":"usage_limit_reached","resets_at":...}}
 	if errObj, ok := raw["error"].(map[string]any); ok {
-		if typ, ok := errObj["type"].(string); ok {
-			b.Code = typ
-		}
-		if code, ok := errObj["code"].(string); ok && b.Code == "" {
-			b.Code = code
-		}
+		typ, _ := errObj["type"].(string)
+		code, _ := errObj["code"].(string)
 		if msg, ok := errObj["message"].(string); ok {
 			b.Message = msg
 		}
@@ -276,19 +292,39 @@ func parseQuotaBody(body []byte) *quotaBody {
 				b.ResetAt = t
 			}
 		}
+		// A non-empty error.code is an explicit provider code (e.g. zai's
+		// "1308") and always counts. error.type counts ONLY when it is
+		// quota-shaped, or when the body carries an explicit code or a
+		// reset horizon — otherwise it stays empty so a bare 429 with a
+		// generic type (agnes "AgnesAI_error") classifies as a rate limit.
+		switch {
+		case isQuotaShapedCode(typ):
+			b.Code = typ
+		case code != "":
+			if typ != "" {
+				b.Code = typ
+			} else {
+				b.Code = code
+			}
+		case !b.ResetAt.IsZero() && typ != "":
+			b.Code = typ
+		}
 		return b
 	}
 
 	// Flat shape with code field (Tencent)
 	if code, ok := raw["code"].(float64); ok {
 		b.Code = fmt.Sprintf("%.0f", code)
-	} else if code, ok := raw["code"].(string); ok {
+	} else if code, ok := raw["code"].(string); ok && code != "" {
 		b.Code = code
 	}
 	if msg, ok := raw["message"].(string); ok {
 		b.Message = msg
 	}
-	if status, ok := raw["status"].(string); ok && b.Code == "" {
+	// Same class as the error-object branch: a generic status string
+	// ("error", "failed") is not a quota code — require a quota-shaped
+	// value or a reset horizon.
+	if status, ok := raw["status"].(string); ok && b.Code == "" && isQuotaShapedCode(status) {
 		b.Code = strings.ToLower(status)
 	}
 
