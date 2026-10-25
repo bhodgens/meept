@@ -128,17 +128,11 @@
       "models": ["agnes/agnes-3.0-flash", "local-gguf/lfm-8b-gguf"],
       "timeout": 20,
       "max_fails": 3
-    },
-    "image": {
-      "models": ["xai-oauth/grok-imagine-image-2.0", "comfyui/flux-dev"],
-      "timeout": 60,
-      "max_fails": 2
-    },
-    "video": {
-      "models": ["xai-oauth/grok-imagine-video"],
-      "timeout": 120,
-      "max_fails": 2
     }
+    // image/video aliases deleted 2026-10-25: zero reachable members
+    // (xai-oauth/comfyui/ollama not in the failover pool) and nothing in
+    // the daemon resolves these alias names — the image_model/video_model
+    // slots reference their provider/model directly.
   },
 
   // Default timeout for all providers (in seconds, 50 minutes)
