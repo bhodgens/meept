@@ -120,9 +120,21 @@ func (s *Store) Update(ctx context.Context, def BotDefinition) error {
 	return nil
 }
 
+// Delete removes the bot definition and its dependent state row. The
+// bot_states FK (REFERENCES bot_definitions(id) ON DELETE CASCADE) is inert
+// because the driver is opened without the foreign_keys pragma, so the state
+// row must be deleted explicitly: otherwise it survives the delete and blocks
+// re-creation of the same id with "UNIQUE constraint failed:
+// bot_states.definition_id". bot_definitions and bot_states are the only
+// tables this store owns, so these two DELETEs sweep every row keyed by id.
 func (s *Store) Delete(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM bot_definitions WHERE id = ?`, id)
-	return err
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM bot_states WHERE definition_id = ?`, id); err != nil {
+		return fmt.Errorf("delete bot state: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM bot_definitions WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete bot definition: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) GetState(ctx context.Context, id string) (*BotState, error) {

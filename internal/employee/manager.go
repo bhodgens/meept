@@ -456,9 +456,9 @@ type BusPublisher interface {
 
 	// PublishConstitutionValidationError publishes an
 	// employee.constitution_validation_error bus event (H5). Emitted when
-	// a constitution fails validation at hire or load time. The
-	// BotDefinition is stored with status = constitution_invalid so the
-	// operator can see and fix the invalid employee in the agents list.
+	// a constitution fails validation at hire or load time. A failed hire
+	// writes no bot rows (bughunt 2026-10-25); the event + audit finding
+	// are how the operator learns of it.
 	PublishConstitutionValidationError(employeeID, validationError, constitutionSummary string)
 }
 
@@ -482,9 +482,9 @@ type CriticalFindingEvent struct {
 
 // ConstitutionValidationErrorEvent is the payload for the
 // employee.constitution_validation_error bus event (H5). Emitted when a
-// constitution fails validation at hire or load time. The BotDefinition
-// is persisted with status = constitution_invalid so the operator can
-// identify and fix the invalid employee via the agents list.
+// constitution fails validation at hire or load time. A failed hire
+// persists nothing — the event + a SeverityCritical audit finding are the
+// operator-visible record.
 type ConstitutionValidationErrorEvent struct {
 	EmployeeID          string `json:"employee_id"`
 	ValidationError     string `json:"validation_error"`
@@ -1108,28 +1108,29 @@ func (m *Manager) GetEmployee(ctx context.Context, id string) (*Employee, error)
 // struct, validated, then persisted via the ConstitutionStore. The
 // underlying bot.BotDefinition is created via botManager.CreateBot.
 //
-// H5: When constitution validation fails, the bot definition is still
-// persisted with Enabled=false so the operator can see the invalid employee
-// in the agents list. A ConstitutionValidationError event is emitted to the
-// bus and an audit finding is written at SeverityCritical.
+// Persistence contract (bughunt 2026-10-25): no bot row is written until the
+// constitution passes every validation step, and every step that runs AFTER
+// the bot-definition insert is transactional in spirit: if it fails, Hire
+// rolls back the bot definition (and any bot state row) so the id is free
+// again and a corrected re-hire cannot be blocked by
+// "UNIQUE constraint failed: bot_definitions.id". Constitution validation
+// failures are recorded as an audit finding + bus event only — the old H5
+// "persist the invalid definition disabled" behaviour was itself the source
+// of the orphan-row bug and is deliberately gone.
 func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) {
 	if m.botManager == nil {
 		return nil, fmt.Errorf("hire: bot backend not configured (enable bots.enabled to manage employees)")
 	}
 	// Decode and validate the constitution. A missing or empty
-	// constitution is rejected per spec line 222.
+	// constitution is rejected per spec line 222. No bot row is written
+	// before this point.
 	c, err := decodeConstitution(req.Constitution)
 	if err != nil {
-		// H5: Persist the bot definition as disabled with
-		// constitution_invalid status so the operator can see it in
-		// the agents list and fix the constitution. Best-effort — if
-		// the bot store is unavailable, just return the error.
 		m.recordConstitutionValidationError(ctx, req, err.Error(),
 			"decode failed: "+err.Error())
 		return nil, fmt.Errorf("hire: constitution: %w", err)
 	}
 	if err := c.Validate(req.ID); err != nil {
-		// H5: Same pattern — persist disabled, emit event, write finding.
 		m.recordConstitutionValidationError(ctx, req, err.Error(),
 			"validation failed: "+err.Error())
 		return nil, fmt.Errorf("hire: constitution validate: %w", err)
@@ -1203,18 +1204,21 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 	if err := m.botManager.CreateBot(ctx, def); err != nil {
 		return nil, fmt.Errorf("hire: create bot: %w", err)
 	}
+	// From here on, every step that can fail must roll the bot rows back
+	// (see rollbackHiredBot) so a partial hire never permanently burns the
+	// id.
 	// Standalone employee DBs keep a schema-only bot_definitions stub; the
 	// new employee's ID must be mirrored in or every later goal/finding
 	// insert for them fails FK validation.
 	m.mirrorEmployeeIntoStandaloneDBs(ctx, req.ID)
-	// Persist the constitution. If this fails we attempt to roll back
-	// the bot creation so we don't end up with a constitutionless
-	// employee (which would fail every subsequent Get/Review).
+	// Persist the constitution. If this fails we roll back the bot
+	// creation so we don't end up with a constitutionless employee (which
+	// would fail every subsequent Get/Review) or an orphan definition row.
 	if m.constitutionStore != nil {
 		if err := m.constitutionStore.Put(ctx, req.ID, c); err != nil {
 			m.logger.Error("hire: persist constitution failed; rolling back bot",
 				"employee_id", req.ID, "error", err)
-			_ = m.botManager.DeleteBot(ctx, req.ID)
+			m.rollbackHiredBot(ctx, req.ID, err)
 			return nil, fmt.Errorf("hire: persist constitution: %w", err)
 		}
 	}
@@ -1225,7 +1229,8 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 	// Leaf 01: create any goals declared on the hire request. The employee
 	// row (and constitution) exist by now, so CreateGoal can resolve the
 	// tier for its source validation. Failures are collected and joined so
-	// the caller sees every broken spec, not just the first.
+	// the caller sees every broken spec, not just the first. A failure here
+	// rolls back the whole hire — the employee is not half-created.
 	if len(req.Goals) > 0 {
 		var goalErrs []error
 		for i, spec := range req.Goals {
@@ -1235,11 +1240,31 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 			}
 		}
 		if err := errors.Join(goalErrs...); err != nil {
+			m.logger.Error("hire: create goals failed; rolling back hire",
+				"employee_id", req.ID, "error", err)
+			m.rollbackHiredBot(ctx, req.ID, err)
 			return nil, fmt.Errorf("hire: create goals: %w", err)
 		}
 	}
 
 	return &Employee{BotDefinition: def, Constitution: c}, nil
+}
+
+// rollbackHiredBot removes every row Hire wrote for employeeID after a
+// post-insert step failed. Retire is the single sweep: bot definition +
+// state rows, constitution row, goals, audit findings, standalone-DB
+// mirrors, and the in-memory caches. Best-effort, logged — its whole purpose
+// is to leave the id free so a corrected re-hire is not blocked by a UNIQUE
+// violation.
+func (m *Manager) rollbackHiredBot(ctx context.Context, employeeID string, cause error) {
+	// botManager is non-nil here — Hire's guard runs before any write.
+	if err := m.Retire(ctx, employeeID); err != nil {
+		m.logger.Warn("hire rollback: retire failed; id may stay blocked",
+			"employee_id", employeeID, "cause", cause, "error", err)
+	} else {
+		m.logger.Info("hire rollback: removed partial hire rows",
+			"employee_id", employeeID, "cause", cause)
+	}
 }
 
 // UpdateEmployee mutates an existing employee's non-constitution fields.
@@ -1277,9 +1302,14 @@ func (m *Manager) UpdateEmployee(ctx context.Context, req UpdateRequest) (*Emplo
 	return m.GetEmployee(ctx, req.ID)
 }
 
-// Retire stops and deletes an employee (spec: agents.delete). Goals and
-// findings cascade-delete via FK; plans survive in the separate plans
-// table. The constitution row is removed explicitly.
+// Retire stops and deletes an employee (spec: agents.delete). Deletes every
+// row keyed by the employee id: bot definition + state (store.Delete),
+// constitution, goals, audit findings, and the standalone-DB
+// bot_definitions mirrors. The employee_goals/employee_audit_findings FKs
+// say ON DELETE CASCADE, but the cascade is inert on shared-DB wiring — the
+// DELETE runs on the bot store's connection, which opens SQLite without the
+// foreign_keys pragma — so those rows are removed explicitly here. Plans
+// survive in the separate plans table.
 func (m *Manager) Retire(ctx context.Context, id string) error {
 	if m.botManager == nil {
 		return fmt.Errorf("retire employee %q: bot backend not configured (enable bots.enabled to manage employees)", id)
@@ -1288,13 +1318,35 @@ func (m *Manager) Retire(ctx context.Context, id string) error {
 	if err := m.botManager.DeleteBot(ctx, id); err != nil {
 		return fmt.Errorf("retire: delete bot: %w", err)
 	}
-	// Cascade clean: constitution, drift cache. Goal/AuditStore have FK
-	// ON DELETE CASCADE referencing bot_definitions; if the bot store and
-	// the goal/audit stores share the same SQLite file those cascade.
-	// We additionally clear the constitution row (no FK) and the cache.
+	// Cascade clean: constitution, goals, findings, standalone mirrors,
+	// caches. The FK cascades cannot be relied on (inert pragma, see doc
+	// comment), so goals/findings get explicit DELETEs.
 	if m.constitutionStore != nil {
 		if err := m.constitutionStore.Delete(ctx, id); err != nil {
 			m.logger.Warn("retire: constitution delete failed",
+				"employee_id", id, "error", err)
+		}
+	}
+	if m.goalStore != nil {
+		if _, err := m.goalStore.db.ExecContext(ctx,
+			`DELETE FROM employee_goals WHERE employee_id = ?`, id); err != nil {
+			m.logger.Warn("retire: goal delete failed",
+				"employee_id", id, "error", err)
+		}
+	}
+	if m.auditStore != nil {
+		if _, err := m.auditStore.db.ExecContext(ctx,
+			`DELETE FROM employee_audit_findings WHERE employee_id = ?`, id); err != nil {
+			m.logger.Warn("retire: audit findings delete failed",
+				"employee_id", id, "error", err)
+		}
+	}
+	// Drop the bot_definitions mirror rows Hire wrote into the standalone
+	// employee DBs (no-op there when mirroring was never enabled).
+	for _, db := range m.standaloneEmployeeDBs {
+		if _, err := db.ExecContext(ctx,
+			`DELETE FROM bot_definitions WHERE id = ?`, id); err != nil {
+			m.logger.Warn("retire: standalone mirror delete failed",
 				"employee_id", id, "error", err)
 		}
 	}
@@ -1379,34 +1431,15 @@ func (m *Manager) HandleCriticalFinding(ctx context.Context, ev CriticalFindingE
 	}
 }
 
-// recordConstitutionValidationError is the H5 helper that persists the bot
-// definition as disabled (status = constitution_invalid), writes an audit
-// finding at SeverityCritical, and emits a ConstitutionValidationError bus
-// event. Best-effort: failures are logged but do not change the returned
-// error from the caller (the validation error itself is the real error).
+// recordConstitutionValidationError is the audit helper for Hire's
+// constitution failures: writes an audit finding at SeverityCritical and
+// emits a ConstitutionValidationError bus event. It no longer persists the
+// bot definition (the old H5 "store the invalid employee disabled" path was
+// the source of the orphan bot_definitions rows that blocked re-creation of
+// the id — bughunt 2026-10-25): a failed hire writes ZERO bot rows.
+// Best-effort: failures are logged but do not change the returned error from
+// the caller (the validation error itself is the real error).
 func (m *Manager) recordConstitutionValidationError(ctx context.Context, req HireRequest, validationError, summary string) {
-	// Persist the bot definition as disabled so it appears in the agents
-	// list with a clear invalid status. Best-effort — if the store is
-	// unavailable, just log.
-	def := bot.BotDefinition{
-		ID:          req.ID,
-		Name:        req.Name,
-		Description: req.Description,
-		Prompt:      req.Prompt,
-		Model:       req.Model,
-		Triggers:    req.Triggers,
-		MemoryScope: req.MemoryScope,
-		Tools:       req.Tools,
-		Enabled:     false,
-	}
-	if err := m.botManager.CreateBot(ctx, def); err != nil {
-		// If the bot already exists (e.g. re-hire attempt), try UpdateBot.
-		if updateErr := m.botManager.UpdateBot(ctx, def); updateErr != nil {
-			m.logger.Warn("hire: failed to persist invalid bot definition",
-				"employee_id", req.ID, "error", updateErr)
-		}
-	}
-
 	// Snapshot stores and publisher under read lock, operate outside lock.
 	m.mu.RLock()
 	auditStore := m.auditStore
