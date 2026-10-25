@@ -232,3 +232,25 @@ topics), runs `make docs-check`.
   "completed" with the same reply) — verified at implementation; if the
   replies differ for completed tasks, dedupe on ConversationID+TurnID
   instead (TurnID is recovered for relays, handler.go:1828).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0). This tree shipped as
+     plan.md only (no master.md); gate added by control-agent survey 2026-10-25. -->
+
+Tree-level verdict: **PARTIAL** — planned features have located test evidence.
+
+- E2E suites (manifest path_map): memory-turn-capture, memory-persistence, async-turn, bridges, chat-submit, session-binding
+- Unit packages with tests: internal/agent, internal/bus, internal/config, internal/daemon (memory_capture_test.go), internal/memory, internal/services, internal/session
+- Sample verified tests: internal/bus:TestMessageBus_PubSub
+- Gaps: no Test Gate matrix (plan.md only, never seeded)
+- Baseline: `make test` 2026-10-25 GREEN (26 port-exhaustion flakes cleared on -p 1 re-run).
+
+Row-level matrix omitted (plan.md-only tree, leaves already implemented and
+suite-covered); a future re-dispatch of this tree must seed per-feature rows
+before implementation.
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: 2026-10-25, tree-level, control-agent survey — gate section added
+(tree previously had no Test Gate; plan.md-only shape).

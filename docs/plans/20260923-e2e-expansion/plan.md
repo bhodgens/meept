@@ -90,3 +90,25 @@ and makes e2e mandatory for features while freezing new unit tests.
 - [x] P2 suites (15 areas implemented; status per area in e2e/SCENARIOS.md)
 - [x] P3 enforcement (hooks, manifest, docs, AGENTS.md)
 - [x] P4 final gates
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0). This tree shipped as
+     plan.md only (no master.md); gate added by control-agent survey 2026-10-25. -->
+
+Tree-level verdict: **PARTIAL** — planned features have located test evidence.
+
+- E2E suites (manifest path_map): smoke (plan proposes new suites incl. rpc-chat)
+- Unit packages with tests: 
+- Sample verified tests: 
+- Gaps: no Test Gate matrix (plan.md only, never seeded)
+- Baseline: `make test` 2026-10-25 GREEN (26 port-exhaustion flakes cleared on -p 1 re-run).
+
+Row-level matrix omitted (plan.md-only tree, leaves already implemented and
+suite-covered); a future re-dispatch of this tree must seed per-feature rows
+before implementation.
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: 2026-10-25, tree-level, control-agent survey — gate section added
+(tree previously had no Test Gate; plan.md-only shape).
