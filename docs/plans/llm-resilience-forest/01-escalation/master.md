@@ -288,3 +288,32 @@ Fix any reported gaps before dispatching.
 - Do not touch the Ralph loop (`ralph_loop.go`) in this tree; Ralph
   replan-iteration escalation is out of scope (D2 scoped the trigger to
   verification.max_fix_loops).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | AgentSpec field | 01-spec-config.md | (pending) | (pending) | PENDING |
+| F2 | AGENT.md frontmatter parsing (BOTH pipeline halves) | 01-spec-config.md | (pending) | (pending) | PENDING |
+| F3 | Docs | 01-spec-config.md | (pending) | (pending) | PENDING |
+| F4 | Trace + choose the per-turn seam | 02-hook-pipeline.md | (pending) | (pending) | PENDING |
+| F5 | Invoke + apply (TDD) | 02-hook-pipeline.md | (pending) | (pending) | PENDING |
+| F6 | Legacy-behavior confirmation | 02-hook-pipeline.md | (pending) | (pending) | PENDING |
+| F7 | ModelResolver + EscalationDecision + DecideEscalation | 03-hook-wiring.md | (pending) | (pending) | PENDING |
+| F8 | Wire the decision into handleFail | 03-hook-wiring.md | (pending) | (pending) | PENDING |
+| F9 | Setter hygiene | 03-hook-wiring.md | (pending) | (pending) | PENDING |
+| F10 | Resolver.ResolveEscalationRef | 04-resolution-lifecycle.md | (pending) | (pending) | PENDING |
+| F11 | Wire resolver into the hook + model switch | 04-resolution-lifecycle.md | (pending) | (pending) | PENDING |
+| F12 | Observability (bus + routing log) | 04-resolution-lifecycle.md | (pending) | (pending) | PENDING |
+| F13 | Graph + docs sync | 04-resolution-lifecycle.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

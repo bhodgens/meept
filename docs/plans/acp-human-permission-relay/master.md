@@ -205,3 +205,25 @@ Wave order: 01 → 02 → 03 → (04 ∥ 05) → 06 → integration gates.
 | Integration | COMPLETE 2026-10-19 | — | daemon+cli builds ok (CLI `acp permissions --help` live proof of the fold); go test -p 2 config/acp/daemon/rpc/bus/tui all ok; acp-wire e2e twice green (27.7s/27.2s, -race internal/acp clean at fix commit); graphs+docs freshness = ZERO diff at final HEAD via clean worktree; flutter 634 pass (leaf 05) + 23 relay tests (leaf 06) |
 
 Tree COMPLETE 2026-10-19 — 6/6 leaves + integration, 100%.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Leaf 01 — [acp] human relay config (Contract A) | 01-config.md | (pending) | (pending) | PENDING |
+| F2 | Leaf 02 — acp relay registry + human lane (Contract B) | 02-acp-relay.md | (pending) | (pending) | PENDING |
+| F3 | Leaf 03 — bus topics + RPC + HTTP + WS relay (Contract C) | 03-daemon-surface.md | (pending) | (pending) | PENDING |
+| F4 | Leaf 04 — TUI relay surface (Contract D) | 04-tui.md | (pending) | (pending) | PENDING |
+| F5 | Leaf 05 — Flutter GUI relay surface (Contract E) | 05-gui.md | (pending) | (pending) | PENDING |
+| F6 | Leaf 06 — docs + live gate (Contract F) | 06-docs-live.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

@@ -127,3 +127,24 @@ capability misses); self-seal ships dark behind
 `plans.self_seal_enabled` (default false); leaf 3 discovers review-verdict
 persistence with both outcomes specified; ReplanAttempt reads the escalation
 level from task metadata, one source of truth.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Leaf 1 — Tier routing in Plan() | 01-tier-routing.md | (pending) | (pending) | PENDING |
+| F2 | Leaf 2 — Critique loop (draft-critique-refine, self-seal) | 02-critique-loop.md | (pending) | (pending) | PENDING |
+| F3 | Leaf 3 — PlanCritiqueInput assembly | 03-critique-input.md | (pending) | (pending) | PENDING |
+| F4 | Leaf 4 — Observability | 04-observability.md | (pending) | (pending) | PENDING |
+| F5 | OPEN-QUESTIONS — tiered-iteration tree | OPEN-QUESTIONS.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

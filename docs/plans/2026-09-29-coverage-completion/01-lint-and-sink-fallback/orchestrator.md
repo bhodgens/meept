@@ -40,3 +40,22 @@ test that documents the intended API.
 - `gosec -quiet -include=G115,G123 ./internal/...` — zero findings
 - `go build ./...` clean; `make e2e-fast` full tier green
 - `make graphs` if any internal/ file line numbers shifted; commit graphs
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Leaf 01 — gosec G115/G123 zero | 01-gosec-zero.md | (pending) | (pending) | PENDING |
+| F2 | Leaf 02 — PlanService evolver sink fallback | 02-planservice-sink.md | (pending) | (pending) | PENDING |
+| F3 | Leaf 03 — stray test + final lint zero | 03-stray-test-and-lint-zero.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

@@ -208,3 +208,33 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 - Parked-turn persistence across daemon restarts: mirror whatever
   QuotaResumeWatcher does today. If it is memory-only, so is the
   generalization; document in leaf 01's Deviations.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | ParkedTurnRecord + TurnParker core | 01-generalize-parker.md | (pending) | (pending) | PENDING |
+| F2 | QuotaResumeWatcher wrapper | 01-generalize-parker.md | (pending) | (pending) | PENDING |
+| F3 | Wiring swap | 01-generalize-parker.md | (pending) | (pending) | PENDING |
+| F4 | ThrottleGiveUpError | 02-throttle-parking.md | (pending) | (pending) | PENDING |
+| F5 | Branch body + state transition | 02-throttle-parking.md | (pending) | (pending) | PENDING |
+| F6 | Resume path | 02-throttle-parking.md | (pending) | (pending) | PENDING |
+| F7 | Goal-loop coverage | 03-goalloop-queue-coverage.md | (pending) | (pending) | PENDING |
+| F8 | Queue coverage | 03-goalloop-queue-coverage.md | (pending) | (pending) | PENDING |
+| F9 | Wiring | 03-goalloop-queue-coverage.md | (pending) | (pending) | PENDING |
+| F10 | WaitInfo + event payloads | 04-states-visibility-docs.md | (pending) | (pending) | PENDING |
+| F11 | WS classification check | 04-states-visibility-docs.md | (pending) | (pending) | PENDING |
+| F12 | TUI surface | 04-states-visibility-docs.md | (pending) | (pending) | PENDING |
+| F13 | Flutter GUI surface (parity) | 04-states-visibility-docs.md | (pending) | (pending) | PENDING |
+| F14 | Docs | 04-states-visibility-docs.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

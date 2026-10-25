@@ -266,3 +266,24 @@ Re-run until `ALL TREES COMPLIANT: True`.
 - Related prior art in-tree: `publishWorkerEvent` (handler.go:1341) already
   publishes lifecycle events to `chat.progress` — the new helper follows the
   same pattern with a frozen payload struct instead of ad-hoc keys.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | TurnTerminalEvent struct + publishTurnTerminal helper | 01-terminal-event.md | (pending) | (pending) | PENDING |
+| F2 | Emit on every handleRequest terminal path | 01-terminal-event.md | (pending) | (pending) | PENDING |
+| F3 | Relay task.completed / task.failed as terminal events | 01-terminal-event.md | (pending) | (pending) | PENDING |
+| F4 | WS classification | 01-terminal-event.md | (pending) | (pending) | PENDING |
+| F5 | TUI subscription (one-line topics list) | 01-terminal-event.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

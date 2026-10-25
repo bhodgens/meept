@@ -252,3 +252,35 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
   verdict; long waits → tree 03's park path).
 - Keep `DefaultQuotaMaxWait` (24h) as the horizon default; the new
   config knob REPLACES the ad-hoc constant only after leaf 03 wires it.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Types + Classify skeleton | 01-classification.md | (pending) | (pending) | PENDING |
+| F2 | Quota-signal detection (D7) | 01-classification.md | (pending) | (pending) | PENDING |
+| F3 | Parity guard test | 01-classification.md | (pending) | (pending) | PENDING |
+| F4 | ParseRetryAfter (D6) | 02-retryafter-schedule.md | (pending) | (pending) | PENDING |
+| F5 | BackoffPlan math (D8) | 02-retryafter-schedule.md | (pending) | (pending) | PENDING |
+| F6 | Config knobs | 02-retryafter-schedule.md | (pending) | (pending) | PENDING |
+| F7 | ThrottleBackoffError | 03-client-unification.md | (pending) | (pending) | PENDING |
+| F8 | Rewire the OpenAI loops (non-streaming, streaming, delta) | 03-client-unification.md | (pending) | (pending) | PENDING |
+| F9 | Rewire the Anthropic loops | 03-client-unification.md | (pending) | (pending) | PENDING |
+| F10 | Agent-loop branch | 03-client-unification.md | (pending) | (pending) | PENDING |
+| F11 | Config plumbing | 03-client-unification.md | (pending) | (pending) | PENDING |
+| F12 | EndpointKey + endpointBlocks state | 04-endpoint-timeouts.md | (pending) | (pending) | PENDING |
+| F13 | Rotation integration | 04-endpoint-timeouts.md | (pending) | (pending) | PENDING |
+| F14 | Alias-level explicit timeout (consistent-member rule) | 04-endpoint-timeouts.md | (pending) | (pending) | PENDING |
+| F15 | Docs (D10 requires this explicitly) | 04-endpoint-timeouts.md | (pending) | (pending) | PENDING |
+| ... | +4 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

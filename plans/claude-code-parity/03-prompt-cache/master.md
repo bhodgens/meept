@@ -404,3 +404,15 @@ Wire into `meept.json5`:
 - [ ] Config flag defaults to enabled
 - [ ] Backward compatible when disabled
 - [ ] No debug artifacts, no TODOs, no placeholder values
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+N/A — no leaf documents found alongside this orchestrator. If this tree
+gains leaves, build the coverage matrix before dispatching them.

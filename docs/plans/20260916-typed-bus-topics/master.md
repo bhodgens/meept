@@ -321,3 +321,32 @@ Required headings (exact strings): `## Dispatch Protocol`, `## Interface Contrac
 - The `exhaustive` linter may flag pre-existing non-WS switches when enabled repo-wide. Leaf 04's task covers the scoping fallback; the orchestrator reviews the final .golangci.yml diff to confirm the scoping is honest and documented, not a blanket exclusion.
 - Payload struct promotion (leaf 02): if a publish site marshals an anonymous struct, promoting it to a named exported struct in the owning package is in scope; renaming existing exported types is NOT (that breaks other consumers) - if promotion requires a rename, stop and report.
 - Sub-agent timeout discipline: every leaf here is sized well under the wall-clock cap. If a leaf times out anyway, audit `git status` for partial work, then re-dispatch only the missing pieces (never the whole leaf blindly).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Topic declaration type + NewTopic | 01-topic-generic.md | (pending) | (pending) | PENDING |
+| F2 | SubscribeT wrapper | 01-topic-generic.md | (pending) | (pending) | PENDING |
+| F3 | PublishT wrapper + marshal-failure decision | 01-topic-generic.md | (pending) | (pending) | PENDING |
+| F4 | Declaration + placement decision | 02-migrate-scarred-topics.md | (pending) | (pending) | PENDING |
+| F5 | Migrate the publisher | 02-migrate-scarred-topics.md | (pending) | (pending) | PENDING |
+| F6 | Verify no functional drift anywhere | 02-migrate-scarred-topics.md | (pending) | (pending) | PENDING |
+| F7 | wsclass package + TurnTerminalEvent marker | 03-ws-classification.md | (pending) | (pending) | PENDING |
+| F8 | Marker-first classification in transformBusEventToWS | 03-ws-classification.md | (pending) | (pending) | PENDING |
+| F9 | Parity fence + report | 03-ws-classification.md | (pending) | (pending) | PENDING |
+| F10 | Enable exhaustive, baseline, and RED experiment | 04-exhaustive-lint.md | (pending) | (pending) | PENDING |
+| F11 | CI path verification | 04-exhaustive-lint.md | (pending) | (pending) | PENDING |
+| F12 | Verify the described code exists (docs-only "confirm old state") | 05-agents-md-cleanup.md | (pending) | (pending) | PENDING |
+| F13 | Apply the three edits | 05-agents-md-cleanup.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

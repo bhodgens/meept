@@ -209,3 +209,31 @@ Tree OK + all leaves OK required before any dispatch.
 - Fail-fast is DEFAULT-OFF: production keeps rotation. It exists to make
   testing honest (user's core complaint) — document that in the config
   comment.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Intent.Model + ResolvedModel accessor | 01-provenance-meta.md | (pending) | (pending) | PENDING |
+| F2 | ChatResponse.Meta population | 01-provenance-meta.md | (pending) | (pending) | PENDING |
+| F3 | package + build green | 01-provenance-meta.md | (pending) | (pending) | PENDING |
+| F4 | IntentAnalyzer FailFast | 02-classifier-fail-fast.md | (pending) | (pending) | PENDING |
+| F5 | config + dispatcher threading | 02-classifier-fail-fast.md | (pending) | (pending) | PENDING |
+| F6 | package + build green | 02-classifier-fail-fast.md | (pending) | (pending) | PENDING |
+| F7 | digest field + resolution | 03-digest-working-dir.md | (pending) | (pending) | PENDING |
+| F8 | activity block line | 03-digest-working-dir.md | (pending) | (pending) | PENDING |
+| F9 | package green | 03-digest-working-dir.md | (pending) | (pending) | PENDING |
+| F10 | HANDOFF — combined-sft rehabilitation + Stage-0 embedding prefilter | HANDOFF-STAGE0.md | (pending) | (pending) | PENDING |
+| F11 | Classification & Routing — Handoff Document | HANDOFF.md | (pending) | (pending) | PENDING |
+| F12 | Design: Classifier Outcome Metrics + Correction-Capture Pipeline | design.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

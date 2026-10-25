@@ -369,3 +369,35 @@ Match `internal/agent` house style:
    plan with two independent phases, observe both phase-start logs and
    per-phase conversationIDs; flip back to false and observe strict
    serial behavior restored.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | RED — failing tests first | 01-frontier-compute.md | (pending) | (pending) | PENDING |
+| F2 | GREEN — implement `internal/agent/phase_frontier.go` | 01-frontier-compute.md | (pending) | (pending) | PENDING |
+| F3 | verify | 01-frontier-compute.md | (pending) | (pending) | PENDING |
+| F4 | RED — flag-off equivalence harness (proves the refactor is safe) | 02-store-state.md | (pending) | (pending) | PENDING |
+| F5 | extraction refactor (no behavior change) | 02-store-state.md | (pending) | (pending) | PENDING |
+| F6 | RED→GREEN — frontier dispatch | 02-store-state.md | (pending) | (pending) | PENDING |
+| F7 | RED — worktree provisioner tests | 03-hooks-budget.md | (pending) | (pending) | PENDING |
+| F8 | GREEN — implement provisioner | 03-hooks-budget.md | (pending) | (pending) | PENDING |
+| F9 | single-slot phase-state survey + fix | 03-hooks-budget.md | (pending) | (pending) | PENDING |
+| F10 | verify | 03-hooks-budget.md | (pending) | (pending) | PENDING |
+| F11 | RED — config schema tests | 04-surface-docs.md | (pending) | (pending) | PENDING |
+| F12 | RED→GREEN — daemon wiring test | 04-surface-docs.md | (pending) | (pending) | PENDING |
+| F13 | worktree consumption wiring | 04-surface-docs.md | (pending) | (pending) | PENDING |
+| F14 | docs + AGENTS.md | 04-surface-docs.md | (pending) | (pending) | PENDING |
+| F15 | verify | 04-surface-docs.md | (pending) | (pending) | PENDING |
+| ... | +1 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

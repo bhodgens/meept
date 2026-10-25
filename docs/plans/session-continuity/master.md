@@ -181,3 +181,26 @@ Must print ALL TREES COMPLIANT contribution (tree OK, leaves OK).
   reply guard (separately fixed, commit 26f276fd).
 - macOS: never unbounded `go test ./...`; use -p 2 scoped runs.
 - Working tree may carry sibling-session WIP; stage only your paths.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | SessionConversation accessor on AgentLoop | 01-task-turn-session-record.md | (pending) | (pending) | PENDING |
+| F2 | recordExchangeInSessionConv + call site | 01-task-turn-session-record.md | (pending) | (pending) | PENDING |
+| F3 | restoreFn construction | 02-conversation-restore.md | (pending) | (pending) | PENDING |
+| F4 | switch RunOnce/RunOnceWithParts acquisition to GetOrRestore | 02-conversation-restore.md | (pending) | (pending) | PENDING |
+| F5 | unknown-ID behavior | 02-conversation-restore.md | (pending) | (pending) | PENDING |
+| F6 | A5 tightening | 03-e2e-continuity-assert.md | (pending) | (pending) | PENDING |
+| F7 | double-run verification | 03-e2e-continuity-assert.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

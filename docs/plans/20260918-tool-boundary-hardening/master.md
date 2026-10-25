@@ -247,3 +247,32 @@ after authoring leaves.
 - Do not touch the nudge-cap or overflow machinery (already landed).
 - Watch for sibling sessions: re-check `git log` before each commit; commit by
   explicit paths only.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | ValidateToolArgs core | 01-arg-validation.md | (pending) | (pending) | PENDING |
+| F2 | Wire into Registry.Execute | 01-arg-validation.md | (pending) | (pending) | PENDING |
+| F3 | Sweep the builtin registry for latent boundary gaps | 01-arg-validation.md | (pending) | (pending) | PENDING |
+| F4 | task_create regression pin | 01-arg-validation.md | (pending) | (pending) | PENDING |
+| F5 | Breaker primitive | 02-repeat-error-breaker.md | (pending) | (pending) | PENDING |
+| F6 | Wire the breaker into the tool-call error path | 02-repeat-error-breaker.md | (pending) | (pending) | PENDING |
+| F7 | Placement verification + honest-failure copy | 02-repeat-error-breaker.md | (pending) | (pending) | PENDING |
+| F8 | planLooksVacuous primitive | 03-plan-vacuity-gate.md | (pending) | (pending) | PENDING |
+| F9 | Wire into heuristicReviewPasses | 03-plan-vacuity-gate.md | (pending) | (pending) | PENDING |
+| F10 | No-regression sweep | 03-plan-vacuity-gate.md | (pending) | (pending) | PENDING |
+| F11 | classifyReportTagAlong predicate | 04-report-tagalong-arbitration.md | (pending) | (pending) | PENDING |
+| F12 | Collapse integration | 04-report-tagalong-arbitration.md | (pending) | (pending) | PENDING |
+| F13 | Regression sweep (F42 + 2026-09-10 arbitration) | 04-report-tagalong-arbitration.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

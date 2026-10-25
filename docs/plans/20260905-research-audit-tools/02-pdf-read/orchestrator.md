@@ -103,3 +103,32 @@ After all three leaves REVIEWED: run `go test -p 2 ./internal/tools/builtin/ -ru
 build daemon (`go build ./cmd/meept-daemon`); confirm no unused-import or
 unused-symbol failures (pre-commit U1000 — remove dead helpers, do not
 nolint). Then mark branch COMPLETE in parent master.md.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | dependency | 01-pdf-lib-wiring.md | (pending) | (pending) | PENDING |
+| F2 | verify library API from source | 01-pdf-lib-wiring.md | (pending) | (pending) | PENDING |
+| F3 | TDD the core | 01-pdf-lib-wiring.md | (pending) | (pending) | PENDING |
+| F4 | implement | 01-pdf-lib-wiring.md | (pending) | (pending) | PENDING |
+| F5 | verify | 01-pdf-lib-wiring.md | (pending) | (pending) | PENDING |
+| F6 | TDD the tool (pdf_read_test.go first) | 02-tool-surface.md | (pending) | (pending) | PENDING |
+| F7 | implement pdf_read.go | 02-tool-surface.md | (pending) | (pending) | PENDING |
+| F8 | register in components.go | 02-tool-surface.md | (pending) | (pending) | PENDING |
+| F9 | verify | 02-tool-surface.md | (pending) | (pending) | PENDING |
+| F10 | locate both sites | 03-webfetch-sniff.md | (pending) | (pending) | PENDING |
+| F11 | TDD (web_fetch_test.go additions first) | 03-webfetch-sniff.md | (pending) | (pending) | PENDING |
+| F12 | implement | 03-webfetch-sniff.md | (pending) | (pending) | PENDING |
+| F13 | verify | 03-webfetch-sniff.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

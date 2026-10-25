@@ -314,3 +314,35 @@ Required sections present in this orchestrator: Dispatch Protocol ✓, Interface
 - Do NOT vendor bubblewrap source (LGPL inside Apache upstream). Exec external binary; document install requirement.
 - cua-driver ships disabled; enabling is user action. Skill (leaf 09) bundles regardless so it loads on enable.
 - References: meept/docs/research/2026-08-24-agent-parity-audit.md sections 3 (gaps 1,3,4,5) and 6 (borrow tiers); issues bhodgens/meept#25 (env) and #26 (cua-driver).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | EnvPolicyConfig plumbed through config | 01-env-policy.md | (pending) | (pending) | PENDING |
+| F2 | BuildChildEnv implementation | 01-env-policy.md | (pending) | (pending) | PENDING |
+| F3 | LocalBackend rewiring | 01-env-policy.md | (pending) | (pending) | PENDING |
+| F4 | Inherit-mode warning + docs pointer | 01-env-policy.md | (pending) | (pending) | PENDING |
+| F5 | Resolver core + Qualifies | 02-failclosed-backends.md | (pending) | (pending) | PENDING |
+| F6 | BwrapBackend | 02-failclosed-backends.md | (pending) | (pending) | PENDING |
+| F7 | Daemon wiring + config plumbing | 02-failclosed-backends.md | (pending) | (pending) | PENDING |
+| F8 | Config schema | 03-secret-broker.md | (pending) | (pending) | PENDING |
+| F9 | Broker load + child values | 03-secret-broker.md | (pending) | (pending) | PENDING |
+| F10 | MCP stdio env wiring | 03-secret-broker.md | (pending) | (pending) | PENDING |
+| F11 | Host matching + placeholder scanning helpers | 04-egress-proxy.md | (pending) | (pending) | PENDING |
+| F12 | ReverseProxy modifier | 04-egress-proxy.md | (pending) | (pending) | PENDING |
+| F13 | Config + daemon wiring + status exposure | 04-egress-proxy.md | (pending) | (pending) | PENDING |
+| F14 | StageWrite + hash field | 05-write-staging.md | (pending) | (pending) | PENDING |
+| F15 | Drift-checking accept | 05-write-staging.md | (pending) | (pending) | PENDING |
+| ... | +15 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

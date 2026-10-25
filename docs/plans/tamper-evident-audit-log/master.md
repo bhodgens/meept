@@ -390,3 +390,35 @@ final commit):
    exists with a line per export; `jq -c . <file>` parses every line.
 7. **Docs:** employees.md section renders (headings/links valid); AGENTS.md
    Key Components table row present.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | canonical.go — CanonicalJSON for maps/scalars | 01-chain-core.md | (pending) | (pending) | PENDING |
+| F2 | chain.go — Record, HashRecord, VerifyChain | 01-chain-core.md | (pending) | (pending) | PENDING |
+| F3 | store.go — Migrate, OpenStore, Append, Head | 01-chain-core.md | (pending) | (pending) | PENDING |
+| F4 | helpers_test.go — shared test helpers | 01-chain-core.md | (pending) | (pending) | PENDING |
+| F5 | full-package verification | 01-chain-core.md | (pending) | (pending) | PENDING |
+| F6 | redact.go — SanitizePayload | 02-emit-wiring.md | (pending) | (pending) | PENDING |
+| F7 | enforcement.go — ChainEmitter hook on AuditStore | 02-emit-wiring.md | (pending) | (pending) | PENDING |
+| F8 | emit.go — the Store→ChainEmitter adapter | 02-emit-wiring.md | (pending) | (pending) | PENDING |
+| F9 | goal_loop.go — gate result emission | 02-emit-wiring.md | (pending) | (pending) | PENDING |
+| F10 | wiring.go — construct and attach the chain store | 02-emit-wiring.md | (pending) | (pending) | PENDING |
+| F11 | package-wide verification | 02-emit-wiring.md | (pending) | (pending) | PENDING |
+| F12 | anchor.go — Store.ExportDigest | 03-anchor-verify.md | (pending) | (pending) | PENDING |
+| F13 | AnchorJob — periodic ticker loop | 03-anchor-verify.md | (pending) | (pending) | PENDING |
+| F14 | RPC agents.audit.verify | 03-anchor-verify.md | (pending) | (pending) | PENDING |
+| F15 | wiring.go — hand the chain DB to the RPC handler + start AnchorJob | 03-anchor-verify.md | (pending) | (pending) | PENDING |
+| ... | +3 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

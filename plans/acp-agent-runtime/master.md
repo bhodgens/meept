@@ -311,3 +311,35 @@ Mechanical items (no user decision needed): protocol version + framing verified 
 - **Sibling sessions:** this repo runs parallel agent sessions. Leaves stage nothing; the orchestrator stages exact paths. Poll `go build ./internal/acp/` if siblings break the tree, per meept-development skill.
 - **Pre-commit gates:** errors gate scans ADDED lines; U1000 unused-code gate; comma-ok exemption active. See references in meept-development skill.
 - AGENTS.md feature-wiring requirement: this tree includes CLI/status surfacing (leaf 08) + tool exposure (leaf 05) + config (leaf 01) — wiring checklist satisfied. Docs updates: each leaf includes its docs-workflows section edit per the repo's feature documentation requirement.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Failing test for ACPConfig defaults | 01-config-catalog.md | (pending) | (pending) | PENDING |
+| F2 | Schema + defaults + validation | 01-config-catalog.md | (pending) | (pending) | PENDING |
+| F3 | Failing test for catalog load/save | 01-config-catalog.md | (pending) | (pending) | PENDING |
+| F4 | Catalog load/save implementation | 01-config-catalog.md | (pending) | (pending) | PENDING |
+| F5 | Catalog template | 01-config-catalog.md | (pending) | (pending) | PENDING |
+| F6 | Docs | 01-config-catalog.md | (pending) | (pending) | PENDING |
+| F7 | Failing tests — wire round-trip | 02-protocol-types.md | (pending) | (pending) | PENDING |
+| F8 | Failing tests — transport call correlation | 02-protocol-types.md | (pending) | (pending) | PENDING |
+| F9 | Transport implementation | 02-protocol-types.md | (pending) | (pending) | PENDING |
+| F10 | Package docs | 02-protocol-types.md | (pending) | (pending) | PENDING |
+| F11 | Fake ACP agent test helper | 03-session-lifecycle.md | (pending) | (pending) | PENDING |
+| F12 | Failing tests — handshake | 03-session-lifecycle.md | (pending) | (pending) | PENDING |
+| F13 | Failing tests — send/cancel/close | 03-session-lifecycle.md | (pending) | (pending) | PENDING |
+| F14 | Session implementation | 03-session-lifecycle.md | (pending) | (pending) | PENDING |
+| F15 | Package-level integration test | 03-session-lifecycle.md | (pending) | (pending) | PENDING |
+| ... | +25 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

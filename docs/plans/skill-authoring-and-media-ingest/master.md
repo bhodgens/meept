@@ -408,3 +408,35 @@ Checklist, and a "Do NOT commit" instruction.
 - Scope guard for all leaves: NO changes to the evolver
   (internal/selfimprove, internal/skills/lifecycle evolver_*), NO
   changes to wiki stores, NO agent loop changes.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Tool skeleton + schema | 01-transcript-fetch-tool.md | (pending) | (pending) | PENDING |
+| F2 | URL parsing to video ID | 01-transcript-fetch-tool.md | (pending) | (pending) | PENDING |
+| F3 | Subprocess execution with injectable runner | 01-transcript-fetch-tool.md | (pending) | (pending) | PENDING |
+| F4 | Execute wiring of args + timestamps format | 01-transcript-fetch-tool.md | (pending) | (pending) | PENDING |
+| F5 | gofmt + package green | 01-transcript-fetch-tool.md | (pending) | (pending) | PENDING |
+| F6 | Tool skeleton + schema + name validation | 02-skill-create-tool.md | (pending) | (pending) | PENDING |
+| F7 | Content assembly + parser acceptance | 02-skill-create-tool.md | (pending) | (pending) | PENDING |
+| F8 | Execute path through the Writer | 02-skill-create-tool.md | (pending) | (pending) | PENDING |
+| F9 | Duplicate detection via registry (SetRegistry) | 02-skill-create-tool.md | (pending) | (pending) | PENDING |
+| F10 | gofmt + package green | 02-skill-create-tool.md | (pending) | (pending) | PENDING |
+| F11 | Tool skeleton, schema, mode validation | 03-skill-patch-tool.md | (pending) | (pending) | PENDING |
+| F12 | Replace mode — unique-match swap on the body | 03-skill-patch-tool.md | (pending) | (pending) | PENDING |
+| F13 | Rewrite mode with parser validation | 03-skill-patch-tool.md | (pending) | (pending) | PENDING |
+| F14 | System-tier refusal | 03-skill-patch-tool.md | (pending) | (pending) | PENDING |
+| F15 | gofmt + package green | 03-skill-patch-tool.md | (pending) | (pending) | PENDING |
+| ... | +12 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

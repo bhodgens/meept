@@ -177,3 +177,22 @@ Integration gate (orchestrator, after Wave 2):
 5. Docs: `docs/workflows/` feature note updated (internal/llm + internal/agent
    behavior; doctor check listed wherever existing doctor checks are
    documented).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Leaf 01: llm.StripThinking export + regex home | 01-strip-export.md | (pending) | (pending) | PENDING |
+| F2 | Leaf 02: doctor reasoning-wire-form check | 02-doctor-check.md | (pending) | (pending) | PENDING |
+| F3 | Leaf 03: conversation choke-point reasoning strip | 03-conversation-strip.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

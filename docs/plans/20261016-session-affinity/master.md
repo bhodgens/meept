@@ -367,3 +367,26 @@ Leaf 07 owns the executable integration coverage:
 4. **No bus topic for lifecycle events.** Direct hook keeps `make graphs`
    green; if a future GUI needs live teardown visibility, add a topic
    THEN (new surface = new graphs regen + comm classification).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Scope Threading - Implementation Leaf | 01-scope-threading.md | (pending) | (pending) | PENDING |
+| F2 | Affinity Header: Config + OpenAI-Compatible Client - Implementation Leaf | 02-affinity-header.md | (pending) | (pending) | PENDING |
+| F3 | Anthropic Client Affinity Header - Implementation Leaf | 03-anthropic-header.md | (pending) | (pending) | PENDING |
+| F4 | Resolver Sticky Endpoint Preference - Implementation Leaf | 04-resolver-sticky.md | (pending) | (pending) | PENDING |
+| F5 | Session Lifecycle Hook + Idle Reaper - Implementation Leaf | 05-session-lifecycle.md | (pending) | (pending) | PENDING |
+| F6 | Provider Teardown Adapters + Coordinator - Implementation Leaf | 06-provider-teardown.md | (pending) | (pending) | PENDING |
+| F7 | E2E Suites + Docs + Invariants - Implementation Leaf | 07-e2e-docs.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

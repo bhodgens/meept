@@ -234,3 +234,29 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 - Do NOT touch the classifier taxonomy (quickplan intent, cue guard) —
   frozen at iter-19/20.
 - ASCII only; pre-commit hooks run the full gate battery.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | AllotmentConfig + defaults | 01-allotment-math.md | (pending) | (pending) | PENDING |
+| F2 | EstimateStepTokens | 01-allotment-math.md | (pending) | (pending) | PENDING |
+| F3 | AllotmentTokens | 01-allotment-math.md | (pending) | (pending) | PENDING |
+| F4 | SplitStepsByAllotment | 01-allotment-math.md | (pending) | (pending) | PENDING |
+| F5 | Continuation helpers (naming only, for leaf 02) | 01-allotment-math.md | (pending) | (pending) | PENDING |
+| F6 | Config + provider dependency | 02-tactical-wiring.md | (pending) | (pending) | PENDING |
+| F7 | Allotment-aware batching in ScheduleReadySteps | 02-tactical-wiring.md | (pending) | (pending) | PENDING |
+| F8 | PlanRequest.ExecutorModelRef | 02-tactical-wiring.md | (pending) | (pending) | PENDING |
+| F9 | Daemon wiring | 02-tactical-wiring.md | (pending) | (pending) | PENDING |
+| F10 | Tests for the daemon wiring | 02-tactical-wiring.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

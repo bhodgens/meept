@@ -282,3 +282,33 @@ contract section, Self-Verification Checklist, Review Checklist, and a
 - Scope guard: NO changes to internal/agent/loop.go, NO new tools, NO
   evolver changes, NO RPC handlers. AGENTS.md: no new packages — the
   no-change verification applies (leaf 04 states it in the report).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Config field + path resolution | 01-file-backed-output.md | (pending) | (pending) | PENDING |
+| F2 | File write + bounded preview result | 01-file-backed-output.md | (pending) | (pending) | PENDING |
+| F3 | gofmt + package green | 01-file-backed-output.md | (pending) | (pending) | PENDING |
+| F4 | Config fields + SetSummarizer + schema defaults | 02-summarize-mode.md | (pending) | (pending) | PENDING |
+| F5 | Map-reduce engine (fake chatter) | 02-summarize-mode.md | (pending) | (pending) | PENDING |
+| F6 | Execute wiring + interaction with output_path | 02-summarize-mode.md | (pending) | (pending) | PENDING |
+| F7 | gofmt + package green | 02-summarize-mode.md | (pending) | (pending) | PENDING |
+| F8 | learn-from-video skill rewrite | 03-skill-and-docs.md | (pending) | (pending) | PENDING |
+| F9 | external-integrations doc | 03-skill-and-docs.md | (pending) | (pending) | PENDING |
+| F10 | skills.md composition flow | 03-skill-and-docs.md | (pending) | (pending) | PENDING |
+| F11 | Verification | 03-skill-and-docs.md | (pending) | (pending) | PENDING |
+| F12 | Dedicated summarizer client construction | 04-wiring.md | (pending) | (pending) | PENDING |
+| F13 | Registration block + chatter injection | 04-wiring.md | (pending) | (pending) | PENDING |
+| F14 | gofmt + scoped green | 04-wiring.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

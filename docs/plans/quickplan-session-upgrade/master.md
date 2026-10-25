@@ -197,3 +197,31 @@ carries 37/48 of traffic share and the scatter evidence is LLM-path
 specific; extending is a follow-up measurement. Q2 (upgrade to quickplan
 vs directly to plan?) — quickplan per the ratified taxonomy
 (execute-existing-plan = quickplan).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | (RED first) — defaults test | 01-config-knob.md | (pending) | (pending) | PENDING |
+| F2 | (GREEN) — schema | 01-config-knob.md | (pending) | (pending) | PENDING |
+| F3 | — config template | 01-config-knob.md | (pending) | (pending) | PENDING |
+| F4 | — template-loading round-trip test | 01-config-knob.md | (pending) | (pending) | PENDING |
+| F5 | (RED) — gate tests | 02-session-gate.md | (pending) | (pending) | PENDING |
+| F6 | (GREEN) — session_state_gate.go | 02-session-gate.md | (pending) | (pending) | PENDING |
+| F7 | — ClassifyAndRoute insertion | 02-session-gate.md | (pending) | (pending) | PENDING |
+| F8 | — wiring check + full suite | 02-session-gate.md | (pending) | (pending) | PENDING |
+| F9 | — scratch rig + OFF leg | 03-replay-acceptance.md | (pending) | (pending) | PENDING |
+| F10 | — ON leg | 03-replay-acceptance.md | (pending) | (pending) | PENDING |
+| F11 | — scoring + report | 03-replay-acceptance.md | (pending) | (pending) | PENDING |
+| F12 | b — teardown | 03-replay-acceptance.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

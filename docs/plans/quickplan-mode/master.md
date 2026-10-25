@@ -288,3 +288,35 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 - Parallel-session hazard: dispatcher.go may carry sibling WIP; leaves
   touching it must re-read at dispatch time and pin hunks (Contract 2 and
   5 regions) in their briefs.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Add the constant | 01-intent-type.md | (pending) | (pending) | PENDING |
+| F2 | Wire the five intent-method switches | 01-intent-type.md | (pending) | (pending) | PENDING |
+| F3 | Tests | 01-intent-type.md | (pending) | (pending) | PENDING |
+| F4 | Update every exhaustive intent table in the package | 01-intent-type.md | (pending) | (pending) | PENDING |
+| F5 | Register the mode | 02-dispatcher-routing.md | (pending) | (pending) | PENDING |
+| F6 | Final fallback swap | 02-dispatcher-routing.md | (pending) | (pending) | PENDING |
+| F7 | Ambiguity gate — clarify, then resume as quickplan | 02-dispatcher-routing.md | (pending) | (pending) | PENDING |
+| F8 | Session-state context for the orchestrator | 02-dispatcher-routing.md | (pending) | (pending) | PENDING |
+| F9 | Tests | 02-dispatcher-routing.md | (pending) | (pending) | PENDING |
+| F10 | Cue pattern file | 03-prefilter-index.md | (pending) | (pending) | PENDING |
+| F11 | Prefilter cue guard | 03-prefilter-index.md | (pending) | (pending) | PENDING |
+| F12 | Centroid builder gains quickplan examples | 03-prefilter-index.md | (pending) | (pending) | PENDING |
+| F13 | Tests | 03-prefilter-index.md | (pending) | (pending) | PENDING |
+| F14 | Regression | 03-prefilter-index.md | (pending) | (pending) | PENDING |
+| F15 | Update docs/workflows/intent-routing.md | 04-docs.md | (pending) | (pending) | PENDING |
+| ... | +5 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

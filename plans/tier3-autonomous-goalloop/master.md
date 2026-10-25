@@ -129,3 +129,34 @@ non-matching candidates and pending-plan creation for matching ones
 
 None — spec lines 298-300 define behavior; constraints already in
 ConstitutionalConstraints.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | WithEscalationGate setter test | 01-decidetier3-core.md | (pending) | (pending) | PENDING |
+| F2 | decideTier3 happy path (no gate) | 01-decidetier3-core.md | (pending) | (pending) | PENDING |
+| F3 | MaxActivePlans cap | 01-decidetier3-core.md | (pending) | (pending) | PENDING |
+| F4 | Escalation gate routes to Plan signoff | 01-decidetier3-core.md | (pending) | (pending) | PENDING |
+| F5 | Failure path | 01-decidetier3-core.md | (pending) | (pending) | PENDING |
+| F6 | Switch wiring | 01-decidetier3-core.md | (pending) | (pending) | PENDING |
+| F7 | ShouldEscalate table-driven tests | 02-escalation-gate.md | (pending) | (pending) | PENDING |
+| F8 | Implement ShouldEscalate | 02-escalation-gate.md | (pending) | (pending) | PENDING |
+| F9 | Wiring | 02-escalation-gate.md | (pending) | (pending) | PENDING |
+| F10 | Integration test | 02-escalation-gate.md | (pending) | (pending) | PENDING |
+| F11 | Escalated metric test | 03-wiring-cli-docs.md | (pending) | (pending) | PENDING |
+| F12 | Audit event on escalation | 03-wiring-cli-docs.md | (pending) | (pending) | PENDING |
+| F13 | CLI surfacing | 03-wiring-cli-docs.md | (pending) | (pending) | PENDING |
+| F14 | Docs | 03-wiring-cli-docs.md | (pending) | (pending) | PENDING |
+| F15 | End-to-end wiring test | 03-wiring-cli-docs.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

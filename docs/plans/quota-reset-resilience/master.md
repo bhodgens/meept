@@ -538,3 +538,35 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
   so it doesn't become a blank chat bubble.
 - internal/llm tests are slow (~80-90s: real HTTP/TLS setup). Always scope
   with -run during iteration; full runs only at integration.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | QuotaResetError type + helpers | 01-quota-error-type.md | (pending) | (pending) | PENDING |
+| F2 | Structured body parsing | 01-quota-error-type.md | (pending) | (pending) | PENDING |
+| F3 | Header extraction | 01-quota-error-type.md | (pending) | (pending) | PENDING |
+| F4 | Integrate into both clients' error paths | 01-quota-error-type.md | (pending) | (pending) | PENDING |
+| F5 | QuotaCredentialKey | 01-quota-error-type.md | (pending) | (pending) | PENDING |
+| F6 | QuotaRetryConfig struct + defaults + parse | 02-quota-config.md | (pending) | (pending) | PENDING |
+| F7 | Template + plumbing | 02-quota-config.md | (pending) | (pending) | PENDING |
+| F8 | Quota-block state on AliasHealth + skip logic | 03-resolver-quota-blocks.md | (pending) | (pending) | PENDING |
+| F9 | Shared-pool credential blocking | 03-resolver-quota-blocks.md | (pending) | (pending) | PENDING |
+| F10 | Exported status readers | 03-resolver-quota-blocks.md | (pending) | (pending) | PENDING |
+| F11 | ProviderManager probe integration | 03-resolver-quota-blocks.md | (pending) | (pending) | PENDING |
+| F12 | Broker stub (no-op, existing tests pass) | 03-resolver-quota-blocks.md | (pending) | (pending) | PENDING |
+| F13 | Decorator type + wait policy | 04-direct-call-wait.md | (pending) | (pending) | PENDING |
+| F14 | Wire into ChatterForModel | 04-direct-call-wait.md | (pending) | (pending) | PENDING |
+| F15 | State constants + transitions | 05-agent-quota-state.md | (pending) | (pending) | PENDING |
+| ... | +19 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

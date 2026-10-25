@@ -88,3 +88,35 @@ branch tracking table notes. Verify `launchctl print` PATH after
 `make install` if launchd service is active on this machine. Mark branch
 COMPLETE in parent master.md only when both 03 and 04 are COMPLETE and
 issue #32's close is queued in the final commit message.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | TDD the field | 01-install-hint-field.md | (pending) | (pending) | PENDING |
+| F2 | annotate the catalog | 01-install-hint-field.md | (pending) | (pending) | PENDING |
+| F3 | loader test | 01-install-hint-field.md | (pending) | (pending) | PENDING |
+| F4 | verify | 01-install-hint-field.md | (pending) | (pending) | PENDING |
+| F5 | read doctor.go fully first | 02-doctor-mcp-checks.md | (pending) | (pending) | PENDING |
+| F6 | TDD (doctor_test.go first) | 02-doctor-mcp-checks.md | (pending) | (pending) | PENDING |
+| F7 | implement | 02-doctor-mcp-checks.md | (pending) | (pending) | PENDING |
+| F8 | verify | 02-doctor-mcp-checks.md | (pending) | (pending) | PENDING |
+| F9 | TDD daemonpath_test.go first | 03-daemonpath-go.md | (pending) | (pending) | PENDING |
+| F10 | implement daemonpath.go | 03-daemonpath-go.md | (pending) | (pending) | PENDING |
+| F11 | wire launchd.go | 03-daemonpath-go.md | (pending) | (pending) | PENDING |
+| F12 | wire kardianos/service | 03-daemonpath-go.md | (pending) | (pending) | PENDING |
+| F13 | manager.go failure warning | 03-daemonpath-go.md | (pending) | (pending) | PENDING |
+| F14 | verify | 03-daemonpath-go.md | (pending) | (pending) | PENDING |
+| F15 | read DaemonController.swift | 04-menubar-path.md | (pending) | (pending) | PENDING |
+| ... | +2 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

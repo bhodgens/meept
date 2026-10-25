@@ -203,3 +203,26 @@ Tree OK + all leaves OK required before any dispatch.
   before editing, keep hunks minimal.
 - Do NOT change ambiguity threshold (0.6), do NOT add keyword lists, do
   NOT add config. The model decides from context.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | SessionContextDigest type + IsEmpty | 01-session-context-digest.md | (pending) | (pending) | PENDING |
+| F2 | buildSessionContextDigest | 01-session-context-digest.md | (pending) | (pending) | PENDING |
+| F3 | wire into package build | 01-session-context-digest.md | (pending) | (pending) | PENDING |
+| F4 | analyzer signature + prompt blocks | 02-analyzer-session-rules.md | (pending) | (pending) | PENDING |
+| F5 | dispatcher call sites | 02-analyzer-session-rules.md | (pending) | (pending) | PENDING |
+| F6 | two consecutive green runs | 03-e2e-a5-verify.md | (pending) | (pending) | PENDING |
+| F7 | regression sweep | 03-e2e-a5-verify.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

@@ -157,3 +157,35 @@ None — panic replacement follows clear, established pattern:
 - No design trade-offs: crashing is always worse than graceful error handling
 
 All decisions straightforward with no ambiguities.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Read and understand current behavior | 01-bus-publish.md | (pending) | (pending) | PENDING |
+| F2 | Define sentinel error | 01-bus-publish.md | (pending) | (pending) | PENDING |
+| F3 | Replace panic with error return | 01-bus-publish.md | (pending) | (pending) | PENDING |
+| F4 | Update function signature | 01-bus-publish.md | (pending) | (pending) | PENDING |
+| F5 | Add test case | 01-bus-publish.md | (pending) | (pending) | PENDING |
+| F6 | Verify | 01-bus-publish.md | (pending) | (pending) | PENDING |
+| F7 | Read and understand context | 02-agent-loop.md | (pending) | (pending) | PENDING |
+| F8 | Identify the function signature | 02-agent-loop.md | (pending) | (pending) | PENDING |
+| F9 | Define sentinel error | 02-agent-loop.md | (pending) | (pending) | PENDING |
+| F10 | Replace panic with error return | 02-agent-loop.md | (pending) | (pending) | PENDING |
+| F11 | Trace and update callers | 02-agent-loop.md | (pending) | (pending) | PENDING |
+| F12 | Add test case | 02-agent-loop.md | (pending) | (pending) | PENDING |
+| F13 | Verify | 02-agent-loop.md | (pending) | (pending) | PENDING |
+| F14 | Read and understand context | 03-mcp-server.md | (pending) | (pending) | PENDING |
+| F15 | Analyze failure modes | 03-mcp-server.md | (pending) | (pending) | PENDING |
+| ... | +20 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

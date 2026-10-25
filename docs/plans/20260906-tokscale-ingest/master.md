@@ -301,3 +301,25 @@ Tracking Table`, `## Integration Test Plan`.
   `go vet` on touched packages before handing off; if a hook fails on
   unrelated in-flight files from the parallel session, use `--no-verify` per
   user standing rule (own tests green, own files only).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | `llm.TokenUsage` gains ReasoningTokens + CacheCreationTokens | 01-schema-and-capture.md | (pending) | (pending) | PENDING |
+| F2 | `llm_calls` schema migration (session_id, reasoning_tokens, cache_creation_token | 01-schema-and-capture.md | (pending) | (pending) | PENDING |
+| F3 | `RecordLLMCall` persists the new fields | 01-schema-and-capture.md | (pending) | (pending) | PENDING |
+| F4 | Thread session id + new tokens through all `recordUsageStore` sites | 01-schema-and-capture.md | (pending) | (pending) | PENDING |
+| F5 | Exempt llm_calls from the retention purge | 02-retention-and-verify.md | (pending) | (pending) | PENDING |
+| F6 | Contract D ingest-verification test | 02-retention-and-verify.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

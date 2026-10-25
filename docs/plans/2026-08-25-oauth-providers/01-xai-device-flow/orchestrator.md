@@ -149,3 +149,26 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 - Leaf 01 is the root-wave gate: branches 02 and 03 import `FlowKind`. Land it first, commit, then fan out.
 - xAI tokens ~6h expiry; existing 10m refresh margin suffices.
 - The poll endpoint 403/404-vs-200 semantics differ per provider; hermes treats non-200-with-`authorization_pending` as continue. Our existing `PollForToken` handles RFC 8628 errors; confirm it maps `authorization_pending`/`slow_down` correctly for form responses (it does — tokenResponse has Error/ErrorDesc fields).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | FlowKind type + provider config fields | 01-registry-extension.md | (pending) | (pending) | PENDING |
+| F2 | OIDC discovery resolver | 01-registry-extension.md | (pending) | (pending) | PENDING |
+| F3 | Form-encoded device requests | 01-registry-extension.md | (pending) | (pending) | PENDING |
+| F4 | Registry entry + resolved flow config | 02-xai-provider-entry.md | (pending) | (pending) | PENDING |
+| F5 | Discovery override in connect + refresh | 02-xai-provider-entry.md | (pending) | (pending) | PENDING |
+| F6 | CLI help + flow dispatch skeleton | 02-xai-provider-entry.md | (pending) | (pending) | PENDING |
+| F7 | config UI pickup (verify, no code) | 02-xai-provider-entry.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

@@ -288,3 +288,35 @@ Re-run until `ALL TREES COMPLIANT: True`.
   carry the real step result" is replaced by "Turns are asynchronous;
   acks are immediate" (legacy behavior documented inside the new bullet).
   The RPC proxy 120s cap is untouched.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | TurnRegistry | 01-async-rpc-mode.md | (pending) | (pending) | PENDING |
+| F2 | chat.submit RPC handler | 01-async-rpc-mode.md | (pending) | (pending) | PENDING |
+| F3 | ChatHandler consumes turn_id + Touch wiring | 01-async-rpc-mode.md | (pending) | (pending) | PENDING |
+| F4 | HTTP /api/v1/chat/submit | 01-async-rpc-mode.md | (pending) | (pending) | PENDING |
+| F5 | registry → reaper seam (data only) | 01-async-rpc-mode.md | (pending) | (pending) | PENDING |
+| F6 | ChatAsync | 02-bench-client.md | (pending) | (pending) | PENDING |
+| F7 | Runner consumes ChatAsync + Row extension | 02-bench-client.md | (pending) | (pending) | PENDING |
+| F8 | suite/docs honesty | 02-bench-client.md | (pending) | (pending) | PENDING |
+| F9 | submitAndAwait helper | 03-cli-client.md | (pending) | (pending) | PENDING |
+| F10 | Wire runChat oneshot path | 03-cli-client.md | (pending) | (pending) | PENDING |
+| F11 | session chat path parity | 03-cli-client.md | (pending) | (pending) | PENDING |
+| F12 | SubmitChat client method + event plumbing | 04-tui-client.md | (pending) | (pending) | PENDING |
+| F13 | Chat view wiring | 04-tui-client.md | (pending) | (pending) | PENDING |
+| F14 | Remove the blocking send on the migrated path | 04-tui-client.md | (pending) | (pending) | PENDING |
+| F15 | ChatSubmitAck + submitChat | 05-gui-client.md | (pending) | (pending) | PENDING |
+| ... | +11 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

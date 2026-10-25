@@ -89,3 +89,29 @@ loop, err := h.loopManager.GetOrCreateWired(conversationID, workingPath, h.loop)
 - Create a worktree for a session, verify the agent operates in the worktree path
 - Verify two sessions in the same project can work on different branches
 - Remove a worktree, verify the session reverts to the project path
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Add WorktreeID/WorktreePath to Session struct | 01-go-backend.md | (pending) | (pending) | PENDING |
+| F2 | Add SetWorktree to session stores | 01-go-backend.md | (pending) | (pending) | PENDING |
+| F3 | Add RPC handlers | 01-go-backend.md | (pending) | (pending) | PENDING |
+| F4 | Update sessionLoop to prefer WorktreePath | 01-go-backend.md | (pending) | (pending) | PENDING |
+| F5 | Add /worktree command to TUI | 01-go-backend.md | (pending) | (pending) | PENDING |
+| F6 | Tests | 01-go-backend.md | (pending) | (pending) | PENDING |
+| F7 | Add /worktree to Flutter slash commands | 02-tui-flutter.md | (pending) | (pending) | PENDING |
+| F8 | Handle /worktree in chat input | 02-tui-flutter.md | (pending) | (pending) | PENDING |
+| F9 | Status bar worktree indicator | 02-tui-flutter.md | (pending) | (pending) | PENDING |
+| F10 | Sidebar — show worktree sessions distinctly | 02-tui-flutter.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

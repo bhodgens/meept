@@ -180,3 +180,35 @@ Re-run until ALL TREES COMPLIANT: True.
    single-employee installs behave exactly as before. UI for employee
    selection is deliberately deferred (binding seam + adapter precedence is
    the deliverable).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | GoalSpec type | 01-goal-ingestion.md | (pending) | (pending) | PENDING |
+| F2 | Manager.CreateGoal | 01-goal-ingestion.md | (pending) | (pending) | PENDING |
+| F3 | Hire parses goals from definition | 01-goal-ingestion.md | (pending) | (pending) | PENDING |
+| F4 | RPC agents.goals.create | 01-goal-ingestion.md | (pending) | (pending) | PENDING |
+| F5 | HTTP route | 01-goal-ingestion.md | (pending) | (pending) | PENDING |
+| F6 | CLI meept agents goal-create | 01-goal-ingestion.md | (pending) | (pending) | PENDING |
+| F7 | SourceImplicit goal source | 02-goal-linkage.md | (pending) | (pending) | PENDING |
+| F8 | Plan.GoalID column | 02-goal-linkage.md | (pending) | (pending) | PENDING |
+| F9 | Task.GoalID column | 02-goal-linkage.md | (pending) | (pending) | PENDING |
+| F10 | PlanCreator sets GoalID | 02-goal-linkage.md | (pending) | (pending) | PENDING |
+| F11 | Implicit goal helper | 02-goal-linkage.md | (pending) | (pending) | PENDING |
+| F12 | Session goal metadata | 03-anchor-chat-path.md | (pending) | (pending) | PENDING |
+| F13 | Goal resolution at plan creation | 03-anchor-chat-path.md | (pending) | (pending) | PENDING |
+| F14 | RPC to set a session goal | 03-anchor-chat-path.md | (pending) | (pending) | PENDING |
+| F15 | Steer on GoalLoop | 04-steer-episode.md | (pending) | (pending) | PENDING |
+| ... | +7 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

@@ -83,3 +83,24 @@ Sandbox HOME test: `HOME=$(mktemp -d) make -n install` shows skill
 copies; real run in a sandbox HOME installs 14 skills; second run
 skips 14; a user-modified skill survives re-install. Mark branch
 COMPLETE in parent master.md after review.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | read the Makefile install/uninstall targets | 01-make-install-skills.md | (pending) | (pending) | PENDING |
+| F2 | implement the install snippet | 01-make-install-skills.md | (pending) | (pending) | PENDING |
+| F3 | uninstall decision | 01-make-install-skills.md | (pending) | (pending) | PENDING |
+| F4 | docs | 01-make-install-skills.md | (pending) | (pending) | PENDING |
+| F5 | verify | 01-make-install-skills.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

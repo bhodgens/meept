@@ -175,3 +175,28 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 - The paste flow is interactive; automated tests cover exchange + URL building, NOT the stdin read (unit-test a `readPastedCode(io.Reader)` helper with a strings.Reader instead).
 - `models_catalog.go` already lists anthropic models under `anthropic` provider ID; `anthropic-sub` ModelConfig created by `registerOAuthProviders` uses provider-ID-as-model-ID placeholder like other OAuth providers — users pick real model IDs via `models.json5` overrides or the placeholder routes server-side. No catalog changes needed.
 - Heredoc/README: subscription billing ≠ Console billing — errors about `anthropic_billing` should surface the hint to use API-key auth instead. Add to error path only if trivial; do not build account-type detection.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | PKCE + state generation | 01-anthropic-flow.md | (pending) | (pending) | PENDING |
+| F2 | Authorize URL builder | 01-anthropic-flow.md | (pending) | (pending) | PENDING |
+| F3 | Exchange with fallback | 01-anthropic-flow.md | (pending) | (pending) | PENDING |
+| F4 | Refresh (form + JSON) + refreshOne routing | 01-anthropic-flow.md | (pending) | (pending) | PENDING |
+| F5 | Registry entry + CLI paste case | 01-anthropic-flow.md | (pending) | (pending) | PENDING |
+| F6 | Option + struct fields | 02-anthropic-bearer.md | (pending) | (pending) | PENDING |
+| F7 | Non-streaming path Bearer headers | 02-anthropic-bearer.md | (pending) | (pending) | PENDING |
+| F8 | Streaming path Bearer headers | 02-anthropic-bearer.md | (pending) | (pending) | PENDING |
+| F9 | createChatterFor + registry entry | 02-anthropic-bearer.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

@@ -217,3 +217,31 @@ Defaults (apply unless the user overrides before dispatch):
 - Do NOT commit from leaves. Orchestrator commits after review.
 - AGENTS.md must list the new script in the Audit scripts table in the same commit as the script (leaf 03).
 - awesome-pages is on for mkdocs; a file under `docs/research/` is enough for nav.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Validate existing catalog JSON | 01-catalog.md | (pending) | (pending) | PENDING |
+| F2 | Fix evidence to real files | 01-catalog.md | (pending) | (pending) | PENDING |
+| F3 | Cover required seed techniques | 01-catalog.md | (pending) | (pending) | PENDING |
+| F4 | Keep evidence URLs honest | 01-catalog.md | (pending) | (pending) | PENDING |
+| F5 | Failing --check without script | 02-script.md | (pending) | (pending) | PENDING |
+| F6 | Implement verify + render | 02-script.md | (pending) | (pending) | PENDING |
+| F7 | --check freshness | 02-script.md | (pending) | (pending) | PENDING |
+| F8 | --search snapshot (optional network) | 02-script.md | (pending) | (pending) | PENDING |
+| F9 | Render must be deterministic | 02-script.md | (pending) | (pending) | PENDING |
+| F10 | Make targets | 03-wiring.md | (pending) | (pending) | PENDING |
+| F11 | AGENTS.md | 03-wiring.md | (pending) | (pending) | PENDING |
+| F12 | Ensure generated markdown exists | 03-wiring.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

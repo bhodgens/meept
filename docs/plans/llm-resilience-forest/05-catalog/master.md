@@ -202,3 +202,29 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
   register_local_model.go is only a rename transform; reject `../`,
   empty, and non-[a-z0-9-_.] chars) — a hostile local
   endpoint must not inject config keys.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Fetchers + parsers | 01-context-discovery.md | (pending) | (pending) | PENDING |
+| F2 | Precedence merge | 01-context-discovery.md | (pending) | (pending) | PENDING |
+| F3 | Config + wiring | 01-context-discovery.md | (pending) | (pending) | PENDING |
+| F4 | Configuration reference | 02-docs-and-config.md | (pending) | (pending) | PENDING |
+| F5 | LM Studio provider docs | 02-docs-and-config.md | (pending) | (pending) | PENDING |
+| F6 | Workflow + AGENTS.md | 02-docs-and-config.md | (pending) | (pending) | PENDING |
+| F7 | Registry entry + constant | 03-lmstudio-provider.md | (pending) | (pending) | PENDING |
+| F8 | Model discovery + registration | 03-lmstudio-provider.md | (pending) | (pending) | PENDING |
+| F9 | Discovery wiring + reasoning translation check | 03-lmstudio-provider.md | (pending) | (pending) | PENDING |
+| F10 | Docs | 03-lmstudio-provider.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

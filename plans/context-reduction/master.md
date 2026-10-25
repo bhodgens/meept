@@ -212,3 +212,27 @@ no ignored errors, no mutex across I/O, two-value map assertions, typed-nil
 guards on Set*, no `time.Now().UnixNano()`/`math/rand` for IDs (use
 `pkg/id.Generate()`). UI text lowercase if any surfaces. New user-facing
 surfaces need CLI/TUI parity (B06 handles this for bridges).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | L01 — Prefix-Aware Response-Cache Keys (P2) | 01-prefix-cache-key.md | (pending) | (pending) | PENDING |
+| F2 | L02 — Response-Cache Metrics Store Wiring (P2) | 02-cache-metrics.md | (pending) | (pending) | PENDING |
+| F3 | L03 — Anthropic Cache Breakpoints via Structured Blocks (P4) | 03-anthropic-cache-blocks.md | (pending) | (pending) | PENDING |
+| F4 | L04 — OpenAI prompt_cache_key + Deterministic Tool Order (P4) | 04-openai-cache-and-tool-order.md | (pending) | (pending) | PENDING |
+| F5 | L05 — Whole-Item Memory Budgeting (P5) | 05-memory-item-budget.md | (pending) | (pending) | PENDING |
+| F6 | L06 — Emit Untrusted-Content Markers at the Tool-Result Seam (P5) | 06-untrusted-markers.md | (pending) | (pending) | PENDING |
+| F7 | L07 — Tool-Output Spill Service (P7) | 07-spill-service.md | (pending) | (pending) | PENDING |
+| F8 | L08 — Spill Retention Sweep (P7) | 08-spill-retention.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

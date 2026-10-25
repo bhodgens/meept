@@ -229,3 +229,27 @@ per leaf with explicit paths; integration gate after leaf 02.
   evolver. AGENTS.md: interface.go gains an exported interface + one
   helper in an existing package — no new package rows; leaf 01 states
   the verification.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | ResultSizer + helper | 01-result-floor-and-map-keys.md | (pending) | (pending) | PENDING |
+| F2 | transcript_fetch declares the floor | 01-result-floor-and-map-keys.md | (pending) | (pending) | PENDING |
+| F3 | compressMapResult determinism + metadata preservation | 01-result-floor-and-map-keys.md | (pending) | (pending) | PENDING |
+| F4 | loop floor consultation | 01-result-floor-and-map-keys.md | (pending) | (pending) | PENDING |
+| F5 | gofmt + suites | 01-result-floor-and-map-keys.md | (pending) | (pending) | PENDING |
+| F6 | Skill slice-size update | 02-skill-page-size-and-docs.md | (pending) | (pending) | PENDING |
+| F7 | Docs sentence | 02-skill-page-size-and-docs.md | (pending) | (pending) | PENDING |
+| F8 | Verification | 02-skill-page-size-and-docs.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

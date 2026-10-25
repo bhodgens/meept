@@ -386,3 +386,33 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 - internal/daemon components wiring is the production construction path for
   Writer/Versioner/evolver; keep changes backward-compatible with any other
   construction sites found via search.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Config knob `skills.evolver.plan_dir` | 01-evolver-plan-sink.md | (pending) | (pending) | PENDING |
+| F2 | Provenance on evolver plans | 01-evolver-plan-sink.md | (pending) | (pending) | PENDING |
+| F3 | Sink wiring in the daemon | 01-evolver-plan-sink.md | (pending) | (pending) | PENDING |
+| F4 | Docs | 01-evolver-plan-sink.md | (pending) | (pending) | PENDING |
+| F5 | ResolveTierPath on discovery | 02-skill-root-resolution.md | (pending) | (pending) | PENDING |
+| F6 | Writer resolves the tier | 02-skill-root-resolution.md | (pending) | (pending) | PENDING |
+| F7 | Daemon construction unchanged but honest | 02-skill-root-resolution.md | (pending) | (pending) | PENDING |
+| F8 | ApplyApprovedPlan dispatch | 03-approval-actuator.md | (pending) | (pending) | PENDING |
+| F9 | Approval wiring | 03-approval-actuator.md | (pending) | (pending) | PENDING |
+| F10 | Audit line | 03-approval-actuator.md | (pending) | (pending) | PENDING |
+| F11 | Extract shared usage thresholds | 04-verifier-per-action-semantics.md | (pending) | (pending) | PENDING |
+| F12 | Usage gate for archive proposals | 04-verifier-per-action-semantics.md | (pending) | (pending) | PENDING |
+| F13 | Verdict records the gate | 04-verifier-per-action-semantics.md | (pending) | (pending) | PENDING |
+| F14 | Refine/create regression | 04-verifier-per-action-semantics.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

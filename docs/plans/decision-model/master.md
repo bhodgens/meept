@@ -193,3 +193,23 @@ a separate effort before any gate escalates real traffic.
 - `go test -p 2 ./internal/config/... ./internal/llm/... ./internal/agent/... ./internal/tools/...`
 - `make docs-generate` after any schema.go change (leaf 01).
 - Pre-commit hooks pass per commit (17 checks).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Leaf 01 — decision_model config slot | 01-config-slot.md | (pending) | (pending) | PENDING |
+| F2 | Leaf 02 — DecisionClient seam | 02-decision-client.md | (pending) | (pending) | PENDING |
+| F3 | Leaf 03 — irreversibility gate hook | 03-irreversibility-gate.md | (pending) | (pending) | PENDING |
+| F4 | Leaf 04 — decision-model compaction lane (opt-in) | 04-decision-compaction.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

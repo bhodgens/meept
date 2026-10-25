@@ -193,3 +193,31 @@ After all children complete:
 - Backward compatible: zero-value `DefaultModel=""` and `BalancedStickyRequests=false` preserve current behavior
 - Empty `callerKey` disables sticky behavior (used by classifiers/analysts that don't need it)
 - Sticky pins are per-alias, keyed by caller string
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Extend ModelAliasEntry struct | 01-core-types.md | (pending) | (pending) | PENDING |
+| F2 | Extend AliasHealth struct | 01-core-types.md | (pending) | (pending) | PENDING |
+| F3 | Update ResolveForAlias signature | 01-core-types.md | (pending) | (pending) | PENDING |
+| F4 | Implement sticky request logic | 01-core-types.md | (pending) | (pending) | PENDING |
+| F5 | Implement default model reversion | 01-core-types.md | (pending) | (pending) | PENDING |
+| F6 | Update existing tests | 01-core-types.md | (pending) | (pending) | PENDING |
+| F7 | Run full build and vet | 01-core-types.md | (pending) | (pending) | PENDING |
+| F8 | Update agent loop call sites | 02-call-sites.md | (pending) | (pending) | PENDING |
+| F9 | Update intent analyzer call sites | 02-call-sites.md | (pending) | (pending) | PENDING |
+| F10 | Update daemon component call sites | 02-call-sites.md | (pending) | (pending) | PENDING |
+| F11 | Update media client call sites | 02-call-sites.md | (pending) | (pending) | PENDING |
+| F12 | Update documentation | 02-call-sites.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

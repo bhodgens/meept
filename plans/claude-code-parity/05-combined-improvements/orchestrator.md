@@ -127,3 +127,35 @@ See SHARED-CONVENTIONS.md §2-§3.
 5. `go test ./internal/selfimprove/... -race`
 6. Verify all builtin tools implement new interface methods
 7. Verify explore agent loads from config/agents/
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Add methods to Tool interface with defaults | 01-per-tool-safety.md | (pending) | (pending) | PENDING |
+| F2 | Update all builtin tools to embed ToolDefaults | 01-per-tool-safety.md | (pending) | (pending) | PENDING |
+| F3 | Update DependencyInferrer to use declared safety | 01-per-tool-safety.md | (pending) | (pending) | PENDING |
+| F4 | Update AdaptiveParallelismLimiter to use declared safety | 01-per-tool-safety.md | (pending) | (pending) | PENDING |
+| F5 | Tests | 01-per-tool-safety.md | (pending) | (pending) | PENDING |
+| F6 | Add unchanged detection to file_read | 02-file-unchanged-cmdsem.md | (pending) | (pending) | PENDING |
+| F7 | Ensure hashline anchors still work with unchanged stub | 02-file-unchanged-cmdsem.md | (pending) | (pending) | PENDING |
+| F8 | Tests for FILE_UNCHANGED | 02-file-unchanged-cmdsem.md | (pending) | (pending) | PENDING |
+| F9 | Add command semantics map to shell tool | 02-file-unchanged-cmdsem.md | (pending) | (pending) | PENDING |
+| F10 | Wire semantics into result construction | 02-file-unchanged-cmdsem.md | (pending) | (pending) | PENDING |
+| F11 | Handle compound commands | 02-file-unchanged-cmdsem.md | (pending) | (pending) | PENDING |
+| F12 | Tests for command semantics | 02-file-unchanged-cmdsem.md | (pending) | (pending) | PENDING |
+| F13 | Create InlineFeedbackTrigger | 03-feedback-staleness.md | (pending) | (pending) | PENDING |
+| F14 | Wire into selfimprove pipeline | 03-feedback-staleness.md | (pending) | (pending) | PENDING |
+| F15 | Wire trigger into agent loop | 03-feedback-staleness.md | (pending) | (pending) | PENDING |
+| ... | +15 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

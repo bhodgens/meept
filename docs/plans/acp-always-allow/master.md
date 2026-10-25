@@ -123,3 +123,21 @@ Tree COMPLETE 2026-10-20 — 2/2 leaves + integration, 100%.
 builds; go test -p 2 acp/bus/rpc/comm/http/daemon/tui; e2e acp-wire x2;
 flutter dialog/provider tests; dart format clean; docs freshness at clean
 HEAD worktree; sibling-WIP exclusion rule (explicit pathspecs).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Leaf 01 — core + wire (Contract A) | 01-core-wire.md | (pending) | (pending) | PENDING |
+| F2 | Leaf 02 — surfaces + docs (Contract B) | 02-surfaces.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

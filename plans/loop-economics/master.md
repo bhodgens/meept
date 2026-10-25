@@ -234,3 +234,34 @@ Required orchestrator sections present: Dispatch Protocol ✓ Interface Contract
 - Cross-tree deps: leaf 09 waits for containment tree merge (its proxy). Leaf 13 consumes leaf 05 guard.
 - Existing cycle detector documented in docs/features.md — leaf 07 extends, never duplicates.
 - Defaults preserve current behavior everywhere except scheduler coalescing (strict improvement) and eviction scoring (flagged [memory.usefulness] enabled=false initially).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Stable-Prefix Prompt Assembly - Implementation Leaf | 01-stable-prefix-prompt.md | (pending) | (pending) | PENDING |
+| F2 | Lazy Tool Schemas (Indexed Mode + tool_view) - Implementation Leaf | 02-lazy-tool-schemas.md | (pending) | (pending) | PENDING |
+| F3 | Scheduler Crash Safety (Claim + Coalesce) - Implementation Leaf | 03-scheduler-crash-safety.md | (pending) | (pending) | PENDING |
+| F4 | Shell Permission Table - Implementation Leaf | 04-shell-permission-table.md | (pending) | (pending) | PENDING |
+| F5 | SSRF Guards - Implementation Leaf | 05-ssrf-guards.md | (pending) | (pending) | PENDING |
+| F6 | Daemon Lifecycle: doctor / status / shutdown - Implementation Leaf | 06-doctor-lifecycle.md | (pending) | (pending) | PENDING |
+| F7 | Loop Guards: No-Progress Ladder, Search Rollback, Reasoning Watchdog - Implement | 07-loop-guards.md | (pending) | (pending) | PENDING |
+| F8 | Quality-Gated Autonomy - Implementation Leaf | 08-quality-gated-autonomy.md | (pending) | (pending) | PENDING |
+| F9 | Egress Policy (Host/CIDR allow-ask-deny) - Implementation Leaf | 09-egress-policy.md | (pending) | (pending) | PENDING |
+| F10 | Inter-Agent Messaging with Receipts - Implementation Leaf | 10-inter-agent-messaging.md | (pending) | (pending) | PENDING |
+| F11 | Local Model Lifecycle CLI - Implementation Leaf | 11-local-model-cli.md | (pending) | (pending) | PENDING |
+| F12 | GBNF-Constrained Tool Calling - Implementation Leaf | 12-gbnf-constrained-calling.md | (pending) | (pending) | PENDING |
+| F13 | Browser Automation Tools (chromedp) - Implementation Leaf | 13-browser-automation.md | (pending) | (pending) | PENDING |
+| F14 | Memory Usefulness Scoring + Voting - Implementation Leaf | 14-memory-usefulness.md | (pending) | (pending) | PENDING |
+| F15 | Memory Lessons & Procedures Distillation - Implementation Leaf | 15-memory-lessons-procedures.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

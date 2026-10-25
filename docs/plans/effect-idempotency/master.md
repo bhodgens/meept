@@ -541,3 +541,35 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 See OPEN-QUESTIONS.md (abandoned-state timeout policy, additional tools to
 wire later, retention, cluster heartbeat push, audit-finding integration;
 resolved forks: payload column, workspace-push target replacement).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Types, errors, interface (TDD: conformance test first) | 01-effect-ledger.md | (pending) | (pending) | PENDING |
+| F2 | EffectKey (TDD) | 01-effect-ledger.md | (pending) | (pending) | PENDING |
+| F3 | In-memory ledger (TDD) | 01-effect-ledger.md | (pending) | (pending) | PENDING |
+| F4 | SQLite ledger (TDD) | 01-effect-ledger.md | (pending) | (pending) | PENDING |
+| F5 | Double-claim race test (TDD) | 01-effect-ledger.md | (pending) | (pending) | PENDING |
+| F6 | Run guard (TDD) | 01-effect-ledger.md | (pending) | (pending) | PENDING |
+| F7 | gofmt + full package verification | 01-effect-ledger.md | (pending) | (pending) | PENDING |
+| F8 | PushService ledger wiring (TDD) | 02-tool-wiring.md | (pending) | (pending) | PENDING |
+| F9 | Backup push ledger wiring (TDD) | 02-tool-wiring.md | (pending) | (pending) | PENDING |
+| F10 | EffectsReconciler (TDD) | 02-tool-wiring.md | (pending) | (pending) | PENDING |
+| F11 | Daemon construction + startup hook | 02-tool-wiring.md | (pending) | (pending) | PENDING |
+| F12 | Parked-turn resume hook | 02-tool-wiring.md | (pending) | (pending) | PENDING |
+| F13 | gofmt + scoped verification | 02-tool-wiring.md | (pending) | (pending) | PENDING |
+| F14 | RPC handler (TDD) | 03-cli-reconcile.md | (pending) | (pending) | PENDING |
+| F15 | CLI commands (TDD) | 03-cli-reconcile.md | (pending) | (pending) | PENDING |
+| ... | +3 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

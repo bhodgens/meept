@@ -118,3 +118,21 @@ pkg/id IDs, JSON5 config opt-in, lowercase UI text, no Getwd in daemon paths.
 Collected in `OPEN-QUESTIONS.md` — resolve before wave 1 dispatch (the two
 blocking ones: persona regeneration scope in T01; whether T03 verdicts
 require the daemon running or support offline CLI mode).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | OPEN-QUESTIONS.md — Memory Capability Forest | OPEN-QUESTIONS.md | (pending) | (pending) | PENDING |
+| F2 | Memory Capability Forest — Shared Conventions | SHARED-CONVENTIONS.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

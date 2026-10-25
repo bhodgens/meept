@@ -108,3 +108,24 @@ After all leaves are committed:
 4. Manual: create a worktree via `/worktree`, verify the session switches to it
 5. Manual: verify `project_info` tool returns cached git data within 5s
 6. Manual: verify terminating tools (platform_agents) return formatted text, not JSON
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Add session filtering to handleWSEvent | 02-ws-session-filter.md | (pending) | (pending) | PENDING |
+| F2 | Test | 02-ws-session-filter.md | (pending) | (pending) | PENDING |
+| F3 | Add Close() method to AgentLoop | 03-loop-eviction-cleanup.md | (pending) | (pending) | PENDING |
+| F4 | Call Close() before eviction | 03-loop-eviction-cleanup.md | (pending) | (pending) | PENDING |
+| F5 | Test | 03-loop-eviction-cleanup.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

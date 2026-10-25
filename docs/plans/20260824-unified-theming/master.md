@@ -158,3 +158,25 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 | L4 tui stragglers | COMPLETE | 2 | 2026-08-25T11:55Z | 100% | landed in commit 86af507c (swept by concurrent session's commit — message mismatch noted); stray-literal guard test added | |
 | L5 consistency + docs | COMPLETE | 1 | 2026-08-25T00:50Z | 100% | commit c1fd91d5 | |
 | Gates (lint/build/tests/report) | COMPLETE | 1 | 2026-08-25T11:58Z | 100% | go build+full go test green; flutter 322 pass, analyze 0 errors | |
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | L1 — Flutter palette layer | L1-flutter-palette.md | (pending) | (pending) | PENDING |
+| F2 | L2 — TUI runtime palette | L2-tui-runtime.md | (pending) | (pending) | PENDING |
+| F3 | L3 — Flutter settings surface | L3-flutter-settings.md | (pending) | (pending) | PENDING |
+| F4 | L4 — TUI straggler migration | L4-tui-stragglers.md | (pending) | (pending) | PENDING |
+| F5 | L5 — Consistency tests and documentation | L5-consistency-docs.md | (pending) | (pending) | PENDING |
+| F6 | W0 — Token foundation (orchestrator in-session) | W0-tokens-and-generator.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

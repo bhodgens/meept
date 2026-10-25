@@ -91,3 +91,25 @@ commit.
 Root conventions apply. Grammar-constrained generation reuses the distill
 grammar wiring (distill_grammar_wiring_test.go shows the pattern). No mutex
 across I/O in Consolidator passes (repo rule) — batch DB writes outside locks.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | B01 — Bridge Store: BridgeShard + Bridge CRUD (P10) | 01-bridge-store.md | (pending) | (pending) | PENDING |
+| F2 | B02 — Bridge Generation Pass in the Consolidator (P10) | 02-bridge-generation.md | (pending) | (pending) | PENDING |
+| F3 | B03 — Entailment Verification + Provenance Cascade-Invalidation (P10) | 03-verify-invalidate.md | (pending) | (pending) | PENDING |
+| F4 | B04 — Balanced Context Selection in Recall (P10) | 04-balanced-recall.md | (pending) | (pending) | PENDING |
+| F5 | B05 — Bridges-On/Off Recall Eval (P10 GATE) | 05-bridge-eval.md | (pending) | (pending) | PENDING |
+| F6 | B06 — Bridges Wiring: CLI/TUI Visibility + e2e + Docs (P10) | 06-wiring-docs.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

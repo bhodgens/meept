@@ -161,3 +161,22 @@ both binaries build; hermes/config/tools.builtin suites green (-count=1).
 
 - `go build` both binaries; `go test -p 2 ./internal/config/... ./internal/hermes/... ./internal/tools/... ./internal/daemon/...`
 - Pre-commit 17 checks per commit; explicit-path staging only.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Leaf 01 — HermesConfig + internal/hermes HTTP client | 01-config-and-client.md | (pending) | (pending) | PENDING |
+| F2 | Leaf 02 — `hermes` builtin tool + daemon registration | 02-builtin-tool.md | (pending) | (pending) | PENDING |
+| F3 | Leaf 03 — docs + matrix cell | 03-docs.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

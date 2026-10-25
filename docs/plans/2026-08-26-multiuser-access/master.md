@@ -224,3 +224,25 @@ After all leaves COMPLETE:
 - Q3 RPC identity: RESOLVED as defense-in-depth in leaf 06 (peer UID
   logging + optional allowlist). RPC remains owner-trusted single-user by
   design; see docs/reference/http-api-security.md §Unix Socket RPC.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Leaf 01 — Auth Store (internal/auth) | 01-auth-store.md | (pending) | (pending) | PENDING |
+| F2 | Leaf 02 — HTTP identity wiring + session ownership | 02-http-identity-sessions.md | (pending) | (pending) | PENDING |
+| F3 | Leaf 03 — Cluster user pooling via peer sync | 03-cluster-pooling.md | (pending) | (pending) | PENDING |
+| F4 | Leaf 04 — User management RPC + CLI surface | 04-user-management-cli.md | (pending) | (pending) | PENDING |
+| F5 | Leaf 05 — TUI + Flutter GUI multi-user config parity | 05-client-tooling-tui-gui.md | (pending) | (pending) | PENDING |
+| F6 | Leaf 06 — RPC peer-credential verification (defense in depth) | 06-rpc-peercred.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

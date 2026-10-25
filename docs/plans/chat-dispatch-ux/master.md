@@ -330,3 +330,35 @@ Must print ALL TREES COMPLIANT: True before any dispatch.
   a temp state dir/socket/port.
 - Truncated task names in completion logs ("create a file named hello.")
   come from dispatcher task naming — cosmetic, out of scope here.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | step result extraction helper | 01-sync-reply-result.md | (pending) | (pending) | PENDING |
+| F2 | waitForTaskCompletion returns real result | 01-sync-reply-result.md | (pending) | (pending) | PENDING |
+| F3 | guard the stub against regression | 01-sync-reply-result.md | (pending) | (pending) | PENDING |
+| F4 | error steps reject review | 02-honest-completion.md | (pending) | (pending) | PENDING |
+| F5 | heuristic cannot approve errors | 02-honest-completion.md | (pending) | (pending) | PENDING |
+| F6 | task completion reflects failed steps | 02-honest-completion.md | (pending) | (pending) | PENDING |
+| F7 | CWD fallback in linked-session scan | 03-step-cwd-fallback.md | (pending) | (pending) | PENDING |
+| F8 | precedence regression guard | 03-step-cwd-fallback.md | (pending) | (pending) | PENDING |
+| F9 | registry-side schema-mode config | 04-task-loop-schema-wiring.md | (pending) | (pending) | PENDING |
+| F10 | daemon wiring | 04-task-loop-schema-wiring.md | (pending) | (pending) | PENDING |
+| F11 | sanitizeCatalogReply | 05-catalog-reply-guard.md | (pending) | (pending) | PENDING |
+| F12 | wire into RunOnce response path | 05-catalog-reply-guard.md | (pending) | (pending) | PENDING |
+| F13 | quota classification + event publish | 06-quota-user-surfacing.md | (pending) | (pending) | PENDING |
+| F14 | user-visible Result stamp | 06-quota-user-surfacing.md | (pending) | (pending) | PENDING |
+| F15 | domainAgrees function | 07-skill-discovery-gate.md | (pending) | (pending) | PENDING |
+| ... | +8 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

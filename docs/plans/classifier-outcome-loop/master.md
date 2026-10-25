@@ -262,3 +262,35 @@ internal/agent/tfidf_veto.go + scripts/build_tfidf_veto.py. The effect
 is UNVALIDATED at the replay's sample size (2 routes) — the outcome
 loop this tree built is the instrument that will validate it on live
 traffic.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Schema migration + indexes | 01-persist-privacy.md | (pending) | (pending) | PENDING |
+| F2 | DispatchEntry + INSERT extension | 01-persist-privacy.md | (pending) | (pending) | PENDING |
+| F3 | Salt management (hash.go) | 01-persist-privacy.md | (pending) | (pending) | PENDING |
+| F4 | recordDispatch writes hash/model/turnNo; input_summary "" | 01-persist-privacy.md | (pending) | (pending) | PENDING |
+| F5 | Salt wiring in daemon | 01-persist-privacy.md | (pending) | (pending) | PENDING |
+| F6 | PrefilterVerdict + SetVerdictObserver | 02-margin-capture.md | (pending) | (pending) | PENDING |
+| F7 | Match emits verdicts on every path | 02-margin-capture.md | (pending) | (pending) | PENDING |
+| F8 | Dispatcher wires observer + persists margin | 02-margin-capture.md | (pending) | (pending) | PENDING |
+| F9 | Log line fields | 02-margin-capture.md | (pending) | (pending) | PENDING |
+| F10 | Store methods | 03-outcome-capture.md | (pending) | (pending) | PENDING |
+| F11 | Signal A in recordDispatch | 03-outcome-capture.md | (pending) | (pending) | PENDING |
+| F12 | Signal B hooks | 03-outcome-capture.md | (pending) | (pending) | PENDING |
+| F13 | Views + views.sql | 04-harvest-dashboards.md | (pending) | (pending) | PENDING |
+| F14 | Correction candidates + near-miss buckets | 04-harvest-dashboards.md | (pending) | (pending) | PENDING |
+| F15 | Local-only text join (gitignored) | 04-harvest-dashboards.md | (pending) | (pending) | PENDING |
+| ... | +2 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

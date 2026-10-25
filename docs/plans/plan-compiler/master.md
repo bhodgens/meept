@@ -339,3 +339,34 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 - Scratch: check_template_compliance.py lives in the Hermes skill dir,
   NOT this repo — leaf 03 must implement its own section-presence check
   in Go for tests.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Write docs/workflows/plan-dialect.md | 01-dialect-spec.md | (pending) | (pending) | PENDING |
+| F2 | Write config/prompts/planner/plan_draft.md | 01-dialect-spec.md | (pending) | (pending) | PENDING |
+| F3 | Skeleton + Meta/Goal/Open-Questions parsing | 02-compiler.md | (pending) | (pending) | PENDING |
+| F4 | Phase + artifact parsing with all validations | 02-compiler.md | (pending) | (pending) | PENDING |
+| F5 | DependsOn inference + cycle detection + hash | 02-compiler.md | (pending) | (pending) | PENDING |
+| F6 | Golden round-trip vs spec examples | 02-compiler.md | (pending) | (pending) | PENDING |
+| F7 | ShouldEmitTree gate | 03-tree-emission.md | (pending) | (pending) | PENDING |
+| F8 | Root emitter | 03-tree-emission.md | (pending) | (pending) | PENDING |
+| F9 | Leaf emitter + step partitioning | 03-tree-emission.md | (pending) | (pending) | PENDING |
+| F10 | Determinism + fixtures | 03-tree-emission.md | (pending) | (pending) | PENDING |
+| F11 | Config key + PlansConfig test | 04-seal-wiring.md | (pending) | (pending) | PENDING |
+| F12 | Draft store + interview gate | 04-seal-wiring.md | (pending) | (pending) | PENDING |
+| F13 | plan.seal + plan.draft RPC | 04-seal-wiring.md | (pending) | (pending) | PENDING |
+| F14 | CLI subcommands + integration test + docs | 04-seal-wiring.md | (pending) | (pending) | PENDING |
+| F15 | OPEN-QUESTIONS — plan-compiler tree | OPEN-QUESTIONS.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

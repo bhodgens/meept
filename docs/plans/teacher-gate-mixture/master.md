@@ -183,3 +183,28 @@ policy (higher-confidence worker) as mechanical defaults. If
 `opencode-go/deepseek-v4.1-flash` does not resolve in the probe, leaf 01
 escalates to the user BEFORE the sweep (do not silently substitute a
 different judge model).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | — CLI smoke, one call per model | 01-model-probe.md | (pending) | (pending) | PENDING |
+| F2 | — Fallback transport check (only if a CLI call fails) | 01-model-probe.md | (pending) | (pending) | PENDING |
+| F3 | — Write the probe report | 01-model-probe.md | (pending) | (pending) | PENDING |
+| F4 | — prompt.py | 02-teacher-sweep.md | (pending) | (pending) | PENDING |
+| F5 | — run_mix.py | 02-teacher-sweep.md | (pending) | (pending) | PENDING |
+| F6 | — Execute the sweep | 02-teacher-sweep.md | (pending) | (pending) | PENDING |
+| F7 | — score_mix.py | 03-scoring-analysis.md | (pending) | (pending) | PENDING |
+| F8 | — REPORT.md | 03-scoring-analysis.md | (pending) | (pending) | PENDING |
+| F9 | — Reproducibility check | 03-scoring-analysis.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

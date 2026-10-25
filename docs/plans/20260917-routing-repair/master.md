@@ -161,3 +161,35 @@ The user has not issued blanket execution approval for all repair leaves. Only t
 5. Scratch-daemon and local-model verification is approved. Leaf 05 remains dependent on completed repairs. A new model-quality campaign still needs a separate dataset and execution budget.
 
 Recorded Decisions override earlier approval-request wording in the leaves. No blanket repair execution or commit authorization is inferred.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | establish producer and consumer ownership | 01-privacy.md | (pending) | (pending) | PENDING |
+| F2 | replace copied excerpts, one producer checkpoint at a time | 01-privacy.md | (pending) | (pending) | PENDING |
+| F3 | protect renamed local data | 01-privacy.md | (pending) | (pending) | PENDING |
+| F4 | hand off historical exposure safely | 01-privacy.md | (pending) | (pending) | PENDING |
+| F5 | prove the scoring failure through the existing self-test | 02-scoring.md | (pending) | (pending) | PENDING |
+| F6 | repair prediction flow and counter consistency | 02-scoring.md | (pending) | (pending) | PENDING |
+| F7 | repair expected-count output formatting | 02-scoring.md | (pending) | (pending) | PENDING |
+| F8 | unify default corpus selection | 03-provenance.md | (pending) | (pending) | PENDING |
+| F9 | establish artifact provenance and fixture intent | 03-provenance.md | (pending) | (pending) | PENDING |
+| F10 | make cache identity explicit | 03-provenance.md | (pending) | (pending) | PENDING |
+| F11 | protect fold evidence | 03-provenance.md | (pending) | (pending) | PENDING |
+| F12 | restrict the arithmetic fast path | 04-routing.md | (pending) | (pending) | PENDING |
+| F13 | distinguish media consumption from URL data | 04-routing.md | (pending) | (pending) | PENDING |
+| F14 | repair evidence predicates without moving arbitration | 04-routing.md | (pending) | (pending) | PENDING |
+| F15 | align degraded routing with the output-based taxonomy | 04-routing.md | (pending) | (pending) | PENDING |
+| ... | +6 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

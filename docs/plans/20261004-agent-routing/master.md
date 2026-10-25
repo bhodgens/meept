@@ -289,3 +289,35 @@ present above.
   spatially, STOP and report; the orchestrator serializes.
 - internal/agent tests take ~60s; run package tests with `-short` and
   targeted `-run` filters during iteration, full package once at review.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | WakeNotifier on PersistentQueue | 01-worker-wakeup.md | (pending) | (pending) | PENDING |
+| F2 | Worker consumes the wake channel | 01-worker-wakeup.md | (pending) | (pending) | PENDING |
+| F3 | Pool wiring + unregister lifecycle | 01-worker-wakeup.md | (pending) | (pending) | PENDING |
+| F4 | Interface + setter + nil-guard | 02-quota-aware-selection.md | (pending) | (pending) | PENDING |
+| F5 | selectAgent warning event | 02-quota-aware-selection.md | (pending) | (pending) | PENDING |
+| F6 | Producer probe (report-only) | 02-quota-aware-selection.md | (pending) | (pending) | PENDING |
+| F7 | TaskStep field + persistence round-trip | 03-successor-hints.md | (pending) | (pending) | PENDING |
+| F8 | Payload round-trip in tactical scheduler | 03-successor-hints.md | (pending) | (pending) | PENDING |
+| F9 | OnJobCompleted adoption + telemetry event | 03-successor-hints.md | (pending) | (pending) | PENDING |
+| F10 | Daemon envelope extraction | 03-successor-hints.md | (pending) | (pending) | PENDING |
+| F11 | Comment block above ClaimNextForAgent's query construction | 04-claim-pinning-docs.md | (pending) | (pending) | PENDING |
+| F12 | Shorter comment on WithAgentID | 04-claim-pinning-docs.md | (pending) | (pending) | PENDING |
+| F13 | RoutingTelemetry type | 05-routing-telemetry.md | (pending) | (pending) | PENDING |
+| F14 | Wire points in tactical scheduler | 05-routing-telemetry.md | (pending) | (pending) | PENDING |
+| F15 | Metadata freshness | 05-routing-telemetry.md | (pending) | (pending) | PENDING |
+| ... | +1 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

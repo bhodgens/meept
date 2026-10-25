@@ -191,3 +191,32 @@ Tracking Table, Integration Test Plan).
   the standard `flutter test` gate. This is a documented scope decision.
 - The 25-minute child cap: leaf 02 is the biggest; if it times out, audit
   surviving files with git status and re-dispatch only the missing half.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Chat steer mid-turn flow (tui-steer-01) | 01-tui-flows-extension.md | (pending) | (pending) | PENDING |
+| F2 | Plans view flow (tui-plans-01) | 01-tui-flows-extension.md | (pending) | (pending) | PENDING |
+| F3 | Tasks view flow (tui-tasks-01) | 01-tui-flows-extension.md | (pending) | (pending) | PENDING |
+| F4 | Suite green | 01-tui-flows-extension.md | (pending) | (pending) | PENDING |
+| F5 | StubDaemon HTTP core | 02-gui-flows-infrastructure.md | (pending) | (pending) | PENDING |
+| F6 | pumpRealApp bootstrap | 02-gui-flows-infrastructure.md | (pending) | (pending) | PENDING |
+| F7 | Terminal event delivery (gui-terminal-01) | 03-gui-flows-tests.md | (pending) | (pending) | PENDING |
+| F8 | Session switch reload (gui-session-01) | 03-gui-flows-tests.md | (pending) | (pending) | PENDING |
+| F9 | Quota park surfacing (gui-quota-01) | 03-gui-flows-tests.md | (pending) | (pending) | PENDING |
+| F10 | Streaming accumulation (gui-stream-01) | 03-gui-flows-tests.md | (pending) | (pending) | PENDING |
+| F11 | Register the 7 scenarios + gui-flows suite entry | 04-manifest-policy.md | (pending) | (pending) | PENDING |
+| F12 | Amend the policy comment | 04-manifest-policy.md | (pending) | (pending) | PENDING |
+| F13 | Verify hook tolerance | 04-manifest-policy.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

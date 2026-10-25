@@ -159,3 +159,28 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 - `store: false` on Responses requests — Codex backend rejects `store: true` for CLI clients.
 - Reasoning items: map `type: "reasoning"` outputs to thinking/empty content; do not drop silently — include as reasoning text if present.
 - Do NOT touch `TransportCodexResponses` constant (already exists) or `provider_registry.go` beyond (optionally) adding the provider def entry — the registry `CanonicalProviders` entry for `openai-codex` (AuthType: AuthOAuthDevice, BaseURL per Contract 2) is leaf 02's to add so `ListProviders`-based UIs see it.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | StartCodexDeviceFlow with 429 retry | 01-codex-flow.md | (pending) | (pending) | PENDING |
+| F2 | PollCodexAuthorization | 01-codex-flow.md | (pending) | (pending) | PENDING |
+| F3 | ExchangeCodexToken | 01-codex-flow.md | (pending) | (pending) | PENDING |
+| F4 | Registry entry + CLI case | 01-codex-flow.md | (pending) | (pending) | PENDING |
+| F5 | JWT account-ID extraction | 02-codex-transport.md | (pending) | (pending) | PENDING |
+| F6 | Request build + headers | 02-codex-transport.md | (pending) | (pending) | PENDING |
+| F7 | Response parsing (message/reasoning/function_call/usage/error) | 02-codex-transport.md | (pending) | (pending) | PENDING |
+| F8 | createChatterFor dispatch + provider registry entry | 02-codex-transport.md | (pending) | (pending) | PENDING |
+| F9 | ChatStream decision | 02-codex-transport.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

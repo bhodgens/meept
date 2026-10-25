@@ -353,3 +353,35 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 - README.md gained a "Post-Step Validation Pipeline" section (authored
   separately) documenting layers 2/4/5 as they exist BEFORE this tree; leaf
   04 amends it to insert the filter stage at position 3.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | FilterResult and OutputFilter types | 01-filter-interface.md | (pending) | (pending) | PENDING |
+| F2 | FilterChain sweep + fail-fast | 01-filter-interface.md | (pending) | (pending) | PENDING |
+| F3 | Rewrite re-sweep from first filter + pass cap | 01-filter-interface.md | (pending) | (pending) | PENDING |
+| F4 | Actions log lines | 01-filter-interface.md | (pending) | (pending) | PENDING |
+| F5 | FilterChain concurrency safety | 01-filter-interface.md | (pending) | (pending) | PENDING |
+| F6 | json_format filter | 02-builtin-filters.md | (pending) | (pending) | PENDING |
+| F7 | language_en filter | 02-builtin-filters.md | (pending) | (pending) | PENDING |
+| F8 | lint_go filter | 02-builtin-filters.md | (pending) | (pending) | PENDING |
+| F9 | Package wiring - builtin registry constructor | 02-builtin-filters.md | (pending) | (pending) | PENDING |
+| F10 | TaskStep new fields + persistence | 03-gate-wiring.md | (pending) | (pending) | PENDING |
+| F11 | SetFilterChain setter + disabled default | 03-gate-wiring.md | (pending) | (pending) | PENDING |
+| F12 | Chain invocation + rewrite application | 03-gate-wiring.md | (pending) | (pending) | PENDING |
+| F13 | Independent filter retry path | 03-gate-wiring.md | (pending) | (pending) | PENDING |
+| F14 | Ordering-contract regression guard | 03-gate-wiring.md | (pending) | (pending) | PENDING |
+| F15 | Config schema + defaults | 04-config-cli-docs.md | (pending) | (pending) | PENDING |
+| ... | +4 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

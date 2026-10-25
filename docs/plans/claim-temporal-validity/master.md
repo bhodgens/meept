@@ -308,3 +308,35 @@ After all three leaves:
    `docs/reference/generated/memory.md` contains `ListExpiredClaims` and the
    extended `Claim` fields; `git diff --stat` shows no hand-edits to
    `docs/reference/generated/`.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | — Extend the Claim struct (TDD: test first) | 01-claim-schema.md | (pending) | (pending) | PENDING |
+| F2 | — StoreClaim metadata mapping (TDD) | 01-claim-schema.md | (pending) | (pending) | PENDING |
+| F3 | — claimRev + claimInForce helpers (TDD) | 01-claim-schema.md | (pending) | (pending) | PENDING |
+| F4 | — Supersede rev/valid_to stamping (TDD) | 01-claim-schema.md | (pending) | (pending) | PENDING |
+| F5 | — Storage verification (the metadata-JSON round trip) | 01-claim-schema.md | (pending) | (pending) | PENDING |
+| F6 | — Full leaf verification | 01-claim-schema.md | (pending) | (pending) | PENDING |
+| F7 | — ListExpiredClaims (TDD) | 02-validity-integration.md | (pending) | (pending) | PENDING |
+| F8 | — Expiry exclusion in the detector candidate filter (TDD) | 02-validity-integration.md | (pending) | (pending) | PENDING |
+| F9 | — Expiry exclusion in FindCanonicalFor (TDD) | 02-validity-integration.md | (pending) | (pending) | PENDING |
+| F10 | — Ambient/skeptic flow compatibility survey (read-only) | 02-validity-integration.md | (pending) | (pending) | PENDING |
+| F11 | — Full leaf verification | 02-validity-integration.md | (pending) | (pending) | PENDING |
+| F12 | — retain_claim temporal params (TDD) | 03-surface-docs.md | (pending) | (pending) | PENDING |
+| F13 | — list_expired_claims tool (TDD) | 03-surface-docs.md | (pending) | (pending) | PENDING |
+| F14 | — CLI `meept memory expired` (TDD where practical) | 03-surface-docs.md | (pending) | (pending) | PENDING |
+| F15 | — docs/workflows/memory.md section | 03-surface-docs.md | (pending) | (pending) | PENDING |
+| ... | +4 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

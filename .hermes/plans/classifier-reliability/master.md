@@ -186,3 +186,34 @@ Written BEFORE execution so we cannot rationalize later:
   whitespace/punctuation — check raw completions in llama-server log.
 - Leaf 03 will surface whether glm-4.5-air fallback actually works; if it
   also fails, the alias chain needs its own investigation (do not paper over).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | IsZero semantics | 01-disable-thinking.md | (pending) | (pending) | PENDING |
+| F2 | local-provider passthrough | 01-disable-thinking.md | (pending) | (pending) | PENDING |
+| F3 | classifier opts in | 01-disable-thinking.md | (pending) | (pending) | PENDING |
+| F4 | analyzer opts in | 01-disable-thinking.md | (pending) | (pending) | PENDING |
+| F5 | full package verification | 01-disable-thinking.md | (pending) | (pending) | PENDING |
+| F6 | Helper + table test | 02-token-caps.md | (pending) | (pending) | PENDING |
+| F7 | Classifier | 02-token-caps.md | (pending) | (pending) | PENDING |
+| F8 | Analyzer | 02-token-caps.md | (pending) | (pending) | PENDING |
+| F9 | Verification | 02-token-caps.md | (pending) | (pending) | PENDING |
+| F10 | Reconfigure (if chosen) | 03-alias-failover.md | (pending) | (pending) | PENDING |
+| F11 | Classifier failover | 03-alias-failover.md | (pending) | (pending) | PENDING |
+| F12 | Analyzer failover | 03-alias-failover.md | (pending) | (pending) | PENDING |
+| F13 | Wiring | 03-alias-failover.md | (pending) | (pending) | PENDING |
+| F14 | Tests | 03-alias-failover.md | (pending) | (pending) | PENDING |
+| F15 | Verification | 03-alias-failover.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

@@ -135,3 +135,26 @@ No ambiguities or design forks exist.
 - [ ] Code uses config values instead of literals
 - [ ] `go build ./...` succeeds
 - [ ] No debug artifacts
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Identify all hardcoded values | 01-extract-hardcoded-configs.md | (pending) | (pending) | PENDING |
+| F2 | Read config schema | 01-extract-hardcoded-configs.md | (pending) | (pending) | PENDING |
+| F3 | Add config fields | 01-extract-hardcoded-configs.md | (pending) | (pending) | PENDING |
+| F4 | Update code to use config | 01-extract-hardcoded-configs.md | (pending) | (pending) | PENDING |
+| F5 | Handle TLS version parsing | 01-extract-hardcoded-configs.md | (pending) | (pending) | PENDING |
+| F6 | Update defaults | 01-extract-hardcoded-configs.md | (pending) | (pending) | PENDING |
+| F7 | Verify | 01-extract-hardcoded-configs.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

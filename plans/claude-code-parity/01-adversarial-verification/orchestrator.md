@@ -82,3 +82,35 @@ See SHARED-CONVENTIONS.md §2-§3.
 3. Verify all `config/agents/*.json5` files parse with new `verification` field
 4. Verify verifier prompt contains "your job is not to confirm" and "VERDICT:"
 5. Verify tool restriction blocks file_write for verifier role
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Define VerificationConfig type | 01-verification-mode.md | (pending) | (pending) | PENDING |
+| F2 | Wire VerificationConfig into AgentSpec | 01-verification-mode.md | (pending) | (pending) | PENDING |
+| F3 | Add daemon-level verification defaults | 01-verification-mode.md | (pending) | (pending) | PENDING |
+| F4 | Update all built-in agent definitions | 01-verification-mode.md | (pending) | (pending) | PENDING |
+| F5 | Add CLI visibility | 01-verification-mode.md | (pending) | (pending) | PENDING |
+| F6 | Tests | 01-verification-mode.md | (pending) | (pending) | PENDING |
+| F7 | Extend EvidenceRequirements with adversarial self-probes | 02-adversarial-prompt.md | (pending) | (pending) | PENDING |
+| F8 | Create the adversarial verifier prompt builder | 02-adversarial-prompt.md | (pending) | (pending) | PENDING |
+| F9 | Create VERDICT parser | 02-adversarial-prompt.md | (pending) | (pending) | PENDING |
+| F10 | Create verifier agent definition | 02-adversarial-prompt.md | (pending) | (pending) | PENDING |
+| F11 | Wire verifier prompt into prompt builder | 02-adversarial-prompt.md | (pending) | (pending) | PENDING |
+| F12 | Tests | 02-adversarial-prompt.md | (pending) | (pending) | PENDING |
+| F13 | Create VerificationTracker | 03-auto-trigger-loop.md | (pending) | (pending) | PENDING |
+| F14 | Wire tracker into agent loop | 03-auto-trigger-loop.md | (pending) | (pending) | PENDING |
+| F15 | Implement auto-trigger as PrepareNextTurnHook | 03-auto-trigger-loop.md | (pending) | (pending) | PENDING |
+| ... | +4 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

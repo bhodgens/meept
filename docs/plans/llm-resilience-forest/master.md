@@ -122,3 +122,22 @@ Forest-level verification after all trees COMPLETE:
 - Siblings: `DECISIONS.md` (ratified decisions D1-D15 + open questions),
   `SHARED-CONVENTIONS.md` (frozen cross-tree contracts, conventions,
   pitfalls). Read both before dispatching anything.
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Architecture Audit — llm-resilience-forest (2026-09-01) | ARCH-AUDIT-2026-09-01.md | (pending) | (pending) | PENDING |
+| F2 | DECISIONS — LLM Resilience Forest | DECISIONS.md | (pending) | (pending) | PENDING |
+| F3 | SHARED CONVENTIONS — LLM Resilience Forest | SHARED-CONVENTIONS.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)

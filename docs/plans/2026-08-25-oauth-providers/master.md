@@ -354,3 +354,23 @@ Required for every orchestrator (this file + 3 branch orchestrators): `## Dispat
 - **xAI short-lived tokens:** ~6h expiry, refresh works via discovered token endpoint. The RefreshManager 10m default margin is fine; no per-provider margin machinery needed.
 - **Do not modify** `internal/calendar/`, `google-oauth`, or `google-calendar` entries. Do not add image/video providers — `xai` API-key provider for grok-imagine stays untouched; `xai-oauth` is a separate chat provider.
 - **AGENTS.md maintenance:** the docs leaf must update AGENTS.md if any invariant changes (none expected — no new bus topics, no session-ID semantics).
+
+## Test Gate
+
+<!-- Tests-first gate (hierarchical-planning skill v1.3.0, patched 2026-10-24).
+     Coverage matrix derived mechanically from leaf task headers; the control
+     agent (orchestrator, in-session) refines rows and fills test names at
+     Phase 0 dispatch. No implementation leaf dispatches until every row is
+     VALIDATED. Delta protocol: lesser of plan/tests updates to the greater.
+     Recipe: skill hierarchical-planning -> references/tests-first-gate.md -->
+
+| # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
+|---|---------------------|--------|-----------|-----------|--------|
+| F1 | Workflow doc | 04-registry-docs.md | (pending) | (pending) | PENDING |
+| F2 | Reference docs | 04-registry-docs.md | (pending) | (pending) | PENDING |
+| F3 | AGENTS.md review | 04-registry-docs.md | (pending) | (pending) | PENDING |
+| F4 | Full verification | 04-registry-docs.md | (pending) | (pending) | PENDING |
+
+Statuses: PENDING | DELTA | VALIDATED
+
+Delta log: (none yet)
