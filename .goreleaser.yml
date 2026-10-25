@@ -1,0 +1,110 @@
+# goreleaser config for meept.
+#
+# Builds the three shipped binaries (meept-daemon, meept, meept-lite) for
+# linux/amd64, linux/arm64, darwin/arm64 with the same version stamping the
+# Makefile uses (internal/version.{Version,Commit,BuildTime}; GO_LDFLAGS adds
+# -s -w).
+#
+# CGO note: the daemon links the oto audio driver (cgo + ALSA on Linux).
+# Cross-compiling cgo targets is NOT automatic:
+#   - darwin/arm64 builds run on a macOS arm64 runner (host-native).
+#   - linux/amd64 + linux/arm64 need CGO on Linux — cut Linux artifacts from
+#     a Linux runner, or wire zig cc / osxcross in `before:` hooks if a single
+#     host must produce everything. With CGO_ENABLED=0 the build succeeds
+#     everywhere but the audio driver is compiled out.
+#
+# No brews: section — no Homebrew tap exists for this project yet.
+version: 2
+
+project_name: meept
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: meept-daemon
+    main: ./cmd/meept-daemon
+    binary: meept-daemon
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # darwin/amd64 is not a shipped target; drop it here.
+    ignore:
+      - goos: darwin
+        goarch: amd64
+    ldflags:
+      - -s -w
+      - -X github.com/caimlas/meept/internal/version.Version={{.Version}}
+      - -X github.com/caimlas/meept/internal/version.Commit={{.FullCommit}}
+      - -X github.com/caimlas/meept/internal/version.BuildTime={{.Date}}
+
+  - id: meept
+    main: ./cmd/meept
+    binary: meept
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: amd64
+    ldflags:
+      - -s -w
+      - -X github.com/caimlas/meept/internal/version.Version={{.Version}}
+      - -X github.com/caimlas/meept/internal/version.Commit={{.FullCommit}}
+      - -X github.com/caimlas/meept/internal/version.BuildTime={{.Date}}
+
+  - id: meept-lite
+    main: ./cmd/meept-lite
+    binary: meept-lite
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: amd64
+    ldflags:
+      - -s -w
+      - -X github.com/caimlas/meept/internal/version.Version={{.Version}}
+      - -X github.com/caimlas/meept/internal/version.Commit={{.FullCommit}}
+      - -X github.com/caimlas/meept/internal/version.BuildTime={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+    # default name template: {{ .ProjectName }}_{{ .Os }}_{{ .Arch }}
+    files:
+      # none: binaries only; config templates ship via make install, and the
+      # dev key / pairing flow must never be baked into distributed artifacts.
+      - none*
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

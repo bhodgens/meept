@@ -1,0 +1,41 @@
+# Keep the container build context small and free of local artifacts.
+
+# Local build outputs
+bin/
+dist/
+coverage.out
+coverage.html
+
+# Git and CI metadata
+.git
+.gitignore
+.github/
+
+# Flutter GUI sources and build outputs (web payload is not in the image)
+ui/flutter_ui/
+ui/flutter_ui/build/
+
+# macOS menubar / desktop app payloads
+ui/menubar/
+
+# Test artifacts and caches
+*.test
+*.out
+e2e/.scratch/
+
+# Config backups and local overrides
+config/*.bak
+config/*.bak-*
+config/models.json5.bak*
+
+# Docs and generated graphs not needed at build time
+docs/
+*.md
+!README.md
+
+# Local dev state
+.meept/
+llmdoc
+meept
+meept-daemon
+meept-lite
