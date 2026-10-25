@@ -11,6 +11,21 @@
 #   ./scripts/totem-cluster.sh teardown    # stop daemons + wipe test state (users, registry clone)
 #                                          # (keeps /root/git/meept checkouts and the bare repo)
 #
+# DRY-RUN: prefix with DRY_RUN=1 (or `DRY_RUN=1 ./scripts/totem-cluster.sh
+# provision`) to print every remote command instead of executing it. Local
+# read-only steps still run; nothing is installed or written on any node.
+#
+# Go toolchain policy: the cluster pins the upstream toolchain named in the
+# repo's go.mod (GO_VERSION below, currently go1.26.5). Distro golang-go is
+# NEVER installed: it is unpinned, and a newer ambient go (1.27+) breaks the
+# repo's x/tools analyzers — the same reason the repo pins GOTOOLCHAIN
+# in-repo. The pinned toolchain installs to /usr/local/go-<ver> and is
+# exposed as /usr/local/go (symlink, only when absent or already ours);
+# a pre-existing REAL /usr/local/go directory (e.g. a manually installed
+# toolchain someone else owns) is left untouched and precedence is handled
+# via PATH export instead. Re-running provision is idempotent: a node whose
+# pinned toolchain already reports the right version is skipped entirely.
+#
 # Requirements from the workstation: root SSH to totem1/2/3 (totem1 must be
 # able to root-ssh to totem2/3 for the registry remote, and vice versa).
 #
@@ -27,8 +42,84 @@ REPO_DIR=/root/git/meept
 STATE=/root/.meept
 GOSSIP_PORT=9701
 
-node() { local h="$1"; shift; ssh root@"$h" "$@"; }
+# Pinned Go toolchain — MUST match the `toolchain` line in the repo's go.mod.
+GO_VERSION=go1.26.5
+GO_TARBALL="${GO_VERSION}.linux-amd64.tar.gz"
+GO_URL="https://go.dev/dl/${GO_TARBALL}"
+GO_SHA256="798232c0baa15b14e03a55899bdb5ea7deb154f5dffd4b4b83bcbe45dc7ada2d"
+GO_INSTALL_ROOT=/usr/local
+GO_INSTALL_DIR="${GO_INSTALL_ROOT}/${GO_VERSION}"
+GO_SYMLINK="${GO_INSTALL_ROOT}/go"
+
+DRY_RUN="${DRY_RUN:-0}"
+if [ "$DRY_RUN" = "1" ]; then
+  node() { local h="$1"; shift; echo "[dry-run] ssh root@$h $*"; return 0; }
+  scpto() { local src="$1" dst="$2"; echo "[dry-run] scp -q $src $dst"; return 0; }
+else
+  node() { local h="$1"; shift; ssh root@"$h" "$@"; }
+  scpto() { local src="$1" dst="$2"; scp -q "$src" "$dst"; }
+fi
 all_nodes() { local h; for h in "${NODES[@]}"; do node "$h" "$@"; done; }
+
+# Pinned-toolchain bootstrap on one node. Idempotent:
+#   1. pinned dir already correct version -> PATH fix only, no download
+#   2. pinned dir present but wrong version -> refresh it (re-download)
+#   3. absent -> download, verify sha256, install
+# /usr/local/go becomes a symlink only when it does not exist yet or already
+# points at our pinned dir; a real directory there is never clobbered.
+install_pinned_go() {
+  local h="$1"
+  node "$h" bash -s -- "$GO_VERSION" "$GO_TARBALL" "$GO_URL" "$GO_SHA256" <<'GOSETUP'
+set -euo pipefail
+GO_VERSION="$1"; GO_TARBALL="$2"; GO_URL="$3"; GO_SHA256="$4"
+GO_INSTALL_DIR="/usr/local/${GO_VERSION}"
+GO_SYMLINK="/usr/local/go"
+GO_BIN="${GO_INSTALL_DIR}/bin/go"
+
+version_ok() { "$1" version 2>/dev/null | grep -q " ${GO_VERSION} " || return 1; }
+
+if [ -x "$GO_BIN" ] && version_ok "$GO_BIN"; then
+  echo "pinned go ${GO_VERSION} already installed at ${GO_INSTALL_DIR}"
+elif [ -x "$GO_BIN" ]; then
+  echo "stale install at ${GO_INSTALL_DIR} (wrong version); refreshing"
+  rm -rf "$GO_INSTALL_DIR"
+fi
+
+if [ ! -x "$GO_BIN" ]; then
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "$tmp/$GO_TARBALL" "$GO_URL"
+  else
+    wget -qO "$tmp/$GO_TARBALL" "$GO_URL"
+  fi
+  echo "$GO_SHA256  $tmp/$GO_TARBALL" | sha256sum -c -
+  rm -rf "$GO_INSTALL_DIR"
+  tar -C /usr/local -xzf "$tmp/$GO_TARBALL"
+  mv /usr/local/go "$GO_INSTALL_DIR"
+  version_ok "$GO_BIN" || { echo "installed go failed version check" >&2; exit 1; }
+  echo "installed pinned ${GO_VERSION} at ${GO_INSTALL_DIR}"
+fi
+
+# Export precedence via profile.d (PATH-only; never clobbers an existing
+# /usr/local/go that someone else owns as a real directory).
+cat > /etc/profile.d/pinned-go.sh <<PROFILE
+# managed by meept scripts/totem-cluster.sh - pinned Go for the meept build
+export PATH="${GO_INSTALL_DIR}/bin:\$PATH"
+export GOTOOLCHAIN="${GO_VERSION}"
+PROFILE
+chmod 0644 /etc/profile.d/pinned-go.sh
+
+if [ ! -e "$GO_SYMLINK" ]; then
+  ln -s "$GO_INSTALL_DIR" "$GO_SYMLINK"
+  echo "symlinked ${GO_SYMLINK} -> ${GO_INSTALL_DIR}"
+elif [ -L "$GO_SYMLINK" ] && [ "$(readlink "$GO_SYMLINK")" != "$GO_INSTALL_DIR" ]; then
+  ln -sfn "$GO_INSTALL_DIR" "$GO_SYMLINK"
+  echo "re-pointed symlink ${GO_SYMLINK} -> ${GO_INSTALL_DIR}"
+fi
+"${GO_BIN}" version
+GOSETUP
+}
 
 write_cluster_config() {
   local h="$1"
@@ -63,29 +154,40 @@ EOF
 }
 
 cmd_provision() {
-  echo "== deps (go, git, build headers) on all nodes"
+  echo "== pinned Go (${GO_VERSION}) on all nodes (never distro golang-go)"
   for h in "${NODES[@]}"; do
-    node "$h" "apt-get install -y -qq golang-go git libsqlite3-dev libasound2-dev pkg-config >/dev/null 2>&1 || true"
+    install_pinned_go "$h"
+  done
+
+  echo "== non-go deps (git, build headers) on all nodes"
+  for h in "${NODES[@]}"; do
+    node "$h" "apt-get install -y -qq git libsqlite3-dev libasound2-dev pkg-config >/dev/null 2>&1 || true"
   done
 
   echo "== repo on totem1 (build host)"
   node totem1 "mkdir -p /root/git && tar xzf /tmp/meept-head.tar.gz -C /root/git/ 2>/dev/null || true; ls $REPO_DIR/cmd/meept-daemon >/dev/null && echo repo-present"
 
-  echo "== build on totem1"
-  # GOTOOLCHAIN inline: the remote host's shell has no pin, and its ambient
-  # Go may be newer than go.mod's toolchain (x/tools export-data break).
-  node totem1 "cd $REPO_DIR && GOTOOLCHAIN=\$(sed -n 's/^toolchain[[:space:]]//p' go.mod | head -1) go build -o bin/meept-daemon ./cmd/meept-daemon && GOTOOLCHAIN=\$(sed -n 's/^toolchain[[:space:]]//p' go.mod | head -1) go build -o bin/meept ./cmd/meept && echo build-ok"
+  echo "== build on totem1 (pinned toolchain from /etc/profile.d/pinned-go.sh)"
+  # The pinned toolchain + GOTOOLCHAIN export live in profile.d (installed
+  # above); source it explicitly because non-interactive ssh does not read it.
+  # GOTOOLCHAIN is also derived from go.mod inline so the build stays pinned
+  # even if the toolchain binary were wrong (go would then fetch the declared
+  # toolchain itself rather than silently building with a mismatched one).
+  node totem1 "cd $REPO_DIR && . /etc/profile.d/pinned-go.sh 2>/dev/null; TC=\$(sed -n 's/^toolchain[[:space:]]//p' go.mod | head -1) && \
+GOTOOLCHAIN=\$TC go build -o bin/meept-daemon ./cmd/meept-daemon && \
+GOTOOLCHAIN=\$TC go build -o bin/meept ./cmd/meept && echo build-ok"
 
   echo "== distribute binaries + source to totem2/3"
   for h in totem2 totem3; do
     node "$h" "mkdir -p $REPO_DIR/bin"
-    scp -q root@totem1:"$REPO_DIR"/bin/meept-daemon root@totem1:"$REPO_DIR"/bin/meept root@"$h":"$REPO_DIR"/bin/
-    scp -q /tmp/meept-head.tar.gz root@"$h":/tmp/ 2>/dev/null && \
-      node "$h" "mkdir -p /root/git && tar xzf /tmp/meept-head.tar.gz -C /root/git/ 2>/dev/null; mkdir -p $REPO_DIR/bin" || true
+    scpto root@totem1:"$REPO_DIR"/bin/meept-daemon root@"$h":"$REPO_DIR"/bin/meept-daemon
+    scpto root@totem1:"$REPO_DIR"/bin/meept root@"$h":"$REPO_DIR"/bin/meept
+    scpto /tmp/meept-head.tar.gz root@"$h":/tmp/meept-head.tar.gz
+    node "$h" "mkdir -p /root/git && tar xzf /tmp/meept-head.tar.gz -C /root/git/ 2>/dev/null; mkdir -p $REPO_DIR/bin" || true
   done
 
-  echo "== registry bare repo on totem1"
-  node totem1 "git init --bare -q $REGISTRY_DIR 2>/dev/null || true; git -C $REGISTRY_DIR symbolic-ref HEAD refs/heads/main"
+  echo "== registry bare repo on totem1 (idempotent: init is a no-op if it exists)"
+  node totem1 "git init --bare -q $REGISTRY_DIR 2>/dev/null || true; git -C $REGISTRY_DIR symbolic-ref HEAD refs/heads/main; (git -C $REGISTRY_DIR rev-parse --verify refs/heads/main >/dev/null 2>&1 || (cd $REPO_DIR && git push -q $REGISTRY_DIR HEAD:refs/heads/main 2>/dev/null || true))"
 
   echo "== host keys + cluster config on all nodes"
   for h in "${NODES[@]}"; do
@@ -93,19 +195,24 @@ cmd_provision() {
     write_cluster_config "$h"
   done
 
-  echo "== daemon config (template + multiuser on + http off)"
+  echo "== daemon config (template + multiuser on + http off) — no-clobber"
   for h in "${NODES[@]}"; do
-    node "$h" "cp -f $REPO_DIR/config/meept.json5 $STATE/meept.json5
-cp -f $REPO_DIR/config/models.json5 $STATE/models.json5
+    # Idempotent, no-clobber: write the template only when the installed copy
+    # is absent (first provision). An existing installed config is the
+    # operator's state — re-provisioning must never clobber it; report drift
+    # instead (scripts/config-drift-check.py is the full audit tool).
+    node "$h" "[ -f $STATE/meept.json5 ] && echo '$h: $STATE/meept.json5 exists, left untouched' || { cp $REPO_DIR/config/meept.json5 $STATE/meept.json5; echo '$h: seeded $STATE/meept.json5'; }
+[ -f $STATE/models.json5 ] && echo '$h: $STATE/models.json5 exists, left untouched' || cp $REPO_DIR/config/models.json5 $STATE/models.json5
 mkdir -p $STATE/config && cp -f $REPO_DIR/config/*.json5 $STATE/config/ 2>/dev/null || true
 python3 - <<'PYEOF'
 import re
 p = '/root/.meept/meept.json5'
 s = open(p).read()
-s = re.sub(r'(\"http\":\s*\{)', r'\1\n      \"enabled\": false,', s, count=1)
 if '\"multiuser\"' not in s:
-    s = s.replace('\"transport\": {',
-        '\"multiuser\": { \"enabled\": true, \"users_file\": \"/root/.meept/users.json5\" },\n  \"transport\": {', 1)
+    s = re.sub(r'(\\\"transport\\\":\\s*\\{)',
+        r'\\\"multiuser\\\": { \\\"enabled\\\": true, \\\"users_file\\\": \\\"/root/.meept/users.json5\\\" },\\n  \\1', s, count=1)
+if 'users.json5' not in s:
+    s = re.sub(r'(\\\"multiuser\\\":\\s*\\{)', r'\\1 \\\"users_file\\\": \\\"/root/.meept/users.json5\\\",', s, count=1)
 open(p, 'w').write(s)
 print('patched', p)
 PYEOF"
