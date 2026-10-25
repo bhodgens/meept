@@ -173,6 +173,7 @@ Recommendation: **A**. `employee.invocations` (manager.go:1472ff) already
 counts the episode; the persona counter + audit attribution are the missing
 two bits; permission_decision events already exist in the acp lane.
 **Decision: A (persona counter shipped fe4cdc44; add employee attribution on audit findings)** (owner picks 2026-10-24; parent proceeding with the recommendations)
+**D6 as landed:** the source tag rides at the executor's single existing emission site, not a second loop-seam emit — the employee adapter stamps ctx via `agent.WithACPTurnSource` and `recordTurn` tags `acp.persona.turns {agent, persona, outcome, source}` (+ `employee_id` when source=employee); no adapter-side datapoint, no double counting. Audit attribution is a new per-turn `AuditFinding` (`violated_rule=acp_turn_attribution`, `checkpoint=post_turn`, evidence names executor_agent/harness/persona + outcome) written by the adapter through the nil-safe `acpTurnAuditRecorder` seam — no schema change to AuditFinding/TurnRecord. A ctx-propagation regression test pins RunOnce→ACPExecutor.Run threading.
 
 ## Security
 
@@ -200,6 +201,40 @@ operator-authored agent defs remain non-model-writable.
 4. e2e: extend hermetic fakeagent (internal/acp/testdata/fakeagent) with an
    employee-driven turn; suite per e2e-testing.md tiers. No surface changes
    beyond `agents show` executor line (TUI/GUI parity per AGENTS.md).
+
+## Display parity follow-up (shipped 2026-10-24)
+
+The `agents show` executor line landed for agent DEFINITIONS (dim 3A,
+`renderExecutorSection`). This follow-up closes the EMPLOYEE surfaces
+(`executor_agent` on an employee references an acp-backed agent; the
+server-side rows already carried the field via the embedded
+`bot.BotDefinition` — no RPC/HTTP row struct changes were needed):
+
+- **CLI** (`agents show` detail): an `executor:    <id> (acp)` line,
+  rendered only when `executor_agent` is set; fully lowercase via the
+  pure `employeeExecutorLine` (cmd/meept/agents_executor_display.go),
+  matching the repo all-lowercase UI rule and the lowercase `executor:`
+  section `renderExecutorSection` prints for agent DEFINITIONS — a
+  deliberate deviation from the sibling detail labels (`ID:`/`Tier:`/
+  `Drift:`), which are pre-existing capitalized text this change does
+  not touch. The value column stays aligned with those rows. The
+  `agents list` table is unchanged (detail-only parity, per the task's
+  stated shape).
+- **TUI** (employees panel): an eighth `exec` list column (`acp` marker
+  for executor-backed employees, `-` otherwise — pure
+  `executorListMarker`) plus a lowercase `executor: <id> (acp)` detail
+  line between `tier:` and `status:` (`executorDetailLine`), omitted for
+  local-executor employees.
+- **GUI** (agents tab): an `acp` badge on the agent tile plus a
+  lowercase `executor: <id> (acp)` line in the goals pane (detail
+  surface). DEVIATION: the Flutter agents tab lists CONFIG agents
+  (`/api/v1/config/agents`, the dispatcher roster), not employees — the
+  badge keys off a best-effort secondary fetch of the employee roster
+  (`GET /api/v1/agents`, `listEmployees`) matched by agent id, stored in
+  `AgentState.employeeExecutors`. A roster fetch failure (employees
+  disabled) degrades silently: no badge, no error banner. When the GUI
+  grows a dedicated employees view over `/api/v1/agents`, this keying
+  becomes direct.
 
 ## Open questions
 
