@@ -1,9 +1,11 @@
 package employee
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,25 @@ import (
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
 )
+
+// syncBuffer is a mutex-guarded bytes.Buffer so a slog handler writing from
+// the Decide path can be read safely in tests.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // ---------------------------------------------------------------------------
 // Test stubs
@@ -866,6 +887,36 @@ func TestParseAssessResponse(t *testing.T) {
 			wantCount: 0,
 		},
 		{
+			name:      "code-fenced JSON with candidates (uppercase fence)",
+			content:   "```JSON\n{\"candidates\":[{\"title\":\"a\",\"description\":\"d\",\"prompt\":\"p\"}]}\n```",
+			wantCount: 1,
+		},
+		{
+			name:      "prose-wrapped JSON object",
+			content:   "Sure, here is my assessment:\n{\"candidates\":[{\"title\":\"a\",\"description\":\"d\",\"prompt\":\"p\"}]}\nHope that helps!",
+			wantCount: 1,
+		},
+		{
+			name:      "bare candidate array (missing envelope)",
+			content:   `[{"title":"a","description":"d","prompt":"p"}]`,
+			wantCount: 1,
+		},
+		{
+			name:      "empty array bare",
+			content:   `[]`,
+			wantCount: 0,
+		},
+		{
+			name:    "valid JSON missing candidates key is a parse error (no silent zero-candidate no-op)",
+			content: `{"action":"none"}`,
+			wantErr: true,
+		},
+		{
+			name:    "JSON truncated mid-object never closes",
+			content: `Thinking... {"candidates":[{"title":"a","descri`,
+			wantErr: true,
+		},
+		{
 			name:    "invalid JSON",
 			content: "not json at all",
 			wantErr: true,
@@ -1493,5 +1544,153 @@ func TestDecide_Tier3_EscalationWritesAuditRecord(t *testing.T) {
 	// The trigger Reason must be carried in the record.
 	if !strings.Contains(f.Evidence, triggerReason) {
 		t.Errorf("evidence = %q, want it to contain trigger reason %q", f.Evidence, triggerReason)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: direct-instruction triggers (live smoke defect 2026-10-25)
+// ---------------------------------------------------------------------------
+
+// directInstructionTrigger mirrors the raw-RPC agents.trigger payload that
+// the acp-employee smoke sent: a direct execution instruction in the payload.
+func directInstructionTrigger() TriggerEvent {
+	return TriggerEvent{
+		Source:  "manual",
+		Topic:   "agents.trigger",
+		Payload: []byte(`{"instruction":"immediately execute: list the files at the repo root and report them"}`),
+		FiredAt: time.Date(2026, 10, 25, 6, 52, 34, 0, time.UTC),
+	}
+}
+
+// TestAssessSystemPrompt_DirectInstructionRule pins the prompt clarity fix:
+// the system prompt must contain the MUST-rule for direct instructions, an
+// affirmative example with real (non-placeholder) values, and the
+// "ONLY a JSON object" output constraint.
+func TestAssessSystemPrompt_DirectInstructionRule(t *testing.T) {
+	for _, want := range []string{
+		"you MUST return exactly one candidate",
+		"Never return an empty candidates array for a direct instruction",
+		`"candidates"`,
+		"ONLY a JSON object",
+	} {
+		if !strings.Contains(assessSystemPrompt, want) {
+			t.Errorf("assessSystemPrompt missing %q", want)
+		}
+	}
+}
+
+// TestBuildAssessUserPrompt_TaskFooterStatesDirectInstructionRule pins the
+// task-footer clarity: the shape and the direct-instruction rule must appear.
+func TestBuildAssessUserPrompt_TaskFooterStatesDirectInstructionRule(t *testing.T) {
+	out := buildAssessUserPrompt(testTier1Constitution(), directInstructionTrigger())
+	for _, want := range []string{
+		`"candidates"`,
+		"direct instruction",
+		"empty candidates array",
+		// The payload itself must be rendered so the model can see it.
+		"immediately execute",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("assess user prompt missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// TestDecide_Tier1_DirectInstructionExecutes proves the end-to-end shape the
+// smoke needed: a trigger whose payload contains a direct instruction, a
+// reflector answering with exactly one candidate, and Execute firing against
+// the executor with the candidate prompt.
+func TestDecide_Tier1_DirectInstructionExecutes(t *testing.T) {
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[{"title":"Report repo files","description":"direct instruction","prompt":"list the files at the repo root and report them"}]}`)
+	reflector.queueResponse(`{"health":"healthy","reasoning":"reported"}`)
+	executor := &capturingExecutor{stubExecutor: *newStubExecutor()}
+	executor.succeedWith("README.md\nmain.go", 25)
+
+	loop := NewGoalLoop("sampler", testTier1Constitution(), nil, nil).
+		WithReflector(reflector).
+		WithExecutor(executor)
+
+	if err := loop.Decide(context.Background(), directInstructionTrigger()); err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+	if executor.CallCount() != 1 {
+		t.Fatalf("executor called %d times, want 1 (Execute must reach the adapter)", executor.CallCount())
+	}
+	prompts := executor.Prompts()
+	if len(prompts) != 1 || !strings.Contains(prompts[0], "list the files at the repo root") {
+		t.Errorf("executed prompts = %v, want the direct instruction prompt", prompts)
+	}
+}
+
+// TestAssess_DirectInstruction_ProseWrappedResponse proves parser tolerance
+// end-to-end: a small model wrapping the JSON in prose (or fences) still
+// yields exactly one candidate instead of a parse failure / no-op.
+func TestAssess_DirectInstruction_ProseWrappedResponse(t *testing.T) {
+	reflector := newStubReflector()
+	reflector.queueResponse("Based on the trigger, here is my assessment:\n```json\n{\"candidates\":[{\"title\":\"Report repo files\",\"description\":\"d\",\"prompt\":\"list the files\"}]}\n```\nDone.")
+
+	loop := NewGoalLoop("sampler", testTier1Constitution(), nil, nil).
+		WithReflector(reflector)
+
+	candidates, err := loop.Assess(context.Background(), directInstructionTrigger())
+	if err != nil {
+		t.Fatalf("Assess error: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("candidates = %d, want 1", len(candidates))
+	}
+	if candidates[0].Prompt != "list the files" {
+		t.Errorf("prompt = %q, want %q", candidates[0].Prompt, "list the files")
+	}
+}
+
+// TestDecide_Tier1_NoCandidates_LogsInfoAtInfo pins the observability fix:
+// the zero-candidate no-op is an INFO record (visible at the daemon's INFO
+// level) carrying the employee id and the candidate count.
+func TestDecide_Tier1_NoCandidates_LogsInfoAtInfo(t *testing.T) {
+	var buf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})).
+		With("component", "test")
+
+	reflector := newStubReflector() // default: {"candidates":[]}
+	loop := NewGoalLoop("sampler-info", testTier1Constitution(), nil, logger).
+		WithReflector(reflector)
+
+	if err := loop.Decide(context.Background(), directInstructionTrigger()); err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"level=INFO",
+		"tier1 assess produced no candidates",
+		"employee_id=sampler-info",
+		"candidates=0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log output missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// TestDecide_Tier3_NoCandidates_LogsInfoAtInfo pins the same promotion on the
+// tier-3 path.
+func TestDecide_Tier3_NoCandidates_LogsInfoAtInfo(t *testing.T) {
+	var buf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})).
+		With("component", "test")
+
+	reflector := newStubReflector() // default: {"candidates":[]}
+	loop := NewGoalLoop("sampler-t3", testTier3Constitution(), nil, logger).
+		WithReflector(reflector)
+
+	if err := loop.Decide(context.Background(), basicTrigger()); err != nil {
+		t.Fatalf("Decide error: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"level=INFO", "tier3 assess produced no candidates", "employee_id=sampler-t3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log output missing %q; got:\n%s", want, out)
+		}
 	}
 }

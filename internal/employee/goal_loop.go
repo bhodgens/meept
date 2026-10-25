@@ -648,16 +648,29 @@ func (l *GoalLoop) SetConstitution(c *Constitution) {
 
 // assessSystemPrompt is the system message for the ASSESS LLM call. It
 // instructs the model to evaluate the current state and propose actions.
+//
+// Direct-instruction rule (live smoke defect 2026-10-25): the employee
+// reflector is a small model (models.json5 small_model slot). Before this
+// rule the prompt's only affirmative example was placeholder text while BOTH
+// closing instructions ("If no action is needed..." / the task-footer
+// "If no action is warranted...") invited an empty array, so a sampler
+// trigger carrying {"instruction":"immediately execute: ..."} came back with
+// {"candidates":[]} and tier-1 Decide silently no-op'd. The MUST-rule below
+// is counterweighted against the empty-array invitation; the example carries
+// real values so the "emit one candidate" branch has a concrete template
+// (few-shot adherence matters at 1.2B scale).
 const assessSystemPrompt = `You are the assessment module of an AI employee. Given the trigger event and your constitution, decide what actions (if any) should be taken.
 
-Respond as JSON:
+Respond with ONLY a JSON object, no other text:
 {
   "candidates": [
-    {"title": "...", "description": "...", "prompt": "the instruction for the executor"}
+    {"title": "Report repo files", "description": "the trigger asked for this", "prompt": "list the files at the repo root and report them"}
   ]
 }
 
-If no action is needed, return {"candidates": []}.`
+Rules:
+1. If the trigger payload contains a direct instruction for you to do or execute something, you MUST return exactly one candidate whose prompt is that instruction. Never return an empty candidates array for a direct instruction.
+2. Only if the trigger asks for nothing actionable may you return {"candidates": []}.`
 
 // reflectSystemPrompt is the system message for the REFLECT LLM call. It
 // instructs the model to evaluate the execution outcome and update goal
@@ -1398,7 +1411,15 @@ func (l *GoalLoop) decideTier1(ctx context.Context, trigger TriggerEvent, logger
 		return fmt.Errorf("tier1 assess: %w", err)
 	}
 	if len(candidates) == 0 {
-		logger.Debug("tier1 assess produced no candidates; no-op")
+		// INFO (live smoke defect 2026-10-25): the zero-candidate no-op was
+		// Debug-level and invisible at the daemon's INFO log level, making a
+		// silently-dead tier-1 employee indistinguishable from a working
+		// one. Keep it visible with the employee id and the count.
+		logger.Info("tier1 assess produced no candidates; no-op",
+			"employee_id", l.employeeID,
+			"candidates", len(candidates),
+			"trigger_source", trigger.Source,
+			"trigger_topic", trigger.Topic)
 		return nil
 	}
 
@@ -1474,7 +1495,11 @@ func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger
 		return fmt.Errorf("tier2 assess: %w", err)
 	}
 	if len(candidates) == 0 {
-		logger.Debug("tier2 assess produced no candidates; no-op")
+		logger.Info("tier2 assess produced no candidates; no-op",
+			"employee_id", l.employeeID,
+			"candidates", len(candidates),
+			"trigger_source", trigger.Source,
+			"trigger_topic", trigger.Topic)
 		return nil
 	}
 
@@ -1578,7 +1603,11 @@ func (l *GoalLoop) decideTier3(ctx context.Context, trigger TriggerEvent, logger
 		return fmt.Errorf("tier3 assess: %w", err)
 	}
 	if len(candidates) == 0 {
-		logger.Debug("tier3 assess produced no candidates; no-op")
+		logger.Info("tier3 assess produced no candidates; no-op",
+			"employee_id", l.employeeID,
+			"candidates", len(candidates),
+			"trigger_source", trigger.Source,
+			"trigger_topic", trigger.Topic)
 		return nil
 	}
 
@@ -1867,7 +1896,11 @@ func buildAssessUserPrompt(c *Constitution, trigger TriggerEvent) string {
 
 	sb.WriteString("\n# task\n\n")
 	sb.WriteString("Given the trigger and your constitution, what should you do? ")
-	sb.WriteString("Return candidates as JSON. If no action is warranted, return an empty candidates array.\n")
+	sb.WriteString("Return candidates as a JSON object of the form ")
+	sb.WriteString(`{"candidates": [{"title": "...", "description": "...", "prompt": "..."}]}. `)
+	sb.WriteString("If the payload above contains a direct instruction, return exactly ")
+	sb.WriteString("one candidate whose prompt executes that instruction. Only when the ")
+	sb.WriteString("trigger asks for nothing actionable return an empty candidates array.\n")
 	return sb.String()
 }
 
@@ -1913,31 +1946,118 @@ func buildReflectUserPrompt(c *Constitution, result *bot.BotExecutionResult) str
 // ---------------------------------------------------------------------------
 
 // assessLLMResponse is the JSON schema expected from the ASSESS LLM call.
+// Candidates is a pointer so a MISSING key (model answered with the wrong
+// shape, e.g. {"action":"none"}) is distinguishable from an explicit empty
+// array: a missing key is a parse failure (tier-1 fallback wraps the raw
+// answer as a candidate) instead of a silent zero-candidate no-op.
 type assessLLMResponse struct {
-	Candidates []CandidatePlan `json:"candidates"`
+	Candidates *[]CandidatePlan `json:"candidates"`
 }
 
 // parseAssessResponse parses the LLM's JSON response from ASSESS. Returns
 // (nil, error) on unparseable output — the caller handles the tier-1 fallback.
+//
+// Tolerance (live smoke defect 2026-10-25): small reflector models wrap the
+// answer in code fences (any case), prefix it with prose ("Sure, here is my
+// assessment: ..."), or return the candidate array bare instead of the
+// {"candidates": [...]} envelope. All three shapes are extracted by scanning
+// for the first balanced JSON span; strict whole-string unmarshal previously
+// turned them into parse errors — and, for a wrong-but-valid-JSON shape
+// missing the candidates key, into a silent zero-candidate no-op.
 func parseAssessResponse(content string) ([]CandidatePlan, error) {
 	content = strings.TrimSpace(content)
-	// Strip markdown code fences if present.
-	content = strings.TrimPrefix(content, "```json")
-	content = strings.TrimPrefix(content, "```")
+	// Strip markdown code fences if present (case-insensitive ```json / ```JSON).
+	lowered := strings.ToLower(content)
+	switch {
+	case strings.HasPrefix(lowered, "```json"):
+		content = content[len("```json"):]
+	case strings.HasPrefix(lowered, "```"):
+		content = content[3:]
+	}
+	content = strings.TrimSpace(content)
 	content = strings.TrimSuffix(content, "```")
 	content = strings.TrimSpace(content)
 
+	span, ok := extractFirstJSONSpan(content)
+	if !ok {
+		return nil, fmt.Errorf("parse assess response: no JSON object or array found in %d bytes", len(content))
+	}
+	raw := span
+
+	// Bare-array tolerance: [{"title":...}, ...] without the envelope.
+	if strings.HasPrefix(raw, "[") {
+		var arr []CandidatePlan
+		if err := json.Unmarshal([]byte(raw), &arr); err == nil {
+			out := make([]CandidatePlan, len(arr))
+			copy(out, arr)
+			return out, nil
+		}
+		// fall through to the envelope error below
+	}
+
 	var parsed assessLLMResponse
-	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return nil, fmt.Errorf("parse assess response: %w", err)
 	}
+	if parsed.Candidates == nil {
+		return nil, fmt.Errorf("parse assess response: JSON lacks the required \"candidates\" key")
+	}
 	// Defensive copy of candidates (avoid aliasing caller-visible slice).
-	if len(parsed.Candidates) == 0 {
+	if len(*parsed.Candidates) == 0 {
 		return []CandidatePlan{}, nil
 	}
-	out := make([]CandidatePlan, len(parsed.Candidates))
-	copy(out, parsed.Candidates)
+	out := make([]CandidatePlan, len(*parsed.Candidates))
+	copy(out, *parsed.Candidates)
 	return out, nil
+}
+
+// extractFirstJSONSpan returns the first balanced JSON value (object or
+// array) found in s, as a substring. Braces/brackets inside JSON string
+// literals are ignored via quote+escape tracking (quotes at depth 0 are
+// prose and do not open a literal). Returns ok=false when no balanced span
+// exists (e.g. pure prose, or truncated JSON that never closes).
+func extractFirstJSONSpan(s string) (string, bool) {
+	depth := 0
+	start := -1
+	inStr, esc := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			if esc {
+				esc = false
+				continue
+			}
+			switch c {
+			case '\\':
+				esc = true
+			case '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			if depth > 0 {
+				inStr = true
+			}
+		case '{', '[':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}', ']':
+			// Well-formed JSON pairs every closer with an opener; a closer
+			// at depth 0 is prose noise — ignore it and wait for a real
+			// opening brace/bracket.
+			if depth > 0 {
+				depth--
+				if depth == 0 {
+					return s[start : i+1], true
+				}
+			}
+		}
+	}
+	return "", false
 }
 
 // reflectLLMResponse is the JSON schema expected from the REFLECT LLM call.
