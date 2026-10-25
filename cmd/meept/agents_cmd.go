@@ -289,6 +289,15 @@ func newAgentsShowCmd() *cobra.Command {
 			if drift := getStringOr(resultMap, "drift_score", ""); drift != "" {
 				fmt.Printf("Drift:       %s\n", drift)
 			}
+			// acp executor reference (acp-employees phase 3 display
+			// parity). Renders only when the employee declares one; the
+			// line is fully lowercase per the repo UI convention (and
+			// matching the lowercase `executor:` section that
+			// renderExecutorSection prints for agent DEFINITIONS), with
+			// the value column aligned to the Tier:/Drift: rows above.
+			if execLine := employeeExecutorLine(resultMap); execLine != "" {
+				fmt.Printf("executor:    %s\n", strings.TrimPrefix(execLine, "executor: "))
+			}
 			if cost := getStringOr(resultMap, "daily_cost", ""); cost != "" {
 				fmt.Printf("Daily cost:  %s\n", cost)
 			}

@@ -797,6 +797,28 @@ class SdkApiClient {
     return raw;
   }
 
+  /// Employee definitions: `GET /api/v1/agents` → `{agents: [...]}`.
+  ///
+  /// Rows come from the employee RPC handler (internal/employee/handler.go
+  /// handleList; the HTTP handler dispatches through unchanged), so each
+  /// entry may carry `executor_agent` — the acp-employees phase-3 acp
+  /// executor reference. The agents tab renders it as an 'acp' tile badge
+  /// plus a detail line. Empty array when the employee subsystem is off
+  /// (the route 404s — callers must catch).
+  Future<List<Map<String, dynamic>>> listEmployees() async {
+    try {
+      final raw = await _get('/api/v1/agents');
+      final agentsRaw = raw['agents'] as List?;
+      if (agentsRaw == null) return [];
+      return agentsRaw
+          .whereType<Map>()
+          .map((a) => Map<String, dynamic>.from(a))
+          .toList();
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   /// Employee goals: `GET /api/v1/agents/{id}/goals` → `{goals: [...]}`.
   Future<List<Map<String, dynamic>>> listEmployeeGoals(
     String employeeId,

@@ -108,11 +108,18 @@ class AgentState {
   /// Per-agent quota episode data keyed by agent id.
   final Map<String, AgentQuotaState> quotaEpisodes;
 
+  /// acp executor references from the employee roster (agents.list rows
+  /// carrying `executor_agent`, acp-employees phase 3 display parity),
+  /// keyed by employee id -> executor agent id. Employees with the
+  /// default local executor are absent.
+  final Map<String, String> employeeExecutors;
+
   const AgentState({
     this.agents = const [],
     this.isLoading = false,
     this.error,
     this.quotaEpisodes = const {},
+    this.employeeExecutors = const {},
   });
 
   AgentState copyWith({
@@ -120,12 +127,14 @@ class AgentState {
     bool? isLoading,
     Object? error = _unset,
     Map<String, AgentQuotaState>? quotaEpisodes,
+    Map<String, String>? employeeExecutors,
   }) {
     return AgentState(
       agents: agents ?? this.agents,
       isLoading: isLoading ?? this.isLoading,
       error: identical(error, _unset) ? this.error : error as String?,
       quotaEpisodes: quotaEpisodes ?? this.quotaEpisodes,
+      employeeExecutors: employeeExecutors ?? this.employeeExecutors,
     );
   }
 }
@@ -151,6 +160,29 @@ class AgentNotifier extends StateNotifier<AgentState> {
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
     }
+    await _loadEmployeeExecutors();
+  }
+
+  /// Best-effort fetch of the employee roster's acp executor references
+  /// (acp-employees phase 3 display parity). The tile badge/detail line
+  /// only renders when an employee id matches a roster agent id; the
+  /// roster call failing (employees disabled, route 404) silently leaves
+  /// the map unchanged — it must never surface as an agents-tab error.
+  Future<void> _loadEmployeeExecutors() async {
+    Map<String, String> executors;
+    try {
+      final employees = await sdkClient.listEmployees();
+      executors = {
+        for (final e in employees)
+          if ((e['id'] as String?) case final String id when id.isNotEmpty)
+            if ((e['executor_agent'] as String?) case final String ex
+                when ex.trim().isNotEmpty)
+              id: ex.trim(),
+      };
+    } catch (_) {
+      return;
+    }
+    state = state.copyWith(employeeExecutors: executors);
   }
 
   /// Apply a quota-status agent_progress event to [state].

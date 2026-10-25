@@ -18,6 +18,31 @@ class _StubSdkClient extends SdkApiClient {
         .map((a) => Map<String, dynamic>.from(a as Map))
         .toList();
   }
+
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async => const [];
+}
+
+/// An SDK client whose employee roster marks 'coder' with an acp
+/// executor reference (acp-employees phase 3 display parity tests).
+class _ExecutorRosterSdkClient extends _StubSdkClient {
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async {
+    return [
+      {'id': 'coder', 'name': 'Coder', 'executor_agent': 'hermes'},
+      {'id': 'analyst', 'name': 'Analyst'}, // no executor_agent
+      {'id': 'blank', 'name': 'Blank', 'executor_agent': '   '},
+    ];
+  }
+}
+
+/// An SDK client whose employee roster fetch throws — the notifier must
+/// keep the executor map unchanged and never surface an agents-tab error.
+class _RosterFailingSdkClient extends _StubSdkClient {
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async {
+    throw Exception('employees disabled');
+  }
 }
 
 /// An SDK client that throws on any call, to simulate failure.
@@ -28,6 +53,9 @@ class _FailingSdkClient extends SdkApiClient {
   Future<List<Map<String, dynamic>>> listAgents() async {
     throw Exception('network failure');
   }
+
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async => const [];
 }
 
 /// An SDK client that returns an empty agents list.
@@ -38,6 +66,9 @@ class _EmptyAgentsSdkClient extends SdkApiClient {
   Future<List<Map<String, dynamic>>> listAgents() async {
     return [];
   }
+
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async => const [];
 }
 
 /// An SDK client that returns one agent with null id, to verify error handling.
@@ -52,6 +83,9 @@ class _NullIdAgentSdkClient extends SdkApiClient {
       <String, dynamic>{'id': null, 'name': 'No ID'},
     ];
   }
+
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async => const [];
 }
 
 const _mockAgentsResponse = {
@@ -266,6 +300,29 @@ void main() {
         expect(notifier.state.agents, isEmpty);
       },
     );
+
+    test('loadAgents populates employeeExecutors from the roster', () async {
+      final notifier = AgentNotifier(sdkClient: _ExecutorRosterSdkClient());
+      notifier.loadAgents();
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // executor_agent rides through under the employee id; a row
+      // without the field, and a whitespace-only value, stay absent.
+      expect(notifier.state.employeeExecutors, {'coder': 'hermes'});
+      expect(notifier.state.error, isNull);
+    });
+
+    test('loadAgents survives a failing employee roster fetch', () async {
+      final notifier = AgentNotifier(sdkClient: _RosterFailingSdkClient());
+      notifier.loadAgents();
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // The roster is best-effort: agents load, executors stay empty,
+      // and the failure never surfaces as an agents-tab error.
+      expect(notifier.state.agents, hasLength(3));
+      expect(notifier.state.employeeExecutors, isEmpty);
+      expect(notifier.state.error, isNull);
+    });
   });
 
   group('Agent model parsing', () {

@@ -144,6 +144,65 @@ void main() {
       expect(find.textContaining('gate:'), findsOneWidget);
     });
   });
+
+  group('agents tab acp executor display (phase 3 parity)', () {
+    Future<void> pumpWithRoster(
+      WidgetTester tester,
+      List<Map<String, dynamic>> employees,
+    ) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(900, 600);
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final agents = [
+        const Agent(id: 'agent-0', name: 'coder', description: 'd'),
+      ];
+      final fake = _FakeSdkClient(agents: agents, employees: employees);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sdkClientProvider.overrideWith((ref) => fake),
+            agentProvider.overrideWith((ref) => AgentNotifier(sdkClient: fake)),
+          ],
+          child: const MaterialApp(home: Scaffold(body: AgentsTab())),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.byKey(const ValueKey('agent-tile-agent-0')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+
+    testWidgets('acp-backed employee tile shows the acp badge and the '
+        'goals pane shows the executor detail line', (tester) async {
+      await pumpWithRoster(tester, [
+        {'id': 'agent-0', 'name': 'coder', 'executor_agent': 'Hermes'},
+      ]);
+
+      // Tile badge (parity with the TUI list 'exec' column marker).
+      expect(find.text('acp'), findsOneWidget);
+      // Detail line, lowercase, (acp) suffix — parity with the TUI
+      // detail view and the CLI `agents show` executor line.
+      expect(find.text('executor: hermes (acp)'), findsOneWidget);
+    });
+
+    testWidgets('employee without executor_agent renders nothing acp', (
+      tester,
+    ) async {
+      await pumpWithRoster(tester, [
+        {'id': 'agent-0', 'name': 'coder'},
+      ]);
+
+      expect(find.text('acp'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('agent-executor-agent-0')),
+        findsNothing,
+      );
+    });
+  });
 }
 
 /// Fake [SdkApiClient] that returns pre-built agent JSON for [listAgents].
@@ -153,7 +212,15 @@ void main() {
 class _FakeSdkClient implements SdkApiClient {
   final List<Agent> agents;
 
-  _FakeSdkClient({required this.agents});
+  /// Employee-roster rows returned by listEmployees (acp-employees phase
+  /// 3 display parity): entries carrying executor_agent mark their id as
+  /// acp-backed in the agents tab.
+  final List<Map<String, dynamic>> employees;
+
+  _FakeSdkClient({required this.agents, this.employees = const []});
+
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async => employees;
 
   @override
   Future<List<Map<String, dynamic>>> listAgents() async {

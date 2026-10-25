@@ -37,6 +37,23 @@ func renderExecutorSection(m map[string]any) string {
 	return b.String()
 }
 
+// employeeExecutorLine renders the employee detail-view executor line
+// for `meept agents show` (acp-employees phase 3 display parity). The
+// employee's `executor_agent` names an acp-backed registry agent whose
+// loop carries the employee's EXECUTE turns; the id is lowercased per
+// the repo UI convention. Returns "" when the daemon omitted the field
+// (a local-executor employee renders no line at all).
+//
+// This is the EMPLOYEE surface — agent DEFINITIONS use
+// renderExecutorSection above, which renders the full executor block.
+func employeeExecutorLine(m map[string]any) string {
+	agent := strings.ToLower(strings.TrimSpace(getStringOr(m, "executor_agent", "")))
+	if agent == "" {
+		return ""
+	}
+	return "executor: " + agent + " (acp)"
+}
+
 // executorSectionValue reads a string field from the acp block, falling
 // back to def for a missing block or an empty value.
 func executorSectionValue(acpBlock map[string]any, key, def string) string {

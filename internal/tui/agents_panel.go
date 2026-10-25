@@ -53,6 +53,11 @@ type AgentsPanel struct {
 	// Data caches (populated by RPC fetches).
 	agents []AgentSummary
 
+	// execColumn mirrors showExec() at the last column fit: the exec column
+	// exists only when some cached agent references an acp executor
+	// (updateAgentsTable refits columns when this flips).
+	execColumn bool
+
 	// Currently selected agent ID (drives the detail view).
 	selectedID string
 
@@ -93,12 +98,17 @@ type AgentsRPCClient interface {
 // fields the daemon returns for agents.list plus a few values (drift,
 // daily cost) that the manager computes from bot state.
 type AgentSummary struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Role           string    `json:"role"`
-	Status         string    `json:"status"` // running | paused | error | stopped | quota_wait
-	Tier           string    `json:"tier"`   // tier_1_reactive | tier_2_propose | tier_3_autonomous
-	DriftScore     float64   `json:"drift_score"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Role       string  `json:"role"`
+	Status     string  `json:"status"` // running | paused | error | stopped | quota_wait
+	Tier       string  `json:"tier"`   // tier_1_reactive | tier_2_propose | tier_3_autonomous
+	DriftScore float64 `json:"drift_score"`
+	// ExecutorAgent names the acp-backed registry agent whose loop this
+	// employee's GoalLoop EXECUTE turns route through (acp-employees
+	// phase 3 display parity; mirrors bot.BotDefinition.ExecutorAgent,
+	// JSON key executor_agent). Empty = default local executor.
+	ExecutorAgent  string    `json:"executor_agent,omitempty"`
 	DailyCostCents int       `json:"daily_cost_cents"`
 	FindingsCount  int       `json:"findings_count"`
 	LastInvocation time.Time `json:"last_invocation"`
@@ -171,6 +181,11 @@ type AgentFinding struct {
 }
 
 // NewAgentsPanel constructs the panel with default table styling.
+// The agents list starts WITHOUT the exec column: it appears only once a
+// cached agent actually references an acp executor (showExec). An
+// unconditional 7-to-8 column table squeezed "findings"/"last run" into
+// ellipsis at narrow viewports (tui-flows e2e pin, 2026-10-25) even when
+// no employee was acp-backed.
 func NewAgentsPanel(rpc AgentsRPCClient) *AgentsPanel {
 	columns := []table.Column{
 		{Title: "id", Width: 18},
@@ -257,22 +272,50 @@ func (p *AgentsPanel) resizeColumns() {
 	// viewport to width-2, so the real cell-text budget is
 	// ContentBudget(viewport, 7) = width-16. The old percentage split
 	// (id 22% + a fixed 52 for the rest) overflowed the bordered box at the
-	// 80x24 default (mainWidth 55 → 7 columns demanded 72 against a 39
+	// 80x24 default (mainWidth 55 -> 7 columns demanded 72 against a 39
 	// budget) and bubbles/table MaxWidth-truncated every cell (M12). All
-	// SEVEN columns are fitted together — a leftover handed to "last run"
+	// columns are fitted together - a leftover handed to "last run"
 	// after fixing the others double-counted the space.
 	mins := []int{12, 8, 8, 6, 6, 8, 8}
 	weights := []int{22, 10, 16, 8, 10, 8, 12}
+	cols := []table.Column{
+		{Title: "id"},
+		{Title: "status"},
+		{Title: "tier"},
+		{Title: "drift"},
+		{Title: "cost"},
+		{Title: "findings"},
+		{Title: "last run"},
+	}
+	if p.showExec() {
+		// exec carries weight 8, not its visual 5: at the narrowest permitted
+		// panel (width 30 -> budget 12) FitWidthsMin's floors do not fit and it
+		// falls back to pure proportional FitWidths, where a weight under
+		// total/budget floored the column to width 0 - and bubbles/table skips
+		// zero-width columns while the leftover redistribution pushed the sum
+		// past the budget (M12 pin). Weight 8 keeps every column >= 1 there.
+		mins = append(mins, 5)
+		weights = append(weights, 8)
+		cols = append(cols, table.Column{Title: "exec"})
+	}
 	widths := tableutil.FitWidthsMin(tableutil.ContentBudget(p.table.Width(), len(mins)), mins, weights)
-	p.table.SetColumns([]table.Column{
-		{Title: "id", Width: widths[0]},
-		{Title: "status", Width: widths[1]},
-		{Title: "tier", Width: widths[2]},
-		{Title: "drift", Width: widths[3]},
-		{Title: "cost", Width: widths[4]},
-		{Title: "findings", Width: widths[5]},
-		{Title: "last run", Width: widths[6]},
-	})
+	for i := range cols {
+		cols[i].Width = widths[i]
+	}
+	p.table.SetColumns(cols)
+}
+
+// showExec reports whether the agents list should carry the exec column:
+// true when ANY cached agent references an acp executor. The column is
+// absent otherwise so the legacy seven-column layout (and its e2e width
+// pins) stays byte-identical for fleets without acp-backed employees.
+func (p *AgentsPanel) showExec() bool {
+	for _, a := range p.agents {
+		if strings.TrimSpace(a.ExecutorAgent) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // resizeGoalColumns fits the goals table to the current width through the
@@ -392,14 +435,15 @@ func (p *AgentsPanel) fetchDetail() tea.Msg {
 		return agentsDetailMsg{err: fmt.Errorf("agents.get: %w", err)}
 	}
 	var emp struct {
-		ID           string         `json:"id"`
-		Name         string         `json:"name"`
-		Description  string         `json:"description"`
-		Enabled      bool           `json:"enabled"`
-		Model        string         `json:"model,omitempty"`
-		Tools        []string       `json:"tools"`
-		Constitution map[string]any `json:"constitution"`
-		Constraints  map[string]any `json:"constraints,omitempty"`
+		ID            string         `json:"id"`
+		Name          string         `json:"name"`
+		Description   string         `json:"description"`
+		Enabled       bool           `json:"enabled"`
+		Model         string         `json:"model,omitempty"`
+		Tools         []string       `json:"tools"`
+		ExecutorAgent string         `json:"executor_agent"`
+		Constitution  map[string]any `json:"constitution"`
+		Constraints   map[string]any `json:"constraints,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &emp); err != nil {
 		return agentsDetailMsg{err: fmt.Errorf("unmarshal agent: %w", err)}
@@ -410,6 +454,7 @@ func (p *AgentsPanel) fetchDetail() tea.Msg {
 	detail.Agent.Name = emp.Name
 	detail.Agent.Role = emp.Description
 	detail.Agent.Status = "stopped"
+	detail.Agent.ExecutorAgent = emp.ExecutorAgent
 	detail.ToolsAllowed = emp.Tools
 
 	// Pull constitution fields.
@@ -848,6 +893,19 @@ func (p *AgentsPanel) handleDetailKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // updateAgentsTable rebuilds the table rows from the cached agents slice.
 func (p *AgentsPanel) updateAgentsTable() {
+	// The exec column rides the rows: a fetched fleet that gained (or lost)
+	// an acp-backed agent changes the column shape, so refit the columns
+	// before emitting rows. SetColumns clears the rows (the resizeColumns
+	// contract), and rows are rebuilt immediately below, so the clear is
+	// invisible; only refit when the shape actually changes to keep the
+	// steady-state refresh cheap.
+	if want := p.showExec(); want != p.execColumn {
+		p.execColumn = want
+		p.resizeColumns()
+		if p.width < 30 {
+			return
+		}
+	}
 	rows := make([]table.Row, len(p.agents))
 	for i, a := range p.agents {
 		statusCell := p.statusBadge(a.Status)
@@ -857,7 +915,7 @@ func (p *AgentsPanel) updateAgentsTable() {
 		if a.QuotaWaitUntil != nil || a.QuotaBlocked || a.QuotaWaitReason == ReasonThrottleGiveUp {
 			statusCell = p.quotaStatusBadge(a.QuotaWaitUntil, a.QuotaBlocked, a.QuotaWaitClass, a.QuotaWaitReason)
 		}
-		rows[i] = table.Row{
+		row := table.Row{
 			truncate(a.ID, 18),
 			statusCell,
 			p.tierShort(a.Tier),
@@ -866,6 +924,10 @@ func (p *AgentsPanel) updateAgentsTable() {
 			fmt.Sprintf("%d", a.FindingsCount),
 			formatTimeAgoTime(a.LastInvocation),
 		}
+		if p.execColumn {
+			row = append(row, executorListMarker(a.ExecutorAgent))
+		}
+		rows[i] = row
 	}
 	tableutil.SetRows(&p.table, rows)
 	// Preserve the cursor across rebuilds. quota events and countdown ticks
@@ -933,6 +995,31 @@ func (p *AgentsPanel) quotaStatusBadge(waitUntil *time.Time, blocked bool, waitC
 		return ""
 	}
 	return QuotaWaitLabel(waitClass, waitReason, *waitUntil)
+}
+
+// executorListMarker is the "exec" column cell for the agents list
+// (acp-employees phase 3 display parity): "acp" when the employee
+// references an acp-backed executor agent, "-" for the default local
+// executor. Pure formatting, lowercase per the repo UI convention;
+// pinned by TestExecutorListMarker.
+func executorListMarker(executorAgent string) string {
+	if strings.TrimSpace(executorAgent) == "" {
+		return "-"
+	}
+	return "acp"
+}
+
+// executorDetailLine renders the detail-view executor line
+// ("executor: <agent-id> (acp)"). The id is lowercased per the repo
+// UI convention. Returns "" when no executor reference is set so the
+// detail view renders no line at all — matching the CLI's omission.
+// Pinned by TestExecutorDetailLine.
+func executorDetailLine(executorAgent string) string {
+	trimmed := strings.TrimSpace(executorAgent)
+	if trimmed == "" {
+		return ""
+	}
+	return "executor: " + strings.ToLower(trimmed) + " (acp)"
 }
 
 func (p *AgentsPanel) tierShort(tier string) string {
@@ -1113,6 +1200,14 @@ func (p *AgentsPanel) renderDetail() string {
 	b.WriteString(labelStyle.Render("tier:"))
 	b.WriteString(valueStyle.Render(d.Agent.Tier))
 	b.WriteString("\n")
+	// acp executor reference (phase 3 display parity): only rendered
+	// when set, matching the CLI's omission for local-executor
+	// employees.
+	if line := executorDetailLine(d.Agent.ExecutorAgent); line != "" {
+		b.WriteString(labelStyle.Render("executor:"))
+		b.WriteString(valueStyle.Render(strings.TrimPrefix(line, "executor: ")))
+		b.WriteString("\n")
+	}
 	b.WriteString(labelStyle.Render("status:"))
 	if d.Agent.QuotaBlocked || d.Agent.QuotaWaitUntil != nil || d.Agent.QuotaWaitReason == ReasonThrottleGiveUp {
 		// Quota episode: show the colored quota status instead of the base

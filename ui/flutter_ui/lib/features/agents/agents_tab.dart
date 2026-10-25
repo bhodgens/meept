@@ -359,6 +359,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                     isSelected,
                     isKeyboardSelected,
                     quotaState,
+                    agentState.employeeExecutors[agent.id],
                   );
                 },
               ),
@@ -373,6 +374,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     bool isSelected,
     bool isKeyboardSelected,
     AgentQuotaState? quotaState,
+    String? executorAgent,
   ) {
     // M9: honor the client-local time toggle (default off — daemon clock).
     final useDeviceTime = ref
@@ -437,6 +439,12 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                // acp executor badge (acp-employees phase 3 display
+                // parity with the TUI 'exec' column): shown when the
+                // employee roster marks this agent's id with an
+                // executor_agent reference. Lowercase per the UI rule.
+                if (executorAgent != null && executorAgent.isNotEmpty)
+                  const _AcpExecutorBadge(),
                 _AgentStatusChip(status: status),
               ],
             ),
@@ -477,6 +485,12 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     );
   }
 
+  /// acp executor reference for [id] from the employee roster (empty
+  /// when absent). Read during build(); the pane rebuilds whenever
+  /// agentState changes (loadAgents refreshes the executor map).
+  String _executorFor(String id) =>
+      ref.read(agentProvider).employeeExecutors[id] ?? '';
+
   Widget _buildGoalsPane(Agent agent) {
     // Quota episode for the selected agent (parity with the TUI detail
     // view): when a fallback model is carrying work, show the
@@ -514,6 +528,21 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             color: CyberpunkColors.midGray,
           ),
         ),
+        // acp executor detail line (phase 3 display parity with the
+        // TUI detail view's "executor: <id> (acp)" line). Only rendered
+        // when the employee roster carries a reference; lowercase.
+        if (_executorFor(agent.id) case final String exec
+            when exec.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            'executor: ${exec.toLowerCase()} (acp)',
+            key: ValueKey('agent-executor-${agent.id}'),
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: CyberpunkColors.midGray,
+              fontFamily: 'SourceCodePro',
+            ),
+          ),
+        ],
         // Aggregate health badge (GUI parity with the TUI goals view):
         // worst-health-wins across the loaded goals for this agent.
         if (_goals.isNotEmpty) ...[
@@ -594,6 +623,36 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Small 'acp' badge on an agent tile whose employee entry carries an
+/// `executor_agent` reference (acp-employees phase 3 display parity with
+/// the TUI list 'exec' column marker). Lowercase per the repo UI rule.
+class _AcpExecutorBadge extends StatelessWidget {
+  const _AcpExecutorBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    final color = CyberpunkColors.cyanAccent;
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          'acp',
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: color,
+            fontSize: 9,
+            fontFamily: 'SourceCodePro',
+          ),
+        ),
+      ),
     );
   }
 }

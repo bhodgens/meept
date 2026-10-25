@@ -164,3 +164,90 @@ func TestAgentsPanel_ColumnWidthsFitContentBudget(t *testing.T) {
 		}
 	}
 }
+
+// acp-employees phase 3 display parity: the exec column cell is "acp"
+// when the employee references an acp-backed executor agent, "-" for the
+// default local executor (pure formatting, lowercase per the UI rule).
+func TestExecutorListMarker(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"set renders acp", "hermes", "acp"},
+		{"mixed-case id still acp", "Hermes-1", "acp"},
+		{"empty renders dash", "", "-"},
+		{"whitespace renders dash", "   ", "-"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := executorListMarker(tc.in); got != tc.want {
+				t.Errorf("executorListMarker(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// The detail line renders "executor: <id> (acp)" with the id lowercased;
+// an empty reference renders no line (matching the CLI's omission).
+func TestExecutorDetailLine(t *testing.T) {
+	if got := executorDetailLine("Hermes"); got != "executor: hermes (acp)" {
+		t.Errorf("executorDetailLine(\"Hermes\") = %q, want %q", got, "executor: hermes (acp)")
+	}
+	if got := executorDetailLine(""); got != "" {
+		t.Errorf("executorDetailLine(\"\") = %q, want empty", got)
+	}
+	if got := executorDetailLine("  bob "); got != "executor: bob (acp)" {
+		t.Errorf("executorDetailLine(\"  bob \") = %q, want %q", got, "executor: bob (acp)")
+	}
+}
+
+// The agents list table must render the acp marker for an executor-backed
+// employee and the dash for a plain one, with row widths matching the
+// eight columns (tableutil discipline).
+func TestAgentsPanel_ListRendersAcpMarker(t *testing.T) {
+	p := NewAgentsPanel(stubAgentsRPC{})
+	p.SetSize(140, 30)
+
+	p.agents = []AgentSummary{
+		{ID: "emp-acp", Status: "running", Tier: "tier_2_propose", ExecutorAgent: "hermes"},
+		{ID: "emp-local", Status: "running", Tier: "tier_1_reactive"},
+	}
+	p.updateAgentsTable()
+
+	cols := len(p.table.Columns())
+	for i, row := range p.table.Rows() {
+		if len(row) != cols {
+			t.Fatalf("row %d has %d cells, table has %d columns", i, len(row), cols)
+		}
+	}
+	if got := p.table.Rows()[0][cols-1]; got != "acp" {
+		t.Errorf("exec cell for acp-backed employee = %q, want %q", got, "acp")
+	}
+	if got := p.table.Rows()[1][cols-1]; got != "-" {
+		t.Errorf("exec cell for local executor = %q, want %q", got, "-")
+	}
+	if !strings.Contains(p.View(), "exec") {
+		t.Errorf("agents list is missing the 'exec' column header\n%s", p.View())
+	}
+}
+
+// The detail view renders the executor line when the drill-in carried
+// an executor_agent, and omits it otherwise.
+func TestAgentsPanel_DetailRendersExecutorLine(t *testing.T) {
+	p := NewAgentsPanel(stubAgentsRPC{})
+	p.SetSize(140, 30)
+	p.detail = &AgentDetail{Agent: AgentSummary{ID: "emp-acp", Name: "Emp Acp", Tier: "tier_2_propose", ExecutorAgent: "Hermes"}}
+	p.subView = agentsViewDetail
+
+	out := p.View()
+	if !strings.Contains(out, "executor:") || !strings.Contains(out, "hermes (acp)") {
+		t.Errorf("detail view missing executor line\n%s", out)
+	}
+
+	p.detail = &AgentDetail{Agent: AgentSummary{ID: "emp-local", Name: "Emp Local", Tier: "tier_1_reactive"}}
+	out = p.View()
+	if strings.Contains(out, "executor:") {
+		t.Errorf("detail view renders an executor line for a local-executor employee\n%s", out)
+	}
+}
