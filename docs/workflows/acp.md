@@ -27,7 +27,7 @@ the flag is on.
 
 When enabled, meept launches a cataloged agent command, runs `initialize`,
 then `session/new` / `session/prompt`. Inbound `session/update` notifications
-become session events. Inbound `session/requestPermission` requests are
+become session events. Inbound `session/request_permission` requests are
 answered according to `[acp] permission_mode`:
 
 - `permissive` (default): auto-approve and log
@@ -78,7 +78,7 @@ between the tool-call gate and the ACP lane when both are enabled.
 ### Human mode (permission relay)
 
 `permission_mode = "human"` puts a person in the loop for every inbound
-`session/requestPermission`. The pending registry lives in
+`session/request_permission`. The pending registry lives in
 `internal/acp/relay.go` (the only package that knows ACP request ids);
 bus/RPC/HTTP/TUI/GUI are consumers. Flow, fail-closed at every step:
 

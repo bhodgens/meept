@@ -115,7 +115,7 @@ func main() {
 				write(msg{
 					JSONRPC: "2.0",
 					ID:      &permID,
-					Method:  "session/requestPermission",
+					Method:  "session/request_permission",
 					Params:  json.RawMessage(`{"sessionId":"sess-fake"}`),
 				})
 			}
@@ -140,7 +140,7 @@ func main() {
 				write(msg{
 					JSONRPC: "2.0",
 					ID:      &permID,
-					Method:  "session/requestPermission",
+					Method:  "session/request_permission",
 					Params:  json.RawMessage(`{"sessionId":"sess-fake","toolCall":{"title":"rm -rf scratch"}}`),
 				})
 				listResult, resolveResult := selfApproveProbe(*socket, permID)
@@ -178,7 +178,7 @@ func main() {
 				write(msg{
 					JSONRPC: "2.0",
 					ID:      &permID,
-					Method:  "session/requestPermission",
+					Method:  "session/request_permission",
 					Params:  params,
 				})
 				var replyMsg msg

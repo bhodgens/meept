@@ -229,7 +229,7 @@ func TestMethodConstants(t *testing.T) {
 		{MethodSessionPrompt, "session/prompt"},
 		{MethodSessionCancel, "session/cancel"},
 		{MethodSessionUpdate, "session/update"},
-		{MethodSessionRequestPermission, "session/requestPermission"},
+		{MethodSessionRequestPermission, "session/request_permission"},
 	}
 	for _, tt := range tests {
 		if tt.got != tt.want {

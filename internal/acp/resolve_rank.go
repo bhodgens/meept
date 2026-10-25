@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -97,6 +98,10 @@ func (m *Manager) rankResolve(ctx context.Context, id, decision string, approver
 	})
 	if err != nil || res == nil {
 		// Rank unavailable at call time: fail open (tighten-only layer).
+		// Loud: silently-inert was the live diagnostic gap 2026-10-24 —
+		// resolve_rank:true appeared to do nothing.
+		slog.Default().Warn("acp resolve rank skipped: decision ask failed; human verdict stands",
+			"component", "acp", "pending", id, "error", err)
 		return nil
 	}
 	// Same vocabulary as the permission lane: "allow" confirms the human
@@ -104,6 +109,13 @@ func (m *Manager) rankResolve(ctx context.Context, id, decision string, approver
 	// the explicit "deny" answer at or above the threshold — a malformed
 	// or unexpected label fails open, because a flaky ranker must never
 	// lock humans out of their own gate.
+	slog.Default().Info("acp resolve rank verdict",
+		"component", "acp",
+		"pending", id,
+		"answer", res.Answer,
+		"confidence", fmt.Sprintf("%.2f", res.Confidence),
+		"threshold", fmt.Sprintf("%.2f", threshold),
+	)
 	if res.Answer != decisionAnswerDeny {
 		return nil
 	}

@@ -12,12 +12,22 @@ const jsonRPCVersion = "2.0"
 
 // JSON-RPC method names. Later leaves must use these constants, never literals.
 const (
-	MethodInitialize               = "initialize"
-	MethodSessionNew               = "session/new"
-	MethodSessionPrompt            = "session/prompt"
-	MethodSessionCancel            = "session/cancel"
-	MethodSessionUpdate            = "session/update"
-	MethodSessionRequestPermission = "session/requestPermission"
+	MethodInitialize    = "initialize"
+	MethodSessionNew    = "session/new"
+	MethodSessionPrompt = "session/prompt"
+	MethodSessionCancel = "session/cancel"
+	MethodSessionUpdate = "session/update"
+	// MethodSessionRequestPermission is the ACP-spec wire method (snake_case
+	// per the agentclientprotocol schema: CLIENT_METHODS
+	// "session_request_permission" = "session/request_permission"). The
+	// camelCase spelling this constant carried until 2026-10-24 matched the
+	// in-repo fakeagent only — every real harness (e.g. hermes' acp_adapter)
+	// sends the snake_case form, and meept's dispatcher fell it through to
+	// the generic notification path: the human/decision relay NEVER fired
+	// and the agent's request hung until its own client-side approval
+	// timeout (observed live 2026-10-24: bob's edit approval "timed out
+	// after 60.0s" while acp.permissions.list stayed empty).
+	MethodSessionRequestPermission = "session/request_permission"
 )
 
 // Request is a JSON-RPC 2.0 request.
