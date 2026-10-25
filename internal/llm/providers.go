@@ -31,6 +31,12 @@ type ProviderOptionsConfig struct {
 	BaseURL string `json:"baseURL"`
 	APIKey  string `json:"apiKey"` //nolint:gosec // field name, not a secret
 	Timeout int    `json:"timeout"`
+	// NoAuth marks a provider that needs no API key (local LLM runtimes).
+	// Mirror of config.ProviderOptions.NoAuth — the daemon's
+	// buildProviderConfigs registers a provider only when APIKey != "" or
+	// NoAuth is true, and the alias-reachability audit (alias_audit.go)
+	// applies the same rule. Keep the JSON tag in sync.
+	NoAuth bool `json:"noAuth"`
 	// DefaultModel is the optional model id this provider serves by
 	// default. When it names a model present in the provider's Models
 	// map, deterministic model picks (daemon failover registration)
@@ -472,6 +478,9 @@ func mergeProviderConfig(base, overlay ProviderConfig) ProviderConfig {
 	}
 	if overlay.Options.Timeout != 0 {
 		out.Options.Timeout = overlay.Options.Timeout
+	}
+	if overlay.Options.NoAuth {
+		out.Options.NoAuth = true
 	}
 	// ExtraHeaders merge per key: overlay entries win, base entries with
 	// no overlay counterpart survive (mirrors modelConfigFrom's merge).

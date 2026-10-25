@@ -49,6 +49,14 @@ type AgentMetadata struct {
 	// Model can be an alias name or direct model reference.
 	Model string `yaml:"model,omitempty"`
 
+	// ModelAlias names a models.json5 alias to resolve for this agent's
+	// turns, independent of the agent id (e.g. a "notes" agent bound to
+	// the "small" alias). Scalar field: on discovery shadowing the
+	// higher-priority tier wins outright (no union merge). Precedence at
+	// loop build time: model: > model_alias: > same-id alias > global
+	// default (see internal/agent modelRefForAgent).
+	ModelAlias string `yaml:"model_alias,omitempty"`
+
 	// EnhancerModel is the small/cheap model used to expand a brief into
 	// generator-ready prose before an image or video backend is called.
 	// Empty = alias "small" (resolves to small_model).

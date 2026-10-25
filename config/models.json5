@@ -66,7 +66,20 @@
   "image_model": "xai-oauth/grok-imagine-image-2.0",
   "video_model": "xai-oauth/grok-imagine-video",
 
-  // Model aliases with cooldown-based failover
+  // Model aliases with cooldown-based failover.
+  //
+  // Agent -> model binding precedence (single source of truth; enforced by
+  // modelRefForAgent in internal/agent/registry.go, documented in
+  // internal/agent/AGENTS.md):
+  //   1. AGENT.md frontmatter `model:`        (direct provider/model ref)
+  //   2. AGENT.md frontmatter `model_alias:`  (explicit alias name, below)
+  //   3. an alias named after the agent id    (e.g. agent coder -> "coder")
+  //   4. the global default `model` slot (top of this file)
+  // Exception: the dedicated planner_model slot outranks lane 3 for the
+  // planner agent only (registry.go). Every alias member must resolve to a
+  // REGISTERED provider — a member whose provider has no apiKey and no
+  // noAuth:true is silently skipped from the failover pool; `meept doctor`
+  // (alias-reachability section) and the daemon boot alias audit WARN on it.
   "model_aliases": {
     "classifier": {
       "models": [

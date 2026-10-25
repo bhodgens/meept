@@ -836,7 +836,7 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 	if lastErr != nil {
 		return nil, fmt.Errorf("all %d provider(s) failed (last: %w)", len(orderedProviders), lastErr)
 	}
-	return nil, fmt.Errorf("no providers available")
+	return nil, pm.poolExhaustedError()
 }
 
 // DeltaCallbackWithAttempt is the attempt-aware delta callback used by
@@ -1058,7 +1058,7 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 	if lastErr != nil {
 		return nil, fmt.Errorf("all %d provider(s) failed (last: %w)", len(orderedProviders), lastErr)
 	}
-	return nil, fmt.Errorf("no providers available")
+	return nil, pm.poolExhaustedError()
 }
 
 // requestResolvedProviderID extracts the request-scoped model selection from
@@ -1099,7 +1099,13 @@ func requestResolvedProviderID(opts []ChatOption) *ModelConfig {
 // disabled, unhealthy, or errors, the loop still walks the remaining entries.
 // This is per-CALL routing, never manager state: concurrent sessions using
 // the same manager are unaffected (each call passes its own option).
-func preferRequestedProvider(providers []*ProviderEntry, providerID string) []*ProviderEntry {
+//
+// A named provider with NO matching entry logs ONE Warn per call: the
+// resolver picked a provider that is not in the failover pool (dropped at
+// boot registration, quota-blocked, or removed), and the selection is
+// silently ignored without this line — the dead-reorder half of the
+// 2026-10-23 outage (boot alias audit names the drop).
+func (pm *ProviderManager) preferRequestedProvider(providers []*ProviderEntry, providerID string) []*ProviderEntry {
 	if providerID == "" || len(providers) < 2 {
 		return providers
 	}
@@ -1112,7 +1118,16 @@ func preferRequestedProvider(providers []*ProviderEntry, providerID string) []*P
 			rest = append(rest, e)
 		}
 	}
-	if len(preferred) == 0 || len(rest) == 0 {
+	if len(preferred) == 0 {
+		if pm.logger != nil && len(rest) > 0 {
+			pm.logger.Warn("resolved provider not in the failover pool; selection ignored",
+				"provider", providerID,
+				"pool_size", len(rest),
+			)
+		}
+		return providers
+	}
+	if len(rest) == 0 {
 		return providers
 	}
 	return append(preferred, rest...)
@@ -1128,7 +1143,7 @@ func (pm *ProviderManager) orderedProvidersForRequest(opts []ChatOption) []*Prov
 	if selection != nil {
 		providerID = selection.ProviderID
 	}
-	return preferRequestedProvider(pm.getOrderedProviders(), providerID)
+	return pm.preferRequestedProvider(pm.getOrderedProviders(), providerID)
 }
 
 // getOrderedProviders returns providers sorted by preference, with
@@ -1194,6 +1209,31 @@ func (pm *ProviderManager) getOrderedProviders() []*ProviderEntry {
 	}
 
 	return ordered
+}
+
+// poolExhaustedError builds the actionable error for a rotation that never
+// attempted a provider. Error-string contract (2026-10-23 outage): the bare
+// "no providers available" is reserved for the genuinely-empty-registration
+// case; when providers ARE registered but every credential is quota-blocked
+// (getOrderedProviders filtered them all out), the error says so and points
+// at the boot alias audit. Callers must NOT hold pm.mu.
+func (pm *ProviderManager) poolExhaustedError() error {
+	pm.mu.RLock()
+	registered := len(pm.providers)
+	now := time.Now()
+	blocked := 0
+	for _, e := range pm.providers {
+		key := QuotaCredentialKey(e.Config.ProviderID, e.Config)
+		if until, ok := pm.quotaBlocks[key]; ok && now.Before(until) {
+			blocked++
+		}
+	}
+	pm.mu.RUnlock()
+
+	if registered > 0 && blocked == registered {
+		return fmt.Errorf("all %d provider credentials quota-blocked (see boot alias audit)", blocked)
+	}
+	return errors.New("no providers available")
 }
 
 // recordSuccess updates health metrics after a successful call.

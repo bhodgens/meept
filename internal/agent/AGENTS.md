@@ -117,6 +117,30 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
   to the stored step Result. Quota is still never an alias failure and
   never re-queued through the tactical retry gate.
 
+## Agent → model binding precedence
+
+`modelRefForAgent` (registry.go) resolves an agent's loop model reference with
+this precedence chain:
+
+1. **`model:`** in the AGENT.md frontmatter (direct ref or alias) — always wins.
+2. **`model_alias:`** in the AGENT.md frontmatter — names a models.json5 alias
+   independent of the agent id. It is returned WITHOUT a `HasAlias` pre-check:
+   the resolver's own alias resolution errors visibly if the alias is missing
+   (a Debug log fires so a typo is diagnosable). Never silently fall back when
+   the alias is unknown.
+3. **Same-id alias** — `resolver.HasAlias(spec.ID)` (the compatibility default;
+   the coder/planner/analyst aliases exist for exactly this).
+4. **`''`** — global default model client. The fall-through is VISIBLE: the
+   createLoop call site logs one Info line per loop creation ("agent X: no
+   model or alias binding; using the global default model").
+
+The dedicated `planner_model` slot override (registry.go ~line 622:
+`plannerChatterLive(r.plannerChatter) && spec.ID == config.AgentIDPlanner`
+blanks the modelRef) sits ABOVE this alias lane for the planner ONLY — do not
+change that behavior. `model_alias` is a scalar frontmatter field: discovery
+shadowing takes the higher tier's value outright (no union merge like the
+additive fields).
+
 ## Output-filter gate order and retry caps
 
 The post-step pipeline order is FROZEN: result → claim-vs-evidence marking →

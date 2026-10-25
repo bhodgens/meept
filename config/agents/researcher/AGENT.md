@@ -6,6 +6,8 @@ description: Gathers information from web, documentation, and codebase
 intents: [research]
 enabled: true
 can_delegate: false
+# model_alias: small   # bind a models.json5 alias for this agent's turns (optional;
+                       # precedence: model: > model_alias: > same-id alias > global default)
 additional_tools:
   - web_fetch
   - web_search

@@ -434,13 +434,22 @@ func (r *AgentRegistry) GetDispatcher() (*AgentLoop, error) {
 
 // modelRefForAgent picks the model reference for an agent's loop.
 //
-// The spec's explicit model: always wins. Otherwise the agent resolves ITS OWN
-// alias when the config defines one under the agent's id, because the
-// models.json5 aliases (coder, planner, analyst, ...) exist for exactly that.
-// Without the fallback the loop resolved no alias at all and ran every turn on
-// the config's default model - observed 2026-09-13: the coder agent always ran
-// on agnes/agnes-2.5-flash even with local/lfm-8b-q4 first in the coder alias,
-// so the local driver was never exercised through the daemon.
+// Precedence: spec.Model (a direct model ref or alias in the AGENT.md
+// model: field) > spec.ModelAlias (an explicit models.json5 alias named
+// independently of the agent id) > the agent's OWN id when models.json5
+// defines an alias under it (compatibility default; the aliases coder,
+// planner, analyst, ... exist for exactly that) > '' (the loop keeps the
+// client it was built with, which is the resolver's default model).
+// Without the same-id fallback the loop resolved no alias at all and ran
+// every turn on the config's default model - observed 2026-09-13: the
+// coder agent always ran on agnes/agnes-2.5-flash even with
+// local/lfm-8b-q4 first in the coder alias, so the local driver was never
+// exercised through the daemon.
+//
+// spec.ModelAlias is returned WITHOUT a HasAlias pre-check: the
+// resolver's own alias resolution will error visibly if the alias is
+// missing, which is the intended failure mode. A Debug log fires when
+// the resolver does not know the named alias so a typo is diagnosable.
 //
 // An empty return means "no alias": the loop keeps the client it was built
 // with, which is the resolver's default model.
@@ -450,6 +459,15 @@ func modelRefForAgent(spec *AgentSpec, resolver *llm.Resolver) string {
 	}
 	if spec.Model != "" {
 		return spec.Model
+	}
+	if spec.ModelAlias != "" {
+		if resolver != nil && !resolver.HasAlias(spec.ModelAlias) {
+			slog.Debug("modelRefForAgent: model_alias names an alias the resolver does not have; resolution will error visibly",
+				"agent", spec.ID,
+				"model_alias", spec.ModelAlias,
+			)
+		}
+		return spec.ModelAlias
 	}
 	if resolver != nil && spec.ID != "" && resolver.HasAlias(spec.ID) {
 		return spec.ID
@@ -587,7 +605,16 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	// 2026-09-13: the coder agent always ran on agnes/agnes-2.5-flash even with
 	// local/lfm-8b-q4 first in the coder alias, so the local driver was never
 	// exercised through the daemon.
-	if modelRef := modelRefForAgent(spec, r.resolver); modelRef != "" {
+	modelRef := modelRefForAgent(spec, r.resolver)
+	if modelRef == "" {
+		// Visible fall-through: nothing binds this agent to a model or
+		// alias, so the loop keeps the shared default client. Logged once
+		// per loop creation (not hot) so the silent global-default path
+		// is diagnosable from the daemon log.
+		r.logger.Info("no model or alias binding; using the global default model",
+			"agent", spec.ID,
+		)
+	} else {
 		// Dedicated planner_model slot (issue #53 direction 4): the slot
 		// outranks the planner alias — blank the modelRef so the alias
 		// resolution cannot SwitchModel the dedicated client. Any other
@@ -1205,6 +1232,13 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.Model = base.Model
 	}
 
+	// ModelAlias: prefer AGENT.md if set (scalar; no union merge)
+	if def.ModelAlias != "" {
+		merged.ModelAlias = def.ModelAlias
+	} else {
+		merged.ModelAlias = base.ModelAlias
+	}
+
 	// EnhancerModel: prefer AGENT.md if set
 	if def.EnhancerModel != "" {
 		merged.EnhancerModel = def.EnhancerModel
@@ -1338,6 +1372,7 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		Intents:         append([]string(nil), def.Intents...),
 		Purpose:         r.assemblePurpose(def.PromptComponents, def.Body),
 		Model:           def.Model,
+		ModelAlias:      def.ModelAlias,
 		EnhancerModel:   def.EnhancerModel,
 		EscalationModel: def.EscalationModel,
 		RefusalModel:    def.RefusalModel,

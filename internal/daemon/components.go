@@ -1326,10 +1326,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Load the llm-side providers config ONCE, ahead of the pool build:
+	// it feeds (a) the loopback-lifecycle set that raises the
+	// no-api-key skip to WARN in buildProviderConfigs, (b) the boot
+	// alias-reachability audit below, and (c) the runtime-lifecycle
+	// scanning further down (former lifecycleCfg load, relocated here).
+	llmProvidersCfg, llmProvidersCfgErr := llm.LoadProvidersConfigDefault()
+	loopbackLifecycle := map[string]bool{}
+	if llmProvidersCfgErr == nil {
+		for providerID, provider := range llmProvidersCfg.Providers {
+			if provider.Lifecycle != nil && llm.IsLoopbackBaseURL(provider.Options.BaseURL) {
+				loopbackLifecycle[providerID] = true
+			}
+		}
+	}
+
 	// Create multi-provider LLM manager if multiple providers configured
 	providerCount := len(c.ModelsConfig.Providers)
 	if providerCount > 1 {
-		providerConfigs := buildProviderConfigs(c.ModelsConfig, logger)
+		providerConfigs := buildProviderConfigs(c.ModelsConfig, logger, loopbackLifecycle)
 		if len(providerConfigs) > 1 {
 			pmCfg := llm.ProviderManagerConfig{
 				Providers: providerConfigs,
@@ -1367,6 +1382,31 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// stored tokens but are not already in the static config.
 			c.registerOAuthProviders(pm, logger)
 
+			// Boot alias-reachability audit (2026-10-23 outage fix):
+			// every alias member is checked against the ACTUAL pool
+			// membership — the registered ids from buildProviderConfigs
+			// plus any dynamically OAuth-registered ones (read back
+			// through GetProviderHealth, which covers AddProvider'd
+			// entries). The registered map OVERRIDES the static config
+			// predicate, so OAuth-only providers count as reachable.
+			// Report-only: findings are Info/Warn lines, never fatal.
+			if llmProvidersCfgErr == nil && llmProvidersCfg != nil {
+				registered := map[string]bool{}
+				for _, pc := range providerConfigs {
+					registered[pc.ProviderID] = true
+				}
+				for _, h := range pm.GetProviderHealth() {
+					if h != nil && h.ProviderID != "" {
+						registered[h.ProviderID] = true
+					}
+				}
+				findings := llm.AuditAliasReachability(llmProvidersCfg, registered)
+				llm.LogAliasAudit(logger.With("component", "alias-audit"), findings)
+			} else {
+				logger.Debug("Skipping boot alias-reachability audit: providers config unavailable",
+					"error", llmProvidersCfgErr)
+			}
+
 			c.LLMProvider = pm
 			logger.Info("Multi-provider LLM manager initialized",
 				"providers", len(providerConfigs),
@@ -1381,7 +1421,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// (Runtime manager construction moved above the teardown wiring — the
 	// adapter captures the manager pointer at construction.)
 
-	lifecycleCfg, lifecycleCfgErr := llm.LoadProvidersConfigDefault()
+	// Reuse the relocated load from above the pool build (audit + loopback
+	// set) — one LoadProvidersConfigDefault per boot, identical semantics.
+	lifecycleCfg, lifecycleCfgErr := llmProvidersCfg, llmProvidersCfgErr
 	if lifecycleCfgErr != nil {
 		logger.Debug("No providers config available for runtime scanning", "error", lifecycleCfgErr)
 	} else {
@@ -5245,7 +5287,16 @@ func (c *Components) Start(ctx context.Context) error {
 					if c.Config != nil {
 						globalMode = c.Config.ACP.PermissionMode
 					}
-					empExecutor, refuse := employeeBotExecutor(emp, executor, specSrc, globalMode, acpEmployeeLoopResolver(c.AgentRegistry), c.Logger)
+					// D6: employee-audit store for turn attribution
+					// findings. Typed-nil guard: a nil
+					// *employee.AuditStore must not be boxed into the
+					// acpTurnAuditRecorder interface (daemon AGENTS.md
+					// rule); nil = attribution dark.
+					var turnAudit acpTurnAuditRecorder
+					if c.EmployeeAuditStore != nil {
+						turnAudit = c.EmployeeAuditStore
+					}
+					empExecutor, refuse := employeeBotExecutor(emp, executor, specSrc, globalMode, acpEmployeeLoopResolver(c.AgentRegistry), turnAudit, c.Logger)
 					if refuse {
 						continue
 					}
@@ -7320,7 +7371,7 @@ func findDot(s string) int {
 // provider option defaultModel wins when it names a model present in
 // provider.Models; otherwise the sorted-first model id is used. Map
 // iteration order is never consulted.
-func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger) []*llm.ModelConfig {
+func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger, loopbackLifecycle map[string]bool) []*llm.ModelConfig {
 	if cfg == nil || len(cfg.Providers) == 0 {
 		return nil
 	}
@@ -7344,13 +7395,29 @@ func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger) []*llm.
 	for _, providerID := range providerIDs {
 		provider := cfg.Providers[providerID]
 		if disabled[providerID] {
+			// Debug stays: disabling a provider is an explicit operator
+			// choice, not a silent drop (2026-10-23 outage review).
 			logger.Debug("Skipping disabled provider", "provider", providerID)
 			continue
 		}
 
-		// Skip if no API key and provider requires one (FIX #0004 - allow NoAuth providers)
+		// Skip if no API key and provider requires one (FIX #0004 - allow NoAuth providers).
+		// WARN when the provider carries a Lifecycle block on a loopback
+		// baseURL: that is an intended local runtime that will NEVER serve
+		// failover while skipped — a silent Debug line here is exactly how
+		// the 2026-10-23 outage hid a healthy-looking local model from the
+		// pool. Cloud providers without a key stay Debug (common template
+		// state: the operator simply has not set that env var).
 		if provider.Options.APIKey == "" && !provider.Options.NoAuth {
-			logger.Debug("Skipping provider without API key", "provider", providerID)
+			if loopbackLifecycle[providerID] {
+				logger.Warn("Skipping local-runtime provider without API key — it will never serve failover; add options.noAuth:true (or apiKey)",
+					"provider", providerID,
+					"base_url", provider.Options.BaseURL,
+					"fix", "set options.noAuth: true in models.json5",
+				)
+			} else {
+				logger.Debug("Skipping provider without API key", "provider", providerID)
+			}
 			continue
 		}
 

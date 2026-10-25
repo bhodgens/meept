@@ -164,6 +164,34 @@ boundaries:
   through `acquireConcurrencyLimit` so they inherit the two-lane
   behavior.
 
+## Alias reachability audit and pool-exhaustion errors (2026-10-23 outage)
+
+- **The audit runs at boot AND at doctor time — keep the twins in sync.**
+  `AuditAliasReachability` (`alias_audit.go`) checks every `model_aliases`
+  member against the `buildProviderConfigs` registration rules (provider
+  exists, not in `disabled_providers`, `apiKey != "" || noAuth`). The
+  daemon (`components.go`, after `registerOAuthProviders`) passes its
+  ACTUAL pool membership as the `registered` map, which OVERRIDES the
+  static predicate per provider — that is what makes dynamically
+  OAuth-registered providers count as reachable and boot-skipped ones
+  count as unreachable. `meept doctor`'s `alias-reachability` check
+  (`cmd/meept/doctor.go`) passes `registered=nil` (offline: pure static
+  predicate) and reports findings as `[warn]`, NEVER `[fail]`.
+- **No silent drops.** A no-api-key skip in `buildProviderConfigs` is a
+  WARN when the provider is a loopback-lifecycle local runtime (it will
+  never serve failover while skipped); the disabled-provider skip stays
+  Debug (explicit operator choice). A request-scoped selection naming a
+  provider absent from the failover pool logs ONE Warn in
+  `preferRequestedProvider` and the selection is ignored — never a
+  silent dead reorder.
+- **Pool-exhaustion error-string contract.** `poolExhaustedError`
+  (provider_manager.go) returns the bare `"no providers available"` ONLY
+  for the genuinely-empty-registration case; when providers ARE
+  registered but EVERY credential is quota-blocked, the error says
+  `"all N provider credentials quota-blocked (see boot alias audit)"`.
+  Do not reintroduce the bare string on the all-blocked path — callers
+  and logs distinguish the two by message.
+
 ## Session affinity headers, sticky rotation, and upstream teardown
 (session-affinity tree; user-facing doc `docs/workflows/session-affinity.md`)
 

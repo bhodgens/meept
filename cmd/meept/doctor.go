@@ -134,6 +134,7 @@ func runDoctor(fix, installMissing bool) error {
 	checks = append(checks, checkModelsDoctor()...)
 	if reasoningCfg, cfgErr := llm.LoadProvidersConfigDefault(); cfgErr == nil {
 		checks = append(checks, checkReasoningDoctor(reasoningCfg)...)
+		checks = append(checks, checkAliasReachabilityDoctor(reasoningCfg)...)
 	}
 
 	// Build the sweep inputs once: the report path and the --fix reaper share
@@ -645,4 +646,94 @@ func runInstallHint(ctx context.Context, hint string, stdout, stderr io.Writer) 
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
+}
+
+// checkAliasReachabilityDoctor is the doctor twin of the daemon's boot-time
+// alias-reachability audit (internal/llm/alias_audit.go). It runs the SAME
+// static predicate (registered=nil: doctor is offline and cannot see the
+// live pool or OAuth-registered providers) and prints one line per alias in
+// the [ok]/[warn] style. Report-only per docs/agents/opt-in-defaults.md:
+// findings are [warn], NEVER [fail] — an unreachable alias member is a
+// config condition to surface, not an install failure.
+func checkAliasReachabilityDoctor(cfg *llm.ProvidersConfig) []doctorCheck {
+	if cfg == nil {
+		return nil
+	}
+	findings := llm.AuditAliasReachability(cfg, nil)
+	if len(findings) == 0 {
+		return []doctorCheck{{
+			name:   "alias-reachability",
+			ok:     true,
+			detail: "no model_aliases configured",
+		}}
+	}
+
+	// Aggregate per alias, preserving AuditAliasReachability's sorted
+	// alias order and member order within each alias.
+	type aliasAgg struct {
+		members   int
+		reachable int
+		bad       []llm.AliasFinding
+		noMembers bool
+	}
+	order := make([]string, 0)
+	aggs := map[string]*aliasAgg{}
+	for _, f := range findings {
+		a, ok := aggs[f.Alias]
+		if !ok {
+			a = &aliasAgg{}
+			aggs[f.Alias] = a
+			order = append(order, f.Alias)
+		}
+		if f.Reason == llm.AliasReasonNoMembers {
+			a.noMembers = true
+			continue
+		}
+		a.members++
+		if f.Reachable {
+			a.reachable++
+		} else {
+			a.bad = append(a.bad, f)
+		}
+	}
+
+	var checks []doctorCheck
+	for _, alias := range order {
+		a := aggs[alias]
+		name := "aliases:" + alias
+		if a.noMembers {
+			checks = append(checks, doctorCheck{
+				name:   name,
+				ok:     true,
+				warn:   true,
+				detail: "alias has no members; turns resolving it will fail — " + llm.AliasFixHint(llm.AliasReasonNoMembers),
+			})
+			continue
+		}
+		if len(a.bad) == 0 {
+			checks = append(checks, doctorCheck{
+				name:   name,
+				ok:     true,
+				detail: fmt.Sprintf("%d/%d reachable", a.reachable, a.members),
+			})
+			continue
+		}
+		for _, f := range a.bad {
+			checks = append(checks, doctorCheck{
+				name:   name,
+				ok:     true,
+				warn:   true,
+				detail: fmt.Sprintf("member %s unreachable: %s — %s", f.Member, f.Reason, llm.AliasFixHint(f.Reason)),
+			})
+		}
+		if a.reachable == 0 {
+			checks = append(checks, doctorCheck{
+				name:   name,
+				ok:     true,
+				warn:   true,
+				detail: fmt.Sprintf("alias %s has no reachable members; turns resolving it will fail", alias),
+			})
+		}
+	}
+	return checks
 }

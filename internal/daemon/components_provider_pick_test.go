@@ -40,7 +40,7 @@ func TestBuildProviderConfigs_DeterministicSortedFirst(t *testing.T) {
 	cfg := multiModelProviderCfg("")
 
 	for i := range 20 {
-		got := buildProviderConfigs(cfg, logger)
+		got := buildProviderConfigs(cfg, logger, nil)
 		if len(got) != 1 {
 			t.Fatalf("run %d: len(configs) = %d, want 1", i, len(got))
 		}
@@ -57,7 +57,7 @@ func TestBuildProviderConfigs_DefaultModelPreference(t *testing.T) {
 	logger := discardTestLogger()
 	cfg := multiModelProviderCfg("agnes-2.5-flash")
 
-	got := buildProviderConfigs(cfg, logger)
+	got := buildProviderConfigs(cfg, logger, nil)
 	if len(got) != 1 {
 		t.Fatalf("len(configs) = %d, want 1", len(got))
 	}
@@ -76,7 +76,7 @@ func TestBuildProviderConfigs_DefaultModelMissingFallsBackSorted(t *testing.T) {
 	logger := discardTestLogger()
 	cfg := multiModelProviderCfg("agnes-9.9-nonexistent")
 
-	got := buildProviderConfigs(cfg, logger)
+	got := buildProviderConfigs(cfg, logger, nil)
 	if len(got) != 1 {
 		t.Fatalf("len(configs) = %d, want 1 (provider must still register)", len(got))
 	}

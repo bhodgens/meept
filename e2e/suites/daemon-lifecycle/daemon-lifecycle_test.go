@@ -550,3 +550,119 @@ func indexOf(haystack, needle string) int {
 	}
 	return -1
 }
+
+// TestDaemonLifecycle_BootAliasAuditWarns covers the 2026-10-23 outage fix
+// at the rig level: a models.json5 with a DEAD alias member — a local
+// (loopback-lifecycle) provider carrying neither apiKey nor noAuth, so
+// buildProviderConfigs drops it — must produce BOTH boot WARN lines:
+//
+//  1. the no-api-key skip WARN naming the provider and the noAuth fix
+//     ("Skipping local-runtime provider without API key");
+//  2. the boot alias-reachability audit WARN naming the alias, the member,
+//     and the reason ("alias member unreachable" ... reason=no-api-key-noauth).
+//
+// The daemon still boots healthy: the audit is report-only. A second
+// reachable noAuth provider keeps the pool at >=2 so the ProviderManager
+// (and with it the boot audit) is actually constructed.
+func TestDaemonLifecycle_BootAliasAuditWarns(t *testing.T) {
+	s := newSandbox(t, harness.FreePort(t))
+
+	// Overwrite the sandbox models.json5: fake (reachable) + fake2
+	// (reachable, same endpoint) + deadlocal (loopback lifecycle, NO
+	// apiKey, NO noAuth — the outage shape) referenced by the coder alias.
+	fakeModels := fmt.Sprintf(`{
+  "model": "fake/fake-model",
+  "small_model": "fake/fake-model",
+  "classifier_model": "classifier",
+  "summarizer_model": "summarizer",
+  "extract_model": "",
+  "refusal_model": "",
+  "default_timeout": 300,
+  "disabled_providers": [],
+  "model_aliases": {
+    "classifier":  { "models": ["fake/fake-model"], "timeout": 10, "max_fails": 2 },
+    "summarizer":  { "models": ["fake/fake-model"], "timeout": 10, "max_fails": 2 },
+    "small":       { "models": ["fake/fake-model"], "timeout": 10, "max_fails": 2 },
+    "coder":       { "models": ["fake/fake-model", "deadlocal/dead-model"], "timeout": 60, "max_fails": 3 },
+    "planner":     { "models": ["fake/fake-model"], "timeout": 60, "max_fails": 3 },
+    "analyst":     { "models": ["fake/fake-model"], "timeout": 60, "max_fails": 3 }
+  },
+  "providers": {
+    "fake": {
+      "api": "openai",
+      "options": { "baseURL": %q, "noAuth": true },
+      "models": {
+        "fake-model": {
+          "name": "fake-model",
+          "capabilities": ["completion", "code", "reasoning", "tool_use"],
+          "input_cost": 0.0, "output_cost": 0.0,
+          "context_limit": 65536, "max_output": 4096, "temperature": 0.7
+        }
+      }
+    },
+    "fake2": {
+      "api": "openai",
+      "options": { "baseURL": %q, "noAuth": true },
+      "models": {
+        "fake-model2": {
+          "name": "fake-model2",
+          "capabilities": ["completion"],
+          "input_cost": 0.0, "output_cost": 0.0,
+          "context_limit": 65536, "max_output": 4096, "temperature": 0.7
+        }
+      }
+    },
+    "deadlocal": {
+      "api": "openai",
+      "options": { "baseURL": "http://127.0.0.1:59999/v1" },
+      "lifecycle": {
+        "runtime": "llama-cpp",
+        "model_path": %q,
+        "auto_start": false
+      },
+      "models": {
+        "dead-model": {
+          "name": "dead-model",
+          "capabilities": ["completion"],
+          "input_cost": 0.0, "output_cost": 0.0,
+          "context_limit": 8192, "max_output": 1024, "temperature": 0.7
+        }
+      }
+    }
+  }
+}`, s.Fake.URL()+"/v1", s.Fake.URL()+"/v1", filepath.Join(s.Work, "nonexistent.gguf"))
+	if err := os.WriteFile(filepath.Join(s.MeeptHome, "models.json5"), []byte(fakeModels), 0o600); err != nil {
+		t.Fatalf("write models.json5: %v", err)
+	}
+
+	s.boot()
+
+	// The daemon is healthy: the audit is report-only.
+	if health := s.HTTPJSON(t); health["status"] != "ok" {
+		t.Fatalf("health = %+v, want ok (audit must never fail boot)", health)
+	}
+
+	logData, err := os.ReadFile(s.logPath)
+	if err != nil {
+		t.Fatalf("read daemon log: %v", err)
+	}
+	log := string(logData)
+
+	// 1. The silent-skip WARN (item 7): names the provider and the fix.
+	if !jsonContains(log, "Skipping local-runtime provider without API key") ||
+		!jsonContains(log, "deadlocal") {
+		t.Errorf("boot log missing the no-api-key local-runtime WARN for deadlocal; log tail:\n%s", s.logTail())
+	}
+
+	// 2. The boot alias-audit WARN (items 1+2): alias coder's dead member
+	// is named with its reason class.
+	if !jsonContains(log, "alias member unreachable") ||
+		!jsonContains(log, "deadlocal/dead-model") ||
+		!jsonContains(log, "no-api-key-noauth") {
+		t.Errorf("boot log missing the alias-reachability WARN for coder member deadlocal/dead-model; log tail:\n%s", s.logTail())
+	}
+	// And the per-alias INFO summary line exists.
+	if !jsonContains(log, "alias reachability audit") {
+		t.Errorf("boot log missing the per-alias audit INFO line; log tail:\n%s", s.logTail())
+	}
+}

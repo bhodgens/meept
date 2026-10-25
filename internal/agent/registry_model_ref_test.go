@@ -74,3 +74,56 @@ func TestModelRefForAgent_NoAliasKeepsTheDefault(t *testing.T) {
 		t.Fatalf("modelRef = %q, want empty for a nil spec", got)
 	}
 }
+
+// TestModelRefForAgent_ModelWinsOverModelAlias pins the top of the precedence
+// chain: an explicit model: ref outranks model_alias: even when the alias is
+// the only one the resolver knows.
+func TestModelRefForAgent_ModelWinsOverModelAlias(t *testing.T) {
+	resolver := testResolver(t, "small", "coder")
+
+	spec := &AgentSpec{ID: "coder", Model: "agnes/agnes-2.5-flash", ModelAlias: "small"}
+	if got := modelRefForAgent(spec, resolver); got != "agnes/agnes-2.5-flash" {
+		t.Fatalf("modelRef = %q, want the explicit model ref %q", got, "agnes/agnes-2.5-flash")
+	}
+}
+
+// TestModelRefForAgent_ModelAliasWinsOverSameIDAlias pins the middle of the
+// chain: an explicit model_alias: binds the agent to an alias whose name
+// differs from the agent id, overriding the same-id compatibility default.
+func TestModelRefForAgent_ModelAliasWinsOverSameIDAlias(t *testing.T) {
+	resolver := testResolver(t, "small", "coder")
+
+	spec := &AgentSpec{ID: "coder", ModelAlias: "small"}
+	if got := modelRefForAgent(spec, resolver); got != "small" {
+		t.Fatalf("modelRef = %q, want the explicit alias %q (not the same-id %q)", got, "small", "coder")
+	}
+}
+
+// TestModelRefForAgent_ModelAliasReturnedEvenWhenResolverLacksIt pins the
+// no-HasAlias-precheck contract: a model_alias the resolver does not know is
+// still returned so the resolver's own resolution errors visibly (a typo is
+// diagnosable), instead of silently falling through to the same-id alias or
+// the global default.
+func TestModelRefForAgent_ModelAliasReturnedEvenWhenResolverLacksIt(t *testing.T) {
+	resolver := testResolver(t, "coder") // knows "coder", not "typo-alias"
+
+	spec := &AgentSpec{ID: "coder", ModelAlias: "typo-alias"}
+	if got := modelRefForAgent(spec, resolver); got != "typo-alias" {
+		t.Fatalf("modelRef = %q, want the declared alias %q even though the resolver lacks it", got, "typo-alias")
+	}
+	// Same with no resolver at all: the declaration still passes through.
+	if got := modelRefForAgent(spec, nil); got != "typo-alias" {
+		t.Fatalf("modelRef = %q, want %q with a nil resolver", got, "typo-alias")
+	}
+}
+
+// TestModelRefForAgent_EmptyEverythingKeepsGlobalDefault pins the bottom of
+// the chain: no model:, no model_alias:, no same-id alias -> '' (the loop
+// keeps the global default client).
+func TestModelRefForAgent_EmptyEverythingKeepsGlobalDefault(t *testing.T) {
+	resolver := testResolver(t, "coder")
+
+	if got := modelRefForAgent(&AgentSpec{ID: "notes"}, resolver); got != "" {
+		t.Fatalf("modelRef = %q, want empty (global default) for an unbound agent", got)
+	}
+}

@@ -1,11 +1,14 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -592,5 +595,73 @@ func TestProviderManager_RecordsDollarCost(t *testing.T) {
 	if status := budget.GetStatus(); status.DailyCostUsed > 0.0001 {
 		t.Errorf("budget DailyCostUsed = %.6f, want 0 (PM must not double-record; client owns budget cost)",
 			status.DailyCostUsed)
+	}
+}
+
+// TestPreferRequestedProvider_NoMatchWarns pins the dead-reorder WARN
+// (2026-10-23 outage, item 8): when a request-scoped selection names a
+// provider that is NOT in the failover pool, preferRequestedProvider logs
+// ONE Warn ("resolved provider X not in the failover pool; selection
+// ignored") and returns the list unchanged — never a silent no-op.
+func TestPreferRequestedProvider_NoMatchWarns(t *testing.T) {
+	var buf bytes.Buffer
+	pm := NewProviderManager(ProviderManagerConfig{
+		Logger: slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		Providers: []*ModelConfig{
+			{ProviderID: "p1", BaseURL: "http://localhost:1/v1", ModelID: "m1"},
+			{ProviderID: "p2", BaseURL: "http://localhost:2/v1", ModelID: "m2"},
+		},
+	})
+	defer pm.Stop()
+
+	entries := []*ProviderEntry{
+		{Config: &ModelConfig{ProviderID: "p1"}},
+		{Config: &ModelConfig{ProviderID: "p2"}},
+	}
+
+	got := pm.preferRequestedProvider(entries, "ghost-provider")
+
+	// List returned unchanged (same order, same pointers).
+	if len(got) != 2 || got[0].Config.ProviderID != "p1" || got[1].Config.ProviderID != "p2" {
+		t.Fatalf("no-match reorder changed the list: %v", got)
+	}
+
+	// Exactly one WARN naming the missing provider.
+	warns := 0
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("unmarshal log line %q: %v", line, err)
+		}
+		if rec["level"] == "WARN" &&
+			strings.Contains(rec["msg"].(string), "not in the failover pool") &&
+			rec["provider"] == "ghost-provider" {
+			warns++
+		}
+	}
+	if warns != 1 {
+		t.Errorf("got %d dead-reorder WARN lines, want exactly 1; log:\n%s", warns, buf.String())
+	}
+
+	// A MATCHING provider still reorders and does not warn.
+	buf.Reset()
+	reordered := pm.preferRequestedProvider(entries, "p2")
+	if reordered[0].Config.ProviderID != "p2" {
+		t.Errorf("matching provider not moved to front: %v", reordered[0].Config.ProviderID)
+	}
+	if strings.Contains(buf.String(), "WARN") {
+		t.Errorf("matching reorder logged a WARN: %s", buf.String())
+	}
+
+	// Empty selection: unchanged, no warn.
+	buf.Reset()
+	if got := pm.preferRequestedProvider(entries, ""); len(got) != 2 || got[0] != entries[0] {
+		t.Errorf("empty selection changed the list")
+	}
+	if strings.Contains(buf.String(), "WARN") {
+		t.Errorf("empty selection logged a WARN: %s", buf.String())
 	}
 }

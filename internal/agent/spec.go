@@ -102,6 +102,12 @@ type AgentSpec struct {
 	// or empty to use the default. If it matches a known alias, alias resolution with
 	// automatic failover and cooldown rotation is used.
 	Model string `json:"model,omitempty"`
+	// ModelAlias names a models.json5 alias to resolve for this agent's
+	// turns, independent of the agent id. Precedence: Model (direct ref)
+	// > ModelAlias (explicit alias) > same-id alias > global default.
+	// Returned WITHOUT a HasAlias pre-check — the resolver's own
+	// resolution errors visibly if the alias is missing.
+	ModelAlias string `json:"model_alias,omitempty" yaml:"model_alias,omitempty"`
 	// EnhancerModel is the small/cheap model used to expand a brief into
 	// generator-ready prose. Empty = alias "small".
 	EnhancerModel string `json:"enhancer_model,omitempty"`
