@@ -116,6 +116,7 @@ type Config struct {
 	Transcript          TranscriptConfig          `json:"transcript"          toml:"transcript"`
 	MultiUser           MultiUserConfig           `json:"multiuser"           toml:"multiuser"`
 	Hermes              HermesConfig              `json:"hermes"               toml:"hermes"`
+	Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 }
 
 // HermesConfig configures the native Hermes gateway interop ([hermes]):
@@ -1301,6 +1302,56 @@ type LLMMetricsConfig struct {
 	DBPath              string `json:"db_path"               toml:"db_path"`               // default "~/.meept/metrics.db"
 	RetentionDays       int    `json:"retention_days"        toml:"retention_days"`        // default 7
 	StatsRefreshMinutes int    `json:"stats_refresh_minutes" toml:"stats_refresh_minutes"` // default 5
+}
+
+// MetricsConfig configures top-level metrics export (JSON5 key: "metrics").
+// The local SQLite metrics store (llm.metrics) is unrelated: it always
+// records in-process. This section controls whether metrics LEAVE the host.
+//
+//gendoc:section metrics
+//gendoc:desc Metrics export configuration. Local SQLite collection is always on; metrics.otlp opts into shipping metric batches to an external OTLP receiver.
+//gendoc:example [metrics] otlp.enabled = true
+type MetricsConfig struct {
+	// OTLP configures the optional OTLP metrics exporter. Default OFF:
+	// metrics stay in the per-host SQLite store until explicitly opted in.
+	OTLP OTLPMetricsConfig `json:"otlp" toml:"otlp"`
+}
+
+// OTLPMetricsConfig configures the OTLP metrics exporter (metrics.otlp).
+// Default OFF per docs/agents/opt-in-defaults.md: no exporter is
+// constructed, no metric leaves the host, and boot logs exactly one Warn
+// line stating that export is disabled. When enabled, the daemon batches
+// agent metrics (turns, tool calls, token usage) and POSTs them as
+// OTLP/HTTP JSON to <endpoint>/v1/metrics (stdlib net/http only — no
+// otel SDK dependency; internal/metrics.OTLPMetricSink is the bridge).
+type OTLPMetricsConfig struct {
+	// Enabled turns the exporter on. Default false.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// Endpoint is the OTLP receiver base URL. Default
+	// "http://localhost:4317". Batches POST to <endpoint>/v1/metrics.
+	Endpoint string `json:"endpoint" toml:"endpoint"`
+	// Interval is the batch export cadence. Zero/negative means the 30s
+	// default (normalized at the config load boundary).
+	Interval time.Duration `json:"interval" toml:"interval"`
+}
+
+// Defaults for metrics.otlp (opt-in exporter).
+const (
+	DefaultOTLPEndpoint       = "http://localhost:4317"
+	DefaultOTLPExportInterval = 30 * time.Second
+)
+
+// NormalizeOTLPMetricsDefaults clamps invalid metrics.otlp values to
+// defaults: zero/negative interval takes the 30s default; an empty
+// endpoint takes http://localhost:4317. Enabled is left as-is — default
+// false is the documented opt-in posture. Idempotent on valid values.
+func NormalizeOTLPMetricsDefaults(c *OTLPMetricsConfig) {
+	if c.Interval <= 0 {
+		c.Interval = DefaultOTLPExportInterval
+	}
+	if c.Endpoint == "" {
+		c.Endpoint = DefaultOTLPEndpoint
+	}
 }
 
 // BudgetConfig holds token budget settings.

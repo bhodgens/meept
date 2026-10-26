@@ -495,6 +495,35 @@ See [LM Studio (Local)](#lm-studio-local) for its discovery behavior
 and [the LLM workflow page](../workflows/llm-management.md) for the
 runtime story.
 
+## Metrics Export (metrics.otlp)
+
+Local metrics collection (`llm.metrics`, SQLite) is always on. The
+top-level `metrics.otlp` section controls whether metrics LEAVE the host.
+It is **off by default** (opt-in posture per `docs/agents/opt-in-defaults.md`).
+
+```json5
+metrics: {
+  otlp: {
+    enabled: false,                    // master switch (default false)
+    endpoint: "http://localhost:4317", // OTLP receiver base URL
+    interval: "30s",                   // batch export cadence
+  }
+}
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `enabled` | bool | `false` | Turn export on. Off = no exporter constructed, no goroutines, no network traffic; boot logs exactly one Warn line. |
+| `endpoint` | string | `http://localhost:4317` | OTLP receiver base URL. Batches POST to `<endpoint>/v1/metrics`. |
+| `interval` | duration | `30s` | Batch export cadence. Zero/negative reverts to the default. |
+
+When enabled, agent metrics (turns, tool calls, token usage,
+self-improvement counters, analysis durations) are batched and shipped as
+OTLP/HTTP JSON via stdlib `net/http` - no otel SDK dependency. Export is
+best-effort: a failed batch is dropped and logged (one Warn per failure
+streak), never blocking the agent loop, daemon boot, or shutdown. See
+[the metrics workflow page](../workflows/metrics.md) for the full story.
+
 ## Provider Examples
 
 ### Ollama (Local)

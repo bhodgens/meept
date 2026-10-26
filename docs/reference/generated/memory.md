@@ -1522,14 +1522,14 @@ SetL0Prune wires the L0 retention pass \(tree 01 L3\) into the periodic consolid
 
 	func (c *Consolidator) StartPeriodicConsolidation(ctx context.Context, interval time.Duration, olderThanHours int)
 
-StartPeriodicConsolidation starts a background goroutine that runs consolidation at the specified interval. Guarded by startOnce: a second call is a no\-op \(bughunt 2026\-10\-15 hazard: an unguarded second caller started a second ticker; boot calls it exactly once today\).
+StartPeriodicConsolidation starts a background goroutine that runs consolidation at the specified interval. Guarded by the tickerActive flag: a second call while the ticker is running is a no\-op \(bughunt 2026\-10\-15 hazard: an unguarded second caller started a second ticker\). Unlike the sync.Once guard this replaced, Start works again after Stop — the Consolidator is restartable, with a fresh stop channel per cycle.
 
 <a name="Consolidator.Stop"></a>
 ### func \(\*Consolidator\) Stop
 
 	func (c *Consolidator) Stop()
 
-Stop stops the periodic consolidation. Safe to call multiple times \- subsequent calls are no\-ops.
+Stop stops the periodic consolidation. Safe to call multiple times and safe before any Start \- subsequent calls are no\-ops. A later Start restarts the ticker.
 
 <a name="ConsolidatorConfig"></a>
 ## type ConsolidatorConfig
@@ -3040,7 +3040,7 @@ SetVerdictAuditor wires the auditlog adapter that receives one entry per verdict
 
 	func (m *Manager) StartPeriodicConsolidation(ctx context.Context)
 
-StartPeriodicConsolidation starts background consolidation on the consolidator's own ticker. This is the ALWAYS\-ON driver for the four consolidator passes \(episodic decay, L0 prune, knowledge ingest/index, bridge generation\): nothing else drives them on a stock install — the scheduler\-based memory\_consolidate job exists but is never seeded by default, so without this call the passes were inert on a fresh boot \(bughunt M3\). The daemon passes a Run\-scoped ctx, so shutdown cancels it; Consolidator.Stop \(from Manager.Close\) is the second stop path. Idempotent: the consolidator's ticker goroutine is guarded by its own stop\-once.
+StartPeriodicConsolidation starts background consolidation on the consolidator's own ticker. This is the ALWAYS\-ON driver for the four consolidator passes \(episodic decay, L0 prune, knowledge ingest/index, bridge generation\): nothing else drives them on a stock install — the scheduler\-based memory\_consolidate job exists but is never seeded by default, so without this call the passes were inert on a fresh boot \(bughunt M3\). The daemon passes a Run\-scoped ctx, so shutdown cancels it; Consolidator.Stop \(from Manager.Close\) is the second stop path. Idempotent: the consolidator's ticker goroutine is guarded by its own start flag \(tickerActive in Consolidator\), so a repeat Start is a no\-op until Stop.
 
 <a name="Manager.StartPrefetchService"></a>
 ### func \(\*Manager\) StartPrefetchService

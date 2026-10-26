@@ -37,6 +37,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 
 - Constants
 - Variables
+- [func AliasFixHint\(reason string\) string](<#AliasFixHint>)
 - [func AmbientCandidateGrammar\(\) string](<#AmbientCandidateGrammar>)
 - [func AttachGrammar\(reqPayload map\[string\]any, mode string, g string\)](<#AttachGrammar>)
 - [func AttachUsageStore\(chatter Chatter, store \*appmetrics.Store\)](<#AttachUsageStore>)
@@ -77,6 +78,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func JSONSchemaForTools\(defs \[\]ToolDefinition\) string](<#JSONSchemaForTools>)
 - [func LessonGrammar\(\) string](<#LessonGrammar>)
 - [func ListScratchRigRunDirs\(\) \[\]string](<#ListScratchRigRunDirs>)
+- [func LogAliasAudit\(logger \*slog.Logger, findings \[\]AliasFinding\)](<#LogAliasAudit>)
 - [func NewMetricsStoreForPacing\(dbPath string\) \(\*metrics.Store, error\)](<#NewMetricsStoreForPacing>)
 - [func ParsePIDFile\(path string\) \(int, error\)](<#ParsePIDFile>)
 - [func ParseRetryAfter\(header http.Header\) \(date time.Time, delta time.Duration, present bool\)](<#ParseRetryAfter>)
@@ -135,6 +137,8 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(a \*AgentReasoningConfig\) ClampEffort\(effort string\) string](<#AgentReasoningConfig.ClampEffort>)
   - [func \(a \*AgentReasoningConfig\) ToReasoningConfig\(effort string\) \*ReasoningConfig](<#AgentReasoningConfig.ToReasoningConfig>)
 - [type AliasEntry](<#AliasEntry>)
+- [type AliasFinding](<#AliasFinding>)
+  - [func AuditAliasReachability\(cfg \*ProvidersConfig, registered map\[string\]bool\) \[\]AliasFinding](<#AuditAliasReachability>)
 - [type AliasHealth](<#AliasHealth>)
 - [type AnthropicClient](<#AnthropicClient>)
   - [func NewAnthropicClient\(config \*ModelConfig, opts ...AnthropicClientOption\) \*AnthropicClient](<#NewAnthropicClient>)
@@ -634,6 +638,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(r \*Resolver\) FindByProvider\(providerID string\) \[\]\*ModelConfig](<#Resolver.FindByProvider>)
   - [func \(r \*Resolver\) FindCheapest\(caps \[\]string\) \*ModelConfig](<#Resolver.FindCheapest>)
   - [func \(r \*Resolver\) ForgetSessionEndpoint\(sessionID string\)](<#Resolver.ForgetSessionEndpoint>)
+  - [func \(r \*Resolver\) ForgetSessionEndpointIf\(sessionID, endpointKey string\) bool](<#Resolver.ForgetSessionEndpointIf>)
   - [func \(r \*Resolver\) GetAliasHealth\(aliasName string\) \(currentIndex int, consecutiveFails int, cooldownUntil time.Time, ok bool\)](<#Resolver.GetAliasHealth>)
   - [func \(r \*Resolver\) GetAllModelsForAlias\(aliasName string\) \(\[\]\*ModelConfig, bool\)](<#Resolver.GetAllModelsForAlias>)
   - [func \(r \*Resolver\) HasAlias\(aliasName string\) bool](<#Resolver.HasAlias>)
@@ -795,6 +800,30 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 
 
 ## Constants
+
+<a name="AliasReasonOK"></a>Alias reason classes returned by AuditAliasReachability.
+
+	const (
+	    // AliasReasonOK means the member's provider is reachable.
+	    AliasReasonOK = "ok"
+	    // AliasReasonUnknownProvider: no provider with this id exists in
+	    // cfg.Providers (typo, or a dynamic OAuth provider that never
+	    // registered).
+	    AliasReasonUnknownProvider = "unknown-provider"
+	    // AliasReasonDisabled: the provider is listed in disabled_providers.
+	    AliasReasonDisabled = "disabled"
+	    // AliasReasonNoKeyNoAuth: the provider has neither options.apiKey nor
+	    // options.noAuth:true, so buildProviderConfigs skips it — the fix is
+	    // to add noAuth (local runtimes) or an apiKey.
+	    AliasReasonNoKeyNoAuth = "no-api-key-noauth"
+	    // AliasReasonNotRegistered: the provider passes the static predicate
+	    // but was absent from the daemon's actual registered pool (only
+	    // possible on the registered-override path).
+	    AliasReasonNotRegistered = "not-registered"
+	    // AliasReasonNoMembers marks the sentinel finding emitted for an
+	    // alias with zero configured members (Member/ProviderID empty).
+	    AliasReasonNoMembers = "no-members"
+	)
 
 <a name="DefaultWarningRatio"></a>Defaults.
 
@@ -1356,6 +1385,13 @@ This gives the context firewall's boundary\-preservation instruction \(structure
 	    },
 	}
 
+<a name="AliasFixHint"></a>
+## func AliasFixHint
+
+	func AliasFixHint(reason string) string
+
+AliasFixHint returns the operator\-facing fix for a reason class. It names the concrete config change, never a vague "check your config".
+
 <a name="AmbientCandidateGrammar"></a>
 ## func AmbientCandidateGrammar
 
@@ -1689,6 +1725,13 @@ The system prompt caps principle at 280 chars; GBNF cannot count characters, so 
 	func ListScratchRigRunDirs() []string
 
 ListScratchRigRunDirs exposes the scratch\-rig run\-dir discovery for callers outside this package \(the daemon's boot sweep\).
+
+<a name="LogAliasAudit"></a>
+## func LogAliasAudit
+
+	func LogAliasAudit(logger *slog.Logger, findings []AliasFinding)
+
+LogAliasAudit reports audit findings: ONE Info line per alias summarizing \(alias, members, reachable\), ONE Warn per unreachable member naming the alias, member, provider, reason, and the concrete fix, and an extra Warn for any alias with zero reachable members \("alias X has no reachable members; turns resolving it will fail"\). The zero\-member sentinel finding is not counted as a member. A nil logger falls back to slog.Default.
 
 <a name="NewMetricsStoreForPacing"></a>
 ## func NewMetricsStoreForPacing
@@ -2214,6 +2257,30 @@ AliasEntry holds the resolved models and configuration for an alias.
 	    BalancedStickyRequests bool           // Optional: pin callers to single model
 	    // contains filtered or unexported fields
 	}
+
+<a name="AliasFinding"></a>
+## type AliasFinding
+
+AliasFinding is one audit verdict for one alias member \(or the zero\-member sentinel for an alias with no members at all\).
+
+	type AliasFinding struct {
+	    Alias      string // alias name in model_aliases
+	    Member     string // "provider/model" as configured (empty on the sentinel)
+	    ProviderID string // provider part of Member (empty on the sentinel)
+	    Reachable  bool
+	    Reason     string // one of the AliasReason* classes
+	}
+
+<a name="AuditAliasReachability"></a>
+### func AuditAliasReachability
+
+	func AuditAliasReachability(cfg *ProvidersConfig, registered map[string]bool) []AliasFinding
+
+AuditAliasReachability checks every model\_aliases member against the registration rules the daemon's buildProviderConfigs applies: the provider exists in cfg.Providers, is not in cfg.DisabledProviders, and carries options.apiKey or options.noAuth:true.
+
+registered semantics: when non\-nil it OVERRIDES the static predicate per provider — the daemon passes its ACTUAL pool membership \(provider ids from buildProviderConfigs plus dynamically OAuth\-registered ids\), so a provider the static config cannot see \(OAuth\) still counts as reachable, and a provider the static predicate would pass but the pool skipped does not. A registered\-override miss keeps the static reason when one explains the drop, else AliasReasonNotRegistered. When registered is nil the pure static predicate decides \(the doctor path, which runs offline\).
+
+Findings are ordered by alias name \(sorted\) and then by member order within the alias. An alias with zero members yields ONE sentinel finding \(Reason AliasReasonNoMembers, empty Member/ProviderID\) so loggers and doctor can still surface it.
 
 <a name="AliasHealth"></a>
 ## type AliasHealth
@@ -6274,6 +6341,19 @@ ProviderOptionsConfig holds provider\-specific options.
 	    BaseURL string `json:"baseURL"`
 	    APIKey  string `json:"apiKey"` //nolint:gosec // field name, not a secret
 	    Timeout int    `json:"timeout"`
+	    // NoAuth marks a provider that needs no API key (local LLM runtimes).
+	    // Mirror of config.ProviderOptions.NoAuth — the daemon's
+	    // buildProviderConfigs registers a provider only when APIKey != "" or
+	    // NoAuth is true, and the alias-reachability audit (alias_audit.go)
+	    // applies the same rule. Keep the JSON tag in sync.
+	    NoAuth bool `json:"noAuth"`
+	    // DefaultModel is the optional model id this provider serves by
+	    // default. When it names a model present in the provider's Models
+	    // map, deterministic model picks (daemon failover registration)
+	    // prefer it; otherwise they fall back to the sorted-first model id.
+	    // Empty = always sorted-first. Never map-iteration order: Go map
+	    // ranging is random, so an unpinned pick is nondeterministic.
+	    DefaultModel string `json:"defaultModel,omitempty"`
 	    // ToolConstraint declares the grammar-constraint wire mode every model
 	    // on this provider supports for tool calls: "llamacpp", "vllm", or
 	    // "json_schema". Empty (default) = no constraint support. Per-model
@@ -6842,7 +6922,14 @@ FindCheapest finds the cheapest model with the specified capabilities.
 
 	func (r *Resolver) ForgetSessionEndpoint(sessionID string)
 
-ForgetSessionEndpoint drops the sticky preference for one session \(session\-affinity integration fix: the PM failure path calls this when the remembered endpoint actually FAILED, so the next resolve cannot re\-pull the dead endpoint to the front and ping\-pong on it — rotation must make progress first; the memory re\-arms on the next success via RememberSessionEndpoint, which also heals teardown refcounting\). No\-op on a nil receiver or empty session; an unknown session is already forgotten. Calls the LOCKED helper directly: the public path's healthy\-candidate gate would reject an empty key \(no candidate carries it\) and fall through to "not remembered" without ever clearing. The helper's empty\-key branch performs the tombstone\-correct LRU slot removal \(two\-value order read \+ bounds self\-heal\) — a second hand\-rolled removal here would diverge from that logic.
+ForgetSessionEndpoint drops the sticky preference for one session \(session\-affinity integration fix: the PM failure path calls this when the remembered endpoint actually FAILED, so the next resolve cannot re\-pull the dead endpoint to the front and ping\-pong on it — rotation must make progress first; the memory re\-arms on the next success via RememberSessionEndpoint, which also heals teardown refcounting\). No\-op on a nil receiver or empty session; an unknown session is already forgotten. Calls the LOCKED helper directly: the public path's healthy\-candidate gate would reject an empty key \(no candidate carries it\) and fall through to "not remembered" without ever clearing. The helper's empty\-key branch splices the session's LRU slot out by identity scan — a second hand\-rolled removal here would diverge from that logic.
+
+<a name="Resolver.ForgetSessionEndpointIf"></a>
+### func \(\*Resolver\) ForgetSessionEndpointIf
+
+	func (r *Resolver) ForgetSessionEndpointIf(sessionID, endpointKey string) bool
+
+ForgetSessionEndpointIf is the compare\-and\-forget twin: it drops the session's sticky preference ONLY when the remembered endpoint key equals endpointKey. The PM failure path uses it so a failed attempt against a DIFFERENT provider cannot wipe the preference for the endpoint that actually served the session \(an unconditional forget on every failure erased healthy preferences whenever any rotated\-to provider died\). Reports whether a preference was dropped. No\-op on a nil receiver, empty session, or empty endpointKey \(an empty key is never remembered, so it can never match\).
 
 <a name="Resolver.GetAliasHealth"></a>
 ### func \(\*Resolver\) GetAliasHealth
@@ -7497,7 +7584,7 @@ SweepOrphanRuntimes stops every runtime a previous meept generation left behind:
 
 TeardownBaseURL resolves a runtime endpoint key to its base URL via the provider registered against it \(Contract 6's teardown accessor\). The lookup mirrors EndpointBaseURL but keys on the ENDPOINT \(the teardown coordinator only ever sees keys, not provider ids\).
 
-The coordinator's keys come from the Resolver snapshot, whose shape is EndpointKey\(cfg\) = "host|credential" \(models.go\) — NOT the runtime key "llama\-cpp:\<host\>:\<port\>" this map is indexed by. Two shapes, one host: so resolution falls back to a HOST match over registered endpoints. The fallback is safe for the teardown use: erasing the KV cache of the one llama\-server listening on that host is the intent, host:port collisions between two llama runtimes on one host do not occur in practice \(each runtime binds a distinct port; the host|credential key carries no port, so port disambiguation is impossible from the snapshot side anyway\). A nil manager or an unknown endpoint returns false: a down or unregistered runtime has no cache worth erasing, and the erase must never guess a base URL.
+The coordinator's keys come from the Resolver snapshot, whose shape is EndpointKey\(cfg\) = "host|credential" \(models.go\) — NOT the runtime key "llama\-cpp:\<host\>:\<port\>" this map is indexed by. Two shapes, one host: so resolution falls back to a HOST match over registered endpoints. The fallback is safe for the teardown use: erasing the KV cache of the one llama\-server listening on that host is the intent. NOTE the snapshot's host portion DOES carry the port — EndpointKey stores endpointHost's host:PORT — and the host\-fallback comparison below relies on it, so two llama runtimes on one host are disambiguated by the snapshot key's port; only legacy port\-less keys fall to the bare\-hostname compare \(first registered wins\). A nil manager or an unknown endpoint returns false: a down or unregistered runtime has no cache worth erasing, and the erase must never guess a base URL.
 
 <a name="RuntimeProcInfo"></a>
 ## type RuntimeProcInfo
@@ -8005,14 +8092,14 @@ OnSessionEvent implements session.SessionLifecycleHook for daemon wiring \(the e
 
 	func (c *TeardownCoordinator) SetIdentityResolver(resolve func(sessionID string) (string, bool))
 
-SetIdentityResolver wires the primary\-id \-\> conversation\-id seam used on a snapshot miss \(the session\_id/conversation\_id duality: lifecycle events carry the primary id, the snapshot keys on the accounting id\). Nil disables the retry. Call once at daemon wiring time, before any event.
+SetIdentityResolver wires the primary\-id \-\> conversation\-id seam used on a snapshot miss \(the session\_id/conversation\_id duality: lifecycle events carry the primary id, the snapshot keys on the accounting id\). Nil disables the retry. Safe to call while dispatchAsync goroutines are in flight: the write is guarded by identityMu, the same lock the dispatch readers take.
 
 <a name="TeardownCoordinator.ShutdownSweep"></a>
 ### func \(\*TeardownCoordinator\) ShutdownSweep
 
 	func (c *TeardownCoordinator) ShutdownSweep(ctx context.Context)
 
-ShutdownSweep tears down every session with a remembered endpoint, SYNCHRONOUSLY, under a total budget of TeardownTimeout \* min\(sweepMaxSessions, len\(sessions\)\). Errors and overruns are logged, never returned to the shutdown path \(shutdown must always complete\). Sessions without a remembered endpoint are skipped \(nothing to release\).
+ShutdownSweep tears down every session with a remembered endpoint, SYNCHRONOUSLY, under a bounded budget. The total worst case is 2 \* TeardownTimeout \* min\(sweepMaxSessions, len\(sessions\)\): the in\-flight wait and the sweep itself are each bounded by the full sweepBudget, and the wait can consume it entirely before the sweep starts its own \(same\-sized\) window. Splitting the budget was rejected: it would halve the erase window for every healthy shutdown to fix a bound that only a stuck in\-flight adapter ever approaches, and the shutdown contract is "always completes", not "completes in exactly N". Errors and overruns are logged, never returned to the shutdown path. Sessions without a remembered endpoint are skipped \(nothing to release\).
 
 <a name="TeardownHookFunc"></a>
 ## type TeardownHookFunc

@@ -301,6 +301,15 @@ type Components struct {
 	// to the same SQLite file.
 	MetricsStore *metrics.Store
 
+	// OTLPExporter ships agent metrics (turns, tool calls, token usage)
+	// off-host to an OTLP receiver (metrics.otlp). Non-nil ONLY when
+	// metrics.otlp.enabled=true: the default posture is opt-in (docs/
+	// agents/opt-in-defaults.md) — no exporter constructed, no network
+	// traffic, one Warn line at boot. Started in NewComponents (config is
+	// read BEFORE construction — no construction-baked-config seam) and
+	// stopped on the shutdown path in stopComponents.
+	OTLPExporter *metrics.OTLPExporter
+
 	// Pricing syncer for dynamic model pricing
 	PricingSyncer *llm.PricingSyncer
 
@@ -780,6 +789,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		Logger: logger,
 	}
 	c.ctx, c.cancel = context.WithCancel(ctx)
+
+	// OTLP metrics export (metrics.otlp) — opt-in, default OFF. The knob
+	// is read here, BEFORE construction, so there is no construction-baked
+	// config seam: Enabled gates the constructor entirely. Disabled boots
+	// log exactly one Warn line and construct nothing (zero steady-state
+	// noise, zero goroutines). Enabled boots construct the exporter with
+	// the stdlib HTTP JSON sink and Start() it immediately; shutdown is
+	// handled in stopComponents.
+	c.wireOTLPExporter(logger)
 
 	// Install the env-script resolver for config expansion (see
 	// internal/llm/envscript.go): process env first, then the executable
@@ -5624,6 +5642,11 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.cancel != nil {
 		c.cancel()
 	}
+
+	// Flush and stop the OTLP metrics exporter first (metrics.otlp): the
+	// final batch must reach the receiver before the process tears down.
+	// Nil on every disabled boot — the guard makes this a no-op there.
+	c.stopOTLPExporter()
 
 	// Stop budget periodic cleanup goroutine
 	if c.BudgetCleanupStop != nil {

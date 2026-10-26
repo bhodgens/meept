@@ -942,6 +942,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if coll != nil && components != nil && components.AgentEventEmitter != nil {
 		coll.RegisterEventListeners(agentEventAdapter{components.AgentEventEmitter})
 		logger.Info("Metrics collector wired to agent event emitter")
+
+		// OTLP export feed (metrics.otlp): the same events the collector
+		// persists locally also feed the exporter so agent metrics leave
+		// the host. Nil exporter (feature disabled, the default) is a
+		// no-op — zero behavior change when off.
+		coll.RegisterOTLPExporter(components.OTLPExporter, agentEventAdapter{components.AgentEventEmitter})
 	}
 
 	// --- Plan system initialization ---

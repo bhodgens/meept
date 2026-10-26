@@ -35,6 +35,7 @@ Package config provides configuration loading and validation for meept.
 - [func NormalizeContextDiscoveryDefaults\(c \*ContextDiscoveryConfig\)](<#NormalizeContextDiscoveryDefaults>)
 - [func NormalizeEvolverDefaults\(e \*SkillsEvolverConfig\) error](<#NormalizeEvolverDefaults>)
 - [func NormalizeFailurePolicyDefaults\(f \*FailurePolicyConfig\)](<#NormalizeFailurePolicyDefaults>)
+- [func NormalizeOTLPMetricsDefaults\(c \*OTLPMetricsConfig\)](<#NormalizeOTLPMetricsDefaults>)
 - [func NormalizePlansDefaults\(c \*PlansConfig\)](<#NormalizePlansDefaults>)
 - [func NormalizeQuotaRetryDefaults\(q \*QuotaRetryConfig\)](<#NormalizeQuotaRetryDefaults>)
 - [func NormalizeRuntimeDefaults\(rc \*RuntimeConfig\)](<#NormalizeRuntimeDefaults>)
@@ -222,6 +223,7 @@ Package config provides configuration loading and validation for meept.
   - [func NewMerger\(baseDir, checkoutDir, nodeID string, l logger\) \*Merger](<#NewMerger>)
   - [func \(m \*Merger\) FileWouldChange\(path string\) \(bool, error\)](<#Merger.FileWouldChange>)
   - [func \(m \*Merger\) Merge\(commitHash string\) \(\*MergeResult, error\)](<#Merger.Merge>)
+- [type MetricsConfig](<#MetricsConfig>)
 - [type Model](<#Model>)
 - [type ModelParams](<#ModelParams>)
 - [type ModelPreset](<#ModelPreset>)
@@ -234,6 +236,7 @@ Package config provides configuration loading and validation for meept.
 - [type NotificationsConfig](<#NotificationsConfig>)
 - [type OAuthConfig](<#OAuthConfig>)
 - [type OAuthProviderEntry](<#OAuthProviderEntry>)
+- [type OTLPMetricsConfig](<#OTLPMetricsConfig>)
 - [type OrchestratorConfig](<#OrchestratorConfig>)
 - [type OutputFiltersConfig](<#OutputFiltersConfig>)
   - [func \(c \*OutputFiltersConfig\) Validate\(\) error](<#OutputFiltersConfig.Validate>)
@@ -421,6 +424,13 @@ Package config provides configuration loading and validation for meept.
 	    DefaultPacingTarget429Hour = 1
 	    DefaultPacingMinInterval   = time.Second
 	    DefaultPacingMaxInterval   = 30 * time.Second
+	)
+
+<a name="DefaultOTLPEndpoint"></a>Defaults for metrics.otlp \(opt\-in exporter\).
+
+	const (
+	    DefaultOTLPEndpoint       = "http://localhost:4317"
+	    DefaultOTLPExportInterval = 30 * time.Second
 	)
 
 <a name="DefaultCfgNoProgressWarnAt"></a>Defaults for \[agent.guards\] — keep in sync with agent.DefaultGuardConfig\(\).
@@ -622,6 +632,13 @@ NormalizeEvolverDefaults normalizes the skills.evolver section: an empty PlanDir
 	func NormalizeFailurePolicyDefaults(f *FailurePolicyConfig)
 
 NormalizeFailurePolicyDefaults clamps invalid failure\_policy values to defaults: negative durations become the field default, zero means unset and takes the default; non\-positive ShortRetries takes the default; pacing intervals normalize the same way and max \< min lifts max to min. Idempotent on valid values. Pacing.Enabled is left as\-is: the default\-on value is applied by DefaultConfig\(\) \(which load unmarshal runs onto\), and an explicit pacing.enabled = false must survive every load.
+
+<a name="NormalizeOTLPMetricsDefaults"></a>
+## func NormalizeOTLPMetricsDefaults
+
+	func NormalizeOTLPMetricsDefaults(c *OTLPMetricsConfig)
+
+NormalizeOTLPMetricsDefaults clamps invalid metrics.otlp values to defaults: zero/negative interval takes the 30s default; an empty endpoint takes http://localhost:4317. Enabled is left as\-is — default false is the documented opt\-in posture. Idempotent on valid values.
 
 <a name="NormalizePlansDefaults"></a>
 ## func NormalizePlansDefaults
@@ -1733,6 +1750,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    Transcript          TranscriptConfig          `json:"transcript"          toml:"transcript"`
 	    MultiUser           MultiUserConfig           `json:"multiuser"           toml:"multiuser"`
 	    Hermes              HermesConfig              `json:"hermes"               toml:"hermes"`
+	    Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -3289,6 +3307,17 @@ ApplyConfigFile is exposed so callers like the CLI can check if a file would cha
 
 Merge applies shared \+ per\-node configs, returning applied/skipped/errored files.
 
+<a name="MetricsConfig"></a>
+## type MetricsConfig
+
+MetricsConfig configures top\-level metrics export \(JSON5 key: "metrics"\). The local SQLite metrics store \(llm.metrics\) is unrelated: it always records in\-process. This section controls whether metrics LEAVE the host.
+
+	type MetricsConfig struct {
+	    // OTLP configures the optional OTLP metrics exporter. Default OFF:
+	    // metrics stay in the per-host SQLite store until explicitly opted in.
+	    OTLP OTLPMetricsConfig `json:"otlp" toml:"otlp"`
+	}
+
 <a name="Model"></a>
 ## type Model
 
@@ -3475,6 +3504,22 @@ OAuthProviderEntry holds per\-provider OAuth overrides.
 	type OAuthProviderEntry struct {
 	    ClientID     string `json:"client_id"     toml:"client_id"`
 	    ClientSecret string `json:"client_secret" toml:"client_secret"`
+	}
+
+<a name="OTLPMetricsConfig"></a>
+## type OTLPMetricsConfig
+
+OTLPMetricsConfig configures the OTLP metrics exporter \(metrics.otlp\). Default OFF per docs/agents/opt\-in\-defaults.md: no exporter is constructed, no metric leaves the host, and boot logs exactly one Warn line stating that export is disabled. When enabled, the daemon batches agent metrics \(turns, tool calls, token usage\) and POSTs them as OTLP/HTTP JSON to \<endpoint\>/v1/metrics \(stdlib net/http only — no otel SDK dependency; internal/metrics.OTLPMetricSink is the bridge\).
+
+	type OTLPMetricsConfig struct {
+	    // Enabled turns the exporter on. Default false.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // Endpoint is the OTLP receiver base URL. Default
+	    // "http://localhost:4317". Batches POST to <endpoint>/v1/metrics.
+	    Endpoint string `json:"endpoint" toml:"endpoint"`
+	    // Interval is the batch export cadence. Zero/negative means the 30s
+	    // default (normalized at the config load boundary).
+	    Interval time.Duration `json:"interval" toml:"interval"`
 	}
 
 <a name="OrchestratorConfig"></a>
@@ -3934,6 +3979,13 @@ ProviderOptions holds provider\-specific options.
 	    APIKey  string `json:"apiKey"` //nolint:gosec // field name, not a secret
 	    Timeout int    `json:"timeout"`
 	    NoAuth  bool   `json:"noAuth"` // FIX #0004 - true for providers that don't require API key (e.g., local LLMs)
+	    // DefaultModel names the model this provider serves by default in the
+	    // ProviderManager failover pool. Without it, buildProviderConfigs picks
+	    // the sorted-first model id (deterministic; map order is random and once
+	    // registered a stale agnes-2.0-flash instead of the configured default).
+	    // Mirror of llm.ProviderOptionsConfig.DefaultModel — keep the JSON tags
+	    // in sync.
+	    DefaultModel string `json:"defaultModel,omitempty"`
 	}
 
 <a name="QAgentConfig"></a>

@@ -47,6 +47,7 @@ Package agent provides the agent loop and related components.
 
 - Constants
 - Variables
+- [func ACPTurnSourceFromContext\(ctx context.Context\) \(kind, employeeID string, ok bool\)](<#ACPTurnSourceFromContext>)
 - [func AllotmentTokens\(contextLimit int, cfg AllotmentConfig\) int](<#AllotmentTokens>)
 - [func ApplyEscalation\(h \*VerificationAutoTrigger, mod \*TurnModification\) bool](<#ApplyEscalation>)
 - [func AssembleOrdered\(sections \[\]PromptSection\) \(prompt string, stablePrefixHash string\)](<#AssembleOrdered>)
@@ -112,6 +113,7 @@ Package agent provides the agent loop and related components.
 - [func StoreSpecInTask\(t \*task.Task, spec \*TaskSpec\)](<#StoreSpecInTask>)
 - [func StripClaimsEvidence\(response string\) string](<#StripClaimsEvidence>)
 - [func StripClaimsEvidenceOrProse\(raw string\) string](<#StripClaimsEvidenceOrProse>)
+- [func StripPromptScaffolding\(desc string\) string](<#StripPromptScaffolding>)
 - [func StripReport\(response string\) string](<#StripReport>)
 - [func TeamMessageTopic\(sessionID string\) string](<#TeamMessageTopic>)
 - [func TeamResultTopic\(sessionID string\) string](<#TeamResultTopic>)
@@ -121,9 +123,18 @@ Package agent provides the agent loop and related components.
 - [func ValidateSoul\(content \[\]byte\) error](<#ValidateSoul>)
 - [func VerifyFromToolResults\(results \[\]tools.ToolResult\) bool](<#VerifyFromToolResults>)
 - [func WarnToolsWithoutProperties\(reg ToolRegistry, logger \*slog.Logger\) \[\]string](<#WarnToolsWithoutProperties>)
+- [func WithACPTurnSource\(ctx context.Context, kind, employeeID string\) context.Context](<#WithACPTurnSource>)
 - [func WithResumedTurn\(ctx context.Context\) context.Context](<#WithResumedTurn>)
 - [func WithRetryBudget\(ctx context.Context, budget \*RetryBudget\) context.Context](<#WithRetryBudget>)
+- [func WithScopeOptions\(ctx context.Context, opts \[\]llm.ChatOption\) context.Context](<#WithScopeOptions>)
 - [func WithThrottleParkAttempt\(ctx context.Context, attempt int\) context.Context](<#WithThrottleParkAttempt>)
+- [type ACPExecutor](<#ACPExecutor>)
+  - [func NewACPExecutor\(m \*acp.Manager\) \*ACPExecutor](<#NewACPExecutor>)
+  - [func \(e \*ACPExecutor\) Run\(ctx context.Context, spec \*AgentSpec, workdir string, promptText string, emit func\(updateText string\)\) \(string, error\)](<#ACPExecutor.Run>)
+  - [func \(e \*ACPExecutor\) SetTurnMetricRecorder\(rec TurnMetricRecorder\)](<#ACPExecutor.SetTurnMetricRecorder>)
+- [type ACPSession](<#ACPSession>)
+- [type ACPSessionProvider](<#ACPSessionProvider>)
+- [type ACPSpec](<#ACPSpec>)
 - [type AbortData](<#AbortData>)
 - [type ActionType](<#ActionType>)
 - [type AdaptiveParallelismLimiter](<#AdaptiveParallelismLimiter>)
@@ -157,6 +168,7 @@ Package agent provides the agent loop and related components.
 - [type AgentLifecyclePayload](<#AgentLifecyclePayload>)
 - [type AgentLoop](<#AgentLoop>)
   - [func NewAgentLoop\(sessionID string, workingDir string, opts ...LoopOption\) \*AgentLoop](<#NewAgentLoop>)
+  - [func \(l \*AgentLoop\) ACPExecutor\(\) \*ACPExecutor](<#AgentLoop.ACPExecutor>)
   - [func \(l \*AgentLoop\) AdvanceBudgetPhase\(newPhaseID string\) error](<#AgentLoop.AdvanceBudgetPhase>)
   - [func \(l \*AgentLoop\) ApplyRequestModel\(modelRef string\)](<#AgentLoop.ApplyRequestModel>)
   - [func \(l \*AgentLoop\) Chatter\(\) llm.Chatter](<#AgentLoop.Chatter>)
@@ -172,6 +184,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) ExecuteSkillToolCalls\(ctx context.Context, toolCalls \[\]llm.ToolCall\) \[\]\*ExecutionResult](<#AgentLoop.ExecuteSkillToolCalls>)
   - [func \(l \*AgentLoop\) FireHTTPHooks\(ctx context.Context, event string, data map\[string\]any\)](<#AgentLoop.FireHTTPHooks>)
   - [func \(l \*AgentLoop\) FirewallStats\(\) map\[string\]any](<#AgentLoop.FirewallStats>)
+  - [func \(l \*AgentLoop\) GetAgentID\(\) string](<#AgentLoop.GetAgentID>)
   - [func \(l \*AgentLoop\) GetBudgetStatus\(\) \*BudgetStatus](<#AgentLoop.GetBudgetStatus>)
   - [func \(l \*AgentLoop\) GetConfig\(\) AgentConfig](<#AgentLoop.GetConfig>)
   - [func \(l \*AgentLoop\) GetConversation\(id string\) \*Conversation](<#AgentLoop.GetConversation>)
@@ -199,6 +212,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) RunWithSkill\(ctx context.Context, skill \*skills.Skill, input string, conversationID string\) \(string, error\)](<#AgentLoop.RunWithSkill>)
   - [func \(l \*AgentLoop\) RunWithTask\(ctx context.Context, t \*task.Task\) \(string, error\)](<#AgentLoop.RunWithTask>)
   - [func \(l \*AgentLoop\) SessionConversation\(id string\) \*Conversation](<#AgentLoop.SessionConversation>)
+  - [func \(l \*AgentLoop\) SetACPExecutor\(e \*ACPExecutor\)](<#AgentLoop.SetACPExecutor>)
   - [func \(l \*AgentLoop\) SetActive\(v bool\)](<#AgentLoop.SetActive>)
   - [func \(l \*AgentLoop\) SetAutonomous\(autonomous bool\)](<#AgentLoop.SetAutonomous>)
   - [func \(l \*AgentLoop\) SetBeforeToolCallHook\(name string, priority HookPriority, hook BeforeToolCallHook\)](<#AgentLoop.SetBeforeToolCallHook>)
@@ -257,6 +271,7 @@ Package agent provides the agent loop and related components.
 - [type AgentModelLookup](<#AgentModelLookup>)
 - [type AgentRegistry](<#AgentRegistry>)
   - [func NewAgentRegistry\(cfg RegistryConfig\) \*AgentRegistry](<#NewAgentRegistry>)
+  - [func \(r \*AgentRegistry\) ACPExecutor\(\) \*ACPExecutor](<#AgentRegistry.ACPExecutor>)
   - [func \(r \*AgentRegistry\) CapabilitiesMap\(\) \*CapabilitiesMap](<#AgentRegistry.CapabilitiesMap>)
   - [func \(r \*AgentRegistry\) Close\(\) error](<#AgentRegistry.Close>)
   - [func \(r \*AgentRegistry\) DB\(\) \*sql.DB](<#AgentRegistry.DB>)
@@ -277,6 +292,7 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) RegisterSpec\(spec \*AgentSpec\) error](<#AgentRegistry.RegisterSpec>)
   - [func \(r \*AgentRegistry\) ReleaseTaskLoops\(taskID string\)](<#AgentRegistry.ReleaseTaskLoops>)
   - [func \(r \*AgentRegistry\) RunAgent\(ctx context.Context, agentID, message, conversationID string\) \(string, error\)](<#AgentRegistry.RunAgent>)
+  - [func \(r \*AgentRegistry\) SetACPExecutor\(e \*ACPExecutor\)](<#AgentRegistry.SetACPExecutor>)
   - [func \(r \*AgentRegistry\) SetCapabilitiesMap\(capMap \*CapabilitiesMap\)](<#AgentRegistry.SetCapabilitiesMap>)
   - [func \(r \*AgentRegistry\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentRegistry.SetCapabilityIndex>)
   - [func \(r \*AgentRegistry\) SetGlobalRules\(rules string\)](<#AgentRegistry.SetGlobalRules>)
@@ -494,6 +510,13 @@ Package agent provides the agent loop and related components.
 - [type CheckResult](<#CheckResult>)
 - [type Checkpoint](<#Checkpoint>)
   - [func SnapshotForTurn\(runID, agentID string, depth int, currentTurn, limit int, toolCalls \[\]TurnRecord, messages \[\]LLMMessage, output string\) \*Checkpoint](<#SnapshotForTurn>)
+- [type ClassifierBootReadiness](<#ClassifierBootReadiness>)
+  - [func NewClassifierBootReadiness\(\) \*ClassifierBootReadiness](<#NewClassifierBootReadiness>)
+  - [func \(b \*ClassifierBootReadiness\) Done\(\) bool](<#ClassifierBootReadiness.Done>)
+  - [func \(b \*ClassifierBootReadiness\) Failed\(\) bool](<#ClassifierBootReadiness.Failed>)
+  - [func \(b \*ClassifierBootReadiness\) SignalFailed\(\)](<#ClassifierBootReadiness.SignalFailed>)
+  - [func \(b \*ClassifierBootReadiness\) SignalReady\(\)](<#ClassifierBootReadiness.SignalReady>)
+  - [func \(b \*ClassifierBootReadiness\) Wait\(ctx context.Context\) error](<#ClassifierBootReadiness.Wait>)
 - [type ClassifyFunc](<#ClassifyFunc>)
 - [type CollaborationEngine](<#CollaborationEngine>)
   - [func NewCollaborationEngine\(deps CollaborationEngineDeps\) \*CollaborationEngine](<#NewCollaborationEngine>)
@@ -657,6 +680,7 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) SetAgentLoopManager\(m \*Manager\)](<#Dispatcher.SetAgentLoopManager>)
   - [func \(d \*Dispatcher\) SetBurstDetector\(det \*metrics.BurstDetector\)](<#Dispatcher.SetBurstDetector>)
   - [func \(d \*Dispatcher\) SetCapabilityMatcher\(matcher \*CapabilityMatcher\)](<#Dispatcher.SetCapabilityMatcher>)
+  - [func \(d \*Dispatcher\) SetClassifierBootReadiness\(b \*ClassifierBootReadiness\)](<#Dispatcher.SetClassifierBootReadiness>)
   - [func \(d \*Dispatcher\) SetDefaultWorkingDir\(dir string\)](<#Dispatcher.SetDefaultWorkingDir>)
   - [func \(d \*Dispatcher\) SetDriftDetector\(det \*SessionDriftDetector\)](<#Dispatcher.SetDriftDetector>)
   - [func \(d \*Dispatcher\) SetFenceController\(fc FenceController\)](<#Dispatcher.SetFenceController>)
@@ -882,6 +906,7 @@ Package agent provides the agent loop and related components.
   - [func NewIntentAnalyzer\(client \*llm.Client, logger \*slog.Logger\) \*IntentAnalyzer](<#NewIntentAnalyzer>)
   - [func \(ia \*IntentAnalyzer\) AnalyzeTrueIntent\(ctx context.Context, input string, sessionContext \*SessionContextDigest\) \(\*TrueIntentAnalysis, error\)](<#IntentAnalyzer.AnalyzeTrueIntent>)
   - [func \(ia \*IntentAnalyzer\) ResolvedModel\(\) string](<#IntentAnalyzer.ResolvedModel>)
+  - [func \(ia \*IntentAnalyzer\) SetBootReadiness\(b \*ClassifierBootReadiness\)](<#IntentAnalyzer.SetBootReadiness>)
   - [func \(ia \*IntentAnalyzer\) WithAmbiguityThreshold\(threshold float64\) \*IntentAnalyzer](<#IntentAnalyzer.WithAmbiguityThreshold>)
 - [type IntentAnalyzerConfig](<#IntentAnalyzerConfig>)
 - [type IntentCategory](<#IntentCategory>)
@@ -905,6 +930,7 @@ Package agent provides the agent loop and related components.
   - [func \(c \*LLMClassifier\) ClassifyMulti\(ctx context.Context, input string, ctxMemory \[\]memory.MemoryResult\) \[\]\*Intent](<#LLMClassifier.ClassifyMulti>)
   - [func \(c \*LLMClassifier\) MarkUnavailable\(\)](<#LLMClassifier.MarkUnavailable>)
   - [func \(c \*LLMClassifier\) ResolvedModel\(\) string](<#LLMClassifier.ResolvedModel>)
+  - [func \(c \*LLMClassifier\) SetBootReadiness\(b \*ClassifierBootReadiness\)](<#LLMClassifier.SetBootReadiness>)
   - [func \(c \*LLMClassifier\) UnmarkUnavailable\(\)](<#LLMClassifier.UnmarkUnavailable>)
 - [type LLMClassifierConfig](<#LLMClassifierConfig>)
 - [type LLMMessage](<#LLMMessage>)
@@ -915,6 +941,7 @@ Package agent provides the agent loop and related components.
 - [type LifecycleOutcome](<#LifecycleOutcome>)
 - [type Logger](<#Logger>)
 - [type LoopOption](<#LoopOption>)
+  - [func WithACPExecutor\(e \*ACPExecutor\) LoopOption](<#WithACPExecutor>)
   - [func WithAdapterRouter\(ar \*llm.AdapterRouter\) LoopOption](<#WithAdapterRouter>)
   - [func WithAgentConfig\(config AgentConfig\) LoopOption](<#WithAgentConfig>)
   - [func WithAgentID\(id string\) LoopOption](<#WithAgentID>)
@@ -923,6 +950,7 @@ Package agent provides the agent loop and related components.
   - [func WithAgentSpec\(spec \*AgentSpec\) LoopOption](<#WithAgentSpec>)
   - [func WithArtifactManager\(am \*ArtifactManager\) LoopOption](<#WithArtifactManager>)
   - [func WithCapabilityIndex\(ci \*skills.CapabilityIndex\) LoopOption](<#WithCapabilityIndex>)
+  - [func WithCompactionConfig\(cfg config.CompactionConfig\) LoopOption](<#WithCompactionConfig>)
   - [func WithCompressionPipeline\(pipeline \*compress.Pipeline\) LoopOption](<#WithCompressionPipeline>)
   - [func WithContextInjectorFunc\(injector \*ContextInjector\) LoopOption](<#WithContextInjectorFunc>)
   - [func WithDetectionContext\(dc \*DetectionContext\) LoopOption](<#WithDetectionContext>)
@@ -1252,6 +1280,7 @@ Package agent provides the agent loop and related components.
   - [func NewRLMAnalyzerFromTraceStore\(cfg RLMAnalyzerConfig, store \*memory.TraceStore, llmClient \*llm.Client, logger \*slog.Logger\) \*RLMAnalyzer](<#NewRLMAnalyzerFromTraceStore>)
   - [func NewTestRLMAnalyzer\(cfg RLMAnalyzerConfig, store TraceStoreReader, llmClient \*llm.Client\) \*RLMAnalyzer](<#NewTestRLMAnalyzer>)
   - [func \(a \*RLMAnalyzer\) Analyze\(ctx context.Context, prompt string\) \(\*AnalyzeResult, error\)](<#RLMAnalyzer.Analyze>)
+  - [func \(a \*RLMAnalyzer\) SetScopeProvider\(provider chatScopeProvider\)](<#RLMAnalyzer.SetScopeProvider>)
 - [type RLMAnalyzerConfig](<#RLMAnalyzerConfig>)
   - [func DefaultRLMConfig\(\) RLMAnalyzerConfig](<#DefaultRLMConfig>)
 - [type RalphLoop](<#RalphLoop>)
@@ -1283,7 +1312,7 @@ Package agent provides the agent loop and related components.
   - [func \(rc \*ReflectionCollector\) DrainPendingProposals\(\) \(\[\]ReflectionProposal, error\)](<#ReflectionCollector.DrainPendingProposals>)
   - [func \(rc \*ReflectionCollector\) ReflectInactiveSessions\(ctx context.Context\)](<#ReflectionCollector.ReflectInactiveSessions>)
   - [func \(rc \*ReflectionCollector\) ReflectTurn\(ctx context.Context, traj ReflectionTrajectory\) error](<#ReflectionCollector.ReflectTurn>)
-  - [func \(rc \*ReflectionCollector\) SetScopeProvider\(provider chatScopeProvider\)](<#ReflectionCollector.SetScopeProvider>)
+  - [func \(rc \*ReflectionCollector\) ReflectTurnWithScope\(ctx context.Context, traj ReflectionTrajectory, scope \[\]llm.ChatOption\) error](<#ReflectionCollector.ReflectTurnWithScope>)
 - [type ReflectionConfig](<#ReflectionConfig>)
   - [func DefaultReflectionConfig\(\) ReflectionConfig](<#DefaultReflectionConfig>)
 - [type ReflectionEngine](<#ReflectionEngine>)
@@ -1560,6 +1589,7 @@ Package agent provides the agent loop and related components.
 - [type SynthesizeTracesTool](<#SynthesizeTracesTool>)
   - [func NewSynthesizeTracesTool\(store TraceStoreReader, llmClient \*llm.Client\) \*SynthesizeTracesTool](<#NewSynthesizeTracesTool>)
   - [func \(t \*SynthesizeTracesTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#SynthesizeTracesTool.Invoke>)
+  - [func \(t \*SynthesizeTracesTool\) SetScopeProvider\(provider chatScopeProvider\)](<#SynthesizeTracesTool.SetScopeProvider>)
 - [type SynthesizedProgressEvent](<#SynthesizedProgressEvent>)
 - [type TTSRManager](<#TTSRManager>)
   - [func NewTTSRManager\(logger \*slog.Logger\) \*TTSRManager](<#NewTTSRManager>)
@@ -1630,13 +1660,14 @@ Package agent provides the agent loop and related components.
   - [func \(to \*TeamOrchestrator\) Name\(\) string](<#TeamOrchestrator.Name>)
   - [func \(to \*TeamOrchestrator\) ReceiveResult\(ctx context.Context, sessionID string, result TeamMemberResultSubmission\) error](<#TeamOrchestrator.ReceiveResult>)
   - [func \(to \*TeamOrchestrator\) Start\(ctx context.Context\) error](<#TeamOrchestrator.Start>)
-  - [func \(to \*TeamOrchestrator\) Status\(ctx context.Context, sessionID string\) \(\*TeamSessionState, error\)](<#TeamOrchestrator.Status>)
+  - [func \(to \*TeamOrchestrator\) Status\(ctx context.Context, sessionID string\) \(\*TeamSessionStateSnapshot, error\)](<#TeamOrchestrator.Status>)
   - [func \(to \*TeamOrchestrator\) Stop\(ctx context.Context\) error](<#TeamOrchestrator.Stop>)
 - [type TeamOrchestratorDeps](<#TeamOrchestratorDeps>)
 - [type TeamPreset](<#TeamPreset>)
   - [func GetTeamPreset\(name string\) \(\*TeamPreset, error\)](<#GetTeamPreset>)
   - [func ListTeamPresets\(\) \[\]TeamPreset](<#ListTeamPresets>)
 - [type TeamSessionState](<#TeamSessionState>)
+- [type TeamSessionStateSnapshot](<#TeamSessionStateSnapshot>)
 - [type TeamStartRequest](<#TeamStartRequest>)
 - [type TeamStatus](<#TeamStatus>)
 - [type TelemetryEmitter](<#TelemetryEmitter>)
@@ -1743,6 +1774,7 @@ Package agent provides the agent loop and related components.
   - [func \(tm \*TurnManager\) TurnLimitRemaining\(\) int](<#TurnManager.TurnLimitRemaining>)
   - [func \(tm \*TurnManager\) TurnTimeout\(\) time.Duration](<#TurnManager.TurnTimeout>)
   - [func \(tm \*TurnManager\) Yield\(\) error](<#TurnManager.Yield>)
+- [type TurnMetricRecorder](<#TurnMetricRecorder>)
 - [type TurnModification](<#TurnModification>)
 - [type TurnParker](<#TurnParker>)
   - [func NewTurnParker\(logger \*slog.Logger, resume func\(context.Context, ParkedTurnRecord\), maxWait time.Duration\) \*TurnParker](<#NewTurnParker>)
@@ -1855,6 +1887,13 @@ Package agent provides the agent loop and related components.
 
 
 ## Constants
+
+<a name="ACPTurnSourceChat"></a>ACPTurnSource\* are the source\-tag values of ACPTurnsMetric \(phase\-3 D6\). Absence of the context value means the chat lane.
+
+	const (
+	    ACPTurnSourceChat     = "chat"
+	    ACPTurnSourceEmployee = "employee"
+	)
 
 <a name="ToolFileRead"></a>Tool name constants used across agent cache, executor, spec, and loop.
 
@@ -2054,6 +2093,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    ReportStatusNeedsInput = "needs_input"
 	)
 
+<a name="ACPTurnsMetric"></a>ACPTurnsMetric is the per\-persona acp turn counter emitted once per completed ACP turn. Tags: agent \(catalog agent id, spec.ACP.Agent\), persona \(spec.ACP.Persona — an empty string is a valid tag value, the bindingless persona lane\), outcome \(success|error|cancelled\), and source \(chat|employee, acp\-employees phase\-3 D6\): chat\-slave turns carry source=chat; employee\-driven turns carry source=employee plus an employee\_id tag. The source rides a context value the employee adapter injects before RunOnce, so the executor stays the single emission site \(no adapter\-side datapoint, no double counting\).
+
+	const ACPTurnsMetric = "acp.persona.turns"
+
 <a name="CheckpointVersion"></a>
 
 	const CheckpointVersion = 1
@@ -2086,6 +2129,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 <a name="DefaultTurnParkerPollInterval"></a>DefaultTurnParkerPollInterval is the re\-check cadence for parked turn records. It is the canonical source for DefaultQuotaResumePollInterval \(quota\_resume.go\), which remains the exported quota\-facing alias.
 
 	const DefaultTurnParkerPollInterval = 10 * time.Minute
+
+<a name="ExecutorACP"></a>ExecutorACP is the AgentSpec.Executor value that routes turns through the external ACP harness instead of the local LLM reasoning loop \(docs/workflows/acp\-employees.md, dim 3A\).
+
+	const ExecutorACP = "acp"
 
 <a name="HookAsyncRewakeTopic"></a>HookAsyncRewakeTopic is the bus topic used when an async hook with AsyncRewake=true finishes successfully. The AgentLoop subscribes to this topic \(armed at turn entry\) and injects a wake into the matching conversation so it can react to the completion on its next reasoning iteration.
 
@@ -2226,9 +2273,17 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    "delegate_task",
 	}
 
+<a name="ErrACPExecutorNotWired"></a>ErrACPExecutorNotWired is the turn error for an executor: acp agent whose loop never received an ACPExecutor \(\[acp\] enabled kill switch off or wiring skipped\). The branch fails loudly with this sentinel; it never falls back to the local LLM loop.
+
+	var ErrACPExecutorNotWired = errors.New("acp executor not wired")
+
 <a name="ErrBudgetExceeded"></a>ErrBudgetExceeded is returned when a sub\-session exceeds available token budget.
 
 	var ErrBudgetExceeded = &CollaborationError{Code: ErrCodeBudgetExceeded, Message: "insufficient token budget for collaboration session"}
+
+<a name="ErrClassifierBootGateFailed"></a>ErrClassifierBootGateFailed is returned by ClassifierBootReadiness.Wait when the F\-D8 boot gate tripped \(the local classifier never became healthy and the daemon is shutting down\). Callers must treat it as "proceed with the ordinary classification attempt", never as a turn failure.
+
+	var ErrClassifierBootGateFailed = errors.New("classifier boot gate failed")
 
 <a name="ErrDepthExceeded"></a>ErrDepthExceeded is returned when collaboration nesting exceeds max depth.
 
@@ -2237,6 +2292,14 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 <a name="ErrIsolatedSpeak"></a>ErrIsolatedSpeak is the sentinel wrapped by every refusal to let an isolated child speak to the user. Match with errors.Is.
 
 	var ErrIsolatedSpeak = errors.New("isolated speak denied")
+
+<a name="ErrNoACPSession"></a>ErrNoACPSession is returned when the manager resolved no live session \(its documented nil\-session/nil\-error "not started" signal\).
+
+	var ErrNoACPSession = errors.New("acp executor: manager started no session")
+
+<a name="ErrNoACPSpecBinding"></a>ErrNoACPSpecBinding is returned by ACPExecutor.Run when the spec carries no acp: block \(executor: acp without a harness binding\).
+
+	var ErrNoACPSpecBinding = errors.New("acp executor: agent spec carries no acp binding")
 
 <a name="ErrNoExecutionSlot"></a>ErrNoExecutionSlot is returned when the semaphore blocks a step from executing.
 
@@ -2420,6 +2483,13 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 Placement note: the declaration lives IN package agent \(not pkg/models or internal/bus\) because TurnTerminalEvent lives here and agent already imports bus; the reverse imports would be a cycle.
 
 	var TopicTurnTerminal = bus.NewTopic[TurnTerminalEvent]("turn.terminal")
+
+<a name="ACPTurnSourceFromContext"></a>
+## func ACPTurnSourceFromContext
+
+	func ACPTurnSourceFromContext(ctx context.Context) (kind, employeeID string, ok bool)
+
+ACPTurnSourceFromContext reads the turn source stamped by WithACPTurnSource. ok=false means the chat lane \(no value present\).
 
 <a name="AllotmentTokens"></a>
 ## func AllotmentTokens
@@ -2913,6 +2983,20 @@ Brace\-aware rather than regex\-based: the envelope's "evidence" array nests obj
 
 StripClaimsEvidenceOrProse removes the envelope; when the ENTIRE input was the envelope, returns the envelope's own prose \(claims \+ evidence descriptions\) so the user still sees what was done instead of an empty or machine\-shaped reply \(2026\-09\-25 run NKZiEl: the model emitted an evidence\-only envelope whose inner strings held the full user answer\).
 
+<a name="StripPromptScaffolding"></a>
+## func StripPromptScaffolding
+
+	func StripPromptScaffolding(desc string) string
+
+StripPromptScaffolding removes the injected session\-context block and "\#\# Your Task" header from a step description, returning only the real task text. Input without the markers is returned trimmed and unchanged.
+
+The injection shape \(strategic.go\) is always:
+
+	<session-context block>\n\n## Your Task\n\n<real description>
+	
+
+so when the Your Task marker is present everything after it is the real text. When only the session\-context marker is present \(a partial/legacy injection\), the block is cut at the marker because no task text follows it in that shape.
+
 <a name="StripReport"></a>
 ## func StripReport
 
@@ -2980,6 +3064,13 @@ results must be non\-empty; empty input fails closed.
 
 WarnToolsWithoutProperties logs a warning listing every property\-less tool in reg and returns the names. Nil\-safe on both arguments. See ToolsWithoutProperties for why this is a hazard.
 
+<a name="WithACPTurnSource"></a>
+## func WithACPTurnSource
+
+	func WithACPTurnSource(ctx context.Context, kind, employeeID string) context.Context
+
+WithACPTurnSource stamps who is driving an acp turn onto ctx so ACPExecutor.recordTurn can tag acp.persona.turns without the executor knowing about employees. kind is ACPTurnSourceEmployee for employee turns \(employeeID names the employee; an empty id just omits the employee\_id tag\); an empty kind returns ctx unchanged — the chat default — so a mis\-wired caller can never emit source:"".
+
 <a name="WithResumedTurn"></a>
 ## func WithResumedTurn
 
@@ -2994,12 +3085,89 @@ WithResumedTurn marks ctx as a RESUMED parked turn \(throttle and quota resume p
 
 WithRetryBudget attaches a retry budget to a context.
 
+<a name="WithScopeOptions"></a>
+## func WithScopeOptions
+
+	func WithScopeOptions(ctx context.Context, opts []llm.ChatOption) context.Context
+
+WithScopeOptions attaches caller\-captured task/session scope options to ctx for secondary LLM call sites \(resolveCallScope\). Nil/empty opts are a no\-op passthrough.
+
 <a name="WithThrottleParkAttempt"></a>
 ## func WithThrottleParkAttempt
 
 	func WithThrottleParkAttempt(ctx context.Context, attempt int) context.Context
 
 WithThrottleParkAttempt returns a ctx carrying the previous park generation's attempt count \(resume path only; zero\-value ctx = fresh turn\).
+
+<a name="ACPExecutor"></a>
+## type ACPExecutor
+
+ACPExecutor drives one agent turn through an external ACP harness \(executor: acp agent definitions, dim 3A\). It shares the daemon's \*acp.Manager with the acp\_agent tool, so a persona session is reused across both paths.
+
+	type ACPExecutor struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewACPExecutor"></a>
+### func NewACPExecutor
+
+	func NewACPExecutor(m *acp.Manager) *ACPExecutor
+
+NewACPExecutor builds the executor on the daemon's acp manager. A nil manager \(\[acp\] disabled\) returns nil, and the injection setters treat nil as a no\-op: the loop branch then fails loudly for any agent that still declares executor: acp.
+
+<a name="ACPExecutor.Run"></a>
+### func \(\*ACPExecutor\) Run
+
+	func (e *ACPExecutor) Run(ctx context.Context, spec *AgentSpec, workdir string, promptText string, emit func(updateText string)) (string, error)
+
+Run executes one turn on the external harness: GetOrCreatePersona owns the session/new lane \(once per persona session; live sessions are reused\), Send carries the prompt text through session/prompt, streamed session/update notifications flow to emit, and the final agent message text is returned to the caller's shared post\-processing pipeline.
+
+<a name="ACPExecutor.SetTurnMetricRecorder"></a>
+### func \(\*ACPExecutor\) SetTurnMetricRecorder
+
+	func (e *ACPExecutor) SetTurnMetricRecorder(rec TurnMetricRecorder)
+
+SetTurnMetricRecorder wires the acp.persona.turns sink after construction \(daemon metrics wiring\). Nil receiver and nil recorder are no\-ops \(repo setter rule\).
+
+<a name="ACPSession"></a>
+## type ACPSession
+
+ACPSession is the session surface ACPExecutor drives. \*acp.Session satisfies it; tests inject a fake.
+
+	type ACPSession interface {
+	    Send(ctx context.Context, text string) (string, error)
+	    Events() <-chan acp.SessionEvent
+	}
+
+<a name="ACPSessionProvider"></a>
+## type ACPSessionProvider
+
+ACPSessionProvider is the narrow acp\-manager surface ACPExecutor needs. \*acp.Manager satisfies it through acpManagerProvider \(the concrete manager returns \*acp.Session, so a thin adapter bridges the return type\); tests inject a fake provider and never spawn a subprocess.
+
+	type ACPSessionProvider interface {
+	    GetOrCreatePersona(ctx context.Context, agentID, persona, workdir string, opts acp.PersonaOpts) (ACPSession, error)
+	}
+
+<a name="ACPSpec"></a>
+## type ACPSpec
+
+ACPSpec is the runtime form of the AGENT.md \`acp:\` block \(executor: acp\). It mirrors agents.ACPAgentMetadata; definitionToSpec converts between them.
+
+	type ACPSpec struct {
+	    // Agent is the catalog id in acp_agents.json5 (e.g. "hermes").
+	    Agent string `json:"agent"`
+	    // Persona is the session key for the multi-session lane: N personas
+	    // share one catalog entry. Empty = the catalog default session.
+	    Persona string `json:"persona,omitempty"`
+	    // CommandArgs are argv entries appended after the catalog command
+	    // (e.g. ["-p", "borg"] selects the hermes profile).
+	    CommandArgs []string `json:"command_args,omitempty"`
+	    // PermissionMode overrides the global [acp] permission_mode for this
+	    // agent (precedence: agent definition > global config). Empty = global.
+	    PermissionMode string `json:"permission_mode,omitempty"`
+	    // DecisionThreshold is only meaningful with permission_mode: decision.
+	    DecisionThreshold float64 `json:"decision_threshold,omitempty"`
+	}
 
 <a name="AbortData"></a>
 ## type AbortData
@@ -3443,6 +3611,13 @@ AgentLoop orchestrates LLM reasoning interleaved with tool execution.
 
 NewAgentLoop creates a new agent loop with explicit session context. sessionID identifies the session this loop belongs to. workingDir is the project directory for agent execution. May be empty at construction for two\-phase initialization \(registry creates loops with empty workingDir, then calls SetWorkingDir when the session binds to a project\); callers that know the directory up\-front should pass it.
 
+<a name="AgentLoop.ACPExecutor"></a>
+### func \(\*AgentLoop\) ACPExecutor
+
+	func (l *AgentLoop) ACPExecutor() *ACPExecutor
+
+ACPExecutor returns the injected external turn producer \(nil = none\).
+
 <a name="AgentLoop.AdvanceBudgetPhase"></a>
 ### func \(\*AgentLoop\) AdvanceBudgetPhase
 
@@ -3551,6 +3726,13 @@ FireHTTPHooks is an exported helper that agent code calls to signal HTTP hook ev
 	func (l *AgentLoop) FirewallStats() map[string]any
 
 FirewallStats returns a map snapshot of the context firewall counters. Returns nil if the context firewall is not enabled on this agent loop.
+
+<a name="AgentLoop.GetAgentID"></a>
+### func \(\*AgentLoop\) GetAgentID
+
+	func (l *AgentLoop) GetAgentID() string
+
+GetAgentID returns the agent identity this loop was built for \(WithAgentID; registry createLoop stamps spec.ID\). Empty for loops constructed without an identity — the daemon template loop, whose sessions clone it via ConfigSnapshot and stamp the template's own id. Safe to call concurrently; returns "" for a nil receiver.
 
 <a name="AgentLoop.GetBudgetStatus"></a>
 ### func \(\*AgentLoop\) GetBudgetStatus
@@ -3744,6 +3926,13 @@ RunWithTask processes a task through the agent loop with memory context injectio
 	func (l *AgentLoop) SessionConversation(id string) *Conversation
 
 SessionConversation returns the conversation for the given session/conversation ID, creating it on first access \(ConversationStore.Get auto\-vivifies: a miss allocates a new Conversation, inserts it into the LRU cache, and returns it, so the result is never nil for a non\-nil receiver\). Unlike GetConversation, which only reads existing entries, this is safe to use when the session conversation may not exist yet — e.g. recording a task\-path exchange into the session conversation before any direct\-path turn has run. Successive calls with the same ID return the same \*Conversation \(cache identity\).
+
+<a name="AgentLoop.SetACPExecutor"></a>
+### func \(\*AgentLoop\) SetACPExecutor
+
+	func (l *AgentLoop) SetACPExecutor(e *ACPExecutor)
+
+SetACPExecutor injects the external ACP turn producer after construction \(daemon wiring\). Nil receiver and nil executor are no\-ops \(repo setter rule\).
 
 <a name="AgentLoop.SetActive"></a>
 ### func \(\*AgentLoop\) SetActive
@@ -4167,6 +4356,13 @@ AgentRegistry manages agent specifications and instantiated agent loops.
 
 NewAgentRegistry creates a new agent registry.
 
+<a name="AgentRegistry.ACPExecutor"></a>
+### func \(\*AgentRegistry\) ACPExecutor
+
+	func (r *AgentRegistry) ACPExecutor() *ACPExecutor
+
+ACPExecutor returns the wired external acp turn producer \(nil = none\).
+
 <a name="AgentRegistry.CapabilitiesMap"></a>
 ### func \(\*AgentRegistry\) CapabilitiesMap
 
@@ -4313,6 +4509,13 @@ ReleaseTaskLoops removes all loops for the given taskID across all agents. Calle
 RunAgent sends a single message to an agent and returns its response.
 
 Context isolation \(leaf 10\): the message is treated as a structured brief — built by the caller through BuildSpawnContext — and starts a FRESH conversation keyed by conversationID. The child never inherits a parent conversation's transcript; cross\-agent context flows via explicit SpawnContext briefs \(report\-router handoffs, step AccumulatedContext\), not shared message lists.
+
+<a name="AgentRegistry.SetACPExecutor"></a>
+### func \(\*AgentRegistry\) SetACPExecutor
+
+	func (r *AgentRegistry) SetACPExecutor(e *ACPExecutor)
+
+SetACPExecutor wires the external acp turn producer \(dim 3A\) onto this registry: every loop createLoop builds afterwards inherits it. Nil receiver and nil executor are no\-ops \(repo setter rule\) — \[acp\] disabled simply never calls this, and executor: acp turns then fail loudly with ErrACPExecutorNotWired.
 
 <a name="AgentRegistry.SetCapabilitiesMap"></a>
 ### func \(\*AgentRegistry\) SetCapabilitiesMap
@@ -4539,6 +4742,12 @@ AgentSpec defines the specification for creating an agent.
 	    // or empty to use the default. If it matches a known alias, alias resolution with
 	    // automatic failover and cooldown rotation is used.
 	    Model string `json:"model,omitempty"`
+	    // ModelAlias names a models.json5 alias to resolve for this agent's
+	    // turns, independent of the agent id. Precedence: Model (direct ref)
+	    // > ModelAlias (explicit alias) > same-id alias > global default.
+	    // Returned WITHOUT a HasAlias pre-check — the resolver's own
+	    // resolution errors visibly if the alias is missing.
+	    ModelAlias string `json:"model_alias,omitempty" yaml:"model_alias,omitempty"`
 	    // EnhancerModel is the small/cheap model used to expand a brief into
 	    // generator-ready prose. Empty = alias "small".
 	    EnhancerModel string `json:"enhancer_model,omitempty"`
@@ -4577,6 +4786,13 @@ AgentSpec defines the specification for creating an agent.
 	    // per-agent AGENT.md path, orthogonal to employees.defaults.gate.enabled
 	    // (the employee kill switch).
 	    Gate *RosterGateConfig `json:"gate,omitempty" yaml:"gate,omitempty"`
+	    // Executor selects the turn producer for this agent: "" or "local" =
+	    // the built-in LLM reasoning loop (default), "acp" = an external ACP
+	    // harness named by ACP.Agent (see docs/workflows/acp-employees.md).
+	    Executor string `json:"executor,omitempty"`
+	    // ACP carries the external ACP harness binding used when Executor is
+	    // "acp". Nil for local-loop agents.
+	    ACP *ACPSpec `json:"acp,omitempty"`
 	}
 
 <a name="AgentSpec.AllTools"></a>
@@ -6330,6 +6546,57 @@ Modeled after HALO's turn\-compaction recovery: checkpoints are written periodic
 
 SnapshotForTurn converts a set of turn records and LLM messages into a Checkpoint suitable for WriteCheckpoint.
 
+<a name="ClassifierBootReadiness"></a>
+## type ClassifierBootReadiness
+
+ClassifierBootReadiness is a one\-shot, goroutine\-safe signal carrying the daemon's classifier boot\-gate outcome to the classification path. The zero value is unusable; construct with NewClassifierBootReadiness. SignalReady and SignalFailed are idempotent and mutually first\-wins \(the gate has exactly one outcome\).
+
+	type ClassifierBootReadiness struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewClassifierBootReadiness"></a>
+### func NewClassifierBootReadiness
+
+	func NewClassifierBootReadiness() *ClassifierBootReadiness
+
+NewClassifierBootReadiness returns an unresolved readiness signal.
+
+<a name="ClassifierBootReadiness.Done"></a>
+### func \(\*ClassifierBootReadiness\) Done
+
+	func (b *ClassifierBootReadiness) Done() bool
+
+Done reports whether the signal has resolved \(either outcome\). A nil receiver reports true: no signal wired means nothing to wait for.
+
+<a name="ClassifierBootReadiness.Failed"></a>
+### func \(\*ClassifierBootReadiness\) Failed
+
+	func (b *ClassifierBootReadiness) Failed() bool
+
+Failed reports whether the gate outcome was a failure.
+
+<a name="ClassifierBootReadiness.SignalFailed"></a>
+### func \(\*ClassifierBootReadiness\) SignalFailed
+
+	func (b *ClassifierBootReadiness) SignalFailed()
+
+SignalFailed reports that the boot gate tripped. Waiters are released with ErrClassifierBootGateFailed so they fall through to the ordinary attempt/degrade path instead of blocking on a dying daemon. Idempotent; a prior SignalReady wins \(first outcome is final\).
+
+<a name="ClassifierBootReadiness.SignalReady"></a>
+### func \(\*ClassifierBootReadiness\) SignalReady
+
+	func (b *ClassifierBootReadiness) SignalReady()
+
+SignalReady reports that the boot gate resolved successfully: every local classifier runtime is healthy \(or no gate applies\). Idempotent.
+
+<a name="ClassifierBootReadiness.Wait"></a>
+### func \(\*ClassifierBootReadiness\) Wait
+
+	func (b *ClassifierBootReadiness) Wait(ctx context.Context) error
+
+Wait blocks until the signal resolves or ctx is done. It returns nil on SignalReady, ErrClassifierBootGateFailed on SignalFailed, and ctx.Err\(\) on cancellation/timeout. A nil receiver returns nil immediately.
+
 <a name="ClassifyFunc"></a>
 ## type ClassifyFunc
 
@@ -7830,6 +8097,13 @@ SetBurstDetector wires the tool\-failure burst detector \(issue \#43\). Nil guar
 
 SetCapabilityMatcher sets the capability matcher for fast routing.
 
+<a name="Dispatcher.SetClassifierBootReadiness"></a>
+### func \(\*Dispatcher\) SetClassifierBootReadiness
+
+	func (d *Dispatcher) SetClassifierBootReadiness(b *ClassifierBootReadiness)
+
+SetClassifierBootReadiness wires the daemon's F\-D8 classifier boot\-gate signal onto the dispatcher's LLM classifiers \(LLMClassifier and IntentAnalyzer\), so classification calls arriving inside the boot window wait — bounded, never failing — for the gate instead of silently degrading to keyword routing. Nil is a no\-op \(setter nil\-guard rule\).
+
 <a name="Dispatcher.SetDefaultWorkingDir"></a>
 ### func \(\*Dispatcher\) SetDefaultWorkingDir
 
@@ -8393,6 +8667,7 @@ EscalationLevel tracks escalation history for a task.
 	    FirstFailure string    `json:"first_failure,omitempty"`
 	    ReplanResult string    `json:"replan_result,omitempty"`
 	    Timestamp    time.Time `json:"timestamp"`
+	    Seq          uint64    `json:"seq"` // Monotonic ordering tiebreaker (S1-8)
 	}
 
 <a name="EscalationManager"></a>
@@ -9916,6 +10191,13 @@ AnalyzeTrueIntent performs a lightweight LLM\-based analysis of the user's true 
 
 ResolvedModel returns the resolved "provider/model" of the LLM that served the analyzer's calls \(provenance, leaf 01 of classifier\-observability\). It reflects the model the client is currently configured with, including any alias\-failover rotation performed by chatWithFailover. Empty when the serving model is unknown \(no model config, or a config without a provider id\) — consumers must treat empty as "no provenance", never fabricate one.
 
+<a name="IntentAnalyzer.SetBootReadiness"></a>
+### func \(\*IntentAnalyzer\) SetBootReadiness
+
+	func (ia *IntentAnalyzer) SetBootReadiness(b *ClassifierBootReadiness)
+
+SetBootReadiness wires the daemon's F\-D8 classifier boot\-gate signal onto an already\-constructed analyzer. Nil is a no\-op \(setter nil\-guard rule\).
+
 <a name="IntentAnalyzer.WithAmbiguityThreshold"></a>
 ### func \(\*IntentAnalyzer\) WithAmbiguityThreshold
 
@@ -9947,6 +10229,12 @@ IntentAnalyzerConfig carries optional construction parameters for newIntentAnaly
 	    // make classifier failures honest during testing/iteration
 	    // (classifier-observability leaf 02).
 	    FailFast bool
+	    // ScopeProvider, when set, supplies the owning loop's task/session
+	    // scope for analysis LLM calls (leaf 01 session-affinity). Mirrors
+	    // LLMClassifierConfig.ScopeProvider. Per-call scopes attached via
+	    // WithScopeOptions on the context take precedence. Nil = unscoped
+	    // calls, byte-identical to prior behavior.
+	    ScopeProvider chatScopeProvider
 	}
 
 <a name="IntentCategory"></a>
@@ -10183,6 +10471,13 @@ MarkUnavailable explicitly sets the classifier as unavailable, preventing furthe
 
 ResolvedModel returns the resolved "provider/model" of the LLM that served this classifier's calls \(provenance, leaf 01 of classifier\-observability\). It reflects the model the client is currently configured with, including any alias\-failover rotation. Empty when the serving model is unknown — consumers must treat empty as "no provenance", never fabricate one.
 
+<a name="LLMClassifier.SetBootReadiness"></a>
+### func \(\*LLMClassifier\) SetBootReadiness
+
+	func (c *LLMClassifier) SetBootReadiness(b *ClassifierBootReadiness)
+
+SetBootReadiness wires the daemon's F\-D8 classifier boot\-gate signal onto an already\-constructed classifier \(the daemon creates the dispatcher in NewComponents, before Run\(\) knows the gate outcome\). Nil is a no\-op per the repo's setter nil\-guard rule; the wait bound falls back to defaultClassifierBootWait when unset.
+
 <a name="LLMClassifier.UnmarkUnavailable"></a>
 ### func \(\*LLMClassifier\) UnmarkUnavailable
 
@@ -10217,6 +10512,21 @@ UnmarkUnavailable clears the unavailable flag, allowing immediate retries.
 	    // ScopeProvider, when set, supplies the owning loop's task/session
 	    // scope for classification LLM calls (leaf 01 session-affinity).
 	    ScopeProvider chatScopeProvider
+	
+	    // BootReadiness, when set, makes classification calls wait (bounded by
+	    // BootWait, then by the call context) for the daemon's F-D8 classifier
+	    // boot gate to resolve before dialing the classifier endpoint. This
+	    // closes the boot-window misroute defect: chat.submit is accepted
+	    // before the local classifier runtimes are healthy, and a classify
+	    // call inside that window used to fail, arm the unavailability
+	    // cooldown, and silently degrade the turn to keyword routing.
+	    BootReadiness *ClassifierBootReadiness
+	    // BootWait bounds the BootReadiness wait (default
+	    // defaultClassifierBootWait). It is a LATENCY CAP for turns that
+	    // arrive during boot, not the gate window itself: on expiry the call
+	    // proceeds through the ordinary attempt/degrade path, so a wait can
+	    // never hard-fail a turn.
+	    BootWait time.Duration
 	}
 
 <a name="LLMMessage"></a>
@@ -10311,6 +10621,13 @@ LoopOption is a functional option for configuring an AgentLoop.
 
 	type LoopOption func(*AgentLoop)
 
+<a name="WithACPExecutor"></a>
+### func WithACPExecutor
+
+	func WithACPExecutor(e *ACPExecutor) LoopOption
+
+WithACPExecutor injects the external ACP turn producer at loop construction. Nil is a no\-op.
+
 <a name="WithAdapterRouter"></a>
 ### func WithAdapterRouter
 
@@ -10366,6 +10683,13 @@ WithArtifactManager sets the Claude artifact manager for project context injecti
 	func WithCapabilityIndex(ci *skills.CapabilityIndex) LoopOption
 
 WithCapabilityIndex sets the capability index for skill discovery.
+
+<a name="WithCompactionConfig"></a>
+### func WithCompactionConfig
+
+	func WithCompactionConfig(cfg config.CompactionConfig) LoopOption
+
+WithCompactionConfig wires the user\-facing compaction config block into the loop's AgentConfig BEFORE construction completes, so the ContextFirewall baked inside NewAgentLoop sees DecisionEnabled and the resolver\-derived DecisionClient \(decision\-compaction lane\). The post\-construction SetCompactionConfig setter runs too late for the firewall — the summarizer selection is baked at construction — so production wiring must pass this option \(daemon template agentOpts and the agent registry both do\).
 
 <a name="WithCompressionPipeline"></a>
 ### func WithCompressionPipeline
@@ -10798,7 +11122,7 @@ GetOrCreate returns existing loop or creates new one for session. workingDir is 
 
 	func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *AgentLoop) (*AgentLoop, error)
 
-GetOrCreateWired returns an existing loop for sessionID, or creates a new one whose configuration \(LLM client, tools, skills, hooks\) is mirrored from template. The template is typically the daemon's singleton AgentLoop.
+GetOrCreateWired returns an existing loop for \(sessionID, template\-agent\), or creates a new one whose configuration \(LLM client, tools, skills, hooks\) is mirrored from template. The template is typically the daemon's singleton AgentLoop or a registry agent loop.
 
 workingDir is the project directory for the new loop; it overrides any value on the template \(per\-session isolation\). All other config is copied via template.ConfigSnapshot\(\).
 
@@ -13450,6 +13774,13 @@ NewTestRLMAnalyzer creates an analyzer for use in tests.
 
 Analyze runs the RLM over traces and returns failure modes. Implements structural depth gating \(no call\_subagent tool at max depth\).
 
+<a name="RLMAnalyzer.SetScopeProvider"></a>
+### func \(\*RLMAnalyzer\) SetScopeProvider
+
+	func (a *RLMAnalyzer) SetScopeProvider(provider chatScopeProvider)
+
+SetScopeProvider wires the owning loop's task/session scope for the analyzer's LLM calls \(leaf 01 session\-affinity\), mirroring the established ReflectionEngine.SetScopeProvider shape. Nil guard prevents the typed\-nil panic. Per\-call scopes attached via WithScopeOptions take precedence over this provider \(resolveCallScope\).
+
 <a name="RLMAnalyzerConfig"></a>
 ## type RLMAnalyzerConfig
 
@@ -13734,14 +14065,14 @@ ReflectInactiveSessions is the periodic\-timer entry point. For MVP it is a stub
 
 	func (rc *ReflectionCollector) ReflectTurn(ctx context.Context, traj ReflectionTrajectory) error
 
-ReflectTurn runs per\-turn reflection. Builds a prompt from the trajectory, calls the classifier, validates confidence, and queues proposals.
+ReflectTurn runs per\-turn reflection with no caller scope \(see ReflectTurnWithScope for the scoped form the loop uses\). Builds a prompt from the trajectory, calls the classifier, validates confidence, and queues proposals.
 
-<a name="ReflectionCollector.SetScopeProvider"></a>
-### func \(\*ReflectionCollector\) SetScopeProvider
+<a name="ReflectionCollector.ReflectTurnWithScope"></a>
+### func \(\*ReflectionCollector\) ReflectTurnWithScope
 
-	func (rc *ReflectionCollector) SetScopeProvider(provider chatScopeProvider)
+	func (rc *ReflectionCollector) ReflectTurnWithScope(ctx context.Context, traj ReflectionTrajectory, scope []llm.ChatOption) error
 
-SetScopeProvider wires the owning agent loop so per\-turn classifier LLM calls carry the loop's current task/session scope \(leaf 01 session\-affinity\). Nil guard prevents typed\-nil panic.
+ReflectTurnWithScope is ReflectTurn with the owning loop's task/session scope CAPTURED BY THE CALLER at turn end and passed per call. The collector is shared across every session clone, so the scope must never live on the collector: each concurrent turn carries its own.
 
 <a name="ReflectionConfig"></a>
 ## type ReflectionConfig
@@ -13993,6 +14324,24 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // single config to retarget, and chatWithFailoverRaw carries the
 	    // resolution request-scoped via WithResolvedModel.
 	    SharedChatter llm.Chatter
+	
+	    // HookRegistry is the daemon-wide lifecycle hook registry (security
+	    // before-tool-call HardError deny, decision gate, transform hooks).
+	    // Registry-built loops MUST inherit it: without it every
+	    // dispatcher-routed chat/specialist turn executes tools with
+	    // l.hookRegistry == nil, silently bypassing the security hardening and
+	    // the decision gate that the daemon template loop enforces. Nil = no
+	    // hooks (tests, standalone use).
+	    HookRegistry *HookRegistry
+	
+	    // Compaction carries the user-facing [compaction] config block into
+	    // registry-built loops. The loop's ContextFirewall bakes its
+	    // decision-compaction lane (DecisionEnabled + resolver-derived
+	    // DecisionClient) AT CONSTRUCTION, so the config must arrive as a
+	    // LoopOption — the post-construction SetCompactionConfig setter is too
+	    // late for the firewall. Zero value keeps every lane off (pre-wiring
+	    // behavior, byte-identical).
+	    Compaction config.CompactionConfig
 	}
 
 <a name="RejectedCandidateLogger"></a>
@@ -15575,7 +15924,7 @@ GetDominantIntent returns the most frequent intent in session.
 
 	func (t *SessionTracker) GetIdleSessions(idleDuration time.Duration) []*TrackerSessionState
 
-GetIdleSessions returns sessions that have been idle for the specified duration.
+GetIdleSessions returns deep copies of sessions that have been idle for the specified duration. S1\-9: Previously returned live pointers; now returns snapshots so callers can safely iterate without racing mutations.
 
 <a name="SessionTracker.GetIntentCounts"></a>
 ### func \(\*SessionTracker\) GetIntentCounts
@@ -15603,7 +15952,7 @@ GetLastIntent returns a copy of the most recent intent.
 
 	func (t *SessionTracker) GetSession(sessionID string) *TrackerSessionState
 
-GetSession returns session state \(read\-only lookup, no cleanup\).
+GetSession returns a deep copy of session state \(read\-only lookup, no cleanup\). S1\-5: Previously returned a live pointer, allowing callers to race with RecordIntent/RecordMetrics mutations. Now returns a snapshot copy.
 
 <a name="SessionTracker.PersistIdleSessions"></a>
 ### func \(\*SessionTracker\) PersistIdleSessions
@@ -16401,6 +16750,13 @@ NewSynthesizeTracesTool creates the synthesis tool.
 
 Invoke executes the synthesis tool.
 
+<a name="SynthesizeTracesTool.SetScopeProvider"></a>
+### func \(\*SynthesizeTracesTool\) SetScopeProvider
+
+	func (t *SynthesizeTracesTool) SetScopeProvider(provider chatScopeProvider)
+
+SetScopeProvider wires the owning loop's task/session scope for the synthesis LLM call \(leaf 01 session\-affinity\), mirroring the established ReflectionEngine.SetScopeProvider shape. Nil guard prevents the typed\-nil panic. Per\-call scopes attached via WithScopeOptions take precedence over this provider \(resolveCallScope\).
+
 <a name="SynthesizedProgressEvent"></a>
 ## type SynthesizedProgressEvent
 
@@ -17047,9 +17403,9 @@ Start subscribes to team.start and begins processing team requests.
 <a name="TeamOrchestrator.Status"></a>
 ### func \(\*TeamOrchestrator\) Status
 
-	func (to *TeamOrchestrator) Status(ctx context.Context, sessionID string) (*TeamSessionState, error)
+	func (to *TeamOrchestrator) Status(ctx context.Context, sessionID string) (*TeamSessionStateSnapshot, error)
 
-Status returns the current status of a team session.
+Status returns a snapshot of the current status of a team session. S1\-10: Previously returned a live pointer whose MemberResults map could be mutated by ReceiveResult during caller iteration. Now returns a deep copy \(TeamSessionStateSnapshot\) with no mutex.
 
 <a name="TeamOrchestrator.Stop"></a>
 ### func \(\*TeamOrchestrator\) Stop
@@ -17119,6 +17475,22 @@ TeamSessionState holds the runtime state of an active team session. All fields m
 	    FinalOutput   string                       `json:"final_output,omitempty"`
 	    StartTime     time.Time                    `json:"start_time"`
 	    // contains filtered or unexported fields
+	}
+
+<a name="TeamSessionStateSnapshot"></a>
+## type TeamSessionStateSnapshot
+
+TeamSessionStateSnapshot is a mutex\-free deep copy of TeamSessionState, safe for callers to iterate without racing concurrent writes \(S1\-10\).
+
+	type TeamSessionStateSnapshot struct {
+	    SessionID     string                       `json:"session_id"`
+	    TaskID        string                       `json:"task_id"`
+	    LeadAgent     string                       `json:"lead_agent"`
+	    Roster        []string                     `json:"roster"`
+	    Phase         string                       `json:"phase"`
+	    MemberResults map[string]*TeamMemberResult `json:"member_results,omitempty"`
+	    FinalOutput   string                       `json:"final_output,omitempty"`
+	    StartTime     time.Time                    `json:"start_time"`
 	}
 
 <a name="TeamStartRequest"></a>
@@ -18131,6 +18503,15 @@ TurnTimeout returns the per\-turn timeout duration.
 	func (tm *TurnManager) Yield() error
 
 Yield allows the current token holder to voluntarily pass the token. The token moves to the next participant in round\-robin order.
+
+<a name="TurnMetricRecorder"></a>
+## type TurnMetricRecorder
+
+TurnMetricRecorder is the narrow telemetry sink ACPExecutor rides for the Phase\-2 acp.persona.turns counter \(docs/workflows/acp\-employees.md\). \*metrics.Store satisfies it via Record\(name, value, tags\) — the same counter shape Dispatcher.SetMetricsStore and the token\-cache metrics already use, and the internal/agent twin of the employee.invocations EmitMetricFunc style in internal/employee. Nil recorder = metrics dark, turn path unaffected.
+
+	type TurnMetricRecorder interface {
+	    Record(name string, value float64, tags map[string]string)
+	}
 
 <a name="TurnModification"></a>
 ## type TurnModification

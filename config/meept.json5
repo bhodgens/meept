@@ -143,6 +143,16 @@
       "retention_days": 7,
       "stats_refresh_minutes": 5,
     },
+    // Top-level metrics export - controls whether metrics LEAVE the host.
+    // Local SQLite collection above is unaffected and always on.
+    // "otlp" ships batched agent metrics (turns, tool calls, token usage)
+    // as OTLP/HTTP JSON to <endpoint>/v1/metrics. Default OFF (opt-in
+    // posture): disabled boots log exactly one Warn line and nothing else.
+    // "otlp": {
+    //   "enabled": false,                  // false = metrics stay local
+    //   "endpoint": "http://localhost:4317", // OTLP receiver base URL
+    //   "interval": "30s",                 // batch export cadence
+    // },
     // LLM response cache (L1 in-memory, L2 SQLite)
     "cache": {
       "enabled": false,

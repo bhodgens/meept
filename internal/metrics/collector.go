@@ -648,6 +648,44 @@ func (c *Collector) Shutdown() {
 	c.wg.Wait()
 }
 
+// RegisterOTLPExporter subscribes exporter Record* calls to the same typed
+// event emitter the collector listens on: when the OTLP exporter is wired
+// (metrics.otlp), agent events also feed the exporter so metrics actually
+// leave the host. The emitter reference is passed explicitly because the
+// collector stores no emitter field. A nil exporter or nil emitter (no
+// agent loop — tests) is a no-op. Listeners are async: the agent loop
+// never blocks on export.
+func (c *Collector) RegisterOTLPExporter(exp *OTLPExporter, emitter TypedEventEmitter) {
+	if exp == nil || emitter == nil {
+		return
+	}
+
+	// Tool executions -> agent.tool.calls.
+	emitter.OnAsync(AgentEventToolExecutionEnd, "otlp.tool-calls",
+		func(_ context.Context, event AgentEvent) {
+			data, ok := event.Data.(ToolExecutionEndData)
+			if !ok {
+				return
+			}
+			exp.RecordToolCall(data.ToolName)
+		},
+	)
+
+	// Turn ends -> agent.turns.count (per session) + agent.token.usage.
+	emitter.OnAsync(AgentEventTurnEnd, "otlp.turns",
+		func(_ context.Context, event AgentEvent) {
+			data, ok := event.Data.(TurnEndData)
+			if !ok {
+				return
+			}
+			exp.RecordTurn("default", event.ConversationID)
+			if data.ResponseTokens > 0 {
+				exp.RecordTokenUsage(data.ResponseTokens)
+			}
+		},
+	)
+}
+
 // AgentTaskMetrics represents metrics for a single agent task execution.
 type AgentTaskMetrics struct {
 	TaskID               string

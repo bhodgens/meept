@@ -77,6 +77,27 @@ meept collects time-series and event-level metrics for agent iterations, tool ex
 | `FlushInterval` | 10 seconds | max time between flushes |
 | `RetentionDays` | 30 | raw data retention (hourly aggregates kept longer) |
 
+### otlp export
+
+metrics can leave the host via the opt-in OTLP exporter (`internal/metrics/otlp_exporter.go` + `otlp_http_sink.go`). this is separate from the local sqlite store above, which is always on.
+
+```json5
+{
+  "metrics": {
+    "otlp": {
+      "enabled": false,                    // default off (opt-in posture)
+      "endpoint": "http://localhost:4317", // otlp receiver base url
+      "interval": "30s",                   // batch export cadence
+    },
+  },
+}
+```
+
+- `enabled: false` (default): no exporter is constructed, no goroutines, no network traffic. boot logs exactly one warn line stating export is disabled.
+- `enabled: true`: the daemon batches agent metrics (turns, tool calls, token usage, self-improvement counters, analysis durations) and posts them as otlp/http json to `<endpoint>/v1/metrics` via stdlib `net/http` -- no otel sdk dependency (the `OTLPMetricSink` bridge in `otlp_exporter.go` keeps it out).
+- export is best-effort: a failed batch is dropped and logged (one warn on the first failure of a consecutive-failure streak, one info on recovery). export never blocks the agent loop or daemon boot.
+- shutdown: `stopComponents` flushes the final batch before the process tears down.
+
 ## behavior
 
 ### metric collection

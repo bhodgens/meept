@@ -38,6 +38,18 @@ interview: the one-shot `task.interview` path stays only for the legacy
 pipeline. `plan.seal` and `plan.draft` are RPC-only, never a bus topic.
 See docs/workflows/agent-orchestration.md ("Plan compiler pipeline").
 
+## OTLP metrics export is opt-in
+
+`metrics.otlp.enabled` (default false) gates the daemon's OTLP metrics
+exporter (`internal/daemon/otlp_wiring.go`, `internal/metrics/
+otlp_exporter.go`). When false, no exporter is constructed, no goroutines
+run, no metric leaves the host, and boot logs exactly one Warn line
+stating export is disabled. When true, batches POST as OTLP/HTTP JSON to
+`<endpoint>/v1/metrics` (stdlib net/http; the `OTLPMetricSink` bridge
+keeps the otel SDK out of go.mod). Local SQLite collection (`llm.metrics`)
+is unaffected and always on. Flipping this default is a product decision,
+not a code cleanup.
+
 ## Wiki/state defaults
 
 `skills.wiki` is enabled by default but inert until wired into the daemon
