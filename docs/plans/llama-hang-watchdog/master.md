@@ -225,6 +225,14 @@ Delta log:
   VerdictNow()==VerdictHung (contracted symbol) instead of unexported
   canaryFails — plan accepted the greater coverage shape; consequence: two F3
   tests turn GREEN at leaf 02, not leaf 01 (leaf 01 self-check adjusted).
+- 2026-10-25, F1, plan-updated (leaf 01 review): shipped config/models.json5
+  uses the RELATIVE "/health" endpoint, so IsLoopbackBaseURL at
+  ValidateAndNormalize time returns false and the canary defaults OFF in real
+  deployments. Fix folded into leaf 02: RegisterConfig (which stamps the
+  absolute baseURL) must re-resolve CanaryEnabled for the nil-Enabled case
+  from the stamped baseURL. Leaf 01 committed 3646f783 (review passed: build
+  OK, vet undefined set = exactly leaf-02 symbols, canary counter separate,
+  single run goroutine, no I/O under h.mu, IsLoopbackBaseURL reused).
 - 2026-10-25, F1, open seam: ValidateAndNormalize sees only the lifecycle
   block; fixture declares the address in options.baseURL + health_check.endpoint.
   If leaf 01 resolves CanaryEnabled at RegisterConfig time instead, adjust the
