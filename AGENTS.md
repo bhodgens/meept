@@ -190,6 +190,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **Audit Chain** | `internal/auditlog` (canonical JSON, hash chain, store, anchoring, verification) |
 | **Session** | `internal/session` (store, store_sqlite, threads, messages) |
 | **Effects** | `internal/effects` (external-effect idempotency ledger) |
+| **GitHub** | `internal/githubsvc` (token sources, per-token client pool, PR status + `ReArmSink` seam; tools themselves are `internal/tools/builtin` github_* registered via the init-populated `ToolFactories` factory seam — `builtin` imports `githubsvc`, so `githubsvc` may NEVER import `builtin`; binaries that don't link `builtin` get a descriptive registration error, never a panic) |
 | **Services** | `internal/services` (chat, session, terminal, push, reflection) |
 | **Project** | `internal/project` (manager, init_deep, detection) |
 | **TUI** | `internal/tui` (app, commands, components, handlers, modals, models, tableutil) |
@@ -308,6 +309,30 @@ alias blocks > stickiness; teardown (KV-cache erase on session archive/delete/
 idle/shutdown) is best-effort with the verified route `POST /slots/0?action=erase`
 and NEVER fails a turn, an archive, or a shutdown; cloud providers are an
 explicit no-op.
+
+### The github_* tool factory seam is init-populated; githubsvc never imports builtin
+
+The github PR/CI tools live in `internal/tools/builtin` (which imports
+`internal/githubsvc` for pool / `OwnerRepo` / `ReArmSink`), so
+`githubsvc` may NEVER import `builtin` back — that would be an import
+cycle. Instead the registration entry point is an inversion of control:
+`githubsvc.RegisterGitHubTools(reg, opts)` consults the package-level
+`githubsvc.ToolFactories` factory, which `builtin` populates in its
+`init()` (internal/tools/builtin/github_register.go). A binary that links
+`builtin` gets full registration; a binary that does not gets a
+descriptive error in the enabled case only (nil-Pool "disabled" still
+returns nil with no registrations). Keep `githubsvc` import-free of
+`builtin` (checked by the import cycle itself); new github_* tools are
+added to the factory closure, not to a `githubsvc`-side constructor list.
+Token material is NEVER logged — the token source reports presence/length
+only, and a token file with group/other access bits is refused
+(`internal/daemon/github_wiring.go` + `meept github status`). A parked
+`github_ci_wait` persists its re-arm as a user-instruction cron row via
+`githubsvc.InstructionReArmSink` (`Trigger: "cron:..."`,
+`Action: "agent_trigger"`); the daemon re-syncs cron instructions on a
+30s ticker (`Components.startGitHubReArmTicker`) so mid-life parks are
+picked up without a restart. `docs/workflows/github.md` is the user-facing
+doc.
 
 ## Coding Practices
 

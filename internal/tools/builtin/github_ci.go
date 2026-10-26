@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/caimlas/meept/internal/githubsvc"
@@ -239,7 +240,10 @@ func (t *GitHubCIWaitTool) IsReadOnly(map[string]any) bool { return true }
 // park records the CI ref on the ReArmSink and returns the parked result
 // plus an error wrapping githubsvc.ErrCIWaitParked. A sink error does not
 // suppress the park: the result is still returned and the error is
-// folded into the wrap.
+// folded into the wrap. A nil sink (registration without a scheduler
+// wiring) still parks and returns the parked result; only the ScheduleReArm
+// call is skipped and the skip is logged, so the operator sees why the
+// re-arm will not fire.
 func (t *GitHubCIWaitTool) park(owner, repo string, prNum int, status githubsvc.PRStatus) (any, error) {
 	waitID := id.Generate("ciwait_")
 	at := time.Now().Add(ciWaitParkLeadTime)
@@ -248,6 +252,9 @@ func (t *GitHubCIWaitTool) park(owner, repo string, prNum int, status githubsvc.
 	var sinkErr error
 	if t.sink != nil {
 		sinkErr = t.sink.ScheduleReArm(ref, at, waitID)
+	} else {
+		slog.Warn("github_ci_wait: parked without re-arm — no ReArmSink wired (instruction scheduler absent); resume manually",
+			"owner", owner, "repo", repo, "pr", prNum, "wait_id", waitID)
 	}
 
 	result := map[string]any{
@@ -259,6 +266,9 @@ func (t *GitHubCIWaitTool) park(owner, repo string, prNum int, status githubsvc.
 	}
 	if sinkErr != nil {
 		return result, fmt.Errorf("%w: schedule re-arm for %s/%s#%d: %w", githubsvc.ErrCIWaitParked, owner, repo, prNum, sinkErr)
+	}
+	if t.sink == nil {
+		return result, fmt.Errorf("%w: parked %s/%s#%d as %s (no re-arm sink wired; resume manually)", githubsvc.ErrCIWaitParked, owner, repo, prNum, waitID)
 	}
 	return result, fmt.Errorf("%w: re-armed %s/%s#%d as %s for %s", githubsvc.ErrCIWaitParked, owner, repo, prNum, waitID, at.Format(time.RFC3339))
 }

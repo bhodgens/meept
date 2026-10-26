@@ -117,6 +117,26 @@ type Config struct {
 	MultiUser           MultiUserConfig           `json:"multiuser"           toml:"multiuser"`
 	Hermes              HermesConfig              `json:"hermes"               toml:"hermes"`
 	Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
+	GitHub              GitHubConfig              `json:"github"               toml:"github"`
+}
+
+// GitHubConfig configures the GitHub PR/CI tool set ([github]). Disabled by
+// default — the eight github_* tools register with the daemon only when
+// enabled=true. TokenSecret is resolved at registration time, not loaded
+// here: a path that exists on disk (or points through ~/.meept) is read as
+// a token FILE (whitespace-trimmed, missing/empty fails closed with
+// githubsvc.ErrNoToken); anything else is treated as a named secret in the
+// secrets broker. The token itself NEVER lives in this config.
+//
+//gendoc:section github
+//gendoc:desc GitHub PR/CI tool set: enable flag, token source (file path or broker secret name), default owner/repo target, optional GitHub Enterprise base URL.
+//gendoc:example [github] enabled = true, token_secret = "~/.meept/github-token", default_owner = "octo"
+type GitHubConfig struct {
+	Enabled      bool   `json:"enabled"       toml:"enabled"`
+	TokenSecret  string `json:"token_secret"  toml:"token_secret"`
+	DefaultOwner string `json:"default_owner" toml:"default_owner"`
+	DefaultRepo  string `json:"default_repo"  toml:"default_repo"`
+	BaseURL      string `json:"base_url,omitempty" toml:"base_url,omitempty"`
 }
 
 // HermesConfig configures the native Hermes gateway interop ([hermes]):

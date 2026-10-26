@@ -27,6 +27,7 @@ Feature specifications describing how each Meept subsystem works, with configura
 | [Code Intelligence](code-intelligence.md) | AST parsing and LSP client tools |
 | [Job Scheduling](job-scheduling.md) | Cron jobs, reminders, and task scheduling |
 | [External Integrations](external-integrations.md) | Telegram, web API, and Google Calendar |
+| [GitHub PR/CI Tools](github.md) | GitHub PR/CI agent tools: config, effects-wrapped calls, parked CI waits, factory-seam registration |
 | [Collaborative Planning](collaborative-planning.md) | Review/approval workflow for agent work |
 | [Deterministic Execution](deterministic-execution.md) | Evidence-based validation, concurrency control, retry logic |
 | [Taint Tracking](taint-tracking.md) | Lattice-based information flow security |

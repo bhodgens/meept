@@ -40,6 +40,7 @@ import (
 	"github.com/caimlas/meept/internal/debug"
 	"github.com/caimlas/meept/internal/effects"
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/githubsvc"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
@@ -176,6 +177,17 @@ type Components struct {
 	// parked-turn resume. Nil when the ledger is nil (no ledger, no
 	// reconcile — nothing pending can exist).
 	EffectsReconciler *EffectsReconciler
+
+	// GitHubPool is the per-token GitHub client pool backing the github_*
+	// tools when [github].enabled. Nil unless the github block is enabled
+	// and a token source resolved. Owned here so the re-arm / RPC surfaces
+	// can report it; it is inert (no open sockets) and needs no close.
+	GitHubPool *githubsvc.ClientPool
+
+	// GitHubReArmTickerDone closes when the periodic instruction re-sync
+	// ticker exits (daemon Stop). Nil unless a ticker was started
+	// (github enabled + live instruction scheduler).
+	GitHubReArmTickerDone chan struct{}
 
 	// Multi-agent orchestration components
 	Queue         queue.Queue
@@ -465,8 +477,10 @@ type Components struct {
 
 	// Secret containment (plans/containment-and-computer-use, leaves 03+04).
 	// SecretBroker holds real secret values in memory; SecretsProxy is the
-	// loopback egress proxy resolving MEEPT_SECRET placeholders. Both nil
-	// unless [secrets.proxy] enabled.
+	// loopback egress proxy resolving MEEPT_SECRET placeholders. The proxy
+	// is nil unless [secrets.proxy] enabled; the broker itself is also
+	// populated lazily by wireGitHubTools when a [github] named-secret
+	// token source needs it and the proxy has not built one yet.
 	SecretBroker *secrets.Broker
 	SecretsProxy *secrets.Proxy
 
@@ -2981,6 +2995,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	knowledgeDataDir := filepath.Join(cfg.Daemon.DataDir, "knowledge")
 	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore)
 
+	// GitHub PR/CI tools ([github] block, github-pr-ci tree): register
+	// next to the other builtin tools, gated on enabled + a resolvable
+	// token source. Runs after registerBuiltinTools because it needs
+	// c.EffectsLedger and c.InstructionStore (both set earlier in this
+	// function); no-op with one debug log when the block is disabled
+	// (the default). Fail-soft: a registration error logs and leaves
+	// the remaining daemon surface untouched (github_wiring.go).
+	c.wireGitHubTools()
+
 	// json_extract (dedicated extraction model from the extract_model
 	// slot). Registered even when ExtractClient is nil: the tool's
 	// Execute reports the actionable config error instead of the model
@@ -4674,6 +4697,16 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start the github CI re-arm ticker: when the github_* tools are
+	// registered AND the instruction scheduler is live, a parked
+	// github_ci_wait writes its re-arm row to the instruction store at
+	// park time. The cron row is only visible to SyncCronInstructions on
+	// a re-sync, and that ran at Start above — so without a ticker a
+	// mid-life park would not re-check until the next daemon boot. This
+	// 30s re-sync closes that window. No-op when either dependency is
+	// absent (github disabled, no scheduler).
+	c.startGitHubReArmTicker()
+
 	// Start result cache cleanup goroutine
 	if c.ResultCache != nil {
 		c.ResultCache.Start()
@@ -5883,6 +5916,12 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.EffectsLedger = nil
 		c.EffectsReconciler = nil
 	}
+
+	// Stop the github CI re-arm ticker and close the GitHub client pool
+	// (pool is inert — a per-token client cache — but Close drops the
+	// cached go-github clients so the process does not hold them past
+	// tool shutdown). No-op when the github block was not enabled.
+	c.stopGitHubReArmTicker()
 
 	if c.StatusHandler != nil {
 		if err := c.StatusHandler.Stop(ctx); err != nil {

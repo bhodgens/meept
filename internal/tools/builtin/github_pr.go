@@ -70,6 +70,16 @@ func prIntArg(args map[string]any, key string) (int, bool) {
 	return 0, false
 }
 
+// githubLedgerGuard returns the fail-closed error an effects-wrapped tool
+// reports when constructed without an effects ledger (a nil-Ledger
+// RegistrationOptions still registers the tool for membership, but its
+// Execute cannot claim a record and must not run the irreversible call).
+// One helper keeps the five effects-wrapped tools naming the missing
+// dependency identically.
+func githubLedgerGuard(toolName string) error {
+	return fmt.Errorf("%s: no effects ledger is wired: the tool refuses to run its irreversible GitHub call without the effects idempotency guard", toolName)
+}
+
 // prBodySHA256 returns the lowercase hex SHA256 of s, the content half of
 // the comment/review effects keys (contract C4: sha256(body)).
 func prBodySHA256(s string) string {
@@ -165,6 +175,9 @@ func (t *GitHubPRCreateTool) Execute(ctx context.Context, args map[string]any) (
 
 	key := effects.EffectKey("github_pr_create", owner, repo, head, title)
 	meta := effects.EffectMeta{Tool: "github_pr_create", ProviderIdempotent: false}
+	if t.ledger == nil {
+		return nil, githubLedgerGuard("github_pr_create")
+	}
 
 	var resNumber int
 	var resURL string
@@ -264,6 +277,9 @@ func (t *GitHubPRCommentTool) Execute(ctx context.Context, args map[string]any) 
 
 	key := effects.EffectKey("github_pr_comment", owner, repo, fmt.Sprint(prNum), prBodySHA256(body))
 	meta := effects.EffectMeta{Tool: "github_pr_comment", ProviderIdempotent: false}
+	if t.ledger == nil {
+		return nil, githubLedgerGuard("github_pr_comment")
+	}
 
 	var resID int64
 	var resURL string
@@ -376,6 +392,9 @@ func (t *GitHubPRReviewTool) Execute(ctx context.Context, args map[string]any) (
 
 	key := effects.EffectKey("github_pr_review", owner, repo, fmt.Sprint(prNum), event, prBodySHA256(body))
 	meta := effects.EffectMeta{Tool: "github_pr_review", ProviderIdempotent: false}
+	if t.ledger == nil {
+		return nil, githubLedgerGuard("github_pr_review")
+	}
 
 	var resID int64
 	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, func(ctx context.Context) (json.RawMessage, error) {
@@ -487,6 +506,9 @@ func (t *GitHubPRMergeTool) Execute(ctx context.Context, args map[string]any) (a
 
 	key := effects.EffectKey("github_pr_merge", owner, repo, fmt.Sprint(prNum), headSHA)
 	meta := effects.EffectMeta{Tool: "github_pr_merge", ProviderIdempotent: false}
+	if t.ledger == nil {
+		return nil, githubLedgerGuard("github_pr_merge")
+	}
 
 	var resMerged bool
 	var resSHA, resMsg string

@@ -1195,4 +1195,18 @@
   //   "output_dir": "~/.meept/media",
   //   "timeout_seconds": 180,
   // },
+
+  // GitHub PR/CI tool set (opt-in, disabled by default). Enables the eight
+  // github_* agent tools (PR create/status/CI wait/comment/review/merge,
+  // issue get/comment). token_secret is resolved at daemon startup: if it
+  // names an existing file (or a path through ~/.meept) the file is read as
+  // the token (whitespace-trimmed); otherwise it is a named secret in the
+  // [secrets] broker. The token itself never lives in this file.
+  // "github": {
+  //   "enabled": false,
+  //   "token_secret": "~/.meept/github-token",
+  //   "default_owner": "",
+  //   "default_repo": "",
+  //   "base_url": "",
+  // },
 }

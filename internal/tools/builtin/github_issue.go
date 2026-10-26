@@ -168,6 +168,9 @@ func (t *GitHubIssueCommentTool) Execute(ctx context.Context, args map[string]an
 
 	key := effects.EffectKey("github_issue_comment", owner, repo, fmt.Sprint(number), prBodySHA256(body))
 	meta := effects.EffectMeta{Tool: "github_issue_comment", ProviderIdempotent: false}
+	if t.ledger == nil {
+		return nil, githubLedgerGuard("github_issue_comment")
+	}
 
 	var resID int64
 	var resURL string

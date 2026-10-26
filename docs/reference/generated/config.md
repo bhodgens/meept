@@ -178,6 +178,7 @@ Package config provides configuration loading and validation for meept.
   - [func \(g \*GitCheckout\) Path\(\) string](<#GitCheckout.Path>)
   - [func \(g \*GitCheckout\) Pull\(\_ context.Context\) \(commitHash string, changed bool, err error\)](<#GitCheckout.Pull>)
   - [func \(g \*GitCheckout\) Repo\(\) \*git.Repository](<#GitCheckout.Repo>)
+- [type GitHubConfig](<#GitHubConfig>)
 - [type HTTPHookConfig](<#HTTPHookConfig>)
 - [type HTTPTransportConfig](<#HTTPTransportConfig>)
   - [func \(c HTTPTransportConfig\) ListenAddr\(\) string](<#HTTPTransportConfig.ListenAddr>)
@@ -1751,6 +1752,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    MultiUser           MultiUserConfig           `json:"multiuser"           toml:"multiuser"`
 	    Hermes              HermesConfig              `json:"hermes"               toml:"hermes"`
 	    Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
+	    GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -2568,6 +2570,19 @@ Pull attempts a shallow pull. Returns \(commitHash, changed, error\). If the wor
 	func (g *GitCheckout) Repo() *git.Repository
 
 Repo returns the underlying git.Repository, if available.
+
+<a name="GitHubConfig"></a>
+## type GitHubConfig
+
+GitHubConfig configures the GitHub PR/CI tool set \(\[github\]\). Disabled by default — the eight github\_\* tools register with the daemon only when enabled=true. TokenSecret is resolved at registration time, not loaded here: a path that exists on disk \(or points through \~/.meept\) is read as a token FILE \(whitespace\-trimmed, missing/empty fails closed with githubsvc.ErrNoToken\); anything else is treated as a named secret in the secrets broker. The token itself NEVER lives in this config.
+
+	type GitHubConfig struct {
+	    Enabled      bool   `json:"enabled"       toml:"enabled"`
+	    TokenSecret  string `json:"token_secret"  toml:"token_secret"`
+	    DefaultOwner string `json:"default_owner" toml:"default_owner"`
+	    DefaultRepo  string `json:"default_repo"  toml:"default_repo"`
+	    BaseURL      string `json:"base_url,omitempty" toml:"base_url,omitempty"`
+	}
 
 <a name="HTTPHookConfig"></a>
 ## type HTTPHookConfig
