@@ -9,11 +9,52 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // HealthChangeCallback is invoked when health state changes.
 type HealthChangeCallback func(healthy bool)
+
+// Verdict is the health checker's tri-state result (Contract 2 of the
+// llama-hang-watchdog tree). It distinguishes a HUNG runtime (/health still
+// answering but the inference canary failing) from the classic UNHEALTHY
+// (process dead or /health failing) so operators can tell hang-restarts from
+// crash-restarts.
+type Verdict int
+
+const (
+	VerdictHealthy   Verdict = iota // /health answering and no canary failure streak
+	VerdictUnhealthy                // /health failing or process dead (existing semantics)
+	VerdictHung                     // /health answering but canary failing >= threshold
+)
+
+// String returns the Contract-2 wire spelling used in runtime.health bus
+// payloads and log fields.
+func (v Verdict) String() string {
+	switch v {
+	case VerdictHealthy:
+		return "healthy"
+	case VerdictUnhealthy:
+		return "unhealthy"
+	case VerdictHung:
+		return "hung"
+	default:
+		return fmt.Sprintf("verdict(%d)", int(v))
+	}
+}
+
+// hangRecoveryGuard is the minimum stability window after a HUNG recovery
+// before a new HUNG can be declared (see hangSuppressUntil). A hung runtime
+// that recovers and immediately re-hangs is re-declared after the guard plus
+// a full fresh failure streak — never instantly.
+const hangRecoveryGuard = 1 * time.Second
+
+// HealthVerdictCallback is invoked on the SAME transition edges as
+// HealthChangeCallback (plus the canary-driven HUNG entry / HUNG recovery
+// edges), carrying the tri-state verdict and an operator-facing detail string
+// (canary failure count, last canary error, endpoint key).
+type HealthVerdictCallback func(v Verdict, detail string)
 
 // HealthChecker performs periodic HTTP health checks on a runtime.
 type HealthChecker struct {
@@ -31,15 +72,34 @@ type HealthChecker struct {
 	// failures and is separate from unhealthyCount (a canary failure must
 	// not flip the /health verdict). canaryAccum accumulates HealthInterval
 	// ticks in the single run goroutine until CanaryInterval is due.
-	canaryClient   *http.Client
-	canaryArmed    bool
-	canaryFails    int
-	canaryAccum    time.Duration
-	mu             sync.RWMutex
-	stopCh         chan struct{}
-	running        bool
-	onHealthChange HealthChangeCallback
-	logger         *slog.Logger
+	canaryClient *http.Client
+	canaryArmed  bool
+	canaryFails  int
+	canaryAccum  time.Duration
+	// verdict is the Contract-2 tri-state. HUNG is its own state: entering it
+	// does NOT flip `healthy` (the /health lane keeps reporting truthfully);
+	// the bool callback still receives exactly one false on the HUNG edge so
+	// the auto-restart path fires unchanged (gate F6). lastCanaryErr carries
+	// the most recent canary failure reason for the verdict detail string.
+	verdict       Verdict
+	lastCanaryErr string
+	// hangSuppressUntil is the post-recovery flap guard: after a HUNG→
+	// healthy recovery, a NEW hung streak is only declared once this
+	// instant has passed. Without it a flapping canary (recover, fail,
+	// recover) re-declares HUNG — and re-fires the restart-driving bool
+	// false — within milliseconds, producing a restart storm. Cleared by
+	// Start (a fresh run re-proves everything anyway).
+	hangSuppressUntil time.Time
+	// runTicks is the Contract-4 liveness counter: incremented once per
+	// checkOnce ENTRY. Atomic (not under mu) so RunTicks() is lock-free for
+	// the manager's watchdog sampler.
+	runTicks        atomic.Uint64
+	mu              sync.RWMutex
+	stopCh          chan struct{}
+	running         bool
+	onHealthChange  HealthChangeCallback
+	onHealthVerdict HealthVerdictCallback
+	logger          *slog.Logger
 	// procAlive reports whether the process this checker was created for is
 	// still running. nil = the checker is not bound to a spawn (standalone CLI
 	// health waits): only the endpoint is then consulted.
@@ -57,7 +117,10 @@ func NewHealthChecker(cfg *RuntimeConfig, baseURL string) *HealthChecker {
 		canaryClient: &http.Client{Timeout: cfg.CanaryTimeout},
 		baseURL:      baseURL,
 		stopCh:       make(chan struct{}),
-		logger:       slog.Default().With("component", "health-checker"),
+		// A checker that has not proven /health yet reports unhealthy,
+		// matching the healthy=false zero state (Start re-arms to the same).
+		verdict: VerdictUnhealthy,
+		logger:  slog.Default().With("component", "health-checker"),
 	}
 }
 
@@ -77,7 +140,8 @@ func NewHealthChecker(cfg *RuntimeConfig, baseURL string) *HealthChecker {
 // armed fresh — verdict reset to unhealthy, failure count cleared — because
 // serving the previous verdict would either fail a healthy restart (and Stop
 // would then kill the process it just restarted) or report a runtime healthy
-// before its socket exists.
+// before its socket exists. The manager's self-watchdog (Contract 4) uses this
+// documented re-arm path to revive a silently stalled run.
 func (h *HealthChecker) Start(ctx context.Context) {
 	h.mu.Lock()
 	if h.running {
@@ -93,6 +157,11 @@ func (h *HealthChecker) Start(ctx context.Context) {
 	h.canaryArmed = false
 	h.canaryFails = 0
 	h.canaryAccum = 0
+	h.lastCanaryErr = ""
+	h.hangSuppressUntil = time.Time{}
+	// Verdict re-arm: same rationale as healthy=false above — a fresh run
+	// must re-prove itself before reporting anything but unhealthy.
+	h.verdict = VerdictUnhealthy
 	stopCh := h.stopCh
 	h.mu.Unlock()
 	go h.run(context.WithoutCancel(ctx), stopCh)
@@ -167,12 +236,13 @@ func (h *HealthChecker) runCanary(gen <-chan struct{}) {
 	if err != nil {
 		// Marshal of a static map cannot fail; treat defensively as a
 		// failure without I/O.
-		h.recordCanaryResult(gen, false)
+		h.recordCanaryResult(gen, false, "canary request marshal failed")
 		return
 	}
 
 	resp, err := h.canaryClient.Post(canaryURL, "application/json", bytes.NewReader(body))
 	ok := false
+	failDetail := ""
 	if err == nil {
 		var parsed struct {
 			Choices []json.RawMessage `json:"choices"`
@@ -180,19 +250,39 @@ func (h *HealthChecker) runCanary(gen <-chan struct{}) {
 		decErr := json.NewDecoder(resp.Body).Decode(&parsed)
 		_ = resp.Body.Close()
 		ok = resp.StatusCode == http.StatusOK && decErr == nil && len(parsed.Choices) > 0
+		if !ok {
+			switch {
+			case resp.StatusCode != http.StatusOK:
+				failDetail = fmt.Sprintf("canary http status %d", resp.StatusCode)
+			case decErr != nil:
+				failDetail = fmt.Sprintf("canary response unparseable: %v", decErr)
+			default:
+				failDetail = "canary returned empty choices"
+			}
+		}
 		if !ok && decErr != nil {
 			h.logger.Debug("canary response unparseable", "err", decErr)
 		}
 	} else {
+		failDetail = fmt.Sprintf("canary transport error: %v", err)
 		h.logger.Debug("canary probe transport error", "err", err)
 	}
-	h.recordCanaryResult(gen, ok)
+	h.recordCanaryResult(gen, ok, failDetail)
 }
 
 // recordCanaryResult updates the consecutive-failure counter under h.mu with
 // the generation guard (a late canary from a superseded run must not write
-// into the current generation).
-func (h *HealthChecker) recordCanaryResult(gen <-chan struct{}, ok bool) {
+// into the current generation). failDetail carries the failure reason for the
+// verdict detail string ("" on success).
+//
+// HUNG transitions (Contract 2): reaching CanaryThreshold consecutive failures
+// while /health still answers (h.healthy) enters VerdictHung and fires the
+// SAME callbacks as an unhealthy edge — the bool callback receives exactly one
+// false so attemptAutoRestart runs unchanged (gate F6). A canary success
+// resets the streak and, from HUNG, fires the healthy recovery edge. canaryFails
+// is only ever cleared by a canary success (or Start's re-arm), never by the
+// transition itself.
+func (h *HealthChecker) recordCanaryResult(gen <-chan struct{}, ok bool, failDetail string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.stopCh != gen {
@@ -200,14 +290,76 @@ func (h *HealthChecker) recordCanaryResult(gen <-chan struct{}, ok bool) {
 	}
 	if ok {
 		h.canaryFails = 0
+		h.lastCanaryErr = ""
+		if h.healthy && h.verdict == VerdictHung {
+			// Recovery from HUNG: the canary streak is cleared and /health
+			// has been answering all along (HUNG never flipped h.healthy),
+			// so the runtime is healthy again. Fires the healthy verdict
+			// edge; the bool callback already saw its single false on HUNG
+			// entry and must not see a second, spurious true here (gate F6
+			// pins the exact bool counts). Arm the post-recovery flap
+			// guard: a fresh HUNG streak only re-declares after the window
+			// (prevents restart storms on a flapping canary).
+			h.verdict = VerdictHealthy
+			h.hangSuppressUntil = time.Now().Add(hangRecoveryGuard)
+			h.logger.Info("Runtime recovered from hung state",
+				"endpoint_key", h.config.EndpointKey)
+			h.fireCallbacksLocked(false, VerdictHealthy)
+		}
 		return
 	}
 	h.canaryFails++
-	if h.canaryFails >= h.config.CanaryThreshold {
-		h.logger.Warn("canary probe failing at threshold",
-			"consecutive_failures", h.canaryFails,
-			"threshold", h.config.CanaryThreshold)
+	h.lastCanaryErr = failDetail
+	if h.config.CanaryThreshold <= 0 || h.canaryFails < h.config.CanaryThreshold {
+		return
 	}
+	if time.Now().Before(h.hangSuppressUntil) {
+		// Post-recovery flap guard: the streak keeps counting (so HUNG
+		// declares on the first failure after the window expires) but no
+		// transition fires inside the window.
+		return
+	}
+	h.logger.Warn("canary probe failing at threshold",
+		"consecutive_failures", h.canaryFails,
+		"threshold", h.config.CanaryThreshold)
+	if h.healthy && h.verdict != VerdictHung {
+		// /health answering but inference dead: HUNG (Contract 2). h.healthy
+		// is deliberately NOT flipped — HUNG is its own state, and the bool
+		// false below is the single restart-driving edge (gate F6).
+		h.verdict = VerdictHung
+		h.logger.Error("Runtime hung: /health answering but inference canary failing",
+			"endpoint_key", h.config.EndpointKey,
+			"consecutive_failures", h.canaryFails,
+			"last_canary_error", h.lastCanaryErr)
+		h.fireCallbacksLocked(true, VerdictHung)
+	}
+}
+
+// fireCallbacksLocked dispatches the bool + verdict callbacks for a
+// canary-driven edge (HUNG entry / HUNG recovery) that does not go through
+// notifyTransition's h.healthy flip. Caller holds h.mu; callbacks run in their
+// own goroutines (the exact `go cb(...)` shape notifyTransition uses), so no
+// callback code ever executes under the lock. fireBool=false suppresses the
+// bool callback (recovery edge: h.healthy never changed, so the legacy
+// callback must not see a transition it would have missed before this tree).
+func (h *HealthChecker) fireCallbacksLocked(fireBool bool, v Verdict) {
+	detail := h.verdictDetailLocked()
+	if fireBool && h.onHealthChange != nil {
+		cb := h.onHealthChange
+		go cb(false)
+	}
+	if h.onHealthVerdict != nil {
+		vcb := h.onHealthVerdict
+		go vcb(v, detail)
+	}
+}
+
+// verdictDetailLocked builds the operator-facing detail string carried by the
+// verdict callback (canary failure count, last canary error, endpoint key).
+// Caller holds h.mu (at least for reading).
+func (h *HealthChecker) verdictDetailLocked() string {
+	return fmt.Sprintf("endpoint_key=%q canary_fails=%d last_canary_error=%q",
+		h.config.EndpointKey, h.canaryFails, h.lastCanaryErr)
 }
 
 // finishRun is a run goroutine's exit path. It clears the running flag ONLY
@@ -235,12 +387,48 @@ func (h *HealthChecker) SetProcessAliveProbe(fn func() bool) {
 	h.procAlive = fn
 }
 
+// processAlive reports the bound process-alive probe's answer — the manager
+// watchdog's Contract-4 precondition (a stall only counts while the watched
+// process is alive). A checker not bound to a spawn reports false: there is no
+// process whose hung checker would be worth re-arming. The probe is invoked
+// OUTSIDE h.mu because it takes the RuntimeProcess mutex (lock-order rule).
+func (h *HealthChecker) processAlive() bool {
+	h.mu.RLock()
+	probe := h.procAlive
+	h.mu.RUnlock()
+	if probe == nil {
+		return false
+	}
+	return probe()
+}
+
+// RunTicks returns the checker-liveness counter (Contract 4): incremented once
+// per checkOnce entry, monotonic for the life of the checker. The manager's
+// self-watchdog samples it to prove the run goroutine is still advancing.
+func (h *HealthChecker) RunTicks() uint64 {
+	return h.runTicks.Load()
+}
+
+// VerdictNow returns the current tri-state verdict (Contract 2).
+func (h *HealthChecker) VerdictNow() Verdict {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.verdict
+}
+
 // checkOnce performs one health check for the run identified by gen (its stop
 // channel). A check that began before Stop or before a re-arm must not write its
 // verdict into the current generation: the process it measured may already be
 // gone, and a late "healthy" from the previous generation is exactly the
 // false-healthy report the process probe exists to prevent.
 func (h *HealthChecker) checkOnce(gen <-chan struct{}) {
+	// Liveness tick (Contract 4). Incremented at ENTRY — before the
+	// generation guard below — because a superseded run's tick still proves
+	// its goroutine is alive, which is exactly what the manager's watchdog
+	// samples; gating the tick on the current generation would under-count
+	// liveness during Stop→Start re-arms.
+	h.runTicks.Add(1)
+
 	h.mu.RLock()
 	wasHealthy := h.healthy
 	h.mu.RUnlock()
@@ -284,6 +472,7 @@ func (h *HealthChecker) checkOnce(gen <-chan struct{}) {
 		h.unhealthyCount++
 		if h.unhealthyCount >= h.config.HealthThreshold {
 			h.healthy = false
+			h.verdict = VerdictUnhealthy
 		}
 		h.notifyTransition(wasHealthy)
 		return
@@ -293,6 +482,7 @@ func (h *HealthChecker) checkOnce(gen <-chan struct{}) {
 		h.unhealthyCount++
 		if h.unhealthyCount >= h.config.HealthThreshold {
 			h.healthy = false
+			h.verdict = VerdictUnhealthy
 		}
 		h.notifyTransition(wasHealthy)
 		return
@@ -301,6 +491,12 @@ func (h *HealthChecker) checkOnce(gen <-chan struct{}) {
 	if statusOK {
 		h.unhealthyCount = 0
 		h.healthy = true
+		// HUNG is owned by the canary lane: an answering /health must not
+		// clear it (only a canary success can), otherwise the verdict would
+		// oscillate on every health tick while inference stays dead.
+		if h.verdict != VerdictHung {
+			h.verdict = VerdictHealthy
+		}
 		// Cold-load guard release: the first /health 200 since (re-)arm
 		// arms the canary lane. The existing /health verdict logic above is
 		// unchanged; canary failures count separately (canaryFails).
@@ -311,6 +507,7 @@ func (h *HealthChecker) checkOnce(gen <-chan struct{}) {
 		h.unhealthyCount++
 		if h.unhealthyCount >= h.config.HealthThreshold {
 			h.healthy = false
+			h.verdict = VerdictUnhealthy
 		}
 	}
 	h.notifyTransition(wasHealthy)
@@ -325,9 +522,19 @@ func (h *HealthChecker) notifyTransition(wasHealthy bool) {
 	} else {
 		h.logger.Warn("Runtime became unhealthy", "consecutive_failures", h.unhealthyCount)
 	}
+	// The verdict callback fires on the SAME edges as the bool callback
+	// (Contract 3), with the current verdict + detail snapshot taken under
+	// the lock; both are dispatched as goroutines so no callback runs under
+	// h.mu.
+	verdict := h.verdict
+	detail := h.verdictDetailLocked()
 	if h.onHealthChange != nil {
 		cb := h.onHealthChange
 		go cb(h.healthy)
+	}
+	if h.onHealthVerdict != nil {
+		vcb := h.onHealthVerdict
+		go vcb(verdict, detail)
 	}
 }
 
@@ -361,6 +568,16 @@ func (h *HealthChecker) OnHealthChange(cb HealthChangeCallback) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.onHealthChange = cb
+}
+
+// OnHealthVerdict sets a callback invoked on the same transition edges as
+// OnHealthChange (Contract 3), carrying the tri-state verdict and an
+// operator-facing detail string. Nil-safe (a nil callback is simply never
+// fired); callbacks run in their own goroutine, never under h.mu.
+func (h *HealthChecker) OnHealthVerdict(cb HealthVerdictCallback) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onHealthVerdict = cb
 }
 
 // IsHealthy returns true if the runtime is considered healthy based on recent checks.

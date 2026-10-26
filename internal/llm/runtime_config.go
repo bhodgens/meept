@@ -129,16 +129,21 @@ type RuntimeConfig struct {
 	// Canary* are the resolved inference-canary fields (Contract 1 of the
 	// llama-hang-watchdog tree). CanaryEnabled is false unless the operator
 	// explicitly enabled it or the lifecycle-visible endpoint address is
-	// loopback (see ValidateAndNormalize).
-	CanaryEnabled      bool
-	CanaryInterval     time.Duration
-	CanaryTimeout      time.Duration
-	CanaryThreshold    int
-	CanaryPrompt       string
-	RestartEnabled     bool
-	RestartMaxAttempts int
-	RestartCooldown    time.Duration
-	RestartResetAfter  time.Duration
+	// loopback (see ValidateAndNormalize). CanaryEnabledExplicit records
+	// whether the lifecycle block carried an explicit `canary.enabled`
+	// value: an explicit value always wins, while the absent (nil) case is
+	// re-resolved by RuntimeManager.RegisterConfig from the stamped
+	// absolute baseURL (plan delta log, leaf-01 review F1).
+	CanaryEnabled         bool
+	CanaryEnabledExplicit bool
+	CanaryInterval        time.Duration
+	CanaryTimeout         time.Duration
+	CanaryThreshold       int
+	CanaryPrompt          string
+	RestartEnabled        bool
+	RestartMaxAttempts    int
+	RestartCooldown       time.Duration
+	RestartResetAfter     time.Duration
 	// ToolConstraint is the grammar-constraint wire mode this managed
 	// runtime auto-declares ("llamacpp" for llama.cpp, "" for MLX).
 	ToolConstraint string
@@ -258,7 +263,8 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 		canaryPrompt = cfg.HealthCheck.Canary.Prompt
 	}
 	canaryEnabled := IsLoopbackBaseURL(cfg.HealthCheck.Endpoint)
-	if cfg.HealthCheck.Canary.Enabled != nil {
+	canaryEnabledExplicit := cfg.HealthCheck.Canary.Enabled != nil
+	if canaryEnabledExplicit {
 		canaryEnabled = *cfg.HealthCheck.Canary.Enabled
 	}
 
@@ -303,28 +309,29 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 	}
 
 	return &RuntimeConfig{
-		Type:               rt,
-		ModelPath:          firstPath,
-		ModelPaths:         modelPaths,
-		PIDFile:            pidFile,
-		AutoStart:          cfg.AutoStart,
-		AutoStop:           cfg.AutoStopOnExitOrDefault(),
-		Supervise:          &supervise,
-		SpawnCommand:       spawnCmd,
-		SpawnTimeout:       spawnTimeout,
-		HealthEndpoint:     cfg.HealthCheck.Endpoint,
-		HealthInterval:     healthInterval,
-		HealthTimeout:      healthTimeout,
-		HealthThreshold:    healthThreshold,
-		CanaryEnabled:      canaryEnabled,
-		CanaryInterval:     canaryInterval,
-		CanaryTimeout:      canaryTimeout,
-		CanaryThreshold:    canaryThreshold,
-		CanaryPrompt:       canaryPrompt,
-		RestartEnabled:     cfg.RestartPolicy.Enabled,
-		RestartMaxAttempts: restartMaxAttempts,
-		RestartCooldown:    restartCooldown,
-		RestartResetAfter:  restartResetAfter,
+		Type:                  rt,
+		ModelPath:             firstPath,
+		ModelPaths:            modelPaths,
+		PIDFile:               pidFile,
+		AutoStart:             cfg.AutoStart,
+		AutoStop:              cfg.AutoStopOnExitOrDefault(),
+		Supervise:             &supervise,
+		SpawnCommand:          spawnCmd,
+		SpawnTimeout:          spawnTimeout,
+		HealthEndpoint:        cfg.HealthCheck.Endpoint,
+		HealthInterval:        healthInterval,
+		HealthTimeout:         healthTimeout,
+		HealthThreshold:       healthThreshold,
+		CanaryEnabled:         canaryEnabled,
+		CanaryEnabledExplicit: canaryEnabledExplicit,
+		CanaryInterval:        canaryInterval,
+		CanaryTimeout:         canaryTimeout,
+		CanaryThreshold:       canaryThreshold,
+		CanaryPrompt:          canaryPrompt,
+		RestartEnabled:        cfg.RestartPolicy.Enabled,
+		RestartMaxAttempts:    restartMaxAttempts,
+		RestartCooldown:       restartCooldown,
+		RestartResetAfter:     restartResetAfter,
 	}, nil
 }
 

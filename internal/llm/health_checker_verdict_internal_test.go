@@ -86,8 +86,10 @@ func TestVerdictHealthyRecovery(t *testing.T) {
 	fx := newCanaryFixture(t)
 	hang := make(chan struct{})
 	closed := make(chan struct{})
-	var closeOnce sync.Once
-	releaseAll := func() { closeOnce.Do(func() { close(hang); close(closed) }) }
+	var hangOnce, closedOnce sync.Once
+	closeHang := func() { hangOnce.Do(func() { close(hang) }) }
+	closeClosed := func() { closedOnce.Do(func() { close(closed) }) }
+	releaseAll := func() { closeHang(); closeClosed() }
 	defer releaseAll() // never leave a hanging completions handler behind on a failure path
 	fx.setCompletions(func(w http.ResponseWriter) {
 		select {
@@ -108,11 +110,11 @@ func TestVerdictHealthyRecovery(t *testing.T) {
 
 	// Recover: completions answer the success shape again.
 	fx.setCompletions(canaryRespondOK)
-	close(hang)
+	closeHang()
 	if !gateWaitFor(2*time.Second, func() bool { return hc.VerdictNow() == VerdictHealthy }) {
 		t.Fatalf("verdict = %v after completions recovered, want VerdictHealthy", hc.VerdictNow())
 	}
-	close(closed)
+	closeClosed()
 
 	// Failure-counter reset: flip completions to failing ONCE and assert the
 	// verdict does not jump straight back to HUNG (threshold=2 requires two
@@ -192,8 +194,10 @@ func TestBoolCallbackUnchangedOnHung(t *testing.T) {
 	fx := newCanaryFixture(t)
 	hang := make(chan struct{})
 	closed := make(chan struct{})
-	var closeOnce sync.Once
-	releaseAll := func() { closeOnce.Do(func() { close(hang); close(closed) }) }
+	var hangOnce, closedOnce sync.Once
+	closeHang := func() { hangOnce.Do(func() { close(hang) }) }
+	closeClosed := func() { closedOnce.Do(func() { close(closed) }) }
+	releaseAll := func() { closeHang(); closeClosed() }
 	defer releaseAll() // never leave a hanging completions handler behind on a failure path
 	fx.setCompletions(func(w http.ResponseWriter) {
 		select {
@@ -227,7 +231,7 @@ func TestBoolCallbackUnchangedOnHung(t *testing.T) {
 
 	// Recovery: true exactly once.
 	fx.setCompletions(canaryRespondOK)
-	close(hang)
+	closeHang()
 	if !gateWaitFor(2*time.Second, func() bool { return hc.VerdictNow() == VerdictHealthy }) {
 		t.Fatalf("verdict = %v after recovery, want VerdictHealthy", hc.VerdictNow())
 	}
@@ -243,7 +247,7 @@ func TestBoolCallbackUnchangedOnHung(t *testing.T) {
 	}) {
 		t.Fatalf("bool callback saw %v across hung+recovery, want [false ... true] once each", rec.boolCalls())
 	}
-	close(closed)
+	closeClosed()
 }
 
 // TestVerdictCallbackPayload — gate matrix F7: OnHealthVerdict (Contract 3)
@@ -254,8 +258,10 @@ func TestVerdictCallbackPayload(t *testing.T) {
 	fx := newCanaryFixture(t)
 	hang := make(chan struct{})
 	closed := make(chan struct{})
-	var closeOnce sync.Once
-	releaseAll := func() { closeOnce.Do(func() { close(hang); close(closed) }) }
+	var hangOnce, closedOnce sync.Once
+	closeHang := func() { hangOnce.Do(func() { close(hang) }) }
+	closeClosed := func() { closedOnce.Do(func() { close(closed) }) }
+	releaseAll := func() { closeHang(); closeClosed() }
 	defer releaseAll() // never leave a hanging completions handler behind on a failure path
 	fx.setCompletions(func(w http.ResponseWriter) {
 		select {
@@ -282,7 +288,7 @@ func TestVerdictCallbackPayload(t *testing.T) {
 	}) {
 		t.Fatalf("no OnHealthVerdict(Hung, non-empty detail) arrived; events=%v", rec.verdictEvents())
 	}
-	close(hang)
+	closeHang()
 
 	// Same-transition ordering: a bool false and a verdict Hung must BOTH
 	// exist for the hang edge (no dropped transitions). Recover and assert
@@ -304,7 +310,7 @@ func TestVerdictCallbackPayload(t *testing.T) {
 	}) {
 		t.Fatalf("transition edges incomplete; events=%v bools=%v", rec.verdictEvents(), rec.boolCalls())
 	}
-	close(closed)
+	closeClosed()
 
 	// The verdict detail on the hung edge must be non-empty (operator-facing:
 	// canary failure evidence).

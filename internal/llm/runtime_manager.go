@@ -28,6 +28,18 @@ type restartState struct {
 	lastFailure time.Time
 }
 
+// watchdogInterval is the self-watchdog cadence (Contract 4): how often the
+// manager samples every live checker's RunTicks counter to prove the health
+// run goroutine is still advancing.
+const watchdogInterval = 60 * time.Second
+
+// watchdogSample is the last RunTicks observation for one endpoint, kept in a
+// small map under m.mu. A stall is "no advance across 2 consecutive samples".
+type watchdogSample struct {
+	ticks uint64
+	last  time.Time
+}
+
 // endpointProcess bundles together the shared process and associated state for
 // a single (runtime, host, port) endpoint.
 type endpointProcess struct {
@@ -60,6 +72,26 @@ type RuntimeManager struct {
 	// sweepLister lists the process table for the orphan sweep. Tests inject a
 	// fake so no real process table is read.
 	sweepLister RuntimeProcLister
+	// healthPublish is the optional bus seam for Contract-2 runtime.health
+	// events (llama-hang-watchdog tree). The manager has NO bus dependency of
+	// its own; the daemon wires this setter to a raw bus Publish closure.
+	// nil = publishing disabled (events are simply not emitted).
+	healthPublish func(topic string, payload map[string]any)
+	// hangCounts is the in-package hang-restart counter (Contract 3's
+	// metrics surface, kept per endpoint under m.mu — smaller diff than a
+	// new internal/metrics column; see plan Deviations). Plain uint64 under
+	// the mutex (not atomic: mutexio flags atomic loads under a lock, and
+	// every access is already serialized by m.mu).
+	hangCounts map[string]uint64
+	// hungEndpoints remembers which endpoints last published a hung verdict,
+	// so the healthy recovery event is published only after a hang.
+	hungEndpoints map[string]struct{}
+	// watchdogSamples holds the self-watchdog's last RunTicks sample per
+	// endpoint (Contract 4); watchdogStop/watchdogActive manage the single
+	// watchdog goroutine started by StartAll and stopped by StopAll.
+	watchdogSamples map[string]watchdogSample
+	watchdogStop    chan struct{}
+	watchdogActive  bool
 }
 
 // runtimeSignaler delivers a signal to a runtime process id.
@@ -78,7 +110,33 @@ func NewRuntimeManager(logger *slog.Logger) *RuntimeManager {
 		logger:           logger,
 		sweepSignal:      killProcessGroupPID,
 		sweepLister:      ListRuntimeProcesses,
+		hangCounts:       make(map[string]uint64),
+		hungEndpoints:    make(map[string]struct{}),
+		watchdogSamples:  make(map[string]watchdogSample),
 	}
+}
+
+// SetHealthEventPublisher wires the optional bus seam for Contract-2
+// runtime.health events (llama-hang-watchdog tree). The daemon passes a
+// closure around its raw bus Publish; the manager itself stays bus-free.
+// Nil-safe: publishing stays disabled until a non-nil publisher is set, and
+// every publish site no-ops while it is nil.
+func (m *RuntimeManager) SetHealthEventPublisher(fn func(topic string, payload map[string]any)) {
+	if fn == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.healthPublish = fn
+}
+
+// HangRestartCount returns the number of HUNG verdicts observed for an
+// endpoint (Contract 3's hang counter; in-package atomic — see the
+// hangCounts field comment).
+func (m *RuntimeManager) HangRestartCount(endpointKey string) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hangCounts[endpointKey]
 }
 
 // SetMetricsRecorder sets the metrics recorder for runtime events.
@@ -122,6 +180,19 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 	// Remember the resolved base URL: the duplicate-spawn pre-check in
 	// RuntimeProcess.Start probes this address before spawning.
 	cfg.BaseURL = baseURL
+
+	// Canary default re-resolution (llama-hang-watchdog plan delta, leaf-01
+	// review F1): ValidateAndNormalize only sees the lifecycle block, where
+	// health_check.endpoint is typically the RELATIVE "/health" — the
+	// loopback check resolves false there and the canary would default OFF
+	// in real deployments. Here the absolute baseURL is known: for the
+	// absent-enabled case only (never an explicit true/false), re-resolve
+	// CanaryEnabled from it. Guarded on CanaryThreshold > 0 so hand-built
+	// literal configs (tests, CLI paths) that never went through
+	// ValidateAndNormalize keep canary disabled.
+	if !cfg.CanaryEnabledExplicit && !cfg.CanaryEnabled && cfg.CanaryThreshold > 0 {
+		cfg.CanaryEnabled = IsLoopbackBaseURL(baseURL)
+	}
 
 	// Resolve the authoritative model-key list. Prefer cfg.ModelKeys (set by
 	// the daemon from the provider's models map). Fall back to ModelPaths keys
@@ -194,6 +265,9 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 		}
 		// Wire health callback for auto-restart + per-model fan-out.
 		hc.OnHealthChange(m.makeHealthCallback(endpointKey))
+		// Verdict callback (Contract 3): bus events + hang counter. The
+		// bool callback above remains the ONLY restart driver.
+		hc.OnHealthVerdict(m.makeHealthVerdictCallback(endpointKey))
 
 		m.logger.Info("Registered runtime config",
 			"provider", providerID,
@@ -305,6 +379,182 @@ func (m *RuntimeManager) logToEndpoint(endpointKey, event string, kv ...any) {
 	}
 }
 
+// makeHealthVerdictCallback builds the Contract-3 verdict callback: on a HUNG
+// verdict it increments the endpoint's hang counter and publishes a
+// runtime.health bus event (verdict=hung); on the healthy recovery after a
+// hang it publishes verdict=healthy. The restart path is NOT here — the bool
+// callback (makeHealthCallback) keeps driving attemptAutoRestart unchanged.
+func (m *RuntimeManager) makeHealthVerdictCallback(endpointKey string) HealthVerdictCallback {
+	return func(v Verdict, detail string) {
+		switch v {
+		case VerdictHung:
+			m.mu.Lock()
+			m.hangCounts[endpointKey]++
+			m.hungEndpoints[endpointKey] = struct{}{}
+			m.mu.Unlock()
+			m.logToEndpoint(endpointKey, "runtime_hung", slog.String("detail", detail))
+			m.publishHealthEvent(endpointKey, "hung", detail)
+		case VerdictHealthy:
+			m.mu.Lock()
+			_, wasHung := m.hungEndpoints[endpointKey]
+			if wasHung {
+				delete(m.hungEndpoints, endpointKey)
+			}
+			m.mu.Unlock()
+			if wasHung {
+				m.logToEndpoint(endpointKey, "runtime_hung_recovered", slog.String("detail", detail))
+				m.publishHealthEvent(endpointKey, "healthy", detail)
+			}
+		case VerdictUnhealthy:
+			// The bool callback already logs/fans out the unhealthy
+			// transition; no extra bus event here keeps the crash path
+			// byte-identical (the watchdog re-arm publishes its own).
+		}
+	}
+}
+
+// publishHealthEvent emits the Contract-2 runtime.health bus event (raw
+// Publish via the optional SetHealthEventPublisher seam; payload keys exactly
+// endpoint_key/verdict/model/detail/ts). Nil-safe: no publisher wired = no-op.
+// No lock is held across the publish call itself.
+func (m *RuntimeManager) publishHealthEvent(endpointKey, verdict, detail string) {
+	m.mu.Lock()
+	pub := m.healthPublish
+	model := ""
+	for pid, ek := range m.providerEndpoint {
+		if ek == endpointKey {
+			if cfg, ok := m.configs[pid]; ok && cfg.ModelPath != "" {
+				model = cfg.ModelPath
+			}
+			break
+		}
+	}
+	m.mu.Unlock()
+	if pub == nil {
+		return
+	}
+	pub("runtime.health", map[string]any{
+		"endpoint_key": endpointKey,
+		"verdict":      verdict,
+		"model":        model,
+		"detail":       detail,
+		"ts":           time.Now().Unix(),
+	})
+}
+
+// startWatchdogLocked arms the single self-watchdog goroutine (Contract 4).
+// Caller holds m.mu. Idempotent: repeated StartAll calls keep one goroutine.
+func (m *RuntimeManager) startWatchdogLocked() {
+	if m.watchdogActive {
+		return
+	}
+	stopCh := make(chan struct{})
+	m.watchdogStop = stopCh
+	m.watchdogActive = true
+	go func() {
+		ticker := time.NewTicker(watchdogInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				m.watchdogTickOnce(time.Now())
+			}
+		}
+	}()
+}
+
+// stopWatchdogLocked stops the self-watchdog goroutine. Caller holds m.mu.
+func (m *RuntimeManager) stopWatchdogLocked() {
+	if !m.watchdogActive {
+		return
+	}
+	close(m.watchdogStop)
+	m.watchdogStop = nil
+	m.watchdogActive = false
+}
+
+// watchdogTickOnce runs ONE self-watchdog sample cycle (Contract 4; the gate
+// test drives this seam directly instead of waiting on the 60s ticker). For
+// every endpoint with a live registered checker: sample RunTicks(); when the
+// counter has not advanced across 2 consecutive samples AND the checker's
+// process-alive probe says the runtime is alive AND the checker should be
+// running but is not ticking, log ERROR "health run stalled", re-arm via
+// hc.Start(context.Background()) (its documented re-arm path), and publish a
+// runtime.health verdict=unhealthy detail="watchdog re-arm" event.
+//
+// Locking: sample state lives in a map under m.mu, but every potentially
+// blocking call (RunTicks is atomic; processAlive takes the RuntimeProcess
+// mutex; Start spawns a goroutine; publish does I/O) runs with m.mu
+// RELEASED — the snapshot/stall bookkeeping is the only locked section.
+func (m *RuntimeManager) watchdogTickOnce(now time.Time) {
+	type wdogItem struct {
+		endpointKey string
+		hc          *HealthChecker
+	}
+	m.mu.Lock()
+	if m.shutdown {
+		m.mu.Unlock()
+		return
+	}
+	items := make([]wdogItem, 0, len(m.endpoints))
+	for endpointKey, ep := range m.endpoints {
+		if ep.hc != nil {
+			items = append(items, wdogItem{endpointKey: endpointKey, hc: ep.hc})
+		}
+	}
+	// Phase 1 (locked): compute stalls against the previous samples and
+	// record the new ones.
+	type stalledItem struct {
+		wdogItem
+		prev watchdogSample
+	}
+	var stalled []stalledItem
+	for _, it := range items {
+		ticks := it.hc.RunTicks()
+		prev, seen := m.watchdogSamples[it.endpointKey]
+		m.watchdogSamples[it.endpointKey] = watchdogSample{ticks: ticks, last: now}
+		if seen && ticks == prev.ticks {
+			stalled = append(stalled, stalledItem{wdogItem: it, prev: prev})
+		}
+	}
+	m.mu.Unlock()
+
+	// Phase 2 (unlocked): verify the stall preconditions and re-arm.
+	for _, it := range stalled {
+		// The checker's own state decides whether a run SHOULD be ticking.
+		it.hc.mu.RLock()
+		running := it.hc.running
+		it.hc.mu.RUnlock()
+		if running {
+			// A live run that still ticks is healthy; a live run whose
+			// ticks froze is the silent-stall class — but its goroutine
+			// may be mid-checkOnce (bounded by HealthTimeout), so only a
+			// process-alive runtime with a NON-running checker is the
+			// deterministic silent-death case the re-arm targets
+			// (Contract 4: "process alive AND checker not Stopped").
+			continue
+		}
+		if !it.hc.processAlive() {
+			continue
+		}
+		secondsStalled := int64(0)
+		if !it.prev.last.IsZero() {
+			secondsStalled = int64(now.Sub(it.prev.last).Seconds())
+		}
+		m.logger.Error("health run stalled",
+			"endpoint_key", it.endpointKey,
+			"last_ticks", it.prev.ticks,
+			"seconds_stalled", secondsStalled)
+		// Documented re-arm path: Start is idempotent (running-flag gate),
+		// so no second run goroutine can exist.
+		it.hc.Start(context.Background())
+		m.logToEndpoint(it.endpointKey, "watchdog_rearm", slog.Uint64("last_ticks", it.prev.ticks))
+		m.publishHealthEvent(it.endpointKey, "unhealthy", "watchdog re-arm")
+	}
+}
+
 // StartAll starts all registered runtimes with auto_start=true whose endpoint
 // has at least one model in the in-use set.
 func (m *RuntimeManager) StartAll(ctx context.Context) error {
@@ -317,6 +567,11 @@ func (m *RuntimeManager) StartAll(ctx context.Context) error {
 	}
 
 	m.mu.Lock()
+	// The self-watchdog goroutine belongs to the manager's serving window
+	// (Contract 4): started here, stopped in StopAll. RegisterConfig also
+	// arms it lazily; startWatchdogLocked is idempotent, so exactly one
+	// goroutine ever exists.
+	m.startWatchdogLocked()
 	var items []startItem
 	for endpointKey, ep := range m.endpoints {
 		cfg := ep.cfg
@@ -427,6 +682,7 @@ func (m *RuntimeManager) StopAll(ctx context.Context) error {
 
 	m.mu.Lock()
 	m.shutdown = true
+	m.stopWatchdogLocked()
 	items := make([]stopItem, 0, len(m.endpoints))
 	for endpointKey, ep := range m.endpoints {
 		items = append(items, stopItem{
