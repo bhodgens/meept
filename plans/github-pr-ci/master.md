@@ -269,13 +269,17 @@ After all children REVIEWED:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests.md | PENDING | 0 | |
-| 01-client-pool.md | PENDING | 0 | |
-| 02-pr-tools.md | PENDING | 0 | |
-| 03-ci-wait.md | PENDING | 0 | |
-| 04-issue-tools.md | PENDING | 0 | |
-| 05-wiring-registration.md | PENDING | 0 | |
-| 06-e2e-suite.md | PENDING | 0 | |
+| 00T-gate-tests.md | COMPLETE | 2 | Gate tests authored by 2 subagents (unit + e2e), validated RED-for-right-reasons in-session; landed with their leaves (one-gate deviation). |
+| 01-client-pool.md | COMPLETE | 1 | 2acdcc4f. Pool/PRStatus/token/rearm types; go-github v93 API break (NewClient error-return, Mergeable *bool, Merge PUT) found here and forwarded to all later leaves. |
+| 02-pr-tools.md | COMPLETE | 1 | 302f643d. 4 PR tools effects-wrapped; 2 gate-test mechanical v93 fixes (mergeable bool, PUT merge verb), no assertion weakened. |
+| 03-ci-wait.md | COMPLETE | 1 | 18b57b24. pr_status + ci_wait (poll 2-15s doubling, fast-fail, park via ReArmSink, pkg/id waitID); channil-class close-then-nil caught by hook in leaf 05's ticker, fixed there. |
+| 04-issue-tools.md | COMPLETE | 1 | f69bb034. issue get (read-only) + comment (effects-wrapped, body-digest key part). Test restored unmodified. |
+| 05-wiring-registration.md | COMPLETE | 1 | ed1ecabd. [github] config block, RegisterGitHubTools behind init-populated ToolFactories seam (breaks builtin<->githubsvc cycle), daemon wiring fail-closed, InstructionReArmSink + 30s ticker, CLI `meept github status`, docs/workflows/github.md + AGENTS.md row. |
+| 06-e2e-suite.md | COMPLETE | 1+1 | 1d89fb4a + ce291e9a (fence fix, see delta log). Hermetic suite GREEN (3/3 scenarios) against the real scratch daemon. |
+
+Tree COMPLETE 2026-10-26. All gates green at close: `make test` 11026/0 fail,
+`make e2e-fast-area AREA=github-pr-ci` 3/3 PASS, `make graphs-check` +
+`make docs-check` green (5cb8d806, 46e585f3, 96a53fed).
 
 ## Integration Test Plan
 
@@ -301,17 +305,35 @@ cycles in RED state).
 
 | # | Feature (from plan) | Source (leaf/spec §) | Unit tests | E2E tests | Status |
 |---|---------------------|----------------------|-----------|-----------|--------|
-| F1 | ClientPool builds/reuses clients; BaseURL + HTTPClient honored | 01 Tasks 1-2 | TestClientPool_For, TestClientPool_BaseURLOverride | e2e/fake-server smoke | PENDING |
-| F2 | Token resolution from secrets broker; ErrNoToken when missing | 01 Task 3 | TestSecretsTokenSource, TestClientPool_ErrNoToken | n/a (secret plumbing) | PENDING |
-| F3 | github_pr_create + effects claim (no dup on same key) | 02 Tasks 1-2 | TestPRCreateTool, TestPRCreateEffectsKey | e2e create-then-recreate | PENDING |
-| F4 | github_pr_status aggregates checks + workflows, AllGreen | 03 Task 1 | TestPRStatusAggregation | e2e status-after-create | PENDING |
-| F5 | github_ci_wait polls to terminal; timeout parks turn + re-arm | 03 Tasks 2-3 | TestCIWaitTerminal, TestCIWaitTimeoutParks | e2e wait-green | PENDING |
-| F6 | github_pr_comment/review/merge wrapped in effects.Run | 02 Task 3 | TestPRCommentEffects, TestPRMergeEffects | n/a (covered by F3 pattern) | PENDING |
-| F7 | github_issue_get + github_issue_comment (effects on comment) | 04 Tasks 1-2 | TestIssueGetTool, TestIssueCommentEffects | n/a | PENDING |
-| F8 | Tools registered when [github].enabled; absent when disabled | 05 Task 1 | TestGitHubToolRegistration | e2e disabled-by-default | PENDING |
+| F1 | ClientPool builds/reuses clients; BaseURL + HTTPClient honored | 01 Tasks 1-2 | TestClientPool_BuildsAndReuses, TestClientPool_BaseURLOverride, TestClientPool_HTTPClientPlumbed | e2e fake-server smoke (scn 01) | VALIDATED |
+| F2 | Token resolution from secrets broker; ErrNoToken when missing | 01 Task 3 | TestClientPool_ErrNoToken (unit); broker/file source wiring in leaf 05 daemon test + scn 02 | n/a (secret plumbing) | VALIDATED |
+| F3 | github_pr_create + effects claim (no dup on same key) | 02 Tasks 1-2 | TestGitHubPRCreateTool, TestGitHubPRCreateTool_EffectsKey | e2e create-then-recreate = scn 03 (reconcile) | VALIDATED |
+| F4 | github_pr_status aggregates checks + workflows, AllGreen | 03 Task 1 | TestSummarizePR_AllGreen/NotGreenWhenCheckFails/NotGreenWhenWorkflowCancelled + TestGitHubPRStatusTool | e2e status-after-create (scn 01) | VALIDATED |
+| F5 | github_ci_wait polls to terminal; timeout parks turn + re-arm | 03 Tasks 2-3 | TestGitHubCIWaitTool_TerminalGreen/_ParkOnTimeout/_FastFail | e2e wait-green (scn 01: 2nd poll) | VALIDATED |
+| F6 | github_pr_comment/review/merge wrapped in effects.Run | 02 Task 3 | TestGitHubPRCommentTool, TestGitHubPRReviewTool, TestGitHubPRMergeTool | n/a (covered by F3 pattern) | VALIDATED |
+| F7 | github_issue_get + github_issue_comment (effects on comment) | 04 Tasks 1-2 | TestGitHubIssueGetTool, TestGitHubIssueCommentTool | n/a | VALIDATED |
+| F8 | Tools registered when [github].enabled; absent when disabled | 05 Task 1 | TestGitHubToolRegistration (+TestInstructionReArmSink) | e2e disabled-by-default (scn 02) | VALIDATED |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
-Delta log: (empty — append date, feature ID, direction, reason)
+Delta log:
+- 2026-10-26, F8/F1-F7, plan->impl: go-github v93 API break (NewClient
+  returns error + functional options; Mergeable *bool; Merge is PUT; checks
+  path /commits/{sha}/check-runs). All leaves built against the real v93
+  surface; gate-test edits were mechanical, no assertion weakened. No
+  contract shape changed.
+- 2026-10-26, F1-F7, plan->impl: e2e revealed a security-fence gap the plan
+  did not anticipate: github_* tools are fence-denied "Unknown action"
+  because ToolActionMap (internal/agent/executor.go) has no entry and
+  BuiltinRules has no rule. ce291e9a registers all eight as
+  network_request (RiskLow, external-API class, transcript_fetch/json_extract
+  precedent) and the completeness guard now pins them. Suite flipped 2/3->3/3
+  green.
+- 2026-10-26, F8, impl->test: e2e scn 01 terminal-text defect - a
+  SetPostToolText claiming a side effect with zero tool executions in that
+  iteration trips the review step's unbacked-claim nudge, the fake LLM
+  repeats the text, the convergence guard aborts the turn (empty reply).
+  Fixed by removing the claiming terminal text (assertions read tool
+  results, not the terminal text). Test-only, no assertion weakened.
 
 ## Structural Completeness Check (Before Dispatch)
 
