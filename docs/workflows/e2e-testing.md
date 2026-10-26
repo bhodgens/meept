@@ -39,11 +39,16 @@ Conventions:
 - Binaries: use `harness.CLIPath(t)` / `harness.DaemonPath(t)` — never call
   `os.MkdirTemp` for binaries yourself. The harness builds once per test
   process into `$TMPDIR/meept-e2e-bin*` and a detached watchdog removes
-  that dir seconds after the process exits (covering panics and kill -9,
-  which in-process `t.Cleanup` cannot). Two fallback layers clear dirs
-  orphaned by a killed process group: a 24h-age sweep at first harness use
-  and `make e2e-clean-tmp` (wired into `e2e-fast`, `e2e-fast-area`, and
-  `e2e-affected`).
+  that dir seconds after the process exits AND kills every meept-daemon /
+  meept process whose executable lives in that dir (covering panics,
+  os.Exit, and kill -9, which in-process `t.Cleanup` cannot; scoped by
+  exec-path prefix so the user's live daemon and concurrent e2e runs are
+  never touched). This daemon-kill layer exists because suites spawn
+  daemons with raw `exec.Command` under `t.Cleanup` only — an abnormal
+  test-process exit used to orphan them (78 leaked daemons observed). Two
+  fallback layers clear dirs orphaned by a killed process group: a 24h-age
+  sweep at first harness use and `make e2e-clean-tmp` (wired into
+  `e2e-fast`, `e2e-fast-area`, and `e2e-affected`).
 
 ## Manifest format (`e2e/manifest.json`)
 

@@ -355,9 +355,14 @@ for new features.** Existing unit tests may be updated for bug fixes only.
 - Scratch-bin hygiene: the harness builds meept-daemon/meept once per test
   process into `$TMPDIR/meept-e2e-bin*`. A detached watchdog reaper
   (`e2e/harness/daemon.go`) removes that dir seconds after the test
-  process exits; a 24h-age sweep runs at first harness use, and `make
-  e2e-clean-tmp` is the standalone/belt-and-braces sweep wired into all
-  three `make e2e-*` Go targets. Do not reintroduce an ownerless
+  process exits AND kills any meept-daemon/meept processes running from
+  that dir — the safety net for abnormal test-process exits (panic abort,
+  os.Exit, kill -9), where in-process `t.Cleanup` never runs and suites
+  that spawn daemons via raw `exec.Command` would otherwise leak them (78
+  orphaned scratch daemons observed on one host). A 24h-age sweep runs at
+  first harness use, and `make e2e-clean-tmp` is the standalone/
+  belt-and-braces sweep wired into all three `make e2e-*` Go targets. Do
+  not reintroduce an ownerless
   `os.MkdirTemp("", "meept-e2e-bin...")` — an earlier version of the
   harness leaked one ~136 MiB dir per test process (219 GiB observed).
 - Enforcement: pre-commit check [18/18] (`pre-commit-e2e`) runs the affected

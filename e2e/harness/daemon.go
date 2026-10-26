@@ -423,17 +423,33 @@ func newDaemon(t testing.TB, s *Stack) *Daemon {
 // nothing deleted it.
 //
 // Cleanup model (bin reaper): at dir creation the harness spawns a
-// DETACHED /bin/sh watchdog that polls the owning test process's PID and
-// removes the dir shortly after that PID exits. This covers every exit
-// path — normal return, panic, os.Exit, and kill -9 — because the
-// watchdog is reparented to init and outlives the test process. In-process
-// t.Cleanup or time.AfterFunc CANNOT do this job: the Go test binary for a
-// package exits as soon as its tests finish, so any in-process timer dies
-// with the dir still on disk (proven by a live suite run). Warm relink
-// costs ~10s per pair, so immediate per-test removal is also wrong; one
-// dir per process lifetime is the correct granularity. Orphaned dirs that
-// outlive the watchdog itself (process-group kill) fall back to the
-// binSweepAge sweep and make e2e-clean-tmp.
+// DETACHED /bin/sh watchdog that polls the owning test process's PID,
+// kills any meept-daemon (and meept CLI) processes running from that dir
+// once the owner exits, and removes the dir shortly after. This covers
+// every exit path — normal return, panic, os.Exit, and kill -9 — because
+// the watchdog is reparented to init and outlives the test process.
+// (t.Cleanup handles the ordered in-process teardown for graceful tests;
+// the detached layer exists for exactly the exits t.Cleanup cannot see.)
+// In-process t.Cleanup or time.AfterFunc CANNOT do this job: the Go test
+// binary for a package exits as soon as its tests finish, so any
+// in-process timer dies with the dir still on disk (proven by a live
+// suite run). Warm relink costs ~10s per pair, so immediate per-test
+// removal is also wrong; one dir per process lifetime is the correct
+// granularity. Orphaned dirs that outlive the watchdog itself
+// (process-group kill) fall back to the binSweepAge sweep and
+// make e2e-clean-tmp.
+//
+// Daemon-process layer (why the watchdog kills, not just rm -rf): suites
+// spawn scratch daemons with raw exec.Command from their own sandboxes
+// (state-restart, daemon-lifecycle, session-affinity, session-teardown,
+// goal-completion, task-queue, runtime-hang, continuity-regressions,
+// auth-multiuser, security-tls) and protect them with t.Cleanup only.
+// On panic-abort, os.Exit, or a killed test binary, t.Cleanup never runs
+// and the daemon is reparented to launchd — 78 such processes were found
+// alive 1-2 days after their runs (all `T/meept-e2e-binNNN/meept-daemon
+// -c .../T/me2e-NNN/...`). pkill would also match the user's live
+// `~/git/meept/bin/meept-daemon -f`, so the watchdog instead signals only
+// daemons whose executable path starts with its OWN scratch bin dir.
 type binDirManager struct {
 	mu   sync.Mutex
 	dir  string
@@ -448,6 +464,10 @@ var binReaperPollInterval = 2 * time.Second
 // binReaperGrace is how long the watchdog waits after owner exit before
 // removing the dir. A var so the hygiene self-test can shrink it.
 var binReaperGrace = 3 * time.Second
+
+// daemonKillGrace bounds the SIGTERM wait before the watchdog escalates to
+// SIGKILL for daemons orphaned by an abnormal test-process exit.
+const daemonKillGrace = 10
 
 // binSweepAge is the age beyond which a meept-e2e-bin* dir in $TMPDIR is
 // considered orphaned (no live test process can still be using it). The
@@ -500,15 +520,36 @@ func sweepStaleBinDirs(tmpDir string, olderThan time.Duration) int {
 // no SIGCHLD coupling — and must be called AFTER the binaries exist.
 //
 //	sh -c 'while kill -0 PID 2>/dev/null; do sleep POLL; done; sleep GRACE;
-//	       rm -rf DIR'
+//	       <kill daemons spawned from "$0">; rm -rf "$0"'
 //
 // kill -0 probes liveness without signaling. On macOS, launchd reaps the
 // zombie promptly once the owner exits, so kill -0 turns false within a
 // poll interval or two.
+//
+// After the owner exits, the ps scan below kills every meept-daemon and
+// meept process whose EXECUTABLE lives under this watchdog's scratch dir
+// (ps -o command= prints the exec path as argv[0] on macOS and Linux —
+// the harness spawns with `bin`, an absolute path into dir, so the
+// pattern always matches). Matching on that path shape — never a bare
+// `pkill meept-daemon` — keeps the user's live `~/git/meept/bin/
+// meept-daemon -f` and any OTHER concurrently running e2e process's
+// daemons untouched (the two-stage grep is required: BSD grep rejects
+// `(a|)`-style empty alternation branches with "empty (sub)expression",
+// so the optional suffix is written `(/meept-daemon|/meept)?`). Graced
+// SIGKILL escalation guarantees the leak cannot survive the watchdog
+// even when TERM is mishandled.
 func spawnBinReaper(dir string, ownerPid int) {
 	script := fmt.Sprintf(
-		`while kill -0 %d 2>/dev/null; do sleep %g; done; sleep %g; rm -rf "$0"`,
-		ownerPid, binReaperPollInterval.Seconds(), binReaperGrace.Seconds())
+		`while kill -0 %d 2>/dev/null; do sleep %g; done; sleep %g; `+
+			`pids=$(ps -axo pid=,command= | grep -F '%s/' | grep -E '%s(/meept-daemon|/meept)? ' | grep -v grep | awk '{print $1}'); `+
+			`if [ -n "$pids" ]; then kill $pids 2>/dev/null; `+
+			`i=0; while [ $i -lt %[6]d ]; do `+
+			`left=$(ps -axo pid=,command= | grep -F '%s/' | grep -E '%s(/meept-daemon|/meept)? ' | grep -v grep | wc -l); `+
+			`[ "$left" -eq 0 ] && break; sleep 1; i=$((i+1)); done; `+
+			`ps -axo pid=,command= | grep -F '%s/' | grep -E '%s(/meept-daemon|/meept)? ' | grep -v grep | awk '{print $1}' | xargs kill -9 2>/dev/null; fi; `+
+			`rm -rf "$0"`,
+		ownerPid, binReaperPollInterval.Seconds(), binReaperGrace.Seconds(),
+		dir, dir, daemonKillGrace, dir, dir, dir, dir)
 	cmd := exec.Command("/bin/sh", "-c", script, dir)
 	// Deliberately NOT attached to the test process: Setpgid detaches the
 	// watchdog from the test binary's process group so a group-wide

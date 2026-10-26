@@ -20,10 +20,15 @@ package harness
 // the legacy shape routing via the daemon round-trips in each test.
 
 import (
+	"bytes"
+	"crypto/tls"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -241,5 +246,167 @@ func TestHarnessBinDirSweep(t *testing.T) {
 		if _, err := os.Stat(keep); err != nil {
 			t.Fatalf("fresh/unrelated dir %s was removed: %v", keep, err)
 		}
+	}
+}
+
+// TestHarnessOrphanDaemonKiller proves the bin-dir watchdog kills
+// meept-daemon processes spawned from its dir after the owning test
+// process exits. This is the second half of the scratch-hygiene contract:
+// the dir reaper alone left 78 `T/meept-e2e-binNNN/meept-daemon` orphans
+// alive on one host (the `rm -rf` fired; the daemon survived it), because
+// suites spawn daemons with raw exec.Command under t.Cleanup only.
+//
+// The orphan state is produced WITHOUT any kill action: a CHILD go-test
+// process acquires the bin dir (real build), boots one real scratch
+// daemon against a temp sandbox, then simply EXITS without stopping it —
+// byte-for-byte the post-crash state (test binary gone, daemon reparented
+// to init, watchdog about to fire). The parent then polls until the
+// watchdog's ps-scan kill lands and asserts the daemon is gone.
+func TestHarnessOrphanDaemonKiller(t *testing.T) {
+	// NOTE: no TMPDIR override — the child boots a real daemon whose unix
+	// socket must stay under the macOS sun_path limit, so the child uses
+	// the default TMPDIR for both the scratch bin dir and its sandbox.
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestHelperOrphanDaemonChild$", "-test.v")
+	cmd.Env = append(os.Environ(), "MEEPT_ORPHAN_DAEMON_PROBE=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("child test process failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "MEEPT_ORPHAN_DAEMON_PID:") {
+		t.Fatalf("child never reported the orphan daemon:\n%s", out)
+	}
+	fields := strings.Fields(strings.Split(string(out), "MEEPT_ORPHAN_DAEMON_PID:")[1])
+	if len(fields) == 0 {
+		t.Fatalf("child reported no daemon pid:\n%s", out)
+	}
+	daemonPid, err := strconv.Atoi(fields[0])
+	if err != nil {
+		t.Fatalf("child reported bad pid %q: %v", fields[0], err)
+	}
+	binDirPath := strings.TrimSpace(strings.SplitN(
+		strings.Split(string(out), "MEEPT_BIN_DIR_CREATED:")[1], "\n", 2)[0])
+
+	// The watchdog fires within poll+grace of the child's exit, then
+	// TERM-waits up to daemonKillGrace seconds before escalating. Poll
+	// generously; /bin/kill -0 mirrors the signal probe the watchdog
+	// itself uses (a reaped-exited pid answers ESRCH).
+	deadline := time.Now().Add(binReaperPollInterval + binReaperGrace +
+		time.Duration(daemonKillGrace)*time.Second + 30*time.Second)
+	for {
+		alive := exec.Command("/bin/kill", "-0", strconv.Itoa(daemonPid)).Run() == nil
+		if !alive {
+			// The dir must be gone too — the kill precedes rm -rf.
+			if _, err := os.Stat(binDirPath); !os.IsNotExist(err) {
+				t.Fatalf("watchdog killed daemon %d but bin dir %s still exists", daemonPid, binDirPath)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("orphan daemon %d still alive %.0fs after child exit",
+				daemonPid, time.Since(deadline.Add(90*time.Second)).Seconds()+90)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// TestHelperOrphanDaemonChild runs ONLY as a child of
+// TestHarnessOrphanDaemonKiller.
+func TestHelperOrphanDaemonChild(t *testing.T) {
+	if os.Getenv("MEEPT_ORPHAN_DAEMON_PROBE") == "" {
+		t.Skip("helper: run via TestHarnessOrphanDaemonKiller")
+	}
+	dir, err := binDir.acquire(t)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	// One real scratch daemon against a throwaway sandbox: the same argv
+	// shape the harness Stack and every suite use. The daemon writes its
+	// pidfile and serves /health; nothing here stops it — the child test
+	// process exits and the daemon becomes an orphan on purpose.
+	// One FLAT MkdirTemp (not t.TempDir()): the socket path must stay
+	// under the macOS 104-char sun_path limit, and the test-name-nested
+	// TempDir spelling blows past it (same reason Stack.Start uses a
+	// bare MkdirTemp).
+	port := FreePort(t)
+	work, err2 := os.MkdirTemp("", "meept-orphanchk-*")
+	if err2 != nil {
+		t.Fatalf("temp dir: %v", err2)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(work) })
+	home := filepath.Join(work, "home")
+	meeptHome := filepath.Join(home, ".meept")
+	stateDir := filepath.Join(work, "state")
+	socket := filepath.Join(stateDir, "meept.sock")
+	for _, d := range []string{home, meeptHome, stateDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	//nolint:gosec // G306: scratch sandbox config, test-only path
+	if err := os.WriteFile(filepath.Join(meeptHome, "meept.json5"), []byte(fmt.Sprintf(`{
+  "daemon": { "socket_path": %q, "pid_file": %q, "data_dir": %q, "log_level": "INFO" },
+  "transport": {
+    "rpc": { "enabled": true, "socket_path": %q },
+    "http": {
+      "enabled": true, "addr": "127.0.0.1:%d", "require_auth": false,
+      "tls_cert_file": %q, "tls_key_file": %q,
+      "rest": true, "websocket": false, "mcp": false
+    }
+  },
+  "multiagent": { "enabled": false }
+}`, socket, filepath.Join(stateDir, "meept.pid"), stateDir, socket, port,
+		filepath.Join(stateDir, "tls", "cert.pem"), filepath.Join(stateDir, "tls", "key.pem"))), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	// Minimal models.json5 (boot refuses without one; no turn is ever run).
+	if err := os.WriteFile(filepath.Join(meeptHome, "models.json5"), []byte(`{
+  "model": "fake/fake-model",
+  "providers": { "fake": { "api": "openai",
+    "options": { "baseURL": "http://127.0.0.1:1/v1", "noAuth": true },
+    "models": { "fake-model": { "name": "fake-model", "capabilities": ["completion"] } } } }
+}`), 0o600); err != nil {
+		t.Fatalf("write models: %v", err)
+	}
+	// Re-point TMPDIR back at the probe dir before spawning: MkdirTemp
+	// inside the daemon would otherwise use the parent's TMPDIR, but the
+	// daemon does not use it. The env is already correct.
+	cmd := exec.Command(filepath.Join(dir, "meept-daemon"),
+		"-c", filepath.Join(meeptHome, "meept.json5"),
+		"-d", stateDir,
+		"-s", socket,
+	)
+	cmd.Env = append(os.Environ(), "HOME="+home, "MEEPT_HOME="+meeptHome)
+	logBuf := &bytes.Buffer{}
+	cmd.Stdout = logBuf
+	cmd.Stderr = logBuf
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start scratch daemon: %v", err)
+	}
+	// Deliberately NO cmd.Wait and NO stop: the daemon must survive this
+	// process (reparented to init) — the exact post-crash orphan state.
+	// Print the pid and bin dir BEFORE exiting; the parent's watchdog
+	// assertion does the rest. The daemon's health is verified by the
+	// boot poll below so a child that never really booted cannot pass
+	// the parent's kill assertion vacuously.
+	client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // self-signed scratch cert
+	}}
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		resp, err := client.Get(fmt.Sprintf("https://127.0.0.1:%d/health", port))
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body) //nolint:errcheck // probe
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				fmt.Printf("MEEPT_ORPHAN_DAEMON_PID:%d\nMEEPT_BIN_DIR_CREATED:%s\n",
+					cmd.Process.Pid, dir)
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatalf("scratch daemon never became healthy; log:\n%s", logBuf.String())
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 }
