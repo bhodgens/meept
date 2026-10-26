@@ -178,12 +178,11 @@ Operational rule: snapshot state before every upgrade, e.g.
 
 and never attempt to hand-edit migrated state back to an older schema.
 
-Note on the migration registry: a migration-registry package
-(internal/migrate) is being added to the repo in this same wave. If it
-is present at your finish time (check: ls internal/migrate), it is the
-authoritative registry of applied migrations; the forward-only rule
-above still holds - the registry records what ran, it does not make
-migrations reversible.
+Note on the migration registry: internal/migrate is the authoritative
+registry of applied migrations (PRAGMA user_version, forward-only steps,
+ErrDownLevel guards a down-level binary against an up-level db); see
+docs/workflows/migrations.md. The forward-only rule above still holds -
+the registry records what ran, it does not make migrations reversible.
 
 
 4. Command quick reference

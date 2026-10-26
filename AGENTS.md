@@ -130,6 +130,8 @@ make docs-check           # Verify those pages are fresh (CI gate; needs mage + 
 # Classifier-eval guards (tools/classifier-eval)
 make classifier-eval-selftest # CI: corpus/replay guard + coverage-floor self-test
 make e2e-sweep-selftest       # CI: offline sweep grading/completion/CLI regressions
+make e2e-fast                 # CI: full hermetic e2e suite (ci.yml gate member;
+                              #     code-quality.yml advisory)
 
 # Git hooks (bash >= 3.2; sub-hooks run under whatever `bash` is on PATH, so the
 # suite also executes on the Linux CI runner)
@@ -316,8 +318,11 @@ for new features.** Existing unit tests may be updated for bug fixes only.
   coverage rule.
 - `make e2e-fast` (all suites), `make e2e-fast-area AREA=<name>` (one suite),
   `make e2e-affected` (suites affected by the working diff, via
-  `scripts/e2e-affected.sh`). The fast tier is hermetic and runs in CI;
-  `make e2e-chat` is the live-model tier, local-only.
+  `scripts/e2e-affected.sh`). The fast tier is hermetic and runs in CI
+  (ci.yml job `e2e-fast`, a required member of the `ci-success` aggregate
+  gate - that is the one blocking merges; code-quality.yml runs the same
+  tier as advisory coverage); `make e2e-chat` is the live-model tier,
+  local-only.
 - Scratch-bin hygiene: the harness builds meept-daemon/meept once per test
   process into `$TMPDIR/meept-e2e-bin*`. A detached watchdog reaper
   (`e2e/harness/daemon.go`) removes that dir seconds after the test
@@ -552,6 +557,8 @@ Audit scripts in `scripts/`:
 | `gui-daemon-connect.py` | Reconcile the installed daemon config with the GUI connect path (`ensure-config` / `endpoint` / `check` / `probe`) |
 | `verify-gui-connect.sh` | Prove a fresh install's GUI reaches the daemon (config, key, TLS pin, WS upgrade) |
 | `research-harness-lit.py` | Verifies harness-technique catalog evidence and markdown freshness (`make research-harness-check`) |
+| `config-drift-check.py` | Diffs config templates vs the installed `$MEEPT_HOME`; classifies drift via `// drift:` annotations; report-only, exit 1 on unclassified drift |
+| `release.sh` | Release pipeline (DRY_RUN=1 default): clean-tree gate, stamped sanity build, `goreleaser` snapshot/publish per `.goreleaser.yml` (Dockerfile + SBOM included) |
 
 All analyzers and audit scripts run via `make lint-ci`.
 
