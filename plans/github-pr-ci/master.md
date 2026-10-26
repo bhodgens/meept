@@ -281,6 +281,11 @@ Tree COMPLETE 2026-10-26. All gates green at close: `make test` 11026/0 fail,
 `make e2e-fast-area AREA=github-pr-ci` 3/3 PASS, `make graphs-check` +
 `make docs-check` green (5cb8d806, 46e585f3, 96a53fed).
 
+Adversarial execution review 2026-10-26 (001a5d5f): five plan-omission
+defects fixed post-COMPLETE (see Delta log); `go build ./...` clean,
+`go test -race` on both packages green, e2e suite green under the
+pre-commit e2e-affected gate (22 suites) at commit time.
+
 ## Integration Test Plan
 
 1. Cross-contract: `github_pr_create` output `{"number","url"}` feeds
@@ -334,6 +339,19 @@ Delta log:
   repeats the text, the convergence guard aborts the turn (empty reply).
   Fixed by removing the claiming terminal text (assertions read tool
   results, not the terminal text). Test-only, no assertion weakened.
+- 2026-10-26 (adversarial execution review), F3/F6/F7 impl->plan: five
+  defects found and fixed post-COMPLETE (001a5d5f): (1) C4 SessionID
+  stamping omitted on all five effects claims; (2) C4 effect payloads
+  omitted (reconcile had no input to re-drive a stuck claim); (3)
+  github_pr_review reported success for reviews that did not land (4xx
+  rejections now recorded-and-surfaced like merge; 2xx non-terminal
+  review states no longer read as success); (4) leaf-03's Retry-After
+  requirement was never implemented (secondary rate limits now honored
+  in the poll loop); (5) parked-wait re-arm rows leaked (cron rows fired
+  daily forever after resume) — ReArmSink gains CancelReArm, wired via
+  the new resume_wait_id arg on terminal green/fast-fail. Also: the
+  deadline park now embeds the last observed PRStatus (leaf 03 Task 3
+  said to; the zero-value was shipped instead).
 
 ## Structural Completeness Check (Before Dispatch)
 
