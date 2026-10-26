@@ -17,15 +17,19 @@
 # ---------------------------------------------------------------------------
 FROM golang:1.26-bookworm AS build
 
-# ALSA headers for the oto audio driver (cgo); git for version stamping.
+# ALSA headers for the oto audio driver (cgo) and libsqlite3-dev for the
+# sqlite-vec cgo bindings (sqlite3.h); git for version stamping.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git libasound2-dev \
+ && apt-get install -y --no-install-recommends git libasound2-dev libsqlite3-dev \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 
-# Cache module downloads before copying the tree.
+# Cache module downloads before copying the tree. go.mod carries a `replace`
+# directive mapping the sdk module to ./sdk/go, so that directory must exist
+# before `go mod download` resolves the module graph.
 COPY go.mod go.sum ./
+COPY sdk/go sdk/go/
 RUN go mod download
 
 COPY . .
@@ -77,27 +81,30 @@ COPY --from=build /out/meept        /opt/meept/bin/meept
 COPY --from=build /out/meept-lite   /opt/meept/bin/meept-lite
 ENV PATH="/opt/meept/bin:${PATH}"
 
-# Config templates per the install layout (make config-bootstrap equivalent:
-# copy the shipped defaults into $MEEPT_HOME before first boot).
+# Config per the install layout (make config-bootstrap equivalent: shipped
+# defaults land under their live names; a deployment overrides by
+# bind-mounting over them).
 ENV MEEPT_HOME=/home/meept/.meept
-COPY config/meept.json5      ${MEEPT_HOME}/meept.json5.template
-COPY config/models.json5     ${MEEPT_HOME}/models.json5.template
-COPY config/mcp_servers.json5 ${MEEPT_HOME}/mcp_servers.json5.template
-COPY config/acp_agents.json5 ${MEEPT_HOME}/acp_agents.json5.template
-COPY config/client.json5     ${MEEPT_HOME}/client.json5.template
+COPY config/meept.json5       ${MEEPT_HOME}/meept.json5
+COPY config/models.json5      ${MEEPT_HOME}/models.json5
+COPY config/mcp_servers.json5 ${MEEPT_HOME}/mcp_servers.json5
+COPY config/acp_agents.json5  ${MEEPT_HOME}/acp_agents.json5
+COPY config/client.json5      ${MEEPT_HOME}/client.json5
 
-# Container config: the HTTP transport must bind a non-loopback address for
-# the EXPOSE'd port to be usable. Loopback-only remains the DEFAULT for every
-# other install (see internal/config/schema.go HTTPTransportConfig.Addr).
-RUN printf '%s\n' \
-      '{' \
-      '  transport: {' \
-      '    http: {' \
-      '      enabled: true,' \
-      '      addr: "0.0.0.0:8081",' \
-      '    },' \
-      '  },' \
-      '}' > ${MEEPT_HOME}/meept.json5 \
+# Container overlay, appended after dropping the template's final closing
+# brace (the JSON5 loader takes the last occurrence of a key, so these win
+# over template defaults). Two deltas vs a bare-metal install:
+#   - transport.http binds 0.0.0.0: the loopback default is unreachable
+#     through EXPOSE (internal/config/schema.go HTTPTransportConfig.Addr).
+#   - classifier_boot_fail_fast=false: the template's local model providers
+#     cannot spawn in a bare container (no GGUF assets, no llama-server), so
+#     the F-D8 boot gate would otherwise kill the daemon at startup.
+RUN sed -i '$d' ${MEEPT_HOME}/meept.json5 \
+ && printf '%s\n' \
+      '  // Container overlay (injected at image build; last key wins).' \
+      '  "transport": { "http": { "enabled": true, "addr": "0.0.0.0:8081" } },' \
+      '  "orchestrator": { "classifier_boot_fail_fast": false },' \
+      '}' >> ${MEEPT_HOME}/meept.json5 \
  && chown -R meept:meept /home/meept
 
 WORKDIR /home/meept
