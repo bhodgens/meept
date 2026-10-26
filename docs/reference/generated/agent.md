@@ -2388,6 +2388,15 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	
 	    "json_extract": "network_request",
 	
+	    "github_pr_create":     "network_request",
+	    "github_pr_status":     "network_request",
+	    "github_ci_wait":       "network_request",
+	    "github_pr_comment":    "network_request",
+	    "github_pr_review":     "network_request",
+	    "github_pr_merge":      "network_request",
+	    "github_issue_get":     "network_request",
+	    "github_issue_comment": "network_request",
+	
 	    ToolMemorySearch:     "memory_read",
 	    ToolMemoryGetContext: "memory_read",
 	    ToolMemoryStore:      "memory_write",
