@@ -209,6 +209,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(b \*CacheKeyBuilder\) ExtractFileReferences\(prompt string\) \[\]string](<#CacheKeyBuilder.ExtractFileReferences>)
 - [type CacheScope](<#CacheScope>)
 - [type CacheStats](<#CacheStats>)
+- [type CanaryConfig](<#CanaryConfig>)
 - [type CapabilityError](<#CapabilityError>)
   - [func \(e \*CapabilityError\) Error\(\) string](<#CapabilityError.Error>)
 - [type ChatMessage](<#ChatMessage>)
@@ -392,10 +393,14 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func NewHealthChecker\(cfg \*RuntimeConfig, baseURL string\) \*HealthChecker](<#NewHealthChecker>)
   - [func \(h \*HealthChecker\) IsHealthy\(\) bool](<#HealthChecker.IsHealthy>)
   - [func \(h \*HealthChecker\) OnHealthChange\(cb HealthChangeCallback\)](<#HealthChecker.OnHealthChange>)
+  - [func \(h \*HealthChecker\) OnHealthVerdict\(cb HealthVerdictCallback\)](<#HealthChecker.OnHealthVerdict>)
+  - [func \(h \*HealthChecker\) RunTicks\(\) uint64](<#HealthChecker.RunTicks>)
   - [func \(h \*HealthChecker\) SetProcessAliveProbe\(fn func\(\) bool\)](<#HealthChecker.SetProcessAliveProbe>)
   - [func \(h \*HealthChecker\) Start\(ctx context.Context\)](<#HealthChecker.Start>)
   - [func \(h \*HealthChecker\) Stop\(\)](<#HealthChecker.Stop>)
+  - [func \(h \*HealthChecker\) VerdictNow\(\) Verdict](<#HealthChecker.VerdictNow>)
   - [func \(h \*HealthChecker\) WaitForHealthy\(ctx context.Context, timeout time.Duration\) error](<#HealthChecker.WaitForHealthy>)
+- [type HealthVerdictCallback](<#HealthVerdictCallback>)
 - [type HeuristicTokenizer](<#HeuristicTokenizer>)
   - [func \(h \*HeuristicTokenizer\) CountTokens\(text string\) int](<#HeuristicTokenizer.CountTokens>)
 - [type ImageRef](<#ImageRef>)
@@ -690,11 +695,13 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func NewRuntimeManager\(logger \*slog.Logger\) \*RuntimeManager](<#NewRuntimeManager>)
   - [func \(m \*RuntimeManager\) EndpointBaseURL\(providerID string\) \(string, bool\)](<#RuntimeManager.EndpointBaseURL>)
   - [func \(m \*RuntimeManager\) GetHealthChecker\(providerID string\) \(\*HealthChecker, bool\)](<#RuntimeManager.GetHealthChecker>)
+  - [func \(m \*RuntimeManager\) HangRestartCount\(endpointKey string\) uint64](<#RuntimeManager.HangRestartCount>)
   - [func \(m \*RuntimeManager\) ModelKeys\(providerID string\) \[\]string](<#RuntimeManager.ModelKeys>)
   - [func \(m \*RuntimeManager\) OrphanRuntimes\(\) \(\[\]OrphanRuntime, error\)](<#RuntimeManager.OrphanRuntimes>)
   - [func \(m \*RuntimeManager\) RegisterConfig\(providerID string, cfg \*RuntimeConfig, baseURL string\) error](<#RuntimeManager.RegisterConfig>)
   - [func \(m \*RuntimeManager\) RegisterLocalModel\(rec ModelRecord\) error](<#RuntimeManager.RegisterLocalModel>)
   - [func \(m \*RuntimeManager\) RestartProvider\(ctx context.Context, providerID string\) error](<#RuntimeManager.RestartProvider>)
+  - [func \(m \*RuntimeManager\) SetHealthEventPublisher\(fn func\(topic string, payload map\[string\]any\)\)](<#RuntimeManager.SetHealthEventPublisher>)
   - [func \(m \*RuntimeManager\) SetMetricsRecorder\(rec MetricsRecorder\)](<#RuntimeManager.SetMetricsRecorder>)
   - [func \(m \*RuntimeManager\) SetModelsInUse\(set map\[string\]struct\{\}\)](<#RuntimeManager.SetModelsInUse>)
   - [func \(m \*RuntimeManager\) StartAll\(ctx context.Context\) error](<#RuntimeManager.StartAll>)
@@ -797,6 +804,8 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(t \*ToolDefinition\) CountTokens\(tokenizer Tokenizer\) int](<#ToolDefinition.CountTokens>)
 - [type UploadStore](<#UploadStore>)
 - [type UsageStoreAttacher](<#UsageStoreAttacher>)
+- [type Verdict](<#Verdict>)
+  - [func \(v Verdict\) String\(\) string](<#Verdict.String>)
 
 
 ## Constants
@@ -2946,6 +2955,19 @@ CacheStats holds statistics about cache performance.
 	    L2Entries  int
 	}
 
+<a name="CanaryConfig"></a>
+## type CanaryConfig
+
+CanaryConfig holds the inference\-canary probe configuration \(Contract 1 of the llama\-hang\-watchdog tree\). The canary detects a HUNG runtime: /health keeps answering 200 while inference itself no longer completes. Enabled is a pointer so an ABSENT key can be told apart from an explicit false: nil means "true iff the endpoint address is loopback AND a lifecycle block exists" \(resolved in ValidateAndNormalize\); an explicit value always wins in both directions.
+
+	type CanaryConfig struct {
+	    Enabled         *bool  `json:"enabled"` // nil => loopback-lifecycle default (true)
+	    IntervalSeconds int    `json:"interval_seconds"`
+	    TimeoutSeconds  int    `json:"timeout_seconds"`
+	    Threshold       int    `json:"threshold"`
+	    Prompt          string `json:"prompt"`
+	}
+
 <a name="CapabilityError"></a>
 ## type CapabilityError
 
@@ -4552,10 +4574,11 @@ HealthChangeCallback is invoked when health state changes.
 HealthCheckConfig holds health check configuration.
 
 	type HealthCheckConfig struct {
-	    Endpoint           string `json:"endpoint"`
-	    IntervalSeconds    int    `json:"interval_seconds"`
-	    TimeoutSeconds     int    `json:"timeout_seconds"`
-	    UnhealthyThreshold int    `json:"unhealthy_threshold"`
+	    Endpoint           string       `json:"endpoint"`
+	    IntervalSeconds    int          `json:"interval_seconds"`
+	    TimeoutSeconds     int          `json:"timeout_seconds"`
+	    UnhealthyThreshold int          `json:"unhealthy_threshold"`
+	    Canary             CanaryConfig `json:"canary"`
 	}
 
 <a name="HealthChecker"></a>
@@ -4588,6 +4611,20 @@ IsHealthy returns true if the runtime is considered healthy based on recent chec
 
 OnHealthChange sets a callback invoked on health state transitions.
 
+<a name="HealthChecker.OnHealthVerdict"></a>
+### func \(\*HealthChecker\) OnHealthVerdict
+
+	func (h *HealthChecker) OnHealthVerdict(cb HealthVerdictCallback)
+
+OnHealthVerdict sets a callback invoked on the same transition edges as OnHealthChange \(Contract 3\), carrying the tri\-state verdict and an operator\-facing detail string. Nil\-safe \(a nil callback is simply never fired\); callbacks run in their own goroutine, never under h.mu.
+
+<a name="HealthChecker.RunTicks"></a>
+### func \(\*HealthChecker\) RunTicks
+
+	func (h *HealthChecker) RunTicks() uint64
+
+RunTicks returns the checker\-liveness counter \(Contract 4\): incremented once per checkOnce entry, monotonic for the life of the checker. The manager's self\-watchdog samples it to prove the run goroutine is still advancing.
+
 <a name="HealthChecker.SetProcessAliveProbe"></a>
 ### func \(\*HealthChecker\) SetProcessAliveProbe
 
@@ -4604,7 +4641,7 @@ Start begins periodic health checks in a background goroutine.
 
 The run belongs to the ENDPOINT, not to the caller's context. Every caller passes a short\-lived context — the daemon cancels its boot context the moment StartAll returns \(\`defer cancelLlm\`\), the HTTP start path passes \`r.Context\(\)\`, and RPC passes a connection\-scoped context — so binding the run to it silently ended health monitoring seconds after boot. The run detaches from cancellation the same way RuntimeProcess.Start detaches the child; only Stop ends it \(and StopAll calls Stop for every endpoint\).
 
-Start is also the re\-arm path. The manager stops the checker when a runtime stops and starts it again when the runtime restarts, and a run can end on its own \(an older caller's context died\). Any checker that is not running is armed fresh — verdict reset to unhealthy, failure count cleared — because serving the previous verdict would either fail a healthy restart \(and Stop would then kill the process it just restarted\) or report a runtime healthy before its socket exists.
+Start is also the re\-arm path. The manager stops the checker when a runtime stops and starts it again when the runtime restarts, and a run can end on its own \(an older caller's context died\). Any checker that is not running is armed fresh — verdict reset to unhealthy, failure count cleared — because serving the previous verdict would either fail a healthy restart \(and Stop would then kill the process it just restarted\) or report a runtime healthy before its socket exists. The manager's self\-watchdog \(Contract 4\) uses this documented re\-arm path to revive a silently stalled run.
 
 <a name="HealthChecker.Stop"></a>
 ### func \(\*HealthChecker\) Stop
@@ -4615,12 +4652,26 @@ Stop stops the health checker. Idempotent, and safe against the run goroutine ex
 
 It gates on the CHANNEL, not on the running flag: a superseded goroutine can never leave a newer run's channel here \(finishRun's generation guard\), so whatever h.stopCh names is either the live run or an already\-exited one, and closing it is safe either way — no run ever closes its own channel. Gating on the flag instead \(the old behaviour\) made Stop a no\-op for a run whose flag a stale goroutine had cleared, leaving it live and unstoppable \(finding F60\).
 
+<a name="HealthChecker.VerdictNow"></a>
+### func \(\*HealthChecker\) VerdictNow
+
+	func (h *HealthChecker) VerdictNow() Verdict
+
+VerdictNow returns the current tri\-state verdict \(Contract 2\).
+
 <a name="HealthChecker.WaitForHealthy"></a>
 ### func \(\*HealthChecker\) WaitForHealthy
 
 	func (h *HealthChecker) WaitForHealthy(ctx context.Context, timeout time.Duration) error
 
 WaitForHealthy blocks until the runtime becomes healthy or the timeout is reached.
+
+<a name="HealthVerdictCallback"></a>
+## type HealthVerdictCallback
+
+HealthVerdictCallback is invoked on the SAME transition edges as HealthChangeCallback \(plus the canary\-driven HUNG entry / HUNG recovery edges\), carrying the tri\-state verdict and an operator\-facing detail string \(canary failure count, last canary error, endpoint key\).
+
+	type HealthVerdictCallback func(v Verdict, detail string)
 
 <a name="HeuristicTokenizer"></a>
 ## type HeuristicTokenizer
@@ -7362,17 +7413,31 @@ RuntimeConfig holds validated runtime configuration.
 	    // ABSENT value (every literal-constructed config) defaults to supervised
 	    // via Supervised(): silence must not mean "leave a runtime behind". Only an
 	    // explicit false opts out.
-	    Supervise          *bool
-	    SpawnCommand       []string
-	    SpawnTimeout       time.Duration
-	    HealthEndpoint     string
-	    HealthInterval     time.Duration
-	    HealthTimeout      time.Duration
-	    HealthThreshold    int
-	    RestartEnabled     bool
-	    RestartMaxAttempts int
-	    RestartCooldown    time.Duration
-	    RestartResetAfter  time.Duration
+	    Supervise       *bool
+	    SpawnCommand    []string
+	    SpawnTimeout    time.Duration
+	    HealthEndpoint  string
+	    HealthInterval  time.Duration
+	    HealthTimeout   time.Duration
+	    HealthThreshold int
+	    // Canary* are the resolved inference-canary fields (Contract 1 of the
+	    // llama-hang-watchdog tree). CanaryEnabled is false unless the operator
+	    // explicitly enabled it or the lifecycle-visible endpoint address is
+	    // loopback (see ValidateAndNormalize). CanaryEnabledExplicit records
+	    // whether the lifecycle block carried an explicit `canary.enabled`
+	    // value: an explicit value always wins, while the absent (nil) case is
+	    // re-resolved by RuntimeManager.RegisterConfig from the stamped
+	    // absolute baseURL (plan delta log, leaf-01 review F1).
+	    CanaryEnabled         bool
+	    CanaryEnabledExplicit bool
+	    CanaryInterval        time.Duration
+	    CanaryTimeout         time.Duration
+	    CanaryThreshold       int
+	    CanaryPrompt          string
+	    RestartEnabled        bool
+	    RestartMaxAttempts    int
+	    RestartCooldown       time.Duration
+	    RestartResetAfter     time.Duration
 	    // ToolConstraint is the grammar-constraint wire mode this managed
 	    // runtime auto-declares ("llamacpp" for llama.cpp, "" for MLX).
 	    ToolConstraint string
@@ -7470,6 +7535,13 @@ EndpointBaseURL returns the resolved base URL for a provider's runtime endpoint 
 
 GetHealthChecker returns the health checker for a provider.
 
+<a name="RuntimeManager.HangRestartCount"></a>
+### func \(\*RuntimeManager\) HangRestartCount
+
+	func (m *RuntimeManager) HangRestartCount(endpointKey string) uint64
+
+HangRestartCount returns the number of HUNG verdicts observed for an endpoint \(Contract 3's hang counter; in\-package atomic — see the hangCounts field comment\).
+
 <a name="RuntimeManager.ModelKeys"></a>
 ### func \(\*RuntimeManager\) ModelKeys
 
@@ -7506,6 +7578,13 @@ RegisterLocalModel wires a pulled GGUF into the runtime manager under the local\
 	func (m *RuntimeManager) RestartProvider(ctx context.Context, providerID string) error
 
 RestartProvider restarts a specific provider's runtime.
+
+<a name="RuntimeManager.SetHealthEventPublisher"></a>
+### func \(\*RuntimeManager\) SetHealthEventPublisher
+
+	func (m *RuntimeManager) SetHealthEventPublisher(fn func(topic string, payload map[string]any))
+
+SetHealthEventPublisher wires the optional bus seam for Contract\-2 runtime.health events \(llama\-hang\-watchdog tree\). The daemon passes a closure around its raw bus Publish; the manager itself stays bus\-free. Nil\-safe: publishing stays disabled until a non\-nil publisher is set, and every publish site no\-ops while it is nil.
 
 <a name="RuntimeManager.SetMetricsRecorder"></a>
 ### func \(\*RuntimeManager\) SetMetricsRecorder
@@ -8430,5 +8509,27 @@ UsageStoreAttacher is implemented by LLM clients that can record per\-provider/p
 	type UsageStoreAttacher interface {
 	    SetUsageStore(store *appmetrics.Store)
 	}
+
+<a name="Verdict"></a>
+## type Verdict
+
+Verdict is the health checker's tri\-state result \(Contract 2 of the llama\-hang\-watchdog tree\). It distinguishes a HUNG runtime \(/health still answering but the inference canary failing\) from the classic UNHEALTHY \(process dead or /health failing\) so operators can tell hang\-restarts from crash\-restarts.
+
+	type Verdict int
+
+<a name="VerdictHealthy"></a>
+
+	const (
+	    VerdictHealthy   Verdict = iota // /health answering and no canary failure streak
+	    VerdictUnhealthy                // /health failing or process dead (existing semantics)
+	    VerdictHung                     // /health answering but canary failing >= threshold
+	)
+
+<a name="Verdict.String"></a>
+### func \(Verdict\) String
+
+	func (v Verdict) String() string
+
+String returns the Contract\-2 wire spelling used in runtime.health bus payloads and log fields.
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)
