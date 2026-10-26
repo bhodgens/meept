@@ -202,20 +202,34 @@ Test leaf: 00T-gate-tests.md — dispatched in Phase 0, validated by the control
 
 | # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
 |---|---------------------|--------|-----------|-----------|--------|
-| F1 | CanaryConfig schema + resolution defaults (nil enabled → loopback default; 0 values → 60/15/3) | 01 leaf, Contract 1 | runtime_config_canary_test.go: TestCanaryConfigDefaults, TestCanaryConfigExplicit, TestCanaryDisabledNonLoopback | n/a — config unit surface | PENDING |
-| F2 | Canary probe issues correct request shape (path, body keys, max_tokens:1, stream:false) | 01 leaf, Contract 5 | health_checker_canary_internal_test.go: TestCanaryRequestShape | e2e fake server asserts body | PENDING |
-| F3 | Canary success requires 200 + parseable choices (empty choices = failure) | 01 leaf, Contract 5 | TestCanaryEmptyChoicesIsFailure, TestCanaryNon200IsFailure | same suite | PENDING |
-| F4 | Cold-load guard: no canary before first /health 200 | 01 leaf | TestCanaryArmsOnlyAfterFirstHealthOK | e2e slow-start fake server | PENDING |
-| F5 | HUNG verdict: canary failing >= threshold while /health answers | 02 leaf, Contract 2 | health_checker_verdict_internal_test.go: TestVerdictHungAfterThreshold, TestVerdictUnhealthyWhenHealthFails, TestVerdictHealthyRecovery | e2e: hung-completion server → verdict hung | PENDING |
-| F6 | Callback compatibility: bool callback still fires and drives restart | 02 leaf, Contract 3 | TestBoolCallbackUnchangedOnHung | e2e: restart observed | PENDING |
-| F7 | Verdict callback + bus event + metrics counter | 02 leaf, Contracts 2-3 | TestVerdictCallbackPayload | e2e: bus topic runtime.health observed | PENDING |
-| F8 | Self-watchdog: RunTicks advances; stalled run re-armed | 02 leaf, Contract 4 | runtime_manager_watchdog_internal_test.go: TestRunTicksAdvance, TestWatchdogRearmsStalledRun | n/a — internal; e2e kill-checker variant optional | PENDING |
-| F9 | Canary isolation: no llm_calls row, no Resolver/slot-gate touch | 01 leaf | TestCanaryBypassesLedger (metrics.db row count unchanged) | n/a | PENDING |
+| F1 | CanaryConfig schema + resolution defaults (nil enabled → loopback default; 0 values → 60/15/3) | 01 leaf, Contract 1 | runtime_config_canary_test.go: TestCanaryConfigDefaults, TestCanaryConfigExplicit, TestCanaryDisabledNonLoopback (committed 00399abd) | n/a — config unit surface | VALIDATED |
+| F2 | Canary probe issues correct request shape (path, body keys, max_tokens:1, stream:false) | 01 leaf, Contract 5 | health_checker_canary_internal_test.go: TestCanaryRequestShape (committed 00399abd) | e2e fake server asserts body | VALIDATED |
+| F3 | Canary success requires 200 + parseable choices (empty choices = failure) | 01 leaf, Contract 5 | health_checker_canary_internal_test.go: TestCanaryEmptyChoicesIsFailure, TestCanaryNon200IsFailure — assert via VerdictNow; go GREEN with leaf 02 (documented in file header) | same suite | VALIDATED |
+| F4 | Cold-load guard: no canary before first /health 200 | 01 leaf | TestCanaryArmsOnlyAfterFirstHealthOK (committed 00399abd) | e2e slow-start fake server | VALIDATED |
+| F5 | HUNG verdict: canary failing >= threshold while /health answers | 02 leaf, Contract 2 | health_checker_verdict_internal_test.go: TestVerdictHungAfterThreshold, TestVerdictUnhealthyWhenHealthFails, TestVerdictHealthyRecovery (committed 00399abd) | e2e: hung-completion server → verdict hung | VALIDATED |
+| F6 | Callback compatibility: bool callback still fires and drives restart | 02 leaf, Contract 3 | TestBoolCallbackUnchangedOnHung (dualRecorder pins edges+ordering) | e2e: restart observed | VALIDATED |
+| F7 | Verdict callback + bus event + metrics counter | 02 leaf, Contracts 2-3 | TestVerdictCallbackPayload (dualRecorder) | e2e: bus topic runtime.health observed | VALIDATED |
+| F8 | Self-watchdog: RunTicks advances; stalled run re-armed | 02 leaf, Contract 4 | runtime_manager_watchdog_internal_test.go: TestRunTicksAdvance, TestWatchdogRearmsStalledRun (watchdogTickOnce seam; wdogLogCapture + gateWaitFor fixtures for leaf 02 reuse) | n/a — internal; e2e kill-checker variant optional | VALIDATED |
+| F9 | Canary isolation: no llm_calls row, no Resolver/slot-gate touch | 01 leaf | TestCanaryBypassesLedger — behavior-driven llm_calls row count via existing store fixtures | n/a | VALIDATED |
 | F10 | e2e suite runtime-hang + manifest entry | 03 leaf | n/a | e2e/suites/runtime-hang/ (hermetic fake llama-server: healthy /health, wedged completions) | PENDING |
 
 Statuses: PENDING | DELTA | VALIDATED
 
-Delta log: (none yet)
+Delta log:
+- 2026-10-25, F1-F9 → VALIDATED: gate tests committed 00399abd; control-agent
+  verified RED state names ONLY contracted symbols (72 compile errors, dedup
+  set = Verdict/VerdictHung/VerdictUnhealthy/VerdictHealthy/VerdictNow/
+  OnHealthVerdict/RunTicks/watchdogTickOnce/Canary* fields), gofmt clean,
+  zero line-number corruption, zero tracked-file modifications.
+- 2026-10-25, F3, tests-updated direction recorded: subagent asserts F3 via
+  VerdictNow()==VerdictHung (contracted symbol) instead of unexported
+  canaryFails — plan accepted the greater coverage shape; consequence: two F3
+  tests turn GREEN at leaf 02, not leaf 01 (leaf 01 self-check adjusted).
+- 2026-10-25, F1, open seam: ValidateAndNormalize sees only the lifecycle
+  block; fixture declares the address in options.baseURL + health_check.endpoint.
+  If leaf 01 resolves CanaryEnabled at RegisterConfig time instead, adjust the
+  fixture per delta protocol (plan is authoritative for behavior, fixture
+  follows the resolution seam).
 
 ## Open Questions
 
