@@ -49,7 +49,7 @@ REFERENCE_DIR="docs/reference"
 # already covered by an existing doc or when the package is purely
 # internal plumbing (logging, config types, test helpers, etc.).
 # Format: space-separated package names (the top-level dir under internal/).
-DOCS_ALLOWLIST="bus comm config daemon errcls metrics preferences queue registry rpc runtime schema session sharedclient task transport util lint version benchmark debug context pathutil validator workers agents mcp shadow"
+DOCS_ALLOWLIST="bus comm config daemon errcls metrics preferences queue registry rpc runtime schema session sharedclient task transport util lint version benchmark debug context pathutil validator workers agents mcp shadow githubsvc"
 
 # Packages whose changes are significant enough to always warrant a doc
 # check even for modifications. If a package is NOT in this list, only
