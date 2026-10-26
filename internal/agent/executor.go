@@ -285,6 +285,24 @@ var ToolActionMap = map[string]string{
 	// denied with "Unknown action" despite being registered and granted.
 	"json_extract": "network_request",
 
+	// GitHub PR/CI family (github-pr-ci tree leaves 02/03/04): all eight
+	// tools make external API calls against the (user-configured) GitHub
+	// endpoint, so the HTTP round-trip is the security-relevant surface -
+	// network_request (RiskLow in BuiltinRules + seed_rules.go). Read-only
+	// tools (pr_status / issue_get) ride the same class as transcript_fetch:
+	// the egress is still a network call. Without these entries the tool
+	// name becomes the fallback action, BuiltinRules has no rule, and every
+	// call is denied "Unknown action" despite registration + grant (bughunt
+	// H7 class - the same gap that hit json_extract and transcript_fetch).
+	"github_pr_create":   "network_request",
+	"github_pr_status":   "network_request",
+	"github_ci_wait":     "network_request",
+	"github_pr_comment":  "network_request",
+	"github_pr_review":   "network_request",
+	"github_pr_merge":    "network_request",
+	"github_issue_get":   "network_request",
+	"github_issue_comment": "network_request",
+
 	// Memory operations
 	ToolMemorySearch:     "memory_read",
 	ToolMemoryGetContext: "memory_read",

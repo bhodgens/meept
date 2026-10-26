@@ -152,6 +152,14 @@ func TestPinnedGrantedToolsResolve(t *testing.T) {
 		// memory-vote family (daemon-registered via NewMemoryVoteTool;
 		// previously "Unknown action"-denied — tools-memory-02)
 		"memory_vote",
+		// GitHub PR/CI family (github-pr-ci tree): eight external-API tools
+		// daemon-registered behind [github].enabled; they need a ClientPool
+		// + effects ledger to construct, so this pinned list is their only
+		// completeness coverage. Without the ToolActionMap entries they are
+		// fence-denied at runtime ("Unknown action", bughunt H7 class).
+		"github_pr_create", "github_pr_status", "github_ci_wait",
+		"github_pr_comment", "github_pr_review", "github_pr_merge",
+		"github_issue_get", "github_issue_comment",
 		// default-roster grants added by the standing-debt paydown:
 		// file_edit/spreadsheet_write/pdf_read/remember (roster grants) and
 		// tool_view (coder grant + platform_read mapping)
