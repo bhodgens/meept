@@ -233,6 +233,18 @@ Delta log:
   from the stamped baseURL. Leaf 01 committed 3646f783 (review passed: build
   OK, vet undefined set = exactly leaf-02 symbols, canary counter separate,
   single run goroutine, no I/O under h.mu, IsLoopbackBaseURL reused).
+- 2026-10-25, leaf 02 REVIEWED + committed adeb5f12: all 12 gate tests GREEN
+  (control-agent re-run), full internal/llm + internal/daemon suites GREEN,
+  vet/gofmt/analyzers clean. Gate-test file modified — ACCEPTED as upward
+  delta: cleanup-only fix of a latent double-close panic in 3 verdict tests
+  (per-channel sync.Once); zero assertion changes; verified by full diff read.
+  Flap guard (hangSuppressUntil 1s) added beyond brief — required by the gate
+  recovery assertion; prevents restart storms. Publisher seam:
+  SetHealthEventPublisher setter (no constructor change); DAEMON WIRING of the
+  publisher + RegisterConfig adoption deferred to leaf 03 integration or a
+  follow-up — until wired, runtime.health events do not reach the bus.
+  RegisterConfig canary-default fix landed as specified (CanaryEnabledExplicit
+  guard + threshold>0 guard).
 - 2026-10-25, F1, open seam: ValidateAndNormalize sees only the lifecycle
   block; fixture declares the address in options.baseURL + health_check.endpoint.
   If leaf 01 resolves CanaryEnabled at RegisterConfig time instead, adjust the
