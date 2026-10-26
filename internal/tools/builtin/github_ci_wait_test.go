@@ -111,12 +111,20 @@ type testReArmSink struct {
 	calls    int
 	lastRef  githubsvc.CIRef
 	lastWait string
+	cancels  []string
 }
 
 func (s *testReArmSink) ScheduleReArm(ref githubsvc.CIRef, at time.Time, waitID string) error {
 	s.calls++
 	s.lastRef = ref
 	s.lastWait = waitID
+	return nil
+}
+
+// CancelReArm satisfies the extended ReArmSink interface (terminal-wait
+// row removal). cancels records the waitIDs it was called with.
+func (s *testReArmSink) CancelReArm(waitID string) error {
+	s.cancels = append(s.cancels, waitID)
 	return nil
 }
 
@@ -321,5 +329,62 @@ func TestGitHubCIWaitTool_FastFail(t *testing.T) {
 	// A fast-fail with a 300s timeout must return well under the timeout.
 	if elapsed > 5*time.Second {
 		t.Errorf("fast-fail took %s, expected it to return promptly (not wait out the 300s timeout)", elapsed)
+	}
+}
+
+// TestGitHubCIWaitTool_CancelReArmOnTerminal verifies the re-arm row
+// lifecycle: a resumed wait that carries resume_wait_id cancels the parked
+// wait's re-arm row when it reaches a terminal outcome (green or
+// fast-fail), and never cancels when it parks again.
+func TestGitHubCIWaitTool_CancelReArmOnTerminal(t *testing.T) {
+	// Green path: the fake turns success on the second poll.
+	fake := newCIGateFake("in_progress", "success")
+	pool := newCIGatePool(t, fake)
+	sink := &testReArmSink{}
+	tool := NewGitHubCIWaitTool(pool, githubsvc.OwnerRepo{Owner: "octo", Repo: "cat"}, sink)
+
+	if _, err := tool.Execute(context.Background(), map[string]any{
+		"pr":              7,
+		"timeout_seconds": 60,
+		"resume_wait_id":  "ciwait_prev",
+	}); err != nil {
+		t.Fatalf("Execute(green): %v", err)
+	}
+	if len(sink.cancels) != 1 || sink.cancels[0] != "ciwait_prev" {
+		t.Fatalf("terminal green did not cancel the prior re-arm row; cancels=%v", sink.cancels)
+	}
+
+	// Fast-fail path also cancels.
+	fake2 := newCIGateFake("failure")
+	pool2 := newCIGatePool(t, fake2)
+	sink2 := &testReArmSink{}
+	tool2 := NewGitHubCIWaitTool(pool2, githubsvc.OwnerRepo{Owner: "octo", Repo: "cat"}, sink2)
+	if _, err := tool2.Execute(context.Background(), map[string]any{
+		"pr":              7,
+		"timeout_seconds": 300,
+		"resume_wait_id":  "ciwait_prev2",
+	}); err != nil {
+		t.Fatalf("Execute(fast-fail): %v", err)
+	}
+	if len(sink2.cancels) != 1 || sink2.cancels[0] != "ciwait_prev2" {
+		t.Fatalf("fast-fail did not cancel the prior re-arm row; cancels=%v", sink2.cancels)
+	}
+
+	// Park path (still in_progress, tiny timeout) must NOT cancel anything
+	// and must re-arm a fresh row.
+	fake3 := newCIGateFake("in_progress")
+	pool3 := newCIGatePool(t, fake3)
+	sink3 := &testReArmSink{}
+	tool3 := NewGitHubCIWaitTool(pool3, githubsvc.OwnerRepo{Owner: "octo", Repo: "cat"}, sink3)
+	_, _ = tool3.Execute(context.Background(), map[string]any{
+		"pr":              7,
+		"timeout_seconds": 1,
+		"resume_wait_id":  "ciwait_prev3",
+	})
+	if len(sink3.cancels) != 0 {
+		t.Errorf("park path cancelled a re-arm row; cancels=%v", sink3.cancels)
+	}
+	if sink3.calls != 1 {
+		t.Errorf("park path ScheduleReArm calls = %d, want 1", sink3.calls)
 	}
 }

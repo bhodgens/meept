@@ -294,13 +294,13 @@ var ToolActionMap = map[string]string{
 	// name becomes the fallback action, BuiltinRules has no rule, and every
 	// call is denied "Unknown action" despite registration + grant (bughunt
 	// H7 class - the same gap that hit json_extract and transcript_fetch).
-	"github_pr_create":   "network_request",
-	"github_pr_status":   "network_request",
-	"github_ci_wait":     "network_request",
-	"github_pr_comment":  "network_request",
-	"github_pr_review":   "network_request",
-	"github_pr_merge":    "network_request",
-	"github_issue_get":   "network_request",
+	"github_pr_create":     "network_request",
+	"github_pr_status":     "network_request",
+	"github_ci_wait":       "network_request",
+	"github_pr_comment":    "network_request",
+	"github_pr_review":     "network_request",
+	"github_pr_merge":      "network_request",
+	"github_issue_get":     "network_request",
 	"github_issue_comment": "network_request",
 
 	// Memory operations

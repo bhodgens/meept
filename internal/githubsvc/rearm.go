@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/preferences"
@@ -20,12 +21,12 @@ type CIRef struct {
 
 // ReArmSink is the schedule seam a parked CI wait hands back to the daemon:
 // ScheduleReArm records that CIRef should be re-checked at the given time
-// under the given waitID. The in-memory recording implementation
-// (InstructionReArmSink, a real scheduler instruction row) is owned by a
-// later leaf; this interface pins the contract the builtin tools program
-// against.
+// under the given waitID; CancelReArm removes that row once the wait
+// reached a terminal outcome (green or fast-fail) so the one-shot cron row
+// cannot re-fire on later days. Both methods must tolerate unknown waitIDs.
 type ReArmSink interface {
 	ScheduleReArm(ref CIRef, at time.Time, waitID string) error
+	CancelReArm(waitID string) error
 }
 
 // ErrCIWaitParked is returned by github_ci_wait when the wait gives up at
@@ -104,6 +105,30 @@ func (s *InstructionReArmSink) ScheduleReArm(ref CIRef, at time.Time, waitID str
 	}
 	s.logger.Info("ci wait parked; re-armed via instruction cron row",
 		"ref", ref.String(), "wait_id", waitID, "at", at.UTC().Format(time.RFC3339), "instruction", instr.ID)
+	return nil
+}
+
+// CancelReArm removes a previously persisted re-arm row by name once the
+// wait reached a terminal outcome. An unknown or already-removed waitID is
+// not an error: cancellation is idempotent, and a row that never existed
+// needs no reconciliation.
+func (s *InstructionReArmSink) CancelReArm(waitID string) error {
+	if s.store == nil {
+		return fmt.Errorf("githubsvc: instruction re-arm sink has no preferences store")
+	}
+	name := "github_ci_wait-" + strings.ToLower(waitID)
+	for _, instr := range s.store.GetActive() {
+		if instr.Name != name {
+			continue
+		}
+		if err := s.store.Delete(instr.ID); err != nil {
+			s.logger.Error("failed to delete ci re-arm instruction",
+				"wait_id", waitID, "instruction", instr.ID, "error", err)
+			return fmt.Errorf("githubsvc: delete ci re-arm instruction %s: %w", instr.ID, err)
+		}
+		s.logger.Info("ci re-arm instruction removed (wait reached terminal state)",
+			"wait_id", waitID, "instruction", instr.ID)
+	}
 	return nil
 }
 

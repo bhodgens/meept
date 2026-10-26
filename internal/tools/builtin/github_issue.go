@@ -167,7 +167,12 @@ func (t *GitHubIssueCommentTool) Execute(ctx context.Context, args map[string]an
 	}
 
 	key := effects.EffectKey("github_issue_comment", owner, repo, fmt.Sprint(number), prBodySHA256(body))
-	meta := effects.EffectMeta{Tool: "github_issue_comment", ProviderIdempotent: false}
+	meta := effects.EffectMeta{
+		Tool:               "github_issue_comment",
+		SessionID:          sessionIDFromCtx(ctx),
+		Payload:            mustGitHubEffectJSON(map[string]any{"owner": owner, "repo": repo, "number": number, "body": body}),
+		ProviderIdempotent: false,
+	}
 	if t.ledger == nil {
 		return nil, githubLedgerGuard("github_issue_comment")
 	}

@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -58,6 +59,19 @@ const ciWaitPollIntervalStart = 2 * time.Second
 // ciWaitPollIntervalMax caps the poll interval; the wait must never
 // sleep more than this between CI observations.
 const ciWaitPollIntervalMax = 15 * time.Second
+
+// ciRateLimitWait reports how long a secondary-rate-limit response asks
+// the poller to wait (the Retry-After header on a 403/429). ok=false when
+// err is not a secondary rate limit or carries no usable Retry-After.
+// Leaf-03 requirement: honor Retry-After on secondary limits; never hammer
+// the API through a park.
+func ciRateLimitWait(err error) (time.Duration, bool) {
+	var abuse *github.AbuseRateLimitError
+	if !errors.As(err, &abuse) || abuse.RetryAfter == nil {
+		return 0, false
+	}
+	return *abuse.RetryAfter, true
+}
 
 // fetchPRStatus fetches the PR, its head-ref check runs, and the head-SHA
 // workflow runs, and summarizes them into a githubsvc.PRStatus. This is
@@ -227,6 +241,7 @@ func (t *GitHubCIWaitTool) Parameters() llm.FunctionParameters {
 			"repo":            {Type: schemaTypeString, Description: "Repository name (optional, defaults to the session target)."},
 			"pr":              {Type: schemaTypeInteger, Description: "Pull request number. Required."},
 			"timeout_seconds": {Type: schemaTypeInteger, Description: "How long to wait before parking (optional, default 600, capped at 3600)."},
+			"resume_wait_id":  {Type: schemaTypeString, Description: "wait_id from a previous parked github_ci_wait result. When this wait reaches green or a fast-fail, the parked wait's re-arm row is cancelled."},
 		},
 		Required: []string{"pr"},
 	}
@@ -273,6 +288,20 @@ func (t *GitHubCIWaitTool) park(owner, repo string, prNum int, status githubsvc.
 	return result, fmt.Errorf("%w: re-armed %s/%s#%d as %s for %s", githubsvc.ErrCIWaitParked, owner, repo, prNum, waitID, at.Format(time.RFC3339))
 }
 
+// cancelReArm best-effort removes the re-arm row for waitID once the wait
+// reached a terminal outcome. A nil sink or an error is logged, never
+// surfaced: the terminal result stands on its own, and the row is
+// idempotent to re-fire (the resumed wait re-parks or re-reports green).
+func (t *GitHubCIWaitTool) cancelReArm(waitID string) {
+	if t.sink == nil || waitID == "" {
+		return
+	}
+	if err := t.sink.CancelReArm(waitID); err != nil {
+		slog.Warn("github_ci_wait: could not cancel the re-arm row after a terminal result",
+			"wait_id", waitID, "error", err)
+	}
+}
+
 // Execute implements tools.Tool.
 func (t *GitHubCIWaitTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	owner, repo, err := t.defaults.Resolve(prStringArg(args, "owner"), prStringArg(args, "repo"))
@@ -303,24 +332,52 @@ func (t *GitHubCIWaitTool) Execute(ctx context.Context, args map[string]any) (an
 	}
 
 	interval := ciWaitPollIntervalStart
+	// lastObserved is the freshest PRStatus seen; the park path embeds it
+	// in the parked result so the resuming turn sees current state (leaf 03
+	// Task 3: "with the PRStatus snapshot embedded").
+	var lastObserved githubsvc.PRStatus
 	for {
 		// Deadline checks run BEFORE every fetch and before every sleep so
 		// a timeout_seconds=1 wait never sleeps a second past its deadline.
+		// lastObserved carries the freshest PRStatus into the park result.
 		if ctx.Err() != nil || !time.Now().Before(deadline) {
-			return t.park(owner, repo, prNum, githubsvc.PRStatus{})
+			return t.park(owner, repo, prNum, lastObserved)
 		}
 
 		status, ferr := fetchPRStatus(ctx, client, owner, repo, prNum)
 		if ferr != nil {
+			// A secondary rate limit (403/429 + Retry-After) is not a
+			// failure: wait the asked duration (bounded by the deadline)
+			// and re-observe, instead of erroring the turn or hammering.
+			if wait, ok := ciRateLimitWait(ferr); ok {
+				remaining := time.Until(deadline)
+				if remaining <= 0 {
+					return t.park(owner, repo, prNum, githubsvc.PRStatus{})
+				}
+				if wait > remaining {
+					wait = remaining
+				}
+				interval = wait
+				select {
+				case <-ctx.Done():
+				case <-time.After(wait):
+				}
+				continue
+			}
 			return nil, fmt.Errorf("github_ci_wait: %w", ferr)
 		}
 
 		if status.AllGreen {
+			// Terminal green: the resuming turn may carry the previous
+			// wait's re-arm row — cancel it so the one-shot cron row does
+			// not re-fire on later days.
+			t.cancelReArm(prStringArg(args, "resume_wait_id"))
 			return map[string]any{"status": status, "terminal": "green"}, nil
 		}
 		if reason, failed := ciTerminalReason(status); failed {
 			// Fast-fail: a concluded failure is terminal; do not wait out
 			// the remaining timeout on red CI.
+			t.cancelReArm(prStringArg(args, "resume_wait_id"))
 			return map[string]any{"status": status, "terminal": "failed", "reason": reason}, nil
 		}
 
@@ -328,6 +385,7 @@ func (t *GitHubCIWaitTool) Execute(ctx context.Context, args map[string]any) (an
 		// the smaller of the doubling interval and the time left, so the
 		// loop re-enters the deadline check instead of oversleeping past
 		// it.
+		lastObserved = status
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			return t.park(owner, repo, prNum, status)

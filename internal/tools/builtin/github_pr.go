@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/caimlas/meept/internal/effects"
 	"github.com/caimlas/meept/internal/githubsvc"
@@ -85,6 +86,18 @@ func githubLedgerGuard(toolName string) error {
 func prBodySHA256(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
+}
+
+// mustGitHubEffectJSON marshals an effects claim payload. The inputs are
+// plain strings/bools/ints, so a marshal error is impossible in practice;
+// on the impossible path it returns a minimal JSON object rather than
+// panicking (never panic in library code).
+func mustGitHubEffectJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage(`{"payload_error":true}`)
+	}
+	return b
 }
 
 // isClientAPIError reports whether err is a GitHub API client error with a
@@ -169,12 +182,21 @@ func (t *GitHubPRCreateTool) Execute(ctx context.Context, args map[string]any) (
 		Title: github.String(title),
 		Body:  github.String(prStringArg(args, "body")),
 	}
-	if d, ok := prBoolArg(args, "draft"); ok {
-		req.Draft = github.Bool(d)
+	draft, hasDraft := prBoolArg(args, "draft")
+	if hasDraft {
+		req.Draft = github.Bool(draft)
 	}
 
 	key := effects.EffectKey("github_pr_create", owner, repo, head, title)
-	meta := effects.EffectMeta{Tool: "github_pr_create", ProviderIdempotent: false}
+	meta := effects.EffectMeta{
+		Tool:      "github_pr_create",
+		SessionID: sessionIDFromCtx(ctx),
+		// Payload carries the exact request so a stuck claimed record can
+		// be reconciled (re-executed by a human-approved path) without
+		// guessing the input.
+		Payload:            mustGitHubEffectJSON(map[string]any{"owner": owner, "repo": repo, "base": prStringArg(args, "base"), "head": head, "title": title, "body": prStringArg(args, "body"), "draft": draft}),
+		ProviderIdempotent: false,
+	}
 	if t.ledger == nil {
 		return nil, githubLedgerGuard("github_pr_create")
 	}
@@ -276,7 +298,12 @@ func (t *GitHubPRCommentTool) Execute(ctx context.Context, args map[string]any) 
 	}
 
 	key := effects.EffectKey("github_pr_comment", owner, repo, fmt.Sprint(prNum), prBodySHA256(body))
-	meta := effects.EffectMeta{Tool: "github_pr_comment", ProviderIdempotent: false}
+	meta := effects.EffectMeta{
+		Tool:               "github_pr_comment",
+		SessionID:          sessionIDFromCtx(ctx),
+		Payload:            mustGitHubEffectJSON(map[string]any{"owner": owner, "repo": repo, "pr": prNum, "body": body}),
+		ProviderIdempotent: false,
+	}
 	if t.ledger == nil {
 		return nil, githubLedgerGuard("github_pr_comment")
 	}
@@ -391,22 +418,60 @@ func (t *GitHubPRReviewTool) Execute(ctx context.Context, args map[string]any) (
 	}
 
 	key := effects.EffectKey("github_pr_review", owner, repo, fmt.Sprint(prNum), event, prBodySHA256(body))
-	meta := effects.EffectMeta{Tool: "github_pr_review", ProviderIdempotent: false}
+	meta := effects.EffectMeta{
+		Tool:               "github_pr_review",
+		SessionID:          sessionIDFromCtx(ctx),
+		Payload:            mustGitHubEffectJSON(map[string]any{"owner": owner, "repo": repo, "pr": prNum, "event": event, "body": body}),
+		ProviderIdempotent: false,
+	}
 	if t.ledger == nil {
 		return nil, githubLedgerGuard("github_pr_review")
 	}
 
 	var resID int64
+	// attemptErr carries a rejected review (4xx provider outcome) so the
+	// caller sees the failure AFTER the receipt is recorded and the record
+	// completed — the same shape the merge tool uses. GitHub returns 200
+	// with state REQUEST_CHANGES when an APPROVE is not permitted; the
+	// result state is checked below so that path cannot read as success.
+	var attemptErr error
 	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, func(ctx context.Context) (json.RawMessage, error) {
-		r, _, apiErr := client.PullRequests.CreateReview(ctx, owner, repo, prNum, &github.PullRequestReviewRequest{
+		r, resp, apiErr := client.PullRequests.CreateReview(ctx, owner, repo, prNum, &github.PullRequestReviewRequest{
 			Body:  github.String(body),
 			Event: github.String(event),
 		})
 		if apiErr != nil {
+			if isClientAPIError(apiErr) {
+				// 4xx: the review attempt happened (e.g. "user can't
+				// approve own pull request"). Record a failure receipt
+				// and complete so reconcile never re-tries it; surface
+				// the provider error to the caller afterwards.
+				attemptErr = fmt.Errorf("github_pr_review: provider rejected review: %w", apiErr)
+				return json.Marshal(map[string]any{"id": int64(0), "state": "REJECTED", "message": apiErr.Error()})
+			}
+			// Transport/5xx: leave the record claimed for reconcile.
 			return nil, apiErr
 		}
 		resID = r.GetID()
-		return json.Marshal(map[string]any{"id": resID})
+		state := r.GetState()
+		// Terminal review states, case-insensitive: GitHub returns them
+		// uppercase; the hermetic fakes may echo lowercase. Any other 2xx
+		// state means the review did not land as submitted (GitHub answers
+		// 200 with state REQUEST_CHANGES when an APPROVE was not
+		// permitted, e.g. self-approval) — see the mismatch path below.
+		if strings.EqualFold(state, "APPROVED") ||
+			strings.EqualFold(state, "CHANGES_REQUESTED") ||
+			strings.EqualFold(state, "COMMENTED") {
+			return json.Marshal(map[string]any{"id": resID, "state": state})
+		}
+		// A 2xx response whose submitted review did not land in a terminal
+		// state (GitHub answers 200 with state REQUEST_CHANGES when an
+		// APPROVE was not permitted, e.g. self-approval): the mutation did
+		// not happen as requested. Record the receipt and complete (the
+		// API call happened), then surface the mismatch as an error so the
+		// caller never reads a rejected review as success.
+		attemptErr = fmt.Errorf("github_pr_review: submitted review did not land (state %q, http %d); the requested %q may not have been applied", state, resp.StatusCode, event)
+		return json.Marshal(map[string]any{"id": resID, "state": state, "submitted_event": event})
 	})
 	if runErr != nil {
 		return nil, fmt.Errorf("github_pr_review: %w", runErr)
@@ -424,6 +489,9 @@ func (t *GitHubPRReviewTool) Execute(ctx context.Context, args map[string]any) (
 		}
 	}
 
+	if attemptErr != nil {
+		return map[string]any{"id": resID, "error": attemptErr.Error()}, attemptErr
+	}
 	return map[string]any{"id": resID}, nil
 }
 
@@ -505,7 +573,12 @@ func (t *GitHubPRMergeTool) Execute(ctx context.Context, args map[string]any) (a
 	}
 
 	key := effects.EffectKey("github_pr_merge", owner, repo, fmt.Sprint(prNum), headSHA)
-	meta := effects.EffectMeta{Tool: "github_pr_merge", ProviderIdempotent: false}
+	meta := effects.EffectMeta{
+		Tool:               "github_pr_merge",
+		SessionID:          sessionIDFromCtx(ctx),
+		Payload:            mustGitHubEffectJSON(map[string]any{"owner": owner, "repo": repo, "pr": prNum, "head": headSHA, "strategy": strategy}),
+		ProviderIdempotent: false,
+	}
 	if t.ledger == nil {
 		return nil, githubLedgerGuard("github_pr_merge")
 	}
