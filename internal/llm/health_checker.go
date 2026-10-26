@@ -1,7 +1,9 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,6 +22,19 @@ type HealthChecker struct {
 	baseURL        string
 	healthy        bool
 	unhealthyCount int
+	// Canary lane (llama-hang-watchdog Contract 5). canaryClient is a PLAIN
+	// http.Client by design: no Recorder, no Resolver, no slot gate — canary
+	// probes are infrastructure, not turns, and must NEVER write an
+	// llm_calls row in metrics.db (gate F9). canaryArmed is set on the first
+	// /health 200 after Start (cold-load guard: no probing before the model
+	// has answered healthy once). canaryFails counts CONSECUTIVE canary
+	// failures and is separate from unhealthyCount (a canary failure must
+	// not flip the /health verdict). canaryAccum accumulates HealthInterval
+	// ticks in the single run goroutine until CanaryInterval is due.
+	canaryClient   *http.Client
+	canaryArmed    bool
+	canaryFails    int
+	canaryAccum    time.Duration
 	mu             sync.RWMutex
 	stopCh         chan struct{}
 	running        bool
@@ -34,11 +49,15 @@ type HealthChecker struct {
 // NewHealthChecker creates a new health checker.
 func NewHealthChecker(cfg *RuntimeConfig, baseURL string) *HealthChecker {
 	return &HealthChecker{
-		config:  cfg,
-		client:  &http.Client{Timeout: cfg.HealthTimeout},
-		baseURL: baseURL,
-		stopCh:  make(chan struct{}),
-		logger:  slog.Default().With("component", "health-checker"),
+		config: cfg,
+		client: &http.Client{Timeout: cfg.HealthTimeout},
+		// Plain client, deliberately NOT the daemon's LLM client: no
+		// Recorder/Resolver/slot gate — see the canaryClient field comment
+		// (gate F9, ledger bypass).
+		canaryClient: &http.Client{Timeout: cfg.CanaryTimeout},
+		baseURL:      baseURL,
+		stopCh:       make(chan struct{}),
+		logger:       slog.Default().With("component", "health-checker"),
 	}
 }
 
@@ -69,6 +88,11 @@ func (h *HealthChecker) Start(ctx context.Context) {
 	h.running = true
 	h.unhealthyCount = 0
 	h.healthy = false
+	// Canary re-arm: a (re-)started checker must re-prove /health before any
+	// canary probe fires (cold-load guard across restarts).
+	h.canaryArmed = false
+	h.canaryFails = 0
+	h.canaryAccum = 0
 	stopCh := h.stopCh
 	h.mu.Unlock()
 	go h.run(context.WithoutCancel(ctx), stopCh)
@@ -88,7 +112,101 @@ func (h *HealthChecker) run(ctx context.Context, stopCh <-chan struct{}) {
 			return
 		case <-ticker.C:
 			h.checkOnce(stopCh)
+			// Canary cadence rides the SAME run goroutine (no second
+			// goroutine, so the generation guard and Stop semantics stay
+			// intact): accumulate health ticks and fire when the canary
+			// interval is due.
+			if h.config.CanaryEnabled {
+				h.mu.RLock()
+				armed := h.canaryArmed
+				h.mu.RUnlock()
+				if armed {
+					h.canaryAccum += h.config.HealthInterval
+					if h.canaryAccum >= h.config.CanaryInterval {
+						h.canaryAccum = 0
+						h.runCanary(stopCh)
+					}
+				}
+			}
 		}
+	}
+}
+
+// runCanary issues one Contract-5 inference canary probe against
+// {server-root}/v1/chat/completions for the run identified by gen. Success =
+// HTTP 200 AND a parseable response with a NON-EMPTY choices array; any
+// transport error, timeout, non-200, unparseable body, or empty choices is
+// one failure. Failures accumulate in canaryFails (SEPARATE from
+// unhealthyCount — a canary failure never flips the /health verdict); a
+// success resets the counter. All HTTP I/O and body parsing happen OUTSIDE
+// h.mu (mutexio rule); only the counter update takes the lock, under the
+// generation guard.
+func (h *HealthChecker) runCanary(gen <-chan struct{}) {
+	// Server-root derivation identical to checkOnce's healthURL logic.
+	root := h.baseURL
+	if parsed, err := url.Parse(h.baseURL); err == nil && parsed.Path != "" {
+		root = fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
+	}
+	canaryURL := root + "/v1/chat/completions"
+
+	// Model id: prefer the authoritative provider model IDs (ModelKeys,
+	// populated by RegisterConfig — the same resolved ids the classifier
+	// boot gate consults); fall back to the model path.
+	model := h.config.ModelPath
+	if len(h.config.ModelKeys) > 0 {
+		model = h.config.ModelKeys[0]
+	}
+	body, err := json.Marshal(map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": h.config.CanaryPrompt},
+		},
+		"max_tokens": 1,
+		"stream":     false,
+	})
+	if err != nil {
+		// Marshal of a static map cannot fail; treat defensively as a
+		// failure without I/O.
+		h.recordCanaryResult(gen, false)
+		return
+	}
+
+	resp, err := h.canaryClient.Post(canaryURL, "application/json", bytes.NewReader(body))
+	ok := false
+	if err == nil {
+		var parsed struct {
+			Choices []json.RawMessage `json:"choices"`
+		}
+		decErr := json.NewDecoder(resp.Body).Decode(&parsed)
+		_ = resp.Body.Close()
+		ok = resp.StatusCode == http.StatusOK && decErr == nil && len(parsed.Choices) > 0
+		if !ok && decErr != nil {
+			h.logger.Debug("canary response unparseable", "err", decErr)
+		}
+	} else {
+		h.logger.Debug("canary probe transport error", "err", err)
+	}
+	h.recordCanaryResult(gen, ok)
+}
+
+// recordCanaryResult updates the consecutive-failure counter under h.mu with
+// the generation guard (a late canary from a superseded run must not write
+// into the current generation).
+func (h *HealthChecker) recordCanaryResult(gen <-chan struct{}, ok bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.stopCh != gen {
+		return
+	}
+	if ok {
+		h.canaryFails = 0
+		return
+	}
+	h.canaryFails++
+	if h.canaryFails >= h.config.CanaryThreshold {
+		h.logger.Warn("canary probe failing at threshold",
+			"consecutive_failures", h.canaryFails,
+			"threshold", h.config.CanaryThreshold)
 	}
 }
 
@@ -183,6 +301,12 @@ func (h *HealthChecker) checkOnce(gen <-chan struct{}) {
 	if statusOK {
 		h.unhealthyCount = 0
 		h.healthy = true
+		// Cold-load guard release: the first /health 200 since (re-)arm
+		// arms the canary lane. The existing /health verdict logic above is
+		// unchanged; canary failures count separately (canaryFails).
+		if h.config.CanaryEnabled {
+			h.canaryArmed = true
+		}
 	} else {
 		h.unhealthyCount++
 		if h.unhealthyCount >= h.config.HealthThreshold {

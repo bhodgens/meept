@@ -61,10 +61,26 @@ func (c RuntimeLifecycleConfig) SuperviseOrDefault() bool {
 
 // HealthCheckConfig holds health check configuration.
 type HealthCheckConfig struct {
-	Endpoint           string `json:"endpoint"`
-	IntervalSeconds    int    `json:"interval_seconds"`
-	TimeoutSeconds     int    `json:"timeout_seconds"`
-	UnhealthyThreshold int    `json:"unhealthy_threshold"`
+	Endpoint           string       `json:"endpoint"`
+	IntervalSeconds    int          `json:"interval_seconds"`
+	TimeoutSeconds     int          `json:"timeout_seconds"`
+	UnhealthyThreshold int          `json:"unhealthy_threshold"`
+	Canary             CanaryConfig `json:"canary"`
+}
+
+// CanaryConfig holds the inference-canary probe configuration (Contract 1 of
+// the llama-hang-watchdog tree). The canary detects a HUNG runtime: /health
+// keeps answering 200 while inference itself no longer completes. Enabled is a
+// pointer so an ABSENT key can be told apart from an explicit false: nil means
+// "true iff the endpoint address is loopback AND a lifecycle block exists"
+// (resolved in ValidateAndNormalize); an explicit value always wins in both
+// directions.
+type CanaryConfig struct {
+	Enabled         *bool  `json:"enabled"` // nil => loopback-lifecycle default (true)
+	IntervalSeconds int    `json:"interval_seconds"`
+	TimeoutSeconds  int    `json:"timeout_seconds"`
+	Threshold       int    `json:"threshold"`
+	Prompt          string `json:"prompt"`
 }
 
 // RestartPolicyConfig holds restart policy configuration.
@@ -103,13 +119,22 @@ type RuntimeConfig struct {
 	// ABSENT value (every literal-constructed config) defaults to supervised
 	// via Supervised(): silence must not mean "leave a runtime behind". Only an
 	// explicit false opts out.
-	Supervise          *bool
-	SpawnCommand       []string
-	SpawnTimeout       time.Duration
-	HealthEndpoint     string
-	HealthInterval     time.Duration
-	HealthTimeout      time.Duration
-	HealthThreshold    int
+	Supervise       *bool
+	SpawnCommand    []string
+	SpawnTimeout    time.Duration
+	HealthEndpoint  string
+	HealthInterval  time.Duration
+	HealthTimeout   time.Duration
+	HealthThreshold int
+	// Canary* are the resolved inference-canary fields (Contract 1 of the
+	// llama-hang-watchdog tree). CanaryEnabled is false unless the operator
+	// explicitly enabled it or the lifecycle-visible endpoint address is
+	// loopback (see ValidateAndNormalize).
+	CanaryEnabled      bool
+	CanaryInterval     time.Duration
+	CanaryTimeout      time.Duration
+	CanaryThreshold    int
+	CanaryPrompt       string
 	RestartEnabled     bool
 	RestartMaxAttempts int
 	RestartCooldown    time.Duration
@@ -202,6 +227,41 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 		healthThreshold = cfg.HealthCheck.UnhealthyThreshold
 	}
 
+	// Canary resolution (Contract 1, llama-hang-watchdog tree). Zero values
+	// resolve to the contract defaults: 60s interval / 15s timeout / 3
+	// threshold / "ping" prompt. An explicit `enabled` always wins; an absent
+	// (nil) key defaults to true iff the endpoint address visible to this
+	// stage is loopback. ValidateAndNormalize sees ONLY the lifecycle block —
+	// the provider options' baseURL is stamped later by RegisterConfig — so
+	// loopback is resolved from health_check.endpoint when it carries an
+	// absolute address (the gate fixture declares it in both places; shipped
+	// configs typically use the relative "/health", which resolves non-
+	// loopback and therefore defaults the canary OFF unless explicitly
+	// enabled). A lifecycle block always exists at this point (this function
+	// is only reached with one), so the loopback check alone gates the
+	// default. Reuses IsLoopbackBaseURL — the same helper the F-D8
+	// classifier boot gate uses.
+	canaryInterval := 60 * time.Second
+	if cfg.HealthCheck.Canary.IntervalSeconds > 0 {
+		canaryInterval = time.Duration(cfg.HealthCheck.Canary.IntervalSeconds) * time.Second
+	}
+	canaryTimeout := 15 * time.Second
+	if cfg.HealthCheck.Canary.TimeoutSeconds > 0 {
+		canaryTimeout = time.Duration(cfg.HealthCheck.Canary.TimeoutSeconds) * time.Second
+	}
+	canaryThreshold := 3
+	if cfg.HealthCheck.Canary.Threshold > 0 {
+		canaryThreshold = cfg.HealthCheck.Canary.Threshold
+	}
+	canaryPrompt := "ping"
+	if cfg.HealthCheck.Canary.Prompt != "" {
+		canaryPrompt = cfg.HealthCheck.Canary.Prompt
+	}
+	canaryEnabled := IsLoopbackBaseURL(cfg.HealthCheck.Endpoint)
+	if cfg.HealthCheck.Canary.Enabled != nil {
+		canaryEnabled = *cfg.HealthCheck.Canary.Enabled
+	}
+
 	restartMaxAttempts := 3
 	if cfg.RestartPolicy.MaxAttempts > 0 {
 		restartMaxAttempts = cfg.RestartPolicy.MaxAttempts
@@ -256,6 +316,11 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 		HealthInterval:     healthInterval,
 		HealthTimeout:      healthTimeout,
 		HealthThreshold:    healthThreshold,
+		CanaryEnabled:      canaryEnabled,
+		CanaryInterval:     canaryInterval,
+		CanaryTimeout:      canaryTimeout,
+		CanaryThreshold:    canaryThreshold,
+		CanaryPrompt:       canaryPrompt,
 		RestartEnabled:     cfg.RestartPolicy.Enabled,
 		RestartMaxAttempts: restartMaxAttempts,
 		RestartCooldown:    restartCooldown,
