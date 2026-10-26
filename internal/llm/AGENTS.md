@@ -268,3 +268,41 @@ boundaries:
   while the healthy peer served zero requests. Blocks expire on the alias
   timeout and clear lazily via expiry + success, like every other block
   map.
+
+## Hang detection (canary + self-watchdog)
+
+The llama-hang-watchdog layer (`health_checker.go` canary lane,
+`runtime_manager.go` self-watchdog; user-facing doc:
+`docs/workflows/runtime-hang-watchdog.md`) detects a runtime whose
+`/health` answers 200 while inference is dead. Invariants — each was
+pinned by the tree's gate tests (`health_checker_verdict_internal_test.go`,
+`runtime_manager_watchdog_internal_test.go`):
+
+- **The canary never touches the Resolver, the slot gate, or the ledger.**
+  It runs on its own plain `http.Client` inside the health checker's run
+  goroutine and writes NO `llm_calls` row — a canary probe is
+  infrastructure, not a turn. Do not route it through the LLM client.
+- **HUNG drives restart ONLY through the existing bool callback.** The
+  HUNG edge fires exactly one `false` on `HealthChangeCallback`, so
+  `attemptAutoRestart` and the `restart_policy` machinery run unchanged;
+  the recovery edge fires NO bool `true` (h.healthy never flipped). The
+  verdict callback (`OnHealthVerdict`) is additive: bus event + hang
+  counter only, never a second restart path.
+- **HUNG is its own verdict state.** An answering `/health` must NOT
+  clear `VerdictHung` (only a canary success can), or the verdict would
+  oscillate on every health tick while inference stays dead. Canary
+  failures count in `canaryFails`, separate from `unhealthyCount`.
+- **The self-watchdog re-arms via `Start()` and never spawns a second
+  run.** `startWatchdogLocked` is idempotent (armed by `StartAll` AND
+  lazily by `RegisterConfig`); exactly one watchdog goroutine exists and
+  `StopAll` stops it. A stalled run (no `RunTicks()` advance across two
+  samples, process alive, checker not stopped) is re-armed through the
+  checker's documented `Start()` re-arm contract — with the generation
+  guard making the old run inert — never by launching a parallel ticker.
+- **`SetHealthEventPublisher` is the ONLY bus seam and stays nil-safe.**
+  The manager has no bus dependency; the daemon wires a closure over its
+  raw `Publish` (`internal/daemon/components.go`, at ContainerManager
+  construction). Every publish site no-ops while the publisher is nil,
+  and the setter ignores nil. The payload keys are exactly the Contract-2
+  set: `endpoint_key`/`verdict`/`model`/`detail`/`ts` — no lock is held
+  across the publish call.

@@ -1079,6 +1079,31 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// only the real wiring order exposes the nil).
 		c.ContainerManager = llm.NewRuntimeManager(logger)
 
+		// Contract-2 bus seam (llama-hang-watchdog leaf 03): the manager
+		// publishes runtime.health events (verdict tri-state, hang
+		// detection + watchdog re-arm) through this closure, which is the
+		// ONLY bridge from internal/llm to the bus — the manager itself
+		// stays bus-free and the setter is nil-safe. msgBus is the
+		// NewComponents parameter, live at this point; the payload map the
+		// manager builds already carries exactly the Contract-2 keys
+		// (endpoint_key/verdict/model/detail/ts), so it is marshaled
+		// unchanged into the BusMessage.
+		c.ContainerManager.SetHealthEventPublisher(func(topic string, payload map[string]any) {
+			blob, err := json.Marshal(payload)
+			if err != nil {
+				logger.Error("runtime health event marshal failed", "topic", topic, "error", err)
+				return
+			}
+			msgBus.Publish(topic, &models.BusMessage{
+				ID:        id.Generate("runtime-health-"),
+				Type:      models.MessageTypeEvent,
+				Topic:     topic,
+				Source:    "runtime-manager",
+				Timestamp: time.Now().UTC(),
+				Payload:   blob,
+			})
+		})
+
 		// Session teardown (session-affinity leaf 06, master Contract 6):
 		// the coordinator subscribes to the session store's lifecycle hook
 		// and fans archive/delete/idle events out to the adapters. Keyed on

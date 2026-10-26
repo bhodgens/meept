@@ -304,6 +304,15 @@
   ],
   "internal/migrate/": [
    "migrate-eq"
+  ],
+  "internal/llm/health_checker.go": [
+   "runtime-hang"
+  ],
+  "internal/llm/runtime_manager.go": [
+   "runtime-hang"
+  ],
+  "e2e/suites/runtime-hang": [
+   "runtime-hang"
   ]
  },
  "suites": [
@@ -628,6 +637,11 @@
   {
    "name": "migrate-eq",
    "dir": "e2e/suites/migrate-eq",
+   "status": "implemented"
+  },
+  {
+   "name": "runtime-hang",
+   "dir": "e2e/suites/runtime-hang",
    "status": "implemented"
   }
  ],
@@ -2861,6 +2875,18 @@
    "title": "down-level binary against up-level database fails loud, never silently proceeds",
    "paths": [
     "internal/migrate/migrate.go"
+   ]
+  },
+  {
+   "id": "runtime-hang-01",
+   "suite": "runtime-hang",
+   "diff": "L",
+   "title": "wedged-completions fake llama-server (healthy /health) drives VerdictHung within canary threshold, publishes runtime.health verdict=hung on the daemon-wired bus seam, the existing auto-restart respawns the runtime (new pid), and the respawned server's healthy canary cycle publishes verdict=healthy",
+   "paths": [
+    "internal/llm/health_checker.go",
+    "internal/llm/runtime_manager.go",
+    "internal/daemon/components.go",
+    "e2e/suites/runtime-hang/fakeserver/main.go"
    ]
   }
  ]

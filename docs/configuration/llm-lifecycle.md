@@ -24,8 +24,16 @@ Add a `lifecycle` section to your provider configuration in `config/models.json5
         "endpoint": "/health",
         "interval_seconds": 10,
         "timeout_seconds": 5,
-        "unhealthy_threshold": 3
-      }
+        "unhealthy_threshold": 3,
+        "canary": {
+          "enabled": true,
+          "interval_seconds": 60,
+          "timeout_seconds": 15,
+          "threshold": 3,
+          "prompt": "ping"
+        }
+      },
+      "restart_policy": { "enabled": true }
     }
   }
 }
@@ -48,6 +56,21 @@ Add a `lifecycle` section to your provider configuration in `config/models.json5
 | `health_check.interval_seconds` | int | no | Health check polling interval (default: 10) |
 | `health_check.timeout_seconds` | int | no | HTTP request timeout (default: 5) |
 | `health_check.unhealthy_threshold` | int | no | Consecutive failures before marking unhealthy (default: 3) |
+| `health_check.canary.enabled` | bool | no | Inference-canary probe (hang detection). Absent defaults to true iff the endpoint address is loopback and a lifecycle block exists; an explicit value always wins. See [Hang Detection](#hang-detection-canary) |
+| `health_check.canary.interval_seconds` | int | no | Canary cadence (default: 60) |
+| `health_check.canary.timeout_seconds` | int | no | Per-probe budget (default: 15) |
+| `health_check.canary.threshold` | int | no | Consecutive canary failures => HUNG (default: 3) |
+| `health_check.canary.prompt` | string | no | Fixed completion prompt (default: "ping") |
+
+### Hang Detection (canary)
+
+`/health` 200 does not prove the inference path works. With the canary
+enabled, the health checker periodically issues a tiny completion
+(`max_tokens: 1`) on its own HTTP client; consecutive failures while
+`/health` keeps answering produce a distinct HUNG verdict, which drives
+the auto-restart path below and publishes `runtime.health` bus events.
+Full behavior, defaults, and the operator runbook live in
+`docs/workflows/runtime-hang-watchdog.md`.
 
 ### `model_path` vs `model_paths`
 

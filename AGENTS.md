@@ -290,7 +290,11 @@ runtime, only `StartupOrphanSweep` reaps orphans, sweep before spawn, a local
 classifier that never becomes healthy fails startup (F-D8), and client transports
 (RPC socket, HTTP/WS listener) come up BEFORE the F-D8 gate so clients can connect
 and enqueue during slow model loads (boot-window submits park on
-`ClassifierBootReadiness`).
+`ClassifierBootReadiness`). Hang detection (inference canary + checker
+self-watchdog, `VerdictHung`, `runtime.health` bus events) adds one rule: HUNG
+drives restart ONLY through the existing bool callback/auto-restart path and the
+bus seam is `SetHealthEventPublisher` — full invariants in `internal/llm/AGENTS.md`
+(`docs/workflows/runtime-hang-watchdog.md`).
 
 ### Session affinity headers and upstream teardown
 
