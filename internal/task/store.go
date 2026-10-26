@@ -23,7 +23,10 @@ type Store struct {
 	logger    *slog.Logger
 }
 
-// NewStore creates a new SQLite-backed task store.
+// NewStore creates a new SQLite-backed task store. Schema migrations are
+// declared in migrations.go (storeMigrations) and applied at the end of
+// migrate(); the tasks database is shared with StepStore, whose column
+// migrations live in the same contiguous registry history.
 func NewStore(dbPath string, logger *slog.Logger) (*Store, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -118,31 +121,7 @@ func (s *Store) migrate() error {
 		return err
 	}
 
-	// Add columns if they don't exist (for migrations)
-	migrations := []string{
-		"ALTER TABLE tasks ADD COLUMN memory_refs TEXT",
-		"ALTER TABLE tasks ADD COLUMN context_query TEXT",
-		"ALTER TABLE tasks ADD COLUMN inherited_from TEXT",
-		"ALTER TABLE tasks ADD COLUMN created_memories TEXT",
-		"ALTER TABLE tasks ADD COLUMN assigned_agent TEXT",
-		"ALTER TABLE tasks ADD COLUMN token_usage INTEGER DEFAULT 0",
-		// Goal linkage (goal-completion leaf 02, C3): every task traces to
-		// its owning goal. Legacy rows keep NULL goal_id, which scans to "".
-		"ALTER TABLE tasks ADD COLUMN goal_id TEXT",
-		// Execution start stamp ("completed in 0s" defect, 2026-10-22):
-		// SetState sets StartedAt on pending→active, but the store never
-		// persisted it — the finalize path re-reads the task, StartedAt
-		// came back zero, and task.completed carried execution_time "0s"
-		// for a 35s job. Legacy rows keep NULL (scan to zero time).
-		"ALTER TABLE tasks ADD COLUMN started_at TEXT",
-	}
-
-	for _, m := range migrations {
-		// Ignore errors - column may already exist
-		_, _ = s.db.Exec(m)
-	}
-
-	return nil
+	return storeMigrations.Apply(s.db, s.logger)
 }
 
 // Create inserts a new task.

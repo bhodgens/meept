@@ -448,6 +448,11 @@ func (s *StepStore) migrate() error {
 		is_handoff     BOOLEAN DEFAULT FALSE,
 		conversation_id TEXT,
 		session_id     TEXT,
+		-- Successor hint (agent-routing tree leaf 03): advisory
+		-- suggested-next hint copied from the finished step-job
+		-- envelope. Also added by registry migration 9 for databases
+		-- whose CREATE predates the column.
+		suggested_next_hint TEXT,
 		created_at     TEXT NOT NULL,
 		updated_at     TEXT NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -475,44 +480,13 @@ func (s *StepStore) migrate() error {
 		return err
 	}
 
-	// Post-migration: add columns for existing databases (ignore errors if column exists)
-	for _, col := range []string{
-		"ALTER TABLE task_steps ADD COLUMN revision_count INTEGER DEFAULT 0",
-		"ALTER TABLE task_steps ADD COLUMN recommendations TEXT",
-		"ALTER TABLE task_steps ADD COLUMN evidence TEXT",
-		"ALTER TABLE task_steps ADD COLUMN claims TEXT",
-		"ALTER TABLE task_steps ADD COLUMN validated BOOLEAN DEFAULT FALSE",
-		"ALTER TABLE task_steps ADD COLUMN validation_error TEXT",
-		"ALTER TABLE task_steps ADD COLUMN token_usage INTEGER DEFAULT 0",
-		"ALTER TABLE task_steps ADD COLUMN memory_refs TEXT",
-		"ALTER TABLE task_steps ADD COLUMN accumulated_context TEXT",
-		"ALTER TABLE task_steps ADD COLUMN model_override TEXT",
-		"ALTER TABLE task_steps ADD COLUMN checklist TEXT",
-		"ALTER TABLE task_steps ADD COLUMN phase TEXT",
-		"ALTER TABLE task_steps ADD COLUMN checkpoint_gate BOOLEAN DEFAULT FALSE",
-		"ALTER TABLE task_steps ADD COLUMN is_handoff BOOLEAN DEFAULT FALSE",
-		"ALTER TABLE task_steps ADD COLUMN conversation_id TEXT",
-		// Originating-session provenance (tree 04 leaf 02, audit R4).
-		"ALTER TABLE task_steps ADD COLUMN session_id TEXT",
-		// Successor hint (agent-routing tree leaf 03): advisory
-		// suggested-next hint copied from the finished step-job envelope.
-		"ALTER TABLE task_steps ADD COLUMN suggested_next_hint TEXT",
-		// Output-filter retry accounting (output-filters tree, leaf 03):
-		// filter rejections persist their own counter + last reason beside
-		// the evidence-validation verdict columns.
-		"ALTER TABLE task_steps ADD COLUMN filter_retry_count INTEGER DEFAULT 0",
-		"ALTER TABLE task_steps ADD COLUMN filter_error TEXT",
-		// Review verdict persistence (tiered-iteration leaf 03): the
-		// ReviewStep verdict was previously ephemeral (bus event only);
-		// persisting it beside the step lets the critic's evidence
-		// assembler read prior verdicts back per session.
-		"ALTER TABLE task_steps ADD COLUMN review_verdict TEXT",
-		"ALTER TABLE task_steps ADD COLUMN review_reason TEXT",
-		"ALTER TABLE task_steps ADD COLUMN review_at TEXT",
-	} {
-		_, _ = s.db.Exec(col)
-	}
-
+	// Column migrations live in the SHARED registry declared in
+	// store.go (migrations()): tasks and task_steps share one database
+	// file, and user_version is per-database, so both stores' migrations
+	// form one contiguous history. On a fresh database those steps were
+	// guard-skipped in Store.migrate (task_steps did not exist yet);
+	// after this CREATE script the schema is already current, and a
+	// legacy database had its columns added during Store.migrate.
 	return nil
 }
 

@@ -301,6 +301,9 @@
   ],
   "e2e/suites/acp-persona-route": [
    "acp-persona-route"
+  ],
+  "internal/migrate/": [
+   "migrate-eq"
   ]
  },
  "suites": [
@@ -620,6 +623,11 @@
   {
    "name": "acp-persona-route",
    "dir": "e2e/suites/acp-persona-route",
+   "status": "implemented"
+  },
+  {
+   "name": "migrate-eq",
+   "dir": "e2e/suites/migrate-eq",
    "status": "implemented"
   }
  ],
@@ -2835,6 +2843,24 @@
     "internal/rpc/acp.go",
     "internal/acp/relay.go",
     "internal/daemon/acp_notifier.go"
+   ]
+  },
+  {
+   "id": "migrate-eq-01",
+   "suite": "migrate-eq",
+   "diff": "M",
+   "title": "fresh vs migrated schema equality for metrics/task/plan/shadow stores",
+   "paths": [
+    "internal/migrate/migrate.go"
+   ]
+  },
+  {
+   "id": "migrate-eq-02",
+   "suite": "migrate-eq",
+   "diff": "S",
+   "title": "down-level binary against up-level database fails loud, never silently proceeds",
+   "paths": [
+    "internal/migrate/migrate.go"
    ]
   }
  ]

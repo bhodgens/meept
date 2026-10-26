@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/migrate"
 	"github.com/jmoiron/sqlx"
 
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
@@ -123,16 +123,12 @@ func (s *SQLiteStore) migrate() error {
 		return fmt.Errorf("failed to create schema: %w", err)
 	}
 
-	// Idempotent column migrations for plan_phases. SQLite returns an error
-	// if the column already exists; we swallow that specific error.
-	if err := s.addColumnIfMissing("plan_phases", "produces", "TEXT"); err != nil {
-		return fmt.Errorf("failed to add produces column: %w", err)
-	}
-	if err := s.addColumnIfMissing("plan_phases", "consumes", "TEXT"); err != nil {
-		return fmt.Errorf("failed to add consumes column: %w", err)
-	}
-	if err := s.addColumnIfMissing("plan_phases", "task_id", "TEXT"); err != nil {
-		return fmt.Errorf("failed to add task_id column: %w", err)
+	// Central registry migrations (internal/migrate; contract in
+	// docs/workflows/migrations.md). Pre-registry databases already carry
+	// these columns (added by the old addColumnIfMissing probes) with
+	// user_version 0; the guards skip the DDL and record the version.
+	if err := storeMigrations.Apply(s.db.DB, s.logger); err != nil {
+		return fmt.Errorf("failed to apply schema migrations: %w", err)
 	}
 
 	// Normalize legacy NULL project_id rows to ''. The store used to write
@@ -145,66 +141,52 @@ func (s *SQLiteStore) migrate() error {
 		return fmt.Errorf("failed to normalize NULL project_id: %w", err)
 	}
 
-	// Synthesis lease columns (bughunt 2026-10-08 runaway). See
-	// PlanManager.Synthesize: a plan is claimed into StateSynthesizing with a
-	// lease before any task is created, so a crash mid-expansion cannot leave
-	// the plan indistinguishable from one that was never expanded.
-	if err := s.addColumnIfMissing("plans", "synthesis_attempts", "INTEGER DEFAULT 0"); err != nil {
-		return fmt.Errorf("failed to add synthesis_attempts column: %w", err)
-	}
-	if err := s.addColumnIfMissing("plans", "synthesis_lease_until", "TEXT"); err != nil {
-		return fmt.Errorf("failed to add synthesis_lease_until column: %w", err)
-	}
-
-	// Goal linkage (goal-completion leaf 02, C3): every plan traces to its
-	// owning goal. Legacy rows keep NULL goal_id, which scans to "".
-	if err := s.addColumnIfMissing("plans", "goal_id", "TEXT"); err != nil {
-		return fmt.Errorf("failed to add goal_id column: %w", err)
-	}
-
 	return nil
 }
 
-// addColumnIfMissing adds a column to a table if it does not already exist.
-// SQLite doesn't support IF NOT EXISTS for ALTER TABLE ADD COLUMN prior to
-// 3.35, so we probe pragma table_info and ignore the duplicate-column error.
-func (s *SQLiteStore) addColumnIfMissing(table, column, colType string) error {
-	// Fast path: check if column exists via pragma.
-	// Use defer for Close so every return path releases the rows handle.
-	rows, err := s.db.QueryxContext(context.Background(),
-		"PRAGMA table_info("+table+")")
+// storeMigrations is the declared schema history for the plans database.
+// Validated once at package init; Apply is called from migrate().
+var storeMigrations = func() *migrate.Registry {
+	r, err := migrate.NewRegistry("plan", []migrate.Migration{
+		// Idempotent column migrations for plan_phases.
+		{
+			Version: 1,
+			Name:    "plan_phases produces/consumes/task_id",
+			SQL: `ALTER TABLE plan_phases ADD COLUMN produces TEXT;
+ALTER TABLE plan_phases ADD COLUMN consumes TEXT;
+ALTER TABLE plan_phases ADD COLUMN task_id TEXT;`,
+			Guard: migrate.ColumnsMissingGuard("plan_phases", "produces", "consumes", "task_id"),
+		},
+		// Synthesis lease columns (bughunt 2026-10-08 runaway). See
+		// PlanManager.Synthesize: a plan is claimed into StateSynthesizing
+		// with a lease before any task is created, so a crash
+		// mid-expansion cannot leave the plan indistinguishable from one
+		// that was never expanded.
+		{
+			Version: 2,
+			Name:    "plans synthesis lease columns",
+			SQL: `ALTER TABLE plans ADD COLUMN synthesis_attempts INTEGER DEFAULT 0;
+ALTER TABLE plans ADD COLUMN synthesis_lease_until TEXT;`,
+			Guard: migrate.ColumnsMissingGuard("plans", "synthesis_attempts", "synthesis_lease_until"),
+		},
+		// Goal linkage (goal-completion leaf 02, C3): every plan traces
+		// to its owning goal. Legacy rows keep NULL goal_id, which
+		// scans to "".
+		{
+			Version: 3,
+			Name:    "plans.goal_id goal linkage",
+			SQL:     "ALTER TABLE plans ADD COLUMN goal_id TEXT",
+			Guard: func(db *sql.DB) (bool, error) {
+				needed, err := migrate.ColumnExists(db, "plans", "goal_id")
+				return !needed, err
+			},
+		},
+	})
 	if err != nil {
-		return fmt.Errorf("pragma table_info(%s): %w", table, err)
+		panic(fmt.Sprintf("plan store migration registry invalid: %v", err))
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return fmt.Errorf("scan table_info: %w", err)
-		}
-		if name == column {
-			return nil // already exists
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate table_info: %w", err)
-	}
-
-	alter := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colType)
-	if _, err := s.db.Exec(alter); err != nil {
-		// Guard against the race where another connection added the column
-		// between our probe and the ALTER. SQLite reports "duplicate column
-		// name" in that case.
-		if strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			return nil
-		}
-		return fmt.Errorf("alter table %s add column %s: %w", table, column, err)
-	}
-	return nil
-}
+	return r
+}()
 
 // Close closes the database connection.
 func (s *SQLiteStore) Close() error {

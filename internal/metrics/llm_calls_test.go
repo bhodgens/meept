@@ -159,6 +159,14 @@ func TestModelPerformanceMigration_OldDBUpgrades(t *testing.T) {
 	if _, err := legacy.db.Exec(`DROP TABLE llm_calls`); err != nil {
 		t.Fatalf("drop llm_calls: %v", err)
 	}
+	// Reset user_version to 0: the registry (internal/migrate) stamps the
+	// version on first open, but this test is simulating a PRE-REGISTRY
+	// database (schema old, version unknown), which is exactly the case
+	// the guards exist for. Without the reset the reopen would correctly
+	// report "already at target" and skip the repair.
+	if _, err := legacy.db.Exec(`PRAGMA user_version = 0`); err != nil {
+		t.Fatalf("reset user_version: %v", err)
+	}
 	if err := legacy.Close(); err != nil {
 		t.Fatalf("close legacy: %v", err)
 	}

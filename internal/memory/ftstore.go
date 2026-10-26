@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/migrate"
 	"github.com/caimlas/meept/pkg/sqlite"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -186,30 +187,21 @@ func (s *SQLiteFTSStore) initSchema(ctx context.Context) error {
 	return nil
 }
 
-// migrateSchema applies schema migrations to existing tables.
-// FIX #0020: Adds columns that may be missing from older database versions.
+// migrateSchema applies schema migrations through the central registry
+// (internal/migrate; contract in docs/workflows/migrations.md). The table
+// DDL itself runs first via initSchema (CREATE TABLE IF NOT EXISTS), so
+// registry step 1 covers the post-table column additions the old
+// hand-rolled loop performed.
 func (s *SQLiteFTSStore) migrateSchema(ctx context.Context) error {
-	// Check and add missing columns with the SAME types the fresh DDL
-	// declares (H7, bughunt 2026-09-04): the old hardcoded "TEXT" for every
-	// column gave version/is_current TEXT affinity on migrated DBs, so
-	// COALESCE(MAX(version),0) compared lexicographically and version
-	// stalled at 9 (MAX('10','9')='9' → duplicate "version 10" rows
-	// forever). last_accessed_at/parent_id/search_text are genuinely TEXT;
-	// version/is_current are INTEGER (episodic.go DDL) and keep their
-	// default-free ADD form (SQLite column default applies per-add).
-	intCols := map[string]bool{"version": true, "is_current": true}
-	columns := []string{"last_accessed_at", "parent_id", "is_current", "version"}
-	if s.searchTextColumn {
-		columns = append(columns, "search_text")
+	reg, err := s.migrationRegistry()
+	if err != nil {
+		return err
 	}
-	for _, col := range columns {
-		colType, defaultVal := "TEXT", "DEFAULT ''"
-		if intCols[col] {
-			colType, defaultVal = "INTEGER", "DEFAULT 1"
-		}
-		if err := s.addColumnIfMissing(ctx, s.config.TableName, col, colType, defaultVal); err != nil {
-			s.logger.Warn("Column migration failed", "column", col, "error", err)
-		}
+	// Pre-registry databases already carry these columns (added by the
+	// old addColumnIfMissing loop) with user_version 0; the guards skip
+	// the DDL and record the version. Fresh databases run every step.
+	if aerr := reg.Apply(s.db.DB, s.logger); aerr != nil {
+		return aerr
 	}
 	// SearchText stores: legacy databases may still carry the pre-search_text
 	// FTS pair — triggers that INSERT content into the virtual table and a
@@ -327,43 +319,37 @@ func (s *SQLiteFTSStore) backfillSearchText(ctx context.Context) {
 	}
 }
 
-// addColumnIfMissing adds a column to a table if it doesn't exist.
-func (s *SQLiteFTSStore) addColumnIfMissing(ctx context.Context, tableName, columnName, colType, defaultVal string) error {
-	// Check if column exists by querying all columns
-	query := fmt.Sprintf("PRAGMA table_info(%s)", tableName)
-	rows, err := s.db.QueryContext(ctx, query)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var cid int
-		var name, dtype string
-		// dflt_value is NULL for columns without a DEFAULT clause — scan
-		// into *string or the whole migration errors out on the first such
-		// column and the missing column is never added (this is why
-		// search_text never appeared on legacy task/episodic tables).
-		var notnull, pk int
-		var dflt *string
-		if err := rows.Scan(&cid, &name, &dtype, &notnull, &dflt, &pk); err != nil {
-			return err
-		}
-		if name == columnName {
-			return nil // Column exists, nothing to do
+// migrationRegistry builds this store's declared schema history. Column
+// types match the fresh DDL exactly (H7, bughunt 2026-09-04): the old
+// hardcoded "TEXT" for every column gave version/is_current TEXT affinity
+// on migrated DBs, so COALESCE(MAX(version),0) compared lexicographically
+// and version stalled at 9 (MAX('10','9')='9' → duplicate "version 10"
+// rows forever). last_accessed_at/parent_id/search_text are genuinely
+// TEXT; version/is_current are INTEGER (episodic.go DDL) and keep their
+// default-free ADD form (SQLite column default applies per-add).
+func (s *SQLiteFTSStore) migrationRegistry() (*migrate.Registry, error) {
+	addCol := func(version int, name, column, colType, defaultVal string) migrate.Migration {
+		return migrate.Migration{
+			Version: version,
+			Name:    name,
+			SQL: fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s %s",
+				s.config.TableName, column, colType, defaultVal),
+			Guard: func(db *sql.DB) (bool, error) {
+				needed, err := migrate.ColumnExists(db, s.config.TableName, column)
+				return !needed, err
+			},
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("pragma table_info(%s) iteration: %w", tableName, err)
+	steps := []migrate.Migration{
+		addCol(1, "add last_accessed_at", "last_accessed_at", "TEXT", "DEFAULT ''"),
+		addCol(2, "add parent_id", "parent_id", "TEXT", "DEFAULT ''"),
+		addCol(3, "add is_current", "is_current", "INTEGER", "DEFAULT 1"),
+		addCol(4, "add version", "version", "INTEGER", "DEFAULT 1"),
 	}
-
-	// Column doesn't exist, add it
-	alterSQL := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s %s", tableName, columnName, colType, defaultVal)
-	if _, err := s.db.ExecContext(ctx, alterSQL); err != nil {
-		return fmt.Errorf("failed to add column %s: %w", columnName, err)
+	if s.searchTextColumn {
+		steps = append(steps, addCol(5, "add search_text", "search_text", "TEXT", "DEFAULT ''"))
 	}
-	s.logger.Info("Schema migration: added column", "table", tableName, "column", columnName)
-	return nil
+	return migrate.NewRegistry("memory/"+s.config.TableName, steps)
 }
 
 // GetDB returns the underlying sqlx.DB for custom queries.

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/migrate"
 	"github.com/caimlas/meept/pkg/sqlite"
 )
 
@@ -170,11 +171,14 @@ CREATE TABLE IF NOT EXISTS provider_stats (
 		if err != nil {
 			return err
 		}
-		// Idempotent migrations for existing databases. Errors are expected
-		// (duplicate column) when a database predates a given migration; the
-		// succeeding statement below re-verifies the schema is usable.
-		_, _ = db.ExecContext(ctx, "ALTER TABLE provider_requests ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0")
-		_, _ = db.ExecContext(ctx, "ALTER TABLE provider_requests ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0.0")
+		// Central registry migrations (internal/migrate; contract in
+		// docs/workflows/migrations.md). Pre-registry databases already
+		// carry these columns (added by the old tolerate-duplicate-column
+		// ALTERs) with user_version 0; the guard skips the DDL and records
+		// the version.
+		if err := storeMigrations.Apply(db, s.logger); err != nil {
+			return err
+		}
 
 		// Create model_cost_daily for persistent per-model cost tracking
 		const dailyCostSchema = `
@@ -199,6 +203,41 @@ CREATE INDEX IF NOT EXISTS idx_mcd_date ON model_cost_daily(date);
 		return nil
 	})
 }
+
+// storeMigrations is the declared schema history for the provider-metrics
+// database. Validated once at package init; Apply is called from
+// Initialize().
+var storeMigrations = func() *migrate.Registry {
+	r, err := migrate.NewRegistry("llm-metrics", []migrate.Migration{
+		{
+			// Fresh databases get cached_tokens inline in the CREATE
+			// script; pre-registry databases got it from the old
+			// tolerate-duplicate-column ALTER.
+			Version: 1,
+			Name:    "provider_requests.cached_tokens",
+			SQL:     "ALTER TABLE provider_requests ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0",
+			Guard: func(db *sql.DB) (bool, error) {
+				exists, err := migrate.ColumnExists(db, "provider_requests", "cached_tokens")
+				return !exists, err
+			},
+		},
+		{
+			// cost_usd is NOT in the CREATE script — it exists only via
+			// this migration, on fresh and legacy databases alike.
+			Version: 2,
+			Name:    "provider_requests.cost_usd",
+			SQL:     "ALTER TABLE provider_requests ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0.0",
+			Guard: func(db *sql.DB) (bool, error) {
+				exists, err := migrate.ColumnExists(db, "provider_requests", "cost_usd")
+				return !exists, err
+			},
+		},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("llm metrics store migration registry invalid: %v", err))
+	}
+	return r
+}()
 
 // Record logs a provider request asynchronously.
 // It queues the record for async processing; the caller is not blocked.

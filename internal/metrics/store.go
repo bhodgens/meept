@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/migrate"
 	"github.com/jmoiron/sqlx"
 
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
@@ -347,96 +348,159 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_agent_ts ON llm_calls(agent_id, timesta
 		return err
 	}
 
-	// Migration tolerance for pre-existing databases: SQLite's CREATE TABLE
-	// IF NOT EXISTS does not alter tables that already exist, so older DBs
-	// are missing the agent_id column (and its UNIQUE-constraint change).
-	// ALTER TABLE ADD COLUMN is idempotent-safe here only because we
-	// tolerate "duplicate column name" — it errors on DBs that already
-	// have it and succeeds on DBs that don't. Existing rows get the
-	// DEFAULT '' agent_id, which is correct (unknown agent).
-	if _, err := s.db.Exec("ALTER TABLE model_performance ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to add model_performance.agent_id: %w", err)
-		}
-	}
-
-	// llm_calls detail columns (tokscale ingest): session id + provider
-	// reasoning/cache-creation token counts. Same tolerate-duplicate-column
-	// pattern as above — pre-existing DBs get the NOT NULL DEFAULTs, which
-	// are correct (unknown session, tokens not reported).
-	if _, err := s.db.Exec("ALTER TABLE llm_calls ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to add llm_calls.session_id: %w", err)
-		}
-	}
-	if _, err := s.db.Exec("ALTER TABLE llm_calls ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to add llm_calls.reasoning_tokens: %w", err)
-		}
-	}
-	if _, err := s.db.Exec("ALTER TABLE llm_calls ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to add llm_calls.cache_creation_tokens: %w", err)
-		}
-	}
-
-	// The session index must be created AFTER the session_id column exists:
-	// on a pre-migration database this whole function runs against the old
-	// schema, so an index on session_id inside the script above would fail
-	// the entire store open ("no such column: session_id") before the ALTERs
-	// below had a chance to add it.
-	if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_llm_calls_session_ts ON llm_calls(session_id, timestamp DESC)"); err != nil {
-		return fmt.Errorf("failed to create idx_llm_calls_session_ts: %w", err)
-	}
-
-	// dispatch_log outcome-loop columns (classifier-observability S1):
-	// salted input hash replaces raw input_summary, plus classifier model
-	// provenance, Door-1 kNN margin, per-session turn number, and outcome
-	// capture. Same tolerate-duplicate-column pattern as llm_calls above.
-	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN input_hash TEXT NOT NULL DEFAULT ''"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to add dispatch_log.input_hash: %w", err)
-		}
-	}
-	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN model TEXT NOT NULL DEFAULT ''"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to add dispatch_log.model: %w", err)
-		}
-	}
-	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN margin REAL"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to add dispatch_log.margin: %w", err)
-		}
-	}
-	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN turn_no INTEGER NOT NULL DEFAULT 0"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to add dispatch_log.turn_no: %w", err)
-		}
-	}
-	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN outcome TEXT NOT NULL DEFAULT 'pending'"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to add dispatch_log.outcome: %w", err)
-		}
-	}
-	if _, err := s.db.Exec("ALTER TABLE dispatch_log ADD COLUMN corrected_agent TEXT NOT NULL DEFAULT ''"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to add dispatch_log.corrected_agent: %w", err)
-		}
-	}
-
-	// The dispatch_log hash/outcome indexes must be created AFTER the
-	// columns exist (same ordering rule as idx_llm_calls_session_ts above):
-	// on a pre-migration database the CREATE TABLE script above runs against
-	// the old schema, so an index on input_hash/outcome inside that script
-	// would fail the entire store open before the ALTERs added the columns.
-	if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_dispatch_log_hash ON dispatch_log(input_hash)"); err != nil {
-		return fmt.Errorf("failed to create idx_dispatch_log_hash: %w", err)
-	}
-	if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_dispatch_log_outcome ON dispatch_log(outcome)"); err != nil {
-		return fmt.Errorf("failed to create idx_dispatch_log_outcome: %w", err)
+	// Central registry migrations (internal/migrate; contract in
+	// docs/workflows/migrations.md). The CREATE TABLE IF NOT EXISTS script
+	// above already creates the current-shape tables on fresh databases,
+	// so the registry covers the historical column additions only.
+	// Pre-registry databases already carry these columns (added by the old
+	// tolerate-duplicate-column ALTERs) with user_version 0; the guards
+	// skip the DDL and record the version. The post-ALTER indexes
+	// (idx_llm_calls_session_ts, idx_dispatch_log_hash/outcome) ride in
+	// the same steps as their columns, preserving the old ordering rule:
+	// an index must never be created before its column exists.
+	if err := storeMigrations.Apply(s.db.DB, s.logger); err != nil {
+		return err
 	}
 	return nil
 }
+
+// columnMissingGuard returns a Guard that reports the step as needed
+// ("true" = run it) exactly when table lacks column — the legacy
+// tolerate-duplicate-column ALTER semantics expressed as a predicate.
+func columnMissingGuard(table, column string) func(*sql.DB) (bool, error) {
+	return func(db *sql.DB) (bool, error) {
+		exists, err := migrate.ColumnExists(db, table, column)
+		return !exists, err
+	}
+}
+
+// indexMissingGuard returns a Guard that reports the step as needed when
+// the named index does not exist. Post-ALTER indexes ride in their own
+// guarded steps so they are (re)created on fresh databases (whose CREATE
+// script does not include them) and on legacy databases alike.
+func indexMissingGuard(name string) func(*sql.DB) (bool, error) {
+	return func(db *sql.DB) (bool, error) {
+		exists, err := migrate.IndexExists(db, name)
+		return !exists, err
+	}
+}
+
+// storeMigrations is the declared schema history for the metrics database.
+// Validated once at package init; Apply is called from initSchema().
+var storeMigrations = func() *migrate.Registry {
+	r, err := migrate.NewRegistry("metrics", []migrate.Migration{
+		{
+			// agent_id + its UNIQUE-constraint change; existing rows get
+			// DEFAULT '' (unknown agent). SQLite cannot ADD a column into
+			// a UNIQUE constraint, so this step REBUILDS the table in its
+			// current shape (the pre-registry ALTER-only code left legacy
+			// databases on the old 3-column UNIQUE forever): create the
+			// new table, copy rows, drop, rename, recreate the indexes.
+			Version: 1,
+			Name:    "model_performance.agent_id (table rebuild)",
+			SQL: `CREATE TABLE model_performance_new (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id        TEXT NOT NULL,
+    provider        TEXT NOT NULL DEFAULT '',
+    agent_id        TEXT NOT NULL DEFAULT '',
+    total_requests  INTEGER NOT NULL DEFAULT 0,
+    total_errors    INTEGER NOT NULL DEFAULT 0,
+    avg_latency_ms  REAL NOT NULL DEFAULT 0,
+    avg_tokens_in   REAL NOT NULL DEFAULT 0,
+    avg_tokens_out  REAL NOT NULL DEFAULT 0,
+    period_start    TEXT NOT NULL,
+    period_end      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    UNIQUE(model_id, provider, agent_id, period_start)
+);
+INSERT INTO model_performance_new
+    (id, model_id, provider, agent_id, total_requests, total_errors,
+     avg_latency_ms, avg_tokens_in, avg_tokens_out, period_start,
+     period_end, updated_at)
+SELECT id, model_id, provider, '', total_requests, total_errors,
+       avg_latency_ms, avg_tokens_in, avg_tokens_out, period_start,
+       period_end, updated_at
+FROM model_performance;
+DROP TABLE model_performance;
+ALTER TABLE model_performance_new RENAME TO model_performance;
+CREATE INDEX IF NOT EXISTS idx_model_performance_period ON model_performance(period_start DESC);
+CREATE INDEX IF NOT EXISTS idx_model_performance_model ON model_performance(model_id);`,
+			Guard: func(db *sql.DB) (bool, error) {
+				needed, err := migrate.ColumnExists(db, "model_performance", "agent_id")
+				return !needed, err
+			},
+		},
+		{
+			// llm_calls session column (tokscale ingest). Fresh
+			// databases get it inline in the CREATE script; pre-registry
+			// databases got it from the old tolerate-duplicate-column
+			// ALTER. Existing rows get NOT NULL DEFAULT '' (unknown
+			// session).
+			Version: 2,
+			Name:    "llm_calls.session_id",
+			SQL:     "ALTER TABLE llm_calls ADD COLUMN session_id TEXT NOT NULL DEFAULT ''",
+			Guard:   columnMissingGuard("llm_calls", "session_id"),
+		},
+		{
+			// Provider reasoning/cache-creation token counts. Existing
+			// rows get the NOT NULL DEFAULTs (tokens not reported).
+			Version: 3,
+			Name:    "llm_calls reasoning/cache token columns",
+			SQL: `ALTER TABLE llm_calls ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE llm_calls ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0;`,
+			Guard: migrate.ColumnsMissingGuard("llm_calls", "reasoning_tokens", "cache_creation_tokens"),
+		},
+		{
+			// The session index must be created AFTER session_id exists:
+			// on a pre-migration database an index on session_id inside
+			// the CREATE script would fail the entire store open before
+			// the ALTER added the column. Guarded on the index itself so
+			// it is (re)created whenever missing, on fresh and legacy
+			// databases alike.
+			Version: 4,
+			Name:    "idx_llm_calls_session_ts session index",
+			SQL:     "CREATE INDEX IF NOT EXISTS idx_llm_calls_session_ts ON llm_calls(session_id, timestamp DESC)",
+			Guard:   indexMissingGuard("idx_llm_calls_session_ts"),
+		},
+		{
+			// dispatch_log outcome-loop columns (classifier-observability
+			// S1): salted input hash replaces raw input_summary, plus
+			// classifier model provenance, Door-1 kNN margin, per-session
+			// turn number, and outcome capture.
+			Version: 5,
+			Name:    "dispatch_log outcome-loop columns",
+			SQL: `ALTER TABLE dispatch_log ADD COLUMN input_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE dispatch_log ADD COLUMN model TEXT NOT NULL DEFAULT '';
+ALTER TABLE dispatch_log ADD COLUMN margin REAL;
+ALTER TABLE dispatch_log ADD COLUMN turn_no INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE dispatch_log ADD COLUMN outcome TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE dispatch_log ADD COLUMN corrected_agent TEXT NOT NULL DEFAULT '';`,
+			Guard: migrate.ColumnsMissingGuard("dispatch_log",
+				"input_hash", "model", "margin", "turn_no", "outcome", "corrected_agent"),
+		},
+		{
+			// The dispatch_log hash/outcome indexes must be created AFTER
+			// the columns exist (same ordering rule as
+			// idx_llm_calls_session_ts above). Guarded on the index
+			// itself; see step 4.
+			Version: 6,
+			Name:    "dispatch_log hash/outcome indexes",
+			SQL: `CREATE INDEX IF NOT EXISTS idx_dispatch_log_hash ON dispatch_log(input_hash);
+CREATE INDEX IF NOT EXISTS idx_dispatch_log_outcome ON dispatch_log(outcome);`,
+			Guard: func(db *sql.DB) (bool, error) {
+				hasHash, err := indexMissingGuard("idx_dispatch_log_hash")(db)
+				if err != nil || !hasHash {
+					return hasHash, err
+				}
+				return indexMissingGuard("idx_dispatch_log_outcome")(db)
+			},
+		},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("metrics store migration registry invalid: %v", err))
+	}
+	return r
+}()
 
 // flushLoop periodically flushes batched metrics.
 func (s *Store) flushLoop() {

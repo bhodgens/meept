@@ -13,7 +13,7 @@ import (
 
 	_ "modernc.org/sqlite" // sqlite3 driver registration
 
-	"github.com/caimlas/meept/internal/errcls"
+	"github.com/caimlas/meept/internal/migrate"
 )
 
 // Ensure implementations satisfy interfaces
@@ -26,23 +26,15 @@ var (
 	ErrNotFound = errors.New("record not found")
 )
 
-// Schema version constants
+// Schema version constants: the pre-registry ladder's targets. The
+// ladder itself is gone (migrations are declared in the central
+// internal/migrate registries below); the constants remain for
+// downgrade-detection diagnostics.
 const (
 	TrainingStoreSchemaVersion = 3
 	ExamplesStoreSchemaVersion = 2
 	AdaptersStoreSchemaVersion = 1
 )
-
-// setSchemaVersion persists the given schema version. E-14 FIX: Called after
-// each individual migration step succeeds so the version always reflects the
-// last completed step, not a future step that might fail.
-func setSchemaVersion(db *sql.DB, version int) error {
-	_, err := db.Exec(`
-		INSERT OR REPLACE INTO schema_version (id, version, migrated_at)
-		VALUES (1, ?, ?)
-	`, version, time.Now().UTC().Format(time.RFC3339))
-	return err
-}
 
 // SQLiteTrainingStore implements TrainingStore using SQLite.
 type SQLiteTrainingStore struct {
@@ -71,60 +63,32 @@ func NewSQLiteTrainingStore(dbPath string) (*SQLiteTrainingStore, error) {
 }
 
 func (s *SQLiteTrainingStore) migrate() error {
-	// Create schema version table
-	_, err := s.db.Exec(`
+	// Central registry migrations (internal/migrate; contract in
+	// docs/workflows/migrations.md). The schema_version table below is
+	// legacy bookkeeping kept for downgrade awareness: the old ladder
+	// stamped it, so pre-registry databases can be detected by
+	// legacySchemaVersion and their version carried into the registry
+	// (the guards then skip the already-applied DDL).
+	if _, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_version (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			version INTEGER NOT NULL,
 			migrated_at TEXT NOT NULL
 		)
-	`)
-	if err != nil {
+	`); err != nil {
 		return fmt.Errorf("failed to create schema_version table: %w", err)
 	}
 
-	// Get current version
-	currentVersion := 0
-	row := s.db.QueryRow("SELECT version FROM schema_version WHERE id = 1")
-	_ = row.Scan(&currentVersion) // Ignore error - table might be empty
-
-	// E-14 FIX: Bump schema version after each successful migration step,
-	// not once at the end. If a step fails, the persisted version reflects
-	// the last successful step and the caller's error prevents construction.
-	if currentVersion < 1 {
-		if err := s.migrateToV1(); err != nil {
-			return fmt.Errorf("migration to v1 failed: %w", err)
-		}
-		if err := setSchemaVersion(s.db, 1); err != nil {
-			return fmt.Errorf("failed to set schema version 1: %w", err)
-		}
-		currentVersion = 1
+	if err := trainingMigrations.Apply(s.db, slog.Default()); err != nil {
+		return fmt.Errorf("failed to apply schema migrations: %w", err)
 	}
-
-	if currentVersion < 2 {
-		if err := s.migrateToV2(); err != nil {
-			return fmt.Errorf("migration to v2 failed: %w", err)
-		}
-		if err := setSchemaVersion(s.db, 2); err != nil {
-			return fmt.Errorf("failed to set schema version 2: %w", err)
-		}
-		currentVersion = 2
-	}
-
-	if currentVersion < 3 {
-		if err := s.migrateToV3(); err != nil {
-			return fmt.Errorf("migration to v3 failed: %w", err)
-		}
-		if err := setSchemaVersion(s.db, 3); err != nil {
-			return fmt.Errorf("failed to set schema version 3: %w", err)
-		}
-	}
-
 	return nil
 }
 
-func (s *SQLiteTrainingStore) migrateToV1() error {
-	schema := `
+// trainingSchemaV1SQL is the v1 baseline DDL (shadow_records,
+// preference_pairs, daily_usage + indexes). It was previously
+// SQLiteTrainingStore.migrateToV1; it is now registry migration 1.
+const trainingSchemaV1SQL = `
 	CREATE TABLE IF NOT EXISTS shadow_records (
 		id TEXT PRIMARY KEY,
 		created_at TEXT NOT NULL,
@@ -170,56 +134,58 @@ func (s *SQLiteTrainingStore) migrateToV1() error {
 		teacher_queries INTEGER DEFAULT 0,
 		teacher_cost REAL DEFAULT 0.0
 	);
-	`
-	_, err := s.db.Exec(schema)
-	return err
-}
+`
 
-func (s *SQLiteTrainingStore) migrateToV2() error {
-	// Add any V2 schema changes here
-	// Example: Add metadata column to shadow_records if it doesn't exist
-	_, err := s.db.Exec(`
-		ALTER TABLE shadow_records ADD COLUMN metadata_json TEXT DEFAULT '';
-	`)
-	// Ignore error if column already exists (duplicate column). Otherwise
-	// return the error so the migration version is not bumped.
-	if err != nil && !errcls.IsDuplicateColumn(err) {
-		return fmt.Errorf("ALTER add metadata_json: %w", err)
+// trainingMigrations is the declared schema history for the training
+// database. Validated once at package init; Apply is called from
+// migrate(). Pre-registry databases (booked by the old schema_version
+// ladder) already carry every step's schema with user_version 0; the
+// guards skip the DDL and record the version.
+var trainingMigrations = func() *migrate.Registry {
+	r, err := migrate.NewRegistry("shadow/training", []migrate.Migration{
+		{
+			Version: 1,
+			Name:    "baseline shadow_records/preference_pairs/daily_usage",
+			SQL:     trainingSchemaV1SQL,
+			Guard: func(db *sql.DB) (bool, error) {
+				exists, err := tableExistsByName(db, "shadow_records")
+				return !exists, err
+			},
+		},
+		{
+			// Export tracking + metadata. The exported_at index rides
+			// here (it was migrateToV2's third statement).
+			Version: 2,
+			Name:    "shadow_records metadata_json/exported_at + export index",
+			SQL: `ALTER TABLE shadow_records ADD COLUMN metadata_json TEXT DEFAULT '';
+ALTER TABLE shadow_records ADD COLUMN exported_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_shadow_records_exported ON shadow_records(exported_at);`,
+			Guard: migrate.ColumnsMissingGuard("shadow_records", "metadata_json", "exported_at"),
+		},
+		{
+			// DPO export context columns.
+			Version: 3,
+			Name:    "preference_pairs domain/task_type/routing_path",
+			SQL: `ALTER TABLE preference_pairs ADD COLUMN domain TEXT DEFAULT '';
+ALTER TABLE preference_pairs ADD COLUMN task_type TEXT DEFAULT '';
+ALTER TABLE preference_pairs ADD COLUMN routing_path TEXT DEFAULT '';`,
+			Guard: migrate.ColumnsMissingGuard("preference_pairs", "domain", "task_type", "routing_path"),
+		},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("shadow training store migration registry invalid: %v", err))
 	}
+	return r
+}()
 
-	// Add export tracking
-	_, err = s.db.Exec(`
-		ALTER TABLE shadow_records ADD COLUMN exported_at TEXT;
-	`)
-	if err != nil && !errcls.IsDuplicateColumn(err) {
-		return fmt.Errorf("ALTER add exported_at: %w", err)
+// tableExistsByName reports whether a table named name exists. Guard
+// helper for baseline-DDL migrations.
+func tableExistsByName(db *sql.DB, name string) (bool, error) {
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, name).Scan(&n); err != nil {
+		return false, err
 	}
-
-	// Create index for export tracking
-	if _, ierr := s.db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_shadow_records_exported ON shadow_records(exported_at);
-	`); ierr != nil {
-		return fmt.Errorf("create index exported_at: %w", ierr)
-	}
-	return nil
-}
-
-// migrateToV3 adds domain, task_type, and routing_path columns to
-// preference_pairs so DPO exports can carry training context.
-func (s *SQLiteTrainingStore) migrateToV3() error {
-	_, err := s.db.Exec(`ALTER TABLE preference_pairs ADD COLUMN domain TEXT DEFAULT '';`)
-	if err != nil && !errcls.IsDuplicateColumn(err) {
-		return fmt.Errorf("ALTER add domain: %w", err)
-	}
-	_, err = s.db.Exec(`ALTER TABLE preference_pairs ADD COLUMN task_type TEXT DEFAULT '';`)
-	if err != nil && !errcls.IsDuplicateColumn(err) {
-		return fmt.Errorf("ALTER add task_type: %w", err)
-	}
-	_, err = s.db.Exec(`ALTER TABLE preference_pairs ADD COLUMN routing_path TEXT DEFAULT '';`)
-	if err != nil && !errcls.IsDuplicateColumn(err) {
-		return fmt.Errorf("ALTER add routing_path: %w", err)
-	}
-	return nil
+	return n > 0, nil
 }
 
 // SaveRecord saves a shadow record.
@@ -748,31 +714,19 @@ func (s *SQLiteExamplesStore) migrate() error {
 	row := s.db.QueryRow("SELECT version FROM schema_version WHERE id = 1")
 	_ = row.Scan(&currentVersion) // Ignore error - table might be empty
 
-	// E-14 FIX: Bump schema version after each successful migration step,
-	// not once at the end. If a step fails, the persisted version reflects
-	// the last successful step and the caller's error prevents construction.
-	if currentVersion < 1 {
-		if err := s.migrateToV1(); err != nil {
-			return fmt.Errorf("migration to v1 failed: %w", err)
-		}
-		if err := setSchemaVersion(s.db, 1); err != nil {
-			return fmt.Errorf("failed to set schema version 1: %w", err)
-		}
-		currentVersion = 1
+	// Central registry migrations (internal/migrate; contract in
+	// docs/workflows/migrations.md). See trainingMigrations for the
+	// pre-registry guard rationale.
+	if err := examplesMigrations.Apply(s.db, slog.Default()); err != nil {
+		return fmt.Errorf("failed to apply schema migrations: %w", err)
 	}
-
-	if currentVersion < 2 {
-		s.migrateToV2()
-		if err := setSchemaVersion(s.db, 2); err != nil {
-			return fmt.Errorf("failed to set schema version 2: %w", err)
-		}
-	}
-
 	return nil
 }
 
-func (s *SQLiteExamplesStore) migrateToV1() error {
-	schema := `
+// examplesSchemaV1SQL is the v1 baseline DDL (fewshot_examples + FTS5
+// pair + sync triggers). Previously SQLiteExamplesStore.migrateToV1; now
+// registry migration 1.
+const examplesSchemaV1SQL = `
 	CREATE TABLE IF NOT EXISTS fewshot_examples (
 		id TEXT PRIMARY KEY,
 		source_record_id TEXT NOT NULL,
@@ -809,28 +763,36 @@ func (s *SQLiteExamplesStore) migrateToV1() error {
 		INSERT INTO fewshot_fts(rowid, user_message) VALUES (new.rowid, new.user_message);
 	END;
 	`
-	_, err := s.db.Exec(schema)
-	return err
-}
 
-func (s *SQLiteExamplesStore) migrateToV2() {
-	// Add tags column for categorization. Ignore duplicate-column errors;
-	// log other errors at WARN.
-	_, err := s.db.Exec(`
-		ALTER TABLE fewshot_examples ADD COLUMN tags TEXT DEFAULT '';
-	`)
-	if err != nil && !errcls.IsDuplicateColumn(err) {
-		slog.Warn("shadow examples store migration: add tags failed", "error", err)
+// examplesMigrations is the declared schema history for the examples
+// database. The old migrateToV2 logged failures at WARN and continued;
+// the registry now fails the open instead (a missing tags/last_used_at
+// column breaks SaveExample reads — failing loud is the honest
+// behavior; rollback is restore-from-backup).
+var examplesMigrations = func() *migrate.Registry {
+	r, err := migrate.NewRegistry("shadow/examples", []migrate.Migration{
+		{
+			Version: 1,
+			Name:    "baseline fewshot_examples + FTS5 pair",
+			SQL:     examplesSchemaV1SQL,
+			Guard: func(db *sql.DB) (bool, error) {
+				exists, err := tableExistsByName(db, "fewshot_examples")
+				return !exists, err
+			},
+		},
+		{
+			Version: 2,
+			Name:    "fewshot_examples tags/last_used_at",
+			SQL: `ALTER TABLE fewshot_examples ADD COLUMN tags TEXT DEFAULT '';
+ALTER TABLE fewshot_examples ADD COLUMN last_used_at TEXT;`,
+			Guard: migrate.ColumnsMissingGuard("fewshot_examples", "tags", "last_used_at"),
+		},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("shadow examples store migration registry invalid: %v", err))
 	}
-
-	// Add last_used_at for recency tracking
-	_, err = s.db.Exec(`
-		ALTER TABLE fewshot_examples ADD COLUMN last_used_at TEXT;
-	`)
-	if err != nil && !errcls.IsDuplicateColumn(err) {
-		slog.Warn("shadow examples store migration: add last_used_at failed", "error", err)
-	}
-}
+	return r
+}()
 
 // SaveExample saves a few-shot example.
 func (s *SQLiteExamplesStore) SaveExample(ctx context.Context, example *FewShotExample) error {
@@ -1158,23 +1120,18 @@ func (s *SQLiteAdaptersStore) migrate() error {
 	row := s.db.QueryRow("SELECT version FROM schema_version WHERE id = 1")
 	_ = row.Scan(&currentVersion) // Ignore error - table might be empty
 
-	// E-14 FIX: Bump schema version after each successful migration step,
-	// not once at the end. If a step fails, the persisted version reflects
-	// the last successful step and the caller's error prevents construction.
-	if currentVersion < 1 {
-		if err := s.migrateToV1(); err != nil {
-			return fmt.Errorf("migration to v1 failed: %w", err)
-		}
-		if err := setSchemaVersion(s.db, 1); err != nil {
-			return fmt.Errorf("failed to set schema version 1: %w", err)
-		}
+	// Central registry migrations (internal/migrate; contract in
+	// docs/workflows/migrations.md). See trainingMigrations for the
+	// pre-registry guard rationale.
+	if err := adaptersMigrations.Apply(s.db, slog.Default()); err != nil {
+		return fmt.Errorf("failed to apply schema migrations: %w", err)
 	}
-
 	return nil
 }
 
-func (s *SQLiteAdaptersStore) migrateToV1() error {
-	schema := `
+// adaptersSchemaV1SQL is the v1 baseline DDL (adapters + training_runs).
+// Previously SQLiteAdaptersStore.migrateToV1; now registry migration 1.
+const adaptersSchemaV1SQL = `
 	CREATE TABLE IF NOT EXISTS adapters (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL UNIQUE,
@@ -1204,9 +1161,26 @@ func (s *SQLiteAdaptersStore) migrateToV1() error {
 
 	CREATE INDEX IF NOT EXISTS idx_training_runs_adapter ON training_runs(adapter_id);
 	`
-	_, err := s.db.Exec(schema)
-	return err
-}
+
+// adaptersMigrations is the declared schema history for the adapters
+// database.
+var adaptersMigrations = func() *migrate.Registry {
+	r, err := migrate.NewRegistry("shadow/adapters", []migrate.Migration{
+		{
+			Version: 1,
+			Name:    "baseline adapters + training_runs",
+			SQL:     adaptersSchemaV1SQL,
+			Guard: func(db *sql.DB) (bool, error) {
+				exists, err := tableExistsByName(db, "adapters")
+				return !exists, err
+			},
+		},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("shadow adapters store migration registry invalid: %v", err))
+	}
+	return r
+}()
 
 // SaveAdapter saves an adapter record.
 func (s *SQLiteAdaptersStore) SaveAdapter(ctx context.Context, adapter *Adapter) error {
