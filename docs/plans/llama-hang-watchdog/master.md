@@ -178,10 +178,10 @@ Serial chain by design: each leaf consumes the previous leaf's exact symbols. 00
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| 00T-gate-tests | PENDING | 0 | |
-| 01-canary-probe | PENDING | 0 | |
-| 02-hung-verdict-watchdog | PENDING | 0 | |
-| 03-e2e-suite-docs | PENDING | 0 | |
+| 00T-gate-tests | COMPLETE | 1 | Gate committed 00399abd; RED-verified: 72 errors, contracted symbols only |
+| 01-canary-probe | COMPLETE | 1 | Committed 3646f783; canary lane + config; review passed |
+| 02-hung-verdict-watchdog | COMPLETE | 1 | Committed adeb5f12; verdict tri-state + watchdog + RegisterConfig delta; all 12 gate tests GREEN; gate-test double-close fix accepted |
+| 03-e2e-suite-docs | COMPLETE | 1 | Committed 81dc09bf; e2e suite 18.7s GREEN; publisher wired in components.go; docs+AGENTS.md landed |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
@@ -211,7 +211,7 @@ Test leaf: 00T-gate-tests.md — dispatched in Phase 0, validated by the control
 | F7 | Verdict callback + bus event + metrics counter | 02 leaf, Contracts 2-3 | TestVerdictCallbackPayload (dualRecorder) | e2e: bus topic runtime.health observed | VALIDATED |
 | F8 | Self-watchdog: RunTicks advances; stalled run re-armed | 02 leaf, Contract 4 | runtime_manager_watchdog_internal_test.go: TestRunTicksAdvance, TestWatchdogRearmsStalledRun (watchdogTickOnce seam; wdogLogCapture + gateWaitFor fixtures for leaf 02 reuse) | n/a — internal; e2e kill-checker variant optional | VALIDATED |
 | F9 | Canary isolation: no llm_calls row, no Resolver/slot-gate touch | 01 leaf | TestCanaryBypassesLedger — behavior-driven llm_calls row count via existing store fixtures | n/a | VALIDATED |
-| F10 | e2e suite runtime-hang + manifest entry | 03 leaf | n/a | e2e/suites/runtime-hang/ (hermetic fake llama-server: healthy /health, wedged completions) | PENDING |
+| F10 | e2e suite runtime-hang + manifest entry | 03 leaf | n/a | e2e/suites/runtime-hang/ — fake wedged llama-server (file-controlled wedge; restart re-runs spawn_command), bus-subscribe pre-start, hung→restart→healthy assertions; `make e2e-fast-area AREA=runtime-hang` ok 18.7s (control-agent re-run 2026-10-25); committed 81dc09bf | VALIDATED |
 
 Statuses: PENDING | DELTA | VALIDATED
 
@@ -245,6 +245,17 @@ Delta log:
   follow-up — until wired, runtime.health events do not reach the bus.
   RegisterConfig canary-default fix landed as specified (CanaryEnabledExplicit
   guard + threshold>0 guard).
+- 2026-10-25, leaf 03 REVIEWED + committed 81dc09bf: e2e suite GREEN (18.7s,
+  control-agent re-run), manifest valid + completeness suite ok, neighbors
+  daemon-lifecycle/runtime-guards unaffected, go build ./... OK, daemon suite
+  GREEN, no leaked fakeserver processes. Deviations accepted: file-controlled
+  wedge (restart re-runs spawn_command — pure flag would wedge every respawn);
+  unhealthy_threshold=30 in suite config so HUNG is the verdict that fires;
+  Contract 3's metrics counter shipped as in-package HangRestartCount only
+  (no internal/metrics counter; docs state this honestly). Follow-ups noted:
+  HangRestartCount has no consumer outside tests (surface via status RPC or
+  metrics in a follow-up leaf). F10 → VALIDATED; all rows VALIDATED; tree
+  gate CLOSED pending integration checks (make test + analyzers running).
 - 2026-10-25, F1, open seam: ValidateAndNormalize sees only the lifecycle
   block; fixture declares the address in options.baseURL + health_check.endpoint.
   If leaf 01 resolves CanaryEnabled at RegisterConfig time instead, adjust the
