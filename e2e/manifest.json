@@ -313,6 +313,15 @@
   ],
   "e2e/suites/runtime-hang": [
    "runtime-hang"
+  ],
+  "e2e/suites/github-pr-ci": [
+   "github-pr-ci"
+  ],
+  "internal/githubsvc/": [
+   "github-pr-ci"
+  ],
+  "internal/tools/builtin/": [
+   "github-pr-ci"
   ]
  },
  "suites": [
@@ -642,6 +651,11 @@
   {
    "name": "runtime-hang",
    "dir": "e2e/suites/runtime-hang",
+   "status": "implemented"
+  },
+  {
+   "name": "github-pr-ci",
+   "dir": "e2e/suites/github-pr-ci",
    "status": "implemented"
   }
  ],
@@ -2898,6 +2912,42 @@
     "internal/llm/runtime_manager.go",
     "internal/daemon/components.go",
     "e2e/suites/runtime-hang/fakeserver/main.go"
+   ]
+  },
+  {
+   "id": "github-pr-ci-01",
+   "suite": "github-pr-ci",
+   "diff": "M",
+   "title": "create PR + wait for CI green: the fake GitHub sees exactly one POST /pulls and the github_ci_wait result reports all_green=true, having polled check-runs past the initial in_progress",
+   "paths": [
+    "internal/tools/builtin/github_pr.go",
+    "internal/tools/builtin/github_ci.go",
+    "internal/githubsvc/status.go",
+    "internal/daemon/github_wiring.go",
+    "e2e/suites/github-pr-ci/main_test.go"
+   ]
+  },
+  {
+   "id": "github-pr-ci-02",
+   "suite": "github-pr-ci",
+   "diff": "S",
+   "title": "[github] off by default (shipped posture): the executor's tool list carries none of the eight github_* tools",
+   "paths": [
+    "internal/config/schema.go",
+    "internal/daemon/github_wiring.go",
+    "e2e/suites/github-pr-ci/main_test.go"
+   ]
+  },
+  {
+   "id": "github-pr-ci-03",
+   "suite": "github-pr-ci",
+   "diff": "M",
+   "title": "effects-ledger reconcile: a pre-seeded CLAIMED row for EffectKey(github_pr_create,o,r,feat/x,feat/x: add PR) collides with the scripted call so the create is blocked (the fake POST counter never exceeds 1) and the prior-record error surfaces",
+   "paths": [
+    "internal/effects/effects.go",
+    "internal/tools/builtin/github_pr.go",
+    "internal/daemon/github_wiring.go",
+    "e2e/suites/github-pr-ci/main_test.go"
    ]
   }
  ]
