@@ -17,6 +17,7 @@ import (
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
+	"github.com/caimlas/meept/pkg/security"
 )
 
 // DispatchSubmitter is the interface for cross-daemon task dispatch.
@@ -191,6 +192,12 @@ func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
 		s.writeError(w, http.StatusGatewayTimeout, err.Error())
 	case errors.Is(err, services.ErrUnavailable):
 		s.writeError(w, http.StatusServiceUnavailable, err.Error())
+	case errors.Is(err, security.ErrCommandBlocked):
+		// A security guard (fence, risk classifier, permission table,
+		// scanner) refused the command BEFORE execution. That is an
+		// authorization outcome, not a server fault: 403, matching the
+		// PTY endpoint's fence rejection (pty_handler.go).
+		s.writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, queue.ErrJobNotClaimable):
 		// Completing a job that is not claimed/processing (pending, failed,
 		// already completed — e.g. requeued for another attempt) is a state

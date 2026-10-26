@@ -4453,6 +4453,8 @@ paths:
           description: Bad request
         '401':
           description: Unauthorized
+        '403':
+          description: Command blocked by a security guard before execution
         '500':
           description: Internal server error
 

@@ -171,9 +171,9 @@ func (t *ShellExecuteTool) checkPermissionTable(command string) error {
 	}
 	switch decision {
 	case intsecurity.ShellActionDeny:
-		return fmt.Errorf("command denied by shell permission table rule: %s", prefix)
+		return fmt.Errorf("%w: command denied by shell permission table rule: %s", security.ErrCommandBlocked, prefix)
 	case intsecurity.ShellActionAsk:
-		return fmt.Errorf("command requires user confirmation by shell permission table rule: %s", prefix)
+		return fmt.Errorf("%w: command requires user confirmation by shell permission table rule: %s", security.ErrCommandBlocked, prefix)
 	default:
 		return nil // allow: tirith still runs below (defense-in-depth)
 	}
@@ -422,7 +422,7 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	// Check fence boundaries
 	if t.fenceChecker != nil {
 		if err := t.fenceChecker.CheckCommand(command, workDir); err != nil {
-			return nil, fmt.Errorf("fence: %w", err)
+			return nil, fmt.Errorf("%w: fence: %w", security.ErrCommandBlocked, err)
 		}
 	}
 
@@ -430,7 +430,7 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	risk := t.classifyRisk(command)
 	if risk == RiskCritical {
 		baseCmd := extractBaseCommand(command)
-		return nil, fmt.Errorf("command blocked for safety: %s", baseCmd)
+		return nil, fmt.Errorf("%w: command blocked for safety: %s", security.ErrCommandBlocked, baseCmd)
 	}
 
 	// Declarative permission table: deny/ask short-circuit before tirith.
@@ -446,7 +446,7 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	} else {
 		blocked, warning, reason := t.securityOrch.ScanShellCommand(ctx, command)
 		if blocked {
-			return nil, fmt.Errorf("command blocked by security scanner: %s", reason)
+			return nil, fmt.Errorf("%w: command blocked by security scanner: %s", security.ErrCommandBlocked, reason)
 		}
 		// Warnings are logged by the orchestrator, but we continue execution
 		_ = warning
@@ -618,7 +618,7 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	// Check fence boundaries
 	if t.fenceChecker != nil {
 		if err := t.fenceChecker.CheckCommand(command, workDir); err != nil {
-			return nil, fmt.Errorf("fence: %w", err)
+			return nil, fmt.Errorf("%w: fence: %w", security.ErrCommandBlocked, err)
 		}
 	}
 
@@ -626,7 +626,7 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	risk := t.classifyRisk(command)
 	if risk == RiskCritical {
 		baseCmd := extractBaseCommand(command)
-		return nil, fmt.Errorf("command blocked for safety: %s", baseCmd)
+		return nil, fmt.Errorf("%w: command blocked for safety: %s", security.ErrCommandBlocked, baseCmd)
 	}
 
 	// Declarative permission table: deny/ask short-circuit before tirith.
@@ -640,7 +640,7 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	} else {
 		blocked, _, reason := t.securityOrch.ScanShellCommand(ctx, command)
 		if blocked {
-			return nil, fmt.Errorf("command blocked by security scanner: %s", reason)
+			return nil, fmt.Errorf("%w: command blocked by security scanner: %s", security.ErrCommandBlocked, reason)
 		}
 	}
 

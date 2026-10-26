@@ -2279,49 +2279,49 @@
     "path": "conversation_id",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 253
+    "line": 260
   },
   {
     "method": "GET",
     "path": "conversation_id",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 3597
+    "line": 3604
   },
   {
     "method": "GET",
     "path": "designation",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 4117
+    "line": 4124
   },
   {
     "method": "GET",
     "path": "duration",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 2678
+    "line": 2685
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7928
+    "line": 8065
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7939
+    "line": 8076
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 7920
+    "line": 8057
   },
   {
     "method": "GET",
@@ -2335,7 +2335,7 @@
     "path": "hash",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 1192
+    "line": 1199
   },
   {
     "method": "GET",
@@ -2377,14 +2377,14 @@
     "path": "kind",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 517
+    "line": 524
   },
   {
     "method": "GET",
     "path": "limit",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 4122
+    "line": 4129
   },
   {
     "method": "GET",
@@ -2419,14 +2419,14 @@
     "path": "name",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 4183
+    "line": 4190
   },
   {
     "method": "GET",
     "path": "offset",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 953
+    "line": 960
   },
   {
     "method": "GET",
@@ -2440,7 +2440,7 @@
     "path": "project_id",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 3069
+    "line": 3076
   },
   {
     "method": "GET",
@@ -2454,7 +2454,7 @@
     "path": "query",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 518
+    "line": 525
   },
   {
     "method": "GET",
@@ -2468,14 +2468,14 @@
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1332
+    "line": 1340
   },
   {
     "method": "GET",
     "path": "resolve",
     "handler": "",
     "file": "internal/daemon/daemon.go",
-    "line": 1513
+    "line": 1521
   },
   {
     "method": "GET",
@@ -2489,14 +2489,14 @@
     "path": "session_id",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 251
+    "line": 258
   },
   {
     "method": "GET",
     "path": "session_id",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 691
+    "line": 698
   },
   {
     "method": "GET",
@@ -2524,7 +2524,7 @@
     "path": "state",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 617
+    "line": 624
   },
   {
     "method": "GET",
@@ -2559,14 +2559,14 @@
     "path": "time_max",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 2521
+    "line": 2528
   },
   {
     "method": "GET",
     "path": "time_min",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 2520
+    "line": 2527
   },
   {
     "method": "GET",
@@ -2580,7 +2580,7 @@
     "path": "topic",
     "handler": "",
     "file": "internal/comm/http/api_handlers.go",
-    "line": 3888
+    "line": 3895
   },
   {
     "method": "GET",

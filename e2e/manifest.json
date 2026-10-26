@@ -870,6 +870,17 @@
    ]
   },
   {
+   "id": "http-auth-04",
+   "suite": "http-auth",
+   "diff": "S",
+   "title": "terminal/exec guard-blocked command -> 403 (not 500); benign command -> 200",
+   "paths": [
+    "internal/comm/http/api_handlers.go",
+    "internal/tools/builtin/shell.go",
+    "pkg/security/errors.go"
+   ]
+  },
+  {
    "id": "gui-pairing-01",
    "suite": "gui-pairing",
    "diff": "M",
