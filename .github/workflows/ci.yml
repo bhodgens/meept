@@ -10,6 +10,8 @@ name: CI
 #   - Python audit scripts (UTF-8 byte arithmetic, Dart enum shadowing)
 #   - Go test with race detector (highest-risk packages only for speed)
 #   - Full Go test without race detector
+#   - Hermetic e2e tier (make e2e-fast: fake LLM, sandboxed MEEPT_HOME,
+#     no live models; member of the ci-success aggregate gate)
 #
 # Adding a new analyzer: drop it under tools/analyzers/ and add a step below.
 
@@ -260,6 +262,43 @@ jobs:
       - name: go test -race ./pkg/id/...
         run: go test -race -count=3 ./pkg/id/...
 
+  # ─── Hermetic e2e tier (e2e/, build tag `e2e`) ─────────────────────────
+  # The hermetic fast tier: fresh scratch binaries, sandboxed HOME and
+  # MEEPT_HOME under $TMPDIR/meept-e2e-*, fake LLM (e2e/harness/fakellm.go).
+  # No live model, no live daemon, no secrets, no host-state dependence.
+  #
+  # code-quality.yml also runs this tier (job `e2e-fast`), but that workflow
+  # is not part of the ci-success aggregate gate below - a red suite there
+  # never blocked a merge protected by "CI success". This job is the gate
+  # member; the live-model tier (make e2e-chat) stays local-only by design.
+  e2e-fast:
+    name: E2E hermetic fast tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Download deps
+        run: go mod download
+
+      - name: Install cgo build deps (alsa headers for the oto audio driver)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libasound2-dev
+
+      - name: Run hermetic e2e suites (make e2e-fast)
+        # The target already pins -count=1 (no cached results) and -p 2
+        # (canonical package-parallelism bound). Full tier measured 13m04s
+        # wall on a local 63-suite run (2026-10-25); 30 minutes leaves ~2x
+        # headroom for the slower shared runner. Any red suite fails this
+        # step via go test's exit code, and the job is a required member of
+        # ci-success below.
+        run: make e2e-fast
+
   # ─── Aggregate gate ───────────────────────────────────────────────────
   # Required-status-check name for branch protection. Succeeds only when
   # every job above succeeds.
@@ -273,6 +312,7 @@ jobs:
       - go-test
       - go-setter-tests
       - pkg-id-tests
+      - e2e-fast
     steps:
       - name: Report success
         run: echo "All CI checks passed."

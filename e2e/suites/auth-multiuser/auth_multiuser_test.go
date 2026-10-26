@@ -70,12 +70,14 @@ func startMultiUser(t *testing.T) *authStack {
 	// The harness daemon already booted with the old config. The multiuser
 	// wiring happens at HTTP-server construction, so stop it and boot one
 	// more time against the rewritten config (harness stop() is idempotent
-	// and cleans up its daemon slot at test end either way).
-	pid := s.Daemon.Pid()
-	if p, err := os.FindProcess(pid); err == nil {
-		_ = p.Signal(syscallTERM())
-	}
-	waitForDaemonDown(t, s)
+	// and cleans up its daemon slot at test end either way). Stop() — not a
+	// bare SIGTERM — is required here: the daemon removes its pidfile via a
+	// defer on the Run() path, so a replacement daemon must not boot until
+	// the old process has actually EXITED, or checkExisting() sees the
+	// still-present pidfile and fails with "daemon already running". A
+	// health-poll ("listener down") does not prove that; Stop()'s
+	// wait-for-exit does.
+	s.Daemon.Stop()
 	_ = os.Remove(s.SocketPath)
 	bootExtra(t, s)
 

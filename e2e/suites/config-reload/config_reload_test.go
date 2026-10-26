@@ -26,7 +26,12 @@ func readConfig(t *testing.T, s *harness.Stack) string {
 	return string(data)
 }
 
-// hup sends SIGHUP to the daemon and waits for the reload to settle.
+// hup sends SIGHUP to the daemon and waits for the reload to settle by
+// polling /health. A fixed sleep is NOT enough: under load the reload path
+// can rebind the TLS listener after any fixed delay, and a one-shot health
+// GET then sees connection-refused (observed flake: TestBadReloadKeepsOld-
+// Config failed twice under full-tier load, passed in isolation every
+// time). The poll treats "not answering yet" as "keep waiting".
 func hup(t *testing.T, s *harness.Stack, pid int) {
 	t.Helper()
 	p, err := os.FindProcess(pid)
@@ -36,7 +41,7 @@ func hup(t *testing.T, s *harness.Stack, pid int) {
 	if err := p.Signal(syscall.SIGHUP); err != nil {
 		t.Fatalf("SIGHUP: %v", err)
 	}
-	time.Sleep(1500 * time.Millisecond)
+	harness.WaitFor(t, 30*time.Second, "health ok after config reload", s.HealthOK)
 }
 
 // config-reload-01 (part 1): SIGHUP triggers a reload and the daemon keeps

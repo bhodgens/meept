@@ -927,6 +927,20 @@ func (s *Stack) httpInsecureClient() *http.Client {
 	}
 }
 
+// HealthOK is the non-fatal health probe: true iff /health answers 200.
+// Use inside harness.WaitFor poll closures — HealthJSON fatals on the
+// first refused connection, which turns a slow (not failed) config reload
+// or listener rebind into a red test.
+func (s *Stack) HealthOK() bool {
+	client := s.httpInsecureClient()
+	resp, err := client.Get(s.HTTPBaseURL() + "/health") //nolint:noctx // bounded probe
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 // WaitFor polls cond every 250ms until it passes or the timeout expires.
 func WaitFor(t testing.TB, timeout time.Duration, what string, cond func() bool) {
 	t.Helper()

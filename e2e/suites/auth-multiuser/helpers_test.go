@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
@@ -28,37 +27,14 @@ func sha256Hex(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// syscallTERM wraps syscall.SIGTERM (keeps the main file's imports lean).
-func syscallTERM() os.Signal { return syscall.SIGTERM }
-
-// waitForDaemonDown polls the sandbox health endpoint until the daemon
-// stops answering (SIGTERM accepted). The harness's own cleanup later waits
-// on the process itself; here we only need the ports/socket released.
-func waitForDaemonDown(t *testing.T, s *harness.Stack) {
-	t.Helper()
-	client := &http.Client{
-		Timeout: 1500 * time.Millisecond,
-		Transport: &http.Transport{
-			TLSClientConfig:   insecureTLSConf(),
-			ForceAttemptHTTP2: false,
-		},
-	}
-	deadline := time.Now().Add(45 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(s.HTTPBaseURL() + "/health") //nolint:noctx // bounded poll in test harness
-		if err != nil {
-			// Connection refused/EOF => the listener is down.
-			return
-		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		time.Sleep(200 * time.Millisecond)
-	}
-	t.Fatal("daemon still answering after SIGTERM within 45s")
-}
-
 // bootExtra boots a fresh daemon against the stack's sandbox (same flags
 // and env as harness.Daemon.boot) and waits for /health.
+//
+// Boot-death detection waits on cmd.Wait() — NOT Signal(syscall.Signal(0)).
+// The extra daemon is a direct child of the test binary; until something
+// reaps it, a dead child still answers signal 0 as a zombie, so a signal
+// probe turns every early boot failure into a silent 60s timeout. The
+// exited channel fires the moment the process is reaped.
 func bootExtra(t *testing.T, s *harness.Stack) {
 	t.Helper()
 
@@ -82,6 +58,8 @@ func bootExtra(t *testing.T, s *harness.Stack) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start daemon: %v", err)
 	}
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
 
 	client := &http.Client{
 		Timeout: 2 * time.Second,
@@ -97,16 +75,20 @@ func bootExtra(t *testing.T, s *harness.Stack) {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				// The extra daemon writes its pidfile; the test's deferred
-				// cleanup uses it to stop the process.
+				// cleanup uses it to stop the process. The reaper
+				// goroutine stays parked until the daemon eventually
+				// exits (cleanup) and reaps it then.
 				return
 			}
+		}
+		select {
+		case <-exited:
+			t.Fatalf("multi-user daemon died during boot; log tail:\n%s", s.Daemon.LogTail())
+		default:
 		}
 		if time.Now().After(deadline) {
 			_ = cmd.Process.Kill()
 			t.Fatalf("multi-user daemon not healthy within 60s; log tail:\n%s", s.Daemon.LogTail())
-		}
-		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
-			t.Fatalf("multi-user daemon died during boot; log tail:\n%s", s.Daemon.LogTail())
 		}
 		time.Sleep(250 * time.Millisecond)
 	}

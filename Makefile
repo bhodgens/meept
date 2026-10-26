@@ -1564,15 +1564,19 @@ e2e-clean-tmp:
 	fi
 
 .PHONY: e2e-fast e2e-fast-area e2e-affected e2e-affected-area
+# -count=1 on both Go targets: the tier is hermetic and cheap to re-run, so
+# a cached test result (go's test binary cache) is never what CI or a
+# release gate should trust. e2e-affected gets the same flag from
+# scripts/e2e-affected.sh.
 e2e-fast: e2e-clean-tmp
-	go test -tags e2e ./e2e/... -p 2
+	go test -tags e2e -count=1 ./e2e/... -p 2
 
 e2e-fast-area: e2e-clean-tmp
 	@if [ -z "$(AREA)" ]; then \
 		echo "usage: make e2e-fast-area AREA=<suite dir under e2e/suites>"; \
 		exit 2; \
 	fi
-	go test -tags e2e ./e2e/suites/$(AREA)/... -p 2
+	go test -tags e2e -count=1 ./e2e/suites/$(AREA)/... -p 2
 
 e2e-affected: e2e-clean-tmp
 	bash scripts/e2e-affected.sh --from-diff

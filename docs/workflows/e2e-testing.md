@@ -7,7 +7,7 @@ tests go. Enforcement lives in the pre-commit hook (check [18/18]).
 
 | Tier | Command | What it is |
 |------|---------|------------|
-| **Fast (hermetic)** | `make e2e-fast` | Go tests under `e2e/suites/` with the `e2e` build tag. Fresh binaries, sandboxed `HOME`/`MEEPT_HOME`, fake LLM. Never touches `~/.meept` or a live daemon. Seconds per suite. Runs in CI (code-quality.yml, job `e2e-fast`) and in the pre-commit hook via the affected-suite gate. |
+| **Fast (hermetic)** | `make e2e-fast` | Go tests under `e2e/suites/` with the `e2e` build tag. Fresh binaries, sandboxed `HOME`/`MEEPT_HOME`, fake LLM. Never touches `~/.meept` or a live daemon. Seconds per suite; the full tier is ~13 min wall (`-p 2`, 63 suites, measured 2026-10-25). Runs in CI (ci.yml, job `e2e-fast`, a member of the `ci-success` aggregate gate; code-quality.yml runs the same tier as `e2e-fast` too) and in the pre-commit hook via the affected-suite gate. |
 | **Fast, Dart tier** | `make e2e-affected-area AREA=gui-flows` | The `gui-flows` suite: Flutter widget/provider tests under `ui/flutter_ui/test/e2e`, driven by `flutter test test/e2e` (NOT `go test`). Runs in CI (code-quality.yml, job `e2e-gui`) and via the affected-suite gate when a `ui/**` path changes. |
 | **Live-model** | `make e2e-chat` | `scripts/e2e-naive-user-chat.sh` drives a real daemon with a real model through a naive-user chat comparison. Slow, costs tokens, needs a configured local daemon. Local-only by design — never in CI. Its scenario also ships as the hermetic twin `e2e/suites/naive-user-chat/` (manifest-registered; CI + pre-commit coverage for the A0-A6 contract). |
 
@@ -153,9 +153,28 @@ runs the smoke suite instead, so the gate never degrades to a no-op.
 MEEPT_E2E_SKIP=1 git push   # loud skip of this gate only (emergencies)
 ```
 
-CI's `make e2e-fast` (job `e2e-fast`) is the third, remote-enforced line;
-the push gate is what makes the local bypass non-shippable before CI
-even starts.
+CI's `make e2e-fast` (ci.yml, job `e2e-fast`; also run by code-quality.yml's
+`e2e-fast` job) is the third, remote-enforced line; the push gate is what
+makes the local bypass non-shippable before CI even starts. The ci.yml job
+is a member of that workflow's `ci-success` aggregate gate, so a red
+hermetic suite fails the required status check - the code-quality.yml copy
+is advisory from that gate's point of view.
+
+## CI coverage details
+
+The ci.yml `e2e-fast` job runs the FULL hermetic tier (`make e2e-fast` =
+`go test -tags e2e -count=1 ./e2e/... -p 2`) on ubuntu-latest:
+
+- No live models: the harness routes every alias at the in-process fake LLM
+  (`e2e/harness/fakellm.go`); nothing dials an external endpoint.
+- No host-state dependence: every suite builds scratch binaries into
+  `$TMPDIR/meept-e2e-*`, points `MEEPT_HOME`/`HOME` inside that sandbox,
+  and the harness cleans up after itself (watchdog reaper + 24h sweep +
+  `e2e-clean-tmp`).
+- Job budget: 30 minutes against a measured ~13 min local wall; the
+  alsa headers step matches the other Go jobs (cgo oto dependency).
+- The Dart tier (`gui-flows`) is NOT in this job - it needs the Flutter
+  SDK and runs in code-quality.yml's `e2e-gui` job.
 
 ## NO-NEW-UNIT-TESTS policy
 
