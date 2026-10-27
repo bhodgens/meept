@@ -873,6 +873,10 @@ audit-scripts:
 		echo "  utf8-byte-arithmetic..."; \
 		python3 scripts/audit-utf8-byte-arithmetic.py || exit 1; \
 	fi
+	@if [ -f scripts/audit-secrets-value-callers.py ]; then \
+		echo "  secrets-value-callers..."; \
+		python3 scripts/audit-secrets-value-callers.py || exit 1; \
+	fi
 	@if [ -f scripts/research-harness-lit.py ]; then \
 		echo "  research-harness-lit..."; \
 		python3 scripts/research-harness-lit.py --check || exit 1; \
