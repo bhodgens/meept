@@ -1629,21 +1629,24 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				logger.Info("Hierarchical budget status HTTP getter registered", "endpoint", "/api/v1/sessions/{id}/budget")
 			}
 
-			// Wire budget stats getter for HTTP endpoint (FIX #0031/#0035).
-			// NOTE: the comm/http Server still exposes the legacy 14-value
-			// tuple getter; the snapshot getter (budget-status-consistency
-			// Contract 1) is wired at the RPC site above. Migrating this
-			// site needs a BudgetStatusSnapshotGetter field on
-			// internal/comm/http/server.go, which is outside this leaf's
-			// allowed file set (see Deviations).
+			// Wire budget stats getters for the HTTP endpoint (FIX #0031/#0035).
+			// Snapshot pass-through of the authoritative Budget.GetStatus()
+			// (budget-status-consistency Contract 1/3, leaf 02 — same closure
+			// style as the RPC site's leaf-01 migration): the booleans ride the
+			// snapshot so the HTTP status handler never recomputes them from
+			// raw counters. The legacy 14-value tuple getter stays wired during
+			// the transition (other consumers/tests may read it).
 			if components.LLMClient != nil {
 				budget := components.LLMClient.Budget()
 				if budget != nil {
+					httpSrv.BudgetStatusSnapshotGetter = func() llm.BudgetStatusSnapshot {
+						return llm.SnapshotFromStatus(budget.GetStatus())
+					}
 					httpSrv.BudgetStatusGetter = func() (int, int, int, int, int, int, float64, float64, float64, float64, float64, float64, int, int) {
 						bs := budget.GetStatus()
 						return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit, bs.PerTaskCost, bs.PerSessionCost, bs.PerTaskBudget, bs.PerSessionBudget
 					}
-					logger.Info("Budget stats HTTP getter registered")
+					logger.Info("Budget stats HTTP getters registered (snapshot + legacy)")
 				}
 			}
 

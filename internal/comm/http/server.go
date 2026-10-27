@@ -32,6 +32,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/mcp"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
@@ -140,7 +141,17 @@ type Server struct {
 
 	// BudgetStatusGetter is an optional callback that returns budget stats.
 	// Used by the status handler to report actual token and cost usage.
+	// Legacy shape: preferred is BudgetStatusSnapshotGetter below; when only
+	// this tuple is wired the status handler bridges it through
+	// llm.LegacyTupleBudgetSnapshot (budget-status-consistency tree, leaf 02).
 	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64, perTaskCost float64, perSessionCost float64, perTaskBudget int, perSessionBudget int)
+
+	// BudgetStatusSnapshotGetter is the preferred budget callback: it
+	// returns a flat pass-through snapshot of the authoritative
+	// Budget.GetStatus() (budget-status-consistency tree, leaf 02 — mirrors
+	// rpc.Server's leaf-01 shape), so the status handler never recomputes
+	// the within-budget booleans from raw counters.
+	BudgetStatusSnapshotGetter func() llm.BudgetStatusSnapshot
 
 	// CompressionStatsGetter is an optional callback that returns compression
 	// pipeline statistics. Used by the compression stats handler.
@@ -2331,25 +2342,42 @@ func (s *Server) handleDaemonStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Add budget status if BudgetStatusGetter is available
-	if s.BudgetStatusGetter != nil {
-		hourlyUsed, hourlyRemaining, dailyUsed, dailyRemaining, rpmCurrent, rpmLimit, dailyCostUsed, dailyCostLimit, hourlyCostUsed, hourlyCostLimit, perTaskCost, perSessionCost, perTaskBudget, perSessionBudget := s.BudgetStatusGetter()
+	// Add budget status if a budget getter is available. The booleans are a
+	// pure pass-through of the authoritative Budget.GetStatus()
+	// (budget-status-consistency tree, leaf 02 — mirrors the rpc/server.go
+	// leaf-01 pattern): the snapshot getter is preferred; the legacy
+	// 14-value tuple is bridged through llm.LegacyTupleBudgetSnapshot so
+	// the booleans keep the authoritative disabled-limits semantics (limit
+	// 0 = unconstrained) without any recompute in this handler.
+	if s.BudgetStatusSnapshotGetter != nil || s.BudgetStatusGetter != nil {
+		var snap llm.BudgetStatusSnapshot
+		if s.BudgetStatusSnapshotGetter != nil {
+			snap = s.BudgetStatusSnapshotGetter()
+		} else {
+			hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl, ptc, psc, ptb, psb := s.BudgetStatusGetter()
+			// This surface has no TokenLimitGetter: pass 0/0 (disabled =
+			// unconstrained) so a disabled budget never recomputes to
+			// over-budget. Production wiring uses the snapshot getter;
+			// the bridge exists for legacy tuple consumers/tests.
+			snap = llm.LegacyTupleBudgetSnapshot(hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl, ptc, psc, ptb, psb, 0, 0)
+		}
 		status["budget"] = map[string]any{
-			"hourly_used":        hourlyUsed,
-			"hourly_remaining":   hourlyRemaining,
-			"daily_used":         dailyUsed,
-			"daily_remaining":    dailyRemaining,
-			"rpm_current":        rpmCurrent,
-			"rpm_limit":          rpmLimit,
-			"daily_cost_used":    dailyCostUsed,
-			"daily_cost_limit":   dailyCostLimit,
-			"hourly_cost_used":   hourlyCostUsed,
-			"hourly_cost_limit":  hourlyCostLimit,
-			"per_task_cost":      perTaskCost,
-			"per_session_cost":   perSessionCost,
-			"per_task_budget":    perTaskBudget,
-			"per_session_budget": perSessionBudget,
-			"within_budget":      hourlyUsed < hourlyRemaining && dailyUsed < dailyRemaining,
+			"hourly_used":        snap.HourlyUsed,
+			"hourly_remaining":   snap.HourlyRemaining,
+			"daily_used":         snap.DailyUsed,
+			"daily_remaining":    snap.DailyRemaining,
+			"rpm_current":        snap.RPMCurrent,
+			"rpm_limit":          snap.RPMLimit,
+			"daily_cost_used":    snap.DailyCostUsed,
+			"daily_cost_limit":   snap.DailyCostLimit,
+			"hourly_cost_used":   snap.HourlyCostUsed,
+			"hourly_cost_limit":  snap.HourlyCostLimit,
+			"per_task_cost":      snap.PerTaskCost,
+			"per_session_cost":   snap.PerSessionCost,
+			"per_task_budget":    snap.PerTaskBudget,
+			"per_session_budget": snap.PerSessionBudget,
+			"within_budget":      snap.WithinBudget,
+			"within_cost_budget": snap.WithinCostBudget,
 		}
 	}
 
