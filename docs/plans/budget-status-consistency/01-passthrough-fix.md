@@ -49,6 +49,25 @@ Update BOTH daemon.go wiring sites identically (they return `bs.*` from
 first: rpc already imports llm for other getters — verify with
 `go list -deps`), fall back to tuple+2 and say why in Deviations.
 
+### Task 1b: budget.go WithinBudget disabled-limits fix (Contract 4, delta 2026-10-27)
+
+`internal/llm/budget.go:731` — `WithinBudget: hourlyUsed < effHourly &&
+b.dailyUsed < effDaily && withinCostBudget` reads false when token limits are
+disabled (0). Apply the same limit>0 guard shape the cost half already uses
+(:707-712):
+
+```go
+withinTokenBudget := true
+if b.hourlyLimit > 0 { withinTokenBudget = hourlyUsed < effHourly }
+if b.dailyLimit > 0 { withinTokenBudget = withinTokenBudget && b.dailyUsed < effDaily }
+// ...
+WithinBudget: withinTokenBudget && withinCostBudget,
+```
+
+(Check existing budget_test.go expectations for WithinBudget with zero limits
+first; if any test pins the CURRENT false behavior, that test is wrong per
+Contract 4 — report it, do not silently rewrite.)
+
 ### Task 2: RPC handler pass-through (Contracts 2, 4)
 
 `internal/rpc/server.go`:

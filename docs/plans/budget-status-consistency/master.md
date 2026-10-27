@@ -28,6 +28,13 @@ when > 0), but wire surfaces diverge:
    `meept-bench doctor` showed `within_cost_budget: false`,
    `tokens_remaining: 0` on a healthy unlimited daemon and an orchestrator
    misdiagnosed budget exhaustion for hours.
+1b. **BUG (found by gate-phase probe, 2026-10-27) — `internal/llm/budget.go:731`:**
+   `WithinBudget: hourlyUsed < effHourly && b.dailyUsed < effDaily &&
+   withinCostBudget` — with token limits disabled (0), `hourlyUsed < 0` is
+   **false**, so even the authoritative Status reports WithinBudget=false on
+   an unlimited config. The cost half (:707-712) got the limit>0 guards; the
+   token half did not. Fix: `(effHourly == 0 || hourlyUsed < effHourly) &&
+   (effDaily == 0 || b.dailyUsed < effDaily) && withinCostBudget`.
 2. **Ambiguity — `tokens_remaining: 0`:** `budget.go:664` computes
    `hourlyRemaining = max(effHourly-hourlyUsed, 0)`, so disabled (limit 0)
    and exhausted both serialize as 0. The partial fix already in place is
@@ -90,7 +97,9 @@ compat).
 
 ### Contract 4: pinned disabled-limits shape (the regression contract)
 
-With all budget limits 0 (repo-shipped default), a status response asserts:
+With all budget limits 0 (repo-shipped default), `Budget.GetStatus()` itself
+asserts `WithinBudget == true` AND `WithinCostBudget == true` (bug 1b fix),
+and a status response asserts:
 `within_budget == true`, `within_cost_budget == true`,
 `hourly_token_limit == 0`, `daily_token_limit == 0`,
 `tokens_remaining == 0`, `tokens_used == <whatever was consumed>`.
@@ -178,7 +187,15 @@ Test leaf: 00T-gate-tests.md — dispatched in Phase 0, validated by the control
 
 Statuses: PENDING | DELTA | VALIDATED
 
-Delta log: (none yet)
+Delta log:
+- 2026-10-27, Contract 4 + Goal, plan-updated (reality was the greater
+  artifact): gate-phase scratch probe (subagent, pre-failure) proved
+  `Status.WithinBudget` is ALSO wrong for disabled token limits
+  (budget.go:731 lacks the limit>0 guards its cost twin has). Probe: disabled
+  → WithinBudget=false, WithinCostBudget=true, usage 500, all limits 0.
+  Gate leaf now must pin the budget-level disabled shape too; leaf 01 scope
+  extended to budget.go:731. First gate dispatch failed on provider outage
+  (no files landed; re-dispatch follows).
 
 ## Open Questions
 
