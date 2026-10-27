@@ -91,8 +91,9 @@ func (s FileTokenSource) Token(ctx context.Context) (string, error) {
 	return token, nil
 }
 
-// SecretsTokenSource resolves a token from the secrets Broker's child
-// value for SecretName.
+// SecretsTokenSource resolves a token from the secrets Broker's REAL value
+// for SecretName (Broker.Value — the in-process accessor). Placeholder and
+// missing values fail closed with ErrNoToken. The token is never logged.
 type SecretsTokenSource struct {
 	Broker     *secrets.Broker
 	SecretName string
@@ -103,7 +104,7 @@ func (s SecretsTokenSource) Token(ctx context.Context) (string, error) {
 	if s.Broker == nil {
 		return "", fmt.Errorf("%w: no secrets broker configured for %q", ErrNoToken, s.SecretName)
 	}
-	val, err := s.Broker.ChildValue(s.SecretName)
+	val, err := s.Broker.Value(s.SecretName)
 	if err != nil {
 		return "", fmt.Errorf("githubsvc: resolve secret %q: %w: %w", s.SecretName, ErrNoToken, err)
 	}

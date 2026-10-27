@@ -154,6 +154,21 @@ func (b *Broker) ChildValue(name string) (string, error) {
 	return Placeholder(name), nil
 }
 
+// Value returns the REAL value for name, for in-process consumers only
+// (a Go service compiled into this daemon that must authenticate with the
+// secret itself, e.g. an outbound API token source). This is the same
+// access level resolve() gives the egress proxy: the value moves from
+// broker memory to caller memory within one process. It must NEVER be
+// placed into a child environment, command line, log line, or bus payload
+// — those surfaces take ChildValue placeholders. Unknown names error.
+func (b *Broker) Value(name string) (string, error) {
+	val, ok := b.values[name]
+	if !ok {
+		return "", fmt.Errorf("unknown secret %q", name)
+	}
+	return val, nil
+}
+
 // ChildValues maps every known secret to its placeholder. Useful when
 // building a full child env map.
 func (b *Broker) ChildValues() map[string]string {
