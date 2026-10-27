@@ -2949,6 +2949,19 @@
     "internal/daemon/github_wiring.go",
     "e2e/suites/github-pr-ci/main_test.go"
    ]
+  },
+  {
+   "id": "github-pr-ci-04",
+   "suite": "github-pr-ci",
+   "diff": "M",
+   "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline — the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
+   "paths": [
+    "internal/tools/builtin/github_ci.go",
+    "internal/githubsvc/rearm.go",
+    "internal/daemon/github_wiring.go",
+    "internal/daemon/instruction_wiring.go",
+    "e2e/suites/github-pr-ci/main_test.go"
+   ]
   }
  ]
 }

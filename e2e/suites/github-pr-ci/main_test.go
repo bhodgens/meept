@@ -7,7 +7,7 @@
 // hermetic; token_secret points at a test token file outside the
 // sandbox home.
 //
-// Coverage map (manifest scenarios github-pr-ci-01..03):
+// Coverage map (manifest scenarios github-pr-ci-01..04):
 //
 //	github-pr-ci-01  create PR + wait for CI green: the fake sees exactly
 //	                 ONE POST /pulls and the github_ci_wait tool result
@@ -24,6 +24,14 @@
 //	                 call sends — is found by the claim's PK-conflict
 //	                 path and NOT re-executed (the fake POST counter
 //	                 never exceeds 1)                    — TestE2EEffectsReconcile
+//	github-pr-ci-04  CI-wait park + re-arm: the fake's check-runs endpoint
+//	                 ALWAYS serves in_progress, so a 1s github_ci_wait
+//	                 parks at its deadline — the tool result carries
+//	                 "parked":true and a non-empty wait_id, and the
+//	                 parked wait's re-arm instruction row
+//	                 (github_ci_wait-<waitID>.yaml) is persisted under
+//	                 the sandbox daemon's instruction tier
+//	                                                     — TestE2ECIWaitPark
 //
 // GREEN posture: the suite reconciles against the committed API surface —
 // the [github] config block (config.Config.GitHub), the eight github_*
@@ -40,6 +48,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -73,6 +82,10 @@ type fakeGitHub struct {
 	checkRunsCalls int
 	// actionsRunsCalls counts GET /repos/o/r/actions/runs.
 	actionsRunsCalls int
+	// alwaysInProgress pins the check-runs endpoint to serve an
+	// in_progress check on EVERY call (the park scenario: the wait can
+	// never turn green and must park at its deadline). Guarded by mu.
+	alwaysInProgress bool
 }
 
 // newFakeGitHub stands up the fake and registers its shutdown.
@@ -132,7 +145,7 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 		}
 		fg.mu.Lock()
 		fg.checkRunsCalls++
-		first := fg.checkRunsCalls == 1
+		first := fg.checkRunsCalls == 1 || fg.alwaysInProgress
 		fg.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if first {
@@ -162,6 +175,17 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 
 // URL is the fake's base URL for the [github].base_url overlay.
 func (fg *fakeGitHub) URL() string { return fg.srv.URL }
+
+// newFakeGitHubAlwaysInProgress stands up the fake with the check-runs
+// endpoint pinned to in_progress on every call — the park scenario's
+// never-green CI.
+func newFakeGitHubAlwaysInProgress(t *testing.T) *fakeGitHub {
+	fg := newFakeGitHub(t)
+	fg.mu.Lock()
+	fg.alwaysInProgress = true
+	fg.mu.Unlock()
+	return fg
+}
 
 // postsPulledCount is the POST /repos/o/r/pulls call count.
 func (fg *fakeGitHub) postsPulledCount() int {
@@ -389,6 +413,12 @@ func TestE2ECreateWaitGreen(t *testing.T) {
 	if got := fg.checkRunsCallsCount(); got < 2 {
 		t.Fatalf("check-runs endpoint called %d times, want >= 2 (poll past the initial in_progress)", got)
 	}
+	// Anti-hammer ceiling (plan leaf 06 Task 2): the fake turns success
+	// after the 2nd poll, so a correct run lands well under 6 check-runs
+	// GETs; more than 6 means the wait is hammering the endpoint.
+	if got := fg.checkRunsCallsCount(); got > 6 {
+		t.Fatalf("check-runs endpoint called %d times, want <= 6 (anti-hammer ceiling)", got)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -522,5 +552,104 @@ func TestE2EEffectsReconcile(t *testing.T) {
 	if !strings.Contains(joined, "owned by another caller") && !strings.Contains(joined, "reconcil") && !strings.Contains(joined, "prior receipt") {
 		t.Fatalf("prior claimed effect not surfaced (no 'owned by another caller'/'reconcil'/'prior receipt' in tool results or reply):\n%s\nlog tail:\n%s",
 			joined, s.Daemon.LogTail())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 4: github-pr-ci-04 — CI-wait park + re-arm row
+// ---------------------------------------------------------------------------
+
+// TestE2ECIWaitPark drives the park path (master plan Integration Test
+// Plan item 3): the fake GitHub's check-runs endpoint ALWAYS serves
+// in_progress, so a short github_ci_wait cannot go green and must park
+// at its deadline. The park path returns (result, error) with the error
+// wrapping githubsvc.ErrCIWaitParked; the agent executor turns a tool
+// error into {"success":false,"error":"tool execution failed: <err>"} —
+// the result map is dropped — so the role=tool message the fake LLM
+// sees carries the park via the ErrCIWaitParked text ("ci wait parked;
+// re-armed o/r#42 as <waitID> ..."), NOT a literal "parked":true JSON
+// field. The assertions below accept either shape (the JSON field if a
+// future executor change surfaces result+error together) and always
+// require a non-empty wait_id.
+//
+// Instruction-row persistence: the scratch daemon DOES wire the
+// instruction store unconditionally (internal/daemon/components.go
+// wireInstructions -> c.InstructionStore, set BEFORE wireGitHubTools at
+// the end of component wiring, so github_wiring.go constructs
+// githubsvc.InstructionReArmSink with it). InstructionReArmSink.Save
+// writes <tier>/github_ci_wait-<waitID>.yaml (lowercased via
+// sanitizeFilename) into the DEFAULT tier, which is ".meept/instructions"
+// — a RELATIVE path resolved against the daemon process's CWD. The
+// harness starts the scratch daemon with cmd.Dir = s.Work (the sandbox
+// root), so the row must exist at <Work>/.meept/instructions/.
+func TestE2ECIWaitPark(t *testing.T) {
+	fg := newFakeGitHubAlwaysInProgress(t)
+	tokenPath := writeGitHubTokenFile(t, "ghp_test_token_e2e")
+	s := harness.Start(t,
+		harness.WithPreBootHook(func(st *harness.Stack) error {
+			seedGitHubAgent(t, st)
+			return nil
+		}),
+		githubConfigOverlay(fg.URL(), tokenPath),
+	)
+	s.RegisterProject(t, "e2e-project")
+	s.Fake.SetClassifierOutput(gitsyncClassifierPin)
+	sessionID := s.CreateSession(t, "e2e-github-park", s.ProjectDir)
+
+	// Script the executor turn: wait for CI on PR 42 with a 1s timeout.
+	// The fake never leaves in_progress, so the wait parks.
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "github_ci_wait",
+		Arguments: `{"owner":"o","repo":"r","pr":42,"timeout_seconds":1}`,
+	})
+	s.Fake.SetPostToolText("the CI wait timed out and was parked for a later resume.")
+	reply := s.ChatTurn(t, sessionID,
+		"wait until the CI checks on PR 42 pass",
+		180*time.Second)
+
+	// The wait actually polled check-runs before parking (>= 1 GET).
+	if got := fg.checkRunsCallsCount(); got < 1 {
+		t.Fatalf("check-runs endpoint called %d times, want >= 1 (the wait must observe CI before parking)\nreply: %s\nlog tail:\n%s",
+			got, reply, s.Daemon.LogTail())
+	}
+
+	// The park result: park evidence plus a non-empty wait_id. On the
+	// live executor path the park surfaces as the ErrCIWaitParked error
+	// text ("ci wait parked; re-armed o/r#42 as <waitID> ..."); the
+	// "parked":true JSON field is accepted as the alternate shape.
+	res := toolResultsJoined(s.Fake)
+	waitRe := regexp.MustCompile(`ciwait_[0-9a-f]{16}`)
+	m := waitRe.FindStringSubmatch(res)
+	parked := strings.Contains(res, `"parked":true`) ||
+		strings.Contains(res, `"parked": true`) ||
+		strings.Contains(res, "ci wait parked")
+	if !parked {
+		t.Fatalf("github_ci_wait result carries no park evidence (parked=true JSON or ErrCIWaitParked text); tool results:\n%s\nreply: %s\nlog tail:\n%s",
+			res, reply, s.Daemon.LogTail())
+	}
+	if m == nil {
+		t.Fatalf("github_ci_wait result missing a wait_id (ciwait_<hex>); tool results:\n%s\nreply: %s\nlog tail:\n%s",
+			res, reply, s.Daemon.LogTail())
+	}
+	waitID := m[0]
+
+	// The instruction row: the scratch daemon wires the instruction
+	// store, so the parked wait's re-arm row must be persisted as
+	// github_ci_wait-<waitID>.yaml under the default tier
+	// (.meept/instructions, resolved against the daemon CWD = s.Work).
+	rowPath := filepath.Join(s.Work, ".meept", "instructions",
+		"github_ci_wait-"+strings.ToLower(waitID)+".yaml")
+	row, err := os.ReadFile(rowPath)
+	if err != nil {
+		t.Fatalf("parked wait did not persist its re-arm instruction row at %s: %v\nlog tail:\n%s",
+			rowPath, err, s.Daemon.LogTail())
+	}
+	if !strings.Contains(string(row), waitID) {
+		t.Fatalf("re-arm instruction row at %s does not reference the wait_id %s:\n%s",
+			rowPath, waitID, string(row))
+	}
+	if !strings.Contains(string(row), "cron:") {
+		t.Fatalf("re-arm instruction row at %s does not carry a cron trigger:\n%s",
+			rowPath, string(row))
 	}
 }

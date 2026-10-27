@@ -8,6 +8,11 @@ to the executor; (3) effects-ledger reconcile — a pre-seeded CLAIMED row whose
 key is built from the EXACT parts the scripted call produces
 (EffectKey(github_pr_create, o, r, feat/x, "feat/x: add PR")) collides with the
 claim's PK-conflict path so the create is blocked: the fake POST counter stays
-at 0 and the prior-owned error surfaces. The [github].base_url override to the
+at 0 and the prior-owned error surfaces. Scenario (4): CI-wait park + re-arm —
+the fake's check-runs endpoint always serves in_progress, so a 1s
+github_ci_wait parks at its deadline: the tool result carries parked=true and a
+non-empty wait_id, and the parked wait's re-arm instruction row
+(github_ci_wait-<waitID>.yaml) is persisted under the sandbox daemon's
+instruction tier. The [github].base_url override to the
 fake server is what makes the loop hermetic. Run via
 `make e2e-fast-area AREA=github-pr-ci`.
