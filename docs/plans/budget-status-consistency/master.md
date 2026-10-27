@@ -155,7 +155,7 @@ one table — this is the consistency definition for every surface.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| 00T-gate-tests | PENDING | 0 | |
+| 00T-gate-tests | TESTS_VALIDATED | 2 | Committed ae545ed7; 1st dispatch died on provider outage (no files); 2nd validated in-session: RED set = exactly bugs A+B pins, golden key-set GREEN pre-fix, vet clean, zero corruption, no tracked file touched |
 | 01-passthrough-fix | PENDING | 0 | |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -178,12 +178,12 @@ Test leaf: 00T-gate-tests.md — dispatched in Phase 0, validated by the control
 
 | # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
 |---|---------------------|--------|-----------|-----------|--------|
-| F1 | within_cost_budget pass-through: disabled limits ⇒ true (kills the server.go:630 recompute) | 01 leaf, Contracts 1-2 | internal/rpc gate test: status handler with zero-limit budget → within_cost_budget true | n/a — RPC wire shape, unit-surface | PENDING |
-| F2 | within_budget added to RPC status (parity with HTTP) | 01 leaf, Contract 2 | rpc gate test: key present, equals Status.WithinBudget in all three states | n/a | PENDING |
-| F3 | Three-state table pinned (disabled / under-limit / at-limit) on RPC surface | 01 leaf, Contract 4 | rpc gate test table: booleans + remaining + limit fields per state | n/a | PENDING |
-| F4 | Getter refactor: struct (or extended tuple) carries authoritative booleans; both daemon wiring sites identical | 01 leaf, Contract 1 | internal/daemon gate test exercising BudgetStatusGetter wiring (or compile-level pin via the struct) | n/a | PENDING |
-| F5 | HTTP surface parity: components.go budget blocks include within_cost_budget pass-through | 01 leaf, Contract 3 | daemon/http gate test on the budget block keys | n/a | PENDING |
-| F6 | No wire compat break: existing keys/types unchanged; no -1 sentinels | 01 leaf | gate test asserting the full key set of a status response (golden-key list) | sdk/go model unmarshal test if cheap | PENDING |
+| F1 | within_cost_budget pass-through: disabled limits ⇒ true (kills the server.go:630 recompute) | 01 leaf, Contracts 1-2 | budget_status_shape_test.go: TestBudgetStatusDisabledLimitsShape; server_budget_status_test.go: TestStatusBudgetWireShape(disabled) | n/a — RPC wire shape, unit-surface | VALIDATED |
+| F2 | within_budget added to RPC status (parity with HTTP) | 01 leaf, Contract 2 | server_budget_status_test.go: TestStatusBudgetWireShape — within_budget key presence asserted in all 3 states | n/a | VALIDATED |
+| F3 | Three-state table pinned (disabled / under-limit / at-limit) on RPC surface | 01 leaf, Contract 4 | TestBudgetStatusThreeStates (llm) + TestStatusBudgetWireShape (rpc) three-state tables | n/a | VALIDATED |
+| F4 | Getter refactor: struct (or extended tuple) carries authoritative booleans; both daemon wiring sites identical | 01 leaf, Contract 1 | TestBudgetStatusGetterCarriesAuthoritativeBooleans — wire == GetStatus() pass-through | n/a | VALIDATED |
+| F5 | HTTP surface parity: components.go budget blocks include within_cost_budget pass-through | 01 leaf, Contract 3 | components_budget_keys_test.go: TestComponentsBudgetBlockKeys (unit-reachable via webHandlerAdapter.Status + WithBudgetTracker) | n/a | VALIDATED |
+| F6 | No wire compat break: existing keys/types unchanged; no -1 sentinels | 01 leaf | TestStatusBudgetKeySetStable — 21 golden keys, no -1 sentinels; PASSES pre-fix (compat pin) | sdk/go model unmarshal test if cheap | VALIDATED |
 
 Statuses: PENDING | DELTA | VALIDATED
 
@@ -196,6 +196,15 @@ Delta log:
   Gate leaf now must pin the budget-level disabled shape too; leaf 01 scope
   extended to budget.go:731. First gate dispatch failed on provider outage
   (no files landed; re-dispatch follows).
+- 2026-10-27, F1-F6 → VALIDATED: gate committed ae545ed7. Control-agent
+  re-run confirms exact RED set: llm TestBudgetStatusDisabledLimitsShape +
+  ThreeStates/disabled (bug B), rpc TestStatusBudgetWireShape x3 +
+  GetterCarriesAuthoritativeBooleans (bug A), daemon
+  TestComponentsBudgetBlockKeys (F5 reachable — not skipped); golden
+  key-set PASS pre-fix (compat pin). Accepted deviation: at/over RPC state
+  adds a real cost breach ($2.00 vs $1.00 HourlyCostLimit) because
+  authoritative WithinCostBudget stays true with cost limits disabled —
+  asserting false there would pin a wrong post-fix shape.
 
 ## Open Questions
 
