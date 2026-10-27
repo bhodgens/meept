@@ -352,6 +352,21 @@ Delta log:
   the new resume_wait_id arg on terminal green/fast-fail. Also: the
   deadline park now embeds the last observed PRStatus (leaf 03 Task 3
   said to; the zero-value was shipped instead).
+- 2026-10-26 (gap-closure wave), residuals from the review above, all
+  landed and verified: (6) e2e scenario 1 gained the leaf-06 <= 6
+  poll-ceiling assertion and a new github-pr-ci-04 park scenario asserts
+  parked:true + wait_id AND the persisted github_ci_wait-<waitID>
+  instruction row end-to-end (6de0db27 — Integration Test Plan item 3
+  is now actually covered); (7) the [secrets]-broker token path was
+  dead — Broker.ChildValue returns only the placeholder, so
+  SecretsTokenSource could never authenticate; fixed with an in-process
+  Broker.Value accessor and a token test pinning all four leaf-00T
+  cases including a RESOLVING real value (903ce3b1); (8) the re-arm
+  prompt now instructs the resuming agent to pass resume_wait_id so the
+  CancelReArm lifecycle engages on real resumes; pinned in
+  TestInstructionReArmSink (07575ae6). The two 00T gate tests that were
+  never written (TestSecretsTokenSource_Resolves, TestReadOnlyFlags)
+  now exist.
 
 ## Structural Completeness Check (Before Dispatch)
 
