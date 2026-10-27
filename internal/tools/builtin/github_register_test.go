@@ -147,6 +147,9 @@ func TestInstructionReArmSink(t *testing.T) {
 		if !strings.Contains(prompt, waitID) {
 			t.Errorf("ActionArgs prompt %q does not name the waitID %q", prompt, waitID)
 		}
+		if !strings.Contains(prompt, "resume_wait_id") {
+			t.Errorf("ActionArgs prompt %q does not instruct the resuming agent to pass resume_wait_id", prompt)
+		}
 		if got, _ := instr.ActionArgs["wait_id"].(string); got != waitID {
 			t.Errorf("ActionArgs wait_id = %q, want %q", got, waitID)
 		}

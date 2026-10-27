@@ -74,9 +74,12 @@ func (s *InstructionReArmSink) ScheduleReArm(ref CIRef, at time.Time, waitID str
 		return fmt.Errorf("githubsvc: instruction re-arm sink has no preferences store")
 	}
 	prompt := fmt.Sprintf(
-		"resume github_ci_wait %s: re-check CI for %s/%s#%d (parked %s, re-armed at %s)",
+		"resume github_ci_wait %s: re-check CI for %s/%s#%d (parked %s, re-armed at %s). "+
+			"When you re-invoke github_ci_wait, pass resume_wait_id=%q so this re-arm "+
+			"row is cancelled once the wait reaches green or a terminal failure.",
 		waitID, ref.Owner, ref.Repo, ref.Number,
 		time.Now().UTC().Format(time.RFC3339), at.Format(time.RFC3339),
+		waitID,
 	)
 	instr := &preferences.UserInstruction{
 		ID:      id.Generate("ciwait_rearm_"),
