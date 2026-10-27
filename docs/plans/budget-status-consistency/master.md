@@ -113,6 +113,7 @@ one table — this is the consistency definition for every surface.
 |---|----------|------|--------------|--------------|-------------|
 | 00T | 00T-gate-tests.md | leaf (tests) | none | 55K | A |
 | 01 | 01-passthrough-fix.md | leaf | 00T VALIDATED | 75K | B |
+| 02 | 02-comm-http-parity.md | leaf | 01 REVIEWED | 55K | C |
 
 ## Dispatch Protocol
 
@@ -156,7 +157,8 @@ one table — this is the consistency definition for every surface.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
 | 00T-gate-tests | TESTS_VALIDATED | 2 | Committed ae545ed7; 1st dispatch died on provider outage (no files); 2nd validated in-session: RED set = exactly bugs A+B pins, golden key-set GREEN pre-fix, vet clean, zero corruption, no tracked file touched |
-| 01-passthrough-fix | PENDING | 0 | |
+| 01-passthrough-fix | REVIEWED | 1 | Committed 577228e8; all gates GREEN (control-agent re-run); struct getter chosen (rpc already imports llm); legacy tuple bridged for gate-test compat; bug B guards mirror cost half. Deviation surfaced leaf 02: comm/http server.go:2352 third recompute instance. |
+| 02-comm-http-parity | PENDING | 0 | Gate tests (F7-F9) written+validated by orchestrator first, then impl dispatched per leaf brief |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
@@ -184,10 +186,20 @@ Test leaf: 00T-gate-tests.md — dispatched in Phase 0, validated by the control
 | F4 | Getter refactor: struct (or extended tuple) carries authoritative booleans; both daemon wiring sites identical | 01 leaf, Contract 1 | TestBudgetStatusGetterCarriesAuthoritativeBooleans — wire == GetStatus() pass-through | n/a | VALIDATED |
 | F5 | HTTP surface parity: components.go budget blocks include within_cost_budget pass-through | 01 leaf, Contract 3 | components_budget_keys_test.go: TestComponentsBudgetBlockKeys (unit-reachable via webHandlerAdapter.Status + WithBudgetTracker) | n/a | VALIDATED |
 | F6 | No wire compat break: existing keys/types unchanged; no -1 sentinels | 01 leaf | TestStatusBudgetKeySetStable — 21 golden keys, no -1 sentinels; PASSES pre-fix (compat pin) | sdk/go model unmarshal test if cheap | VALIDATED |
+| F7 | comm/http within_budget pass-through (kills :2352 used<remaining recompute) | 02 leaf | TestHTTPStatusBudgetDisabledLimits + ThreeStates (RED pre-fix) | n/a — HTTP wire shape, unit surface | PENDING |
+| F8 | comm/http within_cost_budget key added (additive) | 02 leaf | TestHTTPStatusBudgetDisabledLimits | n/a | PENDING |
+| F9 | HTTP budget-block key set stable (compat pin) | 02 leaf | TestHTTPStatusBudgetKeySetStable (GREEN pre and post) | n/a | PENDING |
 
 Statuses: PENDING | DELTA | VALIDATED
 
 Delta log:
+- 2026-10-27, leaf 01 REVIEWED + committed 577228e8. Scope gap found (third
+  recompute instance, same bug class): internal/comm/http/server.go:2352
+  computes within_budget as `hourlyUsed < hourlyRemaining && dailyUsed <
+  dailyRemaining` — compares used-vs-REMAINING (wrong even for enabled
+  limits) and lacks within_cost_budget entirely; daemon.go:1634 still wires
+  the legacy tuple there. User directive is full-codebase consistency → leaf
+  02 added (02-comm-http-parity.md).
 - 2026-10-27, Contract 4 + Goal, plan-updated (reality was the greater
   artifact): gate-phase scratch probe (subagent, pre-failure) proved
   `Status.WithinBudget` is ALSO wrong for disabled token limits
