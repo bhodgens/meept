@@ -158,7 +158,7 @@ one table — this is the consistency definition for every surface.
 |-------|--------|------------|--------------|
 | 00T-gate-tests | TESTS_VALIDATED | 2 | Committed ae545ed7; 1st dispatch died on provider outage (no files); 2nd validated in-session: RED set = exactly bugs A+B pins, golden key-set GREEN pre-fix, vet clean, zero corruption, no tracked file touched |
 | 01-passthrough-fix | REVIEWED | 1 | Committed 577228e8; all gates GREEN (control-agent re-run); struct getter chosen (rpc already imports llm); legacy tuple bridged for gate-test compat; bug B guards mirror cost half. Deviation surfaced leaf 02: comm/http server.go:2352 third recompute instance. |
-| 02-comm-http-parity | PENDING | 0 | Gate tests (F7-F9) written+validated by orchestrator first, then impl dispatched per leaf brief |
+| 02-comm-http-parity | TESTS_IN_PROGRESS | 1 | Gate validated in-session (RED = disabled row only; KeySetStable GREEN; 15-key set pinned — plan's '17 keys' was wrong, actual is 14 scalars + within_budget); impl dispatched |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
@@ -208,6 +208,10 @@ Delta log:
   Gate leaf now must pin the budget-level disabled shape too; leaf 01 scope
   extended to budget.go:731. First gate dispatch failed on provider outage
   (no files landed; re-dispatch follows).
+- 2026-10-27, F7-F9 gate VALIDATED (leaf 02 Phase 0): RED set exact —
+  DisabledLimits FAIL (both pinned modes), ThreeStates disabled-row-only
+  FAIL, KeySetStable PASS. Plan correction accepted: budget block publishes
+  15 keys (14 scalars + within_budget), not 17; gate pins the actual set.
 - 2026-10-27, F1-F6 → VALIDATED: gate committed ae545ed7. Control-agent
   re-run confirms exact RED set: llm TestBudgetStatusDisabledLimitsShape +
   ThreeStates/disabled (bug B), rpc TestStatusBudgetWireShape x3 +
