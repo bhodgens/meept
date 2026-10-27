@@ -712,6 +712,18 @@ func (b *Budget) GetStatus() Status {
 		withinCostBudget = withinCostBudget && b.hourlyCostUsed() < effHourlyCost
 	}
 
+	// A token limit only constrains when > 0 (0 = disabled/unlimited) —
+	// the same guard shape the cost half above uses. Without it, a
+	// disabled limit (effHourly == 0) made `hourlyUsed < 0` false and an
+	// unlimited config reported WithinBudget == false.
+	withinTokenBudget := true
+	if b.hourlyLimit > 0 {
+		withinTokenBudget = hourlyUsed < effHourly
+	}
+	if b.dailyLimit > 0 {
+		withinTokenBudget = withinTokenBudget && b.dailyUsed < effDaily
+	}
+
 	return Status{
 		HourlyUsed:             hourlyUsed,
 		HourlyLimit:            effHourly,
@@ -728,7 +740,7 @@ func (b *Budget) GetStatus() Status {
 		RPMCurrent:             len(b.requestTimestamps),
 		RPMLimit:               b.rateLimitRPM,
 		Aggressiveness:         b.aggressiveness,
-		WithinBudget:           hourlyUsed < effHourly && b.dailyUsed < effDaily && withinCostBudget,
+		WithinBudget:           withinTokenBudget && withinCostBudget,
 		TaskBudgetExhausted:    taskBudgetExhausted,
 		SessionBudgetExhausted: sessionBudgetExhausted,
 		DailyCostUsed:          b.dailyCostUsed,

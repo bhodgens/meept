@@ -14,6 +14,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/errcls"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/process"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
@@ -92,6 +93,16 @@ type Server struct {
 	// BudgetStatusGetter is an optional callback that returns budget status.
 	// Used by the status handler to report actual token and cost usage (FIX #0031/#0035).
 	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64, perTaskCost float64, perSessionCost float64, perTaskBudget int, perSessionBudget int)
+
+	// BudgetStatusSnapshotGetter is the preferred budget callback: it
+	// returns the authoritative snapshot (scalars + WithinBudget /
+	// WithinCostBudget) straight from Budget.GetStatus(). When set, the
+	// status handler passes its booleans through untouched and
+	// BudgetStatusGetter is ignored. Wire handlers must NEVER recompute
+	// the budget booleans from raw counters — a `used < limit` recompute
+	// reads false when a limit is disabled (0) and reports an unlimited
+	// daemon as over budget (budget-status-consistency Contract 1).
+	BudgetStatusSnapshotGetter func() llm.BudgetStatusSnapshot
 
 	// TokenLimitGetter is an optional callback returning the configured
 	// hourly and daily TOKEN limits (0 = disabled/unlimited). When set, the
@@ -610,28 +621,44 @@ func (s *Server) registerBuiltinHandlers() {
 			result["deterministic_tools"] = s.DeterministicToolsGetter()
 		}
 
-		// Include budget stats if a getter is configured (FIX #0031/#0035)
-		if s.BudgetStatusGetter != nil {
-			hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl, ptc, psc, ptb, psb := s.BudgetStatusGetter()
-			result["tokens_used"] = hu
-			result["tokens_remaining"] = hr
-			result["daily_used"] = du
-			result["daily_remaining"] = dr
-			result["rpm_current"] = rc
-			result["rpm_limit"] = rl
-			result["daily_cost_used"] = dcu
-			result["daily_cost_limit"] = dcl
-			result["daily_cost_remaining"] = max(dcl-dcu, 0)
-			result["hourly_cost_used"] = hcu
-			result["hourly_cost_limit"] = hcl
-			result["hourly_cost_remaining"] = max(hcl-hcu, 0)
-			result["budget_used"] = dcu
-			result["budget_remaining"] = max(dcl-dcu, 0)
-			result["within_cost_budget"] = dcu < dcl && hcu < hcl
-			result["per_task_cost"] = ptc
-			result["per_session_cost"] = psc
-			result["per_task_budget"] = ptb
-			result["per_session_budget"] = psb
+		// Include budget stats if a getter is configured (FIX #0031/#0035).
+		// The snapshot getter is the preferred pass-through of the
+		// authoritative Budget.GetStatus(); the legacy 14-value tuple is
+		// bridged through llm.LegacyTupleBudgetSnapshot so the booleans
+		// keep the authoritative disabled-limits semantics (limit 0 =
+		// unconstrained) without any recompute in this handler.
+		if s.BudgetStatusSnapshotGetter != nil || s.BudgetStatusGetter != nil {
+			var snap llm.BudgetStatusSnapshot
+			if s.BudgetStatusSnapshotGetter != nil {
+				snap = s.BudgetStatusSnapshotGetter()
+			} else {
+				hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl, ptc, psc, ptb, psb := s.BudgetStatusGetter()
+				var hl, dl int
+				if s.TokenLimitGetter != nil {
+					hl, dl = s.TokenLimitGetter()
+				}
+				snap = llm.LegacyTupleBudgetSnapshot(hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl, ptc, psc, ptb, psb, hl, dl)
+			}
+			result["tokens_used"] = snap.HourlyUsed
+			result["tokens_remaining"] = snap.HourlyRemaining
+			result["daily_used"] = snap.DailyUsed
+			result["daily_remaining"] = snap.DailyRemaining
+			result["rpm_current"] = snap.RPMCurrent
+			result["rpm_limit"] = snap.RPMLimit
+			result["daily_cost_used"] = snap.DailyCostUsed
+			result["daily_cost_limit"] = snap.DailyCostLimit
+			result["daily_cost_remaining"] = max(snap.DailyCostLimit-snap.DailyCostUsed, 0)
+			result["hourly_cost_used"] = snap.HourlyCostUsed
+			result["hourly_cost_limit"] = snap.HourlyCostLimit
+			result["hourly_cost_remaining"] = max(snap.HourlyCostLimit-snap.HourlyCostUsed, 0)
+			result["budget_used"] = snap.DailyCostUsed
+			result["budget_remaining"] = max(snap.DailyCostLimit-snap.DailyCostUsed, 0)
+			result["within_cost_budget"] = snap.WithinCostBudget
+			result["within_budget"] = snap.WithinBudget
+			result["per_task_cost"] = snap.PerTaskCost
+			result["per_session_cost"] = snap.PerSessionCost
+			result["per_task_budget"] = snap.PerTaskBudget
+			result["per_session_budget"] = snap.PerSessionBudget
 		}
 
 		// Include the configured token limits when a getter is wired so

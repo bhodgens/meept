@@ -324,6 +324,9 @@ With `enabled: true`, a limit of `0` still means **unlimited** for that specific
 // Result: only the daily limit is enforced
 ```
 
+### Disabled Limits on the Wire (status surfaces)
+
+A disabled limit (`0`) never renders as exhaustion or over-budget on any status surface. `Budget.GetStatus()` (`internal/llm/budget.go`) is the single source of truth: a limit constrains only when `> 0`, so with all limits `0` the authoritative booleans are `within_budget: true` and `within_cost_budget: true`. The wire shape for the disabled state is `*_limit: 0`, `*_remaining: 0` (remaining is `max(limit - used, 0)`, so `0` is ambiguous on its own), and `*_used` keeps counting real consumption - disambiguation rides the limit fields: `*_limit == 0` means disabled, while `*_remaining == 0` alongside a **nonzero** limit means exhausted. Wire handlers (RPC `status`/`daemon.status`, HTTP `/api/v1/status`, bus status responses) must PASS THROUGH the computed `Status` booleans and never recompute them from raw counters - a `used < limit` recompute reads `0 < 0 = false` on a disabled limit and reports a healthy unlimited daemon as over budget (the root-cause class fixed by the budget-status-consistency tree).
 
 ### Daily Reset at Midnight UTC
 

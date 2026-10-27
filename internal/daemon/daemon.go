@@ -454,13 +454,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			}
 		}
 
-		// Wire budget stats getter (FIX #0031/#0035 - exposes token budget via RPC)
+		// Wire budget stats getter (FIX #0031/#0035 - exposes token budget via RPC).
+		// Snapshot pass-through of the authoritative Budget.GetStatus()
+		// (budget-status-consistency Contract 1): the booleans ride the
+		// snapshot so the RPC handler never recomputes them from raw counters.
 		if rpcServer != nil && components.LLMClient != nil {
 			budget := components.LLMClient.Budget()
 			if budget != nil {
-				rpcServer.BudgetStatusGetter = func() (int, int, int, int, int, int, float64, float64, float64, float64, float64, float64, int, int) {
-					bs := budget.GetStatus()
-					return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit, bs.PerTaskCost, bs.PerSessionCost, bs.PerTaskBudget, bs.PerSessionBudget
+				rpcServer.BudgetStatusSnapshotGetter = func() llm.BudgetStatusSnapshot {
+					return llm.SnapshotFromStatus(budget.GetStatus())
 				}
 				// Expose the configured token limits (0 = disabled) so status
 				// clients print usage against the limit instead of inferring a
@@ -1627,7 +1629,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				logger.Info("Hierarchical budget status HTTP getter registered", "endpoint", "/api/v1/sessions/{id}/budget")
 			}
 
-			// Wire budget stats getter for HTTP endpoint (FIX #0031/#0035)
+			// Wire budget stats getter for HTTP endpoint (FIX #0031/#0035).
+			// NOTE: the comm/http Server still exposes the legacy 14-value
+			// tuple getter; the snapshot getter (budget-status-consistency
+			// Contract 1) is wired at the RPC site above. Migrating this
+			// site needs a BudgetStatusSnapshotGetter field on
+			// internal/comm/http/server.go, which is outside this leaf's
+			// allowed file set (see Deviations).
 			if components.LLMClient != nil {
 				budget := components.LLMClient.Budget()
 				if budget != nil {

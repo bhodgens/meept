@@ -8659,15 +8659,16 @@ func (h *StatusHandler) handleStatusRequest(msg *models.BusMessage) {
 		budgetStatus := h.budgetTracker.GetStatus()
 		response["tokens_used"] = budgetStatus.HourlyUsed
 		response["budget"] = map[string]any{
-			"hourly_used":      budgetStatus.HourlyUsed,
-			"hourly_limit":     budgetStatus.HourlyLimit,
-			"hourly_remaining": budgetStatus.HourlyRemaining,
-			"daily_used":       budgetStatus.DailyUsed,
-			"daily_limit":      budgetStatus.DailyLimit,
-			"daily_remaining":  budgetStatus.DailyRemaining,
-			"rpm_current":      budgetStatus.RPMCurrent,
-			"rpm_limit":        budgetStatus.RPMLimit,
-			"within_budget":    budgetStatus.WithinBudget,
+			"hourly_used":        budgetStatus.HourlyUsed,
+			"hourly_limit":       budgetStatus.HourlyLimit,
+			"hourly_remaining":   budgetStatus.HourlyRemaining,
+			"daily_used":         budgetStatus.DailyUsed,
+			"daily_limit":        budgetStatus.DailyLimit,
+			"daily_remaining":    budgetStatus.DailyRemaining,
+			"rpm_current":        budgetStatus.RPMCurrent,
+			"rpm_limit":          budgetStatus.RPMLimit,
+			"within_budget":      budgetStatus.WithinBudget,
+			"within_cost_budget": budgetStatus.WithinCostBudget,
 		}
 	} else {
 		response["tokens_used"] = 0
@@ -9468,15 +9469,16 @@ func (h *webHandlerAdapter) Status(ctx context.Context) (map[string]any, error) 
 			budgetStatus := h.statusHandler.budgetTracker.GetStatus()
 			status["tokens_used"] = budgetStatus.HourlyUsed
 			status["budget"] = map[string]any{
-				"hourly_used":      budgetStatus.HourlyUsed,
-				"hourly_limit":     budgetStatus.HourlyLimit,
-				"hourly_remaining": budgetStatus.HourlyRemaining,
-				"daily_used":       budgetStatus.DailyUsed,
-				"daily_limit":      budgetStatus.DailyLimit,
-				"daily_remaining":  budgetStatus.DailyRemaining,
-				"rpm_current":      budgetStatus.RPMCurrent,
-				"rpm_limit":        budgetStatus.RPMLimit,
-				"within_budget":    budgetStatus.WithinBudget,
+				"hourly_used":        budgetStatus.HourlyUsed,
+				"hourly_limit":       budgetStatus.HourlyLimit,
+				"hourly_remaining":   budgetStatus.HourlyRemaining,
+				"daily_used":         budgetStatus.DailyUsed,
+				"daily_limit":        budgetStatus.DailyLimit,
+				"daily_remaining":    budgetStatus.DailyRemaining,
+				"rpm_current":        budgetStatus.RPMCurrent,
+				"rpm_limit":          budgetStatus.RPMLimit,
+				"within_budget":      budgetStatus.WithinBudget,
+				"within_cost_budget": budgetStatus.WithinCostBudget,
 			}
 		}
 	}
