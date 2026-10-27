@@ -114,7 +114,7 @@ USER meept
 EXPOSE 8081
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8081/api/v1/health || exit 1
+  CMD curl -kfsS https://127.0.0.1:8081/api/v1/health || exit 1
 
 ENTRYPOINT ["meept-daemon"]
 CMD ["-f"]
