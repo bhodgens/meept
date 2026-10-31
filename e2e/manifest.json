@@ -1,7 +1,7 @@
 {
  "version": 1,
- "generated": "2026-10-23",
- "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
+ "generated": "2026-10-31",
+ "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
  "path_map": {
   "e2e/suites/smoke": [
    "smoke"
@@ -108,7 +108,8 @@
    "audit-chain"
   ],
   "internal/activity/": [
-   "smoke"
+   "smoke",
+   "activity-views"
   ],
   "internal/effects/": [
    "effects-ledger"
@@ -123,7 +124,8 @@
    "config-home",
    "config-models",
    "config-reload",
-   "github-intake"
+   "github-intake",
+   "agent-groups"
   ],
   "internal/daemon/": [
    "daemon-lifecycle",
@@ -145,7 +147,8 @@
   ],
   "internal/security/": [
    "security-fence",
-   "security-tls"
+   "security-tls",
+   "agent-groups"
   ],
   "internal/employee/": [
    "goal-loop",
@@ -186,7 +189,8 @@
    "smoke"
   ],
   "internal/cluster/": [
-   "smoke"
+   "smoke",
+   "agent-groups"
   ],
   "internal/code/": [
    "smoke"
@@ -332,6 +336,20 @@
   ],
   "e2e/suites/github-intake": [
    "github-intake"
+  ],
+  "e2e/suites/agent-groups": [
+   "agent-groups"
+  ],
+  "e2e/suites/groups-diagnosis": [
+   "groups-diagnosis"
+  ],
+  "internal/groups/": [
+   "agent-groups",
+   "groups-diagnosis"
+  ],
+  "pkg/security/": [
+   "agent-groups",
+   "groups-diagnosis"
   ]
  },
  "suites": [
@@ -671,6 +689,21 @@
   {
    "name": "github-pr-ci",
    "dir": "e2e/suites/github-pr-ci",
+   "status": "implemented"
+  },
+  {
+   "name": "agent-groups",
+   "dir": "e2e/suites/agent-groups",
+   "status": "implemented"
+  },
+  {
+   "name": "github-intake",
+   "dir": "e2e/suites/github-intake",
+   "status": "implemented"
+  },
+  {
+   "name": "activity-views",
+   "dir": "e2e/suites/activity-views",
    "status": "implemented"
   }
  ],
@@ -2353,7 +2386,7 @@
    "id": "naive-user-chat-05",
    "suite": "naive-user-chat",
    "diff": "M",
-   "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge — the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+   "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge \u2014 the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
    "paths": [
     "internal/agent/loop.go",
     "internal/agent/reply_guard.go"
@@ -2476,7 +2509,7 @@
    "id": "plan-lifecycle-02",
    "suite": "plan-lifecycle",
    "diff": "M",
-   "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write — file parses at every observation",
+   "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write \u2014 file parses at every observation",
    "paths": [
     "internal/plan/manager.go",
     "internal/plan/filelock.go",
@@ -2686,7 +2719,7 @@
    "id": "goal-completion-01",
    "suite": "goal-completion",
    "diff": "L",
-   "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger — plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
+   "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger \u2014 plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
    "paths": [
     "internal/employee/manager.go",
     "internal/employee/goal_loop.go",
@@ -2771,7 +2804,7 @@
    "id": "memory-turn-capture-02",
    "suite": "memory-turn-capture",
    "diff": "M",
-   "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID — task reply reaches L0 + status=auto claim",
+   "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID \u2014 task reply reaches L0 + status=auto claim",
    "paths": [
     "internal/daemon/memory_capture.go",
     "internal/agent/handler.go"
@@ -2969,7 +3002,7 @@
    "id": "github-pr-ci-04",
    "suite": "github-pr-ci",
    "diff": "M",
-   "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline — the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
+   "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline \u2014 the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
    "paths": [
     "internal/tools/builtin/github_ci.go",
     "internal/githubsvc/rearm.go",
@@ -3031,6 +3064,145 @@
     "internal/daemon/components.go",
     "internal/config/schema.go",
     "e2e/suites/github-intake/main_test.go"
+   ]
+  },
+  {
+   "id": "agent-groups-01",
+   "suite": "agent-groups",
+   "diff": "M",
+   "title": "F1 deny-beats-allow: grouped agent is not offered the denied tool and cannot call it; allowed tool works",
+   "paths": [
+    "internal/config/schema.go",
+    "internal/groups/",
+    "internal/agent/registry.go",
+    "internal/agent/executor.go"
+   ]
+  },
+  {
+   "id": "agent-groups-02",
+   "suite": "agent-groups",
+   "diff": "M",
+   "title": "F2 ungrouped backward compat: spec grants unchanged without groups config; security.groups.default_managed defaults false",
+   "paths": [
+    "internal/config/schema.go",
+    "internal/groups/",
+    "cmd/meept/"
+   ]
+  },
+  {
+   "id": "agent-groups-03",
+   "suite": "agent-groups",
+   "diff": "S",
+   "title": "F3 assignment validation: groups.assign with an unregistered tool name is rejected naming the tool",
+   "paths": [
+    "internal/rpc/",
+    "internal/groups/",
+    "internal/config/schema.go"
+   ]
+  },
+  {
+   "id": "agent-groups-04",
+   "suite": "agent-groups",
+   "diff": "M",
+   "title": "F4 mutation gate: non-privileged agent denied users-store file_write (BlockedPaths backstop) and groups.assign",
+   "paths": [
+    "internal/rpc/",
+    "internal/security/",
+    "internal/config/schema.go"
+   ]
+  },
+  {
+   "id": "agent-groups-05",
+   "suite": "agent-groups",
+   "diff": "M",
+   "title": "F6 fence stage: group fs_roots enforced centrally in pkg/security; outside-root write denied even with the tool grant",
+   "paths": [
+    "pkg/security/permissions.go",
+    "internal/security/fence.go",
+    "internal/config/schema.go"
+   ]
+  },
+  {
+   "id": "agent-groups-06",
+   "suite": "agent-groups",
+   "diff": "S",
+   "title": "F7 decision audit: daemon log carries decision=deny rule_source=group_deny naming the tool (deny-warn)",
+   "paths": [
+    "internal/agent/executor.go",
+    "pkg/security/permissions.go",
+    "internal/config/schema.go"
+   ]
+  },
+  {
+   "id": "agent-groups-07",
+   "suite": "agent-groups",
+   "diff": "M",
+   "title": "F5 memory ceiling: grouped agent recall bounded by the narrowest group MemoryMaxScope (SKIP: issue #70 branch 01)",
+   "paths": [
+    "internal/memory/",
+    "internal/groups/"
+   ]
+  },
+  {
+   "id": "agent-groups-08",
+   "suite": "agent-groups",
+   "diff": "M",
+   "title": "F9 cluster identity: unsigned DispatchJob rejected with Warn, never executed, when require_node_signatures=true",
+   "paths": [
+    "internal/cluster/executor_bridge.go",
+    "internal/config/cluster_config.go"
+   ]
+  },
+  {
+   "id": "agent-groups-09",
+   "suite": "agent-groups",
+   "diff": "S",
+   "title": "F8 diagnosis CLI pin: meept groups check --json answers a groups diagnosis (RED until leaf 06)",
+   "paths": [
+    "cmd/meept/",
+    "internal/services/"
+   ]
+  },
+  {
+   "id": "agent-groups-10",
+   "suite": "agent-groups",
+   "diff": "S",
+   "title": "F10 override expiry: expired group_overrides entry skipped with one Warn (SKIP: leaf 07-overrides dependency)",
+   "paths": [
+    "internal/groups/",
+    "cmd/meept/"
+   ]
+  },
+  {
+   "id": "groups-diagnosis-01",
+   "suite": "groups-diagnosis",
+   "diff": "M",
+   "title": "F8 explain: meept groups explain names binding+policy per grant (C3 fixture; shell via group:coders/coders)",
+   "paths": [
+    "cmd/meept/",
+    "internal/services/",
+    "internal/groups/"
+   ]
+  },
+  {
+   "id": "groups-diagnosis-02",
+   "suite": "groups-diagnosis",
+   "diff": "M",
+   "title": "F8 check: exits non-zero and reports unknown-group/dangling-policy/empty-allowlist defects by name",
+   "paths": [
+    "cmd/meept/",
+    "internal/services/",
+    "internal/groups/"
+   ]
+  },
+  {
+   "id": "groups-diagnosis-03",
+   "suite": "groups-diagnosis",
+   "diff": "S",
+   "title": "F8 RPC: groups.explain returns stable keys (agent_id, bindings, policy) for a known agent",
+   "paths": [
+    "internal/rpc/",
+    "internal/services/"
    ]
   }
  ]
