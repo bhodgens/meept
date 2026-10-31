@@ -77,6 +77,23 @@ reference; package-local fake is fine). Assert:
   the `queue.interactive_window` precedent (grep `quotedDurationToNanos`
   in the loader for the exemption mechanism).
 
+### Task 2b: projection tests (F8, F9)
+
+**Files:** extend `internal/intake/project_test.go` (created by this leaf)
+
+- `TestProjector_EnsureProjection_Creates` — GraphQL/REST fakes
+  (httptest); a plan with 2 phases x 2 steps produces 1 phase
+  sub-issue per phase + 2 step sub-issues per phase under the ticket;
+  bodies carry `meept-plan:<id> phase:<id>` anchors; State field
+  bootstrap ran once.
+- `TestProjector_ReceiptReuse_Idempotent` — second EnsureProjection for
+  the same planID makes ZERO new issue creations (receipt reuse; fake
+  counters stay flat).
+- `TestProjector_MirrorState` — updates the item's State field to the
+  mirrored phase state (fake records the mutation).
+- `TestProjector_MirrorFailSoft` — GraphQL error -> nil error returned,
+  Warn logged, no panic.
+
 ### Task 3: e2e gate tests (F2, F3, F4, F5, F7)
 
 **Files:** Create `e2e/suites/github-intake/main_test.go`, update `e2e/manifest.json`

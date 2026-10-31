@@ -9,7 +9,7 @@
 
 - **Role:** Root
 - **Parent:** none (root)
-- **Children:** 6 (1 test-gate leaf, 5 implementation leaves)
+- **Children:** 7 (1 test-gate leaf, 6 implementation leaves)
 - **Scope:** Close the L2 work loop's front door: a GitHub Issues intake
   poller turns labeled tickets into employee goals (dedup + re-dispatch
   on re-arrival), and goal outcomes comment back on the ticket —
@@ -165,6 +165,43 @@ func (w *WriteBack) Report(ctx context.Context, t Ticket, o Outcome) (commentID 
 
 Owner: 03. Consumers: 04.
 
+### Contract 5: Plan->GitHub-Project projection — `internal/intake/project.go`
+
+```go
+package intake
+
+// Projection mirrors a synthesized plan's phase/step hierarchy into a
+// GitHub Projects V2 project as sub-issues of the ticket issue:
+//   ticket issue -> sub-issue per PlanPhase -> sub-issue per TaskStep
+// with a "State" single-select field mirroring phase/step states.
+// Projects V2 is GraphQL-only: this leaf adds shurcooL/githubv4 on the
+// SAME token the client pool resolves (no new auth surface).
+type Projector struct { /* pool-backed graphql client + ledger + cfg */ }
+
+func NewProjector(pool *githubsvc.ClientPool, ledger effects.Ledger,
+    projectNumber int64, repo githubsvc.OwnerRepo, logger *slog.Logger) *Projector
+
+// EnsureProjection idempotently creates the phase/step sub-issues for a
+// plan and adds them to the project. Effects receipts ARE the
+// correlation store:
+//   EffectKey("intake_projection", planID, phaseID)
+//   receipt: {"issue_number": N, "node_id": "..."}
+// A completed prior receipt answers "which GitHub issue is this phase?"
+// without any new column. Phase-issue bodies carry
+// "meept-plan:<planID> phase:<phaseID>" so GitHub-side lookup inverts.
+func (p *Projector) EnsureProjection(ctx context.Context, t Ticket,
+    planID string, phases []employee.PlanPhase) error
+
+// MirrorState updates an item's State field after a phase/step
+// transition. Idempotent upstream; failures log Warn, never fail the
+// transition being mirrored.
+func (p *Projector) MirrorState(ctx context.Context, planID, phaseID, state string) error
+```
+
+Trigger: plan synthesis (Plan reaching synthesized state) under an
+intake-linked goal — NOT goal creation. Owner: 06. Consumers: 05
+(wiring), 00T (gate rows F8/F9).
+
 ### Contract 4: Config — `[intake]` block in `internal/config/schema.go`
 
 ```go
@@ -176,6 +213,7 @@ type IntakeConfig struct {
     RequiredLabels []string `json:"required_labels"` // default ["factory"]
     DoneLabel      string `json:"done_label"`       // default "factory:done"
     GateCommand    string `json:"gate_command"`     // optional quality gate for created goals
+    ProjectNumber  int64  `json:"project_number"`   // GitHub Projects V2 number; 0 = projection disabled
 }
 // + Intake IntakeConfig `json:"intake"` on the root config struct
 ```
@@ -197,9 +235,12 @@ test covering BOTH sides. Owner: 04. Consumers: 03, 05.
 | 03 | 03-writeback.md | leaf | 01, 02 | 55K | B |
 | 04 | 04-config.md | leaf | 02, 03 | 45K | C |
 | 05 | 05-wiring-e2e.md | leaf | 01, 02, 03, 04 | 65K | C |
+| 06 | 06-project-projection.md | leaf | 02, 04 | 60K | D |
 
 **Concurrency groups:** gate first; A alone; B = {02, 03} in parallel;
-C = {04, 05} in parallel after B.
+C = {04, 05} in parallel after B; D = {06} after B (needs the effects
+patterns from 02 + config from 04; runs alongside nothing to avoid the
+githubv4 dependency colliding with 05's manifest edits).
 
 ## Dispatch Protocol
 
@@ -354,6 +395,8 @@ packages; splitting would create cross-gate import cycles in RED state).
 | F5 | WriteBack posts effects-wrapped outcome comment + done label on healthy | 03 Tasks 1-2 | TestWriteBack_Report_Comment, TestWriteBack_HealthyAddsLabel, TestWriteBack_NoStorm | e2e write-back scenario (05) | PENDING |
 | F6 | [intake] config parses; duration round-trip survives the json5 loader | 04 Task 1 | TestIntakeConfig_Parse, TestIntakeConfig_DurationRoundTrip | n/a (config) | PENDING |
 | F7 | Wiring: poller scheduled only when enabled; disabled default | 05 Task 1 | TestIntakeWiring_Enabled, TestIntakeWiring_DisabledDefault | e2e disabled scenario (05) | PENDING |
+| F8 | Projection creates phase sub-issues in the project; receipt = correlation | 06 Tasks 1-2 | TestProjector_EnsureProjection_Creates, TestProjector_ReceiptReuse_Idempotent | n/a (GraphQL fake in unit tier; e2e deferred with TUI/GUI) | PENDING |
+| F9 | MirrorState updates the item State field; failures never fail the transition | 06 Task 3 | TestProjector_MirrorState, TestProjector_MirrorFailSoft | n/a | PENDING |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 Delta log:
@@ -393,6 +436,12 @@ Listed for review before dispatch; each notes the impact if reversed:
    mandate-hash) so identical re-arrivals are no-ops. Impact if
    reversed (retire-and-create): cleaner audit rows, loses goal
    continuity.
+6. Plan projection rides shurcooL/githubv4 (new dependency, MIT) on
+   the pool's token; one GitHub Project per watched repo; hierarchy is
+   sub-issues (ticket -> phase -> step) because Projects V2 items are
+   flat; effects receipts are the correlation store (no schema
+   change). Impact if reversed (REST-only, no projects): plan
+   hierarchy stays meept-internal, tickets only see goal outcomes.
 
 ## Notes
 
