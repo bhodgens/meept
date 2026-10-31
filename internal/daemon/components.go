@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/acp"
+	"github.com/caimlas/meept/internal/activity"
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/agents"
 	authpkg "github.com/caimlas/meept/internal/auth"
@@ -321,6 +322,15 @@ type Components struct {
 	// read BEFORE construction — no construction-baked-config seam) and
 	// stopped on the shutdown path in stopComponents.
 	OTLPExporter *metrics.OTLPExporter
+
+	// ActivityAggregator + ActivityRing back the activity.* RPC surface
+	// (activity-views leaf 02). Constructed unconditionally by
+	// wireActivityComponents over whatever store handles exist (nil
+	// handles degrade record kinds, never boot); the ring is fed by the
+	// bus bridge and drained by activity.recent. The ring reference is
+	// dropped in stopComponents.
+	ActivityAggregator *activity.Aggregator
+	ActivityRing       *activity.Ring
 
 	// TraceExporter ships chat-turn/task-step spans to an OTLP receiver
 	// (metrics.otlp_traces, leaf 07-langfuse-sink). Non-nil ONLY when
@@ -5723,6 +5733,10 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// final batch must reach the receiver before the process tears down.
 	// Nil on every disabled boot — the guard makes this a no-op there.
 	c.stopOTLPExporter()
+
+	// Drop the activity ring reference (activity.* live tail). The bus
+	// bridge's subscriber goroutines exit with the process-scoped bus.
+	stopActivityRing(c)
 
 	// Flush and stop the OTLP trace exporter + unsubscribe the span
 	// producer (metrics.otlp_traces): same shutdown-first posture. Nil on

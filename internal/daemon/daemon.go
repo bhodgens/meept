@@ -1381,6 +1381,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 	}
 
+	// Activity + drift RPC surface (activity.* / agents.review). Wires
+	// the aggregator + ring over existing component handles and registers
+	// the five closures; every handle is nil-guarded (a missing store
+	// degrades its method to a clean RPC error). No-op when the RPC
+	// server is absent.
+	wireActivityComponents(components, msgBus, rpcServer, logger)
+
 	// Create HTTP server (if enabled)
 	var httpSrv *http.Server
 	if fullCfg.Transport.HTTP.Enabled {
