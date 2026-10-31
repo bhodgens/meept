@@ -157,8 +157,8 @@ one table — this is the consistency definition for every surface.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
 | 00T-gate-tests | TESTS_VALIDATED | 2 | Committed ae545ed7; 1st dispatch died on provider outage (no files); 2nd validated in-session: RED set = exactly bugs A+B pins, golden key-set GREEN pre-fix, vet clean, zero corruption, no tracked file touched |
-| 01-passthrough-fix | REVIEWED | 1 | Committed 577228e8; all gates GREEN (control-agent re-run); struct getter chosen (rpc already imports llm); legacy tuple bridged for gate-test compat; bug B guards mirror cost half. Deviation surfaced leaf 02: comm/http server.go:2352 third recompute instance. |
-| 02-comm-http-parity | TESTS_IN_PROGRESS | 1 | Gate validated in-session (RED = disabled row only; KeySetStable GREEN; 15-key set pinned — plan's '17 keys' was wrong, actual is 14 scalars + within_budget); impl dispatched |
+| 01-passthrough-fix | COMPLETE | 1 | Committed 577228e8; all gates GREEN (control-agent re-run); struct getter chosen (rpc already imports llm); legacy tuple bridged for gate-test compat; bug B guards mirror cost half. Deviation surfaced leaf 02: comm/http server.go:2352 third recompute instance. |
+| 02-comm-http-parity | COMPLETE | 1 | Gate 294486f0; impl ee7998d4 REVIEWED: 3 gate tests GREEN, class-kill grep zero recomputes outside budget.go, 4-package regression GREEN, legacy bridge deviation audited+accepted |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
@@ -186,9 +186,9 @@ Test leaf: 00T-gate-tests.md — dispatched in Phase 0, validated by the control
 | F4 | Getter refactor: struct (or extended tuple) carries authoritative booleans; both daemon wiring sites identical | 01 leaf, Contract 1 | TestBudgetStatusGetterCarriesAuthoritativeBooleans — wire == GetStatus() pass-through | n/a | VALIDATED |
 | F5 | HTTP surface parity: components.go budget blocks include within_cost_budget pass-through | 01 leaf, Contract 3 | components_budget_keys_test.go: TestComponentsBudgetBlockKeys (unit-reachable via webHandlerAdapter.Status + WithBudgetTracker) | n/a | VALIDATED |
 | F6 | No wire compat break: existing keys/types unchanged; no -1 sentinels | 01 leaf | TestStatusBudgetKeySetStable — 21 golden keys, no -1 sentinels; PASSES pre-fix (compat pin) | sdk/go model unmarshal test if cheap | VALIDATED |
-| F7 | comm/http within_budget pass-through (kills :2352 used<remaining recompute) | 02 leaf | TestHTTPStatusBudgetDisabledLimits + ThreeStates (RED pre-fix) | n/a — HTTP wire shape, unit surface | PENDING |
-| F8 | comm/http within_cost_budget key added (additive) | 02 leaf | TestHTTPStatusBudgetDisabledLimits | n/a | PENDING |
-| F9 | HTTP budget-block key set stable (compat pin) | 02 leaf | TestHTTPStatusBudgetKeySetStable (GREEN pre and post) | n/a | PENDING |
+| F7 | comm/http within_budget pass-through (kills :2352 used<remaining recompute) | 02 leaf | server_budget_status_test.go: TestHTTPStatusBudgetDisabledLimits + ThreeStates — GREEN post-fix (ee7998d4) | n/a — HTTP wire shape, unit surface | VALIDATED |
+| F8 | comm/http within_cost_budget key added (additive) | 02 leaf | TestHTTPStatusBudgetDisabledLimits — within_cost_budget present+true | n/a | VALIDATED |
+| F9 | HTTP budget-block key set stable (compat pin) | 02 leaf | TestHTTPStatusBudgetKeySetStable — GREEN pre and post (compat pin held) | n/a | VALIDATED |
 
 Statuses: PENDING | DELTA | VALIDATED
 
