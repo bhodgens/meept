@@ -105,7 +105,7 @@ Selection logic, -p 2, build-tag handling: UNCHANGED.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| 01-boot-timeout-retry | PENDING | 0 | |
+| 01-boot-timeout-retry | COMPLETE | 1 | Committed 079d9ff8; reviewed in-session: diff confined to 3 hunks + retry loop; deviations accepted (per-suite loop instead of batched go test — required for per-suite retry; orchestrator removed the then-dead positional-args block) |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
@@ -126,13 +126,18 @@ agent. This shape is deliberate and recorded so the N/A is never silent.
 
 | # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
 |---|---------------------|--------|-----------|-----------|--------|
-| F1 | MEEPT_E2E_BOOT_TIMEOUT parse: default 120s, valid duration honored, invalid → default (no fatal) | 01 leaf Task 1 | e2e/harness boot-timeout test (three-state) | n/a — harness internal | PENDING |
-| F2 | Boot wait uses the parsed deadline; process-death fast-fail unchanged | 01 leaf Task 2 | covered by F1 + smoke suite boot | make e2e-fast-area AREA=smoke | PENDING |
-| F3 | e2e-affected.sh single labeled retry; second rc decides; selection unchanged | 01 leaf Task 3 | bash -n + shellcheck + diff review | n/a — hook script | PENDING |
+| F1 | MEEPT_E2E_BOOT_TIMEOUT parse: default 120s, valid duration honored, invalid → default (no fatal) | 01 leaf Task 1 | boot_timeout_test.go: TestE2EBootTimeout 5 subcases (unset/empty/45s/2m/banana), build tag e2e; committed 079d9ff8 | n/a — harness internal | VALIDATED |
+| F2 | Boot wait uses the parsed deadline; process-death fast-fail unchanged | 01 leaf Task 2 | helper + deadline swap verified in diff (3 hunks, fast-fails byte-identical); smoke suite GREEN 20.5s via live script run | make e2e-fast-area AREA=smoke | VALIDATED |
+| F3 | e2e-affected.sh single labeled retry; second rc decides; selection unchanged | 01 leaf Task 3 | bash -n OK; shellcheck before==after (2 pre-existing SC2155/SC2164 only); live run through hook path: 'e2e/harness/daemon.go' input → smoke suite selected+ok rc=0; dead positional block removed (nothing consumed "$@" after loop change) | n/a — hook script | VALIDATED |
 
 Statuses: PENDING | DELTA | VALIDATED
 
-Delta log: (none yet)
+Delta log: 2026-10-27, F1-F3 → VALIDATED; leaf COMPLETE (079d9ff8).
+Accepted deviations: (a) retry loop runs suites individually (per-suite
+semantics) replacing the one batched go test invocation; (b) orchestrator
+deleted the dead `set --` positional block the loop change orphaned (verified
+nothing else consumes "$@"). Live validation: `echo 'e2e/harness/daemon.go' |
+scripts/e2e-affected.sh` → smoke suite selected, ok, rc=0.
 
 ## Open Questions
 
