@@ -358,8 +358,8 @@ After all children REVIEWED:
 |-------|--------|------------|-------------|
 | 00T-gate-tests.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_13f09d75) |
 | 01-poller.md | PENDING | 0 | |
-| 02-linkage.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_65b5790b wave B) |
-| 03-writeback.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_65b5790b wave B) |
+| 02-linkage.md | REVIEWED | 1 | 2026-10-30: 4/4 gate tests PASS -race (in-session verified). GoalCreator gained UpdateGoal per the test stub; Manager.UpdateGoal delegate added by orchestrator (d58d5cbc), pinned by TestManagerSatisfiesGoalCreator. |
+| 03-writeback.md | REVIEWED | 1 | 2026-10-30: 3/3 gate tests PASS -race. caller-side ledger.Complete required for no-storm receipt reuse (per effects.Run contract). Label-fail-after-comment self-heals via reuse path. |
 | 04-config.md | PENDING | 0 | |
 | 05-wiring-e2e.md | PENDING | 0 | |
 
