@@ -57,7 +57,24 @@ func (s *InstructionScheduler) instructionToJob(instr *preferences.UserInstructi
 	switch instr.Action {
 	case "agent_trigger":
 		agentID, _ := instr.ActionArgs["agent_id"].(string)
+
+		// Prefer instr.ActionArgs[prompt] when present and non-empty
 		prompt := fmt.Sprintf("Execute instruction: %s", instr.Trigger)
+		if promptArg, ok := instr.ActionArgs["prompt"].(string); ok && promptArg != "" {
+			prompt = promptArg
+		}
+
+		// Wire ActionArgs passthrough into Context if the field exists.
+		// Only copy string-valued entries to preserve type safety.
+		var contextMap map[string]string
+		if len(instr.ActionArgs) > 0 {
+			contextMap = make(map[string]string, len(instr.ActionArgs))
+			for k, v := range instr.ActionArgs {
+				if s, ok := v.(string); ok {
+					contextMap[k] = s
+				}
+			}
+		}
 
 		_, err := s.scheduler.ScheduleConfig(JobConfig{
 			ID:       jobID,
@@ -67,6 +84,7 @@ func (s *InstructionScheduler) instructionToJob(instr *preferences.UserInstructi
 			AgentConfig: &AgentJobConfig{
 				Prompt:  prompt,
 				AgentID: agentID,
+				Context: contextMap,
 			},
 		})
 		return err
