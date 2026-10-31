@@ -199,11 +199,6 @@ func TestEveryPathMapKeyNamesADeclaredSuite(t *testing.T) {
 var scenariolessSuites = map[string]bool{
 	"smoke":     true, // fallback suite; runs wholesale (pre-push-e2e, make e2e-fast)
 	"logrotate": true, // single daemon-level test file, no scenario breakdown
-	// activity-views: suite entry + test file landed in crossing commits
-	// (suite entry in 6479ccaf via a shared manifest write; the sibling
-	// activity-views wave owns the test file and its scenario registration).
-	// Remove this allowlist when the sibling wave registers scenarios.
-	"activity-views": true,
 }
 
 // TestEveryMappedSuiteHasScenarios closes the gap the scenario→suite
