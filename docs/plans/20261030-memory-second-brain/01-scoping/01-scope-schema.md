@@ -40,13 +40,17 @@ existing memory disappears.
 
 ## Verified Anchors
 
+- internal/memory/types.go:54-61 - AgentID/SessionID/TaskID/BotID attribution
+  fields (WRITTEN on store via manager.go:553, NEVER filtered at recall -
+  this leaf reconciles with them before adding any new scope storage).
+- internal/memory/scoped_manager.go - the only working tag-filter precedent
+  (bot_id); WithScopeFilter's pattern reference.
 - internal/memory/types.go - Memory struct (add Scope field).
 - internal/memory/manager.go - Manager.Search / GetContext entry points
   (variadic option threading).
 - internal/memory/ftstore.go + internal/memory/fact_store.go - SQLite
   schemas; ALTER TABLE + backfill sites.
 - internal/memory/migrate.go - established migration pattern to follow.
-- internal/memory/scoped_manager.go - existing bot-scoping to leave intact.
 
 ## Interface Contracts (From Parent)
 

@@ -329,8 +329,17 @@ dispatched leaf document mid-execution.
   the meept-development skill). When the e2e harness gains scope support, also
   plant bench markers with ScopeProject("bench") if the harness still shares a
   home - cheap belt-and-braces, note in 01-scoping/03's report, do not block on it.
+- Attribution fields are BUILT but UNWIRED at recall: Memory.AgentID/
+  SessionID/TaskID/BotID exist and are written (internal/memory/types.go:54-61;
+  internal/memory/manager.go:553 enriches metadata on store), but no Search
+  path filters by them - ScopedMemoryManager's bot_id filter is the only
+  working tag-filter precedent. Leaf 01-scope-schema must RECONCILE with
+  these fields (reuse or extend, never mint parallel storage) and model
+  WithScopeFilter on the ScopedMemoryManager filter pattern. A project field
+  is still NEW (sessions carry projects; memories do not record them).
 - Existing ScopedMemoryManager (bot_id tagging) is a DIFFERENT mechanism
-  (per-bot). Do not repurpose it for project scoping; leave it intact.
+  (per-bot). Do not repurpose it for project scoping; leave it intact - but
+  REUSE its filter pattern as the WithScopeFilter reference implementation.
 - internal/memory contention: leaves 01-scoping/01 and 01-scoping/03 both edit
   store files; the branch orchestrator must sequence them.
 - Bridges evidence for D1: docs/research/eval/bridges-live-eval.json (tie at
