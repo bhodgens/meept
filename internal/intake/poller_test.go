@@ -198,8 +198,10 @@ func TestGitHubPoller_Watermark(t *testing.T) {
 
 	// Second scan window: issue 2's body changed (re-dispatch fodder) and
 	// issue 3 appeared; issue 1 is untouched.
+	changed2 := intakeIssue(2, "early ticket 2", t0.Add(5*time.Minute), "factory")
+	changed2.Body = "body of issue 2 (changed mandate)"
 	fake.mu.Lock()
-	fake.issues = []ghIssue{issue1, issue2, issue3}
+	fake.issues = []ghIssue{issue1, changed2, issue3}
 	fake.mu.Unlock()
 
 	second, err := poller.Poll(context.Background())
