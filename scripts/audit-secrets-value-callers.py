@@ -62,7 +62,7 @@ ALLOWED_VALUE_CALLERS = {
 # own call site). A bare `.Value(` would false-positive on bubbles
 # textarea/input .Value(), context.Value, store.Value, and similar —
 # the "checker matches the CORRECT spelling" trap.
-VALUE_CALL = re.compile(r"\.[Bb]roker\.(?:Value|resolve)\(")
+VALUE_CALL = re.compile(r"(?:\.[Bb]roker|[Bb]roker)\.(?:Value|resolve)\(")
 
 # Assignment shape: <names> := or =  ... .Broker.Value(/.broker.resolve(
 ASSIGN = re.compile(
@@ -72,6 +72,12 @@ ASSIGN = re.compile(
 # Log/print call openers (slog + fmt printing).
 LOG_CALL = re.compile(
     r"\.(?:Debug|Info|Warn|Error)\(|\bfmt\.Print(?:f|ln)?\(|\bslog\.(?:Debug|Info|Warn|Error)\("
+)
+
+# fmt.Sprintf / fmt.Printf / fmt.Println with a value-bearing variable arg.
+# We look for fmt.Sprintf(val, ...) where val is a variable (not a literal).
+SPRINTF_VALUE = re.compile(
+    r"\bfmt\.(?:Sprintf|Printf|Println)\s*\([^)]*\b[A-Za-z_][A-Za-z0-9_]*\b"
 )
 
 # Env-entry string concatenation: "NAME=" + val  |  val + "=..."
@@ -144,6 +150,12 @@ def scan_file(path: Path, rel: str):
                 findings.append(
                     (i, f"{rel}:{i}: value-bearing variable '{name}' passed "
                         f"to os.Setenv")
+                )
+            # M2: flag fmt.Sprintf where a value-bearing variable is the format arg.
+            if SPRINTF_VALUE.search(line):
+                findings.append(
+                    (i, f"{rel}:{i}: fmt.Sprintf with value-bearing variable "
+                        f"'{name}' in format string (bypass shape)")
                 )
     return findings
 
