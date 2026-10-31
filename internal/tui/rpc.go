@@ -472,6 +472,72 @@ func (c *RPCClient) ReviewQueue(params *tuimodels.ReviewQueueParams) (*tuimodels
 	return &resp, nil
 }
 
+// ActivityQuery calls the daemon's activity.query method (C2, activity-views
+// leaf 02). Returns the decoded records plus the total count BEFORE
+// limit/offset paging.
+func (c *RPCClient) ActivityQuery(params tuimodels.ActivityQueryParams) ([]tuimodels.ActivityRecordJSON, int, error) {
+	result, err := c.Call("activity.query", params)
+	if err != nil {
+		return nil, 0, err
+	}
+	var resp tuimodels.ActivityQueryResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, 0, fmt.Errorf("failed to parse activity query response: %w", err)
+	}
+	return resp.Records, resp.Total, nil
+}
+
+// ActivityRecent calls the daemon's activity.recent method (C2 live tail
+// from the ring buffer). Returns records NEWEST-FIRST (index 0 = newest,
+// wire-order correction over the stale C3 doc comment), the ring's dropped
+// counter, and the total record count.
+func (c *RPCClient) ActivityRecent(limit int) ([]tuimodels.ActivityRecordJSON, int, int, error) {
+	params := map[string]int{ParamLimit: limit}
+	result, err := c.Call("activity.recent", params)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	var resp struct {
+		Records []tuimodels.ActivityRecordJSON `json:"records"`
+		Dropped int                            `json:"dropped"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to parse activity recent response: %w", err)
+	}
+	return resp.Records, resp.Dropped, len(resp.Records), nil
+}
+
+// ActivityFindings calls the daemon's activity.findings method (C2).
+func (c *RPCClient) ActivityFindings(params tuimodels.FindingsParams) ([]tuimodels.FindingJSON, int, error) {
+	result, err := c.Call("activity.findings", params)
+	if err != nil {
+		return nil, 0, err
+	}
+	var resp tuimodels.FindingsResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, 0, fmt.Errorf("failed to parse activity findings response: %w", err)
+	}
+	return resp.Findings, resp.Total, nil
+}
+
+// AgentsReview calls the daemon's agents.review method (C4: drift score +
+// recent findings for one employee).
+func (c *RPCClient) AgentsReview(employeeID string) (tuimodels.DriftJSON, error) {
+	params := map[string]string{"employee_id": employeeID}
+	result, err := c.Call("agents.review", params)
+	if err != nil {
+		return tuimodels.DriftJSON{}, err
+	}
+	var resp tuimodels.DriftJSON
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return tuimodels.DriftJSON{}, fmt.Errorf("failed to parse agents review response: %w", err)
+	}
+	if resp.EmployeeID == "" {
+		resp.EmployeeID = employeeID
+	}
+	return resp, nil
+}
+
 // PromoteClaim promotes one auto claim via memory.promoteClaim (optional
 // human verdict reason; enforced ≤512B daemon-side).
 func (c *RPCClient) PromoteClaim(id, reason string) error {

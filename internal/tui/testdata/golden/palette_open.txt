@@ -11,6 +11,8 @@
                │    [m]  memory - switch to memory view         │
                │    [p]  plans - switch to plans view           │
                │    [e]  agents - switch to employees view      │
+               │    [a]  activity view - agent activity,        │
+               │  findings + drift                              │
                │    [y]  toggle sidebar - show/hide sidebar     │
                │    [o]  projects - manage projects             │
                │    [v]  memory review - review pending auto-   │

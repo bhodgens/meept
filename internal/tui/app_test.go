@@ -42,6 +42,7 @@ func createTestApp() *App {
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
 	app.plans = models.NewPlansModel(rpc)
+	app.activity = models.NewActivityModel(rpc)
 	// Create modals
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)

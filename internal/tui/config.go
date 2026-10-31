@@ -115,6 +115,9 @@ type CommandPaletteKeys struct {
 	Projects      string `json:"projects"`       // Open projects dialog (default: "o")
 	// MemoryReview opens the claim review modal (leaf T03-L2). "" disables.
 	MemoryReview string `json:"memory_review"`
+	// ViewActivity switches to the activity view (leaf 03, activity-views
+	// tree). "" disables the binding.
+	ViewActivity string `json:"view_activity"`
 }
 
 // SessionConfig defines session behavior settings.
@@ -176,6 +179,7 @@ func DefaultClientConfig() *ClientConfig {
 				RenameSession: "r",
 				Projects:      "o",
 				MemoryReview:  "v",
+				ViewActivity:  "a",
 			},
 		},
 		Session: SessionConfig{

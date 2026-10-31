@@ -51,6 +51,7 @@ const (
 	ViewPlans
 	ViewSearch
 	ViewAgents
+	ViewActivity
 )
 
 // VerbosityLevel controls how much progress detail to show in the TUI.
@@ -122,6 +123,7 @@ type App struct {
 	plans    *models.PlansModel
 	search   *models.SearchModel
 	agents   *AgentsPanel
+	activity *models.ActivityModel
 
 	// Sidebar
 	sidebar *SidebarModel
@@ -336,6 +338,7 @@ func NewApp(socketPath string, cwd string) *App {
 		plans:            models.NewPlansModel(rpc),
 		search:           models.NewSearchModel(rpc, slog.Default()),
 		agents:           NewAgentsPanel(rpc),
+		activity:         models.NewActivityModel(rpc),
 		sidebar:          NewSidebarModel(rpc, eventRPC, styles, clientConfig.Rendering.SidebarAnimation),
 		keys:             DefaultKeyMap(),
 		clientConfig:     clientConfig,
@@ -827,6 +830,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.agents != nil {
 			a.agents.SetSize(mainWidth, msg.Height-chromeHeight)
+		}
+		if a.activity != nil {
+			a.activity.SetSize(mainWidth, msg.Height-chromeHeight)
 		}
 
 		if layoutCmd != nil {
@@ -2372,6 +2378,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.agents != nil {
 			cmd = a.agents.Update(msg)
 		}
+	case ViewActivity:
+		if a.activity != nil {
+			cmd = a.activity.Update(msg)
+		}
 	}
 	if cmd != nil {
 		cmds = append(cmds, cmd)
@@ -2422,6 +2432,12 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.currentView = ViewAgents
 			cmd := a.initCurrentView()
 			return a, cmd
+		case keys.ViewActivity:
+			if keys.ViewActivity != "" {
+				a.currentView = ViewActivity
+				cmd := a.initCurrentView()
+				return a, cmd
+			}
 		case keys.Sidebar:
 			a.sidebar.Toggle()
 			return a, func() tea.Msg {
@@ -2706,6 +2722,14 @@ func (a *App) renameSession(sessionID, newName string) tea.Cmd {
 
 // initCurrentView returns a command to initialize the current view.
 func (a *App) initCurrentView() tea.Cmd {
+	// Live-tail teardown (activity-views leaf 03): the activity model owns
+	// the tail poller, so switching away from the activity view must stop it
+	// or it keeps polling the daemon while hidden. Every palette/tab view
+	// switch routes through here, so this is the single choke point.
+	if a.activity != nil && a.currentView != ViewActivity && a.activity.TailOn() {
+		a.activity.Update(models.HideActivityView())
+	}
+
 	switch a.currentView {
 	case ViewChat:
 		return a.chat.Init()
@@ -2726,6 +2750,10 @@ func (a *App) initCurrentView() tea.Cmd {
 	case ViewAgents:
 		if a.agents != nil {
 			return a.agents.Init()
+		}
+	case ViewActivity:
+		if a.activity != nil {
+			return a.activity.Init()
 		}
 	}
 	return nil
@@ -2783,6 +2811,12 @@ func (a *App) View() tea.View {
 				mainView = a.agents.View()
 			} else {
 				mainView = "agents unavailable"
+			}
+		case ViewActivity:
+			if a.activity != nil {
+				mainView = a.activity.View()
+			} else {
+				mainView = "activity unavailable"
 			}
 		}
 	}
@@ -3011,6 +3045,7 @@ func (a *App) renderTabs() string {
 		{"memory", ViewMemory},
 		{"plans", ViewPlans},
 		{"agents", ViewAgents},
+		{"activity", ViewActivity},
 	}
 
 	renderedTabs := make([]string, 0, len(tabs))
@@ -3211,6 +3246,15 @@ func (a *App) getQuickActions() []string {
 			a.styles.HelpKey.Render(KeyEnter)+" "+a.styles.HelpValue.Render("details"),
 			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
 			a.styles.HelpKey.Render("1/2/3")+" "+a.styles.HelpValue.Render("list/approvals/audit"),
+		)
+
+	case ViewActivity:
+		actions = append(actions,
+			a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"),
+			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
+			a.styles.HelpKey.Render("tab")+" "+a.styles.HelpValue.Render("sort mode"),
+			a.styles.HelpKey.Render("t")+" "+a.styles.HelpValue.Render("live tail"),
+			a.styles.HelpKey.Render("p")+" "+a.styles.HelpValue.Render("findings + drift"),
 		)
 
 	case ViewSearch:
