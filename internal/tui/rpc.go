@@ -488,8 +488,9 @@ func (c *RPCClient) ActivityQuery(params tuimodels.ActivityQueryParams) ([]tuimo
 }
 
 // ActivityRecent calls the daemon's activity.recent method (C2 live tail
-// from the ring buffer). Returns records NEWEST-FIRST (index 0 = newest,
-// wire-order correction over the stale C3 doc comment), the ring's dropped
+// from the ring buffer). Returns records in insertion order (oldest
+// first, newest last - tail -f style; matches ring.Tail and the
+// activity-views e2e order pin), the ring's dropped
 // counter, and the total record count.
 func (c *RPCClient) ActivityRecent(limit int) ([]tuimodels.ActivityRecordJSON, int, int, error) {
 	params := map[string]int{ParamLimit: limit}

@@ -178,8 +178,8 @@ func registerActivityRPC(server *rpc.Server, agg *activity.Aggregator,
 				r.LastActivity = rec.At
 			}
 		}
-		// Active-task count: tasks with any non-terminal step.
-		activeTasks := map[string]string{} // agent -> newest active task id
+		// Active-task count: DISTINCT tasks with any non-terminal step.
+		activeTasks := map[string]map[string]bool{} // agent -> set of active task ids
 		for _, rec := range records {
 			if rec.TaskID == "" {
 				continue
@@ -188,11 +188,13 @@ func registerActivityRPC(server *rpc.Server, agg *activity.Aggregator,
 			case "completed", "failed", "rejected", "skipped":
 				continue
 			}
-			activeTasks[rec.AgentID] = rec.TaskID
+			if activeTasks[rec.AgentID] == nil {
+				activeTasks[rec.AgentID] = map[string]bool{}
+			}
+			activeTasks[rec.AgentID][rec.TaskID] = true
 		}
-		for id, taskID := range activeTasks {
-			row(id).ActiveTasks = 1
-			_ = taskID
+		for id, tasks := range activeTasks {
+			row(id).ActiveTasks = len(tasks)
 		}
 
 		sort.Strings(order)
