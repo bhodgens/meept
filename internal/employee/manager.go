@@ -655,24 +655,6 @@ type Manager struct {
 	logger        *slog.Logger
 }
 
-// NewManager constructs a new employee Manager wrapping the given bot.Manager.
-//
-// bm may be nil; the Manager is a valid no-op in that state. Read-only methods
-// (ListEmployees, GetEmployee) return empty/nil results, and state-changing
-// methods return a clear "bot backend not configured" error. Callers do not
-// need to nil-check the Manager itself.
-func NewManager(bm *bot.Manager) *Manager {
-	return &Manager{
-		botManager:           bm,
-		constitutions:        make(map[string]Constitution),
-		pendingConstitutions: make(map[string]*pendingConstitution),
-		driftScores:          make(map[string]float64),
-		goalLoops:            make(map[string]*GoalLoop),
-		invokeMuMap:          make(map[string]*sync.Mutex),
-		assessmentSems:       make(map[string]chan struct{}),
-		logger:               slog.Default(),
-	}
-}
 
 // NewManagerWithStores constructs a Manager with explicit constitution,
 // goal, and audit stores. This is the production constructor used by the
@@ -2855,4 +2837,23 @@ func patchConstitution(existing Constitution, patch map[string]any) (Constitutio
 		return existing, fmt.Errorf("unmarshal merged: %w", err)
 	}
 	return patched, nil
+}
+
+// NewManager constructs a new employee Manager wrapping the given bot.Manager.
+//
+// bm may be nil; the Manager is a valid no-op in that state. Read-only methods
+// (ListEmployees, GetEmployee) return empty/nil results, and state-changing
+// methods return a clear "bot backend not configured" error. Callers do not
+// need to nil-check the Manager itself.
+func NewManager(bm *bot.Manager) *Manager {
+	return &Manager{
+		botManager:           bm,
+		constitutions:        make(map[string]Constitution),
+		pendingConstitutions: make(map[string]*pendingConstitution),
+		driftScores:          make(map[string]float64),
+		goalLoops:            make(map[string]*GoalLoop),
+		invokeMuMap:          make(map[string]*sync.Mutex),
+		assessmentSems:       make(map[string]chan struct{}),
+		logger:               slog.Default(),
+	}
 }

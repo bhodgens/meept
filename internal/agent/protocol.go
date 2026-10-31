@@ -71,42 +71,7 @@ type TaskMessage struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// NewTaskMessage creates a new task message.
-func NewTaskMessage(from, to string, action ActionType, payload any) (*TaskMessage, error) {
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
 
-	return &TaskMessage{
-		Type:      MessageTypeTask,
-		ID:        generateMessageID(),
-		From:      from,
-		To:        to,
-		Action:    action,
-		Timestamp: time.Now().UTC(),
-		Payload:   payloadJSON,
-	}, nil
-}
-
-// NewResultMessage creates a result message for a task.
-func NewResultMessage(taskID, from string, result *ResultPayload) (*TaskMessage, error) {
-	payloadJSON, err := json.Marshal(result)
-	if err != nil {
-		return nil, err
-	}
-
-	return &TaskMessage{
-		Type:      MessageTypeResult,
-		ID:        generateMessageID(),
-		TaskID:    taskID,
-		From:      from,
-		To:        "", // Results go back to originator
-		Action:    "",
-		Timestamp: time.Now().UTC(),
-		Payload:   payloadJSON,
-	}, nil
-}
 
 // TaskPayload is the payload for "execute" and "delegate" actions.
 type TaskPayload struct {
@@ -183,50 +148,10 @@ type StatusPayload struct {
 	Message string `json:"message"`
 }
 
-// GetTaskPayload extracts TaskPayload from a message.
-func (m *TaskMessage) GetTaskPayload() (*TaskPayload, error) {
-	var payload TaskPayload
-	if err := json.Unmarshal(m.Payload, &payload); err != nil {
-		return nil, err
-	}
-	return &payload, nil
-}
 
-// GetResultPayload extracts ResultPayload from a message.
-func (m *TaskMessage) GetResultPayload() (*ResultPayload, error) {
-	var payload ResultPayload
-	if err := json.Unmarshal(m.Payload, &payload); err != nil {
-		return nil, err
-	}
-	return &payload, nil
-}
 
-// GetErrorPayload extracts ErrorPayload from a message.
-func (m *TaskMessage) GetErrorPayload() (*ErrorPayload, error) {
-	var payload ErrorPayload
-	if err := json.Unmarshal(m.Payload, &payload); err != nil {
-		return nil, err
-	}
-	return &payload, nil
-}
 
-// ToJSONL converts the message to a single JSONL line.
-func (m *TaskMessage) ToJSONL() (string, error) {
-	data, err := json.Marshal(m)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
 
-// ParseTaskMessage parses a JSONL line into a TaskMessage.
-func ParseTaskMessage(line string) (*TaskMessage, error) {
-	var msg TaskMessage
-	if err := json.Unmarshal([]byte(line), &msg); err != nil {
-		return nil, err
-	}
-	return &msg, nil
-}
 
 // ChatDelegation is a simple delegation from the chat agent.
 // This is NOT in JSONL format - it's a simpler struct for chat-to-dispatcher handoff.
@@ -244,24 +169,4 @@ type ChatDelegation struct {
 	OriginalMessage string `json:"original_message"`
 }
 
-// ToTaskPayload converts a chat delegation to a task payload.
-func (d *ChatDelegation) ToTaskPayload() *TaskPayload {
-	return &TaskPayload{
-		Description:  d.Intent,
-		ContextQuery: d.OriginalMessage,
-		Priority:     d.urgencyToPriority(),
-	}
-}
 
-func (d *ChatDelegation) urgencyToPriority() TaskPriority {
-	switch d.Urgency {
-	case "urgent":
-		return PriorityUrgent
-	case "high":
-		return PriorityHigh
-	case "low":
-		return PriorityLow
-	default:
-		return PriorityNormal
-	}
-}

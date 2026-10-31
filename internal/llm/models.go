@@ -713,15 +713,3 @@ func (e *StreamAbortedError) Error() string {
 	return fmt.Sprintf("stream aborted by rule %q", e.RuleName)
 }
 
-// Ptr returns a pointer to the given value.
-//
-//go:fix inline
-func Ptr[T any](v T) *T { return new(v) }
-
-// DerefOr returns the dereferenced value of p, or def if p is nil.
-func DerefOr[T any](p *T, def T) T {
-	if p == nil {
-		return def
-	}
-	return *p
-}

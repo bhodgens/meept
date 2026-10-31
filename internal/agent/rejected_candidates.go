@@ -37,21 +37,6 @@ type RejectedCandidateLogger struct {
 	log  *slog.Logger
 }
 
-// NewRejectedCandidateLogger creates a logger writing to <dataDir>/rejected_candidates.jsonl.
-// The directory is created on first write, not at construction, so a
-// read-only environment stays construction-safe.
-func NewRejectedCandidateLogger(dataDir string, log *slog.Logger) *RejectedCandidateLogger {
-	if dataDir == "" {
-		return nil
-	}
-	if log == nil {
-		log = slog.Default()
-	}
-	return &RejectedCandidateLogger{
-		path: filepath.Join(dataDir, "rejected_candidates.jsonl"),
-		log:  log.With("component", "rejected-candidates"),
-	}
-}
 
 // LogRejected appends the given filtered-out candidates. Best-effort: an
 // unwritable path logs a warning once per writer and stops attempting (a
@@ -144,4 +129,20 @@ func rejectRec(c memory.AmbientCandidate, reason string) rejectedCandidateRecord
 func catExcluded(cat string, excluded map[string]struct{}) bool {
 	_, ok := excluded[cat]
 	return ok
+}
+
+// NewRejectedCandidateLogger creates a logger writing to <dataDir>/rejected_candidates.jsonl.
+// The directory is created on first write, not at construction, so a
+// read-only environment stays construction-safe.
+func NewRejectedCandidateLogger(dataDir string, log *slog.Logger) *RejectedCandidateLogger {
+	if dataDir == "" {
+		return nil
+	}
+	if log == nil {
+		log = slog.Default()
+	}
+	return &RejectedCandidateLogger{
+		path: filepath.Join(dataDir, "rejected_candidates.jsonl"),
+		log:  log.With("component", "rejected-candidates"),
+	}
 }

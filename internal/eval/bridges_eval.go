@@ -521,14 +521,6 @@ func (c BridgesEvalConfig) ConfigHash() string {
 	return HashBytes(b)
 }
 
-// fixtureHash hashes the raw fixture bytes (content-addressed resume).
-func fixtureHash(path string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return HashBytes(b), nil
-}
 
 // LoadReport reads an existing artifact for resume; a missing file, a schema
 // mismatch, or a fixture/config hash mismatch returns a fresh report.

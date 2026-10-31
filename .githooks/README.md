@@ -33,8 +33,8 @@ chmod +x .githooks/*
 
 ### pre-commit (Main Hook)
 
-Entry point that runs all checks sequentially (18 total). The numbers below are
-the `[n/18]` labels `.githooks/pre-commit` prints:
+Entry point that runs all checks sequentially (19 total). The numbers below are
+the `[n/19]` labels `.githooks/pre-commit` prints:
 
 | # | Hook | Purpose |
 |---|------|---------|
@@ -56,9 +56,10 @@ the `[n/18]` labels `.githooks/pre-commit` prints:
 | 16 | pre-commit-ascii | No CJK/Hangul/fullwidth characters in staged text files |
 | 17 | pre-commit-dart-format | Staged Dart blob (index content) is dart-format clean |
 | 18 | pre-commit-e2e | Affected hermetic e2e suites run + new feature packages have e2e coverage |
+| 19 | pre-commit-deadcode | Blocks NEW unwired functions (deadcode vs committed baseline) |
 
 Steps 13 and 14 are reported but never block the commit. Steps 1-12, 15-17,
-and 18 do.
+and 18-19 do.
 `pre-commit-staticcheck` is not in this list: it is standalone (run it directly,
 or via your editor) and additionally analyzes the tag-gated `magefiles` package
 with `-tags mage`.
@@ -416,6 +417,45 @@ MEEPT_SKIP_E2E=1 git commit -m "..."
 ```
 
 **See:** docs/workflows/e2e-testing.md, scripts/e2e-affected.sh, e2e/manifest.json
+
+---
+
+### pre-commit-deadcode
+
+Blocks newly unwired functions ("implemented but never wired into a call path")
+using `golang.org/x/tools/cmd/deadcode`.
+
+**Triggers on:** Staged `.go` files (any path)
+
+**Checks:**
+- Runs `deadcode -test` on BOTH binaries (`./cmd/meept-daemon`, `./cmd/meept`)
+  and normalizes each unreachable function to `path: func Name` (line numbers
+  stripped, so pure code motion never produces churn).
+- Diffs the current set against the committed baseline
+  `.githooks/deadcode-baseline.txt`. Any function unreachable in the working
+  tree but ABSENT from the baseline FAILS the commit.
+- The baseline starts at ~12k entries (the repo's existing dead-code stock).
+  The gate is a ratchet: it only ever blocks NEW additions. Failing output
+  names the exact function and its file.
+
+**Re-baselining (deliberate, same policy as the bench regression baseline):**
+```bash
+.githooks/pre-commit-deadcode --rebaseline
+git add .githooks/deadcode-baseline.txt
+```
+Re-baseline when you INTEND to remove dead code or when you wire previously
+unreachable code in (its count drops - keeping the old baseline is harmless,
+re-baselining just shrinks the ratchet).
+
+**Notes:**
+- Skips with a warning if `deadcode` is not on PATH or `$HOME/go/bin`
+  (install: `go install golang.org/x/tools/cmd/deadcode@latest`).
+- Uses the GOTOOLCHAIN pin from go.mod (set by the main pre-commit; also
+  self-pins when run standalone).
+- Over-reporting caveat: deadcode is call-graph-based, so a function reachable
+  only through an interface the analyzed binary never exercises shows as dead.
+  The both-binaries intersection (`comm -12` of the two raw outputs) is the
+  high-confidence dead set.
 
 ---
 

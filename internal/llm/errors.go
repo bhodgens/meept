@@ -162,26 +162,6 @@ func UserMessage(err error) string {
 	return err.Error()
 }
 
-// IsRateLimitErrorMessage is a string-only fallback for rate-limit detection.
-//
-// Deprecated: Use errcls.IsRateLimit(err) with a structured error value.
-// This function is retained for callers that only have the serialized
-// error string (e.g. errors deserialized from the message bus). It will
-// not be removed until all such callers are migrated to pass the original
-// error value.
-func IsRateLimitErrorMessage(errMsg string) bool {
-	lower := strings.ToLower(errMsg)
-	return strings.Contains(lower, "rate limit") ||
-		strings.Contains(lower, "429") ||
-		strings.Contains(lower, "too many requests") ||
-		strings.Contains(lower, "quota exceeded") ||
-		strings.Contains(lower, "rate_limit") ||
-		strings.Contains(lower, "requests per") ||
-		strings.Contains(lower, "api calls per") ||
-		strings.Contains(lower, "rpm limit") ||
-		strings.Contains(lower, "tpm limit") ||
-		strings.Contains(lower, "concurrent requests")
-}
 
 // IsNonRetryable checks if an error is non-retryable.
 func IsNonRetryable(err error) bool {
@@ -613,4 +593,25 @@ func ClassificationUserGuidance(err error) string {
 	default:
 		return "An unexpected error occurred during processing. Please try again."
 	}
+}
+
+// IsRateLimitErrorMessage is a string-only fallback for rate-limit detection.
+//
+// Deprecated: Use errcls.IsRateLimit(err) with a structured error value.
+// This function is retained for callers that only have the serialized
+// error string (e.g. errors deserialized from the message bus). It will
+// not be removed until all such callers are migrated to pass the original
+// error value.
+func IsRateLimitErrorMessage(errMsg string) bool {
+	lower := strings.ToLower(errMsg)
+	return strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "429") ||
+		strings.Contains(lower, "too many requests") ||
+		strings.Contains(lower, "quota exceeded") ||
+		strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "requests per") ||
+		strings.Contains(lower, "api calls per") ||
+		strings.Contains(lower, "rpm limit") ||
+		strings.Contains(lower, "tpm limit") ||
+		strings.Contains(lower, "concurrent requests")
 }

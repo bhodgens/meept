@@ -33,57 +33,6 @@ type SyncMetadata struct {
 	GossipEventsRecv24h int      `json:"gossip_events_recv_24h"`
 }
 
-// GenerateManifest creates a manifest from a list of database paths.
-func GenerateManifest(nodeID string, dbPaths []string) (*BackupManifest, error) {
-	if len(dbPaths) == 0 {
-		return nil, ErrNoDatabases
-	}
-
-	m := &BackupManifest{
-		NodeID:    nodeID,
-		Timestamp: time.Now().UTC(),
-		Databases: make([]DatabaseInfo, 0, len(dbPaths)),
-		SyncMetadata: SyncMetadata{
-			PeersSynced: []string{},
-		},
-	}
-
-	for _, dbPath := range dbPaths {
-		name := filepath.Base(dbPath)
-
-		// Compute uncompressed size
-		info, err := os.Stat(dbPath)
-		if err != nil {
-			return nil, Wrap("manifest_stat", err)
-		}
-
-		// Compute SHA256
-		sha, err := ComputeSHA256(dbPath)
-		if err != nil {
-			return nil, Wrap("manifest_sha256", err)
-		}
-
-		// Compress to temp path in same directory
-		backupDir := filepath.Join(filepath.Dir(dbPath), "backups", time.Now().UTC().Format("2006-01-02"), nodeID)
-		compressedPath := filepath.Join(backupDir, name+".zst")
-
-		compressedSize, err := CompressFile(dbPath, compressedPath)
-		if err != nil {
-			return nil, Wrap("manifest_compress", err)
-		}
-
-		m.Databases = append(m.Databases, DatabaseInfo{
-			Name:             name,
-			UncompressedSize: info.Size(),
-			CompressedSize:   compressedSize,
-			SHA256:           sha,
-			OriginalPath:     dbPath,
-			CompressedPath:   compressedPath,
-		})
-	}
-
-	return m, nil
-}
 
 // Save writes the manifest to the given path as JSON.
 func (m *BackupManifest) Save(path string) error {
@@ -142,4 +91,56 @@ func (m *BackupManifest) TotalUncompressedSize() int64 {
 		total += db.UncompressedSize
 	}
 	return total
+}
+
+// GenerateManifest creates a manifest from a list of database paths.
+func GenerateManifest(nodeID string, dbPaths []string) (*BackupManifest, error) {
+	if len(dbPaths) == 0 {
+		return nil, ErrNoDatabases
+	}
+
+	m := &BackupManifest{
+		NodeID:    nodeID,
+		Timestamp: time.Now().UTC(),
+		Databases: make([]DatabaseInfo, 0, len(dbPaths)),
+		SyncMetadata: SyncMetadata{
+			PeersSynced: []string{},
+		},
+	}
+
+	for _, dbPath := range dbPaths {
+		name := filepath.Base(dbPath)
+
+		// Compute uncompressed size
+		info, err := os.Stat(dbPath)
+		if err != nil {
+			return nil, Wrap("manifest_stat", err)
+		}
+
+		// Compute SHA256
+		sha, err := ComputeSHA256(dbPath)
+		if err != nil {
+			return nil, Wrap("manifest_sha256", err)
+		}
+
+		// Compress to temp path in same directory
+		backupDir := filepath.Join(filepath.Dir(dbPath), "backups", time.Now().UTC().Format("2006-01-02"), nodeID)
+		compressedPath := filepath.Join(backupDir, name+".zst")
+
+		compressedSize, err := CompressFile(dbPath, compressedPath)
+		if err != nil {
+			return nil, Wrap("manifest_compress", err)
+		}
+
+		m.Databases = append(m.Databases, DatabaseInfo{
+			Name:             name,
+			UncompressedSize: info.Size(),
+			CompressedSize:   compressedSize,
+			SHA256:           sha,
+			OriginalPath:     dbPath,
+			CompressedPath:   compressedPath,
+		})
+	}
+
+	return m, nil
 }

@@ -651,16 +651,6 @@ func allotmentAgentID(steps []*task.TaskStep) string {
 	return ""
 }
 
-// hintAgentFallback maps a tool hint to its default agent without touching
-// a scheduler instance. It defers to the authoritative config table
-// (config/tool_hints.go); chat is the terminal default for hints with no
-// entry, matching selectAgent (2026-09-10 audit M8).
-func hintAgentFallback(toolHint string) string {
-	if agentID, ok := config.ToolHintAgent(toolHint); ok {
-		return agentID
-	}
-	return config.AgentIDChat
-}
 
 // flattenWithContinuations rewrites a batched ready wave in place: batch 0
 // keeps its original descriptions; batch k (1-indexed) gets its
@@ -2775,11 +2765,6 @@ func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
 	return errcls.IsRateLimitErrorMessage(errMsg)
 }
 
-// isRateLimitErrorFromErr uses structured error classification via errcls.
-// Prefer this method when the original error value is available.
-func (ts *TacticalScheduler) isRateLimitErrorFromErr(err error) bool {
-	return errcls.IsRateLimit(err)
-}
 
 // isQuotaClassFailure classifies a serialized step-job failure as
 // quota-class, the trigger for quota-aware deferral. Two quota shapes
@@ -2855,13 +2840,6 @@ func (ts *TacticalScheduler) isRetryableError(errMsg string) bool {
 	return false
 }
 
-// isRetryableErrorFromErr uses structured error classification via errcls.
-// Prefer this method when the original error value is available. It correctly
-// handles context.DeadlineExceeded (which the string method missed) and
-// *llm.APIError with StatusCode 529 (overloaded).
-func (ts *TacticalScheduler) isRetryableErrorFromErr(err error) bool {
-	return errcls.IsRetryable(err)
-}
 
 // runValidationGateIfDue increments the validation counter for a task and runs
 // the validation gate if the interval has been reached.
@@ -3584,4 +3562,29 @@ func (ts *TacticalScheduler) claimsFileSideEffects(claims []string) bool {
 	return slices.ContainsFunc(claims, func(c string) bool {
 		return fileSideEffectClaimRe.MatchString(c)
 	})
+}
+
+// hintAgentFallback maps a tool hint to its default agent without touching
+// a scheduler instance. It defers to the authoritative config table
+// (config/tool_hints.go); chat is the terminal default for hints with no
+// entry, matching selectAgent (2026-09-10 audit M8).
+func hintAgentFallback(toolHint string) string {
+	if agentID, ok := config.ToolHintAgent(toolHint); ok {
+		return agentID
+	}
+	return config.AgentIDChat
+}
+
+// isRateLimitErrorFromErr uses structured error classification via errcls.
+// Prefer this method when the original error value is available.
+func (ts *TacticalScheduler) isRateLimitErrorFromErr(err error) bool {
+	return errcls.IsRateLimit(err)
+}
+
+// isRetryableErrorFromErr uses structured error classification via errcls.
+// Prefer this method when the original error value is available. It correctly
+// handles context.DeadlineExceeded (which the string method missed) and
+// *llm.APIError with StatusCode 529 (overloaded).
+func (ts *TacticalScheduler) isRetryableErrorFromErr(err error) bool {
+	return errcls.IsRetryable(err)
 }

@@ -249,22 +249,5 @@ func normalizeID(id string) string {
 	return strings.ToLower(strings.TrimSpace(id))
 }
 
-// GetAgent returns an agent by ID from the last discovery.
-func (d *Discovery) GetAgent(id string) *AgentDefinition {
-	return d.agents[normalizeID(id)]
-}
 
-// ListAgents returns all discovered agent IDs.
-func (d *Discovery) ListAgents() []string {
-	ids := make([]string, 0, len(d.agents))
-	for _, agent := range d.agents {
-		ids = append(ids, agent.ID)
-	}
-	sort.Strings(ids)
-	return ids
-}
 
-// Count returns the number of discovered agents.
-func (d *Discovery) Count() int {
-	return len(d.agents)
-}

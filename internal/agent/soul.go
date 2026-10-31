@@ -45,9 +45,6 @@ const SoulFileName = "SOUL.md"
 //go:embed soul_default.md
 var defaultSoulMD string
 
-// DefaultSoulMD returns the shipped default soul text.
-func DefaultSoulMD() string { return defaultSoulMD }
-
 // SoulPath returns the resolved soul file path (honors MEEPT_HOME).
 func SoulPath() string { return config.MeeptPath(SoulFileName) }
 
@@ -359,3 +356,6 @@ func (s *SoulProvider) reread() {
 }
 
 func sumHex(sum [sha256.Size]byte) string { return hex.EncodeToString(sum[:]) }
+
+// DefaultSoulMD returns the shipped default soul text.
+func DefaultSoulMD() string { return defaultSoulMD }

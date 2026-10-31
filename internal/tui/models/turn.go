@@ -293,26 +293,6 @@ func (r *turnRouter) get(turnID string) (*pendingTurn, bool) {
 	return pt, ok
 }
 
-// progress updates the last-activity timestamp and stored progress text.
-// Currently uncalled — the async-turn flow renders progress via
-// turnProgressMsg directly; kept for the leaf-07 removal sweep decision.
-//
-//lint:ignore U1000 intentional until the leaf-07 sweep
-func (r *turnRouter) progress(turnID, text string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	pt, ok := r.turns[turnID]
-	if !ok {
-		return false
-	}
-	pt.bumpActivity()
-	pt.mu.Lock()
-	if text != "" {
-		pt.progressText = text
-	}
-	pt.mu.Unlock()
-	return true
-}
 
 // remove forgets a turn (after its terminal resolution was rendered).
 func (r *turnRouter) remove(turnID string) {
@@ -337,22 +317,6 @@ func (r *turnRouter) hasPendingFor(conversationID string) bool {
 	return false
 }
 
-// anyPending returns the pending turns for a conversation.
-// Currently uncalled — hasPendingFor supersedes it; kept for the
-// leaf-07 removal sweep decision.
-//
-//lint:ignore U1000 intentional until the leaf-07 sweep
-func (r *turnRouter) anyPending(conversationID string) []*pendingTurn {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var out []*pendingTurn
-	for _, pt := range r.turns {
-		if pt.conversationID == conversationID {
-			out = append(out, pt)
-		}
-	}
-	return out
-}
 
 // Test-facing exports (leaf 04 contract tests). These live in the models
 // package so tests in package tui and package models can drive the router

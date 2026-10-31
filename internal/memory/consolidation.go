@@ -998,11 +998,6 @@ type SummarizeResponse struct {
 	Summaries []Summary `json:"summaries"`
 }
 
-// ToJSON converts a summarize request to JSON.
-func (r *SummarizeRequest) ToJSON() string {
-	data, _ := json.Marshal(r)
-	return string(data)
-}
 
 // extractJSONFromFences finds JSON inside markdown code fences anywhere in the text.
 // It tries ```json fences first, then generic ``` fences.

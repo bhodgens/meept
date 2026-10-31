@@ -46,16 +46,6 @@ type RendererConfig struct {
 	MaxTagsPerFile int
 }
 
-// DefaultRendererConfig returns a RendererConfig with default values.
-func DefaultRendererConfig() RendererConfig {
-	return RendererConfig{
-		MaxLineLength:  100,
-		ContextLines:   2,
-		EnableTreeView: true,
-		ShowScore:      false,
-		MaxTagsPerFile: 20,
-	}
-}
 
 // NewContextRenderer creates a new ContextRenderer with the given configuration.
 func NewContextRenderer(config RendererConfig, logger *slog.Logger) *ContextRenderer {
@@ -509,3 +499,14 @@ func (r *ContextRenderer) RenderSummarized(ranked RankedTags, maxFiles int) Rend
 
 // Ensure ContextRenderer implements RenderingProvider interface from fitting.go
 var _ RenderingProvider = (*ContextRenderer)(nil)
+
+// DefaultRendererConfig returns a RendererConfig with default values.
+func DefaultRendererConfig() RendererConfig {
+	return RendererConfig{
+		MaxLineLength:  100,
+		ContextLines:   2,
+		EnableTreeView: true,
+		ShowScore:      false,
+		MaxTagsPerFile: 20,
+	}
+}

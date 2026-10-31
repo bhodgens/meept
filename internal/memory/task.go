@@ -79,14 +79,6 @@ type TaskMemoryConfig struct {
 	Logger *slog.Logger
 }
 
-// DefaultTaskMemoryConfig returns configuration with sensible defaults.
-func DefaultTaskMemoryConfig(dataDir string) TaskMemoryConfig {
-	return TaskMemoryConfig{
-		DataDir: dataDir,
-		Domains: []string{DomainGeneral, DomainCode, DomainCommands},
-		Logger:  slog.Default(),
-	}
-}
 
 // NewTaskMemory creates a new task memory instance.
 func NewTaskMemory(cfg TaskMemoryConfig) (*TaskMemory, error) {
@@ -405,3 +397,12 @@ func (t *TaskMemory) scanResults(rows *sql.Rows, hasRank bool) ([]MemoryResult, 
 
 // Ensure TaskMemory implements io.Closer
 var _ io.Closer = (*TaskMemory)(nil)
+
+// DefaultTaskMemoryConfig returns configuration with sensible defaults.
+func DefaultTaskMemoryConfig(dataDir string) TaskMemoryConfig {
+	return TaskMemoryConfig{
+		DataDir: dataDir,
+		Domains: []string{DomainGeneral, DomainCode, DomainCommands},
+		Logger:  slog.Default(),
+	}
+}

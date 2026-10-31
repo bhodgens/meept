@@ -731,26 +731,6 @@ func (s *SessionService) GetMessageCount(ctx context.Context, sessionID string) 
 	return count, nil
 }
 
-func (s *SessionService) SearchMessages(ctx context.Context, req SearchMessagesRequest) ([]session.MessageSearchResult, error) {
-	if strings.TrimSpace(req.Query) == "" {
-		return nil, wrapError("session", "SearchMessages", ErrInvalidInput)
-	}
-	if s.store == nil {
-		return nil, wrapError("session", "SearchMessages", ErrUnavailable)
-	}
-	limit := req.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-	results, err := s.store.SearchMessages(ctx, req.Query, limit)
-	if err != nil {
-		return nil, wrapError("session", "SearchMessages", err)
-	}
-	if results == nil {
-		results = []session.MessageSearchResult{}
-	}
-	return results, nil
-}
 
 // UpdateDescription sets a session's description text.
 type UpdateDescriptionRequest struct {

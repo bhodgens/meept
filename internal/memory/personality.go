@@ -1,8 +1,8 @@
 package memory
 
 import (
-	"context"
 	"errors"
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -330,10 +330,9 @@ type PersonalityStore struct {
 	memory *PersonalityMemory
 }
 
-// NewPersonalityStore wraps a PersonalityMemory with key-value access.
-func NewPersonalityStore(memory *PersonalityMemory) *PersonalityStore {
-	return &PersonalityStore{memory: memory}
-}
+
+
+
 
 // Get retrieves a preference value.
 func (s *PersonalityStore) Get(ctx context.Context, key string) (string, error) {
@@ -360,13 +359,4 @@ func (s *PersonalityStore) Set(ctx context.Context, key, value string) error {
 	}
 
 	return s.memory.UpdateKey(ctx, "Creator Preferences", key, value)
-}
-
-// GetAll returns all personality data as a map.
-func (s *PersonalityStore) GetAll(ctx context.Context) (map[string][]string, error) {
-	if s.memory == nil {
-		return nil, errors.New("personality memory not initialized")
-	}
-
-	return s.memory.GetPersonality(), nil
 }

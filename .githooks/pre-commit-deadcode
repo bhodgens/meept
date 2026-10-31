@@ -1,0 +1,135 @@
+#!/bin/bash
+# Pre-commit hook: deadcode reachability gate (blocks NEW unwired functions)
+#
+# Runs golang.org/x/tools/cmd/deadcode on both binaries (cmd/meept-daemon,
+# cmd/meept) and diffs the unreachable-function set against the committed
+# baseline (.githooks/deadcode-baseline.txt). Commit is blocked when a
+# function is unreachable in the working tree but absent from the baseline —
+# i.e. newly added code nothing calls ("implemented but never wired").
+#
+# Why a baseline: the repo already carries ~12k unreachable functions. A
+# "must be empty" gate would block every commit forever. New-code-only
+# ratchets the count down instead of up; re-baseline deliberately when you
+# INTEND to remove or wire dead code (same policy as the bench regression
+# baseline in .githooks/README.md).
+#
+# Line numbers are stripped from the comparison key (path + func name only)
+# so pure code motion never produces false new/removed churn.
+#
+# Usage:
+#   .githooks/pre-commit-deadcode               # gate (called from pre-commit)
+#   .githooks/pre-commit-deadcode --rebaseline  # regenerate the baseline
+#
+# Env overrides (testing/CI):
+#   MEEPT_DEADCODE_BASELINE=/path/to/file   baseline location
+#
+# Requires: deadcode in PATH (or $GOPATH/bin). Skips with a warning when
+# missing: go install golang.org/x/tools/cmd/deadcode@latest
+#
+# Requires GOTOOLCHAIN pinned by the caller (pre-commit does this; standalone
+# runs pin from go.mod below).
+
+set -euo pipefail
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+# Pin the toolchain deadcode's package loading uses (same rationale as the
+# main pre-commit: GOTOOLCHAIN=auto never downgrades and breaks x/tools).
+if [ -z "${GOTOOLCHAIN:-}" ] || [ "$GOTOOLCHAIN" = "auto" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^toolchain[[:space:]]//p' "$PWD/go.mod" | head -1)"
+fi
+if [ -z "${GOTOOLCHAIN:-}" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^go[[:space:]]//p' "$PWD/go.mod" | head -1)"
+fi
+
+REBASELINE=0
+if [ "${1:-}" = "--rebaseline" ]; then
+    REBASELINE=1
+fi
+
+BASELINE="${MEEPT_DEADCODE_BASELINE:-$PWD/.githooks/deadcode-baseline.txt}"
+
+# Locate the deadcode binary.
+DEADCODE_BIN=""
+if command -v deadcode &>/dev/null; then
+    DEADCODE_BIN="$(command -v deadcode)"
+elif [ -x "$HOME/go/bin/deadcode" ]; then
+    DEADCODE_BIN="$HOME/go/bin/deadcode"
+fi
+if [ -z "$DEADCODE_BIN" ]; then
+    echo -e "${YELLOW}⚠️  deadcode not installed — skipping reachability (unwired code) check${NC}"
+    echo "   Install with: go install golang.org/x/tools/cmd/deadcode@latest"
+    exit 0
+fi
+
+# No staged Go files → nothing to check.
+STAGED_GO_FILES=$(git -c color.ui=false -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR 2>/dev/null | grep '\.go$' || true)
+if [ -z "$STAGED_GO_FILES" ] && [ "$REBASELINE" -eq 0 ]; then
+    exit 0
+fi
+
+# Normalize deadcode output to "path: unreachable func: Name" (no line:col —
+# those move on every edit and would churn the baseline).
+normalize() {
+    sed -E 's/:[0-9]+:[0-9]+: unreachable func:/ unreachable func:/'
+}
+
+TMPDIR_CURRENT="$(mktemp -t meept-deadcode.XXXXXX)"
+trap 'rm -f "$TMPDIR_CURRENT" "$TMPDIR_CURRENT.daemon" "$TMPDIR_CURRENT.cli"' EXIT
+
+# Analyze both binaries. A deadcode failure here means the working tree does
+# not typecheck/build — fail closed (pre-commit-build runs earlier and should
+# have caught it, so reaching this failure is unexpected).
+"$DEADCODE_BIN" -test ./cmd/meept-daemon > "$TMPDIR_CURRENT.daemon" || {
+    echo -e "${RED}✗ deadcode failed on ./cmd/meept-daemon (build/typecheck problem?)${NC}"
+    head -20 "$TMPDIR_CURRENT.daemon"
+    exit 1
+}
+"$DEADCODE_BIN" -test ./cmd/meept > "$TMPDIR_CURRENT.cli" || {
+    echo -e "${RED}✗ deadcode failed on ./cmd/meept (build/typecheck problem?)${NC}"
+    head -20 "$TMPDIR_CURRENT.cli"
+    exit 1
+}
+
+normalize < "$TMPDIR_CURRENT.daemon" > "$TMPDIR_CURRENT"
+normalize < "$TMPDIR_CURRENT.cli" >> "$TMPDIR_CURRENT"
+sort -u -o "$TMPDIR_CURRENT" "$TMPDIR_CURRENT"
+
+CURRENT_COUNT=$(wc -l < "$TMPDIR_CURRENT" | tr -d ' ')
+
+if [ "$REBASELINE" -eq 1 ]; then
+    cp "$TMPDIR_CURRENT" "$BASELINE"
+    echo -e "${GREEN}✓ deadcode baseline regenerated: $BASELINE ($CURRENT_COUNT unreachable funcs)${NC}"
+    echo "  Stage it: git add $BASELINE"
+    exit 0
+fi
+
+if [ ! -f "$BASELINE" ]; then
+    echo -e "${RED}✗ deadcode baseline missing: $BASELINE${NC}"
+    echo "  Generate it with: .githooks/pre-commit-deadcode --rebaseline"
+    exit 1
+fi
+
+# New = in the current set but not in the baseline (comm -13).
+NEW_FUNCS=$(comm -13 "$BASELINE" "$TMPDIR_CURRENT" || true)
+if [ -n "$NEW_FUNCS" ]; then
+    NEW_COUNT=$(printf '%s\n' "$NEW_FUNCS" | grep -c . || true)
+    echo -e "${RED}✗ deadcode gate: $NEW_COUNT newly unwired function(s) — commit blocked${NC}"
+    echo ""
+    echo "$NEW_FUNCS" | head -30 | sed 's/^/  /'
+    TOTAL_SHOW=$(printf '%s\n' "$NEW_FUNCS" | grep -c .)
+    if [ "$TOTAL_SHOW" -gt 30 ]; then
+        echo "  ... and $((TOTAL_SHOW - 30)) more"
+    fi
+    echo ""
+    echo "  Fix: wire the code into a call path, remove it, or gate it behind"
+    echo "  an existing entry point. If removal/wiring is the intent, re-baseline:"
+    echo "    .githooks/pre-commit-deadcode --rebaseline && git add .githooks/deadcode-baseline.txt"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ no newly unwired code ($CURRENT_COUNT unreachable funcs, at baseline)${NC}"
+exit 0

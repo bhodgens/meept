@@ -67,11 +67,3 @@ type Duration struct {
 	time.Duration
 }
 
-// DefaultCCRStoreConfig returns a CCRStoreConfig with sensible defaults.
-func DefaultCCRStoreConfig() CCRStoreConfig {
-	return CCRStoreConfig{
-		DatabasePath: "~/.meept/ccr.db",
-		DefaultTTL:   Duration{Duration: time.Hour},
-		MaxEntries:   10000,
-	}
-}

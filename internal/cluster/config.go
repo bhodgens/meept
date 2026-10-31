@@ -100,14 +100,6 @@ func LoadClusterConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// LoadClusterConfigFromDefaultPath loads cluster config from the default location.
-func LoadClusterConfigFromDefaultPath() (*Config, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	return LoadClusterConfig(filepath.Join(homeDir, ".meept", "cluster", "config.json5"))
-}
 
 // DefaultClusterConfigPath returns the default path for the cluster config.
 func DefaultClusterConfigPath() string {

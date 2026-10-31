@@ -1,16 +1,61 @@
 package lint
 
 import (
-	"context"
 	"fmt"
+	"context"
+
 	"path/filepath"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
 )
 
+
 // TreeSitterLinter provides syntax validation using tree-sitter error detection.
 type TreeSitterLinter struct{}
+
+
+
+
+
+
+// GetTreeSitterLanguage returns the tree-sitter language for the given language name.
+// This is a package-level function for use by the Registry.
+func GetTreeSitterLanguage(lang string) *sitter.Language {
+	getter, ok := LanguageFromLang[lang]
+	if !ok {
+		return nil
+	}
+	return getter()
+}
+
+// detectLanguageFromPath determines the language from file extension.
+// Returns the language string used by the lint package.
+func detectLanguageFromPath(filePath string) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".go":
+		return "go"
+	case ".py", ".pyi", ".pyw":
+		return "python"
+	case ".js", ".jsx", ".mjs", ".cjs":
+		return "javascript"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".rs":
+		return "rust"
+	case ".java":
+		return "java"
+	case ".rb", ".rake":
+		return "ruby"
+	case ".c", ".h":
+		return "c"
+	case ".cpp", ".cc", ".cxx", ".hpp":
+		return "cpp"
+	default:
+		return ""
+	}
+}
 
 // NewTreeSitterLinter creates a new tree-sitter linter.
 func NewTreeSitterLinter() *TreeSitterLinter {
@@ -50,34 +95,6 @@ func (ts *TreeSitterLinter) Lint(ctx context.Context, filePath, relPath, content
 	traverseTreeForErrors(root, &results, filePath, content)
 
 	return results, nil
-}
-
-// detectLanguageFromPath determines the language from file extension.
-// Returns the language string used by the lint package.
-func detectLanguageFromPath(filePath string) string {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	switch ext {
-	case ".go":
-		return "go"
-	case ".py", ".pyi", ".pyw":
-		return "python"
-	case ".js", ".jsx", ".mjs", ".cjs":
-		return "javascript"
-	case ".ts", ".tsx":
-		return "typescript"
-	case ".rs":
-		return "rust"
-	case ".java":
-		return "java"
-	case ".rb", ".rake":
-		return "ruby"
-	case ".c", ".h":
-		return "c"
-	case ".cpp", ".cc", ".cxx", ".hpp":
-		return "cpp"
-	default:
-		return ""
-	}
 }
 
 // traverseTreeForErrors recursively walks the parse tree to find ERROR nodes.
@@ -132,14 +149,4 @@ func traverseTreeForErrors(node *sitter.Node, results *[]LinterResult, file, con
 			traverseTreeForErrors(child, results, file, content)
 		}
 	}
-}
-
-// GetTreeSitterLanguage returns the tree-sitter language for the given language name.
-// This is a package-level function for use by the Registry.
-func GetTreeSitterLanguage(lang string) *sitter.Language {
-	getter, ok := LanguageFromLang[lang]
-	if !ok {
-		return nil
-	}
-	return getter()
 }

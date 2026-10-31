@@ -188,61 +188,9 @@ func (m *WireGuardManager) ApplyConfig(cfg *WireGuardConfig) error {
 	return nil
 }
 
-// AddPeer adds a single peer to the WireGuard interface by re-applying the
-// full config with the peer appended to the list.
-func (m *WireGuardManager) AddPeer(peer Member, cfg *WireGuardConfig) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	// Copy the config to avoid mutating the caller's peer slice.
-	cfgCopy := *cfg
-	peers := make([]Member, len(cfg.Peers)+1)
-	copy(peers, cfg.Peers)
-	peers[len(peers)-1] = peer
-	cfgCopy.Peers = peers
-	return m.ApplyConfig(&cfgCopy)
-}
 
-// RemovePeer removes a peer from the WireGuard interface by filtering it out
-// and re-applying the config.
-func (m *WireGuardManager) RemovePeer(nodeID string, cfg *WireGuardConfig) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	// Build a new peer slice and copy the config to avoid mutating caller.
-	peers := make([]Member, 0, len(cfg.Peers))
-	for _, p := range cfg.Peers {
-		if p.NodeID != nodeID {
-			peers = append(peers, p)
-		}
-	}
-	cfgCopy := *cfg
-	cfgCopy.Peers = peers
-	return m.ApplyConfig(&cfgCopy)
-}
 
-// UpdatePeers replaces the entire peer list with the provided members and
-// applies the new configuration.
-func (m *WireGuardManager) UpdatePeers(peers []Member, cfg *WireGuardConfig) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	// Copy the config to avoid mutating the caller's peer slice.
-	cfgCopy := *cfg
-	cfgCopy.Peers = peers
-	return m.ApplyConfig(&cfgCopy)
-}
 
-// SyncWithInterface reads the current WireGuard interface state via
-// `wg show` and returns it as a string. This is useful for diagnostics.
-func (m *WireGuardManager) SyncWithInterface() (string, error) {
-	cmd := exec.Command("wg", "show", m.iface)
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("wg show %s failed: %w", m.iface, err)
-	}
-
-	return stdout.String(), nil
-}
 
 // generateSyncConf creates the minimal WireGuard config suitable for
 // wg syncconf. syncconf requires only the interface private key plus peer
@@ -265,10 +213,6 @@ func parseTemplate(name, text string) (*texttemplate.Template, error) {
 	return texttemplate.New(name).Parse(text)
 }
 
-// InterfaceName returns the WireGuard interface name.
-func (m *WireGuardManager) InterfaceName() string {
-	return m.iface
-}
 
 // Stop releases resources held by the WireGuardManager.
 // Currently a no-op since no background goroutines are started,

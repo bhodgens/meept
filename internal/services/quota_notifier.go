@@ -108,16 +108,6 @@ func (qn *QuotaNotifier) pump(stopCh <-chan struct{}, doneCh chan<- struct{}) {
 	}
 }
 
-// Start ensures the event pump is running. Present for explicit lifecycle
-// symmetry with Stop; NewQuotaNotifier already auto-starts the pump, so this
-// is a no-op in normal use.
-func (qn *QuotaNotifier) Start() {
-	qn.mu.Lock()
-	defer qn.mu.Unlock()
-	if qn.sub != nil && qn.stopCh == nil {
-		qn.start()
-	}
-}
 
 // Stop unsubscribes from the bus and terminates the pump goroutine, waiting
 // for it to exit. Safe to call multiple times (subsequent calls are no-ops),
@@ -300,6 +290,7 @@ func (qn *QuotaNotifier) processEvent(msg *models.BusMessage) {
 	)
 }
 
+
 // Cleanup removes old dedup entries (for memory safety on long runs).
 func (qn *QuotaNotifier) Cleanup() {
 	qn.mu.Lock()
@@ -307,5 +298,16 @@ func (qn *QuotaNotifier) Cleanup() {
 	// Keep only last 100 entries
 	if len(qn.seen) > 100 {
 		qn.seen = make(map[string]bool)
+	}
+}
+
+// Start ensures the event pump is running. Present for explicit lifecycle
+// symmetry with Stop; NewQuotaNotifier already auto-starts the pump, so this
+// is a no-op in normal use.
+func (qn *QuotaNotifier) Start() {
+	qn.mu.Lock()
+	defer qn.mu.Unlock()
+	if qn.sub != nil && qn.stopCh == nil {
+		qn.start()
 	}
 }

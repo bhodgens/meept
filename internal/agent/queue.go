@@ -200,12 +200,6 @@ func WithQueueLogger(l Logger) MessageQueueOption {
 	}
 }
 
-// WithQueuePersister sets the persistence backend.
-func WithQueuePersister(p QueuePersisterOps) MessageQueueOption {
-	return func(q *MessageQueue) {
-		q.persister = p
-	}
-}
 
 // NewMessageQueue creates a new MessageQueue.
 func NewMessageQueue(opts ...MessageQueueOption) *MessageQueue {

@@ -576,11 +576,6 @@ func (l *AgentLoop) shouldAutoInject() bool {
 	return mode == RecallModeAuto || mode == RecallModeHybrid
 }
 
-// shouldFetchOnQuery returns true if memory should be fetched when agent calls memory tools.
-func (l *AgentLoop) shouldFetchOnQuery() bool {
-	mode := l.config.Memory.RecallMode
-	return mode == RecallModeOnQuery || mode == RecallModeHybrid
-}
 
 // AgentLoop orchestrates LLM reasoning interleaved with tool execution.
 type AgentLoop struct {
@@ -8146,46 +8141,6 @@ func (l *AgentLoop) observeToolBreaker(toolCalls []llm.ToolCall, results []*Exec
 	}
 }
 
-// buildSystemPrompt constructs the system prompt.
-func (l *AgentLoop) buildSystemPrompt() string {
-	// Use override if set
-	if l.config.SystemPromptOveride != "" {
-		return l.buildSystemPromptWithOverride()
-	}
-
-	// Build from components
-	builder := NewPromptBuilderFromConfig(PromptConfig{
-		Constitution: l.config.Constitution,
-		Restrictions: l.config.Restrictions,
-		Purpose:      l.config.Purpose,
-		Personality:  l.effectivePersonality(),
-	})
-
-	// Add baseline capabilities and platform introspection guidelines
-	builder.AddSectionWithStability("Platform Capabilities", prompts.BaselineCapabilities, true)
-	builder.AddSectionWithStability("Platform Guidelines", prompts.BaselineGuidelines, true)
-
-	// Add global rules if configured
-	if l.config.GlobalRules != "" {
-		builder.AddSectionWithStability("Global Rules", l.config.GlobalRules, true)
-	}
-
-	// Inject project context (artifact, project info, AGENTS.md)
-	l.injectProjectContext(builder)
-
-	// Tool descriptions are omitted from the system prompt because they are
-	// already sent via the API's tools parameter, avoiding duplication.
-
-	// Evidence requirements apply to all prompt variants
-	builder.AddSectionWithStability("Evidence Requirements", evidenceSection, true)
-
-	// Inject compression instructions when compression is active
-	if l.compressionPipeline != nil {
-		builder.AddSectionWithStability("Context Compression", compressionPrompt, true)
-	}
-
-	return l.assembleSystemPrompt(builder)
-}
 
 // buildValidationAnchorInstructions builds the validation/escalation anchor message
 // that persists through context truncation. This ensures agents always have access
@@ -9429,32 +9384,6 @@ func (l *AgentLoop) currentModelInfo() (modelID, providerID string) {
 	return "unknown", "unknown"
 }
 
-// buildMCPContextSection builds the MCP server context section for the system prompt.
-// Returns an empty string when no MCP server lister is configured or no servers are available.
-func (l *AgentLoop) buildMCPContextSection() string {
-	if l.mcpServerLister == nil {
-		return ""
-	}
-	servers := l.mcpServerLister()
-	if len(servers) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("\n## MCP Servers\n\n")
-	totalTools := 0
-	for _, srv := range servers {
-		status := "disconnected"
-		if srv.Connected {
-			status = "connected"
-		}
-		fmt.Fprintf(&sb, "- %s (%d tool(s), %s)\n", srv.Name, srv.ToolCount, status)
-		totalTools += srv.ToolCount
-	}
-	fmt.Fprintf(&sb, "\nTotal: %d tool(s) across %d server(s)\n", totalTools, len(servers))
-	sb.WriteString("Use the platform_tools tool to list all available tools.\n")
-	sb.WriteString("Use the mcp_servers tool to inspect individual server details.\n")
-	return sb.String()
-}
 
 // applyTerminateReplyGuard runs the reply guard's classification over the
 // terminating-tool lane's final reply (the buildTerminateResponse product)
@@ -9852,4 +9781,78 @@ func (l *AgentLoop) replyToolNotifiedThisTurn(conv *Conversation) bool {
 		return false
 	}
 	return slices.Contains(toolNamesSinceLastUser(conv.GetMessages()), "reply_to_user")
+}
+
+// buildMCPContextSection builds the MCP server context section for the system prompt.
+// Returns an empty string when no MCP server lister is configured or no servers are available.
+func (l *AgentLoop) buildMCPContextSection() string {
+	if l.mcpServerLister == nil {
+		return ""
+	}
+	servers := l.mcpServerLister()
+	if len(servers) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n## MCP Servers\n\n")
+	totalTools := 0
+	for _, srv := range servers {
+		status := "disconnected"
+		if srv.Connected {
+			status = "connected"
+		}
+		fmt.Fprintf(&sb, "- %s (%d tool(s), %s)\n", srv.Name, srv.ToolCount, status)
+		totalTools += srv.ToolCount
+	}
+	fmt.Fprintf(&sb, "\nTotal: %d tool(s) across %d server(s)\n", totalTools, len(servers))
+	sb.WriteString("Use the platform_tools tool to list all available tools.\n")
+	sb.WriteString("Use the mcp_servers tool to inspect individual server details.\n")
+	return sb.String()
+}
+
+// buildSystemPrompt constructs the system prompt.
+func (l *AgentLoop) buildSystemPrompt() string {
+	// Use override if set
+	if l.config.SystemPromptOveride != "" {
+		return l.buildSystemPromptWithOverride()
+	}
+
+	// Build from components
+	builder := NewPromptBuilderFromConfig(PromptConfig{
+		Constitution: l.config.Constitution,
+		Restrictions: l.config.Restrictions,
+		Purpose:      l.config.Purpose,
+		Personality:  l.effectivePersonality(),
+	})
+
+	// Add baseline capabilities and platform introspection guidelines
+	builder.AddSectionWithStability("Platform Capabilities", prompts.BaselineCapabilities, true)
+	builder.AddSectionWithStability("Platform Guidelines", prompts.BaselineGuidelines, true)
+
+	// Add global rules if configured
+	if l.config.GlobalRules != "" {
+		builder.AddSectionWithStability("Global Rules", l.config.GlobalRules, true)
+	}
+
+	// Inject project context (artifact, project info, AGENTS.md)
+	l.injectProjectContext(builder)
+
+	// Tool descriptions are omitted from the system prompt because they are
+	// already sent via the API's tools parameter, avoiding duplication.
+
+	// Evidence requirements apply to all prompt variants
+	builder.AddSectionWithStability("Evidence Requirements", evidenceSection, true)
+
+	// Inject compression instructions when compression is active
+	if l.compressionPipeline != nil {
+		builder.AddSectionWithStability("Context Compression", compressionPrompt, true)
+	}
+
+	return l.assembleSystemPrompt(builder)
+}
+
+// shouldFetchOnQuery returns true if memory should be fetched when agent calls memory tools.
+func (l *AgentLoop) shouldFetchOnQuery() bool {
+	mode := l.config.Memory.RecallMode
+	return mode == RecallModeOnQuery || mode == RecallModeHybrid
 }

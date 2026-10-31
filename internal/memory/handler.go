@@ -65,13 +65,6 @@ func NewHandlerWithSecurity(manager *Manager, msgBus *bus.MessageBus, secOrch *i
 	return h
 }
 
-// SetSecurityOrchestrator wires a security orchestrator for retrieval-time
-// re-sanitization. Nil is accepted and simply disables protection.
-func (h *Handler) SetSecurityOrchestrator(secOrch *intsecurity.Orchestrator) {
-	if secOrch != nil {
-		h.secOrch = secOrch
-	}
-}
 
 // protectContent applies retrieval-time defense to memory content:
 //  1. Re-sanitize through InputSanitizer (if wired) to catch injection patterns
@@ -298,4 +291,12 @@ func (h *Handler) sendError(replyTo, errMsg string) {
 	}
 
 	h.bus.Publish("memory.result", respMsg)
+}
+
+// SetSecurityOrchestrator wires a security orchestrator for retrieval-time
+// re-sanitization. Nil is accepted and simply disables protection.
+func (h *Handler) SetSecurityOrchestrator(secOrch *intsecurity.Orchestrator) {
+	if secOrch != nil {
+		h.secOrch = secOrch
+	}
 }

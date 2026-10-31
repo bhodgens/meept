@@ -18,10 +18,6 @@ const (
 	ColorSuccess = 35  // green
 )
 
-// DefaultBg returns the default terminal background attribute for transparency support.
-func DefaultBg() termbox.Attribute {
-	return termbox.ColorDefault
-}
 
 // Style represents a text style with foreground and background colors.
 type Style struct {
@@ -29,7 +25,3 @@ type Style struct {
 	Bg termbox.Attribute
 }
 
-// NewStyle creates a new style with default background.
-func NewStyle(fg termbox.Attribute) Style {
-	return Style{Fg: fg, Bg: termbox.ColorDefault}
-}

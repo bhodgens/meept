@@ -1,20 +1,24 @@
 package cluster
 
 import (
-	"context"
+
+
 	"crypto/ed25519"
-	"crypto/rand"
-	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/caimlas/meept/internal/bus"
 
 	q "github.com/caimlas/meept/internal/queue"
-	"github.com/cespare/xxhash/v2"
+	"context"
+	"fmt"
+	"path/filepath"
+	"os"
+	"crypto/rand"
+	xxhash "github.com/cespare/xxhash/v2"
 )
+
+
 
 // Engine is the central orchestrator for cluster operations.
 // It manages gossip communication, git-based membership sync,
@@ -54,6 +58,20 @@ type EngineConfig struct {
 	EnableWireGuard bool
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // NewEngine creates a new cluster engine from the given configuration.
 // It does not start any background routines; call Start() to begin.
 func NewEngine(cfg EngineConfig) *Engine {
@@ -79,6 +97,27 @@ func NewEngine(cfg EngineConfig) *Engine {
 		nodeName:        cfg.NodeName,
 		enableWireGuard: cfg.EnableWireGuard,
 	}
+}
+
+// Config returns the global cluster configuration.
+func (e *Engine) Config() *Config {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.cfg
+}
+
+// Gossip returns the gossip engine, or nil if not started.
+func (e *Engine) Gossip() *GossipEngine {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.gossip
+}
+
+// IsRunning returns true if the engine is currently active.
+func (e *Engine) IsRunning() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.running
 }
 
 // Start initializes and starts all cluster components (gossip and git sync).
@@ -196,62 +235,6 @@ func (e *Engine) Stop() error {
 	return nil
 }
 
-// NodeID returns this node's unique identifier.
-func (e *Engine) NodeID() string {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.nodeID
-}
-
-// Config returns the global cluster configuration.
-func (e *Engine) Config() *Config {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.cfg
-}
-
-// LocalCfg returns the local node configuration.
-func (e *Engine) LocalCfg() *Config {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.localCfg
-}
-
-// Gossip returns the gossip engine, or nil if not started.
-func (e *Engine) Gossip() *GossipEngine {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.gossip
-}
-
-// GitSync returns the git sync instance, or nil if not started.
-func (e *Engine) GitSync() *GitSync {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.gitSync
-}
-
-// WireGuardManager returns the WireGuard manager instance, or nil if not started.
-func (e *Engine) WireGuardManager() *WireGuardManager {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.wgMgr
-}
-
-// SigningKey returns the node's ed25519 signing key pair.
-func (e *Engine) SigningKey() (ed25519.PrivateKey, ed25519.PublicKey) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.signingPriv, e.signingPub
-}
-
-// IsRunning returns true if the engine is currently active.
-func (e *Engine) IsRunning() bool {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.running
-}
-
 // loadKeys loads ed25519 signing keys from the local keys directory,
 // or generates a new key pair if none exist.
 func (e *Engine) loadKeys() error {
@@ -313,13 +296,13 @@ generate:
 	return nil
 }
 
+// nodeIDFromPub derives a deterministic node ID from an ed25519 public key.
+func nodeIDFromPub(pub ed25519.PublicKey) string {
+	return fmt.Sprintf("node-%08x", xxhash.Sum64(pub))
+}
+
 // defaultKeysDir returns the default path for cluster signing keys.
 func defaultKeysDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".meept", "cluster", "keys")
-}
-
-// nodeIDFromPub derives a deterministic node ID from an ed25519 public key.
-func nodeIDFromPub(pub ed25519.PublicKey) string {
-	return fmt.Sprintf("node-%08x", xxhash.Sum64(pub))
 }

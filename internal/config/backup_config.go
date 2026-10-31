@@ -15,14 +15,6 @@ type BackupConfig struct {
 	NodeID        string        `json:"node_id"        toml:"node_id"`
 }
 
-// DefaultBackupConfig returns sensible defaults.
-func DefaultBackupConfig() BackupConfig {
-	return BackupConfig{
-		Enabled:       false,
-		Schedule:      24 * time.Hour,
-		RetentionDays: 12,
-	}
-}
 
 // ErrBackupInvalid is returned when BackupConfig validation fails.
 var ErrBackupInvalid = fmt.Errorf("backup config is invalid")
@@ -51,4 +43,13 @@ func (c *BackupConfig) Validate() error {
 // IsValidated reports whether c is enabled and fully configured.
 func (c *BackupConfig) IsValidated() bool {
 	return c.Enabled && c.RepoURL != "" && c.Schedule > 0 && c.RetentionDays > 0
+}
+
+// DefaultBackupConfig returns sensible defaults.
+func DefaultBackupConfig() BackupConfig {
+	return BackupConfig{
+		Enabled:       false,
+		Schedule:      24 * time.Hour,
+		RetentionDays: 12,
+	}
 }

@@ -40,46 +40,9 @@ type ComponentRegistry struct {
 // ComponentRegistryOption configures a ComponentRegistry.
 type ComponentRegistryOption func(*ComponentRegistry)
 
-// WithComponentLogger sets the logger used by the registry.
-func WithComponentLogger(logger *slog.Logger) ComponentRegistryOption {
-	return func(r *ComponentRegistry) { r.logger = logger }
-}
 
-// WithComponentBundledPath sets the bundled defaults path (lowest priority tier).
-func WithComponentBundledPath(path string) ComponentRegistryOption {
-	return func(r *ComponentRegistry) {
-		r.discover(DiscoveryTier{Path: path, Priority: PriorityBundled})
-	}
-}
 
-// WithComponentTiers overrides the default project/user/system tiers.
-func WithComponentTiers(tiers []DiscoveryTier) ComponentRegistryOption {
-	return func(r *ComponentRegistry) {
-		for _, t := range tiers {
-			r.discover(t)
-		}
-	}
-}
 
-// NewComponentRegistry creates a registry and scans the standard 3-tier
-// hierarchy. The bundled path is optional; when empty, only the user-defined
-// tiers are scanned.
-func NewComponentRegistry(opts ...ComponentRegistryOption) *ComponentRegistry {
-	r := &ComponentRegistry{
-		components: make(map[string]string),
-		logger:     slog.Default(),
-	}
-	for _, opt := range opts {
-		opt(r)
-	}
-	// Always include the standard tiers unless the caller fully overrode them
-	// via WithComponentTiers. We can't distinguish "no tiers added yet" from
-	// "caller wants zero tiers" cleanly, so we add defaults here only when the
-	// registry is empty AND the caller didn't pass any tier option. The common
-	// path (NewComponentRegistry()) and NewComponentRegistry(WithComponentBundledPath(...))
-	// both still want the standard tiers.
-	return r
-}
 
 // NewDefaultComponentRegistry scans the standard 3-tier prompts hierarchy
 // plus an optional bundled path. This is the constructor most callers want.

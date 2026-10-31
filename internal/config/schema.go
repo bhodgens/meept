@@ -118,6 +118,7 @@ type Config struct {
 	Hermes              HermesConfig              `json:"hermes"               toml:"hermes"`
 	Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 	GitHub              GitHubConfig              `json:"github"               toml:"github"`
+	Intake              IntakeConfig              `json:"intake"               toml:"intake"`
 }
 
 // GitHubConfig configures the GitHub PR/CI tool set ([github]). Disabled by
@@ -137,6 +138,62 @@ type GitHubConfig struct {
 	DefaultOwner string `json:"default_owner" toml:"default_owner"`
 	DefaultRepo  string `json:"default_repo"  toml:"default_repo"`
 	BaseURL      string `json:"base_url,omitempty" toml:"base_url,omitempty"`
+}
+
+// IntakeConfig configures the GitHub ticket intake ([intake]): a poller
+// watches a repo for label-gated tickets and maps them to employee goals.
+// Opt-in — disabled by default, no poller is scheduled when Enabled=false.
+// PollInterval is declared as a STRING ("5m") and parsed at wiring time;
+// it is registered in the json5 loader's stringDurationKeys exemption so
+// the duration-rewrite pass never converts it to a nanosecond integer.
+//
+//gendoc:section intake
+//gendoc:desc GitHub ticket intake: poll a watch_repo for label-gated tickets and map them to employee goals (opt-in; disabled by default).
+//gendoc:example [intake] enabled = true, default_employee = "factory-bot", poll_interval = "5m", watch_repo = "octo/forge"
+type IntakeConfig struct {
+	// Enabled turns on the intake poller (default: false, opt-in).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// DefaultEmployee is the employee goals are created for — REQUIRED
+	// when Enabled (see ValidateEnabled).
+	DefaultEmployee string `json:"default_employee" toml:"default_employee"`
+	// PollInterval is the poll cadence as a Go duration string
+	// (default "5m"). Held as a string; parsed at wiring time.
+	PollInterval string `json:"poll_interval" toml:"poll_interval"`
+	// WatchRepo is the "owner/repo" repository polled for tickets —
+	// REQUIRED when Enabled (see ValidateEnabled).
+	WatchRepo string `json:"watch_repo" toml:"watch_repo"`
+	// RequiredLabels are the labels a ticket must carry to qualify
+	// (default ["factory"]).
+	RequiredLabels []string `json:"required_labels" toml:"required_labels"`
+	// DoneLabel marks a ticket done after write-back
+	// (default "factory:done").
+	DoneLabel string `json:"done_label" toml:"done_label"`
+	// GateCommand is an optional quality-gate command attached to
+	// goals created by intake.
+	GateCommand string `json:"gate_command" toml:"gate_command"`
+	// ProjectNumber is a GitHub Projects V2 project number for
+	// ticket projection; 0 = projection disabled.
+	ProjectNumber int64 `json:"project_number" toml:"project_number"`
+}
+
+// ValidateEnabled checks the REQUIRED-when-enabled fields: it names EVERY
+// missing one so the operator can fix the config in one pass. No-op when
+// Enabled=false.
+func (c IntakeConfig) ValidateEnabled() error {
+	if !c.Enabled {
+		return nil
+	}
+	var missing []string
+	if c.DefaultEmployee == "" {
+		missing = append(missing, "default_employee")
+	}
+	if c.WatchRepo == "" {
+		missing = append(missing, "watch_repo")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("intake.enabled requires intake.%s to be set", strings.Join(missing, " and intake."))
+	}
+	return nil
 }
 
 // HermesConfig configures the native Hermes gateway interop ([hermes]):
@@ -4133,19 +4190,6 @@ func DefaultConfig() *Config {
 	}
 }
 
-// ParseLogLevel converts a string log level to slog.Level.
-//
-// The name is matched case-insensitively with surrounding whitespace ignored:
-// meept.json5 in the wild carries both the lowercase documented forms
-// ("debug", "info", "warn", "error" — see docs/configuration/config-sync.md)
-// and the uppercase forms the config editor writes ("DEBUG"), and a
-// case-sensitive match silently resolved every lowercase value to INFO —
-// which made daemon.log_level look inert. Unrecognised values fall back to
-// info; callers that want to warn about them use ParseLogLevelValue.
-func ParseLogLevel(level string) slog.Level {
-	lvl, _ := ParseLogLevelValue(level)
-	return lvl
-}
 
 // ParseLogLevelValue converts a configured log level name to an slog.Level and
 // reports whether the name was recognised. Names are matched
@@ -4560,4 +4604,18 @@ func (c *Config) ValidateAll() error {
 	}
 
 	return nil
+}
+
+// ParseLogLevel converts a string log level to slog.Level.
+//
+// The name is matched case-insensitively with surrounding whitespace ignored:
+// meept.json5 in the wild carries both the lowercase documented forms
+// ("debug", "info", "warn", "error" — see docs/configuration/config-sync.md)
+// and the uppercase forms the config editor writes ("DEBUG"), and a
+// case-sensitive match silently resolved every lowercase value to INFO —
+// which made daemon.log_level look inert. Unrecognised values fall back to
+// info; callers that want to warn about them use ParseLogLevelValue.
+func ParseLogLevel(level string) slog.Level {
+	lvl, _ := ParseLogLevelValue(level)
+	return lvl
 }

@@ -45,26 +45,6 @@ func GitInit(repoPath string) (*git.Repository, string, error) {
 	return repo, repoPath, nil
 }
 
-// GitClone clones a repository, returning open repo and path.
-func GitClone(url, path string) (*git.Repository, error) {
-	repo, openErr := git.PlainOpen(path)
-	if openErr == nil {
-		return repo, nil
-	}
-
-	if !os.IsNotExist(openErr) {
-		return nil, Wrap("git_clone_open", openErr)
-	}
-
-	repo, err := git.PlainClone(path, false, &git.CloneOptions{
-		URL: url,
-	})
-	if err != nil {
-		return nil, Wrap("git_clone", err)
-	}
-
-	return repo, nil
-}
 
 // GitPullRebase pulls from the default remote, rebasing local commits.
 func GitPullRebase(repo *git.Repository) error {

@@ -62,11 +62,13 @@ func LoadJSON5(path string, v any) error {
 //	oauth.refresh_interval            — time.ParseDuration at wiring (components.go)
 //	oauth.refresh_margin              — time.ParseDuration at wiring (components.go)
 //	agent.worker_pool.idle_timeout    — time.ParseDuration (agent_manager_wiring.go)
+//	intake.poll_interval              — time.ParseDuration at wiring (leaf 05)
 var stringDurationKeys = map[string]bool{
 	"interactive_window": true,
 	"refresh_interval":   true,
 	"refresh_margin":     true,
 	"idle_timeout":       true,
+	"poll_interval":      true,
 }
 
 // preprocessDurations applies the shared duration preprocessing used by both
@@ -482,16 +484,6 @@ func extractTypeMismatch(errMsg string) string {
 	return fmt.Sprintf("found %s", foundType)
 }
 
-// LoadJSON5WithDefault loads JSON5 from path, or returns default if not found.
-func LoadJSON5WithDefault(path string, v any) error {
-	if err := LoadJSON5(path, v); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
 
 // UnmarshalJSON5 parses JSON5-formatted bytes into a struct.
 // Unlike LoadJSON5, this does NOT expand environment variables.

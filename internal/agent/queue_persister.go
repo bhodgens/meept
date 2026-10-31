@@ -33,13 +33,6 @@ type QueuePersisterConfig struct {
 	MaxPending int
 }
 
-// DefaultQueuePersisterConfig returns defaults.
-func DefaultQueuePersisterConfig() QueuePersisterConfig {
-	return QueuePersisterConfig{
-		FlushDelay: defaultFlushDelay,
-		MaxPending: 100,
-	}
-}
 
 const queuedFollowupsSchema = `
 CREATE TABLE IF NOT EXISTS queued_followups (
@@ -57,6 +50,17 @@ const createQueuedFollowupsIndex = `
 CREATE INDEX IF NOT EXISTS idx_queued_followups_conversation
     ON queued_followups(conversation_id);
 `
+
+
+
+
+
+
+
+
+
+
+
 
 // NewQueuePersister creates a new write-behind persister.
 // It initializes the database schema immediately.
@@ -87,86 +91,12 @@ func NewQueuePersister(db *sql.DB, conversationID string, logger *slog.Logger) (
 	return p, nil
 }
 
-// WithBus attaches a message bus for event publishing on persist.
-func (p *QueuePersister) WithBus(b *bus.MessageBus) {
-	p.bus = b
-}
-
-// initSchema creates the necessary tables and indexes.
-func (p *QueuePersister) initSchema() error {
-	if _, err := p.db.Exec(queuedFollowupsSchema); err != nil {
-		return err
+// DefaultQueuePersisterConfig returns defaults.
+func DefaultQueuePersisterConfig() QueuePersisterConfig {
+	return QueuePersisterConfig{
+		FlushDelay: defaultFlushDelay,
+		MaxPending: 100,
 	}
-	if _, err := p.db.Exec(createQueuedFollowupsIndex); err != nil {
-		return err
-	}
-	return nil
-}
-
-// EnqueueAsync buffers a message for later flushing.
-// It starts or resets the flush timer (debounced write-behind).
-// If the pending buffer reaches MaxPending, an immediate flush is triggered first.
-func (p *QueuePersister) EnqueueAsync(msg QueuedMessage) {
-	p.mu.Lock()
-
-	if len(p.pending) >= p.maxPending {
-		p.logger.Warn("queue persister: max pending reached, flushing",
-			"pending", len(p.pending),
-			"max_pending", p.maxPending,
-		)
-		// Snapshot pending under lock, release for I/O, then re-acquire.
-		pending := p.pending
-		p.pending = make([]QueuedMessage, 0)
-		p.mu.Unlock()
-
-		// Flush without holding the lock (SQLite I/O).
-		p.flushPending(pending)
-
-		// Re-acquire the lock to append the new message and reset the timer.
-		p.mu.Lock()
-	}
-
-	p.pending = append(p.pending, msg)
-
-	// Reset the flush timer (debounce) — must be inside the lock to prevent
-	// concurrent manipulation from the timer goroutine in flushPending.
-	if !p.flushTimer.Stop() {
-		select {
-		case <-p.flushTimer.C:
-		default:
-		}
-	}
-	p.flushTimer.Reset(p.flushDelay)
-
-	p.mu.Unlock()
-}
-
-// PersistSync immediately inserts a message into SQLite.
-func (p *QueuePersister) PersistSync(msg QueuedMessage) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	_, err := p.db.Exec(`
-		INSERT OR REPLACE INTO queued_followups
-			(conversation_id, message_id, content, queue_type, source, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`,
-		p.conversationID,
-		msg.ID,
-		msg.Content,
-		string(msg.QueueType),
-		msg.Source,
-		now,
-		now,
-	)
-
-	if err != nil {
-		p.logger.Warn("queue persister: failed to persist follow-up", "id", msg.ID, "err", err)
-		return err
-	}
-
-	p.publishPersistedEvent(msg)
-	p.logger.Debug("queue persister: persisted follow-up", "id", msg.ID)
-	return nil
 }
 
 // Flush writes all pending buffered messages to SQLite.
@@ -181,6 +111,17 @@ func (p *QueuePersister) Flush() {
 	p.mu.Unlock()
 
 	p.flushPending(pending)
+}
+
+// initSchema creates the necessary tables and indexes.
+func (p *QueuePersister) initSchema() error {
+	if _, err := p.db.Exec(queuedFollowupsSchema); err != nil {
+		return err
+	}
+	if _, err := p.db.Exec(createQueuedFollowupsIndex); err != nil {
+		return err
+	}
+	return nil
 }
 
 // flushPending writes messages to SQLite in a single transaction, re-enqueuing failures.
@@ -258,6 +199,65 @@ func (p *QueuePersister) flushPending(pending []QueuedMessage) {
 	}
 }
 
+// publishPersistedEvent publishes a bus event when a message is persisted.
+func (p *QueuePersister) publishPersistedEvent(msg QueuedMessage) {
+	if p.bus == nil {
+		return
+	}
+
+	payload := QueueEventPayload{
+		ConversationID: p.conversationID,
+		QueueType:      string(msg.QueueType),
+		MessageID:      msg.ID,
+		ContentPreview: previewContent(msg.Content),
+		Source:         msg.Source,
+	}
+
+	ev, err := models.NewBusMessage(models.MessageTypeEvent, "queue", payload)
+	if err != nil {
+		p.logger.Warn("queue persister: failed to marshal event", "err", err)
+		return
+	}
+
+	_ = p.bus.Publish(bus.EventQueuePersisted, ev)
+}
+
+// Stop halts the flush timer and flushes any remaining pending messages.
+func (p *QueuePersister) Stop() {
+	if p.flushTimer != nil {
+		p.flushTimer.Stop()
+	}
+	p.Flush()
+}
+
+// PersistSync immediately inserts a message into SQLite.
+func (p *QueuePersister) PersistSync(msg QueuedMessage) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	_, err := p.db.Exec(`
+		INSERT OR REPLACE INTO queued_followups
+			(conversation_id, message_id, content, queue_type, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`,
+		p.conversationID,
+		msg.ID,
+		msg.Content,
+		string(msg.QueueType),
+		msg.Source,
+		now,
+		now,
+	)
+
+	if err != nil {
+		p.logger.Warn("queue persister: failed to persist follow-up", "id", msg.ID, "err", err)
+		return err
+	}
+
+	p.publishPersistedEvent(msg)
+	p.logger.Debug("queue persister: persisted follow-up", "id", msg.ID)
+	return nil
+}
+
 // LoadPending returns all persisted follow-ups for this conversation.
 func (p *QueuePersister) LoadPending() ([]QueuedMessage, error) {
 	rows, err := p.db.Query(`
@@ -293,33 +293,45 @@ func (p *QueuePersister) ClearPending() error {
 	return err
 }
 
-// Stop halts the flush timer and flushes any remaining pending messages.
-func (p *QueuePersister) Stop() {
-	if p.flushTimer != nil {
-		p.flushTimer.Stop()
+// EnqueueAsync buffers a message for later flushing.
+// It starts or resets the flush timer (debounced write-behind).
+// If the pending buffer reaches MaxPending, an immediate flush is triggered first.
+func (p *QueuePersister) EnqueueAsync(msg QueuedMessage) {
+	p.mu.Lock()
+
+	if len(p.pending) >= p.maxPending {
+		p.logger.Warn("queue persister: max pending reached, flushing",
+			"pending", len(p.pending),
+			"max_pending", p.maxPending,
+		)
+		// Snapshot pending under lock, release for I/O, then re-acquire.
+		pending := p.pending
+		p.pending = make([]QueuedMessage, 0)
+		p.mu.Unlock()
+
+		// Flush without holding the lock (SQLite I/O).
+		p.flushPending(pending)
+
+		// Re-acquire the lock to append the new message and reset the timer.
+		p.mu.Lock()
 	}
-	p.Flush()
+
+	p.pending = append(p.pending, msg)
+
+	// Reset the flush timer (debounce) — must be inside the lock to prevent
+	// concurrent manipulation from the timer goroutine in flushPending.
+	if !p.flushTimer.Stop() {
+		select {
+		case <-p.flushTimer.C:
+		default:
+		}
+	}
+	p.flushTimer.Reset(p.flushDelay)
+
+	p.mu.Unlock()
 }
 
-// publishPersistedEvent publishes a bus event when a message is persisted.
-func (p *QueuePersister) publishPersistedEvent(msg QueuedMessage) {
-	if p.bus == nil {
-		return
-	}
-
-	payload := QueueEventPayload{
-		ConversationID: p.conversationID,
-		QueueType:      string(msg.QueueType),
-		MessageID:      msg.ID,
-		ContentPreview: previewContent(msg.Content),
-		Source:         msg.Source,
-	}
-
-	ev, err := models.NewBusMessage(models.MessageTypeEvent, "queue", payload)
-	if err != nil {
-		p.logger.Warn("queue persister: failed to marshal event", "err", err)
-		return
-	}
-
-	_ = p.bus.Publish(bus.EventQueuePersisted, ev)
+// WithBus attaches a message bus for event publishing on persist.
+func (p *QueuePersister) WithBus(b *bus.MessageBus) {
+	p.bus = b
 }

@@ -506,13 +506,6 @@ type ParallelExecutionError struct {
 	Severity      ErrorSeverity `json:"severity"`
 }
 
-// Error returns the error string for the parallel execution error.
-func (e *ParallelExecutionError) Error() string {
-	if e.CascadeSource != "" {
-		return fmt.Sprintf("tool %s failed (cascading from %s): %s", e.ToolCallID, e.CascadeSource, e.Message)
-	}
-	return fmt.Sprintf("tool %s failed: %s", e.ToolCallID, e.Message)
-}
 
 // detectCascadingErrors marks downstream failures caused by an upstream failure.
 // When a tool call fails and other calls depended on it, those dependent calls
@@ -554,45 +547,6 @@ func detectCascadingErrors(results []*ExecutionResult, graph *ToolDependencyGrap
 	return results
 }
 
-// AggregateErrors converts ExecutionResult failures into a ParallelExecutionError
-// slice with severity heuristics for downstream observability.
-// Cascading failures get Warning severity (they are symptoms, not root causes).
-// Non-cascading failures get Critical severity.
-func AggregateErrors(results []*ExecutionResult) []*ParallelExecutionError {
-	var errors []*ParallelExecutionError
-	for _, r := range results {
-		if r == nil || r.Success {
-			continue
-		}
-		pe := &ParallelExecutionError{
-			ToolCallID:  r.ToolCallID,
-			Message:     r.Error,
-			IsCascading: r.IsCascading,
-		}
-		if r.IsCascading {
-			pe.CascadeSource = r.CascadeFrom
-			pe.Severity = ErrorSeverityWarning
-		} else {
-			pe.Severity = ErrorSeverityCritical
-		}
-		errors = append(errors, pe)
-	}
-	// Populate RelatedErrors: each cascading error references the root cause's
-	// tool call ID and vice versa.
-	for _, pe := range errors {
-		if pe.IsCascading && pe.CascadeSource != "" {
-			for _, root := range errors {
-				if root.ToolCallID == pe.CascadeSource {
-					root.RelatedErrors = append(root.RelatedErrors, pe.ToolCallID)
-				}
-			}
-		}
-	}
-	if errors == nil {
-		return nil
-	}
-	return errors
-}
 
 // ToJSON converts the result to a JSON string.
 func (r *ExecutionResult) ToJSON() string {
@@ -1840,19 +1794,6 @@ func extractEditedFiles(summary string) []string {
 	return nil
 }
 
-// ShouldTerminate checks if ALL results in the batch indicate termination.
-// Returns true only if every result has Terminate=true and at least one result exists.
-func ShouldTerminate(results []*ExecutionResult) bool {
-	if len(results) == 0 {
-		return false
-	}
-	for _, r := range results {
-		if r == nil || !r.Terminate {
-			return false
-		}
-	}
-	return true
-}
 
 // PlaceholderToolRegistry is a simple implementation for testing.
 // For production use, prefer the full tools.Registry implementation.
@@ -2088,4 +2029,66 @@ func WarnToolsWithoutProperties(reg ToolRegistry, logger *slog.Logger) []string 
 			"count", len(names), "tools", names)
 	}
 	return names
+}
+
+// ShouldTerminate checks if ALL results in the batch indicate termination.
+// Returns true only if every result has Terminate=true and at least one result exists.
+func ShouldTerminate(results []*ExecutionResult) bool {
+	if len(results) == 0 {
+		return false
+	}
+	for _, r := range results {
+		if r == nil || !r.Terminate {
+			return false
+		}
+	}
+	return true
+}
+
+// AggregateErrors converts ExecutionResult failures into a ParallelExecutionError
+// slice with severity heuristics for downstream observability.
+// Cascading failures get Warning severity (they are symptoms, not root causes).
+// Non-cascading failures get Critical severity.
+func AggregateErrors(results []*ExecutionResult) []*ParallelExecutionError {
+	var errors []*ParallelExecutionError
+	for _, r := range results {
+		if r == nil || r.Success {
+			continue
+		}
+		pe := &ParallelExecutionError{
+			ToolCallID:  r.ToolCallID,
+			Message:     r.Error,
+			IsCascading: r.IsCascading,
+		}
+		if r.IsCascading {
+			pe.CascadeSource = r.CascadeFrom
+			pe.Severity = ErrorSeverityWarning
+		} else {
+			pe.Severity = ErrorSeverityCritical
+		}
+		errors = append(errors, pe)
+	}
+	// Populate RelatedErrors: each cascading error references the root cause's
+	// tool call ID and vice versa.
+	for _, pe := range errors {
+		if pe.IsCascading && pe.CascadeSource != "" {
+			for _, root := range errors {
+				if root.ToolCallID == pe.CascadeSource {
+					root.RelatedErrors = append(root.RelatedErrors, pe.ToolCallID)
+				}
+			}
+		}
+	}
+	if errors == nil {
+		return nil
+	}
+	return errors
+}
+
+// Error returns the error string for the parallel execution error.
+func (e *ParallelExecutionError) Error() string {
+	if e.CascadeSource != "" {
+		return fmt.Sprintf("tool %s failed (cascading from %s): %s", e.ToolCallID, e.CascadeSource, e.Message)
+	}
+	return fmt.Sprintf("tool %s failed: %s", e.ToolCallID, e.Message)
 }

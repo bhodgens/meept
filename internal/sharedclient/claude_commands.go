@@ -2,11 +2,15 @@
 package sharedclient
 
 import (
+
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+
+
 
 // discoverClaudeCommands scans ~/.claude/commands/ for markdown command files
 // and returns a map of command name to CustomCommand.

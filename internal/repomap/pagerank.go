@@ -30,17 +30,6 @@ type PageRankConfig struct {
 	Personalization map[string]float64
 }
 
-// DefaultPageRankConfig returns a PageRankConfig with default values.
-func DefaultPageRankConfig() PageRankConfig {
-	return PageRankConfig{
-		Damping:         0.85,
-		MaxIterations:   100,
-		ConvergenceTol:  1e-6,
-		Personalization: map[string]float64{
-			// Default personalization weights can be set here
-		},
-	}
-}
 
 // ComputeRank applies Personalized PageRank to the given graph and returns
 // ranked tags sorted by their PageRank score in descending order.
@@ -260,33 +249,7 @@ func buildPersonalizationMap(g *RepoGraph, personalization map[string]float64) m
 	return pers
 }
 
-// AddChatFileBias adds bias to nodes for files actively being discussed in the chat.
-func AddChatFileBias(g *RepoGraph, chatFiles []string, bias float64) map[string]float64 {
-	pers := make(map[string]float64)
 
-	for _, file := range chatFiles {
-		if _, ok := g.nodes[file]; ok {
-			pers[file] = bias
-		}
-	}
-
-	return pers
-}
-
-// AddMentionedIdentifierBias adds bias to nodes for files that match mentioned identifiers.
-func AddMentionedIdentifierBias(g *RepoGraph, mentionedIdentifiers []string, bias float64) map[string]float64 {
-	pers := make(map[string]float64)
-
-	for _, ident := range mentionedIdentifiers {
-		for file := range g.nodes {
-			if matchesPathComponents(file, ident) {
-				pers[file] += bias
-			}
-		}
-	}
-
-	return pers
-}
 
 // matchesPathComponents checks if any path component matches the identifier.
 // This helps identify files related to a mentioned identifier.

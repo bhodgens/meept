@@ -53,28 +53,6 @@ type JSONRPCError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-// ReadMessage reads a single JSON-RPC message from the reader (one line).
-// Deprecated: use ReadMessageFromBufferedReader / Server with BufferedReader
-// instead. ReadMessage creates a new bufio.Reader on every call, which can
-// cause data loss when multiple messages are piped at once.
-func ReadMessage(r io.Reader) (*JSONRPCRequest, error) {
-	reader := bufio.NewReader(r)
-	line, err := reader.ReadBytes('\n')
-
-	if err != nil {
-		return nil, fmt.Errorf("read message: %w", err)
-	}
-	line = bytes.TrimSpace(line)
-	if len(line) == 0 {
-		return nil, fmt.Errorf("empty message")
-	}
-
-	var req JSONRPCRequest
-	if err := json.Unmarshal(line, &req); err != nil {
-		return nil, fmt.Errorf("unmarshal message: %w", err)
-	}
-	return &req, nil
-}
 
 // ReadMessageBuffered reads a single JSON-RPC message from a BufferedReader.
 // This is the preferred method for MCP server use since it preserves the
@@ -106,4 +84,27 @@ func WriteMessage(w io.Writer, resp *JSONRPCResponse) error {
 		return fmt.Errorf("write response: %w", err)
 	}
 	return nil
+}
+
+// ReadMessage reads a single JSON-RPC message from the reader (one line).
+// Deprecated: use ReadMessageFromBufferedReader / Server with BufferedReader
+// instead. ReadMessage creates a new bufio.Reader on every call, which can
+// cause data loss when multiple messages are piped at once.
+func ReadMessage(r io.Reader) (*JSONRPCRequest, error) {
+	reader := bufio.NewReader(r)
+	line, err := reader.ReadBytes('\n')
+
+	if err != nil {
+		return nil, fmt.Errorf("read message: %w", err)
+	}
+	line = bytes.TrimSpace(line)
+	if len(line) == 0 {
+		return nil, fmt.Errorf("empty message")
+	}
+
+	var req JSONRPCRequest
+	if err := json.Unmarshal(line, &req); err != nil {
+		return nil, fmt.Errorf("unmarshal message: %w", err)
+	}
+	return &req, nil
 }

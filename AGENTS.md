@@ -135,7 +135,7 @@ make e2e-fast                 # CI: full hermetic e2e suite (ci.yml gate member;
 
 # Git hooks (bash >= 3.2; sub-hooks run under whatever `bash` is on PATH, so the
 # suite also executes on the Linux CI runner)
-make hooks                # core.hooksPath -> .githooks (18 pre-commit checks +
+make hooks                # core.hooksPath -> .githooks (19 pre-commit checks +
                           # pre-push chain: e2e-affected gate, then bench gate)
 # Package-classification rule for those hooks: a staged package's state comes
 # from `go list -e` STDOUT only. {{.Error}} prints there, while stderr carries

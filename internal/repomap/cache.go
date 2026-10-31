@@ -45,39 +45,7 @@ type CacheConfig struct {
 	Logger *slog.Logger
 }
 
-// DefaultCacheConfig returns a CacheConfig with default values.
-func DefaultCacheConfig() CacheConfig {
-	return CacheConfig{
-		RefreshMode:       "auto",
-		MaxCacheSize:      500 * 1024 * 1024, // 500 MB
-		EnableMemoryCache: true,
-		MemoryCacheSize:   100,
-	}
-}
 
-// ValidateCacheConfig validates the cache configuration.
-func ValidateCacheConfig(config CacheConfig) error {
-	validModes := map[string]bool{
-		"auto":   true,
-		"manual": true,
-		"files":  true,
-		"always": true,
-	}
-
-	if !validModes[config.RefreshMode] {
-		return fmt.Errorf("invalid RefreshMode: %s (must be one of: auto, manual, files, always)", config.RefreshMode)
-	}
-
-	if config.MaxCacheSize <= 0 {
-		return fmt.Errorf("MaxCacheSize must be positive, got %d", config.MaxCacheSize)
-	}
-
-	if config.MemoryCacheSize <= 0 {
-		return fmt.Errorf("MemoryCacheSize must be positive, got %d", config.MemoryCacheSize)
-	}
-
-	return nil
-}
 
 // TagCache is disk-based cache for tags with mtime validation.
 type TagCache struct {
@@ -415,6 +383,43 @@ type RenderCache struct {
 	config CacheConfig
 }
 
+
+
+
+
+
+
+
+// CacheManager manages all three cache layers and provides a unified interface.
+type CacheManager struct {
+	tagCache    *TagCache
+	mapCache    *MapCache
+	renderCache *RenderCache
+	config      CacheConfig
+	logger      *slog.Logger
+}
+
+
+
+
+
+
+
+
+
+
+
+
+// getFileMtime returns the modification time of a file.
+// Helper function for compatibility with the plan.
+func getFileMtime(filePath string) time.Time {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
+}
+
 // NewRenderCache creates a new RenderCache with the given configuration.
 func NewRenderCache(config CacheConfig) *RenderCache {
 	if config.MemoryCacheSize == 0 {
@@ -425,6 +430,131 @@ func NewRenderCache(config CacheConfig) *RenderCache {
 		cache:  make(map[string]string, config.MemoryCacheSize),
 		config: config,
 	}
+}
+
+// NewCacheManager creates a new CacheManager with all cache layers.
+func NewCacheManager(config CacheConfig, logger *slog.Logger) (*CacheManager, error) {
+	// Validate config
+	if err := ValidateCacheConfig(config); err != nil {
+		return nil, err
+	}
+
+	// Create tag cache (disk-based)
+	tagCache, err := NewTagCache(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tag cache: %w", err)
+	}
+
+	// Create map cache (memory-based)
+	mapCache := NewMapCache(config)
+
+	// Create render cache (memory-based)
+	renderCache := NewRenderCache(config)
+
+	return &CacheManager{
+		tagCache:    tagCache,
+		mapCache:    mapCache,
+		renderCache: renderCache,
+		config:      config,
+		logger:      logger,
+	}, nil
+}
+
+// DefaultCacheConfig returns a CacheConfig with default values.
+func DefaultCacheConfig() CacheConfig {
+	return CacheConfig{
+		RefreshMode:       "auto",
+		MaxCacheSize:      500 * 1024 * 1024, // 500 MB
+		EnableMemoryCache: true,
+		MemoryCacheSize:   100,
+	}
+}
+
+// ValidateCacheConfig validates the cache configuration.
+func ValidateCacheConfig(config CacheConfig) error {
+	validModes := map[string]bool{
+		"auto":   true,
+		"manual": true,
+		"files":  true,
+		"always": true,
+	}
+
+	if !validModes[config.RefreshMode] {
+		return fmt.Errorf("invalid RefreshMode: %s (must be one of: auto, manual, files, always)", config.RefreshMode)
+	}
+
+	if config.MaxCacheSize <= 0 {
+		return fmt.Errorf("MaxCacheSize must be positive, got %d", config.MaxCacheSize)
+	}
+
+	if config.MemoryCacheSize <= 0 {
+		return fmt.Errorf("MemoryCacheSize must be positive, got %d", config.MemoryCacheSize)
+	}
+
+	return nil
+}
+
+// GetRenderedMap retrieves a cached rendered map.
+func (cm *CacheManager) GetRenderedMap(files []string, identifiers []string, maxAge time.Duration) (*CachedMap, bool) {
+	return cm.mapCache.Get(files, identifiers, maxAge)
+}
+
+// GetTags retrieves cached tags for a file.
+func (cm *CacheManager) GetTags(filePath string, mtime time.Time) ([]Tag, bool, error) {
+	return cm.tagCache.Get(filePath, mtime)
+}
+
+// SetRenderedMap stores a rendered map in the cache.
+func (cm *CacheManager) SetRenderedMap(files []string, identifiers []string, rendered RenderedMap) {
+	cm.mapCache.Set(files, identifiers, rendered)
+}
+
+// SetTags stores tags in the cache for a file.
+func (cm *CacheManager) SetTags(filePath string, mtime time.Time, tags []Tag) error {
+	return cm.tagCache.Set(filePath, mtime, tags)
+}
+
+// Stats returns statistics for all caches.
+func (cm *CacheManager) Stats() (tagFiles int64, tagSize int64, mapEntries int, renderEntries int, err error) {
+	tagFiles, tagSize, err = cm.tagCache.Stats()
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+
+	mapEntries = cm.mapCache.Size()
+	renderEntries = cm.renderCache.Size()
+
+	return tagFiles, tagSize, mapEntries, renderEntries, nil
+}
+
+// SetRenderedContext stores rendered context in the cache.
+func (cm *CacheManager) SetRenderedContext(filePath string, line int, content string) {
+	cm.renderCache.Set(filePath, line, content)
+}
+
+// GetRenderedContext retrieves cached rendered context for a symbol.
+func (cm *CacheManager) GetRenderedContext(filePath string, line int) (string, bool) {
+	return cm.renderCache.Get(filePath, line)
+}
+
+// ClearAll clears all caches (both disk and memory).
+func (cm *CacheManager) ClearAll() error {
+	// Clear memory caches
+	cm.mapCache.Clear()
+	cm.renderCache.Clear()
+
+	// Clear disk cache
+	return cm.tagCache.Clear()
+}
+
+// ClearTagCache clears the disk-based tag cache.
+func (cm *CacheManager) ClearTagCache() error {
+	return cm.tagCache.Clear()
+}
+
+// InvalidateTags removes cached tags for a specific file.
+func (cm *CacheManager) InvalidateTags(filePath string) error {
+	return cm.tagCache.Invalidate(filePath)
 }
 
 // renderCacheKey generates a key for render cache based on file and line.
@@ -499,114 +629,4 @@ func (r *RenderCache) Size() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.cache)
-}
-
-// CacheManager manages all three cache layers and provides a unified interface.
-type CacheManager struct {
-	tagCache    *TagCache
-	mapCache    *MapCache
-	renderCache *RenderCache
-	config      CacheConfig
-	logger      *slog.Logger
-}
-
-// NewCacheManager creates a new CacheManager with all cache layers.
-func NewCacheManager(config CacheConfig, logger *slog.Logger) (*CacheManager, error) {
-	// Validate config
-	if err := ValidateCacheConfig(config); err != nil {
-		return nil, err
-	}
-
-	// Create tag cache (disk-based)
-	tagCache, err := NewTagCache(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create tag cache: %w", err)
-	}
-
-	// Create map cache (memory-based)
-	mapCache := NewMapCache(config)
-
-	// Create render cache (memory-based)
-	renderCache := NewRenderCache(config)
-
-	return &CacheManager{
-		tagCache:    tagCache,
-		mapCache:    mapCache,
-		renderCache: renderCache,
-		config:      config,
-		logger:      logger,
-	}, nil
-}
-
-// GetTags retrieves cached tags for a file.
-func (cm *CacheManager) GetTags(filePath string, mtime time.Time) ([]Tag, bool, error) {
-	return cm.tagCache.Get(filePath, mtime)
-}
-
-// SetTags stores tags in the cache for a file.
-func (cm *CacheManager) SetTags(filePath string, mtime time.Time, tags []Tag) error {
-	return cm.tagCache.Set(filePath, mtime, tags)
-}
-
-// GetRenderedMap retrieves a cached rendered map.
-func (cm *CacheManager) GetRenderedMap(files []string, identifiers []string, maxAge time.Duration) (*CachedMap, bool) {
-	return cm.mapCache.Get(files, identifiers, maxAge)
-}
-
-// SetRenderedMap stores a rendered map in the cache.
-func (cm *CacheManager) SetRenderedMap(files []string, identifiers []string, rendered RenderedMap) {
-	cm.mapCache.Set(files, identifiers, rendered)
-}
-
-// GetRenderedContext retrieves cached rendered context for a symbol.
-func (cm *CacheManager) GetRenderedContext(filePath string, line int) (string, bool) {
-	return cm.renderCache.Get(filePath, line)
-}
-
-// SetRenderedContext stores rendered context in the cache.
-func (cm *CacheManager) SetRenderedContext(filePath string, line int, content string) {
-	cm.renderCache.Set(filePath, line, content)
-}
-
-// InvalidateTags removes cached tags for a specific file.
-func (cm *CacheManager) InvalidateTags(filePath string) error {
-	return cm.tagCache.Invalidate(filePath)
-}
-
-// ClearTagCache clears the disk-based tag cache.
-func (cm *CacheManager) ClearTagCache() error {
-	return cm.tagCache.Clear()
-}
-
-// ClearAll clears all caches (both disk and memory).
-func (cm *CacheManager) ClearAll() error {
-	// Clear memory caches
-	cm.mapCache.Clear()
-	cm.renderCache.Clear()
-
-	// Clear disk cache
-	return cm.tagCache.Clear()
-}
-
-// Stats returns statistics for all caches.
-func (cm *CacheManager) Stats() (tagFiles int64, tagSize int64, mapEntries int, renderEntries int, err error) {
-	tagFiles, tagSize, err = cm.tagCache.Stats()
-	if err != nil {
-		return 0, 0, 0, 0, err
-	}
-
-	mapEntries = cm.mapCache.Size()
-	renderEntries = cm.renderCache.Size()
-
-	return tagFiles, tagSize, mapEntries, renderEntries, nil
-}
-
-// getFileMtime returns the modification time of a file.
-// Helper function for compatibility with the plan.
-func getFileMtime(filePath string) time.Time {
-	info, err := os.Stat(filePath)
-	if err != nil {
-		return time.Time{}
-	}
-	return info.ModTime()
 }

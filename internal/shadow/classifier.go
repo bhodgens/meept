@@ -166,17 +166,5 @@ func (c *Classifier) ClassifyFromShadowMessages(messages []Message) Classificati
 // DefaultClassifier is a package-level classifier for convenience.
 var DefaultClassifier = NewClassifier()
 
-// ClassifyDomain classifies domain using the default classifier.
-func ClassifyDomain(messages []llm.ChatMessage) Domain {
-	return DefaultClassifier.ClassifyDomain(messages)
-}
 
-// ClassifyTaskType classifies task type using the default classifier.
-func ClassifyTaskType(messages []llm.ChatMessage, response *llm.Response) TaskType {
-	return DefaultClassifier.ClassifyTaskType(messages, response)
-}
 
-// EstimateComplexity estimates complexity using the default classifier.
-func EstimateComplexity(messages []llm.ChatMessage) Complexity {
-	return DefaultClassifier.EstimateComplexity(messages)
-}

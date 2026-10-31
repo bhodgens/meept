@@ -1,5 +1,6 @@
 package selfimprove
 
+
 // OnlyJudged gates learned patterns on trajectory judgment outcome: only
 // patterns whose source trajectory is judged AND passed are returned.
 // Unjudged != passed (master contract C7): a pattern distilled from an

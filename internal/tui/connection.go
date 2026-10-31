@@ -65,14 +65,4 @@ type DaemonClient interface {
 // Ensure RPCClient implements DaemonClient at compile time.
 var _ DaemonClient = (*RPCClient)(nil)
 
-// NewDaemonClient creates a DaemonClient connected to the default socket path.
-// Note: This function is largely unused; most callers use NewRPCClient directly.
-func NewDaemonClient() DaemonClient {
-	return NewRPCClient("~/.meept/meept.sock")
-}
 
-// NewDaemonClientWithAddress creates a DaemonClient connected to a specific address.
-// The address is a Unix socket path for RPC transport.
-func NewDaemonClientWithAddress(address string) DaemonClient {
-	return NewRPCClient(address)
-}

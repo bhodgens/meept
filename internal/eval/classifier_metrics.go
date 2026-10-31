@@ -245,11 +245,6 @@ func ScoreModel(m ModelMetrics) float64 {
 	return scoreModel(m)
 }
 
-// GetScore is an alias for ScoreModel, exported for use from cmd package.
-// Deprecated: use ScoreModel instead.
-func GetScore(m ModelMetrics) float64 {
-	return scoreModel(m)
-}
 
 // scoreModel computes a weighted composite score for a model.
 // Weights: accuracy 60%, precision 20%, recall 20%.

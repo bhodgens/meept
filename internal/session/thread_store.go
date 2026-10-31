@@ -76,29 +76,6 @@ func (s *SQLiteThreadStore) CreateThread(ctx context.Context, thread *Thread) er
 	return err
 }
 
-// GetThread retrieves a thread by ID.
-func (s *SQLiteThreadStore) GetThread(ctx context.Context, threadID string) (*Thread, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, session_id, topic_label, conversation_id, created_at, last_activity, summary, is_active
-		FROM session_threads
-		WHERE id = ? AND session_id = ?
-	`, threadID, s.sessionID)
-
-	var t Thread
-	var createdAtStr, lastActivityStr string
-	err := row.Scan(&t.ID, &t.SessionID, &t.TopicLabel, &t.ConversationID,
-		&createdAtStr, &lastActivityStr, &t.Summary, &t.IsActive)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("thread not found: %s", threadID)
-		}
-		return nil, err
-	}
-
-	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
-	t.LastActivityAt, _ = time.Parse(time.RFC3339, lastActivityStr)
-	return &t, nil
-}
 
 // ListThreadsBySession returns all threads for a session.
 func (s *SQLiteThreadStore) ListThreadsBySession(ctx context.Context, sessionID string) ([]*Thread, error) {
@@ -146,11 +123,6 @@ func (s *SQLiteThreadStore) UpdateThread(ctx context.Context, thread *Thread) er
 	return err
 }
 
-// DeleteThread removes a thread.
-func (s *SQLiteThreadStore) DeleteThread(ctx context.Context, threadID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM session_threads WHERE id = ? AND session_id = ?`, threadID, s.sessionID)
-	return err
-}
 
 // GetThreadByID retrieves a thread by ID alone, without scoping to a session.
 // Use this when the caller knows the thread ID but not the session ID (e.g.
@@ -177,6 +149,12 @@ func (s *SQLiteThreadStore) GetThreadByID(ctx context.Context, threadID string) 
 	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
 	t.LastActivityAt, _ = time.Parse(time.RFC3339, lastActivityStr)
 	return &t, nil
+}
+
+// DeleteThread removes a thread.
+func (s *SQLiteThreadStore) DeleteThread(ctx context.Context, threadID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_threads WHERE id = ? AND session_id = ?`, threadID, s.sessionID)
+	return err
 }
 
 // DeleteThreadByID removes a thread by ID alone, without scoping to a session.
@@ -267,4 +245,28 @@ func CreateThreadInSession(session *Session, topicLabel string) *Thread {
 	session.ActiveThreadID = threadID
 
 	return thread
+}
+
+// GetThread retrieves a thread by ID.
+func (s *SQLiteThreadStore) GetThread(ctx context.Context, threadID string) (*Thread, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, session_id, topic_label, conversation_id, created_at, last_activity, summary, is_active
+		FROM session_threads
+		WHERE id = ? AND session_id = ?
+	`, threadID, s.sessionID)
+
+	var t Thread
+	var createdAtStr, lastActivityStr string
+	err := row.Scan(&t.ID, &t.SessionID, &t.TopicLabel, &t.ConversationID,
+		&createdAtStr, &lastActivityStr, &t.Summary, &t.IsActive)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("thread not found: %s", threadID)
+		}
+		return nil, err
+	}
+
+	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
+	t.LastActivityAt, _ = time.Parse(time.RFC3339, lastActivityStr)
+	return &t, nil
 }

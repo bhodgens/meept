@@ -1524,12 +1524,6 @@ func (h *Handler) SetProjectResolver(pm ProjectResolver) {
 	h.projects = pm
 }
 
-// WithProjectResolver sets the project resolver at construction time.
-func WithProjectResolver(pm ProjectResolver) HandlerOption {
-	return func(h *Handler) {
-		h.projects = pm
-	}
-}
 
 // WithSummarizer sets the summarizer for LLM-based description generation.
 func WithSummarizer(s *Summarizer) HandlerOption {

@@ -261,12 +261,6 @@ func (p *Pool) RemoveWorker(workerID string) error {
 	return nil
 }
 
-// GetWorker returns a worker by ID.
-func (p *Pool) GetWorker(workerID string) *Worker {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.workers[workerID]
-}
 
 // GetWorkers returns all workers.
 func (p *Pool) GetWorkers() []*Worker {

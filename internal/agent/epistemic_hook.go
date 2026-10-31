@@ -38,19 +38,6 @@ type EpistemicHook struct {
 	rejectedLogger *RejectedCandidateLogger
 }
 
-// NewEpistemicHook constructs a hook from the given configuration.
-func NewEpistemicHook(cfg EpistemicHookConfig) *EpistemicHook {
-	h := &EpistemicHook{
-		cfg:            cfg.Cfg,
-		extractor:      cfg.Extractor,
-		logger:         cfg.Logger,
-		rejectedLogger: cfg.RejectedLogger,
-	}
-	if h.logger == nil {
-		h.logger = slog.Default()
-	}
-	return h
-}
 
 // AfterTurn is called by the agent loop after a turn completes. It extracts
 // candidate claims from the conversation window, filters them, and writes
@@ -144,3 +131,17 @@ func normalizeIntentName(s string) string {
 // The comparison is case-insensitive.
 
 // normalizeIntentName lowercases and trims for comparison.
+
+// NewEpistemicHook constructs a hook from the given configuration.
+func NewEpistemicHook(cfg EpistemicHookConfig) *EpistemicHook {
+	h := &EpistemicHook{
+		cfg:            cfg.Cfg,
+		extractor:      cfg.Extractor,
+		logger:         cfg.Logger,
+		rejectedLogger: cfg.RejectedLogger,
+	}
+	if h.logger == nil {
+		h.logger = slog.Default()
+	}
+	return h
+}

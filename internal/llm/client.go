@@ -2038,12 +2038,6 @@ func (c *Client) recordRefusalBudget(refusal *RefusalError, cfg *ModelConfig, ch
 	}
 }
 
-// parseResponse converts a raw ChatResponse to a Response. It recovers tool
-// calls from every recognized shape, including the ambiguous bare-JSON one;
-// callers that know whether tools were offered should use parseResponseWithTools.
-func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
-	return c.parseResponseWithTools(chatResp, true, "", chatResp.Model, "")
-}
 
 // parseResponseWithTools is parseResponse with the ambiguous bare-JSON call
 // recovery gated on hasTools, which reports whether the REQUEST offered tools.
@@ -3031,4 +3025,11 @@ func (c *Client) acquireConcurrencyLimit(ctx context.Context, priority bool) (re
 	return func() {
 		c.concurrencyGate.release()
 	}, nil
+}
+
+// parseResponse converts a raw ChatResponse to a Response. It recovers tool
+// calls from every recognized shape, including the ambiguous bare-JSON one;
+// callers that know whether tools were offered should use parseResponseWithTools.
+func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
+	return c.parseResponseWithTools(chatResp, true, "", chatResp.Model, "")
 }

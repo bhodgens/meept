@@ -260,13 +260,6 @@ type SkillMetadata struct {
 	SourceOrigin  string               `yaml:"-"`
 }
 
-// DefaultMetadata returns a SkillMetadata with sensible defaults.
-func DefaultMetadata() SkillMetadata {
-	return SkillMetadata{
-		RiskLevel:     "medium",
-		MaxIterations: 10,
-	}
-}
 
 // SkillExecutionResult holds the result of executing a skill.
 //

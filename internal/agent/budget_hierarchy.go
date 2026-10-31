@@ -378,22 +378,6 @@ func (o BudgetHierarchyOptions) effectiveTurnWarningRatio() float64 {
 	return o.TurnWarningRatio
 }
 
-// NewBudgetHierarchy creates a new budget hierarchy.
-//
-// The task budget receives a 10% emergency reserve, a 0.7 warning threshold,
-// and borrowing enabled. Each phase budget gets carryover enabled and a 0.8
-// warning threshold. Phases with a budget <= 0 are auto-distributed an equal
-// share of the non-reserved task budget.
-func NewBudgetHierarchy(taskBudget int, phases []string, phaseBudgets []int) *BudgetHierarchy {
-	return newBudgetHierarchyWithOpts(taskBudget, phases, phaseBudgets, BudgetHierarchyOptions{
-		ReservedRatio:     defaultReservedRatio,
-		TaskWarningRatio:  defaultTaskWarningRatio,
-		PhaseWarningRatio: defaultPhaseWarningRatio,
-		TurnWarningRatio:  defaultTurnWarningRatio,
-		CarryoverEnabled:  true,
-		BorrowingEnabled:  true,
-	})
-}
 
 // NewBudgetHierarchyWithConfig is like NewBudgetHierarchy but accepts
 // configuration overrides for reserve ratio, warning thresholds, and
@@ -865,4 +849,21 @@ func (h *BudgetHierarchy) budgetToStatus(b *BudgetAllocation) BudgetSummary {
 		IsExhausted: available <= 0,
 		IsWarning:   usageRatio >= s.warningThreshold,
 	}
+}
+
+// NewBudgetHierarchy creates a new budget hierarchy.
+//
+// The task budget receives a 10% emergency reserve, a 0.7 warning threshold,
+// and borrowing enabled. Each phase budget gets carryover enabled and a 0.8
+// warning threshold. Phases with a budget <= 0 are auto-distributed an equal
+// share of the non-reserved task budget.
+func NewBudgetHierarchy(taskBudget int, phases []string, phaseBudgets []int) *BudgetHierarchy {
+	return newBudgetHierarchyWithOpts(taskBudget, phases, phaseBudgets, BudgetHierarchyOptions{
+		ReservedRatio:     defaultReservedRatio,
+		TaskWarningRatio:  defaultTaskWarningRatio,
+		PhaseWarningRatio: defaultPhaseWarningRatio,
+		TurnWarningRatio:  defaultTurnWarningRatio,
+		CarryoverEnabled:  true,
+		BorrowingEnabled:  true,
+	})
 }

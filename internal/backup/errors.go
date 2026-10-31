@@ -108,6 +108,7 @@ func Wrap(op string, err error) error {
 	return As(op, err)
 }
 
+
 // IsBackupError returns true if err is a BackupError of any kind.
 func IsBackupError(err error) bool {
 	_, ok := errors.AsType[*BackupError](err)

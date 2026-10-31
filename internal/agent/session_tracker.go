@@ -62,17 +62,6 @@ func NewSessionTracker(maxAge time.Duration) *SessionTracker {
 	}
 }
 
-// NewSessionTrackerWithConfig creates a new session tracker with memvid persistence.
-func NewSessionTrackerWithConfig(cfg SessionTrackerConfig) *SessionTracker {
-	return &SessionTracker{
-		sessions:                make(map[string]*TrackerSessionState),
-		maxAge:                  cfg.MaxAge,
-		memvidClient:            cfg.MemvidClient,
-		sessionIdleTriggerHours: cfg.SessionIdleTriggerHours,
-		stopCh:                  make(chan struct{}),
-		logger:                  slog.Default(),
-	}
-}
 
 // RecordIntent logs an intent for a session.
 func (t *SessionTracker) RecordIntent(sessionID string, intent *Intent, agentID string) {

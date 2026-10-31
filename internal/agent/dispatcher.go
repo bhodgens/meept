@@ -2930,19 +2930,6 @@ func splitReportReadbackClauses(input string) (action, report string, ok bool) {
 // counting. Mirrors DetectCompound's own strong-intent filter.
 const compoundIntentConfidenceFloor = 0.5
 
-// RouteToAgent routes a dispatch result to the appropriate agent.
-// If an active agent loop exists for this conversation, it injects
-// the message into the queue (steer or follow-up) based on the
-// SteeringHeuristicTable. Otherwise, it runs the agent synchronously.
-// isWorkIntent reports whether the intent produces new work and must
-// always run the executor path (never short-circuit into a recall answer).
-func isWorkIntent(intentType string) bool {
-	switch IntentType(intentType) {
-	case IntentCode, IntentDebug, IntentPlan, IntentQuickPlan, IntentReview:
-		return true
-	}
-	return false
-}
 
 // isInterrogative reports whether a message asks a question rather than
 // commanding work. Question-first messages ("did...", "what...", "where
@@ -5864,4 +5851,18 @@ func (d *Dispatcher) buildProviderClarification(providers []string, scope string
 // digest answer rather than a generic canned line.
 func (d *Dispatcher) BuildSessionDigestForConversation(sessionID string) *SessionContextDigest {
 	return d.buildSessionContextDigest(sessionID)
+}
+
+// RouteToAgent routes a dispatch result to the appropriate agent.
+// If an active agent loop exists for this conversation, it injects
+// the message into the queue (steer or follow-up) based on the
+// SteeringHeuristicTable. Otherwise, it runs the agent synchronously.
+// isWorkIntent reports whether the intent produces new work and must
+// always run the executor path (never short-circuit into a recall answer).
+func isWorkIntent(intentType string) bool {
+	switch IntentType(intentType) {
+	case IntentCode, IntentDebug, IntentPlan, IntentQuickPlan, IntentReview:
+		return true
+	}
+	return false
 }

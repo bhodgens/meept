@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/tailscale/hujson"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
-	"github.com/tailscale/hujson"
 )
 
 // envVarPattern matches ${VAR_NAME}, ${VAR_NAME:-default}, or $VAR_NAME
@@ -316,12 +316,6 @@ func ExpandEnvVars(s string) (string, error) {
 	return result, nil
 }
 
-// expandEnvVars expands environment variables in a string.
-// Internal helper that ignores errors (used where error propagation is not needed).
-func expandEnvVars(s string) string {
-	result, _ := ExpandEnvVars(s)
-	return result
-}
 
 // expandPath expands ~ to the home directory.
 func expandPath(path string) string {
@@ -546,6 +540,28 @@ func LoadModelsConfigDefault() (*ModelsConfig, error) {
 	return nil, fmt.Errorf("models.json5 not found in %s or config/", MeeptHome())
 }
 
+
+
+// EnsureDataDir creates the data directory if it doesn't exist.
+func EnsureDataDir(cfg *Config) error {
+	if err := os.MkdirAll(cfg.Daemon.DataDir, 0o700); err != nil {
+		return fmt.Errorf("failed to create data directory: %w", err)
+	}
+	return nil
+}
+
+// expandEnvVars expands environment variables in a string.
+// Internal helper that ignores errors (used where error propagation is not needed).
+func expandEnvVars(s string) string {
+	result, _ := ExpandEnvVars(s)
+	return result
+}
+
+// stripJSON5Comments is an alias for StripJSON5Comments.
+func stripJSON5Comments(s string) string {
+	return StripJSON5Comments(s)
+}
+
 // StripJSON5Comments converts JSON5 to strict JSON, handling comments,
 // trailing commas, and unquoted keys. It delegates to hujson.Standardize
 // for full JSON5 spec compliance.
@@ -556,17 +572,4 @@ func StripJSON5Comments(s string) string {
 		return s
 	}
 	return string(stdJSON)
-}
-
-// stripJSON5Comments is an alias for StripJSON5Comments.
-func stripJSON5Comments(s string) string {
-	return StripJSON5Comments(s)
-}
-
-// EnsureDataDir creates the data directory if it doesn't exist.
-func EnsureDataDir(cfg *Config) error {
-	if err := os.MkdirAll(cfg.Daemon.DataDir, 0o700); err != nil {
-		return fmt.Errorf("failed to create data directory: %w", err)
-	}
-	return nil
 }

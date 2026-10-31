@@ -2,7 +2,6 @@ package errcls
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -85,38 +84,7 @@ func IsRetryable(err error) bool {
 	return false
 }
 
-// IsAuthError reports whether err is an authentication/authorization error
-// (HTTP 401 or 403, or a registered auth sentinel such as
-// services.ErrUnauthorized).
-func IsAuthError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {
-		return apiErr.StatusCode == 401 || apiErr.StatusCode == 403
-	}
-	sentinelMu.RLock()
-	defer sentinelMu.RUnlock()
-	for _, sentinel := range authSentinels {
-		if errors.Is(err, sentinel) {
-			return true
-		}
-	}
-	return false
-}
 
-// IsClientError reports whether err is a non-retryable 4xx client error
-// (excluding 401/403 which IsAuthError handles separately).
-func IsClientError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {
-		status := apiErr.StatusCode
-		return status >= 400 && status < 500 && status != 401 && status != 403
-	}
-	return false
-}
 
 // IsParameterError reports whether err is a parameter-validation error
 // suitable for JSON-RPC -32602 InvalidParams. This replaces the substring
@@ -179,24 +147,6 @@ func isConnError(err error) bool {
 	return false
 }
 
-// IsJSONSyntaxError reports whether err is a JSON syntax error from
-// encoding/json (e.g. "unexpected end of JSON input" or "invalid
-// character"). Uses errors.As against *json.SyntaxError for structured
-// detection, then falls back to a centralized substring check for drivers
-// that wrap the error without preserving the type.
-func IsJSONSyntaxError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if _, ok := errors.AsType[*json.SyntaxError](err); ok {
-		return true
-	}
-	// Fall back to centralized substring check for wrapped errors that lose
-	// the *json.SyntaxError type (e.g. fmt.Errorf("parse: %w", err) where the
-	// inner error is a plain error from a third-party decoder).
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "unexpected end") || strings.Contains(msg, "invalid character")
-}
 
 // IsDuplicateColumn reports whether err is a SQLite "duplicate column" error
 // returned by ALTER TABLE ADD COLUMN when the column already exists. SQLite
@@ -243,4 +193,37 @@ func IsRateLimitErrorMessage(errMsg string) bool {
 		strings.Contains(lower, "rpm limit") ||
 		strings.Contains(lower, "tpm limit") ||
 		strings.Contains(lower, "concurrent requests")
+}
+
+// IsAuthError reports whether err is an authentication/authorization error
+// (HTTP 401 or 403, or a registered auth sentinel such as
+// services.ErrUnauthorized).
+func IsAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {
+		return apiErr.StatusCode == 401 || apiErr.StatusCode == 403
+	}
+	sentinelMu.RLock()
+	defer sentinelMu.RUnlock()
+	for _, sentinel := range authSentinels {
+		if errors.Is(err, sentinel) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsClientError reports whether err is a non-retryable 4xx client error
+// (excluding 401/403 which IsAuthError handles separately).
+func IsClientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apiErr, ok := errors.AsType[*llm.APIError](err); ok {
+		status := apiErr.StatusCode
+		return status >= 400 && status < 500 && status != 401 && status != 403
+	}
+	return false
 }

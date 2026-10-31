@@ -10,8 +10,6 @@ package metrics
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -182,13 +180,3 @@ func defaultExporterLogger() *exporterLogger {
 	return &exporterLogger{prefix: "otlp-trace-exporter"}
 }
 
-// TraceIDHex renders a trace ID as the canonical 32-char hex string.
-func TraceIDHex(id [16]byte) string { return hex.EncodeToString(id[:]) }
-
-// SpanIDHex renders a span ID as the canonical 16-char hex string.
-func SpanIDHex(id [8]byte) string { return hex.EncodeToString(id[:]) }
-
-// SpanBrief is a one-line human summary used in daemon debug logs only.
-func SpanBrief(sp Span) string {
-	return fmt.Sprintf("%s trace=%s span=%s", sp.Name, TraceIDHex(sp.TraceID), SpanIDHex(sp.SpanID))
-}

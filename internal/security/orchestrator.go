@@ -37,19 +37,6 @@ type OrchestratorConfig struct {
 	AuditDBPath    string
 }
 
-// DefaultOrchestratorConfig returns a configuration with sensible defaults.
-func DefaultOrchestratorConfig() OrchestratorConfig {
-	return OrchestratorConfig{
-		SanitizeInputs:     true,
-		SanitizeStrictness: StrictnessStandard,
-		MonitorOutput:      true,
-		RedactOutput:       true,
-		ScanShellCommands:  true,
-		TirithBinary:       BinaryTirith,
-		EnableAuditLog:     false,
-		AuditDBPath:        "",
-	}
-}
 
 // Orchestrator coordinates all security components.
 // It provides a unified interface for input sanitization, output monitoring,
@@ -634,5 +621,19 @@ func ParseStrictnessLevel(s string) StrictnessLevel {
 		return StrictnessStrict
 	default:
 		return StrictnessStandard
+	}
+}
+
+// DefaultOrchestratorConfig returns a configuration with sensible defaults.
+func DefaultOrchestratorConfig() OrchestratorConfig {
+	return OrchestratorConfig{
+		SanitizeInputs:     true,
+		SanitizeStrictness: StrictnessStandard,
+		MonitorOutput:      true,
+		RedactOutput:       true,
+		ScanShellCommands:  true,
+		TirithBinary:       BinaryTirith,
+		EnableAuditLog:     false,
+		AuditDBPath:        "",
 	}
 }

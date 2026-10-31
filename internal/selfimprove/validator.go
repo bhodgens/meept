@@ -105,27 +105,6 @@ func (v *FixValidator) Validate(ctx context.Context, fix *ProposedFix) (*Validat
 	return result, nil
 }
 
-// ValidateBatch validates multiple fixes.
-func (v *FixValidator) ValidateBatch(ctx context.Context, fixes []*ProposedFix) ([]*ValidationResult, error) {
-	results := make([]*ValidationResult, 0, len(fixes))
-
-	for _, fix := range fixes {
-		select {
-		case <-ctx.Done():
-			return results, ctx.Err()
-		default:
-		}
-
-		result, err := v.Validate(ctx, fix)
-		if err != nil {
-			v.logger.Warn("validation error", "fix_id", fix.ID, "error", err)
-			continue
-		}
-		results = append(results, result)
-	}
-
-	return results, nil
-}
 
 // createSandbox creates a sandbox directory.
 func (v *FixValidator) createSandbox(fixID string) (string, error) {

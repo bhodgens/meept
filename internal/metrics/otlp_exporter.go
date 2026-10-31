@@ -134,10 +134,6 @@ func (o *OTLPExporter) Stop() {
 	})
 }
 
-// IsStarted reports whether the exporter is actively running.
-func (o *OTLPExporter) IsStarted() bool {
-	return o.started.Load()
-}
 
 // RecordTurn records a completed agent turn for the given employee and session.
 func (o *OTLPExporter) RecordTurn(employeeID, sessionID string) {
@@ -355,4 +351,9 @@ func (l *exporterLogger) Warn(msg string, fields ...any) {
 
 func (l *exporterLogger) Error(msg string, fields ...any) {
 	fmt.Printf("[%s ERROR] %s %v\n", l.prefix, msg, fields)
+}
+
+// IsStarted reports whether the exporter is actively running.
+func (o *OTLPExporter) IsStarted() bool {
+	return o.started.Load()
 }

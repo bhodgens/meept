@@ -1069,14 +1069,6 @@ func (lp *LearningPipeline) similarity(a, b string) float64 {
 	return float64(intersection) / float64(union)
 }
 
-// savePatternsFromSnapshot is deprecated: patterns.json is no longer written.
-// Skills are the new format. Kept as a no-op so the LearningPipeline doesn't
-// error when callers invoke the consolidation path.
-//
-//lint:ignore U1000 // placeholder for legacy patterns consolidation (now uses skills)
-func (lp *LearningPipeline) savePatternsFromSnapshot(patterns map[string]*LearnedPattern) error {
-	return nil
-}
 
 func (lp *LearningPipeline) loadPatterns() error {
 	path := filepath.Join(lp.dataDir, "patterns.json")

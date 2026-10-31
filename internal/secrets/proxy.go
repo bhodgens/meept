@@ -144,17 +144,6 @@ func (p *Proxy) Start(ctx context.Context) (string, error) {
 	return ln.Addr().String(), nil
 }
 
-// Stop forces immediate graceful shutdown (used by daemon wiring on paths
-// where the lifecycle ctx is not cancelled automatically).
-func (p *Proxy) Stop() {
-	if p.server != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-		defer cancel()
-		if err := p.server.Shutdown(ctx); err != nil {
-			p.logger.Debug("secrets proxy stop", "error", err)
-		}
-	}
-}
 
 // loopbackListen validates that listen targets a loopback IP literal and
 // binds it. Non-loopback targets are refused outright: the proxy holds the
@@ -455,4 +444,16 @@ func dedupe(names []string) []string {
 		}
 	}
 	return out
+}
+
+// Stop forces immediate graceful shutdown (used by daemon wiring on paths
+// where the lifecycle ctx is not cancelled automatically).
+func (p *Proxy) Stop() {
+	if p.server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		defer cancel()
+		if err := p.server.Shutdown(ctx); err != nil {
+			p.logger.Debug("secrets proxy stop", "error", err)
+		}
+	}
 }

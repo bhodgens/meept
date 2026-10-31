@@ -21,15 +21,6 @@ type EvolverScheduler struct {
 	running  bool
 }
 
-// NewEvolverScheduler creates a new periodic skill evolution scheduler. The
-// scheduler does not start until Start is called. By default the scheduler
-// runs one cycle immediately on Start (legacy behavior); pass
-// WithRunOnStart(false) or construct via NewEvolverSchedulerWithRunOnStart to
-// skip the initial cycle (recommended for daemon startup where the immediate
-// cycle is noisy).
-func NewEvolverScheduler(evolver *Evolver, interval time.Duration, logger *slog.Logger) *EvolverScheduler {
-	return newEvolverScheduler(evolver, interval, true, logger)
-}
 
 // NewEvolverSchedulerWithRunOnStart creates a scheduler with explicit control
 // over whether a cycle runs immediately on Start. When runOnStart is false the
@@ -140,4 +131,14 @@ func (s *EvolverScheduler) Stop() {
 	s.running = false
 	s.mu.Unlock()
 	s.stopOnce.Do(func() { close(s.stopCh) })
+}
+
+// NewEvolverScheduler creates a new periodic skill evolution scheduler. The
+// scheduler does not start until Start is called. By default the scheduler
+// runs one cycle immediately on Start (legacy behavior); pass
+// WithRunOnStart(false) or construct via NewEvolverSchedulerWithRunOnStart to
+// skip the initial cycle (recommended for daemon startup where the immediate
+// cycle is noisy).
+func NewEvolverScheduler(evolver *Evolver, interval time.Duration, logger *slog.Logger) *EvolverScheduler {
+	return newEvolverScheduler(evolver, interval, true, logger)
 }

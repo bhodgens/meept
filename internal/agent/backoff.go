@@ -41,38 +41,10 @@ type retryableError struct {
 	reason     string
 }
 
-func (e *retryableError) Error() string {
-	if e.reason != "" {
-		return e.err.Error() + " (" + e.reason + ")"
-	}
-	return e.err.Error()
-}
 
-func (e *retryableError) Unwrap() error {
-	return e.err
-}
 
-func (e *retryableError) RetryAfter() time.Duration {
-	return e.retryAfter
-}
 
-func (e *retryableError) IsRetryable() bool {
-	return e.retryable
-}
 
-// Retryable wraps an error as retryable with the given metadata.
-// Returns nil if err is nil (nil guard).
-func Retryable(err error, retryable bool, retryAfter time.Duration, reason string) error {
-	if err == nil {
-		return nil
-	}
-	return &retryableError{
-		err:        err,
-		retryable:  retryable,
-		retryAfter: retryAfter,
-		reason:     reason,
-	}
-}
 
 // IsRetryable returns true if the error is retryable.
 // It first checks the RetryableError interface, then delegates to
@@ -618,4 +590,37 @@ func GetRetryBudget(ctx context.Context) *RetryBudget {
 		return v.(*RetryBudget)
 	}
 	return nil
+}
+
+// Retryable wraps an error as retryable with the given metadata.
+// Returns nil if err is nil (nil guard).
+func Retryable(err error, retryable bool, retryAfter time.Duration, reason string) error {
+	if err == nil {
+		return nil
+	}
+	return &retryableError{
+		err:        err,
+		retryable:  retryable,
+		retryAfter: retryAfter,
+		reason:     reason,
+	}
+}
+
+func (e *retryableError) Unwrap() error {
+	return e.err
+}
+
+func (e *retryableError) RetryAfter() time.Duration {
+	return e.retryAfter
+}
+
+func (e *retryableError) Error() string {
+	if e.reason != "" {
+		return e.err.Error() + " (" + e.reason + ")"
+	}
+	return e.err.Error()
+}
+
+func (e *retryableError) IsRetryable() bool {
+	return e.retryable
 }

@@ -12,11 +12,6 @@ import (
 //go:embed embedded_rules.md
 var embeddedRules string
 
-// DefaultRulesContent returns the default global rules content.
-// This is used when no RULES.md is found in any tier.
-func DefaultRulesContent() string {
-	return embeddedRules
-}
 
 // RulesDiscovery searches for RULES.md files in a priority hierarchy.
 type RulesDiscovery struct {
@@ -62,16 +57,4 @@ func (r *RulesDiscovery) DiscoverWithPath() (content, path string) {
 	return content, path
 }
 
-// DiscoverGlobalRules finds and loads the global rules content.
-// Priority: .meept/RULES.md > ~/.meept/RULES.md > embedded default
-func (r *RulesDiscovery) DiscoverGlobalRules() string {
-	_, content := r.findRulesFile()
-	return content
-}
 
-// RulesPath returns the path where the highest-priority rules were found,
-// or empty string if using embedded defaults.
-func (r *RulesDiscovery) RulesPath() string {
-	path, _ := r.findRulesFile()
-	return path
-}

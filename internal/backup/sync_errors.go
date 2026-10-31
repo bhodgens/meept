@@ -61,11 +61,6 @@ var (
 	}
 )
 
-// IsSyncError reports whether err is a *SyncError.
-func IsSyncError(err error) bool {
-	_, ok := errors.AsType[*SyncError](err)
-	return ok
-}
 
 // IsRetryable checks if a sync error can be retried.
 func IsSyncRetryable(err error) bool {
@@ -105,4 +100,10 @@ func SyncWrap(op string, err error) error {
 		Op:  op,
 		Err: err,
 	}
+}
+
+// IsSyncError reports whether err is a *SyncError.
+func IsSyncError(err error) bool {
+	_, ok := errors.AsType[*SyncError](err)
+	return ok
 }

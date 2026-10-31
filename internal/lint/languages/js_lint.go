@@ -20,10 +20,6 @@ func NewJSLinter() *JSLinter {
 	return &JSLinter{}
 }
 
-// NewTSLinter creates a new TypeScript linter (uses same implementation).
-func NewTSLinter() *JSLinter {
-	return &JSLinter{}
-}
 
 // CompileCheck runs TypeScript compilation check.
 // For JavaScript, this returns nil as JS is interpreted.

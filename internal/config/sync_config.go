@@ -70,14 +70,6 @@ type ConfigSyncConfig struct {
 	ConflictMode string `json:"conflict_mode" toml:"conflict_mode"`
 }
 
-// DefaultConfigSyncConfig returns sensible defaults.
-func DefaultConfigSyncConfig() ConfigSyncConfig {
-	return ConfigSyncConfig{
-		Enabled:      false,
-		PullSchedule: 5 * time.Minute,
-		ConflictMode: "local-wins",
-	}
-}
 
 var ErrConfigSyncInvalid = fmt.Errorf("config sync config is invalid")
 
@@ -101,4 +93,13 @@ func (c *ConfigSyncConfig) Validate() error {
 // IsValidated reports whether c is enabled and fully configured.
 func (c *ConfigSyncConfig) IsValidated() bool {
 	return c.Enabled && c.RepoURL != "" && c.PullSchedule > 0
+}
+
+// DefaultConfigSyncConfig returns sensible defaults.
+func DefaultConfigSyncConfig() ConfigSyncConfig {
+	return ConfigSyncConfig{
+		Enabled:      false,
+		PullSchedule: 5 * time.Minute,
+		ConflictMode: "local-wins",
+	}
 }

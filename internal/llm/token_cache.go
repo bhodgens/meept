@@ -94,10 +94,6 @@ type TokenCacheCoordinator struct {
 	metricsStore *metrics.Store
 }
 
-// NewTokenCacheCoordinator creates a new token cache coordinator.
-func NewTokenCacheCoordinator(config CacheConfig) (*TokenCacheCoordinator, error) {
-	return NewTokenCacheCoordinatorWithMetrics(config, nil)
-}
 
 // NewTokenCacheCoordinatorWithMetrics creates a new token cache coordinator with optional metrics recording.
 func NewTokenCacheCoordinatorWithMetrics(config CacheConfig, metricsStore *metrics.Store) (*TokenCacheCoordinator, error) {
@@ -436,4 +432,9 @@ func (c *TokenCacheCoordinator) Close() error {
 		return c.l2Cache.Close()
 	}
 	return nil
+}
+
+// NewTokenCacheCoordinator creates a new token cache coordinator.
+func NewTokenCacheCoordinator(config CacheConfig) (*TokenCacheCoordinator, error) {
+	return NewTokenCacheCoordinatorWithMetrics(config, nil)
 }

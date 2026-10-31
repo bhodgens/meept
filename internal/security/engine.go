@@ -1,26 +1,28 @@
 package security
 
 import (
-	"database/sql"
+	"time"
+	pkgsecurity "github.com/caimlas/meept/pkg/security"
+	"github.com/caimlas/meept/internal/pathutil"
 	"encoding/json"
+	"maps"
+
+	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"os"
 	"os/user"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/caimlas/meept/internal/config"
-	"github.com/caimlas/meept/internal/pathutil"
-	pkgsecurity "github.com/caimlas/meept/pkg/security"
 	"github.com/jmoiron/sqlx"
 	_ "modernc.org/sqlite" // sqlite3 driver registration
 )
+
 
 // compiledPattern holds a pre-compiled regex pattern with metadata.
 type compiledPattern struct {
@@ -181,40 +183,7 @@ func (e *Engine) SetFenceChecker(fc *FenceChecker) {
 	}
 }
 
-// SetPreExecChecker registers a PreExecChecker for the given agent/employee
-// ID. The checker is called between Stage 3 (context analysis) and Stage 4
-// (override check) during CheckForAgent. An empty agentID is a no-op.
-//
-// IMPORTANT: The checker's Check method is invoked while Engine.mu is held
-// as an RLock. Implementations MUST NOT call any Engine methods that acquire
-// mu (Check, RecordOverride, etc.) — see PreExecChecker interface doc.
-func (e *Engine) SetPreExecChecker(agentID string, checker PreExecChecker) {
-	if agentID == "" {
-		return
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.preExecCheckers == nil {
-		e.preExecCheckers = make(map[string]PreExecChecker)
-	}
-	if checker != nil {
-		e.preExecCheckers[agentID] = checker
-	}
-}
 
-// RemovePreExecChecker unregisters the PreExecChecker for the given agent
-// ID. An empty agentID is a no-op. Safe to call when no checker is
-// registered (idempotent).
-func (e *Engine) RemovePreExecChecker(agentID string) {
-	if agentID == "" {
-		return
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.preExecCheckers != nil {
-		delete(e.preExecCheckers, agentID)
-	}
-}
 
 // createSchema creates the database tables.
 func (e *Engine) createSchema() error {
@@ -348,6 +317,163 @@ func (e *Engine) compilePatterns() error {
 	}
 
 	return nil
+}
+
+
+
+
+// toolRuleRow maps DB rows for tool_rule lookups.
+type toolRuleRow struct {
+	RiskLevel            int `db:"risk_level"`
+	RequiresConfirmation int `db:"requires_confirmation"`
+}
+
+
+
+// normalizePathForComparison ensures a directory path ends with a path separator
+// to prevent prefix matching attacks (e.g., /tmp_backup matching /tmp).
+// SEC-4 FIX: Proper directory boundary comparison.
+func normalizePathForComparison(p string) string {
+	if p == "" {
+		return p
+	}
+	if !strings.HasSuffix(p, string(filepath.Separator)) {
+		return p + string(filepath.Separator)
+	}
+	return p
+}
+
+// isPathUnderDir checks if path is under or equal to dir using proper boundary checks.
+// SEC-4 FIX: Prevents /tmp_backup/secret from matching /tmp.
+func isPathUnderDir(path, dir string) bool {
+	// Exact match
+	if path == dir {
+		return true
+	}
+	// Check if path is under dir (with proper directory boundary)
+	normalizedDir := normalizePathForComparison(dir)
+	return strings.HasPrefix(path, normalizedDir)
+}
+
+
+// permissionOverrideRow maps DB rows for permission_overrides.
+type permissionOverrideRow struct {
+	ID         int64          `db:"id"`
+	Pattern    string         `db:"pattern"`
+	Decision   string         `db:"decision"`
+	Reason     string         `db:"reason"`
+	UsageCount int            `db:"usage_count"`
+	MaxUses    int            `db:"max_uses"`
+	ExpiresAt  sql.NullString `db:"expires_at"`
+}
+
+
+
+
+
+
+
+
+
+// Close closes the database connection.
+func (e *Engine) Close() error {
+	return e.db.Close()
+}
+
+// boolToInt converts a boolean to an integer (0 or 1).
+// Compile-time assertion that Engine implements io.Closer.
+var _ io.Closer = (*Engine)(nil)
+
+
+// Schema SQL for the security database.
+const schemaSQL = `
+CREATE TABLE IF NOT EXISTS tool_rules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name   TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    risk_level  INTEGER NOT NULL DEFAULT 2,
+    description TEXT NOT NULL DEFAULT '',
+    requires_confirmation INTEGER NOT NULL DEFAULT 0,
+    immutable   INTEGER NOT NULL DEFAULT 0,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    UNIQUE(tool_name, action)
+);
+
+CREATE TABLE IF NOT EXISTS command_patterns (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern      TEXT NOT NULL,
+    pattern_type TEXT NOT NULL DEFAULT 'regex',
+    risk_level   INTEGER NOT NULL,
+    category     TEXT NOT NULL DEFAULT 'general',
+    description  TEXT NOT NULL DEFAULT '',
+    immutable    INTEGER NOT NULL DEFAULT 0,
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    UNIQUE(pattern, pattern_type)
+);
+
+CREATE TABLE IF NOT EXISTS path_rules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern     TEXT NOT NULL,
+    rule_type   TEXT NOT NULL,
+    risk_level  INTEGER NOT NULL DEFAULT 2,
+    description TEXT NOT NULL DEFAULT '',
+    immutable   INTEGER NOT NULL DEFAULT 0,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    UNIQUE(pattern, rule_type)
+);
+
+CREATE TABLE IF NOT EXISTS permission_overrides (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    action          TEXT NOT NULL,
+    pattern         TEXT NOT NULL DEFAULT '*',
+    decision        TEXT NOT NULL,
+    reason          TEXT NOT NULL DEFAULT '',
+    usage_count     INTEGER NOT NULL DEFAULT 0,
+    max_uses        INTEGER NOT NULL DEFAULT 50,
+    expires_at      TEXT,
+    conversation_id TEXT,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS decision_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    action          TEXT NOT NULL,
+    tool_name       TEXT NOT NULL DEFAULT '',
+    details_json    TEXT NOT NULL DEFAULT '{}',
+    risk_level      INTEGER NOT NULL,
+    decision        TEXT NOT NULL,
+    reason          TEXT NOT NULL DEFAULT '',
+    rule_source     TEXT NOT NULL DEFAULT '',
+    override_id     INTEGER,
+    conversation_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS financial_patterns (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern      TEXT NOT NULL,
+    pattern_type TEXT NOT NULL DEFAULT 'regex',
+    description  TEXT NOT NULL DEFAULT '',
+    immutable    INTEGER NOT NULL DEFAULT 1,
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(pattern, pattern_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_decision_log_action ON decision_log(action);
+CREATE INDEX IF NOT EXISTS idx_decision_log_timestamp ON decision_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_overrides_action ON permission_overrides(action);
+`
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // Check performs a full permission check pipeline. It is equivalent to
@@ -560,10 +686,60 @@ func (e *Engine) checkFinancial(details map[string]string) *Decision {
 	return nil
 }
 
-// toolRuleRow maps DB rows for tool_rule lookups.
-type toolRuleRow struct {
-	RiskLevel            int `db:"risk_level"`
-	RequiresConfirmation int `db:"requires_confirmation"`
+// logDecision writes a permission decision to the audit log.
+func (e *Engine) logDecision(decision Decision, action, toolName string, details map[string]string, conversationID string) {
+	decisionStr := "allow"
+	if !decision.Allowed {
+		if decision.RequiresConfirmation {
+			decisionStr = "escalate"
+		} else {
+			decisionStr = "deny"
+		}
+	}
+
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		detailsJSON = []byte("{}")
+	}
+
+	var overrideID sql.NullInt64
+	if decision.OverrideID != nil {
+		overrideID.Int64 = *decision.OverrideID
+		overrideID.Valid = true
+	}
+
+	var convID sql.NullString
+	if conversationID != "" {
+		convID.String = conversationID
+		convID.Valid = true
+	}
+
+	_, err = e.db.Exec(`
+		INSERT INTO decision_log
+		(action, tool_name, details_json, risk_level, decision, reason,
+		 rule_source, override_id, conversation_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		action, toolName, string(detailsJSON), int(decision.RiskLevel),
+		decisionStr, decision.Reason, decision.RuleSource,
+		overrideID, convID)
+
+	if err != nil {
+		e.logger.Error("Failed to log decision", "error", err)
+	}
+
+	if !decision.Allowed {
+		e.logger.Info("Permission decision",
+			"decision", decisionStr,
+			"action", action,
+			"tool", toolName,
+			"reason", decision.Reason,
+			"source", decision.RuleSource)
+	} else {
+		e.logger.Debug("Permission allow",
+			"action", action,
+			"tool", toolName,
+			"source", decision.RuleSource)
+	}
 }
 
 // lookupBaseRule looks up the base risk level for an action.
@@ -638,31 +814,6 @@ func (e *Engine) evaluateCommand(command string) (RiskLevel, string, bool) {
 	}
 
 	return RiskMedium, ActionShellExecute, false
-}
-
-// normalizePathForComparison ensures a directory path ends with a path separator
-// to prevent prefix matching attacks (e.g., /tmp_backup matching /tmp).
-// SEC-4 FIX: Proper directory boundary comparison.
-func normalizePathForComparison(p string) string {
-	if p == "" {
-		return p
-	}
-	if !strings.HasSuffix(p, string(filepath.Separator)) {
-		return p + string(filepath.Separator)
-	}
-	return p
-}
-
-// isPathUnderDir checks if path is under or equal to dir using proper boundary checks.
-// SEC-4 FIX: Prevents /tmp_backup/secret from matching /tmp.
-func isPathUnderDir(path, dir string) bool {
-	// Exact match
-	if path == dir {
-		return true
-	}
-	// Check if path is under dir (with proper directory boundary)
-	normalizedDir := normalizePathForComparison(dir)
-	return strings.HasPrefix(path, normalizedDir)
 }
 
 // checkPath checks a filesystem path against path rules.
@@ -771,17 +922,6 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 	}
 
 	return nil
-}
-
-// permissionOverrideRow maps DB rows for permission_overrides.
-type permissionOverrideRow struct {
-	ID         int64          `db:"id"`
-	Pattern    string         `db:"pattern"`
-	Decision   string         `db:"decision"`
-	Reason     string         `db:"reason"`
-	UsageCount int            `db:"usage_count"`
-	MaxUses    int            `db:"max_uses"`
-	ExpiresAt  sql.NullString `db:"expires_at"`
 }
 
 // checkOverrides checks for creator permission overrides.
@@ -948,62 +1088,6 @@ func (e *Engine) needsConfirmation(riskLevel RiskLevel) bool {
 	return false
 }
 
-// logDecision writes a permission decision to the audit log.
-func (e *Engine) logDecision(decision Decision, action, toolName string, details map[string]string, conversationID string) {
-	decisionStr := "allow"
-	if !decision.Allowed {
-		if decision.RequiresConfirmation {
-			decisionStr = "escalate"
-		} else {
-			decisionStr = "deny"
-		}
-	}
-
-	detailsJSON, err := json.Marshal(details)
-	if err != nil {
-		detailsJSON = []byte("{}")
-	}
-
-	var overrideID sql.NullInt64
-	if decision.OverrideID != nil {
-		overrideID.Int64 = *decision.OverrideID
-		overrideID.Valid = true
-	}
-
-	var convID sql.NullString
-	if conversationID != "" {
-		convID.String = conversationID
-		convID.Valid = true
-	}
-
-	_, err = e.db.Exec(`
-		INSERT INTO decision_log
-		(action, tool_name, details_json, risk_level, decision, reason,
-		 rule_source, override_id, conversation_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		action, toolName, string(detailsJSON), int(decision.RiskLevel),
-		decisionStr, decision.Reason, decision.RuleSource,
-		overrideID, convID)
-
-	if err != nil {
-		e.logger.Error("Failed to log decision", "error", err)
-	}
-
-	if !decision.Allowed {
-		e.logger.Info("Permission decision",
-			"decision", decisionStr,
-			"action", action,
-			"tool", toolName,
-			"reason", decision.Reason,
-			"source", decision.RuleSource)
-	} else {
-		e.logger.Debug("Permission allow",
-			"action", action,
-			"tool", toolName,
-			"source", decision.RuleSource)
-	}
-}
-
 // AllowOnce records a temporary allow override for an action.
 func (e *Engine) AllowOnce(action, pattern, reason string, maxUses, expiresDays int) (int64, error) {
 	return e.RecordOverride(action, pattern, "allow", reason, "", maxUses, expiresDays)
@@ -1012,6 +1096,49 @@ func (e *Engine) AllowOnce(action, pattern, reason string, maxUses, expiresDays 
 // BlockAction records a permanent block for an action.
 func (e *Engine) BlockAction(action, pattern, reason string) (int64, error) {
 	return e.RecordOverride(action, pattern, "deny", reason, "", 0, 0)
+}
+
+// GetContextForLLM generates a minimal context string for the LLM.
+func (e *Engine) GetContextForLLM(decision Decision, action string, details map[string]string) string {
+	var lines []string
+	lines = append(lines, "# Security Context (current action)", fmt.Sprintf("- Action: %s", action))
+
+	switch action {
+	case ActionShellExecute:
+		if cmd := details["command"]; cmd != "" {
+			if len(cmd) > 100 {
+				cmd = cmd[:100] + "..."
+			}
+			lines = append(lines, fmt.Sprintf("- Command: %s", cmd))
+		}
+	case "file_read", "file_write", "file_delete":
+		if path := details["path"]; path != "" {
+			lines = append(lines, fmt.Sprintf("- Path: %s", path))
+		}
+	}
+
+	lines = append(lines, fmt.Sprintf("- Risk: %s", decision.RiskLevel.String()))
+
+	if decision.Allowed {
+		lines = append(lines, "- Status: Permitted")
+	} else {
+		lines = append(lines, fmt.Sprintf("- Status: Denied - %s", decision.Reason))
+	}
+
+	if decision.OverrideApplied {
+		lines = append(lines, "- Note: Creator override is active for this action")
+	}
+
+	if !decision.Allowed {
+		lines = append(lines, "- Do not attempt to work around this restriction.")
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// GetDecision retrieves a cached decision lookup (for action-only checks).
+func (e *Engine) GetDecision(action string) Decision {
+	return e.Check(action, "", nil, "")
 }
 
 // RecordOverride records a creator permission override.
@@ -1056,145 +1183,37 @@ func (e *Engine) RecordOverride(action, pattern, decision, reason, conversationI
 	return id, nil
 }
 
-// GetDecision retrieves a cached decision lookup (for action-only checks).
-func (e *Engine) GetDecision(action string) Decision {
-	return e.Check(action, "", nil, "")
+// RemovePreExecChecker unregisters the PreExecChecker for the given agent
+// ID. An empty agentID is a no-op. Safe to call when no checker is
+// registered (idempotent).
+func (e *Engine) RemovePreExecChecker(agentID string) {
+	if agentID == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.preExecCheckers != nil {
+		delete(e.preExecCheckers, agentID)
+	}
 }
 
-// GetContextForLLM generates a minimal context string for the LLM.
-func (e *Engine) GetContextForLLM(decision Decision, action string, details map[string]string) string {
-	var lines []string
-	lines = append(lines, "# Security Context (current action)", fmt.Sprintf("- Action: %s", action))
-
-	switch action {
-	case ActionShellExecute:
-		if cmd := details["command"]; cmd != "" {
-			if len(cmd) > 100 {
-				cmd = cmd[:100] + "..."
-			}
-			lines = append(lines, fmt.Sprintf("- Command: %s", cmd))
-		}
-	case "file_read", "file_write", "file_delete":
-		if path := details["path"]; path != "" {
-			lines = append(lines, fmt.Sprintf("- Path: %s", path))
-		}
+// SetPreExecChecker registers a PreExecChecker for the given agent/employee
+// ID. The checker is called between Stage 3 (context analysis) and Stage 4
+// (override check) during CheckForAgent. An empty agentID is a no-op.
+//
+// IMPORTANT: The checker's Check method is invoked while Engine.mu is held
+// as an RLock. Implementations MUST NOT call any Engine methods that acquire
+// mu (Check, RecordOverride, etc.) — see PreExecChecker interface doc.
+func (e *Engine) SetPreExecChecker(agentID string, checker PreExecChecker) {
+	if agentID == "" {
+		return
 	}
-
-	lines = append(lines, fmt.Sprintf("- Risk: %s", decision.RiskLevel.String()))
-
-	if decision.Allowed {
-		lines = append(lines, "- Status: Permitted")
-	} else {
-		lines = append(lines, fmt.Sprintf("- Status: Denied - %s", decision.Reason))
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.preExecCheckers == nil {
+		e.preExecCheckers = make(map[string]PreExecChecker)
 	}
-
-	if decision.OverrideApplied {
-		lines = append(lines, "- Note: Creator override is active for this action")
+	if checker != nil {
+		e.preExecCheckers[agentID] = checker
 	}
-
-	if !decision.Allowed {
-		lines = append(lines, "- Do not attempt to work around this restriction.")
-	}
-
-	return strings.Join(lines, "\n")
 }
-
-// Close closes the database connection.
-func (e *Engine) Close() error {
-	return e.db.Close()
-}
-
-// boolToInt converts a boolean to an integer (0 or 1).
-// Compile-time assertion that Engine implements io.Closer.
-var _ io.Closer = (*Engine)(nil)
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// Schema SQL for the security database.
-const schemaSQL = `
-CREATE TABLE IF NOT EXISTS tool_rules (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    tool_name   TEXT NOT NULL,
-    action      TEXT NOT NULL,
-    risk_level  INTEGER NOT NULL DEFAULT 2,
-    description TEXT NOT NULL DEFAULT '',
-    requires_confirmation INTEGER NOT NULL DEFAULT 0,
-    immutable   INTEGER NOT NULL DEFAULT 0,
-    enabled     INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    UNIQUE(tool_name, action)
-);
-
-CREATE TABLE IF NOT EXISTS command_patterns (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    pattern      TEXT NOT NULL,
-    pattern_type TEXT NOT NULL DEFAULT 'regex',
-    risk_level   INTEGER NOT NULL,
-    category     TEXT NOT NULL DEFAULT 'general',
-    description  TEXT NOT NULL DEFAULT '',
-    immutable    INTEGER NOT NULL DEFAULT 0,
-    enabled      INTEGER NOT NULL DEFAULT 1,
-    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    UNIQUE(pattern, pattern_type)
-);
-
-CREATE TABLE IF NOT EXISTS path_rules (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    pattern     TEXT NOT NULL,
-    rule_type   TEXT NOT NULL,
-    risk_level  INTEGER NOT NULL DEFAULT 2,
-    description TEXT NOT NULL DEFAULT '',
-    immutable   INTEGER NOT NULL DEFAULT 0,
-    enabled     INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    UNIQUE(pattern, rule_type)
-);
-
-CREATE TABLE IF NOT EXISTS permission_overrides (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    action          TEXT NOT NULL,
-    pattern         TEXT NOT NULL DEFAULT '*',
-    decision        TEXT NOT NULL,
-    reason          TEXT NOT NULL DEFAULT '',
-    usage_count     INTEGER NOT NULL DEFAULT 0,
-    max_uses        INTEGER NOT NULL DEFAULT 50,
-    expires_at      TEXT,
-    conversation_id TEXT,
-    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS decision_log (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    action          TEXT NOT NULL,
-    tool_name       TEXT NOT NULL DEFAULT '',
-    details_json    TEXT NOT NULL DEFAULT '{}',
-    risk_level      INTEGER NOT NULL,
-    decision        TEXT NOT NULL,
-    reason          TEXT NOT NULL DEFAULT '',
-    rule_source     TEXT NOT NULL DEFAULT '',
-    override_id     INTEGER,
-    conversation_id TEXT
-);
-
-CREATE TABLE IF NOT EXISTS financial_patterns (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    pattern      TEXT NOT NULL,
-    pattern_type TEXT NOT NULL DEFAULT 'regex',
-    description  TEXT NOT NULL DEFAULT '',
-    immutable    INTEGER NOT NULL DEFAULT 1,
-    enabled      INTEGER NOT NULL DEFAULT 1,
-    UNIQUE(pattern, pattern_type)
-);
-
-CREATE INDEX IF NOT EXISTS idx_decision_log_action ON decision_log(action);
-CREATE INDEX IF NOT EXISTS idx_decision_log_timestamp ON decision_log(timestamp);
-CREATE INDEX IF NOT EXISTS idx_overrides_action ON permission_overrides(action);
-`

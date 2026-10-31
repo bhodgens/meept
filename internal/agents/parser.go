@@ -82,46 +82,6 @@ func ParseAgentText(text string) (*AgentDefinition, error) {
 	return def, nil
 }
 
-// ParseMetadataOnly parses only the YAML frontmatter from an AGENT.md file.
-// This is faster than ParseAgentFile as it skips the body.
-func ParseMetadataOnly(path string) (*AgentMetadata, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, &ParseError{
-			Path:    path,
-			Message: "failed to read file",
-			Cause:   err,
-		}
-	}
-
-	frontmatter, _, err := splitFrontmatter(string(data))
-	if err != nil {
-		return nil, &ParseError{
-			Path:    path,
-			Message: "failed to split frontmatter",
-			Cause:   err,
-		}
-	}
-
-	meta, err := parseMetadata(frontmatter)
-	if err != nil {
-		return nil, &ParseError{
-			Path:    path,
-			Message: "failed to parse metadata",
-			Cause:   err,
-		}
-	}
-
-	if meta.ID == "" {
-		return nil, &ParseError{
-			Path:    path,
-			Message: "agent has no id",
-			Cause:   ErrNoID,
-		}
-	}
-
-	return meta, nil
-}
 
 // splitFrontmatter splits YAML frontmatter from the markdown body.
 // The frontmatter must be delimited by --- markers.

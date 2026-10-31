@@ -261,11 +261,6 @@ func endpointSpared(spared map[string]bool, pidFile, endpointKey string) bool {
 	return endpointKey != "" && spared[endpointKey]
 }
 
-// OrphanRuntimesFromConfigs reports leftover runtime processes for a set of
-// runtime configs (used by `meept doctor`, which has no RuntimeManager).
-func OrphanRuntimesFromConfigs(cfgs []*RuntimeConfig) ([]OrphanRuntime, error) {
-	return OrphanRuntimesFromConfigsAndRecords(cfgs, nil)
-}
 
 // OrphanRuntimesFromConfigsAndRecords reports leftover runtime processes for a
 // set of runtime configs AND durable spawn records with the real process scan.
@@ -349,13 +344,6 @@ func FilterLiveOwned(cfgs []*RuntimeConfig, orphans []OrphanRuntime) []OrphanRun
 	return out
 }
 
-// ReapOrphanRuntimesFromConfigs finds and reaps leftovers for the given configs
-// with the real process scan and process-group signals. It returns the orphans
-// it considered and the pids confirmed gone — callers must report the confirmed
-// count, never the candidate count.
-func ReapOrphanRuntimesFromConfigs(cfgs []*RuntimeConfig, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int) {
-	return ReapOrphanRuntimesFromConfigsAndRecords(cfgs, nil, waitAfterTerm, log)
-}
 
 // ReapOrphanRuntimesFromConfigsAndRecords finds and reaps leftovers for the
 // given configs and durable spawn records with the real process scan and
@@ -508,30 +496,6 @@ type StaleRecordReap struct {
 	Age time.Duration
 }
 
-// SweepStaleSpawnRecords reaps runtimes that the ppid==1 match of the boot
-// orphan sweep cannot see through the ownership guard: a record older than
-// maxAge whose pid is still ALIVE, re-parented to init, and whose command line
-// matches the record's argv (issue #54). The PID file's ModTime is the record
-// age proxy.
-//
-// cfgs are the endpoint configs for the RuntimeHasLiveOwner veto (nil
-// disables the veto): a stale record whose command line matches an endpoint
-// recording a DIFFERENT live owner is left alone, exactly as the boot sweep
-// leaves it. The F57/F58 contract the boot sweep enforces via sweepableRecord
-// applies here too: a record whose runtime opted OUT of daemon-driven stopping
-// (AutoStop=false, e.g. an operator-started `meept runtime start`) is never
-// reaped, whatever its age.
-//
-// Returns the pids confirmed gone. Best-effort, like every sweep: never
-// returns an error.
-func SweepStaleSpawnRecords(cfgs []*RuntimeConfig, records []SpawnRecord, maxAge time.Duration, now func() time.Time) []int {
-	reaped := sweepStaleSpawnRecords(cfgs, records, maxAge, now, orphanTermGraceDefault, nil, nil, slog.Default())
-	pids := make([]int, 0, len(reaped))
-	for _, r := range reaped {
-		pids = append(pids, r.PID)
-	}
-	return pids
-}
 
 // SweepStaleSpawnRecordsWithAges is SweepStaleSpawnRecords returning the
 // reaped pids WITH the record age observed at stat time (see StaleRecordReap).
@@ -1019,4 +983,29 @@ func matchesSpawnCommand(command string, spawn []string) bool {
 		return false
 	}
 	return fields[len(fields)-1] == last
+}
+
+// SweepStaleSpawnRecords reaps runtimes that the ppid==1 match of the boot
+// orphan sweep cannot see through the ownership guard: a record older than
+// maxAge whose pid is still ALIVE, re-parented to init, and whose command line
+// matches the record's argv (issue #54). The PID file's ModTime is the record
+// age proxy.
+//
+// cfgs are the endpoint configs for the RuntimeHasLiveOwner veto (nil
+// disables the veto): a stale record whose command line matches an endpoint
+// recording a DIFFERENT live owner is left alone, exactly as the boot sweep
+// leaves it. The F57/F58 contract the boot sweep enforces via sweepableRecord
+// applies here too: a record whose runtime opted OUT of daemon-driven stopping
+// (AutoStop=false, e.g. an operator-started `meept runtime start`) is never
+// reaped, whatever its age.
+//
+// Returns the pids confirmed gone. Best-effort, like every sweep: never
+// returns an error.
+func SweepStaleSpawnRecords(cfgs []*RuntimeConfig, records []SpawnRecord, maxAge time.Duration, now func() time.Time) []int {
+	reaped := sweepStaleSpawnRecords(cfgs, records, maxAge, now, orphanTermGraceDefault, nil, nil, slog.Default())
+	pids := make([]int, 0, len(reaped))
+	for _, r := range reaped {
+		pids = append(pids, r.PID)
+	}
+	return pids
 }

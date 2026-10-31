@@ -24,13 +24,6 @@ type ReflectionConfig struct {
 	WorkDir  string // Working directory for lint/test commands
 }
 
-// DefaultReflectionConfig returns the default configuration.
-func DefaultReflectionConfig() ReflectionConfig {
-	return ReflectionConfig{
-		AutoLint: true,
-		AutoTest: true,
-	}
-}
 
 // ReflectionEngine manages the auto-fix loop
 type ReflectionEngine struct {
@@ -45,10 +38,6 @@ type ReflectionEngine struct {
 	scopeProvider chatScopeProvider
 }
 
-// NewReflectionEngine creates a new reflection engine with default config
-func NewReflectionEngine(logger *slog.Logger, linter *lint.Registry, testRunner *lint.TestRunner, llmClient llm.Chatter) *ReflectionEngine {
-	return NewReflectionEngineWithConfig(logger, linter, testRunner, llmClient, DefaultReflectionConfig())
-}
 
 // NewReflectionEngineWithConfig creates a new reflection engine with custom configuration.
 // Multi-pass retry is handled externally by the orchestrator (see orchestrator.go:654-744).
@@ -573,4 +562,17 @@ func reflectionTruncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "... (truncated)"
+}
+
+// NewReflectionEngine creates a new reflection engine with default config
+func NewReflectionEngine(logger *slog.Logger, linter *lint.Registry, testRunner *lint.TestRunner, llmClient llm.Chatter) *ReflectionEngine {
+	return NewReflectionEngineWithConfig(logger, linter, testRunner, llmClient, DefaultReflectionConfig())
+}
+
+// DefaultReflectionConfig returns the default configuration.
+func DefaultReflectionConfig() ReflectionConfig {
+	return ReflectionConfig{
+		AutoLint: true,
+		AutoTest: true,
+	}
 }

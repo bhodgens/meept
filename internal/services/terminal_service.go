@@ -1,8 +1,8 @@
 package services
 
 import (
+
 	"context"
-	"encoding/json"
 	"log/slog"
 	"path/filepath"
 	"sort"
@@ -17,6 +17,7 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
+
 
 // CommandHistory represents a shell command execution record.
 type CommandHistory struct {
@@ -300,47 +301,3 @@ func (svc *TerminalService) SetMaxHistory(max int) {
 	}
 }
 
-// GetShellOutput implements JSON marshaling for shell results.
-func GetShellOutput(result any) (stdout, stderr string, exitCode int, ok bool) {
-	if result == nil {
-		return "", "", 0, false
-	}
-
-	switch r := result.(type) {
-	case builtin.ShellResult:
-		return r.Stdout, r.Stderr, r.ReturnCode, true
-	case map[string]any:
-		if v, ok := r["stdout"].(string); ok {
-			stdout = v
-		}
-		if v, ok := r["stderr"].(string); ok {
-			stderr = v
-		}
-		if code, ok := r["return_code"].(float64); ok {
-			exitCode = int(code)
-		}
-		return stdout, stderr, exitCode, true
-	}
-
-	// Try JSON marshaling as fallback
-	data, err := json.Marshal(result)
-	if err != nil {
-		return "", "", 0, false
-	}
-
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return "", "", 0, false
-	}
-
-	if v, ok := m["stdout"].(string); ok {
-		stdout = v
-	}
-	if v, ok := m["stderr"].(string); ok {
-		stderr = v
-	}
-	if code, ok := m["return_code"].(float64); ok {
-		exitCode = int(code)
-	}
-	return stdout, stderr, exitCode, true
-}

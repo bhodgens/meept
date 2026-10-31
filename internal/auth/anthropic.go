@@ -35,10 +35,6 @@ const (
 // (not a const) so tests can point it at httptest servers.
 var anthropicTokenEndpoints = []string{anthropicPlatformTokenEP, anthropicConsoleTokenEP}
 
-// AnthropicTokenEndpoints returns the token endpoints tried in order.
-func AnthropicTokenEndpoints() []string {
-	return append([]string(nil), anthropicTokenEndpoints...)
-}
 
 // BuildAnthropicAuthorizeURL builds the Claude OAuth authorization URL with
 // PKCE S256 challenge and state.

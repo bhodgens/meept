@@ -163,17 +163,7 @@ func (s *ConfigSyncer) pullOnce(ctx context.Context) error {
 	return nil
 }
 
-// SetBaseDir sets the config base directory after creation.
-func (s *ConfigSyncer) SetBaseDir(baseDir string) {
-	s.mu.Lock()
-	s.baseDir = baseDir
-	s.mu.Unlock()
-}
 
-// NodeID returns the node identifier used for per-node overrides.
-func (s *ConfigSyncer) NodeID() string {
-	return s.nodeID
-}
 
 // LastCommitHash returns the latest known commit hash.
 func (s *ConfigSyncer) LastCommitHash() string {
@@ -252,10 +242,6 @@ type SyncStatus struct {
 	Dirty             bool   `json:"dirty"`
 }
 
-// ReloadRegistry is exported for use in daemon wiring.
-func (s *ConfigSyncer) ReloadRegistry() *ReloadRegistry {
-	return s.hooks
-}
 
 // sanitizeRepoName strips URL scheme and path delimiters, converting to a
 // filesystem-safe directory name. E.g. "git@github.com:user/repo.git" → "github.com_user_repo.git".

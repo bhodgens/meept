@@ -283,20 +283,6 @@ func (s *PlanService) Confirm(ctx context.Context, req ConfirmPlanRequest) (*pla
 	return p, nil
 }
 
-// CountBySession returns counts of plans grouped by state for a session.
-func (s *PlanService) CountBySession(ctx context.Context, sessionID string) (map[plan.PlanState]int, error) {
-	if sessionID == "" {
-		return nil, wrapError("plan", "CountBySession", ErrInvalidInput)
-	}
-	if s.store == nil {
-		return nil, wrapError("plan", "CountBySession", ErrUnavailable)
-	}
-	counts, err := s.store.CountPlansBySessionAndState(ctx, sessionID)
-	if err != nil {
-		return nil, wrapError("plan", "CountBySession", err)
-	}
-	return counts, nil
-}
 
 // Phases returns the phases (with produces/consumes artifacts) for a plan.
 func (s *PlanService) Phases(ctx context.Context, planID string) ([]*plan.PlanPhase, error) {

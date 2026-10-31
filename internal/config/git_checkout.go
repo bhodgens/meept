@@ -241,17 +241,6 @@ func (g *GitCheckout) CommitAndPush(_ context.Context, message string) error {
 		ErrGitConflict, gitPullRetryMax)
 }
 
-// GetLatestCommit returns the latest commit hash in the repo.
-func (g *GitCheckout) GetLatestCommit() (string, error) {
-	if g.repo == nil {
-		return "", fmt.Errorf("not initialized")
-	}
-	head, err := g.repo.Head()
-	if err != nil {
-		return "", err
-	}
-	return head.Hash().String(), nil
-}
 
 // IsDirty returns true if the working tree has uncommitted changes.
 func (g *GitCheckout) IsDirty() (bool, error) {
@@ -274,10 +263,6 @@ func (g *GitCheckout) Path() string {
 	return g.checkoutDir
 }
 
-// Repo returns the underlying git.Repository, if available.
-func (g *GitCheckout) Repo() *git.Repository {
-	return g.repo
-}
 
 // checkoutDirParent computes the parent directory of the checkout path,
 // handling the case where checkoutDir is a bare name (no slash).

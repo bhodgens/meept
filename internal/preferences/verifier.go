@@ -196,15 +196,4 @@ func (v *InstructionVerifier) assessToolRisk(tool string) string {
 	}
 }
 
-// GetKnownSafeCommands returns a copy of the safe commands list.
-func (v *InstructionVerifier) GetKnownSafeCommands() []string {
-	result := make([]string, len(v.safeCommands))
-	copy(result, v.safeCommands)
-	return result
-}
 
-// SetKnownSafeCommands replaces the known-safe commands list.
-func (v *InstructionVerifier) SetKnownSafeCommands(cmds []string) {
-	v.safeCommands = make([]string, len(cmds))
-	copy(v.safeCommands, cmds)
-}

@@ -94,15 +94,6 @@ type Evolver struct {
 // EvolverOption configures an Evolver at construction time.
 type EvolverOption func(*Evolver)
 
-// WithEvolverLLMChatter injects an LLM client for the evolver's refine prompts.
-// This is primarily for testing; production code should pass the client via NewEvolver.
-func WithEvolverLLMChatter(c llmChatter) EvolverOption {
-	return func(e *Evolver) {
-		if c != nil {
-			e.llmClient = c
-		}
-	}
-}
 
 // WithReflectionProposer injects a proposal source for Pass A consumption. When
 // set, Pass A drains pending reflection proposals at the start of each cycle

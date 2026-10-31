@@ -126,41 +126,6 @@ func (g *PatchGenerator) Generate(ctx context.Context, analysis *RootCauseAnalys
 	return g.parseGenerationResponse(analysis.IssueID, resp.Content)
 }
 
-// GenerateBatch generates fixes for multiple analyses.
-func (g *PatchGenerator) GenerateBatch(ctx context.Context, analyses []*RootCauseAnalysis, issues []Issue) ([]*ProposedFix, error) {
-	// Create issue lookup map
-	issueMap := make(map[string]Issue)
-	for _, issue := range issues {
-		issueMap[issue.ID] = issue
-	}
-
-	fixes := make([]*ProposedFix, 0, len(analyses))
-
-	for _, analysis := range analyses {
-		select {
-		case <-ctx.Done():
-			return fixes, ctx.Err()
-		default:
-		}
-
-		issue, ok := issueMap[analysis.IssueID]
-		if !ok {
-			g.logger.Warn("issue not found for analysis", "issue_id", analysis.IssueID)
-			continue
-		}
-
-		fix, err := g.Generate(ctx, analysis, issue)
-		if err != nil {
-			g.logger.Warn("failed to generate fix", "issue_id", analysis.IssueID, "error", err)
-			continue
-		}
-		if fix != nil {
-			fixes = append(fixes, fix)
-		}
-	}
-
-	return fixes, nil
-}
 
 // readAffectedFiles reads content from affected files.
 func (g *PatchGenerator) readAffectedFiles(files []string) string {
@@ -261,4 +226,40 @@ func (g *PatchGenerator) parseGenerationResponse(issueID, response string) (*Pro
 // Close cleans up resources.
 func (g *PatchGenerator) Close() error {
 	return nil
+}
+
+// GenerateBatch generates fixes for multiple analyses.
+func (g *PatchGenerator) GenerateBatch(ctx context.Context, analyses []*RootCauseAnalysis, issues []Issue) ([]*ProposedFix, error) {
+	// Create issue lookup map
+	issueMap := make(map[string]Issue)
+	for _, issue := range issues {
+		issueMap[issue.ID] = issue
+	}
+
+	fixes := make([]*ProposedFix, 0, len(analyses))
+
+	for _, analysis := range analyses {
+		select {
+		case <-ctx.Done():
+			return fixes, ctx.Err()
+		default:
+		}
+
+		issue, ok := issueMap[analysis.IssueID]
+		if !ok {
+			g.logger.Warn("issue not found for analysis", "issue_id", analysis.IssueID)
+			continue
+		}
+
+		fix, err := g.Generate(ctx, analysis, issue)
+		if err != nil {
+			g.logger.Warn("failed to generate fix", "issue_id", analysis.IssueID, "error", err)
+			continue
+		}
+		if fix != nil {
+			fixes = append(fixes, fix)
+		}
+	}
+
+	return fixes, nil
 }

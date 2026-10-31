@@ -134,7 +134,7 @@ func TestIntakeConfig_DurationRoundTrip(t *testing.T) {
 	if !strings.Contains(out, `"poll_interval": "5m"`) && !strings.Contains(out, `poll_interval": "5m"`) {
 		t.Errorf("preprocessDurations rewrote intake.poll_interval:\n%s", out)
 	}
-	if !strings.Contains(out, "horizon: 86400000000000") {
+	if !strings.Contains(out, `"horizon": 86400000000000`) {
 		t.Errorf("preprocessDurations did not convert llm.failure_policy.horizon:\n%s", out)
 	}
 }

@@ -110,14 +110,6 @@ func NewRPCHandler(manager *Manager) *RPCHandler {
 	}
 }
 
-// SetLogger replaces the default logger. Nil values are ignored to prevent
-// typed-nil panics (per CLAUDE.md setter nil guard rule).
-func (h *RPCHandler) SetLogger(l *slog.Logger) {
-	if l == nil {
-		return
-	}
-	h.logger = l
-}
 
 // Handlers returns the map of RPC method names to handler functions.
 //
@@ -860,4 +852,13 @@ func (h *RPCHandler) handleMigrate(ctx context.Context, raw json.RawMessage) (an
 		"proposals": proposals,
 		"count":     len(proposals),
 	}, nil
+}
+
+// SetLogger replaces the default logger. Nil values are ignored to prevent
+// typed-nil panics (per CLAUDE.md setter nil guard rule).
+func (h *RPCHandler) SetLogger(l *slog.Logger) {
+	if l == nil {
+		return
+	}
+	h.logger = l
 }

@@ -60,17 +60,6 @@ func WithEmbeddingDim(dim int) Option {
 	}
 }
 
-// WithTurnGossipPublisher wires a cluster publisher so that SaveMessages
-// emits one PublishTurn call per message. Pass nil to explicitly disable
-// (equivalent to not calling the option). The publisher is expected to be
-// non-blocking; see TurnGossipPublisher contract.
-func WithTurnGossipPublisher(pub TurnGossipPublisher) Option {
-	return func(s *SQLiteStore) {
-		if pub != nil {
-			s.turnGossip = pub
-		}
-	}
-}
 
 // WithBusyTimeoutMs overrides the SQLite busy timeout (milliseconds) used in
 // the connection DSN. A non-positive value is ignored (falls back to the

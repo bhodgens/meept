@@ -516,14 +516,20 @@ func (tr *TestRunner) truncateOutput(output string) string {
 	return strings.Join(lines[:tr.config.MaxOutputLines], "\n") + "\n... (truncated)"
 }
 
-// HasFailures checks if any test results have failures
-func HasFailures(results []TestResult) bool {
+
+
+
+
+
+// FilterSkipped returns only skipped test results
+func FilterSkipped(results []TestResult) []TestResult {
+	var filtered []TestResult
 	for _, r := range results {
-		if !r.Passed && !r.Skipped {
-			return true
+		if r.Skipped {
+			filtered = append(filtered, r)
 		}
 	}
-	return false
+	return filtered
 }
 
 // FilterPassed returns only passing test results
@@ -537,22 +543,21 @@ func FilterPassed(results []TestResult) []TestResult {
 	return filtered
 }
 
+// HasFailures checks if any test results have failures
+func HasFailures(results []TestResult) bool {
+	for _, r := range results {
+		if !r.Passed && !r.Skipped {
+			return true
+		}
+	}
+	return false
+}
+
 // FilterFailed returns only failing test results
 func FilterFailed(results []TestResult) []TestResult {
 	var filtered []TestResult
 	for _, r := range results {
 		if !r.Passed && !r.Skipped {
-			filtered = append(filtered, r)
-		}
-	}
-	return filtered
-}
-
-// FilterSkipped returns only skipped test results
-func FilterSkipped(results []TestResult) []TestResult {
-	var filtered []TestResult
-	for _, r := range results {
-		if r.Skipped {
 			filtered = append(filtered, r)
 		}
 	}

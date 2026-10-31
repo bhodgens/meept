@@ -69,6 +69,7 @@ func (a *ClaudeSkillAdapter) AdaptSkill(skill *Skill) *Skill {
 	return skill
 }
 
+
 // IsClaudeSkillPath returns true if the path is under a ~/.claude/skills/
 // directory (expanded or literal).
 func IsClaudeSkillPath(path string) bool {

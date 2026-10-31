@@ -97,27 +97,6 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, issue Issue) (*RootCaus
 	return a.parseAnalysisResponse(issue.ID, resp.Content), nil
 }
 
-// AnalyzeBatch analyzes multiple issues.
-func (a *RootCauseAnalyzer) AnalyzeBatch(ctx context.Context, issues []Issue) ([]*RootCauseAnalysis, error) {
-	analyses := make([]*RootCauseAnalysis, 0, len(issues))
-
-	for _, issue := range issues {
-		select {
-		case <-ctx.Done():
-			return analyses, ctx.Err()
-		default:
-		}
-
-		analysis, err := a.Analyze(ctx, issue)
-		if err != nil {
-			a.logger.Warn("failed to analyze issue", "issue_id", issue.ID, "error", err)
-			continue
-		}
-		analyses = append(analyses, analysis)
-	}
-
-	return analyses, nil
-}
 
 // extractRelevantCode extracts code around the issue.
 func (a *RootCauseAnalyzer) extractRelevantCode(content string, issue Issue) string {
@@ -205,4 +184,26 @@ func (a *RootCauseAnalyzer) fallbackAnalysis(issue Issue) *RootCauseAnalysis {
 // Close cleans up resources.
 func (a *RootCauseAnalyzer) Close() error {
 	return nil
+}
+
+// AnalyzeBatch analyzes multiple issues.
+func (a *RootCauseAnalyzer) AnalyzeBatch(ctx context.Context, issues []Issue) ([]*RootCauseAnalysis, error) {
+	analyses := make([]*RootCauseAnalysis, 0, len(issues))
+
+	for _, issue := range issues {
+		select {
+		case <-ctx.Done():
+			return analyses, ctx.Err()
+		default:
+		}
+
+		analysis, err := a.Analyze(ctx, issue)
+		if err != nil {
+			a.logger.Warn("failed to analyze issue", "issue_id", issue.ID, "error", err)
+			continue
+		}
+		analyses = append(analyses, analysis)
+	}
+
+	return analyses, nil
 }

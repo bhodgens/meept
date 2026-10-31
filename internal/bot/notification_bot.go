@@ -1,19 +1,21 @@
 package bot
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
-	"log/slog"
-	"slices"
 	"strings"
+	"encoding/hex"
+	"crypto/sha256"
+	"slices"
+	"fmt"
+	"context"
+
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/comm/telegram"
 )
+
 
 // NotificationTriggerType identifies the kind of notification.
 type NotificationTriggerType string
@@ -36,18 +38,6 @@ type NotificationBotConfig struct {
 	TelegramPollTimeout int                 `json:"telegram_poll_timeout,omitempty"`
 }
 
-// DefaultNotificationBotConfig returns a config with sensible defaults.
-func DefaultNotificationBotConfig() NotificationBotConfig {
-	return NotificationBotConfig{
-		Enabled:          false,
-		NotifyOn:         []string{string(TriggerBudgetExhausted), string(TriggerSecurityAlert), string(TriggerSessionDesignated)},
-		RateLimitPerHour: 60,
-		ChannelAllowlists: map[string][]string{
-			"telegram": {}, // empty = allow all configured chat IDs
-		},
-		Templates: make(map[string]string),
-	}
-}
 
 // NotificationBot is a bot type that sends proactive notifications when
 // specific daemon events occur (budget exhausted, security alerts,
@@ -77,40 +67,18 @@ type EventEmitterAdapter interface {
 	Unsubscribe(ch chan *http.NotificationEvent)
 }
 
-// NewNotificationBot creates a notification bot with the given config and emitter.
-func NewNotificationBot(cfg NotificationBotConfig, emitter EventEmitterAdapter, logger *slog.Logger) (*NotificationBot, error) {
-	if cfg.RateLimitPerHour <= 0 {
-		cfg.RateLimitPerHour = 60
-	}
-	if logger == nil {
-		logger = slog.Default()
-	}
 
-	nb := &NotificationBot{
-		config:     cfg,
-		emitter:    emitter,
-		logger:     logger,
-		rateWindow: make([]time.Time, 0),
-	}
 
-	// Create a dedicated Telegram bot for sending notifications (outbound only).
-	if cfg.Enabled && len(cfg.TelegramChatIDs) > 0 && cfg.TelegramToken != "" {
-		tgHandler := func(ctx context.Context, msg *telegram.Message) (string, error) {
-			// The notification bot doesn't respond to incoming messages.
-			return "", nil
-		}
-		tgBot, err := telegram.NewBot(telegram.BotConfig{
-			Token:       cfg.TelegramToken,
-			PollTimeout: cfg.TelegramPollTimeout,
-		}, tgHandler, logger)
-		if err != nil {
-			return nil, fmt.Errorf("create telegram notification bot: %w", err)
-		}
-		nb.telegram = tgBot
-	}
 
-	return nb, nil
-}
+
+
+
+
+
+
+
+
+
 
 // Start begins listening for notification events.
 func (nb *NotificationBot) Start(ctx context.Context) {
@@ -244,17 +212,6 @@ func (nb *NotificationBot) mapEventToTrigger(event *http.NotificationEvent) Noti
 	}
 }
 
-// containsKeyword checks if a string contains any of the given keywords (case-insensitive).
-func containsKeyword(s string, keywords ...string) bool {
-	lower := strings.ToLower(s)
-	for _, kw := range keywords {
-		if strings.Contains(lower, strings.ToLower(kw)) {
-			return true
-		}
-	}
-	return false
-}
-
 // shouldNotify checks whether this trigger type is configured for notification.
 func (nb *NotificationBot) shouldNotify(trigger NotificationTriggerType) bool {
 	return slices.Contains(nb.config.NotifyOn, string(trigger))
@@ -352,4 +309,15 @@ func applyTemplate(tmpl string, event *http.NotificationEvent, trigger Notificat
 	result = strings.ReplaceAll(result, "{{AgentID}}", event.AgentID)
 	result = strings.ReplaceAll(result, "{{Timestamp}}", event.Timestamp)
 	return result
+}
+
+// containsKeyword checks if a string contains any of the given keywords (case-insensitive).
+func containsKeyword(s string, keywords ...string) bool {
+	lower := strings.ToLower(s)
+	for _, kw := range keywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			return true
+		}
+	}
+	return false
 }

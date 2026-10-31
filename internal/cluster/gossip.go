@@ -187,12 +187,6 @@ func NewGossipEngine(cfg *Config, localNode string, msgBus *bus.MessageBus, logg
 	return g
 }
 
-// WithDatabase sets the database handle on the gossip engine.
-func WithDatabase(db *sql.DB) GossipOption {
-	return func(g *GossipEngine) {
-		g.db = db
-	}
-}
 
 // WithSigningKey sets the ed25519 signing key pair on the gossip engine.
 func WithSigningKey(priv ed25519.PrivateKey, pub ed25519.PublicKey) GossipOption {
@@ -216,16 +210,6 @@ func WithMembersProvider(mp MembersProvider) GossipOption {
 	}
 }
 
-// WithMetrics attaches a Metrics counters struct to the engine for
-// observability (Task 4.8). Every metric call is nil-safe, so callers may
-// pass a freshly-constructed NewMetrics() without further setup.
-func WithMetrics(m *Metrics) GossipOption {
-	return func(g *GossipEngine) {
-		if m != nil {
-			g.metrics = m
-		}
-	}
-}
 
 // SetMetrics sets the gossip-engine observability counters on an
 // already-constructed engine. Nil values are ignored per CLAUDE.md
@@ -247,18 +231,6 @@ func (g *GossipEngine) Metrics() *Metrics {
 	return g.metrics
 }
 
-// WithConflictResolver attaches a ConflictResolver to the engine. The
-// resolver is consulted by registered GossipHandlers when an incoming
-// event targets a resource that already exists locally (e.g. same memory
-// ID arriving from two different peer nodes). If not set, the engine
-// falls back to first-writer-wins via INSERT OR IGNORE / REPLACE.
-func WithConflictResolver(r *ConflictResolver) GossipOption {
-	return func(g *GossipEngine) {
-		if r != nil {
-			g.conflictResolver = r
-		}
-	}
-}
 
 // SetConflictResolver sets the conflict resolver on an already-constructed
 // engine. Nil values are ignored to preserve the nil-guard guarantee.
@@ -931,5 +903,23 @@ func (g *GossipEngine) emitToHandlers(event *models.ClusterEvent, sourceNode str
 					"event_id", event.EventID, "err", err)
 			}
 		}()
+	}
+}
+
+// WithMetrics attaches a Metrics counters struct to the engine for
+// observability (Task 4.8). Every metric call is nil-safe, so callers may
+// pass a freshly-constructed NewMetrics() without further setup.
+func WithMetrics(m *Metrics) GossipOption {
+	return func(g *GossipEngine) {
+		if m != nil {
+			g.metrics = m
+		}
+	}
+}
+
+// WithDatabase sets the database handle on the gossip engine.
+func WithDatabase(db *sql.DB) GossipOption {
+	return func(g *GossipEngine) {
+		g.db = db
 	}
 }

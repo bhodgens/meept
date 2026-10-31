@@ -72,6 +72,23 @@ type Compactor struct {
 	mu  sync.RWMutex
 }
 
+
+
+
+
+
+
+
+// -----------------------------------------------------------------------
+// Private helpers
+// -----------------------------------------------------------------------
+
+
+
+
+
+
+
 // NewCompactor creates a compactor with the given configuration. Zero
 // values in the config are replaced by the documented defaults.
 func NewCompactor(cfg CompactionConfig) *Compactor {
@@ -87,11 +104,37 @@ func NewCompactor(cfg CompactionConfig) *Compactor {
 	return &Compactor{cfg: cfg}
 }
 
-// Config returns a copy of the compactor's configuration.
-func (c *Compactor) Config() CompactionConfig {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.cfg
+// summarizeWithLLM asks the LLM for a one-paragraph summary of turns.
+func summarizeWithLLM(ctx context.Context, chatter llm.Chatter, turns []TurnRecord) (string, error) {
+	var lines []string
+	for _, t := range turns {
+		line := fmt.Sprintf("  [%s]", t.Type)
+		if t.ToolName != "" {
+			line += " tool=" + t.ToolName
+		}
+		snippet := t.Content
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		if snippet != "" {
+			line += " content=" + snippet
+		}
+		lines = append(lines, line)
+	}
+
+	prompt := "Summarize these agent turns into one concise paragraph:\n" + strings.Join(lines, "\n")
+
+	resp, err := chatter.Chat(ctx, []llm.ChatMessage{
+		{Role: llm.RoleSystem, Content: "You are a memory compaction assistant. Return only a short paragraph."},
+		{Role: llm.RoleUser, Content: prompt},
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp == nil || resp.Content == "" {
+		return "", fmt.Errorf("empty LLM response")
+	}
+	return strings.TrimSpace(resp.Content), nil
 }
 
 // Compact runs the full compaction pipeline on the given turns and returns
@@ -158,19 +201,6 @@ func (c *Compactor) Compact(ctx context.Context, turns []TurnRecord) (*Compactio
 	return result, final
 }
 
-// copyTurns returns a shallow copy of the slice.
-func copyTurns(src []TurnRecord) []TurnRecord {
-	out := make([]TurnRecord, len(src))
-	copy(out, src)
-	return out
-}
-
-// CompactTurns is a convenience wrapper: compacts turns and returns only the list.
-func (c *Compactor) CompactTurns(turns []TurnRecord) []TurnRecord {
-	_, result := c.Compact(context.Background(), turns)
-	return result
-}
-
 // CompactToolCalls removes duplicate tool calls, keeping only the first
 // occurrence of each (ToolName, Arguments) pair.
 func (c *Compactor) CompactToolCalls(calls []ToolCall) []ToolCall {
@@ -185,6 +215,13 @@ func (c *Compactor) CompactToolCalls(calls []ToolCall) []ToolCall {
 		out = append(out, tc)
 	}
 	return out
+}
+
+// Config returns a copy of the compactor's configuration.
+func (c *Compactor) Config() CompactionConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cfg
 }
 
 // GenerateSummary returns a human-readable summary of the given turns.
@@ -203,9 +240,12 @@ func (c *Compactor) GenerateSummary(ctx context.Context, turns []TurnRecord) str
 	return heuristicSummary(turns)
 }
 
-// -----------------------------------------------------------------------
-// Private helpers
-// -----------------------------------------------------------------------
+// copyTurns returns a shallow copy of the slice.
+func copyTurns(src []TurnRecord) []TurnRecord {
+	out := make([]TurnRecord, len(src))
+	copy(out, src)
+	return out
+}
 
 // mergePairs collapses tool + observation pairs into a single turn.
 func mergePairs(turns []TurnRecord) []TurnRecord {
@@ -252,13 +292,6 @@ func dedupObservations(turns []TurnRecord) []TurnRecord {
 	return out
 }
 
-func trimmedCalls(calls []ToolCall, max int) []ToolCall {
-	if len(calls) <= max {
-		return calls
-	}
-	return calls[:max]
-}
-
 // summarizeMiddle replaces the middle of a large compacted region with a
 // summary TurnRecord.
 func summarizeMiddle(ctx context.Context, turns []TurnRecord, comp *Compactor) []TurnRecord {
@@ -285,39 +318,6 @@ func summarizeMiddle(ctx context.Context, turns []TurnRecord, comp *Compactor) [
 	result = append(result, summaryTurn)
 	result = append(result, footer...)
 	return result
-}
-
-// summarizeWithLLM asks the LLM for a one-paragraph summary of turns.
-func summarizeWithLLM(ctx context.Context, chatter llm.Chatter, turns []TurnRecord) (string, error) {
-	var lines []string
-	for _, t := range turns {
-		line := fmt.Sprintf("  [%s]", t.Type)
-		if t.ToolName != "" {
-			line += " tool=" + t.ToolName
-		}
-		snippet := t.Content
-		if len(snippet) > 200 {
-			snippet = snippet[:200]
-		}
-		if snippet != "" {
-			line += " content=" + snippet
-		}
-		lines = append(lines, line)
-	}
-
-	prompt := "Summarize these agent turns into one concise paragraph:\n" + strings.Join(lines, "\n")
-
-	resp, err := chatter.Chat(ctx, []llm.ChatMessage{
-		{Role: llm.RoleSystem, Content: "You are a memory compaction assistant. Return only a short paragraph."},
-		{Role: llm.RoleUser, Content: prompt},
-	})
-	if err != nil {
-		return "", err
-	}
-	if resp == nil || resp.Content == "" {
-		return "", fmt.Errorf("empty LLM response")
-	}
-	return strings.TrimSpace(resp.Content), nil
 }
 
 // heuristicSummary builds a summary without calling any external service.
@@ -354,4 +354,17 @@ func heuristicSummary(turns []TurnRecord) string {
 	parts = append(parts, samples...)
 
 	return "Compacted: " + strings.Join(parts, " | ")
+}
+
+func trimmedCalls(calls []ToolCall, max int) []ToolCall {
+	if len(calls) <= max {
+		return calls
+	}
+	return calls[:max]
+}
+
+// CompactTurns is a convenience wrapper: compacts turns and returns only the list.
+func (c *Compactor) CompactTurns(turns []TurnRecord) []TurnRecord {
+	_, result := c.Compact(context.Background(), turns)
+	return result
 }
