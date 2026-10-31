@@ -354,7 +354,7 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-e2e-agent-groups.md | PENDING | 0 | |
+| 00T-e2e-agent-groups.md | TESTS_VALIDATED | 1 | 6479ccaf: 9 RED + F5 manifest-deferred (#70 dep) + F10 dated skip; F4 RED witnessed in-session. Manifest shared-write clobber repaired in 4d7706cf (dedupe github-intake, activity-views allowlist - sibling owns its scenarios). Subagent left untracked e2e/suites/zz-cigate-sabotage/ (self-documented negative-witness, never registered) - owner should delete. |
 | 01-permissions/orchestrator.md | PENDING | 0 | |
 | 02-groups-model.md | PENDING | 0 | |
 | 03-membership/orchestrator.md | PENDING | 0 | |
