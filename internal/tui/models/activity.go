@@ -501,7 +501,8 @@ func (m *ActivityModel) Update(msg tea.Msg) tea.Cmd {
 }
 
 // refreshRows rebuilds the table rows from the caches. In tail mode the
-// recent page IS the table (newest first); otherwise the query page renders
+// recent page IS the table (chronological, oldest first, tail -f style);
+// otherwise the query page renders
 // with group headers in task/plan modes. Both paths go through
 // tableutil.SetRows (row length == column count).
 func (m *ActivityModel) refreshRows() {

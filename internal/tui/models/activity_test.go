@@ -304,28 +304,35 @@ func TestActivityModel_TailToggleAndTick(t *testing.T) {
 	}
 }
 
-func TestActivityModel_TailMergeNewestFirst(t *testing.T) {
+// TestActivityModel_TailRendersChronologicalTail: the daemon's
+// activity.recent returns records in insertion order (oldest first,
+// tail -f style, pinned by activity_views_test.go:480). The tail table
+// appends rows in wire order so the newest event renders at the BOTTOM.
+func TestActivityModel_TailRendersChronologicalTail(t *testing.T) {
 	m, fake := newTestActivityModel()
 	press(m, "t")
 
+	// First poll: one event.
 	fake.recentResult = []ActivityRecordJSON{rec("bus_event", "2026-10-30T10:00:00Z", "e", "t1", "", "", "", "one")}
 	m.Update(m.Update(ActivityTickMsg{})())
 
-	fake.recentResult = append([]ActivityRecordJSON{
+	// Second poll: full page in WIRE ORDER (oldest first, newest last).
+	fake.recentResult = []ActivityRecordJSON{
+		rec("bus_event", "2026-10-30T09:00:00Z", "e", "t0", "", "", "", "zero"),
+		rec("bus_event", "2026-10-30T10:00:00Z", "e", "t1", "", "", "", "one"),
 		rec("bus_event", "2026-10-30T10:03:00Z", "e", "t2", "", "", "", "three"),
-	}, fake.recentResult...)
-	fake.recentResult = append(fake.recentResult, rec("bus_event", "2026-10-30T09:00:00Z", "e", "t0", "", "", "", "zero"))
+	}
 	m.Update(m.Update(ActivityTickMsg{})())
 
 	rows := m.table.Rows()
 	if len(rows) != 3 {
 		t.Fatalf("expected 3 rows after merge, got %d", len(rows))
 	}
-	if !strings.Contains(rows[0][2], "three") {
-		t.Fatalf("expected newest row first, got %+v", rows[0])
+	if !strings.Contains(rows[2][2], "three") {
+		t.Fatalf("expected newest row LAST (tail -f), got %+v as last", rows[2])
 	}
-	if !strings.Contains(rows[2][2], "zero") {
-		t.Fatalf("expected oldest row last, got %+v", rows[2])
+	if !strings.Contains(rows[0][2], "zero") {
+		t.Fatalf("expected oldest row first, got %+v as first", rows[0])
 	}
 }
 
