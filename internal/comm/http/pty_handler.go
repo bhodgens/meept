@@ -328,14 +328,18 @@ var dangerousEnvKeys = map[string]struct{}{
 	"RUBYOPT":               {},
 }
 
-// rejectDangerousEnvKey reports an error when the env key is empty (a "K=V"
-// pair with no key is malformed and would produce a bogus "K=V" assignment)
-// or is a loader-interposition / interpreter-redirection key.
+// rejectDangerousEnvKey reports an error when the env key is empty or
+// whitespace-only (a "K=V" pair with no/whitespace key is malformed and would
+// produce a bogus "K=V" assignment) or is a loader-interposition /
+// interpreter-redirection key. We trim whitespace before the blocklist lookup
+// so that "   " (spaces) is rejected rather than passing through because
+// strings.ToUpper("   ") == "   " is not in the blocklist.
 func rejectDangerousEnvKey(key string) error {
-	if key == "" {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" {
 		return fmt.Errorf("env key must not be empty")
 	}
-	if _, blocked := dangerousEnvKeys[strings.ToUpper(key)]; blocked {
+	if _, blocked := dangerousEnvKeys[strings.ToUpper(trimmed)]; blocked {
 		return fmt.Errorf("environment variable %s is not allowed", key)
 	}
 	return nil

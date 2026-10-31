@@ -136,6 +136,10 @@ func TestFenceCommandString(t *testing.T) {
 	if got := fenceCommandString("grep", []string{"-n", "foo", "/etc/passwd"}); got != "grep -n foo /etc/passwd" {
 		t.Fatalf("args fold: got %q", got)
 	}
+	// L2: prove that ../ traversal in args is folded into the fenced string.
+	if got := fenceCommandString("cat", []string{"../../etc/passwd"}); got != "cat ../../etc/passwd" {
+		t.Fatalf("argv with ../: got %q", got)
+	}
 }
 
 // TestFenceCommandString_FenceSeesArgs proves the fold actually changes the
@@ -153,6 +157,10 @@ func TestFenceCommandString_FenceSeesArgs(t *testing.T) {
 	// Folded in the out-of-root argv -> fence must reject.
 	if err := fc.CheckCommand(fenceCommandString("cat", []string{outside}), root); err == nil {
 		t.Fatal("fence should reject a cat of an out-of-root path in args")
+	}
+	// L2: verify ../ traversal in args is also rejected.
+	if err := fc.CheckCommand(fenceCommandString("cat", []string{"../../etc/passwd"}), root); err == nil {
+		t.Fatal("fence should reject ../ traversal in args")
 	}
 }
 
@@ -197,9 +205,15 @@ func TestPTYHandler_RejectDangerousEnvKey(t *testing.T) {
 
 // TestRejectDangerousEnvKey pins the key-denylist + empty-key rule directly.
 func TestRejectDangerousEnvKey(t *testing.T) {
-	for _, k := range []string{"LD_PRELOAD", "ld_preload", "DYLD_INSERT_LIBRARIES", "NODE_OPTIONS", ""} {
+	for _, k := range []string{"LD_PRELOAD", "ld_preload", "DYLD_INSERT_LIBRARIES", "NODE_OPTIONS", "", "   ", "	"} {
 		if err := rejectDangerousEnvKey(k); err == nil {
 			t.Errorf("rejectDangerousEnvKey(%q) = nil, want error", k)
+		}
+	}
+	// Padded LD_PRELOAD variant (L2): the key itself is whitespace-padded.
+	for _, k := range []string{" LD_PRELOAD", "LD_PRELOAD ", " 	LD_PRELOAD	 "} {
+		if err := rejectDangerousEnvKey(k); err == nil {
+			t.Errorf("rejectDangerousEnvKey(%q) = nil, want error (padded key)", k)
 		}
 	}
 	for _, k := range []string{"PATH", "HOME", "TERM"} {
