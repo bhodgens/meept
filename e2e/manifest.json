@@ -3204,6 +3204,47 @@
     "internal/rpc/",
     "internal/services/"
    ]
+  },
+  {
+   "id": "activity-views-01",
+   "suite": "activity-views",
+   "diff": "M",
+   "title": "boot log arms the activity RPC surface; activity.query limit=1 returns the chronologically earliest seeded step",
+   "paths": [
+    "internal/activity/aggregator.go",
+    "internal/daemon/activity_rpc.go"
+   ]
+  },
+  {
+   "id": "activity-views-02",
+   "suite": "activity-views",
+   "diff": "M",
+   "title": "activity.query sort modes chrono/task/plan and task_id/plan_id/agent_id/kinds filters return the expected order over the wire",
+   "paths": [
+    "internal/activity/aggregator.go",
+    "internal/daemon/activity_rpc.go"
+   ]
+  },
+  {
+   "id": "activity-views-03",
+   "suite": "activity-views",
+   "diff": "M",
+   "title": "activity.recent live ring reflects bus events in insertion order (oldest first) with a live dropped counter",
+   "paths": [
+    "internal/activity/ring.go",
+    "internal/activity/busbridge.go",
+    "internal/daemon/activity_wiring.go"
+   ]
+  },
+  {
+   "id": "activity-views-04",
+   "suite": "activity-views",
+   "diff": "M",
+   "title": "activity.overview per-agent drift rollup, activity.findings, and agents.review agree on seeded employees",
+   "paths": [
+    "internal/daemon/activity_rpc.go",
+    "internal/employee/manager.go"
+   ]
   }
  ]
 }
