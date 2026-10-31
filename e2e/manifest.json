@@ -107,6 +107,9 @@
   "internal/auditlog/": [
    "audit-chain"
   ],
+  "internal/activity/": [
+   "smoke"
+  ],
   "internal/effects/": [
    "effects-ledger"
   ],
