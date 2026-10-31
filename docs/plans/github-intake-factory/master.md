@@ -358,8 +358,8 @@ After all children REVIEWED:
 |-------|--------|------------|-------------|
 | 00T-gate-tests.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_13f09d75) |
 | 01-poller.md | PENDING | 0 | |
-| 02-linkage.md | PENDING | 0 | |
-| 03-writeback.md | PENDING | 0 | |
+| 02-linkage.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_65b5790b wave B) |
+| 03-writeback.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_65b5790b wave B) |
 | 04-config.md | PENDING | 0 | |
 | 05-wiring-e2e.md | PENDING | 0 | |
 

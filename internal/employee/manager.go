@@ -2019,6 +2019,20 @@ func (m *Manager) CreateGoal(ctx context.Context, spec GoalSpec) (*Goal, error) 
 	return g, nil
 }
 
+// UpdateGoal persists changes to an existing goal (mandate, state,
+// health) via the goal store. Nil-goalStore degrades to ErrNotImplemented
+// (same posture as CreateGoal). The github-intake-factory tree's
+// GoalCreator seam requires it for re-dispatch (leaf 02).
+func (m *Manager) UpdateGoal(ctx context.Context, goal *Goal) error {
+	if m.goalStore == nil {
+		return ErrNotImplemented
+	}
+	if err := m.goalStore.Update(ctx, goal); err != nil {
+		return fmt.Errorf("update goal: %w", err)
+	}
+	return nil
+}
+
 // ListGoals lists goals, optionally filtered by employee_id. Empty
 // employeeID returns all goals across all employees.
 func (m *Manager) ListGoals(ctx context.Context, employeeID string) ([]*Goal, error) {
