@@ -254,10 +254,10 @@ Deferred: none. Silent omission is a defect.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 01-aggregator | REVIEWED | 1 | Committed 36f4211a 2026-10-31. In-session review: C1 byte-identical (gold JSON test), 12 tests green + -race clean, read-only verified, no internal/plan import. Deviations all pre-approved addenda. Plan-stamp note: resolver stamps batch-carried + queried planIDs (leaf 02 passes resolver; overview relies on Query.PlanID). |
-| 02-rpc | PENDING | 0 | Blocked on 01+05 REVIEWED. |
+| 02-rpc | REVIEWED | 1 | Committed 7829a857 2026-10-31. In-session review: all 5 methods registered, nil-guarded, -race green in overlay; findings since/resolved/offset enforced in-closure (Manager limits documented). Deviation accepted: agents.review as direct closure. |
 | 03-tui | PENDING | 0 | Blocked on 02 REVIEWED. |
 | 04-gui | PENDING | 0 | Serialized AFTER 03 so the shared gui_inventory.json entry already exists (one-writer-per-file). |
-| 05-ring | PENDING | 0 | Blocked on 01 REVIEWED (consumes C1). |
+| 05-ring | REVIEWED | 1 | Salvaged+committed 7829a857 2026-10-31 (writer session went silent mid-flight - ghost class; files verified sound: ring logic correct, busbridge self-corrected to package-level SubscribeT, topics match real publishers). Tail order = newest-FIRST; C3 doc comment stale - wire order pinned here and in leaf 03 dispatch. |
 | 06-e2e-suite | PENDING | 0 | Blocked on 02 REVIEWED. |
 | 07-langfuse-sink | REVIEWED | 1 | Committed 1510efc1 2026-10-31. In-session review: default-OFF inert proven, bus-driven producers (no sync loop hook), circuit+drop counters, config in new otlp_traces.go; schema.go staged with ONLY the OTLPTraces field (intake hunks left to sibling). Producer split (bus decode in daemon wiring) pre-approved cycle-avoidance. |
 
