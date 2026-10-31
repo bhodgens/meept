@@ -88,7 +88,7 @@ func (h *ClusterHandler) handleStatus(_ context.Context, params json.RawMessage)
 	}
 
 	if h.clusterMQ != nil {
-		stats, err := h.clusterMQ.Stats(context.Background())
+		stats, err := h.clusterMQ.ClusterStats(context.Background())
 		if err == nil {
 			resp.Claims = stats.LocalClaims
 			resp.ClusterNode = stats.LocalNode

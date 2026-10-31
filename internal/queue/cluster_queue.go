@@ -28,6 +28,9 @@ type ClusterQueue struct {
 	claimed   map[string]*ClaimRecord
 	stopCh    chan struct{}
 	closeOnce sync.Once
+	// sweepStarted guards StartReclaimSweeper against double-start.
+	// Guarded by mu. NOT reset by Close: one sweeper per queue lifetime.
+	sweepStarted bool
 }
 
 // attemptCompleter is the optional queue surface for attempt-scoped completion
@@ -464,8 +467,12 @@ func (cq *ClusterQueue) ReclaimIfStale(ctx context.Context) []*Job {
 	return reclaiming
 }
 
-// Stats returns cluster-queue statistics.
-func (cq *ClusterQueue) Stats(ctx context.Context) (*ClusterQueueStats, error) {
+// ClusterStats returns cluster-queue statistics (local claim count + node
+// ID). Named to avoid shadowing the embedded Queue.Stats: shadowing it with
+// a different return type made ClusterQueue fail the queue.Queue assertion
+// silently, which blocked the worker pool from ever adopting claim
+// semantics (the documented reason _ Queue was "deliberately not asserted").
+func (cq *ClusterQueue) ClusterStats(ctx context.Context) (*ClusterQueueStats, error) {
 	cq.mu.RLock()
 	defer cq.mu.RUnlock()
 
@@ -481,15 +488,72 @@ func (cq *ClusterQueue) Stats(ctx context.Context) (*ClusterQueueStats, error) {
 // silently degrade cluster mode to poll-only wake-up with nothing failing
 // (audit M2).
 //
-// _ Queue is deliberately NOT asserted: ClusterQueue.Stats returns
-// *ClusterQueueStats and shadows the embedded Queue.Stats, so ClusterQueue is
-// not, and was never, a drop-in Queue. Pre-existing, outside this change's
-// scope; recorded here so nobody re-adds the assertion and thinks it passes.
+// Stats satisfies the embedded queue.Queue contract by forwarding to the
+// wrapped queue (QueueStats shape). The cluster-specific counters live on
+// ClusterStats above.
+func (cq *ClusterQueue) Stats(ctx context.Context) (*QueueStats, error) {
+	return cq.Queue.Stats(ctx)
+}
+
+// ClusterQueue is a drop-in queue.Queue as of the claim-path wiring: the
+// shadowing Stats signature that broke the assertion was renamed
+// ClusterStats, and Stats forwards to the wrapped queue. The worker pool
+// consumes ClusterQueue claims through this interface.
 var (
+	_ Queue            = (*ClusterQueue)(nil)
 	_ WakeNotifier     = (*ClusterQueue)(nil)
 	_ attemptCompleter = (*ClusterQueue)(nil)
 	_ AttemptCompleter = (*ClusterQueue)(nil)
 )
+
+// StartReclaimSweeper launches the stale-claim reclamation loop: every tick
+// it reclaims locally-tracked claims whose timeout expired (worker crash
+// between Claim and Complete/Fail). Interval = DefaultClaimTimeout (the
+// heartbeat cadence of live workers), clamped to [1s, 60s]. Idempotent: a
+// second call while one is running is a no-op. Stopped by Close.
+func (cq *ClusterQueue) StartReclaimSweeper() {
+	cq.mu.Lock()
+	if cq.stopCh == nil {
+		cq.mu.Unlock()
+		return
+	}
+	select {
+	case <-cq.stopCh:
+		cq.mu.Unlock()
+		return
+	default:
+	}
+	if cq.sweepStarted {
+		cq.mu.Unlock()
+		return
+	}
+	cq.sweepStarted = true
+	cq.mu.Unlock()
+
+	interval := cq.cfg.DefaultClaimTimeout
+	if interval <= 0 {
+		interval = time.Second
+	}
+	if interval > time.Minute {
+		interval = time.Minute
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-cq.stopCh:
+				return
+			case <-ticker.C:
+				reclaimed := cq.ReclaimIfStale(context.Background())
+				if len(reclaimed) > 0 {
+					cq.logger.Info("cluster_queue: reclaimed stale claims",
+						"count", len(reclaimed))
+				}
+			}
+		}
+	}()
+}
 
 // Close releases resources held by the cluster queue. It is safe to call
 // multiple times; only the first call closes the stop channel.

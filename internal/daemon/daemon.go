@@ -576,6 +576,19 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if clusterMQ != nil {
 		if components != nil {
 			components.ClusterQueue = clusterMQ
+			// Move the worker pool onto the ClusterQueue so job claims
+			// carry cluster claim bookkeeping (heartbeat timeout, stale
+			// reclaim, gossip replication). The pool was created in
+			// NewComponents against the raw PersistentQueue; the swap
+			// only affects future claims (see Pool.SetQueue). No-op
+			// when the pool never came up.
+			if components.WorkerPool != nil {
+				components.WorkerPool.SetQueue(clusterMQ)
+				// Reclaim locally-tracked claims whose worker died
+				// between Claim and Complete/Fail (stale-claim sweep).
+				clusterMQ.StartReclaimSweeper()
+				logger.Info("worker pool queue swapped to ClusterQueue (cluster claim semantics active)")
+			}
 		}
 	}
 

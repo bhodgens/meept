@@ -2841,9 +2841,9 @@ internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.rejectDispa
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetAgentInvoker
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetBusPublisher
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetMetrics
-internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetPeerSigningKey
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetRequireDispatchSignatures
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetResourceManager
+internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetSigningKeyLookup
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetWorkspaceManager
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.snapshotWorkspace
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SubmitJob
@@ -6809,6 +6809,7 @@ internal/pty/session.go unreachable func: startPTY
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.CheckNodeReachability
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.Claim
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.Close
+internal/queue/cluster_queue.go unreachable func: ClusterQueue.ClusterStats
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.Complete
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.CompleteAttempt
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.CompletionIsFresh
@@ -6819,6 +6820,7 @@ internal/queue/cluster_queue.go unreachable func: ClusterQueue.IsClaimed
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.ReclaimIfStale
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.ReclaimJob
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.reclaimJobUnlocked
+internal/queue/cluster_queue.go unreachable func: ClusterQueue.StartReclaimSweeper
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.Stats
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.WakeWaiter
 internal/queue/cluster_queue.go unreachable func: ClusterQueue.WithMessageBus
@@ -12038,6 +12040,7 @@ internal/validator/web.go unreachable func: parseStatusValue
 internal/validator/web.go unreachable func: WebValidator.Validate
 internal/validator/web.go unreachable func: WebValidator.validateAPIResponse
 internal/validator/web.go unreachable func: WebValidator.ValidateEvidence
+internal/worker/pool_setqueue.go unreachable func: Pool.SetQueue
 internal/worker/pool.go unreachable func: Handler.handleAdd
 internal/worker/pool.go unreachable func: Handler.handleList
 internal/worker/pool.go unreachable func: Handler.handleMessage
