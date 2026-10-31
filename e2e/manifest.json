@@ -119,7 +119,8 @@
   "internal/config/": [
    "config-home",
    "config-models",
-   "config-reload"
+   "config-reload",
+   "github-intake"
   ],
   "internal/daemon/": [
    "daemon-lifecycle",
@@ -322,6 +323,12 @@
   ],
   "internal/tools/builtin/": [
    "github-pr-ci"
+  ],
+  "internal/intake/": [
+   "github-intake"
+  ],
+  "e2e/suites/github-intake": [
+   "github-intake"
   ]
  },
  "suites": [
@@ -651,6 +658,11 @@
   {
    "name": "runtime-hang",
    "dir": "e2e/suites/runtime-hang",
+   "status": "implemented"
+  },
+  {
+   "name": "github-intake",
+   "dir": "e2e/suites/github-intake",
    "status": "implemented"
   },
   {
@@ -2961,6 +2973,61 @@
     "internal/daemon/github_wiring.go",
     "internal/daemon/instruction_wiring.go",
     "e2e/suites/github-pr-ci/main_test.go"
+   ]
+  },
+  {
+   "id": "github-intake-01",
+   "suite": "github-intake",
+   "diff": "M",
+   "title": "intake-create-wait: [intake]-enabled daemon polls the fake GitHub, the labeled issue becomes a goal with source=trigger and trigger_ref intake:octo/forge#42, and the fake saw the issues GET",
+   "paths": [
+    "internal/intake/poller.go",
+    "internal/intake/linkage.go",
+    "internal/daemon/components.go",
+    "e2e/suites/github-intake/main_test.go"
+   ]
+  },
+  {
+   "id": "github-intake-02",
+   "suite": "github-intake",
+   "diff": "S",
+   "title": "intake-dedup: a second poll cycle with the unchanged issue leaves the goal count at exactly 1 (effects-ledger dedup, no duplicate goal)",
+   "paths": [
+    "internal/intake/linkage.go",
+    "internal/effects/effects.go",
+    "e2e/suites/github-intake/main_test.go"
+   ]
+  },
+  {
+   "id": "github-intake-03",
+   "suite": "github-intake",
+   "diff": "M",
+   "title": "intake-redispatch: a changed issue body between polls updates the existing goal's mandate in place; still exactly one goal",
+   "paths": [
+    "internal/intake/linkage.go",
+    "e2e/suites/github-intake/main_test.go"
+   ]
+  },
+  {
+   "id": "github-intake-04",
+   "suite": "github-intake",
+   "diff": "M",
+   "title": "intake-writeback: a goal reaching healthy lands exactly one comments POST + one labels POST (factory:done) on the ticket; a repeat healthy cycle adds no second comments POST (no storm)",
+   "paths": [
+    "internal/intake/writeback.go",
+    "internal/employee/goal_loop.go",
+    "e2e/suites/github-intake/main_test.go"
+   ]
+  },
+  {
+   "id": "github-intake-05",
+   "suite": "github-intake",
+   "diff": "S",
+   "title": "intake-disabled: no [intake] block -> no poll activity at all (fake issues-GET counter stays at zero)",
+   "paths": [
+    "internal/daemon/components.go",
+    "internal/config/schema.go",
+    "e2e/suites/github-intake/main_test.go"
    ]
   }
  ]

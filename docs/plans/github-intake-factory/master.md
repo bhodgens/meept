@@ -356,7 +356,7 @@ After all children REVIEWED:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests.md | PENDING | 0 | |
+| 00T-gate-tests.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_13f09d75) |
 | 01-poller.md | PENDING | 0 | |
 | 02-linkage.md | PENDING | 0 | |
 | 03-writeback.md | PENDING | 0 | |
