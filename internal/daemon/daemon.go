@@ -2085,6 +2085,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 		llmCtx, cancelLlm := context.WithCancel(ctx)
 		go func() {
 			defer cancelLlm() // Ensure cleanup on exit
+			defer func() {
+				if r := recover(); r != nil {
+					d.logger.Error("LLM StartAll goroutine panic recovered", "recovered", r)
+				}
+			}()
 			if err := d.components.ContainerManager.StartAll(llmCtx); err != nil {
 				d.logger.Error("Failed to start LLM runtimes", "error", err)
 			}

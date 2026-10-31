@@ -1255,7 +1255,7 @@ class _ChatInputState extends ConsumerState<ChatInput>
       if (budget is Map) {
         buf.writeln();
         buf.writeln(
-          'budget: within=${budget['within_budget'] ?? '?'} '
+          'budget: within=${budget['within_budget'] ?? '?'} cost=${budget['within_cost_budget'] ?? '?'} '
           'hourly=${budget['hourly_used'] ?? '?'}/${budget['hourly_remaining'] ?? '?'}',
         );
       }

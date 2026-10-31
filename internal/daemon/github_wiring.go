@@ -165,9 +165,17 @@ func (c *Components) startGitHubReArmTicker() {
 		for {
 			select {
 			case <-ticker.C:
-				if err := c.InstructionScheduler.SyncCronInstructions(); err != nil {
-					c.Logger.Debug("github re-arm instruction re-sync", "error", err)
-				}
+				// recover from panic in one tick so a panic cannot kill the daemon
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							c.Logger.Error("github re-arm ticker panic recovered", "recovered", r)
+						}
+					}()
+					if err := c.InstructionScheduler.SyncCronInstructions(); err != nil {
+						c.Logger.Debug("github re-arm instruction re-sync", "error", err)
+					}
+				}()
 			case <-c.ctx.Done():
 				return
 			}
