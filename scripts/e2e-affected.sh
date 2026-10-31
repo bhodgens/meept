@@ -178,19 +178,26 @@ if [ -z "$run_dirs" ] && [ -z "$dart_suites" ]; then
     fi
 fi
 
-# bash-3.2: no arrays — positional params carry the dir args.
-set --
-for d in $run_dirs; do
-    set -- "$@" "./$d/..."
-done
+# bash-3.2: no arrays — iterate $run_dirs directly (the per-suite retry loop
+# below needs one invocation per dir anyway).
 
 if [ -n "$run_dirs" ]; then
     echo "e2e-affected: running hermetic Go e2e suites:"
     for d in $run_dirs; do
         echo "  - $d"
     done
-    go test -tags e2e -count=1 -p 2 "$@"
-    go_rc=$?
+    # One labeled retry per failed suite (e2e-boot-hardening, Contract 2):
+    # load-dependent boot flakes pass on isolated re-run, so the SECOND rc
+    # decides; a suite red twice stays red and the gate still blocks.
+    go_rc=0
+    for d in $run_dirs; do
+        go test -tags e2e -count=1 -p 2 "./$d/..."
+        rc=$?
+        if [ "$rc" != "0" ]; then
+            echo "RETRY(flake-check): $d failed (rc=$rc), re-running once" >&2
+            go test -tags e2e -count=1 -p 2 "./$d/..." || go_rc=$?
+        fi
+    done
 else
     go_rc=0
 fi

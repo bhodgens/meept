@@ -665,6 +665,25 @@ func DaemonPath(t testing.TB) string {
 	return filepath.Join(dir, "meept-daemon")
 }
 
+// e2eBootTimeout returns the daemon boot health-wait budget.
+// MEEPT_E2E_BOOT_TIMEOUT overrides the 120s default (duration string);
+// an unset or unparseable value falls back to the default. The default was
+// raised from 60s after four load-dependent boot-timeout flakes
+// (2026-10-25..27, e2e-boot-hardening tree): healthy boots take 2-20s, the
+// failures clustered at the 60s wall under concurrent machine load.
+func e2eBootTimeout() time.Duration {
+	const def = 120 * time.Second
+	v := strings.TrimSpace(os.Getenv("MEEPT_E2E_BOOT_TIMEOUT"))
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return def
+	}
+	return d
+}
+
 // boot starts the daemon with cwd deliberately different from any project
 // dir (the bash rig's A4 rule) and waits for /health.
 func (d *Daemon) boot() {
@@ -712,7 +731,7 @@ func (d *Daemon) boot() {
 
 	// Wait for HTTP /health (self-signed TLS). The daemon fails fast at
 	// boot on config errors, so poll the process too.
-	deadline := time.Now().Add(60 * time.Second)
+	deadline := time.Now().Add(e2eBootTimeout())
 	client := &http.Client{
 		Timeout: 2 * time.Second,
 		Transport: &http.Transport{
@@ -734,7 +753,7 @@ func (d *Daemon) boot() {
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("harness: daemon not healthy within 60s (%s); log tail:\n%s", healthURL, d.logTail())
+			t.Fatalf("harness: daemon not healthy within %s (%s); log tail:\n%s", e2eBootTimeout(), healthURL, d.logTail())
 		}
 		// A dead daemon never becomes healthy.
 		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
