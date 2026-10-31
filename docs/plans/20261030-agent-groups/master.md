@@ -355,14 +355,14 @@ Output: APPROVED or a list of specific gaps.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 00T-e2e-agent-groups.md | TESTS_VALIDATED | 1 | 6479ccaf: 9 RED + F5 manifest-deferred (#70 dep) + F10 dated skip; F4 RED witnessed in-session. Manifest shared-write clobber repaired in 4d7706cf (dedupe github-intake, activity-views allowlist - sibling owns its scenarios). Subagent left untracked e2e/suites/zz-cigate-sabotage/ (self-documented negative-witness, never registered) - owner should delete. |
-| 01-permissions/orchestrator.md | PENDING | 0 | |
+| 01-permissions/orchestrator.md | IN_PROGRESS | 0 | 00T branch gate TESTS_VALIDATED (d3ea88ea): RED witnessed (10 missing-symbol errors: FenceStage/SetFence/RuleSource). Leaf 01 dispatch next. |
 | 02-groups-model.md | PENDING | 0 | |
 | 03-membership/orchestrator.md | PENDING | 0 | |
 | 04-tool-gates.md | PENDING | 0 | |
-| 05-memory-ceiling.md | PENDING | 0 | |
+| 05-memory-ceiling.md | BLOCKED | 0 | On issue #70 branch 01 (memory scoping) - do not fork primitives. |
 | 06-diagnosis.md | PENDING | 0 | |
 | 07-overrides.md | PENDING | 0 | |
-| 08-cluster-identity.md | PENDING | 0 | |
+| 08-cluster-identity.md | COMPLETE | 1 | 7bd0998b: fail-closed signature gate + default-on flip + docs; F9 GREEN unmodified (ran twice). Deviation flagged: peer-key discovery is a SEAM (SigningKeyLookup) - no production peer-key population path exists yet (gossip only registers the LOCAL key); a key-distribution leaf is needed before two real nodes pass signed dispatches - follow-up issue recommended. Daemon wiring of the opt-out setter intentionally not added (fail-closed default stands). |
 | 09-docs.md | PENDING | 0 | |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
