@@ -253,13 +253,36 @@ Deferred: none. Silent omission is a defect.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-aggregator | PENDING | 0 | |
-| 02-rpc | PENDING | 0 | |
-| 03-tui | PENDING | 0 | |
-| 04-gui | PENDING | 0 | |
-| 05-ring | PENDING | 0 | |
-| 06-e2e-suite | PENDING | 0 | |
-| 07-langfuse-sink | PENDING | 0 | |
+| 01-aggregator | REVIEWED | 1 | Committed 36f4211a 2026-10-31. In-session review: C1 byte-identical (gold JSON test), 12 tests green + -race clean, read-only verified, no internal/plan import. Deviations all pre-approved addenda. Plan-stamp note: resolver stamps batch-carried + queried planIDs (leaf 02 passes resolver; overview relies on Query.PlanID). |
+| 02-rpc | PENDING | 0 | Blocked on 01+05 REVIEWED. |
+| 03-tui | PENDING | 0 | Blocked on 02 REVIEWED. |
+| 04-gui | PENDING | 0 | Serialized AFTER 03 so the shared gui_inventory.json entry already exists (one-writer-per-file). |
+| 05-ring | PENDING | 0 | Blocked on 01 REVIEWED (consumes C1). |
+| 06-e2e-suite | PENDING | 0 | Blocked on 02 REVIEWED. |
+| 07-langfuse-sink | REVIEWED | 1 | Committed 1510efc1 2026-10-31. In-session review: default-OFF inert proven, bus-driven producers (no sync loop hook), circuit+drop counters, config in new otlp_traces.go; schema.go staged with ONLY the OTLPTraces field (intake hunks left to sibling). Producer split (bus decode in daemon wiring) pre-approved cycle-avoidance. |
+
+Dispatch schedule (user constraint: 2 concurrent, raised to 3 on request
+2026-10-31): wave 1 = {01, 07, 05}; wave 2 = {02}; wave 3 = {03, 06};
+wave 4 = {04}. 04 follows 03 because both write the shared
+internal/tui/testdata/gui_inventory.json (one-writer-per-file).
+
+Attempt 1 (2026-10-30 23:31, {01, 07}) FAILED with zero files written.
+Cause was the subagent tool layer, not the task: the host runs
+`ulimit -n 256`, and both children spent 45 minutes on terminal calls that
+timed out at 420s plus `write_file` failures with
+`[Errno 35] Resource temporarily unavailable`; one also hit
+`search_files: Content search requires ripgrep (rg) or grep`. The
+delegation owner exited before recording a terminal result. Verified
+afterwards: no internal/activity/, no internal/metrics/otlp_trace*, no
+ActivityRecord symbol anywhere — nothing to salvage, `go build ./...` clean.
+Attempt 2 (2026-10-31) re-dispatched {01, 07} plus 05, with per-leaf briefs
+that add: batch terminal calls (<25 per leaf), short test commands, a
+retry-once-then-switch-tool rule, and strict file-ownership lists.
+05 is dispatched as a CONTRACT-FROZEN leaf: it authors ring.go/busbridge.go
+verbatim against C1 without defining ActivityRecord, so it can run beside 01
+(RED-BUILD-BLOCKED until 01 lands is the expected state, not a failure).
+05's task T3 (daemon wiring in components.go) is MOVED to leaf 02's wiring
+task so only one agent ever edits internal/daemon/components.go.
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -321,6 +344,13 @@ dispatched leaf document mid-execution.
 
 ## Notes
 
+- Baseline (2026-10-30, before any dispatch): `go build ./...` clean. Scoped
+  test baseline `go test -p 2 -count=1 ./internal/{task,session,auditlog,
+  employee,metrics,config,daemon,tui,comm/http}` = all green except
+  `internal/tui` `TestACPModal_ResolvedToastCarriesApprover`
+  (modal_flows_test.go:295 "resolved frame did not toast"), which passed on
+  an isolated `-count=2` re-run: a pre-existing flake, not tree-caused.
+  Attribute any NEW failure in those packages to this tree.
 - Survey facts (2026-10-30, file:line) are inlined in each leaf's Verified
   Anchors; re-grep before editing - siblings move lines.
 - The drift RPC is net-new: `Manager.Review` (internal/employee/manager.go:2220)
