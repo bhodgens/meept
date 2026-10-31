@@ -187,7 +187,6 @@ func NewGossipEngine(cfg *Config, localNode string, msgBus *bus.MessageBus, logg
 	return g
 }
 
-
 // WithSigningKey sets the ed25519 signing key pair on the gossip engine.
 func WithSigningKey(priv ed25519.PrivateKey, pub ed25519.PublicKey) GossipOption {
 	return func(g *GossipEngine) {
@@ -210,7 +209,6 @@ func WithMembersProvider(mp MembersProvider) GossipOption {
 	}
 }
 
-
 // SetMetrics sets the gossip-engine observability counters on an
 // already-constructed engine. Nil values are ignored per CLAUDE.md
 // nil-guard convention.
@@ -230,7 +228,6 @@ func (g *GossipEngine) Metrics() *Metrics {
 	defer g.mu.RUnlock()
 	return g.metrics
 }
-
 
 // SetConflictResolver sets the conflict resolver on an already-constructed
 // engine. Nil values are ignored to preserve the nil-guard guarantee.
@@ -306,9 +303,10 @@ func (g *GossipEngine) getVC() map[string]int64 {
 }
 
 // persistEvent writes a cluster event into the cluster_events table using INSERT OR IGNORE.
-func (g *GossipEngine) persistEvent(event *models.ClusterEvent) {
+// It returns the number of rows affected (1 if inserted, 0 if ignored as duplicate).
+func (g *GossipEngine) persistEvent(event *models.ClusterEvent) int64 {
 	if g.db == nil {
-		return
+		return 0
 	}
 
 	sigB64 := ""
@@ -320,7 +318,7 @@ func (g *GossipEngine) persistEvent(event *models.ClusterEvent) {
 	payloadJSON := []byte(event.Payload)
 	receivedAt := time.Now().UnixNano()
 
-	_, err := g.db.Exec(`
+	res, err := g.db.Exec(`
 		INSERT OR IGNORE INTO cluster_events
 			(event_id, node_id, event_type, timestamp, vector_clock, payload, signature, received_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -336,7 +334,10 @@ func (g *GossipEngine) persistEvent(event *models.ClusterEvent) {
 	)
 	if err != nil {
 		g.logger.Error("gossip: persist event failed", "event_id", event.EventID, "err", err)
+		return 0
 	}
+	aff, _ := res.RowsAffected()
+	return aff
 }
 
 // RecordLocalVC increments the vector clock for the local node and returns a map
@@ -501,7 +502,14 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 
 	// Persist (INSERT OR IGNORE prevents duplicates)
 	if g.db != nil {
-		g.persistEvent(&event)
+		affected := g.persistEvent(&event)
+		// When the insert was ignored (affected == 0), this is a durable duplicate.
+		// Skip handler dispatch and re-broadcast — a replayed event_id is a no-op
+		// after observePeer (which records liveness).
+		if affected == 0 {
+			g.logger.Debug("gossip: duplicate event_id, skipping handler dispatch", "event_id", event.EventID)
+			return
+		}
 	}
 
 	// Dispatch to registered domain handlers (Phase 4).
@@ -564,6 +572,24 @@ func (g *GossipEngine) cleanupDedupCache() {
 		if now.After(expiry) {
 			delete(g.dedupCache, checksum)
 		}
+	}
+}
+
+// sweepClusterEventsRetention deletes old rows from the cluster_events table
+// where received_at < now - EventTableRetention. Logs the deleted count at Debug.
+func (g *GossipEngine) sweepClusterEventsRetention() {
+	if g.db == nil || g.cfg.Gossip.EventTableRetention <= 0 {
+		return
+	}
+	cutoff := time.Now().UnixNano() - int64(g.cfg.Gossip.EventTableRetention)
+	res, err := g.db.Exec(`DELETE FROM cluster_events WHERE received_at < ?`, cutoff)
+	if err != nil {
+		g.logger.Debug("gossip: cluster_events retention sweep failed", "err", err)
+		return
+	}
+	aff, _ := res.RowsAffected()
+	if aff > 0 {
+		g.logger.Debug("gossip: cluster_events retention sweep", "deleted_rows", aff)
 	}
 }
 
@@ -779,6 +805,10 @@ func (g *GossipEngine) run(ctx context.Context) {
 	ticker := time.NewTicker(g.cfg.Gossip.HeartbeatInterval)
 	defer ticker.Stop()
 
+	// Retention sweep ticker for cluster_events table (runs every 5 minutes)
+	retentionTicker := time.NewTicker(5 * time.Minute)
+	defer retentionTicker.Stop()
+
 	g.logger.Info("gossip: engine started",
 		"node_id", g.localNode,
 		"heartbeat_interval", g.cfg.Gossip.HeartbeatInterval,
@@ -794,6 +824,8 @@ func (g *GossipEngine) run(ctx context.Context) {
 		case <-ticker.C:
 			g.sendHeartbeat()
 			g.pruneStalePeers()
+		case <-retentionTicker.C:
+			g.sweepClusterEventsRetention()
 		}
 	}
 }

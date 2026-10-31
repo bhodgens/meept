@@ -109,6 +109,18 @@ func (t *GossipTransport) Start(ctx context.Context) error {
 		"node_id", t.localNode,
 	)
 
+	// Startup warning: if signatures are disabled and we're bound to a
+	// non-loopback address, peers can inject unsigned events.
+	if t.cfg != nil && !t.cfg.Security.RequireNodeSignatures {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			host = addr // fallback: treat the whole addr as host
+		}
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			t.logger.Warn("gossip: cluster enabled with unsigned events accepted on a non-loopback bind - peers can inject events (incl. TASK_CREATE); set cluster.security.require_node_signatures once peer key distribution exists")
+		}
+	}
+
 	go t.acceptLoop(ctx)
 
 	return nil

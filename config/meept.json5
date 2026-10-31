@@ -1209,4 +1209,39 @@
   //   "default_repo": "",
   //   "base_url": "",
   // },
+
+  // GitHub ticket intake (opt-in, disabled by default). Polls watch_repo
+  // for label-gated tickets and maps them to goals for default_employee.
+  // poll_interval is a duration STRING ("5m"); required_labels defaults to
+  // ["factory"], done_label to "factory:done"; project_number (0 =
+  // projection disabled) targets a GitHub Projects V2 project. No secrets
+  // live here — the poller reuses the [github] token source.
+  // "intake": {
+  //   "enabled": false,
+  //   "default_employee": "factory-bot",
+  //   "poll_interval": "5m",
+  //   "watch_repo": "octo/forge",
+  //   "required_labels": ["factory"],
+  //   "done_label": "factory:done",
+  //   "gate_command": "",
+  //   "project_number": 0,
+  // },
+
+  // Distributed cluster (opt-in, disabled by default). Joins a peer mesh
+  // sharing the task queue via gossip + git; see docs/configuration/cluster.md.
+  // SECURITY: when enabled, cluster.security.require_node_signatures
+  // defaults to TRUE — a dispatched task whose ed25519 signature does not
+  // verify against the origin node's key is rejected and never executed.
+  // Set it to false explicitly to accept unsigned dispatches (not
+  // recommended outside throwaway test meshes).
+  // "cluster": {
+  //   "enabled": false,
+  //   "cluster_id": "",
+  //   "node_id": "",
+  //   "node_name": "",
+  //   "security": {
+  //     "require_node_signatures": true,
+  //     "ed25519_key_rotation_days": 90,
+  //   },
+  // },
 }

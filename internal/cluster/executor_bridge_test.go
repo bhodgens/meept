@@ -179,10 +179,22 @@ func waitForJob(aj *activeJob, timeout time.Duration) bool {
 	}
 }
 
+// newUnsignedTestBridge constructs a bridge with dispatch-signature
+// verification DISABLED — the explicit opt-out seam — so the legacy
+// execution-path tests (which build unsigned jobs via taskCreateEvent)
+// exercise the lifecycle rather than the signature gate. The fail-closed
+// default and the gate itself are covered by the
+// TestDispatchSignature tests below (leaf 08 / T1).
+func newUnsignedTestBridge() *ExecutorBridge {
+	b := NewExecutorBridge("local", nil)
+	b.SetRequireDispatchSignatures(false)
+	return b
+}
+
 func TestExecutorBridge_HandleTaskCreate_Lifecycle(t *testing.T) {
 	invoker := &fakeAgentInvoker{output: "result", outputRes: []string{"blake3:out1"}}
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetAgentInvoker(invoker)
 	bridge.SetBusPublisher(pub)
 
@@ -231,7 +243,7 @@ func TestExecutorBridge_HandleTaskCreate_Lifecycle(t *testing.T) {
 func TestExecutorBridge_HandleTaskCreate_BareTaskPayload(t *testing.T) {
 	invoker := &fakeAgentInvoker{output: "ok"}
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetAgentInvoker(invoker)
 	bridge.SetBusPublisher(pub)
 
@@ -291,7 +303,7 @@ func TestExecutorBridge_HandleTaskCreate_BareTaskPayload(t *testing.T) {
 func TestExecutorBridge_HandleTaskCreate_AgentError(t *testing.T) {
 	invoker := &fakeAgentInvoker{err: errors.New("agent exploded")}
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetAgentInvoker(invoker)
 	bridge.SetBusPublisher(pub)
 
@@ -322,7 +334,7 @@ func TestExecutorBridge_HandleTaskCreate_AgentError(t *testing.T) {
 func TestExecutorBridge_HandleTaskCreate_AgentPanic(t *testing.T) {
 	invoker := &fakeAgentInvoker{panicValue: "boom"}
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetAgentInvoker(invoker)
 	bridge.SetBusPublisher(pub)
 
@@ -355,7 +367,7 @@ func TestExecutorBridge_HandleTaskCreate_AgentPanic(t *testing.T) {
 
 func TestExecutorBridge_NoInvoker_FailsJob(t *testing.T) {
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	// NOTE: no SetAgentInvoker.
 	bridge.SetBusPublisher(pub)
 
@@ -386,7 +398,7 @@ func TestExecutorBridge_ResourceEnsureFailure(t *testing.T) {
 
 	invoker := &fakeAgentInvoker{output: "should-not-reach"}
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetResourceManager(rm)
 	bridge.SetAgentInvoker(invoker)
 	bridge.SetBusPublisher(pub)
@@ -424,7 +436,7 @@ func TestExecutorBridge_RefcountDecrementOnComplete(t *testing.T) {
 	rm := newFakeResourceManager()
 	invoker := &fakeAgentInvoker{output: "ok"}
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetResourceManager(rm)
 	bridge.SetAgentInvoker(invoker)
 	bridge.SetBusPublisher(pub)
@@ -460,7 +472,7 @@ func TestExecutorBridge_RefcountDecrementOnFailure(t *testing.T) {
 	rm := newFakeResourceManager()
 	invoker := &fakeAgentInvoker{err: errors.New("agent fail")}
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetResourceManager(rm)
 	bridge.SetAgentInvoker(invoker)
 	bridge.SetBusPublisher(pub)
@@ -497,7 +509,7 @@ func TestExecutorBridge_RefcountReleaseOnPartialEnsureFailure(t *testing.T) {
 
 	invoker := &fakeAgentInvoker{output: "ok"}
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetResourceManager(rm)
 	bridge.SetAgentInvoker(invoker)
 	bridge.SetBusPublisher(pub)
@@ -561,7 +573,7 @@ func (m *selectiveResourceManager) Has(hash string) bool { return true }
 func TestExecutorBridge_DuplicateJobIgnored(t *testing.T) {
 	invoker := &fakeAgentInvoker{output: "ok", delay: 500 * time.Millisecond}
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetAgentInvoker(invoker)
 	bridge.SetBusPublisher(pub)
 
@@ -591,7 +603,7 @@ func TestExecutorBridge_DuplicateJobIgnored(t *testing.T) {
 }
 
 func TestExecutorBridge_SettersNilGuard(t *testing.T) {
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	// All setters should accept nil without panic.
 	bridge.SetMetrics(nil)
 	bridge.SetResourceManager(nil)
@@ -603,7 +615,7 @@ func TestExecutorBridge_SettersNilGuard(t *testing.T) {
 func TestExecutorBridge_MetricsIncremented(t *testing.T) {
 	metrics := NewMetrics()
 	invoker := &fakeAgentInvoker{output: "ok"}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetMetrics(metrics)
 	bridge.SetAgentInvoker(invoker)
 
@@ -634,7 +646,7 @@ func TestExecutorBridge_MetricsIncremented(t *testing.T) {
 func TestExecutorBridge_MetricsIncrementedOnFailure(t *testing.T) {
 	metrics := NewMetrics()
 	invoker := &fakeAgentInvoker{err: errors.New("fail")}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetMetrics(metrics)
 	bridge.SetAgentInvoker(invoker)
 
@@ -658,7 +670,7 @@ func TestExecutorBridge_MetricsIncrementedOnFailure(t *testing.T) {
 
 func TestExecutorBridge_SubmitJob(t *testing.T) {
 	invoker := &fakeAgentInvoker{output: "ok"}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetAgentInvoker(invoker)
 
 	job := DispatchJob{JobID: "submit-1", OriginNode: "origin"}
@@ -689,7 +701,7 @@ func TestExecutorBridge_SubmitJob(t *testing.T) {
 
 func TestExecutorBridge_JobStatus(t *testing.T) {
 	invoker := &fakeAgentInvoker{output: "ok", delay: 200 * time.Millisecond}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetAgentInvoker(invoker)
 
 	job := DispatchJob{JobID: "status-1", OriginNode: "origin"}
@@ -720,7 +732,7 @@ func TestExecutorBridge_ContextCancelCleansUp(t *testing.T) {
 	rm := newFakeResourceManager()
 	invoker := &fakeAgentInvoker{delay: 30 * time.Second} // very long
 	pub := &fakeBusPublisher{}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetResourceManager(rm)
 	bridge.SetAgentInvoker(invoker)
 	bridge.SetBusPublisher(pub)
@@ -758,7 +770,7 @@ func TestExecutorBridge_ContextCancelCleansUp(t *testing.T) {
 }
 
 func TestExecutorBridge_NilPayloadReturnsError(t *testing.T) {
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	event := &models.ClusterEvent{
 		EventID:   "evt-empty",
 		EventType: models.EventTaskCreate,
@@ -770,7 +782,7 @@ func TestExecutorBridge_NilPayloadReturnsError(t *testing.T) {
 }
 
 func TestExecutorBridge_NilEventReturnsNil(t *testing.T) {
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	if err := bridge.HandleTaskCreate(nil); err != nil {
 		t.Fatalf("nil event should return nil, got %v", err)
 	}
@@ -778,7 +790,7 @@ func TestExecutorBridge_NilEventReturnsNil(t *testing.T) {
 
 func TestExecutorBridge_AutoGenerateJobID(t *testing.T) {
 	invoker := &fakeAgentInvoker{output: "ok"}
-	bridge := NewExecutorBridge("local", nil)
+	bridge := newUnsignedTestBridge()
 	bridge.SetAgentInvoker(invoker)
 
 	job := DispatchJob{

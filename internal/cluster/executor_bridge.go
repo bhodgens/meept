@@ -19,6 +19,7 @@ package cluster
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -95,8 +96,32 @@ type ExecutorBridge struct {
 	invoker    AgentInvoker               // nil-safe (returns error)
 	publisher  BusPublisher               // nil-safe (logs only)
 
+	// dispatchSignatures is the fail-closed job-signature verification
+	// flag (leaf 08 / C9): when true, a DispatchJob with an absent,
+	// tampered, or unverifiable signature is rejected with a Warn and
+	// NEVER executed. Defaults to true (secure by default, matching
+	// cluster.security.require_node_signatures); the daemon wiring
+	// mirrors the config value via SetRequireDispatchSignatures, which
+	// is the ONLY way to disable verification (an explicit
+	// require_node_signatures=false in a cluster-enabled config).
+	dispatchSignatures bool
+
+	// signingKeys resolves an origin node's ed25519 signing public key.
+	// *GossipEngine satisfies SigningKeyLookup structurally, so the
+	// bridge verifies against the SAME key registry the gossip engine
+	// uses for event signatures (leaf 08: one crypto path, not two).
+	// Nil, or a lookup miss, means fail-closed rejection.
+	signingKeys SigningKeyLookup
+
 	mu     sync.Mutex
 	active map[string]*activeJob // jobID -> active job state
+}
+
+// SigningKeyLookup resolves an origin node's ed25519 signing public key.
+// *GossipEngine.PeerSigningKey satisfies this — the bridge and the gossip
+// engine share one key registry and one verification primitive.
+type SigningKeyLookup interface {
+	PeerSigningKey(nodeID string) (ed25519.PublicKey, bool)
 }
 
 // NewExecutorBridge constructs a bridge with the required localNodeID
@@ -112,9 +137,10 @@ func NewExecutorBridge(localNodeID string, logger *slog.Logger) *ExecutorBridge 
 		logger = slog.Default()
 	}
 	return &ExecutorBridge{
-		localNodeID: localNodeID,
-		logger:      logger.With("component", "executor_bridge"),
-		active:      make(map[string]*activeJob),
+		localNodeID:        localNodeID,
+		logger:             logger.With("component", "executor_bridge"),
+		active:             make(map[string]*activeJob),
+		dispatchSignatures: true, // fail-closed default (leaf 08 / C9)
 	}
 }
 
@@ -153,6 +179,26 @@ func (b *ExecutorBridge) SetAgentInvoker(a AgentInvoker) {
 func (b *ExecutorBridge) SetBusPublisher(p BusPublisher) {
 	if p != nil {
 		b.publisher = p
+	}
+}
+
+// SetRequireDispatchSignatures mirrors cluster.security.require_node_signatures
+// onto the bridge's job-signature gate. Passing false is the ONLY way to
+// disable verification (an explicit require_node_signatures=false in a
+// cluster-enabled config) — the constructor default is fail-closed ON.
+func (b *ExecutorBridge) SetRequireDispatchSignatures(require bool) {
+	b.mu.Lock()
+	b.dispatchSignatures = require
+	b.mu.Unlock()
+}
+
+// SetSigningKeyLookup attaches the gossip engine as the bridge's signing
+// key source (leaf 08: the bridge verifies dispatch signatures against
+// the SAME ed25519 registry the gossip engine uses for event signatures —
+// no second crypto path). Nil-guarded.
+func (b *ExecutorBridge) SetSigningKeyLookup(l SigningKeyLookup) {
+	if l != nil {
+		b.signingKeys = l
 	}
 }
 
@@ -195,10 +241,40 @@ func (b *ExecutorBridge) HandleTaskCreate(event *models.ClusterEvent) error {
 		job.OriginNode = event.NodeID
 	}
 
-	// TODO(spec §5 Phase 2): validate ed25519 signature when
-	// job.Signature is present. The verification key comes from the
-	// cluster registry (nodeID → pubkey). For now we accept unsigned
-	// jobs — the gossip engine already verifies event-level signatures.
+	// Job-signature verification (leaf 08 / C9): a DispatchJob must be
+	// signed by its origin node's ed25519 signing key (the same key pair
+	// the gossip engine uses for event signatures) before it is allowed
+	// to execute locally. Fail-closed: absent, tampered, or unverifiable
+	// signatures are rejected with a Warn and NEVER reach the agent —
+	// the job is not recorded in the active map and no goroutine runs.
+	// Unsigned events never get this far in a signatures-enabled mesh —
+	// the gossip engine rejects them at the transport layer — so this
+	// gate is the final defense against a locally-injected or relayed
+	// event whose envelope was signed but whose job payload was not.
+	b.mu.Lock()
+	requireSigs := b.dispatchSignatures
+	b.mu.Unlock()
+	if requireSigs {
+		// Resolve the origin node's signing key from the SHARED gossip
+		// registry (SetSigningKeyLookup). An unknown origin is rejected
+		// exactly like a bad signature: fail closed, never execute.
+		var pubKey ed25519.PublicKey
+		keyKnown := false
+		if b.signingKeys != nil {
+			pubKey, keyKnown = b.signingKeys.PeerSigningKey(job.OriginNode)
+		}
+		switch {
+		case len(job.Signature) == 0:
+			b.rejectDispatchJob(job, errors.New("dispatch job is unsigned (require_node_signatures)"))
+			return nil
+		case !keyKnown:
+			b.rejectDispatchJob(job, fmt.Errorf("no signing key registered for origin node %q", job.OriginNode))
+			return nil
+		case !ed25519.Verify(pubKey, job.signingBytes(), job.Signature):
+			b.rejectDispatchJob(job, fmt.Errorf("dispatch job signature verification failed for origin node %q", job.OriginNode))
+			return nil
+		}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	aj := &activeJob{
@@ -235,6 +311,23 @@ func (b *ExecutorBridge) HandleTaskCreate(event *models.ClusterEvent) error {
 	go b.executeJob(ctx, aj)
 
 	return nil
+}
+
+// rejectDispatchJob is the fail-closed rejection path (leaf 08 / C9):
+// log a Warn carrying the node + job id, count it, publish TASK_FAIL so
+// the origin learns the job was refused. It NEVER materializes resources
+// or invokes the agent — the job was rejected before the active map.
+func (b *ExecutorBridge) rejectDispatchJob(job DispatchJob, reason error) {
+	b.logger.Warn("executor bridge: dispatch job REJECTED (signature verification)",
+		"job_id", job.JobID,
+		"origin_node", job.OriginNode,
+		"agent_id", job.AgentID,
+		"reason", reason,
+	)
+	b.metrics.IncDispatchJobsFailed()
+	if b.publisher != nil {
+		b.publisher.PublishTaskFail(job.JobID, reason.Error())
+	}
 }
 
 // executeJob is the goroutine-side implementation (spec §5 Phase 3

@@ -1,8 +1,8 @@
 package config
 
 import (
-	"github.com/tailscale/hujson"
 	"fmt"
+	"github.com/tailscale/hujson"
 	"log/slog"
 	"os"
 	"os/user"
@@ -69,6 +69,10 @@ func Load(path string) (*Config, error) {
 	// zero/negative interval -> 30s, empty endpoint -> localhost:4317).
 	// Load-boundary normalization so the daemon wiring sees final values.
 	NormalizeOTLPMetricsDefaults(&cfg.Metrics.OTLP)
+
+	// Cluster security defaults (leaf 08 / C9: require_node_signatures
+	// defaults ON with cluster.enabled; explicit false is honored).
+	NormalizeClusterSecurityDefaults(&cfg.Cluster)
 
 	// Clamp invalid metrics.otlp_traces values to defaults (leaf 07:
 	// zero/negative interval -> 5s, empty endpoint -> localhost:4318,
@@ -193,6 +197,10 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// Load-boundary normalization so the daemon wiring sees final values.
 	NormalizeOTLPMetricsDefaults(&cfg.Metrics.OTLP)
 
+	// Cluster security defaults (leaf 08 / C9: require_node_signatures
+	// defaults ON with cluster.enabled; explicit false is honored).
+	NormalizeClusterSecurityDefaults(&cfg.Cluster)
+
 	// Clamp invalid metrics.otlp_traces values to defaults (leaf 07:
 	// zero/negative interval -> 5s, empty endpoint -> localhost:4318,
 	// sample_rate outside (0,1] -> 1.0). Load-boundary normalization so
@@ -315,7 +323,6 @@ func ExpandEnvVars(s string) (string, error) {
 	}
 	return result, nil
 }
-
 
 // expandPath expands ~ to the home directory.
 func expandPath(path string) string {
@@ -539,8 +546,6 @@ func LoadModelsConfigDefault() (*ModelsConfig, error) {
 
 	return nil, fmt.Errorf("models.json5 not found in %s or config/", MeeptHome())
 }
-
-
 
 // EnsureDataDir creates the data directory if it doesn't exist.
 func EnsureDataDir(cfg *Config) error {

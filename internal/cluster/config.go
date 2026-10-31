@@ -66,6 +66,10 @@ type GossipConfig struct {
 	PeerTimeout       time.Duration `json:"peer_timeout"`
 	EventRetention    time.Duration `json:"event_retention"`
 	MaxRetryAttempts  int           `json:"max_retry_attempts"`
+	// EventTableRetention is the TTL for cluster_events table rows.
+	// When zero, defaults to 30 days. A periodic sweep deletes rows older
+	// than now - EventTableRetention.
+	EventTableRetention time.Duration `json:"event_table_retention"`
 }
 
 // GitConfig holds git sync settings.
@@ -100,7 +104,6 @@ func LoadClusterConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-
 // DefaultClusterConfigPath returns the default path for the cluster config.
 func DefaultClusterConfigPath() string {
 	homeDir, _ := os.UserHomeDir()
@@ -129,6 +132,10 @@ func (c *Config) setDefault() {
 		// time.Now().Before(expiry) is always false and duplicate gossip events
 		// are re-processed and re-broadcast on every hop (unbounded storm).
 		c.Gossip.EventRetention = 1 * time.Hour
+	}
+	if c.Gossip.EventTableRetention == 0 {
+		// Default 30 days for cluster_events table retention.
+		c.Gossip.EventTableRetention = 30 * 24 * time.Hour
 	}
 	if c.Queue.DefaultClaimTimeout == 0 {
 		c.Queue.DefaultClaimTimeout = 5 * time.Minute

@@ -10,6 +10,7 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/caimlas/meept/pkg/models"
@@ -110,6 +111,38 @@ type DispatchJob struct {
 	Priority          int           `json:"priority"`
 	CreatedAt         int64         `json:"created_at"` // unix nanoseconds
 	Signature         []byte        `json:"signature"`
+}
+
+// signingBytes returns the canonical bytes a DispatchJob signature covers
+// (leaf 08 / C9): every identity and execution-affecting field, in a fixed
+// wire order, excluding Signature itself. It mirrors the ClusterEvent
+// signing-struct pattern in pkg/models/cluster.go so job signatures and
+// event signatures stay on the same ed25519 identity keys and the same
+// canonical-json verification shape — one crypto path, not two.
+func (j DispatchJob) signingBytes() []byte {
+	type signingStruct struct {
+		JobID             string        `json:"job_id"`
+		OriginNode        string        `json:"origin_node"`
+		TargetNode        string        `json:"target_node"`
+		AgentID           string        `json:"agent_id"`
+		TaskDescription   string        `json:"task_description"`
+		RequiredResources []string      `json:"required_resources"`
+		Workspace         *WorkspaceRef `json:"workspace,omitempty"`
+		Priority          int           `json:"priority"`
+		CreatedAt         int64         `json:"created_at"`
+	}
+	data, _ := json.Marshal(signingStruct{
+		JobID:             j.JobID,
+		OriginNode:        j.OriginNode,
+		TargetNode:        j.TargetNode,
+		AgentID:           j.AgentID,
+		TaskDescription:   j.TaskDescription,
+		RequiredResources: j.RequiredResources,
+		Workspace:         j.Workspace,
+		Priority:          j.Priority,
+		CreatedAt:         j.CreatedAt,
+	})
+	return data
 }
 
 // DispatchJobAck acknowledges a submitted dispatch job.

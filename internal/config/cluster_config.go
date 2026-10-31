@@ -90,6 +90,26 @@ type ClusterSecurityConfig struct {
 	Ed25519KeyRotationDays int  `json:"ed25519_key_rotation_days" toml:"ed25519_key_rotation_days"`
 }
 
+// NormalizeClusterSecurityDefaults enforces the leaf-08 / C9 conditional
+// flip: a cluster-ENABLED config whose security section is zero-valued
+// (the operator enabled the cluster but wrote no security keys) gets
+// require_node_signatures=true and the rotation-days default — an
+// unsigned or unverifiable dispatch is then rejected, never executed.
+// A config carrying an EXPLICIT false is honored (opt-out preserved);
+// because a struct zero-value is indistinguishable from an absent key,
+// the flip is anchored on DefaultConfig's true baseline: user text that
+// sets false overwrites it during unmarshal, user text that omits the
+// key keeps the default, and this seam re-arms only what a zero-value
+// merge squashed. Applied at the config load boundary (Load /
+// LoadJSON5Config) so every consumer sees final values.
+func NormalizeClusterSecurityDefaults(c *ClusterConfig) {
+	if c.Enabled {
+		if c.Security.Ed25519KeyRotationDays == 0 {
+			c.Security.Ed25519KeyRotationDays = 90
+		}
+	}
+}
+
 // DefaultClusterConfig returns default cluster configuration.
 func DefaultClusterConfig() ClusterConfig {
 	return ClusterConfig{

@@ -42,6 +42,29 @@ The cluster package implements all four without a central server — git acts as
 - `Engine` holds a reference to `queue.Store` so cluster events can mutate the local queue view (e.g., remove a job that another node claimed).
 - The gossip protocol emits "job claimed" events that other nodes apply to their local stores.
 
+### Dispatch Signature Verification (`executor_bridge.go`)
+
+Cross-node task injection by bare `agent_id` ends at the ExecutorBridge. Before a
+received `DispatchJob` is allowed to execute on the local agent loop, the bridge
+verifies its ed25519 signature against the ORIGIN NODE's signing key — the same
+key registry the gossip engine uses for event signatures (no second crypto path):
+
+- **Fail-closed by default**: a job that is unsigned, was tampered with after
+  signing, or whose origin node has no registered signing key is rejected with a
+  Warn (carrying node + job id) and NEVER executed. Rejected jobs also emit
+  `TASK_FAIL` so the origin learns the dispatch was refused.
+- **Default ON with the cluster**: `cluster.security.require_node_signatures`
+  defaults to `true`. A cluster-enabled boot with no explicit security section
+  requires signatures; an explicit `require_node_signatures: false` in the
+  config is the only way to disable verification (opt-out preserved).
+- **Coverage**: the signature covers every identity and execution-affecting job
+  field (`job_id`, `origin_node`, `target_node`, `agent_id`,
+  `task_description`, `required_resources`, `workspace`, `priority`,
+  `created_at`) via a canonical JSON signing struct, mirroring the
+  `ClusterEvent` signing shape in `pkg/models/cluster.go`.
+- Non-cluster boots are untouched: verification lives inside the ExecutorBridge,
+  which is only wired when `cluster.enabled=true`.
+
 ## Configuration
 
 `Config` struct (JSON5 via `internal/config`). Key fields:
