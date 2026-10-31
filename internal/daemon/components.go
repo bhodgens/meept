@@ -3026,7 +3026,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// dedicated directory under the daemon data dir, opened lazily inside
 	// registerBuiltinTools only when enabled.
 	knowledgeDataDir := filepath.Join(cfg.Daemon.DataDir, "knowledge")
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions)
 
 	// GitHub PR/CI tools ([github] block, github-pr-ci tree): register
 	// next to the other builtin tools, gated on enabled + a resolvable
@@ -4391,12 +4391,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if err != nil {
 			logger.Warn("Failed to create backup scheduler", "error", err)
 		} else {
+			sched.SetEffectsLedger(c.EffectsLedger)
 			c.BackupScheduler = sched
 			logger.Info("Backup scheduler configured",
 				"enabled", true,
 				"schedule", cfg.Backup.Schedule,
 				"retention_days", cfg.Backup.RetentionDays,
-				"repo", cfg.Backup.RepoURL)
+				"repo", cfg.Backup.RepoURL,
+				"effects_ledger", c.EffectsLedger != nil)
 		}
 	}
 
@@ -6682,11 +6684,14 @@ func registerBuiltinTools(
 	knowledgeDataDir string,
 	knowledgeConsolidationStore *knowledge.Store,
 	knowledgeStoreOut **knowledge.Store,
+	shellPermCfg config.ShellPermissionsConfig,
 ) {
 	readCache := builtin.NewReadCache(30)
 
 	// Filesystem tools
+	secretScanner := intsecurity.NewSecretScanner()
 	readFileTool := builtin.NewReadFileTool(checker, readCache)
+	readFileTool.SetSecretScanner(secretScanner)
 	writeFileTool := builtin.NewWriteFileTool(checker)
 	if fenceChecker != nil {
 		readFileTool.SetFenceChecker(fenceChecker)
@@ -6765,6 +6770,17 @@ func registerBuiltinTools(
 		shellTool.SetSecurityOrchestrator(secOrch)
 		logger.Debug("Shell tool configured with security orchestrator")
 	}
+	if shellPermCfg.Preset != "" || len(shellPermCfg.Rules) > 0 {
+		permTable, err := intsecurity.BuildPermissionTable(shellPermCfg.Preset, shellRulesFromConfig(shellPermCfg.Rules))
+		if err != nil {
+			logger.Error("shell permission table disabled: config invalid", "error", err)
+		} else {
+			shellTool.SetPermissionTable(permTable)
+			logger.Info("Shell permission table wired",
+				"preset", shellPermCfg.Preset, "rules", len(shellPermCfg.Rules))
+		}
+	}
+	shellTool.SetSecretScanner(secretScanner)
 	if fenceChecker != nil {
 		shellTool.SetFenceChecker(fenceChecker)
 		logger.Debug("Shell tool configured with fence checker")
@@ -9909,4 +9925,14 @@ func (r sessionProjectResolver) CreateOrResolveProject(ctx context.Context, path
 		return nil, err
 	}
 	return &session.ProjectBinding{ID: p.ID, Path: p.LocalPath}, nil
+}
+
+// shellRulesFromConfig converts the JSON5 [security.shell_permissions].rules
+// map (prefix -> "allow"|"ask"|"deny") to the security-package rule type.
+func shellRulesFromConfig(rules map[string]string) map[string]intsecurity.ShellRule {
+	out := make(map[string]intsecurity.ShellRule, len(rules))
+	for prefix, action := range rules {
+		out[prefix] = intsecurity.ShellRule{Action: action}
+	}
+	return out
 }

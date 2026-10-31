@@ -1591,6 +1591,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				// handle. No-op when the metrics store is disabled (nil).
 				httpOpts = append(httpOpts, http.WithMetricsUsageProvider(wrapper))
 			}
+			if ds := components.getDispatchSubmitter(); ds != nil {
+				httpOpts = append(httpOpts, http.WithDispatchSubmitter(&httpDispatchSubmitter{rpc: ds}))
+				logger.Info("HTTP dispatch endpoints wired to cluster submitter")
+			}
 			httpSrv = http.NewServer(httpCfg, configService, daemonControl, metricsService, svcRegistry, logger, httpOpts...)
 			// Wire firewall stats getter for HTTP endpoint
 			if components.AgentLoop != nil {

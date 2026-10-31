@@ -2624,6 +2624,7 @@ internal/backup/git_backup.go unreachable func: GitBackupScheduler.ListBackups
 internal/backup/git_backup.go unreachable func: GitBackupScheduler.pruneOldBackups
 internal/backup/git_backup.go unreachable func: GitBackupScheduler.runBackup
 internal/backup/git_backup.go unreachable func: GitBackupScheduler.RunNow
+internal/backup/git_backup.go unreachable func: GitBackupScheduler.SetEffectsLedger
 internal/backup/git_backup.go unreachable func: GitBackupScheduler.SetOnBackupDone
 internal/backup/git_backup.go unreachable func: GitBackupScheduler.Start
 internal/backup/git_backup.go unreachable func: GitBackupScheduler.Stop
@@ -2836,9 +2837,12 @@ internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.JobResults
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.JobStatus
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.materializeResources
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.materializeWorkspace
+internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.rejectDispatchJob
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetAgentInvoker
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetBusPublisher
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetMetrics
+internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetPeerSigningKey
+internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetRequireDispatchSignatures
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetResourceManager
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.SetWorkspaceManager
 internal/cluster/executor_bridge.go unreachable func: ExecutorBridge.snapshotWorkspace
@@ -2924,6 +2928,7 @@ internal/cluster/gossip.go unreachable func: GossipEngine.SigningPrivate
 internal/cluster/gossip.go unreachable func: GossipEngine.Start
 internal/cluster/gossip.go unreachable func: GossipEngine.startRetryLoop
 internal/cluster/gossip.go unreachable func: GossipEngine.Stop
+internal/cluster/gossip.go unreachable func: GossipEngine.sweepClusterEventsRetention
 internal/cluster/gossip.go unreachable func: NewGossipEngine
 internal/cluster/gossip.go unreachable func: pubKeyID
 internal/cluster/gossip.go unreachable func: WithDatabase
@@ -2998,6 +3003,7 @@ internal/cluster/grpc_transport.go unreachable func: resourceServerStreamAdapter
 internal/cluster/grpc_transport.go unreachable func: workspaceGitFetchHandler
 internal/cluster/grpc_transport.go unreachable func: workspaceStreamAdapter.Recv
 internal/cluster/grpc_transport.go unreachable func: workspaceStreamAdapter.Send
+internal/cluster/grpc_types.go unreachable func: DispatchJob.signingBytes
 internal/cluster/metrics.go unreachable func: Metrics.AddCASBytesEvicted
 internal/cluster/metrics.go unreachable func: Metrics.AddCASBytesFetched
 internal/cluster/metrics.go unreachable func: Metrics.IncCASHits
@@ -11266,6 +11272,7 @@ internal/tui/models/activity.go unreachable func: ActivityModel.tailTick
 internal/tui/models/activity.go unreachable func: ActivityModel.Update
 internal/tui/models/activity.go unreachable func: ActivityModel.View
 internal/tui/models/activity.go unreachable func: DriftJSON.UnmarshalJSON
+internal/tui/models/activity.go unreachable func: HideActivityView
 internal/tui/models/activity.go unreachable func: NewActivityModel
 internal/tui/models/chat_selection.go unreachable func: ChatModel.applySelectionHighlight
 internal/tui/models/chat_selection.go unreachable func: ChatModel.calculateCursorOffset

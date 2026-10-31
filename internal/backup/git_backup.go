@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/caimlas/meept/internal/effects"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -17,17 +18,27 @@ import (
 
 // GitBackupScheduler performs periodic git-backed backups of local SQLite databases.
 type GitBackupScheduler struct {
-	cfg          config.BackupConfig
-	dataDir      string
-	logger       *slog.Logger
-	mu           sync.Mutex
-	backupDir    string // local checkout directory
-	repo         *git.Repository
-	nodeID       string
-	running      bool
-	stopCh       chan struct{}
-	stopOnce     sync.Once
-	onBackupDone func(*BackupManifest, error)
+	cfg           config.BackupConfig
+	dataDir       string
+	logger        *slog.Logger
+	mu            sync.Mutex
+	backupDir     string // local checkout directory
+	repo          *git.Repository
+	nodeID        string
+	running       bool
+	stopCh        chan struct{}
+	stopOnce      sync.Once
+	onBackupDone  func(*BackupManifest, error)
+	effectsLedger effects.Ledger
+}
+
+// SetEffectsLedger wires the external-effect idempotency ledger. When set,
+// every backup push is claimed through the ledger so a completed push is
+// never repeated after a crash between push and bookkeeping.
+func (s *GitBackupScheduler) SetEffectsLedger(l effects.Ledger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.effectsLedger = l
 }
 
 // NewGitBackupScheduler creates a new scheduler from config.
@@ -364,7 +375,17 @@ func (s *GitBackupScheduler) gitCommitAndPush(files []string, message string) er
 		s.mu.Unlock()
 	}
 
-	return GitAddCommitPush(repo, files, message)
+	// Route through the effects ledger so a push that already completed
+	// (crash between push and bookkeeping) is an idempotent no-op instead
+	// of a duplicate push. Falls back to plain push when no ledger is set.
+	pushed, err := GitAddCommitPushWithLedger(repo, s.effectsLedger, files, message, s.cfg.RepoURL)
+	if err != nil {
+		return err
+	}
+	if !pushed {
+		s.logger.Debug("backup: push skipped (ledger: already completed)", "remote", s.cfg.RepoURL)
+	}
+	return nil
 }
 
 func (s *GitBackupScheduler) invokeCallback(manifest *BackupManifest, err error) {
