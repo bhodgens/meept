@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -75,12 +76,25 @@ type FileTokenSource struct {
 	Path string
 }
 
-// Token implements TokenSource.
+// Token implements TokenSource. The file is opened and its mode verified
+// on the SAME fd it is read from (open + fstat + read): a Stat-then-Read
+// pair is a TOCTOU window in which a local writer could swap the file or
+// widen its permissions between the check and the read (bughunt 2026-10-30
+// M1). A token file carrying group/other access bits is refused here too,
+// not just at wiring time, so a later chmod cannot smuggle it in.
 func (s FileTokenSource) Token(ctx context.Context) (string, error) {
 	if s.Path == "" {
 		return "", fmt.Errorf("%w: no token file path configured", ErrNoToken)
 	}
-	data, err := os.ReadFile(s.Path)
+	f, err := os.Open(s.Path)
+	if err != nil {
+		return "", fmt.Errorf("%w: read token file: %v", ErrNoToken, err)
+	}
+	defer f.Close()
+	if fi, statErr := f.Stat(); statErr == nil && fi.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("%w: token file %s has group/other access bits; chmod it to 0600", ErrNoToken, s.Path)
+	}
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return "", fmt.Errorf("%w: read token file: %v", ErrNoToken, err)
 	}
