@@ -78,10 +78,12 @@ func wireActivityComponents(c *Components, msgBus *bus.MessageBus, server *rpc.S
 
 	ring := activity.NewRing(activityRingCapacity)
 	if msgBus != nil {
-		// Live tail: bus events (queue.job.*, task.ev.completed/failed,
+		// Live tail: bus events (queue.job.*, task.completed/failed,
 		// agent.progress, turn.terminal) map to ActivityRecord and append
 		// to the ring. Best-effort, never blocks publishers (contract C3).
-		activity.WireBusBridge(msgBus, ring)
+		// The returned subscriptions are retained so stopComponents can
+		// unsubscribe them (goroutine teardown, not process-exit leak).
+		c.activityBridgeSubs = activity.WireBusBridge(msgBus, ring)
 	}
 
 	c.ActivityAggregator = agg
@@ -102,10 +104,21 @@ func activityChainDB(c *Components) *sql.DB {
 	return c.EmployeeManager.AuditChain()
 }
 
-// stopActivityRing drops the ring reference on shutdown; the bus bridge's
-// subscriber goroutines exit with the process-scoped bus.
-func stopActivityRing(c *Components) {
-	if c != nil {
-		c.ActivityRing = nil
+// stopActivityRing drops the ring reference and unsubscribes the live-tail
+// bus bridge on shutdown. Unsubscribing closes each subscriber channel, so
+// the bridge's reader goroutines exit instead of leaking across in-process
+// daemon restarts.
+func stopActivityRing(c *Components, msgBus *bus.MessageBus) {
+	if c == nil {
+		return
 	}
+	if msgBus != nil {
+		for _, sub := range c.activityBridgeSubs {
+			if sub != nil {
+				msgBus.Unsubscribe(sub)
+			}
+		}
+	}
+	c.activityBridgeSubs = nil
+	c.ActivityRing = nil
 }

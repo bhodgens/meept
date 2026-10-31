@@ -9,16 +9,18 @@ import (
 func TestRing_AppendAndTail(t *testing.T) {
 	r := NewRing(3)
 
-	// Append 5 records
+	// Append 5 records with distinct timestamps
+	base := time.Now()
 	for i := 0; i < 5; i++ {
 		r.Append(ActivityRecord{
 			Kind:    "test",
-			At:      time.Now().Add(time.Duration(i) * time.Second),
+			At:      base.Add(time.Duration(i) * time.Second),
 			Summary: "record",
 		})
 	}
 
-	// Tail(10) should return 3 newest records (newest-first)
+	// Tail(10) should return 3 newest records in newest-last order
+	// (chronological ASCENDING: oldest of the 3 first, newest last)
 	tail, dropped := r.Tail(10)
 	if len(tail) != 3 {
 		t.Errorf("expected 3 records, got %d", len(tail))
@@ -27,12 +29,14 @@ func TestRing_AppendAndTail(t *testing.T) {
 		t.Errorf("expected dropped=2, got %d", dropped)
 	}
 
-	// Verify newest-first order (last appended should be first)
-	if tail[0].At.Unix() != time.Now().Add(4*time.Second).Unix() {
-		t.Errorf("first record should be the newest (index 4)")
+	// Verify newest-last order (chronological ASCENDING)
+	// The 3 records kept are indices 2,3,4 (times base+2s, base+3s, base+4s)
+	// newest-last means: [base+2s, base+3s, base+4s]
+	if tail[0].At.Unix() != base.Add(2*time.Second).Unix() {
+		t.Errorf("first record should be the oldest of the 3 (index 2, base+2s), got %v", tail[0].At)
 	}
-	if tail[2].At.Unix() != time.Now().Add(2*time.Second).Unix() {
-		t.Errorf("last record should be the oldest of the 3 (index 2)")
+	if tail[2].At.Unix() != base.Add(4*time.Second).Unix() {
+		t.Errorf("last record should be the newest (index 4, base+4s), got %v", tail[2].At)
 	}
 }
 

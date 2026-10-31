@@ -331,6 +331,11 @@ type Components struct {
 	// dropped in stopComponents.
 	ActivityAggregator *activity.Aggregator
 	ActivityRing       *activity.Ring
+	// activityBridgeSubs holds the live-tail bus subscriptions so
+	// stopComponents can Unsubscribe them instead of leaking reader
+	// goroutines across daemon restarts in-process (activity-views
+	// leaf 05 salvage). Unexported: teardown-only.
+	activityBridgeSubs []*bus.Subscriber
 
 	// TraceExporter ships chat-turn/task-step spans to an OTLP receiver
 	// (metrics.otlp_traces, leaf 07-langfuse-sink). Non-nil ONLY when
@@ -5734,9 +5739,10 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// Nil on every disabled boot — the guard makes this a no-op there.
 	c.stopOTLPExporter()
 
-	// Drop the activity ring reference (activity.* live tail). The bus
-	// bridge's subscriber goroutines exit with the process-scoped bus.
-	stopActivityRing(c)
+	// Drop the activity ring reference and unsubscribe the live-tail bus
+	// bridge (activity.* live tail) so the bridge's reader goroutines exit
+	// instead of leaking across in-process restarts.
+	stopActivityRing(c, c.msgBus)
 
 	// Flush and stop the OTLP trace exporter + unsubscribe the span
 	// producer (metrics.otlp_traces): same shutdown-first posture. Nil on

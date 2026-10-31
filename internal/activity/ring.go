@@ -47,8 +47,9 @@ func (r *Ring) Append(rec ActivityRecord) {
 	}
 }
 
-// Tail returns the newest n records in newest-first order, along with
-// the total dropped counter. If n >= size, all records are returned.
+// Tail returns the newest n records in newest-last order (chronological
+// ASCENDING: oldest of the returned slice is first, newest is last),
+// along with the total dropped counter. If n >= size, all records are returned.
 func (r *Ring) Tail(n int) ([]ActivityRecord, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -57,10 +58,10 @@ func (r *Ring) Tail(n int) ([]ActivityRecord, int) {
 		return []ActivityRecord{}, r.dropped
 	}
 
-	// Collect up to n newest records
+	// Collect up to n newest records in chronological order (oldest first)
 	result := make([]ActivityRecord, 0)
 	for i := 0; i < r.size && len(result) < n; i++ {
-		idx := (r.head + r.size - 1 - i) % r.capacity
+		idx := (r.head + i) % r.capacity
 		result = append(result, r.buf[idx])
 	}
 
