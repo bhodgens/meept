@@ -1,7 +1,7 @@
 {
  "version": 1,
  "generated": "2026-10-31",
- "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
+ "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
  "path_map": {
   "e2e/suites/smoke": [
    "smoke"
@@ -687,23 +687,23 @@
    "status": "implemented"
   },
   {
-   "name": "github-pr-ci",
-   "dir": "e2e/suites/github-pr-ci",
-   "status": "implemented"
-  },
-  {
    "name": "agent-groups",
    "dir": "e2e/suites/agent-groups",
    "status": "implemented"
   },
   {
-   "name": "github-intake",
-   "dir": "e2e/suites/github-intake",
+   "name": "github-pr-ci",
+   "dir": "e2e/suites/github-pr-ci",
    "status": "implemented"
   },
   {
    "name": "activity-views",
    "dir": "e2e/suites/activity-views",
+   "status": "implemented"
+  },
+  {
+   "name": "groups-diagnosis",
+   "dir": "e2e/suites/groups-diagnosis",
    "status": "implemented"
   }
  ],
@@ -2386,7 +2386,7 @@
    "id": "naive-user-chat-05",
    "suite": "naive-user-chat",
    "diff": "M",
-   "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge \u2014 the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+   "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge — the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
    "paths": [
     "internal/agent/loop.go",
     "internal/agent/reply_guard.go"
@@ -2509,7 +2509,7 @@
    "id": "plan-lifecycle-02",
    "suite": "plan-lifecycle",
    "diff": "M",
-   "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write \u2014 file parses at every observation",
+   "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write — file parses at every observation",
    "paths": [
     "internal/plan/manager.go",
     "internal/plan/filelock.go",
@@ -2719,7 +2719,7 @@
    "id": "goal-completion-01",
    "suite": "goal-completion",
    "diff": "L",
-   "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger \u2014 plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
+   "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger — plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
    "paths": [
     "internal/employee/manager.go",
     "internal/employee/goal_loop.go",
@@ -2804,7 +2804,7 @@
    "id": "memory-turn-capture-02",
    "suite": "memory-turn-capture",
    "diff": "M",
-   "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID \u2014 task reply reaches L0 + status=auto claim",
+   "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID — task reply reaches L0 + status=auto claim",
    "paths": [
     "internal/daemon/memory_capture.go",
     "internal/agent/handler.go"
@@ -3002,7 +3002,7 @@
    "id": "github-pr-ci-04",
    "suite": "github-pr-ci",
    "diff": "M",
-   "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline \u2014 the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
+   "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline — the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
    "paths": [
     "internal/tools/builtin/github_ci.go",
     "internal/githubsvc/rearm.go",
