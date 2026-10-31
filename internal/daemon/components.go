@@ -322,6 +322,18 @@ type Components struct {
 	// stopped on the shutdown path in stopComponents.
 	OTLPExporter *metrics.OTLPExporter
 
+	// TraceExporter ships chat-turn/task-step spans to an OTLP receiver
+	// (metrics.otlp_traces, leaf 07-langfuse-sink). Non-nil ONLY when
+	// metrics.otlp_traces.enabled=true: the default posture is opt-in —
+	// no exporter, no span producer, no bus subscriptions, zero network
+	// traffic, one Warn line at boot. Wired in NewComponents next to the
+	// metrics exporter (otlp_traces_wiring.go); the bus subscriptions and
+	// the exporter are torn down on the shutdown path in stopComponents.
+	TraceExporter *metrics.TraceExporter
+	// otlpTraceSubs holds the trace producer's bus subscriptions (nil when
+	// disabled). Unexported: the shutdown path is the only consumer.
+	otlpTraceSubs *otlpTraceSubs
+
 	// Pricing syncer for dynamic model pricing
 	PricingSyncer *llm.PricingSyncer
 
@@ -812,6 +824,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// the stdlib HTTP JSON sink and Start() it immediately; shutdown is
 	// handled in stopComponents.
 	c.wireOTLPExporter(logger)
+
+	// OTLP trace export (metrics.otlp_traces, leaf 07-langfuse-sink) —
+	// opt-in, default OFF, same posture. Enabled boots also subscribe the
+	// span producer to turn.terminal (typed) + task.step_completed (raw);
+	// disabled boots construct nothing at all (zero network activity).
+	c.TraceExporter, _, c.otlpTraceSubs = wireOTLPTraces(cfg.Metrics.OTLPTraces, msgBus, logger)
 
 	// Install the env-script resolver for config expansion (see
 	// internal/llm/envscript.go): process env first, then the executable
@@ -5705,6 +5723,11 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// final batch must reach the receiver before the process tears down.
 	// Nil on every disabled boot — the guard makes this a no-op there.
 	c.stopOTLPExporter()
+
+	// Flush and stop the OTLP trace exporter + unsubscribe the span
+	// producer (metrics.otlp_traces): same shutdown-first posture. Nil on
+	// every disabled boot.
+	stopOTLPTraces(c.msgBus, c.TraceExporter, c.otlpTraceSubs)
 
 	// Stop budget periodic cleanup goroutine
 	if c.BudgetCleanupStop != nil {

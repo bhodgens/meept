@@ -70,6 +70,12 @@ func Load(path string) (*Config, error) {
 	// Load-boundary normalization so the daemon wiring sees final values.
 	NormalizeOTLPMetricsDefaults(&cfg.Metrics.OTLP)
 
+	// Clamp invalid metrics.otlp_traces values to defaults (leaf 07:
+	// zero/negative interval -> 5s, empty endpoint -> localhost:4318,
+	// sample_rate outside (0,1] -> 1.0). Load-boundary normalization so
+	// the daemon wiring sees final values.
+	NormalizeOTLPTracesDefaults(&cfg.Metrics.OTLPTraces)
+
 	// Clamp invalid failure_policy values to defaults (tree 02 leaf 02:
 	// zero/negative durations, non-positive ShortRetries). Load-boundary
 	// normalization so every consumer sees normalized values.
@@ -186,6 +192,12 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// zero/negative interval -> 30s, empty endpoint -> localhost:4317).
 	// Load-boundary normalization so the daemon wiring sees final values.
 	NormalizeOTLPMetricsDefaults(&cfg.Metrics.OTLP)
+
+	// Clamp invalid metrics.otlp_traces values to defaults (leaf 07:
+	// zero/negative interval -> 5s, empty endpoint -> localhost:4318,
+	// sample_rate outside (0,1] -> 1.0). Load-boundary normalization so
+	// the daemon wiring sees final values.
+	NormalizeOTLPTracesDefaults(&cfg.Metrics.OTLPTraces)
 
 	// Clamp invalid failure_policy values to defaults (tree 02 leaf 02:
 	// zero/negative durations, non-positive ShortRetries). Load-boundary

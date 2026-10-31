@@ -1335,6 +1335,11 @@ type MetricsConfig struct {
 	// OTLP configures the optional OTLP metrics exporter. Default OFF:
 	// metrics stay in the per-host SQLite store until explicitly opted in.
 	OTLP OTLPMetricsConfig `json:"otlp" toml:"otlp"`
+
+	// OTLPTraces configures the optional OTLP trace exporter (leaf 07:
+	// chat turns and task steps as spans). Default OFF — see
+	// OTLPTracesConfig (defined in otlp_traces.go).
+	OTLPTraces OTLPTracesConfig `json:"otlp_traces" toml:"otlp_traces"`
 }
 
 // OTLPMetricsConfig configures the OTLP metrics exporter (metrics.otlp).
