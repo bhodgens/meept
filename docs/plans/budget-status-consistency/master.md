@@ -193,6 +193,13 @@ Test leaf: 00T-gate-tests.md — dispatched in Phase 0, validated by the control
 Statuses: PENDING | DELTA | VALIDATED
 
 Delta log:
+- 2026-10-27, tree integration: make analyzers exit 0; make test showed
+  failures ONLY in internal/llm + internal/tools/builtin — all environmental
+  (port exhaustion 'can't assign requested address' + 5s-load timeouts, the
+  documented macOS issue; zero budget-related failures); isolated re-run
+  `go test -count=1 -p 1 ./internal/llm/ ./internal/tools/builtin/` = both ok.
+  Class closed: all three wire surfaces (rpc status, comm/http daemon status,
+  components budget block) pass through Budget.Status booleans. Tree COMPLETE.
 - 2026-10-27, leaf 01 REVIEWED + committed 577228e8. Scope gap found (third
   recompute instance, same bug class): internal/comm/http/server.go:2352
   computes within_budget as `hourlyUsed < hourlyRemaining && dailyUsed <
