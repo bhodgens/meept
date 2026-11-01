@@ -97,7 +97,7 @@ Inherited from ../master.md. Branch-specific:
 
 | Child | Status | Commit | Notes |
 |-------|--------|--------|-------|
-| 00S-runtime-spike | PENDING | - | verdict: TBD |
+| 00S-runtime-spike | COMPLETE | - | verdict GO: goja (report /tmp/pi-eval/codemode-spike-report.md; repo copy docs/research/codemode-spike-report.md pending archive). Criteria: (a) async-bridge PASS (eventloop promise, per-call ctx); (b) timeout-kill PASS (vm.Interrupt at 2.002s, clean Err, no hang); (c) memory-cap FAIL soft-only (no cap API - allocation-count interrupt workaround, C3 field kept per master.md allowance); (d) no-fs-net PASS (fs/process/fetch/WebSocket unreachable; register ONLY eventloop, never goja_nodejs); (e) cgo-free PASS (linux amd64 + darwin arm64 CGO_ENABLED=0 builds rc=0); (f) idiom-compat PASS (3 pi-style scripts + ES2020 probes). wazero+quickjs NO-GO (b: MaxExecutionTime ineffective, ctx-cancel mid-await panics; d: shipped qjs.wasm WASI os.open reaches host fs). yaegi NO-GO (d: host os/net/exec live = fatal for untrusted-code threat model; no async idiom). BRIDGE IDIOM: async - tools.<name> returns a goja promise on the eventloop VM; tool body in a goroutine with per-call ctx; vm.Interrupt(err) on deadline; Result.Value = json.Marshal of exported return (50KB clamp) |
 | 00T-gate | PENDING | - | |
 | 01-sandbox-core | PENDING | - | |
 | 02-codemode-tool | PENDING | - | |
