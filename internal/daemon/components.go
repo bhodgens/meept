@@ -24,6 +24,7 @@ import (
 	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/activity"
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/agent/turnjournal"
 	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/auditlog"
 	authpkg "github.com/caimlas/meept/internal/auth"
@@ -43,6 +44,7 @@ import (
 	"github.com/caimlas/meept/internal/debug"
 	"github.com/caimlas/meept/internal/effects"
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/gatecapture"
 	"github.com/caimlas/meept/internal/githubsvc"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/lint"
@@ -66,6 +68,7 @@ import (
 	"github.com/caimlas/meept/internal/scheduler"
 	"github.com/caimlas/meept/internal/secrets"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/security/pii"
 	"github.com/caimlas/meept/internal/security/ssrf"
 	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/selfimprove"
@@ -144,7 +147,7 @@ type Components struct {
 	// EvolverPlanManager is the PlanManager the evolver parks its plans in:
 	// the dedicated sink manager when available, else the shared manager
 	// (fallback). The approval bridge resolves evolver plan IDs through it
-	// FIRST — evolver plans are stored in this manager's store, not the
+	// FIRST -- evolver plans are stored in this manager's store, not the
 	// shared one.
 	EvolverPlanManager *plan.PlanManager
 	// EvolverPlanApprovalBridge dispatches approved evolver plans (leaf 03):
@@ -155,24 +158,49 @@ type Components struct {
 	SecurityOrchestrator      *intsecurity.Orchestrator
 	FenceChecker              *intsecurity.FenceChecker
 	AgentLoop                 *agent.AgentLoop
-	Soul                      *agent.SoulProvider
-	ChatHandler               *agent.ChatHandler
-	StatusHandler             *StatusHandler
-	SessionStore              session.Store
-	SessionHandler            *session.Handler
-	EmbeddingWorker           *session.EmbeddingWorker
+	// TaintTracker backs the inter-agent taint lane ([security.taint],
+	// agent-boundary-hardening leaf 02). Non-nil only when enabled; the
+	// collaboration drivers' handoff seam and the inter-agent-taint hook
+	// share this one tracker so segments recorded at handoff construction
+	// are what the BeforeToolCall check consults.
+	TaintTracker *taint.ExtendedTracker
+	// Security snapshots the [security] section the components were
+	// built with (wiring tests assert the handoff mode without
+	// re-reading config).
+	Security config.SecurityConfig
+	// PiiSwapStore backs the PII-unmasking restore lane ([security.pii],
+	// pii leaf 02). Non-nil only when the feature is enabled; owned here
+	// so stopComponents closes the SQLite handle after the loop stopped.
+	PiiSwapStore *pii.SwapStore
+	// AgentLoopPiiCfg snapshots the [security.pii] section the loop was
+	// wired with (wiring tests assert on it without re-reading config).
+	AgentLoopPiiCfg config.PiiConfig
+	Soul            *agent.SoulProvider
+	ChatHandler     *agent.ChatHandler
+	StatusHandler   *StatusHandler
+	SessionStore    session.Store
+	SessionHandler  *session.Handler
+	EmbeddingWorker *session.EmbeddingWorker
 
 	// ParkStore persists parked turns (quota/throttle-parked chat turns
 	// and goal-loop episodes) across daemon restarts
 	// (agent.SQLiteParkStore over <data_dir>/parks.db). Nil when the
-	// store failed to open — parkers then run memory-only with their
+	// store failed to open -- parkers then run memory-only with their
 	// legacy drop-at-shutdown behaviour. Owned here so stopComponents
 	// closes the handle after the parkers have stopped.
 	ParkStore *agent.SQLiteParkStore
 
+	// TurnJournal is the turn-level durable journal store
+	// (turnjournal.SQLiteJournal over <data_dir>/turnjournal.db). Nil
+	// when daemon.turn_journal_enabled is false (default -- the file is
+	// never opened) or the store failed to open (best-effort: Warn, the
+	// step pipeline keeps its legacy path). Owned here so stopComponents
+	// closes the handle after the pipeline has stopped.
+	TurnJournal turnjournal.JournalStore
+
 	// EffectsLedger is the external-effect idempotency ledger
 	// (effects.SQLiteLedger over <data_dir>/effects.db). Nil when the
-	// ledger failed to open — every wired tool then falls back to its
+	// ledger failed to open -- every wired tool then falls back to its
 	// legacy unclaimed path via its nil checks (same degradation posture
 	// as ParkStore). Owned here so stopComponents closes the handle after
 	// the tools and reconciler have stopped.
@@ -183,9 +211,18 @@ type Components struct {
 	// Nil when construction degraded - the registry then runs the legacy
 	// ungated path (all-or-nothing: never a half-gate).
 	ToolGate *ExecGateImpl
+
+	// GateCapture is the jev-command-gate leaf-02 capture sink
+	// (internal/gatecapture): records human gate verdicts paired with prior
+	// model scores at the two chokepoints (decision-gate deny resolved by
+	// the human; shell permission-table ask answered by a confirmation).
+	// Nil unless a chokepoint source armed (decision gate or shell
+	// permission table) AND the store opened; capture is strictly additive
+	// and never blocks a gate or confirmation flow.
+	GateCapture *gateCaptureStore
 	// EffectsReconciler re-drives claimed/receipted effects on startup and
 	// parked-turn resume. Nil when the ledger is nil (no ledger, no
-	// reconcile — nothing pending can exist).
+	// reconcile -- nothing pending can exist).
 	EffectsReconciler *EffectsReconciler
 
 	// GitHubPool is the per-token GitHub client pool backing the github_*
@@ -331,9 +368,9 @@ type Components struct {
 	// OTLPExporter ships agent metrics (turns, tool calls, token usage)
 	// off-host to an OTLP receiver (metrics.otlp). Non-nil ONLY when
 	// metrics.otlp.enabled=true: the default posture is opt-in (docs/
-	// agents/opt-in-defaults.md) — no exporter constructed, no network
+	// agents/opt-in-defaults.md) -- no exporter constructed, no network
 	// traffic, one Warn line at boot. Started in NewComponents (config is
-	// read BEFORE construction — no construction-baked-config seam) and
+	// read BEFORE construction -- no construction-baked-config seam) and
 	// stopped on the shutdown path in stopComponents.
 	OTLPExporter *metrics.OTLPExporter
 
@@ -353,7 +390,7 @@ type Components struct {
 
 	// TraceExporter ships chat-turn/task-step spans to an OTLP receiver
 	// (metrics.otlp_traces, leaf 07-langfuse-sink). Non-nil ONLY when
-	// metrics.otlp_traces.enabled=true: the default posture is opt-in —
+	// metrics.otlp_traces.enabled=true: the default posture is opt-in --
 	// no exporter, no span producer, no bus subscriptions, zero network
 	// traffic, one Warn line at boot. Wired in NewComponents next to the
 	// metrics exporter (otlp_traces_wiring.go); the bus subscriptions and
@@ -493,7 +530,7 @@ type Components struct {
 	empBusPub employee.BusPublisher
 
 	// msgBus is the daemon message bus, stored for wiring paths that run
-	// in Start (where the NewComponents parameter is out of scope) —
+	// in Start (where the NewComponents parameter is out of scope) --
 	// currently the leaf-11 speak router for GoalLoops.
 	msgBus *bus.MessageBus
 
@@ -601,7 +638,7 @@ type Components struct {
 // store's session.SessionLifecycleHook interface. The coordinator's
 // OnSessionEvent takes a plain string event because internal/llm must not
 // import internal/session (session already imports llm for its
-// summarizer bridge — the import would cycle), so this tiny bridge
+// summarizer bridge -- the import would cycle), so this tiny bridge
 // converts the event kind. Archive, delete, and idle all funnel to the
 // same async dispatch: every teardown-relevant moment releases the
 // session's upstream resources.
@@ -611,7 +648,7 @@ type Components struct {
 // LOCK before removing the row and hands it over, because the
 // post-delete identity resolver (a store Get) structurally cannot see a
 // deleted row. With the alternate id in hand the hook dispatches under
-// BOTH identities — the snapshot keys on the accounting id, so that
+// BOTH identities -- the snapshot keys on the accounting id, so that
 // dispatch is the one that finds the endpoint.
 type teardownStoreHook struct {
 	coordinator *llm.TeardownCoordinator
@@ -735,14 +772,14 @@ func newRefusingBackend(reason error) runtime.ExecutionBackend {
 //
 // It exists as a named helper (not an inline closure) so the adapter wiring
 // is testable without booting the daemon, and it mirrors the registry's
-// model selection — modelRefForAgent's precedence: an explicit spec.Model
+// model selection -- modelRefForAgent's precedence: an explicit spec.Model
 // wins, else the agent's own same-named alias, else the default model ref.
 //
 // ALIAS RESOLUTION IS THE POINT (bughunt wave M1). An alias is a bare name
 // ("coder"), NOT a "provider/model" ref, so resolver.ResolveRef(alias) ->
 // llm.ResolveModelRef returns nil for it (providers.go requires a "/" split)
 // and the pre-fix closure returned (binding{}, false) for every agent whose
-// AGENT.md declares no `model:` — which is every shipped agent. The alias
+// AGENT.md declares no `model:` -- which is every shipped agent. The alias
 // branch of AgentHealthAdapter was therefore unreachable in production and
 // no routing.warning was ever emitted.
 //
@@ -755,7 +792,7 @@ func newRefusingBackend(reason error) runtime.ExecutionBackend {
 //
 // A failure to resolve is NOT "not parked": it surfaces as
 // (binding{}, false), which the adapter reads conservatively as "route
-// normally" — the pre-existing semantic for an unresolvable model.
+// normally" -- the pre-existing semantic for an unresolvable model.
 func agentModelBindingFor(resolver *llm.Resolver, registry *agent.AgentRegistry, modelsCfg *config.ModelsConfig, agentID string) (agent.AgentModelBinding, bool) {
 	if resolver == nil {
 		return agent.AgentModelBinding{}, false
@@ -847,12 +884,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	c := &Components{
-		Config: cfg,
-		Logger: logger,
+		Config:   cfg,
+		Logger:   logger,
+		Security: cfg.Security,
 	}
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	// OTLP metrics export (metrics.otlp) — opt-in, default OFF. The knob
+	// OTLP metrics export (metrics.otlp) -- opt-in, default OFF. The knob
 	// is read here, BEFORE construction, so there is no construction-baked
 	// config seam: Enabled gates the constructor entirely. Disabled boots
 	// log exactly one Warn line and construct nothing (zero steady-state
@@ -861,7 +899,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// handled in stopComponents.
 	c.wireOTLPExporter(logger)
 
-	// OTLP trace export (metrics.otlp_traces, leaf 07-langfuse-sink) —
+	// OTLP trace export (metrics.otlp_traces, leaf 07-langfuse-sink) --
 	// opt-in, default OFF, same posture. Enabled boots also subscribe the
 	// span producer to turn.terminal (typed) + task.step_completed (raw);
 	// disabled boots construct nothing at all (zero network activity).
@@ -871,7 +909,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// internal/llm/envscript.go): process env first, then the executable
 	// `env` script in the meept home. Must happen BEFORE the first
 	// LoadProvidersConfig so expansion at boot consults the script. The
-	// script is never synced (config-sync refuses it — remote code execution
+	// script is never synced (config-sync refuses it -- remote code execution
 	// at boot).
 	llm.SetEnvScriptResolver(llm.NewEnvScriptResolver())
 
@@ -934,9 +972,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// the resolver block below when decision_gate_enabled; registered onto
 	// the hook registry at the hook-wiring block. Nil = feature off.
 	var decisionGate *builtin.DecisionGateHook
+	// Gate capture store (jev-command-gate leaf 02, Contract C4): the
+	// two-chokepoint capture sink. Built lazily below when EITHER chokepoint
+	// source exists (a decision gate OR a shell permission table); nil =
+	// capture disabled, every consumer nil-guards. Open failure is logged
+	// and degrades to no capture - never blocks boot.
+	var gateCap *gateCaptureStore
 	// Shared decision-model client (acp-permission-decision leaf 03,
-	// Contract C): ONE *llm.DecisionClient instance serves both consumers —
-	// the tool-call gate hook above and the ACP permission lane below —
+	// Contract C): ONE *llm.DecisionClient instance serves both consumers --
+	// the tool-call gate hook above and the ACP permission lane below --
 	// constructed in the resolver block when EITHER is enabled. The
 	// interface type holds *llm.DecisionClient (satisfies both seams); nil
 	// when neither consumer needs it (zero overhead, no slot resolved).
@@ -969,12 +1013,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}
 			// Metrics store for cache.hit / cache.miss / cache.eviction
 			// (context-reduction L02). Built BEFORE the coordinator so it
-			// is passed at construction — never a nil store on the stock
+			// is passed at construction -- never a nil store on the stock
 			// wiring. The handle is exposed on Components.MetricsStore so
 			// daemon.New reuses it for every other consumer instead of
 			// opening a second connection to the same SQLite file. A load
 			// failure degrades to a nil store (cache metrics dark, cache
-			// itself fully functional) rather than blocking startup — the
+			// itself fully functional) rather than blocking startup -- the
 			// same posture as every other metrics-store consumer.
 			metricsStore, mErr := metrics.NewStore(&metrics.StoreConfig{
 				DatabasePath:  filepath.Join(cfg.Daemon.DataDir, "metrics.db"),
@@ -1097,7 +1141,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// all (zero overhead). Either on with an unconfigured
 			// decision_model slot => Available()==false => the gate stays
 			// inert (fail-open) and the ACP lane fails closed per-session
-			// (unavailable) — both without behavior change for installs
+			// (unavailable) -- both without behavior change for installs
 			// that opted out. Registration onto the hook registry happens
 			// below at the hook-wiring block.
 			acpWantsDecision := cfg.ACP.Enabled && (cfg.ACP.PermissionMode == "decision" || cfg.ACP.ResolveRank)
@@ -1116,6 +1160,22 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 					"threshold", providersCfg.DecisionEscalationThreshold,
 					"tools", providersCfg.DecisionGateTools,
 				)
+			}
+			// Gate capture store (jev-command-gate leaf 02, Contract C4).
+			// Built when the decision gate armed (chokepoint-1 source);
+			// the permission-table side attaches its arm when the table is
+			// wired further down. Best-effort: an open failure logs and
+			// leaves capture disabled.
+			if decisionGate != nil && gateCap == nil {
+				gc, gcErr := newGateCaptureStore(gatecapture.DefaultDBPath(), logger)
+				if gcErr != nil {
+					logger.Warn("gate capture store unavailable; capture disabled",
+						"error", gcErr, "path", gatecapture.DefaultDBPath())
+				} else {
+					gateCap = gc
+					c.GateCapture = gc
+					logger.Info("gate capture store open", "path", gatecapture.DefaultDBPath())
+				}
 			}
 		}
 
@@ -1136,7 +1196,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// wiring below: the llama teardown adapter captures the manager
 		// POINTER at construction. Constructing it later (its old position
 		// was after the provider block) left the adapter holding a nil
-		// manager for the daemon's lifetime — Handles() could never resolve
+		// manager for the daemon's lifetime -- Handles() could never resolve
 		// a snapshot key to a live runtime and every erase fell to
 		// CloudTeardown's no-op (session-affinity leaf-07 live-gate finding:
 		// hermetic unit tests pass with an explicitly-constructed manager;
@@ -1146,7 +1206,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Contract-2 bus seam (llama-hang-watchdog leaf 03): the manager
 		// publishes runtime.health events (verdict tri-state, hang
 		// detection + watchdog re-arm) through this closure, which is the
-		// ONLY bridge from internal/llm to the bus — the manager itself
+		// ONLY bridge from internal/llm to the bus -- the manager itself
 		// stays bus-free and the setter is nil-safe. msgBus is the
 		// NewComponents parameter, live at this point; the payload map the
 		// manager builds already carries exactly the Contract-2 keys
@@ -1171,7 +1231,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Session teardown (session-affinity leaf 06, master Contract 6):
 		// the coordinator subscribes to the session store's lifecycle hook
 		// and fans archive/delete/idle events out to the adapters. Keyed on
-		// the resolver's session→endpoint snapshot — the SAME key the sticky
+		// the resolver's session→endpoint snapshot -- the SAME key the sticky
 		// map remembers (leaf 01's WithTaskScope accounting session id), so
 		// the lookup always matches what was served. The llama adapter
 		// reference-counts over the snapshot: only the LAST session on an
@@ -1491,7 +1551,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			// Boot alias-reachability audit (2026-10-23 outage fix):
 			// every alias member is checked against the ACTUAL pool
-			// membership — the registered ids from buildProviderConfigs
+			// membership -- the registered ids from buildProviderConfigs
 			// plus any dynamically OAuth-registered ones (read back
 			// through GetProviderHealth, which covers AddProvider'd
 			// entries). The registered map OVERRIDES the static config
@@ -1525,11 +1585,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		c.LLMProvider = c.LLMClient
 	}
 
-	// (Runtime manager construction moved above the teardown wiring — the
+	// (Runtime manager construction moved above the teardown wiring -- the
 	// adapter captures the manager pointer at construction.)
 
 	// Reuse the relocated load from above the pool build (audit + loopback
-	// set) — one LoadProvidersConfigDefault per boot, identical semantics.
+	// set) -- one LoadProvidersConfigDefault per boot, identical semantics.
 	lifecycleCfg, lifecycleCfgErr := llmProvidersCfg, llmProvidersCfgErr
 	if lifecycleCfgErr != nil {
 		logger.Debug("No providers config available for runtime scanning", "error", lifecycleCfgErr)
@@ -1573,7 +1633,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 					"error", err,
 				}
 				if provider.Lifecycle.AutoStart {
-					msg = "Local LLM runtime skipped — see model_path and error"
+					msg = "Local LLM runtime skipped -- see model_path and error"
 					logger.Error(msg, fields...)
 				} else {
 					logger.Warn(msg, fields...)
@@ -1829,7 +1889,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		agent.WithMessageBus(msgBus),
 		agent.WithLoopLogger(logger),
 		// D11 slot priority (tree 04 leaf 03): the daemon loop is the
-		// user-facing chat loop — its llm.Chat turns acquire model
+		// user-facing chat loop -- its llm.Chat turns acquire model
 		// slots on the interactive lane when concurrency is capped.
 		// Per-session clones inherit the flag via ConfigSnapshot.
 		agent.WithInteractiveTurns(true),
@@ -1857,7 +1917,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	// Model resolver (decision-compaction lane + alias resolution): the
 	// template loop's ContextFirewall derives its DecisionClient from
-	// loop.resolver AT CONSTRUCTION — without the resolver the client is
+	// loop.resolver AT CONSTRUCTION -- without the resolver the client is
 	// never Available() and selectSummarizerForCompressor always passes
 	// the legacy summarizer through, silently killing the
 	// compaction.decision_enabled lane for every clone too.
@@ -1906,7 +1966,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		logger.Info("Agent loop configured with skill usage tracker")
 	}
 	// Wire turn-level trace persistence (WikiSkill raw layer): every
-	// learning-eligible turn — success AND failure — records an immutable
+	// learning-eligible turn -- success AND failure -- records an immutable
 	// trace through the shared store. Opt-in with [skills.wiki]; nil store
 	// (wiki disabled) keeps the loop unwired.
 	if c.TraceStore != nil {
@@ -1956,7 +2016,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		reflectionCollector := agent.NewReflectionCollector(
 			cfg.ReflectionCollector,
 			c.LLMClient,
-			"", // classifierModel — empty = use Client's configured model
+			"", // classifierModel -- empty = use Client's configured model
 			reflectionLoader,
 			".meept/improvements.md",
 			logger.With("component", "reflection-collector"),
@@ -1987,6 +2047,23 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Register the inter-agent taint hook (agent-boundary-hardening leaf 02,
+	// contract C5-A): gated on [security.taint] enabled, HookPriorityCritical
+	// peer registered directly AFTER security-before-tool (equal-priority
+	// peers keep insertion order). Typed-nil guards at every seam: a nil
+	// hook (constructor refuses a nil tracker) skips registration, never
+	// panics. Disabled config = absent, byte-identical daemon behavior.
+	c.TaintTracker = newTaintTrackerIfEnabled(cfg, logger)
+	if c.Security.Taint.Enabled && c.TaintTracker != nil {
+		taintHook := agent.NewTaintBeforeToolCall(c.TaintTracker, logger.With("hook", "inter-agent-taint"), buildTaintHookConfig(&c.Security))
+		if taintHook != nil {
+			hookRegistry.RegisterBeforeToolCall("inter-agent-taint", agent.HookPriorityCritical, taintHook)
+			logger.Info("Registered inter-agent taint BeforeToolCall hook",
+				"mode", c.Security.AgentHandoffMode,
+			)
+		}
+	}
+
 	// Register secret obfuscation hook to protect secrets from LLM exposure.
 	secretObfuscator := intsecurity.NewSecretObfuscator()
 	// Resolve through config so MEEPT_HOME applies (isolated rigs never read
@@ -2000,6 +2077,47 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		logger.Info("Registered secret obfuscation hook")
 	}
 
+	// PII unmasking proxy restore lane ([security.pii], pii leaf 02).
+	// Opt-in default-off: no config, no store, no registration -
+	// byte-identical daemon behavior. When enabled: a durable session-
+	// scoped swap store under MEEPT_HOME/pii_swap backs the Swapper, the
+	// restore hook rides the loop's ScanOutput choke point (output side),
+	// and the pii-restore TransformContext registration sits immediately
+	// AFTER secret-obfuscation (C5-B order, pinned by
+	// internal/agent/pii_hook_order_test.go). Typed-nil guards at both
+	// seams: a failed store open or a nil hook skips registration, never
+	// panics.
+	c.AgentLoopPiiCfg = cfg.Security.Pii
+	if cfg.Security.Pii.Enabled {
+		swapStore, err := pii.NewSwapStore(config.MeeptPath("pii_swap"))
+		if err != nil {
+			logger.Warn("pii swap store unavailable; pii restore lane disabled",
+				"error", err,
+			)
+		} else {
+			c.PiiSwapStore = swapStore
+			// Restore window (research D4): 0 = session lifetime. The
+			// window is stamped per row at Put time and enforced in the
+			// store's Resolve paths.
+			swapStore.SetRestoreWindow(cfg.Security.Pii.RestoreWindow)
+			detectorCfg := pii.Config{Enabled: true, Classes: cfg.Security.Pii.Classes}
+			swapper := pii.NewSwapperWithDetector(swapStore, pii.NewDetector(detectorCfg))
+			restoreHook := agent.NewPiiRestoreHook(swapper, secretObfuscator, cfg.Security.Pii, logger.With("hook", "pii-restore"))
+			if restoreHook != nil {
+				// C5-B: registered directly after secret-obfuscation
+				// (equal HookPriorityCritical peers keep insertion order).
+				hookRegistry.RegisterTransformContext("pii-restore", agent.HookPriorityCritical, restoreHook)
+				logger.Info("Registered pii restore hook",
+					"classes", len(cfg.Security.Pii.Classes),
+					"secret_restore", cfg.Security.Pii.SecretRestore,
+				)
+			}
+			agentOpts = append(agentOpts, func(l *agent.AgentLoop) {
+				l.SetPiiRestoreHook(restoreHook)
+			})
+		}
+	}
+
 	// Decision-model irreversibility gate (decision-model leaf 03): deny
 	// destructive tool calls when the decision model's confidence is below
 	// decision_escalation_threshold; the loop converts the deny into the
@@ -2008,6 +2126,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if decisionGate != nil {
 		hookRegistry.RegisterBeforeToolCall("decision-gate", agent.HookPriorityHigh, decisionGate)
 		logger.Info("Registered decision gate BeforeToolCall hook")
+		if gateCap != nil {
+			// CHOKEPOINT 1 (jev-command-gate leaf 02, Contract C4):
+			// decision-gate deny -> human resolves. Nil-tolerant capture;
+			// wiring it never changes the deny/confirm flow.
+			decisionGate.SetGateCapture(gateCap)
+		}
 	}
 
 	agentOpts = append(agentOpts, agent.WithEventEmitter(emitter), agent.WithHookRegistry(hookRegistry))
@@ -2019,7 +2143,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Opt-in: no-op unless [skills.state] is enabled. The runtime is built
 	// inside a LoopOption closure because it needs the loop's chatter and
 	// tool-execution seam, which exist only once NewAgentLoop applies the
-	// options gathered here (the loop does not exist before that call —
+	// options gathered here (the loop does not exist before that call --
 	// this is the ~:1076 options block, deliberately placed at its tail).
 	// The WithSkillStateRuntime option then stores it mutex-guarded on the
 	// loop, and ConfigSnapshot propagates it to per-session clones.
@@ -2168,12 +2292,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// legacy path when the ledger is degraded/absent.
 	c.PushService.SetEffectsLedger(c.EffectsLedger)
 
-	// Backup push ledger wiring: same degradation posture — when the
+	// Backup push ledger wiring: same degradation posture -- when the
 	// ledger is nil the backup scheduler keeps its legacy unclaimed push.
 	bkpkg.SetEffectsLedger(c.EffectsLedger)
 
 	// Quota notifier (quota-reset-resilience): subscribes to agent.quota_wait
-	// and auto-starts its event pump — no explicit Start call needed. Nil
+	// and auto-starts its event pump -- no explicit Start call needed. Nil
 	// push service is guarded internally (events still consumed, delivery
 	// skipped), so this is safe even before channels register.
 	c.QuotaNotifier = services.NewQuotaNotifier(msgBus, c.PushService,
@@ -2297,7 +2421,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	//
 	// The manager's LLM (consolidation summarization + distill
 	// summarization) prefers the dedicated memory_model client when set;
-	// otherwise the general chat client — byte-identical to the
+	// otherwise the general chat client -- byte-identical to the
 	// pre-slot behavior. Typed-nil guard: only a non-nil client may
 	// occupy the interface field.
 	memoryLLM := c.LLMProvider
@@ -2338,7 +2462,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.Info("Memory fact store opened", "path", filepath.Join(cfg.Daemon.DataDir, "memory_facts.db"))
 			// Session-end fact extraction (C6): extract typed facts from
 			// the turn's dialogue after the session closes. Errors are
-			// logged, never fatal — extraction is advisory.
+			// logged, never fatal -- extraction is advisory.
 			wireMemoryFactExtraction(c.AgentLoop, factStore, logger)
 		}
 
@@ -2383,7 +2507,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	// L0 raw-conversation tier (tree 01 L3). Gated on memory.l0_enabled
-	// (default false — nothing records). Wires the session-end record +
+	// (default false -- nothing records). Wires the session-end record +
 	// enqueue hook, the consolidator prune closure, and returns the
 	// DistillWorker for queue registration below. The enqueuer is the
 	// daemon's own persistent queue (satisfies memory.JobEnqueuer); nil
@@ -2567,8 +2691,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Session teardown wiring (session-affinity leaf 06). The coordinator
 	// is constructed in the LLM block above (resolver must exist first:
 	// the endpoint snapshot is its teardown key source); here it becomes
-	// the store's lifecycle hook — session archive → hook → coordinator →
-	// adapter → erase — and the leaf-05 idle reaper starts feeding it
+	// the store's lifecycle hook -- session archive → hook → coordinator →
+	// adapter → erase -- and the leaf-05 idle reaper starts feeding it
 	// SessionEventIdle. The hook adapter is the tiny structural bridge:
 	// llm.TeardownCoordinator.OnSessionEvent takes a plain string event
 	// (internal/llm must not import internal/session), so this closure
@@ -2580,7 +2704,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// session_id/conversation_id duality (root AGENTS.md): the store
 		// fires lifecycle events with the PRIMARY session id while the
 		// sticky/teardown snapshot keys on the ACCOUNTING (conversation)
-		// id — wire the primary->conversation seam so a miss retries under
+		// id -- wire the primary->conversation seam so a miss retries under
 		// the alternate identity instead of silently dropping the teardown.
 		// NOTE: on the DELETE path this resolver is structurally blind
 		// (the store removes the row before firing the hook), so the
@@ -2635,28 +2759,47 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// daemon restarts via a dedicated parks.db. Deliberately NOT the
 	// session store's handle: the parker writes from resume goroutines,
 	// and a separate WAL database keeps lock contention off the chat
-	// hot path. Best-effort like every parker side channel — a failed
+	// hot path. Best-effort like every parker side channel -- a failed
 	// open logs a warning and every parker runs memory-only (the exact
 	// pre-persistence behaviour).
 	parksDB := filepath.Join(cfg.Daemon.DataDir, "parks.db")
 	parkStore, parkStoreErr := agent.NewSQLiteParkStore(parksDB, logger.With("component", "park-store"))
 	if parkStoreErr != nil {
-		logger.Warn("Failed to create park store — parked turns will NOT survive restarts",
+		logger.Warn("Failed to create park store -- parked turns will NOT survive restarts",
 			"error", parkStoreErr)
 	} else {
 		c.ParkStore = parkStore
 	}
 
+	// Turn journal store (turn-journal tree leaf 02, master C6): the
+	// durable step ledger over a dedicated turnjournal.db, constructed
+	// beside parks.db with the same best-effort posture. Flag OFF
+	// (the default, docs/agents/opt-in-defaults.md) never opens the
+	// file and logs exactly one Info line; a failed open logs Warn and
+	// disables (the step pipeline's nil hooks keep legacy behaviour).
+	if cfg.Daemon.TurnJournalEnabled {
+		turnJournalDB := filepath.Join(cfg.Daemon.DataDir, "turnjournal.db")
+		turnJournal, tjErr := turnjournal.NewSQLiteJournal(turnJournalDB, logger.With("component", "turn-journal"))
+		if tjErr != nil {
+			logger.Warn("Failed to create turn journal -- turns will NOT be journaled",
+				"error", tjErr)
+		} else {
+			c.TurnJournal = turnJournal
+		}
+	} else {
+		logger.Info("turn journal disabled (daemon.turn_journal_enabled=false)")
+	}
+
 	// External-effect idempotency ledger (effects tree leaf 02): durable
 	// record of irreversible external effects over a dedicated effects.db.
-	// Deliberately NOT the park/session store handles — same rationale as
+	// Deliberately NOT the park/session store handles -- same rationale as
 	// parks.db. Best-effort like the park store: a failed open logs a
 	// warning and every wired tool keeps its legacy unclaimed path (the
 	// exact pre-effects behaviour).
 	effectsDB := filepath.Join(cfg.Daemon.DataDir, "effects.db")
 	effectsLedger, effectsLedgerErr := effects.NewSQLiteLedger(effectsDB, logger.With("component", "effects-ledger"))
 	if effectsLedgerErr != nil {
-		logger.Warn("Failed to create effects ledger — external effects will NOT be idempotency-claimed",
+		logger.Warn("Failed to create effects ledger -- external effects will NOT be idempotency-claimed",
 			"error", effectsLedgerErr)
 	} else {
 		c.EffectsLedger = effectsLedger
@@ -2851,7 +2994,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Wire the RPC session handler to the project manager so
 			// session.create binds like the services path: explicit
 			// project_id, else the client's detection-context CWD resolved
-			// into a project, else UNBOUND. Projects are scoped per session —
+			// into a project, else UNBOUND. Projects are scoped per session --
 			// the handler never consults the global active project.
 			if c.SessionHandler != nil {
 				c.SessionHandler.SetProjectResolver(sessionProjectResolver{pm: pm})
@@ -2889,12 +3032,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		c.QueueHandler = queue.NewHandler(jobQueue, msgBus, logger)
 	}
 
-	// L0 raw-conversation tier (tree 01 L3) — wired AFTER the persistent
+	// L0 raw-conversation tier (tree 01 L3) -- wired AFTER the persistent
 	// queue exists: the capture path enqueues memory.l1_extract jobs
 	// through c.Queue, so wiring it before queue creation silently ran
 	// with a nil enqueuer (L0 lines recorded, zero distill jobs ever
-	// enqueued — observed live 2026-10-13). Gated on memory.l0_enabled
-	// (default false — nothing records). The enqueuer is the daemon's
+	// enqueued -- observed live 2026-10-13). Gated on memory.l0_enabled
+	// (default false -- nothing records). The enqueuer is the daemon's
 	// own persistent queue (satisfies memory.JobEnqueuer); nil queue
 	// just means L1 jobs are never enqueued (recording continues).
 	var l0Enqueuer memory.JobEnqueuer
@@ -2918,7 +3061,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Turn-terminal memory capture (option C, plan
 	// docs/plans/20261013-turn-terminal-capture): the turn.terminal
 	// subscriber replaces the retired session-end l0_record hook and the
-	// loop-level epistemic hook — both were loop-local seams that
+	// loop-level epistemic hook -- both were loop-local seams that
 	// dispatched/task-scoped loops never received. Recording pieces come
 	// from l0c (nil = L0 recording disabled); ambient extraction from the
 	// epistemic-built extractor (nil = ambient disabled); the message
@@ -3037,7 +3180,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create the change journal so every accepted change can be reverted
 	// later (`meept changes revert`). Default ON, stored under the daemon
-	// data directory; a failure to open is logged but not fatal — resolve
+	// data directory; a failure to open is logged but not fatal -- resolve
 	// simply runs without journaling.
 	changeJournal, err := builtin.NewJournal(builtin.JournalConfig{
 		DBPath: filepath.Join(cfg.Daemon.DataDir, "changes.db"),
@@ -3054,9 +3197,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	//   - [runtime] enabled: backend selection goes through ResolveBackend.
 	//     With require_sandbox=true and no qualifying sandbox backend, the
 	//     shell tool is wired to a REFUSING backend (every command errors
-	//     wrapping runtime.ErrSandboxRequired) — never silent local exec.
+	//     wrapping runtime.ErrSandboxRequired) -- never silent local exec.
 	//   - [runtime] disabled: behavior is entirely unchanged from before
-	//     this leaf — no manager, shell tool falls back to direct local
+	//     this leaf -- no manager, shell tool falls back to direct local
 	//     exec. This is a deliberate, documented posture, not a degrade.
 	var containerMgr *runtime.ContainerManager
 	if cfg.Runtime.Enabled {
@@ -3115,7 +3258,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	// Transcript summarize chatter: the dedicated summarize_model client
 	// when one was built, else the summarizer chain default (both nil
-	// when no model resolved — the tool's config error stays honest).
+	// when no model resolved -- the tool's config error stays honest).
 	transcriptChatter := c.TranscriptSummarizerClient
 	if transcriptChatter == nil {
 		transcriptChatter = c.SummarizerClient
@@ -3124,7 +3267,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// dedicated directory under the daemon data dir, opened lazily inside
 	// registerBuiltinTools only when enabled.
 	knowledgeDataDir := filepath.Join(cfg.Daemon.DataDir, "knowledge")
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions, gateCap, securityEngine)
 
 	// GitHub PR/CI tools ([github] block, github-pr-ci tree): register
 	// next to the other builtin tools, gated on enabled + a resolvable
@@ -3169,7 +3312,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	if acpMgr != nil && acpMgr.HasPermissionRelay() {
 		// One single lowercase Info line for the armed human relay (leaf 03,
-		// Contract C) — same shape as the decision-lane line above.
+		// Contract C) -- same shape as the decision-lane line above.
 		logger.Info("acp human permission relay armed",
 			"mode", cfg.ACP.PermissionMode,
 			"escalate", cfg.ACP.DecisionEscalateToHuman,
@@ -3185,6 +3328,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	fanSlackNotifierIntoRelay(acpMgr, c.SlackChannel)
 	wireSlackResolver(c.SlackInteractions, acpMgr)
 	RegisterACPTools(c.ToolRegistry, c.ACPManager)
+	if gateCap != nil && acpMgr != nil {
+		// CHOKEPOINT 2 RESOLUTION (jev-command-gate leaf 02, Contract C4):
+		// the permission-table ask's human answer arrives through the ACP
+		// relay resolve path. Match armed asks against the pending request's
+		// summary (which carries the command text) at resolve time.
+		wireGateCaptureResolve(acpMgr, gateCap)
+	}
 
 	// External acp turn producer (acp-employees dim 3A): when the [acp]
 	// kill switch armed a manager, the singleton daemon loop gets the
@@ -3285,7 +3435,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// SharedChatter: the ProviderManager when multi-provider wiring
 			// is on (session-affinity/leaf-07 finding). Without it every
 			// registry-built loop ran on the single default client, whose
-			// requestModelOverride rejects a cross-provider WithResolvedModel —
+			// requestModelOverride rejects a cross-provider WithResolvedModel --
 			// alias rotation and the session-endpoint reporting seam never
 			// engaged for dispatched turns (both session-affinity e2e suites
 			// observed this live). Nil when no manager exists (single-provider
@@ -3340,7 +3490,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// leaf 04): the registry pushes the resolved mode into the shared
 		// tool registry so specialist loops inherit the same indexed
 		// stubbing the primary loop gets via SetSchemaModeConfig above.
-		// Must run after registry construction — c.AgentRegistry is nil at
+		// Must run after registry construction -- c.AgentRegistry is nil at
 		// the primary-loop wiring site (components.go:1422).
 		c.AgentRegistry.SetSchemaModeConfig(cfg.Agent.Tools)
 
@@ -3424,7 +3574,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				logger.Debug("Capability matcher initialized without capability index")
 			}
 		} else if !cfg.Agents.CapabilityMatchEnabled {
-			logger.Info("Capability matcher disabled by config (agents.capability_match_enabled=false) — using LLM classifier + keyword table fallback")
+			logger.Info("Capability matcher disabled by config (agents.capability_match_enabled=false) -- using LLM classifier + keyword table fallback")
 		}
 
 		// Create dispatcher with capability matcher
@@ -3465,7 +3615,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		// Session drift detector (issue #41): watches the per-session
 		// intent-embedding sequence fed by the prefilter's Door-1 path.
-		// Default off, log-only — the detector is constructed only when
+		// Default off, log-only -- the detector is constructed only when
 		// config enables it, and the dispatcher treats the signal as
 		// observational.
 		if cfg.Orchestrator.SessionDrift.Enabled {
@@ -3554,7 +3704,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 
 		// Legacy sync chat opt-in (async-turn-migration leaf 07): the
-		// default is async-everywhere — chat.submit acks immediately and
+		// default is async-everywhere -- chat.submit acks immediately and
 		// results arrive via turn.terminal. Only an explicit
 		// orchestrator.sync_chat_enabled=true makes task-dispatched turns
 		// block the chat RPC again (stall-based ceiling, stub possible).
@@ -3579,7 +3729,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		// Park-event bus (tree 03 leaf 04, D9): the chat-side quota watcher
 		// publishes its park/resume events on the EXISTING agent.quota_wait
-		// topic — the same ParkTurnEvent the throttle parker emits below —
+		// topic -- the same ParkTurnEvent the throttle parker emits below --
 		// so the TUI/GUI agents-tab wait labels see every parked turn class.
 		if c.ChatHandler.QuotaResumeWatcher() != nil {
 			c.ChatHandler.QuotaResumeWatcher().SetParkEventBus(msgBus)
@@ -3603,14 +3753,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		throttleParker.SetPollInterval(cfg.LLM.QuotaRetry.DeferCheckInterval)
 		throttleParker.SetParkEventBus(msgBus)
 		// AUDIT FIX C2 (bughunt 2026-09-03): the parker was wired but never
-		// Started — Park() only appends, resume happens solely in the ticker
+		// Started -- Park() only appends, resume happens solely in the ticker
 		// goroutine Start() spawns, so every parked throttle turn sat forever
 		// (dropped at shutdown) while the caller saw ("", nil) success.
 		// Start here with the wiring ctx, mirroring goalTurnParker.Start.
 		//
 		// The resume callback is nil at this point (SetThrottleParker below
 		// installs the class router), and Start no-ops silently when the
-		// callback is nil (parked_turn.go) — so start AFTER wiring.
+		// callback is nil (parked_turn.go) -- so start AFTER wiring.
 		// Parked-turn persistence: the chat parker's rows are scoped
 		// kind=chat in parks.db. Wired before Start (below) so the first
 		// Start re-arms chat turns parked before this boot. Nil-safe:
@@ -3639,7 +3789,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// the response on "dispatcher.stats.result". The in-process chat path
 		// ("show me dispatcher stats") uses handleStatsQuery directly
 		// (dispatcher.go handlePlatformIntrospection) and does not go
-		// through the bus. Not a dead listener — do not remove.
+		// through the bus. Not a dead listener -- do not remove.
 		statsSub := msgBus.Subscribe("dispatcher-stats-handler", "dispatcher.stats")
 		go func() {
 			for {
@@ -3675,7 +3825,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Pair manager for the strategic planner's spec_pair flow. The
 			// collab engine below builds its own collabPairMgr later in this
 			// block, but strategic pair sessions (compound intent →
-			// spec_pair mode) need one wired HERE — without it
+			// spec_pair mode) need one wired HERE -- without it
 			// planPairSession returns "pair manager not configured", which
 			// used to silently degrade compound requests to a chat-default
 			// fallback step (e2e T1 misroute, 2026-09-10). A dedicated
@@ -3739,7 +3889,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			// Claim-vs-evidence validation (e2e run 7, 2026-09-11 rkl3Th):
 			// the TacticalScheduler's ValidateStep gate has existed since
-			// its introduction but was never WIRED — ValidatorManager was
+			// its introduction but was never WIRED -- ValidatorManager was
 			// constructed nowhere in the daemon, so fabricated evidence in
 			// step results passed silently. A step-scoped filesystem
 			// validator constrained to the session's project root turns the
@@ -3752,7 +3902,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// checks evidence subjects against the REAL filesystem, so a
 			// fabricated file_exists (run 7) fails the gate unless the
 			// artifact exists. Relative evidence paths resolve against the
-			// validator process working directory — scratch-daemon runs
+			// validator process working directory -- scratch-daemon runs
 			// set this to the project dir, so step-relative paths check
 			// the right tree.
 			c.ValidatorManager = validator.NewValidatorManagerWithLogger(
@@ -3777,13 +3927,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			// Output-filter chain (output-filters tree, leaf 04): built
 			// from the daemon config snapshot and wired ONLY when
-			// output_filters.enabled — a disabled config leaves the
+			// output_filters.enabled -- a disabled config leaves the
 			// completion path byte-identical to the pre-filter behavior.
 			// Also wires the filter-retry cap source from the same config.
 			wireOutputFilterChain(c, cfg, tacticalScheduler, logger.With("component", "tactical"))
 
 			// F29 (2026-09-17 bughunt): the tactical task-failure path
-			// must also feed the burst detector — hard failures mark
+			// must also feed the burst detector -- hard failures mark
 			// dispatch_log 'failed_replan' directly and never pass
 			// through the dispatcher's Signal-A ok/corrected resolution,
 			// so without this wiring real failure bursts were invisible
@@ -3868,6 +4018,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				Workspace: collabWorkspace,
 				Bus:       msgBus,
 				Logger:    logger.With("component", "pair-programming-driver"),
+				Handoff:   newCollabHandoffBoundary(cfg, c.TaintTracker, logger),
 			}))
 			collabEngine.RegisterMode("differential", agent.NewDifferentialDriver(agent.DifferentialDriverDeps{
 				Registry:    c.AgentRegistry,
@@ -3875,6 +4026,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				PairManager: collabPairMgr,
 				Bus:         msgBus,
 				Logger:      logger.With("component", "differential-driver"),
+				Handoff:     newCollabHandoffBoundary(cfg, c.TaintTracker, logger),
 			}))
 			collabEngine.RegisterMode("team_parallel", agent.NewParallelTeamDriver(agent.ParallelTeamDriverDeps{
 				Registry:    c.AgentRegistry,
@@ -3882,6 +4034,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				PairManager: collabPairMgr,
 				Bus:         msgBus,
 				Logger:      logger.With("component", "parallel-team-driver"),
+				Handoff:     newCollabHandoffBoundary(cfg, c.TaintTracker, logger),
 			}))
 			c.CollaborationEngine = collabEngine
 			logger.Info("Collaboration engine initialized", "modes", "pair_programming,differential,team_parallel")
@@ -3996,13 +4149,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Create chat handler without dispatcher (single-agent mode)
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, nil, msgBus, logger)
 
-		// Wire the notification publisher (Plan 4.3 finding) — single-agent
+		// Wire the notification publisher (Plan 4.3 finding) -- single-agent
 		// construction site, same adapter as the multi-agent path above.
 		if c.NotificationEmitter != nil {
 			c.ChatHandler.SetNotificationPublisher(&notificationAdapter{emitter: c.NotificationEmitter})
 		}
 
-		// Legacy sync chat opt-in (async-turn-migration leaf 07) —
+		// Legacy sync chat opt-in (async-turn-migration leaf 07) --
 		// same contract as the multi-agent construction site above.
 		c.ChatHandler.SetSyncMode(cfg.Orchestrator.SyncChatEnabled)
 		c.ChatHandler.SetSyncWaitStall(cfg.Orchestrator.SyncWaitStall, cfg.Orchestrator.SyncWaitMax)
@@ -4164,9 +4317,18 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if taskStore != nil {
 		jobProc.WithTaskStore(taskStore)
 	}
+	// Turn-journal hooks onto the step pipeline (turn-journal tree leaf
+	// 02, master C6): installed only when both the flag is on and the
+	// store opened; nil hooks otherwise (byte-identical legacy step
+	// path). A quota PARK leaves the run open by construction -- the
+	// Process-side run_closed fires only on the terminal success return
+	// (leaf T4 invariant).
+	if c.TurnJournal != nil {
+		jobProc.WithTurnJournal(agent.NewTurnJournalHooks(c.TurnJournal, logger.With("component", "turn-journal")))
+	}
 	c.JobProcessor = jobProc
 
-	// BEGIN tree-01-L3 distill worker registration (APPEND-ONLY block —
+	// BEGIN tree-01-L3 distill worker registration (APPEND-ONLY block --
 	// the registration site is contended; add siblings as separate blocks).
 	// When L0 is enabled, memory.l1_extract / memory.l2_scene jobs route to
 	// the DistillWorker; every other job type falls through to the agent
@@ -4429,7 +4591,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Inject the classifier or small-model client as the migrator LLM
 		// so Migrate can propose richer constitutions from bot prompts.
 		// Prefer ClassifierClient (already falls back to small_model
-		// internally). Nil is fine — the conservative path runs.
+		// internally). Nil is fine -- the conservative path runs.
 		var migratorOpt employee.WiringOption
 		if c.ClassifierClient != nil {
 			migratorOpt = employee.WithMigratorLLM(c.ClassifierClient)
@@ -4813,7 +4975,7 @@ func (c *Components) Start(ctx context.Context) error {
 
 	// Start soul watcher (SOUL.md hot reload). First so a persona change
 	// during startup races nothing; the watcher is context-bound (no Stop
-	// method — the deferred c.cancel() reaps it on rollback/shutdown).
+	// method -- the deferred c.cancel() reaps it on rollback/shutdown).
 	if c.Soul != nil {
 		if err := c.Soul.StartWatching(ctx); err != nil {
 			return fmt.Errorf("start soul watcher: %w", err)
@@ -4879,7 +5041,7 @@ func (c *Components) Start(ctx context.Context) error {
 	// registered AND the instruction scheduler is live, a parked
 	// github_ci_wait writes its re-arm row to the instruction store at
 	// park time. The cron row is only visible to SyncCronInstructions on
-	// a re-sync, and that ran at Start above — so without a ticker a
+	// a re-sync, and that ran at Start above -- so without a ticker a
 	// mid-life park would not re-check until the next daemon boot. This
 	// 30s re-sync closes that window. No-op when either dependency is
 	// absent (github disabled, no scheduler).
@@ -4970,7 +5132,7 @@ func (c *Components) Start(ctx context.Context) error {
 
 		// Add agent-specific workers before Start so they are picked up by
 		// the pool's startup loop (which assigns wg and calls worker.Start).
-		// Exclude the dispatcher — it routes jobs but does not execute them.
+		// Exclude the dispatcher -- it routes jobs but does not execute them.
 		agentIDs := agent.ExecutorAgentIDs()
 		workersPerAgent := 1
 		agentWorkerCount := 0
@@ -5183,8 +5345,8 @@ func (c *Components) Start(ctx context.Context) error {
 			}
 			// Resolve the audit model. When the user sets an explicit
 			// alias, try ResolveForAlias first. When empty (the default),
-			// skip straight to SmallModel() — the natural default for an
-			// audit/checkpoint model — then DefaultModel() as a final
+			// skip straight to SmallModel() -- the natural default for an
+			// audit/checkpoint model -- then DefaultModel() as a final
 			// fallback.
 			var modelCfg *llm.ModelConfig
 			if modelAlias != "" {
@@ -5433,7 +5595,7 @@ func (c *Components) Start(ctx context.Context) error {
 			// serve every goal loop. The parker starts disabled (nil
 			// resume) and is armed below with a resume callback that
 			// routes each resumed record to the parked employee's
-			// registered GoalLoop via the Manager lookup — no second
+			// registered GoalLoop via the Manager lookup -- no second
 			// parker is ever created. maxWait mirrors the quota wiring
 			// (llm.quota_retry.max_wait) so goal episodes soft-stop on
 			// the same schedule as chat turns.
@@ -5470,7 +5632,7 @@ func (c *Components) Start(ctx context.Context) error {
 			// chat parkers, so the agents-tab wait labels cover employees.
 			goalTurnParker.SetParkEventBus(c.msgBus)
 			// Parked-turn persistence (episode kind): parked episodes survive
-			// daemon restarts — saved at park, deleted at resume, re-armed on
+			// daemon restarts -- saved at park, deleted at resume, re-armed on
 			// the next start. The key override carries the H4 dedup identity
 			// (employee + phase + trigger, FiredAt excluded) so a re-parked
 			// episode overwrites its own row instead of accumulating
@@ -5481,7 +5643,7 @@ func (c *Components) Start(ctx context.Context) error {
 				goalTurnParker.SetParkPersistence(c.ParkStore, agent.ParkKindEpisode)
 				// Key mirrors the employee parker's H4 identity:
 				// employee + phase + trigger (source|topic), FiredAt excluded
-				// — nil triggers (reflect/approve phases) normalize to "nil",
+				// -- nil triggers (reflect/approve phases) normalize to "nil",
 				// exactly like employee.triggerKey. Loops are one-episode-at-
 				// a-time per employee, so this is unique per live park.
 				goalTurnParker.SetParkKey(func(rec agent.ParkedTurnRecord) string {
@@ -5516,7 +5678,7 @@ func (c *Components) Start(ctx context.Context) error {
 			// config (employees.enabled=true, bots.enabled=false), the
 			// employee Manager is constructed with a nil botManager and
 			// every ListEmployees call returns errNotConfigured. That's
-			// the expected state when the user hasn't set up bots yet —
+			// the expected state when the user hasn't set up bots yet --
 			// logging WARN here is noise. Once bots are enabled and
 			// employees are configured via `meept agents create`, this
 			// block runs for real.
@@ -5785,7 +5947,7 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 		reflectionTicker := time.NewTicker(interval)
 		// Daemon-lifetime goroutine: the reflection timer must outlive the
-		// caller's request/boot context — it exits via c.ctx.Done() (the
+		// caller's request/boot context -- it exits via c.ctx.Done() (the
 		// components lifecycle context cancelled on Stop), mirroring the
 		// detached health-check runs in internal/daemon/AGENTS.md.
 		go func() { //nolint:gosec // daemon-lifetime goroutine must outlive request
@@ -5867,7 +6029,7 @@ func escalationGateForTier(c *employee.Constitution, employeeID string, logger *
 	}
 }
 
-// Stop stops all components. It is idempotent — safe to call multiple times.
+// Stop stops all components. It is idempotent -- safe to call multiple times.
 // Only the first call executes the shutdown sequence; subsequent calls return
 // nil immediately.
 func (c *Components) Stop(ctx context.Context) error {
@@ -5887,7 +6049,7 @@ func (c *Components) stopComponents(ctx context.Context) error {
 
 	// Flush and stop the OTLP metrics exporter first (metrics.otlp): the
 	// final batch must reach the receiver before the process tears down.
-	// Nil on every disabled boot — the guard makes this a no-op there.
+	// Nil on every disabled boot -- the guard makes this a no-op there.
 	c.stopOTLPExporter()
 
 	// Drop the activity ring reference and unsubscribe the live-tail bus
@@ -6086,7 +6248,7 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// Close the park store AFTER the parkers have stopped (ChatHandler.Stop
 	// above joined the quota watcher; the goal-episode parker is joined by
 	// the manager wiring). Rows stay on disk by design: parked turns
-	// re-arm on the next boot — keep, never drop, per the durability goal.
+	// re-arm on the next boot -- keep, never drop, per the durability goal.
 	if c.ParkStore != nil {
 		if err := c.ParkStore.Close(); err != nil {
 			c.Logger.Error("Failed to close park store", "error", err)
@@ -6097,9 +6259,22 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.ParkStore = nil
 	}
 
+	// Close the turn journal AFTER the step pipeline has stopped (the
+	// worker pool above joined it). Rows stay on disk: open runs re-arm
+	// on the next boot via leaf 03's rehydrate -- keep, never drop.
+	if c.TurnJournal != nil {
+		if err := c.TurnJournal.Close(); err != nil {
+			c.Logger.Error("Failed to close turn journal", "error", err)
+			lastErr = err
+		} else {
+			c.Logger.Info("Turn journal closed")
+		}
+		c.TurnJournal = nil
+	}
+
 	// Close the effects ledger AFTER the tools and reconciler have stopped
 	// (mirrors the park-store ordering). Rows stay on disk: pending effects
-	// re-surface on the next boot's startup reconcile — keep, never drop.
+	// re-surface on the next boot's startup reconcile -- keep, never drop.
 	if c.EffectsLedger != nil {
 		if err := c.EffectsLedger.Close(); err != nil {
 			c.Logger.Error("Failed to close effects ledger", "error", err)
@@ -6111,8 +6286,21 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.EffectsReconciler = nil
 	}
 
+	// Close the pii swap store AFTER the loops have stopped ([security.pii],
+	// pii leaf 02). Rows stay on disk (session-scoped restore survives a
+	// daemon restart within the same session).
+	if c.PiiSwapStore != nil {
+		if err := c.PiiSwapStore.Close(); err != nil {
+			c.Logger.Error("Failed to close pii swap store", "error", err)
+			lastErr = err
+		} else {
+			c.Logger.Info("Pii swap store closed")
+		}
+		c.PiiSwapStore = nil
+	}
+
 	// Stop the github CI re-arm ticker and close the GitHub client pool
-	// (pool is inert — a per-token client cache — but Close drops the
+	// (pool is inert -- a per-token client cache -- but Close drops the
 	// cached go-github clients so the process does not hold them past
 	// tool shutdown). No-op when the github block was not enabled.
 	c.stopGitHubReArmTicker()
@@ -6209,7 +6397,7 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// manager (the consolidator's tick passes write through this handle;
 	// manager teardown stops the consolidator). The tools' own lazy
 	// handle is separate and closed by its owner (registerBuiltinTools
-	// keeps it function-local — the process exit reclaims the WAL).
+	// keeps it function-local -- the process exit reclaims the WAL).
 	if c.KnowledgeStore != nil {
 		if err := c.KnowledgeStore.Close(); err != nil {
 			c.Logger.Warn("Failed to close knowledge store", "error", err)
@@ -6296,7 +6484,7 @@ func (c *Components) stopComponents(ctx context.Context) error {
 
 	// Close the evolver's dedicated plan-sink store (its lifecycle context
 	// first, so in-flight sink writes unblock). Owned solely by the evolver
-	// wiring — the shared plan store is closed by the daemon, not here.
+	// wiring -- the shared plan store is closed by the daemon, not here.
 	if c.EvolverPlanCancel != nil {
 		c.EvolverPlanCancel()
 	}
@@ -6441,7 +6629,7 @@ func loadModelsConfigWithPath(logger *slog.Logger) (*config.ModelsConfig, string
 	// Honor MEEPT_HOME (config.MeeptPath is THE resolution point, AGENTS.md).
 	// Previously this used os.UserHomeDir() directly, so an isolated rig
 	// launched with MEEPT_HOME still read the operator's real
-	// ~/.meept/models.json5 — the daemon honored MEEPT_HOME for certs,
+	// ~/.meept/models.json5 -- the daemon honored MEEPT_HOME for certs,
 	// sockets and logs but silently leaked into the user's model config
 	// (found 2026-09-12 while standing up a clean researcher-path rig).
 	homePath := config.MeeptPath("models.json5")
@@ -6672,6 +6860,56 @@ func createSecurityOrchestrator(cfg *config.Config, logger *slog.Logger) *intsec
 	return orch
 }
 
+// newTaintTrackerIfEnabled builds the shared ExtendedTracker for the
+// inter-agent taint lane ([security.taint], leaf 02). Nil when disabled —
+// every consumer treats a nil tracker as "lane off" (typed-nil discipline:
+// labeling, scanning, and the hook all skip silently).
+func newTaintTrackerIfEnabled(cfg *config.Config, logger *slog.Logger) *taint.ExtendedTracker {
+	if cfg == nil || !cfg.Security.Taint.Enabled {
+		return nil
+	}
+	return taint.NewExtendedTracker(logger.With("component", "taint-tracker"))
+}
+
+// buildTaintHookConfig maps [security] config onto the taint hook config:
+// sink knobs pass through unchanged; the per-handoff segment check mode is
+// wired from security.agent_handoff_mode (R0 decision D3: "off"/"" ->
+// TaintModeMonitor, "block" -> TaintModeEnforce). The shipped code default
+// is TaintModeMonitor (audit-first); an explicit config value of "block"
+// is what arms enforcement.
+func buildTaintHookConfig(sec *config.SecurityConfig) agent.TaintHookConfig {
+	hookCfg := agent.TaintHookConfig{
+		BlockUserInputShell: sec.Taint.Sinks.BlockUserInputShell,
+		BlockSecretNetwork:  sec.Taint.Sinks.BlockSecretNetwork,
+		BlockUntrustedAgent: sec.Taint.Sinks.BlockUntrustedAgent,
+		BlockExternalShell:  sec.Taint.Sinks.BlockExternalShell,
+	}
+	if sec.AgentHandoffMode == "block" {
+		hookCfg.Mode = agent.TaintModeEnforce
+	}
+	return hookCfg
+}
+
+// newCollabHandoffBoundary builds the collaboration drivers' handoff seam
+// from config (leaf 02): the shared taint tracker (nil when [security.taint]
+// is disabled -> labeling/scanning skip silently) plus the inter-agent
+// deny-pattern boundary (D2). Nil result keeps drivers at pre-taint
+// behavior.
+func newCollabHandoffBoundary(cfg *config.Config, tracker *taint.ExtendedTracker, logger *slog.Logger) *agent.HandoffBoundary {
+	if cfg == nil {
+		return nil
+	}
+	if tracker == nil && cfg.Security.AgentHandoffMode == "off" {
+		// Nothing to do at all: no labeling, no scanning.
+		return nil
+	}
+	var boundary *intsecurity.InterAgentBoundary
+	if cfg.Security.AgentHandoffMode != "off" {
+		boundary = intsecurity.NewInterAgentBoundary(logger.With("component", "inter-agent-boundary"))
+	}
+	return agent.NewHandoffBoundary(tracker, boundary, cfg.Security.AgentHandoffMode, logger)
+}
+
 // shadowOllamaProviderID is the provider name under which baked adapter models
 // are registered in Ollama. Used to construct "ollama/<baked-name>" refs that
 // the resolver can route to.
@@ -6809,6 +7047,9 @@ type skillAuthoringContext struct {
 }
 
 // registerBuiltinTools registers all builtin tools with the registry.
+// gateCap is the leaf-02 capture sink for chokepoint 2 (permission-table
+// ask); securityEngine receives its arm side when both are non-nil. Both
+// may be nil (capture disabled) - nil-guards everywhere, flow unchanged.
 func registerBuiltinTools(
 	registry *tools.Registry,
 	checker *security.PermissionChecker,
@@ -6838,12 +7079,14 @@ func registerBuiltinTools(
 	knowledgeConsolidationStore *knowledge.Store,
 	knowledgeStoreOut **knowledge.Store,
 	shellPermCfg config.ShellPermissionsConfig,
+	gateCap *gateCaptureStore,
+	securityEngine *intsecurity.Engine,
 ) {
 	readCache := builtin.NewReadCache(30)
 
 	// Filesystem tools
 	// NOTE (agent-groups leaf 01 T3): per-tool SetFenceChecker wiring is
-	// REMOVED — fence enforcement moved into the central FenceStage inside
+	// REMOVED -- fence enforcement moved into the central FenceStage inside
 	// security.PermissionChecker.CheckPermissionForAgent (pkg/security).
 	// Every loop's executor consults the fence centrally, so tools no
 	// longer each need (or get) a fence checker instance.
@@ -6906,7 +7149,7 @@ func registerBuiltinTools(
 	registry.Register(fileGrepTool)
 
 	// Shell tool with security orchestrator for Tirith scanning.
-	// Pass empty workingDir — the shell tool resolves ~ (user home) as
+	// Pass empty workingDir -- the shell tool resolves ~ (user home) as
 	// default. The daemon's CWD is NOT the user's project directory.
 	shellTool := builtin.NewShellExecuteTool("", 60*time.Second, ptyMgr)
 	if secOrch != nil {
@@ -6921,6 +7164,23 @@ func registerBuiltinTools(
 			shellTool.SetPermissionTable(permTable)
 			logger.Info("Shell permission table wired",
 				"preset", shellPermCfg.Preset, "rules", len(shellPermCfg.Rules))
+			// CHOKEPOINT 2 (jev-command-gate leaf 02, Contract C4): the
+			// permission-table ask arm. The store is opened lazily here too
+			// (a table without a decision gate is a valid capture source).
+			// Best-effort: open failure logs and capture stays disabled.
+			if gateCap == nil && securityEngine != nil {
+				gc, gcErr := newGateCaptureStore(gatecapture.DefaultDBPath(), logger)
+				if gcErr != nil {
+					logger.Warn("gate capture store unavailable; capture disabled",
+						"error", gcErr, "path", gatecapture.DefaultDBPath())
+				} else {
+					gateCap = gc
+					logger.Info("gate capture store open", "path", gatecapture.DefaultDBPath())
+				}
+			}
+			if gateCap != nil && securityEngine != nil {
+				securityEngine.SetGateAskCapture(gateCap)
+			}
 		}
 	}
 	shellTool.SetSecretScanner(secretScanner)
@@ -6935,7 +7195,7 @@ func registerBuiltinTools(
 				"error", wire.resolveErr)
 		case wire.resolveErr != nil:
 			// Non-require resolution failure: preserve pre-leaf posture
-			// (no manager wiring => direct exec) — logged at startup.
+			// (no manager wiring => direct exec) -- logged at startup.
 		case wire.resolved != nil:
 			shellTool.SetBackend(wire.resolved)
 			logger.Info("Shell tool wired to resolved backend", "backend", wire.resolved.Name())
@@ -6956,7 +7216,7 @@ func registerBuiltinTools(
 	// Tool-layer spill: oversized shell output is tail-truncated and the full
 	// combined output is spilled to $MEEPT_HOME/spill/tools/<session>/<id>.txt
 	// via the shared SpillService (leaf 01; the sibling leaf 02 owns the TTL
-	// sweep of this tree). Best-effort — a spill failure never fails a command.
+	// sweep of this tree). Best-effort -- a spill failure never fails a command.
 	shellTool.SetSpillWriter(llm.NewSpillService(""))
 	registry.Register(shellTool)
 
@@ -7044,7 +7304,7 @@ func registerBuiltinTools(
 		}
 	}
 
-	// transcript_fetch ([transcript], disabled by default — external
+	// transcript_fetch ([transcript], disabled by default -- external
 	// Python dependency, opt-in like [browser]). Disabled => the tool is
 	// absent from the registry. Configured fields (python path, module,
 	// timeout) flow straight into the tool's subprocess invocation.
@@ -7060,7 +7320,7 @@ func registerBuiltinTools(
 		// summarize=true yields the tool's honest nil-chatter config
 		// error). The threaded client is the chain default
 		// (SummarizerClient) or the dedicated summarize_model client
-		// when one was built — selected at the NewComponents call site.
+		// when one was built -- selected at the NewComponents call site.
 		// A nil client leaves the chatter unset and the tool's config
 		// error is the honest runtime answer.
 		if transcriptCfg.SummarizeEnabled {
@@ -7087,8 +7347,8 @@ func registerBuiltinTools(
 	// entirely (SHARED-CONVENTIONS §2.5: nothing enters prompts). The
 	// consolidation-side store (knowledgeStore, opened by
 	// wireKnowledgeAssets earlier in NewComponents) is shared when
-	// available; otherwise (consolidation passes skipped — no
-	// ingest_dir/code_dirs — or failed open) a fallback handle is opened
+	// available; otherwise (consolidation passes skipped -- no
+	// ingest_dir/code_dirs -- or failed open) a fallback handle is opened
 	// HERE and parked on knowledgeStoreOut so stopComponents closes it at
 	// daemon shutdown (a function-local defer would close it as soon as
 	// this function returns). A failed open is non-fatal: the tools stay
@@ -7099,7 +7359,7 @@ func registerBuiltinTools(
 			ks, kErr := knowledge.New(knowledgeDataDir, knowledgeCfg.MaxPages, logger.With("component", "knowledge-store"))
 			if kErr != nil {
 				logger.Error("knowledge tools disabled: store open failed", "error", kErr, "data_dir", knowledgeDataDir)
-				// Not fatal here — only the knowledge tool family is skipped.
+				// Not fatal here -- only the knowledge tool family is skipped.
 				// Previously this was a bare `return` that aborted the WHOLE
 				// registerBuiltinTools call, silently gutting the rest of the
 				// registry (memory, task, scheduler, image/video, tool_view).
@@ -7285,7 +7545,7 @@ func registerPlatformTools(
 	// Project info tool - resolves current project metadata at call time.
 	// The closure receives a workingDir string: when non-empty (set via
 	// SetWorkingDirFunc from a session-scoped loop), it probes THAT directory;
-	// when empty, it returns "no project bound" — the daemon's own CWD is
+	// when empty, it returns "no project bound" -- the daemon's own CWD is
 	// almost never the user's project, so probing it is misleading.
 	projectInfoFunc := func(workingDir string) map[string]any {
 		if workingDir == "" {
@@ -7326,7 +7586,7 @@ func registerPlatformTools(
 	}
 	handoffTool := builtin.NewRequestHandoffTool(msgBus, agentExistFn)
 	// Unknown-target errors list the roster so the calling agent can
-	// self-correct (named-agent routing follow-up — roster agents outside
+	// self-correct (named-agent routing follow-up -- roster agents outside
 	// the capability table, executor: acp employees included).
 	handoffTool.SetAgentLister(func() []string {
 		var names []string
@@ -7689,13 +7949,13 @@ func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger, loopbac
 		// Skip if no API key and provider requires one (FIX #0004 - allow NoAuth providers).
 		// WARN when the provider carries a Lifecycle block on a loopback
 		// baseURL: that is an intended local runtime that will NEVER serve
-		// failover while skipped — a silent Debug line here is exactly how
+		// failover while skipped -- a silent Debug line here is exactly how
 		// the 2026-10-23 outage hid a healthy-looking local model from the
 		// pool. Cloud providers without a key stay Debug (common template
 		// state: the operator simply has not set that env var).
 		if provider.Options.APIKey == "" && !provider.Options.NoAuth {
 			if loopbackLifecycle[providerID] {
-				logger.Warn("Skipping local-runtime provider without API key — it will never serve failover; add options.noAuth:true (or apiKey)",
+				logger.Warn("Skipping local-runtime provider without API key -- it will never serve failover; add options.noAuth:true (or apiKey)",
 					"provider", providerID,
 					"base_url", provider.Options.BaseURL,
 					"fix", "set options.noAuth: true in models.json5",
@@ -8649,7 +8909,7 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 
 	// Load full skills for registry (for backwards compatibility with existing
 	// code that walks the registry eagerly at startup). A fully lazy registry
-	// would require reworking every RegisterAll consumer — the SkillIndex
+	// would require reworking every RegisterAll consumer -- the SkillIndex
 	// above is already metadata-only, and SkillLoader already provides
 	// on-demand loading for new consumers, which covers the common hot path.
 	// Full lazy conversion of the registry is tracked as a separate concern
@@ -8669,9 +8929,9 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 
 	// Construct skill evolver + scheduler (closed-loop skill evolution).
 	// Requires: usage tracker, writer, registry, capability index, verifier,
-	// learning pipeline — all constructed above. Gated on cfg.Skills.Evolver.Enabled.
+	// learning pipeline -- all constructed above. Gated on cfg.Skills.Evolver.Enabled.
 	// NOTE: extracted to initializeSkillEvolver and invoked AFTER NewComponents'
-	// tracker/writer/PlanManager construction (see daemon.go) — when this block
+	// tracker/writer/PlanManager construction (see daemon.go) -- when this block
 	// lived inline it executed BEFORE c.SkillUsageTracker/c.SkillWriter were
 	// assigned, so the nil-gate was always false and the evolver never
 	// constructed (found by the wiki smoke test, 2026-08-29).
@@ -8701,7 +8961,7 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			)
 		}
 		// requires-tools gating (skills-discovery-02): consult the LIVE tool
-		// registry at execution time, not a snapshot — builtin tools
+		// registry at execution time, not a snapshot -- builtin tools
 		// register after initializeSkills and MCP tools come and go with
 		// their servers. A skill listing unavailable tools fails before any
 		// LLM call (checkRequiredTools runs pre-flight in the executor).
@@ -8891,7 +9151,7 @@ type AgentJobProcessor struct {
 	// bus events, keyed by conversation ID (claim-vs-evidence validation,
 	// e2e run 7 rkl3Th): the step-job result can then carry a tool_evidence
 	// envelope the tactical validation gate can ACTUALLY check against the
-	// filesystem — the model's narrated report was never evidence.
+	// filesystem -- the model's narrated report was never evidence.
 	toolEvidence *toolEvidenceCollector
 	// evidenceSub is the tool.execution.complete subscription opened by
 	// WithBus; kept on the processor so the subscription goroutine has a
@@ -8906,6 +9166,15 @@ type AgentJobProcessor struct {
 	// loop left every test green. With this seam a pin sees what the loop
 	// actually receives (F14 follow-up).
 	turnContextObserver func(ctx context.Context)
+	// turnJournal, when non-nil, journals every step-job turn's
+	// boundaries into turnjournal.db (turn-journal tree leaf 02, master
+	// contracts C2/C4): run_started before the turn, step_started /
+	// step_completed around it, run_closed at the terminal state; and
+	// restores a journaled completed step's result without re-invoking
+	// the LLM (skip seam). Nil (flag off, store failed to open, or a
+	// non-step-job lane) keeps the legacy path byte-identical. All calls
+	// are best-effort: the writer never fails the turn.
+	turnJournal *agent.TurnJournalHooks
 }
 
 // NewAgentJobProcessor creates a new agent job processor.
@@ -8939,7 +9208,7 @@ func (p *AgentJobProcessor) WithTaskStore(ts *task.Store) *AgentJobProcessor {
 // WithBus sets the message bus used for job-level quota surfacing (leaf 06):
 // a step job failing terminal on a provider quota block publishes the
 // EXISTING agent.quota_wait event. Nil bus (the default) keeps the event
-// silent — processors built without a bus must stay fully functional.
+// silent -- processors built without a bus must stay fully functional.
 func (p *AgentJobProcessor) WithBus(b *bus.MessageBus) *AgentJobProcessor {
 	p.bus = b
 	// Claim-vs-evidence validation (run 7): subscribe to the executor's
@@ -8964,12 +9233,12 @@ func (p *AgentJobProcessor) WithBus(b *bus.MessageBus) *AgentJobProcessor {
 // evidenceSub is the tool.execution.complete subscription opened by
 // WithBus; kept on the processor for unsubscribe symmetry.
 // (Declared separately so the zero-value processor stays usable without
-// a bus — every use is nil-guarded.)
+// a bus -- every use is nil-guarded.)
 
 // toolEvidenceCollector accumulates tool-issued evidence payloads per
 // conversation ID. absorb() is best-effort: malformed payloads are
 // dropped, never fatal. Drained by the daemon job processor at step-job
-// completion time. Not safe for concurrent drain — Process calls drain
+// completion time. Not safe for concurrent drain -- Process calls drain
 // on its own worker goroutine while absorb() runs on the subscription
 // goroutine, so a mutex guards the map.
 type toolEvidenceCollector struct {
@@ -9034,11 +9303,71 @@ func (p *AgentJobProcessor) WithOrchestrator(o *agent.Orchestrator) *AgentJobPro
 	return p
 }
 
+// WithTurnJournal installs the turn-journal hooks (turn-journal tree
+// leaf 02, master C6). Nil hooks (flag off / store failed to open)
+// keeps the legacy path byte-identical: every call site nil-checks.
+func (p *AgentJobProcessor) WithTurnJournal(hooks *agent.TurnJournalHooks) *AgentJobProcessor {
+	if hooks != nil {
+		p.turnJournal = hooks
+	}
+	return p
+}
+
+// restoreJournaledStep implements the skip seam (master C4): when the
+// journal already holds a step_completed row for (taskID, stepID), the
+// recorded result envelope is returned WITHOUT re-invoking the LLM
+// (research F3/D2 -- a journaled result is reused, never re-executed),
+// and the empty-response parked-turn probe still runs so a park
+// recorded before the crash keeps routing through the provider-wait
+// requeue. Best-effort: a journal read failure logs and reports
+// ok=false -- the step then executes normally (fail-open toward doing
+// the work; the queue's own dedup stays authoritative per research F4).
+func (p *AgentJobProcessor) restoreJournaledStep(ctx context.Context, job *queue.Job, taskID, stepID, conversationID string) (any, bool) {
+	skip, _, err := p.turnJournal.PlanResume(ctx, taskID, []turnjournal.StepRef{{StepID: stepID, StepIndex: 0}})
+	if err != nil {
+		p.logger.Warn("turn journal: resume plan read failed; executing step normally",
+			"task_id", taskID,
+			"step_id", stepID,
+			"error", err,
+		)
+		return nil, false
+	}
+	payload, ok := skip[stepID]
+	if !ok {
+		return nil, false
+	}
+	p.logger.Info("turn journal: restoring journaled step result without LLM re-invocation",
+		"job_id", job.ID,
+		"task_id", taskID,
+		"step_id", stepID,
+	)
+	// The parked-turn sentinel check rides along: if the loop is STILL
+	// parked from an earlier attempt on this conversation, prefer the
+	// provider-wait requeue over reporting a restored result.
+	if agentLoop := p.agentLoop; agentLoop != nil && agentLoop.GetState() == agent.StateQuotaWait {
+		if parkedErr := p.parkedTurnQuotaError(agentLoop, job); parkedErr != nil {
+			return parkedErr, true
+		}
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(payload, &envelope); err != nil || envelope == nil {
+		// An unparseable blob cannot safely stand in for a step result:
+		// log and re-execute (fail-open), never fabricate.
+		p.logger.Warn("turn journal: recorded step result unparseable; re-executing step",
+			"task_id", taskID,
+			"step_id", stepID,
+			"error", err,
+		)
+		return nil, false
+	}
+	return envelope, true
+}
+
 // resolveStepWorkingDirFor resolves the working directory for a step job,
 // preferring the step's provisioned per-phase worktree (Contract C) over
 // the session precedence chain. stepID (may be "") selects the phase via
-// the step record; when no phase worktree applies — no step/phase, serial
-// mode, provisioner never cached a path — resolution falls back to
+// the step record; when no phase worktree applies -- no step/phase, serial
+// mode, provisioner never cached a path -- resolution falls back to
 // resolveStepWorkingDir, extended with the payload's SessionID hint
 // (finding: the dispatch step lane never injected the session working dir
 // into the tool context because LinkedSessions held a conversation id the
@@ -9061,7 +9390,7 @@ func (p *AgentJobProcessor) resolveStepWorkingDirFor(job *queue.Job, stepID, ses
 	// Payload-hinted origin session: the step job payload carries the
 	// session provenance (audit R4) resolved at schedule time. Look it up
 	// by primary ID and conversation ID (LinkedSessions may hold either
-	// form — same dual lookup as resolveStepWorkingDir's link chain).
+	// form -- same dual lookup as resolveStepWorkingDir's link chain).
 	if sessionID != "" && p.sessionStore != nil {
 		if sess := p.sessionStore.Get(sessionID); sess != nil {
 			if wd, _ := session.ResolveWorkingDir(sess); wd != "" {
@@ -9100,7 +9429,7 @@ func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
 		if t, err := p.taskStore.GetByID(job.TaskID); err == nil && t != nil {
 			for _, sessID := range t.LinkedSessions {
 				// LinkedSessions store conversation IDs (conv-…), not primary
-				// session IDs (session-…) — tasks are linked from the chat
+				// session IDs (session-…) -- tasks are linked from the chat
 				// path, which keys on conversation. Try both lookups
 				// (meept-bench: project.set bound the worktree to the
 				// session, but Get() missed it and step jobs ran in the
@@ -9165,8 +9494,8 @@ func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
 
 // stepJobTurnContext returns the execution context for a queued job's turn.
 //
-// Step jobs run headless — no human sees their intermediate state and no later
-// interactive turn belongs to the task — so their turn carries the AUTONOMOUS
+// Step jobs run headless -- no human sees their intermediate state and no later
+// interactive turn belongs to the task -- so their turn carries the AUTONOMOUS
 // marker and staging tools (file_write, file_edit) write directly instead of
 // staging a pending change that would silently expire unaccepted (e2e run 8,
 // 2026-09-11).
@@ -9236,7 +9565,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 			// Resolve the working directory from the task's linked session's
 			// project binding (set via project.set). Without this, step-job
 			// loops run in the daemon's default cwd instead of the caller's
-			// project — found by meept-bench: file writes landed outside the
+			// project -- found by meept-bench: file writes landed outside the
 			// benchmark worktree. Per-phase worktrees (phase-frontier-parallel
 			// Contract C) take precedence over the session chain when the
 			// orchestrator provisioned one for this step's phase.
@@ -9260,8 +9589,8 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	}
 
 	// Autonomous marker for step jobs (e2e run 8, 2026-09-11): a step job
-	// runs headless — no human sees its intermediate state and no later
-	// interactive turn belongs to this task — so the preview/accept
+	// runs headless -- no human sees its intermediate state and no later
+	// interactive turn belongs to this task -- so the preview/accept
 	// workflow can never complete. Mark the JOB's turn context autonomous so
 	// staging tools (file_write, file_edit) write directly instead of
 	// staging a pending change that silently expires unaccepted (run 8: the
@@ -9269,8 +9598,8 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	// and the artifact never existed).
 	//
 	// The marker MUST NOT be applied to the loop: `agentLoop` above can be
-	// p.agentLoop — the same pointer ChatHandler serves interactive turns on
-	// — and a loop-level latch stayed set forever, silently disabling the
+	// p.agentLoop -- the same pointer ChatHandler serves interactive turns on
+	// -- and a loop-level latch stayed set forever, silently disabling the
 	// pending-change preview for every later chat turn (audit 2026-09-12,
 	// F14). Context scope is per-turn and cannot leak.
 	ctx = stepJobTurnContext(ctx, isStepJob)
@@ -9333,24 +9662,43 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	// Execute
 	if p.turnContextObserver != nil {
 		// Test seam: observe the context the loop is about to receive. Placed
-		// HERE (not next to stepJobTurnContext) on purpose — the pin must fail
+		// HERE (not next to stepJobTurnContext) on purpose -- the pin must fail
 		// if the marker assignment is moved below the RunOnce call.
 		p.turnContextObserver(ctx)
 	}
+
+	// Turn-journal boundaries (turn-journal tree leaf 02, master C2/C4):
+	// run_started before the turn (idempotent per writer), then the skip
+	// seam -- a journaled step_completed row for THIS step restores its
+	// recorded result WITHOUT re-invoking the LLM (research F3/D2), so a
+	// daemon killed after the journal write but before the queue
+	// completion resumes at the recorded value instead of re-executing.
+	// Skip restoration returns the journaled result envelope directly;
+	// the queue's own completion dedup (CompleteAttempt/CompletionIsFresh)
+	// stays authoritative for the queue side (research F4). Best-effort
+	// everywhere: nil hooks (flag off) skip all of this byte-identically.
+	if isStepJob && p.turnJournal != nil {
+		p.turnJournal.OnRunStart(ctx, stepPayload.TaskID, conversationID, job.Payload)
+		if restored, ok := p.restoreJournaledStep(ctx, job, stepPayload.TaskID, stepPayload.StepID, conversationID); ok {
+			return restored, nil
+		}
+		p.turnJournal.OnStepStart(ctx, stepPayload.TaskID, conversationID, stepPayload.StepID, 0)
+	}
+
 	response, err := agentLoop.RunOnce(ctx, prompt, conversationID)
 	if err != nil {
 		// Job-level quota surfacing (leaf 06): the primary loop parks quota
 		// waits via QuotaResumeWatcher and the goal loop has its own parker,
 		// but a step job whose RunOnce still escapes a *llm.QuotaResetError
 		// (every rotation candidate blocked) previously surfaced as a bare
-		// "agent execution failed" — the user never heard the word quota
+		// "agent execution failed" -- the user never heard the word quota
 		// (finding F6). Classify, publish the EXISTING agent.quota_wait
 		// event (WS-classified agent_progress per AGENTS.md), and stamp the
-		// error text with the user-facing sentence — TacticalScheduler.
+		// error text with the user-facing sentence -- TacticalScheduler.
 		// OnJobFailed stores the returned error string verbatim as the step
 		// Result (tactical.go SetResult), so the chat reply quotes it.
 		// Quota is NOT an alias failure: no RecordAliasFailure, no retry or
-		// block mutation here — the loop already did its rotation/parking
+		// block mutation here -- the loop already did its rotation/parking
 		// before the error escaped.
 		if quotaErr, ok := errors.AsType[*llm.QuotaResetError](err); ok {
 			p.publishQuotaWait(job, stepPayload.TaskID, quotaErr)
@@ -9373,14 +9721,14 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		return nil, fmt.Errorf("agent execution failed: %w", err)
 	}
 	// Defense in depth: a no-op turn (LLM failure previously surfaced as
-	// ("", nil)) must not be reported as a completed job — the planner
+	// ("", nil)) must not be reported as a completed job -- the planner
 	// would advance past a step that never did any work.
 	//
 	// H1 (daemon audit 2026-09-08): ("", nil) with err==nil is ALSO the
-	// loop's PARKED-TURN sentinel — a ThrottleBackoffError the loop parked
+	// loop's PARKED-TURN sentinel -- a ThrottleBackoffError the loop parked
 	// on its TurnParker (StateQuotaWait, parkThrottledTurn) returns exactly
 	// that shape. Treating a parked turn as a hard failure failed the step,
-	// discarded the output, and left the parker to re-run the turn later —
+	// discarded the output, and left the parker to re-run the turn later --
 	// side effects re-executed hours after the step was marked failed
 	// (violates D9 "queue jobs PARK"). The parked case must ride the
 	// provider-wait path instead: return a quota-shaped error the worker's
@@ -9413,7 +9761,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	// proved can be fabricated wholesale) and checks every
 	// file_exists/file_hash entry against the real filesystem. A
 	// successful file-tool turn yields entries; the run-7 hallucination
-	// (zero tool calls) yields none — exactly the contrast the gate needs.
+	// (zero tool calls) yields none -- exactly the contrast the gate needs.
 	if isStepJob && p.toolEvidence != nil {
 		result["execution_conversation_id"] = conversationID
 		result["tool_invocations"] = p.toolEvidence.drainInvocations(conversationID)
@@ -9422,9 +9770,9 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		}
 		// Parsed REPORT claims (the model's own accomplished/evidence
 		// narration), for the gate's claim-vs-evidence contrast. Parse
-		// failure leaves claims empty — narration without a parseable
+		// failure leaves claims empty -- narration without a parseable
 		// report is just prose, not structured claims.
-		// (Successor-hint projection lives below, ungated — leaf 03.)
+		// (Successor-hint projection lives below, ungated -- leaf 03.)
 		if report := agent.ExtractReport(response); report != nil {
 			claims := make([]string, 0, len(report.Accomplished))
 			claims = append(claims, report.Accomplished...)
@@ -9434,15 +9782,27 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	if isStepJob {
 		result["step_id"] = stepPayload.StepID
 		result["task_id"] = stepPayload.TaskID
+		// Journal the step's completed boundary with the serialized
+		// envelope (research F3: the memoized replay value), then close
+		// the run ONLY on the terminal success path -- the quota-park
+		// and error returns above leave the run open so leaf 03's
+		// rehydrate sees an interrupted turn and resumes at this step
+		// (leaf T4 invariant: QuotaResetError parks, never short-retries
+		// and never closes).
+		if p.turnJournal != nil {
+			p.turnJournal.OnStepComplete(ctx, stepPayload.TaskID, conversationID,
+				stepPayload.StepID, 0, agent.MarshalTurnResult(result))
+			p.turnJournal.OnRunClose(ctx, stepPayload.TaskID)
+		}
 		// Successor hint projection (agent-routing tree leaf 03): the
 		// finished turn's report-level ADVISORY suggested_next_hint rides
 		// the envelope so tactical.OnJobCompleted can persist it and emit
 		// routing.telemetry. Trimmed and defensively truncated to 64
-		// chars — it is model output, and the envelope must not become a
+		// chars -- it is model output, and the envelope must not become a
 		// channel for unbounded prose. Extracted ONLY from the structured
 		// report field, never from nested response prose; an unparseable
 		// or hint-less report omits the key entirely. NOTE: this lives
-		// OUTSIDE the toolEvidence gate above — the hint must survive even
+		// OUTSIDE the toolEvidence gate above -- the hint must survive even
 		// when the processor runs without a bus/evidence collector wired.
 		if report := agent.ExtractReport(response); report != nil {
 			if hint := strings.TrimSpace(report.SuggestedNextHint); hint != "" {
@@ -9467,13 +9827,13 @@ var _ worker.JobProcessor = (*AgentJobProcessor)(nil)
 // empty queue, or a record already due). Short by design: the job comes
 // back, finds the turn still parked, and re-sentinels at the (then known)
 // resume time. Mirrors the worker's claim-poll cadence rather than the
-// quota-reset horizon — it bounds staleness, not the wait itself.
+// quota-reset horizon -- it bounds staleness, not the wait itself.
 const parkedTurnRequeueFallbackDelay = time.Minute
 
 // parkedTurnQuotaError converts a parked turn into the provider-wait error
 // the worker's requeue machinery already honors (H1, daemon audit
 // 2026-09-08). Called from Process when RunOnce returned ("", nil): that
-// shape is the loop's parked-turn sentinel — the loop hit a
+// shape is the loop's parked-turn sentinel -- the loop hit a
 // ThrottleBackoffError, parked the turn on its TurnParker (StateQuotaWait /
 // "throttle_wait"), and will re-run it via RunOnceWithParts at the resume
 // time. Failing the job here would mark the step failed, discard the
@@ -9482,14 +9842,14 @@ const parkedTurnRequeueFallbackDelay = time.Minute
 // The returned *llm.QuotaResetError is a SENTINEL, not a provider report:
 // internal/worker.requeueOnProviderWait reads ResetAt (the parker's
 // scheduled resume), requeues the job at that time WITHOUT consuming a
-// retry, and returns before any Complete/Fail — so the job can never
+// retry, and returns before any Complete/Fail -- so the job can never
 // double-complete. internal/agent.tactical's isQuotaClassFailure also
 // classifies the rendered text quota-class ("quota limit exceeded"), so any
 // consumer that bypasses the worker's requeue still routes through the
 // existing quota-deferral machinery instead of failing the step. Give-up
 // semantics stay intact: when the resume time exceeds the worker's
 // failure-policy horizon (24h default) the requeue is refused and the
-// legacy fail path runs unchanged — with a message that names the park
+// legacy fail path runs unchanged -- with a message that names the park
 // instead of a bare empty-response error.
 //
 // Returns nil when the loop is NOT in StateQuotaWait: a genuinely empty
@@ -9517,7 +9877,7 @@ func (p *AgentJobProcessor) parkedTurnQuotaError(loop *agent.AgentLoop, job *que
 		ModelID:    "loop-parked-turn",
 		Code:       "parked_turn_requeued",
 		Message: fmt.Sprintf("agent turn parked on provider wait (job %s, agent %s); the loop's turn parker "+
-			"resumes it — job requeued at the parked resume time instead of failing",
+			"resumes it -- job requeued at the parked resume time instead of failing",
 			job.ID, job.AgentID),
 		ResetAt: resetAt,
 		// Matches the daemon's default quota MaxWait posture; the worker
@@ -9528,7 +9888,7 @@ func (p *AgentJobProcessor) parkedTurnQuotaError(loop *agent.AgentLoop, job *que
 }
 
 // publishQuotaWait emits the job-level quota event (leaf 06) on the EXISTING
-// agent.quota_wait topic — the same topic the loop parkers use, so the WS
+// agent.quota_wait topic -- the same topic the loop parkers use, so the WS
 // "agent.quota" prefix classification keeps treating it as agent_progress
 // (AGENTS.md invariant; zero new topics). Payload follows the leaf contract:
 // class="quota_wait", conversation_id/session_id from the task's linked
@@ -9597,7 +9957,7 @@ func (p *AgentJobProcessor) publishQuotaWait(job *queue.Job, taskID string, quot
 
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, job.AgentID, payload)
 	if err != nil {
-		p.logger.Warn("quota_wait event marshal failed — event dropped",
+		p.logger.Warn("quota_wait event marshal failed -- event dropped",
 			"job_id", job.ID,
 			"agent_id", job.AgentID,
 			"error", err,
@@ -9801,7 +10161,7 @@ func (a *agentListerAdapter) ListAgents(ctx context.Context) ([]web.AgentEntry, 
 		if spec == nil {
 			continue
 		}
-		// Skip disabled specs — they are not part of the active roster.
+		// Skip disabled specs -- they are not part of the active roster.
 		if !spec.Enabled {
 			continue
 		}

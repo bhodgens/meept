@@ -54,9 +54,7 @@ func TestAppendReadRoundtrip(t *testing.T) {
 	ctx := context.Background()
 
 	recs := []Record{
-		// run_started carries the class payload blob so leaf 03's
-		// rehydrate can requeue without reconstructing history.
-		{TurnID: "turn-a", SessionID: "sess-1", Kind: KindRunStarted, ResultPayload: []byte(`{"class":"chat"}`), Timestamp: time.Now()},
+		{TurnID: "turn-a", SessionID: "sess-1", StepID: "", StepIndex: 0, Kind: KindRunStarted, ResultPayload: []byte(`{"class":"chat"}`), Timestamp: time.Now()},
 		{TurnID: "turn-a", SessionID: "sess-1", StepID: "step-1", StepIndex: 0, Kind: KindStepStarted, Timestamp: time.Now()},
 		{TurnID: "turn-a", SessionID: "sess-1", StepID: "step-1", StepIndex: 0, Kind: KindStepCompleted, ResultPayload: []byte(`{"ok":true}`), Timestamp: time.Now()},
 	}
@@ -189,8 +187,8 @@ func TestCloseRun(t *testing.T) {
 	}
 }
 
-// T2: a cancelled-context Append returns a wrapped context error well
-// inside the op timeout instead of blocking.
+// T2: a timed-out Append returns a wrapped error instead of blocking past
+// the op timeout.
 func TestAppendTimeout(t *testing.T) {
 	j := newTestJournal(t)
 
