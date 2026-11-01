@@ -239,12 +239,27 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests.md | PENDING | 0 | |
-| 01-seam.md | PENDING | 0 | |
-| 02-gate.md | PENDING | 0 | |
-| 03-migrate.md | PENDING | 0 | |
-| 04-config.md | PENDING | 0 | |
-| 05-e2e-gate.md | PENDING | 0 | |
+| 00T-gate-tests.md | COMPLETE | 0 | writer sa-0-d5f80192; reviewed in-session (RED verified by rerun: missing-symbol failures only; F5 mutation RED->GREEN observed; F6 erratum: SetGate(nil) means green-at-02, accepted); all files landed at HEAD d614d0d3 via sibling sweep (verified identical, attributed); gate tests parked .staged per audit escape hatch - re-activate: provider_test.go.staged at 01, registry_gate_test.go.staged at 02, toolproviders_test.go.staged at 04, wiring test tag at 03 |
+| 01-seam.md | COMPLETE | 0 | writer sa-0-3039b828; reviewed in-session (suite green rerun; deps direction 0; mutation checks observed); T3b wiring landed via sibling sweep db736975 (verified identical, attributed); T3a shape: Discover-time opt capture via SetGitHubProvider, fail-closed unbound |
+| 02-gate.md | COMPLETE | 1 | writer sa-1-22967423; reviewed + ORCHESTRATOR CORRECTIONS: (E1) category map erratum - unknown=>system_modify would CRITICAL-confirm-block ~90% of builtin categories with default confirm flags; replaced with known-tier map + LOW unknown tier (recorded in toolgate.go); (E2) wiring revision 2 - live security.NewEngine (nil engine would fail-close every non-shell call = brown-out), all-or-nothing arming (engine failure = legacy ungated registry), dedicated tool_audit_chain.db; corrections applied in-session then landed via sibling sweep db736975; suites green at HEAD |
+| 03-migrate.md | PENDING | 0 | heavy components.go - serialize behind writer-quiet (30 min mtime silence) |
+| 04-config.md | PENDING | 0 | schema.go + doctor conflict-free; wiring step waits for wave B |
+| 05-e2e-gate.md | PENDING | 0 | last; do not sweep untracked e2e/suites/zz-cigate-sabotage (sibling CI witness, benign) |
+
+Execution addenda (2026-10-31, forensic audit deleg_ba6d8600):
+- Sibling writer ACTIVE in components.go/daemon.go/agent+pkg/security
+  (agent-groups fence-stage leaf; registerBuiltinTools signature rewritten
+  in sibling diff - wave A leaves must NOT edit registerBuiltinTools in
+  the main tree). Whole-tree build GREEN, internal/tools + internal/config
+  baselines GREEN.
+- No pre-existing gate seam (SetGate/ExecGate/toolprov/RiskClass zero
+  production hits) - greenfield confirmed for C1/C2.
+- Wave adjustments: 00T validates via .staged parking or overlay worktree
+  if in-tree test compile breaks; 01 T3 + 02 wiring + 03 + 04 wiring use
+  overlay worktrees from HEAD, copying only owned files back after a
+  writer-quiet check (>=30 min mtime silence on components.go/daemon.go);
+  every pre-commit re-checks git status for sibling growth into
+  internal/tools or internal/config.
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -273,20 +288,33 @@ control agent (orchestrator, in-session).
 
 | # | Feature (from plan) | Source (leaf/spec section) | Unit tests | E2E tests | Status |
 |---|---------------------|----------------------------|-----------|-----------|--------|
-| F1 | Provider registration + discovery | 01-seam.md T1-T2 | TestProviderRegisterDiscover | n/a (units cover the seam contract) | PENDING |
-| F2 | Gate runs for every tool category, not just shell | 02-gate.md T1 | TestExecGateAppliesToAllCategories | 05 suite: provider tool gated | PENDING |
-| F3 | Audit chain entry per execution | 02-gate.md T2 | TestExecGateAuditEmission | 05 suite: chain entry after RPC tool call | PENDING |
-| F4 | Effects ledger reservation for mutating tools | 02-gate.md T3 | TestExecGateLedgerMutatingOnly | n/a | PENDING |
-| F5 | Fail-closed posture inheritance (G4) | 02-gate.md T4 | TestUndeclaredPostureFailClosed | n/a | PENDING |
-| F6 | Nil gate = byte-identical legacy behavior | 02-gate.md T5 | TestNilGatePreservesBehavior | n/a | PENDING |
+| F1 | Provider registration + discovery | 01-seam.md T1-T2 | TestProviderRegisterDiscover | n/a (units cover the seam contract) | VALIDATED |
+| F2 | Gate runs for every tool category, not just shell | 02-gate.md T1 | TestExecGateAppliesToAllCategories | 05 suite: provider tool gated | VALIDATED |
+| F3 | Audit chain entry per execution | 02-gate.md T2 | TestExecGateAuditEmission | 05 suite: chain entry after RPC tool call | VALIDATED |
+| F4 | Effects ledger reservation for mutating tools | 02-gate.md T3 | TestExecGateLedgerMutatingOnly | n/a | VALIDATED |
+| F5 | Fail-closed posture inheritance (G4) | 02-gate.md T4 | TestUndeclaredPostureFailClosed | n/a | VALIDATED |
+| F6 | Nil gate = byte-identical legacy behavior | 02-gate.md T5 | TestNilGatePreservesBehavior | n/a | VALIDATED |
 | F7 | Migrated groups serve via provider path | 03-migrate.md T1-T3 | TestMigratedGroupsViaProviders | 05 suite | PENDING |
 | F8 | Config enable/disable per provider | 04-config.md T1-T2 | TestProviderConfigDisable | 05 suite: disabled = absent from registry | PENDING |
-| F9 | Doctor surfaces provider states (report-only) | 04-config.md T3 | TestDoctorReportsProviders | n/a | PENDING |
+| F9 | Doctor surfaces provider states (report-only) | 04-config.md T3 | TestDoctorReportsProviders | n/a | VALIDATED |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 
-Delta log: (empty - fill on any mismatch with date, feature ID, direction,
-one-line reason)
+Delta log:
+- 2026-10-31, F2/F5 (gate scope), plan->implementation, G1 category tiers:
+  "unknown => system_modify (most restrictive)" replaced with known-tier
+  map (file/filesystem/git=>file_write; network/web/github/media=>
+  network_request; shell=>shell_execute) + unknown=>file_read LOW tier.
+  Reason: with seeded rules and default require_confirmation flags,
+  system_modify is requires_confirmation => Allowed=false => the gate
+  would block ~90% of builtin categories. Fail-closed preserved for
+  engine failures; enforcement still strictly additive (G2/G3/G4).
+- 2026-10-31, F5 (mechanism), plan->implementation, G4 split: posture
+  enforcement moved tools-side via posturedTool wrapper (registry.go)
+  because the ExecGate interface only observes tool.IsReadOnly - the gate
+  alone cannot enforce fail-closed posture. G3 keys on PostureLookup.
+- 2026-10-31, F6 (test green timing), plan->tests: F6 calls SetGate(nil),
+  so "green immediately" is impossible; green-at-02 accepted and observed.
 
 ## Frozen Documents
 
