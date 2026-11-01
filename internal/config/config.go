@@ -92,6 +92,11 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// Normalize the decision-log knob (agent-groups branch-01 leaf 02:
+	// empty or invalid security.groups.decision_log_level -> "deny-warn").
+	// Load-boundary normalization so every consumer sees a valid level.
+	NormalizeDecisionLogDefaults(&cfg.Security.Groups)
+
 	// Expand tilde paths in the loaded config
 	expandConfigPaths(cfg)
 

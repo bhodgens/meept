@@ -906,6 +906,10 @@ type Executor struct {
 	depInferrer        *DependencyInferrer
 	parallelismLimiter *AdaptiveParallelismLimiter
 	retryMetrics       *RetryMetrics
+	// decisionLogLevel gates the C2 permission decision-audit lines
+	// (agent-groups branch-01 leaf 02). "" means the default
+	// (deny-warn). Guarded by mu; set via SetDecisionLogLevel.
+	decisionLogLevel string
 }
 
 // ExecutorOption is a functional option for configuring an Executor.
@@ -1035,6 +1039,36 @@ func (e *Executor) SetSecurityChecker(checker *security.PermissionChecker) {
 	e.mu.Lock()
 	e.security = checker
 	e.mu.Unlock()
+}
+
+// Decision-log levels for the C2 permission decision-audit lines
+// (agent-groups branch-01 leaf 02). Values match
+// security.groups.decision_log_level in the config.
+const (
+	// DecisionLogLevelDenyWarn is the default: denies at WARN, allows
+	// at DEBUG. The empty level on the executor means this default.
+	DecisionLogLevelDenyWarn = "deny-warn"
+	// DecisionLogLevelAll logs every decision at INFO.
+	DecisionLogLevelAll = "all"
+	// DecisionLogLevelOff suppresses the decision lines entirely.
+	DecisionLogLevelOff = "off"
+)
+
+// SetDecisionLogLevel sets the level for the permission decision-audit
+// lines: "deny-warn" (default), "all", or "off". The empty string keeps
+// the deny-warn default; unknown values are ignored (the config loader
+// already normalizes, so this only defends direct callers). Nil-safe per
+// setter convention.
+func (e *Executor) SetDecisionLogLevel(level string) {
+	if e == nil {
+		return
+	}
+	switch level {
+	case DecisionLogLevelDenyWarn, DecisionLogLevelAll, DecisionLogLevelOff, "":
+		e.mu.Lock()
+		e.decisionLogLevel = level
+		e.mu.Unlock()
+	}
 }
 
 // SetAgentID updates the agent/employee identifier used by this executor.
@@ -1674,7 +1708,55 @@ func (e *Executor) checkPermission(toolName string, args map[string]any) securit
 		details["agent_id"] = agentID
 	}
 
-	return e.security.CheckPermission(action, details)
+	result := e.security.CheckPermission(action, details)
+	e.logPermissionDecision(result, action, toolName, agentID)
+	return result
+}
+
+// logPermissionDecision emits the C2 decision-audit line (agent-groups
+// branch-01 leaf 02) for one permission verdict. Shape (frozen):
+//
+//	msg="tool permission decision"
+//	keys: decision, action, tool, agent, groups, rule_source, risk, reason
+//
+// Denies log at WARN, allows at DEBUG under the default "deny-warn"
+// level; "all" logs every decision at INFO; "off" suppresses entirely.
+// Kept at the EXECUTOR seam — pkg/security stays pure (no logging). The
+// groups key carries the "-" placeholder until leaf 04 feeds the
+// resolution record's groups through. No lock is held here.
+func (e *Executor) logPermissionDecision(result security.CheckResult, action, toolName, agentID string) {
+	e.mu.RLock()
+	level := e.decisionLogLevel
+	e.mu.RUnlock()
+
+	if level == DecisionLogLevelOff {
+		return
+	}
+
+	decision := "deny"
+	if result.Allowed {
+		decision = "allow"
+	}
+
+	attrs := []any{
+		"decision", decision,
+		"action", action,
+		"tool", toolName,
+		"agent", agentID,
+		"groups", "-", // placeholder until leaf 04 wires the resolution record
+		"rule_source", result.RuleSource,
+		"risk", result.EffectiveRisk.String(),
+		"reason", result.Reason,
+	}
+
+	switch {
+	case level == DecisionLogLevelAll:
+		e.logger.Info("tool permission decision", attrs...)
+	case !result.Allowed:
+		e.logger.Warn("tool permission decision", attrs...)
+	default:
+		e.logger.Debug("tool permission decision", attrs...)
+	}
 }
 
 // summarizeArgs returns a truncated string representation of arguments for logging.

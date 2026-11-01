@@ -30,6 +30,20 @@ type ResolveTool struct {
 	// journal, when non-nil, receives a JournalEntry for every successful
 	// accept so `meept changes revert <id>` can restore the file later.
 	journal *Journal
+	// fenceConsult, when non-nil, routes revert-write paths through the
+	// central permission pipeline (agent-groups branch-01 leaf 02 T4):
+	// a revert is a file write and must produce a rule_source=fence deny
+	// from the same stage every other write goes through, instead of the
+	// retired per-tool SetFenceChecker wiring.
+	fenceConsult FenceConsult
+}
+
+// FenceConsult consults the permission pipeline's fence stage for a
+// revert-write path. Satisfied structurally by *security.PermissionChecker:
+// a non-nil error means the fence refused the path/op. Returned CheckResults
+// carry RuleSource="fence" on refusal, matching any other write deny.
+type FenceConsult interface {
+	CheckPath(path string, op string) error
 }
 
 // NewResolveTool creates a new resolve tool.
@@ -63,6 +77,37 @@ func (t *ResolveTool) SetJournal(j *Journal) {
 // same path policy as accepts.
 func (t *ResolveTool) FenceChecker() FenceChecker {
 	return t.fenceChecker
+}
+
+// SetFenceConsult installs the central-permission fence consult used by the
+// revert path (agent-groups branch-01 leaf 02 T4). Nil-guarded per the
+// typed-nil interface pattern: a nil input is a no-op. The consult is
+// typically the session's *security.PermissionChecker, so a revert write
+// outside the session fence is denied by the same central stage as any
+// file write (rule_source=fence).
+func (t *ResolveTool) SetFenceConsult(fc FenceConsult) {
+	if fc != nil {
+		t.fenceConsult = fc
+	}
+}
+
+// FenceConsult returns the installed central-permission fence consult, or
+// nil when none is set. The HTTP change-review surface uses this so
+// journal reverts route through the central fence stage.
+func (t *ResolveTool) FenceConsult() FenceConsult {
+	return t.fenceConsult
+}
+
+// ConsultFenceForRevert runs the revert-write path through the central
+// permission pipeline's fence stage. Returns a non-nil error when the
+// fence refuses the write; the error text carries the stage's reason.
+// No consult installed (nil) means no fence — legacy posture for
+// journal-less / unfenced deployments.
+func (t *ResolveTool) ConsultFenceForRevert(path string) error {
+	if t.fenceConsult == nil {
+		return nil
+	}
+	return t.fenceConsult.CheckPath(path, "write")
 }
 
 func (t *ResolveTool) Name() string { return "resolve" }

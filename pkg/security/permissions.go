@@ -253,6 +253,19 @@ func (pc *PermissionChecker) CheckPath(path string) bool {
 	return allowed
 }
 
+// CheckPathFence consults ONLY the fence stage for path under op
+// (agent-groups branch-01 leaf 02 T4): it is the revert-path seam — a
+// journal revert is a file write that bypasses CheckPermissionForAgent's
+// action pipeline, so the caller routes it through here to get the same
+// rule_source=fence verdict any write would receive. A nil fence returns
+// nil (allowed), matching the stage's legacy-skip semantics.
+func (pc *PermissionChecker) CheckPathFence(path, op string) error {
+	if fence := pc.snapshotFence(); fence != nil {
+		return fence.CheckPath(path, op)
+	}
+	return nil
+}
+
 // CheckPathWithReason returns (allowed, reason).
 func (pc *PermissionChecker) checkPathWithReason(pathStr string) (ok bool, result string) {
 	// Use expandPathAll to get BOTH raw and resolved forms.
@@ -356,10 +369,9 @@ type CheckResult struct {
 	Allowed bool
 	Reason  string
 	// RuleSource stamps which pipeline stage produced this result (leaf 02
-	// of agent-groups branch-01, frozen vocabulary). Declared here in leaf
-	// 01 ONLY so the committed gate tests compile — the fence stage stamps
-	// "fence"; every other stage still returns the zero value and leaf 02
-	// owns the full stamping.
+	// of agent-groups branch-01, frozen vocabulary). Every return site in
+	// this package stamps it; group_deny/group_allow fire once leaf 04
+	// feeds group rules in.
 	RuleSource    string
 	EffectiveRisk RiskLevel
 	NeedsConfirm  bool
@@ -372,8 +384,9 @@ func (pc *PermissionChecker) checkRiskResult(details map[string]string, risk Ris
 	for _, v := range details {
 		if pc.config.BlockFinancial && IsFinancial(v) {
 			return CheckResult{
-				Allowed: false,
-				Reason:  "Financial operations are blocked by policy",
+				Allowed:    false,
+				Reason:     "Financial operations are blocked by policy",
+				RuleSource: "financial",
 			}
 		}
 	}
@@ -386,6 +399,7 @@ func (pc *PermissionChecker) checkRiskResult(details map[string]string, risk Ris
 		return CheckResult{
 			Allowed:       false,
 			Reason:        "Action requires user confirmation",
+			RuleSource:    "confirmation_gate",
 			EffectiveRisk: risk,
 			NeedsConfirm:  true,
 		}
@@ -394,6 +408,7 @@ func (pc *PermissionChecker) checkRiskResult(details map[string]string, risk Ris
 	return CheckResult{
 		Allowed:       true,
 		Reason:        "Permitted",
+		RuleSource:    "base_rule",
 		EffectiveRisk: risk,
 	}
 }
@@ -453,6 +468,7 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 						return CheckResult{
 							Allowed:      false,
 							Reason:       reason,
+							RuleSource:   "employee_pre_exec",
 							NeedsConfirm: needsConfirm,
 						}
 					}
@@ -476,8 +492,9 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 	rule, ok := BuiltinRules[action]
 	if !ok {
 		return CheckResult{
-			Allowed: false,
-			Reason:  "Unknown action: " + action,
+			Allowed:    false,
+			Reason:     "Unknown action: " + action,
+			RuleSource: "unknown_action",
 		}
 	}
 
@@ -488,8 +505,9 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 		for _, v := range details {
 			if IsFinancial(v) {
 				return CheckResult{
-					Allowed: false,
-					Reason:  "Financial operations are blocked by policy",
+					Allowed:    false,
+					Reason:     "Financial operations are blocked by policy",
+					RuleSource: "financial",
 				}
 			}
 		}
@@ -501,8 +519,9 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 			allowed, reason := pc.checkPathWithReason(path)
 			if !allowed {
 				return CheckResult{
-					Allowed: false,
-					Reason:  reason,
+					Allowed:    false,
+					Reason:     reason,
+					RuleSource: "base_rule",
 				}
 			}
 		}
@@ -569,6 +588,7 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 		return CheckResult{
 			Allowed:       false,
 			Reason:        "Action requires user confirmation",
+			RuleSource:    "confirmation_gate",
 			EffectiveRisk: effectiveRisk,
 			NeedsConfirm:  true,
 		}
@@ -577,6 +597,7 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 	return CheckResult{
 		Allowed:       true,
 		Reason:        "Permitted",
+		RuleSource:    "base_rule",
 		EffectiveRisk: effectiveRisk,
 	}
 }

@@ -2371,9 +2371,27 @@ type SecurityConfig struct {
 	// Prefix-keyed allow/ask/deny policy evaluated before tirith scanning.
 	ShellPermissions ShellPermissionsConfig `json:"shell_permissions" toml:"shell_permissions"`
 
+	// Groups holds agent-group permission settings ([security.groups]).
+	// Leaf 02 of agent-groups branch-01 adds ONLY the decision-log knob;
+	// the full groups model (members, fs_roots, tools_allowed) is leaf
+	// 04's struct and will extend this section.
+	Groups SecurityGroupsConfig `json:"groups" toml:"groups"`
+
 	// Egress policy for the secrets proxy ([security.egress]): ordered
 	// host-suffix/CIDR allow/ask/deny rules consulted before secret injection.
 	Egress EgressConfig `json:"egress" toml:"egress"`
+}
+
+// SecurityGroupsConfig is the [security.groups] section. Owned by leaf 04
+// (groups model); leaf 02 of branch-01 adds only DecisionLogLevel so the
+// decision-audit knob has a defined home from day one.
+type SecurityGroupsConfig struct {
+	// DecisionLogLevel controls the tool-permission decision audit lines:
+	//   "deny-warn" (default) — denies at WARN, allows at DEBUG
+	//   "all"                 — every decision at INFO
+	//   "off"                 — no decision lines
+	// Invalid values fall back to "deny-warn" at load time.
+	DecisionLogLevel string `json:"decision_log_level" toml:"decision_log_level"`
 }
 
 // EgressConfig configures outbound egress policy for proxied child traffic.
@@ -3292,7 +3310,21 @@ func (c *MemoryConfig) GetLimitsForProject(projectPath string) MemoryLimitsConfi
 	return c.Limits
 }
 
-// DefaultConfig returns a configuration with sensible defaults.
+// NormalizeDecisionLogDefaults clamps security.groups.decision_log_level
+// to a valid level (agent-groups branch-01 leaf 02): empty and invalid
+// values fall back to "deny-warn"; "deny-warn" | "all" | "off" pass
+// through. Applied at the config Load boundary so the executor seam
+// never sees an undefined level.
+func NormalizeDecisionLogDefaults(g *SecurityGroupsConfig) {
+	switch g.DecisionLogLevel {
+	case "deny-warn", "all", "off":
+		// valid — keep
+	default:
+		g.DecisionLogLevel = "deny-warn"
+	}
+}
+
+// DefaultConfig returns a configuration with sane defaults.
 func DefaultConfig() *Config {
 	return &Config{
 		Daemon: DaemonConfig{
@@ -3701,6 +3733,9 @@ func DefaultConfig() *Config {
 			},
 			ShellPermissions: ShellPermissionsConfig{
 				Preset: "workspace",
+			},
+			Groups: SecurityGroupsConfig{
+				DecisionLogLevel: "deny-warn",
 			},
 			Egress: EgressConfig{
 				ScrubNoProxy: true,
@@ -4189,7 +4224,6 @@ func DefaultConfig() *Config {
 		},
 	}
 }
-
 
 // ParseLogLevelValue converts a configured log level name to an slog.Level and
 // reports whether the name was recognised. Names are matched
