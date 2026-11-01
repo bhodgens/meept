@@ -25,6 +25,7 @@ void main() {
     expect(find.text('memory'), findsOneWidget);
     expect(find.text('memory review'), findsOneWidget);
     expect(find.text('users'), findsOneWidget);
+    expect(find.text('activity view'), findsOneWidget);
   });
 
   testWidgets('manifest parity: agents key e, edit description key r', (

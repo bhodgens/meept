@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../services/sdk_client.dart';
+import '../../providers/providers.dart';
 import 'activity_models.dart';
 
 /// Findings panel - lists audit findings with severity/resolved status
@@ -24,7 +24,7 @@ class _ActivityFindingsPanelState extends ConsumerState<ActivityFindingsPanel> {
 
   Future<void> _fetchFindings() async {
     try {
-      final client = SdkApiClient(host: 'localhost', port: 8080);
+      final client = ref.read(sdkClientProvider);
       final raw = await client.getActivityFindings(limit: 10);
       final result = ActivityFindingsResult.fromJson(raw);
       setState(() {

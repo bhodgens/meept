@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/features/activity/activity_list.dart';
-import 'package:meept_ui/features/activity/activity_tab.dart';
 import 'package:meept_ui/services/sdk_client.dart';
+import 'package:meept_ui/providers/providers.dart';
 
 void main() {
   group('ActivityList', () {
     testWidgets('displays empty state when no records', (tester) async {
       final container = ProviderContainer(
         overrides: [
-          sdkApiClientProvider.overrideWith((ref) {
+          sdkClientProvider.overrideWith((ref) {
             return MockSdkApiClient();
           }),
         ],
@@ -18,10 +18,13 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
-          home: Container(
-            child: const ProviderScope(
-              child: ActivityList(),
-            ),
+          home: ProviderScope(
+            overrides: [
+              sdkClientProvider.overrideWith((ref) {
+                return MockSdkApiClient();
+              }),
+            ],
+            child: const ActivityList(),
           ),
         ),
       );
@@ -37,7 +40,7 @@ void main() {
     testWidgets('displays records with chronological sort', (tester) async {
       final container = ProviderContainer(
         overrides: [
-          sdkApiClientProvider.overrideWith((ref) {
+          sdkClientProvider.overrideWith((ref) {
             return MockSdkApiClient(
               records: [
                 ActivityRecord(
@@ -60,10 +63,28 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
-          home: Container(
-            child: const ProviderScope(
-              child: ActivityList(),
-            ),
+          home: ProviderScope(
+            overrides: [
+              sdkClientProvider.overrideWith((ref) {
+                return MockSdkApiClient(
+                  records: [
+                    ActivityRecord(
+                      kind: 'task_step',
+                      at: DateTime.parse('2026-10-30T10:00:00Z'),
+                      agentId: 'agent-1',
+                      summary: 'first action',
+                    ),
+                    ActivityRecord(
+                      kind: 'session_message',
+                      at: DateTime.parse('2026-10-30T09:00:00Z'),
+                      agentId: 'agent-2',
+                      summary: 'older message',
+                    ),
+                  ],
+                );
+              }),
+            ],
+            child: const ActivityList(),
           ),
         ),
       );
@@ -80,7 +101,7 @@ void main() {
     testWidgets('sort modes switch and re-query', (tester) async {
       final container = ProviderContainer(
         overrides: [
-          sdkApiClientProvider.overrideWith((ref) {
+          sdkClientProvider.overrideWith((ref) {
             return MockSdkApiClient(records: []);
           }),
         ],
@@ -88,10 +109,13 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
-          home: Container(
-            child: const ProviderScope(
-              child: ActivityList(),
-            ),
+          home: ProviderScope(
+            overrides: [
+              sdkClientProvider.overrideWith((ref) {
+                return MockSdkApiClient(records: []);
+              }),
+            ],
+            child: const ActivityList(),
           ),
         ),
       );
@@ -114,13 +138,16 @@ class MockSdkApiClient extends SdkApiClient {
   final List<ActivityRecord> records;
 
   MockSdkApiClient({this.records = const []})
-      : super(host: 'localhost', port: 8080);
+    : super(host: 'localhost', port: 8080); // valid-but-unused: Dio
+  // validates baseUrl at construction even when every method is
+  // overridden, so the dummy must parse as a URL.
 
-  // Override the activity query method to return mock data
-  Future<List<ActivityRecord>> listActivity({
-    String? sort,
+  // Override getActivity to return mock data wrapped in ActivityQueryResult shape
+  @override
+  Future<Map<String, dynamic>> getActivity({
     String? since,
     String? until,
+    String? sort,
     String? taskId,
     String? planId,
     String? agentId,
@@ -128,7 +155,48 @@ class MockSdkApiClient extends SdkApiClient {
     int? limit,
     int? offset,
   }) async {
-    return records;
+    return {
+      'records': records.map((r) {
+        return {
+          'kind': r.kind,
+          'at': r.at.toIso8601String(),
+          if (r.agentId != null) 'agent_id': r.agentId,
+          if (r.sessionId != null) 'session_id': r.sessionId,
+          if (r.taskId != null) 'task_id': r.taskId,
+          if (r.stepId != null) 'step_id': r.stepId,
+          if (r.planId != null) 'plan_id': r.planId,
+          if (r.state != null) 'state': r.state,
+          if (r.severity != null) 'severity': r.severity,
+          'summary': r.summary,
+          if (r.detail != null) 'detail': r.detail,
+        };
+      }).toList(),
+      'total': records.length,
+    };
+  }
+
+  // Override getActivityRecent for the recent panel
+  @override
+  Future<Map<String, dynamic>> getActivityRecent({int? limit = 20}) async {
+    return {
+      'records': records.map((r) {
+        return {
+          'kind': r.kind,
+          'at': r.at.toIso8601String(),
+          if (r.agentId != null) 'agent_id': r.agentId,
+          if (r.sessionId != null) 'session_id': r.sessionId,
+          if (r.taskId != null) 'task_id': r.taskId,
+          if (r.stepId != null) 'step_id': r.stepId,
+          if (r.planId != null) 'plan_id': r.planId,
+          if (r.state != null) 'state': r.state,
+          if (r.severity != null) 'severity': r.severity,
+          'summary': r.summary,
+          if (r.detail != null) 'detail': r.detail,
+        };
+      }).toList(),
+      'dropped': 0,
+      'total': records.length,
+    };
   }
 }
 

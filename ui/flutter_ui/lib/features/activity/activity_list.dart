@@ -2,16 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/sdk_client.dart';
+import '../../providers/providers.dart';
 import 'activity_models.dart';
-
-/// Provider for SdkApiClient instance
-final sdkApiClientProvider = Provider<SdkApiClient>((ref) {
-  return SdkApiClient(host: 'localhost', port: 8080);
-});
 
 /// Provider for activity data
 final activityProvider = StateNotifierProvider<ActivityNotifier, ActivityState>(
-  (ref) => ActivityNotifier(ref.read(sdkApiClientProvider)),
+  (ref) => ActivityNotifier(ref.read(sdkClientProvider)),
 );
 
 class ActivityState {

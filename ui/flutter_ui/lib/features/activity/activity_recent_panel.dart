@@ -2,8 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/activity/activity_list.dart';
-import '../../services/sdk_client.dart';
+import '../../providers/providers.dart';
 import 'activity_models.dart';
 
 /// Live recent events panel - polls activity/recent on a timer
@@ -35,7 +34,7 @@ class _ActivityRecentPanelState extends ConsumerState<ActivityRecentPanel> {
 
   Future<void> _fetchRecent() async {
     try {
-      final client = ref.read(sdkApiClientProvider);
+      final client = ref.read(sdkClientProvider);
       final raw = await client.getActivityRecent(limit: 20);
       final result = ActivityRecentResult.fromJson(raw);
       setState(() {

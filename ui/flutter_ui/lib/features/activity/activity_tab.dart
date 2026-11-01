@@ -13,12 +13,12 @@ class ActivityTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Row(
+    return const Row(
       children: [
-        const SizedBox(width: 300, child: ActivityList()),
-        const VerticalDivider(width: 1),
+        SizedBox(width: 300, child: ActivityList()),
+        VerticalDivider(width: 1),
         Expanded(
-          child: const SingleChildScrollView(
+          child: SingleChildScrollView(
             child: Column(
               children: [
                 ActivityRecentPanel(),

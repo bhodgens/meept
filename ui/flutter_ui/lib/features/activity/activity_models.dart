@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 /// ActivityRecord matches the C1 contract from the master plan.
 /// JSON field names are identical to the RPC/HTTP surface.
 class ActivityRecord {
