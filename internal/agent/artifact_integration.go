@@ -8,6 +8,7 @@ import (
 	"time"
 
 	artifactcontext "github.com/caimlas/meept/internal/context"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/project"
 )
 
@@ -417,4 +418,254 @@ func (am *ArtifactManager) GetCacheStats() map[string]any {
 		"claude_stats":       claudeStats,
 		"cache_expiry":       am.cacheExpiry.String(),
 	}
+}
+
+// --- Doc budgets (leaf 02-doc-budgets, docs/plans/20261031-context-memory-engine/) ---
+
+// DefaultDocBudgetTokens is the fallback budget for dynamic doc sections
+// when no allocator-derived budget is supplied. It matches the scale of
+// MaxMemoryContextTokens (2000 tokens) so a caller that has not wired the
+// allocator yet still gets a bounded prompt instead of today's unbounded
+// CLAUDE.md injection.
+const DefaultDocBudgetTokens = 2000
+
+// docBudgetTruncationNotice is the ASCII marker appended when doc content is
+// trimmed to budget. It carries the original and budgeted token counts via
+// fmt.
+const docBudgetTruncationNotice = "[... CLAUDE.md truncated: %d/%d tokens ...]"
+
+// llmHeuristicTokenizerAdapter adapts llm.HeuristicTokenizer to the
+// docBudgetTokenizer seam (kept distinct from the llm package type so tests
+// can assert the fallback choice by concrete type).
+type llmHeuristicTokenizerAdapter struct {
+	inner llm.HeuristicTokenizer
+}
+
+func (a *llmHeuristicTokenizerAdapter) CountTokens(text string) int {
+	return a.inner.CountTokens(text)
+}
+
+// docBudgetTokenizer is the minimal token-counting surface this leaf needs.
+// llm.Tokenizer satisfies it structurally.
+type docBudgetTokenizer interface {
+	CountTokens(text string) int
+}
+
+// newDocBudgetTokenizer resolves the tokenizer for doc budgeting:
+// a non-empty model id goes through llm.NewTokenizerForModel (accurate
+// provider tokenizer); anything else falls back to the 3-chars-per-token
+// HeuristicTokenizer. Both shapes satisfy docBudgetTokenizer.
+func newDocBudgetTokenizer(model string) docBudgetTokenizer {
+	if model != "" {
+		if tk := llm.NewTokenizerForModel(model); tk != nil {
+			return tk
+		}
+	}
+	return &llmHeuristicTokenizerAdapter{inner: llm.HeuristicTokenizer{}}
+}
+
+// truncateDocToBudget keeps the head of content until the budget is reached
+// and appends the ASCII truncation notice. noticeOriginal is the ORIGINAL
+// token count reported in the notice (callers pass the untrimmed count so
+// the notice always carries original vs budget); budgetTokens bounds what
+// the returned string may cost INCLUDING the notice. Trimming walks back to
+// the last newline boundary so a line is never cut mid-token-run, then
+// re-checks the budget (the walk-back only shrinks the head, so the result
+// stays within budget). Deterministic: identical content + budget +
+// tokenizer produce identical output.
+//
+// Head-truncation over tail-keeping: findings-context-budgeting.md R-A4 /
+// Budget Practice 2 (component-appropriate reduction, docs hard-capped) and
+// P2 (Claude Code caps surviving skill/doc bodies, oldest dropped first);
+// project instructions cluster at the top of CLAUDE.md/README files.
+func truncateDocToBudget(content string, budgetTokens int, noticeOriginal int, tk docBudgetTokenizer) (string, bool) {
+	original := tk.CountTokens(content)
+	if original <= budgetTokens {
+		return content, false
+	}
+
+	notice := fmt.Sprintf(docBudgetTruncationNotice, noticeOriginal, budgetTokens)
+	noticeTokens := tk.CountTokens("\n\n" + notice)
+
+	// Reserve room for the notice, then find the longest byte prefix whose
+	// token count fits the remaining budget. Token counts are monotone in
+	// prefix length, so a binary search bounds this deterministically.
+	avail := budgetTokens - noticeTokens
+	if avail < 0 {
+		avail = 0
+	}
+	lo, hi := 0, len(content)
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if tk.CountTokens(content[:mid]) <= avail {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	head := content[:lo]
+
+	// Walk back to the last newline so no line is cut mid-sentence. This
+	// only removes bytes, so the token count cannot grow past the budget.
+	if idx := strings.LastIndex(head, "\n"); idx > 0 {
+		head = head[:idx]
+	}
+
+	return head + "\n\n" + notice, true
+}
+
+// buildFullArtifactContextSections assembles the UNBOUNDED section list in
+// exactly the order and shape of BuildFullArtifactContext (CLAUDE.md
+// verbatim, summarized README, skill refs, agent refs, "\n\n---\n\n"
+// separator). Keeping this shared means the budgeted builder is
+// byte-identical to the unbounded one whenever everything fits.
+func (am *ArtifactManager) buildFullArtifactContextSections(taskDesc string, artifacts *artifactcontext.Artifacts) string {
+	var sections []string
+
+	if artifacts.HasCLAUDEMD() && artifacts.CLAUDEMD.RawContent != "" {
+		sections = append(sections, "# CLAUDE.md (full content)\n\n"+artifacts.CLAUDEMD.RawContent)
+	}
+	if artifacts.HasREADME() {
+		sections = append(sections, "# README.md\n\n"+summarizeREADME(artifacts.READMEContent))
+	}
+	if skill := am.BuildSkillReferences(taskDesc, artifacts.WorkingDir); skill != "" {
+		sections = append(sections, skill)
+	}
+	if agent := am.BuildAgentReferences(taskDesc, artifacts.WorkingDir); agent != "" {
+		sections = append(sections, agent)
+	}
+	if len(sections) == 0 {
+		return ""
+	}
+	return strings.Join(sections, "\n\n---\n\n")
+}
+
+// BuildFullArtifactContextBudgeted is the budgeted replacement for
+// BuildFullArtifactContext: it combines the same sections (CLAUDE.md
+// verbatim, README, skill/agent references) but bounds the assembled
+// section at docBudgetTokens tokens, closing the unbounded-CLAUDE.md hole.
+//
+// Budget semantics:
+//   - docBudgetTokens <= 0 applies DefaultDocBudgetTokens (2000, the
+//     MaxMemoryContextTokens scale) — the unbounded behavior is replaced,
+//     never preserved, at this entry point.
+//   - tk selects the token counter: pass a tokenizer from
+//     llm.NewTokenizerForModel when the serving model is known; tk == nil
+//     falls back to llm.HeuristicTokenizer. The SAME tokenizer counts the
+//     budget and the content at build time, so the two counts agree.
+//   - Under budget the output is byte-identical to the unbounded builder
+//     (stable-prefix rule: trimming only engages over budget).
+//   - Over budget, doc content is trimmed deterministically in priority
+//     order (CLAUDE.md first — it is the authoritative instruction doc the
+//     hole was in — then README) to the longest head that fits, each with
+//     the ASCII notice "[... CLAUDE.md truncated: NNNN/TTTT tokens ...]"
+//     carrying original and budgeted counts. Headers, separators, and the
+//     concise skill/agent references are counted against the budget, so the
+//     TOTAL section respects it.
+//
+// Doc content is per-project DYNAMIC and stays in the unstable prompt
+// region; this function only produces the section body and never affects
+// the stablePrefixHash classification (pinned by
+// TestBaselineStablePrefixHash / TestStablePrefixHashInvariantUnderDocVariation).
+//
+// The budget source in the wired path is Allocation.SystemDynamicDocs from
+// internal/agent/contextalloc (window-fraction budget, R-A4); the default
+// here is only the pre-wiring fallback.
+//
+// Truncation basis: findings-context-budgeting.md R-A4 (docs hard-capped),
+// Budget Practice 2 (component-appropriate reduction), P2 (Claude Code
+// capped doc bodies).
+//
+// The old BuildFullArtifactContext signature and behavior are UNCHANGED for
+// existing callers (caller rewiring is leaf 03-integration's scope).
+func (am *ArtifactManager) BuildFullArtifactContextBudgeted(
+	taskDesc, workingDir string, docBudgetTokens int, tk docBudgetTokenizer,
+) (section string, truncated bool) {
+	if docBudgetTokens <= 0 {
+		docBudgetTokens = DefaultDocBudgetTokens
+	}
+	if tk == nil {
+		tk = newDocBudgetTokenizer("")
+	}
+
+	// Ensure directory is scanned
+	artifacts, err := am.ScanDirectory(workingDir)
+	if err != nil || !artifacts.Available {
+		return "", false
+	}
+
+	unbounded := am.buildFullArtifactContextSections(taskDesc, artifacts)
+	if unbounded == "" {
+		return "", false
+	}
+	if tk.CountTokens(unbounded) <= docBudgetTokens {
+		// Stable-prefix rule: everything fits, so the output is byte
+		// identical to the unbounded builder.
+		return unbounded, false
+	}
+
+	// Over budget: trim doc content in priority order (CLAUDE.md, then
+	// README) until the joined section fits. Each trim budget counts every
+	// OTHER byte of the section (headers, separators, refs, the other doc's
+	// trimmed remainder), so the total always lands within budget. The
+	// truncation notice reports the ORIGINAL doc size against the SECTION
+	// budget (per the interface contract: "[... CLAUDE.md truncated:
+	// NNNN/TTTT tokens ...]" carries original and budgeted counts), so the
+	// section budget is threaded through as noticeBudget.
+	//
+	// parts holds the rendered blocks (header + content) in order; contents
+	// holds the still-trimmable content per block ("" for refs and already
+	// trimmed docs).
+	var parts []string
+	var contents []string
+	if artifacts.HasCLAUDEMD() && artifacts.CLAUDEMD.RawContent != "" {
+		parts = append(parts, "# CLAUDE.md (full content)\n\n"+artifacts.CLAUDEMD.RawContent)
+		contents = append(contents, artifacts.CLAUDEMD.RawContent)
+	}
+	if artifacts.HasREADME() {
+		readme := summarizeREADME(artifacts.READMEContent)
+		parts = append(parts, "# README.md\n\n"+readme)
+		contents = append(contents, readme)
+	}
+	if skill := am.BuildSkillReferences(taskDesc, workingDir); skill != "" {
+		parts = append(parts, skill)
+		contents = append(contents, "")
+	}
+	if agent := am.BuildAgentReferences(taskDesc, workingDir); agent != "" {
+		parts = append(parts, agent)
+		contents = append(contents, "")
+	}
+
+	join := func() string { return strings.Join(parts, "\n\n---\n\n") }
+	trimmable := 0
+	for _, c := range contents {
+		trimmable += len(c)
+	}
+
+	anyTruncated := false
+	for i := range parts {
+		if tk.CountTokens(join()) <= docBudgetTokens {
+			break
+		}
+		if contents[i] == "" {
+			continue // concise ref section, not trimmable
+		}
+		original := contents[i]
+		parts[i] = parts[i][:len(parts[i])-len(original)] // keep the header only
+		rest := tk.CountTokens(join())
+		avail := docBudgetTokens - rest
+		if avail < 0 {
+			avail = 0
+		}
+		trimmed, wasTruncated := truncateDocToBudget(original, avail, tk.CountTokens(original), tk)
+		parts[i] += trimmed
+		contents[i] = ""
+		trimmable -= len(original)
+		if wasTruncated {
+			anyTruncated = true
+		}
+	}
+
+	section = join()
+	return section, anyTruncated
 }
