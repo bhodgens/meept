@@ -1986,7 +1986,73 @@ class SdkApiClient {
     await _post('/api/v1/calendar/events', body: body);
   }
 
-  // ===== Eval Endpoint Methods =====
+  // ===== Activity =====
+
+  /// GET /api/v1/activity ?since&until&sort&task_id&plan_id&agent_id&kinds&limit&offset
+  /// Returns {"records":[ActivityRecord],"total":int}
+  Future<Map<String, dynamic>> getActivity({
+    String? since,
+    String? until,
+    String? sort,
+    String? taskId,
+    String? planId,
+    String? agentId,
+    List<String>? kinds,
+    int? limit,
+    int? offset,
+  }) async {
+    final query = <String, dynamic>{};
+    if (since != null) query['since'] = since;
+    if (until != null) query['until'] = until;
+    if (sort != null) query['sort'] = sort;
+    if (taskId != null) query['task_id'] = taskId;
+    if (planId != null) query['plan_id'] = planId;
+    if (agentId != null) query['agent_id'] = agentId;
+    if (kinds != null) query['kinds'] = kinds.join(',');
+    if (limit != null) query['limit'] = limit;
+    if (offset != null) query['offset'] = offset;
+    return _get('/api/v1/activity', query: query);
+  }
+
+  /// GET /api/v1/activity/recent ?limit
+  /// Returns {"records":[...],"dropped":int,"total":int}
+  Future<Map<String, dynamic>> getActivityRecent({int? limit}) async {
+    final query = <String, dynamic>{};
+    if (limit != null) query['limit'] = limit;
+    return _get('/api/v1/activity/recent', query: query);
+  }
+
+  /// GET /api/v1/activity/overview
+  /// Returns {"by_agent":[...],"generated_at"}
+  Future<Map<String, dynamic>> getActivityOverview() async {
+    return _get('/api/v1/activity/overview');
+  }
+
+  /// GET /api/v1/activity/findings ?employee_id&since&severity&resolved&limit&offset
+  /// Returns {"findings":[...],"total":int}
+  Future<Map<String, dynamic>> getActivityFindings({
+    String? employeeId,
+    String? since,
+    String? severity,
+    bool? resolved,
+    int? limit,
+    int? offset,
+  }) async {
+    final query = <String, dynamic>{};
+    if (employeeId != null) query['employee_id'] = employeeId;
+    if (since != null) query['since'] = since;
+    if (severity != null) query['severity'] = severity;
+    if (resolved != null) query['resolved'] = resolved;
+    if (limit != null) query['limit'] = limit;
+    if (offset != null) query['offset'] = offset;
+    return _get('/api/v1/activity/findings', query: query);
+  }
+
+  /// GET /api/v1/agents/{id}/review
+  /// Returns {"drift_score":float,"recent_findings":[...]}
+  Future<Map<String, dynamic>> getAgentReview(String employeeId) async {
+    return _get('/api/v1/agents/$employeeId/review');
+  }
 
   /// Fetches eval runs from GET /api/v1/eval/runs.
   /// Returns a list of raw eval run maps matching the C1 contract.

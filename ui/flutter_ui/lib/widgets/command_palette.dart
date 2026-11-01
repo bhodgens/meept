@@ -75,6 +75,12 @@ class CommandPalette extends StatefulWidget {
       label: 'agents',
       description: 'switch to employees view',
     ),
+    // Activity view (gui_inventory.json: "activity view" entry)
+    const CommandPaletteItem(
+      keybinding: 'a',
+      label: 'activity view',
+      description: 'agent activity, findings + drift',
+    ),
     const CommandPaletteItem(
       keybinding: 'f',
       label: 'find…',

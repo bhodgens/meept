@@ -9,7 +9,7 @@
     { "key": "v", "label": "memory review", "description": "review pending auto-claims (promote/reject)", "gui": true },
     { "key": "p", "label": "plans", "description": "switch to plans view", "gui": true },
     { "key": "e", "label": "agents", "description": "switch to employees view", "gui": true },
-    { "key": "a", "label": "activity view", "description": "agent activity, findings + drift", "gui": false },
+    { "key": "a", "label": "activity view", "description": "agent activity, findings + drift", "gui": true },
     { "key": "y", "label": "toggle sidebar", "description": "show/hide sidebar", "gui": false },
     { "key": "o", "label": "projects", "description": "manage projects", "gui": true },
     { "key": "u", "label": "users", "description": "multi-user awareness (manage via cli)", "gui": true },
@@ -36,7 +36,7 @@
   ],
   "deviations": {
     "palette:queue": "no flutter queue route yet (documented deviation, command_palette.dart header comment)",
-    "palette:activity view": "gui leaf 04 (activity-views tree) has not landed yet; the flutter activity page is a sibling leaf and will flip this to gui:true when it lands",
+    "palette:activity view": "flutter /activity page landed (activity-views leaf 04); gui:true",
     "palette:toggle sidebar": "no flutter sidebar surface (documented deviation, command_palette.dart header comment)",
     "shortcut:ctrl+m": "markdown rendering toggle is TUI-only; the GUI renders markdown natively",
     "shortcut:ctrl+d": "pending-changes review modal is TUI-only today; GUI review lives in the diff panel",

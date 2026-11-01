@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/activity/activity_tab.dart';
 import '../features/home/home_screen.dart';
 import '../features/home/sidebar_home_screen.dart';
 import '../features/settings/settings_panel.dart';
@@ -85,6 +86,13 @@ final GoRouter router = GoRouter(
       name: 'agents',
       pageBuilder: (context, state) {
         return const NoTransitionPage(child: _LayoutShell(tab: HomeTab.agents));
+      },
+    ),
+    GoRoute(
+      path: '/activity',
+      name: 'activity',
+      pageBuilder: (context, state) {
+        return const NoTransitionPage(child: ActivityTab());
       },
     ),
     GoRoute(

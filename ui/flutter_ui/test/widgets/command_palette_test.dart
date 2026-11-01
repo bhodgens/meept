@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/widgets/command_palette.dart';
 
 void main() {
-  testWidgets('shows all 12 items with labels', (tester) async {
+  testWidgets('shows all 13 items with labels', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -16,7 +16,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(CommandPalette.defaultItems.length, 12);
+    expect(CommandPalette.defaultItems.length, 13);
     expect(find.text('chat'), findsOneWidget);
     expect(find.text('sessions'), findsOneWidget);
     expect(find.text('agents'), findsOneWidget);
