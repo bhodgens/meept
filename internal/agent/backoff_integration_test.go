@@ -113,6 +113,7 @@ func TestToolExecution_NetworkFailure(t *testing.T) {
 		tool, fastCfg,
 		"call_net_1", "web_fetch",
 		map[string]any{"url": "http://example.com"},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)

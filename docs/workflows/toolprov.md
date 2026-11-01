@@ -75,3 +75,16 @@ Semantics (default-true):
   as mutating and privilege-scanned (G4).
 - Duplicate provider or tool names error at registration; nothing
   silently overwrites.
+
+## Live Verification
+
+`make e2e-fast-area AREA=tool-provider-seam` runs the hermetic live-gate
+suite (e2e/suites/tool-provider-seam/): a scratch daemon boots with the
+providers enabled, disabled, and doctor-surfaced, and the suite asserts
+through live surfaces only - the platform_tools catalog and the executor
+request definitions (both resolved from the live registry), a real
+provider tool execution observed through scheduler.list_jobs, the
+block_financial denial (job never created), the `tool gate wired` boot
+line plus the on-disk tool_audit_chain.db store, and `meept doctor`'s
+provider report lines.
+

@@ -459,6 +459,62 @@ func (r *Registry) Gate() ExecGate {
 	return r.gate
 }
 
+// GateCheck runs the pre-execution half of the gate (ValidateToolArgs +
+// BeforeExecute) WITHOUT running the tool body, and GateComplete runs the
+// post-execution half (AfterExecute). They exist for callers whose
+// execution path cannot route through Execute - the agent executor's
+// streaming branch (StreamingTool.ExecuteStreaming) is the live case: it
+// must keep its progress-callback path, so it gates around the call
+// instead of inside it.
+//
+// Live-path rule (05-e2e-gate.md finding, 2026-10-31): the agent executor
+// calls tool.Execute directly and never Registry.Execute, so a gate armed
+// only in the registry is dead on the live path. Callers that hold a
+// *tools.Registry and execute tool handles directly MUST bracket the call
+// with GateCheck/GateComplete. Sequence:
+//
+//	err := reg.GateCheck(ctx, toolName, tool, args)  // nil gate = nil error
+//	if err != nil { /* blocked: ErrCodeGateBlocked, body never runs */ }
+//	result, execErr := tool.Execute(...)  // or ExecuteStreaming
+//	reg.GateComplete(ctx, toolName, tool, args, result, execErr)
+//
+// A nil registry or nil gate makes both methods no-ops, so un-gated
+// callers (unit tests, non-daemon binaries) keep byte-identical behavior.
+// GateCheck's returned error carries the gate's block reason; the
+// typed-envelope ErrCodeGateBlocked stamp is available via ErrCodeGateBlocked
+// for callers that build ToolResults. AfterExecute fires even when execErr
+// is non-nil, and also for the blocked case is NOT called (the block is
+// the BeforeExecute outcome; the concrete gate records blocks itself via
+// its Before path).
+func (r *Registry) GateCheck(ctx context.Context, name string, tool Tool, args map[string]any) error {
+	if r == nil {
+		return nil
+	}
+	gate := r.Gate()
+	if gate == nil {
+		return nil
+	}
+	if err := ValidateToolArgs(tool, args); err != nil {
+		return err
+	}
+	return gate.BeforeExecute(ctx, posturedTool{Tool: tool}, args)
+}
+
+// GateComplete is the AfterExecute half of the bracket; see GateCheck.
+// result and execErr are the raw tool outputs exactly as returned by the
+// body (success value or Go error) - the same normalization Execute applies
+// via buildToolResult happens here before AfterExecute observes them.
+func (r *Registry) GateComplete(ctx context.Context, name string, tool Tool, args map[string]any, result any, execErr error) {
+	if r == nil {
+		return
+	}
+	gate := r.Gate()
+	if gate == nil {
+		return
+	}
+	gate.AfterExecute(ctx, posturedTool{Tool: tool}, args, buildToolResult(r.logger, name, result, execErr), execErr)
+}
+
 // isTypedNilGate reports whether g is a non-nil interface value whose
 // concrete value is nil (a typed-nil). Per the repo setters rule, storing
 // one would arm a gate whose every method call panics on the nil receiver;

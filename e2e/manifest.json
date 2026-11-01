@@ -719,7 +719,7 @@
     {
       "name": "tool-provider-seam",
       "dir": "e2e/suites/tool-provider-seam",
-      "status": "planned"
+      "status": "implemented"
     }
   ],
   "scenarios": [
@@ -3291,6 +3291,61 @@
       "paths": [
         "internal/queue/store_cluster_claim.go",
         "internal/worker/worker.go"
+      ]
+    },
+    {
+      "id": "tool-provider-seam-01",
+      "suite": "tool-provider-seam",
+      "diff": "M",
+      "title": "enabled provider groups live: hermes provider tool listed in the platform_tools catalog and scheduler provider tools present in the live executor definitions",
+      "paths": [
+        "internal/toolprov/provider.go",
+        "internal/daemon/github_wiring.go",
+        "internal/daemon/hermes_register.go",
+        "internal/daemon/components.go"
+      ]
+    },
+    {
+      "id": "tool-provider-seam-02",
+      "suite": "tool-provider-seam",
+      "diff": "M",
+      "title": "provider tool executes through the live turn: schedule_create via the scheduler specialist creates a job visible in scheduler.list_jobs; the gate's tool_audit_chain.db store exists and the boot log proves tool gate wired",
+      "paths": [
+        "internal/daemon/toolgate.go",
+        "internal/daemon/components.go",
+        "internal/auditlog/store.go"
+      ]
+    },
+    {
+      "id": "tool-provider-seam-03",
+      "suite": "tool-provider-seam",
+      "diff": "M",
+      "title": "engine-driven denial: security.block_financial=true denies a provider tool whose args carry a financial pattern; no job is created",
+      "paths": [
+        "pkg/security/permissions.go",
+        "internal/security/engine.go",
+        "internal/agent/executor.go"
+      ]
+    },
+    {
+      "id": "tool-provider-seam-04",
+      "suite": "tool-provider-seam",
+      "diff": "S",
+      "title": "doctor renders one tool-provider line per registered factory with enabled state (acp/github default, hermes config-enabled, scheduler disabled)",
+      "paths": [
+        "cmd/meept/doctor_providers.go",
+        "internal/config/schema.go"
+      ]
+    },
+    {
+      "id": "tool-provider-seam-05",
+      "suite": "tool-provider-seam",
+      "diff": "M",
+      "title": "disabled provider vanishes live: [tool_providers].providers.scheduler.enabled=false names the skip in the boot log, drops the group from the live executor definitions, and leaves hermes listed",
+      "paths": [
+        "internal/daemon/toolprovider_config.go",
+        "internal/daemon/components.go",
+        "internal/toolprov/provider.go"
       ]
     }
   ]

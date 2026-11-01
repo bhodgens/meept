@@ -864,6 +864,7 @@ func (d *Dispatcher) SetSessionFenceFactory(factory sessionFenceFactory) {
 // raced concurrent sessions. resolveAgent now injects a per-session fence
 // stage into the session loop instead. The method remains for compile
 // compatibility but no longer influences dispatched fencing. Nil-safe.
+//lint:ignore U1000 retired call path; kept for compile compatibility (agent-groups leaf 01)
 func (d *Dispatcher) configureFence(sessionID, workingPath string, noFence bool) {
 	_ = sessionID
 	_ = workingPath

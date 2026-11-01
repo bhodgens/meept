@@ -39,7 +39,7 @@ func (t *countingRequiredTool) Execute(ctx context.Context, args map[string]any)
 func TestExecutor_ArgGateRejectsBeforeExecute(t *testing.T) {
 	tool := &countingRequiredTool{}
 	e := NewExecutor(nil, nil)
-	res, err := e.executeToolWithRetry(context.Background(), tool, BackoffConfig{}, "call-1", "fake_required", map[string]any{})
+	res, err := e.executeToolWithRetry(context.Background(), tool, BackoffConfig{}, "call-1", "fake_required", map[string]any{}, nil)
 	require.Error(t, err)
 	assert.Nil(t, res)
 	var ae *tools.ArgValidationError
@@ -51,7 +51,7 @@ func TestExecutor_ArgGateRejectsBeforeExecute(t *testing.T) {
 func TestExecutor_ArgGateAllowsValidArgs(t *testing.T) {
 	tool := &countingRequiredTool{}
 	e := NewExecutor(nil, nil)
-	res, err := e.executeToolWithRetry(context.Background(), tool, BackoffConfig{}, "call-2", "fake_required", map[string]any{"name": "ok"})
+	res, err := e.executeToolWithRetry(context.Background(), tool, BackoffConfig{}, "call-2", "fake_required", map[string]any{"name": "ok"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "ran", res)
 	assert.Equal(t, int32(1), tool.runs.Load())

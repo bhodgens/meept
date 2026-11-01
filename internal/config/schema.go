@@ -820,11 +820,21 @@ type DaemonConfig struct {
 	// process CWD (AGENTS.md). Empty (the default) means "no last resort":
 	// such a turn fails actionably with tools.ErrNoWorkingDir instead of
 	// writing relative paths somewhere unintended.
-	DefaultWorkingDir string               `json:"default_working_dir"   toml:"default_working_dir"`
-	Uploads           UploadsConfig        `json:"uploads"              toml:"uploads"`
-	UserInstructions  InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
-	Verification      VerificationDefaults `json:"verification"         toml:"verification"`
-	OutputFilters     OutputFiltersConfig  `json:"output_filters"       toml:"output_filters"`
+	DefaultWorkingDir string `json:"default_working_dir"   toml:"default_working_dir"`
+	// TurnJournalEnabled opts in to the turn-level durable journal
+	// (internal/agent/turnjournal, docs/plans/20261031-turn-journal):
+	// an append-only step ledger over <DataDir>/turnjournal.db so a
+	// daemon killed mid-turn resumes at the NEXT STEP instead of
+	// re-running the job from step 1. Default FALSE (zero value):
+	// opt-in per docs/agents/opt-in-defaults.md - flipping the default
+	// is a product decision. When false the store is never opened and
+	// legacy behaviour is byte-identical. Wiring lands in leaves
+	// 02/03 of that tree; this field is respected nowhere else yet.
+	TurnJournalEnabled bool                 `json:"turn_journal_enabled"   toml:"turn_journal_enabled"`
+	Uploads            UploadsConfig        `json:"uploads"              toml:"uploads"`
+	UserInstructions   InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
+	Verification       VerificationDefaults `json:"verification"         toml:"verification"`
+	OutputFilters      OutputFiltersConfig  `json:"output_filters"       toml:"output_filters"`
 }
 
 // OutputFiltersConfig holds daemon-level output-filter defaults

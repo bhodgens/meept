@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -18,6 +19,12 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
+
+// ErrGateBlocked is the sentinel wrapped into the error an execution takes
+// when the centralized registry gate (G1-G4) blocks the tool call. Callers
+// classify it with errors.Is to distinguish policy blocks from tool
+// failures (blocks are deterministic and never retried).
+var ErrGateBlocked = errors.New("tool execution blocked by gate")
 
 // ToolConcurrencyProfile categorizes tools by their resource profile to drive
 // adaptive parallelism (Phase 3 of parallel-tool-execution plan).
@@ -460,6 +467,19 @@ type ToolRegistry interface {
 	List() []tools.Tool
 	// GetDefinitions returns tool definitions for the LLM.
 	GetDefinitions() []llm.ToolDefinition
+}
+
+// GatedExecutionRegistry is the OPTIONAL capability the executor probes for
+// at execution time (05-e2e-gate.md live-path finding, 2026-10-31): the
+// executor calls tool handles directly, so a gate armed on the production
+// [tools.Registry] is dead unless the executor brackets every execution
+// with the registry's GateCheck/GateComplete pair. The production
+// *tools.Registry implements this; placeholder test registries do not and
+// keep the un-gated legacy path (nil gate = both methods are no-ops
+// anyway).
+type GatedExecutionRegistry interface {
+	GateCheck(ctx context.Context, name string, tool tools.Tool, args map[string]any) error
+	GateComplete(ctx context.Context, name string, tool tools.Tool, args map[string]any, result any, execErr error)
 }
 
 // ExecutionResult represents the result of a tool execution.
@@ -1268,7 +1288,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	// permission denied, security block) are deterministic failures that
 	// bypass this code entirely.
 	retryConfig := e.getRetryConfigForTool(toolName)
-	toolResult, toolErr := e.executeToolWithRetry(ctx, tool, retryConfig, toolCall.ID, toolName, args)
+	toolResult, toolErr := e.executeToolWithRetry(ctx, tool, retryConfig, toolCall.ID, toolName, args, registry)
 	if toolErr != nil {
 		e.logger.Error("Tool execution failed",
 			"agent", e.agentID,
@@ -1345,7 +1365,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 // retry on retryable errors. Non-retryable errors and successes return
 // immediately. Streaming tools use their streaming path when the bus is
 // available.
-func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, config BackoffConfig, toolCallID, toolName string, args map[string]any) (any, error) {
+func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, config BackoffConfig, toolCallID, toolName string, args map[string]any, registry ToolRegistry) (any, error) {
 	// Registry-level boundary gate (tool-boundary-hardening leaf 01; live
 	// e2e 2026-09-19): the executor is the LIVE tool path — it calls
 	// tool.Execute directly, never tools.Registry.Execute, so the gate must
@@ -1357,6 +1377,24 @@ func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, co
 			"error", err,
 		)
 		return nil, err
+	}
+	// Centralized execution gate bracket (tool-provider-seam leaf 05 finding,
+	// 2026-10-31): a gate armed on the production *tools.Registry is dead on
+	// this path unless the executor brackets the body with
+	// GateCheck/GateComplete (G1 security scan per category, G2 audit-chain
+	// emission, G3 effects reservation, G4 posture). The probe is an optional
+	// capability so placeholder test registries keep the legacy path; a nil
+	// gate inside the registry makes both methods no-ops regardless.
+	gated, _ := registry.(GatedExecutionRegistry)
+	if gated != nil {
+		if err := gated.GateCheck(ctx, toolName, tool, args); err != nil {
+			e.logger.Warn("tool execution blocked by gate",
+				"agent", e.agentID,
+				"tool", toolName,
+				"reason", err,
+			)
+			return nil, fmt.Errorf("%w: %s", ErrGateBlocked, err)
+		}
 	}
 	backoff := NewBackoff(config)
 	var lastErr error
@@ -1379,6 +1417,14 @@ func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, co
 			})
 		} else {
 			toolResult, toolErr = tool.Execute(ctx, args)
+		}
+
+		// AfterExecute observes every body outcome (success, tool error
+		// result, Go error) - the audit tier behind the gate records the
+		// execution whether or not it succeeded. Fired inside the retry
+		// loop: each attempt is one audited execution.
+		if gated != nil {
+			gated.GateComplete(ctx, toolName, tool, args, toolResult, toolErr)
 		}
 
 		if toolErr == nil {

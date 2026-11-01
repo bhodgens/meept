@@ -14,6 +14,12 @@
     // default) and such a turn fails actionably, telling the model to pass an
     // explicit path, instead of writing relative paths somewhere unintended.
     "default_working_dir": "",
+    // Turn-level durable journal (opt-in, default false): an append-only
+    // step ledger over <data_dir>/turnjournal.db so a daemon killed
+    // mid-turn resumes at the NEXT step instead of re-running the whole
+    // job. Leave false unless debugging the resume path; flipping the
+    // default is a product decision.
+    "turn_journal_enabled": false,
     "uploads": {
       "enabled": true,
       "max_size_mb": 20,

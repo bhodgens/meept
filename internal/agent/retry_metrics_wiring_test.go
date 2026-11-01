@@ -44,6 +44,7 @@ func TestRetryMetrics_ExecutorWiring(t *testing.T) {
 		tool, fastCfg,
 		"call_wiring_1", "flaky_tool",
 		map[string]any{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
@@ -90,6 +91,7 @@ func TestRetryMetrics_ExecutorNilSafe(t *testing.T) {
 		tool, fastCfg,
 		"call_nil_1", "safe_tool",
 		map[string]any{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)

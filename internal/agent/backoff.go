@@ -55,6 +55,13 @@ func IsRetryable(err error) bool {
 		return false
 	}
 
+	// Gate blocks are deterministic policy decisions (tool-provider-seam
+	// leaf 05, issue #78): retrying re-runs the same denied call and burns
+	// the retry budget on a block that will never pass. Never retry them.
+	if errors.Is(err, ErrGateBlocked) {
+		return false
+	}
+
 	// 1. Try the RetryableError interface (covers errors wrapped via Retryable()).
 	if re, ok := errors.AsType[RetryableError](err); ok {
 		return re.IsRetryable()
