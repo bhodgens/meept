@@ -548,6 +548,7 @@ internal/agent/dispatcher.go unreachable func: Dispatcher.SetInputHasher
 internal/agent/dispatcher.go unreachable func: Dispatcher.SetInstructionParser
 internal/agent/dispatcher.go unreachable func: Dispatcher.SetInstructionStore
 internal/agent/dispatcher.go unreachable func: Dispatcher.SetMetricsStore
+internal/agent/dispatcher.go unreachable func: Dispatcher.SetSessionFenceFactory
 internal/agent/dispatcher.go unreachable func: Dispatcher.SetSessionStore
 internal/agent/dispatcher.go unreachable func: Dispatcher.SetThreadRouter
 internal/agent/dispatcher.go unreachable func: Dispatcher.SetToolRegistry
@@ -692,6 +693,7 @@ internal/agent/executor.go unreachable func: Executor.SetConversationID
 internal/agent/executor.go unreachable func: Executor.SetParallelismConfig
 internal/agent/executor.go unreachable func: Executor.SetRegistry
 internal/agent/executor.go unreachable func: Executor.SetRetryMetrics
+internal/agent/executor.go unreachable func: Executor.SetSecurityChecker
 internal/agent/executor.go unreachable func: Executor.shouldTerminateEarly
 internal/agent/executor.go unreachable func: Executor.trackCombinedTaint
 internal/agent/executor.go unreachable func: extractEditedFiles
@@ -733,6 +735,8 @@ internal/agent/executor.go unreachable func: WithExecutorParallelismLimiter
 internal/agent/executor.go unreachable func: WithExecutorRetryMetrics
 internal/agent/executor.go unreachable func: WithParallelism
 internal/agent/feedback_propagation.go unreachable func: BuildRevisionContext
+internal/agent/fence_stage.go unreachable func: injectSessionFence
+internal/agent/fence_stage.go unreachable func: newSessionFenceFactory
 internal/agent/file_watcher.go unreachable func: FileWatcherHook.invokeCallback
 internal/agent/file_watcher.go unreachable func: FileWatcherHook.IsRunning
 internal/agent/file_watcher.go unreachable func: FileWatcherHook.matchesPattern
@@ -838,6 +842,7 @@ internal/agent/handler.go unreachable func: ChatHandler.SetMessageSaver
 internal/agent/handler.go unreachable func: ChatHandler.SetMetricsStore
 internal/agent/handler.go unreachable func: ChatHandler.SetNotificationPublisher
 internal/agent/handler.go unreachable func: ChatHandler.SetQuotaResumeConfig
+internal/agent/handler.go unreachable func: ChatHandler.SetSessionFenceFactory
 internal/agent/handler.go unreachable func: ChatHandler.SetSessionStore
 internal/agent/handler.go unreachable func: ChatHandler.SetStepStore
 internal/agent/handler.go unreachable func: ChatHandler.SetSyncMode
@@ -1191,6 +1196,7 @@ internal/agent/loop.go unreachable func: AgentLoop.SetRepoMapGenerator
 internal/agent/loop.go unreachable func: AgentLoop.SetResponseAnalyzer
 internal/agent/loop.go unreachable func: AgentLoop.SetRetryMetrics
 internal/agent/loop.go unreachable func: AgentLoop.SetSchemaModeConfig
+internal/agent/loop.go unreachable func: AgentLoop.SetSecurityChecker
 internal/agent/loop.go unreachable func: AgentLoop.SetSessionAttached
 internal/agent/loop.go unreachable func: AgentLoop.SetSessionRefresher
 internal/agent/loop.go unreachable func: AgentLoop.SetSessionStore
@@ -3192,6 +3198,11 @@ internal/comm/http/acp_status.go unreachable func: httpApprover
 internal/comm/http/acp_status.go unreachable func: Server.handleACPAgentsList
 internal/comm/http/acp_status.go unreachable func: Server.handleACPPermissionsList
 internal/comm/http/acp_status.go unreachable func: Server.handleACPPermissionsResolve
+internal/comm/http/activity_handlers.go unreachable func: Server.handleActivityFindings
+internal/comm/http/activity_handlers.go unreachable func: Server.handleActivityOverview
+internal/comm/http/activity_handlers.go unreachable func: Server.handleActivityQuery
+internal/comm/http/activity_handlers.go unreachable func: Server.handleActivityRecent
+internal/comm/http/activity_handlers.go unreachable func: Server.handleAgentsReview
 internal/comm/http/api_handlers.go unreachable func: maskCredential
 internal/comm/http/api_handlers.go unreachable func: parseIntParam
 internal/comm/http/api_handlers.go unreachable func: parseSessionListQuery
@@ -6914,6 +6925,9 @@ internal/queue/queue.go unreachable func: PersistentQueue.Store
 internal/queue/queue.go unreachable func: PersistentQueue.WakeWaiter
 internal/queue/queue.go unreachable func: PersistentQueue.warnScanBound
 internal/queue/queue.go unreachable func: WaitForJob
+internal/queue/store_cluster_claim.go unreachable func: Store.ClaimNextClustered
+internal/queue/store_cluster_claim.go unreachable func: Store.HeartbeatClaim
+internal/queue/store_cluster_claim.go unreachable func: Store.ReclaimRemoteStale
 internal/queue/store.go unreachable func: boolToInt
 internal/queue/store.go unreachable func: CompletionDisposition.CompletionIsFresh
 internal/queue/store.go unreachable func: has
@@ -12138,6 +12152,7 @@ pkg/models/types.go unreachable func: NewBusMessage
 pkg/security/acp_agent.go unreachable func: ACPAgentRule
 pkg/security/computer_use.go unreachable func: BrowserToolRule
 pkg/security/computer_use.go unreachable func: ComputerUseRule
+pkg/security/fence.go unreachable func: NewFenceStageAdapter
 pkg/security/permissions.go unreachable func: EvaluateShellRisk
 pkg/security/permissions.go unreachable func: IsFinancial
 pkg/security/permissions.go unreachable func: NewPermissionChecker
@@ -12146,11 +12161,15 @@ pkg/security/permissions.go unreachable func: PermissionChecker.checkPathWithRea
 pkg/security/permissions.go unreachable func: PermissionChecker.CheckPermission
 pkg/security/permissions.go unreachable func: PermissionChecker.CheckPermissionForAgent
 pkg/security/permissions.go unreachable func: PermissionChecker.checkRiskResult
+pkg/security/permissions.go unreachable func: PermissionChecker.ConfigSnapshot
 pkg/security/permissions.go unreachable func: PermissionChecker.expandPathAll
 pkg/security/permissions.go unreachable func: PermissionChecker.matchGlobPattern
 pkg/security/permissions.go unreachable func: PermissionChecker.RemovePreExecChecker
+pkg/security/permissions.go unreachable func: PermissionChecker.SetFence
 pkg/security/permissions.go unreachable func: PermissionChecker.SetPreExecChecker
+pkg/security/permissions.go unreachable func: PermissionChecker.snapshotFence
 pkg/security/permissions.go unreachable func: PermissionChecker.snapshotPreExecCheckers
+pkg/security/permissions.go unreachable func: reflectValueOf
 pkg/sqlite/fts5.go unreachable func: BM25
 pkg/sqlite/fts5.go unreachable func: CreateFTS5Table
 pkg/sqlite/fts5.go unreachable func: CreateFTS5Triggers
