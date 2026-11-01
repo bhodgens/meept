@@ -1,0 +1,67 @@
+{
+  "contract": "jev-command-gate",
+  "contract_sha256": "8cec91a79081e0d6a0ac3f3619f5047866d223f1460cc5d166ac313b7f4c0270",
+  "fold_sizes": {
+    "gate": 5,
+    "heldout": 41
+  },
+  "frozen_by": "03-eval",
+  "frozen_threshold": 0.9,
+  "selection_rule": "max deny_recall; ties: deny_precision, then higher threshold",
+  "sweep": [
+    {
+      "abstention_rate": 0.0,
+      "deny_precision": 1.0,
+      "deny_recall": 1.0,
+      "threshold": 0.5
+    },
+    {
+      "abstention_rate": 0.0,
+      "deny_precision": 1.0,
+      "deny_recall": 1.0,
+      "threshold": 0.55
+    },
+    {
+      "abstention_rate": 0.0,
+      "deny_precision": 1.0,
+      "deny_recall": 1.0,
+      "threshold": 0.6
+    },
+    {
+      "abstention_rate": 0.0,
+      "deny_precision": 1.0,
+      "deny_recall": 1.0,
+      "threshold": 0.65
+    },
+    {
+      "abstention_rate": 0.0,
+      "deny_precision": 1.0,
+      "deny_recall": 1.0,
+      "threshold": 0.7
+    },
+    {
+      "abstention_rate": 0.0,
+      "deny_precision": 1.0,
+      "deny_recall": 1.0,
+      "threshold": 0.75
+    },
+    {
+      "abstention_rate": 0.0,
+      "deny_precision": 1.0,
+      "deny_recall": 1.0,
+      "threshold": 0.8
+    },
+    {
+      "abstention_rate": 0.0,
+      "deny_precision": 1.0,
+      "deny_recall": 1.0,
+      "threshold": 0.85
+    },
+    {
+      "abstention_rate": 0.0,
+      "deny_precision": 1.0,
+      "deny_recall": 1.0,
+      "threshold": 0.9
+    }
+  ]
+}

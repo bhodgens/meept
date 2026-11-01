@@ -1026,6 +1026,18 @@ classifier-eval-selftest:
 	@echo "Running classifier-eval guard self-test..."
 	python3 tools/classifier-eval/m4_gold_acceptance.py --self-test
 
+# jev-gate-eval-selftest runs the jev-command-gate eval harness selftest
+# (leaf 03): offline and fixture-driven ONLY - no network, no model. It
+# pins the GetRiskLevel floor reimplementation against the recorded gold,
+# the teacher gate (sub-floor FAIL + student refusal / above-floor PASS),
+# and the threshold freeze (contract status=frozen + manifest sha256
+# match via freeze.py --check). CI-eligible (stdlib only).
+.PHONY: jev-gate-eval-selftest
+jev-gate-eval-selftest:
+	@echo "Running jev-command-gate eval self-test..."
+	python3 tools/jev-command-gate-eval/eval.py --selftest
+	python3 tools/jev-command-gate-eval/freeze.py --check
+
 # adversarial runs the e2e adversarial sweep (tools/e2e-sweep) against a LIVE
 # daemon. Requires: daemon up at the endpoint, dev key at <home>/dev_key.
 # Override MEEPT_SWEEP_BASE_URL / MEEPT_SWEEP_HOME for a scratch rig. Categories

@@ -69,14 +69,16 @@
     "determinism": "the derived pair set is identical for any permutation of the same input record set"
   },
 
-  // Gate threshold. PROVISIONAL - the conservative end of the
-  // research-recommended 0.85-0.90 band (internal/jevgate default).
-  // frozen-by: 03-eval (the teacher sweep writes the frozen value here and
-  // hashes this file into tools/jev-command-gate-eval/manifest.json; never
-  // re-tuned on the student).
+  // Gate threshold. FROZEN by leaf 03's teacher sweep (03-eval) on the
+  // held-out replay fold: 0.90 (the conservative end of the
+  // research-recommended 0.85-0.90 band). The frozen value is hashed
+  // (sha256) into tools/jev-command-gate-eval/manifest.json; NEVER
+  // re-tuned on the student - a new operating point requires a new
+  // teacher sweep + re-freeze (new contract hash), never an in-place
+  // edit driven by student results.
   "gate_threshold": {
-    "value": 0.90,
-    "status": "provisional",
+    "value": 0.9,
+    "status": "frozen",
     "frozen_by": "03-eval",
     "confidence_floor": 0.10,
     "confidence_semantics": "veto signal: below the floor forces ASK, never an allow signal"
