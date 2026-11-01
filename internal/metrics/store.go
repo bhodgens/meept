@@ -754,6 +754,13 @@ func (s *Store) RecordModelPerformance(_ context.Context, record ModelPerformanc
 // caller has no agent identity. SessionID is the raw chat/session id,
 // "" when unknown. ReasoningTokens/CacheCreationTokens are 0 when the
 // provider did not report them (NOT "zero occurred").
+//
+// TraceID/SpanID (llm-hop-tracing leaf 01): lowercase-hex correlation IDs --
+// TraceID is the turn's 32-char trace ("" when the caller passed no
+// WithTraceID scope), SpanID is this call's 16-char span (minted fresh per
+// call, so retried/failover calls under one trace each get their own span).
+// TEXT hex by contract; column persistence is leaf 02's migration -- until
+// it lands the fields live in the in-memory record only.
 type LLMCallRecord struct {
 	Timestamp           time.Time
 	Provider            string
@@ -769,6 +776,8 @@ type LLMCallRecord struct {
 	ErrorMessage        string
 	LatencyMs           int64
 	DurationMs          float64 // wall-clock duration (duplicate of LatencyMs kept for schema parity)
+	TraceID             string  // 32-char lowercase hex; "" when no WithTraceID scope
+	SpanID              string  // 16-char lowercase hex; fresh per call
 }
 
 // RecordLLMCall appends one LLM call to llm_calls and updates the

@@ -1335,3 +1335,111 @@ func TestScopeOptionsPrependsTaskScope(t *testing.T) {
 		assert.Contains(t, err.Error(), "per-session token budget exceeded")
 	})
 }
+
+// ---------------------------------------------------------------------------
+// Leaf 01 (20261031-llm-hop-tracing): trace context + tool-execution end
+// ---------------------------------------------------------------------------
+
+// TestTraceContextRoundtrip pins C2's context half: WithTraceContext/
+// TraceIDFromContext roundtrip, "" when absent (and on a nil context),
+// and WithTraceContext("") is a no-op (no sentinel value ever stored).
+func TestTraceContextRoundtrip(t *testing.T) {
+	ctx := context.Background()
+	if got := TraceIDFromContext(ctx); got != "" {
+		t.Errorf("TraceIDFromContext(bare) = %q, want \"\"", got)
+	}
+	if got := TraceIDFromContext(nil); got != "" {
+		t.Errorf("TraceIDFromContext(nil) = %q, want \"\"", got)
+	}
+	if got := TraceIDFromContext(WithTraceContext(ctx, "")); got != "" {
+		t.Errorf("empty WithTraceContext must be a no-op, got %q", got)
+	}
+	const trace = "fedcba9876543210fedcba9876543210"
+	if got := TraceIDFromContext(WithTraceContext(ctx, trace)); got != trace {
+		t.Errorf("roundtrip = %q, want %q", got, trace)
+	}
+}
+
+// TestExecuteToolCalls_EmitsTracedToolEnd drives executeToolCalls against
+// a loop with a real emitter + bus and pins: one tool_execution_end event
+// per call, TraceID == the turn trace from ctx, SpanID a fresh 16-hex per
+// call (distinct across calls), ArgumentsKeys the sorted comma-joined key
+// NAMES (never values), ArgumentsBytes the raw arguments length.
+func TestExecuteToolCalls_EmitsTracedToolEnd(t *testing.T) {
+	testBus := bus.New(nil, slogDiscardLogger())
+	sub := testBus.Subscribe("test-toolend-trace", "agent.result")
+	defer testBus.Unsubscribe(sub)
+
+	loop := NewAgentLoop("trace-session", "/tmp", WithEventEmitter(NewEventEmitter("trace-agent", testBus, slogDiscardLogger())))
+
+	results := loop.executeToolCalls(
+		WithTraceContext(context.Background(), "0123456789abcdef0123456789abcdef"),
+		[]llm.ToolCall{
+			{ID: "call-1", Type: "function", Function: llm.ToolCallFunction{
+				Name:      "file_read",
+				Arguments: `{"path":"/tmp/a.txt","limit":10}`,
+			}},
+			{ID: "call-2", Type: "function", Function: llm.ToolCallFunction{
+				Name:      "web_search",
+				Arguments: `{not-parseable`,
+			}},
+		})
+	if len(results) != 2 {
+		t.Fatalf("results = %d, want 2", len(results))
+	}
+
+	seen := make([]ToolExecutionEndData, 0, 2)
+	deadline := time.After(5 * time.Second)
+	for len(seen) < 2 {
+		select {
+		case msg := <-sub.Channel:
+			var raw struct {
+				Data ToolExecutionEndData `json:"data"`
+			}
+			if err := json.Unmarshal(msg.Payload, &raw); err != nil {
+				t.Fatalf("unmarshal end event: %v", err)
+			}
+			seen = append(seen, raw.Data)
+		case <-deadline:
+			t.Fatalf("got %d tool_execution_end events, want 2", len(seen))
+		}
+	}
+
+	spanIDs := make(map[string]bool, 2)
+	for _, data := range seen {
+		if data.TraceID != "0123456789abcdef0123456789abcdef" {
+			t.Errorf("tool %s TraceID = %q, want the turn trace", data.ToolName, data.TraceID)
+		}
+		if len(data.SpanID) != 16 {
+			t.Errorf("tool %s SpanID = %q, want 16 hex chars", data.ToolName, data.SpanID)
+		}
+		spanIDs[data.SpanID] = true
+	}
+	if len(spanIDs) != 2 {
+		t.Errorf("span IDs not distinct across calls: %v", spanIDs)
+	}
+
+	byCall := make(map[string]ToolExecutionEndData, 2)
+	for _, data := range seen {
+		byCall[data.ToolCallID] = data
+	}
+	// Parsed arguments: sorted key names joined by comma, bytes = raw length.
+	d1 := byCall["call-1"]
+	if d1.ArgumentsKeys != "limit,path" {
+		t.Errorf("ArgumentsKeys = %q, want \"limit,path\" (sorted key names only)", d1.ArgumentsKeys)
+	}
+	if d1.ArgumentsBytes != len(`{"path":"/tmp/a.txt","limit":10}`) {
+		t.Errorf("ArgumentsBytes = %d, want the raw arguments length", d1.ArgumentsBytes)
+	}
+	if strings.Contains(d1.ArgumentsKeys, "/tmp/a.txt") {
+		t.Error("argument VALUES leaked into ArgumentsKeys (shape-only contract)")
+	}
+	// Unparseable arguments degrade to empty keys + raw length.
+	d2 := byCall["call-2"]
+	if d2.ArgumentsKeys != "" {
+		t.Errorf("unparseable ArgumentsKeys = %q, want \"\"", d2.ArgumentsKeys)
+	}
+	if d2.ArgumentsBytes != len(`{not-parseable`) {
+		t.Errorf("unparseable ArgumentsBytes = %d, want raw length", d2.ArgumentsBytes)
+	}
+}

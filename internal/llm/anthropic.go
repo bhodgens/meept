@@ -70,6 +70,11 @@ type AnthropicClient struct {
 	// Guarded by configMu (set via SetSessionAffinityConfig, read on the
 	// request path alongside the config copy).
 	sessionAffinity *AffinityConfig
+
+	// llmCallObserver is the leaf-01 (llm-hop-tracing) seam -- see
+	// Client.llmCallObserver. Fired from recordUsageStore's async
+	// goroutine; nil = off (SetLLMCallObserver nil-guard).
+	llmCallObserver func(appmetrics.LLMCallRecord)
 }
 
 // SetQuotaMaxWait sets the quota wait upper bound. Nil-receiver safe.
@@ -280,27 +285,37 @@ func (c *AnthropicClient) anthropicRequestURL(cfg *ModelConfig, streaming bool) 
 }
 
 // recordUsageStore appends one completed call to the app-level metrics
-// store (metrics.db llm_calls + model_performance). No-op without a store.
-// cfg is the EFFECTIVE config for the call: after a request-scoped selection
-// (WithModelOverride user directive / WithResolvedModel alias resolution) it
-// names the provider/model that actually served the call, not the client's
-// configured default.
+// store (metrics.db llm_calls + model_performance). No-op without a store
+// or observer. cfg is the EFFECTIVE config for the call: after a
+// request-scoped selection (WithModelOverride user directive /
+// WithResolvedModel alias resolution) it names the provider/model that
+// actually served the call, not the client's configured default.
+//
+// Leaf 01 (llm-hop-tracing): chatOpts.traceID (WithTraceID) rides into the
+// record verbatim and a missing span ID mints per call (trace identity is
+// per-turn, span identity per-call) -- see Client.recordUsageStore.
 func (c *AnthropicClient) recordUsageStore(cfg *ModelConfig, usage TokenUsage, isErr bool, errMsg string, latencyMs int64, chatOpts *chatOptions) {
-	if c.usageStore == nil || cfg == nil {
+	traceID, spanID := traceScopeOf(chatOpts)
+	if c.usageStore == nil && c.llmCallObserver == nil {
 		return
 	}
 	//nolint:gosec // goroutine outlives request context
 	go func() {
 		agentID := ""
 		sessionID := ""
+		providerID, modelID := "", ""
+		if cfg != nil {
+			providerID = cfg.ProviderID
+			modelID = cfg.ModelID
+		}
 		if chatOpts != nil {
 			agentID = chatOpts.agentID
 			sessionID = chatOpts.sessionID
 		}
-		c.usageStore.RecordLLMCall(appmetrics.LLMCallRecord{
+		record := appmetrics.LLMCallRecord{
 			Timestamp:           time.Now(),
-			Provider:            cfg.ProviderID,
-			ModelID:             cfg.ModelID,
+			Provider:            providerID,
+			ModelID:             modelID,
 			AgentID:             agentID,
 			SessionID:           sessionID,
 			TokensSent:          usage.PromptTokens,
@@ -310,8 +325,27 @@ func (c *AnthropicClient) recordUsageStore(cfg *ModelConfig, usage TokenUsage, i
 			IsError:             isErr,
 			ErrorMessage:        errMsg,
 			LatencyMs:           latencyMs,
-		})
+			TraceID:             traceID,
+			SpanID:              spanID,
+		}
+		if c.usageStore != nil {
+			c.usageStore.RecordLLMCall(record)
+		}
+		if c.llmCallObserver != nil {
+			c.llmCallObserver(record)
+		}
 	}()
+}
+
+// SetLLMCallObserver attaches the llm-hop-tracing observer seam (leaf 01)
+// on the Anthropic client -- same contract as Client.SetLLMCallObserver:
+// nil-guarded, fired from recordUsageStore's async goroutine, never blocks
+// the request path.
+func (c *AnthropicClient) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord)) {
+	if c == nil || fn == nil {
+		return
+	}
+	c.llmCallObserver = fn
 }
 
 // recordRefusalBudget charges a REFUSED call's provider-reported usage to the
@@ -357,6 +391,9 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	for _, opt := range opts {
 		opt(chatOpts)
 	}
+	// Leaf 01 (llm-hop-tracing): wall-clock start for the llm_calls
+	// latency stamp -- spans the whole retry loop, not one HTTP hop.
+	start := time.Now()
 
 	// Request-scoped model selection (precedence: USER directive
 	// WithModelOverride > alias resolution WithResolvedModel > this
@@ -436,7 +473,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 			// (the non-streaming doRequest site stamps refusal.Usage but
 			// has no chatOpts for the llm_calls ledger).
 			if refusal, ok := errors.AsType[*RefusalError](err); ok {
-				c.recordUsageStore(effCfg, refusal.Usage, true, "model refusal", 0, chatOpts)
+				c.recordUsageStore(effCfg, refusal.Usage, true, "model refusal", time.Since(start).Milliseconds(), chatOpts)
 				c.recordRefusalBudget(refusal, effCfg, chatOpts)
 				return nil, err
 			}
@@ -477,7 +514,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 				}
 				// Ledger the burned blank completions (every 200-OK
 				// attempt carried a real prompt).
-				c.recordUsageStore(effCfg, TokenUsage{}, true, ErrEmptyResponse.Message, 0, chatOpts)
+				c.recordUsageStore(effCfg, TokenUsage{}, true, ErrEmptyResponse.Message, time.Since(start).Milliseconds(), chatOpts)
 				return nil, err
 			}
 
@@ -549,7 +586,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		}
 
 		// Per-provider/per-agent token accounting (metrics.db llm_calls).
-		c.recordUsageStore(effCfg, resp.Usage, false, "", 0, chatOpts)
+		c.recordUsageStore(effCfg, resp.Usage, false, "", time.Since(start).Milliseconds(), chatOpts)
 
 		if c.budget != nil {
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
@@ -583,7 +620,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
-	c.recordUsageStore(effCfg, TokenUsage{}, true, allFailed.Message, 0, chatOpts)
+	c.recordUsageStore(effCfg, TokenUsage{}, true, allFailed.Message, time.Since(start).Milliseconds(), chatOpts)
 	return nil, allFailed
 }
 
@@ -621,6 +658,9 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 	for _, opt := range opts {
 		opt(chatOpts)
 	}
+	// Leaf 01 (llm-hop-tracing): wall-clock start for the llm_calls
+	// latency stamp -- spans the whole retry loop, not one HTTP hop.
+	start := time.Now()
 
 	// Request-scoped model selection (same precedence chain as Chat):
 	// user directive > alias resolution > configured default; per-request
@@ -716,7 +756,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 			// cannot change the verdict. Bughunt F12: ledger the refused
 			// call's provider-reported usage BEFORE surfacing the refusal.
 			if refusal, ok := errors.AsType[*RefusalError](err); ok {
-				c.recordUsageStore(effCfg, refusal.Usage, true, "model refusal", 0, chatOpts)
+				c.recordUsageStore(effCfg, refusal.Usage, true, "model refusal", time.Since(start).Milliseconds(), chatOpts)
 				c.recordRefusalBudget(refusal, effCfg, chatOpts)
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
@@ -754,7 +794,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 				if attempt < shortRetries {
 					continue
 				}
-				c.recordUsageStore(effCfg, TokenUsage{}, true, ErrEmptyResponse.Message, 0, chatOpts)
+				c.recordUsageStore(effCfg, TokenUsage{}, true, ErrEmptyResponse.Message, time.Since(start).Milliseconds(), chatOpts)
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -829,7 +869,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		reportProgress(ProgressStageStreaming, "Receiving response...")
 
 		// Per-provider/per-agent token accounting (metrics.db llm_calls).
-		c.recordUsageStore(effCfg, resp.Usage, false, "", 0, chatOpts)
+		c.recordUsageStore(effCfg, resp.Usage, false, "", time.Since(start).Milliseconds(), chatOpts)
 
 		if c.budget != nil {
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
@@ -867,7 +907,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
-	c.recordUsageStore(effCfg, TokenUsage{}, true, allFailed.Message, 0, chatOpts)
+	c.recordUsageStore(effCfg, TokenUsage{}, true, allFailed.Message, time.Since(start).Milliseconds(), chatOpts)
 	return nil, allFailed
 }
 

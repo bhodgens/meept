@@ -6199,6 +6199,16 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		opts = append(opts, llm.WithPriority(true))
 	}
 
+	// Leaf 01 (llm-hop-tracing): thread the turn's trace onto every LLM
+	// call. The trace arrives request-scoped on the turn's ctx
+	// (WithTraceContext, set by the handler at the mint seam); it travels
+	// as a ChatOption -- never a loop field (the loop object is shared by
+	// concurrent turns). Empty trace = no option (records keep "" trace
+	// but still mint per-call spans).
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		opts = append(opts, llm.WithTraceID(traceID))
+	}
+
 	attempt := 0
 	// overflowRetried gates F-A1's trim-and-retry-once: an overflow retry
 	// has been spent this call, and a second overflow fails honestly.
@@ -7917,6 +7927,13 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 		return results
 	}
 
+	// Leaf 01 (llm-hop-tracing): the hop's trace scope. The trace comes
+	// from the turn's ctx (minted at the handler seam); each call mints
+	// its OWN span (span identity is per-call). ArgumentsKeys/Bytes are
+	// shape-only: sorted key NAMES of the arguments JSON plus its raw
+	// length -- never values.
+	turnTraceID := TraceIDFromContext(ctx)
+
 	hashes := make([]string, len(toolCalls))
 	toExecute := make([]llm.ToolCall, 0, len(toolCalls))
 	executeIdx := make([]int, 0, len(toolCalls))
@@ -8008,6 +8025,32 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 		execResults := l.executeToolCallsUngated(ctx, toExecute)
 		for j, execResult := range execResults {
 			results[executeIdx[j]] = execResult
+		}
+	}
+
+	// Leaf 01 (llm-hop-tracing): one tool_execution_end event per call,
+	// stamped with the turn's trace, a fresh per-call span, and the
+	// shape-only argument fingerprint (sorted key names + raw byte length;
+	// never values). Emitted for EVERY terminal result -- executed, denied,
+	// breaker-refused -- so consumers see exactly one end per announced
+	// call. Nil emitter (tests, headless loops) is a no-op.
+	if l.eventEmitter != nil {
+		for i, tc := range toolCalls {
+			r := results[i]
+			if r == nil {
+				continue
+			}
+			hop := toolHopTrace(turnTraceID, tc.Function.Arguments)
+			endData := ToolExecutionEndData{
+				ToolCallID:  tc.ID,
+				ToolName:    tc.Function.Name,
+				Success:     r.Success,
+				Error:       r.Error,
+				Cached:      r.Cached,
+				BlockReason: blockReasonForToolResult(r),
+			}
+			stampToolHopTrace(&endData, hop)
+			l.eventEmitter.Emit(ctx, AgentEventToolExecutionEnd, endData)
 		}
 	}
 

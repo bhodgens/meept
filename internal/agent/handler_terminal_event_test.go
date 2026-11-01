@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
@@ -797,6 +798,109 @@ func TestPublishTaskTerminalRelay_UntrackedTaskGetsFreshID(t *testing.T) {
 	}
 	if ev.ConversationID != "task:task-99" {
 		t.Errorf("ConversationID = %q, want task:task-99 sentinel", ev.ConversationID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Leaf 01 (20261031-llm-hop-tracing): turn-start trace mint
+// ---------------------------------------------------------------------------
+
+// traceIDHex32Re pins the 32-char lowercase-hex trace shape on terminal
+// events.
+var traceIDHex32Re = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// TestHandleRequest_EmitsTraceIDOnInlineReply drives the direct inline
+// path (no client TurnID) and pins: the terminal event carries a 32-hex
+// TraceID while turnID falls back as today.
+func TestHandleRequest_EmitsTraceIDOnInlineReply(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	_, _, primaryCfg, secondaryCfg := failoverTestServers(
+		t, emptyContentResponse(), ambiguousAnalysisResponse())
+	resolver := newFailoverResolver(t, primaryCfg, secondaryCfg)
+	dispatcher := NewDispatcher(DispatcherConfig{
+		ClassifierClient:      llm.NewClient(primaryCfg),
+		ClassifierModel:       "primary",
+		ClassifierModelConfig: primaryCfg,
+		Resolver:              resolver,
+	})
+	h := NewChatHandler(nil, dispatcher, msgBus, slogDiscardLogger())
+
+	sub := msgBus.Subscribe("test-trace-terminal", "turn.terminal")
+	defer h.bus.Unsubscribe(sub)
+
+	payload, _ := json.Marshal(ChatRequest{
+		Message:        "what are your capabilities",
+		ConversationID: "conv-trace",
+	})
+	reqMsg := &models.BusMessage{
+		ID: "m-trace", Type: models.MessageTypeRequest, Source: "test",
+		Timestamp: time.Now().UTC(), Payload: payload,
+	}
+
+	h.handleRequest(context.Background(), reqMsg)
+
+	ev := waitTurnTerminal(t, sub)
+	if ev.TurnID == "" {
+		t.Error("turn_id must fall back as today (non-empty)")
+	}
+	if !traceIDHex32Re.MatchString(ev.TraceID) {
+		t.Errorf("TraceID = %q, want 32 lowercase hex chars", ev.TraceID)
+	}
+}
+
+// TestHandleRequest_NoTraceOnInvalidPayload pins the pre-mint early-failure
+// posture: the invalid-request terminal event carries TraceID "" (never a
+// second minted ID for a turn that never started).
+func TestHandleRequest_NoTraceOnInvalidPayload(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
+
+	sub := msgBus.Subscribe("test-badpayload-terminal", "turn.terminal")
+	defer h.bus.Unsubscribe(sub)
+
+	reqMsg := &models.BusMessage{
+		ID: "m-bad", Type: models.MessageTypeRequest, Source: "test",
+		Timestamp: time.Now().UTC(), Payload: []byte("{not json"),
+	}
+
+	h.handleRequest(context.Background(), reqMsg)
+
+	ev := waitTurnTerminal(t, sub)
+	if ev.Status != "failed" || ev.HandlerCase != "invalid_request" {
+		t.Fatalf("event = %+v", ev)
+	}
+	if ev.TraceID != "" {
+		t.Errorf("TraceID = %q, want \"\" on the pre-mint invalid-payload path", ev.TraceID)
+	}
+}
+
+// TestTurnRegistry_TraceCorrelation pins the relay/watchdog trace recovery:
+// AttachTrace stores the mint pair, TraceForTask/TraceForTurn resolve it,
+// and both are no-ops on nil/unknown/empty input.
+func TestTurnRegistry_TraceCorrelation(t *testing.T) {
+	reg := NewTurnRegistry()
+	if reg.Register("turn-t1", "conv-t1") {
+		t.Fatal("fresh register must report not-existing")
+	}
+	reg.AttachTrace("turn-t1", "0123456789abcdef0123456789abcdef", "0123456789abcdef")
+	reg.AttachTask("turn-t1", "task-t1")
+
+	traceID, spanID := reg.TraceForTask("task-t1")
+	if traceID != "0123456789abcdef0123456789abcdef" || spanID != "0123456789abcdef" {
+		t.Errorf("TraceForTask = (%q, %q), want the minted pair", traceID, spanID)
+	}
+	traceID, spanID = reg.TraceForTurn("turn-t1")
+	if traceID == "" || spanID == "" {
+		t.Errorf("TraceForTurn = (%q, %q), want the minted pair", traceID, spanID)
+	}
+	// Unknown task/turn resolve empty (never mint).
+	if traceID, _ = reg.TraceForTask("task-unknown"); traceID != "" {
+		t.Errorf("TraceForTask(unknown) = %q, want \"\"", traceID)
+	}
+	// Nil registry is safe.
+	var nilReg *TurnRegistry
+	if traceID, _ = nilReg.TraceForTask("task-t1"); traceID != "" {
+		t.Errorf("nil TraceForTask = %q, want \"\"", traceID)
 	}
 }
 

@@ -299,3 +299,14 @@ Delta log: (none yet)
 Row-level statuses above stay as seeded; this tree-level verdict records that every
 planned feature has located test evidence (e2e suite mapping and/or package tests).
 Row-by-row test-name mapping happens at next dispatch touch of this tree.
+
+### Extension note -- 20261031-llm-hop-tracing (leaf 01)
+
+`TurnTerminalEvent` gains one additive field: `TraceID string json:"trace_id,
+omitempty"` (32-char lowercase hex; the turn's trace correlation minted at the
+handler seam beside the turn id). Additive/omitempty -- consumers decoding the
+frozen 13-key set are unaffected (verified: existing payload-contract pins still
+pass with the field present). Empty only on the pre-mint invalid-payload early
+failure. Never two trace IDs for one turn: the async task-end relay and the
+turn watchdog re-broadcast under the SUBMITTED turn's trace via the turn
+registry. Owner: docs/plans/20261031-llm-hop-tracing/01-trace-id-threading.md.

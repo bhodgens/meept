@@ -94,7 +94,6 @@ type TokenCacheCoordinator struct {
 	metricsStore *metrics.Store
 }
 
-
 // NewTokenCacheCoordinatorWithMetrics creates a new token cache coordinator with optional metrics recording.
 func NewTokenCacheCoordinatorWithMetrics(config CacheConfig, metricsStore *metrics.Store) (*TokenCacheCoordinator, error) {
 	// Create L1 cache

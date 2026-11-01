@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,5 +187,147 @@ func TestClientChat_UsageStoreCarriesSessionIDAndReasoning(t *testing.T) {
 	}
 	if rows[0].ReasoningTokens != 7 {
 		t.Errorf("ReasoningTokens = %d, want 7", rows[0].ReasoningTokens)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Leaf 01 (20261031-llm-hop-tracing): WithTraceID / EffectiveTraceID /
+// recordUsageStore trace stamps / SetLLMCallObserver
+// ---------------------------------------------------------------------------
+
+// TestEffectiveTraceID pins C2: empty options yield ""; WithTraceID("")
+// is a no-op; duplicate WithTraceID is last-write-wins (same precedence
+// rules as WithResolvedModel's channel).
+func TestEffectiveTraceID(t *testing.T) {
+	if got := EffectiveTraceID(nil); got != "" {
+		t.Errorf("EffectiveTraceID(nil) = %q, want \"\"", got)
+	}
+	if got := EffectiveTraceID([]ChatOption{}); got != "" {
+		t.Errorf("EffectiveTraceID(empty) = %q, want \"\"", got)
+	}
+	if got := EffectiveTraceID([]ChatOption{WithTraceID("")}); got != "" {
+		t.Errorf("EffectiveTraceID(WithTraceID(\"\")) = %q, want \"\" (empty is a no-op)", got)
+	}
+	if got := EffectiveTraceID([]ChatOption{WithTraceID("abc")}); got != "abc" {
+		t.Errorf("EffectiveTraceID = %q, want abc", got)
+	}
+	// Last-write-wins: later options overwrite earlier ones (option-append
+	// order decides within a single channel, like WithResolvedModel).
+	got := EffectiveTraceID([]ChatOption{WithTraceID("first"), WithTraceID("second")})
+	if got != "second" {
+		t.Errorf("EffectiveTraceID duplicate = %q, want second (last-write-wins)", got)
+	}
+}
+
+// TestRecordUsageStore_TraceStampsAndObserver pins (b)+(c): a completed
+// call with WithTraceID carries the trace verbatim, a fresh 16-hex span,
+// and real latency; a set observer receives one record per completed call
+// with matching TraceID; SetLLMCallObserver(nil) is a no-op.
+func TestRecordUsageStore_TraceStampsAndObserver(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"id": "chatcmpl-3", "object": "chat.completion", "model": "test-model",
+			"choices": []map[string]any{
+				{"index": 0,
+					"message":       map[string]any{"role": "assistant", "content": "hi"},
+					"finish_reason": "stop"},
+			},
+			"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	store := newUsageTestStore(t)
+	client := NewClient(&ModelConfig{BaseURL: server.URL, ModelID: "test-model", ProviderID: "prov-x"})
+	client.SetUsageStore(store)
+
+	obsCh := make(chan appmetrics.LLMCallRecord, 8)
+	client.SetLLMCallObserver(func(rec appmetrics.LLMCallRecord) {
+		obsCh <- rec
+	})
+	// Nil re-set must be a safe no-op (nil-guard contract).
+	client.SetLLMCallObserver(nil)
+	client.SetLLMCallObserver(func(rec appmetrics.LLMCallRecord) { obsCh <- rec })
+
+	_, err := client.Chat(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hello"}},
+		WithTraceID("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	// Observer: exactly one record, async, with the trace + hex shapes.
+	var rec appmetrics.LLMCallRecord
+	select {
+	case rec = <-obsCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("observer never fired")
+	}
+	select {
+	case extra := <-obsCh:
+		t.Fatalf("observer fired more than once: %+v", extra)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if rec.TraceID != "0123456789abcdef0123456789abcdef" {
+		t.Errorf("observer TraceID = %q, want the WithTraceID value verbatim", rec.TraceID)
+	}
+	if len(rec.SpanID) != 16 {
+		t.Errorf("observer SpanID = %q (len %d), want 16 hex chars", rec.SpanID, len(rec.SpanID))
+	}
+	for _, r := range rec.SpanID {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			t.Errorf("SpanID %q not lowercase hex", rec.SpanID)
+		}
+	}
+	if rec.LatencyMs < 0 {
+		t.Errorf("LatencyMs = %d, want >= 0 (sub-millisecond round trips truncate to 0)", rec.LatencyMs)
+	}
+	if rec.Provider != "prov-x" || rec.AgentID != "" {
+		t.Errorf("observer record = %+v", rec)
+	}
+}
+
+// TestRecordUsageStore_EmptyTraceStillMintsSpan pins the empty-trace
+// posture: no WithTraceID -> record TraceID "" but SpanID still mints
+// (span identity is per-call, trace identity is per-turn).
+func TestRecordUsageStore_EmptyTraceStillMintsSpan(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"id": "chatcmpl-4", "object": "chat.completion", "model": "test-model",
+			"choices": []map[string]any{
+				{"index": 0,
+					"message":       map[string]any{"role": "assistant", "content": "hi"},
+					"finish_reason": "stop"},
+			},
+			"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	client := NewClient(&ModelConfig{BaseURL: server.URL, ModelID: "test-model", ProviderID: "prov-x"})
+	obsCh := make(chan appmetrics.LLMCallRecord, 4)
+	client.SetLLMCallObserver(func(rec appmetrics.LLMCallRecord) { obsCh <- rec })
+
+	if _, err := client.Chat(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hello"}}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	select {
+	case rec := <-obsCh:
+		if rec.TraceID != "" {
+			t.Errorf("TraceID = %q, want \"\" with no WithTraceID scope", rec.TraceID)
+		}
+		if len(rec.SpanID) != 16 {
+			t.Errorf("SpanID = %q, want a fresh 16-char span even without a trace", rec.SpanID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("observer never fired")
 	}
 }

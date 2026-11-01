@@ -329,6 +329,9 @@ func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []Chat
 	for _, opt := range opts {
 		opt(chatOpts)
 	}
+	// Leaf 01 (llm-hop-tracing): wall-clock start for the llm_calls
+	// latency stamp (spans the empty-completion retry lane too).
+	start := time.Now()
 
 	// Request-scoped model selection (same precedence chain as Chat):
 	// user directive > alias resolution > configured default; per-request
@@ -339,7 +342,7 @@ func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []Chat
 	payload := c.buildPayload(messages, effCfg, chatOpts, true)
 	resp, err := c.doRequestWithEmptyRetry(ctx, payload, effCfg, chatOpts.sessionID, onDelta)
 	if err != nil {
-		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error())
+		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error(), time.Since(start).Milliseconds())
 		return nil, err
 	}
 
@@ -361,7 +364,7 @@ func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []Chat
 	}
 
 	// Per-provider/per-agent token accounting (metrics.db llm_calls).
-	c.recordUsageStore(effCfg, chatOpts, resp.Usage, false, "")
+	c.recordUsageStore(effCfg, chatOpts, resp.Usage, false, "", time.Since(start).Milliseconds())
 
 	return resp, nil
 }

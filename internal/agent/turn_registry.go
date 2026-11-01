@@ -16,6 +16,12 @@ type SubmittedTurnRecord struct {
 	TaskID         string
 	SubmittedAt    time.Time
 	LastProgressAt time.Time
+	// TraceID/TurnSpanID (llm-hop-tracing leaf 01): the turn's trace
+	// correlation, captured at the handler mint seam so the async task-end
+	// relay and the turn watchdog can stamp the SAME trace onto their
+	// terminal events (one trace per minted turn). "" on untracked turns.
+	TraceID    string
+	TurnSpanID string
 }
 
 // TurnRegistry tracks async chat.submit turns in memory. It backs the
@@ -91,6 +97,52 @@ func (r *TurnRegistry) AttachTask(turnID, taskID string) {
 	if rec, ok := r.turns[turnID]; ok {
 		rec.TaskID = taskID
 	}
+}
+
+// AttachTrace records the turn's trace correlation (llm-hop-tracing leaf
+// 01), captured at the handler's mint seam. Call only on a FRESH Register
+// (the handler's Register-then-AttachTrace pair) so a re-registered turn
+// keeps its original trace. No-op when the turn is unknown or traceID "".
+func (r *TurnRegistry) AttachTrace(turnID, traceID, turnSpanID string) {
+	if r == nil || traceID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if rec, ok := r.turns[turnID]; ok {
+		rec.TraceID = traceID
+		rec.TurnSpanID = turnSpanID
+	}
+}
+
+// TraceForTask resolves the originating turn's trace correlation for a
+// finished task (the task-end relay path); "" when unresolvable.
+func (r *TurnRegistry) TraceForTask(taskID string) (traceID, turnSpanID string) {
+	if r == nil || taskID == "" {
+		return "", ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, rec := range r.turns {
+		if rec.TaskID == taskID {
+			return rec.TraceID, rec.TurnSpanID
+		}
+	}
+	return "", ""
+}
+
+// TraceForTurn resolves a tracked turn's trace correlation; "" when
+// unknown (watchdog reap path).
+func (r *TurnRegistry) TraceForTurn(turnID string) (traceID, turnSpanID string) {
+	if r == nil {
+		return "", ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if rec, ok := r.turns[turnID]; ok {
+		return rec.TraceID, rec.TurnSpanID
+	}
+	return "", ""
 }
 
 // Touch marks a turn as making progress (reaper clock reset). No-op when

@@ -196,6 +196,14 @@ type Response struct {
 	// a thinking-only model rides to completion with its raw chain-of-thought
 	// as the user-visible answer. Never set on the tool-call path.
 	ReasoningPromoted bool `json:"-"`
+	// Metadata carries per-call signaling keys written by the serving
+	// layer. Today exactly one writer exists: the ProviderManager's tier
+	// gate (tier_policy.go, llm-serving-tiers leaf 01, Contract C3)
+	// stamps llm_tier / llm_tier_degraded / llm_tier_depth when
+	// llm.tiers enabled+signal_degraded. Nil map = no signaling (the
+	// default and disabled posture: zero bytes of metadata change when
+	// the feature is off). Clients never populate it.
+	Metadata map[string]any `json:"-"`
 }
 
 // HasToolCalls returns true if the response contains tool calls.
@@ -712,4 +720,3 @@ func (e *StreamAbortedError) Error() string {
 	}
 	return fmt.Sprintf("stream aborted by rule %q", e.RuleName)
 }
-

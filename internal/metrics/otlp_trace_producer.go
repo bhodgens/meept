@@ -17,6 +17,8 @@ import (
 
 // TurnSpanSpec carries the decoded turn.terminal fields the producer maps
 // to a chat.turn span (agent-free decode lives in the daemon wiring).
+// TraceID/TurnSpanID (llm-hop-tracing leaf 01) are struct fields ONLY --
+// the producer behavior is unchanged; leaf 03 wires span production.
 type TurnSpanSpec struct {
 	ConversationID string
 	SessionID      string
@@ -29,6 +31,8 @@ type TurnSpanSpec struct {
 	Model          string
 	Error          string
 	DurationMS     int64
+	TraceID        string // 32-hex; "" on pre-mint early failures
+	TurnSpanID     string // 16-hex turn span; parent of leaf 03's hop spans
 }
 
 // StepSpanSpec carries the decoded task.step_completed fields.

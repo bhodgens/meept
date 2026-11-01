@@ -261,7 +261,6 @@ func endpointSpared(spared map[string]bool, pidFile, endpointKey string) bool {
 	return endpointKey != "" && spared[endpointKey]
 }
 
-
 // OrphanRuntimesFromConfigsAndRecords reports leftover runtime processes for a
 // set of runtime configs AND durable spawn records with the real process scan.
 // Records let `meept doctor` still see a leftover whose endpoint config no
@@ -343,7 +342,6 @@ func FilterLiveOwned(cfgs []*RuntimeConfig, orphans []OrphanRuntime) []OrphanRun
 	}
 	return out
 }
-
 
 // ReapOrphanRuntimesFromConfigsAndRecords finds and reaps leftovers for the
 // given configs and durable spawn records with the real process scan and
@@ -495,7 +493,6 @@ type StaleRecordReap struct {
 	PID int
 	Age time.Duration
 }
-
 
 // SweepStaleSpawnRecordsWithAges is SweepStaleSpawnRecords returning the
 // reaped pids WITH the record age observed at stat time (see StaleRecordReap).

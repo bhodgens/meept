@@ -172,6 +172,10 @@ type CodexClient struct {
 	// usageStore is the app-level metrics store (metrics.db). See
 	// Client.usageStore.
 	usageStore *appmetrics.Store
+	// llmCallObserver is the leaf-01 (llm-hop-tracing) seam -- see
+	// Client.llmCallObserver. Fired from recordUsageStore's async
+	// goroutine; nil = off (SetLLMCallObserver nil-guard).
+	llmCallObserver func(appmetrics.LLMCallRecord)
 }
 
 // CodexClientOption is a functional option for NewCodexClient.
@@ -290,23 +294,32 @@ type codexResponsesResponse struct {
 }
 
 // recordUsageStore appends one completed call to the app-level metrics
-// store (metrics.db llm_calls + model_performance). No-op without a store.
-func (c *CodexClient) recordUsageStore(cfg *ModelConfig, chatOpts *chatOptions, usage TokenUsage, isErr bool, errMsg string) {
-	if c.usageStore == nil || cfg == nil {
+// store (metrics.db llm_calls + model_performance). No-op without a store
+// or observer. Leaf 01 (llm-hop-tracing): the chatOptions trace scope
+// (WithTraceID) rides into the record and a missing span ID mints per call
+// -- see Client.recordUsageStore.
+func (c *CodexClient) recordUsageStore(cfg *ModelConfig, chatOpts *chatOptions, usage TokenUsage, isErr bool, errMsg string, latencyMs int64) {
+	traceID, spanID := traceScopeOf(chatOpts)
+	if c.usageStore == nil && c.llmCallObserver == nil {
 		return
 	}
 	agentID := ""
 	sessionID := ""
+	providerID, modelID := "", ""
+	if cfg != nil {
+		providerID = cfg.ProviderID
+		modelID = cfg.ModelID
+	}
 	if chatOpts != nil {
 		agentID = chatOpts.agentID
 		sessionID = chatOpts.sessionID
 	}
 	//nolint:gosec // goroutine outlives request context
 	go func() {
-		c.usageStore.RecordLLMCall(appmetrics.LLMCallRecord{
+		record := appmetrics.LLMCallRecord{
 			Timestamp: time.Now(),
-			Provider:  cfg.ProviderID,
-			ModelID:   cfg.ModelID,
+			Provider:  providerID,
+			ModelID:   modelID,
 			AgentID:   agentID,
 			SessionID: sessionID,
 			// Codex usage payloads decode input/output/cached only;
@@ -316,8 +329,28 @@ func (c *CodexClient) recordUsageStore(cfg *ModelConfig, chatOpts *chatOptions, 
 			TokensCached: usage.CachedTokens,
 			IsError:      isErr,
 			ErrorMessage: errMsg,
-		})
+			LatencyMs:    latencyMs,
+			TraceID:      traceID,
+			SpanID:       spanID,
+		}
+		if c.usageStore != nil {
+			c.usageStore.RecordLLMCall(record)
+		}
+		if c.llmCallObserver != nil {
+			c.llmCallObserver(record)
+		}
 	}()
+}
+
+// SetLLMCallObserver attaches the llm-hop-tracing observer seam (leaf 01)
+// on the Codex client -- same contract as Client.SetLLMCallObserver:
+// nil-guarded, fired from recordUsageStore's async goroutine, never blocks
+// the request path.
+func (c *CodexClient) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord)) {
+	if c == nil || fn == nil {
+		return
+	}
+	c.llmCallObserver = fn
 }
 
 // Chat sends a non-streaming Responses request (stream:false + single JSON
@@ -339,6 +372,9 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 	for _, opt := range opts {
 		opt(chatOpts)
 	}
+	// Leaf 01 (llm-hop-tracing): wall-clock start for the llm_calls
+	// latency stamp (spans the empty-completion retry lane too).
+	start := time.Now()
 
 	// Request-scoped model selection (precedence: USER directive
 	// WithModelOverride > alias resolution WithResolvedModel > this
@@ -349,7 +385,7 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 	payload := c.buildPayload(messages, effCfg, chatOpts, false)
 	resp, err := c.doRequestWithEmptyRetry(ctx, payload, effCfg, chatOpts.sessionID, nil)
 	if err != nil {
-		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error())
+		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error(), time.Since(start).Milliseconds())
 		return nil, err
 	}
 
@@ -371,7 +407,7 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 	}
 
 	// Per-provider/per-agent token accounting (metrics.db llm_calls).
-	c.recordUsageStore(effCfg, chatOpts, resp.Usage, false, "")
+	c.recordUsageStore(effCfg, chatOpts, resp.Usage, false, "", time.Since(start).Milliseconds())
 
 	return resp, nil
 }

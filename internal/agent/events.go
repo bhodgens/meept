@@ -207,16 +207,25 @@ type ToolExecutionUpdateData struct {
 func (ToolExecutionUpdateData) agentEventData() {}
 
 // ToolExecutionEndData is emitted after a tool execution completes or is blocked.
+// TraceID/SpanID/ArgumentsKeys/ArgumentsBytes (llm-hop-tracing leaf 01):
+// shape-only tracing attributes -- trace/span correlate the hop under the
+// turn's trace; ArgumentsKeys is the SORTED COMMA-JOINED KEY NAMES of the
+// tool-call arguments JSON and ArgumentsBytes the raw arguments length.
+// Raw argument VALUES never ride these fields (keys only, shape-only).
 type ToolExecutionEndData struct {
-	ToolCallID  string        `json:"tool_call_id"`
-	ToolName    string        `json:"tool_name"`
-	Success     bool          `json:"success"`
-	Result      string        `json:"result"`
-	Error       string        `json:"error,omitempty"`
-	Cached      bool          `json:"cached"`
-	Duration    time.Duration `json:"duration"`
-	Blocked     bool          `json:"blocked"`
-	BlockReason string        `json:"block_reason,omitempty"`
+	ToolCallID     string        `json:"tool_call_id"`
+	ToolName       string        `json:"tool_name"`
+	Success        bool          `json:"success"`
+	Result         string        `json:"result"`
+	Error          string        `json:"error,omitempty"`
+	Cached         bool          `json:"cached"`
+	Duration       time.Duration `json:"duration"`
+	Blocked        bool          `json:"blocked"`
+	BlockReason    string        `json:"block_reason,omitempty"`
+	TraceID        string        `json:"trace_id,omitempty"`
+	SpanID         string        `json:"span_id,omitempty"`
+	ArgumentsKeys  string        `json:"arguments_keys,omitempty"`
+	ArgumentsBytes int           `json:"arguments_bytes,omitempty"`
 }
 
 func (ToolExecutionEndData) agentEventData() {}

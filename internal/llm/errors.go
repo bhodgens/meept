@@ -162,7 +162,6 @@ func UserMessage(err error) string {
 	return err.Error()
 }
 
-
 // IsNonRetryable checks if an error is non-retryable.
 func IsNonRetryable(err error) bool {
 	if err == nil {
