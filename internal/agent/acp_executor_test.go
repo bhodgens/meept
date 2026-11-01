@@ -485,8 +485,8 @@ func TestACPTurnSourceContext(t *testing.T) {
 	if _, _, ok := ACPTurnSourceFromContext(context.Background()); ok {
 		t.Error("bare ctx must report ok=false (chat lane)")
 	}
-	//nolint:staticcheck // nil ctx must not panic (defensive reader)
-	if _, _, ok := ACPTurnSourceFromContext(nil); ok {
+	//lint:ignore SA1012 nil ctx must not panic (defensive reader) — staticcheck does not honor nolint
+	if _, _, ok := ACPTurnSourceFromContext(nil); ok { //nolint:staticcheck // nil ctx must not panic (defensive reader)
 		t.Error("nil ctx must report ok=false")
 	}
 }

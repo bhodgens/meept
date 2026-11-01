@@ -57,17 +57,6 @@ func (h *wdogLogCapture) Handle(_ context.Context, r slog.Record) error {
 func (h *wdogLogCapture) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h *wdogLogCapture) WithGroup(string) slog.Handler      { return h }
 
-func (h *wdogLogCapture) contains(substr string) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, rec := range h.records {
-		if strings.Contains(rec, substr) {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *wdogLogCapture) hasLevel(substr string, level slog.Level) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
