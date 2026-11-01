@@ -1166,6 +1166,51 @@ RE_REGISTER_HANDLER = re.compile(
     r'RegisterHandler\(\s*"([^"]+)"\s*,\s*([^\)]+)'
 )
 
+# Detect a local closure that forwards to RegisterHandler with a NON-literal
+# first argument, e.g. internal/daemon/activity_rpc.go:35
+#   register := func(method string, handler rpc.Handler) {
+#       ...
+#       server.RegisterHandler(method, handler)
+#   }
+# Registrations then go through that closure (register("activity.query", ...)),
+# so the literal-only RE_REGISTER_HANDLER above misses them entirely and the
+# generated map claims the method does not exist.
+#
+# The body spans many lines, so this runs over the whole file text (DOTALL),
+# not per line. The {[^}]*? stop keeps the match inside the closure's own body:
+# a nested func literal opens with `func(...) {` and its own braces are matched
+# by the non-greedy scan up to the first RegisterHandler call. Only the
+# assignment target is captured; the body is not.
+RE_CLOSURE_FORWARD = re.compile(
+    r'(\w+)\s*:=\s*func\s*\(\s*method\s+string\s*,\s*\w+\s+[\w.]+\s*\)'
+    r'\s*\{(?:[^{}]|\{[^{}]*\})*?RegisterHandler\(\s*method\s*,'
+)
+
+
+def _closure_forwarders(text):
+    """Return {closure_var_name: line_number} for RegisterHandler forwarders.
+
+    Conservative by design: the closure must be a local `name := func(...)`
+    assignment whose body calls RegisterHandler with the first parameter as the
+    topic. Variables, loops and cross-file indirection are not resolved.
+    """
+    found = {}
+    for m in RE_CLOSURE_FORWARD.finditer(text):
+        name = m.group(1)
+        if not name.isidentifier():
+            continue
+        found.setdefault(name, text[:m.start()].count("\n") + 1)
+    return found
+
+
+# A call to a detected forwarder: register("activity.query", <handler>)
+# Only the topic (group 1) and the handler's leading token (group 2) are
+# captured; the handler body is a func literal and is not parsed.
+def _closure_call_re(var_name):
+    return re.compile(
+        r'\b' + re.escape(var_name) + r'\(\s*"([^"]+)"\s*,\s*(?:func\s*\(|(\w+))'
+    )
+
 
 def extract_rpc_handlers():
     """Extract all RegisterHandler("topic", handler) calls.
@@ -1174,14 +1219,25 @@ def extract_rpc_handlers():
     "responseTopic", ...))) bridge RPC methods onto the bus: the RPC method
     publishes requestTopic. Record that edge so proxied topics are not
     misreported as publisher-less.
+
+    Also extracts registrations made through a local forwarding closure (see
+    RE_CLOSURE_FORWARD): the closure's call site supplies the topic, and the
+    handler label records the closure so the map stays traceable.
     """
     handlers = []
     proxy_edges = []
     for fpath in find_go_files():
         try:
-            lines = fpath.read_text(errors="replace").splitlines()
+            text = fpath.read_text(errors="replace")
         except OSError:
             continue
+        lines = text.splitlines()
+
+        # Pass 1: which local closures in THIS file forward to RegisterHandler?
+        forwarders = _closure_forwarders(text)
+        call_res = {v: _closure_call_re(v) for v in forwarders}
+
+        # Pass 2: registrations.
         for i, line in enumerate(lines, 1):
             if line.strip().startswith("//"):
                 continue
@@ -1211,6 +1267,23 @@ def extract_rpc_handlers():
                         "line": i,
                         "via_rpc_proxy": True,
                     })
+
+            # Closure-forwarded registrations: varName("literal", handler)
+            for var_name, cre in call_res.items():
+                cm = cre.search(line)
+                if not cm:
+                    continue
+                topic = cm.group(1)
+                # The handler is a func literal or a named func value; record
+                # the closure so the entry stays traceable to its call site.
+                label = cm.group(2) or "func literal"
+                handlers.append({
+                    "topic": topic,
+                    "handler": "%s(%s)" % (var_name, label),
+                    "file": rel(fpath),
+                    "line": i,
+                })
+
     handlers.sort(key=lambda h: h["topic"])
     return handlers, proxy_edges
 

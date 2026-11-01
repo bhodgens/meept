@@ -18,10 +18,40 @@
     "line": 142
   },
   {
+    "topic": "activity.findings",
+    "handler": "register(func literal)",
+    "file": "internal/daemon/activity_rpc.go",
+    "line": 221
+  },
+  {
+    "topic": "activity.overview",
+    "handler": "register(func literal)",
+    "file": "internal/daemon/activity_rpc.go",
+    "line": 127
+  },
+  {
+    "topic": "activity.query",
+    "handler": "register(func literal)",
+    "file": "internal/daemon/activity_rpc.go",
+    "line": 51
+  },
+  {
+    "topic": "activity.recent",
+    "handler": "register(func literal)",
+    "file": "internal/daemon/activity_rpc.go",
+    "line": 101
+  },
+  {
     "topic": "agent.workers.list",
     "handler": "p.makeProxy(\"agent.workers.list\", \"agent.workers.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",
     "line": 139
+  },
+  {
+    "topic": "agents.review",
+    "handler": "register(func literal)",
+    "file": "internal/daemon/activity_rpc.go",
+    "line": 299
   },
   {
     "topic": "backup.list",
