@@ -197,6 +197,9 @@
     "internal/code/": [
       "smoke"
     ],
+    "internal/codemode/": [
+      "codemode"
+    ],
     "internal/compress/": [
       "smoke"
     ],
@@ -359,6 +362,9 @@
     "internal/jevgate/": [
       "jev-command-gate"
     ],
+    "internal/gatecapture/": [
+      "jev-command-gate"
+    ],
     "internal/comm/slack/": [
       "hitl-notifications"
     ]
@@ -383,12 +389,13 @@
     {
       "name": "jev-command-gate",
       "dir": "e2e/suites/jev-command-gate",
-      "status": "todo",
+      "status": "implemented",
       "diff": "M",
       "scenarios": [
         "jev-gate-01 fail-closed matrix",
         "jev-gate-02 capture chokepoints"
-      ]
+      ],
+      "note": "leaf 01 fail-closed matrix + C2 byte-stability; leaf 02 two-chokepoint capture, DPO export, near-miss pairing, secret scrub, store placement"
     },
     {
       "name": "rpc-ping",
@@ -599,6 +606,12 @@
       "name": "config-reload",
       "dir": "e2e/suites/config-reload",
       "status": "implemented"
+    },
+    {
+      "name": "codemode",
+      "dir": "e2e/suites/codemode",
+      "status": "implemented",
+      "note": "RED gate skeleton (branch 02 leaf 00T): compiles only once internal/codemode lands; the five pinned cases fail RED until leaves 01/02 are complete."
     },
     {
       "name": "daemon-lifecycle",
@@ -3373,6 +3386,76 @@
         "internal/daemon/toolprovider_config.go",
         "internal/daemon/components.go",
         "internal/toolprov/provider.go"
+      ]
+    },
+    {
+      "id": "codemode-01",
+      "suite": "codemode",
+      "diff": "S",
+      "title": "gate default off: with [agent.tools] codemode_enabled absent the codemode tool is absent from every LLM request's tool definitions",
+      "paths": [
+        "internal/codemode/",
+        "internal/tools/builtin/"
+      ]
+    },
+    {
+      "id": "codemode-02",
+      "suite": "codemode",
+      "diff": "M",
+      "title": "gate on: codemode_enabled=true registers the codemode tool in the live executor tool definitions",
+      "paths": [
+        "internal/codemode/",
+        "internal/tools/builtin/"
+      ]
+    },
+    {
+      "id": "codemode-03",
+      "suite": "codemode",
+      "diff": "S",
+      "title": "fixed script return 1+1 serializes to C3 Result.Value \"2\" with OK=true and empty Err",
+      "paths": [
+        "internal/codemode/"
+      ]
+    },
+    {
+      "id": "codemode-04",
+      "suite": "codemode",
+      "diff": "S",
+      "title": "infinite loop + timeout_s=1 -> C3 Result.Err set, wall clock < 5s (hard-kill, no hang)",
+      "paths": [
+        "internal/codemode/"
+      ]
+    },
+    {
+      "id": "codemode-05",
+      "suite": "codemode",
+      "diff": "S",
+      "title": "nested tool calls stay out of LLM context: a script calling tools.echo twice yields exactly one C3 codemode result in the recorded executor request, zero nested echo tool messages",
+      "paths": [
+        "internal/codemode/",
+        "internal/tools/builtin/"
+      ]
+    },
+    {
+      "id": "jev-command-gate-02",
+      "suite": "jev-command-gate",
+      "diff": "M",
+      "title": "two-chokepoint capture: deny->human-resolve and permission-table ask->confirm land exactly one record each; DPO export frozen shape; near-miss deterministic; no secret in any row",
+      "paths": [
+        "internal/gatecapture/store.go",
+        "internal/gatecapture/export.go",
+        "internal/tools/builtin/decision_gate.go",
+        "internal/security/engine.go"
+      ]
+    },
+    {
+      "id": "jev-command-gate-01",
+      "suite": "jev-command-gate",
+      "diff": "M",
+      "title": "fail-closed matrix: clean-allow is the only allow path (error/nil/degraded/below-threshold/low-confidence all soft-escalate); C2 serialization byte-stable across map iteration",
+      "paths": [
+        "internal/jevgate/gate.go",
+        "internal/jevgate/serialize.go"
       ]
     }
   ]

@@ -11,6 +11,20 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 )
 
+// gateCapture is the chokepoint-1 capture seam (jev-command-gate leaf 02,
+// Contract C4): the deny -> human-resolution capture sink. Declared here as
+// a narrow interface and satisfied by *gatecapture.Store (its concrete
+// methods carry context, which the interface binds away) - decision_gate
+// never imports internal/gatecapture, mirroring the githubsvc factory-seam
+// direction rule. Nil-tolerant: a nil capture records nothing and never
+// blocks the flow.
+type gateCapture interface {
+	// DecisionGateDeny arms the pending capture at the deny escalation.
+	DecisionGateDeny(ctx context.Context, command string)
+	// DecisionGateResolved lands the record at the human resolution.
+	DecisionGateResolved(ctx context.Context, command, decision, approver string)
+}
+
 // DecisionGateHook: irreversibility gate (decision-model tree leaf 03,
 // docs/plans/decision-model/03-irreversibility-gate.md, Contract D in
 // master.md). A BeforeToolCallHook that consults the DecisionClient on
@@ -60,6 +74,9 @@ type DecisionGateHook struct {
 	gateTools map[string]bool
 	enabled   bool
 	logger    *slog.Logger
+	// capture is the leaf-02 chokepoint-1 sink. Nil = capture disabled
+	// (every call site nil-guards; the deny/confirm flow is unchanged).
+	capture gateCapture
 }
 
 // compile-time: the hook satisfies the registry's before-tool-call interface.
@@ -100,6 +117,16 @@ func (h *DecisionGateHook) SetEnabled(enabled bool) {
 	h.enabled = enabled
 }
 
+// SetGateCapture attaches the leaf-02 chokepoint-1 capture sink (satisfied
+// by *gatecapture.Store). Nil clears - capture is strictly opt-in and its
+// absence never changes gate behavior.
+func (h *DecisionGateHook) SetGateCapture(c gateCapture) {
+	if h == nil {
+		return
+	}
+	h.capture = c
+}
+
 // BeforeToolCall consults the decision model on a gated tool call.
 // Deny = BlockResult{Block: true, Reason: ...}; the loop renders the
 // phase-1 confirmation shape from it. Everything else allows.
@@ -130,6 +157,18 @@ func (h *DecisionGateHook) BeforeToolCall(ctx context.Context, toolCall llm.Tool
 		h.logger.Debug("decision gate: confirmed re-invoke, skipping ask",
 			"tool", toolCall.Function.Name,
 		)
+		// CHOKEPOINT 1 RESOLUTION (jev-command-gate leaf 02, Contract C4):
+		// the re-invoke IS the human approval - the loop renders the deny
+		// as the phase-1 confirmation shape, the UI resolves it, and the
+		// model re-invokes with confirmed=true only on approval. The prior
+		// (armed by the deny branch below) carries command, serialized
+		// context, and prior score. Approver is the documented empty value
+		// when this seam carries no identity. Best-effort, never blocking.
+		if h.capture != nil {
+			if cmd, _ := extractGateCommand(toolCall); cmd != "" {
+				h.capture.DecisionGateResolved(ctx, cmd, "allowed", "")
+			}
+		}
 		return agent.BlockResult{}
 	}
 
@@ -176,12 +215,35 @@ func (h *DecisionGateHook) BeforeToolCall(ctx context.Context, toolCall llm.Tool
 		"confidence", confidence,
 		"threshold", h.threshold,
 	)
+	// CHOKEPOINT 1 ARM (jev-command-gate leaf 02, Contract C4): the deny
+	// escalated to confirmation. Arming is memory-only; the record lands at
+	// the confirmed re-invoke above (or is dropped when the human never
+	// approves - a decline records nothing at this seam, because the
+	// confirmation flow's decline path never re-enters the gate).
+	if h.capture != nil {
+		if cmd, _ := extractGateCommand(toolCall); cmd != "" {
+			h.capture.DecisionGateDeny(ctx, cmd)
+		}
+	}
 	return agent.BlockResult{
 		Block: true,
 		Reason: fmt.Sprintf(
 			"decision gate: answer %q with confidence %.2f does not clear the %q/%.2f bar; user confirmation required",
 			answer, confidence, decisionGateAffirmative, h.threshold),
 	}
+}
+
+// extractGateCommand pulls the shell command text from the tool-call args
+// (the shell tool's "command" property) for the chokepoint-1 capture. A
+// non-shell gated call (file_write) or unparseable args yields "" - the
+// capture skips it rather than storing a command-less row.
+func extractGateCommand(toolCall llm.ToolCall) (string, error) {
+	args, err := toolCall.ParsedArguments()
+	if err != nil {
+		return "", err
+	}
+	cmd, _ := args["command"].(string)
+	return cmd, nil
 }
 
 // decisionGateAffirmative is the affirmative option label in the gate's

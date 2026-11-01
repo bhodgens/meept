@@ -56,6 +56,12 @@ type Engine struct {
 	// held as RLock, so implementations MUST NOT call back into Engine
 	// methods that acquire mu. See PreExecChecker interface doc.
 	preExecCheckers map[string]PreExecChecker
+
+	// gateAskCapture is the leaf-02 chokepoint-2 capture sink
+	// (jev-command-gate, Contract C4). Nil = capture disabled; every call
+	// site nil-guards. The Ask arm happens under RLock, so the sink's
+	// PermissionTableAsk MUST stay memory-only (see GateAskCapture doc).
+	gateAskCapture GateAskCapture
 }
 
 // NewEngine creates a new security engine with the given database path.
@@ -138,6 +144,15 @@ func (e *Engine) SetPermissionTable(pt *PermissionTable) {
 	e.permissionTable = pt
 }
 
+// SetGateAskCapture attaches the leaf-02 chokepoint-2 capture sink
+// (satisfied by *gatecapture.Store). Nil clears - capture is strictly
+// opt-in and its absence never changes engine behavior.
+func (e *Engine) SetGateAskCapture(c GateAskCapture) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.gateAskCapture = c
+}
+
 // checkShellPermissionTable evaluates the declarative permission table for a
 // shell command. Returns nil when the table is unset or no prefix matched —
 // in that case the existing evaluation path proceeds unchanged.
@@ -158,6 +173,15 @@ func (e *Engine) checkShellPermissionTable(command string) *Decision {
 			RuleSource: "shell_permission_table",
 		}
 	case ShellActionAsk:
+		// CHOKEPOINT 2 ARM (jev-command-gate leaf 02, Contract C4): the
+		// permission-table ask routed to the confirmation flow. Arming is
+		// MEMORY-ONLY (this runs under mu RLock - mutexio); the record
+		// lands at the ask RESOLUTION via the wiring layer calling
+		// Store.PermissionTableResolved when the confirmation flow answers
+		// (outside any engine lock).
+		if e.gateAskCapture != nil {
+			e.gateAskCapture.PermissionTableAsk(command)
+		}
 		return &Decision{
 			Allowed:              false,
 			Reason:               "command requires confirmation by shell permission table rule: " + prefix,
