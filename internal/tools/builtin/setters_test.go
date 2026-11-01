@@ -32,6 +32,7 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		{"TeamPresetCreateTool.SetCallback", func() { (&TeamPresetCreateTool{}).SetCallback(nil) }},
 		{"ShellExecuteTool.SetFenceChecker", func() { (&ShellExecuteTool{}).SetFenceChecker(nil) }},
 		{"ShellExecuteTool.SetSecurityOrchestrator", func() { (&ShellExecuteTool{}).SetSecurityOrchestrator(nil) }},
+		{"ShellExecuteTool.SetSpillWriter", func() { (&ShellExecuteTool{}).SetSpillWriter(nil) }},
 		{"FileEditTool.SetFenceChecker", func() { (&FileEditTool{}).SetFenceChecker(nil) }},
 		{"FileEditTool.SetLSPNotifier", func() { (&FileEditTool{}).SetLSPNotifier(nil) }},
 		{"ResolveTool.SetFenceChecker", func() { (&ResolveTool{}).SetFenceChecker(nil) }},

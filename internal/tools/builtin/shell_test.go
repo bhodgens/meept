@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/stretchr/testify/assert"
@@ -699,4 +701,106 @@ func TestShellTruncationUnderCapByteIdentical(t *testing.T) {
 	assert.Equal(t, raw, sr.Stdout, "under-cap output must be byte-identical to the raw stdout")
 	assert.Empty(t, sr.Stderr, "fixture command writes nothing to stderr")
 	assert.NotContains(t, sr.Stdout, "truncated", "under-cap output must carry no truncation note")
+}
+
+// --- leaf 01 T2/T3: tool-layer spill writer behavior ---
+
+// TestShellSpill pins C2 + T2: when the shell tool truncates and a spiller is
+// wired, the FULL pre-truncation combined output is written to
+// $MEEPT_HOME/spill/tools/<session>/<ulid>.txt byte-for-byte, and the path
+// rides in both ShellResult.FullOutputPath and the truncation note. The real
+// llm.SpillService is used (not a fake) so the C2 path convention is verified
+// end-to-end.
+func TestShellSpill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MEEPT_HOME", home)
+
+	path, headMarker, tailMarker := writeOversizedStdoutFile(t)
+
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool.SetSpillWriter(llm.NewSpillService(""))
+
+	// Scoped context so the spill lands under the named session dir.
+	sid := "shell-spill-sess"
+	ctx := ContextWithSessionID(context.Background(), sid)
+
+	result, err := tool.Execute(ctx, map[string]any{
+		"command": "cat " + path,
+	})
+	require.NoError(t, err, "unexpected error")
+	sr := unwrapShellResult(t, result)
+
+	require.True(t, sr.Truncated, "oversized output must truncate")
+	require.NotEmpty(t, sr.FullOutputPath, "truncated output with a wired spiller must set FullOutputPath")
+	assert.True(t, strings.HasSuffix(sr.FullOutputPath, ".txt"),
+		"FullOutputPath must be a .txt spill file, got %q", sr.FullOutputPath)
+	// The path must be under $MEEPT_HOME/spill/tools/<session>/ (C2).
+	wantDir := filepath.Join(home, "spill", "tools", sid)
+	assert.True(t, strings.HasPrefix(sr.FullOutputPath, wantDir+string(filepath.Separator)),
+		"spill path %q must live under %q", sr.FullOutputPath, wantDir)
+	// Path component naming: <session>/<id>.txt with a hex id.
+	_, after := filepath.Split(sr.FullOutputPath)
+	assert.Regexp(t, `^[0-9a-f]+\.txt$`, after,
+		"spill filename must be a hex id .txt, got %q", after)
+
+	// Byte-for-byte: the on-disk spill equals the FULL stdout fixture
+	// (the command writes only to stdout, so combined == stdout).
+	spilled, readErr := os.ReadFile(sr.FullOutputPath)
+	require.NoError(t, readErr, "spill file must exist on disk")
+	full, readErr := os.ReadFile(path)
+	require.NoError(t, readErr, "read fixture")
+	assert.Equal(t, full, spilled, "spilled file must contain the FULL pre-truncation output byte-for-byte")
+
+	// The result's kept stdout carries the TAIL marker, omits the head, and
+	// names the spill file.
+	assert.Contains(t, sr.Stdout, tailMarker, "kept tail must be present")
+	assert.NotContains(t, sr.Stdout, headMarker, "head must be omitted from the kept tail")
+	assert.Contains(t, sr.Stdout, "full output: "+sr.FullOutputPath,
+		"truncation note must name the spill path")
+
+	// File mode 0600 / dir mode 0700 (C2).
+	info, statErr := os.Stat(sr.FullOutputPath)
+	require.NoError(t, statErr, "stat spill file")
+	assert.EqualValues(t, 0600, info.Mode().Perm(), "spill file must be 0600")
+	dirInfo, statErr := os.Stat(wantDir)
+	require.NoError(t, statErr, "stat spill dir")
+	assert.EqualValues(t, 0700, dirInfo.Mode().Perm(), "spill dir must be 0700")
+}
+
+// failingSpillWriter is a SpillWriter fake that always errors — used to pin
+// the best-effort contract (T3): a spill failure must NOT fail the tool.
+type failingSpillWriter struct{}
+
+func (failingSpillWriter) WriteToolSpill(string, []byte) (string, error) {
+	return "", errors.New("spill write exploded")
+}
+
+// TestShellSpillFailure pins T3 + best-effort semantics: a failing spill
+// writer leaves exit code / truncated tail output UNCHANGED, produces no
+// FullOutputPath, and omits the "full output:" clause from the note.
+func TestShellSpillFailure(t *testing.T) {
+	path, headMarker, tailMarker := writeOversizedStdoutFile(t)
+
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool.SetSpillWriter(failingSpillWriter{})
+	tool.logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"command": "cat " + path,
+	})
+	require.NoError(t, err, "a failing spill writer must NOT fail the tool call")
+	sr := unwrapShellResult(t, result)
+
+	assert.True(t, sr.Truncated, "output is still tail-truncated even when the spill fails")
+	assert.Equal(t, 0, sr.ReturnCode, "exit code is unaffected by a spill failure")
+	assert.Empty(t, sr.FullOutputPath, "no FullOutputPath when the spill write failed")
+	assert.NotContains(t, sr.Stdout, "full output:", "no re-readable pointer when the spill failed")
+	// The tail truncation still happened: tail marker kept, head omitted.
+	assert.Contains(t, sr.Stdout, tailMarker, "tail truncation must still apply on spill failure")
+	assert.NotContains(t, sr.Stdout, headMarker, "head must still be omitted on spill failure")
+	// The note still states the omitted-bytes count (the C1 prefix), just no path.
+	noteRe := regexp.MustCompile(
+		`truncated, ` + strconv.Itoa(truncationGateTotal) + ` bytes total; first \d+ bytes omitted\)`)
+	assert.Regexp(t, noteRe, sr.Stdout,
+		"spill-failure note must state total + omitted bytes without a path")
 }

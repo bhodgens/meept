@@ -123,6 +123,20 @@ type ShellExecuteTool struct {
 	// it SUPERSEDES knownSafeCommands: deny/ask short-circuit execution;
 	// allow proceeds (tirith still runs). Both mechanisms remain available.
 	permissionTable *intsecurity.PermissionTable
+
+	// spillWriter is the tool-layer spill seam (nil = no spill; oversized
+	// output is still tail-truncated, just without the re-readable pointer).
+	// Wired by the daemon to llm.SpillService via SetSpillWriter.
+	spillWriter SpillWriter
+}
+
+// SetSpillWriter installs the tool-layer spill writer (nil = no spill; the
+// shell tool still tail-truncates oversized output, just without the
+// re-readable pointer). Nil-guarded per the repo setter invariant.
+func (t *ShellExecuteTool) SetSpillWriter(w SpillWriter) {
+	if w != nil {
+		t.spillWriter = w
+	}
 }
 
 // NewShellExecuteTool creates a new shell execution tool.
@@ -303,6 +317,22 @@ type ShellResult struct {
 	Stderr     string `json:"stderr,omitempty"`
 	ReturnCode int    `json:"return_code"`
 	Truncated  bool   `json:"truncated,omitempty"`
+	// FullOutputPath is the absolute path of a spilled copy of the FULL
+	// (pre-truncation) combined output. Set only when Truncated is true and
+	// the spill write succeeded; empty when the output was under the cap or
+	// the spill write failed (best-effort — the tool never fails on it).
+	FullOutputPath string `json:"full_output_path,omitempty"`
+}
+
+// SpillWriter is the tool-layer spill seam. The shell tool spills oversized
+// (truncated) output to a re-readable file; the daemon wires the real
+// implementation (llm.SpillService) here. Empty session -> "nosession" dir.
+// A failing writer must NOT fail the tool: callers treat WriteToolSpill as
+// best-effort (log warn, omit the pointer, still return the tail).
+type SpillWriter interface {
+	// WriteToolSpill writes data to $MEEPT_HOME/spill/tools/<session_id|nosession>/<id>.txt
+	// and returns the absolute path.
+	WriteToolSpill(sessionID string, data []byte) (string, error)
 }
 
 // commandSemantic describes how to interpret non-zero exit codes for a
@@ -505,13 +535,34 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		}
 	}
 
-	// Truncate if too large
+	// Pre-truncation combined output (stdout+stderr as captured). Used for the
+	// evidence hash (full-output stability) and the best-effort spill so the
+	// model can re-read bytes the tail window drops.
+	combinedRaw := stdoutStr + stderrStr
+
+	// Tail-keep truncation: oversized streams keep their TAIL (cut on a line
+	// boundary, byte-safe) rather than the head — the head is what loses the
+	// answer in build/test output. When either stream truncates, the FULL
+	// combined output is spilled once (best-effort, never fails the tool);
+	// the path rides in ShellResult.FullOutputPath and in the truncation
+	// note.
+	truncated = false
+	fullOutputPath := ""
 	if len(stdoutStr) > MaxOutputSize {
-		stdoutStr = stdoutStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stdoutStr))
+		kept, omitted := tailKeep([]byte(stdoutStr), MaxOutputSize)
+		fullOutputPath = t.spillCombined(ctx, combinedRaw)
+		stdoutStr = truncationNote(string(kept), len(stdoutStr), omitted, fullOutputPath)
 		truncated = true
 	}
 	if len(stderrStr) > MaxOutputSize {
-		stderrStr = stderrStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stderrStr))
+		kept, omitted := tailKeep([]byte(stderrStr), MaxOutputSize)
+		if fullOutputPath == "" {
+			// stdout did not truncate: spill the full combined output once.
+			fullOutputPath = t.spillCombined(ctx, combinedRaw)
+		}
+		// Reuse the already-spilled path when stdout truncated first, so
+		// one call never writes the same bytes twice.
+		stderrStr = truncationNote(string(kept), len(stderrStr), omitted, fullOutputPath)
 		truncated = true
 	}
 
@@ -538,12 +589,10 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		t.Name(),
 	))
 
-	// Hash output for compactness (full output is still returned in result)
-	outputForHash := stdoutStr + stderrStr
-	if len(outputForHash) > MaxOutputSize {
-		outputForHash = outputForHash[:MaxOutputSize]
-	}
-	h := sha256.Sum256([]byte(outputForHash))
+	// Hash the FULL pre-truncation combined output (not a head-50KB slice)
+	// so the evidence hash is stable across truncation settings and mirrors
+	// the transcript tool's full-text hash.
+	h := sha256.Sum256([]byte(combinedRaw))
 	outputHash := hex.EncodeToString(h[:])
 	evidence = append(evidence, models.NewEvidence(
 		models.EvidenceShellOutput,
@@ -560,14 +609,56 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	return tools.ToolResult{
 		Success: success,
 		Result: ShellResult{
-			Stdout:     stdoutStr,
-			Stderr:     stderrStr,
-			ReturnCode: returnCode,
-			Truncated:  truncated,
+			Stdout:         stdoutStr,
+			Stderr:         stderrStr,
+			ReturnCode:     returnCode,
+			Truncated:      truncated,
+			FullOutputPath: fullOutputPath,
 		},
 		Evidence:   evidence,
 		TaintLabel: taint.TaintExternal, // shell-sourced content is externally tainted (arbitrary user-commanded processes)
 	}, nil
+}
+
+// tailKeep returns the last upTo bytes of data, cut on a newline boundary so
+// a multi-byte UTF-8 rune is never split (byte-safe: the cut point is either
+// 0, a newline index, or len(data) — all rune-safe positions). The second
+// return value is the number of bytes omitted from the head. If data is <=
+// upTo bytes, no truncation happens and the whole data is returned with
+// omitted == 0.
+//
+// When the last upTo bytes contain no newline (a single giant line), the
+// entire tail window is returned uncut — splitting a rune there would be
+// worse than keeping the line whole.
+func tailKeep(data []byte, upTo int) (kept []byte, omitted int) {
+	if len(data) <= upTo {
+		return data, 0
+	}
+	cut := len(data) - upTo
+	// Backtrack to the newline just before the cut point, if one exists in
+	// the window, so the kept tail starts on a fresh line.
+	if nl := bytes.LastIndexByte(data[cut:], '\n'); nl >= 0 {
+		cut += nl + 1
+	}
+	omitted = cut
+	kept = data[cut:]
+	return kept, omitted
+}
+
+// truncationNote builds the model-visible truncation line per C1:
+//
+//	... (truncated, N bytes total; first M bytes omitted[; full output: path])
+//
+// path is the spilled full-output location, appended only when non-empty
+// (spill failed or unwired -> no pointer). The note is prepended to the
+// kept tail so the model sees the omission up front.
+func truncationNote(keptTail string, total, omitted int, fullOutputPath string) string {
+	note := fmt.Sprintf("... (truncated, %d bytes total; first %d bytes omitted", total, omitted)
+	if fullOutputPath != "" {
+		note += "; full output: " + fullOutputPath
+	}
+	note += ")"
+	return note + "\n" + keptTail
 }
 
 // sanitizeOutput runs the shell output through the InputSanitizer when a
@@ -714,13 +805,24 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 		}
 	}
 
-	// Truncate if too large
+	// Tail-keep truncation (streaming lane — same GAP-1 class as Execute).
+	// The full combined output is spilled once, best-effort, when either
+	// stream truncates; the path rides in ShellResult.FullOutputPath and in
+	// the truncation note.
+	combinedRaw := stdoutStr + stderrStr
+	fullOutputPath := ""
 	if len(stdoutStr) > MaxOutputSize {
-		stdoutStr = stdoutStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stdoutStr))
+		kept, omitted := tailKeep([]byte(stdoutStr), MaxOutputSize)
+		fullOutputPath = t.spillCombined(ctx, combinedRaw)
+		stdoutStr = truncationNote(string(kept), len(stdoutStr), omitted, fullOutputPath)
 		truncated = true
 	}
 	if len(stderrStr) > MaxOutputSize {
-		stderrStr = stderrStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stderrStr))
+		kept, omitted := tailKeep([]byte(stderrStr), MaxOutputSize)
+		if fullOutputPath == "" {
+			fullOutputPath = t.spillCombined(ctx, combinedRaw)
+		}
+		stderrStr = truncationNote(string(kept), len(stderrStr), omitted, fullOutputPath)
 		truncated = true
 	}
 
@@ -759,11 +861,9 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 		fmt.Sprintf("%d", returnCode),
 		t.Name(),
 	))
-	outputForHash := stdoutStr + stderrStr
-	if len(outputForHash) > MaxOutputSize {
-		outputForHash = outputForHash[:MaxOutputSize]
-	}
-	h := sha256.Sum256([]byte(outputForHash))
+	// Hash the FULL pre-truncation combined output (stable across truncation
+	// settings), mirroring the Execute lane.
+	h := sha256.Sum256([]byte(combinedRaw))
 	outputHash := hex.EncodeToString(h[:])
 	evidence = append(evidence, models.NewEvidence(
 		models.EvidenceShellOutput,
@@ -780,14 +880,47 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	return tools.ToolResult{
 		Success: success,
 		Result: ShellResult{
-			Stdout:     stdoutStr,
-			Stderr:     stderrStr,
-			ReturnCode: returnCode,
-			Truncated:  truncated,
+			Stdout:         stdoutStr,
+			Stderr:         stderrStr,
+			ReturnCode:     returnCode,
+			Truncated:      truncated,
+			FullOutputPath: fullOutputPath,
 		},
 		Evidence:   evidence,
 		TaintLabel: taint.TaintExternal, // shell-sourced content is externally tainted (arbitrary user-commanded processes)
 	}, nil
+}
+
+// spillCombined writes the full pre-truncation combined output to the
+// tool-spill dir (best-effort). Returns the absolute path on success, or
+// "" when no spiller is wired or the write fails. The shell tool NEVER fails
+// on a spill failure: truncation still applies, only the re-readable pointer
+// is omitted (logged at warn).
+func (t *ShellExecuteTool) spillCombined(ctx context.Context, combined string) string {
+	if t.spillWriter == nil || combined == "" {
+		return ""
+	}
+	sid := shellSpillSessionID(ctx)
+	path, err := t.spillWriter.WriteToolSpill(sid, []byte(combined))
+	if err != nil {
+		if logger := t.logger; logger != nil {
+			logger.Warn("tool output spill write failed; tail-truncated result has no re-readable pointer",
+				"error", err)
+		}
+		return ""
+	}
+	return path
+}
+
+// shellSpillSessionID extracts the agent session id for tool-spill
+// subdirectory scoping. It returns "" (NOT the browser "default") when the
+// context carries no session, so the spill sanitizer maps it to the
+// "nosession" directory (leaf contract: empty session -> "nosession").
+func shellSpillSessionID(ctx context.Context) string {
+	if sid, ok := ctx.Value(sessionIDContextKey).(string); ok && sid != "" {
+		return sid
+	}
+	return ""
 }
 
 // classifyRisk determines the risk level of a command.
