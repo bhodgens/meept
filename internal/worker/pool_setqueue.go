@@ -23,4 +23,13 @@ func (p *Pool) SetQueue(q queue.Queue) {
 		return
 	}
 	p.queue = q
+	// Push the new handle to live workers too: the first generation was
+	// created before the cluster wiring swap and would otherwise keep
+	// claiming (and heartbeating) through the old queue until natural
+	// churn replaced them.
+	for _, w := range p.workers {
+		if w != nil {
+			w.SetQueue(q)
+		}
+	}
 }

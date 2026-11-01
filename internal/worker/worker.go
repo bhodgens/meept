@@ -253,8 +253,13 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 	}
 	w.mu.Unlock()
 
-	// Try to claim a job -- this is the actual work check
-	job, err := w.queue.Claim(ctx, w.ID, w.Capabilities, w.AgentID)
+	// Try to claim a job -- this is the actual work check. Handle read
+	// under the mutex: Pool.SetQueue can swap it concurrently (cluster
+	// wiring); an unsynchronized read would be a data race.
+	w.mu.RLock()
+	qh := w.queue
+	w.mu.RUnlock()
+	job, err := qh.Claim(ctx, w.ID, w.Capabilities, w.AgentID)
 	if err != nil {
 		if errors.Is(err, queue.ErrNoJobAvailable) {
 			return false, nil // Stay idle, no transition needed
@@ -311,7 +316,7 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 	// rather than running a job nobody will accept a result for. Any other
 	// error is non-fatal and logged, exactly as before: the claim is already
 	// ours and Complete's own guard is the authority on the write.
-	markErr := w.queue.MarkProcessing(ctx, job.ID)
+	markErr := qh.MarkProcessing(ctx, job.ID)
 	if markErr != nil && errors.Is(markErr, queue.ErrJobStateLocked) {
 		w.mu.Lock()
 		w.CurrentJob = nil
@@ -331,7 +336,10 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 	// This extends the claim timeout so long-running jobs are not
 	// reclaimed by the cluster stale-claim sweeper.
 	heartbeatDone := make(chan struct{})
-	if hb, ok := w.queue.(queue.Heartbeater); ok {
+	w.mu.RLock()
+	hbQueue := w.queue
+	w.mu.RUnlock()
+	if hb, ok := hbQueue.(queue.Heartbeater); ok {
 		hb.Heartbeat(job.ID) // initial heartbeat
 		go func() {
 			ticker := time.NewTicker(60 * time.Second)
@@ -427,7 +435,8 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 				"error", processErr,
 			)
 		} else if job.CanRetry() {
-			if err := w.queue.Retry(ctx, job.ID); err != nil {
+			w.mu.RLock(); qh := w.queue; w.mu.RUnlock()
+	if err := qh.Retry(ctx, job.ID); err != nil {
 				w.logger.Error("Failed to queue job for retry", "job", job.ID, "error", err)
 			}
 		}
@@ -541,6 +550,20 @@ func generateWorkerID() string {
 // wiring): the daemon passes the SAME cfg.LLM.FailurePolicy mapping the
 // LLM clients receive, so job requeue schedules and client backoff
 // schedules agree. Nil is ignored.
+// SetQueue swaps the worker's queue handle. Pool.SetQueue calls this for
+// live workers so the first worker generation (created before the cluster
+// wiring swap) also claims and heartbeats through the new queue instead of
+// waiting for natural worker churn. Mutex-guarded: the claim loop reads
+// w.queue concurrently.
+func (w *Worker) SetQueue(q queue.Queue) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if q == nil {
+		return
+	}
+	w.queue = q
+}
+
 func (w *Worker) SetProviderPolicy(cfg *llm.FailurePolicyConfig) {
 	if w == nil || cfg == nil {
 		return
@@ -665,7 +688,8 @@ func (w *Worker) failJob(ctx context.Context, jobID string, jobErr error, claimT
 			return fa.FailAttempt(ctx, jobID, jobErr, claimToken)
 		}
 	}
-	return w.queue.Fail(ctx, jobID, jobErr)
+	w.mu.RLock(); qh := w.queue; w.mu.RUnlock()
+	return qh.Fail(ctx, jobID, jobErr)
 }
 
 // Returns the queue's error verbatim; the caller decides what it means for the
@@ -677,7 +701,8 @@ func (w *Worker) completeJob(ctx context.Context, jobID string, result any, clai
 			return ac.CompleteAttempt(ctx, jobID, result, claimToken)
 		}
 	}
-	return w.queue.Complete(ctx, jobID, result)
+	w.mu.RLock(); qh := w.queue; w.mu.RUnlock()
+	return qh.Complete(ctx, jobID, result)
 }
 
 // providerPolicy resolves the injected failure-policy config or the
