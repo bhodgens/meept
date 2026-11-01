@@ -1633,6 +1633,13 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/tasks/{id}/link-session", s.handleTaskLinkSession)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/unlink-session", s.handleTaskUnlinkSession)
 
+	// Activity endpoints (leaf 04 T1)
+	mux.HandleFunc("GET /api/v1/activity", s.handleActivityQuery)
+	mux.HandleFunc("GET /api/v1/activity/recent", s.handleActivityRecent)
+	mux.HandleFunc("GET /api/v1/activity/overview", s.handleActivityOverview)
+	mux.HandleFunc("GET /api/v1/activity/findings", s.handleActivityFindings)
+	mux.HandleFunc("GET /api/v1/agents/{id}/review", s.handleAgentsReview)
+
 	// Session endpoints
 	mux.HandleFunc("POST /api/v1/sessions", s.handleSessionCreate)
 	mux.HandleFunc("GET /api/v1/sessions", s.handleSessionList)
