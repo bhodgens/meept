@@ -92,6 +92,7 @@ type ParallelTeamDriver struct {
 	pairMgr   *PairManager
 	bus       *bus.MessageBus
 	logger    *slog.Logger
+	handoff   *handoffBoundary
 
 	conversations map[string]*TeamStatus
 	convMu        sync.RWMutex
@@ -104,6 +105,9 @@ type ParallelTeamDriverDeps struct {
 	PairManager *PairManager
 	Bus         *bus.MessageBus
 	Logger      *slog.Logger
+	// Handoff is the optional inter-agent handoff seam (taint tracker +
+	// deny patterns). Nil keeps the pre-taint behavior unchanged.
+	Handoff *handoffBoundary
 }
 
 // NewParallelTeamDriver creates a new parallel team driver.
@@ -117,6 +121,7 @@ func NewParallelTeamDriver(deps ParallelTeamDriverDeps) *ParallelTeamDriver {
 		pairMgr:       deps.PairManager,
 		bus:           deps.Bus,
 		logger:        deps.Logger,
+		handoff:       deps.Handoff,
 		conversations: make(map[string]*TeamStatus),
 	}
 }
@@ -326,6 +331,33 @@ func (d *ParallelTeamDriver) fanOut(ctx context.Context, sess *CollaborationSess
 					"error", err,
 				)
 				return nil // errgroup: don't return error, collect partial results
+			}
+
+			// Raw member output is UNTRUSTED (leaf 02, D1/D4): record +
+			// scan BEFORE it fans into the lead's synthesis prompt. A
+			// blocked member output is treated like any other member
+			// failure: recorded, logged, team continues with partial
+			// results (the deny never wedges the session).
+			if d.handoff != nil {
+				if blocked, reason := d.handoff.prepareHandoff("team", "member:"+memberID, output); blocked {
+					errMsg := "output denied at handoff: " + reason
+					d.updateMemberStatus(sess.ID, memberID, MemberFailed, errMsg)
+
+					resultsMu.Lock()
+					results[memberID] = &TeamMemberResult{
+						AgentID: memberID,
+						Status:  MemberFailed,
+						Error:   errMsg,
+					}
+					resultsMu.Unlock()
+
+					d.logger.Warn("Team member output denied by inter-agent boundary",
+						"session_id", sess.ID,
+						"member", memberID,
+						"reason", reason,
+					)
+					return nil
+				}
 			}
 
 			// Record successful result

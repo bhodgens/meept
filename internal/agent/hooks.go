@@ -196,6 +196,32 @@ func (r *HookRegistry) RegisterTransformContext(name string, priority HookPriori
 	})
 }
 
+// TransformContextNames returns the registered TransformContext hook names
+// in pass order (priority, then insertion order among equal priorities).
+// Read-only introspection for ordering pins and wiring tests.
+func (r *HookRegistry) TransformContextNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.transformContexts))
+	for _, h := range r.transformContexts {
+		names = append(names, h.Name)
+	}
+	return names
+}
+
+// BeforeToolCallNames returns the registered BeforeToolCall hook names
+// in run order (priority, then insertion order among equal priorities).
+// Read-only introspection for ordering pins and wiring tests.
+func (r *HookRegistry) BeforeToolCallNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.beforeToolCalls))
+	for _, h := range r.beforeToolCalls {
+		names = append(names, h.Name)
+	}
+	return names
+}
+
 // Unregister removes all hooks with the given name.
 func (r *HookRegistry) Unregister(name string) {
 	r.mu.Lock()

@@ -2476,6 +2476,19 @@ type SecurityConfig struct {
 	// Taint tracking for information flow security
 	Taint TaintConfig `json:"taint" toml:"taint"`
 
+	// AgentHandoffMode governs inter-agent handoff defense
+	// ([security.agent_handoff_mode], R0 decision D3 in
+	// docs/research/agent-boundary-taint-findings.md):
+	//   "off"   - no handoff scanning; segment labeling still applied
+	//   "warn"  (default) - deny-pattern hits inside untrusted handoff
+	//             segments are logged with provenance; nothing is blocked
+	//   "block" - a deny-pattern hit on an untrusted handoff segment
+	//             blocks the handoff with a collaboration error
+	// Empty or invalid values fall back to "warn" (audit-first rollout;
+	// flipping to "block" is a product decision per
+	// docs/agents/opt-in-defaults.md).
+	AgentHandoffMode string `json:"agent_handoff_mode" toml:"agent_handoff_mode"`
+
 	// Path fencing for agent sandboxing
 	FenceEnabled   bool     `json:"fence_enabled"    toml:"fence_enabled"`
 	FenceAllowRead []string `json:"fence_allow_read" toml:"fence_allow_read"`
@@ -2496,6 +2509,32 @@ type SecurityConfig struct {
 	// Egress policy for the secrets proxy ([security.egress]): ordered
 	// host-suffix/CIDR allow/ask/deny rules consulted before secret injection.
 	Egress EgressConfig `json:"egress" toml:"egress"`
+
+	// PII unmasking proxy ([security.pii]): detect-and-swap pre-LLM with
+	// restore-on-output. Opt-in: zero value = fully disabled, byte-identical
+	// daemon behavior.
+	Pii PiiConfig `json:"pii" toml:"pii"`
+}
+
+// PiiConfig is the [security.pii] section: the PII unmasking proxy
+// (detector -> [PII:<uuid>] tokens pre-LLM, session-bounded restore at the
+// ScanOutput choke point). Opt-in: Enabled defaults false.
+type PiiConfig struct {
+	// Enabled turns on the pii swap/restore lanes. Default false: no
+	// masking, no restore, no store open.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// Classes restricts detection to the listed classes (e.g.
+	// "EMAIL_ADDRESS", "PHONE_NUMBER", "SSN", "CREDIT_CARD", "IPV4",
+	// "IBAN"). Empty means all default classes (R0 D1).
+	Classes []string `json:"classes" toml:"classes"`
+	// RestoreWindow bounds how long a swap row restores (research D4).
+	// 0 = session lifetime (no expiry).
+	RestoreWindow time.Duration `json:"restore_window" toml:"restore_window"`
+	// SecretRestore gates the #XXXX# secret-placeholder restore lane
+	// (research D6). The obfuscator's maps are process-wide (not
+	// session-scoped), so this lane is separately opt-in on top of
+	// Enabled. Default false.
+	SecretRestore bool `json:"secret_restore" toml:"secret_restore"`
 }
 
 // SecurityGroupsConfig is the [security.groups] section. Owned by leaf 04

@@ -31,6 +31,11 @@ const (
 	ErrCodeCollabTimeout   = "timeout"
 	ErrCodeInvalidMode     = "invalid_mode"
 	ErrCodeSessionNotFound = "session_not_found"
+	// ErrCodeHandoffBlocked: a cross-agent handoff was denied by the
+	// inter-agent taint/deny-pattern boundary (leaf 02). Sessions fail
+	// through the ordinary CollaborationError path so they finalize as
+	// failed rather than hanging.
+	ErrCodeHandoffBlocked = "handoff_blocked"
 )
 
 // ErrBudgetExceeded is returned when a sub-session exceeds available token budget.

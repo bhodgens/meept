@@ -22,6 +22,7 @@ type PairProgrammingDriver struct {
 	workspace *WorkspaceManager
 	bus       *bus.MessageBus
 	logger    *slog.Logger
+	handoff   *handoffBoundary
 
 	conversations map[string]*PPConversation
 	convMu        sync.RWMutex
@@ -42,6 +43,9 @@ type PairProgrammingDriverDeps struct {
 	Workspace *WorkspaceManager
 	Bus       *bus.MessageBus
 	Logger    *slog.Logger
+	// Handoff is the optional inter-agent handoff seam (taint tracker +
+	// deny patterns). Nil keeps the pre-taint behavior unchanged.
+	Handoff *handoffBoundary
 }
 
 // NewPairProgrammingDriver creates a new pair programming driver.
@@ -54,6 +58,7 @@ func NewPairProgrammingDriver(deps PairProgrammingDriverDeps) *PairProgrammingDr
 		workspace:     deps.Workspace,
 		bus:           deps.Bus,
 		logger:        deps.Logger,
+		handoff:       deps.Handoff,
 		conversations: make(map[string]*PPConversation),
 	}
 }
@@ -179,6 +184,18 @@ func (d *PairProgrammingDriver) runTurnLoop(ctx context.Context, sess *Collabora
 			return nil, NewCollaborationError(ErrCodeAgentFailed, sess.ID, "turn_loop", fmt.Sprintf("driver %s failed: %v", driverID, err))
 		}
 
+		// Raw agent output is UNTRUSTED (leaf 02, D1/D4): record it as an
+		// untrusted segment and scan it BEFORE it is embedded into the
+		// observer's prompt. Driver framing is never recorded or scanned.
+		// Nil handoff seam keeps the pre-taint behavior (silent skip).
+		if d.handoff != nil {
+			if blocked, reason := d.handoff.prepareHandoff("pair", "driver:"+driverID, output); blocked {
+				sess.MarkFailed()
+				return nil, NewCollaborationError(ErrCodeHandoffBlocked, sess.ID, "turn_loop",
+					fmt.Sprintf("driver %s output denied at handoff: %v", driverID, reason))
+			}
+		}
+
 		sess.AddTurn(TurnEntry{
 			AgentID:   driverID,
 			Role:      "driver",
@@ -201,6 +218,17 @@ func (d *PairProgrammingDriver) runTurnLoop(ctx context.Context, sess *Collabora
 		if err != nil {
 			sess.MarkFailed()
 			return nil, NewCollaborationError(ErrCodeAgentFailed, sess.ID, "turn_loop", fmt.Sprintf("observer %s failed: %v", observerID, err))
+		}
+
+		// The observer's raw output drives CONTROL DECISIONS (approve /
+		// request_changes / request_token). It is equally untrusted: record
+		// + scan before the control-verb parse can act on it.
+		if d.handoff != nil {
+			if blocked, reason := d.handoff.prepareHandoff("pair", "observer:"+observerID, observerOutput); blocked {
+				sess.MarkFailed()
+				return nil, NewCollaborationError(ErrCodeHandoffBlocked, sess.ID, "turn_loop",
+					fmt.Sprintf("observer %s output denied at handoff: %v", observerID, reason))
+			}
 		}
 
 		action, feedback := d.parseObserverResponse(observerOutput)

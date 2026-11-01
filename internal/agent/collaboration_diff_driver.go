@@ -23,6 +23,7 @@ type DifferentialDriver struct {
 	pairMgr   *PairManager
 	bus       *bus.MessageBus
 	logger    *slog.Logger
+	handoff   *handoffBoundary
 }
 
 // DifferentialDriverDeps holds dependencies.
@@ -32,6 +33,9 @@ type DifferentialDriverDeps struct {
 	PairManager *PairManager
 	Bus         *bus.MessageBus
 	Logger      *slog.Logger
+	// Handoff is the optional inter-agent handoff seam (taint tracker +
+	// deny patterns). Nil keeps the pre-taint behavior unchanged.
+	Handoff *handoffBoundary
 }
 
 // NewDifferentialDriver creates a new differential driver.
@@ -45,6 +49,7 @@ func NewDifferentialDriver(deps DifferentialDriverDeps) *DifferentialDriver {
 		pairMgr:   deps.PairManager,
 		bus:       deps.Bus,
 		logger:    deps.Logger,
+		handoff:   deps.Handoff,
 	}
 }
 
@@ -312,6 +317,17 @@ func (d *DifferentialDriver) phaseDifferentiate(ctx context.Context, sess *Colla
 	diffOutput, err := d.registry.RunAgent(ctx, differentiatorID, prompt, fmt.Sprintf("diff-%s-differentiator", sess.ID))
 	if err != nil {
 		return nil, NewCollaborationError(ErrCodeAgentFailed, sess.ID, "differentiate", fmt.Sprintf("differentiator agent failed: %v", err))
+	}
+
+	// Raw differentiator output is UNTRUSTED (leaf 02, D1/D4): record +
+	// scan BEFORE it becomes the session's FinalOutput / combined result
+	// artifact. Block mode denies the session with the collaboration
+	// error shape so it finalizes failed, never hangs.
+	if d.handoff != nil {
+		if blocked, reason := d.handoff.prepareHandoff("diff", "differentiator:"+differentiatorID, diffOutput); blocked {
+			return nil, NewCollaborationError(ErrCodeHandoffBlocked, sess.ID, "differentiate",
+				fmt.Sprintf("differentiator output denied at handoff: %v", reason))
+		}
 	}
 
 	if sess.Workspace != "" {
