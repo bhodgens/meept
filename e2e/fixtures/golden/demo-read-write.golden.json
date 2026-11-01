@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "scenario": "demo-read-write",
+  "captured_from": "fakellm-scripted",
+  "match": {
+    "mode": "in_order",
+    "threshold": 1,
+    "arg_rules": {},
+    "ignore_tools": []
+  },
+  "golden": [
+    {
+      "name": "read_file",
+      "args_shape": {
+        "path": "\u003cvar\u003e"
+      }
+    },
+    {
+      "name": "file_write",
+      "args_shape": {
+        "content": "golden",
+        "direct": true,
+        "path": "\u003cvar\u003e"
+      }
+    }
+  ]
+}

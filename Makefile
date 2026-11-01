@@ -1611,3 +1611,39 @@ e2e-affected-area:
 	else \
 		go test -tags e2e -count=1 -p 2 ./e2e/suites/$(AREA)/...; \
 	fi
+
+# Golden fixture regeneration (investigate-then-regenerate; docs/plans/
+# 20261031-trajectory-golden-ci). The helper runs the owning
+# trajectory-golden suite FIRST and refuses to overwrite the fixture when
+# the suite cannot run or fails - a golden diff is investigated, never
+# blind-regenerated. FORCE=1 skips only the investigation print, never
+# the suite gate.
+#
+#   make golden-regenerate SCENARIO=trajectory-golden-basic
+#   make golden-regenerate-all
+.PHONY: golden-regenerate golden-regenerate-all
+golden-regenerate:
+	if [ -z "$(SCENARIO)" ]; then \
+		echo "usage: make golden-regenerate SCENARIO=<fixture stem under e2e/fixtures/golden>"; \
+		exit 2; \
+	fi
+	if [ ! -f "e2e/fixtures/golden/$(SCENARIO).golden.json" ]; then \
+		echo "golden-regenerate: no fixture e2e/fixtures/golden/$(SCENARIO).golden.json (known scenarios: e2e/fixtures/golden/*.golden.json)"; \
+		exit 2; \
+	fi
+	MEEPT_GOLDEN_REGEN_SCENARIO="$(SCENARIO)" \
+	MEEPT_GOLDEN_REGEN_GOLDEN_DIR="e2e/fixtures/golden" \
+	MEEPT_GOLDEN_REGEN_SUITE_DIR="e2e/suites/trajectory-golden" \
+	$(if $(FORCE),MEEPT_GOLDEN_REGEN_FORCE=1,) \
+	go test -tags e2e -count=1 -p 2 ./e2e/harness/ -run '^TestGoldenRegenDispatch$$' -v
+
+golden-regenerate-all:
+	@fixtures=$$(find e2e/fixtures/golden -name '*.golden.json' -type f 2>/dev/null); \
+	if [ -z "$$fixtures" ]; then \
+		echo "golden-regenerate-all: no *.golden.json fixtures in e2e/fixtures/golden"; \
+		exit 2; \
+	fi; \
+	for f in $$fixtures; do \
+		s=$$(basename "$$f" .golden.json); \
+		$(MAKE) --no-print-directory golden-regenerate SCENARIO="$$s" || exit 1; \
+	done
