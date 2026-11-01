@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-31",
+  "generated": "2026-11-01",
   "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
   "path_map": {
     "e2e/suites/smoke": [
@@ -87,7 +87,11 @@
       "tools-web-ssrf"
     ],
     "internal/eval/": [
-      "eval-judge"
+      "eval-judge",
+      "trajectory-golden"
+    ],
+    "internal/eval/trajectorydiff/": [
+      "trajectory-golden"
     ],
     "internal/session/": [
       "session-binding",
@@ -500,6 +504,11 @@
     {
       "name": "eval-judge",
       "dir": "e2e/suites/eval-judge",
+      "status": "implemented"
+    },
+    {
+      "name": "trajectory-golden",
+      "dir": "e2e/suites/trajectory-golden",
       "status": "implemented"
     },
     {
@@ -1576,6 +1585,25 @@
       "paths": [
         "internal/eval/judge.go",
         "internal/eval/store.go"
+      ]
+    },
+    {
+      "id": "trajectory-golden-01",
+      "suite": "trajectory-golden",
+      "diff": "S",
+      "title": "scripted read-write-verify replay passes the golden sequence gate",
+      "paths": [
+        "internal/eval/trajectorydiff/trajectorydiff.go"
+      ]
+    },
+    {
+      "id": "trajectory-golden-02",
+      "suite": "trajectory-golden",
+      "diff": "S",
+      "title": "corrupted fixture order fails the gate with a named step diff, restore passes",
+      "paths": [
+        "internal/eval/trajectorydiff/trajectorydiff.go",
+        "internal/session/store_sqlite.go"
       ]
     },
     {
