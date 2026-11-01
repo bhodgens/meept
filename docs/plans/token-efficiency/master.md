@@ -212,16 +212,16 @@ After all active branches reach COMPLETE:
 
 (Gated decisions - asked of the user 2026-10-31; answers pin branch 03/04 shapes.)
 
-- **Q1 (tool routing shape):** Which as-needed mechanism? (a) keep indexed
-  stubs, tune always-full set; (b) search-not-enumerate: drop the 75-line stub
-  list, add tool_search/tool_view meta-tools (Hermes pattern); (c)
-  orchestrator/classifier predicts per-episode tool subset, full schemas for
-  predicted + core, stubs for rest; (d) hybrid b+c. Recommendation: measure
-  first (03/00 audit), decide on numbers; expected winner (d).
-- **Q2 (prediction authority):** If orchestrator-side prediction: deterministic
-  intent->toolset map, or the existing lfm classifier extended with a
-  tool-head? Deterministic is auditable and free; classifier generalizes but
-  risks silent tool starvation (needs a recovery path - stub list or meta-tool).
+- **Q1 (tool routing shape):** ANSWERED 2026-10-31 (user): **hybrid D** -
+  episode-start predicted subset with full schemas + tool_search/tool_view
+  fallback for misses. Reframed as a single knob (see 03 orchestrator,
+  Ratified Shape): "up-front full-schema budget" - B is D with budget 0.
+- **Q2 (prediction authority):** ANSWERED 2026-10-31 (user): **deterministic
+  intent->toolset map** fed by the existing intent analyzer labels; classifier
+  tool-head deferred until the map proves coarse. Model-tier routing ALSO
+  ratified: per-model/per-agent `tool_exposure` config (default D; B opt-in
+  for frontier-class models), resolved through the existing
+  EffectiveSchemaMode precedence seam (internal/agent/loop.go:1434-1437).
 - **Q3 (skill match signal):** Confirm: match skills against the latest user
   task text (+agent role), not the system prompt base. Any need to keep the
   prompt-base signal as secondary?

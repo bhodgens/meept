@@ -10,7 +10,57 @@
 - **Parent:** ../master.md
 - **Gap:** GAP-3: every turn ships ~75 stub definitions (loop.go:4437) even in
   indexed mode; no task-driven subset exists.
-- **Status gate:** Q1 (mechanism shape) + Q2 (prediction authority) in ../master.md.
+- **Status gate:** Q1/Q2 ANSWERED 2026-10-31 (see ../master.md Open
+  Questions). Ratified shape: hybrid D with deterministic intent map +
+  model-tier `tool_exposure` config. Leaf 00A (audit) still runs FIRST - it
+  sizes the savings and validates the budget numbers the design pins. 00D is
+  unblocked once 00A returns.
+
+## Ratified Shape (user decision 2026-10-31)
+
+**Single-knob design.** All modes are one mechanism - `tool_exposure` with an
+up-front full-schema budget - differing only in how many tools get full
+schemas before the model asks:
+
+| Budget | Mode | Behavior |
+|--------|------|----------|
+| all | `full` / `indexed` | today's behavior (all tools enumerated; full or stub schemas) |
+| N (predicted) | `predicted` (DEFAULT, shape D) | intent-map-selected N tools + always-full core get FULL schemas; rest unlisted; tool_search/tool_view recover misses |
+| 0 | `search` (shape B) | category digest (~10 lines) + tool_search/tool_view only; opt-in for frontier-class models |
+
+**Prediction origin (three layers, no new LLM call):**
+1. CEILING (security): the agent's role list (AGENT.md `additional_tools` ->
+   FilteredToolRegistry). The predicted subset NEVER exceeds it.
+2. SELECTION (episode start): deterministic intent->toolset map (config file,
+   auditable) keyed by the intent label the EXISTING intent analyzer already
+   produces (internal/agent/intent_analyzer.go:257). Not the planner/
+   orchestrator LLM: the planner only runs for dispatched multi-step tasks
+   (chat turns would get no prediction), and an LLM tool-picker adds latency
+   + tokens to the path being optimized. Classifier tool-head is the future
+   upgrade path behind the same seam if the map proves coarse.
+3. PROMOTION (mid-episode, model-driven): tool_search finds a missing tool in
+   the FULL registry (search is never limited to the active set); tool_view
+   fetches the schema AND activates the tool - append to the active list.
+
+**Cache-stability mechanics (binds all leaves):**
+- Prediction computed ONCE at episode start; the active list is frozen for
+  the episode except append-only promotions (StabilizeToolPrefix keeps the
+  existing prefix byte-identical when tools are appended, loop.go:4442-4448).
+- Shrinking happens only at the next episode boundary.
+- tool_search + tool_view are always-full (a stubbed discoverer is
+  undiscoverable) - already true for tool_view (schema.go:1958).
+- A mid-session model switch may change `tool_exposure` (per-model override);
+  the resulting one-time list churn is acceptable - a model switch already
+  invalidates the cache prefix.
+
+**Config resolution order** (mirrors the existing schema_mode seam,
+EffectiveSchemaMode at loop.go:1434-1437): per-model > per-agent (AGENT.md
+frontmatter `tool_exposure`) > global `[agent.tools] tool_exposure` >
+default `predicted`. Small/local models get D automatically; B is opt-in per
+model tier. Evidence for the tier split: the always-full promotions
+(transcript_fetch 2026-09-07, json_extract 2026-09-12, schema.go:1959-1969)
+are live-smoke proof that small models do not reliably pay a two-step
+tool_view round-trip - so B must never be the default.
 
 ## Current State (verified)
 
@@ -54,9 +104,11 @@ D. **Hybrid C+B (expected winner):** predicted subset with full schemas +
 ## Dispatch Protocol
 
 1. Dispatch 00A now (read-only + scratch script; produces measured numbers).
-2. Present 00A numbers + the candidate tradeoffs to the user; get Q1/Q2 answers.
+2. Q1/Q2 are ANSWERED (Ratified Shape above). 00A numbers feed 00D's budget
+   sizing only - no further user gate before 00D.
 3. Dispatch 00D to write docs/research/dynamic-tools-design.md implementing the
-   ratified shape (contracts, cache-stability analysis, starvation recovery).
+   ratified shape (contracts, cache-stability analysis, starvation recovery,
+   intent-map file format, tool_exposure config resolution).
 4. Orchestrator decomposes 00D's implementation section into leaves 01+ and
    updates this Child Index + ../master.md tracking BEFORE dispatching any.
 
