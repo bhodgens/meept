@@ -82,3 +82,39 @@ from daemon.go AFTER the plan system initializes — NOT inside
 `initializeSkills`, which runs before those dependencies exist (the old
 inline gate was always false; found by the wiki smoke test, 2026-08-29).
 Keep this ordering if you refactor daemon startup.
+
+## Automated memory-tier eviction is PROPOSED for default-on (NOT yet flipped)
+
+`memory.tiers.enabled` (tree 02 policy-automation leaf) ships default FALSE
+per this rule. This section is the product-decision PROPOSAL to flip
+automated eviction to default-on; it records intent only - the shipped
+default remains false until a product owner accepts this proposal.
+
+- **What flips:** `memory.tiers.enabled` becomes true on fresh configs
+  (and `config.MemDefaults()` seeds it), turning on the background
+  evict/compress policy tick
+  (`internal/memory/tierpolicy`, off the chat path, bounded interval,
+  dry-run posture available via `dry_run`). Compression reuses the
+  memory.l1_extract distill pipeline; eviction reuses
+  PlanUsefulEviction ranking.
+- **Rationale:** AMV-L measured 3.1x throughput and 4.2x lower median
+  latency for value-based tier lifecycle management over TTL-only
+  retention (findings-memory-tiers.md, tier architecture 3), and MaRS
+  shows scheduled tier migration beating reactive policies at
+  conversation scale. Without automation the tier ceilings exist but
+  nothing enforces them between manual consolidation passes.
+- **Risk:** an over-aggressive eviction pass could delete low-vote but
+  useful memories before distillation captures them. Mitigated by the
+  cost bounds (R-B5: min batch 5 / max 100 per pass, per-tier
+  watermark, no-op sentinel - an empty pass costs zero LLM calls),
+  compress-before-evict ordering (R-B4), and the ~50%-of-overage batch
+  sizing (R-B2, MemGPT flush precedent). The 90d access-expiry prior
+  art (config schema memory.expiration) already accepts automated
+  deletion as a concept.
+- **Rollback:** set `memory.tiers.enabled = false` (one config key, no
+  data migration - evicted rows live in episodic recall storage, never
+  silently dropped; working-tier flushes are lossless). No restart
+  ordering hazards: the engine is constructed after its deps and
+  stops cleanly on cancel.
+- **Decision owner:** meept maintainers (product). Status: PROPOSED,
+  2026-10-31, tree 02 leaf 02.
