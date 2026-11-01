@@ -1,6 +1,22 @@
+//go:build intake_gate
+
 package daemon
 
 // NOTE: gate tests for the github-intake-factory tree (leaf 00T) — F7.
+//
+// Build-tagged `intake_gate` (same convention as toolproviders_wiring_test.go
+// in this package) because wireIntakePoller does not exist yet: an untagged
+// compile-level RED test in package daemon takes the whole package's test
+// binary down, so all 79 daemon test files report a build failure instead of
+// their own results, and `go test ./...`, `make test` and `go vet
+// ./internal/daemon/` all fail for reasons unrelated to the change under test.
+// Run the gate with:
+//
+//	go test -tags intake_gate -p 2 -count=1 -race ./internal/daemon/ -run TestIntakeWiring
+//
+// DROP the tag when leaf 05 lands wireIntakePoller, so the gate runs in the
+// default sweep from then on. The test bodies below are unchanged.
+//
 // Intentionally RED (compile-level): wireIntakePoller does not exist yet;
 // it lands in leaf 05 on the proven employeeSchedulerAdapter.RunAtInterval
 // path. This file lives in package daemon because the wiring seam IS

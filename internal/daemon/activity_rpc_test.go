@@ -49,7 +49,6 @@ func newActivityRPCFixture(t *testing.T) *activityRPCFixture {
 
 	// Two tasks, one step each, distinct agents and timestamps.
 	type seededTask struct {
-		id     string
 		agent  string
 		stepID string
 		state  task.StepState
