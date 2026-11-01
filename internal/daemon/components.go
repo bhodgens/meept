@@ -25,6 +25,7 @@ import (
 	"github.com/caimlas/meept/internal/activity"
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/agents"
+	"github.com/caimlas/meept/internal/auditlog"
 	authpkg "github.com/caimlas/meept/internal/auth"
 	bkpkg "github.com/caimlas/meept/internal/backup"
 	"github.com/caimlas/meept/internal/bot"
@@ -75,6 +76,7 @@ import (
 	"github.com/caimlas/meept/internal/skills/lifecycle"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/templates"
+	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/tools/mcp"
@@ -174,6 +176,12 @@ type Components struct {
 	// as ParkStore). Owned here so stopComponents closes the handle after
 	// the tools and reconciler have stopped.
 	EffectsLedger effects.Ledger
+
+	// ToolGate is the daemon-side ExecGate wired into ToolRegistry via
+	// SetGate (wave A leaf 02, plan docs/plans/20261031-tool-provider-seam).
+	// Nil when construction degraded - the registry then runs the legacy
+	// ungated path (all-or-nothing: never a half-gate).
+	ToolGate *ExecGateImpl
 	// EffectsReconciler re-drives claimed/receipted effects on startup and
 	// parked-turn resume. Nil when the ledger is nil (no ledger, no
 	// reconcile — nothing pending can exist).
@@ -2625,6 +2633,55 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	} else {
 		c.EffectsLedger = effectsLedger
 		c.EffectsReconciler = NewEffectsReconciler(effectsLedger, logger.With("component", "effects-reconciler"))
+	}
+
+	// Centralized execution gate (wave A leaf 02-gate.md): G1 security
+	// scan per category, G2 audit-chain emission, G3 effects reservation
+	// for mutating tools, G4 fail-closed posture. Wired BEFORE
+	// registerBuiltinTools so SetGate precedes any Execute.
+	//
+	// All-or-nothing: the gate arms ONLY when the rule engine builds.
+	// A live engine is mandatory because G1 fail-closes non-shell
+	// categories on a nil engine - arming the gate without an engine
+	// would block every non-shell tool call. Engine build failure =>
+	// ERROR log + legacy ungated registry (never a half-gate).
+	// G2 audit is best-effort by design: a failed chain store logs a
+	// warning and arms the gate without emission, exactly like every
+	// other auditlog wiring site.
+	gateAudit, gateAuditErr := auditlog.OpenStore(
+		filepath.Join(cfg.Daemon.DataDir, "tool_audit_chain.db"),
+		logger.With("component", "tool-gate-audit"))
+	if gateAuditErr != nil {
+		logger.Warn("tool gate: audit chain store unavailable; G2 emission degraded",
+			"error", gateAuditErr)
+		gateAudit = nil
+	}
+
+	engineDB := cfg.Security.AuditDBPath
+	if engineDB == "" {
+		homeDir, _ := os.UserHomeDir()
+		engineDB = filepath.Join(homeDir, ".meept", "audit.db")
+	}
+	securityEngine, engineErr := intsecurity.NewEngine(engineDB, &cfg.Security, logger.With("component", "tool-gate-engine"))
+	if engineErr != nil {
+		logger.Error("tool gate: security rule engine unavailable; registry runs UNGATED (legacy path)",
+			"error", engineErr, "db", engineDB)
+	} else {
+		c.ToolGate = NewExecGate(GateConfig{
+			Orch:   c.SecurityOrchestrator,
+			Engine: securityEngine,
+			Audit:  gateAudit,
+			Ledger: c.EffectsLedger,
+			PostureLookup: func(name string) (toolprov.RiskClass, bool) {
+				return "", false // providers declare postures from leaf 03 onward
+			},
+		})
+		c.ToolGate.SetLogger(logger.With("component", "tool-gate"))
+		c.ToolRegistry.SetGate(c.ToolGate)
+		logger.Info("tool gate wired",
+			"audit_chain", gateAudit != nil,
+			"effects_ledger", c.EffectsLedger != nil,
+			"engine_db", engineDB)
 	}
 
 	// Create session handler with summarizer if LLM is available

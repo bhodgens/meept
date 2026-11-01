@@ -9,6 +9,8 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/githubsvc"
 	"github.com/caimlas/meept/internal/secrets"
+	"github.com/caimlas/meept/internal/tools/builtin"
+	"github.com/caimlas/meept/internal/toolprov"
 )
 
 // wireGitHubTools registers the github_* tools when [github].enabled with
@@ -60,15 +62,24 @@ func (c *Components) wireGitHubTools() {
 		logger.Warn("github_ci_wait re-arm sink unavailable: instruction store not wired; parked CI waits will not re-arm automatically")
 	}
 
-	if err := githubsvc.RegisterGitHubTools(c.ToolRegistry, githubsvc.RegistrationOptions{
+	// Bind the github provider's runtime construction inputs, then walk
+	// the compiled-in provider seam (toolprov.RegisterAll) instead of
+	// calling githubsvc.RegisterGitHubTools directly. The provider's
+	// Discover() constructs the same eight github_* tools the
+	// ToolFactories closure builds, so the tool set is identical; the
+	// seam additionally gives the group a provider identity for
+	// [tool_providers] config and doctor surfacing. Failures keep the
+	// existing degrade-to-no-github-tools posture.
+	builtin.SetGitHubProvider(githubsvc.RegistrationOptions{
 		Pool:         pool,
 		DefaultOwner: cfg.DefaultOwner,
 		DefaultRepo:  cfg.DefaultRepo,
-		Ledger:       c.EffectsLedger,
-		Sink:         sink,
-	}); err != nil {
+	}, c.EffectsLedger, sink, c.SecretBroker)
+	if n, err := toolprov.RegisterAll(c.ToolRegistry, []string{"github"}); err != nil {
 		logger.Error("github tool registration failed", "error", err)
 		return
+	} else if n == 0 {
+		logger.Warn("github provider registered zero tools")
 	}
 	c.GitHubPool = pool
 	logger.Info("github tools registered",

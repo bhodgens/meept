@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -50,6 +51,11 @@ type Registry struct {
 	mu     sync.RWMutex
 	tools  map[string]Tool
 	logger *slog.Logger
+
+	// gate is the optional per-execution enforcement hook (contract C2,
+	// docs/plans/20261031-tool-provider-seam/master.md). Nil (the zero
+	// value) preserves the legacy behavior byte-identically; guarded by mu.
+	gate ExecGate
 
 	// schemaMode and alwaysFull are guarded by mu. alwaysFull is treated
 	// as immutable after being stored (copy-on-write): SetSchemaMode builds
@@ -331,6 +337,35 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 		"args", args,
 	)
 
+	// Per-execution enforcement gate (G1-G4 live in the concrete gate, not
+	// here): BeforeExecute runs AFTER ValidateToolArgs and BEFORE the tool
+	// body. A block surfaces as a typed error RESULT naming the reason
+	// (never a Go error) and the tool body never runs. AfterExecute fires
+	// for every execution, including error results and Go errors, so the
+	// audit tier behind the gate records every call. A nil gate skips the
+	// whole block: legacy behavior byte-identically. The tool handed to the
+	// gate is posture-wrapped when a gate is armed: G4 fail-closed makes
+	// IsReadOnly report FALSE regardless of the tool's own claim, matching
+	// the MCPTool posture (mcp/tool.go:105) for every category.
+	gate := r.Gate()
+	if gate != nil {
+		seen := posturedTool{Tool: tool}
+		if err := gate.BeforeExecute(ctx, seen, args); err != nil {
+			r.logger.Warn("tool execution blocked by gate",
+				"name", name,
+				"reason", err,
+			)
+			res := NewErrorResultErr(err)
+			res.ErrCode = ErrCodeGateBlocked
+			return res, nil
+		}
+
+		result, execErr := tool.Execute(ctx, args)
+		res := buildToolResult(r.logger, name, result, execErr)
+		gate.AfterExecute(ctx, seen, args, res, execErr)
+		return res, nil
+	}
+
 	result, err := tool.Execute(ctx, args)
 	if err != nil {
 		r.logger.Warn("tool execution failed",
@@ -350,6 +385,96 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 	}
 
 	return NewSuccessResult(result), nil
+}
+
+// buildToolResult normalizes a tool's raw Execute outputs into the
+// standardized *ToolResult envelope, with the legacy failure log. Shared by
+// the gated path; the nil-gate path keeps its original inline shape
+// byte-identically.
+func buildToolResult(logger *slog.Logger, name string, result any, err error) *ToolResult {
+	if err != nil {
+		logger.Warn("tool execution failed",
+			"name", name,
+			"error", err,
+		)
+		return NewErrorResultErr(err)
+	}
+
+	// If result is already a ToolResult, return it directly to preserve evidence
+	if tr, ok := result.(*ToolResult); ok {
+		return tr
+	}
+	// Also handle value-type ToolResult (some tools return value not pointer)
+	if tr, ok := result.(ToolResult); ok {
+		return &tr
+	}
+
+	return NewSuccessResult(result)
+}
+
+// posturedTool wraps a Tool with G4's fail-closed posture inheritance
+// (docs/plans/20261031-tool-provider-seam, master.md C2): whenever a gate
+// is armed, IsReadOnly and IsConcurrencySafe report FALSE regardless of the
+// tool's own claim - the same conservative default MCPTool carries
+// (mcp/tool.go:105). Only the posture-query methods are overridden; Execute
+// dispatches to the wrapped tool so the gate never changes tool behavior.
+type posturedTool struct {
+	Tool
+}
+
+// IsReadOnly returns false unconditionally: the fail-closed posture.
+func (p posturedTool) IsReadOnly(map[string]any) bool { return false }
+
+// IsConcurrencySafe returns false unconditionally: the fail-closed posture.
+func (p posturedTool) IsConcurrencySafe(map[string]any) bool { return false }
+
+// ErrCodeGateBlocked is the machine-readable ErrCode stamped on tool-result
+// envelopes whose execution was refused by the injected ExecGate's
+// BeforeExecute (security scan block, posture fail-closed, ledger failure).
+// The envelope's Error field carries the human-readable gate reason.
+const ErrCodeGateBlocked = "gate_blocked"
+
+// SetGate injects the per-execution enforcement gate (contract C2). Nil (or
+// a typed-nil ExecGate holding a nil concrete pointer) restores the legacy
+// behavior byte-identically, so non-daemon test usages are unaffected.
+//
+// Ordering: SetGate must be called BEFORE any Execute on this registry -
+// the daemon wires it immediately after the registry is constructed, before
+// any tool can run. Calling it mid-flight re-arms enforcement for subsequent
+// executions only.
+func (r *Registry) SetGate(g ExecGate) {
+	if isTypedNilGate(g) {
+		g = nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.gate = g
+}
+
+// Gate returns the currently injected gate, or nil when none is armed
+// (nil-safe read for tests).
+func (r *Registry) Gate() ExecGate {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.gate
+}
+
+// isTypedNilGate reports whether g is a non-nil interface value whose
+// concrete value is nil (a typed-nil). Per the repo setters rule, storing
+// one would arm a gate whose every method call panics on the nil receiver;
+// it is normalized to a plain nil instead.
+func isTypedNilGate(g ExecGate) bool {
+	if g == nil {
+		return false
+	}
+	rv := reflect.ValueOf(g)
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan,
+		reflect.Func, reflect.Interface, reflect.UnsafePointer:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }
 
 // GetDefinitions returns tool definitions for the LLM.

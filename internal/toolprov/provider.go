@@ -1,22 +1,28 @@
-// stub: implementation lands in 01-seam.md
-//
 // Package toolprov is the compiled-in tool provider seam (contract C1,
-// docs/plans/20261031-tool-provider-seam/master.md). This file is a
-// MINIMAL compile-only stub placed by the 00T test gate so the gate
-// tests fail RED on assertions, not compilation. It contains types and
-// declarations only - zero logic. Leaf 01-seam.md replaces this stub
-// with the real implementation.
+// docs/plans/20261031-tool-provider-seam/master.md).
 //
-// Register, Factory, Names, RegisterAll, and the factories map are
-// INTENTIONALLY NOT DECLARED in this stub: they are the seam functions
-// 01-seam.md implements, and the gate tests must fail RED naming exactly
-// them (undefined Register/RegisterAll/Names/Factory), never a
-// compilation error on types. An unexported unused map would also trip
-// the U1000 pre-commit gate, so leaf 01 introduces it together with
-// Register.
+// Provider packages contribute tools through the Provider interface and
+// self-register a construction factory via Register (typically from
+// init()). Daemon wiring walks RegisterAll to construct the enabled
+// providers and land their tools in a tools.Registry. The import
+// direction is strictly provider -> toolprov -> tools (+ secrets):
+// toolprov NEVER imports a provider package, internal/tools/builtin, or
+// internal/githubsvc - the same inversion proven by
+// githubsvc.ToolFactories, with builtin populating factories from its
+// own init().
+//
+// Construction is lazy: Register stores the thunk, Factory returns it
+// without invoking, and only RegisterAll (and config mapping in leaf 04)
+// constructs. A disabled provider therefore never runs any work beyond
+// map insertion.
 package toolprov
 
 import (
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+
 	"github.com/caimlas/meept/internal/secrets"
 	"github.com/caimlas/meept/internal/tools"
 )
@@ -52,5 +58,106 @@ type Provider interface {
 	Broker() *secrets.Broker
 }
 
-// factories was intentionally left out of the stub (see package comment);
-// leaf 01-seam.md adds it together with Register.
+// factories is the package-level provider factory map. It is populated
+// exclusively through Register (provider packages' init()); the mutex
+// guards the map and the seed state below.
+var (
+	factoriesMu sync.Mutex
+	factories   = make(map[string]func() Provider)
+)
+
+// Register stores the construction factory for the named provider. The
+// factory is NOT invoked here (construction is lazy); a duplicate name
+// returns an error naming the clash and leaves the first factory
+// untouched - a duplicate provider name is a registration-time error,
+// never a silent overwrite. Safe for concurrent use.
+func Register(name string, f func() Provider) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("toolprov: Register: provider name must not be empty")
+	}
+	if f == nil {
+		return fmt.Errorf("toolprov: Register(%q): nil factory", name)
+	}
+	factoriesMu.Lock()
+	defer factoriesMu.Unlock()
+	if _, exists := factories[name]; exists {
+		return fmt.Errorf("toolprov: Register: provider %q is already registered; duplicate provider names are rejected, never silently overwritten", name)
+	}
+	factories[name] = f
+	return nil
+}
+
+// Factory returns the registered construction thunk for the named
+// provider without invoking it. The second return reports whether the
+// name is registered at all.
+func Factory(name string) (func() Provider, bool) {
+	factoriesMu.Lock()
+	defer factoriesMu.Unlock()
+	f, ok := factories[name]
+	return f, ok
+}
+
+// Names returns the sorted registered provider names, for doctor and
+// config surfacing.
+func Names() []string {
+	factoriesMu.Lock()
+	defer factoriesMu.Unlock()
+	names := make([]string, 0, len(factories))
+	for name := range factories {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// RegisterAll constructs each named provider and registers every tool
+// its Discover() returns into r, returning the number of tools
+// registered. Behavior:
+//
+//   - Unknown provider name: error naming the unknown entry and listing
+//     the known (sorted) names; tools registered before the failure stay
+//     registered.
+//   - A tool whose canonical name collides with an entry already in the
+//     registry, or with a tool the same walk already registered, is an
+//     error: the registry's Register replaces silently, so the seam adds
+//     duplicate detection here and never renames on the provider's
+//     behalf.
+//   - A factory that returns a nil Provider is an error.
+func RegisterAll(r *tools.Registry, names []string) (int, error) {
+	if r == nil {
+		return 0, fmt.Errorf("toolprov: RegisterAll: nil registry")
+	}
+	registered := 0
+	for _, name := range names {
+		f, ok := Factory(name)
+		if !ok {
+			known := Names()
+			if len(known) == 0 {
+				return registered, fmt.Errorf("toolprov: unknown tool provider %q (no providers are registered)", name)
+			}
+			return registered, fmt.Errorf("toolprov: unknown tool provider %q (known: %s)", name, strings.Join(known, ", "))
+		}
+		p := f()
+		if p == nil {
+			return registered, fmt.Errorf("toolprov: provider factory %q returned a nil Provider", name)
+		}
+		existing := r.CanonicalNames()
+		seen := make(map[string]struct{})
+		for _, tool := range p.Discover() {
+			if tool == nil {
+				continue
+			}
+			cn := tools.CanonicalName(tool)
+			if _, dup := seen[cn]; dup {
+				return registered, fmt.Errorf("toolprov: provider %q contributes duplicate tool name %q", p.Name(), tool.Name())
+			}
+			if _, dup := existing[cn]; dup {
+				return registered, fmt.Errorf("toolprov: provider %q contributes tool %q which is already registered in the registry", p.Name(), tool.Name())
+			}
+			seen[cn] = struct{}{}
+			r.Register(tool)
+			registered++
+		}
+	}
+	return registered, nil
+}
