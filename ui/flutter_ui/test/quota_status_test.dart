@@ -576,21 +576,27 @@ void main() {
   group('quotaCountdownText', () {
     test('formats remaining wait time in parity format', () {
       final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final now = DateTime.fromMillisecondsSinceEpoch(nowMs);
       final state = AgentQuotaState(
         quotaBlocked: false,
         quotaWaitUntilEpoch: nowMs + (3 * 60 + 12) * 60 * 1000,
       );
-      expect(quotaCountdownText(state), equals('quota resets in 3h 12m'));
+      expect(
+        quotaCountdownText(state, now: now),
+        equals('quota resets in 3h 12m'),
+      );
     });
 
     test('single hour and 45m', () {
       final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final now = DateTime.fromMillisecondsSinceEpoch(nowMs);
       expect(
         quotaCountdownText(
           AgentQuotaState(
             quotaBlocked: false,
             quotaWaitUntilEpoch: nowMs + 60 * 60 * 1000,
           ),
+          now: now,
         ),
         equals('quota resets in 1h'),
       );
@@ -600,6 +606,7 @@ void main() {
             quotaBlocked: false,
             quotaWaitUntilEpoch: nowMs + 45 * 60 * 1000,
           ),
+          now: now,
         ),
         equals('quota resets in 45m'),
       );
@@ -607,11 +614,12 @@ void main() {
 
     test('past-due renders resets soon', () {
       final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final now = DateTime.fromMillisecondsSinceEpoch(nowMs);
       final state = AgentQuotaState(
         quotaBlocked: false,
         quotaWaitUntilEpoch: nowMs - 60 * 60 * 1000,
       );
-      expect(quotaCountdownText(state), equals('resets soon'));
+      expect(quotaCountdownText(state, now: now), equals('resets soon'));
     });
 
     test('null wait time and blocked yield null', () {
@@ -1006,7 +1014,7 @@ void main() {
     });
 
     testWidgets('shows blocked badge on agent tile', (tester) async {
-      final quotaState = const AgentQuotaState(quotaBlocked: true);
+      const quotaState = AgentQuotaState(quotaBlocked: true);
       final agents = [const Agent(id: 'agent-1', name: 'coder')];
 
       await tester.pumpWidget(

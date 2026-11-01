@@ -90,12 +90,17 @@ String _formatQuotaHHmm(int epochMs, int? offsetMinutes, bool useDeviceTime) {
 /// carries the "action required" hint itself. The "quota wait · " state
 /// label is prepended by [QuotaStatusBadge] (parity with the TUI badge
 /// format in internal/tui/agents_panel.go quotaStatusBadge).
-String? quotaCountdownText(AgentQuotaState? state) {
+///
+/// The [now] parameter is injectable for tests, mirroring the Go twin
+/// [internal/tui/quota_status.go] QuotaCountdownTextAt. When [now] is null,
+/// DateTime.now() is used (production default).
+String? quotaCountdownText(AgentQuotaState? state, {DateTime? now}) {
   if (state == null || state.quotaBlocked) return null;
   final waitUntil = state.quotaWaitUntilEpoch;
   if (waitUntil == null) return null;
+  final referenceNow = now ?? DateTime.now();
   final remaining = Duration(
-    milliseconds: waitUntil - DateTime.now().millisecondsSinceEpoch,
+    milliseconds: waitUntil - referenceNow.millisecondsSinceEpoch,
   );
   if (remaining.inMilliseconds <= 0) {
     return 'resets soon';
