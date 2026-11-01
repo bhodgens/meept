@@ -1050,9 +1050,16 @@ type LLMConfig struct {
 	// inference providers (session-affinity tree, Contract 1). Default
 	// ON: unknown headers are ignored by gateways that do not support
 	// them, so sending is safe by default.
-	SessionAffinity SessionAffinityConfig  `json:"session_affinity" toml:"session_affinity"`
-	Metrics         LLMMetricsConfig       `json:"metrics"           toml:"metrics"`
-	Cache           LLMSimpleFeatureConfig `json:"cache"             toml:"cache"`
+	SessionAffinity SessionAffinityConfig `json:"session_affinity" toml:"session_affinity"`
+	// Tiers configures the serving-tier policy (llm-serving-tiers tree
+	// leaf 01, Contract C1): a per-request degradation-depth limit plus
+	// per-capability per-turn ceilings on alias rotation, and the
+	// degraded-tier signaling keys. Default OFF (opt-in per
+	// docs/agents/opt-in-defaults.md): zero behavior change and no
+	// metadata keys when disabled.
+	Tiers   TierPolicyConfig       `json:"tiers"             toml:"tiers"`
+	Metrics LLMMetricsConfig       `json:"metrics"           toml:"metrics"`
+	Cache   LLMSimpleFeatureConfig `json:"cache"             toml:"cache"`
 }
 
 // SessionAffinityConfig configures per-session affinity headers sent on
@@ -1223,6 +1230,66 @@ const (
 	// timeout (leaf 06 consumption).
 	DefaultSessionAffinityTeardownTimeout = 5 * time.Second
 )
+
+// DefaultTierPolicyMaxDepth is the per-request degradation-depth limit
+// llm.tiers.max_depth takes when the policy is enabled and max_depth is
+// unset/zero (llm-serving-tiers tree leaf 01, Contract C1: "default 2
+// when Enabled"). Inactive while disabled: a zero-value config keeps
+// MaxDepth 0 so no tier logic can fire.
+const DefaultTierPolicyMaxDepth = 2
+
+// TierPolicyConfig configures the serving-tier policy (json5 key:
+// llm.tiers; llm-serving-tiers tree leaf 01, Contract C1). It bounds how
+// far alias rotation may degrade within one request and controls the
+// degraded-tier signaling keys written into per-step response metadata.
+//
+// Zero-value semantics: Load/LoadJSON5Config unmarshal user config ONTO
+// DefaultConfig(), so an unset section inherits the defaults below.
+// Enabled defaults FALSE (opt-in per docs/agents/opt-in-defaults.md);
+// while disabled every field is inert and zero bytes of metadata change.
+// SignalDegraded defaults true — but is only meaningful once Enabled is
+// true, so the default-on value never violates the default-off posture.
+type TierPolicyConfig struct {
+	// Enabled toggles the whole tier policy: depth ceilings in the
+	// alias-rotation path AND metadata signaling. Default false.
+	Enabled bool `json:"enabled"          toml:"enabled"`
+	// MaxDepth is the per-request degradation limit: the rotation may
+	// dispatch at most MaxDepth+1 members (primary + MaxDepth
+	// degradations); the next hop surfaces the typed floor error.
+	// Zero/unset takes DefaultTierPolicyMaxDepth when Enabled; stays
+	// inactive while disabled. Default 2 when enabled.
+	MaxDepth int `json:"max_depth"        toml:"max_depth"`
+	// TurnCeilings maps a capability name (e.g. "small") to the
+	// per-turn maximum TOTAL degradations for turns resolving that
+	// capability. Absent/zero entries fall back to MaxDepth. Counters
+	// live on the request context — they reset on every turn and are
+	// never shared across concurrent turns.
+	TurnCeilings map[string]int `json:"turn_ceilings"    toml:"turn_ceilings"`
+	// SignalDegraded controls whether the llm_tier / llm_tier_degraded /
+	// llm_tier_depth keys are written into per-step response metadata.
+	// Only consulted when Enabled is true. Default true when enabled.
+	SignalDegraded bool `json:"signal_degraded" toml:"signal_degraded"`
+}
+
+// NormalizeTierPolicyDefaults clamps the tier policy to defaults at the
+// load boundary: when Enabled, a non-positive MaxDepth takes
+// DefaultTierPolicyMaxDepth and a nil TurnCeilings map becomes empty
+// (never nil, so consumers can index safely). When disabled, MaxDepth
+// stays 0 — the policy is inactive and must not carry an effective limit.
+// SignalDegraded is left as-is: its default-true value is applied by
+// DefaultConfig() (which load unmarshal runs onto), and an explicit
+// signal_degraded = false must survive every load. Idempotent.
+func NormalizeTierPolicyDefaults(tp *TierPolicyConfig) {
+	if !tp.Enabled {
+		return
+	}
+	if tp.MaxDepth <= 0 {
+		tp.MaxDepth = DefaultTierPolicyMaxDepth
+	}
+	if tp.TurnCeilings == nil {
+		tp.TurnCeilings = map[string]int{}
+	}
+}
 
 // GetEnabled returns Enabled. Part of the getter surface llm.ConfigFromSchema
 // reads via its parameter interface (kept interface-based to avoid an
@@ -3522,6 +3589,19 @@ func DefaultConfig() *Config {
 				AnthropicHeader: "session_id",
 				IdleRelease:     DefaultSessionAffinityIdleRelease,
 				TeardownTimeout: DefaultSessionAffinityTeardownTimeout,
+			},
+			Tiers: TierPolicyConfig{
+				// Default OFF (llm-serving-tiers leaf 01, Contract C1):
+				// opt-in per docs/agents/opt-in-defaults.md; zero
+				// behavior change and no metadata keys when off.
+				// SignalDegraded defaults true but is only consulted
+				// once Enabled flips on; MaxDepth stays 0 here (inactive
+				// while disabled) and normalizes to
+				// DefaultTierPolicyMaxDepth at the load boundary when
+				// an override enables the policy without a depth.
+				Enabled:        false,
+				MaxDepth:       0,
+				SignalDegraded: true,
 			},
 			Metrics: LLMMetricsConfig{
 				Enabled:             true,

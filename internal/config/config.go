@@ -103,6 +103,12 @@ func finalizeLoadedConfig(cfg *Config) (*Config, error) {
 	// normalization so every consumer sees normalized values.
 	NormalizeFailurePolicyDefaults(&cfg.LLM.FailurePolicy)
 
+	// Clamp llm.tiers to defaults (llm-serving-tiers leaf 01, Contract
+	// C1: enabled + unset max_depth -> DefaultTierPolicyMaxDepth; a
+	// disabled policy stays inert with MaxDepth 0). Load-boundary
+	// normalization so every consumer sees normalized values.
+	NormalizeTierPolicyDefaults(&cfg.LLM.Tiers)
+
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every
 	// consumer sees an absolute path (evolver plan-sink leaf 01).
@@ -234,6 +240,10 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// zero/negative durations, non-positive ShortRetries). Load-boundary
 	// normalization so every consumer sees normalized values.
 	NormalizeFailurePolicyDefaults(&cfg.LLM.FailurePolicy)
+
+	// Clamp llm.tiers to defaults (llm-serving-tiers leaf 01, Contract
+	// C1). Same load-boundary rationale as finalizeLoadedConfig above.
+	NormalizeTierPolicyDefaults(&cfg.LLM.Tiers)
 
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every

@@ -142,6 +142,15 @@ type ProviderManager struct {
 	// header off. Guarded by mu.
 	sessionAffinity *AffinityConfig
 
+	// tierPolicy is the resolved llm.tiers serving-policy config
+	// (SetTierPolicy, llm-serving-tiers tree leaf 01). Nil (or
+	// Enabled=false) = disabled: rotation is unbounded exactly as before
+	// the leaf and no metadata keys are written. The per-call depth
+	// counter NEVER lives here - this field is shared by every session;
+	// bookkeeping rides the stack of one rotation loop (tierGate,
+	// tier_policy.go). Guarded by mu.
+	tierPolicy *TierPolicy
+
 	// Circuit breaker state
 	lastHealthCheck time.Time
 	stopChan        chan struct{}
@@ -485,6 +494,17 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 	}
 	pm.mu.RUnlock()
 
+	// Tier gate (llm-serving-tiers leaf 01, T2): the per-call degradation
+	// bound. Built from the PRIMARY candidate's capabilities (index 0 of
+	// the ordered list is the member that would serve at depth 0). nil =
+	// disabled: every gate call below is skipped and the loop runs
+	// byte-identically to pre-leaf behavior. The gate lives on this
+	// call's stack - per-turn counters are never shared across turns.
+	var tier *tierGate
+	if len(orderedProviders) > 0 {
+		tier = pm.newTierGate(orderedProviders[0].Config.Capabilities)
+	}
+
 	var lastErr error
 	var attempts int
 
@@ -502,6 +522,16 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 				)
 				continue
 			}
+		}
+
+		// Tier floor check BEFORE dispatch (T2/T4). attempts counts the
+		// members already dispatched; the floor fires only on a hop that
+		// would DISPATCH - skipped candidates (disabled, unhealthy at
+		// start, quota-blocked via getOrderedProviders) consume no depth
+		// because this line is never reached for them. The first hop
+		// (attempts == 0) can never trip the floor (0 <= any limit).
+		if floorErr := tier.nextHopBlocked(entry.Config.ProviderID, entry.Config.ModelID, attempts, lastErr); floorErr != nil {
+			return nil, floorErr
 		}
 
 		attempts++
@@ -634,6 +664,13 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 		// Success
 		pm.recordSuccess(entry, resp, latency)
 
+		// Tier signaling (llm-serving-tiers leaf 01, T3 / Contract C3):
+		// stamp llm_tier / llm_tier_degraded / llm_tier_depth onto the
+		// completed response when enabled. depth = attempts-1 (zero-based
+		// degradations from the primary). No-op when the gate is nil
+		// (disabled) or signal_degraded is off.
+		tier.stampMetadata(resp, entry.Config.ProviderID, entry.Config.ModelID, attempts-1)
+
 		// Session-endpoint preference reporting (leaf 04 reporting seam,
 		// master Contract 4): a success that carries a session scope
 		// (WithTaskScope) records the serving EndpointKey as that
@@ -688,6 +725,13 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 	}
 	pm.mu.RUnlock()
 
+	// Tier gate (llm-serving-tiers leaf 01, T2): per-call degradation
+	// bound + signaling, identical to the Chat() twin. nil = disabled.
+	var tier *tierGate
+	if len(orderedProviders) > 0 {
+		tier = pm.newTierGate(orderedProviders[0].Config.Capabilities)
+	}
+
 	var lastErr error
 	var attempts int
 
@@ -702,6 +746,11 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 				}
 				continue
 			}
+		}
+
+		// Tier floor check BEFORE dispatch (T2/T4) - see the Chat() twin.
+		if floorErr := tier.nextHopBlocked(entry.Config.ProviderID, entry.Config.ModelID, attempts, lastErr); floorErr != nil {
+			return nil, floorErr
 		}
 
 		attempts++
@@ -818,6 +867,9 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 		}
 		pm.recordSuccess(entry, resp, latency)
 
+		// Tier signaling (llm-serving-tiers leaf 01, T3) - see Chat().
+		tier.stampMetadata(resp, entry.Config.ProviderID, entry.Config.ModelID, attempts-1)
+
 		// Session-endpoint preference reporting (leaf 04 reporting seam):
 		// the progress path's own success site — Chat, ChatWithProgress,
 		// and chatWithAttemptTaggedDeltas each report through this ONE
@@ -925,6 +977,13 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 	}
 	pm.mu.RUnlock()
 
+	// Tier gate (llm-serving-tiers leaf 01, T2): per-call degradation
+	// bound + signaling, identical to the Chat() twin. nil = disabled.
+	var tier *tierGate
+	if len(orderedProviders) > 0 {
+		tier = pm.newTierGate(orderedProviders[0].Config.Capabilities)
+	}
+
 	var lastErr error
 	var attempts int
 	// attempt is the zero-based index of the provider attempt currently
@@ -943,6 +1002,11 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 		if healthSnapshot[i] == ProviderStatusUnhealthy && len(orderedProviders) > 1 && attempts == 0 {
 			pm.logger.Debug("Skipping unhealthy provider", "provider", entry.Config.ProviderID)
 			continue
+		}
+
+		// Tier floor check BEFORE dispatch (T2/T4) - see the Chat() twin.
+		if floorErr := tier.nextHopBlocked(entry.Config.ProviderID, entry.Config.ModelID, attempts, lastErr); floorErr != nil {
+			return nil, floorErr
 		}
 
 		attempts++
@@ -1041,6 +1105,10 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 		}
 
 		pm.recordSuccess(entry, resp, latency)
+
+		// Tier signaling (llm-serving-tiers leaf 01, T3) - see Chat().
+		// attempt is the zero-based serving index (set above).
+		tier.stampMetadata(resp, entry.Config.ProviderID, entry.Config.ModelID, attempt)
 
 		// Session-endpoint preference reporting (leaf 04 reporting seam):
 		// streaming twin of the non-streaming hook above — same ONE seam
