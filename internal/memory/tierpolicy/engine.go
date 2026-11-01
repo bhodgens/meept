@@ -158,6 +158,16 @@ type Deps struct {
 	Deletes    Deleter
 	Enqueuer   JobEnqueuer
 	States     StateSource
+	// DemotionClaims supplies the semantic-claim candidate pool for
+	// demotion planning (leaf 03, contract C6). Optional.
+	DemotionClaims ClaimSource
+	// Demotion applies the two-step demotion (episodic copy + demoted
+	// flag). Optional; nil makes PlanDemotions an honest noop and
+	// Execute report a per-action error.
+	Demotion DemotionApplier
+	// DemotedCheck is the optional standalone idempotency detector
+	// (R-B7); when nil, demotion state is read from claim metadata.
+	DemotedCheck DemotedDetector
 	// CountTokens estimates a record's token cost for batch sizing.
 	// Nil falls back to the chars/4 estimator used by the working-tier
 	// tests. Optional.
@@ -193,6 +203,11 @@ type Config struct {
 	// defaults above.
 	MinBatch int
 	MaxBatch int
+	// Demotion carries the [memory.tiers.demotion] thresholds (leaf 03,
+	// contract C6). Zero/negative fields resolve to the documented
+	// defaults via ResolveDemotionThresholds (30d staleness window,
+	// 0.1 usefulness floor).
+	Demotion DemotionConfig
 }
 
 // Engine evaluates tier states into actions and executes them. Safe for
@@ -330,6 +345,17 @@ func (e *Engine) Evaluate(ctx context.Context, states []TierState) ([]Action, er
 		actions []Action
 		errs    []error
 	)
+	// Demotion planning runs FIRST and demote actions are PREPENDED so
+	// every returned plan orders demote -> compress -> evict (leaf T4,
+	// R-B4 extended: content-preserving reclamation precedes destructive
+	// actions). Demotions are planned against the claim pool, not the
+	// tier bands: any stale/low-utility claim demotes regardless of the
+	// ceiling posture, while band actions stay tier-scoped below.
+	demoteActs, err := e.PlanDemotions(ctx, nil)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	actions = append(actions, demoteActs...)
 	for _, st := range states {
 		rec := PassRecord{Tier: st.Tier, At: e.now(), Tokens: st.Tokens, Ceiling: st.Ceiling}
 		compressAt, evictAt := e.thresholds(st)
@@ -580,6 +606,8 @@ func (e *Engine) tickOnce(ctx context.Context) {
 		"evictions_deleted", rep.EvictionsDeleted,
 		"compress_requested", rep.CompressRequested,
 		"compress_enqueued", rep.CompressionEnqueued,
+		"demote_requested", rep.DemoteRequested,
+		"demoted", rep.Demoted,
 		"dry_run", rep.DryRun,
 		"errors", len(rep.Errors),
 	)

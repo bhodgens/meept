@@ -24,6 +24,12 @@ type ExecutionReport struct {
 	// (memory.l1_extract enqueues through the REAL distill job type).
 	CompressRequested   int
 	CompressionEnqueued int
+	// DemoteRequested / Demoted: demotion accounting (leaf 03). Demoted
+	// counts claims actually demoted (copy + flag); in dry-run only
+	// DemoteRequested counts. Idempotent re-runs of already-demoted IDs
+	// apply without incrementing Demoted (R-B7 noop semantics).
+	DemoteRequested int
+	Demoted         int
 	// DryRun mirrors the engine's dry-run posture for this pass.
 	DryRun bool
 	// Errors carries per-action failures (never fatal to the batch).
@@ -90,6 +96,25 @@ func (e *Engine) Execute(ctx context.Context, actions []Action) (ExecutionReport
 			}
 			rep.CompressionEnqueued += n
 			rep.ActionsApplied++
+		case KindDemote:
+			// Contract C6 (leaf 03): semantic -> episodic demotion,
+			// lossless copy + demoted flag, never a delete. Idempotent
+			// per ID (R-B7).
+			rep.DemoteRequested += len(act.TargetIDs)
+			if e.cfg.DryRun {
+				rep.ActionsApplied++
+				continue
+			}
+			n, err := e.executeDemote(ctx, act)
+			if err != nil {
+				errs = append(errs, err)
+			}
+			// Partial progress still counts: a crash between the
+			// episodic copy and the flag is recoverable by re-run.
+			rep.Demoted += n
+			if n == len(act.TargetIDs) {
+				rep.ActionsApplied++
+			}
 		default:
 			errs = append(errs, fmt.Errorf("unknown action kind %q", act.Kind))
 		}
