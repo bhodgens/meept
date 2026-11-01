@@ -14,11 +14,18 @@
 
 ## Goal
 
-Turn the ratified shape (A/B/C/D) into an implementable design: data flow
-(who predicts, when the list swaps, how misses recover), exact contract
-signatures, cache-stability proof sketch (episode-boundary rule from the
-parent's Interface Contracts), config surface (default OFF per opt-in-defaults
-invariant), and a leaf decomposition proposal for the orchestrator.
+Turn the ratified shape (hybrid D, single `tool_exposure` knob, capability
+gate on `search` - see ./orchestrator.md "Ratified Shape") into an
+implementable design: data flow (who predicts, when the list swaps, how
+misses recover), exact contract signatures, cache-stability proof sketch
+(episode-boundary rule from the parent's Interface Contracts), the frontier
+tier signal (exact models.json5 key + fail-safe rule for unknown models +
+mid-session downgrade/restore semantics), config surface, and a leaf
+decomposition proposal for the orchestrator. Config-surface rule: the whole
+`tool_exposure` mechanism ships behind a feature flag defaulting OFF
+(byte-identical legacy behavior when off, per docs/agents/opt-in-defaults.md);
+when the flag is ON, the mode default is `predicted` (D). Do not conflate the
+two defaults.
 
 ## Context
 
@@ -42,8 +49,10 @@ invariant), and a leaf decomposition proposal for the orchestrator.
 
 docs/research/dynamic-tools-design.md with sections: Ratified Shape; Data
 Flow (sequence, episode boundaries); Contracts (Go signatures); Cache
-Stability (why the prefix survives); Starvation Recovery; Config; Leaf
-Decomposition (proposed leaves with file targets + est. context).
+Stability (why the prefix survives); Capability Gate (frontier tier signal,
+mid-session downgrade-to-D on switch to a lesser model, restore-at-episode-
+boundary on switch back, fail-safe for unknown models); Starvation Recovery;
+Config; Leaf Decomposition (proposed leaves with file targets + est. context).
 
 ### What This Leaf Consumes
 

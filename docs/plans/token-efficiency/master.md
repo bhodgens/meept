@@ -222,6 +222,11 @@ After all active branches reach COMPLETE:
   ratified: per-model/per-agent `tool_exposure` config (default D; B opt-in
   for frontier-class models), resolved through the existing
   EffectiveSchemaMode precedence seam (internal/agent/loop.go:1434-1437).
+  REFINED same day (user): B is capability-GATED - a `search` setting on a
+  non-frontier active model silently downgrades to D (warn log), including
+  mid-session switches to a lesser model; switching back to a frontier model
+  restores B at the next episode boundary. Unknown models = non-frontier
+  (fail-safe). Full rule: 03 orchestrator "Capability gate on `search`".
 - **Q3 (skill match signal):** Confirm: match skills against the latest user
   task text (+agent role), not the system prompt base. Any need to keep the
   prompt-base signal as secondary?

@@ -56,11 +56,37 @@ schemas before the model asks:
 **Config resolution order** (mirrors the existing schema_mode seam,
 EffectiveSchemaMode at loop.go:1434-1437): per-model > per-agent (AGENT.md
 frontmatter `tool_exposure`) > global `[agent.tools] tool_exposure` >
-default `predicted`. Small/local models get D automatically; B is opt-in per
-model tier. Evidence for the tier split: the always-full promotions
+default `predicted`. Per-agent `tool_exposure: "search"` (B) is a supported
+setting - but see the capability gate below; config alone does not enable B.
+
+**Capability gate on `search` (B) - HARD RULE (user decision 2026-10-31):**
+`tool_exposure: search` takes effect ONLY when the ACTIVE model is
+frontier-class. Resolution is: compute the configured mode, then if mode ==
+`search` and the active model is NOT frontier-class, silently downgrade to
+`predicted` (D) and log one warn line naming the model and the downgrade.
+Consequences that MUST hold:
+- A mid-session switch to a lesser model reverts the effective mode to D on
+  the switch - even when the agent config says `search` and even mid-episode
+  (this is the one allowed non-append-only list change; a model switch
+  already invalidates the cache prefix, so the churn is free).
+- Switching BACK to a frontier model restores `search` at the next episode
+  boundary (not mid-episode - avoids flapping).
+- The tier signal comes from models.json5 capability metadata (00D pins the
+  exact key; likely a `frontier: true` tag or a capability-class field on the
+  model entry). Unknown/unclassified models are treated as NON-frontier
+  (fail-safe: defaults to D).
+- Docs requirement (binds leaf 02-equivalent docs tasks): config template
+  comment, docs/workflows page, and AGENT.md frontmatter docs ALL state
+  plainly: "search mode requires a frontier-class model. Do NOT enable it for
+  small/local models - they fail to use the search/view round-trip reliably
+  (live-smoke evidence: always-full promotions 2026-09-07/09-12). The daemon
+  downgrades search to predicted automatically for non-frontier models."
+
+Evidence for the tier split: the always-full promotions
 (transcript_fetch 2026-09-07, json_extract 2026-09-12, schema.go:1959-1969)
 are live-smoke proof that small models do not reliably pay a two-step
-tool_view round-trip - so B must never be the default.
+tool_view round-trip - so B must never be the default AND never survive a
+downgrade to a small model.
 
 ## Current State (verified)
 
@@ -147,12 +173,20 @@ conventions); no daemon behavior changes from leaf 00A.
 Post-00D decomposition. Minimum for any candidate: cold-start token count
 (before/after, measured with the 00A script), cache-hit continuity across 3
 consecutive turns (log assertion: no "prefix cache invalidated" on turns 2-3
-of the same episode), and a task-completion regression (an existing e2e chat
-suite that exercises a non-core tool must still pass - starvation canary).
+of the same episode), a task-completion regression (an existing e2e chat
+suite that exercises a non-core tool must still pass - starvation canary),
+and the capability-gate cases: (1) `search` configured + non-frontier active
+model -> effective mode D + warn log line; (2) mid-session switch
+frontier->lesser with `search` configured -> effective mode reverts to D on
+the switch; (3) switch back lesser->frontier -> `search` restored at the next
+episode boundary, not mid-episode; (4) unknown model treated as non-frontier.
 
 ## Review Checklist
 
 - [ ] 00A numbers reproducible (script committed or saved in report)
 - [ ] Design doc names the cache-stability mechanism explicitly
+- [ ] Design doc pins the frontier tier signal (exact models.json5 key) + fail-safe for unknown models
+- [ ] Capability gate honored: mid-session switch to a lesser model reverts to D; restore only at episode boundary
+- [ ] Docs (config template + workflows + AGENT.md frontmatter) carry the "NOT for small/low-end models" warning verbatim
 - [ ] Starvation recovery path exists in the ratified design
 - [ ] No implementation dispatched before Q1/Q2 recorded
