@@ -587,6 +587,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				// Reclaim locally-tracked claims whose worker died
 				// between Claim and Complete/Fail (stale-claim sweep).
 				clusterMQ.StartReclaimSweeper()
+				// RPC queue surface follows the same swap so
+				// queue.claim/complete carry cluster semantics.
+				if components.QueueHandler != nil {
+					components.QueueHandler.SetQueue(clusterMQ)
+				}
 				logger.Info("worker pool queue swapped to ClusterQueue (cluster claim semantics active)")
 			}
 		}
@@ -1146,15 +1151,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 	}
 
-	// Wire the same fence + security orchestrator the agent-path shell tool
-	// gets (components.go registerTools) into the TerminalService shell.
-	// Without this the terminal RPC path runs with only the built-in
-	// RiskCritical blocklist while the agent path is fenced (bughunt
-	// 2026-10-15 A1).
+	// Wire the same security orchestrator the agent-path shell tool gets
+	// (components.go registerTools) into the TerminalService shell.
+	// NOTE (agent-groups leaf 01 T3): the per-tool fence checker wiring
+	// was REMOVED — fence enforcement moved into the central FenceStage
+	// inside security.PermissionChecker.CheckPermissionForAgent. The
+	// terminal RPC path runs against a session-scoped PermissionChecker
+	// like the agent path, so it is fenced centrally like the agent path
+	// (the former asymmetry this wiring papered over is gone).
 	if svcRegistry.Terminal != nil {
-		if components.FenceChecker != nil {
-			svcRegistry.Terminal.SetFenceChecker(components.FenceChecker)
-		}
 		if components.SecurityOrchestrator != nil {
 			svcRegistry.Terminal.SetSecurityOrchestrator(components.SecurityOrchestrator)
 		}
@@ -1521,14 +1526,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				// audit 2026-10-20 CRIT): without it the HTTP PTY
 				// endpoint spawned with NO path fence even when
 				// security.fence_enabled was on, so a session-less PTY
-				// could read/write outside the project root. With the
-				// shared checker wired, the endpoint is fail-closed in
-				// the same state as terminal/exec. FenceChecker is nil
-				// when fence is disabled, so this is a no-op by default.
+				// could read/write outside the project root. The
+				// endpoint is fail-closed in the same state as
+				// terminal/exec. NOTE (agent-groups leaf 01 T3): the
+				// shared per-tool fence checker wiring was REMOVED —
+				// enforcement moved into the central FenceStage in
+				// security.PermissionChecker; there is no shared
+				// checker to hand out anymore (components.FenceChecker
+				// stays nil).
 				var ptyOpts []http.PTYHandlerOption
-				if components.FenceChecker != nil {
-					ptyOpts = append(ptyOpts, http.WithFenceChecker(components.FenceChecker))
-				}
 				httpOpts = append(httpOpts, http.WithPTY(http.NewPTYHandler(components.PTYManager, logger, ptyOpts...)))
 				logger.Info("PTY session endpoints enabled", "path", "/api/v1/pty/*")
 			}

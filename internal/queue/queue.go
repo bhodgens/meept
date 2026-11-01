@@ -900,6 +900,16 @@ func NewHandler(queue Queue, msgBus *bus.MessageBus, logger *slog.Logger) *Handl
 	return h
 }
 
+// SetQueue swaps the handler's queue. Cluster wiring uses this alongside
+// Pool.SetQueue so the RPC queue surface (queue.claim/complete/fail) also
+// carries cluster claim semantics instead of bypassing the ClusterQueue.
+func (h *Handler) SetQueue(q Queue) {
+	if q == nil {
+		return
+	}
+	h.queue = q
+}
+
 // Start begins listening for queue requests.
 func (h *Handler) Start(ctx context.Context) error {
 	h.handler.Start(ctx)
