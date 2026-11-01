@@ -355,7 +355,7 @@ Output: APPROVED or a list of specific gaps.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 00T-e2e-agent-groups.md | TESTS_VALIDATED | 1 | 6479ccaf: 9 RED + F5 manifest-deferred (#70 dep) + F10 dated skip; F4 RED witnessed in-session. Manifest shared-write clobber repaired in 4d7706cf (dedupe github-intake, activity-views allowlist - sibling owns its scenarios). Subagent left untracked e2e/suites/zz-cigate-sabotage/ (self-documented negative-witness, never registered) - owner should delete. |
-| 01-permissions/orchestrator.md | IN_PROGRESS | 0 | 00T branch gate TESTS_VALIDATED (d3ea88ea): RED witnessed (10 missing-symbol errors: FenceStage/SetFence/RuleSource). Leaf 01 dispatch next. |
+| 01-permissions/orchestrator.md | IN_PROGRESS | 0 | 00T branch gate TESTS_VALIDATED (d3ea88ea); leaf 01 COMPLETE (7897037b): central FenceStage + per-session adapters + per-tool wiring removed + RootPath race eliminated; all 4 deviations reviewed-accepted (RuleSource field early = compile dep of leaf-02 RED tests; bare-root glob fix; agent pin test added; setter methods kept - zero prod callers). F6 e2e RED until leaf 04 (group fs_roots feed). Leaf 02 (decision audit) next. Follow-ups: revert-path fence gap (resolve tool revert loses fence check - needs leaf-02 decision); dead fenceController fields on ChatHandler/Dispatcher (cleanup with leaf 03). |
 | 02-groups-model.md | PENDING | 0 | |
 | 03-membership/orchestrator.md | PENDING | 0 | |
 | 04-tool-gates.md | PENDING | 0 | |
