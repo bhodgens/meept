@@ -16,6 +16,7 @@ import 'theme/app_palette.dart';
 import 'theme/colors.dart';
 import 'theme/palette_provider.dart';
 import 'core/constants.dart';
+import 'core/deep_link_listener.dart';
 import 'core/router.dart';
 import 'features/pairing/pairing_gate.dart';
 import 'providers/providers.dart';
@@ -330,8 +331,15 @@ class CyberpunkApp extends ConsumerWidget {
         // AcpPermissionDialogHost floats the relay dialog over every route
         // (leaf 05 Contract E); it renders nothing itself and pushes the
         // dialog via the router's root navigator key.
+        // DeepLinkListenerHost routes meept://session/<id> links
+        // (menubar tap-through, cold-start) into the router (leaf 03).
         return _AppLifecycleWrapper(
-          child: Stack(children: [child!, const AcpPermissionDialogHost()]),
+          child: Stack(
+            children: [
+              DeepLinkListenerHost(child: child!),
+              const AcpPermissionDialogHost(),
+            ],
+          ),
         );
       },
     );

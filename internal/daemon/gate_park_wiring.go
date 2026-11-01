@@ -47,14 +47,25 @@ func (c *Components) wireGateParker() {
 		func(ctx context.Context, rec agent.ParkedTurnRecord) {
 			// Resume path (approval via ResumeByKey): the approval side
 			// (PlanManager.ApprovePlan) already advanced the plan; the
-			// checkpoint's job here is the terminal log line (leaves
-			// 03/04 attach the user-facing notification). A re-park here
-			// would resurrect the gate after its approval.
+			// checkpoint's job here is the terminal log line plus the
+			// user-facing notification (hitl-notifications leaf 03). A
+			// re-park here would resurrect the gate after its approval.
 			data, _, err := agent.DecodeGatePark(rec)
 			if err != nil {
 				c.Logger.Warn("gate park resumed with undecodable payload -- dropped",
 					"session_id", rec.SessionID, "error", err)
 				return
+			}
+			// User-facing surface: push through the existing notification
+			// emitter. SessionID rides the event so the menubar tap
+			// resolves the meept://session/<id> deep link (C6); the HTTP
+			// push channel fans the same event out over /ws/notifications.
+			if c.NotificationEmitter != nil {
+				c.NotificationEmitter.PublishNotification(
+					data.SessionID, "gate", NotificationTypeInfo,
+					"plan gate approved",
+					"plan \""+data.GateID+"\" approved -- turn resumed",
+				)
 			}
 			c.Logger.Info("gate checkpoint resumed",
 				"gate_kind", data.GateKind,

@@ -34,6 +34,10 @@ class NotificationManager: NSObject, ObservableObject {
         let message: String
         let taskID: String?
         let agentID: String?
+        // Daemon push payload key "session_id" (internal/comm/http
+        // NotificationEvent.SessionID). Older events without it decode as
+        // nil and the tap handler keeps the mark-read-only behavior.
+        let sessionID: String?
         var isRead: Bool = false
     }
 
@@ -150,12 +154,15 @@ class NotificationManager: NSObject, ObservableObject {
         // Add category for action handling
         content.categoryIdentifier = "MEEPT_NOTIFICATION"
 
-        // Add user info for tap handling
+        // Add user info for tap handling. sessionID mirrors the daemon's
+        // "session_id" push payload key (hitl-notifications leaf 03): the
+        // tap handler turns it into the meept://session/<id> deep link.
         content.userInfo = [
             "eventID": event.id,
             "type": event.type,
             "taskID": event.taskID ?? "",
-            "agentID": event.agentID ?? ""
+            "agentID": event.agentID ?? "",
+            "sessionID": event.sessionID ?? ""
         ]
 
         let request = UNNotificationRequest(
@@ -294,7 +301,24 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
             markAsRead(eventID)
         }
 
-        // Handle notification tap - could open relevant view
+        // Handle notification tap: open the GUI on the session via the
+        // pinned meept://session/<id> deep link (hitl-notifications leaf 03,
+        // contract C6). The daemon push payload carries "session_id" (its
+        // JSON key; mapped into userInfo as "sessionID" at show time). A
+        // missing/empty sessionID keeps today's mark-read-only behavior.
+        if let sessionID = userInfo["sessionID"] as? String,
+           !sessionID.isEmpty,
+           sessionMatchesGrammar(sessionID) {
+            // C6 grammar: scheme "meept", host "session", id [A-Za-z0-9-]+
+            // (mirrored from ui/flutter_ui/lib/core/deep_link.dart - the
+            // Dart tests are the grammar authority; this half stays thin).
+            if let url = URL(string: "meept://session/\(sessionID)") {
+                GuiLauncher.open(url)
+            } else {
+                logger.error("deep link build failed for session: \(sessionID, privacy: .public)")
+            }
+        }
+
         if let taskID = userInfo["taskID"] as? String, !taskID.isEmpty {
             logger.info("notification tapped for task: \(taskID)")
             // Post notification for other parts of the app to handle
@@ -306,6 +330,12 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         }
 
         completionHandler()
+    }
+
+    /// C6 session-id grammar check: ^[A-Za-z0-9-]+$ (ASCII mirror of the
+    /// Dart deep_link.dart regex; keeps a hostile id out of the URL).
+    private func sessionMatchesGrammar(_ id: String) -> Bool {
+        return !id.isEmpty && id.range(of: "^[A-Za-z0-9-]+$", options: .regularExpression) != nil
     }
 }
 

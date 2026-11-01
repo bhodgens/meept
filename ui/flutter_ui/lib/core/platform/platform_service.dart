@@ -6,7 +6,9 @@ library platform;
 
 import 'dart:async' show Future;
 import 'package:flutter/foundation.dart' show kIsWeb;
-// Conditional import - web stub returns null/false, native uses dart:io
+// Conditional import - web stub uses dart:html window.open, native uses
+// dart:io Process.run 'open' (macOS) / 'xdg-open' (Linux)
+import 'platform_open_helpers.dart' as openhelpers;
 import 'platform_helpers.dart' as native;
 
 /// Global singleton platform service. Initialized by [initPlatformService].
@@ -73,4 +75,11 @@ class PlatformService {
     if (isMacOS) return 'cmd+x';
     return 'ctrl+x';
   }
+
+  /// Open [url] with the platform's default handler (deep links, leaf 03).
+  ///
+  /// Web: browser new tab (window.open). Native: the OS opener (`open` on
+  /// macOS, `xdg-open` on Linux). Never throws; a blocked/failed open
+  /// returns false.
+  Future<bool> openExternal(String url) => openhelpers.openExternal(url);
 }
