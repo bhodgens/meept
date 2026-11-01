@@ -190,6 +190,13 @@ type Components struct {
 	// closes the handle after the parkers have stopped.
 	ParkStore *agent.SQLiteParkStore
 
+	// GateParker checkpoints human-gate pauses (hitl-notifications leaf
+	// 02, C5) through the dedicated ParkKindGate TurnParker over the
+	// SAME ParkStore. Nil when the park store is unavailable (gate
+	// checkpointing degrades to off: gates that must outlive the process
+	// are useless memory-only) — the pump wiring is a no-op then.
+	GateParker *agent.GateParker
+
 	// TurnJournal is the turn-level durable journal store
 	// (turnjournal.SQLiteJournal over <data_dir>/turnjournal.db). Nil
 	// when daemon.turn_journal_enabled is false (default -- the file is
@@ -903,7 +910,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// opt-in, default OFF, same posture. Enabled boots also subscribe the
 	// span producer to turn.terminal (typed) + task.step_completed (raw);
 	// disabled boots construct nothing at all (zero network activity).
-	c.TraceExporter, _, c.otlpTraceSubs = wireOTLPTraces(cfg.Metrics.OTLPTraces, msgBus, logger)
+	// Leaf 03: the LLM-call observer attaches LATER, right after the llm
+	// client exists (below, after SetUsageStore wiring) -- the client is
+	// not constructed yet here. c.otlpTraceSubs carries the producer.
+	c.TraceExporter, _, c.otlpTraceSubs = wireOTLPTraces(cfg.Metrics.OTLPTraces, msgBus, nil, logger)
 
 	// Install the env-script resolver for config expansion (see
 	// internal/llm/envscript.go): process env first, then the executable
@@ -1104,6 +1114,18 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 
 		c.TokenCache = tokenCache
+
+		// Leaf 03 (llm-hop-tracing, C7): with the trace exporter armed, attach
+		// the llm-call observer bridge onto the client so every completed call
+		// becomes an llm.call span. The client fires the observer from its own
+		// async goroutine (never the request path); nil-guarded, and the
+		// disabled posture (no subs) attaches nothing. Secondary clients
+		// (Anthropic/Codex set below when the manager builds them) go through
+		// the same seam.
+		if c.otlpTraceSubs != nil && c.LLMClient != nil {
+			c.LLMClient.SetLLMCallObserver(c.otlpTraceSubs.llmCallObserver())
+		}
+
 		logger.Info("LLM client initialized successfully",
 			"provider", llmCfg.ProviderID,
 			"model", llmCfg.ModelID,
@@ -2207,6 +2229,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Context firewall / schema-mode / compaction wiring continues below.
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
+	// Wire the context assembler's TierBudgetProvider adapter (leaf 03
+	// T6): constructs branch-B store handles AFTER the memory manager and
+	// registers them on the loop. Opt-in: agent.context_assembler.enabled
+	// (default false) leaves the loop untouched.
+	WireContextAssembler(c, cfg)
 	// Wire tool-schema mode (leaf 02): [agent.tools].schema_mode resolves
 	// per-model > provider > global, indexed default-on; also applies on
 	// later registry attach via applySchemaModeWithLock.
@@ -2769,6 +2796,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			"error", parkStoreErr)
 	} else {
 		c.ParkStore = parkStore
+		// Gate checkpoint parker (hitl-notifications leaf 02): built
+		// beside the park store so ParkKindGate rows land in the same
+		// parks.db. Nil-safe: absent store degrades checkpointing off
+		// (gate_park_wiring.go).
+		c.wireGateParker()
 	}
 
 	// Turn journal store (turn-journal tree leaf 02, master C6): the
@@ -5857,6 +5889,15 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Gate checkpoint pump (hitl-notifications leaf 02): subscribes the
+	// plan.submitting (park) / plan.approved (resume) pumps and Starts
+	// the gate parker — its re-arm loads gate rows parked before this
+	// boot, so a late approval still resumes after a restart. Wired
+	// after the employee subsystem so a session-less/sink plan is
+	// distinguishable and the park store + parker both exist. No-op when
+	// the gate parker or bus is absent (gate_park_wiring.go).
+	c.StartGateParkPump(ctx)
+
 	// Wire the chat-path goal anchor (goal-completion leaf 03 Task 2):
 	// the dispatcher resolves a session's goal at plan-creation time via
 	// agent.GoalAnchorStore. Wired here (after the employee subsystem)
@@ -6111,6 +6152,11 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.QuotaNotifier.Stop()
 		c.Logger.Info("Quota notifier stopped")
 	}
+
+	// Stop the gate checkpoint parker (hitl-notifications leaf 02):
+	// surviving gate rows stay in the park store and re-arm on the next
+	// Start (Stop only logs the count). Nil on checkpointing-off boots.
+	c.stopGateParker()
 
 	// Stop the async-turn liveness reaper (async-turn-migration leaf 06)
 	// next to the other handler-side background loops. Nil when the

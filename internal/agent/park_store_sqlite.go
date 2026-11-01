@@ -70,6 +70,13 @@ const (
 	ParkKindChat ParkKind = "chat"
 	// ParkKindEpisode is the goal-loop parked episode (internal/employee).
 	ParkKindEpisode ParkKind = "episode"
+	// ParkKindGate is a checkpointed human gate (hitl-notifications leaf 02,
+	// C5): a plan/goal approval pause persisted as a GateParkData payload.
+	// Gate parks schedule at a far-future resume time (gateParkHorizon,
+	// gate_park.go) so the time-based drain never auto-approves a gate —
+	// only an explicit ResumeByKey (the approval path) resumes them. Same
+	// kind-scoped persistence rows, same re-arm-on-Start semantics.
+	ParkKindGate ParkKind = "gate"
 )
 
 // persistenceKeySuffix is appended to chat-side persistence keys (after
@@ -313,6 +320,8 @@ func parseParkClass(class string) llm.FailureClass {
 		return llm.FailureThrottle
 	case "quota":
 		return llm.FailureQuota
+	case "none":
+		return llm.FailureNone
 	default:
 		return llm.FailureQuota
 	}

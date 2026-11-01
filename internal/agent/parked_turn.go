@@ -566,6 +566,11 @@ func parkClassString(class llm.FailureClass) string {
 		return "quota"
 	case llm.FailureThrottle:
 		return "throttle"
+	case llm.FailureNone:
+		// Gate parks (gate_park.go) carry no provider-failure class; the
+		// explicit "none" wire value keeps their persistence rows
+		// round-tripping without falling into the legacy quota fallback.
+		return "none"
 	default:
 		return ""
 	}
