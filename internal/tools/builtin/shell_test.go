@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -587,4 +589,114 @@ func TestLastPipeCommand(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// --- token-efficiency branch 01 gate tests (leaf 00T) ---
+//
+// Pinned behavior for GAP-1: shell output over MaxOutputSize must keep the
+// TAIL of the output (not the head), the truncation note must state the
+// total and omitted byte counts, and under-cap output must stay
+// byte-identical. C1 contract (frozen in docs/plans/token-efficiency):
+//
+//	... (truncated, N bytes total; first M bytes omitted; full output: <path>)
+//
+// The path portion and the ShellResult.FullOutputPath field are asserted in
+// leaf 01's tests; T1-T3 below compile against the current types and must
+// fail RED for behavior reasons (today's code keeps the head and its note
+// omits the byte counts).
+
+// truncationGateTotal is the raw stdout byte count the gate fixtures emit
+// (20KB over MaxOutputSize so both markers cannot fit in the kept window).
+const truncationGateTotal = 60000
+
+// writeOversizedStdoutFile writes a deterministic truncationGateTotal-byte
+// fixture: head marker (40 bytes), ASCII filler, exactly one newline, tail
+// marker (40 bytes). The sole newline sits INSIDE the last MaxOutputSize
+// bytes, so a line-boundary tail cut cannot backtrack past either marker —
+// tail-keep implies the head marker is omitted in full.
+func writeOversizedStdoutFile(t *testing.T) (path, headMarker, tailMarker string) {
+	t.Helper()
+	headMarker = strings.Repeat("H", 40)
+	tailMarker = strings.Repeat("T", 40)
+	raw := strings.Repeat("a", truncationGateTotal-len(headMarker)-1-len(tailMarker))
+	body := headMarker + raw + "\n" + tailMarker
+	if len(body) != truncationGateTotal {
+		t.Fatalf("gate fixture size = %d, want %d", len(body), truncationGateTotal)
+	}
+	dir := t.TempDir()
+	path = filepath.Join(dir, "out.txt")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write gate fixture: %v", err)
+	}
+	return path, headMarker, tailMarker
+}
+
+// TestShellTruncationKeepsTail pins GAP-1: a command emitting more than
+// MaxOutputSize returns the TAIL of the output. RED today: the implementation
+// keeps the head (shell.go truncates stdoutStr[:MaxOutputSize]).
+func TestShellTruncationKeepsTail(t *testing.T) {
+	path, headMarker, tailMarker := writeOversizedStdoutFile(t)
+
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"command": "cat " + path,
+	})
+	require.NoError(t, err, "unexpected error")
+	sr := unwrapShellResult(t, result)
+
+	assert.True(t, sr.Truncated, "output over MaxOutputSize must set Truncated")
+	assert.Contains(t, sr.Stdout, tailMarker,
+		"tail-keep truncation must return the last MaxOutputSize bytes (tail marker present)")
+	assert.NotContains(t, sr.Stdout, headMarker,
+		"tail-keep truncation must omit the head (head marker absent)")
+	// Kept window is at most MaxOutputSize bytes plus the truncation note.
+	assert.Less(t, len(sr.Stdout), MaxOutputSize+256,
+		"truncated stdout must not exceed MaxOutputSize plus the truncation note")
+}
+
+// TestShellTruncationNoteStatesOmittedBytes pins the C1 note format prefix
+// (path portion asserted only in leaf 01's tests): the note must state the
+// total byte count AND the omitted byte count. RED today: the note is
+// "(truncated, N bytes total)" with no omitted-bytes clause.
+func TestShellTruncationNoteStatesOmittedBytes(t *testing.T) {
+	path, headMarker, tailMarker := writeOversizedStdoutFile(t)
+	_ = headMarker
+	_ = tailMarker
+
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"command": "cat " + path,
+	})
+	require.NoError(t, err, "unexpected error")
+	sr := unwrapShellResult(t, result)
+
+	assert.True(t, sr.Truncated, "output over MaxOutputSize must set Truncated")
+	noteRe := regexp.MustCompile(
+		`truncated, ` + strconv.Itoa(truncationGateTotal) + ` bytes total; first \d+ bytes omitted`)
+	assert.Regexp(t, noteRe, sr.Stdout,
+		"truncation note must state total bytes and first-M-bytes-omitted per C1")
+}
+
+// TestShellTruncationUnderCapByteIdentical is the regression pin: output
+// under MaxOutputSize must pass through byte-identically with no
+// truncation note and Truncated=false. May already pass today; it guards
+// against the tail-keep implementation changing under-cap behavior.
+func TestShellTruncationUnderCapByteIdentical(t *testing.T) {
+	const underCap = 40001 // stays below MaxOutputSize (50000) with margin
+	dir := t.TempDir()
+	raw := strings.Repeat("z", underCap-1) + "\n"
+	path := filepath.Join(dir, "small.txt")
+	require.NoError(t, os.WriteFile(path, []byte(raw), 0o644))
+
+	tool := NewShellExecuteTool("", time.Second*10, nil)
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"command": "cat " + path,
+	})
+	require.NoError(t, err, "unexpected error")
+	sr := unwrapShellResult(t, result)
+
+	assert.False(t, sr.Truncated, "under-cap output must not set Truncated")
+	assert.Equal(t, raw, sr.Stdout, "under-cap output must be byte-identical to the raw stdout")
+	assert.Empty(t, sr.Stderr, "fixture command writes nothing to stderr")
+	assert.NotContains(t, sr.Stdout, "truncated", "under-cap output must carry no truncation note")
 }
