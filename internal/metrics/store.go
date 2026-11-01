@@ -258,7 +258,9 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     error           INTEGER NOT NULL DEFAULT 0,
     error_message   TEXT NOT NULL DEFAULT '',
     latency_ms      INTEGER NOT NULL DEFAULT 0,
-    duration        REAL NOT NULL DEFAULT 0
+    duration        REAL NOT NULL DEFAULT 0,
+    trace_id        TEXT NOT NULL DEFAULT '',
+    span_id         TEXT NOT NULL DEFAULT ''
 );
 
 -- Error records for retry tracking
@@ -494,6 +496,28 @@ CREATE INDEX IF NOT EXISTS idx_dispatch_log_outcome ON dispatch_log(outcome);`,
 				}
 				return indexMissingGuard("idx_dispatch_log_outcome")(db)
 			},
+		},
+		{
+			// llm-hop-tracing leaf 02: trace correlation columns.
+			// TEXT lowercase hex (NOT BINARY(16)) so every consumer is
+			// either a human pasting the ID into a tracing UI or Go code
+			// comparing strings. Existing rows get DEFAULT '' = "no
+			// trace" (legacy rows).
+			Version: 7,
+			Name:    "llm_calls.trace_id/span_id",
+			SQL: `ALTER TABLE llm_calls ADD COLUMN trace_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE llm_calls ADD COLUMN span_id TEXT NOT NULL DEFAULT '';`,
+			Guard: migrate.ColumnsMissingGuard("llm_calls", "trace_id", "span_id"),
+		},
+		{
+			// The trace index must be created AFTER trace_id exists
+			// (same ordering rule as idx_llm_calls_session_ts, version
+			// 4). Guarded on the index itself so it is (re)created on
+			// fresh and legacy databases alike.
+			Version: 8,
+			Name:    "idx_llm_calls_trace index",
+			SQL:     "CREATE INDEX IF NOT EXISTS idx_llm_calls_trace ON llm_calls(trace_id)",
+			Guard:   indexMissingGuard("idx_llm_calls_trace"),
 		},
 	})
 	if err != nil {
@@ -759,8 +783,8 @@ func (s *Store) RecordModelPerformance(_ context.Context, record ModelPerformanc
 // TraceID is the turn's 32-char trace ("" when the caller passed no
 // WithTraceID scope), SpanID is this call's 16-char span (minted fresh per
 // call, so retried/failover calls under one trace each get their own span).
-// TEXT hex by contract; column persistence is leaf 02's migration -- until
-// it lands the fields live in the in-memory record only.
+// TEXT hex by contract; persisted to the llm_calls trace_id/span_id columns
+// (leaf 02 migrations).
 type LLMCallRecord struct {
 	Timestamp           time.Time
 	Provider            string
@@ -800,12 +824,13 @@ func (s *Store) RecordLLMCall(record LLMCallRecord) {
 		`INSERT INTO llm_calls
 			(timestamp, provider, model_id, agent_id, session_id, tokens_sent,
 			 tokens_received, tokens_cached, reasoning_tokens, cache_creation_tokens,
-			 error, error_message, latency_ms, duration)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 error, error_message, latency_ms, duration, trace_id, span_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts.UTC().Format(time.RFC3339), record.Provider, record.ModelID, record.AgentID,
 		record.SessionID, record.TokensSent, record.TokensRecv, record.TokensCached,
 		record.ReasoningTokens, record.CacheCreationTokens, isErr,
 		record.ErrorMessage, record.LatencyMs, record.DurationMs,
+		record.TraceID, record.SpanID,
 	)
 	if err != nil {
 		s.logger.Error("failed to record llm call", "error", err,

@@ -34,6 +34,11 @@ type ToolCall struct {
 	Arguments  string `json:"arguments"`
 	Result     string `json:"result"`
 	Seq        int    `json:"seq"`
+	// TraceID/SpanID (llm-hop-tracing leaf 02): lowercase-hex correlation
+	// IDs for the enclosing trace. "" = legacy row / no active trace
+	// scope; persisted to session_tool_calls trace_id/span_id columns.
+	TraceID string `json:"trace_id,omitempty"`
+	SpanID  string `json:"span_id,omitempty"`
 }
 
 // Branch represents a named branch in a conversation tree.

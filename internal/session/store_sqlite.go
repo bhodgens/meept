@@ -213,6 +213,8 @@ func (s *SQLiteStore) migrate() error {
 		arguments TEXT NOT NULL,
 		result TEXT,
 		seq INTEGER NOT NULL,
+		trace_id TEXT NOT NULL DEFAULT '',
+		span_id TEXT NOT NULL DEFAULT '',
 		UNIQUE(message_id, seq)
 	);
 
@@ -225,6 +227,13 @@ func (s *SQLiteStore) migrate() error {
 	// Add indexes for tree queries
 	s.migrationCreateIndex("CREATE INDEX IF NOT EXISTS idx_session_messages_session_parent ON session_messages(session_id, parent_id)", "idx_session_messages_session_parent")
 	s.migrationCreateIndex("CREATE INDEX IF NOT EXISTS idx_session_messages_session_branch ON session_messages(session_id, branch_id)", "idx_session_messages_session_branch")
+
+	// Add trace correlation columns to session_tool_calls (llm-hop-tracing
+	// leaf 02). TEXT NOT NULL DEFAULT '' = "no trace" on legacy rows; the
+	// fresh-db CREATE script above carries them inline, the ALTERs cover
+	// pre-existing databases.
+	s.migrationAddColumn("ALTER TABLE session_tool_calls ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''", "trace_id")
+	s.migrationAddColumn("ALTER TABLE session_tool_calls ADD COLUMN span_id TEXT NOT NULL DEFAULT ''", "span_id")
 
 	// FTS5 mirror of session_messages for keyword search.
 	ftsSchema := `
@@ -2013,7 +2022,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		// #nosec G201 -- placeholders are all "?"; IN clause args are parameterized
 		//nolint:gosec // placeholders are all "?"; IN clause args are parameterized
 		tcQuery := fmt.Sprintf(`
-			SELECT id, message_id, tool_name, tool_call_id, arguments, result, seq
+			SELECT id, message_id, tool_name, tool_call_id, arguments, result, seq, trace_id, span_id
 			FROM session_tool_calls
 			WHERE message_id IN (%s)
 			ORDER BY seq`, strings.Join(placeholders, ","))
@@ -2025,8 +2034,8 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		defer tcRows.Close() //nolint:sqlclosecheck // defer in loop is safe here; each iteration re-assigns tcRows
 
 		tcInsertStmt, err := tx.Prepare(`
-			INSERT INTO session_tool_calls (message_id, tool_name, tool_call_id, arguments, result, seq)
-			VALUES (?, ?, ?, ?, ?, ?)`)
+			INSERT INTO session_tool_calls (message_id, tool_name, tool_call_id, arguments, result, seq, trace_id, span_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
 			return nil, fmt.Errorf("failed to prepare tool call insert: %w", err)
 		}
@@ -2038,7 +2047,8 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 			var tcToolName, tcToolCallID, tcArgs string
 			var tcResult sql.NullString
 			var tcSeq int
-			if err := tcRows.Scan(&tcID, &tcMsgID, &tcToolName, &tcToolCallID, &tcArgs, &tcResult, &tcSeq); err != nil {
+			var tcTraceID, tcSpanID string
+			if err := tcRows.Scan(&tcID, &tcMsgID, &tcToolName, &tcToolCallID, &tcArgs, &tcResult, &tcSeq, &tcTraceID, &tcSpanID); err != nil {
 				return nil, fmt.Errorf("failed to scan tool call: %w", err)
 			}
 			newMsgID, ok := oldToNew[tcMsgID]
@@ -2049,7 +2059,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 			if tcResult.Valid {
 				resultVal = tcResult.String
 			}
-			if _, err := tcInsertStmt.Exec(newMsgID, tcToolName, tcToolCallID, tcArgs, resultVal, tcSeq); err != nil { //nolint:mutexio // mutex serializes sqlite connection access
+			if _, err := tcInsertStmt.Exec(newMsgID, tcToolName, tcToolCallID, tcArgs, resultVal, tcSeq, tcTraceID, tcSpanID); err != nil { //nolint:mutexio // mutex serializes sqlite connection access
 				return nil, fmt.Errorf("failed to insert copied tool call: %w", err)
 			}
 		}
@@ -2250,15 +2260,15 @@ func (s *SQLiteStore) SaveToolCalls(messageID int64, toolCalls []ToolCall) error
 	}()
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO session_tool_calls (message_id, tool_name, tool_call_id, arguments, result, seq)
-		VALUES (?, ?, ?, ?, ?, ?)`)
+		INSERT INTO session_tool_calls (message_id, tool_name, tool_call_id, arguments, result, seq, trace_id, span_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare tool call insert: %w", err)
 	}
 	defer stmt.Close()
 
 	for _, tc := range toolCalls {
-		_, err := stmt.Exec(messageID, tc.ToolName, tc.ToolCallID, tc.Arguments, tc.Result, tc.Seq) //nolint:mutexio // mutex serializes sqlite connection access
+		_, err := stmt.Exec(messageID, tc.ToolName, tc.ToolCallID, tc.Arguments, tc.Result, tc.Seq, tc.TraceID, tc.SpanID) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
 			return fmt.Errorf("failed to insert tool call: %w", err)
 		}
@@ -2273,7 +2283,7 @@ func (s *SQLiteStore) GetToolCalls(messageID int64) ([]ToolCall, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT id, message_id, tool_name, tool_call_id, arguments, result, seq
+		SELECT id, message_id, tool_name, tool_call_id, arguments, result, seq, trace_id, span_id
 		FROM session_tool_calls
 		WHERE message_id = ?
 		ORDER BY seq`, messageID) //nolint:mutexio // mutex serializes sqlite connection access
@@ -2286,7 +2296,7 @@ func (s *SQLiteStore) GetToolCalls(messageID int64) ([]ToolCall, error) {
 	for rows.Next() {
 		var tc ToolCall
 		var result sql.NullString
-		if err := rows.Scan(&tc.ID, &tc.MessageID, &tc.ToolName, &tc.ToolCallID, &tc.Arguments, &result, &tc.Seq); err != nil {
+		if err := rows.Scan(&tc.ID, &tc.MessageID, &tc.ToolName, &tc.ToolCallID, &tc.Arguments, &result, &tc.Seq, &tc.TraceID, &tc.SpanID); err != nil {
 			return nil, fmt.Errorf("failed to scan tool call: %w", err)
 		}
 		if result.Valid {
@@ -2322,7 +2332,7 @@ func (s *SQLiteStore) GetToolCallsForMessages(messageIDs []int64) (map[int64][]T
 	// #nosec G201 -- placeholders are all "?"; IN clause args are parameterized
 	//nolint:gosec // placeholders are all "?"; IN clause args are parameterized
 	query := fmt.Sprintf(`
-		SELECT id, message_id, tool_name, tool_call_id, arguments, result, seq
+		SELECT id, message_id, tool_name, tool_call_id, arguments, result, seq, trace_id, span_id
 		FROM session_tool_calls
 		WHERE message_id IN (%s)
 		ORDER BY seq`, strings.Join(placeholders, ","))
@@ -2337,7 +2347,7 @@ func (s *SQLiteStore) GetToolCallsForMessages(messageIDs []int64) (map[int64][]T
 	for rows.Next() {
 		var tc ToolCall
 		var tcResult sql.NullString
-		if err := rows.Scan(&tc.ID, &tc.MessageID, &tc.ToolName, &tc.ToolCallID, &tc.Arguments, &tcResult, &tc.Seq); err != nil {
+		if err := rows.Scan(&tc.ID, &tc.MessageID, &tc.ToolName, &tc.ToolCallID, &tc.Arguments, &tcResult, &tc.Seq, &tc.TraceID, &tc.SpanID); err != nil {
 			return nil, fmt.Errorf("failed to scan tool call: %w", err)
 		}
 		if tcResult.Valid {

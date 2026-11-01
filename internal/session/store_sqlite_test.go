@@ -1656,3 +1656,200 @@ func (s *SQLiteStore) setLastActivityForTest(sessionID string, ts time.Time) err
 	_, err := s.db.Exec("UPDATE sessions SET last_activity = ? WHERE id = ?", ts.Format(time.RFC3339), sessionID) //nolint:mutexio,gosec // test-only
 	return err
 }
+
+// newTracedToolCallSession is the shared setup for the trace-roundtrip
+// pins (llm-hop-tracing leaf 02): a session with one assistant message.
+func newTracedToolCallSession(t *testing.T, store *SQLiteStore, name string) (sessionID string, msgID int64) {
+	t.Helper()
+	sess, err := store.Create(name)
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	if err := store.SaveMessages(sess.ID, []Message{{
+		SessionID: sess.ID, Role: "assistant", Content: "traced",
+		Timestamp: time.Now().UTC(), EntryType: "message", BranchID: "main",
+	}}); err != nil {
+		t.Fatalf("failed to save message: %v", err)
+	}
+	msgs, err := store.GetMessages(sess.ID, 0, 1)
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("failed to fetch seeded message: %v (n=%d)", err, len(msgs))
+	}
+	return sess.ID, msgs[0].ID
+}
+
+// TestSQLiteStore_ToolCallTraceRoundtrip pins the session_tool_calls trace
+// roundtrip (llm-hop-tracing leaf 02): SaveToolCalls persists TraceID/SpanID
+// byte-exact; GetToolCalls AND GetToolCallsForMessages both read them back;
+// a legacy row ("" defaults) reads "" everywhere.
+func TestSQLiteStore_ToolCallTraceRoundtrip(t *testing.T) {
+	store, _ := testHelper(t)
+	defer store.Close()
+
+	_, msgID := newTracedToolCallSession(t, store, "trace-roundtrip")
+
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736" // 32-char lowercase hex
+	const spanID = "00f067aa0ba902b7"                  // 16-char lowercase hex
+
+	if err := store.SaveToolCalls(msgID, []ToolCall{
+		{MessageID: msgID, ToolName: "file_read", ToolCallID: "call_t1",
+			Arguments: "{}", Result: "ok", Seq: 0, TraceID: traceID, SpanID: spanID},
+		{MessageID: msgID, ToolName: "shell_exec", ToolCallID: "call_t2",
+			Arguments: "{}", Result: "ok", Seq: 1, TraceID: "", SpanID: ""},
+	}); err != nil {
+		t.Fatalf("failed to save tool calls: %v", err)
+	}
+
+	// (a) GetToolCalls roundtrip, byte-exact on the traced call and ""
+	// on the untraced one.
+	got, err := store.GetToolCalls(msgID)
+	if err != nil {
+		t.Fatalf("GetToolCalls: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("GetToolCalls rows = %d, want 2", len(got))
+	}
+	if got[0].TraceID != traceID || got[0].SpanID != spanID {
+		t.Errorf("GetToolCalls traced call: trace_id = %q (want %q), span_id = %q (want %q)",
+			got[0].TraceID, traceID, got[0].SpanID, spanID)
+	}
+	if got[1].TraceID != "" || got[1].SpanID != "" {
+		t.Errorf("GetToolCalls untraced call: trace_id = %q, span_id = %q, want \"\" \"\"",
+			got[1].TraceID, got[1].SpanID)
+	}
+
+	// (b) GetToolCallsForMessages reads them back too.
+	batch, err := store.GetToolCallsForMessages([]int64{msgID})
+	if err != nil {
+		t.Fatalf("GetToolCallsForMessages: %v", err)
+	}
+	if len(batch[msgID]) != 2 {
+		t.Fatalf("GetToolCallsForMessages rows = %d, want 2", len(batch[msgID]))
+	}
+	if batch[msgID][0].TraceID != traceID || batch[msgID][0].SpanID != spanID {
+		t.Errorf("GetToolCallsForMessages traced call: trace_id = %q, span_id = %q",
+			batch[msgID][0].TraceID, batch[msgID][0].SpanID)
+	}
+
+	// (d) Legacy row: raw SQL insert without trace columns, then read
+	// through GetToolCalls — DEFAULT '' must surface as "".
+	var legacyMsgID int64
+	if err := store.db.QueryRow(
+		`INSERT INTO session_messages (session_id, role, content, timestamp, entry_type, branch_id)
+		 VALUES ('trace-roundtrip-legacy', 'assistant', 'legacy', ?, 'message', 'main')
+		 RETURNING id`, time.Now().UTC().Format(time.RFC3339)).Scan(&legacyMsgID); err != nil {
+		t.Fatalf("legacy message insert: %v", err)
+	}
+	if _, err := store.db.Exec(
+		`INSERT INTO session_tool_calls (message_id, tool_name, tool_call_id, arguments, result, seq)
+		 VALUES (?, 'legacy_tool', 'call_legacy', '{}', 'ok', 0)`, legacyMsgID); err != nil {
+		t.Fatalf("legacy tool call insert: %v", err)
+	}
+	legacy, err := store.GetToolCalls(legacyMsgID)
+	if err != nil {
+		t.Fatalf("GetToolCalls(legacy): %v", err)
+	}
+	if len(legacy) != 1 {
+		t.Fatalf("legacy rows = %d, want 1", len(legacy))
+	}
+	if legacy[0].TraceID != "" || legacy[0].SpanID != "" {
+		t.Errorf("legacy row reads trace_id = %q, span_id = %q, want \"\" \"\"",
+			legacy[0].TraceID, legacy[0].SpanID)
+	}
+}
+
+// TestSQLiteStore_ToolCallTraceColumnsAndReopen pins the schema delta on
+// session_tool_calls: the trace_id/span_id columns exist on a fresh
+// database (inline CREATE + ALTERs), and reopening the SAME file applies
+// them idempotently (duplicate-column-tolerant no-ops, no error).
+func TestSQLiteStore_ToolCallTraceColumnsAndReopen(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "trace_reopen.db")
+
+	open := func() *SQLiteStore {
+		t.Helper()
+		s, err := NewSQLiteStore(dbPath, slog.Default())
+		if err != nil {
+			t.Fatalf("NewSQLiteStore: %v", err)
+		}
+		return s
+	}
+	check := func(s *SQLiteStore, phase string) {
+		t.Helper()
+		rows, err := s.db.Query(`SELECT name FROM pragma_table_info('session_tool_calls')`)
+		if err != nil {
+			t.Fatalf("[%s] pragma_table_info: %v", phase, err)
+		}
+		defer rows.Close()
+		found := map[string]bool{"trace_id": false, "span_id": false}
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatalf("[%s] scan: %v", phase, err)
+			}
+			if _, ok := found[name]; ok {
+				found[name] = true
+			}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("[%s] rows: %v", phase, err)
+		}
+		for col, ok := range found {
+			if !ok {
+				t.Errorf("[%s] session_tool_calls missing column %q", phase, col)
+			}
+		}
+	}
+
+	s1 := open()
+	check(s1, "fresh")
+	if err := s1.Close(); err != nil {
+		t.Fatalf("close fresh: %v", err)
+	}
+
+	s2 := open()
+	defer func() { _ = s2.Close() }()
+	check(s2, "reopen")
+}
+
+// TestSQLiteStore_ForkSession_PreservesTraceIDs pins the ForkSession copy
+// path (llm-hop-tracing leaf 02): forked tool-call rows carry byte-identical
+// trace_id/span_id.
+func TestSQLiteStore_ForkSession_PreservesTraceIDs(t *testing.T) {
+	store, _ := testHelper(t)
+	defer store.Close()
+
+	sessionID, msgID := newTracedToolCallSession(t, store, "trace-fork")
+
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736" // 32-char lowercase hex
+	const spanID = "00f067aa0ba902b7"                  // 16-char lowercase hex
+
+	if err := store.SaveToolCalls(msgID, []ToolCall{
+		{MessageID: msgID, ToolName: "file_read", ToolCallID: "call_f1",
+			Arguments: "{}", Result: "ok", Seq: 0, TraceID: traceID, SpanID: spanID},
+	}); err != nil {
+		t.Fatalf("failed to save tool calls: %v", err)
+	}
+
+	forked, err := store.ForkSession(sessionID, msgID, "trace-fork-copy")
+	if err != nil {
+		t.Fatalf("ForkSession: %v", err)
+	}
+	forkedMsgs, err := store.GetMessages(forked.ID, 0, 100)
+	if err != nil {
+		t.Fatalf("GetMessages(forked): %v", err)
+	}
+	if len(forkedMsgs) != 1 {
+		t.Fatalf("forked messages = %d, want 1", len(forkedMsgs))
+	}
+	copied, err := store.GetToolCalls(forkedMsgs[0].ID)
+	if err != nil {
+		t.Fatalf("GetToolCalls(forked): %v", err)
+	}
+	if len(copied) != 1 {
+		t.Fatalf("forked tool calls = %d, want 1", len(copied))
+	}
+	if copied[0].TraceID != traceID || copied[0].SpanID != spanID {
+		t.Errorf("forked call: trace_id = %q (want %q), span_id = %q (want %q)",
+			copied[0].TraceID, traceID, copied[0].SpanID, spanID)
+	}
+}

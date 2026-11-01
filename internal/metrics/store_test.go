@@ -349,3 +349,176 @@ func TestStore_RetentionPreservesLLMCalls(t *testing.T) {
 		t.Fatalf("dispatch_log rows after purge = %d, want 0 (still purged)", disp)
 	}
 }
+
+// TestStore_LLMCallsSchemaHasTraceColumns pins llm-hop-tracing leaf 02's
+// schema delta: the llm_calls trace_id/span_id columns exist on a fresh
+// database (inline CREATE), the idx_llm_calls_trace index exists after
+// initSchema, the migration registry applied versions 7 and 8, and a
+// close/reopen of the SAME file is a no-op (idempotent guards).
+func TestStore_LLMCallsSchemaHasTraceColumns(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "metrics.db")
+
+	newStore := func() *Store {
+		t.Helper()
+		s, err := NewStore(&StoreConfig{
+			DatabasePath:  dbPath,
+			BatchSize:     1,
+			FlushInterval: time.Hour,
+		})
+		if err != nil {
+			t.Fatalf("NewStore: %v", err)
+		}
+		return s
+	}
+
+	check := func(s *Store, phase string) {
+		t.Helper()
+		wantCols := map[string]bool{"trace_id": false, "span_id": false}
+		var cols []string
+		if err := s.db.Select(&cols,
+			`SELECT name FROM pragma_table_info('llm_calls') ORDER BY cid`); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range cols {
+			if _, ok := wantCols[c]; ok {
+				wantCols[c] = true
+			}
+		}
+		for c, found := range wantCols {
+			if !found {
+				t.Errorf("[%s] llm_calls missing column %q; have %v", phase, c, cols)
+			}
+		}
+
+		var idx []string
+		if err := s.db.Select(&idx,
+			`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='llm_calls'`); err != nil {
+			t.Fatal(err)
+		}
+		foundIdx := false
+		for _, n := range idx {
+			if n == "idx_llm_calls_trace" {
+				foundIdx = true
+			}
+		}
+		if !foundIdx {
+			t.Errorf("[%s] missing index idx_llm_calls_trace; have %v", phase, idx)
+		}
+
+		// Defaults are NOT NULL DEFAULT '' on both columns (legacy rows
+		// read "" = "no trace").
+		var notNull int
+		if err := s.db.Get(&notNull,
+			`SELECT "notnull" FROM pragma_table_info('llm_calls') WHERE name = 'trace_id'`); err != nil {
+			t.Fatal(err)
+		}
+		var dfltValues []string
+		if err := s.db.Select(&dfltValues,
+			`SELECT COALESCE(dflt_value, '<null>') FROM pragma_table_info('llm_calls') WHERE name IN ('trace_id','span_id')`); err != nil {
+			t.Fatal(err)
+		}
+		hasDefault := 0
+		for _, d := range dfltValues {
+			if d == "''" { // sqlite reports the DEFAULT '' literal verbatim
+				hasDefault++
+			}
+		}
+		if notNull != 1 || hasDefault != 2 {
+			t.Errorf("[%s] trace_id/span_id column shape wrong: notnull=%d, cols-with-''-default=%d (want 1/2)", phase, notNull, hasDefault)
+		}
+
+		// Migration registry: versions 7 and 8 recorded as applied.
+		var v int
+		if err := s.db.Get(&v, `PRAGMA user_version`); err != nil {
+			t.Fatal(err)
+		}
+		if v < 8 {
+			t.Errorf("[%s] PRAGMA user_version = %d, want >= 8 (versions 7+8 applied)", phase, v)
+		}
+	}
+
+	s1 := newStore()
+	check(s1, "fresh")
+
+	// Pre-existing row (inserted before any trace-aware write) must read
+	// "" on both columns.
+	s1.RecordLLMCall(LLMCallRecord{
+		Timestamp:  time.Now().UTC(),
+		Provider:   "anthropic",
+		ModelID:    "claude-legacy",
+		TokensSent: 1,
+		TokensRecv: 2,
+	})
+	var legacyTrace, legacySpan string
+	if err := s1.db.Get(&legacyTrace,
+		`SELECT trace_id FROM llm_calls WHERE model_id = 'claude-legacy'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s1.db.Get(&legacySpan,
+		`SELECT span_id FROM llm_calls WHERE model_id = 'claude-legacy'`); err != nil {
+		t.Fatal(err)
+	}
+	if legacyTrace != "" || legacySpan != "" {
+		t.Errorf("zero-value record persisted trace_id=%q span_id=%q, want \"\" \"\"", legacyTrace, legacySpan)
+	}
+	if err := s1.Close(); err != nil {
+		t.Fatalf("close fresh: %v", err)
+	}
+
+	// Reopen the SAME file: guards must be no-ops (no error, everything
+	// still present).
+	s2 := newStore()
+	defer func() { _ = s2.Close() }()
+	check(s2, "reopen")
+}
+
+// TestStore_RecordLLMCallPersistsTraceIDs pins the llm_calls trace
+// roundtrip (llm-hop-tracing leaf 02): RecordLLMCall writes TraceID/SpanID
+// (byte-exact lowercase hex), and a zero-value record lands as "".
+func TestStore_RecordLLMCallPersistsTraceIDs(t *testing.T) {
+	store := newLLMSchemaTestStore(t)
+
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736" // 32-char lowercase hex
+	const spanID = "00f067aa0ba902b7"                  // 16-char lowercase hex
+
+	store.RecordLLMCall(LLMCallRecord{
+		Timestamp:  time.Now().UTC(),
+		Provider:   "anthropic",
+		ModelID:    "claude-traced",
+		SessionID:  "conv-trace",
+		TokensSent: 10,
+		TokensRecv: 5,
+		TraceID:    traceID,
+		SpanID:     spanID,
+	})
+	store.RecordLLMCall(LLMCallRecord{
+		Timestamp:  time.Now().UTC(),
+		Provider:   "anthropic",
+		ModelID:    "claude-untraced",
+		TokensSent: 1,
+		TokensRecv: 1,
+		// TraceID/SpanID zero values -> "" (no trace scope)
+	})
+
+	var got []struct {
+		ModelID string `db:"model_id"`
+		TraceID string `db:"trace_id"`
+		SpanID  string `db:"span_id"`
+	}
+	if err := store.db.Select(&got,
+		`SELECT model_id, trace_id, span_id FROM llm_calls ORDER BY id`); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("rows = %d, want 2", len(got))
+	}
+	if got[0].TraceID != traceID || got[0].SpanID != spanID {
+		t.Errorf("traced row: trace_id = %q (want %q), span_id = %q (want %q)",
+			got[0].TraceID, traceID, got[0].SpanID, spanID)
+	}
+	if got[1].TraceID != "" || got[1].SpanID != "" {
+		t.Errorf("untraced row: trace_id = %q, span_id = %q, want \"\" \"\"",
+			got[1].TraceID, got[1].SpanID)
+	}
+}
