@@ -355,6 +355,9 @@
     ],
     "internal/toolprov/": [
       "tool-provider-seam"
+    ],
+    "internal/jevgate/": [
+      "jev-command-gate"
     ]
   },
   "suites": [
@@ -362,6 +365,16 @@
       "name": "smoke",
       "dir": "e2e/suites/smoke",
       "status": "implemented"
+    },
+    {
+      "name": "jev-command-gate",
+      "dir": "e2e/suites/jev-command-gate",
+      "status": "todo",
+      "diff": "M",
+      "scenarios": [
+        "jev-gate-01 fail-closed matrix",
+        "jev-gate-02 capture chokepoints"
+      ]
     },
     {
       "name": "rpc-ping",
