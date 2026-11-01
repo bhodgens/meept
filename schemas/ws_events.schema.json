@@ -48,7 +48,8 @@
         "conversation_id": { "type": "string", "minLength": 1 },
         "session_id": { "type": "string" },
         "task_id": { "type": "string" },
-        "intent_type": { "type": "string" },
+
+        "trace_id": { "type": "string", "description": "Turn trace correlation (llm-hop-tracing leaf 01); empty when tracing is disabled" },        "intent_type": { "type": "string" },
         "agent_id": { "type": "string" },
         "handler_case": { "type": "string", "minLength": 1 },
         "status": {
