@@ -60,11 +60,54 @@ type Provider interface {
 
 // factories is the package-level provider factory map. It is populated
 // exclusively through Register (provider packages' init()); the mutex
-// guards the map and the seed state below.
+// guards the map, the seed state below, and the tool-posture reverse
+// index ProviderForTool serves.
 var (
 	factoriesMu sync.Mutex
 	factories   = make(map[string]func() Provider)
+
+	// toolPostures is the reverse index canonical tool name -> the
+	// provider that contributed it and that provider's declared risk
+	// ceiling. It is written ONLY by RegisterAll (the sole path provider
+	// tools take into a registry), never pruned - factory registration
+	// is init-only and immutable in a running binary.
+	toolPostures = make(map[string]toolPosture)
 )
+
+// normalizeToolName lowercases and trims a tool name so ProviderForTool
+// accepts the same name shapes the registry's canonical key comparison
+// does (internal/tools keeps the equivalent helper private, and toolprov
+// cannot reach into the registry's map).
+func normalizeToolName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+// toolPosture is one entry of the reverse index.
+type toolPosture struct {
+	provider string
+	class    RiskClass
+}
+
+// recordToolPostures inserts every tool the provider contributes into
+// the reverse index under the provider's declared class. Duplicate
+// canonical names across providers are a registration-order conflict:
+// the first seam walk wins and later overwrites are refused by the
+// caller's registry duplicate detection before this map can disagree.
+func recordToolPostures(provider Provider, discovered []tools.Tool) {
+	factoriesMu.Lock()
+	defer factoriesMu.Unlock()
+	class := provider.PermissionClass()
+	for _, tool := range discovered {
+		if tool == nil {
+			continue
+		}
+		cn := tools.CanonicalName(tool)
+		if cn == "" {
+			continue
+		}
+		toolPostures[cn] = toolPosture{provider: provider.Name(), class: class}
+	}
+}
 
 // Register stores the construction factory for the named provider. The
 // factory is NOT invoked here (construction is lazy); a duplicate name
@@ -110,6 +153,25 @@ func Names() []string {
 	return names
 }
 
+// ProviderForTool reports which registered provider contributed the
+// named tool, and the risk ceiling that provider declared. The reverse
+// index is maintained at RegisterAll time (the only path provider tools
+// take into a registry), so a tool that never went through the seam has
+// no entry and ok is false - callers then fall back to the fail-closed
+// default (mutating) posture.
+//
+// Concurrency: the same mutex as the factory map guards the index;
+// lookups are map reads only and stay cheap.
+func ProviderForTool(toolName string) (providerName string, riskClass RiskClass, ok bool) {
+	factoriesMu.Lock()
+	defer factoriesMu.Unlock()
+	p, found := toolPostures[normalizeToolName(toolName)]
+	if !found {
+		return "", "", false
+	}
+	return p.provider, p.class, true
+}
+
 // RegisterAll constructs each named provider and registers every tool
 // its Discover() returns into r, returning the number of tools
 // registered. Behavior:
@@ -141,9 +203,11 @@ func RegisterAll(r *tools.Registry, names []string) (int, error) {
 		if p == nil {
 			return registered, fmt.Errorf("toolprov: provider factory %q returned a nil Provider", name)
 		}
+		discovered := p.Discover()
+		recordToolPostures(p, discovered)
 		existing := r.CanonicalNames()
 		seen := make(map[string]struct{})
-		for _, tool := range p.Discover() {
+		for _, tool := range discovered {
 			if tool == nil {
 				continue
 			}

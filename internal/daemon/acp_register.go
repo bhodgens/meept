@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"log/slog"
+
 	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
 )
@@ -59,9 +62,26 @@ func applyACPFromConfig(cfg config.ACPConfig, dec acp.Decisioner, msgBus ...*bus
 
 // RegisterACPTools registers the acp_agent builtin when the manager is live.
 // No-op for a nil registry, nil manager, or disabled manager.
+//
+// Since the tool-provider seam (docs/plans/20261031-tool-provider-seam/
+// 03-migrate.md T3) the tool arrives through the "acp" provider: this
+// guard IS the default-off contract - with [acp] enabled=false (the
+// default) the manager is nil/disabled, the provider factory stays
+// unbound, and toolprov.RegisterAll fails closed on the nil Provider
+// with zero tools registered. No subprocess path arms differently than
+// under the former direct Register call.
 func RegisterACPTools(reg *tools.Registry, mgr *acp.Manager) {
 	if mgr == nil || !mgr.Enabled() || reg == nil {
 		return
 	}
-	reg.Register(builtin.NewACPAgentTool(mgr))
+	// [tool_providers] config filter (04-config.md T2); nil hook = no
+	// filtering (tests, non-daemon binaries).
+	if providerConfigFilter != nil && !providerConfigFilter("acp") {
+		slog.Debug("acp provider disabled by [tool_providers]; skipping registration")
+		return
+	}
+	builtin.SetACPProvider(mgr, nil)
+	if _, err := toolprov.RegisterAll(reg, []string{"acp"}); err != nil {
+		slog.Error("acp tool registration failed", "error", err)
+	}
 }

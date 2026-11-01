@@ -2673,11 +2673,28 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			Audit:  gateAudit,
 			Ledger: c.EffectsLedger,
 			PostureLookup: func(name string) (toolprov.RiskClass, bool) {
-				return "", false // providers declare postures from leaf 03 onward
+				// Real posture source (03-migrate.md T4): provider
+				// factories record a reverse index at RegisterAll
+				// time, so every tool that arrived through the seam
+				// reports its provider's declared risk class here.
+				// A miss (native direct-registered tools) returns
+				// false and the gate keeps the fail-closed default.
+				if _, class, ok := toolprov.ProviderForTool(name); ok {
+					return class, true
+				}
+				return "", false
 			},
 		})
 		c.ToolGate.SetLogger(logger.With("component", "tool-gate"))
 		c.ToolRegistry.SetGate(c.ToolGate)
+		SetProviderConfigFilter(func(name string) bool {
+			for _, n := range cfg.ToolProviders.EnabledNames(toolprov.Names()) {
+				if n == name {
+					return true
+				}
+			}
+			return false
+		})
 		logger.Info("tool gate wired",
 			"audit_chain", gateAudit != nil,
 			"effects_ledger", c.EffectsLedger != nil,
@@ -4207,16 +4224,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Register scheduler tools now that scheduler exists (scheduler is nil at
 	// initial registerBuiltinTools call because it is created after tools).
+	// Tool-provider seam (03-migrate.md T1): the eight schedule_*/cron_create
+	// tools arrive through the "scheduler" provider - same constructors, same
+	// argument, same names; an unbound factory fails closed with zero tools.
+	// [tool_providers] config filters the group (04-config.md T2).
 	if c.Scheduler != nil && c.ToolRegistry != nil {
-		c.ToolRegistry.Register(builtin.NewScheduleCreateTool(c.Scheduler))
-		c.ToolRegistry.Register(builtin.NewScheduleListTool(c.Scheduler))
-		c.ToolRegistry.Register(builtin.NewScheduleGetTool(c.Scheduler))
-		c.ToolRegistry.Register(builtin.NewScheduleDeleteTool(c.Scheduler))
-		c.ToolRegistry.Register(builtin.NewSchedulePauseTool(c.Scheduler))
-		c.ToolRegistry.Register(builtin.NewScheduleResumeTool(c.Scheduler))
-		c.ToolRegistry.Register(builtin.NewScheduleRunNowTool(c.Scheduler))
-		c.ToolRegistry.Register(builtin.NewCronCreateTool(c.Scheduler))
-		logger.Debug("Registered scheduler tools (deferred)")
+		builtin.SetSchedulerProvider(c.Scheduler, c.SecretBroker)
+		names := enabledToolProviderNames(cfg, []string{"scheduler"}, logger)
+		if len(names) == 0 {
+			logger.Debug("scheduler provider disabled by [tool_providers]; skipping")
+		} else if _, err := toolprov.RegisterAll(c.ToolRegistry, names); err != nil {
+			logger.Error("scheduler tool registration failed", "error", err)
+		} else {
+			logger.Debug("Registered scheduler tools (deferred, via provider)")
+		}
 	}
 
 	// Create web server if enabled

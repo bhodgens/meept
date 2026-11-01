@@ -39,9 +39,33 @@ one central gate.
 
 ## Configuration
 
-`[tool_providers]` in meept.json5 (lands with leaf 04-config.md):
-per-provider `enabled` flag; absent = enabled. `meept doctor` lists each
-registered provider's state (report-only).
+`[tool_providers]` in meept.json5 configures the compiled-in providers:
+
+```json5
+{
+  "tool_providers": {
+    "providers": {
+      "github":    { "enabled": false },
+      "scheduler": { "enabled": false },
+    },
+  },
+}
+```
+
+Semantics (default-true):
+
+- Absent `tool_providers` block, absent provider entry, or an entry
+  without `enabled` = the provider is enabled. Existing installs keep
+  working with no config change.
+- Explicit `enabled: false` disables the provider: its tools never
+  register (the wiring site skips it and logs the skip at debug).
+- Unknown names are not config errors: they flow through to
+  `toolprov.RegisterAll`, which fails boot registration naming the
+  known names.
+- `meept doctor` lists every registered provider with its state
+  (`enabled`, `enabled (config)`, `disabled`) plus config names with no
+  registered factory as `unknown`. Report-only: it never installs,
+  prompts, or changes the exit status.
 
 ## Edge Cases
 

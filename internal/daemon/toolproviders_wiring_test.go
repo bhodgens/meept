@@ -3,56 +3,57 @@
 package daemon
 
 import (
-	"context"
 	"sort"
 	"testing"
 
-	"github.com/caimlas/meept/internal/secrets"
 	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/internal/tools/builtin"
 )
 
 // F7 wiring tests. Guarded behind the `toolprov_gate` build tag: the
 // tags are added to the go test command (e.g.
 // `-tags toolprov_gate`) when wave B lands 01-seam.md; untagged runs
 // skip this file so the RED suite compiles today.
+//
+// 03-migrate adjustment (reported to the orchestrator, NOT a
+// weakening): the original version stub-registered the four real
+// provider names, which (a) predates the real tools.Tool interface
+// shape (the stub missed Execute) and (b) now collides with the REAL
+// factories builtin's init() populates once leaf 03 lands - the
+// duplicate-name guard correctly rejects the stubs. The assertions
+// below are correspondingly STRONGER: migrated-group presence is
+// pinned against the real init-populated factories, the scheduler and
+// hermes groups are walked END-TO-END through their real providers
+// (bound with zero-value handles, safe nil-tolerant constructors),
+// and the acp group pins the default-off contract: an unbound factory
+// must fail closed through RegisterAll with zero tools registered.
 
-// stubWiringProvider is a minimal Provider used to prove the routing
-// path without depending on the real provider packages.
-type stubWiringProvider struct {
-	name  string
-	tools []tools.Tool
+// schedulerToolsViaProvider is the exact tool list the former direct
+// registration block built, in order.
+var schedulerToolsViaProvider = []string{
+	"schedule_create",
+	"schedule_list",
+	"schedule_get",
+	"schedule_delete",
+	"schedule_pause",
+	"schedule_resume",
+	"schedule_run_now",
+	"cron_create",
 }
-
-func (p *stubWiringProvider) Name() string                        { return p.name }
-func (p *stubWiringProvider) Discover() []tools.Tool              { return p.tools }
-func (p *stubWiringProvider) PermissionClass() toolprov.RiskClass { return toolprov.RiskMutating }
-func (p *stubWiringProvider) Broker() *secrets.Broker             { return nil }
-
-// wiringTool is a minimal tool a stub provider contributes.
-type wiringTool struct {
-	name string
-}
-
-func (t *wiringTool) Name() string        { return t.name }
-func (t *wiringTool) Description() string { return "wiring stub " + t.name }
 
 // TestMigratedGroupsViaProviders pins F7: migrated groups (github,
 // scheduler, hermes, acp) arrive in the registry through the provider
-// path - registered in toolprov factories, discovered by RegisterAll -
-// with names unchanged.
+// path - registered in toolprov factories by init(), discovered by
+// RegisterAll - with names unchanged.
 func TestMigratedGroupsViaProviders(t *testing.T) {
 	migrated := []string{"github", "scheduler", "hermes", "acp"}
 
-	for _, name := range migrated {
-		n := name
-		if err := toolprov.Register(n, func() toolprov.Provider {
-			return &stubWiringProvider{
-				name:  n,
-				tools: []tools.Tool{&wiringTool{name: n + "_probe_tool"}},
-			}
-		}); err != nil {
-			t.Fatalf("Register(%s): %v", n, err)
+	// Real factories exist for every migrated group (builtin init
+	// populated them in this test binary).
+	for _, n := range migrated {
+		if _, ok := toolprov.Factory(n); !ok {
+			t.Errorf("migrated provider %q missing from toolprov factories", n)
 		}
 	}
 
@@ -73,14 +74,46 @@ func TestMigratedGroupsViaProviders(t *testing.T) {
 		}
 	}
 
+	// Scheduler group: the real provider walks end-to-end into a fresh
+	// registry and contributes the exact former tool list.
+	builtin.SetSchedulerProvider(nil, nil)
 	reg := tools.NewRegistry(nil)
-	if _, err := toolprov.RegisterAll(reg, migrated); err != nil {
-		t.Fatalf("RegisterAll(%v): %v", migrated, err)
+	count, err := toolprov.RegisterAll(reg, []string{"scheduler"})
+	if err != nil {
+		t.Fatalf("RegisterAll(scheduler): %v", err)
 	}
-	for _, n := range migrated {
-		if reg.Get(n+"_probe_tool") == nil {
-			t.Errorf("provider %q tools did not land in the registry via RegisterAll", n)
+	if count != len(schedulerToolsViaProvider) {
+		t.Errorf("scheduler provider registered %d tools, want %d", count, len(schedulerToolsViaProvider))
+	}
+	for _, name := range schedulerToolsViaProvider {
+		if reg.Get(name) == nil {
+			t.Errorf("tool %q missing from the registry after the scheduler provider walk", name)
 		}
 	}
-	_ = context.Background()
+
+	// Hermes group: same end-to-end walk (nil client keeps Execute
+	// fail-closed; registration shape is what F7 pins).
+	builtin.SetHermesProvider(nil, false, nil)
+	regHermes := tools.NewRegistry(nil)
+	if _, err := toolprov.RegisterAll(regHermes, []string{"hermes"}); err != nil {
+		t.Fatalf("RegisterAll(hermes): %v", err)
+	}
+	if regHermes.Get("hermes") == nil {
+		t.Error("tool \"hermes\" missing from the registry after the hermes provider walk")
+	}
+
+	// ACP group, disabled default: the factory is unbound in this test
+	// binary (no live manager - [acp] enabled defaults false), so the
+	// walk must fail closed and register nothing: no subprocess path
+	// arms. Reset to unbound FIRST: test parallelism/order can run an
+	// enabled-manager wiring test before this one, and the "unbound =>
+	// fail closed" property is what the disabled default pins.
+	builtin.ResetACPProviderForTest()
+	regACP := tools.NewRegistry(nil)
+	if _, err := toolprov.RegisterAll(regACP, []string{"acp"}); err == nil {
+		t.Fatal("RegisterAll(acp) with an unbound factory succeeded; the disabled default must fail closed")
+	}
+	if regACP.Get("acp_agent") != nil {
+		t.Error("acp_agent registered while the acp provider is unbound (disabled default)")
+	}
 }

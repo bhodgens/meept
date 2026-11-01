@@ -7,6 +7,7 @@ import (
 	"net"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -67,6 +68,7 @@ type Config struct {
 	Agents              AgentsConfig              `json:"agents"             toml:"agents"`
 	Agent               AgentConfig               `json:"agent"              toml:"agent"`
 	Security            SecurityConfig            `json:"security"           toml:"security"`
+	ToolProviders       ToolProvidersConfig       `json:"tool_providers"     toml:"tool_providers"`
 	Scheduler           SchedulerConfig           `json:"scheduler"          toml:"scheduler"`
 	Queue               QueueConfig               `json:"queue"              toml:"queue"`
 	Workers             WorkersConfig             `json:"workers"            toml:"workers"`
@@ -2322,6 +2324,43 @@ type AgentsConfig struct {
 	// disabled the dispatcher skips keyword-based capability matching and
 	// relies on the LLM intent classifier (with keyword-table fallback).
 	CapabilityMatchEnabled bool `json:"capability_match_enabled" toml:"capability_match_enabled"`
+}
+
+// ToolProvidersConfig is the [tool_providers] block in meept.json5:
+// per-provider enable/disable for the compiled-in tool provider seam
+// (internal/toolprov). Absent map or absent entry = enabled
+// (default-true: migrated native groups keep working on existing
+// installs). Explicit enabled=false turns a provider off.
+//
+// Names not known to the daemon are NOT a config error: they pass
+// through EnabledNames and toolprov.RegisterAll rejects them with the
+// known-names list. internal/config never imports internal/toolprov -
+// the daemon joins the two by passing toolprov.Names() as `all`.
+type ToolProvidersConfig struct {
+	Providers map[string]ToolProviderEntry `json:"providers" toml:"providers"`
+}
+
+// ToolProviderEntry is one provider's configuration. Enabled is a
+// pointer so an absent key stays distinct from an explicit value; nil
+// (or a missing map entry) means enabled.
+type ToolProviderEntry struct {
+	Enabled *bool `json:"enabled,omitempty" toml:"enabled,omitempty"`
+}
+
+// EnabledNames maps the full provider universe `all` (typically
+// toolprov.Names()) to the enabled subset, sorted. A name is enabled
+// unless its config entry explicitly sets enabled=false. Unknown names
+// pass through; RegisterAll rejects them downstream.
+func (c ToolProvidersConfig) EnabledNames(all []string) []string {
+	out := make([]string, 0, len(all))
+	for _, name := range all {
+		if entry, ok := c.Providers[name]; ok && entry.Enabled != nil && !*entry.Enabled {
+			continue
+		}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // SecurityConfig holds security settings.

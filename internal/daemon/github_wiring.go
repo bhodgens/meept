@@ -9,8 +9,8 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/githubsvc"
 	"github.com/caimlas/meept/internal/secrets"
-	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/toolprov"
+	"github.com/caimlas/meept/internal/tools/builtin"
 )
 
 // wireGitHubTools registers the github_* tools when [github].enabled with
@@ -75,7 +75,15 @@ func (c *Components) wireGitHubTools() {
 		DefaultOwner: cfg.DefaultOwner,
 		DefaultRepo:  cfg.DefaultRepo,
 	}, c.EffectsLedger, sink, c.SecretBroker)
-	if n, err := toolprov.RegisterAll(c.ToolRegistry, []string{"github"}); err != nil {
+	// [tool_providers] filter: an explicit enabled=false skips github
+	// registration entirely (default-true when the block is absent).
+	names := enabledToolProviderNames(c.Config, []string{"github"}, logger)
+	if len(names) == 0 {
+		logger.Debug("github provider disabled by [tool_providers] config; no github tools registered")
+		c.GitHubPool = pool
+		return
+	}
+	if n, err := toolprov.RegisterAll(c.ToolRegistry, names); err != nil {
 		logger.Error("github tool registration failed", "error", err)
 		return
 	} else if n == 0 {

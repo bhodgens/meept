@@ -132,6 +132,9 @@ func runDoctor(fix, installMissing bool) error {
 	checks = append(checks, checkConfigReadable())
 	checks = append(checks, checkDiskFreeDoctor(stateDirPath))
 	checks = append(checks, checkModelsDoctor()...)
+	if providerCfg, providerErr := config.LoadDefault(); providerErr == nil {
+		checks = append(checks, providerChecksDoctor(providerCfg)...)
+	}
 	if reasoningCfg, cfgErr := llm.LoadProvidersConfigDefault(); cfgErr == nil {
 		checks = append(checks, checkReasoningDoctor(reasoningCfg)...)
 		checks = append(checks, checkAliasReachabilityDoctor(reasoningCfg)...)

@@ -1210,6 +1210,23 @@
   //   "base_url": "",
   // },
 
+  // Tool providers (tool provider seam): per-provider kill switch for the
+  // compiled-in tool groups. Absent block or absent entry = ENABLED
+  // (default-true, so existing installs keep working unchanged); an
+  // explicit false disables that provider and its tools never register.
+  // Names not compiled in are not config errors - the daemon's boot
+  // registration rejects them with the known-names list, and
+  // `meept doctor` marks them unknown. Known names today: "github" plus
+  // the natively migrated groups ("scheduler", "hermes", "acp").
+  // drift: commented template block; absent from installed homes by
+  // design (default-true keeps them identical to no-block).
+  // "tool_providers": {
+  //   "providers": {
+  //     // "github": { "enabled": false },
+  //     // "scheduler": { "enabled": false },
+  //   },
+  // },
+
   // GitHub ticket intake (opt-in, disabled by default). Polls watch_repo
   // for label-gated tickets and maps them to goals for default_employee.
   // poll_interval is a duration STRING ("5m"); required_labels defaults to

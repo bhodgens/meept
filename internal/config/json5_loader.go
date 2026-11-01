@@ -484,6 +484,114 @@ func extractTypeMismatch(errMsg string) string {
 	return fmt.Sprintf("found %s", foundType)
 }
 
+// LoadJSON5Bytes parses JSON5 config content (already env-expanded) into
+// v, applying the same duration preprocessing and JSON5 standardization
+// as LoadJSON5. It exists so Load can try the JSON5 grammar first (the
+// shipped template format) and fall back to legacy TOML without re-reading
+// the file.
+//
+// Unlike LoadJSON5, this path also quotes JSON5 bare (unquoted) object
+// keys before standardizing: JSON5 proper allows them, hujson does not.
+// Bare-key tolerance lives here and not in LoadJSON5 so existing callers
+// keep their exact strictness; meept.json5 itself quotes every key.
+func LoadJSON5Bytes(data []byte, v any) error {
+	content := preprocessDurations(string(data))
+	stdJSON, err := hujson.Standardize([]byte(quoteBareKeys(content)))
+	if err != nil {
+		return fmt.Errorf("failed to parse JSON5: %w", err)
+	}
+	if err := json.Unmarshal(stdJSON, v); err != nil {
+		return fmt.Errorf("failed to unmarshal JSON5: %w", err)
+	}
+	return nil
+}
+
+// quoteBareKeys walks JSON5 text and wraps unquoted identifier keys in
+// double quotes so hujson (comments + trailing commas only) accepts full
+// JSON5 input. String literals, comments, and non-key identifier
+// positions (values, true/false/null) pass through: a bare token is only
+// quoted when it is followed (after whitespace) by ':' AND the previous
+// non-space byte is '{' or ',' - i.e. a member-name position.
+func quoteBareKeys(content string) string {
+	var b strings.Builder
+	b.Grow(len(content))
+	i := 0
+	for i < len(content) {
+		c := content[i]
+		switch {
+		case c == '"':
+			// String literal: copy verbatim (handles escapes).
+			start := i
+			i++
+			for i < len(content) && content[i] != '"' {
+				if content[i] == '\\' {
+					i++
+				}
+				if i < len(content) {
+					i++
+				}
+			}
+			if i < len(content) {
+				i++ // closing quote
+			}
+			b.WriteString(content[start:i])
+		case c == '/' && i+1 < len(content) && content[i+1] == '/':
+			cstart := i
+			for i < len(content) && content[i] != '\n' {
+				i++
+			}
+			b.WriteString(content[cstart:i])
+		case c == '/' && i+1 < len(content) && content[i+1] == '*':
+			cstart := i
+			i += 2
+			for i+1 < len(content) && (content[i] != '*' || content[i+1] != '/') {
+				i++
+			}
+			if i+1 < len(content) {
+				i += 2
+			} else {
+				i = len(content)
+			}
+			b.WriteString(content[cstart:i])
+		case isIdentStart(c):
+			start := i
+			for i < len(content) && isIdentPart(content[i]) {
+				i++
+			}
+			word := content[start:i]
+			// Member-name position: prev non-space is '{' or ',' and the
+			// next non-space is ':'. Anything else (true/false/null and
+			// future reserved words in value position) passes through.
+			if nextNonSpace(content, i) == ':' {
+				switch prevNonSpace(content, start) {
+				case '{', ',':
+					b.WriteByte('"')
+					b.WriteString(word)
+					b.WriteByte('"')
+					continue
+				}
+			}
+			b.WriteString(word)
+		default:
+			b.WriteByte(c)
+			i++
+		}
+	}
+	return b.String()
+}
+
+// nextNonSpace returns the next non-whitespace byte at or after i, or 0.
+func nextNonSpace(data string, i int) byte {
+	for i < len(data) {
+		switch data[i] {
+		case ' ', '	', '\r', '\n':
+			i++
+		default:
+			return data[i]
+		}
+	}
+	return 0
+}
 
 // UnmarshalJSON5 parses JSON5-formatted bytes into a struct.
 // Unlike LoadJSON5, this does NOT expand environment variables.

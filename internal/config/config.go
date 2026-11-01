@@ -2,13 +2,14 @@ package config
 
 import (
 	"fmt"
-	"github.com/tailscale/hujson"
 	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/tailscale/hujson"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -40,17 +41,34 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file %s: %w", path, err)
 	}
 
-	// Expand environment variables in the raw TOML content
+	// Expand environment variables in the raw config content
 	content, err := ExpandEnvVars(string(data))
 	if err != nil {
 		return nil, err
 	}
 
 	cfg := DefaultConfig()
+
+	// JSON5-first load: the shipped templates and the meept.json5 home
+	// config are JSON5, and [tool_providers] providers maps only express
+	// themselves naturally in that format (nested braces with bare keys).
+	// A file that does not parse as JSON5 falls back to the legacy TOML
+	// path so pre-existing meept.toml installs keep loading unchanged.
+	if err := LoadJSON5Bytes([]byte(content), cfg); err == nil {
+		return finalizeLoadedConfig(cfg)
+	}
 	if err := toml.Unmarshal([]byte(content), cfg); err != nil {
 		return nil, wrapTOMLUnmarshalError(err, path)
 	}
 
+	return finalizeLoadedConfig(cfg)
+}
+
+// finalizeLoadedConfig applies the shared load-boundary normalizations
+// used by every Load path (TOML legacy and JSON5). Split out so Load's
+// JSON5-first branch and its TOML fallback stay byte-identical to the
+// pre-seam behavior for existing configs.
+func finalizeLoadedConfig(cfg *Config) (*Config, error) {
 	// Clamp invalid quota_retry values to defaults (leaf 02 contract:
 	// negatives clamp, zeros take defaults). Applied at the load boundary
 	// so every consumer sees normalized values.
