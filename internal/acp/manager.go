@@ -97,6 +97,71 @@ func (m *Manager) HasPermissionRelay() bool {
 	return m.relay != nil && m.notifier != nil
 }
 
+// AppendPermissionNotifier fans an additional PermissionNotifier into the
+// armed relay (hitl-notifications leaf 01: the Slack approval channel
+// receives every requested/resolved event beside the existing bus
+// notifier). No-op when the relay is not armed or n is nil. The added
+// notifier must honor the seam's non-blocking contract (relay.go:85-98).
+func (m *Manager) AppendPermissionNotifier(n PermissionNotifier) {
+	if m == nil || n == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.relay == nil || m.notifier == nil {
+		return
+	}
+	if fan, ok := m.notifier.(*fanoutNotifier); ok {
+		fan.add(n)
+		return
+	}
+	m.notifier = &fanoutNotifier{delegates: []PermissionNotifier{m.notifier, n}}
+}
+
+// fanoutNotifier composes several PermissionNotifiers behind the single
+// seam. Each delegate is itself required to be non-blocking (mutexio
+// rule); the fanout holds no lock across the delegate calls - it
+// snapshots the slice under m's guard discipline via its own mutex that
+// is never held across a call.
+type fanoutNotifier struct {
+	mu        sync.Mutex
+	delegates []PermissionNotifier
+}
+
+func (f *fanoutNotifier) add(n PermissionNotifier) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delegates = append(f.delegates, n)
+}
+
+// NotifyPermissionRequested fans out; true when ANY delegate reports a
+// live listener (the seam's "a missed frame does not cancel the wait"
+// semantics - a reconnecting surface can still answer).
+func (f *fanoutNotifier) NotifyPermissionRequested(p PendingPermission) bool {
+	f.mu.Lock()
+	delegates := append([]PermissionNotifier(nil), f.delegates...)
+	f.mu.Unlock()
+	any := false
+	for _, n := range delegates {
+		if n.NotifyPermissionRequested(p) {
+			any = true
+		}
+	}
+	return any
+}
+
+// NotifyPermissionResolved fans out (void on the seam).
+func (f *fanoutNotifier) NotifyPermissionResolved(p PendingPermission, decision, reason string, approver Approver) {
+	f.mu.Lock()
+	delegates := append([]PermissionNotifier(nil), f.delegates...)
+	f.mu.Unlock()
+	for _, n := range delegates {
+		n.NotifyPermissionResolved(p, decision, reason, approver)
+	}
+}
+
+var _ PermissionNotifier = (*fanoutNotifier)(nil)
+
 // PendingPermissions returns the still-answerable human relay requests
 // (leaf 03's RPC surface). Nil-safe: a manager without a relay reports
 // none.

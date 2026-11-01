@@ -1614,6 +1614,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				httpOpts = append(httpOpts, http.WithDispatchSubmitter(&httpDispatchSubmitter{rpc: ds}))
 				logger.Info("HTTP dispatch endpoints wired to cluster submitter")
 			}
+			// Slack interaction callback (hitl-notifications leaf 01):
+			// wired ONLY when the channel is enabled (Components carries
+			// the handler otherwise nil - default-off means no route).
+			if components.SlackInteractions != nil {
+				httpOpts = append(httpOpts, http.WithSlackInteractions(components.SlackInteractions))
+				logger.Info("slack interactions endpoint enabled", "path", "/api/v1/slack/interactions")
+			}
 			httpSrv = http.NewServer(httpCfg, configService, daemonControl, metricsService, svcRegistry, logger, httpOpts...)
 			// Wire firewall stats getter for HTTP endpoint
 			if components.AgentLoop != nil {

@@ -358,6 +358,9 @@
     ],
     "internal/jevgate/": [
       "jev-command-gate"
+    ],
+    "internal/comm/slack/": [
+      "hitl-notifications"
     ]
   },
   "suites": [
@@ -365,6 +368,17 @@
       "name": "smoke",
       "dir": "e2e/suites/smoke",
       "status": "implemented"
+    },
+    {
+      "name": "hitl-notifications",
+      "dir": "e2e/suites/hitl-notifications",
+      "status": "todo",
+      "diff": "L",
+      "scenarios": [
+        "hitl-slack-01 round trip incl. late-click fail-closed",
+        "hitl-gate-02 park-restart-resume",
+        "hitl-deep-03 web fallback"
+      ]
     },
     {
       "name": "jev-command-gate",

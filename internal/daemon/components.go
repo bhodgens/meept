@@ -36,6 +36,7 @@ import (
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/code/lsp"
 	codetools "github.com/caimlas/meept/internal/code/tools"
+	"github.com/caimlas/meept/internal/comm/slack"
 	"github.com/caimlas/meept/internal/comm/telegram"
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
@@ -197,6 +198,11 @@ type Components struct {
 	// ticker exits (daemon Stop). Nil unless a ticker was started
 	// (github enabled + live instruction scheduler).
 	GitHubReArmTickerDone chan struct{}
+
+	// ToolSpillTickerDone closes when the tools-spill sweep ticker exits
+	// (daemon Stop). Nil unless startToolSpillSweep ran. Same lifecycle
+	// shape as GitHubReArmTickerDone (never nil'd after close).
+	ToolSpillTickerDone chan struct{}
 
 	// Multi-agent orchestration components
 	Queue         queue.Queue
@@ -445,6 +451,13 @@ type Components struct {
 	// Telegram bot
 	TelegramBot     *telegram.Bot
 	TelegramHandler *telegram.AgentHandler
+
+	// Slack approval channel (hitl-notifications leaf 01). Both nil unless
+	// [comm.slack] enabled=true validated clean at wiring time. The
+	// interactions handler is handed to the unified HTTP server via
+	// http.WithSlackInteractions in daemon.go.
+	SlackChannel      *slack.SlackChannel
+	SlackInteractions *slack.InteractionsHandler
 
 	// Code intelligence
 	ASTParser  *ast.ParserManager
@@ -2134,6 +2147,21 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	c.PushService = services.NewPushServiceWithChannels(msgBus, pushRegistry,
 		logger.With("component", "push-service"))
 
+	// Slack approval channel (hitl-notifications leaf 01): registers on the
+	// push registry ONLY when [comm.slack] enabled=true (default-off
+	// invariant, pinned by slack_wiring_test.go). The interactions handler
+	// rides on Components so the HTTP server build site (daemon.go) can
+	// wire it via http.WithSlackInteractions; the notifier fan-in and the
+	// resolver connection happen after the ACP manager exists below.
+	if slackCh, slackHandler := wireSlackChannel(cfg, logger); slackCh != nil {
+		pushRegistry.Register(slackCh)
+		c.SlackChannel = slackCh
+		c.SlackInteractions = slackHandler
+		logger.Info("slack approval channel enabled",
+			"channel", "push-channel-slack",
+			"allowed_users", len(c.SlackInteractions.Config().AllowedUserIDs),
+		)
+	}
 	// Effects ledger wiring (effects tree leaf 02): when the ledger opened
 	// successfully, push delivery claims its effect key first so duplicate
 	// pushes are idempotent no-ops. PushService's nil check keeps the
@@ -3148,6 +3176,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			"timeout_s", cfg.ACP.RelayTimeout,
 		)
 	}
+	// Slack approval channel <-> relay seams (hitl-notifications leaf 01):
+	// fan the channel's notifier into the armed relay and connect the
+	// interaction handler's resolve path to the manager. Both are no-ops
+	// when the channel is disabled (nil) or the relay is not armed - the
+	// relay's fail-closed [acp] relay_timeout stays the only timeout
+	// authority and the relay semantics are untouched.
+	fanSlackNotifierIntoRelay(acpMgr, c.SlackChannel)
+	wireSlackResolver(c.SlackInteractions, acpMgr)
 	RegisterACPTools(c.ToolRegistry, c.ACPManager)
 
 	// External acp turn producer (acp-employees dim 3A): when the [acp]
@@ -4849,6 +4885,12 @@ func (c *Components) Start(ctx context.Context) error {
 	// absent (github disabled, no scheduler).
 	c.startGitHubReArmTicker()
 
+	// Start the tools-spill sweep: one synchronous pass at startup, then
+	// a 6h ticker (internal/daemon/spill_wiring.go). Errors log, never
+	// fail startup; the ticker exits when the lifecycle ctx cancels and
+	// stopComponents waits on ToolSpillTickerDone.
+	c.startToolSpillSweep()
+
 	// Start result cache cleanup goroutine
 	if c.ResultCache != nil {
 		c.ResultCache.Start()
@@ -6075,6 +6117,11 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// tool shutdown). No-op when the github block was not enabled.
 	c.stopGitHubReArmTicker()
 
+	// Stop the tools-spill sweep ticker: the lifecycle ctx cancellation
+	// above unblocked it; wait briefly for the goroutine to exit so no
+	// sweep I/O races the process teardown. No-op when never started.
+	c.stopToolSpillSweep()
+
 	if c.StatusHandler != nil {
 		if err := c.StatusHandler.Stop(ctx); err != nil {
 			lastErr = err
@@ -6906,6 +6953,11 @@ func registerBuiltinTools(
 	if ptyMgr != nil {
 		logger.Info("Shell tool wired to PTY manager")
 	}
+	// Tool-layer spill: oversized shell output is tail-truncated and the full
+	// combined output is spilled to $MEEPT_HOME/spill/tools/<session>/<id>.txt
+	// via the shared SpillService (leaf 01; the sibling leaf 02 owns the TTL
+	// sweep of this tree). Best-effort — a spill failure never fails a command.
+	shellTool.SetSpillWriter(llm.NewSpillService(""))
 	registry.Register(shellTool)
 
 	// Git tools for commit workflow (workingDir set per-session)

@@ -198,6 +198,13 @@ type Server struct {
 	// When set, the POST /api/v1/bus/call route is registered and forwards
 	// {"method": "...", "params": {...}} requests through this callback.
 	rpcCall func(ctx context.Context, method string, params json.RawMessage) (any, error)
+
+	// slackInteractions serves POST /api/v1/slack/interactions (hitl
+	// notifications leaf 01). Registered only when the daemon wires it
+	// (slack channel enabled); exempt from bearer auth (Slack cannot send
+	// an API key - the v0 request signature is the credential, enforced
+	// inside the handler).
+	slackInteractions http.Handler
 	// Notification handler (optional)
 	notifHandler *NotificationHandler
 	// PTY session handler (optional, set via WithPTY)
@@ -1524,6 +1531,10 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 		mux.HandleFunc(fmt.Sprintf("POST %s", s.mcpPath), s.handleMCPPost)
 		mux.HandleFunc(fmt.Sprintf("GET %s/sse", s.mcpPath), s.handleMCPSSE)
 	}
+
+	// Slack interaction callback (hitl notifications leaf 01): registered
+	// only when the daemon wired the handler (channel enabled).
+	s.RegisterSlackInteractions(mux)
 }
 
 // setupRESTRoutes registers all /api/v1/* REST API endpoints.
@@ -1960,6 +1971,16 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			// limit (the one-time code + single-use consumption bound the
 			// risk; remote callers are rejected inside the handlers).
 			pairingHandler.ServeHTTPForPath(lrw, r)
+			return
+		}
+
+		if s.slackInteractions != nil && r.Method == http.MethodPost && r.URL.Path == "/api/v1/slack/interactions" {
+			// Slack interaction callback: Slack cannot present a bearer
+			// API key, so the credential is the verified v0 request
+			// signature + allowed_user_ids check enforced INSIDE the
+			// handler (research-notes.md A.1/A.2). Rate limiting still
+			// applies (the handler runs under the ordinary chain).
+			s.slackInteractions.ServeHTTP(lrw, r)
 			return
 		}
 
