@@ -897,18 +897,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Create security orchestrator for input sanitization, output monitoring, and shell scanning
 	c.SecurityOrchestrator = createSecurityOrchestrator(cfg, logger)
 
-	// Create fence checker for path-based sandboxing.
-	// RootPath is left empty at init; the per-session working directory
-	// is set when a session binds to a project. The daemon's own CWD is
-	// never the user's project.
-	if cfg.Security.FenceEnabled {
-		c.FenceChecker = intsecurity.NewFenceChecker(intsecurity.FenceConfig{
-			Enabled:   true,
-			RootPath:  "", // set per-session, not from daemon CWD
-			AllowRead: cfg.Security.FenceAllowRead,
-		}, logger)
-		logger.Info("Fence checker enabled (root set per-session)")
-	}
+	// Fence sandboxing (agent-groups leaf 01): there is NO shared mutable
+	// FenceChecker anymore. Every session-scoped loop gets a FRESH,
+	// session-owned fence instance (rooted at the session's working
+	// directory) injected at loop-creation time via the factory below;
+	// enforcement itself is the central FenceStage inside
+	// pkg/security.PermissionChecker.CheckPermissionForAgent.
+	// c.FenceChecker stays nil (kept for compile compatibility of
+	// out-of-tree embedders).
 
 	// Create LLM client with budget tracking
 	llmCfg := createLLMConfig(c.ModelsConfig, logger)
@@ -3026,7 +3022,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// dedicated directory under the daemon data dir, opened lazily inside
 	// registerBuiltinTools only when enabled.
 	knowledgeDataDir := filepath.Join(cfg.Daemon.DataDir, "knowledge")
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, c.FenceChecker, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions)
 
 	// GitHub PR/CI tools ([github] block, github-pr-ci tree): register
 	// next to the other builtin tools, gated on enabled + a resolvable
@@ -3987,12 +3983,26 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// binding, so the setter is not inert.
 		c.ChatHandler.SetDefaultWorkingDir(cfg.Daemon.DefaultWorkingDir)
 	}
-	// Wire the shared fence checker onto the ChatHandler so each session
-	// binds its working directory as the sandbox root and honors the
-	// per-session --nofence override. Without this, an enabled fence with
-	// no root blocks every file operation ("fence: misconfigured").
-	if c.ChatHandler != nil && c.FenceChecker != nil {
-		c.ChatHandler.SetFenceController(c.FenceChecker)
+	// Wire the per-session fence factory onto the ChatHandler so each
+	// session-scoped loop gets its OWN fence instance rooted at the
+	// session's working directory and honors the per-session --nofence
+	// override (agent-groups leaf 01: replaces the retired shared-
+	// checker SetFenceController wiring, whose per-session RootPath
+	// mutation raced concurrent sessions).
+	if c.ChatHandler != nil && cfg.Security.FenceEnabled {
+		fenceAllowRead := cfg.Security.FenceAllowRead
+		c.ChatHandler.SetSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
+			if noFence {
+				return nil
+			}
+			fc := intsecurity.NewFenceChecker(intsecurity.FenceConfig{
+				Enabled:   true,
+				RootPath:  rootPath,
+				AllowRead: fenceAllowRead,
+			}, logger)
+			return security.NewFenceStageAdapter(fc)
+		})
+		logger.Info("Per-session fence factory wired (root set per session loop)")
 	}
 
 	// Wire the same manager onto the Dispatcher so the multi-agent
@@ -4000,6 +4010,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// with the correct project working directory.
 	if c.Dispatcher != nil && c.AgentLoopManager != nil {
 		c.Dispatcher.SetAgentLoopManager(c.AgentLoopManager)
+	}
+
+	// Per-session fence factory on the Dispatcher too (agent-groups leaf
+	// 01 T2, three-site rule): dispatched sessions resolve session loops
+	// in resolveAgent, and BOTH loop-creation sites must bind the fence
+	// per session.
+	if c.Dispatcher != nil && cfg.Security.FenceEnabled {
+		fenceAllowRead := cfg.Security.FenceAllowRead
+		c.Dispatcher.SetSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
+			if noFence {
+				return nil
+			}
+			fc := intsecurity.NewFenceChecker(intsecurity.FenceConfig{
+				Enabled:   true,
+				RootPath:  rootPath,
+				AllowRead: fenceAllowRead,
+			}, logger)
+			return security.NewFenceStageAdapter(fc)
+		})
 	}
 
 	// Create job processor that uses the agent loop (with optional multi-agent registry)
@@ -6668,7 +6697,6 @@ func registerBuiltinTools(
 	ptyMgr *pty.Manager,
 	llmClient *llm.Client,
 	summarizerChatter llm.Chatter,
-	fenceChecker *intsecurity.FenceChecker,
 	logger *slog.Logger,
 	mediaCfg config.MediaConfig,
 	resolver *llm.Resolver,
@@ -6689,14 +6717,15 @@ func registerBuiltinTools(
 	readCache := builtin.NewReadCache(30)
 
 	// Filesystem tools
+	// NOTE (agent-groups leaf 01 T3): per-tool SetFenceChecker wiring is
+	// REMOVED — fence enforcement moved into the central FenceStage inside
+	// security.PermissionChecker.CheckPermissionForAgent (pkg/security).
+	// Every loop's executor consults the fence centrally, so tools no
+	// longer each need (or get) a fence checker instance.
 	secretScanner := intsecurity.NewSecretScanner()
 	readFileTool := builtin.NewReadFileTool(checker, readCache)
 	readFileTool.SetSecretScanner(secretScanner)
 	writeFileTool := builtin.NewWriteFileTool(checker)
-	if fenceChecker != nil {
-		readFileTool.SetFenceChecker(fenceChecker)
-		writeFileTool.SetFenceChecker(fenceChecker)
-	}
 	if secOrch != nil {
 		readFileTool.SetSecurityOrchestrator(secOrch)
 		writeFileTool.SetSecurityOrchestrator(secOrch)
@@ -6714,18 +6743,12 @@ func registerBuiltinTools(
 	if pendingChanges != nil {
 		fileEditTool.SetPendingChangesRegistry(pendingChanges)
 	}
-	if fenceChecker != nil {
-		fileEditTool.SetFenceChecker(fenceChecker)
-	}
 	if secOrch != nil {
 		fileEditTool.SetSecurityOrchestrator(secOrch)
 	}
 	registry.Register(fileEditTool)
 
 	deleteFileTool := builtin.NewDeleteFileTool(checker)
-	if fenceChecker != nil {
-		deleteFileTool.SetFenceChecker(fenceChecker)
-	}
 	if secOrch != nil {
 		deleteFileTool.SetSecurityOrchestrator(secOrch)
 	}
@@ -6750,11 +6773,6 @@ func registerBuiltinTools(
 	listDirTool := builtin.NewListDirectoryTool(checker)
 	fileFindTool := builtin.NewFileFindTool(checker)
 	fileGrepTool := builtin.NewFileGrepTool(checker)
-	if fenceChecker != nil {
-		listDirTool.SetFenceChecker(fenceChecker)
-		fileFindTool.SetFenceChecker(fenceChecker)
-		fileGrepTool.SetFenceChecker(fenceChecker)
-	}
 	if secOrch != nil {
 		listDirTool.SetSecurityOrchestrator(secOrch)
 	}
@@ -6781,10 +6799,6 @@ func registerBuiltinTools(
 		}
 	}
 	shellTool.SetSecretScanner(secretScanner)
-	if fenceChecker != nil {
-		shellTool.SetFenceChecker(fenceChecker)
-		logger.Debug("Shell tool configured with fence checker")
-	}
 	if runtimeWireSandboxLater != nil {
 		wire := runtimeWireSandboxLater
 		switch {
@@ -6820,11 +6834,6 @@ func registerBuiltinTools(
 	gitOverviewTool := builtin.NewGitOverviewTool("")
 	gitSplitTool := builtin.NewGitSplitTool("")
 	gitCommitTool := builtin.NewGitCommitTool("")
-	if fenceChecker != nil {
-		gitOverviewTool.SetFenceChecker(fenceChecker)
-		gitSplitTool.SetFenceChecker(fenceChecker)
-		gitCommitTool.SetFenceChecker(fenceChecker)
-	}
 	registry.Register(gitOverviewTool)
 	registry.Register(gitSplitTool)
 	registry.Register(gitCommitTool)
@@ -8041,17 +8050,11 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegis
 		if pendingChangesRegistry != nil {
 			tool.SetPendingChangesRegistry(pendingChangesRegistry)
 		}
-		if c.FenceChecker != nil {
-			tool.SetFenceChecker(c.FenceChecker)
-		}
 		c.ToolRegistry.Register(tool)
 	}
 	if tool, err := codetools.NewResolveASTEditTool(c.ASTParser); err != nil {
 		logger.Error("Failed to initialize resolve AST edit tool", "error", err)
 	} else {
-		if c.FenceChecker != nil {
-			tool.SetFenceChecker(c.FenceChecker)
-		}
 		c.ToolRegistry.Register(tool)
 	}
 	logger.Debug("Registered AST tools")
@@ -8105,9 +8108,6 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegis
 			if pendingChangesRegistry != nil {
 				tool.SetPendingChangesRegistry(pendingChangesRegistry)
 			}
-			if c.FenceChecker != nil {
-				tool.SetFenceChecker(c.FenceChecker)
-			}
 			c.ToolRegistry.Register(tool)
 		}
 		if tool, err := codetools.NewLSPRenameFilesTool(c.LSPManager); err != nil {
@@ -8145,13 +8145,6 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegis
 		// Wire LSP writethrough notifier into file tools
 		lspNotifier := builtin.NewLSPWriteNotifier(c.LSPManager, cfg.CodeIntel.LSP, logger.With("component", "lsp-writethrough"))
 		if lspNotifier != nil {
-			// Wire fence checker into the notifier so formatting edits are
-			// validated against the workspace boundary before being applied.
-			if c.FenceChecker != nil {
-				if fc, ok := lspNotifier.(interface{ SetFenceChecker(builtin.FenceChecker) }); ok {
-					fc.SetFenceChecker(c.FenceChecker)
-				}
-			}
 			if tool := c.ToolRegistry.Get("file_write"); tool != nil {
 				if wt, ok := tool.(interface {
 					SetLSPNotifier(builtin.LSPWriteNotifier)
@@ -8191,9 +8184,6 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegis
 func (c *Components) initializeDebugTools(registry *tools.Registry, checker *security.PermissionChecker, logger *slog.Logger) {
 	c.DebugManager = debug.NewManager()
 	debugTool := builtin.NewDebugTool(c.DebugManager, checker)
-	if c.FenceChecker != nil {
-		debugTool.SetFenceChecker(c.FenceChecker)
-	}
 	registry.Register(debugTool)
 	logger.Info("Debug tools registered")
 }

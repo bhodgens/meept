@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os/user"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -96,6 +97,13 @@ type PermissionChecker struct {
 	allowedGlobs []string
 	blockedGlobs []string
 	homeDir      string
+
+	// fenceMu guards fence. Separate from the main config fields (which
+	// are immutable after construction) so SetFence can happen concurrently
+	// with checks. The fence's own Check calls run outside the lock (the
+	// same collect-under-lock/release-then-operate pattern as preExecMu).
+	fenceMu sync.RWMutex
+	fence   FenceStage
 
 	// preExecMu guards preExecCheckers. Separate from the main config
 	// fields (which are immutable after construction) so registration
@@ -198,6 +206,47 @@ func (pc *PermissionChecker) snapshotPreExecCheckers() map[string]PreExecChecker
 	return maps.Clone(pc.preExecCheckers)
 }
 
+// ConfigSnapshot returns the checker's immutable path/risk configuration
+// (path allow/block globs, financial gate, confirmation requirements).
+// Read-only by convention: callers must not mutate the returned slices.
+// Used to derive per-session clones that carry their own fence stage.
+func (pc *PermissionChecker) ConfigSnapshot() Config {
+	return pc.config
+}
+
+// SetFence installs the project-boundary fence stage consulted by
+// CheckPermissionForAgent for file and shell actions. Typed-nil guarded:
+// a nil FenceStage (including a typed-nil pointer wrapped in the
+// interface) clears the fence instead of storing a non-nil interface
+// holding nil — fenced behavior stays exactly the legacy pipeline.
+//
+// Safe for concurrent use. The fence's Check calls happen outside the
+// fenceMu lock (same mutex-scope rule as SetPreExecChecker).
+func (pc *PermissionChecker) SetFence(fence FenceStage) {
+	pc.fenceMu.Lock()
+	defer pc.fenceMu.Unlock()
+	if fence == nil {
+		pc.fence = nil
+		return
+	}
+	if v := reflectValueOf(fence); v.Kind() == reflect.Ptr && v.IsNil() {
+		pc.fence = nil
+		return
+	}
+	pc.fence = fence
+}
+
+// snapshotFence returns the current fence stage (nil when none is set).
+func (pc *PermissionChecker) snapshotFence() FenceStage {
+	pc.fenceMu.RLock()
+	defer pc.fenceMu.RUnlock()
+	return pc.fence
+}
+
+// reflectValueOf reflects ValueOf(fence), localized so the reflect import
+// stays next to its only use.
+func reflectValueOf(v FenceStage) reflect.Value { return reflect.ValueOf(v) }
+
 // CheckPath returns true if the path is allowed.
 func (pc *PermissionChecker) CheckPath(path string) bool {
 	allowed, _ := pc.checkPathWithReason(path)
@@ -278,6 +327,14 @@ func (pc *PermissionChecker) matchGlobPattern(pattern, path string) bool {
 		return true
 	}
 
+	// A bare root pattern ("/" after cleaning) fences nothing by glob shape:
+	// the prefix rule above would need path == "/" + name, and filepath.Match
+	// never matches across the separator. Every path is under the root, so
+	// it always allows.
+	if pattern == "/" {
+		return true
+	}
+
 	return false
 }
 
@@ -296,8 +353,14 @@ func IsFinancial(text string) bool {
 
 // CheckResult is the result of a permission check.
 type CheckResult struct {
-	Allowed       bool
-	Reason        string
+	Allowed bool
+	Reason  string
+	// RuleSource stamps which pipeline stage produced this result (leaf 02
+	// of agent-groups branch-01, frozen vocabulary). Declared here in leaf
+	// 01 ONLY so the committed gate tests compile — the fence stage stamps
+	// "fence"; every other stage still returns the zero value and leaf 02
+	// owns the full stamping.
+	RuleSource    string
 	EffectiveRisk RiskLevel
 	NeedsConfirm  bool
 }
@@ -441,6 +504,49 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 					Allowed: false,
 					Reason:  reason,
 				}
+			}
+		}
+	}
+
+	// Fence stage (agent-groups leaf 01): the project-boundary check runs
+	// AFTER the path globs (a glob deny short-circuits above and the fence
+	// is never consulted) and BEFORE confirmation gating (a fence deny wins
+	// over the confirmation result). A nil fence skips this stage entirely
+	// — byte-identical legacy behavior.
+	if fence := pc.snapshotFence(); fence != nil {
+		var fenceErr error
+		switch action {
+		case "file_read", "file_write", "file_delete":
+			if path := details["path"]; path != "" {
+				op := "read"
+				switch action {
+				case "file_write":
+					op = "write"
+				case "file_delete":
+					op = "delete"
+				}
+				fenceErr = fence.CheckPath(path, op)
+			}
+		case "shell_execute":
+			workDir := details["workdir"]
+			if workDir == "" {
+				workDir = "."
+			}
+			// The workdir boundary is validated as a path ("exec" op,
+			// mirroring the real fence checker's own CheckCommand
+			// internals) alongside the command check: a FenceStage
+			// implementation may enforce either surface.
+			if err := fence.CheckPath(workDir, "exec"); err != nil {
+				fenceErr = err
+			} else {
+				fenceErr = fence.CheckCommand(details["command"], workDir)
+			}
+		}
+		if fenceErr != nil {
+			return CheckResult{
+				Allowed:    false,
+				Reason:     fenceErr.Error(),
+				RuleSource: "fence",
 			}
 		}
 	}

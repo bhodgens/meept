@@ -437,6 +437,14 @@ type Dispatcher struct {
 	// fenceController configures the shared fence sandbox per-session
 	// (root = project path, plus --nofence override). Optional; nil-safe.
 	fenceController FenceController
+
+	// fenceFactory mints a FRESH, session-owned fence stage per session
+	// loop (agent-groups leaf 01 T2/T4). It replaces the shared-
+	// FenceController RootPath mutation in resolveAgent: dispatched
+	// sessions each get a fence bound to THEIR root instead of racing over
+	// one shared mutable checker. Nil (fencing disabled) means dispatched
+	// session loops carry no fence stage.
+	fenceFactory sessionFenceFactory
 }
 
 // mediaURLPattern matches YouTube URL forms (hostnames + path shapes).
@@ -827,27 +835,39 @@ func (d *Dispatcher) SetDefaultWorkingDir(dir string) {
 
 // SetFenceController wires the shared fence checker so dispatched sessions
 // bind their project path as the sandbox root and honor --nofence.
+//
+// DEPRECATED (agent-groups leaf 01): retained only for compile
+// compatibility; the daemon no longer wires it. The replacement is
+// SetSessionFenceFactory.
 func (d *Dispatcher) SetFenceController(fc FenceController) {
 	if d != nil {
 		d.fenceController = fc
 	}
 }
 
+// SetSessionFenceFactory wires the factory that mints a FRESH,
+// session-owned fence stage per dispatched session loop (agent-groups
+// leaf 01 T2). Each session-scoped loop gets its own fence bound to the
+// session's working directory — no shared mutable checker, no
+// cross-session root race. Safe to call with nil (fencing disabled).
+func (d *Dispatcher) SetSessionFenceFactory(factory sessionFenceFactory) {
+	if d != nil {
+		d.fenceFactory = factory
+	}
+}
+
 // configureFence updates the shared fence sandbox for this session's
-// working directory and no-fence override. Nil-safe; failures are logged
-// and leave fencing blocked rather than silently widening it.
+// working directory and no-fence override.
+//
+// REMOVED WIRING (agent-groups leaf 01 T3/T4): the dispatcher no longer
+// calls this — mutating one shared FenceChecker's RootPath per session
+// raced concurrent sessions. resolveAgent now injects a per-session fence
+// stage into the session loop instead. The method remains for compile
+// compatibility but no longer influences dispatched fencing. Nil-safe.
 func (d *Dispatcher) configureFence(sessionID, workingPath string, noFence bool) {
-	if d.fenceController == nil || workingPath == "" {
-		return
-	}
-	if err := d.fenceController.SetRootPath(workingPath); err != nil {
-		d.logger.Warn("fence: failed to set session root; fencing stays blocked until a valid root is set",
-			"session", sessionID,
-			"root", workingPath,
-			"error", err,
-		)
-	}
-	d.fenceController.SetNoFence(noFence)
+	_ = sessionID
+	_ = workingPath
+	_ = noFence
 }
 
 // SetInstructionStore wires the instruction store for intent-based action attachment.
@@ -2930,7 +2950,6 @@ func splitReportReadbackClauses(input string) (action, report string, ok bool) {
 // counting. Mirrors DetectCompound's own strong-intent filter.
 const compoundIntentConfidenceFloor = 0.5
 
-
 // isInterrogative reports whether a message asks a question rather than
 // commanding work. Question-first messages ("did...", "what...", "where
 // is...", trailing "?") about prior work are answered from the stored
@@ -3457,10 +3476,7 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 				)
 			}
 			if workingDir != "" {
-				// Bind the shared fence sandbox to this turn's directory
-				// and apply the per-session --nofence override.
-				d.configureFence(conversationID, workingDir, sess.NoFence)
-				// Use the registry agent as the template so the session loop
+				// The registry agent is the template so the session loop
 				// inherits LLM client, tools, skills, and hooks.
 				template, templateErr := d.registry.Get(agentID)
 				if templateErr != nil {
@@ -3477,6 +3493,13 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 						// explicitly: executeToolCalls injects GetWorkingDir()
 						// into every tool context.
 						loop.SetWorkingDir(workingDir)
+						// Per-session fence (leaf 01 T2): this dispatched
+						// session loop gets its OWN fence stage rooted at the
+						// session's working directory — the shared-RootPath
+						// mutation (configureFence) is retired.
+						if fence := injectSessionFence(template.security, d.fenceFactory, workingDir, sess.NoFence); fence != nil {
+							loop.SetSecurityChecker(fence)
+						}
 						if sess.DetectionContext != nil {
 							loop.SetDetectionContext(&DetectionContext{
 								CWD:               sess.DetectionContext.CWD,
@@ -3523,6 +3546,12 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 					if templateErr == nil && template != nil {
 						if loop, err := d.loopManager.GetOrCreateWired(conversationID, projectPath, template); err == nil {
 							loop.SetProjectID(sess.ProjectID)
+							// Per-session fence (leaf 01 T2): same injection
+							// as the primary site above — BOTH loop-creation
+							// sites bind the fence per session.
+							if fence := injectSessionFence(template.security, d.fenceFactory, projectPath, sess.NoFence); fence != nil {
+								loop.SetSecurityChecker(fence)
+							}
 							return loop
 						}
 					}

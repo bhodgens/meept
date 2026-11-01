@@ -1,7 +1,6 @@
 package services
 
 import (
-
 	"context"
 	"log/slog"
 	"path/filepath"
@@ -17,7 +16,6 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
-
 
 // CommandHistory represents a shell command execution record.
 type CommandHistory struct {
@@ -300,4 +298,3 @@ func (svc *TerminalService) SetMaxHistory(max int) {
 		svc.history = svc.history[len(svc.history)-max:]
 	}
 }
-

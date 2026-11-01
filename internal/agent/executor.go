@@ -506,7 +506,6 @@ type ParallelExecutionError struct {
 	Severity      ErrorSeverity `json:"severity"`
 }
 
-
 // detectCascadingErrors marks downstream failures caused by an upstream failure.
 // When a tool call fails and other calls depended on it, those dependent calls
 // would have been skipped or received no data — their failures are cascading
@@ -546,7 +545,6 @@ func detectCascadingErrors(results []*ExecutionResult, graph *ToolDependencyGrap
 
 	return results
 }
-
 
 // ToJSON converts the result to a JSON string.
 func (r *ExecutionResult) ToJSON() string {
@@ -1023,6 +1021,19 @@ func (e *Executor) SetRetryMetrics(m *RetryMetrics) {
 	}
 	e.mu.Lock()
 	e.retryMetrics = m
+	e.mu.Unlock()
+}
+
+// SetSecurityChecker swaps the permission checker used by checkPermission
+// (agent-groups leaf 01 T2): session-loop creation injects a per-session
+// clone carrying the session's own fence stage. Nil-safe per setter
+// convention (nil is a no-op, keeping the current checker).
+func (e *Executor) SetSecurityChecker(checker *security.PermissionChecker) {
+	if e == nil || checker == nil {
+		return
+	}
+	e.mu.Lock()
+	e.security = checker
 	e.mu.Unlock()
 }
 
@@ -1793,7 +1804,6 @@ func extractEditedFiles(summary string) []string {
 	}
 	return nil
 }
-
 
 // PlaceholderToolRegistry is a simple implementation for testing.
 // For production use, prefer the full tools.Registry implementation.

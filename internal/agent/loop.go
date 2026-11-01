@@ -576,7 +576,6 @@ func (l *AgentLoop) shouldAutoInject() bool {
 	return mode == RecallModeAuto || mode == RecallModeHybrid
 }
 
-
 // AgentLoop orchestrates LLM reasoning interleaved with tool execution.
 type AgentLoop struct {
 	mu      sync.RWMutex
@@ -1450,6 +1449,24 @@ func WithSecurityChecker(checker *security.PermissionChecker) LoopOption {
 	return func(l *AgentLoop) {
 		l.security = checker
 	}
+}
+
+// SetSecurityChecker replaces the loop's security permission checker after
+// construction (agent-groups leaf 01 T2): session-loop creation injects a
+// per-session clone carrying the session's own fence stage. Nil-safe per
+// setter convention (a nil checker is a no-op, keeping the current one).
+// The executor is re-pointed too: it holds the checker it was constructed
+// with, so checkPermission routes through the session-scoped instance.
+func (l *AgentLoop) SetSecurityChecker(checker *security.PermissionChecker) {
+	if l == nil || checker == nil {
+		return
+	}
+	l.mu.Lock()
+	l.security = checker
+	if l.executor != nil {
+		l.executor.SetSecurityChecker(checker)
+	}
+	l.mu.Unlock()
 }
 
 // WithMessageBus sets the message bus for event publishing.
@@ -8141,7 +8158,6 @@ func (l *AgentLoop) observeToolBreaker(toolCalls []llm.ToolCall, results []*Exec
 	}
 }
 
-
 // buildValidationAnchorInstructions builds the validation/escalation anchor message
 // that persists through context truncation. This ensures agents always have access
 // to validation requirements and escalation procedures.
@@ -9383,7 +9399,6 @@ func (l *AgentLoop) currentModelInfo() (modelID, providerID string) {
 	}
 	return "unknown", "unknown"
 }
-
 
 // applyTerminateReplyGuard runs the reply guard's classification over the
 // terminating-tool lane's final reply (the buildTerminateResponse product)

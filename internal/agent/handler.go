@@ -109,6 +109,14 @@ type ChatHandler struct {
 	// each session binds to its loop. Nil-safe per setter convention.
 	fenceController FenceController
 
+	// fenceFactory mints a FRESH, session-owned fence stage per session
+	// loop (agent-groups leaf 01 T2/T4). It replaces the shared-
+	// FenceController RootPath mutation above: two concurrent sessions
+	// each get a fence bound to THEIR root instead of racing over one
+	// shared mutable checker. Nil (fencing disabled daemon-wide) means
+	// session loops carry no fence stage.
+	fenceFactory sessionFenceFactory
+
 	// messageSaver persists chat messages to the session store after each
 	// exchange. Wired by the daemon via SetMessageSaver.
 	messageSaver SessionMessageSaver
@@ -149,18 +157,42 @@ type ChatHandler struct {
 
 // FenceController is the narrow interface the ChatHandler needs from the
 // daemon's shared FenceChecker to configure the sandbox per-session.
+//
+// DEPRECATED (agent-groups leaf 01): retained only for compile
+// compatibility during the leaf window; the daemon no longer wires it.
+// The replacement is SetSessionFenceFactory — per-session fence instances
+// instead of mutating one shared checker.
 type FenceController interface {
 	SetRootPath(root string) error
 	SetNoFence(enabled bool)
 }
 
-// SetFenceController wires the shared fence checker so session-scoped loops
-// get a correct sandbox root and --nofence handling. Safe to call with nil.
+// SetFenceController wired the shared fence checker so session-scoped
+// loops get a correct sandbox root and --nofence handling.
+//
+// REMOVED WIRING (agent-groups leaf 01 T3/T4): the daemon no longer calls
+// this — mutating one shared FenceChecker's RootPath per session raced
+// concurrent sessions (session A's root applied to session B's checks).
+// The daemon now wires SetSessionFenceFactory instead. The setter remains
+// for compile compatibility with out-of-tree embedders but no longer
+// influences session fencing. Safe to call with nil.
 func (h *ChatHandler) SetFenceController(fc FenceController) {
 	if h == nil {
 		return
 	}
 	h.fenceController = fc
+}
+
+// SetSessionFenceFactory wires the factory that mints a FRESH,
+// session-owned fence stage per session loop (agent-groups leaf 01 T2).
+// Each session-scoped loop gets its own fence bound to the session's
+// working directory — no shared mutable checker, no cross-session root
+// race. Safe to call with nil (fencing disabled).
+func (h *ChatHandler) SetSessionFenceFactory(factory sessionFenceFactory) {
+	if h == nil {
+		return
+	}
+	h.fenceFactory = factory
 }
 
 // EffectsResumeHook is the parked-turn-resume reconcile callback (effects
@@ -2984,19 +3016,14 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 			"hint", "bind a project to this session (project.set) or start the client from the project directory (--cwd)")
 		return h.loop
 	}
-	// Configure the shared fence sandbox for this session: the sandbox root
-	// follows the session's working directory, and the per-session
-	// --nofence override (persisted on the session) disables fencing.
-	if h.fenceController != nil {
-		if err := h.fenceController.SetRootPath(workingPath); err != nil {
-			h.logger.Warn("fence: failed to set session root; fencing stays blocked until a valid root is set",
-				"session", conversationID,
-				"root", workingPath,
-				"error", err,
-			)
-		}
-		h.fenceController.SetNoFence(sess != nil && sess.NoFence)
-	}
+	// Configure the session fence: every session-scoped loop gets its OWN
+	// fence stage bound to THIS session's working directory (agent-groups
+	// leaf 01 T2/T4). No shared checker is mutated — two concurrent
+	// sessions are each fenced to their own root (the old code retargeted
+	// ONE shared FenceChecker per turn, so session A's root applied to
+	// session B's checks under load). The per-session --nofence override
+	// (persisted on the session) still disables fencing for the session.
+	fence := injectSessionFence(h.loop.security, h.fenceFactory, workingPath, sess != nil && sess.NoFence)
 	// Create a session-scoped loop via the manager. This avoids mutating
 	// the shared singleton's workingDir (which races with concurrent
 	// sessions). If manager creation fails, fall back to the singleton
@@ -3017,6 +3044,13 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 		// concurrent multi-session load but better than no workingDir.
 		h.loop.SetWorkingDir(workingPath)
 		return h.loop
+	}
+	// Per-session fence (leaf 01): clone the loop's security checker with
+	// THIS session's fence stage. The fence instance (and the checker
+	// carrying it) is owned by this session loop — never shared, so
+	// concurrent sessions cannot cross fences.
+	if fence != nil {
+		loop.SetSecurityChecker(fence)
 	}
 	// Wire session identity + project context onto the loop so the system
 	// prompt's "Session Context" section is populated. ConfigSnapshot
