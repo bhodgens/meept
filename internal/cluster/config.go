@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
@@ -106,8 +105,11 @@ func LoadClusterConfig(path string) (*Config, error) {
 
 // DefaultClusterConfigPath returns the default path for the cluster config.
 func DefaultClusterConfigPath() string {
-	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".meept", "cluster", "config.json5")
+	// Routed through MEEPT_HOME (config.MeeptPath), not os.UserHomeDir:
+	// per-node local testing sets MEEPT_HOME per daemon instance, and the
+	// AGENTS.md home-dir rule is that everything meept reads lives under
+	// one home.
+	return config.MeeptPath("cluster", "config.json5")
 }
 
 // setDefault applies default values for missing fields.

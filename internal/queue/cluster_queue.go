@@ -157,9 +157,36 @@ func (cq *ClusterQueue) WithMessageBus(b *bus.MessageBus) {
 
 // Claim wraps the underlying queue's Claim with cluster-aware logic.
 func (cq *ClusterQueue) Claim(ctx context.Context, workerID string, caps []string, agentID string) (*Job, error) {
-	// Check if this job was previously claimed by another node
-	// If not, attempt local claim
-	job, err := cq.Queue.Claim(ctx, workerID, caps, agentID)
+	// Clustered claim path: stamp claimed_by_node + timeout_at on the row so
+	// OTHER nodes' sweepers can see and reclaim this claim if this node dies
+	// (store_cluster_claim.go). Falls back to the embedded Queue claim when
+	// no cluster store is wired (single-node degraded mode).
+	var job *Job
+	var err error
+	if cq.store != nil {
+		job, err = cq.store.ClaimNextClustered(workerID, cq.localNodeID, caps, agentID, cq.cfg.DefaultClaimTimeout)
+		if err == nil {
+			cq.mu.Lock()
+			cq.claimed[job.ID] = &ClaimRecord{
+				TaskID:       job.ID,
+				ClaimedBy:    workerID,
+				ClaimedAt:    time.Now().UTC(),
+				TimeoutAt:    time.Now().UTC().Add(cq.cfg.DefaultClaimTimeout),
+				IsReplica:    false,
+				ManagingNode: cq.localNodeID,
+				ClaimToken:   job.ClaimToken,
+			}
+			cq.mu.Unlock()
+			return job, nil
+		}
+		if err != ErrNoJobAvailable {
+			cq.logger.Warn("cluster_queue: clustered claim failed, falling back",
+				"error", err)
+		}
+		// ErrNoJobAvailable falls through: nothing to claim either way.
+		return nil, err
+	}
+	job, err = cq.Queue.Claim(ctx, workerID, caps, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -405,9 +432,18 @@ func (cq *ClusterQueue) CheckNodeReachability(ctx context.Context, nodeID string
 // to prevent the reclaim mechanism from reclaiming in-flight work.
 func (cq *ClusterQueue) Heartbeat(jobID string) {
 	cq.mu.Lock()
-	defer cq.mu.Unlock()
-	if record, ok := cq.claimed[jobID]; ok {
+	record, ok := cq.claimed[jobID]
+	if ok {
 		record.TimeoutAt = time.Now().UTC().Add(cq.cfg.DefaultClaimTimeout)
+	}
+	cq.mu.Unlock()
+	// Extend the shared-row deadline so remote sweepers see this claim as
+	// alive. Done outside the mutex: the store write is I/O.
+	if ok && cq.store != nil {
+		if _, err := cq.store.HeartbeatClaim(context.Background(), cq.localNodeID, jobID, cq.cfg.DefaultClaimTimeout); err != nil {
+			cq.logger.Warn("cluster_queue: heartbeat row extension failed",
+				"job_id", jobID, "error", err)
+		}
 	}
 }
 
@@ -549,6 +585,31 @@ func (cq *ClusterQueue) StartReclaimSweeper() {
 				if len(reclaimed) > 0 {
 					cq.logger.Info("cluster_queue: reclaimed stale claims",
 						"count", len(reclaimed))
+				}
+				// Cross-node pass: claims held by OTHER nodes whose
+				// timeout_at expired (node crashed / partitioned - it can
+				// no longer heartbeat its own rows).
+				if cq.store != nil {
+					remote, err := cq.store.ReclaimRemoteStale(context.Background(), cq.localNodeID)
+					if err != nil {
+						cq.logger.Warn("cluster_queue: remote stale scan failed", "error", err)
+						continue
+					}
+					for _, jobID := range remote {
+						if err := cq.store.RecordClaimEvent(context.Background(), jobID, cq.localNodeID, "reclaim"); err != nil {
+							cq.logger.Warn("cluster_queue: reclaim event failed", "job_id", jobID, "error", err)
+						}
+						cq.logger.Info("cluster_queue: reclaimed remote stale claim",
+							"job_id", jobID)
+					}
+					if len(remote) > 0 && cq.bus != nil {
+						if msg, err := models.NewBusMessage(models.MessageTypeEvent, "cluster_queue", map[string]any{
+							"job_ids": remote,
+							"node_id": cq.localNodeID,
+						}); err == nil {
+							cq.bus.Publish("event.cluster.task_reclaim_remote", msg)
+						}
+					}
 				}
 			}
 		}
