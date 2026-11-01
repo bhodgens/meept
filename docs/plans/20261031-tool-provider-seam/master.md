@@ -244,7 +244,7 @@ Output: APPROVED or a list of specific gaps.
 | 02-gate.md | COMPLETE | 1 | writer sa-1-22967423; reviewed + ORCHESTRATOR CORRECTIONS: (E1) category map erratum - unknown=>system_modify would CRITICAL-confirm-block ~90% of builtin categories with default confirm flags; replaced with known-tier map + LOW unknown tier (recorded in toolgate.go); (E2) wiring revision 2 - live security.NewEngine (nil engine would fail-close every non-shell call = brown-out), all-or-nothing arming (engine failure = legacy ungated registry), dedicated tool_audit_chain.db; corrections applied in-session then landed via sibling sweep db736975; suites green at HEAD |
 | 03-migrate.md | COMPLETE | 0 | writer sa-0-fa18daaf; reviewed in-session (F7 tagged test green, full tagged daemon suite green, name/category diffs none); 4th task (real PostureLookup via ProviderForTool) landed; config-filter bridge at hermes/acp sites added in-session via SetProviderConfigFilter hook (03 landed before 04's helper); dead early scheduler block at components.go:7141 flagged as follow-up (sched param nil at only call site) |
 | 04-config.md | COMPLETE | 1 | writer sa-1-3c824979; reviewed in-session; deviation accepted with scope note: Load rewritten JSON5-first + TOML fallback (production-neutral: LoadDefault already preferred JSON5, only meept.toml reaches Load, TOML syntax cannot parse as JSON5); doctor live-verified; F8/F9 gate tests green unstaged |
-| 05-e2e-gate.md | PENDING | 0 | last; do not sweep untracked e2e/suites/zz-cigate-sabotage (sibling CI witness, benign) |
+| 05-e2e-gate.md | COMPLETE | 1 | committed e3b2130b (with the in-session live-path gate fix); writer sa-0-fccfc525; reviewed + ORCHESTRATOR CORRECTION: leaf 05 live finding CONFIRMED - Registry.Execute had zero production callers (executor calls tool handles directly), so the armed gate never ran on live turns; fixed in-session with Registry.GateCheck/GateComplete bracket + optional GatedExecutionRegistry capability probe + ErrGateBlocked non-retryable guard (internal/tools/registry.go, internal/agent/executor.go, backoff.go); suite: 4 live scenarios green 2x back-to-back post-fix (S2 uses financial stage - BlockedPaths does not feed engine Check, flagged observation); scenario file is scenarios_test.go (leaf name scenarios.go was not a compilable test filename) |
 
 Execution addenda (2026-10-31, forensic audit deleg_ba6d8600):
 - Sibling writer ACTIVE in components.go/daemon.go/agent+pkg/security
@@ -294,8 +294,8 @@ control agent (orchestrator, in-session).
 | F4 | Effects ledger reservation for mutating tools | 02-gate.md T3 | TestExecGateLedgerMutatingOnly | n/a | VALIDATED |
 | F5 | Fail-closed posture inheritance (G4) | 02-gate.md T4 | TestUndeclaredPostureFailClosed | n/a | VALIDATED |
 | F6 | Nil gate = byte-identical legacy behavior | 02-gate.md T5 | TestNilGatePreservesBehavior | n/a | VALIDATED |
-| F7 | Migrated groups serve via provider path | 03-migrate.md T1-T3 | TestMigratedGroupsViaProviders | 05 suite | PENDING |
-| F8 | Config enable/disable per provider | 04-config.md T1-T2 | TestProviderConfigDisable | 05 suite: disabled = absent from registry | PENDING |
+| F7 | Migrated groups serve via provider path | 03-migrate.md T1-T3 | TestMigratedGroupsViaProviders | 05 suite | VALIDATED |
+| F8 | Config enable/disable per provider | 04-config.md T1-T2 | TestProviderConfigDisable | 05 suite: disabled = absent from registry | VALIDATED |
 | F9 | Doctor surfaces provider states (report-only) | 04-config.md T3 | TestDoctorReportsProviders | n/a | VALIDATED |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
