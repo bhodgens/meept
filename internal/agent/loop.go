@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent/contextalloc"
 	"github.com/caimlas/meept/internal/agent/prompts"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/compress"
@@ -606,6 +607,19 @@ type AgentLoop struct {
 	// schemaModeSet distinguishes "explicitly set" from zero-value config.
 	schemaModeCfg config.AgentToolsConfig
 	schemaModeSet bool
+
+	// Context-assembler seam (context-memory-engine leaf 03).
+	// contextAssemblerCfg is the [agent.context_assembler] values
+	// supplied via SetContextAssemblerConfig; contextAssemblerSet
+	// distinguishes "explicitly set" from zero-value config. tierProvider
+	// is the C1 adapter wired by the daemon (SetTierBudgetProvider);
+	// contextSeam is the lazily-materialized LoopSeam. All guarded by mu.
+	// A nil contextSeam (or a disabled config) = today's behavior,
+	// byte-identical.
+	contextAssemblerCfg config.ContextAssemblerConfig
+	contextAssemblerSet bool
+	tierProvider        contextalloc.TierBudgetProvider
+	contextSeam         *contextalloc.LoopSeam
 
 	// Memory for context injection
 	memvid    *memvid.Client
@@ -4370,7 +4384,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	var cachedTokens int
 	var hadToolCalls bool
 	var toolCallCount int
-	convBudget := l.conversationTokenBudget()
+	convBudget := l.conversationBudgetViaSeam(ctx)
+	if convBudget <= 0 {
+		// Seam disabled or no discovered window: today's static path.
+		convBudget = l.conversationTokenBudget()
+	}
 	inWarningZone := false
 
 	// D-H1 (bughunt 2026-09-04): per-turn cap on duplicate-search rollbacks.
@@ -4509,7 +4527,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		} else {
 			toolOverhead = 0
 		}
-		effectiveBudget := max(IterationTokenBudget-toolOverhead,
+		// Context assembler (leaf 03): allocator-derived iteration budget
+		// (window-fraction, capped at the History share) when the seam is
+		// enabled with a discovered window; 0 = the IterationTokenBudget
+		// static, byte-identical to today.
+		iterBudget := l.iterationBudgetViaSeam(ctx)
+		if iterBudget <= 0 {
+			iterBudget = IterationTokenBudget
+		}
+		effectiveBudget := max(iterBudget-toolOverhead,
 			// minimum budget for messages
 			2000)
 		removed := conv.TruncateByTokens(effectiveBudget)
@@ -6914,7 +6940,13 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	// Build context parts from memory (conditional based on recall mode)
 	var contextParts []string
 	if l.shouldAutoInject() {
-		contextParts = l.buildMemoryContext(ctx, t)
+		// Context assembler (leaf 03): the enabled seam routes injection
+		// through tier-budgeted recall; nil/typed-nil seam = today's path
+		// byte-for-byte.
+		contextParts = l.memoryContextViaSeam(ctx, t.ContextQuery)
+		if contextParts == nil {
+			contextParts = l.buildMemoryContext(ctx, t)
+		}
 	}
 
 	// Set memory context on conversation and freeze snapshot for prefix caching
@@ -6922,7 +6954,11 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		// Apply the token budget to the STRUCTURED items before joining:
 		// whole lowest-ranked items are dropped (relevance order preserved)
 		// instead of cutting the joined string mid-item (leaf L05). Items
-		// are rendered as "- " bullets to match prompt assembly.
+		// are rendered as "- " bullets to match prompt assembly. The
+		// assembler seam already budgeted per tier, so on that path the
+		// final cap re-check still uses the static MaxMemoryContextTokens
+		// as the conservative backstop (leaf 03: seam budgets are always
+		// <= the static share the allocator derives).
 		bulleted := make([]string, len(contextParts))
 		for i, part := range contextParts {
 			bulleted[i] = "- " + part
@@ -7220,10 +7256,29 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 // ensure no code path omits project context when a working directory is set.
 func (l *AgentLoop) injectProjectContext(builder *PromptBuilder) {
 	workingDir := l.GetWorkingDir()
+	ctx := context.Background()
 
 	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
 	if l.artifactManager != nil && workingDir != "" {
-		artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
+		// Context assembler (leaf 03, T5): the ENABLED path calls the
+		// budgeted builder with Allocation.SystemDynamicDocs so a huge
+		// CLAUDE.md can no longer eat the window. The disabled path keeps
+		// the unbounded builder byte-for-byte (caller rewiring contract:
+		// BuildFullArtifactContext unchanged).
+		artifactCtx := ""
+		if docBudget, enabled := l.docBudgetViaSeam(ctx); enabled {
+			var truncated bool
+			artifactCtx, truncated = l.artifactManager.BuildFullArtifactContextBudgeted(
+				"", workingDir, docBudget, nil)
+			if truncated {
+				l.logger.Debug("artifact context truncated to doc budget",
+					"working_dir", workingDir,
+					"doc_budget_tokens", docBudget,
+				)
+			}
+		} else {
+			artifactCtx = l.artifactManager.BuildFullArtifactContext("", workingDir)
+		}
 		if artifactCtx != "" {
 			l.logger.Debug("artifact context loaded",
 				"working_dir", workingDir,
@@ -7263,9 +7318,9 @@ func (l *AgentLoop) injectProjectContext(builder *PromptBuilder) {
 const memoryBudgetTruncatedMarker = "\n\n...[memory truncated due to token budget]..."
 
 // EnforceMemoryItemBudget drops WHOLE lowest-ranked items from a relevance-
-// ordered item list (last item first) until the estimated token count of the
-// joined context fits maxTokens. Items that fit are never touched, and the
-// relevance order of kept items is preserved. When anything was dropped the
+// ordered item list (last item first) until the estimated token count of
+// the joined context fits maxTokens. Items that fit are never touched, and
+// the relevance order of kept items is preserved. When anything was dropped the
 // "...[memory truncated due to token budget]..." marker is appended so the
 // incompleteness stays observable.
 //
@@ -7273,15 +7328,23 @@ const memoryBudgetTruncatedMarker = "\n\n...[memory truncated due to token budge
 // one) is kept on its own — truncated via its own 300-rune per-item
 // truncation upstream — and every lower-ranked item is dropped, rather than
 // emptying the context entirely; the marker is appended.
-func EnforceMemoryItemBudget(items []string, maxTokens int) []string {
+//
+// The optional estimate overrides the heuristic token counter (the
+// context assembler's seam passes the serving model's tokenizer so the
+// budget and the content are counted by the SAME counter; leaf 03 T3).
+// A nil estimate keeps the historical heuristic byte-identically.
+func EnforceMemoryItemBudget(items []string, maxTokens int, estimate ...func(string) int) []string {
 	if maxTokens <= 0 || len(items) == 0 {
 		return items
 	}
 
 	join := func(parts []string) string { return strings.Join(parts, "\n") }
-	estimate := llm.EstimateTokenCountHeuristic
+	estimateFn := llm.EstimateTokenCountHeuristic
+	if len(estimate) > 0 && estimate[0] != nil {
+		estimateFn = estimate[0]
+	}
 
-	if estimate(join(items)) <= maxTokens {
+	if estimateFn(join(items)) <= maxTokens {
 		return items // everything fits; nothing dropped
 	}
 
@@ -7291,7 +7354,7 @@ func EnforceMemoryItemBudget(items []string, maxTokens int) []string {
 	kept := 0
 	running := 0
 	for i, item := range items {
-		next := running + estimate(item)
+		next := running + estimateFn(item)
 		if i > 0 {
 			next++ // "\n" separator
 		}

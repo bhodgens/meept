@@ -1984,6 +1984,11 @@ type AgentConfig struct {
 	// Tools configures tool-call handling for the agent loop, including
 	// grammar-constrained (GBNF) tool calling.
 	Tools AgentToolsConfig `json:"tools" toml:"tools"`
+	// ContextAssembler configures allocator-derived per-section context
+	// budgets (context-memory-engine leaf 03). Opt-in: zero value keeps
+	// every loop budget path byte-identical to the pre-assembler
+	// behavior.
+	ContextAssembler ContextAssemblerConfig `json:"context_assembler" toml:"context_assembler"`
 }
 
 // AgentToolsConfig holds [agent.tools] settings. GBNFConstrained is the
