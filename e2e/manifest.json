@@ -352,6 +352,9 @@
     "pkg/security/": [
       "agent-groups",
       "groups-diagnosis"
+    ],
+    "internal/toolprov/": [
+      "tool-provider-seam"
     ]
   },
   "suites": [
@@ -712,6 +715,11 @@
       "name": "cluster-reclaim",
       "dir": "e2e/suites/cluster-reclaim",
       "status": "implemented"
+    },
+    {
+      "name": "tool-provider-seam",
+      "dir": "e2e/suites/tool-provider-seam",
+      "status": "planned"
     }
   ],
   "scenarios": [
