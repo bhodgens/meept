@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSwapStore_PersistenceAcrossReopen is the durable proof the leaf
@@ -171,4 +172,64 @@ func TestSwapStore_TokenForDeterministic(t *testing.T) {
 	if _, ok := st.TokenFor("sess-b", ClassEmailAddress, "alice@example.com"); ok {
 		t.Fatal("TokenFor crossed the session boundary")
 	}
+}
+
+// T-restore-window (leaf 02, research D4): a positive restore window makes
+// rows expire after the window; the Resolve paths then refuse them exactly
+// like foreign tokens. 0 (default) = session lifetime.
+func TestSwapStoreRestoreWindowExpiry(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewSwapStore(dir)
+	if err != nil {
+		t.Fatalf("NewSwapStore: %v", err)
+	}
+	defer st.Close()
+
+	// Default: no expiry.
+	if err := st.Put("s1", "[PII:tok-a]", "a@example.com", "EMAIL_ADDRESS"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if _, ok := st.Resolve("s1", "[PII:tok-a]"); !ok {
+		t.Fatal("row refused with no TTL set")
+	}
+
+	// Arm a 1-second window and Put a fresh row.
+	st.SetRestoreWindow(time.Second)
+	if err := st.Put("s1", "[PII:tok-b]", "b@example.com", "EMAIL_ADDRESS"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if _, ok := st.Resolve("s1", "[PII:tok-b]"); !ok {
+		t.Fatal("fresh row inside the window refused")
+	}
+	restored, n := st.ResolveForRestore("s1", "mail [PII:tok-b] now")
+	if n != 1 || !strings.Contains(restored, "b@example.com") {
+		t.Fatalf("in-window restore failed: %q (count=%d)", restored, n)
+	}
+
+	// Force-expire: backdate the row past the window.
+	st.mu.Lock()
+	row := st.mem[storeKey("s1", "[PII:tok-b]")]
+	row.Expiry = time.Now().Unix() - 1
+	st.mem[storeKey("s1", "[PII:tok-b]")] = row
+	st.mu.Unlock()
+
+	if _, ok := st.Resolve("s1", "[PII:tok-b]"); ok {
+		t.Fatal("expired row resolved")
+	}
+	restored, n = st.ResolveForRestore("s1", "mail [PII:tok-b] now")
+	if n != 0 || restored != "mail [PII:tok-b] now" {
+		t.Fatalf("expired token restored anyway: %q (count=%d)", restored, n)
+	}
+
+	// Disabling the window (zero) un-stamps future rows.
+	st.SetRestoreWindow(0)
+	if err := st.Put("s1", "[PII:tok-c]", "c@example.com", "EMAIL_ADDRESS"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	st.mu.RLock()
+	if st.mem[storeKey("s1", "[PII:tok-c]")].Expiry != 0 {
+		st.mu.RUnlock()
+		t.Fatal("zero window stamped an expiry")
+	}
+	st.mu.RUnlock()
 }

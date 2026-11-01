@@ -497,6 +497,26 @@
     "enable_audit_log": false,
     "audit_db_path": "~/.meept/audit.db",
     "strict_override_matching": false,  // Use lenient three-strategy cascade for permission overrides
+
+    // PII unmasking proxy: detect PII in user input/context, swap it for
+    // [PII:<uuid>] tokens pre-LLM, restore the originals in the model's
+    // reply before it reaches history, traces, or the user. Tokens never
+    // resolve across sessions. Swap rows live in ~/.meept/pii_swap/.
+    // OPT-IN: default off - the daemon behaves byte-identically when the
+    // block is absent or disabled.
+    "pii": {
+      "enabled": false,
+      // Restrict detection to these classes; empty = all defaults
+      // (EMAIL_ADDRESS, PHONE_NUMBER, SSN, CREDIT_CARD, IPV4, IBAN).
+      "classes": [],
+      // RestoreWindow bounds how long a swap row restores. 0 = session
+      // lifetime.
+      "restore_window": 0,
+      // Also restore #XXXX# secret placeholders in the model's output.
+      // The obfuscator's maps are process-wide (not session-scoped), so
+      // this lane is separately opt-in.
+      "secret_restore": false,
+    },
   },
 
   // Scheduler configuration

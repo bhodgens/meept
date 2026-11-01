@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite" // sqlite driver registration
 )
@@ -32,6 +33,10 @@ type SwapStore struct {
 	db     *sql.DB
 	ins    *sql.Stmt
 	closed bool
+	// ttlSec is the restore window in seconds (research D4). 0 = session
+	// lifetime (rows never expire). When > 0, Put stamps each row's
+	// expiry and the Resolve paths refuse expired rows.
+	ttlSec int64
 }
 
 // storeRow is one swap mapping.
@@ -144,6 +149,26 @@ func splitStoreKey(key string) (sessionID, token string, ok bool) {
 	return key[:i], key[i+1:], true
 }
 
+// SetRestoreWindow enables the restore-window TTL (research D4): rows
+// Put afterwards expire after the given window and the Resolve paths
+// refuse them. A zero or negative window disables expiry (session
+// lifetime). Called once at wiring time, before any Mask traffic.
+func (st *SwapStore) SetRestoreWindow(d time.Duration) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if d <= 0 {
+		st.ttlSec = 0
+		return
+	}
+	st.ttlSec = int64(d / time.Second)
+}
+
+// expiredLocked reports whether a row is past its restore window. Rows
+// carry a stamp = now + ttlSec at Put time; 0 = no expiry.
+func expiredLocked(row storeRow, now int64) bool {
+	return row.Expiry != 0 && now >= row.Expiry
+}
+
 // Put records a swap mapping for sessionID. Re-Putting the same
 // (session, token) pair is an idempotent update.
 func (st *SwapStore) Put(sessionID, token, value, class string) error {
@@ -152,19 +177,23 @@ func (st *SwapStore) Put(sessionID, token, value, class string) error {
 		st.mu.Unlock()
 		return ErrStoreClosed
 	}
+	var expiry int64
+	if st.ttlSec > 0 {
+		expiry = time.Now().Unix() + st.ttlSec
+	}
 	mkey := storeKey(sessionID, token)
 	fkey := forwardKey(sessionID, class, value)
 	prev, hadPrev := st.mem[mkey]
 	prevTok, hadFwd := st.fwd[fkey]
-	st.mem[mkey] = storeRow{Token: token, Value: value, Class: class}
+	st.mem[mkey] = storeRow{Token: token, Value: value, Class: class, Expiry: expiry}
 	st.fwd[fkey] = token
 	db := st.db
 	st.mu.Unlock()
 
 	if _, err := db.Exec(`INSERT INTO pii_swaps (session_id, token, value, class, expiry)
-		VALUES (?, ?, ?, ?, 0)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, token) DO UPDATE SET value=excluded.value, class=excluded.class, expiry=excluded.expiry`,
-		sessionID, token, value, class); err != nil {
+		sessionID, token, value, class, expiry); err != nil {
 		// Roll the in-memory mirrors back so they never diverge from disk.
 		st.mu.Lock()
 		if hadPrev {
@@ -185,12 +214,16 @@ func (st *SwapStore) Put(sessionID, token, value, class string) error {
 }
 
 // Resolve returns the original value for (sessionID, token). Tokens from
-// other sessions never resolve here.
+// other sessions never resolve here; rows past the restore window (TTL,
+// research D4) are refused exactly like foreign tokens.
 func (st *SwapStore) Resolve(sessionID, token string) (string, bool) {
 	st.mu.RLock()
 	defer st.mu.RUnlock()
 	row, ok := st.mem[storeKey(sessionID, token)]
 	if !ok {
+		return "", false
+	}
+	if expiredLocked(row, time.Now().Unix()) {
 		return "", false
 	}
 	return row.Value, true
@@ -206,16 +239,18 @@ func (st *SwapStore) TokenFor(sessionID, class, value string) (string, bool) {
 	return tok, ok
 }
 
-// ResolveForRestore replaces ALL tokens belonging to sessionID in text
-// with their original values and returns (restored, count). Tokens from
-// other sessions and unknown tokens are left untouched as literals.
+// ResolveForRestore replaces ALL unexpired tokens belonging to sessionID
+// in text with their original values and returns (restored, count).
+// Tokens from other sessions, unknown tokens, and rows past the restore
+// window (TTL, research D4) are left untouched as literals.
 func (st *SwapStore) ResolveForRestore(sessionID, text string) (string, int) {
 	// Snapshot the session's token set under the lock; replacement runs
 	// after unlock (fixed-string matching, no I/O).
+	now := time.Now().Unix()
 	st.mu.RLock()
 	tokens := make(map[string]string, len(st.mem))
 	for key, row := range st.mem {
-		if sid, _, ok := splitStoreKey(key); ok && sid == sessionID {
+		if sid, _, ok := splitStoreKey(key); ok && sid == sessionID && !expiredLocked(row, now) {
 			tokens[row.Token] = row.Value
 		}
 	}

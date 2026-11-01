@@ -594,8 +594,12 @@ type AgentLoop struct {
 	registry        ToolRegistry
 	security        *security.PermissionChecker
 	securityOrch    *intsecurity.Orchestrator
-	bus             *bus.MessageBus
-	logger          *slog.Logger
+	// piiRestore is the PII-unmasking restore lane (pii leaf 02): applied
+	// at the ScanOutput choke point before any persistence. Nil = feature
+	// off (opt-in), byte-identical behavior.
+	piiRestore *PiiRestoreHook
+	bus        *bus.MessageBus
+	logger     *slog.Logger
 
 	// Tool-schema mode plumbing (loop-economics leaf 02). schemaModeCfg is
 	// the [agent.tools] values supplied via SetSchemaModeConfig;
@@ -1705,6 +1709,28 @@ func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) LoopOption {
 	return func(l *AgentLoop) {
 		l.securityOrch = orch
 	}
+}
+
+// SetPiiRestoreHook attaches the PII-unmasking restore lane (pii leaf 02).
+// Typed-nil guarded: a nil hook is a no-op (feature off). Called from
+// components.go AFTER hook registration; session clones inherit the lane
+// through the shared *PiiRestoreHook (its RestoreOutput is stateless per
+// call, scoped by the sessionID argument).
+func (l *AgentLoop) SetPiiRestoreHook(hook *PiiRestoreHook) {
+	if hook == nil {
+		return
+	}
+	l.mu.Lock()
+	l.piiRestore = hook
+	l.mu.Unlock()
+}
+
+// PiiRestoreHook returns the attached restore lane (nil when off). The
+// ConfigSnapshot seam re-attaches it on per-session clones.
+func (l *AgentLoop) PiiRestoreHook() *PiiRestoreHook {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.piiRestore
 }
 
 // WithCapabilityIndex sets the capability index for skill discovery.
@@ -3208,6 +3234,17 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// and the reply is byte-identical to before. The note rides AFTER the
 	// reply guard so a substituted fallback reply is disclosed too.
 	finalResponse += l.refusalFallbackDisclosure()
+	// PII unmasking proxy restore lane (agent-boundary-hardening, pii leaf
+	// 02): restore [PII:<uuid>] swap tokens (and, gated, #XXXX# secret
+	// placeholders) BEFORE reply persistence: this point sits after the
+	// reply-guard deliberation but before reflection, learning/trace
+	// capture, history append, speak delivery, and the caller's response,
+	// so every downstream consumer sees restored text. Session-bounded:
+	// only tokens minted in THIS session resolve. Nil/disabled hook ->
+	// byte-identical passthrough (opt-in default-off).
+	if l.piiRestore != nil {
+		finalResponse = l.piiRestore.RestoreOutput(finalResponse, l.sessionID)
+	}
 	if l.securityOrch != nil {
 		scannedText, hasCredentials, warnings := l.securityOrch.ScanOutput(response)
 		if hasCredentials {
