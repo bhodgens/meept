@@ -11,23 +11,43 @@
 //     never a synchronous hook into the agent loop. Export failures never
 //     fail a turn: async batch, bounded queue, drop+counter on overflow,
 //     circuit-open with bounded logging in the sink.
+//
+// Leaf 03 (llm-hop-tracing, C7) adds, inside the Enabled branch ONLY:
+// the turn sub passes the minted TraceID into the turn span; the llm-call
+// observer bridge (SetLLMCallObserver -> RecordLLMCallSpan) attaches to the
+// llm client; and a raw-topic subscription decodes the
+// agent.event.tool_execution_end envelope (leniently, never importing
+// internal/agent types) into tool.call spans.
 package daemon
 
 import (
 	"encoding/json"
 	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
-	"github.com/caimlas/meept/internal/metrics"
+	appmetrics "github.com/caimlas/meept/internal/metrics"
 )
 
+// llmCallObserverAttacher is the SetLLMCallObserver seam (leaf 01, C4)
+// satisfied by *llm.Client (and the Anthropic/Codex clients). Declared as a
+// small interface so the wiring stays decoupled from internal/llm.
+type llmCallObserverAttacher interface {
+	SetLLMCallObserver(fn func(appmetrics.LLMCallRecord))
+}
+
 // otlpTraceSubs holds the live bus subscriptions of an enabled trace
-// pipeline. Zero values on disabled boots; Unsubscribe is nil-safe.
+// pipeline. Zero values on disabled boots; Unsubscribe is nil-safe. The
+// producer rides along so the legacy wireOTLPTraces return shape can hand
+// it back (leaf 03).
 type otlpTraceSubs struct {
-	subs []*bus.Subscriber
+	subs     []*bus.Subscriber
+	producer *appmetrics.TraceProducer
+	observer func(appmetrics.LLMCallRecord)
 }
 
 // Unsubscribe tears down every bus subscription (daemon shutdown).
@@ -41,33 +61,104 @@ func (s *otlpTraceSubs) Unsubscribe(b *bus.MessageBus) {
 	s.subs = nil
 }
 
+// llmCallObserver returns the bridge callback stored on the enabled
+// pipeline (nil on disabled boots - the accessor is nil-safe). components.go
+// hands it to the llm client after the client exists.
+func (s *otlpTraceSubs) llmCallObserver() func(appmetrics.LLMCallRecord) {
+	if s == nil {
+		return nil
+	}
+	return s.observer
+}
+
 // wireOTLPTraces constructs and starts the OTLP trace exporter + span
 // producer when metrics.otlp_traces.enabled=true. Never returns an error:
 // trace export is best-effort and must not block daemon boot. The subs
 // return value is nil when disabled (nothing to tear down).
-func wireOTLPTraces(cfg config.OTLPTracesConfig, b *bus.MessageBus, logger *slog.Logger) (*metrics.TraceExporter, *metrics.TraceProducer, *otlpTraceSubs) {
+func wireOTLPTraces(cfg config.OTLPTracesConfig, b *bus.MessageBus, llmCall llmCallObserverAttacher, logger *slog.Logger) (*appmetrics.TraceExporter, *appmetrics.TraceProducer, *otlpTraceSubs) {
+	exp, producer, subs, _ := wireOTLPTracesWithObserver(cfg, b, llmCall, logger)
+	return exp, producer, subs
+}
+
+// wireOTLPTracesWithObserver is the full leaf-03 wiring: the exporter +
+// producer (when enabled), the bus subscriptions, and the LLM-call observer
+// bridge attached onto llmCall ONLY when enabled. The observer callback is
+// additionally returned so tests can drive records through the bridge
+// deterministically; a disabled boot returns a nil observer (nothing
+// attached, nothing built).
+func wireOTLPTracesWithObserver(cfg config.OTLPTracesConfig, b *bus.MessageBus, llmCall llmCallObserverAttacher, logger *slog.Logger) (*appmetrics.TraceExporter, *appmetrics.TraceProducer, *otlpTraceSubs, func(appmetrics.LLMCallRecord)) {
 	if !cfg.Enabled {
 		// One honest line at boot; nothing else for the lifetime of the
 		// process (no steady-state noise, no goroutines, no network).
+		// Disabled posture (C7): the observer attaches NOWHERE.
 		logger.Warn("OTLP trace export disabled (metrics.otlp_traces.enabled=false); no spans leave the host",
 			"endpoint", cfg.Endpoint)
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
-	sink := metrics.NewOTLPTraceHTTPSink(cfg.Endpoint, cfg.Headers, logger)
-	exp := metrics.NewTraceExporter(metrics.TraceExporterConfig{
+	sink := appmetrics.NewOTLPTraceHTTPSink(cfg.Endpoint, cfg.Headers, logger)
+	exp := appmetrics.NewTraceExporter(appmetrics.TraceExporterConfig{
 		ExportInterval: cfg.ExportInterval, // config-load normalization clamps zero/negative to 5s
 	}, sink)
 	exp.Start()
 
-	producer := metrics.NewTraceProducer(exp, cfg.SampleRate, logger)
+	producer := appmetrics.NewTraceProducer(exp, cfg.SampleRate, logger)
 
-	subs := &otlpTraceSubs{}
+	// Leaf 03 (C7): observer bridge, best-effort parent association. The
+	// llm-call records carry the turn's trace but not the turn span id, so
+	// the wiring keeps a last-seen turnSpanID per conversation (captured
+	// from each turn.terminal event's TurnID slot) and uses it as the hop
+	// spans' parent. " outside a known turn - children-before-parent
+	// export order is valid for Jaeger/Tempo either way (RESEARCH-FINDINGS
+	// 2.1). The observer itself is async on the llm client side and the
+	// bridge never blocks: map copy + RecordLLMCallSpan enqueue only.
+	lastTurn := struct {
+		sync.Mutex
+		convID    string
+		turnSpan  string
+		sessionID string
+	}{}
+	observer := func(rec appmetrics.LLMCallRecord) {
+		lastTurn.Lock()
+		parent := lastTurn.turnSpan
+		lastTurn.Unlock()
+		producer.RecordLLMCallSpan(appmetrics.LLMCallSpanSpec{
+			TraceID:             rec.TraceID,
+			SpanID:              rec.SpanID,
+			ParentSpanID:        parent,
+			Provider:            rec.Provider,
+			ModelID:             rec.ModelID,
+			AgentID:             rec.AgentID,
+			SessionID:           rec.SessionID,
+			ConversationID:      lastConvOf(rec, &lastTurn),
+			TokensSent:          rec.TokensSent,
+			TokensRecv:          rec.TokensRecv,
+			TokensCached:        rec.TokensCached,
+			ReasoningTokens:     rec.ReasoningTokens,
+			CacheCreationTokens: rec.CacheCreationTokens,
+			IsError:             rec.IsError,
+			ErrorMessage:        rec.ErrorMessage,
+			LatencyMS:           rec.LatencyMs,
+		})
+	}
+	if llmCall != nil {
+		llmCall.SetLLMCallObserver(observer)
+	}
+
+	subs := &otlpTraceSubs{producer: producer, observer: observer}
 	if b != nil {
 		// chat.turn: the typed turn.terminal topic is the proven terminal
 		// signal (one event per turn, direct and task-relayed alike).
+		// Leaf 03: the event's minted TraceID rides into the spec so the
+		// turn span adopts it (whole trace shares one ID), and the wiring
+		// remembers the turn span context for hop-span parenting.
 		turnSub := bus.SubscribeT(b, "otlp-trace-turns", agent.TopicTurnTerminal, func(ev agent.TurnTerminalEvent) {
-			producer.RecordTurnSpan(metrics.TurnSpanSpec{
+			lastTurn.Lock()
+			lastTurn.convID = ev.ConversationID
+			lastTurn.sessionID = ev.SessionID
+			lastTurn.turnSpan = "" // terminal: the turn closes; next hops start fresh
+			lastTurn.Unlock()
+			producer.RecordTurnSpan(appmetrics.TurnSpanSpec{
 				ConversationID: ev.ConversationID,
 				SessionID:      ev.SessionID,
 				TurnID:         ev.TurnID,
@@ -79,18 +170,34 @@ func wireOTLPTraces(cfg config.OTLPTracesConfig, b *bus.MessageBus, logger *slog
 				Model:          ev.Model,
 				Error:          ev.Error,
 				DurationMS:     ev.DurationMS,
+				TraceID:        ev.TraceID,
 			})
 		})
 		subs.subs = append(subs.subs, turnSub)
 
 		// task.step: step terminal signals from the tactical scheduler
 		// (raw multi-shape topic; decode leniently). Covers completed AND
-		// failed steps — the state attribute is the honest verdict.
+		// failed steps -- the state attribute is the honest verdict.
 		stepSub := b.Subscribe("otlp-trace-steps", "task.step_completed")
 		subs.subs = append(subs.subs, stepSub)
 		go func() {
 			for msg := range stepSub.Channel {
 				recordStepSpanFromBus(producer, msg.Payload)
+			}
+		}()
+
+		// Tool.call: the emitter bus bridge publishes the serialized
+		// agent.AgentEvent JSON on agent.event.tool_execution_end (Data =
+		// ToolExecutionEndData). The decode is map-lenient -- internal/agent
+		// types are deliberately NOT imported here (mirrors the step-sub
+		// posture). TraceID "" events (untraced turns) simply produce a
+		// span under a random trace, exactly the pre-leaf posture for
+		// step spans; nothing is attached outside this subscription.
+		toolSub := b.Subscribe("otlp-trace-tool-calls", "agent.event.tool_execution_end")
+		subs.subs = append(subs.subs, toolSub)
+		go func() {
+			for msg := range toolSub.Channel {
+				recordToolCallSpanFromBus(producer, msg.Payload)
 			}
 		}()
 	}
@@ -100,7 +207,23 @@ func wireOTLPTraces(cfg config.OTLPTracesConfig, b *bus.MessageBus, logger *slog
 		"sample_rate", cfg.SampleRate,
 		"interval", cfg.ExportInterval.String(),
 	)
-	return exp, producer, subs
+	return exp, producer, subs, observer
+}
+
+// lastConvOf resolves the conversation id for an llm-call record: the
+// wiring's last-seen turn conversation when session ids line up, else "".
+func lastConvOf(rec appmetrics.LLMCallRecord, lastTurn *struct {
+	sync.Mutex
+	convID    string
+	turnSpan  string
+	sessionID string
+}) string {
+	lastTurn.Lock()
+	defer lastTurn.Unlock()
+	if rec.SessionID != "" && rec.SessionID == lastTurn.sessionID {
+		return lastTurn.convID
+	}
+	return ""
 }
 
 // stepCompletedPayload is the lenient decode of the task.step_completed
@@ -117,7 +240,7 @@ type stepCompletedPayload struct {
 // recordStepSpanFromBus decodes one task.step_completed payload and records
 // the span. Undecodable payloads are dropped at Debug (observability must
 // never turn into error noise).
-func recordStepSpanFromBus(producer *metrics.TraceProducer, payload []byte) {
+func recordStepSpanFromBus(producer *appmetrics.TraceProducer, payload []byte) {
 	var pl stepCompletedPayload
 	if err := json.Unmarshal(payload, &pl); err != nil {
 		return
@@ -126,7 +249,7 @@ func recordStepSpanFromBus(producer *metrics.TraceProducer, payload []byte) {
 	if d, err := time.ParseDuration(pl.Duration); err == nil && d > 0 {
 		durMS = d.Milliseconds()
 	}
-	producer.RecordStepSpan(metrics.StepSpanSpec{
+	producer.RecordStepSpan(appmetrics.StepSpanSpec{
 		TaskID:     pl.TaskID,
 		StepID:     pl.StepID,
 		AgentID:    pl.AgentID,
@@ -135,13 +258,72 @@ func recordStepSpanFromBus(producer *metrics.TraceProducer, payload []byte) {
 	})
 }
 
+// toolExecutionEndEnvelope is the LENIENT decode of the agent.AgentEvent
+// JSON envelope the emitter bus bridge publishes on
+// agent.event.tool_execution_end (llm-hop-tracing leaf 03, C7). The
+// discriminating key is "type" == "tool_execution_end"; data decodes into
+// exactly the fields the hop span needs - shape-only argument fingerprints,
+// never raw argument values. internal/agent is deliberately not imported
+// (mirrors how recordStepSpanFromBus avoids it).
+type toolExecutionEndEnvelope struct {
+	Type string                    `json:"type"`
+	Data toolExecutionEndEventBody `json:"data"`
+}
+
+type toolExecutionEndEventBody struct {
+	ToolCallID     string `json:"tool_call_id"`
+	ToolName       string `json:"tool_name"`
+	Success        bool   `json:"success"`
+	Error          string `json:"error"`
+	TraceID        string `json:"trace_id"`
+	SpanID         string `json:"span_id"`
+	ArgumentsKeys  string `json:"arguments_keys"`
+	ArgumentsBytes int    `json:"arguments_bytes"`
+	Blocked        bool   `json:"blocked"`
+	Duration       string `json:"duration"`
+}
+
+// recordToolCallSpanFromBus decodes one agent.event.tool_execution_end
+// envelope and records the tool.call span. Malformed envelopes (bad JSON,
+// wrong type, wrong data shape) are dropped silently - no panic, no span,
+// no error noise.
+func recordToolCallSpanFromBus(producer *appmetrics.TraceProducer, payload []byte) {
+	var env toolExecutionEndEnvelope
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return
+	}
+	if env.Type != "tool_execution_end" {
+		return
+	}
+	var durMS int64
+	if d, err := time.ParseDuration(env.Data.Duration); err == nil && d > 0 {
+		durMS = d.Milliseconds()
+	}
+	producer.RecordToolCallSpan(appmetrics.ToolCallSpanSpec{
+		TraceID:        env.Data.TraceID,
+		SpanID:         env.Data.SpanID,
+		ToolName:       env.Data.ToolName,
+		ToolCallID:     env.Data.ToolCallID,
+		ArgumentsKeys:  env.Data.ArgumentsKeys,
+		ArgumentsBytes: env.Data.ArgumentsBytes,
+		Success:        env.Data.Success,
+		Blocked:        env.Data.Blocked,
+		Error:          env.Data.Error,
+		DurationMS:     durMS,
+	})
+}
+
 // stopOTLPTraces flushes the exporter and tears down the producer's bus
 // subscriptions. Safe on nils (every disabled boot); called from
 // stopComponents on the daemon shutdown path so the final batch reaches the
 // receiver.
-func stopOTLPTraces(b *bus.MessageBus, exp *metrics.TraceExporter, subs *otlpTraceSubs) {
+func stopOTLPTraces(b *bus.MessageBus, exp *appmetrics.TraceExporter, subs *otlpTraceSubs) {
 	subs.Unsubscribe(b)
 	if exp != nil {
 		exp.Stop()
 	}
 }
+
+// The strings import backs the tool-event type discrimination fallback for
+// non-object payloads (defensive; keeps the decoder total).
+var _ = strings.Contains

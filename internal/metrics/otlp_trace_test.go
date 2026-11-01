@@ -8,10 +8,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,14 +30,15 @@ type capturedTrace struct {
 }
 
 type decodedSpan struct {
-	traceID     string // hex
-	spanID      string // hex
-	parentID    string // hex
-	name        string
-	startNano   uint64
-	endNano     uint64
-	attrs       map[string]string
-	errorStatus bool
+	traceID       string // hex
+	spanID        string // hex
+	parentID      string // hex
+	name          string
+	startNano     uint64
+	endNano       uint64
+	attrs         map[string]string
+	statusMessage string
+	errorStatus   bool
 }
 
 // parseProtobuf walks a protobuf message and yields (field, wiretype,
@@ -123,7 +127,10 @@ func decodeSpanMsg(t *testing.T, data []byte) decodedSpan {
 		case 15: // status
 			st := parseProtobuf(t, f.bytes)
 			for _, sf := range st {
-				if sf.field == 2 && sf.varint == 2 {
+				switch {
+				case sf.field == 1:
+					sp.statusMessage = string(sf.bytes)
+				case sf.field == 2 && sf.varint == 2:
 					sp.errorStatus = true
 				}
 			}
@@ -427,5 +434,411 @@ func (blockingSink) ExportSpans(_ context.Context, _ []Span) error {
 }
 func (blockingSink) Close() error { return nil }
 
-// Silence unused warnings for helpers used by future sub-tests.
-var _ = bytes.Equal
+// The drain-and-close helper below is shared with otlp_http_sink.go via the
+// same-package definition there; it is intentionally not redefined.
+var (
+	_ = bytes.Equal
+	_ = io.Discard
+)
+
+// ---------------------------------------------------------------------------
+// Leaf 03 (llm-hop-tracing): llm.call + tool.call hop-span pins.
+// ---------------------------------------------------------------------------
+
+// hopTraceHex/hopSpanHex are valid 32/16-char lowercase hex IDs shared by
+// the leaf-03 pins.
+const (
+	hopTraceHex  = "a1b2c3d4e5f60123456789abcdef0123"
+	hopSpanHex   = "b1b2b3b4b5b6b7b8"
+	hopParentHex = "c1c2c3c4c5c6c7c8"
+	hopToolSpHex = "d1d2d3d4d5d6d7d8"
+	hopTraceBHex = "f00fb00fbaadf00ddeadbeefcafe0123"
+	hopSpanBHex  = "0f0e0d0c0b0a0908"
+)
+
+// newHopProducer builds a producer over a capturingSink (no wire) so pins
+// can assert the Span struct exactly.
+func newHopProducer() (*TraceProducer, *capturingSink, *TraceExporter) {
+	sink := &capturingSink{}
+	exp := NewTraceExporter(TraceExporterConfig{}, sink)
+	return NewTraceProducer(exp, 1.0, nil), sink, exp
+}
+
+// hopLLMCallSpec is a fully-populated success LLMCallSpanSpec.
+func hopLLMCallSpec() LLMCallSpanSpec {
+	return LLMCallSpanSpec{
+		TraceID:             hopTraceHex,
+		SpanID:              hopSpanHex,
+		ParentSpanID:        hopParentHex,
+		Provider:            "openai",
+		ModelID:             "test-model",
+		AgentID:             "agent-1",
+		SessionID:           "session-abc",
+		TokensSent:          52,
+		TokensRecv:          47,
+		TokensCached:        8,
+		CacheCreationTokens: 3,
+		ReasoningTokens:     5,
+		LatencyMS:           1200,
+	}
+}
+
+// T1(a)/C8: RecordLLMCallSpan emits exactly one llm.call span carrying the
+// spec's decoded binary IDs (NOT random fill) and exactly the FINAL-TABLE
+// attribute allowlist with inclusion rules applied (zero omitted).
+func TestProducerRecordLLMCallSpanShape(t *testing.T) {
+	p, sink, exp := newHopProducer()
+	p.RecordLLMCallSpan(hopLLMCallSpec())
+	exp.Flush()
+	if len(sink.spans) != 1 {
+		t.Fatalf("sink got %d spans, want 1", len(sink.spans))
+	}
+	sp := sink.spans[0]
+	if sp.Name != "llm.call" {
+		t.Errorf("span name = %q, want llm.call", sp.Name)
+	}
+	if got := hexEncode(sp.TraceID[:]); got != hopTraceHex {
+		t.Errorf("trace id = %s, want %s", got, hopTraceHex)
+	}
+	if got := hexEncode(sp.SpanID[:]); got != hopSpanHex {
+		t.Errorf("span id = %s, want %s (ev.SpanID reused)", got, hopSpanHex)
+	}
+	if got := hexEncode(sp.ParentSpanID[:]); got != hopParentHex {
+		t.Errorf("parent id = %s, want %s", got, hopParentHex)
+	}
+	if sp.IsError {
+		t.Error("success spec exported as error span")
+	}
+	wantAttrs := map[string]string{
+		"gen_ai.operation.name":                 "chat",
+		"gen_ai.provider.name":                  "openai",
+		"gen_ai.request.model":                  "test-model",
+		"gen_ai.usage.input_tokens":             "52",
+		"gen_ai.usage.output_tokens":            "47",
+		"gen_ai.usage.cache_read.input_tokens":  "8",
+		"gen_ai.usage.cache_write.input_tokens": "3",
+		"gen_ai.usage.reasoning.output_tokens":  "5",
+	}
+	if !reflect.DeepEqual(sp.Attributes, wantAttrs) {
+		t.Errorf("attributes = %v, want %v", sp.Attributes, wantAttrs)
+	}
+}
+
+// T1(a)/C8: error records carry the truncated error.message, a
+// low-cardinality error.type, and the Error span status - and nothing else
+// beyond the allowlist.
+func TestProducerRecordLLMCallSpanError(t *testing.T) {
+	p, sink, exp := newHopProducer()
+	ev := hopLLMCallSpec()
+	ev.IsError = true
+	ev.ErrorMessage = strings.Repeat("x", 300)
+	p.RecordLLMCallSpan(ev)
+	exp.Flush()
+	if len(sink.spans) != 1 {
+		t.Fatalf("sink got %d spans, want 1", len(sink.spans))
+	}
+	sp := sink.spans[0]
+	if !sp.IsError {
+		t.Error("error record did not mark the span status Error")
+	}
+	msg, ok := sp.Attributes["error.message"]
+	if !ok {
+		t.Fatal("error record missing error.message attribute")
+	}
+	if len([]rune(msg)) != 256 {
+		t.Errorf("error.message = %d runes, want exactly 256", len([]rune(msg)))
+	}
+	et, ok := sp.Attributes["error.type"]
+	if !ok || et == "" {
+		t.Errorf("error record missing error.type (got %q)", et)
+	}
+	// Key set is exactly the allowlist subset for an error hop.
+	allowed := map[string]bool{
+		"gen_ai.operation.name": true, "gen_ai.provider.name": true,
+		"gen_ai.request.model": true, "gen_ai.usage.input_tokens": true,
+		"gen_ai.usage.output_tokens": true, "gen_ai.usage.cache_read.input_tokens": true,
+		"gen_ai.usage.cache_write.input_tokens": true, "gen_ai.usage.reasoning.output_tokens": true,
+		"error.type": true, "error.message": true,
+	}
+	for k := range sp.Attributes {
+		if !allowed[k] {
+			t.Errorf("unexpected attribute key %q (allowlist violation)", k)
+		}
+	}
+}
+
+// T3(b): a secret-looking ErrorMessage surfaces ONLY in the truncated
+// error.message attribute (documented C8 exception) and the truncation
+// bound holds for a message whose secret sits inside the kept prefix.
+func TestProducerLLMErrorMessageSecretBound(t *testing.T) {
+	p, sink, exp := newHopProducer()
+	ev := hopLLMCallSpec()
+	ev.IsError = true
+	ev.ErrorMessage = "sk-live-abc123 " + strings.Repeat("pad", 100) // secret in the kept prefix
+	p.RecordLLMCallSpan(ev)
+	exp.Flush()
+	sp := sink.spans[0]
+	for k, v := range sp.Attributes {
+		if k != "error.message" && strings.Contains(v, "sk-live-abc123") {
+			t.Errorf("secret material leaked into attribute %q", k)
+		}
+	}
+	msg := sp.Attributes["error.message"]
+	if !strings.Contains(msg, "sk-live-abc123") {
+		t.Error("error.message lost the kept-prefix content (truncation misapplied)")
+	}
+	if len([]rune(msg)) != 256 {
+		t.Errorf("error.message = %d runes, want exactly 256", len([]rune(msg)))
+	}
+}
+
+// T1(b)/C8: RecordToolCallSpan emits tool.call with shape-only attributes.
+func TestProducerRecordToolCallSpanShape(t *testing.T) {
+	p, sink, exp := newHopProducer()
+	ev := ToolCallSpanSpec{
+		TraceID:        hopTraceHex,
+		SpanID:         hopToolSpHex,
+		ParentSpanID:   hopParentHex,
+		ToolName:       "read_file",
+		ToolCallID:     "call-1",
+		ArgumentsKeys:  "path,token",
+		ArgumentsBytes: 42,
+		Success:        true,
+		Cached:         true,
+		DurationMS:     300,
+	}
+	p.RecordToolCallSpan(ev)
+	exp.Flush()
+	if len(sink.spans) != 1 {
+		t.Fatalf("sink got %d spans, want 1", len(sink.spans))
+	}
+	sp := sink.spans[0]
+	if sp.Name != "tool.call" {
+		t.Errorf("span name = %q, want tool.call", sp.Name)
+	}
+	if got := hexEncode(sp.TraceID[:]); got != hopTraceHex {
+		t.Errorf("trace id = %s, want %s", got, hopTraceHex)
+	}
+	if got := hexEncode(sp.SpanID[:]); got != hopToolSpHex {
+		t.Errorf("span id = %s, want %s", got, hopToolSpHex)
+	}
+	if got := hexEncode(sp.ParentSpanID[:]); got != hopParentHex {
+		t.Errorf("parent id = %s, want %s", got, hopParentHex)
+	}
+	if sp.IsError {
+		t.Error("successful tool call exported as error span")
+	}
+	wantAttrs := map[string]string{
+		"gen_ai.operation.name": "execute_tool",
+		"gen_ai.tool.name":      "read_file",
+		"gen_ai.tool.call.id":   "call-1",
+		"meept.tool.args.keys":  "path,token",
+		"meept.tool.args.bytes": "42",
+	}
+	// Note: Cached=true deliberately produces NO attribute - it is not in
+	// the FINAL-TABLE allowlist (pin c).
+	if !reflect.DeepEqual(sp.Attributes, wantAttrs) {
+		t.Errorf("attributes = %v, want %v", sp.Attributes, wantAttrs)
+	}
+}
+
+// T1(b): failed + blocked tool calls carry meept.tool.blocked, truncated
+// error.message, and error.type; nothing beyond the allowlist.
+func TestProducerRecordToolCallSpanFailedBlocked(t *testing.T) {
+	p, sink, exp := newHopProducer()
+	ev := ToolCallSpanSpec{
+		TraceID:    hopTraceHex,
+		SpanID:     hopToolSpHex,
+		ToolName:   "shell",
+		ToolCallID: "call-2",
+		Success:    false,
+		Blocked:    true,
+		Error:      strings.Repeat("e", 300),
+	}
+	p.RecordToolCallSpan(ev)
+	exp.Flush()
+	sp := sink.spans[0]
+	if !sp.IsError {
+		t.Error("failed tool call did not mark the span status Error")
+	}
+	if got := sp.Attributes["meept.tool.blocked"]; got != "true" {
+		t.Errorf("meept.tool.blocked = %q, want true", got)
+	}
+	if got := sp.Attributes["error.message"]; len([]rune(got)) != 256 {
+		t.Errorf("error.message = %d runes, want exactly 256", len([]rune(got)))
+	}
+	if got := sp.Attributes["error.type"]; got != "_OTHER" {
+		t.Errorf("error.type = %q, want _OTHER", got)
+	}
+	allowed := map[string]bool{
+		"gen_ai.operation.name": true, "gen_ai.tool.name": true,
+		"gen_ai.tool.call.id": true, "meept.tool.args.keys": true,
+		"meept.tool.args.bytes": true, "meept.tool.blocked": true,
+		"error.type": true, "error.message": true,
+	}
+	for k := range sp.Attributes {
+		if !allowed[k] {
+			t.Errorf("unexpected attribute key %q (allowlist violation)", k)
+		}
+	}
+}
+
+// T1(c): nil producer / nil exporter - both hop methods are no-ops.
+func TestProducerHopSpansNilSafe(t *testing.T) {
+	var nilP *TraceProducer
+	nilP.RecordLLMCallSpan(hopLLMCallSpec())
+	nilP.RecordToolCallSpan(ToolCallSpanSpec{TraceID: hopTraceHex})
+	p := NewTraceProducer(nil, 1.0, nil)
+	p.RecordLLMCallSpan(hopLLMCallSpec())
+	p.RecordToolCallSpan(ToolCallSpanSpec{TraceID: hopTraceHex})
+}
+
+// T1(d): the sampler decision is deterministic per TRACE - a rejected trace
+// drops the turn span AND both hop spans; an accepted trace keeps all.
+func TestProducerSamplerDropsWholeTrace(t *testing.T) {
+	p, sink, exp := newHopProducer()
+	rejected, _ := hex.DecodeString(hopTraceHex)
+	var rejectedID [16]byte
+	copy(rejectedID[:], rejected)
+	p.sampler = func(sp Span) bool { return sp.TraceID != rejectedID }
+
+	p.RecordTurnSpan(TurnSpanSpec{ConversationID: "conv-1", Status: "completed", TraceID: hopTraceHex})
+	p.RecordLLMCallSpan(hopLLMCallSpec())
+	p.RecordToolCallSpan(ToolCallSpanSpec{TraceID: hopTraceHex, SpanID: hopToolSpHex, Success: true})
+	exp.Flush()
+	if len(sink.spans) != 0 {
+		t.Fatalf("rejected trace exported %d spans, want 0", len(sink.spans))
+	}
+
+	// A different trace shares the decision: all three kept.
+	p.RecordTurnSpan(TurnSpanSpec{ConversationID: "conv-2", Status: "completed", TraceID: hopTraceBHex})
+	bLLM := hopLLMCallSpec()
+	bLLM.TraceID = hopTraceBHex
+	bLLM.SpanID = hopSpanBHex
+	p.RecordLLMCallSpan(bLLM)
+	p.RecordToolCallSpan(ToolCallSpanSpec{TraceID: hopTraceBHex, SpanID: hopSpanBHex, Success: true})
+	exp.Flush()
+	if len(sink.spans) != 3 {
+		t.Fatalf("accepted trace exported %d spans, want 3", len(sink.spans))
+	}
+	for i, sp := range sink.spans {
+		if got := hexEncode(sp.TraceID[:]); got != hopTraceBHex {
+			t.Errorf("span %d trace id = %s, want %s (trace torn)", i, got, hopTraceBHex)
+		}
+	}
+}
+
+// T1(e): TurnSpanSpec with minted IDs adopts them (byte-identical to the
+// hop spans' trace); with "" the exporter random-fills as before.
+func TestProducerTurnSpanAdoptsMintedIDs(t *testing.T) {
+	p, sink, exp := newHopProducer()
+	p.RecordTurnSpan(TurnSpanSpec{
+		ConversationID: "conv-1",
+		Status:         "completed",
+		DurationMS:     1500,
+		TraceID:        hopTraceHex,
+		TurnSpanID:     hopSpanHex,
+	})
+	p.RecordTurnSpan(TurnSpanSpec{ConversationID: "conv-2", Status: "completed"}) // legacy: no IDs
+	exp.Flush()
+	if len(sink.spans) != 2 {
+		t.Fatalf("sink got %d spans, want 2", len(sink.spans))
+	}
+	adopted, legacy := sink.spans[0], sink.spans[1]
+	if got := hexEncode(adopted.TraceID[:]); got != hopTraceHex {
+		t.Errorf("adopted trace id = %s, want %s", got, hopTraceHex)
+	}
+	if got := hexEncode(adopted.SpanID[:]); got != hopSpanHex {
+		t.Errorf("adopted span id = %s, want %s", got, hopSpanHex)
+	}
+	if legacy.TraceID == ([16]byte{}) || legacy.SpanID == ([8]byte{}) {
+		t.Error("legacy turn span did not get random fill for empty IDs")
+	}
+	if got := hexEncode(legacy.TraceID[:]); got == hopTraceHex {
+		t.Error("legacy turn span adopted the previous span's trace id")
+	}
+}
+
+// Wire-level: the llm.call and tool.call spans survive the real OTLP
+// protobuf encode/decode chain with their exact IDs, error status, and
+// status description.
+func TestTraceSinkEncodesHopSpans(t *testing.T) {
+	srv, captures := newCaptureTraceServer(t)
+	sink := NewOTLPTraceHTTPSink(srv.URL, nil, nil)
+	exp := NewTraceExporter(TraceExporterConfig{}, sink)
+	p := NewTraceProducer(exp, 1.0, nil)
+
+	llmEv := hopLLMCallSpec()
+	llmEv.IsError = true
+	llmEv.ErrorMessage = "boom"
+	p.RecordLLMCallSpan(llmEv)
+	p.RecordToolCallSpan(ToolCallSpanSpec{
+		TraceID: hopTraceHex, SpanID: hopToolSpHex, ParentSpanID: hopParentHex,
+		ToolName: "read_file", ToolCallID: "call-1",
+		ArgumentsKeys: "path", ArgumentsBytes: 9, Success: true,
+	})
+	exp.Flush()
+
+	got := captures()
+	if len(got) != 1 || len(got[0].spans) != 2 {
+		t.Fatalf("captures = %+v, want 1 request with 2 spans", got)
+	}
+	llmSpan := got[0].spans[0]
+	if llmSpan.name != "llm.call" || llmSpan.traceID != hopTraceHex ||
+		llmSpan.spanID != hopSpanHex || llmSpan.parentID != hopParentHex {
+		t.Errorf("llm.call span decode = %+v", llmSpan)
+	}
+	if !llmSpan.errorStatus {
+		t.Error("llm.call error span missing STATUS_CODE_ERROR")
+	}
+	if llmSpan.statusMessage != "boom" {
+		t.Errorf("status description = %q, want boom", llmSpan.statusMessage)
+	}
+	if llmSpan.attrs["error.message"] != "boom" {
+		t.Errorf("error.message attr = %q, want boom", llmSpan.attrs["error.message"])
+	}
+	toolSpan := got[0].spans[1]
+	if toolSpan.name != "tool.call" || toolSpan.traceID != hopTraceHex ||
+		toolSpan.spanID != hopToolSpHex {
+		t.Errorf("tool.call span decode = %+v", toolSpan)
+	}
+	if toolSpan.attrs["gen_ai.tool.name"] != "read_file" {
+		t.Errorf("gen_ai.tool.name attr = %q", toolSpan.attrs["gen_ai.tool.name"])
+	}
+}
+
+// T3(a): a ToolCallSpanSpec built from an end event whose raw arguments
+// carried values exposes ONLY ArgumentsKeys and ArgumentsBytes - no value
+// substring reaches any attribute.
+func TestProducerToolSpanNeverCarriesArgumentValues(t *testing.T) {
+	p, sink, exp := newHopProducer()
+	// The raw arguments contained values like /etc/shadow and x; only the
+	// shape fields survive into the spec (leaf-01 shape-only contract).
+	ev := ToolCallSpanSpec{
+		TraceID:        hopTraceHex,
+		SpanID:         hopToolSpHex,
+		ToolName:       "read_file",
+		ToolCallID:     "call-3",
+		ArgumentsKeys:  "path,token",
+		ArgumentsBytes: 38,
+		Success:        false,
+		Error:          "permission denied",
+	}
+	p.RecordToolCallSpan(ev)
+	exp.Flush()
+	sp := sink.spans[0]
+	secrets := []string{"shadow", "x", "etc"}
+	for k, v := range sp.Attributes {
+		for _, s := range secrets {
+			if k != "meept.tool.args.keys" && s != "x" && strings.Contains(v, s) {
+				t.Errorf("attribute %q carries value substring %q", k, s)
+			}
+		}
+	}
+	if v := sp.Attributes["meept.tool.args.keys"]; v != "path,token" {
+		t.Errorf("args.keys = %q, want key names only", v)
+	}
+	if v := sp.Attributes["meept.tool.args.bytes"]; v != "38" {
+		t.Errorf("args.bytes = %q, want byte count only", v)
+	}
+}

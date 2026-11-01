@@ -102,16 +102,24 @@ type ToolExecutionStartData struct {
 func (ToolExecutionStartData) agentEventData() {}
 
 // ToolExecutionEndData is emitted after a tool execution completes.
+// TraceID/SpanID/ArgumentsKeys/ArgumentsBytes (llm-hop-tracing leaf 01,
+// mirror of agent.ToolExecutionEndData): the turn's trace correlation, the
+// per-call span, and the SHAPE-ONLY argument fingerprint (sorted key names +
+// raw byte length; raw argument VALUES never ride these fields).
 type ToolExecutionEndData struct {
-	ToolCallID  string        `json:"tool_call_id"`
-	ToolName    string        `json:"tool_name"`
-	Success     bool          `json:"success"`
-	Result      string        `json:"result"`
-	Error       string        `json:"error,omitempty"`
-	Cached      bool          `json:"cached"`
-	Duration    time.Duration `json:"duration"`
-	Blocked     bool          `json:"blocked"`
-	BlockReason string        `json:"block_reason,omitempty"`
+	ToolCallID     string        `json:"tool_call_id"`
+	ToolName       string        `json:"tool_name"`
+	Success        bool          `json:"success"`
+	Result         string        `json:"result"`
+	Error          string        `json:"error,omitempty"`
+	Cached         bool          `json:"cached"`
+	Duration       time.Duration `json:"duration"`
+	Blocked        bool          `json:"blocked"`
+	BlockReason    string        `json:"block_reason,omitempty"`
+	TraceID        string        `json:"trace_id,omitempty"`
+	SpanID         string        `json:"span_id,omitempty"`
+	ArgumentsKeys  string        `json:"arguments_keys,omitempty"`
+	ArgumentsBytes int           `json:"arguments_bytes,omitempty"`
 }
 
 func (ToolExecutionEndData) agentEventData() {}

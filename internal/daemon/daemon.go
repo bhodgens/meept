@@ -2631,6 +2631,14 @@ func convertEventData(data agent.AgentEventData) any {
 			Duration:    d.Duration,
 			Blocked:     d.Blocked,
 			BlockReason: d.BlockReason,
+			// Leaf 01 (llm-hop-tracing): trace/span correlation and the
+			// shape-only argument fingerprints ride through the adapter so
+			// daemon-side metrics consumers see the same hop identity the
+			// raw-topic trace producer decodes.
+			TraceID:        d.TraceID,
+			SpanID:         d.SpanID,
+			ArgumentsKeys:  d.ArgumentsKeys,
+			ArgumentsBytes: d.ArgumentsBytes,
 		}
 	default:
 		return data

@@ -2,10 +2,13 @@ package daemon
 
 import (
 	"bytes"
+	"encoding/hex"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +16,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
-	"github.com/caimlas/meept/internal/metrics"
+	appmetrics "github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -81,7 +84,7 @@ func TestOTLPTracesWiringEnabledExportsTurnAndStepSpans(t *testing.T) {
 		SampleRate:     1.0,
 		ExportInterval: 50 * time.Millisecond,
 	}
-	exp, _, subs := wireOTLPTraces(cfg, b, slog.Default())
+	exp, _, subs := wireOTLPTraces(cfg, b, nil, slog.Default())
 	if exp == nil {
 		t.Fatal("enabled wiring returned nil exporter")
 	}
@@ -126,7 +129,7 @@ func TestOTLPTracesWiringDisabledIsInert(t *testing.T) {
 	b := bus.New(nil, nil)
 
 	cfg := config.OTLPTracesConfig{} // Enabled=false — the shipped default
-	exp, producer, subs := wireOTLPTraces(cfg, b, slog.Default())
+	exp, producer, subs := wireOTLPTraces(cfg, b, nil, slog.Default())
 	if exp != nil {
 		t.Fatal("disabled wiring constructed an exporter")
 	}
@@ -174,7 +177,7 @@ func TestOTLPTracesExportFailureNeverBlocksTurn(t *testing.T) {
 		Endpoint:       srv.URL,
 		ExportInterval: 20 * time.Millisecond,
 	}
-	exp, _, subs := wireOTLPTraces(cfg, b, slog.Default())
+	exp, _, subs := wireOTLPTraces(cfg, b, nil, slog.Default())
 	defer stopOTLPTraces(b, exp, subs)
 
 	// A burst of terminal events while the receiver is down: none of these
@@ -210,6 +213,171 @@ func stepMsg(t *testing.T, payload string) *models.BusMessage {
 	return msg
 }
 
-// Silence the unused-import risk if metrics becomes unneeded in future
-// edits of this file.
-var _ = metrics.DefaultTraceServiceName
+// Silence the unused-import risk if the metrics package becomes unneeded in
+// future edits of this file.
+var _ = appmetrics.DefaultTraceServiceName
+
+// ---------------------------------------------------------------------------
+// Leaf 03 (llm-hop-tracing): observer bridge + tool-execution-end wiring.
+// ---------------------------------------------------------------------------
+
+// T2(a): disabled config attaches NO observer and logs exactly one disabled
+// Warn line.
+func TestOTLPTracesWiringDisabledNoObserver(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	b := bus.New(nil, nil)
+	cfg := config.OTLPTracesConfig{} // disabled - the shipped default
+	exp, producer, subs, obs := wireOTLPTracesWithObserver(cfg, b, nil, logger)
+	if exp != nil || producer != nil || subs != nil || obs != nil {
+		t.Fatal("disabled wiring constructed pipeline pieces or attached an observer")
+	}
+	warns := 0
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(line, "OTLP trace export disabled") {
+			warns++
+		}
+	}
+	if warns != 1 {
+		t.Errorf("disabled Warn lines = %d, want exactly 1", warns)
+	}
+}
+
+// T2(b): enabled config attaches an observer; a produced LLMCallRecord
+// routed through it results in a queued llm.call span with the record's
+// decoded values.
+func TestOTLPTracesWiringObserverProducesLLMCallSpan(t *testing.T) {
+	cap := newCaptureTraces(t)
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	b := bus.New(nil, nil)
+	cfg := config.OTLPTracesConfig{
+		Enabled:        true,
+		Endpoint:       cap.srv.URL,
+		SampleRate:     1.0,
+		ExportInterval: 50 * time.Millisecond,
+	}
+	exp, _, subs, obs := wireOTLPTracesWithObserver(cfg, b, nil, logger)
+	if exp == nil || obs == nil {
+		t.Fatal("enabled wiring returned nil exporter or nil observer")
+	}
+	defer stopOTLPTraces(b, exp, subs)
+	infos := 0
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(line, "OTLP trace export enabled") {
+			infos++
+		}
+	}
+	if infos != 1 {
+		t.Errorf("enabled Info lines = %d, want exactly 1", infos)
+	}
+
+	// When: one completed LLM call flows through the observer (the
+	// llm-call-record -> span bridge; no synchronous llm-path hook).
+	obs(appmetrics.LLMCallRecord{
+		Timestamp:  time.Now(),
+		Provider:   "openai",
+		ModelID:    "test-model",
+		AgentID:    "agent-1",
+		SessionID:  "session-abc",
+		TokensSent: 52, TokensRecv: 47,
+		LatencyMs: 1200,
+		TraceID:   "a1b2c3d4e5f60123456789abcdef0123",
+		SpanID:    "b1b2b3b4b5b6b7b8",
+	})
+	waitTraceBodies(t, cap, 1)
+	if !bytes.Contains(cap.bodies[0], []byte("llm.call")) ||
+		!bytes.Contains(cap.bodies[0], []byte("test-model")) {
+		t.Error("llm.call span missing name/model on the wire")
+	}
+}
+
+// T2(c): a bus message on agent.event.tool_execution_end (AgentEvent JSON
+// envelope carrying ToolExecutionEndData) yields one tool.call span with
+// the decoded values; a malformed envelope neither panics nor emits.
+func TestOTLPTracesWiringToolExecutionEndSpan(t *testing.T) {
+	cap := newCaptureTraces(t)
+	b := bus.New(nil, nil)
+	cfg := config.OTLPTracesConfig{
+		Enabled:        true,
+		Endpoint:       cap.srv.URL,
+		SampleRate:     1.0,
+		ExportInterval: 50 * time.Millisecond,
+	}
+	exp, _, subs, _ := wireOTLPTracesWithObserver(cfg, b, nil, slog.Default())
+	defer stopOTLPTraces(b, exp, subs)
+
+	// Build the AgentEvent envelope the emitter bridge publishes (Payload =
+	// serialized agent.AgentEvent JSON; Data holds ToolExecutionEndData).
+	env := map[string]any{
+		"type":            "tool_execution_end",
+		"agent_id":        "agent-1",
+		"conversation_id": "conv-1",
+		"data": map[string]any{
+			"tool_call_id":    "call-9",
+			"tool_name":       "read_file",
+			"success":         true,
+			"trace_id":        "a1b2c3d4e5f60123456789abcdef0123",
+			"span_id":         "d1d2d3d4d5d6d7d8",
+			"arguments_keys":  "path,token",
+			"arguments_bytes": 38,
+		},
+	}
+	payload, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("envelope marshal: %v", err)
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{})
+	if err != nil {
+		t.Fatalf("bus message: %v", err)
+	}
+	msg.Payload = payload
+	b.Publish("agent.event.tool_execution_end", msg)
+	waitTraceBodies(t, cap, 1)
+	if !bytes.Contains(cap.bodies[0], []byte("tool.call")) ||
+		!bytes.Contains(cap.bodies[0], []byte("read_file")) ||
+		!bytes.Contains(cap.bodies[0], []byte("call-9")) {
+		t.Error("tool.call span missing name/tool identity on the wire")
+	}
+
+	// Malformed envelope: no panic, no span.
+	for _, bad := range []string{`{not json`, `{"type":"other"}`, `[]`} {
+		m2, _ := models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{})
+		m2.Payload = []byte(bad)
+		b.Publish("agent.event.tool_execution_end", m2)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := cap.count(); got > 2 {
+		t.Errorf("malformed envelopes produced spans (bodies = %d)", got)
+	}
+}
+
+// T2(d): an enabled wiring's turn event carrying trace_id produces a
+// chat.turn span with that trace id on the wire.
+func TestOTLPTracesWiringTurnSpanCarriesTraceID(t *testing.T) {
+	cap := newCaptureTraces(t)
+	b := bus.New(nil, nil)
+	cfg := config.OTLPTracesConfig{
+		Enabled:        true,
+		Endpoint:       cap.srv.URL,
+		SampleRate:     1.0,
+		ExportInterval: 50 * time.Millisecond,
+	}
+	exp, _, subs, _ := wireOTLPTracesWithObserver(cfg, b, nil, slog.Default())
+	defer stopOTLPTraces(b, exp, subs)
+
+	bus.PublishT(b, agent.TopicTurnTerminal, "test", agent.TurnTerminalEvent{
+		ConversationID: "conv-trace",
+		Status:         "completed",
+		TraceID:        "a1b2c3d4e5f60123456789abcdef0123",
+	})
+	waitTraceBodies(t, cap, 1)
+	// The trace id rides the OTLP protobuf as its 16 raw bytes.
+	rawTrace, err := hex.DecodeString("a1b2c3d4e5f60123456789abcdef0123")
+	if err != nil {
+		t.Fatalf("trace hex: %v", err)
+	}
+	if !bytes.Contains(cap.bodies[0], rawTrace) {
+		t.Error("chat.turn span missing the minted trace id on the wire")
+	}
+}

@@ -367,7 +367,15 @@ func encodeSpan(sp Span) []byte {
 	}
 	out = appendSpanAttributes(out, sp)
 	if sp.IsError {
+		// Leaf 03 (RESEARCH-FINDINGS note E1): on a failed operation the
+		// span status DESCRIPTION carries the error message (the
+		// convention-preferred channel); the truncated message rides the
+		// error.message attribute in addition for SQL-join workflows. The
+		// producer truncates before it ever gets here.
 		var status []byte
+		if msg := sp.Attributes["error.message"]; msg != "" {
+			status = appendString(status, 1, msg) // Status.message field 1
+		}
 		status = appendVarint(status, 2<<3|0) // Status.code field 2, varint
 		status = appendVarint(status, 2)      // STATUS_CODE_ERROR
 		out = appendBytesField(out, 15, status)
