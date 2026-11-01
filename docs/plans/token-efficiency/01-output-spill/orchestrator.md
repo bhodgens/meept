@@ -67,9 +67,9 @@ Inherited from ../master.md Coding Conventions. Branch-specific:
 
 | Child | Status | Commit | Notes |
 |-------|--------|--------|-------|
-| 00T-gate | PENDING | - | |
-| 01-shell-tail-spill | PENDING | - | |
-| 02-spill-sweep | PENDING | - | |
+| 00T-gate | TESTS_VALIDATED | 83571ede | T1/T2 RED behaviorally; T3 green; T4 deferred to leaf 02 |
+| 01-shell-tail-spill | COMPLETE | f71bbe8e | tail-keep both sites; C1 note; FullOutputPath; best-effort spill; SetSpillWriter nil-guard pinned. components.go wiring swept into HEAD by sibling hitl commit 71312c96 - this leaf's spill_wiring.go repairs the resulting broken clean-checkout build |
+| 02-spill-sweep | COMPLETE | f71bbe8e | SweepToolSpills pure fn (age+size passes, 1h in-flight guard, deterministic) + DefaultToolSpillRoot + daemon startup/6h ticker wiring in spill_wiring.go |
 
 ## Integration Test Plan
 

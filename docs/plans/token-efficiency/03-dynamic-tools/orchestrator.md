@@ -166,7 +166,7 @@ conventions); no daemon behavior changes from leaf 00A.
 | Child | Status | Commit | Notes |
 |-------|--------|--------|-------|
 | 00A-token-audit | COMPLETE | - | report archived to docs/research/token-efficiency-2026-10/meept-token-audit.md; key numbers: bare-turn indexed 9,314 est-tok (0.51x pi 18.2K anchor); tool defs indexed 7,800 vs full 13,421; shape B saves 5,685, C(N=10) saves 4,222, D(N=25) saves 1,110; D break-even N=30->31. Co-occurrence evidence skipped (no in-repo telemetry) - 00D flags it |
-| 00D-design-decision | GATED | - | needs 00A + Q1/Q2 |
+| 00D-design-decision | COMPLETE | 52d6f9dd | docs/research/dynamic-tools-design.md - all 7 sections + 7-leaf decomposition; frontier key pinned (models.json5 "frontier" capability tag, llm.CapFrontier const); default N=25 from 00A break-even; flag-off = byte-identical legacy, flag-on default = predicted |
 
 ## Integration Test Plan
 
