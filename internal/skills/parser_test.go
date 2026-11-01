@@ -431,6 +431,58 @@ func TestParseSkillText_StateFlag(t *testing.T) {
 	}
 }
 
+// c4HideField locates the not-yet-added Skill.DisableModelInvocation field by
+// name via reflection so this gate test COMPILES against the current code and
+// fails RED on an assertion (the field is absent), rather than build-failing.
+// Leaf 01 T1 adds `DisableModelInvocation bool` to Skill and wires it in the
+// parser; once that lands this gate turns GREEN.
+func c4HideField(t *testing.T, s *Skill) bool {
+	t.Helper()
+	f := reflect.ValueOf(*s).FieldByName("DisableModelInvocation")
+	if !f.IsValid() {
+		t.Fatalf("Skill has no DisableModelInvocation field: the " +
+			"`disable-model-invocation` frontmatter key is not parsed yet (C4 / leaf 01 T1)")
+	}
+	if f.Kind() != reflect.Bool {
+		t.Fatalf("Skill.DisableModelInvocation is not a bool (got %s)", f.Kind())
+	}
+	return f.Bool()
+}
+
+// TestSkillsFrontmatterDisableModelInvocation pins the NEW frontmatter key
+// `disable-model-invocation` (token-efficiency branch 04, C4). present=true ⇒
+// hidden; present=false or absent ⇒ visible. RED today: the key is not parsed
+// (Skill has no such field), so the reflection assertion fails; GREEN after
+// leaf 01 adds the field and parser wiring.
+func TestSkillsFrontmatterDisableModelInvocation(t *testing.T) {
+	// Key present and true: skill must be flagged hidden from the C4 listing.
+	s, err := ParseSkillText("---\nname: t\ndescription: d\ndisable-model-invocation: true\n---\nbody")
+	if err != nil {
+		t.Fatalf("parse with disable-model-invocation: %v", err)
+	}
+	if !c4HideField(t, s) {
+		t.Errorf("disable-model-invocation: true must set the hide flag")
+	}
+
+	// Key present and false: must stay visible.
+	sF, err := ParseSkillText("---\nname: t\ndescription: d\ndisable-model-invocation: false\n---\nbody")
+	if err != nil {
+		t.Fatalf("parse with disable-model-invocation false: %v", err)
+	}
+	if c4HideField(t, sF) {
+		t.Errorf("disable-model-invocation: false must keep the skill visible")
+	}
+
+	// Key absent: defaults to visible (unknown-key tolerance, old files unaffected).
+	sA, err := ParseSkillText("---\nname: t\ndescription: d\n---\nbody")
+	if err != nil {
+		t.Fatalf("parse without disable-model-invocation: %v", err)
+	}
+	if c4HideField(t, sA) {
+		t.Errorf("absent disable-model-invocation must default to visible (false)")
+	}
+}
+
 func TestParseSkillText_LeadingWhitespace(t *testing.T) {
 	text := `
 
