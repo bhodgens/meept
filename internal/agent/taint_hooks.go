@@ -18,8 +18,27 @@ type TaintBeforeToolCall struct {
 	config  TaintHookConfig
 }
 
+// TaintHookMode selects how checkMessageTaint reacts to a recorded
+// untrusted segment reaching the agent-message sink (R0 decision D3:
+// warn-first rollout, per docs/research/agent-boundary-taint-findings.md).
+type TaintHookMode int
+
+const (
+	// TaintModeMonitor is the zero value and the default: tainted
+	// handoffs are logged at Warn but never blocked. This is the
+	// audit-first stage that measures the false-positive rate on real
+	// benign collaboration before enforcement is armed.
+	TaintModeMonitor TaintHookMode = iota
+	// TaintModeEnforce blocks the send when a recorded untrusted
+	// segment overlaps the outgoing content.
+	TaintModeEnforce
+)
+
 // TaintHookConfig holds configuration for taint tracking hooks.
 type TaintHookConfig struct {
+	// Mode governs the per-handoff untrusted-segment check
+	// (checkMessageTaint). Zero value is TaintModeMonitor (R0 D3).
+	Mode                TaintHookMode
 	BlockUserInputShell bool
 	BlockSecretNetwork  bool
 	BlockUntrustedAgent bool
@@ -152,7 +171,22 @@ func (t *TaintBeforeToolCall) checkNetworkTaint(ctx context.Context, toolCall ll
 	return BlockResult{}
 }
 
-// checkMessageTaint checks if message contains tainted untrusted data
+// checkMessageTaint applies a per-handoff (segment) taint decision for
+// cross-agent messages (R0 decision D1: segment labeling, never
+// whole-message taint; plan 01-taint-redesign).
+//
+// Instead of labeling the ENTIRE outgoing content TaintUntrusted, the check
+// consults only the tracker-RECORDED untrusted segments (recorded at
+// handoff construction time by leaf 02 via
+// ExtendedTracker.RecordUntrustedSegment, keyed "collab:<driver>:<role>")
+// that actually overlap this message's content. A clean, driver-authored
+// handoff therefore passes even when unrelated segments are recorded; a
+// handoff carrying a recorded untrusted segment hits the agent_message
+// sink, which rejects TaintUntrusted.
+//
+// Reaction follows config.Mode: TaintModeMonitor (default, R0 D3
+// warn-first) logs at Warn without blocking; TaintModeEnforce blocks with
+// a hard security error.
 func (t *TaintBeforeToolCall) checkMessageTaint(ctx context.Context, toolCall llm.ToolCall) BlockResult {
 	var args struct {
 		Recipient string `json:"recipient"`
@@ -163,22 +197,45 @@ func (t *TaintBeforeToolCall) checkMessageTaint(ctx context.Context, toolCall ll
 		return BlockResult{}
 	}
 
-	// For cross-agent messages, check for untrusted taint
-	if strings.HasPrefix(args.Recipient, "agent:") && t.config.BlockUntrustedAgent {
-		// Check if content might be from untrusted source
-		tv := taint.NewTaintedValue(args.Content, []taint.TaintLabel{taint.TaintUntrusted}, "agent_message")
-		sink := taint.AgentMessageSink()
+	// Only cross-agent recipients are handoffs subject to this policy.
+	if !strings.HasPrefix(args.Recipient, "agent:") {
+		t.logger.Debug("message taint check passed",
+			"recipient", args.Recipient,
+		)
+		return BlockResult{}
+	}
 
-		if violation := t.tracker.CheckSink(tv, sink); violation != nil {
-			t.logger.Warn("agent message blocked: contains untrusted data",
+	// Per-segment decision: only tracker-recorded untrusted segments
+	// overlapping THIS content can reach the sink. Nothing here labels
+	// the whole message.
+	segments := taint.SegmentLabelsFor(t.tracker, args.Content)
+	if len(segments) == 0 {
+		t.logger.Debug("message taint check passed",
+			"recipient", args.Recipient,
+		)
+		return BlockResult{}
+	}
+
+	sink := taint.AgentMessageSink()
+	for i := range segments {
+		if violation := t.tracker.CheckSink(&segments[i], sink); violation != nil {
+			if t.config.Mode == TaintModeEnforce {
+				t.logger.Warn("agent message blocked: contains untrusted segment",
+					"recipient", args.Recipient,
+					"segment_source", segments[i].Source,
+					"violation", violation.Error(),
+				)
+				return BlockResult{
+					Block:     true,
+					Reason:    "message contains untrusted segment from " + segments[i].Source,
+					HardError: true,
+				}
+			}
+			t.logger.Warn("agent message taint (monitor): untrusted segment not blocked",
 				"recipient", args.Recipient,
+				"segment_source", segments[i].Source,
 				"violation", violation.Error(),
 			)
-			return BlockResult{
-				Block:     true,
-				Reason:    "message contains untrusted data",
-				HardError: true,
-			}
 		}
 	}
 

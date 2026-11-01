@@ -162,12 +162,16 @@ func NetFetchSink() *TaintSink {
 }
 
 // AgentMessageSink returns a sink for sending messages to another agent.
-// It blocks secrets from being transmitted.
+// It blocks secrets from being transmitted and untrusted segments from
+// flowing cross-agent (per-handoff taint labeling; R0 decisions D1/D3 in
+// docs/research/agent-boundary-taint-findings.md). TaintUserInput still
+// passes: ordinary user input may legitimately be relayed to a peer agent.
 func AgentMessageSink() *TaintSink {
 	return &TaintSink{
 		Name: "agent_message",
 		BlockedLabels: []TaintLabel{
 			TaintSecret,
+			TaintUntrusted,
 		},
 	}
 }
@@ -197,6 +201,9 @@ type Tracker struct {
 	logger    *slog.Logger
 	variables map[string]*TaintedValue
 	contexts  []string // Stack for nested scopes
+	// segments holds per-source recorded untrusted handoff segments
+	// (per-handoff taint labeling; see segments.go). Created lazily.
+	segments map[string][]*untrustedSegment
 }
 
 // NewTracker creates a new taint tracker.
