@@ -82,17 +82,23 @@ func newTestDaemon(t *testing.T, ctx context.Context, nodeID string) *testDaemon
 		workspace.WithPatchResolver(&testPatchResolverAdapter{rm: rm}),
 	)
 
+	// GRPCTransport config (built before the bridge so its Security field
+	// can drive the bridge's signature requirement).
+	clusterCfg := &cluster.Config{
+		NodeID:    nodeID,
+		ClusterID: "test-cluster",
+	}
+
 	// ExecutorBridge.
 	eb := cluster.NewExecutorBridge(nodeID, logger)
 	eb.SetMetrics(metrics)
 	eb.SetResourceManager(rm)
 	eb.SetWorkspaceManager(wm)
-
-	// GRPCTransport.
-	clusterCfg := &cluster.Config{
-		NodeID:    nodeID,
-		ClusterID: "test-cluster",
-	}
+	// Mirror the helper's cluster.Config into the bridge. The bridge defaults
+	// fail-closed (require signatures); the helper's config has Security unset
+	// (RequireNodeSignatures=false), so the bridge must end up allowing unsigned
+	// jobs. This matches production wiring in cluster_resources_wiring.go.
+	eb.SetRequireDispatchSignatures(clusterCfg.Security.RequireNodeSignatures)
 	transport := cluster.NewGRPCTransport(clusterCfg, nodeID, logger)
 	transport.SetResourceManager(&testResourceProviderAdapter{rm: rm})
 	transport.SetWorkspaceManager(&testWorkspaceProviderAdapter{wm: wm})

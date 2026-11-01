@@ -98,6 +98,11 @@ func (c *Components) wireClusterResources(ctx context.Context) error {
 	}
 	c.ExecutorBridge.SetResourceManager(c.ResourceManager)
 	c.ExecutorBridge.SetWorkspaceManager(c.WorkspaceManager)
+	// Mirror the operator's explicit config into the bridge. The bridge's
+	// NewExecutorBridge defaults dispatchSignatures:true (fail-closed); this
+	// call respects the cluster.security.require_node_signatures knob so an
+	// operator who sets it false actually disables signature enforcement.
+	c.ExecutorBridge.SetRequireDispatchSignatures(c.Config.Cluster.Security.RequireNodeSignatures)
 
 	// AgentInvoker adapter wrapping the agent loop.
 	if c.AgentLoop != nil {
