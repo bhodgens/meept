@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/agent/turnjournal"
 	"github.com/caimlas/meept/internal/auth"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
@@ -2276,6 +2277,28 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 
+	// Turn-journal boot rehydrate (turn-journal tree leaf 03, master
+	// C3/C6): runs AFTER the claim reset above so every reset job is
+	// pending again -- an open journal run whose job was crash-orphaned
+	// re-enqueues here through the EXISTING queue path with its ORIGINAL
+	// job ID, which is what keeps the queue's CompleteAttempt /
+	// CompletionIsFresh claim-token dedup authoritative for any completion
+	// race (research F5 idempotency; no dedup re-implemented here). A
+	// resumed turn then rides the ordinary worker path where leaf 02's
+	// skip seam restores journaled step results. Best-effort per the
+	// TurnParker.reArm pattern: every journal failure logs and boot
+	// proceeds; rows stay on disk for the next boot. Flag off or a store
+	// that failed to open skips the whole block (R7: no transport or gate
+	// ordering moves -- this sits after the claim reset and before
+	// status=running, exactly where the master contract pins it).
+	if d.fullConfig != nil && d.fullConfig.Daemon.TurnJournalEnabled &&
+		d.components != nil && d.components.TurnJournal != nil {
+		resumed := d.rehydrateTurnJournal(ctx)
+		if resumed > 0 {
+			d.logger.Info("turn journal: resumed interrupted turn(s)", "count", resumed)
+		}
+	}
+
 	// Start HTTP server for menubar app — moved earlier in Run() (right
 	// after components.Start) so the GUI can connect and enqueue during the
 	// runtime/classifier boot window.
@@ -2314,6 +2337,101 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return d.shutdown()
 		}
 	}
+}
+
+// rehydrateTurnJournal is the Rehydrate call site body (turn-journal
+// leaf 03, master C3): requeue every open journal run through the
+// EXISTING queue path, then run the closed-run retention sweep. The
+// requeue closure mirrors the chat/queue submission surface: it looks up
+// the turn's ORIGINAL job by task ID (jobs keep their ID across
+// requeue/claim -- that is the whole interlock), resets it to pending
+// when it is stuck in a claim state the claim reset above could not
+// cover (e.g. failed), and re-enqueues with the SAME ID so the queue's
+// CompleteAttempt/CompletionIsFresh claim-token dedup stays the ONLY
+// completion dedup (research F4/F5 -- nothing here re-implements it).
+// A turn with no surviving queue row (compacted away) is skipped with a
+// Warn: fabricating a new job ID would break the interlock.
+//
+// Best-effort: every failure logs and returns normally -- boot never
+// fails from journal errors. The prune runs unconditionally after the
+// requeue pass (an OpenRuns read failure aborts the requeue pass but
+// still must not skip retention).
+func (d *Daemon) rehydrateTurnJournal(ctx context.Context) (resumed int) {
+	if d.components == nil || d.components.TurnJournal == nil {
+		return 0
+	}
+	pq, ok := d.components.Queue.(*queue.PersistentQueue)
+	if !ok || pq == nil {
+		d.logger.Warn("turn journal: rehydrate skipped (queue is not the persistent queue)")
+		return 0
+	}
+
+	requeue := func(turnID, sessionID string, payload []byte) error {
+		jobs, err := pq.ListByTaskID(ctx, turnID)
+		if err != nil {
+			return fmt.Errorf("lookup original job: %w", err)
+		}
+		var job *queue.Job
+		for _, j := range jobs {
+			if j != nil && j.Type == queue.JobTypeProjectTask {
+				job = j
+				break
+			}
+		}
+		if job == nil {
+			d.logger.Warn("turn journal: no queue job for open run (skipping; not fabricating a new ID)",
+				"turn_id", turnID,
+				"session_id", sessionID,
+			)
+			return nil
+		}
+
+		// A job left in failed (or claimed/processing the claim reset
+		// raced past) cannot claim again until it is pending -- its row
+		// already exists, so the reset back to pending IS the requeue
+		// (the claim reset above already woke the wake waiters; the
+		// pending case below relies on that same wake). Jobs keep their
+		// ORIGINAL ID across the reset, which is the interlock.
+		switch job.State {
+		case queue.StatePending:
+			// Already claimable: the requeue is a no-op enqueue that
+			// still counts once (T1's "already-pending requeue counts
+			// once and does not double-count").
+			return nil
+		case queue.StateClaimed, queue.StateProcessing, queue.StateFailed:
+			if _, err := pq.ResetStaleClaimsAtStartup(ctx, time.Now().Add(-time.Second)); err != nil {
+				return fmt.Errorf("reset job to pending: %w", err)
+			}
+			return nil
+		default:
+			// completed/dead: the queue's own state machine owns the
+			// turn's completion (T3 interlock) -- nothing to resume, and
+			// the run must NOT count as resumed. Returning an error here
+			// routes through Rehydrate's Warn-and-continue so the row is
+			// surfaced, never dropped silently; the journal run stays
+			// open (harmless: every later boot takes this same branch
+			// until boot-time retention prunes it via CloseRun aging --
+			// and if it is not yet closed, the queue's terminal state is
+			// the authoritative answer per research F4/D2).
+			d.logger.Warn("turn journal: open run's job is already terminal at the queue (dedup interlock: no resume)",
+				"turn_id", turnID,
+				"job_id", job.ID,
+				"job_state", string(job.State),
+			)
+			return fmt.Errorf("job %s already %s at the queue (nothing to resume)", job.ID, job.State)
+		}
+	}
+
+	resumed, rerr := turnjournal.Rehydrate(ctx, d.components.TurnJournal, requeue, d.logger)
+	if rerr != nil {
+		d.logger.Error("daemon: turn journal rehydrate failed (open runs stay for the next boot)", "error", rerr)
+		return 0
+	}
+
+	// Boot-time retention (T4): prune closed runs older than the
+	// retention const. Failure logs Warn inside and boot continues.
+	turnjournal.PruneClosedRuns(ctx, d.components.TurnJournal, d.logger)
+	return resumed
 }
 
 // shutdownOnce ensures shutdown() is idempotent - safe to call multiple times

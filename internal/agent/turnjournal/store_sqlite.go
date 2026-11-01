@@ -164,6 +164,10 @@ func (j *SQLiteJournal) OpenRuns(ctx context.Context) ([]OpenRun, error) {
 	return runs, nil
 }
 
+// DBHandle exposes the underlying database handle (test assertions and
+// diagnostics only; production callers stay on the JournalStore methods).
+func (j *SQLiteJournal) DBHandle() *sql.DB { return j.db }
+
 // CompletedSteps maps step_id -> result payload for a turn's
 // step_completed rows. The resume path consults this before each step
 // (finding F3: a journaled result is returned, never re-invoked).
