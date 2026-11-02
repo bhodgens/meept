@@ -78,7 +78,7 @@ Build it.
 
 **Steps:**
 
-1. Build the thing [code]
+1. Build the thing [analyze]
 
 ### Phase 2: Ship
 

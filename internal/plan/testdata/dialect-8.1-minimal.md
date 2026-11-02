@@ -25,7 +25,7 @@ Give uploads a durable home and validation rules.
 
 **Produces:**
 
-- `avatar-store` (file) — on-disk avatar directory plus write and validate helpers
+- `avatar-store` (decision) — on-disk avatar directory plus write and validate helpers
 
 **Consumes:** none
 
@@ -44,7 +44,7 @@ Wire the HTTP upload path to the store.
 
 **Consumes:**
 
-- `avatar-store` (file) — validated storage for uploaded images
+- `avatar-store` (decision) — validated storage for uploaded images
 
 **Steps:**
 

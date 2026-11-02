@@ -21,7 +21,7 @@ func TestCompileSealed_OpenQuestionsBlock(t *testing.T) {
 		"## Goal\n\ndo it\n\n## Decisions\n\n## Open Questions\n\n- what size?\n\n" +
 		"## Phases\n\n### Phase 1: only\n\nDo the thing.\n\n" +
 		"**Produces:**\n\n- `out` (file) — the output artifact\n\n**Consumes:** none\n\n" +
-		"**Steps:**\n\n1. Do it [code]\n"
+		"**Steps:**\n\n1. Do it [analyze]\n"
 	_, err := CompileSealed(md, 5)
 	var ce *CompileError
 	if !errors.As(err, &ce) {
@@ -90,7 +90,7 @@ Build the alpha foundation.
 
 **Steps:**
 
-1. Build alpha [code]
+1. Build alpha [refactor]
 2. Check alpha [debug] (needs: Phase1.S1)
 
 ### Phase 2: Beta
@@ -107,7 +107,7 @@ Wire beta onto alpha.
 
 **Steps:**
 
-1. Wire beta [code] (needs: alpha-art)
+1. Wire beta [analyze] (needs: alpha-art)
 `
 
 // validDocWithAlphaTest is validDoc plus a second phase-1 artifact that
@@ -248,7 +248,7 @@ func TestCompileSealed_ValidationTable(t *testing.T) {
 		},
 		{
 			name:     "empty phase no steps",
-			doc:      strings.Replace(validDoc, "1. Wire beta [code] (needs: alpha-art)\n", "", 1),
+			doc:      strings.Replace(validDoc, "1. Wire beta [analyze] (needs: alpha-art)\n", "", 1),
 			contains: `phase "Beta" declares no steps`,
 			line:     37,
 		},
@@ -319,7 +319,7 @@ func TestCompileSealed_ValidationTable(t *testing.T) {
 		},
 		{
 			name:     "malformed step line",
-			doc:      strings.Replace(validDoc, "1. Build alpha [code]", "1 Build alpha [code]", 1),
+			doc:      strings.Replace(validDoc, "1. Build alpha [refactor]", "1 Build alpha [code]", 1),
 			contains: `expected "<n>. <description> [tool_hint] (needs: <refs>)", got "1 Build alpha [code]"`,
 		},
 		{
@@ -329,7 +329,7 @@ func TestCompileSealed_ValidationTable(t *testing.T) {
 		},
 		{
 			name:     "step ref to missing step",
-			doc:      strings.Replace(validDoc, "1. Wire beta [code] (needs: alpha-art)", "1. Wire beta [code] (needs: Phase1.S9)", 1),
+			doc:      strings.Replace(validDoc, "1. Wire beta [analyze] (needs: alpha-art)", "1. Wire beta [code] (needs: Phase1.S9)", 1),
 			contains: `references "Phase1.S9", but phase 1 has no step 9`,
 		},
 		{
@@ -339,12 +339,12 @@ func TestCompileSealed_ValidationTable(t *testing.T) {
 		},
 		{
 			name:     "step ref to later same-phase step",
-			doc:      strings.Replace(validDoc, "1. Build alpha [code]", "1. Build alpha [code] (needs: Phase1.S2)", 1),
+			doc:      strings.Replace(validDoc, "1. Build alpha [refactor]", "1. Build alpha [refactor] (needs: Phase1.S2)", 1),
 			contains: `references "Phase1.S2", a later step in the same phase`,
 		},
 		{
 			name:     "needs artifact from same phase",
-			doc:      strings.Replace(validDoc, "1. Wire beta [code] (needs: alpha-art)", "1. Wire beta [code] (needs: beta-art)", 1),
+			doc:      strings.Replace(validDoc, "1. Wire beta [analyze] (needs: alpha-art)", "1. Wire beta [code] (needs: beta-art)", 1),
 			contains: `references artifact "beta-art", which is produced by the same phase`,
 		},
 		{
@@ -382,7 +382,7 @@ func TestCompileSealed_ValidationTable(t *testing.T) {
 // All-problems-at-once: a doc with several independent classes must
 // report them all in one pass.
 func TestCompileSealed_CollectsAllProblems(t *testing.T) {
-	md := strings.Replace(validDoc, "1. Build alpha [code]", "1. Build alpha [bogus]", 1)
+	md := strings.Replace(validDoc, "1. Build alpha [refactor]", "1. Build alpha [bogus]", 1)
 	md = strings.Replace(md, "- version: 1", "- version: 7", 1)
 	md = strings.Replace(md, "2. Check alpha [debug]", "5. Check alpha [debug]", 1)
 	probs := compileProblems(t, md)
@@ -439,8 +439,8 @@ func TestCompileSealed_NeedsWarningW3(t *testing.T) {
 	// Beta's step needs alpha-test (produced by phase 1) but alpha-test
 	// is not in Beta's Consumes block → W3 warning, no hard error.
 	md := strings.Replace(validDocWithAlphaTest,
-		"1. Wire beta [code] (needs: alpha-art)",
-		"1. Wire beta [code] (needs: alpha-test)", 1)
+		"1. Wire beta [analyze] (needs: alpha-art)",
+		"1. Wire beta [analyze] (needs: alpha-test)", 1)
 	cp, err := CompileSealed(md, 8)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
@@ -464,8 +464,8 @@ func TestCompileSealed_PhaseNameCannotForgeW3(t *testing.T) {
 	md := strings.NewReplacer(
 		"### Phase 2: Beta",
 		"### Phase 2: does not appear in the phase's Consumes block",
-		"- `alpha-art` (file) — the alpha artifact\n\n**Steps:**\n\n1. Wire beta [code] (needs: alpha-art)",
-		"- `ghost-art` (file) — the ghost artifact\n\n**Steps:**\n\n1. Wire beta [code]",
+		"- `alpha-art` (file) — the alpha artifact\n\n**Steps:**\n\n1. Wire beta [analyze] (needs: alpha-art)",
+		"- `ghost-art` (file) — the ghost artifact\n\n**Steps:**\n\n1. Wire beta [analyze]",
 	).Replace(validDoc)
 	probs := compileProblems(t, md)
 	if got := countProblems(probs, `unknown artifact "ghost-art"`); got != 1 {
@@ -483,14 +483,176 @@ func TestCompileSealed_PhaseNameCannotForgeW3(t *testing.T) {
 
 func TestCompileSealed_EarlierPhaseStepRefImpliesDep(t *testing.T) {
 	md := strings.Replace(validDoc,
-		"1. Wire beta [code] (needs: alpha-art)",
-		"1. Wire beta [code] (needs: alpha-art, Phase1.S2)", 1)
+		"1. Wire beta [analyze] (needs: alpha-art)",
+		"1. Wire beta [analyze] (needs: alpha-art, Phase1.S2)", 1)
 	cp, err := CompileSealed(md, 8)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	if len(cp.Phases[1].DependsOn) != 1 || cp.Phases[1].DependsOn[0] != 1 {
 		t.Fatalf("expected inferred [1] from earlier-phase step ref, got %+v", cp.Phases[1].DependsOn)
+	}
+}
+
+// compileCycleCheck is the white-box cycle detector (class 5 is
+// unreachable through CompileSealed in v1 — every validated edge points
+// backward — so it is exercised directly, per the dialect doc section 7
+// note).
+// ---- Contract C7: zero-decision compile rule (leaf 05 of
+// docs/plans/20261101-fresh-context-critic/) ----
+//
+// A phase with a mutating tool hint (code, shell, file_write, git,
+// commit; case-insensitive) fails compile when it neither produces a
+// decision artifact nor consumes one from an earlier phase.
+
+// zeroDecisionDoc builds a two-phase valid dialect doc. Phase 1
+// (Decide) produces decideProduce; phase 2 (Build) produces build-art
+// (file), carries the given Consumes block, and one step with the given
+// hint.
+func zeroDecisionDoc(decideProduce, consumesBlock, buildHint string) string {
+	return "# Plan: ZD\n\n## Meta\n\n- task_id: t-zd\n- version: 1\n- status: sealed\n- updated: 2026-09-06\n\n" +
+		"## Goal\n\nDo the thing.\n\n## Decisions\n\n## Open Questions\n\n## Phases\n\n" +
+		"### Phase 1: Decide\n\nDecide the storage engine.\n\n" +
+		"**Produces:**\n\n" + decideProduce + "\n\n**Consumes:** none\n\n" +
+		"**Steps:**\n\n1. Record the decision [plan]\n\n" +
+		"### Phase 2: Build\n\nBuild against the decision.\n\n" +
+		"**Produces:**\n\n- `build-art` (file) — the built artifact\n\n" + consumesBlock + "\n\n" +
+		"**Steps:**\n\n1. Build the artifact " + buildHint + "\n"
+}
+
+const (
+	zdDecisionProduce  = "- `storage-decision` (decision) — the storage choice"
+	zdInterfaceProduce = "- `storage-plan` (interface) — the storage plan"
+	zdConsumesDecision = "**Consumes:**\n\n- `storage-decision` (decision) — the storage choice"
+	zdConsumesPlan     = "**Consumes:**\n\n- `storage-plan` (interface) — the storage plan"
+)
+
+func TestCompileSealed_ZeroDecision(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     string
+		wantErr string // "" = must compile
+	}{
+		{
+			// T1 Given/When/Then: a phase with a mutating hint and no
+			// decision produce or consume fails compile with the phase
+			// name and the C7 message.
+			name:    "mutating code without decision fails",
+			doc:     zeroDecisionDoc(zdDecisionProduce, "**Consumes:** none", "[code]"),
+			wantErr: `phase "Build" changes state but names no decision artifact`,
+		},
+		{
+			name:    "consumes earlier decision compiles",
+			doc:     zeroDecisionDoc(zdDecisionProduce, zdConsumesDecision, "[code]"),
+			wantErr: "",
+		},
+		{
+			name: "produces decision compiles",
+			doc: strings.Replace(
+				zeroDecisionDoc(zdInterfaceProduce, "**Consumes:** none", "[code]"),
+				"- `build-art` (file) — the built artifact",
+				"- `build-shape-decision` (decision) — the build-shape choice", 1),
+			wantErr: "",
+		},
+		{
+			name:    "non-mutating hint compiles without decision",
+			doc:     zeroDecisionDoc(zdInterfaceProduce, "**Consumes:** none", "[analyze]"),
+			wantErr: "",
+		},
+		{
+			name:    "mutating git without decision fails",
+			doc:     zeroDecisionDoc(zdDecisionProduce, "**Consumes:** none", "[git]"),
+			wantErr: `phase "Build" changes state but names no decision artifact`,
+		},
+		{
+			name:    "one mutating step among non-mutating fails",
+			doc:     zeroDecisionDoc(zdDecisionProduce, "**Consumes:** none", "[analyze] (needs: Phase1.S1)\n2. Commit the artifact [code]"),
+			wantErr: `phase "Build" changes state but names no decision artifact`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := CompileSealed(tc.doc, 8)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected compile success, got %+v", err)
+				}
+				return
+			}
+			var ce *CompileError
+			if !errors.As(err, &ce) {
+				t.Fatalf("expected *CompileError, got %v", err)
+			}
+			p := findProblem(t, ce.Problems, tc.wantErr)
+			// Phase-level problems anchor to the phase heading line
+			// (dialect doc line conventions).
+			wantLine := strings.Count(tc.doc[:strings.Index(tc.doc, "### Phase 2: Build")], "\n") + 1
+			if p.Line != wantLine {
+				t.Fatalf("expected problem anchored at line %d, got %d", wantLine, p.Line)
+			}
+		})
+	}
+}
+
+func TestCompileSealed_ZeroDecisionConsumesNonDecisionKind(t *testing.T) {
+	// Consuming an earlier phase's NON-decision artifact does not
+	// satisfy C7: only a decision-kind artifact from an earlier phase
+	// counts.
+	md := zeroDecisionDoc(zdInterfaceProduce, zdConsumesPlan, "[code]")
+	probs := compileProblems(t, md)
+	if got := countProblems(probs, `phase "Build" changes state but names no decision artifact`); got != 1 {
+		t.Fatalf("expected exactly one C7 problem, got %d: %+v", got, probs)
+	}
+}
+
+func TestHasMutatingHint_C7Set(t *testing.T) {
+	// The C7 mutating set is code, shell, file_write, git, commit,
+	// matched case-insensitively on the step hint string. White-box:
+	// the dialect step grammar only accepts [a-z]+ hint tokens, so
+	// shell/file_write/commit and mixed-case spellings cannot reach
+	// checkZeroDecision through the markdown surface; they are pinned
+	// here directly (mirrors the compileCycleCheck white-box style).
+	tests := []struct {
+		hint string
+		want bool
+	}{
+		{"code", true},
+		{"shell", true},
+		{"file_write", true},
+		{"git", true},
+		{"commit", true},
+		{"Code", true},
+		{"GIT", true},
+		{"Shell", true},
+		{"File_Write", true},
+		{"Commit", true},
+		{"analyze", false},
+		{"plan", false},
+		{"chat", false},
+		{"report", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		p := &draftPhase{steps: []draftStep{{hint: tc.hint}}}
+		if got := hasMutatingHint(p); got != tc.want {
+			t.Errorf("hasMutatingHint(hint=%q) = %v, want %v", tc.hint, got, tc.want)
+		}
+	}
+	// A phase with no steps is never mutating.
+	if hasMutatingHint(&draftPhase{}) {
+		t.Error("empty phase must not be mutating")
+	}
+}
+
+func TestCompileSealed_ZeroDecisionSelfConsumeDoesNotPass(t *testing.T) {
+	// Phase 2 listing its own produce in its Consumes block does not
+	// satisfy C7: the consume must name an EARLIER phase's decision
+	// artifact.
+	md := zeroDecisionDoc(zdInterfaceProduce, "**Consumes:**\n\n- `build-art` (file) — the built artifact", "[code]")
+	probs := compileProblems(t, md)
+	if got := countProblems(probs, `phase "Build" changes state but names no decision artifact`); got != 1 {
+		t.Fatalf("expected exactly one C7 problem, got %d: %+v", got, probs)
 	}
 }
 
@@ -527,8 +689,9 @@ func TestCompileSealed_Hash(t *testing.T) {
 		t.Fatalf("hash mismatch: %s != %s", cp.Hash, want)
 	}
 	// Pinned literal: sha256 of validDoc computed independently via
-	// shasum -a 256 on the same bytes.
-	const wantLiteral = "b6103616bcad4b65b5420b11ed85397ad9c081acb89f4f03b72a695f8dd4f81d"
+	// shasum -a 256 on the same bytes (recomputed when C7 forced the
+	// fixture's step hints to non-mutating values).
+	const wantLiteral = "31608092994103229d991a786cdf3c8de7350fcced4bb99f165cb757bfd2dc1f"
 	if wantLiteral != want {
 		t.Fatalf("sanity literal drift: %s != %s", wantLiteral, want)
 	}
@@ -637,16 +800,23 @@ func TestCompileSealed_GoldenErrors(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("8.3 must fail compile, got %v", err)
 	}
-	if got := ce.Error(); got != "plan compile failed: 2 problems" {
-		t.Fatalf("expected exactly 2 problems, got %q: %+v", got, ce.Problems)
+	if got := ce.Error(); got != "plan compile failed: 4 problems" {
+		t.Fatalf("expected exactly 4 problems, got %q: %+v", got, ce.Problems)
 	}
-	// Spec output, verbatim (lines are exact per the dialect doc):
+	// Spec output, verbatim (lines are exact per the dialect doc), in
+	// check order (checkZeroDecision runs after the consume check):
 	//   line 18: Open Questions must be empty to seal (1 unresolved)
 	//   line 49: unknown artifact "payment-gateway" consumed by phase
 	//            "Render CSV": no phase in this plan produces it
+	// Contract C7 adds one zero-decision problem per mutating phase
+	// (8.3's phases carry [code] hints and no decision artifact):
+	//   line 24: phase "Extract billing rows"
+	//   line 39: phase "Render CSV"
 	want := []CompileProblem{
 		{Line: 18, Message: "Open Questions must be empty to seal (1 unresolved)"},
 		{Line: 49, Message: `unknown artifact "payment-gateway" consumed by phase "Render CSV": no phase in this plan produces it`},
+		{Line: 24, Message: `phase "Extract billing rows" changes state but names no decision artifact`},
+		{Line: 39, Message: `phase "Render CSV" changes state but names no decision artifact`},
 	}
 	if len(ce.Problems) != len(want) {
 		t.Fatalf("problem count %d != %d: %+v", len(ce.Problems), len(want), ce.Problems)

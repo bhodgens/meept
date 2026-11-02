@@ -253,13 +253,13 @@ Pull the billing-period rows from the ledger store.
 **Consumes:** none
 
 **Steps:**
-1. Open the ledger store read handle [code]
-2. Query the ledger store for the billing period [code]
-3. Validate row completeness flags [code]
-4. Normalize rows into the billing-rows schema [code]
-5. Drop duplicate row keys [code]
-6. Sort rows by posting date [code]
-7. Stamp the export batch id on every row [code]
+1. Open the ledger store read handle [analyze]
+2. Query the ledger store for the billing period [analyze]
+3. Validate row completeness flags [analyze]
+4. Normalize rows into the billing-rows schema [analyze]
+5. Drop duplicate row keys [analyze]
+6. Sort rows by posting date [analyze]
+7. Stamp the export batch id on every row [analyze]
 
 ### Phase 2: CSV renderer
 
@@ -274,7 +274,7 @@ Render billing rows as CSV for download.
 - ` + "`billing-rows`" + ` (schema) — the normalized rows
 
 **Steps:**
-1. Implement the CSV streaming writer [code] (needs: billing-rows)
+1. Implement the CSV streaming writer [analyze] (needs: billing-rows)
 `
 
 // TestPlanSealWiring_TreeModeCleanNamesAndSidecar (H8+M12): a tree-mode seal

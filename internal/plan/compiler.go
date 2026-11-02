@@ -28,6 +28,7 @@ func CompileSealed(markdown string, maxPhases int) (*CompiledPlan, error) {
 	checkEnvelope(doc, maxPhases, &problems)
 	checkPhaseStructure(doc, &problems)
 	checkArtifacts(doc, &problems)
+	checkZeroDecision(doc, &problems)
 	checkDependsOnLines(doc, &problems)
 	checkSteps(doc, &problems)
 
@@ -131,7 +132,11 @@ const (
 	needsMsgSamePhase  = "step %d of phase %q references artifact %q, which is produced by the same phase: artifact references must target earlier phases"
 	// hintMsg is the dialect-doc §7 error format string (kept verbatim; the
 	// spec-slave rule pins its wording).
-	hintMsg             = "step %d of phase %q has unknown tool_hint %q (must be one of code, refactor, debug, fix, analyze, research, git, plan, chat, bash)"
+	hintMsg = "step %d of phase %q has unknown tool_hint %q (must be one of code, refactor, debug, fix, analyze, research, git, plan, chat, bash)"
+	// zeroDecisionMsg is the contract C7 error format (docs/plans/
+	// 20261101-fresh-context-critic/master.md): a phase with a mutating
+	// step must produce or consume a decision artifact.
+	zeroDecisionMsg     = "phase %q changes state but names no decision artifact"
 	oqMsg               = "Open Questions must be empty to seal (%d unresolved)"
 	metaMissingMsg      = "Meta is missing required key: %s"
 	versionMsg          = "unsupported dialect version: got %q; this compiler implements version 1"
@@ -611,6 +616,74 @@ func checkArtifacts(doc *draftDoc, problems *[]CompileProblem) {
 			}
 		}
 	}
+}
+
+// checkZeroDecision enforces contract C7 (docs/plans/
+// 20261101-fresh-context-critic/master.md): a phase with a mutating step
+// must produce a decision artifact or consume a decision artifact that
+// an EARLIER phase produces. Mutating tool hints: code, shell,
+// file_write, git, commit (case-insensitive). Runs after the consume
+// check; one problem per offending phase, anchored at the phase heading
+// (dialect doc line conventions: phase-level errors anchor to the
+// heading).
+func checkZeroDecision(doc *draftDoc, problems *[]CompileProblem) {
+	// Decision producers: every phase counts as a potential producer
+	// (the contract says "an earlier phase", with no qualifier on the
+	// producer's own mutation status). Consumes must reference a
+	// strictly earlier producer, mirroring the consume rules.
+	decisionProducerOf := map[string]int{} // name -> producing phase ordinal
+	for _, p := range doc.phases {
+		for _, art := range p.produces {
+			if art.kind == "decision" {
+				if _, dup := decisionProducerOf[art.name]; !dup {
+					decisionProducerOf[art.name] = p.ordinal
+				}
+			}
+		}
+	}
+	for _, p := range doc.phases {
+		if !hasMutatingHint(p) || hasDecisionArtifact(p, decisionProducerOf) {
+			continue
+		}
+		*problems = append(*problems, CompileProblem{
+			Line:    p.headLine,
+			Message: fmt.Sprintf(zeroDecisionMsg, p.name),
+		})
+	}
+}
+
+// hasMutatingHint reports whether any step of the phase carries a
+// mutating tool hint (C7 set: code, shell, file_write, git, commit),
+// matched case-insensitively.
+func hasMutatingHint(p *draftPhase) bool {
+	for _, st := range p.steps {
+		switch strings.ToLower(st.hint) {
+		case "code", "shell", "file_write", "git", "commit":
+			return true
+		}
+	}
+	return false
+}
+
+// hasDecisionArtifact reports whether the phase passes C7: it produces a
+// decision artifact, or it consumes a decision artifact produced by a
+// strictly earlier phase (name -> producer ordinal in
+// decisionProducerOf).
+func hasDecisionArtifact(p *draftPhase, decisionProducerOf map[string]int) bool {
+	for _, art := range p.produces {
+		if art.kind == "decision" {
+			return true
+		}
+	}
+	for _, art := range p.consumes {
+		if art.kind != "decision" {
+			continue
+		}
+		if ord, ok := decisionProducerOf[art.name]; ok && ord < p.ordinal {
+			return true
+		}
+	}
+	return false
 }
 
 // checkDependsOnLines validates explicit "**Depends on:**" citations.

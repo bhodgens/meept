@@ -25,7 +25,7 @@ Extract schema definitions and validation into a shared internal package.
 
 **Produces:**
 
-- `config-schema` (schema) — validated struct definitions for all config sections
+- `config-schema` (decision) — validated struct definitions for all config sections
 - `config-schema-tests` (test_suite) — table tests covering schema validation
 
 **Consumes:** none
@@ -46,7 +46,7 @@ Load only CLI-relevant sections in cmd/meept.
 
 **Consumes:**
 
-- `config-schema` (schema) — shared definitions for the CLI section
+- `config-schema` (decision) — shared definitions for the CLI section
 
 **Steps:**
 
@@ -64,7 +64,7 @@ Load only daemon-relevant sections in internal/daemon.
 
 **Consumes:**
 
-- `config-schema` (schema) — shared definitions for the daemon section
+- `config-schema` (decision) — shared definitions for the daemon section
 
 **Steps:**
 

@@ -226,8 +226,8 @@ Pull the billing-period rows from the ledger store.
 
 **Steps:**
 
-1. Query the ledger store for the billing period [code]
-2. Normalize rows into the billing-rows schema [code] (needs: Phase1.S1)
+1. Query the ledger store for the billing period [analyze]
+2. Normalize rows into the billing-rows schema [analyze] (needs: Phase1.S1)
 
 ### Phase 2: CSV renderer
 
@@ -243,7 +243,7 @@ Render billing rows as CSV for download.
 
 **Steps:**
 
-1. Implement the CSV streaming writer [code] (needs: billing-rows)
+1. Implement the CSV streaming writer [analyze] (needs: billing-rows)
 `
 
 // TestPlanSealWiring_FlagOn seals the 2-phase draft end to end: compile →
