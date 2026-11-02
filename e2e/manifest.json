@@ -47,7 +47,8 @@
       "naive-user-chat",
       "continuity-regressions",
       "goal-completion",
-      "acp-persona-route"
+      "acp-persona-route",
+      "llm-hop-tracing"
     ],
     "internal/validator/": [
       "output-filters",
@@ -99,7 +100,8 @@
       "state-identity",
       "goal-completion",
       "session-affinity",
-      "session-teardown"
+      "session-teardown",
+      "llm-hop-tracing"
     ],
     "internal/memory/": [
       "bridges",
@@ -139,14 +141,16 @@
       "memory-turn-capture",
       "project-binding",
       "state-restart",
-      "acp-wire"
+      "acp-wire",
+      "llm-hop-tracing"
     ],
     "internal/llm/": [
       "daemon-lifecycle",
       "runtime-guards",
       "continuity-regressions",
       "session-affinity",
-      "session-teardown"
+      "session-teardown",
+      "llm-hop-tracing"
     ],
     "internal/logrotate/": [
       "logrotate"
@@ -155,6 +159,30 @@
       "security-fence",
       "security-tls",
       "agent-groups"
+    ],
+    "internal/security/pii/": [
+      "boundary-hardening"
+    ],
+    "internal/security/agent_boundary.go": [
+      "boundary-hardening"
+    ],
+    "internal/agent/taint_hooks.go": [
+      "boundary-hardening"
+    ],
+    "internal/agent/collaboration_handoff.go": [
+      "boundary-hardening"
+    ],
+    "internal/agent/collaboration_pair_driver.go": [
+      "boundary-hardening"
+    ],
+    "internal/agent/collaboration_diff_driver.go": [
+      "boundary-hardening"
+    ],
+    "internal/agent/collaboration_team_driver.go": [
+      "boundary-hardening"
+    ],
+    "internal/agent/pii_restore_hook.go": [
+      "boundary-hardening"
     ],
     "internal/employee/": [
       "goal-loop",
@@ -235,7 +263,8 @@
       "tools-mcp"
     ],
     "internal/metrics/": [
-      "daemon-lifecycle"
+      "daemon-lifecycle",
+      "llm-hop-tracing"
     ],
     "internal/pathutil/": [
       "smoke"
@@ -309,6 +338,12 @@
     ],
     "ui/flutter_ui/": [
       "gui-flows"
+    ],
+    "e2e/suites/llm-hop-tracing": [
+      "llm-hop-tracing"
+    ],
+    "e2e/harness/": [
+      "llm-hop-tracing"
     ],
     "e2e/suites/session-affinity": [
       "session-affinity"
@@ -768,6 +803,22 @@
     {
       "name": "tool-provider-seam",
       "dir": "e2e/suites/tool-provider-seam",
+      "status": "implemented"
+    },
+    {
+      "name": "llm-hop-tracing",
+      "dir": "e2e/suites/llm-hop-tracing",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "llm-hop-01 shared trace + genai attrs + SQL join (armed)",
+        "llm-hop-02 quiet-boot disabled posture (zero POSTs + one Warn)"
+      ],
+      "note": "leaf 04 live verification of the llm-hop-tracing tree: OTLP capture receiver, single shared trace across chat.turn/llm.call/tool.call, byte-exact llm_calls join, armed/disabled boot log lines"
+    },
+    {
+      "name": "boundary-hardening",
+      "dir": "e2e/suites/boundary-hardening",
       "status": "implemented"
     }
   ],
@@ -3484,6 +3535,99 @@
       "paths": [
         "internal/jevgate/gate.go",
         "internal/jevgate/serialize.go"
+      ]
+    },
+    {
+      "id": "llm-hop-01",
+      "suite": "llm-hop-tracing",
+      "diff": "M",
+      "title": "armed boot, one tool turn: exactly one chat.turn with >=1 llm.call and >=1 tool.call all sharing ONE 32-hex trace id (raw-body byte proof); gen_ai provider/model/token attrs on llm.call; shape-only args keys limit,path + bytes>0 on tool.call with no raw values and allowlisted keys only; distinct span ids; llm_calls.trace_id+span_id join byte-exact to the captured llm.call span",
+      "paths": [
+        "internal/agent/handler.go",
+        "internal/agent/loop.go",
+        "internal/llm/client.go",
+        "internal/metrics/otlp_trace_producer.go",
+        "internal/metrics/otlp_trace_sink.go",
+        "internal/daemon/otlp_traces_wiring.go",
+        "internal/metrics/store.go"
+      ]
+    },
+    {
+      "id": "llm-hop-02",
+      "suite": "llm-hop-tracing",
+      "diff": "S",
+      "title": "quiet boot (metrics.otlp_traces absent): zero export POSTs at the receiver after a full chat turn, zero spans, exactly one disabled Warn line and no enabled line",
+      "paths": [
+        "internal/daemon/otlp_traces_wiring.go",
+        "internal/config/otlp_traces.go"
+      ]
+    },
+    {
+      "id": "llm-hop-03",
+      "suite": "llm-hop-tracing",
+      "diff": "S",
+      "title": "armed boot logs exactly one OTLP-trace-enabled Info line and never the disabled line; harness OTLP capture receiver decode pinned (name/trace/span/parent/attrs, request counting, raw-body containment)",
+      "paths": [
+        "internal/daemon/otlp_traces_wiring.go",
+        "e2e/harness/otlpreceiver.go"
+      ]
+    },
+    {
+      "id": "llm-hop-04",
+      "suite": "llm-hop-tracing",
+      "diff": "S",
+      "title": "tool.call span carries the real tool duration from the emitted tool_execution_end event (duration decode matches the emitter's time.Duration shape) and the span id is fresh per hop, distinct from every llm.call span id on the trace",
+      "paths": [
+        "internal/agent/loop.go",
+        "internal/agent/events.go",
+        "internal/daemon/otlp_traces_wiring.go",
+        "internal/metrics/otlp_trace_producer.go"
+      ]
+    },
+    {
+      "id": "boundary-hardening-01",
+      "suite": "boundary-hardening",
+      "diff": "M",
+      "title": "legitimate collaboration round completes with the taint lane ON (warn): pair session converges and the handoff prompt's driver framing + raw output reach the worker's recorded request",
+      "paths": [
+        "internal/agent/collaboration_pair_driver.go",
+        "internal/agent/collaboration_handoff.go",
+        "internal/security/agent_boundary.go",
+        "internal/security/taint/"
+      ]
+    },
+    {
+      "id": "boundary-hardening-02",
+      "suite": "boundary-hardening",
+      "diff": "M",
+      "title": "forged control message (agent-impersonation preamble + request_token/workspace_yield control JSON) injected into a tainted handoff is neutralized under agent_handoff_mode=block: session finalizes handoff_blocked, forged payload never reaches another agent's prompt, no workspace side effect",
+      "paths": [
+        "internal/agent/collaboration_pair_driver.go",
+        "internal/agent/collaboration_handoff.go",
+        "internal/security/agent_boundary.go",
+        "internal/agent/taint_hooks.go",
+        "internal/daemon/components.go"
+      ]
+    },
+    {
+      "id": "boundary-hardening-03",
+      "suite": "boundary-hardening",
+      "diff": "M",
+      "title": "PII roundtrip: [PII:<uuid>] tokens minted by the real Swapper restore only for the originating session at the ScanOutput choke point; reply + provider-bound history carry restored originals, never tokens; a stolen cross-session token survives verbatim",
+      "paths": [
+        "internal/security/pii/",
+        "internal/agent/pii_restore_hook.go",
+        "internal/agent/loop.go"
+      ]
+    },
+    {
+      "id": "boundary-hardening-04",
+      "suite": "boundary-hardening",
+      "diff": "S",
+      "title": "secret placeholder restore gated by secret_restore: a #XXXX# placeholder from the real SecretObfuscator map returns the original secret; an obfuscator with no knowledge of the map (fresh-daemon equivalent) passes the placeholder through",
+      "paths": [
+        "internal/security/secrets.go",
+        "internal/agent/pii_restore_hook.go"
       ]
     }
   ]
