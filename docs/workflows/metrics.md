@@ -348,3 +348,5 @@ go test ./internal/comm/http/... -v -run Metrics
 - job scheduling: `docs/workflows/job-scheduling.md`
 - worker pool: `docs/workflows/worker.md`
 - http api reference: `docs/reference/http-api.md`
+- trace export (`metrics.otlp_traces`, Jaeger/Tempo/Langfuse):
+  `docs/workflows/llm-tracing.md`

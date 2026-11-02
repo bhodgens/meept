@@ -48,7 +48,9 @@ stating export is disabled. When true, batches POST as OTLP/HTTP JSON to
 `<endpoint>/v1/metrics` (stdlib net/http; the `OTLPMetricSink` bridge
 keeps the otel SDK out of go.mod). Local SQLite collection (`llm.metrics`)
 is unaffected and always on. Flipping this default is a product decision,
-not a code cleanup.
+not a code cleanup. The sibling trace exporter
+(`metrics.otlp_traces.enabled`, default false) follows the same posture;
+see `docs/workflows/llm-tracing.md`.
 
 ## Wiki/state defaults
 

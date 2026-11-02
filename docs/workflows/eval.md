@@ -88,6 +88,9 @@ After a run completes, `Judge(ctx, steps, oracle, workdir)` produces a
 `TrajectoryJudgment{Passed, FirstErrorStep, Summary}`. The evolver's
 `OnlyJudged` gate ensures only judged trajectories feed self-improvement.
 
+For sequence grading (exact tool-call order against committed golden
+fixtures), see [trajectory-grading.md](trajectory-grading.md).
+
 ### Status bar (leaf 13)
 
 Every turn injects a stable-prefix section showing:

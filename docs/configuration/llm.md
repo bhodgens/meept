@@ -524,6 +524,10 @@ best-effort: a failed batch is dropped and logged (one Warn per failure
 streak), never blocking the agent loop, daemon boot, or shutdown. See
 [the metrics workflow page](../workflows/metrics.md) for the full story.
 
+Trace-level export (one distributed trace per chat turn with
+`llm.call`/`tool.call` spans, to Jaeger/Tempo/Langfuse) is a separate
+opt-in: see [llm tracing (`metrics.otlp_traces`)](../workflows/llm-tracing.md).
+
 ## Provider Examples
 
 ### Ollama (Local)
