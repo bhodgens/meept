@@ -271,16 +271,16 @@ type toolExecutionEndEnvelope struct {
 }
 
 type toolExecutionEndEventBody struct {
-	ToolCallID     string `json:"tool_call_id"`
-	ToolName       string `json:"tool_name"`
-	Success        bool   `json:"success"`
-	Error          string `json:"error"`
-	TraceID        string `json:"trace_id"`
-	SpanID         string `json:"span_id"`
-	ArgumentsKeys  string `json:"arguments_keys"`
-	ArgumentsBytes int    `json:"arguments_bytes"`
-	Blocked        bool   `json:"blocked"`
-	Duration       string `json:"duration"`
+	ToolCallID     string        `json:"tool_call_id"`
+	ToolName       string        `json:"tool_name"`
+	Success        bool          `json:"success"`
+	Error          string        `json:"error"`
+	TraceID        string        `json:"trace_id"`
+	SpanID         string        `json:"span_id"`
+	ArgumentsKeys  string        `json:"arguments_keys"`
+	ArgumentsBytes int           `json:"arguments_bytes"`
+	Blocked        bool          `json:"blocked"`
+	Duration       time.Duration `json:"duration"`
 }
 
 // recordToolCallSpanFromBus decodes one agent.event.tool_execution_end
@@ -296,8 +296,8 @@ func recordToolCallSpanFromBus(producer *appmetrics.TraceProducer, payload []byt
 		return
 	}
 	var durMS int64
-	if d, err := time.ParseDuration(env.Data.Duration); err == nil && d > 0 {
-		durMS = d.Milliseconds()
+	if env.Data.Duration > 0 {
+		durMS = env.Data.Duration.Milliseconds()
 	}
 	producer.RecordToolCallSpan(appmetrics.ToolCallSpanSpec{
 		TraceID:        env.Data.TraceID,
