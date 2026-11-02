@@ -63,6 +63,7 @@ Build the artifact.
 
 **Produces:**
 
+- ` + "`" + `critique-decision` + "`" + ` (decision) — the chosen approach
 - ` + "`" + `critique-artifact` + "`" + ` (file) — the finished artifact
 
 **Consumes:** none

@@ -127,6 +127,7 @@ Build the artifact.
 
 **Produces:**
 
+- ` + "`golden-decision`" + ` (decision) — the chosen approach
 - ` + "`golden-artifact`" + ` (file) — the finished artifact
 
 **Consumes:** none
