@@ -241,6 +241,166 @@ func splitObjections(objections []criticObjection) (blocking, advisory []criticO
 	return blocking, advisory
 }
 
+// Contest record tags (fresh-context-critic leaf 04, contract C6). The
+// tag is visible text on the Known Risks line, not a side-channel: a
+// human reviewing the draft sees exactly which objections were settled
+// by a quoted contest and which contests failed the quote check.
+const (
+	contestTagSettled  = "contested-settled"
+	contestTagUnproven = "contested-unproven"
+)
+
+// criticRebuttal is contract C6 (leaf 04): one rebuttal the planner MAY
+// attach to its revise output. Verdict is accept | contest. A contest
+// counts only when Evidence is a verbatim substring of the
+// PlanCritiqueInput.Render() text the critic actually saw; anything else
+// is contested-unproven - never a silent accept, never an answered
+// objection.
+type criticRebuttal struct {
+	Section  string `json:"section"`
+	Targets  string `json:"targets"`  // objection text being contested
+	Evidence string `json:"evidence"` // must quote a PlanCritiqueInput section
+	Verdict  string `json:"verdict"`  // accept | contest
+}
+
+// parseCriticRebuttals parses the optional C6 rebuttal array from the
+// planner's revise output. The reply is markdown-first: rebuttals ride
+// an optional JSON block the planner may emit before or after the
+// markdown (a fenced ```json block with {"rebuttals": [...]} or a bare
+// single-rebuttal object). Parse DEFENSIVELY: absent or unparsable =
+// nil rebuttals, which keeps the no-rebuttal path byte-identical to
+// today's "address every objection" behavior.
+func parseCriticRebuttals(raw string) []criticRebuttal {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	jsonStr := ExtractJSON(raw)
+	if jsonStr == "" {
+		return nil
+	}
+	var envelope struct {
+		Rebuttals []criticRebuttal `json:"rebuttals"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &envelope); err == nil && len(envelope.Rebuttals) > 0 {
+		return envelope.Rebuttals
+	}
+	// Single-rebuttal shape (e.g. an inline <!-- contest: {...} -->
+	// comment). Evidence must be present for it to be a rebuttal at all;
+	// anything else in the markdown that happens to parse as JSON with
+	// no evidence is ignored.
+	var single criticRebuttal
+	if err := json.Unmarshal([]byte(jsonStr), &single); err == nil && strings.TrimSpace(single.Evidence) != "" {
+		return []criticRebuttal{single}
+	}
+	return nil
+}
+
+// objectionKey is the cross-round identity of an objection for the
+// contest ledger (section + objection text, case-insensitive).
+func objectionKey(o criticObjection) string {
+	return strings.ToLower(strings.TrimSpace(o.Section)) + "|" + strings.ToLower(strings.TrimSpace(o.Objection))
+}
+
+// rebuttalTargetKey is the ledger key a rebuttal aims at: its Targets
+// text under objectionKey's normalization.
+func rebuttalTargetKey(rb criticRebuttal) string {
+	return objectionKey(criticObjection{Section: rb.Section, Objection: rb.Targets})
+}
+
+// tagObjection returns a copy of the objection annotated with a contest
+// tag for the Known Risks record.
+func tagObjection(o criticObjection, tag string) criticObjection {
+	o.Objection = strings.TrimSpace(o.Objection) + " [" + tag + "]"
+	return o
+}
+
+// contestEvidenceHolds is the C6 quote check: a contest counts only when
+// its Evidence string is a verbatim substring of the rendered critique
+// input the critic actually saw. A wish to contest is not evidence; this
+// is a substring check, never a model judgment.
+func contestEvidenceHolds(rb criticRebuttal, evidenceText string) bool {
+	evidence := strings.TrimSpace(rb.Evidence)
+	if evidence == "" || evidenceText == "" {
+		return false
+	}
+	return strings.Contains(evidenceText, evidence)
+}
+
+// matchContestedObjection finds the objection a rebuttal targets in the
+// list that drove its revise round. ok=false when no objection matches
+// (the contest aims at nothing currently open).
+func matchContestedObjection(objections []criticObjection, rb criticRebuttal) (criticObjection, bool) {
+	target := rebuttalTargetKey(rb)
+	for _, o := range objections {
+		if objectionKey(o) == target {
+			return o, true
+		}
+	}
+	return criticObjection{}, false
+}
+
+// dropContestedSettled removes objections already settled by a valid
+// contest earlier in this flow (C6: they do NOT re-block in later
+// rounds; they stay recorded as tagged ledger entries).
+func dropContestedSettled(objections []criticObjection, settled map[string]bool) []criticObjection {
+	if len(objections) == 0 || len(settled) == 0 {
+		return objections
+	}
+	kept := make([]criticObjection, 0, len(objections))
+	for _, o := range objections {
+		if settled[objectionKey(o)] {
+			continue
+		}
+		kept = append(kept, o)
+	}
+	return kept
+}
+
+// applyContestRebuttals decides the C6 contests parsed from one revise
+// output against the objections that drove that revise. A VALID contest
+// (Evidence is a verbatim substring of evidenceText) settles its target:
+// recorded tagged contested-settled, and it does not re-block in later
+// rounds of this flow. An INVALID contest is recorded tagged
+// contested-unproven and the objection stays blocking - never silently
+// accepted, never counted as answered. verdict=accept rebuttals are the
+// planner choosing to fix the objection; nothing to record.
+func applyContestRebuttals(rebuttals []criticRebuttal, objections []criticObjection, evidenceText string, settled map[string]bool, records *[]criticObjection, recordKeys map[string]bool) {
+	for _, rb := range rebuttals {
+		if !strings.EqualFold(strings.TrimSpace(rb.Verdict), "contest") {
+			continue
+		}
+		record, ok := matchContestedObjection(objections, rb)
+		if !ok {
+			record = criticObjection{Section: rb.Section, Objection: rb.Targets, Severity: "blocking"}
+		}
+		if contestEvidenceHolds(rb, evidenceText) {
+			settled[rebuttalTargetKey(rb)] = true
+			*records = append(*records, tagObjection(record, contestTagSettled))
+		} else {
+			*records = append(*records, tagObjection(record, contestTagUnproven))
+		}
+		recordKeys[objectionKey(record)] = true
+	}
+}
+
+// mergeContestRecords folds the ledger's tagged contest records into the
+// Known Risks list: a record REPLACES its untagged duplicate so the tag
+// (contested-settled | contested-unproven) is what survives on the
+// draft, and the objection is never silently dropped.
+func mergeContestRecords(known, records []criticObjection, recordKeys map[string]bool) []criticObjection {
+	if len(records) == 0 {
+		return known
+	}
+	kept := make([]criticObjection, 0, len(known)+len(records))
+	for _, o := range known {
+		if recordKeys[objectionKey(o)] {
+			continue
+		}
+		kept = append(kept, o)
+	}
+	return append(kept, records...)
+}
+
 // draftToolHintRe extracts tool hints from draft step lines
 // ("1. Do the thing [code]"). Same hint vocabulary as the compiler's
 // step-line grammar.
@@ -385,6 +545,13 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	criticFailed := false
 	hostileSkipped := false
 	var blocking, advisory []criticObjection
+	// Contest ledger (leaf 04, C6): objections settled by a VALID quoted
+	// contest do not re-block in later rounds of this flow; every decided
+	// contest (settled or unproven) lands as a tagged record that
+	// replaces its untagged duplicate in Known Risks.
+	settledContests := make(map[string]bool)
+	var contestRecords []criticObjection
+	recordKeys := make(map[string]bool)
 
 	for round := 1; round <= maxRounds; round++ {
 		// --- Critique (master step 2) ---
@@ -454,6 +621,13 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 		}
 		hostileSkipped = hostileSkippedReason != ""
 
+		// Contest ledger: settled objections do not re-block in later
+		// rounds of this flow (C6). Applied BEFORE the clean-round check
+		// so a fully settled round seals clean - the objections stay
+		// recorded in the ledger as tagged entries.
+		blocking = dropContestedSettled(blocking, settledContests)
+		advisory = dropContestedSettled(advisory, settledContests)
+
 		if len(blocking) == 0 {
 			// Clean round. Advisory items still roll into Known Risks
 			// (unconditional per the leaf), then the loop exits.
@@ -464,7 +638,12 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 		if round == maxRounds {
 			break
 		}
-		revised, reviseErr := sp.reviseDraft(ctx, plannerLoop, req, draft, append(append([]criticObjection{}, blocking...), advisory...), "")
+		reviseObjections := append(append([]criticObjection{}, blocking...), advisory...)
+		// C6 evidence text: the exact Render() the critic saw for THIS
+		// round - the quote a contest cites must come from what the
+		// critic could actually have read.
+		evidenceText := input.Render()
+		revised, rebuttals, reviseErr := sp.reviseDraft(ctx, plannerLoop, req, draft, reviseObjections, "")
 		if reviseErr != nil {
 			sp.recordMetric("strategic_planner.tier_complex_fallback", 1, map[string]string{"reason": "revise_transport"})
 			sp.logger.Warn("Critique loop revise failed; falling back to legacy path",
@@ -474,6 +653,10 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 			return &critiqueFlowResult{Action: critiqueActionFallback}, nil
 		}
 		draft = revised
+		// Contract C6: rebuttals ride an optional JSON block in the
+		// revise output. No rebuttals -> this is a no-op and the
+		// "address every objection" behavior is unchanged.
+		applyContestRebuttals(rebuttals, reviseObjections, evidenceText, settledContests, &contestRecords, recordKeys)
 	}
 
 	// Rounds exhausted with open blocking items → the Known Risks section
@@ -494,6 +677,9 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 		outcome = critiqueOutcomeCriticFail
 	}
 	known := append(append([]criticObjection{}, blocking...), advisory...)
+	// Leaf 04: decided contests replace their untagged duplicates so the
+	// contested-settled / contested-unproven tag survives on the draft.
+	known = mergeContestRecords(known, contestRecords, recordKeys)
 	if len(known) > 0 {
 		draft.Markdown = appendKnownRisks(draft.Markdown, known)
 	}
@@ -526,7 +712,7 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	compiled, compileErr := plan.CompileSealed(draft.Markdown, sp.MaxPhases())
 	if compileErr != nil {
 		problems := compileProblemText(compileErr)
-		revised, reviseErr := sp.reviseDraft(ctx, plannerLoop, req, draft, nil, problems)
+		revised, _, reviseErr := sp.reviseDraft(ctx, plannerLoop, req, draft, nil, problems)
 		if reviseErr != nil {
 			msg := fmt.Sprintf("plan compile failed (%s) and the compile-fix revise round also failed: %v", problems, reviseErr)
 			sp.failTaskWithReason(req.TaskID, msg)
@@ -722,10 +908,27 @@ func (sp *StrategicPlanner) runCriticOnce(ctx context.Context, plannerLoop *Agen
 	return parseCriticObjections(output)
 }
 
+// revisePromptContestLine is the leaf-04 prompt line added to reviseDraft,
+// after the existing objection list.
+const revisePromptContestLine = "You may contest an objection only by quoting a sentence from the evidence sections. A wish to contest is not evidence. You wrote this draft."
+
+// revisePromptRebuttalBlock documents the optional C6 rebuttal ride-along:
+// the reply stays markdown-first; a planner that wants to contest may emit
+// an extra fenced json block (before or after the markdown) shaped
+// {"rebuttals": [{"section", "targets", "evidence", "verdict"}]}. Verdict
+// is "accept" (the objection is being fixed) or "contest". A contest
+// counts ONLY when its evidence quotes a sentence from the evidence
+// sections rendered in the critic prompt; the loop verifies that quote
+// mechanically and never takes a contest on faith.
+const revisePromptRebuttalBlock = "To contest an objection, add ONE extra fenced ```json block containing {\"rebuttals\": [{\"section\": \"...\", \"targets\": \"the objection text\", \"evidence\": \"a verbatim sentence quoted from the evidence sections\", \"verdict\": \"contest\"}]}."
+
 // reviseDraft asks the planner to produce a revised draft addressing the
 // objection list (and, for the compile-fix path, the compiler's problems).
-func (sp *StrategicPlanner) reviseDraft(ctx context.Context, plannerLoop *AgentLoop, req PlanRequest, draft *PlanDraft, objections []criticObjection, compileProblems string) (*PlanDraft, error) {
+// The reply is markdown-first: rebuttals (leaf 04, contract C6) ride an
+// optional JSON block and are stripped from the stored draft document.
+func (sp *StrategicPlanner) reviseDraft(ctx context.Context, plannerLoop *AgentLoop, req PlanRequest, draft *PlanDraft, objections []criticObjection, compileProblems string) (*PlanDraft, []criticRebuttal, error) {
 	var sb strings.Builder
+	var rebuttals []criticRebuttal
 	sb.WriteString("You are the planner. Revise the following plan draft to address every objection. ")
 	sb.WriteString("Keep the plan-dialect v1 section skeleton (## Meta, ## Goal, ## Decisions, ## Open Questions (empty), ## Phases) ")
 	sb.WriteString("and respond with ONLY the revised markdown document.\n\n")
@@ -739,6 +942,10 @@ func (sp *StrategicPlanner) reviseDraft(ctx context.Context, plannerLoop *AgentL
 			sb.WriteByte('\n')
 		}
 		sb.WriteString("\n")
+		sb.WriteString(revisePromptContestLine)
+		sb.WriteString("\n\n")
+		sb.WriteString(revisePromptRebuttalBlock)
+		sb.WriteString("\n\n")
 	}
 	if compileProblems != "" {
 		sb.WriteString("## Compiler problems to fix\n\n")
@@ -753,13 +960,43 @@ func (sp *StrategicPlanner) reviseDraft(ctx context.Context, plannerLoop *AgentL
 
 	output, err := sp.runPlannerChat(ctx, plannerLoop, req, sb.String())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	md := strings.TrimSpace(output)
 	if md == "" || !strings.Contains(md, "## Phases") {
-		return nil, fmt.Errorf("planner revise output missing Phases section")
+		return nil, nil, fmt.Errorf("planner revise output missing Phases section")
 	}
-	return &PlanDraft{Markdown: md, Version: draft.Version, UpdatedAt: time.Now().UTC()}, nil
+	// Contract C6: parse the rebuttal ride-along from the RAW reply
+	// (rebuttals may live in the fenced block), then strip that block
+	// from the stored markdown-first document.
+	rebuttals = parseCriticRebuttals(output)
+	md = stripRebuttalJSON(md)
+	return &PlanDraft{Markdown: md, Version: draft.Version, UpdatedAt: time.Now().UTC()}, rebuttals, nil
+}
+
+// stripRebuttalJSON removes the optional fenced ```json rebuttal block
+// from a revise reply so it never lands inside the stored plan document.
+// The markdown document itself is preserved verbatim; when no rebuttal
+// block is present the input is returned unchanged (byte-identical
+// no-rebuttal path).
+func stripRebuttalJSON(markdown string) string {
+	const fence = "```json"
+	const closeFence = "```"
+	idx := strings.Index(markdown, fence)
+	if idx < 0 {
+		return markdown
+	}
+	// Search for the closing fence AFTER the opening one (the opening
+	// fence itself contains ``` and would otherwise match immediately).
+	bodyStart := idx + len(fence)
+	rel := strings.Index(markdown[bodyStart:], closeFence)
+	if rel < 0 {
+		// Unterminated fence: leave the reply untouched; the defensive
+		// parse in parseCriticRebuttals handles it either way.
+		return markdown
+	}
+	end := bodyStart + rel + len(closeFence)
+	return strings.TrimRight(markdown[:idx]+markdown[end:], "\n")
 }
 
 // runPlannerChat runs one critique-loop LLM call: the raw chatter when a
