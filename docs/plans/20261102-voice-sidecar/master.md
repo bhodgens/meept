@@ -74,7 +74,10 @@ silence_prompt_seconds(45), max_concurrent_calls, reorder_window_frames(10),
 reorder_gap_ms(60), telnyx_public_key (base64 Ed25519 public key from
 Mission Control; unset = voice routes return 503, fail-closed per leaf 10),
 child_binary_path (optional override; default = daemon-adjacent lookup,
-leaf 13).
+leaf 13), loopback_plain_addr (empty default; when voice.enabled and set,
+the daemon serves a SECOND plain-HTTP listener on this loopback address so
+a TLS-terminating tunnel can forward to it - the main listener stays
+TLS-mandatory untouched; leaf 10 owns the listener).
 
 ### C4 Telnyx client (internal/voice/telnyx, borrowed shapes)
 
@@ -255,6 +258,8 @@ Coverage matrix (gate tests live in 00T, parked .staged until each leaf):
 | One live call per target; max_concurrent_calls busy | TestRegistryLimits | voice-concurrency | PENDING |
 | Unanswered outbound releases slot + unparks goal | TestOutboundTimeoutRelease | - | PENDING |
 | jargo not importable from internal/voice | TestNoJargoImport | - | PENDING |
+| DTMF frames decode as counted no-op | TestFrameDTMF, TestVoiceDTMF | - | PENDING |
+| Plain loopback listener (tunnel ingress), loopback-only bind | TestVoicePlainListener | - | PENDING |
 | Greeting on connect + filler on final prompt (fact-free, order pinned) | TestTalkLoopGreetingAndFiller | voice-lifecycle | PENDING |
 | Missing telnyx_public_key -> routes 503, fail-closed | TestVoiceRoutesDisabled | - | PENDING |
 | Child text-socket keys frame: redaction, memory-only, no env/argv | TestKeysRedaction, TestNoKeyLogs | - | PENDING |
@@ -331,13 +336,14 @@ Gates, in the isolation worktree, after each wave and before merge:
 - One-child-N-pipelines vs one-child-per-call: leaf 07 builds N-pipelines;
   leaf 13 measures; fallback documented in spec, socket contract unchanged.
 - telnyx-go SDK method names: A3 avoids the question (hand-rolled client).
-- TLS ingress posture: the daemon HTTP listener is TLS-mandatory
-  (self-signed cert at ~/.meept/tls). The tunnel must accept/forward to an
-  https backend, or a plain-HTTP loopback listener for tunnel traffic
-  only is added. Proven in Integration Test Plan step 6; ws:// vs wss://
-  survives because the media signature covers the configured URL string.
-- DTMF frames (Telnyx sends them) are NOT handled in this tree; future
-  change if live calls need voicemail trees / "press 1".
+- TLS ingress posture: RESOLVED in-plan. Config key
+  voice.loopback_plain_addr (leaf 01 + leaf 10 T6): an optional
+  plain-HTTP loopback listener serving only the two voice routes, so a
+  TLS-terminating tunnel forwards to it; the main TLS listener is
+  untouched. Live drill step 6 proves the forward path end to end.
+- DTMF frames (Telnyx sends them): handled as a counted no-op decode
+  (leaf 03 T1, leaf 10 T7) so a voicemail-tree "press 1" cannot error the
+  call. No action semantic on DTMF in this tree; a future change adds it.
 - Voicemail detection on outbound is NOT handled (uptractor observed
   voicemail buffers behave differently); note behavior in drill 7.
 - Greeting/filler emission owner is the daemon talk loop (leaf 14): greeting
