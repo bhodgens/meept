@@ -74,10 +74,12 @@ func createTestSkillFile(t *testing.T, dir, name, content string) string {
 	return skillFile
 }
 
-// TestContextInjector_SkillsRelevanceFilter verifies that when the base prompt
-// contains task-relevant keywords, only matching skills appear in the output
-// (not all cached skills). Skills with no relevance to the base are filtered out.
-func TestContextInjector_SkillsRelevanceFilter(t *testing.T) {
+// TestContextInjector_SkillsListingUnconditional verifies the C4 listing:
+// every visible cached skill appears in the "## Active Skills" section, no cap,
+// regardless of whether the base prompt matches it (the base is no longer a
+// relevance signal — branch 04 removed relevance filtering). Both fixtures are
+// listed unconditionally, each in C4 line shape.
+func TestContextInjector_SkillsListingUnconditional(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create two skill files on disk: one for code review, one for deployment.
@@ -135,24 +137,25 @@ Deploy to production.
 	ci := NewContextInjector(nil, nil)
 	ci.SetSkillLoader(loader)
 
-	// Base prompt mentions "review" which should match "code review" skill.
-	// "reviewer" is a query word that matches name word "review" (+5).
+	// Base prompt mentions "review"; under C4 this does NOT filter the
+	// listing — every visible cached skill is listed unconditionally.
 	base := "you are a code reviewer for pull requests"
 	prompt := ci.BuildSystemPrompt(ctx, base)
 
 	// Active Skills section should be present.
 	if !strings.Contains(prompt, "## Active Skills") {
-		t.Error("expected Active Skills section when cached skills match base")
+		t.Error("expected Active Skills section when cached skills exist")
 	}
 
-	// The "code review" skill should appear (word match: "review" in name).
-	if !strings.Contains(prompt, "code review") {
-		t.Error("expected 'code review' skill in prompt when base mentions reviewer")
+	// The "code review" skill should appear in C4 line shape.
+	if !strings.Contains(prompt, "- code review: Review code for bugs and style [load: file_read "+reviewPath+"]") {
+		t.Error("expected 'code review' C4 listing line in prompt")
 	}
 
-	// The "deploy" skill should NOT appear (no relevance match).
-	if strings.Contains(prompt, "Deploy applications to production") {
-		t.Error("expected 'deploy' skill to be filtered out; base does not mention deploy")
+	// The "deploy" skill must ALSO appear: the listing is unconditional,
+	// no relevance filtering, so base text no longer drops it.
+	if !strings.Contains(prompt, "- deploy: Deploy applications to production [load: file_read "+deployPath+"]") {
+		t.Error("expected 'deploy' C4 listing line in prompt (unconditional, no cap)")
 	}
 }
 

@@ -29,6 +29,10 @@ type SkillIndexEntry struct {
 	AllowedTools []string `json:"allowed_tools,omitempty"`
 	// Examples are sample prompts for trigger matching.
 	Examples []string `json:"examples,omitempty"`
+	// DisableModelInvocation omits the skill from the model-facing listing
+	// (frontmatter `disable-model-invocation: true`); the skill stays
+	// executable via explicit invocation paths.
+	DisableModelInvocation bool `json:"disable_model_invocation,omitempty"`
 	// SourceOrigin tracks which skill system the skill originated from ("meept", "claude", "hermes").
 	SourceOrigin string `json:"source_origin,omitempty"`
 }

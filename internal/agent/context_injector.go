@@ -3,16 +3,13 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/caimlas/meept/internal/preferences"
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/skills"
 )
-
-// maxRelevantSkills limits how many relevance-matched skills appear in the
-// system prompt to avoid context bloat.
-const maxRelevantSkills = 5
 
 // ContextInjector merges learning patterns and user instructions
 // into system prompts for context enrichment.
@@ -42,15 +39,21 @@ func (c *ContextInjector) SetSkillLoader(loader *skills.LazySkillLoader) {
 }
 
 // BuildSystemPrompt builds a system prompt with active user instructions
-// and skills injected. The base prompt is used as the relevance query for
-// skill filtering: skills whose name, description, tags, or examples match
-// the task context in base are prioritized. If no relevance matches are
-// found (or the base is empty), all cached skills are included as fallback.
+// and skills injected.
 //
 // Per Phase 4 spec 4.2 + turbo Thread E self-reflection:
-// - Standing instructions from preferences.Store
-// - Active skills filtered by relevance to base
-// - Learned patterns section removed (patterns deprecated; skills replace)
+//   - Standing instructions from preferences.Store
+//   - Skills: a no-cap listing of every visible cached skill, one C4 line
+//     each, in alphabetical order. The per-turn base text is NOT a relevance
+//     signal (C4: the listing is built once per episode so it is cache-stable
+//     and never churns the cache with per-turn base).
+//
+// Line shape (C4, byte-exact):
+//
+//   - <name>: <description> [load: file_read <absolute SKILL.md path>]
+//
+// A skill whose frontmatter sets `disable-model-invocation: true` is omitted
+// from the listing; it stays reachable via the skill executor path.
 func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) string {
 	var sb strings.Builder
 	sb.WriteString(base)
@@ -67,15 +70,14 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 		instructions = c.instructions.GetActive()
 	}
 
-	// Compute relevant skill names: use relevance filtering when possible,
-	// fall back to all cached skills when no query signal or no matches.
-	var skillNames []string
+	// No-cap listing of every visible cached skill, alphabetical (cache-stable).
+	var skillLines []string
 	if c.skillLoader != nil {
-		skillNames = c.relevantSkillNames(base)
+		skillLines = c.visibleSkillLines()
 	}
 
-	// Inject context if we have instructions or active skills.
-	if len(instructions) > 0 || len(skillNames) > 0 {
+	// Inject context if we have instructions or visible skills.
+	if len(instructions) > 0 || len(skillLines) > 0 {
 		sb.WriteString("\n\n# Active Context\n")
 
 		// Standing instructions section
@@ -91,18 +93,13 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 			}
 		}
 
-		// Active skills section: relevance-filtered subset of cached skills.
-		if len(skillNames) > 0 {
+		// Active skills section: one line per visible cached skill, no cap.
+		if len(skillLines) > 0 {
 			sb.WriteString("\n## Active Skills\n")
-			sb.WriteString("The following skills are loaded and may be relevant to this task:\n\n")
-			for _, name := range skillNames {
-				if s := c.skillLoader.Get(name); s != nil {
-					desc := s.Description
-					if desc == "" {
-						desc = "(no description)"
-					}
-					fmt.Fprintf(&sb, "- **%s**: %s\n", s.Name, desc)
-				}
+			sb.WriteString("The following skills provide specialized instructions. Load a skill's file when the task matches its description.\n\n")
+			for _, line := range skillLines {
+				sb.WriteString(line)
+				sb.WriteByte('\n')
 			}
 		}
 
@@ -112,56 +109,29 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 	return sb.String()
 }
 
-// relevantSkillNames returns a relevance-filtered list of cached skill names.
-// When base is non-empty and the skill index is available, MatchAll ranks
-// skills by fuzzy match score. Only skills with score > 0 that are also in
-// cache are returned, capped at maxRelevantSkills. If no relevance matches
-// are found (or base is empty, or no index), all cached names are returned
-// as fallback so skills are never silently dropped.
-func (c *ContextInjector) relevantSkillNames(base string) []string {
-	cached := c.skillLoader.CachedNames()
-	if len(cached) == 0 {
+// visibleSkillLines returns one C4 listing line per visible cached skill, in
+// alphabetical name order (deterministic = cache-stable). Skills whose
+// frontmatter sets disable-model-invocation are hidden from the listing.
+func (c *ContextInjector) visibleSkillLines() []string {
+	names := c.skillLoader.CachedNames()
+	if len(names) == 0 {
 		return nil
 	}
+	sort.Strings(names)
 
-	if base == "" {
-		return cached
-	}
-
-	idx := c.skillLoader.Index()
-	if idx == nil {
-		return cached
-	}
-
-	matches := idx.MatchAll(base)
-	if len(matches) == 0 {
-		return cached
-	}
-
-	// Build a set of cached skill names for O(1) lookup.
-	cachedSet := make(map[string]bool, len(cached))
-	for _, name := range cached {
-		cachedSet[strings.ToLower(name)] = true
-	}
-
-	// Collect matched skills that are also cached, up to maxRelevantSkills.
-	var result []string
-	for _, m := range matches {
-		if len(result) >= maxRelevantSkills {
-			break
+	var out []string
+	for _, name := range names {
+		s := c.skillLoader.Get(name)
+		if s == nil || s.DisableModelInvocation {
+			continue
 		}
-		nameLower := strings.ToLower(m.Entry.Name)
-		if cachedSet[nameLower] {
-			result = append(result, m.Entry.Name)
+		desc := s.Description
+		if desc == "" {
+			desc = "(no description)"
 		}
+		out = append(out, fmt.Sprintf("- %s: %s [load: file_read %s]", s.Name, desc, s.Path))
 	}
-
-	// If no matched skills are cached, fall back to all cached skills.
-	if len(result) == 0 {
-		return cached
-	}
-
-	return result
+	return out
 }
 
 // HasActiveInstructions returns true if there are active user instructions.

@@ -111,16 +111,17 @@ func ParseSkillMetadataOnly(path string) (*SkillIndexEntry, error) {
 	}
 
 	entry := &SkillIndexEntry{
-		Name:          meta.Name,
-		Description:   meta.Description,
-		Requires:      meta.Requires,
-		RequiresTools: meta.RequiresTools,
-		Tags:          meta.Tags,
-		Path:          path,
-		RiskLevel:     meta.RiskLevel,
-		AllowedTools:  meta.AllowedTools,
-		Examples:      meta.Examples,
-		SourceOrigin:  meta.SourceOrigin,
+		Name:                   meta.Name,
+		Description:            meta.Description,
+		Requires:               meta.Requires,
+		RequiresTools:          meta.RequiresTools,
+		Tags:                   meta.Tags,
+		Path:                   path,
+		RiskLevel:              meta.RiskLevel,
+		AllowedTools:           meta.AllowedTools,
+		Examples:               meta.Examples,
+		SourceOrigin:           meta.SourceOrigin,
+		DisableModelInvocation: meta.DisableModelInvocation,
 	}
 
 	// Apply defaults
@@ -196,23 +197,24 @@ func ParseSkillText(text string) (*Skill, error) {
 	}
 
 	skill := &Skill{
-		Name:          meta.Name,
-		Description:   meta.Description,
-		Requires:      meta.Requires,
-		RequiresTools: meta.RequiresTools,
-		Tags:          meta.Tags,
-		Examples:      meta.Examples,
-		Body:          strings.TrimSpace(body),
-		AllowedTools:  meta.AllowedTools,
-		RiskLevel:     meta.RiskLevel,
-		MaxIterations: meta.MaxIterations,
-		Temperature:   meta.Temperature,
-		MaxTokens:     meta.MaxTokens,
-		MCPServers:    meta.MCPServers,
-		UIType:        meta.UIType,
-		State:         meta.State,
-		Prerequisites: meta.HermesPrereqs,
-		SourceOrigin:  meta.SourceOrigin,
+		Name:                   meta.Name,
+		Description:            meta.Description,
+		Requires:               meta.Requires,
+		RequiresTools:          meta.RequiresTools,
+		Tags:                   meta.Tags,
+		Examples:               meta.Examples,
+		Body:                   strings.TrimSpace(body),
+		AllowedTools:           meta.AllowedTools,
+		RiskLevel:              meta.RiskLevel,
+		MaxIterations:          meta.MaxIterations,
+		Temperature:            meta.Temperature,
+		MaxTokens:              meta.MaxTokens,
+		MCPServers:             meta.MCPServers,
+		UIType:                 meta.UIType,
+		State:                  meta.State,
+		DisableModelInvocation: meta.DisableModelInvocation,
+		Prerequisites:          meta.HermesPrereqs,
+		SourceOrigin:           meta.SourceOrigin,
 	}
 
 	// Apply defaults

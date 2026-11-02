@@ -93,6 +93,11 @@ type Skill struct {
 	// `state: true` frontmatter flag; leaf 05 owns activation.
 	State bool `json:"state,omitempty"`
 
+	// DisableModelInvocation omits the skill from the model-facing listing
+	// (frontmatter `disable-model-invocation: true`); the skill stays
+	// executable via explicit invocation paths, it is just not listed.
+	DisableModelInvocation bool `json:"disable_model_invocation,omitempty"`
+
 	// Prerequisites holds Hermes-Agent runtime requirements (env vars, commands, packages).
 	// Nil for Meept-native skills.
 	Prerequisites *HermesPrerequisites `json:"prerequisites,omitempty" yaml:"prerequisites,omitempty"`
@@ -251,6 +256,12 @@ type SkillMetadata struct {
 	// State is the SKILL.state opt-in flag (frontmatter `state: true`).
 	State bool `yaml:"state"`
 
+	// DisableModelInvocation omits the skill from the model-facing listing
+	// (frontmatter `disable-model-invocation: true`, mirrors pi). The skill
+	// remains executable via explicit invocation paths; only the listing
+	// hides it. Absent or false keeps the skill visible.
+	DisableModelInvocation bool `yaml:"disable-model-invocation"`
+
 	// Claude-specific fields (parsed separately, merged into Tags).
 	Trigger  string     `yaml:"trigger"`
 	Triggers stringList `yaml:"triggers"`
@@ -259,7 +270,6 @@ type SkillMetadata struct {
 	HermesPrereqs *HermesPrerequisites `yaml:"-"`
 	SourceOrigin  string               `yaml:"-"`
 }
-
 
 // SkillExecutionResult holds the result of executing a skill.
 //

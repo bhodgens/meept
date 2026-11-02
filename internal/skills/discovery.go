@@ -224,16 +224,17 @@ func (d *Discovery) DiscoverMetadataOnly() ([]*SkillIndexEntry, error) {
 			}
 			for _, skill := range skills {
 				sourceEntries = append(sourceEntries, &SkillIndexEntry{
-					Name:          skill.Name,
-					Description:   skill.Description,
-					Requires:      skill.Requires,
-					RequiresTools: skill.RequiresTools,
-					Tags:          skill.Tags,
-					Path:          skill.Path,
-					Priority:      skill.Priority,
-					RiskLevel:     skill.RiskLevel,
-					AllowedTools:  skill.AllowedTools,
-					Examples:      skill.Examples,
+					Name:                   skill.Name,
+					Description:            skill.Description,
+					Requires:               skill.Requires,
+					RequiresTools:          skill.RequiresTools,
+					Tags:                   skill.Tags,
+					Path:                   skill.Path,
+					Priority:               skill.Priority,
+					RiskLevel:              skill.RiskLevel,
+					AllowedTools:           skill.AllowedTools,
+					Examples:               skill.Examples,
+					DisableModelInvocation: skill.DisableModelInvocation,
 				})
 			}
 		}

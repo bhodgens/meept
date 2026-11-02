@@ -88,6 +88,35 @@ unavailable, execution is refused with an error naming them:
 to diagnose`. Skills without the key are unaffected — no tool check
 runs for them.
 
+### Hiding a skill from the model-facing listing
+
+A skill can opt out of the system-prompt listing with the
+`disable-model-invocation` frontmatter key:
+
+```yaml
+---
+name: secret-tool
+description: Internal helper used by explicit invocation only
+disable-model-invocation: true
+---
+```
+
+Effect: the skill is omitted from the "## Active Skills" listing that the
+model sees each turn, so the model never proposes it on its own. It stays
+reachable through the explicit skill-execution paths (`skills_execute` /
+trigger/invocation wiring) — only the listing hides it; the executor path is
+untouched. The key is opt-in: absent or `disable-model-invocation: false`
+keeps the skill visible, and old skill files without the key are unaffected.
+
+Every *visible* cached skill is listed, one line each, in alphabetical order
+with a load hint —
+
+```
+- <name>: <description> [load: file_read <absolute SKILL.md path>]
+```
+
+— so the model can pull the body on demand; there is no relevance cap.
+
 ### Model Resolution
 - Skills declare `requires: [code, reasoning]` in YAML
 - Models declare `capabilities: [code, tool_use]` in config
