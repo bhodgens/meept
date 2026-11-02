@@ -185,6 +185,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context firewall) |
 | **Memory** | `internal/memory` (manager, episodic, task, ftstore, facts) |
 | **Tools** | `internal/tools` (registry, builtin/*, mcp), `internal/acp` (ACP client wire + human permission relay `relay.go` + decision lane + persona lane `GetOrCreatePersona`), `internal/hermes` (Hermes gateway API-server client) |
+| **Codemode** | `internal/codemode` (C3 sandbox: goja eventloop VM, ToolBridge async bridge, hard timeout kill, allocation-counting memory cap, no fs/net — full contract in `docs/workflows/codemode.md`) |
 | **Security** | `internal/security` (engine, sanitizer, tirith, tls, fence), `internal/auth` (multi-user store: users/keys/expiry, quota+permission stubs) |
 | **Employee** | `internal/employee` (constitution, goal, goal_loop, enforcement, authority, manager) |
 | **Audit Chain** | `internal/auditlog` (canonical JSON, hash chain, store, anchoring, verification) |
