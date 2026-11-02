@@ -125,7 +125,8 @@ D. **Hybrid C+B (expected winner):** predicted subset with full schemas +
 |---|-------|------|-----------|--------------|-------------|
 | 00A | 00A-token-audit.md | measurement leaf | none | 55K | solo, dispatchable NOW |
 | 00D | 00D-design-decision.md | design leaf | 00A + Q1/Q2 answers | 50K | GATED |
-| 01.. | (authored after 00D) | - | 00D | - | GATED |
+| 00T | 00T-gate.md (AUTHORED 2026-11-01) | test gate leaf | 00D | 60K | solo, FIRST after 00D |
+| 01.. | (00D §8 decomposition; leaf docs to be authored before dispatch) | - | 00T | - | GATED |
 
 ## Dispatch Protocol
 
@@ -153,7 +154,7 @@ Pinned after 00D. Placeholder constraint that binds ALL candidates:
 | Feature | Gate leaf | Test target | Status |
 |---------|-----------|-------------|--------|
 | token audit numbers | 00A | n/a (measurement, no code) | PENDING |
-| (design-gated features) | authored with leaves 01+ | TBD post-00D | GATED |
+| tool_exposure config + capability gate + starvation + cache-continuity | 00T-gate.md | e2e/suites/dynamic-tools/ + manifest path_map | PENDING |
 
 ## Coding Conventions
 
