@@ -85,7 +85,7 @@ Inherited from ../master.md. Branch-specific:
 | Child | Status | Commit | Notes |
 |-------|--------|--------|-------|
 | 00T-gate | TESTS_VALIDATED | pending | 4 pinned C4 tests in internal/agent/context_injector_test.go (T4 re-pinned to per-turn base churn - the cache-stability contract - which is RED today; two-identical-builds variant would have been green and defeated the gate) + TestSkillsFrontmatterDisableModelInvocation in internal/skills/parser_test.go (field asserted via reflection so the gate compiles against current code; turns green when leaf 01 T1 adds the field). All 5 fail RED behaviorally; pre-existing tests green; no implementation touched |
-| 01-skill-listing | PENDING | - | |
+| 01-skill-listing | COMPLETE | 6169fe4a | C4 no-cap listing + disable-model-invocation frontmatter; maxRelevantSkills const + MatchAll(base) signal removed; 4 TestSkillsListing* GREEN, agent+skills suites green, 0 cap hits |
 | 02-embedding-rank | GATED | - | needs Q4 |
 
 ## Integration Test Plan
