@@ -1,0 +1,67 @@
+//go:build e2e
+
+// Suite voice-lifecycle (master Test Gate): the inbound call lifecycle end
+// to end against a scratch daemon with a FAKE Telnyx (httptest webhook
+// server + media websocket) and a FAKE child speaking C1 frames over the
+// real unix sockets. C1 frames observed in order:
+// inbound answer -> greeting -> prompt -> say -> hangup -> idle stop
+// (idle_stop_seconds=30 default; suite overrides it small for speed).
+// Parked .staged from leaf 00T; leaf 15 activates + registers the manifest
+// entry (leaf 15 owns e2e/manifest.json).
+package voicelifecycle
+
+import (
+	"testing"
+	"time"
+
+	"github.com/caimlas/meept/e2e/harness"
+)
+
+// TestVoiceLifecycleInboundCall drives the full inbound flow:
+// call.initiated -> manager answers -> greeting say -> child prompt (last)
+// -> employee turn -> supervisor-allowed say -> hangup -> idle stop within
+// the configured idle_stop_seconds.
+func TestVoiceLifecycleInboundCall(t *testing.T) {
+	fake := newFakeTelnyx(t)
+	s := harness.Start(t,
+		harness.WithConfigOverlay(map[string]any{
+			"voice.enabled":                true,
+			"voice.public_stream_url":      fake.streamURL(),
+			"voice.connection_id":          "conn-e2e-1",
+			"voice.from_number":            "+15551000001",
+			"voice.allowed_numbers":        []string{"+15552000001"},
+			"voice.telnyx_public_key":      fake.publicKeyB64(),
+			"voice.telnyx_base_url":        fake.baseURL(),
+			"voice.idle_stop_seconds":      2,
+			"voice.supervisor_timeout_ms":  400,
+		}),
+	)
+
+	// The webhook lands on the daemon's voice route; the fake Telnyx signs
+	// it with the key the daemon was configured with.
+	fake.deliverCallInitiated(t, s, "cc-e2e-1", "+15552000001", "+15551000001", "incoming")
+
+	// C1 ordering: the daemon answers (fake records AnswerCall), then the
+	// child receives the greeting say frame.
+	fake.awaitAnswered(t, "cc-e2e-1", 10*time.Second)
+	child := fake.awaitChildFrame(t, "cc-e2e-1", "say", 10*time.Second)
+	if child.Text == "" {
+		t.Errorf("greeting say frame carried empty text")
+	}
+	if child.Last != nil && *child.Last {
+		t.Errorf("greeting say has last=true; greeting is not a final turn")
+	}
+
+	// Child speaks a final prompt; the daemon runs the employee turn and
+	// answers with a say frame after the supervisor gate.
+	fake.childSendsPrompt(t, "cc-e2e-1", "What is on my calendar today?", true)
+	fake.awaitSayContaining(t, "cc-e2e-1", 15*time.Second)
+
+	// Hangup: teardown is idempotent and the child idle-stops.
+	fake.deliverHangup(t, s, "cc-e2e-1")
+	fake.awaitChildStop(t, "cc-e2e-1", 10*time.Second)
+
+	// Outbound leg is NOT part of this suite; assert zero AnswerCall was
+	// issued toward any outbound-marked leg is covered by voice-concurrency
+	// and the manager unit pins.
+}
