@@ -109,7 +109,7 @@ func (m *Modal) renderContent() string {
 	b.WriteString("\n")
 
 	// Separator
-	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", m.width-4)))
+	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", max(m.width-4, 1))))
 	b.WriteString("\n")
 
 	// Items
@@ -417,7 +417,7 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 	b.WriteString("\n")
 
 	// Separator
-	b.WriteString(s.styles.Muted.Render(strings.Repeat("─", s.width-4)))
+	b.WriteString(s.styles.Muted.Render(strings.Repeat("─", max(s.width-4, 1))))
 	b.WriteString("\n")
 
 	switch {
@@ -508,7 +508,7 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 
 		// Footer with actions
 		b.WriteString("\n")
-		b.WriteString(s.styles.Muted.Render(strings.Repeat("─", s.width-4)))
+		b.WriteString(s.styles.Muted.Render(strings.Repeat("─", max(s.width-4, 1))))
 		b.WriteString("\n")
 		actions := []string{
 			s.styles.HelpKey.Render("[enter]") + s.styles.HelpValue.Render(" switch"),
@@ -730,7 +730,7 @@ func (m *SessionRenameModal) View(screenW, screenH int) string {
 	b.WriteString("\n")
 
 	// Separator
-	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", m.width-4)))
+	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", max(m.width-4, 1))))
 	b.WriteString("\n\n")
 
 	// Input field
@@ -920,7 +920,7 @@ func (m *ConfirmModal) View(screenW, screenH int) string {
 	b.WriteString("\n")
 
 	// Separator
-	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", m.width-4)))
+	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", max(m.width-4, 1))))
 	b.WriteString("\n\n")
 
 	// Message

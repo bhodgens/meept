@@ -245,7 +245,7 @@ func (m *ACPPermissionModal) View(screenW, screenH int) string {
 	titleStyle := m.styles.ModalTitle.Width(m.width - 4)
 	b.WriteString(titleStyle.Render("acp permission request"))
 	b.WriteString("\n")
-	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", m.width-4)))
+	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", max(m.width-4, 1))))
 	b.WriteString("\n\n")
 
 	lines := []string{

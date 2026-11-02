@@ -247,7 +247,7 @@ func (m *PendingChangesModal) View(screenW, screenH int) string {
 	title := lipgloss.NewStyle().Bold(true).Width(m.width - 4).Render("pending changes")
 	b.WriteString(title)
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", m.width-4))
+	b.WriteString(strings.Repeat("─", max(m.width-4, 1)))
 	b.WriteString("\n")
 
 	if m.diffMode {
@@ -261,7 +261,7 @@ func (m *PendingChangesModal) View(screenW, screenH int) string {
 
 	// Footer hints
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", m.width-4))
+	b.WriteString(strings.Repeat("─", max(m.width-4, 1)))
 	b.WriteString("\n")
 	var hints string
 	if m.diffMode {
