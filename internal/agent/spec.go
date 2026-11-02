@@ -96,6 +96,11 @@ type AgentSpec struct {
 	// index from these, so a new specialist is routable with a frontmatter
 	// edit alone. Empty = the agent declares no lanes.
 	Intents []string `json:"intents,omitempty"`
+	// Groups lists the agent groups this agent belongs to, from the AGENT.md
+	// `groups:` frontmatter (C4). Scalar-replacement semantics: discovery
+	// shadowing and mergeSpec both take the higher tier's list OUTRIGHT
+	// (model_alias precedent), never a union with the shadowed base list.
+	Groups []string `json:"groups,omitempty"`
 	// Purpose is a description of what this agent does (used in system prompt).
 	Purpose string `json:"purpose"`
 	// Model can be an alias name (e.g., "coder"), a direct model reference (e.g., "zai/glm-4.7"),

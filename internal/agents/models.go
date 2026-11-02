@@ -103,6 +103,13 @@ type AgentMetadata struct {
 	// only by explicit handoff.
 	Intents []string `yaml:"intents,omitempty"`
 
+	// Groups lists the agent groups this agent belongs to (e.g. membership
+	// in [coders, oncall]). A single word key, so it parses natively in the
+	// underscore form (no altMeta lane needed). Scalar-replacement semantics
+	// on shadowing and merge: a higher tier or override replaces the list
+	// outright (model_alias precedent), never a union.
+	Groups []string `yaml:"groups,omitempty"`
+
 	// MaxIterations is the maximum reasoning cycles.
 	MaxIterations int `yaml:"max_iterations,omitempty"`
 

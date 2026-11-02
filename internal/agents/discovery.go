@@ -202,6 +202,11 @@ func (d *Discovery) loadAgentFile(path string, priority int) {
 		agent.AvailableSkills = unionStrings(agent.AvailableSkills, existing.AvailableSkills)
 		agent.PromptComponents = unionStrings(agent.PromptComponents, existing.PromptComponents)
 		agent.Intents = unionStrings(agent.Intents, existing.Intents)
+		// Groups is DELIBERATELY absent from the union list above: group
+		// membership is scalar-replaced — the shadowing (higher-priority)
+		// definition's groups list takes OUTRIGHT, per the model_alias
+		// precedent (contrast AdditionalTools). Unioning a stale lower
+		// tier's groups would resurrect memberships the override removed.
 	}
 
 	d.agents[key] = agent
@@ -248,6 +253,3 @@ func isAgentFile(name string) bool {
 func normalizeID(id string) string {
 	return strings.ToLower(strings.TrimSpace(id))
 }
-
-
-

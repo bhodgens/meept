@@ -1239,6 +1239,17 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.ModelAlias = base.ModelAlias
 	}
 
+	// Groups: SCALAR REPLACEMENT, not union (model_alias precedent, NOT the
+	// additional_tools/additional-tools additive lane): a non-empty override
+	// list replaces the base list wholesale, since group membership is a
+	// declarative set the overriding AGENT.md owns; an omitted (empty) list
+	// preserves the base.
+	if len(def.Groups) > 0 {
+		merged.Groups = append([]string(nil), def.Groups...)
+	} else {
+		merged.Groups = base.Groups
+	}
+
 	// EnhancerModel: prefer AGENT.md if set
 	if def.EnhancerModel != "" {
 		merged.EnhancerModel = def.EnhancerModel
@@ -1370,6 +1381,7 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		CanDelegate:     def.CanDelegate,
 		ReviewsDomain:   def.ReviewsDomain,
 		Intents:         append([]string(nil), def.Intents...),
+		Groups:          append([]string(nil), def.Groups...),
 		Purpose:         r.assemblePurpose(def.PromptComponents, def.Body),
 		Model:           def.Model,
 		ModelAlias:      def.ModelAlias,
