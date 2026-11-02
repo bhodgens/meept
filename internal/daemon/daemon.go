@@ -1926,6 +1926,27 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			// (NormalizePlansDefaults).
 			sp.SetSelfSealEnabled(fullCfg.Plans.SelfSealEnabled)
 			sp.SetCritiqueMaxRounds(fullCfg.Plans.ComplexMaxCritiqueRounds)
+			// Fresh-context critic tree (plan-20261101-fresh-context-critic,
+			// contracts C1/C2): thread the three critic flags. All default
+			// false (ships dark); nil-guarded setters, so the wiring is a
+			// no-op when the strategic planner is absent. The model chatters
+			// (SetCriticChatter / SetHostileCriticChatter) are wired in
+			// components.go at the critic-model client construction site.
+			sp.SetFreshCriticEnabled(fullCfg.Plans.FreshCriticEnabled)
+			sp.SetHostileCriticEnabled(fullCfg.Plans.HostileCriticEnabled)
+			sp.SetInterviewOptionGates(fullCfg.Plans.InterviewOptionGates)
+			// C9 chatters (components.go built them at construction):
+			// nil critic client = planner chatter for round 1 (C2);
+			// nil hostile client = the pass is skipped (C5). Typed-nil
+			// guard per the internal/daemon AGENTS.md rule: the concrete
+			// *llm.Client only enters the Chatter interface behind an
+			// explicit non-nil check.
+			if c := components.CriticModelClient; c != nil {
+				sp.SetCriticChatter(c)
+			}
+			if hc := components.HostileCriticModelClient; hc != nil {
+				sp.SetHostileCriticChatter(hc)
+			}
 			treeRoot := filepath.Join(cfg.StateDir, "plan-trees")
 			if fullCfg.Daemon.DataDir != "" {
 				treeRoot = filepath.Join(fullCfg.Daemon.DataDir, "plan-trees")

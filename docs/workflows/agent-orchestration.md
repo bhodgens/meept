@@ -366,9 +366,39 @@ follow-up work).
 `plans.plan_compiler_enabled` is true: closures over `StrategicPlanner`
 adapt it to the `rpc.PlanSealHandler` injected-func seams (`DraftSource`,
 `Compile`, `Persist`, `Execute`) in `internal/daemon/plan_seal_wiring.go`.
-`SealPlan` mirrors `ApprovePlan`'s tail: persist steps → generate spec →
-`executing` → promote ready → `orchestrator.schedule`. The compile phase
-cap reuses the planner's existing `MaxPhases` config — no second knob.
+`SealPlan` mirrors `ApprovePlan`'s tail: persist steps -> generate spec ->
+`executing` -> promote ready -> `orchestrator.schedule`. The compile phase
+cap reuses the planner's existing `MaxPhases` config - no second knob.
+
+### Fresh-Context Plan Critic (plans.fresh_critic_enabled)
+
+The plan compiler's critique loop can be upgraded with three opt-in flags
+(plan-20261101-fresh-context-critic), all default FALSE - ships dark,
+same as `plans.self_seal_enabled`:
+
+- `plans.fresh_critic_enabled` - round 1 runs on a fresh child context
+  (empty conversation, no tools; the child sees only the plan draft plus
+  the rendered critique input) instead of the planner loop.
+- `plans.hostile_critic_enabled` - a second, hostile pass runs after
+  round 1. It skips when the `hostile_critic_model` slot is empty
+  (reason `no_model`) or names the same model as the planner (reason
+  `same_model`); it never falls back onto the planner model. The
+  `critic_model` slot optionally gives round 1 its own model (empty =
+  planner chatter, allowed for round 1 only).
+- `plans.interview_option_gates` - interview questions parse as
+  structured option objects (mechanism / trade_off / failure_condition)
+  instead of plain strings.
+
+The slots live (commented out) in `config/models.json5` beside
+`planner_model` and are resolved in `internal/daemon/components.go` the
+same way; an unresolvable slot is a nil chatter, not a boot failure. The
+daemon wires the setters beside the self-seal site in
+`internal/daemon/daemon.go`.
+
+This feature is separate from the implementation verifier
+(`config/agents/verifier`): that agent runs shell commands and tests
+after execution, while the plan critic is a tool-less plan reader. The
+verifier is not modified, retargeted, or routed plans by this feature.
 
 ## Ralph Loop: Automatic Verification and Replanning
 

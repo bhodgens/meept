@@ -44,7 +44,7 @@ type interviewChatter struct {
 func (c *interviewChatter) Chat(_ context.Context, messages []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
 	var sb strings.Builder
 	for _, m := range messages {
-		sb.WriteString(m.Role)
+		sb.WriteString(string(m.Role))
 		sb.WriteString(": ")
 		sb.WriteString(m.Content)
 		sb.WriteString("\n")

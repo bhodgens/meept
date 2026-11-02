@@ -472,6 +472,16 @@ type ModelsConfig struct {
 	// PlannerModel is the dedicated model for the strategic planner; empty
 	// = planner uses its agent default (local 8B).
 	PlannerModel string `json:"planner_model"`
+	// CriticModel is the dedicated model for the fresh-context plan
+	// critic round 1 (plan-20261101-fresh-context-critic contract C9);
+	// empty = the critic uses the planner chatter (the C2 fallback that
+	// is allowed for round 1 only).
+	CriticModel string `json:"critic_model"`
+	// HostileCriticModel is the dedicated model for the hostile
+	// second-pass critic (contract C9); empty = the pass is SKIPPED
+	// (C5), never a planner fallback. Same model as the planner is also
+	// a skip (C5, evaluated at runtime).
+	HostileCriticModel string `json:"hostile_critic_model"`
 	// DecisionModel is the dedicated decision model (Jev-style typed
 	// decision endpoint: fixed labels, calibrated probabilities, no
 	// generated tokens). Empty = decision-model features disabled (gates

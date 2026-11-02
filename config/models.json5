@@ -62,6 +62,18 @@
   // agent default (local 8B) via the usual planner alias chain.
   // "planner_model": "",
 
+  // Dedicated model for the fresh-context plan critic round 1
+  // (plan-20261101-fresh-context-critic contract C9). Commented out
+  // (disabled) by default = the critic round uses the planner chatter
+  // (allowed for round 1 only). Point this at a small, cheap model.
+  // "critic_model": "",
+
+  // Dedicated model for the hostile second-pass critic (contract C9).
+  // Commented out (disabled) by default = the hostile pass is SKIPPED
+  // (reason no_model), never a planner fallback. Setting it to the same
+  // model as the planner is also a skip (reason same_model).
+  // "hostile_critic_model": "",
+
   // Image / video generation (same provider/id form as chat models)
   "image_model": "xai-oauth/grok-imagine-image-2.0",
   "video_model": "xai-oauth/grok-imagine-video",
@@ -279,7 +291,7 @@
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama-extract.pid",
-        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8084", "--host", "127.0.0.1"],
+        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8084", "--host", "127.0.0.1", "--cache-reuse", "256"],
         "spawn_timeout_seconds": 120,
         "health_check": {
           "endpoint": "/health",
@@ -337,13 +349,17 @@
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama-general.pid",
-        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1", "--jinja", "--reasoning-budget", "0", "--ctx-size", "65536"],
+        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1", "--jinja", "--reasoning-budget", "0", "--ctx-size", "65536", "--cache-reuse", "256"],
         // 65536 (was 16384): the model supports 128K (max_position_embeddings);
         // 16K dates from the MLX era and the 2026-09-18 e2e exhausted it via
         // guard-nudge + escalation churn (10x llama.cpp 500 "Context size has
         // been exceeded"). 64K = 4x headroom; KV-cache cost is ~2-4 GB resident.
-        // Per-request window: llama.cpp builds a fresh cache per call; with
-        // max_concurrency: 2 concurrent requests share the allocation.
+        // KV-cache behavior: --cache-prompt is ON by default, so llama.cpp
+        // reuses the previous call's KV cache rather than rebuilding it per
+        // request. --cache-reuse 256 additionally enables chunk-level KV
+        // reuse (256-token minimum chunk shifted into position) across calls
+        // sharing cached content -- see docs/research/
+        // 20261031-llm-serving-tiers-findings.md Section 2.
         "spawn_timeout_seconds": 180,
         "health_check": {
           "endpoint": "/health",

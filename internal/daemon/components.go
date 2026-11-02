@@ -132,10 +132,23 @@ type Components struct {
 	// the planner loop uses its agent default (general chat chain), the
 	// pre-slot behavior.
 	PlannerModelClient *llm.Client
-	LLMResolver        *llm.Resolver
-	ToolRegistry       *tools.Registry
-	SecurityChecker    *security.PermissionChecker
-	BudgetCleanupStop  chan struct{} // Stop channel for budget periodic cleanup
+	// CriticModelClient is the dedicated client for the fresh-context
+	// plan critic round 1 (critic_model slot in models.json5; contract
+	// C9 in plan-20261101-fresh-context-critic). Built ONLY when
+	// critic_model names a resolvable model; nil = the critic round
+	// falls back to the planner chatter (C2 allows that for round 1
+	// only).
+	CriticModelClient *llm.Client
+	// HostileCriticModelClient is the dedicated client for the hostile
+	// second-pass critic (hostile_critic_model slot; contract C9). Built
+	// ONLY when hostile_critic_model names a resolvable model; nil = the
+	// pass is SKIPPED (C5), never a planner-chatter fallback. Same-model
+	// skip is a runtime (C5) check, not a wiring-level one.
+	HostileCriticModelClient *llm.Client
+	LLMResolver              *llm.Resolver
+	ToolRegistry             *tools.Registry
+	SecurityChecker          *security.PermissionChecker
+	BudgetCleanupStop        chan struct{} // Stop channel for budget periodic cleanup
 	// EvolverPlanStore backs the evolver-DEDICATED PlanManager (plan sink).
 	// Owned by the evolver wiring, NOT the shared plan system: closed in
 	// stopComponents, never by the daemon's plan-store shutdown.
@@ -1468,6 +1481,42 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				logger.Info("Planner model LLM client initialized", "model", c.ModelsConfig.PlannerModel)
 			} else {
 				logger.Warn("Planner model unresolvable; planner falls back to its agent default", "model", c.ModelsConfig.PlannerModel)
+			}
+		}
+
+		// Fresh-context critic slots (plan-20261101-fresh-context-critic
+		// contract C9). Same construction shape as planner_model above: a
+		// slot that is empty or does not resolve leaves the client nil, which
+		// the wiring site reads as "no dedicated chatter" - never a boot
+		// failure. critic_model nil = round 1 uses the planner chatter (C2);
+		// hostile_critic_model nil = the hostile pass is SKIPPED (C5), and
+		// the same-model skip is a runtime check, not a wiring-level one.
+		if c.ModelsConfig.CriticModel != "" {
+			c.CriticModelClient = createAuxiliaryLLMClientWithResolver(
+				c.ModelsConfig,
+				c.ModelsConfig.CriticModel,
+				c.LLMResolver,
+				logger.With("component", "critic-model-llm"),
+				budgetTracker,
+			)
+			if c.CriticModelClient != nil {
+				logger.Info("Critic model LLM client initialized", "model", c.ModelsConfig.CriticModel)
+			} else {
+				logger.Warn("Critic model unresolvable; critic round 1 falls back to the planner chatter", "model", c.ModelsConfig.CriticModel)
+			}
+		}
+		if c.ModelsConfig.HostileCriticModel != "" {
+			c.HostileCriticModelClient = createAuxiliaryLLMClientWithResolver(
+				c.ModelsConfig,
+				c.ModelsConfig.HostileCriticModel,
+				c.LLMResolver,
+				logger.With("component", "hostile-critic-model-llm"),
+				budgetTracker,
+			)
+			if c.HostileCriticModelClient != nil {
+				logger.Info("Hostile critic model LLM client initialized", "model", c.ModelsConfig.HostileCriticModel)
+			} else {
+				logger.Warn("Hostile critic model unresolvable; hostile second pass is skipped", "model", c.ModelsConfig.HostileCriticModel)
 			}
 		}
 	} else {

@@ -133,7 +133,8 @@
       "config-models",
       "config-reload",
       "github-intake",
-      "agent-groups"
+      "agent-groups",
+      "llm-serving-tiers"
     ],
     "internal/daemon/": [
       "daemon-lifecycle",
@@ -150,7 +151,8 @@
       "continuity-regressions",
       "session-affinity",
       "session-teardown",
-      "llm-hop-tracing"
+      "llm-hop-tracing",
+      "llm-serving-tiers"
     ],
     "internal/logrotate/": [
       "logrotate"
@@ -264,7 +266,8 @@
     ],
     "internal/metrics/": [
       "daemon-lifecycle",
-      "llm-hop-tracing"
+      "llm-hop-tracing",
+      "llm-serving-tiers"
     ],
     "internal/pathutil/": [
       "smoke"
@@ -418,6 +421,32 @@
     ],
     "internal/memory/tierpolicy/": [
       "context-memory-engine"
+    ],
+    "internal/llm/tier_policy.go": [
+      "llm-serving-tiers"
+    ],
+    "internal/llm/errors_tier.go": [
+      "llm-serving-tiers"
+    ],
+    "internal/llm/semantic_cache.go": [
+      "llm-serving-tiers"
+    ],
+    "internal/config/schema.go": [
+      "config-home",
+      "config-models",
+      "config-reload",
+      "github-intake",
+      "agent-groups",
+      "llm-serving-tiers"
+    ],
+    "internal/agent/plan_critic_child.go": [
+      "plan-critic"
+    ],
+    "internal/agent/plan_critic_hostile.go": [
+      "plan-critic"
+    ],
+    "e2e/suites/plan-critic": [
+      "plan-critic"
     ]
   },
   "suites": [
@@ -845,6 +874,37 @@
         "cme-policy-01 policy engine: demote (copy+flag, idempotent), over-ceiling evict, compress as real memory.l1_extract enqueue"
       ],
       "note": "leaf 04 hermetic verification of the context-memory-engine tree: assembler enabled/disabled via the real WireContextAssembler construction seams over real stores, working-tier flush through the real EpisodicSinkAdapter, tierpolicy Evaluate/Execute over the real manager + persistent queue"
+    },
+    {
+      "name": "llm-serving-tiers",
+      "dir": "e2e/suites/llm-serving-tiers",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "tier-floor-01 depth ceiling: 4-member chain, max_depth=2 -> 3 members dispatch, the 4th hop is refused with errors.Is(ErrTierFloor) (depth=3, limit=2)",
+        "tier-signal-02 degraded-tier metadata: member-2-served turn carries llm_tier/llm_tier_degraded=true/llm_tier_depth=1 exactly; primary turn carries degraded=false/depth 0; disabled policy writes no keys",
+        "tier-precedence-03 quota-blocked member-1 skipped with zero dispatches and zero depth consumed on the next turn (member-2 serves non-degraded)",
+        "semcache-01 paraphrase hit serves from the real SemanticCache over the real vector embedder stub without a live completion consult; unrelated prompt misses",
+        "semcache-02 tool-call-bearing responses are neither stored nor served semantically (embedder consult count unchanged, fresh dispatch is the only path)",
+        "semcache-03 embedder endpoint 500 -> exact-only degradation (miss, nil error); disabled posture is structurally dead (no embedder call)",
+        "config-ttft-01 models.json5 --cache-reuse loader compatibility + live-daemon acceptance of llm.tiers/llm.cache.semantic keys + llm_calls ledger rows on a completed streaming turn (ttft_ms column deferred: leaf 04 not landed, gap documented in the suite)"
+      ],
+      "note": "leaf 05 hermetic verification of the llm-serving-tiers tree: tier scenarios via the REAL exported ProviderManager+SetTierPolicy seam over real multi-member stub endpoints (the components.go SetTierPolicy call site is unwired - in-process route per the context-memory-engine precedent), semantic scenarios via the REAL SemanticCache+vector embedder adapter, config/ledger scenarios through the live harness daemon. ttft_ms assertions land with leaf 04."
+    },
+    {
+      "name": "plan-critic",
+      "dir": "e2e/suites/plan-critic",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "critic-fresh-01 flag-off byte-identical planner-loop critic; flag-on isolated child (empty history, no tools), fresh context sees only draft + critique input",
+        "critic-hostile-02 hostile pass gate: nil chatter skips (no_model), same model skips (same_model), distinct model runs and never falls back to the planner chatter",
+        "critic-contest-03 contest without quotable evidence is contested-unproven (Known Risks), not applied; settled objections stop re-blocking",
+        "critic-compile-04 zero-decision rule: mutating phase with no decision artifact fails compile; non-mutating or consuming phases compile",
+        "critic-interview-05 option gates: flag off keeps string questions byte-identical; flag on parses option objects, recommended key drops the question",
+        "critic-wiring-06 daemon wiring: the three flags default false on a live boot; critic slots absent/empty by default (commented examples)"
+      ],
+      "note": "plan-20261101-fresh-context-critic tree: fresh-context evidence critic (leaf 02), hostile second pass (leaf 03), contest path (leaf 04), zero-decision compile (leaf 05), interview option gates (leaf 06), daemon wiring + model slots (leaf 07). Self-contained fixtures over real StrategicPlanner + live harness daemon for the wiring scenario."
     }
   ],
   "scenarios": [
@@ -3695,6 +3755,108 @@
         "internal/memory/tierpolicy/",
         "internal/memory/claim_demote.go",
         "internal/daemon/tiers_engine.go"
+      ]
+    },
+    {
+      "id": "tier-floor-01",
+      "suite": "llm-serving-tiers",
+      "diff": "M",
+      "title": "depth ceiling: a 4-member alias chain all serving empty completions with max_depth=2 dispatches exactly 3 members (primary + 2 degradations) and refuses the 4th hop with the typed ErrTierFloor (depth=3, limit=2)",
+      "paths": [
+        "internal/llm/tier_policy.go",
+        "internal/llm/errors_tier.go",
+        "internal/llm/provider_manager.go"
+      ]
+    },
+    {
+      "id": "tier-signal-02",
+      "suite": "llm-serving-tiers",
+      "diff": "M",
+      "title": "degraded-tier metadata keys: a member-2-served turn carries llm_tier=prov-2/stub-model, llm_tier_degraded=true, llm_tier_depth=1 exactly; a primary-served turn carries degraded=false depth=0; a disabled policy writes no keys at all",
+      "paths": [
+        "internal/llm/tier_policy.go",
+        "internal/llm/provider_manager.go"
+      ]
+    },
+    {
+      "id": "tier-precedence-03",
+      "suite": "llm-serving-tiers",
+      "diff": "S",
+      "title": "quota-precedence regression: a quota-blocked member-1 is skipped with zero dispatches and zero depth consumed on the follow-up turn (member-2 serves non-degraded)",
+      "paths": [
+        "internal/llm/provider_manager.go",
+        "internal/llm/resolver.go"
+      ]
+    },
+    {
+      "id": "semcache-01",
+      "suite": "llm-serving-tiers",
+      "diff": "M",
+      "title": "semantic cache paraphrase hit: a stored prompt's paraphrase is served from the real SemanticCache over the real vector embedder adapter without a live completion consult (stub request counters); an unrelated prompt misses to the live path",
+      "paths": [
+        "internal/llm/semantic_cache.go",
+        "internal/memory/vector/embedding.go"
+      ]
+    },
+    {
+      "id": "semcache-02",
+      "suite": "llm-serving-tiers",
+      "diff": "S",
+      "title": "tool-call exemption: a tool-call-bearing response is neither stored nor served semantically (embedder consult count unchanged by the tool Store; a plain-response control Store does consult)",
+      "paths": [
+        "internal/llm/semantic_cache.go"
+      ]
+    },
+    {
+      "id": "semcache-03",
+      "suite": "llm-serving-tiers",
+      "diff": "M",
+      "title": "embedder-failure degradation + disabled posture: an embedder endpoint returning 500 degrades to exact-only (miss, nil error, no park); a disabled cache never touches the embedder at all",
+      "paths": [
+        "internal/llm/semantic_cache.go"
+      ]
+    },
+    {
+      "id": "config-ttft-01",
+      "suite": "llm-serving-tiers",
+      "diff": "M",
+      "title": "config + ledger: models.json5 --cache-reuse flags parse through the live daemon boot, llm.tiers/llm.cache.semantic keys are accepted, and a completed chat turn lands llm_calls rows with provider/model_id/latency_ms populated (ttft_ms assertions deferred - leaf 04 not landed, documented gap)",
+      "paths": [
+        "internal/config/schema.go",
+        "internal/metrics/store.go",
+        "internal/llm/tier_policy.go"
+      ]
+    },
+    {
+      "id": "critic-wiring-06",
+      "suite": "plan-critic",
+      "diff": "M",
+      "title": "daemon wiring: a default-config live boot reports plans.fresh_critic_enabled / plans.hostile_critic_enabled / plans.interview_option_gates as false, and the default models.json5 carries no enabled critic_model / hostile_critic_model slot (commented examples only); an explicitly-false overlay still boots healthy",
+      "paths": [
+        "internal/daemon/daemon.go",
+        "internal/daemon/components.go",
+        "internal/config/schema.go",
+        "e2e/suites/plan-critic"
+      ]
+    },
+    {
+      "id": "critic-interview-05",
+      "suite": "plan-critic",
+      "diff": "M",
+      "title": "interview option gates: flag off keeps the {\"questions\": [\"...\"]} string parse byte-identical (option-shaped JSON leaks nothing); flag on parses option objects and a recommended key drops that question instead of defaulting",
+      "paths": [
+        "internal/agent/strategic.go",
+        "e2e/suites/plan-critic"
+      ]
+    },
+    {
+      "id": "critic-compile-04",
+      "suite": "plan-critic",
+      "diff": "M",
+      "title": "zero-decision compile rule: a phase with a mutating tool_hint that neither produces nor consumes a decision artifact fails CompileSealed; non-mutating phases and consumers of earlier decisions still compile",
+      "paths": [
+        "internal/plan/compiler.go",
+        "e2e/suites/plan-critic"
       ]
     }
   ]
