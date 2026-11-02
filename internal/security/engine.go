@@ -1,11 +1,11 @@
 package security
 
 import (
-	"time"
-	pkgsecurity "github.com/caimlas/meept/pkg/security"
-	"github.com/caimlas/meept/internal/pathutil"
 	"encoding/json"
+	"github.com/caimlas/meept/internal/pathutil"
+	pkgsecurity "github.com/caimlas/meept/pkg/security"
 	"maps"
+	"time"
 
 	"database/sql"
 	"fmt"
@@ -22,7 +22,6 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "modernc.org/sqlite" // sqlite3 driver registration
 )
-
 
 // compiledPattern holds a pre-compiled regex pattern with metadata.
 type compiledPattern struct {
@@ -207,8 +206,6 @@ func (e *Engine) SetFenceChecker(fc *FenceChecker) {
 	}
 }
 
-
-
 // createSchema creates the database tables.
 func (e *Engine) createSchema() error {
 	_, err := e.db.Exec(schemaSQL)
@@ -343,16 +340,11 @@ func (e *Engine) compilePatterns() error {
 	return nil
 }
 
-
-
-
 // toolRuleRow maps DB rows for tool_rule lookups.
 type toolRuleRow struct {
 	RiskLevel            int `db:"risk_level"`
 	RequiresConfirmation int `db:"requires_confirmation"`
 }
-
-
 
 // normalizePathForComparison ensures a directory path ends with a path separator
 // to prevent prefix matching attacks (e.g., /tmp_backup matching /tmp).
@@ -379,7 +371,6 @@ func isPathUnderDir(path, dir string) bool {
 	return strings.HasPrefix(path, normalizedDir)
 }
 
-
 // permissionOverrideRow maps DB rows for permission_overrides.
 type permissionOverrideRow struct {
 	ID         int64          `db:"id"`
@@ -391,14 +382,6 @@ type permissionOverrideRow struct {
 	ExpiresAt  sql.NullString `db:"expires_at"`
 }
 
-
-
-
-
-
-
-
-
 // Close closes the database connection.
 func (e *Engine) Close() error {
 	return e.db.Close()
@@ -407,7 +390,6 @@ func (e *Engine) Close() error {
 // boolToInt converts a boolean to an integer (0 or 1).
 // Compile-time assertion that Engine implements io.Closer.
 var _ io.Closer = (*Engine)(nil)
-
 
 // Schema SQL for the security database.
 const schemaSQL = `
@@ -840,11 +822,58 @@ func (e *Engine) evaluateCommand(command string) (RiskLevel, string, bool) {
 	return RiskMedium, ActionShellExecute, false
 }
 
+// checkBlockedPaths consults SecurityConfig.BlockedPaths (the live config
+// seed, schema.go) against an already-expanded absolute path. Matching
+// mirrors the DB block-rule logic: filepath.Match glob, exact match, and
+// directory containment (isPathUnderDir). The Reason names the matching
+// entry so the user sees which rule fired; RiskLevel is high (denies are
+// already terminal). Nil means no config entry matched - the existing
+// DB-rule pipeline proceeds unchanged.
+func (e *Engine) checkBlockedPaths(resolved string) *Decision {
+	if e.config == nil || len(e.config.BlockedPaths) == 0 {
+		return nil
+	}
+	for _, raw := range e.config.BlockedPaths {
+		if raw == "" {
+			continue
+		}
+		expanded := pathutil.ExpandPath(raw)
+		if matched, _ := filepath.Match(expanded, resolved); matched {
+			return e.blockedPathsDecision(raw)
+		}
+		if expanded == resolved {
+			return e.blockedPathsDecision(raw)
+		}
+		if isPathUnderDir(resolved, expanded) {
+			return e.blockedPathsDecision(raw)
+		}
+	}
+	return nil
+}
+
+// blockedPathsDecision builds the deny Decision for a matched
+// SecurityConfig.BlockedPaths entry.
+func (e *Engine) blockedPathsDecision(pattern string) *Decision {
+	return &Decision{
+		Allowed:    false,
+		Reason:     fmt.Sprintf("Path matches blocked_paths entry: %s", pattern),
+		RiskLevel:  RiskHigh,
+		RuleSource: "blocked_path",
+	}
+}
+
 // checkPath checks a filesystem path against path rules.
 func (e *Engine) checkPath(pathStr, _ string) *Decision {
 	resolved := pathutil.ExpandPath(pathStr)
 	if absPath, err := filepath.Abs(resolved); err == nil {
 		resolved = absPath
+	}
+
+	// SecurityConfig.BlockedPaths stage (01-blocked-paths): deny entries
+	// from the live config, mirroring the DB block rules below. Deny wins
+	// over allow: this runs BEFORE any allow-path consultation.
+	if decision := e.checkBlockedPaths(resolved); decision != nil {
+		return decision
 	}
 
 	type pathRuleBlock struct {
