@@ -21,11 +21,11 @@ import (
 // seam shape is the activity aggregator read leaf 04 consumes; the fake
 // satisfies it structurally.
 type cannedAggregator struct {
-	mu     sync.Mutex
-	rows   []activity.ActivityRecord
-	since  time.Time
-	until  time.Time
-	loc    *time.Location
+	mu    sync.Mutex
+	rows  []activity.ActivityRecord
+	since time.Time
+	until time.Time
+	loc   *time.Location
 }
 
 func (c *cannedAggregator) Query(_ context.Context, since, until time.Time, _ int) ([]activity.ActivityRecord, error) {
