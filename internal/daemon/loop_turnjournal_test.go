@@ -19,9 +19,8 @@ import (
 // a KindRunClosed row so kinds() sees the full sequence. CompletedSteps
 // replays completed rows per turn.
 type journalingStore struct {
-	mu    sync.Mutex
-	rows  []turnjournal.Record
-	times []time.Time
+	mu   sync.Mutex
+	rows []turnjournal.Record
 }
 
 func (s *journalingStore) Append(ctx context.Context, rec turnjournal.Record) error {

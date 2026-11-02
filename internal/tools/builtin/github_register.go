@@ -12,8 +12,10 @@ import (
 // package:
 //
 //  1. githubsvc.ToolFactories - the original factory seam broken over
-//     the builtin <-> githubsvc import cycle (populated first, still the
-//     path githubsvc.RegisterGitHubTools uses; kept untouched).
+//     the builtin <-> githubsvc import cycle (populated first; the
+//     githubsvc.RegisterGitHubTools entry point that used to walk it was
+//     removed as dead code, but the factory remains the construction
+//     seam the provider mirrors).
 //  2. toolprov.Register("github", ...) - the compiled-in provider seam
 //     (contract C1, docs/plans/20261031-tool-provider-seam/). The
 //     provider's Discover() constructs the SAME eight github_* tools

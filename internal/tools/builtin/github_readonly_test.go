@@ -3,27 +3,30 @@ package builtin
 // NOTE: gate test from the github-pr-ci tree (leaf 00T, Task 2). Verifies the
 // C2 read-only contract: exactly {github_pr_status, github_ci_wait,
 // github_issue_get} are read-only; the five mutating tools are not.
-// Registry membership only — no Execute, no network.
+// Registry membership only - no Execute, no network. Driven through the
+// production registration path (SetGitHubProvider + toolprov.RegisterAll)
+// since githubsvc.RegisterGitHubTools was removed as dead code.
 
 import (
 	"log/slog"
 	"testing"
 
 	"github.com/caimlas/meept/internal/githubsvc"
+	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools"
 )
 
 func TestReadOnlyFlags(t *testing.T) {
 	pool := newRegisterPool(t, "")
-	reg := tools.NewRegistry(slog.New(slog.DiscardHandler))
-	opts := githubsvc.RegistrationOptions{
+	bindGitHubProviderForTest(t, githubsvc.RegistrationOptions{
 		Pool:         pool,
 		DefaultOwner: "octo",
 		DefaultRepo:  "cat",
 		WorkingDir:   t.TempDir(),
-	}
-	if err := githubsvc.RegisterGitHubTools(reg, opts); err != nil {
-		t.Fatalf("RegisterGitHubTools: %v", err)
+	})
+	reg := tools.NewRegistry(slog.New(slog.DiscardHandler))
+	if _, err := toolprov.RegisterAll(reg, []string{"github"}); err != nil {
+		t.Fatalf("RegisterAll(github): %v", err)
 	}
 
 	readOnly := map[string]bool{

@@ -63,8 +63,7 @@ func (c *Components) wireGitHubTools() {
 	}
 
 	// Bind the github provider's runtime construction inputs, then walk
-	// the compiled-in provider seam (toolprov.RegisterAll) instead of
-	// calling githubsvc.RegisterGitHubTools directly. The provider's
+	// the compiled-in provider seam (toolprov.RegisterAll). The provider's
 	// Discover() constructs the same eight github_* tools the
 	// ToolFactories closure builds, so the tool set is identical; the
 	// seam additionally gives the group a provider identity for

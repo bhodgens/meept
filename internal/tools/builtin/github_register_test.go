@@ -1,10 +1,11 @@
 package builtin
 
-// NOTE: gate test for the github-pr-ci tree (leaf 00T), F8. This file is
-// intentionally RED: RegisterGitHubTools, RegistrationOptions and the pool
-// referenced below do not exist yet — they land in leaf 01 (RegistrationOptions
-// type stub) and leaf 05 (RegisterGitHubTools). Written to compile once
-// those land; a compile failure is the only expected failure in RED state.
+// NOTE: gate test for the github-pr-ci tree (leaf 00T), F8. Registration
+// coverage is driven through the production path: the provider bound via
+// SetGitHubProvider and walked via toolprov.Names/RegisterAll, exactly what
+// the daemon's wireGitHubTools does (githubsvc.RegisterGitHubTools was
+// removed as dead code - see docs/plans/20261101-security-gate-followups/
+// 03-remove-registergithubtools.md).
 
 import (
 	"context"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/caimlas/meept/internal/githubsvc"
 	"github.com/caimlas/meept/internal/preferences"
+	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools"
 )
 
@@ -28,8 +30,9 @@ func (registerTokenStub) Token(ctx context.Context) (string, error) {
 }
 
 // newRegisterPool builds a real *githubsvc.ClientPool for the registration
-// tests. In the enabled case the pool is non-nil; in the disabled case we
-// pass a zero-value RegistrationOptions (nil Pool) to model "not configured".
+// tests. In the enabled case the pool is non-nil; in the disabled case the
+// provider is never bound, mirroring the daemon's "github not configured"
+// posture (no SetGitHubProvider call, no seam walk).
 func newRegisterPool(t *testing.T, baseURL string) *githubsvc.ClientPool {
 	t.Helper()
 	pool, err := githubsvc.NewClientPool(githubsvc.ClientPoolOptions{
@@ -41,6 +44,17 @@ func newRegisterPool(t *testing.T, baseURL string) *githubsvc.ClientPool {
 	}
 	t.Cleanup(pool.Close)
 	return pool
+}
+
+// bindGitHubProviderForTest binds the github provider's construction inputs
+// via SetGitHubProvider (the same binder the daemon uses) and restores the
+// previous binding when the test ends, so package-global state cannot leak
+// between tests.
+func bindGitHubProviderForTest(t *testing.T, opts githubsvc.RegistrationOptions) {
+	t.Helper()
+	saved := githubProviderFactoryFunc
+	t.Cleanup(func() { githubProviderFactoryFunc = saved })
+	SetGitHubProvider(opts, nil, nil, nil)
 }
 
 // expectedGitHubToolNames is the frozen C2 tool-name set. The master plan and
@@ -57,33 +71,45 @@ var expectedGitHubToolNames = []string{
 	"github_issue_comment",
 }
 
-// TestGitHubToolRegistration verifies F8: when the github block is enabled
-// (a populated RegistrationOptions with a real Pool), RegisterGitHubTools
-// registers every C2 tool; when disabled (zero-value RegistrationOptions,
-// nil Pool) it registers none.
-//
-// The [github].enabled flag lives in the config block (C5) that the daemon
-// consults before calling RegisterGitHubTools; the gate test proxies that
-// flag through RegistrationOptions: a non-nil Pool models "enabled", a
-// zero-value (nil Pool) models "disabled / not configured". This keeps the
-// test contract-shaped and compilable against the pinned signature:
-//
-//	githubsvc.RegisterGitHubTools(r *tools.Registry, opts githubsvc.RegistrationOptions) error
+// TestGitHubToolRegistration verifies F8 through the production registration
+// path. Enabled case: a populated RegistrationOptions with a real Pool,
+// provider bound via SetGitHubProvider, discovered via toolprov - every C2
+// tool lands in the registry. Disabled case: the daemon models "github not
+// configured" by never binding the provider and never walking the seam; the
+// seam-level equivalent is an unbound provider factory, whose thunk yields a
+// nil Provider and whose RegisterAll fails closed registering nothing.
 func TestGitHubToolRegistration(t *testing.T) {
 	// ---- Enabled case: a real pool drives full registration. ----
-	// No request is made in this test — only registry membership is
-	// asserted — so the pool's BaseURL can be the default (empty).
+	// No request is made in this test - only registry membership is
+	// asserted - so the pool's BaseURL can be the default (empty).
 	pool := newRegisterPool(t, "")
-	enabledOpts := githubsvc.RegistrationOptions{
+	bindGitHubProviderForTest(t, githubsvc.RegistrationOptions{
 		Pool:         pool,
 		DefaultOwner: "octo",
 		DefaultRepo:  "cat",
 		WorkingDir:   t.TempDir(),
+	})
+
+	// The "github" provider must be discoverable by name; this is what
+	// doctor surfacing and the [tool_providers] config filter consume.
+	found := false
+	for _, name := range toolprov.Names() {
+		if name == "github" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("toolprov.Names() missing %q; names=%v", "github", toolprov.Names())
 	}
 
 	enabledReg := tools.NewRegistry(slog.New(slog.DiscardHandler))
-	if err := githubsvc.RegisterGitHubTools(enabledReg, enabledOpts); err != nil {
-		t.Fatalf("RegisterGitHubTools(enabled): %v", err)
+	n, err := toolprov.RegisterAll(enabledReg, []string{"github"})
+	if err != nil {
+		t.Fatalf("RegisterAll(github): %v", err)
+	}
+	if n != len(expectedGitHubToolNames) {
+		t.Errorf("RegisterAll(github) registered %d tools, want %d", n, len(expectedGitHubToolNames))
 	}
 	for _, name := range expectedGitHubToolNames {
 		if got := enabledReg.Get(name); got == nil {
@@ -91,10 +117,14 @@ func TestGitHubToolRegistration(t *testing.T) {
 		}
 	}
 
-	// ---- Disabled case: zero-value options must register nothing. ----
+	// ---- Disabled case: unbound provider fails closed, registers nothing. ----
+	saved := githubProviderFactoryFunc
+	githubProviderFactoryFunc = nil
+	t.Cleanup(func() { githubProviderFactoryFunc = saved })
+
 	disabledReg := tools.NewRegistry(slog.New(slog.DiscardHandler))
-	if err := githubsvc.RegisterGitHubTools(disabledReg, githubsvc.RegistrationOptions{}); err != nil {
-		t.Fatalf("RegisterGitHubTools(disabled): %v", err)
+	if _, err := toolprov.RegisterAll(disabledReg, []string{"github"}); err == nil {
+		t.Fatal("RegisterAll with an unbound github provider succeeded; the seam must fail closed instead of silently registering nothing")
 	}
 	for _, name := range expectedGitHubToolNames {
 		if got := disabledReg.Get(name); got != nil {
@@ -111,7 +141,7 @@ func TestGitHubToolRegistration(t *testing.T) {
 //
 // This is the leaf-05 additive companion to TestGitHubToolRegistration
 // above (same file, same package): the sink is what the daemon wires in
-// as RegistrationOptions.Sink, and its rows are what
+// as the provider's ReArmSink, and its rows are what
 // InstructionScheduler.SyncCronInstructions picks up.
 func TestInstructionReArmSink(t *testing.T) {
 	tierDir := t.TempDir()

@@ -14,19 +14,20 @@ import (
 // builtin's init() (internal/tools/builtin/github_register.go) with a
 // factory that builds all eight github_* tools from these options.
 //
-// RegisterGitHubTools is deliberately NOT defined in a package that
-// imports builtin: any binary that links builtin gets a non-nil
-// ToolFactories and full registration; a binary that does not link builtin
-// gets a descriptive error in the enabled case only (the disabled case
-// never touches the factory and returns nil with no registrations).
+// Tool construction is deliberately NOT defined in a package that imports
+// builtin: any binary that links builtin gets a non-nil ToolFactories (and,
+// via builtin's init, the toolprov provider seam the daemon walks with
+// RegisterAll); a binary that does not link builtin gets a descriptive
+// error in the enabled case only (the disabled case never touches the
+// factory and registers nothing).
 // Never panic.
 var ToolFactories func(opts RegistrationOptions, ledger effects.Ledger, sink ReArmSink) []tools.Tool
 
-// RegistrationOptions is the configuration surface for registering the
-// GitHub PR/CI tool set with the tools Registry. It is the seam the
-// builtin tool package consumes: leaf 01 fixed the type so the daemon and
-// builtin layers agree on the fields; leaf 05 implements
-// RegisterGitHubTools against it.
+// RegistrationOptions is the configuration surface for the GitHub PR/CI
+// tool set. It is the seam the builtin tool package consumes: the provider
+// factory closure (githubsvc.ToolFactories) and SetGitHubProvider both take
+// it, and the daemon's github_wiring.go builds it from the [github] config
+// block.
 type RegistrationOptions struct {
 	// Pool is the per-token GitHub client pool the registered tools call.
 	// A nil Pool models "github not enabled / not configured": registration
@@ -79,34 +80,9 @@ func (o OwnerRepo) Resolve(ownerArg, repoArg string) (string, string, error) {
 	return owner, repo, nil
 }
 
-// RegisterGitHubTools constructs and registers the eight github_* tools on
-// reg when opts.Pool is non-nil (the enabled case). It never panics:
-//
-//   - Disabled case (nil Pool): registers nothing and returns nil. The
-//     [github] block is not configured; absence of the tools is the
-//     intended state, not an error.
-//   - Enabled case: the tools come from ToolFactories — the init-populated
-//     factory seam the builtin package fills. When ToolFactories is unset
-//     (a binary that does not link builtin), this returns a descriptive
-//     error instead of silently registering nothing.
-//
-// The frozen gate test (internal/tools/builtin/github_register_test.go, F8)
-// pins both behaviors and the exact C2 name set.
-func RegisterGitHubTools(reg *tools.Registry, opts RegistrationOptions) error {
-	if reg == nil {
-		return fmt.Errorf("githubsvc: RegisterGitHubTools: nil registry")
-	}
-	// Disabled / not configured: no pool, no registrations, no error.
-	if opts.Pool == nil {
-		return nil
-	}
-	if ToolFactories == nil {
-		return fmt.Errorf("githubsvc: github tool factories are unavailable: the builtin tool package (which populates them via init) is not linked into this binary; github_* tools cannot be registered")
-	}
-	for _, tool := range ToolFactories(opts, opts.Ledger, opts.Sink) {
-		if tool != nil {
-			reg.Register(tool)
-		}
-	}
-	return nil
-}
+// RegisterGitHubTools was the registration entry point; it was removed as
+// dead code (zero production callers since the provider seam landed) - see
+// docs/plans/20261101-security-gate-followups/03-remove-registergithubtools.md.
+// The daemon now registers the github_* tools through the provider:
+// builtin.SetGitHubProvider binds the construction inputs, then
+// toolprov.RegisterAll walks the "github" provider into the registry.
