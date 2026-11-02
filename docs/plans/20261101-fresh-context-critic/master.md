@@ -12,6 +12,7 @@
 - Children: 8 leaf documents in this directory (flat tree; meept plan trees do not use branch subdirs)
 - Scope: Add a fresh-context plan critic and a separate hostile second pass, without editing existing planning or review agents.
 - Created: 2026-11-01
+- Completed: 2026-11-02
 - plan_id: plan-20261101-fresh-context-critic
 - Source: operator decisions in the 2026-11-01 EGM comparison session, plus the landed TierComplex critique loop (docs/plans/2026-09-23-tiered-iteration/)
 
@@ -274,14 +275,14 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-plan-critic-gate | PENDING | 0 | |
-| 01-config-knobs | PENDING | 0 | |
-| 02-fresh-context-critic | PENDING | 0 | |
-| 03-hostile-second-pass | PENDING | 0 | |
-| 04-contest-path | PENDING | 0 | |
-| 05-zero-decision-compile | PENDING | 0 | |
-| 06-interview-option-gates | PENDING | 0 | |
-| 07-daemon-wiring | PENDING | 0 | |
+| 00T-plan-critic-gate | COMPLETE | 1 | 347ba137 parked; reactivated across 02/03/04/07, all green |
+| 01-config-knobs | COMPLETE | 1 | 863624b2 |
+| 02-fresh-context-critic | COMPLETE | 1 | dc8f051a (worktree 0241dc07; sibling docs message collision documented in-tree) |
+| 03-hostile-second-pass | COMPLETE | 1 | 77734589 |
+| 04-contest-path | COMPLETE | 1 | 53e07d22 |
+| 05-zero-decision-compile | COMPLETE | 1 | 2a2df9d8 |
+| 06-interview-option-gates | COMPLETE | 1 | 238b53c4 |
+| 07-daemon-wiring | COMPLETE | 1 | 2d2a8dcb; deadcode -28 net; hostile/contest baseline lines kept (config-gated branch) |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
