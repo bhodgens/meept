@@ -4737,6 +4737,7 @@ internal/hermes/client.go unreachable func: Client.Capabilities
 internal/hermes/client.go unreachable func: Client.ChatSync
 internal/hermes/client.go unreachable func: Client.classifyError
 internal/hermes/client.go unreachable func: Client.clientJobAction
+internal/hermes/client.go unreachable func: Client.CloseIdleConnections
 internal/hermes/client.go unreachable func: Client.CreateJob
 internal/hermes/client.go unreachable func: Client.CreateRun
 internal/hermes/client.go unreachable func: Client.CreateSession
@@ -4753,6 +4754,8 @@ internal/hermes/client.go unreachable func: Client.RunJob
 internal/hermes/client.go unreachable func: Client.RunStatus
 internal/hermes/client.go unreachable func: Client.SessionMessages
 internal/hermes/client.go unreachable func: Client.SetSessionModel
+internal/hermes/client.go unreachable func: Client.SetSSETransport
+internal/hermes/client.go unreachable func: Client.SetTransport
 internal/hermes/client.go unreachable func: Client.SteerRun
 internal/hermes/client.go unreachable func: Client.StopRun
 internal/hermes/client.go unreachable func: clientJobSchedule.text

@@ -3299,7 +3299,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// dedicated directory under the daemon data dir, opened lazily inside
 	// registerBuiltinTools only when enabled.
 	knowledgeDataDir := filepath.Join(cfg.Daemon.DataDir, "knowledge")
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions, gateCap, securityEngine)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions, gateCap, securityEngine)
 
 	// GitHub PR/CI tools ([github] block, github-pr-ci tree): register
 	// next to the other builtin tools, gated on enabled + a resolvable
@@ -7102,7 +7102,6 @@ func registerBuiltinTools(
 	secOrch *intsecurity.Orchestrator,
 	memoryMgr *memory.Manager,
 	taskStore *task.Store,
-	sched *scheduler.Scheduler,
 	pendingChangesRegistry *builtin.PendingChangesRegistry,
 	changeJournal *builtin.Journal,
 	containerMgr *runtime.ContainerManager,
@@ -7513,19 +7512,6 @@ func registerBuiltinTools(
 			}
 		}
 		logger.Debug("Registered task tools")
-	}
-
-	// Scheduler tools (only if scheduler is available)
-	if sched != nil {
-		registry.Register(builtin.NewScheduleCreateTool(sched))
-		registry.Register(builtin.NewScheduleListTool(sched))
-		registry.Register(builtin.NewScheduleGetTool(sched))
-		registry.Register(builtin.NewScheduleDeleteTool(sched))
-		registry.Register(builtin.NewSchedulePauseTool(sched))
-		registry.Register(builtin.NewScheduleResumeTool(sched))
-		registry.Register(builtin.NewScheduleRunNowTool(sched))
-		registry.Register(builtin.NewCronCreateTool(sched))
-		logger.Debug("Registered scheduler tools")
 	}
 
 	// tool_view (leaf 02): exposes full parameter schemas on demand so
