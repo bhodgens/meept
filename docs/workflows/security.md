@@ -59,6 +59,7 @@ Autonomous agents require robust security to prevent misuse and protect sensitiv
 - **Read guard** (`guardSecretReadPath`, audit M5 Phase 2c): `file_read` refuses daemon CREDENTIAL material only — `dev_key`, `keys/`, `secrets/`. Deliberately narrow: `meept.json5`, logs, databases, skills and agent definitions stay readable. Symlink-resolved on both sides like the write guard.
 - **Shell classification**: commands naming `.meept/dev_key`, `.meept/keys/…` or `.meept/secrets/…` classify RiskCritical (blocked) before the read-only downgrade — `cat ~/.meept/dev_key` never rides the `cat` MEDIUM path. Best-effort string match (variable expansion bypasses it); the hard guarantees are the file_read guard plus engine path_rules (`~/.meept/dev_key` DecisionBlock, immutable).
 - **Engine path_rules**: `~/.meept/dev_key`, `~/.meept/keys/*`, `~/.meept/secrets/*` are seeded immutable DecisionBlock rules alongside `~/.ssh/*` and `security.db`.
+- **File-path decision order**: the engine checks `blocked_paths` (config), then DB block rules, then allow rules — DB `path_rules` rows of type allow plus `allowed_paths` (config). Both allow sources use the same matcher, which supports a trailing `**` as a recursive directory prefix (`<dir>/**` matches `<dir>/sub/file`). Deny always wins: a config allow can never open a path a block rule covers. If any allow rule exists and none matches, the path is denied (fail closed).
 
 ### SSRF Guard (Web Tools)
 - **Scheme Allowlist**: Only `http`/`https` URLs are fetched; `ftp://`, `file://`, `gopher://`, etc. are rejected.
