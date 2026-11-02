@@ -409,6 +409,15 @@
     ],
     "internal/testhttp/": [
       "github-pr-ci"
+    ],
+    "internal/agent/contextalloc/": [
+      "context-memory-engine"
+    ],
+    "internal/memory/working/": [
+      "context-memory-engine"
+    ],
+    "internal/memory/tierpolicy/": [
+      "context-memory-engine"
     ]
   },
   "suites": [
@@ -823,6 +832,19 @@
       "name": "boundary-hardening",
       "dir": "e2e/suites/boundary-hardening",
       "status": "implemented"
+    },
+    {
+      "name": "context-memory-engine",
+      "dir": "e2e/suites/context-memory-engine",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "cme-assembler-01 enabled assembler: budgeted prompt (CLAUDE.md trimmed to the allocator doc budget with notice, tier-budgeted memory recall)",
+        "cme-assembler-02 disabled assembler: verbatim-unbounded legacy doc path, no tier recall, opt-in safety",
+        "cme-working-01 working ring overflow queues evicted turns and Flush lands them in the episodic store losslessly",
+        "cme-policy-01 policy engine: demote (copy+flag, idempotent), over-ceiling evict, compress as real memory.l1_extract enqueue"
+      ],
+      "note": "leaf 04 hermetic verification of the context-memory-engine tree: assembler enabled/disabled via the real WireContextAssembler construction seams over real stores, working-tier flush through the real EpisodicSinkAdapter, tierpolicy Evaluate/Execute over the real manager + persistent queue"
     }
   ],
   "scenarios": [
@@ -3631,6 +3653,48 @@
       "paths": [
         "internal/security/secrets.go",
         "internal/agent/pii_restore_hook.go"
+      ]
+    },
+    {
+      "id": "cme-assembler-01",
+      "suite": "context-memory-engine",
+      "diff": "M",
+      "title": "assembler enabled (agent.context_assembler.enabled=true, accepted by a live daemon boot): the prompt's CLAUDE.md doc section is trimmed to the allocator's SystemDynamicDocs budget with the truncation notice and memory injection is tier-budgeted bullets recalled through the real C1 provider (working/episodic/semantic stores)",
+      "paths": [
+        "internal/agent/contextalloc/",
+        "internal/daemon/context_assembler_wiring.go",
+        "internal/agent/loop_seam.go",
+        "internal/agent/artifact_integration.go"
+      ]
+    },
+    {
+      "id": "cme-assembler-02",
+      "suite": "context-memory-engine",
+      "diff": "S",
+      "title": "assembler disabled (default): the same oversized CLAUDE.md renders verbatim-unbounded with no truncation notice and no tier recall (today's byte shape, opt-in safety)",
+      "paths": [
+        "internal/agent/contextalloc/",
+        "internal/agent/loop_seam.go"
+      ]
+    },
+    {
+      "id": "cme-working-01",
+      "suite": "context-memory-engine",
+      "diff": "M",
+      "title": "working-tier ring overflow queues evicted turns (never dropped) and Flush lands them in the real FTS5 episodic store through the real EpisodicSinkAdapter with turn identity in metadata",
+      "paths": [
+        "internal/memory/working/"
+      ]
+    },
+    {
+      "id": "cme-policy-01",
+      "suite": "context-memory-engine",
+      "diff": "L",
+      "title": "tier-policy engine over the real memory manager + persistent queue: a low-usefulness claim demotes (lossless episodic copy then in-place demoted flag, idempotent on re-run), an over-ceiling band evicts real rows by ID, and compression enqueues a claimable real memory.l1_extract job (AgentID tierpolicy) with zero dead-letters",
+      "paths": [
+        "internal/memory/tierpolicy/",
+        "internal/memory/claim_demote.go",
+        "internal/daemon/tiers_engine.go"
       ]
     }
   ]
