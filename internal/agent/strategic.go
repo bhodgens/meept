@@ -208,6 +208,14 @@ type StrategicPlanner struct {
 	// machine-to-machine plan documents). Test seam + future
 	// dedicated-critic slot; nil = planner loop.
 	critiqueChatter llm.Chatter
+	// interviewOptionGates gates contract C8 (fresh-context-critic plan
+	// leaf 06): when true, the interview parse also accepts option-shaped
+	// questions (mechanism / trade_off / failure_condition, max 3
+	// options, a recommended key drops the question) into a PARALLEL
+	// OptionQuestions field, and the question-generation prompt allows
+	// unranked options. Default false - ships dark; the string-question
+	// path is byte-identical either way. Set via SetInterviewOptionGates.
+	interviewOptionGates bool
 	// validToolNames, when non-empty, gates parsePlanOutput's tool_hint
 	// passthrough: hints outside the set are dropped (with a Warn) so the
 	// executor's tool-hint table picks instead. Empty/nil = legacy behavior
@@ -445,6 +453,14 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 	if renderErr != nil {
 		return nil, fmt.Errorf("render interview template: %w", renderErr)
 	}
+	// C8 (fresh-context-critic leaf 06): the option-gate instruction is
+	// appended ONLY when interview_option_gates is on - flag off the
+	// prompt is byte-identical to today. The template files themselves are
+	// untouched (some are C10-adjacent; the flag is a planner-only
+	// behavior).
+	if gatesLine := interviewOptionGatePromptLine(sp.interviewOptionGatesFlag()); gatesLine != "" {
+		prompt = prompt + "\n\n" + gatesLine
+	}
 
 	interviewCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
 	defer cancel()
@@ -459,7 +475,8 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 		return nil, ErrInterviewGenerationFail
 	}
 
-	questions := sp.parseInterviewQuestions(output)
+	parseResult := sp.parseInterviewOutput(output)
+	questions := parseResult.Questions
 	if len(questions) == 0 {
 		// Fallback to suggested questions from TrueAnalysis if LLM failed to produce JSON.
 		if len(req.TrueAnalysis.SuggestedQuestions) > 0 {
@@ -480,6 +497,14 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 		TrueGoal:           req.TrueAnalysis.Goal,
 		Ambiguities:        req.TrueAnalysis.SuggestedQuestions,
 	}
+	// C8 (fresh-context-critic leaf 06): the parallel option-question
+	// slice. Empty when the flag is off or the model emitted no
+	// option-shaped entries; the legacy string slice above is unchanged.
+	// NOTE: PlanningContext (internal/plan) is outside this leaf's file
+	// ownership, so OptionQuestions is carried on the parse result here
+	// rather than on PlanningContext; leaf 07 wiring can thread it from
+	// parseInterviewOutput.
+	_ = parseResult.OptionQuestions
 
 	sp.logger.Info("Interview questions generated",
 		"task_id", req.TaskID,
@@ -507,6 +532,155 @@ func (sp *StrategicPlanner) parseInterviewQuestions(output string) []string {
 		return nil
 	}
 	return result.Questions
+}
+
+// InterviewOption is one unranked option on an interview question
+// (contract C8, fresh-context-critic plan leaf 06).
+type InterviewOption struct {
+	Mechanism        string `json:"mechanism"`
+	TradeOff         string `json:"trade_off"`
+	FailureCondition string `json:"failure_condition"`
+}
+
+// InterviewOptionQuestion is an interview question that carries up to
+// three unranked options. There is intentionally NO Recommended field:
+// a question whose JSON carries a recommended key is a parse error for
+// that question and is dropped, never defaulted.
+type InterviewOptionQuestion struct {
+	Question string            `json:"question"`
+	Options  []InterviewOption `json:"options"` // len 1..3 when the flag is on
+}
+
+// SetInterviewOptionGates gates contract C8 (plans.interview_option_gates,
+// default false - ships dark). Threaded from daemon.go next to
+// SetSelfSealEnabled. Nil-guarded per the repo's setter convention.
+func (sp *StrategicPlanner) SetInterviewOptionGates(enabled bool) {
+	if sp == nil {
+		return
+	}
+	sp.interviewOptionGates = enabled
+}
+
+// interviewOptionGatesFlag reads the C8 flag nil-safely.
+func (sp *StrategicPlanner) interviewOptionGatesFlag() bool {
+	if sp == nil {
+		return false
+	}
+	return sp.interviewOptionGates
+}
+
+// interviewOptionGateMaxOptions caps the options per option question.
+const interviewOptionGateMaxOptions = 3
+
+// interviewOptionGatePromptLine is the C8 instruction appended to the
+// question-generation prompt when interview_option_gates is on. Flag off
+// returns "" so the prompt stays byte-identical to today.
+func interviewOptionGatePromptLine(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return "When a design choice has more than one defensible answer, emit up to three options. Do not rank them. Do not mark a recommended option. Each option names mechanism, trade_off, and failure_condition."
+}
+
+// interviewParseResult is the interview output parse result. Questions is
+// today's legacy string slice (unchanged shape; existing callers keep
+// compiling). OptionQuestions is the PARALLEL C8 slice: empty when the
+// flag is off or the model emitted no option-shaped entries. The
+// plan.PlanningContext struct lives in internal/plan (outside this leaf's
+// file ownership), so the parallel field lives here with the parser.
+type interviewParseResult struct {
+	Questions       []string
+	OptionQuestions []InterviewOptionQuestion
+}
+
+// interviewOutputEnvelope mirrors the interview reply envelope: entries are
+// either legacy strings or C8 option objects.
+type interviewOutputEnvelope struct {
+	Questions []json.RawMessage `json:"questions"`
+}
+
+// interviewOptionEntry is one C8 option-shaped entry. Recommended is
+// decoded ONLY to detect and reject it - it never selects anything.
+type interviewOptionEntry struct {
+	Question    string            `json:"question"`
+	Options     []InterviewOption `json:"options"`
+	Recommended json.RawMessage   `json:"recommended"`
+}
+
+// ParseInterviewQuestions is the exported parse seam for the interview
+// string-question path. It returns today's string slice: flag off it is
+// parseInterviewQuestions byte-identical; flag on, string entries land
+// here and option-shaped entries never leak into the string slice.
+func (sp *StrategicPlanner) ParseInterviewQuestions(output string) []string {
+	return sp.parseInterviewOutput(output).Questions
+}
+
+// ParseInterviewOptionQuestions parses C8 option-shaped questions
+// ({"question": "...", "options": [{"mechanism","trade_off","failure_condition"}]})
+// from the interview output. Nil when the flag is off. A question
+// carrying a recommended key is dropped, never defaulted. Options are
+// capped at 3 (a 4th is truncated). String entries produce nothing here -
+// they belong to the legacy slice.
+func (sp *StrategicPlanner) ParseInterviewOptionQuestions(output string) []InterviewOptionQuestion {
+	return sp.parseInterviewOutput(output).OptionQuestions
+}
+
+// parseInterviewOutput parses the interview reply into the legacy string
+// slice and the parallel C8 option-question slice. Flag off, it is the
+// legacy parseInterviewQuestions path byte-identical and OptionQuestions
+// stays empty. Flag on, the envelope is decoded entry-by-entry: string
+// entries go to Questions, option objects go to OptionQuestions (a
+// recommended key drops that question; options cap at 3).
+func (sp *StrategicPlanner) parseInterviewOutput(output string) interviewParseResult {
+	if !sp.interviewOptionGatesFlag() {
+		return interviewParseResult{Questions: sp.parseInterviewQuestions(output)}
+	}
+
+	result := interviewParseResult{Questions: []string{}}
+	jsonStr := ExtractJSON(output)
+	if jsonStr == "" {
+		return result
+	}
+
+	var envelope interviewOutputEnvelope
+	if err := json.Unmarshal([]byte(jsonStr), &envelope); err != nil {
+		sp.logger.Warn("Failed to parse interview questions JSON", "error", err)
+		return result
+	}
+
+	for _, raw := range envelope.Questions {
+		var entry interviewOptionEntry
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			// Not an object: a legacy string entry.
+			var s string
+			if strErr := json.Unmarshal(raw, &s); strErr == nil {
+				result.Questions = append(result.Questions, s)
+			}
+			continue
+		}
+		if len(entry.Recommended) > 0 {
+			// A recommended key is a parse error for that question:
+			// dropped, not defaulted.
+			sp.logger.Warn("Interview option question carries a recommended key; dropping question",
+				"question", entry.Question,
+			)
+			continue
+		}
+		if entry.Question == "" || len(entry.Options) == 0 {
+			continue
+		}
+		if len(entry.Options) > interviewOptionGateMaxOptions {
+			entry.Options = entry.Options[:interviewOptionGateMaxOptions]
+		}
+		result.OptionQuestions = append(result.OptionQuestions, InterviewOptionQuestion{
+			Question: entry.Question,
+			Options:  entry.Options,
+		})
+	}
+	if len(result.Questions) == 0 {
+		result.Questions = nil
+	}
+	return result
 }
 
 // Plan decomposes a task into executable steps.

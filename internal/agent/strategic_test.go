@@ -13,6 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -672,6 +673,121 @@ func TestParseInterviewQuestions_EmptyOutput(t *testing.T) {
 	questions := sp.parseInterviewQuestions("")
 	if questions != nil {
 		t.Errorf("expected nil for empty output, got %v", questions)
+	}
+}
+
+// Fresh-context-critic leaf 06 (contract C8 / C2 setter): option gates
+// behind SetInterviewOptionGates. Flag off the string parse is unchanged
+// and OptionQuestions stays empty; flag on the C8 shape parses into
+// option questions, a recommended key drops that question, options cap
+// at 3, and string entries still land in the legacy slice.
+
+func TestInterviewOptionGates_NilSetterIsNoop(t *testing.T) {
+	var sp *StrategicPlanner
+	sp.SetInterviewOptionGates(true) // must not panic
+}
+
+func TestInterviewOptionGates_FlagOffKeepsStringQuestions(t *testing.T) {
+	sp := &StrategicPlanner{logger: slogDiscardLogger()}
+	sp.SetInterviewOptionGates(false)
+
+	output := `{"questions": ["What is the scope?", "Any constraints?"]}`
+	questions := sp.parseInterviewOutput(output)
+	if len(questions.Questions) != 2 {
+		t.Fatalf("flag off: expected 2 string questions, got %d", len(questions.Questions))
+	}
+	if questions.Questions[0] != "What is the scope?" {
+		t.Errorf("flag off: question[0] = %q, want %q", questions.Questions[0], "What is the scope?")
+	}
+	if len(questions.OptionQuestions) != 0 {
+		t.Errorf("flag off: OptionQuestions must stay empty, got %v", questions.OptionQuestions)
+	}
+
+	// The legacy parseInterviewQuestions path must be byte-identical.
+	if got := sp.parseInterviewQuestions(output); !reflect.DeepEqual(got, []string{"What is the scope?", "Any constraints?"}) {
+		t.Errorf("flag off: parseInterviewQuestions = %#v, want the legacy string slice", got)
+	}
+
+	// Flag off + option-shaped output: the string path keeps its behavior
+	// (nil - it cannot parse objects) and no option questions appear.
+	optionShape := `{"questions": [{"question": "Which store?", "options": [{"mechanism": "s3", "trade_off": "cost", "failure_condition": "outage"}]}]}`
+	if got := sp.parseInterviewQuestions(optionShape); got != nil {
+		t.Errorf("flag off: option-shaped JSON leaked into the string path as %#v", got)
+	}
+	result := sp.parseInterviewOutput(optionShape)
+	if len(result.OptionQuestions) != 0 {
+		t.Errorf("flag off: option-shaped JSON produced OptionQuestions %v", result.OptionQuestions)
+	}
+}
+
+func TestInterviewOptionGates_FlagOnParsesC8Shape(t *testing.T) {
+	sp := &StrategicPlanner{logger: slogDiscardLogger()}
+	sp.SetInterviewOptionGates(true)
+
+	// Mixed envelope: one legacy string entry + one C8 option object +
+	// one question carrying a recommended key (dropped) + one with 4
+	// options (truncated to 3).
+	output := `{"questions": [
+		"What is the scope?",
+		{"question": "Which store?", "options": [
+			{"mechanism": "s3", "trade_off": "cost", "failure_condition": "outage"},
+			{"mechanism": "local", "trade_off": "latency", "failure_condition": "disk loss"}
+		]},
+		{"question": "Which CDN?", "recommended": "cloudfront", "options": [
+			{"mechanism": "cdn", "trade_off": "latency", "failure_condition": "region loss"}
+		]},
+		{"question": "Which auth?", "options": [
+			{"mechanism": "jwt", "trade_off": "stateless", "failure_condition": "token theft"},
+			{"mechanism": "session", "trade_off": "revocable", "failure_condition": "store outage"},
+			{"mechanism": "oauth", "trade_off": "delegated", "failure_condition": "provider outage"},
+			{"mechanism": "apikey", "trade_off": "simple", "failure_condition": "key leak"}
+		]}
+	]}`
+
+	result := sp.parseInterviewOutput(output)
+
+	// The legacy slice carries ONLY the string entry.
+	if !reflect.DeepEqual(result.Questions, []string{"What is the scope?"}) {
+		t.Errorf("flag on: Questions = %#v, want only the string entry", result.Questions)
+	}
+
+	// Option questions: the recommended-keyed question is dropped; the
+	// other two are kept; the 4-option question is truncated to 3.
+	if len(result.OptionQuestions) != 2 {
+		t.Fatalf("flag on: OptionQuestions = %d entries, want 2 (recommended-keyed question dropped)", len(result.OptionQuestions))
+	}
+	if result.OptionQuestions[0].Question != "Which store?" {
+		t.Errorf("flag on: kept question[0] = %q, want %q", result.OptionQuestions[0].Question, "Which store?")
+	}
+	if len(result.OptionQuestions[0].Options) != 2 {
+		t.Errorf("flag on: question[0] options = %d, want 2", len(result.OptionQuestions[0].Options))
+	}
+	if result.OptionQuestions[1].Question != "Which auth?" {
+		t.Errorf("flag on: kept question[1] = %q, want %q", result.OptionQuestions[1].Question, "Which auth?")
+	}
+	if len(result.OptionQuestions[1].Options) != 3 {
+		t.Errorf("flag on: 4-option question must cap at 3, got %d", len(result.OptionQuestions[1].Options))
+	}
+	opt := result.OptionQuestions[1].Options[0]
+	if opt.Mechanism != "jwt" || opt.TradeOff != "stateless" || opt.FailureCondition != "token theft" {
+		t.Errorf("flag on: option decoded wrong: %+v", opt)
+	}
+
+	// Exported seams agree with the shared parse.
+	if got := sp.ParseInterviewQuestions(output); !reflect.DeepEqual(got, []string{"What is the scope?"}) {
+		t.Errorf("flag on: ParseInterviewQuestions = %#v, want only the string entry", got)
+	}
+	if got := sp.ParseInterviewOptionQuestions(output); len(got) != 2 {
+		t.Errorf("flag on: ParseInterviewOptionQuestions = %d entries, want 2", len(got))
+	}
+}
+
+func TestInterviewOptionGates_FlagOnParseSeamsFlagOff(t *testing.T) {
+	sp := &StrategicPlanner{logger: slogDiscardLogger()}
+	// Flag never enabled: the exported option seam stays nil.
+	output := `{"questions": [{"question": "Which store?", "options": [{"mechanism": "s3", "trade_off": "cost", "failure_condition": "outage"}]}]}`
+	if got := sp.ParseInterviewOptionQuestions(output); got != nil {
+		t.Errorf("flag off: ParseInterviewOptionQuestions = %v, want nil", got)
 	}
 }
 
