@@ -71,7 +71,10 @@ supervisor_enabled(true), supervisor_model, supervisor_timeout_ms(400),
 voice_model, public_stream_url, connection_id, from_number,
 allowed_numbers([]string E.164), timeout_secs(30), max_call_minutes(15),
 silence_prompt_seconds(45), max_concurrent_calls, reorder_window_frames(10),
-reorder_gap_ms(60).
+reorder_gap_ms(60), telnyx_public_key (base64 Ed25519 public key from
+Mission Control; unset = voice routes return 503, fail-closed per leaf 10),
+child_binary_path (optional override; default = daemon-adjacent lookup,
+leaf 13).
 
 ### C4 Telnyx client (internal/voice/telnyx, borrowed shapes)
 
@@ -252,6 +255,9 @@ Coverage matrix (gate tests live in 00T, parked .staged until each leaf):
 | One live call per target; max_concurrent_calls busy | TestRegistryLimits | voice-concurrency | PENDING |
 | Unanswered outbound releases slot + unparks goal | TestOutboundTimeoutRelease | - | PENDING |
 | jargo not importable from internal/voice | TestNoJargoImport | - | PENDING |
+| Greeting on connect + filler on final prompt (fact-free, order pinned) | TestTalkLoopGreetingAndFiller | voice-lifecycle | PENDING |
+| Missing telnyx_public_key -> routes 503, fail-closed | TestVoiceRoutesDisabled | - | PENDING |
+| Child text-socket keys frame: redaction, memory-only, no env/argv | TestKeysRedaction, TestNoKeyLogs | - | PENDING |
 
 Validation: control agent (in-session) runs each gate test RED for
 missing-implementation reasons, marks TESTS_VALIDATED, commits parked
@@ -325,3 +331,15 @@ Gates, in the isolation worktree, after each wave and before merge:
 - One-child-N-pipelines vs one-child-per-call: leaf 07 builds N-pipelines;
   leaf 13 measures; fallback documented in spec, socket contract unchanged.
 - telnyx-go SDK method names: A3 avoids the question (hand-rolled client).
+- TLS ingress posture: the daemon HTTP listener is TLS-mandatory
+  (self-signed cert at ~/.meept/tls). The tunnel must accept/forward to an
+  https backend, or a plain-HTTP loopback listener for tunnel traffic
+  only is added. Proven in Integration Test Plan step 6; ws:// vs wss://
+  survives because the media signature covers the configured URL string.
+- DTMF frames (Telnyx sends them) are NOT handled in this tree; future
+  change if live calls need voicemail trees / "press 1".
+- Voicemail detection on outbound is NOT handled (uptractor observed
+  voicemail buffers behave differently); note behavior in drill 7.
+- Greeting/filler emission owner is the daemon talk loop (leaf 14): greeting
+  say on connect, filler say immediately on each final prompt (spec Call
+  flow steps 5-6); pinned by TestTalkLoopGreetingAndFiller.
