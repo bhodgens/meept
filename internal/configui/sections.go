@@ -96,6 +96,8 @@ func BuildSectionFields(keyPath string) []Field {
 		return buildCompressionFields()
 	case "reasoning":
 		return buildReasoningFields()
+	case "voice":
+		return buildVoiceFields()
 	default:
 		return []Field{
 			NewTextField("_stub", "(section not yet implemented)", ""),

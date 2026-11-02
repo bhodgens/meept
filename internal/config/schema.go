@@ -121,6 +121,7 @@ type Config struct {
 	Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 	GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	Intake              IntakeConfig              `json:"intake"               toml:"intake"`
+	Voice               VoiceConfig               `json:"voice"                toml:"voice"`
 }
 
 // GitHubConfig configures the GitHub PR/CI tool set ([github]). Disabled by
@@ -4464,6 +4465,18 @@ func DefaultConfig() *Config {
 			Playback:  TTSPlaybackConfig{Volume: 1.0, Rate: 1.0, AudioDevice: ""},
 			Behavior:  TTSBehaviorConfig{ReadOwnMessages: false, InterruptOnNewMsg: true, QueueMessages: false, MaxQueueSize: 5},
 		},
+		Voice: VoiceConfig{
+			Enabled:              false,
+			IdleStopSeconds:      30,
+			Filler:               []string{"Hold on, let me check."},
+			SupervisorEnabled:    true,
+			SupervisorTimeoutMs:  400,
+			TimeoutSecs:          30,
+			MaxCallMinutes:       15,
+			SilencePromptSeconds: 45,
+			ReorderWindowFrames:  10,
+			ReorderGapMs:         60,
+		},
 		ReflectionCollector: ReflectionCollectorConfig{
 			Enabled:              true,
 			AutoQueue:            true,
@@ -4667,6 +4680,41 @@ type TestHarnessConfig struct {
 	TestCommand string `json:"test_command" toml:"test_command"`
 	// TimeoutSeconds is the test timeout.
 	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+}
+
+// VoiceConfig holds the voice sidecar settings ([voice]). All keys default
+// safe: enabled=false, supervisor on, loopback-only (no public URL default).
+// E.164 format in AllowedNumbers is validated lazily at dial/answer time, not
+// at config load, so an operator can save a partially edited list.
+//
+//gendoc:section voice
+//gendoc:desc Voice sidecar: enable flag, STT/TTS provider wiring, call supervisor, Telnyx credentials, and call/session limits.
+//gendoc:example [voice] enabled = true, stt_provider = "whisper", telnyx_public_key = "<base64 Ed25519 public key>"
+type VoiceConfig struct {
+	Enabled              bool     `json:"enabled"                toml:"enabled"`
+	IdleStopSeconds      int      `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	OnnxRuntimeLib       string   `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	STTProvider          string   `json:"stt_provider"           toml:"stt_provider"`
+	TTSProvider          string   `json:"tts_provider"           toml:"tts_provider"`
+	Filler               []string `json:"filler"                 toml:"filler"`
+	SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
+	SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
+	SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
+	PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
+	ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
+	FromNumber           string   `json:"from_number"            toml:"from_number"`
+	AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
+	TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
+	MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
+	SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
+	LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
 }
 
 // STTConfig holds configuration for speech-to-text transcription.
