@@ -984,6 +984,28 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		RequireConfirmationHigh:     cfg.Security.RequireConfirmationHigh,
 		RequireConfirmationCritical: cfg.Security.RequireConfirmationCritical,
 	}
+	// C5 file backstop (agent-groups 03-mutation-gate): arm the
+	// groups-backstop stage when default_managed=true so non-admin agents
+	// are denied file/shell access to the users store, agent definitions,
+	// and the groups config section. Carried by ConfigSnapshot into every
+	// per-session checker clone. admin_agents drive the admin exemption.
+	if cfg.Security.Groups.DefaultManaged {
+		admins := make(map[string]struct{}, len(cfg.Security.Groups.AdminAgents))
+		for _, a := range cfg.Security.Groups.AdminAgents {
+			if a != "" {
+				admins[a] = struct{}{}
+			}
+		}
+		secCfg.GroupsBackstop = security.GroupsBackstopConfig{
+			Enabled:     true,
+			Home:        config.MeeptHome(),
+			UsersFile:   cfg.MultiUser.UsersFile,
+			AdminAgents: admins,
+		}
+		logger.Info("groups backstop armed (default_managed=true)",
+			"admin_agents", cfg.Security.Groups.AdminAgents,
+			"users_file", cfg.MultiUser.UsersFile)
+	}
 	c.SecurityChecker = security.NewPermissionChecker(secCfg)
 
 	// Create security orchestrator for input sanitization, output monitoring, and shell scanning

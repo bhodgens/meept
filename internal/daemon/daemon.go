@@ -18,6 +18,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/agent/turnjournal"
+	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/auth"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
@@ -331,6 +332,30 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 		proxy.SetSubmitHandler(chatSubmitHandler)
 		rpcServer.RegisterHandler("chat.submit", chatSubmitHandler.Submit)
+	}
+
+	// groups.* surface (agent-groups 03-mutation-gate, C5): direct Go
+	// handlers — no bus path. Registered AFTER components exist (this
+	// block needs the live registry, the shared users store, and the tool
+	// registry for C6 validation). The audit chain store opens on the
+	// shared tool-audit db (WAL + busy timeout make multi-connection
+	// appends safe); a failed open degrades auditing, never the gate.
+	if rpcServer != nil && proxy != nil && fullCfg != nil && components != nil {
+		groupsAudit, gaErr := auditlog.OpenStore(
+			filepath.Join(fullCfg.Daemon.DataDir, "tool_audit_chain.db"),
+			logger.With("component", "groups-audit"))
+		if gaErr != nil {
+			logger.Warn("groups: audit chain store unavailable; membership-change auditing degraded",
+				"error", gaErr)
+			groupsAudit = nil
+		}
+		groupsHandler := rpc.NewGroupsHandler(fullCfg, defaultConfigFilePath(), components.AgentRegistry, components.AuthUsersStore, groupsAudit)
+		if components.ToolRegistry != nil {
+			groupsHandler.SetToolValidation(components.ToolRegistry.CanonicalNames(), agent.CanonicalToolName)
+		}
+		proxy.SetGroupsHandler(groupsHandler)
+		proxy.RegisterGroupsMethods(rpcServer)
+		logger.Info("Groups RPC handlers registered", "audit_chain", groupsAudit != nil)
 	}
 
 	// NOTE: skills RPC handler registration moved AFTER

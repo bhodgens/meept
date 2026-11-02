@@ -89,6 +89,14 @@ type Config struct {
 	BlockFinancial              bool
 	RequireConfirmationHigh     bool
 	RequireConfirmationCritical bool
+
+	// GroupsBackstop is the C5 file-level backstop (agent-groups
+	// 03-mutation-gate): when armed (security.groups.default_managed=true),
+	// non-admin agents are denied file/shell access to the users store,
+	// agent definitions, and the groups config section. Carried by
+	// ConfigSnapshot so per-session clones inherit it. Zero value =
+	// stage disabled (legacy behavior).
+	GroupsBackstop GroupsBackstopConfig
 }
 
 // PermissionChecker provides fast permission checking.
@@ -566,6 +574,33 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 				Allowed:    false,
 				Reason:     fenceErr.Error(),
 				RuleSource: "fence",
+			}
+		}
+	}
+
+	// Groups backstop stage (agent-groups 03-mutation-gate, C5): when
+	// default_management is armed, NON-admin agents are denied file/shell
+	// access to the membership surfaces (users store, agent definitions,
+	// the groups config section). Runs AFTER the fence (the fence denies
+	// on project-boundary grounds; this denies on membership-governance
+	// grounds) and BEFORE confirmation gating (a deny must not degrade
+	// into a confirmation prompt). Zero-value backstop = stage skipped,
+	// byte-identical legacy behavior. The executor injects agent_id into
+	// details on every call, so per-agent admin exemption works here.
+	if pc.config.GroupsBackstop.Enabled {
+		agentID := details["agent_id"]
+		var bsErr error
+		switch action {
+		case "file_write", "file_delete":
+			bsErr = pc.config.GroupsBackstop.check(agentID, details["path"])
+		case "shell_execute":
+			bsErr = pc.config.GroupsBackstop.checkCommand(agentID, details["command"])
+		}
+		if bsErr != nil {
+			return CheckResult{
+				Allowed:    false,
+				Reason:     bsErr.Error(),
+				RuleSource: "groups_backstop",
 			}
 		}
 	}

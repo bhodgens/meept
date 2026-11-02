@@ -31,6 +31,12 @@ type ProxyHandler struct {
 	// Constructed lazily per NewProxyHandler; registry stays nil there so
 	// the plain-proxy construction path gains no new dependencies.
 	submitHandler *SubmitHandler
+
+	// groupsHandler serves the C5 membership mutation gate (agent-groups
+	// 03-mutation-gate). Nil until SetGroupsHandler; when nil the four
+	// groups.* methods are NOT registered so callers get method-not-found
+	// (the RED anchor shape) rather than a dead-handler error.
+	groupsHandler *GroupsHandler
 }
 
 // busSubscription holds state for a bus subscription.
@@ -76,6 +82,26 @@ func (p *ProxyHandler) SetSubmitHandler(h *SubmitHandler) {
 	if h != nil {
 		p.submitHandler = h
 	}
+}
+
+// SetGroupsHandler wires the C5 membership mutation gate (agent-groups
+// 03-mutation-gate). The daemon calls this BEFORE RegisterProxyMethods so
+// the four groups.* methods register through the handler's nil-safe
+// construction. Nil-guarded per the setter convention.
+func (p *ProxyHandler) SetGroupsHandler(h *GroupsHandler) {
+	if h != nil {
+		p.groupsHandler = h
+	}
+}
+
+// RegisterGroupsMethods registers the groups.* surface through the wired
+// handler. Exposed so a daemon that does not use ProxyHandler registration
+// (embedders) can still attach the gate. Nil-handler is a no-op.
+func (p *ProxyHandler) RegisterGroupsMethods(server *Server) {
+	if p == nil || p.groupsHandler == nil {
+		return
+	}
+	p.groupsHandler.RegisterGroupsMethods(server)
 }
 
 // RegisterProxyMethods registers all proxy methods that forward to the bus.

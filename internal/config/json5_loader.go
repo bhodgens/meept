@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -38,6 +39,14 @@ func LoadJSON5(path string, v any) error {
 	stdJSON, err := hujson.Standardize([]byte(content))
 	if err != nil {
 		return fmt.Errorf("failed to parse JSON5 config %s: %w (hujson accepts comments (// and /* */) and trailing commas; keys must be quoted; check for syntax errors near the reported position)", path, err)
+	}
+
+	// Promote a top-level "groups" alias into security.groups (agent-groups
+	// 03-mutation-gate) so every JSON5 load path sees the section at its
+	// schema home — see promoteTopLevelGroups.
+	stdJSON, err = promoteTopLevelGroups(stdJSON)
+	if err != nil {
+		return fmt.Errorf("failed to normalize groups section in %s: %w", path, err)
 	}
 
 	// Unmarshal with detailed error handling for type mismatches
@@ -500,10 +509,69 @@ func LoadJSON5Bytes(data []byte, v any) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse JSON5: %w", err)
 	}
+	stdJSON, err = promoteTopLevelGroups(stdJSON)
+	if err != nil {
+		return fmt.Errorf("failed to normalize groups section: %w", err)
+	}
 	if err := json.Unmarshal(stdJSON, v); err != nil {
 		return fmt.Errorf("failed to unmarshal JSON5: %w", err)
 	}
 	return nil
+}
+
+// promoteTopLevelGroups rewrites a top-level "groups" key into
+// "security"."groups" (agent-groups leaf 03-mutation-gate): the groups config
+// section is the [security.groups] schema home, but the e2e overlays and
+// operator configs commonly carry it TOP-LEVEL (the harness's dotted
+// "groups" path lands there). When the parsed document carries a top-level
+// "groups" object it is MOVED under "security" — an existing
+// security.groups section wins (explicit nesting is authoritative; the
+// top-level alias only fills an absent section). A document without a
+// top-level "groups" key is returned byte-identical (fast path: one
+// contains check, zero re-marshal). The rewrite happens AFTER hujson
+// standardization, so the input here is strict JSON.
+func promoteTopLevelGroups(stdJSON []byte) ([]byte, error) {
+	if !bytes.Contains(stdJSON, []byte(`"groups"`)) {
+		return stdJSON, nil
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(stdJSON, &root); err != nil {
+		// Not a top-level object (or malformed post-standardize): hand the
+		// original back and let the caller's Unmarshal produce the real
+		// error.
+		return stdJSON, nil
+	}
+	raw, ok := root["groups"]
+	if !ok {
+		return stdJSON, nil
+	}
+	var section map[string]any
+	if err := json.Unmarshal(raw, &section); err != nil {
+		return nil, fmt.Errorf("top-level groups: %w", err)
+	}
+	secRaw, hasSec := root["security"]
+	var sec map[string]any
+	if hasSec {
+		if err := json.Unmarshal(secRaw, &sec); err != nil || sec == nil {
+			sec = map[string]any{}
+		}
+	} else {
+		sec = map[string]any{}
+	}
+	if _, exists := sec["groups"]; !exists {
+		sec["groups"] = section
+	}
+	secBytes, err := json.Marshal(sec)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode security section: %w", err)
+	}
+	root["security"] = secBytes
+	delete(root, "groups")
+	out, err := json.Marshal(root)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode config: %w", err)
+	}
+	return out, nil
 }
 
 // quoteBareKeys walks JSON5 text and wraps unquoted identifier keys in
