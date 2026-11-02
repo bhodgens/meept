@@ -216,6 +216,17 @@ type StrategicPlanner struct {
 	// unranked options. Default false - ships dark; the string-question
 	// path is byte-identical either way. Set via SetInterviewOptionGates.
 	interviewOptionGates bool
+	// freshCriticEnabled gates contract C3 (fresh-context-critic plan
+	// leaf 02): when true, critique-loop round 1 runs on an isolated
+	// child AgentLoop (no tools, no transcript) instead of the planner
+	// loop. Default false - ships dark; the flag-off critic path is
+	// byte-identical to the tiered-iteration loop. Set via
+	// SetFreshCriticEnabled.
+	freshCriticEnabled bool
+	// criticChatter, when non-nil, is the round-1 fresh-critic child's
+	// chatter (the "critic_model" slot, contract C2). Nil = the planner
+	// chatter is allowed for round 1 only. Set via SetCriticChatter.
+	criticChatter llm.Chatter
 	// validToolNames, when non-empty, gates parsePlanOutput's tool_hint
 	// passthrough: hints outside the set are dropped (with a Warn) so the
 	// executor's tool-hint table picks instead. Empty/nil = legacy behavior

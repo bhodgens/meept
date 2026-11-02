@@ -100,6 +100,46 @@ func (sp *StrategicPlanner) SetSelfSealEnabled(enabled bool) {
 	sp.selfSealEnabled = enabled
 }
 
+// SetFreshCriticEnabled gates the fresh-context evidence critic
+// (plans.fresh_critic_enabled, default false - ships dark). Flag off:
+// round 1 stays on runCriticOnce / the planner loop, byte-identical.
+// Flag on: round 1 runs through runIsolatedCritic (a new child AgentLoop
+// with no tools and no transcript; plan_critic_child.go). Nil-guarded per
+// the repo's setter convention.
+func (sp *StrategicPlanner) SetFreshCriticEnabled(enabled bool) {
+	if sp == nil {
+		return
+	}
+	sp.freshCriticEnabled = enabled
+}
+
+// SetCriticChatter wires the optional round-1 critic model (the C2
+// "critic_model" slot's chatter). Nil (the production default) = the
+// planner chatter is allowed for round 1 ONLY. The hostile pass (leaf 03)
+// must never fall back onto this. Nil-guarded.
+func (sp *StrategicPlanner) SetCriticChatter(ch llm.Chatter) {
+	if sp == nil {
+		return
+	}
+	sp.criticChatter = ch
+}
+
+// freshCriticFlag reads the fresh-critic flag nil-safely.
+func (sp *StrategicPlanner) freshCriticFlag() bool {
+	if sp == nil {
+		return false
+	}
+	return sp.freshCriticEnabled
+}
+
+// criticChatterFor reads the round-1 chatter seam nil-safely.
+func (sp *StrategicPlanner) criticChatterFor() llm.Chatter {
+	if sp == nil {
+		return nil
+	}
+	return sp.criticChatter
+}
+
 // SetCritiqueMaxRounds threads plans.complex_max_critique_rounds into the
 // planner. Values <= 0 are ignored (the config load boundary already
 // clamped to the default 2 via NormalizePlansDefaults). Nil-guarded.
@@ -342,8 +382,22 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 
 	for round := 1; round <= maxRounds; round++ {
 		// --- Critique (master step 2) ---
-		critiquePrompt := sp.buildCriticPrompt(req, draft, input)
-		objections, criticErr := sp.runCriticOnce(ctx, plannerLoop, critiquePrompt)
+		// Fresh-context-critic leaf 02: the branch point. Flag off keeps
+		// runCriticOnce on the planner loop, byte-identical to the
+		// tiered-iteration loop. Flag on, round 1 runs through
+		// runIsolatedCritic: a NEW child AgentLoop with an empty tool
+		// registry and an empty conversation that sees only the draft
+		// markdown plus PlanCritiqueInput.Render(), and replies under the
+		// C4 paraphrase envelope (a missing/empty paraphrase on a
+		// non-empty draft is ONE synthetic blocking objection).
+		var objections []criticObjection
+		var criticErr error
+		if sp.freshCriticFlag() {
+			objections, criticErr = sp.runFreshCriticRound(ctx, draft, input)
+		} else {
+			critiquePrompt := sp.buildCriticPrompt(req, draft, input)
+			objections, criticErr = sp.runCriticOnce(ctx, plannerLoop, critiquePrompt)
+		}
 		roundsUsed = round
 		if criticErr != nil {
 			// Fail-open: never block a plan because the critic
