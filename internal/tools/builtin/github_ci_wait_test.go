@@ -96,6 +96,9 @@ func newCIGatePool(t *testing.T, fake *ciGateFake) *githubsvc.ClientPool {
 	pool, err := githubsvc.NewClientPool(githubsvc.ClientPoolOptions{
 		Tokens:  ciTokenStub{},
 		BaseURL: fake.URL,
+		// Bounded transport: retry on ephemeral-port exhaustion + drain idle
+		// conns at cleanup. See fixture_http_test.go.
+		HTTPClient: boundedHTTPClient(t),
 	})
 	if err != nil {
 		t.Fatalf("NewClientPool: %v", err)

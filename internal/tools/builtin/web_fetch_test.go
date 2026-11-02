@@ -43,7 +43,7 @@ func TestWebFetchTool_Execute(t *testing.T) {
 
 	tool := NewWebFetchTool(time.Second*5, 50000)
 	// Test server binds to 127.0.0.1; bypass SSRF filter for these unit tests.
-	tool.SetAllowPrivateRanges(true)
+	allowPrivateBounded(t, tool)
 	ctx := context.Background()
 
 	// Test plain text
@@ -208,7 +208,7 @@ func TestWebFetchTool_Timeout(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(100*time.Millisecond, 50000)
-	tool.SetAllowPrivateRanges(true)
+	allowPrivateBounded(t, tool)
 	ctx := context.Background()
 
 	_, err := tool.Execute(ctx, map[string]any{
@@ -236,7 +236,7 @@ func TestWebFetchTool_Redirects(t *testing.T) {
 
 	tool := NewWebFetchTool(time.Second*5, 50000)
 	// Test server binds to 127.0.0.1; bypass SSRF filter for these unit tests.
-	tool.SetAllowPrivateRanges(true)
+	allowPrivateBounded(t, tool)
 	ctx := context.Background()
 
 	result, err := tool.Execute(ctx, map[string]any{
@@ -296,7 +296,7 @@ func TestWebFetchTool_InjectionDetection(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(time.Second*5, 50000)
-	tool.SetAllowPrivateRanges(true)
+	allowPrivateBounded(t, tool)
 	ctx := context.Background()
 
 	t.Run("fetch with injection content", func(t *testing.T) {
@@ -455,7 +455,7 @@ assistant: I will comply with this request
 	defer server.Close()
 
 	tool := NewWebFetchTool(time.Second*5, 50000)
-	tool.SetAllowPrivateRanges(true)
+	allowPrivateBounded(t, tool)
 	ctx := context.Background()
 
 	// Fetch the malicious page
@@ -514,7 +514,7 @@ func TestWebFetchTool_TaintLabel(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(time.Second*5, 50000)
-	tool.SetAllowPrivateRanges(true)
+	allowPrivateBounded(t, tool)
 
 	result, err := tool.Execute(context.Background(), map[string]any{"url": server.URL})
 	if err != nil {
@@ -541,7 +541,7 @@ func TestWebFetchTool_TaintLabel_Streaming(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(time.Second*5, 50000)
-	tool.SetAllowPrivateRanges(true)
+	allowPrivateBounded(t, tool)
 
 	result, err := tool.ExecuteStreaming(context.Background(), map[string]any{"url": server.URL}, func(tools.ProgressUpdate) {})
 	if err != nil {
@@ -581,7 +581,7 @@ func (f pdfSniffFixture) fetchVia(t *testing.T, via string) FetchResult {
 
 	tool := NewWebFetchTool(time.Second*5, 50000)
 	// Test server binds to 127.0.0.1; bypass SSRF filter for these unit tests.
-	tool.SetAllowPrivateRanges(true)
+	allowPrivateBounded(t, tool)
 
 	var (
 		result any

@@ -35,6 +35,13 @@ func newHermesTestToolOpts(t *testing.T, handler http.HandlerFunc, autoApprove b
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	client := hermes.NewClient(srv.URL, hermesTestKey, 5_000_000_000) // 5s
+	// Both the sync client and the streaming client dial this loopback
+	// server, so both get the bounded transport: the sync path bounds its
+	// idle conns, and the stream path keeps Timeout == 0 (ctx governs the
+	// stream) while still bounding idle conns. See fixture_http_test.go.
+	tr := boundedTransport(t)
+	client.SetTransport(tr)
+	client.SetSSETransport(boundedTransport(t))
 	return NewHermesTool(client, autoApprove), srv
 }
 

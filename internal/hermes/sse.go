@@ -149,7 +149,13 @@ func (c *Client) sseStream(ctx context.Context, endpoint, method, path string, i
 		req.Header.Set(k, v)
 	}
 
-	resp, err := sseHTTPClient.Do(req)
+	// Per-client override first (see Client.SetSSETransport); otherwise the
+	// shared timeout-less default.
+	streamClient := c.sseClient
+	if streamClient == nil {
+		streamClient = sseHTTPClient
+	}
+	resp, err := streamClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("hermes %s: %w", endpoint, err)
 	}

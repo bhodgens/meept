@@ -64,6 +64,12 @@ type Client struct {
 	apiKey     string
 	httpClient *http.Client
 
+	// sseClient performs streaming requests. It defaults to the package
+	// sseHTTPClient (deliberately timeout-less; the caller's ctx bounds the
+	// stream). SetSSETransport swaps it for a bounded transport; nil falls
+	// back to the shared default. See sse.go.
+	sseClient *http.Client
+
 	capsMu      sync.Mutex
 	caps        *Capabilities
 	capsFetched time.Time
@@ -87,6 +93,44 @@ func NewClient(baseURL, apiKey string, timeout time.Duration) *Client {
 // BaseURL returns the configured gateway root. Exposed for leaf 02's tool
 // status verb (never the key).
 func (c *Client) BaseURL() string { return c.baseURL }
+
+// SetTransport replaces the transport used for the request/response calls
+// (chat, runs, capabilities). A nil tr leaves the default in place. Callers
+// that talk to a loopback test server pass a transport with bounded idle
+// connections so finished requests release their client-side ephemeral ports
+// promptly; see internal/testhttp. Production callers normally leave this
+// alone.
+func (c *Client) SetTransport(tr http.RoundTripper) {
+	if tr == nil {
+		return
+	}
+	c.httpClient.Transport = tr
+}
+
+// SetSSETransport replaces the transport used by the streaming calls. Unlike
+// SetTransport it swaps in a whole *http.Client, because the stream client
+// must keep Timeout == 0 (the caller's ctx bounds a long run, not the sync
+// turn timeout). A nil tr leaves the shared default client in place.
+func (c *Client) SetSSETransport(tr http.RoundTripper) {
+	if tr == nil {
+		return
+	}
+	c.sseClient = &http.Client{Transport: tr}
+}
+
+// CloseIdleConnections releases pooled keep-alive connections held by both
+// the sync and streaming clients. Best-effort: it never errors and never
+// affects an in-flight turn. Test cleanup calls it so a finished test does not
+// hold loopback ephemeral ports while later tests need them.
+func (c *Client) CloseIdleConnections() {
+	if c == nil {
+		return
+	}
+	c.httpClient.CloseIdleConnections()
+	if c.sseClient != nil {
+		c.sseClient.CloseIdleConnections()
+	}
+}
 
 // --- wire shapes (mirror the documented JSON, master.md) --------------------
 

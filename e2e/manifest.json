@@ -406,6 +406,9 @@
     ],
     "internal/comm/slack/": [
       "hitl-notifications"
+    ],
+    "internal/testhttp/": [
+      "github-pr-ci"
     ]
   },
   "suites": [

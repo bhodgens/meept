@@ -114,6 +114,9 @@ func newPrGatePool(t *testing.T, fake *prGateFake) *githubsvc.ClientPool {
 	pool, err := githubsvc.NewClientPool(githubsvc.ClientPoolOptions{
 		Tokens:  prTokenStub{},
 		BaseURL: fake.URL,
+		// Bounded transport: retry on ephemeral-port exhaustion + drain idle
+		// conns at cleanup. See fixture_http_test.go.
+		HTTPClient: boundedHTTPClient(t),
 	})
 	if err != nil {
 		t.Fatalf("NewClientPool: %v", err)
