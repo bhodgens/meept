@@ -12,18 +12,18 @@ import (
 
 func TestSummarizePR_AllGreen(t *testing.T) {
 	pr := &github.PullRequest{
-		Number:    github.Int(7),
-		State:     github.String("open"),
-		Draft:     github.Bool(false),
-		Mergeable: github.Bool(true),
-		Head:      &github.PullRequestBranch{SHA: github.String("abc123")},
+		Number:    new(7),
+		State:     new("open"),
+		Draft:     new(false),
+		Mergeable: new(true),
+		Head:      &github.PullRequestBranch{SHA: new("abc123")},
 	}
 	checks := []*github.CheckRun{
-		{Name: github.String("lint"), Status: github.String("completed"), Conclusion: github.String("success")},
-		{Name: github.String("tests"), Status: github.String("completed"), Conclusion: github.String("success")},
+		{Name: new("lint"), Status: new("completed"), Conclusion: new("success")},
+		{Name: new("tests"), Status: new("completed"), Conclusion: new("success")},
 	}
 	workflows := []*github.WorkflowRun{
-		{Name: github.String("ci"), Status: github.String("completed"), Conclusion: github.String("success")},
+		{Name: new("ci"), Status: new("completed"), Conclusion: new("success")},
 	}
 
 	got := SummarizePR(pr, checks, workflows)
@@ -44,16 +44,16 @@ func TestSummarizePR_AllGreen(t *testing.T) {
 
 func TestSummarizePR_NotGreenWhenCheckFails(t *testing.T) {
 	pr := &github.PullRequest{
-		Number: github.Int(7),
-		State:  github.String("open"),
-		Head:   &github.PullRequestBranch{SHA: github.String("abc123")},
+		Number: new(7),
+		State:  new("open"),
+		Head:   &github.PullRequestBranch{SHA: new("abc123")},
 	}
 	checks := []*github.CheckRun{
-		{Name: github.String("lint"), Status: github.String("completed"), Conclusion: github.String("success")},
-		{Name: github.String("build"), Status: github.String("completed"), Conclusion: github.String("failure")},
+		{Name: new("lint"), Status: new("completed"), Conclusion: new("success")},
+		{Name: new("build"), Status: new("completed"), Conclusion: new("failure")},
 	}
 	workflows := []*github.WorkflowRun{
-		{Name: github.String("ci"), Status: github.String("completed"), Conclusion: github.String("success")},
+		{Name: new("ci"), Status: new("completed"), Conclusion: new("success")},
 	}
 
 	got := SummarizePR(pr, checks, workflows)
@@ -65,15 +65,15 @@ func TestSummarizePR_NotGreenWhenCheckFails(t *testing.T) {
 
 func TestSummarizePR_NotGreenWhenWorkflowCancelled(t *testing.T) {
 	pr := &github.PullRequest{
-		Number: github.Int(7),
-		State:  github.String("open"),
-		Head:   &github.PullRequestBranch{SHA: github.String("abc123")},
+		Number: new(7),
+		State:  new("open"),
+		Head:   &github.PullRequestBranch{SHA: new("abc123")},
 	}
 	checks := []*github.CheckRun{
-		{Name: github.String("lint"), Status: github.String("completed"), Conclusion: github.String("success")},
+		{Name: new("lint"), Status: new("completed"), Conclusion: new("success")},
 	}
 	workflows := []*github.WorkflowRun{
-		{Name: github.String("ci"), Status: github.String("completed"), Conclusion: github.String("cancelled")},
+		{Name: new("ci"), Status: new("completed"), Conclusion: new("cancelled")},
 	}
 
 	got := SummarizePR(pr, checks, workflows)

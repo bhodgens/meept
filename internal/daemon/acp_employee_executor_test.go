@@ -248,7 +248,7 @@ func TestEmployeeBotExecutor_NonACPEmployeeUntouched(t *testing.T) {
 	if refuse {
 		t.Fatal("non-acp employee must never be refused")
 	}
-	if got == nil || got.(bot.BotExecutor) != sentinel {
+	if got == nil || got != sentinel {
 		t.Error("non-acp employee must receive the default executor unchanged")
 	}
 	if resolveCalled {
