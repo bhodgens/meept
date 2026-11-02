@@ -447,6 +447,21 @@
     ],
     "e2e/suites/plan-critic": [
       "plan-critic"
+    ],
+    "internal/voice/": [
+      "voice-lifecycle"
+    ],
+    "internal/voice/telnyx/": [
+      "voice-lifecycle"
+    ],
+    "internal/voiceframe/": [
+      "voice-lifecycle"
+    ],
+    "internal/voicechild/": [
+      "voice-lifecycle"
+    ],
+    "cmd/meept-voice/": [
+      "voice-lifecycle"
     ]
   },
   "suites": [
@@ -905,6 +920,11 @@
         "critic-wiring-06 daemon wiring: the three flags default false on a live boot; critic slots absent/empty by default (commented examples)"
       ],
       "note": "plan-20261101-fresh-context-critic tree: fresh-context evidence critic (leaf 02), hostile second pass (leaf 03), contest path (leaf 04), zero-decision compile (leaf 05), interview option gates (leaf 06), daemon wiring + model slots (leaf 07). Self-contained fixtures over real StrategicPlanner + live harness daemon for the wiring scenario."
+    },
+    {
+      "name": "voice-lifecycle",
+      "dir": "e2e/suites/voice-lifecycle",
+      "status": "todo"
     }
   ],
   "scenarios": [
