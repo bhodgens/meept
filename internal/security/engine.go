@@ -822,6 +822,34 @@ func (e *Engine) evaluateCommand(command string) (RiskLevel, string, bool) {
 	return RiskMedium, ActionShellExecute, false
 }
 
+// matchEnginePathPattern is the engine's path-pattern matcher for DB path
+// rules and SecurityConfig.BlockedPaths/AllowedPaths entries. It layers
+// recursive '**'-suffix support onto filepath.Match: pkg/security's
+// permission matcher (permissions.go:314, the pre-gate live path) treats a
+// trailing '**' as a recursive directory prefix, but filepath.Match does
+// not ('*' never crosses '/'), so '<work>/**' failed to match
+// '<work>/sub/file' once the execution gate started running engine checks
+// on the live tool path (dispatcher-05 e2e failure, 2026-11-01). Rules:
+// exact match, filepath.Match, '**'-suffix prefix containment (boundary
+// checked via isPathUnderDir on the trimmed prefix), plain directory
+// containment.
+func matchEnginePathPattern(pattern, resolved string) bool {
+	expanded := pathutil.ExpandPath(pattern)
+	if expanded == resolved {
+		return true
+	}
+	if matched, _ := filepath.Match(expanded, resolved); matched {
+		return true
+	}
+	if strings.HasSuffix(expanded, "**") {
+		dirPrefix := strings.TrimSuffix(strings.TrimSuffix(expanded, "**"), "*")
+		if dirPrefix != "" && isPathUnderDir(resolved, dirPrefix) {
+			return true
+		}
+	}
+	return isPathUnderDir(resolved, expanded)
+}
+
 // checkBlockedPaths consults SecurityConfig.BlockedPaths (the live config
 // seed, schema.go) against an already-expanded absolute path. Matching
 // mirrors the DB block-rule logic: filepath.Match glob, exact match, and
@@ -837,14 +865,7 @@ func (e *Engine) checkBlockedPaths(resolved string) *Decision {
 		if raw == "" {
 			continue
 		}
-		expanded := pathutil.ExpandPath(raw)
-		if matched, _ := filepath.Match(expanded, resolved); matched {
-			return e.blockedPathsDecision(raw)
-		}
-		if expanded == resolved {
-			return e.blockedPathsDecision(raw)
-		}
-		if isPathUnderDir(resolved, expanded) {
+		if matchEnginePathPattern(raw, resolved) {
 			return e.blockedPathsDecision(raw)
 		}
 	}
@@ -903,7 +924,7 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 	var blocked *Decision
 	for _, pr := range blockRules {
 		expandedPattern := pathutil.ExpandPath(pr.Pattern)
-		if matched, _ := filepath.Match(expandedPattern, resolved); matched {
+		if matchEnginePathPattern(pr.Pattern, resolved) {
 			ruleSource := "path_rule"
 			if pr.Immutable == 1 {
 				ruleSource = "immutable"
@@ -956,7 +977,7 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 	}
 	for _, ap := range allowPatterns {
 		expandedPattern := pathutil.ExpandPath(ap.Pattern)
-		if matched, _ := filepath.Match(expandedPattern, resolved); matched {
+		if matchEnginePathPattern(ap.Pattern, resolved) {
 			return nil // Allowed
 		}
 		// SEC-4 FIX: Use proper directory boundary comparison

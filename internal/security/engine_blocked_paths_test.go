@@ -29,6 +29,22 @@ func newBlockedPathsEngine(t *testing.T, blocked []string, allowed []string) *En
 	return engine
 }
 
+// T2b: recursive '**'-suffix patterns must match nested paths. The e2e
+// harness seeds allowed_paths as "<work>/**"; filepath.Match does not let
+// '*' cross '/', so nested work files were denied once the gate ran engine
+// checks on the live path (dispatcher-05 failure, 2026-11-01).
+func TestEnginePathPatternRecursiveGlobSuffix(t *testing.T) {
+	engine := newBlockedPathsEngine(t, []string{"/opt/locked/**"}, nil)
+
+	decision := engine.Check(ActionFileWrite, "file_write", map[string]string{"path": "/opt/locked/nested/secret.txt"}, "")
+	require.False(t, decision.Allowed, "nested path under a '**' blocked entry must be denied, got: %+v", decision)
+	require.Contains(t, decision.Reason, "/opt/locked/**")
+
+	// Sibling pattern shapes keep working: direct child and the dir itself.
+	d := engine.Check(ActionFileWrite, "file_write", map[string]string{"path": "/opt/locked/top.txt"}, "")
+	require.False(t, d.Allowed, "direct child under '**' must be denied")
+}
+
 // T1: a file-category tool call whose target path matches a BlockedPaths
 // entry is denied, with the rule named in the Reason.
 func TestBlockedPathsDeniesFileWrite(t *testing.T) {
