@@ -28,6 +28,7 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 - [type Categorizer](<#Categorizer>)
 - [type CategoryTools](<#CategoryTools>)
 - [type Deferrable](<#Deferrable>)
+- [type ExecGate](<#ExecGate>)
 - [type PTYSessionConfig](<#PTYSessionConfig>)
 - [type PTYSessionInfo](<#PTYSessionInfo>)
 - [type PTYTool](<#PTYTool>)
@@ -40,12 +41,16 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
   - [func \(r \*Registry\) Count\(\) int](<#Registry.Count>)
   - [func \(r \*Registry\) Execute\(ctx context.Context, name string, args map\[string\]any\) \(\*ToolResult, error\)](<#Registry.Execute>)
   - [func \(r \*Registry\) ExecuteWithRetry\(ctx context.Context, name string, args map\[string\]any\) \(\*ToolResult, error\)](<#Registry.ExecuteWithRetry>)
+  - [func \(r \*Registry\) Gate\(\) ExecGate](<#Registry.Gate>)
+  - [func \(r \*Registry\) GateCheck\(ctx context.Context, name string, tool Tool, args map\[string\]any\) error](<#Registry.GateCheck>)
+  - [func \(r \*Registry\) GateComplete\(ctx context.Context, name string, tool Tool, args map\[string\]any, result any, execErr error\)](<#Registry.GateComplete>)
   - [func \(r \*Registry\) Get\(name string\) Tool](<#Registry.Get>)
   - [func \(r \*Registry\) GetDefinitions\(\) \[\]llm.ToolDefinition](<#Registry.GetDefinitions>)
   - [func \(r \*Registry\) IsCanonicalName\(name string\) bool](<#Registry.IsCanonicalName>)
   - [func \(r \*Registry\) List\(\) \[\]Tool](<#Registry.List>)
   - [func \(r \*Registry\) Names\(\) \[\]string](<#Registry.Names>)
   - [func \(r \*Registry\) Register\(tool Tool\)](<#Registry.Register>)
+  - [func \(r \*Registry\) SetGate\(g ExecGate\)](<#Registry.SetGate>)
   - [func \(r \*Registry\) SetSchemaMode\(mode SchemaMode, alwaysFull \[\]string\)](<#Registry.SetSchemaMode>)
   - [func \(r \*Registry\) ToLLMDefinitions\(\) \[\]llm.ToolDefinition](<#Registry.ToLLMDefinitions>)
   - [func \(r \*Registry\) ToolsByCategory\(\) map\[string\]\[\]string](<#Registry.ToolsByCategory>)
@@ -122,6 +127,10 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 	    SchemaPropOutcome        = "outcome"
 	    SchemaPropCapabilities   = "capabilities"
 	)
+
+<a name="ErrCodeGateBlocked"></a>ErrCodeGateBlocked is the machine\-readable ErrCode stamped on tool\-result envelopes whose execution was refused by the injected ExecGate's BeforeExecute \(security scan block, posture fail\-closed, ledger failure\). The envelope's Error field carries the human\-readable gate reason.
+
+	const ErrCodeGateBlocked = "gate_blocked"
 
 <a name="ErrCodeInvalidArgs"></a>ErrCodeInvalidArgs is the machine\-readable ErrCode stamped on tool\-result envelopes whose arguments failed the registry\-level schema gate \(ValidateToolArgs\) before the tool could run.
 
@@ -271,6 +280,18 @@ Deferrable is an optional interface that tools implement to support a preview\-t
 	    Discard(ctx context.Context, args map[string]any) error
 	}
 
+<a name="ExecGate"></a>
+## type ExecGate
+
+stub: implementation lands in 02\-gate.md
+
+Interface declaration only \- zero logic. SetGate/Gate and the gate field on Registry are INTENTIONALLY NOT DECLARED here: 02\-gate.md implements them, and the gate tests must fail RED naming SetGate exactly. \(During the F5 mutation check this file temporarily carried the SetGate shape; that was reverted \- see the 00T completion report.\)
+
+	type ExecGate interface {
+	    BeforeExecute(ctx context.Context, tool Tool, args map[string]any) error
+	    AfterExecute(ctx context.Context, tool Tool, args map[string]any, res *ToolResult, err error)
+	}
+
 <a name="PTYSessionConfig"></a>
 ## type PTYSessionConfig
 
@@ -417,6 +438,37 @@ Execute runs a tool by name with the given arguments. Returns an error if the to
 
 ExecuteWithRetry executes a tool with retry semantics based on tool\-specific policies. Returns the result of the first successful execution or the last error.
 
+<a name="Registry.Gate"></a>
+### func \(\*Registry\) Gate
+
+	func (r *Registry) Gate() ExecGate
+
+Gate returns the currently injected gate, or nil when none is armed \(nil\-safe read for tests\).
+
+<a name="Registry.GateCheck"></a>
+### func \(\*Registry\) GateCheck
+
+	func (r *Registry) GateCheck(ctx context.Context, name string, tool Tool, args map[string]any) error
+
+GateCheck runs the pre\-execution half of the gate \(ValidateToolArgs \+ BeforeExecute\) WITHOUT running the tool body, and GateComplete runs the post\-execution half \(AfterExecute\). They exist for callers whose execution path cannot route through Execute \- the agent executor's streaming branch \(StreamingTool.ExecuteStreaming\) is the live case: it must keep its progress\-callback path, so it gates around the call instead of inside it.
+
+Live\-path rule \(05\-e2e\-gate.md finding, 2026\-10\-31\): the agent executor calls tool.Execute directly and never Registry.Execute, so a gate armed only in the registry is dead on the live path. Callers that hold a \*tools.Registry and execute tool handles directly MUST bracket the call with GateCheck/GateComplete. Sequence:
+
+	err := reg.GateCheck(ctx, toolName, tool, args)  // nil gate = nil error
+	if err != nil { /* blocked: ErrCodeGateBlocked, body never runs */ }
+	result, execErr := tool.Execute(...)  // or ExecuteStreaming
+	reg.GateComplete(ctx, toolName, tool, args, result, execErr)
+	
+
+A nil registry or nil gate makes both methods no\-ops, so un\-gated callers \(unit tests, non\-daemon binaries\) keep byte\-identical behavior. GateCheck's returned error carries the gate's block reason; the typed\-envelope ErrCodeGateBlocked stamp is available via ErrCodeGateBlocked for callers that build ToolResults. AfterExecute fires even when execErr is non\-nil, and also for the blocked case is NOT called \(the block is the BeforeExecute outcome; the concrete gate records blocks itself via its Before path\).
+
+<a name="Registry.GateComplete"></a>
+### func \(\*Registry\) GateComplete
+
+	func (r *Registry) GateComplete(ctx context.Context, name string, tool Tool, args map[string]any, result any, execErr error)
+
+GateComplete is the AfterExecute half of the bracket; see GateCheck. result and execErr are the raw tool outputs exactly as returned by the body \(success value or Go error\) \- the same normalization Execute applies via buildToolResult happens here before AfterExecute observes them.
+
 <a name="Registry.Get"></a>
 ### func \(\*Registry\) Get
 
@@ -458,6 +510,15 @@ Names returns a sorted list of all registered tool names.
 	func (r *Registry) Register(tool Tool)
 
 Register adds a tool to the registry. If a tool with the same name already exists, it will be replaced.
+
+<a name="Registry.SetGate"></a>
+### func \(\*Registry\) SetGate
+
+	func (r *Registry) SetGate(g ExecGate)
+
+SetGate injects the per\-execution enforcement gate \(contract C2\). Nil \(or a typed\-nil ExecGate holding a nil concrete pointer\) restores the legacy behavior byte\-identically, so non\-daemon test usages are unaffected.
+
+Ordering: SetGate must be called BEFORE any Execute on this registry \- the daemon wires it immediately after the registry is constructed, before any tool can run. Calling it mid\-flight re\-arms enforcement for subsequent executions only.
 
 <a name="Registry.SetSchemaMode"></a>
 ### func \(\*Registry\) SetSchemaMode

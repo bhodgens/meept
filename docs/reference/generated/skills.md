@@ -204,7 +204,6 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func \(t \*SkillMCPTool\) ToLLMDefinition\(\) llm.ToolDefinition](<#SkillMCPTool.ToLLMDefinition>)
 - [type SkillMatch](<#SkillMatch>)
 - [type SkillMetadata](<#SkillMetadata>)
-  - [func DefaultMetadata\(\) SkillMetadata](<#DefaultMetadata>)
 - [type SkillSource](<#SkillSource>)
 - [type ToolAvailabilityFunc](<#ToolAvailabilityFunc>)
 - [type ToolDef](<#ToolDef>)
@@ -1486,6 +1485,11 @@ Skill represents a parsed skill definition from a SKILL.md file.
 	    // `state: true` frontmatter flag; leaf 05 owns activation.
 	    State bool `json:"state,omitempty"`
 	
+	    // DisableModelInvocation omits the skill from the model-facing listing
+	    // (frontmatter `disable-model-invocation: true`); the skill stays
+	    // executable via explicit invocation paths, it is just not listed.
+	    DisableModelInvocation bool `json:"disable_model_invocation,omitempty"`
+	
 	    // Prerequisites holds Hermes-Agent runtime requirements (env vars, commands, packages).
 	    // Nil for Meept-native skills.
 	    Prerequisites *HermesPrerequisites `json:"prerequisites,omitempty" yaml:"prerequisites,omitempty"`
@@ -1732,6 +1736,10 @@ SkillIndexEntry holds skill metadata only \(no body\) for fast lookup.
 	    AllowedTools []string `json:"allowed_tools,omitempty"`
 	    // Examples are sample prompts for trigger matching.
 	    Examples []string `json:"examples,omitempty"`
+	    // DisableModelInvocation omits the skill from the model-facing listing
+	    // (frontmatter `disable-model-invocation: true`); the skill stays
+	    // executable via explicit invocation paths.
+	    DisableModelInvocation bool `json:"disable_model_invocation,omitempty"`
 	    // SourceOrigin tracks which skill system the skill originated from ("meept", "claude", "hermes").
 	    SourceOrigin string `json:"source_origin,omitempty"`
 	}
@@ -1873,6 +1881,12 @@ SkillMetadata holds the parsed YAML frontmatter from a SKILL.md file.
 	    // State is the SKILL.state opt-in flag (frontmatter `state: true`).
 	    State bool `yaml:"state"`
 	
+	    // DisableModelInvocation omits the skill from the model-facing listing
+	    // (frontmatter `disable-model-invocation: true`, mirrors pi). The skill
+	    // remains executable via explicit invocation paths; only the listing
+	    // hides it. Absent or false keeps the skill visible.
+	    DisableModelInvocation bool `yaml:"disable-model-invocation"`
+	
 	    // Claude-specific fields (parsed separately, merged into Tags).
 	    Trigger  string     `yaml:"trigger"`
 	    Triggers stringList `yaml:"triggers"`
@@ -1881,13 +1895,6 @@ SkillMetadata holds the parsed YAML frontmatter from a SKILL.md file.
 	    HermesPrereqs *HermesPrerequisites `yaml:"-"`
 	    SourceOrigin  string               `yaml:"-"`
 	}
-
-<a name="DefaultMetadata"></a>
-### func DefaultMetadata
-
-	func DefaultMetadata() SkillMetadata
-
-DefaultMetadata returns a SkillMetadata with sensible defaults.
 
 <a name="SkillSource"></a>
 ## type SkillSource

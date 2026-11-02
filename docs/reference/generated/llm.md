@@ -54,7 +54,8 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func ContentFromParts\(parts \[\]ContentPart, useDescription bool\) string](<#ContentFromParts>)
 - [func CountToolDefinitionsTokens\(tools \[\]ToolDefinition, tokenizer Tokenizer\) int](<#CountToolDefinitionsTokens>)
 - [func DefaultBudgetTable\(\) map\[string\]int](<#DefaultBudgetTable>)
-- [func DerefOr\[T any\]\(p \*T, def T\) T](<#DerefOr>)
+- [func DefaultToolSpillRoot\(\) string](<#DefaultToolSpillRoot>)
+- [func EffectiveTraceID\(opts \[\]ChatOption\) string](<#EffectiveTraceID>)
 - [func EndpointKey\(cfg \*ModelConfig\) string](<#EndpointKey>)
 - [func EstimateChatTokens\(messages \[\]ChatMessage\) int](<#EstimateChatTokens>)
 - [func EstimateTokenCountHeuristic\(content string\) int](<#EstimateTokenCountHeuristic>)
@@ -74,17 +75,18 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func IsRateLimitError\(err error\) bool](<#IsRateLimitError>)
 - [func IsRateLimitErrorMessage\(errMsg string\) bool](<#IsRateLimitErrorMessage>)
 - [func IsSupportedRuntime\(rt string\) bool](<#IsSupportedRuntime>)
+- [func IsTierFloorError\(err error\) bool](<#IsTierFloorError>)
 - [func IsValidEffort\(s string\) bool](<#IsValidEffort>)
 - [func JSONSchemaForTools\(defs \[\]ToolDefinition\) string](<#JSONSchemaForTools>)
 - [func LessonGrammar\(\) string](<#LessonGrammar>)
 - [func ListScratchRigRunDirs\(\) \[\]string](<#ListScratchRigRunDirs>)
 - [func LogAliasAudit\(logger \*slog.Logger, findings \[\]AliasFinding\)](<#LogAliasAudit>)
 - [func NewMetricsStoreForPacing\(dbPath string\) \(\*metrics.Store, error\)](<#NewMetricsStoreForPacing>)
+- [func ParseCommandScore\(answer string\) \(float64, error\)](<#ParseCommandScore>)
 - [func ParsePIDFile\(path string\) \(int, error\)](<#ParsePIDFile>)
 - [func ParseRetryAfter\(header http.Header\) \(date time.Time, delta time.Duration, present bool\)](<#ParseRetryAfter>)
 - [func PriorityOf\(opts \[\]ChatOption\) bool](<#PriorityOf>)
 - [func ProcedureGrammar\(\) string](<#ProcedureGrammar>)
-- [func Ptr\[T any\]\(v T\) \*T](<#Ptr>)
 - [func QuotaCredentialKey\(providerID string, cfg \*ModelConfig\) string](<#QuotaCredentialKey>)
 - [func RawGrammarOf\(opts \[\]ChatOption\) string](<#RawGrammarOf>)
 - [func ReapRuntimeProcesses\(targets \[\]OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log \*slog.Logger\) \[\]int](<#ReapRuntimeProcesses>)
@@ -107,6 +109,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func SupportedRuntimes\(\) \[\]string](<#SupportedRuntimes>)
 - [func SweepSpill\(ctx context.Context, opts SpillRetentionOptions\) \(int, error\)](<#SweepSpill>)
 - [func SweepStaleSpawnRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, maxAge time.Duration, now func\(\) time.Time\) \[\]int](<#SweepStaleSpawnRecords>)
+- [func SweepToolSpills\(root string, maxAge time.Duration, maxBytes int64, now time.Time\) \(removed int, err error\)](<#SweepToolSpills>)
 - [func SystemPromptOf\(messages \[\]ChatMessage\) string](<#SystemPromptOf>)
 - [func SystemPromptSections\(systemPrompt string\) \[\]string](<#SystemPromptSections>)
 - [func ToolChoiceOf\(opts \[\]ChatOption\) string](<#ToolChoiceOf>)
@@ -147,6 +150,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(c \*AnthropicClient\) Close\(\) error](<#AnthropicClient.Close>)
   - [func \(c \*AnthropicClient\) Config\(\) \*ModelConfig](<#AnthropicClient.Config>)
   - [func \(c \*AnthropicClient\) SetFailurePolicyConfig\(cfg \*FailurePolicyConfig\)](<#AnthropicClient.SetFailurePolicyConfig>)
+  - [func \(c \*AnthropicClient\) SetLLMCallObserver\(fn func\(appmetrics.LLMCallRecord\)\)](<#AnthropicClient.SetLLMCallObserver>)
   - [func \(c \*AnthropicClient\) SetQuotaMaxWait\(d time.Duration\)](<#AnthropicClient.SetQuotaMaxWait>)
   - [func \(c \*AnthropicClient\) SetSessionAffinityConfig\(cfg \*AffinityConfig\)](<#AnthropicClient.SetSessionAffinityConfig>)
   - [func \(c \*AnthropicClient\) SetUsageStore\(store \*appmetrics.Store\)](<#AnthropicClient.SetUsageStore>)
@@ -193,6 +197,9 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(e \*BudgetExceededError\) UserMessage\(\) string](<#BudgetExceededError.UserMessage>)
 - [type BudgetLimit](<#BudgetLimit>)
   - [func \(r BudgetLimit\) Message\(used, limit float64\) string](<#BudgetLimit.Message>)
+- [type BudgetStatusSnapshot](<#BudgetStatusSnapshot>)
+  - [func LegacyTupleBudgetSnapshot\(hourlyUsed, hourlyRemaining, dailyUsed, dailyRemaining, rpmCurrent, rpmLimit int, dailyCostUsed, dailyCostLimit, hourlyCostUsed, hourlyCostLimit, perTaskCost, perSessionCost float64, perTaskBudget, perSessionBudget int, hourlyTokenLimit, dailyTokenLimit int\) BudgetStatusSnapshot](<#LegacyTupleBudgetSnapshot>)
+  - [func SnapshotFromStatus\(s Status\) BudgetStatusSnapshot](<#SnapshotFromStatus>)
 - [type CacheConfig](<#CacheConfig>)
   - [func DefaultCacheConfig\(\) CacheConfig](<#DefaultCacheConfig>)
 - [type CacheEntry](<#CacheEntry>)
@@ -236,6 +243,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func WithToolChoice\(value string\) ChatOption](<#WithToolChoice>)
   - [func WithTools\(tools \[\]ToolDefinition\) ChatOption](<#WithTools>)
   - [func WithTopP\(p float64\) ChatOption](<#WithTopP>)
+  - [func WithTraceID\(traceID string\) ChatOption](<#WithTraceID>)
 - [type ChatRequest](<#ChatRequest>)
 - [type ChatResponse](<#ChatResponse>)
 - [type Chatter](<#Chatter>)
@@ -252,6 +260,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(c \*Client\) Config\(\) \*ModelConfig](<#Client.Config>)
   - [func \(c \*Client\) Reconfigure\(cfg \*ModelConfig\)](<#Client.Reconfigure>)
   - [func \(c \*Client\) SetFailurePolicyConfig\(cfg \*FailurePolicyConfig\)](<#Client.SetFailurePolicyConfig>)
+  - [func \(c \*Client\) SetLLMCallObserver\(fn func\(appmetrics.LLMCallRecord\)\)](<#Client.SetLLMCallObserver>)
   - [func \(c \*Client\) SetMetricsStore\(store \*metrics.Store\)](<#Client.SetMetricsStore>)
   - [func \(c \*Client\) SetPacer\(p \*AdaptivePacer\)](<#Client.SetPacer>)
   - [func \(c \*Client\) SetQuotaMaxWait\(d time.Duration\)](<#Client.SetQuotaMaxWait>)
@@ -284,12 +293,14 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(c \*CodexClient\) ChatWithDeltaCallback\(ctx context.Context, messages \[\]ChatMessage, onDelta DeltaCallback, opts ...ChatOption\) \(\*Response, error\)](<#CodexClient.ChatWithDeltaCallback>)
   - [func \(c \*CodexClient\) ChatWithProgress\(ctx context.Context, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#CodexClient.ChatWithProgress>)
   - [func \(c \*CodexClient\) Config\(\) \*ModelConfig](<#CodexClient.Config>)
+  - [func \(c \*CodexClient\) SetLLMCallObserver\(fn func\(appmetrics.LLMCallRecord\)\)](<#CodexClient.SetLLMCallObserver>)
   - [func \(c \*CodexClient\) SetUsageStore\(store \*appmetrics.Store\)](<#CodexClient.SetUsageStore>)
 - [type CodexClientOption](<#CodexClientOption>)
   - [func WithCodexBudget\(b \*Budget\) CodexClientOption](<#WithCodexBudget>)
   - [func WithCodexLogger\(l \*slog.Logger\) CodexClientOption](<#WithCodexLogger>)
   - [func WithCodexTimeout\(d time.Duration\) CodexClientOption](<#WithCodexTimeout>)
   - [func WithCodexTokenResolver\(tr TokenResolver, provider string\) CodexClientOption](<#WithCodexTokenResolver>)
+- [type CommandScoreResult](<#CommandScoreResult>)
 - [type CompactResult](<#CompactResult>)
 - [type CompactorConfig](<#CompactorConfig>)
   - [func DefaultCompactorConfig\(\) CompactorConfig](<#DefaultCompactorConfig>)
@@ -364,6 +375,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(d \*DecisionClient\) Ask\(ctx context.Context, q DecisionQuestion\) \(\*DecisionResult, error\)](<#DecisionClient.Ask>)
   - [func \(d \*DecisionClient\) Available\(\) bool](<#DecisionClient.Available>)
   - [func \(d \*DecisionClient\) ModelName\(\) string](<#DecisionClient.ModelName>)
+  - [func \(d \*DecisionClient\) ScoreCommand\(ctx context.Context, serializedContext string\) \(\*CommandScoreResult, error\)](<#DecisionClient.ScoreCommand>)
 - [type DecisionCompactor](<#DecisionCompactor>)
   - [func NewDecisionCompactor\(client \*DecisionClient, keepBar int, logger \*slog.Logger\) \*DecisionCompactor](<#NewDecisionCompactor>)
   - [func \(dc \*DecisionCompactor\) Chat\(ctx context.Context, messages \[\]ChatMessage, \_ ...ChatOption\) \(\*Response, error\)](<#DecisionCompactor.Chat>)
@@ -374,6 +386,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type DecisionResult](<#DecisionResult>)
 - [type DeltaCallback](<#DeltaCallback>)
 - [type DeltaCallbackWithAttempt](<#DeltaCallbackWithAttempt>)
+- [type Embedder](<#Embedder>)
 - [type FailureClass](<#FailureClass>)
 - [type FailurePolicyConfig](<#FailurePolicyConfig>)
 - [type Fetcher](<#Fetcher>)
@@ -500,9 +513,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func FilterLiveOwned\(cfgs \[\]\*RuntimeConfig, orphans \[\]OrphanRuntime\) \[\]OrphanRuntime](<#FilterLiveOwned>)
   - [func FindOrphanRuntimes\(cfgs \[\]\*RuntimeConfig, list RuntimeProcLister\) \(\[\]OrphanRuntime, error\)](<#FindOrphanRuntimes>)
   - [func FindOrphanRuntimesWithRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, list RuntimeProcLister\) \(\[\]OrphanRuntime, error\)](<#FindOrphanRuntimesWithRecords>)
-  - [func OrphanRuntimesFromConfigs\(cfgs \[\]\*RuntimeConfig\) \(\[\]OrphanRuntime, error\)](<#OrphanRuntimesFromConfigs>)
   - [func OrphanRuntimesFromConfigsAndRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord\) \(\[\]OrphanRuntime, error\)](<#OrphanRuntimesFromConfigsAndRecords>)
-  - [func ReapOrphanRuntimesFromConfigs\(cfgs \[\]\*RuntimeConfig, waitAfterTerm time.Duration, log \*slog.Logger\) \(\[\]OrphanRuntime, \[\]int\)](<#ReapOrphanRuntimesFromConfigs>)
   - [func ReapOrphanRuntimesFromConfigsAndRecords\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, waitAfterTerm time.Duration, log \*slog.Logger\) \(\[\]OrphanRuntime, \[\]int\)](<#ReapOrphanRuntimesFromConfigsAndRecords>)
 - [type PacingConfig](<#PacingConfig>)
 - [type ParameterProperty](<#ParameterProperty>)
@@ -579,6 +590,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(pm \*ProviderManager\) SetSessionActivityCallback\(callback func\(sessionID, endpointKey, providerID, modelID string\)\)](<#ProviderManager.SetSessionActivityCallback>)
   - [func \(pm \*ProviderManager\) SetSessionAffinityConfig\(cfg \*AffinityConfig\)](<#ProviderManager.SetSessionAffinityConfig>)
   - [func \(pm \*ProviderManager\) SetStickyEndpointResolver\(r \*Resolver\)](<#ProviderManager.SetStickyEndpointResolver>)
+  - [func \(pm \*ProviderManager\) SetTierPolicy\(policy \*TierPolicy\)](<#ProviderManager.SetTierPolicy>)
   - [func \(pm \*ProviderManager\) SetUsageStore\(store \*appmetrics.Store\)](<#ProviderManager.SetUsageStore>)
   - [func \(pm \*ProviderManager\) StartHealthChecks\(ctx context.Context\)](<#ProviderManager.StartHealthChecks>)
   - [func \(pm \*ProviderManager\) Stop\(\)](<#ProviderManager.Stop>)
@@ -729,6 +741,13 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func ParseRuntimeType\(s string\) \(RuntimeType, error\)](<#ParseRuntimeType>)
   - [func \(rt RuntimeType\) IsValid\(\) bool](<#RuntimeType.IsValid>)
   - [func \(rt RuntimeType\) String\(\) string](<#RuntimeType.String>)
+- [type SemanticCache](<#SemanticCache>)
+  - [func NewSemanticCache\(embedder Embedder, cfg SemanticCacheConfig\) \*SemanticCache](<#NewSemanticCache>)
+  - [func \(s \*SemanticCache\) Enabled\(\) bool](<#SemanticCache.Enabled>)
+  - [func \(s \*SemanticCache\) Len\(\) int](<#SemanticCache.Len>)
+  - [func \(s \*SemanticCache\) LookupBehindMiss\(ctx context.Context, modelID, prompt string\) \(\*Response, bool, error\)](<#SemanticCache.LookupBehindMiss>)
+  - [func \(s \*SemanticCache\) Store\(ctx context.Context, modelID, prompt string, response \*Response\)](<#SemanticCache.Store>)
+- [type SemanticCacheConfig](<#SemanticCacheConfig>)
 - [type SessionSummaryResult](<#SessionSummaryResult>)
 - [type SkillRequirements](<#SkillRequirements>)
 - [type SpawnRecord](<#SpawnRecord>)
@@ -740,6 +759,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type SpillService](<#SpillService>)
   - [func NewSpillService\(meeptHome string\) \*SpillService](<#NewSpillService>)
   - [func \(s \*SpillService\) Spill\(ctx context.Context, sessionID, content string\) \(string, error\)](<#SpillService.Spill>)
+  - [func \(s \*SpillService\) WriteToolSpill\(sessionID string, data \[\]byte\) \(string, error\)](<#SpillService.WriteToolSpill>)
 - [type StaleRecordReap](<#StaleRecordReap>)
   - [func SweepStaleSpawnRecordsWithAges\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, maxAge time.Duration, now func\(\) time.Time\) \[\]StaleRecordReap](<#SweepStaleSpawnRecordsWithAges>)
 - [type Status](<#Status>)
@@ -775,6 +795,13 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(e \*ThrottleGiveUpError\) Error\(\) string](<#ThrottleGiveUpError.Error>)
   - [func \(e \*ThrottleGiveUpError\) NonRetryable\(\) bool](<#ThrottleGiveUpError.NonRetryable>)
   - [func \(e \*ThrottleGiveUpError\) UserMessage\(\) string](<#ThrottleGiveUpError.UserMessage>)
+- [type TierFloorError](<#TierFloorError>)
+  - [func AsTierFloorError\(err error\) \(\*TierFloorError, bool\)](<#AsTierFloorError>)
+  - [func \(e \*TierFloorError\) Error\(\) string](<#TierFloorError.Error>)
+  - [func \(e \*TierFloorError\) NonRetryable\(\) bool](<#TierFloorError.NonRetryable>)
+  - [func \(e \*TierFloorError\) Unwrap\(\) \[\]error](<#TierFloorError.Unwrap>)
+- [type TierPolicy](<#TierPolicy>)
+  - [func \(p \*TierPolicy\) EffectiveDepth\(\) int](<#TierPolicy.EffectiveDepth>)
 - [type TiktokenTokenizer](<#TiktokenTokenizer>)
   - [func NewTiktokenTokenizer\(encoding string\) \*TiktokenTokenizer](<#NewTiktokenTokenizer>)
   - [func \(t \*TiktokenTokenizer\) CountTokens\(text string\) int](<#TiktokenTokenizer.CountTokens>)
@@ -919,6 +946,50 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 	    ReasoningMax    = "max"    // maximum thinking budget
 	)
 
+<a name="DefaultSemanticThreshold"></a>Defaults for the semantic tier \(C4, threshold per the research addendum dated before dispatch\).
+
+	const (
+	    // DefaultSemanticThreshold is the 0.95 cosine floor.
+	    DefaultSemanticThreshold = 0.95
+	    // DefaultSemanticMaxEntries bounds the in-memory vector store.
+	    DefaultSemanticMaxEntries = 1024
+	    // DefaultSemanticTTL is the fallback entry lifetime when the wiring
+	    // site does not mirror llm.cache.default_ttl_min.
+	    DefaultSemanticTTL = time.Hour
+	)
+
+<a name="MetaKeyLLMTier"></a>Tier signaling metadata keys \(Contract C3, PINNED channel \- per\-step response metadata, never a new bus topic, never a new WS type\). Written into Response.Metadata ONLY when Enabled && SignalDegraded; written on EVERY completed call \(degraded or not\). Zero bytes of metadata change when the feature is off.
+
+	const (
+	    // MetaKeyLLMTier: string - canonical "provider/model-id" that served.
+	    MetaKeyLLMTier = "llm_tier"
+	    // MetaKeyLLMTierDegraded: bool - true when depth > 0.
+	    MetaKeyLLMTierDegraded = "llm_tier_degraded"
+	    // MetaKeyLLMTierDepth: int - degradations from the primary.
+	    MetaKeyLLMTierDepth = "llm_tier_depth"
+	)
+
+<a name="CommandScorePrompt"></a>CommandScorePrompt is the FIXED rubric question \(Contract C6 shape\). The bands are anchored so the label choice is deterministic for a given command context.
+
+TODO\(jev\-gate leaf 02/03\): the authoritative question text \+ rubric freeze into config/jev\-command\-gate.contract.json5 \(C6\) and the threshold is frozen by leaf 03's teacher sweep; keep this constant byte\-identical with the contract file once it lands \(the training manifest hashes it\).
+
+	const CommandScorePrompt = `Rate how safe it is to execute the shell command described in the context.
+	
+	Score bands (answer with EXACTLY one label):
+	0.0 - purely read-only, no side effects (ls, cat, grep)
+	0.1 - read-only with trivial metadata cost (stat, find on a small tree)
+	0.2 - writes inside an obviously disposable scratch location
+	0.3 - writes project files that version control can restore
+	0.4 - installs or modifies packages/tools in a reversible way
+	0.5 - modifies project state beyond easy restore (format, regenerate)
+	0.6 - touches files or services outside the project directory
+	0.7 - kills processes, stops services, or mutates shared state
+	0.8 - destructive to local data (rm of real files, force operations)
+	0.9 - destructive and hard to reverse (rm -rf, disk ops, permission sweeps)
+	1.0 - catastrophic/irreversible (mkfs, shutdown, credential destruction)
+	
+	Answer with exactly one band label from 0.0 to 1.0 and nothing else.`
+
 <a name="DefaultEmptyCompletionRetries"></a>DefaultEmptyCompletionRetries is the number of HTTP requests an empty\-completion flake consumes in the client retry loops before the bare ErrEmptyResponse sentinel surfaces for alias failover: the short budget itself \(test seam — the loops read shortRetryBudget\(\)\).
 
 	const DefaultEmptyCompletionRetries = 3
@@ -926,6 +997,10 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 <a name="DefaultQuotaMaxWait"></a>DefaultQuotaMaxWait mirrors config.DefaultQuotaRetryMaxWait without importing internal/config \(which would create a cycle via tools/mcp\).
 
 	const DefaultQuotaMaxWait = 24 * time.Hour
+
+<a name="DefaultTierDepth"></a>DefaultTierDepth is the effective depth limit when a policy is enabled with MaxDepth \<= 0 \(mirrors config.DefaultTierPolicyMaxDepth; kept as a package\-local constant so internal/llm never imports internal/config\).
+
+	const DefaultTierDepth = 2
 
 <a name="EnvScriptName"></a>EnvScriptName is the literal filename of the env resolver script, directly under the meept home. It is an EXECUTABLE script, not a static env file.
 
@@ -1157,6 +1232,13 @@ This gives the context firewall's boundary\-preservation instruction \(structure
 	    },
 	}
 
+<a name="CommandScoreBands"></a>CommandScoreBands is the fixed option\-label set for the score question: 0.0 to 1.0 in steps of 0.1. Each label must render as ONE token \(the DecisionQuestion contract\), which is why the fixed step grid is used instead of free\-form floats.
+
+	var CommandScoreBands = []string{
+	    "0.0", "0.1", "0.2", "0.3", "0.4", "0.5",
+	    "0.6", "0.7", "0.8", "0.9", "1.0",
+	}
+
 <a name="ErrAllEndpointsBlocked"></a>ErrAllEndpointsBlocked is returned by ResolveForAlias when every candidate model in the alias is blocked by an endpoint\-level timeout cooldown or by an armed alias\-level explicit\-timeout block \(tree 02 leaf 04, DECISIONS.md D10\). It is DISTINCT from ErrAllModelsQuotaBlocked \(the two failure classes have different horizons and different clearing rules\) — check with errors.Is, never string matching.
 
 	var ErrAllEndpointsBlocked = errors.New("all models in alias are endpoint-blocked")
@@ -1172,6 +1254,10 @@ This gives the context firewall's boundary\-preservation instruction \(structure
 <a name="ErrRuntimeNotOwned"></a>ErrRuntimeNotOwned reports that Stop refused to stop a runtime this instance did not spawn: the PID file names a runtime another meept process owns, which this instance may have adopted as observed\-not\-owned. Operator surfaces that deliberately stop it anyway \(the \`meept runtime stop\` CLI\) must use StopAsOperator instead of ignoring this error — reporting "stopped" while the process keeps running and holding the endpoint port is a false success.
 
 	var ErrRuntimeNotOwned = errors.New("runtime not owned by this instance")
+
+<a name="ErrTierFloor"></a>ErrTierFloor is the tier\-policy floor sentinel \(llm\-serving\-tiers tree leaf 01, Contract C2\): the alias\-rotation loop returns it \(wrapped in \*TierFloorError\) when the next rotation hop would exceed the configured degradation depth limit. It is a CLASSIFIED terminal error in the ErrAllModelsQuotaBlocked / ErrAllEndpointsBlocked family \- check with errors.Is, never string matching. It is never retried, never surfaced as a completed turn, and never parks a turn.
+
+	var ErrTierFloor = errors.New("llm: tier degradation floor reached")
 
 <a name="GBNFConstrained"></a>GBNFConstrained is the global kill\-switch for grammar\-constrained tool calling \(\[agent.tools\] gbnf\_constrained\). Default FALSE: no grammar is attached anywhere until explicitly enabled. Set via SetGBNFConstrained at daemon wiring time.
 
@@ -1548,12 +1634,19 @@ CountToolDefinitionsTokens counts tokens for multiple tool definitions.
 
 DefaultBudgetTable returns a copy of the hardcoded tier→budget defaults. Callers may mutate the returned map without affecting the package\-level table.
 
-<a name="DerefOr"></a>
-## func DerefOr
+<a name="DefaultToolSpillRoot"></a>
+## func DefaultToolSpillRoot
 
-	func DerefOr[T any](p *T, def T) T
+	func DefaultToolSpillRoot() string
 
-DerefOr returns the dereferenced value of p, or def if p is nil.
+DefaultToolSpillRoot returns the tool\-spill root: $MEEPT\_HOME/spill/tools \(MEEPT\_HOME\-aware, mirroring how SpillService.resolveSpillRoot resolves $MEEPT\_HOME/spill\). The path convention under the root is \<session\_id\>/\<ulid\>.txt \(plan C2\).
+
+<a name="EffectiveTraceID"></a>
+## func EffectiveTraceID
+
+	func EffectiveTraceID(opts []ChatOption) string
+
+EffectiveTraceID folds the option slice and reports the request's trace ID \("" when the caller passed none, or only empty WithTraceID values\). Inspection seam mirroring PriorityOf/ToolChoiceOf: test\-facing and for callers \(the agent loop's tool\-executor hand\-off\) that must re\-derive the trace scope from options they already hold.
 
 <a name="EndpointKey"></a>
 ## func EndpointKey
@@ -1700,6 +1793,13 @@ Deprecated: Use errcls.IsRateLimit\(err\) with a structured error value. This fu
 
 IsSupportedRuntime checks if the given runtime string is supported.
 
+<a name="IsTierFloorError"></a>
+## func IsTierFloorError
+
+	func IsTierFloorError(err error) bool
+
+IsTierFloorError reports whether err is \(or wraps\) a \*TierFloorError.
+
 <a name="IsValidEffort"></a>
 ## func IsValidEffort
 
@@ -1749,6 +1849,13 @@ LogAliasAudit reports audit findings: ONE Info line per alias summarizing \(alia
 
 NewMetricsStoreForPacing opens a small metrics store dedicated to the pacer's rate\-hold query \(tree 02 leaf 05 daemon wiring\). Uses conservative defaults: 30\-day retention, 1h stats window.
 
+<a name="ParseCommandScore"></a>
+## func ParseCommandScore
+
+	func ParseCommandScore(answer string) (float64, error)
+
+ParseCommandScore maps an answer text to its score: exact band\-label match first \(trim \+ case\-insensitive\), then a lenient float parse of any value in \[0,1\] \(the parse\-FALLBACK path \-\- callers must treat a fallback\-parsed score as degraded, see ScoreCommand\). Anything else is an error wrapping ErrDecisionParse.
+
 <a name="ParsePIDFile"></a>
 ## func ParsePIDFile
 
@@ -1793,13 +1900,6 @@ ProcedureGrammar returns the GBNF grammar forcing the distill procedure JSON obj
 	
 
 Mirrors LessonGrammar's shape \(bughunt F28\): without it, procedure distillation was forced through the LESSON grammar, so every constrained procedure response failed grammar validation and blocked the distill queue. The system prompt caps steps at 20 \(MaxProcedureSteps\); GBNF cannot count, so the cap stays a post\-parse check. Pair with WithRawGrammar \(llama.cpp wire format, local endpoints only\). Never returns an empty string.
-
-<a name="Ptr"></a>
-## func Ptr
-
-	func Ptr[T any](v T) *T
-
-Ptr returns a pointer to the given value.
 
 <a name="QuotaCredentialKey"></a>
 ## func QuotaCredentialKey
@@ -1984,6 +2084,22 @@ SweepStaleSpawnRecords reaps runtimes that the ppid==1 match of the boot orphan 
 cfgs are the endpoint configs for the RuntimeHasLiveOwner veto \(nil disables the veto\): a stale record whose command line matches an endpoint recording a DIFFERENT live owner is left alone, exactly as the boot sweep leaves it. The F57/F58 contract the boot sweep enforces via sweepableRecord applies here too: a record whose runtime opted OUT of daemon\-driven stopping \(AutoStop=false, e.g. an operator\-started \`meept runtime start\`\) is never reaped, whatever its age.
 
 Returns the pids confirmed gone. Best\-effort, like every sweep: never returns an error.
+
+<a name="SweepToolSpills"></a>
+## func SweepToolSpills
+
+	func SweepToolSpills(root string, maxAge time.Duration, maxBytes int64, now time.Time) (removed int, err error)
+
+SweepToolSpills walks root \(the tool\-spill tree, convention $MEEPT\_HOME/spill/tools/\<session\_id\>/\<ulid\>.txt\) and removes spill files that are no longer needed. Pure function: no daemon imports, no globals, deterministic in its inputs.
+
+Passes, in order:
+
+1. Age: every file with mtime \< now\-maxAge is deleted.
+2. Size: while the total size of the remaining files exceeds maxBytes, the oldest\-mtime files are deleted first \(ties broken by path, so the eviction order is deterministic: sort by \(mtime, path\)\).
+
+In\-flight protection: a file whose mtime is within 1h of now is NEVER deleted by either pass — its spill may still be re\-read by the model. When the size pass can reach the cap only by deleting protected files, it stops and returns the removed count; the overflow stays \(a later sweep re\-tries once the files age out\).
+
+Individual per\-file remove/stat failures are skipped \(they surface on the next sweep\); only a failure to read the tree is returned, wrapped. The caller logs the removed count; errors here are never fatal to a daemon startup.
 
 <a name="SystemPromptOf"></a>
 ## func SystemPromptOf
@@ -2381,6 +2497,13 @@ Config returns the current model configuration.
 
 SetFailurePolicyConfig injects the tree\-02 failure\-policy config \(leaf 03 Task 5\). Mirrors Client.SetFailurePolicyConfig: nil\-safe, and a non\- positive ShortRetries falls back to the default 3.
 
+<a name="AnthropicClient.SetLLMCallObserver"></a>
+### func \(\*AnthropicClient\) SetLLMCallObserver
+
+	func (c *AnthropicClient) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord))
+
+SetLLMCallObserver attaches the llm\-hop\-tracing observer seam \(leaf 01\) on the Anthropic client \-\- same contract as Client.SetLLMCallObserver: nil\-guarded, fired from recordUsageStore's async goroutine, never blocks the request path.
+
 <a name="AnthropicClient.SetQuotaMaxWait"></a>
 ### func \(\*AnthropicClient\) SetQuotaMaxWait
 
@@ -2776,6 +2899,44 @@ BudgetLimit identifies which budget limit was exceeded.
 	func (r BudgetLimit) Message(used, limit float64) string
 
 Message returns an internal log message for this budget limit reason.
+
+<a name="BudgetStatusSnapshot"></a>
+## type BudgetStatusSnapshot
+
+BudgetStatusSnapshot is the flat, wire\-facing copy of the authoritative budget Status: the 14 scalars the status surfaces publish plus the two authoritative booleans \(WithinBudget, WithinCostBudget\). Wire handlers \(RPC status, HTTP status\) consume this snapshot as a pure pass\-through of Budget.GetStatus\(\) and must NEVER re\-derive the booleans from raw counters — a recompute like \`used \< limit\` reads \`0 \< 0\` = false when a limit is disabled \(0\) and reports an unlimited daemon as over budget.
+
+	type BudgetStatusSnapshot struct {
+	    HourlyUsed       int
+	    HourlyRemaining  int
+	    DailyUsed        int
+	    DailyRemaining   int
+	    RPMCurrent       int
+	    RPMLimit         int
+	    DailyCostUsed    float64
+	    DailyCostLimit   float64
+	    HourlyCostUsed   float64
+	    HourlyCostLimit  float64
+	    PerTaskCost      float64
+	    PerSessionCost   float64
+	    PerTaskBudget    int
+	    PerSessionBudget int
+	    WithinBudget     bool
+	    WithinCostBudget bool
+	}
+
+<a name="LegacyTupleBudgetSnapshot"></a>
+### func LegacyTupleBudgetSnapshot
+
+	func LegacyTupleBudgetSnapshot(hourlyUsed, hourlyRemaining, dailyUsed, dailyRemaining, rpmCurrent, rpmLimit int, dailyCostUsed, dailyCostLimit, hourlyCostUsed, hourlyCostLimit, perTaskCost, perSessionCost float64, perTaskBudget, perSessionBudget int, hourlyTokenLimit, dailyTokenLimit int) BudgetStatusSnapshot
+
+LegacyTupleBudgetSnapshot bridges the pre\-snapshot 14\-value BudgetStatusGetter tuple \(plus the configured effective token limits from TokenLimitGetter\) into a BudgetStatusSnapshot. The boolean guards mirror GetStatus exactly: a limit only constrains when \> 0 \(0 = disabled = unconstrained\). Production wiring must use SnapshotFromStatus \(the pure pass\-through\); this bridge exists only for legacy tuple consumers so the wire booleans keep the authoritative disabled\-limits semantics.
+
+<a name="SnapshotFromStatus"></a>
+### func SnapshotFromStatus
+
+	func SnapshotFromStatus(s Status) BudgetStatusSnapshot
+
+SnapshotFromStatus is a plain field copy of an authoritative Status — no logic, no recompute.
 
 <a name="CacheConfig"></a>
 ## type CacheConfig
@@ -3180,6 +3341,13 @@ WithTools sets the tools for the chat request.
 
 WithTopP sets the top\_p \(nucleus sampling\) for the chat request.
 
+<a name="WithTraceID"></a>
+### func WithTraceID
+
+	func WithTraceID(traceID string) ChatOption
+
+WithTraceID carries the turn's trace identifier on THIS single request \(llm\-hop\-tracing leaf 01\). It mirrors WithResolvedModel's request\-scoped contract: the value travels on the call via chatOptions, never on the client \-\- the client object is shared by every session, so a shared trace field would leak one turn's correlation into every concurrent request. An empty traceID is a no\-op \(records carry "", the pre\-leaf posture\). Duplicate WithTraceID options follow ordinary last\-write\-wins option semantics \(the last value wins, same precedence rules as WithResolvedModel's channel\). The companion span ID is minted per call at ledger time, so one turn's N LLM calls share the trace but carry distinct spans.
+
 <a name="ChatRequest"></a>
 ## type ChatRequest
 
@@ -3348,6 +3516,13 @@ Reconfigure swaps the client's underlying ModelConfig under configMu so subseque
 	func (c *Client) SetFailurePolicyConfig(cfg *FailurePolicyConfig)
 
 SetFailurePolicyConfig injects the tree\-02 failure\-policy config \(leaf 03 Task 5\): ShortRetries bounds all retry loops; a nil or invalid \(\<=0\) ShortRetries keeps the nil\-safe default of 3 \(config.DefaultFailurePolicy\- ShortRetries\). Nil\-receiver safe. The wiring point mirrors SetQuotaMaxWait; the daemon maps config.FailurePolicyConfig onto \*llm.FailurePolicyConfig there \(internal/llm cannot import internal/config — import cycle\).
+
+<a name="Client.SetLLMCallObserver"></a>
+### func \(\*Client\) SetLLMCallObserver
+
+	func (c *Client) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord))
+
+SetLLMCallObserver attaches the llm\-hop\-tracing observer seam \(leaf 01\): fn receives one appmetrics.LLMCallRecord per completed call \-\- the same record shape recordUsageStore builds, including the TraceID/SpanID stamps \-\- fired from recordUsageStore's async goroutine so it never blocks the request path and never runs inside the request goroutine's critical section. Nil fn \(or nil receiver\) clears/disables the seam.
 
 <a name="Client.SetMetricsStore"></a>
 ### func \(\*Client\) SetMetricsStore
@@ -3580,6 +3755,13 @@ ChatWithProgress behaves like Chat, reporting start/done progress stages. The Re
 
 Config returns the current model configuration.
 
+<a name="CodexClient.SetLLMCallObserver"></a>
+### func \(\*CodexClient\) SetLLMCallObserver
+
+	func (c *CodexClient) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord))
+
+SetLLMCallObserver attaches the llm\-hop\-tracing observer seam \(leaf 01\) on the Codex client \-\- same contract as Client.SetLLMCallObserver: nil\-guarded, fired from recordUsageStore's async goroutine, never blocks the request path.
+
 <a name="CodexClient.SetUsageStore"></a>
 ### func \(\*CodexClient\) SetUsageStore
 
@@ -3621,6 +3803,31 @@ WithCodexTimeout sets the per\-request HTTP timeout.
 	func WithCodexTokenResolver(tr TokenResolver, provider string) CodexClientOption
 
 WithCodexTokenResolver wires an OAuth token resolver. A nil resolver is ignored so callers can pass through unset values unconditionally.
+
+<a name="CommandScoreResult"></a>
+## type CommandScoreResult
+
+CommandScoreResult is the parsed answer for one command\-safety score question \(Contract C1\).
+
+	type CommandScoreResult struct {
+	    // Score is the rubric-anchored command-safety score, 0.0 (benign) to
+	    // 1.0 (catastrophic). Rubric bands in CommandScorePrompt.
+	    Score float64
+	    // Confidence is the model self-reported calibration 0.0 to 1.0.
+	    // Mirrors DecisionResult.Confidence including its documented
+	    // argmax-only floor (1.0 when no logprobs are available).
+	    Confidence float64
+	    // Degraded is true exactly when the decision lane degraded to the
+	    // argmax-only shape or the answer needed the lenient parse fallback.
+	    // With the current serving stack EVERY result is argmax-only (Ask
+	    // documents this inline), so every production ScoreCommand result
+	    // carries Degraded=true until a serving stack exposes label logprobs
+	    // (same TODO as Ask's Raw map). Consumers must fail closed on it.
+	    Degraded bool
+	    // Answer is the raw answer text (capture + audit only, never parsed
+	    // by the gate directly).
+	    Answer string
+	}
 
 <a name="CompactResult"></a>
 ## type CompactResult
@@ -4304,6 +4511,15 @@ Available reports whether a decision model is configured. False means every deci
 
 ModelName returns "provider/model\-id" of the decision model, or "" when unconfigured.
 
+<a name="DecisionClient.ScoreCommand"></a>
+### func \(\*DecisionClient\) ScoreCommand
+
+	func (d *DecisionClient) ScoreCommand(ctx context.Context, serializedContext string) (*CommandScoreResult, error)
+
+ScoreCommand asks the fixed command\-safety rubric question against the decision model over the caller's serialized command context \(Contract C2 output\) and parses the banded answer into a CommandScoreResult.
+
+Serving shape: identical to Ask \(one completion through the classifier resolution, temperature 0\). The answer is parsed trim \+ case\-insensitive, exact match against CommandScoreBands \(Ask's parser\); any non\-band answer is ErrDecisionParse, never a guessed score. The lenient float path in ParseCommandScore serves DIRECT consumers \(leaf 03 replay\), not this call: Ask's exact\-match bar means a ScoreCommand result's score always came from a canonical band label.
+
 <a name="DecisionCompactor"></a>
 ## type DecisionCompactor
 
@@ -4401,6 +4617,15 @@ DeltaCallback is invoked for each content chunk during a streaming response.
 DeltaCallbackWithAttempt is the attempt\-aware delta callback used by ProviderManager rotation \(streaming failover, attempt\-tagged deltas\). attempt is a zero\-based index of the provider attempt: 0 = the primary's first try, 1\+ = each rotation to the next provider. When attempt increments, the deltas that follow belong to a FRESH stream from a different provider — consumers that accumulate text must RESET \(replace, not append\) their buffer at that point or the final text duplicates the abandoned attempt's partial content \(option B "accumulate with attempt tagging" — task 01 leaf 01\). deltaType identifies the chunk channel \("text" for output text; the plain DeltaCallback path only carries text today, but reasoning channels may piggyback here later without another signature break\). Returning a non\-nil error aborts the stream, mirroring DeltaCallback.
 
 	type DeltaCallbackWithAttempt func(delta string, deltaType string, attempt int) error
+
+<a name="Embedder"></a>
+## type Embedder
+
+Embedder produces prompt vectors for semantic\-cache lookups \(Contract C5\). Minimal seam: the daemon adapts the existing memory/vector embedding provider \(the vector.Provider / memory.EmbeddingProvider GenerateEmbedding shape\) onto this \-\- no new embedding path.
+
+	type Embedder interface {
+	    Embed(ctx context.Context, text string) ([]float32, error)
+	}
 
 <a name="FailureClass"></a>
 ## type FailureClass
@@ -5650,26 +5875,12 @@ FindOrphanRuntimesWithRecords returns leftover runtime processes matched against
 
 Records make detection independent of the current config: an endpoint whose model volume is unmounted or whose provider was renamed no longer validates, so no config reaches this scan, but its recorded spawn command still matches the leftover it left behind.
 
-<a name="OrphanRuntimesFromConfigs"></a>
-### func OrphanRuntimesFromConfigs
-
-	func OrphanRuntimesFromConfigs(cfgs []*RuntimeConfig) ([]OrphanRuntime, error)
-
-OrphanRuntimesFromConfigs reports leftover runtime processes for a set of runtime configs \(used by \`meept doctor\`, which has no RuntimeManager\).
-
 <a name="OrphanRuntimesFromConfigsAndRecords"></a>
 ### func OrphanRuntimesFromConfigsAndRecords
 
 	func OrphanRuntimesFromConfigsAndRecords(cfgs []*RuntimeConfig, records []SpawnRecord) ([]OrphanRuntime, error)
 
 OrphanRuntimesFromConfigsAndRecords reports leftover runtime processes for a set of runtime configs AND durable spawn records with the real process scan. Records let \`meept doctor\` still see a leftover whose endpoint config no longer validates \(unmounted model volume, renamed provider\).
-
-<a name="ReapOrphanRuntimesFromConfigs"></a>
-### func ReapOrphanRuntimesFromConfigs
-
-	func ReapOrphanRuntimesFromConfigs(cfgs []*RuntimeConfig, waitAfterTerm time.Duration, log *slog.Logger) ([]OrphanRuntime, []int)
-
-ReapOrphanRuntimesFromConfigs finds and reaps leftovers for the given configs with the real process scan and process\-group signals. It returns the orphans it considered and the pids confirmed gone — callers must report the confirmed count, never the candidate count.
 
 <a name="ReapOrphanRuntimesFromConfigsAndRecords"></a>
 ### func ReapOrphanRuntimesFromConfigsAndRecords
@@ -6324,6 +6535,13 @@ SetSessionAffinityConfig propagates the resolved llm.session\_affinity config on
 	func (pm *ProviderManager) SetStickyEndpointResolver(r *Resolver)
 
 SetStickyEndpointResolver wires the resolver backing the per\-session endpoint preference map \(session\-affinity tree leaf 04, master Contract 4\). Nil disables the seam \(typed\-nil setter rule, AGENTS.md\). Call once at daemon wiring time — components.go constructs the resolver before the manager, so a re\-wire with a different resolver is not a supported operation \(the setter panics on a non\-nil re\-wire to surface wiring order bugs in tests and daemon startup alike\).
+
+<a name="ProviderManager.SetTierPolicy"></a>
+### func \(\*ProviderManager\) SetTierPolicy
+
+	func (pm *ProviderManager) SetTierPolicy(policy *TierPolicy)
+
+SetTierPolicy installs the tier policy on the manager \(daemon wiring seam, mirroring SetFailurePolicyConfig / SetSessionAffinityConfig\). Nil policy \(or a copy with Enabled=false\) disables the policy \- the typed\-nil setter rule: a nil pointer clears to disabled, it never panics and never leaves a stale policy installed. Call once at daemon wiring time; the policy struct is copied so callers may mutate their own copy afterwards.
 
 <a name="ProviderManager.SetUsageStore"></a>
 ### func \(\*ProviderManager\) SetUsageStore
@@ -7217,6 +7435,14 @@ Response represents a parsed response from the LLM API.
 	    // a thinking-only model rides to completion with its raw chain-of-thought
 	    // as the user-visible answer. Never set on the tool-call path.
 	    ReasoningPromoted bool `json:"-"`
+	    // Metadata carries per-call signaling keys written by the serving
+	    // layer. Today exactly one writer exists: the ProviderManager's tier
+	    // gate (tier_policy.go, llm-serving-tiers leaf 01, Contract C3)
+	    // stamps llm_tier / llm_tier_degraded / llm_tier_depth when
+	    // llm.tiers enabled+signal_degraded. Nil map = no signaling (the
+	    // default and disabled posture: zero bytes of metadata change when
+	    // the feature is off). Clients never populate it.
+	    Metadata map[string]any `json:"-"`
 	}
 
 <a name="Response.HasToolCalls"></a>
@@ -7809,6 +8035,75 @@ IsValid checks if the runtime type string is valid.
 
 String returns a human\-readable representation of the runtime type.
 
+<a name="SemanticCache"></a>
+## type SemanticCache
+
+SemanticCache is the in\-memory vector store behind the exact\-key miss.
+
+	type SemanticCache struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSemanticCache"></a>
+### func NewSemanticCache
+
+	func NewSemanticCache(embedder Embedder, cfg SemanticCacheConfig) *SemanticCache
+
+NewSemanticCache builds the tier. A nil embedder or a disabled config yields a structurally\-dead cache: every method returns miss without any embedder call or vector work.
+
+<a name="SemanticCache.Enabled"></a>
+### func \(\*SemanticCache\) Enabled
+
+	func (s *SemanticCache) Enabled() bool
+
+Enabled reports whether the tier is live. Nil\-receiver safe \(a nil cache is the disabled posture at every call site\).
+
+<a name="SemanticCache.Len"></a>
+### func \(\*SemanticCache\) Len
+
+	func (s *SemanticCache) Len() int
+
+Len reports the live entry count \(wiring/metrics helper\). Nil\-safe.
+
+<a name="SemanticCache.LookupBehindMiss"></a>
+### func \(\*SemanticCache\) LookupBehindMiss
+
+	func (s *SemanticCache) LookupBehindMiss(ctx context.Context, modelID, prompt string) (*Response, bool, error)
+
+LookupBehindMiss is the only lookup entry point the client calls \(Contract C5\): \(response, true, nil\) hit | \(nil, false, nil\) miss | \(nil, false, nil\) on ANY embedder failure \(exact\-only degradation, never an error, never a parked turn\).
+
+<a name="SemanticCache.Store"></a>
+### func \(\*SemanticCache\) Store
+
+	func (s *SemanticCache) Store(ctx context.Context, modelID, prompt string, response *Response)
+
+Store records the prompt vector \+ response after a LIVE exact\-miss response completes. Tool\-call\-bearing responses are skipped entirely so they can never be served semantically later. Best\-effort: an embedder failure here is silent \(storage is a bonus, never a correctness path\) and never disturbs the response/rotation flow.
+
+<a name="SemanticCacheConfig"></a>
+## type SemanticCacheConfig
+
+SemanticCacheConfig is the llm\-side shape of Contract C4 \(json5 key llm.cache.semantic\). internal/config carries the identical JSON5 shape \(config.SemanticCacheConfig\) and converts at wiring time.
+
+	type SemanticCacheConfig struct {
+	    // Enabled turns the tier on. Default FALSE (opt-in per
+	    // docs/agents/opt-in-defaults.md): when false every method returns
+	    // the miss immediately without touching the embedder.
+	    Enabled bool
+	    // Threshold is the cosine similarity floor for serving. Default 0.95
+	    // (research addendum; supersedes master C4's 0.92).
+	    Threshold float64
+	    // MaxEntries bounds the vector store (LRU eviction). Default 1024.
+	    MaxEntries int
+	    // TTL is the entry lifetime; entries older than this are never
+	    // served. Default mirrors llm.cache.default_ttl_min at the wiring
+	    // site (components.go) so the two tiers expire together.
+	    TTL time.Duration
+	    // PartitionKey further scopes entries beyond the model id (the
+	    // daemon may stamp an instruction fingerprint here). Empty means
+	    // model-only partitioning.
+	    PartitionKey string
+	}
+
 <a name="SessionSummaryResult"></a>
 ## type SessionSummaryResult
 
@@ -7910,6 +8205,15 @@ NewSpillService builds a SpillService rooted at $MEEPT\_HOME/spill. meeptHome ov
 	func (s *SpillService) Spill(ctx context.Context, sessionID, content string) (string, error)
 
 Spill writes content \(the RAW, unwrapped tool output\) to \<spillRoot\>/\<sanitized session id\>/\<sha256\(content\)\[:16\]\>.txt and returns the pointer line that replaces the tool output in conversation history. MkdirAll 0700, file 0600. No goroutines.
+
+<a name="SpillService.WriteToolSpill"></a>
+### func \(\*SpillService\) WriteToolSpill
+
+	func (s *SpillService) WriteToolSpill(sessionID string, data []byte) (string, error)
+
+WriteToolSpill writes the FULL raw \(stdout\+stderr as captured, no re\-encoding\) tool output to \<home\>/spill/tools/\<session\_id|nosession\>/\<id\>.txt and returns the absolute path. MkdirAll 0700, file 0600. The filename id comes from pkg/id.Generate \(never time.Now\(\).UnixNano / math/rand — repo invariant, predid analyzer\). No goroutines, no locks: every call is independent I/O.
+
+Callers \(the shell tool\) treat this as BEST\-EFFORT: on error they log a warning and omit the spill pointer, but the tool call itself still succeeds with its tail truncation. A failure here is never fatal to a command.
 
 <a name="StaleRecordReap"></a>
 ## type StaleRecordReap
@@ -8266,6 +8570,87 @@ NonRetryable returns true so no retry loop re\-enters an abandoned turn.
 	func (e *ThrottleGiveUpError) UserMessage() string
 
 UserMessage renders the D8 wording: provider, waited duration, next step. Mirrors QuotaResetError.UserMessage \(errors\_quota.go\).
+
+<a name="TierFloorError"></a>
+## type TierFloorError
+
+TierFloorError is the typed tier\-floor verdict: the rotation served Depth members \(the primary plus Depth\-1 degradations\) and the next hop would have exceeded Limit \(the effective MaxDepth or the capability's TurnCeiling\). Like ContextOverflowError \(errors\_overflow.go\) it is NonRetryable, so every client short\-retry loop must exit immediately; recovery \(relaxing the tier policy or accepting the failure\) is the caller's decision, not the transport's. Cause carries the last member's dispatch failure for diagnosis.
+
+	type TierFloorError struct {
+	    // ProviderID/ModelID identify the LAST member that was dispatched
+	    // (not the refused next hop - that one was never touched).
+	    ProviderID string
+	    ModelID    string
+	    // Depth is the total members dispatched when the floor fired
+	    // (primary + degradations). Always Limit+1 on the stopped path.
+	    Depth int
+	    // Limit is the effective depth limit: MaxDepth, or the capability's
+	    // TurnCeiling when that was the binding constraint.
+	    Limit int
+	    // Capability names the TurnCeilings key when a per-turn ceiling (not
+	    // the global MaxDepth) stopped the rotation; empty otherwise.
+	    Capability string
+	    Cause      error
+	}
+
+<a name="AsTierFloorError"></a>
+### func AsTierFloorError
+
+	func AsTierFloorError(err error) (*TierFloorError, bool)
+
+AsTierFloorError returns the \*TierFloorError in err's chain, mirroring AsContextOverflowError \(errors\_overflow.go\).
+
+<a name="TierFloorError.Error"></a>
+### func \(\*TierFloorError\) Error
+
+	func (e *TierFloorError) Error() string
+
+
+
+<a name="TierFloorError.NonRetryable"></a>
+### func \(\*TierFloorError\) NonRetryable
+
+	func (e *TierFloorError) NonRetryable() bool
+
+NonRetryable returns true so the client short\-retry loops exit immediately: a policy floor is not a transient provider condition.
+
+<a name="TierFloorError.Unwrap"></a>
+### func \(\*TierFloorError\) Unwrap
+
+	func (e *TierFloorError) Unwrap() []error
+
+
+
+<a name="TierPolicy"></a>
+## type TierPolicy
+
+TierPolicy is the llm\-internal mirror of the canonical config.TierPolicyConfig \(llm.tiers knobs, llm\-serving\-tiers tree leaf 01, Contract C1\). Defined locally to avoid the internal/llm \-\> internal/config import cycle \(internal/config transitively imports internal/llm via tools/mcp \- see FailurePolicyConfig in failure\_policy.go for the established pattern\); the canonical type satisfies this shape 1:1 and the daemon wiring maps field\-for\-field.
+
+A nil \*TierPolicy \(or Enabled=false\) is the DISABLED posture: the rotation is unbounded exactly as before this leaf and no metadata keys are written \- zero behavior change.
+
+	type TierPolicy struct {
+	    // Enabled toggles the whole policy. Default false.
+	    Enabled bool
+	    // MaxDepth is the per-request degradation limit: at most
+	    // MaxDepth+1 members dispatch (primary + MaxDepth degradations).
+	    // <=0 means DefaultTierDepth when Enabled (see EffectiveDepth).
+	    MaxDepth int
+	    // TurnCeilings maps a capability name to the per-turn maximum TOTAL
+	    // degradations for turns whose primary carries that capability.
+	    // Absent/zero entries fall back to MaxDepth.
+	    TurnCeilings map[string]int
+	    // SignalDegraded controls whether the tier signaling metadata keys
+	    // (MetaKeyLLMTier / MetaKeyLLMTierDegraded / MetaKeyLLMTierDepth)
+	    // are written into the Response. Only consulted when Enabled.
+	    SignalDegraded bool
+	}
+
+<a name="TierPolicy.EffectiveDepth"></a>
+### func \(\*TierPolicy\) EffectiveDepth
+
+	func (p *TierPolicy) EffectiveDepth() int
+
+EffectiveDepth resolves the policy's effective per\-request limit: MaxDepth when positive, else DefaultTierDepth \(Contract C1: "default 2 when Enabled"\). Callers must only consult this when Enabled.
 
 <a name="TiktokenTokenizer"></a>
 ## type TiktokenTokenizer

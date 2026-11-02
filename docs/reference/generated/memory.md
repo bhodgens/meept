@@ -4,6 +4,14 @@
 
 	import "github.com/caimlas/meept/internal/memory"
 
+Claim demotion flag \(tree 02 leaf 03, contract C6; findings R\-B7\): additive extensions over the EXISTING claim metadata\-update path.
+
+The flag\-not\-delete rule \(D1/D2\): demotion stamps metadata on the claim row IN PLACE \(stampMetadataInPlace precedent from the verdict path\) so the claim ID stays stable, history retains the content, and recall\-side consumers can filter demoted IDs from the default retrieval surface while episodic search still reaches the content.
+
+The demotion lifecycle enum \(R\-B7: active | demoted | superseded\) hangs off the existing "status" claim metadata key: "demoted" is the third value next to auto/confirmed/promoted/rejected. The dedicated "demoted" bool \+ "demoted\_reason"/"demoted\_at" keys carry the tier semantics \(the status enum alone cannot say WHY a claim left the semantic surface\).
+
+ASCII only. No changes to existing claim structs; additive only.
+
 Typed user\-memory facts \(harness\-eval leaf 12, book ch3 "user memory"\): a compact, typed model of the user that survives sessions. Facts are distinct from episodic transcripts and the personality profile: they carry a kind \(preference/restriction/account/temporal\), a conflict rule \(last\-write\-wins with history via ValidUntil\), and temporal validity windows. No new vector engine — SQLite beside the existing stores.
 
 Package memory provides memory storage and retrieval for meept.
@@ -16,6 +24,7 @@ Package memory provides memory storage and retrieval for meept.
 
 - Constants
 - Variables
+- [func ClaimIsDemoted\(meta map\[string\]any\) bool](<#ClaimIsDemoted>)
 - [func ClusterBySimilarity\(ctx context.Context, memories \[\]Memory, threshold float64, embedder EmbeddingProvider\) \(\[\]\[\]Memory, error\)](<#ClusterBySimilarity>)
 - [func ClusterBySimilarityFromResults\(ctx context.Context, results \[\]MemoryResult, threshold float64, embedder EmbeddingProvider, logger \*slog.Logger\) \(\[\]\[\]Memory, error\)](<#ClusterBySimilarityFromResults>)
 - [func EffectiveAutoTrustWeight\(configured float64\) float64](<#EffectiveAutoTrustWeight>)
@@ -226,6 +235,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) Consolidator\(\) \*Consolidator](<#Manager.Consolidator>)
   - [func \(m \*Manager\) DataDir\(\) string](<#Manager.DataDir>)
   - [func \(m \*Manager\) Delete\(ctx context.Context, id string\) error](<#Manager.Delete>)
+  - [func \(m \*Manager\) DemoteClaim\(ctx context.Context, claimID, reason string, at time.Time\) error](<#Manager.DemoteClaim>)
   - [func \(m \*Manager\) Distill\(ctx context.Context, src \[\]Memory\) \(\*Memory, error\)](<#Manager.Distill>)
   - [func \(m \*Manager\) DistributedConfig\(\) config.DistributedMemoryConfig](<#Manager.DistributedConfig>)
   - [func \(m \*Manager\) DrainDistillQueue\(ctx context.Context\) \(DistillQueueSummary, error\)](<#Manager.DrainDistillQueue>)
@@ -308,6 +318,7 @@ Package memory provides memory storage and retrieval for meept.
 - [type MemoryNode](<#MemoryNode>)
 - [type MemoryQuery](<#MemoryQuery>)
 - [type MemoryResult](<#MemoryResult>)
+  - [func FilterDemotedClaims\(results \[\]MemoryResult\) \[\]MemoryResult](<#FilterDemotedClaims>)
   - [func RankForUsefulness\(candidates \[\]MemoryResult, netVotes map\[string\]int, now time.Time, w Weights\) \[\]MemoryResult](<#RankForUsefulness>)
 - [type MemoryStats](<#MemoryStats>)
 - [type MemoryType](<#MemoryType>)
@@ -334,9 +345,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(p \*PersonalityMemory\) UpdateKey\(ctx context.Context, section, key, value string\) error](<#PersonalityMemory.UpdateKey>)
 - [type PersonalityMemoryConfig](<#PersonalityMemoryConfig>)
 - [type PersonalityStore](<#PersonalityStore>)
-  - [func NewPersonalityStore\(memory \*PersonalityMemory\) \*PersonalityStore](<#NewPersonalityStore>)
   - [func \(s \*PersonalityStore\) Get\(ctx context.Context, key string\) \(string, error\)](<#PersonalityStore.Get>)
-  - [func \(s \*PersonalityStore\) GetAll\(ctx context.Context\) \(map\[string\]\[\]string, error\)](<#PersonalityStore.GetAll>)
   - [func \(s \*PersonalityStore\) Set\(ctx context.Context, key, value string\) error](<#PersonalityStore.Set>)
 - [type Prediction](<#Prediction>)
 - [type Procedure](<#Procedure>)
@@ -407,7 +416,6 @@ Package memory provides memory storage and retrieval for meept.
 - [type SpanView](<#SpanView>)
 - [type StoreOptions](<#StoreOptions>)
 - [type SummarizeRequest](<#SummarizeRequest>)
-  - [func \(r \*SummarizeRequest\) ToJSON\(\) string](<#SummarizeRequest.ToJSON>)
 - [type SummarizeResponse](<#SummarizeResponse>)
 - [type Summary](<#Summary>)
   - [func ParseSummarizeResponse\(content string\) \(\[\]Summary, error\)](<#ParseSummarizeResponse>)
@@ -498,6 +506,23 @@ Package memory provides memory storage and retrieval for meept.
 	    // BridgeUnitTypeValue is the metadata value stored under
 	    // BridgeMetaUnitType for every persisted bridge.
 	    BridgeUnitTypeValue = "bridge"
+	)
+
+<a name="MetaClaimDemoted"></a>Claim demotion metadata keys \(tierpolicy mirrors these as constants; the string values are the single source of truth here\).
+
+	const (
+	    // MetaClaimDemoted is the demotion flag: JSON true after demotion.
+	    MetaClaimDemoted = "demoted"
+	    // MetaClaimDemotedReason records why (staleness | low_usefulness |
+	    // superseded).
+	    MetaClaimDemotedReason = "demoted_reason"
+	    // MetaClaimDemotedAt records the RFC3339 demotion instant.
+	    MetaClaimDemotedAt = "demoted_at"
+	    // MetaClaimDemotedTo records the destination tier ("episodic").
+	    MetaClaimDemotedTo = "demoted_to"
+	    // ClaimStatusDemoted is the R-B7 lifecycle value stamped next to
+	    // the existing status (ClaimStatus-typed for reuse).
+	    ClaimStatusDemoted ClaimStatus = "demoted"
 	)
 
 <a name="TypeLesson"></a>Distilled memory types and domains \(loop\-economics leaf 15\).
@@ -657,6 +682,13 @@ reason\_hash is the first 16 hex chars of sha256\(reason\); an empty reason hash
 <a name="ErrVerdictReasonTooLong"></a>ErrVerdictReasonTooLong is returned when a verdict reason exceeds MaxVerdictReasonBytes.
 
 	var ErrVerdictReasonTooLong = errors.New("verdict reason exceeds 512 bytes")
+
+<a name="ClaimIsDemoted"></a>
+## func ClaimIsDemoted
+
+	func ClaimIsDemoted(meta map[string]any) bool
+
+ClaimIsDemoted reports whether a claim memory carries the demotion flag. Metadata\-shape tolerant: hand\-stamped \(bool\) and JSON\-round\-tripped \(bool/float64/string\) shapes all read correctly. Nil\-safe on the metadata map.
 
 <a name="ClusterBySimilarity"></a>
 ## func ClusterBySimilarity
@@ -2604,6 +2636,19 @@ LLM returns the manager's chat client \(consolidation summarization \+ distill s
 
 Delete removes a memory by ID from the appropriate backend.
 
+<a name="Manager.DemoteClaim"></a>
+### func \(\*Manager\) DemoteClaim
+
+	func (m *Manager) DemoteClaim(ctx context.Context, claimID, reason string, at time.Time) error
+
+DemoteClaim stamps the demotion flag on a claim row IN PLACE via the same metadata\-write path the verdict flow uses \(stampMetadataInPlace: no new version row, claim ID stable, supersede lineage intact\).
+
+Idempotent \(R\-B7\): an already\-demoted claim is a successful noop \(the caller's demote counter does not increment on a semantic noop because tierpolicy checks the flag before calling; this double\-check is the transaction\-side belt of that braces\).
+
+Order contract with tierpolicy's executeDemote: the episodic COPY is written FIRST by the caller; this flag write is step 2. A crash between the steps leaves the claim un\-flagged, and a re\-run repeats the copy attempt \- the copy is deduped by the demoted\_from marker on the episodic side \(DemotionApplier implementations\).
+
+Not exported to the chat path: callers are the tierpolicy applier adapter \(background tick\) and admin surfaces. No delete anywhere.
+
 <a name="Manager.Distill"></a>
 ### func \(\*Manager\) Distill
 
@@ -3295,6 +3340,13 @@ MemoryResult is a memory item returned from a search with relevance info.
 	    Source string `json:"source"`
 	}
 
+<a name="FilterDemotedClaims"></a>
+### func FilterDemotedClaims
+
+	func FilterDemotedClaims(results []MemoryResult) []MemoryResult
+
+FilterDemotedClaims drops demoted claims from a result slice \- the visibility\-axis filter recall\-side consumers apply so demoted claims stop surfacing as semantic claims while the rows \(and their episodic copies\) remain in history. Invalid/missing metadata reads as not\-demoted \(fail\-open, same posture as claimInForce\).
+
 <a name="RankForUsefulness"></a>
 ### func RankForUsefulness
 
@@ -3524,26 +3576,12 @@ PersonalityStore provides a key\-value interface over personality data.
 	    // contains filtered or unexported fields
 	}
 
-<a name="NewPersonalityStore"></a>
-### func NewPersonalityStore
-
-	func NewPersonalityStore(memory *PersonalityMemory) *PersonalityStore
-
-NewPersonalityStore wraps a PersonalityMemory with key\-value access.
-
 <a name="PersonalityStore.Get"></a>
 ### func \(\*PersonalityStore\) Get
 
 	func (s *PersonalityStore) Get(ctx context.Context, key string) (string, error)
 
 Get retrieves a preference value.
-
-<a name="PersonalityStore.GetAll"></a>
-### func \(\*PersonalityStore\) GetAll
-
-	func (s *PersonalityStore) GetAll(ctx context.Context) (map[string][]string, error)
-
-GetAll returns all personality data as a map.
 
 <a name="PersonalityStore.Set"></a>
 ### func \(\*PersonalityStore\) Set
@@ -4157,13 +4195,6 @@ SummarizeRequest represents a batch of memories to be summarized by the LLM.
 	    Memories     []MemoryResult `json:"memories"`
 	    MaxSummaries int            `json:"max_summaries"`
 	}
-
-<a name="SummarizeRequest.ToJSON"></a>
-### func \(\*SummarizeRequest\) ToJSON
-
-	func (r *SummarizeRequest) ToJSON() string
-
-ToJSON converts a summarize request to JSON.
 
 <a name="SummarizeResponse"></a>
 ## type SummarizeResponse

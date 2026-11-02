@@ -12,6 +12,10 @@ Package config: read/write helpers for the main daemon config file \(meept.json5
 
 The main config path is resolved through MeeptHome\(\)/MeeptPath\(\) — never os.Getwd or a hardcoded \~/.meept — so the MEEPT\_HOME override applies.
 
+Package config — otlp\_traces.go: OTLPTracesConfig \(leaf 07\-langfuse\-sink, contract C5\). Lives in its own file rather than schema.go so it cannot collide with concurrent sibling WIP hunks in that shared file; same package, same gendoc conventions.
+
+Sibling of metrics.otlp \(opt\-in, default OFF per docs/agents/opt\-in\- defaults.md\): when disabled there is NO exporter, NO span producer, and ZERO network activity — the wiring constructs nothing at all.
+
 Package config provides configuration loading and validation for meept.
 
 Package config provides configuration loading and validation for meept.
@@ -27,18 +31,22 @@ Package config provides configuration loading and validation for meept.
 - [func ExpandMeeptPath\(path string\) string](<#ExpandMeeptPath>)
 - [func IsDialectToolHint\(hint string\) bool](<#IsDialectToolHint>)
 - [func LoadJSON5\(path string, v any\) error](<#LoadJSON5>)
-- [func LoadJSON5WithDefault\(path string, v any\) error](<#LoadJSON5WithDefault>)
+- [func LoadJSON5Bytes\(data \[\]byte, v any\) error](<#LoadJSON5Bytes>)
 - [func MainConfigPath\(\) string](<#MainConfigPath>)
 - [func MeeptHome\(\) string](<#MeeptHome>)
 - [func MeeptPath\(elem ...string\) string](<#MeeptPath>)
 - [func NormalizeAgentGuardsDefaults\(g \*AgentGuardsConfig\)](<#NormalizeAgentGuardsDefaults>)
+- [func NormalizeClusterSecurityDefaults\(c \*ClusterConfig\)](<#NormalizeClusterSecurityDefaults>)
 - [func NormalizeContextDiscoveryDefaults\(c \*ContextDiscoveryConfig\)](<#NormalizeContextDiscoveryDefaults>)
+- [func NormalizeDecisionLogDefaults\(g \*SecurityGroupsConfig\)](<#NormalizeDecisionLogDefaults>)
 - [func NormalizeEvolverDefaults\(e \*SkillsEvolverConfig\) error](<#NormalizeEvolverDefaults>)
 - [func NormalizeFailurePolicyDefaults\(f \*FailurePolicyConfig\)](<#NormalizeFailurePolicyDefaults>)
 - [func NormalizeOTLPMetricsDefaults\(c \*OTLPMetricsConfig\)](<#NormalizeOTLPMetricsDefaults>)
+- [func NormalizeOTLPTracesDefaults\(c \*OTLPTracesConfig\)](<#NormalizeOTLPTracesDefaults>)
 - [func NormalizePlansDefaults\(c \*PlansConfig\)](<#NormalizePlansDefaults>)
 - [func NormalizeQuotaRetryDefaults\(q \*QuotaRetryConfig\)](<#NormalizeQuotaRetryDefaults>)
 - [func NormalizeRuntimeDefaults\(rc \*RuntimeConfig\)](<#NormalizeRuntimeDefaults>)
+- [func NormalizeTierPolicyDefaults\(tp \*TierPolicyConfig\)](<#NormalizeTierPolicyDefaults>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
 - [func ParseLogLevelValue\(level string\) \(slog.Level, bool\)](<#ParseLogLevelValue>)
 - [func ReadMainConfig\(\) \(string, bool, error\)](<#ReadMainConfig>)
@@ -125,17 +133,15 @@ Package config provides configuration loading and validation for meept.
   - [func NewConfigSyncer\(cfg ConfigSyncConfig, nodeID, baseDir string, logger \*slog.Logger\) \(\*ConfigSyncer, error\)](<#NewConfigSyncer>)
   - [func \(s \*ConfigSyncer\) LastAppliedCommit\(\) string](<#ConfigSyncer.LastAppliedCommit>)
   - [func \(s \*ConfigSyncer\) LastCommitHash\(\) string](<#ConfigSyncer.LastCommitHash>)
-  - [func \(s \*ConfigSyncer\) NodeID\(\) string](<#ConfigSyncer.NodeID>)
   - [func \(s \*ConfigSyncer\) PullSchedule\(\) time.Duration](<#ConfigSyncer.PullSchedule>)
   - [func \(s \*ConfigSyncer\) PushLocalChanges\(ctx context.Context, message string\) error](<#ConfigSyncer.PushLocalChanges>)
   - [func \(s \*ConfigSyncer\) RegisterReloadHook\(path string, fn ReloadFunc\)](<#ConfigSyncer.RegisterReloadHook>)
-  - [func \(s \*ConfigSyncer\) ReloadRegistry\(\) \*ReloadRegistry](<#ConfigSyncer.ReloadRegistry>)
   - [func \(s \*ConfigSyncer\) RepoURL\(\) string](<#ConfigSyncer.RepoURL>)
-  - [func \(s \*ConfigSyncer\) SetBaseDir\(baseDir string\)](<#ConfigSyncer.SetBaseDir>)
   - [func \(s \*ConfigSyncer\) Start\(ctx context.Context\)](<#ConfigSyncer.Start>)
   - [func \(s \*ConfigSyncer\) Status\(\) SyncStatus](<#ConfigSyncer.Status>)
   - [func \(s \*ConfigSyncer\) Stop\(\)](<#ConfigSyncer.Stop>)
 - [type ConflictConfig](<#ConflictConfig>)
+- [type ContextAssemblerConfig](<#ContextAssemblerConfig>)
 - [type ContextDiscoveryConfig](<#ContextDiscoveryConfig>)
 - [type DaemonConfig](<#DaemonConfig>)
 - [type DetectionConfig](<#DetectionConfig>)
@@ -173,18 +179,20 @@ Package config provides configuration loading and validation for meept.
 - [type GitCheckout](<#GitCheckout>)
   - [func NewGitCheckout\(repoURL, checkoutDir string, logger \*slog.Logger\) \(\*GitCheckout, error\)](<#NewGitCheckout>)
   - [func \(g \*GitCheckout\) CommitAndPush\(\_ context.Context, message string\) error](<#GitCheckout.CommitAndPush>)
-  - [func \(g \*GitCheckout\) GetLatestCommit\(\) \(string, error\)](<#GitCheckout.GetLatestCommit>)
   - [func \(g \*GitCheckout\) IsDirty\(\) \(bool, error\)](<#GitCheckout.IsDirty>)
   - [func \(g \*GitCheckout\) Path\(\) string](<#GitCheckout.Path>)
   - [func \(g \*GitCheckout\) Pull\(\_ context.Context\) \(commitHash string, changed bool, err error\)](<#GitCheckout.Pull>)
-  - [func \(g \*GitCheckout\) Repo\(\) \*git.Repository](<#GitCheckout.Repo>)
 - [type GitHubConfig](<#GitHubConfig>)
+- [type GroupsBindingConfig](<#GroupsBindingConfig>)
+- [type GroupsPolicyConfig](<#GroupsPolicyConfig>)
 - [type HTTPHookConfig](<#HTTPHookConfig>)
 - [type HTTPTransportConfig](<#HTTPTransportConfig>)
   - [func \(c HTTPTransportConfig\) ListenAddr\(\) string](<#HTTPTransportConfig.ListenAddr>)
 - [type HermesConfig](<#HermesConfig>)
 - [type HooksConfig](<#HooksConfig>)
 - [type InstructionConfig](<#InstructionConfig>)
+- [type IntakeConfig](<#IntakeConfig>)
+  - [func \(c IntakeConfig\) ValidateEnabled\(\) error](<#IntakeConfig.ValidateEnabled>)
 - [type IsolationConfig](<#IsolationConfig>)
 - [type KnowledgeConfig](<#KnowledgeConfig>)
 - [type LLMAdaptiveTimeoutConfig](<#LLMAdaptiveTimeoutConfig>)
@@ -238,6 +246,7 @@ Package config provides configuration loading and validation for meept.
 - [type OAuthConfig](<#OAuthConfig>)
 - [type OAuthProviderEntry](<#OAuthProviderEntry>)
 - [type OTLPMetricsConfig](<#OTLPMetricsConfig>)
+- [type OTLPTracesConfig](<#OTLPTracesConfig>)
 - [type OrchestratorConfig](<#OrchestratorConfig>)
 - [type OutputFiltersConfig](<#OutputFiltersConfig>)
   - [func \(c \*OutputFiltersConfig\) Validate\(\) error](<#OutputFiltersConfig.Validate>)
@@ -249,6 +258,7 @@ Package config provides configuration loading and validation for meept.
   - [func \(c \*PeerSyncConfig\) IsValidated\(\) bool](<#PeerSyncConfig.IsValidated>)
   - [func \(c \*PeerSyncConfig\) Validate\(\) error](<#PeerSyncConfig.Validate>)
 - [type PersonalityConfig](<#PersonalityConfig>)
+- [type PiiConfig](<#PiiConfig>)
 - [type PiperTTSConfig](<#PiperTTSConfig>)
 - [type PlansApprovalConfig](<#PlansApprovalConfig>)
 - [type PlansConfig](<#PlansConfig>)
@@ -299,6 +309,7 @@ Package config provides configuration loading and validation for meept.
 - [type SecretsProxyConfig](<#SecretsProxyConfig>)
 - [type SecurityConfig](<#SecurityConfig>)
   - [func \(c \*SecurityConfig\) Validate\(\) error](<#SecurityConfig.Validate>)
+- [type SecurityGroupsConfig](<#SecurityGroupsConfig>)
 - [type SelfImproveConfig](<#SelfImproveConfig>)
 - [type SessionAffinityConfig](<#SessionAffinityConfig>)
 - [type SessionConfig](<#SessionConfig>)
@@ -331,6 +342,10 @@ Package config provides configuration loading and validation for meept.
 - [type TaskMemoryConfig](<#TaskMemoryConfig>)
 - [type TelegramConfig](<#TelegramConfig>)
 - [type TestHarnessConfig](<#TestHarnessConfig>)
+- [type TierPolicyConfig](<#TierPolicyConfig>)
+- [type ToolProviderEntry](<#ToolProviderEntry>)
+- [type ToolProvidersConfig](<#ToolProvidersConfig>)
+  - [func \(c ToolProvidersConfig\) EnabledNames\(all \[\]string\) \[\]string](<#ToolProvidersConfig.EnabledNames>)
 - [type ToolingConfig](<#ToolingConfig>)
 - [type TranscriptConfig](<#TranscriptConfig>)
   - [func DefaultTranscriptConfig\(\) TranscriptConfig](<#DefaultTranscriptConfig>)
@@ -347,6 +362,13 @@ Package config provides configuration loading and validation for meept.
 
 
 ## Constants
+
+<a name="DefaultOTLPTracesSampleRate"></a>Defaults for metrics.otlp\_traces.
+
+	const (
+	    DefaultOTLPTracesSampleRate   = 1.0
+	    DefaultOTLPTracesExportIntrvl = 5 * time.Second
+	)
 
 <a name="PresetDevelopment"></a>Preset name constants used throughout the codebase.
 
@@ -466,6 +488,14 @@ Package config provides configuration loading and validation for meept.
 
 	const DefaultHomeRel = ".meept"
 
+<a name="DefaultOTLPTracesEndpoint"></a>DefaultOTLPTracesEndpoint is the base URL used when Endpoint is empty at normalization time \(a plain OTLP receiver; a Langfuse install would point at http://langfuse:3000/api/public/otel\).
+
+	const DefaultOTLPTracesEndpoint = "http://localhost:4318"
+
+<a name="DefaultTierPolicyMaxDepth"></a>DefaultTierPolicyMaxDepth is the per\-request degradation\-depth limit llm.tiers.max\_depth takes when the policy is enabled and max\_depth is unset/zero \(llm\-serving\-tiers tree leaf 01, Contract C1: "default 2 when Enabled"\). Inactive while disabled: a zero\-value config keeps MaxDepth 0 so no tier logic can fire.
+
+	const DefaultTierPolicyMaxDepth = 2
+
 <a name="EnvMeeptHome"></a>EnvMeeptHome is the environment variable that overrides the meept home directory. When set \(non\-empty after expansion\), every meept component — daemon, CLI, TUI, config loaders — resolves the home directory to it. When unset, the default is $HOME/.meept.
 
 	const EnvMeeptHome = "MEEPT_HOME"
@@ -576,12 +606,14 @@ IsDialectToolHint reports whether hint is legal in a plan\-dialect draft.
 
 LoadJSON5 reads a JSON5 file, expands environment variables, standardizes to JSON, and unmarshals into v.
 
-<a name="LoadJSON5WithDefault"></a>
-## func LoadJSON5WithDefault
+<a name="LoadJSON5Bytes"></a>
+## func LoadJSON5Bytes
 
-	func LoadJSON5WithDefault(path string, v any) error
+	func LoadJSON5Bytes(data []byte, v any) error
 
-LoadJSON5WithDefault loads JSON5 from path, or returns default if not found.
+LoadJSON5Bytes parses JSON5 config content \(already env\-expanded\) into v, applying the same duration preprocessing and JSON5 standardization as LoadJSON5. It exists so Load can try the JSON5 grammar first \(the shipped template format\) and fall back to legacy TOML without re\-reading the file.
+
+Unlike LoadJSON5, this path also quotes JSON5 bare \(unquoted\) object keys before standardizing: JSON5 proper allows them, hujson does not. Bare\-key tolerance lives here and not in LoadJSON5 so existing callers keep their exact strictness; meept.json5 itself quotes every key.
 
 <a name="MainConfigPath"></a>
 ## func MainConfigPath
@@ -613,12 +645,26 @@ MeeptPath joins elem onto MeeptHome\(\).
 
 NormalizeAgentGuardsDefaults fills ship\-on defaults for zero\-valued fields.
 
+<a name="NormalizeClusterSecurityDefaults"></a>
+## func NormalizeClusterSecurityDefaults
+
+	func NormalizeClusterSecurityDefaults(c *ClusterConfig)
+
+NormalizeClusterSecurityDefaults enforces the leaf\-08 / C9 conditional flip: a cluster\-ENABLED config whose security section is zero\-valued \(the operator enabled the cluster but wrote no security keys\) gets require\_node\_signatures=true and the rotation\-days default — an unsigned or unverifiable dispatch is then rejected, never executed. A config carrying an EXPLICIT false is honored \(opt\-out preserved\); because a struct zero\-value is indistinguishable from an absent key, the flip is anchored on DefaultConfig's true baseline: user text that sets false overwrites it during unmarshal, user text that omits the key keeps the default, and this seam re\-arms only what a zero\-value merge squashed. Applied at the config load boundary \(Load / LoadJSON5Config\) so every consumer sees final values.
+
 <a name="NormalizeContextDiscoveryDefaults"></a>
 ## func NormalizeContextDiscoveryDefaults
 
 	func NormalizeContextDiscoveryDefaults(c *ContextDiscoveryConfig)
 
 NormalizeContextDiscoveryDefaults clamps invalid context\_discovery values to defaults: negative durations become the field default; zero means unset and takes the default. Idempotent on valid values.
+
+<a name="NormalizeDecisionLogDefaults"></a>
+## func NormalizeDecisionLogDefaults
+
+	func NormalizeDecisionLogDefaults(g *SecurityGroupsConfig)
+
+NormalizeDecisionLogDefaults clamps security.groups.decision\_log\_level to a valid level \(agent\-groups branch\-01 leaf 02\): empty and invalid values fall back to "deny\-warn"; "deny\-warn" | "all" | "off" pass through. Applied at the config Load boundary so the executor seam never sees an undefined level.
 
 <a name="NormalizeEvolverDefaults"></a>
 ## func NormalizeEvolverDefaults
@@ -641,6 +687,13 @@ NormalizeFailurePolicyDefaults clamps invalid failure\_policy values to defaults
 
 NormalizeOTLPMetricsDefaults clamps invalid metrics.otlp values to defaults: zero/negative interval takes the 30s default; an empty endpoint takes http://localhost:4317. Enabled is left as\-is — default false is the documented opt\-in posture. Idempotent on valid values.
 
+<a name="NormalizeOTLPTracesDefaults"></a>
+## func NormalizeOTLPTracesDefaults
+
+	func NormalizeOTLPTracesDefaults(c *OTLPTracesConfig)
+
+NormalizeOTLPTracesDefaults clamps invalid metrics.otlp\_traces values to defaults: an empty endpoint takes http://localhost:4318, a sample rate outside \(0, 1\] clamps \(0 \-\> disabled\-by\-rate is NOT applied — the documented way to disable is enabled=false, so a zero rate means the default 1.0; negatives and \>1 clamp to 1.0\), and a zero/negative export interval takes the 5s default. Enabled is left as\-is — default false is the documented opt\-in posture. Idempotent on valid values.
+
 <a name="NormalizePlansDefaults"></a>
 ## func NormalizePlansDefaults
 
@@ -661,6 +714,13 @@ NormalizeQuotaRetryDefaults clamps invalid quota\_retry values to defaults: nega
 	func NormalizeRuntimeDefaults(rc *RuntimeConfig)
 
 NormalizeRuntimeDefaults fills safe defaults for [runtime](<https://pkg.go.dev/runtime/>).env\_policy: empty Mode becomes "allowlist"; empty DenyGlobs become the standard credential\-glob set; empty Allowlist gets a small non\-secret convenience set. Explicit user values are preserved untouched.
+
+<a name="NormalizeTierPolicyDefaults"></a>
+## func NormalizeTierPolicyDefaults
+
+	func NormalizeTierPolicyDefaults(tp *TierPolicyConfig)
+
+NormalizeTierPolicyDefaults clamps the tier policy to defaults at the load boundary: when Enabled, a non\-positive MaxDepth takes DefaultTierPolicyMaxDepth and a nil TurnCeilings map becomes empty \(never nil, so consumers can index safely\). When disabled, MaxDepth stays 0 — the policy is inactive and must not carry an effective limit. SignalDegraded is left as\-is: its default\-true value is applied by DefaultConfig\(\) \(which load unmarshal runs onto\), and an explicit signal\_degraded = false must survive every load. Idempotent.
 
 <a name="ParseLogLevel"></a>
 ## func ParseLogLevel
@@ -1044,6 +1104,11 @@ AgentConfig holds agent loop settings.
 	    // Tools configures tool-call handling for the agent loop, including
 	    // grammar-constrained (GBNF) tool calling.
 	    Tools AgentToolsConfig `json:"tools" toml:"tools"`
+	    // ContextAssembler configures allocator-derived per-section context
+	    // budgets (context-memory-engine leaf 03). Opt-in: zero value keeps
+	    // every loop budget path byte-identical to the pre-assembler
+	    // behavior.
+	    ContextAssembler ContextAssemblerConfig `json:"context_assembler" toml:"context_assembler"`
 	}
 
 <a name="AgentGuardsConfig"></a>
@@ -1702,6 +1767,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    Agents              AgentsConfig              `json:"agents"             toml:"agents"`
 	    Agent               AgentConfig               `json:"agent"              toml:"agent"`
 	    Security            SecurityConfig            `json:"security"           toml:"security"`
+	    ToolProviders       ToolProvidersConfig       `json:"tool_providers"     toml:"tool_providers"`
 	    Scheduler           SchedulerConfig           `json:"scheduler"          toml:"scheduler"`
 	    Queue               QueueConfig               `json:"queue"              toml:"queue"`
 	    Workers             WorkersConfig             `json:"workers"            toml:"workers"`
@@ -1753,6 +1819,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    Hermes              HermesConfig              `json:"hermes"               toml:"hermes"`
 	    Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 	    GitHub              GitHubConfig              `json:"github"               toml:"github"`
+	    Intake              IntakeConfig              `json:"intake"               toml:"intake"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -1760,7 +1827,7 @@ Config is the root configuration structure loaded from meept.toml.
 
 	func DefaultConfig() *Config
 
-DefaultConfig returns a configuration with sensible defaults.
+DefaultConfig returns a configuration with sane defaults.
 
 <a name="Load"></a>
 ### func Load
@@ -1903,13 +1970,6 @@ LastAppliedCommit returns the commit hash of the most recent successfully merged
 
 LastCommitHash returns the latest known commit hash.
 
-<a name="ConfigSyncer.NodeID"></a>
-### func \(\*ConfigSyncer\) NodeID
-
-	func (s *ConfigSyncer) NodeID() string
-
-NodeID returns the node identifier used for per\-node overrides.
-
 <a name="ConfigSyncer.PullSchedule"></a>
 ### func \(\*ConfigSyncer\) PullSchedule
 
@@ -1933,26 +1993,12 @@ The message argument becomes the commit message. If empty, a default "auto: conf
 
 RegisterReloadHook adds a callback invoked when a specific config file path changes.
 
-<a name="ConfigSyncer.ReloadRegistry"></a>
-### func \(\*ConfigSyncer\) ReloadRegistry
-
-	func (s *ConfigSyncer) ReloadRegistry() *ReloadRegistry
-
-ReloadRegistry is exported for use in daemon wiring.
-
 <a name="ConfigSyncer.RepoURL"></a>
 ### func \(\*ConfigSyncer\) RepoURL
 
 	func (s *ConfigSyncer) RepoURL() string
 
 RepoURL returns the configured repo URL.
-
-<a name="ConfigSyncer.SetBaseDir"></a>
-### func \(\*ConfigSyncer\) SetBaseDir
-
-	func (s *ConfigSyncer) SetBaseDir(baseDir string)
-
-SetBaseDir sets the config base directory after creation.
 
 <a name="ConfigSyncer.Start"></a>
 ### func \(\*ConfigSyncer\) Start
@@ -1990,6 +2036,27 @@ ConflictConfig gates LLM conflict detection on the L1 claim\-extraction path \(t
 	    TopK int `json:"top_k" toml:"top_k"`
 	    // MaxBatch caps candidates per conflict LLM call. Default 20.
 	    MaxBatch int `json:"max_batch" toml:"max_batch"`
+	}
+
+<a name="ContextAssemblerConfig"></a>
+## type ContextAssemblerConfig
+
+ContextAssemblerConfig configures the context assembler \(\[agent.context\_assembler\], context\-memory\-engine leaf 01\-context\-assembler/03\-integration.md\).
+
+Opt\-in \(docs/agents/opt\-in\-defaults.md\): Enabled defaults FALSE. The zero value keeps every loop budget path byte\-identical to the pre\-assembler behavior: statics \(IterationTokenBudget / DefaultConversationTokenBudget / MaxMemoryContextTokens\) and the unbounded artifact\-doc builder stay authoritative until this switch is flipped AND a real context window is discovered.
+
+Orchestrator merge note \(sibling owns schema.go\): attach this struct to AgentConfig with the single mechanical field
+
+	ContextAssembler ContextAssemblerConfig `json:"context_assembler" toml:"context_assembler"`
+	
+
+so the config key agent.context\_assembler.enabled resolves through the generic \`meept config get\` surface.
+
+	type ContextAssemblerConfig struct {
+	    // Enabled turns on allocator-derived budgets (memory tiers,
+	    // iteration, conversation, dynamic docs) resolved from the model's
+	    // discovered context window. Default false.
+	    Enabled bool `json:"enabled" toml:"enabled"`
 	}
 
 <a name="ContextDiscoveryConfig"></a>
@@ -2036,11 +2103,21 @@ DaemonConfig holds daemon\-specific settings.
 	    // process CWD (AGENTS.md). Empty (the default) means "no last resort":
 	    // such a turn fails actionably with tools.ErrNoWorkingDir instead of
 	    // writing relative paths somewhere unintended.
-	    DefaultWorkingDir string               `json:"default_working_dir"   toml:"default_working_dir"`
-	    Uploads           UploadsConfig        `json:"uploads"              toml:"uploads"`
-	    UserInstructions  InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
-	    Verification      VerificationDefaults `json:"verification"         toml:"verification"`
-	    OutputFilters     OutputFiltersConfig  `json:"output_filters"       toml:"output_filters"`
+	    DefaultWorkingDir string `json:"default_working_dir"   toml:"default_working_dir"`
+	    // TurnJournalEnabled opts in to the turn-level durable journal
+	    // (internal/agent/turnjournal, docs/plans/20261031-turn-journal):
+	    // an append-only step ledger over <DataDir>/turnjournal.db so a
+	    // daemon killed mid-turn resumes at the NEXT STEP instead of
+	    // re-running the job from step 1. Default FALSE (zero value):
+	    // opt-in per docs/agents/opt-in-defaults.md - flipping the default
+	    // is a product decision. When false the store is never opened and
+	    // legacy behaviour is byte-identical. Wiring lands in leaves
+	    // 02/03 of that tree; this field is respected nowhere else yet.
+	    TurnJournalEnabled bool                 `json:"turn_journal_enabled"   toml:"turn_journal_enabled"`
+	    Uploads            UploadsConfig        `json:"uploads"              toml:"uploads"`
+	    UserInstructions   InstructionConfig    `json:"user_instructions"    toml:"user_instructions"`
+	    Verification       VerificationDefaults `json:"verification"         toml:"verification"`
+	    OutputFilters      OutputFiltersConfig  `json:"output_filters"       toml:"output_filters"`
 	}
 
 <a name="DetectionConfig"></a>
@@ -2536,13 +2613,6 @@ NewGitCheckout creates a new GitCheckout and performs an initial shallow clone i
 
 CommitAndPush creates a commit from working tree changes and attempts push.
 
-<a name="GitCheckout.GetLatestCommit"></a>
-### func \(\*GitCheckout\) GetLatestCommit
-
-	func (g *GitCheckout) GetLatestCommit() (string, error)
-
-GetLatestCommit returns the latest commit hash in the repo.
-
 <a name="GitCheckout.IsDirty"></a>
 ### func \(\*GitCheckout\) IsDirty
 
@@ -2564,13 +2634,6 @@ Path returns the checkout directory.
 
 Pull attempts a shallow pull. Returns \(commitHash, changed, error\). If the working tree is dirty, pulls are skipped to avoid local changes overwriting.
 
-<a name="GitCheckout.Repo"></a>
-### func \(\*GitCheckout\) Repo
-
-	func (g *GitCheckout) Repo() *git.Repository
-
-Repo returns the underlying git.Repository, if available.
-
 <a name="GitHubConfig"></a>
 ## type GitHubConfig
 
@@ -2582,6 +2645,45 @@ GitHubConfig configures the GitHub PR/CI tool set \(\[github\]\). Disabled by de
 	    DefaultOwner string `json:"default_owner" toml:"default_owner"`
 	    DefaultRepo  string `json:"default_repo"  toml:"default_repo"`
 	    BaseURL      string `json:"base_url,omitempty" toml:"base_url,omitempty"`
+	}
+
+<a name="GroupsBindingConfig"></a>
+## type GroupsBindingConfig
+
+GroupsBindingConfig is one \[security.groups.bindings\] entry \(C3 Binding\).
+
+	type GroupsBindingConfig struct {
+	    // Subject is "agent:<id>", "group:<name>", or "user:<id>".
+	    Subject string `json:"subject" toml:"subject"`
+	    // Policy names the policy applied to the subject (must exist).
+	    Policy string `json:"policy" toml:"policy"`
+	    // Scope is "daemon" or "project:<id>".
+	    Scope string `json:"scope,omitempty" toml:"scope"`
+	}
+
+<a name="GroupsPolicyConfig"></a>
+## type GroupsPolicyConfig
+
+GroupsPolicyConfig is one \[security.groups.policies\] entry \(C3 Policy\).
+
+	type GroupsPolicyConfig struct {
+	    // Name uniquely identifies the policy; bindings reference it.
+	    Name string `json:"name" toml:"name"`
+	    // ToolsAllowed lists registered tool names the policy grants.
+	    ToolsAllowed []string `json:"tools_allowed,omitempty" toml:"tools_allowed"`
+	    // ToolsDenied lists registered tool names the policy revokes; deny
+	    // beats allow (D4).
+	    ToolsDenied []string `json:"tools_denied,omitempty" toml:"tools_denied"`
+	    // MemoryMaxScope caps memory retrieval: "" (unrestricted),
+	    // "project", "user", or "global". The narrowest wins across groups.
+	    MemoryMaxScope string `json:"memory_max_scope,omitempty" toml:"memory_max_scope"`
+	    // FSRoots lists additional path-fence roots for the group's members.
+	    FSRoots []string `json:"fs_roots,omitempty" toml:"fs_roots"`
+	    // NetworkClass restricts outbound network access:
+	    // "" / "unrestricted", "allowlist", or "none". Most restrictive wins.
+	    NetworkClass string `json:"network_class,omitempty" toml:"network_class"`
+	    // AllowedModels restricts model aliases (empty = unrestricted).
+	    AllowedModels []string `json:"allowed_models,omitempty" toml:"allowed_models"`
 	}
 
 <a name="HTTPHookConfig"></a>
@@ -2727,6 +2829,44 @@ InstructionConfig holds user instruction automation settings.
 	    Enabled bool `json:"enabled"       toml:"enabled"`
 	}
 
+<a name="IntakeConfig"></a>
+## type IntakeConfig
+
+IntakeConfig configures the GitHub ticket intake \(\[intake\]\): a poller watches a repo for label\-gated tickets and maps them to employee goals. Opt\-in — disabled by default, no poller is scheduled when Enabled=false. PollInterval is declared as a STRING \("5m"\) and parsed at wiring time; it is registered in the json5 loader's stringDurationKeys exemption so the duration\-rewrite pass never converts it to a nanosecond integer.
+
+	type IntakeConfig struct {
+	    // Enabled turns on the intake poller (default: false, opt-in).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // DefaultEmployee is the employee goals are created for — REQUIRED
+	    // when Enabled (see ValidateEnabled).
+	    DefaultEmployee string `json:"default_employee" toml:"default_employee"`
+	    // PollInterval is the poll cadence as a Go duration string
+	    // (default "5m"). Held as a string; parsed at wiring time.
+	    PollInterval string `json:"poll_interval" toml:"poll_interval"`
+	    // WatchRepo is the "owner/repo" repository polled for tickets —
+	    // REQUIRED when Enabled (see ValidateEnabled).
+	    WatchRepo string `json:"watch_repo" toml:"watch_repo"`
+	    // RequiredLabels are the labels a ticket must carry to qualify
+	    // (default ["factory"]).
+	    RequiredLabels []string `json:"required_labels" toml:"required_labels"`
+	    // DoneLabel marks a ticket done after write-back
+	    // (default "factory:done").
+	    DoneLabel string `json:"done_label" toml:"done_label"`
+	    // GateCommand is an optional quality-gate command attached to
+	    // goals created by intake.
+	    GateCommand string `json:"gate_command" toml:"gate_command"`
+	    // ProjectNumber is a GitHub Projects V2 project number for
+	    // ticket projection; 0 = projection disabled.
+	    ProjectNumber int64 `json:"project_number" toml:"project_number"`
+	}
+
+<a name="IntakeConfig.ValidateEnabled"></a>
+### func \(IntakeConfig\) ValidateEnabled
+
+	func (c IntakeConfig) ValidateEnabled() error
+
+ValidateEnabled checks the REQUIRED\-when\-enabled fields: it names EVERY missing one so the operator can fix the config in one pass. No\-op when Enabled=false.
+
 <a name="IsolationConfig"></a>
 ## type IsolationConfig
 
@@ -2813,9 +2953,16 @@ LLMConfig holds LLM configuration including budget, broker, and metrics.
 	    // inference providers (session-affinity tree, Contract 1). Default
 	    // ON: unknown headers are ignored by gateways that do not support
 	    // them, so sending is safe by default.
-	    SessionAffinity SessionAffinityConfig  `json:"session_affinity" toml:"session_affinity"`
-	    Metrics         LLMMetricsConfig       `json:"metrics"           toml:"metrics"`
-	    Cache           LLMSimpleFeatureConfig `json:"cache"             toml:"cache"`
+	    SessionAffinity SessionAffinityConfig `json:"session_affinity" toml:"session_affinity"`
+	    // Tiers configures the serving-tier policy (llm-serving-tiers tree
+	    // leaf 01, Contract C1): a per-request degradation-depth limit plus
+	    // per-capability per-turn ceilings on alias rotation, and the
+	    // degraded-tier signaling keys. Default OFF (opt-in per
+	    // docs/agents/opt-in-defaults.md): zero behavior change and no
+	    // metadata keys when disabled.
+	    Tiers   TierPolicyConfig       `json:"tiers"             toml:"tiers"`
+	    Metrics LLMMetricsConfig       `json:"metrics"           toml:"metrics"`
+	    Cache   LLMSimpleFeatureConfig `json:"cache"             toml:"cache"`
 	}
 
 <a name="LLMContextFirewallConfig"></a>
@@ -3331,6 +3478,11 @@ MetricsConfig configures top\-level metrics export \(JSON5 key: "metrics"\). The
 	    // OTLP configures the optional OTLP metrics exporter. Default OFF:
 	    // metrics stay in the per-host SQLite store until explicitly opted in.
 	    OTLP OTLPMetricsConfig `json:"otlp" toml:"otlp"`
+	
+	    // OTLPTraces configures the optional OTLP trace exporter (leaf 07:
+	    // chat turns and task steps as spans). Default OFF — see
+	    // OTLPTracesConfig (defined in otlp_traces.go).
+	    OTLPTraces OTLPTracesConfig `json:"otlp_traces" toml:"otlp_traces"`
 	}
 
 <a name="Model"></a>
@@ -3535,6 +3687,32 @@ OTLPMetricsConfig configures the OTLP metrics exporter \(metrics.otlp\). Default
 	    // Interval is the batch export cadence. Zero/negative means the 30s
 	    // default (normalized at the config load boundary).
 	    Interval time.Duration `json:"interval" toml:"interval"`
+	}
+
+<a name="OTLPTracesConfig"></a>
+## type OTLPTracesConfig
+
+OTLPTracesConfig configures the opt\-in OTLP/HTTP trace exporter \(metrics.otlp\_traces\). Disabled by default: no spans are produced, no network calls are made, and boot logs exactly one Warn line stating that trace export is disabled. When enabled, chat turns and task steps become OTLP/HTTP protobuf spans POSTed to \<endpoint\>/v1/traces \(stdlib net/http only — no otel SDK dependency; internal/metrics.OTLPTraceHTTPSink is the bridge\). Aimed at \(but not coupled to\) self\-hosted Langfuse v3\+, which accepts OTLP traces at /api/public/otel with the "x\-langfuse\-ingestion\-version: 4" header \(pass it via Headers\).
+
+	type OTLPTracesConfig struct {
+	    // Enabled turns the trace exporter on. Default false — opt-in.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // Endpoint is the OTLP receiver base URL (spans POST to
+	    // <endpoint>/v1/traces). Default "http://localhost:4318" when
+	    // enabled with no explicit value (normalized at the load boundary).
+	    Endpoint string `json:"endpoint" toml:"endpoint"`
+	    // Headers are extra HTTP headers attached to every export request
+	    // (auth, x-langfuse-ingestion-version: 4, ...). Secret material
+	    // arrives ONLY here and is never logged.
+	    Headers map[string]string `json:"headers,omitempty" toml:"headers,omitempty"`
+	    // SampleRate is the fraction of traces exported, 0..1. Default 1.0;
+	    // values outside the range clamp to it. The decision is
+	    // deterministic per trace ID, so all spans of one trace sample
+	    // identically.
+	    SampleRate float64 `json:"sample_rate,omitempty" toml:"sample_rate,omitempty"`
+	    // ExportInterval is the batch flush cadence. Zero/negative means the
+	    // 5s default (normalized at the config load boundary).
+	    ExportInterval time.Duration `json:"export_interval,omitempty" toml:"export_interval,omitempty"`
 	}
 
 <a name="OrchestratorConfig"></a>
@@ -3774,6 +3952,29 @@ PersonalityConfig holds personality memory settings.
 	    UpdateIntervalConversations int  `json:"update_interval_conversations" toml:"update_interval_conversations"`
 	}
 
+<a name="PiiConfig"></a>
+## type PiiConfig
+
+PiiConfig is the \[security.pii\] section: the PII unmasking proxy \(detector \-\> \[PII:\<uuid\>\] tokens pre\-LLM, session\-bounded restore at the ScanOutput choke point\). Opt\-in: Enabled defaults false.
+
+	type PiiConfig struct {
+	    // Enabled turns on the pii swap/restore lanes. Default false: no
+	    // masking, no restore, no store open.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // Classes restricts detection to the listed classes (e.g.
+	    // "EMAIL_ADDRESS", "PHONE_NUMBER", "SSN", "CREDIT_CARD", "IPV4",
+	    // "IBAN"). Empty means all default classes (R0 D1).
+	    Classes []string `json:"classes" toml:"classes"`
+	    // RestoreWindow bounds how long a swap row restores (research D4).
+	    // 0 = session lifetime (no expiry).
+	    RestoreWindow time.Duration `json:"restore_window" toml:"restore_window"`
+	    // SecretRestore gates the #XXXX# secret-placeholder restore lane
+	    // (research D6). The obfuscator's maps are process-wide (not
+	    // session-scoped), so this lane is separately opt-in on top of
+	    // Enabled. Default false.
+	    SecretRestore bool `json:"secret_restore" toml:"secret_restore"`
+	}
+
 <a name="PiperTTSConfig"></a>
 ## type PiperTTSConfig
 
@@ -3838,6 +4039,24 @@ PlansConfig holds configuration for the plan system.
 	    // draft-critique-refine flow and seals with provenance
 	    // "planner-self" without a human in the loop.
 	    SelfSealEnabled bool `json:"self_seal_enabled" toml:"self_seal_enabled"`
+	
+	    // FreshCriticEnabled gates the fresh-context evidence critic
+	    // (plan-20261101-fresh-context-critic contract C1; default FALSE -
+	    // ships dark). See
+	    // docs/plans/20261101-fresh-context-critic/master.md contract C1.
+	    FreshCriticEnabled bool `json:"fresh_critic_enabled"   toml:"fresh_critic_enabled"`
+	
+	    // HostileCriticEnabled gates the hostile second-pass critic on a
+	    // different model (plan-20261101-fresh-context-critic contract C1;
+	    // default FALSE - ships dark). See
+	    // docs/plans/20261101-fresh-context-critic/master.md contract C1.
+	    HostileCriticEnabled bool `json:"hostile_critic_enabled" toml:"hostile_critic_enabled"`
+	
+	    // InterviewOptionGates gates the structured interview option objects
+	    // (plan-20261101-fresh-context-critic contract C1; default FALSE -
+	    // ships dark). See
+	    // docs/plans/20261101-fresh-context-critic/master.md contract C1.
+	    InterviewOptionGates bool `json:"interview_option_gates" toml:"interview_option_gates"`
 	}
 
 <a name="PlansConfig.Validate"></a>
@@ -4418,6 +4637,19 @@ SecurityConfig holds security settings.
 	    // Taint tracking for information flow security
 	    Taint TaintConfig `json:"taint" toml:"taint"`
 	
+	    // AgentHandoffMode governs inter-agent handoff defense
+	    // ([security.agent_handoff_mode], R0 decision D3 in
+	    // docs/research/agent-boundary-taint-findings.md):
+	    //   "off"   - no handoff scanning; segment labeling still applied
+	    //   "warn"  (default) - deny-pattern hits inside untrusted handoff
+	    //             segments are logged with provenance; nothing is blocked
+	    //   "block" - a deny-pattern hit on an untrusted handoff segment
+	    //             blocks the handoff with a collaboration error
+	    // Empty or invalid values fall back to "warn" (audit-first rollout;
+	    // flipping to "block" is a product decision per
+	    // docs/agents/opt-in-defaults.md).
+	    AgentHandoffMode string `json:"agent_handoff_mode" toml:"agent_handoff_mode"`
+	
 	    // Path fencing for agent sandboxing
 	    FenceEnabled   bool     `json:"fence_enabled"    toml:"fence_enabled"`
 	    FenceAllowRead []string `json:"fence_allow_read" toml:"fence_allow_read"`
@@ -4429,9 +4661,20 @@ SecurityConfig holds security settings.
 	    // Prefix-keyed allow/ask/deny policy evaluated before tirith scanning.
 	    ShellPermissions ShellPermissionsConfig `json:"shell_permissions" toml:"shell_permissions"`
 	
+	    // Groups holds agent-group permission settings ([security.groups]).
+	    // Leaf 02 of agent-groups branch-01 adds ONLY the decision-log knob;
+	    // the full groups model (members, fs_roots, tools_allowed) is leaf
+	    // 04's struct and will extend this section.
+	    Groups SecurityGroupsConfig `json:"groups" toml:"groups"`
+	
 	    // Egress policy for the secrets proxy ([security.egress]): ordered
 	    // host-suffix/CIDR allow/ask/deny rules consulted before secret injection.
 	    Egress EgressConfig `json:"egress" toml:"egress"`
+	
+	    // PII unmasking proxy ([security.pii]): detect-and-swap pre-LLM with
+	    // restore-on-output. Opt-in: zero value = fully disabled, byte-identical
+	    // daemon behavior.
+	    Pii PiiConfig `json:"pii" toml:"pii"`
 	}
 
 <a name="SecurityConfig.Validate"></a>
@@ -4440,6 +4683,46 @@ SecurityConfig holds security settings.
 	func (c *SecurityConfig) Validate() error
 
 Validate validates the SecurityConfig.
+
+<a name="SecurityGroupsConfig"></a>
+## type SecurityGroupsConfig
+
+SecurityGroupsConfig is the \[security.groups\] section \(C3 groups model\). Owned by leaf 02 \(groups model\) of the agent\-groups tree; leaf 02 of branch\-01 added DecisionLogLevel first so the decision\-audit knob has a defined home from day one.
+
+	type SecurityGroupsConfig struct {
+	    // DecisionLogLevel controls the tool-permission decision audit lines:
+	    //   "deny-warn" (default) — denies at WARN, allows at DEBUG
+	    //   "all"                 — every decision at INFO
+	    //   "off"                 — no decision lines
+	    // Invalid values fall back to "deny-warn" at load time.
+	    DecisionLogLevel string `json:"decision_log_level" toml:"decision_log_level"`
+	
+	    // Policies is the named policy table (C3). A policy bundles tool
+	    // allow/deny lists, the memory scope ceiling ("", "project", "user",
+	    // "global"), additional fence roots, a network class
+	    // ("unrestricted", "allowlist", "none"), and allowed model aliases
+	    // (empty = unrestricted). Deny always beats allow (D4).
+	    Policies []GroupsPolicyConfig `json:"policies" toml:"policies"`
+	
+	    // Bindings attaches policies to subjects. Subject form:
+	    // "agent:<id>", "group:<name>", or "user:<id>"; scope is "daemon" or
+	    // "project:<id>". Referencing an unknown policy fails boot validation.
+	    Bindings []GroupsBindingConfig `json:"bindings" toml:"bindings"`
+	
+	    // DefaultManaged routes agents with NO matching binding through the
+	    // fail-closed "default" policy (D7). Default false: ungrouped agents
+	    // keep the legacy spec-allowlist behavior unchanged. Flipping the
+	    // default is a product decision (docs/agents/opt-in-defaults.md).
+	    DefaultManaged bool `json:"default_managed" toml:"default_managed"`
+	
+	    // AdminAgents lists agent ids allowed to mutate membership via the
+	    // groups.* RPC write gate (C5). Default: ["agent-update"].
+	    AdminAgents []string `json:"admin_agents,omitempty" toml:"admin_agents"`
+	
+	    // AdminUsers lists user ids whose human keys may mutate membership
+	    // (C5 human half of the write gate).
+	    AdminUsers []string `json:"admin_users,omitempty" toml:"admin_users"`
+	}
 
 <a name="SelfImproveConfig"></a>
 ## type SelfImproveConfig
@@ -4981,6 +5264,62 @@ TestHarnessConfig holds test harness settings.
 	    // TimeoutSeconds is the test timeout.
 	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
 	}
+
+<a name="TierPolicyConfig"></a>
+## type TierPolicyConfig
+
+TierPolicyConfig configures the serving\-tier policy \(json5 key: llm.tiers; llm\-serving\-tiers tree leaf 01, Contract C1\). It bounds how far alias rotation may degrade within one request and controls the degraded\-tier signaling keys written into per\-step response metadata.
+
+Zero\-value semantics: Load/LoadJSON5Config unmarshal user config ONTO DefaultConfig\(\), so an unset section inherits the defaults below. Enabled defaults FALSE \(opt\-in per docs/agents/opt\-in\-defaults.md\); while disabled every field is inert and zero bytes of metadata change. SignalDegraded defaults true — but is only meaningful once Enabled is true, so the default\-on value never violates the default\-off posture.
+
+	type TierPolicyConfig struct {
+	    // Enabled toggles the whole tier policy: depth ceilings in the
+	    // alias-rotation path AND metadata signaling. Default false.
+	    Enabled bool `json:"enabled"          toml:"enabled"`
+	    // MaxDepth is the per-request degradation limit: the rotation may
+	    // dispatch at most MaxDepth+1 members (primary + MaxDepth
+	    // degradations); the next hop surfaces the typed floor error.
+	    // Zero/unset takes DefaultTierPolicyMaxDepth when Enabled; stays
+	    // inactive while disabled. Default 2 when enabled.
+	    MaxDepth int `json:"max_depth"        toml:"max_depth"`
+	    // TurnCeilings maps a capability name (e.g. "small") to the
+	    // per-turn maximum TOTAL degradations for turns resolving that
+	    // capability. Absent/zero entries fall back to MaxDepth. Counters
+	    // live on the request context — they reset on every turn and are
+	    // never shared across concurrent turns.
+	    TurnCeilings map[string]int `json:"turn_ceilings"    toml:"turn_ceilings"`
+	    // SignalDegraded controls whether the llm_tier / llm_tier_degraded /
+	    // llm_tier_depth keys are written into per-step response metadata.
+	    // Only consulted when Enabled is true. Default true when enabled.
+	    SignalDegraded bool `json:"signal_degraded" toml:"signal_degraded"`
+	}
+
+<a name="ToolProviderEntry"></a>
+## type ToolProviderEntry
+
+ToolProviderEntry is one provider's configuration. Enabled is a pointer so an absent key stays distinct from an explicit value; nil \(or a missing map entry\) means enabled.
+
+	type ToolProviderEntry struct {
+	    Enabled *bool `json:"enabled,omitempty" toml:"enabled,omitempty"`
+	}
+
+<a name="ToolProvidersConfig"></a>
+## type ToolProvidersConfig
+
+ToolProvidersConfig is the \[tool\_providers\] block in meept.json5: per\-provider enable/disable for the compiled\-in tool provider seam \(internal/toolprov\). Absent map or absent entry = enabled \(default\-true: migrated native groups keep working on existing installs\). Explicit enabled=false turns a provider off.
+
+Names not known to the daemon are NOT a config error: they pass through EnabledNames and toolprov.RegisterAll rejects them with the known\-names list. internal/config never imports internal/toolprov \- the daemon joins the two by passing toolprov.Names\(\) as \`all\`.
+
+	type ToolProvidersConfig struct {
+	    Providers map[string]ToolProviderEntry `json:"providers" toml:"providers"`
+	}
+
+<a name="ToolProvidersConfig.EnabledNames"></a>
+### func \(ToolProvidersConfig\) EnabledNames
+
+	func (c ToolProvidersConfig) EnabledNames(all []string) []string
+
+EnabledNames maps the full provider universe \`all\` \(typically toolprov.Names\(\)\) to the enabled subset, sorted. A name is enabled unless its config entry explicitly sets enabled=false. Unknown names pass through; RegisterAll rejects them downstream.
 
 <a name="ToolingConfig"></a>
 ## type ToolingConfig

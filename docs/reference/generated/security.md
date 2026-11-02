@@ -4,6 +4,12 @@
 
 	import "github.com/caimlas/meept/internal/security"
 
+agent\_boundary.go implements the inter\-agent deny\-pattern boundary \(plan: docs/plans/20261031\-agent\-boundary\-hardening/01\-inter\-agent\-taint/ 02\-driver\-wiring.md, contract C4\-A; research decision D2 in docs/research/agent\-boundary\-taint\-findings.md\).
+
+The pattern set is deliberately narrow and PHRASE\-LEVEL \(OWASP prompt injection cheat sheet: single\-word triggers produce documented false positives\). It covers exactly the four D2 classes and nothing else: no jailbreak personas, no content\-policy classes, no single suspicious words. It is pattern\-level only \-\- no LLM classifier here.
+
+Callers scan only UNTRUSTED\-SEGMENT content \(raw peer output\). Driver framing text is never passed here, so legitimate instructions the driver itself authored can never trip a pattern.
+
 Package security: declarative shell command permission tables.
 
 The permission table provides prefix\-keyed allow/ask/deny policy that is evaluated BEFORE tirith pattern scanning. Tirith detects dangerous PATTERNS; the table expresses operator POLICY \("git push always asks; rm \-rf always denies"\). A table match short\-circuits; an "allow" still runs tirith as defense\-in\-depth.
@@ -59,6 +65,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(e \*Engine\) RecordOverride\(action, pattern, decision, reason, conversationID string, maxUses, expiresDays int\) \(int64, error\)](<#Engine.RecordOverride>)
   - [func \(e \*Engine\) RemovePreExecChecker\(agentID string\)](<#Engine.RemovePreExecChecker>)
   - [func \(e \*Engine\) SetFenceChecker\(fc \*FenceChecker\)](<#Engine.SetFenceChecker>)
+  - [func \(e \*Engine\) SetGateAskCapture\(c GateAskCapture\)](<#Engine.SetGateAskCapture>)
   - [func \(e \*Engine\) SetPermissionTable\(pt \*PermissionTable\)](<#Engine.SetPermissionTable>)
   - [func \(e \*Engine\) SetPreExecChecker\(agentID string, checker PreExecChecker\)](<#Engine.SetPreExecChecker>)
 - [type FenceChecker](<#FenceChecker>)
@@ -71,6 +78,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(fc \*FenceChecker\) Valid\(\) bool](<#FenceChecker.Valid>)
 - [type FenceConfig](<#FenceConfig>)
 - [type FinancialPattern](<#FinancialPattern>)
+- [type GateAskCapture](<#GateAskCapture>)
 - [type InjectionMatch](<#InjectionMatch>)
 - [type InputSanitizer](<#InputSanitizer>)
   - [func NewInputSanitizer\(strictness StrictnessLevel\) \*InputSanitizer](<#NewInputSanitizer>)
@@ -81,6 +89,12 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(v \*InstructionValidator\) IsHighRiskCommand\(cmd string\) bool](<#InstructionValidator.IsHighRiskCommand>)
   - [func \(v \*InstructionValidator\) IsKnownSafeCommand\(cmd string\) bool](<#InstructionValidator.IsKnownSafeCommand>)
   - [func \(v \*InstructionValidator\) Validate\(instr \*preferences.ParsedInstruction\) ValidationResult](<#InstructionValidator.Validate>)
+- [type InterAgentBoundary](<#InterAgentBoundary>)
+  - [func NewInterAgentBoundary\(logger \*slog.Logger\) \*InterAgentBoundary](<#NewInterAgentBoundary>)
+  - [func \(b \*InterAgentBoundary\) InspectHandoff\(recipient, content string\) \(blocked bool, reason string\)](<#InterAgentBoundary.InspectHandoff>)
+  - [func \(b \*InterAgentBoundary\) InspectHandoffContent\(content string\) \[\]InterAgentBoundaryMatch](<#InterAgentBoundary.InspectHandoffContent>)
+- [type InterAgentBoundaryMatch](<#InterAgentBoundaryMatch>)
+- [type InterAgentBoundaryPattern](<#InterAgentBoundaryPattern>)
 - [type Message](<#Message>)
 - [type Orchestrator](<#Orchestrator>)
   - [func NewOrchestrator\(cfg OrchestratorConfig, logger \*slog.Logger\) \*Orchestrator](<#NewOrchestrator>)
@@ -174,6 +188,19 @@ Package security provides the security engine with SQLite\-backed decision makin
 
 
 ## Constants
+
+<a name="BoundaryClassRoleMarker"></a>D2 deny classes.
+
+	const (
+	    // D2 class 1: forged role/control markers.
+	    BoundaryClassRoleMarker = "forged_role_marker"
+	    // D2 class 2: instruction-override verbs.
+	    BoundaryClassOverrideVerb = "instruction_override"
+	    // D2 class 3: agent impersonation / control-verb forgery.
+	    BoundaryClassControlForgery = "control_verb_forgery"
+	    // D2 class 4: exfiltration directives.
+	    BoundaryClassExfiltration = "exfiltration_directive"
+	)
 
 <a name="ActionShellExecute"></a>Tool action name constants.
 
@@ -605,6 +632,13 @@ RemovePreExecChecker unregisters the PreExecChecker for the given agent ID. An e
 
 SetFenceChecker sets the fence checker for path boundary enforcement. Pass nil to disable fencing for this session. The typed\-nil guard prevents accidental interface\-nil assignment.
 
+<a name="Engine.SetGateAskCapture"></a>
+### func \(\*Engine\) SetGateAskCapture
+
+	func (e *Engine) SetGateAskCapture(c GateAskCapture)
+
+SetGateAskCapture attaches the leaf\-02 chokepoint\-2 capture sink \(satisfied by \*gatecapture.Store\). Nil clears \- capture is strictly opt\-in and its absence never changes engine behavior.
+
 <a name="Engine.SetPermissionTable"></a>
 ### func \(\*Engine\) SetPermissionTable
 
@@ -709,6 +743,21 @@ FinancialPattern defines a pattern for detecting financial operations.
 	    Enabled     bool   `json:"enabled"`
 	}
 
+<a name="GateAskCapture"></a>
+## type GateAskCapture
+
+GateAskCapture is the chokepoint\-2 capture seam \(jev\-command\-gate leaf 02, Contract C4\): the shell permission\-table ask \-\> confirmation\-resolution capture sink. Declared in internal/security as a narrow interface and satisfied by \*gatecapture.Store \(whose concrete methods carry context\) \- the engine never imports internal/gatecapture, keeping the same seam direction as every other capture sink.
+
+LOCK CONTRACT: PermissionTableAsk is called from checkShellPermissionTable while the Engine holds mu as RLock. The implementation MUST be memory\-only \(never sqlite I/O, never a call back into Engine methods that acquire mu\). \*gatecapture.Store satisfies this: its arm path is a mutex\-guarded in\-map insert that never touches the DB.
+
+	type GateAskCapture interface {
+	    // PermissionTableAsk arms the pending capture for a permission-table ask.
+	    PermissionTableAsk(command string)
+	    // PermissionTableResolved lands the record at the confirmation
+	    // resolution. Called OUTSIDE any engine lock, from the wiring layer.
+	    PermissionTableResolved(ctx context.Context, command, decision, approver string)
+	}
+
 <a name="InjectionMatch"></a>
 ## type InjectionMatch
 
@@ -787,6 +836,58 @@ IsKnownSafeCommand checks if a command is in the known\-safe allowlist.
 	func (v *InstructionValidator) Validate(instr *preferences.ParsedInstruction) ValidationResult
 
 Validate validates a parsed instruction and returns the result.
+
+<a name="InterAgentBoundary"></a>
+## type InterAgentBoundary
+
+InterAgentBoundary scans UNTRUSTED handoff content for the D2 deny patterns. Construction is infallible; nil logger falls back to the default. The zero value is NOT usable \-\- build through NewInterAgentBoundary.
+
+	type InterAgentBoundary struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewInterAgentBoundary"></a>
+### func NewInterAgentBoundary
+
+	func NewInterAgentBoundary(logger *slog.Logger) *InterAgentBoundary
+
+NewInterAgentBoundary creates the boundary with the default D2 pattern inventory \(contract C4\-A\).
+
+<a name="InterAgentBoundary.InspectHandoff"></a>
+### func \(\*InterAgentBoundary\) InspectHandoff
+
+	func (b *InterAgentBoundary) InspectHandoff(recipient, content string) (blocked bool, reason string)
+
+InspectHandoff checks a composed cross\-agent handoff \(contract C4\-A signature\): recipient identifies the receiving agent, content is the payload. Returns blocked=true with a reason when a deny pattern hits. Under the warn\-first rollout this is consumed by the block\-mode caller; monitor\-mode callers log the matches and let the handoff pass.
+
+<a name="InterAgentBoundary.InspectHandoffContent"></a>
+### func \(\*InterAgentBoundary\) InspectHandoffContent
+
+	func (b *InterAgentBoundary) InspectHandoffContent(content string) []InterAgentBoundaryMatch
+
+InspectHandoffContent scans content \(an UNTRUSTED handoff segment\) and returns every deny\-pattern hit. Empty content returns no matches. This is the decision\-free primitive; callers own the mode policy \(off/warn/block\).
+
+<a name="InterAgentBoundaryMatch"></a>
+## type InterAgentBoundaryMatch
+
+InterAgentBoundaryMatch is one deny\-pattern hit.
+
+	type InterAgentBoundaryMatch struct {
+	    Class   string
+	    Pattern string
+	    Reason  string
+	}
+
+<a name="InterAgentBoundaryPattern"></a>
+## type InterAgentBoundaryPattern
+
+InterAgentBoundaryPattern is one compiled deny pattern with its class \(D2 taxonomy\) and a human\-readable reason fragment.
+
+	type InterAgentBoundaryPattern struct {
+	    Re     *regexp.Regexp
+	    Class  string
+	    Reason string
+	}
 
 <a name="Message"></a>
 ## type Message

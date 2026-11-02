@@ -897,6 +897,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
+	// Agent-groups boot hook (leaf 02, task T4): structural validation of
+	// the [security.groups] section BEFORE any component wiring — a
+	// cyclic group chain or dangling policy reference fails boot with a
+	// named defect (fail closed). Live-registry tool validation is leaf
+	// 04's extension of the same hook.
+	if err := validateGroupsConfig(cfg); err != nil {
+		logger.Error("FATAL: groups config invalid", "error", err)
+		return nil, err
+	}
+
 	// OTLP metrics export (metrics.otlp) -- opt-in, default OFF. The knob
 	// is read here, BEFORE construction, so there is no construction-baked
 	// config seam: Enabled gates the constructor entirely. Disabled boots

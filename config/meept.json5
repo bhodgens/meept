@@ -517,6 +517,47 @@
       // this lane is separately opt-in.
       "secret_restore": false,
     },
+
+    // Agent group policy model (C3): named policies bound to subjects
+    // (agent:<id> | group:<name> | user:<id>) enforced at the dispatch,
+    // tool-call, and memory-retrieval gates. Ungrouped agents keep the
+    // legacy spec-allowlist behavior while default_managed stays false.
+    // STRUCTURE: every policy name must be unique, every binding must
+    // reference an existing policy, subjects must be well-formed, and
+    // group nesting is ONE level (a cyclic membership fails boot).
+    // drift: commented template block; absent from installed homes by
+    // design (empty tables + default_managed=false are identical to
+    // no-block).
+    // "groups": {
+    //   // Fail-closed knob: when true, agents with NO matching binding
+    //   // run through the "default" policy below (deny-everything unless
+    //   // it grants tools). Default false.
+    //   "default_managed": false,
+    //   // Decision-audit log level: "deny-warn" (default), "all", "off".
+    //   "decision_log_level": "deny-warn",
+    //   // agents allowed to mutate membership via groups.* RPC (C5).
+    //   "admin_agents": ["agent-update"],
+    //   // human user ids allowed to mutate membership (C5).
+    //   "admin_users": [],
+    //   "policies": [
+    //     {
+    //       "name": "coders",
+    //       "tools_allowed": ["file_read", "file_write", "shell"],
+    //       "tools_denied": [],            // deny beats allow
+    //       "memory_max_scope": "project", // "" | "project" | "user" | "global"
+    //       "fs_roots": [],                // extra path-fence roots
+    //       "network_class": "",           // "" | "unrestricted" | "allowlist" | "none"
+    //       "allowed_models": [],          // model aliases; empty = unrestricted
+    //     },
+    //     // The special "default" policy applies to unbound agents when
+    //     // default_managed=true (fail-closed: an empty allowlist denies
+    //     // everything for a managed agent).
+    //     // { "name": "default", "tools_allowed": ["file_read"] },
+    //   ],
+    //   "bindings": [
+    //     { "subject": "group:coders", "policy": "coders", "scope": "daemon" },
+    //   ],
+    // },
   },
 
   // Scheduler configuration

@@ -2560,9 +2560,14 @@ type PiiConfig struct {
 	SecretRestore bool `json:"secret_restore" toml:"secret_restore"`
 }
 
-// SecurityGroupsConfig is the [security.groups] section. Owned by leaf 04
-// (groups model); leaf 02 of branch-01 adds only DecisionLogLevel so the
-// decision-audit knob has a defined home from day one.
+// SecurityGroupsConfig is the [security.groups] section (C3 groups model).
+// Owned by leaf 02 (groups model) of the agent-groups tree; leaf 02 of
+// branch-01 added DecisionLogLevel first so the decision-audit knob has a
+// defined home from day one.
+//
+//gendoc:section security.groups
+//gendoc:desc Agent group policy model: named policies (tool allow/deny, memory scope ceiling, fence roots, network class, model aliases) bound to agent/group/user subjects, with fail-closed default management and decision-audit log level.
+//gendoc:example [security.groups] default_managed = false, decision_log_level = "deny-warn"
 type SecurityGroupsConfig struct {
 	// DecisionLogLevel controls the tool-permission decision audit lines:
 	//   "deny-warn" (default) — denies at WARN, allows at DEBUG
@@ -2570,6 +2575,63 @@ type SecurityGroupsConfig struct {
 	//   "off"                 — no decision lines
 	// Invalid values fall back to "deny-warn" at load time.
 	DecisionLogLevel string `json:"decision_log_level" toml:"decision_log_level"`
+
+	// Policies is the named policy table (C3). A policy bundles tool
+	// allow/deny lists, the memory scope ceiling ("", "project", "user",
+	// "global"), additional fence roots, a network class
+	// ("unrestricted", "allowlist", "none"), and allowed model aliases
+	// (empty = unrestricted). Deny always beats allow (D4).
+	Policies []GroupsPolicyConfig `json:"policies" toml:"policies"`
+
+	// Bindings attaches policies to subjects. Subject form:
+	// "agent:<id>", "group:<name>", or "user:<id>"; scope is "daemon" or
+	// "project:<id>". Referencing an unknown policy fails boot validation.
+	Bindings []GroupsBindingConfig `json:"bindings" toml:"bindings"`
+
+	// DefaultManaged routes agents with NO matching binding through the
+	// fail-closed "default" policy (D7). Default false: ungrouped agents
+	// keep the legacy spec-allowlist behavior unchanged. Flipping the
+	// default is a product decision (docs/agents/opt-in-defaults.md).
+	DefaultManaged bool `json:"default_managed" toml:"default_managed"`
+
+	// AdminAgents lists agent ids allowed to mutate membership via the
+	// groups.* RPC write gate (C5). Default: ["agent-update"].
+	AdminAgents []string `json:"admin_agents,omitempty" toml:"admin_agents"`
+
+	// AdminUsers lists user ids whose human keys may mutate membership
+	// (C5 human half of the write gate).
+	AdminUsers []string `json:"admin_users,omitempty" toml:"admin_users"`
+}
+
+// GroupsPolicyConfig is one [security.groups.policies] entry (C3 Policy).
+type GroupsPolicyConfig struct {
+	// Name uniquely identifies the policy; bindings reference it.
+	Name string `json:"name" toml:"name"`
+	// ToolsAllowed lists registered tool names the policy grants.
+	ToolsAllowed []string `json:"tools_allowed,omitempty" toml:"tools_allowed"`
+	// ToolsDenied lists registered tool names the policy revokes; deny
+	// beats allow (D4).
+	ToolsDenied []string `json:"tools_denied,omitempty" toml:"tools_denied"`
+	// MemoryMaxScope caps memory retrieval: "" (unrestricted),
+	// "project", "user", or "global". The narrowest wins across groups.
+	MemoryMaxScope string `json:"memory_max_scope,omitempty" toml:"memory_max_scope"`
+	// FSRoots lists additional path-fence roots for the group's members.
+	FSRoots []string `json:"fs_roots,omitempty" toml:"fs_roots"`
+	// NetworkClass restricts outbound network access:
+	// "" / "unrestricted", "allowlist", or "none". Most restrictive wins.
+	NetworkClass string `json:"network_class,omitempty" toml:"network_class"`
+	// AllowedModels restricts model aliases (empty = unrestricted).
+	AllowedModels []string `json:"allowed_models,omitempty" toml:"allowed_models"`
+}
+
+// GroupsBindingConfig is one [security.groups.bindings] entry (C3 Binding).
+type GroupsBindingConfig struct {
+	// Subject is "agent:<id>", "group:<name>", or "user:<id>".
+	Subject string `json:"subject" toml:"subject"`
+	// Policy names the policy applied to the subject (must exist).
+	Policy string `json:"policy" toml:"policy"`
+	// Scope is "daemon" or "project:<id>".
+	Scope string `json:"scope,omitempty" toml:"scope"`
 }
 
 // EgressConfig configures outbound egress policy for proxied child traffic.
@@ -3927,6 +3989,7 @@ func DefaultConfig() *Config {
 			},
 			Groups: SecurityGroupsConfig{
 				DecisionLogLevel: "deny-warn",
+				AdminAgents:      []string{"agent-update"},
 			},
 			Egress: EgressConfig{
 				ScrubNoProxy: true,
