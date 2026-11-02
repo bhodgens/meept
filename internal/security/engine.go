@@ -850,6 +850,17 @@ func matchEnginePathPattern(pattern, resolved string) bool {
 	return isPathUnderDir(resolved, expanded)
 }
 
+// configAllowedPaths returns SecurityConfig.AllowedPaths, or nil when the
+// engine was built without a config. Entries are raw (possibly "~"-prefixed);
+// matchEnginePathPattern expands each one during comparison, which is the same
+// contract the DB allow-rule loop uses.
+func (e *Engine) configAllowedPaths() []string {
+	if e.config == nil {
+		return nil
+	}
+	return e.config.AllowedPaths
+}
+
 // checkBlockedPaths consults SecurityConfig.BlockedPaths (the live config
 // seed, schema.go) against an already-expanded absolute path. Matching
 // mirrors the DB block-rule logic: filepath.Match glob, exact match, and
@@ -986,7 +997,22 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 		}
 	}
 
-	if len(allowPatterns) > 0 {
+	// Config allow entries (security.allowed_paths) are part of the same allow
+	// set as the DB rows. BlockedPaths got this treatment in 2331d457; the
+	// allow half was never wired, so the field was validated, expanded, and
+	// surfaced in the config UI while granting nothing. That made the e2e
+	// harness's allowed_paths: ["<work>/**"] inert: the seeded DB allow rules
+	// are only ~/* and /tmp/*, so a scratch daemon's project dir fell outside
+	// every allow rule and file_write was denied (dispatcher-05).
+	// Precedence is unchanged: checkBlockedPaths and the DB block rules above
+	// already ran, so a config allow can never override a block.
+	for _, raw := range e.configAllowedPaths() {
+		if matchEnginePathPattern(raw, resolved) {
+			return nil // Allowed
+		}
+	}
+
+	if len(allowPatterns) > 0 || len(e.configAllowedPaths()) > 0 {
 		return &Decision{
 			Allowed:    false,
 			Reason:     "Path does not match any allowed pattern",

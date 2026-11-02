@@ -130,3 +130,44 @@ func TestBlockedPathsNoInterferenceWithNormalFlow(t *testing.T) {
 		t.Fatalf("ordinary path hit the blocked-path stage: %+v", decision)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// SecurityConfig.AllowedPaths wiring in the allow stage
+// ---------------------------------------------------------------------------
+
+// T-A: a config allow entry grants a path no DB rule covers. This is the
+// dispatcher-05 shape: the e2e harness seeds allowed_paths as "<work>/**",
+// while the seeded DB allow rules are only ~/* and /tmp/*, so a scratch
+// daemon's project dir matched nothing and file_write was denied. Before this
+// wiring the config field was validated, expanded, and shown in the config UI
+// while granting nothing (its BlockedPaths twin landed in 2331d457).
+func TestAllowedPathsConfigEntryGrantsNestedPath(t *testing.T) {
+	engine := newBlockedPathsEngine(t, nil, []string{"/opt/e2e-work/**"})
+
+	decision := engine.Check(ActionFileWrite, "file_write", map[string]string{"path": "/opt/e2e-work/project/quickplan.txt"}, "")
+	require.True(t, decision.Allowed, "nested path under a config allow entry must be granted, got: %+v", decision)
+}
+
+// T-B: deny still wins. A config allow must never open a path a block rule
+// covers, so the precedence order (blocked config, DB block rules, then allow)
+// is unchanged by the wiring.
+func TestAllowedPathsConfigCannotOverrideBlock(t *testing.T) {
+	engine := newBlockedPathsEngine(t,
+		[]string{"/opt/e2e-work/private/**"},
+		[]string{"/opt/e2e-work/**"})
+
+	decision := engine.Check(ActionFileWrite, "file_write", map[string]string{"path": "/opt/e2e-work/private/token.txt"}, "")
+	require.False(t, decision.Allowed, "a config allow must not override a blocked entry, got: %+v", decision)
+	require.Contains(t, decision.Reason, "/opt/e2e-work/private/**")
+}
+
+// T-C: fail-closed is preserved. Wiring config allows must not turn the allow
+// stage into a no-op: a path matching neither a DB rule nor a config entry
+// still denies.
+func TestAllowedPathsConfigKeepsFailClosed(t *testing.T) {
+	engine := newBlockedPathsEngine(t, nil, []string{"/opt/e2e-work/**"})
+
+	decision := engine.Check(ActionFileWrite, "file_write", map[string]string{"path": "/opt/somewhere-else/file.txt"}, "")
+	require.False(t, decision.Allowed, "path outside every allow rule must still deny, got: %+v", decision)
+	require.Contains(t, decision.Reason, "allowed pattern")
+}
