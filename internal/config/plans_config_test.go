@@ -231,3 +231,47 @@ func TestPlansConfig_TieredIterationDefaults(t *testing.T) {
 		t.Errorf("Validate() after clamp = %v, want nil", err)
 	}
 }
+
+// TestPlansConfig_FreshContextCriticDefaults pins plan-20261101-fresh-
+// context-critic contract C1: the three critic flags default FALSE (ships
+// dark), absent JSON keys decode false, and explicitly-true keys decode
+// true. NormalizePlansDefaults must not flip any of them on.
+func TestPlansConfig_FreshContextCriticDefaults(t *testing.T) {
+	type doc struct {
+		Plans PlansConfig `json:"plans"`
+	}
+
+	// Absent keys -> all false.
+	var absent doc
+	if err := json.Unmarshal([]byte(`{"plans":{}}`), &absent); err != nil {
+		t.Fatalf("json.Unmarshal absent: %v", err)
+	}
+	if absent.Plans.FreshCriticEnabled {
+		t.Error("absent fresh_critic_enabled decoded true, want false")
+	}
+	if absent.Plans.HostileCriticEnabled {
+		t.Error("absent hostile_critic_enabled decoded true, want false")
+	}
+	if absent.Plans.InterviewOptionGates {
+		t.Error("absent interview_option_gates decoded true, want false")
+	}
+	NormalizePlansDefaults(&absent.Plans)
+	if absent.Plans.FreshCriticEnabled || absent.Plans.HostileCriticEnabled || absent.Plans.InterviewOptionGates {
+		t.Error("NormalizePlansDefaults flipped a critic flag on; all three must stay false")
+	}
+
+	// Keys present and true -> true.
+	var present doc
+	if err := json.Unmarshal([]byte(`{"plans":{"fresh_critic_enabled":true,"hostile_critic_enabled":true,"interview_option_gates":true}}`), &present); err != nil {
+		t.Fatalf("json.Unmarshal present: %v", err)
+	}
+	if !present.Plans.FreshCriticEnabled {
+		t.Error("fresh_critic_enabled = true decoded false, want true")
+	}
+	if !present.Plans.HostileCriticEnabled {
+		t.Error("hostile_critic_enabled = true decoded false, want true")
+	}
+	if !present.Plans.InterviewOptionGates {
+		t.Error("interview_option_gates = true decoded false, want true")
+	}
+}

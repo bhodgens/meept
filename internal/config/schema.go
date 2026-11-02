@@ -534,6 +534,24 @@ type PlansConfig struct {
 	// draft-critique-refine flow and seals with provenance
 	// "planner-self" without a human in the loop.
 	SelfSealEnabled bool `json:"self_seal_enabled" toml:"self_seal_enabled"`
+
+	// FreshCriticEnabled gates the fresh-context evidence critic
+	// (plan-20261101-fresh-context-critic contract C1; default FALSE -
+	// ships dark). See
+	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
+	FreshCriticEnabled bool `json:"fresh_critic_enabled"   toml:"fresh_critic_enabled"`
+
+	// HostileCriticEnabled gates the hostile second-pass critic on a
+	// different model (plan-20261101-fresh-context-critic contract C1;
+	// default FALSE - ships dark). See
+	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
+	HostileCriticEnabled bool `json:"hostile_critic_enabled" toml:"hostile_critic_enabled"`
+
+	// InterviewOptionGates gates the structured interview option objects
+	// (plan-20261101-fresh-context-critic contract C1; default FALSE -
+	// ships dark). See
+	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
+	InterviewOptionGates bool `json:"interview_option_gates" toml:"interview_option_gates"`
 }
 
 // NormalizePlansDefaults clamps the tiered-iteration planning knobs to
