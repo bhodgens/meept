@@ -360,8 +360,8 @@ After all children REVIEWED:
 | 01-poller.md | PENDING | 0 | |
 | 02-linkage.md | REVIEWED | 1 | 2026-10-30: 4/4 gate tests PASS -race (in-session verified). GoalCreator gained UpdateGoal per the test stub; Manager.UpdateGoal delegate added by orchestrator (d58d5cbc), pinned by TestManagerSatisfiesGoalCreator. |
 | 03-writeback.md | REVIEWED | 1 | 2026-10-30: 3/3 gate tests PASS -race. caller-side ledger.Complete required for no-storm receipt reuse (per effects.Run contract). Label-fail-after-comment self-heals via reuse path. |
-| 04-config.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_a201a9e9 wave C) |
-| 05-wiring-e2e.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_a201a9e9 wave C); coordinates with 04 via Contract 4 |
+| 04-config.md | COMPLETE | 1 | 2026-10-31: IntakeConfig + root field + loader exemption (json5_loader.go:74 note) + template block + tests green; committed via sibling-wave 9edc4c85/0d081d84 (child died post-work; work verified on disk per pitfall-4/54 protocol). |
+| 05-wiring-e2e.md | IN_PROGRESS | 2 | wave-C child died mid-flight (tool timeouts, 2026-10-31); sibling build-tagged the wiring gate test (0943902b, tag intake_gate). Continuation dispatched 2026-11-02. |
 
 ## Integration Test Plan
 
