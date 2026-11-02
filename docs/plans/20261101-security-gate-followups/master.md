@@ -134,10 +134,10 @@ Output: APPROVED or specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-blocked-paths.md | PENDING | 0 | |
-| 02-pin-streaming-gate.md | PENDING | 0 | |
-| 03-remove-registergithubtools.md | PENDING | 0 | |
-| 04-dead-scheduler-block.md | PENDING | 0 | |
+| 01-blocked-paths.md | COMPLETE | 0 | RED observed on config-driven entries with no DB seed; deny-wins pinned; commit 2331d457 + recursive-glob fix cc23528e (dispatcher-05 e2e surfaced: filepath.Match never crosses /, harness seeds <work>/** - matchEnginePathPattern added, regression unit test) |
+| 02-pin-streaming-gate.md | COMPLETE | 0 | pin test green; mutation RED observed (gate call removed => sequence assertion fails) and reverted byte-identical (diff empty); commit with leaf 02 batch; CORRECTION: streaming calls were already gated - this leaf is a pin only |
+| 03-remove-registergithubtools.md | COMPLETE | 0 | function deleted, tests re-homed via SetGitHubProvider + RegisterAll preserving all assertions; zero stragglers; commit e84be514; also removed dead 'times' field in loop_turnjournal_test.go (sibling file, U1000-flagged, TestTurnJournal green) |
+| 04-dead-scheduler-block.md | COMPLETE | 0 | nil-order evidence re-verified before deletion (call site precedes assignment, not SUPERSEDED); block + sched param + call-site arg removed; NewScheduleCreateTool count now 0 in components.go (provider-only); commit 140c6517; hermes Client deadcode rebaseline attributed to sibling hermes-stub leaf |
 
 ## Integration Test Plan
 
@@ -152,10 +152,10 @@ tasks carry RED-first tests. Matrix:
 
 | # | Feature | Source | Tests | Status |
 |---|---------|--------|-------|--------|
-| F1 | BlockedPaths denies file tools | 01 T1-T2 | engine unit tests | PENDING |
-| F2 | streaming calls gated (pin) | 02 T1 | executor pin test | PENDING |
-| F3 | provider-only github registration | 03 T1-T2 | re-homed tests | PENDING |
-| F4 | dead block removed | 04 T1 | build + scheduler-provider test | PENDING |
+| F1 | BlockedPaths denies file tools | 01 T1-T2 | engine unit tests | VALIDATED |
+| F2 | streaming calls gated (pin) | 02 T1 | executor pin test | VALIDATED |
+| F3 | provider-only github registration | 03 T1-T2 | re-homed tests | VALIDATED |
+| F4 | dead block removed | 04 T1 | build + scheduler-provider test | VALIDATED |
 
 ## Frozen Documents
 
