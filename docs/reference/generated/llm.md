@@ -193,6 +193,9 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(e \*BudgetExceededError\) UserMessage\(\) string](<#BudgetExceededError.UserMessage>)
 - [type BudgetLimit](<#BudgetLimit>)
   - [func \(r BudgetLimit\) Message\(used, limit float64\) string](<#BudgetLimit.Message>)
+- [type BudgetStatusSnapshot](<#BudgetStatusSnapshot>)
+  - [func LegacyTupleBudgetSnapshot\(hourlyUsed, hourlyRemaining, dailyUsed, dailyRemaining, rpmCurrent, rpmLimit int, dailyCostUsed, dailyCostLimit, hourlyCostUsed, hourlyCostLimit, perTaskCost, perSessionCost float64, perTaskBudget, perSessionBudget int, hourlyTokenLimit, dailyTokenLimit int\) BudgetStatusSnapshot](<#LegacyTupleBudgetSnapshot>)
+  - [func SnapshotFromStatus\(s Status\) BudgetStatusSnapshot](<#SnapshotFromStatus>)
 - [type CacheConfig](<#CacheConfig>)
   - [func DefaultCacheConfig\(\) CacheConfig](<#DefaultCacheConfig>)
 - [type CacheEntry](<#CacheEntry>)
@@ -2776,6 +2779,44 @@ BudgetLimit identifies which budget limit was exceeded.
 	func (r BudgetLimit) Message(used, limit float64) string
 
 Message returns an internal log message for this budget limit reason.
+
+<a name="BudgetStatusSnapshot"></a>
+## type BudgetStatusSnapshot
+
+BudgetStatusSnapshot is the flat, wire\-facing copy of the authoritative budget Status: the 14 scalars the status surfaces publish plus the two authoritative booleans \(WithinBudget, WithinCostBudget\). Wire handlers \(RPC status, HTTP status\) consume this snapshot as a pure pass\-through of Budget.GetStatus\(\) and must NEVER re\-derive the booleans from raw counters — a recompute like \`used \< limit\` reads \`0 \< 0\` = false when a limit is disabled \(0\) and reports an unlimited daemon as over budget.
+
+	type BudgetStatusSnapshot struct {
+	    HourlyUsed       int
+	    HourlyRemaining  int
+	    DailyUsed        int
+	    DailyRemaining   int
+	    RPMCurrent       int
+	    RPMLimit         int
+	    DailyCostUsed    float64
+	    DailyCostLimit   float64
+	    HourlyCostUsed   float64
+	    HourlyCostLimit  float64
+	    PerTaskCost      float64
+	    PerSessionCost   float64
+	    PerTaskBudget    int
+	    PerSessionBudget int
+	    WithinBudget     bool
+	    WithinCostBudget bool
+	}
+
+<a name="LegacyTupleBudgetSnapshot"></a>
+### func LegacyTupleBudgetSnapshot
+
+	func LegacyTupleBudgetSnapshot(hourlyUsed, hourlyRemaining, dailyUsed, dailyRemaining, rpmCurrent, rpmLimit int, dailyCostUsed, dailyCostLimit, hourlyCostUsed, hourlyCostLimit, perTaskCost, perSessionCost float64, perTaskBudget, perSessionBudget int, hourlyTokenLimit, dailyTokenLimit int) BudgetStatusSnapshot
+
+LegacyTupleBudgetSnapshot bridges the pre\-snapshot 14\-value BudgetStatusGetter tuple \(plus the configured effective token limits from TokenLimitGetter\) into a BudgetStatusSnapshot. The boolean guards mirror GetStatus exactly: a limit only constrains when \> 0 \(0 = disabled = unconstrained\). Production wiring must use SnapshotFromStatus \(the pure pass\-through\); this bridge exists only for legacy tuple consumers so the wire booleans keep the authoritative disabled\-limits semantics.
+
+<a name="SnapshotFromStatus"></a>
+### func SnapshotFromStatus
+
+	func SnapshotFromStatus(s Status) BudgetStatusSnapshot
+
+SnapshotFromStatus is a plain field copy of an authoritative Status — no logic, no recompute.
 
 <a name="CacheConfig"></a>
 ## type CacheConfig
