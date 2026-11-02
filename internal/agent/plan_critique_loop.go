@@ -87,6 +87,11 @@ const (
 	critiqueOutcomeClean      = "clean"
 	critiqueOutcomeExhausted  = "exhausted"
 	critiqueOutcomeCriticFail = "critic_fail"
+	// critiqueOutcomeHostileSkipped stamps a round whose hostile pass was
+	// SKIPPED (contract C5: flag on but chatter nil or same model ref). A
+	// skipped hostile pass is not a clean seal - the draft stays at the human
+	// seal and the self-seal path treats it like an open blocking item.
+	critiqueOutcomeHostileSkipped = "hostile_skipped"
 )
 
 // SetSelfSealEnabled toggles the planner's autonomous self-seal
@@ -378,6 +383,7 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	maxRounds := sp.critiqueRoundsCap()
 	roundsUsed := 0
 	criticFailed := false
+	hostileSkipped := false
 	var blocking, advisory []criticObjection
 
 	for round := 1; round <= maxRounds; round++ {
@@ -414,6 +420,40 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 		// on that class) and are blocking.
 		blocking = append(blocking, syntheticObjectionsFromHints(input.ValidateToolHints(draftToolHints(draft.Markdown)))...)
 
+		// Hostile second pass (fresh-context-critic leaf 03, contract
+		// C5): a SECOND isolated child reader on a DIFFERENT model. It
+		// runs only when the hostile flag is on AND the C5 gate fully
+		// holds (chatter wired AND hostile model ref != planner model
+		// ref); otherwise it is skipped with the skip metric and the
+		// planner/critic chatters are never touched with the hostile
+		// prompt. It is a reader, not an extra revise round: its
+		// blocking objections join this round's blocking list so the
+		// same cycle's reviseDraft addresses them, and a clean seal
+		// requires both readers blocking-free in the same cycle.
+		hostileSkippedReason := ""
+		if sp.hostileCriticFlag() {
+			if skip := hostilePassSkipReason(sp.hostileCriticChatterFor(), sp.plannerModelRef(plannerLoop)); skip != "" {
+				hostileSkippedReason = skip
+				sp.recordMetric("strategic_planner.hostile_critic_skipped", 1, map[string]string{"reason": skip})
+			} else {
+				hostileObjections, hostileErr := sp.runHostileCriticRound(ctx, draft, input)
+				if hostileErr != nil {
+					// Fail-open like round 1: never block a plan
+					// because a critic misformatted. The transport
+					// failure is logged, not silent.
+					sp.logger.Warn("Hostile critic call failed; continuing with round-1 objections only",
+						"task_id", req.TaskID,
+						"error", hostileErr,
+					)
+				} else {
+					hBlocking, hAdvisory := splitObjections(hostileObjections)
+					blocking = append(blocking, hBlocking...)
+					advisory = append(advisory, hAdvisory...)
+				}
+			}
+		}
+		hostileSkipped = hostileSkippedReason != ""
+
 		if len(blocking) == 0 {
 			// Clean round. Advisory items still roll into Known Risks
 			// (unconditional per the leaf), then the loop exits.
@@ -440,6 +480,14 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	// carries them (honest degradation, never silent), then the draft
 	// seals anyway.
 	outcome := critiqueOutcomeClean
+	if hostileSkipped {
+		// Contract C5: a skipped hostile pass is NOT a clean seal. The
+		// outcome stamps hostile_skipped (without overwriting the
+		// exhausted/critic_fail verdicts - those still win when they
+		// fired) and the self-seal path below refuses planner-self on
+		// it: the draft stays at the human seal.
+		outcome = critiqueOutcomeHostileSkipped
+	}
 	if len(blocking) > 0 {
 		outcome = critiqueOutcomeExhausted
 	} else if criticFailed {
@@ -507,7 +555,10 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	//                         leaf 01's single-shot fallback).
 	if req.Mode != "quick_plan" {
 		provenance := sealProvenanceUser
-		if sp.selfSealFlag() {
+		if sp.selfSealFlag() && !hostileSkipped {
+			// Contract C5: a skipped-hostile draft is never handed a
+			// planner-self default - it is treated like a draft with an
+			// open blocking item and stays at the human seal.
 			provenance = sealProvenancePlannerSelf
 		}
 		if err := sp.stampSealProvenance(req.TaskID, provenance); err != nil {
@@ -527,6 +578,18 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	// Self-seal: stamp provenance planner-self, then seal through the
 	// existing seal pipeline (SealDraft's sealed-hash pattern, then
 	// SealPlan: persist steps → spec → executing → promote → schedule).
+	// Contract C5: a skipped-hostile draft does NOT self-seal - it stays
+	// at the human seal (plan mode path above), stamped hostile_skipped.
+	if hostileSkipped {
+		sp.recordMetric("strategic_planner.seal_provenance", 1, map[string]string{"by": sealProvenanceUser, "stage": "hostile_skipped"})
+		return &critiqueFlowResult{
+			Action:          critiqueActionAwaitSeal,
+			CompiledPhases:  compiled.Phases,
+			RoundsUsed:      roundsUsed,
+			KnownRisks:      len(known),
+			CritiqueSummary: critiqueSummaryText(outcome, roundsUsed, known),
+		}, nil
+	}
 	if err := sp.stampSealProvenance(req.TaskID, sealProvenancePlannerSelf); err != nil {
 		sp.logger.Warn("Failed to stamp self-seal provenance",
 			"task_id", req.TaskID, "error", err)

@@ -227,6 +227,18 @@ type StrategicPlanner struct {
 	// chatter (the "critic_model" slot, contract C2). Nil = the planner
 	// chatter is allowed for round 1 only. Set via SetCriticChatter.
 	criticChatter llm.Chatter
+	// hostileCriticEnabled gates the hostile second pass (fresh-context-critic
+	// plan leaf 03, contract C5): when true, the critique loop may run a
+	// SECOND hostile child reader after round 1 - still only when the C5 gate
+	// fully holds (hostile chatter wired AND a different model than the
+	// planner). Default false - ships dark; the flag-off loop is
+	// byte-identical. Set via SetHostileCriticEnabled.
+	hostileCriticEnabled bool
+	// hostileCriticChatter, when non-nil, is the hostile pass's own chatter
+	// (the "hostile_critic_model" slot, contract C2). Nil = the pass is
+	// SKIPPED (C5 no_model); it never falls back onto the planner chatter or
+	// the round-1 critic chatter. Set via SetHostileCriticChatter.
+	hostileCriticChatter llm.Chatter
 	// validToolNames, when non-empty, gates parsePlanOutput's tool_hint
 	// passthrough: hints outside the set are dropped (with a Warn) so the
 	// executor's tool-hint table picks instead. Empty/nil = legacy behavior
