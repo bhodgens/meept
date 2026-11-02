@@ -151,8 +151,23 @@ func runUsersList(path string, asJSON bool) error {
 	return nil
 }
 
-// runUsersAdd implements `meept users add <name>`.
-func runUsersAdd(path, name string) error {
+// parseGroupsFlag splits a comma-separated --groups value into group
+// names: entries are trimmed of surrounding whitespace and empty entries
+// (from "" or trailing commas) are dropped. An empty spec yields nil.
+func parseGroupsFlag(spec string) []string {
+	var out []string
+	for _, g := range strings.Split(spec, ",") {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			continue
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
+// runUsersAdd implements `meept users add <name> [--groups g1,g2]`.
+func runUsersAdd(path, name, groupsSpec string) error {
 	s, err := openUsersStore(path)
 	if err != nil {
 		return err
@@ -161,8 +176,44 @@ func runUsersAdd(path, name string) error {
 	if err != nil {
 		return err
 	}
+	if groups := parseGroupsFlag(groupsSpec); len(groups) > 0 {
+		if err := s.SetUserGroups(u.ID, groups); err != nil {
+			return fmt.Errorf("set groups on new user %s: %w", u.ID, err)
+		}
+		fmt.Printf("groups: %s\n", strings.Join(groups, ", "))
+	}
 	fmt.Printf("created user: %s (%s)\n", u.Name, u.ID)
 	fmt.Println("next: meept keys add " + u.ID + " --label <label>")
+	return nil
+}
+
+// runUsersUpdate implements `meept users update <id> [--groups g1,g2]`.
+// A non-empty --groups replaces the membership wholesale; an explicitly
+// passed empty value (--groups "") clears it. When the flag was not
+// passed at all nothing changes. Returns an error for an unknown or
+// ambiguous user reference.
+func runUsersUpdate(path, userRef, groupsSpec string, groupsSet bool) error {
+	s, err := openUsersStore(path)
+	if err != nil {
+		return err
+	}
+	u := lookupUser(s, userRef)
+	if u == nil {
+		return fmt.Errorf("update user: %s not found", userRef)
+	}
+	if !groupsSet {
+		fmt.Printf("user %s (%s): no changes\n", u.Name, u.ID)
+		return nil
+	}
+	groups := parseGroupsFlag(groupsSpec) // empty spec clears membership
+	if err := s.SetUserGroups(u.ID, groups); err != nil {
+		return err
+	}
+	if len(groups) == 0 {
+		fmt.Printf("updated user %s (%s): groups cleared\n", u.Name, u.ID)
+	} else {
+		fmt.Printf("updated user %s (%s): groups: %s\n", u.Name, u.ID, strings.Join(groups, ", "))
+	}
 	return nil
 }
 
@@ -410,6 +461,7 @@ Examples:
 	}
 	cmd.AddCommand(newUsersListCmd())
 	cmd.AddCommand(newUsersAddCmd())
+	cmd.AddCommand(newUsersUpdateCmd())
 	cmd.AddCommand(newUsersRemoveCmd())
 	return cmd
 }
@@ -433,16 +485,42 @@ func newUsersListCmd() *cobra.Command {
 }
 
 func newUsersAddCmd() *cobra.Command {
-	var storePath string
+	var (
+		groups    string
+		storePath string
+	)
 	cmd := &cobra.Command{
 		Use:   "add <name>",
 		Short: "add a user",
-		Long:  "create a user with the given display name. names must be unique.",
+		Long:  "create a user with the given display name. names must be unique. pass --groups with a comma-separated list to set group membership at creation.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUsersAdd(usersStorePath(storePath), args[0])
+			return runUsersAdd(usersStorePath(storePath), args[0], groups)
 		},
 	}
+	cmd.Flags().StringVar(&groups, "groups", "", "comma-separated group memberships (e.g. admins,oncall)")
+	bindStoreFlag(cmd, &storePath)
+	return cmd
+}
+
+func newUsersUpdateCmd() *cobra.Command {
+	var (
+		groups    string
+		storePath string
+	)
+	cmd := &cobra.Command{
+		Use:   "update <id>",
+		Short: "update a user",
+		Long: `update a user's fields. pass --groups with a comma-separated list
+to replace group membership wholesale, or an empty value (--groups "") to
+clear it. omitting the flag changes nothing.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			groupsSet := cmd.Flags().Changed("groups")
+			return runUsersUpdate(usersStorePath(storePath), args[0], groups, groupsSet)
+		},
+	}
+	cmd.Flags().StringVar(&groups, "groups", "", "comma-separated group memberships replacing the current set (empty value clears)")
 	bindStoreFlag(cmd, &storePath)
 	return cmd
 }

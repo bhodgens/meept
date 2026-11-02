@@ -145,7 +145,7 @@ func TestRunCLIStoreRoundTrip(t *testing.T) {
 	withTempStateDir(t)
 
 	// add user
-	out := captureUsersStdout(t, func() { _ = runUsersAdd(usersStorePath(""), "carol") })
+	out := captureUsersStdout(t, func() { _ = runUsersAdd(usersStorePath(""), "carol", "") })
 	var userID string
 	for line := range strings.SplitSeq(out, "\n") {
 		if rest, found := strings.CutPrefix(line, "created user: carol ("); found {

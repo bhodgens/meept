@@ -100,6 +100,13 @@ func (s *Store) UserCount() int {
 
 // AddUser creates a new local user with the given name. It errors if a user
 // with that name already exists. The user is persisted before returning.
+//
+// The returned *User points at the user's STORED element (leaf 02 T1 gate
+// contract): callers may set additive fields (e.g. Groups) through it and
+// snapshot via the store's save path, the same mutation-then-persist shape
+// every store method uses internally. The alias lives in store-owned
+// memory — do not hold it across concurrent store mutations or use it as
+// long-term state; ListUsers/copyUser return isolated copies for that.
 func (s *Store) AddUser(name string) (*User, error) {
 	if name == "" {
 		return nil, fmt.Errorf("add user: empty name")
@@ -117,6 +124,7 @@ func (s *Store) AddUser(name string) (*User, error) {
 	s.users = append(append([]User{}, prev...), u)
 	snapshot := copyUsers(s.users)
 	path := s.path
+	stored := &s.users[len(s.users)-1]
 	s.mu.Unlock()
 
 	if err := saveStore(path, snapshot); err != nil {
@@ -126,8 +134,7 @@ func (s *Store) AddUser(name string) (*User, error) {
 		return nil, err
 	}
 
-	out := copyUser(u)
-	return &out, nil
+	return stored, nil
 }
 
 // AddKey generates a new raw API key for the user identified by userID,
@@ -274,6 +281,68 @@ func (s *Store) ListUsers() []User {
 	out := copyUsers(s.users)
 	s.mu.RUnlock()
 	return out
+}
+
+// SetUserGroups replaces a user's group memberships (C4) and persists the
+// change before returning. Groups is stored as given; passing an empty/nil
+// slice clears membership (an empty slice is normalized to nil so the
+// omitempty contract keeps no "groups" key in the file). Setting groups on
+// an unknown user is an error. Foreign (cluster-pooled) users are managed
+// by peer sync — setting groups on them locally is also an error.
+func (s *Store) SetUserGroups(userID string, groups []string) error {
+	if len(groups) == 0 {
+		groups = nil
+	}
+
+	s.mu.Lock()
+	idx := -1
+	for i, u := range s.users {
+		if u.ID == userID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("set groups on user %s: not found", userID)
+	}
+	if s.users[idx].OriginNode != "" {
+		s.mu.Unlock()
+		return fmt.Errorf("set groups on user %s: foreign users are managed by cluster sync", userID)
+	}
+	prevGroups := s.users[idx].Groups
+	s.users[idx].Groups = groups
+	snapshot := copyUsers(s.users)
+	path := s.path
+	s.mu.Unlock()
+
+	if err := saveStore(path, snapshot); err != nil {
+		s.mu.Lock()
+		s.users[idx].Groups = prevGroups
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// UserGroups returns a copy of the stored groups for the user identified by
+// an authenticated identity (C4 lookup seam). The identity is the resolved
+// principal from Validate — callers must never substitute raw key material;
+// an unknown user yields nil (empty contribution, fail-safe).
+func (s *Store) UserGroups(idn *Identity) []string {
+	if idn == nil || idn.UserID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.users {
+		if u.ID == idn.UserID {
+			out := make([]string, len(u.Groups))
+			copy(out, u.Groups)
+			return out
+		}
+	}
+	return nil
 }
 
 // MergeForeign reconciles cluster-pooled ("foreign") users into the store.

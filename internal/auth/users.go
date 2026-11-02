@@ -83,6 +83,13 @@ type User struct {
 	Name       string `json:"name"`
 	Keys       []Key  `json:"keys"`
 	OriginNode string `json:"origin_node,omitempty"` // empty = local
+	// Groups lists the named group policies the account belongs to (C4).
+	// Consumed by groups.EffectiveGroups via the store lookup seam when a
+	// request carries this user's Identity; never derived from key
+	// material. Additive JSON with omitempty — old stores load unchanged
+	// and a user with no groups persists no "groups" key (the pattern
+	// Key.Role established).
+	Groups []string `json:"groups,omitempty"`
 }
 
 // Identity is the authenticated principal attached to a request after a
@@ -125,8 +132,9 @@ func copyKey(k Key) Key {
 	return c
 }
 
-// copyUser returns a deep copy of u, isolating the keys slice and every
-// expiry pointer so callers cannot mutate store-owned state.
+// copyUser returns a deep copy of u, isolating the keys slice, the groups
+// slice, and every expiry pointer so callers cannot mutate store-owned
+// state.
 func copyUser(u User) User {
 	c := u
 	if len(u.Keys) > 0 {
@@ -134,6 +142,10 @@ func copyUser(u User) User {
 		for i, k := range u.Keys {
 			c.Keys[i] = copyKey(k)
 		}
+	}
+	if len(u.Groups) > 0 {
+		c.Groups = make([]string, len(u.Groups))
+		copy(c.Groups, u.Groups)
 	}
 	return c
 }
