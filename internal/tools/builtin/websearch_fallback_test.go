@@ -60,7 +60,10 @@ func TestWebSearch_202ChallengeFallsBackToLite(t *testing.T) {
 	// The search URLs are hardcoded to duckduckgo.com; route them to the
 	// test server's html/lite paths.
 	srvHost := strings.TrimPrefix(srv.URL, "http://")
-	tm.client.Transport = &rewriteTransport{host: srvHost, base: http.DefaultTransport}
+	// base is the bounded testhttp transport, not http.DefaultTransport: the
+	// DDG rewrite dials loopback, so it needs the ephemeral-port retry and
+	// SO_LINGER 0 (no client-side TIME_WAIT). See fixture_http_test.go.
+	tm.client.Transport = &rewriteTransport{host: srvHost, base: boundedTransport(t)}
 
 	res, err := tm.Execute(_SearchCtx(t), map[string]any{
 		"query": "flaky tests",
@@ -98,7 +101,9 @@ func TestWebSearch_BothEndpointsChallengeHonestError(t *testing.T) {
 	}
 	tm.client.Transport = &rewriteTransport{
 		host: strings.TrimPrefix(srv.URL, "http://"),
-		base: http.DefaultTransport,
+		// Bounded testhttp transport (ephemeral retry + SO_LINGER 0), not
+		// http.DefaultTransport. See fixture_http_test.go.
+		base: boundedTransport(t),
 	}
 
 	_, err := tm.Execute(_SearchCtx(t), map[string]any{"query": "flaky tests"})

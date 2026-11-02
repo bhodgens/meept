@@ -32,7 +32,9 @@ func TestWebSearch_MCPSuccessSkipsDuckDuckGo(t *testing.T) {
 	tm := &WebSearchTool{timeout: DefaultSearchTimeout, client: srv.Client()}
 	tm.client.Transport = &rewriteTransport{
 		host: strings.TrimPrefix(srv.URL, "http://"),
-		base: http.DefaultTransport,
+		// Bounded testhttp transport (ephemeral retry + SO_LINGER 0), not
+		// http.DefaultTransport. See fixture_http_test.go.
+		base: boundedTransport(t),
 	}
 	tm.SetSearchProvider(stubSearchProvider{results: SearchResults{
 		Query:   "flaky tests",
@@ -83,7 +85,9 @@ func TestWebSearch_MCPFailureFallsBackToDuckDuckGo(t *testing.T) {
 	tm := &WebSearchTool{timeout: DefaultSearchTimeout, client: srv.Client()}
 	tm.client.Transport = &rewriteTransport{
 		host: strings.TrimPrefix(srv.URL, "http://"),
-		base: http.DefaultTransport,
+		// Bounded testhttp transport (ephemeral retry + SO_LINGER 0), not
+		// http.DefaultTransport. See fixture_http_test.go.
+		base: boundedTransport(t),
 	}
 	tm.SetSearchProvider(failingProvider{err: errors.New("mcp down")})
 
@@ -113,7 +117,9 @@ func TestWebSearch_NilProviderIsPureDDG(t *testing.T) {
 	tm := &WebSearchTool{timeout: DefaultSearchTimeout, client: srv.Client()}
 	tm.client.Transport = &rewriteTransport{
 		host: strings.TrimPrefix(srv.URL, "http://"),
-		base: http.DefaultTransport,
+		// Bounded testhttp transport (ephemeral retry + SO_LINGER 0), not
+		// http.DefaultTransport. See fixture_http_test.go.
+		base: boundedTransport(t),
 	}
 	// No SetSearchProvider call: DDG path must work unchanged.
 	res, err := tm.Execute(_SearchCtx(t), map[string]any{"query": "flaky tests"})

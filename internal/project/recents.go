@@ -28,9 +28,16 @@ func NewRecentsStore(db *sql.DB) *RecentsStore {
 	return &RecentsStore{db: db}
 }
 
+// rfc3339NanoFixed is RFC3339 with the fractional part forced to exactly 9
+// digits. time.RFC3339Nano TRIMS trailing zeros, so a stored value's digit
+// count varies; last_used_at is TEXT, so any leftover string comparison of it
+// would be wrong (see the julianday() note on ListRecents). Fixed width keeps
+// the stored form canonical.
+const rfc3339NanoFixed = "2006-01-02T15:04:05.000000000Z07:00"
+
 // TouchRecent updates or inserts a project path in recents.
 func (s *RecentsStore) TouchRecent(ctx context.Context, path string) error {
-	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	ts := time.Now().UTC().Format(rfc3339NanoFixed)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO project_recents (project_path, last_used_at)
 		VALUES (?, ?)
@@ -40,10 +47,25 @@ func (s *RecentsStore) TouchRecent(ctx context.Context, path string) error {
 }
 
 // ListRecents returns the top N most recent project paths.
+//
+// The sort uses julianday(), not the raw TEXT column. last_used_at holds more
+// than one textual shape: TouchRecent writes RFC3339 with a fractional part,
+// while a row created by the table DEFAULT CURRENT_TIMESTAMP comes back with
+// no fractional part at all ("2026-11-02T05:23:07Z"). A TEXT ORDER BY compares
+// bytes and gets both cases wrong. Verified on this driver: for
+// "...:37.123456789Z" and "...:37.1Z", TEXT DESC returns the .1 row first
+// (wrong — .1 is earlier), while julianday() returns the .123456789 row first
+// (right). The same trap applies to a no-fraction row, since 'Z' (0x5A) sorts
+// after '.' (0x2E). julianday() parses each shape into a real instant, which
+// is what "most recent" means. The rowid tiebreaker keeps same-instant touches
+// deterministic; rowid is used rather than the id column because callers create
+// this table with more than one shape (the daemon's store.go has an
+// AUTOINCREMENT id, the project-binding e2e suite declares only
+// project_path + last_used_at) and every SQLite table here has a rowid.
 func (s *RecentsStore) ListRecents(ctx context.Context, limit int) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT project_path FROM project_recents
-		ORDER BY last_used_at DESC
+		ORDER BY julianday(last_used_at) DESC, rowid DESC
 		LIMIT ?
 	`, limit)
 	if err != nil {
@@ -62,27 +84,32 @@ func (s *RecentsStore) ListRecents(ctx context.Context, limit int) ([]string, er
 	return paths, rows.Err()
 }
 
-// PruneOlderThan removes entries older than the specified duration.
+// PruneOlderThan removes entries older than the specified duration. The
+// comparison uses julianday() for the same reason ListRecents does: rows carry
+// different textual shapes, so a raw TEXT "<" comparison against a formatted
+// cutoff mis-classifies which rows are old.
 func (s *RecentsStore) PruneOlderThan(ctx context.Context, ttl time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-ttl)
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM project_recents
-		WHERE last_used_at < ?
-	`, cutoff.UTC().Format(time.RFC3339Nano))
+		WHERE julianday(last_used_at) < julianday(?)
+	`, cutoff.UTC().Format(rfc3339NanoFixed))
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
 }
 
-// CapToN removes oldest entries to keep only the most recent N.
+// CapToN removes oldest entries to keep only the most recent N. rowid is the
+// identity here rather than the id column, so the query works against every
+// shape callers create this table with (see ListRecents).
 func (s *RecentsStore) CapToN(ctx context.Context, max int) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM project_recents
-		WHERE id NOT IN (
-			SELECT id FROM (
-				SELECT id FROM project_recents
-				ORDER BY last_used_at DESC
+		WHERE rowid NOT IN (
+			SELECT rowid FROM (
+				SELECT rowid FROM project_recents
+				ORDER BY julianday(last_used_at) DESC, rowid DESC
 				LIMIT ?
 			)
 		)

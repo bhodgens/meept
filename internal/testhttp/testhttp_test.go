@@ -111,7 +111,8 @@ func TestDialWithEphemeralRetryNoRetryOnRefused(t *testing.T) {
 	if IsEphemeralExhaustion(err) {
 		t.Skipf("platform reported exhaustion rather than refusal: %v", err)
 	}
-	if elapsed := time.Since(start); elapsed >= retryBackoff {
+	// A refusal must not consume any of the exhaustion backoff budget.
+	if elapsed := time.Since(start); elapsed >= ephemeralRetryBase {
 		t.Errorf("refused dial took %v; the retry must not fire for refusals", elapsed)
 	}
 }

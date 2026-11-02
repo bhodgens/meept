@@ -472,3 +472,18 @@ func TestActivityModel_NotConnectedStillRenders(t *testing.T) {
 		t.Fatal("expected not-connected error")
 	}
 }
+
+// TestActivityColumnsMatchConst pins activityColumnCount against the column
+// set. tableutil.SetRows panics when a row is longer than the column list
+// (bubbles/table), so the row builders and the column set must agree on the
+// cell count. This test is what keeps that count a checked fact rather than a
+// comment.
+func TestActivityColumnsMatchConst(t *testing.T) {
+	for _, width := range []int{80, 120, 40} {
+		cols := activityColumns(width)
+		if len(cols) != activityColumnCount {
+			t.Errorf("activityColumns(%d) returned %d columns, activityColumnCount = %d",
+				width, len(cols), activityColumnCount)
+		}
+	}
+}

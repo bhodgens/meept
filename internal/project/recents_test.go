@@ -173,3 +173,140 @@ func TestRecentsStore_CapToN(t *testing.T) {
 		}
 	}
 }
+
+// TestRecentsStore_OrderIsChronological pins the fix for a real ordering bug:
+// last_used_at is stored as TEXT, so SQLite's ORDER BY compares strings. The
+// old time.RFC3339Nano format TRIMS trailing zeros, so within one second
+// "...:37.1Z" (nanos 100000000) sorted AFTER "...:37.123456789Z" and the older
+// touch came back first. The fixed-width format makes byte order equal numeric
+// order; the id tiebreaker keeps same-instant touches deterministic.
+func TestRecentsStore_OrderIsChronological(t *testing.T) {
+	db := newTestRecentsDB(t)
+	ctx := context.Background()
+	s := NewRecentsStore(db)
+
+	// Insert rows whose timestamps are out of insertion order and whose
+	// fractional parts have DIFFERENT digit counts — the exact shape that
+	// tripped the trimmed-nanoseconds sort. Written directly so the test does
+	// not depend on wall-clock timing.
+	rows := []struct {
+		path string
+		ts   string
+	}{
+		{"/repo/earlier-9digits", "2026-11-01T20:10:37.123456789Z"},
+		{"/repo/mid-1digit", "2026-11-01T20:10:37.2Z"},
+		{"/repo/latest-2digits", "2026-11-01T20:10:37.30Z"},
+	}
+	for _, r := range rows {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO project_recents (project_path, last_used_at) VALUES (?, ?)`,
+			r.path, r.ts); err != nil {
+			t.Fatalf("insert %s: %v", r.path, err)
+		}
+	}
+
+	got, err := s.ListRecents(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListRecents: %v", err)
+	}
+	want := []string{"/repo/latest-2digits", "/repo/mid-1digit", "/repo/earlier-9digits"}
+	if len(got) != len(want) {
+		t.Fatalf("ListRecents returned %d rows, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("recents[%d] = %q, want %q (TEXT sort must be chronological)", i, got[i], want[i])
+		}
+	}
+}
+
+// TestRecentsStore_OrderAcrossTimestampShapes pins the fix for a real ordering
+// bug: last_used_at is TEXT, so a raw ORDER BY compares bytes. Rows written by
+// TouchRecent carry a fractional second; rows created by the table DEFAULT
+// CURRENT_TIMESTAMP carry none. Byte order gets that wrong — 'Z' (0x5A) sorts
+// after '.' (0x2E), so a no-fraction row at :07 sorts as NEWER than a
+// fractional row at :07.5. julianday() compares instants instead.
+func TestRecentsStore_OrderAcrossTimestampShapes(t *testing.T) {
+	db := newTestRecentsDB(t)
+	ctx := context.Background()
+	s := NewRecentsStore(db)
+
+	// Insertion order deliberately contradicts chronological order, and mixes
+	// shapes: fractional (9 digits), fractional (1 digit), and no fraction.
+	rows := []struct {
+		path string
+		ts   string
+	}{
+		{"/repo/nine-digits", "2026-11-01T20:10:37.123456789Z"},
+		{"/repo/one-digit", "2026-11-01T20:10:37.1Z"},
+		{"/repo/no-fraction-earlier", "2026-11-01T20:10:36Z"},
+		{"/repo/no-fraction-later", "2026-11-01T20:10:38Z"},
+	}
+	for _, r := range rows {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO project_recents (project_path, last_used_at) VALUES (?, ?)`,
+			r.path, r.ts); err != nil {
+			t.Fatalf("insert %s: %v", r.path, err)
+		}
+	}
+
+	got, err := s.ListRecents(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListRecents: %v", err)
+	}
+	want := []string{
+		"/repo/no-fraction-later",   // :38 — newest
+		"/repo/nine-digits",         // :37.123456789
+		"/repo/one-digit",           // :37.1
+		"/repo/no-fraction-earlier", // :36 — oldest
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ListRecents returned %d rows, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("recents[%d] = %q, want %q (TEXT sort is not chronological; sort by julianday)", i, got[i], want[i])
+		}
+	}
+}
+
+// TestRecentsStore_CapToNKeepsNewest pins that the cap uses the same instant
+// ordering, so a mixed-shape table never truncates the wrong end.
+func TestRecentsStore_CapToNKeepsNewest(t *testing.T) {
+	db := newTestRecentsDB(t)
+	ctx := context.Background()
+	s := NewRecentsStore(db)
+
+	rows := []struct {
+		path string
+		ts   string
+	}{
+		{"/repo/oldest", "2026-11-01T20:10:36Z"},
+		{"/repo/mid", "2026-11-01T20:10:37.1Z"},
+		{"/repo/newest", "2026-11-01T20:10:37.123456789Z"},
+	}
+	for _, r := range rows {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO project_recents (project_path, last_used_at) VALUES (?, ?)`,
+			r.path, r.ts); err != nil {
+			t.Fatalf("insert %s: %v", r.path, err)
+		}
+	}
+
+	if _, err := s.CapToN(ctx, 2); err != nil {
+		t.Fatalf("CapToN: %v", err)
+	}
+	got, err := s.ListRecents(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListRecents: %v", err)
+	}
+	want := []string{"/repo/newest", "/repo/mid"}
+	if len(got) != len(want) {
+		t.Fatalf("after CapToN(2) got %d rows %v, want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("kept[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

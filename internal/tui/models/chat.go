@@ -2236,7 +2236,11 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 func (m *ChatModel) updateViewport() {
 	var content strings.Builder
 
-	thinSep := m.separatorStyle.Render(strings.Repeat("─", m.width-6))
+	// Clamp like the other width math in this file (chat.go:3749,
+	// search.go:363): m.width is 0 until a WindowSizeMsg arrives, and
+	// strings.Repeat panics on a negative count. A headless test program
+	// (and any early render before the first size event) hits exactly that.
+	thinSep := m.separatorStyle.Render(strings.Repeat("─", max(m.width-6, 1)))
 
 	// Turn separator: a more visible line with turn number
 	turnSepStyle := lipgloss.NewStyle().
