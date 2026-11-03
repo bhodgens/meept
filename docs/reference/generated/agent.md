@@ -1492,10 +1492,8 @@ Package agent provides the agent loop and related components.
 - [type SemanticIndex](<#SemanticIndex>)
   - [func NewSemanticIndex\(client EmbeddingClient\) \*SemanticIndex](<#NewSemanticIndex>)
   - [func \(idx \*SemanticIndex\) BuildIndex\(ctx context.Context\) error](<#SemanticIndex.BuildIndex>)
-  - [func \(idx \*SemanticIndex\) BuildIndexWithCancel\(ctx context.Context\) \(cancel context.CancelFunc, err error\)](<#SemanticIndex.BuildIndexWithCancel>)
   - [func \(idx \*SemanticIndex\) IsReady\(\) bool](<#SemanticIndex.IsReady>)
   - [func \(idx \*SemanticIndex\) Match\(input string, minConfidence float64\) \*SemanticMatch](<#SemanticIndex.Match>)
-  - [func \(idx \*SemanticIndex\) Stop\(\)](<#SemanticIndex.Stop>)
 - [type SemanticMatch](<#SemanticMatch>)
 - [type SessionBeforeCompactData](<#SessionBeforeCompactData>)
 - [type SessionBeforeTreeData](<#SessionBeforeTreeData>)
@@ -4857,6 +4855,11 @@ AgentSpec defines the specification for creating an agent.
 	    // index from these, so a new specialist is routable with a frontmatter
 	    // edit alone. Empty = the agent declares no lanes.
 	    Intents []string `json:"intents,omitempty"`
+	    // Groups lists the agent groups this agent belongs to, from the AGENT.md
+	    // `groups:` frontmatter (C4). Scalar-replacement semantics: discovery
+	    // shadowing and mergeSpec both take the higher tier's list OUTRIGHT
+	    // (model_alias precedent), never a union with the shadowed base list.
+	    Groups []string `json:"groups,omitempty"`
 	    // Purpose is a description of what this agent does (used in system prompt).
 	    Purpose string `json:"purpose"`
 	    // Model can be an alias name (e.g., "coder"), a direct model reference (e.g., "zai/glm-4.7"),
@@ -15830,13 +15833,6 @@ NewSemanticIndex creates a new semantic index.
 
 BuildIndex pre\-computes embeddings for all intent definitions.
 
-<a name="SemanticIndex.BuildIndexWithCancel"></a>
-### func \(\*SemanticIndex\) BuildIndexWithCancel
-
-	func (idx *SemanticIndex) BuildIndexWithCancel(ctx context.Context) (cancel context.CancelFunc, err error)
-
-BuildIndexWithCancel is like BuildIndex but returns a cancellation function so callers can shut down the background goroutine cleanly.
-
 <a name="SemanticIndex.IsReady"></a>
 ### func \(\*SemanticIndex\) IsReady
 
@@ -15850,13 +15846,6 @@ IsReady returns true if the index is built and ready.
 	func (idx *SemanticIndex) Match(input string, minConfidence float64) *SemanticMatch
 
 Match finds the best matching intent by semantic similarity.
-
-<a name="SemanticIndex.Stop"></a>
-### func \(\*SemanticIndex\) Stop
-
-	func (idx *SemanticIndex) Stop()
-
-Stop cancels the background build\-index goroutine \(if any\) and waits for it to exit, preventing goroutine leaks. AGENT\-10 FIX
 
 <a name="SemanticMatch"></a>
 ## type SemanticMatch
