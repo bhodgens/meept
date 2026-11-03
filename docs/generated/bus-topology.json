@@ -38,7 +38,7 @@
     "agent.action": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8431,
+        "line": 8531,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -49,7 +49,7 @@
     "agent.iteration.completed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8639,
+        "line": 8739,
         "payload_keys": [
           "agent_id",
           "conversation_id",
@@ -61,7 +61,7 @@
     "agent.lifecycle.ended": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2918,
+        "line": 2958,
         "payload_keys": [],
         "via_const": true
       }
@@ -69,7 +69,7 @@
     "agent.lifecycle.started": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2858,
+        "line": 2898,
         "payload_keys": [],
         "via_const": true
       }
@@ -105,7 +105,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 8496,
+        "line": 8596,
         "payload_keys": [
           "detail",
           "iteration",
@@ -116,7 +116,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 8550,
+        "line": 8650,
         "payload_keys": [
           "conversation_id",
           "detail",
@@ -131,7 +131,7 @@
     "agent.progress.synthesized": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2221,
+        "line": 2453,
         "payload_keys": []
       }
     ],
@@ -146,7 +146,7 @@
     "agent.queue.followup.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8621,
+        "line": 8721,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -183,7 +183,7 @@
     "agent.queue.steer.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8597,
+        "line": 8697,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -196,24 +196,24 @@
     "agent.quota_wait": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2303,
+        "line": 2343,
         "payload_keys": []
       },
       {
         "file": "internal/agent/parked_turn.go",
-        "line": 710,
+        "line": 715,
         "payload_keys": []
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9608,
+        "line": 10081,
         "payload_keys": []
       }
     ],
     "agent.result": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8461,
+        "line": 8561,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -224,7 +224,7 @@
     "agent.state.changed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2292,
+        "line": 2332,
         "payload_keys": [],
         "via_const": true
       }
@@ -232,13 +232,13 @@
     "agent.workers.list": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 139,
+        "line": 165,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 139,
+        "line": 165,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "agent.workers.list"
@@ -318,13 +318,13 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 88,
+        "line": 114,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 88,
+        "line": 114,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "chat"
@@ -391,7 +391,7 @@
     "collaboration.consensus_reached": [
       {
         "file": "internal/agent/collaboration_pair_driver.go",
-        "line": 227,
+        "line": 255,
         "payload_keys": [],
         "via_helper": true
       }
@@ -399,56 +399,18 @@
     "collaboration.divergence": [
       {
         "file": "internal/agent/collaboration_diff_driver.go",
-        "line": 119,
+        "line": 124,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/collaboration_diff_driver.go",
-        "line": 132,
+        "line": 137,
         "payload_keys": [],
         "via_helper": true
       }
     ],
     "collaboration.error": [
-      {
-        "file": "internal/agent/collaboration_diff_driver.go",
-        "line": 101,
-        "payload_keys": [],
-        "via_helper": true
-      },
-      {
-        "file": "internal/agent/collaboration_diff_driver.go",
-        "line": 148,
-        "payload_keys": [],
-        "via_helper": true
-      },
-      {
-        "file": "internal/agent/collaboration_pair_driver.go",
-        "line": 117,
-        "payload_keys": [],
-        "via_helper": true
-      },
-      {
-        "file": "internal/agent/collaboration_team_driver.go",
-        "line": 222,
-        "payload_keys": [],
-        "via_helper": true
-      },
-      {
-        "file": "internal/agent/collaboration_team_driver.go",
-        "line": 245,
-        "payload_keys": [],
-        "via_helper": true
-      }
-    ],
-    "collaboration.phase_completed": [
-      {
-        "file": "internal/agent/collaboration_diff_driver.go",
-        "line": 93,
-        "payload_keys": [],
-        "via_helper": true
-      },
       {
         "file": "internal/agent/collaboration_diff_driver.go",
         "line": 106,
@@ -457,7 +419,45 @@
       },
       {
         "file": "internal/agent/collaboration_diff_driver.go",
-        "line": 139,
+        "line": 153,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_pair_driver.go",
+        "line": 122,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_team_driver.go",
+        "line": 227,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_team_driver.go",
+        "line": 250,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "collaboration.phase_completed": [
+      {
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 98,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 111,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/agent/collaboration_diff_driver.go",
+        "line": 144,
         "payload_keys": [],
         "via_helper": true
       }
@@ -473,19 +473,19 @@
     "collaboration.result": [
       {
         "file": "internal/agent/collaboration_diff_driver.go",
-        "line": 158,
+        "line": 163,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/collaboration_pair_driver.go",
-        "line": 126,
+        "line": 131,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/collaboration_team_driver.go",
-        "line": 257,
+        "line": 262,
         "payload_keys": [],
         "via_helper": true
       }
@@ -493,7 +493,7 @@
     "collaboration.session_created": [
       {
         "file": "internal/agent/collaboration_diff_driver.go",
-        "line": 71,
+        "line": 76,
         "payload_keys": [],
         "via_helper": true
       },
@@ -505,13 +505,13 @@
       },
       {
         "file": "internal/agent/collaboration_pair_driver.go",
-        "line": 96,
+        "line": 101,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/collaboration_team_driver.go",
-        "line": 199,
+        "line": 204,
         "payload_keys": [],
         "via_helper": true
       }
@@ -519,13 +519,13 @@
     "collaboration.turn_completed": [
       {
         "file": "internal/agent/collaboration_pair_driver.go",
-        "line": 190,
+        "line": 207,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/collaboration_pair_driver.go",
-        "line": 217,
+        "line": 245,
         "payload_keys": [],
         "via_helper": true
       }
@@ -533,7 +533,7 @@
     "config.reload": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 123,
+        "line": 149,
         "payload_keys": [],
         "via_helper": true
       }
@@ -541,7 +541,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2712,
+        "line": 2884,
         "payload_keys": [
           "event"
         ]
@@ -550,7 +550,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2359,
+        "line": 2523,
         "payload_keys": [
           "event"
         ]
@@ -559,7 +559,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3665,
+        "line": 3928,
         "payload_keys": []
       }
     ],
@@ -580,7 +580,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5662,
+        "line": 5937,
         "payload_keys": [
           "name",
           "tags",
@@ -670,7 +670,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8570,
+        "line": 8670,
         "payload_keys": [
           "conversation_id",
           "total_tokens"
@@ -680,13 +680,13 @@
     "memory.query": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 107,
+        "line": 133,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 107,
+        "line": 133,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "memory.query"
@@ -695,13 +695,13 @@
     "memory.recent": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 108,
+        "line": 134,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 108,
+        "line": 134,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "memory.recent"
@@ -770,19 +770,19 @@
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 890,
+        "line": 1087,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 944,
+        "line": 1141,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 2075,
+        "line": 2272,
         "payload_keys": [],
         "via_helper": true
       }
@@ -861,7 +861,7 @@
     "pair.session_created": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 1730,
+        "line": 1927,
         "payload_keys": [],
         "via_helper": true
       }
@@ -982,13 +982,13 @@
     "queue.claim": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 179,
+        "line": 205,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 179,
+        "line": 205,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.claim"
@@ -997,13 +997,13 @@
     "queue.complete": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 180,
+        "line": 206,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 180,
+        "line": 206,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.complete"
@@ -1012,13 +1012,13 @@
     "queue.dead_letter": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 187,
+        "line": 213,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 187,
+        "line": 213,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.dead_letter"
@@ -1027,13 +1027,13 @@
     "queue.dead_stats": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 188,
+        "line": 214,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 188,
+        "line": 214,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.dead_stats"
@@ -1048,13 +1048,13 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 178,
+        "line": 204,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 178,
+        "line": 204,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.enqueue"
@@ -1063,13 +1063,13 @@
     "queue.fail": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 181,
+        "line": 207,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 181,
+        "line": 207,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.fail"
@@ -1078,13 +1078,13 @@
     "queue.get": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 183,
+        "line": 209,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 183,
+        "line": 209,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.get"
@@ -1161,13 +1161,13 @@
     "queue.list": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 184,
+        "line": 210,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 184,
+        "line": 210,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.list"
@@ -1176,13 +1176,13 @@
     "queue.recover": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 186,
+        "line": 212,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 186,
+        "line": 212,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.recover"
@@ -1199,13 +1199,13 @@
     "queue.retry": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 182,
+        "line": 208,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 182,
+        "line": 208,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.retry"
@@ -1214,13 +1214,13 @@
     "queue.stats": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 185,
+        "line": 211,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 185,
+        "line": 211,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "queue.stats"
@@ -1380,13 +1380,13 @@
     "session.attach": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 145,
+        "line": 171,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 145,
+        "line": 171,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.attach"
@@ -1395,13 +1395,13 @@
     "session.branch.navigate": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 160,
+        "line": 186,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 160,
+        "line": 186,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.branch.navigate"
@@ -1410,13 +1410,13 @@
     "session.branches.list": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 161,
+        "line": 187,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 161,
+        "line": 187,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.branches.list"
@@ -1425,13 +1425,13 @@
     "session.create": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 142,
+        "line": 168,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 142,
+        "line": 168,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.create"
@@ -1440,13 +1440,13 @@
     "session.delete": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 147,
+        "line": 173,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 147,
+        "line": 173,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.delete"
@@ -1455,13 +1455,13 @@
     "session.detach": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 146,
+        "line": 172,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 146,
+        "line": 172,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.detach"
@@ -1470,13 +1470,13 @@
     "session.fork": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 162,
+        "line": 188,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 162,
+        "line": 188,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.fork"
@@ -1485,13 +1485,13 @@
     "session.generate_description": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 151,
+        "line": 177,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 151,
+        "line": 177,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.generate_description"
@@ -1500,13 +1500,13 @@
     "session.get": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 144,
+        "line": 170,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 144,
+        "line": 170,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.get"
@@ -1515,13 +1515,13 @@
     "session.get_child_tasks": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 159,
+        "line": 185,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 159,
+        "line": 185,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.get_child_tasks"
@@ -1530,13 +1530,13 @@
     "session.get_most_recent": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 153,
+        "line": 179,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 153,
+        "line": 179,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.get_most_recent"
@@ -1567,13 +1567,13 @@
     "session.list": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 143,
+        "line": 169,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 143,
+        "line": 169,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.list"
@@ -1582,13 +1582,13 @@
     "session.messages.get": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 149,
+        "line": 175,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 149,
+        "line": 175,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.messages.get"
@@ -1597,13 +1597,13 @@
     "session.messages.save": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 148,
+        "line": 174,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 148,
+        "line": 174,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.messages.save"
@@ -1612,13 +1612,13 @@
     "session.refresh_title": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 155,
+        "line": 181,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 155,
+        "line": 181,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.refresh_title"
@@ -1635,13 +1635,13 @@
     "session.set_foreground": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 157,
+        "line": 183,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 157,
+        "line": 183,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.set_foreground"
@@ -1650,13 +1650,13 @@
     "session.set_last_user_message": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 158,
+        "line": 184,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 158,
+        "line": 184,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.set_last_user_message"
@@ -1665,13 +1665,13 @@
     "session.set_nofence": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 156,
+        "line": 182,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 156,
+        "line": 182,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.set_nofence"
@@ -1680,13 +1680,13 @@
     "session.stop": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 154,
+        "line": 180,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 154,
+        "line": 180,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.stop"
@@ -1695,7 +1695,7 @@
     "session.title_updated": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9771,
+        "line": 9871,
         "payload_keys": [
           "description",
           "name",
@@ -1711,13 +1711,13 @@
     "session.tree.get": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 163,
+        "line": 189,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 163,
+        "line": 189,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.tree.get"
@@ -1726,13 +1726,13 @@
     "session.update_description": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 150,
+        "line": 176,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 150,
+        "line": 176,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "session.update_description"
@@ -1741,13 +1741,13 @@
     "sessions.designated": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 152,
+        "line": 178,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 152,
+        "line": 178,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "sessions.designated"
@@ -1756,13 +1756,13 @@
     "status.request": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 97,
+        "line": 123,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 97,
+        "line": 123,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "status"
@@ -1771,7 +1771,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8868,
+        "line": 9241,
         "payload_keys": []
       }
     ],
@@ -1857,7 +1857,7 @@
     "task.approved": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 2069,
+        "line": 2266,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1865,13 +1865,13 @@
     "task.cancel": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 171,
+        "line": 197,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 171,
+        "line": 197,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "task.cancel"
@@ -1896,7 +1896,7 @@
     "task.create": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 166,
+        "line": 192,
         "payload_keys": [],
         "via_helper": true
       },
@@ -1908,7 +1908,7 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 166,
+        "line": 192,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "task.create"
@@ -1917,7 +1917,7 @@
     "task.delete": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 172,
+        "line": 198,
         "payload_keys": [],
         "via_helper": true
       },
@@ -1929,7 +1929,7 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 172,
+        "line": 198,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "task.delete"
@@ -1957,19 +1957,19 @@
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 598,
+        "line": 795,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 1660,
+        "line": 1857,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 1672,
+        "line": 1869,
         "payload_keys": [],
         "via_helper": true
       },
@@ -1997,13 +1997,13 @@
     "task.get": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 167,
+        "line": 193,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 167,
+        "line": 193,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "task.get"
@@ -2020,7 +2020,7 @@
     "task.interview": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 1008,
+        "line": 1205,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2028,7 +2028,7 @@
     "task.link": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 173,
+        "line": 199,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2040,7 +2040,7 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 173,
+        "line": 199,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "task.link"
@@ -2049,13 +2049,13 @@
     "task.list": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 168,
+        "line": 194,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 168,
+        "line": 194,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "task.list"
@@ -2064,13 +2064,13 @@
     "task.list_extended": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 169,
+        "line": 195,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 169,
+        "line": 195,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "task.list_extended"
@@ -2079,7 +2079,7 @@
     "task.pending_approval": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 1979,
+        "line": 2176,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2093,13 +2093,13 @@
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 881,
+        "line": 1078,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/strategic.go",
-        "line": 935,
+        "line": 1132,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2133,7 +2133,7 @@
     "task.rejected": [
       {
         "file": "internal/agent/strategic.go",
-        "line": 2105,
+        "line": 2302,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2184,13 +2184,13 @@
     "task.steps": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 175,
+        "line": 201,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 175,
+        "line": 201,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "task.steps"
@@ -2199,7 +2199,7 @@
     "task.unlink": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 174,
+        "line": 200,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2211,7 +2211,7 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 174,
+        "line": 200,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "task.unlink"
@@ -2220,7 +2220,7 @@
     "task.update": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 170,
+        "line": 196,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2262,7 +2262,7 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 170,
+        "line": 196,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "task.update"
@@ -2298,13 +2298,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 7474,
+        "line": 7847,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 7511,
+        "line": 7884,
         "payload_keys": [],
         "via_const": true
       }
@@ -2348,13 +2348,13 @@
     "worker.add": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 191,
+        "line": 217,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 191,
+        "line": 217,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "worker.add"
@@ -2363,13 +2363,13 @@
     "worker.list": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 193,
+        "line": 219,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 193,
+        "line": 219,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "worker.list"
@@ -2394,13 +2394,13 @@
     "worker.remove": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 192,
+        "line": 218,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 192,
+        "line": 218,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "worker.remove"
@@ -2417,13 +2417,13 @@
     "worker.scale": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 195,
+        "line": 221,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 195,
+        "line": 221,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "worker.scale"
@@ -2440,13 +2440,13 @@
     "worker.stats": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 194,
+        "line": 220,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 194,
+        "line": 220,
         "payload_keys": [],
         "via_rpc_proxy": true,
         "method": "worker.stats"
@@ -2505,8 +2505,15 @@
     "agent.event.*": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2191,
+        "line": 2423,
         "subscriber_id": "progress-synthesizer"
+      }
+    ],
+    "agent.event.tool_execution_end": [
+      {
+        "file": "internal/daemon/otlp_traces_wiring.go",
+        "line": 196,
+        "subscriber_id": "otlp-trace-tool-calls"
       }
     ],
     "agent.progress": [
@@ -2555,7 +2562,7 @@
     "agent.workers.result": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 139,
+        "line": 165,
         "subscriber_id": "rpc-proxy:agent.workers.list",
         "via_rpc_proxy": true
       }
@@ -2600,7 +2607,7 @@
     "chat.response": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 88,
+        "line": 114,
         "subscriber_id": "rpc-proxy:chat",
         "via_rpc_proxy": true
       }
@@ -2669,7 +2676,7 @@
     "combinedTopic": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 411,
+        "line": 437,
         "subscriber_id": "subID"
       }
     ],
@@ -2684,7 +2691,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 3643,
+        "line": 3906,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2699,7 +2706,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4500,
+        "line": 4775,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -2764,7 +2771,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/metrics/collector.go",
-        "line": 231,
+        "line": 239,
         "subscriber_id": "metrics-collector-tokens"
       }
     ],
@@ -2785,13 +2792,13 @@
     "memory.result": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 107,
+        "line": 133,
         "subscriber_id": "rpc-proxy:memory.query",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 108,
+        "line": 134,
         "subscriber_id": "rpc-proxy:memory.recent",
         "via_rpc_proxy": true
       }
@@ -2903,6 +2910,18 @@
         "file": "internal/daemon/evolver_approval_bridge.go",
         "line": 75,
         "subscriber_id": "evolver-approval-bridge"
+      },
+      {
+        "file": "internal/daemon/gate_park_wiring.go",
+        "line": 192,
+        "subscriber_id": "gate-resume-pump"
+      }
+    ],
+    "plan.submitting": [
+      {
+        "file": "internal/daemon/gate_park_wiring.go",
+        "line": 194,
+        "subscriber_id": "gate-park-pump"
       }
     ],
     "project.set": [
@@ -3073,67 +3092,67 @@
     "queue.result": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 178,
+        "line": 204,
         "subscriber_id": "rpc-proxy:queue.enqueue",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 179,
+        "line": 205,
         "subscriber_id": "rpc-proxy:queue.claim",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 180,
+        "line": 206,
         "subscriber_id": "rpc-proxy:queue.complete",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 181,
+        "line": 207,
         "subscriber_id": "rpc-proxy:queue.fail",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 182,
+        "line": 208,
         "subscriber_id": "rpc-proxy:queue.retry",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 183,
+        "line": 209,
         "subscriber_id": "rpc-proxy:queue.get",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 184,
+        "line": 210,
         "subscriber_id": "rpc-proxy:queue.list",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 185,
+        "line": 211,
         "subscriber_id": "rpc-proxy:queue.stats",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 186,
+        "line": 212,
         "subscriber_id": "rpc-proxy:queue.recover",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 187,
+        "line": 213,
         "subscriber_id": "rpc-proxy:queue.dead_letter",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 188,
+        "line": 214,
         "subscriber_id": "rpc-proxy:queue.dead_stats",
         "via_rpc_proxy": true
       }
@@ -3169,7 +3188,7 @@
     "responseTopic": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 242,
+        "line": 268,
         "subscriber_id": "msgID"
       }
     ],
@@ -3304,133 +3323,133 @@
     "session.result": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 142,
+        "line": 168,
         "subscriber_id": "rpc-proxy:session.create",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 143,
+        "line": 169,
         "subscriber_id": "rpc-proxy:session.list",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 144,
+        "line": 170,
         "subscriber_id": "rpc-proxy:session.get",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 145,
+        "line": 171,
         "subscriber_id": "rpc-proxy:session.attach",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 146,
+        "line": 172,
         "subscriber_id": "rpc-proxy:session.detach",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 147,
+        "line": 173,
         "subscriber_id": "rpc-proxy:session.delete",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 148,
+        "line": 174,
         "subscriber_id": "rpc-proxy:session.messages.save",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 149,
+        "line": 175,
         "subscriber_id": "rpc-proxy:session.messages.get",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 150,
+        "line": 176,
         "subscriber_id": "rpc-proxy:session.update_description",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 151,
+        "line": 177,
         "subscriber_id": "rpc-proxy:session.generate_description",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 152,
+        "line": 178,
         "subscriber_id": "rpc-proxy:sessions.designated",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 153,
+        "line": 179,
         "subscriber_id": "rpc-proxy:session.get_most_recent",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 154,
+        "line": 180,
         "subscriber_id": "rpc-proxy:session.stop",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 155,
+        "line": 181,
         "subscriber_id": "rpc-proxy:session.refresh_title",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 156,
+        "line": 182,
         "subscriber_id": "rpc-proxy:session.set_nofence",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 157,
+        "line": 183,
         "subscriber_id": "rpc-proxy:session.set_foreground",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 158,
+        "line": 184,
         "subscriber_id": "rpc-proxy:session.set_last_user_message",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 159,
+        "line": 185,
         "subscriber_id": "rpc-proxy:session.get_child_tasks",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 160,
+        "line": 186,
         "subscriber_id": "rpc-proxy:session.branch.navigate",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 161,
+        "line": 187,
         "subscriber_id": "rpc-proxy:session.branches.list",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 162,
+        "line": 188,
         "subscriber_id": "rpc-proxy:session.fork",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 163,
+        "line": 189,
         "subscriber_id": "rpc-proxy:session.tree.get",
         "via_rpc_proxy": true
       }
@@ -3526,14 +3545,14 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8794,
+        "line": 9167,
         "subscriber_id": "status-handler"
       }
     ],
     "status.response": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 97,
+        "line": 123,
         "subscriber_id": "rpc-proxy:status",
         "via_rpc_proxy": true
       }
@@ -3541,7 +3560,7 @@
     "step.*": [
       {
         "file": "internal/metrics/collector.go",
-        "line": 207,
+        "line": 215,
         "subscriber_id": "metrics-collector-review"
       }
     ],
@@ -3661,61 +3680,61 @@
     "task.result": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 166,
+        "line": 192,
         "subscriber_id": "rpc-proxy:task.create",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 167,
+        "line": 193,
         "subscriber_id": "rpc-proxy:task.get",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 168,
+        "line": 194,
         "subscriber_id": "rpc-proxy:task.list",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 169,
+        "line": 195,
         "subscriber_id": "rpc-proxy:task.list_extended",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 170,
+        "line": 196,
         "subscriber_id": "rpc-proxy:task.update",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 171,
+        "line": 197,
         "subscriber_id": "rpc-proxy:task.cancel",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 172,
+        "line": 198,
         "subscriber_id": "rpc-proxy:task.delete",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 173,
+        "line": 199,
         "subscriber_id": "rpc-proxy:task.link",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 174,
+        "line": 200,
         "subscriber_id": "rpc-proxy:task.unlink",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 175,
+        "line": 201,
         "subscriber_id": "rpc-proxy:task.steps",
         "via_rpc_proxy": true
       }
@@ -3730,7 +3749,7 @@
     "task.step_completed": [
       {
         "file": "internal/daemon/otlp_traces_wiring.go",
-        "line": 89,
+        "line": 181,
         "subscriber_id": "otlp-trace-steps"
       },
       {
@@ -3817,7 +3836,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8952,
+        "line": 9334,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],
@@ -3851,7 +3870,7 @@
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 455,
+        "line": 481,
         "subscriber_id": "subID+\"-\"+topic"
       },
       {
@@ -3883,7 +3902,7 @@
       },
       {
         "file": "internal/daemon/otlp_traces_wiring.go",
-        "line": 69,
+        "line": 155,
         "subscriber_id": "otlp-trace-turns",
         "typed": true
       }
@@ -3891,7 +3910,7 @@
     "worker.*": [
       {
         "file": "internal/metrics/collector.go",
-        "line": 220,
+        "line": 228,
         "subscriber_id": "metrics-collector-worker"
       }
     ],
@@ -3922,31 +3941,31 @@
     "worker.result": [
       {
         "file": "internal/rpc/proxy.go",
-        "line": 191,
+        "line": 217,
         "subscriber_id": "rpc-proxy:worker.add",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 192,
+        "line": 218,
         "subscriber_id": "rpc-proxy:worker.remove",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 193,
+        "line": 219,
         "subscriber_id": "rpc-proxy:worker.list",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 194,
+        "line": 220,
         "subscriber_id": "rpc-proxy:worker.stats",
         "via_rpc_proxy": true
       },
       {
         "file": "internal/rpc/proxy.go",
-        "line": 195,
+        "line": 221,
         "subscriber_id": "rpc-proxy:worker.scale",
         "via_rpc_proxy": true
       }
@@ -4023,6 +4042,7 @@
       "task.validation_retry"
     ],
     "subscribed_not_published": [
+      "agent.event.tool_execution_end",
       "instruction.add",
       "instruction.delete",
       "instruction.execute",

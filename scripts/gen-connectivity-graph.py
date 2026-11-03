@@ -1294,11 +1294,34 @@ def extract_rpc_handlers():
 
 # Matches chi-style: r.Get("/path", handler) / r.Post("/path", handler)
 # Also: r.HandleFunc("/path", handler) / mux.Handle("/path", handler)
+#
+# The method-name alternation is not enough on its own: .Get( also matches
+# header and map lookups (r.Header.Get("Content-Type"), m.Get("json"),
+# vm.GlobalObject().Get("Array")), which landed 104 fake routes in
+# http-routes.json (Content-Type x11, Retry-After x8, Origin x6, json x5, ...).
+# A real registered path always starts with "/" or an HTTP method token
+# (mux.HandleFunc("GET /health", ...) is Go 1.22 method-prefixed routing), so
+# the extracted path is filtered on that shape.
 RE_HTTP_ROUTE = re.compile(
     r'\.(Get|Post|Put|Patch|Delete|HandleFunc|Handle|Method|MethodFunc)\(\s*'
     r'(?:"([^"]+)"|`([^`]+)`)'
     r'(?:\s*,\s*([^\)]+))?'
 )
+
+
+_HTTP_METHOD_TOKENS = ("GET ", "POST ", "PUT ", "PATCH ", "DELETE ", "HEAD ", "OPTIONS ")
+
+
+def _is_route_path(path):
+    """True if the captured string looks like a registered HTTP route.
+
+    Go 1.22 method-prefixed patterns ("GET /health") and plain rooted paths
+    ("/ws/notifications") both qualify. Header lookups (Header.Get("Origin")),
+    map lookups (m.Get("json")) and goja JS lookups (Get("Array")) do not.
+    """
+    if path.startswith("/"):
+        return True
+    return path.startswith(_HTTP_METHOD_TOKENS)
 
 
 def extract_http_routes():
@@ -1315,6 +1338,10 @@ def extract_http_routes():
             for m in RE_HTTP_ROUTE.finditer(line):
                 method = m.group(1)
                 path = m.group(2) or m.group(3) or "?"
+                # Reject header/map lookups that share the .Get( shape. A
+                # registered route is "/"-rooted or method-prefixed.
+                if not _is_route_path(path):
+                    continue
                 handler = (m.group(4) or "").strip().rstrip(",")
                 # Normalize method names
                 method_map = {
