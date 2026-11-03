@@ -43,10 +43,14 @@ type Child struct {
 	logger *slog.Logger
 	token  string
 
+	// Provider factories, injected by cmd/meept-voice (leaf 08 adapters);
+	// nil factories leave the leaf-07 stubs in place (tests).
+	sttFactory STTFactory
+	ttsFactory TTSFactory
+
 	mu        sync.Mutex
 	pipelines map[string]*pipeline // keyed by call_control_id
 	conn      net.Conn             // live text socket; nil until Run dials
-	closed    bool
 }
 
 // writeLine writes one encoded frame line to the text socket, serialized
@@ -141,6 +145,20 @@ func (c *Child) pipelineCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.pipelines)
+}
+
+// SetProviderFactories injects the leaf-08 provider constructors. Nil
+// arguments keep the stubs (tests); call before Run in production - the
+// lock here makes a test-time swap race-free against a running child.
+func (c *Child) SetProviderFactories(stt STTFactory, tts TTSFactory) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if stt != nil {
+		c.sttFactory = stt
+	}
+	if tts != nil {
+		c.ttsFactory = tts
+	}
 }
 
 // Run connects the text socket, reads the start token from TokenReader
@@ -243,6 +261,8 @@ func (c *Child) handleLine(ctx context.Context, line string) error {
 	case voiceframe.EventEnd:
 		c.handleEnd(frame)
 		return nil
+	case "keys": // voiceframe keys event (leaf-07 C1 shape; constant lives here: the shared codec carries no key fields)
+		return c.handleKeysFrame(line)
 	default:
 		// Unknown events (dtmf and friends) decode fine per C1; log and
 		// continue so a voicemail-tree "press 1" never errors the call.

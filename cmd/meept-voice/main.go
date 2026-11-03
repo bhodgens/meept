@@ -22,6 +22,7 @@ import (
 	"syscall"
 
 	"github.com/caimlas/meept/internal/voicechild"
+	"github.com/caimlas/meept/internal/voicechild/providers"
 )
 
 func main() {
@@ -58,6 +59,23 @@ func run(ctx context.Context, textSocket, audioDir string) error {
 		AudioDir:       audioDir,
 		TokenReader:    os.Stdin, // start token via stdin ONLY (never argv/env)
 	})
+	// Leaf 08: real provider adapters behind the leaf-07 interfaces. The
+	// vendors and models are fixed here (A1: Deepgram STT, OpenAI TTS);
+	// keys arrive per call over the C1 keys frame and live in memory only.
+	child.SetProviderFactories(
+		func(key string, sampleRate int) (voicechild.STTProvider, error) {
+			return providers.NewSTT(providers.ProviderConfig{
+				Vendor:     "deepgram",
+				SampleRate: sampleRate,
+			}, key)
+		},
+		func(key string, sampleRate int) (voicechild.TTSProvider, error) {
+			return providers.NewTTS(providers.ProviderConfig{
+				Vendor:     "openai",
+				SampleRate: sampleRate,
+			}, key)
+		},
+	)
 	return child.Run(ctx)
 }
 

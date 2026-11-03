@@ -47,7 +47,6 @@ type pipeline struct {
 	audioOut  net.Conn    // child->daemon PCM (C2 <ccid>.out)
 	audioIn   net.Conn    // daemon->child PCM (C2 <ccid>.in)
 	audioDir  string
-	workerRun func() // jargo worker Run wrapper; nil in pure-stub tests
 
 	// playback state, guarded by playMu
 	playMu      sync.Mutex
