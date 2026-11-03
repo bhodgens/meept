@@ -243,11 +243,12 @@ type AudioPair struct {
 	ccid string
 	dir  string
 
-	mu      sync.Mutex
-	in      net.Conn // accepted from <ccid>.in listener
-	out     net.Conn // accepted from <ccid>.out listener
-	closed  bool
-	closeFn func() // closes both listeners; set by NewAudioPair
+	mu        sync.Mutex
+	in        net.Conn // accepted from <ccid>.in listener
+	out       net.Conn // accepted from <ccid>.out listener
+	pendingIn [][]byte // writes buffered from before the child dialed .in
+	closed    bool
+	closeFn   func() // closes both listeners; set by NewAudioPair
 
 	closeOnce sync.Once
 }
@@ -305,7 +306,16 @@ func NewAudioPair(dir, ccid string) (*AudioPair, error) {
 			return
 		}
 		p.in = conn
+		pending := p.pendingIn
+		p.pendingIn = nil
 		p.mu.Unlock()
+		// Flush pre-connect writes in order. Errors here mean the child
+		// dialed and immediately died; the next Write surfaces it.
+		for _, chunk := range pending {
+			if _, err := conn.Write(chunk); err != nil {
+				return
+			}
+		}
 	}()
 	go func() {
 		conn, acceptErr := outLn.Accept()
@@ -330,6 +340,20 @@ func NewAudioPair(dir, ccid string) (*AudioPair, error) {
 func (p *AudioPair) WriteToChild(pcm []byte) error {
 	p.mu.Lock()
 	conn := p.in
+	if conn == nil && !p.closed {
+		// Pre-dial: buffer the chunk for flush-on-accept. The media WS
+		// goes live before the child dials on real calls, and the splice
+		// must not error (or lose audio) over that ordering.
+		if len(p.pendingIn)+len(pcm) <= maxPendingInBytes {
+			cp := make([]byte, len(pcm))
+			copy(cp, pcm)
+			p.pendingIn = append(p.pendingIn, cp)
+			p.mu.Unlock()
+			return nil
+		}
+		p.mu.Unlock()
+		return fmt.Errorf("voice: %s.in pre-connect buffer full", p.ccid)
+	}
 	p.mu.Unlock()
 	if conn == nil {
 		return fmt.Errorf("voice: child not connected on %s.in", p.ccid)
@@ -339,6 +363,10 @@ func (p *AudioPair) WriteToChild(pcm []byte) error {
 	}
 	return nil
 }
+
+// maxPendingInBytes bounds the pre-connect write buffer: 128 x 640-byte
+// L16@16k chunks is 2.56 s of audio, far past any realistic dial window.
+const maxPendingInBytes = 128 * 640
 
 // ReadFromChild reads raw PCM from the child over the <ccid>.out socket.
 // Errors while the child has not connected yet or after Close.
@@ -367,6 +395,7 @@ func (p *AudioPair) Close() error {
 		p.in = nil
 		out := p.out
 		p.out = nil
+		p.pendingIn = nil
 		closeFn := p.closeFn
 		p.mu.Unlock()
 

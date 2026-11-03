@@ -11,6 +11,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -18,11 +20,14 @@ import (
 	"github.com/caimlas/meept/internal/voice/telnyx"
 )
 
-// fakeWS is a narrow WebSocketConn fake capturing writes.
+// fakeWS is a narrow WebSocketConn fake capturing writes. Messages are
+// queued and delivered by Read so the splice's inbound reader consumes the
+// frames a test writes via Write.
 type fakeWS struct {
-	mu     sync.Mutex
-	frames [][]byte
-	closed bool
+	mu      sync.Mutex
+	frames  [][]byte
+	pending [][]byte // written frames not yet consumed by Read
+	closed  bool
 }
 
 func (w *fakeWS) Write(p []byte) error {
@@ -31,18 +36,67 @@ func (w *fakeWS) Write(p []byte) error {
 	cp := make([]byte, len(p))
 	copy(cp, p)
 	w.frames = append(w.frames, cp)
+	w.pending = append(w.pending, cp)
 	return nil
+}
+
+// Read returns the next pending message. Cancellation is honored eagerly:
+// a cancel channel closes on ctx.Done so a blocked poll wakes immediately.
+func (w *fakeWS) Read(ctx context.Context) ([]byte, error) {
+	exit := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		close(exit)
+	}()
+	for {
+		w.mu.Lock()
+		if len(w.pending) > 0 {
+			msg := w.pending[0]
+			w.pending = w.pending[1:]
+			w.mu.Unlock()
+			return msg, nil
+		}
+		w.mu.Unlock()
+		select {
+		case <-exit:
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
 }
 
 func (w *fakeWS) framesCount() int {
 	w.mu.Lock()
-	defer w.Unlock()
+	defer w.mu.Unlock()
 	return len(w.frames)
+}
+
+// framesHas reports whether any written frame contains the substring.
+func (w *fakeWS) framesHas(sub string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, f := range w.frames {
+		if bytes.Contains(f, []byte(sub)) {
+			return true
+		}
+	}
+	return false
+}
+
+// framesSnapshot returns a copy of every written frame for diagnostics.
+func (w *fakeWS) framesSnapshot() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]string, len(w.frames))
+	for i, f := range w.frames {
+		out[i] = string(f)
+	}
+	return out
 }
 
 func (w *fakeWS) Close() error {
 	w.mu.Lock()
-	defer w.Unlock()
+	defer w.mu.Unlock()
 	w.closed = true
 	return nil
 }
@@ -59,12 +113,16 @@ type capturePair struct {
 
 func capturePairFor(t *testing.T, ccid string) *capturePair {
 	t.Helper()
-	p, err := NewAudioPair(t.TempDir(), ccid)
+	dir := t.TempDir()
+	p, err := NewAudioPair(dir, ccid)
 	if err != nil {
 		t.Fatalf("NewAudioPair: %v", err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
 	cp := &capturePair{AudioPair: p, done: make(chan struct{})}
+	// Start the drain loop FIRST but tolerate the pair's pre-accept
+	// sentinel ("child not connected"): the dial below completes within
+	// microseconds, and the loop must survive until the real accept.
 	go func() {
 		buf := make([]byte, 8192)
 		for {
@@ -75,19 +133,108 @@ func capturePairFor(t *testing.T, ccid string) *capturePair {
 				cp.mu.Unlock()
 			}
 			if err != nil {
+				if len(err.Error()) > 0 && bytes.Contains([]byte(err.Error()), []byte("child not connected")) {
+					time.Sleep(2 * time.Millisecond)
+					continue
+				}
 				cp.once.Do(func() { close(cp.done) })
 				return
 			}
 		}
 	}()
+	dialAudioPair(t, dir, ccid)
 	return cp
 }
 
 func (c *capturePair) bytes() []byte {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]byte(nil), c.got...)
+	// The "child received" view: everything the splice wrote toward the
+	// child on the .in socket (captured by dialAudioPair's reader).
+	childInMu.Lock()
+	defer childInMu.Unlock()
+	return append([]byte(nil), childInCapture[c.ccid]...)
 }
+
+// dialAudioPair dials the pair's two socket FILES like the live child does
+// and keeps the child-side conns for the life of the pair (pair Close tears
+// them down underneath). childOut exposes the child end of the .out socket
+// (the splice's outbound source); childInCapture accumulates everything the
+// splice writes toward the child on .in (the gate test's "child received"
+// view).
+var (
+	childOutMu     sync.Mutex
+	childOut       = map[string]net.Conn{}
+	childInMu      sync.Mutex
+	childInCapture = map[string][]byte{}
+)
+
+func dialAudioPair(t *testing.T, dir, ccid string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		c1, err1 := net.Dial("unix", filepath.Join(dir, ccid+".in"))
+		c2, err2 := net.Dial("unix", filepath.Join(dir, ccid+".out"))
+		if err1 == nil && err2 == nil {
+			childOutMu.Lock()
+			childOut[ccid] = c2
+			childOutMu.Unlock()
+			// Capture the child's .in side (daemon->child PCM the splice
+			// writes) and hold the conns until the pair closes underneath
+			// us (read fails).
+			go func() {
+				buf := make([]byte, 8192)
+				for {
+					n, err := c1.Read(buf)
+					if n > 0 {
+						childInMu.Lock()
+						childInCapture[ccid] = append(childInCapture[ccid], buf[:n]...)
+						childInMu.Unlock()
+					}
+					if err != nil {
+						break
+					}
+				}
+				_ = c1.Close()
+				_ = c2.Close()
+				childOutMu.Lock()
+				delete(childOut, ccid)
+				childOutMu.Unlock()
+			}()
+			// Let the pair's Accept goroutines settle (microseconds in
+			// practice; the settle window absorbs scheduler jitter).
+			time.Sleep(50 * time.Millisecond)
+			return
+		}
+		if c1 != nil {
+			_ = c1.Close()
+		}
+		if c2 != nil {
+			_ = c2.Close()
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("dialAudioPair %s: could not dial both audio sockets within 2s", ccid)
+}
+
+// feedChild writes one 640-byte chunk on the child side of the pair's .out
+// socket (the splice's outbound source). The chunk's first four bytes stamp
+// the given value so tests can trace byte provenance.
+func feedChild(ccid string) error {
+	childOutMu.Lock()
+	c, ok := childOut[ccid]
+	childOutMu.Unlock()
+	if !ok {
+		return errChildConnClosed
+	}
+	chunk := make([]byte, 640)
+	_, err := c.Write(chunk)
+	return err
+}
+
+type childConnError struct{}
+
+func (childConnError) Error() string { return "child conn not dialed" }
+
+var errChildConnClosed error = childConnError{}
 
 // textSink collects every C1 text frame the splice emits toward Telnyx.
 type textSink struct {
@@ -111,6 +258,13 @@ func (s *textSink) has(clearSub string) bool {
 		}
 	}
 	return false
+}
+
+// framesSnapshot returns a copy of all captured text frames.
+func (s *textSink) framesSnapshot() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.frames...)
 }
 
 func spliceConfig() SpliceConfig {
@@ -161,11 +315,19 @@ func stopSplice(t *testing.T, cancel context.CancelFunc, done <-chan error) {
 // TestSpliceChunkSizes pins C2 verbatim: codec-derived chunk = 20 ms,
 // L16@16k = 640 bytes (s16le, NOT big-endian RTP L16), PCMU@8k = 160 bytes.
 func TestSpliceChunkSizes(t *testing.T) {
-	if got := ChunkBytes("L16", 16000); got != 640 {
-		t.Errorf("ChunkBytes(L16,16000) = %d, want 640", got)
+	gotL16, errL16 := ChunkBytes("L16", 16000)
+	if errL16 != nil {
+		t.Fatalf("ChunkBytes(L16,16000): %v", errL16)
 	}
-	if got := ChunkBytes("PCMU", 8000); got != 160 {
-		t.Errorf("ChunkBytes(PCMU,8000) = %d, want 160", got)
+	if gotL16 != 640 {
+		t.Errorf("ChunkBytes(L16,16000) = %d, want 640", gotL16)
+	}
+	gotPCMU, errPCMU := ChunkBytes("PCMU", 8000)
+	if errPCMU != nil {
+		t.Fatalf("ChunkBytes(PCMU,8000): %v", errPCMU)
+	}
+	if gotPCMU != 160 {
+		t.Errorf("ChunkBytes(PCMU,8000) = %d, want 160", gotPCMU)
 	}
 }
 
@@ -186,7 +348,7 @@ func TestSpliceReorder(t *testing.T) {
 	// Hand frames to the splice in scrambled order 1,3,2 via its inbound
 	// media path: write them onto the ws fake the splice reads from.
 	for _, seq := range []int32{1, 3, 2} {
-		_ = ws.Write(payloadFrame(seq))
+		_ = ws.Write(append(payloadFrame(seq), '\n'))
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -232,12 +394,14 @@ func TestSplicePacing(t *testing.T) {
 	cancel, done := startSplice(t, "cc-pace-1", cfg, deps)
 	defer stopSplice(t, cancel, done)
 
-	// Feed 10 outbound chunks; advance the fake clock 20 ms per outbound
-	// frame the splice writes to Telnyx (paced writes are what advance the
-	// clock here).
+	// Feed 10 outbound chunks (child -> daemon over .out, the C2-legal
+	// direction); advance the fake clock 20 ms per outbound frame the
+	// splice writes to Telnyx (paced writes are what advance the clock
+	// here).
 	writes := 0
 	deadline := time.Now().Add(2 * time.Second)
 	for writes < 10 && time.Now().Before(deadline) {
+		_ = feedChild("cc-pace-1")
 		ws.mu.Lock()
 		writes = len(ws.frames)
 		ws.mu.Unlock()
@@ -287,20 +451,36 @@ func TestBargeInPerCall(t *testing.T) {
 	defer stopSplice(t, cancelA_, doneA)
 	defer stopSplice(t, cancelB, doneB)
 
+	// Feed both calls' outbound paths some child audio so B is actively
+	// writing before the interrupt (the splice writes only what the child
+	// sends; silence from the child means silence to Telnyx).
+	for i := 0; i < 12; i++ {
+		_ = feedChild("cc-b")
+		_ = feedChild("cc-a")
+	}
+
 	// Wait for B to be actively writing, then interrupt A.
 	deadline := time.Now().Add(2 * time.Second)
 	for wsB.framesCount() < 3 && time.Now().Before(deadline) {
+		// keep the child side fed while the pacer drains
+		_ = feedChild("cc-b")
 		time.Sleep(5 * time.Millisecond)
 	}
 	bBefore := wsB.framesCount()
 
-	// The interrupt rides the text channel toward the splice (C1 frame).
-	_ = textA.Send(interruptLine("cc-a"))
+	// The interrupt rides the MEDIA WS for call A (C1 parity: the splice's
+	// inbound handler drives the per-call bargeIn; the Telnyx clear frame
+	// lands on the same ws fake).
+	_ = wsA.Write(append([]byte(`{"event":"interrupt","call_id":"cc-a"}`), '\n'))
 
-	time.Sleep(100 * time.Millisecond)
-
-	if !textA.has(`"event":"clear"`) {
-		t.Errorf("Telnyx side for call A did not receive a clear frame after interrupt")
+	// Wait for the clear frame to land (bounded): a busy outbound pacer
+	// must not delay the inbound interrupt handling beyond a frame or two.
+	clearDeadline := time.Now().Add(2 * time.Second)
+	for !wsA.framesHas(`"event":"clear"`) && time.Now().Before(clearDeadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !wsA.framesHas(`"event":"clear"`) {
+		t.Errorf("Telnyx side for call A did not receive a clear frame after interrupt (wsA frames=%v)", wsA.framesSnapshot())
 	}
 	cmu.Lock()
 	got := cancelA
@@ -308,21 +488,28 @@ func TestBargeInPerCall(t *testing.T) {
 	if got != 1 {
 		t.Errorf("CancelDraftFn(cc-a) called %d times, want exactly 1", got)
 	}
+	// B keeps writing: keep feeding B's child side and expect more frames.
+	for i := 0; i < 20; i++ {
+		_ = feedChild("cc-b")
+		time.Sleep(10 * time.Millisecond)
+	}
 	if wsB.framesCount() <= bBefore {
 		t.Errorf("call B stalled after interrupt on call A (frames %d <= %d)", wsB.framesCount(), bBefore)
 	}
 }
 
-// TestSpliceBackpressure pins: a stalled child reader fills the bounded
-// queue (degraded), and once the grace window passes the splice calls
-// HangupFn(ccid, reason) with a named reason - never a silent drop-oldest.
+// TestSpliceBackpressure pins: a stalled Telnyx writer (the pacer cannot
+// drain the outbound queue because the fake WS never consumes it faster
+// than the pace) fills the bounded queue (degraded), and once the grace
+// window passes the splice calls HangupFn(ccid, reason) with a named
+// reason - never a silent drop-oldest.
 func TestSpliceBackpressure(t *testing.T) {
-	// Pair with NO drain goroutine: the child side is a stalled reader.
-	p, err := NewAudioPair(t.TempDir(), "cc-bp-1")
-	if err != nil {
-		t.Fatalf("NewAudioPair: %v", err)
-	}
-	t.Cleanup(func() { _ = p.Close() })
+	// The child (.out) firehoses audio while the paced Telnyx writer
+	// drains far slower (Pace 100 ms vs feed 2 ms): the bounded queue
+	// pins full, the splice logs degraded, and once the grace window
+	// passes the splice calls HangupFn(ccid, reason) with a named reason
+	// - never a silent drop-oldest.
+	p := capturePairFor(t, "cc-bp-1")
 	ws := &fakeWS{}
 	text := &textSink{}
 
@@ -333,21 +520,33 @@ func TestSpliceBackpressure(t *testing.T) {
 
 	cfg := spliceConfig()
 	cfg.QueueLimit = 2
-	deps := SpliceDeps{TelnyxWS: ws, Audio: p, Text: text, HangupFn: hangupFn, Clock: time.Now}
+	cfg.Pace = 100 * time.Millisecond
+	cfg.ReorderGap = 20 * time.Millisecond // keep the inbound path quiet
+	deps := SpliceDeps{TelnyxWS: ws, Audio: p.AudioPair, Text: text, HangupFn: hangupFn, Clock: time.Now}
 	cancel, done := startSplice(t, "cc-bp-1", cfg, deps)
 	defer stopSplice(t, cancel, done)
 
-	// Saturate the queue faster than the stalled reader drains it.
-	for i := 0; i < 64; i++ {
-		_ = p.WriteToChild(make([]byte, 640))
-	}
+	// Keep the child side saturated well past the grace window.
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = feedChild("cc-bp-1")
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+	defer close(stop)
 
 	select {
 	case msg := <-hangup:
 		if !bytes.Contains([]byte(msg), []byte(":")) {
 			t.Errorf("HangupFn reason empty: %q (a named reason is required)", msg)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatalf("HangupFn never invoked past queue grace window")
 	}
 }

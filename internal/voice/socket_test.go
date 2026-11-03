@@ -503,10 +503,9 @@ func TestAudioPairLifecycleErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAudioPair: %v", err)
 	}
-	// No child dialed yet: both operations error, not block or panic.
-	if err := p.WriteToChild([]byte{1, 2}); err == nil {
-		t.Fatalf("WriteToChild without child must error")
-	}
+	// No child dialed yet: ReadFromChild errors (nothing to read); a small
+	// WriteToChild is buffered for flush-on-accept (leaf 06 splice writes
+	// before the child dials on live calls), and after Close it errors.
 	if _, err := p.ReadFromChild(make([]byte, 8)); err == nil {
 		t.Fatalf("ReadFromChild without child must error")
 	}
