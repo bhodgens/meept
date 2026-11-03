@@ -101,6 +101,27 @@ from daemon.go AFTER the plan system initializes — NOT inside
 inline gate was always false; found by the wiki smoke test, 2026-08-29).
 Keep this ordering if you refactor daemon startup.
 
+## Agent groups default management is opt-in (fail-closed)
+
+Two frozen defaults from the agent-groups tree
+(docs/plans/20261030-agent-groups/master.md, decisions D7 and D8 -
+that plan is the product-decision authorization):
+
+- **D7: `security.groups.default_managed` defaults FALSE.** Agents with no
+  group membership and no binding keep TODAY's behavior (spec allowlist
+  only, legacy empty-means-all registry semantics, call-time gate skipped).
+  Setting it true routes those agents through the fail-closed `default`
+  policy and arms the membership file backstop. Flipping it on an install
+  with ungrouped agents is an isolation-posture upgrade that WILL shrink
+  their access; treat it as the product decision it is.
+- **D8: an empty effective allowlist on a MANAGED subject means DENY-ALL.**
+  When a group policy is active for a subject, zero resolved allowed tools
+  denies everything at dispatch AND call time; `FilteredToolRegistry`'s
+  legacy empty=all behavior must never fire for a managed subject. This is
+  the fail-closed reading, not an opt-in: the "default" that stays fixed is
+  the legacy empty=all behavior for UNMANAGED subjects only (D7's false
+  posture).
+
 ## Automated memory-tier eviction is PROPOSED for default-on (NOT yet flipped)
 
 `memory.tiers.enabled` (tree 02 policy-automation leaf) ships default FALSE
