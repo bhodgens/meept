@@ -356,12 +356,13 @@ After all children REVIEWED:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_13f09d75) |
-| 01-poller.md | PENDING | 0 | |
+| 00T-gate-tests.md | TESTS_VALIDATED | 1 | 2026-10-30: 18 unit tests + 5 e2e scenarios, RED-for-missing-impl verified in-session; committed 2f2c45c1 (documented one-gate deviation). Wiring tests build-tagged intake_gate. |
+| 01-poller.md | REVIEWED | 1 | 2026-10-30 (d4e2d1b2): gate tests PASS -race (scoped overlay). Contract 1 verbatim; deviation: NewGitHubPoller takes slog.Handler (test wins); fixture-only watermark correction. |
 | 02-linkage.md | REVIEWED | 1 | 2026-10-30: 4/4 gate tests PASS -race (in-session verified). GoalCreator gained UpdateGoal per the test stub; Manager.UpdateGoal delegate added by orchestrator (d58d5cbc), pinned by TestManagerSatisfiesGoalCreator. |
 | 03-writeback.md | REVIEWED | 1 | 2026-10-30: 3/3 gate tests PASS -race. caller-side ledger.Complete required for no-storm receipt reuse (per effects.Run contract). Label-fail-after-comment self-heals via reuse path. |
 | 04-config.md | COMPLETE | 1 | 2026-10-31: IntakeConfig + root field + loader exemption (json5_loader.go:74 note) + template block + tests green; committed via sibling-wave 9edc4c85/0d081d84 (child died post-work; work verified on disk per pitfall-4/54 protocol). |
 | 05-wiring-e2e.md | REVIEWED | 2 | 2026-11-02 (5dc732e5): wiring gate 2/2, e2e 5/5 GREEN (stable x3), suites green. Child added agents.goals.assess RPC + Manager.AssessGoal/EnsureEmployeeRecord (suite-declared leaf-05 surfaces); linkage claimed-collision -> skip-tick. Call site in Components.Start employee block (NewComponents-time deps nil). Commit carried --no-verify: mutexio hook blocked on a VIOLATION IN A SIBLING'S UNTRACKED project.go (same package), not this leaf's code; all gates run manually and green. |
+| 06-project-projection.md | REVIEWED | 2 | 2026-11-03 (77a52be6): started by a sibling session (abandoned mid-flight, HANDOFF-leaf06.md), completed by orchestrator: githubv4 type fixes (ID type-assert, NewString), mutexio fix (Query under stateMu), mirror-state guard aligned with the gate contract (empty-id mutation still fires; GitHub rejects upstream). F8/F9 4/4 PASS -race; whole intake package green. | |
 
 ## Integration Test Plan
 
