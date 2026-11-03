@@ -280,13 +280,13 @@ files, then releases the wave.
 | 05 | COMPLETE | 1dfb8d22; 9/9 -race; FailOutcome variant added in-session for leaf 11 no_answer; done channels inbound extension test-pinned |
 | 06 | COMPLETE | 32f71d74; 5/5 -race x6, full pkg 39/39; gate-test infra fixes flagged; socket.go pre-accept buffering cross-fix (leaf-03 tests green); SpliceConfig.Codec inline mirror - leaf 14 keeps shape parity |
 | 07 | COMPLETE | 523f23af; voiceframe relocation + jargo v0.1.0 pin (6 API drifts recorded); no-jargo pin PASS; MVS upgraded transitive deps |
-| 08 | PENDING | wave C |
+| 08 | COMPLETE | ba6fd76c; 17/17 -race; wrap-vs-handroll recorded (jargo internals reused); jargo.go skeleton removed + deadcode baseline rebaselined; docs/workflows/voicechild.md added |
 | 09 | COMPLETE | f65a60bd; 6/6 -race; mutation RED-GREEN recorded; SplitSentences caps implementer-chosen |
-| 10 | PENDING | wave C |
-| 11 | PENDING | wave C - use FailOutcome(ccid, OutcomeNoAnswer, ...) for the no-answer timer |
+| 10 | COMPLETE | 9827555a; 13/13 -race; VoiceCallManager narrow interface (import cycle: voice->activity->employee->bot->comm/http); leaf 14 injects via daemon wiring |
+| 11 | COMPLETE | af3d41be; 4/4 -race; ordering test-pinned audit->claim->duplicate->allowlist; U1000 sweep of committed-file dead symbols rode this commit |
 | 12 | COMPLETE | 359e3f64; TZ differential + brief-once + hold/release-once pinned; mutexio fix (tx-based transcript RMW); brief-injection = prompt prefix (hook-registry rejection evidenced); WORKTREE INCIDENT: original .hermes worktree repointed to main by a sibling mid-leaf - leaf 12 committed via detached /tmp/voice-l12 worktree, branch pointer fast-forwarded |
-| 13 | PENDING | wave C |
-| 14 | PENDING | serial, components.go - IN PROGRESS (leaf-14 agent: wiring+talkloop+tool live-gated in /tmp/voice-wiring; awaiting orchestrator review/commit) |
+| 13 | COMPLETE | 94d7f782; 12/12 -race incl. parent-death drill; WRAP decision; fixer subagent rewrote 23 ignored-error sites |
+| 14 | COMPLETE | 0e36ed76 (tree-built after 5 blocked hook attempts + 2 sibling worktree repoints; 19-file diff vs 359e3f64 verified exact; full -race green on the landed tree); live-gate evidence in commit body; llm supervisor stdin fix + binding resolveMu fix + secrets-broker degrade fix (gate-caught) included; FailOutcome per leaf-11 note consumed |
 | 15 | PENDING | manifest is shared-write: merge, never overwrite |
 | 16 | PENDING | |
 
