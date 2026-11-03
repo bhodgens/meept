@@ -346,6 +346,58 @@ dispatched leaf document mid-execution.
   87.5%, ~10% more tokens). Leaf 07 owns the flip-back decision procedure.
 - Claim-leak caveat source: references/memory-extension-seams.md ("verify
   MarkResolved/RecordReview before reusing"). Leaf 05 verifies, then fixes.
+
+## Dated addenda (2026-11-03, agent-groups review integration - ride the
+## dispatch briefs verbatim)
+
+Three flags from the agent-groups tree's review of this plan
+(docs/plans/20261030-agent-groups/, session of 2026-10-31). The frozen-docs
+rule forbids editing leaves, so each flag below is DISPATCH CONTEXT for the
+named leaf - include it verbatim in that leaf's delegate_task context.
+
+### Flag 1 (cluster gossip rows default to global scope) - for 01-scope-schema
+
+Peer-node memories enter the gossip DB via MEMORY_STORED re-storage
+(internal/cluster/gossip_handler.go:161-220) and merge into local recall via
+mergeDualStoreRecent (manager.go:669) with NO project binding - under the
+backfill rule they land as scope=global and remain visible everywhere, so on
+a cluster the isolation guarantee silently degrades to "everything from other
+nodes is global." Resolution for THIS tree: stamp gossip-ingested rows (the
+dual-store write path in gossip_handler or the dual-store ingest seam) with a
+distinguishing metadata marker (e.g. scope=global + metadata["remote_node"])
+OR document cluster recall as explicitly unscoped in docs/workflows/memory.md
+- pick one in the leaf report; do NOT silently leave the default path.
+Single-daemon installs are unaffected.
+
+### Flag 2 (MemoryScope vocabulary collision) - for 03-agent-recall-wiring
+
+Bot/employee definitions ALREADY carry an unwired `MemoryScope` field
+(internal/bot/types.go:70, values private/shared/readonly) plus the built-but-
+unwired `bot.MemoryNamespace` / `ScopedMemoryManager` / `FilterBotMemories`
+machinery. This tree adds `memory_max_scope` (project/user/global) to the
+same definition surface. REQUIRED: reconcile or explicitly supersede - in the
+leaf report, state whether bot MemoryScope maps onto memory_max_scope
+(private->project, shared->global, readonly-> ??? - readonly has no
+equivalent; propose one or document the gap), and either mark MemoryScope
+SUPERSEDED in the bot definition docs or wire its mapping. Two overlapping
+vocabularies on one surface is the parallel-storage defect class the master
+Notes already warn about. Do NOT delete bot fields in this tree (bots are a
+separate surface) - supersede in docs, map in resolution.
+
+### Flag 3 (userID empty-match fails open) - for 01-scope-schema AND
+### 03-agent-recall-wiring
+
+C2's predicate "scope==user AND userID matches (empty userID matches in
+single-user)" fails OPEN if multiuser is enabled but identity resolution
+returns "" (a resolution bug, not a config choice): every user-scope row
+becomes recallable by every agent. Pin the INVERSE: when multiuser is
+ENABLED (cfg multiuser.enabled=true) and the resolved userID is EMPTY,
+user-scope rows are NOT recallable (fail closed). Empty-userID-matches
+applies ONLY when multiuser is disabled. Both leaves touch this predicate:
+01 implements it, 03's resolveScopeInputs must carry the multiuser-enabled
+bit alongside userID so the predicate can distinguish the two cases. Add a
+table-test cell for (multiuser=true, userID="") => user rows hidden.
+
 - Known pre-existing dead code the tree must NOT absorb silently:
   InjectContextBounded (internal/agent/conversation.go, zero callers) and the
   daemon-unused SetEpistemicHook agent seam - out of scope; flag in reports
