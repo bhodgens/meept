@@ -260,12 +260,6 @@ func TestTextServerClosedChild(t *testing.T) {
 	}
 }
 
-func childClosed(c net.Conn) bool {
-	// A closed conn rejects local writes; that is our probe.
-	_, err := c.Write(nil)
-	return err != nil
-}
-
 // Review checklist: exactly one child; the second connection is refused
 // with a log line and closed, and the first child keeps working.
 func TestTextServerSecondConnectionRefused(t *testing.T) {

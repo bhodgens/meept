@@ -28,19 +28,12 @@ func (b *blockingChatter) Ask(_ context.Context, _ string) (string, error) {
 	return "ALLOW", nil
 }
 
-func (b *blockingChatter) count() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.asks
-}
-
 // scriptedChatter returns canned answers and records calls.
 type scriptedChatter struct {
-	mu      sync.Mutex
-	asks    int
-	reply   string
-	err     error
-	errOnce bool
+	mu    sync.Mutex
+	asks  int
+	reply string
+	err   error
 }
 
 func (s *scriptedChatter) Ask(_ context.Context, _ string) (string, error) {

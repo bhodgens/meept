@@ -249,24 +249,6 @@ func (s *textSink) Send(raw []byte) error {
 	return nil
 }
 
-func (s *textSink) has(clearSub string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, f := range s.frames {
-		if bytes.Contains([]byte(f), []byte(clearSub)) {
-			return true
-		}
-	}
-	return false
-}
-
-// framesSnapshot returns a copy of all captured text frames.
-func (s *textSink) framesSnapshot() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]string(nil), s.frames...)
-}
-
 func spliceConfig() SpliceConfig {
 	return SpliceConfig{
 		Codec:               telnyx.Codec{BidirectionalCodec: "L16", SamplingRate: 16000},
@@ -285,10 +267,6 @@ func payloadFrame(seq int32) []byte {
 	binary.LittleEndian.PutUint32(payload[0:4], uint32(seq))
 	b64 := base64.StdEncoding.EncodeToString(payload)
 	return []byte(`{"event":"media","sequence_number":` + fmt.Sprintf("%d", seq) + `,"media":{"payload":"` + b64 + `"}}`)
-}
-
-func interruptLine(ccid string) []byte {
-	return []byte(`{"call_id":"` + ccid + `","event":"interrupt"}`)
 }
 
 func startSplice(t *testing.T, ccid string, cfg SpliceConfig, deps SpliceDeps) (context.CancelFunc, <-chan error) {

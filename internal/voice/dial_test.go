@@ -34,7 +34,7 @@ func (c *countingController) DialOut(_ context.Context, _, _, _ string) (string,
 	return "cc-dial-" + time.Now().Format("150405.000000000"), nil
 }
 
-func (c *countingController) AnswerCall(_ context.Context, _ string) error   { return nil }
+func (c *countingController) AnswerCall(_ context.Context, _ string) error { return nil }
 func (c *countingController) StartStreaming(_ context.Context, _, _ string, _ telnyx.Codec) error {
 	return nil
 }
@@ -58,12 +58,12 @@ func zeroRequestServer(t *testing.T) *httptest.Server {
 
 func dialConfig() DialConfig {
 	return DialConfig{
-		Enabled:        true,
-		AllowedNumbers: []string{"+15551230001"},
+		Enabled:         true,
+		AllowedNumbers:  []string{"+15551230001"},
 		PublicStreamURL: "wss://tunnel.example/media",
-		ConnectionID:   "conn-1",
-		FromNumber:     "+15551239999",
-		TimeoutSecs:    30,
+		ConnectionID:    "conn-1",
+		FromNumber:      "+15551239999",
+		TimeoutSecs:     30,
 	}
 }
 
@@ -72,9 +72,9 @@ func dialConfig() DialConfig {
 // BEFORE any HTTP call - the httptest server asserts zero requests.
 func TestDialRefusals(t *testing.T) {
 	cases := []struct {
-		name     string
-		mutate   func(*DialConfig)
-		wantErr  error
+		name    string
+		mutate  func(*DialConfig)
+		wantErr error
 	}{
 		{"voice disabled", func(c *DialConfig) { c.Enabled = false }, ErrVoiceDisabled},
 		{"target not allowed", func(c *DialConfig) { c.AllowedNumbers = nil }, ErrNumberNotAllowed},

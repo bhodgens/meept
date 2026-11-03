@@ -698,11 +698,10 @@ func (s *runSplice) Send(raw []byte) error {
 
 // ---------- outbound path ----------
 
-// readResult is one child-socket read: n bytes of data or an error.
+// readResult is one child-socket read: an error, or nothing (err nil means
+// the read produced bytes already consumed into the chunker).
 type readResult struct {
-	n    int
-	err  error
-	data []byte
+	err error
 }
 
 // outboundLoop reads child PCM, splits into ChunkBytes chunks, and paces
