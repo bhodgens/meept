@@ -88,6 +88,15 @@ const (
 	// supervisorPollStep is the interval at which the grace period is checked
 	// for the runtime's exit.
 	supervisorPollStep = 100 * time.Millisecond
+	// supervisorEnvEnv carries the RUNTIME's complete environment from the
+	// spawning daemon to the supervisor: the wrapper inherits the daemon's
+	// environment untouched (it may need PATH etc.), while the runtime gets
+	// exactly what the spawner declared (the voice child: VOICE_ONNX_LIB
+	// only - a path, never a secret). Empty means the runtime inherits the
+	// wrapper's environment, byte-identical to previous behavior. The value
+	// is NUL-separated so entries containing '=' survive verbatim.
+	supervisorEnvEnv = "MEEPT_SUPERVISOR_RUNTIME_ENV"
+
 	// supervisorBinaryEnv overrides the resolved supervisor binary, for
 	// installations whose daemon binary is renamed.
 	supervisorBinaryEnv = "MEEPT_SUPERVISOR_BIN"
@@ -114,6 +123,15 @@ type SupervisorOptions struct {
 	ParentDeathFD int
 	// Argv is the runtime command line, verbatim.
 	Argv []string
+	// Stdin is an optional stream wired to the RUNTIME's STDIN (the voice
+	// child's start token travels only this way - never argv, never env).
+	// Nil keeps the runtime's stdin nil, byte-identical to the llama/MLX
+	// spawns. The supervisor never reads from it.
+	Stdin io.Reader
+	// Env is the RUNTIME's complete environment when non-empty (the voice
+	// child: VOICE_ONNX_LIB only, a path, never a secret). Empty keeps the
+	// wrapper's inherited environment for the runtime.
+	Env []string
 	// Log receives the supervisor's diagnostics. nil means slog.Default().
 	Log *slog.Logger
 	// PollInterval overrides the parent check interval. 0 means
@@ -285,9 +303,20 @@ func RunSupervisor(opts SupervisorOptions) int {
 	if grace <= 0 {
 		grace = supervisorTermGrace
 	}
+	// Env not set directly (the daemon path: ParseSupervisorArgs cannot
+	// carry an env list)? Decode the NUL-separated variable the spawning
+	// daemon attached to the wrapper's environment. Absent = inherit.
+	if len(opts.Env) == 0 {
+		opts.Env = decodeSupervisorEnv(os.Getenv(supervisorEnvEnv))
+	}
 
 	child := exec.Command(opts.Argv[0], opts.Argv[1:]...)
-	child.Stdin = nil
+	// SpawnEnv (empty for llama/MLX) replaces the RUNTIME's whole env; the
+	// wrapper keeps its own inherited environment untouched.
+	if len(opts.Env) > 0 {
+		child.Env = opts.Env
+	}
+	child.Stdin = opts.Stdin // voice start token (leaf 13); nil for llama/MLX
 	child.Stdout = os.Stdout
 	child.Stderr = os.Stderr
 	// The runtime keeps its own process group, exactly as a direct spawn would
@@ -526,7 +555,16 @@ func (p *RuntimeProcess) startSupervised(ctx context.Context, stdout, stderr io.
 	cmd := exec.CommandContext(ctx, bin, argv...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.Stdin = nil
+	// The supervisor forwards SpawnStdin to the RUNTIME's stdin (the voice
+	// child's start token); the wrapper itself never reads it.
+	cmd.Stdin = p.config.SpawnStdin //nolint:mutexio // field read only here, before Wait
+	// SpawnEnv travels NUL-separated through the wrapper's environment
+	// (supervisorEnvEnv): the wrapper keeps the daemon's env, the RUNTIME
+	// gets exactly SpawnEnv. Absent means the runtime inherits the wrapper's.
+	if len(p.config.SpawnEnv) > 0 {
+		wrapperEnv := append(os.Environ(), supervisorEnvEnv+"="+strings.Join(p.config.SpawnEnv, "\x00"))
+		cmd.Env = wrapperEnv
+	}
 	cmd.ExtraFiles = []*os.File{writeEnd, deathRead}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
@@ -543,6 +581,27 @@ func (p *RuntimeProcess) startSupervised(ctx context.Context, stdout, stderr io.
 	closeFileQuietly(deathRead)
 	p.cmd = cmd
 	return readEnd, deathWrite, nil
+}
+
+// decodeSupervisorEnv splits the NUL-encoded environment list the spawning
+// daemon passed to the supervisor wrapper back into entries. Entries without
+// '=' are skipped (not representable as an env entry).
+func decodeSupervisorEnv(encoded string) []string {
+	if encoded == "" {
+		return nil
+	}
+	parts := strings.Split(encoded, "\x00")
+	env := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p == "" || !strings.Contains(p, "=") {
+			continue
+		}
+		env = append(env, p)
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
 }
 
 // closeFileQuietly closes a pipe end. A close error has no recovery and the
