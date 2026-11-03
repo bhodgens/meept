@@ -105,6 +105,7 @@ type Client struct {
 	timeoutCalc   *metrics.Calculator
 	tokenCache    ResponseCache
 	keyBuilder    *CacheKeyBuilder
+	semanticCache *SemanticCache
 	tokenResolver TokenResolver
 	oauthProvider string
 	extraHeaders  map[string]string
@@ -321,6 +322,97 @@ func (c *Client) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord)) {
 		return
 	}
 	c.llmCallObserver = fn
+}
+
+// Semantic cache partition keys: lookup/store partition by (model,
+// instruction scope) so answers never leak across models or scopes
+// (llm-serving-tiers leaf 02; findings 1.3 item 5). semanticPartitionFor
+// derives the partition from the request's EFFECTIVE model (request-scoped
+// override first, then the client default).
+func (c *Client) semanticPartitionFor(cfg *ModelConfig, o *chatOptions) string {
+	if cfg == nil {
+		return ""
+	}
+	part := cfg.ModelID
+	if o != nil {
+		_, modelID, _, ok := o.requestModelOverride(cfg)
+		if ok && modelID != "" {
+			part = modelID
+		}
+	}
+	return part
+}
+
+// semanticLookupBehindMiss is the ONE wrapper all cache-consulting paths
+// funnel through: exact-key FIRST (the caller already missed), then the
+// semantic tier strictly behind the miss. A nil/disabled cache, any error
+// shape, or an embedder failure all degrade to miss -- the turn proceeds
+// to the budget gate exactly as before (never parked, never errored,
+// ErrEmptyResponse accounting untouched).
+func (c *Client) semanticLookupBehindMiss(ctx context.Context, cfg *ModelConfig, o *chatOptions, messages []ChatMessage) (*Response, bool) {
+	if c.semanticCache == nil || !c.semanticCache.Enabled() {
+		return nil, false
+	}
+	part := c.semanticPartitionFor(cfg, o)
+	if part == "" {
+		return nil, false
+	}
+	resp, hit, err := c.semanticCache.LookupBehindMiss(ctx, part, messagesPromptText(messages))
+	if err != nil || !hit {
+		return nil, false
+	}
+	// Serve-side tool-call exemption (leaf 02 hard constraint): a
+	// semantic hit NEVER serves a response carrying tool calls -- the
+	// tool call IS the answer (classifyAnthropicEmpty exemption shape),
+	// and serving one would replace the whole turn with the tool never
+	// running. Falls through to the live path.
+	if resp == nil || resp.HasToolCalls() {
+		return nil, false
+	}
+	return resp, true
+}
+
+// semanticStoreAfterSuccess records a completed LIVE response into the
+// semantic tier after the exact-key Put. Best-effort: embedder failure is
+// silent; tool-call-bearing responses are skipped entirely so they can
+// never be served semantically later (leaf 02 hard constraint).
+func (c *Client) semanticStoreAfterSuccess(ctx context.Context, cfg *ModelConfig, o *chatOptions, messages []ChatMessage, resp *Response) {
+	if c.semanticCache == nil || !c.semanticCache.Enabled() || resp == nil || resp.HasToolCalls() {
+		return
+	}
+	part := c.semanticPartitionFor(cfg, o)
+	if part == "" {
+		return
+	}
+	c.semanticCache.Store(ctx, part, messagesPromptText(messages), resp)
+}
+
+// messagesPromptText flattens the message list into the text the semantic
+// tier embeds: every turn's role + content so conversation context is
+// not erased (embedding the final user message alone would underdetermine
+// the answer).
+func messagesPromptText(messages []ChatMessage) string {
+	var b strings.Builder
+	for i, m := range messages {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(string(m.Role))
+		b.WriteString(": ")
+		b.WriteString(m.Content)
+	}
+	return b.String()
+}
+
+// WithSemanticCache attaches the opt-in semantic cache tier (leaf 02).
+// A nil cache is the disabled posture: the lookup seam is never
+// consulted and behavior is byte-identical to the pre-leaf client.
+func WithSemanticCache(cache *SemanticCache) ClientOption {
+	return func(c *Client) {
+		if cache != nil {
+			c.semanticCache = cache
+		}
+	}
 }
 
 // WithTimeoutCalculator sets the adaptive timeout calculator for the client.
@@ -677,6 +769,13 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			return cached.Response, nil
 		}
+		// Semantic tier (llm-serving-tiers leaf 02): strictly BEHIND
+		// the exact-key miss, BEFORE the budget gate. Silent
+		// exact-only degradation on any embedder failure; a hit never
+		// carries tool calls (guard inside the seam).
+		if semHit, ok := c.semanticLookupBehindMiss(ctx, cfg, chatOpts, messages); ok {
+			return semHit, nil
+		}
 	}
 
 	// Budget gate
@@ -872,6 +971,10 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		if c.tokenCache != nil && c.keyBuilder != nil {
 			cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
+			// Semantic tier store (leaf 02): best-effort vector
+			// record after the live response; tool-call responses
+			// skipped inside the seam.
+			c.semanticStoreAfterSuccess(ctx, cfg, chatOpts, messages, resp)
 		}
 
 		// Per-provider/per-agent token accounting (metrics.db llm_calls).
@@ -937,6 +1040,14 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			reportProgress(ProgressStageDone, "Cache hit")
 			return cached.Response, nil
+		}
+		// Semantic tier (llm-serving-tiers leaf 02): strictly BEHIND
+		// the exact-key miss, BEFORE the budget gate. Silent
+		// exact-only degradation on any embedder failure; a hit never
+		// carries tool calls (guard inside the seam).
+		if semHit, ok := c.semanticLookupBehindMiss(ctx, cfg, chatOpts, messages); ok {
+			reportProgress(ProgressStageDone, "Semantic cache hit")
+			return semHit, nil
 		}
 	}
 
@@ -1130,6 +1241,10 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		if c.tokenCache != nil && c.keyBuilder != nil {
 			cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
+			// Semantic tier store (leaf 02): best-effort vector
+			// record after the live response; tool-call responses
+			// skipped inside the seam.
+			c.semanticStoreAfterSuccess(ctx, cfg, chatOpts, messages, resp)
 		}
 
 		// Check if response contains tool calls
@@ -1237,6 +1352,19 @@ type chatOptions struct {
 	// identity is per-call; trace identity is per-turn).
 	traceID string
 	spanID  string
+	// ttftStart is the wall-clock request-dispatch instant the TTFT
+	// measurement runs from (llm-serving-tiers leaf 04, R0 Section 3):
+	// set by the streaming entry points right before the HTTP request is
+	// sent - NOT at queue entry - so the number is time-to-first-token on
+	// the wire. Zero means "not measured" (non-streaming path, cache
+	// hits, pre-stream errors): recordUsageStore maps it to TTFTMS -1.
+	// A plain field written by the client's own goroutine; no lock.
+	ttftStart time.Time
+	// ttftCaptured marks that a first content delta was observed and
+	// ttftFirstDelta holds its instant. Kept separate from the zero-time
+	// check so a genuine capture is distinguishable from "never set".
+	ttftCaptured   bool
+	ttftFirstDelta time.Time
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -2052,6 +2180,34 @@ var ErrEmptyResponse = &ClientError{Message: "empty content"}
 // budget itself (test seam — the loops read shortRetryBudget()).
 const DefaultEmptyCompletionRetries = 3
 
+// captureFirstDelta records the first streamed content delta's arrival
+// instant (llm-serving-tiers leaf 04). Plain field assignment on the
+// request-scoped chatOptions - no lock, idempotent (only the FIRST delta
+// wins), and cheap enough to sit directly in the stream read loop.
+func captureFirstDelta(chatOpts *chatOptions) {
+	if chatOpts == nil || chatOpts.ttftCaptured {
+		return
+	}
+	chatOpts.ttftCaptured = true
+	chatOpts.ttftFirstDelta = time.Now()
+}
+
+// ttftMS computes the record's TTFTMS value from the request's capture
+// state (llm-serving-tiers leaf 04, Contract C6): milliseconds from
+// request dispatch to the first content delta; -1 when the start was
+// never armed (non-streaming, cache hit) or no delta ever arrived
+// (errors). It reads chatOptions ONLY - never shared client state.
+func ttftMS(chatOpts *chatOptions) int64 {
+	if chatOpts == nil || chatOpts.ttftStart.IsZero() || !chatOpts.ttftCaptured {
+		return -1
+	}
+	ms := chatOpts.ttftFirstDelta.Sub(chatOpts.ttftStart).Milliseconds()
+	if ms < 0 {
+		return 0
+	}
+	return ms
+}
+
 // recordUsageStore appends one completed LLM call to the app-level metrics
 // store (metrics.db llm_calls ledger + model_performance rollup). No-op when
 // no usage store is attached. Storage errors are logged, never fatal.
@@ -2067,6 +2223,10 @@ const DefaultEmptyCompletionRetries = 3
 // the caller passes neither.
 func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string, usage TokenUsage, isErr bool, errMsg string, latencyMs int64, chatOpts *chatOptions) {
 	traceID, spanID := traceScopeOf(chatOpts)
+	// TTFT (llm-serving-tiers leaf 04): captured from the request-scoped
+	// first-delta state; -1 on non-streaming calls, cache hits, and
+	// errors (nothing armed the clock or no delta ever arrived).
+	ttftMs := ttftMS(chatOpts)
 	if c.usageStore == nil && c.llmCallObserver == nil {
 		return
 	}
@@ -2085,6 +2245,7 @@ func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string
 			IsError:         isErr,
 			ErrorMessage:    errMsg,
 			LatencyMs:       latencyMs,
+			TTFTMS:          ttftMs,
 			TraceID:         traceID,
 			SpanID:          spanID,
 		}
@@ -2379,7 +2540,11 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			retryState.isResume = true
 			c.logger.Debug("stream retry attempt", "attempt", attempt+1, "max", shortRetries)
 		}
-		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill)
+		// TTFT clock arm (llm-serving-tiers leaf 04): dispatch instant of
+		// THIS attempt, refreshed per short-retry so the number measures
+		// the serving attempt's first-token wait. First delta captures.
+		chatOpts.ttftStart = time.Now()
+		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill, chatOpts)
 		if err == nil {
 			// Record usage with scope
 			if c.budget != nil && resp != nil {
@@ -2594,7 +2759,10 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 // Returns HTTP status code as int so callers don't manage *http.Response lifecycle.
 // cfg must be captured under lock by the caller.
 // priority marks an interactive turn for slot-gate priority (tree 04 leaf 03).
-func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState, cfg *ModelConfig, priority bool, sessionID, assistantPrefill string) (*Response, int, error) {
+// chatOpts carries the request-scoped TTFT capture state (llm-serving-tiers
+// leaf 04): the first content delta stamps chatOpts.ttftFirstDelta. May be
+// nil (legacy callers) - capture is then skipped and the record stays -1.
+func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta DeltaCallback, retryState *streamRetryState, cfg *ModelConfig, priority bool, sessionID, assistantPrefill string, chatOpts *chatOptions) (*Response, int, error) {
 	// Acquire concurrency slot (if configured)
 	release, err := c.acquireConcurrencyLimit(ctx, priority)
 	if err != nil {
@@ -2849,6 +3017,10 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		// Handle content delta
 		delta := chunk.Choices[0].Delta.Content
 		if delta != "" {
+			// TTFT: first non-empty content delta after dispatch
+			// (llm-serving-tiers leaf 04). Reasoning deltas do NOT
+			// start the clock - R0 Section 3 pins first CONTENT delta.
+			captureFirstDelta(chatOpts)
 			accumulated.WriteString(delta)
 			// Skip deltas already sent (on resume)
 			if retryState == nil || !retryState.isResume || deltasSent >= retryState.deltasSent {

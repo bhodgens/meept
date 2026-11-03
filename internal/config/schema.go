@@ -1152,6 +1152,72 @@ type LLMSimpleFeatureConfig struct {
 	L2Enabled     bool   `json:"l2_enabled"      toml:"l2_enabled"`
 	L2DBPath      string `json:"l2_db_path"      toml:"l2_db_path"`
 	DefaultTTLMin int    `json:"default_ttl_min" toml:"default_ttl_min"`
+	// Semantic configures the semantic cache tier (llm-serving-tiers
+	// leaf 02, Contract C4; json5 key llm.cache.semantic). Default OFF:
+	// opt-in per docs/agents/opt-in-defaults.md -- no embedder call, no
+	// vector math, byte-identical client behavior when disabled.
+	Semantic SemanticCacheConfig `json:"semantic"        toml:"semantic"`
+}
+
+// SemanticCacheConfig configures the opt-in semantic cache tier
+// (llm-serving-tiers leaf 02, Contract C4; json5 key llm.cache.semantic).
+// An embedding-similarity second-chance lookup that sits strictly BEHIND
+// the exact-key response cache: exact miss first, embed, serve the cached
+// response when cosine similarity clears the threshold.
+//
+// Threshold default is 0.95 cosine per the R0 research addendum
+// (docs/research/20261031-llm-serving-tiers-findings.md Section 1.2),
+// which supersedes master.md C4's 0.92: AWS Well-Architected, Redis
+// LangCache, and Vercel converge on 0.95+ for false-positive-sensitive
+// workloads, and agent traffic (tool calls, code, one-operand differences)
+// is exactly where loose thresholds produce wrong answers.
+type SemanticCacheConfig struct {
+	// Enabled turns the tier on. Default FALSE (opt-in per
+	// docs/agents/opt-in-defaults.md): when false the client's code path
+	// is structurally unreachable -- no embedder call, no vector math,
+	// byte-identical responses.
+	Enabled bool `json:"enabled"        toml:"enabled"`
+	// Threshold is the cosine similarity floor for serving a cached
+	// response. Default 0.95 (research addendum; supersedes C4's 0.92).
+	Threshold float64 `json:"threshold"      toml:"threshold"`
+	// MaxEntries bounds the in-memory vector store with LRU eviction.
+	// Default 1024.
+	MaxEntries int `json:"max_entries"    toml:"max_entries"`
+	// TTLMin is the entry lifetime in minutes; zero mirrors
+	// llm.cache.default_ttl_min at the daemon wiring site. A negative
+	// value clamps to that mirror at the load boundary.
+	TTLMin int `json:"ttl_min"        toml:"ttl_min"`
+	// EmbedderAlias resolves the embedder model via the alias/capability
+	// machinery. Empty means reuse the memory-stack embedding provider
+	// (memory/vector) when configured; if neither resolves, the tier
+	// degrades to exact-only (structurally dead cache, never an error).
+	EmbedderAlias string `json:"embedder_alias" toml:"embedder_alias"`
+}
+
+// Defaults for llm.cache.semantic (Contract C4 + R0 addendum).
+const (
+	// DefaultSemanticCacheThreshold is the 0.95 cosine floor.
+	DefaultSemanticCacheThreshold = 0.95
+	// DefaultSemanticCacheMaxEntries bounds the vector store.
+	DefaultSemanticCacheMaxEntries = 1024
+)
+
+// NormalizeSemanticCacheDefaults clamps invalid semantic-cache values to
+// defaults at the load boundary (llm-serving-tiers leaf 02): non-positive
+// or >= 1 threshold -> 0.95, non-positive max_entries -> 1024, negative
+// ttl_min -> 0 (the wiring-site mirror of llm.cache.default_ttl_min).
+// Idempotent on valid values; the tier stays disabled unless Enabled is
+// true.
+func NormalizeSemanticCacheDefaults(sc *SemanticCacheConfig) {
+	if sc.Threshold <= 0 || sc.Threshold >= 1 {
+		sc.Threshold = DefaultSemanticCacheThreshold
+	}
+	if sc.MaxEntries <= 0 {
+		sc.MaxEntries = DefaultSemanticCacheMaxEntries
+	}
+	if sc.TTLMin < 0 {
+		sc.TTLMin = 0
+	}
 }
 
 // LLMBrokerConfig configures the model broker.
@@ -3737,6 +3803,20 @@ func DefaultConfig() *Config {
 				DBPath:              "~/.meept/metrics.db",
 				RetentionDays:       7,
 				StatsRefreshMinutes: 5,
+			},
+			Cache: LLMSimpleFeatureConfig{
+				Semantic: SemanticCacheConfig{
+					// Default OFF (llm-serving-tiers leaf 02,
+					// Contract C4): opt-in per
+					// docs/agents/opt-in-defaults.md. Threshold
+					// 0.95 per the R0 research addendum
+					// (supersedes C4's 0.92) but consulted only
+					// when Enabled flips on.
+					Enabled:    false,
+					Threshold:  DefaultSemanticCacheThreshold,
+					MaxEntries: DefaultSemanticCacheMaxEntries,
+					TTLMin:     0, // mirrors llm.cache.default_ttl_min at wiring
+				},
 			},
 		},
 		Memory: MemoryConfig{
