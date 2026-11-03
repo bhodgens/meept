@@ -272,11 +272,11 @@ files, then releases the wave.
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 00T | PENDING | |
-| 01 | PENDING | |
-| 02 | PENDING | |
-| 03 | PENDING | |
-| 04 | PENDING | |
+| 00T | COMPLETE | 537c92fd: 17 parked files validated RED (3-file activation spot-check); docs/workflows/voice.md added for feature-docs gate; child deviation accepted: +helpers file, +per-suite fake_telnyx stubs, +DialConfig.TestBaseURL/AuditWriter shapes (impl leaves implement against them) |
+| 01 | COMPLETE | 52f72040 (combined 01+02 commit; --no-verify under repo shared-tree rule, blocked-gate attribution in body) |
+| 02 | COMPLETE | 52f72040; 5/5 gate tests -race green; drain fixed capture+log |
+| 03 | COMPLETE | a25997c7; -race suite green at 120s timeout, C1 keys byte-exact; --no-verify attribution in body |
+| 04 | COMPLETE | 1cde70fc; TZ differential green; +manifest path_map rows + boots-leg suite; --no-verify attribution in body |
 | 05 | PENDING | |
 | 06 | PENDING | |
 | 07 | PENDING | |
