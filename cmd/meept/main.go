@@ -179,6 +179,7 @@ Analytics:
 	rootCmd.AddCommand(newBotsCmd())
 	rootCmd.AddCommand(newAgentsCmd())
 	rootCmd.AddCommand(newGithubCmd())
+	rootCmd.AddCommand(newIntakeCmd())
 	rootCmd.AddCommand(newLanesCmd())
 	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newAnalyticsCmd())

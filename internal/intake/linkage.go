@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -154,6 +155,14 @@ func (l *Linker) create(ctx context.Context, t Ticket, employeeID string, gate *
 		return json.Marshal(map[string]string{"goal_id": goal.ID})
 	})
 	if err != nil {
+		// A claimed prior owned by another caller is a concurrent
+		// poller/pod racing for the same ticket — not an error to
+		// surface: the winner creates the goal and this tick's caller
+		// picks it up on the next poll (dedup). Abandon would kill the
+		// winner's in-flight claim, so it is NOT called here.
+		if errors.Is(err, effects.ErrInvalidTransition) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("intake: create goal for %s#%s: %w", t.Repo, t.ID, err)
 	}
 	if err := l.ledger.Complete(ctx, IntakeKey(t.Repo, t.ID, t.Body)); err != nil {

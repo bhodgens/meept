@@ -137,6 +137,10 @@ make e2e-fast                 # CI: full hermetic e2e suite (ci.yml gate member;
 # suite also executes on the Linux CI runner)
 make hooks                # core.hooksPath -> .githooks (19 pre-commit checks +
                           # pre-push chain: e2e-affected gate, then bench gate)
+# Pre-flight [0/19]: pre-commit-worktreecfg - auto-repairs core.bare=true flips
+# that break go build -buildvcs and git status; logs repairs to
+# .core-bare-repair.log in the repo root (gitignored by the *.log rule). It runs
+# before the numbered chain because the flip breaks gate 1 (pre-commit-build).
 # Package-classification rule for those hooks: a staged package's state comes
 # from `go list -e` STDOUT only. {{.Error}} prints there, while stderr carries
 # progress noise ("go: downloading ..." on a cold GOMODCACHE) that must never be
@@ -192,6 +196,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **Session** | `internal/session` (store, store_sqlite, threads, messages) |
 | **Effects** | `internal/effects` (external-effect idempotency ledger) |
 | **GitHub** | `internal/githubsvc` (token sources, per-token client pool, PR status + `ReArmSink` seam; tools themselves are `internal/tools/builtin` github_* registered via the init-populated `ToolFactories` factory seam — `builtin` imports `githubsvc`, so `githubsvc` may NEVER import `builtin`; binaries that don't link `builtin` get a descriptive registration error, never a panic) |
+| **Intake** | `internal/intake` (github-intake-factory: label-gated GitHub Issues poller, ticket→goal identity layer (`Linker.EnsureGoal`, TriggerRef `intake:<repo>#<ticket>`), outcome write-back with the effects storm guard; daemon wiring `internal/daemon/intake_wiring.go` schedules `intake_poller` only when `[intake].enabled` — disabled by default; rides the `[github]` token sources, no separate token; docs/workflows/intake.md) |
 | **Services** | `internal/services` (chat, session, terminal, push, reflection) |
 | **Project** | `internal/project` (manager, init_deep, detection) |
 | **TUI** | `internal/tui` (app, commands, components, handlers, modals, models, tableutil) |
