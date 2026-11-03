@@ -39,6 +39,24 @@ func boundedHTTPClient(t *testing.T) *http.Client {
 	return c
 }
 
+// boundedMediaTransport points a mediaClient's HTTP client at the bounded
+// transport. The media client builds its own http.Client in newMediaClient
+// (media_client.go:65) with no transport seam, so same-package fixtures set the
+// field directly and production needs no change.
+//
+// The generate_image / generate_video fixtures dial an httptest server for the
+// ComfyUI /history + /view round trip and for artifact downloads, which is
+// several short-lived connections per test. Two of them were the last
+// ephemeral-port failures left in the suite after the hermes / github /
+// web_fetch / websearch fixtures were bounded.
+func boundedMediaTransport(t *testing.T, c *mediaClient) {
+	t.Helper()
+	if c == nil || c.client == nil {
+		return
+	}
+	c.client.Transport = boundedTransport(t)
+}
+
 // allowPrivateBounded is the web_fetch fixture's loopback setup: it enables
 // the private-range path (so the tool may dial an httptest server) and then
 // wraps the resulting transport's dialer with the ephemeral-port retry and

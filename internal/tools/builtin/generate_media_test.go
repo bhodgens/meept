@@ -109,6 +109,7 @@ func TestGenerateImage_OpenAICompat(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	tool := NewGenerateImageTool(testImageResolver(t, srv.URL, "openai_images"), dir, 5*time.Second)
+	boundedMediaTransport(t, tool.client)
 	raw, err := tool.Execute(context.Background(), map[string]any{"prompt": "a red fox"})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -147,6 +148,7 @@ func TestGenerateImage_HTTPTemplate(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	tool := NewGenerateImageTool(testImageResolver(t, srv.URL, "http"), dir, 5*time.Second)
+	boundedMediaTransport(t, tool.client)
 	raw, err := tool.Execute(context.Background(), map[string]any{"prompt": "hello"})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -350,6 +352,7 @@ func mediaDownloadFixture(t *testing.T, artifactURL string) (*mediaClient, strin
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	c := newMediaClient(nil, t.TempDir(), 5*time.Second)
+	boundedMediaTransport(t, c)
 	return c, srv.URL
 }
 
@@ -366,6 +369,7 @@ func TestMediaDownload_SameBaseURLLoopbackAllowed(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := newMediaClient(nil, t.TempDir(), 5*time.Second)
+	boundedMediaTransport(t, c)
 	mc := &llm.ModelConfig{BaseURL: srv.URL}
 	body, err := c.download(context.Background(), srv.URL+"/artifact", mc)
 	if err != nil {
@@ -475,6 +479,7 @@ func TestGenerateImage_ComfyRelativeArtifactDownloads(t *testing.T) {
 		},
 	}
 	tool := NewGenerateImageTool(llm.NewResolver(cfg, nil), t.TempDir(), 5*time.Second)
+	boundedMediaTransport(t, tool.client)
 	raw, err := tool.Execute(context.Background(), map[string]any{
 		"prompt": strings.Repeat("word ", 20), // >= 15 words: skips prompt enhancement
 	})

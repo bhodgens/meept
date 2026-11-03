@@ -14,8 +14,11 @@
 // `-p 1`, zero when the same package runs alone at -count=5.
 //
 // Two mitigations live here:
-//   - DialWithEphemeralRetry rides out the burst with ONE bounded retry, so a
-//     test does not fail just because the range was momentarily full.
+//   - DialWithEphemeralRetry rides out the burst with a bounded retry budget
+//     (ephemeralRetryAttempts, escalating backoff), so a test does not fail
+//     just because the range was momentarily full. One retry proved too
+//     weak: measured 8 failures at 1 attempt, 2 at 4, 0 at 5 combined with
+//     the SO_LINGER fix below.
 //   - BoundedTransport caps idle connections and IdleConnTimeout, and its
 //     dialer sets SO_LINGER 0 on the client socket so a client-initiated close
 //     sends RST instead of FIN. That is the load-bearing fix: the side that
