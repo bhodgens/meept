@@ -109,7 +109,15 @@
       "bridges",
       "memory-knowledge-assets",
       "memory-layered-distill",
-      "memory-persistence"
+      "memory-persistence",
+      "memory-defaults",
+      "memory-scoping"
+    ],
+    "e2e/suites/memory-defaults": [
+      "memory-defaults"
+    ],
+    "e2e/suites/memory-scoping": [
+      "memory-scoping"
     ],
     "internal/auth/": [
       "auth-multiuser"
@@ -648,6 +656,32 @@
       "name": "memory-persistence",
       "dir": "e2e/suites/memory-persistence",
       "status": "implemented"
+    },
+    {
+      "name": "memory-defaults",
+      "dir": "e2e/suites/memory-defaults",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "memory-defaults-01 default-config boot: one completed turn records L0 lines, enqueues a memory.l1_extract job, and knowledge_search rides the tool list (F1/D3)",
+        "memory-defaults-02 config get reports all five memory knobs true on a default boot (C4/D1)",
+        "memory-defaults-03 stable item renders under the Memory (standing) section while the volatile item stays inside the <memory-context> fence (F4/C6)",
+        "memory-defaults-04 recall_outcomes.jsonl row carries the verbatim C5 key set with injected=true and cited=true after a citing recall turn (F5/C5)",
+        "memory-defaults-05 meept doctor renders a memory-pipeline check naming l0 status (F7)"
+      ],
+      "note": "RED gate for the memory second-brain tree leaf 00T (memory-defaults half): boots the scratch daemon with the DEFAULT config and asserts the default-on world (F1/F4/F5/F7). Every case fails RED today for the missing-implementation reason (memory knobs default false; no stable-section render; no telemetry writer; no doctor memory check); turns GREEN when leaves 02/03/04/06 land."
+    },
+    {
+      "name": "memory-scoping",
+      "dir": "e2e/suites/memory-scoping",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "memory-scoping-01 project isolation: project-A fact absent from a project-B session recall while a global-scope fact stays recallable in both (F2, C1/C2)",
+        "memory-scoping-02 chief-of-staff: memory_max_scope=global agent recalls the project-A fact in project B; the default (project) agent does not (F3, C3)",
+        "memory-scoping-03 fail-closed cell: multiuser enabled + resolved-empty userID hides user-scope rows while global rows stay visible (Flag 3)"
+      ],
+      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today — the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
     },
     {
       "name": "memory-layered-distill",
@@ -3860,6 +3894,90 @@
       "paths": [
         "internal/agent/strategic.go",
         "e2e/suites/plan-critic"
+      ]
+    },
+    {
+      "id": "memory-defaults-01",
+      "suite": "memory-defaults",
+      "diff": "M",
+      "title": "default-config boot: one completed turn records L0 lines in the day file, enqueues a memory.l1_extract job, and knowledge_search rides the executor tool list",
+      "paths": [
+        "internal/config/schema.go",
+        "internal/daemon/memory_capture.go",
+        "e2e/suites/memory-defaults"
+      ]
+    },
+    {
+      "id": "memory-defaults-02",
+      "suite": "memory-defaults",
+      "diff": "S",
+      "title": "meept config get reports all five memory knobs (l0_enabled, usefulness.enabled, epistemic.ambient_extraction.enabled, knowledge.enabled, bridges.enabled) true on a default boot",
+      "paths": [
+        "internal/config/schema.go",
+        "e2e/suites/memory-defaults"
+      ]
+    },
+    {
+      "id": "memory-defaults-03",
+      "suite": "memory-defaults",
+      "diff": "M",
+      "title": "stable/volatile recall split: the stable item renders under the Memory (standing) section and the volatile item stays inside the <memory-context> fence",
+      "paths": [
+        "internal/agent/loop.go",
+        "e2e/suites/memory-defaults"
+      ]
+    },
+    {
+      "id": "memory-defaults-04",
+      "suite": "memory-defaults",
+      "diff": "M",
+      "title": "recall telemetry: after a recall turn whose reply cites the injected memory, recall_outcomes.jsonl gains a row with the verbatim C5 key set, injected=true, cited=true",
+      "paths": [
+        "internal/memory/",
+        "e2e/suites/memory-defaults"
+      ]
+    },
+    {
+      "id": "memory-defaults-05",
+      "suite": "memory-defaults",
+      "diff": "S",
+      "title": "doctor visibility: meept doctor renders a memory-pipeline check naming l0/distill status against the scratch home",
+      "paths": [
+        "cmd/meept/doctor.go",
+        "e2e/suites/memory-defaults"
+      ]
+    },
+    {
+      "id": "memory-scoping-01",
+      "suite": "memory-scoping",
+      "diff": "M",
+      "title": "project isolation: a project-A fact is absent from a project-B session recall while a global-scope fact is recallable in both",
+      "paths": [
+        "internal/memory/",
+        "internal/agent/",
+        "e2e/suites/memory-scoping"
+      ]
+    },
+    {
+      "id": "memory-scoping-02",
+      "suite": "memory-scoping",
+      "diff": "M",
+      "title": "chief-of-staff: the memory_max_scope=global agent recalls the project-A fact from a project-B session; the default (project) agent does not",
+      "paths": [
+        "internal/agents/models.go",
+        "internal/agent/",
+        "e2e/suites/memory-scoping"
+      ]
+    },
+    {
+      "id": "memory-scoping-03",
+      "suite": "memory-scoping",
+      "diff": "M",
+      "title": "fail-closed cell (Flag 3): multiuser enabled + a resolved-empty userID hides user-scope rows while global rows stay visible",
+      "paths": [
+        "internal/memory/",
+        "internal/config/schema.go",
+        "e2e/suites/memory-scoping"
       ]
     },
     {
