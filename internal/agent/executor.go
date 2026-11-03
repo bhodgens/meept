@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/code/ast"
+	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/security/taint"
 	"github.com/caimlas/meept/internal/tools"
@@ -930,6 +932,12 @@ type Executor struct {
 	// (agent-groups branch-01 leaf 02). "" means the default
 	// (deny-warn). Guarded by mu; set via SetDecisionLogLevel.
 	decisionLogLevel string
+	// groupResolution is the loop-carried group policy record (agent-groups
+	// leaf 04 T3): the call-time gate consults it AFTER the employee
+	// PreExecChecker and BEFORE the default policy routing. Nil record =
+	// unmanaged (legacy skip). Guarded by mu; set via WithGroupResolution /
+	// SetGroupResolution.
+	groupResolution *groups.Resolved
 }
 
 // ExecutorOption is a functional option for configuring an Executor.
@@ -1091,6 +1099,40 @@ func (e *Executor) SetDecisionLogLevel(level string) {
 	}
 }
 
+// GroupResolution returns the executor's group policy record snapshot
+// (nil = unmanaged). Test/diagnosis seam.
+func (e *Executor) GroupResolution() *groups.Resolved {
+	if e == nil {
+		return nil
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.groupResolution
+}
+
+// SetGroupResolution swaps the group policy record after construction
+// (agent-groups leaf 04 T1/T3; loop.SetGroupResolution forwards here).
+// Nil-safe per setter convention: nil clears the record (ungrouped legacy
+// posture), keeping the current one only when BOTH are nil.
+func (e *Executor) SetGroupResolution(res *groups.Resolved) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.groupResolution = res
+	e.mu.Unlock()
+}
+
+// WithGroupResolutionOption carries the group policy record onto the
+// executor at construction (loop.go wires it after the executor exists,
+// so the setter is the primary seam; the option exists for direct
+// executor tests).
+func WithGroupResolutionOption(res *groups.Resolved) ExecutorOption {
+	return func(e *Executor) {
+		e.groupResolution = res
+	}
+}
+
 // SetAgentID updates the agent/employee identifier used by this executor.
 // The agentID is injected into the permission check details map so the
 // PermissionChecker can route to the registered PreExecChecker (employee
@@ -1213,6 +1255,25 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 
 	tool := registry.Get(toolName)
 	if tool == nil {
+		// Group gate on the unknown-tool path (agent-groups leaf 04 T3,
+		// F7): a grouped agent calling a tool the dispatch intersection
+		// removed must get the group_deny verdict (with its C2 decision
+		// line), not the bare unknown-tool error — the call still
+		// attempted the parent registry's tool, and the audit surface
+		// must say WHY it was refused. `action` here maps the tool name
+		// for the audit line only.
+		actionName, mapped := ToolActionMap[toolName]
+		if !mapped {
+			actionName = toolName
+		}
+		if denied := e.groupDenyVerdict(toolName); denied != nil {
+			e.logPermissionDecision(*denied, actionName, toolName, e.agentID)
+			return &ExecutionResult{
+				ToolCallID: toolCall.ID,
+				Success:    false,
+				Error:      fmt.Sprintf("permission denied: %s", denied.Reason),
+			}
+		}
 		e.logger.Warn("Unknown tool requested", "tool", toolName)
 		return &ExecutionResult{
 			ToolCallID: toolCall.ID,
@@ -1755,8 +1816,104 @@ func (e *Executor) checkPermission(toolName string, args map[string]any) securit
 	}
 
 	result := e.security.CheckPermission(action, details)
+	result = e.applyGroupGate(result, action, toolName)
 	e.logPermissionDecision(result, action, toolName, agentID)
 	return result
+}
+
+// groupDenyVerdict returns the group_deny verdict for a tool call a
+// managed subject attempted (used both in checkPermission's gate and on
+// the unknown-tool path — where the dispatch intersection already removed
+// the tool but the model still called it). nil = no group deny (unmanaged,
+// or the tool sits inside the ceiling). Mirrors applyGroupGate's rules.
+func (e *Executor) groupDenyVerdict(toolName string) *security.CheckResult {
+	e.mu.RLock()
+	res := e.groupResolution
+	e.mu.RUnlock()
+	if res == nil || !res.Managed {
+		return nil
+	}
+	canon := CanonicalToolName(toolName)
+	for _, d := range res.DeniedTools {
+		if d == canon || d == toolName {
+			return &security.CheckResult{
+				Allowed:    false,
+				Reason:     fmt.Sprintf("tool %q denied by group policy", toolName),
+				RuleSource: "group_deny",
+			}
+		}
+	}
+	if !slices.Contains(res.AllowedTools, canon) && !slices.Contains(res.AllowedTools, toolName) {
+		return &security.CheckResult{
+			Allowed:    false,
+			Reason:     fmt.Sprintf("tool %q not allowed by group policy", toolName),
+			RuleSource: "group_deny",
+		}
+	}
+	return nil
+}
+
+// applyGroupGate is the call-time group policy gate (agent-groups leaf 04
+// T3, precedence C3/FROZEN): employee checker first (it already ran inside
+// CheckPermission — a registered PreExecChecker's verdict above wins),
+// THEN the loop's group resolution record (deny => group_deny; an allowed
+// tool NOT in the record's allowlist => group_deny too — the managed
+// allowlist is the ceiling), and an allowed tool inside the allowlist is
+// stamped group_allow. An unmanaged record (nil) skips the gate entirely —
+// today's behavior byte-identical (D7). The gate runs at the executor
+// AFTER the base permission pipeline: a base-pipeline deny (financial,
+// fence, backstop, confirmation) keeps ITS rule source; the group gate can
+// only ever narrow.
+//
+// The parent-registry bypass (a tool call that never went through the
+// filtered dispatch registry) is caught HERE: a denied tool named in the
+// record's DeniedTools short-circuits even though GetDefinitions never
+// offered it.
+func (e *Executor) applyGroupGate(result security.CheckResult, action, toolName string) security.CheckResult {
+	e.mu.RLock()
+	res := e.groupResolution
+	e.mu.RUnlock()
+	if res == nil || !res.Managed {
+		// Unmanaged: legacy skip (D7) — the base verdict stands.
+		return result
+	}
+	if !result.Allowed {
+		// The base pipeline already denied (fence, financial,
+		// backstop, confirmation...): keep its rule source.
+		return result
+	}
+
+	// canonical name: the record is normalized with the same vocabulary
+	// the registry grants use (CanonicalToolName at resolve time), so
+	// the lookup uses the canonical form of the tool name.
+	canon := CanonicalToolName(toolName)
+	for _, d := range res.DeniedTools {
+		if d == canon || d == toolName {
+			return security.CheckResult{
+				Allowed:    false,
+				Reason:     fmt.Sprintf("tool %q denied by group policy", toolName),
+				RuleSource: "group_deny",
+			}
+		}
+	}
+	// Managed allowlist is the ceiling (D8: an empty allowlist denies
+	// everything). Baseline platform/task tools stay reachable — they are
+	// the spec's BaselineTools, present in every agent's grant set the
+	// record was intersected against.
+	if !slices.Contains(res.AllowedTools, canon) && !slices.Contains(res.AllowedTools, toolName) {
+		return security.CheckResult{
+			Allowed:    false,
+			Reason:     fmt.Sprintf("tool %q not allowed by group policy", toolName),
+			RuleSource: "group_deny",
+		}
+	}
+	// Allowed inside the group ceiling: stamp the group rule source.
+	return security.CheckResult{
+		Allowed:       true,
+		Reason:        result.Reason,
+		RuleSource:    "group_allow",
+		EffectiveRisk: result.EffectiveRisk,
+	}
 }
 
 // logPermissionDecision emits the C2 decision-audit line (agent-groups
@@ -1768,8 +1925,9 @@ func (e *Executor) checkPermission(toolName string, args map[string]any) securit
 // Denies log at WARN, allows at DEBUG under the default "deny-warn"
 // level; "all" logs every decision at INFO; "off" suppresses entirely.
 // Kept at the EXECUTOR seam — pkg/security stays pure (no logging). The
-// groups key carries the "-" placeholder until leaf 04 feeds the
-// resolution record's groups through. No lock is held here.
+// groups key carries the loop's group memberships (agent-groups leaf 04:
+// the loop's resolution record supplies the subject's groups; "-" when
+// ungrouped/unmanaged). No lock is held here.
 func (e *Executor) logPermissionDecision(result security.CheckResult, action, toolName, agentID string) {
 	e.mu.RLock()
 	level := e.decisionLogLevel
@@ -1784,12 +1942,17 @@ func (e *Executor) logPermissionDecision(result security.CheckResult, action, to
 		decision = "allow"
 	}
 
+	groupsList := "-"
+	if res := e.GroupResolution(); res != nil && res.Managed && len(res.Groups) > 0 {
+		groupsList = strings.Join(res.Groups, ",")
+	}
+
 	attrs := []any{
 		"decision", decision,
 		"action", action,
 		"tool", toolName,
 		"agent", agentID,
-		"groups", "-", // placeholder until leaf 04 wires the resolution record
+		"groups", groupsList,
 		"rule_source", result.RuleSource,
 		"risk", result.EffectiveRisk.String(),
 		"reason", result.Reason,
@@ -2045,23 +2208,46 @@ func (t *MockTool) IsConcurrencySafe(map[string]any) bool { return false }
 type FilteredToolRegistry struct {
 	parent  ToolRegistry
 	allowed map[string]bool
+	// denyAll is the D8 marker (agent-groups leaf 04 T2): an explicitly
+	// EMPTY allowlist on a MANAGED subject must deny everything, not fall
+	// back to FilteredToolRegistry's legacy empty=all semantics. Legacy
+	// callers (skill filters, verifier children) never set it.
+	denyAll bool
+}
+
+// FilteredToolRegistryOption configures NewFilteredToolRegistry.
+type FilteredToolRegistryOption func(*FilteredToolRegistry)
+
+// WithDenyAll marks the registry as an explicit deny-all (D8): Get/List/
+// GetDefinitions return nothing regardless of the (empty) allowlist.
+func WithDenyAll() FilteredToolRegistryOption {
+	return func(r *FilteredToolRegistry) {
+		r.denyAll = true
+	}
 }
 
 // NewFilteredToolRegistry creates a tool registry that filters tools by allowed names.
 // If allowedTools is empty, all tools from the parent are allowed.
-func NewFilteredToolRegistry(parent ToolRegistry, allowedTools []string) *FilteredToolRegistry {
+func NewFilteredToolRegistry(parent ToolRegistry, allowedTools []string, opts ...FilteredToolRegistryOption) *FilteredToolRegistry {
 	allowed := make(map[string]bool)
 	for _, name := range allowedTools {
 		allowed[name] = true
 	}
-	return &FilteredToolRegistry{
+	r := &FilteredToolRegistry{
 		parent:  parent,
 		allowed: allowed,
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Get retrieves a tool by name, returning nil if not in the allowed set.
 func (r *FilteredToolRegistry) Get(name string) tools.Tool {
+	if r.denyAll {
+		return nil
+	}
 	if len(r.allowed) > 0 && !r.allowed[name] {
 		return nil
 	}
@@ -2070,6 +2256,9 @@ func (r *FilteredToolRegistry) Get(name string) tools.Tool {
 
 // List returns only allowed tools.
 func (r *FilteredToolRegistry) List() []tools.Tool {
+	if r.denyAll {
+		return nil
+	}
 	all := r.parent.List()
 	if len(r.allowed) == 0 {
 		return all
@@ -2086,6 +2275,9 @@ func (r *FilteredToolRegistry) List() []tools.Tool {
 
 // GetDefinitions returns tool definitions for only allowed tools.
 func (r *FilteredToolRegistry) GetDefinitions() []llm.ToolDefinition {
+	if r.denyAll {
+		return nil
+	}
 	all := r.parent.GetDefinitions()
 	if len(r.allowed) == 0 {
 		return all

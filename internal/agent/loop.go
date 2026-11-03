@@ -24,6 +24,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/compress"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
@@ -595,6 +596,12 @@ type AgentLoop struct {
 	registry        ToolRegistry
 	security        *security.PermissionChecker
 	securityOrch    *intsecurity.Orchestrator
+	// groupResolution is the loop-carried group policy record (agent-groups
+	// leaf 04 T1): resolved at loop creation from the daemon's groups
+	// resolver, consulted by the executor's call-time gate and stamped into
+	// the decision-audit lines. A nil record (ungrouped + default_managed
+	// false) is the legacy posture — no group gate applies. Guarded by mu.
+	groupResolution *groups.Resolved
 	// piiRestore is the PII-unmasking restore lane (pii leaf 02): applied
 	// at the ScanOutput choke point before any persistence. Nil = feature
 	// off (opt-in), byte-identical behavior.
@@ -1487,7 +1494,71 @@ func (l *AgentLoop) SetSecurityChecker(checker *security.PermissionChecker) {
 	l.mu.Unlock()
 }
 
-// WithMessageBus sets the message bus for event publishing.
+// WithGroupResolution carries the agent's group policy resolution record
+// onto the loop at construction (agent-groups leaf 04 T1). A nil record
+// (ungrouped + default_managed=false) is the legacy posture: no group gate.
+func WithGroupResolution(res *groups.Resolved) LoopOption {
+	return func(l *AgentLoop) {
+		l.groupResolution = res
+	}
+}
+
+// GroupResolution returns the loop's group policy record (nil = unmanaged).
+func (l *AgentLoop) GroupResolution() *groups.Resolved {
+	if l == nil {
+		return nil
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.groupResolution
+}
+
+// Security returns the loop's current permission checker (nil = none).
+// Daemon-side consumers (step-job fence arming) read it to derive a
+// fence-carrying clone.
+func (l *AgentLoop) Security() *security.PermissionChecker {
+	if l == nil {
+		return nil
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.security
+}
+
+// SetGroupResolution re-points the loop's group resolution record after
+// construction (config hot-reload lane: the daemon resolves a fresh record
+// and swaps it atomically; the executor is re-pointed too, mirroring
+// SetSecurityChecker). Typed-nil safe: a nil record clears the gate (the
+// ungrouped legacy posture), never leaves a stale deny list live.
+func (l *AgentLoop) SetGroupResolution(res *groups.Resolved) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.groupResolution = res
+	if l.executor != nil {
+		l.executor.SetGroupResolution(res)
+	}
+	l.mu.Unlock()
+}
+
+// SetExecutorDecisionLogLevel forwards security.groups.decision_log_level
+// to this loop's executor (agent-groups leaf 04 daemon wiring): the C2
+// permission decision-audit lines log at the configured level. Nil-safe and
+// nil-executor safe; the daemon calls it after loop construction.
+func (l *AgentLoop) SetExecutorDecisionLogLevel(level string) {
+	if l == nil {
+		return
+	}
+	l.mu.RLock()
+	exec := l.executor
+	l.mu.RUnlock()
+	if exec != nil {
+		exec.SetDecisionLogLevel(level)
+	}
+}
+
+// SetMessageBus sets the message bus for event publishing.
 func WithMessageBus(b *bus.MessageBus) LoopOption {
 	return func(l *AgentLoop) {
 		l.bus = b
@@ -2410,6 +2481,13 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 			loop.security,
 			executorOpts...,
 		)
+		// Loop-carried group resolution (agent-groups leaf 04 T1): the
+		// executor's call-time gate consults the same record the loop
+		// carries (applied AFTER options ran, so WithGroupResolution on
+		// the loop wins over any executor-side default).
+		if res := loop.groupResolution; res != nil {
+			loop.executor.SetGroupResolution(res)
+		}
 	}
 
 	// Build prompt builder from config
@@ -8825,6 +8903,26 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		WithResolver(l.resolver),
 		WithModelRef(l.modelRef),
 		WithAgentSpec(l.spec),
+		// --- Loop-carried group resolution (agent-groups leaf 04 T1,
+		// three-site rule site 2: session clones). Clones inherit the
+		// template's record so dispatched/chat turns are gated exactly
+		// like the template loop; a nil record clones as nil (unmanaged).
+		func(l2 *AgentLoop) {
+			if res := l.GroupResolution(); res != nil {
+				l2.SetGroupResolution(res)
+			}
+		},
+		// --- Decision-log level (agent-groups leaf 04 daemon wiring):
+		// clones inherit the template executor's C2 decision-audit level
+		// so the knob covers session-scoped turns too.
+		func(l2 *AgentLoop) {
+			if e := l.executor; e != nil {
+				e.mu.RLock()
+				level := e.decisionLogLevel
+				e.mu.RUnlock()
+				l2.SetExecutorDecisionLogLevel(level)
+			}
+		},
 		// --- Bughunt F5: the global models.json5 refusal_model slot must
 		// survive the clone — without it a per-session loop cloned from the
 		// daemon template had refusalFallbackRef() == "" and silently ran

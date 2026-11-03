@@ -1677,7 +1677,6 @@ func (sp *StrategicPlanner) parsePlanOutput(taskID, output string) ([]*task.Task
 // has the verified context that was collected during the interview phase.
 func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []string) []*task.TaskStep {
 	description := req.Input
-
 	// If a verified PlanningContext with substantive content exists, prepend
 	// a "## Verified Context" section so the executing agent doesn't lose the
 	// interview results.
@@ -1710,6 +1709,18 @@ func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []st
 
 	step := task.NewTaskStep(req.TaskID, description, 0)
 	step.ToolHint = req.Intent
+	// Client agent override (researcher-extract e2e precedent, extended by
+	// agent-groups leaf 04): the dispatcher's routed agent (result.AgentID,
+	// persisted on the task via WithAssignedAgent) must survive the
+	// direct-mode fallback — without this the empty AgentID re-entered the
+	// tool-hint table here, so a grouped agent pinned by the classifier
+	// ("aastub" owns the code lane) executed on the bundled coder instead
+	// and its group policy record never applied. Same override rule as
+	// runPlannerOnceWithPrompt's synthesized steps: explicit routing wins
+	// over the hint table.
+	if req.AssignedAgent != "" {
+		step.AgentID = req.AssignedAgent
+	}
 	// Copy parent refs
 	for _, ref := range parentRefs {
 		step.AddMemoryRef(ref)

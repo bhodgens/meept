@@ -240,9 +240,17 @@ func Resolve(specTools []string, agentID string, groupMemberships []string, poli
 		// every legacy path (including FilteredToolRegistry's empty=all)
 		// stays byte-identical. Managed routing (default policy) is the
 		// CALLER's decision via ResolveDefaultManaged.
-		return Resolved{Managed: false}
+		return Resolved{Managed: false, Groups: sortedCopy(groupMemberships)}
 	}
-	return resolveLayered(specTools, bound, opts, true)
+	res := resolveLayered(specTools, bound, opts, true)
+	res.Groups = sortedCopy(groupMemberships)
+	return res
+}
+
+// sortedCopy returns a sorted, de-duplicated, nil-when-empty copy (the
+// diagnosis/audit surface for the subject's groups).
+func sortedCopy(in []string) []string {
+	return sortDedup(in)
 }
 
 // ResolveDefaultManaged resolves a subject with NO matching bindings under
