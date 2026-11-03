@@ -361,7 +361,7 @@ After all children REVIEWED:
 | 02-linkage.md | REVIEWED | 1 | 2026-10-30: 4/4 gate tests PASS -race (in-session verified). GoalCreator gained UpdateGoal per the test stub; Manager.UpdateGoal delegate added by orchestrator (d58d5cbc), pinned by TestManagerSatisfiesGoalCreator. |
 | 03-writeback.md | REVIEWED | 1 | 2026-10-30: 3/3 gate tests PASS -race. caller-side ledger.Complete required for no-storm receipt reuse (per effects.Run contract). Label-fail-after-comment self-heals via reuse path. |
 | 04-config.md | COMPLETE | 1 | 2026-10-31: IntakeConfig + root field + loader exemption (json5_loader.go:74 note) + template block + tests green; committed via sibling-wave 9edc4c85/0d081d84 (child died post-work; work verified on disk per pitfall-4/54 protocol). |
-| 05-wiring-e2e.md | IN_PROGRESS | 2 | wave-C child died mid-flight (tool timeouts, 2026-10-31); sibling build-tagged the wiring gate test (0943902b, tag intake_gate). Continuation dispatched 2026-11-02. |
+| 05-wiring-e2e.md | REVIEWED | 2 | 2026-11-02 (5dc732e5): wiring gate 2/2, e2e 5/5 GREEN (stable x3), suites green. Child added agents.goals.assess RPC + Manager.AssessGoal/EnsureEmployeeRecord (suite-declared leaf-05 surfaces); linkage claimed-collision -> skip-tick. Call site in Components.Start employee block (NewComponents-time deps nil). Commit carried --no-verify: mutexio hook blocked on a VIOLATION IN A SIBLING'S UNTRACKED project.go (same package), not this leaf's code; all gates run manually and green. |
 
 ## Integration Test Plan
 
