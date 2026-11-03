@@ -535,23 +535,28 @@ type PlansConfig struct {
 	// "planner-self" without a human in the loop.
 	SelfSealEnabled bool `json:"self_seal_enabled" toml:"self_seal_enabled"`
 
-	// FreshCriticEnabled gates the fresh-context evidence critic
-	// (plan-20261101-fresh-context-critic contract C1; default FALSE -
-	// ships dark). See
-	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
-	FreshCriticEnabled bool `json:"fresh_critic_enabled"   toml:"fresh_critic_enabled"`
+	// FreshCriticDisabled disables the fresh-context evidence critic
+	// (plan-20261101-fresh-context-critic contract C1). Default ON per
+	// the 2026-11-02 operator decision (docs/plans/20261101-fresh-
+	// context-critic/master.md contract C1): an absent key decodes
+	// false, which means the critic runs; an explicit true disables it.
+	// A true-by-default bool cannot be expressed with an enable-named
+	// field, so the knob ships in disable form.
+	FreshCriticDisabled bool `json:"fresh_critic_disabled"   toml:"fresh_critic_disabled"`
 
-	// HostileCriticEnabled gates the hostile second-pass critic on a
-	// different model (plan-20261101-fresh-context-critic contract C1;
-	// default FALSE - ships dark). See
-	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
-	HostileCriticEnabled bool `json:"hostile_critic_enabled" toml:"hostile_critic_enabled"`
+	// HostileCriticDisabled disables the hostile second-pass critic on
+	// a different model (plan-20261101-fresh-context-critic contract
+	// C1). Default ON per the 2026-11-02 operator decision; an absent
+	// key means the hostile pass runs (and still skips at runtime via
+	// the C5 gate while the hostile_critic_model slot is empty or
+	// same-model); an explicit true turns the pass off entirely.
+	HostileCriticDisabled bool `json:"hostile_critic_disabled" toml:"hostile_critic_disabled"`
 
-	// InterviewOptionGates gates the structured interview option objects
-	// (plan-20261101-fresh-context-critic contract C1; default FALSE -
-	// ships dark). See
-	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
-	InterviewOptionGates bool `json:"interview_option_gates" toml:"interview_option_gates"`
+	// InterviewOptionsDisabled disables the structured interview option
+	// objects (plan-20261101-fresh-context-critic contract C1). Default
+	// ON per the 2026-11-02 operator decision; an explicit true falls
+	// interview questions back to plain strings.
+	InterviewOptionsDisabled bool `json:"interview_options_disabled" toml:"interview_options_disabled"`
 }
 
 // NormalizePlansDefaults clamps the tiered-iteration planning knobs to
@@ -4475,6 +4480,25 @@ func DefaultConfig() *Config {
 			TurnConfidenceMin:    0.6,
 			SessionConfidenceMin: 0.7,
 			MaxSessionProposals:  3,
+		},
+		// GitHub PR/CI tool set (opt-in, disabled by default).
+		GitHub: GitHubConfig{
+			Enabled:      false,
+			TokenSecret:  "",
+			DefaultOwner: "",
+			DefaultRepo:  "",
+			BaseURL:      "",
+		},
+		// GitHub ticket intake poller (opt-in, disabled by default).
+		Intake: IntakeConfig{
+			Enabled:         false,
+			DefaultEmployee: "",
+			PollInterval:    "5m",
+			WatchRepo:       "",
+			RequiredLabels:  []string{"factory"},
+			DoneLabel:       "factory:done",
+			GateCommand:     "",
+			ProjectNumber:   0,
 		},
 	}
 }

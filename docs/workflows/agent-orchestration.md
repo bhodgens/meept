@@ -370,24 +370,30 @@ adapt it to the `rpc.PlanSealHandler` injected-func seams (`DraftSource`,
 `executing` -> promote ready -> `orchestrator.schedule`. The compile phase
 cap reuses the planner's existing `MaxPhases` config - no second knob.
 
-### Fresh-Context Plan Critic (plans.fresh_critic_enabled)
+### Fresh-Context Plan Critic (plans.fresh_critic_disabled)
 
-The plan compiler's critique loop can be upgraded with three opt-in flags
-(plan-20261101-fresh-context-critic), all default FALSE - ships dark,
-same as `plans.self_seal_enabled`:
+The plan compiler's critique loop ships with three critic features
+ENABLED BY DEFAULT (plan-20261101-fresh-context-critic; 2026-11-02
+operator decision). Each is turned off with its disable-form key (an
+absent key means the feature runs; an explicit true disables it):
 
-- `plans.fresh_critic_enabled` - round 1 runs on a fresh child context
-  (empty conversation, no tools; the child sees only the plan draft plus
-  the rendered critique input) instead of the planner loop.
-- `plans.hostile_critic_enabled` - a second, hostile pass runs after
-  round 1. It skips when the `hostile_critic_model` slot is empty
-  (reason `no_model`) or names the same model as the planner (reason
-  `same_model`); it never falls back onto the planner model. The
-  `critic_model` slot optionally gives round 1 its own model (empty =
-  planner chatter, allowed for round 1 only).
-- `plans.interview_option_gates` - interview questions parse as
-  structured option objects (mechanism / trade_off / failure_condition)
-  instead of plain strings.
+- `plans.fresh_critic_disabled` - set true to stop round 1 from running
+  on a fresh child context (empty conversation, no tools; the child sees
+  only the plan draft plus the rendered critique input) and fall back to
+  the planner loop.
+- `plans.hostile_critic_disabled` - set true to skip the second, hostile
+  pass entirely. The pass still skips at runtime when the
+  `hostile_critic_model` slot is empty (reason `no_model`) or names the
+  same model as the planner (reason `same_model`); it never falls back
+  onto the planner model. Until a hostile slot is configured (the
+  DEFAULT state - the slot ships as a commented example), every
+  TierComplex plan stamps `hostile_skipped` and waits at the human seal;
+  that is intentional: no clean seal without a hostile reader (the EGM
+  property). The `critic_model` slot optionally gives round 1 its own
+  model (empty = planner chatter, allowed for round 1 only).
+- `plans.interview_options_disabled` - set true to parse interview
+  questions as plain strings instead of structured option objects
+  (mechanism / trade_off / failure_condition).
 
 The slots live (commented out) in `config/models.json5` beside
 `planner_model` and are resolved in `internal/daemon/components.go` the

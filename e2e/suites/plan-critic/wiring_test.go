@@ -6,11 +6,13 @@
 // PARKED as .staged. Leaf 07 re-activates ONLY this file (and adds the
 // manifest rows). It pins:
 //
-//	F9 TestCriticFlagsDefaultOff (C1/C2/C9: a default-config daemon boot
-//	   leaves fresh_critic_enabled, hostile_critic_enabled, and
-//	   interview_option_gates false; the critic_model and
-//	   hostile_critic_model slots are absent/empty by default and the
-//	   empty hostile slot is a nil chatter, never a planner fallback)
+//	TestCriticFlagsDefaultOn (C1/C2/C9: a default-config daemon boot
+//	    leaves the three critic features ENABLED - the disable-form keys
+//	    fresh_critic_disabled, hostile_critic_disabled, and
+//	    interview_options_disabled default false - and setting a disable
+//	    key turns its feature off; the critic_model and
+//	    hostile_critic_model slots are absent/empty by default and the
+//	    empty hostile slot is a nil chatter, never a planner fallback)
 //
 // Uses the hermetic harness (harness.Start) like the config-models
 // suite: the flags are observable through the live config surface
@@ -35,23 +37,25 @@ func wiringConfigGet(t *testing.T, s *harness.Stack, key string) string {
 	return stdout + stderr
 }
 
-// F9 (C1/C2/C9): the three critic flags default false on a real boot and
-// the two model slots stay empty by default.
-func TestCriticFlagsDefaultOff(t *testing.T) {
+// F9 (C1/C2/C9): the three critic features default ENABLED on a real
+// boot (disable-form keys default false) and the two model slots stay
+// empty by default.
+func TestCriticFlagsDefaultOn(t *testing.T) {
 	// Default sandbox config: no plans.critic keys anywhere.
 	s := harness.Start(t)
 	if !s.HealthOK() {
 		t.Fatal("F9: daemon did not come up healthy on default config")
 	}
 
-	// C1: all three flags default false through the live config surface.
+	// C1: all three disable-form keys default false through the live
+	// config surface (false = the feature is enabled).
 	for key, want := range map[string]string{
-		"plans.fresh_critic_enabled":   "false",
-		"plans.hostile_critic_enabled": "false",
-		"plans.interview_option_gates": "false",
+		"plans.fresh_critic_disabled":     "false",
+		"plans.hostile_critic_disabled":   "false",
+		"plans.interview_options_disabled": "false",
 	} {
 		if got := wiringConfigGet(t, s, key); !strings.Contains(got, want) {
-			t.Fatalf("F9 (C1): config get %s = %q, want it to report %s (the flag must default false and ship dark)", key, got, want)
+			t.Fatalf("F9 (C1): config get %s = %q, want it to report %s (the disable key must default false = feature enabled)", key, got, want)
 		}
 	}
 
@@ -61,20 +65,23 @@ func TestCriticFlagsDefaultOff(t *testing.T) {
 	if strings.Contains(modelsData, "\"critic_model\"") || strings.Contains(modelsData, "\"hostile_critic_model\"") {
 		t.Fatalf("F9 (C9): default models.json5 must not enable critic slots (commented examples only), got:\n%s", modelsData)
 	}
+}
 
-	// C9: an explicitly empty hostile_critic_model slot resolves to a nil
-	// chatter, never a planner-model fallback. Boot a second daemon with
-	// the slot present but empty; it must boot healthy (nil, not a boot
-	// failure) with the flags still dark.
+// F9b (C1): an explicit disable key turns its feature off on a real
+// boot while the daemon stays healthy.
+func TestCriticFlagsExplicitDisable(t *testing.T) {
 	s2 := harness.Start(t, harness.WithConfigOverlay(map[string]any{
-		"plans.fresh_critic_enabled":   false,
-		"plans.hostile_critic_enabled": false,
+		"plans.fresh_critic_disabled":   true,
+		"plans.hostile_critic_disabled": true,
 	}))
 	if !s2.HealthOK() {
-		t.Fatal("F9 (C9): daemon with explicit false flags did not boot healthy")
+		t.Fatal("F9b (C1): daemon with explicit disable keys did not boot healthy")
 	}
-	if got := wiringConfigGet(t, s2, "plans.hostile_critic_enabled"); !strings.Contains(got, "false") {
-		t.Fatalf("F9: explicit overlay must keep hostile_critic_enabled false, got %q", got)
+	if got := wiringConfigGet(t, s2, "plans.hostile_critic_disabled"); !strings.Contains(got, "true") {
+		t.Fatalf("F9b: explicit overlay must set hostile_critic_disabled true, got %q", got)
+	}
+	if got := wiringConfigGet(t, s2, "plans.fresh_critic_disabled"); !strings.Contains(got, "true") {
+		t.Fatalf("F9b: explicit overlay must set fresh_critic_disabled true, got %q", got)
 	}
 }
 

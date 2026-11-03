@@ -38,6 +38,22 @@ interview: the one-shot `task.interview` path stays only for the legacy
 pipeline. `plan.seal` and `plan.draft` are RPC-only, never a bus topic.
 See docs/workflows/agent-orchestration.md ("Plan compiler pipeline").
 
+## Fresh-context critic flags are on by default (disable-form keys)
+
+The three plan-critic features (`fresh_critic_disabled`,
+`hostile_critic_disabled`, `interview_options_disabled` in `[plans]`)
+default ON per the 2026-11-02 operator decision and are expressed as
+INVERTED disable-form keys: absent = enabled, explicit true = disabled
+(a true-by-default bool cannot be expressed with an enable-named field;
+the original enable-named keys shipped dark for one day and were
+renamed). With defaults on and the `hostile_critic_model` slot empty
+(the shipped state), a TierComplex plan still cannot self-seal: the
+hostile pass skips at runtime (reason `no_model`), the outcome stamps
+`hostile_skipped`, and the draft waits at the human seal - intentional,
+per the no-clean-seal-without-hostile-reader property. Flipping a
+default back is a product decision, not a code cleanup. See
+docs/workflows/agent-orchestration.md ("Fresh-Context Plan Critic").
+
 ## OTLP metrics export is opt-in
 
 `metrics.otlp.enabled` (default false) gates the daemon's OTLP metrics
