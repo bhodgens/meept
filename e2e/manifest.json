@@ -48,6 +48,7 @@
       "continuity-regressions",
       "goal-completion",
       "acp-persona-route",
+      "dynamic-tools",
       "llm-hop-tracing"
     ],
     "internal/validator/": [
@@ -85,6 +86,7 @@
       "tools-mcp",
       "tools-memory",
       "tools-tasks",
+      "dynamic-tools",
       "tools-web-ssrf"
     ],
     "internal/eval/": [
@@ -134,6 +136,7 @@
       "config-reload",
       "github-intake",
       "agent-groups",
+      "dynamic-tools",
       "llm-serving-tiers"
     ],
     "internal/daemon/": [
@@ -151,6 +154,7 @@
       "continuity-regressions",
       "session-affinity",
       "session-teardown",
+      "dynamic-tools",
       "llm-hop-tracing",
       "llm-serving-tiers"
     ],
@@ -447,6 +451,9 @@
     ],
     "e2e/suites/plan-critic": [
       "plan-critic"
+    ],
+    "e2e/suites/dynamic-tools": [
+      "dynamic-tools"
     ]
   },
   "suites": [
@@ -905,6 +912,12 @@
         "critic-wiring-06 daemon wiring: the three flags default false on a live boot; critic slots absent/empty by default (commented examples)"
       ],
       "note": "plan-20261101-fresh-context-critic tree: fresh-context evidence critic (leaf 02), hostile second pass (leaf 03), contest path (leaf 04), zero-decision compile (leaf 05), interview option gates (leaf 06), daemon wiring + model slots (leaf 07). Self-contained fixtures over real StrategicPlanner + live harness daemon for the wiring scenario."
+    },
+    {
+      "name": "dynamic-tools",
+      "dir": "e2e/suites/dynamic-tools",
+      "status": "implemented",
+      "note": "RED gate skeleton (branch 03 leaf 00T): compiles against current code; flag-off byte-identical control + capability-gate cases 1-4 fail RED for the missing capability-gate/exposure seam (no llm.CapFrontier tag, no warn-once downgrade, no episode-boundary restore yet). Starvation canary + cache-continuity cases are todo-marked (need the 01/04/05 impl seams: tool_search + predicted-budget promotion + the SetSchemaMode re-cache)."
     }
   ],
   "scenarios": [
@@ -3831,7 +3844,7 @@
       "id": "critic-wiring-06",
       "suite": "plan-critic",
       "diff": "M",
-      "title": "daemon wiring: a default-config live boot reports plans.fresh_critic_enabled / plans.hostile_critic_enabled / plans.interview_option_gates as false, and the default models.json5 carries no enabled critic_model / hostile_critic_model slot (commented examples only); an explicitly-false overlay still boots healthy",
+      "title": "daemon wiring: a default-config live boot reports plans.fresh_critic_disabled / plans.hostile_critic_disabled / plans.interview_options_disabled as false (features ENABLED by default, 2026-11-02 operator decision), and the default models.json5 carries no enabled critic_model / hostile_critic_model slot (commented examples only); an explicit disable-key overlay still boots healthy",
       "paths": [
         "internal/daemon/daemon.go",
         "internal/daemon/components.go",
