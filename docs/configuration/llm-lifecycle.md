@@ -409,9 +409,21 @@ decision_escalate_to_human = false
 {
   "runtime": "llama-cpp",
   "model_path": "~/models/lfm-code.Q8_0.gguf",
-  "spawn_command": ["llama-server", "-m", "${MODEL_PATH}", "--port", "8080"]
+  "spawn_command": ["llama-server", "-m", "${MODEL_PATH}", "--port", "8080", "--cache-reuse", "256"]
 }
 ```
+
+#### KV cache: --cache-prompt is ON by default; --cache-reuse 256
+
+llama-server keeps the previous request's KV cache and reuses the shared
+prompt prefix positionally (`--cache-prompt` is default-on) -- it does NOT
+rebuild the cache from scratch on every call. The shipped config additionally
+passes `--cache-reuse 256` on both llama-server spawn entries: chunk-level KV
+reuse with a 256-token minimum chunk, so runs of at least 256 cached tokens
+that reappear mid-prompt are shifted into position instead of re-evaluated
+(llama.cpp PR #9866; see `docs/research/20261031-llm-serving-tiers-findings.md`
+Section 2). The daemon's session teardown (`POST /slots/0?action=erase` on
+archive/idle/shutdown) bounds the reuse window -- the two are complementary.
 
 #### Version floor: llama.cpp build >= 9660 (LFM2.5 tool calls)
 

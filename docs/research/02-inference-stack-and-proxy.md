@@ -9,8 +9,9 @@ cited). Full leg-1 report: .hermes/research-kv-cache-report.md (transcript:
 
 - **`--cache-prompt` is ON by default.** Auto unified KV buffer, ~4 auto slots,
   slot selection by longest-common-prefix similarity. meept's config comment
-  ("llama.cpp builds a fresh cache per call", config/models.json5:316) is
-  outdated — the hot slot already reuses the session prefix. CORRECT THE COMMENT.
+  claiming a fresh per-call cache (pre-2026-11 config/models.json5) is
+  outdated -- the hot slot already reuses the session prefix. CORRECTED 2026-11
+  by the llm-serving-tiers tree (leaf 03).
 - `--cache-reuse 256`: KV-shifted non-prefix CHUNK reuse (≥256-token chunks,
   PR #9866). Recovers prefill after mid-history edits, compaction rewrites, and
   reordering. THE flag meept is missing.
