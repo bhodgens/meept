@@ -23,6 +23,11 @@ type ResolveOptions struct {
 	// still intersected with the spec (an override never widens the
 	// agent's own grants). Nil/empty = no overrides.
 	ExtraAllows []string
+	// ExtraAllowsFor is leaf 07's per-subject variant, consulted only
+	// when ExtraAllows is empty: given the agent subject ("agent:<id>"),
+	// it returns the live override grants (OverrideSet.AllowsFor with
+	// the query clock). Same add-only precedence as ExtraAllows.
+	ExtraAllowsFor func(subject string) []string
 }
 
 // defaultManagedPolicy is the policy name routed for UNGROUPED subjects

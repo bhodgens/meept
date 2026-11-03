@@ -41,6 +41,12 @@ type ResolverOptions struct {
 	// later; nil default). They ADD allows only — never rescue a deny,
 	// never widen the spec.
 	ExtraAllows []string
+	// ExtraAllowsFor is leaf 07's PER-SUBJECT override seam: given the
+	// agent subject ("agent:<id>"), it returns the live override grants
+	// for that subject (OverrideSet.AllowsFor bound to the load clock).
+	// Consulted only when ExtraAllows is empty. Same precedence: adds
+	// allows only, deny beats override, spec is the ceiling.
+	ExtraAllowsFor func(subject string) []string
 	// knownTools is the LIVE registered-tool-name set (C6). Boot and
 	// RPC validation reject policy tool names outside this set; set via
 	// WithKnownTools (below) so the raw field stays construction-only.
@@ -65,14 +71,27 @@ func NewResolver(policies []Policy, bindings []Binding, defaultManaged bool, opt
 		r.ropts = &ResolverOptions{
 			NormalizeToolName: opts.NormalizeToolName,
 			ExtraAllows:       opts.ExtraAllows,
+			ExtraAllowsFor:    opts.ExtraAllowsFor,
 			knownTools:        opts.knownTools,
 		}
 		r.opts = &ResolveOptions{
 			NormalizeToolName: opts.NormalizeToolName,
 			ExtraAllows:       opts.ExtraAllows,
+			ExtraAllowsFor:    opts.ExtraAllowsFor,
 		}
 	}
 	return r
+}
+
+// extraAllowsForSubject answers the per-subject override query through the
+// injected seam (nil-safe). Used by ResolveForAgent so each resolution
+// consults the LIVE set for its own subject instead of a construction-time
+// snapshot.
+func (r *Resolver) extraAllowsForSubject(subject string) []string {
+	if r == nil || r.ropts == nil || r.ropts.ExtraAllowsFor == nil {
+		return nil
+	}
+	return r.ropts.ExtraAllowsFor(subject)
 }
 
 // DefaultManaged reports whether ungrouped subjects route through the
@@ -88,20 +107,39 @@ func (r *Resolver) DefaultManaged() bool {
 // ResolveForAgent answers C3 for one agent: a matching binding (agent or
 // one-level group) resolves through the layered policies; with no matching
 // binding, default_managed=true routes through the fail-closed `default`
-// policy, false yields the unmanaged record (legacy behavior, Managed
-// false).
+// policy, false yields the unmanaged record (Managed false).
+//
+// Leaf 07 per-subject overrides: when no static ExtraAllows list is set,
+// the injected ExtraAllowsFor seam answers THIS agent's live grant set
+// ("agent:<agentID>") before resolving — a per-resolution query through
+// the reader's clock, so overrides loaded mid-window expire correctly
+// without rebuilding the resolver. Identical precedence: deny beats
+// override, spec is the ceiling.
 func (r *Resolver) ResolveForAgent(agentID string, groupMemberships, specTools []string) Resolved {
 	if r == nil {
 		return Resolved{Managed: false}
 	}
+	resOpts := r.opts
+	if (resOpts == nil || len(resOpts.ExtraAllows) == 0) &&
+		(len(r.bindings) > 0 || r.defaultManaged) &&
+		r.ropts != nil && r.ropts.ExtraAllowsFor != nil {
+		allow := r.extraAllowsForSubject("agent:" + agentID)
+		if resOpts == nil {
+			resOpts = &ResolveOptions{NormalizeToolName: r.ropts.NormalizeToolName}
+		}
+		resOpts = &ResolveOptions{
+			NormalizeToolName: resOpts.NormalizeToolName,
+			ExtraAllows:       allow,
+		}
+	}
 	if len(r.bindings) > 0 {
-		res := Resolve(specTools, agentID, groupMemberships, r.policies, r.bindings, r.opts)
+		res := Resolve(specTools, agentID, groupMemberships, r.policies, r.bindings, resOpts)
 		if res.Managed {
 			return res
 		}
 	}
 	if r.defaultManaged {
-		return ResolveDefaultManaged(specTools, r.policies, r.opts)
+		return ResolveDefaultManaged(specTools, r.policies, resOpts)
 	}
 	return Resolved{Managed: false}
 }

@@ -936,12 +936,35 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// filterTools dispatch intersection). The normalizer injects the
 	// agent-grant vocabulary ("shell_execute" -> "shell") so
 	// internal/groups never imports internal/agent.
+	//
+	// Time-boxed overrides (agent-groups leaf 07, C8): the reader loads
+	// $MEEPT_HOME/group_overrides.json5 at boot with its clock injected
+	// (EnvGroupsNow: MEEPT_GROUPS_NOW for the e2e gate, wall-clock in
+	// production). A malformed FILE or entry FAILS BOOT (named error,
+	// fail-closed — same posture as validateGroupsConfig); expired
+	// entries are skipped with ONE Warn. The loaded set feeds the
+	// resolver's per-subject ExtraAllowsFor seam: deny still beats
+	// override and the spec stays the ceiling (resolve.go owns that
+	// precedence). The seam answers through the QUERY clock each
+	// resolution, so entries expire mid-window without a resolver
+	// rebuild.
+	groupsOverrides, groupsErr := groups.LoadOverrides(groupsOverridesPath(), groups.OverrideLoadOptions{
+		Now:  EnvGroupsNow,
+		Warn: func(msg string) { logger.Warn(msg) },
+	})
+	if groupsErr != nil {
+		logger.Error("FATAL: groups overrides invalid", "error", groupsErr)
+		return nil, groupsErr
+	}
 	groupsResolver := groups.NewResolver(
 		groupsPoliciesFromConfig(cfg.Security.Groups.Policies),
 		groupsBindingsFromConfig(cfg.Security.Groups.Bindings),
 		cfg.Security.Groups.DefaultManaged,
 		&groups.ResolverOptions{
 			NormalizeToolName: agent.CanonicalToolName,
+			ExtraAllowsFor: func(subject string) []string {
+				return groupsOverrides.AllowsFor(subject, EnvGroupsNow())
+			},
 		},
 	)
 

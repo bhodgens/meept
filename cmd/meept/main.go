@@ -181,6 +181,7 @@ Analytics:
 	rootCmd.AddCommand(newGithubCmd())
 	rootCmd.AddCommand(newIntakeCmd())
 	rootCmd.AddCommand(newLanesCmd())
+	rootCmd.AddCommand(newGroupsCmd())
 	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newAnalyticsCmd())
 	rootCmd.AddCommand(newTTSCmd())

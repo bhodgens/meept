@@ -29,6 +29,7 @@ import (
 	employeepkg "github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/eval"
 	intakepkg "github.com/caimlas/meept/internal/intake"
+	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/metrics"
@@ -354,6 +355,26 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if components.ToolRegistry != nil {
 			groupsHandler.SetToolValidation(components.ToolRegistry.CanonicalNames(), agent.CanonicalToolName)
 		}
+		// Diagnosis surface (agent-groups leaf 06): the report-only
+		// groups.check + per-entry explain attribution ride the same
+		// handler through the shared groups.Explain/Check engine. The
+		// normalizer injects the registry-backed grant vocabulary (same
+		// seam the resolver construction in components uses) so the C6
+		// tool-name leg validates against the live vocabulary.
+		groupsHandler.SetDiagnosisService(services.NewGroupsService(
+			fullCfg,
+			"config/agents",
+		))
+		// Overrides reader seam (agent-groups leaf 07): groups.check
+		// loads $MEEPT_HOME/group_overrides.json5 per request through the
+		// same injected clock the resolver seam uses (MEEPT_GROUPS_NOW
+		// pins it for the e2e gate). A load error surfaces to the caller
+		// as a named check failure — never silent zero counts.
+		groupsHandler.SetOverridesLoader(func() (groups.OverridesReader, error) {
+			return groups.LoadOverrides(groupsOverridesPath(), groups.OverrideLoadOptions{
+				Now: EnvGroupsNow,
+			})
+		})
 		proxy.SetGroupsHandler(groupsHandler)
 		proxy.RegisterGroupsMethods(rpcServer)
 		logger.Info("Groups RPC handlers registered", "audit_chain", groupsAudit != nil)
