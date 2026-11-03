@@ -266,7 +266,7 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-e2e-memory-pipeline.md | PENDING | 0 | |
+| 00T-e2e-memory-pipeline.md | TESTS_VALIDATED | 1 | a78b5d47: 8/8 RED witnessed in-session at clean-HEAD worktree (default-on pipeline, C4 knobs, stable/volatile split, recall_outcomes row, doctor check, project isolation, chief-of-staff, Flag-3 fail-closed cell). Gate observation riding leaf-03: dispatcher renders recall as '## Relevant Context' user-message block (dispatcher.go:3610) - stable/volatile split must reconcile BOTH injection sites. |
 | 01-scoping/orchestrator.md | PENDING | 0 | |
 | 02-defaults-on.md | PENDING | 0 | |
 | 03-stable-volatile-split.md | PENDING | 0 | |
