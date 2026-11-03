@@ -1622,6 +1622,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				httpOpts = append(httpOpts, http.WithSlackInteractions(components.SlackInteractions))
 				logger.Info("slack interactions endpoint enabled", "path", "/api/v1/slack/interactions")
 			}
+			// Telnyx voice endpoints (voice-sidecar leaf 14): wired ONLY
+			// when the voice block is enabled and its routes armed
+			// (signature verifiers constructed - otherwise nil and the
+			// routes never register, 404 instead of 503-fail-closed since
+			// an enabled-but-unverifiable voice config fails the boot).
+			if components.Voice != nil && components.Voice.Routes != nil {
+				httpOpts = append(httpOpts, http.WithVoiceRoutes(components.Voice.Routes))
+				logger.Info("voice routes armed",
+					"webhook_path", components.Voice.Routes.WebhookPath(),
+					"media_path", components.Voice.Routes.MediaPath(),
+				)
+			}
 			httpSrv = http.NewServer(httpCfg, configService, daemonControl, metricsService, svcRegistry, logger, httpOpts...)
 			// Wire firewall stats getter for HTTP endpoint
 			if components.AgentLoop != nil {

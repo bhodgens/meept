@@ -284,9 +284,9 @@ files, then releases the wave.
 | 09 | COMPLETE | f65a60bd; 6/6 -race; mutation RED-GREEN recorded; SplitSentences caps implementer-chosen |
 | 10 | PENDING | wave C |
 | 11 | PENDING | wave C - use FailOutcome(ccid, OutcomeNoAnswer, ...) for the no-answer timer |
-| 12 | PENDING | wave C |
+| 12 | COMPLETE | 359e3f64; TZ differential + brief-once + hold/release-once pinned; mutexio fix (tx-based transcript RMW); brief-injection = prompt prefix (hook-registry rejection evidenced); WORKTREE INCIDENT: original .hermes worktree repointed to main by a sibling mid-leaf - leaf 12 committed via detached /tmp/voice-l12 worktree, branch pointer fast-forwarded |
 | 13 | PENDING | wave C |
-| 14 | PENDING | serial, components.go |
+| 14 | PENDING | serial, components.go - IN PROGRESS (leaf-14 agent: wiring+talkloop+tool live-gated in /tmp/voice-wiring; awaiting orchestrator review/commit) |
 | 15 | PENDING | manifest is shared-write: merge, never overwrite |
 | 16 | PENDING | |
 

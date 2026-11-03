@@ -142,6 +142,13 @@ type Binding struct {
 
 	mu    sync.Mutex
 	calls map[string]*callState // call_control_id -> per-call state
+
+	// resolveMu serializes resolveSession per (employee, number) pair so
+	// two concurrent calls for the same pair cannot both miss the name
+	// lookup and create two sessions (the leaf-14 -race gate exposed the
+	// double-create: the winner of the rename leaves the loser's session
+	// unresolvable, and the test pins ONE session id for the pair).
+	resolveMu sync.Mutex
 }
 
 // callState is one live call's binding state.
@@ -327,6 +334,13 @@ func (b *Binding) state(ccid string) *callState {
 // resolveSession creates or reuses the session for (number, employee):
 // lookup by stable name first, then create + rename + employee-bind.
 func (b *Binding) resolveSession(employeeID, number string) (SessionHandle, error) {
+	// One live session per (number, employee): serialize the
+	// lookup-or-create so a concurrent call for the same pair observes
+	// either the prior session or the first caller's create, never a
+	// second create racing the rename.
+	b.resolveMu.Lock()
+	defer b.resolveMu.Unlock()
+
 	name := SessionName(employeeID, number)
 	sessions, err := b.deps.Sessions.List()
 	if err != nil {

@@ -309,6 +309,13 @@ func RunSupervisor(opts SupervisorOptions) int {
 	if len(opts.Env) == 0 {
 		opts.Env = decodeSupervisorEnv(os.Getenv(supervisorEnvEnv))
 	}
+	// Stdin not set directly either: the wrapper's OWN stdin carries the
+	// daemon's SpawnStdin pipe (startSupervised wires cmd.Stdin =
+	// SpawnStdin), and the wrapper never reads it - its documented job is
+	// to forward it to the runtime. Default here, same pattern as Env.
+	if opts.Stdin == nil {
+		opts.Stdin = os.Stdin
+	}
 
 	child := exec.Command(opts.Argv[0], opts.Argv[1:]...)
 	// SpawnEnv (empty for llama/MLX) replaces the RUNTIME's whole env; the

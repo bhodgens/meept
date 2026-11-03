@@ -53,14 +53,18 @@ ALLOWED_VALUE_CALLERS = {
         "HTTP client (go-github) only; never logged, never placed in "
         "child envs or command args."
     ),
-    # PLANNED (voice-sidecar leaf 14, not yet landed): the daemon wiring
-    # site resolves the Telnyx API token via Broker.Value and hands it to
-    # telnyx.NewClient(baseURL, key) as an already-resolved in-process
-    # string. The expected file is internal/daemon/voice_wiring.go (or
-    # wherever components.go constructs internal/voice clients). Same
-    # rules as above: token reaches only the Client constructor, never a
-    # log line, env entry, os.Setenv, or child process. When that caller
-    # lands, add its real repo-relative path + justification here.
+    # The voice sidecar's Telnyx token source (voice-sidecar leaf 14):
+    # the daemon wiring (WireVoice) resolves telnyx_api_key via
+    # Broker.Value and hands it ONLY to telnyx.NewClient(baseURL, key) as
+    # an already-resolved in-process string - the same posture as the
+    # github row above. The token never reaches a log line, env entry,
+    # os.Setenv, bus payload, or the meept-voice child process (the child
+    # gets provider keys over the unix socket, a different surface).
+    "internal/daemon/voice_wiring.go": (
+        "WireVoice resolves the Telnyx API token in-process and hands it "
+        "only to telnyx.NewClient (outbound call-control auth); never "
+        "logged, never in child envs or command args."
+    ),
 }
 
 # A call whose result may carry real secret material. The receiver name is

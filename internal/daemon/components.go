@@ -516,6 +516,14 @@ type Components struct {
 	SlackChannel      *slack.SlackChannel
 	SlackInteractions *slack.InteractionsHandler
 
+	// Voice sidecar (voice-sidecar leaf 14). nil unless [voice].enabled
+	//=true wired clean (Telnyx key, public URL, and connection id all
+	// present - a HALF-configured voice block fails the boot). The Routes
+	// field is handed to the unified HTTP server via
+	// http.WithVoiceRoutes in daemon.go; Stop tears child -> text
+	// server -> call store down in order.
+	Voice *VoiceWiring
+
 	// Code intelligence
 	ASTParser  *ast.ParserManager
 	LSPManager *lsp.Manager
@@ -4781,6 +4789,64 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Voice sidecar ([voice] block, voice-sidecar leaf 14): the whole-
+	// daemon wiring - call manager, registry, dialer, talk loops,
+	// supervisor, child proc, text server, employee binding, and the two
+	// Telnyx HTTP routes. Ordered AFTER the loop manager (loopTurnRunner
+	// clones loops per session), the session store, the employee
+	// framework (goal holds), and the effects ledger (dial reservation);
+	// every field captured by WireVoice is assigned before this call
+	// (pointer-capture order rule). Disabled boots (default) skip the
+	// block entirely - zero goroutines, zero sockets. An ENABLED boot
+	// with a broken voice config is a FATAL wiring error: answering
+	// phones half-wired strands live callers.
+	if cfg.Voice.Enabled {
+		vdeps := WireVoiceDeps{
+			Config:   cfg,
+			Bus:      msgBus,
+			Sessions: c.SessionStore,
+			Loops:    c.AgentLoopManager,
+			Template: c.AgentLoop,
+			Effects:  c.EffectsLedger,
+			Broker:   c.ensureSecretBroker(logger),
+			Logger:   logger,
+		}
+		// Audit chain: the employee wiring hands the Manager the chain DB
+		// handle; voice dial audit rows append through a store opened over
+		// the same pool (shared-DB convention, OpenStoreFromDB's Close is
+		// a no-op on caller-owned handles).
+		if chainDB := activityChainDB(c); chainDB != nil {
+			if s, err := auditlog.OpenStoreFromDB(chainDB, logger.With("component", "voice-audit")); err == nil {
+				vdeps.Audit = s
+			} else {
+				logger.Warn("voice wiring: audit chain store unavailable; dial audit rows degraded", "error", err)
+			}
+		}
+		// Supervisor chatter (C6 fast endpoint): voice.supervisor_model
+		// resolves to the classifier/small-model client when configured,
+		// else the main client. nil degrades the gate to allow-all with a
+		// single construction warning (NewSupervisor logs it).
+		vdeps.SupervisorChatter = voiceSupervisorChatter(c)
+		wiring, err := WireVoice(c.ctx, vdeps)
+		if err != nil {
+			logger.Error("FATAL: voice wiring failed", "error", err)
+			return nil, err
+		}
+		if wiring == nil {
+			// Degraded to disabled (missing secrets broker/token): the
+			// daemon boots without voice; every call path stays refused.
+			c.Voice = nil
+			logger.Warn("voice sidecar disabled: wiring degraded (see voice wiring WARN above)")
+		} else {
+			c.Voice = wiring
+			logger.Info("voice sidecar wired",
+				"max_concurrent_calls", cfg.Voice.MaxConcurrentCalls,
+				"supervisor_enabled", cfg.Voice.SupervisorEnabled,
+				"routes_armed", wiring.Routes != nil,
+			)
+		}
+	}
+
 	// Initialize backup scheduler (if configured and enabled)
 	if cfg.Backup.IsValidated() {
 		sched, err := bkpkg.NewGitBackupScheduler(cfg.Backup, logger)
@@ -5075,6 +5141,30 @@ func (c *Components) Start(ctx context.Context) error {
 	}
 
 	// Start chat handler
+	// Voice sidecar Start (leaf 14): text server up + voice_call tool
+	// registered via the toolprov provider seam. Runs after the ordinary
+	// component Start machinery so the loop manager is live before the
+	// first talk loop can clone a session loop. Failure rolls back through
+	// the ordinary started-handlers path.
+	if c.Voice != nil {
+		if err := c.Voice.Start(ctx, func(dial builtin.DialerFunc, agentID builtin.AgentIDFunc) {
+			builtin.SetVoiceProvider(dial, agentID, c.SecretBroker)
+			names := enabledToolProviderNames(c.Config, []string{"voice"}, c.Logger)
+			if len(names) == 0 {
+				c.Logger.Debug("voice provider disabled by [tool_providers]; no voice_call tool registered")
+				return
+			}
+			if _, err := toolprov.RegisterAll(c.ToolRegistry, names); err != nil {
+				c.Logger.Error("voice_call tool registration failed", "error", err)
+				return
+			}
+			c.Logger.Info("voice_call tool registered (employee outbound dial, gated by allowlist + effects ledger)")
+		}); err != nil {
+			return err
+		}
+		startedHandlers = append(startedHandlers, "voice")
+	}
+
 	if err := c.ChatHandler.Start(ctx); err != nil {
 		return err
 	}
@@ -6448,6 +6538,17 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.Dispatcher != nil {
 		c.Dispatcher.Stop()
 		c.Logger.Info("Dispatcher stopped")
+	}
+
+	// Voice sidecar Stop (leaf 14): child FIRST (it holds the text socket
+	// connection and can be mid-call), then the text server listener,
+	// then the call store - children before stores. Runs before the
+	// session store close below so the binding's terminal call-row writes
+	// still find the store open.
+	if c.Voice != nil {
+		c.Voice.Stop(ctx)
+		c.Voice = nil
+		c.Logger.Info("voice sidecar stopped")
 	}
 
 	// Close stores
