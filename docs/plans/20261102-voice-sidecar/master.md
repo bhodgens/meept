@@ -277,15 +277,15 @@ files, then releases the wave.
 | 02 | COMPLETE | 52f72040; 5/5 gate tests -race green; drain fixed capture+log |
 | 03 | COMPLETE | a25997c7; -race suite green at 120s timeout, C1 keys byte-exact; --no-verify attribution in body |
 | 04 | COMPLETE | 1cde70fc; TZ differential green; +manifest path_map rows + boots-leg suite; --no-verify attribution in body |
-| 05 | PENDING | |
-| 06 | PENDING | |
-| 07 | PENDING | |
-| 08 | PENDING | |
-| 09 | PENDING | |
-| 10 | PENDING | |
-| 11 | PENDING | |
-| 12 | PENDING | |
-| 13 | PENDING | |
+| 05 | COMPLETE | 1dfb8d22; 9/9 -race; FailOutcome variant added in-session for leaf 11 no_answer; done channels inbound extension test-pinned |
+| 06 | COMPLETE | 32f71d74; 5/5 -race x6, full pkg 39/39; gate-test infra fixes flagged; socket.go pre-accept buffering cross-fix (leaf-03 tests green); SpliceConfig.Codec inline mirror - leaf 14 keeps shape parity |
+| 07 | COMPLETE | 523f23af; voiceframe relocation + jargo v0.1.0 pin (6 API drifts recorded); no-jargo pin PASS; MVS upgraded transitive deps |
+| 08 | PENDING | wave C |
+| 09 | COMPLETE | f65a60bd; 6/6 -race; mutation RED-GREEN recorded; SplitSentences caps implementer-chosen |
+| 10 | PENDING | wave C |
+| 11 | PENDING | wave C - use FailOutcome(ccid, OutcomeNoAnswer, ...) for the no-answer timer |
+| 12 | PENDING | wave C |
+| 13 | PENDING | wave C |
 | 14 | PENDING | serial, components.go |
 | 15 | PENDING | manifest is shared-write: merge, never overwrite |
 | 16 | PENDING | |
