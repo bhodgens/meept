@@ -516,6 +516,45 @@ control (zero `knowledge_*` tools offered to the model).
 - Vector embedding dimensions
 - Distributed memory sync status
 
+## Scope (project/user/global)
+
+Every stored memory carries a recall scope (`memory.Scope`), stored as the
+portable metadata key `scope` everywhere and as a queryable
+`scope TEXT NOT NULL DEFAULT 'global'` column in the SQLite content tables
+(episodic + task; the FTS index table is never altered — content-table
+column only).
+
+- `project` — visible only to sessions bound to the same project
+  (matched against metadata `project_id`).
+- `user` — visible to all sessions of the user (matched against metadata
+  `user_id`); in single-user installs an empty filter userID matches.
+- `global` — visible everywhere. The legacy backfill value: every row that
+  predates scoping is `global`, so no existing memory disappears from
+  recall.
+
+Recall is scope-aware via the additive `WithScopeFilter(maxScope,
+projectID, userID)` search option on `Manager.Search` /
+`GetRelevantContext` (+ `WithMultiUserEnabled(bool)` carrying the
+multiuser bit). Callers that do not pass the option get today's
+unfiltered behavior byte-identically. `maxScope` is the CALLER's operating
+scope (purview): project-scope callers see only their own project's rows;
+user-scope callers see all project rows plus matching user rows; global
+callers see only global rows. Fail-closed rule: multiuser enabled +
+resolved empty userID ⇒ user-scope rows are NOT recallable (an identity
+resolution gap must never widen recall).
+
+### Cluster recall is explicitly unscoped across nodes
+
+Peer-node memories that arrive via gossip ingestion (MEMORY_STORED →
+`DualStore.StoreRemoteMemory`) are stamped `scope=global` plus
+`remote_node=<source node>` metadata at the ingest seam. Cluster recall is
+therefore deliberately UNscoped across nodes: a peer's memories are visible
+everywhere on the receiving node, exactly as before scoping existed — the
+stamp makes that a documented, queryable decision (provenance via
+`remote_node`), not a silent backfill accident. Single-daemon installs are
+unaffected. Narrowing cross-node recall per project is future work; the
+`remote_node` marker is the hook it would build on.
+
 ## Edge Cases
 
 ### Memory Storage Failure

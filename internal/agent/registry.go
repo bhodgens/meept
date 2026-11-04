@@ -13,6 +13,7 @@ import (
 	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/shadow"
@@ -155,6 +156,24 @@ type AgentRegistry struct {
 	// construction, so its ContextFirewall bakes the decision-compaction
 	// lane (resolver + decision_enabled).
 	compactionCfg config.CompactionConfig
+
+	// groupsResolver mirrors RegistryConfig.GroupsResolver (agent-groups
+	// leaf 04): the group policy resolver consulted at loop creation to
+	// resolve each spec's record (carried on the loop + executor) and in
+	// filterTools for the dispatch intersection. Nil = no groups config
+	// (byte-identical legacy behavior).
+	groupsResolver *groups.Resolver
+
+	// decisionLogLevel mirrors RegistryConfig.DecisionLogLevel: the C2
+	// decision-audit level applied to every loop this registry builds.
+	decisionLogLevel string
+
+	// codemodeEnabled mirrors RegistryConfig.CodemodeEnabled
+	// (token-efficiency branch 02 leaf 02): when true, filterTools unions
+	// the codemode tool into every scoped agent's allow-list so the
+	// filtered registry exposes it. Guarded by mu; written only at
+	// construction (NewAgentRegistry) — it is immutable after that.
+	codemodeEnabled bool
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -263,6 +282,28 @@ type RegistryConfig struct {
 	// late for the firewall. Zero value keeps every lane off (pre-wiring
 	// behavior, byte-identical).
 	Compaction config.CompactionConfig
+
+	// GroupsResolver is the daemon's group policy resolver (agent-groups
+	// leaf 04). When set, every registry-built loop resolves its spec's
+	// group record at creation (carried on the loop + executor for the
+	// call-time gate) and filterTools intersects the spec allowlist with
+	// it (dispatch gate; D8 deny-all via the explicit marker). Nil = no
+	// groups config: byte-identical legacy behavior (D7).
+	GroupsResolver *groups.Resolver
+
+	// DecisionLogLevel is security.groups.decision_log_level (agent-groups
+	// leaf 04 daemon wiring): applied to every registry-built loop's
+	// executor so the C2 decision-audit lines honor the knob on
+	// dispatched turns too. "" = deny-warn default.
+	DecisionLogLevel string
+
+	// CodemodeEnabled is [agent.tools].codemode_enabled (token-efficiency
+	// branch 02 leaf 02): when true, every registry-built loop's filtered
+	// tool registry is granted the codemode tool (filterTools unions it
+	// into the scoped agent's allow-list). Default false: the daemon
+	// behaves byte-identically to pre-codemode and the tool stays absent
+	// from filtered registries.
+	CodemodeEnabled bool
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -298,6 +339,9 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		plannerChatter:        cfg.PlannerChatter,
 		hookRegistry:          cfg.HookRegistry,
 		compactionCfg:         cfg.Compaction,
+		groupsResolver:        cfg.GroupsResolver,
+		decisionLogLevel:      cfg.DecisionLogLevel,
+		codemodeEnabled:       cfg.CodemodeEnabled,
 	}
 
 	// Load global rules
@@ -634,6 +678,17 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		opts = append(opts, WithSecurityChecker(r.security))
 	}
 
+	// Loop-carried group resolution (agent-groups leaf 04 T1): resolve the
+	// spec's group record ONCE at loop creation and carry it on the loop
+	// (the executor's call-time gate consults it; filterTools intersects
+	// with the same record). Managed=false records are stamped too — the
+	// call-time gate reads Managed and skips, keeping the legacy posture
+	// explicit instead of inferred from a nil field.
+	if r.groupsResolver != nil {
+		res := r.groupsResolver.ResolveForAgent(spec.ID, spec.Groups, spec.GrantedToolNames())
+		opts = append(opts, WithGroupResolution(&res))
+	}
+
 	if r.memvid != nil {
 		opts = append(opts, WithMemvidClient(r.memvid))
 	}
@@ -762,7 +817,14 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 
 	// Agent loops created by registry use agentID as sessionID
 	// workingDir is set later via SetWorkingDir when session binds to project
-	return NewAgentLoop(spec.ID, "", opts...)
+	loop := NewAgentLoop(spec.ID, "", opts...)
+	// Decision-log level (agent-groups leaf 04): every registry-built
+	// loop's executor logs the C2 permission decision lines at the
+	// configured knob ("" = deny-warn default).
+	if r != nil && r.decisionLogLevel != "" {
+		loop.SetExecutorDecisionLogLevel(r.decisionLogLevel)
+	}
+	return loop
 }
 
 // filterTools returns a filtered tool registry based on agent spec.
@@ -774,6 +836,14 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 // shell_execute resolves to the registered `shell` tool) and capped when the
 // spec sets tool_scope_limit (tool-list scoping; 0 = no cap, existing
 // behavior). See AgentSpec.GrantedToolNames / ScopedToolNames.
+//
+// Group intersection (agent-groups leaf 04 T2): when the registry carries a
+// groups resolver and the agent resolves MANAGED, the spec allowlist is
+// further intersected with the record's AllowedTools minus its DeniedTools
+// (binding never widens the spec, D4). A managed record with an EMPTY
+// effective allowlist means DENY-ALL — the explicit emptyAllowAll marker
+// registry keeps FilteredToolRegistry's legacy empty=all semantics from
+// firing (D8). Ungrouped/unmanaged agents are byte-identical (D7).
 func (r *AgentRegistry) filterTools(spec *AgentSpec) ToolRegistry {
 	if r.tools == nil {
 		return nil
@@ -783,11 +853,61 @@ func (r *AgentRegistry) filterTools(spec *AgentSpec) ToolRegistry {
 	if !spec.CanDelegate {
 		allowedTools = removeString(allowedTools, "delegate_task")
 	}
+	// Codemode gate (token-efficiency branch 02 leaf 02): when [agent.tools]
+	// codemode_enabled is on, union the codemode tool into a SCOPED agent's
+	// allow-list so its filtered registry exposes it. Only scoped agents
+	// (non-empty allow-list) need the explicit union: the empty-scope early
+	// return below hands out the unfiltered registry, which already carries
+	// codemode when it is registered. Gate-off leaves allowedTools
+	// byte-identical to the pre-codemode path. r.codemodeEnabled is read
+	// under r.mu (filterTools runs inside createLoop under the write lock).
+	if r.codemodeEnabled && len(allowedTools) > 0 {
+		allowedTools = appendUnique(allowedTools, "codemode")
+	}
 	if len(allowedTools) == 0 {
 		return r.tools
 	}
 
+	// Group intersection (T2): resolve BEFORE the legacy empty check so a
+	// managed deny-all cannot fall through to the unfiltered registry.
+	if res := r.resolveForSpec(spec); res != nil && res.Managed {
+		denied := make(map[string]struct{}, len(res.DeniedTools))
+		for _, d := range res.DeniedTools {
+			denied[d] = struct{}{}
+		}
+		allowed := make(map[string]struct{}, len(res.AllowedTools))
+		for _, a := range res.AllowedTools {
+			allowed[a] = struct{}{}
+		}
+		intersected := make([]string, 0, len(allowedTools))
+		for _, t := range allowedTools {
+			if _, ok := denied[t]; ok {
+				continue
+			}
+			if _, ok := allowed[t]; ok {
+				intersected = append(intersected, t)
+			}
+		}
+		if len(intersected) == 0 {
+			// D8 deny-all: explicit marker, never the legacy empty=all.
+			return NewFilteredToolRegistry(r.tools, nil, WithDenyAll())
+		}
+		return NewFilteredToolRegistry(r.tools, intersected)
+	}
+
 	return NewFilteredToolRegistry(r.tools, allowedTools)
+}
+
+// resolveForSpec resolves the spec's group record through the registry's
+// resolver (nil resolver or empty spec id => nil). The record is the SAME
+// one stamped onto the loop (createLoop), so the dispatch gate and the
+// call-time gate can never disagree.
+func (r *AgentRegistry) resolveForSpec(spec *AgentSpec) *groups.Resolved {
+	if r.groupsResolver == nil || spec == nil {
+		return nil
+	}
+	res := r.groupsResolver.ResolveForAgent(spec.ID, spec.Groups, spec.GrantedToolNames())
+	return &res
 }
 
 // GetByRole returns all agent loops with the given role.

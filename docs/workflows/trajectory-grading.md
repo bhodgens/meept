@@ -73,7 +73,10 @@ build tag `e2e`) is the gate:
 
 1. A scripted `FakeLLM` scenario replays through a real scratch daemon.
 2. The actual tool-call sequence is captured from the session store
-   (ordered by seq) and normalized.
+   (ordered by seq) and normalized. The DB-first path is live: the chat
+   exchange persist writes `session_tool_calls` rows automatically
+   (wiring-gap-remediation leaf 05), with the FakeLLM request-log echo
+   kept as the fallback when a session has zero persisted rows.
 3. `trajectorydiff` grades it against the committed fixture, using the
    fixture's own `match` block.
 

@@ -80,6 +80,13 @@ type RPCHandler struct {
 	// (goal-completion follow-up #5). Same injection seam as sessionGoals;
 	// nil means agents.employees.bind_session returns a clear error.
 	sessionEmployees SessionEmployeeBinder
+
+	// goalOutcomeReporter is the external-effect seam for goal outcomes
+	// (github-intake-factory leaf 05): agents.goals.assess invokes it
+	// after persisting the verdict so the intake write-back can comment
+	// on the source ticket. Nil means the outcome surfaces in the goal
+	// row only — no external effect is attempted.
+	goalOutcomeReporter GoalOutcomeReporter
 }
 
 // SessionGoalBinder is the narrow session-store surface bind_session needs:
@@ -98,6 +105,22 @@ func (h *RPCHandler) SetSessionGoalBinder(b SessionGoalBinder) {
 	h.sessionGoals = b
 }
 
+// GoalOutcomeReporter is the external-effect seam for goal outcomes
+// (github-intake-factory leaf 05): given the assessed goal, report the
+// outcome to its source (the intake write-back comments on the ticket).
+// Errors are surfaced by the caller but never rolled back — the verdict
+// itself is already persisted.
+type GoalOutcomeReporter func(ctx context.Context, goal *Goal) error
+
+// SetGoalOutcomeReporter injects the outcome write-back seam. Nil is
+// ignored (typed-nil guard).
+func (h *RPCHandler) SetGoalOutcomeReporter(fn GoalOutcomeReporter) {
+	if fn == nil {
+		return
+	}
+	h.goalOutcomeReporter = fn
+}
+
 // NewRPCHandler creates a new RPC handler for employee operations.
 //
 // manager may be nil when the employee subsystem is entirely disabled;
@@ -109,7 +132,6 @@ func NewRPCHandler(manager *Manager) *RPCHandler {
 		logger:  slog.Default(),
 	}
 }
-
 
 // Handlers returns the map of RPC method names to handler functions.
 //
@@ -148,6 +170,12 @@ func (h *RPCHandler) Handlers() map[string]func(context.Context, json.RawMessage
 		"agents.employees.bind_session": h.handleEmployeesBindSession,
 		"agents.goals.approve":          h.handleGoalsApprove,
 		"agents.goals.reject":           h.handleGoalsReject,
+
+		// Health assessment (github-intake-factory leaf 05): the same
+		// Assess+persist the GoalLoop reflect path performs, exposed for
+		// external drivers; the intake outcome write-back subscribes to
+		// the result via the injected GoalOutcomeReporter seam.
+		"agents.goals.assess": h.handleGoalsAssess,
 
 		// Audit (spec line 539)
 		"agents.audit.list":    h.handleAuditList,
@@ -597,6 +625,54 @@ func (h *RPCHandler) handleGoalsSetGate(ctx context.Context, raw json.RawMessage
 		return nil, fmt.Errorf("set gate: %w", err)
 	}
 	return g, nil
+}
+
+// handleGoalsAssess handles agents.goals.assess (github-intake-factory
+// leaf 05): records a health verdict on a goal through the same
+// Assess+persist path the GoalLoop reflect uses, then reports the outcome
+// through the injected GoalOutcomeReporter (the intake write-back). The
+// verdict is persisted even when the reporter fails or is absent — the
+// external effect is best-effort on top of a completed internal state
+// change, and the effects ledger inside the reporter dedups repeats.
+func (h *RPCHandler) handleGoalsAssess(ctx context.Context, raw json.RawMessage) (any, error) {
+	if h.manager == nil {
+		return nil, errNotConfigured
+	}
+	var req struct {
+		GoalID string `json:"goal_id"`
+		Health string `json:"health"`
+		Detail string `json:"detail,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, fmt.Errorf("invalid request: %w", err)
+	}
+	if req.GoalID == "" {
+		return nil, fmt.Errorf("goal_id is required")
+	}
+	if req.Health == "" {
+		return nil, fmt.Errorf("health is required (healthy|at_risk|broken|unknown)")
+	}
+
+	g, err := h.manager.AssessGoal(ctx, req.GoalID, req.Health)
+	if err != nil {
+		return nil, fmt.Errorf("assess goal: %w", err)
+	}
+
+	reported := false
+	if h.goalOutcomeReporter != nil {
+		if err := h.goalOutcomeReporter(ctx, g); err != nil {
+			return map[string]any{
+				"goal":             g,
+				"outcome_reported": false,
+				"outcome_error":    err.Error(),
+			}, nil
+		}
+		reported = true
+	}
+	return map[string]any{
+		"goal":             g,
+		"outcome_reported": reported,
+	}, nil
 }
 
 // handleGoalsBindSession handles agents.goals.bind_session (goal-completion

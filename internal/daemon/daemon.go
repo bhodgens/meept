@@ -28,6 +28,8 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	employeepkg "github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/eval"
+	intakepkg "github.com/caimlas/meept/internal/intake"
+	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/metrics"
@@ -353,6 +355,26 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if components.ToolRegistry != nil {
 			groupsHandler.SetToolValidation(components.ToolRegistry.CanonicalNames(), agent.CanonicalToolName)
 		}
+		// Diagnosis surface (agent-groups leaf 06): the report-only
+		// groups.check + per-entry explain attribution ride the same
+		// handler through the shared groups.Explain/Check engine. The
+		// normalizer injects the registry-backed grant vocabulary (same
+		// seam the resolver construction in components uses) so the C6
+		// tool-name leg validates against the live vocabulary.
+		groupsHandler.SetDiagnosisService(services.NewGroupsService(
+			fullCfg,
+			"config/agents",
+		))
+		// Overrides reader seam (agent-groups leaf 07): groups.check
+		// loads $MEEPT_HOME/group_overrides.json5 per request through the
+		// same injected clock the resolver seam uses (MEEPT_GROUPS_NOW
+		// pins it for the e2e gate). A load error surfaces to the caller
+		// as a named check failure — never silent zero counts.
+		groupsHandler.SetOverridesLoader(func() (groups.OverridesReader, error) {
+			return groups.LoadOverrides(groupsOverridesPath(), groups.OverrideLoadOptions{
+				Now: EnvGroupsNow,
+			})
+		})
 		proxy.SetGroupsHandler(groupsHandler)
 		proxy.RegisterGroupsMethods(rpcServer)
 		logger.Info("Groups RPC handlers registered", "audit_chain", groupsAudit != nil)
@@ -1401,6 +1423,41 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// execution/storage layer; only the RPC surface changes.
 		if components.EmployeeManager != nil {
 			agentRPCHandler := employeepkg.NewRPCHandler(components.EmployeeManager)
+			// Goal outcome write-back (github-intake-factory leaf 05):
+			// agents.goals.assess reports through the intake WriteBack so
+			// a verdict reaches the source ticket as an effects-wrapped
+			// comment (healthy also adds the done label). The write-back
+			// is READ THROUGH components.IntakeWriteBack at call time —
+			// wireIntakePoller runs later in Components.Start, so a
+			// registration-time check would capture nil forever. Goals
+			// without an intake TriggerRef are skipped — the write-back
+			// is keyed on intake:<repo>#<ticket> and cannot address
+			// anything else. A nil write-back (intake disabled / no
+			// effects ledger) degrades to row-only assessment.
+			componentsRef := components
+			agentRPCHandler.SetGoalOutcomeReporter(func(ctx context.Context, goal *employeepkg.Goal) error {
+				wb := componentsRef.IntakeWriteBack
+				if wb == nil || goal == nil || !strings.HasPrefix(goal.TriggerRef, intakepkg.TriggerRefPrefix) {
+					return nil
+				}
+				ref := strings.TrimPrefix(goal.TriggerRef, intakepkg.TriggerRefPrefix)
+				idx := strings.LastIndex(ref, "#")
+				if idx <= 0 || idx == len(ref)-1 {
+					return fmt.Errorf("intake writeback: malformed trigger_ref %q", goal.TriggerRef)
+				}
+				ticket := intakepkg.Ticket{
+					ID:        ref[idx+1:],
+					Repo:      ref[:idx],
+					Title:     goal.Title,
+					UpdatedAt: time.Now().UTC(),
+				}
+				_, _, err := wb.Report(ctx, ticket, intakepkg.Outcome{
+					GoalID: goal.ID,
+					State:  goal.Health.String(),
+					Detail: goal.Title,
+				})
+				return err
+			})
 			// Session goal binding (goal-completion leaf 03 Task 3):
 			// agents.goals.bind_session persists via the session store's
 			// SetGoalID (C6 branch 1). session.Store satisfies the
@@ -1952,14 +2009,16 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			sp.SetSelfSealEnabled(fullCfg.Plans.SelfSealEnabled)
 			sp.SetCritiqueMaxRounds(fullCfg.Plans.ComplexMaxCritiqueRounds)
 			// Fresh-context critic tree (plan-20261101-fresh-context-critic,
-			// contracts C1/C2): thread the three critic flags. All default
-			// false (ships dark); nil-guarded setters, so the wiring is a
-			// no-op when the strategic planner is absent. The model chatters
+			// contracts C1/C2): thread the three critic flags. Default ON
+			// per the 2026-11-02 operator decision, so the knobs ship in
+			// disable form and the setters get the inverted value; the
+			// nil-guarded setters make the wiring a no-op when the
+			// strategic planner is absent. The model chatters
 			// (SetCriticChatter / SetHostileCriticChatter) are wired in
 			// components.go at the critic-model client construction site.
-			sp.SetFreshCriticEnabled(fullCfg.Plans.FreshCriticEnabled)
-			sp.SetHostileCriticEnabled(fullCfg.Plans.HostileCriticEnabled)
-			sp.SetInterviewOptionGates(fullCfg.Plans.InterviewOptionGates)
+			sp.SetFreshCriticEnabled(!fullCfg.Plans.FreshCriticDisabled)
+			sp.SetHostileCriticEnabled(!fullCfg.Plans.HostileCriticDisabled)
+			sp.SetInterviewOptionGates(!fullCfg.Plans.InterviewOptionsDisabled)
 			// C9 chatters (components.go built them at construction):
 			// nil critic client = planner chatter for round 1 (C2);
 			// nil hostile client = the pass is skipped (C5). Typed-nil

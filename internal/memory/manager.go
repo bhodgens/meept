@@ -475,6 +475,22 @@ func (m *Manager) Store(ctx context.Context, mem Memory) (string, error) {
 		return "", fmt.Errorf("memory content exceeds limit of %d characters", limit.CharacterLimit)
 	}
 
+	// Scope stamping (01-scope-schema T1): metadata["scope"] is the
+	// portable storage truth (dual-store/memvid paths read metadata; the
+	// SQLite scope column is query-time defense-in-depth). Empty Scope
+	// stores as "global" so unscoped writers keep legacy
+	// (everywhere-visible) behavior.
+	scope := mem.Scope
+	if scope == "" {
+		scope = ScopeGlobal
+	}
+	if mem.Metadata == nil {
+		mem.Metadata = make(map[string]any)
+	}
+	if _, exists := mem.Metadata["scope"]; !exists {
+		mem.Metadata["scope"] = string(scope)
+	}
+
 	// Route through memvid when active
 	var id string
 	var storeErr error
@@ -704,7 +720,11 @@ func (m *Manager) mergeDualStoreRecent(ctx context.Context, local []MemoryResult
 }
 
 // Search finds memories matching the query.
-func (m *Manager) Search(ctx context.Context, query MemoryQuery) ([]MemoryResult, error) {
+// Variadic SearchOptions (01-scope-schema C2) are additive: without them the
+// behavior is byte-identical to the pre-scoping recall (no scope filtering).
+func (m *Manager) Search(ctx context.Context, query MemoryQuery, opts ...SearchOption) ([]MemoryResult, error) {
+	scopeFilter := resolveScopeOptions(opts)
+
 	m.mu.RLock()
 	if !m.initialized {
 		m.mu.RUnlock()
@@ -726,8 +746,10 @@ func (m *Manager) Search(ctx context.Context, query MemoryQuery) ([]MemoryResult
 			if err != nil {
 				return nil, err
 			}
+			results = filterScopeResults(results, scopeFilter)
 			return m.mergeBridges(ctx, query.Query, results)
 		}
+		results = filterScopeResults(results, scopeFilter)
 		return m.mergeBridges(ctx, query.Query, results)
 	}
 
@@ -735,6 +757,7 @@ func (m *Manager) Search(ctx context.Context, query MemoryQuery) ([]MemoryResult
 	if err != nil {
 		return nil, err
 	}
+	results = filterScopeResults(results, scopeFilter)
 	return m.mergeBridges(ctx, query.Query, results)
 }
 
@@ -1016,7 +1039,11 @@ func (m *Manager) GetRecent(ctx context.Context, limit int) ([]MemoryResult, err
 }
 
 // GetRelevantContext retrieves memories relevant to a query with smart ranking.
-func (m *Manager) GetRelevantContext(ctx context.Context, query string, maxItems int) ([]MemoryResult, error) {
+// Variadic SearchOptions (01-scope-schema C2) are additive: without them the
+// behavior is byte-identical to the pre-scoping recall (no scope filtering).
+func (m *Manager) GetRelevantContext(ctx context.Context, query string, maxItems int, opts ...SearchOption) ([]MemoryResult, error) {
+	scopeFilter := resolveScopeOptions(opts)
+
 	m.mu.RLock()
 	if !m.initialized {
 		m.mu.RUnlock()
@@ -1100,6 +1127,10 @@ func (m *Manager) GetRelevantContext(ctx context.Context, query string, maxItems
 			results = ranked
 		}
 	}
+
+	// Scope predicate (01-scope-schema C2): applied after ranking so the
+	// legacy (no-option) path keeps its exact prior ordering.
+	results = filterScopeResults(results, scopeFilter)
 
 	// Sort by relevance descending, recency as tie-breaker
 	sort.Slice(results, func(i, j int) bool {
@@ -1323,8 +1354,8 @@ func (m *Manager) Graph() *KnowledgeGraph {
 
 // SearchWithGraph searches memories and applies graph-aware ranking.
 // The alpha parameter controls PageRank influence: 0 = pure relevance, 1 = pure PageRank.
-func (m *Manager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64) ([]MemoryResult, error) {
-	results, err := m.Search(ctx, query)
+func (m *Manager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64, opts ...SearchOption) ([]MemoryResult, error) {
+	results, err := m.Search(ctx, query, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1672,6 +1703,9 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 	}
 
 	mem.Metadata = ParseMetadata(metaJSON)
+	// Scope recovery (01-scope-schema): metadata["scope"] is the portable
+	// truth; missing marker = legacy row -> global.
+	mem.Scope = scopeFromMetadata(mem.Metadata)
 	// Distilled memories (leaf 15) must carry well-formed structured JSON;
 	// malformed stored entries are rejected at read.
 	if verr := ValidateDistilledContent(mem.Category, mem.Content); verr != nil {
@@ -2034,7 +2068,10 @@ func (m *Manager) DistributedConfig() config.DistributedMemoryConfig {
 
 // SearchSemantic performs vector similarity search for memories.
 // If the vector store is not configured, it falls back to keyword search.
-func (m *Manager) SearchSemantic(ctx context.Context, query string, limit int) ([]MemoryResult, error) {
+// Variadic SearchOptions (01-scope-schema C2) apply the scope predicate to
+// derived/embedding-space results too (T4: the same filter everywhere).
+func (m *Manager) SearchSemantic(ctx context.Context, query string, limit int, opts ...SearchOption) ([]MemoryResult, error) {
+	scopeFilter := resolveScopeOptions(opts)
 	m.mu.RLock()
 	if !m.initialized {
 		m.mu.RUnlock()
@@ -2060,13 +2097,14 @@ func (m *Manager) SearchSemantic(ctx context.Context, query string, limit int) (
 				Content:  r.Content,
 				Metadata: r.Metadata,
 			}
+			mem.Scope = scopeFromMetadata(mem.Metadata)
 			memResults = append(memResults, MemoryResult{
 				Memory:         mem,
 				RelevanceScore: r.RelevanceScore,
 				Source:         "semantic",
 			})
 		}
-		return m.mergeBridges(ctx, query, memResults)
+		return m.mergeBridges(ctx, query, filterScopeResults(memResults, scopeFilter))
 	}
 
 	// Fallback to keyword search. MatchAny + PrefixTerms (bughunt 2026-10-14,
@@ -2083,12 +2121,15 @@ func (m *Manager) SearchSemantic(ctx context.Context, query string, limit int) (
 		Limit:       limit,
 		MatchAny:    true,
 		PrefixTerms: true,
-	})
+	}, opts...)
 }
 
 // SearchHybrid performs a hybrid search combining keyword and vector similarity.
 // If the vector store is not configured, it falls back to keyword search.
-func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]MemoryResult, error) {
+// Variadic SearchOptions (01-scope-schema C2) apply the scope predicate to
+// derived/embedding-space results too (T4: the same filter everywhere).
+func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int, opts ...SearchOption) ([]MemoryResult, error) {
+	scopeFilter := resolveScopeOptions(opts)
 	m.mu.RLock()
 	if !m.initialized {
 		m.mu.RUnlock()
@@ -2127,7 +2168,6 @@ func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]
 		for _, r := range keywordResults {
 			keywordScores[r.Memory.ID] = r.RelevanceScore
 		}
-
 		vectorScores := make(map[string]float64)
 		for _, r := range vectorResults {
 			vectorScores[r.MemoryID] = r.VectorSimilarity
@@ -2143,12 +2183,14 @@ func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]
 		// Add vector-only results
 		for _, vr := range vectorResults {
 			if _, exists := combined[vr.MemoryID]; !exists {
+				mem := Memory{
+					ID:       vr.MemoryID,
+					Content:  vr.Content,
+					Metadata: vr.Metadata,
+				}
+				mem.Scope = scopeFromMetadata(mem.Metadata)
 				combined[vr.MemoryID] = &MemoryResult{
-					Memory: Memory{
-						ID:       vr.MemoryID,
-						Content:  vr.Content,
-						Metadata: vr.Metadata,
-					},
+					Memory: mem,
 					Source: "hybrid",
 				}
 			}
@@ -2170,6 +2212,8 @@ func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]
 			return results[i].RelevanceScore > results[j].RelevanceScore
 		})
 
+		results = filterScopeResults(results, scopeFilter)
+
 		if len(results) > limit {
 			results = results[:limit]
 		}
@@ -2185,7 +2229,7 @@ func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]
 		Limit:       limit,
 		MatchAny:    true,
 		PrefixTerms: true,
-	})
+	}, opts...)
 }
 
 // GetVectorSearcher returns the underlying vector searcher if configured.

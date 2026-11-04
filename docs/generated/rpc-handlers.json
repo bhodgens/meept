@@ -183,7 +183,7 @@
     "topic": "chat.submit",
     "handler": "chatSubmitHandler.Submit",
     "file": "internal/daemon/daemon.go",
-    "line": 334
+    "line": 336
   },
   {
     "topic": "chat.submit",
@@ -381,25 +381,31 @@
     "topic": "groups.assign",
     "handler": "h.handleAssign",
     "file": "internal/rpc/groups.go",
-    "line": 136
+    "line": 153
+  },
+  {
+    "topic": "groups.check",
+    "handler": "h.handleCheck",
+    "file": "internal/rpc/groups.go",
+    "line": 155
   },
   {
     "topic": "groups.explain",
     "handler": "h.handleExplain",
     "file": "internal/rpc/groups.go",
-    "line": 135
+    "line": 152
   },
   {
     "topic": "groups.list",
     "handler": "h.handleList",
     "file": "internal/rpc/groups.go",
-    "line": 134
+    "line": 151
   },
   {
     "topic": "groups.remove",
     "handler": "h.handleRemove",
     "file": "internal/rpc/groups.go",
-    "line": 137
+    "line": 154
   },
   {
     "topic": "instruction.add",

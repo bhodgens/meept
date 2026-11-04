@@ -38,6 +38,22 @@ interview: the one-shot `task.interview` path stays only for the legacy
 pipeline. `plan.seal` and `plan.draft` are RPC-only, never a bus topic.
 See docs/workflows/agent-orchestration.md ("Plan compiler pipeline").
 
+## Fresh-context critic flags are on by default (disable-form keys)
+
+The three plan-critic features (`fresh_critic_disabled`,
+`hostile_critic_disabled`, `interview_options_disabled` in `[plans]`)
+default ON per the 2026-11-02 operator decision and are expressed as
+INVERTED disable-form keys: absent = enabled, explicit true = disabled
+(a true-by-default bool cannot be expressed with an enable-named field;
+the original enable-named keys shipped dark for one day and were
+renamed). With defaults on and the `hostile_critic_model` slot empty
+(the shipped state), a TierComplex plan still cannot self-seal: the
+hostile pass skips at runtime (reason `no_model`), the outcome stamps
+`hostile_skipped`, and the draft waits at the human seal - intentional,
+per the no-clean-seal-without-hostile-reader property. Flipping a
+default back is a product decision, not a code cleanup. See
+docs/workflows/agent-orchestration.md ("Fresh-Context Plan Critic").
+
 ## OTLP metrics export is opt-in
 
 `metrics.otlp.enabled` (default false) gates the daemon's OTLP metrics
@@ -84,6 +100,27 @@ from daemon.go AFTER the plan system initializes — NOT inside
 `initializeSkills`, which runs before those dependencies exist (the old
 inline gate was always false; found by the wiki smoke test, 2026-08-29).
 Keep this ordering if you refactor daemon startup.
+
+## Agent groups default management is opt-in (fail-closed)
+
+Two frozen defaults from the agent-groups tree
+(docs/plans/20261030-agent-groups/master.md, decisions D7 and D8 -
+that plan is the product-decision authorization):
+
+- **D7: `security.groups.default_managed` defaults FALSE.** Agents with no
+  group membership and no binding keep TODAY's behavior (spec allowlist
+  only, legacy empty-means-all registry semantics, call-time gate skipped).
+  Setting it true routes those agents through the fail-closed `default`
+  policy and arms the membership file backstop. Flipping it on an install
+  with ungrouped agents is an isolation-posture upgrade that WILL shrink
+  their access; treat it as the product decision it is.
+- **D8: an empty effective allowlist on a MANAGED subject means DENY-ALL.**
+  When a group policy is active for a subject, zero resolved allowed tools
+  denies everything at dispatch AND call time; `FilteredToolRegistry`'s
+  legacy empty=all behavior must never fire for a managed subject. This is
+  the fail-closed reading, not an opt-in: the "default" that stays fixed is
+  the legacy empty=all behavior for UNMANAGED subjects only (D7's false
+  posture).
 
 ## Automated memory-tier eviction is PROPOSED for default-on (NOT yet flipped)
 

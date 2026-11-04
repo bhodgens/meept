@@ -175,6 +175,11 @@ type Conversation struct {
 	memoryContext string
 	// memorySnapshot is frozen at session start for API prefix caching
 	memorySnapshot string
+	// standingMemoryContext holds the budgeted STABLE (standing) memory
+	// bullets (leaf 03 C6). Rendered as the cacheable "Memory (standing)"
+	// system-prompt section via AddSectionWithStability(..., true); it never
+	// enters the volatile <memory-context> fence or the snapshot.
+	standingMemoryContext string
 	// cachePrefixHash tracks SHA256 of system prompt + stabilized tools for cache invalidation.
 	cachePrefixHash string
 	// cachePrefixChanged is set to true when StabilizeToolPrefix detects a hash change.
@@ -1066,6 +1071,7 @@ func (c *Conversation) Clone() *Conversation {
 	// conversation (used by branching, pair sessions, and snapshots).
 	clone.memoryContext = c.memoryContext
 	clone.memorySnapshot = c.memorySnapshot
+	clone.standingMemoryContext = c.standingMemoryContext
 	clone.cachePrefixHash = c.cachePrefixHash
 	clone.cachePrefixChanged = c.cachePrefixChanged
 
@@ -1153,6 +1159,24 @@ func (c *Conversation) SetMemoryContext(ctxStr string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.memoryContext = ctxStr
+}
+
+// SetStandingMemoryContext sets the budgeted stable (standing) memory
+// bullets (leaf 03 C6). Empty string clears the section. Callers pass the
+// whole-item-budgeted bullet list; the render site (system-prompt builders)
+// emits it as the cacheable "Memory (standing)" section.
+func (c *Conversation) SetStandingMemoryContext(standing string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.standingMemoryContext = standing
+}
+
+// StandingMemoryContext returns the standing (stable) memory bullets for
+// prompt building. Empty when no stable items were recalled.
+func (c *Conversation) StandingMemoryContext() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.standingMemoryContext
 }
 
 // FetchAndFreezeMemory fetches memory context and freezes it for prefix caching.

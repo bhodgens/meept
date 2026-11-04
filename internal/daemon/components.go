@@ -46,6 +46,8 @@ import (
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/gatecapture"
 	"github.com/caimlas/meept/internal/githubsvc"
+	"github.com/caimlas/meept/internal/groups"
+	"github.com/caimlas/meept/internal/intake"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
@@ -250,6 +252,12 @@ type Components struct {
 	// and a token source resolved. Owned here so the re-arm / RPC surfaces
 	// can report it; it is inert (no open sockets) and needs no close.
 	GitHubPool *githubsvc.ClientPool
+
+	// IntakeWriteBack is the ticket outcome write-back built when the
+	// [intake] block is enabled and the effects ledger is wired (nil
+	// otherwise). The goal-health outcome seam reports through it;
+	// SetDoneLabel has already been applied by wireIntakePoller.
+	IntakeWriteBack *intake.WriteBack
 
 	// GitHubReArmTickerDone closes when the periodic instruction re-sync
 	// ticker exits (daemon Stop). Nil unless a ticker was started
@@ -913,12 +921,52 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Agent-groups boot hook (leaf 02, task T4): structural validation of
 	// the [security.groups] section BEFORE any component wiring — a
 	// cyclic group chain or dangling policy reference fails boot with a
-	// named defect (fail closed). Live-registry tool validation is leaf
-	// 04's extension of the same hook.
+	// named defect (fail closed). Leaf 04 extends the same hook with the
+	// C6 live-registry tool-name leg: the registry is built just below
+	// (tools.NewRegistry), and groupsBootValidateTools runs AFTER builtin
+	// registration (registerBuiltinTools) where every policy tool name
+	// must resolve, or boot fails naming the offender.
 	if err := validateGroupsConfig(cfg); err != nil {
 		logger.Error("FATAL: groups config invalid", "error", err)
 		return nil, err
 	}
+
+	// Groups resolver (agent-groups leaf 04): built ONCE from the loaded
+	// config and shared by the registry (loop resolution records + the
+	// filterTools dispatch intersection). The normalizer injects the
+	// agent-grant vocabulary ("shell_execute" -> "shell") so
+	// internal/groups never imports internal/agent.
+	//
+	// Time-boxed overrides (agent-groups leaf 07, C8): the reader loads
+	// $MEEPT_HOME/group_overrides.json5 at boot with its clock injected
+	// (EnvGroupsNow: MEEPT_GROUPS_NOW for the e2e gate, wall-clock in
+	// production). A malformed FILE or entry FAILS BOOT (named error,
+	// fail-closed — same posture as validateGroupsConfig); expired
+	// entries are skipped with ONE Warn. The loaded set feeds the
+	// resolver's per-subject ExtraAllowsFor seam: deny still beats
+	// override and the spec stays the ceiling (resolve.go owns that
+	// precedence). The seam answers through the QUERY clock each
+	// resolution, so entries expire mid-window without a resolver
+	// rebuild.
+	groupsOverrides, groupsErr := groups.LoadOverrides(groupsOverridesPath(), groups.OverrideLoadOptions{
+		Now:  EnvGroupsNow,
+		Warn: func(msg string) { logger.Warn(msg) },
+	})
+	if groupsErr != nil {
+		logger.Error("FATAL: groups overrides invalid", "error", groupsErr)
+		return nil, groupsErr
+	}
+	groupsResolver := groups.NewResolver(
+		groupsPoliciesFromConfig(cfg.Security.Groups.Policies),
+		groupsBindingsFromConfig(cfg.Security.Groups.Bindings),
+		cfg.Security.Groups.DefaultManaged,
+		&groups.ResolverOptions{
+			NormalizeToolName: agent.CanonicalToolName,
+			ExtraAllowsFor: func(subject string) []string {
+				return groupsOverrides.AllowsFor(subject, EnvGroupsNow())
+			},
+		},
+	)
 
 	// OTLP metrics export (metrics.otlp) -- opt-in, default OFF. The knob
 	// is read here, BEFORE construction, so there is no construction-baked
@@ -3410,6 +3458,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// re-registered as cache-gated wrappers; off => no-op.
 	applyDeterministicToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
 
+	// Codemode sandbox tool (token-efficiency branch 02 leaf 02): register
+	// the `codemode` builtin only when [agent.tools].codemode_enabled is on
+	// (default false => tool ABSENT from the shared registry, byte-identical
+	// to pre-codemode). The matching agent-side grant (unioning codemode
+	// into each scoped agent's filtered allow-list) is wired below via
+	// agent.RegistryConfig.CodemodeEnabled at the NewAgentRegistry site.
+	applyCodemodeToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
+
+	// C6 live-registry validation (agent-groups leaf 04): every policy
+	// tool name must resolve in the NOW-FULL registry (builtin + extract
+	// + deterministic wrappers all registered above), or boot fails
+	// naming the offender. Runs here — not at the early structural hook —
+	// because the registry is empty before registerBuiltinTools.
+	if err := groupsResolver.ValidatePolicies(); err != nil {
+		logger.Error("FATAL: groups config policy tool names invalid", "error", err)
+		return nil, err
+	}
+
 	// msgBus (the NewComponents parameter): c.msgBus is only stored later
 	// in this function, so the relay notifier takes the local directly.
 	acpMgr, acpErr := applyACPFromConfig(cfg.ACP, decisionClient, msgBus)
@@ -3565,6 +3631,22 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			ToolRegistry:    c.ToolRegistry,
 			ShadowManager:   c.ShadowManager,
 			Logger:          logger,
+			// Groups resolver (agent-groups leaf 04): loop resolution
+			// records + the filterTools dispatch intersection for every
+			// registry-built agent. Nil resolver is impossible here (New
+			// always returns non-nil), and an empty-table resolver is the
+			// no-op legacy posture (D7).
+			GroupsResolver: groupsResolver,
+			// Decision-log level (agent-groups leaf 04): the C2 decision
+			// lines on dispatched/specialist turns honor the knob too.
+			DecisionLogLevel: cfg.Security.Groups.DecisionLogLevel,
+			// Codemode grant (token-efficiency branch 02 leaf 02): pass
+			// [agent.tools].codemode_enabled into the registry so filterTools
+			// unions the codemode tool into each scoped agent's filtered
+			// allow-list when the gate is on. Default false keeps the grant
+			// off (tool absent from filtered registries even if it were
+			// registered elsewhere).
+			CodemodeEnabled: cfg.Agent.Tools.CodemodeEnabled,
 			// Hook registry inheritance: registry-built specialists must
 			// enforce the same security-before-tool deny, decision gate,
 			// and transform hooks as the daemon template loop.
@@ -3606,6 +3688,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Must run after registry construction -- c.AgentRegistry is nil at
 		// the primary-loop wiring site (components.go:1422).
 		c.AgentRegistry.SetSchemaModeConfig(cfg.Agent.Tools)
+
+		// Decision-log level (agent-groups leaf 04, T3-adjacent): the
+		// security.groups.decision_log_level knob gates the C2
+		// permission decision-audit lines on the PRIMARY loop's executor.
+		// Session clones inherit via ConfigSnapshot's executor-level
+		// wiring; registry loops get the same value through their own
+		// executor construction below.
+		c.AgentLoop.SetExecutorDecisionLogLevel(cfg.Security.Groups.DecisionLogLevel)
 
 		// External acp turn producer (acp-employees dim 3A): mirror the
 		// singleton loop's wiring onto the registry so executor: acp
@@ -5632,6 +5722,15 @@ func (c *Components) Start(ctx context.Context) error {
 			if err := c.EmployeeManager.ScheduleFindingsRetention(ctx, schedAdapter, retentionDays); err != nil {
 				c.Logger.Warn("Failed to schedule findings retention", "error", err)
 			}
+
+			// GitHub ticket intake ([intake] block, github-intake-factory
+			// tree): schedule the ticket->goal poll here — NOT beside the
+			// github tool wiring — because the scheduler, employee
+			// manager, and effects ledger only exist from this point of
+			// the boot sequence on. Gated on enabled (default-off), same
+			// fail-closed posture; no-op with one debug log when
+			// disabled. RunAtInterval is idempotent per name.
+			wireIntakePoller(c)
 
 			// Schedule daily recents pruning (TTL + cap).
 			if c.ProjectManager != nil {
@@ -9722,6 +9821,17 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 			// orchestrator provisioned one for this step's phase.
 			if wd := p.resolveStepWorkingDirFor(job, stepPayload.StepID, stepPayload.SessionID); wd != "" {
 				loop.SetWorkingDir(wd)
+				// Group fence roots (agent-groups leaf 04 F6): a managed
+				// agent's fs_roots arm an ADDITIVE fence on this loop —
+				// writes outside the group roots are denied at the
+				// central FenceStage, even when the daemon-wide session
+				// fence is off (fence_enabled=false). The step-job lane
+				// has NO session-scoped injection site (the session loop
+				// seam is dispatcher/handler), so this is the fence arm
+				// point for task-scoped loops.
+				if gf := agent.InjectGroupFence(loop.Security(), loop.GroupResolution()); gf != nil && gf != loop.Security() {
+					loop.SetSecurityChecker(gf)
+				}
 				p.logger.Info("Step job working dir resolved",
 					"job_id", job.ID,
 					"task_id", job.TaskID,

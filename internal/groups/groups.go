@@ -61,6 +61,10 @@ type Resolved struct {
 	// DENY-ALL (D8 — the caller decides fail-closed; FilteredToolRegistry's
 	// legacy empty=all behavior must never fire for a managed subject).
 	Managed bool
+	// Groups carries the subject's effective group memberships that were
+	// consulted for this resolution (diagnosis + decision-audit surface;
+	// empty for the default-policy route and the unmanaged record).
+	Groups []string
 }
 
 // scopeRank orders memory scopes from narrowest (0) to widest. Unknown

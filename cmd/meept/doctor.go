@@ -132,6 +132,13 @@ func runDoctor(fix, installMissing bool) error {
 	checks = append(checks, checkStateDirWritable(stateDirPath))
 	checks = append(checks, checkConfigReadable())
 	checks = append(checks, checkDiskFreeDoctor(stateDirPath))
+	checks = append(checks, checkCoreBareDoctor())
+	// Groups permissions check (agent-groups leaf 06): report-only —
+	// config validity + the dispatch-divergence posture. The CLI process
+	// cannot see the live registry, so the divergence leg reports the
+	// posture (the live answer rides `meept groups check`). wiredSpecs
+	// nil is the production posture; tests inject it.
+	checks = append(checks, checkGroupsDoctorGroups(checkConfiguredGroupsDoctor())...)
 	checks = append(checks, checkModelsDoctor()...)
 	if providerCfg, providerErr := config.LoadDefault(); providerErr == nil {
 		checks = append(checks, providerChecksDoctor(providerCfg)...)
@@ -245,6 +252,16 @@ func runDoctor(fix, installMissing bool) error {
 					c.detail += fmt.Sprintf(" [stopped %d/%d orphans; %d survived]",
 						len(confirmed), len(candidates), len(candidates)-len(confirmed))
 					c.ok = false
+				}
+			case "core.bare":
+				// Repair core.bare=true by setting it to false.
+				repoRoot, err := exec.Command("git", "rev-parse", "--show-toplevel").CombinedOutput()
+				if err == nil {
+					repoRootStr := strings.TrimSpace(string(repoRoot))
+					if err := fixCoreBareRepair(repoRootStr); err == nil {
+						c.detail += " [repaired core.bare=false]"
+						c.ok = true
+					}
 				}
 			}
 		}
@@ -905,4 +922,56 @@ func checkAliasReachabilityDoctor(cfg *llm.ProvidersConfig) []doctorCheck {
 		}
 	}
 	return checks
+}
+
+// checkCoreBareDoctor reports the core.bare state in .git/config and repairs it
+// under --fix. The repair is safe: setting core.bare=false in a working-tree
+// repo is harmless and restores git status/go build -buildvcs functionality.
+func checkCoreBareDoctor() doctorCheck {
+	repoRoot, err := exec.Command("git", "rev-parse", "--show-toplevel").CombinedOutput()
+	if err != nil {
+		// Not a git repo or git not available — report as warning, not failure.
+		return doctorCheck{
+			name:    "core.bare",
+			ok:      true,
+			warn:    true,
+			detail:  "not a git worktree (git rev-parse failed)",
+			fixable: false,
+		}
+	}
+	repoRootStr := strings.TrimSpace(string(repoRoot))
+
+	// Check current value
+	bareVal, err := exec.Command("git", "-C", repoRootStr, "config", "core.bare").CombinedOutput()
+	if err != nil {
+		return doctorCheck{
+			name:    "core.bare",
+			ok:      false,
+			detail:  "git config core.bare failed: " + strings.TrimSpace(string(bareVal)),
+			fixable: false,
+		}
+	}
+	bareValStr := strings.TrimSpace(string(bareVal))
+
+	if bareValStr == "true" {
+		return doctorCheck{
+			name:    "core.bare",
+			ok:      false,
+			warn:    true,
+			detail:  "core.bare=true (breaks git status and go build -buildvcs)",
+			fixable: true,
+		}
+	}
+	return doctorCheck{
+		name:    "core.bare",
+		ok:      true,
+		detail:  "core.bare=false (ok)",
+		fixable: false,
+	}
+}
+
+// fixCoreBareRepair applies the core.bare=false fix under --fix.
+func fixCoreBareRepair(repoRoot string) error {
+	_, err := exec.Command("git", "-C", repoRoot, "config", "core.bare", "false").CombinedOutput()
+	return err
 }

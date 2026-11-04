@@ -115,9 +115,34 @@ func NewFactStore(dbPath string) (*FactStore, error) {
 		db.Close() //nolint:mutexio // one-time init cleanup path
 		return nil, fmt.Errorf("memory: fact store schema: %w", err)
 	}
+	// Origin column (branch 02, C3): additive, idempotent migration for
+	// pre-existing stores that predate the origin column.
 	if err := ensureFactOriginColumn(db); err != nil {
 		db.Close() //nolint:mutexio // one-time init cleanup path
 		return nil, fmt.Errorf("memory: fact store migration: %w", err)
+	}
+
+	// Scope column (01-scope-schema T2): queryable defense-in-depth beside
+	// the fact's OwnerID; every existing row backfills to 'global' so no
+	// fact disappears from search. Idempotent: guarded by PRAGMA
+	// table_info + a pending-row check (open-close-open is a no-op).
+	var hasScope int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('memory_facts') WHERE name = 'scope'`).Scan(&hasScope); err != nil {
+		db.Close() //nolint:mutexio // one-time init cleanup path
+		return nil, fmt.Errorf("memory: fact store scope introspection: %w", err)
+	}
+	if hasScope == 0 {
+		if _, err := db.Exec(
+			`ALTER TABLE memory_facts ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'`); err != nil {
+			db.Close() //nolint:mutexio // one-time init cleanup path
+			return nil, fmt.Errorf("memory: fact store add scope column: %w", err)
+		}
+	}
+	if _, err := db.Exec(
+		`UPDATE memory_facts SET scope = 'global' WHERE scope IS NULL OR scope = ''`); err != nil {
+		db.Close() //nolint:mutexio // one-time init cleanup path
+		return nil, fmt.Errorf("memory: fact store scope backfill: %w", err)
 	}
 	return &FactStore{db: db}, nil
 }

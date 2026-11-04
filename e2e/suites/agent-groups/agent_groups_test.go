@@ -222,6 +222,8 @@ func rpcErrorMessage(t *testing.T, method string, resp map[string]any) string {
 // not exist, so the config is silently ignored and the spec grant of
 // shell_execute still offers/executes shell.
 func TestAgentGroupsF1DenyBeatsAllow(t *testing.T) {
+	// Re-armed by leaf 04-tool-gates: the groups resolver now feeds the
+	// dispatch intersection (filterTools), so this gate runs for real.
 	s := harness.Start(t,
 		harness.WithPreBootHook(func(st *harness.Stack) error {
 			seedAgent(t, st, "aastub", "code", []string{"file_read", "shell_execute"}, []string{"coders"})
@@ -414,6 +416,8 @@ func TestAgentGroupsF4MutationGateDeniesNonPrivileged(t *testing.T) {
 //
 // RED today: the outside write succeeds — no fence stage exists.
 func TestAgentGroupsF6FenceStageDeniesOutsideRoot(t *testing.T) {
+	// Re-armed by leaf 04-tool-gates: the group fs_roots now arm the
+	// central FenceStage (pkg/security), so this gate runs for real.
 	var fsRoots []string
 	s := harness.Start(t,
 		harness.WithPreBootHook(func(st *harness.Stack) error {
@@ -468,6 +472,9 @@ func TestAgentGroupsF6FenceStageDeniesOutsideRoot(t *testing.T) {
 // RED today: no groups resolution, no decision audit — the line never
 // appears (and the shell call executes instead of being denied).
 func TestAgentGroupsF7DecisionLogRecordsGroupDeny(t *testing.T) {
+	// Re-armed by leaf 04-tool-gates: the group gate stamps
+	// rule_source=group_deny on the C2 decision line, so this gate runs
+	// for real.
 	s := harness.Start(t,
 		harness.WithPreBootHook(func(st *harness.Stack) error {
 			seedAgent(t, st, "aastub", "code", []string{"file_read", "shell_execute"}, []string{"coders"})

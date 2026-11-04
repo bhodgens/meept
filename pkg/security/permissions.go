@@ -65,6 +65,18 @@ var BuiltinRules = map[string]ActionRule{
 	// Media generation (network + file write)
 	"generate_image": {Action: "generate_image", RiskLevel: RiskMedium, RequiresConfirmation: false},
 	"generate_video": {Action: "generate_video", RiskLevel: RiskMedium, RequiresConfirmation: false},
+
+	// Codemode sandbox (token-efficiency branch 02): runs model-written JS
+	// that batch-calls the agent's already-filtered tool registry through
+	// the C3 sandbox bridges. The sandbox itself has no fs/net/process
+	// surface (only the injected tool bridges), and the bridge set equals
+	// the agent's filtered scope exactly — so codemode never widens tool
+	// access; its risk is bounded by the tools the agent is already
+	// permitted. MEDIUM like shell_execute/file_write (it executes
+	// model-generated code), and deliberately below HIGH so the
+	// require_confirmation_high gate does not block it in the e2e
+	// harness (nested calls inherit the grant, not a new confirmation).
+	"codemode": {Action: "codemode", RiskLevel: RiskMedium, RequiresConfirmation: false},
 }
 
 // Dangerous command patterns that elevate shell_execute to HIGH risk.

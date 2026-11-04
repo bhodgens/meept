@@ -655,7 +655,6 @@ type Manager struct {
 	logger        *slog.Logger
 }
 
-
 // NewManagerWithStores constructs a Manager with explicit constitution,
 // goal, and audit stores. This is the production constructor used by the
 // daemon wiring (wiring.go). Any nil store is accepted; the corresponding
@@ -2015,6 +2014,20 @@ func (m *Manager) UpdateGoal(ctx context.Context, goal *Goal) error {
 	return nil
 }
 
+// EnsureEmployeeRecord makes the employee's FK anchor exist so goals can
+// be created for them: on the standalone-DB path it mirrors the ID into
+// each employee DB's bot_definitions stub (the same row Hire writes).
+// Idempotent (INSERT OR IGNORE). It does NOT hire, configure, or enable
+// anything — a trigger-source goal factory (the [intake] block) routes
+// work to a configured default_employee that may legitimately never have
+// been hired; without this anchor every CreateGoal for that id fails the
+// employee_goals FK. Best-effort: mirror failures are logged, not
+// returned — the subsequent CreateGoal surfaces the FK failure with the
+// same actionable message Hire's mirror logs.
+func (m *Manager) EnsureEmployeeRecord(ctx context.Context, employeeID string) {
+	m.mirrorEmployeeIntoStandaloneDBs(ctx, employeeID)
+}
+
 // ListGoals lists goals, optionally filtered by employee_id. Empty
 // employeeID returns all goals across all employees.
 func (m *Manager) ListGoals(ctx context.Context, employeeID string) ([]*Goal, error) {
@@ -2054,6 +2067,30 @@ func (m *Manager) SetGoalGate(ctx context.Context, goalID string, gate *GateConf
 	g.Gate = gate
 	if err := m.goalStore.Update(ctx, g); err != nil {
 		return nil, fmt.Errorf("set goal gate: %w", err)
+	}
+	return g, nil
+}
+
+// AssessGoal records a health verdict on a goal (agents.goals.assess RPC,
+// github-intake-factory leaf 05): the same Assess + persist the GoalLoop
+// reflect path performs, exposed as an RPC so external drivers (the intake
+// e2e suite, operators) can move a goal's health without a live LLM loop.
+// health must be one of "healthy" | "at_risk" | "broken" | "unknown".
+func (m *Manager) AssessGoal(ctx context.Context, goalID, health string) (*Goal, error) {
+	if m.goalStore == nil {
+		return nil, ErrNotImplemented
+	}
+	h, err := ParseGoalHealth(health)
+	if err != nil {
+		return nil, fmt.Errorf("assess goal: %w", err)
+	}
+	g, err := m.goalStore.Get(ctx, goalID)
+	if err != nil {
+		return nil, fmt.Errorf("assess goal: %w", err)
+	}
+	g.Assess(h, time.Now().UTC())
+	if err := m.goalStore.Update(ctx, g); err != nil {
+		return nil, fmt.Errorf("assess goal: persist: %w", err)
 	}
 	return g, nil
 }

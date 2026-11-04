@@ -100,6 +100,7 @@ type Config struct {
 	ProjectsRecent      ProjectRecentConfig       `json:"projects_recent"     toml:"projects_recent"`
 	STT                 STTConfig                 `json:"stt"                 toml:"stt"`
 	TTS                 TTSConfig                 `json:"tts"                 toml:"tts"`
+	Voice               VoiceConfig               `json:"voice"                toml:"voice"`
 	OAuth               OAuthConfig               `json:"oauth"               toml:"oauth"`
 	Analytics           AnalyticsConfig           `json:"analytics,omitzero" toml:"analytics"`
 	Notifications       NotificationsConfig       `json:"notifications,omitzero" toml:"notifications"`
@@ -535,23 +536,28 @@ type PlansConfig struct {
 	// "planner-self" without a human in the loop.
 	SelfSealEnabled bool `json:"self_seal_enabled" toml:"self_seal_enabled"`
 
-	// FreshCriticEnabled gates the fresh-context evidence critic
-	// (plan-20261101-fresh-context-critic contract C1; default FALSE -
-	// ships dark). See
-	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
-	FreshCriticEnabled bool `json:"fresh_critic_enabled"   toml:"fresh_critic_enabled"`
+	// FreshCriticDisabled disables the fresh-context evidence critic
+	// (plan-20261101-fresh-context-critic contract C1). Default ON per
+	// the 2026-11-02 operator decision (docs/plans/20261101-fresh-
+	// context-critic/master.md contract C1): an absent key decodes
+	// false, which means the critic runs; an explicit true disables it.
+	// A true-by-default bool cannot be expressed with an enable-named
+	// field, so the knob ships in disable form.
+	FreshCriticDisabled bool `json:"fresh_critic_disabled"   toml:"fresh_critic_disabled"`
 
-	// HostileCriticEnabled gates the hostile second-pass critic on a
-	// different model (plan-20261101-fresh-context-critic contract C1;
-	// default FALSE - ships dark). See
-	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
-	HostileCriticEnabled bool `json:"hostile_critic_enabled" toml:"hostile_critic_enabled"`
+	// HostileCriticDisabled disables the hostile second-pass critic on
+	// a different model (plan-20261101-fresh-context-critic contract
+	// C1). Default ON per the 2026-11-02 operator decision; an absent
+	// key means the hostile pass runs (and still skips at runtime via
+	// the C5 gate while the hostile_critic_model slot is empty or
+	// same-model); an explicit true turns the pass off entirely.
+	HostileCriticDisabled bool `json:"hostile_critic_disabled" toml:"hostile_critic_disabled"`
 
-	// InterviewOptionGates gates the structured interview option objects
-	// (plan-20261101-fresh-context-critic contract C1; default FALSE -
-	// ships dark). See
-	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
-	InterviewOptionGates bool `json:"interview_option_gates" toml:"interview_option_gates"`
+	// InterviewOptionsDisabled disables the structured interview option
+	// objects (plan-20261101-fresh-context-critic contract C1). Default
+	// ON per the 2026-11-02 operator decision; an explicit true falls
+	// interview questions back to plain strings.
+	InterviewOptionsDisabled bool `json:"interview_options_disabled" toml:"interview_options_disabled"`
 }
 
 // NormalizePlansDefaults clamps the tiered-iteration planning knobs to
@@ -1147,6 +1153,72 @@ type LLMSimpleFeatureConfig struct {
 	L2Enabled     bool   `json:"l2_enabled"      toml:"l2_enabled"`
 	L2DBPath      string `json:"l2_db_path"      toml:"l2_db_path"`
 	DefaultTTLMin int    `json:"default_ttl_min" toml:"default_ttl_min"`
+	// Semantic configures the semantic cache tier (llm-serving-tiers
+	// leaf 02, Contract C4; json5 key llm.cache.semantic). Default OFF:
+	// opt-in per docs/agents/opt-in-defaults.md -- no embedder call, no
+	// vector math, byte-identical client behavior when disabled.
+	Semantic SemanticCacheConfig `json:"semantic"        toml:"semantic"`
+}
+
+// SemanticCacheConfig configures the opt-in semantic cache tier
+// (llm-serving-tiers leaf 02, Contract C4; json5 key llm.cache.semantic).
+// An embedding-similarity second-chance lookup that sits strictly BEHIND
+// the exact-key response cache: exact miss first, embed, serve the cached
+// response when cosine similarity clears the threshold.
+//
+// Threshold default is 0.95 cosine per the R0 research addendum
+// (docs/research/20261031-llm-serving-tiers-findings.md Section 1.2),
+// which supersedes master.md C4's 0.92: AWS Well-Architected, Redis
+// LangCache, and Vercel converge on 0.95+ for false-positive-sensitive
+// workloads, and agent traffic (tool calls, code, one-operand differences)
+// is exactly where loose thresholds produce wrong answers.
+type SemanticCacheConfig struct {
+	// Enabled turns the tier on. Default FALSE (opt-in per
+	// docs/agents/opt-in-defaults.md): when false the client's code path
+	// is structurally unreachable -- no embedder call, no vector math,
+	// byte-identical responses.
+	Enabled bool `json:"enabled"        toml:"enabled"`
+	// Threshold is the cosine similarity floor for serving a cached
+	// response. Default 0.95 (research addendum; supersedes C4's 0.92).
+	Threshold float64 `json:"threshold"      toml:"threshold"`
+	// MaxEntries bounds the in-memory vector store with LRU eviction.
+	// Default 1024.
+	MaxEntries int `json:"max_entries"    toml:"max_entries"`
+	// TTLMin is the entry lifetime in minutes; zero mirrors
+	// llm.cache.default_ttl_min at the daemon wiring site. A negative
+	// value clamps to that mirror at the load boundary.
+	TTLMin int `json:"ttl_min"        toml:"ttl_min"`
+	// EmbedderAlias resolves the embedder model via the alias/capability
+	// machinery. Empty means reuse the memory-stack embedding provider
+	// (memory/vector) when configured; if neither resolves, the tier
+	// degrades to exact-only (structurally dead cache, never an error).
+	EmbedderAlias string `json:"embedder_alias" toml:"embedder_alias"`
+}
+
+// Defaults for llm.cache.semantic (Contract C4 + R0 addendum).
+const (
+	// DefaultSemanticCacheThreshold is the 0.95 cosine floor.
+	DefaultSemanticCacheThreshold = 0.95
+	// DefaultSemanticCacheMaxEntries bounds the vector store.
+	DefaultSemanticCacheMaxEntries = 1024
+)
+
+// NormalizeSemanticCacheDefaults clamps invalid semantic-cache values to
+// defaults at the load boundary (llm-serving-tiers leaf 02): non-positive
+// or >= 1 threshold -> 0.95, non-positive max_entries -> 1024, negative
+// ttl_min -> 0 (the wiring-site mirror of llm.cache.default_ttl_min).
+// Idempotent on valid values; the tier stays disabled unless Enabled is
+// true.
+func NormalizeSemanticCacheDefaults(sc *SemanticCacheConfig) {
+	if sc.Threshold <= 0 || sc.Threshold >= 1 {
+		sc.Threshold = DefaultSemanticCacheThreshold
+	}
+	if sc.MaxEntries <= 0 {
+		sc.MaxEntries = DefaultSemanticCacheMaxEntries
+	}
+	if sc.TTLMin < 0 {
+		sc.TTLMin = 0
+	}
 }
 
 // LLMBrokerConfig configures the model broker.
@@ -2036,6 +2108,13 @@ type AgentToolsConfig struct {
 	// Used by meept-bench for reproducible suites. The
 	// MEEPT_DETERMINISTIC_TOOLS env var ORs with this at call time.
 	DeterministicTools bool `json:"deterministic_tools" toml:"deterministic_tools"`
+	// CodemodeEnabled gates the `codemode` tool (token-efficiency branch 02):
+	// when true the daemon registers the codemode builtin on the shared tool
+	// registry and unions it into every agent's filtered tool allow-list;
+	// when false (the default) the tool is absent end-to-end (registry,
+	// LLM definitions, and grants). Opt-in: default false means the daemon
+	// behaves byte-identically to pre-codemode when the key is omitted.
+	CodemodeEnabled bool `json:"codemode_enabled" toml:"codemode_enabled"`
 }
 
 // Validate checks the [agent.tools] section. Unknown schema_mode values are
@@ -2529,6 +2608,13 @@ type SecurityConfig struct {
 	// 04's struct and will extend this section.
 	Groups SecurityGroupsConfig `json:"groups" toml:"groups"`
 
+	// JevCommandGate configures the graded command-safety score gate
+	// ([security.jev_command_gate], docs/plans/20261103-wiring-gap-remediation/
+	// 04-jev-gate-wiring.md). Field names mirror jevgate.ScoreGateConfig
+	// (internal/jevgate/serialize.go); the daemon adapter maps verbatim.
+	// Opt-in: all defaults false/conservative per docs/agents/opt-in-defaults.md.
+	JevCommandGate JevGateConfig `json:"jev_command_gate" toml:"jev_command_gate"`
+
 	// Egress policy for the secrets proxy ([security.egress]): ordered
 	// host-suffix/CIDR allow/ask/deny rules consulted before secret injection.
 	Egress EgressConfig `json:"egress" toml:"egress"`
@@ -2601,6 +2687,23 @@ type SecurityGroupsConfig struct {
 	// AdminUsers lists user ids whose human keys may mutate membership
 	// (C5 human half of the write gate).
 	AdminUsers []string `json:"admin_users,omitempty" toml:"admin_users"`
+}
+
+// JevGateConfig configures the [security.jev_command_gate] section
+// (graded command-safety score gate). Field names mirror
+// jevgate.ScoreGateConfig verbatim; the daemon adapter maps one-to-one.
+// Defaults: disabled; score_threshold 0.90 (conservative; the frozen
+// contract value), confidence_threshold 0.10 (veto-only posture -
+// low confidence forces the human ask, never an allow).
+type JevGateConfig struct {
+	// Enabled arms the score gate on shell commands. Default false.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// ScoreThreshold is the minimum Jev score for an automatic allow.
+	// Below threshold escalates to the human confirmation flow.
+	ScoreThreshold float64 `json:"score_threshold" toml:"score_threshold"`
+	// ConfidenceThreshold is the confidence VETO floor: confidence below
+	// this forces ASK regardless of score. Default 0.10.
+	ConfidenceThreshold float64 `json:"confidence_threshold" toml:"confidence_threshold"`
 }
 
 // GroupsPolicyConfig is one [security.groups.policies] entry (C3 Policy).
@@ -2738,6 +2841,17 @@ func (c *SecurityConfig) Validate() error {
 			// valid
 		default:
 			return fmt.Errorf("security.shell_permissions.preset %q: must be workspace, readonly, danger, or empty", sp.Preset)
+		}
+	}
+	// Jev gate: zero-value thresholds in an ENABLED gate are the disabled
+	// posture (empty struct in an otherwise-enabled config) - normalize to
+	// the conservative defaults rather than let 0.0 allow everything.
+	if c.JevCommandGate.Enabled {
+		if c.JevCommandGate.ScoreThreshold <= 0 {
+			c.JevCommandGate.ScoreThreshold = 0.90
+		}
+		if c.JevCommandGate.ConfidenceThreshold <= 0 {
+			c.JevCommandGate.ConfidenceThreshold = 0.10
 		}
 	}
 	for prefix, action := range c.ShellPermissions.Rules {
@@ -3733,6 +3847,20 @@ func DefaultConfig() *Config {
 				RetentionDays:       7,
 				StatsRefreshMinutes: 5,
 			},
+			Cache: LLMSimpleFeatureConfig{
+				Semantic: SemanticCacheConfig{
+					// Default OFF (llm-serving-tiers leaf 02,
+					// Contract C4): opt-in per
+					// docs/agents/opt-in-defaults.md. Threshold
+					// 0.95 per the R0 research addendum
+					// (supersedes C4's 0.92) but consulted only
+					// when Enabled flips on.
+					Enabled:    false,
+					Threshold:  DefaultSemanticCacheThreshold,
+					MaxEntries: DefaultSemanticCacheMaxEntries,
+					TTLMin:     0, // mirrors llm.cache.default_ttl_min at wiring
+				},
+			},
 		},
 		Memory: MemoryConfig{
 			Backend:                    MemoryBackendLocal, // built-in local store; memvid service via [memvid] enabled = true
@@ -3990,6 +4118,10 @@ func DefaultConfig() *Config {
 			Groups: SecurityGroupsConfig{
 				DecisionLogLevel: "deny-warn",
 				AdminAgents:      []string{"agent-update"},
+			},
+			JevCommandGate: JevGateConfig{
+				ScoreThreshold:      0.90,
+				ConfidenceThreshold: 0.10,
 			},
 			Egress: EgressConfig{
 				ScrubNoProxy: true,
@@ -4464,6 +4596,19 @@ func DefaultConfig() *Config {
 			Playback:  TTSPlaybackConfig{Volume: 1.0, Rate: 1.0, AudioDevice: ""},
 			Behavior:  TTSBehaviorConfig{ReadOwnMessages: false, InterruptOnNewMsg: true, QueueMessages: false, MaxQueueSize: 5},
 		},
+		Voice: VoiceConfig{
+			Enabled:              false,
+			IdleStopSeconds:      30,
+			Filler:               []string{"Hold on, let me check."},
+			SupervisorEnabled:    true,
+			SupervisorTimeoutMs:  400,
+			TimeoutSecs:          30,
+			MaxConcurrentCalls:   2,
+			MaxCallMinutes:       15,
+			SilencePromptSeconds: 45,
+			ReorderWindowFrames:  10,
+			ReorderGapMs:         60,
+		},
 		ReflectionCollector: ReflectionCollectorConfig{
 			Enabled:              true,
 			AutoQueue:            true,
@@ -4475,6 +4620,25 @@ func DefaultConfig() *Config {
 			TurnConfidenceMin:    0.6,
 			SessionConfidenceMin: 0.7,
 			MaxSessionProposals:  3,
+		},
+		// GitHub PR/CI tool set (opt-in, disabled by default).
+		GitHub: GitHubConfig{
+			Enabled:      false,
+			TokenSecret:  "",
+			DefaultOwner: "",
+			DefaultRepo:  "",
+			BaseURL:      "",
+		},
+		// GitHub ticket intake poller (opt-in, disabled by default).
+		Intake: IntakeConfig{
+			Enabled:         false,
+			DefaultEmployee: "",
+			PollInterval:    "5m",
+			WatchRepo:       "",
+			RequiredLabels:  []string{"factory"},
+			DoneLabel:       "factory:done",
+			GateCommand:     "",
+			ProjectNumber:   0,
 		},
 	}
 }
@@ -4732,6 +4896,34 @@ type TTSConfig struct {
 
 	// Behavior settings
 	Behavior TTSBehaviorConfig `json:"behavior" toml:"behavior"`
+}
+
+type VoiceConfig struct {
+	Enabled              bool     `json:"enabled"                toml:"enabled"`
+	IdleStopSeconds      int      `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	OnnxRuntimeLib       string   `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	STTProvider          string   `json:"stt_provider"           toml:"stt_provider"`
+	TTSProvider          string   `json:"tts_provider"           toml:"tts_provider"`
+	Filler               []string `json:"filler"                 toml:"filler"`
+	SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
+	SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
+	SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
+	PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
+	ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
+	FromNumber           string   `json:"from_number"            toml:"from_number"`
+	AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
+	TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
+	MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
+	SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
+	LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
 }
 
 // PiperTTSConfig holds Piper TTS engine settings.

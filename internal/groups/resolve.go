@@ -23,6 +23,11 @@ type ResolveOptions struct {
 	// still intersected with the spec (an override never widens the
 	// agent's own grants). Nil/empty = no overrides.
 	ExtraAllows []string
+	// ExtraAllowsFor is leaf 07's per-subject variant, consulted only
+	// when ExtraAllows is empty: given the agent subject ("agent:<id>"),
+	// it returns the live override grants (OverrideSet.AllowsFor with
+	// the query clock). Same add-only precedence as ExtraAllows.
+	ExtraAllowsFor func(subject string) []string
 }
 
 // defaultManagedPolicy is the policy name routed for UNGROUPED subjects
@@ -240,9 +245,17 @@ func Resolve(specTools []string, agentID string, groupMemberships []string, poli
 		// every legacy path (including FilteredToolRegistry's empty=all)
 		// stays byte-identical. Managed routing (default policy) is the
 		// CALLER's decision via ResolveDefaultManaged.
-		return Resolved{Managed: false}
+		return Resolved{Managed: false, Groups: sortedCopy(groupMemberships)}
 	}
-	return resolveLayered(specTools, bound, opts, true)
+	res := resolveLayered(specTools, bound, opts, true)
+	res.Groups = sortedCopy(groupMemberships)
+	return res
+}
+
+// sortedCopy returns a sorted, de-duplicated, nil-when-empty copy (the
+// diagnosis/audit surface for the subject's groups).
+func sortedCopy(in []string) []string {
+	return sortDedup(in)
 }
 
 // ResolveDefaultManaged resolves a subject with NO matching bindings under

@@ -416,6 +416,12 @@ func (l *AgentLoop) verifierChildOptions(modelRef string) []LoopOption {
 		WithAgentSpec(l.spec),
 		WithGlobalRefusalModel(l.globalRefusalModel),
 	}
+	// Loop-carried group resolution (agent-groups leaf 04 T1, three-site
+	// rule site 3: verifier children). The child executes tools and must
+	// inherit the parent's group gates exactly like session clones do.
+	if res := l.GroupResolution(); res != nil {
+		childOpts = append(childOpts, WithGroupResolution(res))
+	}
 	// Hook registry inheritance: the verifier child executes tools (the
 	// filtered read-only set) and must enforce the same security
 	// before-tool-call denies, decision gate, and transform hooks as its

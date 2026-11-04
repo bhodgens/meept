@@ -43,6 +43,16 @@ type SessionMessageSaver interface {
 	SaveMessages(sessionID string, messages []session.Message) error
 }
 
+// sessionToolCallSaver is the optional capability the message saver carries
+// when the backing store can persist tool calls (tool-call persistence
+// leaf, wiring-gap-remediation 05): the exchange save + tool-call write go
+// through ONE store call keyed by message index, best-effort on the chat
+// path. session.Store implementations satisfy this structurally; the type
+// assertion at the persist site keeps test doubles narrow.
+type sessionToolCallSaver interface {
+	SaveMessagesWithToolCalls(sessionID string, messages []session.Message, toolCalls map[int][]session.ToolCall) error
+}
+
 // ChatHandler bridges the message bus to the AgentLoop.
 // It subscribes to chat.request and publishes responses to chat.response.
 type ChatHandler struct {
@@ -103,18 +113,17 @@ type ChatHandler struct {
 	// NOT the user's project).
 	defaultWorkingDir string
 
-	// FenceController is the per-session fence sandbox controller (optional).
-	// When set, sessionLoop updates the shared FenceChecker with the
-	// session's working directory (sandbox root) and no-fence override as
-	// each session binds to its loop. Nil-safe per setter convention.
-	fenceController FenceController
-
 	// fenceFactory mints a FRESH, session-owned fence stage per session
-	// loop (agent-groups leaf 01 T2/T4). It replaces the shared-
-	// FenceController RootPath mutation above: two concurrent sessions
+	// loop (agent-groups leaf 01 T2/T4). It replaces the retired shared-
+	// FenceChecker RootPath mutation: two concurrent sessions
 	// each get a fence bound to THEIR root instead of racing over one
 	// shared mutable checker. Nil (fencing disabled daemon-wide) means
 	// session loops carry no fence stage.
+	//
+	// Cleanup (agent-groups leaf 04): the retired fenceController field +
+	// FenceController interface + SetFenceController setter are REMOVED —
+	// zero production callers (grep-verified), the daemon wires
+	// SetSessionFenceFactory exclusively.
 	fenceFactory sessionFenceFactory
 
 	// messageSaver persists chat messages to the session store after each
@@ -155,33 +164,13 @@ type ChatHandler struct {
 	wg     sync.WaitGroup
 }
 
-// FenceController is the narrow interface the ChatHandler needs from the
-// daemon's shared FenceChecker to configure the sandbox per-session.
-//
-// DEPRECATED (agent-groups leaf 01): retained only for compile
-// compatibility during the leaf window; the daemon no longer wires it.
-// The replacement is SetSessionFenceFactory — per-session fence instances
-// instead of mutating one shared checker.
-type FenceController interface {
-	SetRootPath(root string) error
-	SetNoFence(enabled bool)
-}
-
 // SetFenceController wired the shared fence checker so session-scoped
 // loops get a correct sandbox root and --nofence handling.
 //
-// REMOVED WIRING (agent-groups leaf 01 T3/T4): the daemon no longer calls
-// this — mutating one shared FenceChecker's RootPath per session raced
-// concurrent sessions (session A's root applied to session B's checks).
-// The daemon now wires SetSessionFenceFactory instead. The setter remains
-// for compile compatibility with out-of-tree embedders but no longer
-// influences session fencing. Safe to call with nil.
-func (h *ChatHandler) SetFenceController(fc FenceController) {
-	if h == nil {
-		return
-	}
-	h.fenceController = fc
-}
+// REMOVED (agent-groups leaf 04 cleanup): the FenceController interface and
+// this setter are deleted — zero production callers (grep-verified); the
+// daemon wires SetSessionFenceFactory exclusively (leaf 01 retired the
+// shared-RootPath mutation, which raced concurrent sessions).
 
 // SetSessionFenceFactory wires the factory that mints a FRESH,
 // session-owned fence stage per session loop (agent-groups leaf 01 T2).
@@ -1415,8 +1404,10 @@ func (h *ChatHandler) recordExchangeInSessionConv(conversationID, userMsg, reply
 
 // persistExchange saves the user message and assistant reply to the session
 // store so HTTP-only clients (Flutter GUI) can reload conversation history.
-// Errors are logged but never propagate — persistence failure must not break
-// the chat response path.
+// When the loop holds tool calls for THIS turn (assistant messages after
+// the last user message in the conversation), they persist keyed to the
+// assistant row via SaveMessagesWithToolCalls. Errors are logged but never
+// propagate - persistence failure must not break the chat response path.
 func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.ContentPart, reply string, agentID string) {
 	if h.messageSaver == nil || sessionID == "" {
 		return
@@ -1440,7 +1431,9 @@ func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.Con
 	msgs = append(msgs, userEntry)
 
 	// Assistant reply (skip empty replies, e.g. async-dispatch acks)
+	assistantIdx := -1
 	if reply != "" {
+		assistantIdx = len(msgs)
 		msgs = append(msgs, session.Message{
 			SessionID: sessionID,
 			Role:      "assistant",
@@ -1452,6 +1445,30 @@ func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.Con
 		})
 	}
 
+	// Tool-call persistence (wiring-gap-remediation leaf 05): the loop's
+	// conversation holds THIS turn's assistant tool-call messages; extract
+	// them and attach to the assistant row in one store transaction.
+	// Best-effort: a saver without the capability (or a turn with no tool
+	// calls) writes the exchange exactly as before.
+	if assistantIdx >= 0 {
+		if tcs := h.turnToolCalls(sessionID); len(tcs) > 0 {
+			if tcSaver, ok := h.messageSaver.(sessionToolCallSaver); ok {
+				if err := tcSaver.SaveMessagesWithToolCalls(sessionID, msgs, map[int][]session.ToolCall{
+					assistantIdx: tcs,
+				}); err != nil {
+					h.logger.Warn("failed to persist chat exchange with tool calls",
+						"session_id", sessionID,
+						"message_count", len(msgs),
+						"tool_calls", len(tcs),
+						"error", err,
+					)
+					return
+				}
+				return
+			}
+		}
+	}
+
 	if err := h.messageSaver.SaveMessages(sessionID, msgs); err != nil {
 		h.logger.Warn("failed to persist chat exchange",
 			"session_id", sessionID,
@@ -1459,6 +1476,53 @@ func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.Con
 			"error", err,
 		)
 	}
+}
+
+// turnToolCalls collects the current turn's tool calls from the loop's
+// conversation: every ToolCall on assistant messages after the LAST user
+// message. Read-only and best-effort - a missing conversation, a loop
+// without one, or an empty tail yields nil and the exchange persists
+// without tool calls (pre-leaf behavior).
+func (h *ChatHandler) turnToolCalls(sessionID string) []session.ToolCall {
+	if h.loop == nil {
+		return nil
+	}
+	conv := h.loop.GetConversation(sessionID)
+	if conv == nil {
+		return nil
+	}
+	chatMsgs := conv.GetMessages()
+	var tcs []session.ToolCall
+	seen := map[string]bool{}
+	for _, cm := range chatMsgs {
+		if cm.Role == llm.RoleUser {
+			// New turn boundary: drop everything collected so far.
+			tcs = nil
+			seen = map[string]bool{}
+			continue
+		}
+		if cm.Role != llm.RoleAssistant {
+			continue
+		}
+		for _, tc := range cm.ToolCalls {
+			// Dedupe by call id: a re-entrant persist (quota/budget
+			// resume paths both call persistExchange) must not double-
+			// write the same call.
+			if tc.ID != "" && seen[tc.ID] {
+				continue
+			}
+			if tc.ID != "" {
+				seen[tc.ID] = true
+			}
+			tcs = append(tcs, session.ToolCall{
+				ToolName:   tc.Function.Name,
+				ToolCallID: tc.ID,
+				Arguments:  tc.Function.Arguments,
+				Seq:        len(tcs),
+			})
+		}
+	}
+	return tcs
 }
 
 // publishPlanRequest sends a plan request to the orchestrator via the bus.
@@ -3087,9 +3151,16 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	// Per-session fence (leaf 01): clone the loop's security checker with
 	// THIS session's fence stage. The fence instance (and the checker
 	// carrying it) is owned by this session loop — never shared, so
-	// concurrent sessions cannot cross fences.
+	// concurrent sessions cannot cross fences. The group fence roots
+	// (leaf 04 F6) are composed in the same pass: the loop's resolution
+	// record's fs_roots add an additive fence checked alongside the
+	// session root — armed even when the daemon-wide fence is off.
 	if fence != nil {
 		loop.SetSecurityChecker(fence)
+	} else if res := loop.GroupResolution(); res != nil {
+		if gf := injectGroupFence(loop.security, res); gf != loop.security && gf != nil {
+			loop.SetSecurityChecker(gf)
+		}
 	}
 	// Wire session identity + project context onto the loop so the system
 	// prompt's "Session Context" section is populated. ConfigSnapshot

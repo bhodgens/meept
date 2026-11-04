@@ -311,6 +311,12 @@ func findGroupCycle(graph map[string][]string) (string, []string) {
 	return "", nil
 }
 
+// ErrCheckDefects is the scriptable exit-code sentinel for `meept groups
+// check`: the CLI returns it (cobra maps returned errors to exit 1) when
+// the defect enumeration found anything. errors.Is-compatible so callers
+// can distinguish "defects found" from transport failures.
+var ErrCheckDefects = fmt.Errorf("groups check: %d class(es) of config defects found", 1)
+
 // Compile-time shape check: Defect must satisfy error even when returned
 // individually (the RPC surface returns single defects as errors).
 var _ error = Defect{}

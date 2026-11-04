@@ -23,6 +23,7 @@ import (
 
 	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/gatecapture"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/security"
 )
 
@@ -77,6 +78,26 @@ func (g *gateCaptureStore) DecisionGateDeny(ctx context.Context, command string)
 // DecisionGateResolved lands the chokepoint-1 record.
 func (g *gateCaptureStore) DecisionGateResolved(ctx context.Context, command, decision, approver string) {
 	g.store.DecisionGateResolved(ctx, command, decision, approver)
+}
+
+// RecordScore arms the jev score-gate lane: satisfies the jevgate.Recorder
+// seam (leaf-01 capture). The underlying store's RecordScore is
+// nil-tolerant and only arms on escalations; a clean allow records nothing.
+func (g *gateCaptureStore) RecordScore(ctx context.Context, command, serializedContext string, result *llm.CommandScoreResult, escalated bool, reason string) {
+	g.store.RecordScore(ctx, command, serializedContext, result, escalated, reason)
+}
+
+// Escalated satisfies the jevgate.ConfirmFlow seam: the score gate's deny
+// is NOT a terminal deny - the agent loop converts Block=true into the
+// phase-1 confirmation shape - so the only notification needed here is the
+// escalation marker, and the arm already happened via RecordScore. Kept as
+// a debug log so the capture store can be passed directly as the hook's
+// ConfirmFlow without a separate stub type.
+func (g *gateCaptureStore) Escalated(ctx context.Context, command, reason string) {
+	if g == nil || g.logger == nil {
+		return
+	}
+	g.logger.Debug("gatecapture: jev score gate escalated", "reason", reason, "command", command)
 }
 
 // PermissionTableAsk arms the chokepoint-2 pending. MEMORY-ONLY (the

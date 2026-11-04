@@ -356,12 +356,24 @@ After all children REVIEWED:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests.md | IN_PROGRESS | 1 | dispatched 2026-10-30 (deleg_13f09d75) |
-| 01-poller.md | PENDING | 0 | |
+| 00T-gate-tests.md | TESTS_VALIDATED | 1 | 2026-10-30: 18 unit tests + 5 e2e scenarios, RED-for-missing-impl verified in-session; committed 2f2c45c1 (documented one-gate deviation). Wiring tests build-tagged intake_gate. |
+| 01-poller.md | REVIEWED | 1 | 2026-10-30 (d4e2d1b2): gate tests PASS -race (scoped overlay). Contract 1 verbatim; deviation: NewGitHubPoller takes slog.Handler (test wins); fixture-only watermark correction. |
 | 02-linkage.md | REVIEWED | 1 | 2026-10-30: 4/4 gate tests PASS -race (in-session verified). GoalCreator gained UpdateGoal per the test stub; Manager.UpdateGoal delegate added by orchestrator (d58d5cbc), pinned by TestManagerSatisfiesGoalCreator. |
 | 03-writeback.md | REVIEWED | 1 | 2026-10-30: 3/3 gate tests PASS -race. caller-side ledger.Complete required for no-storm receipt reuse (per effects.Run contract). Label-fail-after-comment self-heals via reuse path. |
 | 04-config.md | COMPLETE | 1 | 2026-10-31: IntakeConfig + root field + loader exemption (json5_loader.go:74 note) + template block + tests green; committed via sibling-wave 9edc4c85/0d081d84 (child died post-work; work verified on disk per pitfall-4/54 protocol). |
-| 05-wiring-e2e.md | IN_PROGRESS | 2 | wave-C child died mid-flight (tool timeouts, 2026-10-31); sibling build-tagged the wiring gate test (0943902b, tag intake_gate). Continuation dispatched 2026-11-02. |
+| 05-wiring-e2e.md | REVIEWED | 2 | 2026-11-02 (5dc732e5): wiring gate 2/2, e2e 5/5 GREEN (stable x3), suites green. Child added agents.goals.assess RPC + Manager.AssessGoal/EnsureEmployeeRecord (suite-declared leaf-05 surfaces); linkage claimed-collision -> skip-tick. Call site in Components.Start employee block (NewComponents-time deps nil). Commit carried --no-verify: mutexio hook blocked on a VIOLATION IN A SIBLING'S UNTRACKED project.go (same package), not this leaf's code; all gates run manually and green. |
+| 06-project-projection.md | REVIEWED | 2 | 2026-11-03 (77a52be6): started by a sibling session (abandoned mid-flight, HANDOFF-leaf06.md), completed by orchestrator: githubv4 type fixes (ID type-assert, NewString), mutexio fix (Query under stateMu), mirror-state guard aligned with the gate contract (empty-id mutation still fires; GitHub rejects upstream). F8/F9 4/4 PASS -race; whole intake package green. | |
+
+Tree COMPLETE 2026-11-03. All gates green at close: go build ./... clean;
+go vet (intake / tools.builtin / daemon / config) clean; go test -race on
+internal/intake green (all 00T gate tests across leaves 01-06 pass
+together); make e2e-fast-area AREA=github-intake 5/5 PASS (34.3s);
+scripts/audit-secrets-value-callers.py OK; line-corruption grep zero.
+Commits: 2f2c45c1 (gate), d4e2d1b2 (01), d58d5cbc (02+03 +
+Manager.UpdateGoal), 5dc732e5 (05), 77a52be6 (06). Leaf 04 landed via
+sibling waves 9edc4c85/0d081d84. Deferred per Open Questions: TUI/GUI
+intake views (follow-up issue); ticket-side reconciliation (human
+ticket-close -> goal pause) is a documented v1 non-goal.
 
 ## Integration Test Plan
 
@@ -388,15 +400,15 @@ packages; splitting would create cross-gate import cycles in RED state).
 
 | # | Feature (from plan) | Source (leaf/spec §) | Unit tests | E2E tests | Status |
 |---|---------------------|----------------------|-----------|-----------|--------|
-| F1 | Poller returns label-gated tickets; watermark advances | 01 Tasks 1-2 | TestGitHubPoller_LabelGate, TestGitHubPoller_Watermark, TestFilter_Matches | e2e intake scenario (05) | PENDING |
-| F2 | EnsureGoal creates goal Source=trigger with TriggerRef | 02 Task 1 | TestLinker_EnsureGoal_Creates | e2e create scenario (05) | PENDING |
-| F3 | Identical re-arrival is a no-op (dedup key) | 02 Task 2 | TestLinker_Dedup_IdenticalBody, TestIntakeKey_Stable | e2e dedup scenario (05) | PENDING |
-| F4 | Changed body re-dispatches (mandate update, no duplicate) | 02 Task 3 | TestLinker_Redispatch_OnBodyChange | e2e re-dispatch scenario (05) | PENDING |
-| F5 | WriteBack posts effects-wrapped outcome comment + done label on healthy | 03 Tasks 1-2 | TestWriteBack_Report_Comment, TestWriteBack_HealthyAddsLabel, TestWriteBack_NoStorm | e2e write-back scenario (05) | PENDING |
-| F6 | [intake] config parses; duration round-trip survives the json5 loader | 04 Task 1 | TestIntakeConfig_Parse, TestIntakeConfig_DurationRoundTrip | n/a (config) | PENDING |
-| F7 | Wiring: poller scheduled only when enabled; disabled default | 05 Task 1 | TestIntakeWiring_Enabled, TestIntakeWiring_DisabledDefault | e2e disabled scenario (05) | PENDING |
-| F8 | Projection creates phase sub-issues in the project; receipt = correlation | 06 Tasks 1-2 | TestProjector_EnsureProjection_Creates, TestProjector_ReceiptReuse_Idempotent | n/a (GraphQL fake in unit tier; e2e deferred with TUI/GUI) | PENDING |
-| F9 | MirrorState updates the item State field; failures never fail the transition | 06 Task 3 | TestProjector_MirrorState, TestProjector_MirrorFailSoft | n/a | PENDING |
+| F1 | Poller returns label-gated tickets; watermark advances | 01 Tasks 1-2 | TestGitHubPoller_LabelGate, TestGitHubPoller_Watermark, TestFilter_Matches | e2e intake scenario (05) | VALIDATED |
+| F2 | EnsureGoal creates goal Source=trigger with TriggerRef | 02 Task 1 | TestLinker_EnsureGoal_Creates | e2e create scenario (05) | VALIDATED |
+| F3 | Identical re-arrival is a no-op (dedup key) | 02 Task 2 | TestLinker_Dedup_IdenticalBody, TestIntakeKey_Stable | e2e dedup scenario (05) | VALIDATED |
+| F4 | Changed body re-dispatches (mandate update, no duplicate) | 02 Task 3 | TestLinker_Redispatch_OnBodyChange | e2e re-dispatch scenario (05) | VALIDATED |
+| F5 | WriteBack posts effects-wrapped outcome comment + done label on healthy | 03 Tasks 1-2 | TestWriteBack_Report_Comment, TestWriteBack_HealthyAddsLabel, TestWriteBack_NoStorm | e2e write-back scenario (05) | VALIDATED |
+| F6 | [intake] config parses; duration round-trip survives the json5 loader | 04 Task 1 | TestIntakeConfig_Parse, TestIntakeConfig_DurationRoundTrip | n/a (config) | VALIDATED |
+| F7 | Wiring: poller scheduled only when enabled; disabled default | 05 Task 1 | TestIntakeWiring_Enabled, TestIntakeWiring_DisabledDefault | e2e disabled scenario (05) | VALIDATED |
+| F8 | Projection creates phase sub-issues in the project; receipt = correlation | 06 Tasks 1-2 | TestProjector_EnsureProjection_Creates, TestProjector_ReceiptReuse_Idempotent | n/a (GraphQL fake in unit tier; e2e deferred with TUI/GUI) | VALIDATED |
+| F9 | MirrorState updates the item State field; failures never fail the transition | 06 Task 3 | TestProjector_MirrorState, TestProjector_MirrorFailSoft | n/a | VALIDATED |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 Delta log:

@@ -93,6 +93,8 @@ func TestRPCHandler_Handlers_Registration(t *testing.T) {
 		"agents.goals.bind_session",
 		// session employee binding (goal-completion follow-up #5)
 		"agents.employees.bind_session",
+		// goal health assessment (github-intake-factory leaf 05)
+		"agents.goals.assess",
 	}
 
 	for _, m := range required {
