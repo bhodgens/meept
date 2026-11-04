@@ -27,6 +27,7 @@ import (
 	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/project"
@@ -7016,14 +7017,32 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	conv := l.conversations.Get(conversationID)
 
 	// Build context parts from memory (conditional based on recall mode)
-	var contextParts []string
+	var contextParts []memoryRecallItem
 	if l.shouldAutoInject() {
 		// Context assembler (leaf 03): the enabled seam routes injection
 		// through tier-budgeted recall; nil/typed-nil seam = today's path
-		// byte-for-byte.
-		contextParts = l.memoryContextViaSeam(ctx, t.ContextQuery)
-		if contextParts == nil {
+		// byte-for-byte. Seam items carry no stable metadata, so they enter
+		// as volatile (the historical default).
+		if parts := l.memoryContextViaSeam(ctx, t.ContextQuery); parts != nil {
+			contextParts = make([]memoryRecallItem, len(parts))
+			for i, p := range parts {
+				contextParts[i] = memoryRecallItem{text: p}
+			}
+		} else {
 			contextParts = l.buildMemoryContext(ctx, t)
+		}
+	}
+
+	// Stable/volatile split (leaf 03 C6): items whose "stable" metadata is
+	// truthy join the cacheable "Memory (standing)" section (its own
+	// conservative 25% budget); volatile items keep the whole-item
+	// MaxMemoryContextTokens fence budget, unchanged.
+	var stableItems, volatileItems []memoryRecallItem
+	for _, item := range contextParts {
+		if item.stable {
+			stableItems = append(stableItems, item)
+		} else {
+			volatileItems = append(volatileItems, item)
 		}
 	}
 
@@ -7037,9 +7056,34 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		// final cap re-check still uses the static MaxMemoryContextTokens
 		// as the conservative backstop (leaf 03: seam budgets are always
 		// <= the static share the allocator derives).
-		bulleted := make([]string, len(contextParts))
-		for i, part := range contextParts {
-			bulleted[i] = "- " + part
+		//
+		// Budget split (leaf 03 T2): the VOLATILE set keeps the whole-item
+		// MaxMemoryContextTokens budget (semantics unchanged); the stable
+		// set is capped at its own conservative 25% bound (500 tokens),
+		// whole-item, marker appended on drop — stable is untouched by
+		// volatile-budget drops and vice versa.
+		stableBudget := MaxMemoryContextTokens / 4
+		stableBulleted := make([]string, 0, len(stableItems))
+		for _, item := range stableItems {
+			stableBulleted = append(stableBulleted, "- "+item.text)
+		}
+		stableBudgeted := EnforceMemoryItemBudget(stableBulleted, stableBudget)
+		if len(stableBudgeted) != len(stableBulleted) {
+			l.logger.Debug("Standing memory truncated due to token budget",
+				"original_items", len(stableBulleted),
+				"kept_items", len(stableBudgeted)-1, // minus marker
+				"budget_tokens", stableBudget,
+			)
+		}
+		var stableContext strings.Builder
+		for _, part := range stableBudgeted {
+			stableContext.WriteString(part + "\n")
+		}
+		conv.SetStandingMemoryContext(stableContext.String())
+
+		bulleted := make([]string, len(volatileItems))
+		for i, item := range volatileItems {
+			bulleted[i] = "- " + item.text
 		}
 		budgeted := EnforceMemoryItemBudget(bulleted, MaxMemoryContextTokens)
 		if len(budgeted) != len(bulleted) {
@@ -7280,9 +7324,23 @@ func (l *AgentLoop) extractModelOverrideFromMetadata(metadata json.RawMessage) s
 	return ref
 }
 
+// memoryRecallItem is one recalled memory rendered for prompt injection,
+// carrying the leaf-03 C6 stable flag (metadata "stable" truthy = standing
+// context that renders in the cacheable "Memory (standing)" section).
+type memoryRecallItem struct {
+	text   string
+	stable bool
+}
+
 // buildMemoryContext fetches and formats memory context for the task.
-func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []string {
-	var parts []string
+func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []memoryRecallItem {
+	var items []memoryRecallItem
+	add := func(m memvid.Memory) {
+		items = append(items, memoryRecallItem{
+			text:   formatMemoryForPrompt(m),
+			stable: memoryItemIsStable(memory.MemoryResult{Memory: memory.Memory{Metadata: m.Metadata}}),
+		})
+	}
 
 	// Fetch inherited memories from parent task
 	if l.memvid != nil && l.taskStore != nil && t.InheritedFrom != "" {
@@ -7295,7 +7353,7 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 				l.logger.Warn("Failed to fetch inherited memories", "error", err)
 			} else {
 				for _, m := range inherited {
-					parts = append(parts, formatMemoryForPrompt(m))
+					add(m)
 				}
 			}
 		}
@@ -7308,7 +7366,7 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 			l.logger.Warn("Failed to fetch memory refs", "error", err)
 		} else {
 			for _, m := range memories {
-				parts = append(parts, formatMemoryForPrompt(m))
+				add(m)
 			}
 		}
 	}
@@ -7320,12 +7378,12 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 			l.logger.Warn("Failed to search memory context", "error", err)
 		} else {
 			for _, r := range results {
-				parts = append(parts, formatMemoryForPrompt(r.Memory))
+				add(r.Memory)
 			}
 		}
 	}
 
-	return parts
+	return items
 }
 
 // injectProjectContext adds artifact context (CLAUDE.md, .claude/ skills/agents),
@@ -7530,6 +7588,14 @@ func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, c
 	// Add memory context section using frozen snapshot (Hermes pattern for prefix caching)
 	// The snapshot was frozen at session start via conv.FreezeMemorySnapshot()
 	// Context fencing prevents the model from treating recalled memory as user discourse
+
+	// Standing (stable) memory first (leaf 03 C6/T3): AddSectionWithStability
+	// with stable=true places the section in the CACHEABLE prefix (ahead of
+	// everything volatile), so prompt caches survive per-turn recall churn.
+	// The title is contract C6's literal — the gate asserts it.
+	if standing := conv.StandingMemoryContext(); strings.TrimSpace(standing) != "" {
+		builder.AddSectionWithStability("Memory (standing)", standing, true)
+	}
 	if conv.HasMemorySnapshot() {
 		memoryContext := conv.BuildPromptWithSnapshot()
 		if memoryContext != "" {
@@ -7933,6 +7999,26 @@ func (l *AgentLoop) recordTaskExecution(ctx context.Context, t *task.Task, respo
 	// Record the created memory ID
 	t.AddCreatedMemory(memoryID)
 	l.logger.Debug("Recorded task execution", "task", t.ID, "memory", memoryID)
+}
+
+// memoryItemIsStable reports whether a recalled memory is standing
+// (rarely-changing) context: the leaf-03 C6 stable flag rides the memory's
+// "stable" metadata key (truthy = stable). Absent/nil metadata or a
+// non-true value is volatile — the historical default. Shared by both
+// recall injection sites (the loop's system-prompt fence assembly and the
+// dispatcher's "## Relevant Context" user-message block).
+func memoryItemIsStable(m memory.MemoryResult) bool {
+	if m.Memory.Metadata == nil {
+		return false
+	}
+	switch v := m.Memory.Metadata["stable"].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true" || v == "1"
+	default:
+		return false
+	}
 }
 
 // formatMemoryForPrompt formats a memory for inclusion in the prompt.

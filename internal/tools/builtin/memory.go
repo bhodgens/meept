@@ -50,6 +50,10 @@ func (t *MemoryStoreTool) Parameters() llm.FunctionParameters {
 				Type:        schemaTypeString,
 				Description: "Optional category to organize the memory (e.g., 'conversation', 'code', 'decision').",
 			},
+			"stable": {
+				Type:        schemaTypeBoolean,
+				Description: "Optional: true marks this memory as standing (rarely-changing) context (persona facts, standing project context). Stable memories render in the cacheable 'Memory (standing)' section; default false (volatile per-turn recall).",
+			},
 		},
 		Required: []string{"content", "type"},
 	}
@@ -82,10 +86,21 @@ func (t *MemoryStoreTool) Execute(ctx context.Context, args map[string]any) (any
 
 	category, _ := args["category"].(string)
 
+	// Stable flag (leaf 03 C6): memory_store accepts an optional "stable"
+	// arg and stamps metadata["stable"]; recall assembly splits on it
+	// (stable items render under the cacheable "Memory (standing)"
+	// section, volatile items stay in the budgeted fence). Absent/false
+	// leaves metadata unset = volatile, the historical behavior.
+	var meta map[string]any
+	if stable, ok := args["stable"].(bool); ok && stable {
+		meta = map[string]any{"stable": true}
+	}
+
 	mem := memory.Memory{
 		Content:  content,
 		Type:     memType,
 		Category: category,
+		Metadata: meta,
 	}
 
 	id, err := t.manager.Store(ctx, mem)
