@@ -139,6 +139,10 @@ func runDoctor(fix, installMissing bool) error {
 	// nil is the production posture; tests inject it.
 	checks = append(checks, checkGroupsDoctorGroups(checkConfiguredGroupsDoctor())...)
 	checks = append(checks, checkModelsDoctor()...)
+	// Memory-pipeline checks (memory second-brain leaf 06): report-only —
+	// capture/distill/recall/extras + the F7 summary line. Every degraded
+	// state is a warn, never a failure.
+	checks = append(checks, checkMemoryDoctor()...)
 	if providerCfg, providerErr := config.LoadDefault(); providerErr == nil {
 		checks = append(checks, providerChecksDoctor(providerCfg)...)
 	}
