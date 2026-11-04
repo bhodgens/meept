@@ -347,6 +347,18 @@ var ToolActionMap = map[string]string{
 	ToolPlatformTools:  "platform_read",
 	"project_info":     "platform_read",
 
+	// Codemode sandbox (token-efficiency branch 02 leaf 02): runs model
+	// JS that batch-calls the agent's already-filtered tool registry
+	// through the C3 sandbox bridges. The sandbox has no fs/net surface of
+	// its own and the bridge set equals the agent's filtered scope
+	// exactly, so it never widens access — MEDIUM like shell_execute
+	// (executes model-generated code), below HIGH so the e2e
+	// require_confirmation_high gate does not block it. Without this
+	// entry the tool name becomes the fallback action, BuiltinRules has a
+	// codemode rule (RiskMedium) but the fallback maps to the name, so the
+	// explicit entry keeps the mapping unambiguous (bughunt H7 class).
+	"codemode": "codemode",
+
 	// Task management
 	"task_create": "task_write",
 	"task_get":    "task_read",
@@ -1439,6 +1451,12 @@ func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, co
 		)
 		return nil, err
 	}
+	// Tool-registry context seam (token-efficiency branch 02 leaf 02):
+	// inject the executor's (already-filtered) registry into the tool
+	// context so tools that need it — codemode builds its sandbox bridges
+	// strictly from this filtered set, never widening the agent's scope —
+	// can read it via ToolRegistryFromContext.
+	ctx = ContextWithToolRegistry(ctx, registry)
 	// Centralized execution gate bracket (tool-provider-seam leaf 05 finding,
 	// 2026-10-31): a gate armed on the production *tools.Registry is dead on
 	// this path unless the executor brackets the body with

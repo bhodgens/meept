@@ -3458,6 +3458,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// re-registered as cache-gated wrappers; off => no-op.
 	applyDeterministicToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
 
+	// Codemode sandbox tool (token-efficiency branch 02 leaf 02): register
+	// the `codemode` builtin only when [agent.tools].codemode_enabled is on
+	// (default false => tool ABSENT from the shared registry, byte-identical
+	// to pre-codemode). The matching agent-side grant (unioning codemode
+	// into each scoped agent's filtered allow-list) is wired below via
+	// agent.RegistryConfig.CodemodeEnabled at the NewAgentRegistry site.
+	applyCodemodeToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
+
 	// C6 live-registry validation (agent-groups leaf 04): every policy
 	// tool name must resolve in the NOW-FULL registry (builtin + extract
 	// + deterministic wrappers all registered above), or boot fails
@@ -3632,6 +3640,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Decision-log level (agent-groups leaf 04): the C2 decision
 			// lines on dispatched/specialist turns honor the knob too.
 			DecisionLogLevel: cfg.Security.Groups.DecisionLogLevel,
+			// Codemode grant (token-efficiency branch 02 leaf 02): pass
+			// [agent.tools].codemode_enabled into the registry so filterTools
+			// unions the codemode tool into each scoped agent's filtered
+			// allow-list when the gate is on. Default false keeps the grant
+			// off (tool absent from filtered registries even if it were
+			// registered elsewhere).
+			CodemodeEnabled: cfg.Agent.Tools.CodemodeEnabled,
 			// Hook registry inheritance: registry-built specialists must
 			// enforce the same security-before-tool deny, decision gate,
 			// and transform hooks as the daemon template loop.

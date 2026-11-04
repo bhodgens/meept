@@ -2107,6 +2107,13 @@ type AgentToolsConfig struct {
 	// Used by meept-bench for reproducible suites. The
 	// MEEPT_DETERMINISTIC_TOOLS env var ORs with this at call time.
 	DeterministicTools bool `json:"deterministic_tools" toml:"deterministic_tools"`
+	// CodemodeEnabled gates the `codemode` tool (token-efficiency branch 02):
+	// when true the daemon registers the codemode builtin on the shared tool
+	// registry and unions it into every agent's filtered tool allow-list;
+	// when false (the default) the tool is absent end-to-end (registry,
+	// LLM definitions, and grants). Opt-in: default false means the daemon
+	// behaves byte-identically to pre-codemode when the key is omitted.
+	CodemodeEnabled bool `json:"codemode_enabled" toml:"codemode_enabled"`
 }
 
 // Validate checks the [agent.tools] section. Unknown schema_mode values are

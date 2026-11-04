@@ -478,6 +478,24 @@
         "exclusive": {"parallelism": 1},   // Exclusive locks (one at a time)
       },
     },
+    // Tool-call handling gates for the agent loop. Most keys are opt-in and
+    // default OFF so the daemon behaves byte-identically when the block is
+    // omitted.
+    "tools": {
+      // schema_mode: "" = indexed (default, one-line tool stubs + tool_view
+      // expansion), "full" = legacy complete schemas inline.
+      "schema_mode": "indexed",
+      // deterministic_tools: cache-gated web tools (meept-bench). Off by
+      // default; the MEEPT_DETERMINISTIC_TOOLS env var ORs with it.
+      "deterministic_tools": false,
+      // codemode_enabled: register the `codemode` sandbox tool (runs
+      // model-written JS that batch-calls the agent's already-filtered tool
+      // registry; nested calls stay out of LLM context). OFF by default —
+      // when false the tool is absent from the registry, the LLM tool
+      // definitions, and every agent's filtered allow-list (byte-identical
+      // to pre-codemode). See docs/workflows/codemode.md.
+      "codemode_enabled": false,
+    },
   },
 
   // Security configuration

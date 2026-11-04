@@ -167,6 +167,13 @@ type AgentRegistry struct {
 	// decisionLogLevel mirrors RegistryConfig.DecisionLogLevel: the C2
 	// decision-audit level applied to every loop this registry builds.
 	decisionLogLevel string
+
+	// codemodeEnabled mirrors RegistryConfig.CodemodeEnabled
+	// (token-efficiency branch 02 leaf 02): when true, filterTools unions
+	// the codemode tool into every scoped agent's allow-list so the
+	// filtered registry exposes it. Guarded by mu; written only at
+	// construction (NewAgentRegistry) — it is immutable after that.
+	codemodeEnabled bool
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -289,6 +296,14 @@ type RegistryConfig struct {
 	// executor so the C2 decision-audit lines honor the knob on
 	// dispatched turns too. "" = deny-warn default.
 	DecisionLogLevel string
+
+	// CodemodeEnabled is [agent.tools].codemode_enabled (token-efficiency
+	// branch 02 leaf 02): when true, every registry-built loop's filtered
+	// tool registry is granted the codemode tool (filterTools unions it
+	// into the scoped agent's allow-list). Default false: the daemon
+	// behaves byte-identically to pre-codemode and the tool stays absent
+	// from filtered registries.
+	CodemodeEnabled bool
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -326,6 +341,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		compactionCfg:         cfg.Compaction,
 		groupsResolver:        cfg.GroupsResolver,
 		decisionLogLevel:      cfg.DecisionLogLevel,
+		codemodeEnabled:       cfg.CodemodeEnabled,
 	}
 
 	// Load global rules
@@ -836,6 +852,17 @@ func (r *AgentRegistry) filterTools(spec *AgentSpec) ToolRegistry {
 	allowedTools := spec.ScopedToolNames(spec.ToolScopeLimit)
 	if !spec.CanDelegate {
 		allowedTools = removeString(allowedTools, "delegate_task")
+	}
+	// Codemode gate (token-efficiency branch 02 leaf 02): when [agent.tools]
+	// codemode_enabled is on, union the codemode tool into a SCOPED agent's
+	// allow-list so its filtered registry exposes it. Only scoped agents
+	// (non-empty allow-list) need the explicit union: the empty-scope early
+	// return below hands out the unfiltered registry, which already carries
+	// codemode when it is registered. Gate-off leaves allowedTools
+	// byte-identical to the pre-codemode path. r.codemodeEnabled is read
+	// under r.mu (filterTools runs inside createLoop under the write lock).
+	if r.codemodeEnabled && len(allowedTools) > 0 {
+		allowedTools = appendUnique(allowedTools, "codemode")
 	}
 	if len(allowedTools) == 0 {
 		return r.tools

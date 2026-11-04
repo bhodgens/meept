@@ -118,6 +118,78 @@ is killed. Settlement is always routed back onto the event loop
 (`loop.RunOnLoop`); a stale settlement (run already replaced or loop
 terminated) is dropped, never settled into a dead/new VM.
 
+## The agent-facing `codemode` tool (branch 02 leaf 02)
+
+### Config gate
+
+The tool is **opt-in, default OFF**: `[agent.tools].codemode_enabled`
+(default `false`). When false the daemon behaves byte-identically to
+pre-codemode — the tool is absent from the shared tool registry, from every
+LLM request's tool-definition array, and from every agent's filtered
+allow-list. When true:
+
+1. **Registration** — the daemon registers the `codemode` builtin on the
+   shared tool registry (`internal/daemon/codemode_wiring.go`,
+   `applyCodemodeToolsFromConfig`, mirroring the deterministic-wiring
+   pattern).
+2. **Grant** — the same flag is passed into
+   `agent.RegistryConfig.CodemodeEnabled`; `filterTools` then unions
+   `codemode` into every *scoped* agent's allow-list so its filtered
+   registry exposes the tool. Empty-scope agents already get the unfiltered
+   registry, which carries the tool when registered.
+3. **Permission** — `codemode` maps to the dedicated `codemode` action in
+   `security.BuiltinRules` at **RiskMedium** (it executes model-generated
+   code, but the sandbox cannot widen the agent's tool access, so the risk
+   is bounded by the already-granted tools). It stays below HIGH so the
+   `require_confirmation_high` gate does not block it.
+
+### Security model (never widen, only batch)
+
+The tool's `Execute` builds the sandbox's `ToolBridge` list **strictly from
+the agent's already-filtered tool registry**, which the executor injects
+into the tool context (`agent.ContextWithToolRegistry`, read via
+`agent.ToolRegistryFromContext`). The sandbox's `ALL_TOOLS` therefore
+equals the agent's filtered tool set exactly — `shell_execute` /
+`file_write` appear in the script's catalog *only if* the agent's own
+filtered registry has them. A nested bridge call re-enters the **same**
+filtered registry by name, so a call the agent could not make directly is
+not callable inside a script. The sandbox itself is no-fs/net by design
+(eventloop-only, rejecting `require`), and no env/secrets are passed into
+it. The sandbox only *batches* calls the agent is already permitted to
+make.
+
+### Input / output
+
+- **Input schema:** `{ script: string (required), timeout_s?: integer
+  (default 60, clamped to [1,600]) }`.
+- **Output:** the C3 `Result` serialized to JSON — object keys `OK` /
+  `Output` / `Value` / `Err` (frozen by the e2e gate). `Value` is the
+  JSON-serialized `return`; `Output` is the accumulated `text(...)`; `Err`
+  carries a hard-kill or script throw.
+
+### Copy-paste example script
+
+```js
+// Batch four file reads and shape them into one record. The nested
+// tool_read calls never enter LLM context — only this script's Value does.
+// (tool bridge names follow the agent's own filtered registry; enumerate
+// them on ALL_TOOLS.)
+const files = ["a.txt", "b.txt", "c.txt"];
+const results = [];
+for (const name of files) {
+  const r = await tools.file_read(name);     // args is a JSON string
+  results.push({ name, bytes: String(r).length });
+}
+text(`read ${results.length} files`);          // -> Result.Output
+return { files: results };                     // -> Result.Value (JSON)
+```
+
+Calling the tool:
+
+```json
+{ "script": "...the script above...", "timeout_s": 30 }
+```
+
 ## Concurrency & lifecycle
 
 - Executes are serialized per sandbox (`runMu`); tool-call goroutines may
