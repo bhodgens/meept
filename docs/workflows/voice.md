@@ -4,8 +4,10 @@ title: Voice
 
 # Voice (phone sidecar)
 
-Status: In progress. Authoritative design: docs/workflows/voice-sidecar.md.
-Implementation plan: docs/plans/20261102-voice-sidecar/.
+Status: Implemented (plan docs/plans/20261102-voice-sidecar/ complete;
+see the as-built section of the spec). Authoritative design:
+docs/workflows/voice-sidecar.md. Implementation plan:
+docs/plans/20261102-voice-sidecar/.
 
 ## Overview
 

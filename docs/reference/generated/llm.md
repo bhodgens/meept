@@ -386,7 +386,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type DecisionResult](<#DecisionResult>)
 - [type DeltaCallback](<#DeltaCallback>)
 - [type DeltaCallbackWithAttempt](<#DeltaCallbackWithAttempt>)
-- [type Embedder](<#Embedder>)
 - [type FailureClass](<#FailureClass>)
 - [type FailurePolicyConfig](<#FailurePolicyConfig>)
 - [type Fetcher](<#Fetcher>)
@@ -741,13 +740,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func ParseRuntimeType\(s string\) \(RuntimeType, error\)](<#ParseRuntimeType>)
   - [func \(rt RuntimeType\) IsValid\(\) bool](<#RuntimeType.IsValid>)
   - [func \(rt RuntimeType\) String\(\) string](<#RuntimeType.String>)
-- [type SemanticCache](<#SemanticCache>)
-  - [func NewSemanticCache\(embedder Embedder, cfg SemanticCacheConfig\) \*SemanticCache](<#NewSemanticCache>)
-  - [func \(s \*SemanticCache\) Enabled\(\) bool](<#SemanticCache.Enabled>)
-  - [func \(s \*SemanticCache\) Len\(\) int](<#SemanticCache.Len>)
-  - [func \(s \*SemanticCache\) LookupBehindMiss\(ctx context.Context, modelID, prompt string\) \(\*Response, bool, error\)](<#SemanticCache.LookupBehindMiss>)
-  - [func \(s \*SemanticCache\) Store\(ctx context.Context, modelID, prompt string, response \*Response\)](<#SemanticCache.Store>)
-- [type SemanticCacheConfig](<#SemanticCacheConfig>)
 - [type SessionSummaryResult](<#SessionSummaryResult>)
 - [type SkillRequirements](<#SkillRequirements>)
 - [type SpawnRecord](<#SpawnRecord>)
@@ -944,18 +936,6 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 	    ReasoningHigh   = "high"   // deep thinking
 	    ReasoningXHigh  = "xhigh"  // extra-deep thinking
 	    ReasoningMax    = "max"    // maximum thinking budget
-	)
-
-<a name="DefaultSemanticThreshold"></a>Defaults for the semantic tier \(C4, threshold per the research addendum dated before dispatch\).
-
-	const (
-	    // DefaultSemanticThreshold is the 0.95 cosine floor.
-	    DefaultSemanticThreshold = 0.95
-	    // DefaultSemanticMaxEntries bounds the in-memory vector store.
-	    DefaultSemanticMaxEntries = 1024
-	    // DefaultSemanticTTL is the fallback entry lifetime when the wiring
-	    // site does not mirror llm.cache.default_ttl_min.
-	    DefaultSemanticTTL = time.Hour
 	)
 
 <a name="MetaKeyLLMTier"></a>Tier signaling metadata keys \(Contract C3, PINNED channel \- per\-step response metadata, never a new bus topic, never a new WS type\). Written into Response.Metadata ONLY when Enabled && SignalDegraded; written on EVERY completed call \(degraded or not\). Zero bytes of metadata change when the feature is off.
@@ -4618,15 +4598,6 @@ DeltaCallbackWithAttempt is the attempt\-aware delta callback used by ProviderMa
 
 	type DeltaCallbackWithAttempt func(delta string, deltaType string, attempt int) error
 
-<a name="Embedder"></a>
-## type Embedder
-
-Embedder produces prompt vectors for semantic\-cache lookups \(Contract C5\). Minimal seam: the daemon adapts the existing memory/vector embedding provider \(the vector.Provider / memory.EmbeddingProvider GenerateEmbedding shape\) onto this \-\- no new embedding path.
-
-	type Embedder interface {
-	    Embed(ctx context.Context, text string) ([]float32, error)
-	}
-
 <a name="FailureClass"></a>
 ## type FailureClass
 
@@ -7667,6 +7638,18 @@ RuntimeConfig holds validated runtime configuration.
 	    // ToolConstraint is the grammar-constraint wire mode this managed
 	    // runtime auto-declares ("llamacpp" for llama.cpp, "" for MLX).
 	    ToolConstraint string
+	    // SpawnStdin is an optional stream wired to the child's STDIN. It exists
+	    // for the voice child (internal/voice ChildProc): its start token arrives
+	    // via stdin ONLY (never argv, never env - the leaf-07 secret contract),
+	    // and the child reads stdin before it connects its socket, so the stream
+	    // must exist at spawn time. Nil (every existing config literal) spawns
+	    // byte-identically to before: stdin stays nil and nothing is read.
+	    SpawnStdin io.Reader
+	    // SpawnEnv is the child's COMPLETE environment when non-empty (the voice
+	    // child gets no daemon env: only VOICE_ONNX_LIB, a path, never a
+	    // secret). Empty/nil keeps the previous behavior: the child inherits the
+	    // parent's environment.
+	    SpawnEnv []string
 	}
 
 <a name="ValidateAndNormalize"></a>
@@ -8035,75 +8018,6 @@ IsValid checks if the runtime type string is valid.
 
 String returns a human\-readable representation of the runtime type.
 
-<a name="SemanticCache"></a>
-## type SemanticCache
-
-SemanticCache is the in\-memory vector store behind the exact\-key miss.
-
-	type SemanticCache struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewSemanticCache"></a>
-### func NewSemanticCache
-
-	func NewSemanticCache(embedder Embedder, cfg SemanticCacheConfig) *SemanticCache
-
-NewSemanticCache builds the tier. A nil embedder or a disabled config yields a structurally\-dead cache: every method returns miss without any embedder call or vector work.
-
-<a name="SemanticCache.Enabled"></a>
-### func \(\*SemanticCache\) Enabled
-
-	func (s *SemanticCache) Enabled() bool
-
-Enabled reports whether the tier is live. Nil\-receiver safe \(a nil cache is the disabled posture at every call site\).
-
-<a name="SemanticCache.Len"></a>
-### func \(\*SemanticCache\) Len
-
-	func (s *SemanticCache) Len() int
-
-Len reports the live entry count \(wiring/metrics helper\). Nil\-safe.
-
-<a name="SemanticCache.LookupBehindMiss"></a>
-### func \(\*SemanticCache\) LookupBehindMiss
-
-	func (s *SemanticCache) LookupBehindMiss(ctx context.Context, modelID, prompt string) (*Response, bool, error)
-
-LookupBehindMiss is the only lookup entry point the client calls \(Contract C5\): \(response, true, nil\) hit | \(nil, false, nil\) miss | \(nil, false, nil\) on ANY embedder failure \(exact\-only degradation, never an error, never a parked turn\).
-
-<a name="SemanticCache.Store"></a>
-### func \(\*SemanticCache\) Store
-
-	func (s *SemanticCache) Store(ctx context.Context, modelID, prompt string, response *Response)
-
-Store records the prompt vector \+ response after a LIVE exact\-miss response completes. Tool\-call\-bearing responses are skipped entirely so they can never be served semantically later. Best\-effort: an embedder failure here is silent \(storage is a bonus, never a correctness path\) and never disturbs the response/rotation flow.
-
-<a name="SemanticCacheConfig"></a>
-## type SemanticCacheConfig
-
-SemanticCacheConfig is the llm\-side shape of Contract C4 \(json5 key llm.cache.semantic\). internal/config carries the identical JSON5 shape \(config.SemanticCacheConfig\) and converts at wiring time.
-
-	type SemanticCacheConfig struct {
-	    // Enabled turns the tier on. Default FALSE (opt-in per
-	    // docs/agents/opt-in-defaults.md): when false every method returns
-	    // the miss immediately without touching the embedder.
-	    Enabled bool
-	    // Threshold is the cosine similarity floor for serving. Default 0.95
-	    // (research addendum; supersedes master C4's 0.92).
-	    Threshold float64
-	    // MaxEntries bounds the vector store (LRU eviction). Default 1024.
-	    MaxEntries int
-	    // TTL is the entry lifetime; entries older than this are never
-	    // served. Default mirrors llm.cache.default_ttl_min at the wiring
-	    // site (components.go) so the two tiers expire together.
-	    TTL time.Duration
-	    // PartitionKey further scopes entries beyond the model id (the
-	    // daemon may stamp an instruction fingerprint here). Empty means
-	    // model-only partitioning.
-	    PartitionKey string
-	}
-
 <a name="SessionSummaryResult"></a>
 ## type SessionSummaryResult
 
@@ -8341,6 +8255,15 @@ SupervisorOptions is one supervisor invocation. ParseSupervisorArgs fills it fro
 	    ParentDeathFD int
 	    // Argv is the runtime command line, verbatim.
 	    Argv []string
+	    // Stdin is an optional stream wired to the RUNTIME's STDIN (the voice
+	    // child's start token travels only this way - never argv, never env).
+	    // Nil keeps the runtime's stdin nil, byte-identical to the llama/MLX
+	    // spawns. The supervisor never reads from it.
+	    Stdin io.Reader
+	    // Env is the RUNTIME's complete environment when non-empty (the voice
+	    // child: VOICE_ONNX_LIB only, a path, never a secret). Empty keeps the
+	    // wrapper's inherited environment for the runtime.
+	    Env []string
 	    // Log receives the supervisor's diagnostics. nil means slog.Default().
 	    Log *slog.Logger
 	    // PollInterval overrides the parent check interval. 0 means

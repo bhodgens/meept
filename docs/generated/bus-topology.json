@@ -206,7 +206,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10153,
+        "line": 10160,
         "payload_keys": []
       }
     ],
@@ -580,7 +580,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5998,
+        "line": 6005,
         "payload_keys": [
           "name",
           "tags",
@@ -1771,7 +1771,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9313,
+        "line": 9320,
         "payload_keys": []
       }
     ],
@@ -2298,13 +2298,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 7919,
+        "line": 7926,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 7956,
+        "line": 7963,
         "payload_keys": [],
         "via_const": true
       }
@@ -2348,7 +2348,7 @@
     "voice.call.ended": [
       {
         "file": "internal/daemon/voice_wiring.go",
-        "line": 467,
+        "line": 493,
         "payload_keys": [],
         "typed": true
       }
@@ -3561,7 +3561,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9239,
+        "line": 9246,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3852,7 +3852,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9406,
+        "line": 9413,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

@@ -354,6 +354,7 @@ Package config provides configuration loading and validation for meept.
 - [type UploadsConfig](<#UploadsConfig>)
 - [type ValidationConfig](<#ValidationConfig>)
 - [type VerificationDefaults](<#VerificationDefaults>)
+- [type VoiceConfig](<#VoiceConfig>)
 - [type WatchdogConfig](<#WatchdogConfig>)
 - [type WebConfig](<#WebConfig>)
 - [type WhisperConfig](<#WhisperConfig>)
@@ -1820,6 +1821,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 	    GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	    Intake              IntakeConfig              `json:"intake"               toml:"intake"`
+	    Voice               VoiceConfig               `json:"voice"                toml:"voice"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -3555,6 +3557,16 @@ ModelsConfig represents the models.json5 configuration structure.
 	    // PlannerModel is the dedicated model for the strategic planner; empty
 	    // = planner uses its agent default (local 8B).
 	    PlannerModel string `json:"planner_model"`
+	    // CriticModel is the dedicated model for the fresh-context plan
+	    // critic round 1 (plan-20261101-fresh-context-critic contract C9);
+	    // empty = the critic uses the planner chatter (the C2 fallback that
+	    // is allowed for round 1 only).
+	    CriticModel string `json:"critic_model"`
+	    // HostileCriticModel is the dedicated model for the hostile
+	    // second-pass critic (contract C9); empty = the pass is SKIPPED
+	    // (C5), never a planner fallback. Same model as the planner is also
+	    // a skip (C5, evaluated at runtime).
+	    HostileCriticModel string `json:"hostile_critic_model"`
 	    // DecisionModel is the dedicated decision model (Jev-style typed
 	    // decision endpoint: fixed labels, calibrated probabilities, no
 	    // generated tokens). Empty = decision-model features disabled (gates
@@ -5458,6 +5470,39 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    MaxFixLoops int `json:"max_fix_loops" toml:"max_fix_loops"`
 	    // AutoTriggerThreshold is the number of consecutive failures before auto-triggering verification.
 	    AutoTriggerThreshold int `json:"auto_trigger_threshold" toml:"auto_trigger_threshold"`
+	}
+
+<a name="VoiceConfig"></a>
+## type VoiceConfig
+
+VoiceConfig holds the voice sidecar settings \(\[voice\]\). All keys default safe: enabled=false, supervisor on, loopback\-only \(no public URL default\). E.164 format in AllowedNumbers is validated lazily at dial/answer time, not at config load, so an operator can save a partially edited list.
+
+	type VoiceConfig struct {
+	    Enabled              bool     `json:"enabled"                toml:"enabled"`
+	    IdleStopSeconds      int      `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	    OnnxRuntimeLib       string   `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	    STTProvider          string   `json:"stt_provider"           toml:"stt_provider"`
+	    TTSProvider          string   `json:"tts_provider"           toml:"tts_provider"`
+	    Filler               []string `json:"filler"                 toml:"filler"`
+	    SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
+	    SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	    SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
+	    SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	    VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
+	    PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
+	    ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
+	    FromNumber           string   `json:"from_number"            toml:"from_number"`
+	    AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
+	    TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
+	    MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
+	    SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	    MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	    ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	    ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	    TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	    ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
+	    LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	    DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
 	}
 
 <a name="WatchdogConfig"></a>

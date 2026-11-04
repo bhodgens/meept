@@ -2412,21 +2412,21 @@
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 8731
+    "line": 8738
   },
   {
     "method": "GET",
     "path": "file_edit",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 8742
+    "line": 8749
   },
   {
     "method": "GET",
     "path": "file_write",
     "handler": "",
     "file": "internal/daemon/components.go",
-    "line": 8723
+    "line": 8730
   },
   {
     "method": "GET",
