@@ -267,7 +267,7 @@ Output: APPROVED or a list of specific gaps.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 00T-e2e-memory-pipeline.md | TESTS_VALIDATED | 1 | a78b5d47: 8/8 RED witnessed in-session at clean-HEAD worktree (default-on pipeline, C4 knobs, stable/volatile split, recall_outcomes row, doctor check, project isolation, chief-of-staff, Flag-3 fail-closed cell). Gate observation riding leaf-03: dispatcher renders recall as '## Relevant Context' user-message block (dispatcher.go:3610) - stable/volatile split must reconcile BOTH injection sites. |
-| 01-scoping/orchestrator.md | PENDING | 0 | |
+| 01-scoping/orchestrator.md | IN_PROGRESS | 0 | 00T branch gate TESTS_VALIDATED (7b775b70): RED witnessed in-session (Scope/WithScopeFilter/MemoryMaxScope/resolveScopeInputs missing-symbol only). Deviation reviewed+accepted: multiuser bit pinned ADDITIVELY (WithMultiUserEnabled SearchOption + 4th resolveScopeInputs return) keeping frozen C2 signature verbatim. Pre-existing blocker noted: working tree has in-flight memoryRecallItem refactor compile errors in loop.go (sibling wave). Leaf 01-scope-schema dispatch next (Flags 1+3 ride brief). |
 | 02-defaults-on.md | PENDING | 0 | |
 | 03-stable-volatile-split.md | PENDING | 0 | |
 | 04-recall-telemetry.md | PENDING | 0 | |
