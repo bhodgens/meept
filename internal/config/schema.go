@@ -100,6 +100,7 @@ type Config struct {
 	ProjectsRecent      ProjectRecentConfig       `json:"projects_recent"     toml:"projects_recent"`
 	STT                 STTConfig                 `json:"stt"                 toml:"stt"`
 	TTS                 TTSConfig                 `json:"tts"                 toml:"tts"`
+	Voice               VoiceConfig               `json:"voice"                toml:"voice"`
 	OAuth               OAuthConfig               `json:"oauth"               toml:"oauth"`
 	Analytics           AnalyticsConfig           `json:"analytics,omitzero" toml:"analytics"`
 	Notifications       NotificationsConfig       `json:"notifications,omitzero" toml:"notifications"`
@@ -2607,6 +2608,13 @@ type SecurityConfig struct {
 	// 04's struct and will extend this section.
 	Groups SecurityGroupsConfig `json:"groups" toml:"groups"`
 
+	// JevCommandGate configures the graded command-safety score gate
+	// ([security.jev_command_gate], docs/plans/20261103-wiring-gap-remediation/
+	// 04-jev-gate-wiring.md). Field names mirror jevgate.ScoreGateConfig
+	// (internal/jevgate/serialize.go); the daemon adapter maps verbatim.
+	// Opt-in: all defaults false/conservative per docs/agents/opt-in-defaults.md.
+	JevCommandGate JevGateConfig `json:"jev_command_gate" toml:"jev_command_gate"`
+
 	// Egress policy for the secrets proxy ([security.egress]): ordered
 	// host-suffix/CIDR allow/ask/deny rules consulted before secret injection.
 	Egress EgressConfig `json:"egress" toml:"egress"`
@@ -2679,6 +2687,23 @@ type SecurityGroupsConfig struct {
 	// AdminUsers lists user ids whose human keys may mutate membership
 	// (C5 human half of the write gate).
 	AdminUsers []string `json:"admin_users,omitempty" toml:"admin_users"`
+}
+
+// JevGateConfig configures the [security.jev_command_gate] section
+// (graded command-safety score gate). Field names mirror
+// jevgate.ScoreGateConfig verbatim; the daemon adapter maps one-to-one.
+// Defaults: disabled; score_threshold 0.90 (conservative; the frozen
+// contract value), confidence_threshold 0.10 (veto-only posture -
+// low confidence forces the human ask, never an allow).
+type JevGateConfig struct {
+	// Enabled arms the score gate on shell commands. Default false.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// ScoreThreshold is the minimum Jev score for an automatic allow.
+	// Below threshold escalates to the human confirmation flow.
+	ScoreThreshold float64 `json:"score_threshold" toml:"score_threshold"`
+	// ConfidenceThreshold is the confidence VETO floor: confidence below
+	// this forces ASK regardless of score. Default 0.10.
+	ConfidenceThreshold float64 `json:"confidence_threshold" toml:"confidence_threshold"`
 }
 
 // GroupsPolicyConfig is one [security.groups.policies] entry (C3 Policy).
@@ -2816,6 +2841,17 @@ func (c *SecurityConfig) Validate() error {
 			// valid
 		default:
 			return fmt.Errorf("security.shell_permissions.preset %q: must be workspace, readonly, danger, or empty", sp.Preset)
+		}
+	}
+	// Jev gate: zero-value thresholds in an ENABLED gate are the disabled
+	// posture (empty struct in an otherwise-enabled config) - normalize to
+	// the conservative defaults rather than let 0.0 allow everything.
+	if c.JevCommandGate.Enabled {
+		if c.JevCommandGate.ScoreThreshold <= 0 {
+			c.JevCommandGate.ScoreThreshold = 0.90
+		}
+		if c.JevCommandGate.ConfidenceThreshold <= 0 {
+			c.JevCommandGate.ConfidenceThreshold = 0.10
 		}
 	}
 	for prefix, action := range c.ShellPermissions.Rules {
@@ -4083,6 +4119,10 @@ func DefaultConfig() *Config {
 				DecisionLogLevel: "deny-warn",
 				AdminAgents:      []string{"agent-update"},
 			},
+			JevCommandGate: JevGateConfig{
+				ScoreThreshold:      0.90,
+				ConfidenceThreshold: 0.10,
+			},
 			Egress: EgressConfig{
 				ScrubNoProxy: true,
 			},
@@ -4556,6 +4596,19 @@ func DefaultConfig() *Config {
 			Playback:  TTSPlaybackConfig{Volume: 1.0, Rate: 1.0, AudioDevice: ""},
 			Behavior:  TTSBehaviorConfig{ReadOwnMessages: false, InterruptOnNewMsg: true, QueueMessages: false, MaxQueueSize: 5},
 		},
+		Voice: VoiceConfig{
+			Enabled:              false,
+			IdleStopSeconds:      30,
+			Filler:               []string{"Hold on, let me check."},
+			SupervisorEnabled:    true,
+			SupervisorTimeoutMs:  400,
+			TimeoutSecs:          30,
+			MaxConcurrentCalls:   2,
+			MaxCallMinutes:       15,
+			SilencePromptSeconds: 45,
+			ReorderWindowFrames:  10,
+			ReorderGapMs:         60,
+		},
 		ReflectionCollector: ReflectionCollectorConfig{
 			Enabled:              true,
 			AutoQueue:            true,
@@ -4843,6 +4896,34 @@ type TTSConfig struct {
 
 	// Behavior settings
 	Behavior TTSBehaviorConfig `json:"behavior" toml:"behavior"`
+}
+
+type VoiceConfig struct {
+	Enabled              bool     `json:"enabled"                toml:"enabled"`
+	IdleStopSeconds      int      `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	OnnxRuntimeLib       string   `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	STTProvider          string   `json:"stt_provider"           toml:"stt_provider"`
+	TTSProvider          string   `json:"tts_provider"           toml:"tts_provider"`
+	Filler               []string `json:"filler"                 toml:"filler"`
+	SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
+	SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
+	SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
+	PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
+	ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
+	FromNumber           string   `json:"from_number"            toml:"from_number"`
+	AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
+	TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
+	MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
+	SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
+	LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
 }
 
 // PiperTTSConfig holds Piper TTS engine settings.

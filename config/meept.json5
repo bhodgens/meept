@@ -478,24 +478,6 @@
         "exclusive": {"parallelism": 1},   // Exclusive locks (one at a time)
       },
     },
-    // Tool-call handling gates for the agent loop. Most keys are opt-in and
-    // default OFF so the daemon behaves byte-identically when the block is
-    // omitted.
-    "tools": {
-      // schema_mode: "" = indexed (default, one-line tool stubs + tool_view
-      // expansion), "full" = legacy complete schemas inline.
-      "schema_mode": "indexed",
-      // deterministic_tools: cache-gated web tools (meept-bench). Off by
-      // default; the MEEPT_DETERMINISTIC_TOOLS env var ORs with it.
-      "deterministic_tools": false,
-      // codemode_enabled: register the `codemode` sandbox tool (runs
-      // model-written JS that batch-calls the agent's already-filtered tool
-      // registry; nested calls stay out of LLM context). OFF by default —
-      // when false the tool is absent from the registry, the LLM tool
-      // definitions, and every agent's filtered allow-list (byte-identical
-      // to pre-codemode). See docs/workflows/codemode.md.
-      "codemode_enabled": false,
-    },
   },
 
   // Security configuration
@@ -1221,6 +1203,38 @@
       "queue_messages": false,
       "max_queue_size": 5
     }
+  },
+
+  // Voice sidecar ([voice]). Disabled by default; all keys default safe
+  // (supervisor on, loopback-only, no public URL). Unset telnyx_public_key
+  // means voice routes return 503 (fail-closed). E.164 format in
+  // allowed_numbers is validated lazily at dial/answer time, not at load.
+  "voice": {
+    "enabled": false,                       // master switch; sidecar absent when false
+    "idle_stop_seconds": 30,                // stop the sidecar after this much idle time
+    "onnx_runtime_lib": "",                 // optional ONNX runtime library override
+    "stt_provider": "",                     // STT provider for call audio
+    "tts_provider": "",                     // TTS provider for call audio
+    "filler": ["Hold on, let me check."],   // spoken filler lines while working
+    "supervisor_employee": "",              // employee id supervising calls
+    "supervisor_enabled": true,             // run the call supervisor
+    "supervisor_model": "",                 // empty = use small_model
+    "supervisor_timeout_ms": 400,           // supervisor decision timeout
+    "voice_model": "",                      // model used for voice interactions
+    "public_stream_url": "",                // public media stream URL; empty = refusal until configured
+    "connection_id": "",                    // Telnyx connection id
+    "from_number": "",                      // caller ID number (E.164)
+    "allowed_numbers": null,                // allowed caller numbers (E.164); null = all
+    "timeout_secs": 30,                     // per-step call timeout
+    "max_call_minutes": 15,                 // hard cap on call length
+    "silence_prompt_seconds": 45,           // silence before prompting the caller
+    "max_concurrent_calls": 2,              // concurrent voice instances; 0 = unlimited
+    "reorder_window_frames": 10,            // audio reorder window (frames)
+    "reorder_gap_ms": 60,                   // audio reorder gap (ms)
+    "telnyx_public_key": "",                // base64 Ed25519 public key from Mission Control; unset = routes 503
+    "default_employee": "",                 // phone employee id owning inbound calls; required when enabled
+    "child_binary_path": "",                // empty = daemon-adjacent lookup
+    "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
   },
 
   // Analytics configuration

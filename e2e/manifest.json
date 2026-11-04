@@ -519,9 +519,10 @@
       "diff": "M",
       "scenarios": [
         "jev-gate-01 fail-closed matrix",
-        "jev-gate-02 capture chokepoints"
+        "jev-gate-02 capture chokepoints",
+        "jev-gate-03 daemon wiring: armed boot escalates a below-threshold shell call; deleting the registration lets the same call execute"
       ],
-      "note": "leaf 01 fail-closed matrix + C2 byte-stability; leaf 02 two-chokepoint capture, DPO export, near-miss pairing, secret scrub, store placement"
+      "note": "leaf 01 fail-closed matrix + C2 byte-stability; leaf 02 two-chokepoint capture, DPO export, near-miss pairing, secret scrub, store placement; wiring leaf 03 config adapter + construction + registration + wiring-failure property"
     },
     {
       "name": "rpc-ping",
