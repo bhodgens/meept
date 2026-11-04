@@ -48,7 +48,8 @@
       "continuity-regressions",
       "goal-completion",
       "acp-persona-route",
-      "llm-hop-tracing"
+      "llm-hop-tracing",
+      "skills-refresh-origin"
     ],
     "internal/validator/": [
       "output-filters",
@@ -75,7 +76,8 @@
     ],
     "internal/skills/": [
       "skills-discovery",
-      "continuity-regressions"
+      "continuity-regressions",
+      "skills-refresh-origin"
     ],
     "internal/tools/": [
       "memory-knowledge-assets",
@@ -107,7 +109,8 @@
       "bridges",
       "memory-knowledge-assets",
       "memory-layered-distill",
-      "memory-persistence"
+      "memory-persistence",
+      "skills-refresh-origin"
     ],
     "internal/auth/": [
       "auth-multiuser"
@@ -204,7 +207,8 @@
       "hermes-client"
     ],
     "cmd/meept/": [
-      "cli-surface"
+      "cli-surface",
+      "skills-refresh-origin"
     ],
     "cmd/meept-daemon/": [
       "daemon-lifecycle"
@@ -376,7 +380,8 @@
       "github-pr-ci"
     ],
     "internal/tools/builtin/": [
-      "github-pr-ci"
+      "github-pr-ci",
+      "skills-refresh-origin"
     ],
     "internal/intake/": [
       "github-intake"
@@ -447,6 +452,9 @@
     ],
     "e2e/suites/plan-critic": [
       "plan-critic"
+    ],
+    "e2e/suites/skills-refresh-origin": [
+      "skills-refresh-origin"
     ]
   },
   "suites": [
@@ -905,6 +913,19 @@
         "critic-wiring-06 daemon wiring: the three flags default false on a live boot; critic slots absent/empty by default (commented examples)"
       ],
       "note": "plan-20261101-fresh-context-critic tree: fresh-context evidence critic (leaf 02), hostile second pass (leaf 03), contest path (leaf 04), zero-decision compile (leaf 05), interview option gates (leaf 06), daemon wiring + model slots (leaf 07). Self-contained fixtures over real StrategicPlanner + live harness daemon for the wiring scenario."
+    },
+    {
+      "name": "skills-refresh-origin",
+      "dir": "e2e/suites/skills-refresh-origin",
+      "status": "todo",
+      "diff": "M",
+      "scenarios": [
+        "skills-refresh-01 mid-session skill write visible next turn",
+        "skills-refresh-02 no-op refresh byte-stable",
+        "skills-origin-01 origin stamped per write path",
+        "skills-origin-02 memory_facts origin column + legacy unknown",
+        "skills-doctor-01 doctor origin-backfill report-only"
+      ]
     }
   ],
   "scenarios": [
