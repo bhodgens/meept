@@ -15,7 +15,9 @@
 //	agent-groups-04  F4 membership mutation gate — TestAgentGroupsF4MutationGateDeniesNonPrivileged
 //	agent-groups-05  F6 fence stage             — TestAgentGroupsF6FenceStageDeniesOutsideRoot
 //	agent-groups-06  F7 decision audit log      — TestAgentGroupsF7DecisionLogRecordsGroupDeny
-//	agent-groups-07  F5 memory ceiling          — SKIPPED (issue #70 branch 01 dependency; dated)
+//	agent-groups-07  F5 memory ceiling          — f5_memory_ceiling_test.go
+//	                                     (re-armed by leaf 05-memory-ceiling
+//	                                     after #70 branch 01 landed)
 //	agent-groups-08  F9 cluster dispatch identity — SKIPPED member (cluster_identity_member_test.go; dated)
 //
 // All assertions ride live surfaces (the fake-LLM tool-offer/tool-result

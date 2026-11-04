@@ -3435,7 +3435,7 @@
       "id": "agent-groups-07",
       "suite": "agent-groups",
       "diff": "M",
-      "title": "F5 memory ceiling: grouped agent recall bounded by the narrowest group MemoryMaxScope (SKIP: issue #70 branch 01)",
+      "title": "F5 memory ceiling: grouped agent recall bounded by the narrowest group MemoryMaxScope; a wider agent declaration never widens it",
       "paths": [
         "internal/memory/",
         "internal/groups/"

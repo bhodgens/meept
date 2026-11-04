@@ -122,14 +122,20 @@ search, task tools, platform status, handoff, `project_info`,
 `delegate_task`) stay reachable because the record was intersected against
 the full grant set that includes them.
 
-### Gate 3: retrieval-time memory ceiling (declared, NOT yet enforced)
+### Gate 3: retrieval-time memory ceiling (enforced)
 
-`memory_max_scope` resolves (narrowest wins) into the `Resolved` record, but
-the retrieval-side scope filter is not wired yet: leaf 05 of the plan tree
-is BLOCKED on the memory-scoping branch of the issue #70 tree. Until that
-branch lands, treat `memory_max_scope` as **declared-but-inert**: changing
-it in config does not change memory recall behavior. Do not rely on it for
-isolation.
+`memory_max_scope` resolves (narrowest wins) into the `Resolved` record and
+IS enforced at recall time (leaf 05, C7): the loop folds the ceiling into
+its scope resolution (`EffectiveMemoryScope` — the narrower of the agent's
+own declaration and the group ceiling, order project < user < global), so
+`buildMemoryContext` recall AND the four memory tools
+(`memory_store`/`memory_search`/`memory_recall`/`memory_get_context`,
+which filter and stamp from the loop-injected identity) all operate at the
+effective ceiling. The dispatcher chat lane applies the same narrowed
+resolution. Groups NEVER widen: a ceiling wider than the agent's own
+`memory_max_scope` is inert, and an ungrouped agent resolves exactly as
+the memory-scoping baseline. The gate is pinned by the agent-groups-07 e2e
+scenario and the `internal/agent` ceiling pins.
 
 The same caution applies to the remaining policy fields: `network_class`
 and `allowed_models` resolve and merge (most-restrictive / intersection

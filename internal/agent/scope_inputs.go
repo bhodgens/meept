@@ -64,11 +64,64 @@ func resolveScopeInputs(spec *AgentSpec, projectID, userID string) (memory.Scope
 	return maxScope, projectID, userID, userID != ""
 }
 
+// scopeIdentityInputs is the identity pass-through half of
+// resolveScopeInputs (project + user + multiuser bit), split out so the
+// group-ceiling variant (resolveScopeInputsWithCeiling) reuses the exact
+// same identity semantics without re-deriving the B1 max scope.
+func scopeIdentityInputs(projectID, userID string) (string, string, bool) {
+	return projectID, userID, userID != ""
+}
+
+// resolveScopeInputsWithCeiling resolves the B1 tuple with the group
+// MemoryMaxScope ceiling folded in (agent-groups leaf 05 T2, C7):
+// effective = min(agent declaration, group ceiling); groups NEVER widen.
+// The identity legs are byte-identical to resolveScopeInputs. decl "" /
+// invalid still resolves through EffectiveMemoryScope's fail-safe matrix,
+// so a grouped agent with a malformed AGENT.md declaration cannot have
+// the typo widened by a permissive group either.
+func resolveScopeInputsWithCeiling(spec *AgentSpec, ceiling, projectID, userID string) (memory.Scope, string, string, bool) {
+	decl := ""
+	if spec != nil {
+		decl = spec.MemoryMaxScope
+	}
+	maxScope := EffectiveMemoryScope(decl, ceiling)
+	proj, uid, multi := scopeIdentityInputs(projectID, userID)
+	return maxScope, proj, uid, multi
+}
+
+// EffectiveMemoryScope narrows an agent's declared max scope by a group
+// policy ceiling (agent-groups leaf 05, C7 verbatim):
+//
+//	effective = min(agent MemoryMaxScope, group Resolved.MemoryMaxScope)
+//
+// scope order project < user < global. Groups NEVER widen (T3 pin): a
+// wider ceiling than the declaration is inert. agentDecl follows the B1
+// vocabulary with the same fail-safe defaults resolveScopeInputs applies
+// (empty = project; invalid = project, never global). groupCeiling "" =
+// unrestricted (no group policy bound, or the bound policies declare no
+// ceiling) and never narrows; an INVALID ceiling never narrows either —
+// both fail toward the agent's own resolution rather than inventing a
+// scope the agent did not declare.
+func EffectiveMemoryScope(agentDecl, groupCeiling string) memory.Scope {
+	maxScope := memory.ScopeProject
+	switch agentDecl {
+	case "", string(memory.ScopeProject):
+		maxScope = memory.ScopeProject
+	case string(memory.ScopeUser):
+		maxScope = memory.ScopeUser
+	case string(memory.ScopeGlobal):
+		maxScope = memory.ScopeGlobal
+	default:
+		// Fail SAFE: an unrecognized declaration narrows to project,
+		// never widens to global (same posture as resolveScopeInputs).
+		maxScope = memory.ScopeProject
+	}
+	return memoryScopeCeiling(maxScope, groupCeiling)
+}
+
 // memoryScopeCeiling narrows a resolved max scope by an optional
-// group-policy ceiling (agent-groups leaf 05 C7 consumes this via its own
-// narrow fn; kept package-local so the loop can apply both without a
-// second vocabulary). order: project < user < global; "" (unset ceiling)
-// never narrows.
+// group-policy ceiling (leaf 05 C7). order: project < user < global;
+// "" (unset ceiling) and unknown values never narrow.
 func memoryScopeCeiling(max memory.Scope, ceiling string) memory.Scope {
 	if ceiling == "" {
 		return max
