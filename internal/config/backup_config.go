@@ -15,6 +15,7 @@ type BackupConfig struct {
 	NodeID        string        `json:"node_id"        toml:"node_id"`
 }
 
+
 // ErrBackupInvalid is returned when BackupConfig validation fails.
 var ErrBackupInvalid = fmt.Errorf("backup config is invalid")
 

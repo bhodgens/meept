@@ -113,7 +113,6 @@ git config core.hooksPath .githooks
 | `internal/skills/` | `docs/workflows/skills.md` |
 | `internal/scheduler/` | `docs/workflows/job-scheduling.md` |
 | `internal/comm/` | `docs/workflows/external-integrations.md` |
-| `internal/voice/` | `docs/workflows/voice-sidecar.md` |
 | `internal/stt/` | `docs/workflows/speech-to-text.md` |
 | `internal/tts/` | `docs/workflows/tts.md` |
 | `internal/runtime/` | `docs/workflows/runtime.md` |

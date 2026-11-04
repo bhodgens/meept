@@ -241,6 +241,7 @@ func (g *GitCheckout) CommitAndPush(_ context.Context, message string) error {
 		ErrGitConflict, gitPullRetryMax)
 }
 
+
 // IsDirty returns true if the working tree has uncommitted changes.
 func (g *GitCheckout) IsDirty() (bool, error) {
 	if g.repo == nil {
@@ -261,6 +262,7 @@ func (g *GitCheckout) IsDirty() (bool, error) {
 func (g *GitCheckout) Path() string {
 	return g.checkoutDir
 }
+
 
 // checkoutDirParent computes the parent directory of the checkout path,
 // handling the case where checkoutDir is a bare name (no slash).

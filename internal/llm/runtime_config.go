@@ -3,7 +3,6 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/url"
 	"os"
@@ -148,18 +147,6 @@ type RuntimeConfig struct {
 	// ToolConstraint is the grammar-constraint wire mode this managed
 	// runtime auto-declares ("llamacpp" for llama.cpp, "" for MLX).
 	ToolConstraint string
-	// SpawnStdin is an optional stream wired to the child's STDIN. It exists
-	// for the voice child (internal/voice ChildProc): its start token arrives
-	// via stdin ONLY (never argv, never env - the leaf-07 secret contract),
-	// and the child reads stdin before it connects its socket, so the stream
-	// must exist at spawn time. Nil (every existing config literal) spawns
-	// byte-identically to before: stdin stays nil and nothing is read.
-	SpawnStdin io.Reader
-	// SpawnEnv is the child's COMPLETE environment when non-empty (the voice
-	// child gets no daemon env: only VOICE_ONNX_LIB, a path, never a
-	// secret). Empty/nil keeps the previous behavior: the child inherits the
-	// parent's environment.
-	SpawnEnv []string
 }
 
 // ValidateAndNormalize validates the config and expands paths.

@@ -1636,7 +1636,6 @@ Three media specialists sit beside that roster: `image-gen` and `video-gen` each
 | **Hermes Interop** | Native HTTP client for a running Hermes gateway API server (`hermes` builtin tool; `[hermes]` off by default, env-var API key; REST + SSE streaming + approval relay). See [Hermes interop](workflows/hermes.md). |
 | **Distributed Cluster** | P2P mesh networking with gossip protocol for multi-node coordination |
 | **Flutter GUI** | Cross-platform GUI client (desktop + web) with chat, sessions, tasks, agents, metrics panels, live rendering prefs and theme picker |
-| **Voice (Telnyx Phone Sidecar)** | Opt-in (`[voice] enabled` defaults false) realtime phone channel: an employee answers inbound calls and dials out via Telnyx, holds a barge-in conversation through a separate jargo voice child (`meept-voice`), speaks only supervisor-allowed sentences, and carries the day's context. Employee surface: the `voice_call` tool. A `meept voice` status CLI command + Flutter control are deferred. See [Voice](workflows/voice.md) and [voice-sidecar spec + as-built](workflows/voice-sidecar.md). |
 
 ---
 

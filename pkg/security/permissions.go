@@ -62,16 +62,6 @@ var BuiltinRules = map[string]ActionRule{
 	"agent_delegate": {Action: "agent_delegate", RiskLevel: RiskLow, RequiresConfirmation: false},
 	"skill_execute":  {Action: "skill_execute", RiskLevel: RiskMedium, RequiresConfirmation: false},
 
-	// Voice sidecar (voice-sidecar leaf 14): one action row for the
-	// employee-callable outbound dial. Unknown actions DENY by default, so
-	// this row is MANDATORY - without it every voice_call is denied
-	// "Unknown action" regardless of the employee's tools_allowed grant.
-	// MEDIUM: it initiates a real-world phone call (the dialer's own
-	// policy gates - allowlist, registry cap, effects idempotency, audit
-	// row - run before any HTTP, so the risk here is the outbound action
-	// itself, on par with send_message + network_request).
-	"voice_call": {Action: "voice_call", RiskLevel: RiskMedium, RequiresConfirmation: false},
-
 	// Media generation (network + file write)
 	"generate_image": {Action: "generate_image", RiskLevel: RiskMedium, RequiresConfirmation: false},
 	"generate_video": {Action: "generate_video", RiskLevel: RiskMedium, RequiresConfirmation: false},

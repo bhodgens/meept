@@ -1223,38 +1223,6 @@
     }
   },
 
-  // Voice sidecar ([voice]). Disabled by default; all keys default safe
-  // (supervisor on, loopback-only, no public URL). Unset telnyx_public_key
-  // means voice routes return 503 (fail-closed). E.164 format in
-  // allowed_numbers is validated lazily at dial/answer time, not at load.
-  "voice": {
-    "enabled": false,                       // master switch; sidecar absent when false
-    "idle_stop_seconds": 30,                // stop the sidecar after this much idle time
-    "onnx_runtime_lib": "",                 // optional ONNX runtime library override
-    "stt_provider": "",                     // STT provider for call audio
-    "tts_provider": "",                     // TTS provider for call audio
-    "filler": ["Hold on, let me check."],   // spoken filler lines while working
-    "supervisor_employee": "",              // employee id supervising calls
-    "supervisor_enabled": true,             // run the call supervisor
-    "supervisor_model": "",                 // empty = use small_model
-    "supervisor_timeout_ms": 400,           // supervisor decision timeout
-    "voice_model": "",                      // model used for voice interactions
-    "public_stream_url": "",                // public media stream URL; empty = refusal until configured
-    "connection_id": "",                    // Telnyx connection id
-    "from_number": "",                      // caller ID number (E.164)
-    "allowed_numbers": null,                // allowed caller numbers (E.164); null = all
-    "timeout_secs": 30,                     // per-step call timeout
-    "max_call_minutes": 15,                 // hard cap on call length
-    "silence_prompt_seconds": 45,           // silence before prompting the caller
-    "max_concurrent_calls": 2,              // concurrent voice instances; 0 = unlimited
-    "reorder_window_frames": 10,            // audio reorder window (frames)
-    "reorder_gap_ms": 60,                   // audio reorder gap (ms)
-    "telnyx_public_key": "",                // base64 Ed25519 public key from Mission Control; unset = routes 503
-    "default_employee": "",                 // phone employee id owning inbound calls; required when enabled
-    "child_binary_path": "",                // empty = daemon-adjacent lookup
-    "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
-  },
-
   // Analytics configuration
   "analytics": {
     "enabled": true,
