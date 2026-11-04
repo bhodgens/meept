@@ -85,8 +85,8 @@ e2e/suites/ (build tag e2e); user-facing strings lowercase; opt-in-defaults poli
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-e2e-tests | PENDING | 0 | |
-| 01-index-refresh-seam | PENDING | 0 | |
+| 00T-e2e-tests | COMPLETE | 0 | gate GREEN (F1/F2) |
+| 01-index-refresh-seam | COMPLETE | 1 | C1 landed + daemon wiring closed in-session (rescan source + per-turn builder attach) |
 
 Status: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED |
 REVIEWED | COMPLETE | BLOCKED.
@@ -102,8 +102,8 @@ Test leaves: 00T-e2e-tests.md (hermetic e2e). Dispatched first, validated in-ses
 
 | # | Feature | Source | E2E test | Status |
 |---|---------|--------|----------|--------|
-| F1 | index refresh reflects mid-session write | 01 T1-T2 | refresh-scenario | PENDING |
-| F2 | no-op refresh byte-stable | 01 T3 | refresh-scenario (hash) | PENDING |
+| F1 | index refresh reflects mid-session write | 01 T1-T2 | refresh-scenario | COMPLETE |
+| F2 | no-op refresh byte-stable | 01 T1-T3 | refresh-scenario (hash) | COMPLETE |
 
 Delta log: (none yet).
 
