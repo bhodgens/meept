@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-01",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
+  "generated": "2026-11-03",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -48,10 +48,7 @@
       "continuity-regressions",
       "goal-completion",
       "acp-persona-route",
-      "dynamic-tools",
-      "llm-hop-tracing",
-      "hitl-notifications",
-      "turn-journal"
+      "llm-hop-tracing"
     ],
     "internal/validator/": [
       "output-filters",
@@ -88,7 +85,6 @@
       "tools-mcp",
       "tools-memory",
       "tools-tasks",
-      "dynamic-tools",
       "tools-web-ssrf"
     ],
     "internal/eval/": [
@@ -111,15 +107,7 @@
       "bridges",
       "memory-knowledge-assets",
       "memory-layered-distill",
-      "memory-persistence",
-      "memory-defaults",
-      "memory-scoping"
-    ],
-    "e2e/suites/memory-defaults": [
-      "memory-defaults"
-    ],
-    "e2e/suites/memory-scoping": [
-      "memory-scoping"
+      "memory-persistence"
     ],
     "internal/auth/": [
       "auth-multiuser"
@@ -146,7 +134,6 @@
       "config-reload",
       "github-intake",
       "agent-groups",
-      "dynamic-tools",
       "llm-serving-tiers"
     ],
     "internal/daemon/": [
@@ -156,9 +143,7 @@
       "project-binding",
       "state-restart",
       "acp-wire",
-      "llm-hop-tracing",
-      "turn-journal",
-      "hitl-notifications"
+      "llm-hop-tracing"
     ],
     "internal/llm/": [
       "daemon-lifecycle",
@@ -166,7 +151,6 @@
       "continuity-regressions",
       "session-affinity",
       "session-teardown",
-      "dynamic-tools",
       "llm-hop-tracing",
       "llm-serving-tiers"
     ],
@@ -208,8 +192,7 @@
     ],
     "internal/acp/": [
       "acp-wire",
-      "acp-persona-route",
-      "hitl-notifications"
+      "acp-persona-route"
     ],
     "internal/process/": [
       "acp-wire"
@@ -424,9 +407,6 @@
     "internal/gatecapture/": [
       "jev-command-gate"
     ],
-    "internal/agent/turnjournal/": [
-      "turn-journal"
-    ],
     "internal/comm/slack/": [
       "hitl-notifications"
     ],
@@ -468,17 +448,30 @@
     "e2e/suites/plan-critic": [
       "plan-critic"
     ],
-    "e2e/suites/dynamic-tools": [
-      "dynamic-tools"
+    "internal/voice/": [
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
     ],
-    "internal/comm/http/": [
-      "hitl-notifications"
+    "internal/voice/telnyx/": [
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
     ],
-    "internal/comm/web/": [
-      "hitl-notifications"
+    "internal/voiceframe/": [
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
     ],
-    "internal/eval/hitl/": [
-      "hitl-notifications"
+    "internal/voicechild/": [
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
+    ],
+    "cmd/meept-voice/": [
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
     ]
   },
   "suites": [
@@ -488,28 +481,14 @@
       "status": "implemented"
     },
     {
-      "name": "turn-journal",
-      "dir": "e2e/suites/turn-journal",
-      "status": "implemented",
-      "diff": "L",
-      "scenarios": [
-        "kill9-resume-01 kill -9 mid-turn -> restart -> resume at NEXT STEP (no LLM re-invocation of journaled steps; pre-kill payloads byte-identical after resume)",
-        "dedup-02 no duplicate completion: a fully-completed turn re-mounted after kill -9 delivers ZERO new completions (per-job queue.job.completed dedup, no job-row minting, journal payload invariance)",
-        "quota-03 a QuotaResetError on the resumed step parks via the existing agent.quota_wait surface; the quota-failed step boundary stays un-completed in the journal",
-        "flagoff-04 flag-off legacy control: kill mid-turn -> the in-flight job re-runs live (executor counter advances); turnjournal.db never exists"
-      ],
-      "note": "leaf 04 hermetic acceptance gate of the turn-journal tree: true SIGKILL on the harness daemon handle + fresh boot over the SAME data dir (state-restart restart primitive); fake-LLM executor counter proves no re-invocation; read-only SQL over <DataDir>/turnjournal.db for row-shape assertions; serial 3-step pinned plan (sleep-8 STEP-B gives the deterministic mid-turn window). KNOWN GAPS observed and reported: boot RecoverStaleTasks force-fails the in-flight step before the reclaim re-runs it, so a resumed turn's task row may read failed while the WORK completes; the journal writer keys run_started/run_closed per step-job round, so a multi-round turn carries multiple close rows and OpenRuns() can miss the parked round (the queue reclaim is the working resume path in that shape)."
-    },
-    {
       "name": "hitl-notifications",
       "dir": "e2e/suites/hitl-notifications",
-      "status": "implemented",
+      "status": "todo",
       "diff": "L",
       "scenarios": [
-        "hitl-slack-01 signed Slack interaction -> relay resolve with approver slack:<uid>; late click after the disableable relay timeout fail-closes (no pending request)",
-        "hitl-gate-02 plan gate park -> daemon restart -> out-of-band approve -> resume",
-        "hitl-deep-03 web fallback substrate: the daemon web server serves the session page for the deep-link fallback URL",
-        "hitl-regime-04 the hitl Runner produces a HitlRegimeReport across all three regimes with every C7 field populated; markdown renders"
+        "hitl-slack-01 round trip incl. late-click fail-closed",
+        "hitl-gate-02 park-restart-resume",
+        "hitl-deep-03 web fallback"
       ]
     },
     {
@@ -687,32 +666,6 @@
       "name": "memory-persistence",
       "dir": "e2e/suites/memory-persistence",
       "status": "implemented"
-    },
-    {
-      "name": "memory-defaults",
-      "dir": "e2e/suites/memory-defaults",
-      "status": "implemented",
-      "diff": "M",
-      "scenarios": [
-        "memory-defaults-01 default-config boot: one completed turn records L0 lines, enqueues a memory.l1_extract job, and knowledge_search rides the tool list (F1/D3)",
-        "memory-defaults-02 config get reports all five memory knobs true on a default boot (C4/D1)",
-        "memory-defaults-03 stable item renders under the Memory (standing) section while the volatile item stays inside the <memory-context> fence (F4/C6)",
-        "memory-defaults-04 recall_outcomes.jsonl row carries the verbatim C5 key set with injected=true and cited=true after a citing recall turn (F5/C5)",
-        "memory-defaults-05 meept doctor renders a memory-pipeline check naming l0 status (F7)"
-      ],
-      "note": "RED gate for the memory second-brain tree leaf 00T (memory-defaults half): boots the scratch daemon with the DEFAULT config and asserts the default-on world (F1/F4/F5/F7). Every case fails RED today for the missing-implementation reason (memory knobs default false; no stable-section render; no telemetry writer; no doctor memory check); turns GREEN when leaves 02/03/04/06 land."
-    },
-    {
-      "name": "memory-scoping",
-      "dir": "e2e/suites/memory-scoping",
-      "status": "implemented",
-      "diff": "M",
-      "scenarios": [
-        "memory-scoping-01 project isolation: project-A fact absent from a project-B session recall while a global-scope fact stays recallable in both (F2, C1/C2)",
-        "memory-scoping-02 chief-of-staff: memory_max_scope=global agent recalls the project-A fact in project B; the default (project) agent does not (F3, C3)",
-        "memory-scoping-03 fail-closed cell: multiuser enabled + resolved-empty userID hides user-scope rows while global rows stay visible (Flag 3)"
-      ],
-      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today — the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
     },
     {
       "name": "memory-layered-distill",
@@ -979,10 +932,38 @@
       "note": "plan-20261101-fresh-context-critic tree: fresh-context evidence critic (leaf 02), hostile second pass (leaf 03), contest path (leaf 04), zero-decision compile (leaf 05), interview option gates (leaf 06), daemon wiring + model slots (leaf 07). Self-contained fixtures over real StrategicPlanner + live harness daemon for the wiring scenario."
     },
     {
-      "name": "dynamic-tools",
-      "dir": "e2e/suites/dynamic-tools",
+      "name": "voice-lifecycle",
+      "dir": "e2e/suites/voice-lifecycle",
       "status": "implemented",
-      "note": "RED gate skeleton (branch 03 leaf 00T): compiles against current code; flag-off byte-identical control + capability-gate cases 1-4 fail RED for the missing capability-gate/exposure seam (no llm.CapFrontier tag, no warn-once downgrade, no episode-boundary restore yet). Starvation canary + cache-continuity cases are todo-marked (need the 01/04/05 impl seams: tool_search + predicted-budget promotion + the SetSchemaMode re-cache)."
+      "diff": "L",
+      "scenarios": [
+        "voice-boot-01 enabled boot arms voice routes; disabled boot arms nothing",
+        "voice-child-lazy-01 child binary NOT spawned at boot (zero calls, no control socket)",
+        "voice-webhook-media-01 signed call.initiated accepted 200, answer action placed, media start frame consumed by the splice",
+        "voice-inbound-lifecycle-SKIPPED full loop (greeting->prompt->say->hangup) blocked: leaf-14 inbound SessionSpawner never registry.Acquires, C1 setup router drops the talk-loop arm (named skip in the suite)"
+      ]
+    },
+    {
+      "name": "voice-bargein",
+      "dir": "e2e/suites/voice-bargein",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "voice-bargein-01 media-side interrupt clears ONLY the interrupted call's socket; the concurrent call's socket never sees clear",
+        "voice-bargein-c1-SKIPPED C1 interrupt -> talk-loop clear path blocked by the inbound registry-Acquire gap (named skip in the suite)"
+      ]
+    },
+    {
+      "name": "voice-concurrency",
+      "dir": "e2e/suites/voice-concurrency",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "voice-conc-01 two simultaneous inbound calls: both answered, both media splices armed, one child hosts both",
+        "voice-refusal-01 unresolvable child binary -> inbound webhook refused 5xx, no media session arms",
+        "voice-say-streams-SKIPPED concurrent say streams blocked by the inbound registry-Acquire gap (named skip in the suite)",
+        "voice-dup-target-SKIPPED duplicate-target + max_concurrent caps gate the OUTBOUND dialer path, not the inbound webhook (named skips; pinned by TestRegistryLimits/TestDialRefusals)"
+      ]
     }
   ],
   "scenarios": [
@@ -2683,7 +2664,7 @@
       "id": "naive-user-chat-05",
       "suite": "naive-user-chat",
       "diff": "M",
-      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge — the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge \u2014 the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
       "paths": [
         "internal/agent/loop.go",
         "internal/agent/reply_guard.go"
@@ -2806,7 +2787,7 @@
       "id": "plan-lifecycle-02",
       "suite": "plan-lifecycle",
       "diff": "M",
-      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write — file parses at every observation",
+      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write \u2014 file parses at every observation",
       "paths": [
         "internal/plan/manager.go",
         "internal/plan/filelock.go",
@@ -3016,7 +2997,7 @@
       "id": "goal-completion-01",
       "suite": "goal-completion",
       "diff": "L",
-      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger — plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
+      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger \u2014 plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
       "paths": [
         "internal/employee/manager.go",
         "internal/employee/goal_loop.go",
@@ -3101,7 +3082,7 @@
       "id": "memory-turn-capture-02",
       "suite": "memory-turn-capture",
       "diff": "M",
-      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID — task reply reaches L0 + status=auto claim",
+      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID \u2014 task reply reaches L0 + status=auto claim",
       "paths": [
         "internal/daemon/memory_capture.go",
         "internal/agent/handler.go"
@@ -3299,7 +3280,7 @@
       "id": "github-pr-ci-04",
       "suite": "github-pr-ci",
       "diff": "M",
-      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline — the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
+      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline \u2014 the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
       "paths": [
         "internal/tools/builtin/github_ci.go",
         "internal/githubsvc/rearm.go",
@@ -3909,7 +3890,7 @@
       "id": "critic-wiring-06",
       "suite": "plan-critic",
       "diff": "M",
-      "title": "daemon wiring: a default-config live boot reports plans.fresh_critic_disabled / plans.hostile_critic_disabled / plans.interview_options_disabled as false (features ENABLED by default, 2026-11-02 operator decision), and the default models.json5 carries no enabled critic_model / hostile_critic_model slot (commented examples only); an explicit disable-key overlay still boots healthy",
+      "title": "daemon wiring: a default-config live boot reports plans.fresh_critic_enabled / plans.hostile_critic_enabled / plans.interview_option_gates as false, and the default models.json5 carries no enabled critic_model / hostile_critic_model slot (commented examples only); an explicitly-false overlay still boots healthy",
       "paths": [
         "internal/daemon/daemon.go",
         "internal/daemon/components.go",
@@ -3928,90 +3909,6 @@
       ]
     },
     {
-      "id": "memory-defaults-01",
-      "suite": "memory-defaults",
-      "diff": "M",
-      "title": "default-config boot: one completed turn records L0 lines in the day file, enqueues a memory.l1_extract job, and knowledge_search rides the executor tool list",
-      "paths": [
-        "internal/config/schema.go",
-        "internal/daemon/memory_capture.go",
-        "e2e/suites/memory-defaults"
-      ]
-    },
-    {
-      "id": "memory-defaults-02",
-      "suite": "memory-defaults",
-      "diff": "S",
-      "title": "meept config get reports all five memory knobs (l0_enabled, usefulness.enabled, epistemic.ambient_extraction.enabled, knowledge.enabled, bridges.enabled) true on a default boot",
-      "paths": [
-        "internal/config/schema.go",
-        "e2e/suites/memory-defaults"
-      ]
-    },
-    {
-      "id": "memory-defaults-03",
-      "suite": "memory-defaults",
-      "diff": "M",
-      "title": "stable/volatile recall split: the stable item renders under the Memory (standing) section and the volatile item stays inside the <memory-context> fence",
-      "paths": [
-        "internal/agent/loop.go",
-        "e2e/suites/memory-defaults"
-      ]
-    },
-    {
-      "id": "memory-defaults-04",
-      "suite": "memory-defaults",
-      "diff": "M",
-      "title": "recall telemetry: after a recall turn whose reply cites the injected memory, recall_outcomes.jsonl gains a row with the verbatim C5 key set, injected=true, cited=true",
-      "paths": [
-        "internal/memory/",
-        "e2e/suites/memory-defaults"
-      ]
-    },
-    {
-      "id": "memory-defaults-05",
-      "suite": "memory-defaults",
-      "diff": "S",
-      "title": "doctor visibility: meept doctor renders a memory-pipeline check naming l0/distill status against the scratch home",
-      "paths": [
-        "cmd/meept/doctor.go",
-        "e2e/suites/memory-defaults"
-      ]
-    },
-    {
-      "id": "memory-scoping-01",
-      "suite": "memory-scoping",
-      "diff": "M",
-      "title": "project isolation: a project-A fact is absent from a project-B session recall while a global-scope fact is recallable in both",
-      "paths": [
-        "internal/memory/",
-        "internal/agent/",
-        "e2e/suites/memory-scoping"
-      ]
-    },
-    {
-      "id": "memory-scoping-02",
-      "suite": "memory-scoping",
-      "diff": "M",
-      "title": "chief-of-staff: the memory_max_scope=global agent recalls the project-A fact from a project-B session; the default (project) agent does not",
-      "paths": [
-        "internal/agents/models.go",
-        "internal/agent/",
-        "e2e/suites/memory-scoping"
-      ]
-    },
-    {
-      "id": "memory-scoping-03",
-      "suite": "memory-scoping",
-      "diff": "M",
-      "title": "fail-closed cell (Flag 3): multiuser enabled + a resolved-empty userID hides user-scope rows while global rows stay visible",
-      "paths": [
-        "internal/memory/",
-        "internal/config/schema.go",
-        "e2e/suites/memory-scoping"
-      ]
-    },
-    {
       "id": "critic-compile-04",
       "suite": "plan-critic",
       "diff": "M",
@@ -4022,85 +3919,99 @@
       ]
     },
     {
-      "id": "kill9-resume-01",
-      "suite": "turn-journal",
-      "diff": "L",
-      "title": "kill -9 mid-turn -> restart over the same data dir -> resume at NEXT STEP: journaled step payloads byte-identical, executor counter advances, journal ends closed",
-      "paths": [
-        "internal/agent/turnjournal/journal.go",
-        "internal/agent/turnjournal/writer.go",
-        "internal/agent/turnjournal/rehydrate.go",
-        "internal/daemon/daemon.go"
-      ]
-    },
-    {
-      "id": "dedup-02",
-      "suite": "turn-journal",
-      "diff": "L",
-      "title": "no duplicate completion: a completed turn re-mounted after kill -9 never re-delivers queue.job.completed for the same job; completed queue rows stay completed; journal payloads unchanged",
-      "paths": [
-        "internal/queue/queue.go",
-        "internal/agent/turnjournal/replay.go",
-        "internal/daemon/daemon.go"
-      ]
-    },
-    {
-      "id": "quota-03",
-      "suite": "turn-journal",
+      "id": "voice-boot-01",
+      "suite": "voice-lifecycle",
       "diff": "M",
-      "title": "a QuotaResetError on the resumed step parks via the existing agent.quota_wait surface; the quota-failed step boundary stays un-completed in the journal (no run close for the parked step)",
+      "title": "[voice] enabled boot arms the voice routes (sidecar wired + routes armed log); disabled boot arms nothing",
       "paths": [
-        "internal/daemon/components.go",
-        "internal/agent/turnjournal/writer.go"
+        "internal/daemon/voice_wiring.go",
+        "internal/comm/http/voice.go"
       ]
     },
     {
-      "id": "flagoff-04",
-      "suite": "turn-journal",
-      "diff": "M",
-      "title": "flag-off legacy control: kill mid-turn -> the in-flight job re-runs live (executor counter advances); turnjournal.db never exists and no journal rows are written",
-      "paths": [
-        "internal/daemon/components.go",
-        "internal/config/schema.go"
-      ]
-    },
-    {
-      "id": "hitl-slack-01",
-      "suite": "hitl-notifications",
-      "diff": "L",
-      "title": "Slack round trip incl. late-click fail-closed: a signed interaction POSTed to /api/v1/slack/interactions resolves the pending permission with approver slack:<uid>; a click arriving after the relay timeout gets no pending request",
-      "paths": [
-        "internal/comm/slack/",
-        "internal/acp/",
-        "internal/daemon/slack_wiring.go"
-      ]
-    },
-    {
-      "id": "hitl-gate-02",
-      "suite": "hitl-notifications",
-      "diff": "L",
-      "title": "gate park -> restart -> resume: a ParkKindGate checkpoint survives a daemon restart and resumes exactly once on out-of-band approval",
-      "paths": [
-        "internal/agent/gate_park.go",
-        "internal/daemon/gate_park_wiring.go"
-      ]
-    },
-    {
-      "id": "hitl-deep-03",
-      "suite": "hitl-notifications",
+      "id": "voice-child-lazy-01",
+      "suite": "voice-lifecycle",
       "diff": "S",
-      "title": "deep-link web fallback substrate: the running daemon's web server serves the session page for the C6 fallback URL (<web base>/#/activity?session=<id>)",
+      "title": "[voice] the meept-voice child is NOT spawned at boot; EnsureRunning is lazy on first call",
       "paths": [
-        "internal/comm/web/server.go"
+        "internal/voice/childproc.go"
       ]
     },
     {
-      "id": "hitl-regime-04",
-      "suite": "hitl-notifications",
+      "id": "voice-webhook-media-01",
+      "suite": "voice-lifecycle",
       "diff": "M",
-      "title": "regime report generation: the hitl Runner runs the scripted scenario in all three regimes and the report JSON parses into HitlRegimeReport with every C7 field present; the markdown renders",
+      "title": "[voice] signed call.initiated accepted 200, answer action placed at the call-control API, media start frame consumed by the splice",
       "paths": [
-        "internal/eval/hitl/"
+        "internal/comm/http/voice.go",
+        "internal/voice/manager.go",
+        "internal/voice/splice.go"
+      ]
+    },
+    {
+      "id": "voice-inbound-lifecycle-skipped",
+      "suite": "voice-lifecycle",
+      "diff": "L",
+      "title": "[voice] full inbound loop (greeting->prompt->say->hangup) SKIPPED: leaf-14 inbound SessionSpawner never registry.Acquires, C1 setup router drops the talk-loop arm",
+      "paths": [
+        "internal/daemon/voice_wiring.go"
+      ]
+    },
+    {
+      "id": "voice-bargein-01",
+      "suite": "voice-bargein",
+      "diff": "M",
+      "title": "[voice] media-side interrupt clears ONLY the interrupted call's socket; the concurrent call's socket never sees clear",
+      "paths": [
+        "internal/voice/splice.go"
+      ]
+    },
+    {
+      "id": "voice-bargein-c1-skipped",
+      "suite": "voice-bargein",
+      "diff": "M",
+      "title": "[voice] C1 interrupt -> talk-loop clear path SKIPPED: blocked by the inbound registry-Acquire gap",
+      "paths": [
+        "internal/voice/talkloop.go",
+        "internal/daemon/voice_wiring.go"
+      ]
+    },
+    {
+      "id": "voice-conc-01",
+      "suite": "voice-concurrency",
+      "diff": "M",
+      "title": "[voice] two simultaneous inbound calls: both answered, both media splices armed, one child hosts both",
+      "paths": [
+        "internal/voice/childproc.go",
+        "internal/voice/splice.go"
+      ]
+    },
+    {
+      "id": "voice-refusal-01",
+      "suite": "voice-concurrency",
+      "diff": "S",
+      "title": "[voice] unresolvable child binary -> inbound webhook refused 5xx, no media session arms",
+      "paths": [
+        "internal/voice/manager.go",
+        "internal/comm/http/voice.go"
+      ]
+    },
+    {
+      "id": "voice-say-streams-skipped",
+      "suite": "voice-concurrency",
+      "diff": "M",
+      "title": "[voice] concurrent say streams SKIPPED: blocked by the inbound registry-Acquire gap (talk loops cannot arm inbound)",
+      "paths": [
+        "internal/voice/talkloop.go"
+      ]
+    },
+    {
+      "id": "voice-dup-target-skipped",
+      "suite": "voice-concurrency",
+      "diff": "S",
+      "title": "[voice] duplicate-target + max_concurrent caps gate the OUTBOUND dialer, not the inbound webhook (named skips; pinned by TestRegistryLimits/TestDialRefusals)",
+      "paths": [
+        "internal/voice/dial.go"
       ]
     }
   ]

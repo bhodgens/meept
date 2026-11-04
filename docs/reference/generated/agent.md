@@ -1505,10 +1505,8 @@ Package agent provides the agent loop and related components.
 - [type SemanticIndex](<#SemanticIndex>)
   - [func NewSemanticIndex\(client EmbeddingClient\) \*SemanticIndex](<#NewSemanticIndex>)
   - [func \(idx \*SemanticIndex\) BuildIndex\(ctx context.Context\) error](<#SemanticIndex.BuildIndex>)
-  - [func \(idx \*SemanticIndex\) BuildIndexWithCancel\(ctx context.Context\) \(cancel context.CancelFunc, err error\)](<#SemanticIndex.BuildIndexWithCancel>)
   - [func \(idx \*SemanticIndex\) IsReady\(\) bool](<#SemanticIndex.IsReady>)
   - [func \(idx \*SemanticIndex\) Match\(input string, minConfidence float64\) \*SemanticMatch](<#SemanticIndex.Match>)
-  - [func \(idx \*SemanticIndex\) Stop\(\)](<#SemanticIndex.Stop>)
 - [type SemanticMatch](<#SemanticMatch>)
 - [type SessionBeforeCompactData](<#SessionBeforeCompactData>)
 - [type SessionBeforeTreeData](<#SessionBeforeTreeData>)
@@ -2515,6 +2513,8 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	
 	    "ask":             "send_message",
 	    "request_handoff": "send_message",
+	
+	    "voice_call": "voice_call",
 	
 	    "pdf_read": ToolFileRead,
 	
@@ -15946,13 +15946,6 @@ NewSemanticIndex creates a new semantic index.
 
 BuildIndex pre\-computes embeddings for all intent definitions.
 
-<a name="SemanticIndex.BuildIndexWithCancel"></a>
-### func \(\*SemanticIndex\) BuildIndexWithCancel
-
-	func (idx *SemanticIndex) BuildIndexWithCancel(ctx context.Context) (cancel context.CancelFunc, err error)
-
-BuildIndexWithCancel is like BuildIndex but returns a cancellation function so callers can shut down the background goroutine cleanly.
-
 <a name="SemanticIndex.IsReady"></a>
 ### func \(\*SemanticIndex\) IsReady
 
@@ -15966,13 +15959,6 @@ IsReady returns true if the index is built and ready.
 	func (idx *SemanticIndex) Match(input string, minConfidence float64) *SemanticMatch
 
 Match finds the best matching intent by semantic similarity.
-
-<a name="SemanticIndex.Stop"></a>
-### func \(\*SemanticIndex\) Stop
-
-	func (idx *SemanticIndex) Stop()
-
-Stop cancels the background build\-index goroutine \(if any\) and waits for it to exit, preventing goroutine leaks. AGENT\-10 FIX
 
 <a name="SemanticMatch"></a>
 ## type SemanticMatch

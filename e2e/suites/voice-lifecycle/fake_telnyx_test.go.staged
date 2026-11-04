@@ -1,0 +1,59 @@
+//go:build e2e
+
+// fakeTelnyx is the hermetic Telnyx stand-in for the voice-lifecycle suite:
+// a signed-webhook httptest server (deliveries INTO the daemon's voice
+// route) plus a media websocket endpoint, recording every call-control call
+// the daemon makes and proxying C1 text frames between daemon and fake
+// child. Owned by leaf 15's activation; shape pinned here by leaf 00T.
+package voicelifecycle
+
+import (
+	"net/http"
+	"testing"
+	"time"
+)
+
+// c1Frame is the C1 daemon->child say frame the suite asserts on.
+type c1Frame struct {
+	CallID string `json:"call_id"`
+	Event  string `json:"event"`
+	Text   string `json:"text"`
+	Last   *bool  `json:"last"`
+}
+
+type fakeTelnyx struct {
+	srv *http.Server
+}
+
+func newFakeTelnyx(t *testing.T) *fakeTelnyx {
+	t.Helper()
+	return &fakeTelnyx{}
+}
+
+func (f *fakeTelnyx) baseURL() string      { return "" } // pinned by leaf 15 wiring
+func (f *fakeTelnyx) streamURL() string    { return "" } // pinned by leaf 15 wiring
+func (f *fakeTelnyx) publicKeyB64() string { return "" } // pinned by leaf 15 wiring
+
+func (f *fakeTelnyx) deliverCallInitiated(t *testing.T, s interface{ HTTPBaseURL() string }, ccid, from, to, direction string) {
+	t.Helper()
+}
+
+func (f *fakeTelnyx) deliverHangup(t *testing.T, s interface{ HTTPBaseURL() string }, ccid string) {
+	t.Helper()
+}
+
+func (f *fakeTelnyx) deliverCallInitiatedExpectStatus(t *testing.T, s interface{ HTTPBaseURL() string }, ccid, from, to, direction string) int {
+	t.Helper()
+	return 0
+}
+
+func (f *fakeTelnyx) awaitAnswered(t *testing.T, ccid string, within time.Duration)                        { t.Helper() }
+func (f *fakeTelnyx) awaitChildFrame(t *testing.T, ccid, event string, within time.Duration) c1Frame       { t.Helper(); return c1Frame{} }
+func (f *fakeTelnyx) awaitSayContaining(t *testing.T, ccid string, within time.Duration)                   { t.Helper() }
+func (f *fakeTelnyx) awaitClearFrame(t *testing.T, ccid string, within time.Duration)                      { t.Helper() }
+func (f *fakeTelnyx) awaitChildStop(t *testing.T, ccid string, within time.Duration)                       { t.Helper() }
+func (f *fakeTelnyx) assertNoAnswer(t *testing.T, ccid string, within time.Duration)                       { t.Helper() }
+func (f *fakeTelnyx) childSendsPrompt(t *testing.T, ccid, text string, last bool)                          { t.Helper() }
+func (f *fakeTelnyx) childSendsInterrupt(t *testing.T, ccid string)                                        { t.Helper() }
+func (f *fakeTelnyx) sayFrameCount(t *testing.T, ccid string) int                                          { t.Helper(); return 0 }
+func (f *fakeTelnyx) sayFrameCountAfterClear(t *testing.T, ccid string) int                                { t.Helper(); return 0 }

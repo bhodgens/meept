@@ -1,0 +1,229 @@
+package voice
+
+// Gate tests for contract C9 (master.md) + leaf 11 shapes: typed refusals
+// BEFORE any HTTP call, reserve-then-dial effect ordering, retry of the same
+// request_id never rings twice, and no-answer timeout release.
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/caimlas/meept/internal/voice/telnyx"
+)
+
+// countingController is a CallController fake that counts DialOuts and can
+// be pointed at an httptest server.
+type countingController struct {
+	mu     sync.Mutex
+	dials  int
+	failDV bool
+}
+
+func (c *countingController) DialOut(_ context.Context, _, _, _ string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.failDV {
+		return "", errors.New("dial failed")
+	}
+	c.dials++
+	return "cc-dial-" + time.Now().Format("150405.000000000"), nil
+}
+
+func (c *countingController) AnswerCall(_ context.Context, _ string) error { return nil }
+func (c *countingController) StartStreaming(_ context.Context, _, _ string, _ telnyx.Codec) error {
+	return nil
+}
+func (c *countingController) HangupCall(_ context.Context, _ string) error { return nil }
+
+func (c *countingController) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.dials
+}
+
+// zeroRequestServer fails the test if ANY http request arrives. Refusals
+// must fire BEFORE any HTTP call.
+func zeroRequestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Errorf("HTTP request reached the server on a refusal path; refusals must fire BEFORE any call")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+}
+
+func dialConfig() DialConfig {
+	return DialConfig{
+		Enabled:         true,
+		AllowedNumbers:  []string{"+15551230001"},
+		PublicStreamURL: "wss://tunnel.example/media",
+		ConnectionID:    "conn-1",
+		FromNumber:      "+15551239999",
+		TimeoutSecs:     30,
+	}
+}
+
+// TestDialRefusals pins C9/leaf 11: every policy gate returns a typed error
+// (ErrVoiceDisabled, ErrNumberNotAllowed, ErrNoPublicURL, ErrNoConnectionID)
+// BEFORE any HTTP call - the httptest server asserts zero requests.
+func TestDialRefusals(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*DialConfig)
+		wantErr error
+	}{
+		{"voice disabled", func(c *DialConfig) { c.Enabled = false }, ErrVoiceDisabled},
+		{"target not allowed", func(c *DialConfig) { c.AllowedNumbers = nil }, ErrNumberNotAllowed},
+		{"empty public url", func(c *DialConfig) { c.PublicStreamURL = "" }, ErrNoPublicURL},
+		{"empty connection id", func(c *DialConfig) { c.ConnectionID = "" }, ErrNoConnectionID},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := zeroRequestServer(t)
+			defer srv.Close()
+
+			cfg := dialConfig()
+			tc.mutate(&cfg)
+			cfg.TestBaseURL = srv.URL
+
+			reg := NewRegistry(4)
+			d := NewDialer(cfg, &countingController{}, nil, reg, newTestLedger(t), nil, testLogger())
+			_, err := d.Dial(context.Background(), DialRequest{
+				EmployeeID: "emp-1", Target: "+15551230001", RequestID: "req-refusal-1",
+			})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Dial error = %v, want %v (typed refusal)", err, tc.wantErr)
+			}
+		})
+	}
+
+	// No slot: registry cap 0 -> ErrBusy passthrough.
+	srv := zeroRequestServer(t)
+	defer srv.Close()
+	cfg := dialConfig()
+	cfg.TestBaseURL = srv.URL
+	reg := NewRegistry(0)
+	d := NewDialer(cfg, &countingController{}, nil, reg, newTestLedger(t), nil, testLogger())
+	_, err := d.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-1", Target: "+15551230001", RequestID: "req-refusal-2",
+	})
+	if !errors.Is(err, ErrBusy) {
+		t.Errorf("over-cap dial error = %v, want ErrBusy", err)
+	}
+
+	// Duplicate live target: same target twice globally -> ErrDuplicateTarget.
+	srv2 := zeroRequestServer(t)
+	defer srv2.Close()
+	reg2 := NewRegistry(4)
+	if _, err := reg2.Acquire("cc-live-1", "emp-2", "+15551230009"); err != nil {
+		t.Fatalf("seed acquire: %v", err)
+	}
+	cfg2 := dialConfig()
+	cfg2.TestBaseURL = srv2.URL
+	d2 := NewDialer(cfg2, &countingController{}, nil, reg2, newTestLedger(t), nil, testLogger())
+	_, err = d2.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-3", Target: "+15551230009", RequestID: "req-refusal-3",
+	})
+	if !errors.Is(err, ErrDuplicateTarget) {
+		t.Errorf("duplicate live target error = %v, want ErrDuplicateTarget (one live call per target globally)", err)
+	}
+}
+
+// TestDialEffectsIdempotent pins C9 verbatim: the effect keyed
+// (employee_id, target, request_id) is reserved BEFORE the POST; a retry of
+// the same request_id does NOT dial twice (zero additional POSTs).
+func TestDialEffectsIdempotent(t *testing.T) {
+	tel := &countingController{}
+	cfg := dialConfig()
+	reg := NewRegistry(4)
+	ledger := newTestLedger(t)
+	d := NewDialer(cfg, tel, nil, reg, ledger, nil, testLogger())
+
+	req := DialRequest{EmployeeID: "emp-1", Target: "+15551230001", RequestID: "req-idem-1"}
+
+	res1, err := d.Dial(context.Background(), req)
+	if err != nil {
+		t.Fatalf("first Dial: %v", err)
+	}
+	if got := tel.count(); got != 1 {
+		t.Fatalf("first dial count = %d, want 1", got)
+	}
+
+	res2, err := d.Dial(context.Background(), req)
+	if err != nil {
+		t.Fatalf("retry Dial: %v", err)
+	}
+	if got := tel.count(); got != 1 {
+		t.Errorf("dial count after retry = %d, want 1 (retry never rings twice)", got)
+	}
+	if res2.CallControlID != res1.CallControlID {
+		t.Errorf("retry returned ccid %q, want the reserved result %q", res2.CallControlID, res1.CallControlID)
+	}
+}
+
+// TestDialOrdering pins C9 ordering: the audit row (direction outgoing,
+// target) is written BEFORE DialOut, and a POST failure completes the
+// effect with its failed outcome (no leaked reservation).
+func TestDialOrdering(t *testing.T) {
+	failing := &countingController{failDV: true}
+	cfg := dialConfig()
+	reg := NewRegistry(4)
+	ledger := newCaptureLedger(t)
+	audit := &captureAudit{}
+	d := NewDialer(cfg, failing, nil, reg, ledger, audit, testLogger())
+
+	_, err := d.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-1", Target: "+15551230001", RequestID: "req-order-1",
+	})
+	if err == nil {
+		t.Fatalf("dial with failing controller succeeded, want error")
+	}
+
+	if audit.rowsCount() == 0 {
+		t.Errorf("no audit row written (C9: audit row (direction outgoing, target) BEFORE DialOut)")
+	}
+	if leaked := ledger.pending(); leaked != 0 {
+		t.Errorf("%d effect reservations leaked after dial failure, want 0 (failed dial completes its effect)", leaked)
+	}
+}
+
+// TestOutboundTimeoutRelease pins the no-answer release: with the call never
+// answered, the timer fires at timeout_secs and the registry slot is freed
+// with outcome no_answer (master Test Gate: unanswered outbound releases
+// slot + unparks goal).
+func TestOutboundTimeoutRelease(t *testing.T) {
+	tel := &countingController{}
+	cfg := dialConfig()
+	cfg.TimeoutSecs = 1 // test-scale
+	reg := NewRegistry(4)
+	d := NewDialer(cfg, tel, nil, reg, newTestLedger(t), &captureAudit{}, testLogger())
+
+	res, err := d.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-1", Target: "+15551230001", RequestID: "req-timeout-1",
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+
+	// While waiting: the target is occupied.
+	if _, err := reg.Acquire("cc-probe", "emp-9", "+15551230001"); !errors.Is(err, ErrDuplicateTarget) {
+		t.Errorf("target not marked live during pending dial: %v, want ErrDuplicateTarget", err)
+	}
+
+	select {
+	case <-res.Done:
+		// terminal: no-answer path completed
+	case <-time.After(10 * time.Second):
+		t.Fatalf("dial never reached terminal state within timeout window")
+	}
+
+	// After no-answer: the slot is freed (acquire for the same target succeeds).
+	if _, err := reg.Acquire("cc-after", "emp-9", "+15551230001"); err != nil {
+		t.Errorf("target still occupied after no-answer timeout: %v, want slot released", err)
+	}
+	reg.Release("cc-after")
+}

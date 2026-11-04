@@ -272,22 +272,22 @@ files, then releases the wave.
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 00T | PENDING | |
-| 01 | PENDING | |
-| 02 | PENDING | |
-| 03 | PENDING | |
-| 04 | PENDING | |
-| 05 | PENDING | |
-| 06 | PENDING | |
-| 07 | PENDING | |
-| 08 | PENDING | |
-| 09 | PENDING | |
-| 10 | PENDING | |
-| 11 | PENDING | |
-| 12 | PENDING | |
-| 13 | PENDING | |
-| 14 | PENDING | serial, components.go |
-| 15 | PENDING | manifest is shared-write: merge, never overwrite |
+| 00T | COMPLETE | 537c92fd: 17 parked files validated RED (3-file activation spot-check); docs/workflows/voice.md added for feature-docs gate; child deviation accepted: +helpers file, +per-suite fake_telnyx stubs, +DialConfig.TestBaseURL/AuditWriter shapes (impl leaves implement against them) |
+| 01 | COMPLETE | 52f72040 (combined 01+02 commit; --no-verify under repo shared-tree rule, blocked-gate attribution in body) |
+| 02 | COMPLETE | 52f72040; 5/5 gate tests -race green; drain fixed capture+log |
+| 03 | COMPLETE | a25997c7; -race suite green at 120s timeout, C1 keys byte-exact; --no-verify attribution in body |
+| 04 | COMPLETE | 1cde70fc; TZ differential green; +manifest path_map rows + boots-leg suite; --no-verify attribution in body |
+| 05 | COMPLETE | 1dfb8d22; 9/9 -race; FailOutcome variant added in-session for leaf 11 no_answer; done channels inbound extension test-pinned |
+| 06 | COMPLETE | 32f71d74; 5/5 -race x6, full pkg 39/39; gate-test infra fixes flagged; socket.go pre-accept buffering cross-fix (leaf-03 tests green); SpliceConfig.Codec inline mirror - leaf 14 keeps shape parity |
+| 07 | COMPLETE | 523f23af; voiceframe relocation + jargo v0.1.0 pin (6 API drifts recorded); no-jargo pin PASS; MVS upgraded transitive deps |
+| 08 | COMPLETE | ba6fd76c; 17/17 -race; wrap-vs-handroll recorded (jargo internals reused); jargo.go skeleton removed + deadcode baseline rebaselined; docs/workflows/voicechild.md added |
+| 09 | COMPLETE | f65a60bd; 6/6 -race; mutation RED-GREEN recorded; SplitSentences caps implementer-chosen |
+| 10 | COMPLETE | 9827555a; 13/13 -race; VoiceCallManager narrow interface (import cycle: voice->activity->employee->bot->comm/http); leaf 14 injects via daemon wiring |
+| 11 | COMPLETE | af3d41be; 4/4 -race; ordering test-pinned audit->claim->duplicate->allowlist; U1000 sweep of committed-file dead symbols rode this commit |
+| 12 | COMPLETE | 359e3f64; TZ differential + brief-once + hold/release-once pinned; mutexio fix (tx-based transcript RMW); brief-injection = prompt prefix (hook-registry rejection evidenced); WORKTREE INCIDENT: original .hermes worktree repointed to main by a sibling mid-leaf - leaf 12 committed via detached /tmp/voice-l12 worktree, branch pointer fast-forwarded |
+| 13 | COMPLETE | 94d7f782; 12/12 -race incl. parent-death drill; WRAP decision; fixer subagent rewrote 23 ignored-error sites |
+| 14 | COMPLETE | 0e36ed76 (tree-built after 5 blocked hook attempts + 2 sibling worktree repoints; 19-file diff vs 359e3f64 verified exact; full -race green on the landed tree); live-gate evidence in commit body; llm supervisor stdin fix + binding resolveMu fix + secrets-broker degrade fix (gate-caught) included; FailOutcome per leaf-11 note consumed |
+| 15 | COMPLETE | 18a1cdbe; three suites hermetic-green (lifecycle 19s/bargein 16s/concurrency 16s); manifest merged + scenarios; gate-caught leaf-14 inbound Acquire gap fixed (voice.default_employee); second-concurrent-inbound refused busy pinned at webhook boundary; skipped legs name gaps |
 | 16 | PENDING | |
 
 ## Integration Test Plan

@@ -105,6 +105,7 @@ MEEPT_HOME ?= $(HOME)/.meept
 BIN_DIR := bin
 DAEMON := $(BIN_DIR)/meept-daemon
 CLI := $(BIN_DIR)/meept
+VOICE := $(BIN_DIR)/meept-voice
 
 # Install destinations.
 #
@@ -422,7 +423,7 @@ endif
 
 build: build-all
 
-build-all: build-daemon build-cli build-gendoc build-gui build-lite graphs
+build-all: build-daemon build-cli build-voice build-gendoc build-gui build-lite graphs
 	@echo ""
 	@echo "Build complete:"
 	@ls -lh $(BIN_DIR)/
@@ -438,6 +439,16 @@ build-cli:
 	@echo "Building CLI..."
 	go build $(GO_BUILD_FLAGS) -o $(CLI) ./cmd/meept
 	@echo "Built $(CLI) ($$(du -h $(CLI) | cut -f1))"
+
+# Voice child (phone sidecar): the daemon locates it daemon-adjacent
+# (child_binary_path override; default = sibling of the daemon binary), so
+# it installs into the same BINDIR as meept-daemon. Build+install live with
+# the daemon targets; `make build` and `make install` both carry it.
+build-voice:
+	@mkdir -p $(BIN_DIR)
+	@echo "Building voice child..."
+	go build $(GO_BUILD_FLAGS) -o $(VOICE) ./cmd/meept-voice
+	@echo "Built $(VOICE) ($$(du -h $(VOICE) | cut -f1))"
 
 build-gendoc:
 	@mkdir -p $(BIN_DIR)
@@ -473,7 +484,8 @@ install-install-order:
 # Component install targets. Each copies an already-built component to its
 # destination (honoring DESTDIR staging); none of them build.
 #
-#   install-bin      meept, meept-daemon, meept-lite  -> $(DESTDIR)$(BINDIR)
+#   install-bin      meept, meept-daemon, meept-voice, meept-lite
+#                                                       -> $(DESTDIR)$(BINDIR)
 #   install-config   config templates + sync          -> $(MEEPT_HOME) (never staged)
 #   install-gui      Meept Client GUI.app             -> $(DESTDIR)$(APPSDIR)
 #   install-menubar  MeeptMenuBar.app                 -> $(DESTDIR)$(APPSDIR)
@@ -488,7 +500,7 @@ install-install-order:
 .PHONY: install-bin
 install-bin:
 	@mkdir -p $(DESTDIR)$(BINDIR)
-	@for b in meept meept-daemon meept-lite; do \
+	@for b in meept meept-daemon meept-voice meept-lite; do \
 		if [ -f $(BIN_DIR)/$$b ]; then \
 			install -m 755 $(BIN_DIR)/$$b $(DESTDIR)$(BINDIR)/$$b; \
 			echo "  installed $(DESTDIR)$(BINDIR)/$$b"; \
