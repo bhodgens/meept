@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/caimlas/meept/internal/skills"
 )
 
@@ -423,4 +425,136 @@ func TestWriterArchivePrunesSHAIndex(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "skill-new", "SKILL.md")); err != nil {
 		t.Errorf("skill-new should exist after post-archive write: %v", err)
 	}
+}
+
+// TestWriterOriginStampAndRoundTrip verifies the C2 frontmatter round-trip:
+// a stamped write persists `origin: <o>` into the SKILL.md frontmatter,
+// the key reads back through the SkillMetadata yaml tag, and the bare
+// WriteSkill path stays byte-stable (no origin key, omitempty).
+func TestWriterOriginStampAndRoundTrip(t *testing.T) {
+	const base = "---\nname: origin-skill\ndescription: origin fixture\n---\n\nbody line\n"
+
+	// Stamped write persists the key; body and other keys preserved.
+	t.Run("stamped write persists origin key", func(t *testing.T) {
+		dir := t.TempDir()
+		w := NewWriter(dir, nil)
+		if err := w.WriteSkillWithOrigin("origin-skill", base, OriginAgent); err != nil {
+			t.Fatalf("WriteSkillWithOrigin: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "origin-skill", "SKILL.md"))
+		if err != nil {
+			t.Fatalf("read written skill: %v", err)
+		}
+		text := string(data)
+		for _, want := range []string{"origin: agent", "name: origin-skill", "description: origin fixture", "body line"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("written skill missing %q:\n%s", want, text)
+			}
+		}
+	})
+
+	// The key round-trips through SkillMetadata's yaml tag (the same tag
+	// parseMetadata unmarshals into, so the parser reads it back).
+	t.Run("frontmatter reparses origin into SkillMetadata", func(t *testing.T) {
+		dir := t.TempDir()
+		w := NewWriter(dir, nil)
+		if err := w.WriteSkillWithOrigin("origin-skill", base, OriginEvolver); err != nil {
+			t.Fatalf("WriteSkillWithOrigin: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "origin-skill", "SKILL.md"))
+		if err != nil {
+			t.Fatalf("read written skill: %v", err)
+		}
+		// Isolate the frontmatter block exactly as the parser's
+		// splitFrontmatter would hand it to yaml.Unmarshal.
+		text := string(data)
+		rest := strings.TrimPrefix(text, "---\n")
+		idx := strings.Index(rest, "\n---")
+		if idx < 0 {
+			t.Fatalf("unterminated frontmatter:\n%s", text)
+		}
+		frontmatter := rest[:idx]
+		var meta skills.SkillMetadata
+		if err := yaml.Unmarshal([]byte(frontmatter), &meta); err != nil {
+			t.Fatalf("reparse frontmatter: %v", err)
+		}
+		if meta.Origin != "evolver" {
+			t.Errorf("repaired origin = %q, want %q (frontmatter: %s)", meta.Origin, "evolver", frontmatter)
+		}
+	})
+
+	// Re-stamping replaces the key in place (idempotent, no duplication).
+	t.Run("re-stamp replaces existing origin key", func(t *testing.T) {
+		dir := t.TempDir()
+		w := NewWriter(dir, nil)
+		if err := w.WriteSkillWithOrigin("origin-skill", base, OriginAgent); err != nil {
+			t.Fatalf("first WriteSkillWithOrigin: %v", err)
+		}
+		if err := w.WriteSkillWithOrigin("origin-skill", base, OriginUser); err != nil {
+			t.Fatalf("second WriteSkillWithOrigin: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "origin-skill", "SKILL.md"))
+		if err != nil {
+			t.Fatalf("read re-stamped skill: %v", err)
+		}
+		text := string(data)
+		if !strings.Contains(text, "origin: user") || strings.Contains(text, "origin: agent") {
+			t.Errorf("re-stamp did not replace the origin key:\n%s", text)
+		}
+		if n := strings.Count(text, "origin:"); n != 1 {
+			t.Errorf("expected exactly one origin key, found %d:\n%s", n, text)
+		}
+	})
+
+	// Legacy byte-stability: bare WriteSkill == WithOrigin(unknown) writes
+	// the content untouched — no origin key may appear.
+	t.Run("bare WriteSkill stays byte-stable", func(t *testing.T) {
+		dir := t.TempDir()
+		w := NewWriter(dir, nil)
+		if err := w.WriteSkill("origin-legacy", base); err != nil {
+			t.Fatalf("WriteSkill: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "origin-legacy", "SKILL.md"))
+		if err != nil {
+			t.Fatalf("read written skill: %v", err)
+		}
+		if string(data) != base {
+			t.Errorf("bare WriteSkill altered content:\ngot:  %s\nwant: %s", data, base)
+		}
+		if strings.Contains(string(data), "origin:") {
+			t.Errorf("bare WriteSkill must not stamp an origin key:\n%s", data)
+		}
+	})
+
+	// Change notifier: fires once per successful write, not on dedup-skip,
+	// nil-safe when unset.
+	t.Run("change notifier fires on write only", func(t *testing.T) {
+		dir := t.TempDir()
+		w := NewWriter(dir, nil)
+		var fired []string
+		w.SetChangeNotifier(func(name string) { fired = append(fired, name) })
+
+		identical := "---\nname: dup-a\ndescription: dup\n---\n\ndup body\n"
+		if err := w.WriteSkillWithOrigin("dup-a", identical, OriginAgent); err != nil {
+			t.Fatalf("first write: %v", err)
+		}
+		if err := w.WriteSkillWithOrigin("dup-b", identical, OriginAgent); err == nil {
+			t.Fatal("dedup: second write with identical content should be rejected")
+		}
+		if err := w.WriteSkillWithOrigin("dup-c", "---\nname: dup-c\ndescription: distinct\n---\n\nbody\n", OriginUser); err != nil {
+			t.Fatalf("third write: %v", err)
+		}
+		if len(fired) != 2 || fired[0] != "dup-a" || fired[1] != "dup-c" {
+			t.Errorf("notifier fired for %v, want [dup-a dup-c]", fired)
+		}
+
+		// nil-safe: clearing the notifier makes writes quiet.
+		w.SetChangeNotifier(nil)
+		if err := w.WriteSkillWithOrigin("dup-d", "---\nname: dup-d\ndescription: quiet\n---\n\nbody\n", OriginAgent); err != nil {
+			t.Fatalf("fourth write: %v", err)
+		}
+		if len(fired) != 2 {
+			t.Errorf("nil notifier must not fire (still %v)", fired)
+		}
+	})
 }

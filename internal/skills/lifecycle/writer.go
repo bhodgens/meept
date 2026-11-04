@@ -49,6 +49,13 @@ type Writer struct {
 	shaMu     sync.Mutex
 	shaIndex  map[string]string // content_sha → skill_name
 	shaLoaded bool              // tracks whether shaIndex has been loaded from disk
+
+	// notifierMu guards changeNotifier, which the daemon assigns from its
+	// wiring goroutine (SetChangeNotifier) while tool-call goroutines read
+	// it on every write. The lock is held only for the assignment/return,
+	// never across I/O.
+	notifierMu     sync.Mutex
+	changeNotifier func(skillName string)
 }
 
 // TierResolver locates the discovery tier holding a named skill. It is
@@ -129,6 +136,32 @@ func (w *Writer) SetVersioner(v *Versioner) {
 	}
 }
 
+// SetChangeNotifier installs a post-write notification hook. After every
+// successful skill write (WriteSkill / WriteSkillWithOrigin, which is the
+// single funnel the agent tools, evolver, and CLI manual paths route
+// through), the hook is called with the affected skill name so the daemon
+// can mark its in-memory skill index dirty (C1 MarkDirty) and refresh on
+// the next turn. A nil argument clears the hook (no-op path); when no
+// notifier is set, writes are simply unannounced. The hook runs AFTER the
+// file write succeeds and BEFORE the method returns; it is expected to be
+// cheap and non-blocking (index-flag semantics, no I/O).
+func (w *Writer) SetChangeNotifier(fn func(skillName string)) {
+	w.notifierMu.Lock()
+	w.changeNotifier = fn
+	w.notifierMu.Unlock()
+}
+
+// notifyChange fires the post-write hook if one is set (nil-safe: the
+// hook is snapshotted under the guard lock and invoked outside it).
+func (w *Writer) notifyChange(name string) {
+	w.notifierMu.Lock()
+	fn := w.changeNotifier
+	w.notifierMu.Unlock()
+	if fn != nil {
+		fn(name)
+	}
+}
+
 // legacySkillPath returns <skillsDir>/<name>/SKILL.md — the Writer's own
 // root, used for new skills and legacy layouts.
 func (w *Writer) legacySkillPath(name string) string {
@@ -195,9 +228,34 @@ func (w *Writer) skillPath(name string) string {
 // persistent index (skillsDir/.sha-index.json). If the hash matches a different
 // skill that already has identical content, WriteSkill returns
 // ErrDuplicateContent and does not write.
+//
+// WriteSkill is the bare, un-stamped write path: it delegates to
+// WriteSkillWithOrigin(OriginUnknown), which leaves the content byte-stable
+// (the omitempty origin key is not written for OriginUnknown) so legacy
+// frontmatter round-trips unchanged.
 func (w *Writer) WriteSkill(name, content string) error {
+	return w.WriteSkillWithOrigin(name, content, OriginUnknown)
+}
+
+// WriteSkillWithOrigin is the origin-aware write path. It stamps `origin: <o>`
+// into the SKILL.md frontmatter before the atomic write when o is not
+// OriginUnknown (creating or replacing the key, preserving every other byte),
+// and fires the post-write change notifier (SetChangeNotifier) with name once
+// the write succeeds, so the daemon can mark its skill index dirty (C1).
+//
+// The full doc + semantics of WriteSkill apply (atomic write, version
+// snapshot, duplicate detection, registry re-parse).
+func (w *Writer) WriteSkillWithOrigin(name string, content string, o Origin) error {
 	if name == "" {
 		return fmt.Errorf("writer: skill name is required")
+	}
+
+	if o != OriginUnknown {
+		stamped, err := stampSkillOrigin(name, content, o)
+		if err != nil {
+			return fmt.Errorf("writer: stamp origin %q: %w", o, err)
+		}
+		content = stamped
 	}
 
 	targetPath := w.skillPath(name)
@@ -274,8 +332,59 @@ func (w *Writer) WriteSkill(name, content string) error {
 		}
 	}
 
-	w.logger.Info("Skill written", "name", name, "path", targetPath)
+	w.logger.Info("Skill written", "name", name, "path", targetPath, "origin", string(o))
+
+	// The on-disk skill set changed: announce it so the daemon's index
+	// (C1 MarkDirty) refreshes on the next turn. No-op when unset.
+	w.notifyChange(name)
 	return nil
+}
+
+// stampSkillOrigin injects the `origin: <o>` key into the SKILL.md
+// frontmatter, byte-preserving everything else. Idempotent: an existing
+// top-level origin line is replaced. A missing frontmatter block gets a
+// minimal one (name + origin); an empty block (--- ---) gets the key
+// alone.
+func stampSkillOrigin(name, content string, o Origin) (string, error) {
+	newKey := "origin: " + string(o)
+
+	if !strings.HasPrefix(content, "---\n") {
+		// No frontmatter: create a minimal block. The parser is lenient
+		// (frontmatter optional), so the stamped file still round-trips.
+		return "---\nname: " + name + "\n" + newKey + "\n---\n\n" + content, nil
+	}
+
+	rest := strings.TrimPrefix(content, "---\n")
+
+	var block, after string
+	if strings.HasPrefix(rest, "---") {
+		// Empty frontmatter block: no metadata lines to preserve.
+		after = rest[len("---"):]
+	} else if idx := strings.Index(rest, "\n---"); idx >= 0 {
+		block = rest[:idx]
+		after = rest[idx+len("\n---"):]
+	} else {
+		return "", fmt.Errorf("unterminated frontmatter block in skill %q", name)
+	}
+
+	// Drop any existing top-level origin line, keep every other byte.
+	var lines []string
+	for _, l := range strings.Split(block, "\n") {
+		if l == "origin:" || strings.HasPrefix(l, "origin: ") {
+			continue
+		}
+		lines = append(lines, l)
+	}
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1] // the trailing newline's empty fragment
+	}
+	stampedBlock := ""
+	if len(lines) > 0 {
+		stampedBlock = strings.Join(lines, "\n") + "\n"
+	}
+	stampedBlock += newKey + "\n"
+
+	return "---\n" + stampedBlock + "---" + after, nil
 }
 
 // checkDuplicate returns (existingSkillName, true) if the content SHA matches

@@ -141,7 +141,7 @@ func (t *SkillCreateTool) Execute(ctx context.Context, args map[string]any) (any
 		return nil, fmt.Errorf("skills writer unavailable")
 	}
 
-	if err := t.writer.WriteSkill(name, content); err != nil {
+	if err := t.writer.WriteSkillWithOrigin(name, content, lifecycle.OriginAgent); err != nil {
 		return nil, fmt.Errorf("write skill %q: %w", name, err)
 	}
 
