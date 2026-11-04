@@ -287,7 +287,7 @@ files, then releases the wave.
 | 12 | COMPLETE | 359e3f64; TZ differential + brief-once + hold/release-once pinned; mutexio fix (tx-based transcript RMW); brief-injection = prompt prefix (hook-registry rejection evidenced); WORKTREE INCIDENT: original .hermes worktree repointed to main by a sibling mid-leaf - leaf 12 committed via detached /tmp/voice-l12 worktree, branch pointer fast-forwarded |
 | 13 | COMPLETE | 94d7f782; 12/12 -race incl. parent-death drill; WRAP decision; fixer subagent rewrote 23 ignored-error sites |
 | 14 | COMPLETE | 0e36ed76 (tree-built after 5 blocked hook attempts + 2 sibling worktree repoints; 19-file diff vs 359e3f64 verified exact; full -race green on the landed tree); live-gate evidence in commit body; llm supervisor stdin fix + binding resolveMu fix + secrets-broker degrade fix (gate-caught) included; FailOutcome per leaf-11 note consumed |
-| 15 | PENDING | manifest is shared-write: merge, never overwrite |
+| 15 | COMPLETE | 18a1cdbe; three suites hermetic-green (lifecycle 19s/bargein 16s/concurrency 16s); manifest merged + scenarios; gate-caught leaf-14 inbound Acquire gap fixed (voice.default_employee); second-concurrent-inbound refused busy pinned at webhook boundary; skipped legs name gaps |
 | 16 | PENDING | |
 
 ## Integration Test Plan
