@@ -48,6 +48,7 @@ type MemoryFact struct {
 	ValidFrom     *time.Time `json:"valid_from,omitempty"`
 	ValidUntil    *time.Time `json:"valid_until,omitempty"`
 	SourceSession string     `json:"source_session,omitempty"`
+	Origin        string     `json:"origin,omitempty"` // who wrote the fact: 'agent', 'user', 'unknown' (branch 02, C3)
 	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
@@ -62,6 +63,7 @@ CREATE TABLE IF NOT EXISTS memory_facts (
 	valid_from     DATETIME,
 	valid_until    DATETIME,
 	source_session TEXT NOT NULL DEFAULT '',
+	origin         TEXT NOT NULL DEFAULT 'unknown',
 	updated_at     DATETIME NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_memory_facts_owner_kind_key
@@ -113,7 +115,51 @@ func NewFactStore(dbPath string) (*FactStore, error) {
 		db.Close() //nolint:mutexio // one-time init cleanup path
 		return nil, fmt.Errorf("memory: fact store schema: %w", err)
 	}
+	if err := ensureFactOriginColumn(db); err != nil {
+		db.Close() //nolint:mutexio // one-time init cleanup path
+		return nil, fmt.Errorf("memory: fact store migration: %w", err)
+	}
 	return &FactStore{db: db}, nil
+}
+
+// ensureFactOriginColumn adds the origin column to memory_facts if it is
+// missing (pre-existing databases created before C3). Uses PRAGMA table_info
+// so the ALTER runs exactly once per open and is a no-op when the column
+// already exists. Idempotent and safe to call on every Open.
+func ensureFactOriginColumn(db *sql.DB) error {
+	var exists bool
+	rows, err := db.Query(`PRAGMA table_info(memory_facts)`)
+	if err != nil {
+		return fmt.Errorf("fact store table_info: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    any
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("fact store table_info scan: %w", err)
+		}
+		if name == "origin" {
+			exists = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("fact store table_info rows: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE memory_facts ADD COLUMN origin TEXT NOT NULL DEFAULT 'unknown'`); err != nil {
+		return fmt.Errorf("add origin column: %w", err)
+	}
+	return nil
 }
 
 // Close closes the underlying database.
@@ -137,6 +183,12 @@ func (s *FactStore) Upsert(ctx context.Context, f MemoryFact) error {
 	if f.UpdatedAt.IsZero() {
 		f.UpdatedAt = time.Now().UTC()
 	}
+	// C3: never write an empty origin — normalize to 'unknown' before the INSERT.
+	// The shared origin constants arrive with C2 (branch 02, leaf 01); until
+	// then callers stamp literal strings (e.g. 'agent' at the tool write path).
+	if f.Origin == "" {
+		f.Origin = "unknown"
+	}
 
 	now := f.UpdatedAt
 
@@ -159,10 +211,10 @@ func (s *FactStore) Upsert(ctx context.Context, f MemoryFact) error {
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO memory_facts
-		 (id, owner_id, kind, key, value, valid_from, valid_until, source_session, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (id, owner_id, kind, key, value, valid_from, valid_until, source_session, origin, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		f.ID, f.OwnerID, string(f.Kind), f.Key, f.Value,
-		f.ValidFrom, f.ValidUntil, f.SourceSession, f.UpdatedAt); err != nil {
+		f.ValidFrom, f.ValidUntil, f.SourceSession, f.Origin, f.UpdatedAt); err != nil {
 		return fmt.Errorf("memory: insert fact: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -176,7 +228,7 @@ func (s *FactStore) Upsert(ctx context.Context, f MemoryFact) error {
 // at == ValidUntil is EXCLUDED (the fact has ended).
 func (s *FactStore) GetActive(ctx context.Context, ownerID string, at time.Time) ([]MemoryFact, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, owner_id, kind, key, value, valid_from, valid_until, source_session, updated_at
+		`SELECT id, owner_id, kind, key, value, valid_from, valid_until, source_session, origin, updated_at
 		 FROM memory_facts
 		 WHERE owner_id = ?
 		   AND (valid_from IS NULL OR valid_from <= ?)
@@ -223,7 +275,7 @@ func scanFacts(rows *sql.Rows) ([]MemoryFact, error) {
 		var kind string
 		var validFrom, validUntil sql.NullTime
 		if err := rows.Scan(&f.ID, &f.OwnerID, &kind, &f.Key, &f.Value,
-			&validFrom, &validUntil, &f.SourceSession, &f.UpdatedAt); err != nil {
+			&validFrom, &validUntil, &f.SourceSession, &f.Origin, &f.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("memory: scan fact: %w", err)
 		}
 		f.Kind = FactKind(kind)
