@@ -801,6 +801,14 @@ type AgentLoop struct {
 	detectionContext *DetectionContext
 	// projectID is the bound project identifier for this loop's session.
 	projectID string
+	// scopeUserID is the serving session's multiuser identity (OwnerID);
+	// empty in single-user installs. Memory-scope resolution input (leaf
+	// 03-agent-recall-wiring). Guarded by mu.
+	scopeUserID string
+	// multiUserEnabled mirrors cfg multiuser.enabled; OR-ed into the
+	// memory-scope multiUser bit so a resolution gap under enabled
+	// multiuser fails closed (Flag 3). Guarded by mu.
+	multiUserEnabled bool
 	// workerID identifies which worker slot owns this loop within the pool.
 	// Distinct from the watchdog-local workerID variables constructed from
 	// agentID + conversationID — this is a stable struct-level identifier.
@@ -7333,6 +7341,12 @@ type memoryRecallItem struct {
 }
 
 // buildMemoryContext fetches and formats memory context for the task.
+// Every recall branch passes the C2 scope filter (leaf 03-agent-recall-
+// wiring T2): the loop's resolved B1 tuple (agent MemoryMaxScope + the
+// session's bound project + multiuser identity) scopes inherited memories,
+// explicit refs, and the auto-search identically. An unbound session under
+// a project max recalls NOTHING project-scoped (global + own-user rows
+// stay recallable) — never a daemon-CWD fallback.
 func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []memoryRecallItem {
 	var items []memoryRecallItem
 	add := func(m memvid.Memory) {
@@ -7340,6 +7354,25 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []memo
 			text:   formatMemoryForPrompt(m),
 			stable: memoryItemIsStable(memory.MemoryResult{Memory: memory.Memory{Metadata: m.Metadata}}),
 		})
+	}
+	// Scope filter for THIS loop's session (T2): applied to every fetched
+	// slice below via memory.FilterResults — the committed C2 predicate.
+	scopeIdentity := l.memoryScopeCtxIdentity()
+	scopeOpts := []memory.SearchOption{
+		memory.WithScopeFilter(memory.Scope(scopeIdentity.MaxScope), scopeIdentity.ProjectID, scopeIdentity.UserID),
+		memory.WithMultiUserEnabled(scopeIdentity.MultiUser),
+	}
+	addScoped := func(mems []memvid.Memory) {
+		for _, m := range mems {
+			res := memory.FilterResults([]memory.MemoryResult{memory.MemoryToResult(memory.Memory{
+				ID:       m.ID,
+				Content:  m.Content,
+				Metadata: m.Metadata,
+			})}, scopeOpts...)
+			if len(res) > 0 {
+				add(m)
+			}
+		}
 	}
 
 	// Fetch inherited memories from parent task
@@ -7352,9 +7385,7 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []memo
 			if err != nil {
 				l.logger.Warn("Failed to fetch inherited memories", "error", err)
 			} else {
-				for _, m := range inherited {
-					add(m)
-				}
+				addScoped(inherited)
 			}
 		}
 	}
@@ -7365,9 +7396,7 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []memo
 		if err != nil {
 			l.logger.Warn("Failed to fetch memory refs", "error", err)
 		} else {
-			for _, m := range memories {
-				add(m)
-			}
+			addScoped(memories)
 		}
 	}
 
@@ -7378,7 +7407,7 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []memo
 			l.logger.Warn("Failed to search memory context", "error", err)
 		} else {
 			for _, r := range results {
-				add(r.Memory)
+				addScoped([]memvid.Memory{r.Memory})
 			}
 		}
 	}
@@ -8345,6 +8374,12 @@ func (l *AgentLoop) executeToolCallsUngated(ctx context.Context, toolCalls []llm
 	// need per-session project info (e.g. project_info) can read it without
 	// shared mutable state on the tool registry.
 	ctx = tools.ContextWithWorkingDir(ctx, l.GetWorkingDir())
+
+	// Memory-scope identity (leaf 03-agent-recall-wiring T3): the memory
+	// tools stamp writes and filter reads with the SAME resolved B1 tuple
+	// this loop recalls under. Absent from contexts without this injection
+	// (legacy callers) = scope-blind, byte-identical.
+	ctx = tools.ContextWithScopeIdentity(ctx, l.memoryScopeCtxIdentity())
 
 	// Autonomous-execution marker: job-driven headless runs (step jobs)
 	// cannot be followed by an interactive resolve/accept turn, so staging

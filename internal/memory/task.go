@@ -341,12 +341,17 @@ func (t *TaskMemory) GetByID(ctx context.Context, id string) (*MemoryResult, err
 	if dt := memoryTypeFromCategory(domain, ""); dt != "" {
 		memType = dt
 	}
+	meta := ParseMetadata(metaJSON)
 	mem := Memory{
-		ID:        memID,
-		Content:   content,
-		Type:      memType,
-		Category:  domain,
-		Metadata:  ParseMetadata(metaJSON),
+		ID:       memID,
+		Content:  content,
+		Type:     memType,
+		Category: domain,
+		Metadata: meta,
+		// Scope recovery (01-scope-schema): metadata["scope"] is the
+		// portable truth; missing marker = legacy row -> global. Kept
+		// consistent with the episodic GetByID read path.
+		Scope:     scopeFromMetadata(meta),
 		CreatedAt: createdAt,
 	}
 

@@ -14,6 +14,75 @@ import (
 	"github.com/caimlas/meept/internal/tools"
 )
 
+// scopeIdentity reads the session memory-scope identity the agent loop
+// injects into every tool-execution context (leaf 03-agent-recall-wiring
+// T3/T4). Zero value (no injection) = scope-blind legacy behavior,
+// byte-identical: no filter, and stamps fall through to Manager.Store's
+// global backfill.
+func scopeIdentity(ctx context.Context) tools.ScopeIdentity {
+	return tools.ScopeIdentityFromContext(ctx)
+}
+
+// scopeSearchOptions folds an identity into C2 filter options for the
+// Manager search surfaces. Empty MaxScope = no options = unfiltered.
+func scopeSearchOptions(ctx context.Context) []memory.SearchOption {
+	id := scopeIdentity(ctx)
+	if id.MaxScope == "" {
+		return nil
+	}
+	return []memory.SearchOption{
+		memory.WithScopeFilter(memory.Scope(id.MaxScope), id.ProjectID, id.UserID),
+		memory.WithMultiUserEnabled(id.MultiUser),
+	}
+}
+
+// stampScope computes the write stamp for a memory tool store: an explicit
+// scope argument is honored verbatim when it names a valid vocabulary term
+// (the writer's intent; recall-time maxScope is the enforcement boundary),
+// otherwise the session's own scope (project when bound, global when
+// unbound). Identity keys ride the metadata so the C2 predicate can match
+// the row later.
+func stampScope(ctx context.Context, meta map[string]any, explicit string) (memory.Scope, map[string]any) {
+	id := scopeIdentity(ctx)
+
+	scope := memory.ScopeGlobal
+	switch explicit {
+	case string(memory.ScopeProject), string(memory.ScopeUser), string(memory.ScopeGlobal):
+		scope = memory.Scope(explicit)
+	case "":
+		// Default: the session's own scope — project when the session is
+		// bound, global when unbound (an unbound writer has no project
+		// identity to stamp; legacy rows stay visible).
+		if id.ProjectID != "" {
+			scope = memory.ScopeProject
+		}
+	default:
+		// Invalid vocabulary: fail safe to the session scope (project when
+		// bound, else global) rather than erroring the store.
+		if id.ProjectID != "" {
+			scope = memory.ScopeProject
+		}
+	}
+
+	if meta == nil {
+		meta = make(map[string]any)
+	}
+	if _, exists := meta["scope"]; !exists {
+		meta["scope"] = string(scope)
+	}
+	if scope == memory.ScopeProject && id.ProjectID != "" {
+		if _, exists := meta["project_id"]; !exists {
+			meta["project_id"] = id.ProjectID
+		}
+	}
+	if scope == memory.ScopeUser && id.UserID != "" {
+		if _, exists := meta["user_id"]; !exists {
+			meta["user_id"] = id.UserID
+		}
+	}
+	return scope, meta
+}
+
 // MemoryStoreTool stores information in long-term memory.
 type MemoryStoreTool struct {
 	tools.ToolDefaults
@@ -53,6 +122,11 @@ func (t *MemoryStoreTool) Parameters() llm.FunctionParameters {
 			"stable": {
 				Type:        schemaTypeBoolean,
 				Description: "Optional: true marks this memory as standing (rarely-changing) context (persona facts, standing project context). Stable memories render in the cacheable 'Memory (standing)' section; default false (volatile per-turn recall).",
+			},
+			"scope": {
+				Type:        schemaTypeString,
+				Description: "Optional recall scope: 'project' (default — visible to this project's sessions), 'user' (visible across the user's projects), 'global' (visible everywhere). Cross-project facts should be explicit.",
+				Enum:        []string{"project", "user", "global"},
 			},
 		},
 		Required: []string{"content", "type"},
@@ -96,10 +170,19 @@ func (t *MemoryStoreTool) Execute(ctx context.Context, args map[string]any) (any
 		meta = map[string]any{"stable": true}
 	}
 
+	// Scope stamp (leaf 03-agent-recall-wiring T3): explicit "scope" arg
+	// honored verbatim; default = the session's own scope (project when
+	// the session is bound, global otherwise). The session identity (and
+	// project_id/user_id keys) come from the loop-injected context.
+	explicitScope, _ := args["scope"].(string)
+	scope, meta2 := stampScope(ctx, meta, explicitScope)
+	meta = meta2
+
 	mem := memory.Memory{
 		Content:  content,
 		Type:     memType,
 		Category: category,
+		Scope:    scope,
 		Metadata: meta,
 	}
 
@@ -204,7 +287,10 @@ func (t *MemorySearchTool) Execute(ctx context.Context, args map[string]any) (an
 	}
 
 	// Use graph-aware search for better ranking (alpha=0.3 = 30% PageRank influence)
-	results, err := t.manager.SearchWithGraph(ctx, memQuery, 0.3)
+	// + scope filter (leaf 03-agent-recall-wiring T3): results are narrowed
+	// by the session's resolved scope identity when the loop injected one;
+	// no identity = unfiltered legacy behavior.
+	results, err := t.manager.SearchWithGraph(ctx, memQuery, 0.3, scopeSearchOptions(ctx)...)
 	if err != nil {
 		return nil, fmt.Errorf("memory search failed: %w", err)
 	}
@@ -280,7 +366,9 @@ func (t *MemoryGetContextTool) Execute(ctx context.Context, args map[string]any)
 		maxItems = min(int(m), 30)
 	}
 
-	results, err := t.manager.GetRelevantContext(ctx, query, maxItems)
+	// Scope filter (leaf 03-agent-recall-wiring T4): same predicate as
+	// memory_search — session identity narrows recalled context.
+	results, err := t.manager.GetRelevantContext(ctx, query, maxItems, scopeSearchOptions(ctx)...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get context: %w", err)
 	}
@@ -711,16 +799,21 @@ func (t *MemoryRetainTool) Execute(ctx context.Context, args map[string]any) (an
 		importance = "medium"
 	}
 
-	// Store as task memory with special category for retained facts
+	// Store as task memory with special category for retained facts.
+	// Scope stamp (leaf 03-agent-recall-wiring T3): same rule as
+	// memory_store — explicit scope honored, default = the session's own
+	// scope from the loop-injected identity.
+	retainScope, retainMeta := stampScope(ctx, map[string]any{
+		"retained":   true,
+		"domain":     domain,
+		"importance": importance,
+	}, "")
 	mem := memory.Memory{
 		Content:  content,
 		Type:     memory.MemoryTypeTask,
 		Category: "hindsight:" + importance,
-		Metadata: map[string]any{
-			"retained":   true,
-			"domain":     domain,
-			"importance": importance,
-		},
+		Scope:    retainScope,
+		Metadata: retainMeta,
 	}
 
 	id, err := t.manager.Store(ctx, mem)
@@ -824,11 +917,12 @@ func (t *MemoryRecallTool) Execute(ctx context.Context, args map[string]any) (an
 	}
 
 	// Search task memories (hindsight facts are stored as task memories)
+	// with the session scope filter (leaf 03-agent-recall-wiring T3).
 	results, err := t.manager.Search(ctx, memory.MemoryQuery{
 		Query: query,
 		Type:  memory.MemoryTypeTask,
 		Limit: limitRaw,
-	})
+	}, scopeSearchOptions(ctx)...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to recall memories: %w", err)
 	}

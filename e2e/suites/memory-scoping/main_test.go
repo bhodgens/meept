@@ -53,7 +53,14 @@ const (
 // stays healthy and the RED is behavioral).
 func scopedStack(t *testing.T) *harness.Stack {
 	t.Helper()
-	s := harness.Start(t)
+	// Flag-3 suite note (leaf 03 report, 2026-11-04): the session-digest
+	// blocks ("[Recent session activity]" / "## Session context") echo the
+	// plant turn's raw task text back into the SAME session's next-turn
+	// prompts by design (session continuity, not memory recall). Disable
+	// the digest lane so the Flag-3 assertion measures memory recall only.
+	s := harness.Start(t, harness.WithExtraEnv(map[string]string{
+		"MEEPT_DISABLE_DIGEST_CONTEXT": "1",
+	}))
 	s.RegisterProject(t, "e2e-project")
 	return s
 }

@@ -3616,6 +3616,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			MemvidClient: c.MemvidClient,
 			TaskStore:    taskStore,
 			LLMClient:    c.LLMClient,
+			// Late discovery (leaf 03-agent-recall-wiring): definitions
+			// seeded into the discovery tiers after boot join at first
+			// dispatch. Daemon-only opt-in — test registries never rescan.
+			AllowLateDiscovery: true,
 			// SharedChatter: the ProviderManager when multi-provider wiring
 			// is on (session-affinity/leaf-07 finding). Without it every
 			// registry-built loop ran on the single default client, whose

@@ -165,3 +165,21 @@ func filterScopeResults(results []MemoryResult, f *scopeRecallFilter) []MemoryRe
 	}
 	return filtered
 }
+
+// FilterResults applies the committed C2 scope predicate to an ALREADY
+// fetched result slice (leaf 03-agent-recall-wiring). Recall sites that
+// fetch once and scope per consumer (the loop's memvid recall path, the
+// dispatcher's per-agent re-scope in RouteToAgent) call this instead of
+// re-querying, so there is ONE predicate implementation: the same
+// WithScopeFilter/WithMultiUserEnabled options a Manager.Search caller
+// passes, folded by the same resolveScopeOptions. No options = unfiltered
+// legacy behavior, byte-identical.
+func FilterResults(results []MemoryResult, opts ...SearchOption) []MemoryResult {
+	return filterScopeResults(results, resolveScopeOptions(opts))
+}
+
+// MemoryToResult wraps a bare Memory as a single result so FilterResults
+// can scope it (the memvid recall path yields bare memories).
+func MemoryToResult(m Memory) MemoryResult {
+	return MemoryResult{Memory: m}
+}

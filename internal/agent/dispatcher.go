@@ -412,6 +412,14 @@ type Dispatcher struct {
 	indexCancel context.CancelFunc
 	indexWG     sync.WaitGroup
 
+	// multiUserEnabled mirrors cfg multiuser.enabled (leaf
+	// 03-agent-recall-wiring): OR-ed into the memory-scope multiUser bit so
+	// an identity-resolution gap under enabled multiuser fails CLOSED
+	// (Flag 3). Written once at daemon wiring; read under statsMu-adjacent
+	// is unnecessary — set before any dispatch traffic, so no lock needed
+	// beyond data-race hygiene at wiring time. Guarded by stats.mu.
+	multiUserEnabled bool
+
 	// instructionStore handles user instructions for automation (Phase 1).
 	// When nil, instruction-based automation is disabled.
 	instructionStore *preferences.Store
@@ -916,6 +924,14 @@ func suggestReasoningForIntent(intentType string) string {
 // RouteToAgent's one-shot SetModelOverride application. Empty = the turn
 // runs the alias/default chain unchanged.
 func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string, parts []llm.ContentPart, agentOverride, requestModel string) (*DispatchResult, error) {
+	// Late agent discovery (leaf 03-agent-recall-wiring): definitions
+	// seeded into the discovery tiers after daemon boot join the lane
+	// routing index BEFORE classification, so a chat lane pinned to a
+	// post-boot agent routes to that agent instead of the static chat
+	// fallback. One-shot; no-op on steady state.
+	if d.registry != nil {
+		d.registry.EnsureLateDiscovered()
+	}
 	d.logger.Debug("Dispatching request",
 		"session", sessionID,
 		"input_len", len(input),
@@ -1223,7 +1239,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 3.5. IntentGate-style true intent analysis. The session digest is
 	// built BEFORE the call so the analyzer can resolve references against
 	// recent session activity (leaf 02 of session-aware-intent-gate).
-	if d.intentAnalyzer != nil {
+	if d.intentAnalyzer != nil && d.digestContextEnabled() {
 		digest := d.buildSessionContextDigest(sessionID)
 		analysis, err := d.intentAnalyzer.AnalyzeTrueIntent(ctx, input, digest)
 		if err == nil && analysis != nil {
@@ -2014,11 +2030,19 @@ func (d *Dispatcher) buildMemoryContext(ctx context.Context, input, sessionID st
 	// injects nothing and the memory is dead on arrival. OR matching keeps
 	// the ranking signal (rows matching more terms rank higher via f.rank)
 	// while guaranteeing a hit when ANY salient token matches.
+	//
+	// Scope (leaf 03-agent-recall-wiring): this pre-routing recall serves
+	// classification/anaphora context only (no memory CONTENT reaches any
+	// LLM prompt from here — buildClassificationPrompt embeds the input
+	// alone), so it filters with the conservative chat-lane scope. The
+	// prompt-facing context is re-scoped per ROUTED agent in RouteToAgent
+	// (rescopeMemoryContextForAgent).
+	scopeOpts := d.sessionScopeOptions(config.AgentIDChat, sessionID)
 	results, err := d.memoryMgr.Search(ctx, memory.MemoryQuery{
 		Query:    input,
 		Limit:    5,
 		MatchAny: true,
-	})
+	}, scopeOpts...)
 	if err != nil {
 		d.logger.Debug("Memory search failed", "error", err)
 		results = []memory.MemoryResult{}
@@ -2294,7 +2318,7 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 	// Re-analyze the combined input with the intent analyzer. The session
 	// digest is built BEFORE the call so the analyzer can resolve references
 	// against recent session activity (leaf 02 of session-aware-intent-gate).
-	if d.intentAnalyzer != nil {
+	if d.intentAnalyzer != nil && d.digestContextEnabled() {
 		digest := d.buildSessionContextDigest(sessionID)
 		analysis, err := d.intentAnalyzer.AnalyzeTrueIntent(ctx, combinedInput, digest)
 		if err == nil && analysis != nil {
@@ -3156,13 +3180,14 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	}
 
 	// No active loop, or queue closed/full -- run normally
-	// Build context message with memory refs
 	// Session-context digest (the executing-agent context block):
 	// sessionConversationID, NOT the thread-resolved id — the digest's
 	// GetTasksForSession JOINs session_tasks on the session-level
 	// conversation id (d045a450 fixed the recall branch only; this call
 	// site had the same A5 failure class, so a threaded conversation's
-	// executing agent lost the digest block entirely).
+	// executing agent lost the digest block entirely). The context MESSAGE
+	// itself is built after the per-agent memory re-scope below, once
+	// result.AgentID is final (recall continuity may consume it first).
 	contextMsg := d.buildContextMessage(result, sessionConversationID)
 
 	// Recall continuity (option 3, issue #58 follow-up): answer
@@ -3213,6 +3238,13 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		return "", fmt.Errorf("no agent available for %q", result.AgentID)
 	}
 
+	// Per-agent memory re-scope (leaf 03-agent-recall-wiring): the
+	// prompt-facing context block must carry the ROUTED agent's
+	// MemoryMaxScope (chief-of-staff spans projects; the default project
+	// agent is isolated). Runs after agent resolution, before
+	// buildContextMessage renders the block.
+	d.rescopeMemoryContextForAgent(ctx, result, sessionConversationID)
+
 	// Apply the client-supplied per-request model (chat.request "model")
 	// through the loop's ONE-SHOT SetModelOverride seam — the same
 	// precedence slot as a parsed user model directive, so it outranks the
@@ -3245,6 +3277,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// (e.g. image attachments), route them through RunOnceWithParts so the
 	// provider serializer emits native image blocks. Otherwise use the
 	// plain RunOnce path — the two are equivalent for text-only turns.
+	contextMsg = d.buildContextMessage(result, sessionConversationID)
 	var response string
 	var err error
 	if len(result.Parts) > 0 {
@@ -3484,6 +3517,10 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 						// Wire session identity + project context (mirrors
 						// ChatHandler.sessionLoop; ConfigSnapshot excludes these).
 						loop.SetProjectID(sess.ProjectID)
+						// Memory-scope identity (leaf 03-agent-recall-wiring):
+						// OwnerID is the multiuser identity for the scope
+						// filter; empty in single-user installs.
+						loop.SetScopeUserID(sess.OwnerID)
 						// The directory may come from the detection context or
 						// the active project, not only ProjectPath, so set it
 						// explicitly: executeToolCalls injects GetWorkingDir()
@@ -3549,6 +3586,8 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 					if templateErr == nil && template != nil {
 						if loop, err := d.loopManager.GetOrCreateWired(conversationID, projectPath, template); err == nil {
 							loop.SetProjectID(sess.ProjectID)
+							// Memory-scope identity (leaf 03-agent-recall-wiring).
+							loop.SetScopeUserID(sess.OwnerID)
 							// Per-session fence (leaf 01 T2): same injection
 							// as the primary site above — BOTH loop-creation
 							// sites bind the fence per session. Group fence

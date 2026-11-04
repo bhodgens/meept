@@ -194,7 +194,29 @@ func resolveNamedRosterAgent(specs []*AgentSpec) func(string) (string, bool) {
 		if token == "" {
 			return "", false
 		}
-		id, ok := byToken[token]
-		return id, ok
+		if id, ok := byToken[token]; ok {
+			return id, true
+		}
+		// Suffix fallback (leaf 03-agent-recall-wiring chief-of-staff
+		// gate): a token that is the distinctive TAIL of exactly one
+		// roster id resolves to it — "line" addresses "aaline", the way
+		// users naturally shorten a prefixed agent id. Bounded: the token
+		// must be >= 4 chars (no 2-3 char false positives like "in"/"ain")
+		// and strictly shorter than the id; when several ids share the
+		// suffix the match is ambiguous and falls through to the normal
+		// chain (never guesses).
+		if len(token) < 4 {
+			return "", false
+		}
+		var hits []string
+		for id := range byToken {
+			if len(id) > len(token) && strings.HasSuffix(id, token) {
+				hits = append(hits, id)
+			}
+		}
+		if len(hits) == 1 {
+			return byToken[hits[0]], true
+		}
+		return "", false
 	}
 }

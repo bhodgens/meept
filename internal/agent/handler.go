@@ -3168,6 +3168,10 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	// here on every lookup (idempotent for an already-cached loop).
 	if sess != nil {
 		loop.SetProjectID(sess.ProjectID)
+		// Memory-scope identity (leaf 03-agent-recall-wiring): the
+		// session's OwnerID is the multiuser identity the scope filter
+		// matches against; empty in single-user installs.
+		loop.SetScopeUserID(sess.OwnerID)
 		if sess.DetectionContext != nil {
 			loop.SetDetectionContext(&DetectionContext{
 				CWD:               sess.DetectionContext.CWD,

@@ -555,6 +555,43 @@ stamp makes that a documented, queryable decision (provenance via
 unaffected. Narrowing cross-node recall per project is future work; the
 `remote_node` marker is the hook it would build on.
 
+### Agent declarations: `memory_max_scope` (chief-of-staff pattern)
+
+An agent (AGENT.md frontmatter `memory_max_scope:`) declares the WIDEST
+scope its sessions recall at: `""`/`project` (default — isolated to the
+session's bound project), `user`, or `global`. Resolution
+(`agent.resolveScopeInputs`) combines the declaration with the session's
+bound project and OwnerID; invalid values fail SAFE to project (warned).
+Every loop recall and every memory tool (`memory_store`/`memory_retain`
+stamp on write; `memory_search`/`memory_recall`/`memory_get_context`
+filter on read) flows through that resolution:
+
+- Writes: an explicit `scope` argument on `memory_store` is honored
+  verbatim (the writer's intent — recall-time maxScope is the enforcement
+  boundary, not the write stamp); the default stamp is the session's own
+  scope (project when bound, global when unbound). `project_id` /
+  `user_id` ride the metadata for predicate matching.
+- Reads: project-declared agents see global rows + their own project's
+  rows (an unbound session sees NO project rows — never a daemon-CWD
+  fallback). A `global` declaration is the chief-of-staff grant: it maps
+  onto the filter's user purview (all projects' rows + user rows), since
+  the committed C2 predicate treats a global-scope CALLER as
+  identity-less. Under enabled multiuser (`[multiuser] enabled`), an
+  identity-resolution gap (empty OwnerID) fails CLOSED: user-scope rows
+  stay hidden.
+
+### Bot `memory_scope` is superseded (Flag 2)
+
+Bot definitions (internal/bot) carry an older `memory_scope` vocabulary
+(private/shared/read_only). It is SUPERSEDED for scope governance by
+`memory_max_scope`: scope enforcement now flows exclusively through the
+agent declaration + `resolveScopeInputs`. The bot fields remain (bots are
+a separate surface; `ScopedMemoryManager`'s bot_id namespace tagging is a
+different mechanism and untouched). Mapping when reading a bot's memory
+posture: private→project, shared→global, read_only→project (there is no
+read-only equivalent in the Scope vocabulary — write suppression is a
+tool-permission concern, not a recall scope).
+
 ## Edge Cases
 
 ### Memory Storage Failure

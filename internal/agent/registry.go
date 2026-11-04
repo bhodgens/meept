@@ -174,6 +174,15 @@ type AgentRegistry struct {
 	// filtered registry exposes it. Guarded by mu; written only at
 	// construction (NewAgentRegistry) — it is immutable after that.
 	codemodeEnabled bool
+
+	// Lazy-discovery fallback state (leaf 03-agent-recall-wiring):
+	// bundledAgentsPath is the path captured at construction so a
+	// post-boot discovery rescan uses the same tiers;
+	// discoveryRescanned guards the one-shot rescan on a spec miss.
+	// Both guarded by mu.
+	bundledAgentsPath  string
+	allowLateDiscovery bool
+	discoveryRescanned bool
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -204,6 +213,13 @@ type RegistryConfig struct {
 
 	// BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
 	BundledAgentsPath string
+	// AllowLateDiscovery opts in to the one-shot post-boot discovery
+	// rescan (EnsureLateDiscovered / GetSpec-miss fallback, leaf
+	// 03-agent-recall-wiring): definitions seeded into the discovery tiers
+	// after daemon boot join the registry and lane index at first
+	// dispatch. Wired ONLY by the daemon — test registries must never
+	// merge definitions from the host's real discovery tiers mid-test.
+	AllowLateDiscovery bool
 
 	// BundledPromptsPath is the path to bundled prompt component markdown
 	// files (e.g., "config/prompts"). When set, a ComponentRegistry scans
@@ -360,8 +376,62 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 
 	// Discover and load AGENT.md definitions (the canonical source of truth).
 	r.loadAgentDefinitions(cfg.BundledAgentsPath)
+	r.bundledAgentsPath = cfg.BundledAgentsPath
+	r.allowLateDiscovery = cfg.AllowLateDiscovery
 
 	return r
+}
+
+// ensureAgentDiscovered is the lazy-discovery fallback for registry lookups
+// (leaf 03-agent-recall-wiring, chief-of-staff gate): agent definitions
+// seeded into the discovery tiers AFTER daemon boot (the e2e harness seeds
+// per-test agents into MEEPT_HOME/agents post-Start) would never route —
+// a chat lane pinned to a post-boot agent resolved the static chat fallback
+// and the gate's per-agent scope asymmetry was unobservable. On a spec MISS,
+// run ONE discovery rescan over the same tiers and merge whatever is new.
+// Idempotent: loaded definitions merge into existing specs without clobber
+// (mergeAgentDefinition semantics), the lane index is republished, and the
+// rescan happens at most... per miss, but merges are cheap and only run
+// while specs are actually missing. The bundled path is the one captured at
+// construction.
+func (r *AgentRegistry) ensureAgentDiscovered(id string) {
+	r.ensureDiscoveredRescan()
+}
+
+// EnsureLateDiscovered runs the one-shot post-boot discovery rescan if it
+// has not run yet (leaf 03-agent-recall-wiring). Called at dispatch entry
+// so definitions seeded after daemon boot (the e2e harness seeds per-test
+// agents into the user tier post-Start) are in the lane routing index
+// BEFORE classification — a chat lane pinned to a post-boot agent would
+// otherwise resolve the static chat fallback and the per-agent scope
+// asymmetry would be unobservable.
+func (r *AgentRegistry) EnsureLateDiscovered() {
+	r.ensureDiscoveredRescan()
+}
+
+// ensureDiscoveredRescan is the guarded one-shot rescan. No-op once run
+// (and at construction the full scan already happened, so the flag only
+// needs to gate post-boot additions).
+func (r *AgentRegistry) ensureDiscoveredRescan() {
+	r.mu.RLock()
+	rescanned := r.discoveryRescanned
+	allowed := r.allowLateDiscovery
+	r.mu.RUnlock()
+	if rescanned || !allowed {
+		return
+	}
+
+	r.mu.Lock()
+	if r.discoveryRescanned {
+		r.mu.Unlock()
+		return
+	}
+	r.discoveryRescanned = true
+	path := r.bundledAgentsPath
+	r.mu.Unlock()
+
+	r.logger.Debug("registry late discovery rescan")
+	r.loadAgentDefinitions(path)
 }
 
 // RegisterSpec registers an agent specification.
@@ -388,12 +458,21 @@ func (r *AgentRegistry) UnregisterSpec(id string) {
 	r.logger.Debug("Unregistered agent spec", "id", id)
 }
 
-// GetSpec returns an agent specification by ID.
+// GetSpec returns an agent specification by ID. On a miss, a one-shot
+// discovery rescan runs first (ensureAgentDiscovered) so definitions seeded
+// after daemon boot (e2e harness per-test agents) are routable.
 func (r *AgentRegistry) GetSpec(id string) (*AgentSpec, bool) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	spec, ok := r.specs[id]
+	r.mu.RUnlock()
+	if ok {
+		return spec, ok
+	}
+	r.ensureAgentDiscovered(id)
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	spec, ok = r.specs[id]
 	return spec, ok
 }
 
@@ -482,7 +561,7 @@ func (r *AgentRegistry) GetDispatcher() (*AgentLoop, error) {
 // model: field) > spec.ModelAlias (an explicit models.json5 alias named
 // independently of the agent id) > the agent's OWN id when models.json5
 // defines an alias under it (compatibility default; the aliases coder,
-// planner, analyst, ... exist for exactly that) > '' (the loop keeps the
+// planner, analyst, ... exist for exactly that) > ” (the loop keeps the
 // client it was built with, which is the resolver's default model).
 // Without the same-id fallback the loop resolved no alias at all and ran
 // every turn on the config's default model - observed 2026-09-13: the
@@ -1392,6 +1471,14 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.RefusalModel = base.RefusalModel
 	}
 
+	// MemoryMaxScope: prefer AGENT.md if set (scalar replacement, C3);
+	// omission keeps the base.
+	if def.MemoryMaxScope != "" {
+		merged.MemoryMaxScope = def.MemoryMaxScope
+	} else {
+		merged.MemoryMaxScope = base.MemoryMaxScope
+	}
+
 	// Verification: prefer AGENT.md when the re-loaded frontmatter carries a
 	// verification block; omission keeps the current config (D16 gap fix —
 	// previously only definitionToSpec wired this, so re-loads silently
@@ -1508,6 +1595,7 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		EnhancerModel:   def.EnhancerModel,
 		EscalationModel: def.EscalationModel,
 		RefusalModel:    def.RefusalModel,
+		MemoryMaxScope:  def.MemoryMaxScope,
 		AdditionalTools: append([]string(nil), def.AdditionalTools...),
 		AvailableSkills: append([]string(nil), def.AvailableSkills...),
 		SkillTriggers:   copyStringMap(def.SkillTriggers),
