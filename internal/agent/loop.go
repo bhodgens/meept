@@ -855,6 +855,13 @@ type AgentLoop struct {
 	capabilityIndex *skills.CapabilityIndex
 	skillLoader     *skills.LazySkillLoader
 
+	// capabilitiesBuilder, when wired (SetCapabilitiesBuilder), is attached to
+	// each per-turn prompt builder at the turn boundary (assembleSystemPrompt)
+	// so a mid-session skill write that marked the shared SkillIndex dirty
+	// refreshes on the next turn without a restart (branch 01 #103 / C1).
+	// Nil by default: the refresh is a no-op unless the daemon wires it.
+	capabilitiesBuilder *CapabilitiesBuilder
+
 	// Prefetch callback for memory context (Hermes pattern)
 	// Called at turn completion to prefetch context for next turn
 	prefetchCallback func(query string, maxItems int)
@@ -8475,6 +8482,19 @@ func (l *AgentLoop) assembleSystemPrompt(builder *PromptBuilder) string {
 	// Inject status bar (leaf 13, unstable section for turn-level info)
 	builder.AddSectionWithStability("[status]", StatusBar(l.turnStatus()), false)
 
+	// Turn boundary (branch 01 #103 / C1): attach the loop's refresh-capable
+	// capabilities builder so this per-turn build settles a mid-session
+	// skill-index refresh (BuildSystemPromptOrdered -> refreshIfNeeded). The
+	// builder is shared across turns and nil-guarded: when the daemon has
+	// not wired one the refresh is a no-op. Reads the loop field under the
+	// lock, mirroring the capabilityIndex read in discoverRelevantSkills.
+	l.mu.RLock()
+	cb := l.capabilitiesBuilder
+	l.mu.RUnlock()
+	if cb != nil {
+		builder.SetCapabilitiesBuilder(cb)
+	}
+
 	prompt, hash := builder.BuildSystemPromptOrdered(!l.config.StablePrefixDisabled)
 
 	l.mu.Lock()
@@ -9072,6 +9092,22 @@ func (l *AgentLoop) SetCapabilityIndex(ci *skills.CapabilityIndex) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.capabilityIndex = ci
+}
+
+// SetCapabilitiesBuilder wires the refresh-capable capabilities builder whose
+// skill index the per-turn prompt build settles (branch 01 #103 / C1). The
+// loop attaches it to each per-turn PromptBuilder at the turn boundary
+// (assembleSystemPrompt), so a skill the agent authored mid-session (index
+// marked dirty by the write-path notifier) is visible next turn without a
+// restart. Nil is guarded: a nil argument leaves the loop unwired and the
+// refresh is a no-op (the default), flipping no new default.
+func (l *AgentLoop) SetCapabilitiesBuilder(cb *CapabilitiesBuilder) {
+	if cb == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.capabilitiesBuilder = cb
 }
 
 // SetSkillLoader sets the lazy skill loader for on-demand loading.
