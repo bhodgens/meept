@@ -4472,6 +4472,7 @@ func DefaultConfig() *Config {
 			SupervisorEnabled:    true,
 			SupervisorTimeoutMs:  400,
 			TimeoutSecs:          30,
+			MaxConcurrentCalls:   2,
 			MaxCallMinutes:       15,
 			SilencePromptSeconds: 45,
 			ReorderWindowFrames:  10,
@@ -4715,6 +4716,7 @@ type VoiceConfig struct {
 	TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
 	ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
 	LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
 }
 
 // STTConfig holds configuration for speech-to-text transcription.

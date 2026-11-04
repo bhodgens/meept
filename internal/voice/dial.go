@@ -495,7 +495,9 @@ func (r *CallRegistry) Acquire(ccid, employeeID, target string) (Instance, error
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if len(r.live) >= r.cap {
+	// cap <= 0 means unlimited (the spec's max_concurrent_calls is an
+	// optional cap; zero config value must not make every Acquire busy).
+	if r.cap > 0 && len(r.live) >= r.cap {
 		return Instance{}, fmt.Errorf("%w: %d/%d slots live", ErrBusy, len(r.live), r.cap)
 	}
 	for _, inst := range r.live {

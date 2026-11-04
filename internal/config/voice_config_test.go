@@ -47,6 +47,9 @@ func TestVoiceConfigDefaults(t *testing.T) {
 	if v.TelnyxPublicKey != "" {
 		t.Errorf("voice.telnyx_public_key default = %q, want empty (unset key = routes 503, fail-closed)", v.TelnyxPublicKey)
 	}
+	if v.DefaultEmployee != "" {
+		t.Errorf("voice.default_employee default = %q, want empty (the phone employee is operator-configured)", v.DefaultEmployee)
+	}
 	if v.LoopbackPlainAddr != "" {
 		t.Errorf("voice.loopback_plain_addr default = %q, want empty (no extra listener by default)", v.LoopbackPlainAddr)
 	}

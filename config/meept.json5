@@ -1228,10 +1228,11 @@
     "timeout_secs": 30,                     // per-step call timeout
     "max_call_minutes": 15,                 // hard cap on call length
     "silence_prompt_seconds": 45,           // silence before prompting the caller
-    "max_concurrent_calls": 0,              // 0 = unlimited
+    "max_concurrent_calls": 2,              // concurrent voice instances; 0 = unlimited
     "reorder_window_frames": 10,            // audio reorder window (frames)
     "reorder_gap_ms": 60,                   // audio reorder gap (ms)
     "telnyx_public_key": "",                // base64 Ed25519 public key from Mission Control; unset = routes 503
+    "default_employee": "",                 // phone employee id owning inbound calls; required when enabled
     "child_binary_path": "",                // empty = daemon-adjacent lookup
     "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
   },

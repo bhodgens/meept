@@ -190,6 +190,18 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		if err := child.EnsureRunning(callCtx); err != nil {
 			return nil, err
 		}
+		// Acquire the C8 registry slot for THIS inbound call: the C1 setup
+		// router resolves the talk loop through Registry.Live(), so a call
+		// that skips Acquire can never arm its loop (leaf-15 e2e finding).
+		// The employee is the configured default phone employee; outbound
+		// dials Acquire through the dialer with the requesting employee.
+		if cfg.DefaultEmployee == "" {
+			return nil, fmt.Errorf("voice wiring: voice.default_employee is empty; " +
+				"inbound calls have no owning employee (set the phone employee id)")
+		}
+		if _, err := registry.Acquire(ev.CallControlID, cfg.DefaultEmployee, ev.From); err != nil {
+			return nil, fmt.Errorf("voice wiring: registry acquire: %w", err)
+		}
 		return func() {}, nil
 	}
 	manager := voice.NewManager(voice.ManagerConfig{

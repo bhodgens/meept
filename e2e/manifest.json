@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-01",
+  "generated": "2026-11-03",
   "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
   "path_map": {
     "e2e/suites/smoke": [
@@ -449,19 +449,29 @@
       "plan-critic"
     ],
     "internal/voice/": [
-      "voice-lifecycle"
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
     ],
     "internal/voice/telnyx/": [
-      "voice-lifecycle"
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
     ],
     "internal/voiceframe/": [
-      "voice-lifecycle"
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
     ],
     "internal/voicechild/": [
-      "voice-lifecycle"
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
     ],
     "cmd/meept-voice/": [
-      "voice-lifecycle"
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
     ]
   },
   "suites": [
@@ -924,7 +934,36 @@
     {
       "name": "voice-lifecycle",
       "dir": "e2e/suites/voice-lifecycle",
-      "status": "todo"
+      "status": "implemented",
+      "diff": "L",
+      "scenarios": [
+        "voice-boot-01 enabled boot arms voice routes; disabled boot arms nothing",
+        "voice-child-lazy-01 child binary NOT spawned at boot (zero calls, no control socket)",
+        "voice-webhook-media-01 signed call.initiated accepted 200, answer action placed, media start frame consumed by the splice",
+        "voice-inbound-lifecycle-SKIPPED full loop (greeting->prompt->say->hangup) blocked: leaf-14 inbound SessionSpawner never registry.Acquires, C1 setup router drops the talk-loop arm (named skip in the suite)"
+      ]
+    },
+    {
+      "name": "voice-bargein",
+      "dir": "e2e/suites/voice-bargein",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "voice-bargein-01 media-side interrupt clears ONLY the interrupted call's socket; the concurrent call's socket never sees clear",
+        "voice-bargein-c1-SKIPPED C1 interrupt -> talk-loop clear path blocked by the inbound registry-Acquire gap (named skip in the suite)"
+      ]
+    },
+    {
+      "name": "voice-concurrency",
+      "dir": "e2e/suites/voice-concurrency",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "voice-conc-01 two simultaneous inbound calls: both answered, both media splices armed, one child hosts both",
+        "voice-refusal-01 unresolvable child binary -> inbound webhook refused 5xx, no media session arms",
+        "voice-say-streams-SKIPPED concurrent say streams blocked by the inbound registry-Acquire gap (named skip in the suite)",
+        "voice-dup-target-SKIPPED duplicate-target + max_concurrent caps gate the OUTBOUND dialer path, not the inbound webhook (named skips; pinned by TestRegistryLimits/TestDialRefusals)"
+      ]
     }
   ],
   "scenarios": [
@@ -3877,6 +3916,102 @@
       "paths": [
         "internal/plan/compiler.go",
         "e2e/suites/plan-critic"
+      ]
+    },
+    {
+      "id": "voice-boot-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[voice] enabled boot arms the voice routes (sidecar wired + routes armed log); disabled boot arms nothing",
+      "paths": [
+        "internal/daemon/voice_wiring.go",
+        "internal/comm/http/voice.go"
+      ]
+    },
+    {
+      "id": "voice-child-lazy-01",
+      "suite": "voice-lifecycle",
+      "diff": "S",
+      "title": "[voice] the meept-voice child is NOT spawned at boot; EnsureRunning is lazy on first call",
+      "paths": [
+        "internal/voice/childproc.go"
+      ]
+    },
+    {
+      "id": "voice-webhook-media-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[voice] signed call.initiated accepted 200, answer action placed at the call-control API, media start frame consumed by the splice",
+      "paths": [
+        "internal/comm/http/voice.go",
+        "internal/voice/manager.go",
+        "internal/voice/splice.go"
+      ]
+    },
+    {
+      "id": "voice-inbound-lifecycle-skipped",
+      "suite": "voice-lifecycle",
+      "diff": "L",
+      "title": "[voice] full inbound loop (greeting->prompt->say->hangup) SKIPPED: leaf-14 inbound SessionSpawner never registry.Acquires, C1 setup router drops the talk-loop arm",
+      "paths": [
+        "internal/daemon/voice_wiring.go"
+      ]
+    },
+    {
+      "id": "voice-bargein-01",
+      "suite": "voice-bargein",
+      "diff": "M",
+      "title": "[voice] media-side interrupt clears ONLY the interrupted call's socket; the concurrent call's socket never sees clear",
+      "paths": [
+        "internal/voice/splice.go"
+      ]
+    },
+    {
+      "id": "voice-bargein-c1-skipped",
+      "suite": "voice-bargein",
+      "diff": "M",
+      "title": "[voice] C1 interrupt -> talk-loop clear path SKIPPED: blocked by the inbound registry-Acquire gap",
+      "paths": [
+        "internal/voice/talkloop.go",
+        "internal/daemon/voice_wiring.go"
+      ]
+    },
+    {
+      "id": "voice-conc-01",
+      "suite": "voice-concurrency",
+      "diff": "M",
+      "title": "[voice] two simultaneous inbound calls: both answered, both media splices armed, one child hosts both",
+      "paths": [
+        "internal/voice/childproc.go",
+        "internal/voice/splice.go"
+      ]
+    },
+    {
+      "id": "voice-refusal-01",
+      "suite": "voice-concurrency",
+      "diff": "S",
+      "title": "[voice] unresolvable child binary -> inbound webhook refused 5xx, no media session arms",
+      "paths": [
+        "internal/voice/manager.go",
+        "internal/comm/http/voice.go"
+      ]
+    },
+    {
+      "id": "voice-say-streams-skipped",
+      "suite": "voice-concurrency",
+      "diff": "M",
+      "title": "[voice] concurrent say streams SKIPPED: blocked by the inbound registry-Acquire gap (talk loops cannot arm inbound)",
+      "paths": [
+        "internal/voice/talkloop.go"
+      ]
+    },
+    {
+      "id": "voice-dup-target-skipped",
+      "suite": "voice-concurrency",
+      "diff": "S",
+      "title": "[voice] duplicate-target + max_concurrent caps gate the OUTBOUND dialer, not the inbound webhook (named skips; pinned by TestRegistryLimits/TestDialRefusals)",
+      "paths": [
+        "internal/voice/dial.go"
       ]
     }
   ]
