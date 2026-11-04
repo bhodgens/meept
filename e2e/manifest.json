@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generated": "2026-11-01",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -49,7 +49,9 @@
       "goal-completion",
       "acp-persona-route",
       "dynamic-tools",
-      "llm-hop-tracing"
+      "llm-hop-tracing",
+      "hitl-notifications",
+      "turn-journal"
     ],
     "internal/validator/": [
       "output-filters",
@@ -154,7 +156,9 @@
       "project-binding",
       "state-restart",
       "acp-wire",
-      "llm-hop-tracing"
+      "llm-hop-tracing",
+      "turn-journal",
+      "hitl-notifications"
     ],
     "internal/llm/": [
       "daemon-lifecycle",
@@ -204,7 +208,8 @@
     ],
     "internal/acp/": [
       "acp-wire",
-      "acp-persona-route"
+      "acp-persona-route",
+      "hitl-notifications"
     ],
     "internal/process/": [
       "acp-wire"
@@ -419,6 +424,9 @@
     "internal/gatecapture/": [
       "jev-command-gate"
     ],
+    "internal/agent/turnjournal/": [
+      "turn-journal"
+    ],
     "internal/comm/slack/": [
       "hitl-notifications"
     ],
@@ -462,6 +470,15 @@
     ],
     "e2e/suites/dynamic-tools": [
       "dynamic-tools"
+    ],
+    "internal/comm/http/": [
+      "hitl-notifications"
+    ],
+    "internal/comm/web/": [
+      "hitl-notifications"
+    ],
+    "internal/eval/hitl/": [
+      "hitl-notifications"
     ]
   },
   "suites": [
@@ -471,14 +488,28 @@
       "status": "implemented"
     },
     {
-      "name": "hitl-notifications",
-      "dir": "e2e/suites/hitl-notifications",
-      "status": "todo",
+      "name": "turn-journal",
+      "dir": "e2e/suites/turn-journal",
+      "status": "implemented",
       "diff": "L",
       "scenarios": [
-        "hitl-slack-01 round trip incl. late-click fail-closed",
-        "hitl-gate-02 park-restart-resume",
-        "hitl-deep-03 web fallback"
+        "kill9-resume-01 kill -9 mid-turn -> restart -> resume at NEXT STEP (no LLM re-invocation of journaled steps; pre-kill payloads byte-identical after resume)",
+        "dedup-02 no duplicate completion: a fully-completed turn re-mounted after kill -9 delivers ZERO new completions (per-job queue.job.completed dedup, no job-row minting, journal payload invariance)",
+        "quota-03 a QuotaResetError on the resumed step parks via the existing agent.quota_wait surface; the quota-failed step boundary stays un-completed in the journal",
+        "flagoff-04 flag-off legacy control: kill mid-turn -> the in-flight job re-runs live (executor counter advances); turnjournal.db never exists"
+      ],
+      "note": "leaf 04 hermetic acceptance gate of the turn-journal tree: true SIGKILL on the harness daemon handle + fresh boot over the SAME data dir (state-restart restart primitive); fake-LLM executor counter proves no re-invocation; read-only SQL over <DataDir>/turnjournal.db for row-shape assertions; serial 3-step pinned plan (sleep-8 STEP-B gives the deterministic mid-turn window). KNOWN GAPS observed and reported: boot RecoverStaleTasks force-fails the in-flight step before the reclaim re-runs it, so a resumed turn's task row may read failed while the WORK completes; the journal writer keys run_started/run_closed per step-job round, so a multi-round turn carries multiple close rows and OpenRuns() can miss the parked round (the queue reclaim is the working resume path in that shape)."
+    },
+    {
+      "name": "hitl-notifications",
+      "dir": "e2e/suites/hitl-notifications",
+      "status": "implemented",
+      "diff": "L",
+      "scenarios": [
+        "hitl-slack-01 signed Slack interaction -> relay resolve with approver slack:<uid>; late click after the disableable relay timeout fail-closes (no pending request)",
+        "hitl-gate-02 plan gate park -> daemon restart -> out-of-band approve -> resume",
+        "hitl-deep-03 web fallback substrate: the daemon web server serves the session page for the deep-link fallback URL",
+        "hitl-regime-04 the hitl Runner produces a HitlRegimeReport across all three regimes with every C7 field populated; markdown renders"
       ]
     },
     {
@@ -2652,7 +2683,7 @@
       "id": "naive-user-chat-05",
       "suite": "naive-user-chat",
       "diff": "M",
-      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge \u2014 the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge — the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
       "paths": [
         "internal/agent/loop.go",
         "internal/agent/reply_guard.go"
@@ -2775,7 +2806,7 @@
       "id": "plan-lifecycle-02",
       "suite": "plan-lifecycle",
       "diff": "M",
-      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write \u2014 file parses at every observation",
+      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write — file parses at every observation",
       "paths": [
         "internal/plan/manager.go",
         "internal/plan/filelock.go",
@@ -2985,7 +3016,7 @@
       "id": "goal-completion-01",
       "suite": "goal-completion",
       "diff": "L",
-      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger \u2014 plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
+      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger — plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
       "paths": [
         "internal/employee/manager.go",
         "internal/employee/goal_loop.go",
@@ -3070,7 +3101,7 @@
       "id": "memory-turn-capture-02",
       "suite": "memory-turn-capture",
       "diff": "M",
-      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID \u2014 task reply reaches L0 + status=auto claim",
+      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID — task reply reaches L0 + status=auto claim",
       "paths": [
         "internal/daemon/memory_capture.go",
         "internal/agent/handler.go"
@@ -3268,7 +3299,7 @@
       "id": "github-pr-ci-04",
       "suite": "github-pr-ci",
       "diff": "M",
-      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline \u2014 the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
+      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline — the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
       "paths": [
         "internal/tools/builtin/github_ci.go",
         "internal/githubsvc/rearm.go",
@@ -3988,6 +4019,88 @@
       "paths": [
         "internal/plan/compiler.go",
         "e2e/suites/plan-critic"
+      ]
+    },
+    {
+      "id": "kill9-resume-01",
+      "suite": "turn-journal",
+      "diff": "L",
+      "title": "kill -9 mid-turn -> restart over the same data dir -> resume at NEXT STEP: journaled step payloads byte-identical, executor counter advances, journal ends closed",
+      "paths": [
+        "internal/agent/turnjournal/journal.go",
+        "internal/agent/turnjournal/writer.go",
+        "internal/agent/turnjournal/rehydrate.go",
+        "internal/daemon/daemon.go"
+      ]
+    },
+    {
+      "id": "dedup-02",
+      "suite": "turn-journal",
+      "diff": "L",
+      "title": "no duplicate completion: a completed turn re-mounted after kill -9 never re-delivers queue.job.completed for the same job; completed queue rows stay completed; journal payloads unchanged",
+      "paths": [
+        "internal/queue/queue.go",
+        "internal/agent/turnjournal/replay.go",
+        "internal/daemon/daemon.go"
+      ]
+    },
+    {
+      "id": "quota-03",
+      "suite": "turn-journal",
+      "diff": "M",
+      "title": "a QuotaResetError on the resumed step parks via the existing agent.quota_wait surface; the quota-failed step boundary stays un-completed in the journal (no run close for the parked step)",
+      "paths": [
+        "internal/daemon/components.go",
+        "internal/agent/turnjournal/writer.go"
+      ]
+    },
+    {
+      "id": "flagoff-04",
+      "suite": "turn-journal",
+      "diff": "M",
+      "title": "flag-off legacy control: kill mid-turn -> the in-flight job re-runs live (executor counter advances); turnjournal.db never exists and no journal rows are written",
+      "paths": [
+        "internal/daemon/components.go",
+        "internal/config/schema.go"
+      ]
+    },
+    {
+      "id": "hitl-slack-01",
+      "suite": "hitl-notifications",
+      "diff": "L",
+      "title": "Slack round trip incl. late-click fail-closed: a signed interaction POSTed to /api/v1/slack/interactions resolves the pending permission with approver slack:<uid>; a click arriving after the relay timeout gets no pending request",
+      "paths": [
+        "internal/comm/slack/",
+        "internal/acp/",
+        "internal/daemon/slack_wiring.go"
+      ]
+    },
+    {
+      "id": "hitl-gate-02",
+      "suite": "hitl-notifications",
+      "diff": "L",
+      "title": "gate park -> restart -> resume: a ParkKindGate checkpoint survives a daemon restart and resumes exactly once on out-of-band approval",
+      "paths": [
+        "internal/agent/gate_park.go",
+        "internal/daemon/gate_park_wiring.go"
+      ]
+    },
+    {
+      "id": "hitl-deep-03",
+      "suite": "hitl-notifications",
+      "diff": "S",
+      "title": "deep-link web fallback substrate: the running daemon's web server serves the session page for the C6 fallback URL (<web base>/#/activity?session=<id>)",
+      "paths": [
+        "internal/comm/web/server.go"
+      ]
+    },
+    {
+      "id": "hitl-regime-04",
+      "suite": "hitl-notifications",
+      "diff": "M",
+      "title": "regime report generation: the hitl Runner runs the scripted scenario in all three regimes and the report JSON parses into HitlRegimeReport with every C7 field present; the markdown renders",
+      "paths": [
+        "internal/eval/hitl/"
       ]
     }
   ]
