@@ -97,6 +97,7 @@ internal/comm/http/project/
 # Compiled test binaries
 daemon.test
 *.test
+*.staged
 *.db-shm
 *.db-wal
 results/
@@ -125,6 +126,9 @@ tools/classifier-eval/**/*.local.json5
 rejected_candidates.jsonl
 claim_verdicts.jsonl
 raw_responses.jsonl
+# recall outcome telemetry (leaf 04 C5): per-turn injected-memory citation
+# rows; carries memory text + reply text — same never-commit class as above.
+recall_outcomes.jsonl
 
 # Agent scratch / intermediates (convention: park on socrates or /tmp, never in repos)
 /scratch/
@@ -159,3 +163,4 @@ docs/plans/sealed-plan*.md
 # Probe/scratch MEEPT_HOME dirs from live-validation runs never belong in
 # the repo (they carry stale dev_keys, sockets, sqlite dbs, and binaries).
 .*-probe-home/
+.hermes/worktrees/

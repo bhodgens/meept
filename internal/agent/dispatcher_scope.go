@@ -90,7 +90,7 @@ func (d *Dispatcher) sessionScopeOptions(agentID, sessionID string) []memory.Sea
 // an agent with a wider declared MemoryMaxScope (chief-of-staff) needs its
 // own pass, and a narrower one must never see more than the default.
 // Memory content never reached any prompt before this point.
-func (d *Dispatcher) rescopeMemoryContextForAgent(ctx context.Context, result *DispatchResult, conversationID string) {
+func (d *Dispatcher) rescopeMemoryContextForAgent(ctx context.Context, result *DispatchResult, loop *AgentLoop, conversationID string) {
 	if d.memoryMgr == nil || result == nil || result.OriginalInput == "" {
 		return
 	}
@@ -107,6 +107,14 @@ func (d *Dispatcher) rescopeMemoryContextForAgent(ctx context.Context, result *D
 		return
 	}
 	result.MemoryContext = results
+	// Recall telemetry (leaf 04 T2): this re-scope IS the prompt-facing
+	// recall — what it returns is what buildContextMessage renders. Stage
+	// the injected-item snapshot on the executing loop's conversation so
+	// the turn.terminal subscriber can drain it (nil loop / conversation:
+	// skip, telemetry never blocks routing).
+	if loop != nil {
+		d.recallOutcomeSnapshot(result, loop, conversationID, results)
+	}
 }
 
 // chatAgentScopeOptions is the conservative chat-lane filter used at

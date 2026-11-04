@@ -7054,6 +7054,16 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		}
 	}
 
+	// Recall telemetry (leaf 04 T2): stage the injected-item snapshot on
+	// the conversation BEFORE the turn renders, so the turn.terminal
+	// capture can write one recall_outcomes.jsonl row per item. Identifiable
+	// items only (empty id = seam/legacy path, no row). Runs even when the
+	// assembly produced nothing so a previous turn's staged rows cannot
+	// leak into this turn's outcome.
+	if conv := l.conversations.Get(conversationID); conv != nil {
+		conv.SetRecallOutcomeSnapshot(recallSnapshotFromItems(contextParts))
+	}
+
 	// Set memory context on conversation and freeze snapshot for prefix caching
 	if len(contextParts) > 0 {
 		// Apply the token budget to the STRUCTURED items before joining:
@@ -7334,10 +7344,17 @@ func (l *AgentLoop) extractModelOverrideFromMetadata(metadata json.RawMessage) s
 
 // memoryRecallItem is one recalled memory rendered for prompt injection,
 // carrying the leaf-03 C6 stable flag (metadata "stable" truthy = standing
-// context that renders in the cacheable "Memory (standing)" section).
+// context that renders in the cacheable "Memory (standing)" section) and the
+// leaf-04 C5 telemetry identity: the memory's id + salient tokens so the
+// turn-terminal capture can write the recall_outcomes.jsonl row. Items
+// assembled without an id (legacy/seam paths) carry an empty id and
+// contribute NO outcome row (conservative: an unidentifiable injection is
+// not measurable).
 type memoryRecallItem struct {
 	text   string
 	stable bool
+	id     string
+	query  string
 }
 
 // buildMemoryContext fetches and formats memory context for the task.
@@ -7353,6 +7370,9 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []memo
 		items = append(items, memoryRecallItem{
 			text:   formatMemoryForPrompt(m),
 			stable: memoryItemIsStable(memory.MemoryResult{Memory: memory.Memory{Metadata: m.Metadata}}),
+			// Leaf 04 C5: identity for the recall-outcome row.
+			id:    m.ID,
+			query: t.ContextQuery,
 		})
 	}
 	// Scope filter for THIS loop's session (T2): applied to every fetched

@@ -3242,8 +3242,10 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// prompt-facing context block must carry the ROUTED agent's
 	// MemoryMaxScope (chief-of-staff spans projects; the default project
 	// agent is isolated). Runs after agent resolution, before
-	// buildContextMessage renders the block.
-	d.rescopeMemoryContextForAgent(ctx, result, sessionConversationID)
+	// buildContextMessage renders the block. The resolved loop rides along
+	// so the recall-telemetry snapshot (leaf 04 T2) stages on the SAME
+	// conversation the turn executes against.
+	d.rescopeMemoryContextForAgent(ctx, result, agent, sessionConversationID)
 
 	// Apply the client-supplied per-request model (chat.request "model")
 	// through the loop's ONE-SHOT SetModelOverride seam — the same

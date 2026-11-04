@@ -3233,8 +3233,28 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// epistemic-built extractor (nil = ambient disabled); the message
 	// source is the daemon session store. Same AFTER-queue placement rule
 	// as above (live-gate lesson, commit c941327e).
+	//
+	// Recall outcome telemetry (leaf 04, contract C5): the outcome writer
+	// rides the SAME subscriber. Its drain seam closes over the daemon's
+	// loop sources (singleton + per-session manager) so the turn.terminal
+	// capture can read the injected-memory snapshot the recall render
+	// sites staged pre-render. The manager may not exist yet at this
+	// wiring point (constructed in wireAgentLoopManager), so the closure
+	// reads the component fields at CALL time, not wiring time.
+	recallOutcomes := memory.NewRecallOutcomeLogger(memoryDataDirFor(c.MemoryManager), logger)
+	if recallOutcomes != nil {
+		recallOutcomes.SetLoopSource(func(conversationID string) []memory.RecallOutcomeRecord {
+			loops := []*agent.AgentLoop{c.AgentLoop}
+			if c.AgentLoopManager != nil {
+				for _, loop := range c.AgentLoopManager.List() {
+					loops = append(loops, loop)
+				}
+			}
+			return agent.DrainRecallOutcomeSnapshot(conversationID, loops...)
+		})
+	}
 	WireMemoryCapture(msgBus, c.SessionStore,
-		l0cRecorder(l0c), l0cEnqueuer(l0c), c.AmbientExtractor, logger)
+		l0cRecorder(l0c), l0cEnqueuer(l0c), c.AmbientExtractor, logger, recallOutcomes)
 
 	// Create task registry (before agent registry so task store can be shared)
 	tasksDB := filepath.Join(cfg.Daemon.DataDir, "tasks.db")
