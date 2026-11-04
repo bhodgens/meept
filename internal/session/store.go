@@ -109,6 +109,13 @@ type Store interface {
 
 	// Tool call operations
 	SaveToolCalls(messageID int64, toolCalls []ToolCall) error
+	// SaveMessagesWithToolCalls persists an exchange AND its tool calls in
+	// ONE transaction (tool-call persistence leaf, wiring-gap-remediation
+	// 05): messages insert as in SaveMessages, and toolCalls - keyed by the
+	// INDEX of the messages slice entry the calls belong to (the
+	// ChatMessagesToToolCalls shape) - are written with the inserted
+	// message IDs. An empty map degrades to plain SaveMessages.
+	SaveMessagesWithToolCalls(sessionID string, messages []Message, toolCalls map[int][]ToolCall) error
 	GetToolCalls(messageID int64) ([]ToolCall, error)
 	GetToolCallsForMessages(messageIDs []int64) (map[int64][]ToolCall, error)
 

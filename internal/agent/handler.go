@@ -43,6 +43,16 @@ type SessionMessageSaver interface {
 	SaveMessages(sessionID string, messages []session.Message) error
 }
 
+// sessionToolCallSaver is the optional capability the message saver carries
+// when the backing store can persist tool calls (tool-call persistence
+// leaf, wiring-gap-remediation 05): the exchange save + tool-call write go
+// through ONE store call keyed by message index, best-effort on the chat
+// path. session.Store implementations satisfy this structurally; the type
+// assertion at the persist site keeps test doubles narrow.
+type sessionToolCallSaver interface {
+	SaveMessagesWithToolCalls(sessionID string, messages []session.Message, toolCalls map[int][]session.ToolCall) error
+}
+
 // ChatHandler bridges the message bus to the AgentLoop.
 // It subscribes to chat.request and publishes responses to chat.response.
 type ChatHandler struct {
@@ -1394,8 +1404,10 @@ func (h *ChatHandler) recordExchangeInSessionConv(conversationID, userMsg, reply
 
 // persistExchange saves the user message and assistant reply to the session
 // store so HTTP-only clients (Flutter GUI) can reload conversation history.
-// Errors are logged but never propagate — persistence failure must not break
-// the chat response path.
+// When the loop holds tool calls for THIS turn (assistant messages after
+// the last user message in the conversation), they persist keyed to the
+// assistant row via SaveMessagesWithToolCalls. Errors are logged but never
+// propagate - persistence failure must not break the chat response path.
 func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.ContentPart, reply string, agentID string) {
 	if h.messageSaver == nil || sessionID == "" {
 		return
@@ -1419,7 +1431,9 @@ func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.Con
 	msgs = append(msgs, userEntry)
 
 	// Assistant reply (skip empty replies, e.g. async-dispatch acks)
+	assistantIdx := -1
 	if reply != "" {
+		assistantIdx = len(msgs)
 		msgs = append(msgs, session.Message{
 			SessionID: sessionID,
 			Role:      "assistant",
@@ -1431,6 +1445,30 @@ func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.Con
 		})
 	}
 
+	// Tool-call persistence (wiring-gap-remediation leaf 05): the loop's
+	// conversation holds THIS turn's assistant tool-call messages; extract
+	// them and attach to the assistant row in one store transaction.
+	// Best-effort: a saver without the capability (or a turn with no tool
+	// calls) writes the exchange exactly as before.
+	if assistantIdx >= 0 {
+		if tcs := h.turnToolCalls(sessionID); len(tcs) > 0 {
+			if tcSaver, ok := h.messageSaver.(sessionToolCallSaver); ok {
+				if err := tcSaver.SaveMessagesWithToolCalls(sessionID, msgs, map[int][]session.ToolCall{
+					assistantIdx: tcs,
+				}); err != nil {
+					h.logger.Warn("failed to persist chat exchange with tool calls",
+						"session_id", sessionID,
+						"message_count", len(msgs),
+						"tool_calls", len(tcs),
+						"error", err,
+					)
+					return
+				}
+				return
+			}
+		}
+	}
+
 	if err := h.messageSaver.SaveMessages(sessionID, msgs); err != nil {
 		h.logger.Warn("failed to persist chat exchange",
 			"session_id", sessionID,
@@ -1438,6 +1476,53 @@ func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.Con
 			"error", err,
 		)
 	}
+}
+
+// turnToolCalls collects the current turn's tool calls from the loop's
+// conversation: every ToolCall on assistant messages after the LAST user
+// message. Read-only and best-effort - a missing conversation, a loop
+// without one, or an empty tail yields nil and the exchange persists
+// without tool calls (pre-leaf behavior).
+func (h *ChatHandler) turnToolCalls(sessionID string) []session.ToolCall {
+	if h.loop == nil {
+		return nil
+	}
+	conv := h.loop.GetConversation(sessionID)
+	if conv == nil {
+		return nil
+	}
+	chatMsgs := conv.GetMessages()
+	var tcs []session.ToolCall
+	seen := map[string]bool{}
+	for _, cm := range chatMsgs {
+		if cm.Role == llm.RoleUser {
+			// New turn boundary: drop everything collected so far.
+			tcs = nil
+			seen = map[string]bool{}
+			continue
+		}
+		if cm.Role != llm.RoleAssistant {
+			continue
+		}
+		for _, tc := range cm.ToolCalls {
+			// Dedupe by call id: a re-entrant persist (quota/budget
+			// resume paths both call persistExchange) must not double-
+			// write the same call.
+			if tc.ID != "" && seen[tc.ID] {
+				continue
+			}
+			if tc.ID != "" {
+				seen[tc.ID] = true
+			}
+			tcs = append(tcs, session.ToolCall{
+				ToolName:   tc.Function.Name,
+				ToolCallID: tc.ID,
+				Arguments:  tc.Function.Arguments,
+				Seq:        len(tcs),
+			})
+		}
+	}
+	return tcs
 }
 
 // publishPlanRequest sends a plan request to the orchestrator via the bus.

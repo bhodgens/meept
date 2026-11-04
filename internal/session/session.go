@@ -1298,6 +1298,13 @@ func (s *MemoryStore) SaveToolCalls(messageID int64, toolCalls []ToolCall) error
 	return nil
 }
 
+// SaveMessagesWithToolCalls persists the messages only (MemoryStore keeps
+// no tool-call records; the SQLite store is the persistence path for the
+// tool-call rows).
+func (s *MemoryStore) SaveMessagesWithToolCalls(sessionID string, messages []Message, toolCalls map[int][]ToolCall) error {
+	return s.SaveMessages(sessionID, messages)
+}
+
 // GetToolCalls returns empty for MemoryStore (tool calls are only persisted in SQLite).
 func (s *MemoryStore) GetToolCalls(messageID int64) ([]ToolCall, error) {
 	return nil, nil

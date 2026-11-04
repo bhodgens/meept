@@ -816,6 +816,9 @@ func (s *SQLiteStore) Attach(sessionID, clientID string) error {
 }
 
 // Detach removes a client from a session.
+// MEM-9 FIX: verify session still exists before returning success when client was not found.
+// Without this check, if the row is deleted between getByColumnUnsafe and here,
+// the call silently succeeds (no-op) instead of returning an error.
 func (s *SQLiteStore) Detach(sessionID, clientID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -825,13 +828,25 @@ func (s *SQLiteStore) Detach(sessionID, clientID string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
+	found := false
 	for i, c := range session.AttachedClients {
 		if c == clientID {
 			session.AttachedClients = append(session.AttachedClients[:i], session.AttachedClients[i+1:]...)
-			return s.updateSession(session)
+			found = true
+			break
 		}
 	}
 
+	if err := s.updateSession(session); err != nil {
+		return err
+	}
+	if !found {
+		// MEM-9 FIX: row existed before but may have been deleted concurrently;
+		// updateSession already returned error if so. If we get here with !found,
+		// the row existed but nothing changed. Log and return nil for idempotency
+		// (the common case for double-detach).
+		s.logger.Debug("Detach: client not found in session", "session", sessionID, "client", clientID)
+	}
 	return nil
 }
 
@@ -869,6 +884,9 @@ func (s *SQLiteStore) AddWorker(sessionID, workerID string) error {
 }
 
 // RemoveWorker removes a worker ID from a session.
+// MEM-9 FIX: verify session still exists before returning when worker not found.
+// Without this check, if the row is deleted between getByColumnUnsafe and here,
+// the call silently succeeds (no-op) instead of returning an error.
 func (s *SQLiteStore) RemoveWorker(sessionID, workerID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -878,13 +896,21 @@ func (s *SQLiteStore) RemoveWorker(sessionID, workerID string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
+	found := false
 	for i, w := range session.WorkerIDs {
 		if w == workerID {
 			session.WorkerIDs = append(session.WorkerIDs[:i], session.WorkerIDs[i+1:]...)
-			return s.updateSession(session)
+			found = true
+			break
 		}
 	}
 
+	if err := s.updateSession(session); err != nil {
+		return err
+	}
+	if !found {
+		s.logger.Debug("RemoveWorker: worker not found in session", "session", sessionID, "worker", workerID)
+	}
 	return nil
 }
 
@@ -992,6 +1018,108 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 				"session_id", sessionID, "role", msg.Role, "error", perr)
 		}
 	}
+	return nil
+}
+
+// SaveMessagesWithToolCalls persists an exchange and its tool calls in ONE
+// transaction (tool-call persistence leaf, wiring-gap-remediation 05).
+// messages insert exactly as SaveMessages; toolCalls is keyed by the INDEX
+// of the messages entry whose row the calls attach to - the map keys are
+// resolved to the inserted autoincrement IDs inside the same tx, so a
+// crash cannot leave tool calls pointing at a message row that never
+// committed (or vice versa). An empty map degrades to plain SaveMessages.
+func (s *SQLiteStore) SaveMessagesWithToolCalls(sessionID string, messages []Message, toolCalls map[int][]ToolCall) error {
+	if len(toolCalls) == 0 {
+		return s.SaveMessages(sessionID, messages)
+	}
+
+	s.mu.Lock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) {
+			slog.Debug("transaction rollback error", "error", rErr)
+		}
+	}()
+
+	msgStmt, err := tx.Prepare(`
+		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, parts)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer msgStmt.Close()
+
+	tcStmt, err := tx.Prepare(`
+		INSERT INTO session_tool_calls (message_id, tool_name, tool_call_id, arguments, result, seq, trace_id, span_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("failed to prepare tool call insert: %w", err)
+	}
+	defer tcStmt.Close()
+
+	for i, msg := range messages {
+		var entryType, branchID string
+		if msg.EntryType != "" {
+			entryType = msg.EntryType
+		} else {
+			entryType = KeyMessage
+		}
+		if msg.BranchID != "" {
+			branchID = msg.BranchID
+		} else {
+			branchID = BranchMain
+		}
+
+		var partsJSON any
+		searchContent := msg.Content
+		if len(msg.Parts) > 0 {
+			partsJSON, err = json.Marshal(msg.Parts)
+			if err != nil {
+				s.mu.Unlock()
+				return fmt.Errorf("failed to marshal message parts: %w", err)
+			}
+			partsText := llm.ContentFromParts(msg.Parts, true)
+			if searchContent == "" {
+				searchContent = partsText
+			} else if partsText != "" {
+				searchContent = searchContent + "\n" + partsText
+			}
+		}
+
+		res, err := msgStmt.Exec(sessionID, msg.Role, searchContent, msg.Timestamp.Format(time.RFC3339),
+			msg.ParentID, entryType, branchID, msg.Model, msg.AgentID, msg.Name, msg.ToolCallID, partsJSON) //nolint:mutexio // mutex serializes sqlite connection access
+		if err != nil {
+			s.mu.Unlock()
+			return fmt.Errorf("failed to insert message: %w", err)
+		}
+		if tcs, ok := toolCalls[i]; ok && len(tcs) > 0 {
+			messageID, idErr := res.LastInsertId()
+			if idErr != nil {
+				s.mu.Unlock()
+				return fmt.Errorf("failed to read inserted message id: %w", idErr)
+			}
+			for _, tc := range tcs {
+				if _, err := tcStmt.Exec(messageID, tc.ToolName, tc.ToolCallID, tc.Arguments, tc.Result, tc.Seq, tc.TraceID, tc.SpanID); err != nil { //nolint:mutexio // mutex serializes sqlite connection access
+					s.mu.Unlock()
+					return fmt.Errorf("failed to insert tool call: %w", err)
+				}
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("failed to commit message+tool call batch: %w", err)
+	}
+
+	s.mu.Unlock()
 	return nil
 }
 
