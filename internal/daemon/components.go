@@ -522,6 +522,7 @@ type Components struct {
 	// interactions handler is handed to the unified HTTP server via
 	// http.WithSlackInteractions in daemon.go.
 	SlackChannel      *slack.SlackChannel
+	Voice             *VoiceWiring
 	SlackInteractions *slack.InteractionsHandler
 
 	// Code intelligence
@@ -2327,6 +2328,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		})
 	}
 	c.AgentLoop = agent.NewAgentLoop("daemon", "", agentOpts...)
+	// Memory-scope multiuser bit (leaf 03-agent-recall-wiring, Flag 3):
+	// the daemon-wide multiuser.enabled flag ORs into the scope resolution
+	// so an identity gap under enabled multiuser fails closed.
+	c.AgentLoop.SetMultiUserScopeEnabled(cfg.MultiUser.Enabled)
 	// Wire the global refusal-fallback default (refusal-fallback tree 02+03):
 	// the loop package cannot import internal/config, so the models.json5
 	// refusal_model slot is mirrored onto the loop here. Per-agent spec
@@ -3886,6 +3891,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// (the default) keeps the actionable ErrNoWorkingDir.
 		c.Dispatcher.SetDefaultWorkingDir(cfg.Daemon.DefaultWorkingDir)
 
+		// Wire the multiuser bit for memory-scope resolution (leaf
+		// 03-agent-recall-wiring, Flag 3 fail-closed).
+		c.Dispatcher.SetMultiUserScopeEnabled(cfg.MultiUser.Enabled)
+
 		// Register platform tools now that agent registry is available
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, msgBus, logger)
 
@@ -4889,6 +4898,64 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				"constitution_store", wiring.ConstitutionStore != nil,
 				"goal_store", wiring.GoalStore != nil,
 				"audit_store", wiring.AuditStore != nil,
+			)
+		}
+	}
+
+	// Voice sidecar ([voice] block, voice-sidecar leaf 14): the whole-
+	// daemon wiring - call manager, registry, dialer, talk loops,
+	// supervisor, child proc, text server, employee binding, and the two
+	// Telnyx HTTP routes. Ordered AFTER the loop manager (loopTurnRunner
+	// clones loops per session), the session store, the employee
+	// framework (goal holds), and the effects ledger (dial reservation);
+	// every field captured by WireVoice is assigned before this call
+	// (pointer-capture order rule). Disabled boots (default) skip the
+	// block entirely - zero goroutines, zero sockets. An ENABLED boot
+	// with a broken voice config is a FATAL wiring error: answering
+	// phones half-wired strands live callers.
+	if cfg.Voice.Enabled {
+		vdeps := WireVoiceDeps{
+			Config:   cfg,
+			Bus:      msgBus,
+			Sessions: c.SessionStore,
+			Loops:    c.AgentLoopManager,
+			Template: c.AgentLoop,
+			Effects:  c.EffectsLedger,
+			Broker:   c.ensureSecretBroker(logger),
+			Logger:   logger,
+		}
+		// Audit chain: the employee wiring hands the Manager the chain DB
+		// handle; voice dial audit rows append through a store opened over
+		// the same pool (shared-DB convention, OpenStoreFromDB's Close is
+		// a no-op on caller-owned handles).
+		if chainDB := activityChainDB(c); chainDB != nil {
+			if s, err := auditlog.OpenStoreFromDB(chainDB, logger.With("component", "voice-audit")); err == nil {
+				vdeps.Audit = s
+			} else {
+				logger.Warn("voice wiring: audit chain store unavailable; dial audit rows degraded", "error", err)
+			}
+		}
+		// Supervisor chatter (C6 fast endpoint): voice.supervisor_model
+		// resolves to the classifier/small-model client when configured,
+		// else the main client. nil degrades the gate to allow-all with a
+		// single construction warning (NewSupervisor logs it).
+		vdeps.SupervisorChatter = voiceSupervisorChatter(c)
+		wiring, err := WireVoice(c.ctx, vdeps)
+		if err != nil {
+			logger.Error("FATAL: voice wiring failed", "error", err)
+			return nil, err
+		}
+		if wiring == nil {
+			// Degraded to disabled (missing secrets broker/token): the
+			// daemon boots without voice; every call path stays refused.
+			c.Voice = nil
+			logger.Warn("voice sidecar disabled: wiring degraded (see voice wiring WARN above)")
+		} else {
+			c.Voice = wiring
+			logger.Info("voice sidecar wired",
+				"max_concurrent_calls", cfg.Voice.MaxConcurrentCalls,
+				"supervisor_enabled", cfg.Voice.SupervisorEnabled,
+				"routes_armed", wiring.Routes != nil,
 			)
 		}
 	}
@@ -9783,6 +9850,21 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 			// orchestrator provisioned one for this step's phase.
 			if wd := p.resolveStepWorkingDirFor(job, stepPayload.StepID, stepPayload.SessionID); wd != "" {
 				loop.SetWorkingDir(wd)
+				// Memory-scope identity (leaf 03-agent-recall-wiring): the
+				// step job's origin session binds the loop's project +
+				// multiuser identity the memory tools stamp/filter with —
+				// task-scoped loops would otherwise stay scope-blind while
+				// session loops are filtered (three-site rule).
+				if p.sessionStore != nil && stepPayload.SessionID != "" {
+					sess := p.sessionStore.Get(stepPayload.SessionID)
+					if sess == nil {
+						sess = p.sessionStore.GetByConversationID(stepPayload.SessionID)
+					}
+					if sess != nil {
+						loop.SetProjectID(sess.ProjectID)
+						loop.SetScopeUserID(sess.OwnerID)
+					}
+				}
 				// Group fence roots (agent-groups leaf 04 F6): a managed
 				// agent's fs_roots arm an ADDITIVE fence on this loop —
 				// writes outside the group roots are denied at the

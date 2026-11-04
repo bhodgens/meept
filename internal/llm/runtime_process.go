@@ -356,9 +356,17 @@ func (p *RuntimeProcess) Start(ctx context.Context, stdout, stderr io.Writer) er
 		p.pid = pid
 	} else {
 		p.cmd = exec.CommandContext(spawnCtx, name, args...)
+		// SpawnEnv (empty for every llama/MLX config) replaces the child's
+		// whole environment; empty keeps the inherited one.
+		if len(p.config.SpawnEnv) > 0 {
+			p.cmd.Env = p.config.SpawnEnv
+		}
 		p.cmd.Stdout = stdout
 		p.cmd.Stderr = stderr
-		p.cmd.Stdin = nil // Explicitly set stdin to nil to avoid blocking
+		// SpawnStdin (nil for every llama/MLX config) feeds the child's STDIN:
+		// the voice child's start token arrives only this way. A read error
+		// surfaces through the child's exit, not here.
+		p.cmd.Stdin = p.config.SpawnStdin //nolint:mutexio // field read only here, before Wait
 		p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 		if err := p.cmd.Start(); err != nil {
