@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	//nolint:revive // sqlite3 driver registration side effect
@@ -135,11 +136,13 @@ func (g *gateDB) insert(_ context.Context, rec *CommandGateRecord) error {
 // list returns records newest-first under the filters.
 func (g *gateDB) list(_ context.Context, opts ListOptions) ([]CommandGateRecord, error) {
 	q := `SELECT id, ts, chokepoint, command, context_blob,
-		     prior_score, prior_confidence, prior_degraded,
-		     human_decision, approver
-	      FROM command_gate_records`
-	var conds []string
+	     prior_score, prior_confidence, prior_degraded,
+	     human_decision, approver
+      FROM command_gate_records`
+	// Filter fragments are compile-time constants joined with WHERE/AND;
+	// all user-influenced values bind through args (gosec G202).
 	var args []any
+	var conds []string
 	if opts.Chokepoint != "" {
 		conds = append(conds, "chokepoint = ?")
 		args = append(args, opts.Chokepoint)
@@ -148,14 +151,16 @@ func (g *gateDB) list(_ context.Context, opts ListOptions) ([]CommandGateRecord,
 		conds = append(conds, "ts >= ?")
 		args = append(args, opts.Since.UTC().Format(time.RFC3339Nano))
 	}
-	for _, c := range conds {
-		q += " WHERE " + c
+	if len(conds) > 0 {
+		q += " WHERE " + strings.Join(conds, " AND ")
 	}
 	q += " ORDER BY ts DESC, id DESC"
 	if opts.Limit > 0 {
-		q += fmt.Sprintf(" LIMIT %d OFFSET %d", opts.Limit, opts.Offset)
+		q += " LIMIT ? OFFSET ?"
+		args = append(args, opts.Limit, opts.Offset)
 	} else if opts.Offset > 0 {
-		q += fmt.Sprintf(" OFFSET %d", opts.Offset)
+		q += " OFFSET ?"
+		args = append(args, opts.Offset)
 	}
 
 	rows, err := g.db.Query(q, args...)
