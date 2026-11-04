@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/memory/conflict"
@@ -108,6 +109,29 @@ type DistillWorker struct {
 	conflict *ConflictWiring
 	now      func() time.Time
 	logger   *slog.Logger
+	// noModelWarned dedups the models-less Warn (T4 of the memory-defaults
+	// leaf): ONE Warn per worker lifetime, not one per retry cycle — a
+	// models-less default-on daemon must not spam the log on every queued
+	// distill job. Guarded by noModelMu.
+	noModelMu     sync.Mutex
+	noModelWarned bool
+}
+
+// warnNoModelOnce logs the models-less skip warning at most once per worker.
+// The queue layer owns retry/backoff, so the JOB stays queued and will be
+// re-driven when a model becomes available (the L0 lines survive on disk;
+// the progress marker never advances on a skip, so the retry re-reads the
+// same window — no lost lines, no duplicated claims).
+func (w *DistillWorker) warnNoModelOnce(stage string) {
+	w.noModelMu.Lock()
+	defer w.noModelMu.Unlock()
+	if w.noModelWarned {
+		return
+	}
+	w.noModelWarned = true
+	w.logger.Warn("distill: no memory model available; distill jobs skip until a model resolves "+
+		"(jobs stay queued; l0 lines preserved; set models.json5 memory_model or configure a provider)",
+		"stage", stage)
 }
 
 // NewDistillWorker constructs a distill worker.
@@ -200,7 +224,17 @@ func (w *DistillWorker) handleL1Extract(ctx context.Context, payload []byte) (an
 		return nil, errors.New("distill: l1 worker has no memory manager")
 	}
 	if w.llm == nil {
-		return nil, errors.New("distill: l1 worker has no llm configured")
+		// Models-less host (memory-defaults leaf 02 T4): default-on L0
+		// means jobs are enqueued on every daemon, but a host with NO
+		// resolvable model must not error-loop the queue. Skip with ONE
+		// Warn per cycle and leave the job queued (return no error) —
+		// the marker never advances, so a later model-driven cycle
+		// re-distills the same window from the surviving L0 lines.
+		w.warnNoModelOnce("l1")
+		return map[string]any{
+			"status":     "skipped_no_model",
+			"session_id": p.SessionID,
+		}, nil
 	}
 
 	marker, err := w.l0ProgressMarker(ctx, p.SessionID)
@@ -434,15 +468,29 @@ func (w *DistillWorker) handleL2Scene(ctx context.Context, payload []byte) (any,
 		return map[string]any{"status": "ok", "session_id": p.SessionID, "scenes": 0}, nil
 	}
 
-	segments, err := w.segmentScenes(ctx, recs)
-	segmentMethod := "llm"
-	if err != nil || len(segments) == 0 {
-		if err != nil {
-			w.logger.Warn("distill: scene segmentation unusable, falling back to whole-session scene",
-				"session_id", p.SessionID, "error", err)
-		}
+	var (
+		segments      []sceneSegment
+		segmentMethod string
+	)
+	if w.llm == nil {
+		// Models-less host (memory-defaults leaf 02 T4): same posture as
+		// the L1 skip — Warn once, degrade to the fallback whole-session
+		// scene (which needs no LLM), never error-loop the queue.
+		w.warnNoModelOnce("l2")
 		segments = []sceneSegment{{SceneName: "session", MessageIDs: recordIDs(recs)}}
 		segmentMethod = "fallback"
+	} else {
+		var segErr error
+		segments, segErr = w.segmentScenes(ctx, recs)
+		segmentMethod = "llm"
+		if segErr != nil || len(segments) == 0 {
+			if segErr != nil {
+				w.logger.Warn("distill: scene segmentation unusable, falling back to whole-session scene",
+					"session_id", p.SessionID, "error", segErr)
+			}
+			segments = []sceneSegment{{SceneName: "session", MessageIDs: recordIDs(recs)}}
+			segmentMethod = "fallback"
+		}
 	}
 
 	written := 0

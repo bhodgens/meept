@@ -125,6 +125,14 @@ type AgentSpec struct {
 	// refusal_model slot; both empty = refusal fallback disabled for this
 	// agent (precedence: per-agent spec field > global slot > off).
 	RefusalModel string `json:"refusal_model,omitempty" yaml:"refusal_model,omitempty"`
+	// MemoryMaxScope declares the WIDEST memory recall scope this agent's
+	// sessions operate at (leaf 03-agent-recall-wiring, C3; chief-of-staff
+	// pattern D2): "" or "project" (default — isolated to the session's
+	// bound project), "user" (all the user's projects), "global" (spans
+	// projects; the chief-of-staff declaration). Invalid values fail SAFE
+	// to project (resolveScopeInputs warns). AGENT.md frontmatter key:
+	// memory_max_scope.
+	MemoryMaxScope string `json:"memory_max_scope,omitempty" yaml:"memory_max_scope,omitempty"`
 	// AdditionalTools are tools beyond the baseline that this agent has access to.
 	AdditionalTools []string `json:"additional_tools,omitempty"`
 	// ToolScopeLimit caps how many tools are offered to this agent in the
@@ -183,6 +191,15 @@ var BaselineTools = []string{
 	ToolMemoryStore,
 	ToolMemorySearch,
 	ToolMemoryGetContext,
+	// Knowledge-asset reads (tree 04): default-on per the memory
+	// second-brain decisions D1-D3 (plan
+	// docs/plans/20261030-memory-second-brain) — the store registers its
+	// tools on every daemon, so the read side rides the baseline grant
+	// (on-demand tool access; nothing ambiently injected). knowledge_ingest
+	// stays grant-only (memory_write class).
+	"knowledge_search",
+	"knowledge_read",
+	"knowledge_impact",
 	"task_create",
 	"task_get",
 	"task_list",

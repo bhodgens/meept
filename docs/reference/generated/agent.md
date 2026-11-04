@@ -4,6 +4,10 @@
 
 	import "github.com/caimlas/meept/internal/agent"
 
+Tool\-registry context seam \(token\-efficiency branch 02 leaf 02\).
+
+The executor injects the agent's ALREADY\-filtered tool registry into the tool\-execution context before invoking any tool \(executeToolWithRetry\). The codemode tool \(internal/tools/builtin/codemode.go\) reads it to build the sandbox's tool bridges strictly from that filtered set — it never widens the agent's tool access, only batches the calls the agent is already permitted to make.
+
 collaboration\_handoff.go implements the shared inter\-agent handoff boundary seam used by all three collaboration drivers \(plan: docs/plans/20261031\-agent\-boundary\-hardening/01\-inter\-agent\-taint/ 02\-driver\-wiring.md; research decisions D1/D2/D4 in docs/research/agent\-boundary\-taint\-findings.md\).
 
 RAW AGENT OUTPUT is untrusted \(D4: provenance is attached where the data enters\). Before a driver embeds a peer's raw output into the next agent's prompt, it records that exact span as an untrusted segment on the taint tracker \(keyed "collab:\<driver\>:\<role\>"\) and scans it with the inter\-agent deny patterns. The driver's OWN framing text stays clean: it is never recorded and never scanned.
@@ -64,11 +68,14 @@ Package agent provides the agent loop and related components.
 - [func BusTopic\(eventType AgentEventType\) string](<#BusTopic>)
 - [func CanonicalToolName\(name string\) string](<#CanonicalToolName>)
 - [func ClearPerOperationBackoffOverrideForTest\(key string\)](<#ClearPerOperationBackoffOverrideForTest>)
+- [func ContextWithToolRegistry\(ctx context.Context, reg ToolRegistry\) context.Context](<#ContextWithToolRegistry>)
 - [func ContinuationDescription\(desc string, k, n int\) string](<#ContinuationDescription>)
 - [func CosineSimilarity\(a, b \[\]float64\) float64](<#CosineSimilarity>)
 - [func CurrentLaneAgentIndex\(\) map\[string\]string](<#CurrentLaneAgentIndex>)
 - [func DefaultCoworkerAwareness\(\) string](<#DefaultCoworkerAwareness>)
 - [func DefaultSoulMD\(\) string](<#DefaultSoulMD>)
+- [func DrainRecallOutcomeSnapshot\(conversationID string, loops ...\*AgentLoop\) \[\]memory.RecallOutcomeRecord](<#DrainRecallOutcomeSnapshot>)
+- [func EffectiveMemoryScope\(agentDecl, groupCeiling string\) memory.Scope](<#EffectiveMemoryScope>)
 - [func EnforceMemoryItemBudget\(items \[\]string, maxTokens int, estimate ...func\(string\) int\) \[\]string](<#EnforceMemoryItemBudget>)
 - [func EstimateStepTokens\(desc string, cfg AllotmentConfig\) int](<#EstimateStepTokens>)
 - [func ExecutorAgentIDs\(\) \[\]string](<#ExecutorAgentIDs>)
@@ -96,6 +103,7 @@ Package agent provides the agent loop and related components.
 - [func PlanCriticSpawnVerifierCalls\(\) int](<#PlanCriticSpawnVerifierCalls>)
 - [func PresetPrompt\(presetName string, taskDescription string\) \(string, error\)](<#PresetPrompt>)
 - [func PublishLaneAgentIndex\(idx map\[string\]string\)](<#PublishLaneAgentIndex>)
+- [func RecalledSnapshotItems\(results \[\]memory.MemoryResult, query string\) \[\]memory.RecallOutcomeRecord](<#RecalledSnapshotItems>)
 - [func RecoverPendingFollowUps\(db \*sql.DB, msgBus \*bus.MessageBus, logger \*slog.Logger\)](<#RecoverPendingFollowUps>)
 - [func RenderSpawnContext\(sc SpawnContext\) string](<#RenderSpawnContext>)
 - [func ResultsToChatMessages\(results \[\]\*ExecutionResult\) \[\]llm.ChatMessage](<#ResultsToChatMessages>)
@@ -250,6 +258,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetMemvidClient\(client \*memvid.Client\)](<#AgentLoop.SetMemvidClient>)
   - [func \(l \*AgentLoop\) SetMessageDrainer\(d MessageDrainer\)](<#AgentLoop.SetMessageDrainer>)
   - [func \(l \*AgentLoop\) SetModelOverride\(modelRef string\)](<#AgentLoop.SetModelOverride>)
+  - [func \(l \*AgentLoop\) SetMultiUserScopeEnabled\(enabled bool\)](<#AgentLoop.SetMultiUserScopeEnabled>)
   - [func \(l \*AgentLoop\) SetNotificationPublisher\(publisher NotificationPublisher\)](<#AgentLoop.SetNotificationPublisher>)
   - [func \(l \*AgentLoop\) SetParallelismConfig\(baseParallelism int, profiles map\[string\]int\)](<#AgentLoop.SetParallelismConfig>)
   - [func \(l \*AgentLoop\) SetPersistentModelOverride\(modelRef string\)](<#AgentLoop.SetPersistentModelOverride>)
@@ -262,6 +271,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetResponseAnalyzer\(ra \*metrics.ResponseAnalyzer\)](<#AgentLoop.SetResponseAnalyzer>)
   - [func \(l \*AgentLoop\) SetRetryMetrics\(m \*RetryMetrics\)](<#AgentLoop.SetRetryMetrics>)
   - [func \(l \*AgentLoop\) SetSchemaModeConfig\(cfg config.AgentToolsConfig\)](<#AgentLoop.SetSchemaModeConfig>)
+  - [func \(l \*AgentLoop\) SetScopeUserID\(uid string\)](<#AgentLoop.SetScopeUserID>)
   - [func \(l \*AgentLoop\) SetSecurityChecker\(checker \*security.PermissionChecker\)](<#AgentLoop.SetSecurityChecker>)
   - [func \(l \*AgentLoop\) SetSessionAttached\(attached bool\)](<#AgentLoop.SetSessionAttached>)
   - [func \(l \*AgentLoop\) SetSessionRefresher\(r \*session.SessionRefresher\)](<#AgentLoop.SetSessionRefresher>)
@@ -292,6 +302,7 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) CapabilitiesMap\(\) \*CapabilitiesMap](<#AgentRegistry.CapabilitiesMap>)
   - [func \(r \*AgentRegistry\) Close\(\) error](<#AgentRegistry.Close>)
   - [func \(r \*AgentRegistry\) DB\(\) \*sql.DB](<#AgentRegistry.DB>)
+  - [func \(r \*AgentRegistry\) EnsureLateDiscovered\(\)](<#AgentRegistry.EnsureLateDiscovered>)
   - [func \(r \*AgentRegistry\) Get\(id string\) \(\*AgentLoop, error\)](<#AgentRegistry.Get>)
   - [func \(r \*AgentRegistry\) GetActiveQueue\(conversationID string\) \(queue \*MessageQueue, generation uint64\)](<#AgentRegistry.GetActiveQueue>)
   - [func \(r \*AgentRegistry\) GetActiveQueueLoop\(conversationID string\) \*AgentLoop](<#AgentRegistry.GetActiveQueueLoop>)
@@ -618,13 +629,17 @@ Package agent provides the agent loop and related components.
   - [func \(c \*Conversation\) MarkActive\(\)](<#Conversation.MarkActive>)
   - [func \(c \*Conversation\) MarkInactive\(\)](<#Conversation.MarkInactive>)
   - [func \(c \*Conversation\) PrefixChanged\(\) bool](<#Conversation.PrefixChanged>)
+  - [func \(c \*Conversation\) RecallOutcomeSnapshot\(\) \[\]memory.RecallOutcomeRecord](<#Conversation.RecallOutcomeSnapshot>)
   - [func \(c \*Conversation\) RemoveCompactedMessages\(indices \[\]int\) int](<#Conversation.RemoveCompactedMessages>)
   - [func \(c \*Conversation\) RemoveLast\(\) \*llm.ChatMessage](<#Conversation.RemoveLast>)
   - [func \(c \*Conversation\) RestoreFromMessages\(messages \[\]llm.ChatMessage\)](<#Conversation.RestoreFromMessages>)
   - [func \(c \*Conversation\) SetBranchPoint\(index int\)](<#Conversation.SetBranchPoint>)
   - [func \(c \*Conversation\) SetMemoryContext\(ctxStr string\)](<#Conversation.SetMemoryContext>)
+  - [func \(c \*Conversation\) SetRecallOutcomeSnapshot\(items \[\]memory.RecallOutcomeRecord\)](<#Conversation.SetRecallOutcomeSnapshot>)
+  - [func \(c \*Conversation\) SetStandingMemoryContext\(standing string\)](<#Conversation.SetStandingMemoryContext>)
   - [func \(c \*Conversation\) SetSystemPrompt\(prompt string\)](<#Conversation.SetSystemPrompt>)
   - [func \(c \*Conversation\) StabilizeToolPrefix\(tools \[\]llm.ToolDefinition\) \[\]llm.ToolDefinition](<#Conversation.StabilizeToolPrefix>)
+  - [func \(c \*Conversation\) StandingMemoryContext\(\) string](<#Conversation.StandingMemoryContext>)
   - [func \(c \*Conversation\) Truncate\(\) int](<#Conversation.Truncate>)
   - [func \(c \*Conversation\) TruncateByImportance\(tokenBudget int\) int](<#Conversation.TruncateByImportance>)
   - [func \(c \*Conversation\) TruncateByTokens\(tokenBudget int\) int](<#Conversation.TruncateByTokens>)
@@ -705,6 +720,7 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) SetInstructionParser\(parser \*InstructionParser\)](<#Dispatcher.SetInstructionParser>)
   - [func \(d \*Dispatcher\) SetInstructionStore\(store \*preferences.Store\)](<#Dispatcher.SetInstructionStore>)
   - [func \(d \*Dispatcher\) SetMetricsStore\(store \*metrics.Store\)](<#Dispatcher.SetMetricsStore>)
+  - [func \(d \*Dispatcher\) SetMultiUserScopeEnabled\(enabled bool\)](<#Dispatcher.SetMultiUserScopeEnabled>)
   - [func \(d \*Dispatcher\) SetPlanManager\(pm \*plan.PlanManager\)](<#Dispatcher.SetPlanManager>)
   - [func \(d \*Dispatcher\) SetSessionFenceFactory\(factory sessionFenceFactory\)](<#Dispatcher.SetSessionFenceFactory>)
   - [func \(d \*Dispatcher\) SetSessionStore\(s SessionStoreReader\)](<#Dispatcher.SetSessionStore>)
@@ -1756,6 +1772,7 @@ Package agent provides the agent loop and related components.
 - [type ToolParameterInfo](<#ToolParameterInfo>)
 - [type ToolRegistry](<#ToolRegistry>)
   - [func FilterToolsForSkill\(registry ToolRegistry, allowedTools \[\]string\) ToolRegistry](<#FilterToolsForSkill>)
+  - [func ToolRegistryFromContext\(ctx context.Context\) ToolRegistry](<#ToolRegistryFromContext>)
 - [type ToolRetryBreaker](<#ToolRetryBreaker>)
   - [func NewToolRetryBreaker\(\) \*ToolRetryBreaker](<#NewToolRetryBreaker>)
   - [func \(b \*ToolRetryBreaker\) Observe\(name string, args map\[string\]any, failed bool\) bool](<#ToolRetryBreaker.Observe>)
@@ -2331,6 +2348,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    ToolMemoryStore,
 	    ToolMemorySearch,
 	    ToolMemoryGetContext,
+	
+	    "knowledge_search",
+	    "knowledge_read",
+	    "knowledge_impact",
 	    "task_create",
 	    "task_get",
 	    "task_list",
@@ -2497,6 +2518,8 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    ToolPlatformAgents: "platform_read",
 	    ToolPlatformTools:  "platform_read",
 	    "project_info":     "platform_read",
+	
+	    "codemode": "codemode",
 	
 	    "task_create": "task_write",
 	    "task_get":    "task_read",
@@ -2670,6 +2693,13 @@ CanonicalToolName returns the registered tool name for an agent grant. Unknown n
 
 ClearPerOperationBackoffOverrideForTest removes the per\-operation backoff override under the given key.
 
+<a name="ContextWithToolRegistry"></a>
+## func ContextWithToolRegistry
+
+	func ContextWithToolRegistry(ctx context.Context, reg ToolRegistry) context.Context
+
+ContextWithToolRegistry stores the agent's filtered tool registry under the typed key, replacing any prior value \(the executor is the single injection point, so there is at most one value on a tool's execution context\).
+
 <a name="ContinuationDescription"></a>
 ## func ContinuationDescription
 
@@ -2704,6 +2734,25 @@ DefaultCoworkerAwareness returns the standard coworker awareness prompt.
 	func DefaultSoulMD() string
 
 DefaultSoulMD returns the shipped default soul text.
+
+<a name="DrainRecallOutcomeSnapshot"></a>
+## func DrainRecallOutcomeSnapshot
+
+	func DrainRecallOutcomeSnapshot(conversationID string, loops ...*AgentLoop) []memory.RecallOutcomeRecord
+
+DrainRecallOutcomeSnapshot drains the staged injected\-memory snapshot for a conversation across the given loops \(leaf 04 T3\). The daemon's turn\-terminal wiring passes its loop sources \(singleton \+ per\-session manager loops\); the first loop holding a conversation with a staged snapshot wins. The drain is consuming \(the conversation clears on read\), so exactly one terminal event consumes each turn's injection set. Loops whose conversation holds nothing are untouched.
+
+<a name="EffectiveMemoryScope"></a>
+## func EffectiveMemoryScope
+
+	func EffectiveMemoryScope(agentDecl, groupCeiling string) memory.Scope
+
+EffectiveMemoryScope narrows an agent's declared max scope by a group policy ceiling \(agent\-groups leaf 05, C7 verbatim\):
+
+	effective = min(agent MemoryMaxScope, group Resolved.MemoryMaxScope)
+	
+
+scope order project \< user \< global. Groups NEVER widen \(T3 pin\): a wider ceiling than the declaration is inert. agentDecl follows the B1 vocabulary with the same fail\-safe defaults resolveScopeInputs applies \(empty = project; invalid = project, never global\). groupCeiling "" = unrestricted \(no group policy bound, or the bound policies declare no ceiling\) and never narrows; an INVALID ceiling never narrows either — both fail toward the agent's own resolution rather than inventing a scope the agent did not declare.
 
 <a name="EnforceMemoryItemBudget"></a>
 ## func EnforceMemoryItemBudget
@@ -2909,6 +2958,13 @@ PresetPrompt returns the rendered prompt template for a preset with the given ta
 	func PublishLaneAgentIndex(idx map[string]string)
 
 PublishLaneAgentIndex atomically installs idx as the lane routing index. A nil or empty map clears it, restoring the static fallback path. The map is copied so later caller mutation cannot race with reads.
+
+<a name="RecalledSnapshotItems"></a>
+## func RecalledSnapshotItems
+
+	func RecalledSnapshotItems(results []memory.MemoryResult, query string) []memory.RecallOutcomeRecord
+
+RecalledSnapshotItems converts prompt\-facing recall results into the C5 snapshot rows \(one per injected item; id, query, salient tokens, token estimate\). The render\-site callers stage these so the terminal path can consume them pre\-render.
 
 <a name="RecoverPendingFollowUps"></a>
 ## func RecoverPendingFollowUps
@@ -4250,6 +4306,13 @@ SetMessageDrainer wires the inbox drain source. Nil disables injection \(the def
 
 SetModelOverride sets the model override at runtime \(thread\-safe\). This is a one\-shot override: it auto\-clears after one reasoning cycle via the consumption site in reasoningCycle. Used by the dispatcher for user\-driven model reassignment.
 
+<a name="AgentLoop.SetMultiUserScopeEnabled"></a>
+### func \(\*AgentLoop\) SetMultiUserScopeEnabled
+
+	func (l *AgentLoop) SetMultiUserScopeEnabled(enabled bool)
+
+SetMultiUserScopeEnabled wires the daemon\-wide multiuser.enabled bit. Nil\-safe per the setter convention.
+
 <a name="AgentLoop.SetNotificationPublisher"></a>
 ### func \(\*AgentLoop\) SetNotificationPublisher
 
@@ -4333,6 +4396,13 @@ SetRetryMetrics sets the retry metrics collector after agent loop creation. It a
 	func (l *AgentLoop) SetSchemaModeConfig(cfg config.AgentToolsConfig)
 
 SetSchemaModeConfig supplies the \[agent.tools\] tool\-schema settings \(loop\-economics leaf 02\) used to resolve the registry's schema mode. Call it any time before or after the registry is attached; when a registry is present the mode is applied immediately, otherwise it is applied on attach \(or at loop\-construction time if the option ran first\).
+
+<a name="AgentLoop.SetScopeUserID"></a>
+### func \(\*AgentLoop\) SetScopeUserID
+
+	func (l *AgentLoop) SetScopeUserID(uid string)
+
+SetScopeUserID wires the serving session's multiuser identity \(OwnerID\). Nil\-safe per the setter convention.
 
 <a name="AgentLoop.SetSecurityChecker"></a>
 ### func \(\*AgentLoop\) SetSecurityChecker
@@ -4560,6 +4630,13 @@ Close shuts down all agent loops and releases resources.
 
 DB returns the SQLite connection used for queue persistence, or nil.
 
+<a name="AgentRegistry.EnsureLateDiscovered"></a>
+### func \(\*AgentRegistry\) EnsureLateDiscovered
+
+	func (r *AgentRegistry) EnsureLateDiscovered()
+
+EnsureLateDiscovered runs the one\-shot post\-boot discovery rescan if it has not run yet \(leaf 03\-agent\-recall\-wiring\). Called at dispatch entry so definitions seeded after daemon boot \(the e2e harness seeds per\-test agents into the user tier post\-Start\) are in the lane routing index BEFORE classification — a chat lane pinned to a post\-boot agent would otherwise resolve the static chat fallback and the per\-agent scope asymmetry would be unobservable.
+
 <a name="AgentRegistry.Get"></a>
 ### func \(\*AgentRegistry\) Get
 
@@ -4633,7 +4710,7 @@ GetQueueWithVersion performs a version\-check after lookup. Returns ErrQueueClos
 
 	func (r *AgentRegistry) GetSpec(id string) (*AgentSpec, bool)
 
-GetSpec returns an agent specification by ID.
+GetSpec returns an agent specification by ID. On a miss, a one\-shot discovery rescan runs first \(ensureAgentDiscovered\) so definitions seeded after daemon boot \(e2e harness per\-test agents\) are routable.
 
 <a name="AgentRegistry.GlobalRules"></a>
 ### func \(\*AgentRegistry\) GlobalRules
@@ -4941,6 +5018,14 @@ AgentSpec defines the specification for creating an agent.
 	    // refusal_model slot; both empty = refusal fallback disabled for this
 	    // agent (precedence: per-agent spec field > global slot > off).
 	    RefusalModel string `json:"refusal_model,omitempty" yaml:"refusal_model,omitempty"`
+	    // MemoryMaxScope declares the WIDEST memory recall scope this agent's
+	    // sessions operate at (leaf 03-agent-recall-wiring, C3; chief-of-staff
+	    // pattern D2): "" or "project" (default — isolated to the session's
+	    // bound project), "user" (all the user's projects), "global" (spans
+	    // projects; the chief-of-staff declaration). Invalid values fail SAFE
+	    // to project (resolveScopeInputs warns). AGENT.md frontmatter key:
+	    // memory_max_scope.
+	    MemoryMaxScope string `json:"memory_max_scope,omitempty" yaml:"memory_max_scope,omitempty"`
 	    // AdditionalTools are tools beyond the baseline that this agent has access to.
 	    AdditionalTools []string `json:"additional_tools,omitempty"`
 	    // ToolScopeLimit caps how many tools are offered to this agent in the
@@ -7551,6 +7636,13 @@ MarkInactive decrements the in\-flight usage counter.
 
 PrefixChanged returns true if the system prompt \+ tools hash has changed since the last call to StabilizeToolPrefix. Returns true on the first call \(when no hash has been computed yet\).
 
+<a name="Conversation.RecallOutcomeSnapshot"></a>
+### func \(\*Conversation\) RecallOutcomeSnapshot
+
+	func (c *Conversation) RecallOutcomeSnapshot() []memory.RecallOutcomeRecord
+
+RecallOutcomeSnapshot drains the staged injected\-memory items. Draining is consuming: the snapshot clears on read so exactly one terminal write consumes each turn's injection set \(a later same\-conversation read sees the next turn's staged set or nothing\).
+
 <a name="Conversation.RemoveCompactedMessages"></a>
 ### func \(\*Conversation\) RemoveCompactedMessages
 
@@ -7586,6 +7678,20 @@ SetBranchPoint truncates the conversation to the message at the given index. All
 
 SetMemoryContext sets the live memory context \(for internal use\).
 
+<a name="Conversation.SetRecallOutcomeSnapshot"></a>
+### func \(\*Conversation\) SetRecallOutcomeSnapshot
+
+	func (c *Conversation) SetRecallOutcomeSnapshot(items []memory.RecallOutcomeRecord)
+
+SetRecallOutcomeSnapshot stages this turn's injected\-memory items \(leaf 04 C5\), captured at the recall render site BEFORE the turn renders. A nil or empty slice is an explicit clear: the turn injected nothing, so the terminal path must not carry over a previous turn's rows.
+
+<a name="Conversation.SetStandingMemoryContext"></a>
+### func \(\*Conversation\) SetStandingMemoryContext
+
+	func (c *Conversation) SetStandingMemoryContext(standing string)
+
+SetStandingMemoryContext sets the budgeted stable \(standing\) memory bullets \(leaf 03 C6\). Empty string clears the section. Callers pass the whole\-item\-budgeted bullet list; the render site \(system\-prompt builders\) emits it as the cacheable "Memory \(standing\)" section.
+
 <a name="Conversation.SetSystemPrompt"></a>
 ### func \(\*Conversation\) SetSystemPrompt
 
@@ -7599,6 +7705,13 @@ SetSystemPrompt sets or updates the system prompt.
 	func (c *Conversation) StabilizeToolPrefix(tools []llm.ToolDefinition) []llm.ToolDefinition
 
 StabilizeToolPrefix creates a deterministic byte layout for tool definitions and updates the cache prefix hash. Tools are sorted alphabetically by name, and each tool is serialized as name \+ description \+ parameters sorted by key. The resulting SHA256 hash enables detection of prefix changes for cache invalidation. Returns the stabilized tool list sorted by name.
+
+<a name="Conversation.StandingMemoryContext"></a>
+### func \(\*Conversation\) StandingMemoryContext
+
+	func (c *Conversation) StandingMemoryContext() string
+
+StandingMemoryContext returns the standing \(stable\) memory bullets for prompt building. Empty when no stable items were recalled.
 
 <a name="Conversation.Truncate"></a>
 ### func \(\*Conversation\) Truncate
@@ -8362,6 +8475,13 @@ SetInstructionStore wires the instruction store for intent\-based action attachm
 	func (d *Dispatcher) SetMetricsStore(store *metrics.Store)
 
 SetMetricsStore wires the metrics store for persistent dispatch logging.
+
+<a name="Dispatcher.SetMultiUserScopeEnabled"></a>
+### func \(\*Dispatcher\) SetMultiUserScopeEnabled
+
+	func (d *Dispatcher) SetMultiUserScopeEnabled(enabled bool)
+
+SetMultiUserScopeEnabled wires the daemon\-wide multiuser.enabled bit onto the dispatcher. Nil\-safe per the setter convention. Written once at daemon wiring, before any dispatch traffic; read without a lock is safe for this write\-once\-then\-read pattern.
 
 <a name="Dispatcher.SetPlanManager"></a>
 ### func \(\*Dispatcher\) SetPlanManager
@@ -14675,6 +14795,13 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	
 	    // BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
 	    BundledAgentsPath string
+	    // AllowLateDiscovery opts in to the one-shot post-boot discovery
+	    // rescan (EnsureLateDiscovered / GetSpec-miss fallback, leaf
+	    // 03-agent-recall-wiring): definitions seeded into the discovery tiers
+	    // after daemon boot join the registry and lane index at first
+	    // dispatch. Wired ONLY by the daemon — test registries must never
+	    // merge definitions from the host's real discovery tiers mid-test.
+	    AllowLateDiscovery bool
 	
 	    // BundledPromptsPath is the path to bundled prompt component markdown
 	    // files (e.g., "config/prompts"). When set, a ComponentRegistry scans
@@ -14767,6 +14894,14 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // executor so the C2 decision-audit lines honor the knob on
 	    // dispatched turns too. "" = deny-warn default.
 	    DecisionLogLevel string
+	
+	    // CodemodeEnabled is [agent.tools].codemode_enabled (token-efficiency
+	    // branch 02 leaf 02): when true, every registry-built loop's filtered
+	    // tool registry is granted the codemode tool (filterTools unions it
+	    // into the scoped agent's allow-list). Default false: the daemon
+	    // behaves byte-identically to pre-codemode and the tool stays absent
+	    // from filtered registries.
+	    CodemodeEnabled bool
 	}
 
 <a name="RejectedCandidateLogger"></a>
@@ -18429,6 +18564,13 @@ The production \[tools.Registry\] satisfies this interface; see \[tools.Registry
 	func FilterToolsForSkill(registry ToolRegistry, allowedTools []string) ToolRegistry
 
 FilterToolsForSkill creates a filtered tool registry based on a skill's allowed\-tools. This is used when executing skills that have restricted tool access.
+
+<a name="ToolRegistryFromContext"></a>
+### func ToolRegistryFromContext
+
+	func ToolRegistryFromContext(ctx context.Context) ToolRegistry
+
+ToolRegistryFromContext returns the filtered tool registry the executor injected for this execution, or nil when no registry was carried \(standalone tool use, tests, or an executor path that does not inject\).
 
 <a name="ToolRetryBreaker"></a>
 ## type ToolRetryBreaker

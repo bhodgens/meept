@@ -239,11 +239,47 @@
     },
     // Per-project character limit overrides (keyed by project path)
     "project_overrides": {},
+    // Usefulness voting: consolidation eviction reorders by the
+    // usefulness score (net votes <= -2 evicted first regardless of age,
+    // then the bottom floor_pct by score). DEFAULT-ON per D3
+    // (docs/plans/20261030-memory-second-brain); set false to restore
+    // age-only ordering. Zero numeric sub-knobs take the code defaults
+    // (floor 0.05, base 0.5, weights 0.08/0.05/0.005).
+    // drift: local-drift: memory.usefulness.* -> pre-flip installs have no
+    // usefulness block (zero value = disabled); default-on ships the
+    // enabled=true block per D3.
+    "usefulness": {
+      "enabled": true,
+      "floor_pct": 0.05,
+      "base": 0.5,
+      "wv": 0.08,
+      "wa": 0.05,
+      "ws": 0.005,
+    },
+    // Epistemic memory: ambient claim extraction from conversation turns
+    // (candidates land in the human review queue as status=auto).
+    // ambient_extraction is DEFAULT-ON per D3
+    // (docs/plans/20261030-memory-second-brain); set
+    // ambient_extraction.enabled = false to opt out. Zero confidence
+    // sub-knobs take the spec defaults (threshold 0.7, max_per_turn 3).
+    "epistemic": {
+      "ambient_extraction": {
+        // drift: local-drift: memory.epistemic.ambient_extraction.* ->
+        // pre-flip installs have no epistemic block (zero value = disabled);
+        // default-on ships the enabled=true block per D3.
+        "enabled": true,
+        "confidence_threshold": 0.7,
+        "max_per_turn": 3,
+      },
+    },
     // Knowledge-asset store: FTS5 full-text over ingested pages plus the
-    // knowledge_search/read/ingest tools. Opt-in (default false); when
-    // disabled nothing is stored and no knowledge_* tool is registered.
+    // knowledge_search/read/ingest tools. DEFAULT-ON per the memory
+    // second-brain decisions D1-D3 (docs/plans/20261030-memory-second-brain);
+    // set false to opt out (no knowledge_* tools registered, nothing stored).
     "knowledge": {
-      "enabled": false,
+      // drift: local-drift: memory.knowledge.* -> pre-flip install kept
+      // enabled=false (opt-in era); default-on ships true per D1-D3.
+      "enabled": true,
       // Watched directory: *.md files here are ingested on the
       // consolidation tick (unchanged files skipped by content hash).
       // Empty = no dir syncing.
@@ -261,6 +297,8 @@
     // candidate: store / merge / supersede / skip. Any detector failure
     // fails open (all candidates stored plainly). Opt-in (default false):
     // disabled means zero extra LLM calls on the extraction path.
+    // NOT flipped by the memory-defaults wave (D3 covers L0/usefulness/
+    // ambient/knowledge/bridges only) — still opt-in.
     "conflict": {
       "enabled": false,
       // Existing claims recalled per candidate for the conflict prompt.
@@ -268,11 +306,33 @@
       // Candidates per conflict LLM call.
       "max_batch": 20,
     },
+    // Bridging facts (IndexRAG stage 2): offline consolidator pass derives
+    // entity-linking facts with mandatory provenance, verifies them, and
+    // admits at most kb into one assembled context. DEFAULT-ON per D1
+    // (docs/plans/20261030-memory-second-brain, "Q1 a"); the leaf-07
+    // substitution experiment may flip it back if the eval loses. Set
+    // false for zero generation + zero LLM calls in consolidation.
+    // drift: local-drift: memory.bridges.* -> pre-flip installs have no
+    // bridges block (zero value = disabled); default-on ships true per D1.
+    "bridges": {
+      "enabled": true,
+      "kb": 2,
+      "bridge_df_max": 10,
+      "verify": true,
+    },
     // L0 raw-conversation tier (layered async distillation): every turn is
     // appended to <data_dir>/l0/YYYY-MM-DD.jsonl and distilled off the turn
     // path into L1 claims (memory.l1_extract) and L2 session scenes
-    // (memory.l2_scene) on the persistent queue. Opt-in (default false).
-    "l0_enabled": false,
+    // (memory.l2_scene) on the persistent queue. DEFAULT-ON per D3
+    // (docs/plans/20261030-memory-second-brain: full default-on, cost is
+    // local compute); set false to opt out (nothing records).
+    // drift: local-drift: memory.* -> pre-flip installs carry an older
+    // memory block (opt-in era: no l0/usefulness/epistemic/bridges keys,
+    // knowledge disabled, backend "memvid"); the default-on template ships
+    // the D1-D3 world. This annotation sits beside the l0 keys; it also
+    // covers the whole [memory] block above (usefulness, epistemic,
+    // knowledge, bridges, backend) in one declaration.
+    "l0_enabled": true,
     // Whole daily L0 files older than this many days are pruned on the
     // consolidation tick. <= 0 disables pruning. Default 30.
     "l0_retention_days": 30,

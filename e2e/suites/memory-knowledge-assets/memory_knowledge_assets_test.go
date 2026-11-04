@@ -378,10 +378,13 @@ func TestKnowledgeCodeIndexAndImpact(t *testing.T) {
 }
 
 // memory-knowledge-assets-03 (control): with memory.knowledge.enabled
-// false (the default), the executor's tool list carries ZERO knowledge_*
+// false (explicit OPT-OUT — the memory second-brain D1-D3 wave flipped the
+// default to true), the executor's tool list carries ZERO knowledge_*
 // tools — nothing enters prompts.
 func TestKnowledgeDisabledNoTools(t *testing.T) {
-	s := harness.Start(t)
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		"memory.knowledge.enabled": false,
+	}))
 	s.RegisterProject(t, "e2e-project")
 	sessionID := s.CreateSession(t, "knowledge-off", s.ProjectDir)
 

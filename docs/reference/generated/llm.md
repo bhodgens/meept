@@ -277,6 +277,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func WithExtraHeaders\(headers map\[string\]string\) ClientOption](<#WithExtraHeaders>)
   - [func WithLogger\(logger \*slog.Logger\) ClientOption](<#WithLogger>)
   - [func WithMetricsStore\(store \*metrics.Store\) ClientOption](<#WithMetricsStore>)
+  - [func WithSemanticCache\(cache \*SemanticCache\) ClientOption](<#WithSemanticCache>)
   - [func WithTimeout\(timeout time.Duration\) ClientOption](<#WithTimeout>)
   - [func WithTimeoutCalculator\(calc \*metrics.Calculator\) ClientOption](<#WithTimeoutCalculator>)
   - [func WithTokenCache\(cache ResponseCache\) ClientOption](<#WithTokenCache>)
@@ -3638,6 +3639,13 @@ WithLogger sets the logger for the client.
 	func WithMetricsStore(store *metrics.Store) ClientOption
 
 WithMetricsStore sets the metrics store for the client.
+
+<a name="WithSemanticCache"></a>
+### func WithSemanticCache
+
+	func WithSemanticCache(cache *SemanticCache) ClientOption
+
+WithSemanticCache attaches the opt\-in semantic cache tier \(leaf 02\). A nil cache is the disabled posture: the lookup seam is never consulted and behavior is byte\-identical to the pre\-leaf client.
 
 <a name="WithTimeout"></a>
 ### func WithTimeout
@@ -7667,6 +7675,18 @@ RuntimeConfig holds validated runtime configuration.
 	    // ToolConstraint is the grammar-constraint wire mode this managed
 	    // runtime auto-declares ("llamacpp" for llama.cpp, "" for MLX).
 	    ToolConstraint string
+	    // SpawnStdin is an optional stream wired to the child's STDIN. It exists
+	    // for the voice child (internal/voice ChildProc): its start token arrives
+	    // via stdin ONLY (never argv, never env - the leaf-07 secret contract),
+	    // and the child reads stdin before it connects its socket, so the stream
+	    // must exist at spawn time. Nil (every existing config literal) spawns
+	    // byte-identically to before: stdin stays nil and nothing is read.
+	    SpawnStdin io.Reader
+	    // SpawnEnv is the child's COMPLETE environment when non-empty (the voice
+	    // child gets no daemon env: only VOICE_ONNX_LIB, a path, never a
+	    // secret). Empty/nil keeps the previous behavior: the child inherits the
+	    // parent's environment.
+	    SpawnEnv []string
 	}
 
 <a name="ValidateAndNormalize"></a>
@@ -8341,6 +8361,15 @@ SupervisorOptions is one supervisor invocation. ParseSupervisorArgs fills it fro
 	    ParentDeathFD int
 	    // Argv is the runtime command line, verbatim.
 	    Argv []string
+	    // Stdin is an optional stream wired to the RUNTIME's STDIN (the voice
+	    // child's start token travels only this way - never argv, never env).
+	    // Nil keeps the runtime's stdin nil, byte-identical to the llama/MLX
+	    // spawns. The supervisor never reads from it.
+	    Stdin io.Reader
+	    // Env is the RUNTIME's complete environment when non-empty (the voice
+	    // child: VOICE_ONNX_LIB only, a path, never a secret). Empty keeps the
+	    // wrapper's inherited environment for the runtime.
+	    Env []string
 	    // Log receives the supervisor's diagnostics. nil means slog.Default().
 	    Log *slog.Logger
 	    // PollInterval overrides the parent check interval. 0 means

@@ -4,6 +4,34 @@ Cross-cutting features that are deliberately OFF by default; flipping any of
 these defaults is a product decision, not a code cleanup. Referenced from the
 root AGENTS.md. Update both in the same commit per the root maintenance rule.
 
+## Memory subsystem defaults are ON (authorized, 2026-10-30)
+
+The five memory subsystem defaults are TRUE per the memory second-brain
+product decisions (plan `docs/plans/20261030-memory-second-brain/master.md`,
+User decisions table, frozen 2026-10-30 — that plan is the authorization for
+this flip):
+
+- **D1: `memory.bridges.enabled` = true.** "Q1 a" — bridging facts
+  (IndexRAG stage 2) generate by default now; the leaf-07 substitution
+  experiment may flip it back if the eval loses.
+- **D3: full default-on** ("sure", chose "enable it all by default"):
+  - `memory.l0_enabled` = true — every turn records L0 lines and distills
+    into L1 claims + L2 scenes on the persistent queue.
+  - `memory.usefulness.enabled` = true — consolidation evicts by
+    usefulness score (net votes <= -2 first, then the bottom floor).
+  - `memory.epistemic.ambient_extraction.enabled` = true — turn-side
+    ambient claims land in the human review queue as `status=auto`.
+  - `memory.knowledge.enabled` = true — the knowledge_* tools register out
+    of the box (on-demand tool access; nothing ambiently injected).
+
+These are OPT-OUT knobs now: every one still honors an explicit `false` in
+the user's config. Flipping any of them back OFF by default is again a
+product decision. Not flipped (still opt-in, deliberate):
+`memory.conflict.enabled` (an extra LLM call per extraction batch),
+`memory.tiers.enabled` (PROPOSED below). Models-less hosts degrade by
+SKIP-Warn (one Warn per distill-worker cycle, jobs stay queued, L0 lines
+preserved) — documented in docs/workflows/memory.md.
+
 ## State mode is per-skill opt-in
 
 `SKILL.state` execution (`internal/agent/skill_state.go`) activates only when

@@ -58,9 +58,23 @@ func scopedStack(t *testing.T) *harness.Stack {
 	// plant turn's raw task text back into the SAME session's next-turn
 	// prompts by design (session continuity, not memory recall). Disable
 	// the digest lane so the Flag-3 assertion measures memory recall only.
-	s := harness.Start(t, harness.WithExtraEnv(map[string]string{
-		"MEEPT_DISABLE_DIGEST_CONTEXT": "1",
-	}))
+	s := harness.Start(t,
+		harness.WithExtraEnv(map[string]string{
+			"MEEPT_DISABLE_DIGEST_CONTEXT": "1",
+		}),
+		// Memory-defaults leaf 02 (D1-D3 flip companion): the default-on
+		// world enqueues memory.l1_extract jobs and fires ambient
+		// extraction on every turn. The scripted fake replies are not
+		// extraction JSON, so each turn's distill job retries with
+		// backoff and its failure lines churn the daemon log faster than
+		// this suite's 4KB LogTail observable survives — the store turns'
+		// "tool=memory_store" line scrolls out and the wait times out.
+		// This suite measures SCOPE isolation, not the distill pipeline;
+		// pin the noisy pipeline off so the log observable stays stable.
+		harness.WithConfigOverlay(map[string]any{
+			"memory.l0_enabled":                           false,
+			"memory.epistemic.ambient_extraction.enabled": false,
+		}))
 	s.RegisterProject(t, "e2e-project")
 	return s
 }

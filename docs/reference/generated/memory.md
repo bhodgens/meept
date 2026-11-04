@@ -24,6 +24,8 @@ Package memory provides memory storage and retrieval for meept.
 
 - Constants
 - Variables
+- [func Cited\(item, reply string\) bool](<#Cited>)
+- [func CitedByOverlap\(replyTokens, itemSalient \[\]string\) bool](<#CitedByOverlap>)
 - [func ClaimIsDemoted\(meta map\[string\]any\) bool](<#ClaimIsDemoted>)
 - [func ClusterBySimilarity\(ctx context.Context, memories \[\]Memory, threshold float64, embedder EmbeddingProvider\) \(\[\]\[\]Memory, error\)](<#ClusterBySimilarity>)
 - [func ClusterBySimilarityFromResults\(ctx context.Context, results \[\]MemoryResult, threshold float64, embedder EmbeddingProvider, logger \*slog.Logger\) \(\[\]\[\]Memory, error\)](<#ClusterBySimilarityFromResults>)
@@ -43,10 +45,13 @@ Package memory provides memory storage and retrieval for meept.
 - [func MigrateToDualDB\(dataDir string, nodeID string, logger \*slog.Logger\) error](<#MigrateToDualDB>)
 - [func ParseMetadata\(jsonStr string\) map\[string\]any](<#ParseMetadata>)
 - [func ReasonHash\(reason string\) string](<#ReasonHash>)
+- [func ReplyTokens\(text string\) \[\]string](<#ReplyTokens>)
 - [func RotateIfNeeded\(path string, maxBytes int64\) error](<#RotateIfNeeded>)
+- [func SalientTokens\(text string\) \[\]string](<#SalientTokens>)
 - [func SanitizeForStore\(s string\) string](<#SanitizeForStore>)
 - [func ScoreCandidate\(mem Memory, netVotes int, accesses int, now time.Time, w Weights\) float64](<#ScoreCandidate>)
 - [func StampFacts\(facts \[\]MemoryFact, ownerID, sourceSession string, at time.Time\)](<#StampFacts>)
+- [func TokenEstimate\(text string\) int](<#TokenEstimate>)
 - [func Usefulness\(sumVotes, accesses int, ageDays float64, w Weights\) float64](<#Usefulness>)
 - [func ValidateDistilledContent\(category, content string\) error](<#ValidateDistilledContent>)
 - [func VerifyBridges\(ctx context.Context, store \*BridgeStore, verifier BridgeVerifier, cfg BridgesConfig\) \(kept int, dropped int, err error\)](<#VerifyBridges>)
@@ -252,7 +257,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) GetGraphStats\(ctx context.Context\) \(\*GraphStats, error\)](<#Manager.GetGraphStats>)
   - [func \(m \*Manager\) GetRecent\(ctx context.Context, limit int\) \(\[\]MemoryResult, error\)](<#Manager.GetRecent>)
   - [func \(m \*Manager\) GetRelatedMemories\(ctx context.Context, memoryID string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.GetRelatedMemories>)
-  - [func \(m \*Manager\) GetRelevantContext\(ctx context.Context, query string, maxItems int\) \(\[\]MemoryResult, error\)](<#Manager.GetRelevantContext>)
+  - [func \(m \*Manager\) GetRelevantContext\(ctx context.Context, query string, maxItems int, opts ...SearchOption\) \(\[\]MemoryResult, error\)](<#Manager.GetRelevantContext>)
   - [func \(m \*Manager\) GetStats\(ctx context.Context\) \(\*MemoryStats, error\)](<#Manager.GetStats>)
   - [func \(m \*Manager\) GetVectorSearcher\(\) VectorSearcher](<#Manager.GetVectorSearcher>)
   - [func \(m \*Manager\) GetVersionHistory\(ctx context.Context, id string\) \(\[\]Memory, error\)](<#Manager.GetVersionHistory>)
@@ -286,10 +291,10 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) RejectClaimWithReason\(ctx context.Context, claimID, reason string\) error](<#Manager.RejectClaimWithReason>)
   - [func \(m \*Manager\) RelevantDistilled\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.RelevantDistilled>)
   - [func \(m \*Manager\) ScopedManager\(botID string\) \*ScopedMemoryManager](<#Manager.ScopedManager>)
-  - [func \(m \*Manager\) Search\(ctx context.Context, query MemoryQuery\) \(\[\]MemoryResult, error\)](<#Manager.Search>)
-  - [func \(m \*Manager\) SearchHybrid\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.SearchHybrid>)
-  - [func \(m \*Manager\) SearchSemantic\(ctx context.Context, query string, limit int\) \(\[\]MemoryResult, error\)](<#Manager.SearchSemantic>)
-  - [func \(m \*Manager\) SearchWithGraph\(ctx context.Context, query MemoryQuery, alpha float64\) \(\[\]MemoryResult, error\)](<#Manager.SearchWithGraph>)
+  - [func \(m \*Manager\) Search\(ctx context.Context, query MemoryQuery, opts ...SearchOption\) \(\[\]MemoryResult, error\)](<#Manager.Search>)
+  - [func \(m \*Manager\) SearchHybrid\(ctx context.Context, query string, limit int, opts ...SearchOption\) \(\[\]MemoryResult, error\)](<#Manager.SearchHybrid>)
+  - [func \(m \*Manager\) SearchSemantic\(ctx context.Context, query string, limit int, opts ...SearchOption\) \(\[\]MemoryResult, error\)](<#Manager.SearchSemantic>)
+  - [func \(m \*Manager\) SearchWithGraph\(ctx context.Context, query MemoryQuery, alpha float64, opts ...SearchOption\) \(\[\]MemoryResult, error\)](<#Manager.SearchWithGraph>)
   - [func \(m \*Manager\) SetBridgeStore\(bs \*BridgeStore\)](<#Manager.SetBridgeStore>)
   - [func \(m \*Manager\) SetCalibrationLogger\(c \*CalibrationLogger\)](<#Manager.SetCalibrationLogger>)
   - [func \(m \*Manager\) SetDistillSummarizer\(s DistillSummarizer\)](<#Manager.SetDistillSummarizer>)
@@ -319,6 +324,8 @@ Package memory provides memory storage and retrieval for meept.
 - [type MemoryQuery](<#MemoryQuery>)
 - [type MemoryResult](<#MemoryResult>)
   - [func FilterDemotedClaims\(results \[\]MemoryResult\) \[\]MemoryResult](<#FilterDemotedClaims>)
+  - [func FilterResults\(results \[\]MemoryResult, opts ...SearchOption\) \[\]MemoryResult](<#FilterResults>)
+  - [func MemoryToResult\(m Memory\) MemoryResult](<#MemoryToResult>)
   - [func RankForUsefulness\(candidates \[\]MemoryResult, netVotes map\[string\]int, now time.Time, w Weights\) \[\]MemoryResult](<#RankForUsefulness>)
 - [type MemoryStats](<#MemoryStats>)
 - [type MemoryType](<#MemoryType>)
@@ -351,6 +358,16 @@ Package memory provides memory storage and retrieval for meept.
 - [type Procedure](<#Procedure>)
   - [func DecodeProcedure\(content string\) \(\*Procedure, error\)](<#DecodeProcedure>)
 - [type Question](<#Question>)
+- [type RecallOutcomeLogger](<#RecallOutcomeLogger>)
+  - [func NewRecallOutcomeLogger\(dataDir string, log \*slog.Logger\) \*RecallOutcomeLogger](<#NewRecallOutcomeLogger>)
+  - [func \(r \*RecallOutcomeLogger\) BeginTurn\(conversationID string, items \[\]RecallOutcomeRecord\)](<#RecallOutcomeLogger.BeginTurn>)
+  - [func \(r \*RecallOutcomeLogger\) Drain\(conversationID string\) \[\]RecallOutcomeRecord](<#RecallOutcomeLogger.Drain>)
+  - [func \(r \*RecallOutcomeLogger\) LogOutcomes\(ctx context.Context, sessionID string, items \[\]RecallOutcomeRecord, reply string\)](<#RecallOutcomeLogger.LogOutcomes>)
+  - [func \(r \*RecallOutcomeLogger\) Path\(\) string](<#RecallOutcomeLogger.Path>)
+  - [func \(r \*RecallOutcomeLogger\) SetLoopSource\(drain func\(conversationID string\) \[\]RecallOutcomeRecord\)](<#RecallOutcomeLogger.SetLoopSource>)
+  - [func \(r \*RecallOutcomeLogger\) TakeRows\(conversationID string\) \[\]RecallOutcomeRecord](<#RecallOutcomeLogger.TakeRows>)
+- [type RecallOutcomeRecord](<#RecallOutcomeRecord>)
+  - [func OutcomeRows\(path string\) \(\[\]RecallOutcomeRecord, error\)](<#OutcomeRows>)
 - [type ReportArtifact](<#ReportArtifact>)
 - [type ReportStore](<#ReportStore>)
   - [func NewReportStore\(dbPath string\) \*ReportStore](<#NewReportStore>)
@@ -382,6 +399,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(s \*SQLiteFTSStore\) ScanResults\(rows \*sql.Rows, hasRank bool, cfg ScanRowConfig\) \(\[\]MemoryResult, error\)](<#SQLiteFTSStore.ScanResults>)
   - [func \(s \*SQLiteFTSStore\) Store\(ctx context.Context, query string, args ...any\) error](<#SQLiteFTSStore.Store>)
 - [type ScanRowConfig](<#ScanRowConfig>)
+- [type Scope](<#Scope>)
 - [type ScopedMemoryManager](<#ScopedMemoryManager>)
   - [func \(s \*ScopedMemoryManager\) BotID\(\) string](<#ScopedMemoryManager.BotID>)
   - [func \(s \*ScopedMemoryManager\) Delete\(ctx context.Context, id string\) error](<#ScopedMemoryManager.Delete>)
@@ -397,6 +415,9 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(s \*ScopedMemoryManager\) SearchWithGraph\(ctx context.Context, query MemoryQuery, alpha float64\) \(\[\]MemoryResult, error\)](<#ScopedMemoryManager.SearchWithGraph>)
   - [func \(s \*ScopedMemoryManager\) Store\(ctx context.Context, mem Memory\) \(string, error\)](<#ScopedMemoryManager.Store>)
 - [type SearchMatch](<#SearchMatch>)
+- [type SearchOption](<#SearchOption>)
+  - [func WithMultiUserEnabled\(multiUser bool\) SearchOption](<#WithMultiUserEnabled>)
+  - [func WithScopeFilter\(maxScope Scope, projectID, userID string\) SearchOption](<#WithScopeFilter>)
 - [type SearchParams](<#SearchParams>)
 - [type SearchTraceResult](<#SearchTraceResult>)
 - [type SearcherOption](<#SearcherOption>)
@@ -683,6 +704,20 @@ reason\_hash is the first 16 hex chars of sha256\(reason\); an empty reason hash
 
 	var ErrVerdictReasonTooLong = errors.New("verdict reason exceeds 512 bytes")
 
+<a name="Cited"></a>
+## func Cited
+
+	func Cited(item, reply string) bool
+
+Cited reports whether reply cites item under the C5 overlap rule \(convenience wrapper over SalientTokens/ReplyTokens \+ CitedByOverlap\).
+
+<a name="CitedByOverlap"></a>
+## func CitedByOverlap
+
+	func CitedByOverlap(replyTokens, itemSalient []string) bool
+
+CitedByOverlap applies the C5 citation rule: the reply cites an injected item when replyTokens \(with multiplicity\) share \>= minCiteOverlapTokens members with itemSalient \(the item's deduplicated token set\). Conservative: an empty reply or item never cites.
+
 <a name="ClaimIsDemoted"></a>
 ## func ClaimIsDemoted
 
@@ -832,12 +867,26 @@ ParseMetadata parses a JSON string into metadata.
 
 ReasonHash returns the first 16 hex chars of sha256\(reason\). An empty reason hashes to the sha256 of the empty string \(stable sentinel\).
 
+<a name="ReplyTokens"></a>
+## func ReplyTokens
+
+	func ReplyTokens(text string) []string
+
+ReplyTokens returns the lowercase word tokens of a reply, kept WITH multiplicity: each occurrence that matches the injected item's salient set counts toward the C5 bar \(a reply that restates the fact twice cites twice as strongly\).
+
 <a name="RotateIfNeeded"></a>
 ## func RotateIfNeeded
 
 	func RotateIfNeeded(path string, maxBytes int64) error
 
 RotateIfNeeded rotates path to path\+".1" when the file currently exceeds maxBytes. The previous .1 generation is overwritten, so at most two generations of the log exist \(current \+ .1\). Rename on the same filesystem is atomic, so a crash mid\-rotation leaves either the old file or the rotated one, never a partial copy. A missing file is not an error \(nothing to rotate\).
+
+<a name="SalientTokens"></a>
+## func SalientTokens
+
+	func SalientTokens(text string) []string
+
+SalientTokens returns the deduplicated lowercase word tokens of text \(the citation\-overlap token set for the INJECTED ITEM side\). Empty text returns nil.
 
 <a name="SanitizeForStore"></a>
 ## func SanitizeForStore
@@ -861,6 +910,13 @@ ScoreCandidate computes the usefulness score of one memory against a batched net
 	func StampFacts(facts []MemoryFact, ownerID, sourceSession string, at time.Time)
 
 StampFacts fills OwnerID, SourceSession, and UpdatedAt on extracted facts \(helper for callers; keeps Extract pure and testable\).
+
+<a name="TokenEstimate"></a>
+## func TokenEstimate
+
+	func TokenEstimate(text string) int
+
+TokenEstimate is the injected\-item token estimate \(the shared 3\-chars/token heuristic — the same estimator the memory context budgets use\).
 
 <a name="Usefulness"></a>
 ## func Usefulness
@@ -1825,6 +1881,8 @@ StoreMemory persists a memory record to the appropriate database based on owners
 
 StoreRemoteMemory writes a memory from a peer node to gossip.db.
 
+Flag\-1 resolution \(01\-scope\-schema, master.md dated addenda 2026\-11\-03\): gossip\-ingested rows are STAMPED, not left to the backfill default. The ingest seam stamps scope=global \(explicit, not an accident of the legacy backfill\) plus metadata\["remote\_node"\]=\<source node\>, so cluster recall stays today's behavior \(peer memories visible everywhere — cluster recall is explicitly UNscoped across nodes, see docs/workflows/memory.md\) while the marker makes the provenance queryable and keeps the isolation guarantee from silently degrading without a trace. The distinguishing marker lets leaf 02/03 recall wiring treat remote rows differently if cluster scoping is designed later.
+
 <a name="DualStore.StoreRemoteSession"></a>
 ### func \(\*DualStore\) StoreRemoteSession
 
@@ -2764,9 +2822,9 @@ GetRelatedMemories returns memories related to the given memory via the knowledg
 <a name="Manager.GetRelevantContext"></a>
 ### func \(\*Manager\) GetRelevantContext
 
-	func (m *Manager) GetRelevantContext(ctx context.Context, query string, maxItems int) ([]MemoryResult, error)
+	func (m *Manager) GetRelevantContext(ctx context.Context, query string, maxItems int, opts ...SearchOption) ([]MemoryResult, error)
 
-GetRelevantContext retrieves memories relevant to a query with smart ranking.
+GetRelevantContext retrieves memories relevant to a query with smart ranking. Variadic SearchOptions \(01\-scope\-schema C2\) are additive: without them the behavior is byte\-identical to the pre\-scoping recall \(no scope filtering\).
 
 <a name="Manager.GetStats"></a>
 ### func \(\*Manager\) GetStats
@@ -3006,28 +3064,28 @@ ScopedManager returns a ScopedMemoryManager that filters all operations to memor
 <a name="Manager.Search"></a>
 ### func \(\*Manager\) Search
 
-	func (m *Manager) Search(ctx context.Context, query MemoryQuery) ([]MemoryResult, error)
+	func (m *Manager) Search(ctx context.Context, query MemoryQuery, opts ...SearchOption) ([]MemoryResult, error)
 
-Search finds memories matching the query.
+Search finds memories matching the query. Variadic SearchOptions \(01\-scope\-schema C2\) are additive: without them the behavior is byte\-identical to the pre\-scoping recall \(no scope filtering\).
 
 <a name="Manager.SearchHybrid"></a>
 ### func \(\*Manager\) SearchHybrid
 
-	func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]MemoryResult, error)
+	func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int, opts ...SearchOption) ([]MemoryResult, error)
 
-SearchHybrid performs a hybrid search combining keyword and vector similarity. If the vector store is not configured, it falls back to keyword search.
+SearchHybrid performs a hybrid search combining keyword and vector similarity. If the vector store is not configured, it falls back to keyword search. Variadic SearchOptions \(01\-scope\-schema C2\) apply the scope predicate to derived/embedding\-space results too \(T4: the same filter everywhere\).
 
 <a name="Manager.SearchSemantic"></a>
 ### func \(\*Manager\) SearchSemantic
 
-	func (m *Manager) SearchSemantic(ctx context.Context, query string, limit int) ([]MemoryResult, error)
+	func (m *Manager) SearchSemantic(ctx context.Context, query string, limit int, opts ...SearchOption) ([]MemoryResult, error)
 
-SearchSemantic performs vector similarity search for memories. If the vector store is not configured, it falls back to keyword search.
+SearchSemantic performs vector similarity search for memories. If the vector store is not configured, it falls back to keyword search. Variadic SearchOptions \(01\-scope\-schema C2\) apply the scope predicate to derived/embedding\-space results too \(T4: the same filter everywhere\).
 
 <a name="Manager.SearchWithGraph"></a>
 ### func \(\*Manager\) SearchWithGraph
 
-	func (m *Manager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64) ([]MemoryResult, error)
+	func (m *Manager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64, opts ...SearchOption) ([]MemoryResult, error)
 
 SearchWithGraph searches memories and applies graph\-aware ranking. The alpha parameter controls PageRank influence: 0 = pure relevance, 1 = pure PageRank.
 
@@ -3226,6 +3284,15 @@ Memory represents a stored memory item.
 	    TaskID string `json:"task_id,omitempty"`
 	    // BotID identifies the bot that created this memory (for bot namespace isolation).
 	    BotID string `json:"bot_id,omitempty"`
+	
+	    // Scope is the recall scope: project (visible only to sessions bound
+	    // to the same project), user (all sessions of the user / the whole
+	    // install in single-user mode), or global (visible everywhere; the
+	    // legacy backfill value). Empty on read means legacy row -> global.
+	    // The portable storage truth is metadata["scope"], stamped on Store;
+	    // SQLite stores additionally keep a `scope` column as query-time
+	    // defense-in-depth (docs/workflows/memory.md).
+	    Scope Scope `json:"scope,omitempty"`
 	}
 
 <a name="Memory.MetadataJSON"></a>
@@ -3346,6 +3413,20 @@ MemoryResult is a memory item returned from a search with relevance info.
 	func FilterDemotedClaims(results []MemoryResult) []MemoryResult
 
 FilterDemotedClaims drops demoted claims from a result slice \- the visibility\-axis filter recall\-side consumers apply so demoted claims stop surfacing as semantic claims while the rows \(and their episodic copies\) remain in history. Invalid/missing metadata reads as not\-demoted \(fail\-open, same posture as claimInForce\).
+
+<a name="FilterResults"></a>
+### func FilterResults
+
+	func FilterResults(results []MemoryResult, opts ...SearchOption) []MemoryResult
+
+FilterResults applies the committed C2 scope predicate to an ALREADY fetched result slice \(leaf 03\-agent\-recall\-wiring\). Recall sites that fetch once and scope per consumer \(the loop's memvid recall path, the dispatcher's per\-agent re\-scope in RouteToAgent\) call this instead of re\-querying, so there is ONE predicate implementation: the same WithScopeFilter/WithMultiUserEnabled options a Manager.Search caller passes, folded by the same resolveScopeOptions. No options = unfiltered legacy behavior, byte\-identical.
+
+<a name="MemoryToResult"></a>
+### func MemoryToResult
+
+	func MemoryToResult(m Memory) MemoryResult
+
+MemoryToResult wraps a bare Memory as a single result so FilterResults can scope it \(the memvid recall path yields bare memories\).
 
 <a name="RankForUsefulness"></a>
 ### func RankForUsefulness
@@ -3633,6 +3714,91 @@ Question is an open question the user is tracking.
 	    AnswerClaim   string   // claim ID that answers it (if answered)
 	}
 
+<a name="RecallOutcomeLogger"></a>
+## type RecallOutcomeLogger
+
+RecallOutcomeLogger appends recall outcome rows to \<dataDir\>/recall\_outcomes.jsonl. Nil\-safe; a write error disables the logger \(best\-effort — telemetry must never fail the turn\). Rotation rides the shared calibration\-JSONL mechanism \(RotateIfNeeded, 10 MiB cap, one .1 generation\).
+
+	type RecallOutcomeLogger struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewRecallOutcomeLogger"></a>
+### func NewRecallOutcomeLogger
+
+	func NewRecallOutcomeLogger(dataDir string, log *slog.Logger) *RecallOutcomeLogger
+
+NewRecallOutcomeLogger creates a logger writing into the memory data dir. Empty dataDir returns nil \(disabled\).
+
+<a name="RecallOutcomeLogger.BeginTurn"></a>
+### func \(\*RecallOutcomeLogger\) BeginTurn
+
+	func (r *RecallOutcomeLogger) BeginTurn(conversationID string, items []RecallOutcomeRecord)
+
+BeginTurn stages the injected\-item snapshot for a turn about to emit its terminal event, keyed by conversation id. The terminal subscriber calls this synchronously at event time — before the async capture goroutine can read — so a same\-conversation turn racing the previous turn's capture can never lose its snapshot \(the capture consumes TakeRows, not the live map\). An empty items slice explicitly CLEARS the staged snapshot for the conversation \(no rows are fabricated for context the model never saw\).
+
+<a name="RecallOutcomeLogger.Drain"></a>
+### func \(\*RecallOutcomeLogger\) Drain
+
+	func (r *RecallOutcomeLogger) Drain(conversationID string) []RecallOutcomeRecord
+
+Drain is the capture subscriber's seam: it delegates to the wired loop source. A nil source \(or nil logger\) returns nothing.
+
+<a name="RecallOutcomeLogger.LogOutcomes"></a>
+### func \(\*RecallOutcomeLogger\) LogOutcomes
+
+	func (r *RecallOutcomeLogger) LogOutcomes(ctx context.Context, sessionID string, items []RecallOutcomeRecord, reply string)
+
+LogOutcomes appends one C5 row per item. The items are the turn's consumed snapshot; the caller supplies the session id \(the capture pipeline's resolved session, with the conversation\-id fallback\) and the final reply. Write failures disable the logger \(logged, never fatal\).
+
+<a name="RecallOutcomeLogger.Path"></a>
+### func \(\*RecallOutcomeLogger\) Path
+
+	func (r *RecallOutcomeLogger) Path() string
+
+Path returns the logger's JSONL path \(empty when disabled\).
+
+<a name="RecallOutcomeLogger.SetLoopSource"></a>
+### func \(\*RecallOutcomeLogger\) SetLoopSource
+
+	func (r *RecallOutcomeLogger) SetLoopSource(drain func(conversationID string) []RecallOutcomeRecord)
+
+SetLoopSource wires the snapshot drain seam \(leaf 04 T3\): given a turn's conversation id, the source returns the injected\-memory items the recall render site staged pre\-render \(draining = consuming\). The daemon passes agent.DrainRecallOutcomeSnapshot closed over its loop sources. Nil source disables the drain \(no rows\). Nil\-safe setter.
+
+<a name="RecallOutcomeLogger.TakeRows"></a>
+### func \(\*RecallOutcomeLogger\) TakeRows
+
+	func (r *RecallOutcomeLogger) TakeRows(conversationID string) []RecallOutcomeRecord
+
+TakeRows atomically consumes the staged snapshot for a completed turn. Snapshot items are NOT deleted on take: the chat lane injects memory on EVERY turn while only turns whose assembly ran publish a snapshot, so the last\-seen items carry over until the next assembly for the same conversation \(a turn with no assembly is a turn with the same context\). An assembly that produced ZERO items explicitly clears the carry\-over via BeginTurn with no items. Non\-completed turns never reach the writer.
+
+<a name="RecallOutcomeRecord"></a>
+## type RecallOutcomeRecord
+
+RecallOutcomeRecord is one line of recall\_outcomes.jsonl \(leaf 04, contract C5\): per injected memory item, whether the final assistant reply cited it. The key set is the contract's verbatim C5 set — do not rename fields.
+
+	type RecallOutcomeRecord struct {
+	    TS        string `json:"ts"`         // RFC3339 (UTC)
+	    SessionID string `json:"session_id"` // the turn's conversation/session id
+	    MemoryID  string `json:"memory_id"`  // id of the injected memory item
+	    Query     string `json:"query"`      // the recall query that surfaced it
+	    Injected  bool   `json:"injected"`   // true: the item reached a prompt this turn
+	    Cited     bool   `json:"cited"`      // overlap rule: reply's shared tokens >= minCiteOverlapTokens
+	    Tokens    int    `json:"tokens"`     // the item's injected token estimate
+	
+	    // Salient is NOT serialized: it is the injected item's pre-computed
+	    // salient token set, staged with the snapshot so the terminal path
+	    // never re-parses the raw text twice.
+	    Salient []string `json:"-"`
+	}
+
+<a name="OutcomeRows"></a>
+### func OutcomeRows
+
+	func OutcomeRows(path string) ([]RecallOutcomeRecord, error)
+
+OutcomeRows reads back a recall\_outcomes.jsonl file \(tests / future analysis tooling\). Malformed lines are skipped, never fatal.
+
 <a name="ReportArtifact"></a>
 ## type ReportArtifact
 
@@ -3869,6 +4035,27 @@ ScanRowConfig holds parameters that vary between EpisodicMemory and TaskMemory w
 	    SourceFmt string
 	}
 
+<a name="Scope"></a>
+## type Scope
+
+Scope is the recall scope of a stored memory \(01\-scope\-schema, C1\).
+
+	type Scope string
+
+<a name="ScopeProject"></a>
+
+	const (
+	    // ScopeProject marks a memory visible only to sessions bound to the
+	    // same project.
+	    ScopeProject Scope = "project"
+	    // ScopeUser marks a memory visible to all sessions of the user
+	    // (multiuser) or of the install (single-user).
+	    ScopeUser Scope = "user"
+	    // ScopeGlobal marks a memory visible everywhere (explicit
+	    // cross-project facts and all legacy rows).
+	    ScopeGlobal Scope = "global"
+	)
+
 <a name="ScopedMemoryManager"></a>
 ## type ScopedMemoryManager
 
@@ -3984,6 +4171,27 @@ SearchMatch represents a span that matched a search regex, with context.
 	    MatchLen int    `json:"match_len"`
 	    Raw      string `json:"raw,omitempty"`
 	}
+
+<a name="SearchOption"></a>
+## type SearchOption
+
+SearchOption mutates the optional search state. Options are variadic trailing arguments on Manager.Search / GetRelevantContext \(C2 contract: existing callers compile unchanged\).
+
+	type SearchOption func(*searchOptions)
+
+<a name="WithMultiUserEnabled"></a>
+### func WithMultiUserEnabled
+
+	func WithMultiUserEnabled(multiUser bool) SearchOption
+
+WithMultiUserEnabled carries the multiuser\-enabled bit into the scope predicate \(deviation pin from gate 7b775b70: additive SearchOption rather than a fourth WithScopeFilter parameter, keeping the frozen C2 signature verbatim\). With multiUser=true and an empty filter userID, user\-scope rows are NOT recallable \(Flag 3: fail closed\). Absent option = disabled \(single\-user install: empty userID matches\).
+
+<a name="WithScopeFilter"></a>
+### func WithScopeFilter
+
+	func WithScopeFilter(maxScope Scope, projectID, userID string) SearchOption
+
+WithScopeFilter restricts recall to rows at or below maxScope that match the caller's project/user identity, per the C2 predicate. An empty projectID means the caller is unbound to any project: project\-scoped rows are hidden. An empty userID matches user\-scope rows ONLY when multiuser is disabled \(WithMultiUserEnabled\(false\), the default when the option is absent\); under WithMultiUserEnabled\(true\) an empty userID hides user rows \(Flag 3 fail\-closed\).
 
 <a name="SearchParams"></a>
 ## type SearchParams

@@ -1743,11 +1743,14 @@ type MemoryConfig struct {
 	// MemoryUsefulnessConfig.
 	Usefulness MemoryUsefulnessConfig `json:"usefulness" toml:"usefulness"`
 	// Bridges holds cross-memory bridging-fact generation settings
-	// (IndexRAG stage 2, branch 09). Default OFF. See MemoryBridgesConfig.
+	// (IndexRAG stage 2, branch 09). Default ON per D1 (plan
+	// docs/plans/20261030-memory-second-brain); the substitution-experiment
+	// leaf (07) may flip it back if the eval loses. See MemoryBridgesConfig.
 	Bridges MemoryBridgesConfig `json:"bridges" toml:"bridges"`
 	// Knowledge holds the knowledge-asset store settings (tree 04).
-	// Default OFF: when disabled the knowledge_* tools are not registered
-	// and nothing reaches prompts. See KnowledgeConfig.
+	// Default ON per D1-D3 (plan docs/plans/20261030-memory-second-brain):
+	// the knowledge_* tools register out of the box; set
+	// memory.knowledge.enabled = false to opt out. See KnowledgeConfig.
 	Knowledge KnowledgeConfig `json:"knowledge" toml:"knowledge"`
 	// Conflict holds LLM conflict detection for distilled claim extraction
 	// (tree 02). Default OFF: when disabled the L1 extract handler stores
@@ -1758,10 +1761,12 @@ type MemoryConfig struct {
 	// async distillation): conversation turns are appended to
 	// <memory.data_dir>/l0/YYYY-MM-DD.jsonl and distilled asynchronously
 	// into L1 claims + L2 session scenes via the persistent queue.
-	// Default false (opt-in-defaults rule; nothing records and no
-	// memory.l1_extract / memory.l2_scene job is enqueued until set).
+	// Default true per D3 (plan docs/plans/20261030-memory-second-brain:
+	// full default-on; cost is local compute). Set false to opt out —
+	// nothing records and no memory.l1_extract / memory.l2_scene job is
+	// enqueued.
 	//
-	//gendoc:desc L0 raw-conversation tier: append-only daily JSONL of conversation turns distilled asynchronously into L1 claims (memory.l1_extract) and L2 session-scene files (memory.l2_scene) on the persistent queue; retention prunes whole daily files on the consolidation tick.
+	//gendoc:desc L0 raw-conversation tier: append-only daily JSONL of conversation turns distilled asynchronously into L1 claims (memory.l1_extract) and L2 session-scene files (memory.l2_scene) on the persistent queue; retention prunes whole daily files on the consolidation tick. Default on (memory second-brain decision D3).
 	//gendoc:example [memory] l0_enabled = true, l0_retention_days = 30
 	L0Enabled bool `json:"l0_enabled" toml:"l0_enabled"`
 	// L0RetentionDays is the retention window for daily L0 files: whole
@@ -1800,8 +1805,9 @@ type ConflictConfig struct {
 type KnowledgeConfig struct {
 	// Enabled turns on the knowledge store and registers the
 	// knowledge_search / knowledge_read / knowledge_ingest tools.
-	// Default false (opt-in-defaults rule; wiki→inference reachability
-	// is a product decision per SHARED-CONVENTIONS §2.5).
+	// Default true per D1-D3 (plan docs/plans/20261030-memory-second-brain
+	// — SHARED-CONVENTIONS §2.5 product decision authorized there); set
+	// false to opt out (wiki→inference reachability off again).
 	Enabled bool `json:"enabled" toml:"enabled"`
 	// IngestDir is the watched directory of *.md files ingested on the
 	// periodic consolidation tick (source "dir:<relpath>", content-hash
@@ -1824,7 +1830,9 @@ type KnowledgeConfig struct {
 // generation NEVER runs on the chat inference path.
 type MemoryBridgesConfig struct {
 	// Enabled turns on bridge generation in the periodic consolidation
-	// pass. Default false (opt-in until validated by the bridge eval).
+	// pass. Default true per D1 (plan docs/plans/20261030-memory-second-brain:
+	// "Q1 a"; leaf 07's substitution experiment may flip it back if the
+	// eval loses). Explicit false keeps the pass dormant.
 	Enabled bool `json:"enabled" toml:"enabled"`
 	// KB is the recall-path cap: the maximum number of bridging facts
 	// admitted into a single assembled context (leaf B04 consumes this).
@@ -1844,7 +1852,9 @@ type MemoryBridgesConfig struct {
 // consolidation eviction ordering (loop-economics leaf 14).
 type MemoryUsefulnessConfig struct {
 	// Enabled turns on usefulness-scored eviction in consolidation.
-	// Default false (opt-in until validated).
+	// Default true per D3 (plan docs/plans/20261030-memory-second-brain,
+	// "enable it all by default"). Explicit false restores age-only
+	// eviction ordering.
 	Enabled bool `json:"enabled" toml:"enabled"`
 	// FloorPct is the bottom fraction of memories (by usefulness) evicted
 	// before any age-based rule. Default 0.05.
@@ -1884,6 +1894,8 @@ type EpistemicConfig struct {
 // AmbientExtractionConfig holds settings for extracting epistemic claims
 // from conversation turns without explicit user action.
 type AmbientExtractionConfig struct {
+	// Enabled turns on ambient extraction. Default true per D3 (plan
+	// docs/plans/20261030-memory-second-brain); explicit false opts out.
 	Enabled             bool    `json:"enabled"              toml:"enabled"`
 	ConfidenceThreshold float64 `json:"confidence_threshold" toml:"confidence_threshold"`
 	// RejectBelow hard-drops candidates under this confidence (reason
@@ -3875,16 +3887,23 @@ func DefaultConfig() *Config {
 				SimilarityThreshold: 0.85,
 				MinRelevance:        0.6,
 			},
+			// Bridges: DEFAULT-ON per D1 (plan
+			// docs/plans/20261030-memory-second-brain: "Q1 a" - enable by
+			// default now; the substitution-experiment leaf (07) may flip it
+			// back if it loses the eval). Explicit false still wins.
 			Bridges: MemoryBridgesConfig{
-				Enabled:     false,
+				Enabled:     true,
 				KB:          2,
 				BridgeDFMax: 10,
 				Verify:      true,
 			},
-			// Knowledge store: opt-in, disabled by default (SHARED-CONVENTIONS
-			// §2.5 — nothing reaches prompts until memory.knowledge.enabled).
+			// Knowledge store: DEFAULT-ON per D1-D3 (plan
+			// docs/plans/20261030-memory-second-brain, decision D3 "full
+			// default-on"; SHARED-CONVENTIONS §2.5 product decision authorized
+			// there). An explicit memory.knowledge.enabled = false still wins:
+			// user text unmarshal-overwrites the DefaultConfig baseline.
 			Knowledge: KnowledgeConfig{
-				Enabled:   false,
+				Enabled:   true,
 				IngestDir: "",
 				MaxPages:  0,
 				CodeDirs:  nil,
@@ -3897,10 +3916,12 @@ func DefaultConfig() *Config {
 				TopK:     5,
 				MaxBatch: 20,
 			},
-			// L0 raw-conversation tier: opt-in, disabled by default
-			// (opt-in-defaults rule — nothing records until
-			// memory.l0_enabled; retention default 30 days).
-			L0Enabled:       false,
+			// L0 raw-conversation tier: DEFAULT-ON per D3 (plan
+			// docs/plans/20261030-memory-second-brain: full default-on, L0
+			// capture + L1 extraction + L2 scenes on every daemon; cost is
+			// local compute). Explicit memory.l0_enabled = false still wins
+			// (opt-out preserved); retention default 30 days.
+			L0Enabled:       true,
 			L0RetentionDays: 30,
 			Task: TaskMemoryConfig{
 				Enabled: true,
@@ -3957,6 +3978,34 @@ func DefaultConfig() *Config {
 				BaseURL:   "http://localhost:11434",
 				Model:     "nomic-embed-text",
 				Dimension: 768,
+			},
+			// Usefulness voting: DEFAULT-ON per D3 (plan
+			// docs/plans/20261030-memory-second-brain: the consolidation
+			// eviction ordering is part of the "enable it all" decision).
+			// Numeric sub-knobs stay 0 here: memory.ResolveUsefulEviction
+			// substitutes the package defaults for zero values (floor 0.05,
+			// base 0.5, the documented weights). Explicit
+			// memory.usefulness.enabled = false still wins.
+			Usefulness: MemoryUsefulnessConfig{
+				Enabled:  true,
+				FloorPct: 0,
+				Base:     0,
+				Wv:       0,
+				Wa:       0,
+				Ws:       0,
+			},
+			// Epistemic ambient extraction: DEFAULT-ON per D3 (plan
+			// docs/plans/20261030-memory-second-brain). Confidence/max
+			// sub-knobs stay 0: the extractor + hook substitute the spec
+			// defaults (threshold 0.7, max_per_turn 3). Explicit
+			// memory.epistemic.ambient_extraction.enabled = false wins.
+			Epistemic: EpistemicConfig{
+				AmbientExtraction: AmbientExtractionConfig{
+					Enabled:             true,
+					ConfidenceThreshold: 0,
+					RejectBelow:         0,
+					MaxPerTurn:          0,
+				},
 			},
 		},
 		Memvid: MemvidConfig{
@@ -4133,7 +4182,12 @@ func DefaultConfig() *Config {
 			Timezone: "UTC",
 		},
 		Queue: QueueConfig{
-			DBPath:            "~/.meept/queue.db",
+			// DBPath empty by default: components.go resolves the fallback
+			// <daemon.data_dir>/queue.db, which is ~/.meept/queue.db on
+			// every stock install (daemon.data_dir defaults to ~/.meept).
+			// An explicit queue.db_path still wins (relocated installs);
+			// config/meept.json5 ships the explicit value.
+			DBPath:            "",
 			MaxRetries:        3,
 			InteractiveWindow: "5m", // Q1: default interactivity window (D11)
 		},
