@@ -269,9 +269,9 @@ Output: APPROVED or a list of specific gaps.
 | 00T-e2e-memory-pipeline.md | TESTS_VALIDATED | 1 | a78b5d47: 8/8 RED witnessed in-session at clean-HEAD worktree (default-on pipeline, C4 knobs, stable/volatile split, recall_outcomes row, doctor check, project isolation, chief-of-staff, Flag-3 fail-closed cell). Gate observation riding leaf-03: dispatcher renders recall as '## Relevant Context' user-message block (dispatcher.go:3610) - stable/volatile split must reconcile BOTH injection sites. |
 | 01-scoping/orchestrator.md | IN_PROGRESS | 0 | 00T branch gate TESTS_VALIDATED (7b775b70): RED witnessed in-session (Scope/WithScopeFilter/MemoryMaxScope/resolveScopeInputs missing-symbol only). Deviation reviewed+accepted: multiuser bit pinned ADDITIVELY (WithMultiUserEnabled SearchOption + 4th resolveScopeInputs return) keeping frozen C2 signature verbatim. Pre-existing blocker noted: working tree has in-flight memoryRecallItem refactor compile errors in loop.go (sibling wave). Leaf 01-scope-schema dispatch next (Flags 1+3 ride brief). |
 | 02-defaults-on.md | PENDING | 0 | |
-| 03-stable-volatile-split.md | PENDING | 0 | |
+| 03-stable-volatile-split.md | COMPLETE | 1 | ac45aabe: split at BOTH injection sites (loop AddSectionWithStability before volatile fence; dispatcher user-message block reconciled), T2 budgets (volatile 2000 whole-item; stable 25%), memory_store stable arg. Deviations accepted: dispatcher recall MatchAny=true (strict-AND ungreenable for NL queries); single-hash headings (gate span helpers); volatile fence carries system note only - leaf-04 hooks read result.MemoryContext pre-render. Gate TestStableVolatileRecallSplit GREEN unmodified. |
 | 04-recall-telemetry.md | PENDING | 0 | |
-| 05-claim-status-stamping.md | PENDING | 0 | |
+| 05-claim-status-stamping.md | COMPLETE | 1 | 052f1984: PROBE CONFIRMED leak in BOTH transitions (StoreVersioned(CreateVersion:true) left stale open rows searchable - 2 rows per search); fixed via stampMetadataInPlace (established pattern); pins 5/5 green; StoreVersioned now zero prod callers (kept, bridges-exercised). Verified in overlay (scope gate RED pins excluded - leaf-01 in flight). Pre-existing flake noted: ftstore_test.go:240 sub-ms timestamp ordering. |
 | 06-doctor-memory.md | PENDING | 0 | |
 | 07-bridges-substitution-eval.md | PENDING | 0 | |
 
