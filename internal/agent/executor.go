@@ -950,6 +950,15 @@ type Executor struct {
 	// unmanaged (legacy skip). Guarded by mu; set via WithGroupResolution /
 	// SetGroupResolution.
 	groupResolution *groups.Resolved
+	// exposurePlan is the per-episode as-needed tool-exposure plan
+	// (dynamic-tools leaf 06, design §6 rows 4-5). The tool-lookup site
+	// consults it to shape the unknown-tool error: a tool that is KNOWN to
+	// the registry but NOT active in this episode gets the actionable
+	// "call tool_view{X} first" directive (row 4); a genuinely unknown name
+	// gets the legacy "unknown tool: X" error. Nil = flag-off posture, so
+	// every error path is byte-identical to the pre-exposure legacy.
+	// Guarded by mu; set via SetExposurePlan.
+	exposurePlan *ExposurePlan
 }
 
 // ExecutorOption is a functional option for configuring an Executor.
@@ -1135,6 +1144,22 @@ func (e *Executor) SetGroupResolution(res *groups.Resolved) {
 	e.mu.Unlock()
 }
 
+// SetExposurePlan installs the per-episode tool-exposure plan on the executor
+// (dynamic-tools leaf 06). The tool-lookup site consults it to emit the
+// actionable "not active in this episode; call tool_view{X} first" error for
+// a known-but-inactive tool (design §6 row 4). A nil plan is the flag-off
+// posture: the lookup site never takes the active-set branch, so the error
+// behavior is byte-identical to legacy. Nil-guarded per the repo setter
+// convention (a nil plan resets to the legacy posture).
+func (e *Executor) SetExposurePlan(plan *ExposurePlan) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.exposurePlan = plan
+	e.mu.Unlock()
+}
+
 // WithGroupResolutionOption carries the group policy record onto the
 // executor at construction (loop.go wires it after the executor exists,
 // so the setter is the primary seam; the option exists for direct
@@ -1256,6 +1281,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	// Look up tool
 	e.mu.RLock()
 	registry := e.registry
+	plan := e.exposurePlan
 	e.mu.RUnlock()
 	if registry == nil {
 		return &ExecutionResult{
@@ -1267,6 +1293,24 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 
 	tool := registry.Get(toolName)
 	if tool == nil {
+		// dynamic-tools leaf 06 (design §6 row 4): when the episode carries a
+		// tool-exposure plan and this name is a REAL registered tool that is
+		// simply not active in this episode, the model must get the actionable
+		// recovery directive, not a bare "unknown tool" error. This is the
+		// starvation recovery vehicle: the model can call tool_view{name} to
+		// load the full schema and retry. A genuinely unknown name (not in the
+		// full registry) falls through to the legacy error below. A nil plan
+		// (flag off) never takes this branch — byte-identical legacy.
+		if plan != nil && plan.IsKnown(toolName) && !plan.IsActive(toolName) {
+			e.logger.Warn("Known tool not active in this episode; directing to tool_view",
+				"agent", e.agentID, "tool", toolName)
+			return &ExecutionResult{
+				ToolCallID: toolCall.ID,
+				Success:    false,
+				Error:      fmt.Sprintf("tool %q is not active in this episode; call tool_view{%q} first", toolName, toolName),
+			}
+		}
+
 		// Group gate on the unknown-tool path (agent-groups leaf 04 T3,
 		// F7): a grouped agent calling a tool the dispatch intersection
 		// removed must get the group_deny verdict (with its C2 decision

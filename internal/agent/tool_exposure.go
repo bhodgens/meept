@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 )
 
@@ -94,35 +95,70 @@ func EffectiveExposureMode(mc *llm.ModelConfig, agentMode, globalMode string, fl
 // invariant, §4.3). Seeded at episode start from the predicted set
 // (intent map) + core always-full + the meta-tool pair.
 //
-// TODO(dynamic-tools 06): NewExposurePlan is wired into the loop's
-// iteration site (GetDefinitions + StabilizeToolPrefix) in leaf 06;
-// this leaf (05) provides the type + the warn-once gate.
+// ceilingNames is the role ceiling (design §1 layer 1): the FULL
+// registry scoped to this agent's granted tools. Promote refuses a
+// name outside the ceiling and the error names the ceiling (§6 row 5),
+// so the model knows the tool is not merely unlisted but unavailable
+// to this role at all. A nil ceilingNames means "no ceiling" (the
+// flag-off legacy posture: Promote never refuses on ceiling).
+//
+// knownNames is the FULL registry's name set at episode start (design
+// §6 row 4): the executor uses IsKnown to distinguish a real registered
+// tool that is simply not active yet (emit the actionable "call
+// tool_view{X} first" directive) from a hallucinated / truly-unknown
+// name (the generic unknown-tool error). A nil knownNames means the
+// knowledge set is unset; IsKnown is then false, so row 4 only fires
+// when the full registry's names were supplied at construction.
 type ExposurePlan struct {
-	mu      sync.Mutex
-	active  []string
-	ceiling int
+	mu           sync.Mutex
+	active       []string
+	ceilingNames map[string]struct{}
+	knownNames   map[string]struct{}
 }
 
+// metaTools is the always-active meta-tool pair (design §1 layer 3): the
+// discoverer + the expander. In dynamic modes they are always full, so a
+// stubbed discoverer is undiscoverable and the pair must be active so the
+// model can reach a non-core tool.
+var metaTools = []string{"tool_search", "tool_view"}
+
 // NewExposurePlan builds the episode's active set for the given mode.
-// In search mode, the predicted set is empty (budget 0) so only core
-// always-full + the meta pair (tool_search, tool_view) are active.
-// In predicted mode, the caller passes the intent-selected set via
-// the IntentMap.For result; the core + meta are unioned in.
-//
-// m may be nil (no intent map loaded) → the predicted set is empty
-// and only core + meta are active.
-func NewExposurePlan(mode ToolExposureMode, predicted []string, budget int) *ExposurePlan {
+// ceiling is the role ceiling (design §1 layer 1): the set of tool
+// names this agent's role may ever activate. A nil ceiling means
+// "no ceiling" (the flag-off legacy posture). In search mode the
+// predicted set is empty (budget 0) so only core always-full + the
+// meta pair (tool_search, tool_view) are active. In predicted mode
+// the caller passes the intent-selected set; the core always-full set
+// and the meta pair are unioned in. knownNames is the FULL registry's
+// name set (design §6 row 4) so the executor can distinguish a real
+// registered tool that is not active yet from a genuinely unknown name.
+func NewExposurePlan(mode ToolExposureMode, predicted []string, budget int, ceiling []string, knownNames []string) *ExposurePlan {
 	p := &ExposurePlan{}
+	if len(ceiling) > 0 {
+		p.ceilingNames = make(map[string]struct{}, len(ceiling))
+		for _, c := range ceiling {
+			p.ceilingNames[c] = struct{}{}
+		}
+	}
+	if len(knownNames) > 0 {
+		p.knownNames = make(map[string]struct{}, len(knownNames))
+		for _, n := range knownNames {
+			p.knownNames[n] = struct{}{}
+		}
+	}
+	// Core always-full tools are active in every dynamic mode.
+	core := config.DefaultAlwaysFullTools()
 	switch mode {
 	case ExposureSearch:
-		// No predicted tools; only the meta pair.
-		p.active = []string{"tool_search", "tool_view"}
+		// No predicted tools; only core + the meta pair.
+		p.active = append(append([]string{}, core...), metaTools...)
 	case ExposurePredicted:
-		// Predicted set (capped at budget) + meta pair.
+		// Predicted set (capped at budget) + core + meta pair.
 		if len(predicted) > budget && budget > 0 {
 			predicted = predicted[:budget]
 		}
-		p.active = append(append([]string{}, predicted...), "tool_search", "tool_view")
+		p.active = append(append([]string{}, predicted...), core...)
+		p.active = append(p.active, metaTools...)
 	default:
 		// Full or indexed: no filtering; the plan is a no-op.
 		p.active = nil
@@ -130,9 +166,12 @@ func NewExposurePlan(mode ToolExposureMode, predicted []string, budget int) *Exp
 	return p
 }
 
-// Promote adds a tool name to the active set (append-only). Returns
-// nil if the tool is already active. Returns an error for an empty
-// name or when the set is at its ceiling.
+// Promote adds a tool name to the active set (append-only, design §3.1/§4.3).
+// Returns nil if the tool is already active. §6 row 5: a name OUTSIDE the
+// role ceiling is refused with an error that names the ceiling (the model
+// learns the tool is not merely unlisted but unavailable to this role at
+// all). A nil ceiling (flag off) disables the refusal — every name is
+// allowed, the legacy posture.
 func (p *ExposurePlan) Promote(name string) error {
 	if p == nil {
 		return fmt.Errorf("exposure: nil plan")
@@ -147,11 +186,47 @@ func (p *ExposurePlan) Promote(name string) error {
 			return nil // already active
 		}
 	}
-	if p.ceiling > 0 && len(p.active) >= p.ceiling {
-		return fmt.Errorf("exposure: cannot promote %q: at ceiling (%d)", name, p.ceiling)
+	if p.ceilingNames != nil {
+		if _, ok := p.ceilingNames[name]; !ok {
+			return fmt.Errorf("exposure: cannot activate %q: outside this agent's role ceiling (%d tools)", name, len(p.ceilingNames))
+		}
 	}
 	p.active = append(p.active, name)
 	return nil
+}
+
+// IsActive reports whether name is in the episode's active set. The executor's
+// §6 row 4 error-shaping uses this to distinguish a known-but-inactive tool
+// (emit the actionable "call tool_view{X} first" directive) from a genuinely
+// unknown one (the generic unknown-tool error). A nil plan returns false,
+// so the flag-off path never triggers the active-set error branch.
+func (p *ExposurePlan) IsActive(name string) bool {
+	if p == nil || name == "" {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, n := range p.active {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// IsKnown reports whether name is registered in the FULL registry (regardless
+// of active state). Used by the executor's §6 row 4 branch: a known tool that
+// is NOT active gets the actionable "call tool_view{X} first" error; an
+// unknown name falls through to the legacy "unknown tool: X" error. A nil
+// plan or unset known set returns false (the flag-off posture).
+func (p *ExposurePlan) IsKnown(name string) bool {
+	if p == nil || name == "" {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, ok := p.knownNames[name]
+	return ok
 }
 
 // Active returns the current active set (a copy; safe to iterate).
