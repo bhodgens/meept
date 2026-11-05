@@ -43,6 +43,11 @@ type SQLiteStore struct {
 	// written by SaveMessages. The publisher is responsible for any
 	// cluster broadcast; the session store's contract is purely local.
 	turnGossip TurnGossipPublisher
+
+	// projections, when set, receives an OnAppend call for each committed
+	// message (contract S2, leaf 03/02). Folds run post-commit and are
+	// best-effort: a fold failure never fails the save.
+	projections *SessionProjectionRegistry
 }
 
 // Option configures a SQLiteStore at construction time.
@@ -136,6 +141,11 @@ func (s *SQLiteStore) migrate() error {
 
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
+	}
+
+	// Additive projection watermark cache table (contract S2, leaf 03/02).
+	if _, err := s.db.Exec(projectionCacheSchema); err != nil {
+		return fmt.Errorf("failed to create projection cache table: %w", err)
 	}
 
 	// Add description column if not present (migration for existing databases)
@@ -985,7 +995,17 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 
 	// Snapshot the publisher under the lock, release, then publish.
 	pub := s.turnGossip
+	reg := s.projections
 	s.mu.Unlock()
+
+	// Post-commit projection fold (contract S2, leaf 03/02): best-effort,
+	// outside the store lock; a fold failure never fails the save.
+	if reg != nil {
+		for _, msg := range written {
+			msg.SessionID = sessionID
+			reg.OnAppend(sessionID, msg)
+		}
+	}
 
 	if pub == nil {
 		return nil
@@ -1284,6 +1304,24 @@ func (s *SQLiteStore) SetTurnGossipPublisher(pub TurnGossipPublisher) {
 	if s != nil && pub != nil {
 		s.turnGossip = pub
 	}
+}
+
+// SetProjectionRegistry wires (or replaces) the session projection registry
+// (contract S2). Nil values are ignored per CLAUDE.md nil-guard convention.
+// The store folds each committed message through the registry post-commit;
+// failures are best-effort and never fail the save.
+func (s *SQLiteStore) SetProjectionRegistry(reg *SessionProjectionRegistry) {
+	if s == nil || reg == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.projections = reg
+	// Leaf 03/02 T4: arm the S1 schema-version guard so projections refuse
+	// sessions stamped ahead of this build (fold + read both check it).
+	reg.SetVersionGuard(func(sessionID string) (int, error) {
+		return s.GetSchemaVersion(sessionID)
+	})
 }
 
 // GetDesignationHistory returns the designation history store for external access.
