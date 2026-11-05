@@ -1,0 +1,97 @@
+package agent
+
+// T3 gate (01-delegation/00T-tests.md): B2 fork-seed prefix pins.
+// Contract .hermes/contracts/01-delegation.md B2:
+//   completedTurnPrefix(conv *Conversation) []llm.ChatMessage
+// mirrors dsh subagent-fork-in-process/index.ts:46-53: the seed is the
+// parent's messages through the LAST completed turn; an unbalanced in-flight
+// turn (assistant tool-call without its tool results, or a trailing user
+// message with no assistant reply) is EXCLUDED; empty when nothing completed.
+//
+// RED until leaf 02-fork-seed lands (completedTurnPrefix undefined).
+
+import (
+	"testing"
+
+	"github.com/caimlas/meept/internal/llm"
+)
+
+func TestCompletedTurnPrefix_EmptyLog(t *testing.T) {
+	conv := NewConversation()
+	if got := completedTurnPrefix(conv); len(got) != 0 {
+		t.Errorf("empty conversation -> %d messages, want 0", len(got))
+	}
+}
+
+func TestCompletedTurnPrefix_BalancedSingleTurn(t *testing.T) {
+	conv := NewConversation()
+	conv.AddUserMessage("question")
+	conv.AddAssistantMessage("answer")
+
+	got := completedTurnPrefix(conv)
+	if len(got) != 2 {
+		t.Fatalf("balanced single turn -> %d messages, want 2", len(got))
+	}
+	if got[0].Role != llm.RoleUser || got[1].Role != llm.RoleAssistant {
+		t.Errorf("ordering/roles not preserved: %v %v", got[0].Role, got[1].Role)
+	}
+}
+
+func TestCompletedTurnPrefix_DropsInFlightTurn(t *testing.T) {
+	conv := NewConversation()
+	// Turn 1: completed.
+	conv.AddUserMessage("q1")
+	conv.AddAssistantMessage("a1")
+	// Turn 2: completed (tool round trip balanced).
+	conv.AddUserMessage("q2")
+	conv.AddAssistantMessageWithToolCalls("calling", []llm.ToolCall{
+		{ID: "call-1", Function: llm.FunctionCall{Name: "terminal", Arguments: "{}"}},
+	})
+	conv.AddToolResult("call-1", "output")
+	conv.AddAssistantMessage("a2")
+	// Turn 3: IN-FLIGHT - trailing user message with no assistant reply.
+	conv.AddUserMessage("q3")
+
+	got := completedTurnPrefix(conv)
+	for _, m := range got {
+		if m.Content == "q3" {
+			t.Fatal("in-flight trailing user message leaked into the fork seed")
+		}
+	}
+	if len(got) < 6 {
+		t.Errorf("completed turns lost: %d messages, want >= 6", len(got))
+	}
+}
+
+func TestCompletedTurnPrefix_DropsUnbalancedToolCall(t *testing.T) {
+	conv := NewConversation()
+	conv.AddUserMessage("q1")
+	conv.AddAssistantMessage("a1")
+	// In-flight turn: assistant tool-call whose result never arrived.
+	conv.AddUserMessage("q2")
+	conv.AddAssistantMessageWithToolCalls("calling", []llm.ToolCall{
+		{ID: "call-2", Function: llm.FunctionCall{Name: "terminal", Arguments: "{}"}},
+	})
+
+	got := completedTurnPrefix(conv)
+	for _, m := range got {
+		if len(m.ToolCalls) > 0 {
+			t.Fatal("unbalanced in-flight tool call leaked into the fork seed")
+		}
+		if m.Content == "q2" {
+			t.Fatal("user message of the unbalanced turn leaked into the seed")
+		}
+	}
+}
+
+func TestCompletedTurnPrefix_ThreeCompletedTurnsKeepsAll(t *testing.T) {
+	conv := NewConversation()
+	for i := 1; i <= 3; i++ {
+		conv.AddUserMessage("q")
+		conv.AddAssistantMessage("a")
+	}
+	got := completedTurnPrefix(conv)
+	if len(got) != 6 {
+		t.Errorf("3 completed turns -> %d messages, want 6", len(got))
+	}
+}
