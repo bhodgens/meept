@@ -14,7 +14,7 @@ package intake
 // Transport facts (binding for this file):
 //   - Projects V2 is GraphQL-only. REST cannot add board items or set
 //     field values, so the two board writes go through
-//     github.com/shurcoooL/githubv4 on the pool's OWN authenticated
+//     github.com/shurcooL/githubv4 on the pool's OWN authenticated
 //     *http.Client (client.Client()) — one token, no second auth surface,
 //     no internal/secrets import.
 //   - Sub-issue creation uses the raw client.NewRequest/client.Do escape

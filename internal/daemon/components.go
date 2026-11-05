@@ -260,6 +260,14 @@ type Components struct {
 	// SetDoneLabel has already been applied by wireIntakePoller.
 	IntakeWriteBack *intake.WriteBack
 
+	// IntakeProjector is the plan->GitHub-Projects projection built when
+	// [intake].project_number > 0 and the effects ledger is wired (nil
+	// otherwise). wireIntakePoller also arms the plan.executing /
+	// plan.phase_state bus subscribers that drive it; a nil msgBus or
+	// lifecycle ctx (the wiring gate fixture) constructs the projector
+	// without subscriptions, so it stays inert rather than panicking.
+	IntakeProjector *intake.Projector
+
 	// GitHubReArmTickerDone closes when the periodic instruction re-sync
 	// ticker exits (daemon Stop). Nil unless a ticker was started
 	// (github enabled + live instruction scheduler).

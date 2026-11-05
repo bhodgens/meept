@@ -50,6 +50,18 @@ new goroutine). Each tick:
    effects-wrapped per (ticket, state, goal) so a repeated outcome
    reuses the receipt instead of re-posting. A healthy outcome adds the
    done label (`done_label`, default `factory:done`).
+4. **Project (opt-in)** — when `project_number` > 0, `intake.Projector`
+   (held on `Components.IntakeProjector`) mirrors the plan hierarchy
+   into a GitHub Projects V2 board as sub-issues of the ticket issue:
+   ticket issue → one sub-issue per plan phase → one sub-issue per task
+   step. A `State` single-select field on the board mirrors phase
+   state. Two bus subscribers drive it: `plan.executing` (the plan just
+   synthesized → `EnsureProjection`) and `plan.phase_state` (state
+   transitions → `MirrorState`). The effects receipts ARE the
+   correlation store: `intake_projection:<planID>:<phaseID>` answers
+   "which GitHub issue and which board item is this phase?" — no new
+   column, no new table. Projection is fail-soft: a GitHub or GraphQL
+   error logs Warn and never fails the plan that triggered it.
 
 Poll errors log Warn and wait for the next tick; a panic inside one tick
 is recovered so the scheduler goroutine survives (same posture as the
@@ -80,6 +92,15 @@ by default:
 `ValidateEnabled` names EVERY missing required field, and the wiring is
 fail-closed: an invalid block logs Warn naming the fields and schedules
 nothing.
+
+For projection (`project_number` > 0): the board must already exist in
+the watch repo's GitHub Projects V2, owned by the token's user or
+organization. The projector looks up the board by number and resolves
+its `State` single-select field lazily on first use; if the field is
+missing, state mirroring sends the mutation with unresolved ids and
+GitHub rejects it (logged Warn, never fatal). Create the `State` field
+with options matching the phase states (`pending`, `in_progress`,
+`completed`, `confirmed`, `failed`) for clean mirroring.
 
 ## Wiring and the token coupling
 

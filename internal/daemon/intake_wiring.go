@@ -15,6 +15,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -24,6 +25,9 @@ import (
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/githubsvc"
 	"github.com/caimlas/meept/internal/intake"
+	"github.com/caimlas/meept/internal/plan"
+	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // intakePollJobName is the scheduler job ID for the intake poll. The
@@ -140,6 +144,21 @@ func wireIntakePoller(c *Components) {
 		logger.Warn("effects ledger not wired; intake outcome write-back disabled (goal outcomes will not comment back)")
 	}
 
+	// Plan->GitHub-Projects projection (leaf 06, Contract 5): built only
+	// when project_number > 0 AND the effects ledger is wired — receipts
+	// are the correlation store, so a nil ledger means no projection.
+	// project_number 0 (the shipped default) skips silently.
+	if cfg.ProjectNumber > 0 {
+		if c.EffectsLedger != nil {
+			c.IntakeProjector = intake.NewProjector(pool, c.EffectsLedger,
+				cfg.ProjectNumber, githubsvc.OwnerRepo{Owner: owner, Repo: repo}, logger.Handler())
+			wireIntakeProjectionSubscriptions(c, cfg, logger)
+			logger.Info("intake projection armed", "project_number", cfg.ProjectNumber, "watch_repo", cfg.WatchRepo)
+		} else {
+			logger.Warn("intake.project_number is set but the effects ledger is not wired; plan projection disabled")
+		}
+	}
+
 	// FK anchor: the default_employee may never have been hired — a
 	// trigger-source goal factory legitimately routes work to a
 	// configured id, not a managed employee. Without the anchor every
@@ -198,4 +217,181 @@ func pollIntakeTickets(ctx context.Context, c *Components, poller *intake.GitHub
 		logger.Debug("intake poll mapped tickets to goals",
 			"tickets", len(tickets), "default_employee", cfg.DefaultEmployee)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Plan -> GitHub Project projection (leaf 06, Contract 5 wiring seam)
+// ---------------------------------------------------------------------------
+
+// wireIntakeProjectionSubscriptions arms the two bus subscribers that drive
+// the Projector:
+//
+//   - "plan.executing"      -> EnsureProjection (the plan just synthesized;
+//     its phase tree becomes sub-issues of the intake ticket).
+//   - "plan.phase_state"    -> MirrorState (phase state transitions the
+//     PlanManager publishes: in_progress on synthesize, completed on
+//     phase/task completion).
+//
+// A nil msgBus or nil lifecycle ctx (the wiring gate fixture) skips
+// silently: the projector stays constructed but inert, never a panic.
+// Subscribers exit on ctx.Done and unsubscribe on the way out, the same
+// posture as the employee.critical_finding subscriber. Every handler is
+// fail-soft: a projection error logs Warn and never touches the plan
+// lifecycle that published the event.
+func wireIntakeProjectionSubscriptions(c *Components, cfg config.IntakeConfig, logger *slog.Logger) {
+	if c.msgBus == nil || c.ctx == nil {
+		logger.Debug("intake projection subscriptions skipped: no bus or lifecycle context on Components")
+		return
+	}
+	if c.PlanManager == nil || c.EmployeeManager == nil {
+		logger.Warn("intake projection subscriptions skipped: PlanManager or EmployeeManager not wired")
+		return
+	}
+
+	execSub := c.msgBus.Subscribe("intake-projection-executing", "plan.executing")
+	go func() {
+		defer c.msgBus.Unsubscribe(execSub)
+		for {
+			select {
+			case <-c.ctx.Done():
+				return
+			case msg, ok := <-execSub.Channel:
+				if !ok {
+					return
+				}
+				projectPlanFromEvent(c.ctx, c, cfg, logger, msg)
+			}
+		}
+	}()
+
+	stateSub := c.msgBus.Subscribe("intake-projection-phase-state", "plan.phase_state")
+	go func() {
+		defer c.msgBus.Unsubscribe(stateSub)
+		for {
+			select {
+			case <-c.ctx.Done():
+				return
+			case msg, ok := <-stateSub.Channel:
+				if !ok {
+					return
+				}
+				var ev struct {
+					PlanID  string `json:"plan_id"`
+					PhaseID string `json:"phase_id"`
+					State   string `json:"state"`
+				}
+				if err := json.Unmarshal(msg.Payload, &ev); err != nil {
+					logger.Warn("plan.phase_state: unmarshal failed", "error", err)
+					continue
+				}
+				if ev.PlanID == "" || ev.PhaseID == "" || ev.State == "" {
+					continue
+				}
+				// MirrorState is fail-soft by contract: it logs its own
+				// Warns and returns nil. The projection only exists for
+				// intake-linked plans anyway — an unprojected phase gets
+				// ErrUnknownKey inside and is skipped there.
+				if err := c.IntakeProjector.MirrorState(c.ctx, ev.PlanID, ev.PhaseID, ev.State); err != nil {
+					logger.Warn("intake projection: MirrorState returned an error",
+						"plan_id", ev.PlanID, "phase_id", ev.PhaseID, "state", ev.State, "error", err)
+				}
+			}
+		}
+	}()
+}
+
+// projectPlanFromEvent handles one plan.executing bus event: resolve the
+// plan's intake ticket (plan -> goal -> TriggerRef intake:<repo>#<ticket>),
+// then EnsureProjection the phase tree under it. Every step is fail-soft —
+// a non-intake plan (no goal, no TriggerRef) is the common case and skips
+// quietly at Debug.
+func projectPlanFromEvent(ctx context.Context, c *Components, cfg config.IntakeConfig,
+	logger *slog.Logger, msg *models.BusMessage) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("intake projection handler panic recovered", "recovered", r)
+		}
+	}()
+
+	var ev struct {
+		PlanID string `json:"plan_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &ev); err != nil || ev.PlanID == "" {
+		return
+	}
+
+	p, err := c.PlanManager.GetPlan(ctx, ev.PlanID)
+	if err != nil {
+		logger.Warn("intake projection: plan lookup failed", "plan_id", ev.PlanID, "error", err)
+		return
+	}
+	if p.GoalID == "" {
+		return // not a goal-driven plan: nothing to project
+	}
+	goal, err := c.EmployeeManager.GetGoal(ctx, p.GoalID)
+	if err != nil || goal == nil || goal.TriggerRef == "" {
+		return // not an intake-linked goal
+	}
+	if !strings.HasPrefix(goal.TriggerRef, intake.TriggerRefPrefix) {
+		return // trigger source other than intake (cron, manual)
+	}
+	repoTicket := strings.TrimPrefix(goal.TriggerRef, intake.TriggerRefPrefix)
+	repo, ticketID, ok := strings.Cut(repoTicket, "#")
+	if !ok || repo == "" || ticketID == "" {
+		return
+	}
+	if repo != cfg.WatchRepo {
+		// The projection board is scoped to the watch repo; a goal from a
+		// different repo's intake (future multi-repo) is out of scope.
+		logger.Debug("intake projection: goal TriggerRef repo differs from watch_repo",
+			"plan_id", ev.PlanID, "goal_repo", repo, "watch_repo", cfg.WatchRepo)
+		return
+	}
+
+	phases, err := c.PlanManager.GetPhases(ctx, ev.PlanID)
+	if err != nil {
+		logger.Warn("intake projection: phase lookup failed", "plan_id", ev.PlanID, "error", err)
+		return
+	}
+	if len(phases) == 0 {
+		return
+	}
+	phaseVals := make([]plan.PlanPhase, 0, len(phases))
+	for _, ph := range phases {
+		if ph != nil {
+			phaseVals = append(phaseVals, *ph)
+		}
+	}
+
+	// Real step lists when the step store is reachable: the phase child
+	// task IDs come from the manager's task map via GetPhasesByTask on the
+	// parent task. Best-effort — a nil/failed lookup falls back to
+	// synthesized steps from each phase's TotalSteps counter.
+	var stepsByPhase map[string][]task.TaskStep
+	if c.StepStore != nil && p.TaskID != "" {
+		if phaseTasks, ptErr := c.PlanManager.GetPhasesByTask(ctx, p.TaskID); ptErr == nil && len(phaseTasks) > 0 {
+			stepsByPhase = map[string][]task.TaskStep{}
+			for _, ph := range phaseTasks {
+				if ph.TaskID == "" {
+					continue
+				}
+				if steps, sErr := c.StepStore.ListByTaskID(ph.TaskID); sErr == nil {
+					for _, st := range steps {
+						if st != nil {
+							stepsByPhase[ph.ID] = append(stepsByPhase[ph.ID], *st)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	ticket := intake.Ticket{ID: ticketID, Repo: repo}
+	if err := c.IntakeProjector.EnsureProjectionWithSteps(ctx, ticket, ev.PlanID, phaseVals, stepsByPhase); err != nil {
+		logger.Warn("intake projection failed (fail-soft; the plan keeps running)",
+			"plan_id", ev.PlanID, "repo", repo, "ticket", ticketID, "error", err)
+		return
+	}
+	logger.Info("intake projection complete",
+		"plan_id", ev.PlanID, "repo", repo, "ticket", ticketID, "phases", len(phaseVals))
 }

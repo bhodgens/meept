@@ -131,7 +131,7 @@
     "agent.progress.synthesized": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2506,
+        "line": 2537,
         "payload_keys": []
       }
     ],
@@ -206,7 +206,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10297,
+        "line": 10417,
         "payload_keys": []
       }
     ],
@@ -559,7 +559,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4051,
+        "line": 4120,
         "payload_keys": []
       }
     ],
@@ -580,7 +580,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6127,
+        "line": 6216,
         "payload_keys": [
           "name",
           "tags",
@@ -893,7 +893,7 @@
     "plan.completed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 1053,
+        "line": 1070,
         "payload_keys": [],
         "via_helper": true
       }
@@ -917,7 +917,7 @@
     "plan.executing": [
       {
         "file": "internal/plan/manager.go",
-        "line": 911,
+        "line": 916,
         "payload_keys": [],
         "via_helper": true
       }
@@ -925,7 +925,27 @@
     "plan.phase_completed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 978,
+        "line": 988,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
+    "plan.phase_state": [
+      {
+        "file": "internal/plan/manager.go",
+        "line": 892,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/plan/manager.go",
+        "line": 962,
+        "payload_keys": [],
+        "via_helper": true
+      },
+      {
+        "file": "internal/plan/manager.go",
+        "line": 993,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1771,7 +1791,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9431,
+        "line": 9551,
         "payload_keys": []
       }
     ],
@@ -2298,13 +2318,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8037,
+        "line": 8157,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8074,
+        "line": 8194,
         "payload_keys": [],
         "via_const": true
       }
@@ -2521,7 +2541,7 @@
     "agent.event.*": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2476,
+        "line": 2507,
         "subscriber_id": "progress-synthesizer"
       }
     ],
@@ -2707,7 +2727,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4029,
+        "line": 4098,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2722,7 +2742,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4898,
+        "line": 4967,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -2931,6 +2951,20 @@
         "file": "internal/daemon/gate_park_wiring.go",
         "line": 192,
         "subscriber_id": "gate-resume-pump"
+      }
+    ],
+    "plan.executing": [
+      {
+        "file": "internal/daemon/intake_wiring.go",
+        "line": 251,
+        "subscriber_id": "intake-projection-executing"
+      }
+    ],
+    "plan.phase_state": [
+      {
+        "file": "internal/daemon/intake_wiring.go",
+        "line": 267,
+        "subscriber_id": "intake-projection-phase-state"
       }
     ],
     "plan.submitting": [
@@ -3561,7 +3595,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9357,
+        "line": 9477,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3852,7 +3886,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9524,
+        "line": 9644,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],
@@ -3908,6 +3942,12 @@
         "file": "internal/activity/busbridge.go",
         "line": 99,
         "subscriber_id": "activity-ring",
+        "typed": true
+      },
+      {
+        "file": "internal/daemon/context_assembler_wiring.go",
+        "line": 164,
+        "subscriber_id": "working-producer",
         "typed": true
       },
       {
