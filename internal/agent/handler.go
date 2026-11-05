@@ -293,6 +293,16 @@ type TurnTerminalEvent struct {
 	// frozen 13-key set ignore it (20260916-turn-lifecycle-events extension
 	// note updated in the same change).
 	TraceID string `json:"trace_id,omitempty"`
+	// TurnSpanID (wiring-gap-remediation leaf 06): the 16-hex turn span
+	// minted BESIDE the trace at the same handler seam; it is the parent of
+	// the trace's llm.call and tool.call hop spans (mid-turn hops export
+	// children-before-parent -- valid for Tempo/Jaeger). Empty (omitempty)
+	// on the same pre-mint early failure paths as TraceID; untraced turns
+	// carry both fields empty so untraced bytes stay identical. Additive
+	// field: consumers decoding the frozen key set ignore it
+	// (20260916-turn-lifecycle-events extension note updated in the same
+	// change).
+	TurnSpanID string `json:"turn_span_id,omitempty"`
 }
 
 // WSClass implements wsclass.WSClassified: turn lifecycle events render
@@ -774,10 +784,14 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 	if req.Message == "" {
 		h.sendError(msg.ID, "message is required")
+		// The local mint is in hand and the turn is not yet registered
+		// (registration happens below), so the central publishTurnTerminal
+		// fill cannot resolve it -- stamp the pair directly (leaf 06).
 		h.publishTurnTerminal(TurnTerminalEvent{
 			ConversationID: req.ConversationID,
 			TurnID:         turnID,
 			TraceID:        traceID,
+			TurnSpanID:     turnSpanID,
 			HandlerCase:    "empty_message",
 			Status:         "failed",
 			Reply:          "I encountered an error: message is required",
@@ -1346,6 +1360,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		Model:          syncModel,
 		Error:          turnError,
 		TraceID:        traceID,
+		TurnSpanID:     turnSpanID,
 	})
 
 	// Async-turn completion (leaf 03): the submitted turn leaves the
@@ -1780,9 +1795,23 @@ func (h *ChatHandler) publishWorkerEvent(topic string, w *Worker) {
 // publishTurnTerminal is the single emission point for the turn.terminal
 // topic (async-turn-migration step 1). Payload contract is frozen — see
 // docs/plans/20260916-turn-lifecycle-events/master.md Interface Contracts.
+//
+// Central TurnSpanID backfill (wiring-gap-remediation leaf 06): every
+// literal construction site routes through THIS funnel (direct calls and
+// the watchdog's EmitTurnTerminal alike), so the registry's trace
+// correlation is resolved here instead of at each site. Tracked turns get
+// the minted turn span id; untracked/legacy turns keep both fields ""
+// (omitempty keeps their bytes identical). Callers that hold the local
+// mint (the handler's own emission paths) may still set the field
+// explicitly; this fill only covers an empty value.
 func (h *ChatHandler) publishTurnTerminal(ev TurnTerminalEvent) {
 	if h == nil || h.bus == nil {
 		return
+	}
+	if ev.TurnSpanID == "" && ev.TurnID != "" && h.turnRegistry != nil {
+		if _, span := h.turnRegistry.TraceForTurn(ev.TurnID); span != "" {
+			ev.TurnSpanID = span
+		}
 	}
 	// Pre-marshal to preserve the log-and-drop contract (typed-bus-topics
 	// leaf 02): bus.PublishT panics on marshal failure, but a marshal
@@ -1968,8 +1997,10 @@ func (h *ChatHandler) publishTaskTerminalRelay(taskID string, linkedSessions []s
 	// Leaf 01 (llm-hop-tracing): the relay re-broadcasts under the
 	// SUBMITTED turn id, so it carries the SAME trace that turn minted --
 	// recovered from the registry's task->turn edge. Unknown/untracked ->
-	// "" (never mint a second trace for one turn).
-	relayTraceID, _ := h.turnRegistry.TraceForTask(taskID)
+	// "" (never mint a second trace for one turn). Leaf 06: the minted
+	// turn span id rides the same lookup (the trace->span correlation is
+	// one pair; publishTurnTerminal's central fill is the backstop).
+	relayTraceID, relayTurnSpanID := h.turnRegistry.TraceForTask(taskID)
 	h.publishTurnTerminal(TurnTerminalEvent{
 		ConversationID: conversationID,
 		SessionID:      sessionID,
@@ -1980,6 +2011,7 @@ func (h *ChatHandler) publishTaskTerminalRelay(taskID string, linkedSessions []s
 		Reply:          reply,
 		Error:          errMsg,
 		TraceID:        relayTraceID,
+		TurnSpanID:     relayTurnSpanID,
 	})
 	// The task→turn registry edge has served its purpose (the relay
 	// recovered the originating id): drop the entry so the watchdog does
@@ -2571,7 +2603,7 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 		// failed after the re-park declined — report it honestly so the
 		// awaiter resolves as failed. Legacy parked turns stay silent.
 		if turn.TurnID != "" {
-			resumeTraceID, _ := h.turnRegistry.TraceForTurn(turn.TurnID)
+			resumeTraceID, resumeTurnSpanID := h.turnRegistry.TraceForTurn(turn.TurnID)
 			h.publishTurnTerminal(TurnTerminalEvent{
 				ConversationID: turn.ConversationID,
 				SessionID:      turn.SessionID,
@@ -2581,6 +2613,7 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 				Reply:          "I encountered an error: Auto-resume failed: " + err.Error(),
 				Error:          err.Error(),
 				TraceID:        resumeTraceID,
+				TurnSpanID:     resumeTurnSpanID,
 			})
 		}
 		return
@@ -2601,7 +2634,7 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 	// the terminal event fires under the id the ack returned. Legacy
 	// parked turns (TurnID "") stay silent.
 	if turn.TurnID != "" {
-		resumeTraceID, _ := h.turnRegistry.TraceForTurn(turn.TurnID)
+		resumeTraceID, resumeTurnSpanID := h.turnRegistry.TraceForTurn(turn.TurnID)
 		h.publishTurnTerminal(TurnTerminalEvent{
 			ConversationID: turn.ConversationID,
 			SessionID:      turn.SessionID,
@@ -2610,6 +2643,7 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 			Status:         "completed",
 			Reply:          reply,
 			TraceID:        resumeTraceID,
+			TurnSpanID:     resumeTurnSpanID,
 		})
 	}
 
@@ -3001,7 +3035,7 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 		// failed — report it honestly so the awaiter resolves as failed.
 		// Legacy parked turns (TurnID "") stay silent.
 		if turn.TurnID != "" {
-			resumeTraceID, _ := h.turnRegistry.TraceForTurn(turn.TurnID)
+			resumeTraceID, resumeTurnSpanID := h.turnRegistry.TraceForTurn(turn.TurnID)
 			h.publishTurnTerminal(TurnTerminalEvent{
 				ConversationID: turn.ConversationID,
 				SessionID:      turn.SessionID,
@@ -3011,6 +3045,7 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 				Reply:          "I encountered an error: Auto-resume failed: " + err.Error(),
 				Error:          err.Error(),
 				TraceID:        resumeTraceID,
+				TurnSpanID:     resumeTurnSpanID,
 			})
 		}
 		return
@@ -3032,7 +3067,7 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 	// the terminal event fires under the id the ack returned. Legacy
 	// parked turns stay silent.
 	if turn.TurnID != "" {
-		resumeTraceID, _ := h.turnRegistry.TraceForTurn(turn.TurnID)
+		resumeTraceID, resumeTurnSpanID := h.turnRegistry.TraceForTurn(turn.TurnID)
 		h.publishTurnTerminal(TurnTerminalEvent{
 			ConversationID: turn.ConversationID,
 			SessionID:      turn.SessionID,
@@ -3041,6 +3076,7 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 			Status:         "completed",
 			Reply:          reply,
 			TraceID:        resumeTraceID,
+			TurnSpanID:     resumeTurnSpanID,
 		})
 	}
 

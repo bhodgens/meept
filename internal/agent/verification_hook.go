@@ -422,6 +422,32 @@ func (l *AgentLoop) verifierChildOptions(modelRef string) []LoopOption {
 	if res := l.GroupResolution(); res != nil {
 		childOpts = append(childOpts, WithGroupResolution(res))
 	}
+	// Context-assembler seam inheritance (wiring-gap leaf 01-snapshot-seams,
+	// three-site rule site 3: verifier children). The child runs its own
+	// reasoning cycle over the filtered registry, so it must budget from the
+	// same seam as its parent: propagating the armed assembler config plus
+	// the tier provider is sufficient -- contextSeamIfEnabled() materializes
+	// lazily from that pair, and the LoopSeam pointer itself stays per-loop.
+	// Without this the child silently reverted to the static token budgets.
+	if l.contextAssemblerSet {
+		assemblerCfg := l.contextAssemblerCfg
+		childOpts = append(childOpts, func(c *AgentLoop) {
+			c.SetContextAssemblerConfig(assemblerCfg)
+		})
+	}
+	if prov := l.tierProvider; prov != nil {
+		childOpts = append(childOpts, func(c *AgentLoop) {
+			c.SetTierBudgetProvider(prov)
+		})
+	}
+	// piiRestore is deliberately NOT propagated here (documented N/A for
+	// site 3, wiring-gap leaf 01): (a) RestoreOutput is session-bounded --
+	// tokens were minted under the parent's sessionID and cannot resolve
+	// under the child's "verifier-<id>" session; (b) the child's raw output
+	// is machine-consumed by ParseVerdict and never reaches the user, so
+	// the unmasking lane has no user-facing surface to protect. The parent
+	// loop's post-turn pipeline applies the restore lane once on the final
+	// response (loop.go ScanOutput choke point).
 	// Hook registry inheritance: the verifier child executes tools (the
 	// filtered read-only set) and must enforce the same security
 	// before-tool-call denies, decision gate, and transform hooks as its

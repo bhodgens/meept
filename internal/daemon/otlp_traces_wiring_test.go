@@ -381,3 +381,175 @@ func TestOTLPTracesWiringTurnSpanCarriesTraceID(t *testing.T) {
 		t.Error("chat.turn span missing the minted trace id on the wire")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Leaf 06 (wiring-gap-remediation): TurnSpanID parent linkage.
+// ---------------------------------------------------------------------------
+
+// T3 wiring-failure proof (leaf 06 / R6 "hop spans export with empty
+// ParentSpanID"):
+//
+//	Given: an enabled trace pipeline and a terminal event carrying the
+//	       minted trace+turn-span pair;
+//	When:  an LLM-call hop for the SAME trace flows through the observer
+//	       bridge;
+//	Then:  the exported llm.call span's ParentSpanID wire bytes equal the
+//	       turn span id.
+//
+// Wiring-failure property: deleting the TurnSpanID field on
+// agent.TurnTerminalEvent (or the trace->turnSpan propagation in the turn
+// subscription) leaves the parent empty -- the probe hop never lands with
+// the turn-span parent bytes and the test FAILS at the marked assertion
+// (witnessed live: with the pair propagation removed, this test reported
+// "llm.call hop exported WITHOUT the turn-span parent").
+//
+// The FIRST hop is observed BEFORE the terminal (real export order --
+// children-before-parent); its parent resolution happens at observe time,
+// so it carries no assertion. A trailing hop AFTER the terminal must
+// still parent on the same turn span: the receiver keys a trace->turnspan
+// MAP looked up at hop time, not a last-seen-terminal heuristic -- and
+// keeps late-terminal traces rather than resetting on the terminal.
+//
+// Export sequencing is driven by explicit exp.Flush() calls (the started
+// exporter's periodic ticker is irrelevant here). Body composition is
+// timing-dependent, so every assertion scans bodies for the span whose
+// 8-byte span id is unique to it.
+func TestOTLPTracesWiringLLMCallHopParentsOnTurnSpan(t *testing.T) {
+	cap := newCaptureTraces(t)
+	b := bus.New(nil, nil)
+	cfg := config.OTLPTracesConfig{
+		Enabled:        true,
+		Endpoint:       cap.srv.URL,
+		SampleRate:     1.0,
+		ExportInterval: 50 * time.Millisecond,
+	}
+	exp, _, subs, obs := wireOTLPTracesWithObserver(cfg, b, nil, slog.Default())
+	if exp == nil || obs == nil {
+		t.Fatal("enabled wiring returned nil exporter or nil observer")
+	}
+	defer stopOTLPTraces(b, exp, subs)
+
+	const (
+		traceID   = "a1b2c3d4e5f60123456789abcdef0123"
+		turnSpan  = "0a0b0c0d0e0f1011"
+		llmSpanID = "b1b2b3b4b5b6b7b8"
+	)
+	rawTurnSpan, err := hex.DecodeString(turnSpan)
+	if err != nil {
+		t.Fatalf("turn span hex: %v", err)
+	}
+
+	// When FIRST: the mid-turn hop arrives before its terminal. Drained
+	// immediately; no assertion (its parent resolution raced the pair by
+	// construction).
+	obs(appmetrics.LLMCallRecord{
+		Timestamp: time.Now(),
+		Provider:  "openai",
+		ModelID:   "test-model",
+		AgentID:   "agent-1",
+		SessionID: "session-abc",
+		LatencyMs: 300,
+		TraceID:   traceID,
+		SpanID:    llmSpanID,
+	})
+	exp.Flush()
+
+	// And THEN: the terminal for the same trace carries the minted pair.
+	bus.PublishT(b, agent.TopicTurnTerminal, "test", agent.TurnTerminalEvent{
+		ConversationID: "conv-turnspan",
+		SessionID:      "session-abc",
+		TurnID:         "turn-ts-1",
+		HandlerCase:    "direct",
+		Status:         "completed",
+		TraceID:        traceID,
+		TurnSpanID:     turnSpan,
+	})
+	// The typed subscription decodes on its own goroutine; wait for the
+	// pair to be recorded by probing with a canary hop -- the same lookup
+	// production uses -- until it lands parented.
+	rawProbe, err := hex.DecodeString("e1e2e3e4e5e6e7e8")
+	if err != nil {
+		t.Fatalf("probe span hex: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	pairSeen := false
+	for time.Now().Before(deadline) && !pairSeen {
+		obs(appmetrics.LLMCallRecord{
+			Timestamp: time.Now(),
+			Provider:  "probe",
+			ModelID:   "pair-probe",
+			LatencyMs: 1,
+			TraceID:   traceID,
+			SpanID:    "e1e2e3e4e5e6e7e8",
+		})
+		exp.Flush()
+		for _, body := range cap.bodies {
+			if bytes.Contains(body, rawProbe) && bytes.Contains(body, rawTurnSpan) {
+				pairSeen = true
+				break
+			}
+		}
+		if !pairSeen {
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if !pairSeen {
+		// Wiring-failure proof marker: the propagation is gone (field
+		// deleted / map write removed) -- every hop exports unparented.
+		t.Errorf("llm.call hop exported WITHOUT the turn-span parent (%s): parent linkage wiring removed", turnSpan)
+	}
+
+	// A trailing hop AFTER the terminal must still parent on the same
+	// turn span (the map keeps late-terminal traces; no reset on the
+	// terminal).
+	obs(appmetrics.LLMCallRecord{
+		Timestamp: time.Now(),
+		Provider:  "openai",
+		ModelID:   "test-model",
+		AgentID:   "agent-1",
+		SessionID: "session-abc",
+		LatencyMs: 100,
+		TraceID:   traceID,
+		SpanID:    "d1d2d3d4d5d6d7d8",
+	})
+	exp.Flush()
+	rawTrailing, err := hex.DecodeString("d1d2d3d4d5d6d7d8")
+	if err != nil {
+		t.Fatalf("trailing hop span hex: %v", err)
+	}
+	for _, body := range cap.bodies {
+		if bytes.Contains(body, rawTrailing) && !bytes.Contains(body, rawTurnSpan) {
+			t.Error("post-terminal hop exported WITHOUT the turn-span parent (map reset on terminal?)")
+			break
+		}
+	}
+
+	// A hop under an UNKNOWN trace exports unparented (no cross-trace
+	// leakage): its body must not carry the turn-span bytes.
+	obs(appmetrics.LLMCallRecord{
+		Timestamp: time.Now(),
+		Provider:  "openai",
+		ModelID:   "test-model",
+		SessionID: "session-other",
+		LatencyMs: 50,
+		TraceID:   "f0e0d0c0b0a090807060504030201000",
+		SpanID:    "c1c2c3c4c5c6c7c8",
+	})
+	exp.Flush()
+	rawUnk, err := hex.DecodeString("c1c2c3c4c5c6c7c8")
+	if err != nil {
+		t.Fatalf("unknown hop span hex: %v", err)
+	}
+	unkFound := false
+	for _, body := range cap.bodies {
+		if bytes.Contains(body, rawUnk) {
+			unkFound = true
+			if bytes.Contains(body, rawTurnSpan) {
+				t.Error("unknown-trace hop inherited the turn-span parent (cross-trace leakage)")
+			}
+		}
+	}
+	if !unkFound {
+		t.Fatal("unknown-trace hop never exported")
+	}
+}

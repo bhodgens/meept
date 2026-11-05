@@ -1807,9 +1807,13 @@ func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) LoopOption {
 
 // SetPiiRestoreHook attaches the PII-unmasking restore lane (pii leaf 02).
 // Typed-nil guarded: a nil hook is a no-op (feature off). Called from
-// components.go AFTER hook registration; session clones inherit the lane
-// through the shared *PiiRestoreHook (its RestoreOutput is stateless per
-// call, scoped by the sessionID argument).
+// components.go AFTER hook registration. Session clones inherit the lane
+// through the ConfigSnapshot seam closure (wiring-gap leaf 01), which
+// re-attaches the shared *PiiRestoreHook on every GetOrCreateWired clone
+// (its RestoreOutput is stateless per call, scoped by the sessionID
+// argument). Verifier children (site 3) intentionally run hook-less:
+// their raw output is post-processed by the parent loop's ScanOutput
+// path, so the restore lane applies once on the parent's final response.
 func (l *AgentLoop) SetPiiRestoreHook(hook *PiiRestoreHook) {
 	if hook == nil {
 		return
@@ -9283,6 +9287,29 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		func(l2 *AgentLoop) {
 			if l.branchManager != nil {
 				l2.branchManager = l.branchManager
+			}
+		},
+
+		// --- Context-assembler + PII-restore seams (wiring-gap leaf
+		// 01-snapshot-seams, three-site rule site 2: session clones).
+		// Without this block a GetOrCreateWired clone silently lost all
+		// four: the assembler config + tier provider never arrived, so
+		// contextSeamIfEnabled() stayed nil and the clone ran the
+		// un-budgeted static path forever; the PII restore lane never
+		// re-attached, so a masked reply shipped raw to the user. The
+		// seam materializes lazily from (cfg, provider), so propagating
+		// both inputs is sufficient; the LoopSeam pointer itself stays
+		// per-loop. SetTierBudgetProvider is typed-nil-guarded, so the
+		// interface read is unconditional.
+		func(l2 *AgentLoop) {
+			if l.contextAssemblerSet {
+				l2.SetContextAssemblerConfig(l.contextAssemblerCfg)
+			}
+			if l.tierProvider != nil {
+				l2.SetTierBudgetProvider(l.tierProvider)
+			}
+			if hook := l.piiRestore; hook != nil {
+				l2.SetPiiRestoreHook(hook)
 			}
 		},
 

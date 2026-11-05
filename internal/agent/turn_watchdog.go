@@ -141,6 +141,12 @@ func (w *TurnWatchdog) reapOnce(staleAfter time.Duration) int {
 			Error:          fmt.Sprintf("turn reaped: no progress for %s", staleAfter),
 			HandlerCase:    "turn_reaped",
 			Reply:          "this turn stopped responding and was marked failed",
+			// Leaf 01/06: the reaped event carries the SAME trace
+			// correlation the turn minted (one trace per turn, never
+			// two). The record holds the pair; EmitTurnTerminal's
+			// central registry fill is the backstop.
+			TraceID:    rec.TraceID,
+			TurnSpanID: rec.TurnSpanID,
 		})
 		// Observability (leaf-06 task 4): the emit wrapper's Warn line —
 		// countable in the daemon log alongside the terminal event itself.
