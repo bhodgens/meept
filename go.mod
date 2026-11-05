@@ -25,6 +25,7 @@ require (
 	github.com/fsouza/go-dockerclient v1.13.2
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/golangci/plugin-module-register v0.1.2
+	github.com/gomutex/godocx v0.1.5
 	github.com/google/go-github/v93 v93.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
