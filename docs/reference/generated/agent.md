@@ -4339,7 +4339,7 @@ SetPersistentModelOverride sets a model override that does NOT auto\-clear after
 
 	func (l *AgentLoop) SetPiiRestoreHook(hook *PiiRestoreHook)
 
-SetPiiRestoreHook attaches the PII\-unmasking restore lane \(pii leaf 02\). Typed\-nil guarded: a nil hook is a no\-op \(feature off\). Called from components.go AFTER hook registration; session clones inherit the lane through the shared \*PiiRestoreHook \(its RestoreOutput is stateless per call, scoped by the sessionID argument\).
+SetPiiRestoreHook attaches the PII\-unmasking restore lane \(pii leaf 02\). Typed\-nil guarded: a nil hook is a no\-op \(feature off\). Called from components.go AFTER hook registration. Session clones inherit the lane through the ConfigSnapshot seam closure \(wiring\-gap leaf 01\), which re\-attaches the shared \*PiiRestoreHook on every GetOrCreateWired clone \(its RestoreOutput is stateless per call, scoped by the sessionID argument\). Verifier children \(site 3\) intentionally run hook\-less: their raw output is post\-processed by the parent loop's ScanOutput path, so the restore lane applies once on the parent's final response.
 
 <a name="AgentLoop.SetPrefetchCallback"></a>
 ### func \(\*AgentLoop\) SetPrefetchCallback
@@ -13197,7 +13197,7 @@ PersistenceFunc is called to persist messages after they're added.
 PiiRestoreHook restores swap tokens in model output before any persistence surface. Two lanes, both session\-bounded \(research findings D4/D5, L7\):
 
 1. PII tokens: \[PII:\<uuid\>\] placeholders minted by the pii.Swapper in this session resolve back to their original values via the session\- scoped SwapStore. Tokens minted in ANOTHER session never resolve here \- the store refuses cross\-session lookups \(cross\-session restore is an info leak, not a convenience\).
-2. Secret placeholders: \#XXXX\# placeholders minted by the process\-wide SecretObfuscator pass restore via Deobfuscate. The obfuscator's maps are NOT session\-scoped \(they are process\-wide by design \- the pre\-LLM obfuscation hook obfuscated this session's context in this process\), so this lane is gated on cfg.SecretRestore \(research D6: learning\-capture redaction shares the gate\) and on the swapper AND obfuscator being present.
+2. Secret placeholders: \#XXXXXXXXXXXX\# placeholders minted by the process\-wide SecretObfuscator pass restore via session\-scoped RestoreOutput \(falling back to the legacy sessionless Deobfuscate for untagged mints\). The obfuscator's value maps are process\-wide \(the pre\-LLM obfuscation hook obfuscated this session's context in this process\), but each placeholder is TAGGED with its minting session: RestoreOutput only resolves that session's entries \(wiring\-gap leaf 07 T2\). This lane is gated on cfg.SecretRestore \(research D6: learning\-capture redaction shares the gate\) and on the swapper AND obfuscator being present.
 
 One\-to\-one value\-keyed restore only \(L7 LiteLLM wrong\-restore corruption class\): placeholders resolve through exact fixed\-string replacement against the maps that minted them; no partial or positional rewriting.
 
@@ -19488,6 +19488,16 @@ TurnTerminalEvent is the frozen payload published on the "turn.terminal" bus top
 	    // frozen 13-key set ignore it (20260916-turn-lifecycle-events extension
 	    // note updated in the same change).
 	    TraceID string `json:"trace_id,omitempty"`
+	    // TurnSpanID (wiring-gap-remediation leaf 06): the 16-hex turn span
+	    // minted BESIDE the trace at the same handler seam; it is the parent of
+	    // the trace's llm.call and tool.call hop spans (mid-turn hops export
+	    // children-before-parent -- valid for Tempo/Jaeger). Empty (omitempty)
+	    // on the same pre-mint early failure paths as TraceID; untraced turns
+	    // carry both fields empty so untraced bytes stay identical. Additive
+	    // field: consumers decoding the frozen key set ignore it
+	    // (20260916-turn-lifecycle-events extension note updated in the same
+	    // change).
+	    TurnSpanID string `json:"turn_span_id,omitempty"`
 	}
 
 <a name="TurnTerminalEvent.WSClass"></a>

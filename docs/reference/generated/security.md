@@ -154,7 +154,9 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(s \*SecretObfuscator\) DeobfuscateMessages\(messages \[\]any\) \[\]any](<#SecretObfuscator.DeobfuscateMessages>)
   - [func \(s \*SecretObfuscator\) LoadFromConfig\(path string\) error](<#SecretObfuscator.LoadFromConfig>)
   - [func \(s \*SecretObfuscator\) Obfuscate\(text string\) string](<#SecretObfuscator.Obfuscate>)
+  - [func \(s \*SecretObfuscator\) ObfuscateForSession\(text, sessionID string\) string](<#SecretObfuscator.ObfuscateForSession>)
   - [func \(s \*SecretObfuscator\) ObfuscateMessages\(messages \[\]any\) \[\]any](<#SecretObfuscator.ObfuscateMessages>)
+  - [func \(s \*SecretObfuscator\) RestoreOutput\(text, sessionID string\) string](<#SecretObfuscator.RestoreOutput>)
 - [type SecretRule](<#SecretRule>)
 - [type SecretScanner](<#SecretScanner>)
   - [func NewSecretScanner\(\) \*SecretScanner](<#NewSecretScanner>)
@@ -1378,6 +1380,8 @@ SecretMode determines how a secret is handled.
 
 SecretObfuscator manages secret detection and obfuscation. It is safe for concurrent use.
 
+Session scoping \(wiring\-gap leaf 07\): obfuscated placeholders are minted per session and recorded in sessionTaggedEntries. RestoreOutput passes a sessionID; restore only consults that session's entries, so a placeholder minted in session A NEVER resolves inside session B \(cross\-session restore is an info leak, not a convenience\). The sessionless Deobfuscate wrapper covers legacy in\-process callers and legacy placeholders minted before a session tag existed.
+
 	type SecretObfuscator struct {
 	    // contains filtered or unexported fields
 	}
@@ -1394,7 +1398,7 @@ NewSecretObfuscator creates a new obfuscator populated with environment variable
 
 	func (s *SecretObfuscator) Deobfuscate(text string) string
 
-Deobfuscate replaces placeholders back with original secrets.
+Deobfuscate replaces placeholders back with original secrets, consulting the process\-wide map. This is the legacy in\-process lane; the output\-restore lane is RestoreOutput, which scopes resolution to the minting session.
 
 <a name="SecretObfuscator.DeobfuscateMessages"></a>
 ### func \(\*SecretObfuscator\) DeobfuscateMessages
@@ -1415,7 +1419,14 @@ LoadFromConfig loads explicit secrets from a JSON5 config file. The file format 
 
 	func (s *SecretObfuscator) Obfuscate(text string) string
 
-Obfuscate replaces all secrets in the text with placeholders or replacement strings.
+Obfuscate replaces all secrets in the text with placeholders or replacement strings. Placeholders minted here are UNTAGGED \(legacy lane\); the session\-aware entry point is ObfuscateForSession.
+
+<a name="SecretObfuscator.ObfuscateForSession"></a>
+### func \(\*SecretObfuscator\) ObfuscateForSession
+
+	func (s *SecretObfuscator) ObfuscateForSession(text, sessionID string) string
+
+ObfuscateForSession obfuscates like Obfuscate and tags every placeholder it mints with sessionID, so RestoreOutput can later scope resolution to that session \(wiring\-gap leaf 07 T2\). An empty sessionID is equivalent to Obfuscate.
 
 <a name="SecretObfuscator.ObfuscateMessages"></a>
 ### func \(\*SecretObfuscator\) ObfuscateMessages
@@ -1423,6 +1434,13 @@ Obfuscate replaces all secrets in the text with placeholders or replacement stri
 	func (s *SecretObfuscator) ObfuscateMessages(messages []any) []any
 
 ObfuscateMessages obfuscates secrets in a slice of ChatMessage\-like objects. The input is \[\]any where each element is a map\[string\]any with a "content" field, or a struct with a Content field. Returns a new slice with obfuscated content.
+
+<a name="SecretObfuscator.RestoreOutput"></a>
+### func \(\*SecretObfuscator\) RestoreOutput
+
+	func (s *SecretObfuscator) RestoreOutput(text, sessionID string) string
+
+RestoreOutput replaces placeholders back with original secrets, bounded to the entries minted for sessionID \(wiring\-gap leaf 07 T2/T3\): a placeholder minted in another session never resolves here \(cross\-session restore refused\), and only that session's entries are scanned \(placeholder\-keyed lookup, not a whole\-map ReplaceAll sweep\). An empty sessionID has no provenance and refuses to resolve anything.
 
 <a name="SecretRule"></a>
 ## type SecretRule

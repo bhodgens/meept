@@ -38,7 +38,7 @@
     "agent.action": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8750,
+        "line": 8819,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -49,7 +49,7 @@
     "agent.iteration.completed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8958,
+        "line": 9027,
         "payload_keys": [
           "agent_id",
           "conversation_id",
@@ -61,7 +61,7 @@
     "agent.lifecycle.ended": [
       {
         "file": "internal/agent/loop.go",
-        "line": 3045,
+        "line": 3073,
         "payload_keys": [],
         "via_const": true
       }
@@ -69,7 +69,7 @@
     "agent.lifecycle.started": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2985,
+        "line": 3013,
         "payload_keys": [],
         "via_const": true
       }
@@ -105,7 +105,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 8815,
+        "line": 8884,
         "payload_keys": [
           "detail",
           "iteration",
@@ -116,7 +116,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 8869,
+        "line": 8938,
         "payload_keys": [
           "conversation_id",
           "detail",
@@ -146,7 +146,7 @@
     "agent.queue.followup.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8940,
+        "line": 9009,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -183,7 +183,7 @@
     "agent.queue.steer.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8916,
+        "line": 8985,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -196,7 +196,7 @@
     "agent.quota_wait": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2423,
+        "line": 2451,
         "payload_keys": []
       },
       {
@@ -213,7 +213,7 @@
     "agent.result": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8780,
+        "line": 8849,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -224,7 +224,7 @@
     "agent.state.changed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2412,
+        "line": 2440,
         "payload_keys": [],
         "via_const": true
       }
@@ -247,20 +247,20 @@
     "agent.workers.result": [
       {
         "file": "internal/agent/handler.go",
-        "line": 686,
+        "line": 696,
         "payload_keys": []
       }
     ],
     "budget-resume-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2995,
+        "line": 3029,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 3024,
+        "line": 3059,
         "payload_keys": [],
         "via_helper": true
       }
@@ -268,7 +268,7 @@
     "chat.message.received": [
       {
         "file": "internal/agent/handler.go",
-        "line": 849,
+        "line": 863,
         "payload_keys": [
           "content",
           "session_id",
@@ -280,7 +280,7 @@
     "chat.processing": [
       {
         "file": "internal/agent/handler.go",
-        "line": 887,
+        "line": 901,
         "payload_keys": [
           "conversation_id",
           "request_id",
@@ -333,14 +333,14 @@
     "chat.response": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1661,
+        "line": 1676,
         "payload_keys": []
       }
     ],
     "chat_message": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1709,
+        "line": 1724,
         "payload_keys": []
       }
     ],
@@ -383,7 +383,7 @@
     "collab-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3323,
+        "line": 3359,
         "payload_keys": [],
         "via_helper": true
       }
@@ -670,7 +670,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/agent/loop.go",
-        "line": 8889,
+        "line": 8958,
         "payload_keys": [
           "conversation_id",
           "total_tokens"
@@ -746,7 +746,7 @@
     "orchestrator.plan": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1606,
+        "line": 1621,
         "payload_keys": []
       }
     ],
@@ -790,7 +790,7 @@
     "pair-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3369,
+        "line": 3405,
         "payload_keys": [],
         "via_helper": true
       }
@@ -869,7 +869,7 @@
     "pair.start": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2904,
+        "line": 2938,
         "payload_keys": [],
         "via_const": true
       }
@@ -1229,13 +1229,13 @@
     "quota-resume-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2565,
+        "line": 2597,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 2593,
+        "line": 2626,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1254,13 +1254,13 @@
     "review-completed-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 620,
+        "line": 630,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 624,
+        "line": 634,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1695,7 +1695,7 @@
     "session.title_updated": [
       {
         "file": "internal/agent/loop.go",
-        "line": 10110,
+        "line": 10202,
         "payload_keys": [
           "description",
           "name",
@@ -1799,13 +1799,13 @@
     "task-completed-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1913,
+        "line": 1942,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 1918,
+        "line": 1947,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1813,13 +1813,13 @@
     "task-failed-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2109,
+        "line": 2141,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 2114,
+        "line": 2146,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2340,7 +2340,7 @@
     "turn.terminal": [
       {
         "file": "internal/agent/handler.go",
-        "line": 1797,
+        "line": 1826,
         "payload_keys": [],
         "typed": true
       }
@@ -2528,7 +2528,7 @@
     "agent.event.tool_execution_end": [
       {
         "file": "internal/daemon/otlp_traces_wiring.go",
-        "line": 196,
+        "line": 217,
         "subscriber_id": "otlp-trace-tool-calls"
       }
     ],
@@ -2540,7 +2540,7 @@
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 351,
+        "line": 361,
         "subscriber_id": "chat-handler"
       },
       {
@@ -2571,7 +2571,7 @@
     "agent.workers.list": [
       {
         "file": "internal/agent/handler.go",
-        "line": 335,
+        "line": 345,
         "subscriber_id": "worker-handler"
       }
     ],
@@ -2616,7 +2616,7 @@
     "chat.request": [
       {
         "file": "internal/agent/handler.go",
-        "line": 332,
+        "line": 342,
         "subscriber_id": "chat-handler"
       }
     ],
@@ -2671,7 +2671,7 @@
     "collaboration.result": [
       {
         "file": "internal/agent/handler.go",
-        "line": 360,
+        "line": 370,
         "subscriber_id": "chat-handler"
       },
       {
@@ -2878,7 +2878,7 @@
     "pair.result": [
       {
         "file": "internal/agent/handler.go",
-        "line": 357,
+        "line": 367,
         "subscriber_id": "chat-handler"
       }
     ],
@@ -3621,7 +3621,7 @@
     "task.completed": [
       {
         "file": "internal/agent/handler.go",
-        "line": 338,
+        "line": 348,
         "subscriber_id": "chat-handler"
       },
       {
@@ -3650,7 +3650,7 @@
     "task.failed": [
       {
         "file": "internal/agent/handler.go",
-        "line": 339,
+        "line": 349,
         "subscriber_id": "chat-handler"
       }
     ],
@@ -3689,7 +3689,7 @@
     "task.progress": [
       {
         "file": "internal/agent/handler.go",
-        "line": 347,
+        "line": 357,
         "subscriber_id": "chat-handler"
       }
     ],
@@ -3758,14 +3758,14 @@
     "task.review_completed": [
       {
         "file": "internal/agent/handler.go",
-        "line": 354,
+        "line": 364,
         "subscriber_id": "chat-handler"
       }
     ],
     "task.step_completed": [
       {
         "file": "internal/daemon/otlp_traces_wiring.go",
-        "line": 181,
+        "line": 202,
         "subscriber_id": "otlp-trace-steps"
       },
       {
@@ -3918,7 +3918,7 @@
       },
       {
         "file": "internal/daemon/otlp_traces_wiring.go",
-        "line": 155,
+        "line": 167,
         "subscriber_id": "otlp-trace-turns",
         "typed": true
       }
