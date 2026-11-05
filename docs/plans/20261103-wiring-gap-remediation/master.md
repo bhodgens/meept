@@ -97,14 +97,21 @@ forest precedent. Coverage matrix lives in each leaf's task table.
 
 | Child | Status | Commit | Notes |
 |-------|--------|--------|-------|
-| 00-tier-floor-doc | PENDING | | doc-only, do-first |
-| 01-snapshot-seams | PENDING | | wave C |
-| 02-transform-lane | PENDING | | wave B; 07 depends |
-| 03-tierpolicy-daemon | PENDING | | wave D; coordinate w/ second-brain |
-| 04-jev-gate-wiring | PENDING | | wave A |
-| 05-toolcall-persistence | PENDING | | wave A |
-| 06-turnspan-linkage | PENDING | | wave C |
-| 07-secret-restore-scoping | PENDING | | wave B; depends on 02 |
+| 00-tier-floor-doc | COMPLETE | a9f81c04 | doc corrected to next-hop semantics + generated llm.md sweep; e2e pin untouched |
+| 01-snapshot-seams | COMPLETE | fb7e5491 | 4 seams propagated (3-site rule); verifier children wired (piiRestore N/A documented); false loop.go:1803 comment fixed; proof witnessed |
+| 02-transform-lane | COMPLETE | 56570323 | RunTransformContext live per reasoningCycle iteration; fixpoint cap 5; messages cloned; obfuscation reaches provider; history non-mutation pinned; proof witnessed |
+| 03-tierpolicy-daemon | COMPLETE | c24db7d9 | memory.tiers knob + real cutoff + DemotionClaims/Demotion adapters + call site after wireL0Distill + WireWorkingProducer turn-end subscriber; 4 wiring-failure proofs witnessed |
+| 04-jev-gate-wiring | COMPLETE | 26a7764b | ScoreGateHook constructed beside decision-gate (shared DecisionClient), registered jev-score-gate, recorder adapters, security.jev_command_gate.* keys; delete-registration contrast arm witnessed |
+| 05-toolcall-persistence | COMPLETE | 65ad62b1 | SaveMessagesWithToolCalls one-tx + persistChatExchange threading; best-effort pinned; mutation-cycle RED witnessed |
+| 06-turnspan-linkage | COMPLETE | fb7e5491 | TurnTerminalEvent.TurnSpanID additive + trace->turnSpanID map receiver; 9-site audit; RED witnessed; WS schema turn_span_id declared |
+| 07-secret-restore-scoping | COMPLETE | 56570323 | 48-bit placeholders (collision fix), session-tagged restore (cross-session refused), bounded lookup; proofs witnessed |
+
+## Final integration gates (2026-11-04)
+
+- go build ./... green at each wave commit.
+- Scoped test sweeps green per leaf (details in commit bodies).
+- lint-ci: gosec G202 finding from leaf-02's store fixed in-tree (9e67ea34); residual lint-ci fail is the ambient mutexio/export-data environment issue + sibling committed-RED gates (scope_inputs, dynamic-tools manifest row) - all attributed, none from this tree.
+- Known follow-ups carried in suite docblocks (ConfigSnapshot note now resolved by leaf 01; conversation_id attr regression from leaf 06 noted in fb7e5491).
 
 ## Integration Test Plan
 
