@@ -95,13 +95,14 @@
       "trajectory-golden"
     ],
     "internal/session/": [
-      "session-binding",
-      "state-restart",
-      "state-identity",
       "goal-completion",
+      "llm-hop-tracing",
       "session-affinity",
+      "session-binding",
+      "session-storage",
       "session-teardown",
-      "llm-hop-tracing"
+      "state-identity",
+      "state-restart"
     ],
     "internal/memory/": [
       "bridges",
@@ -447,6 +448,12 @@
     ],
     "e2e/suites/plan-critic": [
       "plan-critic"
+    ],
+    "internal/context/sessionref/": [
+      "session-storage"
+    ],
+    "e2e/suites/session-storage": [
+      "session-storage"
     ]
   },
   "suites": [
@@ -905,6 +912,11 @@
         "critic-wiring-06 daemon wiring: the three flags default false on a live boot; critic slots absent/empty by default (commented examples)"
       ],
       "note": "plan-20261101-fresh-context-critic tree: fresh-context evidence critic (leaf 02), hostile second pass (leaf 03), contest path (leaf 04), zero-decision compile (leaf 05), interview option gates (leaf 06), daemon wiring + model slots (leaf 07). Self-contained fixtures over real StrategicPlanner + live harness daemon for the wiring scenario."
+    },
+    {
+      "name": "session-storage",
+      "dir": "e2e/suites/session-storage",
+      "status": "implemented"
     }
   ],
   "scenarios": [
