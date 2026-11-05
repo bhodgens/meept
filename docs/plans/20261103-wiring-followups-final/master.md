@@ -50,10 +50,23 @@ persistence/restore paths, bounded nil-safe maps in wiring layers.
 
 | Child | Status | Commit | Notes |
 |-------|--------|--------|-------|
-| 01-conversation-attr | PENDING | | daemon wiring layer only |
-| 02-restore-toolcalls | PENDING | | loop restore fn + tests |
-| 03-two-stage-verifier | PENDING | | semantic_cache.go + tests |
-| 04-streaming-cache-sites | PENDING | | client.go 2 hunks + tests |
+| 01-conversation-attr | COMPLETE | e23fd815 | trace->conversation state struct; attr omitted for unknown trace; RED witnessed |
+| 02-restore-toolcalls | COMPLETE | e23fd815 | batched GetToolCallsForMessages join; best-effort; model-visible record proven; RED witnessed |
+| 03-two-stage-verifier | COMPLETE | e23fd815 | verify_floor 0.85 band; R0 false-hit scenario prevented (call-count pin); band-off byte-identical |
+| 04-streaming-cache-sites | COMPLETE | e23fd815 | both sites via shared seam; TTFT sentinel pinned for hit path; RED witnessed |
+
+All 4 leaves landed in a single commit (e23fd815, 1022 insertions) - one
+executing agent, sequential execution, verified by orchestrator in-session.
+
+## Final integration gates (2026-11-05)
+
+- go build ./... green.
+- internal/llm full package green; agent Restore tests green; daemon Trace tests green.
+- e2e green: llm-serving-tiers, llm-hop-tracing, boundary-hardening.
+- gofmt clean on all touched files; mutexio/predid clean.
+- Note carried forward: SemanticCacheConfig.VerifyFloor reaches the tier
+  only when the future daemon construction site copies the field (same
+  documented gap as the leaf-02 daemon wiring - loader-pinned today).
 
 ## Integration Test Plan
 
