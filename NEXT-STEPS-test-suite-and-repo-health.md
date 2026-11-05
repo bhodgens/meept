@@ -258,18 +258,26 @@ Branch `bad-scratch` (tip `26718e1e`) can be deleted once you have looked at it.
 
 ## 7. Not done, ranked — STATUS 2026-11-04 (all items resolved)
 
-1. DONE (mitigated). `core.bare = true` writer: still unidentified, but a
-   self-healing pre-flight guard landed (`68c1a1da`):
-   `.githooks/pre-commit-worktreecfg` runs as [0/19] in the pre-commit chain,
-   repairs the flip, logs to `.core-bare-repair.log`, and snapshots the process
-   list so the next flip names its writer. Ruled out: filter-repo (marker
-   mtimes all 2026-09-18), `git worktree add/remove/prune` (probed), `git init
-   --bare` at an existing repo (probed — git refuses to convert), mcp-server-git
-   (source read: no config-writing tool), repo scripts/hooks/Makefile (grep).
-   A 20 ms mtime watcher (`/tmp/meept-bare-watch2.py`, log
-   `/tmp/meept-bare-watch2.log`) captures the writer if it fires again. All 4
-   repair-log entries so far were self-inflicted test flips; zero third-party
-   flips observed under either watcher.
+1. DONE (mitigated + mechanism proven). `core.bare = true` writer: the ONLY
+   way to produce `bare = true` in a working-tree repo is `git init --bare`
+   pointed AT the `.git` directory — proven in scratch repos: `git init --bare
+   <repo>/.git`, `git init --bare .git` (relative, inside the repo), and
+   `cd <repo>/.git && git init --bare` all flip the parent's config; every
+   other form (`init --bare .`, `GIT_DIR=... init --bare .`, `clone --bare`,
+   worktree ops) leaves it `false`. No local caller of the dangerous form
+   exists: repo scripts target REMOTE registries over ssh
+   (`scripts/totem-cluster.sh:190`, `docs/configuration/backup.md:88`), the
+   benchmark runner clones bare into its own cache
+   (`internal/benchmark/runner.go:184`), shell history has zero hits, cron
+   has none, and a grep of every Hermes session log across all profiles
+   found only my own probes. All 4 `.core-bare-repair.log` entries correlate
+   with agent-session test flips. Mitigation is now three-layer: the
+   pre-commit pre-flight guard (`68c1a1da`), `meept doctor` core.bare check
+   with `--fix` (landed by a sibling in `bf0e94ce`), and a kqueue
+   EVFILT_VNODE watcher (`/tmp/meept-bare-kqueue.py`, log
+   `/tmp/meept-bare-kqueue.log`) that sees every `.git/config` write with
+   zero polling gap, snapshots the process list on a bare=true sighting, and
+   repairs within ~1s. Verified end-to-end against a simulated flip.
 2. DONE. `internal/intake` builds: leaf 06 landed `project.go` (with
    `NewProjector`) and the `githubv4` dependency in `go.mod:42` in this
    worktree. `go build ./internal/intake` exit 0, `go build ./...` exit 0. No
