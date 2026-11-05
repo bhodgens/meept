@@ -181,7 +181,7 @@ LESSER artifact updates to reflect the GREATER.
 |-------|--------|--------|-------|
 | 01-output-spill (branch) | COMPLETE | f71bbe8e | both leaves green (01-shell-tail-spill + 02-spill-sweep); tail-keep truncation + FullOutputPath + SweepToolSpills + daemon startup/6h ticker wiring in spill_wiring.go |
 | 02-codemode (branch) | COMPLETE | 04a650d7 | spike GO (goja), 01-sandbox-core af2f4bde + 02-codemode-tool 2876a4a5 + 03-e2e-suite 04a650d7; nested-call measurement 334B vs 4175B (92.0% saved) |
-| 03-dynamic-tools (branch) | COMPLETE | 7e97efca | all 7 leaves green (01/02/03/04/05/06/07); 00T gate 4-cap + flag-off byte-identical; starvation canary + cache-continuity cases stay t.Skip (deferred payload-scoping, documented); docs/workflows/dynamic-tools.md + opt-in-defaults + agents.md frontmatter carry the 5.3 warning |
+| 03-dynamic-tools (branch) | COMPLETE | 78c8aeed | all 7 leaves green (01/02/03/04/05/06/07); value mechanism wired (loop.go scopes the LLM tool payload to the per-conversation active set + loop-side tool_view activation); 00T gate 4-cap + flag-off byte-identical; starvation canary + cache-continuity cases re-armed and GREEN (was t.Skip - payload shrank to active set, task_create absent pre-promotion then present post-tool_view); docs/workflows/dynamic-tools.md + opt-in-defaults + agents.md frontmatter carry the 5.3 warning |
 | 04-skill-routing (branch) | PARTIAL | 6169fe4a | 01-skill-listing COMPLETE (C4 no-cap listing + disable-model-invocation; 4 TestSkillsListing* GREEN); 02-embedding-rank GATED on Q4 (unanswered user decision) - branch not shippable until Q4 recorded |
 
 ## Integration Test Plan
