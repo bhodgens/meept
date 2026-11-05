@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/e2e/harness"
 )
 
 // agentToolsSearchOn is the [agent.tools] overlay that would arm the as-needed
@@ -236,14 +238,64 @@ func TestCapabilityGate_UnknownModelIsNonFrontier(t *testing.T) {
 // always-full in dynamic modes) is pinned here so the implementation leaves
 // know the shape the canary will take.
 func TestStarvationCanary_SearchViewPromotion(t *testing.T) {
-	t.Skip("TODO(dynamic-tools 01/04/05): the starvation canary needs the " +
-		"always-full meta-tool pair (tool_search) and the predicted-budget " +
-		"promotion seam (NewExposurePlan/Promote, 00D §3.1/§6), none of which " +
-		"exist yet. Contract pinned: an e2e chat that requires a NON-core tool " +
-		"(one not in config.DefaultAlwaysFullTools) must still complete by " +
-		"recovering it via tool_search -> tool_view promotion; the meta pair " +
-		"is always present and always-full in dynamic modes. Re-arm as a real " +
-		"RED once the tool_search registration + promotion leaves land.")
+	s := newSandbox(t,
+		withAgentTools(agentToolsSearchOn),
+		withDefaultModel("fake/frontier-flagship"),
+	)
+	session := s.createSession("starvation")
+
+	// One episode that needs a NON-core tool (task_create is not in
+	// config.DefaultAlwaysFullTools). The model recovers it through the
+	// always-full meta pair: tool_search discovers it, tool_view fetches its
+	// schema AND promotes it into the episode's active set, and the NEXT
+	// request ships the promoted tool. Scripted as a 3-call executor
+	// sequence; the FakeLLM pops one call per tool-bearing request.
+	const promotedTool = "task_create"
+	before := s.Fake.RequestCount()
+	s.submitScriptedTurn(session, "create a task with the task tool", "fake/frontier-flagship",
+		harness.ToolCall{Name: "tool_search", Arguments: `{"query":"task","limit":5}`},
+		harness.ToolCall{Name: "tool_view", Arguments: `{"name":"task_create"}`},
+		harness.ToolCall{Name: "task_create", Arguments: `{}`},
+	)
+	reqs := s.awaitToolRequests(before, 3, turnTimeout)
+
+	// The meta expander (tool_view) is ALWAYS offered in dynamic modes: a
+	// stubbed discoverer is undiscoverable, so the expander must survive the
+	// active-set scoping on every request of the episode. (The fixture agent
+	// grants tool_view but not tool_search; in a full agent the discoverer
+	// tool_search is a DefaultAlwaysFullTools member and is offered too.)
+	for i, r := range reqs {
+		names := toolNamesFromBody(r)
+		if !contains(names, "tool_view") {
+			t.Errorf("canary: the meta expander tool_view must be always-offered on request %d; got %v", i, names)
+		}
+	}
+
+	// BEFORE the tool_view promotion, the NON-core task_create is ABSENT from
+	// the payload (the token saving: only the active set ships).
+	if names0 := toolNamesFromBody(reqs[0]); contains(names0, promotedTool) {
+		t.Errorf("canary: %s must NOT be offered before the tool_view promotion (only the active set ships); it is present in the first request: %v", promotedTool, names0)
+	}
+
+	// AFTER the tool_view promotion, the NEXT request ships the promoted
+	// tool's full schema (the on-demand growth, §2.2/§3.2).
+	if names2 := toolNamesFromBody(reqs[2]); !contains(names2, promotedTool) {
+		t.Errorf("canary: %s must be offered on the request following the successful tool_view (append-only activation); it is still absent: %v", promotedTool, names2)
+	}
+
+	// The episode completes: the model is never starved of a tool the
+	// predicted set lacked — search->view->promoted-call recovers it.
+	_ = reqs[1] // tool_view request; promotion happens on its execution
+}
+
+// contains reports whether s has the name (case-sensitive, exact tool names).
+func contains(s []string, name string) bool {
+	for _, x := range s {
+		if x == name {
+			return true
+		}
+	}
+	return false
 }
 
 // TestCacheContinuity_NoInvalidationWithinEpisode (00T Goal 4, 00D §4.3)
@@ -262,14 +314,46 @@ func TestStarvationCanary_SearchViewPromotion(t *testing.T) {
 // (exactly one event); this case verifies it does NOT re-cache on ordinary
 // consecutive turns.
 func TestCacheContinuity_NoInvalidationWithinEpisode(t *testing.T) {
-	t.Skip("TODO(dynamic-tools 05): the cache-continuity gate needs the " +
-		"exposure engine's bounded one-time prefix re-cache seam (00D §4.3: " +
-		"a promotion splices into the sorted payload and fires 'prefix cache " +
-		"invalidated' exactly once; a model switch is free). Without that seam " +
-		"the 'three consecutive turns emit no prefix-cache-invalidation' " +
-		"invariant is vacuous. Pinned contract: across three same-episode " +
-		"turns the daemon log contains ZERO 'prefix cache invalidated' lines; " +
-		"a single promotion is the only allowed re-cache event (exactly one). " +
-		"Re-arm as a real RED once the SetSchemaMode-swap + append-only " +
-		"promotion leaves land.")
+	s := newSandbox(t,
+		withAgentTools(agentToolsSearchOn),
+		withDefaultModel("fake/frontier-flagship"),
+	)
+	session := s.createSession("cachestable")
+
+	// Three consecutive plain turns of ONE episode, no promotion and no model
+	// switch: the active tool set is frozen, so the tool payload is
+	// byte-identical turn to turn (§2.2 "mid-episode turn: none -> byte-identical
+	// payload -> prefix survives"). The one thing this episode MUST NOT do is
+	// churn the prefix on an ordinary turn - the regression this branch must
+	// never ship. The invalidation marker is loop.go:4832
+	// ("prefix cache invalidated"), emitted only when the hash changes.
+	const invPhrase = "prefix cache invalidated"
+
+	before1 := s.Fake.RequestCount()
+	s.submitTurn(session, "write the gate probe file", "fake/frontier-flagship")
+	s.awaitNewToolRequest("frontier-flagship", before1, turnTimeout)
+	n1 := s.logLineCount(invPhrase)
+
+	before2 := s.Fake.RequestCount()
+	s.submitTurn(session, "write the gate probe file again", "fake/frontier-flagship")
+	s.awaitNewToolRequest("frontier-flagship", before2, turnTimeout)
+	n2 := s.logLineCount(invPhrase)
+
+	before3 := s.Fake.RequestCount()
+	s.submitTurn(session, "write the gate probe file a third time", "fake/frontier-flagship")
+	s.awaitNewToolRequest("frontier-flagship", before3, turnTimeout)
+	n3 := s.logLineCount(invPhrase)
+
+	// The invariant: an ordinary mid-episode turn adds NO churn. The
+	// "prefix cache invalidated" count may rise at most once (the fresh-episode
+	// establishment) but MUST NOT rise between two turns that offer the same
+	// frozen payload. A per-turn increase is the churn regression.
+	if n2 > n1 {
+		t.Errorf("cache-continuity: the second ordinary turn added %d 'prefix cache invalidated' event(s) (%d -> %d); a frozen active set must not churn the prefix. lines=%v",
+			n2-n1, n1, n2, s.logLinesContaining(invPhrase))
+	}
+	if n3 > n2 {
+		t.Errorf("cache-continuity: the third ordinary turn added %d 'prefix cache invalidated' event(s) (%d -> %d); a frozen active set must not churn the prefix. lines=%v",
+			n3-n2, n2, n3, s.logLinesContaining(invPhrase))
+	}
 }

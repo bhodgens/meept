@@ -595,8 +595,14 @@ type AgentLoop struct {
 	acpExecutor     *ACPExecutor         // external acp turn producer (dim 3A); nil = local loop only. guarded by mu
 	executor        *Executor
 	registry        ToolRegistry
-	security        *security.PermissionChecker
-	securityOrch    *intsecurity.Orchestrator
+	// dynamic-tools (branch 03): per-conversation tool-exposure plans. The
+	// LLM payload is scoped to the plan's active set and grows append-only
+	// on promotion within an episode (the token saving). Owned by
+	// exposureMu; a nil map = feature off = byte-identical legacy.
+	exposureMu    sync.Mutex
+	exposurePlans map[string]*ExposurePlan
+	security      *security.PermissionChecker
+	securityOrch  *intsecurity.Orchestrator
 	// groupResolution is the loop-carried group policy record (agent-groups
 	// leaf 04 T1): resolved at loop creation from the daemon's groups
 	// resolver, consulted by the executor's call-time gate and stamped into
@@ -2132,6 +2138,117 @@ func (l *AgentLoop) applyExposureGate(modelRef string, mc *llm.ModelConfig) {
 		"model", modelRef,
 		"agent_id", l.agentID,
 	)
+}
+
+// ensureExposurePlan returns the per-conversation (episode) tool-exposure
+// plan, building it on first use. It is a no-op (nil) when the dynamic flag
+// is off, so payload scoping and activation never engage. The plan is keyed
+// by conversation: a new conversation is a new episode (design §2.2), and the
+// active set is frozen for the episode except append-only promotions.
+// Thread-safe via exposureMu.
+func (l *AgentLoop) ensureExposurePlan(conversationID string) *ExposurePlan {
+	if !l.schemaModeSet || !l.schemaModeCfg.DynamicToolExposure {
+		return nil
+	}
+	l.exposureMu.Lock()
+	defer l.exposureMu.Unlock()
+	if l.exposurePlans == nil {
+		l.exposurePlans = make(map[string]*ExposurePlan)
+	}
+	if p, ok := l.exposurePlans[conversationID]; ok {
+		return p
+	}
+	var mc *llm.ModelConfig
+	if l.llmClient != nil {
+		mc = l.llmClient.Config()
+	}
+	agentMode := ""
+	if l.spec != nil {
+		agentMode = l.spec.ToolExposure
+	}
+	mode := EffectiveExposureMode(mc, agentMode, l.schemaModeCfg.ToolExposure, true)
+	var known []string
+	if l.registry != nil {
+		for _, t := range l.registry.List() {
+			known = append(known, t.Name())
+		}
+	}
+	var ceiling []string
+	if l.spec != nil {
+		ceiling = l.spec.AllTools()
+	}
+	plan := NewExposurePlan(mode, nil, l.schemaModeCfg.PredictedBudget, ceiling, known)
+	l.exposurePlans[conversationID] = plan
+	return plan
+}
+
+// exposurePlanFor returns the conversation's armed plan, or nil when the
+// feature is off / not yet armed. Read-only; used at the payload site to
+// scope the LLM tool definitions to the active set (the token saving).
+func (l *AgentLoop) exposurePlanFor(conversationID string) *ExposurePlan {
+	l.exposureMu.Lock()
+	defer l.exposureMu.Unlock()
+	if l.exposurePlans == nil {
+		return nil
+	}
+	return l.exposurePlans[conversationID]
+}
+
+// activateViewedTool promotes the tool the model just viewed via tool_view
+// into the episode's active set (design §3.2/§6: append-only promotion, one
+// bounded prefix re-cache). Loop-side activation: the agent package cannot
+// import internal/tools/builtin (import cycle, loop.go:10433), so the shared
+// tool_view instance cannot carry per-loop plans; the loop sees every tool
+// call and promotes here. No-op when the feature is off or the call did not
+// succeed.
+func (l *AgentLoop) activateViewedTool(conversationID string, call llm.ToolCall, success bool) {
+	if !success {
+		return
+	}
+	plan := l.exposurePlanFor(conversationID)
+	if plan == nil {
+		return
+	}
+	var args struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+		return
+	}
+	if args.Name == "" {
+		return
+	}
+	if err := plan.Promote(args.Name); err != nil {
+		l.logger.Warn("dynamic-tools: activation refused",
+			"tool", args.Name, "conversation", conversationID, "err", err.Error())
+		return
+	}
+	l.logger.Debug("dynamic-tools: tool activated",
+		"tool", args.Name, "conversation", conversationID)
+}
+
+// scopeDefinitionsToActive keeps only the tool definitions whose name is in
+// active (the per-conversation exposure plan's active set), preserving the
+// parent registry's definition order. StabilizeToolPrefix (downstream) sorts
+// the surviving set deterministically, so an append-only promotion splices
+// into that sorted order and produces exactly ONE bounded prefix-change event
+// (design §4.3) - never per-turn churn. Unlisted tools are simply absent from
+// the payload. This is the token saving: active tools ship, the rest do not.
+func (l *AgentLoop) scopeDefinitionsToActive(defs []llm.ToolDefinition, active []string) []llm.ToolDefinition {
+	if len(defs) == 0 || len(active) == 0 {
+		return defs
+	}
+	want := make(map[string]struct{}, len(active))
+	for _, n := range active {
+		want[n] = struct{}{}
+	}
+	filtered := make([]llm.ToolDefinition, 0, len(active))
+	for _, d := range defs {
+		if _, ok := want[d.Function.Name]; ok {
+			filtered = append(filtered, d)
+		}
+	}
+	return filtered
 }
 
 // maxTransformFixpointPasses caps the transform-context fixpoint loop per
@@ -4564,37 +4681,18 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	}
 	inWarningZone := false
 
-	// dynamic-tools leaf 06: arm the per-episode tool-exposure plan on the
-	// executor when the flag is on. The plan's active set = core always-full
-	// + the meta pair + the predicted set (empty here — intent-map wiring is
-	// leaf 07). knownNames = the loop's registry's tool names (correct for
-	// the unfiltered daemon registry; filtered-registry known names are a
-	// leaf 07 concern). ceiling = the agent spec's AllTools (nil spec = no
-	// ceiling = the flag-off posture). No-op when the flag is off: no plan
-	// is armed, the executor's active-set branch never fires, and every
-	// error path is byte-identical to the legacy.
-	if l.schemaModeSet && l.schemaModeCfg.DynamicToolExposure && l.executor != nil {
-		var mc *llm.ModelConfig
-		if l.llmClient != nil {
-			mc = l.llmClient.Config()
+	// dynamic-tools (branch 03): arm the per-conversation tool-exposure plan
+	// when the flag is on. The plan's active set = core always-full + the meta
+	// pair + the predicted set (intent-map selection deferred to a follow-up).
+	// The plan is stored PER CONVERSATION (episode, design §2.2) and shared
+	// with the executor for the §6 row-4 guard. No-op when the flag is off:
+	// no plan is armed, the active-set payload scoping never fires, and every
+	// path is byte-identical to the legacy.
+	if l.schemaModeSet && l.schemaModeCfg.DynamicToolExposure {
+		plan := l.ensureExposurePlan(conversationID)
+		if plan != nil && l.executor != nil {
+			l.executor.SetExposurePlan(plan)
 		}
-		agentMode := ""
-		if l.spec != nil {
-			agentMode = l.spec.ToolExposure
-		}
-		mode := EffectiveExposureMode(mc, agentMode, l.schemaModeCfg.ToolExposure, true)
-		var known []string
-		if l.registry != nil {
-			for _, t := range l.registry.List() {
-				known = append(known, t.Name())
-			}
-		}
-		var ceiling []string
-		if l.spec != nil {
-			ceiling = l.spec.AllTools()
-		}
-		plan := NewExposurePlan(mode, nil, l.schemaModeCfg.PredictedBudget, ceiling, known)
-		l.executor.SetExposurePlan(plan)
 	}
 
 	// D-H1 (bughunt 2026-09-04): per-turn cap on duplicate-search rollbacks.
@@ -4713,6 +4811,18 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		var tools []llm.ToolDefinition
 		if l.registry != nil {
 			tools = l.registry.GetDefinitions()
+		}
+		// dynamic-tools (branch 03): when a per-conversation exposure plan is
+		// armed, ship only the ACTIVE set's full-fidelity definitions (the token
+		// saving). The active set = core always-full + the meta pair + promoted
+		// tools; it is frozen for the episode and grows append-only on activation
+		// (StabilizeToolPrefix keeps the appended prefix byte-identical, §4.3).
+		// No plan (feature off) => no filtering, byte-identical legacy.
+		if plan := l.exposurePlanFor(conversationID); plan != nil {
+			active := plan.Active()
+			if len(active) > 0 {
+				tools = l.scopeDefinitionsToActive(tools, active)
+			}
 		}
 
 		// Stabilize tool prefix ordering for cache hit optimization
@@ -5415,6 +5525,19 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"iteration":  iteration,
 			})
 			results := l.executeToolCalls(ctx, response.ToolCalls)
+
+			// dynamic-tools (branch 03): a successful tool_view promotes the viewed
+			// tool into the episode's active set (append-only), so the next LLM
+			// call ships its full schema. The meta pair is always active, so a
+			// model that lost the prediction set recovers via search->view (§2.3).
+			for i, tc := range response.ToolCalls {
+				if tc.Function.Name != "tool_view" {
+					continue
+				}
+				if i < len(results) && results[i] != nil {
+					l.activateViewedTool(conversationID, tc, results[i].Success)
+				}
+			}
 
 			// Record file-modifying tool calls for verification tracking (Tree 01 Leaf 03).
 			if l.verificationTracker != nil {

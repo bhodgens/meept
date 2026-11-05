@@ -578,6 +578,61 @@ func toolNamesFromBody(body map[string]any) []string {
 	return out
 }
 
+// submitScriptedTurn drives one turn with a CUSTOM executor tool-call
+// sequence (instead of submitTurn's fixed file_write). The FakeLLM pops one
+// scripted call per executor round-trip (the next request that carries a
+// tools array); when the queue empties it serves postToolText as the final
+// reply. The classifier is pinned to "tooluse" so the turn rides the
+// executor lane. Returns the turn_id the ack minted.
+func (s *sandbox) submitScriptedTurn(sessionID, message, modelRef string, calls ...harness.ToolCall) string {
+	t := s.t
+	s.Fake.SetClassifierOutput(`{"intent":"tooluse","confidence":0.95,"reasoning":"pinned tooluse (dynamic-tools canary)"}`)
+	s.Fake.EnqueueToolCalls(calls...)
+	s.Fake.SetPostToolText("done")
+
+	client := harness.DialRPC(t, s.socketPath()) // conn closed by DialRPC's t.Cleanup
+
+	params := map[string]any{
+		"message":    message,
+		"session_id": sessionID,
+	}
+	if modelRef != "" {
+		params["model"] = modelRef
+	}
+	ack := client.CallResult("chat.submit", params)
+	if acc, _ := ack["accepted"].(bool); !acc {
+		t.Fatalf("chat.submit not accepted: %v\nlog tail:\n%s", ack, s.logTail())
+	}
+	turnID, _ := ack["turn_id"].(string)
+	return turnID
+}
+
+// awaitToolRequests polls until at least want tool-bearing executor requests
+// have been recorded since beforeCount, and returns their tool payloads in
+// arrival order. It stops as soon as the count reaches want, so a call that
+// never terminates (an unbounded tool loop) would still be observed once
+// enough requests landed.
+func (s *sandbox) awaitToolRequests(beforeCount, want int, timeout time.Duration) []map[string]any {
+	t := s.t
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		reqs := s.Fake.Requests()
+		collected := make([]map[string]any, 0, want)
+		for i := len(reqs) - 1; i >= beforeCount; i-- {
+			if hasTools(reqs[i]) {
+				collected = append([]map[string]any{reqs[i]}, collected...)
+			}
+		}
+		if len(collected) >= want {
+			return collected[:want]
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatalf("fewer than %d tool-bearing executor requests recorded since index %d within %s\nlog tail:\n%s",
+		want, beforeCount, timeout, s.logTail())
+	return nil
+}
+
 // payloadEqual reports whether two recorded requests offer IDENTICAL tool
 // payloads (name+description+parameters, canonical-serialized across the
 // whole tools array). Used by the flag-off byte-identical case.
