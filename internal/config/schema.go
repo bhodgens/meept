@@ -1773,6 +1773,97 @@ type MemoryConfig struct {
 	// files older than this many days are pruned during the consolidation
 	// pass (no new ticker). Default 30; <= 0 disables pruning.
 	L0RetentionDays int `json:"l0_retention_days" toml:"l0_retention_days"`
+	// Tiers configures the memory-tier policy engine (tree 02 leaf 02,
+	// contract C5; wiring-gap leaf 03-tierpolicy-daemon T1): the opt-in
+	// background evict/compress/demote policy over the episodic tier.
+	// Entirely OFF at the zero value (docs/agents/opt-in-defaults.md);
+	// the daemon constructs the engine only when enabled. See
+	// MemoryTiersConfig.
+	Tiers MemoryTiersConfig `json:"tiers" toml:"tiers"`
+}
+
+// MemoryTiersConfig is the user-facing [memory.tiers] knob set for the
+// memory-tier policy engine (tierpolicy.TiersConfig mirrored into the
+// config schema; the daemon adapter maps it onto the engine). All knobs
+// are OPT-IN: Enabled defaults false, and a disabled config stays inert
+// (no goroutine, zero cost).
+//
+//gendoc:desc Memory-tier policy engine: opt-in background tick that compresses and evicts old episodic memories above band ratios, and demotes stale or low-usefulness claims to the episodic tier (flag-not-delete). Entirely off unless enabled.
+//gendoc:example [memory.tiers] enabled = true, evict_over_ratio = 0.9, retention_days = 30
+type MemoryTiersConfig struct {
+	// Enabled turns on the policy engine background tick. Default false
+	// (opt-in-defaults rule; flipping it is a product decision).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// EvictOverRatio is the hard eviction band start (fraction of the
+	// episodic ceiling). <= 0 or >= 1 resolves to 0.9 once enabled.
+	EvictOverRatio float64 `json:"evict_over_ratio" toml:"evict_over_ratio"`
+	// CompressOverRatio is the soft compression band start. <= 0 or >= 1
+	// resolves to 0.8 once enabled.
+	CompressOverRatio float64 `json:"compress_over_ratio" toml:"compress_over_ratio"`
+	// IntervalSeconds is the background tick period. <= 0 resolves to
+	// 300 once enabled.
+	IntervalSeconds int `json:"interval_seconds" toml:"interval_seconds"`
+	// DryRun makes the engine report would-be counts without mutating
+	// any store. Default false.
+	DryRun bool `json:"dry_run" toml:"dry_run"`
+	// RetentionDays is the candidate-cutoff window: episodic memories
+	// older than this many days are eviction/compression candidates;
+	// younger ones never qualify (the tick reads GetOldMemories with
+	// now-minus-retention, never an unbounded window). <= 0 resolves to
+	// 30 once enabled.
+	RetentionDays int `json:"retention_days" toml:"retention_days"`
+	// Demotion carries the semantic-claim demotion thresholds. See
+	// MemoryTiersDemotionConfig.
+	Demotion MemoryTiersDemotionConfig `json:"demotion" toml:"demotion"`
+}
+
+// NormalizeMemoryTiersDefaults clamps invalid memory.tiers values to
+// their defaults (wiring-gap leaf 03-tierpolicy-daemon T1; mirrors
+// tierpolicy.ResolveTiersConfig and NormalizeTierPolicyDefaults so all
+// three tier knob sets behave identically at the load boundary). A
+// disabled config is left untouched (inert engine; nothing consumes
+// the knob values while off, so the template's documented defaults
+// survive verbatim). An enabled config gets every unset/negative field
+// resolved (0.9 / 0.8 / 300s / 30d retention / 30d staleness / 0.1
+// usefulness floor). Idempotent: feeding resolved values through again
+// is a no-op.
+func NormalizeMemoryTiersDefaults(mt *MemoryTiersConfig) {
+	if mt == nil || !mt.Enabled {
+		return
+	}
+	if mt.EvictOverRatio <= 0 || mt.EvictOverRatio >= 1 {
+		mt.EvictOverRatio = 0.9
+	}
+	if mt.CompressOverRatio <= 0 || mt.CompressOverRatio >= 1 {
+		mt.CompressOverRatio = 0.8
+	}
+	if mt.IntervalSeconds <= 0 {
+		mt.IntervalSeconds = 300
+	}
+	if mt.RetentionDays <= 0 {
+		mt.RetentionDays = 30
+	}
+	if mt.Demotion.StaleDays <= 0 {
+		mt.Demotion.StaleDays = 30
+	}
+	if mt.Demotion.MinUsefulness <= 0 || mt.Demotion.MinUsefulness >= 1 {
+		mt.Demotion.MinUsefulness = 0.1
+	}
+}
+
+// MemoryTiersDemotionConfig carries the [memory.tiers.demotion]
+// thresholds for the semantic-to-episodic claim demotion (tierpolicy
+// contract C6). Zero/negative fields resolve to the documented defaults
+// (30d staleness window, 0.1 usefulness floor) once memory.tiers is
+// enabled.
+type MemoryTiersDemotionConfig struct {
+	// StaleDays is the staleness window: claims older than this many
+	// days are demotion candidates. Default 30.
+	StaleDays int `json:"stale_days" toml:"stale_days"`
+	// MinUsefulness is the usefulness-score floor: claims scoring below
+	// it are demotion candidates. (0, 1) required; outside resolves to
+	// 0.1.
+	MinUsefulness float64 `json:"min_usefulness" toml:"min_usefulness"`
 }
 
 // ConflictConfig gates LLM conflict detection on the L1 claim-extraction
@@ -2127,17 +2218,82 @@ type AgentToolsConfig struct {
 	// LLM definitions, and grants). Opt-in: default false means the daemon
 	// behaves byte-identically to pre-codemode when the key is omitted.
 	CodemodeEnabled bool `json:"codemode_enabled" toml:"codemode_enabled"`
+	// DynamicToolExposure is the master switch for the as-needed tool-exposure
+	// mechanism (token-efficiency branch 03 leaf 01): when true the
+	// predicted/search exposure modes below are live. Default false =
+	// byte-identical legacy (full/indexed only), per
+	// docs/agents/opt-in-defaults.md.
+	DynamicToolExposure bool `json:"dynamic_tool_exposure" toml:"dynamic_tool_exposure"`
+	// ToolExposure is the single tool-exposure knob: "" | "full" | "indexed"
+	// | "predicted" | "search". "predicted"/"search" only take effect while
+	// DynamicToolExposure is on; with the flag off they are downgraded to
+	// "indexed" at load (one warn, byte-identical legacy payload). Resolution
+	// order: per-model > per-agent frontmatter > this global value >
+	// "predicted" (flag on). See docs/research/dynamic-tools-design.md §1/§3.4.
+	ToolExposure string `json:"tool_exposure" toml:"tool_exposure"`
+	// PredictedBudget is N, the predicted-subset cap for predicted mode: how
+	// many intent-selected tools get full schemas per turn. Default 25;
+	// valid 1..30 — values above 30 clamp to 30 with one warn (N=31 costs
+	// MORE than the indexed baseline, so >30 can never be the better
+	// choice).
+	PredictedBudget int `json:"predicted_budget" toml:"predicted_budget"`
 }
 
 // Validate checks the [agent.tools] section. Unknown schema_mode values are
 // rejected with an error naming agent.tools.schema_mode so a typo fails fast
-// at config load instead of silently shipping full schemas.
+// at config load instead of silently shipping full schemas; the
+// tool_exposure check below follows the same fail-fast style. Validate also
+// normalizes predicted_budget at this point (the daemon calls ValidateAll
+// before any component starts; the normalization is idempotent, so repeat
+// validation is silent).
 func (c *AgentToolsConfig) Validate() error {
+	NormalizeAgentToolsDefaults(c)
 	switch c.SchemaMode {
 	case "", "full", "indexed":
-		return nil
 	default:
 		return fmt.Errorf("agent.tools.schema_mode: invalid value %q (must be \"\", \"full\", or \"indexed\")", c.SchemaMode)
+	}
+	// tool_exposure (branch 03 leaf 01, design §3.4): with the
+	// dynamic_tool_exposure flag OFF, "predicted"/"search" are downgraded to
+	// the indexed legacy default with a single warn (byte-identical legacy
+	// payload — the whole mechanism stays off); with the flag ON, all four
+	// mode values are valid. Any other value is a load error naming
+	// agent.tools.tool_exposure.
+	switch c.ToolExposure {
+	case "", "full", "indexed":
+	case "predicted", "search":
+		if !c.DynamicToolExposure {
+			slog.Warn("agent.tools.tool_exposure: dynamic_tool_exposure is off; downgrading", "tool_exposure", c.ToolExposure, "effective", "indexed")
+			c.ToolExposure = "indexed"
+		}
+	default:
+		return fmt.Errorf("agent.tools.tool_exposure: invalid value %q (must be \"\", \"full\", \"indexed\", \"predicted\", or \"search\")", c.ToolExposure)
+	}
+	return nil
+}
+
+// DefaultAgentToolsPredictedBudget is the predicted-subset cap N for
+// tool_exposure "predicted" mode (branch 03 leaf 01, design §7): 00A
+// Table 4 — D(N=25) saves 1,110 est-tok/turn while N=31 costs more than
+// the indexed baseline, so 25 stays on the favorable side of break-even.
+// Values above MaxAgentToolsPredictedBudget clamp to the bound with one
+// warn; non-positive values take the default.
+const (
+	DefaultAgentToolsPredictedBudget = 25
+	MaxAgentToolsPredictedBudget     = 30
+)
+
+// NormalizeAgentToolsDefaults fills load-boundary defaults for
+// [agent.tools] (branch 03 leaf 01, design §3.4): PredictedBudget 0/negative
+// -> default 25; >30 -> clamped to 30 with one warn (N=31 costs more than
+// the indexed baseline, so it can never be the better choice).
+func NormalizeAgentToolsDefaults(c *AgentToolsConfig) {
+	if c.PredictedBudget <= 0 {
+		c.PredictedBudget = DefaultAgentToolsPredictedBudget
+	}
+	if c.PredictedBudget > MaxAgentToolsPredictedBudget {
+		slog.Warn("agent.tools.predicted_budget: value above 30 clamped; N=31 costs more than the indexed baseline", "predicted_budget", c.PredictedBudget, "effective", MaxAgentToolsPredictedBudget)
+		c.PredictedBudget = MaxAgentToolsPredictedBudget
 	}
 }
 
@@ -2149,6 +2305,11 @@ func DefaultAlwaysFullTools() []string {
 		"shell", "file_read", "file_edit", "file_write",
 		"memory_search", "memory_store", "web_fetch", "web_search",
 		"platform_status", "tool_view",
+		// tool_search (branch 03 leaf 01): the as-needed discoverer — a
+		// stubbed discoverer is undiscoverable, so the meta-tool pair
+		// tool_search + tool_view is always-full in dynamic exposure
+		// modes (design §1 layer 3, §6).
+		"tool_search",
 		// transcript_fetch: 5 params with distinct types (url/timestamps/
 		// language/offset/max_chars) — the indexed one-liner gives the
 		// model no parameter schema, and models then call it with empty
@@ -5136,6 +5297,14 @@ func (c *Config) ValidateAll() error {
 	if err := c.Daemon.OutputFilters.Validate(); err != nil {
 		return fmt.Errorf("daemon config: %w", err)
 	}
+
+	// Normalize memory.tiers at the daemon's pre-start boundary (leaf
+	// 03-tierpolicy-daemon T1): NormalizeMemoryTiersDefaults is
+	// idempotent, so repeat validation is silent and the tiers adapter
+	// the engine consumes always sees resolved knobs even when the
+	// config arrived through a path that skipped load-boundary
+	// normalization.
+	NormalizeMemoryTiersDefaults(&c.Memory.Tiers)
 
 	return nil
 }

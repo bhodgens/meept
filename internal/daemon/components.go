@@ -56,6 +56,7 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
+	"github.com/caimlas/meept/internal/memory/working"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/placement"
 	"github.com/caimlas/meept/internal/plan"
@@ -325,6 +326,28 @@ type Components struct {
 	// memory.l0_enabled is set. Routed through the worker pool's
 	// processor via distillRouter (see l0_wiring.go).
 	DistillWorker *memory.DistillWorker
+
+	// TiersEngine is the memory-tier policy engine (wiring-gap leaf
+	// 03-tierpolicy-daemon T4): constructed AFTER the memory manager
+	// and the persistent queue exist (same AFTER-queue rule as the L0
+	// distill wiring), started in Components.Start, and stopped in
+	// stopComponents BEFORE the memory manager closes. Nil whenever
+	// memory.tiers.enabled is false (the default) or the enabled wiring
+	// failed its typed-nil guard - zero cost either way.
+	TiersEngine *EngineHandle
+
+	// WorkingProducer is the turn-terminal producer feeding the
+	// context assembler's working-tier ring (leaf T5). Nil unless the
+	// context assembler is enabled AND the ring store was constructed;
+	// stopped (unsubscribed) in stopComponents before the loop tears
+	// down.
+	WorkingProducer *bus.Subscriber
+
+	// workingStore is the ring store WireContextAssembler built (nil
+	// unless the assembler is enabled and construction succeeded). The
+	// producer wiring reads it at CALL time - WireContextAssembler runs
+	// before WireWorkingProducer in NewComponents.
+	workingStore *working.Store
 
 	// KnowledgeStore is the consolidation-side knowledge-asset store
 	// (tree 04): opened by wireKnowledgeAssets when memory.knowledge is
@@ -3224,6 +3247,36 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	l0c := buildL0Components(c.MemoryManager, l0Enqueuer, cfg.Memory, logger)
 	c.DistillWorker = wireL0Distill(l0c, c.MemoryManager, distillChatter, cfg.Memory, logger)
 
+	// Memory-tier policy engine (wiring-gap leaf 03-tierpolicy-daemon
+	// T4). Same AFTER-queue placement rule as the L0 wiring above: the
+	// engine's compression path enqueues through c.Queue, so a wiring
+	// point before queue creation would have shipped the nil-enqueuer
+	// defect the L0 twin hit live (2026-10-13). memory.tiers defaults
+	// false (opt-in-defaults rule): the disabled posture is (nil, no
+	// goroutine, zero cost); an enabled config with a nil manager is a
+	// wiring ERROR (typed-nil guard, internal/daemon/AGENTS.md) logged
+	// at warn - boot continues, the engine is simply absent.
+	if pq, ok := c.Queue.(*queue.PersistentQueue); ok || c.Queue == nil {
+		eng, wired, engErr := BuildTierPolicyEngine(
+			NewTiersConfigAdapter(cfg.Memory.Tiers),
+			assemblerWorkConfigValue(),
+			c.MemoryManager,
+			pq,
+			logger.With("component", "tierpolicy"),
+		)
+		if engErr != nil {
+			logger.Warn("memory.tiers engine wiring failed -- policy tick disabled",
+				"error", engErr)
+		} else if wired {
+			c.TiersEngine = WrapEngine(eng)
+			logger.Info("memory.tiers engine wired",
+				"interval_seconds", cfg.Memory.Tiers.IntervalSeconds,
+				"retention_days", cfg.Memory.Tiers.RetentionDays,
+				"dry_run", cfg.Memory.Tiers.DryRun,
+			)
+		}
+	}
+
 	// Turn-terminal memory capture (option C, plan
 	// docs/plans/20261013-turn-terminal-capture): the turn.terminal
 	// subscriber replaces the retired session-end l0_record hook and the
@@ -3255,6 +3308,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	}
 	WireMemoryCapture(msgBus, c.SessionStore,
 		l0cRecorder(l0c), l0cEnqueuer(l0c), c.AmbientExtractor, logger, recallOutcomes)
+
+	// Working-tier ring producer (wiring-gap leaf 03-tierpolicy-daemon
+	// T5): the turn.terminal subscriber that actually FILLS the ring
+	// WireContextAssembler built. Wiring point matches the assembler's:
+	// after WireContextAssembler (line ~2370, which sets c.workingStore)
+	// and after the session store exists. Nil store -> nil subscriber
+	// (the ring is simply absent, exactly the pre-leaf posture).
+	c.WorkingProducer = WireWorkingProducer(msgBus, c.SessionStore, c.workingStore, logger)
 
 	// Create task registry (before agent registry so task store can be shared)
 	tasksDB := filepath.Join(cfg.Daemon.DataDir, "tasks.db")
@@ -5260,6 +5321,10 @@ func (c *Components) Start(ctx context.Context) error {
 				if c.SyncPuller != nil {
 					c.SyncPuller.Stop()
 				}
+			case "tierpolicy":
+				if c.TiersEngine != nil {
+					c.TiersEngine.Stop()
+				}
 			}
 			if stopErr != nil {
 				c.Logger.Warn("component stop error during rollback", "handler", name, "error", stopErr)
@@ -5275,6 +5340,22 @@ func (c *Components) Start(ctx context.Context) error {
 			return fmt.Errorf("start soul watcher: %w", err)
 		}
 		startedHandlers = append(startedHandlers, "soul")
+	}
+
+	// Start the memory-tier policy engine (wiring-gap leaf 03-
+	// tierpolicy-daemon T4): the background tick is the ONLY owner of
+	// Evaluate/Execute (never chat-path code). Placement AFTER the
+	// components exist, before the request handlers: a failed Start is
+	// a hard error (an enabled policy that never ticks is a silent
+	// silent-skip defect, the exact class this leaf closes). The engine
+	// handle is nil on every disabled boot - guard makes it a no-op.
+	if c.TiersEngine != nil {
+		if err := c.TiersEngine.Start(ctx); err != nil {
+			return fmt.Errorf("start memory.tiers engine: %w", err)
+		}
+		startedHandlers = append(startedHandlers, "tierpolicy")
+		c.Logger.Info("memory.tiers engine started",
+			"running", c.TiersEngine.Running())
 	}
 
 	// Start chat handler
@@ -6689,6 +6770,29 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.Logger.Info("session idle reaper stopped")
 	}
 
+	// Stop the memory-tier policy engine (wiring-gap leaf 03-
+	// tierpolicy-daemon T4) BEFORE the memory manager closes: the tick's
+	// pass reads episodic rows and the demotion path writes them, so an
+	// engine ticking into a closed store would error (or worse, race the
+	// close). Stop is ctx-cancel-safe + idempotent; the context cancel
+	// above already unblocks the loop, this closes the stopChan cleanly.
+	if c.TiersEngine != nil {
+		c.TiersEngine.Stop()
+		c.Logger.Info("memory.tiers engine stopped")
+	}
+
+	// Unsubscribe the working-tier producer (leaf T5) before the session
+	// store and the agent loop tear down: the producer reads the store
+	// from its goroutine, so a terminal event arriving mid-shutdown could
+	// otherwise race the store close. Unsubscribe stops the reader
+	// goroutine; in-flight appends are best-effort and safe (the ring is
+	// process-local and dies with it).
+	if c.WorkingProducer != nil {
+		c.msgBus.Unsubscribe(c.WorkingProducer)
+		c.WorkingProducer = nil
+		c.Logger.Info("working-tier producer unsubscribed")
+	}
+
 	if c.SessionStore != nil {
 		if err := c.SessionStore.Close(); err != nil {
 			lastErr = err
@@ -7790,6 +7894,14 @@ func registerBuiltinTools(
 	// registry itself always returns full-fidelity tools via Get(name), so
 	// expansions never lose schema data. LRU size 0 -> builtin default 32.
 	registry.Register(builtin.NewToolViewTool(registry, 0))
+
+	// tool_search (leaf 04): the search meta-tool for indexed/predicted
+	// exposure. It scans the FULL registry (the role ceiling), never the
+	// filtered active subset, so unlisted-but-in-ceiling tools stay
+	// discoverable. The daemon registers it against the full registry; the
+	// exposure engine (leaf 05) re-bounds it to a ceiling-filtered view via
+	// SetScope when dynamic exposure is on.
+	registry.Register(builtin.NewToolSearchTool(registry))
 
 	logger.Info("Registered builtin tools", "count", registry.Count())
 }

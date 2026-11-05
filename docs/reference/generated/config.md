@@ -36,11 +36,13 @@ Package config provides configuration loading and validation for meept.
 - [func MeeptHome\(\) string](<#MeeptHome>)
 - [func MeeptPath\(elem ...string\) string](<#MeeptPath>)
 - [func NormalizeAgentGuardsDefaults\(g \*AgentGuardsConfig\)](<#NormalizeAgentGuardsDefaults>)
+- [func NormalizeAgentToolsDefaults\(c \*AgentToolsConfig\)](<#NormalizeAgentToolsDefaults>)
 - [func NormalizeClusterSecurityDefaults\(c \*ClusterConfig\)](<#NormalizeClusterSecurityDefaults>)
 - [func NormalizeContextDiscoveryDefaults\(c \*ContextDiscoveryConfig\)](<#NormalizeContextDiscoveryDefaults>)
 - [func NormalizeDecisionLogDefaults\(g \*SecurityGroupsConfig\)](<#NormalizeDecisionLogDefaults>)
 - [func NormalizeEvolverDefaults\(e \*SkillsEvolverConfig\) error](<#NormalizeEvolverDefaults>)
 - [func NormalizeFailurePolicyDefaults\(f \*FailurePolicyConfig\)](<#NormalizeFailurePolicyDefaults>)
+- [func NormalizeMemoryTiersDefaults\(mt \*MemoryTiersConfig\)](<#NormalizeMemoryTiersDefaults>)
 - [func NormalizeOTLPMetricsDefaults\(c \*OTLPMetricsConfig\)](<#NormalizeOTLPMetricsDefaults>)
 - [func NormalizeOTLPTracesDefaults\(c \*OTLPTracesConfig\)](<#NormalizeOTLPTracesDefaults>)
 - [func NormalizePlansDefaults\(c \*PlansConfig\)](<#NormalizePlansDefaults>)
@@ -226,6 +228,8 @@ Package config provides configuration loading and validation for meept.
 - [type MemoryExpirationConfig](<#MemoryExpirationConfig>)
 - [type MemoryLimitsConfig](<#MemoryLimitsConfig>)
 - [type MemorySecurityConfig](<#MemorySecurityConfig>)
+- [type MemoryTiersConfig](<#MemoryTiersConfig>)
+- [type MemoryTiersDemotionConfig](<#MemoryTiersDemotionConfig>)
 - [type MemoryUsefulnessConfig](<#MemoryUsefulnessConfig>)
 - [type MemoryVersioningConfig](<#MemoryVersioningConfig>)
 - [type MemvidConfig](<#MemvidConfig>)
@@ -469,6 +473,13 @@ Package config provides configuration loading and validation for meept.
 	    DefaultOTLPExportInterval = 30 * time.Second
 	)
 
+<a name="DefaultAgentToolsPredictedBudget"></a>DefaultAgentToolsPredictedBudget is the predicted\-subset cap N for tool\_exposure "predicted" mode \(branch 03 leaf 01, design §7\): 00A Table 4 — D\(N=25\) saves 1,110 est\-tok/turn while N=31 costs more than the indexed baseline, so 25 stays on the favorable side of break\-even. Values above MaxAgentToolsPredictedBudget clamp to the bound with one warn; non\-positive values take the default.
+
+	const (
+	    DefaultAgentToolsPredictedBudget = 25
+	    MaxAgentToolsPredictedBudget     = 30
+	)
+
 <a name="DefaultCfgNoProgressWarnAt"></a>Defaults for \[agent.guards\] — keep in sync with agent.DefaultGuardConfig\(\).
 
 	const (
@@ -658,6 +669,13 @@ MeeptPath joins elem onto MeeptHome\(\).
 
 NormalizeAgentGuardsDefaults fills ship\-on defaults for zero\-valued fields.
 
+<a name="NormalizeAgentToolsDefaults"></a>
+## func NormalizeAgentToolsDefaults
+
+	func NormalizeAgentToolsDefaults(c *AgentToolsConfig)
+
+NormalizeAgentToolsDefaults fills load\-boundary defaults for \[agent.tools\] \(branch 03 leaf 01, design §3.4\): PredictedBudget 0/negative \-\> default 25; \>30 \-\> clamped to 30 with one warn \(N=31 costs more than the indexed baseline, so it can never be the better choice\).
+
 <a name="NormalizeClusterSecurityDefaults"></a>
 ## func NormalizeClusterSecurityDefaults
 
@@ -692,6 +710,13 @@ NormalizeEvolverDefaults normalizes the skills.evolver section: an empty PlanDir
 	func NormalizeFailurePolicyDefaults(f *FailurePolicyConfig)
 
 NormalizeFailurePolicyDefaults clamps invalid failure\_policy values to defaults: negative durations become the field default, zero means unset and takes the default; non\-positive ShortRetries takes the default; pacing intervals normalize the same way and max \< min lifts max to min. Idempotent on valid values. Pacing.Enabled is left as\-is: the default\-on value is applied by DefaultConfig\(\) \(which load unmarshal runs onto\), and an explicit pacing.enabled = false must survive every load.
+
+<a name="NormalizeMemoryTiersDefaults"></a>
+## func NormalizeMemoryTiersDefaults
+
+	func NormalizeMemoryTiersDefaults(mt *MemoryTiersConfig)
+
+NormalizeMemoryTiersDefaults clamps invalid memory.tiers values to their defaults \(wiring\-gap leaf 03\-tierpolicy\-daemon T1; mirrors tierpolicy.ResolveTiersConfig and NormalizeTierPolicyDefaults so all three tier knob sets behave identically at the load boundary\). A disabled config is left untouched \(inert engine; nothing consumes the knob values while off, so the template's documented defaults survive verbatim\). An enabled config gets every unset/negative field resolved \(0.9 / 0.8 / 300s / 30d retention / 30d staleness / 0.1 usefulness floor\). Idempotent: feeding resolved values through again is a no\-op.
 
 <a name="NormalizeOTLPMetricsDefaults"></a>
 ## func NormalizeOTLPMetricsDefaults
@@ -1294,6 +1319,25 @@ SchemaMode controls how tool definitions are exposed to the LLM \(loop\-economic
 	    // LLM definitions, and grants). Opt-in: default false means the daemon
 	    // behaves byte-identically to pre-codemode when the key is omitted.
 	    CodemodeEnabled bool `json:"codemode_enabled" toml:"codemode_enabled"`
+	    // DynamicToolExposure is the master switch for the as-needed tool-exposure
+	    // mechanism (token-efficiency branch 03 leaf 01): when true the
+	    // predicted/search exposure modes below are live. Default false =
+	    // byte-identical legacy (full/indexed only), per
+	    // docs/agents/opt-in-defaults.md.
+	    DynamicToolExposure bool `json:"dynamic_tool_exposure" toml:"dynamic_tool_exposure"`
+	    // ToolExposure is the single tool-exposure knob: "" | "full" | "indexed"
+	    // | "predicted" | "search". "predicted"/"search" only take effect while
+	    // DynamicToolExposure is on; with the flag off they are downgraded to
+	    // "indexed" at load (one warn, byte-identical legacy payload). Resolution
+	    // order: per-model > per-agent frontmatter > this global value >
+	    // "predicted" (flag on). See docs/research/dynamic-tools-design.md §1/§3.4.
+	    ToolExposure string `json:"tool_exposure" toml:"tool_exposure"`
+	    // PredictedBudget is N, the predicted-subset cap for predicted mode: how
+	    // many intent-selected tools get full schemas per turn. Default 25;
+	    // valid 1..30 — values above 30 clamp to 30 with one warn (N=31 costs
+	    // MORE than the indexed baseline, so >30 can never be the better
+	    // choice).
+	    PredictedBudget int `json:"predicted_budget" toml:"predicted_budget"`
 	}
 
 <a name="AgentToolsConfig.Validate"></a>
@@ -1301,7 +1345,7 @@ SchemaMode controls how tool definitions are exposed to the LLM \(loop\-economic
 
 	func (c *AgentToolsConfig) Validate() error
 
-Validate checks the \[agent.tools\] section. Unknown schema\_mode values are rejected with an error naming agent.tools.schema\_mode so a typo fails fast at config load instead of silently shipping full schemas.
+Validate checks the \[agent.tools\] section. Unknown schema\_mode values are rejected with an error naming agent.tools.schema\_mode so a typo fails fast at config load instead of silently shipping full schemas; the tool\_exposure check below follows the same fail\-fast style. Validate also normalizes predicted\_budget at this point \(the daemon calls ValidateAll before any component starts; the normalization is idempotent, so repeat validation is silent\).
 
 <a name="AgentWorkerPoolConfig"></a>
 ## type AgentWorkerPoolConfig
@@ -3373,6 +3417,13 @@ MemoryConfig holds memory subsystem settings.
 	    // files older than this many days are pruned during the consolidation
 	    // pass (no new ticker). Default 30; <= 0 disables pruning.
 	    L0RetentionDays int `json:"l0_retention_days" toml:"l0_retention_days"`
+	    // Tiers configures the memory-tier policy engine (tree 02 leaf 02,
+	    // contract C5; wiring-gap leaf 03-tierpolicy-daemon T1): the opt-in
+	    // background evict/compress/demote policy over the episodic tier.
+	    // Entirely OFF at the zero value (docs/agents/opt-in-defaults.md);
+	    // the daemon constructs the engine only when enabled. See
+	    // MemoryTiersConfig.
+	    Tiers MemoryTiersConfig `json:"tiers" toml:"tiers"`
 	}
 
 <a name="MemoryConfig.GetLimitsForProject"></a>
@@ -3440,6 +3491,53 @@ MemorySecurityConfig holds memory security settings.
 	    FailClosed bool `json:"fail_closed" toml:"fail_closed"`
 	    // LogBlocked logs blocked memory store attempts
 	    LogBlocked bool `json:"log_blocked" toml:"log_blocked"`
+	}
+
+<a name="MemoryTiersConfig"></a>
+## type MemoryTiersConfig
+
+MemoryTiersConfig is the user\-facing \[memory.tiers\] knob set for the memory\-tier policy engine \(tierpolicy.TiersConfig mirrored into the config schema; the daemon adapter maps it onto the engine\). All knobs are OPT\-IN: Enabled defaults false, and a disabled config stays inert \(no goroutine, zero cost\).
+
+	type MemoryTiersConfig struct {
+	    // Enabled turns on the policy engine background tick. Default false
+	    // (opt-in-defaults rule; flipping it is a product decision).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // EvictOverRatio is the hard eviction band start (fraction of the
+	    // episodic ceiling). <= 0 or >= 1 resolves to 0.9 once enabled.
+	    EvictOverRatio float64 `json:"evict_over_ratio" toml:"evict_over_ratio"`
+	    // CompressOverRatio is the soft compression band start. <= 0 or >= 1
+	    // resolves to 0.8 once enabled.
+	    CompressOverRatio float64 `json:"compress_over_ratio" toml:"compress_over_ratio"`
+	    // IntervalSeconds is the background tick period. <= 0 resolves to
+	    // 300 once enabled.
+	    IntervalSeconds int `json:"interval_seconds" toml:"interval_seconds"`
+	    // DryRun makes the engine report would-be counts without mutating
+	    // any store. Default false.
+	    DryRun bool `json:"dry_run" toml:"dry_run"`
+	    // RetentionDays is the candidate-cutoff window: episodic memories
+	    // older than this many days are eviction/compression candidates;
+	    // younger ones never qualify (the tick reads GetOldMemories with
+	    // now-minus-retention, never an unbounded window). <= 0 resolves to
+	    // 30 once enabled.
+	    RetentionDays int `json:"retention_days" toml:"retention_days"`
+	    // Demotion carries the semantic-claim demotion thresholds. See
+	    // MemoryTiersDemotionConfig.
+	    Demotion MemoryTiersDemotionConfig `json:"demotion" toml:"demotion"`
+	}
+
+<a name="MemoryTiersDemotionConfig"></a>
+## type MemoryTiersDemotionConfig
+
+MemoryTiersDemotionConfig carries the \[memory.tiers.demotion\] thresholds for the semantic\-to\-episodic claim demotion \(tierpolicy contract C6\). Zero/negative fields resolve to the documented defaults \(30d staleness window, 0.1 usefulness floor\) once memory.tiers is enabled.
+
+	type MemoryTiersDemotionConfig struct {
+	    // StaleDays is the staleness window: claims older than this many
+	    // days are demotion candidates. Default 30.
+	    StaleDays int `json:"stale_days" toml:"stale_days"`
+	    // MinUsefulness is the usefulness-score floor: claims scoring below
+	    // it are demotion candidates. (0, 1) required; outside resolves to
+	    // 0.1.
+	    MinUsefulness float64 `json:"min_usefulness" toml:"min_usefulness"`
 	}
 
 <a name="MemoryUsefulnessConfig"></a>

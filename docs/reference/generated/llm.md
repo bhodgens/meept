@@ -932,6 +932,14 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 	    // ModelConfig.ToolConstraint ("llamacpp"|"vllm"|"json_schema").
 	    CapToolConstraint = "tool_constraint"
 	
+	    // CapFrontier marks a model as frontier-class (token-efficiency branch
+	    // 03 leaf 01, design §5.1): the as-needed tool-exposure "search" mode
+	    // takes effect ONLY for active models whose capabilities carry this
+	    // tag; non-frontier models get an automatic search -> predicted
+	    // downgrade (one warn naming the model). Absence of the tag never
+	    // upgrades a mode — unclassified models are non-frontier.
+	    CapFrontier = "frontier"
+	
 	    // Metrics dimension keys.
 	    KeyLevel = "level"
 	)

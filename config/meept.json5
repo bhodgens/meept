@@ -336,6 +336,38 @@
     // Whole daily L0 files older than this many days are pruned on the
     // consolidation tick. <= 0 disables pruning. Default 30.
     "l0_retention_days": 30,
+    // Memory-tier policy engine (tree 02 leaf 02): opt-in background tick
+    // that compresses and evicts old episodic memories above band ratios
+    // and demotes stale or low-usefulness claims to episodic (flag-not-
+    // delete). DEFAULT OFF (opt-in-defaults rule): zero value = no
+    // goroutine, no engine, byte-identical legacy behavior. Enable only
+    // after sizing memory.tiers.retention_days against your store.
+    // drift: local-drift: memory.tiers.* -> pre-leaf installs carry no
+    // tiers block (zero value = engine off); the template ships the knob
+    // set disabled, so absence and presence behave identically until
+    // enabled is flipped.
+    "tiers": {
+      "enabled": false,
+      // Hard eviction band start (fraction of the episodic ceiling).
+      // Default 0.9 once enabled.
+      "evict_over_ratio": 0.9,
+      // Soft compression band start. Default 0.8 once enabled.
+      "compress_over_ratio": 0.8,
+      // Background tick period in seconds. Default 300 once enabled.
+      "interval_seconds": 300,
+      // Report would-be actions without mutating any store.
+      "dry_run": false,
+      // Candidate cutoff window in days: episodic memories older than
+      // this are tick candidates; younger never qualify. Default 30.
+      "retention_days": 30,
+      // Semantic-claim demotion thresholds (claim too stale or scoring
+      // below the floor gets copied to episodic and flagged). Defaults:
+      // stale_days 30, min_usefulness 0.1.
+      "demotion": {
+        "stale_days": 30,
+        "min_usefulness": 0.1,
+      },
+    },
   },
 
   // Memvid service connection
@@ -537,6 +569,31 @@
         "stateful":  {"parallelism": 1},   // Writes, mutations (serialized)
         "exclusive": {"parallelism": 1},   // Exclusive locks (one at a time)
       },
+    },
+    // As-needed tool exposure (token-efficiency branch 03): predicted/search
+    // modes give the model a curated full-schema set instead of every tool's
+    // full schema, saving tokens on every turn.
+    "tools": {
+      // dynamic_tool_exposure: master switch for the as-needed tool-exposure
+      // mechanism (branch 03). DEFAULT FALSE = byte-identical legacy
+      // (full/indexed only), per docs/agents/opt-in-defaults.md.
+      "dynamic_tool_exposure": false,
+      // tool_exposure: full | indexed | predicted | search. With the flag
+      // off, predicted/search silently downgrade to the indexed legacy
+      // default (one warn). With the flag on, the default is "predicted"
+      // (hybrid D).
+      // Resolution: per-model (models.json5 tool_exposure) > per-agent
+      // (AGENT.md frontmatter) > this value > "predicted".
+      //
+      // WARNING: "search" requires a frontier-class model (capabilities
+      // carry "frontier"). Do NOT enable it for small/local models — they
+      // fail to use the search/view round-trip reliably; the daemon
+      // downgrades search to predicted automatically for non-frontier
+      // models.
+      "tool_exposure": "predicted",
+      // predicted_budget: N, the predicted-subset cap. Default 25; valid
+      // 1..30 (00A: break-even at N=30->31 — N=31 costs more than indexed).
+      "predicted_budget": 25,
     },
   },
 

@@ -31,6 +31,10 @@ Package agent provides the agent loop and related components.
 
 Package agent provides HTTP hook support for external integrations.
 
+Intent\-map engine \(branch 03 leaf 03; design §3.3 in docs/research/dynamic\-tools\-design.md\).
+
+IntentMap is the deterministic intent\-category \-\> tool\-set selection table that drives the "predicted" and "search" tool\-exposure modes. The dispatcher already runs AnalyzeTrueIntent per turn and stores the category label \(internal/agent/intent\_analyzer.go:257 / :372\-377\); the exposure engine \(leaf 05\) keys the predicted subset off that SAME label through For. No LLM call is made here — the whole point is that selection is config\-driven, auditable, and byte\-deterministic for a given \(label, budget, allowed\) triple.
+
 Package agent — loop\_messages.go implements turn\-start injection of inter\-agent messages \(loop\-economics leaf 10\). The daemon wires a MessageDrainer \(backed by the employee message store\); before each turn's system prompt is built, unread queued messages are drained \(queued→delivered, exactly once\) and prepended as an anchored block "\[message from X\]" with message IDs so replies can target them.
 
 The drain is deliberately destructive: because DrainInbox transitions drained rows out of the queued set, a second build of the prompt will not re\-inject them. Delivery is at\-most\-once per recipient turn.
@@ -961,6 +965,12 @@ Package agent provides the agent loop and related components.
 - [type IntentCategory](<#IntentCategory>)
 - [type IntentClassifier](<#IntentClassifier>)
 - [type IntentEntry](<#IntentEntry>)
+- [type IntentMap](<#IntentMap>)
+  - [func LoadIntentMap\(path string, log \*slog.Logger\) \(\*IntentMap, error\)](<#LoadIntentMap>)
+  - [func LoadIntentMapWithUniverse\(path string, log \*slog.Logger, universe map\[string\]struct\{\}\) \(\*IntentMap, error\)](<#LoadIntentMapWithUniverse>)
+  - [func \(m \*IntentMap\) For\(label string, budget int, allowed \[\]string\) \[\]string](<#IntentMap.For>)
+  - [func \(m \*IntentMap\) Names\(\) \[\]string](<#IntentMap.Names>)
+  - [func \(m \*IntentMap\) SetUniverse\(universe map\[string\]struct\{\}\) \[\]string](<#IntentMap.SetUniverse>)
 - [type IntentType](<#IntentType>)
   - [func \(t IntentType\) Category\(\) IntentCategory](<#IntentType.Category>)
   - [func \(t IntentType\) DefaultAgent\(\) string](<#IntentType.DefaultAgent>)
@@ -10723,6 +10733,54 @@ IntentEntry represents an intent definition for indexing.
 	    Description string
 	    Keywords    []string
 	}
+
+<a name="IntentMap"></a>
+## type IntentMap
+
+IntentMap is the deterministic intent\-\>toolset selection table. Loaded once at daemon start from a JSON5 file \(default template config/tools\_intent\_map.json5, copied into $MEEPT\_HOME by \`make config\-bootstrap\`\). Invalid tool names \(not in the registry universe\) are dropped with one warn at load; a malformed file falls back to a "\_default"\-only safe map, never to an LLM call.
+
+	type IntentMap struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="LoadIntentMap"></a>
+### func LoadIntentMap
+
+	func LoadIntentMap(path string, log *slog.Logger) (*IntentMap, error)
+
+LoadIntentMap loads a JSON5 intent map at path and validates every entry against the known\-tool universe. It returns the parsed map AND a non\-nil error when the file is malformed or the top level is not an object; in that degraded case the returned \*IntentMap is a usable "\_default"\-only map so callers log one warn and continue — never an LLM fallback, never a panic. A clean parse returns a nil error. An ABSENT file is not an error: a fresh install before the template lands still gets the safe map \(nil error, conservative content\).
+
+Invalid tool names are dropped at load with one warn naming the entry. Malformed files are NOT logged here \(the caller owns that one warn from the returned error, per the §3.3 contract\).
+
+<a name="LoadIntentMapWithUniverse"></a>
+### func LoadIntentMapWithUniverse
+
+	func LoadIntentMapWithUniverse(path string, log *slog.Logger, universe map[string]struct{}) (*IntentMap, error)
+
+LoadIntentMapWithUniverse is LoadIntentMap with an explicit tool universe \(the live registry's name set, once leaf 05 wires it\). A nil universe disables invalid\-name dropping \(every entry accepted as\-is\).
+
+<a name="IntentMap.For"></a>
+### func \(\*IntentMap\) For
+
+	func (m *IntentMap) For(label string, budget int, allowed []string) []string
+
+For returns entry\[label\] \(falling back to entry\["\_default"\] when label is absent\) intersected with allowed, truncated to budget. budget \<= 0 yields a nil slice \(in search mode the caller passes 0\). Deterministic: same inputs give the same slice; stable order = the config order preserved after intersection \(never re\-sorted\).
+
+The result never exceeds the allowed set \(the agent's role ceiling\) and never exceeds the budget. A miss on both label and "\_default", or an empty intersection, yields a nil/empty slice — the caller then proceeds with "core \+ meta\-tools only" \(design §2.1\): never an error, never an LLM call.
+
+<a name="IntentMap.Names"></a>
+### func \(\*IntentMap\) Names
+
+	func (m *IntentMap) Names() []string
+
+Names returns the sorted set of category labels present \(diagnostics / audit surface\). Deterministic.
+
+<a name="IntentMap.SetUniverse"></a>
+### func \(\*IntentMap\) SetUniverse
+
+	func (m *IntentMap) SetUniverse(universe map[string]struct{}) []string
+
+SetUniverse re\-validates the loaded entries against a live registry universe \(leaf 05 calls this at daemon boot with the real registry names, which is the authoritative "registry universe" the §3.3 drop rule refers to\). It mutates in place, dropping out\-of\-universe names, and returns the "entry/name" pairs that were dropped — the caller logs one warn for a non\-nil result \(the load\-time contract, applied after the fact\). A nil universe resets to "accept any" and drops nothing.
 
 <a name="IntentType"></a>
 ## type IntentType
