@@ -614,7 +614,7 @@ func TestKill9NoDuplicateCompletion(t *testing.T) {
 		})
 	var jobsBefore, completedBefore int
 	var completedJobIDs []string
-	for _, row := range readQueueJobs(t, filepath.Join(s.MeeptHome, "queue.db")) {
+	for _, row := range readQueueJobs(t, filepath.Join(s.StateDir, "queue.db")) {
 		if row.TaskID == taskID {
 			jobsBefore++
 			if row.State == "completed" {
@@ -683,7 +683,7 @@ func TestKill9NoDuplicateCompletion(t *testing.T) {
 	// would mint rows), and every job that was completed pre-kill stays
 	// completed (never reset for a second run).
 	jobsAfter, completedAfter := 0, 0
-	for _, row := range readQueueJobs(t, filepath.Join(s.MeeptHome, "queue.db")) {
+	for _, row := range readQueueJobs(t, filepath.Join(s.StateDir, "queue.db")) {
 		if row.TaskID == taskID {
 			jobsAfter++
 			if row.State == "completed" {
