@@ -40,11 +40,21 @@ type secretEntry struct {
 
 // SecretObfuscator manages secret detection and obfuscation.
 // It is safe for concurrent use.
+//
+// Session scoping (wiring-gap leaf 07): obfuscated placeholders are
+// minted per session and recorded in sessionTaggedEntries. RestoreOutput
+// passes a sessionID; restore only consults that session's entries, so a
+// placeholder minted in session A NEVER resolves inside session B
+// (cross-session restore is an info leak, not a convenience). The
+// sessionless Deobfuscate wrapper covers legacy in-process callers and
+// legacy placeholders minted before a session tag existed.
 type SecretObfuscator struct {
 	mu             sync.RWMutex
 	entries        []secretEntry
 	obfuscateMap   map[string]string // placeholder -> original
 	deobfuscateMap map[string]string // original -> placeholder
+	sessionTags    map[string]string // placeholder -> minting sessionID
+	sessionOrder   []string          // per-session placeholder mint order (restore scan bound)
 	compiledRegex  []*regexp.Regexp
 	counter        uint64 // monotonic counter for placeholder generation
 	logger         *slog.Logger
@@ -58,6 +68,7 @@ func NewSecretObfuscator() *SecretObfuscator {
 	s := &SecretObfuscator{
 		obfuscateMap:   make(map[string]string),
 		deobfuscateMap: make(map[string]string),
+		sessionTags:    make(map[string]string),
 		logger:         slog.Default().With("component", "secret-obfuscator"),
 	}
 	s.loadEnvSecrets()
@@ -178,14 +189,31 @@ func (s *SecretObfuscator) sortEntriesLocked() {
 	})
 }
 
-// placeholder generates a unique placeholder string like #AB12#.
+// placeholder generates a placeholder string like #XXXXXX#. 48 bits of
+// xxhash entropy: the 16-bit form (#XXXX#, wiring-gap leaf 07 T1) collided
+// roughly once per 65k minted placeholders, and a collision overwrote
+// obfuscateMap[ph] so the WRONG secret got restored by map iteration order.
 func (s *SecretObfuscator) placeholder(index uint64) string {
 	h := xxhash.Sum64([]byte(fmt.Sprintf("secret-%d", index)))
-	return fmt.Sprintf("#%04X#", h&0xFFFF)
+	return fmt.Sprintf("#%012X#", h&0xFFFFFFFFFFFF)
 }
 
-// Obfuscate replaces all secrets in the text with placeholders or replacement strings.
+// Obfuscate replaces all secrets in the text with placeholders or replacement
+// strings. Placeholders minted here are UNTAGGED (legacy lane); the
+// session-aware entry point is ObfuscateForSession.
 func (s *SecretObfuscator) Obfuscate(text string) string {
+	return s.obfuscate(text, "")
+}
+
+// ObfuscateForSession obfuscates like Obfuscate and tags every placeholder
+// it mints with sessionID, so RestoreOutput can later scope resolution to
+// that session (wiring-gap leaf 07 T2). An empty sessionID is equivalent to
+// Obfuscate.
+func (s *SecretObfuscator) ObfuscateForSession(text, sessionID string) string {
+	return s.obfuscate(text, sessionID)
+}
+
+func (s *SecretObfuscator) obfuscate(text, sessionID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -203,7 +231,7 @@ func (s *SecretObfuscator) Obfuscate(text string) string {
 					continue
 				}
 				seen[match] = true
-				replacement := s.replacementFor(match, entry.mode)
+				replacement := s.replacementFor(match, entry.mode, sessionID)
 				result = strings.ReplaceAll(result, match, replacement)
 			}
 		} else {
@@ -211,7 +239,7 @@ func (s *SecretObfuscator) Obfuscate(text string) string {
 			if !strings.Contains(result, entry.content) {
 				continue
 			}
-			replacement := s.replacementFor(entry.content, entry.mode)
+			replacement := s.replacementFor(entry.content, entry.mode, sessionID)
 			result = strings.ReplaceAll(result, entry.content, replacement)
 		}
 	}
@@ -221,13 +249,17 @@ func (s *SecretObfuscator) Obfuscate(text string) string {
 
 // replacementFor returns the obfuscation placeholder or one-way replacement for a secret.
 // Caller must hold s.mu.
-func (s *SecretObfuscator) replacementFor(secret string, mode SecretMode) string {
+func (s *SecretObfuscator) replacementFor(secret string, mode SecretMode, sessionID string) string {
 	if mode == SecretModeReplace {
 		return strings.Repeat("*", len(secret))
 	}
 
-	// Obfuscate mode: use a reversible placeholder.
+	// Obfuscate mode: use a reversible placeholder. Re-minting for another
+	// session reuses the SAME placeholder under the new tag (the
+	// deobfuscate map stays process-wide), so RestoreOutput scoped to
+	// either minting session resolves it.
 	if ph, ok := s.deobfuscateMap[secret]; ok {
+		s.tagPlaceholder(ph, sessionID)
 		return ph
 	}
 
@@ -235,7 +267,9 @@ func (s *SecretObfuscator) replacementFor(secret string, mode SecretMode) string
 	s.counter++
 	ph := s.placeholder(s.counter)
 
-	// Ensure uniqueness (extremely unlikely collision, but be safe).
+	// Ensure uniqueness (extremely unlikely collision at 48 bits, but be
+	// safe: reuse would overwrite obfuscateMap[ph] and restore the WRONG
+	// secret by map iteration order).
 	for _, exists := s.obfuscateMap[ph]; exists; _, exists = s.obfuscateMap[ph] {
 		s.counter++
 		ph = s.placeholder(s.counter)
@@ -243,10 +277,27 @@ func (s *SecretObfuscator) replacementFor(secret string, mode SecretMode) string
 
 	s.obfuscateMap[ph] = secret
 	s.deobfuscateMap[secret] = ph
+	s.tagPlaceholder(ph, sessionID)
 	return ph
 }
 
-// Deobfuscate replaces placeholders back with original secrets.
+// tagPlaceholder records sessionID as an allowed restore scope for ph
+// (caller must hold s.mu). Empty sessionID leaves the placeholder untagged:
+// it stays resolvable through the legacy sessionless Deobfuscate lane only.
+func (s *SecretObfuscator) tagPlaceholder(ph, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	if _, tagged := s.sessionTags[ph]; !tagged {
+		s.sessionOrder = append(s.sessionOrder, ph)
+	}
+	s.sessionTags[ph] = sessionID
+}
+
+// Deobfuscate replaces placeholders back with original secrets, consulting
+// the process-wide map. This is the legacy in-process lane; the
+// output-restore lane is RestoreOutput, which scopes resolution to the
+// minting session.
 func (s *SecretObfuscator) Deobfuscate(text string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -254,6 +305,33 @@ func (s *SecretObfuscator) Deobfuscate(text string) string {
 	result := text
 	for placeholder, original := range s.obfuscateMap {
 		result = strings.ReplaceAll(result, placeholder, original)
+	}
+	return result
+}
+
+// RestoreOutput replaces placeholders back with original secrets, bounded
+// to the entries minted for sessionID (wiring-gap leaf 07 T2/T3): a
+// placeholder minted in another session never resolves here (cross-session
+// restore refused), and only that session's entries are scanned
+// (placeholder-keyed lookup, not a whole-map ReplaceAll sweep). An empty
+// sessionID has no provenance and refuses to resolve anything.
+func (s *SecretObfuscator) RestoreOutput(text, sessionID string) string {
+	if sessionID == "" {
+		return text
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := text
+	for _, ph := range s.sessionOrder {
+		if s.sessionTags[ph] != sessionID {
+			continue
+		}
+		if !strings.Contains(result, ph) {
+			continue
+		}
+		result = strings.ReplaceAll(result, ph, s.obfuscateMap[ph])
 	}
 	return result
 }

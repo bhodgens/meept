@@ -2072,6 +2072,30 @@ func (l *AgentLoop) ApplyRequestModel(modelRef string) {
 	)
 }
 
+// maxTransformFixpointPasses caps the transform-context fixpoint loop per
+// reasoningCycle iteration (wiring-gap leaf 02). RunTransformContext
+// short-circuits on the first Modified=true hook, so composing several
+// transforms (secret-obfuscation then pii-restore) requires repeated passes;
+// the cap bounds a hook that never reports Modified=false.
+const maxTransformFixpointPasses = 5
+
+// cloneMessagesForTransform copies the message slice (including ToolCalls
+// slices) so transform hooks that mutate elements in place cannot write
+// placeholders into conversation history. GetWindowedMessages results feed
+// later turns; the transform lane must only reshape what THIS LLM call sees.
+func cloneMessagesForTransform(messages []llm.ChatMessage) []llm.ChatMessage {
+	cloned := make([]llm.ChatMessage, len(messages))
+	copy(cloned, messages)
+	for i := range cloned {
+		if len(cloned[i].ToolCalls) > 0 {
+			tc := make([]llm.ToolCall, len(cloned[i].ToolCalls))
+			copy(tc, cloned[i].ToolCalls)
+			cloned[i].ToolCalls = tc
+		}
+	}
+	return cloned
+}
+
 // applyTurnModification applies a PrepareNextTurn hook's TurnModification to
 // the loop so it takes effect on the next LLM call in reasoningCycle:
 //   - ExtraMessages non-empty -> staged in pendingHookMessages; reasoningCycle
@@ -4708,6 +4732,47 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Inject few-shot examples from shadow training (only on first iteration)
 		if iteration == 1 && l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
 			messages = l.injectFewShotExamples(ctx, messages, conversationID)
+		}
+
+		// Transform-context hook pipeline (wiring-gap leaf 02): the
+		// TransformContext registrations (secret-obfuscation, pii-restore)
+		// had zero production callers, so the registered security
+		// transforms never ran. Fire the pipeline once per reasoningCycle
+		// iteration, after the turn's messages are finalized (windowed
+		// above, hook messages and few-shot examples appended here) and
+		// before the LLM call below. RunTransformContext short-circuits on
+		// the first Modified=true hook, so composition to a fixpoint
+		// requires repeated passes; cap 5 so a hook that always claims
+		// Modified cannot spin the loop (pii_hook_order_test.go pattern).
+		//
+		// HISTORY NON-MUTATION: messages from conv.GetWindowedMessages are
+		// cloned before the first pass. Transform hooks mutate message
+		// elements in place (the obfuscation hook writes .Content); without
+		// the clone those writes would land in conversation history and
+		// placeholders would replace the originals in every later turn.
+		// The transform lane shapes what the MODEL sees this iteration
+		// only.
+		if l.hookRegistry != nil && len(messages) > 0 {
+			messages = cloneMessagesForTransform(messages)
+			for pass := 0; pass < maxTransformFixpointPasses; pass++ {
+				tr := func() (tr ContextTransform) {
+					defer func() {
+						if r := recover(); r != nil {
+							l.logger.Error("transform_context hook panicked; continuing with untransformed messages",
+								"panic", r,
+								"conversation", conversationID,
+								"iteration", iteration,
+								"pass", pass,
+							)
+						}
+					}()
+					return l.hookRegistry.RunTransformContext(ctx, messages, tools)
+				}()
+				if !tr.Modified {
+					break
+				}
+				messages = tr.Messages
+			}
 		}
 
 		// Vision pre-flight: analyze undescribed images before the main turn.

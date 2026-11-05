@@ -37,7 +37,6 @@ type OrchestratorConfig struct {
 	AuditDBPath    string
 }
 
-
 // Orchestrator coordinates all security components.
 // It provides a unified interface for input sanitization, output monitoring,
 // and shell command scanning.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"testing"
 )
@@ -312,19 +313,10 @@ func TestPlaceholderUniqueness(t *testing.T) {
 	obfuscated := s.Obfuscate(text)
 
 	// Both secrets should be replaced with different placeholders.
-	// Count the number of #XXXX# patterns.
-	count := 0
-	for i := range len(obfuscated) {
-		if obfuscated[i] == '#' {
-			// Look for closing #
-			for j := i + 1; j < len(obfuscated) && j <= i+5; j++ {
-				if obfuscated[j] == '#' {
-					count++
-					break
-				}
-			}
-		}
-	}
+	// Count the number of #<12-hex># patterns exactly (48-bit placeholder
+	// format since the wiring-gap leaf 07 T1 widening).
+	phRe := regexp.MustCompile(`#[0-9A-F]{12}#`)
+	count := len(phRe.FindAllString(obfuscated, -1))
 	if count != 2 {
 		t.Errorf("expected 2 placeholders, found %d in: %s", count, obfuscated)
 	}

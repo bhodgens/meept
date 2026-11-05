@@ -115,7 +115,7 @@ func TestPiiHookOrderPinned(t *testing.T) {
 	if len(stub.observed) == 0 {
 		t.Fatal("pii stub never ran")
 	}
-	secretReplaced := regexp.MustCompile(`#[0-9A-F]{4}#`)
+	secretReplaced := regexp.MustCompile(`#[0-9A-F]{12}#`)
 	for i, seen := range stub.observed {
 		if strings.Contains(seen, secret) {
 			t.Fatalf("pii stub observed raw secret (pass %d): %q", i, seen)

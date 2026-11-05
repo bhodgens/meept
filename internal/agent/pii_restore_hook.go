@@ -19,13 +19,16 @@ import (
 //     scoped SwapStore. Tokens minted in ANOTHER session never resolve
 //     here - the store refuses cross-session lookups (cross-session
 //     restore is an info leak, not a convenience).
-//  2. Secret placeholders: #XXXX# placeholders minted by the process-wide
-//     SecretObfuscator pass restore via Deobfuscate. The obfuscator's maps
-//     are NOT session-scoped (they are process-wide by design - the
-//     pre-LLM obfuscation hook obfuscated this session's context in this
-//     process), so this lane is gated on cfg.SecretRestore (research D6:
-//     learning-capture redaction shares the gate) and on the swapper AND
-//     obfuscator being present.
+//  2. Secret placeholders: #XXXXXXXXXXXX# placeholders minted by the
+//     process-wide SecretObfuscator pass restore via session-scoped
+//     RestoreOutput (falling back to the legacy sessionless Deobfuscate
+//     for untagged mints). The obfuscator's value maps are process-wide
+//     (the pre-LLM obfuscation hook obfuscated this session's context in
+//     this process), but each placeholder is TAGGED with its minting
+//     session: RestoreOutput only resolves that session's entries
+//     (wiring-gap leaf 07 T2). This lane is gated on cfg.SecretRestore
+//     (research D6: learning-capture redaction shares the gate) and on
+//     the swapper AND obfuscator being present.
 //
 // One-to-one value-keyed restore only (L7 LiteLLM wrong-restore
 // corruption class): placeholders resolve through exact fixed-string
@@ -83,7 +86,15 @@ func (h *PiiRestoreHook) RestoreOutput(text, sessionID string) string {
 
 	secretCount := 0
 	if h.cfg.SecretRestore && h.obfuscator != nil {
-		deobfuscated := h.obfuscator.Deobfuscate(restored)
+		// Session-scoped restore (wiring-gap leaf 07 T2): placeholders
+		// minted in OTHER sessions never resolve here. A scoped restore
+		// that made no progress falls back to the legacy sessionless lane
+		// so placeholders minted before this deploy (untagged) still
+		// restore within this process.
+		deobfuscated := h.obfuscator.RestoreOutput(restored, sessionID)
+		if sessionID == "" || deobfuscated == restored {
+			deobfuscated = h.obfuscator.Deobfuscate(restored)
+		}
 		if deobfuscated != restored {
 			// Count one event, never the values: the obfuscator's
 			// per-placeholder detail stays in-process.
@@ -105,8 +116,8 @@ func (h *PiiRestoreHook) RestoreOutput(text, sessionID string) string {
 	return restored
 }
 
-// countPlaceholders counts #XXXX#-shaped placeholder occurrences for the
-// count-only log line. Cheap fixed-shape scan; never inspects values.
+// countPlaceholders counts #XXXXXXXXXXXX#-shaped placeholder occurrences for
+// the count-only log line. Cheap fixed-shape scan; never inspects values.
 func countPlaceholders(text string) int {
 	count := 0
 	for i := 0; i+1 < len(text); i++ {
