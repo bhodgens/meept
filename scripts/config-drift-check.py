@@ -272,9 +272,9 @@ def main(argv=None):
     ap.add_argument("--strict", action="store_true",
                     help="exit 1 on ANY drift (classified or not)")
     ap.add_argument("--optional-templates", default="",
-                    help="comma list of template files that MAY be absent from "
-                         "the install (reported, not fatal; default: ai-infra,"
-                         "epistemic_tags,pty,runtime)")
+                   help="comma list of template files that MAY be absent from "
+                        "the install (reported, not fatal; default: ai-infra,"
+                        "epistemic_tags,pty,runtime,tools_intent_map)")
     ap.add_argument("--defect", default="",
                     help="comma list of dotted keys to treat as template-defect (CLI annotations)")
     ap.add_argument("--local-drift", default="",
