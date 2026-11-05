@@ -19,9 +19,9 @@ import (
 
 // summaryState is the fold state for the test projection unit.
 type summaryState struct {
-	MsgCount int      `json:"msg_count"`
-	LastRole string   `json:"last_role"`
-	LastText string   `json:"last_text"`
+	MsgCount int    `json:"msg_count"`
+	LastRole string `json:"last_role"`
+	LastText string `json:"last_text"`
 }
 
 func TestProjection_RegistryFoldOnAppend(t *testing.T) {

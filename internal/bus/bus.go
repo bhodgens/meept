@@ -330,6 +330,15 @@ func callerName(depth int) string {
 	return fn.Name()
 }
 
+// Unsubscribe removes a subscription (package-level form: the G5 gate and
+// other test/e2e callers hold the bus as a value; nil-safe).
+func Unsubscribe(b *MessageBus, sub *Subscriber) {
+	if b == nil || sub == nil {
+		return
+	}
+	b.Unsubscribe(sub)
+}
+
 // Unsubscribe removes a subscription.
 func (b *MessageBus) Unsubscribe(sub *Subscriber) {
 	b.mu.Lock()

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/storage"
 	sid "github.com/caimlas/meept/pkg/id"
 	_ "modernc.org/sqlite"     // sqlite3 driver registration
 	_ "modernc.org/sqlite/vec" // sqlite-vec extension (vec0 virtual table)
@@ -48,6 +49,11 @@ type SQLiteStore struct {
 	// message (contract S2, leaf 03/02). Folds run post-commit and are
 	// best-effort: a fold failure never fails the save.
 	projections *SessionProjectionRegistry
+
+	// storageEvents, when set, publishes RecordChanged events on
+	// storage.record.changed strictly AFTER durable commit (contract S4,
+	// leaf 03/04). Best-effort: a publish never fails a save/delete.
+	storageEvents *storage.ChangeEmitter
 }
 
 // Option configures a SQLiteStore at construction time.
@@ -64,7 +70,6 @@ func WithEmbeddingDim(dim int) Option {
 		}
 	}
 }
-
 
 // WithBusyTimeoutMs overrides the SQLite busy timeout (milliseconds) used in
 // the connection DSN. A non-positive value is ignored (falls back to the
@@ -809,10 +814,19 @@ func (s *SQLiteStore) Delete(id string) bool {
 	// invariant: never hold a mutex across the hook call). The fire
 	// carries the pre-delete-captured conversation id.
 	fires := s.collectLockedWithAlternate(s.logger, SessionEventDelete, id, conversationID)
+	em := s.storageEvents
 	s.mu.Unlock()
 
 	s.logger.Info("Session deleted", "id", id)
 	fireLifecycle(s.logger, fires...)
+	// Post-commit tombstone (contract S4): delete carries NO value.
+	if em != nil {
+		em.Publish("session.store", storage.RecordChanged{
+			Store: "session",
+			Key:   id,
+			Op:    storage.ChangeOpDelete,
+		})
+	}
 	return true
 }
 
@@ -996,7 +1010,26 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 	// Snapshot the publisher under the lock, release, then publish.
 	pub := s.turnGossip
 	reg := s.projections
+	em := s.storageEvents
 	s.mu.Unlock()
+
+	// Post-commit record-change events (contract S4, leaf 03/04): one put
+	// per committed message, carrying the NEW snapshot; strictly after the
+	// commit, outside the lock, best-effort.
+	if em != nil {
+		for _, msg := range written {
+			snap, mErr := json.Marshal(msg)
+			if mErr != nil {
+				continue // best-effort: an unmarshalable snapshot skips the event
+			}
+			em.Publish("session.store", storage.RecordChanged{
+				Store: "session_messages",
+				Key:   sessionID,
+				Op:    storage.ChangeOpPut,
+				Value: snap,
+			})
+		}
+	}
 
 	// Post-commit projection fold (contract S2, leaf 03/02): best-effort,
 	// outside the store lock; a fold failure never fails the save.
@@ -1105,8 +1138,23 @@ func (s *SQLiteStore) GetMessageCount(sessionID string) (int, error) {
 // ClearMessages removes all messages for a session and resets the leaf
 // pointer. The session row itself is preserved. FTS cleanup is handled
 // automatically by the session_messages_ad_fts trigger.
-func (s *SQLiteStore) ClearMessages(sessionID string) error {
+func (s *SQLiteStore) ClearMessages(sessionID string) (retErr error) {
 	s.mu.Lock()
+	// Defer ordering (LIFO): the publish defer is registered BEFORE the
+	// unlock defer, so it runs AFTER the unlock — post-commit, outside the
+	// lock (contract S4). Publishes only on a successful clear: events
+	// follow durable commits, never failed ones. The emitter is
+	// snapshotted under the lock.
+	em := s.storageEvents
+	defer func() {
+		if em != nil && retErr == nil {
+			em.Publish("session.store", storage.RecordChanged{
+				Store: "session_messages",
+				Key:   sessionID,
+				Op:    storage.ChangeOpDelete,
+			})
+		}
+	}()
 	defer s.mu.Unlock()
 
 	session := s.getByColumnUnsafe("id", sessionID)
@@ -1304,6 +1352,19 @@ func (s *SQLiteStore) SetTurnGossipPublisher(pub TurnGossipPublisher) {
 	if s != nil && pub != nil {
 		s.turnGossip = pub
 	}
+}
+
+// SetStorageEventEmitter wires (or replaces) the storage record-change
+// emitter (contract S4). Nil values are ignored per CLAUDE.md nil-guard
+// convention. Publishes happen post-commit, outside the store lock,
+// best-effort — mirroring the turnGossip pattern.
+func (s *SQLiteStore) SetStorageEventEmitter(em *storage.ChangeEmitter) {
+	if s == nil || em == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.storageEvents = em
 }
 
 // SetProjectionRegistry wires (or replaces) the session projection registry
