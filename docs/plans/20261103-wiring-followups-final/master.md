@@ -54,6 +54,7 @@ persistence/restore paths, bounded nil-safe maps in wiring layers.
 | 02-restore-toolcalls | COMPLETE | e23fd815 | batched GetToolCallsForMessages join; best-effort; model-visible record proven; RED witnessed |
 | 03-two-stage-verifier | COMPLETE | e23fd815 | verify_floor 0.85 band; R0 false-hit scenario prevented (call-count pin); band-off byte-identical |
 | 04-streaming-cache-sites | COMPLETE | e23fd815 | both sites via shared seam; TTFT sentinel pinned for hit path; RED witnessed |
+| 05-semantic-cache-daemon-wiring | PENDING | | final leaf: construction site (embedder reuse > alias > none), mapping, degraded posture |
 
 All 4 leaves landed in a single commit (e23fd815, 1022 insertions) - one
 executing agent, sequential execution, verified by orchestrator in-session.
@@ -64,9 +65,9 @@ executing agent, sequential execution, verified by orchestrator in-session.
 - internal/llm full package green; agent Restore tests green; daemon Trace tests green.
 - e2e green: llm-serving-tiers, llm-hop-tracing, boundary-hardening.
 - gofmt clean on all touched files; mutexio/predid clean.
-- Note carried forward: SemanticCacheConfig.VerifyFloor reaches the tier
-  only when the future daemon construction site copies the field (same
-  documented gap as the leaf-02 daemon wiring - loader-pinned today).
+- Leaf 05 closes the carried-forward gap: the daemon construction site
+  copies VerifyFloor (and all other fields), making llm.cache.semantic.*
+  + verify_floor armable in production config.
 
 ## Integration Test Plan
 
