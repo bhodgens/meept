@@ -1,0 +1,20 @@
+package sessionref
+
+import (
+	"testing"
+)
+
+func TestParseMentionText(t *testing.T) {
+	// G4: Unit: mention grammar + reference budget math + truncate
+	text := `@[lbl](meept-session:YWJj)`
+	clean, refs, err := ParseMentionText(text)
+	if err != nil {
+		t.Fatalf("ParseMentionText failed: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Errorf("expected 1 ref, got %d", len(refs))
+	}
+	if clean != text {
+		t.Errorf("expected clean text to match input, got %q", clean)
+	}
+}

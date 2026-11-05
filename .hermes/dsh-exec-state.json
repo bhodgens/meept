@@ -1,0 +1,84 @@
+{
+  "tree": "docs/plans/20261102-dsh-convergence",
+  "worktree": "/Users/caimlas/git/meept/.hermes/worktrees/dsh-convergence",
+  "branch": "plan/dsh-convergence",
+  "base_commit": "40f6fa5a",
+  "baseline": {
+    "build": "GREEN (go build ./... at 40f6fa5a, isolated worktree)",
+    "test": "running /tmp/dsh-baseline-test.log"
+  },
+  "wave1": {
+    "status": "REJECTED - vacuous output from weak child model",
+    "root_cause": "profile config.yaml delegation.model=minicpm-v-4.7 (vision model) overrode the parent coding model",
+    "fix": "hermes config set delegation.model flashnext (verified via hermes config get)",
+    "quarantine": "/tmp/dsh-wave1-quarantine (18 files, moved not deleted)"
+  },
+  "branches": {
+    "01-delegation": {
+      "00T": "TESTS_IN_PROGRESS",
+      "01": "PENDING",
+      "02": "PENDING",
+      "03": "PENDING",
+      "04": "PENDING",
+      "05": "PENDING",
+      "06": "PENDING"
+    },
+    "02-goals-plans": {
+      "00T": "TESTS_IN_PROGRESS",
+      "01": "PENDING",
+      "02": "PENDING",
+      "03": "PENDING",
+      "04": "PENDING"
+    },
+    "03-session-storage": {
+      "00T": "TESTS_IN_PROGRESS",
+      "01": "PENDING",
+      "02": "PENDING",
+      "03": "PENDING",
+      "04": "PENDING"
+    },
+    "04-tool-surface": {
+      "00T": "TESTS_IN_PROGRESS",
+      "01": "PENDING",
+      "02": "PENDING",
+      "03": "PENDING",
+      "04": "PENDING",
+      "05": "PENDING",
+      "06": "IN_PROGRESS"
+    },
+    "05-schedule": {
+      "00T": "TESTS_IN_PROGRESS",
+      "01": "PENDING",
+      "02": "PENDING"
+    },
+    "06-office-skills": {
+      "00R": "REVIEWED - library-picks.md written in-session (docx=gomutex/godocx v0.1.5 MIT; pptx=mmonterroca/pptxgo MIT + OPEN QUESTION on low stars; xlsx=excelize confirmed). 4 OPEN QUESTION markers.",
+      "00T": "TESTS_IN_PROGRESS",
+      "01": "PENDING",
+      "02": "PENDING",
+      "03": "PENDING",
+      "04": "PENDING"
+    }
+  },
+  "commits": [],
+  "notes": [
+    "01 leaf edited e2e/manifest.json despite the RESERVED rule - edit is additive and correct (delegate-seam path_map + suite entry); orchestrator will merge the other five suites at gate commit.",
+    "Baseline: go build ./... GREEN; 20 tree packages test GREEN at 40f6fa5a.",
+    "Probe module cache at /tmp/dsh-libprobe (throwaway, not in repo)."
+  ],
+  "wave2": {
+    "status": "DISPATCHED",
+    "deleg_id": "deleg_1f783a7c",
+    "ids": {
+      "01": "sa-0-99973036",
+      "02": "sa-1-8d9f753c",
+      "03": "sa-2-61dad160",
+      "04": "sa-3-16cb7796",
+      "05": "sa-4-5882bd1d",
+      "06": "sa-5-abb0b5f2"
+    },
+    "gate": "all six 00T test leaves; no commit until each gate validated RED"
+  },
+  "e2e_vet_baseline": "go vet -tags e2e ./e2e/... GREEN at 40f6fa5a",
+  "anchors_doc": "WORKTREE/.hermes/anchors/e2e-harness.md"
+}
