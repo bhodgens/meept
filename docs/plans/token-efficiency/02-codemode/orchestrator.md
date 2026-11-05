@@ -101,7 +101,7 @@ Inherited from ../master.md. Branch-specific:
 | 00T-gate | TESTS_VALIDATED | d939d020 | 5 pinned C3 cases compile-RED (expected - internal/codemode not yet built); manifest path_map + 5 scenario rows (hunks re-applied after sibling commits dropped them) |
 | 01-sandbox-core | COMPLETE | af2f4bde | internal/codemode (goja eventloop VM, rejecting require registry, C3 exact, ToolBridge async bridge, hard timeout kill, allocation-counting memory cap, 50KB clamps, no builtin import); +goja deps; AGENTS.md Codemode row; docs/workflows/codemode.md. Unit mechanics tested (accepted exception, recorded); e2e gate TestCodemodeDisabledByDefault PASSES, tool-cases RED by design until leaf 02 |
 | 02-codemode-tool | COMPLETE | 2876a4a5 | codemode builtin + [agent.tools].codemode_enabled gate (default false, byte-identical off); ToolBridge set == agent filtered registry (T5); RiskMedium no-confirmation; FULL e2e/suites/codemode/ 5/5 PASS |
-| 03-e2e-suite | PENDING | - | |
+| 03-e2e-suite | COMPLETE | 04a650d7 | gate 5 cases GREEN + TestNestedCallContextSavings (measure_test.go): 5x file_read via codemode script = 1 tool-result / 334B vs 5x direct = 5 tool-results / 4175B => 3841B saved (92.0%); -count=3 stable. Branch 02 now COMPLETE (01/02/03 all green) |
 
 ## Integration Test Plan
 
