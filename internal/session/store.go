@@ -98,6 +98,14 @@ type Store interface {
 	HasResponses(sessionID string) (bool, error)
 	Close() error
 
+	// Session format version accessors (contract S1, leaf 03/01).
+	// GetSchemaVersion reads the row's stamped format version;
+	// MigrateSchema carries it forward through the build-static catalog
+	// and refuses stored-newer (ErrSessionFormatNewer) or gapped chains
+	// (ErrSessionFormatGap).
+	GetSchemaVersion(sessionID string) (int, error)
+	MigrateSchema(sessionID string) error
+
 	// Tree operations
 	GetLeafMessageID(sessionID string) (int64, error)
 	SetLeafMessageID(sessionID string, messageID int64) error

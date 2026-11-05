@@ -141,6 +141,14 @@ func (s *SQLiteStore) migrate() error {
 	// Add description column if not present (migration for existing databases)
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN description TEXT DEFAULT ''", "description")
 
+	// Add the per-session format version (contract S1, leaf 03/01). The
+	// DEFAULT back-fills existing rows without a rewrite; the constant
+	// keeps the DDL in sync with SessionFormatVersion.
+	s.migrationAddColumn(fmt.Sprintf(
+		"ALTER TABLE sessions ADD COLUMN schema_version INTEGER NOT NULL DEFAULT %d",
+		SessionFormatVersion,
+	), "schema_version")
+
 	// Add leaf_message_id column to sessions
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN leaf_message_id INTEGER", "leaf_message_id")
 
@@ -481,8 +489,8 @@ func (s *SQLiteStore) Create(name string) (*Session, error) {
 	workersJSON, _ := json.Marshal(session.WorkerIDs)
 
 	_, err := s.db.Exec(`
-		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, detection_context)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '', '', false, '')`,
+		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, detection_context, schema_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '', '', false, '', ?)`,
 		session.ID,
 		session.Name,
 		session.ConversationID,
@@ -491,6 +499,7 @@ func (s *SQLiteStore) Create(name string) (*Session, error) {
 		string(attachedJSON),
 		string(workersJSON),
 		session.Description,
+		SessionFormatVersion,
 	) //nolint:mutexio // mutex serializes sqlite connection access
 
 	if err != nil {
@@ -527,8 +536,8 @@ func (s *SQLiteStore) CreateForOwner(_ context.Context, req CreateForOwnerReques
 	workersJSON, _ := json.Marshal(session.WorkerIDs)
 
 	_, err := s.db.Exec(`
-		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, owner_id, detection_context)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '', '', false, ?, '')`,
+		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, owner_id, detection_context, schema_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '', '', false, ?, '', ?)`,
 		session.ID,
 		session.Name,
 		session.ConversationID,
@@ -538,6 +547,7 @@ func (s *SQLiteStore) CreateForOwner(_ context.Context, req CreateForOwnerReques
 		string(workersJSON),
 		session.Description,
 		session.OwnerID,
+		SessionFormatVersion,
 	) //nolint:mutexio // mutex serializes sqlite connection access
 
 	if err != nil {
@@ -1877,11 +1887,12 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 	workersJSON, _ := json.Marshal([]string{})
 
 	_, err = tx.Exec(`
-		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence)
-		VALUES (?, ?, ?, ?, ?, ?, ?, '', NULL, '', '', false)`,
+		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, schema_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '', NULL, '', '', false, ?)`,
 		newID, newName, newConvID,
 		now.Format(time.RFC3339), now.Format(time.RFC3339),
 		string(attachedJSON), string(workersJSON),
+		SessionFormatVersion,
 	) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return nil, fmt.Errorf("failed to create forked session: %w", err)
