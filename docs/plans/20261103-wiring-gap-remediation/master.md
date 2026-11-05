@@ -31,9 +31,12 @@ Per-survey dependency map (survey deleg_786d8798, verified at HEAD 72c24930). Di
   02 for end-to-end proof).
 - Wave C: 01 (ConfigSnapshot closures; pairs with 02/03 seams being
   load-bearing) + 06 (TurnTerminalEvent additive field).
-- Wave D: 03 (largest; schema knob -> adapter -> call site; SEQUENCE
-  against memory second-brain leaf 03-agent-recall-wiring, which touches
-  loop recall seams - do not merge blindly on top).
+- Wave D: 03 (largest; schema knob -> adapter -> call site). COORDINATION
+  RESOLVED 2026-11-04: memory second-brain leaf 03-agent-recall-wiring is
+  COMPLETE (4cefbfc9 - loop recall filtering at all three branches +
+  dispatcher recall). Wave D wires the tierpolicy ENGINE layer (components
+  call site, cutoff, claim adapter, producer) - no overlap with the landed
+  recall filtering; loop.go buildMemoryContext untouched by wave D.
 - Final: integration gates + completion report.
 
 Concurrent-sibling rule: memory second-brain leaf 03 is queued by another
