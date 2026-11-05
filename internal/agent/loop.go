@@ -616,6 +616,11 @@ type AgentLoop struct {
 	schemaModeCfg config.AgentToolsConfig
 	schemaModeSet bool
 
+	// exposureDowngradeWarned tracks which model refs already emitted the
+	// one-time "search downgraded to predicted" warn (dynamic-tools leaf 05,
+	// design §5.2.1). Guarded by l.mu.
+	exposureDowngradeWarned map[string]struct{}
+
 	// Context-assembler seam (context-memory-engine leaf 03).
 	// contextAssemblerCfg is the [agent.context_assembler] values
 	// supplied via SetContextAssemblerConfig; contextAssemblerSet
@@ -2048,16 +2053,20 @@ func (l *AgentLoop) ApplyRequestModel(modelRef string) {
 	if modelRef == "" {
 		return
 	}
-	if l.resolver != nil && l.resolver.ResolveRef(modelRef) == nil {
-		// Not a provider/model ref — is it an alias name?
-		if l.resolver.HasAlias(modelRef) {
-			if mc, err := l.resolver.ResolveForAlias(modelRef, ""); err == nil && mc != nil {
-				modelRef = mc.ProviderID + "/" + mc.ModelID
+	var mc *llm.ModelConfig
+	if l.resolver != nil {
+		mc = l.resolver.ResolveRef(modelRef)
+	}
+	if mc == nil {
+		if l.resolver != nil && l.resolver.HasAlias(modelRef) {
+			// Not a provider/model ref — is it an alias name?
+			if resolved, err := l.resolver.ResolveForAlias(modelRef, ""); err == nil && resolved != nil {
+				modelRef = resolved.ProviderID + "/" + resolved.ModelID
+				mc = resolved
 			} else {
 				l.logger.Warn("Per-request model alias could not be resolved, using current model chain",
 					"agent_id", l.agentID,
 					"model_ref", modelRef,
-					"error", err,
 				)
 				return
 			}
@@ -2070,9 +2079,58 @@ func (l *AgentLoop) ApplyRequestModel(modelRef string) {
 		}
 	}
 	l.SetModelOverride(modelRef)
+	// dynamic-tools leaf 05: the warn-once capability-gate downgrade. When
+	// "search" exposure is configured and the switched-to model is not
+	// frontier-class, exactly ONE warn line naming the model is emitted;
+	// repeat overrides to the same model do not re-log. No-op when the
+	// dynamic flag is off or the tier is not "search" (byte-identical legacy).
+	l.applyExposureGate(modelRef, mc)
 	l.logger.Info("Per-request model override armed",
 		"agent_id", l.agentID,
 		"model_ref", modelRef,
+	)
+}
+
+// applyExposureGate is the warn-once capability-gate downgrade for the
+// as-needed tool-exposure mechanism (dynamic-tools leaf 05, design §5.2.1).
+// When "search" exposure is configured (per-model > per-agent > global
+// resolution chain) but the active model is not frontier-class, the
+// effective tier reverts to "predicted" and exactly ONE warn line is emitted
+// naming the model. Repeat overrides to the same model ref do not re-log
+// (warn-once-per-model, the §5.2.1 contract). No-op when the tier is not
+// "search" or the model is frontier-class (byte-identical legacy payload).
+// Thread-safe: takes l.mu.
+func (l *AgentLoop) applyExposureGate(modelRef string, mc *llm.ModelConfig) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	// Gate engages only when "search" is configured somewhere in the
+	// resolution chain. The e2e drives it through the global [agent.tools]
+	// tier; a per-model or per-agent "search" engages identically.
+	searchConfigured := l.schemaModeCfg.ToolExposure == string(ExposureSearch)
+	if !searchConfigured && mc != nil {
+		searchConfigured = mc.ToolExposure == string(ExposureSearch)
+	}
+	if !searchConfigured && l.spec != nil {
+		searchConfigured = l.spec.ToolExposure == string(ExposureSearch)
+	}
+	if !searchConfigured {
+		return // not the "search" tier: no frontier gate, legacy payload.
+	}
+	// The capability gate: a frontier model keeps "search" (no downgrade).
+	if IsFrontierClass(mc) {
+		return
+	}
+	// warn-once-per-model-ref.
+	if l.exposureDowngradeWarned == nil {
+		l.exposureDowngradeWarned = make(map[string]struct{})
+	}
+	if _, seen := l.exposureDowngradeWarned[modelRef]; seen {
+		return
+	}
+	l.exposureDowngradeWarned[modelRef] = struct{}{}
+	l.logger.Warn("not frontier-class; search downgraded to predicted",
+		"model", modelRef,
+		"agent_id", l.agentID,
 	)
 }
 
@@ -9173,6 +9231,21 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		WithMessageBus(l.bus),
 		WithLoopLogger(l.logger),
 
+		// [agent.tools] tool-schema + exposure config (dynamic-tools leaf 05):
+		// per-session clones must inherit the daemon template's tool-schema
+		// settings or the capability-gate downgrade seam (ApplyRequestModel)
+		// cannot resolve the active mode. Idempotent: the clone already had
+		// it stamped by applySchemaModeLocked on attach, and re-stamping
+		// the same values is a no-op.
+		func(l2 *AgentLoop) {
+			l.mu.RLock()
+			cfg, set := l.schemaModeCfg, l.schemaModeSet
+			l.mu.RUnlock()
+			if set {
+				l2.SetSchemaModeConfig(cfg)
+			}
+		},
+
 		// --- Memory + task ---
 		WithMemvidClient(l.memvid),
 		WithTaskStore(l.taskStore),
@@ -9466,15 +9539,36 @@ func (l *AgentLoop) SetSessionStore(store any, sessionCfg any) {
 	}
 }
 
+// sessionToolCallReader is the narrow structural interface for reading
+// persisted tool calls (wiring-followups-final leaf 02). Satisfied by
+// session.SQLiteStore (and session.Store); asserted OPTIONALLY at restore
+// time so readers without the capability restore exactly as before.
+// MemoryStore satisfies it structurally too, returning empty (tool calls
+// are only persisted in SQLite).
+type sessionToolCallReader interface {
+	GetToolCallsForMessages(messageIDs []int64) (map[int64][]session.ToolCall, error)
+}
+
 // buildConversationRestoreFn returns the restore function handed to
 // ConversationStore.GetOrRestore on cache miss. It reads persisted
 // messages, filters to user/assistant entries, sorts ascending by
 // timestamp, and tail-caps to restoreMessageLimit (0 = all). Unknown IDs
 // and empty histories return an empty (non-nil) slice with a nil error so
 // GetOrRestore yields a fresh conversation.
+//
+// Leaf 02 (wiring-followups-final): when the reader ALSO satisfies
+// sessionToolCallReader, the rebuild loop re-attaches persisted tool calls
+// to assistant ChatMessages (message_id join, seq order, llm.ToolCalls
+// shape) - a restored session no longer loses its tool-call record. The
+// fetch is best-effort: any join failure logs a Warn and restores without
+// tool calls, never failing the restore.
 func (l *AgentLoop) buildConversationRestoreFn() func(id string) ([]llm.ChatMessage, error) {
 	reader := l.sessionReader
 	limit := l.restoreMessageLimit
+	var toolReader sessionToolCallReader
+	if tr, ok := reader.(sessionToolCallReader); ok {
+		toolReader = tr
+	}
 	return func(id string) ([]llm.ChatMessage, error) {
 		if reader == nil || id == "" {
 			return []llm.ChatMessage{}, nil
@@ -9492,19 +9586,63 @@ func (l *AgentLoop) buildConversationRestoreFn() func(id string) ([]llm.ChatMess
 			// the error is logged by the caller (see logRestoreFailure).
 			return nil, err
 		}
-		out := make([]llm.ChatMessage, 0, len(rows))
+		// Leaf 02: collect the user/assistant rows first so the join can
+		// batch ONE GetToolCallsForMessages call over all assistant IDs
+		// (never per-row store I/O).
+		type kept struct {
+			row  session.Message
+			want bool // true = may carry tool calls (assistant row)
+		}
+		keptRows := make([]kept, 0, len(rows))
+		var assistantIDs []int64
 		for _, row := range rows {
-			// Filter to user/assistant "message" entries — session_messages
+			// Filter to user/assistant "message" entries - session_messages
 			// also carries system/anchor/summary/compaction rows that must
 			// not leak into model-visible history (leaf Notes).
 			if row.EntryType != "message" ||
 				(row.Role != string(llm.RoleUser) && row.Role != string(llm.RoleAssistant)) {
 				continue
 			}
-			out = append(out, llm.ChatMessage{
-				Role:    llm.Role(row.Role),
-				Content: row.Content,
-			})
+			isAssistant := row.Role == string(llm.RoleAssistant)
+			if isAssistant && row.ID > 0 {
+				assistantIDs = append(assistantIDs, row.ID)
+			}
+			keptRows = append(keptRows, kept{row: row, want: isAssistant})
+		}
+		// Best-effort tool-call join: one batched fetch keyed by message_id.
+		// Any failure shape degrades to restore-without-tool-calls (Warn,
+		// never an error -- the messages themselves already loaded fine).
+		var callsByID map[int64][]session.ToolCall
+		if toolReader != nil && len(assistantIDs) > 0 {
+			fetched, ferr := toolReader.GetToolCallsForMessages(assistantIDs)
+			if ferr != nil {
+				l.logger.Warn("conversation restore: tool-call fetch failed; restoring without tool calls",
+					"conversation", id,
+					"error", ferr,
+				)
+			} else {
+				callsByID = fetched
+			}
+		}
+		out := make([]llm.ChatMessage, 0, len(keptRows))
+		for _, k := range keptRows {
+			msg := llm.ChatMessage{
+				Role:    llm.Role(k.row.Role),
+				Content: k.row.Content,
+			}
+			if k.want && callsByID != nil {
+				for _, tc := range callsByID[k.row.ID] {
+					msg.ToolCalls = append(msg.ToolCalls, llm.ToolCall{
+						ID:   tc.ToolCallID,
+						Type: "function",
+						Function: llm.ToolCallFunction{
+							Name:      tc.ToolName,
+							Arguments: tc.Arguments,
+						},
+					})
+				}
+			}
+			out = append(out, msg)
 		}
 		// GetMessages returns ascending (SQLite ORDER BY id; memory store
 		// is append-ordered). Rows were appended in store order, which the

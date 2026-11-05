@@ -897,6 +897,15 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	// Agent loops created by registry use agentID as sessionID
 	// workingDir is set later via SetWorkingDir when session binds to project
 	loop := NewAgentLoop(spec.ID, "", opts...)
+	// dynamic-tools leaf 05: stamp the [agent.tools] schema + exposure config
+	// onto the registry-built loop so the warn-once capability-gate in
+	// ApplyRequestModel can resolve the active tier. Without this, registry
+	// loops have zero-valued schemaModeCfg and the gate never fires. The
+	// registry's field is read under r.mu (createLoop callers hold it);
+	// loop.mu is uncontended on a fresh loop — no deadlock.
+	if r.schemaModeSet {
+		loop.SetSchemaModeConfig(r.schemaModeCfg)
+	}
 	// Decision-log level (agent-groups leaf 04): every registry-built
 	// loop's executor logs the C2 permission decision lines at the
 	// configured knob ("" = deny-warn default).
