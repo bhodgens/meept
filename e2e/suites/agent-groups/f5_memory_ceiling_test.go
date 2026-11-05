@@ -133,7 +133,13 @@ func TestAgentGroupsF5MemoryCeilingBoundsRecall(t *testing.T) {
 			f5SeedChief(t, st)
 			return nil
 		}),
+		// This suite measures the memory CEILING, not the distill pipeline;
+		// pin the noisy pipeline off (leaf-02 default-on makes distill-retry
+		// logging scroll the 4KB LogTail window faster than the store-turn
+		// observable can be polled - same remedy as the memory-scoping suite).
 		harness.WithConfigOverlay(map[string]any{
+			"memory.l0_enabled":                           false,
+			"memory.epistemic.ambient_extraction.enabled": false,
 			"groups": groupsSection(
 				[]map[string]any{policy("ceiling", nil, nil, map[string]any{
 					"memory_max_scope": "project",

@@ -8,6 +8,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/memory"
+	"github.com/caimlas/meept/internal/session"
 )
 
 // Leaf 04 T3/T4: the turn-terminal capture writes recall_outcomes.jsonl rows
@@ -31,6 +32,11 @@ func TestMemoryCaptureRecallOutcomes(t *testing.T) {
 			}
 			return nil
 		})
+		// The capture pipeline skips turns whose store has no user message
+		// (Step 3 guard) - seed one or writeRecallOutcomes is unreachable.
+		if err := store.SaveMessages(sessionID, []session.Message{{Role: "user", Content: "what is the convoy passphrase"}}); err != nil {
+			t.Fatalf("seed user message: %v", err)
+		}
 		sub := WireMemoryCapture(b, store, nil, nil, nil, captureLogger(), outcomes)
 		defer b.Unsubscribe(sub)
 
@@ -73,6 +79,9 @@ func TestMemoryCaptureRecallOutcomes(t *testing.T) {
 		b, store, _, _, _, _, sessionID := newCaptureHarness(t)
 		outcomes := memory.NewRecallOutcomeLogger(t.TempDir(), nil)
 		outcomes.SetLoopSource(func(string) []memory.RecallOutcomeRecord { return items })
+		if err := store.SaveMessages(sessionID, []session.Message{{Role: "user", Content: "tell me something unrelated"}}); err != nil {
+			t.Fatalf("seed user message: %v", err)
+		}
 		sub := WireMemoryCapture(b, store, nil, nil, nil, captureLogger(), outcomes)
 		defer b.Unsubscribe(sub)
 
@@ -127,6 +136,11 @@ func TestMemoryCaptureRecallOutcomes(t *testing.T) {
 			}
 			return nil
 		})
+		// Capture Step 3 guard: no user message in the store skips the
+		// whole turn (writeRecallOutcomes unreachable) - seed one.
+		if err := store.SaveMessages(sessionID, []session.Message{{Role: "user", Content: "what is the convoy passphrase"}}); err != nil {
+			t.Fatalf("seed user message: %v", err)
+		}
 		sub := WireMemoryCapture(b, store, nil, nil, nil, captureLogger(), outcomes)
 		defer b.Unsubscribe(sub)
 
