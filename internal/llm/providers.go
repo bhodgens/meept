@@ -102,6 +102,17 @@ type ModelDef struct {
 	// model ("full"|"indexed", loop-economics leaf 02). Empty inherits
 	// the provider setting. Unknown values are ignored at resolve time.
 	SchemaMode string `json:"schema_mode,omitempty"`
+	// ToolExposure is the per-model as-needed tool-exposure tier
+	// ("full"|"indexed"|"predicted"|"search", token-efficiency branch 03
+	// leaf 02, design §7). It resolves ahead of the per-agent AGENT.md
+	// `tool_exposure:` frontmatter key and the global [agent.tools]
+	// tool_exposure. Empty (the default) inherits those lower layers;
+	// "search" takes effect only for models whose capabilities carry the
+	// "frontier" tag (design §5.1) — the exposure engine (branch 03 leaf
+	// 05) downgrades it to "predicted" with one warn otherwise. There is
+	// no provider-level option: the value maps straight through from
+	// ModelDef.
+	ToolExposure string `json:"tool_exposure,omitempty"`
 	// ToolChoice overrides the provider-level tool_choice policy for this
 	// model. Empty inherits the provider setting. See
 	// ProviderOptionsConfig.ToolChoice.
@@ -699,6 +710,11 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 			"provider", providerID, "model", mapKey, "value", toolChoice)
 		toolChoice = ""
 	}
+	// Per-model as-needed tool-exposure tier (branch 03 leaf 02, design §7).
+	// There is no provider-level option: empty maps through as "" (inherit
+	// per-agent frontmatter > global [agent.tools] tool_exposure > default),
+	// so resolution stays the engine's call — no validation or warn here.
+	toolExposure := modelDef.ToolExposure
 	name := modelDef.Name
 	if name == "" {
 		name = mapKey
@@ -730,6 +746,7 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 		CatalogRef:           providerID + "/" + mapKey,
 		ToolConstraint:       mode,
 		SchemaMode:           schemaMode,
+		ToolExposure:         toolExposure,
 		ToolChoice:           toolChoice,
 		ExtraHeaders:         extraHeaders,
 		Timeout:              time.Duration(opts.Timeout) * time.Second,

@@ -418,7 +418,17 @@
       "models": {
         "agnes-3.0-flash": {
           "name": "agnes-3.0-flash",
-          "capabilities": ["completion", "code", "reasoning", "tool_use"],
+          // "frontier" capability tag (branch 03 leaf 02, design §5.1):
+          // marks this as a frontier-class model, so the as-needed
+          // tool-exposure "search" tier takes effect for it (the tier
+          // signal IS this capabilities array — no separate boolean).
+          // The per-model tool_exposure example below exercises the
+          // same surface (design §7).
+          "capabilities": ["completion", "code", "reasoning", "tool_use", "frontier"],
+          // Per-model tool-exposure tier ("full"|"indexed"|"predicted"|"search";
+          // empty inherits the agent/global layers, design §7). "search" is
+          // only honored because this model carries the "frontier" tag above.
+          "tool_exposure": "search",
           "input_cost": 0.0,
           "output_cost": 0.0,
           "context_limit": 128000,
@@ -618,7 +628,11 @@
       "models": {
         "kimi-k2.6": {
           "name": "kimi-k2.6",
-          "capabilities": ["completion", "code", "reasoning", "tool_use"],
+          // "frontier" capability tag (branch 03 leaf 02, design §5.1):
+          // frontier-class cloud model — the as-needed tool-exposure
+          // "search" tier takes effect for it. The tag itself (this
+          // capabilities entry) is the tier signal; no separate boolean.
+          "capabilities": ["completion", "code", "reasoning", "tool_use", "frontier"],
           "context_limit": 262144,
           "max_output": 8192
         }

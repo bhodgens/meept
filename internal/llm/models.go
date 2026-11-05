@@ -252,6 +252,17 @@ type ModelConfig struct {
 	// global [agent.tools].schema_mode (default "indexed") via
 	// Resolver.EffectiveSchemaMode.
 	SchemaMode string
+	// ToolExposure is the per-model as-needed tool-exposure tier
+	// ("full"|"indexed"|"predicted"|"search"), mapped from the models.json5
+	// per-model tool_exposure key (branch 03 leaf 02, design §7). Empty
+	// (the default) means inherit: the exposure engine resolves
+	// per-model > per-agent AGENT.md frontmatter > global [agent.tools]
+	// tool_exposure > default ("predicted" with the flag on, "indexed"
+	// legacy with the flag off). "search" takes effect only when the
+	// model's capabilities carry "frontier" (CapFrontier, design §5.1);
+	// otherwise the engine downgrades to "predicted" with one warn
+	// naming the model.
+	ToolExposure string
 	// ToolChoice is the resolved tool_choice policy for this endpoint,
 	// resolved per-model over provider from models.json5 `tool_choice`
 	// (see internal/llm/providers.go). Empty (the default) means the

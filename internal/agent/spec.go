@@ -113,6 +113,17 @@ type AgentSpec struct {
 	// Returned WITHOUT a HasAlias pre-check — the resolver's own
 	// resolution errors visibly if the alias is missing.
 	ModelAlias string `json:"model_alias,omitempty" yaml:"model_alias,omitempty"`
+	// ToolExposure is the per-agent as-needed tool-exposure tier, from the
+	// AGENT.md `tool_exposure:` frontmatter key (token-efficiency branch 03
+	// leaf 02, design §7). Valid values: "full" | "indexed" |
+	// "predicted" | "search"; empty = inherit — the exposure engine
+	// resolves per-model (models.json5 tool_exposure) > this field > the
+	// global [agent.tools] tool_exposure > default ("predicted" with the
+	// dynamic_tool_exposure flag on, legacy "indexed" with it off). "search"
+	// takes effect only for frontier-class models (the model's capabilities
+	// carry "frontier", design §5.1); otherwise it downgrades to
+	// "predicted" with one warn naming the model.
+	ToolExposure string `json:"tool_exposure,omitempty" yaml:"tool_exposure,omitempty"`
 	// EnhancerModel is the small/cheap model used to expand a brief into
 	// generator-ready prose. Empty = alias "small".
 	EnhancerModel string `json:"enhancer_model,omitempty"`
