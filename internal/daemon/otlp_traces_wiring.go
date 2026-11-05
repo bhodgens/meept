@@ -40,6 +40,15 @@ type llmCallObserverAttacher interface {
 	SetLLMCallObserver(fn func(appmetrics.LLMCallRecord))
 }
 
+// traceTurnState is one bounded-map entry (wiring-followups-final leaf 01):
+// the turn.terminal event's minted turn span id (hop parenting,
+// wiring-gap-remediation leaf 06) plus its ConversationID (hop
+// gen_ai.conversation.id attribute). Zero values on unknown traces.
+type traceTurnState struct {
+	turnSpanID     string
+	conversationID string
+}
+
 // otlpTraceSubs holds the live bus subscriptions of an enabled trace
 // pipeline. Zero values on disabled boots; Unsubscribe is nil-safe. The
 // producer rides along so the legacy wireOTLPTraces return shape can hand
@@ -117,28 +126,33 @@ func wireOTLPTracesWithObserver(cfg config.OTLPTracesConfig, b *bus.MessageBus, 
 	// client side and the bridge never blocks: map copy + RecordLLMCallSpan
 	// enqueue only. The map is bounded by a FIFO eviction (a chat turn is a
 	// handful of hops; the cap bounds abandoned traces only).
+	//
+	// Leaf 01 (wiring-followups-final): the map value widens to a struct
+	// carrying the terminal event's ConversationID alongside the turn span
+	// id, so the llm.call hop span stamps gen_ai.conversation.id from the
+	// SAME trace's terminal event (restores the attribute that regressed to
+	// always-"" when the last-seen heuristic was removed). Unknown trace ->
+	// no conversation attribute (absent, never an empty-string attribute).
 	turnSpanByTrace := struct {
 		sync.Mutex
-		m map[string]string
-	}{m: make(map[string]string, 64)}
+		m map[string]traceTurnState
+	}{m: make(map[string]traceTurnState, 64)}
 	traceSpanCap := 1024
 	observer := func(rec appmetrics.LLMCallRecord) {
 		turnSpanByTrace.Lock()
-		parent := turnSpanByTrace.m[rec.TraceID]
+		st := turnSpanByTrace.m[rec.TraceID]
 		turnSpanByTrace.Unlock()
 		producer.RecordLLMCallSpan(appmetrics.LLMCallSpanSpec{
 			TraceID:      rec.TraceID,
 			SpanID:       rec.SpanID,
-			ParentSpanID: parent,
+			ParentSpanID: st.turnSpanID,
 			Provider:     rec.Provider,
 			ModelID:      rec.ModelID,
 			AgentID:      rec.AgentID,
 			SessionID:    rec.SessionID,
-			// ConversationID: the previous last-seen-conversation heuristic
-			// (kept session-keyed state to enrich one attribute) is gone
-			// with the trace->turnSpan map rewrite (leaf 06); the spec
-			// field stays "" -- correlation keys are TraceID/SessionID.
-			ConversationID:      "",
+			// Leaf 01: stamped from the same trace's terminal event; ""
+			// (attribute omitted by the producer) outside a known trace.
+			ConversationID:      st.conversationID,
 			TokensSent:          rec.TokensSent,
 			TokensRecv:          rec.TokensRecv,
 			TokensCached:        rec.TokensCached,
@@ -165,7 +179,11 @@ func wireOTLPTracesWithObserver(cfg config.OTLPTracesConfig, b *bus.MessageBus, 
 		// throughout the turn and a trailing hop observed after the terminal
 		// (async observer delivery) must still parent correctly.
 		turnSub := bus.SubscribeT(b, "otlp-trace-turns", agent.TopicTurnTerminal, func(ev agent.TurnTerminalEvent) {
-			if ev.TraceID != "" && ev.TurnSpanID != "" {
+			// Leaf 01 (wiring-followups-final): both fields fill from the
+			// SAME event (the frozen carrier set). A trace with only a
+			// TurnSpanID (older publisher) keeps the pre-leaf parenting
+			// posture; a ConversationID alone stamps hops but no parent.
+			if ev.TraceID != "" && (ev.TurnSpanID != "" || ev.ConversationID != "") {
 				turnSpanByTrace.Lock()
 				if _, exists := turnSpanByTrace.m[ev.TraceID]; !exists && len(turnSpanByTrace.m) >= traceSpanCap {
 					// FIFO-bounded: drop one arbitrary (map-range) entry
@@ -176,7 +194,10 @@ func wireOTLPTracesWithObserver(cfg config.OTLPTracesConfig, b *bus.MessageBus, 
 						break
 					}
 				}
-				turnSpanByTrace.m[ev.TraceID] = ev.TurnSpanID
+				turnSpanByTrace.m[ev.TraceID] = traceTurnState{
+					turnSpanID:     ev.TurnSpanID,
+					conversationID: ev.ConversationID,
+				}
 				turnSpanByTrace.Unlock()
 			}
 			producer.RecordTurnSpan(appmetrics.TurnSpanSpec{

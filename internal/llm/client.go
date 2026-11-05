@@ -2497,6 +2497,22 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 	// that actually serves the request.
 	cfg = withRequestModelOverride(cfg, chatOpts)
 
+	// Cache check (leaf 04, wiring-followups-final): the exact-key tier
+	// then the semantic tier, IDENTICAL to the non-streaming Chat() site
+	// and strictly BEFORE the budget gate. A semantic hit short-circuits
+	// BEFORE the first delta (the TTFT sentinel stays -1: no clock was
+	// ever armed -- chatOpts.ttftStart arms per live attempt below). A
+	// hit never carries tool calls (guard inside the seam).
+	if c.tokenCache != nil && c.keyBuilder != nil {
+		cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
+		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
+			return cached.Response, nil
+		}
+		if semHit, ok := c.semanticLookupBehindMiss(ctx, cfg, chatOpts, messages); ok {
+			return semHit, nil
+		}
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
@@ -2594,6 +2610,16 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			// Per-provider/per-agent token accounting (metrics.db llm_calls).
 			if resp != nil {
 				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, resp.Usage, false, "", time.Since(start).Milliseconds(), chatOpts)
+				// Cache store (leaf 04, wiring-followups-final): the
+				// exact-key Put then the semantic tier, identical shape
+				// to the ChatWithProgress() success site. Tool-call
+				// responses are skipped inside the seam (the streaming
+				// hard exemption mirrors the non-streaming sites).
+				if c.tokenCache != nil && c.keyBuilder != nil {
+					cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
+					c.tokenCache.Put(ctx, cacheKey, resp)
+					c.semanticStoreAfterSuccess(ctx, cfg, chatOpts, messages, resp)
+				}
 			}
 			return resp, nil
 		}

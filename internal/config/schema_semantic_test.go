@@ -123,4 +123,73 @@ func TestNormalizeSemanticCacheDefaults(t *testing.T) {
 			t.Errorf("not idempotent: %+v vs %+v", again, sc)
 		}
 	})
+	// Leaf 03 (wiring-followups-final): verify_floor clamps.
+	t.Run("verify_floor valid band passes through", func(t *testing.T) {
+		sc := SemanticCacheConfig{Threshold: 0.95, VerifyFloor: 0.85}
+		NormalizeSemanticCacheDefaults(&sc)
+		if sc.VerifyFloor != 0.85 {
+			t.Errorf("verify_floor = %v, want 0.85 (valid band kept)", sc.VerifyFloor)
+		}
+	})
+	t.Run("verify_floor at/above threshold clamps to 0", func(t *testing.T) {
+		sc := SemanticCacheConfig{Threshold: 0.95, VerifyFloor: 0.95}
+		NormalizeSemanticCacheDefaults(&sc)
+		if sc.VerifyFloor != 0 {
+			t.Errorf("verify_floor = %v, want 0 (band at/above threshold is empty)", sc.VerifyFloor)
+		}
+		sc = SemanticCacheConfig{Threshold: 0.95, VerifyFloor: 0.99}
+		NormalizeSemanticCacheDefaults(&sc)
+		if sc.VerifyFloor != 0 {
+			t.Errorf("verify_floor = %v, want 0 (band above threshold is empty)", sc.VerifyFloor)
+		}
+	})
+	t.Run("negative verify_floor clamps to 0", func(t *testing.T) {
+		sc := SemanticCacheConfig{Threshold: 0.95, VerifyFloor: -0.1}
+		NormalizeSemanticCacheDefaults(&sc)
+		if sc.VerifyFloor != 0 {
+			t.Errorf("verify_floor = %v, want 0", sc.VerifyFloor)
+		}
+	})
+	t.Run("verify_floor zero stays zero (band disabled)", func(t *testing.T) {
+		sc := SemanticCacheConfig{Threshold: 0.95}
+		NormalizeSemanticCacheDefaults(&sc)
+		if sc.VerifyFloor != 0 {
+			t.Errorf("verify_floor = %v, want 0 (default disabled band)", sc.VerifyFloor)
+		}
+	})
+}
+
+// TestSemanticCacheVerifyFloorJSON5Override pins the json5 key
+// (llm.cache.semantic.verify_floor): an override engages the verify band;
+// NormalizeSemanticCacheDefaults runs at load (band configured + clamped).
+func TestSemanticCacheVerifyFloorJSON5Override(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "meept.json5")
+	content := `{
+		"llm": {
+			"cache": {
+				"semantic": {
+					"enabled": true,
+					"threshold": 0.95,
+					"verify_floor": 0.85
+				}
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadJSON5Config(path)
+	if err != nil {
+		t.Fatalf("LoadJSON5Config failed: %v", err)
+	}
+
+	sc := cfg.LLM.Cache.Semantic
+	if sc.VerifyFloor != 0.85 {
+		t.Errorf("llm.cache.semantic.verify_floor = %v, want 0.85 after override", sc.VerifyFloor)
+	}
+	if sc.Threshold != 0.95 {
+		t.Errorf("llm.cache.semantic.threshold = %v, want 0.95", sc.Threshold)
+	}
 }

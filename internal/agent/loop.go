@@ -4564,6 +4564,39 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	}
 	inWarningZone := false
 
+	// dynamic-tools leaf 06: arm the per-episode tool-exposure plan on the
+	// executor when the flag is on. The plan's active set = core always-full
+	// + the meta pair + the predicted set (empty here — intent-map wiring is
+	// leaf 07). knownNames = the loop's registry's tool names (correct for
+	// the unfiltered daemon registry; filtered-registry known names are a
+	// leaf 07 concern). ceiling = the agent spec's AllTools (nil spec = no
+	// ceiling = the flag-off posture). No-op when the flag is off: no plan
+	// is armed, the executor's active-set branch never fires, and every
+	// error path is byte-identical to the legacy.
+	if l.schemaModeSet && l.schemaModeCfg.DynamicToolExposure && l.executor != nil {
+		var mc *llm.ModelConfig
+		if l.llmClient != nil {
+			mc = l.llmClient.Config()
+		}
+		agentMode := ""
+		if l.spec != nil {
+			agentMode = l.spec.ToolExposure
+		}
+		mode := EffectiveExposureMode(mc, agentMode, l.schemaModeCfg.ToolExposure, true)
+		var known []string
+		if l.registry != nil {
+			for _, t := range l.registry.List() {
+				known = append(known, t.Name())
+			}
+		}
+		var ceiling []string
+		if l.spec != nil {
+			ceiling = l.spec.AllTools()
+		}
+		plan := NewExposurePlan(mode, nil, l.schemaModeCfg.PredictedBudget, ceiling, known)
+		l.executor.SetExposurePlan(plan)
+	}
+
 	// D-H1 (bughunt 2026-09-04): per-turn cap on duplicate-search rollbacks.
 	// The rollback branch `continue`s WITHOUT incrementing the iteration
 	// counter, so a model that keeps re-emitting the identical web_search

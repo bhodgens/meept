@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -250,5 +251,181 @@ func TestSemanticCacheTTLExpiry(t *testing.T) {
 	_, hit, _ := cache.LookupBehindMiss(context.Background(), "m", "q")
 	if hit {
 		t.Fatal("expired entry served, want miss")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Two-stage verifier (wiring-followups-final leaf 03): candidates scoring in
+// the verify band [verify_floor, threshold) are re-embedded and direct-cosine
+// verified against their stored embedding before serving. Verifier failure
+// degrades to miss; verify_floor=0 disables the band (today's behavior).
+// ---------------------------------------------------------------------------
+
+// seqEmbedder returns scripted vectors per call index; the two-stage
+// verifier makes exactly TWO embed calls for an in-band candidate (stage-1
+// scan + stage-2 re-embed), which the call count pins.
+type seqEmbedder struct {
+	mu    sync.Mutex
+	calls int
+	embed func(call int) ([]float32, error)
+}
+
+func (s *seqEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
+	s.mu.Lock()
+	c := s.calls
+	s.calls++
+	s.mu.Unlock()
+	return s.embed(c)
+}
+
+func (s *seqEmbedder) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+// bandVecs builds a stored direction and a query vector at ~cos 0.90
+// (inside the 0.85-0.95 verify band) plus a verify-pass variant at ~cos 0.97.
+func bandVecs() (stored, inBand, verified []float32) {
+	stored = []float32{1, 0, 0, 0, 0, 0, 0, 0}
+	inBand = []float32{0.90, 0.43589, 0, 0, 0, 0, 0, 0}   // cos = 0.90
+	verified = []float32{0.97, 0.24398, 0, 0, 0, 0, 0, 0} // cos ~= 0.97
+	return
+}
+
+// TestSemanticCacheVerifyBandServesAfterVerify pins T3(a): an in-band
+// candidate whose re-embedded query direct-cosines at/above the threshold
+// against the stored embedding SERVES (verify pass), with exactly two
+// embedder calls (scan + verify).
+func TestSemanticCacheVerifyBandServesAfterVerify(t *testing.T) {
+	stored, inBand, verified := bandVecs()
+	storedResp := &Response{Content: "band hit"}
+	emb := &seqEmbedder{embed: func(call int) ([]float32, error) {
+		if call == 0 {
+			return inBand, nil
+		}
+		return verified, nil
+	}}
+	cache := NewSemanticCache(emb, SemanticCacheConfig{Enabled: true, Threshold: 0.95, VerifyFloor: 0.85})
+	cache.mu.Lock()
+	cache.entries["m band"] = &semanticEntry{vector: stored, response: storedResp, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.mu.Unlock()
+
+	resp, hit, err := cache.LookupBehindMiss(context.Background(), "m", "band probe")
+	if err != nil {
+		t.Fatalf("LookupBehindMiss errored: %v", err)
+	}
+	if !hit {
+		t.Fatal("in-band candidate with matching verify embedding missed, want serve after verify")
+	}
+	if resp != storedResp {
+		t.Fatalf("verify pass served wrong response: %+v", resp)
+	}
+	if got := emb.count(); got != 2 {
+		t.Fatalf("embedder calls = %d, want 2 (scan + verify re-embed)", got)
+	}
+}
+
+// TestSemanticCacheVerifyBandDivergentMisses pins T3(b), the R0 scenario:
+// an in-band candidate whose verify re-embed stays below the threshold
+// (divergent embedding) MISSES - the near-threshold false hit is prevented.
+// The verifier MUST have run (two embed calls); without the band wiring the
+// lookup degrades after a single embed call and this test FAILS (RED).
+func TestSemanticCacheVerifyBandDivergentMisses(t *testing.T) {
+	stored, inBand, _ := bandVecs()
+	emb := &seqEmbedder{embed: func(call int) ([]float32, error) {
+		return inBand, nil // both scan and verify score 0.90 < threshold
+	}}
+	cache := NewSemanticCache(emb, SemanticCacheConfig{Enabled: true, Threshold: 0.95, VerifyFloor: 0.85})
+	cache.mu.Lock()
+	cache.entries["m band"] = &semanticEntry{vector: stored, response: &Response{Content: "false hit"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.mu.Unlock()
+
+	resp, hit, err := cache.LookupBehindMiss(context.Background(), "m", "band probe")
+	if err != nil {
+		t.Fatalf("embedder failure surfaced an error: %v", err)
+	}
+	if hit || resp != nil {
+		t.Fatalf("in-band divergent candidate served (%v,%v); want miss", resp, hit)
+	}
+	if got := emb.count(); got != 2 {
+		t.Fatalf("embedder calls = %d, want 2; the stage-2 verify never ran (band wiring absent)", got)
+	}
+}
+
+// TestSemanticCacheVerifyBandEmbedderFailureMisses pins T3(c): an embedder
+// error on the VERIFY call degrades to a miss (never an error, never a
+// wrong-content serve).
+func TestSemanticCacheVerifyBandEmbedderFailureMisses(t *testing.T) {
+	stored, inBand, _ := bandVecs()
+	emb := &seqEmbedder{embed: func(call int) ([]float32, error) {
+		if call == 0 {
+			return inBand, nil
+		}
+		return nil, errors.New("embedder down mid-verify")
+	}}
+	cache := NewSemanticCache(emb, SemanticCacheConfig{Enabled: true, Threshold: 0.95, VerifyFloor: 0.85})
+	cache.mu.Lock()
+	cache.entries["m band"] = &semanticEntry{vector: stored, response: &Response{Content: "x"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.mu.Unlock()
+
+	resp, hit, err := cache.LookupBehindMiss(context.Background(), "m", "band probe")
+	if err != nil {
+		t.Fatalf("verify embedder failure surfaced: %v", err)
+	}
+	if hit || resp != nil {
+		t.Fatalf("verify failure served (%v,%v); want miss", resp, hit)
+	}
+	if got := emb.count(); got != 2 {
+		t.Fatalf("embedder calls = %d, want 2; the stage-2 verify never ran", got)
+	}
+}
+
+// TestSemanticCacheVerifyFloorZeroDisablesBand pins T3(d): verify_floor=0
+// disables the band entirely - an in-band candidate misses after exactly
+// ONE embed call (byte-identical to the pre-band behavior).
+func TestSemanticCacheVerifyFloorZeroDisablesBand(t *testing.T) {
+	stored, inBand, _ := bandVecs()
+	emb := &seqEmbedder{embed: func(call int) ([]float32, error) {
+		return inBand, nil
+	}}
+	cache := NewSemanticCache(emb, SemanticCacheConfig{Enabled: true, Threshold: 0.95, VerifyFloor: 0})
+	cache.mu.Lock()
+	cache.entries["m band"] = &semanticEntry{vector: stored, response: &Response{Content: "x"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.mu.Unlock()
+
+	_, hit, err := cache.LookupBehindMiss(context.Background(), "m", "band probe")
+	if err != nil {
+		t.Fatalf("LookupBehindMiss errored: %v", err)
+	}
+	if hit {
+		t.Fatal("band-off in-band candidate served; want miss")
+	}
+	if got := emb.count(); got != 1 {
+		t.Fatalf("embedder calls = %d, want exactly 1 (band disabled = no verify re-embed)", got)
+	}
+}
+
+// TestSemanticCacheAboveThresholdNoExtraEmbed pins the checklist invariant:
+// an above-threshold hit never triggers the verify re-embed (one call).
+func TestSemanticCacheAboveThresholdNoExtraEmbed(t *testing.T) {
+	stored := []float32{1, 0, 0, 0, 0, 0, 0, 0}
+	emb := &seqEmbedder{embed: func(call int) ([]float32, error) {
+		return stored, nil // cos 1.0, above threshold
+	}}
+	cache := NewSemanticCache(emb, SemanticCacheConfig{Enabled: true, Threshold: 0.95, VerifyFloor: 0.85})
+	cache.mu.Lock()
+	cache.entries["m band"] = &semanticEntry{vector: stored, response: &Response{Content: "direct"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.mu.Unlock()
+
+	_, hit, err := cache.LookupBehindMiss(context.Background(), "m", "direct probe")
+	if err != nil {
+		t.Fatalf("LookupBehindMiss errored: %v", err)
+	}
+	if !hit {
+		t.Fatal("above-threshold hit missed")
+	}
+	if got := emb.count(); got != 1 {
+		t.Fatalf("embedder calls = %d, want 1; above-threshold path must not re-embed", got)
 	}
 }

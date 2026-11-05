@@ -1193,6 +1193,14 @@ type SemanticCacheConfig struct {
 	// (memory/vector) when configured; if neither resolves, the tier
 	// degrades to exact-only (structurally dead cache, never an error).
 	EmbedderAlias string `json:"embedder_alias" toml:"embedder_alias"`
+	// VerifyFloor is the lower bound of the two-stage verifier band
+	// (wiring-followups-final leaf 03): a candidate scoring in
+	// [verify_floor, threshold) is re-embedded and direct-cosine verified
+	// against its stored embedding before serving; verify failure degrades
+	// to a miss. Default 0.85 when the tier normalizes an unset band;
+	// 0 disables the band entirely (pre-band behavior). Values at/above
+	// threshold are useless and clamp to 0 at the load boundary.
+	VerifyFloor float64 `json:"verify_floor"   toml:"verify_floor"`
 }
 
 // Defaults for llm.cache.semantic (Contract C4 + R0 addendum).
@@ -1207,8 +1215,10 @@ const (
 // defaults at the load boundary (llm-serving-tiers leaf 02): non-positive
 // or >= 1 threshold -> 0.95, non-positive max_entries -> 1024, negative
 // ttl_min -> 0 (the wiring-site mirror of llm.cache.default_ttl_min).
-// Idempotent on valid values; the tier stays disabled unless Enabled is
-// true.
+// Leaf 03 (wiring-followups-final) adds the verify-band clamp: verify_floor
+// at/above the (post-clamp) threshold, or negative, is no band at all ->
+// 0 (disabled). Idempotent on valid values; the tier stays disabled unless
+// Enabled is true.
 func NormalizeSemanticCacheDefaults(sc *SemanticCacheConfig) {
 	if sc.Threshold <= 0 || sc.Threshold >= 1 {
 		sc.Threshold = DefaultSemanticCacheThreshold
@@ -1218,6 +1228,12 @@ func NormalizeSemanticCacheDefaults(sc *SemanticCacheConfig) {
 	}
 	if sc.TTLMin < 0 {
 		sc.TTLMin = 0
+	}
+	// Verify-band clamp (leaf 03) runs AFTER the threshold clamp so the
+	// comparison uses the effective threshold. A negative floor, and a
+	// floor at/above the threshold (an empty band), both disable.
+	if sc.VerifyFloor < 0 || sc.VerifyFloor >= sc.Threshold {
+		sc.VerifyFloor = 0
 	}
 }
 

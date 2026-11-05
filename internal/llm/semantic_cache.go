@@ -80,6 +80,14 @@ type SemanticCacheConfig struct {
 	// daemon may stamp an instruction fingerprint here). Empty means
 	// model-only partitioning.
 	PartitionKey string
+	// VerifyFloor is the lower bound of the two-stage verifier band
+	// (wiring-followups-final leaf 03). A candidate scoring in
+	// [VerifyFloor, Threshold) is re-embedded (stage 2) and direct-cosine
+	// compared against its stored embedding: >= Threshold serves, below
+	// misses. Zero (the default) disables the band = pre-band behavior.
+	// Values >= Threshold are clamped to 0 (a useless band) at
+	// construction; negative values are clamped to 0 as well.
+	VerifyFloor float64
 }
 
 // Defaults for the semantic tier (C4, threshold per the research
@@ -133,6 +141,12 @@ func NewSemanticCache(embedder Embedder, cfg SemanticCacheConfig) *SemanticCache
 	if cfg.TTL == 0 {
 		cfg.TTL = DefaultSemanticTTL
 	}
+	// Two-stage verifier band clamp (leaf 03): negative, or a floor at/above
+	// the serving threshold, is no band at all -- clamp to 0 (disabled) so
+	// the band can never swallow legitimate hits into an empty verify set.
+	if cfg.VerifyFloor < 0 || cfg.VerifyFloor >= cfg.Threshold {
+		cfg.VerifyFloor = 0
+	}
 	return &SemanticCache{
 		embedder: embedder,
 		cfg:      cfg,
@@ -170,12 +184,21 @@ func (s *SemanticCache) LookupBehindMiss(ctx context.Context, modelID, prompt st
 	bestScore := float32(s.cfg.Threshold)
 	var bestKey string
 	var bestResp *Response
+	// Two-stage verifier state (leaf 03): the best in-band candidate's
+	// stored embedding. The stage-2 re-embed happens OUTSIDE the lock
+	// (mutexio) below.
+	verifyFloor := float32(s.cfg.VerifyFloor)
+	var inBandVec []float32
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// Pure in-memory scan under the store lock (no I/O): nearest-neighbor
 	// over a bounded (MaxEntries) set, expiring stale rows as encountered.
+	// Selection prefers the strictly-best scorer; an in-band candidate is
+	// tracked only when NO candidate already cleared the threshold (the
+	// verify pass costs an embed call -- never spent when stage 1 already
+	// decided).
 	for key, e := range s.entries {
 		if e.partition != part || len(e.vector) != len(vec) {
 			continue
@@ -195,13 +218,60 @@ func (s *SemanticCache) LookupBehindMiss(ctx context.Context, modelID, prompt st
 			bestScore = score
 			bestKey = key
 			bestResp = e.response
+		} else if bestResp == nil && verifyFloor > 0 && score >= verifyFloor && score < float32(s.cfg.Threshold) && len(e.vector) == len(vec) {
+			// Stage-1 in-band candidate: remember the embedding for the
+			// stage-2 direct verify. Ties resolve by the map range; the
+			// bound on entries keeps the ambiguity cost-free.
+			inBandVec = e.vector
+			bestKey = key
 		}
 	}
 	if bestResp == nil {
-		return nil, false, nil
+		if inBandVec == nil {
+			return nil, false, nil
+		}
+		// STAGE 2 (leaf 03 two-stage verifier): the re-embed must run
+		// OUTSIDE the lock (mutexio -- no I/O under mutex). verifyBehindBand
+		// unlocks, embeds, re-locks, and re-checks the candidate before
+		// serving (entries may change during the window).
+		return s.verifyBehindBand(ctx, modelID, prompt, part, bestKey)
 	}
 	s.touchLocked(bestKey)
 	return bestResp, true, nil
+}
+
+// verifyBehindBand is the lock-free stage-2 window of the two-stage
+// verifier: re-embeds the query (same embedder, same embedded text),
+// direct-cosines it against the candidate's stored embedding, and serves
+// only when the direct score clears the threshold. ANY failure shape
+// (embedder error, empty vector, candidate evicted/expired mid-verify)
+// degrades to a miss -- never an error, never wrong content, never a
+// parked turn.
+func (s *SemanticCache) verifyBehindBand(ctx context.Context, modelID, prompt, part string, key string) (*Response, bool, error) {
+	s.mu.Unlock()
+	verifyVec, err := s.embedder.Embed(ctx, semanticPromptText(modelID, prompt))
+	s.mu.Lock()
+	if err != nil || len(verifyVec) == 0 {
+		return nil, false, nil
+	}
+	e, ok := s.entries[key]
+	if !ok || e.partition != part {
+		return nil, false, nil
+	}
+	now := time.Now()
+	if now.After(e.expiresAt) {
+		s.removeLocked(key)
+		return nil, false, nil
+	}
+	if e.response == nil || e.response.HasToolCalls() {
+		return nil, false, nil
+	}
+	// Direct cosine against the STORED embedding, no cache traversal.
+	if cosineSimilarity(verifyVec, e.vector) < float32(s.cfg.Threshold) {
+		return nil, false, nil
+	}
+	s.touchLocked(key)
+	return e.response, true, nil
 }
 
 // Store records the prompt vector + response after a LIVE exact-miss
