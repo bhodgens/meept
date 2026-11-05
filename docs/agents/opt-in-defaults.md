@@ -185,3 +185,33 @@ default remains false until a product owner accepts this proposal.
   stops cleanly on cancel.
 - **Decision owner:** meept maintainers (product). Status: PROPOSED,
   2026-10-31, tree 02 leaf 02.
+
+## As-needed tool exposure is opt-in (default OFF)
+
+`[agent.tools] dynamic_tool_exposure` (token-efficiency branch 03) is FALSE
+by default. When off, tool definitions are byte-identical legacy
+(`full`/`indexed` only) - the as-needed predicted/search exposure engine
+(`tool_exposure` knob, `internal/agent/tool_exposure.go`) is entirely inert.
+
+- **What flips:** `dynamic_tool_exposure = true` enables the predicted
+  (default) / search exposure modes. The mode knob `tool_exposure`
+  (full | indexed | predicted | search) and `predicted_budget` (N, default
+  25) only take effect while the flag is on; with it off they silently
+  downgrade to indexed legacy (one warn).
+- **Capability gate (hard rule):** `search` mode is additionally gated on
+  the active model being frontier-class (the `"frontier"` capability tag,
+  `llm.CapFrontier`). A non-frontier active model is downgraded to
+  `predicted` with ONE warn line naming the model; unknown models are
+  treated as non-frontier (fail-safe).
+- **The 5.3 warning (verbatim, required in the config template, this doc,
+  and the AGENT.md frontmatter doc):** search mode requires a
+  frontier-class model. Do NOT enable it for small/local models - they fail
+  to use the search/view round-trip reliably (live-smoke evidence:
+  always-full promotions 2026-09-07/09-12,
+  `internal/config/schema.go:1959-1971`). The daemon downgrades search to
+  predicted automatically for non-frontier models.
+- **Rollback:** set `dynamic_tool_exposure = false` - one config key,
+  no data migration, behavior returns to byte-identical legacy.
+
+User-facing how-to: `docs/workflows/dynamic-tools.md`. Design contract:
+`docs/research/dynamic-tools-design.md`.
