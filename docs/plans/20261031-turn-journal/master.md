@@ -332,11 +332,11 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| R0-research.md | PENDING | 0 | |
-| 01-journal-schema.md | PENDING | 0 | |
-| 02-loop-integration.md | PENDING | 0 | |
-| 03-rehydrate-interlock.md | PENDING | 0 | |
-| 04-e2e-turn-journal.md | PENDING | 0 | |
+| R0-research.md | COMPLETE | 1 | c5ef67e9 (findings doc docs/research/turn-journal-findings.md) |
+| 01-journal-schema.md | COMPLETE | 1 | e3b2130b (internal/agent/turnjournal journal.go/store.go/store_sqlite.go + tests; C5 flag at internal/config/schema.go:857, default false) |
+| 02-loop-integration.md | COMPLETE | 1 | f3460f33 (writer.go; PlanResume seam in replay.go; components.go:2977 flag-gated store; agent.NewTurnJournalHooks) |
+| 03-rehydrate-interlock.md | COMPLETE | 1 | fc89b3a6 (rehydrate.go; daemon.go rehydrateTurnJournal, original-job-id requeue interlock) |
+| 04-e2e-turn-journal.md | COMPLETE | 1 | e7a966d4 + fix 98c85b11 (e2e/suites/turn-journal; manifest path_map entry line 432; 4/4 scenarios incl. kill -9) |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -371,13 +371,13 @@ COMPLETE):
 
 | # | Feature (from plan) | Source (leaf/spec section) | Unit tests | E2E tests | Status |
 |---|---------------------|----------------------------|-----------|-----------|--------|
-| F1 | journal schema + store CRUD (C1) | 01-journal-schema.md T1-T3 | turnjournal package tests | e2e kill -9 resume test | PENDING |
-| F2 | flag off = legacy behaviour (C5) | 01-journal-schema.md T5 | config default-false test | e2e flag-off scenario | PENDING |
-| F3 | writer at step boundaries, best-effort (C2) | 02-loop-integration.md T1-T3 | loop seam tests | e2e kill -9 resume test | PENDING |
-| F4 | skipped-step restore without LLM re-invocation (C4) | 02-loop-integration.md T4 | seam unit test | e2e call-counter assertion | PENDING |
-| F5 | boot rehydrate after claim reset (C3) | 03-rehydrate-interlock.md T1-T2 | rehydrate unit test | e2e restart test | PENDING |
-| F6 | quota parks on replay (R4) | 02-loop-integration.md T4 | quota park test | e2e quota-park scenario | PENDING |
-| F7 | no duplicate side effects on resume (R1/R6) | 03 T3 + 04 T3 | dedup seam test | e2e duplicate-effect assertion | PENDING |
+| F1 | journal schema + store CRUD (C1) | 01-journal-schema.md T1-T3 | turnjournal package tests | e2e kill -9 resume test | VALIDATED |
+| F2 | flag off = legacy behaviour (C5) | 01-journal-schema.md T5 | config default-false test | e2e flag-off scenario | VALIDATED |
+| F3 | writer at step boundaries, best-effort (C2) | 02-loop-integration.md T1-T3 | loop seam tests | e2e kill -9 resume test | VALIDATED |
+| F4 | skipped-step restore without LLM re-invocation (C4) | 02-loop-integration.md T4 | seam unit test | e2e call-counter assertion | VALIDATED |
+| F5 | boot rehydrate after claim reset (C3) | 03-rehydrate-interlock.md T1-T2 | rehydrate unit test | e2e restart test | VALIDATED |
+| F6 | quota parks on replay (R4) | 02-loop-integration.md T4 | quota park test | e2e quota-park scenario | VALIDATED |
+| F7 | no duplicate side effects on resume (R1/R6) | 03 T3 + 04 T3 | dedup seam test | e2e duplicate-effect assertion | VALIDATED |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 
