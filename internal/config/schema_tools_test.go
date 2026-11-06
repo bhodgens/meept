@@ -68,6 +68,9 @@ func TestDefaultAlwaysFullTools(t *testing.T) {
 		"shell", "file_read", "file_edit", "file_write",
 		"memory_search", "memory_store", "web_fetch", "web_search",
 		"platform_status", "tool_view",
+		// tool_search: the as-needed discoverer is always-full — a stubbed
+		// discoverer is undiscoverable (branch 03 leaf 01, design §1/§6).
+		"tool_search",
 		"transcript_fetch",
 		"json_extract",
 	}

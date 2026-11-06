@@ -217,6 +217,64 @@ func TestGenerate_BenchmarkSmoke(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// TraceID / SpanID (20261031-llm-hop-tracing leaf 01)
+// ---------------------------------------------------------------------------
+
+// traceIDHexRe / spanIDHexRe pin the OpenTelemetry wire shapes: 32 and 16
+// lowercase hex chars respectively.
+var (
+	traceIDHexRe = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	spanIDHexRe  = regexp.MustCompile(`^[0-9a-f]{16}$`)
+)
+
+// TestTraceID_Shape pins C1: TraceID returns exactly 32 lowercase hex chars
+// and successive calls differ (16 random bytes, crypto/rand).
+func TestTraceID_Shape(t *testing.T) {
+	seen := make(map[string]struct{}, 1000)
+	for range 1000 {
+		got := TraceID()
+		if len(got) != 32 {
+			t.Fatalf("TraceID() = %q (len %d); want 32 chars", got, len(got))
+		}
+		if !traceIDHexRe.MatchString(got) {
+			t.Fatalf("TraceID() = %q; want 32 lowercase hex chars", got)
+		}
+		if _, dup := seen[got]; dup {
+			t.Fatalf("TraceID() collision across calls: %q", got)
+		}
+		seen[got] = struct{}{}
+	}
+}
+
+// TestSpanID_Shape pins C1: SpanID returns exactly 16 lowercase hex chars
+// and successive calls differ (8 random bytes, crypto/rand).
+func TestSpanID_Shape(t *testing.T) {
+	seen := make(map[string]struct{}, 1000)
+	for range 1000 {
+		got := SpanID()
+		if len(got) != 16 {
+			t.Fatalf("SpanID() = %q (len %d); want 16 chars", got, len(got))
+		}
+		if !spanIDHexRe.MatchString(got) {
+			t.Fatalf("SpanID() = %q; want 16 lowercase hex chars", got)
+		}
+		if _, dup := seen[got]; dup {
+			t.Fatalf("SpanID() collision across calls: %q", got)
+		}
+		seen[got] = struct{}{}
+	}
+}
+
+// BenchmarkTraceID mirrors BenchmarkGenerate: crypto/rand reads should
+// sustain far more than 1k ops/sec.
+func BenchmarkTraceID(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		_ = TraceID()
+	}
+}
+
 // BenchmarkGenerate is the canonical benchmark. Run with:
 //
 //	go test -bench=. ./pkg/id/...

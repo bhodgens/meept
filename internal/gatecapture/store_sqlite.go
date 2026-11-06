@@ -152,7 +152,8 @@ func (g *gateDB) list(_ context.Context, opts ListOptions) ([]CommandGateRecord,
 		args = append(args, opts.Since.UTC().Format(time.RFC3339Nano))
 	}
 	if len(conds) > 0 {
-		q += " WHERE " + strings.Join(conds, " AND ")
+		// #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
+		q += " WHERE " + strings.Join(conds, " AND ") // #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
 	}
 	q += " ORDER BY ts DESC, id DESC"
 	if opts.Limit > 0 {

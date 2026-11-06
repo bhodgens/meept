@@ -48,8 +48,13 @@ func TestCollectorWorkerSubscription(t *testing.T) {
 	t.Parallel()
 
 	c, store, messageBus := newTestCollectorAndBus(t)
-	defer c.Shutdown()
-	defer func() { _ = store.Close() }()
+	// Stop the subscriber before closing the store. The reverse order
+	// closes the DB under an in-flight Record and logs
+	// "sql: database is closed".
+	t.Cleanup(func() {
+		c.Shutdown()
+		_ = store.Close()
+	})
 
 	events := []struct {
 		topic  string
@@ -71,8 +76,38 @@ func TestCollectorWorkerSubscription(t *testing.T) {
 		messageBus.Publish(e.topic, msg)
 	}
 
-	// Give the subscriber goroutine a moment to drain the channel.
-	time.Sleep(100 * time.Millisecond)
+	// Each event does two SQLite writes. A fixed 100ms sleep drops the
+	// last events on a loaded CI runner (started and completed land,
+	// stopped and state_changed do not). Poll until the rows exist.
+	want := map[string]float64{
+		"started\x00worker-pool":        2,
+		"completed\x00chat-handler":     1,
+		"stopped\x00worker-pool":        1,
+		"state_changed\x00chat-handler": 1,
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	var counts map[string]float64
+	for {
+		counts = workerEventCounts(t, store)
+		if workerCountsMatch(counts, want) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for key, wantVal := range want {
+		eventType, source, _ := strings.Cut(key, "\x00")
+		if counts[key] != wantVal {
+			t.Errorf("event_type=%s source=%s: got %v, want %v",
+				eventType, source, counts[key], wantVal)
+		}
+	}
+}
+
+// workerEventCounts reads worker.events_total rows keyed by event_type
+// and source. Exact tag fields, not a substring match: "started" must
+// not match a later tag that merely contains those letters.
+func workerEventCounts(t *testing.T, store *Store) map[string]float64 {
+	t.Helper()
 
 	type row struct {
 		Name  string  `db:"metric_name"`
@@ -95,33 +130,25 @@ func TestCollectorWorkerSubscription(t *testing.T) {
 		if err := rows.StructScan(&r); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
-		// Build a composite key from tags JSON for matching.
-		counts[r.Tags] += r.Value
+		var tags map[string]string
+		if err := json.Unmarshal([]byte(r.Tags), &tags); err != nil {
+			t.Fatalf("tags json: %v (%s)", err, r.Tags)
+		}
+		counts[tags["event_type"]+"\x00"+tags["source"]] += r.Value
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	return counts
+}
 
-	wantCases := []struct {
-		eventType string
-		source    string
-		want      float64
-	}{
-		{"started", "worker-pool", 2},
-		{"completed", "chat-handler", 1},
-		{"stopped", "worker-pool", 1},
-		{"state_changed", "chat-handler", 1},
-	}
-	for _, tc := range wantCases {
-		var found float64
-		for tagKey, val := range counts {
-			if strings.Contains(tagKey, tc.eventType) && strings.Contains(tagKey, tc.source) {
-				found = val
-				break
-			}
-		}
-		if found != tc.want {
-			t.Errorf("event_type=%s source=%s: got %v, want %v",
-				tc.eventType, tc.source, found, tc.want)
+func workerCountsMatch(got, want map[string]float64) bool {
+	for key, wantVal := range want {
+		if got[key] != wantVal {
+			return false
 		}
 	}
+	return true
 }
 
 // TestRecordWorkerMetricsMalformedPayloadDoesNotPanic verifies defensive

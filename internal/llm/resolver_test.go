@@ -317,23 +317,21 @@ func TestResolver_ExponentialBackoff(t *testing.T) {
 	// the same struct (reading it lazily after call 2 sees call 2's values).
 	resolver.RecordAliasFailure("coder", nil, nil)
 	deadline1 := resolver.health["coder"].CooldownUntil
-	setAt1 := time.Now()
 
 	// Record second failure
 	resolver.RecordAliasFailure("coder", nil, nil)
 	deadline2 := resolver.health["coder"].CooldownUntil
-	setAt2 := time.Now()
 
-	// Compare ABSOLUTE deadline spans, not time.Until: time.Until decays
-	// as the wall clock advances between the two calls, so a scheduler
-	// stall between them (CI) made the second window look smaller than
-	// 2x the first.
-	cooldown1 := deadline1.Sub(setAt1)
-	cooldown2 := deadline2.Sub(setAt2)
-
-	// Cooldown should roughly double (30s -> 60s)
-	if cooldown2 < cooldown1+cooldown1 {
-		t.Errorf("Expected exponential backoff: cooldown1=%v, cooldown2=%v", cooldown1, cooldown2)
+	// Compare the two deadlines, not a time.Now() taken after the write.
+	// The deadlines are t1+base and t2+2*base, so the gap is
+	// base+(t2-t1) and is never shorter than base. A post-write sample
+	// shrinks each window by the return gap. Under -race that gap is not
+	// symmetric, and a strict 2x check fails by microseconds
+	// (CI: cooldown1=29.999996473s, cooldown2=59.999991975s).
+	base := resolver.aliases["coder"].Timeout
+	gap := deadline2.Sub(deadline1)
+	if gap < base {
+		t.Errorf("expected exponential backoff: deadline gap=%v, base=%v", gap, base)
 	}
 }
 
