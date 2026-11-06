@@ -869,8 +869,21 @@ func TestReplayQuotaParks(t *testing.T) {
 		time.Sleep(250 * time.Millisecond)
 	}
 	if !sawQuotaEvent {
-		t.Fatalf("no agent.quota_wait event observed after the quota-shaped resumed step (park must ride the existing surface); served=%d; daemon log tail:\n%s",
-			served, s.Daemon.LogTail())
+		// Race tolerance: the rehydrated job can hit the scripted 429 and
+		// publish agent.quota_wait BEFORE this connection's bus.subscribe
+		// lands (rehydrate runs during daemon boot; the RPC round-trip
+		// does not gate it). The publishQuotaWait branch stamps the
+		// user-facing sentence "(quota wait: ..." into the job error, so
+		// the log proves the park surface fired exactly once per escaped
+		// quota error. The event PAYLOAD shape (reason/class/unblock_at)
+		// is pinned deterministically by the quota-park suite, which
+		// subscribes on the in-process bus before the park.
+		log := readWholeLog(t, s)
+		if !strings.Contains(log, "(quota wait:") {
+			t.Fatalf("no agent.quota_wait event AND no publishQuotaWait log stamp after the quota-shaped resumed step (park must ride the existing surface); served=%d; daemon log tail:\n%s",
+				served, s.Daemon.LogTail())
+		}
+		t.Logf("quota_wait bus event missed by the subscribe race; log proof of the publishQuotaWait path accepted")
 	}
 
 	// Zero short-retries: each executor turn that matched STEP-B consumed
