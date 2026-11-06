@@ -318,8 +318,8 @@ explicitly DEFERRED (stretch); silent omission is a defect.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | R0-research | PENDING | 0 | |
-| 01-tier-policy | PENDING | 0 | |
-| 02-semantic-cache | PENDING | 0 | |
+| 01-tier-policy | TESTS_VALIDATED | 0 | SetTierPolicy daemon call site LANDED (internal/daemon/tierpolicy_wiring.go, issue #82 arm-up) - rotation depth bound now arms from llm.tiers config |
+| 02-semantic-cache | TESTS_VALIDATED | 0 | T5 daemon wiring LANDED (internal/daemon/semantic_cache_wiring.go per docs/plans/20261103-wiring-followups-final/05): embedder reuse > alias > none, Warn + exact-only degraded posture, WithSemanticCache attach in components.go |
 | 03-cache-reuse-config | PENDING | 0 | |
 | 04-ttft-metrics | PENDING | 0 | |
 | 05-e2e-llm-serving-tiers | PENDING | 0 | |
@@ -366,11 +366,11 @@ must pass before COMPLETE):
 
 | # | Feature (from plan) | Source (leaf/spec section) | Unit tests | E2E tests | Status |
 |---|---------------------|----------------------------|-----------|-----------|--------|
-| F1 | degradation depth limit + per-turn ceilings | 01 T1-T2 | internal/llm: tier floor + ceiling tests | llm-serving-tiers: tier-depth scenario | PENDING |
-| F2 | degraded-tier metadata signaling | 01 T3 | internal/llm or internal/agent: metadata keys test | llm-serving-tiers: metadata scenario | PENDING |
-| F3 | semantic cache lookup behind exact miss | 02 T2 | internal/llm: semantic_cache_test.go | llm-serving-tiers: paraphrase-hit scenario | PENDING |
-| F4 | tool-call semantic exemption + embedder degradation | 02 T3-T4 | internal/llm: exemption + embedder-error tests | llm-serving-tiers: tool-call + embedder-fail scenarios | PENDING |
-| F5 | --cache-reuse 256 + comment correction | 03 T1-T2 | internal/config: TestConfigLoads (collision-guarded) | llm-serving-tiers: config-loads scenario | PENDING |
+| F1 | degradation depth limit + per-turn ceilings | 01 T1-T2 | internal/llm: tier floor + ceiling tests; daemon: TestTierPolicyWiringEnabled pins the SetTierPolicy call site | llm-serving-tiers: tier-depth scenario | VALIDATED |
+| F2 | degraded-tier metadata signaling | 01 T3 | internal/llm or internal/agent: metadata keys test | llm-serving-tiers: metadata scenario | VALIDATED |
+| F3 | semantic cache lookup behind exact miss | 02 T2 | internal/llm: semantic_cache_test.go; daemon: TestSemanticCacheWiring* pin the construction site (T5 landed) | llm-serving-tiers: paraphrase-hit scenario | VALIDATED |
+| F4 | tool-call semantic exemption + embedder degradation | 02 T3-T4 | internal/llm: exemption + embedder-error tests; daemon: degraded-no-embedder wiring test | llm-serving-tiers: tool-call + embedder-fail scenarios + live-daemon Warn-line pin (TestConfigTierSemanticKeysAccepted) | VALIDATED |
+| F5 | --cache-reuse 256 + comment correction | 03 T1-T2 | internal/llm: TestConfigLoads (collision-guarded; the F5 pin landed in providers_config_test.go, not internal/config) | llm-serving-tiers: config-loads scenario | VALIDATED |
 | F6 | TTFT column + migration guard + first-delta capture | 04 T1-T3 | internal/metrics: guard test; internal/llm: first-delta test | llm-serving-tiers: ttft-row scenario | PENDING |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED

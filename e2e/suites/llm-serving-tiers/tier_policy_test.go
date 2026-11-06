@@ -6,12 +6,14 @@
 // quota-blocked member consumes zero depth) holds.
 //
 // Route (documented deviation): the daemon-side SetTierPolicy call site
-// (components.go consuming llm.tiers) is not wired yet, so a chat turn
-// through the harness daemon cannot arm the policy. The scenarios drive
-// the REAL exported seam the daemon wiring will use - llm.NewProviderManager
-// over REAL OpenAI-compatible clients against real stub endpoints, with
-// llm.SetTierPolicy - the context-memory-engine in-process pattern. The
-// live-daemon config-acceptance pin lives in config_ttft_test.go.
+// now exists (applyTierPolicyToProviderManager in internal/daemon/
+// tierpolicy_wiring.go, pinned in-package by TestTierPolicyWiring*), but a
+// chat turn through the harness daemon still cannot reach the floor lane
+// end-to-end, so these scenarios keep driving the REAL exported seam the
+// daemon wiring uses - llm.NewProviderManager over REAL OpenAI-compatible
+// clients against real stub endpoints, with llm.SetTierPolicy - the
+// context-memory-engine in-process pattern. The live-daemon
+// config-acceptance pin lives in config_ttft_test.go.
 package llmservingtiers
 
 import (

@@ -1101,6 +1101,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// out-of-tree embedders).
 
 	// Create LLM client with budget tracking
+	// Semantic cache tier wiring (llm-serving-tiers leaf 02 T5,
+	// wiring-followups-final leaf 05): the ONE shared embedding provider
+	// is hoisted ahead of the client build so the semantic cache tier and
+	// the memory-stack blocks below reuse the SAME handle - never a
+	// duplicate vector.NewProviderFromConfig construction.
+	var embedder vector.Provider
+	if cfg.Memory.Embeddings.Enabled {
+		emb, embErr := vector.NewProviderFromConfig(cfg.Memory.Embeddings)
+		if embErr != nil {
+			logger.Warn("Failed to create embedding provider, vector search disabled", "error", embErr)
+		} else {
+			embedder = emb
+		}
+	}
 	llmCfg := createLLMConfig(c.ModelsConfig, logger)
 	var budgetTracker *llm.Budget
 	// Decision-model irreversibility gate (decision-model leaf 03). Built in
@@ -1187,6 +1201,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 		if tokenCache != nil {
 			clientOpts = append(clientOpts, llm.WithTokenCache(tokenCache))
+		}
+		// Semantic cache tier (llm-serving-tiers leaf 02 T5 + wiring-
+		// followups-final leaf 05): nil (disabled default or degraded
+		// embedder resolution) leaves clientOpts byte-identical -
+		// WithSemanticCache ignores a nil cache by contract.
+		if semanticCache := buildSemanticCacheTier(cfg, embedder, logger); semanticCache != nil {
+			clientOpts = append(clientOpts, llm.WithSemanticCache(semanticCache))
 		}
 		c.LLMClient = llm.NewClient(llmCfg, clientOpts...)
 
@@ -1726,6 +1747,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// c.LLMResolver is constructed earlier in this function, so the
 			// wire is always non-nil here.
 			pm.SetStickyEndpointResolver(c.LLMResolver)
+			// Serving-tier policy (llm-serving-tiers leaf 01 T5 arm-up,
+			// issue #82): map llm.tiers onto llm.TierPolicy and install
+			// via SetTierPolicy. Disabled default installs nil - the
+			// rotation stays unbounded with zero metadata change.
+			applyTierPolicyToProviderManager(pm, cfg)
 			c.ProviderManager = pm
 
 			// Dynamically register OAuth-backed LLM providers that have
@@ -2556,13 +2582,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create vector shard manager for semantic search
 	var vectorSearcher memory.VectorSearcher
-	var embedder vector.Provider
 	if cfg.Memory.Embeddings.Enabled {
-		// Create embedding provider
-		var err error
-		embedder, err = vector.NewProviderFromConfig(cfg.Memory.Embeddings)
-		if err != nil {
-			logger.Warn("Failed to create embedding provider, vector search disabled", "error", err)
+		// Create embedding provider: hoisted above the LLM client build
+		// for the semantic cache tier (wiring-followups-final leaf 05)
+		// and reused here - a duplicate construction is forbidden (the
+		// ONE-shared-provider constraint). embedder == nil means
+		// construction failed and was already warned at the hoist site.
+		if embedder == nil {
+			logger.Warn("Embedding provider unavailable, vector search disabled")
 		} else {
 			// Parse shard types from config
 			var shardTypes []vector.ShardType
