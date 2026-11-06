@@ -52,5 +52,5 @@ Areas examined and found sound (within time-box; no finding filed):
   the toolprov provider path (SetGitHubProvider + toolprov.RegisterAll;
   ToolFactories documented as the mirrored construction seam; the removed
   RegisterGitHubTools is now named as removed, matching the register.go tombstone).
-- F-2 OPEN (fakellm recall arm precedence) — parent fixing next.
+- F-2 CLOSED: postToolTextExplicit flag implements the claimed precedence (SetPostToolText wins over the recall arm; cleared in Reset). Suites green: continuity-regressions, refusal, memory-defaults, memory-scoping.
 - F-3 OPEN (BuildIndexWithCancel dead seam) — parent fixing next.
