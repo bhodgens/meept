@@ -76,3 +76,16 @@
   (unit x3 + filter end-to-end; mutation-proven RED: 9 tools under a
   12-cap = the exact displacement symptom).
 - F-4 OPEN (needs product decision on origin: user no-clobber posture).
+- F-4 CLOSED: origin no-clobber ENFORCED at the central choke point
+  (Writer.WriteSkillWithOrigin). A skill whose on-disk frontmatter
+  declares `origin: user` refuses overwrite by any other funnel
+  (agent/evolver/review/unstamped): returns ErrUserClobber and mirrors
+  the candidate to SKILL.md.new for a human merge. User-class writes are
+  the re-authorization and always pass. Legacy/unstamped files stay
+  overwritable (fail-soft; only a proven user stamp is protected).
+  Indented nested origin keys never count (top-level only).
+  Pins: origin_guard_test.go (8 subtests + skillFileOrigin table;
+  mutation-proven RED with the guard disabled). Affected e2e suites
+  green: skills-refresh-origin 19.5s, skills-discovery 25.7s,
+  continuity-regressions 30.4s. Doc: docs/workflows/skills.md (Origin
+  no-clobber bullet).

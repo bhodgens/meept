@@ -250,6 +250,8 @@ func (w *Writer) WriteSkillWithOrigin(name string, content string, o Origin) err
 		return fmt.Errorf("writer: skill name is required")
 	}
 
+	targetPath := w.skillPath(name)
+
 	if o != OriginUnknown {
 		stamped, err := stampSkillOrigin(name, content, o)
 		if err != nil {
@@ -258,7 +260,29 @@ func (w *Writer) WriteSkillWithOrigin(name string, content string, o Origin) err
 		content = stamped
 	}
 
-	targetPath := w.skillPath(name)
+	// Origin no-clobber guard (bughunt config-tools F-4): a skill whose
+	// on-disk frontmatter declares `origin: user` is protected from every
+	// other funnel (agent, evolver, review, unstamped). Provenance is no
+	// longer write-only: refresh/evolver cannot silently wipe a user
+	// edit. The refused candidate lands beside the real file as
+	// SKILL.md.new (the install-sync <file>.new convention) so a human
+	// can merge it, and the call returns ErrUserClobber so every caller
+	// (evolver report, skill_patch/skill_create tools) surfaces the
+	// refusal instead of a silent overwrite. A user-stamped write is
+	// always allowed: that IS the explicit re-authorization. Unreadable
+	// or absent files fall through (legacy posture: only a proven
+	// user-stamped file is protected).
+	if o != OriginUser {
+		if existing, err := os.ReadFile(targetPath); err == nil && skillFileOrigin(existing) == OriginUser {
+			sidecar := targetPath + ".new"
+			if werr := os.WriteFile(sidecar, []byte(content), 0o644); werr != nil {
+				w.logger.Warn("origin guard: sidecar write failed; refusing overwrite anyway",
+					"name", name, "sidecar", sidecar, "error", werr)
+			}
+			return fmt.Errorf("%w: skill %q declares origin: user; candidate written to %s",
+				ErrUserClobber, name, sidecar)
+		}
+	}
 
 	// Snapshot existing content before overwriting, if a versioner is wired
 	// and the skill already exists on disk.

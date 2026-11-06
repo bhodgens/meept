@@ -26,6 +26,14 @@ When multiple skills have the same name, the highest-priority version wins.
 - **No-clobber**: an existing skill directory in `~/.meept/skills/` is
   never overwritten. `make install` prints `skipping <name> (exists)` for
   those and `installed skill <name>` for fresh installs.
+- **Origin no-clobber (enforced)**: every funnel write stamps its
+  provenance into SKILL.md frontmatter (`origin: user|agent|evolver|review`).
+  A file declaring `origin: user` refuses overwrite by any OTHER funnel:
+  the write returns `ErrUserClobber` and the candidate lands as
+  `SKILL.md.new` beside the real file for a human merge (the same sidecar
+  convention as `make install`). A user-class write is always allowed —
+  it is the explicit re-authorization. Legacy/unstamped files stay
+  overwritable.
 - **User edits shadow bundled**: discovery resolves `~/.meept/skills/`
   above the bundled source (and project-local `.meept/skills/` above
   both). Editing or replacing an installed bundled skill is safe —
