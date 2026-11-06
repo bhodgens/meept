@@ -1,11 +1,3 @@
-//go:build daemon_jevgate_pending
-// above: build-tagged 2026-11-05 (agent-groups orchestrator, integration pass):
-// this gate references Components.JevScoreGate, which its own wave (26a7764b)
-// never landed - it has compile-blocked the WHOLE daemon test package for
-// every session since. Same remedy as the intake gate (0943902b precedent):
-// tag it out until the jev wave lands the field + wiring. Remove the tag,
-// do not delete, when JevScoreGate exists.
-
 package daemon
 
 import (

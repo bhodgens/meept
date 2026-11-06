@@ -298,13 +298,25 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| R0-research | PENDING | 0 | |
-| 01-scorer-gate | PENDING | 0 | |
-| 02-capture-export | PENDING | 0 | |
-| 03-eval | PENDING | 0 | |
+| R0-research | COMPLETE | 1 | docs/research/jev-command-gate-calibration.md (c5ef67e9); cited by 03 threshold band |
+| 01-scorer-gate | COMPLETE | 1 | 14b21b5e (jevgate pkg + ScoreCommand); daemon wiring was NOT in that wave - see closeout |
+| 02-capture-export | COMPLETE | 1 | c1a75549 (gatecapture store, DPO export, contract hash 691f5fdf) |
+| 03-eval | COMPLETE | 1 | 989e4ea5 (teacher sweep, frozen threshold 0.90, selftest green) |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
+
+**Closeout (2026-11-05, issue #87):** the missing piece this tree carried was
+the DAEMON WIRING: commit 26a7764b (wiring-gap leaf 04) claimed construction +
+registration but never touched internal/daemon/components.go (audit-verified:
+`git log -S JevScoreGate -- internal/daemon/components.go` empty; the
+jevgate/gate.go surface was listed unreachable in the deadcode baseline).
+Landed now in <WIRING_SHA>: Components.JevScoreGate + ScoreGateHook
+construction gated on security.jev_command_gate.enabled +
+RegisterBeforeToolCall("jev-score-gate", HookPriorityHigh) + untagged
+daemon_jevgate_pending (TestJevGateWiring / TestJevGateRegistrationNilWhenDisabled
+green against the real build) + deadcode regen (10 jevgate/gate.go entries
+cleared).
 
 ## Integration Test Plan
 
@@ -331,15 +343,20 @@ review; delta protocol: the LESSER artifact updates to the GREATER):
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|-----------|-----------|--------|
-| F1 | ScoreCommand result shape + degraded class | 01 T1 | n/a (e2e policy) | jev-command-gate suite, scorer cases | PENDING |
-| F2 | Byte-stable serialization | 01 T2 | n/a | suite asserts stable bytes | PENDING |
-| F3 | Fail-closed threshold gate | 01 T4-T6 | n/a | suite fail-closed cases | PENDING |
-| F4 | Two-chokepoint capture | 02 T1-T3 | n/a | suite capture cases | PENDING |
-| F5 | DPO export + near-miss pairs | 02 T4-T5 | n/a | suite export case | PENDING |
-| F6 | Contract file + hash | 02 T6, 03 T4 | n/a | suite hash check | PENDING |
-| F7 | Teacher gate + replay ruler | 03 T1-T3 | n/a (python) | make selftest target | PENDING |
+| F1 | ScoreCommand result shape + degraded class | 01 T1 | n/a (e2e policy) | jev-command-gate suite, scorer cases | VALIDATED (14b21b5e, 41efd41c) |
+| F2 | Byte-stable serialization | 01 T2 | n/a | suite asserts stable bytes | VALIDATED (14b21b5e) |
+| F3 | Fail-closed threshold gate | 01 T4-T6 | n/a | suite fail-closed cases | VALIDATED (14b21b5e; daemon wiring + wiring-failure e2e landed <WIRING_SHA>, issue #87) |
+| F4 | Two-chokepoint capture | 02 T1-T3 | n/a | suite capture cases | VALIDATED (c1a75549) |
+| F5 | DPO export + near-miss pairs | 02 T4-T5 | n/a | suite export case | VALIDATED (c1a75549) |
+| F6 | Contract file + hash | 02 T6, 03 T4 | n/a | suite hash check | VALIDATED (989e4ea5; freeze --check green) |
+| F7 | Teacher gate + replay ruler | 03 T1-T3 | n/a (python) | make selftest target | VALIDATED (989e4ea5; `make jev-gate-eval-selftest` green 2026-11-05) |
 
-Delta log: (none yet)
+Delta log: 2026-11-05 issue #87 - the F3 daemon-wiring half was false-complete
+at 26a7764b (never touched components.go; jevgate/gate.go dead in the deadcode
+baseline; wiring test build-tagged daemon_jevgate_pending). Landed + re-
+validated at <WIRING_SHA> (construction gated on security.jev_command_gate.enabled,
+RegisterBeforeToolCall("jev-score-gate", HookPriorityHigh), tagged test untagged
+and green, e2e jev-command-gate suite green, deadcode baseline regenerated).
 
 ## Frozen Documents
 

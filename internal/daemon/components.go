@@ -48,6 +48,7 @@ import (
 	"github.com/caimlas/meept/internal/githubsvc"
 	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/intake"
+	"github.com/caimlas/meept/internal/jevgate"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
@@ -243,6 +244,16 @@ type Components struct {
 	// permission table) AND the store opened; capture is strictly additive
 	// and never blocks a gate or confirmation flow.
 	GateCapture *gateCaptureStore
+	// JevScoreGate is the graded command-safety score gate
+	// (internal/jevgate, docs/plans/20261031-jev-command-gate +
+	// docs/plans/20261103-wiring-gap-remediation/04-jev-gate-wiring.md):
+	// a fail-closed BeforeToolCallHook on shell calls behind the opt-in
+	// [security.jev_command_gate] knob. Nil unless enabled=true AND the LLM
+	// client/resolver built (degraded posture, never a boot-fail); the
+	// registration block below treats nil as "unregistered" (zero
+	// behavior). Issue #87: this field + construction + registration are
+	// the wiring the leaf wave's commit message claimed but never landed.
+	JevScoreGate *jevgate.ScoreGateHook
 	// EffectsReconciler re-drives claimed/receipted effects on startup and
 	// parked-turn resume. Nil when the ledger is nil (no ledger, no
 	// reconcile -- nothing pending can exist).
@@ -1127,6 +1138,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// capture disabled, every consumer nil-guards. Open failure is logged
 	// and degrades to no capture - never blocks boot.
 	var gateCap *gateCaptureStore
+	// JeV command-score gate (jev-command-gate leaf 01 T5 + wiring-gap
+	// leaf 04, issue #87). Built in the resolver block below ONLY when
+	// [security.jev_command_gate].enabled; registered onto the hook
+	// registry at the hook-wiring block. Nil = feature off (the opt-in
+	// default) -- construction and registration both no-op.
+	var jevScoreGate *jevgate.ScoreGateHook
 	// Shared decision-model client (acp-permission-decision leaf 03,
 	// Contract C): ONE *llm.DecisionClient instance serves both consumers --
 	// the tool-call gate hook above and the ACP permission lane below --
@@ -1313,7 +1330,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// that opted out. Registration onto the hook registry happens
 			// below at the hook-wiring block.
 			acpWantsDecision := cfg.ACP.Enabled && (cfg.ACP.PermissionMode == "decision" || cfg.ACP.ResolveRank)
-			if providersCfg.DecisionGateEnabled || acpWantsDecision {
+			jevGateEnabled := cfg.Security.JevCommandGate.Enabled
+			if providersCfg.DecisionGateEnabled || acpWantsDecision || jevGateEnabled {
 				decisionClient = llm.NewDecisionClient(c.LLMResolver, logger.With("component", "decision-client"))
 			}
 			if providersCfg.DecisionGateEnabled {
@@ -1330,11 +1348,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				)
 			}
 			// Gate capture store (jev-command-gate leaf 02, Contract C4).
-			// Built when the decision gate armed (chokepoint-1 source);
-			// the permission-table side attaches its arm when the table is
-			// wired further down. Best-effort: an open failure logs and
-			// leaves capture disabled.
-			if decisionGate != nil && gateCap == nil {
+			// Built when the decision gate armed (chokepoint-1 source) or
+			// the jev score gate is enabled (its RecordScore/Escalated
+			// seam rides this same store); the permission-table side
+			// attaches its arm when the table is wired further down.
+			// Best-effort: an open failure logs and leaves capture
+			// disabled.
+			if (decisionGate != nil || jevGateEnabled) && gateCap == nil {
 				gc, gcErr := newGateCaptureStore(gatecapture.DefaultDBPath(), logger)
 				if gcErr != nil {
 					logger.Warn("gate capture store unavailable; capture disabled",
@@ -1344,6 +1364,49 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 					c.GateCapture = gc
 					logger.Info("gate capture store open", "path", gatecapture.DefaultDBPath())
 				}
+			}
+			// JeV graded command-safety score gate (issue #87;
+			// docs/plans/20261031-jev-command-gate leaf 01 T5 +
+			// docs/plans/20261103-wiring-gap-remediation/04-jev-gate-wiring.md).
+			// Constructed ONLY when [security.jev_command_gate].enabled
+			// (opt-in default false = zero behavior change; a nil field is
+			// the registration block's "not registered" signal). The scorer
+			// is the SAME shared *llm.DecisionClient the decision gate and
+			// ACP lane use (its ScoreCommand satisfies jevgate.ScoreClient);
+			// jevGateEnabled above already pulled the client into
+			// existence. Degraded posture never boot-fails: an unconfigured
+			// decision_model slot leaves the client Available()==false, and
+			// the hook then escalates every shell call per-branch
+			// (fail-closed Contract C3) -- the operator opted in, so ASK is
+			// the safe render. A type-assert miss leaves a nil scorer,
+			// which BeforeToolCall also routes to ASK. The capture store is
+			// both the hook's ConfirmFlow and its Recorder (leaf-02
+			// gatecapture_wiring.go adapters); typed-nil guard per
+			// internal/daemon/AGENTS.md -- a nil *gateCaptureStore must
+			// never be boxed into the interface fields.
+			if jevGateEnabled {
+				var scorer jevgate.ScoreClient
+				if sc, ok := decisionClient.(jevgate.ScoreClient); ok {
+					scorer = sc
+				}
+				var confirmFlow jevgate.ConfirmFlow
+				var recorder jevgate.Recorder
+				if gateCap != nil {
+					confirmFlow = gateCap
+					recorder = gateCap
+				}
+				jevScoreGate = jevgate.NewScoreGateHook(
+					scorer,
+					jevScoreGateConfigFromConfig(&cfg.Security.JevCommandGate),
+					confirmFlow,
+					logger,
+				)
+				jevScoreGate.SetRecorder(recorder)
+				c.JevScoreGate = jevScoreGate
+				logger.Info("jev score gate armed",
+					"score_threshold", cfg.Security.JevCommandGate.ScoreThreshold,
+					"confidence_threshold", cfg.Security.JevCommandGate.ConfidenceThreshold,
+				)
 			}
 		}
 
@@ -2341,6 +2404,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// wiring it never changes the deny/confirm flow.
 			decisionGate.SetGateCapture(gateCap)
 		}
+	}
+
+	// JeV graded command-safety score gate (issue #87): registered as the
+	// decision-gate's BeforeToolCallHook peer at the same High priority
+	// (equal-priority peers keep insertion order, so it runs AFTER
+	// decision-gate and after the security-critical hooks). A nil field is
+	// the ONLY registration source: disabled default = no registration =
+	// zero behavior (04-jev-gate-wiring.md pins this).
+	if c.JevScoreGate != nil {
+		hookRegistry.RegisterBeforeToolCall("jev-score-gate", agent.HookPriorityHigh, c.JevScoreGate)
+		logger.Info("Registered jev score gate BeforeToolCall hook")
 	}
 
 	agentOpts = append(agentOpts, agent.WithEventEmitter(emitter), agent.WithHookRegistry(hookRegistry))
@@ -7368,6 +7442,24 @@ func buildTaintHookConfig(sec *config.SecurityConfig) agent.TaintHookConfig {
 		hookCfg.Mode = agent.TaintModeEnforce
 	}
 	return hookCfg
+}
+
+// jevScoreGateConfigFromConfig maps the [security.jev_command_gate] knob
+// (config.JevGateConfig) onto jevgate.ScoreGateConfig field-for-field
+// (issue #87; the schema struct mirrors these names, see
+// internal/config/schema.go JevGateConfig). SecurityConfig.Validate already
+// normalizes the thresholds when Enabled, so zero/unset values never reach
+// here on an armed boot; jevgate's effectiveThreshold/effectiveConfFloor
+// clamp anything that does.
+func jevScoreGateConfigFromConfig(g *config.JevGateConfig) jevgate.ScoreGateConfig {
+	if g == nil {
+		return jevgate.DefaultScoreGateConfig()
+	}
+	return jevgate.ScoreGateConfig{
+		Enabled:         g.Enabled,
+		ScoreThreshold:  g.ScoreThreshold,
+		ConfidenceFloor: g.ConfidenceThreshold,
+	}
 }
 
 // newCollabHandoffBoundary builds the collaboration drivers' handoff seam
