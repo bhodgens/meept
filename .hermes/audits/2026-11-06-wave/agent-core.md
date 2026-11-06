@@ -71,3 +71,13 @@ HUNT STATUS: COMPLETE (F-1..F-5 written; F-1 was initially drafted as a HIGH dea
   model refs, not conversation churn).
 - F-5 OPEN (LOW): deferred — writer.go is under active sibling edits;
   revisit after the sibling wave lands.
+- F-5 CLOSED: both dedup rings bounded by dedupRingCap (8192) with
+  FIFO eviction (markDedup helper + startedOrder/closedOrder rings).
+  Below the cap the semantics are byte-identical to the unbounded
+  legacy (retry coalesce, double-close no-op, failed-close marker
+  kept). Above it the interlock forgets only turns older than 8192
+  writes; a forgotten turn re-appending one duplicate row is
+  tolerated by OpenRuns (GROUP BY newest) and reclaimed by
+  PruneClosed. Pins: TestJournalWriterDedupSetsStayBounded
+  (mutation-proven RED with eviction disabled) +
+  TestJournalWriterRingKeepsLegacySemanticsBelowCap.
