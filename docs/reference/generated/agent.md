@@ -93,6 +93,7 @@ Package agent provides the agent loop and related components.
 - [func HashToolCall\(tool string, argsJSON string\) string](<#HashToolCall>)
 - [func InjectGroupFence\(base \*security.PermissionChecker, res \*groups.Resolved\) \*security.PermissionChecker](<#InjectGroupFence>)
 - [func IsAlwaysProposeOnly\(target string\) bool](<#IsAlwaysProposeOnly>)
+- [func IsFrontierClass\(mc \*llm.ModelConfig\) bool](<#IsFrontierClass>)
 - [func IsRetryable\(err error\) bool](<#IsRetryable>)
 - [func IsSafeTargetPath\(target string\) bool](<#IsSafeTargetPath>)
 - [func IsValidIntentType\(s string\) bool](<#IsValidIntentType>)
@@ -101,6 +102,7 @@ Package agent provides the agent loop and related components.
 - [func LoadJSONLTraces\(store \*InMemoryTraceStore, path string\) error](<#LoadJSONLTraces>)
 - [func LoadSoul\(path string\) \(string, error\)](<#LoadSoul>)
 - [func MarshalTurnResult\(envelope any\) \[\]byte](<#MarshalTurnResult>)
+- [func NewSkillRankingEmbedder\(baseURL, model string, timeout time.Duration\) skills.Embedder](<#NewSkillRankingEmbedder>)
 - [func PairTopic\(sessionID string\) string](<#PairTopic>)
 - [func ParseVerdict\(output string\) \(Verdict, \[\]CheckResult\)](<#ParseVerdict>)
 - [func PhaseSpecsToPlan\(in \[\]PlanPhaseSpec\) \*plan.CompiledPlan](<#PhaseSpecsToPlan>)
@@ -241,6 +243,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetBeforeToolCallHook\(name string, priority HookPriority, hook BeforeToolCallHook\)](<#AgentLoop.SetBeforeToolCallHook>)
   - [func \(l \*AgentLoop\) SetBranchManager\(mgr any\)](<#AgentLoop.SetBranchManager>)
   - [func \(l \*AgentLoop\) SetBudgetConfig\(total int, opts BudgetHierarchyOptions\)](<#AgentLoop.SetBudgetConfig>)
+  - [func \(l \*AgentLoop\) SetCapabilitiesBuilder\(cb \*CapabilitiesBuilder\)](<#AgentLoop.SetCapabilitiesBuilder>)
   - [func \(l \*AgentLoop\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentLoop.SetCapabilityIndex>)
   - [func \(l \*AgentLoop\) SetClock\(now func\(\) time.Time\)](<#AgentLoop.SetClock>)
   - [func \(l \*AgentLoop\) SetCompactionConfig\(cfg config.CompactionConfig\)](<#AgentLoop.SetCompactionConfig>)
@@ -592,6 +595,7 @@ Package agent provides the agent loop and related components.
   - [func \(c \*ContextInjector\) GetActiveInstructions\(\) \[\]\*preferences.UserInstruction](<#ContextInjector.GetActiveInstructions>)
   - [func \(c \*ContextInjector\) HasActiveInstructions\(\) bool](<#ContextInjector.HasActiveInstructions>)
   - [func \(c \*ContextInjector\) HasLearnedPatterns\(ctx context.Context\) bool](<#ContextInjector.HasLearnedPatterns>)
+  - [func \(c \*ContextInjector\) SetEpisodeTask\(taskText string\)](<#ContextInjector.SetEpisodeTask>)
   - [func \(c \*ContextInjector\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#ContextInjector.SetSkillLoader>)
 - [type ContextIsolation](<#ContextIsolation>)
 - [type ContextTransform](<#ContextTransform>)
@@ -801,6 +805,7 @@ Package agent provides the agent loop and related components.
   - [func \(e \*Executor\) SetAgentID\(id string\)](<#Executor.SetAgentID>)
   - [func \(e \*Executor\) SetConversationID\(id string\)](<#Executor.SetConversationID>)
   - [func \(e \*Executor\) SetDecisionLogLevel\(level string\)](<#Executor.SetDecisionLogLevel>)
+  - [func \(e \*Executor\) SetExposurePlan\(plan \*ExposurePlan\)](<#Executor.SetExposurePlan>)
   - [func \(e \*Executor\) SetGroupResolution\(res \*groups.Resolved\)](<#Executor.SetGroupResolution>)
   - [func \(e \*Executor\) SetParallelismConfig\(baseParallelism int, profiles map\[string\]int\)](<#Executor.SetParallelismConfig>)
   - [func \(e \*Executor\) SetRegistry\(registry ToolRegistry\)](<#Executor.SetRegistry>)
@@ -816,6 +821,12 @@ Package agent provides the agent loop and related components.
   - [func WithExecutorRetryMetrics\(m \*RetryMetrics\) ExecutorOption](<#WithExecutorRetryMetrics>)
   - [func WithGroupResolutionOption\(res \*groups.Resolved\) ExecutorOption](<#WithGroupResolutionOption>)
   - [func WithParallelism\(n int\) ExecutorOption](<#WithParallelism>)
+- [type ExposurePlan](<#ExposurePlan>)
+  - [func NewExposurePlan\(mode ToolExposureMode, predicted \[\]string, budget int, ceiling \[\]string, knownNames \[\]string\) \*ExposurePlan](<#NewExposurePlan>)
+  - [func \(p \*ExposurePlan\) Active\(\) \[\]string](<#ExposurePlan.Active>)
+  - [func \(p \*ExposurePlan\) IsActive\(name string\) bool](<#ExposurePlan.IsActive>)
+  - [func \(p \*ExposurePlan\) IsKnown\(name string\) bool](<#ExposurePlan.IsKnown>)
+  - [func \(p \*ExposurePlan\) Promote\(name string\) error](<#ExposurePlan.Promote>)
 - [type FailureContext](<#FailureContext>)
 - [type FailureMode](<#FailureMode>)
   - [func \(fm FailureMode\) SeverityAsIssueSeverity\(\) string](<#FailureMode.SeverityAsIssueSeverity>)
@@ -1270,6 +1281,7 @@ Package agent provides the agent loop and related components.
   - [func \(b \*PromptBuilder\) Build\(\) string](<#PromptBuilder.Build>)
   - [func \(b \*PromptBuilder\) BuildSystemPrompt\(\) \(prompt string, stablePrefixHash string\)](<#PromptBuilder.BuildSystemPrompt>)
   - [func \(b \*PromptBuilder\) BuildSystemPromptOrdered\(cacheStablePrefix bool\) \(prompt string, stablePrefixHash string\)](<#PromptBuilder.BuildSystemPromptOrdered>)
+  - [func \(b \*PromptBuilder\) SetCapabilitiesBuilder\(caps \*CapabilitiesBuilder\) \*PromptBuilder](<#PromptBuilder.SetCapabilitiesBuilder>)
   - [func \(b \*PromptBuilder\) WithAgentsContext\(content string\) \*PromptBuilder](<#PromptBuilder.WithAgentsContext>)
   - [func \(b \*PromptBuilder\) WithConstitution\(constitution string\) \*PromptBuilder](<#PromptBuilder.WithConstitution>)
   - [func \(b \*PromptBuilder\) WithCoworkerAwareness\(awareness string\) \*PromptBuilder](<#PromptBuilder.WithCoworkerAwareness>)
@@ -1777,6 +1789,8 @@ Package agent provides the agent loop and related components.
   - [func \(e \*ToolExecutionError\) Error\(\) string](<#ToolExecutionError.Error>)
 - [type ToolExecutionStartData](<#ToolExecutionStartData>)
 - [type ToolExecutionUpdateData](<#ToolExecutionUpdateData>)
+- [type ToolExposureMode](<#ToolExposureMode>)
+  - [func EffectiveExposureMode\(mc \*llm.ModelConfig, agentMode, globalMode string, flagOn bool\) ToolExposureMode](<#EffectiveExposureMode>)
 - [type ToolHighlight](<#ToolHighlight>)
 - [type ToolParameter](<#ToolParameter>)
 - [type ToolParameterInfo](<#ToolParameterInfo>)
@@ -2871,6 +2885,13 @@ InjectGroupFence is the exported arm point for daemon\-side fence arming \(agent
 
 IsAlwaysProposeOnly is an exported wrapper around isAlwaysProposeOnly for external callers \(CLI, HTTP handlers\).
 
+<a name="IsFrontierClass"></a>
+## func IsFrontierClass
+
+	func IsFrontierClass(mc *llm.ModelConfig) bool
+
+IsFrontierClass reports whether mc carries the "frontier" capability tag \(llm.CapFrontier\). A nil config or a model without the tag is NOT frontier\-class \(fail\-safe: unknown models are treated as non\-frontier, so search downgrades to predicted for them — design §5.1 "unknown/unclassified is non\-frontier"\).
+
 <a name="IsRetryable"></a>
 ## func IsRetryable
 
@@ -2926,6 +2947,13 @@ LoadSoul reads and validates the soul file at path. It is the startup gate: an i
 	func MarshalTurnResult(envelope any) []byte
 
 MarshalTurnResult serializes the step result envelope the journal stores. Falls back to an empty JSON object when the envelope is not marshalable \(journaling is best\-effort and never fails the turn\).
+
+<a name="NewSkillRankingEmbedder"></a>
+## func NewSkillRankingEmbedder
+
+	func NewSkillRankingEmbedder(baseURL, model string, timeout time.Duration) skills.Embedder
+
+NewSkillRankingEmbedder returns a skills.Embedder backed by an OpenAI\-compatible /v1/embeddings endpoint rooted at baseURL \(e.g. "http://127.0.0.1:8090/v1"\). The daemon wires it only when \[skills.ranking\].enabled — nil config never reaches ranking.
 
 <a name="PairTopic"></a>
 ## func PairTopic
@@ -4169,6 +4197,13 @@ SetBranchManager wires a branch manager for in\-memory cache coordination. Stub 
 
 SetBudgetConfig overrides the hierarchical budget totals. When total \> 0, the BudgetHierarchy is rebuilt with the new task budget and the provided options \(reserved ratio, warning thresholds, carryover/borrowing toggles\). opts is a BudgetHierarchyOptions struct; zero\-valued fields fall back to sensible defaults. Nil\-guarded per CLAUDE.md.
 
+<a name="AgentLoop.SetCapabilitiesBuilder"></a>
+### func \(\*AgentLoop\) SetCapabilitiesBuilder
+
+	func (l *AgentLoop) SetCapabilitiesBuilder(cb *CapabilitiesBuilder)
+
+SetCapabilitiesBuilder wires the refresh\-capable capabilities builder whose skill index the per\-turn prompt build settles \(branch 01 \#103 / C1\). The loop attaches it to each per\-turn PromptBuilder at the turn boundary \(assembleSystemPrompt\), so a skill the agent authored mid\-session \(index marked dirty by the write\-path notifier\) is visible next turn without a restart. Nil is guarded: a nil argument leaves the loop unwired and the refresh is a no\-op \(the default\), flipping no new default.
+
 <a name="AgentLoop.SetCapabilityIndex"></a>
 ### func \(\*AgentLoop\) SetCapabilityIndex
 
@@ -5016,6 +5051,17 @@ AgentSpec defines the specification for creating an agent.
 	    // Returned WITHOUT a HasAlias pre-check — the resolver's own
 	    // resolution errors visibly if the alias is missing.
 	    ModelAlias string `json:"model_alias,omitempty" yaml:"model_alias,omitempty"`
+	    // ToolExposure is the per-agent as-needed tool-exposure tier, from the
+	    // AGENT.md `tool_exposure:` frontmatter key (token-efficiency branch 03
+	    // leaf 02, design §7). Valid values: "full" | "indexed" |
+	    // "predicted" | "search"; empty = inherit — the exposure engine
+	    // resolves per-model (models.json5 tool_exposure) > this field > the
+	    // global [agent.tools] tool_exposure > default ("predicted" with the
+	    // dynamic_tool_exposure flag on, legacy "indexed" with it off). "search"
+	    // takes effect only for frontier-class models (the model's capabilities
+	    // carry "frontier", design §5.1); otherwise it downgrades to
+	    // "predicted" with one warn naming the model.
+	    ToolExposure string `json:"tool_exposure,omitempty" yaml:"tool_exposure,omitempty"`
 	    // EnhancerModel is the small/cheap model used to expand a brief into
 	    // generator-ready prose. Empty = alias "small".
 	    EnhancerModel string `json:"enhancer_model,omitempty"`
@@ -7329,6 +7375,13 @@ HasActiveInstructions returns true if there are active user instructions.
 
 HasLearnedPatterns returns true if there are learned patterns available.
 
+<a name="ContextInjector.SetEpisodeTask"></a>
+### func \(\*ContextInjector\) SetEpisodeTask
+
+	func (c *ContextInjector) SetEpisodeTask(taskText string)
+
+SetEpisodeTask marks the start of a new episode and records its task text as the ranking signal for the skill listing \(leaf 02: "rank at episode start"\). Called once per episode by the agent loop; subsequent BuildSystemPrompt calls in the same episode reuse the frozen order, so per\-turn churn never invalidates the prompt cache. Empty taskText keeps the listing alphabetical \(no signal\). Setting the SAME text again does not invalidate the frozen order \(idempotent within an episode\). Nil\-safe.
+
 <a name="ContextInjector.SetSkillLoader"></a>
 ### func \(\*ContextInjector\) SetSkillLoader
 
@@ -9228,6 +9281,13 @@ SetConversationID updates the conversation/session identifier included in bus pr
 
 SetDecisionLogLevel sets the level for the permission decision\-audit lines: "deny\-warn" \(default\), "all", or "off". The empty string keeps the deny\-warn default; unknown values are ignored \(the config loader already normalizes, so this only defends direct callers\). Nil\-safe per setter convention.
 
+<a name="Executor.SetExposurePlan"></a>
+### func \(\*Executor\) SetExposurePlan
+
+	func (e *Executor) SetExposurePlan(plan *ExposurePlan)
+
+SetExposurePlan installs the per\-episode tool\-exposure plan on the executor \(dynamic\-tools leaf 06\). The tool\-lookup site consults it to emit the actionable "not active in this episode; call tool\_view\{X\} first" error for a known\-but\-inactive tool \(design §6 row 4\). A nil plan is the flag\-off posture: the lookup site never takes the active\-set branch, so the error behavior is byte\-identical to legacy. Nil\-guarded per the repo setter convention \(a nil plan resets to the legacy posture\).
+
 <a name="Executor.SetGroupResolution"></a>
 ### func \(\*Executor\) SetGroupResolution
 
@@ -9332,6 +9392,54 @@ WithGroupResolutionOption carries the group policy record onto the executor at c
 	func WithParallelism(n int) ExecutorOption
 
 WithParallelism sets the maximum number of parallel tool executions.
+
+<a name="ExposurePlan"></a>
+## type ExposurePlan
+
+ExposurePlan is the per\-episode active\-set of tool names that ship full schemas \(design §3.1\). It is append\-only within an episode \(Promote adds, never removes — the prefix\-cache\-invalidation invariant, §4.3\). Seeded at episode start from the predicted set \(intent map\) \+ core always\-full \+ the meta\-tool pair.
+
+ceilingNames is the role ceiling \(design §1 layer 1\): the FULL registry scoped to this agent's granted tools. Promote refuses a name outside the ceiling and the error names the ceiling \(§6 row 5\), so the model knows the tool is not merely unlisted but unavailable to this role at all. A nil ceilingNames means "no ceiling" \(the flag\-off legacy posture: Promote never refuses on ceiling\).
+
+knownNames is the FULL registry's name set at episode start \(design §6 row 4\): the executor uses IsKnown to distinguish a real registered tool that is simply not active yet \(emit the actionable "call tool\_view\{X\} first" directive\) from a hallucinated / truly\-unknown name \(the generic unknown\-tool error\). A nil knownNames means the knowledge set is unset; IsKnown is then false, so row 4 only fires when the full registry's names were supplied at construction.
+
+	type ExposurePlan struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewExposurePlan"></a>
+### func NewExposurePlan
+
+	func NewExposurePlan(mode ToolExposureMode, predicted []string, budget int, ceiling []string, knownNames []string) *ExposurePlan
+
+NewExposurePlan builds the episode's active set for the given mode. ceiling is the role ceiling \(design §1 layer 1\): the set of tool names this agent's role may ever activate. A nil ceiling means "no ceiling" \(the flag\-off legacy posture\). In search mode the predicted set is empty \(budget 0\) so only core always\-full \+ the meta pair \(tool\_search, tool\_view\) are active. In predicted mode the caller passes the intent\-selected set; the core always\-full set and the meta pair are unioned in. knownNames is the FULL registry's name set \(design §6 row 4\) so the executor can distinguish a real registered tool that is not active yet from a genuinely unknown name.
+
+<a name="ExposurePlan.Active"></a>
+### func \(\*ExposurePlan\) Active
+
+	func (p *ExposurePlan) Active() []string
+
+Active returns the current active set \(a copy; safe to iterate\).
+
+<a name="ExposurePlan.IsActive"></a>
+### func \(\*ExposurePlan\) IsActive
+
+	func (p *ExposurePlan) IsActive(name string) bool
+
+IsActive reports whether name is in the episode's active set. The executor's §6 row 4 error\-shaping uses this to distinguish a known\-but\-inactive tool \(emit the actionable "call tool\_view\{X\} first" directive\) from a genuinely unknown one \(the generic unknown\-tool error\). A nil plan returns false, so the flag\-off path never triggers the active\-set error branch.
+
+<a name="ExposurePlan.IsKnown"></a>
+### func \(\*ExposurePlan\) IsKnown
+
+	func (p *ExposurePlan) IsKnown(name string) bool
+
+IsKnown reports whether name is registered in the FULL registry \(regardless of active state\). Used by the executor's §6 row 4 branch: a known tool that is NOT active gets the actionable "call tool\_view\{X\} first" error; an unknown name falls through to the legacy "unknown tool: X" error. A nil plan or unset known set returns false \(the flag\-off posture\).
+
+<a name="ExposurePlan.Promote"></a>
+### func \(\*ExposurePlan\) Promote
+
+	func (p *ExposurePlan) Promote(name string) error
+
+Promote adds a tool name to the active set \(append\-only, design §3.1/§4.3\). Returns nil if the tool is already active. §6 row 5: a name OUTSIDE the role ceiling is refused with an error that names the ceiling \(the model learns the tool is not merely unlisted but unavailable to this role at all\). A nil ceiling \(flag off\) disables the refusal — every name is allowed, the legacy posture.
 
 <a name="FailureContext"></a>
 ## type FailureContext
@@ -13674,6 +13782,13 @@ BuildSystemPrompt is the stable\-prefix convenience wrapper: equivalent to Build
 	func (b *PromptBuilder) BuildSystemPromptOrdered(cacheStablePrefix bool) (prompt string, stablePrefixHash string)
 
 BuildSystemPromptOrdered assembles the system prompt via AssembleOrdered. When cacheStablePrefix is true \(the default path\), sections are reordered stable\-first and the sha256 of the stable prefix is returned. When false, the legacy call\-order Build\(\) output is returned byte\-for\-byte with the hash of that legacy prefix, so callers can detect ordering\-mode changes.
+
+<a name="PromptBuilder.SetCapabilitiesBuilder"></a>
+### func \(\*PromptBuilder\) SetCapabilitiesBuilder
+
+	func (b *PromptBuilder) SetCapabilitiesBuilder(caps *CapabilitiesBuilder) *PromptBuilder
+
+SetCapabilitiesBuilder wires the capabilities builder whose skill index the turn\-boundary build settles \(branch 1 \#103 / C1\). BuildSystemPromptOrdered calls refreshIfNeeded on it once at the start of the per\-turn build, so a skill the agent authored mid\-session \(index marked dirty by the write\-path notifier\) is visible next turn without a restart. Nil is guarded: a nil argument leaves any already\-wired builder intact, and an unwired builder makes the refresh a no\-op \(the default\), flipping no new default.
 
 <a name="PromptBuilder.WithAgentsContext"></a>
 ### func \(\*PromptBuilder\) WithAgentsContext
@@ -18558,6 +18673,37 @@ ToolExecutionUpdateData is emitted during tool execution progress.
 	    Status     string `json:"status"`
 	    Detail     string `json:"detail"`
 	}
+
+<a name="ToolExposureMode"></a>
+## type ToolExposureMode
+
+ToolExposureMode is the effective tool\-exposure tier for a turn.
+
+	type ToolExposureMode string
+
+<a name="ExposureFull"></a>The four tiers \(design §3.1\). "full" and "indexed" are the legacy loop\-economics modes; "predicted" and "search" are the as\-needed modes gated on the dynamic\_tool\_exposure flag \+ the frontier capability.
+
+	const (
+	    ExposureFull      ToolExposureMode = "full"
+	    ExposureIndexed   ToolExposureMode = "indexed"
+	    ExposurePredicted ToolExposureMode = "predicted"
+	    ExposureSearch    ToolExposureMode = "search"
+	)
+
+<a name="EffectiveExposureMode"></a>
+### func EffectiveExposureMode
+
+	func EffectiveExposureMode(mc *llm.ModelConfig, agentMode, globalMode string, flagOn bool) ToolExposureMode
+
+EffectiveExposureMode resolves the tool\-exposure mode for a turn. Resolution order \(design §3.4\):
+
+	per-model ToolExposure (models.json5 model entry)
+	  > per-agent frontmatter (AgentSpec.ToolExposure)
+	  > global [agent.tools].tool_exposure
+	  > default: "predicted" (flag on) / "indexed" (flag off)
+	
+
+The capability gate then downgrades configured "search" to "predicted" for non\-frontier models \(the warn\-once is emitted by the caller, not here — this is a pure function\). Flag off forces "indexed" \(byte\-identical legacy payload\).
 
 <a name="ToolHighlight"></a>
 ## type ToolHighlight

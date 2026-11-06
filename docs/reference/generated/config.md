@@ -337,6 +337,8 @@ Package config provides configuration loading and validation for meept.
 - [type SkillsRankingConfig](<#SkillsRankingConfig>)
 - [type SkillsStateConfig](<#SkillsStateConfig>)
 - [type SkillsWikiConfig](<#SkillsWikiConfig>)
+- [type SlackConfig](<#SlackConfig>)
+  - [func \(c SlackConfig\) ValidateEnabled\(\) error](<#SlackConfig.ValidateEnabled>)
 - [type SpillConfig](<#SpillConfig>)
 - [type SyncConfig](<#SyncConfig>)
 - [type SyncStatus](<#SyncStatus>)
@@ -1895,6 +1897,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 	    GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	    Intake              IntakeConfig              `json:"intake"               toml:"intake"`
+	    Slack               SlackConfig               `json:"slack"                toml:"slack"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -5308,6 +5311,39 @@ SkillsWikiConfig configures the wiki knowledge store \(arXiv:2608.27454\). The s
 	    Enabled bool   `json:"enabled" toml:"enabled"` // default true
 	    Dir     string `json:"dir"     toml:"dir"`     // default "~/.meept/wiki"
 	}
+
+<a name="SlackConfig"></a>
+## type SlackConfig
+
+SlackConfig configures the HITL Slack approval channel \(\[comm.slack\], json key "slack"\): a services.PushChannel that publishes pending ACP permission requests as interactive Slack messages and resolves approver button clicks through the ACP human permission relay. Opt\-in — disabled by default; when disabled nothing registers, no route is served, and no goroutine runs. Mirrors slack.SlackConfig \(internal/comm/slack\); config does not import the channel package and the daemon maps the fields in internal/daemon/slack\_wiring.go, per the ResolverConfig convention. BotToken and SigningSecret support the $\{VAR\} env indirection the JSON5 loader applies \(ExpandEnvVars\) before decoding; the values themselves are never logged.
+
+	type SlackConfig struct {
+	    // Enabled turns the channel on (default: false, opt-in).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // BotToken is the Slack bot token (xoxb-...), chat:write scope.
+	    // Env indirection (${VAR}) only — never plaintext in logs.
+	    BotToken string `json:"bot_token" toml:"bot_token"`
+	    // SigningSecret is the Slack app signing secret used to verify the
+	    // v0 HMAC signature on interaction callbacks.
+	    SigningSecret string `json:"signing_secret" toml:"signing_secret"`
+	    // ChannelID is the fixed Slack channel the approval cards post to.
+	    ChannelID string `json:"channel_id" toml:"channel_id"`
+	    // AllowedUserIDs are the Slack user IDs allowed to answer approval
+	    // requests. Empty allows NOBODY (fail closed) — unlike the Telegram
+	    // precedent where empty means all.
+	    AllowedUserIDs []string `json:"allowed_user_ids" toml:"allowed_user_ids"`
+	    // APIBaseURL overrides the Slack Web API base (default
+	    // https://slack.com/api); tests point it at a local server.
+	    // Never logged.
+	    APIBaseURL string `json:"api_base_url" toml:"api_base_url"`
+	}
+
+<a name="SlackConfig.ValidateEnabled"></a>
+### func \(SlackConfig\) ValidateEnabled
+
+	func (c SlackConfig) ValidateEnabled() error
+
+ValidateEnabled checks the REQUIRED\-when\-enabled fields of the Slack block: bot\_token, signing\_secret, and channel\_id must all be set when Enabled=true; no\-op when disabled.
 
 <a name="SpillConfig"></a>
 ## type SpillConfig

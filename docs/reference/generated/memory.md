@@ -3332,6 +3332,7 @@ MemoryFact is one typed, time\-scoped fact about a user.
 	    ValidFrom     *time.Time `json:"valid_from,omitempty"`
 	    ValidUntil    *time.Time `json:"valid_until,omitempty"`
 	    SourceSession string     `json:"source_session,omitempty"`
+	    Origin        string     `json:"origin,omitempty"` // who wrote the fact: 'agent', 'user', 'unknown' (branch 02, C3)
 	    UpdatedAt     time.Time  `json:"updated_at"`
 	}
 
