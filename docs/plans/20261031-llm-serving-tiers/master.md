@@ -371,7 +371,7 @@ must pass before COMPLETE):
 | F3 | semantic cache lookup behind exact miss | 02 T2 | internal/llm: semantic_cache_test.go; daemon: TestSemanticCacheWiring* pin the construction site (T5 landed) | llm-serving-tiers: paraphrase-hit scenario | VALIDATED |
 | F4 | tool-call semantic exemption + embedder degradation | 02 T3-T4 | internal/llm: exemption + embedder-error tests; daemon: degraded-no-embedder wiring test | llm-serving-tiers: tool-call + embedder-fail scenarios + live-daemon Warn-line pin (TestConfigTierSemanticKeysAccepted) | VALIDATED |
 | F5 | --cache-reuse 256 + comment correction | 03 T1-T2 | internal/llm: TestConfigLoads (collision-guarded; the F5 pin landed in providers_config_test.go, not internal/config) | llm-serving-tiers: config-loads scenario | VALIDATED |
-| F6 | TTFT column + migration guard + first-delta capture | 04 T1-T3 | internal/metrics: guard test; internal/llm: first-delta test | llm-serving-tiers: ttft-row scenario | PENDING |
+| F6 | TTFT column + migration guard + first-delta capture | 04 T1-T3 | internal/metrics: guard test; internal/llm: first-delta test | llm-serving-tiers: ttft-row scenario | VALIDATED (closeout audit 2026-11-05: 04 landed at 0827f72c - migration v9 llm_calls.ttft_ms via columnMissingGuard (store.go:531), captureFirstDelta openai+anthropic (client.go:2187), AvgTTFTMs live path; unit pins green; e2e ttft_ms value assertions deferred-to-fake per suite header) |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 
