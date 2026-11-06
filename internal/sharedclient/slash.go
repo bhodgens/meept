@@ -99,6 +99,12 @@ var builtinCommands = map[string]struct{}{
 
 	// Session: show current session info (id/title/workdir).
 	"session": {},
+
+	// Intake status (read-only view over the intake.status RPC; issue #109
+	// TUI/GUI parity for the github-intake pipeline; CLI `meept intake
+	// status` already exists). Routed to executeIntake in
+	// internal/tui/command_handler.go.
+	"intake": {},
 }
 
 // CommandTasks is the "tasks" command name, exported for compatibility with tui/constants.go.
