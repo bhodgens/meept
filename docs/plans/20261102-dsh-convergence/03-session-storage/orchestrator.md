@@ -331,11 +331,11 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-tests | PENDING | 0 | phase-0 gate |
-| 01-session-version | PENDING | 0 | serialized first (S5) |
-| 02-session-projection | PENDING | 0 | after 01 |
-| 03-session-reference | PENDING | 0 | after 02, parallel with 04 |
-| 04-storage-events | PENDING | 0 | after 02, parallel with 03 |
+| 00T-tests | COMPLETE | 0 | gates activated GREEN (G1-G5); session-storage suite registered in manifest |
+| 01-session-version | COMPLETE | 0 | 9d1fa51a: schema_version col + catalog + Plan guard |
+| 02-session-projection | COMPLETE | 0 | 85a4cd77: registry + watermark cache |
+| 03-session-reference | COMPLETE | 0 | 82aab4d2: internal/context/sessionref |
+| 04-storage-events | COMPLETE | 0 | 66ea1673: internal/storage RecordChanged + store wiring |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

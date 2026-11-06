@@ -334,13 +334,13 @@ The orchestrator (main model) verifies each branch in-session:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-delegation/ | PENDING | 0 | spine |
-| 02-goals-plans/ | PENDING | 0 | waits 01 partially |
-| 03-session-storage/ | PENDING | 0 | |
-| 04-tool-surface/ | PENDING | 0 | |
-| 05-schedule/ | PENDING | 0 | |
-| 06-office-skills/ | PENDING | 0 | research-gated |
-| gh-issues (11,12) | PENDING | 0 | filed from docs leaf |
+| 01-delegation/ | PENDING | 0 | spine; impl NOT-STARTED (gates parked .staged) |
+| 02-goals-plans/ | PENDING | 0 | waits 01 partially; impl NOT-STARTED (gates parked .staged) |
+| 03-session-storage/ | COMPLETE | 0 | 4 impl leaves + gates GREEN; suite in manifest |
+| 04-tool-surface/ | PENDING | 0 | impl NOT-STARTED; gh-issue drafts 11+12 written, unfiled |
+| 05-schedule/ | PENDING | 0 | impl NOT-STARTED (gates parked .staged) |
+| 06-office-skills/ | IN_PROGRESS | 0 | 00R+01-docx+03-xlsx DONE; 02-pptx+04-docs+C11.5 open |
+| gh-issues (11,12) | IN_PROGRESS | 0 | bodies drafted in 04/06-gh-issues/; filing pending |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

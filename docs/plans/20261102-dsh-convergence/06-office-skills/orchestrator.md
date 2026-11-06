@@ -303,11 +303,11 @@ user picks the library or approves a non-Go runtime, never the agent silently.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00-research-assignment | PENDING | 0 | research gate; GO unlocks 01-04 |
-| 00T-tests | PENDING | 0 | Phase 0 test gate |
-| 01-docx-skill | PENDING | 0 | gated on 00R GO + 00T VALIDATED |
-| 02-pptx-skill | PENDING | 0 | gated on 00R GO + 00T VALIDATED |
-| 03-xlsx-skill | PENDING | 0 | gated on 00T VALIDATED (+00R confirm) |
+| 00-research-assignment | COMPLETE | 0 | library-picks.md committed, GO (docx godocx, xlsx excelize, pptx pptxgo) |
+| 00T-tests | COMPLETE | 0 | parked RED (.staged) per Phase 0; activates with C11.5 |
+| 01-docx-skill | COMPLETE | 0 | cb3e999b: office_docx builtin + office-docx skill |
+| 02-pptx-skill | PENDING | 0 | gated on 00R GO; pick = mmonterroca/pptxgo (fallback F31/go-pptx) |
+| 03-xlsx-skill | COMPLETE | 0 | 51d4abbc: office_workbook builtin + office-xlsx skill |
 | 04-docs | PENDING | 0 | after 01-03 REVIEWED + 00R GO |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
