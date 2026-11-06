@@ -101,18 +101,36 @@ func TestDialRefusals(t *testing.T) {
 		})
 	}
 
-	// No slot: registry cap 0 -> ErrBusy passthrough.
+	// Over-cap: registry cap 1 with one live call -> ErrBusy.
+	// (bughunt voice F-3: cap 0 is the UNLIMITED sentinel, matching
+	// Acquire - it must not refuse every dial.)
 	srv := zeroRequestServer(t)
 	defer srv.Close()
 	cfg := dialConfig()
 	cfg.TestBaseURL = srv.URL
-	reg := NewRegistry(0)
+	reg := NewRegistry(1)
+	if _, err := reg.Acquire("cc-live-0", "emp-0", "+155****0000"); err != nil {
+		t.Fatalf("seed acquire: %v", err)
+	}
 	d := NewDialer(cfg, &countingController{}, nil, reg, newTestLedger(t), nil, testLogger())
 	_, err := d.Dial(context.Background(), DialRequest{
 		EmployeeID: "emp-1", Target: "+15551230001", RequestID: "req-refusal-2",
 	})
 	if !errors.Is(err, ErrBusy) {
 		t.Errorf("over-cap dial error = %v, want ErrBusy", err)
+	}
+
+	// Unlimited sentinel: cap 0 dials succeed (registryGate and Acquire
+	// agree; the old code refused every dial here while Acquire accepted it).
+	srvU := zeroRequestServer(t)
+	defer srvU.Close()
+	cfgU := dialConfig()
+	cfgU.TestBaseURL = srvU.URL
+	dU := NewDialer(cfgU, &countingController{}, nil, NewRegistry(0), newTestLedger(t), nil, testLogger())
+	if _, err := dU.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-u1", Target: "+15551230001", RequestID: "req-unlimited-1",
+	}); err != nil {
+		t.Errorf("cap-0 (unlimited) dial error = %v, want success", err)
 	}
 
 	// Duplicate live target: same target twice globally -> ErrDuplicateTarget.

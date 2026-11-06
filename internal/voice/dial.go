@@ -349,7 +349,11 @@ func (d *Dialer) doneFor(ctx context.Context, ccid string) <-chan struct{} {
 // per target globally (ErrDuplicateTarget).
 func (d *Dialer) registryGate(target, employeeID string) error {
 	live := d.reg.Live()
-	if len(live) >= d.registryCap() {
+	// Same sentinel as CallRegistry.Acquire: cap <= 0 means unlimited
+	// (voice.max_concurrent_calls 0 = unlimited per config docs). The
+	// pre-gate must not refuse every dial while Acquire would accept it
+	// (bughunt 2026-11-06 voice F-3).
+	if cap := d.registryCap(); cap > 0 && len(live) >= cap {
 		return fmt.Errorf("%w: at capacity (%d)", ErrBusy, len(live))
 	}
 	for _, inst := range live {
@@ -365,8 +369,11 @@ func (d *Dialer) registryGate(target, employeeID string) error {
 	return nil
 }
 
-// registryCap returns the configured cap; 0 means zero capacity (every
-// Acquire is refused) - there is no "unlimited" sentinel.
+// registryCap returns the configured cap. Like CallRegistry.Acquire, a cap
+// of 0 (or negative) means UNLIMITED - voice.max_concurrent_calls documents
+// "0 = unlimited" (template config/meept.json5), so the gate semantics must
+// match Acquire's sentinel or a cap-0 config refuses dials that Acquire
+// would accept.
 func (d *Dialer) registryCap() int { return d.reg.Cap() }
 
 // abandonEffect marks a claimed effect dead (refused/failed dial: the ring
@@ -485,7 +492,7 @@ type CallRegistry struct {
 }
 
 // NewRegistry returns a CallRegistry with the given capacity. A cap of 0
-// refuses every Acquire with ErrBusy.
+// (or negative) means UNLIMITED - the same sentinel Acquire applies.
 func NewRegistry(cap int) *CallRegistry {
 	return &CallRegistry{cap: cap, live: make(map[string]Instance)}
 }
