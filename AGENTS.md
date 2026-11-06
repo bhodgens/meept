@@ -13,6 +13,9 @@ internal/session/ -> internal/session/AGENTS.md (lifecycle hooks, idle reaper)
 internal/daemon/  -> internal/daemon/AGENTS.md  (runtime lifecycle, spawn guards)
 internal/agent/   -> internal/agent/AGENTS.md   (chat contracts, output filters, session IDs)
 internal/comm/    -> internal/comm/AGENTS.md    (WS classification, bus topics)
+internal/voice/   -> internal/voice/AGENTS.md   (frames, sockets, splice/barge-in,
+                                                 supervisor gate, release fan-out,
+                                                 secrets lanes, child confinement)
 docs/agents/      -> coding-practices.md | opt-in-defaults.md | projects-and-workdirs.md
 ```
 
@@ -32,7 +35,8 @@ guidance at all.
 # Build
 go build -o bin/meept-daemon ./cmd/meept-daemon
 go build -o bin/meept ./cmd/meept
-make build              # Everything (daemon + CLI + gendoc + GUI + lite + graphs)
+go build -o bin/meept-voice ./cmd/meept-voice  # voice child (phone sidecar)
+make build              # Everything (daemon + CLI + voice child + gendoc + GUI + lite + graphs)
 make build-gui          # Flutter GUI only
 make build-gui-dist     # Flutter GUI with NO embedded dev key (distribution; first-run pairing)
 make menubar-install    # macOS MenuBar app
@@ -202,6 +206,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **TUI** | `internal/tui` (app, commands, components, handlers, modals, models, tableutil) |
 | **GUI** | `ui/flutter_ui` (Flutter web + desktop) |
 | **Scheduling** | `internal/scheduler`, `internal/queue`, `internal/worker` |
+| **Voice** | `internal/voice` (daemon side: call manager, splice, supervisor gate, dial, day brief, registry, child proc), `internal/voiceframe` (stdlib-only shared frame codec), `internal/voicechild` + `cmd/meept-voice` (jargo voice child - full contract in `internal/voice/AGENTS.md`) |
 | **Skills** | `internal/skills`, `internal/selfimprove` |
 | **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/process`, `internal/eval`, `internal/gate` |
 
@@ -315,6 +320,27 @@ alias blocks > stickiness; teardown (KV-cache erase on session archive/delete/
 idle/shutdown) is best-effort with the verified route `POST /slots/0?action=erase`
 and NEVER fails a turn, an archive, or a shutdown; cloud providers are an
 explicit no-op.
+
+### Voice sidecar (phone channel)
+
+Full rules live in `internal/voice/AGENTS.md` (frames, sockets,
+reorder/pacing/barge-in, release fan-out, secrets lanes, child
+confinement, one-live-call-per-employee); user-facing docs are
+`docs/workflows/voice-sidecar.md` (spec + as-built) and
+`docs/workflows/voice.md`. Short form: C1 text frames are byte-exact
+JSON lines, every frame carries `call_id`, only final prompts
+(`last:true`) start a turn, and `say` goes out only after the
+supervisor allows (fact-free filler/greeting excepted); C2 audio rides
+per-call unix socket pairs with codec-derived 20 ms chunks; barge-in
+`clear` affects the interrupted call only. A voice call is never
+quota-parked - supervisor timeout means fallback line and the call
+continues; hangups fan out release (slot, goal unpark, effects) exactly
+once. The Telnyx token resolves via `Broker.Value` in-daemon only;
+provider keys reach the child over the unix socket and live in child
+memory only. jargo is imported ONLY by `cmd/meept-voice` and
+`internal/voicechild` (compile-time pins); the registry enforces one
+live call per employee and per target number, with outbound dials
+gated by allowlist + effects reservation + audit-before-dial.
 
 ### The github_* tool factory seam is init-populated; githubsvc never imports builtin
 

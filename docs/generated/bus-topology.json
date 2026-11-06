@@ -206,7 +206,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10606,
+        "line": 10644,
         "payload_keys": []
       }
     ],
@@ -541,7 +541,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2949,
+        "line": 2961,
         "payload_keys": [
           "event"
         ]
@@ -550,7 +550,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2588,
+        "line": 2600,
         "payload_keys": [
           "event"
         ]
@@ -580,7 +580,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6341,
+        "line": 6368,
         "payload_keys": [
           "name",
           "tags",
@@ -1791,7 +1791,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9740,
+        "line": 9778,
         "payload_keys": []
       }
     ],
@@ -2318,13 +2318,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8300,
+        "line": 8338,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8337,
+        "line": 8375,
         "payload_keys": [],
         "via_const": true
       }
@@ -2343,14 +2343,14 @@
     "tool.execution.complete": [
       {
         "file": "internal/agent/executor.go",
-        "line": 2136,
+        "line": 2142,
         "payload_keys": []
       }
     ],
     "tool.execution.progress": [
       {
         "file": "internal/agent/executor.go",
-        "line": 2081,
+        "line": 2087,
         "payload_keys": [
           "message",
           "percent"
@@ -3595,7 +3595,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9666,
+        "line": 9704,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3886,7 +3886,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9833,
+        "line": 9871,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

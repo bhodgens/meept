@@ -5491,6 +5491,33 @@ func (c *Components) Start(ctx context.Context) error {
 			"running", c.TiersEngine.Running())
 	}
 
+	// Voice sidecar Start (leaf 14): text server up + voice_call tool
+	// registered via the toolprov provider seam. Runs after the ordinary
+	// component Start machinery so the loop manager is live before the
+	// first talk loop can clone a session loop. Failure rolls back through
+	// the ordinary started-handlers path.
+	// Without this call the C1 text socket listener never binds, the
+	// ChildProc spawn handshake blocks, and every inbound webhook hangs
+	// (bughunt 2026-11-06: restore after the token-efficiency sweep).
+	if c.Voice != nil {
+		if err := c.Voice.Start(ctx, func(dial builtin.DialerFunc, agentID builtin.AgentIDFunc) {
+			builtin.SetVoiceProvider(dial, agentID, c.SecretBroker)
+			names := enabledToolProviderNames(c.Config, []string{"voice"}, c.Logger)
+			if len(names) == 0 {
+				c.Logger.Debug("voice provider disabled by [tool_providers]; no voice_call tool registered")
+				return
+			}
+			if _, err := toolprov.RegisterAll(c.ToolRegistry, names); err != nil {
+				c.Logger.Error("voice_call tool registration failed", "error", err)
+				return
+			}
+			c.Logger.Info("voice_call tool registered (employee outbound dial, gated by allowlist + effects ledger)")
+		}); err != nil {
+			return err
+		}
+		startedHandlers = append(startedHandlers, "voice")
+	}
+
 	// Start chat handler
 	if err := c.ChatHandler.Start(ctx); err != nil {
 		return err
@@ -6874,6 +6901,17 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.Dispatcher != nil {
 		c.Dispatcher.Stop()
 		c.Logger.Info("Dispatcher stopped")
+	}
+
+	// Voice sidecar Stop (leaf 14): child FIRST (it holds the text socket
+	// connection and can be mid-call), then the text server listener,
+	// then the call store - children before stores. Runs before the
+	// session store close below so the binding's terminal call-row writes
+	// still find the store open.
+	if c.Voice != nil {
+		c.Voice.Stop(ctx)
+		c.Voice = nil
+		c.Logger.Info("voice sidecar stopped")
 	}
 
 	// Close stores
