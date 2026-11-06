@@ -51,6 +51,15 @@ type Tool interface {
 	// are concurrency-safe may be parallelized even if they are not
 	// strictly read-only (e.g., independent file writes to different paths).
 	IsConcurrencySafe(input map[string]any) bool
+
+	// TimeoutMs declares this tool's cooperative execution budget.
+	// 0 (the ToolDefaults default) means no declared timeout: the executor
+	// delegates unchanged. A value > 0 arms a context deadline around the
+	// dispatch (bounding the whole retry loop, so a retry storm cannot
+	// outlive the declared budget); on expiry the executor substitutes a
+	// structured TOOL_TIMEOUT result instead of leaking a raw
+	// context.DeadlineExceeded. Opt-in per tool.
+	TimeoutMs() time.Duration
 }
 
 // ToolDefaults provides default implementations for the safety-query methods
@@ -66,6 +75,12 @@ func (ToolDefaults) IsReadOnly(map[string]any) bool { return false }
 // IsConcurrencySafe returns false by default. Tools that can safely execute
 // concurrently should override this method to return true.
 func (ToolDefaults) IsConcurrencySafe(map[string]any) bool { return false }
+
+// TimeoutMs returns 0 by default: no declared timeout, the executor
+// delegates unchanged. Tools that want a cooperative budget override this
+// method with their declared duration (dsh convergence leaf 01-tool-timeout,
+// contract B1).
+func (ToolDefaults) TimeoutMs() time.Duration { return 0 }
 
 // ToolResult is the standardized result envelope returned by tool execution.
 //

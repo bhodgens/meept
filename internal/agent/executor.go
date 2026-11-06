@@ -519,6 +519,12 @@ type ExecutionResult struct {
 	// so a guard-only harness that fails every call identically by policy —
 	// not by the tool's own logic — never trips breaker terminalization.
 	IsBreakableRepeat bool `json:"is_breakable_repeat,omitempty"`
+	// ErrCode is a machine-readable error class for classified failures.
+	// Today only a declared-TimeoutMs budget expiry stamps it
+	// ("TOOL_TIMEOUT"); every other path leaves the zero value "" — purely
+	// additive, mirroring tools.ToolResult.ErrCode (contract B1,
+	// 01-tool-timeout).
+	ErrCode string `json:"err_code,omitempty"`
 }
 
 // ErrorSeverity classifies the severity of a parallel execution error.
@@ -1412,15 +1418,22 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 			"tool", toolName,
 			"error", toolErr,
 		)
-		return &ExecutionResult{
+		res := &ExecutionResult{
 			ToolCallID: toolCall.ID,
 			Success:    false,
 			// A failure surfaced by the tool itself: this is exactly the
 			// evidence the repeat-error breaker keys on (a repeated
 			// "tool execution failed: X" means the input is doomed).
-			IsBreakableRepeat: true,
+			// A declared-budget timeout is NOT one: it is the tool's
+			// cooperative timer expiring, not evidence the input is
+			// doomed — it must never trip the breaker (contract B1).
+			IsBreakableRepeat: !isToolTimeoutErr(toolErr),
 			Error:             fmt.Sprintf("tool execution failed: %v", toolErr),
 		}
+		if isToolTimeoutErr(toolErr) {
+			res.ErrCode = toolTimeoutErrCode
+		}
+		return res
 	}
 
 	// Extract evidence from ToolResult if present
@@ -1478,6 +1491,17 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	return result
 }
 
+// toolTimeoutErrCode is the machine-readable ErrCode stamped on the
+// structured result substituted when a tool's declared TimeoutMs budget
+// expires (contract B1). Deliberately NOT the generic ErrCodeTimeout
+// ("timeout"): the dsh timeout-policy guard owns a stable, distinct code so
+// the model-facing envelope is classifiable without string matching.
+const toolTimeoutErrCode = "TOOL_TIMEOUT"
+
+// isToolTimeoutErr reports whether err is the structured tool-timeout error
+// the executor substitutes when a declared TimeoutMs budget expires.
+func isToolTimeoutErr(err error) bool { return errors.Is(err, tools.ErrToolTimeout) }
+
 // executeToolWithRetry runs a single tool's execution with exponential backoff
 // retry on retryable errors. Non-retryable errors and successes return
 // immediately. Streaming tools use their streaming path when the bus is
@@ -1522,6 +1546,55 @@ func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, co
 	backoff := NewBackoff(config)
 	var lastErr error
 
+	// Cooperative per-tool timeout (dsh convergence leaf 01-tool-timeout,
+	// contract B1): a tool that declares a budget (TimeoutMs() > 0) gets a
+	// context deadline around its dispatch. The deadline bounds the WHOLE
+	// retry loop, not each attempt, so a retry storm cannot outlive the
+	// declared budget. Zero budget = delegate unchanged (the upstream ctx
+	// passes through unadorned, no derived deadline).
+	execCtx := ctx
+	timeoutBudget := time.Duration(0)
+	if t, ok := tool.(interface{ TimeoutMs() time.Duration }); ok {
+		if d := t.TimeoutMs(); d > 0 {
+			timeoutBudget = d
+			var cancel context.CancelFunc
+			execCtx, cancel = context.WithTimeout(ctx, d)
+			defer cancel()
+		}
+	}
+	// dispatchToolBody runs one attempt (streaming when available) under the
+	// derived deadline and substitutes the structured TOOL_TIMEOUT error ONLY
+	// when THIS tool's own timer fired — turn-level cancellation from the
+	// upstream ctx is never masked (T5).
+	dispatchToolBody := func() (any, error) {
+		var toolResult any
+		var toolErr error
+		if st, ok := tool.(tools.StreamingTool); ok && e.bus != nil {
+			toolResult, toolErr = st.ExecuteStreaming(execCtx, args, func(pu tools.ProgressUpdate) {
+				pu.ToolCallID = toolCallID
+				e.publishToolProgress(execCtx, toolCallID, toolName, pu)
+			})
+		} else {
+			toolResult, toolErr = tool.Execute(execCtx, args)
+		}
+		if toolErr == nil {
+			return toolResult, nil
+		}
+		// A cooperative tool honoring its deadline surfaces ctx.Err()
+		// itself (or a wrapper around it). Substitute the structured
+		// timeout error only when the DERIVED timer expired — i.e. the
+		// upstream ctx is still alive while the derived one is done with
+		// DeadlineExceeded. An upstream cancellation (or any other error)
+		// propagates verbatim.
+		if timeoutBudget > 0 &&
+			errors.Is(toolErr, context.DeadlineExceeded) &&
+			!errors.Is(toolErr, tools.ErrToolTimeout) &&
+			ctx.Err() == nil {
+			return nil, fmt.Errorf("%w after %s", tools.ErrToolTimeout, timeoutBudget)
+		}
+		return toolResult, toolErr
+	}
+
 	for {
 		// Check context before attempting.
 		if err := ctx.Err(); err != nil {
@@ -1531,16 +1604,7 @@ func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, co
 			return nil, err
 		}
 
-		var toolResult any
-		var toolErr error
-		if st, ok := tool.(tools.StreamingTool); ok && e.bus != nil {
-			toolResult, toolErr = st.ExecuteStreaming(ctx, args, func(pu tools.ProgressUpdate) {
-				pu.ToolCallID = toolCallID
-				e.publishToolProgress(ctx, toolCallID, toolName, pu)
-			})
-		} else {
-			toolResult, toolErr = tool.Execute(ctx, args)
-		}
+		toolResult, toolErr := dispatchToolBody()
 
 		// AfterExecute observes every body outcome (success, tool error
 		// result, Go error) - the audit tier behind the gate records the
@@ -2265,6 +2329,9 @@ func (t *MockTool) IsReadOnly(map[string]any) bool { return false }
 
 // IsConcurrencySafe returns false for mock tools by default.
 func (t *MockTool) IsConcurrencySafe(map[string]any) bool { return false }
+
+// TimeoutMs returns 0 for mock tools: no declared timeout budget.
+func (t *MockTool) TimeoutMs() time.Duration { return 0 }
 
 // FilteredToolRegistry wraps a ToolRegistry and only exposes a subset of tools.
 type FilteredToolRegistry struct {
