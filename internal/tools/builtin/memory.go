@@ -25,13 +25,23 @@ func scopeIdentity(ctx context.Context) tools.ScopeIdentity {
 
 // scopeSearchOptions folds an identity into C2 filter options for the
 // Manager search surfaces. Empty MaxScope = no options = unfiltered.
+// A declared-GLOBAL identity maps to the USER purview - exactly the
+// mapping the loop/dispatcher injection path applies
+// (internal/agent/scope_wiring.go memoryScopeOptions: the C2 predicate
+// treats a global-scope caller as identity-less and would hide every
+// project row from the chief-of-staff's TOOL recall while its loop recall
+// spans projects; bughunt 2026-11-06 memory F-2).
 func scopeSearchOptions(ctx context.Context) []memory.SearchOption {
 	id := scopeIdentity(ctx)
 	if id.MaxScope == "" {
 		return nil
 	}
+	filterScope := memory.Scope(id.MaxScope)
+	if filterScope == memory.ScopeGlobal {
+		filterScope = memory.ScopeUser
+	}
 	return []memory.SearchOption{
-		memory.WithScopeFilter(memory.Scope(id.MaxScope), id.ProjectID, id.UserID),
+		memory.WithScopeFilter(filterScope, id.ProjectID, id.UserID),
 		memory.WithMultiUserEnabled(id.MultiUser),
 	}
 }
