@@ -204,6 +204,18 @@ func TestDoctorMemoryDistillFromDB(t *testing.T) {
 // ok, no warn, models-less posture stays green (leaf self-check: works on
 // models-less hosts).
 func TestDoctorMemoryDistillCleanQueue(t *testing.T) {
+	// Hermetic MEEPT_HOME: checkMemoryDistillDoctor resolves memory_model
+	// through config.LoadModelsConfigDefault ($MEEPT_HOME/models.json5,
+	// else ./config/ relative to cwd), so an ambient host without
+	// ~/.meept/models.json5 made the report-only models leg warn (CI
+	// determinism). Point MEEPT_HOME at a scratch dir via the shared
+	// withMeeptHome helper and stage a minimal models.json5 so the
+	// unset-slot fallback is the resolved, by-design state. The queue
+	// behavior under test is unchanged.
+	home := withMeeptHome(t)
+	if err := os.WriteFile(filepath.Join(home, "models.json5"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	dbPath := filepath.Join(t.TempDir(), "queue.db")
 	db, err := openMemoryDoctorTestDB(dbPath)
 	if err != nil {
