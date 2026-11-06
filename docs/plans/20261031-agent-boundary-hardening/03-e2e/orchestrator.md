@@ -145,7 +145,7 @@ Output: APPROVED or specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-boundary-hardening-suite.md | PENDING | 0 | |
+| 01-boundary-hardening-suite.md | COMPLETE | 1 | landed 1781716d; 4/4 scenarios PASS (issue 84) |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE |
 BLOCKED

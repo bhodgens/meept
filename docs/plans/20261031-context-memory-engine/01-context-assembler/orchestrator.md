@@ -193,10 +193,10 @@ every dispatch context). Branch-specific additions:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00-research-budgeting | PENDING | 0 | |
-| 01-allocator-core | PENDING | 0 | |
-| 02-doc-budgets | PENDING | 0 | |
-| 03-integration | PENDING | 0 | |
+| 00-research-budgeting | COMPLETE | 1 | landed b8b138c6 (findings doc, reviewed) |
+| 01-allocator-core | COMPLETE | 1 | landed 14b21b5e (issue 81) |
+| 02-doc-budgets | COMPLETE | 1 | landed 90ab5266 (issue 81) |
+| 03-integration | COMPLETE | 1 | landed 5983163c (issue 81) |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -221,10 +221,10 @@ In-leaf TDD gate; matrix validated at REVIEW time in-session.
 
 | # | Feature (from plan) | Source (leaf/spec) | Unit tests | E2E tests | Status |
 |---|---------------------|--------------------|-----------|-----------|--------|
-| F1 | window-fraction allocation, deterministic | 01 T3-T5 | contextalloc tests | context-memory-engine | PENDING |
-| F2 | doc budgets bound CLAUDE.md/README | 02 | artifact budget tests | context-memory-engine | PENDING |
-| F3 | stable prefix hash preservation | 02 | prompt ordered tests | context-memory-engine | PENDING |
-| F7 | tier budgets into allocator, nil = today | 03 | seam + typed-nil tests | context-memory-engine | PENDING |
+| F1 | window-fraction allocation, deterministic | 01 T3-T5 | contextalloc tests | context-memory-engine | VALIDATED |
+| F2 | doc budgets bound CLAUDE.md/README | 02 | artifact budget tests | context-memory-engine | VALIDATED |
+| F3 | stable prefix hash preservation | 02 | prompt ordered tests | context-memory-engine | VALIDATED |
+| F7 | tier budgets into allocator, nil = today | 03 | seam + typed-nil tests | context-memory-engine | VALIDATED |
 
 Statuses: PENDING | DELTA | VALIDATED
 

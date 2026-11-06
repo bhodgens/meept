@@ -217,9 +217,9 @@ Output: APPROVED or specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| R0-research.md | PENDING | 0 | |
-| 01-taint-redesign.md | PENDING | 0 | |
-| 02-driver-wiring.md | PENDING | 0 | |
+| R0-research.md | COMPLETE | 1 | landed c5ef67e9 (findings doc, reviewed) |
+| 01-taint-redesign.md | COMPLETE | 1 | landed 46661bbe (issue 84) |
+| 02-driver-wiring.md | COMPLETE | 1 | landed 1c573f80 (issue 84) |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE |
 BLOCKED (research leaf: COMPLETE when findings reviewed in-session)
@@ -244,11 +244,11 @@ Go leaves with inline TDD tables). Coverage matrix:
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|-----------|-----------|--------|
-| FA1 | per-handoff decision replaces whole-message label | 01 T1 | TestCheckMessageTaintWholeCleanPasses / TestCheckMessageTaintTaintedSegmentBlocked | boundary-hardening-01/02 | PENDING |
-| FA2 | sink blocks TaintSecret + TaintUntrusted | 01 T2 | TestAgentMessageSinkBlocksUntrusted | boundary-hardening-02 | PENDING |
-| FA3 | 3 drivers mark handoffs; framing clean | 02 T1 | TestDriverMarksHandoffUntrusted (per driver) | boundary-hardening-01 | PENDING |
-| FA4 | inter-agent deny patterns | 02 T3 | TestInterAgentBoundaryInspectHandoff | boundary-hardening-02 | PENDING |
-| FA5 | components.go wiring + typed-nil guard | 02 T2 | TestInterAgentTaintWiringFailsWithoutRegistration | boundary-hardening-01 | PENDING |
+| FA1 | per-handoff decision replaces whole-message label | 01 T1 | TestCheckMessageTaintWholeCleanPasses / TestCheckMessageTaintTaintedSegmentBlocked | boundary-hardening-01/02 | VALIDATED |
+| FA2 | sink blocks TaintSecret + TaintUntrusted | 01 T2 | TestAgentMessageSinkBlocksUntrusted | boundary-hardening-02 | VALIDATED |
+| FA3 | 3 drivers mark handoffs; framing clean | 02 T1 | TestDriverMarksHandoffUntrusted (per driver) | boundary-hardening-01 | VALIDATED |
+| FA4 | inter-agent deny patterns | 02 T3 | TestInterAgentBoundaryInspectHandoff | boundary-hardening-02 | VALIDATED |
+| FA5 | components.go wiring + typed-nil guard | 02 T2 | TestInterAgentTaintWiringFailsWithoutRegistration | boundary-hardening-01 | VALIDATED |
 
 Statuses: PENDING | DELTA | VALIDATED. Delta log: [none yet]
 
