@@ -1,24 +1,20 @@
 package cluster
 
 import (
-
-
 	"crypto/ed25519"
 	"log/slog"
 	"sync"
 
 	"github.com/caimlas/meept/internal/bus"
 
-	q "github.com/caimlas/meept/internal/queue"
 	"context"
-	"fmt"
-	"path/filepath"
-	"os"
 	"crypto/rand"
+	"fmt"
+	q "github.com/caimlas/meept/internal/queue"
 	xxhash "github.com/cespare/xxhash/v2"
+	"os"
+	"path/filepath"
 )
-
-
 
 // Engine is the central orchestrator for cluster operations.
 // It manages gossip communication, git-based membership sync,
@@ -57,20 +53,6 @@ type EngineConfig struct {
 	NodeName        string
 	EnableWireGuard bool
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // NewEngine creates a new cluster engine from the given configuration.
 // It does not start any background routines; call Start() to begin.
