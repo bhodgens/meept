@@ -53,4 +53,4 @@ Areas examined and found sound (within time-box; no finding filed):
   ToolFactories documented as the mirrored construction seam; the removed
   RegisterGitHubTools is now named as removed, matching the register.go tombstone).
 - F-2 CLOSED: postToolTextExplicit flag implements the claimed precedence (SetPostToolText wins over the recall arm; cleared in Reset). Suites green: continuity-regressions, refusal, memory-defaults, memory-scoping.
-- F-3 OPEN (BuildIndexWithCancel dead seam) — parent fixing next.
+- F-3 CLOSED: removed the dead SemanticIndex.BuildIndexWithCancel+Stop pair (zero callers, unshipped "fix"). The real drain already lives on Dispatcher.indexCtx/indexWG, cancelled+waited in Dispatcher.Stop (called from Components.Stop:6902).
