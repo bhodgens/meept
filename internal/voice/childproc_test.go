@@ -115,6 +115,23 @@ func waitGone(t *testing.T, pid int, within time.Duration) {
 	t.Fatalf("pid %d still alive after %s", pid, within)
 }
 
+// waitAlive polls until pid is a live process (signal 0), failing after the
+// deadline. The supervised child needs a moment to exec and connect, so a
+// one-shot signal-0 check races the spawn chain (fake daemon -> supervisor ->
+// child); polling removes the race while keeping the assertion strong: a
+// child killed by a real parent-death bug stays dead and the deadline fails.
+func waitAlive(t *testing.T, pid int, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if processAlive(pid) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("supervised child pid %d not alive after %s", pid, within)
+}
+
 // T2: EnsureRunning spawns exactly one child; a second EnsureRunning reuses
 // it (one spawn, observed via the helper's on-disk marker, one process).
 func TestChildProcEnsureReusesOneSpawn(t *testing.T) {
@@ -332,9 +349,11 @@ func TestChildProcParentDeath(t *testing.T) {
 		t.Fatalf("child pid never appeared in %s: %v", pidFile, err)
 	}
 	waitReady(t, readyFile, 5*time.Second)
-	if !processAlive(childPID) {
-		t.Fatalf("supervised child pid %d not alive", childPID)
-	}
+	// Poll liveness with a generous deadline instead of a one-shot check:
+	// the pid lands in the file as soon as the supervisor reports it, but
+	// the child may still be mid-exec. If the child died for any reason
+	// (supervisor bug, spawn failure) it stays dead and this fails.
+	waitAlive(t, childPID, 10*time.Second)
 
 	// Hard-kill the parent: the supervisor must terminate the child group.
 	if err := fakeDaemon.Process.Kill(); err != nil {

@@ -226,6 +226,26 @@ func runVoiceFakeDaemon(args []string) int {
 	cmd.ExtraFiles = []*os.File{reportWrite, deathRead}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	// The supervisor forwards its own stdin to the runtime (RunSupervisor
+	// defaults opts.Stdin to os.Stdin and assigns child.Stdin = opts.Stdin),
+	// and the voice child reads its one-time start token line from stdin
+	// before it connects. exec.Cmd nils Stdin to /dev/null, so without this
+	// the child exits(3) at spawn - empty start token - and the
+	// parent-death teardown has nothing left to terminate. Feed the token
+	// line through a pipe: it fits the pipe buffer, so write-then-close
+	// never blocks and the child sees EOF after the line.
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fake daemon: stdin pipe:", err)
+		return 1
+	}
+	if _, wErr := stdinW.WriteString("fake-daemon-start-token\n"); wErr != nil {
+		fmt.Fprintln(os.Stderr, "fake daemon: stdin token write:", wErr)
+	}
+	if cErr := stdinW.Close(); cErr != nil {
+		fmt.Fprintln(os.Stderr, "fake daemon: stdin token close:", cErr)
+	}
+	cmd.Stdin = stdinR
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, "fake daemon: start supervisor:", err)
 		return 1
