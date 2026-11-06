@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // handleSubmitTurnResult registers an accepted chat.submit ack and spawns
@@ -203,6 +204,7 @@ func (m *ChatModel) appendToSessionTranscript(sessionID, role, content string) {
 		return
 	}
 	msg := ChatMessage{
+		ID:        id.Generate("msg-"),
 		Role:      role,
 		Content:   content,
 		Timestamp: time.Now(),

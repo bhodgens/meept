@@ -3183,7 +3183,10 @@ func (a *App) getQuickActions() []string {
 		if a.chat != nil {
 			// Show copy hint when there's an active text selection
 			if a.chat.HasSelection() {
-				actions = append(actions, a.styles.HelpKey.Render("c")+" "+a.styles.HelpValue.Render("copy selection"))
+				actions = append(actions,
+					a.styles.HelpKey.Render("c")+" "+a.styles.HelpValue.Render("copy selection"),
+					a.styles.HelpKey.Render("q")+" "+a.styles.HelpValue.Render("quote message"),
+				)
 			}
 
 			chatMode := a.chat.GetMode()

@@ -72,6 +72,7 @@ const doubleEnterTTL = 500 * time.Millisecond
 
 // ChatMessage represents a single chat message.
 type ChatMessage struct {
+	ID           string // Stable identity for quote references ("msg-..."); empty for local-only lines
 	Role         string // "user", "assistant", "system", "participant", or "pending"
 	Content      string
 	SourceClient string // Client identifier for participant messages (e.g. "claude", "tui")
@@ -1206,6 +1207,15 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 
+		case "q":
+			// Quote selected message into the input (message-quotes leaf 05):
+			// inserts a `> [msg <id>]` blockquote of the selected message at
+			// the cursor, keeping prior input. No-op without a selection.
+			if m.focused == FocusViewport {
+				m.QuoteSelected()
+				return nil
+			}
+
 		case "ctrl+l":
 			// Clear chat history
 			m.messages = []ChatMessage{}
@@ -1831,6 +1841,7 @@ func (m *ChatModel) getMessageContent(msg ChatMessage) string {
 
 func (m *ChatModel) addMessage(role, content string) {
 	m.messages = append(m.messages, ChatMessage{
+		ID:        id.Generate("msg-"),
 		Role:      role,
 		Content:   content,
 		Timestamp: time.Now(),
@@ -1851,6 +1862,7 @@ func (m *ChatModel) AddSystemMessage(content string) {
 // AddParticipantMessage adds a message from a session participant to the chat transcript.
 func (m *ChatModel) AddParticipantMessage(sourceClient, content string) {
 	m.messages = append(m.messages, ChatMessage{
+		ID:           id.Generate("msg-"),
 		Role:         RoleParticipant,
 		Content:      content,
 		SourceClient: sourceClient,
@@ -2207,6 +2219,7 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 	for _, sm := range serverMsgs {
 		ts, _ := time.Parse(time.RFC3339, sm.Timestamp)
 		chatMsgs = append(chatMsgs, ChatMessage{
+			ID:        fmt.Sprintf("msg-%d", sm.ID),
 			Role:      sm.Role,
 			Content:   sm.Content,
 			Timestamp: ts,
@@ -2329,7 +2342,7 @@ func (m *ChatModel) updateViewport() {
 				copyHint = lipgloss.NewStyle().
 					Foreground(paletteColor("success")).
 					Bold(true).
-					Render("  (c) copy")
+					Render("  (c) copy  (q) quote")
 			}
 			header := lipgloss.NewStyle().
 				Foreground(paletteColor("textMuted")).
