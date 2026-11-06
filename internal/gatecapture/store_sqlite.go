@@ -84,10 +84,22 @@ var captureMigrations = func() *migrate.Registry {
 
 // openGateDB opens and migrates the sqlite capture DB.
 func openGateDB(dbPath string) (*gateDB, error) {
-	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+	// Command-gate capture rows can carry secret-bearing argv: the DB
+	// lives under a user-only directory with owner-only file modes
+	// (bughunt 2026-11-06 security F-1; sqlite's default create mode is
+	// 0644 = world-readable).
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("gatecapture: failed to create directory: %w", err)
 	}
+	if f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600); err == nil {
+		_ = f.Close() //nolint:errcheck // existence+mode pin; sql.Open re-opens
+	} else if !os.IsExist(err) {
+		return nil, fmt.Errorf("gatecapture: failed to create database file: %w", err)
+	}
+	// An existing file (created by an older 0644 build) is tightened here;
+	// WAL side files are best-effort.
+	_ = os.Chmod(dbPath, 0o600)        //nolint:errcheck // best-effort tighten
+	_ = os.Chmod(dbPath+"-wal", 0o600) //nolint:errcheck // best-effort tighten
 
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_foreign_keys=on")
 	if err != nil {
