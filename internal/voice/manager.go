@@ -61,6 +61,14 @@ type Manager struct {
 	outbound map[string]struct{}           // registered by TrackOutbound; NEVER answered by us
 	done     map[string]chan struct{}      // registered on track/initiate; closed once on hangup
 	release  func(ccid string, outcome Outcome)
+
+	// answerMu guards answerHook. The hook is the answered-notification
+	// seam (audit 2026-11-06 H1): the daemon wiring registers the dialer's
+	// no-answer-timer cancel on it, so an outbound call picked up just
+	// before timer expiry keeps its slot. Without this seam the hook is
+	// unwired and a no-answer Fail can land on a live, answered call.
+	answerMu   sync.Mutex
+	answerHook func(ccid string)
 }
 
 // NewManager returns a Manager. spawn may be nil when the caller only uses
@@ -110,10 +118,38 @@ func (m *Manager) SetReleaseHook(fn func(ccid string, outcome Outcome)) {
 	m.mu.Unlock()
 }
 
+// SetAnsweredHook installs the call.answered notification callback (audit
+// 2026-11-06 H1). The webhook path invokes it for every call.answered on a
+// tracked id - inbound or outbound - so the dialer can cancel the outbound
+// no-answer timer the moment the call is picked up; without the wiring the
+// timer can fire a late OutcomeNoAnswer on a live, answered call. A nil fn
+// clears the hook. Hook invocations happen outside the manager mutex and
+// never fail the webhook; unknown/tracked-refused ids do not invoke it.
+func (m *Manager) SetAnsweredHook(fn func(ccid string)) {
+	m.answerMu.Lock()
+	m.answerHook = fn
+	m.answerMu.Unlock()
+}
+
+// notifyAnswered invokes the answered hook outside the manager mutex. A
+// missing hook is a no-op (the H1 defect shape: the seam existed only as a
+// manager-side field before the wiring landed).
+func (m *Manager) notifyAnswered(ccid string) {
+	m.answerMu.Lock()
+	hook := m.answerHook
+	m.answerMu.Unlock()
+	if hook != nil {
+		hook(ccid)
+	}
+}
+
 // releaseOnce removes every per-call trace of ccid under the lock (so a
 // concurrent duplicate terminal event sees nothing and no-ops) and returns
 // the cancels plus whether the hook should fire. The done channel is closed
-// exactly once here and retained for late WaitCall observers.
+// exactly once here; unlike an earlier revision documented, it is deleted
+// with the rest of the per-call state (audit 2026-11-06 M3), so a WaitCall
+// AFTER teardown yields a fresh never-closing channel - retention is the
+// original channel holder's job, not the manager's.
 func (m *Manager) releaseOnce(ccid string) (callCancel, streamCancel context.CancelFunc, fire bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -179,6 +215,21 @@ func (m *Manager) HandleCallEvent(ctx context.Context, ev telnyx.CallEvent) erro
 		if m.spawn != nil {
 			cancel, err := m.spawn(ctx, ev)
 			if err != nil {
+				// Spawn failed AFTER the carrier accepted the answer: the
+				// session will never exist, so hang the leg up now
+				// (audit 2026-11-06 H3) - otherwise the caller sits on a
+				// dead line until some carrier-side timeout. The hangup is
+				// best-effort; a failure folds into the surfaced error.
+				// Either way the spawn failure is a terminal failed
+				// outcome: failUntracked fires the release fan-out exactly
+				// once so any registry/goal/effects state a spawn seam
+				// variant acquired before failing still releases. A
+				// redelivered initiated event for the now-dead leg fails
+				// at AnswerCall, as any late event for an ended call does.
+				if hErr := m.tel.HangupCall(ctx, ev.CallControlID); hErr != nil {
+					err = fmt.Errorf("voice: spawn failed (%v); carrier hangup also failed (%v)", err, hErr)
+				}
+				m.failUntracked(ev.CallControlID, fmt.Sprintf("inbound spawn failed: %v", err))
 				return err
 			}
 			m.mu.Lock()
@@ -196,6 +247,9 @@ func (m *Manager) HandleCallEvent(ctx context.Context, ev telnyx.CallEvent) erro
 			// stream audio for a call we never initiated or answered.
 			return fmt.Errorf("voice: call.answered for untracked call_control_id %q", ev.CallControlID)
 		}
+		// Answered on a tracked id: notify the answered hook (audit
+		// 2026-11-06 H1 - the outbound no-answer timer cancel rides this).
+		m.notifyAnswered(ev.CallControlID)
 		if trackedOut {
 			// Dial-initiated (outbound) call: Telnyx already answered the leg
 			// it dialed; there is nothing to answer. AnswerCall here returns
@@ -268,6 +322,22 @@ func (m *Manager) TrackOutbound(ccid string) error {
 	return nil
 }
 
+// failUntracked tears down a ccid the manager never registered (H3
+// fallback: the spawn seam failed before the call became tracked and the
+// carrier hangup also failed). It creates the done channel, closes it, and
+// fires the release hook with OutcomeFailed, so the registry slot the spawn
+// seam acquired, the goal park, and any effects reservation release
+// exactly once. A ccid that releaseOnce already claimed between check and
+// here is a no-op: whichever teardown path runs first wins.
+func (m *Manager) failUntracked(ccid, reason string) {
+	m.mu.Lock()
+	if _, ok := m.done[ccid]; !ok {
+		m.done[ccid] = make(chan struct{})
+	}
+	m.mu.Unlock()
+	m.FailOutcome(ccid, OutcomeFailed, reason)
+}
+
 // Fail tears down a tracked call on a non-hangup terminal path (streaming
 // failed, no-answer timeout) and fires the release hook once with
 // OutcomeFailed. An unknown ccid is a no-op, matching hangup idempotency.
@@ -292,11 +362,17 @@ func (m *Manager) FailOutcome(ccid string, outcome Outcome, reason string) {
 }
 
 // WaitCall returns a channel that closes when the call's session ends (its
-// call.hangup or Fail is processed). A tracked call always yields a channel
-// - already closed if the session already ended - so a dialer can block on
-// it and return when the call is done. Ids that were never tracked return a
-// channel that never closes. The channel is retained after close, so late
-// WaitCall callers still observe completion.
+// call.hangup or Fail is processed). A call the manager is CURRENTLY tracking
+// yields its done channel - already closed if the session already ended.
+// IMPORTANT (audit 2026-11-06 M3): per-call channels are deleted from the
+// manager state on release, so a call whose terminal event was processed
+// BEFORE this call (or whose ccid was never tracked) yields a FRESH channel
+// that never closes - retention is NOT guaranteed across teardown. A dialer
+// that must observe completion of a call it already holds a channel for is
+// fine (it kept the original channel; that channel is closed once and stays
+// closed), but a caller re-resolving by ccid after teardown cannot rely on
+// seeing closure. Ids that were never tracked return a channel that never
+// closes.
 func (m *Manager) WaitCall(ccid string) <-chan struct{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -64,8 +64,14 @@ type DialConfig struct {
 	PublicStreamURL string
 	ConnectionID    string
 	FromNumber      string
-	TimeoutSecs     int
-	TestBaseURL     string
+	// TimeoutSecs drives BOTH ring-time limits (audit 2026-11-06 M8):
+	// the dialer's local no-answer timer AND the carrier-side
+	// timeout_secs on the POST /calls body. Keeping the carrier limit on
+	// the same config (voice.timeout_secs, default 30) means the two
+	// races can never disagree about when a ring is dead; 0 falls back
+	// to DefaultNoAnswerSecs on both sides.
+	TimeoutSecs int
+	TestBaseURL string
 }
 
 // AuditWriter is the narrow audit seam (C9): one canonical row per dial
@@ -88,10 +94,11 @@ type EffectsLedger interface {
 
 // DialController is the dial-facing seam: telnyx.CallController plus
 // DialOut (leaf-02 Client satisfies it; the countingController gate fake
-// satisfies it structurally).
+// satisfies it structurally). The trailing timeoutSecs is the carrier-side
+// timeout_secs resolved from voice.timeout_secs (audit 2026-11-06 M8).
 type DialController interface {
 	telnyx.CallController
-	DialOut(ctx context.Context, to, from, connectionID string) (string, error)
+	DialOut(ctx context.Context, to, from, connectionID string, timeoutSecs int) (string, error)
 }
 
 // compile-time proof that the leaf-02 client satisfies the dial seam.
@@ -103,9 +110,24 @@ type dialReceipt struct {
 	CallControlID string `json:"call_control_id"`
 }
 
-// defaultNoAnswerSecs matches telnyx timeout_secs default (leaf-02 dial
-// request body) when config leaves TimeoutSecs unset.
-const defaultNoAnswerSecs = 30
+// DefaultNoAnswerSecs is the ring-time limit applied when config leaves
+// TimeoutSecs unset: it matches the telnyx default timeout_secs (leaf-02
+// dial request body) so the local timer and the carrier limit agree. It is
+// exported because the telnyx DialOut call site consumes the same value for
+// the carrier-side timeout_secs (audit 2026-11-06 M8 - the carrier field
+// was previously hardcoded, ignoring voice.timeout_secs).
+const DefaultNoAnswerSecs = 30
+
+// NoAnswerSecs resolves the effective ring timeout: the configured
+// TimeoutSecs when positive, else DefaultNoAnswerSecs. Both the dialer's
+// no-answer timer and the DialOut timeout_secs ride this single resolution
+// so the two limits can never disagree.
+func (d *Dialer) NoAnswerSecs() int {
+	if d.cfg.TimeoutSecs > 0 {
+		return d.cfg.TimeoutSecs
+	}
+	return DefaultNoAnswerSecs
+}
 
 // Dialer places outbound calls under the C9 order. All fields are
 // immutable after construction; mutable state (no-answer timers, per-call
@@ -128,12 +150,18 @@ type Dialer struct {
 // NewDialer returns a Dialer. mgr may be nil (registry-only tests, and the
 // wiring leaf before the manager exists on the path); when non-nil, the
 // no-answer timer reports FailOutcome(ccid, OutcomeNoAnswer) and terminal
-// closure is observed through Manager.WaitCall.
+// closure is observed through Manager.WaitCall. Non-nil mgr also WIRES the
+// answered notification (audit 2026-11-06 H1): the dialer registers its
+// NotifyAnswered as the manager's call.answered hook, so an outbound call
+// picked up before timer expiry keeps its slot instead of eating a late
+// no-answer release. The dialer owns its timer; the manager owns the
+// webhook seam - connecting them at dialer construction keeps the whole
+// contract inside the voice package.
 func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, fx EffectsLedger, audit AuditWriter, logger *slog.Logger) *Dialer {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Dialer{
+	d := &Dialer{
 		cfg:    cfg,
 		tel:    tel,
 		mgr:    mgr,
@@ -145,6 +173,10 @@ func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, f
 		dones:  make(map[string]chan struct{}),
 		fin:    make(map[string]bool),
 	}
+	if mgr != nil {
+		mgr.SetAnsweredHook(d.NotifyAnswered)
+	}
+	return d
 }
 
 // Dial places one outbound call under the pinned order:
@@ -221,9 +253,10 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 	// -- 4. remaining policy + registry gates (still zero HTTP): one live
 	// call per target globally (ErrDuplicateTarget, pinned BEFORE the
 	// allowlist check by TestDialRefusals), allowlist, public URL,
-	// connection id, capacity, one live call per employee. --
+	// connection id, capacity, one live call per employee. Targets are
+	// compared through NormalizeE164 (audit 2026-11-06 M7). --
 	for _, inst := range d.reg.Live() {
-		if inst.Target == target {
+		if NormalizeE164(inst.Target) == target {
 			gateErr := fmt.Errorf("%w: %s", ErrDuplicateTarget, target)
 			d.abandonEffect(ctx, key, gateErr)
 			return DialResult{}, gateErr
@@ -253,8 +286,10 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 		return DialResult{}, gateErr
 	}
 
-	// -- 5. POST /calls --
-	ccid, err := d.tel.DialOut(ctx, target, d.cfg.FromNumber, d.cfg.ConnectionID)
+	// -- 5. POST /calls (timeout_secs rides the resolved voice.timeout_secs
+	// so the carrier-side ring limit matches the local no-answer timer;
+	// audit 2026-11-06 M8) --
+	ccid, err := d.tel.DialOut(ctx, target, d.cfg.FromNumber, d.cfg.ConnectionID, d.NoAnswerSecs())
 	if err != nil || ccid == "" {
 		if err == nil {
 			err = errors.New("telnyx dial out returned an empty call_control_id")
@@ -346,7 +381,11 @@ func (d *Dialer) doneFor(ctx context.Context, ccid string) <-chan struct{} {
 
 // registryGate enforces the C8 capacity and uniqueness rules against the
 // live snapshot: cap, one live call per employee (ErrBusy), one live call
-// per target globally (ErrDuplicateTarget).
+// per target globally (ErrDuplicateTarget). Live targets are compared
+// through NormalizeE164 (audit 2026-11-06 M7) so a registry entry acquired
+// in a non-canonical shape (a raw webhook `from`, a legacy row) still
+// collides with its canonical dial-target twin - the duplicate-target rule
+// is by number, not by string.
 func (d *Dialer) registryGate(target, employeeID string) error {
 	live := d.reg.Live()
 	// Same sentinel as CallRegistry.Acquire: cap <= 0 means unlimited
@@ -390,10 +429,7 @@ func (d *Dialer) abandonEffect(ctx context.Context, key string, cause error) {
 // and closes the dial result's Done channel. NotifyAnswered stops the
 // timer when the call is picked up, so no late Fail lands on a live call.
 func (d *Dialer) armNoAnswerTimer(ccid string) {
-	secs := d.cfg.TimeoutSecs
-	if secs <= 0 {
-		secs = defaultNoAnswerSecs
-	}
+	secs := d.NoAnswerSecs()
 	timer := time.NewTimer(time.Duration(secs) * time.Second)
 	d.mu.Lock()
 	d.timers[ccid] = timer
@@ -497,8 +533,14 @@ func NewRegistry(cap int) *CallRegistry {
 	return &CallRegistry{cap: cap, live: make(map[string]Instance)}
 }
 
-// Acquire registers a live instance under the C8 rules.
+// Acquire registers a live instance under the C8 rules. Target is
+// normalized at this boundary (audit 2026-11-06 M7): every registry entry
+// carries the same canonical E.164 shape, so direct Acquire callers (the
+// inbound spawn seam passes a raw webhook `from`) and the dialer's
+// pre-gate snapshot agree by construction instead of by each caller
+// remembering to normalize.
 func (r *CallRegistry) Acquire(ccid, employeeID, target string) (Instance, error) {
+	target = NormalizeE164(target)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

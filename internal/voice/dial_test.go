@@ -24,7 +24,7 @@ type countingController struct {
 	failDV bool
 }
 
-func (c *countingController) DialOut(_ context.Context, _, _, _ string) (string, error) {
+func (c *countingController) DialOut(_ context.Context, _, _, _ string, _ int) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.failDV {
@@ -244,4 +244,195 @@ func TestOutboundTimeoutRelease(t *testing.T) {
 		t.Errorf("target still occupied after no-answer timeout: %v, want slot released", err)
 	}
 	reg.Release("cc-after")
+}
+
+// TestDialRegistryNormalizesTargets pins audit 2026-11-06 M7: the registry
+// normalizes targets at the Acquire boundary, so an instance acquired with
+// a raw-form number (the inbound spawn seam passes the webhook `from`)
+// collides with the canonical E.164 twin at both Acquire and the dialer's
+// duplicate-target gate. Without boundary normalization the two shapes
+// could coexist live and ring one number twice.
+func TestDialRegistryNormalizesTargets(t *testing.T) {
+	reg := NewRegistry(4)
+	// Acquire with a bare 10-digit number; the canonical twin must refuse.
+	inst, err := reg.Acquire("cc-raw-1", "emp-1", "555 123 0001")
+	if err != nil {
+		t.Fatalf("Acquire(raw form): %v", err)
+	}
+	if inst.Target != "+15551230001" {
+		t.Errorf("Acquire stored target %q, want canonical +15551230001 (M7: normalize at the boundary)", inst.Target)
+	}
+	if _, err := reg.Acquire("cc-can-1", "emp-2", "+15551230001"); !errors.Is(err, ErrDuplicateTarget) {
+		t.Errorf("Acquire(canonical twin) = %v, want ErrDuplicateTarget", err)
+	}
+
+	// The dialer's duplicate-target scan must also treat the live raw-form
+	// entry as a duplicate of the canonical dial target (zero HTTP).
+	srv := zeroRequestServer(t)
+	defer srv.Close()
+	cfg := dialConfig()
+	cfg.TestBaseURL = srv.URL
+	cfg.AllowedNumbers = []string{"+15551230001"}
+	d := NewDialer(cfg, &countingController{}, nil, reg, newTestLedger(t), nil, testLogger())
+	if _, err := d.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-3", Target: "+15551230001", RequestID: "req-m7-1",
+	}); !errors.Is(err, ErrDuplicateTarget) {
+		t.Errorf("dial against live raw-form twin = %v, want ErrDuplicateTarget (M7)", err)
+	}
+}
+
+// TestDialTimeoutSecsDrivesCarrierAndTimer pins audit 2026-11-06 M8: the
+// configured TimeoutSecs drives the carrier-side timeout_secs (the fake
+// records the value DialOut was invoked with) AND the local no-answer
+// timer; the zero sentinel falls back to the shared default on both sides.
+func TestDialTimeoutSecsDrivesCarrierAndTimer(t *testing.T) {
+	// Configured value reaches DialOut verbatim.
+	rec := &timeoutRecordingController{inner: &countingController{}}
+	cfg := dialConfig()
+	cfg.TimeoutSecs = 17
+	d := NewDialer(cfg, rec, nil, NewRegistry(4), newTestLedger(t), &captureAudit{}, testLogger())
+	allowedTarget := cfg.AllowedNumbers[0]
+	if _, err := d.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-1", Target: allowedTarget, RequestID: "req-m8-1",
+	}); err != nil {
+		t.Fatalf("Dial(TimeoutSecs=17): %v", err)
+	}
+	if got := rec.lastTimeout(); got != 17 {
+		t.Errorf("carrier timeout_secs = %d, want 17 (M8: config drives the carrier field, not a hardcoded 30)", got)
+	}
+	if got := d.NoAnswerSecs(); got != 17 {
+		t.Errorf("NoAnswerSecs() = %d, want 17 (local timer must match the carrier limit)", got)
+	}
+
+	// Zero sentinel: both sides fall back to the shared default.
+	cfg0 := dialConfig()
+	cfg0.TimeoutSecs = 0
+	d0 := NewDialer(cfg0, rec, nil, NewRegistry(4), newTestLedger(t), &captureAudit{}, testLogger())
+	if got := d0.NoAnswerSecs(); got != DefaultNoAnswerSecs {
+		t.Errorf("NoAnswerSecs() with unset config = %d, want default %d", got, DefaultNoAnswerSecs)
+	}
+	if _, err := d0.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-1", Target: allowedTarget, RequestID: "req-m8-2",
+	}); err != nil {
+		t.Fatalf("Dial(TimeoutSecs=0): %v", err)
+	}
+	if got := rec.lastTimeout(); got != DefaultNoAnswerSecs {
+		t.Errorf("carrier timeout_secs with unset config = %d, want default %d", got, DefaultNoAnswerSecs)
+	}
+}
+
+// timeoutRecordingController wraps a countingController and records the
+// carrier timeout_secs the dialer passed to DialOut.
+type timeoutRecordingController struct {
+	inner *countingController
+
+	mu   sync.Mutex
+	last int
+}
+
+func (c *timeoutRecordingController) DialOut(ctx context.Context, to, from, connectionID string, timeoutSecs int) (string, error) {
+	c.mu.Lock()
+	c.last = timeoutSecs
+	c.mu.Unlock()
+	return c.inner.DialOut(ctx, to, from, connectionID, timeoutSecs)
+}
+
+func (c *timeoutRecordingController) AnswerCall(ctx context.Context, ccid string) error {
+	return c.inner.AnswerCall(ctx, ccid)
+}
+
+func (c *timeoutRecordingController) StartStreaming(ctx context.Context, ccid, url string, codec telnyx.Codec) error {
+	return c.inner.StartStreaming(ctx, ccid, url, codec)
+}
+
+func (c *timeoutRecordingController) HangupCall(ctx context.Context, ccid string) error {
+	return c.inner.HangupCall(ctx, ccid)
+}
+
+func (c *timeoutRecordingController) lastTimeout() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.last
+}
+
+// TestDialAnsweredCancelsNoAnswerTimer pins the H1 wiring end to end: a
+// dialer constructed with a live manager has NotifyAnswered registered as
+// the manager's call.answered hook, so an answered outbound call survives
+// past the original timer deadline (no late OutcomeNoAnswer on a live call,
+// registry slot retained) while an never-answered control call still times
+// out and releases.
+func TestDialAnsweredCancelsNoAnswerTimer(t *testing.T) {
+	tel := &timeoutRecordingController{inner: &countingController{}}
+	cfg := dialConfig()
+	cfg.TimeoutSecs = 1 // test-scale
+	reg := NewRegistry(4)
+	mgr := NewManager(ManagerConfig{StreamURL: "wss://tunnel.example/media"}, tel, nil)
+	d := NewDialer(cfg, tel, mgr, reg, newTestLedger(t), &captureAudit{}, testLogger())
+
+	// Answered call: dial, then simulate the carrier pickup through the
+	// manager's webhook path (TrackOutbound already ran inside Dial).
+	res, err := d.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-1", Target: allowedNumber(t, cfg), RequestID: "req-h1-1",
+	})
+	if err != nil {
+		t.Fatalf("Dial(answered call): %v", err)
+	}
+	if err := mgr.HandleCallEvent(context.Background(), telnyx.CallEvent{
+		EventType: "call.answered", CallControlID: res.CallControlID, Direction: "outgoing",
+	}); err != nil {
+		t.Fatalf("HandleCallEvent(answered): %v", err)
+	}
+
+	// Never-answered control call on a different employee/target.
+	cfg2 := dialConfig()
+	cfg2.TimeoutSecs = 1
+	target2 := allowedNumber(t, cfg2)
+	reg2 := NewRegistry(4)
+	mgr2 := NewManager(ManagerConfig{StreamURL: "wss://tunnel.example/media"}, tel, nil)
+	d2 := NewDialer(cfg2, tel, mgr2, reg2, newTestLedger(t), &captureAudit{}, testLogger())
+	res2, err := d2.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-2", Target: target2, RequestID: "req-h1-2",
+	})
+	if err != nil {
+		t.Fatalf("Dial(control call): %v", err)
+	}
+
+	// The answered call must STILL be live after 2x the timer deadline.
+	time.Sleep(2200 * time.Millisecond)
+	live := 0
+	for _, inst := range reg.Live() {
+		if inst.CallControlID == res.CallControlID {
+			live++
+		}
+	}
+	if live != 1 {
+		t.Errorf("answered call released past its timer deadline (H1: late no-answer landed on a live call)")
+	}
+	select {
+	case <-res.Done:
+		t.Errorf("answered call's Done channel closed, want still open (no-answer fired on answered call)")
+	default:
+	}
+
+	// The control call must have timed out and released.
+	select {
+	case <-res2.Done:
+		if _, err := reg2.Acquire("cc-probe-h1", "emp-9", target2); err != nil {
+			t.Errorf("control call target not released after no-answer: %v", err)
+		} else {
+			reg2.Release("cc-probe-h1")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("control call never timed out")
+	}
+}
+
+// allowedNumber returns the config's first allowlist entry (the tests dial
+// their own allowed target; no hardcoded number is duplicated here).
+func allowedNumber(t *testing.T, cfg DialConfig) string {
+	t.Helper()
+	if len(cfg.AllowedNumbers) == 0 {
+		t.Fatalf("dial config has no allowed numbers")
+	}
+	return cfg.AllowedNumbers[0]
 }

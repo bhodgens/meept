@@ -142,7 +142,10 @@ func (c *Client) StartStreaming(ctx context.Context, callControlID, streamURL st
 }
 
 // dialRequest is the POST /calls body that starts an outbound call.
-// timeout_secs is a field (default 30, set by the leaf-11 call site).
+// timeout_secs is the carrier-side ring limit; the dialer sends its
+// resolved no-answer seconds (voice.timeout_secs) so the carrier hangs a
+// dead ring up at the same moment the local timer does (audit 2026-11-06
+// M8 - the field was previously hardcoded to 30, ignoring config).
 type dialRequest struct {
 	ConnectionID string `json:"connection_id"`
 	To           string `json:"to"`
@@ -150,16 +153,27 @@ type dialRequest struct {
 	TimeoutSecs  int    `json:"timeout_secs"`
 }
 
+// DefaultDialTimeoutSecs is the carrier-side timeout_secs fallback when the
+// caller passes <= 0: it matches telnyx's own default and voice's
+// DefaultNoAnswerSecs, so an unset config keeps the old wire behavior
+// (audit 2026-11-06 M8).
+const DefaultDialTimeoutSecs = 30
+
 // DialOut starts an outbound call through the Call Control application
 // identified by connectionID and returns the new call_control_id parsed
-// from data.call_control_id. A non-2xx response or an undecodable body is
-// an %w-wrapped error with an empty id.
-func (c *Client) DialOut(ctx context.Context, to, from, connectionID string) (string, error) {
+// from data.call_control_id. timeoutSecs is the carrier-side timeout_secs
+// (<= 0 falls back to DefaultDialTimeoutSecs, matching telnyx's own
+// default). A non-2xx response or an undecodable body is an %w-wrapped
+// error with an empty id.
+func (c *Client) DialOut(ctx context.Context, to, from, connectionID string, timeoutSecs int) (string, error) {
+	if timeoutSecs <= 0 {
+		timeoutSecs = DefaultDialTimeoutSecs
+	}
 	payload, err := json.Marshal(dialRequest{
 		ConnectionID: connectionID,
 		To:           to,
 		From:         from,
-		TimeoutSecs:  30,
+		TimeoutSecs:  timeoutSecs,
 	})
 	if err != nil {
 		return "", fmt.Errorf("telnyx dial out: encode: %w", err)
