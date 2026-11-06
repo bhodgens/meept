@@ -81,6 +81,15 @@ class CommandPalette extends StatefulWidget {
       label: 'activity view',
       description: 'agent activity, findings + drift',
     ),
+    // Intake status view — parity with the TUI's /intake slash command
+    // (internal/sharedclient/slash.go; issue #109). 'i' is unused and
+    // echoes the surface name. Routed at core/router.dart (/intake).
+    const CommandPaletteItem(
+      keybinding: 'i',
+      label: 'intake status',
+      description: 'github ticket intake: config + poller state',
+      route: '/intake',
+    ),
     const CommandPaletteItem(
       keybinding: 'f',
       label: 'find…',

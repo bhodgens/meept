@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/activity/activity_tab.dart';
+import '../features/intake/intake_tab.dart';
 import '../features/home/home_screen.dart';
 import '../features/home/sidebar_home_screen.dart';
 import '../features/settings/settings_panel.dart';
@@ -93,6 +94,14 @@ final GoRouter router = GoRouter(
       name: 'activity',
       pageBuilder: (context, state) {
         return const NoTransitionPage(child: ActivityTab());
+      },
+    ),
+    // Intake status (issue #109 GUI parity; TUI slash: /intake).
+    GoRoute(
+      path: '/intake',
+      name: 'intake',
+      pageBuilder: (context, state) {
+        return const NoTransitionPage(child: IntakeTab());
       },
     ),
     GoRoute(

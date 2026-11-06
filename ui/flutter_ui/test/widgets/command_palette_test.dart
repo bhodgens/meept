@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/widgets/command_palette.dart';
 
 void main() {
-  testWidgets('shows all 13 items with labels', (tester) async {
+  testWidgets('shows all 14 items with labels', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -16,7 +16,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(CommandPalette.defaultItems.length, 13);
+    expect(CommandPalette.defaultItems.length, 14);
     expect(find.text('chat'), findsOneWidget);
     expect(find.text('sessions'), findsOneWidget);
     expect(find.text('agents'), findsOneWidget);
@@ -26,6 +26,7 @@ void main() {
     expect(find.text('memory review'), findsOneWidget);
     expect(find.text('users'), findsOneWidget);
     expect(find.text('activity view'), findsOneWidget);
+    expect(find.text('intake status'), findsOneWidget);
   });
 
   testWidgets('manifest parity: agents key e, edit description key r', (
