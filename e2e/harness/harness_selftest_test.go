@@ -287,26 +287,56 @@ func TestHarnessOrphanDaemonKiller(t *testing.T) {
 		strings.Split(string(out), "MEEPT_BIN_DIR_CREATED:")[1], "\n", 2)[0])
 
 	// The watchdog fires within poll+grace of the child's exit, then
-	// TERM-waits up to daemonKillGrace seconds before escalating. Poll
-	// generously; /bin/kill -0 mirrors the signal probe the watchdog
-	// itself uses (a reaped-exited pid answers ESRCH).
-	deadline := time.Now().Add(binReaperPollInterval + binReaperGrace +
-		time.Duration(daemonKillGrace)*time.Second + 30*time.Second)
-	for {
-		alive := exec.Command("/bin/kill", "-0", strconv.Itoa(daemonPid)).Run() == nil
-		if !alive {
-			// The dir must be gone too — the kill precedes rm -rf.
-			if _, err := os.Stat(binDirPath); !os.IsNotExist(err) {
-				t.Fatalf("watchdog killed daemon %d but bin dir %s still exists", daemonPid, binDirPath)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("orphan daemon %d still alive %.0fs after child exit",
-				daemonPid, time.Since(deadline.Add(90*time.Second)).Seconds()+90)
+	// TERM-waits up to daemonKillGrace seconds before escalating, THEN
+	// rm -rf's the dir. On a loaded CI runner each phase can overshoot its
+	// budget several-fold, so poll on OBSERVABLE state with generous
+	// deadlines instead of asserting a single instant where both conditions
+	// hold simultaneously (the 17.5s CI failure: the daemon's death was
+	// observed while the rm -rf was still in flight — the old code treated
+	// that in-flight window as a hard failure).
+	//
+	// killAlive uses /bin/kill -0, mirroring the signal probe the watchdog
+	// itself uses (a reaped-exited pid answers ESRCH). The CI ceiling is
+	// 120s (~3x the sum of every watchdog phase); this suite's whole-file
+	// go-test budget is ~196s on the same runner, so the ceiling cannot
+	// push the package over the run.
+	const orphanReapCeiling = 120 * time.Second
+
+	killAlive := func() bool {
+		return exec.Command("/bin/kill", "-0", strconv.Itoa(daemonPid)).Run() == nil
+	}
+
+	// Phase 1: the daemon must eventually die. No assumption about WHEN.
+	killed := false
+	phaseDeadline := time.Now().Add(orphanReapCeiling)
+	for time.Now().Before(phaseDeadline) {
+		if !killAlive() {
+			killed = true
+			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+	if !killed {
+		t.Fatalf("orphan daemon %d still alive %s after the child exited (watchdog never killed it)", daemonPid, orphanReapCeiling)
+	}
+
+	// Phase 2: with the daemon gone, the dir must eventually follow. The
+	// kill precedes rm -rf in the watchdog script, but the rm runs after
+	// the (possibly escalated, graced) kill loop — give it its own budget.
+	// liveness re-checks: if the daemon came back (it must not) or was
+	// never killed, fail loudly here too.
+	phaseDeadline = time.Now().Add(orphanReapCeiling)
+	for time.Now().Before(phaseDeadline) {
+		if killAlive() {
+			t.Fatalf("orphan daemon %d is alive again after being observed dead (bad pid reuse or watchdog kill failed)", daemonPid)
+		}
+		if _, err := os.Stat(binDirPath); os.IsNotExist(err) {
+			return // both contract conditions observed: pass
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("watchdog killed daemon %d but bin dir %s still exists %s after the kill (rm -rf never landed)",
+		daemonPid, binDirPath, orphanReapCeiling)
 }
 
 // TestHelperOrphanDaemonChild runs ONLY as a child of

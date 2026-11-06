@@ -38,6 +38,16 @@ import (
 
 // stopDaemon sends SIGTERM to the process and waits for exit (SIGKILL after
 // 10s). Safe to call on an already-exited process.
+//
+// The pidfile wait matters on Linux CI: pid 1 (the runner) does not reap
+// children promptly, so a pid found by later FindProcess calls can still be
+// an unreaped ZOMBIE of this very test process — Signal(0) succeeds on it
+// (ESRCH only fires after reaping) and the daemon's stale-pidfile check
+// misreads the dead predecessor as "daemon already running (PID N)" and
+// exits at boot (the CI failure this guards: health never comes up because
+// the fresh daemon quit before binding its transports). Waiting for the
+// SIGTERM'd process to actually exit (proc.Wait) before returning closes
+// the race without touching any daemon-side code.
 func stopDaemon(t *testing.T, pid int) {
 	t.Helper()
 	if pid <= 0 {
@@ -57,31 +67,21 @@ func stopDaemon(t *testing.T, pid int) {
 		<-done
 	}
 	// Clean slate for the next boot even if shutdown skipped socket removal.
-	_ = os.Remove(sandboxSocketPath(t))
+	// (stopDaemon is stack-free by signature, matching the state-restart
+	// primitive; the boot loop below removes the socket before re-binding.)
 }
 
-// sandboxSocketPath resolves the sandbox socket path from the meept.json5 the
-// harness wrote under the sandbox home.
-func sandboxSocketPath(t *testing.T) string {
-	t.Helper()
-	home := os.Getenv("MEEPT_E2E_RESTART_HOME")
-	if home == "" {
-		return ""
+// pidAlive reports whether the pid exists (Signal(0) probe). A zombie
+// still answers true; callers pair it with the reap guarantees above.
+func pidAlive(pid int) bool {
+	if pid <= 0 {
+		return false
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".meept", "meept.json5"))
+	proc, err := os.FindProcess(pid)
 	if err != nil {
-		return ""
+		return false
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, `"socket_path"`) {
-			var val string
-			if _, err := fmt.Sscanf(line, `"socket_path": %q,`, &val); err == nil && val != "" {
-				return val
-			}
-		}
-	}
-	return ""
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 // bootDaemon spawns a fresh scratch daemon against the stack's sandbox and
@@ -109,7 +109,6 @@ func bootDaemon(t *testing.T, s *harness.Stack) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start daemon: %v", err)
 	}
-
 	client := &http.Client{
 		Timeout: 2 * time.Second,
 		Transport: &http.Transport{
@@ -152,13 +151,31 @@ func restartDaemon(t *testing.T, s *harness.Stack) func() {
 	stopDaemon(t, oldPID)
 
 	// Wait for the old process to be fully reaped before re-binding the
-	// socket path.
+	// socket path, AND for the daemon to remove its pidfile. The pidfile
+	// wait is the Linux-CI guard: if a still-unreaped old pid were still
+	// present, the fresh boot's stale-pidfile check would abort with
+	// "daemon already running". stopDaemon's proc.Wait already reaped the
+	// handle we hold; this poll covers the pidfile the DAEMON wrote (the
+	// daemon removes it on graceful shutdown — wait for that observable
+	// rather than assuming a fixed sleep is enough).
 	deadline := time.Now().Add(15 * time.Second)
+	pidFile := filepath.Join(s.StateDir, "meept.pid")
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(s.SocketPath); os.IsNotExist(err) {
+		_, statErr := os.Stat(s.SocketPath)
+		_, pidErr := os.Stat(pidFile)
+		if os.IsNotExist(statErr) && os.IsNotExist(pidErr) {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+	if data, err := os.ReadFile(pidFile); err == nil {
+		// Pidfile still present after the wait: only fatal if it names a
+		// LIVE pid (a stale file naming a dead pid is removed by the fresh
+		// boot's own stale-pidfile check).
+		var stale int
+		if _, sErr := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &stale); sErr == nil && pidAlive(stale) && stale != os.Getpid() {
+			t.Fatalf("old daemon pid %d still alive (pidfile %s) after SIGTERM+10s; restart would abort on the stale-pidfile check", stale, pidFile)
+		}
 	}
 
 	bootDaemon(t, s)
@@ -623,11 +640,15 @@ func queueJobByID(t *testing.T, s *harness.Stack, jobID string) *queueJobRow {
 	return row
 }
 
-// queueDBPath resolves the daemon's queue.db path. The default
-// [queue].db_path is "~/.meept/queue.db", which the MEEPT_HOME override
-// redirects into the sandbox meept home — that is where the scratch
-// daemon's queue store lives (the data_dir fallback only fires for an
-// explicitly empty DBPath).
+// queueDBPath resolves the daemon's queue.db path. components.go resolves
+// the empty default [queue].db_path fallback to
+// filepath.Join(cfg.Daemon.DataDir, "queue.db") — and the harness pins
+// daemon.data_dir to s.StateDir (meept.json5 "daemon"."data_dir" AND the
+// -d flag) — so the scratch daemon's queue store lives in StateDir, NOT in
+// the MEEPT_HOME override dir (reading ~MEEPT_HOME/queue.db was the CI
+// "no such table: jobs" failure: the file did not exist there, and
+// mode=ro against a fresh path yields an empty schema). Mirrors the
+// harness's own TasksDBPath convention (data_dir/tasks.db).
 func queueDBPath(s *harness.Stack) string {
-	return filepath.Join(s.MeeptHome, "queue.db")
+	return filepath.Join(s.StateDir, "queue.db")
 }

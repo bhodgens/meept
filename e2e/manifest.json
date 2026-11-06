@@ -1008,7 +1008,7 @@
       "name": "dynamic-tools",
       "dir": "e2e/suites/dynamic-tools",
       "status": "implemented",
-      "note": "RED gate skeleton (branch 03 leaf 00T): compiles against current code; flag-off byte-identical control + capability-gate cases 1-4 fail RED for the missing capability-gate/exposure seam (no llm.CapFrontier tag, no warn-once downgrade, no episode-boundary restore yet). Starvation canary + cache-continuity cases are todo-marked (need the 01/04/05 impl seams: tool_search + predicted-budget promotion + the SetSchemaMode re-cache)."
+      "note": "As-needed tool exposure (branch 03): flag-off byte-identical control + capability-gate cases 1-4 + starvation canary (tool_search -> tool_view append-only promotion) + cache-continuity (no mid-episode invalidation) all green against the landed seams; scenarios dynamic-tools-01..04 in scenarios[] below."
     },
     {
       "name": "intake-status",
@@ -4147,14 +4147,47 @@
       ]
     },
     {
-      "id": "intake-status-02",
-      "suite": "intake-status",
-      "diff": "S",
-      "title": "intake-status bridge disabled default: no [intake] block -> GET /api/v1/intake/status still answers 200 with the disabled envelope (enabled=false, poller_scheduled=false, note set), never method-not-found",
+      "id": "dynamic-tools-01",
+      "suite": "dynamic-tools",
+      "diff": "M",
+      "title": "flag-off control: with [agent.tools].dynamic_tool_exposure=false the executor tool payload is byte-identical across consecutive turns of one episode (the stable legacy enumeration, never append/reshape-spliced)",
       "paths": [
-        "internal/daemon/intake_status_rpc.go",
-        "internal/rpc/intake_status.go",
-        "e2e/suites/intake-status/intake_status_test.go"
+        "internal/agent/",
+        "internal/config/",
+        "e2e/suites/dynamic-tools/dynamic_tools_test.go"
+      ]
+    },
+    {
+      "id": "dynamic-tools-02",
+      "suite": "dynamic-tools",
+      "diff": "M",
+      "title": "capability-gate matrix (Integration Test Plan cases 1-4): configured search + non-frontier active model downgrades to predicted with exactly ONE warn-once log naming the model; a mid-session frontier->lesser switch reverts the mode ON the switch; a lesser->frontier switch-back restores search ONLY at the episode boundary (no mid-episode flap or re-log); an unknown/unclassified model is treated as non-frontier and downgrades too",
+      "paths": [
+        "internal/agent/",
+        "internal/llm/",
+        "e2e/suites/dynamic-tools/dynamic_tools_test.go"
+      ]
+    },
+    {
+      "id": "dynamic-tools-03",
+      "suite": "dynamic-tools",
+      "diff": "M",
+      "title": "starvation canary: an episode needing a NON-core tool (task_create, outside the always-full set) recovers it through the always-full meta pair tool_search -> tool_view; the tool_view promotion appends the tool into the episode's active set so the NEXT request ships its full schema and the turn completes (the model is never starved)",
+      "paths": [
+        "internal/agent/",
+        "internal/tools/",
+        "e2e/suites/dynamic-tools/dynamic_tools_test.go"
+      ]
+    },
+    {
+      "id": "dynamic-tools-04",
+      "suite": "dynamic-tools",
+      "diff": "M",
+      "title": "cache continuity: three consecutive ordinary turns of one episode add ZERO 'prefix cache invalidated' events (a frozen active set is byte-identical turn to turn; only a promotion or a model switch re-caches, once each)",
+      "paths": [
+        "internal/agent/",
+        "internal/llm/",
+        "e2e/suites/dynamic-tools/dynamic_tools_test.go"
       ]
     }
   ]

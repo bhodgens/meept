@@ -3717,6 +3717,7 @@ internal/comm/http/instructions_handlers.go unreachable func: InstructionsHandle
 internal/comm/http/instructions_handlers.go unreachable func: InstructionsHandler.handleUpdateByID
 internal/comm/http/instructions_handlers.go unreachable func: InstructionsHandler.RegisterRoutes
 internal/comm/http/instructions_handlers.go unreachable func: NewInstructionsHandler
+internal/comm/http/intake_handlers.go unreachable func: Server.handleIntakeStatus
 internal/comm/http/live_metrics_usage.go unreachable func: Server.buildLiveMetricsResponse
 internal/comm/http/live_metrics_usage.go unreachable func: Server.readOnlyUsageStore
 internal/comm/http/live_metrics_usage.go unreachable func: Server.usageProvider
