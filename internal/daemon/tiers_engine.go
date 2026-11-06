@@ -374,6 +374,11 @@ func BuildTierPolicyEngine(tiers TiersConfigAdapter, workCfg working.Config, mmg
 	}
 	cfg := tiers.ToEngineConfig(workCfg)
 	cfg.Demotion = tierpolicy.DemotionConfig{StaleDays: staleDays, MinUsefulness: minUsefulness}
+	// Eviction knob set from the SAME resolved [memory.usefulness] the
+	// consolidator uses - user enabled/floor_pct/base/wv/wa/ws honored;
+	// explicit enabled=false restores age-only ordering on this lane too
+	// (bughunt config-tools F-2).
+	cfg.Usefulness = memory.ResolveUsefulEviction(mmgr.Config().Usefulness)
 	eng := tierpolicy.New(cfg, deps)
 	return eng, true, nil
 }
