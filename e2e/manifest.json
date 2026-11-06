@@ -480,13 +480,17 @@
       "dynamic-tools"
     ],
     "internal/comm/http/": [
-      "hitl-notifications"
+      "hitl-notifications",
+      "intake-status"
     ],
     "internal/comm/web/": [
       "hitl-notifications"
     ],
     "internal/eval/hitl/": [
       "hitl-notifications"
+    ],
+    "e2e/suites/intake-status": [
+      "intake-status"
     ]
   },
   "suites": [
@@ -1004,7 +1008,13 @@
       "name": "dynamic-tools",
       "dir": "e2e/suites/dynamic-tools",
       "status": "implemented",
-      "note": "RED gate skeleton (branch 03 leaf 00T): compiles against current code; flag-off byte-identical control + capability-gate cases 1-4 fail RED for the missing capability-gate/exposure seam (no llm.CapFrontier tag, no warn-once downgrade, no episode-boundary restore yet). Starvation canary + cache-continuity cases are todo-marked (need the 01/04/05 impl seams: tool_search + predicted-budget promotion + the SetSchemaMode re-cache)."    }
+      "note": "RED gate skeleton (branch 03 leaf 00T): compiles against current code; flag-off byte-identical control + capability-gate cases 1-4 fail RED for the missing capability-gate/exposure seam (no llm.CapFrontier tag, no warn-once downgrade, no episode-boundary restore yet). Starvation canary + cache-continuity cases are todo-marked (need the 01/04/05 impl seams: tool_search + predicted-budget promotion + the SetSchemaMode re-cache)."
+    },
+    {
+      "name": "intake-status",
+      "dir": "e2e/suites/intake-status",
+      "status": "implemented"
+    }
   ],
   "scenarios": [
     {
@@ -4122,6 +4132,29 @@
       "title": "regime report generation: the hitl Runner runs the scripted scenario in all three regimes and the report JSON parses into HitlRegimeReport with every C7 field present; the markdown renders",
       "paths": [
         "internal/eval/hitl/"
+      ]
+    },
+    {
+      "id": "intake-status-01",
+      "suite": "intake-status",
+      "diff": "M",
+      "title": "intake-status bridge enabled: authenticated GET /api/v1/intake/status returns the frozen cross-surface shape (enabled, watch_repo, poll_interval, required_labels, done_label, default_employee, gate_command, project_number, poller_scheduled, note) with poller_scheduled=true for an enabled+valid [intake]; missing Authorization -> 401",
+      "paths": [
+        "internal/comm/http/intake_handlers.go",
+        "internal/comm/http/server.go",
+        "internal/daemon/intake_status_rpc.go",
+        "e2e/suites/intake-status/intake_status_test.go"
+      ]
+    },
+    {
+      "id": "intake-status-02",
+      "suite": "intake-status",
+      "diff": "S",
+      "title": "intake-status bridge disabled default: no [intake] block -> GET /api/v1/intake/status still answers 200 with the disabled envelope (enabled=false, poller_scheduled=false, note set), never method-not-found",
+      "paths": [
+        "internal/daemon/intake_status_rpc.go",
+        "internal/rpc/intake_status.go",
+        "e2e/suites/intake-status/intake_status_test.go"
       ]
     }
   ]

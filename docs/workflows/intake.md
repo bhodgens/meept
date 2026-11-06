@@ -136,3 +136,26 @@ watch repo, poll interval, required labels, done label, default
 employee resolved-or-missing, gate command, project number, and a
 validity preview mirroring the daemon's fail-closed posture. Always
 exit 0 — a disabled state is the default, not a failure.
+
+## TUI and GUI views
+
+`/intake` (TUI slash command, routed through
+`internal/sharedclient/slash.go`) prints the same report over the
+`intake.status` RPC (`internal/rpc/intake_status.go`; registered
+daemon-side by `registerIntakeStatusRPC`).
+
+The Flutter GUI carries the parity view (issue #109): the
+**intake status** command-palette item (`i`) and the `/intake` chat
+slash command both open `/intake` (`ui/flutter_ui/lib/features/intake/`),
+which fetches the same snapshot through the HTTP bridge
+`GET /api/v1/intake/status` (`internal/comm/http/intake_handlers.go`,
+the `s.rpcCall` seam — the pattern of `/api/v1/activity`). The view is
+read-only: it renders the [intake] config snapshot (enabled, watch
+repo, interval, labels, done label, default employee, gate command,
+project number) plus the poll-job state, mirroring the TUI's row
+defaults. It never carries token material — presence of the GitHub
+token remains `meept github status` territory. A daemon that never
+wired [intake] still answers 200 with the disabled envelope (the
+handler's nil-safe posture), so the view never shows "method not
+found". Hermetic pins: `e2e/suites/intake-status` (route shape +
+auth + disabled envelope over the real bridge).

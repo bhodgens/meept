@@ -39,7 +39,7 @@
     "path": "DELETE /api/v1/calendar/events/{id}",
     "handler": "s.handleCalendarDelete",
     "file": "internal/comm/http/server.go",
-    "line": 1769
+    "line": 1773
   },
   {
     "method": "ANY",
@@ -88,28 +88,28 @@
     "path": "DELETE /api/v1/projects/{id}",
     "handler": "s.handleProjectUnregister",
     "file": "internal/comm/http/server.go",
-    "line": 1817
+    "line": 1821
   },
   {
     "method": "ANY",
     "path": "DELETE /api/v1/prompts/{path}",
     "handler": "s.handlePromptsDelete",
     "file": "internal/comm/http/server.go",
-    "line": 1906
+    "line": 1910
   },
   {
     "method": "ANY",
     "path": "DELETE /api/v1/scheduler/jobs/{id}",
     "handler": "s.handleSchedulerRemoveJob",
     "file": "internal/comm/http/server.go",
-    "line": 1759
+    "line": 1763
   },
   {
     "method": "ANY",
     "path": "DELETE /api/v1/sessions/{id}",
     "handler": "s.handleSessionDelete",
     "file": "internal/comm/http/server.go",
-    "line": 1682
+    "line": 1686
   },
   {
     "method": "ANY",
@@ -123,7 +123,7 @@
     "path": "DELETE /api/v1/sessions/{id}/threads/{threadID}",
     "handler": "s.handleThreadDelete",
     "file": "internal/comm/http/server.go",
-    "line": 1709
+    "line": 1713
   },
   {
     "method": "ANY",
@@ -137,7 +137,7 @@
     "path": "DELETE /api/v1/templates/{name}",
     "handler": "s.handleTemplatesClear",
     "file": "internal/comm/http/server.go",
-    "line": 1736
+    "line": 1740
   },
   {
     "method": "ANY",
@@ -151,7 +151,7 @@
     "path": "DELETE /api/v1/workers/{id}",
     "handler": "s.handleWorkerRemove",
     "file": "internal/comm/http/server.go",
-    "line": 1715
+    "line": 1719
   },
   {
     "method": "ANY",
@@ -172,14 +172,14 @@
     "path": "GET /api/v1/acp/agents",
     "handler": "s.handleACPAgentsList",
     "file": "internal/comm/http/server.go",
-    "line": 1872
+    "line": 1876
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/acp/permissions",
     "handler": "s.handleACPPermissionsList",
     "file": "internal/comm/http/server.go",
-    "line": 1873
+    "line": 1877
   },
   {
     "method": "ANY",
@@ -270,56 +270,56 @@
     "path": "GET /api/v1/bus/stats",
     "handler": "s.handleBusStats",
     "file": "internal/comm/http/server.go",
-    "line": 1799
+    "line": 1803
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/cache/inspect",
     "handler": "s.handleCacheInspect",
     "file": "internal/comm/http/server.go",
-    "line": 1751
+    "line": 1755
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/cache/stats",
     "handler": "s.handleCacheStats",
     "file": "internal/comm/http/server.go",
-    "line": 1748
+    "line": 1752
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/calendar/events",
     "handler": "s.handleCalendarList",
     "file": "internal/comm/http/server.go",
-    "line": 1765
+    "line": 1769
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/calendar/events/{id}",
     "handler": "s.handleCalendarGet",
     "file": "internal/comm/http/server.go",
-    "line": 1766
+    "line": 1770
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/calendar/today",
     "handler": "s.handleCalendarToday",
     "file": "internal/comm/http/server.go",
-    "line": 1770
+    "line": 1774
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/calendar/upcoming",
     "handler": "s.handleCalendarUpcoming",
     "file": "internal/comm/http/server.go",
-    "line": 1771
+    "line": 1775
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/changes/journal",
     "handler": "s.handleListJournal",
     "file": "internal/comm/http/server.go",
-    "line": 1700
+    "line": 1704
   },
   {
     "method": "ANY",
@@ -347,7 +347,7 @@
     "path": "GET /api/v1/compression/stats",
     "handler": "s.handleCompressionStats",
     "file": "internal/comm/http/server.go",
-    "line": 1893
+    "line": 1897
   },
   {
     "method": "ANY",
@@ -410,14 +410,14 @@
     "path": "GET /api/v1/dispatch/{id}/results",
     "handler": "s.handleDispatchResults",
     "file": "internal/comm/http/server.go",
-    "line": 1912
+    "line": 1916
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/dispatch/{id}/status",
     "handler": "s.handleDispatchStatus",
     "file": "internal/comm/http/server.go",
-    "line": 1911
+    "line": 1915
   },
   {
     "method": "ANY",
@@ -438,7 +438,7 @@
     "path": "GET /api/v1/filesystem/browse",
     "handler": "s.handleFilesystemBrowse",
     "file": "internal/comm/http/server.go",
-    "line": 1814
+    "line": 1818
   },
   {
     "method": "ANY",
@@ -470,6 +470,13 @@
   },
   {
     "method": "ANY",
+    "path": "GET /api/v1/intake/status",
+    "handler": "s.handleIntakeStatus",
+    "file": "internal/comm/http/server.go",
+    "line": 1676
+  },
+  {
+    "method": "ANY",
     "path": "GET /api/v1/jobs",
     "handler": "s.handleJobsList",
     "file": "internal/comm/web/server.go",
@@ -487,21 +494,21 @@
     "path": "GET /api/v1/mcp/servers",
     "handler": "s.handleMCPServersList",
     "file": "internal/comm/http/server.go",
-    "line": 1870
+    "line": 1874
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/memory/auto-claims",
     "handler": "s.handleEpistemicListAutoClaims",
     "file": "internal/comm/http/server.go",
-    "line": 1887
+    "line": 1891
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/memory/canonical",
     "handler": "s.handleEpistemicFindCanonical",
     "file": "internal/comm/http/server.go",
-    "line": 1885
+    "line": 1889
   },
   {
     "method": "ANY",
@@ -522,7 +529,7 @@
     "path": "GET /api/v1/memory/review-queue",
     "handler": "s.handleEpistemicReviewQueue",
     "file": "internal/comm/http/server.go",
-    "line": 1886
+    "line": 1890
   },
   {
     "method": "ANY",
@@ -543,7 +550,7 @@
     "path": "GET /api/v1/metrics/firewall",
     "handler": "s.handleFirewallStats",
     "file": "internal/comm/http/server.go",
-    "line": 1808
+    "line": 1812
   },
   {
     "method": "ANY",
@@ -606,7 +613,7 @@
     "path": "GET /api/v1/notifications/dnd",
     "handler": "s.handleNotificationsGetDND",
     "file": "internal/comm/http/server.go",
-    "line": 1790
+    "line": 1794
   },
   {
     "method": "ANY",
@@ -620,70 +627,70 @@
     "path": "GET /api/v1/plans",
     "handler": "s.handlePlanList",
     "file": "internal/comm/http/server.go",
-    "line": 1830
+    "line": 1834
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/plans/{id}",
     "handler": "s.handlePlanGet",
     "file": "internal/comm/http/server.go",
-    "line": 1832
+    "line": 1836
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/plans/{id}/handoffs",
     "handler": "s.handlePlanHandoffs",
     "file": "internal/comm/http/server.go",
-    "line": 1834
+    "line": 1838
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/plans/{id}/phases",
     "handler": "s.handlePlanPhases",
     "file": "internal/comm/http/server.go",
-    "line": 1833
+    "line": 1837
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/projects",
     "handler": "s.handleProjectList",
     "file": "internal/comm/http/server.go",
-    "line": 1811
+    "line": 1815
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/projects/{id}",
     "handler": "s.handleProjectGet",
     "file": "internal/comm/http/server.go",
-    "line": 1815
+    "line": 1819
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/projects/{id}/branches",
     "handler": "s.handleProjectBranches",
     "file": "internal/comm/http/server.go",
-    "line": 1820
+    "line": 1824
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/projects/{id}/status",
     "handler": "s.handleProjectStatus",
     "file": "internal/comm/http/server.go",
-    "line": 1819
+    "line": 1823
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/prompts",
     "handler": "s.handlePromptsList",
     "file": "internal/comm/http/server.go",
-    "line": 1903
+    "line": 1907
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/prompts/{path}",
     "handler": "s.handlePromptsGet",
     "file": "internal/comm/http/server.go",
-    "line": 1904
+    "line": 1908
   },
   {
     "method": "ANY",
@@ -718,28 +725,28 @@
     "path": "GET /api/v1/reasoning/agents",
     "handler": "s.handleReasoningListAgents",
     "file": "internal/comm/http/server.go",
-    "line": 1785
+    "line": 1789
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/reasoning/budgets",
     "handler": "s.handleReasoningGetBudgets",
     "file": "internal/comm/http/server.go",
-    "line": 1783
+    "line": 1787
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/reasoning/tiers",
     "handler": "s.handleReasoningListTiers",
     "file": "internal/comm/http/server.go",
-    "line": 1782
+    "line": 1786
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/reflection/proposals",
     "handler": "s.handleReflectionList",
     "file": "internal/comm/http/server.go",
-    "line": 1897
+    "line": 1901
   },
   {
     "method": "ANY",
@@ -760,21 +767,21 @@
     "path": "GET /api/v1/scheduler/jobs",
     "handler": "s.handleSchedulerListJobs",
     "file": "internal/comm/http/server.go",
-    "line": 1757
+    "line": 1761
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/selfimprove/status",
     "handler": "s.handleSelfImproveStatus",
     "file": "internal/comm/http/server.go",
-    "line": 1739
+    "line": 1743
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions",
     "handler": "s.handleSessionList",
     "file": "internal/comm/http/server.go",
-    "line": 1676
+    "line": 1680
   },
   {
     "method": "ANY",
@@ -788,21 +795,21 @@
     "path": "GET /api/v1/sessions/designated",
     "handler": "s.handleSessionsDesignated",
     "file": "internal/comm/http/server.go",
-    "line": 1678
+    "line": 1682
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/most-recent",
     "handler": "s.handleSessionMostRecent",
     "file": "internal/comm/http/server.go",
-    "line": 1677
+    "line": 1681
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{id}",
     "handler": "s.handleSessionGet",
     "file": "internal/comm/http/server.go",
-    "line": 1680
+    "line": 1684
   },
   {
     "method": "ANY",
@@ -816,84 +823,84 @@
     "path": "GET /api/v1/sessions/{id}/branches",
     "handler": "s.handleSessionBranches",
     "file": "internal/comm/http/server.go",
-    "line": 1687
+    "line": 1691
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{id}/budget",
     "handler": "s.handleGetBudgetStatus",
     "file": "internal/comm/http/server.go",
-    "line": 1805
+    "line": 1809
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{id}/designation",
     "handler": "s.handleSessionDesignationGet",
     "file": "internal/comm/http/server.go",
-    "line": 1692
+    "line": 1696
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{id}/messages",
     "handler": "s.handleSessionMessages",
     "file": "internal/comm/http/server.go",
-    "line": 1690
+    "line": 1694
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{id}/plans",
     "handler": "s.handleSessionPlans",
     "file": "internal/comm/http/server.go",
-    "line": 1839
+    "line": 1843
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{id}/state",
     "handler": "s.handleGetAgentState",
     "file": "internal/comm/http/server.go",
-    "line": 1802
+    "line": 1806
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{id}/threads",
     "handler": "s.handleThreadList",
     "file": "internal/comm/http/server.go",
-    "line": 1704
+    "line": 1708
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{id}/threads/active",
     "handler": "s.handleThreadGetActive",
     "file": "internal/comm/http/server.go",
-    "line": 1706
+    "line": 1710
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{id}/threads/{threadID}",
     "handler": "s.handleThreadGet",
     "file": "internal/comm/http/server.go",
-    "line": 1708
+    "line": 1712
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{id}/tree",
     "handler": "s.handleSessionTree",
     "file": "internal/comm/http/server.go",
-    "line": 1689
+    "line": 1693
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/sessions/{sid}/pending-changes",
     "handler": "s.handleListPendingChanges",
     "file": "internal/comm/http/server.go",
-    "line": 1697
+    "line": 1701
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/skills",
     "handler": "s.handleSkillsList",
     "file": "internal/comm/http/server.go",
-    "line": 1719
+    "line": 1723
   },
   {
     "method": "ANY",
@@ -907,28 +914,28 @@
     "path": "GET /api/v1/skills/stats",
     "handler": "s.handleSkillsStats",
     "file": "internal/comm/http/server.go",
-    "line": 1725
+    "line": 1729
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/skills/{slug}",
     "handler": "s.handleSkillsGet",
     "file": "internal/comm/http/server.go",
-    "line": 1720
+    "line": 1724
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/skills/{slug}/history",
     "handler": "s.handleSkillsHistory",
     "file": "internal/comm/http/server.go",
-    "line": 1726
+    "line": 1730
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/skills/{slug}/ui",
     "handler": "s.handleSkillUI",
     "file": "internal/comm/http/server.go",
-    "line": 1842
+    "line": 1846
   },
   {
     "method": "ANY",
@@ -963,28 +970,28 @@
     "path": "GET /api/v1/templates",
     "handler": "s.handleTemplatesList",
     "file": "internal/comm/http/server.go",
-    "line": 1733
+    "line": 1737
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/templates/{name}",
     "handler": "s.handleTemplatesGet",
     "file": "internal/comm/http/server.go",
-    "line": 1734
+    "line": 1738
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/terminal/history",
     "handler": "s.handleTerminalHistory",
     "file": "internal/comm/http/server.go",
-    "line": 1775
+    "line": 1779
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/terminal/sessions",
     "handler": "s.handleTerminalSessions",
     "file": "internal/comm/http/server.go",
-    "line": 1777
+    "line": 1781
   },
   {
     "method": "ANY",
@@ -1012,14 +1019,14 @@
     "path": "GET /api/v1/workers",
     "handler": "s.handleWorkerList",
     "file": "internal/comm/http/server.go",
-    "line": 1712
+    "line": 1716
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/workers/stats",
     "handler": "s.handleWorkerStats",
     "file": "internal/comm/http/server.go",
-    "line": 1713
+    "line": 1717
   },
   {
     "method": "ANY",
@@ -1068,7 +1075,7 @@
     "path": "PATCH /api/v1/sessions/{id}",
     "handler": "s.handleSessionArchive",
     "file": "internal/comm/http/server.go",
-    "line": 1681
+    "line": 1685
   },
   {
     "method": "ANY",
@@ -1089,7 +1096,7 @@
     "path": "POST /api/v1/acp/permissions/resolve",
     "handler": "s.handleACPPermissionsResolve",
     "file": "internal/comm/http/server.go",
-    "line": 1874
+    "line": 1878
   },
   {
     "method": "ANY",
@@ -1159,49 +1166,49 @@
     "path": "POST /api/v1/bus/call",
     "handler": "s.handleBusCall",
     "file": "internal/comm/http/server.go",
-    "line": 1796
+    "line": 1800
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/bus/publish",
     "handler": "s.handleBusPublish",
     "file": "internal/comm/http/server.go",
-    "line": 1798
+    "line": 1802
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/cache/clear",
     "handler": "s.handleCacheClear",
     "file": "internal/comm/http/server.go",
-    "line": 1749
+    "line": 1753
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/cache/invalidate",
     "handler": "s.handleCacheInvalidate",
     "file": "internal/comm/http/server.go",
-    "line": 1750
+    "line": 1754
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/calendar/events",
     "handler": "s.handleCalendarCreate",
     "file": "internal/comm/http/server.go",
-    "line": 1767
+    "line": 1771
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/calendar/quickadd",
     "handler": "s.handleCalendarQuickAdd",
     "file": "internal/comm/http/server.go",
-    "line": 1772
+    "line": 1776
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/changes/journal/{id}/revert",
     "handler": "s.handleRevertJournalEntry",
     "file": "internal/comm/http/server.go",
-    "line": 1701
+    "line": 1705
   },
   {
     "method": "ANY",
@@ -1327,7 +1334,7 @@
     "path": "POST /api/v1/dispatch",
     "handler": "s.handleDispatchSubmit",
     "file": "internal/comm/http/server.go",
-    "line": 1910
+    "line": 1914
   },
   {
     "method": "ANY",
@@ -1369,42 +1376,42 @@
     "path": "POST /api/v1/memory/auto-claims/purge",
     "handler": "s.handleEpistemicPurgeAutoClaims",
     "file": "internal/comm/http/server.go",
-    "line": 1888
+    "line": 1892
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/memory/claims",
     "handler": "s.handleEpistemicRetainClaim",
     "file": "internal/comm/http/server.go",
-    "line": 1877
+    "line": 1881
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/memory/claims/{id}/promote",
     "handler": "s.handleEpistemicPromoteClaim",
     "file": "internal/comm/http/server.go",
-    "line": 1878
+    "line": 1882
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/memory/claims/{id}/reject",
     "handler": "s.handleEpistemicRejectClaim",
     "file": "internal/comm/http/server.go",
-    "line": 1879
+    "line": 1883
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/memory/decisions",
     "handler": "s.handleEpistemicRetainDecision",
     "file": "internal/comm/http/server.go",
-    "line": 1880
+    "line": 1884
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/memory/decisions/{id}/review",
     "handler": "s.handleEpistemicRecordReview",
     "file": "internal/comm/http/server.go",
-    "line": 1881
+    "line": 1885
   },
   {
     "method": "ANY",
@@ -1418,14 +1425,14 @@
     "path": "POST /api/v1/memory/predictions",
     "handler": "s.handleEpistemicRetainPrediction",
     "file": "internal/comm/http/server.go",
-    "line": 1882
+    "line": 1886
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/memory/predictions/{id}/resolve",
     "handler": "s.handleEpistemicMarkResolved",
     "file": "internal/comm/http/server.go",
-    "line": 1883
+    "line": 1887
   },
   {
     "method": "ANY",
@@ -1439,7 +1446,7 @@
     "path": "POST /api/v1/memory/supersede",
     "handler": "s.handleEpistemicMarkSuperseded",
     "file": "internal/comm/http/server.go",
-    "line": 1884
+    "line": 1888
   },
   {
     "method": "ANY",
@@ -1474,7 +1481,7 @@
     "path": "POST /api/v1/notifications/dnd",
     "handler": "s.handleNotificationsSetDND",
     "file": "internal/comm/http/server.go",
-    "line": 1791
+    "line": 1795
   },
   {
     "method": "ANY",
@@ -1488,91 +1495,91 @@
     "path": "POST /api/v1/pending-changes/{id}/accept",
     "handler": "s.handleAcceptPendingChange",
     "file": "internal/comm/http/server.go",
-    "line": 1698
+    "line": 1702
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/pending-changes/{id}/reject",
     "handler": "s.handleRejectPendingChange",
     "file": "internal/comm/http/server.go",
-    "line": 1699
+    "line": 1703
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/plans",
     "handler": "s.handlePlanCreate",
     "file": "internal/comm/http/server.go",
-    "line": 1831
+    "line": 1835
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/plans/{id}/approve",
     "handler": "s.handlePlanApprove",
     "file": "internal/comm/http/server.go",
-    "line": 1835
+    "line": 1839
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/plans/{id}/confirm",
     "handler": "s.handlePlanConfirm",
     "file": "internal/comm/http/server.go",
-    "line": 1837
+    "line": 1841
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/plans/{id}/reject",
     "handler": "s.handlePlanReject",
     "file": "internal/comm/http/server.go",
-    "line": 1836
+    "line": 1840
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/plans/{id}/revise",
     "handler": "s.handlePlanRevise",
     "file": "internal/comm/http/server.go",
-    "line": 1838
+    "line": 1842
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/projects",
     "handler": "s.handleProjectRegister",
     "file": "internal/comm/http/server.go",
-    "line": 1816
+    "line": 1820
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/projects/detect",
     "handler": "s.handleProjectDetect",
     "file": "internal/comm/http/server.go",
-    "line": 1823
+    "line": 1827
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/projects/{id}/checkout",
     "handler": "s.handleProjectCheckout",
     "file": "internal/comm/http/server.go",
-    "line": 1821
+    "line": 1825
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/projects/{id}/rename",
     "handler": "s.handleProjectRename",
     "file": "internal/comm/http/server.go",
-    "line": 1822
+    "line": 1826
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/projects/{id}/sync",
     "handler": "s.handleProjectSync",
     "file": "internal/comm/http/server.go",
-    "line": 1818
+    "line": 1822
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/prompts/validate",
     "handler": "s.handlePromptsValidate",
     "file": "internal/comm/http/server.go",
-    "line": 1907
+    "line": 1911
   },
   {
     "method": "ANY",
@@ -1635,28 +1642,28 @@
     "path": "POST /api/v1/reasoning/budgets",
     "handler": "s.handleReasoningSetBudgets",
     "file": "internal/comm/http/server.go",
-    "line": 1784
+    "line": 1788
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/reflection/proposals/{id}/apply",
     "handler": "s.handleReflectionApply",
     "file": "internal/comm/http/server.go",
-    "line": 1898
+    "line": 1902
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/reflection/proposals/{id}/skip",
     "handler": "s.handleReflectionSkip",
     "file": "internal/comm/http/server.go",
-    "line": 1899
+    "line": 1903
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/reflection/remember",
     "handler": "s.handleReflectionRemember",
     "file": "internal/comm/http/server.go",
-    "line": 1900
+    "line": 1904
   },
   {
     "method": "ANY",
@@ -1684,98 +1691,98 @@
     "path": "POST /api/v1/scheduler/jobs",
     "handler": "s.handleSchedulerAddJob",
     "file": "internal/comm/http/server.go",
-    "line": 1758
+    "line": 1762
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/scheduler/jobs/{id}/enable",
     "handler": "s.handleSchedulerEnableJob",
     "file": "internal/comm/http/server.go",
-    "line": 1760
+    "line": 1764
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/scheduler/jobs/{id}/pause",
     "handler": "s.handleSchedulerPauseJob",
     "file": "internal/comm/http/server.go",
-    "line": 1761
+    "line": 1765
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/scheduler/jobs/{id}/resume",
     "handler": "s.handleSchedulerResumeJob",
     "file": "internal/comm/http/server.go",
-    "line": 1762
+    "line": 1766
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/search",
     "handler": "s.handleSearch",
     "file": "internal/comm/http/server.go",
-    "line": 1826
+    "line": 1830
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/search/semantic",
     "handler": "s.handleSearchSemantic",
     "file": "internal/comm/http/server.go",
-    "line": 1827
+    "line": 1831
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/security/check",
     "handler": "s.handleSecurityCheck",
     "file": "internal/comm/http/server.go",
-    "line": 1754
+    "line": 1758
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/selfimprove/analyze",
     "handler": "s.handleSelfImproveAnalyze",
     "file": "internal/comm/http/server.go",
-    "line": 1741
+    "line": 1745
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/selfimprove/apply",
     "handler": "s.handleSelfImproveApply",
     "file": "internal/comm/http/server.go",
-    "line": 1744
+    "line": 1748
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/selfimprove/generate",
     "handler": "s.handleSelfImproveGenerate",
     "file": "internal/comm/http/server.go",
-    "line": 1742
+    "line": 1746
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/selfimprove/reject",
     "handler": "s.handleSelfImproveReject",
     "file": "internal/comm/http/server.go",
-    "line": 1745
+    "line": 1749
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/selfimprove/trigger",
     "handler": "s.handleSelfImproveTrigger",
     "file": "internal/comm/http/server.go",
-    "line": 1740
+    "line": 1744
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/selfimprove/validate",
     "handler": "s.handleSelfImproveValidate",
     "file": "internal/comm/http/server.go",
-    "line": 1743
+    "line": 1747
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/sessions",
     "handler": "s.handleSessionCreate",
     "file": "internal/comm/http/server.go",
-    "line": 1675
+    "line": 1679
   },
   {
     "method": "ANY",
@@ -1789,63 +1796,63 @@
     "path": "POST /api/v1/sessions/{id}/acknowledge",
     "handler": "s.handleSessionAcknowledge",
     "file": "internal/comm/http/server.go",
-    "line": 1693
+    "line": 1697
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/sessions/{id}/attach",
     "handler": "s.handleSessionAttach",
     "file": "internal/comm/http/server.go",
-    "line": 1683
+    "line": 1687
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/sessions/{id}/branch",
     "handler": "s.handleSessionBranch",
     "file": "internal/comm/http/server.go",
-    "line": 1686
+    "line": 1690
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/sessions/{id}/compact",
     "handler": "s.handleSessionCompact",
     "file": "internal/comm/http/server.go",
-    "line": 1691
+    "line": 1695
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/sessions/{id}/detach",
     "handler": "s.handleSessionDetach",
     "file": "internal/comm/http/server.go",
-    "line": 1684
+    "line": 1688
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/sessions/{id}/fork",
     "handler": "s.handleSessionFork",
     "file": "internal/comm/http/server.go",
-    "line": 1688
+    "line": 1692
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/sessions/{id}/resume",
     "handler": "s.handleSessionResume",
     "file": "internal/comm/http/server.go",
-    "line": 1685
+    "line": 1689
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/sessions/{id}/threads",
     "handler": "s.handleThreadCreate",
     "file": "internal/comm/http/server.go",
-    "line": 1705
+    "line": 1709
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/skills/evolve",
     "handler": "s.handleSkillsEvolve",
     "file": "internal/comm/http/server.go",
-    "line": 1729
+    "line": 1733
   },
   {
     "method": "ANY",
@@ -1859,21 +1866,21 @@
     "path": "POST /api/v1/skills/{slug}/archive",
     "handler": "s.handleSkillsArchive",
     "file": "internal/comm/http/server.go",
-    "line": 1727
+    "line": 1731
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/skills/{slug}/execute",
     "handler": "s.handleSkillsExecute",
     "file": "internal/comm/http/server.go",
-    "line": 1721
+    "line": 1725
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/skills/{slug}/restore",
     "handler": "s.handleSkillsRestore",
     "file": "internal/comm/http/server.go",
-    "line": 1728
+    "line": 1732
   },
   {
     "method": "ANY",
@@ -1915,21 +1922,21 @@
     "path": "POST /api/v1/templates/{name}/invoke",
     "handler": "s.handleTemplatesInvoke",
     "file": "internal/comm/http/server.go",
-    "line": 1735
+    "line": 1739
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/terminal/clear",
     "handler": "s.handleTerminalClear",
     "file": "internal/comm/http/server.go",
-    "line": 1778
+    "line": 1782
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/terminal/exec",
     "handler": "s.handleTerminalExec",
     "file": "internal/comm/http/server.go",
-    "line": 1776
+    "line": 1780
   },
   {
     "method": "ANY",
@@ -1943,14 +1950,14 @@
     "path": "POST /api/v1/workers",
     "handler": "s.handleWorkerAdd",
     "file": "internal/comm/http/server.go",
-    "line": 1714
+    "line": 1718
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/workers/scale",
     "handler": "s.handleWorkerScale",
     "file": "internal/comm/http/server.go",
-    "line": 1716
+    "line": 1720
   },
   {
     "method": "ANY",
@@ -1964,7 +1971,7 @@
     "path": "PUT /api/v1/calendar/events/{id}",
     "handler": "s.handleCalendarUpdate",
     "file": "internal/comm/http/server.go",
-    "line": 1768
+    "line": 1772
   },
   {
     "method": "ANY",
@@ -1985,28 +1992,28 @@
     "path": "PUT /api/v1/mcp/servers/{name}/enabled",
     "handler": "s.handleMCPServerSetEnabled",
     "file": "internal/comm/http/server.go",
-    "line": 1871
+    "line": 1875
   },
   {
     "method": "ANY",
     "path": "PUT /api/v1/prompts/{path}",
     "handler": "s.handlePromptsPut",
     "file": "internal/comm/http/server.go",
-    "line": 1905
+    "line": 1909
   },
   {
     "method": "ANY",
     "path": "PUT /api/v1/sessions/designated/{id}",
     "handler": "s.handleSessionDesignatedAcknowledge",
     "file": "internal/comm/http/server.go",
-    "line": 1679
+    "line": 1683
   },
   {
     "method": "ANY",
     "path": "PUT /api/v1/sessions/{id}/threads/active",
     "handler": "s.handleThreadSetActive",
     "file": "internal/comm/http/server.go",
-    "line": 1707
+    "line": 1711
   },
   {
     "method": "ANY",

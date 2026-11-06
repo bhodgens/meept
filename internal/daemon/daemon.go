@@ -28,8 +28,8 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	employeepkg "github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/eval"
-	intakepkg "github.com/caimlas/meept/internal/intake"
 	"github.com/caimlas/meept/internal/groups"
+	intakepkg "github.com/caimlas/meept/internal/intake"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/metrics"
@@ -1488,6 +1488,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// degrades its method to a clean RPC error). No-op when the RPC
 	// server is absent.
 	wireActivityComponents(components, msgBus, rpcServer, logger)
+
+	// intake.status RPC (issue #109 TUI/GUI parity): registers the
+	// handler shipped in 9a19d0be with the daemon as its config/poller
+	// snapshot source. Pure wiring of the existing nil-safe handler —
+	// a daemon without [intake] answers the disabled envelope.
+	registerIntakeStatusRPC(components, rpcServer, logger)
 
 	// Create HTTP server (if enabled)
 	var httpSrv *http.Server
