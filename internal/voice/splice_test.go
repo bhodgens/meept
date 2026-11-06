@@ -683,8 +683,11 @@ func TestSpliceH2Inbound(t *testing.T) {
 func TestBargeInClearWriteErr(t *testing.T) {
 	p := rawPairFor(t, "cc-m1")
 	text := &textSink{}
-	var logBuf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+	// lockedBuffer (childproc_testsupport_test.go): the splice goroutine
+	// writes the log via slog while the assertion goroutine reads it, so
+	// the plain bytes.Buffer here raced under -race.
+	logBuf := &lockedBuffer{}
+	logger := slog.New(slog.NewTextHandler(logBuf, nil))
 
 	ws := &failingWriteWS{}
 	var cmu sync.Mutex
@@ -724,7 +727,7 @@ func TestBargeInClearWriteErr(t *testing.T) {
 	if n != 1 {
 		t.Errorf("CancelDraftFn called %d times, want exactly 1", n)
 	}
-	if !bytes.Contains(logBuf.Bytes(), []byte("barge-in clear frame write failed")) {
+	if !bytes.Contains([]byte(logBuf.String()), []byte("barge-in clear frame write failed")) {
 		t.Errorf("clear-frame write failure not logged (audit m1: the error must not be silently discarded); log=%s", logBuf.String())
 	}
 }
