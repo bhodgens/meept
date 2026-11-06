@@ -54,7 +54,7 @@ persistence/restore paths, bounded nil-safe maps in wiring layers.
 | 02-restore-toolcalls | COMPLETE | e23fd815 | batched GetToolCallsForMessages join; best-effort; model-visible record proven; RED witnessed |
 | 03-two-stage-verifier | COMPLETE | e23fd815 | verify_floor 0.85 band; R0 false-hit scenario prevented (call-count pin); band-off byte-identical |
 | 04-streaming-cache-sites | COMPLETE | e23fd815 | both sites via shared seam; TTFT sentinel pinned for hit path; RED witnessed |
-| 05-semantic-cache-daemon-wiring | COMPLETE | PENDING_SHA | construction site landed (semantic_cache_wiring.go): embedder reuse > alias > none, all-field mapping, Warn + exact-only degraded posture; components.go attaches via WithSemanticCache; TierPolicy arm-up (tierpolicy_wiring.go SetTierPolicy call site) closes issue #82; daemon wiring tests + llm/config/daemon/e2e gates green; live-daemon degraded Warn line pinned in the e2e suite |
+| 05-semantic-cache-daemon-wiring | COMPLETE | 7bbd4ddf | construction site landed (semantic_cache_wiring.go): embedder reuse > alias > none, all-field mapping, Warn + exact-only degraded posture; components.go attaches via WithSemanticCache; TierPolicy arm-up (tierpolicy_wiring.go SetTierPolicy call site) closes issue #82; daemon wiring tests + llm/config/daemon/e2e gates green; live-daemon degraded Warn line pinned in the e2e suite |
 
 All 4 leaves landed in a single commit (e23fd815, 1022 insertions) - one
 executing agent, sequential execution, verified by orchestrator in-session.
