@@ -311,7 +311,7 @@ the DAEMON WIRING: commit 26a7764b (wiring-gap leaf 04) claimed construction +
 registration but never touched internal/daemon/components.go (audit-verified:
 `git log -S JevScoreGate -- internal/daemon/components.go` empty; the
 jevgate/gate.go surface was listed unreachable in the deadcode baseline).
-Landed now in <WIRING_SHA>: Components.JevScoreGate + ScoreGateHook
+Landed now in 5e01e286: Components.JevScoreGate + ScoreGateHook
 construction gated on security.jev_command_gate.enabled +
 RegisterBeforeToolCall("jev-score-gate", HookPriorityHigh) + untagged
 daemon_jevgate_pending (TestJevGateWiring / TestJevGateRegistrationNilWhenDisabled
@@ -345,7 +345,7 @@ review; delta protocol: the LESSER artifact updates to the GREATER):
 |---|---------|--------|-----------|-----------|--------|
 | F1 | ScoreCommand result shape + degraded class | 01 T1 | n/a (e2e policy) | jev-command-gate suite, scorer cases | VALIDATED (14b21b5e, 41efd41c) |
 | F2 | Byte-stable serialization | 01 T2 | n/a | suite asserts stable bytes | VALIDATED (14b21b5e) |
-| F3 | Fail-closed threshold gate | 01 T4-T6 | n/a | suite fail-closed cases | VALIDATED (14b21b5e; daemon wiring + wiring-failure e2e landed <WIRING_SHA>, issue #87) |
+| F3 | Fail-closed threshold gate | 01 T4-T6 | n/a | suite fail-closed cases | VALIDATED (14b21b5e; daemon wiring + wiring-failure e2e landed 5e01e286, issue #87) |
 | F4 | Two-chokepoint capture | 02 T1-T3 | n/a | suite capture cases | VALIDATED (c1a75549) |
 | F5 | DPO export + near-miss pairs | 02 T4-T5 | n/a | suite export case | VALIDATED (c1a75549) |
 | F6 | Contract file + hash | 02 T6, 03 T4 | n/a | suite hash check | VALIDATED (989e4ea5; freeze --check green) |
@@ -354,7 +354,7 @@ review; delta protocol: the LESSER artifact updates to the GREATER):
 Delta log: 2026-11-05 issue #87 - the F3 daemon-wiring half was false-complete
 at 26a7764b (never touched components.go; jevgate/gate.go dead in the deadcode
 baseline; wiring test build-tagged daemon_jevgate_pending). Landed + re-
-validated at <WIRING_SHA> (construction gated on security.jev_command_gate.enabled,
+validated at 5e01e286 (construction gated on security.jev_command_gate.enabled,
 RegisterBeforeToolCall("jev-score-gate", HookPriorityHigh), tagged test untagged
 and green, e2e jev-command-gate suite green, deadcode baseline regenerated).
 
