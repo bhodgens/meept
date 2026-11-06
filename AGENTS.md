@@ -184,7 +184,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 
 | Layer | Packages |
 |-------|----------|
-| **Server** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus` (typed topics: `bus.Topic[T]`/`PublishT`/`SubscribeT`, `internal/bus/topic.go`), `internal/comm` (WS classification: `internal/comm/wsclass`) |
+| **Server** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus` (typed topics: `bus.Topic[T]`/`PublishT`/`SubscribeT`, `internal/bus/topic.go`), `internal/comm` (WS classification: `internal/comm/wsclass`; HITL Slack approval channel: `internal/comm/slack`, docs/workflows/hitl-notifications.md) |
 | **Agent** | `internal/agent` (loop, orchestrator, planner, collaborative, workspace, executor, dispatcher) |
 | **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context firewall) |
 | **Memory** | `internal/memory` (manager, episodic, task, ftstore, facts) |

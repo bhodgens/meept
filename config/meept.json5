@@ -1472,6 +1472,25 @@
   //   "project_number": 0,
   // },
 
+  // HITL Slack approval channel (opt-in, disabled by default). Publishes
+  // pending ACP permission requests as interactive Slack cards in
+  // channel_id; approvers in allowed_user_ids resolve them with Approve/
+  // Deny buttons (signed callbacks to POST /api/v1/slack/interactions).
+  // Secrets support ${VAR} env indirection — never plaintext values in
+  // logs. allowed_user_ids empty allows NOBODY (fail closed). Requires a
+  // reachable HTTP endpoint for Slack's Interactivity Requests URL; see
+  // docs/workflows/hitl-notifications.md.
+  // drift: commented template block; absent from installed homes by
+  // design (default-off: an absent block is identical to disabled).
+  // "slack": {
+  //   "enabled": false,
+  //   "bot_token": "${SLACK_BOT_TOKEN}",
+  //   "signing_secret": "${SLACK_SIGNING_SECRET}",
+  //   "channel_id": "C0123456789",
+  //   "allowed_user_ids": ["U0123456789"],
+  //   "api_base_url": "https://slack.com/api",
+  // },
+
   // Distributed cluster (opt-in, disabled by default). Joins a peer mesh
   // sharing the task queue via gossip + git; see docs/configuration/cluster.md.
   // SECURITY: when enabled, cluster.security.require_node_signatures

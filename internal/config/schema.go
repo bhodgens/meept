@@ -122,6 +122,7 @@ type Config struct {
 	Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 	GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	Intake              IntakeConfig              `json:"intake"               toml:"intake"`
+	Slack               SlackConfig               `json:"slack"                toml:"slack"`
 }
 
 // GitHubConfig configures the GitHub PR/CI tool set ([github]). Disabled by
@@ -195,6 +196,65 @@ func (c IntakeConfig) ValidateEnabled() error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("intake.enabled requires intake.%s to be set", strings.Join(missing, " and intake."))
+	}
+	return nil
+}
+
+// SlackConfig configures the HITL Slack approval channel ([comm.slack],
+// json key "slack"): a services.PushChannel that publishes pending ACP
+// permission requests as interactive Slack messages and resolves approver
+// button clicks through the ACP human permission relay. Opt-in — disabled
+// by default; when disabled nothing registers, no route is served, and no
+// goroutine runs. Mirrors slack.SlackConfig (internal/comm/slack); config
+// does not import the channel package and the daemon maps the fields in
+// internal/daemon/slack_wiring.go, per the ResolverConfig convention.
+// BotToken and SigningSecret support the ${VAR} env indirection the JSON5
+// loader applies (ExpandEnvVars) before decoding; the values themselves
+// are never logged.
+//
+//gendoc:section slack
+//gendoc:desc HITL Slack approval channel: post pending ACP permission requests to a fixed channel and resolve approver clicks via the permission relay (opt-in; disabled by default).
+//gendoc:example [slack] enabled = true, bot_token = "${SLACK_BOT_TOKEN}", signing_secret = "${SLACK_SIGNING_SECRET}", channel_id = "C0123456789"
+type SlackConfig struct {
+	// Enabled turns the channel on (default: false, opt-in).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// BotToken is the Slack bot token (xoxb-...), chat:write scope.
+	// Env indirection (${VAR}) only — never plaintext in logs.
+	BotToken string `json:"bot_token" toml:"bot_token"`
+	// SigningSecret is the Slack app signing secret used to verify the
+	// v0 HMAC signature on interaction callbacks.
+	SigningSecret string `json:"signing_secret" toml:"signing_secret"`
+	// ChannelID is the fixed Slack channel the approval cards post to.
+	ChannelID string `json:"channel_id" toml:"channel_id"`
+	// AllowedUserIDs are the Slack user IDs allowed to answer approval
+	// requests. Empty allows NOBODY (fail closed) — unlike the Telegram
+	// precedent where empty means all.
+	AllowedUserIDs []string `json:"allowed_user_ids" toml:"allowed_user_ids"`
+	// APIBaseURL overrides the Slack Web API base (default
+	// https://slack.com/api); tests point it at a local server.
+	// Never logged.
+	APIBaseURL string `json:"api_base_url" toml:"api_base_url"`
+}
+
+// ValidateEnabled checks the REQUIRED-when-enabled fields of the Slack
+// block: bot_token, signing_secret, and channel_id must all be set when
+// Enabled=true; no-op when disabled.
+func (c SlackConfig) ValidateEnabled() error {
+	if !c.Enabled {
+		return nil
+	}
+	var missing []string
+	if strings.TrimSpace(c.BotToken) == "" {
+		missing = append(missing, "bot_token")
+	}
+	if strings.TrimSpace(c.SigningSecret) == "" {
+		missing = append(missing, "signing_secret")
+	}
+	if strings.TrimSpace(c.ChannelID) == "" {
+		missing = append(missing, "channel_id")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("slack.enabled requires slack.%s to be set", strings.Join(missing, " and slack."))
 	}
 	return nil
 }
@@ -4899,6 +4959,16 @@ func DefaultConfig() *Config {
 			DoneLabel:       "factory:done",
 			GateCommand:     "",
 			ProjectNumber:   0,
+		},
+		// HITL Slack approval channel (opt-in, disabled by default; T4).
+		// APIBaseURL mirrors slack.DefaultAPIBaseURL (internal/comm/slack).
+		Slack: SlackConfig{
+			Enabled:        false,
+			BotToken:       "",
+			SigningSecret:  "",
+			ChannelID:      "",
+			AllowedUserIDs: nil,
+			APIBaseURL:     "https://slack.com/api",
 		},
 	}
 }
