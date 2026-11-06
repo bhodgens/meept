@@ -757,7 +757,11 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		// TTFT clock arm (llm-serving-tiers leaf 04): dispatch instant of
 		// THIS attempt, refreshed per short-retry so the number measures
 		// the serving attempt's first-token wait. First text delta captures.
+		// Capture state resets with the clock (stale-pair fix shared with
+		// the OpenAI-compatible client; bughunt 2026-11-06 llm-daemon F-2).
 		chatOpts.ttftStart = time.Now()
+		chatOpts.ttftCaptured = false
+		chatOpts.ttftFirstDelta = time.Time{}
 		resp, err := c.doStreamingRequest(ctx, reqBody, effCfg, reportProgress, chatOpts.sessionID, chatOpts)
 		if err != nil {
 			// Refusal errors never re-enter the short-retry loop: the

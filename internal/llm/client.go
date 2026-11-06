@@ -2559,7 +2559,13 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		// TTFT clock arm (llm-serving-tiers leaf 04): dispatch instant of
 		// THIS attempt, refreshed per short-retry so the number measures
 		// the serving attempt's first-token wait. First delta captures.
+		// The capture state resets with the clock: a delta captured by an
+		// earlier (failed) attempt must not stamp this attempt's wait —
+		// stale pair vs a fresh ttftMS read clamped to 0 (bughunt
+		// 2026-11-06 llm-daemon F-2).
 		chatOpts.ttftStart = time.Now()
+		chatOpts.ttftCaptured = false
+		chatOpts.ttftFirstDelta = time.Time{}
 		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill, chatOpts)
 		if err == nil {
 			// Record usage with scope
