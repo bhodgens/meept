@@ -62,13 +62,27 @@ type TextSender interface {
 	Send(raw []byte) error
 }
 
-// SpliceConfig sizes the splice's windows. Codec selects the transcode path
-// and, via ChunkBytes, the 20 ms chunk size; ReorderWindowFrames bounds the
-// reorder buffer; ReorderGap is how long a sequence gap may persist before
-// it is silence-filled; Pace is the outbound inter-frame interval (20 ms);
+// SpliceConfig sizes the splice's windows. Codec is the child-native codec
+// configuration (legacy wiring field); CodecWire is the NEGOTIATED wire
+// codec from the Telnyx media start frame (start.media_format) and selects
+// the transcode path — an empty CodecWire falls back to Codec. The child's
+// C2 chunk size is ALWAYS ChunkBytes("L16", 16000) = 640 regardless of the
+// wire codec: the child speaks L16 s16le@16k only, and the splice
+// transcodes wire <-> child. ReorderWindowFrames bounds the reorder buffer;
+// ReorderGap is how long a sequence gap may persist before it is
+// silence-filled; Pace is the outbound inter-frame interval (20 ms);
 // QueueLimit bounds the outbound queue.
 type SpliceConfig struct {
 	Codec struct {
+		BidirectionalCodec string
+		SamplingRate       int
+	} `json:"-"`
+	// CodecWire is the negotiated WIRE codec from the media start frame.
+	// Empty falls back to Codec. It drives transcodeInbound /
+	// transcodeOutbound only; child chunks are always
+	// ChunkBytes("L16", 16000) = 640 regardless of the wire codec
+	// (audit H2: the wire codec must never size child chunks).
+	CodecWire struct {
 		BidirectionalCodec string
 		SamplingRate       int
 	} `json:"-"`
@@ -78,10 +92,23 @@ type SpliceConfig struct {
 	QueueLimit          int
 }
 
-// NOTE(leaf06): SpliceConfig.Codec is declared inline above to mirror the
-// telnyx.Codec shape without importing internal/voice/telnyx here; the
-// composite-literal assignment from a telnyx.Codec value in the gate test
-// uses field names, so the shapes must stay aligned.
+// NOTE(leaf06): SpliceConfig.Codec and SpliceConfig.CodecWire are declared
+// inline above to mirror the telnyx.Codec shape without importing
+// internal/voice/telnyx here; the composite-literal assignment from a
+// telnyx.Codec value in the gate test uses field names, so the shapes must
+// stay aligned.
+
+// wireCodecOf resolves the negotiated wire codec: CodecWire when set, else
+// the legacy Codec field, else L16.
+func wireCodecOf(cfg SpliceConfig) string {
+	if cfg.CodecWire.BidirectionalCodec != "" {
+		return cfg.CodecWire.BidirectionalCodec
+	}
+	if cfg.Codec.BidirectionalCodec != "" {
+		return cfg.Codec.BidirectionalCodec
+	}
+	return "L16"
+}
 
 // SpliceDeps carries the injected edges. HangupFn and CancelDraftFn are
 // ALWAYS injected (never direct telnyx client calls from the splice).
@@ -151,15 +178,13 @@ func RunSplice(ctx context.Context, ccid string, cfg SpliceConfig, deps SpliceDe
 	if cfg.QueueLimit <= 0 {
 		cfg.QueueLimit = 100
 	}
-	codec := cfg.Codec.BidirectionalCodec
-	if codec == "" {
-		codec = "L16"
-	}
-	rate := cfg.Codec.SamplingRate
-	if rate == 0 {
-		rate = 16000
-	}
-	chunk, err := ChunkBytes(codec, rate)
+	// The child speaks L16 s16le@16k ONLY (C2): its chunk size is the
+	// child-native 20 ms chunk, ALWAYS 640 bytes, regardless of the
+	// negotiated wire codec. Audit H2: computing this from the wire codec
+	// produced 160-byte PCMU-sized chunks of L16 PCM at the child socket -
+	// corrupt audio the moment Telnyx negotiated PCMU. The WIRE codec
+	// (CodecWire, fallback Codec) selects only the transcode path.
+	chunk, err := ChunkBytes("L16", 16000)
 	if err != nil {
 		return fmt.Errorf("voice: RunSplice %s: %w", ccid, err)
 	}
@@ -384,6 +409,13 @@ func (s *runSplice) handleInboundLine(
 // splitJSONObjects splits a line that may contain several concatenated JSON
 // objects (whitespace-separated) into the individual object byte slices.
 // A well-formed single-object line yields one element.
+//
+// The scan is string-aware (audit m2): `{` and `}` inside a JSON string
+// literal (e.g. a base64 payload or a text field carrying braces) must not
+// drive the depth counter, or the split cuts objects at brace characters
+// that are string CONTENT, producing fragments no decoder accepts. Escapes
+// (`\"`, `\\`) inside strings are tracked so an escaped quote or backslash
+// cannot flip string state either.
 func splitJSONObjects(line []byte) [][]byte {
 	var out [][]byte
 	depth := 0
@@ -394,10 +426,18 @@ func splitJSONObjects(line []byte) [][]byte {
 		switch {
 		case escaped:
 			escaped = false
-		case c == '\\' && inString:
-			escaped = true
-		case c == '"' && depth > 0:
-			inString = !inString
+		case inString:
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+		case c == '"':
+			if depth > 0 {
+				inString = true
+			}
+			// A quote outside any object cannot open a string that
+			// matters: only brace-delimited objects are surfaced.
 		case c == '{':
 			if depth == 0 {
 				start = i
@@ -422,11 +462,10 @@ func splitJSONObjects(line []byte) [][]byte {
 	return out
 }
 
+// codec resolves the negotiated WIRE codec for transcode selection
+// (CodecWire, fallback Codec, fallback L16). It never sizes child chunks.
 func (s *runSplice) codec() string {
-	if s.cfg.Codec.BidirectionalCodec == "" {
-		return "L16"
-	}
-	return s.cfg.Codec.BidirectionalCodec
+	return wireCodecOf(s.cfg)
 }
 
 // ---------- reorder window (spec: Frame order) ----------
@@ -651,8 +690,16 @@ func (s *runSplice) bargeIn() {
 	s.interrupt = true
 	s.mu.Unlock()
 
-	// Byte-exact clear frame (review checklist pins the exact bytes).
-	_ = s.deps.TelnyxWS.Write([]byte(`{"event":"clear"}`))
+	// Byte-exact clear frame (review checklist pins the exact bytes). The
+	// write error is NOT discarded (audit m1): a failed clear leaves
+	// Telnyx playout running through the barge-in, so surface it loudly.
+	// Barge-in state is already latched, so we do not retry or unwind -
+	// the splice continues (the queue drop and draft cancel below still
+	// happen) and the error is logged at warn for call diagnostics.
+	if err := s.deps.TelnyxWS.Write([]byte(`{"event":"clear"}`)); err != nil {
+		s.log.Warn("voice: barge-in clear frame write failed",
+			"ccid", s.ccid, "err", err)
+	}
 
 	s.outboundMu.Lock()
 	s.outbound = nil
