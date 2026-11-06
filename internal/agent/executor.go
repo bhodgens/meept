@@ -388,6 +388,12 @@ var ToolActionMap = map[string]string{
 	"ask":             "send_message",
 	"request_handoff": "send_message",
 
+	// Voice sidecar (voice-sidecar leaf 14): the employee-callable
+	// outbound dial has its OWN BuiltinRules action row (unknown actions
+	// DENY by default, so a mapping to a nonexistent action would dead-map
+	// exactly like the H7 entries above).
+	"voice_call": "voice_call",
+
 	// PDF reading is a local file read at heart (URL inputs pass the
 	// same SSRF guard as web_fetch and land in the same result shape).
 	// Granted by the analyst agent; previously hard-denied (H7 class).
