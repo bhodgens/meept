@@ -146,6 +146,27 @@ func capturePairFor(t *testing.T, ccid string) *capturePair {
 	return cp
 }
 
+// rawPairFor builds an AudioPair and dials it like capturePairFor but
+// WITHOUT the capture drain goroutine. Some gate tests (backpressure)
+// need the splice's read pump to be the SINGLE reader of the .out
+// socket: a unix conn Read wakes only one blocked reader, so a competing
+// capture drain can steal the feed for stretches, legitimately emptying
+// the outbound queue - which resets the grace clock (recovery at
+// splice.go clears outFullAt once the queue stays under half the limit
+// for one pace) - and pushing the grace hangup past the test deadline
+// nondeterministically.
+func rawPairFor(t *testing.T, ccid string) *AudioPair {
+	t.Helper()
+	dir := t.TempDir()
+	p, err := NewAudioPair(dir, ccid)
+	if err != nil {
+		t.Fatalf("NewAudioPair: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+	dialAudioPair(t, dir, ccid)
+	return p
+}
+
 func (c *capturePair) bytes() []byte {
 	// The "child received" view: everything the splice wrote toward the
 	// child on the .in socket (captured by dialAudioPair's reader).
@@ -487,7 +508,16 @@ func TestSpliceBackpressure(t *testing.T) {
 	// pins full, the splice logs degraded, and once the grace window
 	// passes the splice calls HangupFn(ccid, reason) with a named reason
 	// - never a silent drop-oldest.
-	p := capturePairFor(t, "cc-bp-1")
+	//
+	// rawPairFor, NOT capturePairFor: the splice's read pump must be the
+	// SINGLE reader of the .out socket here. A competing capture drain
+	// can steal the feed (a unix conn Read wakes only one blocked
+	// reader), legitimately emptying the queue and resetting the grace
+	// clock via the low-water recovery path - the nondeterministic flake
+	// this test used to carry. Also stop feeding once HangupFn fires
+	// (terminal: the call is over, further frames are post-teardown
+	// noise).
+	p := rawPairFor(t, "cc-bp-1")
 	ws := &fakeWS{}
 	text := &textSink{}
 
@@ -500,7 +530,7 @@ func TestSpliceBackpressure(t *testing.T) {
 	cfg.QueueLimit = 2
 	cfg.Pace = 100 * time.Millisecond
 	cfg.ReorderGap = 20 * time.Millisecond // keep the inbound path quiet
-	deps := SpliceDeps{TelnyxWS: ws, Audio: p.AudioPair, Text: text, HangupFn: hangupFn, Clock: time.Now}
+	deps := SpliceDeps{TelnyxWS: ws, Audio: p, Text: text, HangupFn: hangupFn, Clock: time.Now}
 	cancel, done := startSplice(t, "cc-bp-1", cfg, deps)
 	defer stopSplice(t, cancel, done)
 
@@ -513,7 +543,11 @@ func TestSpliceBackpressure(t *testing.T) {
 				return
 			default:
 			}
-			_ = feedChild("cc-bp-1")
+			if err := feedChild("cc-bp-1"); err != nil {
+				// Splice teardown (pair closed under us) or hangup:
+				// stop feeding, further writes are noise.
+				return
+			}
 			time.Sleep(2 * time.Millisecond)
 		}
 	}()
