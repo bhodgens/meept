@@ -1,0 +1,149 @@
+{
+  "task": "Policy engines for embedding in a pure-Go single-daemon agent platform (meept): per-tool-call server-side authorization, sub-millisecond to low-ms target, no external services, SQLite-backed policy storage",
+  "researched_at": "2026-10-30",
+  "recommendation_summary": "For meept's narrow shape (named agents -> group -> tool/memory/filesystem grants, per-tool-call checks, SQLite, pure Go), cedar-go is the best fit on latency and policy safety; OPA/rego is the best fit if policies must stay human-authorable as code with rich string/structure logic; Casbin is the pragmatic middle ground with the best SQLite-adapter story but the weakest engine hygiene. All three are pure-Go, Apache-2.0, and embeddable with no daemon/sidecar.",
+  "options": [
+    {
+      "name": "Open Policy Agent (OPA) / Rego",
+      "module": "github.com/open-policy-agent/opa/v1",
+      "license": "Apache-2.0 (verified on GitHub repo and pkg.go.dev)",
+      "maturity": "CNCF GRADUATED (accepted 2018-03-29, incubating 2019-04-02, graduated 2021-01-29); OPA 1.0 released 2024-12-20 stabilizing Rego (if/contains mandatory); current release line v1.x (v1.22.0 seen); 12k+ GitHub stars; completed CNCF TAG-Security joint security assessment (Sept 2019)",
+      "policy_model": "Policy-as-code: Rego is a full declarative Datalog-inspired query language over JSON. OPA marketing calls it 'policy as code' vs older 'policy as data'; policies are code-like modules compiled per version, with the same care as security-critical code (per CNCF TAG-Security assessment). Input/external data is data; rules are code.",
+      "embeddability": {
+        "verdict": "Excellent, first-class. Two embedded modes, no server required:",
+        "modes": [
+          "Low-level github.com/open-policy-agent/opa/v1/rego: 'embed OPA as a library inside services written in Go, when only policy evaluation - and no other capabilities of OPA, like the management features - are desired' (official integration docs). rego.New(...).PrepareForEval(ctx) -> PreparedEvalQuery.Eval(ctx, EvalInput(input)); prepared queries are safe to share across goroutines.",
+          "High-level github.com/open-policy-agent/opa/v1/sdk: embeds most of OPA (bundle loading from file:// scheme works with no bundle server), but this mode is designed around bundle management/decision logs and is heavier than needed for in-process authz."
+        ],
+        "bundle_mode_note": "Official docs: for the SDK with no server, configure a bundle with resource: file://path and no services; issue #7277 confirms the SDK has no embed.FS support and that the Rego API + loader package is the recommended path for shipped/embedded policy."
+      },
+      "latency": {
+        "summary": "Fast when queries are PREPARED; re-preparing per call is ~100x slower. Well inside the sub-ms target for small policies.",
+        "evidence": [
+          "opa-benchmark (PlanetScale fork of official example), prepared query + prepared input, no columns: ~44-46 us/op, ~10 KB/op, ~200-220 allocs/op (AMD Ryzen 7 2700). Non-prepared prepare+eval: ~2.41 ms/op, ~11.5k allocs/op. https://github.com/Phanatic/opa-benchmark",
+          "OPA PR #1335 introducing PrepareForEval: authz benchmark dropped from ~250-330 us/op (unprepared) to ~31 us/op (simple forbid rule) / ~97-103 us/op (path/method rules), with ~10x fewer allocs. https://github.com/open-policy-agent/opa/pull/1335",
+          "SPIRE PR #6633: partial-eval + PrepareForEval cut policy eval from ~54.5 us to ~27.9 us/op. https://github.com/spiffe/spire/pull/6633",
+          "Zalando Skipper OPA filter benchmark (Apple M1 Max): ~8.8 us/op mean with decision logs after buffer fix; tail latency P99 ~544 us, P99.9 ~1.5 ms with decision logs on. https://github.com/zalando/skipper/pull/3442",
+          "Caution: performance collapses with large inlined data scans (issue #1432: naive data scan over 47 MB data.json -> seconds per decision); policies must index/join data rather than scan. https://github.com/open-policy-agent/opa/issues/1432"
+        ],
+        "fit_for_meept": "With one shared PreparedEvalQuery per policy revision and small structured input, expect tens-of-microseconds per tool-call check - comfortably under budget. Tail risk only if policies grow complex or data is scanned naively."
+      },
+      "maintenance_burden": "Medium. Upside: huge ecosystem, graduated CNCF governance, strong tooling (opa fmt/check/test/bench, VS Code extension). Downside for a small daemon: Rego is a real language teams must learn; OPA docs themselves note 'The added complexity of OPA is not trivial' (via TAG-Security assessment) and Rego is widely reported as tricky; library import is large (parser, compiler, topdown evaluator, storage abstractions); occasional language-version migration work (v0 -> v1 Rego required policy rewrites or the v0 compatibility flag; rego.v2 import just appeared in v1.22.0, signaling continued language churn).",
+      "fit_assessment": "Good but heavier than needed. meept's authorization model (agent -> group -> tool/memory/fs) is simple enough that Rego's generality buys little, and Rego authoring/maintenance cost is the price. Choose OPA if policies will grow complex/expressive (conditional tool args, time/IP context, structured decision reasons) or if the team wants the ecosystem and tooling. It is the only option here with CNCF-level governance and a security assessment on record.",
+      "urls": [
+        "https://www.openpolicyagent.org/docs/latest/integration/",
+        "https://pkg.go.dev/github.com/open-policy-agent/opa/v1/rego",
+        "https://pkg.go.dev/github.com/open-policy-agent/opa/sdk",
+        "https://github.com/open-policy-agent/opa/issues/7277",
+        "https://github.com/open-policy-agent/opa/issues/951",
+        "https://www.cncf.io/projects/open-policy-agent-opa/",
+        "https://github.com/open-policy-agent/opa/releases/tag/v1.0.0",
+        "https://github.com/open-policy-agent/opa/releases/",
+        "https://github.com/open-policy-agent/opa",
+        "https://github.com/cncf/tag-security/tree/main/assessments/projects/opa",
+        "https://github.com/Phanatic/opa-benchmark",
+        "https://github.com/open-policy-agent/opa/pull/1335",
+        "https://github.com/spiffe/spire/pull/6633",
+        "https://github.com/zalando/skipper/pull/3442",
+        "https://github.com/open-policy-agent/opa/issues/1432"
+      ]
+    },
+    {
+      "name": "Cedar (AWS) + cedar-go",
+      "module": "github.com/cedar-policy/cedar-go",
+      "license": "Apache-2.0 (verified on pkg.go.dev and GitHub repo)",
+      "maturity": "Official Go implementation of Cedar under the cedar-policy org (same org as the Rust Cedar used by Amazon Verified Permissions); repo created 2024-02, ~240 stars; current release v1.9.0 (2026-10-29) - active and rapidly iterated; nightly corpus tests against the Rust implementation (policy-set JSON checked against Rust Cedar's output); development largely driven by StrongDM + AWS engineers. Younger than OPA/Casbin: v1.0.0 is recent, and the API surface (x/exp packages) still carries breaking-change warnings.",
+      "policy_model": "Policy-as-code with a fixed, purpose-built authorization schema: every request is (principal, action, resource, context); policies are permit/forbid statements scoped with 'when'/'unless' conditions; entity/attribute model (RBAC and ABAC via entity hierarchy 'in' and attrs). Default-deny: Authorize returns Deny unless at least one permit matches and no forbid matches. A schema defines the authorization model; the Rust Cedar validator is mature, cedar-go's validator is experimental (x/exp/schema).",
+      "embeddability": {
+        "verdict": "Excellent. Pure Go (no CGO, no wasm, no FFI - unlike the third-party Joffref/cedar wasm binding), single import, zero infra.",
+        "details": [
+          "cedar.Authorize(policySet, entities, cedar.Request{Principal, Action, Resource, Context}) returns (Decision, Diagnostic) with reasons/diagnostics for auditing.",
+          "Included in Go impl: core authorizer, JSON marshal/unmarshal, core+extended types (datetime/duration RFC 80), integration test suite, schema parsing + programmatic construction.",
+          "NOT yet included: CLI, full schema validator (experimental), formatter, partial evaluation, policy templates. (https://github.com/cedar-policy/cedar-go)",
+          "Caveat for meept's toolchain: cedar-go v1.9.0 requires Go >= 1.26 (depends on go-json-experiment/json; GOEXPERIMENT=jsonv2 builds unsupported). Check the daemon's current Go version before pinning; earlier majors support older Go (each release supports the two most recent Go majors)."
+        ]
+      },
+      "latency": {
+        "summary": "Cedar's headline property: policy structure is designed to be indexed for quick retrieval and 'fast and scalable real-time evaluation, with bounded latency' (official claim). The Rust engine's Datalog-style head-indexing means checks do not degrade linearly with policy count; the Go reimplementation evaluates every policy in the set per request (Authorize loops all policies - visible in authorize.go), so per-check cost is O(#policies) but with tiny constant factors in pure Go.",
+        "evidence": [
+          "Official README performance claims: 'Cedar is fast and scalable... designed to be indexed... bounded latency'. https://github.com/cedar-policy/cedar-go",
+          "Cedar (Rust) commonly cited at sub-millisecond, thousands of decisions/sec/core; third-party comparison (johal.in) reports Cedar p99 ~62 us vs OPA ~840 us - treat those specific numbers with caution (blog, methodology unclear, and cedar-go != Rust Cedar), but the direction (Cedar notably faster than Rego eval) is consistent with Cedar's indexed design.",
+          "An open cedar-go issue (#7) notes cedar-go is not yet integrated into the official cedar-examples benchmark suite - no authoritative cedar-go benchmark numbers exist yet; benchmark it yourself against meept's policy shape. https://github.com/cedar-policy/cedar-go/issues/7",
+          "Practical expectation for meept-scale (dozens of policies, small entity map): low tens of microseconds per Authorize call in pure Go - comfortably sub-millisecond."
+        ],
+        "fit_for_meept": "Best latency story of the three, and per-call cost is predictable. Entities map (users/agents/groups) can be rebuilt from SQLite on policy change; requests are constructed in-process."
+      },
+      "maintenance_burden": "Low-medium. Policies are short, statically structured, and hard to shoot yourself with (no arbitrary expression language, default deny, typed entities). Costs: young library (expect minor-version API churn; x/exp explicitly unstable), Go 1.26 requirement at v1.9.0, missing Rust-side features (no templates/partial eval/production validator yet), small community (~240 stars, few Stack Overflow answers).",
+      "fit_assessment": "Strongest conceptual fit. meept's need is exactly Cedar's target: principal-action-resource-permit/forbid with entity hierarchy (agent in group), server-side enforcement, per-call checks, embedded in a daemon, no service. Security posture is good for a policy engine in this space: the v1.9.0 release demonstrates active security response (fixed DoS via exponential-time JSON policy decoding, quadratic-time nested-JSON decode, authorization bypass via malformed JSON entity records, and policy-injection risks via unvalidated annotation keys/entity-type names). Watch: pin the version, keep entities/policy JSON sources trusted, re-run `go get -u` discipline on security advisories.",
+      "urls": [
+        "https://github.com/cedar-policy/cedar-go/",
+        "https://pkg.go.dev/github.com/cedar-policy/cedar-go",
+        "https://github.com/cedar-policy/cedar-go/releases",
+        "https://github.com/cedar-policy/cedar-go/blob/main/authorize.go",
+        "https://github.com/cedar-policy/cedar-go/issues/7",
+        "https://github.com/cedar-policy/cedar-go/pull/98",
+        "https://github.com/Joffref/cedar",
+        "https://johal.in/replacing-open-policy-agent-cedar-32-application-authorization",
+        "https://zdnetinside.com/knowledge/why_is_cedar_the_policy_engine_of_choice_for_securing_ai_agents_in_2026.php"
+      ]
+    },
+    {
+      "name": "Casbin (Go)",
+      "module": "github.com/casbin/casbin/v3 (v2 line: github.com/casbin/casbin/v2, critical fixes only; v3 released 2025-12-09, primarily a module-path change)",
+      "license": "Apache-2.0 (verified on pkg.go.dev and GitHub)",
+      "maturity": "Very active and long-lived (~20k stars; the original casbin/casbin repo now under apache/casbin). Project entered the Apache Incubator 2026-02-07 (Apache Casbin, Incubating); Go v3.11.0-incubating released 2026-08; v2 gets critical bug fixes only, migration guide says plan to move within 6-12 months. Single maintainer dominates (hsluoyz) - bus-factor consideration.",
+      "policy_model": "Model-as-code in a PERM metamodel: a .conf file declares request_definition, policy_definition, role_definition (g), policy_effect, and a matcher expression (govaluate-based), plus policy rules as string tuples stored via an adapter. This is the most flexible metamodel (ACL/RBAC/ABAC/RESTful/deny-override/priority/BLP/Biba/LBAC/OrBAC models ship as examples) but the matcher is a stringly-typed expression evaluated over (policy rows x request), and policy values are plain strings (V0..V5 columns).",
+      "embeddability": {
+        "verdict": "Excellent. Pure Go, no CGO; enforcer is an in-process object; NewEnforcer(model, adapter) loads policies from storage automatically at construction.",
+        "storage_sqlite": "YES - SQLite policy persistence is first-class. Options: (1) apache/casbin-gorm-adapter/v3 (supports MySQL/PostgreSQL/SQLServer/SQLite3; deliberately uses github.com/glebarez/sqlite - the pure-Go, CGO-free GORM sqlite driver; AutoSave supported); (2) the lighter SQL adapter (database/sql, SQLite3 in master, AutoSave supported); (3) xorm-adapter, ent-adapter, sqlx, bun adapters. Adapter interface: mandatory LoadPolicy/SavePolicy + optional AddPolicy/RemovePolicy/RemoveFilteredPolicy for AutoSave. Note: an existing GORM instance can be shared via gormadapter.NewAdapterByDB(gormInstance). https://casbin.apache.org/docs/adapters/ , https://github.com/casbin/gorm-adapter",
+        "caveat": "GORM adapter pulls in the full GORM stack; for meept (already SQLite-backed) the plain SQL adapter or a ~50-line custom Adapter over the existing DB handle keeps the dependency tree smaller. SyncedEnforcer (RWMutex) or explicit locking is needed if policies are mutated at runtime."
+      },
+      "latency": {
+        "summary": "Fast for small policy sets; degrades linearly with policy count (matcher evaluated per policy row) - the RBAC g() graph lookup adds cost on large role graphs.",
+        "evidence": [
+          "Official benchmark page (Go, i7-6700HQ): ACL 2 rules ~15.5 us/op; RBAC 5 rules ~21.7 us/op; RBAC 1,100 rules ~164 us/op; RBAC 11,000 rules ~2.26 ms/op; RBAC 110,000 rules ~23.9 ms/op; ABAC ~7.5 us/op. https://casbin.apache.org/docs/benchmark/",
+          "Matcher ordering matters: putting g() role calls last in the matcher cut latency ~60% in production for one reporter (PR #966: 79.9 us -> 42.8 us/op small set; 7.56 ms -> 2.71 ms/op large set). https://github.com/casbin/casbin/pull/966",
+          "CachedEnforcer exists for hot paths (result cache; known cache-clearing bugs were fixed along the way). https://github.com/apache/casbin/blob/master/enforcer_cached_b_test.go"
+        ],
+        "fit_for_meept": "At meept scale (per-agent/group policies, likely tens-to-hundreds of rules) expect ~20-170 us per Enforce() call - within budget. Do NOT put 10k+ policy rows in a single enforcer without the cached enforcer or role-graph shaping."
+      },
+      "maintenance_burden": "Low to operate, medium to trust. Ops burden is small (one import, one .conf, adapter). Trust/maintenance concerns, all verified: (1) history of concurrency bugs - ConcurrentModificationException-class and race conditions around concurrent Enforce/LoadPolicy (casbin issues #1318-class, #1387, #1491, #1537, jcasbin #361, jcasbin #513 race in enforce); use SyncedEnforcer and check recent fixes; (2) matcher-function footguns - keyMatch3 gave a false positive on a malformed wildcard policy while the editor/jcasbin rejected it (issue #1392); maintainer's stated stance: 'policy rules are totally trusted and on the same side together with the Casbin caller' - i.e., Casbin does NOT treat policy content as adversarial input, which matters if meept ever lets agents/tenant users author policy rows; (3) the eval() matcher function allows policy-driven expression execution - keep eval() out of the model unless trusted policy authors only; (4) v2->v3 transition in flight - choose v3 today. No reviewed GHSA/GO-vuln entries for the casbin/casbin Go core itself were found in this search pass (searches surfaced Casdoor and jcasbin transitive-dependency noise, not core-library advisories) - absence of found advisories is not proof of absence; run `govulncheck` after adding it.",
+      "fit_assessment": "Pragmatic fit, with caveats. Wins: exact SQLite story meept wants (pure-Go driver, AutoSave, share the existing DB handle), RBAC-with-domains maps directly to agent->group->tool, most flexible model definitions, huge adapter ecosystem. Risks: stringly-typed policy model means less type safety than Cedar's typed entities or Rego's compiler-checked modules; concurrency hygiene history means meept must serialize policy mutations; the maintainer's trust-model (policies are trusted input) is a poor match if policies become user/agent-writable. Best choice if the SQLite-adapter integration and familiar RBAC shapes outweigh Cedar's cleaner engine.",
+      "urls": [
+        "https://casbin.apache.org/docs/adapters/",
+        "https://github.com/casbin/gorm-adapter",
+        "https://pkg.go.dev/github.com/apache/casbin-gorm-adapter/v3",
+        "https://casbin.apache.org/docs/benchmark/",
+        "https://github.com/casbin/casbin/pull/966",
+        "https://github.com/apache/casbin/blob/master/enforcer_cached_b_test.go",
+        "https://github.com/apache/casbin/releases/tag/v3.0.0",
+        "https://github.com/apache/casbin/releases",
+        "https://casbin.apache.org/blog/upgrading-casbin-go-v2-to-v3/",
+        "https://incubator.apache.org/projects/casbin.html",
+        "https://release-catalog.apache.org/casbin/index.html",
+        "https://github.com/casbin/casbin/issues/1392",
+        "https://github.com/casbin/jcasbin/issues/361",
+        "https://github.com/casbin/jcasbin/issues/407",
+        "https://github.com/apache/casbin/blob/master/enforcer.go"
+      ]
+    }
+  ],
+  "cross_cutting_comparison": {
+    "policy_as_data_vs_code": {
+      "OPA": "policy-as-code (Rego modules, versioned, compiled, testable with opa test/fmt/check)",
+      "Cedar": "policy-as-code (Cedar statements, typed against a schema; JSON policy-set format also exists for storage)",
+      "Casbin": "model-as-code (PERM .conf) + policy-as-DATA (string tuples in storage) - the only one where the authorization rules themselves are untyped stored data"
+    },
+    "go_purity": "All three core modules are pure Go / no CGO. Note: casbin gorm-adapter uses glebarez/sqlite (pure Go) deliberately; OPA and cedar-go have no DB dependency at all (policies in memory; persistence is your code).",
+    "per_call_latency_ranking": "Cedar ~ tens of us (indexed design, pure-Go re-eval of all policies per request; no official cedar-go benchmark yet) <= OPA ~30-160 us with PreparedEvalQuery (never re-prepare per call) <= Casbin ~15-170 us small sets, linear degradation past ~1k rules (~2.3 ms at 11k rules)",
+    "storage_persistence": "Casbin wins (SQLite adapters, AutoSave). OPA/Cedar leave persistence to you - trivial for meept: store Rego modules / Cedar policy-set+entities JSON in SQLite, load+prepare on boot and on change.",
+    "safety_hygiene": "Cedar: typed, default-deny, active security-response cadence (v1.9.0 fixed 5 vulns incl. authz-bypass and DoS). OPA: graduated CNCF, completed security assessment, mature tooling. Casbin: documented concurrency-bug history and an explicit 'policy is trusted input' trust model; no reviewed Go-core advisories found in this pass (verify with govulncheck).",
+    "single_daemon_fit_ranking": "1) cedar-go - principal/action/resource + entity hierarchy is exactly 'named agents -> groups -> tools', best latency, lowest policy-authoring risk; costs: young lib, Go>=1.26 at v1.9.0, no validator yet. 2) OPA/rego - pick if policy expressiveness (string ops, set logic, rich conditions over tool args) is needed; costs: Rego learning curve + large dep. 3) Casbin - pick if SQLite-backed policy CRUD with AutoSave and conventional RBAC out-of-the-box matters most; costs: concurrency discipline, stringly-typed model, v2->v3 churn."
+  },
+  "honest_gaps": [
+    "No authoritative cedar-go micro-benchmark exists (official benchmark integration is still an open issue, cedar-policy/cedar-go#7); third-party Cedar-vs-OPA numbers found are Rust-engine numbers or from low-trust blogs - meept should write its own ~30-line benchmark against its real policy shape before committing.",
+    "Casbin-specific reviewed security advisories (GHSA/GO-202x) for the Go core were not located in this search pass; jcasbin/Casdoor advisories found are adjacent projects, not the Go library. Recommend `govulncheck ./...` post-integration as the verification step.",
+    "OPA memory footprint when embedded as a library was not benchmarked here; the library is large (parse/compile/eval stack) and cold-start compile of big policy sets takes time - irrelevant at meept scale but unstated numbers above are per-decision, not per-boot.",
+    "Cedar-go v1.9.0's Go 1.26 minimum must be checked against meept's current go.mod before adoption; if meept is on an older toolchain, pin an earlier cedar-go major that supports it."
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "topic": "Zanzibar-style relationship-based access control (ReBAC) systems and fit for meept (single-daemon, pure-Go, SQLite-backed, no external services)",
+  "researched_on": "2026-10-30",
+  "verification_notes": {
+    "zanzibar_leap": "UNVERIFIED: targeted searches for a technique called 'Zanzibar Leap' returned no hits. The verified consistency concepts from the paper are: zookies (opaque consistency tokens), external consistency, snapshot reads with bounded staleness, and the 'new enemy' problem. If 'Zanzibar leap' was meant as a specific follow-up technique, it could not be confirmed and is intentionally not described.",
+    "method": "Facts below are drawn from USENIX paper text, GitHub repo metadata, pkg.go.dev, CNCF project pages, and project blogs returned by web_search; each entry carries cited URLs."
+  },
+  "options": [
+    {
+      "name": "Google Zanzibar (reference paper)",
+      "type": "paper / reference architecture (not usable software)",
+      "what_it_is": "Google's globally distributed ACL storage and evaluation system (USENIX ATC 2019), backing Drive, Calendar, Cloud IAM, Photos, YouTube.",
+      "key_ideas": [
+        "Relation tuples: object#relation@subject; subjects can be usersets (nested groups), enabling object-to-object relations like doc:readme#parent@folder:A",
+        "Namespace configs with userset rewrite rules (union/intersection/exclusion) define derived permissions (viewer contains editor contains owner)",
+        "APIs: Check, Expand (effective userset tree), Read, Write, Watch",
+        "Consistency: external consistency via Spanner TrueTime timestamps; zookie tokens bound snapshot staleness; prevents the 'new enemy' problem (revoked user must not see new content via stale ACLs)",
+        "Scale framing: 2+ trillion ACLs, millions of checks/sec, <10ms p95, 99.999% availability"
+      ],
+      "zanzibar_leap": "Not verifiable in this research pass - see verification_notes.",
+      "fit_for_meept": "The DATA MODEL (tuples + inheritance graph walk) is a great fit for 'agent -> group -> resource' checks; the DISTRIBUTED CONSISTENCY machinery (Spanner, zookies, multi-region) is unnecessary overhead for a single SQLite-backed daemon, where serialized SQLite transactions already give external consistency for free.",
+      "urls": [
+        "https://www.usenix.org/system/files/atc19-pang.pdf",
+        "https://research.google/pubs/zanzibar-googles-consistent-global-authorization-system/",
+        "https://github.com/authzed/zanzibar-annotated/blob/main/content/zanzibar.mdx"
+      ]
+    },
+    {
+      "name": "OpenFGA",
+      "type": "authorization server, embeddable as a Go library",
+      "license": "Apache-2.0",
+      "language": "Go",
+      "maturity": "High and growing: CNCF Sandbox Sep 2022, moved to CNCF Incubating Oct 28 2025; ~5.9k GitHub stars; created by Auth0/Okta engineers; production adopters include Grafana Labs, Canonical, Docker, Agicap; v1.22.x on pkg.go.dev.",
+      "go_integration": "Dual story. (1) Standalone server (`openfga run`) over HTTP/gRPC, usually with PostgreSQL/MySQL (SQLite adapter is beta). (2) Library embedding: `pkg/server` `NewServerWithOpts(...)` with any implementation of the `pkg/storage.OpenFGADatastore` interface, including the built-in in-memory datastore; the README explicitly advertises 'Can also be embedded as a Go library'. Maintainers have confirmed embedding works with no network when the datastore is local.",
+      "embeddability_caveats": [
+        "Historically request validation lived in gRPC middleware, so library users lost it - fixed by moving validation into the RPC methods (issue #965 closed via PR #975 / #2670)",
+        "Issue #1874 (still OPEN as of research date): some server-config validations still don't run when used as a library",
+        "Internal graph-resolution code stays in `internal/` - you embed the Server struct, not the raw graph engine"
+      ],
+      "data_model_fit": "Native fit: types + relations + conditions model 'agent belongs to group, group has viewer on resource, check(agent, viewer, resource)' directly; supports contextual/conditional tuples (ABAC-lite).",
+      "operational_cost": "As a server: one more process + datastore to run (violates meept's no-external-services constraint unless embedded). Embedded: pure Go dependency, in-memory datastore or a custom SQLite-backed OpenFGADatastore implementation; dependency footprint is non-trivial (gRPC, protobuf, otel) but contained in-process.",
+      "fit_verdict": "BEST candidate among the big three for meept's constraint: Apache-2.0, CNCF-governed, SQLite-capable, and genuinely embeddable. Risk: embedding is a second-class path (open validation bugs, `internal/` boundaries), so it must be validated with a spike before committing.",
+      "urls": [
+        "https://github.com/OpenFGA/openfga",
+        "https://openfga.dev/docs/fga",
+        "https://www.cncf.io/projects/openfga/",
+        "https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/",
+        "https://github.com/openfga/openfga/issues/871",
+        "https://github.com/openfga/openfga/issues/965",
+        "https://github.com/openfga/openfga/issues/1874",
+        "https://pkg.go.dev/github.com/openfga/openfga"
+      ]
+    },
+    {
+      "name": "SpiceDB",
+      "type": "authorization database (server-first)",
+      "license": "Apache-2.0",
+      "language": "Go",
+      "maturity": "Highest among OSS Zanzibar implementations ('most mature' per its own docs, battle-tested since 2021 by AuthZed); ~7.1k stars; actively released (v1.57.0 at research time).",
+      "go_integration": "Standard deployment is a SEPARATE SpiceDB server plus an external datastore: PostgreSQL (recommended single-region), CockroachDB (recommended multi-region), Spanner, MySQL (not recommended); memdb only for dev/test. Go client is authzed/authzed-go over gRPC. Partial library story: a `pkg/embedded` package now exists that runs SpiceDB's permission engine in-process (no gRPC), but it exposes ONLY `CheckPermission` (no schema/relationship writes API surface, no watch/lookup) and still requires constructing a `datastore.Datastore`; checks are always evaluated at head revision.",
+      "data_model_fit": "Excellent: schema language (zed) with definitions, relations, permissions; subjects can be `agent`, `group#member`, wildcards; caveats for conditional access.",
+      "operational_cost": "High for meept: a dedicated server process plus Postgres/CockroachDB is exactly the heavyweight external service meept excludes. Embedded `pkg/embedded` mode avoids the second process but is check-only and leans on a datastore implementation you'd have to write against SQLite.",
+      "fit_verdict": "Poor fit for single-daemon meept despite being the most mature option: server+datastore in the normal path; embedded mode too narrow to be the primary integration. Would only make sense if meept ever grew a dedicated multi-service authz tier.",
+      "urls": [
+        "https://github.com/authzed/spiceDB",
+        "https://authzed.com/docs/spicedb/concepts/datastores",
+        "https://pkg.go.dev/github.com/authzed/spicedb",
+        "https://pkg.go.dev/github.com/authzed/spicedb/pkg/embedded",
+        "https://github.com/authzed/authzed-go/",
+        "https://authzed.com/spicedb/"
+      ]
+    },
+    {
+      "name": "Permify",
+      "type": "authorization-as-a-service engine (server-first)",
+      "license": "AGPL-3.0 since May 13 2025 (was Apache-2.0 before; license swap via PR #2228) - copyleft matters for anything linking/embedding it",
+      "language": "Go",
+      "maturity": "ACTIVE, not archived: acquired by FusionAuth on Nov 20 2025 with a public commitment to stay open source; steady release cadence since (v1.6.x through v1.7.5, Oct 2026; commits into Oct 2026); ~5.9-6.1k stars.",
+      "go_integration": "Server-first: runs as `permify` server (gRPC/HTTP/REST) backed primarily by PostgreSQL; consumed via generated SDKs. No documented embed-as-a-Go-library path surfaced in this research (its engine packages live under `internal/`, implying import restrictions) - treat as server-only.",
+      "data_model_fit": "Good on paper (schema + relationships + permission checks, Zanzibar-inspired, multi-tenancy).",
+      "operational_cost": "Separate server + Postgres. AGPL-3.0 is the decisive blocker: linking it into a distributed single-binary daemon triggers network-copyleft obligations.",
+      "fit_verdict": "Poor fit: server+Postgres violates the no-external-services constraint, and AGPL-3.0 makes embedding legally unattractive for a self-hosted platform binary. Note the license was Apache before May 2025 - old pins/forks may silently differ.",
+      "urls": [
+        "https://github.com/Permify/permify",
+        "https://permify.co/post/fusionauth-acquires-permify/",
+        "https://github.com/Permify/permify/pull/2228",
+        "https://pkg.go.dev/github.com/Permify/permify",
+        "https://github.com/Permify/permify/releases"
+      ]
+    },
+    {
+      "name": "Embeddable Zanzibar-style Go libraries",
+      "options": [
+        {
+          "name": "sourcenetwork/zanzi",
+          "verified": true,
+          "detail": "'Zanzibar based ReBAC embeddable authorization engine', pure Go, has a documented embedded-library usage example (example/embedded) plus gRPC mode. Last push 2026-05-14. BUT: 7 stars, 2 contributors - tiny bus factor, essentially a two-person project. License not confirmed in this pass.",
+          "url": "https://github.com/sourcenetwork/zanzi"
+        },
+        {
+          "name": "xraph/warden",
+          "verified": true,
+          "detail": "In-process Go engine combining RBAC + ABAC + ReBAC ('Zanzibar-style relation tuples and a graph walk, inside your own process and database. There is no separate authorization service to run' - direct quote from README). Apache-2.0, works against PostgreSQL/SQLite/MongoDB/in-memory, v1.8.x on pkg.go.dev, releases into late 2026. BUT: repo created 2026-02-20 with ~1 star - very young, unproven adoption.",
+          "url": "https://github.com/xraph/warden"
+        },
+        {
+          "name": "trevex/zanzigo",
+          "verified": true,
+          "detail": "Minimal building-blocks library for a Zanzibar-esque resolver (model + tuple store + Check); useful as a reference implementation more than a dependency; tiny project.",
+          "url": "https://github.com/trevex/zanzigo"
+        },
+        {
+          "name": "atol.sh/sdk-go",
+          "verified": true,
+          "detail": "Embeds Zanzibar relationship checks in-process, BUT bootstraps model/tuples from the atol.sh SaaS at startup - external service dependency, disqualified for meept.",
+          "url": "https://github.com/atol-sh/atol-sdk-go"
+        }
+      ],
+      "note": "No large, battle-tested pure-library Zanzibar implementation exists in Go. The embeddable options are all small-community projects; the mature systems (OpenFGA, SpiceDB, Permify) are all server-first with library embedding as a secondary path.",
+      "urls_extra": [
+        "https://pkg.go.dev/github.com/xraph/warden"
+      ]
+    }
+  ],
+  "overall_recommendation_for_meept": {
+    "summary": "Adopt the Zanzibar DATA MODEL, not a Zanzibar SYSTEM. Meept's 'agent -> group -> resource' checks map naturally onto relation tuples, but every mature Zanzibar-style system is built for distributed, multi-service deployments and conflicts with meept's no-external-services constraint.",
+    "ranked_options": [
+      "1. Roll a minimal ReBAC engine in-repo: a relation-tuples table in meept's existing SQLite store (`object_type:object_id#relation@subject`, subjects may be usersets) plus a bounded recursive userset-resolution Check with a cycle guard. This is a few hundred lines, keeps data co-located with session/employee storage, and needs no zookies - a single SQLite writer gives external consistency by construction.",
+      "2. Embed OpenFGA as a Go library (Apache-2.0, CNCF Incubating, SQLite-beta adapter, documented `NewServerWithOpts` + in-memory datastore path) with a custom SQLite-backed `OpenFGADatastore`. Viable but must be spike-validated: library mode has known open validation gaps (issue #1874) and a heavy dependency footprint (gRPC/otel).",
+      "3. Avoid SpiceDB (server+datastore required; embedded pkg/embedded is Check-only) and Permify (server+Postgres, AGPL-3.0)."
+    ],
+    "when_to_revisit": "If meept grows optional clustering with cross-node authz decisions, revisiting OpenFGA (server or embedded) becomes worthwhile; the tuple schema from option 1 is OpenFGA-model-compatible, keeping a migration path open."
+  }
+}
