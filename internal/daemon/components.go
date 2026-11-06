@@ -5170,9 +5170,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}
 		}
 		// Supervisor chatter (C6 fast endpoint): voice.supervisor_model
-		// resolves to the classifier/small-model client when configured,
-		// else the main client. nil degrades the gate to allow-all with a
-		// single construction warning (NewSupervisor logs it).
+		// resolves to a DEDICATED client through the same
+		// createAuxiliaryLLMClientWithResolver path the classifier chain
+		// uses (bughunt M1); nil/empty falls back to the classifier
+		// chatter below. nil chatter degrades the gate to allow-all with
+		// a single construction warning (NewSupervisor logs it).
+		vdeps.SupervisorChatterClient = func(modelRef string) *llm.Client {
+			return createAuxiliaryLLMClientWithResolver(
+				c.ModelsConfig,
+				modelRef,
+				c.LLMResolver,
+				logger.With("component", "voice-supervisor-llm"),
+				budgetTracker,
+			)
+		}
 		vdeps.SupervisorChatter = voiceSupervisorChatter(c)
 		wiring, err := WireVoice(c.ctx, vdeps)
 		if err != nil {

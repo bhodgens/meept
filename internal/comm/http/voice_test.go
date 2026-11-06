@@ -648,3 +648,75 @@ func mustWriteWS(t *testing.T, conn *websocket.Conn, data []byte) {
 }
 
 const websocketStatusNormal = websocket.StatusNormalClosure
+
+// --- bughunt H2-wiring: start frame carries the negotiated wire codec ---
+//
+// The splice runner builds SpliceConfig.CodecWire from StartFrame.Encoding/
+// SampleRate while TranscodeInbound keeps its PCMU-flag semantics. These
+// tests pin the StartFrame side of that contract (the SpliceConfig fill is
+// daemon wiring, pinned in internal/daemon/voice_wiring_test.go).
+
+func TestVoiceStartFrameCarriesWireCodec(t *testing.T) {
+	v, _, runner, _, signMedia := enabledRoutes(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s := NewServer(ServerConfig{}, nil, nil, nil, nil, nil, WithVoiceRoutes(v))
+		s.middleware(http.HandlerFunc(v.serveVoiceRoute)).ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + v.MediaPath()
+	conn, _, err := dialMediaWS(t, wsURL, signMedia(v.mgrStreamURL()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close(websocketStatusNormal, "")
+	mustWriteWS(t, conn, []byte(`{"event":"connected"}`))
+	mustWriteWS(t, conn, []byte(`{"event":"start","start":{"call_control_id":"cc-h2","media_format":{"encoding":"PCMU","sample_rate":8000}}}`))
+
+	deadline := time.Now().Add(3 * time.Second)
+	for runner.callCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("runner never invoked")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	start := runner.lastStart()
+	// Wire codec fields populated verbatim from media_format...
+	if start.Encoding != "PCMU" || start.SampleRate != 8000 {
+		t.Fatalf("start frame wire codec: encoding=%q sample_rate=%d, want PCMU/8000", start.Encoding, start.SampleRate)
+	}
+	// ...while TranscodeInbound keeps its PCMU-flag semantics.
+	if !start.TranscodeInbound {
+		t.Fatal("PCMU encoding must keep TranscodeInbound true")
+	}
+}
+
+func TestVoiceStartFrameL16EmptyTranscodeKeepsCodecFields(t *testing.T) {
+	v, _, runner, _, signMedia := enabledRoutes(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s := NewServer(ServerConfig{}, nil, nil, nil, nil, nil, WithVoiceRoutes(v))
+		s.middleware(http.HandlerFunc(v.serveVoiceRoute)).ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + v.MediaPath()
+	conn, _, err := dialMediaWS(t, wsURL, signMedia(v.mgrStreamURL()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close(websocketStatusNormal, "")
+	mustWriteWS(t, conn, []byte(`{"event":"start","start":{"call_control_id":"cc-h2b","media_format":{"encoding":"L16","sample_rate":16000}}}`))
+
+	deadline := time.Now().Add(3 * time.Second)
+	for runner.callCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("runner never invoked")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	start := runner.lastStart()
+	if start.Encoding != "L16" || start.SampleRate != 16000 {
+		t.Fatalf("start frame wire codec: encoding=%q sample_rate=%d, want L16/16000", start.Encoding, start.SampleRate)
+	}
+	if start.TranscodeInbound {
+		t.Fatal("L16 must not set TranscodeInbound")
+	}
+}
