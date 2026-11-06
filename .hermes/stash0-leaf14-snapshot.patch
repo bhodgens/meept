@@ -1,0 +1,1156 @@
+diff --git a/.githooks/deadcode-baseline.txt b/.githooks/deadcode-baseline.txt
+index 40c8aee6..64418beb 100644
+--- a/.githooks/deadcode-baseline.txt
++++ b/.githooks/deadcode-baseline.txt
+@@ -265,6 +265,7 @@ internal/agent/capabilities_builder.go unreachable func: CapabilitiesBuilder.Bui
+ internal/agent/capabilities_builder.go unreachable func: CapabilitiesBuilder.deriveIntentTypesFromSpec
+ internal/agent/capabilities_builder.go unreachable func: CapabilitiesBuilder.deriveKeywordsFromPurpose
+ internal/agent/capabilities_builder.go unreachable func: CapabilitiesBuilder.extractIntentsFromPurpose
++internal/agent/capabilities_builder.go unreachable func: CapabilitiesBuilder.refreshIfNeeded
+ internal/agent/capabilities_builder.go unreachable func: CapabilitiesBuilder.WithCapabilityIndex
+ internal/agent/capabilities_builder.go unreachable func: NewCapabilitiesBuilder
+ internal/agent/capabilities_builder.go unreachable func: uniqueStrings
+@@ -310,6 +311,8 @@ internal/agent/classifier_boot_readiness.go unreachable func: ClassifierBootRead
+ internal/agent/classifier_boot_readiness.go unreachable func: ClassifierBootReadiness.SignalReady
+ internal/agent/classifier_boot_readiness.go unreachable func: ClassifierBootReadiness.Wait
+ internal/agent/classifier_boot_readiness.go unreachable func: NewClassifierBootReadiness
++internal/agent/codemode_grant.go unreachable func: ContextWithToolRegistry
++internal/agent/codemode_grant.go unreachable func: ToolRegistryFromContext
+ internal/agent/collaboration_diff_driver.go unreachable func: DifferentialDriver.buildDifferentiatorPrompt
+ internal/agent/collaboration_diff_driver.go unreachable func: DifferentialDriver.CanInitiate
+ internal/agent/collaboration_diff_driver.go unreachable func: DifferentialDriver.Name
+@@ -407,8 +410,10 @@ internal/agent/context_injector.go unreachable func: ContextInjector.BuildSystem
+ internal/agent/context_injector.go unreachable func: ContextInjector.GetActiveInstructions
+ internal/agent/context_injector.go unreachable func: ContextInjector.HasActiveInstructions
+ internal/agent/context_injector.go unreachable func: ContextInjector.HasLearnedPatterns
++internal/agent/context_injector.go unreachable func: ContextInjector.rankSkillNames
++internal/agent/context_injector.go unreachable func: ContextInjector.SetEpisodeTask
+ internal/agent/context_injector.go unreachable func: ContextInjector.SetSkillLoader
+-internal/agent/context_injector.go unreachable func: ContextInjector.visibleSkillLines
++internal/agent/context_injector.go unreachable func: ContextInjector.visibleSkillLinesForEpisode
+ internal/agent/context_injector.go unreachable func: NewContextInjector
+ internal/agent/contextalloc/adapter.go unreachable func: episodicRecall
+ internal/agent/contextalloc/adapter.go unreachable func: isNilPointer
+@@ -475,13 +480,17 @@ internal/agent/conversation.go unreachable func: Conversation.Len
+ internal/agent/conversation.go unreachable func: Conversation.MarkActive
+ internal/agent/conversation.go unreachable func: Conversation.MarkInactive
+ internal/agent/conversation.go unreachable func: Conversation.PrefixChanged
++internal/agent/conversation.go unreachable func: Conversation.RecallOutcomeSnapshot
+ internal/agent/conversation.go unreachable func: Conversation.RemoveCompactedMessages
+ internal/agent/conversation.go unreachable func: Conversation.RemoveLast
+ internal/agent/conversation.go unreachable func: Conversation.RestoreFromMessages
+ internal/agent/conversation.go unreachable func: Conversation.SetBranchPoint
+ internal/agent/conversation.go unreachable func: Conversation.SetMemoryContext
++internal/agent/conversation.go unreachable func: Conversation.SetRecallOutcomeSnapshot
++internal/agent/conversation.go unreachable func: Conversation.SetStandingMemoryContext
+ internal/agent/conversation.go unreachable func: Conversation.SetSystemPrompt
+ internal/agent/conversation.go unreachable func: Conversation.StabilizeToolPrefix
++internal/agent/conversation.go unreachable func: Conversation.StandingMemoryContext
+ internal/agent/conversation.go unreachable func: Conversation.Truncate
+ internal/agent/conversation.go unreachable func: Conversation.TruncateByImportance
+ internal/agent/conversation.go unreachable func: Conversation.TruncateByTokens
+@@ -515,6 +524,11 @@ internal/agent/conversation.go unreachable func: WithStoreLogger
+ internal/agent/conversation.go unreachable func: WithSystemPrompt
+ internal/agent/dispatcher_report_tagalong.go unreachable func: classifyReportTagAlong
+ internal/agent/dispatcher_report_tagalong.go unreachable func: newTopicStopwords
++internal/agent/dispatcher_scope.go unreachable func: Dispatcher.chatAgentScopeOptions
++internal/agent/dispatcher_scope.go unreachable func: Dispatcher.lookupSession
++internal/agent/dispatcher_scope.go unreachable func: Dispatcher.rescopeMemoryContextForAgent
++internal/agent/dispatcher_scope.go unreachable func: Dispatcher.sessionScopeOptions
++internal/agent/dispatcher_scope.go unreachable func: Dispatcher.SetMultiUserScopeEnabled
+ internal/agent/dispatcher.go unreachable func: BuildSessionContextBlock
+ internal/agent/dispatcher.go unreachable func: deduplicateIntents
+ internal/agent/dispatcher.go unreachable func: detectMediaURL
+@@ -661,7 +675,9 @@ internal/agent/embedding_prefilter.go unreachable func: NewEmbeddingPrefilter
+ internal/agent/embedding_prefilter.go unreachable func: NewOpenAIEmbedClient
+ internal/agent/embedding_prefilter.go unreachable func: openAIEmbedClient.Embed
+ internal/agent/embedding.go unreachable func: CosineSimilarity
++internal/agent/embedding.go unreachable func: NewSkillRankingEmbedder
+ internal/agent/embedding.go unreachable func: NewSnowflakeEmbedClient
++internal/agent/embedding.go unreachable func: skillRankingEmbedder.Embed
+ internal/agent/embedding.go unreachable func: SnowflakeEmbedClient.Dimension
+ internal/agent/embedding.go unreachable func: SnowflakeEmbedClient.Embed
+ internal/agent/embedding.go unreachable func: SnowflakeEmbedClient.EmbedBatch
+@@ -731,6 +747,7 @@ internal/agent/executor.go unreachable func: Executor.publishToolProgress
+ internal/agent/executor.go unreachable func: Executor.SetAgentID
+ internal/agent/executor.go unreachable func: Executor.SetConversationID
+ internal/agent/executor.go unreachable func: Executor.SetDecisionLogLevel
++internal/agent/executor.go unreachable func: Executor.SetExposurePlan
+ internal/agent/executor.go unreachable func: Executor.SetGroupResolution
+ internal/agent/executor.go unreachable func: Executor.SetParallelismConfig
+ internal/agent/executor.go unreachable func: Executor.SetRegistry
+@@ -921,6 +938,7 @@ internal/agent/handler.go unreachable func: ChatHandler.syncFingerprint
+ internal/agent/handler.go unreachable func: ChatHandler.syncWaitPlan
+ internal/agent/handler.go unreachable func: ChatHandler.touchTurn
+ internal/agent/handler.go unreachable func: ChatHandler.turnIDForTask
++internal/agent/handler.go unreachable func: ChatHandler.turnToolCalls
+ internal/agent/handler.go unreachable func: ChatHandler.unregisterWorker
+ internal/agent/handler.go unreachable func: ChatHandler.waitForTaskCompletion
+ internal/agent/handler.go unreachable func: ChatHandler.workerConversationForSession
+@@ -1025,6 +1043,13 @@ internal/agent/intent_index.go unreachable func: SemanticIndex.BuildIndexWithCan
+ internal/agent/intent_index.go unreachable func: SemanticIndex.IsReady
+ internal/agent/intent_index.go unreachable func: SemanticIndex.Match
+ internal/agent/intent_index.go unreachable func: SemanticIndex.Stop
++internal/agent/intent_tool_map.go unreachable func: IntentMap.For
++internal/agent/intent_tool_map.go unreachable func: IntentMap.Names
++internal/agent/intent_tool_map.go unreachable func: IntentMap.SetUniverse
++internal/agent/intent_tool_map.go unreachable func: LoadIntentMap
++internal/agent/intent_tool_map.go unreachable func: LoadIntentMapWithUniverse
++internal/agent/intent_tool_map.go unreachable func: newSafeIntentMap
++internal/agent/intent_tool_map.go unreachable func: sortedUnique
+ internal/agent/intent.go unreachable func: IntentType.Category
+ internal/agent/intent.go unreachable func: IntentType.Keywords
+ internal/agent/intent.go unreachable func: IntentType.RequiresPlanning
+@@ -1132,7 +1157,9 @@ internal/agent/loop_trace.go unreachable func: buildTraceRecord
+ internal/agent/loop_trace.go unreachable func: NewTraceStoreWriter
+ internal/agent/loop_trace.go unreachable func: TraceWriterFunc.WriteTrace
+ internal/agent/loop_trace.go unreachable func: WithTraceWriter
++internal/agent/loop.go unreachable func: AgentLoop.activateViewedTool
+ internal/agent/loop.go unreachable func: AgentLoop.AdvanceBudgetPhase
++internal/agent/loop.go unreachable func: AgentLoop.applyExposureGate
+ internal/agent/loop.go unreachable func: AgentLoop.ApplyRequestModel
+ internal/agent/loop.go unreachable func: AgentLoop.applySchemaModeLocked
+ internal/agent/loop.go unreachable func: AgentLoop.applySchemaModeWithLock
+@@ -1178,8 +1205,10 @@ internal/agent/loop.go unreachable func: AgentLoop.deliverableClaimsFileEffect
+ internal/agent/loop.go unreachable func: AgentLoop.deriveRoutingPath
+ internal/agent/loop.go unreachable func: AgentLoop.discoverRelevantSkills
+ internal/agent/loop.go unreachable func: AgentLoop.effectivePersonality
++internal/agent/loop.go unreachable func: AgentLoop.ensureExposurePlan
+ internal/agent/loop.go unreachable func: AgentLoop.executeToolCalls
+ internal/agent/loop.go unreachable func: AgentLoop.executeToolCallsUngated
++internal/agent/loop.go unreachable func: AgentLoop.exposurePlanFor
+ internal/agent/loop.go unreachable func: AgentLoop.extractModelOverrideFromMetadata
+ internal/agent/loop.go unreachable func: AgentLoop.FireHTTPHooks
+ internal/agent/loop.go unreachable func: AgentLoop.FirewallStats
+@@ -1242,6 +1271,7 @@ internal/agent/loop.go unreachable func: AgentLoop.RunOnceWithParts
+ internal/agent/loop.go unreachable func: AgentLoop.RunWithSkill
+ internal/agent/loop.go unreachable func: AgentLoop.RunWithTask
+ internal/agent/loop.go unreachable func: AgentLoop.safeTransition
++internal/agent/loop.go unreachable func: AgentLoop.scopeDefinitionsToActive
+ internal/agent/loop.go unreachable func: AgentLoop.Security
+ internal/agent/loop.go unreachable func: AgentLoop.SessionConversation
+ internal/agent/loop.go unreachable func: AgentLoop.SetActive
+@@ -1249,6 +1279,7 @@ internal/agent/loop.go unreachable func: AgentLoop.SetAutonomous
+ internal/agent/loop.go unreachable func: AgentLoop.SetBeforeToolCallHook
+ internal/agent/loop.go unreachable func: AgentLoop.SetBranchManager
+ internal/agent/loop.go unreachable func: AgentLoop.SetBudgetConfig
++internal/agent/loop.go unreachable func: AgentLoop.SetCapabilitiesBuilder
+ internal/agent/loop.go unreachable func: AgentLoop.SetCapabilityIndex
+ internal/agent/loop.go unreachable func: AgentLoop.SetCompactionConfig
+ internal/agent/loop.go unreachable func: AgentLoop.SetCompressionPipeline
+@@ -1304,6 +1335,7 @@ internal/agent/loop.go unreachable func: AgentLoop.unbackedSideEffectClaims
+ internal/agent/loop.go unreachable func: AgentLoop.updateSessionDesignation
+ internal/agent/loop.go unreachable func: attachLLMBudget
+ internal/agent/loop.go unreachable func: buildContextSection
++internal/agent/loop.go unreachable func: cloneMessagesForTransform
+ internal/agent/loop.go unreachable func: containsAnyKeyword
+ internal/agent/loop.go unreachable func: convergenceDetector.detectConvergence
+ internal/agent/loop.go unreachable func: convergenceDetector.recordResponse
+@@ -1331,6 +1363,7 @@ internal/agent/loop.go unreachable func: hashArgs
+ internal/agent/loop.go unreachable func: hashString
+ internal/agent/loop.go unreachable func: labelledReasoningOnly
+ internal/agent/loop.go unreachable func: lastUserMessageText
++internal/agent/loop.go unreachable func: memoryItemIsStable
+ internal/agent/loop.go unreachable func: NewAgentLoop
+ internal/agent/loop.go unreachable func: newConvergenceDetector
+ internal/agent/loop.go unreachable func: newCycleDetector
+@@ -1723,6 +1756,7 @@ internal/agent/prompt.go unreachable func: PromptBuilder.Build
+ internal/agent/prompt.go unreachable func: PromptBuilder.BuildSystemPrompt
+ internal/agent/prompt.go unreachable func: PromptBuilder.BuildSystemPromptOrdered
+ internal/agent/prompt.go unreachable func: PromptBuilder.classifySections
++internal/agent/prompt.go unreachable func: PromptBuilder.SetCapabilitiesBuilder
+ internal/agent/prompt.go unreachable func: PromptBuilder.WithAgentsContext
+ internal/agent/prompt.go unreachable func: PromptBuilder.WithConstitution
+ internal/agent/prompt.go unreachable func: PromptBuilder.WithCoworkerAwareness
+@@ -1868,6 +1902,10 @@ internal/agent/reasoning_parser.go unreachable func: detectScope
+ internal/agent/reasoning_parser.go unreachable func: findTierWord
+ internal/agent/reasoning_parser.go unreachable func: ParseReasoningDirective
+ internal/agent/recall_answer.go unreachable func: Dispatcher.RecallAnswer
++internal/agent/recall_outcome_snapshot.go unreachable func: Dispatcher.recallOutcomeSnapshot
++internal/agent/recall_outcome_snapshot.go unreachable func: DrainRecallOutcomeSnapshot
++internal/agent/recall_outcome_snapshot.go unreachable func: RecalledSnapshotItems
++internal/agent/recall_outcome_snapshot.go unreachable func: recallSnapshotFromItems
+ internal/agent/reflection_collector.go unreachable func: IsAlwaysProposeOnly
+ internal/agent/reflection_collector.go unreachable func: NewReflectionCollector
+ internal/agent/reflection_collector.go unreachable func: ReflectionCollector.DrainPendingProposals
+@@ -1901,6 +1939,9 @@ internal/agent/registry.go unreachable func: AgentRegistry.createLoop
+ internal/agent/registry.go unreachable func: AgentRegistry.DB
+ internal/agent/registry.go unreachable func: AgentRegistry.definitionToSpec
+ internal/agent/registry.go unreachable func: AgentRegistry.discoverGlobalRules
++internal/agent/registry.go unreachable func: AgentRegistry.ensureAgentDiscovered
++internal/agent/registry.go unreachable func: AgentRegistry.ensureDiscoveredRescan
++internal/agent/registry.go unreachable func: AgentRegistry.EnsureLateDiscovered
+ internal/agent/registry.go unreachable func: AgentRegistry.filterTools
+ internal/agent/registry.go unreachable func: AgentRegistry.findReviewerByDomain
+ internal/agent/registry.go unreachable func: AgentRegistry.Get
+@@ -2115,6 +2156,16 @@ internal/agent/routing_telemetry.go unreachable func: RoutingTelemetry.RecordHan
+ internal/agent/routing_telemetry.go unreachable func: RoutingTelemetry.RecordHintMiss
+ internal/agent/routing_telemetry.go unreachable func: RoutingTelemetry.RecordHintRoute
+ internal/agent/scaffolding_strip.go unreachable func: StripPromptScaffolding
++internal/agent/scope_inputs.go unreachable func: EffectiveMemoryScope
++internal/agent/scope_inputs.go unreachable func: memoryScopeCeiling
++internal/agent/scope_inputs.go unreachable func: resolveScopeInputs
++internal/agent/scope_inputs.go unreachable func: resolveScopeInputsWithCeiling
++internal/agent/scope_inputs.go unreachable func: scopeIdentityInputs
++internal/agent/scope_wiring.go unreachable func: AgentLoop.memoryScopeCtxIdentity
++internal/agent/scope_wiring.go unreachable func: AgentLoop.resolveMemoryScope
++internal/agent/scope_wiring.go unreachable func: AgentLoop.SetMultiUserScopeEnabled
++internal/agent/scope_wiring.go unreachable func: AgentLoop.SetScopeUserID
++internal/agent/scope_wiring.go unreachable func: memoryScopeOptions
+ internal/agent/security_hooks.go unreachable func: NewSecretObfuscationHook
+ internal/agent/security_hooks.go unreachable func: NewSecurityBeforeToolCall
+ internal/agent/security_hooks.go unreachable func: NewSecurityTransformContext
+@@ -2459,6 +2510,13 @@ internal/agent/tool_exemplar.go unreachable func: AgentLoop.prefillToolCallHint
+ internal/agent/tool_exemplar.go unreachable func: buildToolExemplarSection
+ internal/agent/tool_exemplar.go unreachable func: containsFold
+ internal/agent/tool_exemplar.go unreachable func: isLFMFamilyModel
++internal/agent/tool_exposure.go unreachable func: EffectiveExposureMode
++internal/agent/tool_exposure.go unreachable func: ExposurePlan.Active
++internal/agent/tool_exposure.go unreachable func: ExposurePlan.IsActive
++internal/agent/tool_exposure.go unreachable func: ExposurePlan.IsKnown
++internal/agent/tool_exposure.go unreachable func: ExposurePlan.Promote
++internal/agent/tool_exposure.go unreachable func: IsFrontierClass
++internal/agent/tool_exposure.go unreachable func: NewExposurePlan
+ internal/agent/tool_registry.go unreachable func: DepthToolRegistry.DefinitionsAtDepth
+ internal/agent/tool_registry.go unreachable func: DepthToolRegistry.entryForDepth
+ internal/agent/tool_registry.go unreachable func: DepthToolRegistry.GetTool
+@@ -3356,6 +3414,32 @@ internal/code/tools/ast_resolve.go unreachable func: ASTResolveTool.Name
+ internal/code/tools/ast_resolve.go unreachable func: ASTResolveTool.Parameters
+ internal/code/tools/ast_resolve.go unreachable func: ASTResolveTool.SetFenceChecker
+ internal/code/tools/ast_resolve.go unreachable func: NewASTResolveTool
++internal/codemode/bridge.go unreachable func: estBytes
++internal/codemode/bridge.go unreachable func: hookArgBytes
++internal/codemode/bridge.go unreachable func: instrumentAllocations
++internal/codemode/bridge.go unreachable func: Sandbox.buildMemHook
++internal/codemode/bridge.go unreachable func: Sandbox.textFunc
++internal/codemode/bridge.go unreachable func: Sandbox.toolFunc
++internal/codemode/exec.go unreachable func: clampString
++internal/codemode/exec.go unreachable func: memoryThresholdFor
++internal/codemode/exec.go unreachable func: Sandbox.clampedOutput
++internal/codemode/exec.go unreachable func: Sandbox.countAlloc
++internal/codemode/exec.go unreachable func: Sandbox.Execute
++internal/codemode/exec.go unreachable func: Sandbox.exportValue
++internal/codemode/exec.go unreachable func: Sandbox.hardInterrupt
++internal/codemode/exec.go unreachable func: Sandbox.killedResult
++internal/codemode/sandbox.go unreachable func: New
++internal/codemode/sandbox.go unreachable func: Sandbox.appendOutput
++internal/codemode/sandbox.go unreachable func: Sandbox.Close
++internal/codemode/sandbox.go unreachable func: Sandbox.drainToolJobs
++internal/codemode/sandbox.go unreachable func: Sandbox.execCtxCopy
++internal/codemode/sandbox.go unreachable func: Sandbox.joinOutput
++internal/codemode/sandbox.go unreachable func: Sandbox.rejectingRegistry
++internal/codemode/sandbox.go unreachable func: Sandbox.resetOutput
++internal/codemode/sandbox.go unreachable func: Sandbox.setExecCtx
++internal/codemode/sandbox.go unreachable func: Sandbox.setupGlobals
++internal/codemode/sandbox.go unreachable func: Sandbox.SortedToolNames
++internal/codemode/sandbox.go unreachable func: sortJoinSpaces
+ internal/comm/http/acp_status.go unreachable func: acpDisabledPermissions
+ internal/comm/http/acp_status.go unreachable func: acpDisabledStatus
+ internal/comm/http/acp_status.go unreachable func: httpApprover
+@@ -3769,6 +3853,7 @@ internal/comm/http/server.go unreachable func: WithMetricsUsageProvider
+ internal/comm/http/server.go unreachable func: WithNotification
+ internal/comm/http/server.go unreachable func: WithPTY
+ internal/comm/http/server.go unreachable func: WithRPCCall
++internal/comm/http/server.go unreachable func: WithVoiceRoutes
+ internal/comm/http/server.go unreachable func: WithWebSocket
+ internal/comm/http/server.go unreachable func: wsConn.sendJSON
+ internal/comm/http/server.go unreachable func: wsConn.write
+@@ -3794,6 +3879,25 @@ internal/comm/http/upload_handlers.go unreachable func: Server.handleUploadCreat
+ internal/comm/http/upload_handlers.go unreachable func: Server.handleUploadDelete
+ internal/comm/http/upload_handlers.go unreachable func: Server.handleUploadGet
+ internal/comm/http/upload_handlers.go unreachable func: Server.handleUploadMetadata
++internal/comm/http/voice_plain.go unreachable func: ensureLoopbackAddr
++internal/comm/http/voice_plain.go unreachable func: startVoicePlain
++internal/comm/http/voice_plain.go unreachable func: StartVoicePlainListener
++internal/comm/http/voice_plain.go unreachable func: StartVoicePlainListenerWith
++internal/comm/http/voice_plain.go unreachable func: voicePlainMux
++internal/comm/http/voice.go unreachable func: mediaWSConn.Close
++internal/comm/http/voice.go unreachable func: mediaWSConn.Read
++internal/comm/http/voice.go unreachable func: mediaWSConn.Write
++internal/comm/http/voice.go unreachable func: NewVoiceRoutes
++internal/comm/http/voice.go unreachable func: VoiceRoutes.failClosed
++internal/comm/http/voice.go unreachable func: VoiceRoutes.handleMedia
++internal/comm/http/voice.go unreachable func: VoiceRoutes.HandlesPath
++internal/comm/http/voice.go unreachable func: VoiceRoutes.handleWebhook
++internal/comm/http/voice.go unreachable func: VoiceRoutes.MediaPath
++internal/comm/http/voice.go unreachable func: VoiceRoutes.readStartFrame
++internal/comm/http/voice.go unreachable func: VoiceRoutes.Register
++internal/comm/http/voice.go unreachable func: VoiceRoutes.serveVoiceRoute
++internal/comm/http/voice.go unreachable func: VoiceRoutes.WebhookPath
++internal/comm/http/voice.go unreachable func: writeVoiceOK
+ internal/comm/slack/interactions.go unreachable func: Pattern
+ internal/comm/telegram/base_bot.go unreachable func: baseBot.ID
+ internal/comm/telegram/base_bot.go unreachable func: baseBot.Name
+@@ -3928,8 +4032,6 @@ internal/config/acp.go unreachable func: SaveACPAgents
+ internal/config/backup_config.go unreachable func: DefaultBackupConfig
+ internal/config/config.go unreachable func: EnsureDataDir
+ internal/config/config.go unreachable func: expandEnvVars
+-internal/config/config.go unreachable func: LoadModelsConfig
+-internal/config/config.go unreachable func: LoadModelsConfigDefault
+ internal/config/config.go unreachable func: stripJSON5Comments
+ internal/config/config.go unreachable func: StripJSON5Comments
+ internal/config/git_checkout.go unreachable func: checkoutDirParent
+@@ -3998,6 +4100,8 @@ internal/config/tool_hints.go unreachable func: normalizeHint
+ internal/config/tool_hints.go unreachable func: ToolHintAgent
+ internal/configui/fields.go unreachable func: NewDrilldownFieldCount
+ internal/configui/fields.go unreachable func: NewStringSliceDrilldownField
++internal/configui/sections_voice.go unreachable func: buildVoiceFields
++internal/configui/sections_voice.go unreachable func: voiceJoinSlice
+ internal/configui/writers.go unreachable func: LoadMainConfig
+ internal/context/artifact_manager.go unreachable func: ArtifactManager.Cleanup
+ internal/context/artifact_manager.go unreachable func: ArtifactManager.GetArtifacts
+@@ -4106,18 +4210,13 @@ internal/daemon/service.go unreachable func: DaemonService.PID
+ internal/daemon/service.go unreachable func: DaemonService.readPID
+ internal/daemon/service.go unreachable func: DaemonService.Restart
+ internal/daemon/service.go unreachable func: DaemonService.Uptime
+-internal/daemon/tiers_engine.go unreachable func: BuildTierPolicyEngine
+-internal/daemon/tiers_engine.go unreachable func: EngineHandle.Running
+-internal/daemon/tiers_engine.go unreachable func: EngineHandle.Start
+-internal/daemon/tiers_engine.go unreachable func: EngineHandle.Stop
+-internal/daemon/tiers_engine.go unreachable func: episodicDeleter.DeleteByIDs
+-internal/daemon/tiers_engine.go unreachable func: managerCandidates.Candidates
+-internal/daemon/tiers_engine.go unreachable func: managerStates.TierStates
+-internal/daemon/tiers_engine.go unreachable func: managerVotes.NetVotes
+-internal/daemon/tiers_engine.go unreachable func: queueAsEnqueuer
+-internal/daemon/tiers_engine.go unreachable func: TiersConfigAdapter.ToEngineConfig
+-internal/daemon/tiers_engine.go unreachable func: WrapEngine
+ internal/daemon/toolgate.go unreachable func: ExecGateImpl.engineOverride
++internal/daemon/voice_employee.go unreachable func: VoiceEmployeeWiring.AcquireCallHold
++internal/daemon/voice_wiring.go unreachable func: agentIDFromContext
++internal/daemon/voice_wiring.go unreachable func: VoiceWiring.agentIDForTool
++internal/daemon/voice_wiring.go unreachable func: VoiceWiring.dialForTool
++internal/daemon/voice_wiring.go unreachable func: VoiceWiring.Start
++internal/daemon/voice_wiring.go unreachable func: VoiceWiring.Stop
+ internal/daemon/worker_pool.go unreachable func: Worker.hasCapacity
+ internal/daemon/worker_pool.go unreachable func: Worker.processWorkItem
+ internal/daemon/worker_pool.go unreachable func: Worker.resetIdleTimer
+@@ -4785,7 +4884,6 @@ internal/githubsvc/token.go unreachable func: FileTokenSource.Token
+ internal/githubsvc/token.go unreachable func: NewStaticTokenSource
+ internal/githubsvc/token.go unreachable func: SecretsTokenSource.Token
+ internal/githubsvc/token.go unreachable func: StaticTokenSource.Token
+-internal/groups/diagnose.go unreachable func: pickNormalizer
+ internal/groups/memberjoin.go unreachable func: dedupSortGroups
+ internal/groups/memberjoin.go unreachable func: EffectiveGroups
+ internal/groups/membership_writer.go unreachable func: AgentDefinitionPath
+@@ -4798,10 +4896,8 @@ internal/groups/membership_writer.go unreachable func: SetAgentGroups
+ internal/groups/membership_writer.go unreachable func: splitFrontmatterBlock
+ internal/groups/membership_writer.go unreachable func: yamlScalar
+ internal/groups/overrides.go unreachable func: overrideRows
+-internal/groups/overrides.go unreachable func: OverrideSet.ActiveCount
+ internal/groups/overrides.go unreachable func: OverrideSet.ActiveOverrides
+ internal/groups/overrides.go unreachable func: OverrideSet.AllowsFor
+-internal/groups/overrides.go unreachable func: OverrideSet.ExpiredCount
+ internal/groups/overrides.go unreachable func: OverrideSet.ExpiredOverrides
+ internal/groups/overrides.go unreachable func: PruneOverrides
+ internal/groups/overrides.go unreachable func: SaveOverrides
+@@ -4860,41 +4956,9 @@ internal/hermes/sse.go unreachable func: Client.sseStream
+ internal/hermes/sse.go unreachable func: Client.StreamChat
+ internal/hermes/sse.go unreachable func: Client.StreamRunEvents
+ internal/hermes/sse.go unreachable func: ssePump
+-internal/intake/project.go unreachable func: NewProjector
+-internal/intake/project.go unreachable func: phaseBody
+-internal/intake/project.go unreachable func: phaseSummary
+-internal/intake/project.go unreachable func: phaseTitle
+-internal/intake/project.go unreachable func: Projector.addToProject
+-internal/intake/project.go unreachable func: Projector.createPhaseTree
+-internal/intake/project.go unreachable func: Projector.createSubIssue
+ internal/intake/project.go unreachable func: Projector.Enabled
+ internal/intake/project.go unreachable func: Projector.EnsureProjection
+-internal/intake/project.go unreachable func: Projector.EnsureProjectionWithSteps
+-internal/intake/project.go unreachable func: Projector.graphqlClient
+-internal/intake/project.go unreachable func: Projector.MirrorState
+-internal/intake/project.go unreachable func: Projector.mirrorStateMutation
+-internal/intake/project.go unreachable func: Projector.queryBoard
+-internal/intake/project.go unreachable func: Projector.resolveBoard
+-internal/intake/project.go unreachable func: Projector.runPhaseEffect
+-internal/intake/project.go unreachable func: Projector.stateFieldOption
+-internal/intake/project.go unreachable func: stepBody
+-internal/intake/project.go unreachable func: stepTitle
+-internal/intake/project.go unreachable func: synthesizedStepID
+-internal/intake/project.go unreachable func: unmarshalReceipt
+-internal/jevgate/gate.go unreachable func: extractCommand
+-internal/jevgate/gate.go unreachable func: extractFacts
+-internal/jevgate/gate.go unreachable func: NewScoreGateHook
+-internal/jevgate/gate.go unreachable func: ScoreGateHook.BeforeToolCall
+-internal/jevgate/gate.go unreachable func: ScoreGateHook.Enabled
+-internal/jevgate/gate.go unreachable func: ScoreGateHook.escalate
+-internal/jevgate/gate.go unreachable func: ScoreGateHook.record
+-internal/jevgate/gate.go unreachable func: ScoreGateHook.SetEnabled
+-internal/jevgate/gate.go unreachable func: ScoreGateHook.SetRecorder
+-internal/jevgate/gate.go unreachable func: shellOnly
+-internal/jevgate/serialize.go unreachable func: DefaultScoreGateConfig
+ internal/jevgate/serialize.go unreachable func: DescribeConfig
+-internal/jevgate/serialize.go unreachable func: ScoreGateConfig.effectiveConfFloor
+-internal/jevgate/serialize.go unreachable func: ScoreGateConfig.effectiveThreshold
+ internal/learning/auto_train.go unreachable func: ClearPendingAutoTrain
+ internal/learning/auto_train.go unreachable func: EnqueueAutoTrain
+ internal/learning/capture.go unreachable func: appendTrajectory
+@@ -5118,6 +5182,9 @@ internal/llm/client.go unreachable func: Client.policyCfg
+ internal/llm/client.go unreachable func: Client.Reconfigure
+ internal/llm/client.go unreachable func: Client.recordRefusalBudget
+ internal/llm/client.go unreachable func: Client.recordUsageStore
++internal/llm/client.go unreachable func: Client.semanticLookupBehindMiss
++internal/llm/client.go unreachable func: Client.semanticPartitionFor
++internal/llm/client.go unreachable func: Client.semanticStoreAfterSuccess
+ internal/llm/client.go unreachable func: Client.SetFailurePolicyConfig
+ internal/llm/client.go unreachable func: Client.SetLLMCallObserver
+ internal/llm/client.go unreachable func: Client.SetMetricsStore
+@@ -5134,6 +5201,7 @@ internal/llm/client.go unreachable func: errorStatusAndHeader
+ internal/llm/client.go unreachable func: extractRetryAfter
+ internal/llm/client.go unreachable func: GBNFConstrainedEnabled
+ internal/llm/client.go unreachable func: isLocalEndpoint
++internal/llm/client.go unreachable func: messagesPromptText
+ internal/llm/client.go unreachable func: NewClient
+ internal/llm/client.go unreachable func: PriorityOf
+ internal/llm/client.go unreachable func: RawGrammarOf
+@@ -5161,6 +5229,7 @@ internal/llm/client.go unreachable func: WithRawGrammar
+ internal/llm/client.go unreachable func: WithReasoning
+ internal/llm/client.go unreachable func: withRequestModelOverride
+ internal/llm/client.go unreachable func: WithResolvedModel
++internal/llm/client.go unreachable func: WithSemanticCache
+ internal/llm/client.go unreachable func: WithStopSequences
+ internal/llm/client.go unreachable func: WithSystemBlocks
+ internal/llm/client.go unreachable func: WithTaskScope
+@@ -5787,6 +5856,7 @@ internal/llm/semantic_cache.go unreachable func: SemanticCache.partition
+ internal/llm/semantic_cache.go unreachable func: SemanticCache.removeLocked
+ internal/llm/semantic_cache.go unreachable func: SemanticCache.Store
+ internal/llm/semantic_cache.go unreachable func: SemanticCache.touchLocked
++internal/llm/semantic_cache.go unreachable func: SemanticCache.verifyBehindBand
+ internal/llm/semantic_cache.go unreachable func: semanticPromptText
+ internal/llm/semantic_cache.go unreachable func: semanticTextHash
+ internal/llm/sigv4.go unreachable func: canonicalURI
+@@ -5815,6 +5885,7 @@ internal/llm/spill.go unreachable func: SpillService.Spill
+ internal/llm/spill.go unreachable func: SpillService.toolSpillRoot
+ internal/llm/spill.go unreachable func: SpillService.WriteToolSpill
+ internal/llm/spill.go unreachable func: SweepToolSpills
++internal/llm/supervisor.go unreachable func: decodeSupervisorEnv
+ internal/llm/supervisor.go unreachable func: ParseSupervisorArgs
+ internal/llm/supervisor.go unreachable func: reportRuntimePID
+ internal/llm/supervisor.go unreachable func: RunSupervisor
+@@ -6096,11 +6167,11 @@ internal/memory/distill_async.go unreachable func: DistillWorker.l2Dir
+ internal/memory/distill_async.go unreachable func: DistillWorker.Process
+ internal/memory/distill_async.go unreachable func: DistillWorker.segmentScenes
+ internal/memory/distill_async.go unreachable func: DistillWorker.storeCandidates
++internal/memory/distill_async.go unreachable func: DistillWorker.warnNoModelOnce
+ internal/memory/distill_async.go unreachable func: EnqueueL1
+ internal/memory/distill_async.go unreachable func: EnqueueL2
+ internal/memory/distill_async.go unreachable func: formatL0Conversation
+ internal/memory/distill_async.go unreachable func: formatL0WithIDs
+-internal/memory/distill_async.go unreachable func: LocalDayKey
+ internal/memory/distill_async.go unreachable func: LocalDayStart
+ internal/memory/distill_async.go unreachable func: markerPosCoversFileEnd
+ internal/memory/distill_async.go unreachable func: NewDistillWorker
+@@ -6246,6 +6317,7 @@ internal/memory/epistemic.go unreachable func: Manager.StoreQuestion
+ internal/memory/epistemic.go unreachable func: Manager.verdictClaim
+ internal/memory/epistemic.go unreachable func: outcomeOverlapScore
+ internal/memory/epistemic.go unreachable func: stringTokenSet
++internal/memory/fact_store.go unreachable func: ensureFactOriginColumn
+ internal/memory/fact_store.go unreachable func: FactStore.Close
+ internal/memory/fact_store.go unreachable func: FactStore.GetActive
+ internal/memory/fact_store.go unreachable func: FactStore.Search
+@@ -6424,6 +6496,19 @@ internal/memory/personality.go unreachable func: PersonalityMemory.UpdateKey
+ internal/memory/personality.go unreachable func: PersonalityStore.Get
+ internal/memory/personality.go unreachable func: PersonalityStore.Set
+ internal/memory/personality.go unreachable func: updateInSection
++internal/memory/recall_outcome.go unreachable func: Cited
++internal/memory/recall_outcome.go unreachable func: CitedByOverlap
++internal/memory/recall_outcome.go unreachable func: NewRecallOutcomeLogger
++internal/memory/recall_outcome.go unreachable func: OutcomeRows
++internal/memory/recall_outcome.go unreachable func: RecallOutcomeLogger.BeginTurn
++internal/memory/recall_outcome.go unreachable func: RecallOutcomeLogger.Drain
++internal/memory/recall_outcome.go unreachable func: RecallOutcomeLogger.LogOutcomes
++internal/memory/recall_outcome.go unreachable func: RecallOutcomeLogger.Path
++internal/memory/recall_outcome.go unreachable func: RecallOutcomeLogger.SetLoopSource
++internal/memory/recall_outcome.go unreachable func: RecallOutcomeLogger.TakeRows
++internal/memory/recall_outcome.go unreachable func: ReplyTokens
++internal/memory/recall_outcome.go unreachable func: SalientTokens
++internal/memory/recall_outcome.go unreachable func: TokenEstimate
+ internal/memory/report_artifact.go unreachable func: NewReportStore
+ internal/memory/report_artifact.go unreachable func: ReportStore.EnsureReportFile
+ internal/memory/report_artifact.go unreachable func: ReportStore.generateID
+@@ -6435,6 +6520,14 @@ internal/memory/review_queue.go unreachable func: Manager.SetVerdictAuditor
+ internal/memory/review_queue.go unreachable func: ReasonHash
+ internal/memory/rotate.go unreachable func: RotateIfNeeded
+ internal/memory/sanitize_store.go unreachable func: SanitizeForStore
++internal/memory/scope_filter.go unreachable func: FilterResults
++internal/memory/scope_filter.go unreachable func: filterScopeResults
++internal/memory/scope_filter.go unreachable func: MemoryToResult
++internal/memory/scope_filter.go unreachable func: resolveScopeOptions
++internal/memory/scope_filter.go unreachable func: scopeRecallFilter.visible
++internal/memory/scope_filter.go unreachable func: scopeRowOwner
++internal/memory/scope_filter.go unreachable func: WithMultiUserEnabled
++internal/memory/scope_filter.go unreachable func: WithScopeFilter
+ internal/memory/scoped_manager.go unreachable func: expandLimit
+ internal/memory/scoped_manager.go unreachable func: ScopedMemoryManager.BotID
+ internal/memory/scoped_manager.go unreachable func: ScopedMemoryManager.Delete
+@@ -6476,42 +6569,12 @@ internal/memory/task.go unreachable func: TaskMemory.scanResults
+ internal/memory/task.go unreachable func: TaskMemory.Search
+ internal/memory/task.go unreachable func: TaskMemory.SearchOptions
+ internal/memory/task.go unreachable func: TaskMemory.Store
+-internal/memory/tierpolicy/demote.go unreachable func: cutPrefix
+-internal/memory/tierpolicy/demote.go unreachable func: demotedFromMeta
+ internal/memory/tierpolicy/demote.go unreachable func: DemoteOrderBefore
+-internal/memory/tierpolicy/demote.go unreachable func: demoteReasonString
+-internal/memory/tierpolicy/demote.go unreachable func: demotionReason
+-internal/memory/tierpolicy/demote.go unreachable func: Engine.demotedDetector
+-internal/memory/tierpolicy/demote.go unreachable func: Engine.demoteOne
+-internal/memory/tierpolicy/demote.go unreachable func: Engine.executeDemote
+-internal/memory/tierpolicy/demote.go unreachable func: Engine.loadClaim
+-internal/memory/tierpolicy/demote.go unreachable func: Engine.netVotesSafe
+-internal/memory/tierpolicy/demote.go unreachable func: Engine.PlanDemotions
+-internal/memory/tierpolicy/demote.go unreachable func: parseDemoteReason
+-internal/memory/tierpolicy/demote.go unreachable func: splitSemicolon
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.countTokens
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.Evaluate
+ internal/memory/tierpolicy/engine.go unreachable func: Engine.LastPass
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.loop
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.planCompress
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.planEvict
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.Running
+ internal/memory/tierpolicy/engine.go unreachable func: Engine.SetClock
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.setPass
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.Start
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.Stop
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.thresholds
+-internal/memory/tierpolicy/engine.go unreachable func: Engine.tickOnce
+ internal/memory/tierpolicy/engine.go unreachable func: isNilFunc
+-internal/memory/tierpolicy/engine.go unreachable func: New
+-internal/memory/tierpolicy/engine.go unreachable func: reason
+ internal/memory/tierpolicy/engine.go unreachable func: ResolveTiersConfig
+ internal/memory/tierpolicy/engine.go unreachable func: TiersConfig.ToEngineConfig
+-internal/memory/tierpolicy/execute.go unreachable func: Engine.enqueueCompress
+-internal/memory/tierpolicy/execute.go unreachable func: Engine.Execute
+-internal/memory/tierpolicy/execute.go unreachable func: sessionFromReason
+-internal/memory/tierpolicy/execute.go unreachable func: truncate
+-internal/memory/tierpolicy/thresholds.go unreachable func: ResolveDemotionThresholds
+ internal/memory/trace_index_row.go unreachable func: encode16
+ internal/memory/trace_index_row.go unreachable func: encodeFingerprint
+ internal/memory/trace_index_row.go unreachable func: encodeUint16
+@@ -6560,6 +6623,7 @@ internal/memory/trace_store.go unreachable func: TraceStore.ViewTrace
+ internal/memory/trace_store.go unreachable func: truncateAttributes
+ internal/memory/types.go unreachable func: Memory.MetadataJSON
+ internal/memory/types.go unreachable func: ParseMetadata
++internal/memory/types.go unreachable func: scopeFromMetadata
+ internal/memory/usefulness.go unreachable func: clamp01
+ internal/memory/usefulness.go unreachable func: DefaultWeights
+ internal/memory/usefulness.go unreachable func: Manager.initVoteStore
+@@ -6915,6 +6979,7 @@ internal/plan/manager.go unreachable func: PlanManager.CreatePhase
+ internal/plan/manager.go unreachable func: PlanManager.CreatePlan
+ internal/plan/manager.go unreachable func: PlanManager.CreatePlanWithGoal
+ internal/plan/manager.go unreachable func: PlanManager.EnsureTaskPlan
++internal/plan/manager.go unreachable func: PlanManager.GetPhases
+ internal/plan/manager.go unreachable func: PlanManager.GetPhasesByTask
+ internal/plan/manager.go unreachable func: PlanManager.GetPlan
+ internal/plan/manager.go unreachable func: PlanManager.GetPlansForSession
+@@ -7645,7 +7710,9 @@ internal/rpc/epistemic.go unreachable func: EpistemicHandler.managerOrErr
+ internal/rpc/epistemic.go unreachable func: EpistemicHandler.RegisterEpistemicHandlers
+ internal/rpc/epistemic.go unreachable func: NewEpistemicHandler
+ internal/rpc/groups_diagnosis.go unreachable func: GroupsHandler.handleCheck
++internal/rpc/groups_diagnosis.go unreachable func: GroupsHandler.overridesReader
+ internal/rpc/groups_diagnosis.go unreachable func: GroupsHandler.SetDiagnosisService
++internal/rpc/groups_diagnosis.go unreachable func: GroupsHandler.SetOverridesLoader
+ internal/rpc/groups.go unreachable func: callerAgentOK
+ internal/rpc/groups.go unreachable func: CallerIdentityFromContext
+ internal/rpc/groups.go unreachable func: ContextWithCallerIdentity
+@@ -7682,6 +7749,11 @@ internal/rpc/instructions.go unreachable func: InstructionHandler.sendResponse
+ internal/rpc/instructions.go unreachable func: InstructionHandler.Start
+ internal/rpc/instructions.go unreachable func: InstructionHandler.Stop
+ internal/rpc/instructions.go unreachable func: NewInstructionHandler
++internal/rpc/intake_status.go unreachable func: IntakeStatusHandler.handleIntakeStatus
++internal/rpc/intake_status.go unreachable func: IntakeStatusHandler.RegisterIntakeStatusMethods
++internal/rpc/intake_status.go unreachable func: IntakeStatusHandler.SetConfigFunc
++internal/rpc/intake_status.go unreachable func: IntakeStatusHandler.SetPollerScheduledFunc
++internal/rpc/intake_status.go unreachable func: NewIntakeStatusHandler
+ internal/rpc/mcp.go unreachable func: MCPHandler.handleList
+ internal/rpc/mcp.go unreachable func: MCPHandler.handleSetEnabled
+ internal/rpc/mcp.go unreachable func: MCPHandler.managerOrErr
+@@ -8170,12 +8242,16 @@ internal/security/secrets.go unreachable func: SecretObfuscator.deobfuscateMessa
+ internal/security/secrets.go unreachable func: SecretObfuscator.DeobfuscateMessages
+ internal/security/secrets.go unreachable func: SecretObfuscator.loadEnvSecrets
+ internal/security/secrets.go unreachable func: SecretObfuscator.LoadFromConfig
++internal/security/secrets.go unreachable func: SecretObfuscator.obfuscate
+ internal/security/secrets.go unreachable func: SecretObfuscator.Obfuscate
++internal/security/secrets.go unreachable func: SecretObfuscator.ObfuscateForSession
+ internal/security/secrets.go unreachable func: SecretObfuscator.obfuscateMessage
+ internal/security/secrets.go unreachable func: SecretObfuscator.ObfuscateMessages
+ internal/security/secrets.go unreachable func: SecretObfuscator.placeholder
+ internal/security/secrets.go unreachable func: SecretObfuscator.replacementFor
++internal/security/secrets.go unreachable func: SecretObfuscator.RestoreOutput
+ internal/security/secrets.go unreachable func: SecretObfuscator.sortEntriesLocked
++internal/security/secrets.go unreachable func: SecretObfuscator.tagPlaceholder
+ internal/security/seed_rules.go unreachable func: CountRules
+ internal/security/seed_rules.go unreachable func: seedCommandPatterns
+ internal/security/seed_rules.go unreachable func: seedFinancialPatterns
+@@ -8887,6 +8963,7 @@ internal/session/session.go unreachable func: MemoryStore.NavigateToBranch
+ internal/session/session.go unreachable func: MemoryStore.RemoveWorker
+ internal/session/session.go unreachable func: MemoryStore.ReparentAfterCompaction
+ internal/session/session.go unreachable func: MemoryStore.SaveMessages
++internal/session/session.go unreachable func: MemoryStore.SaveMessagesWithToolCalls
+ internal/session/session.go unreachable func: MemoryStore.SaveToolCalls
+ internal/session/session.go unreachable func: MemoryStore.SearchMessages
+ internal/session/session.go unreachable func: MemoryStore.SearchMessagesSemantic
+@@ -8971,6 +9048,7 @@ internal/session/store_sqlite.go unreachable func: SQLiteStore.NavigateToBranch
+ internal/session/store_sqlite.go unreachable func: SQLiteStore.RemoveWorker
+ internal/session/store_sqlite.go unreachable func: SQLiteStore.ReparentAfterCompaction
+ internal/session/store_sqlite.go unreachable func: SQLiteStore.SaveMessages
++internal/session/store_sqlite.go unreachable func: SQLiteStore.SaveMessagesWithToolCalls
+ internal/session/store_sqlite.go unreachable func: SQLiteStore.SaveToolCalls
+ internal/session/store_sqlite.go unreachable func: SQLiteStore.scanSession
+ internal/session/store_sqlite.go unreachable func: SQLiteStore.scanSessionRow
+@@ -9300,9 +9378,12 @@ internal/skills/hermes_compat.go unreachable func: HermesToolMapper.Translate
+ internal/skills/hermes_compat.go unreachable func: HermesToolMapper.TranslateToolReferences
+ internal/skills/hermes_compat.go unreachable func: NewDefaultPrerequisiteChecker
+ internal/skills/hermes_compat.go unreachable func: NewHermesToolMapper
++internal/skills/index.go unreachable func: cosineSimilarityF32
+ internal/skills/index.go unreachable func: matchEntryScore
+ internal/skills/index.go unreachable func: NewSkillIndex
+ internal/skills/index.go unreachable func: removeEntry
++internal/skills/index.go unreachable func: skillEmbeddingHash
++internal/skills/index.go unreachable func: skillEmbeddingText
+ internal/skills/index.go unreachable func: SkillIndex.AllCapabilities
+ internal/skills/index.go unreachable func: SkillIndex.AllTags
+ internal/skills/index.go unreachable func: SkillIndex.Clear
+@@ -9314,11 +9395,18 @@ internal/skills/index.go unreachable func: SkillIndex.FindByTag
+ internal/skills/index.go unreachable func: SkillIndex.Get
+ internal/skills/index.go unreachable func: SkillIndex.Index
+ internal/skills/index.go unreachable func: SkillIndex.IndexAll
++internal/skills/index.go unreachable func: SkillIndex.indexLocked
++internal/skills/index.go unreachable func: SkillIndex.IsDirty
+ internal/skills/index.go unreachable func: SkillIndex.List
++internal/skills/index.go unreachable func: SkillIndex.MarkDirty
+ internal/skills/index.go unreachable func: SkillIndex.Match
+ internal/skills/index.go unreachable func: SkillIndex.MatchAll
+ internal/skills/index.go unreachable func: SkillIndex.Names
++internal/skills/index.go unreachable func: SkillIndex.RankedNames
++internal/skills/index.go unreachable func: SkillIndex.Refresh
+ internal/skills/index.go unreachable func: SkillIndex.removeFromSecondaryIndices
++internal/skills/index.go unreachable func: SkillIndex.SetEmbedder
++internal/skills/index.go unreachable func: SkillIndex.SetRescanSource
+ internal/skills/index.go unreachable func: SkillIndexEntry.HasCapability
+ internal/skills/index.go unreachable func: SkillIndexEntry.HasTag
+ internal/skills/keyword_extractor.go unreachable func: defaultStopWords
+@@ -9441,18 +9529,21 @@ internal/skills/lifecycle/versioner.go unreachable func: Versioner.versionsDir
+ internal/skills/lifecycle/writer.go unreachable func: copyDir
+ internal/skills/lifecycle/writer.go unreachable func: NewWriter
+ internal/skills/lifecycle/writer.go unreachable func: sha256HexBytes
++internal/skills/lifecycle/writer.go unreachable func: stampSkillOrigin
+ internal/skills/lifecycle/writer.go unreachable func: Writer.archivePath
+ internal/skills/lifecycle/writer.go unreachable func: Writer.ArchiveSkill
+ internal/skills/lifecycle/writer.go unreachable func: Writer.checkDuplicate
+ internal/skills/lifecycle/writer.go unreachable func: Writer.defaultResolver
+ internal/skills/lifecycle/writer.go unreachable func: Writer.ensureSHALoaded
+ internal/skills/lifecycle/writer.go unreachable func: Writer.legacySkillPath
++internal/skills/lifecycle/writer.go unreachable func: Writer.notifyChange
+ internal/skills/lifecycle/writer.go unreachable func: Writer.ReadSkill
+ internal/skills/lifecycle/writer.go unreachable func: Writer.recordSHA
+ internal/skills/lifecycle/writer.go unreachable func: Writer.removeSHABySkillName
+ internal/skills/lifecycle/writer.go unreachable func: Writer.resolverOrNil
+ internal/skills/lifecycle/writer.go unreachable func: Writer.resolveSkillPath
+ internal/skills/lifecycle/writer.go unreachable func: Writer.RestoreSkill
++internal/skills/lifecycle/writer.go unreachable func: Writer.SetChangeNotifier
+ internal/skills/lifecycle/writer.go unreachable func: Writer.SetRegistry
+ internal/skills/lifecycle/writer.go unreachable func: Writer.SetTierResolver
+ internal/skills/lifecycle/writer.go unreachable func: Writer.SetVersioner
+@@ -9460,6 +9551,7 @@ internal/skills/lifecycle/writer.go unreachable func: Writer.SkillExists
+ internal/skills/lifecycle/writer.go unreachable func: Writer.skillPath
+ internal/skills/lifecycle/writer.go unreachable func: Writer.SkillPath
+ internal/skills/lifecycle/writer.go unreachable func: Writer.WriteSkill
++internal/skills/lifecycle/writer.go unreachable func: Writer.WriteSkillWithOrigin
+ internal/skills/mcp_runtime.go unreachable func: MCPRuntime.ClientTools
+ internal/skills/mcp_runtime.go unreachable func: MCPRuntime.HasServers
+ internal/skills/mcp_runtime.go unreachable func: MCPRuntime.sendShutdown
+@@ -9982,6 +10074,15 @@ internal/tools/builtin/calendar.go unreachable func: NewCalendarQuickAddTool
+ internal/tools/builtin/calendar.go unreachable func: NewCalendarTodayTool
+ internal/tools/builtin/change_journal.go unreachable func: Journal.Record
+ internal/tools/builtin/change_journal.go unreachable func: marshalChangeIDs
++internal/tools/builtin/codemode.go unreachable func: codemodeBridgeCall
++internal/tools/builtin/codemode.go unreachable func: codemodeBridgesFromRegistry
++internal/tools/builtin/codemode.go unreachable func: CodemodeTool.Category
++internal/tools/builtin/codemode.go unreachable func: CodemodeTool.Description
++internal/tools/builtin/codemode.go unreachable func: CodemodeTool.Execute
++internal/tools/builtin/codemode.go unreachable func: CodemodeTool.Name
++internal/tools/builtin/codemode.go unreachable func: CodemodeTool.Parameters
++internal/tools/builtin/codemode.go unreachable func: NewCodemodeTool
++internal/tools/builtin/codemode.go unreachable func: schemaToJSONMap
+ internal/tools/builtin/collaboration.go unreachable func: InitiateCollaborationTool.Category
+ internal/tools/builtin/collaboration.go unreachable func: InitiateCollaborationTool.Description
+ internal/tools/builtin/collaboration.go unreachable func: InitiateCollaborationTool.Execute
+@@ -10571,6 +10672,9 @@ internal/tools/builtin/memory.go unreachable func: NewMemorySearchTool
+ internal/tools/builtin/memory.go unreachable func: NewMemoryStoreTool
+ internal/tools/builtin/memory.go unreachable func: NewMemoryVoteTool
+ internal/tools/builtin/memory.go unreachable func: parseInsightsFromResponse
++internal/tools/builtin/memory.go unreachable func: scopeIdentity
++internal/tools/builtin/memory.go unreachable func: scopeSearchOptions
++internal/tools/builtin/memory.go unreachable func: stampScope
+ internal/tools/builtin/patch_validator.go unreachable func: PatchError.String
+ internal/tools/builtin/patch_validator.go unreachable func: validateAnchorFormat
+ internal/tools/builtin/patch_validator.go unreachable func: validateCommon
+@@ -10963,6 +11067,18 @@ internal/tools/builtin/tool_schedule_list.go unreachable func: ScheduleListTool.
+ internal/tools/builtin/tool_schedule_list.go unreachable func: ScheduleListTool.Name
+ internal/tools/builtin/tool_schedule_list.go unreachable func: ScheduleListTool.Parameters
+ internal/tools/builtin/tool_schedule_list.go unreachable func: ScheduleListTool.TerminateHint
++internal/tools/builtin/tool_search.go unreachable func: buildToolSearchDigest
++internal/tools/builtin/tool_search.go unreachable func: NewToolSearchTool
++internal/tools/builtin/tool_search.go unreachable func: oneLineDescription
++internal/tools/builtin/tool_search.go unreachable func: ToolSearchTool.Category
++internal/tools/builtin/tool_search.go unreachable func: ToolSearchTool.Description
++internal/tools/builtin/tool_search.go unreachable func: ToolSearchTool.Execute
++internal/tools/builtin/tool_search.go unreachable func: ToolSearchTool.IsConcurrencySafe
++internal/tools/builtin/tool_search.go unreachable func: ToolSearchTool.IsReadOnly
++internal/tools/builtin/tool_search.go unreachable func: ToolSearchTool.Name
++internal/tools/builtin/tool_search.go unreachable func: ToolSearchTool.Parameters
++internal/tools/builtin/tool_search.go unreachable func: ToolSearchTool.parseLimit
++internal/tools/builtin/tool_search.go unreachable func: ToolSearchTool.SetScope
+ internal/tools/builtin/tool_template_clear.go unreachable func: NewTemplateClearTool
+ internal/tools/builtin/tool_template_clear.go unreachable func: TemplateClearTool.Category
+ internal/tools/builtin/tool_template_clear.go unreachable func: TemplateClearTool.Description
+@@ -10985,12 +11101,14 @@ internal/tools/builtin/tool_view.go unreachable func: NewToolViewTool
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.Category
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.Description
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.Execute
++internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.fireActivate
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.IsConcurrencySafe
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.IsReadOnly
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.lruLen
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.Name
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.Parameters
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.record
++internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.SetActivateHook
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.touchLocked
+ internal/tools/builtin/tool_view.go unreachable func: ToolViewTool.viewResult
+ internal/tools/builtin/tool_web_search.go unreachable func: isChallengeStatus
+@@ -11039,6 +11157,17 @@ internal/tools/builtin/transcript_fetch.go unreachable func: TranscriptFetchTool
+ internal/tools/builtin/transcript_fetch.go unreachable func: TranscriptFetchTool.SetTranscriptRunner
+ internal/tools/builtin/transcript_fetch.go unreachable func: TranscriptFetchTool.summarizeText
+ internal/tools/builtin/transcript_fetch.go unreachable func: writeTranscriptFile
++internal/tools/builtin/voice_call.go unreachable func: NewVoiceCallTool
++internal/tools/builtin/voice_call.go unreachable func: SetVoiceProvider
++internal/tools/builtin/voice_call.go unreachable func: VoiceCallTool.Category
++internal/tools/builtin/voice_call.go unreachable func: VoiceCallTool.Description
++internal/tools/builtin/voice_call.go unreachable func: VoiceCallTool.Execute
++internal/tools/builtin/voice_call.go unreachable func: VoiceCallTool.Name
++internal/tools/builtin/voice_call.go unreachable func: VoiceCallTool.Parameters
++internal/tools/builtin/voice_call.go unreachable func: voiceProvider.Broker
++internal/tools/builtin/voice_call.go unreachable func: voiceProvider.Discover
++internal/tools/builtin/voice_call.go unreachable func: voiceProvider.Name
++internal/tools/builtin/voice_call.go unreachable func: voiceProvider.PermissionClass
+ internal/tools/builtin/web_fetch.go unreachable func: NewWebFetchTool
+ internal/tools/builtin/web_fetch.go unreachable func: pdfSniff
+ internal/tools/builtin/web_fetch.go unreachable func: renderText
+@@ -11202,6 +11331,8 @@ internal/tools/registry.go unreachable func: Registry.SetSchemaMode
+ internal/tools/registry.go unreachable func: Registry.ToLLMDefinitions
+ internal/tools/registry.go unreachable func: Registry.ToolsByCategory
+ internal/tools/registry.go unreachable func: Registry.Unregister
++internal/tools/scope_ctx.go unreachable func: ContextWithScopeIdentity
++internal/tools/scope_ctx.go unreachable func: ScopeIdentityFromContext
+ internal/tools/workdir_ctx.go unreachable func: AutonomousFromContext
+ internal/tools/workdir_ctx.go unreachable func: ContextWithAutonomous
+ internal/tools/workdir_ctx.go unreachable func: ContextWithWorkingDir
+@@ -11672,6 +11803,8 @@ internal/tui/instructions.go unreachable func: InstructionConfirmationModel.View
+ internal/tui/instructions.go unreachable func: NewInstructionConfirmationModel
+ internal/tui/instructions.go unreachable func: riskBorderColor
+ internal/tui/instructions.go unreachable func: riskLevelStyle
++internal/tui/intake_view.go unreachable func: CommandHandler.executeIntake
++internal/tui/intake_view.go unreachable func: renderIntakeStatus
+ internal/tui/modal.go unreachable func: BranchPickerModal.HandleKey
+ internal/tui/modal.go unreachable func: BranchPickerModal.HandleMouse
+ internal/tui/modal.go unreachable func: BranchPickerModal.RefreshBranches
+@@ -12538,6 +12671,36 @@ internal/validator/web.go unreachable func: parseStatusValue
+ internal/validator/web.go unreachable func: WebValidator.Validate
+ internal/validator/web.go unreachable func: WebValidator.validateAPIResponse
+ internal/validator/web.go unreachable func: WebValidator.ValidateEvidence
++internal/voice/binding.go unreachable func: BuildDayBrief
++internal/voice/childproc.go unreachable func: ChildProc.Alive
++internal/voice/childproc.go unreachable func: ChildProc.Stop
++internal/voice/daybrief.go unreachable func: AggregatorSource.Query
++internal/voice/daybrief.go unreachable func: Build
++internal/voice/daybrief.go unreachable func: isNilSource
++internal/voice/dial.go unreachable func: Dialer.abandonEffect
++internal/voice/dial.go unreachable func: Dialer.armNoAnswerTimer
++internal/voice/dial.go unreachable func: Dialer.Dial
++internal/voice/dial.go unreachable func: Dialer.doneFor
++internal/voice/dial.go unreachable func: Dialer.finishCall
++internal/voice/dial.go unreachable func: Dialer.NotifyAnswered
++internal/voice/dial.go unreachable func: Dialer.registryCap
++internal/voice/dial.go unreachable func: Dialer.registryGate
++internal/voice/dial.go unreachable func: Dialer.reservedResult
++internal/voice/dial.go unreachable func: NormalizeE164
++internal/voice/telnyx/callcontrol.go unreachable func: Client.DialOut
++internal/voice/telnyx/callcontrol.go unreachable func: Client.StartStreaming
++internal/voice/telnyx/callcontrol.go unreachable func: flexibleString.UnmarshalJSON
++internal/voice/telnyx/callcontrol.go unreachable func: ParseCallEvent
++internal/voice/telnyx/client.go unreachable func: Client.AnswerCall
++internal/voice/telnyx/client.go unreachable func: Client.HangupCall
++internal/voice/telnyx/client.go unreachable func: Client.postCall
++internal/voice/telnyx/client.go unreachable func: drainFully
++internal/voice/telnyx/client.go unreachable func: NewClient
++internal/voice/telnyx/client.go unreachable func: snippet
++internal/voice/telnyx/signature.go unreachable func: signedString
++internal/voice/telnyx/signature.go unreachable func: VerifyMediaSocket
++internal/voice/telnyx/signature.go unreachable func: verifySignedMessage
++internal/voice/telnyx/signature.go unreachable func: VerifyWebhookSignature
+ internal/worker/pool_setqueue.go unreachable func: Pool.SetQueue
+ internal/worker/pool.go unreachable func: Handler.handleAdd
+ internal/worker/pool.go unreachable func: Handler.handleList
+diff --git a/docs/generated/bus-topology.json b/docs/generated/bus-topology.json
+index 51e8c605..23f4f139 100644
+--- a/docs/generated/bus-topology.json
++++ b/docs/generated/bus-topology.json
+@@ -131,7 +131,7 @@
+     "agent.progress.synthesized": [
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 2563,
++        "line": 2637,
+         "payload_keys": []
+       }
+     ],
+@@ -206,7 +206,7 @@
+       },
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 10514,
++        "line": 10606,
+         "payload_keys": []
+       }
+     ],
+@@ -559,7 +559,7 @@
+     "dispatcher.stats.result": [
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 4171,
++        "line": 4245,
+         "payload_keys": []
+       }
+     ],
+@@ -580,7 +580,7 @@
+     "employee.metric": [
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 6267,
++        "line": 6341,
+         "payload_keys": [
+           "name",
+           "tags",
+@@ -1791,7 +1791,7 @@
+     "status.response": [
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 9648,
++        "line": 9740,
+         "payload_keys": []
+       }
+     ],
+@@ -2318,13 +2318,13 @@
+     "team.start": [
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 8208,
++        "line": 8300,
+         "payload_keys": [],
+         "via_const": true
+       },
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 8245,
++        "line": 8337,
+         "payload_keys": [],
+         "via_const": true
+       }
+@@ -2541,7 +2541,7 @@
+     "agent.event.*": [
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 2533,
++        "line": 2607,
+         "subscriber_id": "progress-synthesizer"
+       }
+     ],
+@@ -2727,7 +2727,7 @@
+     "dispatcher.stats": [
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 4149,
++        "line": 4223,
+         "subscriber_id": "dispatcher-stats-handler"
+       }
+     ],
+@@ -2742,7 +2742,7 @@
+     "employee.critical_finding": [
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 5018,
++        "line": 5092,
+         "subscriber_id": "employee-critical-finding"
+       }
+     ],
+@@ -3595,7 +3595,7 @@
+     "status.request": [
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 9574,
++        "line": 9666,
+         "subscriber_id": "status-handler"
+       }
+     ],
+@@ -3886,7 +3886,7 @@
+       },
+       {
+         "file": "internal/daemon/components.go",
+-        "line": 9741,
++        "line": 9833,
+         "subscriber_id": "agent-job-processor-evidence"
+       }
+     ],
+diff --git a/docs/generated/bus-topology.md b/docs/generated/bus-topology.md
+index e3d95fb7..bd9abc1a 100644
+--- a/docs/generated/bus-topology.md
++++ b/docs/generated/bus-topology.md
+@@ -11,7 +11,7 @@ Auto-generated by `scripts/gen-connectivity-graph.py`. Do not edit.
+ | `acp.*.*` | — | `internal/comm/http/server.go:791` (slice:topics:acp.*.*) | — |
+ | `agent.SpeakTopicNotify` | — | `internal/daemon/speak_push_bridge.go:27` (speak-push-bridge) | — |
+ | `agent.action` | `internal/agent/loop.go:9059` | — | conversation_id, iteration, tool_calls |
+-| `agent.event.*` | — | `internal/daemon/components.go:2533` (progress-synthesizer) | — |
++| `agent.event.*` | — | `internal/daemon/components.go:2607` (progress-synthesizer) | — |
+ | `agent.event.tool_execution_end` | — | `internal/daemon/otlp_traces_wiring.go:238` (otlp-trace-tool-calls) | — |
+ | `agent.iteration.completed` | `internal/agent/loop.go:9267` | — | agent_id, conversation_id, iteration |
+ | `agent.lifecycle.ended` | `internal/agent/loop.go:3255` | — | — |
+@@ -19,14 +19,14 @@ Auto-generated by `scripts/gen-connectivity-graph.py`. Do not edit.
+ | `agent.message.delivered` | `internal/tools/builtin/agent_message.go:237` | — | event, message_id |
+ | `agent.model_escalated` | `internal/agent/verification_escalation.go:154` | — | — |
+ | `agent.progress` | `internal/agent/acp_executor.go:464`, `internal/agent/loop.go:9124`, `internal/agent/loop.go:9178` | `internal/activity/busbridge.go:80` (activity-ring), `internal/agent/handler.go:361` (chat-handler), `internal/comm/http/api_handlers.go:281` (subID+"-agent") | agent_id, conversation_id, detail, iteration, stage, text_so_far, timestamp, token_count |
+-| `agent.progress.synthesized` | `internal/daemon/components.go:2563` | `internal/comm/http/api_handlers.go:287` (subID+"-synth"), `internal/comm/http/server.go:803` (http-ws-agent.progress.synthesized) | — |
++| `agent.progress.synthesized` | `internal/daemon/components.go:2637` | `internal/comm/http/api_handlers.go:287` (subID+"-synth"), `internal/comm/http/server.go:803` (http-ws-agent.progress.synthesized) | — |
+ | `agent.queue.followup.added` | `internal/agent/queue.go:317` | — | — |
+ | `agent.queue.followup.injected` | `internal/agent/loop.go:9249` | — | conversation_id, count, message_ids, queue_type |
+ | `agent.queue.followup.restored` | `internal/agent/queue_recovery.go:76` | — | — |
+ | `agent.queue.persisted` | `internal/agent/queue_persister.go:222` | — | — |
+ | `agent.queue.steer.added` | `internal/agent/queue.go:252` | — | — |
+ | `agent.queue.steer.injected` | `internal/agent/loop.go:9225` | — | conversation_id, count, message_ids, queue_type |
+-| `agent.quota_wait` | `internal/agent/loop.go:2633`, `internal/agent/parked_turn.go:715`, `internal/daemon/components.go:10514` | `internal/services/quota_notifier.go:72` (quota-notifier) | — |
++| `agent.quota_wait` | `internal/agent/loop.go:2633`, `internal/agent/parked_turn.go:715`, `internal/daemon/components.go:10606` | `internal/services/quota_notifier.go:72` (quota-notifier) | — |
+ | `agent.result` | `internal/agent/loop.go:9089` | — | conversation_id, iteration, results |
+ | `agent.state.changed` | `internal/agent/loop.go:2622` | — | — |
+ | `agent.workers.list` | `internal/rpc/proxy.go:165`, `internal/rpc/proxy.go:165` | `internal/agent/handler.go:345` (worker-handler) | — |
+@@ -58,12 +58,12 @@ Auto-generated by `scripts/gen-connectivity-graph.py`. Do not edit.
+ | `daemon.*` | — | `internal/comm/http/server.go:791` (slice:topics:daemon.*) | — |
+ | `daemon.reloaded` | `internal/daemon/daemon.go:2943` | — | event |
+ | `daemon.stopping` | `internal/daemon/daemon.go:2582` | — | event |
+-| `dispatcher.stats` | — | `internal/daemon/components.go:4149` (dispatcher-stats-handler) | — |
+-| `dispatcher.stats.result` | `internal/daemon/components.go:4171` | — | — |
++| `dispatcher.stats` | — | `internal/daemon/components.go:4223` (dispatcher-stats-handler) | — |
++| `dispatcher.stats.result` | `internal/daemon/components.go:4245` | — | — |
+ | `employee.*` | — | `internal/comm/http/server.go:791` (slice:topics:employee.*) | — |
+ | `employee.constitution_validation_error` | `internal/daemon/employee_service_adapter.go:267` | — | — |
+-| `employee.critical_finding` | `internal/daemon/employee_service_adapter.go:238` | `internal/daemon/components.go:5018` (employee-critical-finding) | — |
+-| `employee.metric` | `internal/daemon/components.go:6267` | — | name, tags, value |
++| `employee.critical_finding` | `internal/daemon/employee_service_adapter.go:238` | `internal/daemon/components.go:5092` (employee-critical-finding) | — |
++| `employee.metric` | `internal/daemon/components.go:6341` | — | name, tags, value |
+ | `employee.notify` | `internal/agent/speak.go:243` | — | — |
+ | `employee.paused` | `internal/daemon/employee_service_adapter.go:210` | — | — |
+ | `event.cluster.task_reclaim` | `internal/queue/cluster_queue.go:337` | — | job_id, node_id, reason |
+@@ -183,8 +183,8 @@ Auto-generated by `scripts/gen-connectivity-graph.py`. Do not edit.
+ | `session.tree.get` | `internal/rpc/proxy.go:189`, `internal/rpc/proxy.go:189` | `internal/session/session.go:1572` (topics:session.tree.get) | — |
+ | `session.update_description` | `internal/rpc/proxy.go:176`, `internal/rpc/proxy.go:176` | `internal/session/session.go:1572` (topics:session.update_description) | — |
+ | `sessions.designated` | `internal/rpc/proxy.go:178`, `internal/rpc/proxy.go:178` | — | — |
+-| `status.request` | `internal/rpc/proxy.go:123`, `internal/rpc/proxy.go:123` | `internal/daemon/components.go:9574` (status-handler) | — |
+-| `status.response` | `internal/daemon/components.go:9648` | `internal/rpc/proxy.go:123` (rpc-proxy:status) | — |
++| `status.request` | `internal/rpc/proxy.go:123`, `internal/rpc/proxy.go:123` | `internal/daemon/components.go:9666` (status-handler) | — |
++| `status.response` | `internal/daemon/components.go:9740` | `internal/rpc/proxy.go:123` (rpc-proxy:status) | — |
+ | `step.*` | — | `internal/metrics/collector.go:215` (metrics-collector-review) | — |
+ | `step.review_completed` | `internal/agent/review_manager.go:701` | — | confidence, feedback, reviewer, revision_count, status |
+ | `step.review_requested` | `internal/agent/tactical.go:1896` | — | — |
+@@ -223,11 +223,11 @@ Auto-generated by `scripts/gen-connectivity-graph.py`. Do not edit.
+ | `task.validation_retry` | `internal/agent/tactical.go:1773` | — | — |
+ | `team.error` | `internal/agent/team_orchestrator.go:559` | `internal/agent/orchestrator.go:192` (topics:team.error) | error, session_id |
+ | `team.result` | `internal/agent/team_orchestrator.go:333` | `internal/agent/orchestrator.go:192` (topics:team.result) | — |
+-| `team.start` | `internal/daemon/components.go:8208`, `internal/daemon/components.go:8245` | `internal/agent/team_orchestrator.go:127` (team-orchestrator) | — |
++| `team.start` | `internal/daemon/components.go:8300`, `internal/daemon/components.go:8337` | `internal/agent/team_orchestrator.go:127` (team-orchestrator) | — |
+ | `terminal.*` | — | `internal/comm/http/server.go:791` (slice:topics:terminal.*) | — |
+ | `terminal.command` | `internal/services/terminal_service.go:183` | — | command, id, success |
+ | `tool.*` | — | `internal/comm/http/server.go:791` (slice:topics:tool.*) | — |
+-| `tool.execution.complete` | `internal/agent/executor.go:2136` | `internal/agent/orchestrator.go:192` (topics:tool.execution.complete), `internal/comm/http/api_handlers.go:293` (subID+"-complete"), `internal/daemon/components.go:9741` (agent-job-processor-evidence) | — |
++| `tool.execution.complete` | `internal/agent/executor.go:2136` | `internal/agent/orchestrator.go:192` (topics:tool.execution.complete), `internal/comm/http/api_handlers.go:293` (subID+"-complete"), `internal/daemon/components.go:9833` (agent-job-processor-evidence) | — |
+ | `tool.execution.progress` | `internal/agent/executor.go:2081` | `internal/comm/http/api_handlers.go:271` (subID) | message, percent |
+ | `topic` | — | `internal/activity/busbridge.go:38` (activity-ring), `internal/activity/busbridge.go:60` (activity-ring), `internal/bot/router.go:66` ("bot-router-"+topic), `internal/bus/handler.go:52` ("handler-"+topic), `internal/rpc/proxy.go:481` (subID+"-"+topic), `internal/services/bus_service.go:106` (session-) | — |
+ | `turn.*` | — | `internal/comm/http/server.go:791` (slice:topics:turn.*) | — |
+diff --git a/internal/daemon/components.go b/internal/daemon/components.go
+index 43af30f1..8aea6ed6 100644
+--- a/internal/daemon/components.go
++++ b/internal/daemon/components.go
+@@ -48,6 +48,7 @@ import (
+ 	"github.com/caimlas/meept/internal/githubsvc"
+ 	"github.com/caimlas/meept/internal/groups"
+ 	"github.com/caimlas/meept/internal/intake"
++	"github.com/caimlas/meept/internal/jevgate"
+ 	"github.com/caimlas/meept/internal/learning"
+ 	"github.com/caimlas/meept/internal/lint"
+ 	"github.com/caimlas/meept/internal/llm"
+@@ -243,6 +244,16 @@ type Components struct {
+ 	// permission table) AND the store opened; capture is strictly additive
+ 	// and never blocks a gate or confirmation flow.
+ 	GateCapture *gateCaptureStore
++	// JevScoreGate is the graded command-safety score gate
++	// (internal/jevgate, docs/plans/20261031-jev-command-gate +
++	// docs/plans/20261103-wiring-gap-remediation/04-jev-gate-wiring.md):
++	// a fail-closed BeforeToolCallHook on shell calls behind the opt-in
++	// [security.jev_command_gate] knob. Nil unless enabled=true AND the LLM
++	// client/resolver built (degraded posture, never a boot-fail); the
++	// registration block below treats nil as "unregistered" (zero
++	// behavior). Issue #87: this field + construction + registration are
++	// the wiring the leaf wave's commit message claimed but never landed.
++	JevScoreGate *jevgate.ScoreGateHook
+ 	// EffectsReconciler re-drives claimed/receipted effects on startup and
+ 	// parked-turn resume. Nil when the ledger is nil (no ledger, no
+ 	// reconcile -- nothing pending can exist).
+@@ -1127,6 +1138,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
+ 	// capture disabled, every consumer nil-guards. Open failure is logged
+ 	// and degrades to no capture - never blocks boot.
+ 	var gateCap *gateCaptureStore
++	// JeV command-score gate (jev-command-gate leaf 01 T5 + wiring-gap
++	// leaf 04, issue #87). Built in the resolver block below ONLY when
++	// [security.jev_command_gate].enabled; registered onto the hook
++	// registry at the hook-wiring block. Nil = feature off (the opt-in
++	// default) -- construction and registration both no-op.
++	var jevScoreGate *jevgate.ScoreGateHook
+ 	// Shared decision-model client (acp-permission-decision leaf 03,
+ 	// Contract C): ONE *llm.DecisionClient instance serves both consumers --
+ 	// the tool-call gate hook above and the ACP permission lane below --
+@@ -1313,7 +1330,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
+ 			// that opted out. Registration onto the hook registry happens
+ 			// below at the hook-wiring block.
+ 			acpWantsDecision := cfg.ACP.Enabled && (cfg.ACP.PermissionMode == "decision" || cfg.ACP.ResolveRank)
+-			if providersCfg.DecisionGateEnabled || acpWantsDecision {
++			jevGateEnabled := cfg.Security.JevCommandGate.Enabled
++			if providersCfg.DecisionGateEnabled || acpWantsDecision || jevGateEnabled {
+ 				decisionClient = llm.NewDecisionClient(c.LLMResolver, logger.With("component", "decision-client"))
+ 			}
+ 			if providersCfg.DecisionGateEnabled {
+@@ -1330,11 +1348,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
+ 				)
+ 			}
+ 			// Gate capture store (jev-command-gate leaf 02, Contract C4).
+-			// Built when the decision gate armed (chokepoint-1 source);
+-			// the permission-table side attaches its arm when the table is
+-			// wired further down. Best-effort: an open failure logs and
+-			// leaves capture disabled.
+-			if decisionGate != nil && gateCap == nil {
++			// Built when the decision gate armed (chokepoint-1 source) or
++			// the jev score gate is enabled (its RecordScore/Escalated
++			// seam rides this same store); the permission-table side
++			// attaches its arm when the table is wired further down.
++			// Best-effort: an open failure logs and leaves capture
++			// disabled.
++			if (decisionGate != nil || jevGateEnabled) && gateCap == nil {
+ 				gc, gcErr := newGateCaptureStore(gatecapture.DefaultDBPath(), logger)
+ 				if gcErr != nil {
+ 					logger.Warn("gate capture store unavailable; capture disabled",
+@@ -1345,6 +1365,49 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
+ 					logger.Info("gate capture store open", "path", gatecapture.DefaultDBPath())
+ 				}
+ 			}
++			// JeV graded command-safety score gate (issue #87;
++			// docs/plans/20261031-jev-command-gate leaf 01 T5 +
++			// docs/plans/20261103-wiring-gap-remediation/04-jev-gate-wiring.md).
++			// Constructed ONLY when [security.jev_command_gate].enabled
++			// (opt-in default false = zero behavior change; a nil field is
++			// the registration block's "not registered" signal). The scorer
++			// is the SAME shared *llm.DecisionClient the decision gate and
++			// ACP lane use (its ScoreCommand satisfies jevgate.ScoreClient);
++			// jevGateEnabled above already pulled the client into
++			// existence. Degraded posture never boot-fails: an unconfigured
++			// decision_model slot leaves the client Available()==false, and
++			// the hook then escalates every shell call per-branch
++			// (fail-closed Contract C3) -- the operator opted in, so ASK is
++			// the safe render. A type-assert miss leaves a nil scorer,
++			// which BeforeToolCall also routes to ASK. The capture store is
++			// both the hook's ConfirmFlow and its Recorder (leaf-02
++			// gatecapture_wiring.go adapters); typed-nil guard per
++			// internal/daemon/AGENTS.md -- a nil *gateCaptureStore must
++			// never be boxed into the interface fields.
++			if jevGateEnabled {
++				var scorer jevgate.ScoreClient
++				if sc, ok := decisionClient.(jevgate.ScoreClient); ok {
++					scorer = sc
++				}
++				var confirmFlow jevgate.ConfirmFlow
++				var recorder jevgate.Recorder
++				if gateCap != nil {
++					confirmFlow = gateCap
++					recorder = gateCap
++				}
++				jevScoreGate = jevgate.NewScoreGateHook(
++					scorer,
++					jevScoreGateConfigFromConfig(&cfg.Security.JevCommandGate),
++					confirmFlow,
++					logger,
++				)
++				jevScoreGate.SetRecorder(recorder)
++				c.JevScoreGate = jevScoreGate
++				logger.Info("jev score gate armed",
++					"score_threshold", cfg.Security.JevCommandGate.ScoreThreshold,
++					"confidence_threshold", cfg.Security.JevCommandGate.ConfidenceThreshold,
++				)
++			}
+ 		}
+ 
+ 		// Create pricing syncer for dynamic model pricing
+@@ -2343,6 +2406,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
+ 		}
+ 	}
+ 
++	// JeV graded command-safety score gate (issue #87): registered as the
++	// decision-gate's BeforeToolCallHook peer at the same High priority
++	// (equal-priority peers keep insertion order, so it runs AFTER
++	// decision-gate and after the security-critical hooks). A nil field is
++	// the ONLY registration source: disabled default = no registration =
++	// zero behavior (04-jev-gate-wiring.md pins this).
++	if c.JevScoreGate != nil {
++		hookRegistry.RegisterBeforeToolCall("jev-score-gate", agent.HookPriorityHigh, c.JevScoreGate)
++		logger.Info("Registered jev score gate BeforeToolCall hook")
++	}
++
+ 	agentOpts = append(agentOpts, agent.WithEventEmitter(emitter), agent.WithHookRegistry(hookRegistry))
+ 	c.AgentEventEmitter = emitter
+ 
+@@ -7370,6 +7444,24 @@ func buildTaintHookConfig(sec *config.SecurityConfig) agent.TaintHookConfig {
+ 	return hookCfg
+ }
+ 
++// jevScoreGateConfigFromConfig maps the [security.jev_command_gate] knob
++// (config.JevGateConfig) onto jevgate.ScoreGateConfig field-for-field
++// (issue #87; the schema struct mirrors these names, see
++// internal/config/schema.go JevGateConfig). SecurityConfig.Validate already
++// normalizes the thresholds when Enabled, so zero/unset values never reach
++// here on an armed boot; jevgate's effectiveThreshold/effectiveConfFloor
++// clamp anything that does.
++func jevScoreGateConfigFromConfig(g *config.JevGateConfig) jevgate.ScoreGateConfig {
++	if g == nil {
++		return jevgate.DefaultScoreGateConfig()
++	}
++	return jevgate.ScoreGateConfig{
++		Enabled:         g.Enabled,
++		ScoreThreshold:  g.ScoreThreshold,
++		ConfidenceFloor: g.ConfidenceThreshold,
++	}
++}
++
+ // newCollabHandoffBoundary builds the collaboration drivers' handoff seam
+ // from config (leaf 02): the shared taint tracker (nil when [security.taint]
+ // is disabled -> labeling/scanning skip silently) plus the inter-agent
+diff --git a/internal/daemon/jevgate_wiring_test.go b/internal/daemon/jevgate_wiring_test.go
+index e65384df..0090563f 100644
+--- a/internal/daemon/jevgate_wiring_test.go
++++ b/internal/daemon/jevgate_wiring_test.go
+@@ -1,11 +1,3 @@
+-//go:build daemon_jevgate_pending
+-// above: build-tagged 2026-11-05 (agent-groups orchestrator, integration pass):
+-// this gate references Components.JevScoreGate, which its own wave (26a7764b)
+-// never landed - it has compile-blocked the WHOLE daemon test package for
+-// every session since. Same remedy as the intake gate (0943902b precedent):
+-// tag it out until the jev wave lands the field + wiring. Remove the tag,
+-// do not delete, when JevScoreGate exists.
+-
+ package daemon
+ 
+ import (
