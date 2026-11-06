@@ -317,12 +317,12 @@ explicitly DEFERRED (stretch); silent omission is a defect.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| R0-research | PENDING | 0 | |
-| 01-tier-policy | TESTS_VALIDATED | 0 | SetTierPolicy daemon call site LANDED (internal/daemon/tierpolicy_wiring.go, issue #82 arm-up) - rotation depth bound now arms from llm.tiers config |
-| 02-semantic-cache | TESTS_VALIDATED | 0 | T5 daemon wiring LANDED (internal/daemon/semantic_cache_wiring.go per docs/plans/20261103-wiring-followups-final/05): embedder reuse > alias > none, Warn + exact-only degraded posture, WithSemanticCache attach in components.go |
-| 03-cache-reuse-config | PENDING | 0 | |
-| 04-ttft-metrics | PENDING | 0 | |
-| 05-e2e-llm-serving-tiers | PENDING | 0 | |
+| R0-research | COMPLETE | 0 | Landed c5ef67e9 - wave-1 findings doc (similarity thresholds, --cache-reuse semantics, TTFT conventions); serving-tiers thresholds pinned, cited by 01-04 |
+| 01-tier-policy | COMPLETE | 0 | F1/F2 VALIDATED: TestTierPolicyWiringEnabled/Disabled + e2e tier-depth and metadata scenarios exist and pass. SetTierPolicy daemon call site LANDED (internal/daemon/tierpolicy_wiring.go, issue #82 arm-up) - rotation depth bound now arms from llm.tiers config |
+| 02-semantic-cache | COMPLETE | 0 | F3/F4 VALIDATED: internal/llm/semantic_cache_test.go unit suite + TestSemanticCacheWiring* + e2e paraphrase/tool-call scenarios exist and pass. T5 daemon wiring LANDED (internal/daemon/semantic_cache_wiring.go per docs/plans/20261103-wiring-followups-final/05): embedder reuse > alias > none, Warn + exact-only degraded posture, WithSemanticCache attach in components.go |
+| 03-cache-reuse-config | COMPLETE | 0 | Landed 79f58294 - TestConfigLoads guard pins --cache-reuse 256 on both llama entries in internal/llm/providers_config_test.go; fresh-cache comment corrected; docs updated; spawn entries landed via sibling sweep 2d2a8dcb |
+| 04-ttft-metrics | COMPLETE | 0 | Landed 0827f72c - migration v9 llm_calls.ttft_ms via columnMissingGuard (internal/metrics/store.go:531), captureFirstDelta on openai+anthropic (internal/llm/client.go:2187), AvgTTFTMs live path |
+| 05-e2e-llm-serving-tiers | COMPLETE | 0 | Landed 7a86954c - suite llm-serving-tiers, 13 tests incl. tier floor, metadata keys, quota skip, paraphrase hit, tool-call exemption, embedder fallback, cache-reuse at boot, llm_calls ledger shape. Residual (honest): e2e ttft_ms VALUE assertions are deferred-to-fake per the suite header |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
