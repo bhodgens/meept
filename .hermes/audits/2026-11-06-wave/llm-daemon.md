@@ -46,3 +46,7 @@ Hunted per the wave brief with no confirmed defect found in:
   Full internal/llm package ok.
 - F-1 OPEN (OTLP observer never attached to Anthropic/Codex clients) — parent
   next.
+- F-1 CLOSED: ProviderManager.SetLLMCallObserver fan-out seam attaches the
+  observer on EVERY chatter (Client/AnthropicClient/CodexClient) at boot AND
+  via AddProvider; daemon calls it right after pm construction. Pinned by
+  TestProviderManager_SetLLMCallObserverFanout. internal/llm + internal/daemon ok.

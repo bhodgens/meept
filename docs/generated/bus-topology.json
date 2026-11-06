@@ -131,7 +131,7 @@
     "agent.progress.synthesized": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2637,
+        "line": 2647,
         "payload_keys": []
       }
     ],
@@ -206,7 +206,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10644,
+        "line": 10654,
         "payload_keys": []
       }
     ],
@@ -559,7 +559,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4245,
+        "line": 4255,
         "payload_keys": []
       }
     ],
@@ -580,7 +580,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6368,
+        "line": 6378,
         "payload_keys": [
           "name",
           "tags",
@@ -1791,7 +1791,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9778,
+        "line": 9788,
         "payload_keys": []
       }
     ],
@@ -2318,13 +2318,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8338,
+        "line": 8348,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8375,
+        "line": 8385,
         "payload_keys": [],
         "via_const": true
       }
@@ -2541,7 +2541,7 @@
     "agent.event.*": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2607,
+        "line": 2617,
         "subscriber_id": "progress-synthesizer"
       }
     ],
@@ -2727,7 +2727,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4223,
+        "line": 4233,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2742,7 +2742,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5092,
+        "line": 5102,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -3595,7 +3595,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9704,
+        "line": 9714,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3886,7 +3886,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9871,
+        "line": 9881,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

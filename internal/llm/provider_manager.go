@@ -142,6 +142,13 @@ type ProviderManager struct {
 	// header off. Guarded by mu.
 	sessionAffinity *AffinityConfig
 
+	// llmCallObserverFn is the llm-hop-tracing observer attached across
+	// the boot by the daemon (SetLLMCallObserver fan-out), so Anthropic/
+	// Codex chatters fire llm.call spans too, not just the primary
+	// OpenAI-compatible client (bughunt 2026-11-06 llm-daemon F-1).
+	// Guarded by mu; nil = off.
+	llmCallObserverFn func(appmetrics.LLMCallRecord)
+
 	// tierPolicy is the resolved llm.tiers serving-policy config
 	// (SetTierPolicy, llm-serving-tiers tree leaf 01). Nil (or
 	// Enabled=false) = disabled: rotation is unbounded exactly as before
@@ -311,6 +318,35 @@ func (pm *ProviderManager) SetFailurePolicyConfig(cfg *FailurePolicyConfig) {
 	for _, entry := range pm.providers {
 		if c, ok := entry.Chatter.(*Client); ok {
 			c.SetFailurePolicyConfig(cfg)
+		}
+	}
+}
+
+// llmCallObserverSetter is the leaf-01 (llm-hop-tracing) observer seam
+// implemented by every client class that records llm.call spans
+// (*Client, *AnthropicClient, *CodexClient).
+type llmCallObserverSetter interface {
+	SetLLMCallObserver(fn func(appmetrics.LLMCallRecord))
+}
+
+// SetLLMCallObserver fans the llm-hop-tracing observer out onto every
+// chatter this manager owns (existing and future via AddProvider),
+// mirroring SetFailurePolicyConfig. Before this seam the daemon attached
+// the observer ONLY to the primary OpenAI-compatible c.LLMClient, so
+// Anthropic/Codex serving hops never produced llm.call spans even with
+// otlp_traces enabled (bughunt 2026-11-06 llm-daemon F-1). A nil fn is
+// ignored by the per-client setters (nil-guard contract), so this is an
+// attach-only seam. Nil-receiver safe.
+func (pm *ProviderManager) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord)) {
+	if pm == nil || fn == nil {
+		return
+	}
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.llmCallObserverFn = fn
+	for _, entry := range pm.providers {
+		if s, ok := entry.Chatter.(llmCallObserverSetter); ok {
+			s.SetLLMCallObserver(fn)
 		}
 	}
 }
@@ -1595,6 +1631,13 @@ func (pm *ProviderManager) AddProvider(cfg *ModelConfig, priority int) {
 		}
 		if c, ok := entry.Chatter.(*AnthropicClient); ok {
 			c.SetSessionAffinityConfig(pm.sessionAffinity)
+		}
+	}
+	// llm-hop-tracing fan-out: a provider added after boot inherits the
+	// observer attached via SetLLMCallObserver (bughunt llm-daemon F-1).
+	if pm.llmCallObserverFn != nil {
+		if s, ok := entry.Chatter.(llmCallObserverSetter); ok {
+			s.SetLLMCallObserver(pm.llmCallObserverFn)
 		}
 	}
 

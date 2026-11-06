@@ -1817,6 +1817,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			applyTierPolicyToProviderManager(pm, cfg)
 			c.ProviderManager = pm
 
+			// llm-hop-tracing fan-out (bughunt llm-daemon F-1): the boot
+			// attach above only reaches the primary OpenAI-compatible
+			// client; the manager seam puts the observer on EVERY
+			// chatter (Anthropic/Codex included) and on providers added
+			// later (OAuth registration, AddProvider). No-op when traces
+			// are disabled (otlpTraceSubs nil).
+			if c.otlpTraceSubs != nil {
+				pm.SetLLMCallObserver(c.otlpTraceSubs.llmCallObserver())
+			}
+
 			// Dynamically register OAuth-backed LLM providers that have
 			// stored tokens but are not already in the static config.
 			c.registerOAuthProviders(pm, logger)
