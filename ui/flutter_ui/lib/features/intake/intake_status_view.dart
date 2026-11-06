@@ -183,8 +183,10 @@ class _StatusReport extends StatelessWidget {
             ? 'scheduled (intake_poller)'
             : 'not scheduled',
       ),
-      if (status.note.isNotEmpty)
-        _Row(label: 'note', value: status.note.toLowerCase()),
+      // The enabled-state note ('intake enabled') is RPC boilerplate the
+      // TUI twin never renders; dropped for parity (bughunt surfaces F-2).
+      // Documented deviation: empty single-value fields render '-' here
+      // (_dash) where the TUI prints them blank.
     ];
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);

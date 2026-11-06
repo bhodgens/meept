@@ -19,6 +19,8 @@
                │  claims (promote/reject)                       │
                │    [u]  users - multi-user awareness (manage   │
                │  via cli)                                      │
+               │    [i]  intake status - github ticket intake:  │
+               │  config + poller state                         │
                │    [n]  new session - create a new session     │
                │    [r]  edit description - edit session        │
                │  description                                   │

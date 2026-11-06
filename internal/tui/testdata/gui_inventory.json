@@ -15,6 +15,7 @@
     { "key": "u", "label": "users", "description": "multi-user awareness (manage via cli)", "gui": true },
     { "key": "n", "label": "new session", "description": "create a new session", "gui": true },
     { "key": "r", "label": "edit description", "description": "edit session description", "gui": true },
+    { "key": "i", "label": "intake status", "description": "github ticket intake: config + poller state", "gui": true },
     { "key": "f", "label": "find...", "description": "search sessions and tasks", "gui": true }
   ],
   "shortcuts": [
@@ -36,6 +37,7 @@
   ],
   "deviations": {
     "palette:queue": "no flutter queue route yet (documented deviation, command_palette.dart header comment)",
+    "intake:view-empty-dash": "GUI intake_status_view renders empty single-value fields as '-' where the TUI prints blank (cosmetic; row set is parity after dropping the enabled-note row, bughunt surfaces F-2)",
     "palette:activity view": "flutter /activity page landed (activity-views leaf 04); gui:true",
     "palette:toggle sidebar": "no flutter sidebar surface (documented deviation, command_palette.dart header comment)",
     "shortcut:ctrl+m": "markdown rendering toggle is TUI-only; the GUI renders markdown natively",

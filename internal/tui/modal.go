@@ -209,6 +209,7 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 		{Key: keys.Projects, Label: "projects", Description: "manage projects"},
 		{Key: keys.MemoryReview, Label: "memory review", Description: "review pending auto-claims (promote/reject)"},
 		{Key: "u", Label: "users", Description: "multi-user awareness (manage via cli)"},
+		{Key: "i", Label: "intake status", Description: "github ticket intake: config + poller state"},
 		{Key: keys.NewSession, Label: "new session", Description: "create a new session"},
 		{Key: keys.RenameSession, Label: "edit description", Description: "edit session description"},
 		{Key: "f", Label: "find...", Description: "search sessions and tasks"},

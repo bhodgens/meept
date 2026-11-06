@@ -2484,6 +2484,14 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalUsers
 			a.usersModal.Show()
 			return a, nil
+		case "i":
+			// intake status (GUI command-palette parity, issue #109): runs
+			// the same /intake slash path the chat input intercepts
+			// (CommandHandler.executeIntake -> intake.status RPC).
+			if cmd := ParseSlash("/intake"); cmd != nil && a.commandHandler != nil {
+				return a, a.commandHandler.Execute(cmd)
+			}
+			return a, nil
 		}
 		return a, nil
 
