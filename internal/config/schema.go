@@ -3315,6 +3315,35 @@ type SkillsConfig struct {
 	Evolver               SkillsEvolverConfig `json:"evolver"                 toml:"evolver"`                // Closed-loop skill evolution settings
 	Wiki                  SkillsWikiConfig    `json:"wiki"                    toml:"wiki"`                   // Wiki knowledge store (raw/consolidated evidence base)
 	State                 SkillsStateConfig   `json:"state"                   toml:"state"`                  // SKILL.state execution mode settings
+	Ranking               SkillsRankingConfig `json:"ranking"                 toml:"ranking"`                // Embedding-rank ordering of the model-facing skill listing (branch 04 leaf 02; opt-in, default OFF)
+}
+
+// SkillsRankingConfig configures embedding-rank ordering of the no-cap
+// skill listing (token-efficiency branch 04, leaf 02; Q4 user ruling:
+// always rank, never hide/cap). When Enabled and a reachable
+// OpenAI-compatible embeddings endpoint is configured, the "## Active
+// Skills" listing is ordered by cosine similarity between the episode's
+// task text and each skill's name+description embedding, computed ONCE per
+// episode (cache-stable). Ranking is order-only: every visible skill is
+// still listed. Disabled (the default), a missing/unreachable endpoint, or
+// any embedding failure leaves the listing alphabetical — byte-identical to
+// the leaf-01 shipped behavior.
+type SkillsRankingConfig struct {
+	// Enabled turns on embedding-rank ordering. Default false (opt-in
+	// defaults invariant, docs/agents/opt-in-defaults.md).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// BaseURL is the OpenAI-compatible embeddings root, e.g.
+	// "http://127.0.0.1:8090/v1" (scripts/embed_server.py serves the
+	// Qwen3-Embedding weights in that shape). Required when Enabled;
+	// empty with Enabled=true disables ranking at wiring time (warn).
+	BaseURL string `json:"base_url" toml:"base_url"`
+	// Model is the model id sent in the embeddings request (e.g.
+	// "qwen3-emb"). Empty is sent through as-is; the local embed server
+	// ignores it.
+	Model string `json:"model" toml:"model"`
+	// TimeoutSeconds bounds each embeddings call. 0 uses the built-in
+	// default (2s). The embedder must never stall an episode build.
+	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
 }
 
 // SkillsWikiConfig configures the wiki knowledge store (arXiv:2608.27454).

@@ -334,6 +334,7 @@ Package config provides configuration loading and validation for meept.
 - [type ShellPermissionsConfig](<#ShellPermissionsConfig>)
 - [type SkillsConfig](<#SkillsConfig>)
 - [type SkillsEvolverConfig](<#SkillsEvolverConfig>)
+- [type SkillsRankingConfig](<#SkillsRankingConfig>)
 - [type SkillsStateConfig](<#SkillsStateConfig>)
 - [type SkillsWikiConfig](<#SkillsWikiConfig>)
 - [type SpillConfig](<#SpillConfig>)
@@ -758,7 +759,7 @@ NormalizeRuntimeDefaults fills safe defaults for [runtime](<https://pkg.go.dev/r
 
 	func NormalizeSemanticCacheDefaults(sc *SemanticCacheConfig)
 
-NormalizeSemanticCacheDefaults clamps invalid semantic\-cache values to defaults at the load boundary \(llm\-serving\-tiers leaf 02\): non\-positive or \>= 1 threshold \-\> 0.95, non\-positive max\_entries \-\> 1024, negative ttl\_min \-\> 0 \(the wiring\-site mirror of llm.cache.default\_ttl\_min\). Idempotent on valid values; the tier stays disabled unless Enabled is true.
+NormalizeSemanticCacheDefaults clamps invalid semantic\-cache values to defaults at the load boundary \(llm\-serving\-tiers leaf 02\): non\-positive or \>= 1 threshold \-\> 0.95, non\-positive max\_entries \-\> 1024, negative ttl\_min \-\> 0 \(the wiring\-site mirror of llm.cache.default\_ttl\_min\). Leaf 03 \(wiring\-followups\-final\) adds the verify\-band clamp: verify\_floor at/above the \(post\-clamp\) threshold, or negative, is no band at all \-\> 0 \(disabled\). Idempotent on valid values; the tier stays disabled unless Enabled is true.
 
 <a name="NormalizeTierPolicyDefaults"></a>
 ## func NormalizeTierPolicyDefaults
@@ -4950,6 +4951,14 @@ Threshold default is 0.95 cosine per the R0 research addendum \(docs/research/20
 	    // (memory/vector) when configured; if neither resolves, the tier
 	    // degrades to exact-only (structurally dead cache, never an error).
 	    EmbedderAlias string `json:"embedder_alias" toml:"embedder_alias"`
+	    // VerifyFloor is the lower bound of the two-stage verifier band
+	    // (wiring-followups-final leaf 03): a candidate scoring in
+	    // [verify_floor, threshold) is re-embedded and direct-cosine verified
+	    // against its stored embedding before serving; verify failure degrades
+	    // to a miss. Default 0.85 when the tier normalizes an unset band;
+	    // 0 disables the band entirely (pre-band behavior). Values at/above
+	    // threshold are useless and clamp to 0 at the load boundary.
+	    VerifyFloor float64 `json:"verify_floor"   toml:"verify_floor"`
 	}
 
 <a name="SessionAffinityConfig"></a>
@@ -5235,6 +5244,7 @@ SkillsConfig holds skills settings.
 	    Evolver               SkillsEvolverConfig `json:"evolver"                 toml:"evolver"`                // Closed-loop skill evolution settings
 	    Wiki                  SkillsWikiConfig    `json:"wiki"                    toml:"wiki"`                   // Wiki knowledge store (raw/consolidated evidence base)
 	    State                 SkillsStateConfig   `json:"state"                   toml:"state"`                  // SKILL.state execution mode settings
+	    Ranking               SkillsRankingConfig `json:"ranking"                 toml:"ranking"`                // Embedding-rank ordering of the model-facing skill listing (branch 04 leaf 02; opt-in, default OFF)
 	}
 
 <a name="SkillsEvolverConfig"></a>
@@ -5254,6 +5264,29 @@ SkillsEvolverConfig configures the skill evolver — the scheduled process that 
 	    RunOnStart                 bool          `json:"run_on_start"                   toml:"run_on_start"`                 // Default false; when true, scheduler runs one cycle immediately on Start (noisy on daemon startup)
 	    PlanDir                    string        `json:"plan_dir"                       toml:"plan_dir"`                     // Evolver plan sink; default "" -> ~/.meept/plans/evolver (user-scoped, machine-originated plans)
 	    PlanRetentionDays          int           `json:"plan_retention_days"            toml:"plan_retention_days"`          // Default 14; sink plans older than this are auto-pruned each cycle (draft/cancelled/failed rows + md deleted, stale pending_approval cancelled). <=0 disables retention.
+	}
+
+<a name="SkillsRankingConfig"></a>
+## type SkillsRankingConfig
+
+SkillsRankingConfig configures embedding\-rank ordering of the no\-cap skill listing \(token\-efficiency branch 04, leaf 02; Q4 user ruling: always rank, never hide/cap\). When Enabled and a reachable OpenAI\-compatible embeddings endpoint is configured, the "\#\# Active Skills" listing is ordered by cosine similarity between the episode's task text and each skill's name\+description embedding, computed ONCE per episode \(cache\-stable\). Ranking is order\-only: every visible skill is still listed. Disabled \(the default\), a missing/unreachable endpoint, or any embedding failure leaves the listing alphabetical — byte\-identical to the leaf\-01 shipped behavior.
+
+	type SkillsRankingConfig struct {
+	    // Enabled turns on embedding-rank ordering. Default false (opt-in
+	    // defaults invariant, docs/agents/opt-in-defaults.md).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // BaseURL is the OpenAI-compatible embeddings root, e.g.
+	    // "http://127.0.0.1:8090/v1" (scripts/embed_server.py serves the
+	    // Qwen3-Embedding weights in that shape). Required when Enabled;
+	    // empty with Enabled=true disables ranking at wiring time (warn).
+	    BaseURL string `json:"base_url" toml:"base_url"`
+	    // Model is the model id sent in the embeddings request (e.g.
+	    // "qwen3-emb"). Empty is sent through as-is; the local embed server
+	    // ignores it.
+	    Model string `json:"model" toml:"model"`
+	    // TimeoutSeconds bounds each embeddings call. 0 uses the built-in
+	    // default (2s). The embedder must never stall an episode build.
+	    TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
 	}
 
 <a name="SkillsStateConfig"></a>

@@ -846,6 +846,18 @@
     "search_paths": [],
     "auto_reload": false,
     "max_cached_skills": 50,
+    // drift: commented template block; absent from installed homes by
+    // design (ranking.enabled defaults false = alphabetical listing).
+    // Uncomment to order the model-facing skill listing by embedding
+    // similarity to the episode's task text (branch 04 leaf 02; Q4:
+    // always rank, never hide). Needs a running OpenAI-compatible
+    // /v1/embeddings endpoint, e.g. scripts/embed_server.py.
+    // "ranking": {
+    //   "enabled": true,
+    //   "base_url": "http://127.0.0.1:8090/v1",
+    //   "model": "qwen3-emb",
+    //   "timeout_seconds": 2,
+    // },
   },
 
   // Self-improvement configuration

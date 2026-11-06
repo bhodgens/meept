@@ -53,3 +53,21 @@ func TestDefaultConfig_SkillsWikiState(t *testing.T) {
 		t.Fatalf("max chars: %d", c.Skills.State.MaxStateChars)
 	}
 }
+
+// TestDefaultConfig_SkillsRanking pins the branch-04 leaf-02 opt-in default:
+// skills.ranking ships OFF. Absent config key => Enabled=false => the skill
+// listing stays alphabetical (leaf-01 behavior, byte-identical). The
+// zero TimeoutSeconds means "built-in default" — the wiring applies 2s;
+// the schema itself never carries an implicit-on value.
+func TestDefaultConfig_SkillsRanking(t *testing.T) {
+	c := DefaultConfig()
+	if c.Skills.Ranking.Enabled {
+		t.Fatal("skills.ranking default must be disabled (opt-in defaults invariant)")
+	}
+	if c.Skills.Ranking.BaseURL != "" || c.Skills.Ranking.Model != "" {
+		t.Fatalf("ranking endpoint fields must default empty: %+v", c.Skills.Ranking)
+	}
+	if c.Skills.Ranking.TimeoutSeconds != 0 {
+		t.Fatalf("timeout default must be 0 (built-in applied at wiring), got %d", c.Skills.Ranking.TimeoutSeconds)
+	}
+}

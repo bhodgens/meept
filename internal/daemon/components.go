@@ -2735,6 +2735,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// enriched with standing instructions and learned patterns.
 	if c.AgentLoop != nil && instrResult.ContextInjector != nil {
 		c.AgentLoop.SetContextInjector(instrResult.ContextInjector)
+		// The injector renders the no-cap skill listing (branch 04); it
+		// needs the lazy loader's cache, and its episode ranking needs
+		// the loader's index embedder (wired in initializeSkills above).
+		if c.SkillLoader != nil {
+			instrResult.ContextInjector.SetSkillLoader(c.SkillLoader)
+		}
 		logger.Info("context injector wired to agent loop")
 	}
 	// Store the memvid client from memory manager if active, or create standalone
@@ -9326,6 +9332,32 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 		// mid-session skill writes invisible until a restart. Discovery is
 		// lightweight (metadata-only, no bodies) and runs off the index mutex.
 		c.SkillIndex.SetRescanSource(discovery.DiscoverMetadataOnly)
+
+		// Embedding-rank ordering of the model-facing skill listing
+		// (token-efficiency branch 04 leaf 02; Q4 user ruling: always
+		// rank, never hide/cap). Opt-in: [skills.ranking].enabled false
+		// (the default) wires NOTHING — the listing stays alphabetical,
+		// byte-identical to leaf 01. Enabled without a base_url degrades
+		// to alphabetical with a warning; ranking itself is order-only
+		// and any embedding failure never fails an episode.
+		if cfg.Skills.Ranking.Enabled {
+			if strings.TrimSpace(cfg.Skills.Ranking.BaseURL) == "" {
+				logger.Warn("skills.ranking enabled but base_url empty; skill listing stays alphabetical")
+			} else {
+				timeout := 2 * time.Second
+				if cfg.Skills.Ranking.TimeoutSeconds > 0 {
+					timeout = time.Duration(cfg.Skills.Ranking.TimeoutSeconds) * time.Second
+				}
+				c.SkillIndex.SetEmbedder(agent.NewSkillRankingEmbedder(
+					cfg.Skills.Ranking.BaseURL, cfg.Skills.Ranking.Model, timeout,
+				))
+				logger.Info("Skill ranking embedder wired",
+					"base_url", cfg.Skills.Ranking.BaseURL,
+					"model", cfg.Skills.Ranking.Model,
+					"timeout", timeout.String(),
+				)
+			}
+		}
 
 		// Build capability index for metadata-driven skill matching
 		c.CapabilityIndex = skills.BuildCapabilityIndex(

@@ -7436,6 +7436,12 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	}
 
 	// Build system prompt with memory and skill context
+	// Episode-start skill-ranking signal (branch 04 leaf 02): the task
+	// name+description is this episode's ranking text, recorded once here
+	// so the injector freezes the listing order for the whole episode.
+	if inj := l.ContextInjector(); inj != nil {
+		inj.SetEpisodeTask(taskInput)
+	}
 	systemPrompt := l.buildSystemPromptWithContextAndSkills(ctx, conv, discovered)
 	conv.SetSystemPrompt(systemPrompt)
 
