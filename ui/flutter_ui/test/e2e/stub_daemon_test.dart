@@ -676,7 +676,13 @@ void main() {
     });
 
     test('binds loopback on an ephemeral port and disposes cleanly', () async {
-      expect(daemon.port, greaterThanOrEqualTo(49152));
+      // Ephemeral range is platform-specific: Linux defaults to
+      // 32768-60999 (/proc/sys/net/ipv4/ip_local_port_range), macOS to
+      // 49152-65535. A hard 49152 floor fails on Linux CI with a valid
+      // kernel-assigned port (observed: 38221 on ubuntu-latest).
+      final floor = Platform.isLinux ? 32768 : 49152;
+      expect(daemon.port, greaterThanOrEqualTo(floor));
+      expect(daemon.port, lessThanOrEqualTo(65535));
       expect(daemon.baseUrl, startsWith('http://127.0.0.1:'));
       // Disposing twice is safe; the port is released afterwards.
       await daemon.dispose();
