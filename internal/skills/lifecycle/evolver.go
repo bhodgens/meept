@@ -94,7 +94,6 @@ type Evolver struct {
 // EvolverOption configures an Evolver at construction time.
 type EvolverOption func(*Evolver)
 
-
 // WithReflectionProposer injects a proposal source for Pass A consumption. When
 // set, Pass A drains pending reflection proposals at the start of each cycle
 // and routes each one (above MinProposalConfidence) through the verifier as
@@ -816,7 +815,7 @@ func (e *Evolver) applyProposal(ctx context.Context, proposal EvolutionProposal)
 		if e.writer == nil {
 			return fmt.Errorf("evolver: writer not configured")
 		}
-		if err := e.writer.WriteSkill(proposal.SkillName, proposal.CandidateContent); err != nil {
+		if err := e.writer.WriteSkillWithOrigin(proposal.SkillName, proposal.CandidateContent, OriginEvolver); err != nil {
 			return fmt.Errorf("evolver: write skill %s: %w", proposal.SkillName, err)
 		}
 		// Re-parse and register so the skill is immediately discoverable.

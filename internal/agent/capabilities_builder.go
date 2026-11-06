@@ -221,3 +221,41 @@ func (b *CapabilitiesBuilder) BuildFromRegistry(registry *AgentRegistry) (*Capab
 	specs := registry.ListSpecs()
 	return b.Build(specs)
 }
+
+// refreshIfNeeded refreshes the builder's skill index at a turn boundary when
+// the index has been marked dirty (for example by a mid-session skill-write
+// notifier, branch 2's Writer.SetChangeNotifier -> SkillIndex.MarkDirty).
+//
+// It is the idle, bounded refresh seam for branch 1 (#103): a skill the agent
+// authors mid-session is invisible until restart because the index is built
+// once at boot. This method runs once per turn build (wired at the prompt.go
+// turn boundary, never mid-stream) and:
+//   - no-ops when no index is wired (b.skillIndex == nil) or when the index
+//     is not dirty, so the loop-economics stable prompt prefix survives a
+//     no-op refresh byte-for-byte;
+//   - otherwise calls SkillIndex.Refresh() to rescan the tiers and rebuild
+//     the index in place, then rebuilds the cached capability index through
+//     the shared CapabilityIndex.Rebuild primitive (capability_index.go) --
+//     it does NOT fork a second rebuild path.
+//
+// Refresh failures are logged, not returned: a turn must never hard-fail
+// because an index rescan hiccupped; the index simply stays dirty and the
+// next turn retries.
+func (b *CapabilitiesBuilder) refreshIfNeeded() {
+	if b == nil || b.skillIndex == nil {
+		return
+	}
+	if !b.skillIndex.IsDirty() {
+		return
+	}
+	if err := b.skillIndex.Refresh(); err != nil {
+		b.logger.Warn("skill index refresh failed at turn boundary", "error", err)
+		return
+	}
+	if b.capabilityIndex != nil {
+		// Reuse the existing in-place rebuild primitive; a byte-stable
+		// (unchanged skill set) rebuild leaves the capability index -- and
+		// therefore the stable prompt prefix -- untouched.
+		b.capabilityIndex.Rebuild()
+	}
+}

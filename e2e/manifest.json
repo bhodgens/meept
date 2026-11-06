@@ -48,8 +48,9 @@
       "continuity-regressions",
       "goal-completion",
       "acp-persona-route",
-      "dynamic-tools",
       "llm-hop-tracing",
+      "skills-refresh-origin",
+      "dynamic-tools",
       "hitl-notifications",
       "turn-journal"
     ],
@@ -78,7 +79,8 @@
     ],
     "internal/skills/": [
       "skills-discovery",
-      "continuity-regressions"
+      "continuity-regressions",
+      "skills-refresh-origin"
     ],
     "internal/tools/": [
       "memory-knowledge-assets",
@@ -112,6 +114,7 @@
       "memory-knowledge-assets",
       "memory-layered-distill",
       "memory-persistence",
+      "skills-refresh-origin",
       "memory-defaults",
       "memory-scoping"
     ],
@@ -221,7 +224,8 @@
       "hermes-client"
     ],
     "cmd/meept/": [
-      "cli-surface"
+      "cli-surface",
+      "skills-refresh-origin"
     ],
     "cmd/meept-daemon/": [
       "daemon-lifecycle"
@@ -393,7 +397,8 @@
       "github-pr-ci"
     ],
     "internal/tools/builtin/": [
-      "github-pr-ci"
+      "github-pr-ci",
+      "skills-refresh-origin"
     ],
     "internal/intake/": [
       "github-intake"
@@ -467,6 +472,9 @@
     ],
     "e2e/suites/plan-critic": [
       "plan-critic"
+    ],
+    "e2e/suites/skills-refresh-origin": [
+      "skills-refresh-origin"
     ],
     "e2e/suites/dynamic-tools": [
       "dynamic-tools"
@@ -980,11 +988,23 @@
       "note": "plan-20261101-fresh-context-critic tree: fresh-context evidence critic (leaf 02), hostile second pass (leaf 03), contest path (leaf 04), zero-decision compile (leaf 05), interview option gates (leaf 06), daemon wiring + model slots (leaf 07). Self-contained fixtures over real StrategicPlanner + live harness daemon for the wiring scenario."
     },
     {
+      "name": "skills-refresh-origin",
+      "dir": "e2e/suites/skills-refresh-origin",
+      "status": "todo",
+      "diff": "M",
+      "scenarios": [
+        "skills-refresh-01 mid-session skill write visible next turn",
+        "skills-refresh-02 no-op refresh byte-stable",
+        "skills-origin-01 origin stamped per write path",
+        "skills-origin-02 memory_facts origin column + legacy unknown",
+        "skills-doctor-01 doctor origin-backfill report-only"
+      ]
+    },
+    {
       "name": "dynamic-tools",
       "dir": "e2e/suites/dynamic-tools",
       "status": "implemented",
-      "note": "RED gate skeleton (branch 03 leaf 00T): compiles against current code; flag-off byte-identical control + capability-gate cases 1-4 fail RED for the missing capability-gate/exposure seam (no llm.CapFrontier tag, no warn-once downgrade, no episode-boundary restore yet). Starvation canary + cache-continuity cases are todo-marked (need the 01/04/05 impl seams: tool_search + predicted-budget promotion + the SetSchemaMode re-cache)."
-    }
+      "note": "RED gate skeleton (branch 03 leaf 00T): compiles against current code; flag-off byte-identical control + capability-gate cases 1-4 fail RED for the missing capability-gate/exposure seam (no llm.CapFrontier tag, no warn-once downgrade, no episode-boundary restore yet). Starvation canary + cache-continuity cases are todo-marked (need the 01/04/05 impl seams: tool_search + predicted-budget promotion + the SetSchemaMode re-cache)."    }
   ],
   "scenarios": [
     {

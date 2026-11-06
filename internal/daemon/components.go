@@ -3846,6 +3846,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		// Build capabilities map from agent specs and skill metadata
 		capBuilder := agent.NewCapabilitiesBuilder(c.SkillIndex, logger.With("component", "capabilities-builder"))
+		if c.CapabilityIndex != nil {
+			// Branch 01 #103 / C1: give the builder the shared capability index so
+			// a turn-boundary refreshIfNeeded() can reuse CapabilityIndex.Rebuild
+			// to re-derive the capability map after a mid-session skill write.
+			// Without it the refresh re-scans the skill index but cannot update the
+			// capability matching (a no-op beyond the skill index).
+			capBuilder.WithCapabilityIndex(c.CapabilityIndex)
+		}
+		// Wire the refresh-capable builder onto the main loop so each per-turn
+		// prompt build (assembleSystemPrompt -> SetCapabilitiesBuilder) settles a
+		// dirty skill index. No-ops unless c.SkillIndex is non-nil (discovery
+		// succeeded); a loop without skills keeps the default inert refresh.
+		if c.SkillIndex != nil && c.AgentLoop != nil {
+			c.AgentLoop.SetCapabilitiesBuilder(capBuilder)
+			logger.Info("Agent loop wired with skill-index refresh builder",
+				"component", "capabilities-builder",
+			)
+		}
 		capMap, err := capBuilder.Build(c.AgentRegistry.ListSpecs())
 		if err != nil {
 			logger.Warn("Failed to build capabilities map", "error", err)
@@ -9301,6 +9319,14 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			"capabilities", len(c.SkillIndex.AllCapabilities()),
 		)
 
+		// Branch 01 #103 / C1: install the rescan source so a turn-boundary
+		// SkillIndex.Refresh() (settled by CapabilitiesBuilder.refreshIfNeeded)
+		// re-reads the on-disk skill tiers. Without this the bare index holds no
+		// discovery source and Refresh would only clear the dirty flag, leaving
+		// mid-session skill writes invisible until a restart. Discovery is
+		// lightweight (metadata-only, no bodies) and runs off the index mutex.
+		c.SkillIndex.SetRescanSource(discovery.DiscoverMetadataOnly)
+
 		// Build capability index for metadata-driven skill matching
 		c.CapabilityIndex = skills.BuildCapabilityIndex(
 			c.SkillIndex,
@@ -9348,6 +9374,18 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 	// Wire registry into skill writer so archive/restore keeps registry in sync.
 	if c.SkillWriter != nil {
 		c.SkillWriter.SetRegistry(c.SkillRegistry)
+	}
+
+	// Wire the skill writer's post-write change notifier into the branch-1
+	// index dirty flag (C1): every skill write marks the index dirty so the
+	// next-turn refresh re-reads the on-disk tiers. SkillIndex is nil when
+	// discovery failed above, in which case the writer simply stays un-wired
+	// (writes still land on disk; the index was never populated anyway).
+	if c.SkillWriter != nil && c.SkillIndex != nil {
+		idx := c.SkillIndex
+		c.SkillWriter.SetChangeNotifier(func(skillName string) {
+			idx.MarkDirty()
+		})
 	}
 
 	// Construct skill evolver + scheduler (closed-loop skill evolution).

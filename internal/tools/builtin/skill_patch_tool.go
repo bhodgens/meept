@@ -144,7 +144,7 @@ func (t *SkillPatchTool) Execute(ctx context.Context, args map[string]any) (any,
 		return tools.NewErrorResult(err.Error()), nil
 	}
 
-	if err := t.writer.WriteSkill(name, newContent); err != nil {
+	if err := t.writer.WriteSkillWithOrigin(name, newContent, lifecycle.OriginAgent); err != nil {
 		return tools.NewErrorResult(fmt.Sprintf("failed to write skill %q: %v", name, err)), nil
 	}
 
