@@ -206,7 +206,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10654,
+        "line": 10660,
         "payload_keys": []
       }
     ],
@@ -559,7 +559,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4255,
+        "line": 4261,
         "payload_keys": []
       }
     ],
@@ -580,7 +580,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6378,
+        "line": 6384,
         "payload_keys": [
           "name",
           "tags",
@@ -1791,7 +1791,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9788,
+        "line": 9794,
         "payload_keys": []
       }
     ],
@@ -2318,13 +2318,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8348,
+        "line": 8354,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8385,
+        "line": 8391,
         "payload_keys": [],
         "via_const": true
       }
@@ -2727,7 +2727,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4233,
+        "line": 4239,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2742,7 +2742,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5102,
+        "line": 5108,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -3595,7 +3595,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9714,
+        "line": 9720,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3886,7 +3886,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9881,
+        "line": 9887,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

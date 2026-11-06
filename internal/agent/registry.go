@@ -175,6 +175,14 @@ type AgentRegistry struct {
 	// construction (NewAgentRegistry) — it is immutable after that.
 	codemodeEnabled bool
 
+	// dynamicExposureEnabled mirrors RegistryConfig.DynamicExposureEnabled
+	// (bughunt agent-core F-2): when true, filterTools unions the
+	// tool_search/tool_view meta pair into every scoped agent's allow-list
+	// so the dynamic exposure engine's recovery path (§1 layer 3 always-
+	// active discoverer+expander) actually exists in the filtered registry
+	// the executor consults. Guarded by mu; written only at construction.
+	dynamicExposureEnabled bool
+
 	// Lazy-discovery fallback state (leaf 03-agent-recall-wiring):
 	// bundledAgentsPath is the path captured at construction so a
 	// post-boot discovery rescan uses the same tiers;
@@ -320,6 +328,18 @@ type RegistryConfig struct {
 	// behaves byte-identically to pre-codemode and the tool stays absent
 	// from filtered registries.
 	CodemodeEnabled bool
+
+	// DynamicExposureEnabled is [agent.tools].dynamic_tool_exposure: when
+	// true, filterTools unions the tool_search/tool_view meta pair into
+	// every SCOPED agent's allow-list (bughunt agent-core F-2). Design
+	// §1 layer 3 makes the pair always-active in dynamic modes, and the
+	// row-4 hard execution gate refuses any non-active tool — so an agent
+	// whose grant lacks the meta pair would have no recovery path (it
+	// could never activate an in-ceiling non-core tool). Most AGENT.md
+	// specs grant neither meta tool (only coder grants tool_view), so
+	// without this union the gate starves scoped agents. Default false
+	// keeps filtered registries byte-identical to the pre-union posture.
+	DynamicExposureEnabled bool
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -329,35 +349,36 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 	}
 
 	r := &AgentRegistry{
-		specs:                 make(map[string]*AgentSpec),
-		loops:                 make(map[string]map[string]*AgentLoop),
-		activeQueues:          make(map[string]*QueueEntry),
-		memvid:                cfg.MemvidClient,
-		taskStore:             cfg.TaskStore,
-		llm:                   cfg.LLMClient,
-		sharedChatter:         cfg.SharedChatter,
-		resolver:              cfg.Resolver,
-		bus:                   cfg.MessageBus,
-		security:              cfg.SecurityChecker,
-		tools:                 cfg.ToolRegistry,
-		shadowMgr:             cfg.ShadowManager,
-		logger:                cfg.Logger,
-		watchdog:              cfg.Watchdog,
-		hallucinationDetector: cfg.HallucinationDetector,
-		artifactManager:       cfg.ArtifactManager,
-		ttsrManager:           cfg.TTSRManager,
-		quotaTracker:          cfg.QuotaTracker,
-		queueConfig:           cfg.Queues,
-		guardsCfg:             cfg.Guards,
-		db:                    cfg.DB,
-		sharedConvStore:       NewConversationStore(cfg.ConversationStoreSize),
-		globalRefusalModel:    cfg.GlobalRefusalModel,
-		plannerChatter:        cfg.PlannerChatter,
-		hookRegistry:          cfg.HookRegistry,
-		compactionCfg:         cfg.Compaction,
-		groupsResolver:        cfg.GroupsResolver,
-		decisionLogLevel:      cfg.DecisionLogLevel,
-		codemodeEnabled:       cfg.CodemodeEnabled,
+		specs:                  make(map[string]*AgentSpec),
+		loops:                  make(map[string]map[string]*AgentLoop),
+		activeQueues:           make(map[string]*QueueEntry),
+		memvid:                 cfg.MemvidClient,
+		taskStore:              cfg.TaskStore,
+		llm:                    cfg.LLMClient,
+		sharedChatter:          cfg.SharedChatter,
+		resolver:               cfg.Resolver,
+		bus:                    cfg.MessageBus,
+		security:               cfg.SecurityChecker,
+		tools:                  cfg.ToolRegistry,
+		shadowMgr:              cfg.ShadowManager,
+		logger:                 cfg.Logger,
+		watchdog:               cfg.Watchdog,
+		hallucinationDetector:  cfg.HallucinationDetector,
+		artifactManager:        cfg.ArtifactManager,
+		ttsrManager:            cfg.TTSRManager,
+		quotaTracker:           cfg.QuotaTracker,
+		queueConfig:            cfg.Queues,
+		guardsCfg:              cfg.Guards,
+		db:                     cfg.DB,
+		sharedConvStore:        NewConversationStore(cfg.ConversationStoreSize),
+		globalRefusalModel:     cfg.GlobalRefusalModel,
+		plannerChatter:         cfg.PlannerChatter,
+		hookRegistry:           cfg.HookRegistry,
+		compactionCfg:          cfg.Compaction,
+		groupsResolver:         cfg.GroupsResolver,
+		decisionLogLevel:       cfg.DecisionLogLevel,
+		codemodeEnabled:        cfg.CodemodeEnabled,
+		dynamicExposureEnabled: cfg.DynamicExposureEnabled,
 	}
 
 	// Load global rules
@@ -951,6 +972,17 @@ func (r *AgentRegistry) filterTools(spec *AgentSpec) ToolRegistry {
 	// under r.mu (filterTools runs inside createLoop under the write lock).
 	if r.codemodeEnabled && len(allowedTools) > 0 {
 		allowedTools = appendUnique(allowedTools, "codemode")
+	}
+	// Meta-pair union (bughunt agent-core F-2, design §1 layer 3): the
+	// dynamic exposure engine's row-4 hard gate refuses every non-active
+	// tool, so tool_search + tool_view must be reachable for ANY agent
+	// with an armed plan — the executor looks tools up in the FILTERED
+	// registry, and most AGENT.md specs grant neither meta tool. Same
+	// scoped-agents-only shape as the codemode gate above; flag-off
+	// leaves allowedTools byte-identical.
+	if r.dynamicExposureEnabled && len(allowedTools) > 0 {
+		allowedTools = appendUnique(allowedTools, "tool_search")
+		allowedTools = appendUnique(allowedTools, "tool_view")
 	}
 	if len(allowedTools) == 0 {
 		return r.tools

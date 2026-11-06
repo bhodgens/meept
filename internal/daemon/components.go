@@ -3862,6 +3862,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// off (tool absent from filtered registries even if it were
 			// registered elsewhere).
 			CodemodeEnabled: cfg.Agent.Tools.CodemodeEnabled,
+			// Meta-pair grant (bughunt agent-core F-2): pass
+			// [agent.tools].dynamic_tool_exposure into the registry so
+			// filterTools unions tool_search/tool_view into each scoped
+			// agent's filtered registry — the row-4 hard gate's recovery
+			// path must exist for the gate to be fair.
+			DynamicExposureEnabled: cfg.Agent.Tools.DynamicToolExposure,
 			// Hook registry inheritance: registry-built specialists must
 			// enforce the same security-before-tool deny, decision gate,
 			// and transform hooks as the daemon template loop.

@@ -52,3 +52,16 @@
 - F-1 OPEN (tool_search ceiling re-bind never wired).
 - F-3 OPEN (BaselineTools knowledge_* dead names under scope caps).
 - F-4 OPEN (skills origin metadata write-only).
+
+- F-1 CLOSED: per-call ctx seam, not SetScope. tool_search Execute now
+  prefers agent.ToolRegistryFromContext(ctx) (the executor injects the
+  agent's FILTERED registry per call at executor.go ContextWithToolRegistry
+  — same seam codemode uses); tool_view Execute refuses an out-of-ceiling
+  name BEFORE the shared LRU cache via scope.Get(name)==nil. A shared-
+  singleton SetScope would race across concurrent agents; the ctx value is
+  per-call and byte-identical for standalone callers (tests, direct use).
+  Pins: internal/tools/builtin/tool_ceiling_seam_test.go (mutation-proven
+  RED for both halves). Registry-side companion (agent-core F-2 corollary):
+  filterTools unions the meta pair into scoped agents' allow-lists when
+  [agent.tools].dynamic_tool_exposure is on, so every agent keeps the
+  recovery path under the row-4 hard gate.
