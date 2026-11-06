@@ -65,3 +65,14 @@
   filterTools unions the meta pair into scoped agents' allow-lists when
   [agent.tools].dynamic_tool_exposure is on, so every agent keeps the
   recovery path under the row-4 hard gate.
+
+## Closeout 2 (2026-11-06, second fix pass)
+- F-3 CLOSED: AgentSpec.ScopedToolNamesPresent(limit, baselinePresent)
+  drops BASELINE names not registered in the parent registry BEFORE they
+  consume a cap slot (filterTools wires r.tools.Get presence). Additional
+  grants are never dropped by presence (explicit per-agent grants, e.g.
+  reconnecting MCP tools, keep their slots). limit<=0 / nil predicate are
+  byte-identical to ScopedToolNames. Pins: tool_baseline_presence_test.go
+  (unit x3 + filter end-to-end; mutation-proven RED: 9 tools under a
+  12-cap = the exact displacement symptom).
+- F-4 OPEN (needs product decision on origin: user no-clobber posture).

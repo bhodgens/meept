@@ -958,7 +958,16 @@ func (r *AgentRegistry) filterTools(spec *AgentSpec) ToolRegistry {
 		return nil
 	}
 
-	allowedTools := spec.ScopedToolNames(spec.ToolScopeLimit)
+	// Presence-filtered cap (bughunt config-tools F-3): a baseline name
+	// whose registration is conditional (knowledge_* under
+	// memory.knowledge.enabled) must not consume a cap slot when the
+	// feature is off — the dead name would silently displace a real tail
+	// tool from the grant. Registry presence is checked at boot-stable
+	// filter time; nil registry keeps the legacy cap shape.
+	baselinePresent := func(name string) bool {
+		return r.tools.Get(name) != nil
+	}
+	allowedTools := spec.ScopedToolNamesPresent(spec.ToolScopeLimit, baselinePresent)
 	if !spec.CanDelegate {
 		allowedTools = removeString(allowedTools, "delegate_task")
 	}
