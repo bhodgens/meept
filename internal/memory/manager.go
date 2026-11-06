@@ -750,10 +750,10 @@ func (m *Manager) Search(ctx context.Context, query MemoryQuery, opts ...SearchO
 				return nil, err
 			}
 			results = filterScopeResults(results, scopeFilter)
-			return m.mergeBridges(ctx, query.Query, results)
+			return m.mergeBridges(ctx, query.Query, results, scopeFilter)
 		}
 		results = filterScopeResults(results, scopeFilter)
-		return m.mergeBridges(ctx, query.Query, results)
+		return m.mergeBridges(ctx, query.Query, results, scopeFilter)
 	}
 
 	results, err := m.searchViaSQLite(ctx, query)
@@ -761,7 +761,7 @@ func (m *Manager) Search(ctx context.Context, query MemoryQuery, opts ...SearchO
 		return nil, err
 	}
 	results = filterScopeResults(results, scopeFilter)
-	return m.mergeBridges(ctx, query.Query, results)
+	return m.mergeBridges(ctx, query.Query, results, scopeFilter)
 }
 
 // mergeBridges appends the bridge store's own-space recall to a result set
@@ -774,7 +774,7 @@ func (m *Manager) Search(ctx context.Context, query MemoryQuery, opts ...SearchO
 // by ID. Best-effort: a missing/closed store or a search error is logged at
 // debug and the source results return unchanged — bridges are a supplement,
 // never a failure.
-func (m *Manager) mergeBridges(ctx context.Context, queryText string, results []MemoryResult) ([]MemoryResult, error) {
+func (m *Manager) mergeBridges(ctx context.Context, queryText string, results []MemoryResult, f *scopeRecallFilter) ([]MemoryResult, error) {
 	m.mu.RLock()
 	bs := m.bridgeStore
 	kb := m.config.Bridges.KB
@@ -801,6 +801,14 @@ func (m *Manager) mergeBridges(ctx context.Context, queryText string, results []
 			break
 		}
 		if _, dup := seen[b.ID]; dup {
+			continue
+		}
+		// Scope gate (bughunt wave 2026-11-06, memory F-1): bridge rows are
+		// distilled from source memories and are recalled OUTSIDE the
+		// embedder-space query that filterScopeResults already pruned, so
+		// the same C2 predicate must bind here or a project-scoped caller
+		// can read facts derived from another project's memories.
+		if !bridgeVisible(f, b) {
 			continue
 		}
 		seen[b.ID] = struct{}{}
@@ -1062,7 +1070,13 @@ func (m *Manager) GetRelevantContext(ctx context.Context, query string, maxItems
 			Limit: maxItems,
 		})
 		if err == nil {
-			return results, nil
+			// Scope gate (bughunt 2026-11-06, same class as memory F-1):
+			// this fast path resolved scopeFilter above but returned the
+			// raw rows — every OTHER recall site in the manager applies
+			// filterScopeResults (the Search memvid branch does; the
+			// commit 4cefbfc9 "scoped recall at ALL sites" contract).
+			// searchViaMemvid never sees the C2 options.
+			return filterScopeResults(results, scopeFilter), nil
 		}
 		m.logger.Warn("Memvid context search failed, trying SQLite fallback", "error", err)
 	}
@@ -2107,7 +2121,7 @@ func (m *Manager) SearchSemantic(ctx context.Context, query string, limit int, o
 				Source:         "semantic",
 			})
 		}
-		return m.mergeBridges(ctx, query, filterScopeResults(memResults, scopeFilter))
+		return m.mergeBridges(ctx, query, filterScopeResults(memResults, scopeFilter), scopeFilter)
 	}
 
 	// Fallback to keyword search. MatchAny + PrefixTerms (bughunt 2026-10-14,

@@ -428,6 +428,16 @@ memories.
 3. **Recall** (post-retrieval, `SelectBalanced`): source units always pass;
    bridges are admitted while `bridges_included < kb` — at most k_b bridging
    facts enter one assembled context, regardless of how many rank highly.
+   Bridges carry a scope stamp folded from their evidence sources at
+   generation (all-global sources → `global`; one bound project and no user
+   sources → that `project`; anything else → `user`, with a single shared
+   `user_id` when exactly one exists). The recall-side `WithScopeFilter`
+   predicate binds bridge rows exactly like source rows (bughunt
+   2026-11-06: bridge rows were appended AFTER the filter and had no scope
+   key, so a project-scoped caller could read facts distilled from another
+   project's memories). Pre-stamp bridges keep no scope key and read as
+   global — the safe legacy default; the over-visible window closes for new
+   bridges.
 4. **Invalidation** (guarantees): every bridge carries non-empty evidence
    IDs at write time, and deleting, superseding (versioned update), or
    consolidator-expiring a source memory cascade-deletes every bridge citing
