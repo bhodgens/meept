@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+#
+# pre-push-vet - push-boundary whole-tree compile gate (production AND test
+# files, including the `e2e`-tagged suites).
+#
+# WHY: the commit-time gates are all scoped - pre-commit-build builds staged
+# packages + clean production downstream importers, pre-commit-vet vets staged
+# packages, pre-commit-consumer-tests test-compiles clean consumers. None of
+# them type-checks EVERY package's test files tree-wide, and none compiles the
+# `//go:build e2e` suite files unless a suite happens to run. That is how
+# 65ad62b1 (Nov 4) sat on main for a day: `go build ./...` green,
+# internal/services/push_effects_test.go red (fakeStore did not implement the
+# new session.Store method). `go vet ./...` type-checks test files of every
+# package; `go vet -tags e2e ./e2e/...` adds the hermetic suite layer. Both
+# are warm-cache seconds (~3-8 s each), so this runs FIRST in the pre-push
+# chain, before the minutes-long e2e and bench gates.
+#
+# CI runs `go vet ./...` in the "Go static analysis" job (ci.yml); this gate
+# keeps the break from ever reaching the remote.
+#
+# Skip (emergencies only - prints a loud warning):
+#   MEEPT_PUSH_VET_SKIP=1 git push
+# `git push --no-verify` also bypasses every pre-push hook.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+if [ "${MEEPT_PUSH_VET_SKIP:-}" = "1" ]; then
+  echo -e "${YELLOW}⚠ MEEPT_PUSH_VET_SKIP=1 - SKIPPING the whole-tree vet gate.${NC}"
+  echo -e "${YELLOW}  A test-file break in ANY package will push unseen. Use only when${NC}"
+  echo -e "${YELLOW}  the failure is provably a foreign session's in-flight WIP.${NC}"
+  exit 0
+fi
+
+# Pin the toolchain to go.mod's `toolchain` line (same contract as the
+# pre-commit dispatcher: GOTOOLCHAIN=auto never downgrades and a newer
+# ambient Go writes export data the x/tools-linked analyzers cannot decode).
+if [ -z "$GOTOOLCHAIN" ] || [ "$GOTOOLCHAIN" = "auto" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^toolchain[[:space:]]//p' "$PWD/go.mod" | head -1)"
+fi
+if [ -z "$GOTOOLCHAIN" ]; then
+    export GOTOOLCHAIN="$(sed -n 's/^go[[:space:]]//p' "$PWD/go.mod" | head -1)"
+fi
+
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}  Pre-push: whole-tree go vet (production + test files)${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+FAILED=0
+
+echo "  go vet ./...  (every package, test files included)"
+if ! VET_OUT=$(go vet ./... 2>&1); then
+  echo -e "${RED}❌ go vet ./... failed:${NC}"
+  echo ""
+  echo "$VET_OUT"
+  echo ""
+  FAILED=1
+fi
+
+echo "  go vet -tags e2e ./e2e/...  (hermetic suite layer)"
+if ! VET_E2E=$(go vet -tags e2e ./e2e/... 2>&1); then
+  echo -e "${RED}❌ go vet -tags e2e ./e2e/... failed:${NC}"
+  echo ""
+  echo "$VET_E2E"
+  echo ""
+  FAILED=1
+fi
+
+if [ "$FAILED" != "0" ]; then
+  echo -e "${YELLOW}Fix before pushing: go build skips _test.go files, so 'the build is${NC}"
+  echo -e "${YELLOW}green' does NOT mean the tree compiles. Run 'go vet ./...' locally.${NC}"
+  exit 1
+fi
+
+echo -e "${GREEN}✅ whole-tree vet green (production + tests + e2e-tagged suites)${NC}"
+exit 0

@@ -39,27 +39,28 @@ the `[n/19]` labels `.githooks/pre-commit` prints:
 | # | Hook | Purpose |
 |---|------|---------|
 | 1 | pre-commit-build | Staged packages + clean downstream importers compile (no stray binaries) |
-| 2 | pre-commit-deferred | Findings docs have resolution plans |
-| 3 | pre-commit-mutexio | No I/O under mutex (CLAUDE.md rule) |
-| 4 | pre-commit-u1000 | Unused code detection (staticcheck) |
-| 5 | pre-commit-vet | Common Go bugs (built-in) |
-| 6 | pre-commit-setters | Nil-safe setter methods |
-| 7 | pre-commit-selflock | Self-deadlocking locks (AST analyzer) |
-| 8 | pre-commit-gosec | Security vulnerabilities |
-| 9 | pre-commit-errors | Error handling anti-patterns |
-| 10 | pre-commit-predictable-ids | Use pkg/id.Generate (not time.Now().UnixNano()) |
-| 11 | pre-commit-sqlite-pragmas | SQLite WAL + busy_timeout required |
-| 12 | pre-commit-channel-nilafterclose | Use sync.Once (not close+nil) |
-| 13 | pre-commit-concurrency | Concurrency annotations (informational — never blocks) |
-| 14 | pre-commit-mutation | Mutation-test coverage (report only — never blocks) |
-| 15 | pre-commit-feature-docs | Documentation updates |
-| 16 | pre-commit-ascii | No CJK/Hangul/fullwidth characters in staged text files |
-| 17 | pre-commit-dart-format | Staged Dart blob (index content) is dart-format clean |
-| 18 | pre-commit-e2e | Affected hermetic e2e suites run + new feature packages have e2e coverage |
-| 19 | pre-commit-deadcode | Blocks NEW unwired functions (deadcode vs committed baseline) |
+| 2 | pre-commit-consumer-tests | Clean downstream packages' `_test.go` files compile against staged contracts |
+| 3 | pre-commit-deferred | Findings docs have resolution plans |
+| 4 | pre-commit-mutexio | No I/O under mutex (CLAUDE.md rule) |
+| 5 | pre-commit-u1000 | Unused code detection (staticcheck) |
+| 6 | pre-commit-vet | Common Go bugs (built-in) |
+| 7 | pre-commit-setters | Nil-safe setter methods |
+| 8 | pre-commit-selflock | Self-deadlocking locks (AST analyzer) |
+| 9 | pre-commit-gosec | Security vulnerabilities |
+| 10 | pre-commit-errors | Error handling anti-patterns |
+| 11 | pre-commit-predictable-ids | Use pkg/id.Generate (not time.Now().UnixNano()) |
+| 12 | pre-commit-sqlite-pragmas | SQLite WAL + busy_timeout required |
+| 13 | pre-commit-channel-nilafterclose | Use sync.Once (not close+nil) |
+| 14 | pre-commit-concurrency | Concurrency annotations (informational — never blocks) |
+| 15 | pre-commit-mutation | Mutation-test coverage (report only — never blocks) |
+| 16 | pre-commit-feature-docs | Documentation updates |
+| 17 | pre-commit-ascii | No CJK/Hangul/fullwidth characters in staged text files |
+| 18 | pre-commit-dart-format | Staged Dart blob (index content) is dart-format clean |
+| 19 | pre-commit-e2e | Affected hermetic e2e suites run + new feature packages have e2e coverage |
+| 20 | pre-commit-deadcode | Blocks NEW unwired functions (deadcode vs committed baseline) |
 
-Steps 13 and 14 are reported but never block the commit. Steps 1-12, 15-17,
-and 18-19 do.
+Steps 14 and 15 are reported but never block the commit. Steps 1-13,
+16-18, and 19-20 do.
 `pre-commit-staticcheck` is not in this list: it is standalone (run it directly,
 or via your editor) and additionally analyzes the tag-gated `magefiles` package
 with `-tags mage`.
@@ -157,6 +158,37 @@ Runs `go vet` on staged Go packages.
 - Shadowed variables
 - Invalid struct tags
 - Copying mutex values
+
+**Requires:** Go (built-in, no installation needed)
+
+---
+
+### pre-commit-consumer-tests
+
+Test-compiles CLEAN downstream consumer packages against staged
+non-test Go changes. Closes the gap that `go build` cannot: `go build`
+skips `_test.go` files, so an interface method added in one commit and
+missing from a consumer's test fake (e.g. `fakeStore` vs
+`session.Store.SaveMessagesWithToolCalls`, commit 65ad62b1) leaves the
+production build green while `go vet`/`go test` on the consumer is red.
+
+**Triggers on:** Changes to non-test Go source files
+
+**Checks:**
+- Resolves staged packages' import paths via `go list`
+- One `go list` pass finds every module package whose TEST imports
+  (`.TestImports`/`.XTestImports`) name a staged package
+- Excludes staged consumers (gate 6 pre-commit-vet covers them) and
+  consumers with unstaged WIP (a foreign session's half-written test must
+  not block this commit — same rule as pre-commit-build's downstream pass)
+- `go vet`s every remaining consumer — vet type-checks the package
+  including its test files
+
+**Known limits (documented in the hook):** tag-gated packages (magefiles,
+`//go:build e2e` suites) report no imports to an untagged `go list`, so
+their test files are not checked here; the push-boundary gate
+`pre-push-vet` covers the whole tree including `-tags e2e ./e2e/...`, and
+CI's "Go static analysis" job runs `go vet ./...`.
 
 **Requires:** Go (built-in, no installation needed)
 
