@@ -63,3 +63,9 @@ Status: FINAL (call budget reached at ~25). 3 findings (F-1 MEDIUM, F-2 LOW/INFO
   (TestOpenGateDBFileModes, passes; old modes would fail both checks).
 - F-2 OPEN as INFO (default flip = product decision, deferred to user).
 - F-3 OPEN (parent triaging next).
+- F-3 CLOSED: hook fallback narrowed to DeobfuscateUntagged (untagged/
+  pre-deploy placeholders only). Two-session pin
+  TestSecretPlaceholderCrossSessionNeverRestores proven RED under the old
+  fallback (leak text printed by the failure) + TestUntaggedPlaceholderStillRestores
+  guards the legacy lane + sessionless callers no longer sweep tagged maps.
+  internal/agent + internal/security full packages ok.

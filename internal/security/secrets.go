@@ -336,6 +336,28 @@ func (s *SecretObfuscator) RestoreOutput(text, sessionID string) string {
 	return result
 }
 
+// DeobfuscateUntagged resolves ONLY placeholders with no minting-session
+// tag - the pre-deploy entries the legacy full-sweep Deobfuscate used to
+// serve - and skips every session-tagged placeholder. Callers pairing this
+// with RestoreOutput (the PII/secret restore hook) get untagged legacy
+// coverage WITHOUT the cross-session leak: a placeholder tagged to session
+// A never resolves for session B's text (bughunt 2026-11-06 security F-3;
+// the old "no progress" fallback to full Deobfuscate resolved exactly the
+// cross-session case the scoped lane refuses).
+func (s *SecretObfuscator) DeobfuscateUntagged(text string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := text
+	for placeholder, original := range s.obfuscateMap {
+		if _, tagged := s.sessionTags[placeholder]; tagged {
+			continue
+		}
+		result = strings.ReplaceAll(result, placeholder, original)
+	}
+	return result
+}
+
 // ChatMessage is a minimal interface for message-like objects with a Content field.
 // We use this to avoid importing the llm package (which would create a circular dependency).
 type ChatMessage struct {
