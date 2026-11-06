@@ -36,10 +36,13 @@ func TestGroupsOverrideAddListPruneRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	file := filepath.Join(home, groups.OverridesFileName)
 
+	// The active window is pinned RELATIVE to now so the test cannot
+	// date-rot (the original fixed 2026-11-05 expiry expired live).
+	activeExpiry := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
 	// add (no file yet — first use creates it)
 	if _, err := executeOverrideCLI(t, home, "add", "agent:deploy-bot",
 		"--allow", "git_push,shell", "--reason", "deploy window",
-		"--expires", "2026-11-05T17:00:00Z"); err != nil {
+		"--expires", activeExpiry); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	entries, err := readOverridesFile(file)
@@ -164,7 +167,7 @@ func TestGroupsOverrideAddReplacesSameSubjectReason(t *testing.T) {
 			t.Fatalf("add: %v", err)
 		}
 	}
-	add("2026-11-05T17:00:00Z")
+	add(time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339))
 	add("2026-12-05T17:00:00Z")
 	entries, err := readOverridesFile(filepath.Join(home, groups.OverridesFileName))
 	if err != nil {
