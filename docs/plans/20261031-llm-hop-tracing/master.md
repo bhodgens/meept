@@ -447,15 +447,18 @@ Match repo AGENTS.md + docs/agents/coding-practices.md:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00-research | PENDING | 0 | |
-| 01-trace-id-threading | PENDING | 0 | |
-| 02-schema-migrations | PENDING | 0 | |
-| 03-span-producer | PENDING | 0 | |
-| 04-e2e-live-verify | PENDING | 0 | |
-| 05-docs | PENDING | 0 | |
+| 00-research | COMPLETE | 1 | RESEARCH-FINDINGS.md landed in-tree; C8 semconv refinement sanctioned and implemented by leaf 03 |
+| 01-trace-id-threading | COMPLETE | 1 | commit e056cbe5 (trace ID mint, WithTraceID threading, SetLLMCallObserver, real latency, tool-execution event emission); TurnSpanID parent-linkage follow-up landed in fb7e5491 |
+| 02-schema-migrations | COMPLETE | 1 | commit e86012cd (llm_calls v7+v8, session_tool_calls migrationAddColumn, roundtrip pins). Honest-scope note: runtime persistence of executed tool calls via session_tool_calls remains unwritten BY DESIGN (Open Question 1); a future writer inherits trace correlation automatically via session.ToolCall |
+| 03-span-producer | COMPLETE | 1 | commit 81fc7d7a (llm.call + tool.call spans, gen_ai.* attrs per refined C8, daemon observer bridge + tool_execution_end subscription; disabled posture preserved) |
+| 04-e2e-live-verify | COMPLETE | 1 | commit 079ab7ba (e2e suite + live Duration envelope production fix); re-run green in 2026-11-05 audit: make e2e-fast-area AREA=llm-hop-tracing, 20.1s |
+| 05-docs | COMPLETE | 1 | docs/workflows/llm-tracing.md (331 lines) landed in 4d8179cf |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE |
 BLOCKED. Update after every transition; re-dispatch resets to IN_PROGRESS.
+
+Forest closeout 2026-11-05: read-only audit verified all leaves at HEAD;
+e2e area green; issue 85 closed.
 
 ## Integration Test Plan
 
@@ -487,19 +490,19 @@ dispatching group D using this matrix:
 
 | # | Feature (from plan) | Source | Unit/pin tests | E2E tests | Status |
 |---|---------------------|--------|----------------|-----------|--------|
-| F1 | TraceID/SpanID minting (crypto/rand, hex, fallback) | C1 / 01 T1 | pkg/id table tests | via 04 shared-trace assert | PENDING |
-| F2 | WithTraceID request scoping + EffectiveTraceID | C2 / 01 T2 | internal/llm client pins | via 04 | PENDING |
-| F3 | Loop tool-event emission with TraceID + args shape | C5 / 01 T3 | internal/agent pins | 04 tool.call span assert | PENDING |
-| F4 | llm_calls trace/span columns + migration idempotence + index | C3 / 02 T1 | store migration pins | 04 SQL join | PENDING |
-| F5 | session_tool_calls trace/span columns + roundtrip | C3 / 02 T2 | store_sqlite pins | n/a (no runtime writer; see Open Questions) | PENDING |
-| F6 | LLMCallRecord stamping at every call site + real latency | C3/C4 / 01 T2 | internal/llm pins | 04 latency>0 assert | PENDING |
-| F7 | llm.call span w/ gen_ai attrs + SQL span_id identity | C6/C8 / 03 T1 | otlp_trace_test additions | 04 receiver capture | PENDING |
-| F8 | tool.call span w/ shape attrs | C6/C8 / 03 T1 | otlp_trace_test additions | 04 receiver capture | PENDING |
-| F9 | TurnSpanSpec keeps minted IDs; trace shares one ID | C5/C6 / 03 T1 | producer pins | 04 single-trace assert | PENDING |
-| F10 | Wiring: observer + raw-topic sub; armed/disabled log lines | C7 / 03 T2-T3 | daemon wiring tests | 04 quiet-boot + armed-boot | PENDING |
-| F11 | Secret-free attributes | C8 / 03 T2 | producer pin (prohibited keys absent) | 04 negative assertion | PENDING |
-| F12 | llm-hop-tracing suite + manifest entry | R5 / 04 T1-T3 | n/a | the suite itself | PENDING |
-| F13 | docs/workflows/llm-tracing.md + Jaeger/Tempo targets | R6 / 05 T1 | n/a (docs leaf: cross-refs resolve) | n/a | PENDING |
+| F1 | TraceID/SpanID minting (crypto/rand, hex, fallback) | C1 / 01 T1 | pkg/id table tests | via 04 shared-trace assert | VALIDATED |
+| F2 | WithTraceID request scoping + EffectiveTraceID | C2 / 01 T2 | internal/llm client pins | via 04 | VALIDATED |
+| F3 | Loop tool-event emission with TraceID + args shape | C5 / 01 T3 | internal/agent pins | 04 tool.call span assert | VALIDATED |
+| F4 | llm_calls trace/span columns + migration idempotence + index | C3 / 02 T1 | store migration pins | 04 SQL join | VALIDATED |
+| F5 | session_tool_calls trace/span columns + roundtrip | C3 / 02 T2 | store_sqlite pins | n/a (no runtime writer; see Open Questions) | VALIDATED |
+| F6 | LLMCallRecord stamping at every call site + real latency | C3/C4 / 01 T2 | internal/llm pins | 04 latency>0 assert | VALIDATED |
+| F7 | llm.call span w/ gen_ai attrs + SQL span_id identity | C6/C8 / 03 T1 | otlp_trace_test additions | 04 receiver capture | VALIDATED |
+| F8 | tool.call span w/ shape attrs | C6/C8 / 03 T1 | otlp_trace_test additions | 04 receiver capture | VALIDATED |
+| F9 | TurnSpanSpec keeps minted IDs; trace shares one ID | C5/C6 / 03 T1 | producer pins | 04 single-trace assert | VALIDATED |
+| F10 | Wiring: observer + raw-topic sub; armed/disabled log lines | C7 / 03 T2-T3 | daemon wiring tests | 04 quiet-boot + armed-boot | VALIDATED |
+| F11 | Secret-free attributes | C8 / 03 T2 | producer pin (prohibited keys absent) | 04 negative assertion | VALIDATED |
+| F12 | llm-hop-tracing suite + manifest entry | R5 / 04 T1-T3 | n/a | the suite itself | VALIDATED |
+| F13 | docs/workflows/llm-tracing.md + Jaeger/Tempo targets | R6 / 05 T1 | n/a (docs leaf: cross-refs resolve) | n/a | VALIDATED |
 
 Delta protocol: if a returned leaf's tests diverge from this matrix, the
 LESSER of plan/tests is updated to reflect the GREATER (test deletion needs
