@@ -266,14 +266,14 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-e2e-memory-pipeline.md | PENDING | 0 | |
-| 01-scoping/orchestrator.md | PENDING | 0 | |
-| 02-defaults-on.md | PENDING | 0 | |
-| 03-stable-volatile-split.md | PENDING | 0 | |
-| 04-recall-telemetry.md | PENDING | 0 | |
-| 05-claim-status-stamping.md | PENDING | 0 | |
-| 06-doctor-memory.md | PENDING | 0 | |
-| 07-bridges-substitution-eval.md | PENDING | 0 | |
+| 00T-e2e-memory-pipeline.md | TESTS_VALIDATED | 1 | a78b5d47: 8/8 RED witnessed in-session at clean-HEAD worktree (default-on pipeline, C4 knobs, stable/volatile split, recall_outcomes row, doctor check, project isolation, chief-of-staff, Flag-3 fail-closed cell). Gate observation riding leaf-03: dispatcher renders recall as '## Relevant Context' user-message block (dispatcher.go:3610) - stable/volatile split must reconcile BOTH injection sites. |
+| 01-scoping/orchestrator.md | COMPLETE | 0 | 00T gate 7b775b70; leaf 01-scope-schema COMPLETE (9b1b94f9); leaf 03-agent-recall-wiring COMPLETE (4cefbfc9, self-committed by its session with my digest-gate fix + harness env included - verified content identical + scoped tests green post-commit). Scoping e2e FULLY GREEN x2 (F2 + chief-of-staff F3 + Flag-3 cell). Flag-2 RESOLVED: bot MemoryScope SUPERSEDED (private->project, shared->global, readonly->project PROPOSED - documented gap). Accepted deviations: chief-of-staff global maps to filter USER purview (committed predicate treats global-max as identity-less; resolveScopeInputs still returns ScopeGlobal per pin); late-discovery rescan + bounded suffix matcher (real routing gaps the gate exposed - adjacent-surface, sibling-flagged); task GetByID scope parity. BRANCH 01 COMPLETE - agent-groups leaf 05 UNBLOCKED. Digest-gate gap found en route: intent-analyzer activity feed built digests without digestContextEnabled() at 2 sites (env documented 'opts BOTH') - fixed in same commit. |
+| 02-defaults-on.md | COMPLETE | 1 | 5da890a1: all five knobs flipped w/ D1-D3 citations (field semantics kept, explicit false overrides); knowledge reads to BaselineTools (D3 minimal-consistent); models-less skip-Warn pin; Queue.DBPath default empty (F1 sandbox path; stock unchanged); template w/ drift annotations (no new unclassified); governance docs same wave. Suite overlays reviewed+accepted (memory-scoping pins l0=false - anticipated by its header; knowledge-assets explicit-false control). F1+C4 GREEN x2, gate untouched; adjacent suites green; docs/graphs checks green. |
+| 03-stable-volatile-split.md | COMPLETE | 1 | ac45aabe: split at BOTH injection sites (loop AddSectionWithStability before volatile fence; dispatcher user-message block reconciled), T2 budgets (volatile 2000 whole-item; stable 25%), memory_store stable arg. Deviations accepted: dispatcher recall MatchAny=true (strict-AND ungreenable for NL queries); single-hash headings (gate span helpers); volatile fence carries system note only - leaf-04 hooks read result.MemoryContext pre-render. Gate TestStableVolatileRecallSplit GREEN unmodified. |
+| 04-recall-telemetry.md | COMPLETE | 1 | 7e4748d4: RecallOutcomeLogger (verbatim C5 shape, >=8-token lowercase occurrence-counting cite - F5 fixture fact has 7 unique tokens so multiplicity is required, documented), 10MiB rotation riding existing calibration mechanism, disable-on-write-failure, gitignored; snapshot staged at BOTH render sites pre-render (loop assembly + chat-lane rescope), drained in the existing turn-terminal subscriber w/ shared LRU dedup, never fails the turn. Deviation reviewed+accepted: harness fakellm +19 lines bounded recall-turn arm (post-tool default made committed F5 fixture unreachable by any implementation; explicit SetPostToolText still wins). F5 GREEN x2 witnessed. T3/T4 unit coverage compile-blocked by sibling jev gate RED (pre-existing; e2e covers same path). |
+| 05-claim-status-stamping.md | COMPLETE | 1 | 052f1984: PROBE CONFIRMED leak in BOTH transitions (StoreVersioned(CreateVersion:true) left stale open rows searchable - 2 rows per search); fixed via stampMetadataInPlace (established pattern); pins 5/5 green; StoreVersioned now zero prod callers (kept, bridges-exercised). Verified in overlay (scope gate RED pins excluded - leaf-01 in flight). Pre-existing flake noted: ftstore_test.go:240 sub-ms timestamp ordering. |
+| 06-doctor-memory.md | COMPLETE | 1 | bf0e94ce: four contract checks (memory-capture/distill/recall/extras) + memory-pipeline summary line, warn-not-fail, report-only audited (zero writes, ?mode=ro, mtime-unchanged pin), stats via daemon RPC w/ mode=ro fallback. DEVIATION accepted: summary line required by committed F7 (asserts 'memory-pipeline' AND 'l0'; four names alone keep it RED - contract names render verbatim below). F7 GREEN witnessed; doctor suite green incl. sibling rows. |
+| 07-bridges-substitution-eval.md | COMPLETE | 0 | LIVE run complete (no commit per leaf): fixture tools/bridges-eval/fixtures/substitution-fixture.json (42 memories, 24 questions; 6/12 substitution questions starved from flat top-8 = 50% >= 30% two-hop requirement; controls flat-answerable 12/12), artifact docs/research/eval/bridges-substitution-eval.json (LIVE, llama-server b7730 on 127.0.0.1:8401, LFM2.5-8B-A1B Q4_K_M sha256 af0cc01b... owned + verified via /v1/models + killed after; both arms same fixture/model/config; 0 errors), decision record docs/research/eval/bridges-substitution-decision.md. DECISION per frozen rule: subst fact-coverage A 38.10% -> B 85.71% (+47.61pp >= 5pp PASS), control regression 0.00pp (control improved +8.33pp) -> BRIDGES STAY DEFAULT-ON, no flip-back, no config edit. Tokens +9.6% (2 bridges/query). ascii-check ok on all 3 new files; hermetic run + internal/eval tests green. |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -346,6 +346,58 @@ dispatched leaf document mid-execution.
   87.5%, ~10% more tokens). Leaf 07 owns the flip-back decision procedure.
 - Claim-leak caveat source: references/memory-extension-seams.md ("verify
   MarkResolved/RecordReview before reusing"). Leaf 05 verifies, then fixes.
+
+## Dated addenda (2026-11-03, agent-groups review integration - ride the
+## dispatch briefs verbatim)
+
+Three flags from the agent-groups tree's review of this plan
+(docs/plans/20261030-agent-groups/, session of 2026-10-31). The frozen-docs
+rule forbids editing leaves, so each flag below is DISPATCH CONTEXT for the
+named leaf - include it verbatim in that leaf's delegate_task context.
+
+### Flag 1 (cluster gossip rows default to global scope) - for 01-scope-schema
+
+Peer-node memories enter the gossip DB via MEMORY_STORED re-storage
+(internal/cluster/gossip_handler.go:161-220) and merge into local recall via
+mergeDualStoreRecent (manager.go:669) with NO project binding - under the
+backfill rule they land as scope=global and remain visible everywhere, so on
+a cluster the isolation guarantee silently degrades to "everything from other
+nodes is global." Resolution for THIS tree: stamp gossip-ingested rows (the
+dual-store write path in gossip_handler or the dual-store ingest seam) with a
+distinguishing metadata marker (e.g. scope=global + metadata["remote_node"])
+OR document cluster recall as explicitly unscoped in docs/workflows/memory.md
+- pick one in the leaf report; do NOT silently leave the default path.
+Single-daemon installs are unaffected.
+
+### Flag 2 (MemoryScope vocabulary collision) - for 03-agent-recall-wiring
+
+Bot/employee definitions ALREADY carry an unwired `MemoryScope` field
+(internal/bot/types.go:70, values private/shared/readonly) plus the built-but-
+unwired `bot.MemoryNamespace` / `ScopedMemoryManager` / `FilterBotMemories`
+machinery. This tree adds `memory_max_scope` (project/user/global) to the
+same definition surface. REQUIRED: reconcile or explicitly supersede - in the
+leaf report, state whether bot MemoryScope maps onto memory_max_scope
+(private->project, shared->global, readonly-> ??? - readonly has no
+equivalent; propose one or document the gap), and either mark MemoryScope
+SUPERSEDED in the bot definition docs or wire its mapping. Two overlapping
+vocabularies on one surface is the parallel-storage defect class the master
+Notes already warn about. Do NOT delete bot fields in this tree (bots are a
+separate surface) - supersede in docs, map in resolution.
+
+### Flag 3 (userID empty-match fails open) - for 01-scope-schema AND
+### 03-agent-recall-wiring
+
+C2's predicate "scope==user AND userID matches (empty userID matches in
+single-user)" fails OPEN if multiuser is enabled but identity resolution
+returns "" (a resolution bug, not a config choice): every user-scope row
+becomes recallable by every agent. Pin the INVERSE: when multiuser is
+ENABLED (cfg multiuser.enabled=true) and the resolved userID is EMPTY,
+user-scope rows are NOT recallable (fail closed). Empty-userID-matches
+applies ONLY when multiuser is disabled. Both leaves touch this predicate:
+01 implements it, 03's resolveScopeInputs must carry the multiuser-enabled
+bit alongside userID so the predicate can distinguish the two cases. Add a
+table-test cell for (multiuser=true, userID="") => user rows hidden.
+
 - Known pre-existing dead code the tree must NOT absorb silently:
   InjectContextBounded (internal/agent/conversation.go, zero callers) and the
   daemon-unused SetEpistemicHook agent seam - out of scope; flag in reports

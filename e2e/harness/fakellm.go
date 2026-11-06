@@ -642,6 +642,25 @@ func (f *FakeLLM) classifyLocked(body map[string]any) (ChatCompletionResponse, *
 				}},
 			}, "tool_calls"), nil
 		}
+		// Recall turns (leaf 04 C5 gate fixture contract): an executor
+		// turn whose prompt carries injected memory context is a RECALL
+		// turn — its scripted reply is the pinned chat text (the pinChat
+		// helper's documented contract: "scripts the plain chat
+		// completion (the RouteToAgent path's reply)"). Without this arm
+		// the post-tool default ("done") served every post-store turn,
+		// and the memory-defaults gate fixtures that pin a citing reply
+		// over a recall turn could never observe their scripted text.
+		// Explicit SetPostToolText still wins for suites that script the
+		// post-tool reply directly: those calls set postToolText AFTER
+		// the default, and this arm only fires when the prompt carries
+		// injected memory (a recall turn) — never for plain post-tool
+		// work turns.
+		if f.chatText != "" &&
+			(strings.Contains(all, "Memory (standing)") || strings.Contains(all, "<memory-context>")) {
+			return envelope(body, ResponseMsg{
+				Role: "assistant", Content: f.chatText,
+			}, "stop"), nil
+		}
 		return envelope(body, ResponseMsg{
 			Role: "assistant", Content: f.postToolText,
 		}, "stop"), nil

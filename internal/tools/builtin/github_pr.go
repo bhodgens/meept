@@ -179,12 +179,12 @@ func (t *GitHubPRCreateTool) Execute(ctx context.Context, args map[string]any) (
 	req := github.CreatePullRequest{
 		Base:  prStringArg(args, "base"),
 		Head:  head,
-		Title: github.String(title),
-		Body:  github.String(prStringArg(args, "body")),
+		Title: new(title),
+		Body:  new(prStringArg(args, "body")),
 	}
 	draft, hasDraft := prBoolArg(args, "draft")
 	if hasDraft {
-		req.Draft = github.Bool(draft)
+		req.Draft = new(draft)
 	}
 
 	key := effects.EffectKey("github_pr_create", owner, repo, head, title)
@@ -437,8 +437,8 @@ func (t *GitHubPRReviewTool) Execute(ctx context.Context, args map[string]any) (
 	var attemptErr error
 	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, func(ctx context.Context) (json.RawMessage, error) {
 		r, resp, apiErr := client.PullRequests.CreateReview(ctx, owner, repo, prNum, &github.PullRequestReviewRequest{
-			Body:  github.String(body),
-			Event: github.String(event),
+			Body:  new(body),
+			Event: new(event),
 		})
 		if apiErr != nil {
 			if isClientAPIError(apiErr) {

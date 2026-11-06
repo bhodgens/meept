@@ -264,10 +264,10 @@ every dispatch context). Branch-specific additions:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00-research-tiers | PENDING | 0 | |
-| 01-working-tier-store | PENDING | 0 | |
-| 02-policy-automation | PENDING | 0 | |
-| 03-demotion | PENDING | 0 | |
+| 00-research-tiers | COMPLETE | 1 | landed b8b138c6 (findings doc, reviewed) |
+| 01-working-tier-store | COMPLETE | 1 | landed 14b21b5e (issue 81) |
+| 02-policy-automation | COMPLETE | 1 | landed f8d2bfd6 (issue 81) |
+| 03-demotion | COMPLETE | 1 | landed 9872de89 (issue 81) |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -294,9 +294,9 @@ In-leaf TDD gate; matrix validated at REVIEW time in-session.
 
 | # | Feature (from plan) | Source (leaf/spec) | Unit tests | E2E tests | Status |
 |---|---------------------|--------------------|-----------|-----------|--------|
-| F4 | working tier store + recall bound | 01 | internal/memory/working tests | context-memory-engine | PENDING |
-| F5 | automated eviction + compression policies | 02 | tierpolicy tests | context-memory-engine | PENDING |
-| F6 | semantic->episodic demotion | 03 | demotion tests | context-memory-engine | PENDING |
+| F4 | working tier store + recall bound | 01 | internal/memory/working tests | context-memory-engine | VALIDATED |
+| F5 | automated eviction + compression policies | 02 | tierpolicy tests | context-memory-engine | VALIDATED |
+| F6 | semantic->episodic demotion | 03 | demotion tests | context-memory-engine | VALIDATED |
 
 Statuses: PENDING | DELTA | VALIDATED
 

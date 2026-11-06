@@ -316,10 +316,32 @@ func (s *DualStore) publishMemoryGossip(pub GossipPublisher, mem *Memory) {
 }
 
 // StoreRemoteMemory writes a memory from a peer node to gossip.db.
+//
+// Flag-1 resolution (01-scope-schema, master.md dated addenda 2026-11-03):
+// gossip-ingested rows are STAMPED, not left to the backfill default. The
+// ingest seam stamps scope=global (explicit, not an accident of the legacy
+// backfill) plus metadata["remote_node"]=<source node>, so cluster recall
+// stays today's behavior (peer memories visible everywhere — cluster recall
+// is explicitly UNscoped across nodes, see docs/workflows/memory.md) while
+// the marker makes the provenance queryable and keeps the isolation
+// guarantee from silently degrading without a trace. The distinguishing
+// marker lets leaf 02/03 recall wiring treat remote rows differently if
+// cluster scoping is designed later.
 func (s *DualStore) StoreRemoteMemory(ctx context.Context, mem *Memory, sourceNode string) error {
 	if sourceNode == "" {
 		return fmt.Errorf("dual store: StoreRemoteMemory requires non-empty sourceNode")
 	}
+
+	// Stamp the gossip-ingested row (portable metadata truth). Explicit
+	// keys win: a peer that already carried a scope keeps its value, but
+	// remote_node is always set to THIS hop's source node.
+	if mem.Metadata == nil {
+		mem.Metadata = make(map[string]any)
+	}
+	if _, exists := mem.Metadata["scope"]; !exists {
+		mem.Metadata["scope"] = string(ScopeGlobal)
+	}
+	mem.Metadata["remote_node"] = sourceNode
 
 	s.mu.RLock()
 	db := s.gossipDB

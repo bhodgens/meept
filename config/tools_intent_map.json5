@@ -1,0 +1,25 @@
+// Deterministic intent->toolset map (branch 03, leaf 03; design §3.3 in
+// docs/research/dynamic-tools-design.md). One entry per valid intent
+// category (internal/agent/intent_analyzer.go:372 — research |
+// implementation | investigation | fix | clarification | other | quickplan);
+// unknown/missing categories (and quickplan, which has no dedicated entry)
+// fall through to "_default".
+//
+// Names in each entry are INTERSECTED with the agent's role ceiling
+// (FilteredToolRegistry) at lookup time and CAPPED at the predicted budget
+// ([agent.tools] predicted_budget, default 25; search mode passes 0 and gets
+// no predicted tools — core + meta-tools only). Order within an entry is
+// config order after intersection (stable, deterministic: same inputs give
+// the same slice). Names not in the registry universe are dropped at load
+// with one warn naming the entry; a malformed file degrades to the
+// "_default"-only map (never an LLM fallback, never a panic).
+{
+  "_default": ["memory_search"],
+  "research":       ["web_search", "web_fetch", "transcript_fetch", "json_extract", "memory_search", "skills_load"],
+  "implementation": ["shell", "file_read", "file_write", "file_edit", "git_overview", "build", "test"],
+  "investigation":  ["shell", "file_read", "memory_search", "grep_files"],
+  "fix":            ["shell", "file_read", "file_edit", "grep_files", "git_overview"],
+  "clarification":  ["memory_search"],
+  "other":          ["memory_search"]
+  // quickplan: inherits "_default" (planning turns need no extra tools)
+}

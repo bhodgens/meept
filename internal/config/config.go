@@ -109,6 +109,19 @@ func finalizeLoadedConfig(cfg *Config) (*Config, error) {
 	// normalization so every consumer sees normalized values.
 	NormalizeTierPolicyDefaults(&cfg.LLM.Tiers)
 
+	// Clamp llm.cache.semantic to defaults (llm-serving-tiers leaf 02:
+	// threshold -> 0.95 per the R0 addendum, max_entries -> 1024,
+	// negative ttl_min -> 0). Load-boundary normalization so the daemon
+	// wiring sees normalized values.
+	NormalizeSemanticCacheDefaults(&cfg.LLM.Cache.Semantic)
+
+	// Clamp memory.tiers to defaults (wiring-gap leaf 03-tierpolicy-
+	// daemon T1: an enabled config resolves unset ratios/interval/
+	// retention/demotion thresholds; a disabled config stays a zero
+	// value). Load-boundary normalization so the daemon adapter sees
+	// final values.
+	NormalizeMemoryTiersDefaults(&cfg.Memory.Tiers)
+
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every
 	// consumer sees an absolute path (evolver plan-sink leaf 01).
@@ -244,6 +257,17 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// Clamp llm.tiers to defaults (llm-serving-tiers leaf 01, Contract
 	// C1). Same load-boundary rationale as finalizeLoadedConfig above.
 	NormalizeTierPolicyDefaults(&cfg.LLM.Tiers)
+
+	// Clamp llm.cache.semantic to defaults (llm-serving-tiers leaf 02:
+	// threshold -> 0.95 per the R0 addendum, max_entries -> 1024,
+	// negative ttl_min -> 0). Load-boundary normalization so the daemon
+	// wiring sees normalized values.
+	NormalizeSemanticCacheDefaults(&cfg.LLM.Cache.Semantic)
+
+	// Clamp memory.tiers to defaults (wiring-gap leaf 03-tierpolicy-
+	// daemon T1). Same load-boundary rationale as finalizeLoadedConfig
+	// above.
+	NormalizeMemoryTiersDefaults(&cfg.Memory.Tiers)
 
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every

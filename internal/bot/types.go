@@ -17,6 +17,26 @@ const (
 
 type MemoryScope string
 
+// Flag-2 reconciliation (docs/plans/20261030-memory-second-brain master.md
+// dated addenda; leaf 03-agent-recall-wiring): the agent-definition surface
+// now carries `memory_max_scope` over the memory.Scope vocabulary
+// (internal/memory: project/user/global). This bot MemoryScope vocabulary is
+// SUPERSEDED by that declaration for scope purposes; the fields remain for
+// backward compatibility and are NOT deleted (bots are a separate surface).
+// Mapping when reading a bot definition's memory posture:
+//
+//	MemoryScopePrivate  -> memory.ScopeProject  (isolated to the bot's own
+//	                       project; the bot_id namespace additionally tags
+//	                       rows — ScopedMemoryManager, untouched)
+//	MemoryScopeShared   -> memory.ScopeGlobal   (cross-project recall)
+//	MemoryScopeReadOnly -> memory.ScopeProject  (PROPOSED mapping; there is
+//	                       no read-only equivalent in the Scope vocabulary —
+//	                       recall breadth is project, write suppression is a
+//	                       separate tool-permission concern, not a scope)
+//
+// Scope GOVERNANCE (who may recall what) now flows exclusively through
+// memory_max_scope + resolveScopeInputs; MemoryScope here no longer gates
+// recall.
 const (
 	MemoryScopePrivate  MemoryScope = "private"
 	MemoryScopeShared   MemoryScope = "shared"

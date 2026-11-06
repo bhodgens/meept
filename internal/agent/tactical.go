@@ -651,7 +651,6 @@ func allotmentAgentID(steps []*task.TaskStep) string {
 	return ""
 }
 
-
 // flattenWithContinuations rewrites a batched ready wave in place: batch 0
 // keeps its original descriptions; batch k (1-indexed) gets its
 // descriptions wrapped with ContinuationDescription(desc, k, N) where
@@ -1408,8 +1407,12 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		// consumes it for routing in this tree.
 		SuggestedNextHint string `json:"suggested_next_hint,omitempty"`
 	}
-	if err := json.Unmarshal(result, &execResult); err != nil {
-		ts.logger.Debug("Failed to parse execution result", "step_id", step.ID, "error", err)
+	// AGENT-14 FIX: Guard against nil result passed to json.Unmarshal,
+	// which can return a misleading error or panic depending on the decoder.
+	if result != nil {
+		if err := json.Unmarshal(result, &execResult); err != nil {
+			ts.logger.Debug("Failed to parse execution result", "step_id", step.ID, "error", err)
+		}
 	}
 
 	// Update step with evidence before validation. Tool-issued evidence
@@ -2765,7 +2768,6 @@ func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
 	return errcls.IsRateLimitErrorMessage(errMsg)
 }
 
-
 // isQuotaClassFailure classifies a serialized step-job failure as
 // quota-class, the trigger for quota-aware deferral. Two quota shapes
 // survive the message-bus stringification:
@@ -2840,15 +2842,24 @@ func (ts *TacticalScheduler) isRetryableError(errMsg string) bool {
 	return false
 }
 
-
 // runValidationGateIfDue increments the validation counter for a task and runs
 // the validation gate if the interval has been reached.
+// AGENT-13 FIX: Clean up entries for tasks that are no longer active to prevent
+// unbounded map growth.
 func (ts *TacticalScheduler) runValidationGateIfDue(ctx context.Context, taskID string) {
 	ts.validationGateMu.Lock()
 	defer ts.validationGateMu.Unlock()
 
 	if ts.validationGateInterval <= 0 {
 		return // Validation gate disabled
+	}
+
+	// Clean up stale entries (tasks that are completed or failed)
+	if t, err := ts.taskStore.GetByID(taskID); err == nil && t != nil {
+		if t.State.IsTerminal() {
+			delete(ts.validationGateCounter, taskID)
+			return
+		}
 	}
 
 	ts.validationGateCounter[taskID]++

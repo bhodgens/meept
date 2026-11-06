@@ -258,6 +258,7 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     error           INTEGER NOT NULL DEFAULT 0,
     error_message   TEXT NOT NULL DEFAULT '',
     latency_ms      INTEGER NOT NULL DEFAULT 0,
+    ttft_ms         INTEGER NOT NULL DEFAULT -1,
     duration        REAL NOT NULL DEFAULT 0,
     trace_id        TEXT NOT NULL DEFAULT '',
     span_id         TEXT NOT NULL DEFAULT ''
@@ -518,6 +519,18 @@ ALTER TABLE llm_calls ADD COLUMN span_id TEXT NOT NULL DEFAULT '';`,
 			Name:    "idx_llm_calls_trace index",
 			SQL:     "CREATE INDEX IF NOT EXISTS idx_llm_calls_trace ON llm_calls(trace_id)",
 			Guard:   indexMissingGuard("idx_llm_calls_trace"),
+		},
+		{
+			// TTFT instrumentation leaf (llm-serving-tiers 04): the
+			// time-to-first-token column. INTEGER milliseconds from request
+			// dispatch to the first content delta; -1 = not measured
+			// (non-streaming calls, cache hits, errors). Existing rows get
+			// DEFAULT -1 (never measured). Fresh databases get the column
+			// inline in the CREATE script, making the guard a no-op there.
+			Version: 9,
+			Name:    "llm_calls.ttft_ms",
+			SQL:     "ALTER TABLE llm_calls ADD COLUMN ttft_ms INTEGER NOT NULL DEFAULT -1",
+			Guard:   columnMissingGuard("llm_calls", "ttft_ms"),
 		},
 	})
 	if err != nil {
@@ -799,9 +812,15 @@ type LLMCallRecord struct {
 	IsError             bool
 	ErrorMessage        string
 	LatencyMs           int64
-	DurationMs          float64 // wall-clock duration (duplicate of LatencyMs kept for schema parity)
-	TraceID             string  // 32-char lowercase hex; "" when no WithTraceID scope
-	SpanID              string  // 16-char lowercase hex; fresh per call
+	// TTFTMS is the time-to-first-token: milliseconds from request
+	// dispatch to the first streamed content delta (llm-serving-tiers
+	// leaf 04). -1 = not measured (non-streaming calls, cache hits,
+	// errors); the schema default keeps legacy/unmeasured rows at -1 so
+	// aggregates can exclude them explicitly.
+	TTFTMS     int64
+	DurationMs float64 // wall-clock duration (duplicate of LatencyMs kept for schema parity)
+	TraceID    string  // 32-char lowercase hex; "" when no WithTraceID scope
+	SpanID     string  // 16-char lowercase hex; fresh per call
 }
 
 // RecordLLMCall appends one LLM call to llm_calls and updates the
@@ -824,12 +843,12 @@ func (s *Store) RecordLLMCall(record LLMCallRecord) {
 		`INSERT INTO llm_calls
 			(timestamp, provider, model_id, agent_id, session_id, tokens_sent,
 			 tokens_received, tokens_cached, reasoning_tokens, cache_creation_tokens,
-			 error, error_message, latency_ms, duration, trace_id, span_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 error, error_message, latency_ms, ttft_ms, duration, trace_id, span_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts.UTC().Format(time.RFC3339), record.Provider, record.ModelID, record.AgentID,
 		record.SessionID, record.TokensSent, record.TokensRecv, record.TokensCached,
 		record.ReasoningTokens, record.CacheCreationTokens, isErr,
-		record.ErrorMessage, record.LatencyMs, record.DurationMs,
+		record.ErrorMessage, record.LatencyMs, record.TTFTMS, record.DurationMs,
 		record.TraceID, record.SpanID,
 	)
 	if err != nil {
@@ -889,6 +908,10 @@ type LLMUsageRow struct {
 	TokensRecv   int64   `db:"tokens_received" json:"tokens_received"`
 	TokensCached int64   `db:"tokens_cached" json:"tokens_cached"`
 	AvgLatencyMs float64 `db:"avg_latency_ms" json:"avg_latency_ms"`
+	// AvgTTFTMs averages ONLY measured calls (ttft_ms >= 0); the -1
+	// "not measured" sentinel rows never drag the average down. -1 when
+	// no measured call exists in the window.
+	AvgTTFTMs float64 `db:"avg_ttft_ms" json:"avg_ttft_ms"`
 }
 
 // QueryLLMCallUsage aggregates llm_calls over a window. When groupByAgent
@@ -906,12 +929,17 @@ func (s *Store) QueryLLMCallUsage(from, to time.Time, groupByAgent bool) ([]LLMU
 		groupExpr = "provider, agent_id"
 	}
 	// groupExpr/agentExpr are built from fixed constants above, never user input.
+	// avg_ttft_ms averages only MEASURED calls (ttft_ms >= 0): the -1
+	// sentinel means "not measured" (non-streaming, cache hit, error),
+	// not "instant", so unmeasured rows must never drag the average
+	// toward 0. COALESCE keeps the -1 no-measurements contract.
 	query := fmt.Sprintf(`SELECT provider, %s, COUNT(*) AS calls,
 			SUM(error) AS errors,
 			SUM(tokens_sent) AS tokens_sent,
 			SUM(tokens_received) AS tokens_received,
 			SUM(tokens_cached) AS tokens_cached,
-			AVG(latency_ms) AS avg_latency_ms
+			AVG(latency_ms) AS avg_latency_ms,
+			COALESCE(AVG(CASE WHEN ttft_ms >= 0 THEN ttft_ms END), -1) AS avg_ttft_ms
 		FROM llm_calls
 		WHERE timestamp >= ? AND timestamp <= ?
 		GROUP BY %s

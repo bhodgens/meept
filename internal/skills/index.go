@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -65,6 +66,16 @@ type SkillIndex struct {
 	entries map[string]*SkillIndexEntry // normalized name -> entry
 	byTag   map[string][]*SkillIndexEntry
 	byCap   map[string][]*SkillIndexEntry
+	// dirty flags that the on-disk skill set changed since the last
+	// Refresh. Set by MarkDirty (e.g. a write-path change notifier) and
+	// cleared by the next Refresh.
+	dirty bool
+	// rescan, when installed via SetRescanSource, returns the fresh
+	// on-disk skill tiers so Refresh can rebuild the index in place. A
+	// nil rescan (the default) makes Refresh a no-op beyond clearing the
+	// dirty flag, so a bare index stays inert until a discovery source is
+	// wired. Refresh runs it OUTSIDE the index mutex (it does I/O).
+	rescan func() ([]*SkillIndexEntry, error)
 }
 
 // NewSkillIndex creates a new empty skill index.
@@ -84,7 +95,13 @@ func (idx *SkillIndex) Index(entry *SkillIndexEntry) {
 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+	idx.indexLocked(entry)
+}
 
+// indexLocked adds or updates an entry; the caller must hold idx.mu (write).
+// It is the single maintenance path shared by Index and Refresh, so the
+// in-place refresh never forks a second rebuild.
+func (idx *SkillIndex) indexLocked(entry *SkillIndexEntry) {
 	key := normalizeName(entry.Name)
 
 	// Remove existing entry from secondary indices if present
@@ -252,6 +269,96 @@ func (idx *SkillIndex) Clear() {
 	idx.entries = make(map[string]*SkillIndexEntry)
 	idx.byTag = make(map[string][]*SkillIndexEntry)
 	idx.byCap = make(map[string][]*SkillIndexEntry)
+}
+
+// MarkDirty flags that the on-disk skill set changed since the last
+// Refresh. It is O(1): it only sets the dirty flag under the index mutex,
+// it does not rescan. Branch 2's write-path change notifier
+// (lifecycle.Writer.SetChangeNotifier) is the in-tree caller that arrives
+// after this leaf; marking is a cross-branch contract, so it lands now.
+func (idx *SkillIndex) MarkDirty() {
+	if idx == nil {
+		return
+	}
+	idx.mu.Lock()
+	idx.dirty = true
+	idx.mu.Unlock()
+}
+
+// IsDirty reports whether MarkDirty has been observed since the last
+// Refresh. A nil receiver reads clean so miswired indexes are inert.
+func (idx *SkillIndex) IsDirty() bool {
+	if idx == nil {
+		return false
+	}
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.dirty
+}
+
+// SetRescanSource installs the discovery source that Refresh uses to read
+// the current on-disk skill tiers. fn returns freshly discovered metadata
+// entries and may do I/O; Refresh runs it OUTSIDE the index mutex, then
+// rebuilds the index in place. A nil fn (the default) leaves refresh inert:
+// Refresh still settles the dirty flag but rescans nothing. The setter is
+// nil-guarded; a nil receiver or nil fn is a no-op.
+func (idx *SkillIndex) SetRescanSource(fn func() ([]*SkillIndexEntry, error)) {
+	if idx == nil {
+		return
+	}
+	idx.mu.Lock()
+	idx.rescan = fn
+	idx.mu.Unlock()
+}
+
+// Refresh rescans the configured skill tiers and rebuilds the index in place.
+// It reuses the shared indexLocked maintenance path (the same primitive Index
+// uses), so a refresh that observes an unchanged on-disk set reinserts
+// byte-identical entries and downstream consumers (CapabilityIndex, the
+// loop-economics stable prefix) see no change. It clears the dirty flag and
+// returns a wrapped error only when the tier rescan itself fails. The rescan
+// (the only I/O) runs before the write lock is taken, so the mutex is never
+// held across I/O.
+func (idx *SkillIndex) Refresh() error {
+	if idx == nil {
+		return nil
+	}
+
+	// Snapshot the rescan hook without holding the lock across its I/O.
+	idx.mu.RLock()
+	rescan := idx.rescan
+	idx.mu.RUnlock()
+
+	if rescan == nil {
+		// No tiers wired: settle the flag and stop. Refresh is a no-op
+		// beyond clearing dirty, preserving the byte-stable invariant.
+		idx.mu.Lock()
+		idx.dirty = false
+		idx.mu.Unlock()
+		return nil
+	}
+
+	entries, err := rescan()
+	if err != nil {
+		// Leave the flag set so a later turn retries the refresh.
+		return fmt.Errorf("skill index rescan: %w", err)
+	}
+
+	// Rebuild in place under the write lock through the shared path.
+	idx.mu.Lock()
+	idx.entries = make(map[string]*SkillIndexEntry)
+	idx.byTag = make(map[string][]*SkillIndexEntry)
+	idx.byCap = make(map[string][]*SkillIndexEntry)
+	for _, e := range entries {
+		if e == nil || e.Name == "" {
+			continue
+		}
+		idx.indexLocked(e)
+	}
+	idx.dirty = false
+	idx.mu.Unlock()
+
+	return nil
 }
 
 // AllTags returns all unique tags across all indexed entries.

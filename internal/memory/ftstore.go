@@ -346,9 +346,49 @@ func (s *SQLiteFTSStore) migrationRegistry() (*migrate.Registry, error) {
 		addCol(3, "add is_current", "is_current", "INTEGER", "DEFAULT 1"),
 		addCol(4, "add version", "version", "INTEGER", "DEFAULT 1"),
 	}
+	// search_text KEEPS version 5: databases created before the scope
+	// column recorded user_version=5 for it, and Apply skips steps
+	// <= current — renumbering it would silently skip the scope ALTER on
+	// every existing search_text store. The scope column takes the next
+	// free slot per store shape.
 	if s.searchTextColumn {
 		steps = append(steps, addCol(5, "add search_text", "search_text", "TEXT", "DEFAULT ''"))
 	}
+	scopeVersion := len(steps) + 1
+	// Scope column (01-scope-schema T2): recall-scope defense-in-depth.
+	// Every legacy row backfills to 'global' (the column default covers
+	// fresh ALTERs; the explicit UPDATE pins rows predating the column
+	// so no existing memory disappears from recall). The portable truth
+	// stays metadata["scope"] (dual-store/memvid paths read metadata).
+	// NEVER touch the FTS index table here — content-table column only.
+	steps = append(steps, addCol(scopeVersion, "add scope", "scope", "TEXT", "NOT NULL DEFAULT 'global'"))
+	// Backfill: the explicit UPDATE is the pinned backfill contract for
+	// legacy databases whose rows predate the column entirely (the ALTER's
+	// DEFAULT covers fresh adds). Idempotent by construction: the guard
+	// skips when no row is pending, and the WHERE clause is a no-op after.
+	steps = append(steps, migrate.Migration{
+		Version: scopeVersion + 1,
+		Name:    "backfill scope to global",
+		SQL:     fmt.Sprintf("UPDATE %s SET scope = 'global' WHERE scope IS NULL OR scope = ''", s.config.TableName),
+		Guard: func(db *sql.DB) (bool, error) {
+			exists, err := migrate.ColumnExists(db, s.config.TableName, "scope")
+			if err != nil {
+				return false, err
+			}
+			if !exists {
+				// Table absent (fresh create runs after migrations) —
+				// skip; the fresh DDL already carries the column.
+				return false, nil
+			}
+			var pending int
+			if err := db.QueryRow(fmt.Sprintf(
+				`SELECT COUNT(*) FROM %s WHERE scope IS NULL OR scope = ''`,
+				s.config.TableName)).Scan(&pending); err != nil {
+				return false, err
+			}
+			return pending > 0, nil
+		},
+	})
 	return migrate.NewRegistry("memory/"+s.config.TableName, steps)
 }
 
@@ -643,14 +683,18 @@ func (s *SQLiteFTSStore) ScanResults(rows *sql.Rows, hasRank bool, cfg ScanRowCo
 			source = fmt.Sprintf(source, category)
 		}
 
+		metadata := ParseMetadata(metaJSON)
 		results = append(results, MemoryResult{
 			Memory: Memory{
 				ID:        id,
 				Content:   content,
 				Type:      memoryTypeFromCategory(category, cfg.MemoryType),
 				Category:  category,
-				Metadata:  ParseMetadata(metaJSON),
+				Metadata:  metadata,
 				CreatedAt: createdAt,
+				// Scope recovery (01-scope-schema): metadata["scope"] is
+				// the portable truth; missing marker = legacy -> global.
+				Scope: scopeFromMetadata(metadata),
 			},
 			RelevanceScore: sqlite.NormalizeRank(rank),
 			Source:         source,

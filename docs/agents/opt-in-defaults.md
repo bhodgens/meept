@@ -4,6 +4,34 @@ Cross-cutting features that are deliberately OFF by default; flipping any of
 these defaults is a product decision, not a code cleanup. Referenced from the
 root AGENTS.md. Update both in the same commit per the root maintenance rule.
 
+## Memory subsystem defaults are ON (authorized, 2026-10-30)
+
+The five memory subsystem defaults are TRUE per the memory second-brain
+product decisions (plan `docs/plans/20261030-memory-second-brain/master.md`,
+User decisions table, frozen 2026-10-30 — that plan is the authorization for
+this flip):
+
+- **D1: `memory.bridges.enabled` = true.** "Q1 a" — bridging facts
+  (IndexRAG stage 2) generate by default now; the leaf-07 substitution
+  experiment may flip it back if the eval loses.
+- **D3: full default-on** ("sure", chose "enable it all by default"):
+  - `memory.l0_enabled` = true — every turn records L0 lines and distills
+    into L1 claims + L2 scenes on the persistent queue.
+  - `memory.usefulness.enabled` = true — consolidation evicts by
+    usefulness score (net votes <= -2 first, then the bottom floor).
+  - `memory.epistemic.ambient_extraction.enabled` = true — turn-side
+    ambient claims land in the human review queue as `status=auto`.
+  - `memory.knowledge.enabled` = true — the knowledge_* tools register out
+    of the box (on-demand tool access; nothing ambiently injected).
+
+These are OPT-OUT knobs now: every one still honors an explicit `false` in
+the user's config. Flipping any of them back OFF by default is again a
+product decision. Not flipped (still opt-in, deliberate):
+`memory.conflict.enabled` (an extra LLM call per extraction batch),
+`memory.tiers.enabled` (PROPOSED below). Models-less hosts degrade by
+SKIP-Warn (one Warn per distill-worker cycle, jobs stay queued, L0 lines
+preserved) — documented in docs/workflows/memory.md.
+
 ## State mode is per-skill opt-in
 
 `SKILL.state` execution (`internal/agent/skill_state.go`) activates only when
@@ -37,6 +65,22 @@ draft→seal→compile planning pipeline. When false, the legacy JSON
 interview: the one-shot `task.interview` path stays only for the legacy
 pipeline. `plan.seal` and `plan.draft` are RPC-only, never a bus topic.
 See docs/workflows/agent-orchestration.md ("Plan compiler pipeline").
+
+## Fresh-context critic flags are on by default (disable-form keys)
+
+The three plan-critic features (`fresh_critic_disabled`,
+`hostile_critic_disabled`, `interview_options_disabled` in `[plans]`)
+default ON per the 2026-11-02 operator decision and are expressed as
+INVERTED disable-form keys: absent = enabled, explicit true = disabled
+(a true-by-default bool cannot be expressed with an enable-named field;
+the original enable-named keys shipped dark for one day and were
+renamed). With defaults on and the `hostile_critic_model` slot empty
+(the shipped state), a TierComplex plan still cannot self-seal: the
+hostile pass skips at runtime (reason `no_model`), the outcome stamps
+`hostile_skipped`, and the draft waits at the human seal - intentional,
+per the no-clean-seal-without-hostile-reader property. Flipping a
+default back is a product decision, not a code cleanup. See
+docs/workflows/agent-orchestration.md ("Fresh-Context Plan Critic").
 
 ## OTLP metrics export is opt-in
 
@@ -85,6 +129,27 @@ from daemon.go AFTER the plan system initializes — NOT inside
 inline gate was always false; found by the wiki smoke test, 2026-08-29).
 Keep this ordering if you refactor daemon startup.
 
+## Agent groups default management is opt-in (fail-closed)
+
+Two frozen defaults from the agent-groups tree
+(docs/plans/20261030-agent-groups/master.md, decisions D7 and D8 -
+that plan is the product-decision authorization):
+
+- **D7: `security.groups.default_managed` defaults FALSE.** Agents with no
+  group membership and no binding keep TODAY's behavior (spec allowlist
+  only, legacy empty-means-all registry semantics, call-time gate skipped).
+  Setting it true routes those agents through the fail-closed `default`
+  policy and arms the membership file backstop. Flipping it on an install
+  with ungrouped agents is an isolation-posture upgrade that WILL shrink
+  their access; treat it as the product decision it is.
+- **D8: an empty effective allowlist on a MANAGED subject means DENY-ALL.**
+  When a group policy is active for a subject, zero resolved allowed tools
+  denies everything at dispatch AND call time; `FilteredToolRegistry`'s
+  legacy empty=all behavior must never fire for a managed subject. This is
+  the fail-closed reading, not an opt-in: the "default" that stays fixed is
+  the legacy empty=all behavior for UNMANAGED subjects only (D7's false
+  posture).
+
 ## Automated memory-tier eviction is PROPOSED for default-on (NOT yet flipped)
 
 `memory.tiers.enabled` (tree 02 policy-automation leaf) ships default FALSE
@@ -120,3 +185,33 @@ default remains false until a product owner accepts this proposal.
   stops cleanly on cancel.
 - **Decision owner:** meept maintainers (product). Status: PROPOSED,
   2026-10-31, tree 02 leaf 02.
+
+## As-needed tool exposure is opt-in (default OFF)
+
+`[agent.tools] dynamic_tool_exposure` (token-efficiency branch 03) is FALSE
+by default. When off, tool definitions are byte-identical legacy
+(`full`/`indexed` only) - the as-needed predicted/search exposure engine
+(`tool_exposure` knob, `internal/agent/tool_exposure.go`) is entirely inert.
+
+- **What flips:** `dynamic_tool_exposure = true` enables the predicted
+  (default) / search exposure modes. The mode knob `tool_exposure`
+  (full | indexed | predicted | search) and `predicted_budget` (N, default
+  25) only take effect while the flag is on; with it off they silently
+  downgrade to indexed legacy (one warn).
+- **Capability gate (hard rule):** `search` mode is additionally gated on
+  the active model being frontier-class (the `"frontier"` capability tag,
+  `llm.CapFrontier`). A non-frontier active model is downgraded to
+  `predicted` with ONE warn line naming the model; unknown models are
+  treated as non-frontier (fail-safe).
+- **The 5.3 warning (verbatim, required in the config template, this doc,
+  and the AGENT.md frontmatter doc):** search mode requires a
+  frontier-class model. Do NOT enable it for small/local models - they fail
+  to use the search/view round-trip reliably (live-smoke evidence:
+  always-full promotions 2026-09-07/09-12,
+  `internal/config/schema.go:1959-1971`). The daemon downgrades search to
+  predicted automatically for non-frontier models.
+- **Rollback:** set `dynamic_tool_exposure = false` - one config key,
+  no data migration, behavior returns to byte-identical legacy.
+
+User-facing how-to: `docs/workflows/dynamic-tools.md`. Design contract:
+`docs/research/dynamic-tools-design.md`.

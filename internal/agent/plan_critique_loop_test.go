@@ -604,6 +604,96 @@ func TestCritiqueFlow_CompileRejectionRecovered(t *testing.T) {
 	}
 }
 
+// TestCriticLoop_DefaultsOnHostileSkippedSelfSealRefused pins the
+// post-flip default state (2026-11-02 operator decision): fresh-critic
+// and hostile flags ON (the production defaults via the inverted
+// disable-form config keys), hostile_critic_model slot empty (nil
+// hostile chatter - the shipped state), selfSealEnabled=true
+// quick_plan. The C5 gate skips the hostile pass every round (reason
+// no_model), the outcome stamps hostile_skipped, and the self-seal path
+// REFUSES: the result is await_seal, never handled - the draft waits at
+// the human seal (the EGM no-clean-seal-without-hostile-reader
+// property).
+func TestCriticLoop_DefaultsOnHostileSkippedSelfSealRefused(t *testing.T) {
+	store := newCritiqueMetricStore(t)
+	chatter := &repairCaptureChatter{
+		resps: []string{
+			compileableDraft("Avatar upload"), // draft fill
+			// Fresh critic round 1: clean, WITH the C4 paraphrase
+			// envelope (a bare objections array is a synthetic blocking
+			// objection per C4).
+			`{"paraphrase":{"proposes":"Upload avatars end to end.","system_context":"Single-user app with an existing avatar pipeline."},"objections":[]}`,
+		},
+	}
+	sp := newCritiqueTestPlanner(t, chatter, true, 2)
+	// Production defaults now: fresh critic on, hostile on, NO hostile
+	// chatter wired (nil - the shipped empty hostile_critic_model slot).
+	sp.SetFreshCriticEnabled(true)
+	sp.SetHostileCriticEnabled(true)
+	sp.metricsStore = store
+	tsk := seedCritiqueTask(t, sp, "task-critique-default-hostile")
+
+	res, err := sp.PlanCritiqueFlow(context.Background(), critiqueFlowRequest(tsk, "quick_plan"), &PlanCritiqueInput{})
+	if err != nil {
+		t.Fatalf("PlanCritiqueFlow: %v", err)
+	}
+	if res.Action != critiqueActionAwaitSeal {
+		t.Fatalf("action = %q, want %q (a skipped hostile pass must refuse the self-seal even on a clean round)", res.Action, critiqueActionAwaitSeal)
+	}
+	if res.RoundsUsed != 1 {
+		t.Errorf("rounds_used = %d, want 1 (clean on round 1)", res.RoundsUsed)
+	}
+
+	// 2 LLM calls: draft fill + one fresh-critic pass. The hostile pass
+	// is skipped at the gate, so it spends NO call and never panics on
+	// the nil hostile chatter.
+	if got := chatter.callCount(); got != 2 {
+		t.Errorf("LLM calls = %d, want exactly 2 (draft + fresh critic; hostile skipped)", got)
+	}
+
+	fresh, err := sp.taskStore.GetByID(tsk.ID)
+	if err != nil || fresh == nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	// Still planning: the draft waits for the human seal.
+	if fresh.State != task.StatePlanning {
+		t.Errorf("task state = %q, want planning (hostile_skipped refuses the self-seal)", fresh.State)
+	}
+	d, ok := draftFromMetadataForTest(t, fresh)
+	if !ok {
+		t.Fatal("no draft on task after flow")
+	}
+	if d.SealedHash != "" {
+		t.Error("draft carries a sealed hash; hostile_skipped must never self-seal")
+	}
+	if d.CritiqueOutcome != critiqueOutcomeHostileSkipped {
+		t.Errorf("draft critique outcome = %q, want %q", d.CritiqueOutcome, critiqueOutcomeHostileSkipped)
+	}
+	if got := metadataStringForTest(t, fresh, critiqueOutcomeMetadataKey); got != critiqueOutcomeHostileSkipped {
+		t.Errorf("critique_outcome metadata = %q, want %q", got, critiqueOutcomeHostileSkipped)
+	}
+	// The quick_plan hostile_skipped branch never stamps planner-self
+	// provenance (it records the seal_provenance metric with by=user,
+	// stage=hostile_skipped and waits); no planner-self anywhere.
+	if got := metadataStringForTest(t, fresh, sealProvenanceMetadataKey); got == sealProvenancePlannerSelf {
+		t.Errorf("sealed_by = %q, want anything but %q (hostile_skipped never proposes planner-self)", got, sealProvenancePlannerSelf)
+	}
+	if got := critiqueMetricTotal(t, store, "strategic_planner.seal_provenance", map[string]string{"by": sealProvenanceUser, "stage": "hostile_skipped"}); got != 1 {
+		t.Errorf("seal_provenance{by=user,stage=hostile_skipped} = %d, want 1", got)
+	}
+	// Metrics: the skip fired with reason no_model and the outcome is
+	// hostile_skipped, not clean.
+	if got := critiqueMetricTotal(t, store, "strategic_planner.hostile_critic_skipped", map[string]string{"reason": "no_model"}); got != 1 {
+		t.Errorf("hostile_critic_skipped{reason=no_model} = %d, want 1", got)
+	}
+	if got := critiqueMetricTotal(t, store, "strategic_planner.critique_outcome", map[string]string{"outcome": critiqueOutcomeHostileSkipped}); got != 1 {
+		t.Errorf("critique_outcome{outcome=hostile_skipped} = %d, want 1", got)
+	}
+	if got := critiqueMetricTotal(t, store, "strategic_planner.critique_outcome", map[string]string{"outcome": critiqueOutcomeClean}); got != 0 {
+		t.Errorf("critique_outcome{outcome=clean} = %d, want 0 (hostile_skipped overrides clean)", got)
+	}
+}
+
 // TestCritiqueLoop_AdvisoryRollsIntoKnownRisksUnconditionally pins the
 // advisory rule: advisory-only objections never trigger a revise, but
 // they always land in Known Risks — including on a clean (sealing) round.

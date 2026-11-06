@@ -29,6 +29,13 @@ type ToolViewTool struct {
 	tools.ToolDefaults
 	reg *tools.Registry
 
+	// activateHook, when set, is called after a successful tool_view result
+	// with the viewed tool's name. The dynamic-tools exposure engine (leaf
+	// 05/06) sets it to promote the tool into the episode's active set via
+	// ExposurePlan.Promote (design §3.2). nil = legacy (no activation).
+	// Guarded by mu alongside the LRU maps.
+	activateHook func(name string)
+
 	mu      sync.Mutex
 	entries map[string][]byte // tool name -> JSON-marshalled definition
 	order   []string          // LRU order; oldest first
@@ -47,6 +54,21 @@ func NewToolViewTool(reg *tools.Registry, lruSize int) *ToolViewTool {
 		order:   make([]string, 0, lruSize),
 		size:    lruSize,
 	}
+}
+
+// SetActivateHook installs the activation hook called after a successful
+// tool_view result with the viewed tool's name (dynamic-tools leaf 05,
+// design §3.2). The caller typically passes a closure over the episode's
+// ExposurePlan so a viewed tool is promoted into the active set (append-only).
+// A nil hook is the legacy posture: viewing never activates. Thread-safe;
+// idempotent for a single-episode plan.
+func (t *ToolViewTool) SetActivateHook(hook func(name string)) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.activateHook = hook
 }
 
 func (t *ToolViewTool) Name() string { return "tool_view" }
@@ -85,7 +107,9 @@ func (t *ToolViewTool) Execute(_ context.Context, args map[string]any) (any, err
 	cached, ok := t.entries[name]
 	t.mu.Unlock()
 	if ok {
-		return t.viewResult(name, cached), nil
+		result := t.viewResult(name, cached)
+		t.fireActivate(name)
+		return result, nil
 	}
 
 	if t.reg == nil {
@@ -110,7 +134,23 @@ func (t *ToolViewTool) Execute(_ context.Context, args map[string]any) (any, err
 	t.record(name, raw)
 	t.mu.Unlock()
 
-	return t.viewResult(name, raw), nil
+	result := t.viewResult(name, raw)
+	t.fireActivate(name)
+	return result, nil
+}
+
+// fireActivate snapshots the activation hook under the LRU lock and invokes
+// it OUTSIDE the lock (mutexio: the hook promotes the tool into the episode's
+// ExposurePlan, which takes its own mutex; running it while holding t.mu
+// would nest the two lock domains). Nil-safe: a nil hook is the legacy
+// posture (viewing never activates) and the call is a no-op.
+func (t *ToolViewTool) fireActivate(name string) {
+	t.mu.Lock()
+	hook := t.activateHook
+	t.mu.Unlock()
+	if hook != nil {
+		hook(name)
+	}
 }
 
 // viewResult wraps the definition JSON in the standard tool-result envelope

@@ -340,11 +340,11 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| R0-research | PENDING | 0 | |
-| 01-comparator | PENDING | 0 | |
-| 02-fixture-capture | PENDING | 0 | |
-| 03-e2e-suite | PENDING | 0 | |
-| 04-docs | PENDING | 0 | |
+| R0-research | COMPLETE | 1 | landed c5ef67e9 (R0-findings.md, reviewed) |
+| 01-comparator | COMPLETE | 1 | landed e3b2130b (internal/eval/trajectorydiff + unit tests) |
+| 02-fixture-capture | COMPLETE | 1 | landed 92fa3350 (issues 83, 88) |
+| 03-e2e-suite | COMPLETE | 1 | landed 9c142af1 (issue 83) |
+| 04-docs | COMPLETE | 1 | docs/workflows/trajectory-grading.md landed 4d8179cf; cross-refs resolve |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -377,13 +377,13 @@ in-session by the control agent before leaf 03 dispatches:
 
 | # | Feature (from plan) | Source (leaf/spec section) | Unit tests | E2E tests | Status |
 |---|---------------------|----------------------------|-----------|-----------|--------|
-| F1 | normalize: shape + var scrub + sorted keys | 01 T1/T2, C3 | TestNormalize* | trajectory-golden suite (implicit) | PENDING |
-| F2 | compare: exact / in_order / any_order + threshold + epsilon | 01 T3/T4, C2 | TestCompare* | suite fail-drill | PENDING |
-| F3 | capture: scripted run -> golden fixture file | 02 T1/T2, C5 | TestCaptureGolden* | suite regenerate path | PENDING |
-| F4 | regenerate target: suite-first + diff print | 02 T4, C5, R8 | n/a (make target) | make -n / dry run | PENDING |
-| F5 | gate: replay suite fails on sequence regression | 03 T1/T2, R6 | n/a | TestTrajectoryGolden_* RED drill | PENDING |
-| F6 | manifest + path_map entry, same commit | 03 T3, C6 | n/a | manifest assert | PENDING |
-| F7 | docs workflow page | 04 T1, R10 | n/a | cross-ref resolve | PENDING |
+| F1 | normalize: shape + var scrub + sorted keys | 01 T1/T2, C3 | TestNormalize* | trajectory-golden suite (implicit) | VALIDATED |
+| F2 | compare: exact / in_order / any_order + threshold + epsilon | 01 T3/T4, C2 | TestCompare* | suite fail-drill | VALIDATED |
+| F3 | capture: scripted run -> golden fixture file | 02 T1/T2, C5 | TestCaptureGolden* | suite regenerate path | VALIDATED |
+| F4 | regenerate target: suite-first + diff print | 02 T4, C5, R8 | n/a (make target) | make -n / dry run | VALIDATED |
+| F5 | gate: replay suite fails on sequence regression | 03 T1/T2, R6 | n/a | TestTrajectoryGolden_* RED drill | VALIDATED |
+| F6 | manifest + path_map entry, same commit | 03 T3, C6 | n/a | manifest assert | VALIDATED |
+| F7 | docs workflow page | 04 T1, R10 | n/a | cross-ref resolve | VALIDATED |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 
@@ -426,3 +426,4 @@ dispatched leaf document mid-execution.
 - ASCII only: fixtures, docs, and code. The regeneration drill in the
   Integration Test Plan is destructive-but-revertible; run it on a clean
   tree and restore immediately.
+- Forest closeout 2026-11-05: tables reconciled against HEAD by read-only audit; all leaves verified landed + gates green.

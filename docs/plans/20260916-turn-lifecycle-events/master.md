@@ -310,3 +310,19 @@ pass with the field present). Empty only on the pre-mint invalid-payload early
 failure. Never two trace IDs for one turn: the async task-end relay and the
 turn watchdog re-broadcast under the SUBMITTED turn's trace via the turn
 registry. Owner: docs/plans/20261031-llm-hop-tracing/01-trace-id-threading.md.
+
+### Extension note -- 20261103-wiring-gap-remediation (leaf 06)
+
+`TurnTerminalEvent` gains one additive field: `TurnSpanID string
+json:"turn_span_id,omitempty"` (16-char lowercase hex; the turn span minted at
+the handler seam BESIDE the trace id -- the same mint seam as the leaf-01
+TraceID extension -- and the pre-declared parent of the trace's llm.call and
+tool.call hop spans). Additive/omitempty -- consumers decoding the frozen key
+set are unaffected (verified: the ws_events.schema.json drift gate, the
+TUI map decode, the CLI await struct, and the Flutter golden fixture all pass
+with the field present). Empty on the same pre-mint early failure paths as
+TraceID; never two turn span IDs for one turn: the async task-end relay and
+the turn watchdog re-broadcast under the SUBMITTED turn's pair via the turn
+registry, and the handler's publishTurnTerminal funnel back-fills the field
+centrally from TraceForTurn for every routed site. Owner:
+docs/plans/20261103-wiring-gap-remediation/06-turnspan-linkage.md.

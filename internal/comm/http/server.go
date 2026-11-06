@@ -206,6 +206,13 @@ type Server struct {
 	// inside the handler).
 	slackInteractions http.Handler
 	// Notification handler (optional)
+	// voiceRoutes serves the two Telnyx endpoints (POST /api/v1/voice/
+	// webhook, GET media websocket; voice-sidecar leaf 10). Registered only
+	// when the daemon wires it via WithVoiceRoutes (voice.enabled + a
+	// telnyx public key); exempt from bearer auth (Telnyx cannot send a
+	// meept API key - the mandatory Ed25519 signatures are the credential,
+	// enforced inside the handlers; key-unset fail-closes to 503).
+	voiceRoutes  *VoiceRoutes
 	notifHandler *NotificationHandler
 	// PTY session handler (optional, set via WithPTY)
 	ptyHandler *PTYHandler
@@ -1128,6 +1135,19 @@ type RouteRegistrar interface {
 // This option replaces the former WithBotWebhook: the webhook trigger
 // endpoint moves from /api/v1/bot/{id}/trigger to
 // /api/v1/agents/{id}/trigger (spec line 506).
+// WithVoiceRoutes enables the Telnyx voice endpoints (webhook + media WS,
+// voice-sidecar leaf 10). The two routes are exempt from bearer-key auth
+// (enforced in Server.middleware) because Telnyx authenticates with
+// mandatory Ed25519 signatures inside the handlers; a missing public key
+// fail-closes them to 503, never signature-optional.
+func WithVoiceRoutes(v *VoiceRoutes) ServerOption {
+	return func(s *Server) {
+		if v != nil {
+			s.voiceRoutes = v
+		}
+	}
+}
+
 func WithAgentHandlers(h RouteRegistrar) ServerOption {
 	return func(s *Server) {
 		if h != nil {
@@ -1981,6 +2001,17 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			// handler (research-notes.md A.1/A.2). Rate limiting still
 			// applies (the handler runs under the ordinary chain).
 			s.slackInteractions.ServeHTTP(lrw, r)
+			return
+		}
+
+		if s.voiceRoutes != nil && s.voiceRoutes.HandlesPath(r.URL.Path) {
+			// Telnyx voice endpoints (leaf 10): Telnyx cannot present a
+			// bearer API key, so the credential is the mandatory Ed25519
+			// signature verified INSIDE the handlers (webhook body /
+			// stream_url). Never signature-optional: an unset public key
+			// fail-closes to 503 inside the handlers. Rate limiting still
+			// applies (the handlers run under the ordinary chain).
+			s.voiceRoutes.serveVoiceRoute(lrw, r)
 			return
 		}
 

@@ -889,6 +889,11 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 		if err := m.store.SetPhaseState(ctx, phase.ID, PhaseInProgress); err != nil {
 			m.logger.Warn("failed to set phase state to in_progress", "phase_id", phase.ID, "error", err)
 		}
+		m.publishEvent("plan.phase_state", map[string]any{
+			"plan_id":  planID,
+			"phase_id": phase.ID,
+			"state":    string(PhaseInProgress),
+		})
 
 		// Set TotalJobs on the child task and schedule its steps.
 		stepCount := len(pp.Steps)
@@ -954,6 +959,11 @@ func (m *PlanManager) OnStepCompleted(ctx context.Context, taskID, stepID string
 			if err := m.store.SetPhaseState(ctx, phaseID, PhaseCompleted); err != nil {
 				m.logger.Warn("failed to set phase completed", "phase_id", phaseID, "error", err)
 			}
+			m.publishEvent("plan.phase_state", map[string]any{
+				"plan_id":  planID,
+				"phase_id": phaseID,
+				"state":    string(PhaseCompleted),
+			})
 			break
 		}
 	}
@@ -979,6 +989,13 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 			"task_id":  taskID,
 			"phase_id": phaseID,
 		})
+		if hasPlan {
+			m.publishEvent("plan.phase_state", map[string]any{
+				"plan_id":  planID,
+				"phase_id": phaseID,
+				"state":    string(PhaseCompleted),
+			})
+		}
 
 		// Check if all phases of the plan are now complete. If so,
 		// transition the plan to completed.
@@ -1060,6 +1077,13 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 
 	m.logger.Info("plan completed", "plan_id", plan.ID)
 	return nil
+}
+
+// GetPhases returns the phases for a plan, ordered by sequence (read-through
+// to the store). The intake projection subscriber (leaf 06) uses it to
+// rebuild the phase tree from a plan.executing bus event.
+func (m *PlanManager) GetPhases(ctx context.Context, planID string) ([]*PlanPhase, error) {
+	return m.store.GetPhases(ctx, planID)
 }
 
 // GetPhasesByTask returns the phases for the plan associated with the given

@@ -56,6 +56,21 @@ temperature: 0.3
 - **name**: Human-readable display name
 - **role**: Agent role (`executor`, `dispatcher`, etc.)
 - **additional_tools**: List of tools this agent can access
+- **tool_exposure**: Per-agent value of the as-needed tool-exposure knob
+  (token-efficiency branch 03): `full` | `indexed` | `predicted` | `search`.
+  Resolved per turn in the order per-model > **this frontmatter field** >
+  global `[agent.tools] tool_exposure` > `predicted`. It only takes effect
+  while `[agent.tools] dynamic_tool_exposure` is ON. `predicted` ships full
+  schemas for N intent-selected tools + the always-full core and discovers
+  the rest via `tool_search`/`tool_view`. `search` additionally requires the
+  active model to be frontier-class and is auto-downgraded to `predicted`
+  (one warn) otherwise. The 5.3 warning (verbatim): search mode requires a
+  frontier-class model. Do NOT enable it for small/local models - they fail
+  to use the search/view round-trip reliably (live-smoke evidence:
+  always-full promotions 2026-09-07/09-12,
+  `internal/config/schema.go:1959-1971`). The daemon downgrades search to
+  predicted automatically for non-frontier models. See
+  [dynamic tool exposure](workflows/dynamic-tools.md).
 - **capabilities**: Required model capabilities (`code`, `reasoning`, `tool_use`, etc.)
 - **max_iterations**: Maximum agent loop iterations
 - **timeout_seconds**: Maximum execution time

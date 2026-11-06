@@ -53,6 +53,13 @@ func LoadJSON5(path string, v any) error {
 	if err := json.Unmarshal(stdJSON, v); err != nil {
 		return wrapJSONUnmarshalError(err, path)
 	}
+	// Clamp memory.tiers to defaults when the destination is a full
+	// *Config (wiring-gap leaf 03-tierpolicy-daemon T1): LoadJSON5 is
+	// shared by partial unmarshals, so the normalize is type-asserted
+	// rather than forced.
+	if cfg, ok := v.(*Config); ok {
+		NormalizeMemoryTiersDefaults(&cfg.Memory.Tiers)
+	}
 	return nil
 }
 

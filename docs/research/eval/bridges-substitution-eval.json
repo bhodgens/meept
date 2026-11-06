@@ -1,0 +1,1439 @@
+{
+  "schema_version": 1,
+  "eval": "bridges-on-off-recall",
+  "mode": "live",
+  "run_at": "2026-11-05T01:57:02Z",
+  "note": "synthetic hermetic run (scripted generator/verifier + mock grader). Live-model runs against the local llama-server stack are a follow-up; use --live to enable.",
+  "config": {
+    "kb": 2,
+    "top_k": 8,
+    "match_threshold": 0.6,
+    "bridge_df_max": 10,
+    "verify": true,
+    "live": true
+  },
+  "fixture_path": "tools/bridges-eval/fixtures/substitution-fixture.json",
+  "fixture_hash": "227f35842d69c7e5bcf4e45f",
+  "config_hash": "893275a4af9c16daba3711dd",
+  "bridge_pool": {
+    "generated": 3,
+    "verified": 3,
+    "entities": [
+      "brownbag",
+      "handbook",
+      "harbor",
+      "kestrel",
+      "meetup",
+      "misc",
+      "newsletter",
+      "scorecard",
+      "webinar",
+      "wiki",
+      "zenith"
+    ]
+  },
+  "arms": {
+    "a": {
+      "arm": "a",
+      "questions": 24,
+      "errors": 0,
+      "correctness_pct": 66.67,
+      "mean_context_tokens": 344.292,
+      "mean_latency_ms": 1522.692,
+      "bridge_query_count": 0,
+      "bridges_included_total": 0,
+      "bridges_included_avg_per_query": 0,
+      "bridges_excluded_total": 0,
+      "bridges_available": 0
+    },
+    "b": {
+      "arm": "b",
+      "questions": 24,
+      "errors": 0,
+      "correctness_pct": 91.67,
+      "mean_context_tokens": 377.375,
+      "mean_latency_ms": 1435.938,
+      "bridge_query_count": 24,
+      "bridges_included_total": 48,
+      "bridges_included_avg_per_query": 2,
+      "bridges_excluded_total": 24,
+      "bridges_available": 3
+    }
+  },
+  "pass_criteria": {
+    "correctness_non_regression": true,
+    "token_reduction": false,
+    "correctness_gain": true,
+    "pass": false,
+    "rule": "pass = (corrB \u003e= corrA - 2pp AND tokensB \u003c= tokensA*0.9) OR (corrB \u003e= corrA + 3pp AND tokensB ~= tokensA)"
+  },
+  "questions": [
+    {
+      "question_id": "ctl-h-01",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 174,
+      "latency_ms": 685.838,
+      "sources_selected": [
+        "mem-h04",
+        "mem-h03",
+        "mem-h06",
+        "mem-h14",
+        "mem-h15",
+        "mem-z07",
+        "mem-h01",
+        "mem-h13"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "It shows shard health per zone."
+    },
+    {
+      "question_id": "ctl-h-02",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 176,
+      "latency_ms": 897.905,
+      "sources_selected": [
+        "mem-h05",
+        "mem-h04",
+        "mem-h03",
+        "mem-h06",
+        "mem-h14",
+        "mem-h01",
+        "mem-h13",
+        "mem-z06"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "Platform game days for harbor run every quarter."
+    },
+    {
+      "question_id": "ctl-h-03",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 276,
+      "latency_ms": 738.517,
+      "sources_selected": [
+        "mem-h06",
+        "mem-h07",
+        "mem-h14",
+        "mem-h03",
+        "mem-h04",
+        "mem-h01",
+        "mem-h13",
+        "mem-h12"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The cluster expansion for harbor added six nodes."
+    },
+    {
+      "question_id": "ctl-h-04",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 171,
+      "latency_ms": 3206.124,
+      "sources_selected": [
+        "mem-h07",
+        "mem-h06",
+        "mem-h14",
+        "mem-h04",
+        "mem-h03",
+        "mem-h05",
+        "mem-h01",
+        "mem-h13"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "Cluster alerts for the harbor route are escalated to the platform team."
+    },
+    {
+      "question_id": "ctl-k-01",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 497,
+      "latency_ms": 1283.058,
+      "sources_selected": [
+        "mem-k04",
+        "mem-k14",
+        "mem-k03",
+        "mem-k16",
+        "mem-k11",
+        "mem-k15",
+        "mem-z12",
+        "mem-h11"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The mobile crash rate for kestrel dropped after the rendering fix."
+    },
+    {
+      "question_id": "ctl-k-02",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 159,
+      "latency_ms": 922.641,
+      "sources_selected": [
+        "mem-k05",
+        "mem-k04",
+        "mem-k14",
+        "mem-k03",
+        "mem-k06",
+        "mem-k17",
+        "mem-k02",
+        "mem-k07"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "Mobile onboarding for kestrel takes under two minutes on average."
+    },
+    {
+      "question_id": "ctl-k-03",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 598,
+      "latency_ms": 1107.478,
+      "sources_selected": [
+        "mem-k06",
+        "mem-k07",
+        "mem-k03",
+        "mem-k11",
+        "mem-k04",
+        "mem-z12",
+        "mem-h11",
+        "mem-k12"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The beta cohort for kestrel gets builds every Monday."
+    },
+    {
+      "question_id": "ctl-k-04",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 164,
+      "latency_ms": 988.673,
+      "sources_selected": [
+        "mem-k07",
+        "mem-k06",
+        "mem-k05",
+        "mem-k14",
+        "mem-k16",
+        "mem-k03",
+        "mem-h04",
+        "mem-k04"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The beta feedback for kestrel is triaged by the qa rotation."
+    },
+    {
+      "question_id": "ctl-z-01",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 395,
+      "latency_ms": 1008.429,
+      "sources_selected": [
+        "mem-z04",
+        "mem-z07",
+        "mem-z03",
+        "mem-z05",
+        "mem-z06",
+        "mem-z14",
+        "mem-z12",
+        "mem-z11"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The engagement survey for zenith received a score of 82."
+    },
+    {
+      "question_id": "ctl-z-02",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 616,
+      "latency_ms": 953.27,
+      "sources_selected": [
+        "mem-z05",
+        "mem-z04",
+        "mem-z01",
+        "mem-z13",
+        "mem-h12",
+        "mem-z12",
+        "mem-h11",
+        "mem-z11"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "Engagement with the zenith account is reviewed monthly."
+    },
+    {
+      "question_id": "ctl-z-03",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 395,
+      "latency_ms": 924.766,
+      "sources_selected": [
+        "mem-z06",
+        "mem-z07",
+        "mem-z14",
+        "mem-z03",
+        "mem-z12",
+        "mem-z05",
+        "mem-z13",
+        "mem-z11"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The partnership offsite for zenith is booked for two days in September."
+    },
+    {
+      "question_id": "ctl-z-04",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 394,
+      "latency_ms": 1035.836,
+      "sources_selected": [
+        "mem-z07",
+        "mem-z06",
+        "mem-z04",
+        "mem-z14",
+        "mem-z12",
+        "mem-z03",
+        "mem-z11",
+        "mem-z13"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The partnership budget for zenith was approved by the finance lead."
+    },
+    {
+      "question_id": "sub-h-01",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 374,
+      "latency_ms": 5309.575,
+      "sources_selected": [
+        "mem-h13",
+        "mem-h03",
+        "mem-h15",
+        "mem-h12",
+        "mem-k12",
+        "mem-h01",
+        "mem-h16",
+        "mem-h17"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "Office lighting upgrades finished during the first week of the month."
+    },
+    {
+      "question_id": "sub-h-02",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 374,
+      "latency_ms": 2869.001,
+      "sources_selected": [
+        "mem-h03",
+        "mem-h15",
+        "mem-h01",
+        "mem-h13",
+        "mem-h12",
+        "mem-h16",
+        "mem-h17",
+        "mem-k12"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "not in context"
+    },
+    {
+      "question_id": "sub-h-03",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 169,
+      "latency_ms": 824.349,
+      "sources_selected": [
+        "mem-h01",
+        "mem-h13",
+        "mem-h06",
+        "mem-h03",
+        "mem-h15",
+        "mem-h02",
+        "mem-h07",
+        "mem-h14"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "not in context."
+    },
+    {
+      "question_id": "sub-h-04",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 389,
+      "latency_ms": 947.005,
+      "sources_selected": [
+        "mem-h07",
+        "mem-h01",
+        "mem-h13",
+        "mem-h12",
+        "mem-h14",
+        "mem-h03",
+        "mem-h15",
+        "mem-h11"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "It passed its yearly check with two minor findings in April."
+    },
+    {
+      "question_id": "sub-k-01",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 598,
+      "latency_ms": 1326.491,
+      "sources_selected": [
+        "mem-k12",
+        "mem-k03",
+        "mem-k15",
+        "mem-h12",
+        "mem-k01",
+        "mem-k13",
+        "mem-z12",
+        "mem-k11"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The kestrel release shipped on time with two patched regressions."
+    },
+    {
+      "question_id": "sub-k-02",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 598,
+      "latency_ms": 1837.349,
+      "sources_selected": [
+        "mem-k11",
+        "mem-k03",
+        "mem-k15",
+        "mem-k12",
+        "mem-k01",
+        "mem-k13",
+        "mem-h12",
+        "mem-z12"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "Yes, the kestrel release shipped on time."
+    },
+    {
+      "question_id": "sub-k-03",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 265,
+      "latency_ms": 826.306,
+      "sources_selected": [
+        "mem-k13",
+        "mem-k12",
+        "mem-k06",
+        "mem-k17",
+        "mem-k02",
+        "mem-k14",
+        "mem-k16",
+        "mem-k03"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "not in context"
+    },
+    {
+      "question_id": "sub-k-04",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 176,
+      "latency_ms": 1031.571,
+      "sources_selected": [
+        "mem-k13",
+        "mem-k02",
+        "mem-k01",
+        "mem-z04",
+        "mem-k16",
+        "mem-k03",
+        "mem-k15",
+        "mem-z13"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "not in context"
+    },
+    {
+      "question_id": "sub-z-01",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 380,
+      "latency_ms": 2247.485,
+      "sources_selected": [
+        "mem-z04",
+        "mem-z03",
+        "mem-z15",
+        "mem-z01",
+        "mem-z13",
+        "mem-z02",
+        "mem-z12",
+        "mem-k12"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The audit and renewal paperwork came out of the zenith vendor audit."
+    },
+    {
+      "question_id": "sub-z-02",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 379,
+      "latency_ms": 1299.279,
+      "sources_selected": [
+        "mem-z03",
+        "mem-z15",
+        "mem-z01",
+        "mem-z13",
+        "mem-z02",
+        "mem-z12",
+        "mem-k12",
+        "mem-z07"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "not in context"
+    },
+    {
+      "question_id": "sub-z-03",
+      "arm": "a",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 275,
+      "latency_ms": 2182.83,
+      "sources_selected": [
+        "mem-z16",
+        "mem-z13",
+        "mem-z14",
+        "mem-z07",
+        "mem-z17",
+        "mem-z04",
+        "mem-z12",
+        "mem-z03"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The partnership terms were renewed for three more years in June."
+    },
+    {
+      "question_id": "sub-z-04",
+      "arm": "a",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 271,
+      "latency_ms": 2090.843,
+      "sources_selected": [
+        "mem-z13",
+        "mem-z16",
+        "mem-z17",
+        "mem-z14",
+        "mem-z03",
+        "mem-z01",
+        "mem-z15",
+        "mem-z12"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 42,
+        "sources": 42,
+        "bridges_included": 0,
+        "bridges_excluded": 0
+      },
+      "answer": "The partnership terms now run for three more years."
+    },
+    {
+      "question_id": "ctl-h-01",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 265,
+      "latency_ms": 943.024,
+      "sources_selected": [
+        "mem-h04",
+        "mem-h03",
+        "mem-h06",
+        "mem-h14",
+        "mem-h15",
+        "mem-z07",
+        "mem-h01"
+      ],
+      "bridges_selected": [
+        "bridge-4c4780df8fce91b9"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The platform dashboard for harbor now displays shard health per zone."
+    },
+    {
+      "question_id": "ctl-h-02",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 266,
+      "latency_ms": 985.695,
+      "sources_selected": [
+        "mem-h05",
+        "mem-h04",
+        "mem-h03",
+        "mem-h06",
+        "mem-h14",
+        "mem-h01",
+        "mem-h13"
+      ],
+      "bridges_selected": [
+        "bridge-4c4780df8fce91b9"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "Platform game days for harbor run every quarter."
+    },
+    {
+      "question_id": "ctl-h-03",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 263,
+      "latency_ms": 948.179,
+      "sources_selected": [
+        "mem-h06",
+        "mem-h07",
+        "mem-h14",
+        "mem-h03",
+        "mem-h04",
+        "mem-h01",
+        "mem-h13"
+      ],
+      "bridges_selected": [
+        "bridge-4c4780df8fce91b9"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The cluster expansion for harbor added six nodes."
+    },
+    {
+      "question_id": "ctl-h-04",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 262,
+      "latency_ms": 1439.498,
+      "sources_selected": [
+        "mem-h07",
+        "mem-h06",
+        "mem-h14",
+        "mem-h04",
+        "mem-h03",
+        "mem-h05",
+        "mem-h01"
+      ],
+      "bridges_selected": [
+        "bridge-4c4780df8fce91b9"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "Cluster alerts for the harbor route are directed to the on‑call rotation."
+    },
+    {
+      "question_id": "ctl-k-01",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 476,
+      "latency_ms": 903.375,
+      "sources_selected": [
+        "mem-k04",
+        "mem-k14",
+        "mem-k03",
+        "mem-k16",
+        "mem-k11",
+        "mem-k15",
+        "mem-z12"
+      ],
+      "bridges_selected": [
+        "bridge-3fc025cfe6ae8106"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The mobile crash rate for kestrel dropped after the rendering fix."
+    },
+    {
+      "question_id": "ctl-k-02",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 253,
+      "latency_ms": 1221.932,
+      "sources_selected": [
+        "mem-k05",
+        "mem-k04",
+        "mem-k14",
+        "mem-k03",
+        "mem-k06",
+        "mem-k17",
+        "mem-k02"
+      ],
+      "bridges_selected": [
+        "bridge-3fc025cfe6ae8106"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "Mobile onboarding for kestrel takes under two minutes on average."
+    },
+    {
+      "question_id": "ctl-k-03",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 586,
+      "latency_ms": 1042.498,
+      "sources_selected": [
+        "mem-k06",
+        "mem-k07",
+        "mem-k03",
+        "mem-k11",
+        "mem-k04",
+        "mem-z12",
+        "mem-h11"
+      ],
+      "bridges_selected": [
+        "bridge-3fc025cfe6ae8106"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The beta cohort for kestrel receives builds every Monday."
+    },
+    {
+      "question_id": "ctl-k-04",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 164,
+      "latency_ms": 1027.61,
+      "sources_selected": [
+        "mem-k07",
+        "mem-k06",
+        "mem-k05",
+        "mem-k14",
+        "mem-k16",
+        "mem-k03",
+        "mem-h04",
+        "mem-k04"
+      ],
+      "bridges_selected": null,
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The beta feedback for kestrel is triaged by the qa rotation."
+    },
+    {
+      "question_id": "ctl-z-01",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 370,
+      "latency_ms": 1043.755,
+      "sources_selected": [
+        "mem-z04",
+        "mem-z07",
+        "mem-z03",
+        "mem-z05",
+        "mem-z06",
+        "mem-z14",
+        "mem-z12"
+      ],
+      "bridges_selected": [
+        "bridge-1879c6c21208490a"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The engagement survey for zenith received a score of 82."
+    },
+    {
+      "question_id": "ctl-z-02",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 592,
+      "latency_ms": 1288.352,
+      "sources_selected": [
+        "mem-z05",
+        "mem-z04",
+        "mem-z01",
+        "mem-z13",
+        "mem-h12",
+        "mem-z12",
+        "mem-h11"
+      ],
+      "bridges_selected": [
+        "bridge-1879c6c21208490a"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "Engagement with the zenith account is reviewed monthly."
+    },
+    {
+      "question_id": "ctl-z-03",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 371,
+      "latency_ms": 1130.4,
+      "sources_selected": [
+        "mem-z06",
+        "mem-z07",
+        "mem-z14",
+        "mem-z03",
+        "mem-z12",
+        "mem-z05",
+        "mem-z13"
+      ],
+      "bridges_selected": [
+        "bridge-1879c6c21208490a"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The partnership offsite for zenith is booked for two days in September."
+    },
+    {
+      "question_id": "ctl-z-04",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 480,
+      "latency_ms": 1020.089,
+      "sources_selected": [
+        "mem-z07",
+        "mem-z06",
+        "mem-z04",
+        "mem-z14",
+        "mem-z12",
+        "mem-z03",
+        "mem-z11"
+      ],
+      "bridges_selected": [
+        "bridge-1879c6c21208490a"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The partnership budget for zenith was approved by the finance lead."
+    },
+    {
+      "question_id": "sub-h-01",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 472,
+      "latency_ms": 2614.252,
+      "sources_selected": [
+        "mem-h13",
+        "mem-h03",
+        "mem-h15",
+        "mem-h12",
+        "mem-k12",
+        "mem-h01",
+        "mem-h16"
+      ],
+      "bridges_selected": [
+        "bridge-4c4780df8fce91b9"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The harbor rollout completed in four days with zero downtime, and the harbor cluster passed its yearly check with two minor findings."
+    },
+    {
+      "question_id": "sub-h-02",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 364,
+      "latency_ms": 1621.001,
+      "sources_selected": [
+        "mem-h03",
+        "mem-h15",
+        "mem-h01",
+        "mem-h13",
+        "mem-h12",
+        "mem-h16",
+        "mem-h17"
+      ],
+      "bridges_selected": [
+        "bridge-4c4780df8fce91b9"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The harbor rollout finished in four days with zero downtime."
+    },
+    {
+      "question_id": "sub-h-03",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 263,
+      "latency_ms": 766.18,
+      "sources_selected": [
+        "mem-h01",
+        "mem-h13",
+        "mem-h06",
+        "mem-h03",
+        "mem-h15",
+        "mem-h02",
+        "mem-h07"
+      ],
+      "bridges_selected": [
+        "bridge-4c4780df8fce91b9"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The harbor cluster passed its yearly check with two minor findings in April."
+    },
+    {
+      "question_id": "sub-h-04",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 370,
+      "latency_ms": 1197.211,
+      "sources_selected": [
+        "mem-h07",
+        "mem-h01",
+        "mem-h13",
+        "mem-h12",
+        "mem-h14",
+        "mem-h03",
+        "mem-h15"
+      ],
+      "bridges_selected": [
+        "bridge-4c4780df8fce91b9"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The harbor cluster passed its yearly check with two minor findings in April."
+    },
+    {
+      "question_id": "sub-k-01",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 576,
+      "latency_ms": 2155.326,
+      "sources_selected": [
+        "mem-k12",
+        "mem-k03",
+        "mem-k15",
+        "mem-h12",
+        "mem-k01",
+        "mem-k13",
+        "mem-z12"
+      ],
+      "bridges_selected": [
+        "bridge-3fc025cfe6ae8106"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The kestrel release shipped on time with two patched regressions and retained ninety percent of trial users after the billing change."
+    },
+    {
+      "question_id": "sub-k-02",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 587,
+      "latency_ms": 1142.463,
+      "sources_selected": [
+        "mem-k11",
+        "mem-k03",
+        "mem-k15",
+        "mem-k12",
+        "mem-k01",
+        "mem-k13",
+        "mem-h12"
+      ],
+      "bridges_selected": [
+        "bridge-3fc025cfe6ae8106"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "Yes, the kestrel release shipped on time."
+    },
+    {
+      "question_id": "sub-k-03",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 0,
+      "correct": false,
+      "correctness_pct": 0,
+      "context_tokens": 358,
+      "latency_ms": 1095.131,
+      "sources_selected": [
+        "mem-k13",
+        "mem-k12",
+        "mem-k06",
+        "mem-k17",
+        "mem-k02",
+        "mem-k14",
+        "mem-k16"
+      ],
+      "bridges_selected": [
+        "bridge-3fc025cfe6ae8106"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "not in context"
+    },
+    {
+      "question_id": "sub-k-04",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 265,
+      "latency_ms": 2627.128,
+      "sources_selected": [
+        "mem-k13",
+        "mem-k02",
+        "mem-k01",
+        "mem-z04",
+        "mem-k16",
+        "mem-k03",
+        "mem-k15"
+      ],
+      "bridges_selected": [
+        "bridge-3fc025cfe6ae8106"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "Ninety percent of trial users stayed with kestrel after the billing change."
+    },
+    {
+      "question_id": "sub-z-01",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 1,
+      "correct": false,
+      "correctness_pct": 50,
+      "context_tokens": 365,
+      "latency_ms": 2225.91,
+      "sources_selected": [
+        "mem-z04",
+        "mem-z03",
+        "mem-z15",
+        "mem-z01",
+        "mem-z13",
+        "mem-z02",
+        "mem-z12"
+      ],
+      "bridges_selected": [
+        "bridge-1879c6c21208490a"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The audit found zero issues and resulted in the renewal of the partnership terms for three more years."
+    },
+    {
+      "question_id": "sub-z-02",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 1,
+      "correct": false,
+      "correctness_pct": 50,
+      "context_tokens": 466,
+      "latency_ms": 1202.182,
+      "sources_selected": [
+        "mem-z03",
+        "mem-z15",
+        "mem-z01",
+        "mem-z13",
+        "mem-z02",
+        "mem-z12",
+        "mem-k12"
+      ],
+      "bridges_selected": [
+        "bridge-1879c6c21208490a"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The audit found zero issues."
+    },
+    {
+      "question_id": "sub-z-03",
+      "arm": "b",
+      "expected_facts": 2,
+      "covered_facts": 2,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 366,
+      "latency_ms": 2488.69,
+      "sources_selected": [
+        "mem-z16",
+        "mem-z13",
+        "mem-z14",
+        "mem-z07",
+        "mem-z17",
+        "mem-z04",
+        "mem-z12"
+      ],
+      "bridges_selected": [
+        "bridge-1879c6c21208490a"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The partnership terms were renewed for three more years in June, after the March audit found zero issues."
+    },
+    {
+      "question_id": "sub-z-04",
+      "arm": "b",
+      "expected_facts": 1,
+      "covered_facts": 1,
+      "correct": true,
+      "correctness_pct": 100,
+      "context_tokens": 257,
+      "latency_ms": 2332.619,
+      "sources_selected": [
+        "mem-z13",
+        "mem-z16",
+        "mem-z17",
+        "mem-z14",
+        "mem-z03",
+        "mem-z01",
+        "mem-z15"
+      ],
+      "bridges_selected": [
+        "bridge-1879c6c21208490a"
+      ],
+      "selection_stats": {
+        "total": 45,
+        "sources": 42,
+        "bridges_included": 2,
+        "bridges_excluded": 1
+      },
+      "answer": "The partnership terms were renewed for three more years."
+    }
+  ]
+}

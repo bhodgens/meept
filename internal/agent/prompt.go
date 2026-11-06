@@ -65,6 +65,11 @@ type PromptBuilder struct {
 	coworkerAwareness string
 	agentsContext     string
 	projectInfo       string
+	// capabilitiesBuilder, when wired (SetCapabilitiesBuilder), settles a
+	// mid-session skill-index refresh once at the start of the per-turn
+	// build. Nil by default, so the refresh is a no-op unless the daemon or
+	// loop wires the real builder (branch 1 #103 / C1).
+	capabilitiesBuilder *CapabilitiesBuilder
 }
 
 type promptSection struct {
@@ -264,6 +269,21 @@ func (b *PromptBuilder) WithProjectInfo(name, path, branch, language string, dir
 		sb.WriteString(language)
 	}
 	b.projectInfo = sb.String()
+	return b
+}
+
+// SetCapabilitiesBuilder wires the capabilities builder whose skill index the
+// turn-boundary build settles (branch 1 #103 / C1). BuildSystemPromptOrdered
+// calls refreshIfNeeded on it once at the start of the per-turn build, so a
+// skill the agent authored mid-session (index marked dirty by the write-path
+// notifier) is visible next turn without a restart. Nil is guarded: a nil
+// argument leaves any already-wired builder intact, and an unwired builder
+// makes the refresh a no-op (the default), flipping no new default.
+func (b *PromptBuilder) SetCapabilitiesBuilder(caps *CapabilitiesBuilder) *PromptBuilder {
+	if b == nil || caps == nil {
+		return b
+	}
+	b.capabilitiesBuilder = caps
 	return b
 }
 
@@ -516,6 +536,17 @@ var emptyPrefixSHA256 = func() string {
 // the legacy call-order Build() output is returned byte-for-byte with the
 // hash of that legacy prefix, so callers can detect ordering-mode changes.
 func (b *PromptBuilder) BuildSystemPromptOrdered(cacheStablePrefix bool) (prompt string, stablePrefixHash string) {
+	// Turn boundary (C1, branch 1 #103): settle a mid-session skill-index
+	// refresh once at the start of the per-turn build, before any section is
+	// rendered. This is the per-turn composition point -- the loop's
+	// assembleSystemPrompt (loop.go) routes every turn-entry builder through
+	// here, while the mid-stream tool-result reasoningCycle NEVER rebuilds
+	// the system prompt, so a refresh can only land at the next turn, never
+	// mid-stream. No-op unless a builder is wired AND its index is dirty; a
+	// no-op refresh leaves the stable prefix byte-identical (F2).
+	if b != nil && b.capabilitiesBuilder != nil {
+		b.capabilitiesBuilder.refreshIfNeeded()
+	}
 	if !cacheStablePrefix {
 		prompt = b.Build()
 		sum := sha256.Sum256([]byte(prompt))

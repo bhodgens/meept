@@ -95,6 +95,21 @@ type GroupsHandler struct {
 	// bundledAgentsDir is the bundled roster root used when a user-tier
 	// AGENT.md is absent (agent definition writes).
 	bundledAgentsDir string
+	// checkSvc is the diagnosis surface (leaf 06-diagnosis): per-entry
+	// source attribution for explain + the defect-enumerating check.
+	// Declared as the local DiagnosisService interface (satisfied by
+	// *services.GroupsService — wired at daemon registration) because
+	// internal/rpc can import neither internal/services nor the engine's
+	// service wrapper (services -> scheduler -> rpc cycle, pre-existing).
+	// Nil until SetDiagnosisService; nil keeps the legacy explain shape
+	// and degrades groups.check to a descriptive error.
+	checkSvc DiagnosisService
+	// overridesLoader is the leaf-07 reader seam (leaf 07-overrides):
+	// groups.check loads the overrides THROUGH this func at request time
+	// (fresh per call — an operator's add/prune between checks is seen
+	// without a daemon restart; nil = zero overrides + the reader-not-
+	// wired note). Set via SetOverridesLoader.
+	overridesLoader func() (groups.OverridesReader, error)
 }
 
 // NewGroupsHandler constructs the handler. Any dependency may be nil;
@@ -129,12 +144,15 @@ func (h *GroupsHandler) SetToolValidation(knownTools map[string]struct{}, normal
 	h.normalize = normalize
 }
 
-// RegisterGroupsMethods registers the four groups.* methods on the server.
+// RegisterGroupsMethods registers the groups.* methods on the server.
+// groups.check rides the same read-only surface (leaf 06-diagnosis);
+// checkSvc is nil-safe (nil degrades check to a descriptive error).
 func (h *GroupsHandler) RegisterGroupsMethods(server *Server) {
 	server.RegisterHandler("groups.list", h.handleList)
 	server.RegisterHandler("groups.explain", h.handleExplain)
 	server.RegisterHandler("groups.assign", h.handleAssign)
 	server.RegisterHandler("groups.remove", h.handleRemove)
+	server.RegisterHandler("groups.check", h.handleCheck)
 }
 
 // groupsPolicies returns the handler's policy table as model rows.
@@ -198,7 +216,10 @@ func (h *GroupsHandler) handleList(ctx context.Context, params json.RawMessage) 
 // subject's bound policies and the layering result with per-entry sources
 // (which binding brought each policy in).
 func (h *GroupsHandler) handleExplain(ctx context.Context, params json.RawMessage) (any, error) {
-	if h.cfg == nil {
+	// The diagnosis service owns the explain path (leaf 06); it needs no
+	// handler config (the service carries its own). The legacy shape
+	// below still requires the handler config.
+	if h.checkSvc == nil && h.cfg == nil {
 		return nil, fmt.Errorf("groups.explain: config not available")
 	}
 	var req struct {
@@ -210,6 +231,36 @@ func (h *GroupsHandler) handleExplain(ctx context.Context, params json.RawMessag
 	req.AgentID = strings.TrimSpace(req.AgentID)
 	if req.AgentID == "" {
 		return nil, fmt.Errorf("groups.explain: agent_id is required")
+	}
+
+	// Diagnosis service path (leaf 06): per-entry source attribution
+	// through the SHARED groups.Explain engine — the same resolution the
+	// gates enforce. Unwired service (legacy construction sites, unit
+	// tests) falls through to the resolution-only shape below.
+	if h.checkSvc != nil {
+		res, err := h.checkSvc.Explain(ctx, req.AgentID)
+		if err != nil {
+			return nil, fmt.Errorf("groups.explain: %w", err)
+		}
+		// "policy" is a stable F8 RPC key: the FIRST selecting binding's
+		// policy (the subject-matching view; nil when nothing selected).
+		var firstPolicy any
+		for _, src := range res.Bindings {
+			firstPolicy = src.Policy
+			break
+		}
+		return map[string]any{
+			"agent_id":           res.AgentID,
+			"frontmatter_groups": res.Groups,
+			"groups":             res.Groups,
+			"bindings":           res.Bindings,
+			"policy":             firstPolicy,
+			"managed":            res.Managed,
+			"allowed_tools":      res.AllowedTools,
+			"denied_tools":       res.DeniedTools,
+			"grants":             res.Grants,
+			"resolved":           res.Resolved,
+		}, nil
 	}
 
 	policies := h.groupsPolicies()

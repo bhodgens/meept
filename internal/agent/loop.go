@@ -24,8 +24,10 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/compress"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/project"
@@ -593,8 +595,20 @@ type AgentLoop struct {
 	acpExecutor     *ACPExecutor         // external acp turn producer (dim 3A); nil = local loop only. guarded by mu
 	executor        *Executor
 	registry        ToolRegistry
-	security        *security.PermissionChecker
-	securityOrch    *intsecurity.Orchestrator
+	// dynamic-tools (branch 03): per-conversation tool-exposure plans. The
+	// LLM payload is scoped to the plan's active set and grows append-only
+	// on promotion within an episode (the token saving). Owned by
+	// exposureMu; a nil map = feature off = byte-identical legacy.
+	exposureMu    sync.Mutex
+	exposurePlans map[string]*ExposurePlan
+	security      *security.PermissionChecker
+	securityOrch  *intsecurity.Orchestrator
+	// groupResolution is the loop-carried group policy record (agent-groups
+	// leaf 04 T1): resolved at loop creation from the daemon's groups
+	// resolver, consulted by the executor's call-time gate and stamped into
+	// the decision-audit lines. A nil record (ungrouped + default_managed
+	// false) is the legacy posture — no group gate applies. Guarded by mu.
+	groupResolution *groups.Resolved
 	// piiRestore is the PII-unmasking restore lane (pii leaf 02): applied
 	// at the ScanOutput choke point before any persistence. Nil = feature
 	// off (opt-in), byte-identical behavior.
@@ -607,6 +621,11 @@ type AgentLoop struct {
 	// schemaModeSet distinguishes "explicitly set" from zero-value config.
 	schemaModeCfg config.AgentToolsConfig
 	schemaModeSet bool
+
+	// exposureDowngradeWarned tracks which model refs already emitted the
+	// one-time "search downgraded to predicted" warn (dynamic-tools leaf 05,
+	// design §5.2.1). Guarded by l.mu.
+	exposureDowngradeWarned map[string]struct{}
 
 	// Context-assembler seam (context-memory-engine leaf 03).
 	// contextAssemblerCfg is the [agent.context_assembler] values
@@ -793,6 +812,14 @@ type AgentLoop struct {
 	detectionContext *DetectionContext
 	// projectID is the bound project identifier for this loop's session.
 	projectID string
+	// scopeUserID is the serving session's multiuser identity (OwnerID);
+	// empty in single-user installs. Memory-scope resolution input (leaf
+	// 03-agent-recall-wiring). Guarded by mu.
+	scopeUserID string
+	// multiUserEnabled mirrors cfg multiuser.enabled; OR-ed into the
+	// memory-scope multiUser bit so a resolution gap under enabled
+	// multiuser fails closed (Flag 3). Guarded by mu.
+	multiUserEnabled bool
 	// workerID identifies which worker slot owns this loop within the pool.
 	// Distinct from the watchdog-local workerID variables constructed from
 	// agentID + conversationID — this is a stable struct-level identifier.
@@ -854,6 +881,13 @@ type AgentLoop struct {
 	// Skill discovery (lightweight, metadata-driven)
 	capabilityIndex *skills.CapabilityIndex
 	skillLoader     *skills.LazySkillLoader
+
+	// capabilitiesBuilder, when wired (SetCapabilitiesBuilder), is attached to
+	// each per-turn prompt builder at the turn boundary (assembleSystemPrompt)
+	// so a mid-session skill write that marked the shared SkillIndex dirty
+	// refreshes on the next turn without a restart (branch 01 #103 / C1).
+	// Nil by default: the refresh is a no-op unless the daemon wires it.
+	capabilitiesBuilder *CapabilitiesBuilder
 
 	// Prefetch callback for memory context (Hermes pattern)
 	// Called at turn completion to prefetch context for next turn
@@ -1487,7 +1521,71 @@ func (l *AgentLoop) SetSecurityChecker(checker *security.PermissionChecker) {
 	l.mu.Unlock()
 }
 
-// WithMessageBus sets the message bus for event publishing.
+// WithGroupResolution carries the agent's group policy resolution record
+// onto the loop at construction (agent-groups leaf 04 T1). A nil record
+// (ungrouped + default_managed=false) is the legacy posture: no group gate.
+func WithGroupResolution(res *groups.Resolved) LoopOption {
+	return func(l *AgentLoop) {
+		l.groupResolution = res
+	}
+}
+
+// GroupResolution returns the loop's group policy record (nil = unmanaged).
+func (l *AgentLoop) GroupResolution() *groups.Resolved {
+	if l == nil {
+		return nil
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.groupResolution
+}
+
+// Security returns the loop's current permission checker (nil = none).
+// Daemon-side consumers (step-job fence arming) read it to derive a
+// fence-carrying clone.
+func (l *AgentLoop) Security() *security.PermissionChecker {
+	if l == nil {
+		return nil
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.security
+}
+
+// SetGroupResolution re-points the loop's group resolution record after
+// construction (config hot-reload lane: the daemon resolves a fresh record
+// and swaps it atomically; the executor is re-pointed too, mirroring
+// SetSecurityChecker). Typed-nil safe: a nil record clears the gate (the
+// ungrouped legacy posture), never leaves a stale deny list live.
+func (l *AgentLoop) SetGroupResolution(res *groups.Resolved) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.groupResolution = res
+	if l.executor != nil {
+		l.executor.SetGroupResolution(res)
+	}
+	l.mu.Unlock()
+}
+
+// SetExecutorDecisionLogLevel forwards security.groups.decision_log_level
+// to this loop's executor (agent-groups leaf 04 daemon wiring): the C2
+// permission decision-audit lines log at the configured level. Nil-safe and
+// nil-executor safe; the daemon calls it after loop construction.
+func (l *AgentLoop) SetExecutorDecisionLogLevel(level string) {
+	if l == nil {
+		return
+	}
+	l.mu.RLock()
+	exec := l.executor
+	l.mu.RUnlock()
+	if exec != nil {
+		exec.SetDecisionLogLevel(level)
+	}
+}
+
+// SetMessageBus sets the message bus for event publishing.
 func WithMessageBus(b *bus.MessageBus) LoopOption {
 	return func(l *AgentLoop) {
 		l.bus = b
@@ -1727,9 +1825,13 @@ func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) LoopOption {
 
 // SetPiiRestoreHook attaches the PII-unmasking restore lane (pii leaf 02).
 // Typed-nil guarded: a nil hook is a no-op (feature off). Called from
-// components.go AFTER hook registration; session clones inherit the lane
-// through the shared *PiiRestoreHook (its RestoreOutput is stateless per
-// call, scoped by the sessionID argument).
+// components.go AFTER hook registration. Session clones inherit the lane
+// through the ConfigSnapshot seam closure (wiring-gap leaf 01), which
+// re-attaches the shared *PiiRestoreHook on every GetOrCreateWired clone
+// (its RestoreOutput is stateless per call, scoped by the sessionID
+// argument). Verifier children (site 3) intentionally run hook-less:
+// their raw output is post-processed by the parent loop's ScanOutput
+// path, so the restore lane applies once on the parent's final response.
 func (l *AgentLoop) SetPiiRestoreHook(hook *PiiRestoreHook) {
 	if hook == nil {
 		return
@@ -1964,16 +2066,20 @@ func (l *AgentLoop) ApplyRequestModel(modelRef string) {
 	if modelRef == "" {
 		return
 	}
-	if l.resolver != nil && l.resolver.ResolveRef(modelRef) == nil {
-		// Not a provider/model ref — is it an alias name?
-		if l.resolver.HasAlias(modelRef) {
-			if mc, err := l.resolver.ResolveForAlias(modelRef, ""); err == nil && mc != nil {
-				modelRef = mc.ProviderID + "/" + mc.ModelID
+	var mc *llm.ModelConfig
+	if l.resolver != nil {
+		mc = l.resolver.ResolveRef(modelRef)
+	}
+	if mc == nil {
+		if l.resolver != nil && l.resolver.HasAlias(modelRef) {
+			// Not a provider/model ref — is it an alias name?
+			if resolved, err := l.resolver.ResolveForAlias(modelRef, ""); err == nil && resolved != nil {
+				modelRef = resolved.ProviderID + "/" + resolved.ModelID
+				mc = resolved
 			} else {
 				l.logger.Warn("Per-request model alias could not be resolved, using current model chain",
 					"agent_id", l.agentID,
 					"model_ref", modelRef,
-					"error", err,
 				)
 				return
 			}
@@ -1986,10 +2092,194 @@ func (l *AgentLoop) ApplyRequestModel(modelRef string) {
 		}
 	}
 	l.SetModelOverride(modelRef)
+	// dynamic-tools leaf 05: the warn-once capability-gate downgrade. When
+	// "search" exposure is configured and the switched-to model is not
+	// frontier-class, exactly ONE warn line naming the model is emitted;
+	// repeat overrides to the same model do not re-log. No-op when the
+	// dynamic flag is off or the tier is not "search" (byte-identical legacy).
+	l.applyExposureGate(modelRef, mc)
 	l.logger.Info("Per-request model override armed",
 		"agent_id", l.agentID,
 		"model_ref", modelRef,
 	)
+}
+
+// applyExposureGate is the warn-once capability-gate downgrade for the
+// as-needed tool-exposure mechanism (dynamic-tools leaf 05, design §5.2.1).
+// When "search" exposure is configured (per-model > per-agent > global
+// resolution chain) but the active model is not frontier-class, the
+// effective tier reverts to "predicted" and exactly ONE warn line is emitted
+// naming the model. Repeat overrides to the same model ref do not re-log
+// (warn-once-per-model, the §5.2.1 contract). No-op when the tier is not
+// "search" or the model is frontier-class (byte-identical legacy payload).
+// Thread-safe: takes l.mu.
+func (l *AgentLoop) applyExposureGate(modelRef string, mc *llm.ModelConfig) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	// Gate engages only when "search" is configured somewhere in the
+	// resolution chain. The e2e drives it through the global [agent.tools]
+	// tier; a per-model or per-agent "search" engages identically.
+	searchConfigured := l.schemaModeCfg.ToolExposure == string(ExposureSearch)
+	if !searchConfigured && mc != nil {
+		searchConfigured = mc.ToolExposure == string(ExposureSearch)
+	}
+	if !searchConfigured && l.spec != nil {
+		searchConfigured = l.spec.ToolExposure == string(ExposureSearch)
+	}
+	if !searchConfigured {
+		return // not the "search" tier: no frontier gate, legacy payload.
+	}
+	// The capability gate: a frontier model keeps "search" (no downgrade).
+	if IsFrontierClass(mc) {
+		return
+	}
+	// warn-once-per-model-ref.
+	if l.exposureDowngradeWarned == nil {
+		l.exposureDowngradeWarned = make(map[string]struct{})
+	}
+	if _, seen := l.exposureDowngradeWarned[modelRef]; seen {
+		return
+	}
+	l.exposureDowngradeWarned[modelRef] = struct{}{}
+	l.logger.Warn("not frontier-class; search downgraded to predicted",
+		"model", modelRef,
+		"agent_id", l.agentID,
+	)
+}
+
+// ensureExposurePlan returns the per-conversation (episode) tool-exposure
+// plan, building it on first use. It is a no-op (nil) when the dynamic flag
+// is off, so payload scoping and activation never engage. The plan is keyed
+// by conversation: a new conversation is a new episode (design §2.2), and the
+// active set is frozen for the episode except append-only promotions.
+// Thread-safe via exposureMu.
+func (l *AgentLoop) ensureExposurePlan(conversationID string) *ExposurePlan {
+	if !l.schemaModeSet || !l.schemaModeCfg.DynamicToolExposure {
+		return nil
+	}
+	l.exposureMu.Lock()
+	defer l.exposureMu.Unlock()
+	if l.exposurePlans == nil {
+		l.exposurePlans = make(map[string]*ExposurePlan)
+	}
+	if p, ok := l.exposurePlans[conversationID]; ok {
+		return p
+	}
+	var mc *llm.ModelConfig
+	if l.llmClient != nil {
+		mc = l.llmClient.Config()
+	}
+	agentMode := ""
+	if l.spec != nil {
+		agentMode = l.spec.ToolExposure
+	}
+	mode := EffectiveExposureMode(mc, agentMode, l.schemaModeCfg.ToolExposure, true)
+	var known []string
+	if l.registry != nil {
+		for _, t := range l.registry.List() {
+			known = append(known, t.Name())
+		}
+	}
+	var ceiling []string
+	if l.spec != nil {
+		ceiling = l.spec.AllTools()
+	}
+	plan := NewExposurePlan(mode, nil, l.schemaModeCfg.PredictedBudget, ceiling, known)
+	l.exposurePlans[conversationID] = plan
+	return plan
+}
+
+// exposurePlanFor returns the conversation's armed plan, or nil when the
+// feature is off / not yet armed. Read-only; used at the payload site to
+// scope the LLM tool definitions to the active set (the token saving).
+func (l *AgentLoop) exposurePlanFor(conversationID string) *ExposurePlan {
+	l.exposureMu.Lock()
+	defer l.exposureMu.Unlock()
+	if l.exposurePlans == nil {
+		return nil
+	}
+	return l.exposurePlans[conversationID]
+}
+
+// activateViewedTool promotes the tool the model just viewed via tool_view
+// into the episode's active set (design §3.2/§6: append-only promotion, one
+// bounded prefix re-cache). Loop-side activation: the agent package cannot
+// import internal/tools/builtin (import cycle, loop.go:10433), so the shared
+// tool_view instance cannot carry per-loop plans; the loop sees every tool
+// call and promotes here. No-op when the feature is off or the call did not
+// succeed.
+func (l *AgentLoop) activateViewedTool(conversationID string, call llm.ToolCall, success bool) {
+	if !success {
+		return
+	}
+	plan := l.exposurePlanFor(conversationID)
+	if plan == nil {
+		return
+	}
+	var args struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+		return
+	}
+	if args.Name == "" {
+		return
+	}
+	if err := plan.Promote(args.Name); err != nil {
+		l.logger.Warn("dynamic-tools: activation refused",
+			"tool", args.Name, "conversation", conversationID, "err", err.Error())
+		return
+	}
+	l.logger.Debug("dynamic-tools: tool activated",
+		"tool", args.Name, "conversation", conversationID)
+}
+
+// scopeDefinitionsToActive keeps only the tool definitions whose name is in
+// active (the per-conversation exposure plan's active set), preserving the
+// parent registry's definition order. StabilizeToolPrefix (downstream) sorts
+// the surviving set deterministically, so an append-only promotion splices
+// into that sorted order and produces exactly ONE bounded prefix-change event
+// (design §4.3) - never per-turn churn. Unlisted tools are simply absent from
+// the payload. This is the token saving: active tools ship, the rest do not.
+func (l *AgentLoop) scopeDefinitionsToActive(defs []llm.ToolDefinition, active []string) []llm.ToolDefinition {
+	if len(defs) == 0 || len(active) == 0 {
+		return defs
+	}
+	want := make(map[string]struct{}, len(active))
+	for _, n := range active {
+		want[n] = struct{}{}
+	}
+	filtered := make([]llm.ToolDefinition, 0, len(active))
+	for _, d := range defs {
+		if _, ok := want[d.Function.Name]; ok {
+			filtered = append(filtered, d)
+		}
+	}
+	return filtered
+}
+
+// maxTransformFixpointPasses caps the transform-context fixpoint loop per
+// reasoningCycle iteration (wiring-gap leaf 02). RunTransformContext
+// short-circuits on the first Modified=true hook, so composing several
+// transforms (secret-obfuscation then pii-restore) requires repeated passes;
+// the cap bounds a hook that never reports Modified=false.
+const maxTransformFixpointPasses = 5
+
+// cloneMessagesForTransform copies the message slice (including ToolCalls
+// slices) so transform hooks that mutate elements in place cannot write
+// placeholders into conversation history. GetWindowedMessages results feed
+// later turns; the transform lane must only reshape what THIS LLM call sees.
+func cloneMessagesForTransform(messages []llm.ChatMessage) []llm.ChatMessage {
+	cloned := make([]llm.ChatMessage, len(messages))
+	copy(cloned, messages)
+	for i := range cloned {
+		if len(cloned[i].ToolCalls) > 0 {
+			tc := make([]llm.ToolCall, len(cloned[i].ToolCalls))
+			copy(tc, cloned[i].ToolCalls)
+			cloned[i].ToolCalls = tc
+		}
+	}
+	return cloned
 }
 
 // applyTurnModification applies a PrepareNextTurn hook's TurnModification to
@@ -2410,6 +2700,13 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 			loop.security,
 			executorOpts...,
 		)
+		// Loop-carried group resolution (agent-groups leaf 04 T1): the
+		// executor's call-time gate consults the same record the loop
+		// carries (applied AFTER options ran, so WithGroupResolution on
+		// the loop wins over any executor-side default).
+		if res := loop.groupResolution; res != nil {
+			loop.executor.SetGroupResolution(res)
+		}
 	}
 
 	// Build prompt builder from config
@@ -4391,6 +4688,20 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	}
 	inWarningZone := false
 
+	// dynamic-tools (branch 03): arm the per-conversation tool-exposure plan
+	// when the flag is on. The plan's active set = core always-full + the meta
+	// pair + the predicted set (intent-map selection deferred to a follow-up).
+	// The plan is stored PER CONVERSATION (episode, design §2.2) and shared
+	// with the executor for the §6 row-4 guard. No-op when the flag is off:
+	// no plan is armed, the active-set payload scoping never fires, and every
+	// path is byte-identical to the legacy.
+	if l.schemaModeSet && l.schemaModeCfg.DynamicToolExposure {
+		plan := l.ensureExposurePlan(conversationID)
+		if plan != nil && l.executor != nil {
+			l.executor.SetExposurePlan(plan)
+		}
+	}
+
 	// D-H1 (bughunt 2026-09-04): per-turn cap on duplicate-search rollbacks.
 	// The rollback branch `continue`s WITHOUT incrementing the iteration
 	// counter, so a model that keeps re-emitting the identical web_search
@@ -4508,6 +4819,18 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		if l.registry != nil {
 			tools = l.registry.GetDefinitions()
 		}
+		// dynamic-tools (branch 03): when a per-conversation exposure plan is
+		// armed, ship only the ACTIVE set's full-fidelity definitions (the token
+		// saving). The active set = core always-full + the meta pair + promoted
+		// tools; it is frozen for the episode and grows append-only on activation
+		// (StabilizeToolPrefix keeps the appended prefix byte-identical, §4.3).
+		// No plan (feature off) => no filtering, byte-identical legacy.
+		if plan := l.exposurePlanFor(conversationID); plan != nil {
+			active := plan.Active()
+			if len(active) > 0 {
+				tools = l.scopeDefinitionsToActive(tools, active)
+			}
+		}
 
 		// Stabilize tool prefix ordering for cache hit optimization
 		if len(tools) > 0 && conv != nil {
@@ -4621,6 +4944,47 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Inject few-shot examples from shadow training (only on first iteration)
 		if iteration == 1 && l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
 			messages = l.injectFewShotExamples(ctx, messages, conversationID)
+		}
+
+		// Transform-context hook pipeline (wiring-gap leaf 02): the
+		// TransformContext registrations (secret-obfuscation, pii-restore)
+		// had zero production callers, so the registered security
+		// transforms never ran. Fire the pipeline once per reasoningCycle
+		// iteration, after the turn's messages are finalized (windowed
+		// above, hook messages and few-shot examples appended here) and
+		// before the LLM call below. RunTransformContext short-circuits on
+		// the first Modified=true hook, so composition to a fixpoint
+		// requires repeated passes; cap 5 so a hook that always claims
+		// Modified cannot spin the loop (pii_hook_order_test.go pattern).
+		//
+		// HISTORY NON-MUTATION: messages from conv.GetWindowedMessages are
+		// cloned before the first pass. Transform hooks mutate message
+		// elements in place (the obfuscation hook writes .Content); without
+		// the clone those writes would land in conversation history and
+		// placeholders would replace the originals in every later turn.
+		// The transform lane shapes what the MODEL sees this iteration
+		// only.
+		if l.hookRegistry != nil && len(messages) > 0 {
+			messages = cloneMessagesForTransform(messages)
+			for pass := 0; pass < maxTransformFixpointPasses; pass++ {
+				tr := func() (tr ContextTransform) {
+					defer func() {
+						if r := recover(); r != nil {
+							l.logger.Error("transform_context hook panicked; continuing with untransformed messages",
+								"panic", r,
+								"conversation", conversationID,
+								"iteration", iteration,
+								"pass", pass,
+							)
+						}
+					}()
+					return l.hookRegistry.RunTransformContext(ctx, messages, tools)
+				}()
+				if !tr.Modified {
+					break
+				}
+				messages = tr.Messages
+			}
 		}
 
 		// Vision pre-flight: analyze undescribed images before the main turn.
@@ -5168,6 +5532,19 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"iteration":  iteration,
 			})
 			results := l.executeToolCalls(ctx, response.ToolCalls)
+
+			// dynamic-tools (branch 03): a successful tool_view promotes the viewed
+			// tool into the episode's active set (append-only), so the next LLM
+			// call ships its full schema. The meta pair is always active, so a
+			// model that lost the prediction set recovers via search->view (§2.3).
+			for i, tc := range response.ToolCalls {
+				if tc.Function.Name != "tool_view" {
+					continue
+				}
+				if i < len(results) && results[i] != nil {
+					l.activateViewedTool(conversationID, tc, results[i].Success)
+				}
+			}
 
 			// Record file-modifying tool calls for verification tracking (Tree 01 Leaf 03).
 			if l.verificationTracker != nil {
@@ -6938,15 +7315,43 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	conv := l.conversations.Get(conversationID)
 
 	// Build context parts from memory (conditional based on recall mode)
-	var contextParts []string
+	var contextParts []memoryRecallItem
 	if l.shouldAutoInject() {
 		// Context assembler (leaf 03): the enabled seam routes injection
 		// through tier-budgeted recall; nil/typed-nil seam = today's path
-		// byte-for-byte.
-		contextParts = l.memoryContextViaSeam(ctx, t.ContextQuery)
-		if contextParts == nil {
+		// byte-for-byte. Seam items carry no stable metadata, so they enter
+		// as volatile (the historical default).
+		if parts := l.memoryContextViaSeam(ctx, t.ContextQuery); parts != nil {
+			contextParts = make([]memoryRecallItem, len(parts))
+			for i, p := range parts {
+				contextParts[i] = memoryRecallItem{text: p}
+			}
+		} else {
 			contextParts = l.buildMemoryContext(ctx, t)
 		}
+	}
+
+	// Stable/volatile split (leaf 03 C6): items whose "stable" metadata is
+	// truthy join the cacheable "Memory (standing)" section (its own
+	// conservative 25% budget); volatile items keep the whole-item
+	// MaxMemoryContextTokens fence budget, unchanged.
+	var stableItems, volatileItems []memoryRecallItem
+	for _, item := range contextParts {
+		if item.stable {
+			stableItems = append(stableItems, item)
+		} else {
+			volatileItems = append(volatileItems, item)
+		}
+	}
+
+	// Recall telemetry (leaf 04 T2): stage the injected-item snapshot on
+	// the conversation BEFORE the turn renders, so the turn.terminal
+	// capture can write one recall_outcomes.jsonl row per item. Identifiable
+	// items only (empty id = seam/legacy path, no row). Runs even when the
+	// assembly produced nothing so a previous turn's staged rows cannot
+	// leak into this turn's outcome.
+	if conv := l.conversations.Get(conversationID); conv != nil {
+		conv.SetRecallOutcomeSnapshot(recallSnapshotFromItems(contextParts))
 	}
 
 	// Set memory context on conversation and freeze snapshot for prefix caching
@@ -6959,9 +7364,34 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		// final cap re-check still uses the static MaxMemoryContextTokens
 		// as the conservative backstop (leaf 03: seam budgets are always
 		// <= the static share the allocator derives).
-		bulleted := make([]string, len(contextParts))
-		for i, part := range contextParts {
-			bulleted[i] = "- " + part
+		//
+		// Budget split (leaf 03 T2): the VOLATILE set keeps the whole-item
+		// MaxMemoryContextTokens budget (semantics unchanged); the stable
+		// set is capped at its own conservative 25% bound (500 tokens),
+		// whole-item, marker appended on drop — stable is untouched by
+		// volatile-budget drops and vice versa.
+		stableBudget := MaxMemoryContextTokens / 4
+		stableBulleted := make([]string, 0, len(stableItems))
+		for _, item := range stableItems {
+			stableBulleted = append(stableBulleted, "- "+item.text)
+		}
+		stableBudgeted := EnforceMemoryItemBudget(stableBulleted, stableBudget)
+		if len(stableBudgeted) != len(stableBulleted) {
+			l.logger.Debug("Standing memory truncated due to token budget",
+				"original_items", len(stableBulleted),
+				"kept_items", len(stableBudgeted)-1, // minus marker
+				"budget_tokens", stableBudget,
+			)
+		}
+		var stableContext strings.Builder
+		for _, part := range stableBudgeted {
+			stableContext.WriteString(part + "\n")
+		}
+		conv.SetStandingMemoryContext(stableContext.String())
+
+		bulleted := make([]string, len(volatileItems))
+		for i, item := range volatileItems {
+			bulleted[i] = "- " + item.text
 		}
 		budgeted := EnforceMemoryItemBudget(bulleted, MaxMemoryContextTokens)
 		if len(budgeted) != len(bulleted) {
@@ -7202,9 +7632,58 @@ func (l *AgentLoop) extractModelOverrideFromMetadata(metadata json.RawMessage) s
 	return ref
 }
 
+// memoryRecallItem is one recalled memory rendered for prompt injection,
+// carrying the leaf-03 C6 stable flag (metadata "stable" truthy = standing
+// context that renders in the cacheable "Memory (standing)" section) and the
+// leaf-04 C5 telemetry identity: the memory's id + salient tokens so the
+// turn-terminal capture can write the recall_outcomes.jsonl row. Items
+// assembled without an id (legacy/seam paths) carry an empty id and
+// contribute NO outcome row (conservative: an unidentifiable injection is
+// not measurable).
+type memoryRecallItem struct {
+	text   string
+	stable bool
+	id     string
+	query  string
+}
+
 // buildMemoryContext fetches and formats memory context for the task.
-func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []string {
-	var parts []string
+// Every recall branch passes the C2 scope filter (leaf 03-agent-recall-
+// wiring T2): the loop's resolved B1 tuple (agent MemoryMaxScope + the
+// session's bound project + multiuser identity) scopes inherited memories,
+// explicit refs, and the auto-search identically. An unbound session under
+// a project max recalls NOTHING project-scoped (global + own-user rows
+// stay recallable) — never a daemon-CWD fallback.
+func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []memoryRecallItem {
+	var items []memoryRecallItem
+	add := func(m memvid.Memory) {
+		items = append(items, memoryRecallItem{
+			text:   formatMemoryForPrompt(m),
+			stable: memoryItemIsStable(memory.MemoryResult{Memory: memory.Memory{Metadata: m.Metadata}}),
+			// Leaf 04 C5: identity for the recall-outcome row.
+			id:    m.ID,
+			query: t.ContextQuery,
+		})
+	}
+	// Scope filter for THIS loop's session (T2): applied to every fetched
+	// slice below via memory.FilterResults — the committed C2 predicate.
+	scopeIdentity := l.memoryScopeCtxIdentity()
+	scopeOpts := []memory.SearchOption{
+		memory.WithScopeFilter(memory.Scope(scopeIdentity.MaxScope), scopeIdentity.ProjectID, scopeIdentity.UserID),
+		memory.WithMultiUserEnabled(scopeIdentity.MultiUser),
+	}
+	addScoped := func(mems []memvid.Memory) {
+		for _, m := range mems {
+			res := memory.FilterResults([]memory.MemoryResult{memory.MemoryToResult(memory.Memory{
+				ID:       m.ID,
+				Content:  m.Content,
+				Metadata: m.Metadata,
+			})}, scopeOpts...)
+			if len(res) > 0 {
+				add(m)
+			}
+		}
+	}
 
 	// Fetch inherited memories from parent task
 	if l.memvid != nil && l.taskStore != nil && t.InheritedFrom != "" {
@@ -7216,9 +7695,7 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 			if err != nil {
 				l.logger.Warn("Failed to fetch inherited memories", "error", err)
 			} else {
-				for _, m := range inherited {
-					parts = append(parts, formatMemoryForPrompt(m))
-				}
+				addScoped(inherited)
 			}
 		}
 	}
@@ -7229,9 +7706,7 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 		if err != nil {
 			l.logger.Warn("Failed to fetch memory refs", "error", err)
 		} else {
-			for _, m := range memories {
-				parts = append(parts, formatMemoryForPrompt(m))
-			}
+			addScoped(memories)
 		}
 	}
 
@@ -7242,12 +7717,12 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 			l.logger.Warn("Failed to search memory context", "error", err)
 		} else {
 			for _, r := range results {
-				parts = append(parts, formatMemoryForPrompt(r.Memory))
+				addScoped([]memvid.Memory{r.Memory})
 			}
 		}
 	}
 
-	return parts
+	return items
 }
 
 // injectProjectContext adds artifact context (CLAUDE.md, .claude/ skills/agents),
@@ -7452,6 +7927,14 @@ func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, c
 	// Add memory context section using frozen snapshot (Hermes pattern for prefix caching)
 	// The snapshot was frozen at session start via conv.FreezeMemorySnapshot()
 	// Context fencing prevents the model from treating recalled memory as user discourse
+
+	// Standing (stable) memory first (leaf 03 C6/T3): AddSectionWithStability
+	// with stable=true places the section in the CACHEABLE prefix (ahead of
+	// everything volatile), so prompt caches survive per-turn recall churn.
+	// The title is contract C6's literal — the gate asserts it.
+	if standing := conv.StandingMemoryContext(); strings.TrimSpace(standing) != "" {
+		builder.AddSectionWithStability("Memory (standing)", standing, true)
+	}
 	if conv.HasMemorySnapshot() {
 		memoryContext := conv.BuildPromptWithSnapshot()
 		if memoryContext != "" {
@@ -7857,6 +8340,26 @@ func (l *AgentLoop) recordTaskExecution(ctx context.Context, t *task.Task, respo
 	l.logger.Debug("Recorded task execution", "task", t.ID, "memory", memoryID)
 }
 
+// memoryItemIsStable reports whether a recalled memory is standing
+// (rarely-changing) context: the leaf-03 C6 stable flag rides the memory's
+// "stable" metadata key (truthy = stable). Absent/nil metadata or a
+// non-true value is volatile — the historical default. Shared by both
+// recall injection sites (the loop's system-prompt fence assembly and the
+// dispatcher's "## Relevant Context" user-message block).
+func memoryItemIsStable(m memory.MemoryResult) bool {
+	if m.Memory.Metadata == nil {
+		return false
+	}
+	switch v := m.Memory.Metadata["stable"].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true" || v == "1"
+	default:
+		return false
+	}
+}
+
 // formatMemoryForPrompt formats a memory for inclusion in the prompt.
 func formatMemoryForPrompt(m memvid.Memory) string {
 	content := m.Content
@@ -8182,6 +8685,12 @@ func (l *AgentLoop) executeToolCallsUngated(ctx context.Context, toolCalls []llm
 	// shared mutable state on the tool registry.
 	ctx = tools.ContextWithWorkingDir(ctx, l.GetWorkingDir())
 
+	// Memory-scope identity (leaf 03-agent-recall-wiring T3): the memory
+	// tools stamp writes and filter reads with the SAME resolved B1 tuple
+	// this loop recalls under. Absent from contexts without this injection
+	// (legacy callers) = scope-blind, byte-identical.
+	ctx = tools.ContextWithScopeIdentity(ctx, l.memoryScopeCtxIdentity())
+
 	// Autonomous-execution marker: job-driven headless runs (step jobs)
 	// cannot be followed by an interactive resolve/accept turn, so staging
 	// tools bypass the preview workflow on this context (e2e run 8:
@@ -8474,6 +8983,19 @@ func (l *AgentLoop) buildSystemPromptWithOverride() string {
 func (l *AgentLoop) assembleSystemPrompt(builder *PromptBuilder) string {
 	// Inject status bar (leaf 13, unstable section for turn-level info)
 	builder.AddSectionWithStability("[status]", StatusBar(l.turnStatus()), false)
+
+	// Turn boundary (branch 01 #103 / C1): attach the loop's refresh-capable
+	// capabilities builder so this per-turn build settles a mid-session
+	// skill-index refresh (BuildSystemPromptOrdered -> refreshIfNeeded). The
+	// builder is shared across turns and nil-guarded: when the daemon has
+	// not wired one the refresh is a no-op. Reads the loop field under the
+	// lock, mirroring the capabilityIndex read in discoverRelevantSkills.
+	l.mu.RLock()
+	cb := l.capabilitiesBuilder
+	l.mu.RUnlock()
+	if cb != nil {
+		builder.SetCapabilitiesBuilder(cb)
+	}
 
 	prompt, hash := builder.BuildSystemPromptOrdered(!l.config.StablePrefixDisabled)
 
@@ -8825,6 +9347,26 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		WithResolver(l.resolver),
 		WithModelRef(l.modelRef),
 		WithAgentSpec(l.spec),
+		// --- Loop-carried group resolution (agent-groups leaf 04 T1,
+		// three-site rule site 2: session clones). Clones inherit the
+		// template's record so dispatched/chat turns are gated exactly
+		// like the template loop; a nil record clones as nil (unmanaged).
+		func(l2 *AgentLoop) {
+			if res := l.GroupResolution(); res != nil {
+				l2.SetGroupResolution(res)
+			}
+		},
+		// --- Decision-log level (agent-groups leaf 04 daemon wiring):
+		// clones inherit the template executor's C2 decision-audit level
+		// so the knob covers session-scoped turns too.
+		func(l2 *AgentLoop) {
+			if e := l.executor; e != nil {
+				e.mu.RLock()
+				level := e.decisionLogLevel
+				e.mu.RUnlock()
+				l2.SetExecutorDecisionLogLevel(level)
+			}
+		},
 		// --- Bughunt F5: the global models.json5 refusal_model slot must
 		// survive the clone — without it a per-session loop cloned from the
 		// daemon template had refusalFallbackRef() == "" and silently ran
@@ -8864,6 +9406,21 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		WithSecurityOrchestrator(l.securityOrch),
 		WithMessageBus(l.bus),
 		WithLoopLogger(l.logger),
+
+		// [agent.tools] tool-schema + exposure config (dynamic-tools leaf 05):
+		// per-session clones must inherit the daemon template's tool-schema
+		// settings or the capability-gate downgrade seam (ApplyRequestModel)
+		// cannot resolve the active mode. Idempotent: the clone already had
+		// it stamped by applySchemaModeLocked on attach, and re-stamping
+		// the same values is a no-op.
+		func(l2 *AgentLoop) {
+			l.mu.RLock()
+			cfg, set := l.schemaModeCfg, l.schemaModeSet
+			l.mu.RUnlock()
+			if set {
+				l2.SetSchemaModeConfig(cfg)
+			}
+		},
 
 		// --- Memory + task ---
 		WithMemvidClient(l.memvid),
@@ -8982,6 +9539,29 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 			}
 		},
 
+		// --- Context-assembler + PII-restore seams (wiring-gap leaf
+		// 01-snapshot-seams, three-site rule site 2: session clones).
+		// Without this block a GetOrCreateWired clone silently lost all
+		// four: the assembler config + tier provider never arrived, so
+		// contextSeamIfEnabled() stayed nil and the clone ran the
+		// un-budgeted static path forever; the PII restore lane never
+		// re-attached, so a masked reply shipped raw to the user. The
+		// seam materializes lazily from (cfg, provider), so propagating
+		// both inputs is sufficient; the LoopSeam pointer itself stays
+		// per-loop. SetTierBudgetProvider is typed-nil-guarded, so the
+		// interface read is unconditional.
+		func(l2 *AgentLoop) {
+			if l.contextAssemblerSet {
+				l2.SetContextAssemblerConfig(l.contextAssemblerCfg)
+			}
+			if l.tierProvider != nil {
+				l2.SetTierBudgetProvider(l.tierProvider)
+			}
+			if hook := l.piiRestore; hook != nil {
+				l2.SetPiiRestoreHook(hook)
+			}
+		},
+
 		// NOTE: The following fields are deliberately EXCLUDED:
 		// - sessionID, workingDir, projectID, detectionContext, workerID:
 		//   per-session fields set explicitly by GetOrCreateWired.
@@ -9074,6 +9654,22 @@ func (l *AgentLoop) SetCapabilityIndex(ci *skills.CapabilityIndex) {
 	l.capabilityIndex = ci
 }
 
+// SetCapabilitiesBuilder wires the refresh-capable capabilities builder whose
+// skill index the per-turn prompt build settles (branch 01 #103 / C1). The
+// loop attaches it to each per-turn PromptBuilder at the turn boundary
+// (assembleSystemPrompt), so a skill the agent authored mid-session (index
+// marked dirty by the write-path notifier) is visible next turn without a
+// restart. Nil is guarded: a nil argument leaves the loop unwired and the
+// refresh is a no-op (the default), flipping no new default.
+func (l *AgentLoop) SetCapabilitiesBuilder(cb *CapabilitiesBuilder) {
+	if cb == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.capabilitiesBuilder = cb
+}
+
 // SetSkillLoader sets the lazy skill loader for on-demand loading.
 // This allows wiring the loader after the loop is created when
 // skills are initialized in a specific order.
@@ -9135,15 +9731,36 @@ func (l *AgentLoop) SetSessionStore(store any, sessionCfg any) {
 	}
 }
 
+// sessionToolCallReader is the narrow structural interface for reading
+// persisted tool calls (wiring-followups-final leaf 02). Satisfied by
+// session.SQLiteStore (and session.Store); asserted OPTIONALLY at restore
+// time so readers without the capability restore exactly as before.
+// MemoryStore satisfies it structurally too, returning empty (tool calls
+// are only persisted in SQLite).
+type sessionToolCallReader interface {
+	GetToolCallsForMessages(messageIDs []int64) (map[int64][]session.ToolCall, error)
+}
+
 // buildConversationRestoreFn returns the restore function handed to
 // ConversationStore.GetOrRestore on cache miss. It reads persisted
 // messages, filters to user/assistant entries, sorts ascending by
 // timestamp, and tail-caps to restoreMessageLimit (0 = all). Unknown IDs
 // and empty histories return an empty (non-nil) slice with a nil error so
 // GetOrRestore yields a fresh conversation.
+//
+// Leaf 02 (wiring-followups-final): when the reader ALSO satisfies
+// sessionToolCallReader, the rebuild loop re-attaches persisted tool calls
+// to assistant ChatMessages (message_id join, seq order, llm.ToolCalls
+// shape) - a restored session no longer loses its tool-call record. The
+// fetch is best-effort: any join failure logs a Warn and restores without
+// tool calls, never failing the restore.
 func (l *AgentLoop) buildConversationRestoreFn() func(id string) ([]llm.ChatMessage, error) {
 	reader := l.sessionReader
 	limit := l.restoreMessageLimit
+	var toolReader sessionToolCallReader
+	if tr, ok := reader.(sessionToolCallReader); ok {
+		toolReader = tr
+	}
 	return func(id string) ([]llm.ChatMessage, error) {
 		if reader == nil || id == "" {
 			return []llm.ChatMessage{}, nil
@@ -9161,19 +9778,63 @@ func (l *AgentLoop) buildConversationRestoreFn() func(id string) ([]llm.ChatMess
 			// the error is logged by the caller (see logRestoreFailure).
 			return nil, err
 		}
-		out := make([]llm.ChatMessage, 0, len(rows))
+		// Leaf 02: collect the user/assistant rows first so the join can
+		// batch ONE GetToolCallsForMessages call over all assistant IDs
+		// (never per-row store I/O).
+		type kept struct {
+			row  session.Message
+			want bool // true = may carry tool calls (assistant row)
+		}
+		keptRows := make([]kept, 0, len(rows))
+		var assistantIDs []int64
 		for _, row := range rows {
-			// Filter to user/assistant "message" entries — session_messages
+			// Filter to user/assistant "message" entries - session_messages
 			// also carries system/anchor/summary/compaction rows that must
 			// not leak into model-visible history (leaf Notes).
 			if row.EntryType != "message" ||
 				(row.Role != string(llm.RoleUser) && row.Role != string(llm.RoleAssistant)) {
 				continue
 			}
-			out = append(out, llm.ChatMessage{
-				Role:    llm.Role(row.Role),
-				Content: row.Content,
-			})
+			isAssistant := row.Role == string(llm.RoleAssistant)
+			if isAssistant && row.ID > 0 {
+				assistantIDs = append(assistantIDs, row.ID)
+			}
+			keptRows = append(keptRows, kept{row: row, want: isAssistant})
+		}
+		// Best-effort tool-call join: one batched fetch keyed by message_id.
+		// Any failure shape degrades to restore-without-tool-calls (Warn,
+		// never an error -- the messages themselves already loaded fine).
+		var callsByID map[int64][]session.ToolCall
+		if toolReader != nil && len(assistantIDs) > 0 {
+			fetched, ferr := toolReader.GetToolCallsForMessages(assistantIDs)
+			if ferr != nil {
+				l.logger.Warn("conversation restore: tool-call fetch failed; restoring without tool calls",
+					"conversation", id,
+					"error", ferr,
+				)
+			} else {
+				callsByID = fetched
+			}
+		}
+		out := make([]llm.ChatMessage, 0, len(keptRows))
+		for _, k := range keptRows {
+			msg := llm.ChatMessage{
+				Role:    llm.Role(k.row.Role),
+				Content: k.row.Content,
+			}
+			if k.want && callsByID != nil {
+				for _, tc := range callsByID[k.row.ID] {
+					msg.ToolCalls = append(msg.ToolCalls, llm.ToolCall{
+						ID:   tc.ToolCallID,
+						Type: "function",
+						Function: llm.ToolCallFunction{
+							Name:      tc.ToolName,
+							Arguments: tc.Arguments,
+						},
+					})
+				}
+			}
+			out = append(out, msg)
 		}
 		// GetMessages returns ascending (SQLite ORDER BY id; memory store
 		// is append-ordered). Rows were appended in store order, which the

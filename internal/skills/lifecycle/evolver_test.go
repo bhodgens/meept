@@ -261,12 +261,15 @@ func TestEvolver_PassA_Refine(t *testing.T) {
 		t.Errorf("expected Refined=1, got %d (report: %+v)", report.Refined, report)
 	}
 
-	// Verify the skill was overwritten.
+	// Verify the skill was overwritten. The evolver stamps origin:evolver
+	// into the frontmatter (C2), so the on-disk content is improvedContent
+	// with the origin key inserted.
 	got, err := writer.ReadSkill(skillName)
 	if err != nil {
 		t.Fatalf("ReadSkill failed: %v", err)
 	}
-	if got != improvedContent {
+	wantStamped := strings.Replace(improvedContent, "\n---\n", "\norigin: evolver\n---\n", 1)
+	if got != wantStamped {
 		t.Errorf("expected improved content, got %q", got)
 	}
 

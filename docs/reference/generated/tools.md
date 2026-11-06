@@ -15,6 +15,7 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 - [func AutonomousFromContext\(ctx context.Context\) bool](<#AutonomousFromContext>)
 - [func CanonicalName\(tool Tool\) string](<#CanonicalName>)
 - [func ContextWithAutonomous\(ctx context.Context\) context.Context](<#ContextWithAutonomous>)
+- [func ContextWithScopeIdentity\(ctx context.Context, id ScopeIdentity\) context.Context](<#ContextWithScopeIdentity>)
 - [func ContextWithWorkingDir\(ctx context.Context, dir string\) context.Context](<#ContextWithWorkingDir>)
 - [func GetCategory\(t Tool\) string](<#GetCategory>)
 - [func GetMaxResultTokens\(t Tool\) int](<#GetMaxResultTokens>)
@@ -57,6 +58,8 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
   - [func \(r \*Registry\) Unregister\(name string\) error](<#Registry.Unregister>)
 - [type ResultSizer](<#ResultSizer>)
 - [type SchemaMode](<#SchemaMode>)
+- [type ScopeIdentity](<#ScopeIdentity>)
+  - [func ScopeIdentityFromContext\(ctx context.Context\) ScopeIdentity](<#ScopeIdentityFromContext>)
 - [type StreamingTool](<#StreamingTool>)
 - [type TerminatingTool](<#TerminatingTool>)
 - [type Tool](<#Tool>)
@@ -170,6 +173,13 @@ C3: This function exists so that constitution tool references can be validated a
 	func ContextWithAutonomous(ctx context.Context) context.Context
 
 ContextWithAutonomous marks the context as AUTONOMOUS execution: a job\-driven, headless run where no human and no later interactive turn can follow up. Staging tools \(file\_write, file\_edit\) consult this to bypass the preview/accept workflow — a staged change in an autonomous run is a silent no\-op \(e2e run 8, 2026\-09\-11: file\_write direct:"False" staged into the pending\-changes registry, nothing ever resolved it, the step "completed", and the file never existed on disk\).
+
+<a name="ContextWithScopeIdentity"></a>
+## func ContextWithScopeIdentity
+
+	func ContextWithScopeIdentity(ctx context.Context, id ScopeIdentity) context.Context
+
+ContextWithScopeIdentity returns ctx carrying the session's memory\-scope identity. A zero MaxScope stores nothing \(no identity = legacy behavior\).
 
 <a name="ContextWithWorkingDir"></a>
 ## func ContextWithWorkingDir
@@ -584,6 +594,32 @@ SchemaModeFull ships every tool's complete parameter schema \(legacy behavior\).
 	    // empty object schemas; the alwaysFull set keeps core tools intact.
 	    SchemaModeIndexed SchemaMode = "indexed"
 	)
+
+<a name="ScopeIdentity"></a>
+## type ScopeIdentity
+
+ScopeIdentity is the session memory\-scope identity carried in the tool execution context \(leaf 03\-agent\-recall\-wiring T3/T4\). The agent loop resolves the B1 tuple \(agent MemoryMaxScope \+ session project/user identity\) once per turn and injects it alongside the working directory; the memory tools stamp writes and filter reads from it. Zero value = no identity \(legacy scope\-blind behavior, byte\-identical\).
+
+	type ScopeIdentity struct {
+	    // MaxScope is the caller's widest recall scope: "project", "user", or
+	    // "global" (memory.Scope vocabulary).
+	    MaxScope string
+	    // ProjectID is the session's bound project ("" unbound — never a CWD
+	    // fallback).
+	    ProjectID string
+	    // UserID is the session's multiuser identity ("" single-user).
+	    UserID string
+	    // MultiUser is the Flag-3 bit: true under enabled multiuser, so an
+	    // empty UserID fails closed instead of matching user-scope rows.
+	    MultiUser bool
+	}
+
+<a name="ScopeIdentityFromContext"></a>
+### func ScopeIdentityFromContext
+
+	func ScopeIdentityFromContext(ctx context.Context) ScopeIdentity
+
+ScopeIdentityFromContext extracts the session memory\-scope identity from ctx. Returns the zero value when absent.
 
 <a name="StreamingTool"></a>
 ## type StreamingTool

@@ -277,15 +277,15 @@ Passed to every implementation agent in dispatch context:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-context-assembler/00-research-budgeting | PENDING | 0 | |
-| 01-context-assembler/01-allocator-core | PENDING | 0 | |
-| 01-context-assembler/02-doc-budgets | PENDING | 0 | |
-| 01-context-assembler/03-integration | PENDING | 0 | |
-| 02-memory-tiers/00-research-tiers | PENDING | 0 | |
-| 02-memory-tiers/01-working-tier-store | PENDING | 0 | |
-| 02-memory-tiers/02-policy-automation | PENDING | 0 | |
-| 02-memory-tiers/03-demotion | PENDING | 0 | |
-| 04-e2e | PENDING | 0 | |
+| 01-context-assembler/00-research-budgeting | COMPLETE | 1 | landed b8b138c6 (findings-context-budgeting.md, reviewed) |
+| 01-context-assembler/01-allocator-core | COMPLETE | 1 | landed 14b21b5e (issue 81) |
+| 01-context-assembler/02-doc-budgets | COMPLETE | 1 | landed 90ab5266 (issue 81) |
+| 01-context-assembler/03-integration | COMPLETE | 1 | landed 5983163c (issue 81) |
+| 02-memory-tiers/00-research-tiers | COMPLETE | 1 | landed b8b138c6 (findings-memory-tiers.md, reviewed) |
+| 02-memory-tiers/01-working-tier-store | COMPLETE | 1 | landed 14b21b5e (issue 81) |
+| 02-memory-tiers/02-policy-automation | COMPLETE | 1 | landed f8d2bfd6 (issue 81) |
+| 02-memory-tiers/03-demotion | COMPLETE | 1 | landed 9872de89 (issue 81) |
+| 04-e2e | COMPLETE | 1 | landed 91b68aae; make e2e-fast-area AREA=context-memory-engine green (20.8s re-run at audit) |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -314,13 +314,13 @@ matrix validated at REVIEW time in-session.
 
 | # | Feature (from plan) | Source (leaf/spec) | Unit tests | E2E tests | Status |
 |---|---------------------|--------------------|-----------|-----------|--------|
-| F1 | window-fraction allocation, deterministic | A1 T3-T5 | contextalloc allocator tests | context-memory-engine (budget probes) | PENDING |
-| F2 | doc budget bounds CLAUDE.md/README | A2 | artifact_integration budget tests | context-memory-engine | PENDING |
-| F3 | stable prefix hash preservation | A2 | prompt ordered-assembly tests | context-memory-engine | PENDING |
-| F4 | working tier store + recall bound | B1 | internal/memory/working tests | context-memory-engine | PENDING |
-| F5 | automated eviction + compression policies | B2 | tierpolicy tests | context-memory-engine | PENDING |
-| F6 | semantic->episodic demotion | B3 | demotion tests | context-memory-engine | PENDING |
-| F7 | tier budgets into allocator, nil seam = today | A3 | seam + typed-nil tests | context-memory-engine | PENDING |
+| F1 | window-fraction allocation, deterministic | A1 T3-T5 | contextalloc allocator tests | context-memory-engine (budget probes) | VALIDATED |
+| F2 | doc budget bounds CLAUDE.md/README | A2 | artifact_integration budget tests | context-memory-engine | VALIDATED |
+| F3 | stable prefix hash preservation | A2 | prompt ordered-assembly tests | context-memory-engine | VALIDATED |
+| F4 | working tier store + recall bound | B1 | internal/memory/working tests | context-memory-engine | VALIDATED |
+| F5 | automated eviction + compression policies | B2 | tierpolicy tests | context-memory-engine | VALIDATED |
+| F6 | semantic->episodic demotion | B3 | demotion tests | context-memory-engine | VALIDATED |
+| F7 | tier budgets into allocator, nil seam = today | A3 | seam + typed-nil tests | context-memory-engine | VALIDATED |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 
@@ -343,3 +343,4 @@ dated addenda. Never edit a dispatched leaf document mid-execution.
 - The known statics (loop.go:4169-4184, conversation.go:22,33) remain as
   FALLBACKS when no model context limit is discovered; the allocator
   supersedes them when ContextDiscovery resolves a real window.
+- Forest closeout 2026-11-05: tables reconciled against HEAD by read-only audit; all leaves verified landed + gates green.

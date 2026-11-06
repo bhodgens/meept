@@ -202,7 +202,10 @@ func (f *fakeStore) GetTree(string) ([]session.TreeNode, error)        { return 
 func (f *fakeStore) ForkSession(string, int64, string) (*session.Session, error) {
 	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
-func (f *fakeStore) SaveToolCalls(int64, []session.ToolCall) error  { return nil }
+func (f *fakeStore) SaveToolCalls(int64, []session.ToolCall) error { return nil }
+func (f *fakeStore) SaveMessagesWithToolCalls(string, []session.Message, map[int][]session.ToolCall) error {
+	return nil
+}
 func (f *fakeStore) GetToolCalls(int64) ([]session.ToolCall, error) { return nil, nil }
 func (f *fakeStore) GetToolCallsForMessages([]int64) (map[int64][]session.ToolCall, error) {
 	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface

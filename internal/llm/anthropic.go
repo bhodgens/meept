@@ -296,6 +296,10 @@ func (c *AnthropicClient) anthropicRequestURL(cfg *ModelConfig, streaming bool) 
 // per-turn, span identity per-call) -- see Client.recordUsageStore.
 func (c *AnthropicClient) recordUsageStore(cfg *ModelConfig, usage TokenUsage, isErr bool, errMsg string, latencyMs int64, chatOpts *chatOptions) {
 	traceID, spanID := traceScopeOf(chatOpts)
+	// TTFT (llm-serving-tiers leaf 04): captured from the request-scoped
+	// first-delta state; -1 on non-streaming calls, cache hits, and
+	// errors (nothing armed the clock or no delta ever arrived).
+	ttftMs := ttftMS(chatOpts)
 	if c.usageStore == nil && c.llmCallObserver == nil {
 		return
 	}
@@ -325,6 +329,7 @@ func (c *AnthropicClient) recordUsageStore(cfg *ModelConfig, usage TokenUsage, i
 			IsError:             isErr,
 			ErrorMessage:        errMsg,
 			LatencyMs:           latencyMs,
+			TTFTMS:              ttftMs,
 			TraceID:             traceID,
 			SpanID:              spanID,
 		}
@@ -749,7 +754,11 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 			reportProgress(ProgressStageThinking, "Model is thinking...")
 		}
 
-		resp, err := c.doStreamingRequest(ctx, reqBody, effCfg, reportProgress, chatOpts.sessionID)
+		// TTFT clock arm (llm-serving-tiers leaf 04): dispatch instant of
+		// THIS attempt, refreshed per short-retry so the number measures
+		// the serving attempt's first-token wait. First text delta captures.
+		chatOpts.ttftStart = time.Now()
+		resp, err := c.doStreamingRequest(ctx, reqBody, effCfg, reportProgress, chatOpts.sessionID, chatOpts)
 		if err != nil {
 			// Refusal errors never re-enter the short-retry loop: the
 			// serving model declined by policy — retrying the SAME model
@@ -1694,7 +1703,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 // doStreamingRequest performs a streaming HTTP request to Anthropic's API.
 // It processes server-sent events and reports progress via the callback.
-func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthropicRequest, cfg *ModelConfig, progress func(ProgressStage, string), sessionID string) (*Response, error) {
+func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthropicRequest, cfg *ModelConfig, progress func(ProgressStage, string), sessionID string, chatOpts ...*chatOptions) (*Response, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
@@ -1825,7 +1834,14 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 	if cfg.ProviderID == ProviderIDBedrock || hasBedrockEventStreamBody(resp.Header) {
 		streamBody = newBedrockEventStreamAdapter(resp.Body)
 	}
-	parsedResp, parseErr := c.parseStreamingResponse(streamBody, progress, cfg)
+	// TTFT capture (llm-serving-tiers leaf 04): thread the request-scoped
+	// options into the parser when the caller supplied them, so the first
+	// content delta stamps the capture instant.
+	var capture *chatOptions
+	if len(chatOpts) > 0 {
+		capture = chatOpts[0]
+	}
+	parsedResp, parseErr := c.parseStreamingResponse(streamBody, progress, cfg, capture)
 
 	// Record successful request metrics with actual usage from the stream
 	if c.metricsStore != nil && parseErr == nil && parsedResp != nil {
@@ -1901,11 +1917,22 @@ func (c *AnthropicClient) buildRateLimitError(respBody []byte, statusCode int, r
 // served the stream — the streaming refusal must attribute to it, not to the
 // client's configured default (which is stale under override/refusal
 // fallback). May be nil (legacy callers); the client's stored config is the
-// then-fallback attribution source.
-func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(ProgressStage, string), cfg ...*ModelConfig) (*Response, error) {
+// then-fallback attribution source. ttftOpts carries the request-scoped TTFT
+// capture state (llm-serving-tiers leaf 04): the first text content delta
+// stamps ttftFirstDelta on it. Nil (legacy/test callers) = no capture, the
+// record stays -1.
+func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(ProgressStage, string), cfg ...any) (*Response, error) {
 	effective := c.config
-	if len(cfg) > 0 && cfg[0] != nil {
-		effective = cfg[0]
+	var ttftOpts *chatOptions
+	for _, arg := range cfg {
+		switch v := arg.(type) {
+		case *ModelConfig:
+			if v != nil {
+				effective = v
+			}
+		case *chatOptions:
+			ttftOpts = v
+		}
 	}
 	var blocks []contentBlockAccum
 	var stopReason = "end_turn"
@@ -1958,6 +1985,11 @@ func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(P
 			switch currentBlock.Type {
 			case "text":
 				if streamEvent.Delta.Text != "" {
+					// TTFT: first non-empty TEXT delta after dispatch
+					// (llm-serving-tiers leaf 04). Thinking deltas do NOT
+					// start the clock - R0 Section 3 pins first CONTENT
+					// delta. Nil ttftOpts (legacy callers) skips capture.
+					captureFirstDelta(ttftOpts)
 					currentBlock.Text.WriteString(streamEvent.Delta.Text)
 					if progress != nil {
 						progress(ProgressStageStreaming, "Receiving text...")

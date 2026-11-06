@@ -12,10 +12,11 @@ Companion docs:
 
 ## CRITICAL CORRECTION to prior meept config comments
 
-`config/models.json5:316` says "llama.cpp builds a fresh cache per call". This is
-WRONG. llama-server has `--cache-prompt` **enabled by default**, auto unified KV,
+The pre-2026-11 `config/models.json5` comment claimed a fresh per-call cache.
+That is WRONG. llama-server has `--cache-prompt` **enabled by default**, auto unified KV,
 and longest-common-prefix slot selection (verified against llama.cpp master README
 + tools/server docs, Oct 2026). The hot slot already reuses the session prefix.
+(Corrected in config/models.json5 by the llm-serving-tiers tree, leaf 03.)
 The real loss paths are: slot eviction on session switch, mid-prefix edits, and
 non-prefix reuse after compaction. Fix the comment; do not "fix" caching that
 already exists. (Detail: 02-inference-stack-and-proxy.md §1.)
@@ -59,7 +60,7 @@ already exists. (Detail: 02-inference-stack-and-proxy.md §1.)
 ### P1 — Turn on the free wins in the local stack (S, ~1 day) — GPU prefill ↓↓
 - config/models.json5: add `--cache-reuse 256` to the llama-server spawn command
   (recovers prefill after compaction/edits via KV-shifted chunk reuse, llama.cpp
-  PR #9866); correct the stale "fresh cache per call" comment.
+  PR #9866); correct the stale fresh-per-call-cache comment.
 - Optionally `--cache-ram 8192` (host-RAM prompt state cache, PR #16391; watch
   unified-memory pressure on the 64GB M2 Ultra; start 4096).
 - Wire llama-server `n_past`/`progress` log parsing into metrics → a real

@@ -100,6 +100,7 @@ type Config struct {
 	ProjectsRecent      ProjectRecentConfig       `json:"projects_recent"     toml:"projects_recent"`
 	STT                 STTConfig                 `json:"stt"                 toml:"stt"`
 	TTS                 TTSConfig                 `json:"tts"                 toml:"tts"`
+	Voice               VoiceConfig               `json:"voice"                toml:"voice"`
 	OAuth               OAuthConfig               `json:"oauth"               toml:"oauth"`
 	Analytics           AnalyticsConfig           `json:"analytics,omitzero" toml:"analytics"`
 	Notifications       NotificationsConfig       `json:"notifications,omitzero" toml:"notifications"`
@@ -535,23 +536,28 @@ type PlansConfig struct {
 	// "planner-self" without a human in the loop.
 	SelfSealEnabled bool `json:"self_seal_enabled" toml:"self_seal_enabled"`
 
-	// FreshCriticEnabled gates the fresh-context evidence critic
-	// (plan-20261101-fresh-context-critic contract C1; default FALSE -
-	// ships dark). See
-	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
-	FreshCriticEnabled bool `json:"fresh_critic_enabled"   toml:"fresh_critic_enabled"`
+	// FreshCriticDisabled disables the fresh-context evidence critic
+	// (plan-20261101-fresh-context-critic contract C1). Default ON per
+	// the 2026-11-02 operator decision (docs/plans/20261101-fresh-
+	// context-critic/master.md contract C1): an absent key decodes
+	// false, which means the critic runs; an explicit true disables it.
+	// A true-by-default bool cannot be expressed with an enable-named
+	// field, so the knob ships in disable form.
+	FreshCriticDisabled bool `json:"fresh_critic_disabled"   toml:"fresh_critic_disabled"`
 
-	// HostileCriticEnabled gates the hostile second-pass critic on a
-	// different model (plan-20261101-fresh-context-critic contract C1;
-	// default FALSE - ships dark). See
-	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
-	HostileCriticEnabled bool `json:"hostile_critic_enabled" toml:"hostile_critic_enabled"`
+	// HostileCriticDisabled disables the hostile second-pass critic on
+	// a different model (plan-20261101-fresh-context-critic contract
+	// C1). Default ON per the 2026-11-02 operator decision; an absent
+	// key means the hostile pass runs (and still skips at runtime via
+	// the C5 gate while the hostile_critic_model slot is empty or
+	// same-model); an explicit true turns the pass off entirely.
+	HostileCriticDisabled bool `json:"hostile_critic_disabled" toml:"hostile_critic_disabled"`
 
-	// InterviewOptionGates gates the structured interview option objects
-	// (plan-20261101-fresh-context-critic contract C1; default FALSE -
-	// ships dark). See
-	// docs/plans/20261101-fresh-context-critic/master.md contract C1.
-	InterviewOptionGates bool `json:"interview_option_gates" toml:"interview_option_gates"`
+	// InterviewOptionsDisabled disables the structured interview option
+	// objects (plan-20261101-fresh-context-critic contract C1). Default
+	// ON per the 2026-11-02 operator decision; an explicit true falls
+	// interview questions back to plain strings.
+	InterviewOptionsDisabled bool `json:"interview_options_disabled" toml:"interview_options_disabled"`
 }
 
 // NormalizePlansDefaults clamps the tiered-iteration planning knobs to
@@ -1147,6 +1153,88 @@ type LLMSimpleFeatureConfig struct {
 	L2Enabled     bool   `json:"l2_enabled"      toml:"l2_enabled"`
 	L2DBPath      string `json:"l2_db_path"      toml:"l2_db_path"`
 	DefaultTTLMin int    `json:"default_ttl_min" toml:"default_ttl_min"`
+	// Semantic configures the semantic cache tier (llm-serving-tiers
+	// leaf 02, Contract C4; json5 key llm.cache.semantic). Default OFF:
+	// opt-in per docs/agents/opt-in-defaults.md -- no embedder call, no
+	// vector math, byte-identical client behavior when disabled.
+	Semantic SemanticCacheConfig `json:"semantic"        toml:"semantic"`
+}
+
+// SemanticCacheConfig configures the opt-in semantic cache tier
+// (llm-serving-tiers leaf 02, Contract C4; json5 key llm.cache.semantic).
+// An embedding-similarity second-chance lookup that sits strictly BEHIND
+// the exact-key response cache: exact miss first, embed, serve the cached
+// response when cosine similarity clears the threshold.
+//
+// Threshold default is 0.95 cosine per the R0 research addendum
+// (docs/research/20261031-llm-serving-tiers-findings.md Section 1.2),
+// which supersedes master.md C4's 0.92: AWS Well-Architected, Redis
+// LangCache, and Vercel converge on 0.95+ for false-positive-sensitive
+// workloads, and agent traffic (tool calls, code, one-operand differences)
+// is exactly where loose thresholds produce wrong answers.
+type SemanticCacheConfig struct {
+	// Enabled turns the tier on. Default FALSE (opt-in per
+	// docs/agents/opt-in-defaults.md): when false the client's code path
+	// is structurally unreachable -- no embedder call, no vector math,
+	// byte-identical responses.
+	Enabled bool `json:"enabled"        toml:"enabled"`
+	// Threshold is the cosine similarity floor for serving a cached
+	// response. Default 0.95 (research addendum; supersedes C4's 0.92).
+	Threshold float64 `json:"threshold"      toml:"threshold"`
+	// MaxEntries bounds the in-memory vector store with LRU eviction.
+	// Default 1024.
+	MaxEntries int `json:"max_entries"    toml:"max_entries"`
+	// TTLMin is the entry lifetime in minutes; zero mirrors
+	// llm.cache.default_ttl_min at the daemon wiring site. A negative
+	// value clamps to that mirror at the load boundary.
+	TTLMin int `json:"ttl_min"        toml:"ttl_min"`
+	// EmbedderAlias resolves the embedder model via the alias/capability
+	// machinery. Empty means reuse the memory-stack embedding provider
+	// (memory/vector) when configured; if neither resolves, the tier
+	// degrades to exact-only (structurally dead cache, never an error).
+	EmbedderAlias string `json:"embedder_alias" toml:"embedder_alias"`
+	// VerifyFloor is the lower bound of the two-stage verifier band
+	// (wiring-followups-final leaf 03): a candidate scoring in
+	// [verify_floor, threshold) is re-embedded and direct-cosine verified
+	// against its stored embedding before serving; verify failure degrades
+	// to a miss. Default 0.85 when the tier normalizes an unset band;
+	// 0 disables the band entirely (pre-band behavior). Values at/above
+	// threshold are useless and clamp to 0 at the load boundary.
+	VerifyFloor float64 `json:"verify_floor"   toml:"verify_floor"`
+}
+
+// Defaults for llm.cache.semantic (Contract C4 + R0 addendum).
+const (
+	// DefaultSemanticCacheThreshold is the 0.95 cosine floor.
+	DefaultSemanticCacheThreshold = 0.95
+	// DefaultSemanticCacheMaxEntries bounds the vector store.
+	DefaultSemanticCacheMaxEntries = 1024
+)
+
+// NormalizeSemanticCacheDefaults clamps invalid semantic-cache values to
+// defaults at the load boundary (llm-serving-tiers leaf 02): non-positive
+// or >= 1 threshold -> 0.95, non-positive max_entries -> 1024, negative
+// ttl_min -> 0 (the wiring-site mirror of llm.cache.default_ttl_min).
+// Leaf 03 (wiring-followups-final) adds the verify-band clamp: verify_floor
+// at/above the (post-clamp) threshold, or negative, is no band at all ->
+// 0 (disabled). Idempotent on valid values; the tier stays disabled unless
+// Enabled is true.
+func NormalizeSemanticCacheDefaults(sc *SemanticCacheConfig) {
+	if sc.Threshold <= 0 || sc.Threshold >= 1 {
+		sc.Threshold = DefaultSemanticCacheThreshold
+	}
+	if sc.MaxEntries <= 0 {
+		sc.MaxEntries = DefaultSemanticCacheMaxEntries
+	}
+	if sc.TTLMin < 0 {
+		sc.TTLMin = 0
+	}
+	// Verify-band clamp (leaf 03) runs AFTER the threshold clamp so the
+	// comparison uses the effective threshold. A negative floor, and a
+	// floor at/above the threshold (an empty band), both disable.
+	if sc.VerifyFloor < 0 || sc.VerifyFloor >= sc.Threshold {
+		sc.VerifyFloor = 0
+	}
 }
 
 // LLMBrokerConfig configures the model broker.
@@ -1671,11 +1759,14 @@ type MemoryConfig struct {
 	// MemoryUsefulnessConfig.
 	Usefulness MemoryUsefulnessConfig `json:"usefulness" toml:"usefulness"`
 	// Bridges holds cross-memory bridging-fact generation settings
-	// (IndexRAG stage 2, branch 09). Default OFF. See MemoryBridgesConfig.
+	// (IndexRAG stage 2, branch 09). Default ON per D1 (plan
+	// docs/plans/20261030-memory-second-brain); the substitution-experiment
+	// leaf (07) may flip it back if the eval loses. See MemoryBridgesConfig.
 	Bridges MemoryBridgesConfig `json:"bridges" toml:"bridges"`
 	// Knowledge holds the knowledge-asset store settings (tree 04).
-	// Default OFF: when disabled the knowledge_* tools are not registered
-	// and nothing reaches prompts. See KnowledgeConfig.
+	// Default ON per D1-D3 (plan docs/plans/20261030-memory-second-brain):
+	// the knowledge_* tools register out of the box; set
+	// memory.knowledge.enabled = false to opt out. See KnowledgeConfig.
 	Knowledge KnowledgeConfig `json:"knowledge" toml:"knowledge"`
 	// Conflict holds LLM conflict detection for distilled claim extraction
 	// (tree 02). Default OFF: when disabled the L1 extract handler stores
@@ -1686,16 +1777,109 @@ type MemoryConfig struct {
 	// async distillation): conversation turns are appended to
 	// <memory.data_dir>/l0/YYYY-MM-DD.jsonl and distilled asynchronously
 	// into L1 claims + L2 session scenes via the persistent queue.
-	// Default false (opt-in-defaults rule; nothing records and no
-	// memory.l1_extract / memory.l2_scene job is enqueued until set).
+	// Default true per D3 (plan docs/plans/20261030-memory-second-brain:
+	// full default-on; cost is local compute). Set false to opt out —
+	// nothing records and no memory.l1_extract / memory.l2_scene job is
+	// enqueued.
 	//
-	//gendoc:desc L0 raw-conversation tier: append-only daily JSONL of conversation turns distilled asynchronously into L1 claims (memory.l1_extract) and L2 session-scene files (memory.l2_scene) on the persistent queue; retention prunes whole daily files on the consolidation tick.
+	//gendoc:desc L0 raw-conversation tier: append-only daily JSONL of conversation turns distilled asynchronously into L1 claims (memory.l1_extract) and L2 session-scene files (memory.l2_scene) on the persistent queue; retention prunes whole daily files on the consolidation tick. Default on (memory second-brain decision D3).
 	//gendoc:example [memory] l0_enabled = true, l0_retention_days = 30
 	L0Enabled bool `json:"l0_enabled" toml:"l0_enabled"`
 	// L0RetentionDays is the retention window for daily L0 files: whole
 	// files older than this many days are pruned during the consolidation
 	// pass (no new ticker). Default 30; <= 0 disables pruning.
 	L0RetentionDays int `json:"l0_retention_days" toml:"l0_retention_days"`
+	// Tiers configures the memory-tier policy engine (tree 02 leaf 02,
+	// contract C5; wiring-gap leaf 03-tierpolicy-daemon T1): the opt-in
+	// background evict/compress/demote policy over the episodic tier.
+	// Entirely OFF at the zero value (docs/agents/opt-in-defaults.md);
+	// the daemon constructs the engine only when enabled. See
+	// MemoryTiersConfig.
+	Tiers MemoryTiersConfig `json:"tiers" toml:"tiers"`
+}
+
+// MemoryTiersConfig is the user-facing [memory.tiers] knob set for the
+// memory-tier policy engine (tierpolicy.TiersConfig mirrored into the
+// config schema; the daemon adapter maps it onto the engine). All knobs
+// are OPT-IN: Enabled defaults false, and a disabled config stays inert
+// (no goroutine, zero cost).
+//
+//gendoc:desc Memory-tier policy engine: opt-in background tick that compresses and evicts old episodic memories above band ratios, and demotes stale or low-usefulness claims to the episodic tier (flag-not-delete). Entirely off unless enabled.
+//gendoc:example [memory.tiers] enabled = true, evict_over_ratio = 0.9, retention_days = 30
+type MemoryTiersConfig struct {
+	// Enabled turns on the policy engine background tick. Default false
+	// (opt-in-defaults rule; flipping it is a product decision).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// EvictOverRatio is the hard eviction band start (fraction of the
+	// episodic ceiling). <= 0 or >= 1 resolves to 0.9 once enabled.
+	EvictOverRatio float64 `json:"evict_over_ratio" toml:"evict_over_ratio"`
+	// CompressOverRatio is the soft compression band start. <= 0 or >= 1
+	// resolves to 0.8 once enabled.
+	CompressOverRatio float64 `json:"compress_over_ratio" toml:"compress_over_ratio"`
+	// IntervalSeconds is the background tick period. <= 0 resolves to
+	// 300 once enabled.
+	IntervalSeconds int `json:"interval_seconds" toml:"interval_seconds"`
+	// DryRun makes the engine report would-be counts without mutating
+	// any store. Default false.
+	DryRun bool `json:"dry_run" toml:"dry_run"`
+	// RetentionDays is the candidate-cutoff window: episodic memories
+	// older than this many days are eviction/compression candidates;
+	// younger ones never qualify (the tick reads GetOldMemories with
+	// now-minus-retention, never an unbounded window). <= 0 resolves to
+	// 30 once enabled.
+	RetentionDays int `json:"retention_days" toml:"retention_days"`
+	// Demotion carries the semantic-claim demotion thresholds. See
+	// MemoryTiersDemotionConfig.
+	Demotion MemoryTiersDemotionConfig `json:"demotion" toml:"demotion"`
+}
+
+// NormalizeMemoryTiersDefaults clamps invalid memory.tiers values to
+// their defaults (wiring-gap leaf 03-tierpolicy-daemon T1; mirrors
+// tierpolicy.ResolveTiersConfig and NormalizeTierPolicyDefaults so all
+// three tier knob sets behave identically at the load boundary). A
+// disabled config is left untouched (inert engine; nothing consumes
+// the knob values while off, so the template's documented defaults
+// survive verbatim). An enabled config gets every unset/negative field
+// resolved (0.9 / 0.8 / 300s / 30d retention / 30d staleness / 0.1
+// usefulness floor). Idempotent: feeding resolved values through again
+// is a no-op.
+func NormalizeMemoryTiersDefaults(mt *MemoryTiersConfig) {
+	if mt == nil || !mt.Enabled {
+		return
+	}
+	if mt.EvictOverRatio <= 0 || mt.EvictOverRatio >= 1 {
+		mt.EvictOverRatio = 0.9
+	}
+	if mt.CompressOverRatio <= 0 || mt.CompressOverRatio >= 1 {
+		mt.CompressOverRatio = 0.8
+	}
+	if mt.IntervalSeconds <= 0 {
+		mt.IntervalSeconds = 300
+	}
+	if mt.RetentionDays <= 0 {
+		mt.RetentionDays = 30
+	}
+	if mt.Demotion.StaleDays <= 0 {
+		mt.Demotion.StaleDays = 30
+	}
+	if mt.Demotion.MinUsefulness <= 0 || mt.Demotion.MinUsefulness >= 1 {
+		mt.Demotion.MinUsefulness = 0.1
+	}
+}
+
+// MemoryTiersDemotionConfig carries the [memory.tiers.demotion]
+// thresholds for the semantic-to-episodic claim demotion (tierpolicy
+// contract C6). Zero/negative fields resolve to the documented defaults
+// (30d staleness window, 0.1 usefulness floor) once memory.tiers is
+// enabled.
+type MemoryTiersDemotionConfig struct {
+	// StaleDays is the staleness window: claims older than this many
+	// days are demotion candidates. Default 30.
+	StaleDays int `json:"stale_days" toml:"stale_days"`
+	// MinUsefulness is the usefulness-score floor: claims scoring below
+	// it are demotion candidates. (0, 1) required; outside resolves to
+	// 0.1.
+	MinUsefulness float64 `json:"min_usefulness" toml:"min_usefulness"`
 }
 
 // ConflictConfig gates LLM conflict detection on the L1 claim-extraction
@@ -1728,8 +1912,9 @@ type ConflictConfig struct {
 type KnowledgeConfig struct {
 	// Enabled turns on the knowledge store and registers the
 	// knowledge_search / knowledge_read / knowledge_ingest tools.
-	// Default false (opt-in-defaults rule; wiki→inference reachability
-	// is a product decision per SHARED-CONVENTIONS §2.5).
+	// Default true per D1-D3 (plan docs/plans/20261030-memory-second-brain
+	// — SHARED-CONVENTIONS §2.5 product decision authorized there); set
+	// false to opt out (wiki→inference reachability off again).
 	Enabled bool `json:"enabled" toml:"enabled"`
 	// IngestDir is the watched directory of *.md files ingested on the
 	// periodic consolidation tick (source "dir:<relpath>", content-hash
@@ -1752,7 +1937,9 @@ type KnowledgeConfig struct {
 // generation NEVER runs on the chat inference path.
 type MemoryBridgesConfig struct {
 	// Enabled turns on bridge generation in the periodic consolidation
-	// pass. Default false (opt-in until validated by the bridge eval).
+	// pass. Default true per D1 (plan docs/plans/20261030-memory-second-brain:
+	// "Q1 a"; leaf 07's substitution experiment may flip it back if the
+	// eval loses). Explicit false keeps the pass dormant.
 	Enabled bool `json:"enabled" toml:"enabled"`
 	// KB is the recall-path cap: the maximum number of bridging facts
 	// admitted into a single assembled context (leaf B04 consumes this).
@@ -1772,7 +1959,9 @@ type MemoryBridgesConfig struct {
 // consolidation eviction ordering (loop-economics leaf 14).
 type MemoryUsefulnessConfig struct {
 	// Enabled turns on usefulness-scored eviction in consolidation.
-	// Default false (opt-in until validated).
+	// Default true per D3 (plan docs/plans/20261030-memory-second-brain,
+	// "enable it all by default"). Explicit false restores age-only
+	// eviction ordering.
 	Enabled bool `json:"enabled" toml:"enabled"`
 	// FloorPct is the bottom fraction of memories (by usefulness) evicted
 	// before any age-based rule. Default 0.05.
@@ -1812,6 +2001,8 @@ type EpistemicConfig struct {
 // AmbientExtractionConfig holds settings for extracting epistemic claims
 // from conversation turns without explicit user action.
 type AmbientExtractionConfig struct {
+	// Enabled turns on ambient extraction. Default true per D3 (plan
+	// docs/plans/20261030-memory-second-brain); explicit false opts out.
 	Enabled             bool    `json:"enabled"              toml:"enabled"`
 	ConfidenceThreshold float64 `json:"confidence_threshold" toml:"confidence_threshold"`
 	// RejectBelow hard-drops candidates under this confidence (reason
@@ -2036,17 +2227,89 @@ type AgentToolsConfig struct {
 	// Used by meept-bench for reproducible suites. The
 	// MEEPT_DETERMINISTIC_TOOLS env var ORs with this at call time.
 	DeterministicTools bool `json:"deterministic_tools" toml:"deterministic_tools"`
+	// CodemodeEnabled gates the `codemode` tool (token-efficiency branch 02):
+	// when true the daemon registers the codemode builtin on the shared tool
+	// registry and unions it into every agent's filtered tool allow-list;
+	// when false (the default) the tool is absent end-to-end (registry,
+	// LLM definitions, and grants). Opt-in: default false means the daemon
+	// behaves byte-identically to pre-codemode when the key is omitted.
+	CodemodeEnabled bool `json:"codemode_enabled" toml:"codemode_enabled"`
+	// DynamicToolExposure is the master switch for the as-needed tool-exposure
+	// mechanism (token-efficiency branch 03 leaf 01): when true the
+	// predicted/search exposure modes below are live. Default false =
+	// byte-identical legacy (full/indexed only), per
+	// docs/agents/opt-in-defaults.md.
+	DynamicToolExposure bool `json:"dynamic_tool_exposure" toml:"dynamic_tool_exposure"`
+	// ToolExposure is the single tool-exposure knob: "" | "full" | "indexed"
+	// | "predicted" | "search". "predicted"/"search" only take effect while
+	// DynamicToolExposure is on; with the flag off they are downgraded to
+	// "indexed" at load (one warn, byte-identical legacy payload). Resolution
+	// order: per-model > per-agent frontmatter > this global value >
+	// "predicted" (flag on). See docs/research/dynamic-tools-design.md §1/§3.4.
+	ToolExposure string `json:"tool_exposure" toml:"tool_exposure"`
+	// PredictedBudget is N, the predicted-subset cap for predicted mode: how
+	// many intent-selected tools get full schemas per turn. Default 25;
+	// valid 1..30 — values above 30 clamp to 30 with one warn (N=31 costs
+	// MORE than the indexed baseline, so >30 can never be the better
+	// choice).
+	PredictedBudget int `json:"predicted_budget" toml:"predicted_budget"`
 }
 
 // Validate checks the [agent.tools] section. Unknown schema_mode values are
 // rejected with an error naming agent.tools.schema_mode so a typo fails fast
-// at config load instead of silently shipping full schemas.
+// at config load instead of silently shipping full schemas; the
+// tool_exposure check below follows the same fail-fast style. Validate also
+// normalizes predicted_budget at this point (the daemon calls ValidateAll
+// before any component starts; the normalization is idempotent, so repeat
+// validation is silent).
 func (c *AgentToolsConfig) Validate() error {
+	NormalizeAgentToolsDefaults(c)
 	switch c.SchemaMode {
 	case "", "full", "indexed":
-		return nil
 	default:
 		return fmt.Errorf("agent.tools.schema_mode: invalid value %q (must be \"\", \"full\", or \"indexed\")", c.SchemaMode)
+	}
+	// tool_exposure (branch 03 leaf 01, design §3.4): with the
+	// dynamic_tool_exposure flag OFF, "predicted"/"search" are downgraded to
+	// the indexed legacy default with a single warn (byte-identical legacy
+	// payload — the whole mechanism stays off); with the flag ON, all four
+	// mode values are valid. Any other value is a load error naming
+	// agent.tools.tool_exposure.
+	switch c.ToolExposure {
+	case "", "full", "indexed":
+	case "predicted", "search":
+		if !c.DynamicToolExposure {
+			slog.Warn("agent.tools.tool_exposure: dynamic_tool_exposure is off; downgrading", "tool_exposure", c.ToolExposure, "effective", "indexed")
+			c.ToolExposure = "indexed"
+		}
+	default:
+		return fmt.Errorf("agent.tools.tool_exposure: invalid value %q (must be \"\", \"full\", \"indexed\", \"predicted\", or \"search\")", c.ToolExposure)
+	}
+	return nil
+}
+
+// DefaultAgentToolsPredictedBudget is the predicted-subset cap N for
+// tool_exposure "predicted" mode (branch 03 leaf 01, design §7): 00A
+// Table 4 — D(N=25) saves 1,110 est-tok/turn while N=31 costs more than
+// the indexed baseline, so 25 stays on the favorable side of break-even.
+// Values above MaxAgentToolsPredictedBudget clamp to the bound with one
+// warn; non-positive values take the default.
+const (
+	DefaultAgentToolsPredictedBudget = 25
+	MaxAgentToolsPredictedBudget     = 30
+)
+
+// NormalizeAgentToolsDefaults fills load-boundary defaults for
+// [agent.tools] (branch 03 leaf 01, design §3.4): PredictedBudget 0/negative
+// -> default 25; >30 -> clamped to 30 with one warn (N=31 costs more than
+// the indexed baseline, so it can never be the better choice).
+func NormalizeAgentToolsDefaults(c *AgentToolsConfig) {
+	if c.PredictedBudget <= 0 {
+		c.PredictedBudget = DefaultAgentToolsPredictedBudget
+	}
+	if c.PredictedBudget > MaxAgentToolsPredictedBudget {
+		slog.Warn("agent.tools.predicted_budget: value above 30 clamped; N=31 costs more than the indexed baseline", "predicted_budget", c.PredictedBudget, "effective", MaxAgentToolsPredictedBudget)
+		c.PredictedBudget = MaxAgentToolsPredictedBudget
 	}
 }
 
@@ -2058,6 +2321,11 @@ func DefaultAlwaysFullTools() []string {
 		"shell", "file_read", "file_edit", "file_write",
 		"memory_search", "memory_store", "web_fetch", "web_search",
 		"platform_status", "tool_view",
+		// tool_search (branch 03 leaf 01): the as-needed discoverer — a
+		// stubbed discoverer is undiscoverable, so the meta-tool pair
+		// tool_search + tool_view is always-full in dynamic exposure
+		// modes (design §1 layer 3, §6).
+		"tool_search",
 		// transcript_fetch: 5 params with distinct types (url/timestamps/
 		// language/offset/max_chars) — the indexed one-liner gives the
 		// model no parameter schema, and models then call it with empty
@@ -2529,6 +2797,13 @@ type SecurityConfig struct {
 	// 04's struct and will extend this section.
 	Groups SecurityGroupsConfig `json:"groups" toml:"groups"`
 
+	// JevCommandGate configures the graded command-safety score gate
+	// ([security.jev_command_gate], docs/plans/20261103-wiring-gap-remediation/
+	// 04-jev-gate-wiring.md). Field names mirror jevgate.ScoreGateConfig
+	// (internal/jevgate/serialize.go); the daemon adapter maps verbatim.
+	// Opt-in: all defaults false/conservative per docs/agents/opt-in-defaults.md.
+	JevCommandGate JevGateConfig `json:"jev_command_gate" toml:"jev_command_gate"`
+
 	// Egress policy for the secrets proxy ([security.egress]): ordered
 	// host-suffix/CIDR allow/ask/deny rules consulted before secret injection.
 	Egress EgressConfig `json:"egress" toml:"egress"`
@@ -2601,6 +2876,23 @@ type SecurityGroupsConfig struct {
 	// AdminUsers lists user ids whose human keys may mutate membership
 	// (C5 human half of the write gate).
 	AdminUsers []string `json:"admin_users,omitempty" toml:"admin_users"`
+}
+
+// JevGateConfig configures the [security.jev_command_gate] section
+// (graded command-safety score gate). Field names mirror
+// jevgate.ScoreGateConfig verbatim; the daemon adapter maps one-to-one.
+// Defaults: disabled; score_threshold 0.90 (conservative; the frozen
+// contract value), confidence_threshold 0.10 (veto-only posture -
+// low confidence forces the human ask, never an allow).
+type JevGateConfig struct {
+	// Enabled arms the score gate on shell commands. Default false.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// ScoreThreshold is the minimum Jev score for an automatic allow.
+	// Below threshold escalates to the human confirmation flow.
+	ScoreThreshold float64 `json:"score_threshold" toml:"score_threshold"`
+	// ConfidenceThreshold is the confidence VETO floor: confidence below
+	// this forces ASK regardless of score. Default 0.10.
+	ConfidenceThreshold float64 `json:"confidence_threshold" toml:"confidence_threshold"`
 }
 
 // GroupsPolicyConfig is one [security.groups.policies] entry (C3 Policy).
@@ -2738,6 +3030,17 @@ func (c *SecurityConfig) Validate() error {
 			// valid
 		default:
 			return fmt.Errorf("security.shell_permissions.preset %q: must be workspace, readonly, danger, or empty", sp.Preset)
+		}
+	}
+	// Jev gate: zero-value thresholds in an ENABLED gate are the disabled
+	// posture (empty struct in an otherwise-enabled config) - normalize to
+	// the conservative defaults rather than let 0.0 allow everything.
+	if c.JevCommandGate.Enabled {
+		if c.JevCommandGate.ScoreThreshold <= 0 {
+			c.JevCommandGate.ScoreThreshold = 0.90
+		}
+		if c.JevCommandGate.ConfidenceThreshold <= 0 {
+			c.JevCommandGate.ConfidenceThreshold = 0.10
 		}
 	}
 	for prefix, action := range c.ShellPermissions.Rules {
@@ -3733,6 +4036,20 @@ func DefaultConfig() *Config {
 				RetentionDays:       7,
 				StatsRefreshMinutes: 5,
 			},
+			Cache: LLMSimpleFeatureConfig{
+				Semantic: SemanticCacheConfig{
+					// Default OFF (llm-serving-tiers leaf 02,
+					// Contract C4): opt-in per
+					// docs/agents/opt-in-defaults.md. Threshold
+					// 0.95 per the R0 research addendum
+					// (supersedes C4's 0.92) but consulted only
+					// when Enabled flips on.
+					Enabled:    false,
+					Threshold:  DefaultSemanticCacheThreshold,
+					MaxEntries: DefaultSemanticCacheMaxEntries,
+					TTLMin:     0, // mirrors llm.cache.default_ttl_min at wiring
+				},
+			},
 		},
 		Memory: MemoryConfig{
 			Backend:                    MemoryBackendLocal, // built-in local store; memvid service via [memvid] enabled = true
@@ -3747,16 +4064,23 @@ func DefaultConfig() *Config {
 				SimilarityThreshold: 0.85,
 				MinRelevance:        0.6,
 			},
+			// Bridges: DEFAULT-ON per D1 (plan
+			// docs/plans/20261030-memory-second-brain: "Q1 a" - enable by
+			// default now; the substitution-experiment leaf (07) may flip it
+			// back if it loses the eval). Explicit false still wins.
 			Bridges: MemoryBridgesConfig{
-				Enabled:     false,
+				Enabled:     true,
 				KB:          2,
 				BridgeDFMax: 10,
 				Verify:      true,
 			},
-			// Knowledge store: opt-in, disabled by default (SHARED-CONVENTIONS
-			// §2.5 — nothing reaches prompts until memory.knowledge.enabled).
+			// Knowledge store: DEFAULT-ON per D1-D3 (plan
+			// docs/plans/20261030-memory-second-brain, decision D3 "full
+			// default-on"; SHARED-CONVENTIONS §2.5 product decision authorized
+			// there). An explicit memory.knowledge.enabled = false still wins:
+			// user text unmarshal-overwrites the DefaultConfig baseline.
 			Knowledge: KnowledgeConfig{
-				Enabled:   false,
+				Enabled:   true,
 				IngestDir: "",
 				MaxPages:  0,
 				CodeDirs:  nil,
@@ -3769,10 +4093,12 @@ func DefaultConfig() *Config {
 				TopK:     5,
 				MaxBatch: 20,
 			},
-			// L0 raw-conversation tier: opt-in, disabled by default
-			// (opt-in-defaults rule — nothing records until
-			// memory.l0_enabled; retention default 30 days).
-			L0Enabled:       false,
+			// L0 raw-conversation tier: DEFAULT-ON per D3 (plan
+			// docs/plans/20261030-memory-second-brain: full default-on, L0
+			// capture + L1 extraction + L2 scenes on every daemon; cost is
+			// local compute). Explicit memory.l0_enabled = false still wins
+			// (opt-out preserved); retention default 30 days.
+			L0Enabled:       true,
 			L0RetentionDays: 30,
 			Task: TaskMemoryConfig{
 				Enabled: true,
@@ -3829,6 +4155,34 @@ func DefaultConfig() *Config {
 				BaseURL:   "http://localhost:11434",
 				Model:     "nomic-embed-text",
 				Dimension: 768,
+			},
+			// Usefulness voting: DEFAULT-ON per D3 (plan
+			// docs/plans/20261030-memory-second-brain: the consolidation
+			// eviction ordering is part of the "enable it all" decision).
+			// Numeric sub-knobs stay 0 here: memory.ResolveUsefulEviction
+			// substitutes the package defaults for zero values (floor 0.05,
+			// base 0.5, the documented weights). Explicit
+			// memory.usefulness.enabled = false still wins.
+			Usefulness: MemoryUsefulnessConfig{
+				Enabled:  true,
+				FloorPct: 0,
+				Base:     0,
+				Wv:       0,
+				Wa:       0,
+				Ws:       0,
+			},
+			// Epistemic ambient extraction: DEFAULT-ON per D3 (plan
+			// docs/plans/20261030-memory-second-brain). Confidence/max
+			// sub-knobs stay 0: the extractor + hook substitute the spec
+			// defaults (threshold 0.7, max_per_turn 3). Explicit
+			// memory.epistemic.ambient_extraction.enabled = false wins.
+			Epistemic: EpistemicConfig{
+				AmbientExtraction: AmbientExtractionConfig{
+					Enabled:             true,
+					ConfidenceThreshold: 0,
+					RejectBelow:         0,
+					MaxPerTurn:          0,
+				},
 			},
 		},
 		Memvid: MemvidConfig{
@@ -3991,6 +4345,10 @@ func DefaultConfig() *Config {
 				DecisionLogLevel: "deny-warn",
 				AdminAgents:      []string{"agent-update"},
 			},
+			JevCommandGate: JevGateConfig{
+				ScoreThreshold:      0.90,
+				ConfidenceThreshold: 0.10,
+			},
 			Egress: EgressConfig{
 				ScrubNoProxy: true,
 			},
@@ -4001,7 +4359,12 @@ func DefaultConfig() *Config {
 			Timezone: "UTC",
 		},
 		Queue: QueueConfig{
-			DBPath:            "~/.meept/queue.db",
+			// DBPath empty by default: components.go resolves the fallback
+			// <daemon.data_dir>/queue.db, which is ~/.meept/queue.db on
+			// every stock install (daemon.data_dir defaults to ~/.meept).
+			// An explicit queue.db_path still wins (relocated installs);
+			// config/meept.json5 ships the explicit value.
+			DBPath:            "",
 			MaxRetries:        3,
 			InteractiveWindow: "5m", // Q1: default interactivity window (D11)
 		},
@@ -4464,6 +4827,19 @@ func DefaultConfig() *Config {
 			Playback:  TTSPlaybackConfig{Volume: 1.0, Rate: 1.0, AudioDevice: ""},
 			Behavior:  TTSBehaviorConfig{ReadOwnMessages: false, InterruptOnNewMsg: true, QueueMessages: false, MaxQueueSize: 5},
 		},
+		Voice: VoiceConfig{
+			Enabled:              false,
+			IdleStopSeconds:      30,
+			Filler:               []string{"Hold on, let me check."},
+			SupervisorEnabled:    true,
+			SupervisorTimeoutMs:  400,
+			TimeoutSecs:          30,
+			MaxConcurrentCalls:   2,
+			MaxCallMinutes:       15,
+			SilencePromptSeconds: 45,
+			ReorderWindowFrames:  10,
+			ReorderGapMs:         60,
+		},
 		ReflectionCollector: ReflectionCollectorConfig{
 			Enabled:              true,
 			AutoQueue:            true,
@@ -4475,6 +4851,25 @@ func DefaultConfig() *Config {
 			TurnConfidenceMin:    0.6,
 			SessionConfidenceMin: 0.7,
 			MaxSessionProposals:  3,
+		},
+		// GitHub PR/CI tool set (opt-in, disabled by default).
+		GitHub: GitHubConfig{
+			Enabled:      false,
+			TokenSecret:  "",
+			DefaultOwner: "",
+			DefaultRepo:  "",
+			BaseURL:      "",
+		},
+		// GitHub ticket intake poller (opt-in, disabled by default).
+		Intake: IntakeConfig{
+			Enabled:         false,
+			DefaultEmployee: "",
+			PollInterval:    "5m",
+			WatchRepo:       "",
+			RequiredLabels:  []string{"factory"},
+			DoneLabel:       "factory:done",
+			GateCommand:     "",
+			ProjectNumber:   0,
 		},
 	}
 }
@@ -4734,6 +5129,34 @@ type TTSConfig struct {
 	Behavior TTSBehaviorConfig `json:"behavior" toml:"behavior"`
 }
 
+type VoiceConfig struct {
+	Enabled              bool     `json:"enabled"                toml:"enabled"`
+	IdleStopSeconds      int      `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	OnnxRuntimeLib       string   `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	STTProvider          string   `json:"stt_provider"           toml:"stt_provider"`
+	TTSProvider          string   `json:"tts_provider"           toml:"tts_provider"`
+	Filler               []string `json:"filler"                 toml:"filler"`
+	SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
+	SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
+	SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
+	PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
+	ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
+	FromNumber           string   `json:"from_number"            toml:"from_number"`
+	AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
+	TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
+	MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
+	SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
+	LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
+}
+
 // PiperTTSConfig holds Piper TTS engine settings.
 type PiperTTSConfig struct {
 	BinPath    string `json:"bin_path"   toml:"bin_path"`
@@ -4890,6 +5313,14 @@ func (c *Config) ValidateAll() error {
 	if err := c.Daemon.OutputFilters.Validate(); err != nil {
 		return fmt.Errorf("daemon config: %w", err)
 	}
+
+	// Normalize memory.tiers at the daemon's pre-start boundary (leaf
+	// 03-tierpolicy-daemon T1): NormalizeMemoryTiersDefaults is
+	// idempotent, so repeat validation is silent and the tiers adapter
+	// the engine consumes always sees resolved knobs even when the
+	// config arrived through a path that skipped load-boundary
+	// normalization.
+	NormalizeMemoryTiersDefaults(&c.Memory.Tiers)
 
 	return nil
 }

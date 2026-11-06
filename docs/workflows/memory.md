@@ -10,14 +10,14 @@ Effective agent operation requires persistent memory across sessions. The memory
 - Efficient retrieval of relevant information
 - Memory consolidation and summarization
 
-### Usefulness Voting (opt-in)
+### Usefulness Voting (default on)
 Memories can receive explicit usefulness votes via the `memory_vote` tool (`memory_id`, `delta` of +1/-1, optional reason up to 512 bytes). Each memory's usefulness score is:
 
 ```
 clamp01(base + Wv*net_votes + Wa*log1p(accesses) - Ws*age_days)
 ```
 
-Defaults: `base=0.5`, `Wv=0.08`, `Wa=0.05`, `Ws=0.005`. When `[memory.usefulness] enabled = true` (default **false**), consolidation eviction reorders by this score: memories with net votes <= -2 are evicted first regardless of age, then the bottom `floor_pct` (default 0.05) by score is evicted before any age-based rule; the rest consolidate as before.
+Defaults: `base=0.5`, `Wv=0.08`, `Wa=0.05`, `Ws=0.005`. `[memory.usefulness] enabled` defaults **true** (memory second-brain decision D3, plan `docs/plans/20261030-memory-second-brain`: consolidation eviction reorders by this score — memories with net votes <= -2 are evicted first regardless of age, then the bottom `floor_pct` (default 0.05) by score is evicted before any age-based rule; the rest consolidate as before). Set `enabled = false` to restore age-only ordering.
 
 ```toml
 [memory.usefulness]
@@ -75,8 +75,10 @@ ws = 0.005
 
 ### Ambient Candidate Confidence Disposal (three bands)
 
-Ambient extraction candidates are disposed by confidence band
-(`AmbientExtractionConfig`):
+Ambient extraction (`memory.epistemic.ambient_extraction`) defaults **on**
+per the memory second-brain decision D3 (plan
+`docs/plans/20261030-memory-second-brain`); its candidates are disposed by
+confidence band (`AmbientExtractionConfig`):
 
 | Band | Disposal |
 |------|----------|
@@ -105,6 +107,24 @@ loop:
 All three are size-capped at 10 MiB with one rotated generation
 (`<name>.jsonl.1`). They contain raw conversation text: they live outside
 the repo and are gitignored — never commit them.
+
+### Recall Outcome Telemetry
+
+`recall_outcomes.jsonl` (same memory data dir) records whether an injected
+memory actually helped: the turn-terminal capture subscriber writes one row
+per injected memory item per completed turn —
+
+```json
+{"ts":"RFC3339","session_id":"...","memory_id":"...","query":"...","injected":true,"cited":true,"tokens":123}
+```
+
+`cited` is conservative: the final reply must share >= 8 lowercase word
+tokens with the item's salient text (reply-side tokens count with
+multiplicity), else `cited=false`. The file rides the same calibration-JSONL
+mechanism (10 MiB cap, one `.jsonl.1` rotation) and is gitignored — rows
+carry memory and reply text; never commit one. The recall-value consumer
+(feeding scores back into recall ranking) is future work; today the file is
+only produced.
 
 ### Human Review Queue
 
@@ -270,7 +290,7 @@ byte-identical to the pre-conflict behavior.
 ```json5
 "memory": {
   "conflict": {
-    "enabled": false,   // opt-in; false = zero recall, zero LLM calls
+    "enabled": false,   // opt-in (NOT flipped by the D1-D3 default-on wave); false = zero recall, zero LLM calls
     "top_k": 5,         // existing claims recalled per candidate
     "max_batch": 20,    // candidates per conflict LLM call
   },
@@ -318,19 +338,23 @@ tier and moves claim extraction off the turn path:
   (`segment_method: "llm"`, or `"fallback"` when the segmentation response
   is malformed — an L2 job never dead-letters on a malformed segmentation).
 
-Everything is gated on `memory.l0_enabled` (default **false**): disabled
-means nothing records and no distill job is ever enqueued. The capture
+Everything is gated on `memory.l0_enabled`, which defaults **true** per the
+memory second-brain decision D3 (plan `docs/plans/20261030-memory-second-brain`:
+full default-on — L0 capture + L1 extraction + L2 scenes on every daemon; cost
+is local compute). Set it to `false` to opt out: disabled means nothing records
+and no distill job is ever enqueued. The capture
 subscriber's ambient epistemic extraction additionally gates on
-`memory.epistemic.ambient_extraction.enabled` (default **false**) — with the
-gate off, L0 lines and L1 distill jobs still run, but no turn-side ambient
-`status=auto` claims are written (the L1 job's own extraction is unaffected).
+`memory.epistemic.ambient_extraction.enabled`, which also defaults **true** per
+D3 — with that gate off, L0 lines and L1 distill jobs still run, but no
+turn-side ambient `status=auto` claims are written (the L1 job's own extraction
+is unaffected).
 
 ### Configuration
 
 ```json5
 "memory": {
-  // Raw-conversation tier + async distillation. Opt-in.
-  "l0_enabled": false,
+  // Raw-conversation tier + async distillation. Default on (D3).
+  "l0_enabled": true,
   // Whole daily L0 files older than this are pruned on the consolidation
   // tick (no new ticker). <= 0 disables pruning. Default 30.
   "l0_retention_days": 30,
@@ -340,6 +364,21 @@ gate off, L0 lines and L1 distill jobs still run, but no turn-side ambient
 LLM calls resolve through the `memory_model` slot (same preference order as
 ambient extraction: `memory_model` client > general provider > general
 client).
+
+### Models-less hosts (skip-Warn degradation)
+
+On a host with NO resolvable model (empty `memory_model` slot, no provider,
+no general client), a default-on daemon must not error-loop the queue: the
+L1 job SKIPS with exactly one Warn per worker cycle
+(`distill: no memory model available; distill jobs skip until a model
+resolves ...`) and returns `status: "skipped_no_model"` with NO error — the
+job completes, the `l0_progress` marker never advances, and the L0 lines
+survive on disk. When a model later resolves, the next window's job (or a
+re-enqueued one) re-distills the same undisilled window — no lost lines, no
+duplicated claims. L2 degrades the same way: no model means the fallback
+whole-session scene (the existing `segment_method: "fallback"` path), never
+a dead letter. The chat turn path is unaffected either way (capture and
+extraction are off the turn path).
 
 ### Failure semantics
 
@@ -399,12 +438,14 @@ memories.
 ### Configuration
 
 All keys under `[memory.bridges]` (schema: `MemoryBridgesConfig` in
-`internal/config/schema.go`). The whole subsystem is opt-in; the defaults
-below are the shipped values.
+`internal/config/schema.go`). The subsystem is DEFAULT-ON per the memory
+second-brain decision D1 (plan `docs/plans/20261030-memory-second-brain`,
+"Q1 a" — enable by default now; the leaf-07 substitution experiment may flip
+it back if it loses the eval). The defaults below are the shipped values.
 
 | key | default | meaning |
 |-----|---------|---------|
-| `memory.bridges.enabled` | `false` | master gate; false = zero generation, zero LLM calls |
+| `memory.bridges.enabled` | `true` | master gate; false = zero generation, zero LLM calls |
 | `memory.bridges.kb` | `2` | recall-path cap: max bridges admitted into one assembled context |
 | `memory.bridges.bridge_df_max` | `10` | inclusive upper bound of the entity document-frequency window (lower bound fixed at 2) |
 | `memory.bridges.verify` | `true` | run entailment verification on generated bridges (requires a local model) |
@@ -423,15 +464,13 @@ GUI-side bridge visualization is a documented deviation pending GUI parity.
 
 ### Evaluation
 
-Adoption is gated on the B05 bridges eval (on/off recall comparison,
-`docs/research/eval/bridges-<date>.json` when run): correctness with bridges
-must not regress, and context tokens must shrink or correctness must
-improve, before `enabled` is flipped for any installation. See
-`plans/context-reduction/09-bridges/05-bridge-eval.md` for the pass
-criteria. Nobody enables bridges by default on the strength of the feature
-alone.
+The B05 bridges eval (on/off recall comparison) remains the quality gate:
+correctness with bridges must not regress, and context tokens must shrink or
+correctness must improve, or the leaf-07 substitution experiment flips
+`enabled` back to false (per D1's flip-back clause). See
+`plans/context-reduction/09-bridges/05-bridge-eval.md` for the pass criteria.
 
-## Knowledge Assets (opt-in)
+## Knowledge Assets (default on)
 
 The `[memory.knowledge]` block gates a SEPARATE knowledge-asset store
 (tree 04): SQLite pages with an FTS5 full-text index and a link graph, at
@@ -440,13 +479,15 @@ wiki (`internal/selfimprove`) — separate store, separate schema, separate
 code path; the wiki stays evolver-only and is never reachable from the
 inference path.
 
-### Why default-off
+### Default posture
 
-`memory.knowledge.enabled` defaults to **false** (opt-in-defaults rule:
-wiki→inference reachability is a product decision). When disabled, nothing
-is stored and no `knowledge_*` tool exists — nothing from this store can
-enter a prompt. All agent access is on-demand through explicit tool calls;
-there is no ambient injection.
+`memory.knowledge.enabled` defaults to **true** per the memory second-brain
+decisions D1-D3 (plan `docs/plans/20261030-memory-second-brain` — the
+SHARED-CONVENTIONS §2.5 product decision authorized there). The knowledge_*
+tools register out of the box; nothing is ambiently injected (all agent
+access is on-demand through explicit tool calls). Set `enabled = false` to
+opt out: nothing is stored and no `knowledge_*` tool exists — nothing from
+this store can enter a prompt.
 
 ### Tools
 
@@ -515,6 +556,82 @@ control (zero `knowledge_*` tools offered to the model).
 - Search relevance scores
 - Vector embedding dimensions
 - Distributed memory sync status
+
+## Scope (project/user/global)
+
+Every stored memory carries a recall scope (`memory.Scope`), stored as the
+portable metadata key `scope` everywhere and as a queryable
+`scope TEXT NOT NULL DEFAULT 'global'` column in the SQLite content tables
+(episodic + task; the FTS index table is never altered — content-table
+column only).
+
+- `project` — visible only to sessions bound to the same project
+  (matched against metadata `project_id`).
+- `user` — visible to all sessions of the user (matched against metadata
+  `user_id`); in single-user installs an empty filter userID matches.
+- `global` — visible everywhere. The legacy backfill value: every row that
+  predates scoping is `global`, so no existing memory disappears from
+  recall.
+
+Recall is scope-aware via the additive `WithScopeFilter(maxScope,
+projectID, userID)` search option on `Manager.Search` /
+`GetRelevantContext` (+ `WithMultiUserEnabled(bool)` carrying the
+multiuser bit). Callers that do not pass the option get today's
+unfiltered behavior byte-identically. `maxScope` is the CALLER's operating
+scope (purview): project-scope callers see only their own project's rows;
+user-scope callers see all project rows plus matching user rows; global
+callers see only global rows. Fail-closed rule: multiuser enabled +
+resolved empty userID ⇒ user-scope rows are NOT recallable (an identity
+resolution gap must never widen recall).
+
+### Cluster recall is explicitly unscoped across nodes
+
+Peer-node memories that arrive via gossip ingestion (MEMORY_STORED →
+`DualStore.StoreRemoteMemory`) are stamped `scope=global` plus
+`remote_node=<source node>` metadata at the ingest seam. Cluster recall is
+therefore deliberately UNscoped across nodes: a peer's memories are visible
+everywhere on the receiving node, exactly as before scoping existed — the
+stamp makes that a documented, queryable decision (provenance via
+`remote_node`), not a silent backfill accident. Single-daemon installs are
+unaffected. Narrowing cross-node recall per project is future work; the
+`remote_node` marker is the hook it would build on.
+
+### Agent declarations: `memory_max_scope` (chief-of-staff pattern)
+
+An agent (AGENT.md frontmatter `memory_max_scope:`) declares the WIDEST
+scope its sessions recall at: `""`/`project` (default — isolated to the
+session's bound project), `user`, or `global`. Resolution
+(`agent.resolveScopeInputs`) combines the declaration with the session's
+bound project and OwnerID; invalid values fail SAFE to project (warned).
+Every loop recall and every memory tool (`memory_store`/`memory_retain`
+stamp on write; `memory_search`/`memory_recall`/`memory_get_context`
+filter on read) flows through that resolution:
+
+- Writes: an explicit `scope` argument on `memory_store` is honored
+  verbatim (the writer's intent — recall-time maxScope is the enforcement
+  boundary, not the write stamp); the default stamp is the session's own
+  scope (project when bound, global when unbound). `project_id` /
+  `user_id` ride the metadata for predicate matching.
+- Reads: project-declared agents see global rows + their own project's
+  rows (an unbound session sees NO project rows — never a daemon-CWD
+  fallback). A `global` declaration is the chief-of-staff grant: it maps
+  onto the filter's user purview (all projects' rows + user rows), since
+  the committed C2 predicate treats a global-scope CALLER as
+  identity-less. Under enabled multiuser (`[multiuser] enabled`), an
+  identity-resolution gap (empty OwnerID) fails CLOSED: user-scope rows
+  stay hidden.
+
+### Bot `memory_scope` is superseded (Flag 2)
+
+Bot definitions (internal/bot) carry an older `memory_scope` vocabulary
+(private/shared/read_only). It is SUPERSEDED for scope governance by
+`memory_max_scope`: scope enforcement now flows exclusively through the
+agent declaration + `resolveScopeInputs`. The bot fields remain (bots are
+a separate surface; `ScopedMemoryManager`'s bot_id namespace tagging is a
+different mechanism and untouched). Mapping when reading a bot's memory
+posture: private→project, shared→global, read_only→project (there is no
+read-only equivalent in the Scope vocabulary — write suppression is a
+tool-permission concern, not a recall scope).
 
 ## Edge Cases
 

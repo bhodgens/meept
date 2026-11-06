@@ -1,0 +1,55 @@
+#!/bin/bash
+# pre-commit-worktreecfg: Guard against core.bare=true flip in .git/config
+#
+# This hook checks if the repository is bare and repairs it if so.
+# It's designed to catch the intermittent core.bare=true flip that breaks
+# go build -buildvcs and git status.
+#
+# Runs as pre-flight [0/19], BEFORE the numbered chain: a bare-config flip makes
+# gate 1 (pre-commit-build) fail on "error obtaining VCS status", so a guard
+# placed later in the chain would never run.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# When core.bare=true, git rev-parse --show-toplevel fails.
+# We need the repo root for the log file. Use the parent of the hooks dir as fallback.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$REPO_ROOT" ]; then
+    # Fallback: parent of the hooks directory
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+
+# Log file goes in the repo root (not inside .git which is a file in worktrees)
+LOG_FILE="$REPO_ROOT/.core-bare-repair.log"
+
+# Check if repository is bare
+IS_BARE=$(git rev-parse --is-bare-repository 2>/dev/null || echo "false")
+
+if [ "$IS_BARE" = "true" ]; then
+    # Get the previous value before we fix it
+    PREV_VAL=$(git config core.bare 2>/dev/null || echo "unknown")
+    
+    # Repair: set core.bare false
+    git config core.bare false
+    
+    # Log the repair
+    TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "$TIMESTAMP | REPAIR: core.bare was $PREV_VAL, set to false" >> "$LOG_FILE"
+
+    # Capture evidence: the writer is still unidentified, so every repair
+    # snapshots the process list. Grep the log for the pid whose command
+    # writes git config (filter-repo, an init --bare, or a config writer).
+    {
+        echo "$TIMESTAMP | PROCESS SNAPSHOT (git-ish processes)"
+        ps -axo pid=,ppid=,lstart=,command= | grep -Ei 'filter-repo|git .*init|git .*config|git .*clone' | grep -v grep | sed 's/^/  /'
+    } >> "$LOG_FILE"
+    
+    # Loud warning
+    echo -e "\e[31m⚠️  [WORKTREE CONFIG GUARD] repository detected as bare (core.bare=$PREV_VAL). Auto-repaired to false.\e[0m"
+    echo -e "\e[31m⚠️  This breaks go build -buildvcs and git status. Check $LOG_FILE for history.\e[0m"
+    echo ""
+fi
+
+exit 0

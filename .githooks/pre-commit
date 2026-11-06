@@ -22,6 +22,10 @@
 # 18. e2e enforcement (affected suites + new-feature coverage rule)
 # 19. deadcode reachability (blocks NEW unwired functions vs baseline)
 #
+# Pre-flight [0/19]: pre-commit-worktreecfg repairs a core.bare=true flip. It
+# runs BEFORE the numbered chain because that flip breaks `go build`
+# ("error obtaining VCS status: exit status 128"), which would abort gate 1.
+#
 # Requires bash >= 4 (macOS /bin/bash is 3.2): sub-hooks carry
 # /opt/homebrew/bin/bash shebangs.
 #
@@ -46,6 +50,13 @@ if [ -z "$GOTOOLCHAIN" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 0. worktree config guard (core.bare=true self-heal) — PRE-FLIGHT, before the
+# numbered chain. WHY first: a bare-config flip makes `go build` fail with
+# "error obtaining VCS status: exit status 128", so gate [1/19] pre-commit-build
+# would abort the chain (set -e) before a later guard could repair it.
+echo -e "\e[34m[0/19]\e[0m Checking worktree configuration (core.bare guard)..."
+"$SCRIPT_DIR/pre-commit-worktreecfg"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

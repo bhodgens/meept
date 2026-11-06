@@ -298,7 +298,11 @@ the metrics store and collector are created during platform component initializa
 (`internal/metrics/usage.go`):
 
 - `models`: per provider/model aggregates from the `llm_calls` ledger over the
-  last 24 hours (`ModelUsageSince`)
+  last 24 hours (`ModelUsageSince`), including `avg_ttft_ms` - the mean
+  time-to-first-token over MEASURED streaming calls only (rows with
+  `ttft_ms >= 0`; the -1 "not measured" sentinel used by non-streaming
+  calls, cache hits, and errors is excluded, and an all-unmeasured window
+  reports -1)
 - `agents`: task outcome totals and last known state from
   `agent_task_outcomes` / `agent_states` (`AgentUsageSince`)
 - `totals`: sums of the model rows

@@ -131,6 +131,26 @@ func TestConfigLoads(t *testing.T) {
 		t.Errorf("local-gguf spawn_command = %v, want --jinja (without it llama-server cannot emit tool calls)",
 			ggufProvider.Lifecycle.SpawnCommand)
 	}
+	// Contract C7 (llm-serving-tiers leaf 03): BOTH llama-server spawn
+	// entries carry explicit chunk-level KV reuse. Without the flag the
+	// server falls back to plain prefix-only reuse and silently loses the
+	// mid-prompt chunk reuse (256-token minimum chunk, R0 findings Section 2).
+	if !slices.Contains(ggufProvider.Lifecycle.SpawnCommand, "--cache-reuse") {
+		t.Errorf("local-gguf spawn_command = %v, want --cache-reuse", ggufProvider.Lifecycle.SpawnCommand)
+	}
+	// Port-8084 (extract) llama-server entry: same contract, found by scan.
+	extractLifecycle := extractPort8084Lifecycle(cfg.Providers)
+	if extractLifecycle == nil {
+		t.Fatal("no llama-server spawn entry on port 8084")
+	}
+	if !slices.Contains(extractLifecycle.SpawnCommand, "--cache-reuse") {
+		t.Errorf("port-8084 spawn_command = %v, want --cache-reuse", extractLifecycle.SpawnCommand)
+	}
+	for _, lc := range []*RuntimeLifecycleConfig{ggufProvider.Lifecycle, extractLifecycle} {
+		if i := slices.Index(lc.SpawnCommand, "--cache-reuse"); i < 0 || i+1 >= len(lc.SpawnCommand) || lc.SpawnCommand[i+1] != "256" {
+			t.Errorf("spawn_command = %v, want --cache-reuse followed by 256", lc.SpawnCommand)
+		}
+	}
 	ggufModel, ok := ggufProvider.Models["lfm-8b-gguf"]
 	if !ok {
 		t.Fatal("lfm-8b-gguf model not found in local-gguf provider")
@@ -344,4 +364,24 @@ func TestTransportPortClashGuard(t *testing.T) {
 			}
 		})
 	}
+}
+
+// extractPort8084Lifecycle finds the provider whose lifecycle spawn_command
+// runs llama-server on port 8084 (the extract runtime). Contract C7 (leaf 03)
+// pins --cache-reuse 256 on BOTH llama-server entries; the 8080 entry is
+// pinned inline in TestConfigLoads via the local-gguf provider.
+func extractPort8084Lifecycle(providers map[string]ProviderConfig) *RuntimeLifecycleConfig {
+	for name := range providers {
+		p := providers[name]
+		if p.Lifecycle == nil {
+			continue
+		}
+		cmd := p.Lifecycle.SpawnCommand
+		isLlama := slices.Contains(cmd, "llama-server")
+		portIdx := slices.Index(cmd, "8084")
+		if isLlama && portIdx >= 0 {
+			return p.Lifecycle
+		}
+	}
+	return nil
 }

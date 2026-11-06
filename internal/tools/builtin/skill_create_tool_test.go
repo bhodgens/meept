@@ -202,7 +202,10 @@ func TestSkillCreate_Execute_DuplicateContentRejected(t *testing.T) {
 	// built from the same assembly — exactly the case the writer's SHA dedup
 	// rejects (identical content under a different name).
 	seed := assembleSkillContent("dup-target", "shared description", []string{"tag"}, "shared body")
-	if err := writer.WriteSkill("other-skill", seed); err != nil {
+	// C2: the create tool stamps origin:agent into the frontmatter, so the
+	// seed must be written the same way for the on-disk content (and its SHA)
+	// to be identical to what the tool write produces.
+	if err := writer.WriteSkillWithOrigin("other-skill", seed, lifecycle.OriginAgent); err != nil {
 		t.Fatalf("seed write failed: %v", err)
 	}
 

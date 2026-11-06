@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -131,7 +132,18 @@ func runDoctor(fix, installMissing bool) error {
 	checks = append(checks, checkStateDirWritable(stateDirPath))
 	checks = append(checks, checkConfigReadable())
 	checks = append(checks, checkDiskFreeDoctor(stateDirPath))
+	checks = append(checks, checkCoreBareDoctor())
+	// Groups permissions check (agent-groups leaf 06): report-only —
+	// config validity + the dispatch-divergence posture. The CLI process
+	// cannot see the live registry, so the divergence leg reports the
+	// posture (the live answer rides `meept groups check`). wiredSpecs
+	// nil is the production posture; tests inject it.
+	checks = append(checks, checkGroupsDoctorGroups(checkConfiguredGroupsDoctor())...)
 	checks = append(checks, checkModelsDoctor()...)
+	// Memory-pipeline checks (memory second-brain leaf 06): report-only —
+	// capture/distill/recall/extras + the F7 summary line. Every degraded
+	// state is a warn, never a failure.
+	checks = append(checks, checkMemoryDoctor()...)
 	if providerCfg, providerErr := config.LoadDefault(); providerErr == nil {
 		checks = append(checks, providerChecksDoctor(providerCfg)...)
 	}
@@ -164,6 +176,11 @@ func runDoctor(fix, installMissing bool) error {
 	// a single warn line, never an abort.
 	mcpChecks, mcpEntries := mcpDependencyChecksDoctor()
 	checks = append(checks, mcpChecks...)
+
+	// --- origin-backfill gap counter (branch 02, C4) ---
+	// Report-only: the counts surface the origin backfill gap; the check
+	// is always ok and never blocks doctor or writes anything.
+	checks = append(checks, originBackfillCheck(stateDir))
 
 	// --- --install-missing (Contract E) ---
 	// Collect the missing-with-hint servers from the check data and offer
@@ -239,6 +256,16 @@ func runDoctor(fix, installMissing bool) error {
 					c.detail += fmt.Sprintf(" [stopped %d/%d orphans; %d survived]",
 						len(confirmed), len(candidates), len(candidates)-len(confirmed))
 					c.ok = false
+				}
+			case "core.bare":
+				// Repair core.bare=true by setting it to false.
+				repoRoot, err := exec.Command("git", "rev-parse", "--show-toplevel").CombinedOutput()
+				if err == nil {
+					repoRootStr := strings.TrimSpace(string(repoRoot))
+					if err := fixCoreBareRepair(repoRootStr); err == nil {
+						c.detail += " [repaired core.bare=false]"
+						c.ok = true
+					}
 				}
 			}
 		}
@@ -428,6 +455,166 @@ func intList(pids []int) string {
 		parts[i] = strconv.Itoa(p)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// --- origin-backfill gap counter (branch 02, C4) ---
+
+// originBackfillCheck builds the report-only origin-backfill doctorCheck. It
+// counts (a) skills whose frontmatter has no usable 'origin' key and (b)
+// memory facts whose origin is 'unknown', and reports both as data in the
+// detail string. The check is always ok=true: it surfaces the backfill gap,
+// it never blocks doctor. Reads only: the fact store opens with mode=ro and
+// the skill scan is pure filesystem reads — nothing is written, backfilled,
+// or repaired here.
+func originBackfillCheck(stateDir string) doctorCheck {
+	nSkills := countOriginUnknownSkills(stateDir)
+	nFacts := countOriginUnknownFacts(stateDir)
+	return doctorCheck{
+		name:   "origin-backfill",
+		ok:     true,
+		detail: fmt.Sprintf("%d unknown skill(s), %d unknown fact(s); report-only", nSkills, nFacts),
+	}
+}
+
+// skillDirsForDoctor returns the skill directories doctor counts skills in:
+// the live writer tier (<stateDir>/skills, the daemon's SkillWriter root)
+// and the installed user tier (<MEEPT_HOME>/skills). The archive sibling
+// (<stateDir>/skills.archived) is deliberately excluded: archived skills are
+// out of scope for the backfill gap. Missing directories are skipped.
+func skillDirsForDoctor(stateDir string) []string {
+	var dirs []string
+	if live := filepath.Join(stateDir, "skills"); live != "" {
+		dirs = append(dirs, live)
+	}
+	if user := config.MeeptPath("skills"); user != "" {
+		dirs = append(dirs, user)
+	}
+	return dirs
+}
+
+// isDoctorSkillFile mirrors FileSource's skill-file predicate: any .md in a
+// tier counts, except the common non-skill markdown (readme/changelog/
+// license/contributing) that discovery excludes.
+func isDoctorSkillFile(name string) bool {
+	if !strings.HasSuffix(strings.ToLower(name), ".md") {
+		return false
+	}
+	switch strings.ToLower(name) {
+	case "readme.md", "changelog.md", "license.md", "contributing.md":
+		return false
+	}
+	return true
+}
+
+// countOriginUnknownSkills counts skill files (directory-layout SKILL.md and
+// flat .md skills) whose frontmatter carries no usable 'origin' key.
+// Frontmatterless files count as unknown too — a skill the writer never
+// stamped is exactly the backfill gap this check surfaces.
+func countOriginUnknownSkills(stateDir string) int {
+	n := 0
+	for _, root := range skillDirsForDoctor(stateDir) {
+		if _, err := os.Stat(root); err != nil {
+			continue
+		}
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				// Unreadable entries are skipped, not an abort: this is a
+				// report-only counter, a bad entry just isn't counted.
+				return nil //nolint:nilerr // skip unreadable entry, keep counting
+			}
+			if d.IsDir() {
+				// versions/vN bundles are historical snapshots, not live
+				// skills — skip the whole versions subtree.
+				if strings.HasPrefix(d.Name(), "versions") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !isDoctorSkillFile(d.Name()) {
+				return nil
+			}
+			if skillOriginUnknown(path) {
+				n++
+			}
+			return nil
+		})
+	}
+	return n
+}
+
+// skillOriginUnknown reports whether one skill file's YAML frontmatter has
+// no usable 'origin' key: no frontmatter at all, no origin key, or the key
+// present with an empty value.
+func skillOriginUnknown(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	fm, _, err := splitFrontmatter(string(data))
+	if err != nil {
+		return true
+	}
+	missing := true
+	for line := range strings.SplitSeq(fm, "\n") {
+		line = strings.TrimRight(line, " 	\r")
+		if !strings.HasPrefix(line, "origin:") {
+			continue
+		}
+		// origin: <value> — the backfill stamp; empty value == still unknown
+		if strings.TrimSpace(strings.TrimPrefix(line, "origin:")) != "" {
+			missing = false
+		}
+		break
+	}
+	return missing
+}
+
+// splitFrontmatter extracts the YAML frontmatter block (text between the
+// leading '---' markers) from one SKILL.md file. Returns ("", "", err) when
+// the file carries no frontmatter block.
+func splitFrontmatter(text string) (string, string, error) {
+	trimmed := strings.TrimLeft(text, " 	\n\r")
+	if !strings.HasPrefix(trimmed, "---") {
+		return "", "", fmt.Errorf("no frontmatter")
+	}
+	rest := strings.TrimPrefix(trimmed, "---")
+	// skip past the opening marker's line
+	rest = strings.TrimLeft(rest, " 	\r")
+	if !strings.HasPrefix(rest, "\n") {
+		return "", "", fmt.Errorf("no frontmatter")
+	}
+	rest = rest[1:]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return "", "", fmt.Errorf("unterminated frontmatter")
+	}
+	return rest[:end], rest[end+len("\n---"):], nil
+}
+
+// countOriginUnknownFacts counts memory_facts rows whose origin is
+// 'unknown' via a read-only SELECT COUNT(*) against the state dir's fact
+// store. The DSN is pure read-only (mode=ro): a WAL db with a live writer
+// can be read this way without the ro session leaving the file tree
+// byte-changed (verified against the e2e F5 no-mutation hash). A missing or
+// unreadable store counts as zero unknown facts — a doctor surface is
+// report-only and must never fail the run over the gap it reports.
+func countOriginUnknownFacts(stateDir string) int {
+	dbPath := filepath.Join(stateDir, "memory_facts.db")
+	if _, err := os.Stat(dbPath); err != nil {
+		return 0
+	}
+	dsn := "file:" + dbPath + "?mode=ro&_busy_timeout=5000"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return 0
+	}
+	defer db.Close() //nolint:errcheck // read-only close, best effort
+	db.SetMaxOpenConns(1)
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM memory_facts WHERE origin = 'unknown'`).Scan(&n); err != nil {
+		return 0
+	}
+	return n
 }
 
 // --- mcp catalog dependency checks (Contract B) ---
@@ -739,4 +926,56 @@ func checkAliasReachabilityDoctor(cfg *llm.ProvidersConfig) []doctorCheck {
 		}
 	}
 	return checks
+}
+
+// checkCoreBareDoctor reports the core.bare state in .git/config and repairs it
+// under --fix. The repair is safe: setting core.bare=false in a working-tree
+// repo is harmless and restores git status/go build -buildvcs functionality.
+func checkCoreBareDoctor() doctorCheck {
+	repoRoot, err := exec.Command("git", "rev-parse", "--show-toplevel").CombinedOutput()
+	if err != nil {
+		// Not a git repo or git not available — report as warning, not failure.
+		return doctorCheck{
+			name:    "core.bare",
+			ok:      true,
+			warn:    true,
+			detail:  "not a git worktree (git rev-parse failed)",
+			fixable: false,
+		}
+	}
+	repoRootStr := strings.TrimSpace(string(repoRoot))
+
+	// Check current value
+	bareVal, err := exec.Command("git", "-C", repoRootStr, "config", "core.bare").CombinedOutput()
+	if err != nil {
+		return doctorCheck{
+			name:    "core.bare",
+			ok:      false,
+			detail:  "git config core.bare failed: " + strings.TrimSpace(string(bareVal)),
+			fixable: false,
+		}
+	}
+	bareValStr := strings.TrimSpace(string(bareVal))
+
+	if bareValStr == "true" {
+		return doctorCheck{
+			name:    "core.bare",
+			ok:      false,
+			warn:    true,
+			detail:  "core.bare=true (breaks git status and go build -buildvcs)",
+			fixable: true,
+		}
+	}
+	return doctorCheck{
+		name:    "core.bare",
+		ok:      true,
+		detail:  "core.bare=false (ok)",
+		fixable: false,
+	}
+}
+
+// fixCoreBareRepair applies the core.bare=false fix under --fix.
+func fixCoreBareRepair(repoRoot string) error {
+	_, err := exec.Command("git", "-C", repoRoot, "config", "core.bare", "false").CombinedOutput()
+	return err
 }

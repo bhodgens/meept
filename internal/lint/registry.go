@@ -62,12 +62,25 @@ func NewRegistry() *Registry {
 	return r
 }
 
-// Register adds a linter for a specific language
+// Register adds a linter for a specific language.
+// It appends. Default chains (CompileCheck, Vet) stay in front.
 func (r *Registry) Register(lang string, fn LinterFunc) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.linters[lang] = append(r.linters[lang], fn)
 	r.knownLangs[lang] = true
+}
+
+// SetLinters replaces the linter chain for one language.
+// Use it when a caller must not wait on the default CompileCheck or Vet
+// subprocesses. An empty list clears the chain.
+func (r *Registry) SetLinters(lang string, fns ...LinterFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.linters[lang] = append([]LinterFunc(nil), fns...)
+	if len(fns) > 0 {
+		r.knownLangs[lang] = true
+	}
 }
 
 // SetGlobalLinter sets a catch-all linter for unknown languages

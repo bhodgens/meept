@@ -110,6 +110,11 @@ type AgentMetadata struct {
 	// outright (model_alias precedent), never a union.
 	Groups []string `yaml:"groups,omitempty"`
 
+	// MemoryMaxScope caps this agent's memory recall scope (leaf
+	// 03-agent-recall-wiring C3): "" / "project" (default), "user",
+	// "global". The underscore key parses natively via the yaml tag.
+	MemoryMaxScope string `yaml:"memory_max_scope,omitempty"`
+
 	// MaxIterations is the maximum reasoning cycles.
 	MaxIterations int `yaml:"max_iterations,omitempty"`
 

@@ -236,7 +236,11 @@ PYEOF
             continue
         fi
         # shellcheck disable=SC2086  # cmdline is intentionally word-split.
-        ( cd "$workdir" && $cmdline ) || dart_rc=1
+        # git exports GIT_DIR/GIT_WORK_TREE into hook environments; the
+        # flutter tool reads them to resolve ITS OWN sdk version and
+        # lands on the hooked repo instead, reporting 0.0.0-unknown and
+        # failing pub version solving. Scrub them for the Dart runner.
+        ( cd "$workdir" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE $cmdline ) || dart_rc=1
     done
 fi
 

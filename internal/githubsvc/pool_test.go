@@ -173,4 +173,4 @@ func TestClientPool_ErrNoToken(t *testing.T) {
 
 // keep the go-github import referenced even where a test's failure happens
 // earlier; it documents the pinned major version the pool is built on.
-var _ = github.String
+var _ = github.NewClient

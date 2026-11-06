@@ -219,9 +219,9 @@ Output: APPROVED or specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| R0-research.md | PENDING | 0 | |
-| 01-detector-store.md | PENDING | 0 | |
-| 02-restore-lane.md | PENDING | 0 | |
+| R0-research.md | COMPLETE | 1 | landed c5ef67e9 (findings doc, reviewed) |
+| 01-detector-store.md | COMPLETE | 1 | landed 46661bbe (issue 84) |
+| 02-restore-lane.md | COMPLETE | 1 | landed 1e4912cc (issue 84) |
 
 Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE |
 BLOCKED
@@ -245,13 +245,13 @@ Coverage matrix:
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|-----------|-----------|--------|
-| FB1 | PII detector classes + NER seam | 01 T1 | TestDetectorDetects*/TestDetectorNERSeam | boundary-hardening-03 | PENDING |
-| FB2 | UUID swapper + durable session store | 01 T2-T3 | TestSwapperRoundTrip/TestSwapStoreDurability | boundary-hardening-03 | PENDING |
-| FB3 | hook order pinned (critical peers) | 01 T4 | TestPiiHookOrderPinned | boundary-hardening-03 | PENDING |
-| FB4 | restore at ScanOutput, session-bounded | 02 T1-T2 | TestRestoreAtScanOutput/TestRestoreCrossSessionRefused | boundary-hardening-03 | PENDING |
-| FB5 | secret #XXXX# restore (dead lane fixed) | 02 T4 | TestSecretPlaceholderRestore | boundary-hardening-04 | PENDING |
-| FB6 | config [security.pii] default false + disabled passthrough | 02 T3 | TestPiiConfigDefaults/TestPiiDisabledByteIdentical | boundary-hardening-03 | PENDING |
-| FB7 | leakage classes closed (logs/audit/trace) | master C2/C3 | in-package assertions | boundary-hardening-03 | PENDING |
+| FB1 | PII detector classes + NER seam | 01 T1 | TestDetectorDetects*/TestDetectorNERSeam | boundary-hardening-03 | VALIDATED |
+| FB2 | UUID swapper + durable session store | 01 T2-T3 | TestSwapperRoundTrip/TestSwapStoreDurability | boundary-hardening-03 | VALIDATED |
+| FB3 | hook order pinned (critical peers) | 01 T4 | TestPiiHookOrderPinned | boundary-hardening-03 | VALIDATED |
+| FB4 | restore at ScanOutput, session-bounded | 02 T1-T2 | TestRestoreAtScanOutput/TestRestoreCrossSessionRefused | boundary-hardening-03 | VALIDATED |
+| FB5 | secret #XXXX# restore (dead lane fixed) | 02 T4 | TestSecretPlaceholderRestore | boundary-hardening-04 | VALIDATED |
+| FB6 | config [security.pii] default false + disabled passthrough | 02 T3 | TestPiiConfigDefaults/TestPiiDisabledByteIdentical | boundary-hardening-03 | VALIDATED |
+| FB7 | leakage classes closed (logs/audit/trace) | master C2/C3 | in-package assertions | boundary-hardening-03 | VALIDATED |
 
 Statuses: PENDING | DELTA | VALIDATED. Delta log: [none yet]
 

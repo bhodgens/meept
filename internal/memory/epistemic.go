@@ -765,8 +765,13 @@ func (m *Manager) MarkResolved(ctx context.Context, predictionID, outcome string
 	mem.Metadata["status"] = "resolved"
 	mem.Metadata["resolved_at"] = time.Now().Format(time.RFC3339)
 	mem.Metadata["audit_id"] = auditID
-	if _, err := m.StoreVersioned(ctx, *mem, StoreOptions{CreateVersion: true, ParentID: predictionID}); err != nil {
-		return "", fmt.Errorf("store versioned: %w", err)
+	// Status is stamped IN PLACE on the existing row (leaf 05 probe confirmed
+	// the leak): a versioned write mints a new row and leaves the old
+	// status=open row visible to Search, which has no is_current filter —
+	// resolved predictions resurfaced as live. In-place keeps the prediction
+	// ID stable; row versioning remains reserved for supersede lineage.
+	if err := m.stampMetadataInPlace(ctx, mem); err != nil {
+		return "", fmt.Errorf("stamp resolve on prediction %s: %w", predictionID, err)
 	}
 	return auditID, nil
 }
@@ -798,8 +803,14 @@ func (m *Manager) RecordReview(ctx context.Context, decisionID, actualOutcome st
 	mem.Metadata["status"] = "reviewed"
 	mem.Metadata["reviewed_at"] = time.Now().Format(time.RFC3339)
 	mem.Metadata["audit_id"] = auditID
-	if _, err := m.StoreVersioned(ctx, *mem, StoreOptions{CreateVersion: true, ParentID: decisionID}); err != nil {
-		return 0, "", fmt.Errorf("store versioned: %w", err)
+	// Status is stamped IN PLACE on the existing row (leaf 05 probe confirmed
+	// the leak): a versioned write mints a new row and leaves the old
+	// status=open row visible to Search, which has no is_current filter —
+	// reviewed decisions resurfaced as pending review. In-place keeps the
+	// decision ID stable; row versioning remains reserved for supersede
+	// lineage.
+	if err := m.stampMetadataInPlace(ctx, mem); err != nil {
+		return 0, "", fmt.Errorf("stamp review on decision %s: %w", decisionID, err)
 	}
 	return score, auditID, nil
 }

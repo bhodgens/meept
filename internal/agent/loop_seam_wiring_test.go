@@ -10,6 +10,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/security/pii"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -293,4 +294,53 @@ func TestRunWithTaskSeamEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "done", resp)
 	_ = fmt.Sprint(resp) // keep fmt import honest if asserts change
+}
+
+// ---------------------------------------------------------------------------
+// Wiring-gap leaf 01-snapshot-seams: ConfigSnapshot propagation proof
+// ---------------------------------------------------------------------------
+
+// TestConfigSnapshotPropagatesSeams is the leaf's wiring-failure proof: an
+// armed template (assembler config enabled + tier provider + PII restore
+// hook) must clone its seams through Manager.GetOrCreateWired. A nil seam
+// or nil restore hook on the clone FAILS -- deleting the ConfigSnapshot
+// propagation block in loop.go makes this test red.
+func TestConfigSnapshotPropagatesSeams(t *testing.T) {
+	store, err := pii.NewSwapStore(t.TempDir())
+	require.NoError(t, err)
+	hook := NewPiiRestoreHook(pii.NewSwapper(store), nil,
+		config.PiiConfig{Enabled: true}, slogDiscardLogger())
+	require.NotNil(t, hook, "test setup must produce a live restore hook")
+
+	template := NewAgentLoop("seam-template", "/tmp",
+		WithLLMChatter(newMockChatter(&llm.Response{Content: "ok", FinishReason: "stop"})),
+		WithMessageBus(bus.New(nil, slogDiscardLogger())),
+	)
+	template.SetContextAssemblerConfig(config.ContextAssemblerConfig{Enabled: true})
+	template.SetTierBudgetProvider(&seamLoopProvider{items: []string{"template fact"}})
+	template.SetPiiRestoreHook(hook)
+
+	// Pre-arm the template's own seam so we also pin that the clone's seam
+	// is functionally materializable, not just config-carrying.
+	require.NotNil(t, template.contextSeamIfEnabled())
+
+	mgr := NewManager(ManagerConfig{})
+	clone, err := mgr.GetOrCreateWired("seam-clone-session", "/project/dir", template)
+	require.NoError(t, err)
+	require.NotNil(t, clone)
+
+	// The clone's assembler config + provider must have arrived.
+	clone.mu.RLock()
+	cfgSet, cfgEnabled := clone.contextAssemblerSet, clone.contextAssemblerCfg.Enabled
+	clone.mu.RUnlock()
+	assert.True(t, cfgSet, "clone lost the assembler config (contextAssemblerSet false)")
+	assert.True(t, cfgEnabled, "clone lost the enabled assembler flag")
+	assert.NotNil(t, clone.contextSeamIfEnabled(),
+		"clone's context seam must materialize from the propagated (cfg, provider) pair -- nil means the ConfigSnapshot propagation was deleted")
+	assert.NotNil(t, clone.PiiRestoreHook(),
+		"clone's PII restore hook must be re-attached -- nil means the ConfigSnapshot propagation was deleted")
+
+	// And the session identity must still be the clone's own (the excluded
+	// fields stay excluded).
+	assert.Equal(t, "seam-clone-session", clone.GetSessionID())
 }

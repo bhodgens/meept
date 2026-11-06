@@ -521,7 +521,6 @@ func (c BridgesEvalConfig) ConfigHash() string {
 	return HashBytes(b)
 }
 
-
 // LoadReport reads an existing artifact for resume; a missing file, a schema
 // mismatch, or a fixture/config hash mismatch returns a fresh report.
 func LoadReport(path string, fixtureHash, configHash string) *BridgesEvalReport {

@@ -262,6 +262,14 @@ type SkillMetadata struct {
 	// hides it. Absent or false keeps the skill visible.
 	DisableModelInvocation bool `yaml:"disable-model-invocation"`
 
+	// Origin stamps the provenance of the write that produced this skill
+	// (frontmatter `origin: user|agent|evolver|review`, lifecycle.Origin).
+	// The Writer persists it into the frontmatter on a stamped write
+	// (WriteSkillWithOrigin) and parses it back on read; legacy
+	// frontmatter without the key reads as "" (OriginUnknown). omitempty
+	// keeps bare/legacy writes byte-stable.
+	Origin string `yaml:"origin,omitempty"`
+
 	// Claude-specific fields (parsed separately, merged into Tags).
 	Trigger  string     `yaml:"trigger"`
 	Triggers stringList `yaml:"triggers"`

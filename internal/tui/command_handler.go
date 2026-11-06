@@ -191,6 +191,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeStop()
 	case "status":
 		return h.executeStatus()
+	case "intake":
+		return h.executeIntake()
 	case CmdTasks:
 		return h.executeTasks(cmd.Args)
 	case "task":

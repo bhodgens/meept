@@ -207,12 +207,12 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01/00T-e2e-tests | PENDING | 0 | |
-| 01/01-index-refresh-seam | PENDING | 0 | |
-| 02/00T-e2e-tests | PENDING | 0 | |
-| 02/01-skill-origin-stamp | PENDING | 0 | waits on 01/01 (C1) |
-| 02/02-memory-origin-column | PENDING | 0 | |
-| 02/03-doctor-report | PENDING | 0 | |
+| 01/00T-e2e-tests | COMPLETE | 0 | gate GREEN; 2 post-land design fixes (F4 query key, F5 no-mutation invariant) |
+| 01/01-index-refresh-seam | COMPLETE | 1 | C1 landed + daemon wiring closed in-session (rescan source + per-turn builder attach) |
+| 02/00T-e2e-tests | COMPLETE | 0 | gate GREEN (F3/F4/F5) |
+| 02/01-skill-origin-stamp | COMPLETE | 0 | C2: origin type + write-path stamps; CLI archives are move-ops, no content stamp |
+| 02/02-memory-origin-column | COMPLETE | 0 | C3: additive origin column + in-place migration, legacy reads 'unknown' |
+| 02/03-doctor-report | COMPLETE | 0 | C4: report-only origin-backfill check (mode=ro SELECT COUNT), never blocks |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED.
@@ -233,13 +233,28 @@ Phase 0, validated by the control agent (root orchestrator, in-session).
 
 | # | Feature | Source | E2E test | Status |
 |---|---------|--------|----------|--------|
-| F1 | index refresh reflects mid-session write | 01/01 T1-T2 | refresh-scenario | PENDING |
-| F2 | no-op refresh byte-stable | 01/01 T3 | refresh-scenario (hash) | PENDING |
-| F3 | skill frontmatter origin stamped per path | 02/01 T1-T3 | origin-scenario | PENDING |
-| F4 | memory_facts.origin column + legacy unknown | 02/02 T1-T3 | origin-scenario | PENDING |
-| F5 | doctor origin backfill report (report-only) | 02/03 T1-T2 | doctor-scenario | PENDING |
+| F1 | index refresh reflects mid-session write | 01/01 T1-T2 | refresh-scenario | COMPLETE |
+| F2 | no-op refresh byte-stable | 01/01 T3 | refresh-scenario (hash) | COMPLETE |
+| F3 | skill frontmatter origin stamped per path | 02/01 T1-T3 | origin-scenario | COMPLETE |
+| F4 | memory_facts.origin column + legacy unknown | 02/02 T1-T3 | origin-scenario | COMPLETE |
+| F5 | doctor origin backfill report (report-only) | 02/03 T1-T2 | doctor-scenario | COMPLETE |
 
-Delta log: (none yet).
+Delta log:
+- 2026-11-04 orchestrator: F4 tool-path leg re-keyed from `value LIKE '%window
+  seats%'` to `source_session <> ''`. The gate coupled C3's origin assertion to
+  C6's extractor value behavior (last-write-wins stored the assistant's
+  session-context value under the same owner/kind/key upsert slot), so the
+  value query never matched. Both C3's column and the funnel's origin stamping
+  were proven correct against the seeded DB; only the test's over-constrained
+  value predicate was wrong.
+- 2026-11-04 orchestrator: F5 no-mutation assert switched from raw fact-store
+  file bytes (db + -wal/-shm) to a logical row-set hash. After Daemon.Stop the
+  WAL sidecars stay hot; the doctor's first read-only open runs WAL recovery and
+  rewrites the sidecar bytes with zero rows changed, so a raw-byte hash
+  false-positived "mutated" nondeterministically (passed in one full run,
+  failed the isolated re-run). A genuine report-only violation (a backfill
+  write) would change the logical rows; the new invariant catches that and
+  nothing else. Stable across 3 consecutive runs.
 
 ## Frozen Documents
 

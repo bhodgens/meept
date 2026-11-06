@@ -46,6 +46,8 @@ import (
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/gatecapture"
 	"github.com/caimlas/meept/internal/githubsvc"
+	"github.com/caimlas/meept/internal/groups"
+	"github.com/caimlas/meept/internal/intake"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
@@ -54,6 +56,7 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
+	"github.com/caimlas/meept/internal/memory/working"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/placement"
 	"github.com/caimlas/meept/internal/plan"
@@ -251,6 +254,20 @@ type Components struct {
 	// can report it; it is inert (no open sockets) and needs no close.
 	GitHubPool *githubsvc.ClientPool
 
+	// IntakeWriteBack is the ticket outcome write-back built when the
+	// [intake] block is enabled and the effects ledger is wired (nil
+	// otherwise). The goal-health outcome seam reports through it;
+	// SetDoneLabel has already been applied by wireIntakePoller.
+	IntakeWriteBack *intake.WriteBack
+
+	// IntakeProjector is the plan->GitHub-Projects projection built when
+	// [intake].project_number > 0 and the effects ledger is wired (nil
+	// otherwise). wireIntakePoller also arms the plan.executing /
+	// plan.phase_state bus subscribers that drive it; a nil msgBus or
+	// lifecycle ctx (the wiring gate fixture) constructs the projector
+	// without subscriptions, so it stays inert rather than panicking.
+	IntakeProjector *intake.Projector
+
 	// GitHubReArmTickerDone closes when the periodic instruction re-sync
 	// ticker exits (daemon Stop). Nil unless a ticker was started
 	// (github enabled + live instruction scheduler).
@@ -317,6 +334,28 @@ type Components struct {
 	// memory.l0_enabled is set. Routed through the worker pool's
 	// processor via distillRouter (see l0_wiring.go).
 	DistillWorker *memory.DistillWorker
+
+	// TiersEngine is the memory-tier policy engine (wiring-gap leaf
+	// 03-tierpolicy-daemon T4): constructed AFTER the memory manager
+	// and the persistent queue exist (same AFTER-queue rule as the L0
+	// distill wiring), started in Components.Start, and stopped in
+	// stopComponents BEFORE the memory manager closes. Nil whenever
+	// memory.tiers.enabled is false (the default) or the enabled wiring
+	// failed its typed-nil guard - zero cost either way.
+	TiersEngine *EngineHandle
+
+	// WorkingProducer is the turn-terminal producer feeding the
+	// context assembler's working-tier ring (leaf T5). Nil unless the
+	// context assembler is enabled AND the ring store was constructed;
+	// stopped (unsubscribed) in stopComponents before the loop tears
+	// down.
+	WorkingProducer *bus.Subscriber
+
+	// workingStore is the ring store WireContextAssembler built (nil
+	// unless the assembler is enabled and construction succeeded). The
+	// producer wiring reads it at CALL time - WireContextAssembler runs
+	// before WireWorkingProducer in NewComponents.
+	workingStore *working.Store
 
 	// KnowledgeStore is the consolidation-side knowledge-asset store
 	// (tree 04): opened by wireKnowledgeAssets when memory.knowledge is
@@ -514,6 +553,7 @@ type Components struct {
 	// interactions handler is handed to the unified HTTP server via
 	// http.WithSlackInteractions in daemon.go.
 	SlackChannel      *slack.SlackChannel
+	Voice             *VoiceWiring
 	SlackInteractions *slack.InteractionsHandler
 
 	// Code intelligence
@@ -913,12 +953,52 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Agent-groups boot hook (leaf 02, task T4): structural validation of
 	// the [security.groups] section BEFORE any component wiring — a
 	// cyclic group chain or dangling policy reference fails boot with a
-	// named defect (fail closed). Live-registry tool validation is leaf
-	// 04's extension of the same hook.
+	// named defect (fail closed). Leaf 04 extends the same hook with the
+	// C6 live-registry tool-name leg: the registry is built just below
+	// (tools.NewRegistry), and groupsBootValidateTools runs AFTER builtin
+	// registration (registerBuiltinTools) where every policy tool name
+	// must resolve, or boot fails naming the offender.
 	if err := validateGroupsConfig(cfg); err != nil {
 		logger.Error("FATAL: groups config invalid", "error", err)
 		return nil, err
 	}
+
+	// Groups resolver (agent-groups leaf 04): built ONCE from the loaded
+	// config and shared by the registry (loop resolution records + the
+	// filterTools dispatch intersection). The normalizer injects the
+	// agent-grant vocabulary ("shell_execute" -> "shell") so
+	// internal/groups never imports internal/agent.
+	//
+	// Time-boxed overrides (agent-groups leaf 07, C8): the reader loads
+	// $MEEPT_HOME/group_overrides.json5 at boot with its clock injected
+	// (EnvGroupsNow: MEEPT_GROUPS_NOW for the e2e gate, wall-clock in
+	// production). A malformed FILE or entry FAILS BOOT (named error,
+	// fail-closed — same posture as validateGroupsConfig); expired
+	// entries are skipped with ONE Warn. The loaded set feeds the
+	// resolver's per-subject ExtraAllowsFor seam: deny still beats
+	// override and the spec stays the ceiling (resolve.go owns that
+	// precedence). The seam answers through the QUERY clock each
+	// resolution, so entries expire mid-window without a resolver
+	// rebuild.
+	groupsOverrides, groupsErr := groups.LoadOverrides(groupsOverridesPath(), groups.OverrideLoadOptions{
+		Now:  EnvGroupsNow,
+		Warn: func(msg string) { logger.Warn(msg) },
+	})
+	if groupsErr != nil {
+		logger.Error("FATAL: groups overrides invalid", "error", groupsErr)
+		return nil, groupsErr
+	}
+	groupsResolver := groups.NewResolver(
+		groupsPoliciesFromConfig(cfg.Security.Groups.Policies),
+		groupsBindingsFromConfig(cfg.Security.Groups.Bindings),
+		cfg.Security.Groups.DefaultManaged,
+		&groups.ResolverOptions{
+			NormalizeToolName: agent.CanonicalToolName,
+			ExtraAllowsFor: func(subject string) []string {
+				return groupsOverrides.AllowsFor(subject, EnvGroupsNow())
+			},
+		},
+	)
 
 	// OTLP metrics export (metrics.otlp) -- opt-in, default OFF. The knob
 	// is read here, BEFORE construction, so there is no construction-baked
@@ -2279,6 +2359,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		})
 	}
 	c.AgentLoop = agent.NewAgentLoop("daemon", "", agentOpts...)
+	// Memory-scope multiuser bit (leaf 03-agent-recall-wiring, Flag 3):
+	// the daemon-wide multiuser.enabled flag ORs into the scope resolution
+	// so an identity gap under enabled multiuser fails closed.
+	c.AgentLoop.SetMultiUserScopeEnabled(cfg.MultiUser.Enabled)
 	// Wire the global refusal-fallback default (refusal-fallback tree 02+03):
 	// the loop package cannot import internal/config, so the models.json5
 	// refusal_model slot is mirrored onto the loop here. Per-agent spec
@@ -3171,6 +3255,36 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	l0c := buildL0Components(c.MemoryManager, l0Enqueuer, cfg.Memory, logger)
 	c.DistillWorker = wireL0Distill(l0c, c.MemoryManager, distillChatter, cfg.Memory, logger)
 
+	// Memory-tier policy engine (wiring-gap leaf 03-tierpolicy-daemon
+	// T4). Same AFTER-queue placement rule as the L0 wiring above: the
+	// engine's compression path enqueues through c.Queue, so a wiring
+	// point before queue creation would have shipped the nil-enqueuer
+	// defect the L0 twin hit live (2026-10-13). memory.tiers defaults
+	// false (opt-in-defaults rule): the disabled posture is (nil, no
+	// goroutine, zero cost); an enabled config with a nil manager is a
+	// wiring ERROR (typed-nil guard, internal/daemon/AGENTS.md) logged
+	// at warn - boot continues, the engine is simply absent.
+	if pq, ok := c.Queue.(*queue.PersistentQueue); ok || c.Queue == nil {
+		eng, wired, engErr := BuildTierPolicyEngine(
+			NewTiersConfigAdapter(cfg.Memory.Tiers),
+			assemblerWorkConfigValue(),
+			c.MemoryManager,
+			pq,
+			logger.With("component", "tierpolicy"),
+		)
+		if engErr != nil {
+			logger.Warn("memory.tiers engine wiring failed -- policy tick disabled",
+				"error", engErr)
+		} else if wired {
+			c.TiersEngine = WrapEngine(eng)
+			logger.Info("memory.tiers engine wired",
+				"interval_seconds", cfg.Memory.Tiers.IntervalSeconds,
+				"retention_days", cfg.Memory.Tiers.RetentionDays,
+				"dry_run", cfg.Memory.Tiers.DryRun,
+			)
+		}
+	}
+
 	// Turn-terminal memory capture (option C, plan
 	// docs/plans/20261013-turn-terminal-capture): the turn.terminal
 	// subscriber replaces the retired session-end l0_record hook and the
@@ -3180,8 +3294,36 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// epistemic-built extractor (nil = ambient disabled); the message
 	// source is the daemon session store. Same AFTER-queue placement rule
 	// as above (live-gate lesson, commit c941327e).
+	//
+	// Recall outcome telemetry (leaf 04, contract C5): the outcome writer
+	// rides the SAME subscriber. Its drain seam closes over the daemon's
+	// loop sources (singleton + per-session manager) so the turn.terminal
+	// capture can read the injected-memory snapshot the recall render
+	// sites staged pre-render. The manager may not exist yet at this
+	// wiring point (constructed in wireAgentLoopManager), so the closure
+	// reads the component fields at CALL time, not wiring time.
+	recallOutcomes := memory.NewRecallOutcomeLogger(memoryDataDirFor(c.MemoryManager), logger)
+	if recallOutcomes != nil {
+		recallOutcomes.SetLoopSource(func(conversationID string) []memory.RecallOutcomeRecord {
+			loops := []*agent.AgentLoop{c.AgentLoop}
+			if c.AgentLoopManager != nil {
+				for _, loop := range c.AgentLoopManager.List() {
+					loops = append(loops, loop)
+				}
+			}
+			return agent.DrainRecallOutcomeSnapshot(conversationID, loops...)
+		})
+	}
 	WireMemoryCapture(msgBus, c.SessionStore,
-		l0cRecorder(l0c), l0cEnqueuer(l0c), c.AmbientExtractor, logger)
+		l0cRecorder(l0c), l0cEnqueuer(l0c), c.AmbientExtractor, logger, recallOutcomes)
+
+	// Working-tier ring producer (wiring-gap leaf 03-tierpolicy-daemon
+	// T5): the turn.terminal subscriber that actually FILLS the ring
+	// WireContextAssembler built. Wiring point matches the assembler's:
+	// after WireContextAssembler (line ~2370, which sets c.workingStore)
+	// and after the session store exists. Nil store -> nil subscriber
+	// (the ring is simply absent, exactly the pre-leaf posture).
+	c.WorkingProducer = WireWorkingProducer(msgBus, c.SessionStore, c.workingStore, logger)
 
 	// Create task registry (before agent registry so task store can be shared)
 	tasksDB := filepath.Join(cfg.Daemon.DataDir, "tasks.db")
@@ -3410,6 +3552,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// re-registered as cache-gated wrappers; off => no-op.
 	applyDeterministicToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
 
+	// Codemode sandbox tool (token-efficiency branch 02 leaf 02): register
+	// the `codemode` builtin only when [agent.tools].codemode_enabled is on
+	// (default false => tool ABSENT from the shared registry, byte-identical
+	// to pre-codemode). The matching agent-side grant (unioning codemode
+	// into each scoped agent's filtered allow-list) is wired below via
+	// agent.RegistryConfig.CodemodeEnabled at the NewAgentRegistry site.
+	applyCodemodeToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
+
+	// C6 live-registry validation (agent-groups leaf 04): every policy
+	// tool name must resolve in the NOW-FULL registry (builtin + extract
+	// + deterministic wrappers all registered above), or boot fails
+	// naming the offender. Runs here — not at the early structural hook —
+	// because the registry is empty before registerBuiltinTools.
+	if err := groupsResolver.ValidatePolicies(); err != nil {
+		logger.Error("FATAL: groups config policy tool names invalid", "error", err)
+		return nil, err
+	}
+
 	// msgBus (the NewComponents parameter): c.msgBus is only stored later
 	// in this function, so the relay notifier takes the local directly.
 	acpMgr, acpErr := applyACPFromConfig(cfg.ACP, decisionClient, msgBus)
@@ -3545,6 +3705,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			MemvidClient: c.MemvidClient,
 			TaskStore:    taskStore,
 			LLMClient:    c.LLMClient,
+			// Late discovery (leaf 03-agent-recall-wiring): definitions
+			// seeded into the discovery tiers after boot join at first
+			// dispatch. Daemon-only opt-in — test registries never rescan.
+			AllowLateDiscovery: true,
 			// SharedChatter: the ProviderManager when multi-provider wiring
 			// is on (session-affinity/leaf-07 finding). Without it every
 			// registry-built loop ran on the single default client, whose
@@ -3565,6 +3729,22 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			ToolRegistry:    c.ToolRegistry,
 			ShadowManager:   c.ShadowManager,
 			Logger:          logger,
+			// Groups resolver (agent-groups leaf 04): loop resolution
+			// records + the filterTools dispatch intersection for every
+			// registry-built agent. Nil resolver is impossible here (New
+			// always returns non-nil), and an empty-table resolver is the
+			// no-op legacy posture (D7).
+			GroupsResolver: groupsResolver,
+			// Decision-log level (agent-groups leaf 04): the C2 decision
+			// lines on dispatched/specialist turns honor the knob too.
+			DecisionLogLevel: cfg.Security.Groups.DecisionLogLevel,
+			// Codemode grant (token-efficiency branch 02 leaf 02): pass
+			// [agent.tools].codemode_enabled into the registry so filterTools
+			// unions the codemode tool into each scoped agent's filtered
+			// allow-list when the gate is on. Default false keeps the grant
+			// off (tool absent from filtered registries even if it were
+			// registered elsewhere).
+			CodemodeEnabled: cfg.Agent.Tools.CodemodeEnabled,
 			// Hook registry inheritance: registry-built specialists must
 			// enforce the same security-before-tool deny, decision gate,
 			// and transform hooks as the daemon template loop.
@@ -3606,6 +3786,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Must run after registry construction -- c.AgentRegistry is nil at
 		// the primary-loop wiring site (components.go:1422).
 		c.AgentRegistry.SetSchemaModeConfig(cfg.Agent.Tools)
+
+		// Decision-log level (agent-groups leaf 04, T3-adjacent): the
+		// security.groups.decision_log_level knob gates the C2
+		// permission decision-audit lines on the PRIMARY loop's executor.
+		// Session clones inherit via ConfigSnapshot's executor-level
+		// wiring; registry loops get the same value through their own
+		// executor construction below.
+		c.AgentLoop.SetExecutorDecisionLogLevel(cfg.Security.Groups.DecisionLogLevel)
 
 		// External acp turn producer (acp-employees dim 3A): mirror the
 		// singleton loop's wiring onto the registry so executor: acp
@@ -3658,6 +3846,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 		// Build capabilities map from agent specs and skill metadata
 		capBuilder := agent.NewCapabilitiesBuilder(c.SkillIndex, logger.With("component", "capabilities-builder"))
+		if c.CapabilityIndex != nil {
+			// Branch 01 #103 / C1: give the builder the shared capability index so
+			// a turn-boundary refreshIfNeeded() can reuse CapabilityIndex.Rebuild
+			// to re-derive the capability map after a mid-session skill write.
+			// Without it the refresh re-scans the skill index but cannot update the
+			// capability matching (a no-op beyond the skill index).
+			capBuilder.WithCapabilityIndex(c.CapabilityIndex)
+		}
+		// Wire the refresh-capable builder onto the main loop so each per-turn
+		// prompt build (assembleSystemPrompt -> SetCapabilitiesBuilder) settles a
+		// dirty skill index. No-ops unless c.SkillIndex is non-nil (discovery
+		// succeeded); a loop without skills keeps the default inert refresh.
+		if c.SkillIndex != nil && c.AgentLoop != nil {
+			c.AgentLoop.SetCapabilitiesBuilder(capBuilder)
+			logger.Info("Agent loop wired with skill-index refresh builder",
+				"component", "capabilities-builder",
+			)
+		}
 		capMap, err := capBuilder.Build(c.AgentRegistry.ListSpecs())
 		if err != nil {
 			logger.Warn("Failed to build capabilities map", "error", err)
@@ -3795,6 +4001,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// active-project fallback: projects are scoped per session. Empty
 		// (the default) keeps the actionable ErrNoWorkingDir.
 		c.Dispatcher.SetDefaultWorkingDir(cfg.Daemon.DefaultWorkingDir)
+
+		// Wire the multiuser bit for memory-scope resolution (leaf
+		// 03-agent-recall-wiring, Flag 3 fail-closed).
+		c.Dispatcher.SetMultiUserScopeEnabled(cfg.MultiUser.Enabled)
 
 		// Register platform tools now that agent registry is available
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, msgBus, logger)
@@ -4803,6 +5013,64 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Voice sidecar ([voice] block, voice-sidecar leaf 14): the whole-
+	// daemon wiring - call manager, registry, dialer, talk loops,
+	// supervisor, child proc, text server, employee binding, and the two
+	// Telnyx HTTP routes. Ordered AFTER the loop manager (loopTurnRunner
+	// clones loops per session), the session store, the employee
+	// framework (goal holds), and the effects ledger (dial reservation);
+	// every field captured by WireVoice is assigned before this call
+	// (pointer-capture order rule). Disabled boots (default) skip the
+	// block entirely - zero goroutines, zero sockets. An ENABLED boot
+	// with a broken voice config is a FATAL wiring error: answering
+	// phones half-wired strands live callers.
+	if cfg.Voice.Enabled {
+		vdeps := WireVoiceDeps{
+			Config:   cfg,
+			Bus:      msgBus,
+			Sessions: c.SessionStore,
+			Loops:    c.AgentLoopManager,
+			Template: c.AgentLoop,
+			Effects:  c.EffectsLedger,
+			Broker:   c.ensureSecretBroker(logger),
+			Logger:   logger,
+		}
+		// Audit chain: the employee wiring hands the Manager the chain DB
+		// handle; voice dial audit rows append through a store opened over
+		// the same pool (shared-DB convention, OpenStoreFromDB's Close is
+		// a no-op on caller-owned handles).
+		if chainDB := activityChainDB(c); chainDB != nil {
+			if s, err := auditlog.OpenStoreFromDB(chainDB, logger.With("component", "voice-audit")); err == nil {
+				vdeps.Audit = s
+			} else {
+				logger.Warn("voice wiring: audit chain store unavailable; dial audit rows degraded", "error", err)
+			}
+		}
+		// Supervisor chatter (C6 fast endpoint): voice.supervisor_model
+		// resolves to the classifier/small-model client when configured,
+		// else the main client. nil degrades the gate to allow-all with a
+		// single construction warning (NewSupervisor logs it).
+		vdeps.SupervisorChatter = voiceSupervisorChatter(c)
+		wiring, err := WireVoice(c.ctx, vdeps)
+		if err != nil {
+			logger.Error("FATAL: voice wiring failed", "error", err)
+			return nil, err
+		}
+		if wiring == nil {
+			// Degraded to disabled (missing secrets broker/token): the
+			// daemon boots without voice; every call path stays refused.
+			c.Voice = nil
+			logger.Warn("voice sidecar disabled: wiring degraded (see voice wiring WARN above)")
+		} else {
+			c.Voice = wiring
+			logger.Info("voice sidecar wired",
+				"max_concurrent_calls", cfg.Voice.MaxConcurrentCalls,
+				"supervisor_enabled", cfg.Voice.SupervisorEnabled,
+				"routes_armed", wiring.Routes != nil,
+			)
+		}
+	}
+
 	// Initialize backup scheduler (if configured and enabled)
 	if cfg.Backup.IsValidated() {
 		sched, err := bkpkg.NewGitBackupScheduler(cfg.Backup, logger)
@@ -5079,6 +5347,10 @@ func (c *Components) Start(ctx context.Context) error {
 				if c.SyncPuller != nil {
 					c.SyncPuller.Stop()
 				}
+			case "tierpolicy":
+				if c.TiersEngine != nil {
+					c.TiersEngine.Stop()
+				}
 			}
 			if stopErr != nil {
 				c.Logger.Warn("component stop error during rollback", "handler", name, "error", stopErr)
@@ -5094,6 +5366,22 @@ func (c *Components) Start(ctx context.Context) error {
 			return fmt.Errorf("start soul watcher: %w", err)
 		}
 		startedHandlers = append(startedHandlers, "soul")
+	}
+
+	// Start the memory-tier policy engine (wiring-gap leaf 03-
+	// tierpolicy-daemon T4): the background tick is the ONLY owner of
+	// Evaluate/Execute (never chat-path code). Placement AFTER the
+	// components exist, before the request handlers: a failed Start is
+	// a hard error (an enabled policy that never ticks is a silent
+	// silent-skip defect, the exact class this leaf closes). The engine
+	// handle is nil on every disabled boot - guard makes it a no-op.
+	if c.TiersEngine != nil {
+		if err := c.TiersEngine.Start(ctx); err != nil {
+			return fmt.Errorf("start memory.tiers engine: %w", err)
+		}
+		startedHandlers = append(startedHandlers, "tierpolicy")
+		c.Logger.Info("memory.tiers engine started",
+			"running", c.TiersEngine.Running())
 	}
 
 	// Start chat handler
@@ -5614,6 +5902,15 @@ func (c *Components) Start(ctx context.Context) error {
 			if err := c.EmployeeManager.ScheduleFindingsRetention(ctx, schedAdapter, retentionDays); err != nil {
 				c.Logger.Warn("Failed to schedule findings retention", "error", err)
 			}
+
+			// GitHub ticket intake ([intake] block, github-intake-factory
+			// tree): schedule the ticket->goal poll here — NOT beside the
+			// github tool wiring — because the scheduler, employee
+			// manager, and effects ledger only exist from this point of
+			// the boot sequence on. Gated on enabled (default-off), same
+			// fail-closed posture; no-op with one debug log when
+			// disabled. RunAtInterval is idempotent per name.
+			wireIntakePoller(c)
 
 			// Schedule daily recents pruning (TTL + cap).
 			if c.ProjectManager != nil {
@@ -6497,6 +6794,29 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	if c.TeardownIdleReaper != nil {
 		c.TeardownIdleReaper.Stop()
 		c.Logger.Info("session idle reaper stopped")
+	}
+
+	// Stop the memory-tier policy engine (wiring-gap leaf 03-
+	// tierpolicy-daemon T4) BEFORE the memory manager closes: the tick's
+	// pass reads episodic rows and the demotion path writes them, so an
+	// engine ticking into a closed store would error (or worse, race the
+	// close). Stop is ctx-cancel-safe + idempotent; the context cancel
+	// above already unblocks the loop, this closes the stopChan cleanly.
+	if c.TiersEngine != nil {
+		c.TiersEngine.Stop()
+		c.Logger.Info("memory.tiers engine stopped")
+	}
+
+	// Unsubscribe the working-tier producer (leaf T5) before the session
+	// store and the agent loop tear down: the producer reads the store
+	// from its goroutine, so a terminal event arriving mid-shutdown could
+	// otherwise race the store close. Unsubscribe stops the reader
+	// goroutine; in-flight appends are best-effort and safe (the ring is
+	// process-local and dies with it).
+	if c.WorkingProducer != nil {
+		c.msgBus.Unsubscribe(c.WorkingProducer)
+		c.WorkingProducer = nil
+		c.Logger.Info("working-tier producer unsubscribed")
 	}
 
 	if c.SessionStore != nil {
@@ -7600,6 +7920,14 @@ func registerBuiltinTools(
 	// registry itself always returns full-fidelity tools via Get(name), so
 	// expansions never lose schema data. LRU size 0 -> builtin default 32.
 	registry.Register(builtin.NewToolViewTool(registry, 0))
+
+	// tool_search (leaf 04): the search meta-tool for indexed/predicted
+	// exposure. It scans the FULL registry (the role ceiling), never the
+	// filtered active subset, so unlisted-but-in-ceiling tools stay
+	// discoverable. The daemon registers it against the full registry; the
+	// exposure engine (leaf 05) re-bounds it to a ceiling-filtered view via
+	// SetScope when dynamic exposure is on.
+	registry.Register(builtin.NewToolSearchTool(registry))
 
 	logger.Info("Registered builtin tools", "count", registry.Count())
 }
@@ -8991,6 +9319,14 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 			"capabilities", len(c.SkillIndex.AllCapabilities()),
 		)
 
+		// Branch 01 #103 / C1: install the rescan source so a turn-boundary
+		// SkillIndex.Refresh() (settled by CapabilitiesBuilder.refreshIfNeeded)
+		// re-reads the on-disk skill tiers. Without this the bare index holds no
+		// discovery source and Refresh would only clear the dirty flag, leaving
+		// mid-session skill writes invisible until a restart. Discovery is
+		// lightweight (metadata-only, no bodies) and runs off the index mutex.
+		c.SkillIndex.SetRescanSource(discovery.DiscoverMetadataOnly)
+
 		// Build capability index for metadata-driven skill matching
 		c.CapabilityIndex = skills.BuildCapabilityIndex(
 			c.SkillIndex,
@@ -9038,6 +9374,18 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 	// Wire registry into skill writer so archive/restore keeps registry in sync.
 	if c.SkillWriter != nil {
 		c.SkillWriter.SetRegistry(c.SkillRegistry)
+	}
+
+	// Wire the skill writer's post-write change notifier into the branch-1
+	// index dirty flag (C1): every skill write marks the index dirty so the
+	// next-turn refresh re-reads the on-disk tiers. SkillIndex is nil when
+	// discovery failed above, in which case the writer simply stays un-wired
+	// (writes still land on disk; the index was never populated anyway).
+	if c.SkillWriter != nil && c.SkillIndex != nil {
+		idx := c.SkillIndex
+		c.SkillWriter.SetChangeNotifier(func(skillName string) {
+			idx.MarkDirty()
+		})
 	}
 
 	// Construct skill evolver + scheduler (closed-loop skill evolution).
@@ -9684,6 +10032,32 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 			// orchestrator provisioned one for this step's phase.
 			if wd := p.resolveStepWorkingDirFor(job, stepPayload.StepID, stepPayload.SessionID); wd != "" {
 				loop.SetWorkingDir(wd)
+				// Memory-scope identity (leaf 03-agent-recall-wiring): the
+				// step job's origin session binds the loop's project +
+				// multiuser identity the memory tools stamp/filter with —
+				// task-scoped loops would otherwise stay scope-blind while
+				// session loops are filtered (three-site rule).
+				if p.sessionStore != nil && stepPayload.SessionID != "" {
+					sess := p.sessionStore.Get(stepPayload.SessionID)
+					if sess == nil {
+						sess = p.sessionStore.GetByConversationID(stepPayload.SessionID)
+					}
+					if sess != nil {
+						loop.SetProjectID(sess.ProjectID)
+						loop.SetScopeUserID(sess.OwnerID)
+					}
+				}
+				// Group fence roots (agent-groups leaf 04 F6): a managed
+				// agent's fs_roots arm an ADDITIVE fence on this loop —
+				// writes outside the group roots are denied at the
+				// central FenceStage, even when the daemon-wide session
+				// fence is off (fence_enabled=false). The step-job lane
+				// has NO session-scoped injection site (the session loop
+				// seam is dispatcher/handler), so this is the fence arm
+				// point for task-scoped loops.
+				if gf := agent.InjectGroupFence(loop.Security(), loop.GroupResolution()); gf != nil && gf != loop.Security() {
+					loop.SetSecurityChecker(gf)
+				}
 				p.logger.Info("Step job working dir resolved",
 					"job_id", job.ID,
 					"task_id", job.TaskID,

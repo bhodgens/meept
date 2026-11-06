@@ -49,7 +49,9 @@
         "session_id": { "type": "string" },
         "task_id": { "type": "string" },
 
-        "trace_id": { "type": "string", "description": "Turn trace correlation (llm-hop-tracing leaf 01); empty when tracing is disabled" },        "intent_type": { "type": "string" },
+        "trace_id": { "type": "string", "description": "Turn trace correlation (llm-hop-tracing leaf 01); empty when tracing is disabled" },
+        "turn_span_id": { "type": "string", "description": "Minted turn span id, parent of the trace's llm.call/tool.call hop spans (wiring-gap-remediation leaf 06); empty on the same paths as trace_id" },
+        "intent_type": { "type": "string" },
         "agent_id": { "type": "string" },
         "handler_case": { "type": "string", "minLength": 1 },
         "status": {

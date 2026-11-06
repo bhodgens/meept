@@ -286,8 +286,11 @@ func TestSkillPatch_RewriteMode(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("read rewritten skill: %v", readErr)
 	}
-	if string(data) != newContent {
-		t.Errorf("disk content mismatch:\n got: %q\nwant: %q", string(data), newContent)
+	// C2: the patch tool stamps origin:agent into the frontmatter, so the
+	// on-disk file is the submitted content with the origin key inserted.
+	wantStamped := strings.Replace(newContent, "\n---\n", "\norigin: agent\n---\n", 1)
+	if string(data) != wantStamped {
+		t.Errorf("disk content mismatch:\n got: %q\nwant: %q", string(data), wantStamped)
 	}
 }
 

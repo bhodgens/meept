@@ -31,6 +31,15 @@ func l0DirFor(dataDir string) string {
 	return filepath.Join(dataDir, "l0")
 }
 
+// memoryDataDirFor is the nil-safe memory data dir accessor ("" when no
+// manager or no data dir — every consumer treats "" as disabled).
+func memoryDataDirFor(memoryMgr *memory.Manager) string {
+	if memoryMgr == nil {
+		return ""
+	}
+	return memoryMgr.DataDir()
+}
+
 func newDistillLLMAdapter(chatter llm.Chatter) memory.DistillLLM {
 	if chatter == nil {
 		return nil

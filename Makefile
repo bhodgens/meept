@@ -248,6 +248,11 @@ FLUTTER_DART_DEFINES_DIST = --dart-define=MEEPT_DEV_API_KEY= --dart-define=MEEPT
 # =============================================================================
 
 # Config templates to install
+#
+# The recipe copies each target (if absent) from config/<basename>. A target
+# with no config/ template is skipped ("template ... not found") — so a fresh
+# install of tools_intent_map.json5 is the copy-if-absent path, and an
+# existing user-edited file is never clobbered (make config-bootstrap).
 CONFIG_FILES := \
 	$(MEEPT_HOME)/meept.json5 \
 	$(MEEPT_HOME)/models.json5 \
@@ -256,7 +261,8 @@ CONFIG_FILES := \
 	$(MEEPT_HOME)/mcp_servers.json5 \
 	$(MEEPT_HOME)/acp_agents.json5 \
 	$(MEEPT_HOME)/q_agent.json5 \
-	$(MEEPT_HOME)/menubar.json5
+	$(MEEPT_HOME)/menubar.json5 \
+	$(MEEPT_HOME)/tools_intent_map.json5
 
 # The env resolver script (config/env -> $(MEEPT_HOME)/env) is NOT in
 # CONFIG_FILES: it is an EXECUTABLE (the daemon runs it at config-expansion

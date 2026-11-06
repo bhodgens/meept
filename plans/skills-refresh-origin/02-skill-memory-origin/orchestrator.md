@@ -93,10 +93,10 @@ assertions in e2e/suites/ (build tag e2e); user-facing strings lowercase.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-e2e-tests | PENDING | 0 | |
-| 01-skill-origin-stamp | PENDING | 0 | waits on branch 1 01 (C1) |
-| 02-memory-origin-column | PENDING | 0 | |
-| 03-doctor-report | PENDING | 0 | waits on 02 |
+| 00T-e2e-tests | COMPLETE | 0 | gate GREEN; F4/F5 design fixes recorded in master delta log |
+| 01-skill-origin-stamp | COMPLETE | 0 | C2 landed; stamps verified |
+| 02-memory-origin-column | COMPLETE | 0 | C3 landed; in-place migration proven |
+| 03-doctor-report | COMPLETE | 0 | C4 landed; report-only (mode=ro) verified |
 
 Status: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED |
 REVIEWED | COMPLETE | BLOCKED.
@@ -113,9 +113,9 @@ Test leaves: 00T-e2e-tests.md (hermetic e2e). Dispatched first, validated in-ses
 
 | # | Feature | Source | E2E test | Status |
 |---|---------|--------|----------|--------|
-| F3 | skill frontmatter origin per path | 01 T1-T3 | origin-scenario | PENDING |
-| F4 | memory_facts.origin + legacy unknown | 02 T1-T3 | origin-scenario | PENDING |
-| F5 | doctor backfill report-only | 03 T1-T2 | doctor-scenario | PENDING |
+| F3 | skill frontmatter origin per path | 01 T1-T3 | origin-scenario | COMPLETE |
+| F4 | memory_facts.origin + legacy unknown | 02 T1-T3 | origin-scenario | COMPLETE |
+| F5 | doctor backfill report-only | 03 T1-T2 | doctor-scenario | COMPLETE |
 
 Delta log: (none yet).
 

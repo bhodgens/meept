@@ -146,10 +146,12 @@ func captureScriptedGolden(t testing.TB, opts CaptureOptions) (string, error) {
 // scratch daemon's state dir. The DB opens READ-ONLY (the tasksdb.go
 // DSN pattern) - capture never writes daemon state.
 //
-// The chat path does not persist session_tool_calls rows today (the
-// store method exists; the loop-side writer is not wired), so when the
-// session has zero persisted rows the sequence is read from the
-// FakeLLM request log instead: the daemon echoes every assistant
+// The chat path now persists session_tool_calls rows at every exchange
+// (wiring-gap-remediation leaf 05: the loop-side writer is wired), so
+// DB-first capture is the primary path and the rows land automatically
+// with each scripted turn. When the session still has zero persisted
+// rows the sequence is read from the FakeLLM request log instead (the
+// echo fallback stays): the daemon echoes every assistant
 // tool_calls message back to the model on the next completion request,
 // so the LAST request's echoed set is the complete served sequence in
 // serving order. That echo exists only inside a scripted FakeLLM run -

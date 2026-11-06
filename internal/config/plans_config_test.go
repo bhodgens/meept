@@ -233,45 +233,60 @@ func TestPlansConfig_TieredIterationDefaults(t *testing.T) {
 }
 
 // TestPlansConfig_FreshContextCriticDefaults pins plan-20261101-fresh-
-// context-critic contract C1: the three critic flags default FALSE (ships
-// dark), absent JSON keys decode false, and explicitly-true keys decode
-// true. NormalizePlansDefaults must not flip any of them on.
+// context-critic contract C1 as flipped by the 2026-11-02 operator
+// decision: the three critic features default ENABLED, expressed through
+// inverted disable-form keys (an absent key decodes false = feature on;
+// an explicit true disables). The old enable-named keys were removed, so
+// a config carrying only the legacy keys must leave every Disabled bool
+// false (unknown keys are ignored, not honored). NormalizePlansDefaults
+// must not flip any of them.
 func TestPlansConfig_FreshContextCriticDefaults(t *testing.T) {
 	type doc struct {
 		Plans PlansConfig `json:"plans"`
 	}
 
-	// Absent keys -> all false.
+	// Absent keys -> all three DISABLED flags false, i.e. features on.
 	var absent doc
 	if err := json.Unmarshal([]byte(`{"plans":{}}`), &absent); err != nil {
 		t.Fatalf("json.Unmarshal absent: %v", err)
 	}
-	if absent.Plans.FreshCriticEnabled {
-		t.Error("absent fresh_critic_enabled decoded true, want false")
+	if absent.Plans.FreshCriticDisabled {
+		t.Error("absent fresh_critic_disabled decoded true; the critic must default enabled")
 	}
-	if absent.Plans.HostileCriticEnabled {
-		t.Error("absent hostile_critic_enabled decoded true, want false")
+	if absent.Plans.HostileCriticDisabled {
+		t.Error("absent hostile_critic_disabled decoded true; the hostile pass must default enabled")
 	}
-	if absent.Plans.InterviewOptionGates {
-		t.Error("absent interview_option_gates decoded true, want false")
+	if absent.Plans.InterviewOptionsDisabled {
+		t.Error("absent interview_options_disabled decoded true; the option gates must default enabled")
 	}
 	NormalizePlansDefaults(&absent.Plans)
-	if absent.Plans.FreshCriticEnabled || absent.Plans.HostileCriticEnabled || absent.Plans.InterviewOptionGates {
-		t.Error("NormalizePlansDefaults flipped a critic flag on; all three must stay false")
+	if absent.Plans.FreshCriticDisabled || absent.Plans.HostileCriticDisabled || absent.Plans.InterviewOptionsDisabled {
+		t.Error("NormalizePlansDefaults flipped a critic disable flag on; all three must stay false")
 	}
 
-	// Keys present and true -> true.
+	// Explicit disable keys -> exactly those features turn off.
 	var present doc
-	if err := json.Unmarshal([]byte(`{"plans":{"fresh_critic_enabled":true,"hostile_critic_enabled":true,"interview_option_gates":true}}`), &present); err != nil {
+	if err := json.Unmarshal([]byte(`{"plans":{"fresh_critic_disabled":true,"hostile_critic_disabled":true,"interview_options_disabled":true}}`), &present); err != nil {
 		t.Fatalf("json.Unmarshal present: %v", err)
 	}
-	if !present.Plans.FreshCriticEnabled {
-		t.Error("fresh_critic_enabled = true decoded false, want true")
+	if !present.Plans.FreshCriticDisabled {
+		t.Error("fresh_critic_disabled = true decoded false, want true (explicit disable)")
 	}
-	if !present.Plans.HostileCriticEnabled {
-		t.Error("hostile_critic_enabled = true decoded false, want true")
+	if !present.Plans.HostileCriticDisabled {
+		t.Error("hostile_critic_disabled = true decoded false, want true (explicit disable)")
 	}
-	if !present.Plans.InterviewOptionGates {
-		t.Error("interview_option_gates = true decoded false, want true")
+	if !present.Plans.InterviewOptionsDisabled {
+		t.Error("interview_options_disabled = true decoded false, want true (explicit disable)")
+	}
+
+	// Legacy enable-named keys have NO effect: they were removed, so a
+	// config carrying only fresh_critic_enabled must leave the disable
+	// flag false (the feature stays enabled; unknown keys are ignored).
+	var legacy doc
+	if err := json.Unmarshal([]byte(`{"plans":{"fresh_critic_enabled":false,"hostile_critic_enabled":false,"interview_option_gates":false}}`), &legacy); err != nil {
+		t.Fatalf("json.Unmarshal legacy: %v", err)
+	}
+	if legacy.Plans.FreshCriticDisabled || legacy.Plans.HostileCriticDisabled || legacy.Plans.InterviewOptionsDisabled {
+		t.Error("legacy enable-named keys disabled a critic feature; unknown keys must be ignored")
 	}
 }

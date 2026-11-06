@@ -113,6 +113,17 @@ type AgentSpec struct {
 	// Returned WITHOUT a HasAlias pre-check — the resolver's own
 	// resolution errors visibly if the alias is missing.
 	ModelAlias string `json:"model_alias,omitempty" yaml:"model_alias,omitempty"`
+	// ToolExposure is the per-agent as-needed tool-exposure tier, from the
+	// AGENT.md `tool_exposure:` frontmatter key (token-efficiency branch 03
+	// leaf 02, design §7). Valid values: "full" | "indexed" |
+	// "predicted" | "search"; empty = inherit — the exposure engine
+	// resolves per-model (models.json5 tool_exposure) > this field > the
+	// global [agent.tools] tool_exposure > default ("predicted" with the
+	// dynamic_tool_exposure flag on, legacy "indexed" with it off). "search"
+	// takes effect only for frontier-class models (the model's capabilities
+	// carry "frontier", design §5.1); otherwise it downgrades to
+	// "predicted" with one warn naming the model.
+	ToolExposure string `json:"tool_exposure,omitempty" yaml:"tool_exposure,omitempty"`
 	// EnhancerModel is the small/cheap model used to expand a brief into
 	// generator-ready prose. Empty = alias "small".
 	EnhancerModel string `json:"enhancer_model,omitempty"`
@@ -125,6 +136,14 @@ type AgentSpec struct {
 	// refusal_model slot; both empty = refusal fallback disabled for this
 	// agent (precedence: per-agent spec field > global slot > off).
 	RefusalModel string `json:"refusal_model,omitempty" yaml:"refusal_model,omitempty"`
+	// MemoryMaxScope declares the WIDEST memory recall scope this agent's
+	// sessions operate at (leaf 03-agent-recall-wiring, C3; chief-of-staff
+	// pattern D2): "" or "project" (default — isolated to the session's
+	// bound project), "user" (all the user's projects), "global" (spans
+	// projects; the chief-of-staff declaration). Invalid values fail SAFE
+	// to project (resolveScopeInputs warns). AGENT.md frontmatter key:
+	// memory_max_scope.
+	MemoryMaxScope string `json:"memory_max_scope,omitempty" yaml:"memory_max_scope,omitempty"`
 	// AdditionalTools are tools beyond the baseline that this agent has access to.
 	AdditionalTools []string `json:"additional_tools,omitempty"`
 	// ToolScopeLimit caps how many tools are offered to this agent in the
@@ -183,6 +202,15 @@ var BaselineTools = []string{
 	ToolMemoryStore,
 	ToolMemorySearch,
 	ToolMemoryGetContext,
+	// Knowledge-asset reads (tree 04): default-on per the memory
+	// second-brain decisions D1-D3 (plan
+	// docs/plans/20261030-memory-second-brain) — the store registers its
+	// tools on every daemon, so the read side rides the baseline grant
+	// (on-demand tool access; nothing ambiently injected). knowledge_ingest
+	// stays grant-only (memory_write class).
+	"knowledge_search",
+	"knowledge_read",
+	"knowledge_impact",
 	"task_create",
 	"task_get",
 	"task_list",

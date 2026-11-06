@@ -26,6 +26,9 @@ type ModelUsage struct {
 	TokensIn     int64   `json:"tokens_in" db:"tokens_in"`
 	TokensOut    int64   `json:"tokens_out" db:"tokens_out"`
 	AvgLatencyMs float64 `json:"avg_latency_ms" db:"avg_latency_ms"`
+	// AvgTTFTMs averages only MEASURED calls (ttft_ms >= 0, the -1
+	// sentinel excluded); -1 when nothing in the window was measured.
+	AvgTTFTMs float64 `json:"avg_ttft_ms" db:"avg_ttft_ms"`
 }
 
 // AgentUsage is one agent's task outcome totals. State is the agent's last
@@ -66,7 +69,8 @@ SELECT provider || '/' || model_id AS id,
        COUNT(*)                          AS calls,
        COALESCE(SUM(tokens_sent), 0)     AS tokens_in,
        COALESCE(SUM(tokens_received), 0) AS tokens_out,
-       COALESCE(AVG(latency_ms), 0)      AS avg_latency_ms
+       COALESCE(AVG(latency_ms), 0)      AS avg_latency_ms,
+       COALESCE(AVG(CASE WHEN ttft_ms >= 0 THEN ttft_ms END), -1) AS avg_ttft_ms
 FROM llm_calls
 WHERE timestamp >= ?
 GROUP BY provider, model_id

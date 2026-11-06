@@ -315,8 +315,10 @@ func (c *L2Cache) InvalidateByFile(ctx context.Context, filePath string) {
 	// Use a LIKE pattern to match entries that contain the file path as a key
 	// in the JSON object. This works because JSON keys are quoted with double
 	// quotes, so we search for "filePath" as a key indicator.
-	// Escape LIKE metacharacters to prevent incorrect matching on paths with % or _
+	// LLM-11 FIX: Escape LIKE metacharacters (%, _) and JSON-delimiter (") to prevent
+	// pattern injection via adversarial file paths.
 	escaped := strings.ReplaceAll(filePath, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 	escaped = strings.ReplaceAll(escaped, `%`, `\%`)
 	escaped = strings.ReplaceAll(escaped, `_`, `\_`)
 	pattern := `%"` + escaped + `"%`

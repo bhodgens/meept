@@ -226,13 +226,13 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-inter-agent-taint/R0-research.md | PENDING | 0 | |
-| 01-inter-agent-taint/01-taint-redesign.md | PENDING | 0 | |
-| 01-inter-agent-taint/02-driver-wiring.md | PENDING | 0 | |
-| 02-pii-proxy/R0-research.md | PENDING | 0 | |
-| 02-pii-proxy/01-detector-store.md | PENDING | 0 | |
-| 02-pii-proxy/02-restore-lane.md | PENDING | 0 | |
-| 03-e2e/01-boundary-hardening-suite.md | PENDING | 0 | |
+| 01-inter-agent-taint/R0-research.md | COMPLETE | 1 | landed c5ef67e9 (agent-boundary-taint-findings.md, reviewed) |
+| 01-inter-agent-taint/01-taint-redesign.md | COMPLETE | 1 | landed 46661bbe (issue 84) |
+| 01-inter-agent-taint/02-driver-wiring.md | COMPLETE | 1 | landed 1c573f80 (issue 84) |
+| 02-pii-proxy/R0-research.md | COMPLETE | 1 | landed c5ef67e9 (pii-unmasking-findings.md, reviewed) |
+| 02-pii-proxy/01-detector-store.md | COMPLETE | 1 | landed 46661bbe (issue 84) |
+| 02-pii-proxy/02-restore-lane.md | COMPLETE | 1 | landed 1e4912cc (issue 84) |
+| 03-e2e/01-boundary-hardening-suite.md | COMPLETE | 1 | landed 1781716d; 4/4 scenarios PASS (16.3s re-run at audit) |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -260,13 +260,13 @@ integration gate dispatched last.
 
 | # | Feature (from plan) | Source (leaf/spec section) | Unit tests | E2E tests | Status |
 |---|---------------------|----------------------------|-----------|-----------|--------|
-| F1 | per-handoff taint labeling + declassify at driver boundary | 01-taint-redesign.md T1-T3 | TestCheckMessageTaint* in internal/agent | boundary-hardening-01 | PENDING |
-| F2 | driver MarkUntrusted/RecordToolTaint at all 3 drivers + hook registration | 02-driver-wiring.md T1-T2 | wiring-failure test in internal/daemon | boundary-hardening-01 | PENDING |
-| F3 | inter-agent deny patterns | 02-driver-wiring.md T3 | internal/security deny-pattern tests | boundary-hardening-02 | PENDING |
-| F4 | PII detector + durable session swap store | 01-detector-store.md T1-T2 | internal/security/pii tests | boundary-hardening-03 | PENDING |
-| F5 | restore-on-output, session-bounded + config [security.pii] | 02-restore-lane.md T1-T3 | restore + cross-session tests | boundary-hardening-03 | PENDING |
-| F6 | secret Deobfuscate restore lane | 02-restore-lane.md T4 | secret-restore test | boundary-hardening-04 | PENDING |
-| F7 | hook pass order pinned | contract C1; 01-detector-store.md T4 | ordering test | boundary-hardening-03 | PENDING |
+| F1 | per-handoff taint labeling + declassify at driver boundary | 01-taint-redesign.md T1-T3 | TestCheckMessageTaint* in internal/agent | boundary-hardening-01 | VALIDATED |
+| F2 | driver MarkUntrusted/RecordToolTaint at all 3 drivers + hook registration | 02-driver-wiring.md T1-T2 | wiring-failure test in internal/daemon | boundary-hardening-01 | VALIDATED |
+| F3 | inter-agent deny patterns | 02-driver-wiring.md T3 | internal/security deny-pattern tests | boundary-hardening-02 | VALIDATED |
+| F4 | PII detector + durable session swap store | 01-detector-store.md T1-T2 | internal/security/pii tests | boundary-hardening-03 | VALIDATED |
+| F5 | restore-on-output, session-bounded + config [security.pii] | 02-restore-lane.md T1-T3 | restore + cross-session tests | boundary-hardening-03 | VALIDATED |
+| F6 | secret Deobfuscate restore lane | 02-restore-lane.md T4 | secret-restore test | boundary-hardening-04 | VALIDATED |
+| F7 | hook pass order pinned | contract C1; 01-detector-store.md T4 | ordering test | boundary-hardening-03 | VALIDATED |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 
@@ -289,3 +289,4 @@ dated addenda. Never edit a dispatched leaf document mid-execution.
   see `#XXXX#` in replies.
 - scripts/audit-secrets-value-callers.py may need its allowlist extended
   for the PII store's resolve-adjacent accessors - same review discipline.
+- Forest closeout 2026-11-05: tables reconciled against HEAD by read-only audit; all leaves verified landed + gates green.

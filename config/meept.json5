@@ -239,11 +239,47 @@
     },
     // Per-project character limit overrides (keyed by project path)
     "project_overrides": {},
+    // Usefulness voting: consolidation eviction reorders by the
+    // usefulness score (net votes <= -2 evicted first regardless of age,
+    // then the bottom floor_pct by score). DEFAULT-ON per D3
+    // (docs/plans/20261030-memory-second-brain); set false to restore
+    // age-only ordering. Zero numeric sub-knobs take the code defaults
+    // (floor 0.05, base 0.5, weights 0.08/0.05/0.005).
+    // drift: local-drift: memory.usefulness.* -> pre-flip installs have no
+    // usefulness block (zero value = disabled); default-on ships the
+    // enabled=true block per D3.
+    "usefulness": {
+      "enabled": true,
+      "floor_pct": 0.05,
+      "base": 0.5,
+      "wv": 0.08,
+      "wa": 0.05,
+      "ws": 0.005,
+    },
+    // Epistemic memory: ambient claim extraction from conversation turns
+    // (candidates land in the human review queue as status=auto).
+    // ambient_extraction is DEFAULT-ON per D3
+    // (docs/plans/20261030-memory-second-brain); set
+    // ambient_extraction.enabled = false to opt out. Zero confidence
+    // sub-knobs take the spec defaults (threshold 0.7, max_per_turn 3).
+    "epistemic": {
+      "ambient_extraction": {
+        // drift: local-drift: memory.epistemic.ambient_extraction.* ->
+        // pre-flip installs have no epistemic block (zero value = disabled);
+        // default-on ships the enabled=true block per D3.
+        "enabled": true,
+        "confidence_threshold": 0.7,
+        "max_per_turn": 3,
+      },
+    },
     // Knowledge-asset store: FTS5 full-text over ingested pages plus the
-    // knowledge_search/read/ingest tools. Opt-in (default false); when
-    // disabled nothing is stored and no knowledge_* tool is registered.
+    // knowledge_search/read/ingest tools. DEFAULT-ON per the memory
+    // second-brain decisions D1-D3 (docs/plans/20261030-memory-second-brain);
+    // set false to opt out (no knowledge_* tools registered, nothing stored).
     "knowledge": {
-      "enabled": false,
+      // drift: local-drift: memory.knowledge.* -> pre-flip install kept
+      // enabled=false (opt-in era); default-on ships true per D1-D3.
+      "enabled": true,
       // Watched directory: *.md files here are ingested on the
       // consolidation tick (unchanged files skipped by content hash).
       // Empty = no dir syncing.
@@ -261,6 +297,8 @@
     // candidate: store / merge / supersede / skip. Any detector failure
     // fails open (all candidates stored plainly). Opt-in (default false):
     // disabled means zero extra LLM calls on the extraction path.
+    // NOT flipped by the memory-defaults wave (D3 covers L0/usefulness/
+    // ambient/knowledge/bridges only) — still opt-in.
     "conflict": {
       "enabled": false,
       // Existing claims recalled per candidate for the conflict prompt.
@@ -268,14 +306,68 @@
       // Candidates per conflict LLM call.
       "max_batch": 20,
     },
+    // Bridging facts (IndexRAG stage 2): offline consolidator pass derives
+    // entity-linking facts with mandatory provenance, verifies them, and
+    // admits at most kb into one assembled context. DEFAULT-ON per D1
+    // (docs/plans/20261030-memory-second-brain, "Q1 a"); the leaf-07
+    // substitution experiment may flip it back if the eval loses. Set
+    // false for zero generation + zero LLM calls in consolidation.
+    // drift: local-drift: memory.bridges.* -> pre-flip installs have no
+    // bridges block (zero value = disabled); default-on ships true per D1.
+    "bridges": {
+      "enabled": true,
+      "kb": 2,
+      "bridge_df_max": 10,
+      "verify": true,
+    },
     // L0 raw-conversation tier (layered async distillation): every turn is
     // appended to <data_dir>/l0/YYYY-MM-DD.jsonl and distilled off the turn
     // path into L1 claims (memory.l1_extract) and L2 session scenes
-    // (memory.l2_scene) on the persistent queue. Opt-in (default false).
-    "l0_enabled": false,
+    // (memory.l2_scene) on the persistent queue. DEFAULT-ON per D3
+    // (docs/plans/20261030-memory-second-brain: full default-on, cost is
+    // local compute); set false to opt out (nothing records).
+    // drift: local-drift: memory.* -> pre-flip installs carry an older
+    // memory block (opt-in era: no l0/usefulness/epistemic/bridges keys,
+    // knowledge disabled, backend "memvid"); the default-on template ships
+    // the D1-D3 world. This annotation sits beside the l0 keys; it also
+    // covers the whole [memory] block above (usefulness, epistemic,
+    // knowledge, bridges, backend) in one declaration.
+    "l0_enabled": true,
     // Whole daily L0 files older than this many days are pruned on the
     // consolidation tick. <= 0 disables pruning. Default 30.
     "l0_retention_days": 30,
+    // Memory-tier policy engine (tree 02 leaf 02): opt-in background tick
+    // that compresses and evicts old episodic memories above band ratios
+    // and demotes stale or low-usefulness claims to episodic (flag-not-
+    // delete). DEFAULT OFF (opt-in-defaults rule): zero value = no
+    // goroutine, no engine, byte-identical legacy behavior. Enable only
+    // after sizing memory.tiers.retention_days against your store.
+    // drift: local-drift: memory.tiers.* -> pre-leaf installs carry no
+    // tiers block (zero value = engine off); the template ships the knob
+    // set disabled, so absence and presence behave identically until
+    // enabled is flipped.
+    "tiers": {
+      "enabled": false,
+      // Hard eviction band start (fraction of the episodic ceiling).
+      // Default 0.9 once enabled.
+      "evict_over_ratio": 0.9,
+      // Soft compression band start. Default 0.8 once enabled.
+      "compress_over_ratio": 0.8,
+      // Background tick period in seconds. Default 300 once enabled.
+      "interval_seconds": 300,
+      // Report would-be actions without mutating any store.
+      "dry_run": false,
+      // Candidate cutoff window in days: episodic memories older than
+      // this are tick candidates; younger never qualify. Default 30.
+      "retention_days": 30,
+      // Semantic-claim demotion thresholds (claim too stale or scoring
+      // below the floor gets copied to episodic and flagged). Defaults:
+      // stale_days 30, min_usefulness 0.1.
+      "demotion": {
+        "stale_days": 30,
+        "min_usefulness": 0.1,
+      },
+    },
   },
 
   // Memvid service connection
@@ -477,6 +569,31 @@
         "stateful":  {"parallelism": 1},   // Writes, mutations (serialized)
         "exclusive": {"parallelism": 1},   // Exclusive locks (one at a time)
       },
+    },
+    // As-needed tool exposure (token-efficiency branch 03): predicted/search
+    // modes give the model a curated full-schema set instead of every tool's
+    // full schema, saving tokens on every turn.
+    "tools": {
+      // dynamic_tool_exposure: master switch for the as-needed tool-exposure
+      // mechanism (branch 03). DEFAULT FALSE = byte-identical legacy
+      // (full/indexed only), per docs/agents/opt-in-defaults.md.
+      "dynamic_tool_exposure": false,
+      // tool_exposure: full | indexed | predicted | search. With the flag
+      // off, predicted/search silently downgrade to the indexed legacy
+      // default (one warn). With the flag on, the default is "predicted"
+      // (hybrid D).
+      // Resolution: per-model (models.json5 tool_exposure) > per-agent
+      // (AGENT.md frontmatter) > this value > "predicted".
+      //
+      // WARNING: "search" requires a frontier-class model (capabilities
+      // carry "frontier"). Do NOT enable it for small/local models — they
+      // fail to use the search/view round-trip reliably; the daemon
+      // downgrades search to predicted automatically for non-frontier
+      // models.
+      "tool_exposure": "predicted",
+      // predicted_budget: N, the predicted-subset cap. Default 25; valid
+      // 1..30 (00A: break-even at N=30->31 — N=31 costs more than indexed).
+      "predicted_budget": 25,
     },
   },
 
@@ -1203,6 +1320,38 @@
       "queue_messages": false,
       "max_queue_size": 5
     }
+  },
+
+  // Voice sidecar ([voice]). Disabled by default; all keys default safe
+  // (supervisor on, loopback-only, no public URL). Unset telnyx_public_key
+  // means voice routes return 503 (fail-closed). E.164 format in
+  // allowed_numbers is validated lazily at dial/answer time, not at load.
+  "voice": {
+    "enabled": false,                       // master switch; sidecar absent when false
+    "idle_stop_seconds": 30,                // stop the sidecar after this much idle time
+    "onnx_runtime_lib": "",                 // optional ONNX runtime library override
+    "stt_provider": "",                     // STT provider for call audio
+    "tts_provider": "",                     // TTS provider for call audio
+    "filler": ["Hold on, let me check."],   // spoken filler lines while working
+    "supervisor_employee": "",              // employee id supervising calls
+    "supervisor_enabled": true,             // run the call supervisor
+    "supervisor_model": "",                 // empty = use small_model
+    "supervisor_timeout_ms": 400,           // supervisor decision timeout
+    "voice_model": "",                      // model used for voice interactions
+    "public_stream_url": "",                // public media stream URL; empty = refusal until configured
+    "connection_id": "",                    // Telnyx connection id
+    "from_number": "",                      // caller ID number (E.164)
+    "allowed_numbers": null,                // allowed caller numbers (E.164); null = all
+    "timeout_secs": 30,                     // per-step call timeout
+    "max_call_minutes": 15,                 // hard cap on call length
+    "silence_prompt_seconds": 45,           // silence before prompting the caller
+    "max_concurrent_calls": 2,              // concurrent voice instances; 0 = unlimited
+    "reorder_window_frames": 10,            // audio reorder window (frames)
+    "reorder_gap_ms": 60,                   // audio reorder gap (ms)
+    "telnyx_public_key": "",                // base64 Ed25519 public key from Mission Control; unset = routes 503
+    "default_employee": "",                 // phone employee id owning inbound calls; required when enabled
+    "child_binary_path": "",                // empty = daemon-adjacent lookup
+    "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
   },
 
   // Analytics configuration

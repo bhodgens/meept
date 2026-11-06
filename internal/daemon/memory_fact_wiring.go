@@ -60,6 +60,11 @@ func (h *memoryFactExtractHook) OnSessionEnd(ctx context.Context, state agent.Se
 	memory.StampFacts(facts, "", state.SessionID, result.EndTime)
 
 	for _, f := range facts {
+		// C3 caller stamp: session-end extraction runs agent-mediated (the
+		// built-in memory tool path), so origin is 'agent'. The shared
+		// origin constants arrive with C2 (branch 02, leaf 01); until then
+		// this is a literal — keep it lowercase, no new type here.
+		f.Origin = "agent"
 		if err := h.store.Upsert(ctx, f); err != nil {
 			h.logger.Warn("fact upsert failed",
 				"session", state.SessionID,

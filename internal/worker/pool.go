@@ -261,7 +261,6 @@ func (p *Pool) RemoveWorker(workerID string) error {
 	return nil
 }
 
-
 // GetWorkers returns all workers.
 func (p *Pool) GetWorkers() []*Worker {
 	p.mu.RLock()
@@ -372,21 +371,33 @@ func (p *Pool) Scale(_ context.Context, targetCount int) error {
 			}
 		}
 
-		// If we still need to remove more, remove any worker
+		// If we still need to remove more, remove any worker.
+		// CLI-5 FIX: The previous code rescanned p.workers under a fresh
+		// RLock, which could include workers already removed by the idle pass
+		// (if RemoveWorker failed mid-cycle) or workers the loop skipped due
+		// to a break. We now collect a single canonical set and filter out
+		// any already-attempted removals.
 		if removed < toRemove {
-			p.mu.RLock()
+			p.mu.Lock()
 			var anyWorkers []string
 			for id := range p.workers {
-				if removed >= toRemove {
-					break
-				}
 				anyWorkers = append(anyWorkers, id)
 			}
-			p.mu.RUnlock()
+			p.mu.Unlock()
+
+			// Build a set of IDs already attempted in the idle pass
+			attempted := make(map[string]struct{}, len(idleWorkers))
+			for _, id := range idleWorkers {
+				attempted[id] = struct{}{}
+			}
 
 			for _, id := range anyWorkers {
 				if removed >= toRemove {
 					break
+				}
+				// Skip workers already attempted in the idle pass
+				if _, ok := attempted[id]; ok {
+					continue
 				}
 				if err := p.RemoveWorker(id); err == nil {
 					removed++

@@ -23,8 +23,9 @@ var ErrTierFloor = errors.New("llm: tier degradation floor reached")
 // caller's decision, not the transport's. Cause carries the last member's
 // dispatch failure for diagnosis.
 type TierFloorError struct {
-	// ProviderID/ModelID identify the LAST member that was dispatched
-	// (not the refused next hop - that one was never touched).
+	// ProviderID/ModelID identify the member ABOUT to dispatch when the
+	// floor fired - the refused next hop (it was never touched; no
+	// request reached it).
 	ProviderID string
 	ModelID    string
 	// Depth is the total members dispatched when the floor fired

@@ -34,8 +34,13 @@ func TestOrchestrator_ReflectionThreadsConversationScope(t *testing.T) {
 		src := filepath.Join(dir, "main.go")
 		require.NoError(t, os.WriteFile(src, []byte("package main\n"), 0o644))
 
+		// Replace the default go chain. Register appends behind
+		// CompileCheck and Vet, which shell out to the go tool. On a
+		// loaded CI runner that subprocess exceeds the 5s poll, the
+		// httptest server is already closed, and the fix call gets
+		// connection refused.
 		linter := lint.NewRegistry()
-		linter.Register("go", func(_ context.Context, _, _, _ string) ([]lint.LinterResult, error) {
+		linter.SetLinters("go", func(_ context.Context, _, _, _ string) ([]lint.LinterResult, error) {
 			return []lint.LinterResult{{
 				File:     src,
 				Line:     0,

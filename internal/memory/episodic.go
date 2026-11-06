@@ -459,6 +459,9 @@ func (e *EpisodicMemory) GetByID(ctx context.Context, id string) (*MemoryResult,
 		Metadata:  ParseMetadata(metaJSON),
 		CreatedAt: createdAt,
 	}
+	// Scope recovery (01-scope-schema): metadata["scope"] is the portable
+	// truth; missing marker = legacy row -> global.
+	mem.Scope = scopeFromMetadata(mem.Metadata)
 
 	return &MemoryResult{
 		Memory: mem,

@@ -239,8 +239,11 @@ func TestApplyApprovedPlan(t *testing.T) {
 		if err != nil {
 			t.Fatalf("refined skill missing: %v", err)
 		}
-		if string(written) != candidate {
-			t.Errorf("skill content mismatch:\n got: %q\nwant: %q", string(written), candidate)
+		// C2: the evolver funnel stamps origin into the frontmatter, so the
+		// written file is the candidate plus the inserted origin key.
+		wantStamped := strings.Replace(candidate, "\n---\n", "\norigin: evolver\n---\n", 1)
+		if string(written) != wantStamped {
+			t.Errorf("skill content mismatch:\n got: %q\nwant: %q", string(written), wantStamped)
 		}
 
 		assertAuditLine(t, capture, planPath, "improve", "evo-improve-apply-refine-skill-000002", "ok")
@@ -271,8 +274,11 @@ func TestApplyApprovedPlan(t *testing.T) {
 		if err != nil {
 			t.Fatalf("created skill missing: %v", err)
 		}
-		if string(written) != candidate {
-			t.Errorf("skill content mismatch:\n got: %q\nwant: %q", string(written), candidate)
+		// C2: the evolver funnel stamps origin into the frontmatter, so the
+		// written file is the candidate plus the inserted origin key.
+		wantStamped := strings.Replace(candidate, "\n---\n", "\norigin: evolver\n---\n", 1)
+		if string(written) != wantStamped {
+			t.Errorf("skill content mismatch:\n got: %q\nwant: %q", string(written), wantStamped)
 		}
 
 		assertAuditLine(t, capture, planPath, "create", "evo-create-apply-create-skill-000003", "ok")

@@ -12,7 +12,7 @@ import (
 type CredentialStore struct {
 	filepath string
 	creds    map[string]string // provider_id -> api_key
-	mu       sync.RWMutex      // Protects concurrent access to creds
+	mu       sync.RWMutex      // LLM-10 FIX: Protects concurrent access to creds
 }
 
 // NewCredentialStore creates a new credential store.

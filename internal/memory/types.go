@@ -59,6 +59,41 @@ type Memory struct {
 	TaskID string `json:"task_id,omitempty"`
 	// BotID identifies the bot that created this memory (for bot namespace isolation).
 	BotID string `json:"bot_id,omitempty"`
+
+	// Scope is the recall scope: project (visible only to sessions bound
+	// to the same project), user (all sessions of the user / the whole
+	// install in single-user mode), or global (visible everywhere; the
+	// legacy backfill value). Empty on read means legacy row -> global.
+	// The portable storage truth is metadata["scope"], stamped on Store;
+	// SQLite stores additionally keep a `scope` column as query-time
+	// defense-in-depth (docs/workflows/memory.md).
+	Scope Scope `json:"scope,omitempty"`
+}
+
+// Scope is the recall scope of a stored memory (01-scope-schema, C1).
+type Scope string
+
+const (
+	// ScopeProject marks a memory visible only to sessions bound to the
+	// same project.
+	ScopeProject Scope = "project"
+	// ScopeUser marks a memory visible to all sessions of the user
+	// (multiuser) or of the install (single-user).
+	ScopeUser Scope = "user"
+	// ScopeGlobal marks a memory visible everywhere (explicit
+	// cross-project facts and all legacy rows).
+	ScopeGlobal Scope = "global"
+)
+
+// scopeFromMetadata recovers a row's scope from its metadata map, the
+// portable storage truth. Missing/empty marker means a legacy row that
+// predates scoping: global (the backfill value), so no existing memory
+// disappears from recall.
+func scopeFromMetadata(meta map[string]any) Scope {
+	if s, ok := meta["scope"].(string); ok && s != "" {
+		return Scope(s)
+	}
+	return ScopeGlobal
 }
 
 // MemoryResult is a memory item returned from a search with relevance info.

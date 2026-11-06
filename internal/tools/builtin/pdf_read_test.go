@@ -149,10 +149,7 @@ func TestPDFReadTool(t *testing.T) {
 			if tc.ctxDir != "" {
 				ctx = tools.ContextWithWorkingDir(ctx, tc.ctxDir)
 			}
-			tool := NewPDFReadTool(tc.maxBytes, nil)
-			if tc.allowPrivate {
-				tool.SetAllowPrivateRanges(true)
-			}
+			tool := boundedPDFReadTool(t, tc.maxBytes, nil)
 
 			res, err := tool.Execute(ctx, tc.args)
 			if tc.wantErr != "" {

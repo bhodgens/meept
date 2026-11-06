@@ -4,6 +4,10 @@
 
 	import "github.com/caimlas/meept/internal/agent"
 
+Tool\-registry context seam \(token\-efficiency branch 02 leaf 02\).
+
+The executor injects the agent's ALREADY\-filtered tool registry into the tool\-execution context before invoking any tool \(executeToolWithRetry\). The codemode tool \(internal/tools/builtin/codemode.go\) reads it to build the sandbox's tool bridges strictly from that filtered set — it never widens the agent's tool access, only batches the calls the agent is already permitted to make.
+
 collaboration\_handoff.go implements the shared inter\-agent handoff boundary seam used by all three collaboration drivers \(plan: docs/plans/20261031\-agent\-boundary\-hardening/01\-inter\-agent\-taint/ 02\-driver\-wiring.md; research decisions D1/D2/D4 in docs/research/agent\-boundary\-taint\-findings.md\).
 
 RAW AGENT OUTPUT is untrusted \(D4: provenance is attached where the data enters\). Before a driver embeds a peer's raw output into the next agent's prompt, it records that exact span as an untrusted segment on the taint tracker \(keyed "collab:\<driver\>:\<role\>"\) and scans it with the inter\-agent deny patterns. The driver's OWN framing text stays clean: it is never recorded and never scanned.
@@ -26,6 +30,10 @@ Package agent provides file system watcher hooks.
 Package agent provides the agent loop and related components.
 
 Package agent provides HTTP hook support for external integrations.
+
+Intent\-map engine \(branch 03 leaf 03; design §3.3 in docs/research/dynamic\-tools\-design.md\).
+
+IntentMap is the deterministic intent\-category \-\> tool\-set selection table that drives the "predicted" and "search" tool\-exposure modes. The dispatcher already runs AnalyzeTrueIntent per turn and stores the category label \(internal/agent/intent\_analyzer.go:257 / :372\-377\); the exposure engine \(leaf 05\) keys the predicted subset off that SAME label through For. No LLM call is made here — the whole point is that selection is config\-driven, auditable, and byte\-deterministic for a given \(label, budget, allowed\) triple.
 
 Package agent — loop\_messages.go implements turn\-start injection of inter\-agent messages \(loop\-economics leaf 10\). The daemon wires a MessageDrainer \(backed by the employee message store\); before each turn's system prompt is built, unread queued messages are drained \(queued→delivered, exactly once\) and prepended as an anchored block "\[message from X\]" with message IDs so replies can target them.
 
@@ -64,11 +72,14 @@ Package agent provides the agent loop and related components.
 - [func BusTopic\(eventType AgentEventType\) string](<#BusTopic>)
 - [func CanonicalToolName\(name string\) string](<#CanonicalToolName>)
 - [func ClearPerOperationBackoffOverrideForTest\(key string\)](<#ClearPerOperationBackoffOverrideForTest>)
+- [func ContextWithToolRegistry\(ctx context.Context, reg ToolRegistry\) context.Context](<#ContextWithToolRegistry>)
 - [func ContinuationDescription\(desc string, k, n int\) string](<#ContinuationDescription>)
 - [func CosineSimilarity\(a, b \[\]float64\) float64](<#CosineSimilarity>)
 - [func CurrentLaneAgentIndex\(\) map\[string\]string](<#CurrentLaneAgentIndex>)
 - [func DefaultCoworkerAwareness\(\) string](<#DefaultCoworkerAwareness>)
 - [func DefaultSoulMD\(\) string](<#DefaultSoulMD>)
+- [func DrainRecallOutcomeSnapshot\(conversationID string, loops ...\*AgentLoop\) \[\]memory.RecallOutcomeRecord](<#DrainRecallOutcomeSnapshot>)
+- [func EffectiveMemoryScope\(agentDecl, groupCeiling string\) memory.Scope](<#EffectiveMemoryScope>)
 - [func EnforceMemoryItemBudget\(items \[\]string, maxTokens int, estimate ...func\(string\) int\) \[\]string](<#EnforceMemoryItemBudget>)
 - [func EstimateStepTokens\(desc string, cfg AllotmentConfig\) int](<#EstimateStepTokens>)
 - [func ExecutorAgentIDs\(\) \[\]string](<#ExecutorAgentIDs>)
@@ -80,6 +91,7 @@ Package agent provides the agent loop and related components.
 - [func GetRetryAfter\(err error\) time.Duration](<#GetRetryAfter>)
 - [func GetThresholdForIntent\(intentType string\) float64](<#GetThresholdForIntent>)
 - [func HashToolCall\(tool string, argsJSON string\) string](<#HashToolCall>)
+- [func InjectGroupFence\(base \*security.PermissionChecker, res \*groups.Resolved\) \*security.PermissionChecker](<#InjectGroupFence>)
 - [func IsAlwaysProposeOnly\(target string\) bool](<#IsAlwaysProposeOnly>)
 - [func IsRetryable\(err error\) bool](<#IsRetryable>)
 - [func IsSafeTargetPath\(target string\) bool](<#IsSafeTargetPath>)
@@ -95,6 +107,7 @@ Package agent provides the agent loop and related components.
 - [func PlanCriticSpawnVerifierCalls\(\) int](<#PlanCriticSpawnVerifierCalls>)
 - [func PresetPrompt\(presetName string, taskDescription string\) \(string, error\)](<#PresetPrompt>)
 - [func PublishLaneAgentIndex\(idx map\[string\]string\)](<#PublishLaneAgentIndex>)
+- [func RecalledSnapshotItems\(results \[\]memory.MemoryResult, query string\) \[\]memory.RecallOutcomeRecord](<#RecalledSnapshotItems>)
 - [func RecoverPendingFollowUps\(db \*sql.DB, msgBus \*bus.MessageBus, logger \*slog.Logger\)](<#RecoverPendingFollowUps>)
 - [func RenderSpawnContext\(sc SpawnContext\) string](<#RenderSpawnContext>)
 - [func ResultsToChatMessages\(results \[\]\*ExecutionResult\) \[\]llm.ChatMessage](<#ResultsToChatMessages>)
@@ -125,6 +138,7 @@ Package agent provides the agent loop and related components.
 - [func ThrottleParkAttemptFromContext\(ctx context.Context\) int](<#ThrottleParkAttemptFromContext>)
 - [func ToolsWithoutProperties\(reg ToolRegistry\) \[\]string](<#ToolsWithoutProperties>)
 - [func TraceIDFromContext\(ctx context.Context\) string](<#TraceIDFromContext>)
+- [func UnionFence\(a, b security.FenceStage\) security.FenceStage](<#UnionFence>)
 - [func ValidateSoul\(content \[\]byte\) error](<#ValidateSoul>)
 - [func VerifyFromToolResults\(results \[\]tools.ToolResult\) bool](<#VerifyFromToolResults>)
 - [func WarnToolsWithoutProperties\(reg ToolRegistry, logger \*slog.Logger\) \[\]string](<#WarnToolsWithoutProperties>)
@@ -204,6 +218,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) GetStateSnapshot\(\) AgentStateSnapshot](<#AgentLoop.GetStateSnapshot>)
   - [func \(l \*AgentLoop\) GetWorkerID\(\) int](<#AgentLoop.GetWorkerID>)
   - [func \(l \*AgentLoop\) GetWorkingDir\(\) string](<#AgentLoop.GetWorkingDir>)
+  - [func \(l \*AgentLoop\) GroupResolution\(\) \*groups.Resolved](<#AgentLoop.GroupResolution>)
   - [func \(l \*AgentLoop\) HandleMessage\(ctx context.Context, message string\) \(string, error\)](<#AgentLoop.HandleMessage>)
   - [func \(l \*AgentLoop\) HookRegistry\(\) \*HookRegistry](<#AgentLoop.HookRegistry>)
   - [func \(l \*AgentLoop\) IsActive\(\) bool](<#AgentLoop.IsActive>)
@@ -218,6 +233,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) RunOnceWithParts\(ctx context.Context, userMessage string, parts \[\]llm.ContentPart, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnceWithParts>)
   - [func \(l \*AgentLoop\) RunWithSkill\(ctx context.Context, skill \*skills.Skill, input string, conversationID string\) \(string, error\)](<#AgentLoop.RunWithSkill>)
   - [func \(l \*AgentLoop\) RunWithTask\(ctx context.Context, t \*task.Task\) \(string, error\)](<#AgentLoop.RunWithTask>)
+  - [func \(l \*AgentLoop\) Security\(\) \*security.PermissionChecker](<#AgentLoop.Security>)
   - [func \(l \*AgentLoop\) SessionConversation\(id string\) \*Conversation](<#AgentLoop.SessionConversation>)
   - [func \(l \*AgentLoop\) SetACPExecutor\(e \*ACPExecutor\)](<#AgentLoop.SetACPExecutor>)
   - [func \(l \*AgentLoop\) SetActive\(v bool\)](<#AgentLoop.SetActive>)
@@ -235,8 +251,10 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetContextInjector\(injector \*ContextInjector\)](<#AgentLoop.SetContextInjector>)
   - [func \(l \*AgentLoop\) SetDetectionContext\(dc \*DetectionContext\)](<#AgentLoop.SetDetectionContext>)
   - [func \(l \*AgentLoop\) SetEpistemicHook\(hook \*EpistemicHook\)](<#AgentLoop.SetEpistemicHook>)
+  - [func \(l \*AgentLoop\) SetExecutorDecisionLogLevel\(level string\)](<#AgentLoop.SetExecutorDecisionLogLevel>)
   - [func \(l \*AgentLoop\) SetFileWatcher\(fw \*FileWatcherHook\)](<#AgentLoop.SetFileWatcher>)
   - [func \(l \*AgentLoop\) SetGlobalRefusalModel\(ref string\)](<#AgentLoop.SetGlobalRefusalModel>)
+  - [func \(l \*AgentLoop\) SetGroupResolution\(res \*groups.Resolved\)](<#AgentLoop.SetGroupResolution>)
   - [func \(l \*AgentLoop\) SetGuardFallback\(digestBlock string\)](<#AgentLoop.SetGuardFallback>)
   - [func \(l \*AgentLoop\) SetHTTPHooks\(executor \*HookBatchExecutor\)](<#AgentLoop.SetHTTPHooks>)
   - [func \(l \*AgentLoop\) SetIsolatedChild\(isolated bool\)](<#AgentLoop.SetIsolatedChild>)
@@ -244,6 +262,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetMemvidClient\(client \*memvid.Client\)](<#AgentLoop.SetMemvidClient>)
   - [func \(l \*AgentLoop\) SetMessageDrainer\(d MessageDrainer\)](<#AgentLoop.SetMessageDrainer>)
   - [func \(l \*AgentLoop\) SetModelOverride\(modelRef string\)](<#AgentLoop.SetModelOverride>)
+  - [func \(l \*AgentLoop\) SetMultiUserScopeEnabled\(enabled bool\)](<#AgentLoop.SetMultiUserScopeEnabled>)
   - [func \(l \*AgentLoop\) SetNotificationPublisher\(publisher NotificationPublisher\)](<#AgentLoop.SetNotificationPublisher>)
   - [func \(l \*AgentLoop\) SetParallelismConfig\(baseParallelism int, profiles map\[string\]int\)](<#AgentLoop.SetParallelismConfig>)
   - [func \(l \*AgentLoop\) SetPersistentModelOverride\(modelRef string\)](<#AgentLoop.SetPersistentModelOverride>)
@@ -256,6 +275,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetResponseAnalyzer\(ra \*metrics.ResponseAnalyzer\)](<#AgentLoop.SetResponseAnalyzer>)
   - [func \(l \*AgentLoop\) SetRetryMetrics\(m \*RetryMetrics\)](<#AgentLoop.SetRetryMetrics>)
   - [func \(l \*AgentLoop\) SetSchemaModeConfig\(cfg config.AgentToolsConfig\)](<#AgentLoop.SetSchemaModeConfig>)
+  - [func \(l \*AgentLoop\) SetScopeUserID\(uid string\)](<#AgentLoop.SetScopeUserID>)
   - [func \(l \*AgentLoop\) SetSecurityChecker\(checker \*security.PermissionChecker\)](<#AgentLoop.SetSecurityChecker>)
   - [func \(l \*AgentLoop\) SetSessionAttached\(attached bool\)](<#AgentLoop.SetSessionAttached>)
   - [func \(l \*AgentLoop\) SetSessionRefresher\(r \*session.SessionRefresher\)](<#AgentLoop.SetSessionRefresher>)
@@ -286,6 +306,7 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) CapabilitiesMap\(\) \*CapabilitiesMap](<#AgentRegistry.CapabilitiesMap>)
   - [func \(r \*AgentRegistry\) Close\(\) error](<#AgentRegistry.Close>)
   - [func \(r \*AgentRegistry\) DB\(\) \*sql.DB](<#AgentRegistry.DB>)
+  - [func \(r \*AgentRegistry\) EnsureLateDiscovered\(\)](<#AgentRegistry.EnsureLateDiscovered>)
   - [func \(r \*AgentRegistry\) Get\(id string\) \(\*AgentLoop, error\)](<#AgentRegistry.Get>)
   - [func \(r \*AgentRegistry\) GetActiveQueue\(conversationID string\) \(queue \*MessageQueue, generation uint64\)](<#AgentRegistry.GetActiveQueue>)
   - [func \(r \*AgentRegistry\) GetActiveQueueLoop\(conversationID string\) \*AgentLoop](<#AgentRegistry.GetActiveQueueLoop>)
@@ -501,7 +522,6 @@ Package agent provides the agent loop and related components.
   - [func \(h \*ChatHandler\) SetCollaborationEngine\(engine \*CollaborationEngine\)](<#ChatHandler.SetCollaborationEngine>)
   - [func \(h \*ChatHandler\) SetDefaultWorkingDir\(dir string\)](<#ChatHandler.SetDefaultWorkingDir>)
   - [func \(h \*ChatHandler\) SetEffectsResumeHook\(fn EffectsResumeHook\)](<#ChatHandler.SetEffectsResumeHook>)
-  - [func \(h \*ChatHandler\) SetFenceController\(fc FenceController\)](<#ChatHandler.SetFenceController>)
   - [func \(h \*ChatHandler\) SetMessageSaver\(s SessionMessageSaver\)](<#ChatHandler.SetMessageSaver>)
   - [func \(h \*ChatHandler\) SetMetricsStore\(store \*metrics.Store\)](<#ChatHandler.SetMetricsStore>)
   - [func \(h \*ChatHandler\) SetNotificationPublisher\(p NotificationPublisher\)](<#ChatHandler.SetNotificationPublisher>)
@@ -613,13 +633,17 @@ Package agent provides the agent loop and related components.
   - [func \(c \*Conversation\) MarkActive\(\)](<#Conversation.MarkActive>)
   - [func \(c \*Conversation\) MarkInactive\(\)](<#Conversation.MarkInactive>)
   - [func \(c \*Conversation\) PrefixChanged\(\) bool](<#Conversation.PrefixChanged>)
+  - [func \(c \*Conversation\) RecallOutcomeSnapshot\(\) \[\]memory.RecallOutcomeRecord](<#Conversation.RecallOutcomeSnapshot>)
   - [func \(c \*Conversation\) RemoveCompactedMessages\(indices \[\]int\) int](<#Conversation.RemoveCompactedMessages>)
   - [func \(c \*Conversation\) RemoveLast\(\) \*llm.ChatMessage](<#Conversation.RemoveLast>)
   - [func \(c \*Conversation\) RestoreFromMessages\(messages \[\]llm.ChatMessage\)](<#Conversation.RestoreFromMessages>)
   - [func \(c \*Conversation\) SetBranchPoint\(index int\)](<#Conversation.SetBranchPoint>)
   - [func \(c \*Conversation\) SetMemoryContext\(ctxStr string\)](<#Conversation.SetMemoryContext>)
+  - [func \(c \*Conversation\) SetRecallOutcomeSnapshot\(items \[\]memory.RecallOutcomeRecord\)](<#Conversation.SetRecallOutcomeSnapshot>)
+  - [func \(c \*Conversation\) SetStandingMemoryContext\(standing string\)](<#Conversation.SetStandingMemoryContext>)
   - [func \(c \*Conversation\) SetSystemPrompt\(prompt string\)](<#Conversation.SetSystemPrompt>)
   - [func \(c \*Conversation\) StabilizeToolPrefix\(tools \[\]llm.ToolDefinition\) \[\]llm.ToolDefinition](<#Conversation.StabilizeToolPrefix>)
+  - [func \(c \*Conversation\) StandingMemoryContext\(\) string](<#Conversation.StandingMemoryContext>)
   - [func \(c \*Conversation\) Truncate\(\) int](<#Conversation.Truncate>)
   - [func \(c \*Conversation\) TruncateByImportance\(tokenBudget int\) int](<#Conversation.TruncateByImportance>)
   - [func \(c \*Conversation\) TruncateByTokens\(tokenBudget int\) int](<#Conversation.TruncateByTokens>)
@@ -695,12 +719,12 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) SetClassifierBootReadiness\(b \*ClassifierBootReadiness\)](<#Dispatcher.SetClassifierBootReadiness>)
   - [func \(d \*Dispatcher\) SetDefaultWorkingDir\(dir string\)](<#Dispatcher.SetDefaultWorkingDir>)
   - [func \(d \*Dispatcher\) SetDriftDetector\(det \*SessionDriftDetector\)](<#Dispatcher.SetDriftDetector>)
-  - [func \(d \*Dispatcher\) SetFenceController\(fc FenceController\)](<#Dispatcher.SetFenceController>)
   - [func \(d \*Dispatcher\) SetGoalAnchor\(anchor GoalAnchorStore\)](<#Dispatcher.SetGoalAnchor>)
   - [func \(d \*Dispatcher\) SetInputHasher\(fn func\(message string\) string\)](<#Dispatcher.SetInputHasher>)
   - [func \(d \*Dispatcher\) SetInstructionParser\(parser \*InstructionParser\)](<#Dispatcher.SetInstructionParser>)
   - [func \(d \*Dispatcher\) SetInstructionStore\(store \*preferences.Store\)](<#Dispatcher.SetInstructionStore>)
   - [func \(d \*Dispatcher\) SetMetricsStore\(store \*metrics.Store\)](<#Dispatcher.SetMetricsStore>)
+  - [func \(d \*Dispatcher\) SetMultiUserScopeEnabled\(enabled bool\)](<#Dispatcher.SetMultiUserScopeEnabled>)
   - [func \(d \*Dispatcher\) SetPlanManager\(pm \*plan.PlanManager\)](<#Dispatcher.SetPlanManager>)
   - [func \(d \*Dispatcher\) SetSessionFenceFactory\(factory sessionFenceFactory\)](<#Dispatcher.SetSessionFenceFactory>)
   - [func \(d \*Dispatcher\) SetSessionStore\(s SessionStoreReader\)](<#Dispatcher.SetSessionStore>)
@@ -773,9 +797,11 @@ Package agent provides the agent loop and related components.
   - [func \(e \*Executor\) Execute\(ctx context.Context, toolCall llm.ToolCall\) \*ExecutionResult](<#Executor.Execute>)
   - [func \(e \*Executor\) ExecuteAll\(ctx context.Context, toolCalls \[\]llm.ToolCall\) \[\]\*ExecutionResult](<#Executor.ExecuteAll>)
   - [func \(e \*Executor\) ExecuteSequential\(ctx context.Context, toolCalls \[\]llm.ToolCall\) \[\]\*ExecutionResult](<#Executor.ExecuteSequential>)
+  - [func \(e \*Executor\) GroupResolution\(\) \*groups.Resolved](<#Executor.GroupResolution>)
   - [func \(e \*Executor\) SetAgentID\(id string\)](<#Executor.SetAgentID>)
   - [func \(e \*Executor\) SetConversationID\(id string\)](<#Executor.SetConversationID>)
   - [func \(e \*Executor\) SetDecisionLogLevel\(level string\)](<#Executor.SetDecisionLogLevel>)
+  - [func \(e \*Executor\) SetGroupResolution\(res \*groups.Resolved\)](<#Executor.SetGroupResolution>)
   - [func \(e \*Executor\) SetParallelismConfig\(baseParallelism int, profiles map\[string\]int\)](<#Executor.SetParallelismConfig>)
   - [func \(e \*Executor\) SetRegistry\(registry ToolRegistry\)](<#Executor.SetRegistry>)
   - [func \(e \*Executor\) SetRetryMetrics\(m \*RetryMetrics\)](<#Executor.SetRetryMetrics>)
@@ -788,13 +814,13 @@ Package agent provides the agent loop and related components.
   - [func WithExecutorLogger\(logger \*slog.Logger\) ExecutorOption](<#WithExecutorLogger>)
   - [func WithExecutorParallelismLimiter\(limiter \*AdaptiveParallelismLimiter\) ExecutorOption](<#WithExecutorParallelismLimiter>)
   - [func WithExecutorRetryMetrics\(m \*RetryMetrics\) ExecutorOption](<#WithExecutorRetryMetrics>)
+  - [func WithGroupResolutionOption\(res \*groups.Resolved\) ExecutorOption](<#WithGroupResolutionOption>)
   - [func WithParallelism\(n int\) ExecutorOption](<#WithParallelism>)
 - [type FailureContext](<#FailureContext>)
 - [type FailureMode](<#FailureMode>)
   - [func \(fm FailureMode\) SeverityAsIssueSeverity\(\) string](<#FailureMode.SeverityAsIssueSeverity>)
 - [type FallbackEntry](<#FallbackEntry>)
 - [type FeedbackPipeline](<#FeedbackPipeline>)
-- [type FenceController](<#FenceController>)
 - [type FileChange](<#FileChange>)
 - [type FileWatcherHook](<#FileWatcherHook>)
   - [func NewFileWatcherHook\(pattern string, debounce time.Duration, ignore \[\]string, logger \*slog.Logger\) \*FileWatcherHook](<#NewFileWatcherHook>)
@@ -808,10 +834,12 @@ Package agent provides the agent loop and related components.
   - [func EffectiveFilterConfig\(daemon config.OutputFiltersConfig, agent \*FilterConfig\) FilterConfig](<#EffectiveFilterConfig>)
   - [func \(fc FilterConfig\) MaxFilterRetriesOrDefault\(\) int](<#FilterConfig.MaxFilterRetriesOrDefault>)
 - [type FilteredToolRegistry](<#FilteredToolRegistry>)
-  - [func NewFilteredToolRegistry\(parent ToolRegistry, allowedTools \[\]string\) \*FilteredToolRegistry](<#NewFilteredToolRegistry>)
+  - [func NewFilteredToolRegistry\(parent ToolRegistry, allowedTools \[\]string, opts ...FilteredToolRegistryOption\) \*FilteredToolRegistry](<#NewFilteredToolRegistry>)
   - [func \(r \*FilteredToolRegistry\) Get\(name string\) tools.Tool](<#FilteredToolRegistry.Get>)
   - [func \(r \*FilteredToolRegistry\) GetDefinitions\(\) \[\]llm.ToolDefinition](<#FilteredToolRegistry.GetDefinitions>)
   - [func \(r \*FilteredToolRegistry\) List\(\) \[\]tools.Tool](<#FilteredToolRegistry.List>)
+- [type FilteredToolRegistryOption](<#FilteredToolRegistryOption>)
+  - [func WithDenyAll\(\) FilteredToolRegistryOption](<#WithDenyAll>)
 - [type FixAttempt](<#FixAttempt>)
 - [type GateParkData](<#GateParkData>)
   - [func DecodeGatePark\(rec ParkedTurnRecord\) \(GateParkData, string, error\)](<#DecodeGatePark>)
@@ -837,6 +865,10 @@ Package agent provides the agent loop and related components.
   - [func \(t \*GetDatasetOverviewTool\) Name\(\) string](<#GetDatasetOverviewTool.Name>)
   - [func \(t \*GetDatasetOverviewTool\) Parameters\(\) llm.FunctionParameters](<#GetDatasetOverviewTool.Parameters>)
 - [type GoalAnchorStore](<#GoalAnchorStore>)
+- [type GroupFenceStage](<#GroupFenceStage>)
+  - [func NewGroupFenceStage\(roots \[\]string\) \*GroupFenceStage](<#NewGroupFenceStage>)
+  - [func \(g \*GroupFenceStage\) CheckCommand\(command, workDir string\) error](<#GroupFenceStage.CheckCommand>)
+  - [func \(g \*GroupFenceStage\) CheckPath\(path, op string\) error](<#GroupFenceStage.CheckPath>)
 - [type GuardConfig](<#GuardConfig>)
   - [func DefaultGuardConfig\(\) GuardConfig](<#DefaultGuardConfig>)
   - [func \(c GuardConfig\) Normalized\(\) GuardConfig](<#GuardConfig.Normalized>)
@@ -933,6 +965,12 @@ Package agent provides the agent loop and related components.
 - [type IntentCategory](<#IntentCategory>)
 - [type IntentClassifier](<#IntentClassifier>)
 - [type IntentEntry](<#IntentEntry>)
+- [type IntentMap](<#IntentMap>)
+  - [func LoadIntentMap\(path string, log \*slog.Logger\) \(\*IntentMap, error\)](<#LoadIntentMap>)
+  - [func LoadIntentMapWithUniverse\(path string, log \*slog.Logger, universe map\[string\]struct\{\}\) \(\*IntentMap, error\)](<#LoadIntentMapWithUniverse>)
+  - [func \(m \*IntentMap\) For\(label string, budget int, allowed \[\]string\) \[\]string](<#IntentMap.For>)
+  - [func \(m \*IntentMap\) Names\(\) \[\]string](<#IntentMap.Names>)
+  - [func \(m \*IntentMap\) SetUniverse\(universe map\[string\]struct\{\}\) \[\]string](<#IntentMap.SetUniverse>)
 - [type IntentType](<#IntentType>)
   - [func \(t IntentType\) Category\(\) IntentCategory](<#IntentType.Category>)
   - [func \(t IntentType\) DefaultAgent\(\) string](<#IntentType.DefaultAgent>)
@@ -982,6 +1020,7 @@ Package agent provides the agent loop and related components.
   - [func WithFileWatcher\(fw \*FileWatcherHook\) LoopOption](<#WithFileWatcher>)
   - [func WithGlobalRefusalModel\(ref string\) LoopOption](<#WithGlobalRefusalModel>)
   - [func WithGlobalRules\(rules string\) LoopOption](<#WithGlobalRules>)
+  - [func WithGroupResolution\(res \*groups.Resolved\) LoopOption](<#WithGroupResolution>)
   - [func WithHTTPHooks\(executor \*HookBatchExecutor\) LoopOption](<#WithHTTPHooks>)
   - [func WithHallucinationDetector\(hd \*HallucinationDetector\) LoopOption](<#WithHallucinationDetector>)
   - [func WithHookRegistry\(hr \*HookRegistry\) LoopOption](<#WithHookRegistry>)
@@ -1492,8 +1531,10 @@ Package agent provides the agent loop and related components.
 - [type SemanticIndex](<#SemanticIndex>)
   - [func NewSemanticIndex\(client EmbeddingClient\) \*SemanticIndex](<#NewSemanticIndex>)
   - [func \(idx \*SemanticIndex\) BuildIndex\(ctx context.Context\) error](<#SemanticIndex.BuildIndex>)
+  - [func \(idx \*SemanticIndex\) BuildIndexWithCancel\(ctx context.Context\) \(cancel context.CancelFunc, err error\)](<#SemanticIndex.BuildIndexWithCancel>)
   - [func \(idx \*SemanticIndex\) IsReady\(\) bool](<#SemanticIndex.IsReady>)
   - [func \(idx \*SemanticIndex\) Match\(input string, minConfidence float64\) \*SemanticMatch](<#SemanticIndex.Match>)
+  - [func \(idx \*SemanticIndex\) Stop\(\)](<#SemanticIndex.Stop>)
 - [type SemanticMatch](<#SemanticMatch>)
 - [type SessionBeforeCompactData](<#SessionBeforeCompactData>)
 - [type SessionBeforeTreeData](<#SessionBeforeTreeData>)
@@ -1741,6 +1782,7 @@ Package agent provides the agent loop and related components.
 - [type ToolParameterInfo](<#ToolParameterInfo>)
 - [type ToolRegistry](<#ToolRegistry>)
   - [func FilterToolsForSkill\(registry ToolRegistry, allowedTools \[\]string\) ToolRegistry](<#FilterToolsForSkill>)
+  - [func ToolRegistryFromContext\(ctx context.Context\) ToolRegistry](<#ToolRegistryFromContext>)
 - [type ToolRetryBreaker](<#ToolRetryBreaker>)
   - [func NewToolRetryBreaker\(\) \*ToolRetryBreaker](<#NewToolRetryBreaker>)
   - [func \(b \*ToolRetryBreaker\) Observe\(name string, args map\[string\]any, failed bool\) bool](<#ToolRetryBreaker.Observe>)
@@ -2316,6 +2358,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    ToolMemoryStore,
 	    ToolMemorySearch,
 	    ToolMemoryGetContext,
+	
+	    "knowledge_search",
+	    "knowledge_read",
+	    "knowledge_impact",
 	    "task_create",
 	    "task_get",
 	    "task_list",
@@ -2482,6 +2528,8 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    ToolPlatformAgents: "platform_read",
 	    ToolPlatformTools:  "platform_read",
 	    "project_info":     "platform_read",
+	
+	    "codemode": "codemode",
 	
 	    "task_create": "task_write",
 	    "task_get":    "task_read",
@@ -2655,6 +2703,13 @@ CanonicalToolName returns the registered tool name for an agent grant. Unknown n
 
 ClearPerOperationBackoffOverrideForTest removes the per\-operation backoff override under the given key.
 
+<a name="ContextWithToolRegistry"></a>
+## func ContextWithToolRegistry
+
+	func ContextWithToolRegistry(ctx context.Context, reg ToolRegistry) context.Context
+
+ContextWithToolRegistry stores the agent's filtered tool registry under the typed key, replacing any prior value \(the executor is the single injection point, so there is at most one value on a tool's execution context\).
+
 <a name="ContinuationDescription"></a>
 ## func ContinuationDescription
 
@@ -2689,6 +2744,25 @@ DefaultCoworkerAwareness returns the standard coworker awareness prompt.
 	func DefaultSoulMD() string
 
 DefaultSoulMD returns the shipped default soul text.
+
+<a name="DrainRecallOutcomeSnapshot"></a>
+## func DrainRecallOutcomeSnapshot
+
+	func DrainRecallOutcomeSnapshot(conversationID string, loops ...*AgentLoop) []memory.RecallOutcomeRecord
+
+DrainRecallOutcomeSnapshot drains the staged injected\-memory snapshot for a conversation across the given loops \(leaf 04 T3\). The daemon's turn\-terminal wiring passes its loop sources \(singleton \+ per\-session manager loops\); the first loop holding a conversation with a staged snapshot wins. The drain is consuming \(the conversation clears on read\), so exactly one terminal event consumes each turn's injection set. Loops whose conversation holds nothing are untouched.
+
+<a name="EffectiveMemoryScope"></a>
+## func EffectiveMemoryScope
+
+	func EffectiveMemoryScope(agentDecl, groupCeiling string) memory.Scope
+
+EffectiveMemoryScope narrows an agent's declared max scope by a group policy ceiling \(agent\-groups leaf 05, C7 verbatim\):
+
+	effective = min(agent MemoryMaxScope, group Resolved.MemoryMaxScope)
+	
+
+scope order project \< user \< global. Groups NEVER widen \(T3 pin\): a wider ceiling than the declaration is inert. agentDecl follows the B1 vocabulary with the same fail\-safe defaults resolveScopeInputs applies \(empty = project; invalid = project, never global\). groupCeiling "" = unrestricted \(no group policy bound, or the bound policies declare no ceiling\) and never narrows; an INVALID ceiling never narrows either — both fail toward the agent's own resolution rather than inventing a scope the agent did not declare.
 
 <a name="EnforceMemoryItemBudget"></a>
 ## func EnforceMemoryItemBudget
@@ -2782,6 +2856,13 @@ GetRetryAfter extracts a retry\-after hint from an error if available. Returns 0
 	func HashToolCall(tool string, argsJSON string) string
 
 HashToolCall returns a normalized hash of tool name \+ arguments JSON. JSON args are canonicalized \(keys sorted, whitespace collapsed\) so that reordered or differently\-spaced but semantically identical calls hash equal. Non\-JSON args fall back to whitespace\-collapsed raw comparison.
+
+<a name="InjectGroupFence"></a>
+## func InjectGroupFence
+
+	func InjectGroupFence(base *security.PermissionChecker, res *groups.Resolved) *security.PermissionChecker
+
+InjectGroupFence is the exported arm point for daemon\-side fence arming \(agent\-groups leaf 04 F6\): derives a permission checker carrying the record's additive fs\_roots fence. Returns base unchanged when there is nothing to arm \(nil base/record, unmanaged, no roots\).
 
 <a name="IsAlwaysProposeOnly"></a>
 ## func IsAlwaysProposeOnly
@@ -2887,6 +2968,13 @@ PresetPrompt returns the rendered prompt template for a preset with the given ta
 	func PublishLaneAgentIndex(idx map[string]string)
 
 PublishLaneAgentIndex atomically installs idx as the lane routing index. A nil or empty map clears it, restoring the static fallback path. The map is copied so later caller mutation cannot race with reads.
+
+<a name="RecalledSnapshotItems"></a>
+## func RecalledSnapshotItems
+
+	func RecalledSnapshotItems(results []memory.MemoryResult, query string) []memory.RecallOutcomeRecord
+
+RecalledSnapshotItems converts prompt\-facing recall results into the C5 snapshot rows \(one per injected item; id, query, salient tokens, token estimate\). The render\-site callers stage these so the terminal path can consume them pre\-render.
 
 <a name="RecoverPendingFollowUps"></a>
 ## func RecoverPendingFollowUps
@@ -3117,6 +3205,13 @@ Such a tool is a HAZARD for grammar\-constrained / forced tool calls: the tool\-
 	func TraceIDFromContext(ctx context.Context) string
 
 TraceIDFromContext reports the request's trace ID \("" when the context carries none\). Readers: the loop's tool\-executor hand\-off stamps the same turn trace onto ToolExecutionEndData; leaf 03's span producers subscribe to those events.
+
+<a name="UnionFence"></a>
+## func UnionFence
+
+	func UnionFence(a, b security.FenceStage) security.FenceStage
+
+UnionFence composes two FenceStages into one: every check runs against BOTH stages and the first denial wins. Either side may be nil.
 
 <a name="ValidateSoul"></a>
 ## func ValidateSoul
@@ -3909,6 +4004,13 @@ GetWorkerID returns the worker slot identifier \(zero if unset\). Safe to call c
 
 GetWorkingDir returns the current working directory. Safe to call concurrently. Returns "" for a nil receiver.
 
+<a name="AgentLoop.GroupResolution"></a>
+### func \(\*AgentLoop\) GroupResolution
+
+	func (l *AgentLoop) GroupResolution() *groups.Resolved
+
+GroupResolution returns the loop's group policy record \(nil = unmanaged\).
+
 <a name="AgentLoop.HandleMessage"></a>
 ### func \(\*AgentLoop\) HandleMessage
 
@@ -4010,6 +4112,13 @@ RunWithSkill executes a skill through the agent loop with the skill's constraint
 	func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, error)
 
 RunWithTask processes a task through the agent loop with memory context injection.
+
+<a name="AgentLoop.Security"></a>
+### func \(\*AgentLoop\) Security
+
+	func (l *AgentLoop) Security() *security.PermissionChecker
+
+Security returns the loop's current permission checker \(nil = none\). Daemon\-side consumers \(step\-job fence arming\) read it to derive a fence\-carrying clone.
 
 <a name="AgentLoop.SessionConversation"></a>
 ### func \(\*AgentLoop\) SessionConversation
@@ -4130,6 +4239,13 @@ SetDetectionContext wires the client\-side detection context \(CWD, detected pro
 
 SetEpistemicHook wires the post\-turn ambient\-extraction hook. Nil\-safe per CLAUDE.md setter convention. When non\-nil, the hook's AfterTurn method is invoked after each agent turn so the extractor can mine claims/decisions/predictions from the conversation window.
 
+<a name="AgentLoop.SetExecutorDecisionLogLevel"></a>
+### func \(\*AgentLoop\) SetExecutorDecisionLogLevel
+
+	func (l *AgentLoop) SetExecutorDecisionLogLevel(level string)
+
+SetExecutorDecisionLogLevel forwards security.groups.decision\_log\_level to this loop's executor \(agent\-groups leaf 04 daemon wiring\): the C2 permission decision\-audit lines log at the configured level. Nil\-safe and nil\-executor safe; the daemon calls it after loop construction.
+
 <a name="AgentLoop.SetFileWatcher"></a>
 ### func \(\*AgentLoop\) SetFileWatcher
 
@@ -4143,6 +4259,13 @@ SetFileWatcher wire a file watcher for filesystem\-level hooks. Nil is safely ig
 	func (l *AgentLoop) SetGlobalRefusalModel(ref string)
 
 SetGlobalRefusalModel mirrors the global models.json5 refusal\_model slot onto this loop. Precedence lives in refusalFallbackRef: a non\-empty spec.RefusalModel wins; the global value fills an empty spec field. Wire once at loop construction \(alongside the resolver wiring\); not thread\-safe by design because construction\-time wiring is.
+
+<a name="AgentLoop.SetGroupResolution"></a>
+### func \(\*AgentLoop\) SetGroupResolution
+
+	func (l *AgentLoop) SetGroupResolution(res *groups.Resolved)
+
+SetGroupResolution re\-points the loop's group resolution record after construction \(config hot\-reload lane: the daemon resolves a fresh record and swaps it atomically; the executor is re\-pointed too, mirroring SetSecurityChecker\). Typed\-nil safe: a nil record clears the gate \(the ungrouped legacy posture\), never leaves a stale deny list live.
 
 <a name="AgentLoop.SetGuardFallback"></a>
 ### func \(\*AgentLoop\) SetGuardFallback
@@ -4193,6 +4316,13 @@ SetMessageDrainer wires the inbox drain source. Nil disables injection \(the def
 
 SetModelOverride sets the model override at runtime \(thread\-safe\). This is a one\-shot override: it auto\-clears after one reasoning cycle via the consumption site in reasoningCycle. Used by the dispatcher for user\-driven model reassignment.
 
+<a name="AgentLoop.SetMultiUserScopeEnabled"></a>
+### func \(\*AgentLoop\) SetMultiUserScopeEnabled
+
+	func (l *AgentLoop) SetMultiUserScopeEnabled(enabled bool)
+
+SetMultiUserScopeEnabled wires the daemon\-wide multiuser.enabled bit. Nil\-safe per the setter convention.
+
 <a name="AgentLoop.SetNotificationPublisher"></a>
 ### func \(\*AgentLoop\) SetNotificationPublisher
 
@@ -4219,7 +4349,7 @@ SetPersistentModelOverride sets a model override that does NOT auto\-clear after
 
 	func (l *AgentLoop) SetPiiRestoreHook(hook *PiiRestoreHook)
 
-SetPiiRestoreHook attaches the PII\-unmasking restore lane \(pii leaf 02\). Typed\-nil guarded: a nil hook is a no\-op \(feature off\). Called from components.go AFTER hook registration; session clones inherit the lane through the shared \*PiiRestoreHook \(its RestoreOutput is stateless per call, scoped by the sessionID argument\).
+SetPiiRestoreHook attaches the PII\-unmasking restore lane \(pii leaf 02\). Typed\-nil guarded: a nil hook is a no\-op \(feature off\). Called from components.go AFTER hook registration. Session clones inherit the lane through the ConfigSnapshot seam closure \(wiring\-gap leaf 01\), which re\-attaches the shared \*PiiRestoreHook on every GetOrCreateWired clone \(its RestoreOutput is stateless per call, scoped by the sessionID argument\). Verifier children \(site 3\) intentionally run hook\-less: their raw output is post\-processed by the parent loop's ScanOutput path, so the restore lane applies once on the parent's final response.
 
 <a name="AgentLoop.SetPrefetchCallback"></a>
 ### func \(\*AgentLoop\) SetPrefetchCallback
@@ -4276,6 +4406,13 @@ SetRetryMetrics sets the retry metrics collector after agent loop creation. It a
 	func (l *AgentLoop) SetSchemaModeConfig(cfg config.AgentToolsConfig)
 
 SetSchemaModeConfig supplies the \[agent.tools\] tool\-schema settings \(loop\-economics leaf 02\) used to resolve the registry's schema mode. Call it any time before or after the registry is attached; when a registry is present the mode is applied immediately, otherwise it is applied on attach \(or at loop\-construction time if the option ran first\).
+
+<a name="AgentLoop.SetScopeUserID"></a>
+### func \(\*AgentLoop\) SetScopeUserID
+
+	func (l *AgentLoop) SetScopeUserID(uid string)
+
+SetScopeUserID wires the serving session's multiuser identity \(OwnerID\). Nil\-safe per the setter convention.
 
 <a name="AgentLoop.SetSecurityChecker"></a>
 ### func \(\*AgentLoop\) SetSecurityChecker
@@ -4503,6 +4640,13 @@ Close shuts down all agent loops and releases resources.
 
 DB returns the SQLite connection used for queue persistence, or nil.
 
+<a name="AgentRegistry.EnsureLateDiscovered"></a>
+### func \(\*AgentRegistry\) EnsureLateDiscovered
+
+	func (r *AgentRegistry) EnsureLateDiscovered()
+
+EnsureLateDiscovered runs the one\-shot post\-boot discovery rescan if it has not run yet \(leaf 03\-agent\-recall\-wiring\). Called at dispatch entry so definitions seeded after daemon boot \(the e2e harness seeds per\-test agents into the user tier post\-Start\) are in the lane routing index BEFORE classification — a chat lane pinned to a post\-boot agent would otherwise resolve the static chat fallback and the per\-agent scope asymmetry would be unobservable.
+
 <a name="AgentRegistry.Get"></a>
 ### func \(\*AgentRegistry\) Get
 
@@ -4576,7 +4720,7 @@ GetQueueWithVersion performs a version\-check after lookup. Returns ErrQueueClos
 
 	func (r *AgentRegistry) GetSpec(id string) (*AgentSpec, bool)
 
-GetSpec returns an agent specification by ID.
+GetSpec returns an agent specification by ID. On a miss, a one\-shot discovery rescan runs first \(ensureAgentDiscovered\) so definitions seeded after daemon boot \(e2e harness per\-test agents\) are routable.
 
 <a name="AgentRegistry.GlobalRules"></a>
 ### func \(\*AgentRegistry\) GlobalRules
@@ -4884,6 +5028,14 @@ AgentSpec defines the specification for creating an agent.
 	    // refusal_model slot; both empty = refusal fallback disabled for this
 	    // agent (precedence: per-agent spec field > global slot > off).
 	    RefusalModel string `json:"refusal_model,omitempty" yaml:"refusal_model,omitempty"`
+	    // MemoryMaxScope declares the WIDEST memory recall scope this agent's
+	    // sessions operate at (leaf 03-agent-recall-wiring, C3; chief-of-staff
+	    // pattern D2): "" or "project" (default — isolated to the session's
+	    // bound project), "user" (all the user's projects), "global" (spans
+	    // projects; the chief-of-staff declaration). Invalid values fail SAFE
+	    // to project (resolveScopeInputs warns). AGENT.md frontmatter key:
+	    // memory_max_scope.
+	    MemoryMaxScope string `json:"memory_max_scope,omitempty" yaml:"memory_max_scope,omitempty"`
 	    // AdditionalTools are tools beyond the baseline that this agent has access to.
 	    AdditionalTools []string `json:"additional_tools,omitempty"`
 	    // ToolScopeLimit caps how many tools are offered to this agent in the
@@ -6476,15 +6628,6 @@ SetDefaultWorkingDir wires the daemon's configured default working directory. It
 
 SetEffectsResumeHook wires the reconciler. Nil\-guarded \(setter convention\); nil disables the hook.
 
-<a name="ChatHandler.SetFenceController"></a>
-### func \(\*ChatHandler\) SetFenceController
-
-	func (h *ChatHandler) SetFenceController(fc FenceController)
-
-SetFenceController wired the shared fence checker so session\-scoped loops get a correct sandbox root and \-\-nofence handling.
-
-REMOVED WIRING \(agent\-groups leaf 01 T3/T4\): the daemon no longer calls this — mutating one shared FenceChecker's RootPath per session raced concurrent sessions \(session A's root applied to session B's checks\). The daemon now wires SetSessionFenceFactory instead. The setter remains for compile compatibility with out\-of\-tree embedders but no longer influences session fencing. Safe to call with nil.
-
 <a name="ChatHandler.SetMessageSaver"></a>
 ### func \(\*ChatHandler\) SetMessageSaver
 
@@ -7503,6 +7646,13 @@ MarkInactive decrements the in\-flight usage counter.
 
 PrefixChanged returns true if the system prompt \+ tools hash has changed since the last call to StabilizeToolPrefix. Returns true on the first call \(when no hash has been computed yet\).
 
+<a name="Conversation.RecallOutcomeSnapshot"></a>
+### func \(\*Conversation\) RecallOutcomeSnapshot
+
+	func (c *Conversation) RecallOutcomeSnapshot() []memory.RecallOutcomeRecord
+
+RecallOutcomeSnapshot drains the staged injected\-memory items. Draining is consuming: the snapshot clears on read so exactly one terminal write consumes each turn's injection set \(a later same\-conversation read sees the next turn's staged set or nothing\).
+
 <a name="Conversation.RemoveCompactedMessages"></a>
 ### func \(\*Conversation\) RemoveCompactedMessages
 
@@ -7538,6 +7688,20 @@ SetBranchPoint truncates the conversation to the message at the given index. All
 
 SetMemoryContext sets the live memory context \(for internal use\).
 
+<a name="Conversation.SetRecallOutcomeSnapshot"></a>
+### func \(\*Conversation\) SetRecallOutcomeSnapshot
+
+	func (c *Conversation) SetRecallOutcomeSnapshot(items []memory.RecallOutcomeRecord)
+
+SetRecallOutcomeSnapshot stages this turn's injected\-memory items \(leaf 04 C5\), captured at the recall render site BEFORE the turn renders. A nil or empty slice is an explicit clear: the turn injected nothing, so the terminal path must not carry over a previous turn's rows.
+
+<a name="Conversation.SetStandingMemoryContext"></a>
+### func \(\*Conversation\) SetStandingMemoryContext
+
+	func (c *Conversation) SetStandingMemoryContext(standing string)
+
+SetStandingMemoryContext sets the budgeted stable \(standing\) memory bullets \(leaf 03 C6\). Empty string clears the section. Callers pass the whole\-item\-budgeted bullet list; the render site \(system\-prompt builders\) emits it as the cacheable "Memory \(standing\)" section.
+
 <a name="Conversation.SetSystemPrompt"></a>
 ### func \(\*Conversation\) SetSystemPrompt
 
@@ -7551,6 +7715,13 @@ SetSystemPrompt sets or updates the system prompt.
 	func (c *Conversation) StabilizeToolPrefix(tools []llm.ToolDefinition) []llm.ToolDefinition
 
 StabilizeToolPrefix creates a deterministic byte layout for tool definitions and updates the cache prefix hash. Tools are sorted alphabetically by name, and each tool is serialized as name \+ description \+ parameters sorted by key. The resulting SHA256 hash enables detection of prefix changes for cache invalidation. Returns the stabilized tool list sorted by name.
+
+<a name="Conversation.StandingMemoryContext"></a>
+### func \(\*Conversation\) StandingMemoryContext
+
+	func (c *Conversation) StandingMemoryContext() string
+
+StandingMemoryContext returns the standing \(stable\) memory bullets for prompt building. Empty when no stable items were recalled.
 
 <a name="Conversation.Truncate"></a>
 ### func \(\*Conversation\) Truncate
@@ -8280,15 +8451,6 @@ SetDriftDetector wires the session drift detector \(issue \#41\). Nil guard per 
 
 Wiring model: the dispatcher registers the detector as the prefilter's embedding observer \(SetEmbeddingObserver\), so every healthy Door\-1 embedding feeds the per\-session drift check with zero extra model calls. The signal is LOG\-ONLY at this call site \(issue \#41 acceptance criterion 3\): a drift event logs one Info line and never changes routing — the full\-chain fall\-through decision belongs to a later, measured rollout.
 
-<a name="Dispatcher.SetFenceController"></a>
-### func \(\*Dispatcher\) SetFenceController
-
-	func (d *Dispatcher) SetFenceController(fc FenceController)
-
-SetFenceController wires the shared fence checker so dispatched sessions bind their project path as the sandbox root and honor \-\-nofence.
-
-DEPRECATED \(agent\-groups leaf 01\): retained only for compile compatibility; the daemon no longer wires it. The replacement is SetSessionFenceFactory.
-
 <a name="Dispatcher.SetGoalAnchor"></a>
 ### func \(\*Dispatcher\) SetGoalAnchor
 
@@ -8323,6 +8485,13 @@ SetInstructionStore wires the instruction store for intent\-based action attachm
 	func (d *Dispatcher) SetMetricsStore(store *metrics.Store)
 
 SetMetricsStore wires the metrics store for persistent dispatch logging.
+
+<a name="Dispatcher.SetMultiUserScopeEnabled"></a>
+### func \(\*Dispatcher\) SetMultiUserScopeEnabled
+
+	func (d *Dispatcher) SetMultiUserScopeEnabled(enabled bool)
+
+SetMultiUserScopeEnabled wires the daemon\-wide multiuser.enabled bit onto the dispatcher. Nil\-safe per the setter convention. Written once at daemon wiring, before any dispatch traffic; read without a lock is safe for this write\-once\-then\-read pattern.
 
 <a name="Dispatcher.SetPlanManager"></a>
 ### func \(\*Dispatcher\) SetPlanManager
@@ -9031,6 +9200,13 @@ Independent tool calls are executed in parallel within each wave \(group\); depe
 
 ExecuteSequential runs tool calls sequentially \(no parallelism\).
 
+<a name="Executor.GroupResolution"></a>
+### func \(\*Executor\) GroupResolution
+
+	func (e *Executor) GroupResolution() *groups.Resolved
+
+GroupResolution returns the executor's group policy record snapshot \(nil = unmanaged\). Test/diagnosis seam.
+
 <a name="Executor.SetAgentID"></a>
 ### func \(\*Executor\) SetAgentID
 
@@ -9051,6 +9227,13 @@ SetConversationID updates the conversation/session identifier included in bus pr
 	func (e *Executor) SetDecisionLogLevel(level string)
 
 SetDecisionLogLevel sets the level for the permission decision\-audit lines: "deny\-warn" \(default\), "all", or "off". The empty string keeps the deny\-warn default; unknown values are ignored \(the config loader already normalizes, so this only defends direct callers\). Nil\-safe per setter convention.
+
+<a name="Executor.SetGroupResolution"></a>
+### func \(\*Executor\) SetGroupResolution
+
+	func (e *Executor) SetGroupResolution(res *groups.Resolved)
+
+SetGroupResolution swaps the group policy record after construction \(agent\-groups leaf 04 T1/T3; loop.SetGroupResolution forwards here\). Nil\-safe per setter convention: nil clears the record \(ungrouped legacy posture\), keeping the current one only when BOTH are nil.
 
 <a name="Executor.SetParallelismConfig"></a>
 ### func \(\*Executor\) SetParallelismConfig
@@ -9136,6 +9319,13 @@ WithExecutorParallelismLimiter sets a custom adaptive parallelism limiter. If ni
 
 WithExecutorRetryMetrics sets the retry metrics collector for the executor. If nil \(or not provided\), retry events are not recorded.
 
+<a name="WithGroupResolutionOption"></a>
+### func WithGroupResolutionOption
+
+	func WithGroupResolutionOption(res *groups.Resolved) ExecutorOption
+
+WithGroupResolutionOption carries the group policy record onto the executor at construction \(loop.go wires it after the executor exists, so the setter is the primary seam; the option exists for direct executor tests\).
+
 <a name="WithParallelism"></a>
 ### func WithParallelism
 
@@ -9199,18 +9389,6 @@ FeedbackPipeline is the interface for submitting skill improvement proposals. It
 
 	type FeedbackPipeline interface {
 	    SubmitProposal(ctx context.Context, proposal selfimprove.SkillProposal) error
-	}
-
-<a name="FenceController"></a>
-## type FenceController
-
-FenceController is the narrow interface the ChatHandler needs from the daemon's shared FenceChecker to configure the sandbox per\-session.
-
-DEPRECATED \(agent\-groups leaf 01\): retained only for compile compatibility during the leaf window; the daemon no longer wires it. The replacement is SetSessionFenceFactory — per\-session fence instances instead of mutating one shared checker.
-
-	type FenceController interface {
-	    SetRootPath(root string) error
-	    SetNoFence(enabled bool)
 	}
 
 <a name="FileChange"></a>
@@ -9350,7 +9528,7 @@ FilteredToolRegistry wraps a ToolRegistry and only exposes a subset of tools.
 <a name="NewFilteredToolRegistry"></a>
 ### func NewFilteredToolRegistry
 
-	func NewFilteredToolRegistry(parent ToolRegistry, allowedTools []string) *FilteredToolRegistry
+	func NewFilteredToolRegistry(parent ToolRegistry, allowedTools []string, opts ...FilteredToolRegistryOption) *FilteredToolRegistry
 
 NewFilteredToolRegistry creates a tool registry that filters tools by allowed names. If allowedTools is empty, all tools from the parent are allowed.
 
@@ -9374,6 +9552,20 @@ GetDefinitions returns tool definitions for only allowed tools.
 	func (r *FilteredToolRegistry) List() []tools.Tool
 
 List returns only allowed tools.
+
+<a name="FilteredToolRegistryOption"></a>
+## type FilteredToolRegistryOption
+
+FilteredToolRegistryOption configures NewFilteredToolRegistry.
+
+	type FilteredToolRegistryOption func(*FilteredToolRegistry)
+
+<a name="WithDenyAll"></a>
+### func WithDenyAll
+
+	func WithDenyAll() FilteredToolRegistryOption
+
+WithDenyAll marks the registry as an explicit deny\-all \(D8\): Get/List/ GetDefinitions return nothing regardless of the \(empty\) allowlist.
 
 <a name="FixAttempt"></a>
 ## type FixAttempt
@@ -9602,6 +9794,36 @@ GoalAnchorStore is the narrow surface the dispatcher needs to resolve a session'
 	    // goal titled from the plan title (C6 branch 3). Returns "" on error.
 	    EnsureImplicitGoal(ctx context.Context, employeeID, title string) string
 	}
+
+<a name="GroupFenceStage"></a>
+## type GroupFenceStage
+
+GroupFenceStage is a FenceStage that checks a path/command against EVERY root in its list and denies when NO root accepts it \(agent\-groups leaf 04, F6\): the group policy's fs\_roots are ADDITIVE fence roots — the subject may write inside any of them, nothing outside. It is consulted IN ADDITION to the session fence \(whichever denies first wins\).
+
+	type GroupFenceStage struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewGroupFenceStage"></a>
+### func NewGroupFenceStage
+
+	func NewGroupFenceStage(roots []string) *GroupFenceStage
+
+NewGroupFenceStage builds the additive group fence over the \(non\-empty\) root list. Nil/empty input yields nil \(no group fence to enforce\).
+
+<a name="GroupFenceStage.CheckCommand"></a>
+### func \(\*GroupFenceStage\) CheckCommand
+
+	func (g *GroupFenceStage) CheckCommand(command, workDir string) error
+
+CheckCommand validates the working directory against the group roots \(the command surface is owned by the session fence; the group gate's fs\_roots contract is path\-boundary scoped\).
+
+<a name="GroupFenceStage.CheckPath"></a>
+### func \(\*GroupFenceStage\) CheckPath
+
+	func (g *GroupFenceStage) CheckPath(path, op string) error
+
+CheckPath allows the path when it sits inside ANY group root.
 
 <a name="GuardConfig"></a>
 ## type GuardConfig
@@ -10512,6 +10734,54 @@ IntentEntry represents an intent definition for indexing.
 	    Keywords    []string
 	}
 
+<a name="IntentMap"></a>
+## type IntentMap
+
+IntentMap is the deterministic intent\-\>toolset selection table. Loaded once at daemon start from a JSON5 file \(default template config/tools\_intent\_map.json5, copied into $MEEPT\_HOME by \`make config\-bootstrap\`\). Invalid tool names \(not in the registry universe\) are dropped with one warn at load; a malformed file falls back to a "\_default"\-only safe map, never to an LLM call.
+
+	type IntentMap struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="LoadIntentMap"></a>
+### func LoadIntentMap
+
+	func LoadIntentMap(path string, log *slog.Logger) (*IntentMap, error)
+
+LoadIntentMap loads a JSON5 intent map at path and validates every entry against the known\-tool universe. It returns the parsed map AND a non\-nil error when the file is malformed or the top level is not an object; in that degraded case the returned \*IntentMap is a usable "\_default"\-only map so callers log one warn and continue — never an LLM fallback, never a panic. A clean parse returns a nil error. An ABSENT file is not an error: a fresh install before the template lands still gets the safe map \(nil error, conservative content\).
+
+Invalid tool names are dropped at load with one warn naming the entry. Malformed files are NOT logged here \(the caller owns that one warn from the returned error, per the §3.3 contract\).
+
+<a name="LoadIntentMapWithUniverse"></a>
+### func LoadIntentMapWithUniverse
+
+	func LoadIntentMapWithUniverse(path string, log *slog.Logger, universe map[string]struct{}) (*IntentMap, error)
+
+LoadIntentMapWithUniverse is LoadIntentMap with an explicit tool universe \(the live registry's name set, once leaf 05 wires it\). A nil universe disables invalid\-name dropping \(every entry accepted as\-is\).
+
+<a name="IntentMap.For"></a>
+### func \(\*IntentMap\) For
+
+	func (m *IntentMap) For(label string, budget int, allowed []string) []string
+
+For returns entry\[label\] \(falling back to entry\["\_default"\] when label is absent\) intersected with allowed, truncated to budget. budget \<= 0 yields a nil slice \(in search mode the caller passes 0\). Deterministic: same inputs give the same slice; stable order = the config order preserved after intersection \(never re\-sorted\).
+
+The result never exceeds the allowed set \(the agent's role ceiling\) and never exceeds the budget. A miss on both label and "\_default", or an empty intersection, yields a nil/empty slice — the caller then proceeds with "core \+ meta\-tools only" \(design §2.1\): never an error, never an LLM call.
+
+<a name="IntentMap.Names"></a>
+### func \(\*IntentMap\) Names
+
+	func (m *IntentMap) Names() []string
+
+Names returns the sorted set of category labels present \(diagnostics / audit surface\). Deterministic.
+
+<a name="IntentMap.SetUniverse"></a>
+### func \(\*IntentMap\) SetUniverse
+
+	func (m *IntentMap) SetUniverse(universe map[string]struct{}) []string
+
+SetUniverse re\-validates the loaded entries against a live registry universe \(leaf 05 calls this at daemon boot with the real registry names, which is the authoritative "registry universe" the §3.3 drop rule refers to\). It mutates in place, dropping out\-of\-universe names, and returns the "entry/name" pairs that were dropped — the caller logs one warn for a non\-nil result \(the load\-time contract, applied after the fact\). A nil universe resets to "accept any" and drops nothing.
+
 <a name="IntentType"></a>
 ## type IntentType
 
@@ -11009,6 +11279,13 @@ WithGlobalRefusalModel is the LoopOption form of SetGlobalRefusalModel \(bughunt
 
 WithGlobalRules sets the global rules content to inject into all prompts.
 
+<a name="WithGroupResolution"></a>
+### func WithGroupResolution
+
+	func WithGroupResolution(res *groups.Resolved) LoopOption
+
+WithGroupResolution carries the agent's group policy resolution record onto the loop at construction \(agent\-groups leaf 04 T1\). A nil record \(ungrouped \+ default\_managed=false\) is the legacy posture: no group gate.
+
 <a name="WithHTTPHooks"></a>
 ### func WithHTTPHooks
 
@@ -11098,7 +11375,7 @@ WithMemvidClient sets the memvid client for memory injection.
 
 	func WithMessageBus(b *bus.MessageBus) LoopOption
 
-WithMessageBus sets the message bus for event publishing.
+SetMessageBus sets the message bus for event publishing.
 
 <a name="WithMessageQueue"></a>
 ### func WithMessageQueue
@@ -12978,7 +13255,7 @@ PersistenceFunc is called to persist messages after they're added.
 PiiRestoreHook restores swap tokens in model output before any persistence surface. Two lanes, both session\-bounded \(research findings D4/D5, L7\):
 
 1. PII tokens: \[PII:\<uuid\>\] placeholders minted by the pii.Swapper in this session resolve back to their original values via the session\- scoped SwapStore. Tokens minted in ANOTHER session never resolve here \- the store refuses cross\-session lookups \(cross\-session restore is an info leak, not a convenience\).
-2. Secret placeholders: \#XXXX\# placeholders minted by the process\-wide SecretObfuscator pass restore via Deobfuscate. The obfuscator's maps are NOT session\-scoped \(they are process\-wide by design \- the pre\-LLM obfuscation hook obfuscated this session's context in this process\), so this lane is gated on cfg.SecretRestore \(research D6: learning\-capture redaction shares the gate\) and on the swapper AND obfuscator being present.
+2. Secret placeholders: \#XXXXXXXXXXXX\# placeholders minted by the process\-wide SecretObfuscator pass restore via session\-scoped RestoreOutput \(falling back to the legacy sessionless Deobfuscate for untagged mints\). The obfuscator's value maps are process\-wide \(the pre\-LLM obfuscation hook obfuscated this session's context in this process\), but each placeholder is TAGGED with its minting session: RestoreOutput only resolves that session's entries \(wiring\-gap leaf 07 T2\). This lane is gated on cfg.SecretRestore \(research D6: learning\-capture redaction shares the gate\) and on the swapper AND obfuscator being present.
 
 One\-to\-one value\-keyed restore only \(L7 LiteLLM wrong\-restore corruption class\): placeholders resolve through exact fixed\-string replacement against the maps that minted them; no partial or positional rewriting.
 
@@ -14576,6 +14853,13 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	
 	    // BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
 	    BundledAgentsPath string
+	    // AllowLateDiscovery opts in to the one-shot post-boot discovery
+	    // rescan (EnsureLateDiscovered / GetSpec-miss fallback, leaf
+	    // 03-agent-recall-wiring): definitions seeded into the discovery tiers
+	    // after daemon boot join the registry and lane index at first
+	    // dispatch. Wired ONLY by the daemon — test registries must never
+	    // merge definitions from the host's real discovery tiers mid-test.
+	    AllowLateDiscovery bool
 	
 	    // BundledPromptsPath is the path to bundled prompt component markdown
 	    // files (e.g., "config/prompts"). When set, a ComponentRegistry scans
@@ -14654,6 +14938,28 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // late for the firewall. Zero value keeps every lane off (pre-wiring
 	    // behavior, byte-identical).
 	    Compaction config.CompactionConfig
+	
+	    // GroupsResolver is the daemon's group policy resolver (agent-groups
+	    // leaf 04). When set, every registry-built loop resolves its spec's
+	    // group record at creation (carried on the loop + executor for the
+	    // call-time gate) and filterTools intersects the spec allowlist with
+	    // it (dispatch gate; D8 deny-all via the explicit marker). Nil = no
+	    // groups config: byte-identical legacy behavior (D7).
+	    GroupsResolver *groups.Resolver
+	
+	    // DecisionLogLevel is security.groups.decision_log_level (agent-groups
+	    // leaf 04 daemon wiring): applied to every registry-built loop's
+	    // executor so the C2 decision-audit lines honor the knob on
+	    // dispatched turns too. "" = deny-warn default.
+	    DecisionLogLevel string
+	
+	    // CodemodeEnabled is [agent.tools].codemode_enabled (token-efficiency
+	    // branch 02 leaf 02): when true, every registry-built loop's filtered
+	    // tool registry is granted the codemode tool (filterTools unions it
+	    // into the scoped agent's allow-list). Default false: the daemon
+	    // behaves byte-identically to pre-codemode and the tool stays absent
+	    // from filtered registries.
+	    CodemodeEnabled bool
 	}
 
 <a name="RejectedCandidateLogger"></a>
@@ -15833,6 +16139,13 @@ NewSemanticIndex creates a new semantic index.
 
 BuildIndex pre\-computes embeddings for all intent definitions.
 
+<a name="SemanticIndex.BuildIndexWithCancel"></a>
+### func \(\*SemanticIndex\) BuildIndexWithCancel
+
+	func (idx *SemanticIndex) BuildIndexWithCancel(ctx context.Context) (cancel context.CancelFunc, err error)
+
+BuildIndexWithCancel is like BuildIndex but returns a cancellation function so callers can shut down the background goroutine cleanly.
+
 <a name="SemanticIndex.IsReady"></a>
 ### func \(\*SemanticIndex\) IsReady
 
@@ -15846,6 +16159,13 @@ IsReady returns true if the index is built and ready.
 	func (idx *SemanticIndex) Match(input string, minConfidence float64) *SemanticMatch
 
 Match finds the best matching intent by semantic similarity.
+
+<a name="SemanticIndex.Stop"></a>
+### func \(\*SemanticIndex\) Stop
+
+	func (idx *SemanticIndex) Stop()
+
+Stop cancels the background build\-index goroutine \(if any\) and waits for it to exit, preventing goroutine leaks. AGENT\-10 FIX
 
 <a name="SemanticMatch"></a>
 ## type SemanticMatch
@@ -18303,6 +18623,13 @@ The production \[tools.Registry\] satisfies this interface; see \[tools.Registry
 
 FilterToolsForSkill creates a filtered tool registry based on a skill's allowed\-tools. This is used when executing skills that have restricted tool access.
 
+<a name="ToolRegistryFromContext"></a>
+### func ToolRegistryFromContext
+
+	func ToolRegistryFromContext(ctx context.Context) ToolRegistry
+
+ToolRegistryFromContext returns the filtered tool registry the executor injected for this execution, or nil when no registry was carried \(standalone tool use, tests, or an executor path that does not inject\).
+
 <a name="ToolRetryBreaker"></a>
 ## type ToolRetryBreaker
 
@@ -19219,6 +19546,16 @@ TurnTerminalEvent is the frozen payload published on the "turn.terminal" bus top
 	    // frozen 13-key set ignore it (20260916-turn-lifecycle-events extension
 	    // note updated in the same change).
 	    TraceID string `json:"trace_id,omitempty"`
+	    // TurnSpanID (wiring-gap-remediation leaf 06): the 16-hex turn span
+	    // minted BESIDE the trace at the same handler seam; it is the parent of
+	    // the trace's llm.call and tool.call hop spans (mid-turn hops export
+	    // children-before-parent -- valid for Tempo/Jaeger). Empty (omitempty)
+	    // on the same pre-mint early failure paths as TraceID; untraced turns
+	    // carry both fields empty so untraced bytes stay identical. Additive
+	    // field: consumers decoding the frozen key set ignore it
+	    // (20260916-turn-lifecycle-events extension note updated in the same
+	    // change).
+	    TurnSpanID string `json:"turn_span_id,omitempty"`
 	}
 
 <a name="TurnTerminalEvent.WSClass"></a>

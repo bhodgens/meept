@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/security/ssrf"
 	"github.com/caimlas/meept/internal/testhttp"
 )
 
@@ -78,4 +79,23 @@ func allowPrivateBounded(t *testing.T, tool *WebFetchTool) {
 	tr.MaxIdleConnsPerHost = 2
 	tr.IdleConnTimeout = time.Second
 	t.Cleanup(tr.CloseIdleConnections)
+}
+
+// boundedPDFReadTool creates a pdf_read tool with the testhttp bounded transport
+// wired in. It enables private-range access (for httptest servers) and wraps
+// the dialer with ephemeral-port retry. Use this in pdf_read tests that dial
+// loopback HTTP via httptest.NewServer.
+func boundedPDFReadTool(t *testing.T, maxBytes int64, guard *ssrf.Guard) *PDFReadTool {
+	t.Helper()
+	tool := NewPDFReadTool(maxBytes, guard)
+	tool.SetAllowPrivateRanges(true)
+	tool.clientMu.Lock()
+	defer tool.clientMu.Unlock()
+	tr, ok := tool.client.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		return tool
+	}
+	tr.DialContext = testhttp.WrapDialer(tr.DialContext)
+	t.Cleanup(tr.CloseIdleConnections)
+	return tool
 }

@@ -31,10 +31,16 @@ const memoryCaptureLRUSize = 512
 // l0_record-hook semantics: since_msg_id = the day's last record before this
 // append), and runs ambient epistemic extraction over the exchange.
 //
+// Recall outcome telemetry (leaf 04, contract C5): outcomes, when non-nil,
+// receives one recall_outcomes.jsonl row per injected memory item, riding
+// the SAME subscriber, dedup LRU, and conversation-id fallback — no second
+// LRU, no private ticker/retry.
+//
 // Every dependency is nil-safe; a nil piece disables just that piece:
 //   - recorder nil   → no L0 lines
 //   - enqueuer nil   → no distill enqueue
 //   - extractor nil  → no ambient extraction
+//   - outcomes nil   → no recall_outcomes.jsonl rows
 //   - store nil      → no user message resolvable → nothing captured
 //   - b nil          → returns nil (no subscriber to wire)
 //
@@ -49,6 +55,7 @@ func WireMemoryCapture(
 	enqueuer memory.JobEnqueuer,
 	extractor *memory.AmbientExtractor,
 	logger *slog.Logger,
+	outcomes ...*memory.RecallOutcomeLogger,
 ) *bus.Subscriber {
 	if b == nil {
 		return nil
@@ -57,12 +64,22 @@ func WireMemoryCapture(
 		logger = slog.Default()
 	}
 	logger = logger.With("component", "memory-capture")
+	var outcomeLogger *memory.RecallOutcomeLogger
+	var recallDrain func(conversationID string) []memory.RecallOutcomeRecord
+	if len(outcomes) > 0 && outcomes[0] != nil {
+		outcomeLogger = outcomes[0]
+		recallDrain = outcomes[0].Drain
+	}
 	mc := &memoryCapture{
 		store:     store,
 		enqueuer:  enqueuer,
 		extractor: extractor,
 		logger:    logger,
 		seen:      newCaptureLRU(memoryCaptureLRUSize),
+		outcomes:  outcomeLogger,
+	}
+	if recallDrain != nil {
+		mc.recallDrain = recallDrain
 	}
 	// Typed-nil guard: recorder is a CONCRETE *l0.Recorder, and assigning
 	// it straight into the l0Appender interface field boxes a nil pointer
@@ -92,6 +109,14 @@ type memoryCapture struct {
 	extractor *memory.AmbientExtractor
 	logger    *slog.Logger
 	seen      *captureLRU
+	// outcomes is the recall-outcome writer (leaf 04 C5). Nil = disabled;
+	// every call on it is nil-safe and a write failure never fails the turn.
+	outcomes *memory.RecallOutcomeLogger
+	// recallDrain stages the snapshot drain seam: given the turn's
+	// conversation id, returns the injected-memory items the render site
+	// staged pre-render (draining = consuming). Wired from the daemon's
+	// loop sources; nil = no drainable snapshots (telemetry disabled).
+	recallDrain func(conversationID string) []memory.RecallOutcomeRecord
 }
 
 // handleEvent is the typed-bus callback: synchronous, cheap, hands real work
@@ -157,6 +182,14 @@ func (mc *memoryCapture) capture(ev agent.TurnTerminalEvent) {
 		return
 	}
 
+	// Recall outcome telemetry (leaf 04 T3): the recall render site staged
+	// this turn's injected-memory items on the executing loop's
+	// conversation (pre-render, keyed by the CONVERSATION id the turn ran
+	// under — ev.ConversationID, not the capture-resolved session). Drain
+	// it and write one C5 row per item, deduped by the shared LRU above.
+	// Best-effort: write failures disable the logger, never fail the turn.
+	mc.writeRecallOutcomes(ev, captureSession)
+
 	// Step 4+5: L0 appends (user then assistant — same order as the retired
 	// l0_record hook), then the distill enqueue with retired-hook marker
 	// semantics. Recorder errors are logged, enqueue is still attempted.
@@ -170,6 +203,32 @@ func (mc *memoryCapture) capture(ev agent.TurnTerminalEvent) {
 	if mc.extractor != nil && ev.Reply != "" {
 		mc.runAmbient(captureSession, ev.TurnID, userMsg, ev.Reply)
 	}
+}
+
+// writeRecallOutcomes drains the turn's staged injected-memory snapshot and
+// appends one recall_outcomes.jsonl row per item (leaf 04 T3/T4). The
+// snapshot was staged by the recall render site keyed by the CONVERSATION id
+// the turn ran under, so the drain uses ev.ConversationID (the thread-
+// resolved id the loop executed with); the ROW's session_id uses the
+// capture-resolved session (conversation-id fallback included). Non-
+// completed turns never reach this path (handleEvent gates). Best-effort:
+// nil logger/drain, or a write failure, logs and moves on — never fails the
+// turn. The shared (ConversationID, Reply) LRU in handleEvent already
+// deduped this event, so relay+direct double terminals produce ONE row set.
+func (mc *memoryCapture) writeRecallOutcomes(ev agent.TurnTerminalEvent, captureSession string) {
+	if mc.outcomes == nil || mc.recallDrain == nil || ev.Reply == "" {
+		return
+	}
+	items := mc.recallDrain(ev.ConversationID)
+	if len(items) == 0 {
+		return
+	}
+	mc.outcomes.LogOutcomes(context.Background(), captureSession, items, ev.Reply)
+	mc.logger.Debug("recall outcomes written",
+		"session_id", captureSession,
+		"items", len(items),
+		"turn_id", ev.TurnID,
+	)
 }
 
 // storeHasMessages reports whether the store has any messages keyed under

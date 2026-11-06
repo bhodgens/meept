@@ -77,8 +77,9 @@ func (w *WorkspaceManager) Create(ctx context.Context, taskID, description strin
 	}
 
 	// Initialize git repo
-	if ok, _ := w.gitCmd(ctx, workspace, "init"); !ok {
-		w.logger.Warn("workspace: git init failed", "task_id", taskID)
+	// gitCmd now returns an error for init if the workspace is not its own repo root
+	if err := w.gitInitSafe(ctx, workspace); err != nil {
+		return "", fmt.Errorf("git init failed: %w", err)
 	}
 
 	// Write README with task description
@@ -105,6 +106,8 @@ func (w *WorkspaceManager) Create(ctx context.Context, taskID, description strin
 	if autoCommit {
 		if err := w.commitInternal(ctx, taskID, "Initial workspace setup"); err != nil {
 			w.logger.Warn("workspace: initial commit failed", "task_id", taskID, "error", err)
+			// Don't return error - initial commit failure is not fatal per original behavior
+			// but we log it. The workspace is still usable.
 		}
 	}
 
@@ -129,10 +132,14 @@ func (w *WorkspaceManager) commitInternal(ctx context.Context, taskID, message s
 	// Stage files
 	if len(paths) > 0 {
 		for _, p := range paths {
-			w.gitCmd(ctx, workspace, "add", p)
+			if ok, _ := w.gitCmd(ctx, workspace, "add", p); !ok {
+				return fmt.Errorf("git add failed for %s", p)
+			}
 		}
 	} else {
-		w.gitCmd(ctx, workspace, "add", "-A")
+		if ok, _ := w.gitCmd(ctx, workspace, "add", "-A"); !ok {
+			return fmt.Errorf("git add -A failed")
+		}
 	}
 
 	// Commit
@@ -223,15 +230,94 @@ func (w *WorkspaceManager) Cleanup(taskID string) error {
 }
 
 // gitCmd runs a git command in the workspace and returns (success, output).
+// It sets GIT_CEILING_DIRECTORIES to prevent git from walking up past the
+// workspace's parent directory.
 func (w *WorkspaceManager) gitCmd(ctx context.Context, workspace string, args ...string) (ok bool, result string) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = workspace
+
+	// Set GIT_CEILING_DIRECTORIES to the workspace's parent directory.
+	// This prevents git from walking up past this directory to find a parent repo.
+	// Append to os.Environ(): assigning to cmd.Env alone would replace the whole
+	// environment, leaving git without HOME (identity lookup) or credential env.
+	parentDir := filepath.Dir(workspace)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("GIT_CEILING_DIRECTORIES=%s", parentDir))
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, string(output)
 	}
 	return true, strings.TrimSpace(string(output))
+}
+
+// gitInitSafe runs git init in the workspace and verifies that the workspace
+// is its own repository root and is not nested under an existing repo.
+// It returns an error if the workspace is nested under a parent repo.
+func (w *WorkspaceManager) gitInitSafe(ctx context.Context, workspace string) error {
+	// Detect a parent repo by probing the workspace's parent. This probe runs
+	// with NO GIT_CEILING_DIRECTORIES: a ceiling names the first directory git
+	// refuses to look in, so a ceiling set to parentDir would hide parentDir
+	// itself and make this check always pass. The probe is read-only, so an
+	// unbounded walk here is safe; the mutating commands below are the ones
+	// that need the ceiling.
+	parentDir := filepath.Dir(workspace)
+
+	verifyParentCmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
+	verifyParentCmd.Dir = parentDir
+	parentToplevel, err := verifyParentCmd.CombinedOutput()
+	if err == nil {
+		// A repo exists at or above parentDir. Refuse when it contains the
+		// workspace: that is the walk-up that staged a whole-tree deletion.
+		parentToplevelStr := strings.TrimSpace(string(parentToplevel))
+		parentToplevelClean, err := filepath.EvalSymlinks(parentToplevelStr)
+		if err != nil {
+			return fmt.Errorf("filepath.EvalSymlinks failed for parent toplevel: %w", err)
+		}
+		workspaceClean, err := filepath.EvalSymlinks(workspace)
+		if err != nil {
+			return fmt.Errorf("filepath.EvalSymlinks failed for workspace: %w", err)
+		}
+		prefix := filepath.Clean(parentToplevelClean) + string(filepath.Separator)
+		if strings.HasPrefix(filepath.Clean(workspaceClean), prefix) {
+			return fmt.Errorf("workspace is nested under an existing git repo at %q", parentToplevelClean)
+		}
+	}
+
+	// Now run git init
+	cmd := exec.CommandContext(ctx, "git", "init")
+	cmd.Dir = workspace
+	cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_CEILING_DIRECTORIES=%s", parentDir))
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git init failed: %s", string(output))
+	}
+
+	// Verify that the workspace is its own repository root
+	verifyCmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
+	verifyCmd.Dir = workspace
+	verifyCmd.Env = append(verifyCmd.Env, fmt.Sprintf("GIT_CEILING_DIRECTORIES=%s", parentDir))
+
+	toplevel, err := verifyCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git rev-parse --show-toplevel failed: %s", string(toplevel))
+	}
+
+	toplevelStr := strings.TrimSpace(string(toplevel))
+	toplevelClean, err := filepath.EvalSymlinks(toplevelStr)
+	if err != nil {
+		return fmt.Errorf("filepath.EvalSymlinks failed for toplevel: %w", err)
+	}
+	workspaceClean, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		return fmt.Errorf("filepath.EvalSymlinks failed for workspace: %w", err)
+	}
+
+	if toplevelClean != workspaceClean {
+		return fmt.Errorf("workspace is not its own repository root: git rev-parse --show-toplevel returned %q, expected %q", toplevelClean, workspaceClean)
+	}
+
+	return nil
 }
 
 // WorkspaceCheckpoint represents a workspace checkpoint for rollback.

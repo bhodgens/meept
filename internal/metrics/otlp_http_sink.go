@@ -83,13 +83,7 @@ func (s *OTLPHTTPSink) ExportMetrics(ctx context.Context, data []MetricDatum) er
 		Metrics:     make([]otlpExportMetric, 0, len(data)),
 	}
 	for _, d := range data {
-		payload.Metrics = append(payload.Metrics, otlpExportMetric{
-			Name:      d.Name,
-			Value:     d.Value,
-			Type:      d.Type,
-			Timestamp: d.Timestamp,
-			Tags:      d.Tags,
-		})
+		payload.Metrics = append(payload.Metrics, otlpExportMetric(d))
 	}
 
 	body, err := json.Marshal(payload)

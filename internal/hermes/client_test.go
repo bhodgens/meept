@@ -371,13 +371,12 @@ func TestClient_ErrHermesSessionForeign_409(t *testing.T) {
 }
 
 func TestClient_ErrHermesAuth_401(t *testing.T) {
-	c := NewClient("http://127.0.0.1:1", "wrong-key", time.Second)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 	}))
 	defer srv.Close()
-	c = NewClient(srv.URL, "wrong-key", time.Second)
+	c := NewClient(srv.URL, "wrong-key", time.Second)
 	err := c.Health(context.Background())
 	if err == nil {
 		t.Fatal("want error on 401")

@@ -1,0 +1,843 @@
+{
+  "memories": [
+    {
+      "id": "mem-z11",
+      "session_id": "sess-zenith-a",
+      "content": "The zenith vendor audit closed in march and found zero issues. Planning cadence notes were refreshed for the quarter and filed away. Coffee rotations changed for the on-site team during the same period. Parking assignments moved after the office reshuffle in the spring. Laptop refreshes landed for the support group around the same week. Travel policy updates were circulated ahead of the summer break.",
+      "entities": "zenith"
+    },
+    {
+      "id": "mem-z12",
+      "session_id": "sess-zenith-b",
+      "content": "Zenith renewed the partnership terms for three more years in june. Office lighting upgrades finished during the first week of the month. The podcast club picked two new shows for the rotation. Desk plant orders arrived and were distributed across the floor. Expense report reminders went out before the fiscal cutoff. An all hands was scheduled for the end of the quarter.",
+      "entities": "zenith"
+    },
+    {
+      "id": "mem-z01",
+      "session_id": "sess-zenith-c",
+      "content": "The zenith audit and renewal notes are filed with the vendor desk.",
+      "entities": "zenith"
+    },
+    {
+      "id": "mem-z02",
+      "session_id": "sess-zenith-d",
+      "content": "Zenith audit and renewal paperwork sits with the vendor desk.",
+      "entities": "zenith"
+    },
+    {
+      "id": "mem-z03",
+      "session_id": "sess-zenith-e",
+      "content": "Vendor notes for zenith cover the audit and the renewal.",
+      "entities": "zenith"
+    },
+    {
+      "id": "mem-z04",
+      "session_id": "sess-zenith-f",
+      "content": "The engagement survey for zenith came back positive with a score of 82.",
+      "entities": "newsletter"
+    },
+    {
+      "id": "mem-z05",
+      "session_id": "sess-zenith-g",
+      "content": "Engagement with the zenith account is reviewed monthly by the vendor desk.",
+      "entities": "scorecard"
+    },
+    {
+      "id": "mem-z06",
+      "session_id": "sess-zenith-h",
+      "content": "The partnership offsite for zenith is booked for two days in september.",
+      "entities": "wiki"
+    },
+    {
+      "id": "mem-z07",
+      "session_id": "sess-zenith-i",
+      "content": "The partnership budget for zenith was approved by the finance lead.",
+      "entities": "wiki"
+    },
+    {
+      "id": "mem-z13",
+      "session_id": "sess-zenith-j",
+      "content": "The zenith partnership terms and renewal notes sit with the vendor desk.",
+      "entities": "newsletter"
+    },
+    {
+      "id": "mem-z14",
+      "session_id": "sess-zenith-k",
+      "content": "Partnership terms escalations for zenith go to the vendor team.",
+      "entities": "scorecard"
+    },
+    {
+      "id": "mem-z15",
+      "session_id": "sess-zenith-l",
+      "content": "The vendor desk holds the zenith audit and renewal checklist.",
+      "entities": "newsletter"
+    },
+    {
+      "id": "mem-h11",
+      "session_id": "sess-harbor-a",
+      "content": "The harbor rollout finished in four days with zero downtime. Planning cadence notes were refreshed for the quarter and filed away. Coffee rotations changed for the on-site team during the same period. Parking assignments moved after the office reshuffle in the spring. Laptop refreshes landed for the support group around the same week. Travel policy updates were circulated ahead of the summer break.",
+      "entities": "harbor"
+    },
+    {
+      "id": "mem-h12",
+      "session_id": "sess-harbor-b",
+      "content": "The harbor cluster passed its yearly check with two minor findings in april. Office lighting upgrades finished during the first week of the month. The podcast club picked two new shows for the rotation. Desk plant orders arrived and were distributed across the floor. Expense report reminders went out before the fiscal cutoff. An all hands was scheduled for the end of the quarter.",
+      "entities": "harbor"
+    },
+    {
+      "id": "mem-h01",
+      "session_id": "sess-harbor-c",
+      "content": "The harbor rollout and check notes are filed with the platform team.",
+      "entities": "harbor"
+    },
+    {
+      "id": "mem-h02",
+      "session_id": "sess-harbor-d",
+      "content": "Harbor rollout and check paperwork sits with the platform desk.",
+      "entities": "harbor"
+    },
+    {
+      "id": "mem-h03",
+      "session_id": "sess-harbor-e",
+      "content": "Platform notes for harbor cover the rollout and the check.",
+      "entities": "harbor"
+    },
+    {
+      "id": "mem-h04",
+      "session_id": "sess-harbor-f",
+      "content": "The platform dashboard for harbor now shows shard health per zone.",
+      "entities": "brownbag"
+    },
+    {
+      "id": "mem-h05",
+      "session_id": "sess-harbor-g",
+      "content": "Platform game days for harbor run every quarter and fill up fast.",
+      "entities": "brownbag"
+    },
+    {
+      "id": "mem-h06",
+      "session_id": "sess-harbor-h",
+      "content": "The cluster expansion for harbor added six nodes last month.",
+      "entities": "handbook"
+    },
+    {
+      "id": "mem-h07",
+      "session_id": "sess-harbor-i",
+      "content": "Cluster alerts for harbor route to the on-call rotation.",
+      "entities": "handbook"
+    },
+    {
+      "id": "mem-h13",
+      "session_id": "sess-harbor-j",
+      "content": "The harbor cluster check and rollout notes sit with the platform desk.",
+      "entities": "brownbag"
+    },
+    {
+      "id": "mem-h14",
+      "session_id": "sess-harbor-k",
+      "content": "Cluster check escalations for harbor go to the platform team.",
+      "entities": "handbook"
+    },
+    {
+      "id": "mem-h15",
+      "session_id": "sess-harbor-l",
+      "content": "The platform desk holds the harbor rollout and check checklist.",
+      "entities": "brownbag"
+    },
+    {
+      "id": "mem-k11",
+      "session_id": "sess-kestrel-a",
+      "content": "The kestrel release shipped on time with two patched regressions. Planning cadence notes were refreshed for the quarter and filed away. Coffee rotations changed for the on-site team during the same period. Parking assignments moved after the office reshuffle in the spring. Laptop refreshes landed for the support group around the same week. Travel policy updates were circulated ahead of the summer break.",
+      "entities": "kestrel"
+    },
+    {
+      "id": "mem-k12",
+      "session_id": "sess-kestrel-b",
+      "content": "Kestrel kept ninety percent of trial users after the billing change. Office lighting upgrades finished during the first week of the month. The podcast club picked two new shows for the rotation. Desk plant orders arrived and were distributed across the floor. Expense report reminders went out before the fiscal cutoff. An all hands was scheduled for the end of the quarter.",
+      "entities": "kestrel"
+    },
+    {
+      "id": "mem-k01",
+      "session_id": "sess-kestrel-c",
+      "content": "The kestrel release and trial notes are filed with the mobile team.",
+      "entities": "kestrel"
+    },
+    {
+      "id": "mem-k02",
+      "session_id": "sess-kestrel-d",
+      "content": "Kestrel release and trial paperwork sits with the mobile desk.",
+      "entities": "kestrel"
+    },
+    {
+      "id": "mem-k03",
+      "session_id": "sess-kestrel-e",
+      "content": "Mobile notes for kestrel cover the release and the trial.",
+      "entities": "kestrel"
+    },
+    {
+      "id": "mem-k04",
+      "session_id": "sess-kestrel-f",
+      "content": "The mobile crash rate for kestrel dropped after the rendering fix.",
+      "entities": "meetup"
+    },
+    {
+      "id": "mem-k05",
+      "session_id": "sess-kestrel-g",
+      "content": "Mobile onboarding for kestrel takes under two minutes on average.",
+      "entities": "meetup"
+    },
+    {
+      "id": "mem-k06",
+      "session_id": "sess-kestrel-h",
+      "content": "The beta cohort for kestrel gets builds every monday.",
+      "entities": "webinar"
+    },
+    {
+      "id": "mem-k07",
+      "session_id": "sess-kestrel-i",
+      "content": "Beta feedback for kestrel is triaged by the qa rotation.",
+      "entities": "webinar"
+    },
+    {
+      "id": "mem-k13",
+      "session_id": "sess-kestrel-j",
+      "content": "The kestrel trial users and release notes sit with the mobile desk.",
+      "entities": "meetup"
+    },
+    {
+      "id": "mem-k14",
+      "session_id": "sess-kestrel-k",
+      "content": "Trial user escalations for kestrel go to the mobile team.",
+      "entities": "webinar"
+    },
+    {
+      "id": "mem-k15",
+      "session_id": "sess-kestrel-l",
+      "content": "The mobile desk holds the kestrel release and trial checklist.",
+      "entities": "meetup"
+    },
+    {
+      "id": "mem-z16",
+      "session_id": "sess-z16",
+      "content": "Zenith partnership terms reminders go to the vendor desk.",
+      "entities": "misc"
+    },
+    {
+      "id": "mem-z17",
+      "session_id": "sess-z17",
+      "content": "The vendor team tracks zenith partnership terms follow ups.",
+      "entities": "misc"
+    },
+    {
+      "id": "mem-h16",
+      "session_id": "sess-h16",
+      "content": "Harbor rollout reminders go to the platform desk.",
+      "entities": "misc"
+    },
+    {
+      "id": "mem-h17",
+      "session_id": "sess-h17",
+      "content": "The platform team tracks harbor rollout follow ups.",
+      "entities": "misc"
+    },
+    {
+      "id": "mem-k16",
+      "session_id": "sess-k16",
+      "content": "Kestrel billing and trial user questions go to the mobile desk.",
+      "entities": "misc"
+    },
+    {
+      "id": "mem-k17",
+      "session_id": "sess-k17",
+      "content": "The mobile team tracks kestrel trial user follow ups.",
+      "entities": "misc"
+    }
+  ],
+  "questions": [
+    {
+      "id": "sub-z-01",
+      "question": "what came out of the zenith vendor audit?",
+      "expected_facts": [
+        "closed in march",
+        "found zero issues"
+      ],
+      "source_memory_ids": [
+        "mem-z11"
+      ],
+      "relevant_memory_ids": [
+        "mem-z01",
+        "mem-z02",
+        "mem-z03",
+        "mem-z04",
+        "mem-z05",
+        "mem-z06",
+        "mem-z07",
+        "mem-z11",
+        "mem-z12",
+        "mem-z13",
+        "mem-z14",
+        "mem-z15"
+      ]
+    },
+    {
+      "id": "sub-z-02",
+      "question": "how did the zenith vendor audit turn out when it closed?",
+      "expected_facts": [
+        "closed in march",
+        "found zero issues"
+      ],
+      "source_memory_ids": [
+        "mem-z11"
+      ],
+      "relevant_memory_ids": [
+        "mem-z01",
+        "mem-z02",
+        "mem-z03",
+        "mem-z04",
+        "mem-z05",
+        "mem-z06",
+        "mem-z07",
+        "mem-z11",
+        "mem-z12",
+        "mem-z13",
+        "mem-z14",
+        "mem-z15"
+      ]
+    },
+    {
+      "id": "sub-z-03",
+      "question": "what happened to the zenith partnership terms, and when?",
+      "expected_facts": [
+        "renewed for three more years",
+        "in june"
+      ],
+      "source_memory_ids": [
+        "mem-z12"
+      ],
+      "relevant_memory_ids": [
+        "mem-z01",
+        "mem-z02",
+        "mem-z03",
+        "mem-z04",
+        "mem-z05",
+        "mem-z06",
+        "mem-z07",
+        "mem-z11",
+        "mem-z12",
+        "mem-z13",
+        "mem-z14",
+        "mem-z15"
+      ]
+    },
+    {
+      "id": "sub-z-04",
+      "question": "how long do the zenith partnership terms now run?",
+      "expected_facts": [
+        "renewed for three more years"
+      ],
+      "source_memory_ids": [
+        "mem-z12"
+      ],
+      "relevant_memory_ids": [
+        "mem-z01",
+        "mem-z02",
+        "mem-z03",
+        "mem-z04",
+        "mem-z05",
+        "mem-z06",
+        "mem-z07",
+        "mem-z11",
+        "mem-z12",
+        "mem-z13",
+        "mem-z14",
+        "mem-z15"
+      ]
+    },
+    {
+      "id": "sub-h-01",
+      "question": "what came out of the harbor rollout?",
+      "expected_facts": [
+        "finished in four days",
+        "zero downtime"
+      ],
+      "source_memory_ids": [
+        "mem-h11"
+      ],
+      "relevant_memory_ids": [
+        "mem-h01",
+        "mem-h02",
+        "mem-h03",
+        "mem-h04",
+        "mem-h05",
+        "mem-h06",
+        "mem-h07",
+        "mem-h11",
+        "mem-h12",
+        "mem-h13",
+        "mem-h14",
+        "mem-h15"
+      ]
+    },
+    {
+      "id": "sub-h-02",
+      "question": "how did the harbor rollout end?",
+      "expected_facts": [
+        "finished in four days",
+        "zero downtime"
+      ],
+      "source_memory_ids": [
+        "mem-h11"
+      ],
+      "relevant_memory_ids": [
+        "mem-h01",
+        "mem-h02",
+        "mem-h03",
+        "mem-h04",
+        "mem-h05",
+        "mem-h06",
+        "mem-h07",
+        "mem-h11",
+        "mem-h12",
+        "mem-h13",
+        "mem-h14",
+        "mem-h15"
+      ]
+    },
+    {
+      "id": "sub-h-03",
+      "question": "what did the harbor cluster yearly check find, and when?",
+      "expected_facts": [
+        "two minor findings",
+        "in april"
+      ],
+      "source_memory_ids": [
+        "mem-h12"
+      ],
+      "relevant_memory_ids": [
+        "mem-h01",
+        "mem-h02",
+        "mem-h03",
+        "mem-h04",
+        "mem-h05",
+        "mem-h06",
+        "mem-h07",
+        "mem-h11",
+        "mem-h12",
+        "mem-h13",
+        "mem-h14",
+        "mem-h15"
+      ]
+    },
+    {
+      "id": "sub-h-04",
+      "question": "how did the harbor cluster do on its yearly check?",
+      "expected_facts": [
+        "two minor findings",
+        "in april"
+      ],
+      "source_memory_ids": [
+        "mem-h12"
+      ],
+      "relevant_memory_ids": [
+        "mem-h01",
+        "mem-h02",
+        "mem-h03",
+        "mem-h04",
+        "mem-h05",
+        "mem-h06",
+        "mem-h07",
+        "mem-h11",
+        "mem-h12",
+        "mem-h13",
+        "mem-h14",
+        "mem-h15"
+      ]
+    },
+    {
+      "id": "sub-k-01",
+      "question": "how did the kestrel release go, and what about the regressions?",
+      "expected_facts": [
+        "shipped on time",
+        "two patched regressions"
+      ],
+      "source_memory_ids": [
+        "mem-k11"
+      ],
+      "relevant_memory_ids": [
+        "mem-k01",
+        "mem-k02",
+        "mem-k03",
+        "mem-k04",
+        "mem-k05",
+        "mem-k06",
+        "mem-k07",
+        "mem-k11",
+        "mem-k12",
+        "mem-k13",
+        "mem-k14",
+        "mem-k15"
+      ]
+    },
+    {
+      "id": "sub-k-02",
+      "question": "did the kestrel release stay on schedule?",
+      "expected_facts": [
+        "shipped on time"
+      ],
+      "source_memory_ids": [
+        "mem-k11"
+      ],
+      "relevant_memory_ids": [
+        "mem-k01",
+        "mem-k02",
+        "mem-k03",
+        "mem-k04",
+        "mem-k05",
+        "mem-k06",
+        "mem-k07",
+        "mem-k11",
+        "mem-k12",
+        "mem-k13",
+        "mem-k14",
+        "mem-k15"
+      ]
+    },
+    {
+      "id": "sub-k-03",
+      "question": "what number of trial users did kestrel keep?",
+      "expected_facts": [
+        "kept ninety percent of trial users"
+      ],
+      "source_memory_ids": [
+        "mem-k12"
+      ],
+      "relevant_memory_ids": [
+        "mem-k01",
+        "mem-k02",
+        "mem-k03",
+        "mem-k04",
+        "mem-k05",
+        "mem-k06",
+        "mem-k07",
+        "mem-k11",
+        "mem-k12",
+        "mem-k13",
+        "mem-k14",
+        "mem-k15"
+      ]
+    },
+    {
+      "id": "sub-k-04",
+      "question": "how many trial users stayed with kestrel, and what preceded that?",
+      "expected_facts": [
+        "kept ninety percent of trial users",
+        "after the billing change"
+      ],
+      "source_memory_ids": [
+        "mem-k12"
+      ],
+      "relevant_memory_ids": [
+        "mem-k01",
+        "mem-k02",
+        "mem-k03",
+        "mem-k04",
+        "mem-k05",
+        "mem-k06",
+        "mem-k07",
+        "mem-k11",
+        "mem-k12",
+        "mem-k13",
+        "mem-k14",
+        "mem-k15"
+      ]
+    },
+    {
+      "id": "ctl-z-01",
+      "question": "what score did the engagement survey for zenith get?",
+      "expected_facts": [
+        "score of 82"
+      ],
+      "source_memory_ids": [
+        "mem-z04"
+      ],
+      "relevant_memory_ids": [
+        "mem-z01",
+        "mem-z02",
+        "mem-z03",
+        "mem-z04",
+        "mem-z05",
+        "mem-z06",
+        "mem-z07",
+        "mem-z11",
+        "mem-z12",
+        "mem-z13",
+        "mem-z14",
+        "mem-z15"
+      ]
+    },
+    {
+      "id": "ctl-z-02",
+      "question": "how often is engagement with the zenith account reviewed?",
+      "expected_facts": [
+        "reviewed monthly"
+      ],
+      "source_memory_ids": [
+        "mem-z05"
+      ],
+      "relevant_memory_ids": [
+        "mem-z01",
+        "mem-z02",
+        "mem-z03",
+        "mem-z04",
+        "mem-z05",
+        "mem-z06",
+        "mem-z07",
+        "mem-z11",
+        "mem-z12",
+        "mem-z13",
+        "mem-z14",
+        "mem-z15"
+      ]
+    },
+    {
+      "id": "ctl-z-03",
+      "question": "when is the partnership offsite for zenith booked?",
+      "expected_facts": [
+        "two days in september"
+      ],
+      "source_memory_ids": [
+        "mem-z06"
+      ],
+      "relevant_memory_ids": [
+        "mem-z01",
+        "mem-z02",
+        "mem-z03",
+        "mem-z04",
+        "mem-z05",
+        "mem-z06",
+        "mem-z07",
+        "mem-z11",
+        "mem-z12",
+        "mem-z13",
+        "mem-z14",
+        "mem-z15"
+      ]
+    },
+    {
+      "id": "ctl-z-04",
+      "question": "who approved the partnership budget for zenith?",
+      "expected_facts": [
+        "approved by the finance lead"
+      ],
+      "source_memory_ids": [
+        "mem-z07"
+      ],
+      "relevant_memory_ids": [
+        "mem-z01",
+        "mem-z02",
+        "mem-z03",
+        "mem-z04",
+        "mem-z05",
+        "mem-z06",
+        "mem-z07",
+        "mem-z11",
+        "mem-z12",
+        "mem-z13",
+        "mem-z14",
+        "mem-z15"
+      ]
+    },
+    {
+      "id": "ctl-h-01",
+      "question": "what does the platform dashboard for harbor show now?",
+      "expected_facts": [
+        "shard health per zone"
+      ],
+      "source_memory_ids": [
+        "mem-h04"
+      ],
+      "relevant_memory_ids": [
+        "mem-h01",
+        "mem-h02",
+        "mem-h03",
+        "mem-h04",
+        "mem-h05",
+        "mem-h06",
+        "mem-h07",
+        "mem-h11",
+        "mem-h12",
+        "mem-h13",
+        "mem-h14",
+        "mem-h15"
+      ]
+    },
+    {
+      "id": "ctl-h-02",
+      "question": "how often do platform game days for harbor run?",
+      "expected_facts": [
+        "every quarter"
+      ],
+      "source_memory_ids": [
+        "mem-h05"
+      ],
+      "relevant_memory_ids": [
+        "mem-h01",
+        "mem-h02",
+        "mem-h03",
+        "mem-h04",
+        "mem-h05",
+        "mem-h06",
+        "mem-h07",
+        "mem-h11",
+        "mem-h12",
+        "mem-h13",
+        "mem-h14",
+        "mem-h15"
+      ]
+    },
+    {
+      "id": "ctl-h-03",
+      "question": "how many nodes did the cluster expansion for harbor add?",
+      "expected_facts": [
+        "six nodes"
+      ],
+      "source_memory_ids": [
+        "mem-h06"
+      ],
+      "relevant_memory_ids": [
+        "mem-h01",
+        "mem-h02",
+        "mem-h03",
+        "mem-h04",
+        "mem-h05",
+        "mem-h06",
+        "mem-h07",
+        "mem-h11",
+        "mem-h12",
+        "mem-h13",
+        "mem-h14",
+        "mem-h15"
+      ]
+    },
+    {
+      "id": "ctl-h-04",
+      "question": "where do cluster alerts for harbor route?",
+      "expected_facts": [
+        "on-call rotation"
+      ],
+      "source_memory_ids": [
+        "mem-h07"
+      ],
+      "relevant_memory_ids": [
+        "mem-h01",
+        "mem-h02",
+        "mem-h03",
+        "mem-h04",
+        "mem-h05",
+        "mem-h06",
+        "mem-h07",
+        "mem-h11",
+        "mem-h12",
+        "mem-h13",
+        "mem-h14",
+        "mem-h15"
+      ]
+    },
+    {
+      "id": "ctl-k-01",
+      "question": "what happened to the mobile crash rate for kestrel?",
+      "expected_facts": [
+        "dropped after the rendering fix"
+      ],
+      "source_memory_ids": [
+        "mem-k04"
+      ],
+      "relevant_memory_ids": [
+        "mem-k01",
+        "mem-k02",
+        "mem-k03",
+        "mem-k04",
+        "mem-k05",
+        "mem-k06",
+        "mem-k07",
+        "mem-k11",
+        "mem-k12",
+        "mem-k13",
+        "mem-k14",
+        "mem-k15"
+      ]
+    },
+    {
+      "id": "ctl-k-02",
+      "question": "how long does mobile onboarding for kestrel take?",
+      "expected_facts": [
+        "under two minutes"
+      ],
+      "source_memory_ids": [
+        "mem-k05"
+      ],
+      "relevant_memory_ids": [
+        "mem-k01",
+        "mem-k02",
+        "mem-k03",
+        "mem-k04",
+        "mem-k05",
+        "mem-k06",
+        "mem-k07",
+        "mem-k11",
+        "mem-k12",
+        "mem-k13",
+        "mem-k14",
+        "mem-k15"
+      ]
+    },
+    {
+      "id": "ctl-k-03",
+      "question": "when does the beta cohort for kestrel get builds?",
+      "expected_facts": [
+        "every monday"
+      ],
+      "source_memory_ids": [
+        "mem-k06"
+      ],
+      "relevant_memory_ids": [
+        "mem-k01",
+        "mem-k02",
+        "mem-k03",
+        "mem-k04",
+        "mem-k05",
+        "mem-k06",
+        "mem-k07",
+        "mem-k11",
+        "mem-k12",
+        "mem-k13",
+        "mem-k14",
+        "mem-k15"
+      ]
+    },
+    {
+      "id": "ctl-k-04",
+      "question": "who triages beta feedback for kestrel?",
+      "expected_facts": [
+        "qa rotation"
+      ],
+      "source_memory_ids": [
+        "mem-k07"
+      ],
+      "relevant_memory_ids": [
+        "mem-k01",
+        "mem-k02",
+        "mem-k03",
+        "mem-k04",
+        "mem-k05",
+        "mem-k06",
+        "mem-k07",
+        "mem-k11",
+        "mem-k12",
+        "mem-k13",
+        "mem-k14",
+        "mem-k15"
+      ]
+    }
+  ]
+}

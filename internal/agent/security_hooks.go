@@ -180,6 +180,12 @@ func NewSecretObfuscationHook(obfuscator *intsecurity.SecretObfuscator, logger *
 func (h *SecretObfuscationHook) TransformContext(_ context.Context, messages []llm.ChatMessage, toolDefs []llm.ToolDefinition) ContextTransform {
 	modified := false
 	for i, msg := range messages {
+		// Session-tagged mint (wiring-gap leaf 07 T2): the obfuscator
+		// records which session each placeholder belongs to so the output
+		// restore lane can scope resolution. The hook carries no session
+		// identity (the TransformContext seam is session-shapeless), so
+		// mints stay untagged here and resolve through the legacy
+		// sessionless lane until a session-aware seam exists.
 		obfuscated := h.obfuscator.Obfuscate(msg.Content)
 		if obfuscated != msg.Content {
 			messages[i].Content = obfuscated
