@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -111,3 +112,4 @@ func (t *stubBaselineTool) Execute(_ context.Context, _ map[string]any) (any, er
 }
 func (t *stubBaselineTool) IsReadOnly(map[string]any) bool        { return true }
 func (t *stubBaselineTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (t *stubBaselineTool) TimeoutMs() time.Duration              { return 0 }

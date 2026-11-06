@@ -733,6 +733,7 @@ func (t *mockStreamingTool) Execute(ctx context.Context, args map[string]any) (a
 }
 func (t *mockStreamingTool) IsReadOnly(map[string]any) bool        { return false }
 func (t *mockStreamingTool) IsConcurrencySafe(map[string]any) bool { return false }
+func (t *mockStreamingTool) TimeoutMs() time.Duration              { return 0 }
 func (t *mockStreamingTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
 	for _, u := range t.updates {
 		onUpdate(u)
@@ -768,6 +769,7 @@ func (t *mockTerminatingTool) Execute(ctx context.Context, args map[string]any) 
 }
 func (t *mockTerminatingTool) IsReadOnly(map[string]any) bool        { return false }
 func (t *mockTerminatingTool) IsConcurrencySafe(map[string]any) bool { return false }
+func (t *mockTerminatingTool) TimeoutMs() time.Duration              { return 0 }
 func (t *mockTerminatingTool) TerminateHint(args map[string]any) bool {
 	return t.terminate
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -24,6 +25,7 @@ func (t *scopedStubTool) Description() string                   { return "scopin
 func (t *scopedStubTool) Parameters() llm.FunctionParameters    { return t.params }
 func (t *scopedStubTool) IsReadOnly(map[string]any) bool        { return false }
 func (t *scopedStubTool) IsConcurrencySafe(map[string]any) bool { return false }
+func (t *scopedStubTool) TimeoutMs() time.Duration              { return 0 }
 func (t *scopedStubTool) Execute(_ context.Context, _ map[string]any) (any, error) {
 	return map[string]any{"ok": true}, nil
 }

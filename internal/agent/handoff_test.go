@@ -1172,6 +1172,7 @@ func (t *stubHandoffTool) Execute(ctx context.Context, args map[string]any) (any
 }
 func (t *stubHandoffTool) IsReadOnly(map[string]any) bool        { return true }
 func (t *stubHandoffTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (t *stubHandoffTool) TimeoutMs() time.Duration              { return 0 }
 func (t *stubHandoffTool) TerminateHint(map[string]any) bool     { return true }
 
 // requestHandoffExecute is the request_handoff contract as the daemon wires it

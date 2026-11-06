@@ -122,6 +122,7 @@ func (f *fakeTool) Description() string                   { return "fake" }
 func (f *fakeTool) Parameters() llm.FunctionParameters    { return llm.FunctionParameters{} }
 func (f *fakeTool) IsReadOnly(map[string]any) bool        { return true }
 func (f *fakeTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (f *fakeTool) TimeoutMs() time.Duration              { return 0 }
 func (f *fakeTool) Execute(_ context.Context, _ map[string]any) (any, error) {
 	f.calls++
 	return "LIVE", nil

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -375,3 +376,4 @@ func (s statusStubTool) Execute(ctx context.Context, args map[string]any) (any, 
 }
 func (s statusStubTool) IsReadOnly(map[string]any) bool        { return true }
 func (s statusStubTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (s statusStubTool) TimeoutMs() time.Duration              { return 0 }

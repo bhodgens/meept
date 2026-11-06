@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
@@ -31,6 +32,7 @@ func (t *schemaWiringTool) Execute(_ context.Context, _ map[string]any) (any, er
 }
 func (t *schemaWiringTool) IsReadOnly(map[string]any) bool        { return true }
 func (t *schemaWiringTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (t *schemaWiringTool) TimeoutMs() time.Duration              { return 0 }
 
 // schemaWiringResolver builds a one-provider resolver with no schema_mode
 // overrides, so tests exercise the global/default resolution path.

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -29,6 +30,7 @@ func (t *fakeLeafTool) Execute(ctx context.Context, args map[string]any) (any, e
 }
 func (t *fakeLeafTool) IsReadOnly(map[string]any) bool        { return false }
 func (t *fakeLeafTool) IsConcurrencySafe(map[string]any) bool { return false }
+func (t *fakeLeafTool) TimeoutMs() time.Duration              { return 0 }
 
 // fakeSpawnTool is a depth-gated spawn tool with gate at maxDepth.
 type fakeSpawnTool struct {
@@ -51,6 +53,7 @@ func (t *fakeSpawnTool) IsReadOnly(input map[string]any) bool { return t.base.Is
 func (t *fakeSpawnTool) IsConcurrencySafe(input map[string]any) bool {
 	return t.base.IsConcurrencySafe(input)
 }
+func (t *fakeSpawnTool) TimeoutMs() time.Duration { return t.base.TimeoutMs() }
 
 var _ depthGate = (*fakeSpawnTool)(nil)
 

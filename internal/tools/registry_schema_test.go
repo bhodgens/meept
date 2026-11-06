@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -35,6 +36,7 @@ func (t *schemaModeTool) Execute(_ context.Context, _ map[string]any) (any, erro
 }
 func (t *schemaModeTool) IsReadOnly(map[string]any) bool        { return true }
 func (t *schemaModeTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (t *schemaModeTool) TimeoutMs() time.Duration              { return 0 }
 
 // Compile-time assertion that the fake implements Tool.
 var _ Tool = (*schemaModeTool)(nil)

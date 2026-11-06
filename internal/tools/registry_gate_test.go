@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -39,6 +40,7 @@ func (t *gateTool) Execute(_ context.Context, _ map[string]any) (any, error) {
 }
 func (t *gateTool) IsReadOnly(map[string]any) bool        { return t.readOnly }
 func (t *gateTool) IsConcurrencySafe(map[string]any) bool { return t.concSafe }
+func (t *gateTool) TimeoutMs() time.Duration              { return 0 }
 func (t *gateTool) Category() string                      { return t.category }
 
 // recordingGate is a stub ExecGate that records every Before/After call.

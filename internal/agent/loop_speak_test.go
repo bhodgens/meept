@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
@@ -53,6 +54,7 @@ func (t *speakLoopTestTool) Execute(_ context.Context, args map[string]any) (any
 }
 func (t *speakLoopTestTool) IsReadOnly(map[string]any) bool        { return true }
 func (t *speakLoopTestTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (t *speakLoopTestTool) TimeoutMs() time.Duration              { return 0 }
 
 // speakingPublisher is a concurrency-safe fake SpeakPublisher.
 type speakingPublisher struct {

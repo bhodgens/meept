@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -38,6 +39,7 @@ func (m *mockTool) Execute(ctx context.Context, args map[string]any) (any, error
 }
 func (m *mockTool) IsReadOnly(map[string]any) bool        { return false }
 func (m *mockTool) IsConcurrencySafe(map[string]any) bool { return false }
+func (m *mockTool) TimeoutMs() time.Duration              { return 0 }
 
 func TestRegistry_Register(t *testing.T) {
 	r := NewRegistry(nil)

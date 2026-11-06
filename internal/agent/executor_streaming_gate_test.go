@@ -12,6 +12,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
@@ -54,6 +55,7 @@ func (t *gatedStreamingStub) Parameters() llm.FunctionParameters {
 }
 func (t *gatedStreamingStub) IsReadOnly(input map[string]any) bool        { return true }
 func (t *gatedStreamingStub) IsConcurrencySafe(input map[string]any) bool { return true }
+func (t *gatedStreamingStub) TimeoutMs() time.Duration                    { return 0 }
 func (t *gatedStreamingStub) Execute(ctx context.Context, args map[string]any) (any, error) {
 	t.seq.record("execute_body")
 	return "non-streaming", nil

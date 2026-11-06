@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
@@ -40,6 +41,7 @@ func (f *failingCountTool) Execute(ctx context.Context, args map[string]any) (an
 }
 func (f *failingCountTool) IsReadOnly(map[string]any) bool        { return true }
 func (f *failingCountTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (f *failingCountTool) TimeoutMs() time.Duration              { return 0 }
 
 // newBreakerLoopHarness builds a loop whose chatter emits `n` identical
 // tool-call responses (same tool, same args) followed by filler responses.

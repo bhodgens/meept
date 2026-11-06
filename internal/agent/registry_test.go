@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/config"
@@ -1112,6 +1113,7 @@ func (t *taskSchemaTool) Execute(_ context.Context, _ map[string]any) (any, erro
 }
 func (t *taskSchemaTool) IsReadOnly(map[string]any) bool        { return true }
 func (t *taskSchemaTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (t *taskSchemaTool) TimeoutMs() time.Duration              { return 0 }
 
 // newTestRegistryWithTaskTools builds an AgentRegistry wired to a real
 // *tools.Registry carrying the always-full core tool "shell" plus a non-core

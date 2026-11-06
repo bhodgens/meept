@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
@@ -180,6 +181,7 @@ func (m *mockGuardTool) Execute(ctx context.Context, args map[string]any) (any, 
 }
 func (m *mockGuardTool) IsReadOnly(map[string]any) bool        { return true }
 func (m *mockGuardTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (m *mockGuardTool) TimeoutMs() time.Duration              { return 0 }
 
 func TestGuards_NoProgressLadder_Integration(t *testing.T) {
 	// 7 near-same calls (alternating key order so the byte-level cycle

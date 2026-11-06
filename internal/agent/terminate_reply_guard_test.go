@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
@@ -41,6 +42,7 @@ func (t *dumpTerminatingTool) Execute(ctx context.Context, args map[string]any) 
 }
 func (t *dumpTerminatingTool) IsReadOnly(map[string]any) bool        { return false }
 func (t *dumpTerminatingTool) IsConcurrencySafe(map[string]any) bool { return false }
+func (t *dumpTerminatingTool) TimeoutMs() time.Duration              { return 0 }
 
 func newTerminateGuardLoop(t *testing.T, chatter llm.Chatter) *AgentLoop {
 	t.Helper()

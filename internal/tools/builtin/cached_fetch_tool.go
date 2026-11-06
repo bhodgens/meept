@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -92,6 +93,9 @@ func (t *CachedFetchTool) IsReadOnly(in map[string]any) bool {
 func (t *CachedFetchTool) IsConcurrencySafe(in map[string]any) bool {
 	return t.inner.IsConcurrencySafe(in)
 }
+
+// TimeoutMs delegates to the wrapped tool's declared budget (contract B1).
+func (t *CachedFetchTool) TimeoutMs() time.Duration { return t.inner.TimeoutMs() }
 
 // Category delegates to the inner tool's optional Categorizer (tools.
 // GetCategory handles the interface check; the wrapper preserves "web").

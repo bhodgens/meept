@@ -17,6 +17,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
@@ -44,6 +45,7 @@ func (shadowProbeTool) Execute(ctx context.Context, args map[string]any) (any, e
 }
 func (shadowProbeTool) IsReadOnly(map[string]any) bool        { return true }
 func (shadowProbeTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (shadowProbeTool) TimeoutMs() time.Duration              { return 0 }
 
 // shadowBrief exceeds the 500-char threshold shadow.estimateComplexity uses
 // to classify a conversation as at least moderate complexity

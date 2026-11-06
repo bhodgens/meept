@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -30,7 +31,9 @@ func (t *countingRequiredTool) Parameters() llm.FunctionParameters {
 	}
 }
 func (t *countingRequiredTool) IsConcurrencySafe(args map[string]any) bool { return true }
-func (t *countingRequiredTool) IsReadOnly(input map[string]any) bool       { return false }
+
+func (t *countingRequiredTool) TimeoutMs() time.Duration             { return 0 }
+func (t *countingRequiredTool) IsReadOnly(input map[string]any) bool { return false }
 func (t *countingRequiredTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	t.runs.Add(1)
 	return "ran", nil
