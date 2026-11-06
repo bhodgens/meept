@@ -9,6 +9,7 @@ package agent
 // construction and tool_view activation hook are leaf 06/07.
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -114,6 +115,40 @@ type ExposurePlan struct {
 	active       []string
 	ceilingNames map[string]struct{}
 	knownNames   map[string]struct{}
+	// enforcing is true only in the dynamic modes (search/predicted). A
+	// non-enforcing plan (full/indexed) never gates execution: the active
+	// set is advisory there, matching the pre-gate byte-identical posture
+	// (bughunt agent-core F-1).
+	enforcing bool
+}
+
+// exposurePlanCtxKey keys the per-turn ExposurePlan on the turn context
+// (bughunt agent-core F-3). The plan rides the CONTEXT, not shared
+// executor state: one executor field cannot adjudicate interleaved
+// conversations on a session-long loop — episode A's earned promotions
+// would go invisible to B's plan and vice versa. The loop arms the
+// conversation's plan into the turn ctx at reasoningCycle entry; the
+// executor's §6 row-4 gate reads it per call.
+type exposurePlanCtxKey struct{}
+
+// WithExposurePlan attaches the episode's plan to ctx for the duration of
+// the turn. A nil plan leaves ctx untouched (legacy posture: the row-4
+// execution gate stays off).
+func WithExposurePlan(ctx context.Context, plan *ExposurePlan) context.Context {
+	if ctx == nil || plan == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, exposurePlanCtxKey{}, plan)
+}
+
+// exposurePlanFromContext returns the plan the turn carries, or nil when
+// the execution gate is off (flag off, legacy mode, or a non-loop caller).
+func exposurePlanFromContext(ctx context.Context) *ExposurePlan {
+	if ctx == nil {
+		return nil
+	}
+	p, _ := ctx.Value(exposurePlanCtxKey{}).(*ExposurePlan)
+	return p
 }
 
 // metaTools is the always-active meta-tool pair (design §1 layer 3): the
@@ -151,12 +186,14 @@ func NewExposurePlan(mode ToolExposureMode, predicted []string, budget int, ceil
 	switch mode {
 	case ExposureSearch:
 		// No predicted tools; only core + the meta pair.
+		p.enforcing = true
 		p.active = append(append([]string{}, core...), metaTools...)
 	case ExposurePredicted:
 		// Predicted set (capped at budget) + core + meta pair.
 		if len(predicted) > budget && budget > 0 {
 			predicted = predicted[:budget]
 		}
+		p.enforcing = true
 		p.active = append(append([]string{}, predicted...), core...)
 		p.active = append(p.active, metaTools...)
 	default:
@@ -164,6 +201,13 @@ func NewExposurePlan(mode ToolExposureMode, predicted []string, budget int, ceil
 		p.active = nil
 	}
 	return p
+}
+
+// Enforcing reports whether this plan hard-gates tool execution (dynamic
+// modes only). Full/indexed plans never gate: the active set there is
+// advisory, matching the pre-gate posture (bughunt agent-core F-1).
+func (p *ExposurePlan) Enforcing() bool {
+	return p != nil && p.enforcing
 }
 
 // Promote adds a tool name to the active set (append-only, design §3.1/§4.3).

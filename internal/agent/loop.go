@@ -2180,9 +2180,33 @@ func (l *AgentLoop) ensureExposurePlan(conversationID string) *ExposurePlan {
 			known = append(known, t.Name())
 		}
 	}
+	// bughunt agent-core F-2: the ceiling is the agent's EXECUTABLE view —
+	// the per-loop filtered registry (canonical registry names, grant
+	// aliases resolved, group intersection already applied by
+	// filterTools/ScopedToolNames) — NOT the raw declared grant names
+	// (spec.AllTools returns "shell_execute" where the registry serves
+	// "shell", so Promote mis-refused every alias'd grant). It also
+	// skipped the group denial entirely; a live execution gate (F-1) made
+	// that a permission bypass. The meta pair is UNIONed: design §1 layer
+	// 3 makes the discoverer+expander always-active in dynamic modes, and
+	// most AGENT.md specs never grant them — without the union, agents
+	// would have no recovery path under the hard gate.
 	var ceiling []string
-	if l.spec != nil {
-		ceiling = l.spec.AllTools()
+	if l.registry != nil {
+		ceiling = append([]string(nil), known...)
+	} else if l.spec != nil {
+		ceiling = l.spec.GrantedToolNames()
+	}
+	if len(ceiling) > 0 {
+		seenC := make(map[string]struct{}, len(ceiling)+2)
+		for _, c := range ceiling {
+			seenC[c] = struct{}{}
+		}
+		for _, m := range metaTools {
+			if _, ok := seenC[m]; !ok {
+				ceiling = append(ceiling, m)
+			}
+		}
 	}
 	plan := NewExposurePlan(mode, nil, l.schemaModeCfg.PredictedBudget, ceiling, known)
 	l.exposurePlans[conversationID] = plan
@@ -4697,8 +4721,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	// path is byte-identical to the legacy.
 	if l.schemaModeSet && l.schemaModeCfg.DynamicToolExposure {
 		plan := l.ensureExposurePlan(conversationID)
-		if plan != nil && l.executor != nil {
-			l.executor.SetExposurePlan(plan)
+		if plan != nil {
+			// bughunt agent-core F-3: the plan rides the TURN CONTEXT, not
+			// a shared executor field, so interleaved conversations on one
+			// session-long loop are each adjudicated against their own
+			// episode's active set.
+			ctx = WithExposurePlan(ctx, plan)
 		}
 	}
 
@@ -9319,6 +9347,15 @@ func (l *AgentLoop) SessionConversation(id string) *Conversation {
 // ClearConversation removes a conversation.
 func (l *AgentLoop) ClearConversation(id string) {
 	l.conversations.Delete(id)
+	// bughunt agent-core F-4: the episode's exposure plan dies with the
+	// conversation. Without this the map grows per conversationID for the
+	// loop's whole life (active slice + two name sets per entry) and a
+	// recycled conversationID would silently resume a frozen episode
+	// instead of starting fresh (design §2.2: a new conversation is a new
+	// episode).
+	l.exposureMu.Lock()
+	delete(l.exposurePlans, id)
+	l.exposureMu.Unlock()
 }
 
 // SetConfig updates the agent configuration.

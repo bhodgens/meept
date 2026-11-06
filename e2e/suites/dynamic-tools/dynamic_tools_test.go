@@ -357,3 +357,71 @@ func TestCacheContinuity_NoInvalidationWithinEpisode(t *testing.T) {
 			n3-n2, n2, n3, s.logLinesContaining(invPhrase))
 	}
 }
+
+// TestRow4HardGate_RefusesInactiveTool pins the §6 row-4 HARD execution gate
+// (bughunt agent-core F-1): in an enforcing dynamic mode (search here), the
+// model calling a tool the episode never activated — even one inside the
+// role ceiling with a full schema already in hand — is REFUSED before
+// execution with the actionable tool_view recovery directive. Before F-1
+// the guard sat inside `if tool == nil` and was unreachable: the executor
+// holds the same registry knownNames came from, so registry.Get always
+// succeeded and the call executed silently, making promotion advisory-only.
+func TestRow4HardGate_RefusesInactiveTool(t *testing.T) {
+	s := newSandbox(t,
+		withAgentTools(agentToolsSearchOn),
+		withDefaultModel("fake/frontier-flagship"),
+	)
+	session := s.createSession("row4-gate")
+
+	// task_create is a BaselineTools member: known to the registry (inside
+	// ceiling after the F-2 canonical-name fix) but NOT core always-full and
+	// never promoted via tool_view in this episode. Call it cold.
+	const gatePhrase = "Known tool not active in this episode; refusing execution"
+	before := s.Fake.RequestCount()
+	s.submitScriptedTurn(session, "create a task directly, no discovery", "fake/frontier-flagship",
+		harness.ToolCall{Name: "task_create", Arguments: `{}`},
+	)
+	reqs := s.awaitToolRequests(before, 2, turnTimeout)
+
+	// The refusal must surface as the tool-result the model sees on the
+	// NEXT request (the recovery directive), not a silent success.
+	found := false
+	for _, m := range messagesFromBody(reqs[1]) {
+		if strings.Contains(m, gateErrPhrase) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("row-4 gate: second request must carry the %q refusal in its tool-result messages; got %v",
+			gateErrPhrase, messagesFromBody(reqs[1]))
+	}
+
+	// The executor logged the refusal exactly once.
+	if n := s.logLineCount(gatePhrase); n != 1 {
+		t.Errorf("row-4 gate: expected exactly 1 refusal log line, got %d\nlog tail:\n%s", n, s.logTail())
+	}
+	_ = reqs[0]
+}
+
+// gateErrPhrase is the model-visible half of the row-4 refusal error text
+// (internal/agent/executor.go Execute gate).
+const gateErrPhrase = "is not active in this episode; call tool_view"
+
+// messagesFromBody extracts the string content of every message in one
+// recorded executor request body (the tool-result lane is plain strings on
+// the OpenAI-compatible wire the fake serves).
+func messagesFromBody(body map[string]any) []string {
+	raw, _ := body["messages"].([]any)
+	var out []string
+	for _, rm := range raw {
+		m, ok := rm.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch c := m["content"].(type) {
+		case string:
+			out = append(out, c)
+		}
+	}
+	return out
+}

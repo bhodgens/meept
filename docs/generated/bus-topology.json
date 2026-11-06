@@ -38,7 +38,7 @@
     "agent.action": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9059,
+        "line": 9087,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -49,7 +49,7 @@
     "agent.iteration.completed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9267,
+        "line": 9295,
         "payload_keys": [
           "agent_id",
           "conversation_id",
@@ -61,7 +61,7 @@
     "agent.lifecycle.ended": [
       {
         "file": "internal/agent/loop.go",
-        "line": 3255,
+        "line": 3279,
         "payload_keys": [],
         "via_const": true
       }
@@ -69,7 +69,7 @@
     "agent.lifecycle.started": [
       {
         "file": "internal/agent/loop.go",
-        "line": 3195,
+        "line": 3219,
         "payload_keys": [],
         "via_const": true
       }
@@ -105,7 +105,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 9124,
+        "line": 9152,
         "payload_keys": [
           "detail",
           "iteration",
@@ -116,7 +116,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 9178,
+        "line": 9206,
         "payload_keys": [
           "conversation_id",
           "detail",
@@ -146,7 +146,7 @@
     "agent.queue.followup.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9249,
+        "line": 9277,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -183,7 +183,7 @@
     "agent.queue.steer.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9225,
+        "line": 9253,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -196,7 +196,7 @@
     "agent.quota_wait": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2633,
+        "line": 2657,
         "payload_keys": []
       },
       {
@@ -213,7 +213,7 @@
     "agent.result": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9089,
+        "line": 9117,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -224,7 +224,7 @@
     "agent.state.changed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2622,
+        "line": 2646,
         "payload_keys": [],
         "via_const": true
       }
@@ -670,7 +670,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9198,
+        "line": 9226,
         "payload_keys": [
           "conversation_id",
           "total_tokens"
@@ -1715,7 +1715,7 @@
     "session.title_updated": [
       {
         "file": "internal/agent/loop.go",
-        "line": 10538,
+        "line": 10575,
         "payload_keys": [
           "description",
           "name",
@@ -2343,14 +2343,14 @@
     "tool.execution.complete": [
       {
         "file": "internal/agent/executor.go",
-        "line": 2142,
+        "line": 2137,
         "payload_keys": []
       }
     ],
     "tool.execution.progress": [
       {
         "file": "internal/agent/executor.go",
-        "line": 2087,
+        "line": 2082,
         "payload_keys": [
           "message",
           "percent"
