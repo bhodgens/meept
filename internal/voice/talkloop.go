@@ -10,10 +10,15 @@ package voice
 //	prompt -> filler say at once (fact-free, C1 exception)
 //	       -> Binding turn (employee draft on the pinned endpoint)
 //	       -> SplitSentences
-//	       -> pipelined supervisor Check (sentence N+1 is checked while
+//	-> pipelined supervisor Check (sentence N+1 is checked while
 //	         sentence N is playing)
-//	       -> allowed sentences become say frames; denied sentences are
+//	-> allowed sentences become say frames; denied sentences are
 //	         dropped; a check FAILURE speaks the C6 fallback line
+//	-> the draft's turn-final say flush (last:true) goes out exactly
+//	         once per draft: carried by the final allowed sentence or the
+//	         fallback line, or sent as an empty-text marker at drain when
+//	         no verdict carried it (denied final sentence after earlier
+//	         spoken sentences, empty reply)
 //
 // Fact-free lines (greeting on connect, filler on each final prompt) bypass
 // the supervisor by contract C1 ("say only after supervisor allow, except
@@ -108,6 +113,11 @@ type pipeline struct {
 	checks   chan verdict
 	said     int  // allowed sentences spoken so far in this draft
 	fallback bool // fallback line already spoken in this draft
+	// turnEnded marks that a last:true say already went out for this
+	// draft (final allowed sentence or fallback line). Owned by the
+	// playback goroutine (Run); the drain flush checks it so the
+	// turn-final marker is sent exactly once (M2).
+	turnEnded bool
 }
 
 // TalkLoop runs one live call's conversation. Run blocks until the call
@@ -246,17 +256,23 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 
 	// Silence timer (voice.silence_prompt_seconds): re-armed after every
 	// final prompt.
+	//
+	// Timer discipline (M5): never Reset a timer whose fire may already
+	// be buffered (or racing Stop) — the stale value would be consumed
+	// by the next select and double-fire the silence path. Instead every
+	// re-arm abandons the old timer and arms a FRESH one: a stale fire
+	// lands in an orphaned channel nobody reads and is GC'd with the old
+	// timer; the new window starts clean.
 	var silenceTimer *time.Timer
 	var silenceC <-chan time.Time
-	armSilence := func() {
+	rearmSilence := func() {
 		if t.cfg.SilencePromptSeconds <= 0 {
 			return
 		}
-		if silenceTimer == nil {
-			silenceTimer = time.NewTimer(time.Duration(t.cfg.SilencePromptSeconds) * time.Second)
-		} else {
-			silenceTimer.Reset(time.Duration(t.cfg.SilencePromptSeconds) * time.Second)
+		if silenceTimer != nil {
+			silenceTimer.Stop()
 		}
+		silenceTimer = time.NewTimer(time.Duration(t.cfg.SilencePromptSeconds) * time.Second)
 		silenceC = silenceTimer.C
 	}
 	stopSilence := func() {
@@ -265,7 +281,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 		}
 		silenceC = nil
 	}
-	armSilence()
+	rearmSilence()
 	defer stopSilence()
 
 	// current drains the live pipeline's verdict channel, or nil between
@@ -277,6 +293,25 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			return nil
 		}
 		return t.cur.checks
+	}
+
+	// flushTurnEnd sends the turn-final say flush (last:true) exactly
+	// once per draft (M2): the final verdict usually carries it, but a
+	// draft whose final sentence was DENIED after earlier sentences were
+	// spoken (or which ended with an empty reply) reaches the channel
+	// close with no last:true sent, leaving the child's turn-taking
+	// without its end marker.
+	flushTurnEnd := func(ccid string) {
+		t.interruptMu.Lock()
+		p := t.cur
+		t.interruptMu.Unlock()
+		if p == nil || p.turnEnded {
+			return
+		}
+		p.turnEnded = true
+		if err := t.say(ccid, "", true); err != nil {
+			t.log.Warn("voice talk loop: final flush send failed", "ccid", ccid, "error", err)
+		}
 	}
 
 	for {
@@ -302,7 +337,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 						t.log.Debug("talkloop: partial say dropped", "ccid", ccid, "err", sayErr)
 					}
 				}
-				armSilence()
+				rearmSilence()
 				continue
 			}
 			// Second consecutive fire: hang up with the named reason.
@@ -312,8 +347,9 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 		case vr, ok := <-current():
 			if !ok {
 				// Draft finished (checker closed the channel).
+				flushTurnEnd(ccid)
 				t.clearPipeline()
-				armSilence()
+				rearmSilence()
 				continue
 			}
 			t.playVerdict(ccid, vr)
@@ -452,9 +488,11 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 
 	if vr.fallback {
 		// Check failure (C6): the caller hears the fallback line, the
-		// call continues. Spoken once per draft.
+		// call continues. Spoken once per draft, with the turn-final
+		// flush carried on it.
 		if !p.fallback {
 			p.fallback = true
+			p.turnEnded = true
 			if err := t.say(ccid, t.fallbackLine(), true); err == nil {
 				t.sayProgress(ccid)
 			}
@@ -469,16 +507,20 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 			t.sayProgress(ccid)
 		}
 		p.said++
+		if vr.final {
+			p.turnEnded = true
+		}
 		return
 	}
 
 	// Denied sentence: dropped, never spoken. When the whole draft ends
 	// with nothing allowed, the fallback line keeps the caller informed
-	// (spoken at the draft's final slot). The final-flag closure lives in
-	// the pipeline drain: a denied FINAL sentence with zero said sentences
-	// speaks the fallback as the last say.
+	// (spoken at the draft's final slot). Otherwise the flush at drain
+	// sends the turn-final marker, so a denied final sentence after
+	// spoken sentences still ends the child's turn (M2).
 	if vr.final && p.said == 0 {
 		p.fallback = true
+		p.turnEnded = true
 		if err := t.say(ccid, t.fallbackLine(), true); err == nil {
 			t.sayProgress(ccid)
 		}
