@@ -237,6 +237,17 @@ func (p *ExposurePlan) Enforcing() bool {
 	return p != nil && p.enforcing
 }
 
+// promoteLocked appends name to the active set. Caller holds p.mu.
+func (p *ExposurePlan) promoteLocked(name string) bool {
+	for _, n := range p.active {
+		if n == name {
+			return false // already active
+		}
+	}
+	p.active = append(p.active, name)
+	return true
+}
+
 // Promote adds a tool name to the active set (append-only, design §3.1/§4.3).
 // Returns nil if the tool is already active. §6 row 5: a name OUTSIDE the
 // role ceiling is refused with an error that names the ceiling (the model
@@ -251,24 +262,38 @@ func (p *ExposurePlan) Promote(name string) error {
 		return fmt.Errorf("exposure: cannot promote empty tool name")
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	already := false
 	for _, n := range p.active {
 		if n == name {
-			return nil // already active
+			already = true
+			break
 		}
 	}
+	outsideCeiling := false
 	if p.ceilingNames != nil {
 		if _, ok := p.ceilingNames[name]; !ok {
-			// bughunt 2026-11-07 agent-fixes F-B: a post-arm registration
-			// is legitimately inside the ceiling when the FILTERED registry
-			// serves it — the same proof IsKnown uses. A name absent from
-			// BOTH remains refused (row 5 keeps its bite).
-			if p.liveSource == nil || p.liveSource.Get(name) == nil {
-				return fmt.Errorf("exposure: cannot activate %q: outside this agent's role ceiling (%d tools)", name, len(p.ceilingNames))
-			}
+			outsideCeiling = true
 		}
 	}
-	p.active = append(p.active, name)
+	live := p.liveSource
+	p.mu.Unlock()
+	if already {
+		return nil // already active
+	}
+	// bughunt 2026-11-07 agent-fixes F-B: a post-arm registration
+	// is legitimately inside the ceiling when the FILTERED registry
+	// serves it — the same proof IsKnown uses. A name absent from
+	// BOTH remains refused (row 5 keeps its bite).
+	// mutexio: the live lookup runs OUTSIDE p.mu (registry.Get is
+	// arbitrary I/O under the mutex-scope rule), same shape as IsKnown.
+	// The append is re-checked under the lock: a concurrent Promote of
+	// the same name is idempotent by the already-active scan.
+	if outsideCeiling && !(live != nil && live.Get(name) != nil) {
+		return fmt.Errorf("exposure: cannot activate %q: outside this agent's role ceiling (%d tools)", name, len(p.ceilingNames))
+	}
+	p.mu.Lock()
+	p.promoteLocked(name)
+	p.mu.Unlock()
 	return nil
 }
 
