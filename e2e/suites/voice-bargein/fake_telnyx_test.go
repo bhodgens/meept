@@ -796,7 +796,6 @@ func shortenTmpdirForSockets() {
 		return
 	}
 	dir := os.TempDir()
-	const maxSunPath = 103
 	probe := filepath.Join(dir, "meept-e2e-1234567890", "home", ".meept", "voice", "sock", "text.sock")
 	if len(probe) < 100 {
 		return

@@ -1,12 +1,10 @@
 //go:build e2e
 
-// Compile-pin for the fakeTelnyx helper methods used by the SKIPPED full
-// inbound-flow subtests (TestVoiceLifecycleInboundCall etc.): those tests
-// are skipped until the leaf-14 inbound registry-acquire wiring gap is
-// closed and the C1 -> talk-loop leg is activatable, but the helpers are
-// the activation surface - deleting them would mean rewriting the skipped
-// tests from scratch. Function-value variables keep every helper reachable
-// (U1000 counts a use in a var initializer) without executing any.
+// Compile-pin for the fakeTelnyx helper methods. The full inbound-flow
+// subtests went live once the leaf-15 inbound registry-acquire landed, so
+// the C1 -> talk-loop helpers are exercised for real; the pin keeps the few
+// still-unexercised ones (awaitChildFrame, sayFrameCountAfterClear,
+// assertNoMediaFrame) reachable for U1000 without executing any.
 package voicelifecycle
 
 var ftPin = &fakeTelnyx{}

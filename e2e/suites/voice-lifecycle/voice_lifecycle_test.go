@@ -3,12 +3,13 @@
 // Suite voice-lifecycle (master Test Gate): the inbound call lifecycle
 // against a scratch daemon with a FAKE Telnyx (signed webhooks + call-
 // control API + media websocket client) and a FAKE child speaking C1/C2
-// over the real unix sockets. The landed tree wires the answer + media
-// splice for inbound calls but NOT the inbound registry Acquire the C1
-// setup router needs, so the full loop (greeting -> prompt -> say ->
-// hangup) is a named skip and the runnable hermetic pieces assert:
-// webhook acceptance, call-control answer, media start-frame consumption,
-// lazy child spawn, and the refusal path (in voice-concurrency).
+// over the real unix sockets. The inbound registry Acquire the C1 setup
+// router needs landed with leaf 15 (internal/daemon/voice_wiring.go spawn
+// seam), so the hermetic loop now runs end to end: answer -> media start
+// frame -> child setup -> talk loop armed -> greeting say -> C1 interrupt
+// -> clear -> hangup -> call ended -> idle stop. Still a named skip:
+// greeting AUDIO pacing onto the Telnyx media socket (needs the child's
+// real TTS stage; the fake child speaks no PCM).
 //
 // Activated from the parked leaf-00T sketch; assertions were reshaped to
 // the LANDED leaf-14 contracts (the parked guesses predated the wiring):
@@ -38,16 +39,58 @@ import (
 	"time"
 )
 
-// TestVoiceLifecycleInboundCall documents the leaf-14 wiring gap the full
-// inbound loop hits: the manager answers the webhook and the media splice
-// arms, but the wiring's SessionSpawner never Acquires a registry instance
-// for INBOUND calls (only the outbound dialer does), so the C1 frame
-// router rejects the child's setup frame ("voice wiring: setup for unknown
-// call") and no talk loop ever arms - the greeting/turn/hangup sequence
-// cannot run end to end. Skipped with the named gap per the leaf split
-// rule; every runnable hermetic piece lives in the tests below.
+// TestVoiceLifecycleInboundCall runs the hermetic inbound loop end to end:
+// the signed webhook is accepted, the manager answers at the call-control
+// API, the media start frame is consumed, the fake child's C1 setup frame
+// ARMS the talk loop (leaf-15 inbound Acquire makes the registry lookup
+// succeed), the greeting say reaches the child, a final prompt produces
+// another say, a C1 interrupt produces a clear, the hangup tears the call
+// down once, and the idle child stops. Audio pacing onto the Telnyx socket
+// is still the splice unit tests' job (see the named skip below).
 func TestVoiceLifecycleInboundCall(t *testing.T) {
-	t.Skipf("not yet wirable: the leaf-14 inbound SessionSpawner (internal/daemon/voice_wiring.go) EnsureRunning's the child but never registry.Acquire's the call, so the C1 setup router finds no Instance for inbound call_control_ids and drops the talk-loop arm - the full inbound lifecycle (greeting -> prompt -> say -> hangup) needs that inbound Acquire wired first")
+	fake := newFakeTelnyx(t)
+	s, ctrlPath := bootVoiceStack(t, fake, nil)
+
+	const ccid = "cc-life-1"
+
+	fake.deliverCallInitiated(s, ccid, "incoming")
+	fake.awaitAnswered(ccid, 10*time.Second)
+
+	// The manager answered the call at the fake call-control API.
+	fake.awaitAction(ccid, "/answer", 10*time.Second)
+
+	// Fake Telnyx dials the media route; the splice consumes the start
+	// frame. The answer path spawned the fake child, so its control
+	// socket now exists and the suite can drive C1.
+	fake.dialMedia(s, ccid)
+	awaitLogLine(t, s, "voice media: start frame", 15*time.Second)
+	fake.connectChild(ctrlPath, 15*time.Second)
+	fake.childDialAudio(ccid)
+
+	// C1 setup (a child->daemon production) arms the talk loop: the
+	// registry instance the inbound spawner Acquired resolves, and the
+	// greeting say (filler-class, never supervisor-gated) lands.
+	fake.childSetup(ccid, "inbound")
+	awaitLogLine(t, s, "voice wiring: talk loop armed", 15*time.Second)
+	fake.awaitSayContaining(ccid, 15*time.Second)
+
+	// A final transcript becomes a prompt: the loop answers it with the
+	// filler say at once (fact-free) and starts the employee turn.
+	baseline := fake.sayFrameCount(ccid)
+	fake.childSendsPrompt(ccid, "is the shipment still on friday", true)
+	fake.awaitSayAdvance(ccid, baseline, 15*time.Second)
+
+	// Barge-in over C1: the talk loop drops the in-flight draft and
+	// clears THIS call on the text socket (the child flushes its TTS
+	// queue). Per-call isolation is pinned by voice-bargein.
+	fake.childSendsInterrupt(ccid)
+	fake.awaitClearFrame(ccid, 10*time.Second)
+	awaitLogLine(t, s, "voice talk loop: barge-in", 10*time.Second)
+
+	// Hangup tears the call down exactly once and the idle child stops.
+	fake.deliverHangup(s, ccid)
+	awaitLogLine(t, s, "voice call ended", 15*time.Second)
+	fake.awaitChildStop(15 * time.Second)
 }
 
 // TestVoiceWebhookAcceptedAndMediaArmed pins the runnable hermetic half of
