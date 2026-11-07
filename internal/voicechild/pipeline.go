@@ -2,6 +2,7 @@ package voicechild
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -84,6 +85,10 @@ type pipeline struct {
 	// utterance plays again — without this reset the agent was muted for
 	// the whole call after its first interrupt.
 	playGen uint64
+	// rmsRun (local-leg leaf 02): consecutive over-threshold chunk count
+	// of the playback-side RMS VAD; guarded by playMu, reset by latch
+	// state changes (see rmsBargeInCheck).
+	rmsRun int
 
 	// cancel cancels the pipeline's internal context (workers, streams).
 	cancel context.CancelFunc
@@ -362,6 +367,11 @@ func (p *pipeline) playback(frame voiceframe.Frame) {
 				p.logger.Error("voicechild: audio out write", "err", werr, "call_id", p.ccid)
 				return
 			}
+			// Local-leg VAD (leaf 02, CL3): the chunk just written to the
+			// .out socket is the caller-heard audio; feed it to the RMS
+			// hook. No-op unless local && bargeInRms > 0. Called with no
+			// lock held (the hook takes playMu itself).
+			p.rmsBargeInCheck(buf[:n])
 		}
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
@@ -401,6 +411,73 @@ func (p *pipeline) noteBargeIn() bool {
 	}
 	p.interrupted = true
 	return true
+}
+
+// rmsWindowChunks is the sustained-loudness window (CL3): 10 consecutive
+// over-threshold chunks = 200 ms at the L16/16k 20 ms chunk size.
+const rmsWindowChunks = 10
+
+// rmsChunkOver reports whether an s16le mono PCM chunk's loudness exceeds
+// threshold, comparing the integer sum of squares against threshold^2 *
+// sampleCount (integer-sqrt-free: sum >= thr*thr*n <=> rms >= thr; at
+// least one full sample required - a trailing odd byte is ignored).
+// Threshold <= 0 means the VAD is disabled (named no-op: never loud).
+func rmsChunkOver(b []byte, threshold int) bool {
+	if threshold <= 0 {
+		return false
+	}
+	n := len(b) / 2 // whole int16 samples; trailing odd byte ignored
+	if n <= 0 {
+		return false
+	}
+	var sum uint64
+	for i := 0; i+1 < len(b); i += 2 {
+		v := int16(binary.LittleEndian.Uint16(b[i:]))
+		u := uint64(uint16(v)) // |v| without float/negation games
+		if v < 0 {
+			u = uint64(-u) // two's complement wrap: -32768 -> 32768
+		}
+		sum += u * u
+	}
+	thr := uint64(threshold)
+	return sum >= thr*thr*uint64(n)
+}
+
+// rmsBargeInCheck is the playback-side VAD hook (local leg only, CL3
+// matrix): called with each outgoing chunk's bytes. On a non-local leg it
+// returns immediately without touching the audio data (RMS unreachable on
+// phone legs); with bargeInRms <= 0 it is likewise a named no-op.
+// Sustained loudness - rmsWindowChunks consecutive over-threshold chunks,
+// the counter reset by any under-threshold chunk and by latch state - trips
+// the noteBargeIn latch: the SAME p.interrupted latch field noteBargeIn
+// guards (inlined here because noteBargeIn itself takes playMu; no second
+// dedup mechanism), and the trip fires emitInterrupt off-lock.
+func (p *pipeline) rmsBargeInCheck(chunk []byte) {
+	if !p.local || p.bargeInRms <= 0 {
+		return // phone legs keep the STT-partial trigger; VAD never runs
+	}
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	if !p.speaking || p.interrupted || p.dropQueued {
+		p.rmsRun = 0
+		return
+	}
+	if rmsChunkOver(chunk, p.bargeInRms) {
+		p.rmsRun++
+		if p.rmsRun >= rmsWindowChunks {
+			p.rmsRun = 0
+			// Latch trip happens under playMu: noteBargeIn cannot be
+			// called re-entrantly (it would deadlock on playMu).
+			p.interrupted = true
+			go func() {
+				if err := p.child.emitInterrupt(p.ctx, p.ccid); err != nil {
+					p.logger.Error("voicechild: emit interrupt", "err", err, "call_id", p.ccid)
+				}
+			}()
+		}
+		return
+	}
+	p.rmsRun = 0
 }
 
 // playbackRestarted resets the one-interrupt-per-barge-in latch when a new
