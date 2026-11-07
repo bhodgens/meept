@@ -282,7 +282,7 @@ Output: APPROVED or a list of specific gaps with file + line references.
 | 04-qwen3-tts-adapter | DONE (by leaf 02 f8fa3c99) | 0 | orchestrator in-session: full task matrix verified already landed with dispatch work (stream:true body, ErrMissingTTSBaseURL, keyless no-auth assert, Bearer assert, resample); gate T3 green |
 | 05-stt-pipeline-wiring | DONE da197f34 | 1 | gate :160 Darwin kernel-coalescing RED (orchestrator repro [12] vs [4,4,4]) + :269 stub-TTS timing RED accepted; gate files byte-untouched; sibling d0458a89 gate-rewrite rejected |
 | 06-bargein-trigger | DONE abd08370 | 1 | C5 order in partial branch (noteBargeIn->interrupt->prompt); gate :269 timing block stands (Scenario A passes; :283/:312 equivalents verified via gated-TTS leaf tests) |
-| 07-e2e-docs | PENDING | 0 | |
+| 07-e2e-docs | DONE b82e8f16 | 2026-11-07 | e2e x2 green + as-built docs; orchestrator-verified (3 suites ok, gates untouched, secrets audit exit 0) |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED |
 IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
