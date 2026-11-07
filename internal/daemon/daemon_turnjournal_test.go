@@ -515,3 +515,59 @@ func TestBootRehydrateDeadJobDoesNotFabricateWork(t *testing.T) {
 		t.Fatalf("dead-letter row for %s not found: %+v", job.ID, rows)
 	}
 }
+
+// bughunt 2026-11-07 dispatcher-queue F-3: a run whose queue job reached a
+// terminal state (completed) WITHOUT a run_closed row (the writer's terminal
+// close failed, or the completion path skipped OnRunClose) used to stay open
+// forever: PruneClosed only deletes turns WITH a run_closed row, and OpenRuns
+// re-listed the run on every boot. The rehydrate default branch now writes
+// the close row (the queue's terminal state is the authoritative close
+// signal per research F4), so the run leaves the open set immediately.
+func TestBootRehydrateTerminalJobClosesJournalRun(t *testing.T) {
+	j, err := rehydrateSeededJournal(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := newTestQueueForRehydrate(t)
+	ctx := context.Background()
+
+	job, _ := queue.NewJob(queue.JobTypeProjectTask,
+		json.RawMessage(`{"step_id":"s1","task_id":"task-done-1"}`))
+	job = job.WithTaskID("task-done-1")
+	if err := q.Enqueue(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := q.Claim(ctx, "w1", nil, "")
+	if err != nil || claimed == nil {
+		t.Fatalf("claim: %v %v", claimed, err)
+	}
+	if err := q.CompleteAttempt(ctx, job.ID, "ok", claimed.ClaimToken); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	// The journal still shows the run OPEN (no run_closed row landed).
+	seedOpenRun(t, j, "task-done-1", "s1", []byte(`{"response":"journaled"}`))
+	open, err := j.OpenRuns(ctx)
+	if err != nil {
+		t.Fatalf("OpenRuns: %v", err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("precondition: open runs = %d, want 1", len(open))
+	}
+
+	d := newRehydrateDaemon(t, j, q)
+	resumed := d.rehydrateTurnJournal(ctx)
+	if resumed != 0 {
+		t.Fatalf("resumed = %d, want 0 (terminal job must not count as resumed)", resumed)
+	}
+
+	// The run is closed now: it leaves the open set and enters the
+	// prunable set (bughunt 2026-11-07 F-3).
+	after, err := j.OpenRuns(ctx)
+	if err != nil {
+		t.Fatalf("OpenRuns after: %v", err)
+	}
+	if len(after) != 0 {
+		t.Fatalf("terminal-state run stayed open across rehydrate: %+v (F-3 leak: never prunable)", after)
+	}
+}

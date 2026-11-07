@@ -453,13 +453,13 @@
     "topic": "memory.bridges",
     "handler": "func(ctx context.Context, _ json.RawMessage",
     "file": "internal/daemon/memory_rpc.go",
-    "line": 92
+    "line": 100
   },
   {
     "topic": "memory.export",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/daemon/memory_rpc.go",
-    "line": 44
+    "line": 52
   },
   {
     "topic": "memory.findCanonical",
@@ -567,13 +567,13 @@
     "topic": "memory.vector.search",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/daemon/memory_rpc.go",
-    "line": 29
+    "line": 37
   },
   {
     "topic": "memory.vector.stats",
     "handler": "func(_ context.Context, _ json.RawMessage",
     "file": "internal/daemon/memory_rpc.go",
-    "line": 77
+    "line": 85
   },
   {
     "topic": "models.delete_credential",
