@@ -36,6 +36,7 @@ type compiledPattern struct {
 type Engine struct {
 	mu                sync.RWMutex
 	db                *sqlx.DB
+	dbPath            string // expanded DB file path (WAL sidecar tightening)
 	config            *config.SecurityConfig
 	homeDir           string
 	compiledCommands  []compiledPattern
@@ -78,11 +79,23 @@ func NewEngine(dbPath string, cfg *config.SecurityConfig, logger *slog.Logger) (
 		dbPath = filepath.Join(homeDir, dbPath[2:])
 	}
 
-	// Ensure directory exists
+	// Ensure directory exists.
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
+	// MkdirAll applies the mode only to dirs it CREATES; repair pre-existing
+	// (bughunt 2026-11-07 infra-fixes F-2 class).
+	_ = os.Chmod(dir, 0o700) //nolint:errcheck // best-effort tighten
+
+	// Pre-create/tighten the DB file before sql.Open: engine rows carry
+	// permission overrides and gate decisions, so the file must never be
+	// world-readable between create and first write (same contract as
+	// gatecapture 39dfb0ca / orchestrator initAuditDB).
+	if f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600); err == nil {
+		_ = f.Close() //nolint:errcheck // existence+mode pin; sql.Open re-opens
+	}
+	_ = os.Chmod(dbPath, 0o600) //nolint:errcheck // best-effort tighten
 
 	sqlDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)") // modernc _pragma form (bughunt 2026-11-07)
 	if err != nil {
@@ -102,6 +115,7 @@ func NewEngine(dbPath string, cfg *config.SecurityConfig, logger *slog.Logger) (
 
 	e := &Engine{
 		db:              db,
+		dbPath:          dbPath,
 		config:          cfg,
 		homeDir:         homeDir,
 		logger:          logger,
@@ -124,6 +138,18 @@ func (e *Engine) initialize() error {
 
 	if err := e.seedDefaults(); err != nil {
 		return fmt.Errorf("failed to seed defaults: %w", err)
+	}
+
+	// WAL sidecars (-wal/-shm) only exist once the first write activates
+	// WAL, and SQLite creates them 0644. Tighten after schema+seed, not
+	// before sql.Open (bughunt 2026-11-07 infra-fixes F-1 class).
+	if dbPath := e.dbPath; dbPath != "" {
+		for _, suffix := range []string{"-wal", "-shm"} {
+			p := dbPath + suffix
+			if _, statErr := os.Stat(p); statErr == nil {
+				_ = os.Chmod(p, 0o600) //nolint:errcheck // best-effort tighten
+			}
+		}
 	}
 
 	if err := e.compilePatterns(); err != nil {
