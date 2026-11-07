@@ -211,6 +211,7 @@ Package config provides configuration loading and validation for meept.
 - [type LearningConfig](<#LearningConfig>)
 - [type LearningRetentionConfig](<#LearningRetentionConfig>)
 - [type LearningTrainingConfig](<#LearningTrainingConfig>)
+- [type LocalConfig](<#LocalConfig>)
 - [type MCPConfig](<#MCPConfig>)
 - [type MCPServersConfig](<#MCPServersConfig>)
   - [func LoadMCPConfig\(path string\) \(\*MCPServersConfig, error\)](<#LoadMCPConfig>)
@@ -3220,6 +3221,21 @@ LearningTrainingConfig holds settings for LoRA training.
 	    ManualOnly         bool   `json:"manual_only"            toml:"manual_only"`
 	}
 
+<a name="LocalConfig"></a>
+## type LocalConfig
+
+LocalConfig holds the local voice leg sub\-block \(voice.local, local\-leg plan CL4\). The local leg is opt\-in: Enabled must be true before any local session opens. Empty provider/model/voice fields fall back to the global voice.\* values at selection time; BargeInRms 3000 comes from DefaultConfig.
+
+	type LocalConfig struct {
+	    Enabled     bool   `json:"enabled"      toml:"enabled"`
+	    STTProvider string `json:"stt_provider" toml:"stt_provider"`
+	    TTSProvider string `json:"tts_provider" toml:"tts_provider"`
+	    TTSModel    string `json:"tts_model"    toml:"tts_model"`
+	    TTSVoice    string `json:"tts_voice"    toml:"tts_voice"`
+	    BargeInRms  int    `json:"barge_in_rms" toml:"barge_in_rms"`
+	    Name        string `json:"name"         toml:"name"`
+	}
+
 <a name="MCPConfig"></a>
 ## type MCPConfig
 
@@ -5746,31 +5762,36 @@ VerificationDefaults holds daemon\-level verification defaults.
 
 
 	type VoiceConfig struct {
-	    Enabled              bool     `json:"enabled"                toml:"enabled"`
-	    IdleStopSeconds      int      `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
-	    OnnxRuntimeLib       string   `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
-	    STTProvider          string   `json:"stt_provider"           toml:"stt_provider"`
-	    TTSProvider          string   `json:"tts_provider"           toml:"tts_provider"`
-	    Filler               []string `json:"filler"                 toml:"filler"`
-	    SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
-	    SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
-	    SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
-	    SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
-	    VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
-	    PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
-	    ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
-	    FromNumber           string   `json:"from_number"            toml:"from_number"`
-	    AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
-	    TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
-	    MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
-	    SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
-	    MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	    ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	    ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	    TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	    ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
-	    LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	    DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
+	    Enabled              bool        `json:"enabled"                toml:"enabled"`
+	    IdleStopSeconds      int         `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	    OnnxRuntimeLib       string      `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	    STTProvider          string      `json:"stt_provider"           toml:"stt_provider"`
+	    TTSProvider          string      `json:"tts_provider"           toml:"tts_provider"`
+	    Filler               []string    `json:"filler"                 toml:"filler"`
+	    SupervisorEmployee   string      `json:"supervisor_employee"    toml:"supervisor_employee"`
+	    SupervisorEnabled    bool        `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	    SupervisorModel      string      `json:"supervisor_model"       toml:"supervisor_model"`
+	    SupervisorTimeoutMs  int         `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	    VoiceModel           string      `json:"voice_model"            toml:"voice_model"`
+	    PublicStreamURL      string      `json:"public_stream_url"      toml:"public_stream_url"`
+	    ConnectionID         string      `json:"connection_id"          toml:"connection_id"`
+	    FromNumber           string      `json:"from_number"            toml:"from_number"`
+	    AllowedNumbers       []string    `json:"allowed_numbers"        toml:"allowed_numbers"`
+	    TimeoutSecs          int         `json:"timeout_secs"           toml:"timeout_secs"`
+	    MaxCallMinutes       int         `json:"max_call_minutes"       toml:"max_call_minutes"`
+	    SilencePromptSeconds int         `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	    MaxConcurrentCalls   int         `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	    ReorderWindowFrames  int         `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	    ReorderGapMs         int         `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	    TelnyxPublicKey      string      `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	    ChildBinaryPath      string      `json:"child_binary_path"      toml:"child_binary_path"`
+	    LoopbackPlainAddr    string      `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	    DefaultEmployee      string      `json:"default_employee"       toml:"default_employee"`
+	    DefaultLeg           string      `json:"default_leg"            toml:"default_leg"`
+	    TTSModel             string      `json:"tts_model"              toml:"tts_model"`
+	    TTSVoice             string      `json:"tts_voice"              toml:"tts_voice"`
+	    STTModel             string      `json:"stt_model"              toml:"stt_model"`
+	    Local                LocalConfig `json:"local"                  toml:"local"`
 	}
 
 <a name="WatchdogConfig"></a>
