@@ -276,8 +276,8 @@ Output: APPROVED or a list of specific gaps with file + line references.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 00T-gate-tests | DONE a0cb1c37 | 1 | reflection-RED accepted; T2 temp-socket seam |
-| 01-config | PENDING | 0 | |
-| 02-keys-frame-extension | PENDING | 0 | |
+| 01-config | DONE a4216248 | 1 | placement after STTModel accepted (group ordering); STTModel/TTSModel/TTSVoice reconciled pre-existing |
+| 02-keys-frame-extension | DONE f8fa3c99 | 1 | ProviderConfig alias in providers pkg; whisper STT dispatch kept; qwen3 test helper de-reflection (asserts unchanged); 05/06 RED-at-HEAD confirmed via worktree |
 | 03-daemon-keys-emission | PENDING | 0 | |
 | 04-qwen3-tts-adapter | PENDING | 0 | |
 | 05-stt-pipeline-wiring | PENDING | 0 | |
