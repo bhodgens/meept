@@ -552,11 +552,21 @@ func (d *Dialer) finishCall(ccid string) {
 // the daemon components; the interface is the dependency seam every other
 // consumer codes against.
 
+// Leg values for Instance.Leg (CL6). The zero value of Leg is the phone
+// leg, so existing Instance composite literals stay valid untouched.
+const (
+	LegPhone = "phone"
+	LegLocal = "local"
+)
+
 // Instance is one live voice instance: the registry's unit of capacity.
+// Leg is which leg the instance rides ("phone" or "local"; CL6). The zero
+// value of Leg means "phone" so existing composite literals stay valid.
 type Instance struct {
 	CallControlID string
 	EmployeeID    string
 	Target        string
+	Leg           string
 }
 
 // Registry tracks live calls: N concurrent calls need N slots
@@ -589,14 +599,33 @@ func NewRegistry(cap int) *CallRegistry {
 	return &CallRegistry{cap: cap, live: make(map[string]Instance)}
 }
 
-// Acquire registers a live instance under the C8 rules. Target is
-// normalized at this boundary (audit 2026-11-06 M7): every registry entry
-// carries the same canonical E.164 shape, so direct Acquire callers (the
-// inbound spawn seam passes a raw webhook `from`) and the dialer's
-// pre-gate snapshot agree by construction instead of by each caller
-// remembering to normalize.
+// Acquire registers a live instance under the C8 rules on the PHONE leg
+// (CL6 compatibility wrapper: the Registry interface keeps the 3-arg shape
+// so existing implementors and test fakes do not all break at once). The
+// target is normalized at this boundary (audit 2026-11-06 M7): every
+// registry entry carries the same canonical E.164 shape, so direct Acquire
+// callers (the inbound spawn seam passes a raw webhook `from`) and the
+// dialer's pre-gate snapshot agree by construction instead of by each
+// caller remembering to normalize.
 func (r *CallRegistry) Acquire(ccid, employeeID, target string) (Instance, error) {
-	target = NormalizeE164(target)
+	return r.AcquireLeg(ccid, employeeID, target, LegPhone)
+}
+
+// AcquireLeg registers a live instance under the C8 rules with an explicit
+// leg (CL6: "phone" or "local"; the empty string means "phone"). The target
+// is normalized ONLY for the phone leg: local targets look like
+// "local:<label>" and NormalizeE164 must never mangle them. For phone legs
+// the same boundary normalization as Acquire applies (audit 2026-11-06
+// M7). The cap, one-live-per-employee, and one-live-per-target rules are
+// shared across legs: one employee, one conversation at a time, whatever
+// the leg.
+func (r *CallRegistry) AcquireLeg(ccid, employeeID, target, leg string) (Instance, error) {
+	if leg == "" {
+		leg = LegPhone
+	}
+	if leg == LegPhone {
+		target = NormalizeE164(target)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -615,7 +644,7 @@ func (r *CallRegistry) Acquire(ccid, employeeID, target string) (Instance, error
 			return Instance{}, fmt.Errorf("%w: employee %s already live", ErrBusy, employeeID)
 		}
 	}
-	inst := Instance{CallControlID: ccid, EmployeeID: employeeID, Target: target}
+	inst := Instance{CallControlID: ccid, EmployeeID: employeeID, Target: target, Leg: leg}
 	r.live[ccid] = inst
 	return inst, nil
 }
@@ -627,7 +656,9 @@ func (r *CallRegistry) Release(ccid string) {
 	delete(r.live, ccid)
 }
 
-// Live snapshots the live instances.
+// Live snapshots the live instances. Each Instance carries its Leg
+// ("phone" or "local"; CL6) so telemetry and gates can tell the legs
+// apart; the cap and uniqueness rules are shared across legs.
 func (r *CallRegistry) Live() []Instance {
 	r.mu.Lock()
 	defer r.mu.Unlock()
