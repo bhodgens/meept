@@ -33,6 +33,40 @@ type Transcript struct {
 	Final bool
 }
 
+// STT Stream-open retry policy (audit fix 5): the daemon sends the keys
+// frame exactly once per call, so a failed session open has no external
+// hook to lean on — the pipeline retries on its own, bounded, with a short
+// capped delay, honoring the pipeline ctx. Package vars so tests can tune
+// the delay; production defaults are the constants.
+var (
+	sttOpenAttempts = 3
+	trRetryDelay    = 500 * time.Millisecond
+)
+
+// sttProvider returns the pipeline's STT adapter under the playMu regime
+// (audit fix 2: ONE lock for provider fields), reporting nil for the stub
+// or a nil provider — callers treat "no real STT yet" identically.
+func (p *pipeline) sttProvider() STTProvider {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	if p.stt == nil {
+		return nil
+	}
+	if _, isStub := p.stt.(stubSTT); isStub {
+		return nil // keys not yet arrived: no real provider installed
+	}
+	return p.stt
+}
+
+// ttsProvider returns the pipeline's TTS adapter under the playMu regime
+// (audit fix 2). The stub IS a valid provider for playback (deterministic
+// audio in tests), so no stub filter here.
+func (p *pipeline) ttsProvider() TTSProvider {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	return p.tts
+}
+
 // pipeline is one live call: its jargo worker and the per-call audio pair
 // client sockets (C2). All public entry points are safe for concurrent use;
 // a child hosts N pipelines concurrently (map[ccid]*pipeline in child.go).
@@ -50,18 +84,19 @@ type pipeline struct {
 	ttsCfg   ProviderConfig // per-call vendor/model/base_url/voice (C1 keys frame)
 
 	// STT wiring (leaf 05, C5 prompt half). pcmCh carries daemon->child
-	// PCM from pumpAudioIn into the STT Stream session; transcripts is the
-	// session's output, consumed by consumeTranscripts. transMu guards the
+	// PCM from pumpAudioIn into the STT Stream session; the session's
+	// output channel is consumed directly by the retry-chain goroutine
+	// (consumeTranscripts takes it as a parameter). transMu guards the
 	// exactly-once transcript startup (Stream + consumer exactly once per
 	// pipeline, whichever of start/handleKeys runs first).
-	pcmCh        chan []byte       // fed by pumpAudioIn, consumed by Stream (bounded, oldest-chunk drop)
-	transcripts  <-chan Transcript // STT session output (nil until startTranscripts binds)
-	transMu      sync.Mutex        // guards transStarted
-	transStarted bool              // Stream session + consumer launched
-	trStart      chan struct{}     // closed when the transcript consumer exits (teardown wait)
-	pumpOnce     sync.Once         // start() is idempotent: exactly one pump goroutine
-	audioOut     net.Conn          // child->daemon PCM (C2 <ccid>.out)
-	audioIn      net.Conn          // daemon->child PCM (C2 <ccid>.in)
+	pcmCh        chan []byte   // fed by pumpAudioIn, consumed by Stream (bounded, oldest-chunk drop)
+	transMu      sync.Mutex    // guards transStarted
+	transStarted bool          // Stream session claim made (retry chain owns it)
+	trStart      chan struct{} // closed when the transcript consumer exits (teardown wait)
+	trStartOnce  sync.Once     // exactly-once close of trStart (consumer exit OR permanent open failure)
+	pumpOnce     sync.Once     // start() is idempotent: exactly one pump goroutine
+	audioOut     net.Conn      // child->daemon PCM (C2 <ccid>.out)
+	audioIn      net.Conn      // daemon->child PCM (C2 <ccid>.in)
 	audioDir     string
 
 	// open-frame profile (local-leg plan CL1/CL3), set once by handleOpen
@@ -72,14 +107,27 @@ type pipeline struct {
 	local      bool
 	bargeInRms int
 
-	// playback state, guarded by playMu
-	playMu      sync.Mutex
-	dropQueued  bool   // clear received: drop queued audio, stop writes
-	interrupted bool   // one interrupt per barge-in until playback restarts
-	speaking    bool   // playback active (say in flight)
-	outCh       []byte // queued PCM awaiting write to audioOut
+	// Playback state, guarded by playMu.
+	//
+	// playMu is ALSO the single lock regime for p.stt/p.tts: constructProviders
+	// writes them, the playback worker and startTranscripts read them — all
+	// through playMu (via sttProvider/ttsProvider), never bare. (Audit fix 2:
+	// the three old regimes — transMu read in startTranscripts, playMu write
+	// in constructProviders, lock-free read in playback — were inconsistent.)
+	//
+	// FIFO playback (audit fix 1): one worker goroutine per pipeline drains
+	// sayQueue; each say frame is ENQUEUED, never spawned concurrently, so
+	// two utterances can never interleave PCM writes on the same audioOut
+	// socket. Concurrent says are the NORMAL path (supervisor checks
+	// sentence N+1 while N plays), so this serialization is load-bearing.
+	playMu       sync.Mutex
+	dropQueued   bool        // clear received: drop queued audio, stop writes
+	interrupted  bool        // one interrupt per barge-in until playback restarts
+	speaking     bool        // playback active (say in flight)
+	sayQueue     []queuedSay // pending say frames (gen-stamped), drained FIFO by the worker (audit fix 8: replaces the never-consumed outCh placeholder)
+	playWorkerUp bool        // a playback worker goroutine is draining sayQueue
 	// playGen (bughunt 2026-11-07 voice F-1): bumped by clear(); each
-	// playback goroutine carries the gen it started under and aborts when
+	// stream carries the gen it started under and aborts when
 	// the gen moves. dropQueued becomes per-barge-in (reset by the next
 	// say), so the stale stream stays dead via gen mismatch while a new
 	// utterance plays again — without this reset the agent was muted for
@@ -155,40 +203,82 @@ func (p *pipeline) start(ctx context.Context) error {
 // stub STT (keys not yet arrived), it is a no-op: handleKeys retries at the
 // constructProviders hook point. Safe to call from start and handleKeys in
 // either order (T3).
+//
+// Bounded retry (audit fix 5): an STT session-open FAILURE used to reset
+// the once-guard expecting a "retry on the next hook", but the daemon
+// sends the keys frame exactly once per call (internal/daemon/voice_keys.go
+// — "Called once per call"), so no further hook ever fired and the call
+// stayed permanently deaf. Now a failed open retries up to sttOpenAttempts
+// times with capped backoff (trRetryDelay between attempts, ctx-honoring)
+// while the pipeline is live; transcripts never start without a REAL STT
+// provider (the stub guard still short-circuits before any Stream call),
+// so retrying without a provider present stays impossible. The daemon's
+// keys protocol is unchanged.
 func (p *pipeline) startTranscripts() {
+	stt := p.sttProvider()
+	if stt == nil {
+		// No real provider yet: the keys-arrives hook will call again.
+		return
+	}
+	// The guard check and the claim are ONE critical section: two
+	// concurrent callers (start + a retry chain) cannot both pass it.
 	p.transMu.Lock()
 	if p.transStarted {
 		p.transMu.Unlock()
 		return
 	}
-	if _, isStub := p.stt.(stubSTT); isStub || p.stt == nil {
-		// No real provider yet: the keys-arrives hook will call again.
-		p.transMu.Unlock()
-		return
-	}
-	p.transStarted = true
-	stt := p.stt
+	p.transStarted = true // claimed; the retry chain owns the slot
 	p.transMu.Unlock()
 
-	// Stream once per pipeline (C5). The session dies with p.ctx on
-	// teardown; closing pcmCh is the pump's job (socket EOF or ctx cancel).
-	trans, err := stt.Stream(p.ctx, p.pcmCh)
-	if err != nil {
-		p.logger.Error("voicechild: stt stream open", "err", err, "call_id", p.ccid)
-		// Release the once-guard: a transient adapter failure should not
-		// strand the call silent forever (one retry on the next hook).
-		p.transMu.Lock()
-		p.transStarted = false
-		p.transMu.Unlock()
-		return
+	go p.openTranscriptSession(stt, sttOpenAttempts)
+}
+
+// openTranscriptSession runs the bounded Stream-open retry chain claimed
+// by startTranscripts. Each attempt is an atomic read of the CURRENT
+// provider (a mid-call provider swap via constructProviders is honoured,
+// never captured stale). On permanent failure it closes trStart via the
+// once so teardown never waits on a consumer that never ran.
+func (p *pipeline) openTranscriptSession(stt STTProvider, attempts int) {
+	for attempt := 1; attempt <= attempts; attempt++ {
+		// Re-read the provider each attempt (playMu regime) so a newer
+		// constructed adapter wins over a stale captured one.
+		if live := p.sttProvider(); live != nil {
+			stt = live
+		}
+		trans, err := stt.Stream(p.ctx, p.pcmCh)
+		if err == nil {
+			// The session channel is consumed directly here — no field,
+			// no second synchronization regime for it.
+			p.consumeTranscripts(trans)
+			p.trStartOnce.Do(func() { close(p.trStart) })
+			return
+		}
+		if p.ctx.Err() != nil {
+			// Pipeline torn down: stop trying, unblock teardown.
+			p.trStartOnce.Do(func() { close(p.trStart) })
+			return
+		}
+		if attempt == attempts {
+			p.logger.Error("voicechild: stt stream open permanently failed; call is deaf (no transcript retry hooks remain)",
+				"err", err, "call_id", p.ccid, "attempts", attempts)
+			p.trStartOnce.Do(func() { close(p.trStart) })
+			return
+		}
+		p.logger.Warn("voicechild: stt stream open failed; retrying",
+			"err", err, "call_id", p.ccid, "attempt", attempt, "max_attempts", attempts)
+		slept := false
+		timer := time.NewTimer(trRetryDelay)
+		select {
+		case <-p.ctx.Done():
+		case <-timer.C:
+			slept = true
+		}
+		timer.Stop()
+		if !slept {
+			p.trStartOnce.Do(func() { close(p.trStart) })
+			return
+		}
 	}
-	p.transMu.Lock()
-	p.transcripts = trans
-	p.transMu.Unlock()
-	go func() {
-		defer close(p.trStart)
-		p.consumeTranscripts()
-	}()
 }
 
 // consumeTranscripts turns STT transcripts into C1 prompt frames: a final
@@ -199,8 +289,8 @@ func (p *pipeline) startTranscripts() {
 // so playback stops before the new turn's say can start; the latch keeps
 // it exactly-once per barge-in until a new say restarts playback. No lock
 // is held across channel reads or socket writes (mutexio).
-func (p *pipeline) consumeTranscripts() {
-	for tr := range p.transcripts {
+func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
+	for tr := range trans {
 		if tr.Text == "" {
 			continue // Deepgram silence results produce no frame
 		}
@@ -285,32 +375,102 @@ func (p *pipeline) forwardPCM(data []byte) {
 	}
 }
 
-// enqueueSay queues speech text for synthesis and playback. Frames carry
-// last:true to mark the end of one utterance; the stub TTS starts playing
-// immediately (leaf 08 replaces the synthesis itself).
+// enqueueSay queues speech text for synthesis and playback (audit fix 1:
+// FIFO, one worker). The frame is appended to sayQueue under playMu and ONE
+// playback worker goroutine per pipeline drains the queue serially — no
+// per-say goroutine any more, so two concurrent utterances can NEVER
+// interleave PCM writes on the same audioOut socket. Concurrent says are
+// the normal path (the supervisor checks sentence N+1 while N plays), so
+// serialization here is load-bearing, not defensive.
+//
+// The F-1 re-arm semantics keep working: a fresh say clears dropQueued
+// (the drop applies to the INTERRUPTED generation only — the stale stream
+// aborts on its gen mismatch, see playbackStream), and the worker re-arms
+// the barge-in latch when it starts streaming a frame whose gen is current.
+//
+// Audit fix 8: the old outCh placeholder field is gone; sayQueue IS the
+// queue.
 func (p *pipeline) enqueueSay(frame voiceframe.Frame) error {
 	p.playMu.Lock()
 	// bughunt 2026-11-07 voice F-1: `dropQueued` used to be a once-per-call
 	// latch (never reset), so every say after the first clear was silently
 	// dropped — the agent was muted for the rest of the call. A NEW say is
-	// a new utterance: the drop applies to the INTERRUPTED stream only
-	// (the stale playback goroutine aborts on its gen mismatch, see
-	// playback()), so clear the gate here.
+	// a new utterance: the drop applies to the INTERRUPTED generation only,
+	// so clear the gate here. The frame carries the CURRENT playGen as its
+	// retirement stamp: a clear after this enqueue bumps playGen and the
+	// draft is dropped at dequeue time ("clear drops queued drafts").
 	p.dropQueued = false
-	p.outCh = append(p.outCh, []byte(frame.Text)...) // placeholder queue marker; real audio queued below
+	p.sayQueue = append(p.sayQueue, queuedSay{frame: frame, gen: p.playGen})
+	workerUp := p.playWorkerUp
+	if !workerUp {
+		p.playWorkerUp = true
+	}
 	p.playMu.Unlock()
 
-	go p.playback(frame)
+	if !workerUp {
+		go p.playbackWorker()
+	}
 	return nil
 }
 
-// playback synthesizes text (stub) and writes PCM to the .out socket
-// (child->daemon). A clear received mid-playback drops the remaining audio
-// and stops writes (T4). Each stream carries the playGen it started under:
-// clear() bumps the gen, so the interrupted goroutine aborts even after a
-// later say re-opens the dropQueued gate (bughunt 2026-11-07 voice F-1).
-func (p *pipeline) playback(frame voiceframe.Frame) {
-	pcm, err := p.tts.Speak(p.ctx, frame.Text)
+// playbackWorker is the single drain loop for sayQueue (audit fix 1). It
+// processes frames strictly one at a time, so audioOut.Write is only ever
+// reached from one goroutine at a time per pipeline. The worker exits when
+// the queue empties or the pipeline ctx dies; a concurrent enqueueSay
+// re-launches it (playWorkerUp is released under playMu in the same
+// critical section that observes an empty queue, so no frame is ever
+// stranded).
+func (p *pipeline) playbackWorker() {
+	for {
+		p.playMu.Lock()
+		if len(p.sayQueue) == 0 || p.ctx.Err() != nil {
+			// Release the slot atomically with the emptiness check:
+			// an enqueueSay after this point spawns a fresh worker.
+			p.playWorkerUp = false
+			p.playMu.Unlock()
+			return
+		}
+		item := p.sayQueue[0]
+		p.sayQueue = p.sayQueue[1:]
+		// A clear received between enqueue and dequeue bumped playGen:
+		// this queued draft is dropped (C1 barge-in contract).
+		retired := item.gen != p.playGen
+		p.playMu.Unlock()
+		if retired {
+			continue
+		}
+		p.playbackStream(item.frame, item.gen)
+	}
+}
+
+// queuedSay is one say frame waiting in the pipeline FIFO, stamped with
+// the playGen at enqueue time. clear() bumps playGen: a draft whose stamp
+// no longer matches was queued BEFORE the interrupt, so the worker drops
+// it at dequeue time ("clear drops queued drafts for THAT call only"),
+// even if a later say already re-opened the drop gate (F-1 re-arm) — the
+// re-arm belongs to the newer utterance, not to a retired draft. Drafts
+// stamped with the CURRENT gen always play: the re-arm's "a new utterance
+// plays again" is exactly their stamp surviving.
+type queuedSay struct {
+	frame voiceframe.Frame
+	gen   uint64
+}
+
+// playbackStream synthesizes one frame's text and writes its PCM to the
+// .out socket (child->daemon). Called ONLY from playbackWorker — never
+// concurrently for the same pipeline, so audioOut writes are serialized by
+// construction (audit fix 1). A clear received mid-stream drops the
+// remaining audio and stops writes (T4): the stream carries the playGen it
+// started under, and clear() bumps the gen, so an interrupted stream aborts
+// even after a later say re-opens the dropQueued gate (bughunt 2026-11-07
+// voice F-1).
+func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
+	tts := p.ttsProvider()
+	if tts == nil {
+		p.logger.Error("voicechild: tts provider not installed; dropping say", "call_id", p.ccid)
+		return
+	}
+	pcm, err := tts.Speak(p.ctx, frame.Text)
 	if err != nil {
 		p.logger.Error("voicechild: tts speak", "err", err, "call_id", p.ccid)
 		return
@@ -318,10 +478,12 @@ func (p *pipeline) playback(frame voiceframe.Frame) {
 	defer func() { _ = pcm.Close() }() //nolint:mutexio // deferred close, no lock held
 
 	p.playMu.Lock()
-	gen := p.playGen
-	if p.dropQueued && p.playGen == gen {
-		// cleared between Speak() and here, before a newer say re-opened
-		// the gate: this stream must not start.
+	if p.playGen != gen {
+		// A clear retired this stream's generation between dequeue and
+		// here (or between Speak() and here): it must not start. The
+		// stamped-gen check subsumes the old dropQueued gate — a clear
+		// always bumps playGen, so dropQueued is never true at a
+		// matching gen.
 		p.playMu.Unlock()
 		return
 	}
@@ -390,16 +552,17 @@ func (p *pipeline) playback(frame voiceframe.Frame) {
 // clear drops queued TTS audio for this call and stops pending .out writes
 // (C1 Frame{clear}; T4). Idempotent. Bumping playGen (bughunt 2026-11-07
 // voice F-1) retires the in-flight playback stream even after a later say
-// re-opens the dropQueued gate: the stale goroutine sees its gen mismatch
-// and aborts instead of double-writing.
+// re-opens the dropQueued gate: the stale stream sees its gen mismatch
+// and aborts instead of double-writing. Queued drafts not yet dequeued are
+// dropped at dequeue time by the same gate (audit fix 1 keeps the barge-in
+// semantics: "clear stops the current stream and drops queued audio").
 func (p *pipeline) clear() {
 	p.playMu.Lock()
 	p.dropQueued = true
 	p.playGen++
-	p.outCh = nil
 	// Playback stopped with the clear: drop the stale `speaking` flag.
 	// The aborted stream's deferred reset skips itself on the gen
-	// mismatch (playback()), so without this the flag would stay true
+	// mismatch (playbackStream), so without this the flag would stay true
 	// across the interrupt and let noteBargeIn observe a speaking
 	// pipeline that no longer exists (also makes a watcher that waits
 	// for speaking==true synchronize with the next playback's latch
@@ -506,8 +669,10 @@ func (p *pipeline) playbackRestarted() {
 // close tears the pipeline down: cancels its context, closes both audio
 // sockets, and waits (bounded) for the transcript consumer to exit - the
 // pump dies on the socket close/ctx cancel and closes pcmCh, Stream's
-// session ends, and the consumer drains out (T4: no goroutine leak).
-// Idempotent.
+// session ends, and the consumer drains out (T4: no goroutine leak). A
+// retry chain that never opened a session exits on the ctx cancel and
+// closes trStart through the same once, so teardown never waits on a
+// consumer that never ran. Idempotent.
 func (p *pipeline) close(ctx context.Context) {
 	p.cancel()
 	_ = ctx // kept for future graceful-drain variants
@@ -517,7 +682,7 @@ func (p *pipeline) close(ctx context.Context) {
 	started := p.transStarted
 	p.transMu.Unlock()
 	if !started {
-		return // no consumer ever ran; nothing to wait for
+		return // no session claim ever ran; nothing to wait for
 	}
 	select {
 	case <-p.trStart:

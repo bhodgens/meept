@@ -28,7 +28,7 @@ func newBargeInChild(t *testing.T, ccid string) (*fakeDaemon, *Child, *pipeline,
 	d, child, _, p, stt := newSTTWiredChild(t, ccid)
 	waitFor(t, func() bool { return stt.streamCalls() == 1 })
 	gate := newGatedTTS()
-	p.tts = gate
+	swapTTS(p, gate)
 	return d, child, p, stt, gate
 }
 
@@ -133,7 +133,7 @@ func TestBargeInLatchRearmLeaf(t *testing.T) {
 	waitFor(t, p.isDropped)
 	close(gate1.releaseSecond) // stale stream's next read: gen mismatch -> abort
 	gate2 := newGatedTTS()
-	p.tts = gate2
+	swapTTS(p, gate2)
 	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "where were we"}); err != nil {
 		t.Fatalf("handleSay 2: %v", err)
 	}

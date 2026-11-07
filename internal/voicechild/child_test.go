@@ -337,7 +337,7 @@ func TestSayClear(t *testing.T) {
 	waitFor(t, func() bool { return child.pipelineCount() == 1 })
 	p, _ := child.getPipeline("cc2")
 	gate := newGatedTTS()
-	p.tts = gate
+	swapTTS(p, gate)
 
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cc2", Event: voiceframe.EventSay, Text: "hello there", Last: lastPtr(true)})
 	gotFirst := make(chan []byte, 1)
@@ -404,7 +404,7 @@ func TestInterrupt(t *testing.T) {
 	waitFor(t, func() bool { return child.pipelineCount() == 1 })
 	p, _ := child.getPipeline("cc3")
 	gate := newGatedTTS()
-	p.tts = gate
+	swapTTS(p, gate)
 
 	// Start playback through the real say path; the gated TTS parks the
 	// stream after the first chunk, so playback stays active.
@@ -464,6 +464,89 @@ func TestKeysRedaction(t *testing.T) {
 	formatted := fmt.Sprintf("%v", k)
 	if strings.Contains(formatted, "sk-secret") {
 		t.Fatalf("%%v formatting leaked key material: %s", formatted)
+	}
+}
+
+// TestPerFrameErrorKeepsChildAlive (audit fix 4): one bad frame — here a
+// setup whose audio dial fails (the .out socket listener never exists),
+// then a malformed line, then a keys decode failure — must NEVER end
+// serve/Run. Every other live call keeps working; Run exits only when the
+// text socket itself dies. This pins the 'fail the call, not the child'
+// posture that handleKeys already implemented for construction failures.
+func TestPerFrameErrorKeepsChildAlive(t *testing.T) {
+	dir := shortTempDir(t)
+	d := newFakeDaemon(t, dir)
+	d.listenPair("good")
+
+	child := newTestChild(t, d, "tok")
+	runDone := make(chan error, 1)
+	go func() { runDone <- child.Run(context.Background()) }()
+	childConn := d.serveText()
+
+	// A healthy call first.
+	d.sendLine(childConn, voiceframe.Frame{
+		CallID: "good", Event: voiceframe.EventSetup, Codec: "L16", SampleRate: 16000,
+	})
+	gin, gout := d.acceptAll("good")
+	defer func() { _ = gin.Close() }()
+	defer func() { _ = gout.Close() }()
+	waitFor(t, func() bool { return child.pipelineCount() == 1 })
+
+	// 1) setup for a call whose audio pair cannot be dialed: the
+	// "deaddial" socket files are never listened on. Pre-fix this
+	// error propagated out of serve into Run and os.Exit'd the child.
+	d.sendLine(childConn, voiceframe.Frame{
+		CallID: "deaddial", Event: "setup", Codec: "L16", SampleRate: 16000,
+	})
+	// Give the handler time to fail; the child must still be serving.
+	time.Sleep(200 * time.Millisecond)
+
+	// 2) a malformed JSON line: decode failure.
+	if _, err := childConn.Write([]byte("{not json\n")); err != nil {
+		t.Fatalf("write malformed: %v", err)
+	}
+	// 3) a keys line that cannot decode.
+	sendRaw(t, childConn, `{"call_id":"good","event":"keys","stt_key":`)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// The child is alive: the healthy pipeline survived all three frames
+	// and a fresh say on it still produces audio.
+	if _, ok := child.getPipeline("good"); !ok {
+		t.Fatalf("healthy pipeline gone after per-frame errors")
+	}
+	d.sendLine(childConn, voiceframe.Frame{CallID: "good", Event: voiceframe.EventSay, Text: "still alive", Last: lastPtr(true)})
+	first := make(chan int, 1)
+	go func() {
+		_ = gout.SetReadDeadline(time.Now().Add(5 * time.Second))
+		buf := make([]byte, 640)
+		n, _ := gout.Read(buf)
+		first <- n
+	}()
+	select {
+	case n := <-first:
+		if n != 640 {
+			t.Fatalf("surviving call got %d bytes, want 640", n)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("FIX 4 VIOLATION: child stopped serving after a bad frame (or the whole suite died with it)")
+	}
+
+	// A second failing setup (empty call_id) — also non-fatal.
+	d.sendLine(childConn, voiceframe.Frame{CallID: "", Event: voiceframe.EventSetup})
+	time.Sleep(100 * time.Millisecond)
+
+	// Run returns nil ONLY when the text socket dies.
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run returned error after clean close: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Run did not return after socket close")
 	}
 }
 
@@ -540,6 +623,31 @@ func (p *pipeline) isDropped() bool {
 	p.playMu.Lock()
 	defer p.playMu.Unlock()
 	return p.dropQueued
+}
+
+// isTransStarted reports whether the transcript session claim landed
+// (transMu regime — tests must not read the field bare under -race).
+func (p *pipeline) isTransStarted() bool {
+	p.transMu.Lock()
+	defer p.transMu.Unlock()
+	return p.transStarted
+}
+
+// queuedSayCount reports how many say frames sit in the FIFO (test seam
+// for the single-worker serialization audit, fix 1).
+func (p *pipeline) queuedSayCount() int {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	return len(p.sayQueue)
+}
+
+// swapTTS installs a test TTS under playMu — the same lock regime the
+// production code uses for provider fields (audit fix 2), so a test swap
+// can never race the playback worker's ttsProvider() read under -race.
+func swapTTS(p *pipeline, tts TTSProvider) {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	p.tts = tts
 }
 
 // helpers

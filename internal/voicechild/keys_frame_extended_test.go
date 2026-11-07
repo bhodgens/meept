@@ -205,3 +205,56 @@ func newKeysTestPipeline(t *testing.T, ccid string) (*fakeDaemon, *Child, net.Co
 // netConnRemoved: the helper now returns net.Conn directly.
 
 var _ = fmt.Sprintf // keep fmt linked for helper error strings
+
+// TestKeysBaseURLUserinfoScrub (audit fix 7): an OpenAI-compatible base
+// URL is free-form user config and can embed userinfo credential material
+// in its authority. String/LogValue must never print that half, while
+// host+path stay debuggable; the STORED config keeps the full URL (the
+// adapter needs it to dial).
+func TestKeysBaseURLUserinfoScrub(t *testing.T) {
+	const secret = "hunter" + "2"
+	k := KeysFrame{
+		CallID:     "cc-scrub",
+		STTBaseURL: "https://ingest.example.com/v1",
+		TTSBaseURL: "https://agent:" + secret + "@tts.internal:8880/compat/v1",
+	}
+	for _, s := range []string{k.String(), redactedKeys{k}.String(), fmt.Sprintf("%v", k)} {
+		if strings.Contains(s, secret) {
+			t.Fatalf("base_url rendering leaked userinfo secret: %s", s)
+		}
+	}
+	str := k.String()
+	if !strings.Contains(str, "tts.internal:8880") {
+		t.Fatalf("scrubbed URL lost the host (misconfig must stay debuggable): %s", str)
+	}
+	if !strings.Contains(str, "https://"+Redacted+"@tts.internal:8880/compat/v1") {
+		t.Fatalf("scrub shape wrong: %s", str)
+	}
+	if !strings.Contains(str, "https://ingest.example.com/v1") {
+		t.Fatalf("credential-free URL must print untouched: %s", str)
+	}
+
+	// scrubURL unit edges: no scheme, no '@', '@' after the authority, port.
+	if got := scrubURL("127.0.0.1:8880"); got != "127.0.0.1:8880" {
+		t.Errorf("no-scheme URL rewritten: %s", got)
+	}
+	if got := scrubURL("http://127.0.0.1:8880"); got != "http://127.0.0.1:8880" {
+		t.Errorf("clean URL rewritten: %s", got)
+	}
+	if got := scrubURL("http://host/path@a/b"); got != "http://host/path@a/b" {
+		t.Errorf("'@' after the authority rewritten: %s", got)
+	}
+	if got := scrubURL(""); got != "" {
+		t.Errorf("empty URL rewritten: %s", got)
+	}
+
+	// The STORED provider config keeps the full URL (dial needs it);
+	// only the display path scrubs.
+	_, _, childConn, p := newKeysTestPipeline(t, "cc-scrub-live")
+	sendRaw(t, childConn, `{"call_id":"cc-scrub-live","event":"keys","stt_key":"s","tts_key":"t",`+
+		`"tts_base_url":"https://agent:`+secret+`@tts.internal:8880/compat/v1"}`)
+	waitFor(t, func() bool {
+		v, ok := pipelineCfgString(p, "ttsCfg", "BaseURL")
+		return ok && v == "https://agent:"+secret+"@tts.internal:8880/compat/v1"
+	})
+}

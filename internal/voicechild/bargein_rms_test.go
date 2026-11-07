@@ -228,8 +228,7 @@ func TestRMSBargeIn(t *testing.T) {
 
 	// Barge-in 1: loud chunks while speaking trip the sustained window.
 	gate1 := newChunkedTTS(loudSample, chunks)
-	p.tts = gate1
-	defer close(gate1.park)
+	swapTTS(p, gate1)
 	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "one moment"}); err != nil {
 		t.Fatalf("handleSay 1: %v", err)
 	}
@@ -241,11 +240,13 @@ func TestRMSBargeIn(t *testing.T) {
 	if n := countQueuedInterrupts(d); n != 0 {
 		t.Fatalf("latch did not hold: %d extra interrupts after one barge-in", n)
 	}
+	// FIFO playback (audit fix 1): utterance 2 starts only after
+	// utterance 1's stream ends — release the park, which EOFs gate1.
+	close(gate1.park)
 
 	// Quiet audio while speaking: window never fills, no interrupt.
 	gate2 := newChunkedTTS(quietSample, chunks)
-	p.tts = gate2
-	defer close(gate2.park)
+	swapTTS(p, gate2)
 	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "where were we"}); err != nil {
 		t.Fatalf("handleSay 2: %v", err)
 	}
@@ -253,10 +254,11 @@ func TestRMSBargeIn(t *testing.T) {
 	if n := countQueuedInterrupts(d); n != 0 {
 		t.Fatalf("quiet audio emitted %d interrupts, want 0", n)
 	}
+	close(gate2.park)
 
 	// Barge-in 2: the new say re-armed the latch; loud audio trips again.
 	gate3 := newChunkedTTS(loudSample, chunks)
-	p.tts = gate3
+	swapTTS(p, gate3)
 	defer close(gate3.park)
 	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "ok, back"}); err != nil {
 		t.Fatalf("handleSay 3: %v", err)
@@ -282,7 +284,7 @@ func TestRMSDisabledOnPhoneLeg(t *testing.T) {
 	d, child, p, out := newRMSChild(t, ccid, false, rmsThresh)
 
 	gate := newChunkedTTS(loudSample, chunks)
-	p.tts = gate
+	swapTTS(p, gate)
 	defer close(gate.park)
 	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "long utterance"}); err != nil {
 		t.Fatalf("handleSay: %v", err)
@@ -301,7 +303,7 @@ func TestRMSDisabledZeroThreshold(t *testing.T) {
 	d, child, p, out := newRMSChild(t, ccid, true, 0)
 
 	gate := newChunkedTTS(loudSample, chunks)
-	p.tts = gate
+	swapTTS(p, gate)
 	defer close(gate.park)
 	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "loud but unmonitored"}); err != nil {
 		t.Fatalf("handleSay: %v", err)

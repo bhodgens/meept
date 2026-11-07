@@ -3,6 +3,7 @@ package voicechild
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/caimlas/meept/internal/voiceframe"
 )
@@ -17,13 +18,15 @@ import (
 // Key material lives ONLY in memory: never logged (String redacts), never
 // written to disk, never passed through argv/env.
 //
-// Redaction scope note: the vendor/model/base_url/voice fields are NOT
-// redacted in String/LogValue because none of them can carry a secret -
-// vendor is an adapter name, model a public model id, voice a voice name,
-// and base_url is an endpoint (loopback in the local qwen3 case); a URL
-// never carries credential material (auth rides the key fields or, for
-// keyless qwen3, no header at all). Redacting them would make provider
-// misconfiguration undebuggable for no secrecy gain.
+// Redaction scope note: the vendor/model/voice fields are NOT redacted in
+// String/LogValue because none of them can carry a secret - vendor is an
+// adapter name, model a public model id, voice a voice name. The
+// base_url fields ARE scrubbed (audit fix 7): an OpenAI-compatible base
+// URL is user-supplied config and its userinfo component (the authority
+// between "://" and the first "/") can embed credential material; the
+// credential half must never reach a log
+// line. The stored ProviderConfig.BaseURL keeps the FULL URL — the
+// adapter needs it to dial — only the display path scrubs.
 type KeysFrame struct {
 	CallID     string
 	STTKey     string
@@ -41,13 +44,13 @@ type KeysFrame struct {
 const Redacted = "[REDACTED]"
 
 // String implements fmt.Stringer, REDACTING key material so the struct is
-// safe to pass to any logger. The vendor/model/base_url/voice selectors
-// print in the clear (see the type comment for why they are not secrets).
+// safe to pass to any logger. The vendor/model/voice selectors print in
+// the clear; base URLs print with userinfo scrubbed (see scrubURL).
 func (k KeysFrame) String() string {
 	return fmt.Sprintf("keys(call_id: %s, stt_key: %s, tts_key: %s, stt_vendor: %s, stt_model: %s, stt_base_url: %s, tts_vendor: %s, tts_model: %s, tts_base_url: %s, tts_voice: %s)",
 		k.CallID, redact(k.STTKey), redact(k.TTSKey),
-		k.STTVendor, k.STTModel, k.STTBaseURL,
-		k.TTSVendor, k.TTSModel, k.TTSBaseURL, k.TTSVoice)
+		k.STTVendor, k.STTModel, scrubURL(k.STTBaseURL),
+		k.TTSVendor, k.TTSModel, scrubURL(k.TTSBaseURL), k.TTSVoice)
 }
 
 // LogValue routes the frame through a redaction-safe representation, so
@@ -59,8 +62,8 @@ type redactedKeys struct{ k KeysFrame }
 func (r redactedKeys) String() string {
 	return fmt.Sprintf("call_id=%s stt_key=%s tts_key=%s stt_vendor=%s stt_model=%s stt_base_url=%s tts_vendor=%s tts_model=%s tts_base_url=%s tts_voice=%s",
 		r.k.CallID, redact(r.k.STTKey), redact(r.k.TTSKey),
-		r.k.STTVendor, r.k.STTModel, r.k.STTBaseURL,
-		r.k.TTSVendor, r.k.TTSModel, r.k.TTSBaseURL, r.k.TTSVoice)
+		r.k.STTVendor, r.k.STTModel, scrubURL(r.k.STTBaseURL),
+		r.k.TTSVendor, r.k.TTSModel, scrubURL(r.k.TTSBaseURL), r.k.TTSVoice)
 }
 
 // redact reports the placeholder for non-empty secrets and "" untouched
@@ -70,6 +73,36 @@ func redact(s string) string {
 		return ""
 	}
 	return Redacted
+}
+
+// scrubURL removes userinfo credential material from a URL for display
+// (audit fix 7): OpenAI-compatible base URLs are free-form config and a
+// scheme://user:secret@host form embeds a secret in the endpoint
+// string. Everything between "://" and the '@' that ends the authority is
+// replaced with the redaction marker; the host/path stay in the clear
+// (misconfiguration must stay debuggable). A URL with no '@' before the
+// path is returned unchanged.
+func scrubURL(u string) string {
+	i := strings.Index(u, "://")
+	if i < 0 {
+		return u
+	}
+	authority := u[i+3:]
+	// The authority ends at the first '/', '?' or '#'.
+	end := len(authority)
+	for j, r := range authority {
+		if r == '/' || r == '?' || r == '#' {
+			end = j
+			break
+		}
+	}
+	at := strings.LastIndex(authority[:end], "@")
+	if at < 0 {
+		return u
+	}
+	// Keep everything from '@' on (host:port/path): only the userinfo
+	// half before the last '@' is credential material.
+	return u[:i+3] + Redacted + authority[at:]
 }
 
 // applyKeys stores provider key material and the vendor/model/base_url/

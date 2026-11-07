@@ -286,7 +286,7 @@ func TestBargeInViaPartial(t *testing.T) {
 		t.Fatal("pipeline missing")
 	}
 	gate := newGatedTTS()
-	p.tts = gate
+	swapTTS(p, gate)
 	say := voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "sure, one moment"}
 	if err := child.handleSay(say); err != nil {
 		t.Fatalf("handleSay: %v", err)
@@ -336,7 +336,7 @@ func TestBargeInViaPartial(t *testing.T) {
 	// New gate for the second utterance: keeps `speaking` observable
 	// through the re-arm partial (same race as Scenario B).
 	gate2 := newGatedTTS()
-	p.tts = gate2
+	swapTTS(p, gate2)
 	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "where were we"}); err != nil {
 		t.Fatalf("handleSay 2: %v", err)
 	}

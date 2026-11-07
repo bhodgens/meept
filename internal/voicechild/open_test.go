@@ -8,7 +8,6 @@ package voicechild
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -174,12 +173,24 @@ func TestSetupWithoutOpenStillWorks(t *testing.T) {
 	}
 }
 
-// TestOpenEmptyCallIDErrors guards the frame contract: an open with no
-// call_id can never key a pipeline.
-func TestOpenEmptyCallIDErrors(t *testing.T) {
-	child := New(ChildConfig{AudioDir: t.TempDir()})
-	err := child.handleLine(context.Background(), `{"call_id":"","event":"open"}`)
-	if err == nil || !strings.Contains(err.Error(), "empty call_id") {
-		t.Fatalf("open with empty call_id: err = %v, want mention of empty call_id", err)
+// TestOpenEmptyCallIDFailsCallNotChild guards the frame contract: an open
+// with no call_id can never key a pipeline. handleOpen still refuses it
+// with the named error; handleLine isolates the failure per-frame (audit
+// fix 4): the error is logged, no pipeline exists, and the call to
+// handleLine must NOT panic or stop the reader loop.
+func TestOpenEmptyCallIDFailsCallNotChild(t *testing.T) {
+	logger := newCaptureLogger()
+	child := New(ChildConfig{AudioDir: t.TempDir(), Logger: logger.logger()})
+	child.handleLine(context.Background(), `{"call_id":"","event":"open"}`)
+	if got := child.pipelineCount(); got != 0 {
+		t.Fatalf("pipeline count after empty-call_id open = %d, want 0", got)
 	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if logger.contains("empty call_id") {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("handleLine did not log the empty call_id failure; log so far:\n%s", logger.everything())
 }

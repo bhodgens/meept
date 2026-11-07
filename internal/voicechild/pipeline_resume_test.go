@@ -37,7 +37,7 @@ func TestSayAfterClearPlaysAgain(t *testing.T) {
 
 	// Utterance 1: gated TTS, one chunk out, then clear mid-stream.
 	gate1 := newGatedTTS()
-	p.tts = gate1
+	swapTTS(p, gate1)
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cc7", Event: voiceframe.EventSay, Text: "first", Last: lastPtr(true)})
 	buf := make([]byte, 640)
 	_ = out.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -51,7 +51,7 @@ func TestSayAfterClearPlaysAgain(t *testing.T) {
 	// Utterance 2 (THE F-1 case): a fresh say after clear must play, not
 	// be silently dropped.
 	gate2 := newGatedTTS()
-	p.tts = gate2
+	swapTTS(p, gate2)
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cc7", Event: voiceframe.EventSay, Text: "second", Last: lastPtr(true)})
 	_ = out.SetReadDeadline(time.Now().Add(5 * time.Second))
 	n, err := io.ReadFull(out, buf)

@@ -17,9 +17,18 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/voiceframe"
 )
+
+// textWriteTimeout bounds a single text-socket write under the write
+// mutex (audit fix 3): the repo invariant is "never hold a mutex across
+// I/O" — the write mutex inherently serializes conn.Write (one line at a
+// time is the CONTRACT: concurrent writes would interleave JSON lines),
+// so the safety property comes from the deadline: a wedged daemon can
+// stall one writer for at most this long, never the whole child.
+const textWriteTimeout = 2 * time.Second
 
 // ChildConfig configures a Child.
 type ChildConfig struct {
@@ -48,25 +57,46 @@ type Child struct {
 	sttFactory STTFactory
 	ttsFactory TTSFactory
 
-	mu        sync.Mutex
-	pipelines map[string]*pipeline // keyed by call_control_id
-	conn      net.Conn             // live text socket; nil until Run dials
+	// mu guards conn + the provider factories ONLY (audit fix 3: the
+	// pipelines map moved to pipelineMu). writeMu serializes text-socket
+	// writes; conn itself is read under writeMu after Run publishes it.
+	mu      sync.Mutex
+	writeMu sync.Mutex // serializes writeLine's conn.Write
+	conn    net.Conn   // live text socket; nil until Run dials
+
+	pipelineMu sync.Mutex           // guards pipelines (routing map)
+	pipelines  map[string]*pipeline // keyed by call_control_id
 }
 
 // writeLine writes one encoded frame line to the text socket, serialized
 // across concurrent pipelines (prompt/interrupt emitters race freely).
+// Audit fix 3: a DEDICATED write mutex (not the state map's lock) plus a
+// write deadline. The mutex is held across conn.Write by necessity —
+// serializing whole lines is the socket's contract — so the "never hold a
+// mutex across I/O" invariant is honored via the bound instead:
+// SetWriteDeadline caps the hold at textWriteTimeout, and the lock here
+// guards nothing but writes, so a stalled write can never freeze frame
+// routing or provider-factory reads.
 func (c *Child) writeLine(ctx context.Context, b []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn == nil {
-		return errors.New("voicechild: text socket not connected")
-	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("voicechild: write cancelled: %w", err)
 	}
-	if _, err := c.conn.Write(b); err != nil {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	if conn == nil {
+		return errors.New("voicechild: text socket not connected")
+	}
+	if err := conn.SetWriteDeadline(time.Now().Add(textWriteTimeout)); err != nil {
+		return fmt.Errorf("voicechild: set write deadline: %w", err)
+	}
+	if _, err := conn.Write(b); err != nil {
 		return fmt.Errorf("voicechild: write text socket: %w", err)
 	}
+	// Clear the deadline so a later writer never inherits a stale bound.
+	_ = conn.SetWriteDeadline(time.Time{})
 	return nil
 }
 
@@ -116,23 +146,23 @@ func trimSpace(s string) string {
 
 // getPipeline returns the live pipeline for ccid.
 func (c *Child) getPipeline(ccid string) (*pipeline, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.pipelineMu.Lock()
+	defer c.pipelineMu.Unlock()
 	p, ok := c.pipelines[ccid]
 	return p, ok
 }
 
 // registerPipeline stores a pipeline for ccid.
 func (c *Child) registerPipeline(p *pipeline) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.pipelineMu.Lock()
+	defer c.pipelineMu.Unlock()
 	c.pipelines[p.ccid] = p
 }
 
 // dropPipeline removes and returns the pipeline for ccid, if live.
 func (c *Child) dropPipeline(ccid string) (*pipeline, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.pipelineMu.Lock()
+	defer c.pipelineMu.Unlock()
 	p, ok := c.pipelines[ccid]
 	if ok {
 		delete(c.pipelines, ccid)
@@ -142,8 +172,8 @@ func (c *Child) dropPipeline(ccid string) (*pipeline, bool) {
 
 // pipelineCount reports how many live pipelines exist (test seam).
 func (c *Child) pipelineCount() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.pipelineMu.Lock()
+	defer c.pipelineMu.Unlock()
 	return len(c.pipelines)
 }
 
@@ -193,21 +223,25 @@ func (c *Child) Run(ctx context.Context) error {
 	c.conn = nil
 	c.mu.Unlock()
 	// Tear down every live pipeline with the connection gone.
-	c.mu.Lock()
+	c.pipelineMu.Lock()
 	live := make([]*pipeline, 0, len(c.pipelines))
 	for _, p := range c.pipelines {
 		live = append(live, p)
 	}
 	c.pipelines = make(map[string]*pipeline)
-	c.mu.Unlock()
+	c.pipelineMu.Unlock()
 	for _, p := range live {
 		p.close(context.Background())
 	}
 	return readErr
 }
 
-// serve reads newline-delimited frames until ctx is cancelled, EOF, or a
-// decode error, dispatching each to its pipeline.
+// serve reads newline-delimited frames until ctx is cancelled or the text
+// socket errors/EOFs. A per-frame handler failure NEVER ends the loop
+// (audit fix 4): handleLine logs, tears down only the implicated call,
+// and returns nil — "fail the call, not the child", the pattern handleKeys
+// already implements. Run exits on text-socket read failures only, so one
+// malformed line or one failed audio dial cannot kill every live call.
 func (c *Child) serve(ctx context.Context, conn net.Conn) error {
 	readCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -218,13 +252,27 @@ func (c *Child) serve(ctx context.Context, conn net.Conn) error {
 		br := bufio.NewScanner(conn)
 		br.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for br.Scan() {
-			lineCh <- br.Text()
+			// Audit fix 6: a bare send here could block forever once the
+			// dispatcher exits with readCtx cancelled (the reader keeps
+			// scanning until conn.Close lands): select on the done
+			// channel so teardown never hangs the reader goroutine.
+			select {
+			case lineCh <- br.Text():
+			case <-readCtx.Done():
+				return
+			}
 		}
 		if err := br.Err(); err != nil {
-			errCh <- fmt.Errorf("voicechild: read text socket: %w", err)
+			select {
+			case errCh <- fmt.Errorf("voicechild: read text socket: %w", err):
+			case <-readCtx.Done():
+			}
 			return
 		}
-		errCh <- nil // clean EOF: daemon closed the connection
+		select {
+		case errCh <- nil: // clean EOF: daemon closed the connection
+		case <-readCtx.Done():
+		}
 	}()
 
 	for {
@@ -237,39 +285,58 @@ func (c *Child) serve(ctx context.Context, conn net.Conn) error {
 			}
 			return nil // EOF: not a child error
 		case line := <-lineCh:
-			if err := c.handleLine(readCtx, line); err != nil {
-				return err
-			}
+			c.handleLine(readCtx, line)
 		}
 	}
 }
 
-// handleLine decodes one C1 frame and routes it by event.
-func (c *Child) handleLine(ctx context.Context, line string) error {
+// handleLine decodes one C1 frame and routes it by event. Per-frame
+// failures are isolated (audit fix 4): a decode error, a setup/open dial
+// failure, or any handler error logs and tears down ONLY the implicated
+// call's pipeline; the child and all other calls keep serving. handleLine
+// never returns an error to the reader loop — serve() owns process
+// termination, and it ends only on a text-socket read failure.
+func (c *Child) handleLine(ctx context.Context, line string) {
 	frame, err := voiceframe.DecodeFrame([]byte(line))
 	if err != nil {
-		return fmt.Errorf("voicechild: %w", err)
+		c.logger.Error("voicechild: malformed frame dropped", "err", err)
+		return // a bad line kills the line, not the child
 	}
 	switch frame.Event {
 	case voiceframe.EventOpen:
-		return c.handleOpen(ctx, frame)
+		c.failCall(frame.CallID, c.handleOpen(ctx, frame), "open")
 	case voiceframe.EventSetup:
-		return c.handleSetup(ctx, frame)
+		c.failCall(frame.CallID, c.handleSetup(ctx, frame), "setup")
 	case voiceframe.EventSay:
-		return c.handleSay(frame)
+		c.failCall(frame.CallID, c.handleSay(frame), "say")
 	case voiceframe.EventClear:
 		c.handleClear(frame)
-		return nil
 	case voiceframe.EventEnd:
 		c.handleEnd(frame)
-		return nil
 	case "keys": // voiceframe keys event (leaf-07 C1 shape; constant lives here: the shared codec carries no key fields)
-		return c.handleKeysFrame(line)
+		c.failCall(frame.CallID, c.handleKeysFrame(line), "keys")
 	default:
 		// Unknown events (dtmf and friends) decode fine per C1; log and
 		// continue so a voicemail-tree "press 1" never errors the call.
 		c.logger.Debug("voicechild: unhandled frame event", "event", frame.Event, "call_id", frame.CallID)
-		return nil
+	}
+}
+
+// failCall applies the "fail the call, not the child" posture to one
+// handler result: on error, log and tear down exactly that call's
+// pipeline (mirroring handleKeys' construction-failure path). An error
+// with an empty call_id has no pipeline to drop — log and move on.
+func (c *Child) failCall(ccid string, err error, op string) {
+	if err == nil {
+		return
+	}
+	c.logger.Error("voicechild: frame handler failed; tearing down the call only",
+		"err", err, "call_id", ccid, "event", op)
+	if ccid == "" {
+		return
+	}
+	if p, ok := c.dropPipeline(ccid); ok {
+		p.close(context.Background())
 	}
 }
 
