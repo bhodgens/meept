@@ -595,9 +595,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				localNodeID = "local"
 			}
 			cqConfig := queue.ClusterQueueConfig{
-				DefaultClaimTimeout:     clusterCfg.Gossip.HeartbeatInterval,
+				// bughunt 2026-11-07 dispatcher-queue F-2: the claim timeout
+				// must come from the QUEUE section (default 5 min, normalized
+				// in cluster.Config.Load), NOT the gossip heartbeat interval
+				// (default 30s). Worker heartbeats fire every 60s, so a 30s
+				// claim deadline expired between heartbeats: every job
+				// running >~30s was reclaimed mid-flight and double-dispatched.
+				DefaultClaimTimeout:     clusterCfg.Queue.DefaultClaimTimeout,
 				NodeReachabilityTimeout: clusterCfg.Gossip.PeerTimeout,
 				FullPayloadReplication:  false,
+			}
+			if cqConfig.DefaultClaimTimeout <= 0 {
+				cqConfig.DefaultClaimTimeout = 5 * time.Minute
 			}
 			if pq, ok := components.Queue.(*queue.PersistentQueue); ok {
 				queueStore = pq.Store()
@@ -1331,7 +1340,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// Memory RPC handlers (vector search + export). These override the
 		// dead bus proxies for the same methods — see memory_rpc.go.
 		if svcRegistry.Memory != nil {
-			registerMemoryRPCHandlers(rpcServer, svcRegistry.Memory)
+			registerMemoryRPCHandlers(rpcServer, svcRegistry.Memory, fullCfg.MultiUser.Enabled)
 			logger.Info("Memory RPC handlers registered")
 		}
 
@@ -2552,12 +2561,24 @@ func (d *Daemon) rehydrateTurnJournal(ctx context.Context) (resumed int) {
 			// turn's completion (T3 interlock) -- nothing to resume, and
 			// the run must NOT count as resumed. Returning an error here
 			// routes through Rehydrate's Warn-and-continue so the row is
-			// surfaced, never dropped silently; the journal run stays
-			// open (harmless: every later boot takes this same branch
-			// until boot-time retention prunes it via CloseRun aging --
-			// and if it is not yet closed, the queue's terminal state is
-			// the authoritative answer per research F4/D2).
-			d.logger.Warn("turn journal: open run's job is already terminal at the queue (dedup interlock: no resume)",
+			// surfaced, never dropped silently.
+			//
+			// bughunt 2026-11-07 dispatcher-queue F-3: close the journal
+			// run HERE. The queue's terminal state is the authoritative
+			// close signal (research F4/D2 -- the comment's own
+			// citation), but the writer never got the memo: a run whose
+			// terminal close write failed, or whose job reached
+			// completed/dead without OnRunClose ever firing, stayed open
+			// forever. PruneClosed deletes only turns WITH a run_closed
+			// row, and OpenRuns re-lists these rows on EVERY boot —
+			// permanent re-walk plus an unprunable retention hole that
+			// defeated the 7d F6 contract. Writing the close row now
+			// moves the run into the prunable set immediately after.
+			if cerr := d.components.TurnJournal.CloseRun(ctx, turnID); cerr != nil {
+				d.logger.Warn("turn journal: closing terminal-state run failed (retried next boot)",
+					"turn_id", turnID, "error", cerr)
+			}
+			d.logger.Warn("turn journal: open run's job is already terminal at the queue (closed for retention; no resume)",
 				"turn_id", turnID,
 				"job_id", job.ID,
 				"job_state", string(job.State),

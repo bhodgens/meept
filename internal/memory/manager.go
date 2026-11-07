@@ -2329,6 +2329,40 @@ func (m *Manager) BridgeStore() *BridgeStore {
 	return m.bridgeStore
 }
 
+// ListBridgesScoped lists every persisted bridge record through the same C2
+// scope predicate the recall lane uses (bughunt 2026-11-07 agent-fixes F-H:
+// the visibility/dashboard lane returned ALL bridges — including rows
+// distilled from another project's memories — while mergeBridges recall was
+// already scope-gated by 78a1da70; the leak claim closed only for recall).
+// No options = unfiltered (the single-user, owner-trusted posture —
+// byte-identical to the old service method). Under multiuser, callers pass
+// WithScopeFilter + WithMultiUserEnabled exactly like Search does, and an
+// unresolved identity fails closed (Flag 3): global rows stay visible,
+// project/user rows hide.
+func (m *Manager) ListBridgesScoped(ctx context.Context, opts ...SearchOption) ([]BridgeRecord, error) {
+	m.mu.RLock()
+	bs := m.bridgeStore
+	m.mu.RUnlock()
+	if bs == nil {
+		return nil, nil
+	}
+	records, err := bs.ListBridges(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f := resolveScopeOptions(opts)
+	if f == nil {
+		return records, nil
+	}
+	out := make([]BridgeRecord, 0, len(records))
+	for _, b := range records {
+		if bridgeVisible(f, b) {
+			out = append(out, b)
+		}
+	}
+	return out, nil
+}
+
 // Consolidator returns the manager's consolidator (nil before Initialize).
 // Exposed for daemon boot wiring (branch 09 B06): the bridge generation and
 // verification components attach to the consolidator, not the manager.

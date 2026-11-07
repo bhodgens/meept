@@ -205,3 +205,67 @@ func TestManagerSearchScopeFilterHidesForeignBridge(t *testing.T) {
 		}
 	}
 }
+
+// TestListBridgesScopedGatesListing (bughunt 2026-11-07 agent-fixes F-H):
+// the bridge LISTING surface must apply the same C2 predicate as recall.
+// Before the fix, Services.Bridges -> store.ListBridges returned every
+// persisted bridge — including one distilled from another project's
+// memories — while mergeBridges recall was already gated by 78a1da70.
+// No options = unfiltered legacy posture (byte-identical); a project
+// caller must NOT see another project's bridge rows.
+func TestListBridgesScopedGatesListing(t *testing.T) {
+	ctx := context.Background()
+	m := mustNewManager(t)
+	bs, err := NewBridgeStore(filepath.Join(t.TempDir(), "bridge-list.vec.db"))
+	if err != nil {
+		t.Fatalf("NewBridgeStore: %v", err)
+	}
+	defer bs.Close()
+
+	seedBridges := []BridgeRecord{
+		{ID: "bridge-alpha", Content: "alpha project fact", Embedding: hashBridgeEmbedding("a"),
+			EvidenceIDs: []string{"m-a"}, Metadata: map[string]any{"scope": string(ScopeProject), "project_id": "alpha"}},
+		{ID: "bridge-beta", Content: "beta project fact", Embedding: hashBridgeEmbedding("b"),
+			EvidenceIDs: []string{"m-b"}, Metadata: map[string]any{"scope": string(ScopeProject), "project_id": "beta"}},
+		{ID: "bridge-global", Content: "global fact", Embedding: hashBridgeEmbedding("g"),
+			EvidenceIDs: []string{"m-g"}, Metadata: map[string]any{"scope": string(ScopeGlobal)}},
+	}
+	for _, b := range seedBridges {
+		if err := bs.PutBridge(ctx, b); err != nil {
+			t.Fatalf("PutBridge %s: %v", b.ID, err)
+		}
+	}
+	m.SetBridgeStore(bs)
+
+	// Unfiltered: all three (legacy, single-user owner-trusted posture).
+	all, err := m.ListBridgesScoped(ctx)
+	if err != nil {
+		t.Fatalf("ListBridgesScoped (unfiltered): %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("unfiltered listing = %d bridges, want 3", len(all))
+	}
+
+	// Project-beta caller: sees beta + global, NEVER alpha's bridge
+	// (the F-H leak: distilled from alpha's memories, visible via the
+	// dashboard lane).
+	gated, err := m.ListBridgesScoped(ctx, WithScopeFilter(ScopeProject, "beta", ""))
+	if err != nil {
+		t.Fatalf("ListBridgesScoped (beta): %v", err)
+	}
+	if len(gated) != 2 {
+		t.Fatalf("beta listing = %d bridges, want 2 (%+v)", len(gated), gated)
+	}
+	for _, b := range gated {
+		if b.ID == "bridge-alpha" {
+			t.Fatal("F-H leak: cross-project bridge row survived the scope gate on the LISTING lane")
+		}
+	}
+
+	// Nil-store manager: empty, no error (same as recall's nil-store path).
+	m2 := mustNewManager(t)
+	empty, err := m2.ListBridgesScoped(ctx, WithScopeFilter(ScopeUser, "", ""))
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("nil store: %v / %d, want nil error + empty", err, len(empty))
+	}
+}
