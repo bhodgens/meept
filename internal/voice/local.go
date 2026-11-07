@@ -127,6 +127,10 @@ type localCallState struct {
 	pair      *AudioPair
 	cancel    context.CancelFunc // splice ctx cancel (End tears it down)
 	sessionID string
+	// ttsVoiceOverride is the tool's per-call `voice` arg (leaf 09
+	// LocalFunc's 4th parameter): highest CL4 precedence, applied AFTER
+	// the profile resolver fills the frame.
+	ttsVoiceOverride string
 }
 
 // childNoteSeam is the ChildProc note seam the leg calls through. The
@@ -215,7 +219,7 @@ func (l *LocalLeg) localLabel(label string) (string, error) {
 // Open turns (employee, label) into a live local voice call (CL5). The
 // registry errors surface unchanged; every other refusal is a named
 // error BEFORE any side effect.
-func (l *LocalLeg) Open(ctx context.Context, employeeID, label string) (LocalCall, error) {
+func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOverride ...string) (LocalCall, error) {
 	// -- 1. gates (named refusals, zero side effects) --
 	if !l.cfg.Enabled {
 		return LocalCall{}, ErrLocalDisabled
@@ -261,6 +265,11 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string) (LocalCal
 		employee: employeeID,
 		target:   target,
 		pair:     pair,
+	}
+	// Tool-supplied CL4 override (voice_call's `voice` arg): highest
+	// precedence - beats the per-call profile resolver (voice_wiring).
+	if len(voiceOverride) > 0 {
+		st.ttsVoiceOverride = voiceOverride[0]
 	}
 	spliceCtx, spliceCancel := context.WithCancel(context.Background())
 	st.cancel = spliceCancel
@@ -366,6 +375,10 @@ func (l *LocalLeg) sendOpenFrame(st *localCallState) error {
 		f.TtsVendor = p.TtsVendor
 		f.TtsModel = p.TtsModel
 		f.TtsVoice = p.TtsVoice
+	}
+	// Tool override (CL4 top layer) beats the resolved profile voice.
+	if st.ttsVoiceOverride != "" {
+		f.TtsVoice = st.ttsVoiceOverride
 	}
 	return l.deps.TextServer.Send(f)
 }

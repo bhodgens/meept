@@ -529,3 +529,106 @@ func TestLocalLegDepsGuards(t *testing.T) {
 		t.Errorf("NewLocalLeg over nil-carrier Manager = %v, want accepted", err)
 	}
 }
+
+// TestLocalLegVoiceOverride pins the CL4 top layer: Open's variadic
+// voiceOverride (the voice_call tool's `voice` arg, leaf 09 LocalFunc)
+// beats the profile resolver's tts_voice in the open frame. No override
+// leaves the resolver's value untouched.
+func TestLocalLegVoiceOverride(t *testing.T) {
+	f := newLegFixture(t)
+
+	// A dedicated leg with a profile resolver: the fixture leg stays
+	// profile-free (its byte-exact open-frame pin depends on that).
+	sockPath := filepath.Join(shortDir(t), "leg-ovr.sock")
+	srv := NewTextServer(sockPath, localLegDiscard())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.Start(ctx) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(sockPath); err == nil {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Cleanup(func() {
+		cancel()
+		srv.Close()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+	})
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("fake child dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	childReader := bufio.NewReader(conn)
+
+	manager := NewManager(ManagerConfig{}, nil, nil)
+	manager.SetReleaseHook(func(ccid string, _ Outcome) {
+		f.child.NoteCallEnd(ccid)
+		f.reg.Release(ccid)
+	})
+	leg, err := NewLocalLeg(
+		LocalLegConfig{Enabled: true, Label: "legbox", BargeInRms: 3000},
+		LocalDeps{
+			Registry:        f.reg,
+			ChildProc:       f.child,
+			TextServer:      srv,
+			Manager:         manager,
+			DayBriefBuilder: func(context.Context, string, string) (DayBrief, error) { return DayBrief{}, nil },
+			Profile:         func(string) Profile { return Profile{TtsVendor: "qwen3", TtsVoice: "resolved-default"} },
+			Logger:          localLegDiscard(),
+		})
+	if err != nil {
+		t.Fatalf("NewLocalLeg: %v", err)
+	}
+
+	first, err := leg.Open(context.Background(), "emp-ovr", "legbox")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	frame := readOvrFrame(t, childReader)
+	if !strings.Contains(frame, `"tts_voice":"resolved-default"`) {
+		t.Errorf("open frame without override = %s, want resolver tts_voice", frame)
+	}
+
+	// One live call per target (CL6): end the first call before opening
+	// the override variant.
+	if err := leg.End(first.CallID, "test-done"); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+	if _, err := leg.Open(context.Background(), "emp-ovr", "legbox", "nova-2"); err != nil {
+		t.Fatalf("Open with override: %v", err)
+	}
+	frame = readOvrFrame(t, childReader)
+	if !strings.Contains(frame, `"tts_voice":"nova-2"`) {
+		t.Errorf("open frame with override = %s, want tts_voice nova-2", frame)
+	}
+}
+
+// readOvrFrame reads one open-event line off the override test's child.
+func readOvrFrame(t *testing.T, r *bufio.Reader) string {
+	t.Helper()
+	type result struct {
+		line string
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		line, err := r.ReadString('\n')
+		ch <- result{line, err}
+	}()
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			t.Fatalf("read open frame: %v", res.err)
+		}
+		return res.line
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timeout reading open frame")
+	}
+	return ""
+}

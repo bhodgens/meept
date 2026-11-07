@@ -5529,6 +5529,21 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.Voice != nil {
 		if err := c.Voice.Start(ctx, func(dial builtin.DialerFunc, agentID builtin.AgentIDFunc) {
 			builtin.SetVoiceProvider(dial, agentID, c.SecretBroker)
+			// local-leg leaf 08 T4: arm the voice_call tool's local seam
+			// when the leg exists (nil seam = the tool fails closed with
+			// the disabled-leg error, exactly the voice.local.enabled=false
+			// posture). The override arg rides LocalLeg.Open's variadic
+			// voiceOverride into the open frame (CL4 top layer).
+			if c.Voice.Local != nil {
+				local := c.Voice.Local
+				builtin.SetVoiceLocalFunc(func(ctx context.Context, employeeID, label, ttsVoice string) (string, string, error) {
+					call, err := local.Open(ctx, employeeID, label, ttsVoice)
+					if err != nil {
+						return "", "", err
+					}
+					return call.CallID, call.SessionID, nil
+				})
+			}
 			names := enabledToolProviderNames(c.Config, []string{"voice"}, c.Logger)
 			if len(names) == 0 {
 				c.Logger.Debug("voice provider disabled by [tool_providers]; no voice_call tool registered")
