@@ -7,9 +7,13 @@
 // router needs landed with leaf 15 (internal/daemon/voice_wiring.go spawn
 // seam), so the hermetic loop now runs end to end: answer -> media start
 // frame -> child setup -> talk loop armed -> greeting say -> C1 interrupt
-// -> clear -> hangup -> call ended -> idle stop. Still a named skip:
-// greeting AUDIO pacing onto the Telnyx media socket (needs the child's
-// real TTS stage; the fake child speaks no PCM).
+// -> clear -> hangup -> call ended -> idle stop. No named skips remain:
+// the last one (greeting AUDIO reaching the Telnyx media socket through
+// the splice) was retired by voice-tierA leaf 07, whose
+// TestVoiceKeysToProviders drives the REAL qwen3 TTS adapter (constructed
+// from the daemon's keys line) and asserts decoded audio frames on the
+// media socket; the local leg's client-audio path is pinned hermetically
+// by the voice-local suite (local-leg leaf 11).
 //
 // Activated from the parked leaf-00T sketch; assertions were reshaped to
 // the LANDED leaf-14 contracts (the parked guesses predated the wiring):
@@ -28,9 +32,6 @@
 //	say round trip, hangup teardown, idle stop. Media-splice wiring is
 //	exercised only as far as the WS dial + start frame (audio assertions
 //	are the splice unit tests' job; no ONNX/jargo needed).
-//	TestVoiceLifecycleFullLoopSkipped: documents the not-yet-wirable
-//	residue (greeting audio reaching Telnyx through the splice) - split
-//	out with a named skip per the leaf's split rule.
 package voicelifecycle
 
 import (
@@ -45,8 +46,9 @@ import (
 // ARMS the talk loop (leaf-15 inbound Acquire makes the registry lookup
 // succeed), the greeting say reaches the child, a final prompt produces
 // another say, a C1 interrupt produces a clear, the hangup tears the call
-// down once, and the idle child stops. Audio pacing onto the Telnyx socket
-// is still the splice unit tests' job (see the named skip below).
+// down exactly once, and the idle child stops. Audio pacing onto the
+// Telnyx socket is pinned LIVE by TestVoiceKeysToProviders
+// (keys_providers_test.go, voice-tierA leaf 07).
 func TestVoiceLifecycleInboundCall(t *testing.T) {
 	fake := newFakeTelnyx(t)
 	s, ctrlPath := bootVoiceStack(t, fake, nil)

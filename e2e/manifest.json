@@ -516,6 +516,15 @@
       "voice-lifecycle",
       "voice-bargein",
       "voice-concurrency"
+    ],
+    "internal/voice/local.go": [
+      "voice-local"
+    ],
+    "internal/voice/localsplice.go": [
+      "voice-local"
+    ],
+    "internal/rpc/voice_local.go": [
+      "voice-local"
     ]
   },
   "suites": [
@@ -1053,6 +1062,11 @@
     {
       "name": "voice-concurrency",
       "dir": "e2e/suites/voice-concurrency",
+      "status": "implemented"
+    },
+    {
+      "name": "voice-local",
+      "dir": "e2e/suites/voice-local",
       "status": "implemented"
     }
   ],
@@ -4346,6 +4360,27 @@
         "internal/voicechild/pipeline.go",
         "internal/voice/talkloop.go",
         "internal/voice/local.go"
+      ]
+    },
+    {
+      "id": "voice-local-e2e-01",
+      "suite": "voice-local",
+      "diff": "L",
+      "title": "[voice-local] the whole local leg hermetic: RPC open -> pair paths -> scripted client PCM through the REAL whisper adapter (fake shim) -> fake-runner employee turn -> say through the REAL piper adapter -> paced PCM at OutPath -> voice.local.end -> registry empty + calls.db row with transcripts",
+      "paths": [
+        "internal/voice/local.go",
+        "internal/voice/localsplice.go",
+        "internal/rpc/voice_local.go"
+      ]
+    },
+    {
+      "id": "voice-local-refusals-01",
+      "suite": "voice-local",
+      "diff": "S",
+      "title": "[voice-local] busy / duplicate-target / unknown-employee refusals surface through the voice.local.open RPC error shapes (named CL8 errors)",
+      "paths": [
+        "internal/voice/dial.go",
+        "internal/rpc/voice_local.go"
       ]
     }
   ]

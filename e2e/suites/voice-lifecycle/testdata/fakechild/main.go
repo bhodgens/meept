@@ -16,6 +16,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -72,6 +73,17 @@ var realProviders = "false"
 
 func realMode() bool { return realProviders == "true" }
 
+// realAudio is overridable at build time (-ldflags "-X main.realAudio=true"):
+// the voice-local e2e suite builds the binary with the FULL real-audio
+// pipeline armed - the STT factory (so client mic PCM runs the real
+// segmentation/transcript path) and say-driven TTS synthesis (so a say
+// frame produces real PCM on the C2 .out socket). Keys-providers builds
+// with realProviders only: arming STT there would fail provider
+// construction on the empty cloud keys its fake broker sends.
+var realAudio = "false"
+
+func realAudioMode() bool { return realAudio == "true" }
+
 type child struct {
 	textSocket string
 	audioDir   string
@@ -87,6 +99,19 @@ type child struct {
 	// adapters constructed from each call's keys line. In-memory only.
 	ttsFactory voicechild.TTSFactory
 	tts        map[string]voicechild.TTSProvider
+	// realAudio mode only: the C3 STT factory + the pipelines' say frames
+	// (each say drives a REAL TTS synthesis and pushes the PCM onto the
+	// C2 .out socket, exactly what the real pipeline's playback does).
+	sttFactory   voicechild.STTFactory
+	sayQueue     chan frame
+	drivenSay    map[string]bool // text already spoken (dedup per say text)
+	saidSequence map[string]int  // count of driven speaks per call
+	// realAudio STT pump state: the per-call pcm channel feeding the
+	// adapter's Stream session and the adapters built from the keys line.
+	stt     map[string]voicechild.STTProvider
+	sttCfg  map[string]voicechild.ProviderConfig
+	pcmCh   map[string]chan []byte
+	micConn map[string]net.Conn // .in conns the STT pump owns (realAudio)
 
 	// speaking/latched mirror the pipeline's playback state for the
 	// bargein control: speaking is set when a say frame is mirrored for
@@ -102,6 +127,18 @@ func realFactories() voicechild.TTSFactory {
 	return func(cfg voicechild.ProviderConfig, key string) (voicechild.TTSProvider, error) {
 		return providers.NewTTS(cfg, key)
 	}
+}
+
+// realAudioFactories mirrors cmd/meept-voice's FULL C3 wiring (both
+// factories): used when the binary was built with realAudio=true, so the
+// voice-local suite runs the real STT segmentation and the real TTS
+// synthesis paths (via fake whisper-cli/piper shims on PATH).
+func realAudioFactories() (voicechild.STTFactory, voicechild.TTSFactory) {
+	stt := func(cfg voicechild.ProviderConfig, key string) (voicechild.STTProvider, error) {
+		return providers.NewSTT(cfg, key)
+	}
+	tts := realFactories()
+	return stt, tts
 }
 
 func (c *child) sendLine(w io.Writer, v any) {
@@ -225,6 +262,199 @@ func (c *child) speakReal(ccid, text string) {
 	c.toCtrl(frame{CallID: ccid, Event: "log", Text: fmt.Sprintf("fakechild speak-real wrote %d bytes at rate %d", total, rate)})
 }
 
+// driveSay synthesizes text through the call's REAL TTS adapter and
+// writes the PCM to the C2 .out socket - the same surface the real
+// pipeline's playback uses (realAudio mode only). Sequential over the
+// say queue so overlapping says keep their wire order.
+func (c *child) driveSay(f frame) {
+	c.mu.Lock()
+	tts := c.tts[f.CallID]
+	out := c.audioOut[f.CallID]
+	rate := c.sttRate[f.CallID]
+	c.mu.Unlock()
+	if tts == nil {
+		c.toCtrl(frame{CallID: f.CallID, Event: "log", Text: "fakechild say drive: no tts adapter constructed"})
+		return
+	}
+	if out == nil {
+		c.toCtrl(frame{CallID: f.CallID, Event: "log", Text: "fakechild say drive: audio pair not dialed"})
+		return
+	}
+	pcm, err := tts.Speak(context.Background(), f.Text)
+	if err != nil {
+		c.toCtrl(frame{CallID: f.CallID, Event: "log", Text: "fakechild say drive speak: " + err.Error()})
+		return
+	}
+	defer func() { _ = pcm.Close() }() //nolint:errcheck // test sink drain
+	buf := make([]byte, 4096)
+	total := 0
+	for {
+		n, rerr := pcm.Read(buf)
+		if n > 0 {
+			if _, werr := out.Write(buf[:n]); werr != nil {
+				c.toCtrl(frame{CallID: f.CallID, Event: "log", Text: "fakechild say drive write: " + werr.Error()})
+				return
+			}
+			total += n
+		}
+		if rerr != nil {
+			break
+		}
+	}
+	c.mu.Lock()
+	c.saidSequence[f.CallID]++
+	seq := c.saidSequence[f.CallID]
+	c.mu.Unlock()
+	c.toCtrl(frame{CallID: f.CallID, Event: "log", Text: fmt.Sprintf("fakechild say drive wrote %d bytes at rate %d seq=%d", total, rate, seq)})
+}
+
+// startMicSTT arms the real-audio STT path for ccid: one adapter
+// (constructed when the keys line arrives; retried here each call) and a
+// pump feeding client PCM chunks into its Stream session. Transcripts
+// surface as C1 prompt frames exactly like the real pipeline's
+// consumeTranscripts (finals carry last:true).
+func (c *child) startMicSTT(ccid string, rate int) {
+	if !realAudioMode() || c.sttFactory == nil {
+		return
+	}
+	c.mu.Lock()
+	if _, live := c.pcmCh[ccid]; live {
+		c.mu.Unlock()
+		return // pump already armed for this call
+	}
+	cfg, haveCfg := c.sttCfg[ccid]
+	sttFactory := c.sttFactory
+	c.mu.Unlock()
+	if !haveCfg {
+		// Keys not yet arrived: the keys handler retries at construction.
+		return
+	}
+	cfg.SampleRate = rate
+	stt, err := sttFactory(cfg, "")
+	if err != nil {
+		c.toCtrl(frame{CallID: ccid, Event: "log", Text: "fakechild stt construct failed: " + err.Error()})
+		return
+	}
+	pcm := make(chan []byte, 8)
+	trs, err := stt.Stream(context.Background(), pcm)
+	if err != nil {
+		c.toCtrl(frame{CallID: ccid, Event: "log", Text: "fakechild stt stream open: " + err.Error()})
+		return
+	}
+	c.mu.Lock()
+	c.stt[ccid] = stt
+	c.pcmCh[ccid] = pcm
+	c.mu.Unlock()
+	c.toCtrl(frame{CallID: ccid, Event: "log", Text: fmt.Sprintf("fakechild stt armed vendor=%s rate=%d", cfg.Vendor, rate)})
+	// Transcript consumer: finals become last:true prompts (real turn
+	// triggers), partials become previews (real barge-in triggers on the
+	// phone leg; the local leg trips on RMS instead).
+	go func() {
+		for tr := range trs {
+			if tr.Text == "" {
+				continue
+			}
+			f := frame{CallID: ccid, Event: "prompt", Text: tr.Text}
+			if tr.Final {
+				last := true
+				f.Last = &last
+			}
+			if err := c.sendFrame(f); err != nil {
+				c.toCtrl(frame{CallID: ccid, Event: "log", Text: "fakechild stt prompt send: " + err.Error()})
+				return
+			}
+			c.toCtrl(f)
+		}
+	}()
+	// The pump: read client PCM off the .in socket and chunk it into the
+	// session (640 B L16@16k units, the real pipeline's chunk shape).
+	go func() {
+		defer close(pcm)
+		inPath := filepath.Join(c.audioDir, ccid+".in")
+		var inConn net.Conn
+		dialer := net.Dialer{}
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			conn, err := dialer.Dial("unix", inPath)
+			if err == nil {
+				inConn = conn
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if inConn == nil {
+			c.toCtrl(frame{CallID: ccid, Event: "log", Text: "fakechild stt pump: never dialed .in"})
+			return
+		}
+		c.mu.Lock()
+		c.micConn[ccid] = inConn
+		c.mu.Unlock()
+		buf := make([]byte, 640)
+		for {
+			n, rerr := inConn.Read(buf)
+			if n > 0 {
+				chunk := make([]byte, n)
+				copy(chunk, buf[:n])
+				select {
+				case pcm <- chunk:
+				default:
+					// Session backlog (the adapter is busy segmenting):
+					// drop the oldest chunk, the real pump's policy.
+					select {
+					case <-pcm:
+					default:
+					}
+					select {
+					case pcm <- chunk:
+					default:
+					}
+				}
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+}
+
+// feedMicPump injects suite-scripted client PCM into the REAL whisper STT
+// pump (realAudio mode): the suite's "client writes scripted PCM" hop.
+// The landed AudioPair client surface delegates BOTH client directions to
+// the .out accept (socket.go ReadFromClient -> ReadFromChild), so a
+// suite-side .in dial cannot reach the daemon relay when the child owns
+// the accept (the production topology answerOpen pins). The control keeps
+// the REAL adapter, segmentation, and prompt emission in the loop while
+// documenting that delegation gap (cross-leaf finding, report notes it).
+func (c *child) feedMicPump(m ctrlMsg) {
+	c.mu.Lock()
+	pcm := c.pcmCh[m.CallID]
+	c.mu.Unlock()
+	if pcm == nil {
+		c.toCtrl(frame{CallID: m.CallID, Event: "log", Text: "fakechild speak-mic: stt pump not armed"})
+		return
+	}
+	data, err := base64.StdEncoding.DecodeString(m.Note)
+	if err != nil {
+		c.toCtrl(frame{CallID: m.CallID, Event: "log", Text: "fakechild speak-mic decode: " + err.Error()})
+		return
+	}
+	// Chunk to the pump in 640-byte units (the real pump's chunk shape).
+	const chunk = 640
+	for i := 0; i < len(data); i += chunk {
+		end := i + chunk
+		if end > len(data) {
+			end = len(data)
+		}
+		c.mu.Lock()
+		ch := c.pcmCh[m.CallID]
+		c.mu.Unlock()
+		if ch == nil {
+			return
+		}
+		ch <- data[i:end]
+	}
+}
+
 // answerOpen mirrors the real child's open contract (internal/voicechild
 // open.go handleOpen): dial the C2 pair for the frame's call and answer
 // with the setup frame the daemon's router arms the talk loop on. This
@@ -236,6 +466,15 @@ func (c *child) answerOpen(f frame) {
 	if err := c.dialAudio(f.CallID); err != nil {
 		c.toCtrl(frame{CallID: f.CallID, Event: "log", Text: "fakechild open dial-audio failed: " + err.Error()})
 	}
+	// realAudio mode: arm the mic STT pump (if the keys config already
+	// arrived; otherwise the keys handler arms it).
+	c.mu.Lock()
+	rate := 16000
+	if r, ok := c.sttRate[f.CallID]; ok && r != 0 {
+		rate = r
+	}
+	c.mu.Unlock()
+	c.startMicSTT(f.CallID, rate)
 	setup := frame{
 		CallID:     f.CallID,
 		Event:      "setup",
@@ -296,6 +535,10 @@ func (c *child) handleCtrl(raw []byte) {
 		if err := c.dialAudio(m.CallID); err != nil {
 			c.toCtrl(frame{CallID: m.CallID, Event: "log", Text: "dial-audio failed: " + err.Error()})
 		}
+	case "speak-mic":
+		// voice-local leaf 11: inject suite-scripted client PCM into the
+		// REAL whisper STT pump (realAudio mode). No-op without one.
+		go c.feedMicPump(m)
 	case "speak-real":
 		// voice-tierA leaf 07: synthesize through the call's REAL TTS
 		// adapter (constructed from the daemon's keys line) and push the
@@ -397,6 +640,20 @@ func (c *child) handleRawLine(line []byte) {
 	c.tts[k.CallID] = tts
 	c.mu.Unlock()
 	c.toCtrl(frame{CallID: k.CallID, Event: "log", Text: "fakechild tts constructed"})
+	// realAudio mode: store the STT config and arm the mic pump (retrying
+	// the open-time arm now that the keys config exists).
+	if realAudioMode() && c.sttFactory != nil {
+		c.mu.Lock()
+		c.sttCfg[k.CallID] = voicechild.ProviderConfig{
+			Vendor:     k.STTVendor,
+			Model:      k.STTModel,
+			BaseURL:    k.STTBaseURL,
+			SampleRate: rate,
+		}
+		sttRate := rate
+		c.mu.Unlock()
+		c.startMicSTT(k.CallID, sttRate)
+	}
 }
 
 func main() {
@@ -439,6 +696,26 @@ func main() {
 	}
 	if realMode() {
 		c.ttsFactory = realFactories()
+	}
+	if realAudioMode() {
+		sttF, ttsF := realAudioFactories()
+		c.sttFactory = sttF
+		c.ttsFactory = ttsF
+		c.drivenSay = map[string]bool{}
+		c.saidSequence = map[string]int{}
+		c.stt = map[string]voicechild.STTProvider{}
+		c.sttCfg = map[string]voicechild.ProviderConfig{}
+		c.pcmCh = map[string]chan []byte{}
+		c.micConn = map[string]net.Conn{}
+		// Sequential say driver: one worker drains the queue so say
+		// synthesis keeps wire order (a buffered channel would let two
+		// says interleave their PCM on the .out socket).
+		c.sayQueue = make(chan frame, 32)
+		go func() {
+			for f := range c.sayQueue {
+				c.driveSay(f)
+			}
+		}()
 	}
 
 	conn, err := net.Dial("unix", *textSocket)
@@ -512,7 +789,23 @@ func main() {
 				c.mu.Lock()
 				c.speaking[f.CallID] = true
 				c.latched[f.CallID] = false
+				dedupe := realAudioMode()
 				c.mu.Unlock()
+				// realAudio mode: drive the REAL TTS adapter with this
+				// say's text (each say text is spoken exactly once -
+				// the daemon's filler + supervisor retries would
+				// otherwise double-synthesize the same greeting line).
+				if dedupe {
+					c.mu.Lock()
+					first := !c.drivenSay[f.CallID+"|"+f.Text]
+					if first {
+						c.drivenSay[f.CallID+"|"+f.Text] = true
+					}
+					c.mu.Unlock()
+					if first && f.Text != "" {
+						c.sayQueue <- f
+					}
+				}
 			}
 			if f.Event == "clear" {
 				c.mu.Lock()
