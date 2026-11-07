@@ -91,17 +91,25 @@ func openGateDB(dbPath string) (*gateDB, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("gatecapture: failed to create directory: %w", err)
 	}
+	// MkdirAll applies the mode only to dirs it CREATES. An install from the
+	// pre-fix build already has a 0755 dir here, so tighten it unconditionally
+	// (bughunt 2026-11-07 infra-fixes F-2).
+	_ = os.Chmod(filepath.Dir(dbPath), 0o700) //nolint:errcheck // best-effort tighten
 	if f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600); err == nil {
 		_ = f.Close() //nolint:errcheck // existence+mode pin; sql.Open re-opens
 	} else if !os.IsExist(err) {
 		return nil, fmt.Errorf("gatecapture: failed to create database file: %w", err)
 	}
-	// An existing file (created by an older 0644 build) is tightened here;
-	// WAL side files are best-effort.
-	_ = os.Chmod(dbPath, 0o600)        //nolint:errcheck // best-effort tighten
-	_ = os.Chmod(dbPath+"-wal", 0o600) //nolint:errcheck // best-effort tighten
+	// An existing file (created by an older 0644 build) is tightened here.
+	_ = os.Chmod(dbPath, 0o600) //nolint:errcheck // best-effort tighten
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_foreign_keys=on")
+	// The registered "sqlite" driver is modernc.org/sqlite: its DSN honors
+	// ONLY `_pragma=name(value)` params (applyQueryParams in the driver), so
+	// mattn-style `_journal_mode=WAL`/`_foreign_keys=on` queries are silently
+	// dropped (bughunt 2026-11-07 infra-fixes F-1 corollary: the store ran
+	// in delete-journal mode with FK off and no busy timeout, contradicting
+	// its own docblock "central migrate registry, WAL" claim).
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		return nil, fmt.Errorf("gatecapture: failed to open database: %w", err)
 	}
@@ -111,7 +119,27 @@ func openGateDB(dbPath string) (*gateDB, error) {
 		db.Close()
 		return nil, fmt.Errorf("gatecapture: failed to apply schema migrations: %w", err)
 	}
+	// WAL sidecars do not exist until SQLite activates journal_mode=WAL on
+	// the first real write (the migration above), and it creates them at
+	// 0666&~umask = 0644. Pre-open chmods therefore no-op and leave the
+	// un-checkpointed secret-bearing argv rows world-readable for the whole
+	// run: tighten -wal/-shm AFTER the first open+migrate instead
+	// (bughunt 2026-11-07 infra-fixes F-1; best-effort, sidecars may be
+	// recreated at 0644 after a fresh boot until the checkpoint keeps them).
+	tightenWalSidecars(dbPath)
 	return g, nil
+}
+
+// tightenWalSidecars best-effort chmods the WAL side files SQLite creates
+// beside the main DB to owner-only. They may not exist yet on a read-only
+// first open; missing files are skipped silently.
+func tightenWalSidecars(dbPath string) {
+	for _, suffix := range []string{"-wal", "-shm"} {
+		p := dbPath + suffix
+		if _, err := os.Stat(p); err == nil {
+			_ = os.Chmod(p, 0o600) //nolint:errcheck // best-effort tighten
+		}
+	}
 }
 
 // insert writes one row. The caller has already validated the vocabularies

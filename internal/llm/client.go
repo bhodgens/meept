@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm/metrics"
@@ -145,7 +146,20 @@ type Client struct {
 	// ALSO handed to the callback from recordUsageStore's async goroutine
 	// -- it never runs on the request goroutine and never blocks the call
 	// path. Nil = off (SetLLMCallObserver nil-guard).
-	llmCallObserver func(appmetrics.LLMCallRecord)
+	//
+	// Atomic: the fan-out setter writes under ProviderManager's pm.mu while
+	// every completed call's recordUsageStore goroutine reads this field; a
+	// plain func-field write racing request-path reads is a data race
+	// (bughunt 2026-11-07 infra-fixes F-3).
+	llmCallObserver atomic.Pointer[func(appmetrics.LLMCallRecord)]
+}
+
+// llmCallObserverFn loads the attached observer (nil when unset).
+func (c *Client) llmCallObserverFn() func(appmetrics.LLMCallRecord) {
+	if p := c.llmCallObserver.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // DefaultQuotaMaxWait mirrors config.DefaultQuotaRetryMaxWait without
@@ -321,7 +335,7 @@ func (c *Client) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord)) {
 	if c == nil || fn == nil {
 		return
 	}
-	c.llmCallObserver = fn
+	c.llmCallObserver.Store(&fn)
 }
 
 // Semantic cache partition keys: lookup/store partition by (model,
@@ -2227,7 +2241,8 @@ func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string
 	// first-delta state; -1 on non-streaming calls, cache hits, and
 	// errors (nothing armed the clock or no delta ever arrived).
 	ttftMs := ttftMS(chatOpts)
-	if c.usageStore == nil && c.llmCallObserver == nil {
+	observer := c.llmCallObserverFn()
+	if c.usageStore == nil && observer == nil {
 		return
 	}
 	//nolint:gosec // goroutine outlives request context
@@ -2252,8 +2267,8 @@ func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string
 		if c.usageStore != nil {
 			c.usageStore.RecordLLMCall(record)
 		}
-		if c.llmCallObserver != nil {
-			c.llmCallObserver(record)
+		if observer != nil {
+			observer(record)
 		}
 	}()
 }

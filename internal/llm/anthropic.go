@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm/metrics"
@@ -73,8 +74,17 @@ type AnthropicClient struct {
 
 	// llmCallObserver is the leaf-01 (llm-hop-tracing) seam -- see
 	// Client.llmCallObserver. Fired from recordUsageStore's async
-	// goroutine; nil = off (SetLLMCallObserver nil-guard).
-	llmCallObserver func(appmetrics.LLMCallRecord)
+	// goroutine; nil = off (SetLLMCallObserver nil-guard). Atomic for the
+	// same reason as Client's (bughunt 2026-11-07 infra-fixes F-3).
+	llmCallObserver atomic.Pointer[func(appmetrics.LLMCallRecord)]
+}
+
+// llmCallObserverFn loads the attached observer (nil when unset).
+func (c *AnthropicClient) llmCallObserverFn() func(appmetrics.LLMCallRecord) {
+	if p := c.llmCallObserver.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // SetQuotaMaxWait sets the quota wait upper bound. Nil-receiver safe.
@@ -300,7 +310,8 @@ func (c *AnthropicClient) recordUsageStore(cfg *ModelConfig, usage TokenUsage, i
 	// first-delta state; -1 on non-streaming calls, cache hits, and
 	// errors (nothing armed the clock or no delta ever arrived).
 	ttftMs := ttftMS(chatOpts)
-	if c.usageStore == nil && c.llmCallObserver == nil {
+	observer := c.llmCallObserverFn()
+	if c.usageStore == nil && observer == nil {
 		return
 	}
 	//nolint:gosec // goroutine outlives request context
@@ -336,8 +347,8 @@ func (c *AnthropicClient) recordUsageStore(cfg *ModelConfig, usage TokenUsage, i
 		if c.usageStore != nil {
 			c.usageStore.RecordLLMCall(record)
 		}
-		if c.llmCallObserver != nil {
-			c.llmCallObserver(record)
+		if observer != nil {
+			observer(record)
 		}
 	}()
 }
@@ -350,7 +361,7 @@ func (c *AnthropicClient) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord)) 
 	if c == nil || fn == nil {
 		return
 	}
-	c.llmCallObserver = fn
+	c.llmCallObserver.Store(&fn)
 }
 
 // recordRefusalBudget charges a REFUSED call's provider-reported usage to the

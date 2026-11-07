@@ -34,11 +34,11 @@ func TestProviderManager_SetLLMCallObserverFanout(t *testing.T) {
 		var fn func(appmetrics.LLMCallRecord)
 		switch x := c.(type) {
 		case *Client:
-			fn = x.llmCallObserver
+			fn = x.llmCallObserverFn()
 		case *AnthropicClient:
-			fn = x.llmCallObserver
+			fn = x.llmCallObserverFn()
 		case *CodexClient:
-			fn = x.llmCallObserver
+			fn = x.llmCallObserverFn()
 		default:
 			t.Fatalf("%s: unexpected chatter type %T", who, c)
 		}
