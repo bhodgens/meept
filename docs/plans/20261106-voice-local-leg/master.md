@@ -363,7 +363,7 @@ Per child, in order:
 | # | Leaf | Wave | Status | Notes |
 |---|------|------|--------|-------|
 | 01 | frame-config | A | DONE cb8c8672 | gates re-run by orchestrator |
-| 02 | local-rms-bargein | B | PENDING | tierA 05/06 land first |
+| 02 | local-rms-bargein | B | DONE 1046dda0 | playback-side RMS VAD (10-chunk/200ms sustained window), same interrupted latch inlined under playMu, phone legs excluded; -race clean; only the 2 documented host-bound REDs |
 | 03 | child-open-handler | B | DONE 6e1113ce | orchestrator in-session after 2 delegation deaths |
 | 04 | open-producer-profile | B | DONE 6e1113ce + follow-up | CL4 resolver (internal/voice/profile.go) + voice.employee_leg config (OQ4 pick: config list, per leaf 01 doc shape); keys-emission swap still gated on tierA 03 |
 | 05 | local-splice | A | DONE 57abc139 | orchestrator fixed clear-frame newline |
