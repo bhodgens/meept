@@ -51,6 +51,7 @@ type CommandHandler struct {
 	getProjectID func() string
 	skillCommand *commands.SkillCommand
 	notifier     NotificationToggler
+	voice        *models.VoiceSessionModel
 }
 
 // NotificationToggler lets slash commands toggle Do-Not-Disturb mode on the
@@ -193,6 +194,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeStatus()
 	case "intake":
 		return h.executeIntake()
+	case "voice":
+		return h.executeVoice(cmd.Args)
 	case CmdTasks:
 		return h.executeTasks(cmd.Args)
 	case "task":
@@ -292,6 +295,8 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("                      query dispatch job status\n")
 	sb.WriteString("  /dispatch results <jobID>\n")
 	sb.WriteString("                      fetch dispatch job results\n")
+	sb.WriteString("  /voice <emp>|stop|list\n")
+	sb.WriteString("                      start, stop, or list local voice sessions\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -517,6 +522,18 @@ examples:
   /prompts                          list all templates
   /prompts show planner/decompose   show the decompose template
   /prompts validate                 validate all templates`,
+
+		"voice": `usage: /voice <employee> [label] | /voice stop | /voice list
+
+start, stop, and inspect local voice sessions for this machine.
+  /voice eve          start a live local call with employee eve
+  /voice eve desk     start it with a session label
+  /voice stop         end the live call
+  /voice list         show live calls (both legs)
+while a call is live the status bar shows the employee, leg, and
+call id. audio uses the leaf 08 client shim (mic via ffmpeg,
+speaker via oto) when a dialer is wired; without it the session
+is control-only.`,
 	}
 
 	if text, ok := helpTexts[name]; ok {
