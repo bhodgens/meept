@@ -1,10 +1,28 @@
 package voice
 
 // Test helpers for ChildProc (leaf 13): the fake child binaries (built once
-// per test run by compiling tiny generated mains), the fake-daemon re-exec
+// per test RUN by compiling tiny generated mains), the fake-daemon re-exec
 // role used by the parent-death test, and the processAlive shim.
+//
+// Build determinism (flake fix): every ChildProc test used to run its own
+// `go build` of the helper binaries inside the test process — buildFakeVoiceChild
+// per test env, and a FULL cmd/meept-daemon build (buildSupervisorCapableBinary,
+// ~7s) on every TestChildProcParentDeath iteration. Under -p 2 -race on a
+// loaded host, one transient failure of those in-test builds (toolchain
+// contention with concurrent sessions, a just-written binary briefly refused
+// by macOS AMFI at exec time) surfaced as a test FAIL ~1 run in 20 — observed
+// as TestChildProcParentDeath failing at 1.44s, i.e. inside the BUILD phase,
+// far inside every supervision deadline (15s pid / 5s ready / 10s alive / 20s
+// gone). Production logic was never involved in that failure class.
+//
+// Fix: each run-constant binary is built exactly once per test binary into a
+// shared run-scoped dir, with bounded retries and a warm exec check proving
+// the fresh binary actually runs. A real build failure still fails every
+// dependent test fast, with the captured stderr. TestMain removes the dir.
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +30,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -43,25 +62,130 @@ func waitCmd(t *testing.T, cmd *exec.Cmd) {
 	}
 }
 
-// goBuild compiles src into a standalone binary in dir.
-func goBuild(t *testing.T, dir, binName, src string) string {
-	t.Helper()
-	out := filepath.Join(dir, binName)
-	srcPath := filepath.Join(dir, binName+".go")
-	if err := os.WriteFile(srcPath, []byte(src), 0o600); err != nil {
-		t.Fatalf("write helper source: %v", err)
-	}
-	cmd := exec.Command("go", "build", "-o", out, srcPath)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("go build %s: %v", binName, err)
-	}
-	t.Cleanup(func() {
-		if rmErr := os.Remove(out); rmErr != nil {
-			t.Logf("remove %s: %v", out, rmErr)
+// childProcBinDirMu guards the run-scoped shared binary dir.
+var childProcBinDirMu sync.Mutex
+var childProcBinDir string
+
+// childProcSharedBinDir returns (creating once) the run-scoped directory the
+// cached helper binaries are built into. cleanupSharedChildProcBins removes
+// it when the test binary exits.
+func childProcSharedBinDir() (string, error) {
+	childProcBinDirMu.Lock()
+	defer childProcBinDirMu.Unlock()
+	if childProcBinDir == "" {
+		dir, err := os.MkdirTemp("", "vsbin")
+		if err != nil {
+			return "", fmt.Errorf("shared test bin dir: %w", err)
 		}
-	})
-	return out
+		childProcBinDir = dir
+	}
+	return childProcBinDir, nil
+}
+
+// cleanupSharedChildProcBins removes the run-scoped bin dir. Called from
+// TestMain after m.Run(); safe when the dir was never created.
+func cleanupSharedChildProcBins() {
+	childProcBinDirMu.Lock()
+	defer childProcBinDirMu.Unlock()
+	if childProcBinDir != "" {
+		_ = os.RemoveAll(childProcBinDir)
+		childProcBinDir = ""
+	}
+}
+
+// warmExec proves a freshly built binary execs. macOS can transiently kill a
+// just-written binary at dyld/AMFI time under load; discovering that inside
+// the supervised spawn chain costs the whole poll deadline, so it is checked
+// at build time instead. args must make main exit on its own OR the binary
+// must be safe to kill after warmGrace (the never-exit variants). A process
+// that runs — exits with any code, or is still alive at the grace tick and
+// gets reaped after our own Kill — proves exec + dyld are fine. A failure to
+// even start it, or a signalled death that is NOT our own Kill, is transient:
+// the caller retries the build+warm pair.
+func warmExec(path string, warmGrace time.Duration, args ...string) error {
+	cmd := exec.Command(path, args...)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("warm exec start %s: %w", filepath.Base(path), err)
+	}
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+	select {
+	case err := <-waitCh:
+		if err == nil {
+			return nil
+		}
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			// Ran and exited (any code): exec path is proven.
+			return nil
+		}
+		return fmt.Errorf("warm exec wait %s: %w", filepath.Base(path), err)
+	case <-time.After(warmGrace):
+		// Still running: kill it and accept — exec + run are proven.
+		_ = cmd.Process.Kill()
+		select {
+		case <-waitCh:
+			return nil
+		case <-time.After(2 * time.Second):
+			return fmt.Errorf("warm exec %s: process unkillable", filepath.Base(path))
+		}
+	}
+}
+
+// runGoBuild runs one `go build -o out target` (target is either a
+// generated .go file path or a module package path) with captured stderr,
+// returned on failure for the retry report.
+func runGoBuild(out, target string) error {
+	cmd := exec.Command("go", "build", "-o", out, target)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// buildAndWarm compiles (srcPath = generated .go file, or pkgPath = module
+// package) into <sharedDir>/<name> and warm-execs the result, retrying
+// transient failures of either step together with backoff. Exactly one of
+// src/pkg must be non-empty.
+func buildAndWarm(name, src, pkg string, warmGrace time.Duration, warmArgs ...string) (string, error) {
+	dir, err := childProcSharedBinDir()
+	if err != nil {
+		return "", err
+	}
+	target := src
+	if pkg != "" {
+		target = pkg
+	}
+	if src != "" {
+		srcPath := filepath.Join(dir, name+".go")
+		if wErr := os.WriteFile(srcPath, []byte(src), 0o600); wErr != nil {
+			return "", fmt.Errorf("write helper source: %w", wErr)
+		}
+		target = srcPath
+	}
+	var last error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if attempt > 1 {
+			time.Sleep(time.Duration(attempt-1) * 500 * time.Millisecond)
+		}
+		out := filepath.Join(dir, name)
+		if bErr := runGoBuild(out, target); bErr != nil {
+			last = fmt.Errorf("attempt %d build: %w", attempt, bErr)
+			continue
+		}
+		if wErr := warmExec(out, warmGrace, warmArgs...); wErr != nil {
+			_ = os.Remove(out)
+			last = fmt.Errorf("attempt %d warm: %w", attempt, wErr)
+			continue
+		}
+		return out, nil
+	}
+	return "", last
 }
 
 // fakeVoiceChildSrc is the fake meept-voice the tests spawn: it reads the
@@ -160,36 +284,71 @@ func main() {
 }
 `
 
+// buildFakeVoiceChild returns the fake child binary, built once per test run
+// (the dir argument is kept for call-site compatibility; the binary is
+// run-constant and must NOT be rebuilt per test / per -count iteration —
+// that rebuild loop was the flake surface).
 func buildFakeVoiceChild(t *testing.T, dir string) string {
 	t.Helper()
-	return goBuild(t, dir, "fake-meept-voice", fakeVoiceChildSrc)
+	_ = dir
+	bin, err := fakeVoiceChildBin()
+	if err != nil {
+		t.Fatalf("build fake voice child: %v", err)
+	}
+	return bin
 }
 
 func buildSilentVoiceChild(t *testing.T, dir string) string {
 	t.Helper()
-	return goBuild(t, dir, "silent-meept-voice", silentVoiceChildSrc)
+	_ = dir
+	bin, err := silentVoiceChildBin()
+	if err != nil {
+		t.Fatalf("build silent voice child: %v", err)
+	}
+	return bin
 }
+
+// The run-scoped build caches. Each sync.OnceValues runs the build+warm
+// sequence exactly once per test binary; a real (non-transient) build failure
+// is cached and fails every dependent test — correct: it is a broken
+// toolchain, not a flake.
+var fakeVoiceChildBin = sync.OnceValues(func() (string, error) {
+	// Warm exec with no args: main exits 2 immediately (missing flags).
+	return buildAndWarm("fake-meept-voice", fakeVoiceChildSrc, "", 10*time.Second)
+})
+
+var silentVoiceChildBin = sync.OnceValues(func() (string, error) {
+	// The silent child never exits on its own: warm exec starts it and
+	// kills it at the grace tick.
+	return buildAndWarm("silent-meept-voice", silentVoiceChildSrc, "", 1*time.Second)
+})
 
 // buildSupervisorCapableBinary builds a meept-daemon-named binary that
 // carries the supervisor entry point (llm's supervisor resolution accepts
 // only executables whose basename starts with meept-daemon). It compiles
 // the module's own cmd/meept-daemon, which already implements supervisor
-// mode - no generated source, no internal-package violation.
+// mode - no generated source, no internal-package violation. Built once per
+// test run: this is the most expensive build in the suite (the whole daemon,
+// ~7s) and per-count-iteration rebuilds multiplied both the wall time and
+// the transient build-failure surface that flaked TestChildProcParentDeath.
 func buildSupervisorCapableBinary(t *testing.T, dir string) string {
 	t.Helper()
-	out := filepath.Join(dir, "meept-daemon-voice-sup")
-	cmd := exec.Command("go", "build", "-o", out, "github.com/caimlas/meept/cmd/meept-daemon")
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	_ = dir
+	bin, err := supervisorCapableBin()
+	if err != nil {
 		t.Fatalf("go build meept-daemon supervisor helper: %v", err)
 	}
-	t.Cleanup(func() {
-		if rmErr := os.Remove(out); rmErr != nil {
-			t.Logf("remove %s: %v", out, rmErr)
-		}
-	})
-	return out
+	return bin
 }
+
+var supervisorCapableBin = sync.OnceValues(func() (string, error) {
+	// Warm exec in supervisor mode with a malformed invocation:
+	// runSupervisorMode reports the parse error and exits 2 BEFORE
+	// spawning anything, proving the just-built binary execs with no
+	// side effects.
+	return buildAndWarm("meept-daemon-voice-sup", "", "github.com/caimlas/meept/cmd/meept-daemon",
+		30*time.Second, "--supervise-parent", "0", "--", "/usr/bin/true")
+})
 
 // runVoiceFakeDaemon is the parent-death test's re-exec role: it stands in
 // for the daemon. args: <sup-bin> <pid-file> <ready-file> <runtime argv...>.

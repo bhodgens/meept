@@ -357,7 +357,13 @@ func TestChildProcParentDeath(t *testing.T) {
 
 	// Hard-kill the parent: the supervisor must terminate the child group.
 	if err := fakeDaemon.Process.Kill(); err != nil {
-		t.Fatalf("kill fake daemon: %v", err)
+		// Kill reports an error only once the process is gone: the test's
+		// premise is a hard kill of a LIVE parent, so an early fake-daemon
+		// exit is the failure, not the kill error itself. The fake daemon
+		// exits on its own only when the supervisor or the runtime died
+		// first, and its stderr (passed through above) says which.
+		waitCmd(t, fakeDaemon)
+		t.Fatalf("fake daemon exited before the hard kill: %v", err)
 	}
 	waitCmd(t, fakeDaemon)
 

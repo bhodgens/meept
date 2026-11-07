@@ -33,5 +33,10 @@ func TestMain(m *testing.M) {
 	if len(args) > 0 && args[0] == voiceFakeDaemonFlag {
 		os.Exit(runVoiceFakeDaemon(args[1:]))
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	// The run-scoped helper binary cache (childproc_testhelper_test.go)
+	// lives outside the per-test temp dirs; remove it when the whole run
+	// finishes so built binaries never outlive the test process.
+	cleanupSharedChildProcBins()
+	os.Exit(code)
 }
