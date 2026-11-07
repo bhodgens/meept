@@ -524,7 +524,6 @@ internal/agent/conversation.go unreachable func: WithStoreLogger
 internal/agent/conversation.go unreachable func: WithSystemPrompt
 internal/agent/dispatcher_report_tagalong.go unreachable func: classifyReportTagAlong
 internal/agent/dispatcher_report_tagalong.go unreachable func: newTopicStopwords
-internal/agent/dispatcher_scope.go unreachable func: Dispatcher.chatAgentScopeOptions
 internal/agent/dispatcher_scope.go unreachable func: Dispatcher.lookupSession
 internal/agent/dispatcher_scope.go unreachable func: Dispatcher.rescopeMemoryContextForAgent
 internal/agent/dispatcher_scope.go unreachable func: Dispatcher.sessionScopeOptions
@@ -747,7 +746,6 @@ internal/agent/executor.go unreachable func: Executor.publishToolProgress
 internal/agent/executor.go unreachable func: Executor.SetAgentID
 internal/agent/executor.go unreachable func: Executor.SetConversationID
 internal/agent/executor.go unreachable func: Executor.SetDecisionLogLevel
-internal/agent/executor.go unreachable func: Executor.SetExposurePlan
 internal/agent/executor.go unreachable func: Executor.SetGroupResolution
 internal/agent/executor.go unreachable func: Executor.SetParallelismConfig
 internal/agent/executor.go unreachable func: Executor.SetRegistry
@@ -1039,10 +1037,8 @@ internal/agent/intent_analyzer.go unreachable func: TrueIntentAnalysis.IsAmbiguo
 internal/agent/intent_index.go unreachable func: buildIntentText
 internal/agent/intent_index.go unreachable func: NewSemanticIndex
 internal/agent/intent_index.go unreachable func: SemanticIndex.BuildIndex
-internal/agent/intent_index.go unreachable func: SemanticIndex.BuildIndexWithCancel
 internal/agent/intent_index.go unreachable func: SemanticIndex.IsReady
 internal/agent/intent_index.go unreachable func: SemanticIndex.Match
-internal/agent/intent_index.go unreachable func: SemanticIndex.Stop
 internal/agent/intent_tool_map.go unreachable func: IntentMap.For
 internal/agent/intent_tool_map.go unreachable func: IntentMap.Names
 internal/agent/intent_tool_map.go unreachable func: IntentMap.SetUniverse
@@ -2162,6 +2158,7 @@ internal/agent/scope_inputs.go unreachable func: resolveScopeInputs
 internal/agent/scope_inputs.go unreachable func: resolveScopeInputsWithCeiling
 internal/agent/scope_inputs.go unreachable func: scopeIdentityInputs
 internal/agent/scope_wiring.go unreachable func: AgentLoop.memoryScopeCtxIdentity
+internal/agent/scope_wiring.go unreachable func: AgentLoop.recallScopeOptions
 internal/agent/scope_wiring.go unreachable func: AgentLoop.resolveMemoryScope
 internal/agent/scope_wiring.go unreachable func: AgentLoop.SetMultiUserScopeEnabled
 internal/agent/scope_wiring.go unreachable func: AgentLoop.SetScopeUserID
@@ -2276,6 +2273,7 @@ internal/agent/spec.go unreachable func: AgentSpec.GrantedToolNames
 internal/agent/spec.go unreachable func: AgentSpec.HasSkill
 internal/agent/spec.go unreachable func: AgentSpec.HasTool
 internal/agent/spec.go unreachable func: AgentSpec.ScopedToolNames
+internal/agent/spec.go unreachable func: AgentSpec.ScopedToolNamesPresent
 internal/agent/spec.go unreachable func: CanonicalToolName
 internal/agent/spec.go unreachable func: DefaultConstraints
 internal/agent/spec.go unreachable func: ExecutorAgentIDs
@@ -2511,12 +2509,17 @@ internal/agent/tool_exemplar.go unreachable func: buildToolExemplarSection
 internal/agent/tool_exemplar.go unreachable func: containsFold
 internal/agent/tool_exemplar.go unreachable func: isLFMFamilyModel
 internal/agent/tool_exposure.go unreachable func: EffectiveExposureMode
+internal/agent/tool_exposure.go unreachable func: ExposureGateRefusal
 internal/agent/tool_exposure.go unreachable func: ExposurePlan.Active
+internal/agent/tool_exposure.go unreachable func: ExposurePlan.Enforcing
 internal/agent/tool_exposure.go unreachable func: ExposurePlan.IsActive
 internal/agent/tool_exposure.go unreachable func: ExposurePlan.IsKnown
 internal/agent/tool_exposure.go unreachable func: ExposurePlan.Promote
+internal/agent/tool_exposure.go unreachable func: ExposurePlan.promoteLocked
+internal/agent/tool_exposure.go unreachable func: exposurePlanFromContext
 internal/agent/tool_exposure.go unreachable func: IsFrontierClass
 internal/agent/tool_exposure.go unreachable func: NewExposurePlan
+internal/agent/tool_exposure.go unreachable func: WithExposurePlan
 internal/agent/tool_registry.go unreachable func: DepthToolRegistry.DefinitionsAtDepth
 internal/agent/tool_registry.go unreachable func: DepthToolRegistry.entryForDepth
 internal/agent/tool_registry.go unreachable func: DepthToolRegistry.GetTool
@@ -2686,6 +2689,7 @@ internal/agent/turnjournal/writer.go unreachable func: JournalWriter.OnRunStart
 internal/agent/turnjournal/writer.go unreachable func: JournalWriter.OnStepComplete
 internal/agent/turnjournal/writer.go unreachable func: JournalWriter.OnStepStart
 internal/agent/turnjournal/writer.go unreachable func: JournalWriter.record
+internal/agent/turnjournal/writer.go unreachable func: markDedup
 internal/agent/turnjournal/writer.go unreachable func: NewJournalWriter
 internal/agent/util.go unreachable func: extractBriefDescription
 internal/agent/util.go unreachable func: formatTokenCount
@@ -4101,8 +4105,6 @@ internal/config/tool_hints.go unreachable func: normalizeHint
 internal/config/tool_hints.go unreachable func: ToolHintAgent
 internal/configui/fields.go unreachable func: NewDrilldownFieldCount
 internal/configui/fields.go unreachable func: NewStringSliceDrilldownField
-internal/configui/sections_voice.go unreachable func: buildVoiceFields
-internal/configui/sections_voice.go unreachable func: voiceJoinSlice
 internal/configui/writers.go unreachable func: LoadMainConfig
 internal/context/artifact_manager.go unreachable func: ArtifactManager.Cleanup
 internal/context/artifact_manager.go unreachable func: ArtifactManager.GetArtifacts
@@ -4213,11 +4215,6 @@ internal/daemon/service.go unreachable func: DaemonService.Restart
 internal/daemon/service.go unreachable func: DaemonService.Uptime
 internal/daemon/toolgate.go unreachable func: ExecGateImpl.engineOverride
 internal/daemon/voice_employee.go unreachable func: VoiceEmployeeWiring.AcquireCallHold
-internal/daemon/voice_wiring.go unreachable func: agentIDFromContext
-internal/daemon/voice_wiring.go unreachable func: VoiceWiring.agentIDForTool
-internal/daemon/voice_wiring.go unreachable func: VoiceWiring.dialForTool
-internal/daemon/voice_wiring.go unreachable func: VoiceWiring.Start
-internal/daemon/voice_wiring.go unreachable func: VoiceWiring.Stop
 internal/daemon/worker_pool.go unreachable func: Worker.hasCapacity
 internal/daemon/worker_pool.go unreachable func: Worker.processWorkItem
 internal/daemon/worker_pool.go unreachable func: Worker.resetIdleTimer
@@ -4874,7 +4871,6 @@ internal/eval/test_corpus.go unreachable func: TestCorpus.CategoryCount
 internal/eval/test_corpus.go unreachable func: TestCorpus.CategoryNames
 internal/eval/test_corpus.go unreachable func: TestCorpus.TestCaseByCategory
 internal/eval/test_corpus.go unreachable func: TestCorpus.TotalCount
-internal/gatecapture/export.go unreachable func: sharesNearMissPrefix
 internal/githubsvc/pool.go unreachable func: NewClientPool
 internal/githubsvc/rearm.go unreachable func: cronMinuteExpr
 internal/githubsvc/rearm.go unreachable func: InstructionReArmSink.CancelReArm
@@ -4910,7 +4906,6 @@ internal/groups/resolution.go unreachable func: Resolver.extraAllowsForSubject
 internal/groups/resolution.go unreachable func: Resolver.ResolveForAgent
 internal/groups/resolution.go unreachable func: Resolver.ValidatePolicies
 internal/groups/resolution.go unreachable func: ResolverOptions.KnownTools
-internal/groups/resolution.go unreachable func: ResolverOptions.normalizeFunc
 internal/groups/resolution.go unreachable func: ResolverOptions.WithKnownTools
 internal/groups/resolve.go unreachable func: Resolved.String
 internal/groups/validate.go unreachable func: ValidatePolicyTools
@@ -5062,6 +5057,7 @@ internal/llm/anthropic.go unreachable func: AnthropicClient.Close
 internal/llm/anthropic.go unreachable func: AnthropicClient.Config
 internal/llm/anthropic.go unreachable func: AnthropicClient.doRequest
 internal/llm/anthropic.go unreachable func: AnthropicClient.doStreamingRequest
+internal/llm/anthropic.go unreachable func: AnthropicClient.llmCallObserverFn
 internal/llm/anthropic.go unreachable func: AnthropicClient.parseResponse
 internal/llm/anthropic.go unreachable func: AnthropicClient.parseStreamingResponse
 internal/llm/anthropic.go unreachable func: AnthropicClient.partsToAnthropicContent
@@ -5177,6 +5173,7 @@ internal/llm/client.go unreachable func: Client.Close
 internal/llm/client.go unreachable func: Client.Config
 internal/llm/client.go unreachable func: Client.doRequest
 internal/llm/client.go unreachable func: Client.doStreamRequest
+internal/llm/client.go unreachable func: Client.llmCallObserverFn
 internal/llm/client.go unreachable func: Client.parseResponse
 internal/llm/client.go unreachable func: Client.parseResponseWithTools
 internal/llm/client.go unreachable func: Client.policyCfg
@@ -5259,6 +5256,7 @@ internal/llm/codex.go unreachable func: CodexClient.ChatWithProgress
 internal/llm/codex.go unreachable func: CodexClient.Config
 internal/llm/codex.go unreachable func: CodexClient.doRequest
 internal/llm/codex.go unreachable func: CodexClient.doRequestWithEmptyRetry
+internal/llm/codex.go unreachable func: CodexClient.llmCallObserverFn
 internal/llm/codex.go unreachable func: CodexClient.parseResponse
 internal/llm/codex.go unreachable func: CodexClient.recordUsageStore
 internal/llm/codex.go unreachable func: CodexClient.SetLLMCallObserver
@@ -5653,6 +5651,7 @@ internal/llm/provider_manager.go unreachable func: ProviderManager.ResetProvider
 internal/llm/provider_manager.go unreachable func: ProviderManager.runHealthCheck
 internal/llm/provider_manager.go unreachable func: ProviderManager.SetCostOptimized
 internal/llm/provider_manager.go unreachable func: ProviderManager.SetFailurePolicyConfig
+internal/llm/provider_manager.go unreachable func: ProviderManager.SetLLMCallObserver
 internal/llm/provider_manager.go unreachable func: ProviderManager.SetQuotaMaxWait
 internal/llm/provider_manager.go unreachable func: ProviderManager.SetSessionActivityCallback
 internal/llm/provider_manager.go unreachable func: ProviderManager.SetSessionAffinityConfig
@@ -5758,7 +5757,9 @@ internal/llm/resolver.go unreachable func: Resolver.SmallModel
 internal/llm/resolver.go unreachable func: Resolver.sweepExpiredEndpointBlocks
 internal/llm/resolver.go unreachable func: Resolver.VideoModel
 internal/llm/resolver.go unreachable func: VerdictForFailure
+internal/llm/retry_after.go unreachable func: dezeroDate
 internal/llm/retry_after.go unreachable func: ParseRetryAfter
+internal/llm/retry_after.go unreachable func: secondsToDuration
 internal/llm/routing_log.go unreachable func: NewRoutingLogger
 internal/llm/routing_log.go unreachable func: RoutingLogger.ByModel
 internal/llm/routing_log.go unreachable func: RoutingLogger.Close
@@ -6058,7 +6059,9 @@ internal/memory/bridges_verify.go unreachable func: VerifyBridges
 internal/memory/bridges_verify.go unreachable func: verifyBridgesListed
 internal/memory/bridges.go unreachable func: bridgeCandidates
 internal/memory/bridges.go unreachable func: bridgeFactsFromMetadata
+internal/memory/bridges.go unreachable func: bridgeSourceScope
 internal/memory/bridges.go unreachable func: eligibleBridgeEntities
+internal/memory/bridges.go unreachable func: evidenceMemories
 internal/memory/bridges.go unreachable func: extractBridgeFacts
 internal/memory/bridges.go unreachable func: extractEntitiesV1
 internal/memory/bridges.go unreachable func: filterBridgeEvidence
@@ -6435,6 +6438,7 @@ internal/memory/manager.go unreachable func: Manager.invalidateBridgesForMemoryL
 internal/memory/manager.go unreachable func: Manager.IsDistributed
 internal/memory/manager.go unreachable func: Manager.IsInitialized
 internal/memory/manager.go unreachable func: Manager.IsMemvidActive
+internal/memory/manager.go unreachable func: Manager.ListBridgesScoped
 internal/memory/manager.go unreachable func: Manager.LLM
 internal/memory/manager.go unreachable func: Manager.markVersionNonCurrent
 internal/memory/manager.go unreachable func: Manager.maybeMirrorToDualStore
@@ -6521,6 +6525,7 @@ internal/memory/review_queue.go unreachable func: Manager.SetVerdictAuditor
 internal/memory/review_queue.go unreachable func: ReasonHash
 internal/memory/rotate.go unreachable func: RotateIfNeeded
 internal/memory/sanitize_store.go unreachable func: SanitizeForStore
+internal/memory/scope_filter.go unreachable func: bridgeVisible
 internal/memory/scope_filter.go unreachable func: FilterResults
 internal/memory/scope_filter.go unreachable func: filterScopeResults
 internal/memory/scope_filter.go unreachable func: MemoryToResult
@@ -8241,6 +8246,7 @@ internal/security/secrets.go unreachable func: SecretObfuscator.addRegexEntryLoc
 internal/security/secrets.go unreachable func: SecretObfuscator.Deobfuscate
 internal/security/secrets.go unreachable func: SecretObfuscator.deobfuscateMessage
 internal/security/secrets.go unreachable func: SecretObfuscator.DeobfuscateMessages
+internal/security/secrets.go unreachable func: SecretObfuscator.DeobfuscateUntagged
 internal/security/secrets.go unreachable func: SecretObfuscator.loadEnvSecrets
 internal/security/secrets.go unreachable func: SecretObfuscator.LoadFromConfig
 internal/security/secrets.go unreachable func: SecretObfuscator.obfuscate
@@ -9480,6 +9486,7 @@ internal/skills/lifecycle/evolver.go unreachable func: Evolver.passCPrune
 internal/skills/lifecycle/evolver.go unreachable func: Evolver.passDFillGap
 internal/skills/lifecycle/evolver.go unreachable func: Evolver.processProposal
 internal/skills/lifecycle/evolver.go unreachable func: Evolver.RunCycle
+internal/skills/lifecycle/evolver.go unreachable func: Evolver.userLocked
 internal/skills/lifecycle/evolver.go unreachable func: evolverPlanCandidateContent
 internal/skills/lifecycle/evolver.go unreachable func: evolverSkillNameFromAction
 internal/skills/lifecycle/evolver.go unreachable func: mapReflectionType
@@ -9495,6 +9502,7 @@ internal/skills/lifecycle/gap_analysis.go unreachable func: GapAnalyzer.Propose
 internal/skills/lifecycle/gap_analysis.go unreachable func: generateSkillBody
 internal/skills/lifecycle/gap_analysis.go unreachable func: NewGapAnalyzer
 internal/skills/lifecycle/gap_analysis.go unreachable func: slugifyQuery
+internal/skills/lifecycle/origin.go unreachable func: skillFileOrigin
 internal/skills/lifecycle/types.go unreachable func: Outcome.String
 internal/skills/lifecycle/types.go unreachable func: ParseOutcome
 internal/skills/lifecycle/usage.go unreachable func: NewUsageTracker
@@ -12674,20 +12682,17 @@ internal/validator/web.go unreachable func: WebValidator.validateAPIResponse
 internal/validator/web.go unreachable func: WebValidator.ValidateEvidence
 internal/voice/binding.go unreachable func: BuildDayBrief
 internal/voice/childproc.go unreachable func: ChildProc.Alive
-internal/voice/childproc.go unreachable func: ChildProc.Stop
 internal/voice/daybrief.go unreachable func: AggregatorSource.Query
 internal/voice/daybrief.go unreachable func: Build
 internal/voice/daybrief.go unreachable func: isNilSource
-internal/voice/dial.go unreachable func: Dialer.abandonEffect
-internal/voice/dial.go unreachable func: Dialer.armNoAnswerTimer
-internal/voice/dial.go unreachable func: Dialer.Dial
-internal/voice/dial.go unreachable func: Dialer.doneFor
-internal/voice/dial.go unreachable func: Dialer.finishCall
-internal/voice/dial.go unreachable func: Dialer.NotifyAnswered
-internal/voice/dial.go unreachable func: Dialer.registryCap
-internal/voice/dial.go unreachable func: Dialer.registryGate
-internal/voice/dial.go unreachable func: Dialer.reservedResult
-internal/voice/dial.go unreachable func: NormalizeE164
+internal/voice/localsplice.go unreachable func: LocalSpliceFor
+internal/voice/localsplice.go unreachable func: RunLocalSplice
+internal/voice/localsplice.go unreachable func: runLocalSplice.HandleInterrupt
+internal/voice/localsplice.go unreachable func: runLocalSplice.inboundLoop
+internal/voice/localsplice.go unreachable func: runLocalSplice.notify
+internal/voice/localsplice.go unreachable func: runLocalSplice.outboundLoop
+internal/voice/localsplice.go unreachable func: runLocalSplice.paceOne
+internal/voice/localsplice.go unreachable func: runLocalSplice.resumeBargeIn
 internal/voice/telnyx/callcontrol.go unreachable func: Client.DialOut
 internal/voice/telnyx/callcontrol.go unreachable func: Client.StartStreaming
 internal/voice/telnyx/callcontrol.go unreachable func: flexibleString.UnmarshalJSON
