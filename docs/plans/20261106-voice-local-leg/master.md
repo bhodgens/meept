@@ -364,14 +364,14 @@ Per child, in order:
 |---|------|------|--------|-------|
 | 01 | frame-config | A | DONE cb8c8672 | gates re-run by orchestrator |
 | 02 | local-rms-bargein | B | PENDING | tierA 05/06 land first |
-| 03 | child-open-handler | B | PENDING | F4 setup-producer half |
-| 04 | open-producer-profile | B | PENDING | serialize before leaf 07 |
+| 03 | child-open-handler | B | DONE 6e1113ce | orchestrator in-session after 2 delegation deaths |
+| 04 | open-producer-profile | B | DONE 6e1113ce | global-config-only resolution; OQ4 still open |
 | 05 | local-splice | A | DONE 57abc139 | orchestrator fixed clear-frame newline |
 | 06 | registry-leg | A | DONE a72d293f | 4-arg shape = AcquireLeg (Go: no overload) |
 | 07 | local-leg | C | PENDING | |
 | 08 | rpc-cli | D | PENDING | only components.go toucher |
 | 09 | tool-leg | D | PENDING | |
-| 10 | local-providers | B | PENDING | GPL subprocess rule |
+| 10 | local-providers | B | PARKED | leaf10 subagent: piper TTS usable, whisper STT empty scaffolding; providers.go damage reverted; salvage in /tmp/leaf10-salvage/ |
 | 11 | e2e | E | PENDING | manifest same commit |
 | 12 | docs | E | PENDING | AGENTS.md same commit |
 | 13 | tui-voice (part 2) | F | PENDING (optional) | parity deviation documented |
