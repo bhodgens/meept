@@ -667,3 +667,39 @@ func TestWireVoiceUnresolvableSupervisorModelFallsBackWithLog(t *testing.T) {
 		t.Fatalf("verdict = %+v, want allowed (fallback chatter in the loop)", verdict)
 	}
 }
+
+// bughunt 2026-11-07 voice F-6 pin: a duplicate setup frame for a live
+// ccid must be IGNORED (the child-side handleSetup twin already is).
+// Before the guard, routeFrame overwrote w.loops[ccid] and
+// w.loopCancels[ccid]: the replaced loop kept running but received no
+// further frames (the router looks up by map), and its silence timer
+// eventually fired t.end -> managerHangup on the CURRENT live call; the
+// lost cancel func leaked the context.
+func TestRouteFrameDuplicateSetupIgnored(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	const ccid = "cc-dup-setup"
+	acquireFor(w, ccid)
+
+	w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+	w.loopsMu.Lock()
+	first := w.loops[ccid]
+	firstCancel := w.loopCancels[ccid]
+	w.loopsMu.Unlock()
+	if first == nil {
+		t.Fatal("precondition: first setup armed a talk loop")
+	}
+
+	w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+	w.loopsMu.Lock()
+	second := w.loops[ccid]
+	secondCancel := w.loopCancels[ccid]
+	w.loopsMu.Unlock()
+
+	if second != first {
+		t.Fatal("F-6: duplicate setup REPLACED the live talk loop (orphaned loop + silence-timer hangup on the live call)")
+	}
+	if secondCancel == nil || firstCancel == nil {
+		t.Fatal("precondition: per-call cancel armed on both reads")
+	}
+	t.Cleanup(func() { w.releaseCall(ccid, voice.OutcomeHangup) })
+}

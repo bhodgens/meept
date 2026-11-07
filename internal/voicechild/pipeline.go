@@ -54,6 +54,13 @@ type pipeline struct {
 	interrupted bool   // one interrupt per barge-in until playback restarts
 	speaking    bool   // playback active (say in flight)
 	outCh       []byte // queued PCM awaiting write to audioOut
+	// playGen (bughunt 2026-11-07 voice F-1): bumped by clear(); each
+	// playback goroutine carries the gen it started under and aborts when
+	// the gen moves. dropQueued becomes per-barge-in (reset by the next
+	// say), so the stale stream stays dead via gen mismatch while a new
+	// utterance plays again — without this reset the agent was muted for
+	// the whole call after its first interrupt.
+	playGen uint64
 
 	// cancel cancels the pipeline's internal context (workers, streams).
 	cancel context.CancelFunc
@@ -141,10 +148,13 @@ func (p *pipeline) pumpAudioIn() {
 // immediately (leaf 08 replaces the synthesis itself).
 func (p *pipeline) enqueueSay(frame voiceframe.Frame) error {
 	p.playMu.Lock()
-	if p.dropQueued {
-		p.playMu.Unlock()
-		return nil // cleared: silently drop
-	}
+	// bughunt 2026-11-07 voice F-1: `dropQueued` used to be a once-per-call
+	// latch (never reset), so every say after the first clear was silently
+	// dropped — the agent was muted for the rest of the call. A NEW say is
+	// a new utterance: the drop applies to the INTERRUPTED stream only
+	// (the stale playback goroutine aborts on its gen mismatch, see
+	// playback()), so clear the gate here.
+	p.dropQueued = false
 	p.outCh = append(p.outCh, []byte(frame.Text)...) // placeholder queue marker; real audio queued below
 	p.playMu.Unlock()
 
@@ -154,7 +164,9 @@ func (p *pipeline) enqueueSay(frame voiceframe.Frame) error {
 
 // playback synthesizes text (stub) and writes PCM to the .out socket
 // (child->daemon). A clear received mid-playback drops the remaining audio
-// and stops writes (T4).
+// and stops writes (T4). Each stream carries the playGen it started under:
+// clear() bumps the gen, so the interrupted goroutine aborts even after a
+// later say re-opens the dropQueued gate (bughunt 2026-11-07 voice F-1).
 func (p *pipeline) playback(frame voiceframe.Frame) {
 	pcm, err := p.tts.Speak(p.ctx, frame.Text)
 	if err != nil {
@@ -164,15 +176,27 @@ func (p *pipeline) playback(frame voiceframe.Frame) {
 	defer func() { _ = pcm.Close() }() //nolint:mutexio // deferred close, no lock held
 
 	p.playMu.Lock()
-	if p.dropQueued {
+	gen := p.playGen
+	if p.dropQueued && p.playGen == gen {
+		// cleared between Speak() and here, before a newer say re-opened
+		// the gate: this stream must not start.
 		p.playMu.Unlock()
 		return
 	}
+	// Fresh playback restarts the barge-in VAD latch (one interrupt per
+	// barge-in, T5) — the path playbackRestarted() documented but never
+	// took in production.
+	p.dropQueued = false
+	p.interrupted = false
 	p.speaking = true
 	p.playMu.Unlock()
 	defer func() {
 		p.playMu.Lock()
-		p.speaking = false
+		// Only the current generation may clear `speaking` (a stale,
+		// aborted stream must not mute the barge-in VAD of a newer say).
+		if p.playGen == gen {
+			p.speaking = false
+		}
 		p.playMu.Unlock()
 	}()
 
@@ -184,15 +208,15 @@ func (p *pipeline) playback(frame voiceframe.Frame) {
 	buf := make([]byte, chunk)
 	for {
 		p.playMu.Lock()
-		dropped := p.dropQueued
+		dropped := p.dropQueued || p.playGen != gen
 		p.playMu.Unlock()
 		if dropped {
-			return // clear: drop queued audio, stop writes
+			return // clear: drop queued audio, stop writes (or gen moved on)
 		}
 		n, readErr := pcm.Read(buf)
 		if n > 0 {
 			p.playMu.Lock()
-			dropped := p.dropQueued
+			dropped := p.dropQueued || p.playGen != gen
 			p.playMu.Unlock()
 			if dropped {
 				return // clear arrived while reading: drop the chunk
@@ -217,10 +241,14 @@ func (p *pipeline) playback(frame voiceframe.Frame) {
 }
 
 // clear drops queued TTS audio for this call and stops pending .out writes
-// (C1 Frame{clear}; T4). Idempotent.
+// (C1 Frame{clear}; T4). Idempotent. Bumping playGen (bughunt 2026-11-07
+// voice F-1) retires the in-flight playback stream even after a later say
+// re-opens the dropQueued gate: the stale goroutine sees its gen mismatch
+// and aborts instead of double-writing.
 func (p *pipeline) clear() {
 	p.playMu.Lock()
 	p.dropQueued = true
+	p.playGen++
 	p.outCh = nil
 	p.playMu.Unlock()
 }

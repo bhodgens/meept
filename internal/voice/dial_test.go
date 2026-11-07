@@ -436,3 +436,83 @@ func allowedNumber(t *testing.T, cfg DialConfig) string {
 	}
 	return cfg.AllowedNumbers[0]
 }
+
+// bughunt 2026-11-07 voice F-2 pins: the no-answer fire must not tear down
+// an ANSWERED call. Timer.Stop cannot un-arm a fire already in flight
+// (Stop returns false once the value is buffered) — the answered map is the
+// second cancellation channel, re-checked AT fire time. These exercise the
+// guard directly (the map, not the Stop result).
+func TestNoAnswerTimerRespectsAnsweredFlag(t *testing.T) {
+	cfg := dialConfig()
+	cfg.TimeoutSecs = 1 // fire at +1s
+
+	// (a) UNANSWERED: the fire lands no-answer cleanup (finishCall
+	// releases the registry slot). Legacy behavior, unchanged.
+	reg := NewRegistry(1)
+	d := NewDialer(cfg, &countingController{}, nil, reg, newTestLedger(t), &captureAudit{}, testLogger())
+	res, err := d.Dial(context.Background(), DialRequest{
+		EmployeeID: "emp-1", Target: cfg.AllowedNumbers[0], RequestID: "req-f2a",
+	})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	_ = res
+	deadline := time.Now().Add(3 * time.Second)
+	for len(reg.Live()) > 0 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(reg.Live()) != 0 {
+		t.Fatalf("unanswered case: slot should release after the no-answer fire, live=%d", len(reg.Live()))
+	}
+
+	// (b) THE FIRE-IN-FLIGHT RACE, made deterministic: the fire wins the
+	// select (Timer.Stop returned false / never ran), the goroutine blocks
+	// on d.mu for the answered re-check, and the test lands the answer
+	// marker WHILE holding that lock. The guard must then return WITHOUT
+	// finishCall — the live call keeps its slot (the F-2 strand:
+	// FailOutcome used to release a slot under an answered call while the
+	// leg stayed up).
+	cfgB := dialConfig()
+	cfgB.TimeoutSecs = 1
+	regB := NewRegistry(1)
+	dB := NewDialer(cfgB, &countingController{}, nil, regB, newTestLedger(t), &captureAudit{}, testLogger())
+	const ccid = "cc-f2b"
+	if _, err := regB.Acquire(ccid, "emp-1", cfgB.AllowedNumbers[0]); err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	dB.armNoAnswerTimer(ccid) // goroutine enters the select on the 1s timer
+
+	dB.mu.Lock()
+	dB.answered[ccid] = true            // the answer lands...
+	time.Sleep(1400 * time.Millisecond) // ...the timer fires (value buffered), goroutine blocks on d.mu
+	dB.mu.Unlock()                      // releases it onto the answered re-check
+
+	// The guard path returns WITHOUT finishCall; a mutation (no guard)
+	// releases the slot via finishCall inside the next ~100 ms.
+	time.Sleep(300 * time.Millisecond)
+	if len(regB.Live()) != 1 {
+		t.Fatalf("answered call lost its slot to the no-answer fire (F-2): live=%d, want 1", len(regB.Live()))
+	}
+}
+
+// (c) The answer webhook can beat DialOut's arm site: NotifyAnswered marks
+// the ccid before armNoAnswerTimer runs, so arming is skipped entirely and
+// no timer exists for the call.
+func TestArmSkippedForAlreadyAnswered(t *testing.T) {
+	cfg := dialConfig()
+	cfg.TimeoutSecs = 1
+	d := NewDialer(cfg, &countingController{}, nil, NewRegistry(4), newTestLedger(t), &captureAudit{}, testLogger())
+	d.mu.Lock()
+	d.answered["cc-early"] = true
+	d.mu.Unlock()
+
+	d.armNoAnswerTimer("cc-early")
+
+	d.mu.Lock()
+	timer := d.timers["cc-early"]
+	d.mu.Unlock()
+	if timer != nil {
+		timer.Stop()
+		t.Fatal("timer armed for an already-answered ccid (F-2: webhook can beat the arm site)")
+	}
+}

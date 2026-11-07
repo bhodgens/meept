@@ -141,10 +141,11 @@ type Dialer struct {
 	audit  AuditWriter
 	logger *slog.Logger
 
-	mu     sync.Mutex
-	timers map[string]*time.Timer   // ccid -> no-answer timer (stopped on answered)
-	dones  map[string]chan struct{} // ccid -> terminal channel (closed once)
-	fin    map[string]bool          // ccid -> terminal cleanup already ran
+	mu       sync.Mutex
+	timers   map[string]*time.Timer   // ccid -> no-answer timer (stopped on answered)
+	answered map[string]bool          // ccid -> answer notification landed (bughunt 2026-11-07 voice F-2)
+	dones    map[string]chan struct{} // ccid -> terminal channel (closed once)
+	fin      map[string]bool          // ccid -> terminal cleanup already ran
 }
 
 // NewDialer returns a Dialer. mgr may be nil (registry-only tests, and the
@@ -169,9 +170,10 @@ func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, f
 		fx:     fx,
 		audit:  audit,
 		logger: logger,
-		timers: make(map[string]*time.Timer),
-		dones:  make(map[string]chan struct{}),
-		fin:    make(map[string]bool),
+		timers:   make(map[string]*time.Timer),
+		answered: make(map[string]bool),
+		dones:    make(map[string]chan struct{}),
+		fin:      make(map[string]bool),
 	}
 	if mgr != nil {
 		mgr.SetAnsweredHook(d.NotifyAnswered)
@@ -432,6 +434,14 @@ func (d *Dialer) armNoAnswerTimer(ccid string) {
 	secs := d.NoAnswerSecs()
 	timer := time.NewTimer(time.Duration(secs) * time.Second)
 	d.mu.Lock()
+	// bughunt 2026-11-07 voice F-2: if the answer webhook landed before
+	// this arm site (webhook beats DialOut's line-339 path), the call is
+	// already answered — arming a no-answer timer would be wrong; skip it.
+	if d.answered[ccid] {
+		d.mu.Unlock()
+		timer.Stop()
+		return
+	}
 	d.timers[ccid] = timer
 	d.mu.Unlock()
 
@@ -442,6 +452,30 @@ func (d *Dialer) armNoAnswerTimer(ccid string) {
 		}
 		select {
 		case <-timer.C:
+			// bughunt 2026-11-07 voice F-2: the fire may win the race
+			// against NotifyAnswered's timer.Stop (Stop returns false
+			// once the value is buffered). Re-check answered at fire
+			// time: an answered call keeps running, its no-answer never
+			// lands. Do NOT return here — the call still needs terminal
+			// bookkeeping: wait the manager's done channel (the hangup /
+			// release signal) so finishCall still frees the registry
+			// slot and closes the dial Done channel exactly once.
+			d.mu.Lock()
+			answered := d.answered[ccid]
+			d.mu.Unlock()
+			if answered {
+				d.logger.Debug("voice: no-answer timer fired for answered call (ignored)", "ccid", ccid)
+				if mgrDone != nil {
+					// Real call lifecycle: hold the slot until the
+					// manager's terminal event, then clean up once.
+					<-mgrDone
+					d.finishCall(ccid)
+				}
+				// mgr == nil (registry-only dialer): no lifecycle to
+				// observe; leave the slot to the caller's own release,
+				// never tear down an answered call.
+				return
+			}
 			if d.mgr != nil {
 				d.mgr.FailOutcome(ccid, OutcomeNoAnswer, fmt.Sprintf("no answer within %ds", secs))
 			}
@@ -462,8 +496,24 @@ func (d *Dialer) armNoAnswerTimer(ccid string) {
 // NotifyAnswered cancels the no-answer timer for ccid (call.answered on
 // the outbound leg). The webhook wiring calls this on every answered event
 // for a tracked outbound id. Unknown ccid is a no-op.
+//
+// bughunt 2026-11-07 voice F-2: Timer.Stop CANNOT un-arm a fire already in
+// flight — when the expiry tick and the webhook race, the fire wins the
+// select and FailOutcome(OutcomeNoAnswer) tears down a call that was
+// answered in the same instant (3bf5431c M8 deliberately aligned the local
+// timer and the carrier timeout_secs, which maximizes that simultaneity).
+// The answered map is the second cancellation channel: NotifyAnswered
+// marks the ccid answered (even before armNoAnswerTimer runs — the webhook
+// can beat DialOut's arm site), and the fire branch refuses to fail an
+// answered call.
 func (d *Dialer) NotifyAnswered(ccid string) {
 	d.mu.Lock()
+	// A call already terminal-cleaned (finishCall ran) must not regain an
+	// answered marker after finishCall's delete — that would leak the
+	// entry for the ccid's whole daemon life.
+	if !d.fin[ccid] {
+		d.answered[ccid] = true
+	}
 	timer := d.timers[ccid]
 	d.mu.Unlock()
 	if timer != nil {
@@ -481,6 +531,12 @@ func (d *Dialer) finishCall(ccid string) {
 	}
 	d.fin[ccid] = true
 	ch := d.dones[ccid]
+	delete(d.dones, ccid)
+	delete(d.timers, ccid)
+	// bughunt 2026-11-07 voice F-2: the answered marker is per-call
+	// bookkeeping; drop it at terminal cleanup so the map cannot grow
+	// across the daemon's dial history.
+	delete(d.answered, ccid)
 	d.mu.Unlock()
 
 	d.reg.Release(ccid)

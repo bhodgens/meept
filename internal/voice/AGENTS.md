@@ -46,12 +46,22 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
 - Reorder window (`reorder_window_frames`, default 10) with silence
   fill; frames arriving within `reorder_gap_ms` (default 60) are
   sequenced, not forwarded in arrival order (uptractor deviation).
-- Playback paces 20 ms per frame outbound; chunk size follows the
-  negotiated codec, never a fixed constant.
-- Barge-in is PER CALL: `clear` stops playback and drops queued drafts
-  for THAT call_id only; other calls' pipelines are untouched
-  (pinned by TestBargeInPerCall and the voice-bargein e2e suite). One
-  interrupt latch per barge-in in the child pipeline.
+- Playback paces 20 ms per frame outbound. Child chunks are ALWAYS
+  L16@16k = 640 bytes (`ChunkBytes("L16", 16000)`) regardless of the
+  negotiated wire codec (audit H2: the wire codec must NEVER size child
+  chunks). The wire codec selects only the transcode direction
+  (L16 = byte-identical passthrough, PCMU = mu-law 8 kHz up/downsample),
+  and the wiring REFUSES a codec/rate mismatch (L16@!=16000, PCMU@!=8000)
+  rather than silently mis-resampling (bughunt 2026-11-07 voice F-3).
+- Barge-in is PER CALL and per BARGE-IN: `clear` stops playback and drops
+  queued drafts for THAT call_id only; other calls' pipelines are untouched
+  (pinned by TestBargeInPerCall and the voice-bargein e2e suite). The
+  latch is per barge-in, not per call: the child pipeline re-opens playback
+  on the next say (playGen retirement kills the interrupted stream), and
+  the splice re-arms when fresh child PCM arrives (bughunt 2026-11-07
+  voice F-1 — both latches used to be once-per-call, muting the agent
+  after its first interrupt). One interrupt VAD latch per barge-in in the
+  child pipeline.
 
 ## Release fan-out
 

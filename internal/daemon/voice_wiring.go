@@ -387,6 +387,20 @@ func (a auditWriterAdapter) WriteAudit(ctx context.Context, row map[string]any) 
 func (w *VoiceWiring) routeFrame(f voice.Frame) {
 	switch f.Event {
 	case voice.EventSetup:
+		// bughunt 2026-11-07 voice F-6: idempotent setup, mirroring the
+		// child's handleSetup ("setup for live call ignored"). Without the
+		// guard a duplicate setup (child reconnect/replay) overwrote the
+		// loop + loopCancel map entries: the replaced loop kept running
+		// unreached (router looks up by map), received no frames, and its
+		// silence timer eventually fired t.end -> managerHangup on the
+		// CURRENT live call. The lost cancel func also leaked the ctx.
+		w.loopsMu.Lock()
+		if _, exists := w.loops[f.CallID]; exists {
+			w.loopsMu.Unlock()
+			w.logger.Debug("voice wiring: setup for live call ignored", "ccid", f.CallID)
+			return
+		}
+		w.loopsMu.Unlock()
 		// Setup carries the call identity the talk loop needs. The
 		// registry instance was acquired at answer/dial time; find it.
 		var inst voice.Instance
@@ -610,6 +624,31 @@ func (w *VoiceWiring) spliceRunner() func(context.Context, string, commhttp.WebS
 		if start.Encoding != "" {
 			cfg.CodecWire.BidirectionalCodec = start.Encoding
 			cfg.CodecWire.SamplingRate = start.SampleRate
+			// bughunt 2026-11-07 voice F-3: the echoed sample rate must
+			// MATCH what the transcode path assumes, or the splice
+			// silently mis-resamples. The path is codec-selected ONLY:
+			// L16 passes bytes through and everything downstream
+			// (640-byte "20 ms" chunks, silence fill, pacing) assumes
+			// 16 kHz; PCMU is 8 kHz with explicit up/downsample. An
+			// L16@8000 negotiation would play at double speed with
+			// half-length chunks; a PCMU@16000 would double-decode.
+			// Refuse the mismatched media leg instead of shipping
+			// corrupted audio (the SpliceRunner error ends the call
+			// path; the caller hears the carrier's failure, not noise).
+			switch start.Encoding {
+			case "L16":
+				if start.SampleRate != 0 && start.SampleRate != 16000 {
+					err := fmt.Errorf("voice wiring: negotiated wire codec %s@%d is unsupported (L16 must be 16000)", start.Encoding, start.SampleRate)
+					w.logger.Error("voice wiring: wire rate mismatch", "ccid", ccid, "error", err)
+					return err // deferred audio.Close() tears the pair down
+				}
+			case "PCMU":
+				if start.SampleRate != 0 && start.SampleRate != 8000 {
+					err := fmt.Errorf("voice wiring: negotiated wire codec %s@%d is unsupported (PCMU must be 8000)", start.Encoding, start.SampleRate)
+					w.logger.Error("voice wiring: wire rate mismatch", "ccid", ccid, "error", err)
+					return err // deferred audio.Close() tears the pair down
+				}
+			}
 		}
 
 		return voice.RunSplice(ctx, ccid, cfg, voice.SpliceDeps{
