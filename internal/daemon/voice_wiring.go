@@ -600,6 +600,61 @@ type CallEndedEvent struct {
 // topic; ended carries the terminal outcome here).
 var TopicVoiceCallEnded = bus.NewTopic[CallEndedEvent]("voice.call.ended")
 
+// pick returns the first non-empty value. CL4 precedence: per-leg config
+// before global config; empty stays empty and means "vendor default" -
+// nothing here invents vendor or model names.
+func pick(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// sendOpenFrame sends the C1 open frame (local-leg plan CL1) for ccid.
+// The leg comes from the registry instance (leaf 06); provider selection
+// follows CL4 precedence (local-leg config falls back to global, empty
+// stays empty). The child-native codec (L16@16k, the C2 chunk format) is
+// always the open frame codec - the NEGOTIATED wire codec belongs to the
+// splice, not to the child.
+func (w *VoiceWiring) sendOpenFrame(ccid string) error {
+	f := voice.Frame{
+		CallID:     ccid,
+		Event:      voice.EventOpen,
+		Codec:      telnyx.DefaultCodec.BidirectionalCodec,
+		SampleRate: telnyx.DefaultCodec.SamplingRate,
+		Direction:  "inbound",
+		From:       w.cfg.FromNumber,
+	}
+	if w.Manager != nil && w.Manager.IsOutbound(ccid) {
+		f.Direction = "outbound"
+	}
+	for _, inst := range w.Registry.Live() {
+		if inst.CallControlID != ccid {
+			continue
+		}
+		f.To = inst.Target
+		if inst.Leg == voice.LegLocal {
+			f.Local = true
+			f.BargeInRms = w.cfg.Local.BargeInRms
+			f.SttVendor = pick(w.cfg.Local.STTProvider, w.cfg.STTProvider)
+			f.SttModel = w.cfg.STTModel
+			f.TtsVendor = pick(w.cfg.Local.TTSProvider, w.cfg.TTSProvider)
+			f.TtsModel = pick(w.cfg.Local.TTSModel, w.cfg.TTSModel)
+			f.TtsVoice = pick(w.cfg.Local.TTSVoice, w.cfg.TTSVoice)
+		} else {
+			f.SttVendor = w.cfg.STTProvider
+			f.SttModel = w.cfg.STTModel
+			f.TtsVendor = w.cfg.TTSProvider
+			f.TtsModel = w.cfg.TTSModel
+			f.TtsVoice = w.cfg.TTSVoice
+		}
+		break
+	}
+	return w.TextServer.Send(f)
+}
+
 // spliceRunner builds the leaf-10 SpliceRunner closure: RunSplice for this
 // call with a per-call AudioPair under the manager's per-call context.
 func (w *VoiceWiring) spliceRunner() func(context.Context, string, commhttp.WebSocketConn, commhttp.StartFrame) error {
@@ -611,6 +666,18 @@ func (w *VoiceWiring) spliceRunner() func(context.Context, string, commhttp.WebS
 			return err
 		}
 		defer audio.Close()
+
+		// bughunt voice-sidecar local leg (CL1): open the call on the child
+		// BEFORE splicing. The child creates its pipeline, dials the C2 pair
+		// this runner splices, and answers with the setup frame routeFrame
+		// arms the talk loop on. Without this frame the child never builds a
+		// pipeline, so no setup ever arrives, so no loop arms - the omission
+		// that kept every production call on stub audio. Failure is warn-and-
+		// continue (degrade, not fail - mirrors the supervisor philosophy): a
+		// call must not die because an optional arm frame failed to send.
+		if err := w.sendOpenFrame(ccid); err != nil {
+			w.logger.Warn("voice wiring: open frame send failed", "ccid", ccid, "error", err)
+		}
 
 		// Codec is the child-native config (legacy wiring field, default
 		// L16@16k). CodecWire (audit H2) is the NEGOTIATED wire codec

@@ -301,6 +301,17 @@ func (m *Manager) OnMediaStart(ccid string, dial func(context.Context) error) er
 	return dial(callCtx)
 }
 
+// IsOutbound reports whether ccid is a leg WE dialed (registered by
+// TrackOutbound). The open frame carries the call direction; the manager's
+// outbound set is its own record of who placed the leg. A released ccid
+// reports false (its entry is gone with the slot).
+func (m *Manager) IsOutbound(ccid string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.outbound[ccid]
+	return ok
+}
+
 // TrackOutbound registers a dial-initiated call_control_id so its later
 // call.answered streams WITHOUT AnswerCall (answering an outbound leg 404s
 // and aborts the session). Registering an empty id is an error;

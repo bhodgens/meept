@@ -34,13 +34,15 @@ func shortTempDir(t *testing.T) string {
 }
 
 // fakeDaemon stands in for the daemon: a text socket listener recording
-// frames the child emits, plus per-call audio pair listeners.
+// frames the child emits (decoded, plus the raw lines for wire-shape
+// assertions), and per-call audio pair listeners.
 type fakeDaemon struct {
 	t           *testing.T
 	dir         string
 	textLn      net.Listener
 	mu          sync.Mutex
 	queue       []voiceframe.Frame
+	rawQueue    []string
 	frameSignal chan struct{}
 	inLn        map[string]net.Listener
 	outLn       map[string]net.Listener
@@ -138,6 +140,9 @@ func (d *fakeDaemon) serveText() net.Conn {
 	go func() {
 		br := bufio.NewScanner(conn)
 		for br.Scan() {
+			d.mu.Lock()
+			d.rawQueue = append(d.rawQueue, br.Text())
+			d.mu.Unlock()
 			f, err := voiceframe.DecodeFrame(br.Bytes())
 			if err != nil {
 				continue
@@ -152,6 +157,26 @@ func (d *fakeDaemon) serveText() net.Conn {
 		}
 	}()
 	return conn
+}
+
+// waitRawLine waits for and pops the next raw child-emitted line. Wire
+// shape is a contract (byte-exact JSON keys), so some assertions must see
+// the line itself, not the decoded struct.
+func (d *fakeDaemon) waitRawLine(t *testing.T) string {
+	t.Helper()
+	select {
+	case <-d.frameSignal:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for child frame")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.rawQueue) == 0 {
+		t.Fatalf("no raw child line queued")
+	}
+	line := d.rawQueue[0]
+	d.rawQueue = d.rawQueue[1:]
+	return line
 }
 
 // newTestChild wires a Child against the fake daemon with a token on stdin.

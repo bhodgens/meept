@@ -251,6 +251,8 @@ func (c *Child) handleLine(ctx context.Context, line string) error {
 		return fmt.Errorf("voicechild: %w", err)
 	}
 	switch frame.Event {
+	case voiceframe.EventOpen:
+		return c.handleOpen(ctx, frame)
 	case voiceframe.EventSetup:
 		return c.handleSetup(ctx, frame)
 	case voiceframe.EventSay:

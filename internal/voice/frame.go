@@ -25,6 +25,7 @@ const (
 	EventEnd       = voiceframe.EventEnd
 	EventSay       = voiceframe.EventSay
 	EventClear     = voiceframe.EventClear
+	EventOpen      = voiceframe.EventOpen
 )
 
 // EncodeFrame serializes f as one JSON line: compact JSON plus '\n'.

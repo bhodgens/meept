@@ -35,18 +35,26 @@ type Transcript struct {
 // client sockets (C2). All public entry points are safe for concurrent use;
 // a child hosts N pipelines concurrently (map[ccid]*pipeline in child.go).
 type pipeline struct {
-	ccid      string
-	codec     string
-	sampleRt  int
-	child     *Child
-	logger    *slog.Logger
-	stt       STTProvider // stub this leaf
-	tts       TTSProvider // stub this leaf
-	sttKey    string      // provider keys, in memory only (leaf 08 consumes)
-	ttsKey    string      // provider keys, in memory only (leaf 08 consumes)
-	audioOut  net.Conn    // child->daemon PCM (C2 <ccid>.out)
-	audioIn   net.Conn    // daemon->child PCM (C2 <ccid>.in)
-	audioDir  string
+	ccid     string
+	codec    string
+	sampleRt int
+	child    *Child
+	logger   *slog.Logger
+	stt      STTProvider // stub this leaf
+	tts      TTSProvider // stub this leaf
+	sttKey   string      // provider keys, in memory only (leaf 08 consumes)
+	ttsKey   string      // provider keys, in memory only (leaf 08 consumes)
+	audioOut net.Conn    // child->daemon PCM (C2 <ccid>.out)
+	audioIn  net.Conn    // daemon->child PCM (C2 <ccid>.in)
+	audioDir string
+
+	// open-frame profile (local-leg plan CL1/CL3), set once by handleOpen
+	// before the pipeline starts; read-only afterwards (no lock needed).
+	// Providers themselves keep arriving over the keys frame (Tier A owns
+	// that wire), so this carries ONLY what the local leg needs early:
+	// the leg marker (RMS barge-in runs when local) and its threshold.
+	local      bool
+	bargeInRms int
 
 	// playback state, guarded by playMu
 	playMu      sync.Mutex
