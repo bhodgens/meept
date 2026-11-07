@@ -46,6 +46,8 @@ type fakeDaemon struct {
 	frameSignal chan struct{}
 	inLn        map[string]net.Listener
 	outLn       map[string]net.Listener
+	accIn       map[string]net.Conn // accepted C2 conns by ccid (acceptAll is idempotent)
+	accOut      map[string]net.Conn
 }
 
 func newFakeDaemon(t *testing.T, dir string) *fakeDaemon {
@@ -62,6 +64,8 @@ func newFakeDaemon(t *testing.T, dir string) *fakeDaemon {
 		frameSignal: make(chan struct{}, 64),
 		inLn:        make(map[string]net.Listener),
 		outLn:       make(map[string]net.Listener),
+		accIn:       make(map[string]net.Conn),
+		accOut:      make(map[string]net.Conn),
 	}
 	return d
 }
@@ -86,19 +90,36 @@ func (d *fakeDaemon) listenPair(ccid string) {
 }
 
 // acceptAll accepts one connection per audio listener (child dials both).
+// Idempotent per ccid: the child dials each socket exactly once, so a
+// second call returns the conns already accepted (some call sites accept
+// early and re-acquire `in` later for writes).
 func (d *fakeDaemon) acceptAll(ccid string) (in, out net.Conn) {
 	d.t.Helper()
 	d.mu.Lock()
 	inLn, outLn := d.inLn[ccid], d.outLn[ccid]
+	in, out = d.accIn[ccid], d.accOut[ccid]
 	d.mu.Unlock()
-	var err error
-	in, err = inLn.Accept()
-	if err != nil {
-		d.t.Fatalf("accept in: %v", err)
+	if in != nil && out != nil {
+		return in, out
 	}
-	out, err = outLn.Accept()
-	if err != nil {
-		d.t.Fatalf("accept out: %v", err)
+	var err error
+	if in == nil {
+		in, err = inLn.Accept()
+		if err != nil {
+			d.t.Fatalf("accept in: %v", err)
+		}
+		d.mu.Lock()
+		d.accIn[ccid] = in
+		d.mu.Unlock()
+	}
+	if out == nil {
+		out, err = outLn.Accept()
+		if err != nil {
+			d.t.Fatalf("accept out: %v", err)
+		}
+		d.mu.Lock()
+		d.accOut[ccid] = out
+		d.mu.Unlock()
 	}
 	return in, out
 }

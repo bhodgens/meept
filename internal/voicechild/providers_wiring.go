@@ -136,5 +136,10 @@ func (c *Child) handleKeys(k KeysFrame) error {
 		return nil
 	}
 	c.logger.Info("voicechild: providers constructed", "call_id", k.CallID)
+	// Leaf 05 hook: if setup/start ran before keys (the normal daemon
+	// order), the transcript session was still unbound - start it now that
+	// the real provider exists. The once-guard makes this a no-op when
+	// keys arrived first (start already bound it).
+	p.startTranscripts()
 	return nil
 }

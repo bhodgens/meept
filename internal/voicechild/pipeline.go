@@ -9,6 +9,7 @@ import (
 	"net"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/voiceframe"
 )
@@ -46,9 +47,21 @@ type pipeline struct {
 	ttsKey   string         // provider keys, in memory only (leaf 08 consumes)
 	sttCfg   ProviderConfig // per-call vendor/model/base_url/voice (C1 keys frame)
 	ttsCfg   ProviderConfig // per-call vendor/model/base_url/voice (C1 keys frame)
-	audioOut net.Conn       // child->daemon PCM (C2 <ccid>.out)
-	audioIn  net.Conn       // daemon->child PCM (C2 <ccid>.in)
-	audioDir string
+
+	// STT wiring (leaf 05, C5 prompt half). pcmCh carries daemon->child
+	// PCM from pumpAudioIn into the STT Stream session; transcripts is the
+	// session's output, consumed by consumeTranscripts. transMu guards the
+	// exactly-once transcript startup (Stream + consumer exactly once per
+	// pipeline, whichever of start/handleKeys runs first).
+	pcmCh        chan []byte       // fed by pumpAudioIn, consumed by Stream (bounded, oldest-chunk drop)
+	transcripts  <-chan Transcript // STT session output (nil until startTranscripts binds)
+	transMu      sync.Mutex        // guards transStarted
+	transStarted bool              // Stream session + consumer launched
+	trStart      chan struct{}     // closed when the transcript consumer exits (teardown wait)
+	pumpOnce     sync.Once         // start() is idempotent: exactly one pump goroutine
+	audioOut     net.Conn          // child->daemon PCM (C2 <ccid>.out)
+	audioIn      net.Conn          // daemon->child PCM (C2 <ccid>.in)
+	audioDir     string
 
 	// open-frame profile (local-leg plan CL1/CL3), set once by handleOpen
 	// before the pipeline starts; read-only afterwards (no lock needed).
@@ -107,6 +120,11 @@ func (c *Child) newPipeline(frame voiceframe.Frame) (*pipeline, error) {
 		logger:   c.logger,
 		stt:      stubSTT{},
 		tts:      stubTTS{},
+		// Bounded to 8 chunks (160 ms at the L16/16k default). On overflow
+		// the OLDEST chunk is dropped (see pumpAudioIn): for a phone call,
+		// audio latency beats completeness.
+		pcmCh:    make(chan []byte, 8),
+		trStart:  make(chan struct{}),
 		audioIn:  inConn,
 		audioOut: outConn,
 		audioDir: c.cfg.AudioDir,
@@ -116,19 +134,84 @@ func (c *Child) newPipeline(frame voiceframe.Frame) (*pipeline, error) {
 	return p, nil
 }
 
-// start launches the pipeline's background work. In this leaf the jargo
-// worker chain is constructed but its transport is the unix audio pair, so
-// start only begins the daemon->child audio pump; leaf 08 wires real
-// providers into the worker chain.
+// start launches the pipeline's background work: the daemon->child audio
+// pump and, if a real STT provider is already installed (keys arrived
+// before setup), the transcript session. When keys arrive later, handleKeys
+// calls startTranscripts at the hook point; the once-guard makes both
+// orders behave identically (exactly one Stream + one consumer).
 func (p *pipeline) start(ctx context.Context) error {
-	go p.pumpAudioIn()
+	p.pumpOnce.Do(func() { go p.pumpAudioIn() })
+	p.startTranscripts()
 	return nil
 }
 
+// startTranscripts binds the STT Stream session and spawns the transcript
+// consumer, exactly once per pipeline. When the pipeline still carries the
+// stub STT (keys not yet arrived), it is a no-op: handleKeys retries at the
+// constructProviders hook point. Safe to call from start and handleKeys in
+// either order (T3).
+func (p *pipeline) startTranscripts() {
+	p.transMu.Lock()
+	if p.transStarted {
+		p.transMu.Unlock()
+		return
+	}
+	if _, isStub := p.stt.(stubSTT); isStub || p.stt == nil {
+		// No real provider yet: the keys-arrives hook will call again.
+		p.transMu.Unlock()
+		return
+	}
+	p.transStarted = true
+	stt := p.stt
+	p.transMu.Unlock()
+
+	// Stream once per pipeline (C5). The session dies with p.ctx on
+	// teardown; closing pcmCh is the pump's job (socket EOF or ctx cancel).
+	trans, err := stt.Stream(p.ctx, p.pcmCh)
+	if err != nil {
+		p.logger.Error("voicechild: stt stream open", "err", err, "call_id", p.ccid)
+		// Release the once-guard: a transient adapter failure should not
+		// strand the call silent forever (one retry on the next hook).
+		p.transMu.Lock()
+		p.transStarted = false
+		p.transMu.Unlock()
+		return
+	}
+	p.transMu.Lock()
+	p.transcripts = trans
+	p.transMu.Unlock()
+	go func() {
+		defer close(p.trStart)
+		p.consumeTranscripts()
+	}()
+}
+
+// consumeTranscripts turns STT transcripts into C1 prompt frames: a final
+// transcript is last:true (starts an employee turn), a partial is last:false
+// (preview only), and empty-text silence results emit nothing (C5). The
+// barge-in trigger on the partial path is leaf 06 - this is the seam where
+// it will hook; nothing calls noteBargeIn here. No lock is held across
+// channel reads or socket writes (mutexio).
+func (p *pipeline) consumeTranscripts() {
+	for tr := range p.transcripts {
+		if tr.Text == "" {
+			continue // Deepgram silence results produce no frame
+		}
+		if err := p.child.emitPrompt(p.ctx, p.ccid, tr.Text, tr.Final); err != nil {
+			p.logger.Error("voicechild: emit prompt", "err", err, "call_id", p.ccid)
+		}
+	}
+}
+
 // pumpAudioIn reads daemon->child PCM from <ccid>.in and feeds the STT
-// stage. Chunk sizes are codec-derived (C2). In this leaf the STT stage is
-// a stub, so chunks are counted but not transcribed; the pump keeps the
-// socket drained so the daemon never blocks writing.
+// stage. Chunk sizes are codec-derived (C2); each Read's bytes forward as
+// one chunk (a stream socket has no write boundaries - a coalesced Read
+// arrives as one chunk, which is fine for a 20 ms-unit producer). Chunks
+// forward into pcmCh for the Stream session (installed by startTranscripts);
+// before it binds, the bounded channel absorbs a few chunks and then drops
+// the oldest - the drain never blocks the socket read loop, so the daemon
+// never blocks writing. On overflow the OLDEST chunk is dropped: for a
+// phone call, audio latency beats completeness.
 func (p *pipeline) pumpAudioIn() {
 	chunk, err := voiceframe.ChunkBytes(p.codec, p.sampleRt)
 	if err != nil {
@@ -139,17 +222,48 @@ func (p *pipeline) pumpAudioIn() {
 	for {
 		n, err := p.audioIn.Read(buf)
 		if n > 0 {
-			// Stub STT consumes nothing yet; leaf 08 forwards buf[:n] into
-			// the jargo pipeline input.
+			// Copy: buf is reused by the next Read.
+			data := make([]byte, n)
+			copy(data, buf[:n])
+			p.forwardPCM(data)
 		}
 		if err != nil {
-			return // socket closed by teardown or daemon
+			close(p.pcmCh) // socket closed by teardown or daemon: end the Stream feed
+			return
 		}
 		select {
 		case <-p.ctx.Done():
 			return
 		default:
 		}
+	}
+}
+
+// forwardPCM sends one chunk into pcmCh without ever blocking the socket
+// drain. Selects first on delivery, then on overflow (drop the OLDEST
+// queued chunk to make room), then on teardown (pump exits, chunks left in
+// the channel die with it).
+func (p *pipeline) forwardPCM(data []byte) {
+	select {
+	case p.pcmCh <- data:
+		return
+	default:
+	}
+	select {
+	case p.pcmCh <- data:
+		return
+	case <-p.ctx.Done():
+		return
+	default:
+	}
+	// Full: drop the oldest chunk, then deliver this one.
+	select {
+	case <-p.pcmCh:
+	default:
+	}
+	select {
+	case p.pcmCh <- data:
+	case <-p.ctx.Done():
 	}
 }
 
@@ -285,13 +399,27 @@ func (p *pipeline) playbackRestarted() {
 	p.playMu.Unlock()
 }
 
-// close tears the pipeline down: cancels its context and closes both audio
-// sockets. Idempotent.
+// close tears the pipeline down: cancels its context, closes both audio
+// sockets, and waits (bounded) for the transcript consumer to exit - the
+// pump dies on the socket close/ctx cancel and closes pcmCh, Stream's
+// session ends, and the consumer drains out (T4: no goroutine leak).
+// Idempotent.
 func (p *pipeline) close(ctx context.Context) {
 	p.cancel()
 	_ = ctx // kept for future graceful-drain variants
 	_ = p.audioIn.Close()
 	_ = p.audioOut.Close()
+	p.transMu.Lock()
+	started := p.transStarted
+	p.transMu.Unlock()
+	if !started {
+		return // no consumer ever ran; nothing to wait for
+	}
+	select {
+	case <-p.trStart:
+	case <-time.After(5 * time.Second):
+		p.logger.Warn("voicechild: transcript consumer did not exit", "call_id", p.ccid)
+	}
 }
 
 // stubSTT is the leaf-07 stand-in for the leaf-08 STT adapter: it emits
