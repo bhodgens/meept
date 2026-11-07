@@ -369,8 +369,8 @@ Per child, in order:
 | 05 | local-splice | A | DONE 57abc139 | orchestrator fixed clear-frame newline |
 | 06 | registry-leg | A | DONE a72d293f | 4-arg shape = AcquireLeg (Go: no overload) |
 | 07-local-leg | DONE b374927f | 1 | LocalLeg CL5 (no carrier/audit/effects, nil-carrier pinned); pre-accept 'not connected' splice filter; deadcode rebaseline: 5 reachable, 13 leaf-08 surfaces; sun_path fixture fix |
-| 08 | rpc-cli | D | PENDING | only components.go toucher |
-| 09 | tool-leg | D | PENDING | |
+| 08 | rpc-cli | D | DONE 439624b2 + T4 seam arming 9c459774 | voice.local.* RPC (import-cycle seam adapters), client audio, CLI; components.go diff kept empty; deadcode +229 CLI-scope entries rebalanced |
+| 09 | tool-leg | D | DONE 7854e298 | leg/voice args, CL4 precedence, LocalFunc seam fails closed; phone branch verbatim; daemon arming = 9c459774 |
 | 10 | local-providers | B | DONE 02157fc2 | orchestrator in-session after 3 delegation deaths; whisper+piper subprocess adapters, vendor switch in NewSTT/NewTTS; local vendors keyless; fake-binary test seams; race+gofmt+vet clean |
 | 11 | e2e | E | PENDING | manifest same commit |
 | 12 | docs | E | PENDING | AGENTS.md same commit |
