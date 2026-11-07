@@ -46,20 +46,27 @@ type OpenAITTS struct {
 	transport http.RoundTripper
 }
 
-// NewTTS builds an OpenAI TTS adapter from the call's key (C1 keys frame).
-// A missing key is ErrMissingTTSKey; the child and other calls are
-// unaffected. Construction logs vendor+model only, never the key.
+// NewTTS builds a TTS adapter selected by ProviderConfig.Vendor. Cloud
+// vendors (openai) take the call's key (C1 keys frame); local vendors
+// (piper) need none. A missing key for a cloud vendor is
+// ErrMissingTTSKey; every failure is a constructor error - the child and
+// other calls are unaffected. Construction logs vendor+model only, never
+// the key.
 func NewTTS(cfg ProviderConfig, key string) (voicechild.TTSProvider, error) {
-	if cfg.Vendor != "openai" {
+	switch cfg.Vendor {
+	case "openai":
+		if key == "" {
+			return nil, ErrMissingTTSKey
+		}
+		if cfg.Model == "" {
+			cfg.Model = ttsVendorDefaultModel
+		}
+		return &OpenAITTS{cfg: cfg, apiKey: key, transport: ttsTransport}, nil
+	case "piper":
+		return newPiperTTS(cfg)
+	default:
 		return nil, fmt.Errorf("%w: tts vendor %q", ErrUnknownVendor, cfg.Vendor)
 	}
-	if key == "" {
-		return nil, ErrMissingTTSKey
-	}
-	if cfg.Model == "" {
-		cfg.Model = ttsVendorDefaultModel
-	}
-	return &OpenAITTS{cfg: cfg, apiKey: key, transport: ttsTransport}, nil
 }
 
 // setTTSTransport replaces the HTTP transport (test seam for the httptest

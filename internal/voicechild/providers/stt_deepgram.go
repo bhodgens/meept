@@ -121,20 +121,27 @@ type DeepgramSTT struct {
 	dial func(ctx context.Context, path string, header wsHeader) (wsSession, error)
 }
 
-// NewSTT builds a Deepgram streaming STT adapter from the call's key
-// (C1 keys frame). A missing key is ErrMissingSTTKey; the child and other
-// calls are unaffected. Construction logs vendor+model only, never the key.
+// NewSTT builds an STT adapter selected by ProviderConfig.Vendor. Cloud
+// vendors (deepgram) take the call's key (C1 keys frame); local vendors
+// (whisper) need none. A missing key for a cloud vendor is
+// ErrMissingSTTKey; every failure is a constructor error - the child and
+// other calls are unaffected. Construction logs vendor+model only, never
+// the key.
 func NewSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) {
-	if cfg.Vendor != "deepgram" {
+	switch cfg.Vendor {
+	case "deepgram":
+		if key == "" {
+			return nil, ErrMissingSTTKey
+		}
+		if cfg.Model == "" {
+			cfg.Model = sttVendorDefaultModel
+		}
+		return &DeepgramSTT{cfg: cfg, apiKey: key, dial: sttDialer}, nil
+	case "whisper":
+		return newWhisperSTT(cfg)
+	default:
 		return nil, fmt.Errorf("%w: stt vendor %q", ErrUnknownVendor, cfg.Vendor)
 	}
-	if key == "" {
-		return nil, ErrMissingSTTKey
-	}
-	if cfg.Model == "" {
-		cfg.Model = sttVendorDefaultModel
-	}
-	return &DeepgramSTT{cfg: cfg, apiKey: key, dial: sttDialer}, nil
 }
 
 // setSTTDialer replaces the session dialer (test seam for the httptest
