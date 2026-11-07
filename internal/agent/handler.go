@@ -2998,9 +2998,15 @@ func (h *ChatHandler) SetMessageSaver(s SessionMessageSaver) {
 
 // ClearConversation removes the in-memory conversation cache for a session.
 // Called by the /reset RPC handler after clearing persisted messages.
+//
+// bughunt 2026-11-07 agent-fixes F-A: route through the loop method, NOT
+// conversations.Delete directly. AgentLoop.ClearConversation also prunes
+// the conversation's exposure plan (bughunt agent-core F-4); bypassing it
+// left every real /reset leaking a frozen episode (map growth + a
+// recycled conversationID silently resuming the old active set).
 func (h *ChatHandler) ClearConversation(conversationID string) {
-	if h.loop != nil && h.loop.conversations != nil {
-		h.loop.conversations.Delete(conversationID)
+	if h.loop != nil {
+		h.loop.ClearConversation(conversationID)
 	}
 }
 

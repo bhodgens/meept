@@ -191,6 +191,15 @@ func codemodeBridgesFromRegistry(reg agent.ToolRegistry) []codemode.ToolBridge {
 // message the script can catch — it does NOT widen or fabricate access.
 func codemodeBridgeCall(reg agent.ToolRegistry, name string) func(context.Context, string) (string, error) {
 	return func(ctx context.Context, argsJSON string) (string, error) {
+		// bughunt 2026-11-07 agent-fixes F-C: the §6 row-4 hard gate lives
+		// in Executor.Execute, but this bridge re-enters the filtered
+		// registry directly — without the same check a sandbox script could
+		// invoke any known-but-inactive tool and skip the tool_view
+		// promotion round-trip entirely. The plan rides the ctx the codemode
+		// tool received from the executor, so the verdict is the episode's.
+		if refuse, directive := agent.ExposureGateRefusal(ctx, name); refuse {
+			return "", fmt.Errorf("codemode: %s", directive)
+		}
 		tool := reg.Get(name)
 		if tool == nil {
 			return "", fmt.Errorf("tool %q is not available in this agent's scope", name)

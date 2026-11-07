@@ -96,6 +96,20 @@ func memoryScopeOptions(maxScope memory.Scope, projectID, userID string, multiUs
 
 // memoryScopeCtxIdentity resolves the tuple and packages it for the
 // tool-execution context (memory tools stamp/filter from it).
+// recallScopeOptions resolves the loop's B1 tuple and folds it into the
+// C2 recall options through the SAME helper the dispatcher chat lane uses
+// (memoryScopeOptions). bughunt 2026-11-07 agent-fixes F-D: buildMemoryContext
+// must call this, not WithScopeFilter(MaxScope) verbatim — a declared-global
+// chief-of-staff's prompt-injected recall was hiding every project/user row
+// while its own memory tools (post f5eb3e03) spanned them, re-opening the
+// contradiction from the opposite side (three-site rule above).
+func (l *AgentLoop) recallScopeOptions() []memory.SearchOption {
+	maxScope, projectID, userID, multiUser := l.resolveMemoryScope()
+	return memoryScopeOptions(maxScope, projectID, userID, multiUser)
+}
+
+// memoryScopeCtxIdentity resolves the tuple and packages it for the
+// tool-execution context (memory tools stamp/filter from it).
 func (l *AgentLoop) memoryScopeCtxIdentity() tools.ScopeIdentity {
 	maxScope, projectID, userID, multiUser := l.resolveMemoryScope()
 	return tools.ScopeIdentity{

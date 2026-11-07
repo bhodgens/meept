@@ -2208,7 +2208,7 @@ func (l *AgentLoop) ensureExposurePlan(conversationID string) *ExposurePlan {
 			}
 		}
 	}
-	plan := NewExposurePlan(mode, nil, l.schemaModeCfg.PredictedBudget, ceiling, known)
+	plan := NewExposurePlan(mode, nil, l.schemaModeCfg.PredictedBudget, ceiling, known, l.registry)
 	l.exposurePlans[conversationID] = plan
 	return plan
 }
@@ -7701,11 +7701,14 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []memo
 	}
 	// Scope filter for THIS loop's session (T2): applied to every fetched
 	// slice below via memory.FilterResults — the committed C2 predicate.
-	scopeIdentity := l.memoryScopeCtxIdentity()
-	scopeOpts := []memory.SearchOption{
-		memory.WithScopeFilter(memory.Scope(scopeIdentity.MaxScope), scopeIdentity.ProjectID, scopeIdentity.UserID),
-		memory.WithMultiUserEnabled(scopeIdentity.MultiUser),
-	}
+	// bughunt 2026-11-07 agent-fixes F-D: fold through memoryScopeOptions
+	// (the same helper dispatcher_scope.go and the tool lane use), NOT the
+	// verbatim MaxScope. A declared-global chief-of-staff maps to the USER
+	// purview there; passing ScopeGlobal verbatim made the C2 predicate
+	// hide every project/user row from prompt-injected recall — the exact
+	// contradiction f5eb3e03 closed on the tool lane, reopened here on the
+	// loop lane (three-site rule, scope_wiring.go:11-13).
+	scopeOpts := l.recallScopeOptions()
 	addScoped := func(mems []memvid.Memory) {
 		for _, m := range mems {
 			res := memory.FilterResults([]memory.MemoryResult{memory.MemoryToResult(memory.Memory{
@@ -9344,9 +9347,17 @@ func (l *AgentLoop) SessionConversation(id string) *Conversation {
 	return l.conversations.Get(id)
 }
 
-// ClearConversation removes a conversation.
+// ClearConversation removes a conversation. Nil-safe on the store (bughunt
+// 2026-11-07 agent-fixes F-A: ChatHandler.ClearConversation now routes here
+// instead of touching l.conversations directly, so the exposure-plan prune
+// below dies with every real /reset, not only test callers).
 func (l *AgentLoop) ClearConversation(id string) {
-	l.conversations.Delete(id)
+	if l == nil {
+		return
+	}
+	if l.conversations != nil {
+		l.conversations.Delete(id)
+	}
 	// bughunt agent-core F-4: the episode's exposure plan dies with the
 	// conversation. Without this the map grows per conversationID for the
 	// loop's whole life (active slice + two name sets per entry) and a

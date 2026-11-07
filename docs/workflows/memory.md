@@ -466,6 +466,12 @@ it back if it loses the eval). The defaults below are the shipped values.
 meept memory --bridges      # list bridging facts (verified flag, evidence count, entity)
 ```
 
+The listing lane is scope-gated with the same C2 predicate as recall
+(bughunt 2026-11-07 agent-fixes F-H): a single-user install lists every
+bridge; under `multiuser.enabled`, user-scope rows resolve against the
+caller identity and fail closed when the identity is unresolved. Project
+rows sit in the user-purview listing (the socket is owner-trusted).
+
 In the default `meept memory` listing and the TUI memory browser, bridge
 rows carry a `[bridge]` marker with `verified: yes/no` and their evidence
 count, so derived facts stay distinguishable from source memories. The TUI

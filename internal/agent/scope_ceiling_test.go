@@ -198,3 +198,44 @@ func TestMemoryToolIdentityCarriesCeiling(t *testing.T) {
 			"project (C7)", id.MaxScope)
 	}
 }
+
+// TestRecallScopeOptionsDeclaredGlobalFoldsToUser (bughunt 2026-11-07
+// agent-fixes F-D): the loop's prompt-injected recall lane must fold a
+// declared-global chief-of-staff to the USER purview through the same
+// memoryScopeOptions helper the dispatcher lane and (post f5eb3e03) the
+// tool lane use. Passing ScopeGlobal verbatim made the C2 predicate treat
+// the caller as identity-less and hide every project/user row — so the
+// agent's injected memory context and its own memory_search results
+// contradicted each other (and user-scoped bridges folded from
+// global+project evidence vanished from recall entirely).
+func TestRecallScopeOptionsDeclaredGlobalFoldsToUser(t *testing.T) {
+	l := NewAgentLoop("fd-pin", "/tmp", WithLoopLogger(silentLogger()))
+	l.SetProjectID("proj-fd")
+	l.mu.Lock()
+	l.spec = &AgentSpec{
+		ID:             "fd-agent",
+		Role:           RoleExecutor,
+		Enabled:        true,
+		MemoryMaxScope: string(memory.ScopeGlobal),
+	}
+	l.mu.Unlock()
+
+	opts := l.recallScopeOptions()
+	filtered := memory.FilterResults([]memory.MemoryResult{
+		{Memory: memory.Memory{ID: "g", Content: "global fact", Scope: memory.ScopeGlobal}},
+		{Memory: memory.Memory{ID: "p", Content: "project fact", Scope: memory.ScopeProject,
+			Metadata: map[string]any{"project_id": "proj-fd"}}},
+	}, opts...)
+
+	seen := map[string]bool{}
+	for _, r := range filtered {
+		seen[r.Memory.ID] = true
+	}
+	if !seen["g"] {
+		t.Fatal("global row must stay visible")
+	}
+	if !seen["p"] {
+		t.Fatal("F-D: declared-global loop recall hid a project row (verbatim ScopeGlobal filter) — " +
+			"the injected context contradicts the agent's own tool lane purview")
+	}
+}

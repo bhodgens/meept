@@ -115,6 +115,16 @@ type ExposurePlan struct {
 	active       []string
 	ceilingNames map[string]struct{}
 	knownNames   map[string]struct{}
+	// liveSource (bughunt 2026-11-07 agent-fixes F-B): the agent's
+	// filtered registry, consulted when a name is absent from the
+	// frozen snapshot. Tools registered mid-episode (MCP server
+	// connect) are not in knownNames/ceilingNames, yet they ARE in
+	// this agent's executable view — the filtered registry already
+	// enforces role ceiling + group intersection, so presence there
+	// proves ceiling membership. Without this fallback the gate was
+	// fail-OPEN (post-arm tools skipped IsKnown and executed
+	// un-gated) and Promote refused legitimate new tools.
+	liveSource ToolRegistry
 	// enforcing is true only in the dynamic modes (search/predicted). A
 	// non-enforcing plan (full/indexed) never gates execution: the active
 	// set is advisory there, matching the pre-gate byte-identical posture
@@ -151,6 +161,23 @@ func exposurePlanFromContext(ctx context.Context) *ExposurePlan {
 	return p
 }
 
+// ExposureGateRefusal is the §6 row-4 verdict for one tool name against the
+// plan riding ctx: refuse=true only when an ENFORCING plan is armed, the
+// name is known (snapshot OR live filtered registry), and it is not yet
+// active. directive is the actionable recovery text. Exported so every
+// execution lane — Executor.Execute, the codemode sandbox bridge, and the
+// skill-state tool runner — pays the same gate (bughunt 2026-11-07
+// agent-fixes F-C: the gate lived only in Executor.Execute, so a sandbox
+// script could invoke any known-but-inactive tool in the filtered registry
+// without ever promoting it via tool_view).
+func ExposureGateRefusal(ctx context.Context, toolName string) (refuse bool, directive string) {
+	plan := exposurePlanFromContext(ctx)
+	if !plan.Enforcing() || !plan.IsKnown(toolName) || plan.IsActive(toolName) {
+		return false, ""
+	}
+	return true, fmt.Sprintf("tool %q is not active in this episode; call tool_view{%q} first", toolName, toolName)
+}
+
 // metaTools is the always-active meta-tool pair (design §1 layer 3): the
 // discoverer + the expander. In dynamic modes they are always full, so a
 // stubbed discoverer is undiscoverable and the pair must be active so the
@@ -167,8 +194,8 @@ var metaTools = []string{"tool_search", "tool_view"}
 // and the meta pair are unioned in. knownNames is the FULL registry's
 // name set (design §6 row 4) so the executor can distinguish a real
 // registered tool that is not active yet from a genuinely unknown name.
-func NewExposurePlan(mode ToolExposureMode, predicted []string, budget int, ceiling []string, knownNames []string) *ExposurePlan {
-	p := &ExposurePlan{}
+func NewExposurePlan(mode ToolExposureMode, predicted []string, budget int, ceiling []string, knownNames []string, liveSource ToolRegistry) *ExposurePlan {
+	p := &ExposurePlan{liveSource: liveSource}
 	if len(ceiling) > 0 {
 		p.ceilingNames = make(map[string]struct{}, len(ceiling))
 		for _, c := range ceiling {
@@ -232,7 +259,13 @@ func (p *ExposurePlan) Promote(name string) error {
 	}
 	if p.ceilingNames != nil {
 		if _, ok := p.ceilingNames[name]; !ok {
-			return fmt.Errorf("exposure: cannot activate %q: outside this agent's role ceiling (%d tools)", name, len(p.ceilingNames))
+			// bughunt 2026-11-07 agent-fixes F-B: a post-arm registration
+			// is legitimately inside the ceiling when the FILTERED registry
+			// serves it — the same proof IsKnown uses. A name absent from
+			// BOTH remains refused (row 5 keeps its bite).
+			if p.liveSource == nil || p.liveSource.Get(name) == nil {
+				return fmt.Errorf("exposure: cannot activate %q: outside this agent's role ceiling (%d tools)", name, len(p.ceilingNames))
+			}
 		}
 	}
 	p.active = append(p.active, name)
@@ -268,9 +301,23 @@ func (p *ExposurePlan) IsKnown(name string) bool {
 		return false
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	_, ok := p.knownNames[name]
-	return ok
+	live := p.liveSource
+	p.mu.Unlock()
+	if ok {
+		return true
+	}
+	// bughunt 2026-11-07 agent-fixes F-B: a tool registered AFTER the
+	// episode armed (MCP connect mid-conversation) is absent from the
+	// frozen snapshot. Without the live check the gate skipped it and
+	// registry.Get executed it un-promoted — a fail-OPEN permission hole.
+	// The live source is the agent's FILTERED registry: presence there
+	// already proves role-ceiling + group membership (filterTools built
+	// it), so this widens nothing.
+	if live != nil {
+		return live.Get(name) != nil
+	}
+	return false
 }
 
 // Active returns the current active set (a copy; safe to iterate).
