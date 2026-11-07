@@ -1,9 +1,12 @@
 # Voice sidecar (jargo)
 
 **Status**: Implemented
-**Date**: 2026-11-02 (spec rev 2); as-built appended 2026-11-04
+**Date**: 2026-11-02 (spec rev 2); as-built appended 2026-11-04; rev 3
+(local leg, plan docs/plans/20261106-voice-local-leg/) amended in
+2026-11-07
 
-This spec is the phone channel. It is not the client text-to-speech path in
+This spec covers both voice legs: the Telnyx phone channel and the local
+(client audio) channel. It is not the client text-to-speech path in
 `docs/workflows/tts.md`. That path runs in the TUI and the Flutter process.
 It never reaches the daemon. A phone call must own capture and playback.
 
@@ -11,6 +14,13 @@ Rev 2 adds: Telnyx call-out (borrowed from the aiedge-uptractor
 coordinator, see "Borrowed from uptractor"), media frame ordering, the
 barge-in contract, the model-contention mitigation, and concurrent voice
 instances.
+
+Rev 3 adds: the local leg (section "Local leg (C11)") - a real-time voice
+conversation with an employee over local client audio (mic + speaker)
+instead of a Telnyx phone call. Same child, same talk loop, same
+supervisor gate, same session/binding/day-brief machinery. The phone leg
+stays fully functional; the two legs run CONCURRENTLY on one child, one
+text server, one registry, and one call store.
 
 ## Purpose
 
@@ -637,3 +647,244 @@ it.
   playback (local leg) trips exactly one interrupt, the talk loop clears
   the call, and the fresh final starts a new employee turn whose reply
   reflects the interrupting prompt (FakeLLM request-log observable).
+
+## Local leg (C11) - spec rev 3
+
+The local leg is a real-time voice conversation with an employee over
+LOCAL client audio (mic + speaker) instead of a Telnyx phone call. Same
+child, same talk loop, same supervisor gate, same session/binding/day
+brief machinery. Purposes:
+
+1. Local testing of the whole voice stack without outbound calls or
+   cloud STT/TTS.
+2. Agent interaction over voice for any same-user client (CLI now, TUI
+   as a later part).
+3. Concurrent legs: Telnyx stays fully functional; the two legs share
+   one child, one text server, one registry, and one call store.
+
+### The open frame (CL1)
+
+The daemon sends one C1 `open` frame per call, right after the AudioPair
+exists, for BOTH legs (phone and local). The child creates its pipeline,
+dials the C2 audio pair, stores the call identity, and answers with the
+existing `setup` frame; the daemon's routeFrame arms the talk loop on
+setup and the keys line follows (Tier A emission site). Frame additions,
+all `omitempty`, zero value = pre-rev-3 behavior byte-exact
+(internal/voiceframe/frame.go:40-46, EventOpen at :61):
+
+```
+Local      bool   `json:"local,omitempty"`
+BargeInRms int    `json:"barge_in_rms,omitempty"`
+```
+
+Open frame shape (daemon -> child):
+
+```
+{"call_id":"<ccid>","event":"open","from":"<id>","to":"<id>",
+ "direction":"inbound|outbound|local","codec":"L16","sample_rate":16000,
+ "local":true,"barge_in_rms":3000}
+```
+
+Rules: vendors/models/voices NEVER ride the open frame - they ride the
+Tier A `keys` frame. The open frame carries only call identity, the leg
+marker, and the RMS threshold the local leg needs before any keys arrive.
+Existing wire tests (byte-exact prompt/say lines) still pass. The phone
+path's producer is internal/daemon/voice_wiring.go `sendOpenFrame`
+(:689, warn-and-continue on send failure at :745); the local leg's is
+internal/voice/local.go `sendOpenFrame` (:360).
+
+### Leg matrix
+
+A call is one of phone-inbound, phone-outbound, local; the daemon
+originates local legs and the open frame's `direction` names the wire
+value. Barge-in trigger, effects reservation, audit row, carrier, and
+reorder/transcode policy differ per leg:
+
+| Property | Phone (inbound) | Phone (outbound) | Local |
+| --- | --- | --- | --- |
+| Audio source | Telnyx media socket | Telnyx media socket | client dials the C2 unix pair (mic/speaker) |
+| Identity (`direction`) | `inbound` | `outbound` | `local` |
+| Target shape | caller E.164 (allowlist) | allowlisted E.164 | `local:<label>` (label = config name or hostname), never E.164-normalized (internal/voice/dial.go:629-633) |
+| ccid shape | `call_control_id` | `call_control_id` | `"local-" + pkg/id.Generate()` (internal/voice/local.go:237) |
+| Registry leg | `phone` | `phone` | `local` (`Instance.Leg`, internal/voice/dial.go:555-569) |
+| Effects reservation | no (inbound) | YES, before POST | NO (deliberate: no paid side effect) |
+| Audit row before dial | no | YES | NO (deliberate: no external party) |
+| Carrier | Telnyx POST/webhooks | Telnyx POST/webhooks | NONE - no telnyx import, no carrier seam (internal/voice/local.go:14-15,165) |
+| Reorder window | YES (Telnyx untrusted order) | YES | NO - unix sockets preserve order (internal/voice/localsplice.go:8-12) |
+| Transcode | PCMU negotiated = mu-law both ways | same | NO - L16 s16le@16000 only, anything else is a named refusal (ErrL16Only) |
+| Barge-in trigger | STT partial (Tier A D1) | STT partial (Tier A D1) | RMS VAD, Local==true only (internal/voicechild/pipeline.go:430-432) |
+| Keys frame | at EventSetup (Tier A) | at EventSetup (Tier A) | the wiring emits it at setup, same wire shape |
+| Cap / one-live-per-employee / per-target | shared ACROSS legs (internal/voice/dial.go:621-628) | shared | shared |
+
+### Local leg lifecycle (CL5)
+
+`internal/voice/local.go` owns the lifecycle. Open order (LocalLeg.Open,
+:222):
+
+1. Gates: leg enabled (`voice.enabled` && `voice.local.enabled`, folded
+   into one bool by the daemon glue) and non-empty employee id, both
+   named refusals before any side effect (ErrLocalDisabled, ErrNoEmployee).
+2. ccid = `"local-" + pkg/id.Generate()`; target = `"local:" + label`
+   (label = the tool/RPC arg, then `voice.local.name`, then the
+   hostname, :205-217).
+3. Registry `AcquireLeg(ccid, employeeID, target, "local")` (:243) -
+   ErrBusy / ErrDuplicateTarget surface unchanged; capacity and
+   one-live-per-employee rules are shared across legs.
+4. `Manager.TrackOutbound(ccid)` (:249) so FailOutcome / WaitCall /
+   release fan-out work unchanged.
+5. AudioPair under SocketDir (:256) - one listener each, one accept
+   each; the pair PATHS go to the caller.
+6. Send the open frame (:291) - identity + `local:true` +
+   `barge_in_rms` + the CL4-resolved provider profile; the child builds
+   its pipeline, dials the pair, answers with setup, and the wiring
+   emits the keys line at the Tier A site. Send failure degrades to
+   warn-and-continue on stub audio (:292).
+7. RunLocalSplice in a goroutine (:304) - the client join grace bounds a
+   never-dialed pair (ErrNoClient); the pre-accept "not connected"
+   window is filtered, not terminal (:311).
+8. Day brief + `Binding.OnCallStart` with direction `"local"` and number
+   `"local:<label>"` (:324-339) - the same call-site shape as the phone
+   path.
+
+Teardown (End, :407, and any terminal splice error): `Manager.FailOutcome`
+runs the once-per-outcome release fan-out (childproc note, talk-loop
+cancel, registry release, binding end) exactly as a phone hangup does;
+End additionally cancels the splice context and closes the audio pair.
+Double End is idempotent; a foreign id is a named error
+(ErrUnknownLocalCall). No carrier POST anywhere on this leg.
+
+Local session persistence: `Binding.OnCallStart` binds the same
+(number=local:<label>, employee) session the phone path binds, and the
+call row + transcripts land in the same calls.db (direction `"local"`).
+
+### Leg and voice selection (CL4, config verbatim)
+
+Config, all under `voice`, additive; defaults preserve pre-rev-3
+behavior byte-identically (internal/config/schema.go:5261-5264,
+5277-5297):
+
+```
+default_leg        "phone"          // phone | local
+tts_model          ""               // global TTS model (openai voice id etc.)
+tts_voice          ""               // global TTS voice
+stt_model          ""
+local.enabled      false            // local leg master switch (opt-in)
+local.stt_provider ""               // default "whisper"; empty = voice.stt_provider
+local.tts_provider ""               // default "piper"; empty = voice.tts_provider
+local.tts_model    ""
+local.tts_voice    ""
+local.barge_in_rms 3000             // s16 RMS threshold, local leg only
+local.name         ""               // session label; empty = hostname
+employee_leg       []                // per-agent defaults:
+  // {employee, leg, tts_voice, tts_model} so different employees default
+  // to different legs/voices with no tool arg (the concurrent-legs case)
+```
+
+Selection precedence (frozen, resolved in ONE place:
+`voice.ResolveProfile`, internal/voice/profile.go:49):
+
+- TTS voice/model: voice_call `voice` arg > `voice.employee_leg[employee]`
+  > per-leg config (`voice.local.*` for local, `voice.*` for phone) >
+  provider default (represented by an empty field).
+- Leg: voice_call `leg` arg > `voice.employee_leg[employee].leg` >
+  `voice.default_leg` (internal/tools/builtin/voice_call.go:157;
+  an empty arg with no armed default seam means phone).
+- LLM pin unchanged (`voice.voice_model` + employee Model - the LLM
+  model is not the TTS voice; Tier A already separates them).
+- `"local"` means the direct-TTS leg: agent speech is synthesized and
+  played on the client device; no Telnyx anywhere on the call.
+
+Local providers are SUBPROCESSES, never vendored or linked: whisper.cpp
+STT (`whisper-cli`, internal/voicechild/providers/stt_whisper.go:22) and
+piper TTS (internal/voicechild/providers/tts_piper.go:19). GPL as a
+subprocess is allowed; both are keyless (empty keys ride the Tier A
+keys frame per its keyless rule).
+
+### Policy differences: effects, audit, carrier, VAD
+
+These differences are DELIBERATE and pinned in code:
+
+| Difference | Rule | Where pinned |
+| --- | --- | --- |
+| Effects reservation | local leg skips it (no paid side effect) | internal/voice/local.go:10-13 (mirror comment); phone path keeps the claim |
+| Audit row | local leg writes none (no external party) | same mirror comment; phone path writes it before the POST |
+| Carrier | local leg has NO telnyx import and NO carrier seam | internal/voice/local.go:14-15,165 (build-pinned; grep for telnyx in local.go/localsplice.go/voice_local.go finds comments only) |
+| ONNX / barge-in rule | rev 2's "no call without barge-in (ONNX)" is superseded by Tier A (STT-partial trigger, ONNX non-fatal) for the phone leg; the LOCAL leg uses RMS VAD instead - 10 sustained chunks at 200 ms over `local.barge_in_rms` triggers one interrupt; RMS NEVER runs when Local==false | internal/voicechild/pipeline.go:430-432; phone legs keep the STT-partial trigger |
+
+### LocalSplice (CL7)
+
+`internal/voice/localsplice.go` `RunLocalSplice` is the carrier-free
+media path - simpler sibling of splice.RunSplice:
+
+- child .out -> client speaker, paced 20 ms per 640 B L16@16k chunk
+  (same pacing rule; the client buffer underruns are the local crackle
+  equivalent) (:14-17).
+- client mic -> child .in, chunk-sized 640 B (:8-10). NO reorder window
+  (unix sockets preserve order). NO transcode: the local leg negotiates
+  L16@16000 only and REFUSES anything else (ErrL16Only, :49-51).
+- Barge-in: interrupt for THIS ccid stops outbound writes, sends the
+  clear frame to the CHILD (there is no carrier playout to flush - the
+  child's TTS queue is what needs flushing), cancels the draft once,
+  and re-arms on fresh child PCM (:19-26). Same per-barge-in latch
+  contract the phone splice pins.
+- Join grace: the client must produce its first byte within 10 s or the
+  splice ends with ErrNoClient (:28-30) - a never-dialed leg cannot
+  wedge the registry slot.
+- Backpressure: a socket write error ends the leg with a named error;
+  there is no drop-oldest path (:32-33).
+
+### Control plane (CL8)
+
+RPC (internal/rpc/voice_local.go, seam-based - internal/rpc never
+imports internal/voice):
+
+- `voice.local.open {employee_id, label}` -> `{call_id, in_path,
+  out_path, session_id}`
+- `voice.local.end {call_id}` -> `{ok}` (idempotent; double end is ok)
+- `voice.local.status {}` -> `{calls: [{call_id, employee_id, target,
+  since_rfc3339, leg}]}` - live calls for BOTH legs (phone rows carry
+  leg `"phone"`, local rows `"local"`)
+
+Named refusals: ErrVoiceLocalDisabled (unwired leg), ErrVoiceLocalUnknownEmployee
+(checked before any side effect), ErrVoiceLocalBusy /
+ErrVoiceLocalDuplicate (shared registry rules), ErrVoiceLocalUnknownCall
+(End on a foreign id). Audio NEVER rides RPC: the client dials the C2
+unix pair directly from the returned paths (same-user trust, the same
+model as the RPC socket).
+
+CLI (cmd/meept/voice.go):
+
+- `meept voice local --employee <id> [--label <l>] [--in <wav>]
+  [--out <wav>] [--list]` - opens the call over RPC, dials both pair
+  sockets, and shuffles audio. `--in/--out` is FILE mode: a scripted,
+  mic-free, deterministic leg (pure io.Copy both directions, canonical
+  WAV in/out) for CI and demos. Without them, LIVE mode: ffmpeg
+  avfoundation mic capture and oto speaker playback.
+- `meept voice status` - one table of live calls for BOTH legs.
+- SIGINT ends the call via `voice.local.end` before exit, so the release
+  fan-out runs exactly once.
+
+GOOS support: live mic capture is darwin-only (ffmpeg avfoundation);
+any other GOOS refuses with a named error pointing at `--in` file mode
+(internal/voice/clientaudio.go:89-90). File mode works everywhere.
+
+### e2e coverage
+
+Suite `e2e/suites/voice-local` (leaf 11, commit 73d5b900) runs the whole
+local leg hermetically: RPC open -> pair paths -> scripted client PCM
+through the REAL whisper adapter (fake subprocess shim) -> employee turn
+on a fake LLM -> say through the REAL piper adapter -> paced PCM at the
+out path -> voice.local.end -> registry empty + calls.db row with
+transcripts. Two scenarios are registered in e2e/manifest.json
+(voice-local-e2e-01, voice-local-refusals-01).
+
+### Known product gap (stated honestly)
+
+The call row's ENDED-state transition does not fire in production on
+either leg yet: `Binding.OnCallEnd` (which marks calls.db rows ended)
+rides `ReleaseHook -> heldCalls` (internal/daemon/voice_employee.go:312-326),
+and the hold is only registered by `AcquireCallHold`
+(internal/daemon/voice_employee.go:264), which has no production caller.
+The row, direction, session binding, and transcripts land; the ended
+transition is the wiring owner's gap (the e2e suite logs it rather than
+failing: e2e/suites/voice-local/voice_local_test.go:858-866).

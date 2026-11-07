@@ -1494,6 +1494,24 @@
     "line": 29
   },
   {
+    "topic": "voice.local.end",
+    "handler": "h.handleEnd",
+    "file": "internal/rpc/voice_local.go",
+    "line": 129
+  },
+  {
+    "topic": "voice.local.open",
+    "handler": "h.handleOpen",
+    "file": "internal/rpc/voice_local.go",
+    "line": 128
+  },
+  {
+    "topic": "voice.local.status",
+    "handler": "h.handleStatus",
+    "file": "internal/rpc/voice_local.go",
+    "line": 130
+  },
+  {
     "topic": "worker.add",
     "handler": "p.makeProxy(\"worker.add\", \"worker.result\", 10*time.Second",
     "file": "internal/rpc/proxy.go",

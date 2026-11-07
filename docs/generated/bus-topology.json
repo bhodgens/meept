@@ -206,7 +206,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10671,
+        "line": 10686,
         "payload_keys": []
       }
     ],
@@ -541,7 +541,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 3016,
+        "line": 3022,
         "payload_keys": [
           "event"
         ]
@@ -550,7 +550,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2655,
+        "line": 2661,
         "payload_keys": [
           "event"
         ]
@@ -580,7 +580,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6395,
+        "line": 6410,
         "payload_keys": [
           "name",
           "tags",
@@ -1791,7 +1791,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9805,
+        "line": 9820,
         "payload_keys": []
       }
     ],
@@ -2318,13 +2318,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 8365,
+        "line": 8380,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 8402,
+        "line": 8417,
         "payload_keys": [],
         "via_const": true
       }
@@ -2368,7 +2368,7 @@
     "voice.call.ended": [
       {
         "file": "internal/daemon/voice_wiring.go",
-        "line": 582,
+        "line": 662,
         "payload_keys": [],
         "typed": true
       }
@@ -3595,7 +3595,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9731,
+        "line": 9746,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3886,7 +3886,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9898,
+        "line": 9913,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

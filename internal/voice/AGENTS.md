@@ -5,8 +5,10 @@ its child-side siblings `internal/voiceframe`, `internal/voicechild`,
 `cmd/meept-voice`). Referenced from the root AGENTS.md; the full voice
 sidecar contract lives here. Update both in the same commit per the
 root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
-(spec rev 2 + as-built), `docs/workflows/voice.md`,
-`docs/workflows/voicechild.md`. Plan tree: `docs/plans/20261102-voice-sidecar/`.
+(spec rev 3 + as-built), `docs/workflows/voice.md`,
+`docs/workflows/voicechild.md`. Plan trees:
+`docs/plans/20261102-voice-sidecar/` and
+`docs/plans/20261106-voice-local-leg/`.
 
 ## Frames (C1): one JSON object per line, every frame carries call_id
 
@@ -164,3 +166,67 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   supervisor mode; only the startup sweep reaps orphans (mirrors the
   root daemon invariants).
 - Child RSS is logged at spawn, first call, and idle stop.
+
+## Local leg (C11, local-leg plan): invariants
+
+The local leg (`internal/voice/local.go`, `internal/voice/localsplice.go`)
+is the carrier-free sibling of the phone leg. Two legs exist
+CONCURRENTLY - one child, one text server, one registry, one call
+store. Invariants a future agent must NOT break:
+
+- Local leg NEVER imports telnyx or touches the broker key: local.go
+  imports no telnyx package and carries no carrier seam at all
+  (internal/voice/local.go:14-15 - build-pinned, not convention), and
+  `Broker.Value("telnyx_api_key")` has no local-leg caller. The leg may
+  ride a Manager whose `telnyx.CallController` is nil (:165) - never
+  give the local leg a live carrier client, and never add a carrier
+  call to its teardown.
+- Registry leg field semantics: `Instance.Leg` is `"phone"` or
+  `"local"`; the ZERO value means "phone" so existing composite
+  literals stay valid (internal/voice/dial.go:555-569). Acquire via
+  `AcquireLeg`; `NormalizeE164` runs ONLY for leg "phone" - local
+  targets look like `local:<label>` and must never be mangled
+  (:629-633). Capacity, one-live-per-employee, and one-live-per-target
+  rules are SHARED across legs (:621-628); never add a leg-scoped
+  bypass of them.
+- Open-before-setup ordering: the daemon sends the C1 `open` frame
+  right after the AudioPair exists, for BOTH legs; the child creates
+  its pipeline, dials the pair, and answers with `setup`; the talk
+  loop arms on setup and the keys line follows at the Tier A emission
+  site (internal/daemon/voice_wiring.go:683-745; local producer
+  internal/voice/local.go:360). Do not send keys or say frames before
+  setup arrives, and do not make open failure fatal (warn-and-continue
+  on stub audio is the pinned posture, local.go:291-292).
+- RMS VAD only when Local==true: the local leg's barge-in trigger is
+  the playback-side RMS window (10 sustained chunks = 200 ms over
+  `voice.local.barge_in_rms`; internal/voicechild/pipeline.go:430-432).
+  RMS must NEVER run on phone legs - they keep the Tier A STT-partial
+  trigger. Never move the trigger to a leg-agnostic branch.
+- LocalSplice has NO reorder and NO transcode by contract:
+  unix sockets preserve order (no reorder window), and the local leg
+  negotiates L16 s16le@16000 only - any other chunk size is the named
+  ErrL16Only refusal (internal/voice/localsplice.go:8-12,49-51).
+  Outbound stays paced at one 640 B chunk per 20 ms (the uptractor
+  rule; :14-17). Do not "harden" it with a reorder buffer.
+- Deliberate policy differences, pinned not accidental: the local leg
+  skips the effects reservation and the dial audit row (no paid side
+  effect, no external party; internal/voice/local.go:10-13 mirror
+  comment) and writes no carrier POST. Do not "restore symmetry" -
+  add the leg's invariants, not the phone leg's policy.
+- Teardown parity: `LocalLeg.End` fans out through
+  `Manager.FailOutcome` exactly like a phone hangup (release hook,
+  registry release, binding end; local.go:401-440). Double End is
+  idempotent nil; a foreign (non-`local-`-shaped) id is
+  ErrUnknownLocalCall. Keep the prefix shape test honest - it is what
+  distinguishes those two.
+- RPC stays seam-based: `internal/rpc/voice_local.go` takes
+  `VoiceLocalSeams` func fields and NEVER imports internal/voice (the
+  daemon adapts in internal/daemon/voice_local_rpc.go). No audio ever
+  rides RPC - clients dial the C2 pair paths directly (internal/rpc/
+  voice_local.go:23-24).
+- Known product gap (do not paper over): the call row's ended-state
+  transition rides `ReleaseHook -> heldCalls`, whose only writer
+  `AcquireCallHold` (internal/daemon/voice_employee.go:264) has no
+  production caller - OnCallEnd never marks rows ended on EITHER leg.
+  State the gap in docs; do not claim ended-state behavior.
+

@@ -206,7 +206,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **TUI** | `internal/tui` (app, commands, components, handlers, modals, models, tableutil) |
 | **GUI** | `ui/flutter_ui` (Flutter web + desktop) |
 | **Scheduling** | `internal/scheduler`, `internal/queue`, `internal/worker` |
-| **Voice** | `internal/voice` (daemon side: call manager, splice, supervisor gate, dial, day brief, registry, child proc), `internal/voiceframe` (stdlib-only shared frame codec), `internal/voicechild` + `cmd/meept-voice` (jargo voice child - full contract in `internal/voice/AGENTS.md`) |
+| **Voice** | `internal/voice` (daemon side: call manager, splice, supervisor gate, dial, day brief, registry, child proc, local leg `local.go`/`localsplice.go`), `internal/voiceframe` (stdlib-only shared frame codec), `internal/voicechild` + `cmd/meept-voice` (jargo voice child), `cmd/meept/voice.go` (`voice local`/`voice status` CLI), `internal/rpc/voice_local.go` (`voice.local.*` RPC - full contract in `internal/voice/AGENTS.md`) |
 | **Skills** | `internal/skills`, `internal/selfimprove` |
 | **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/process`, `internal/eval`, `internal/gate` |
 
@@ -322,12 +322,13 @@ idle/shutdown) is best-effort with the verified route `POST /slots/0?action=eras
 and NEVER fails a turn, an archive, or a shutdown; cloud providers are an
 explicit no-op.
 
-### Voice sidecar (phone channel)
+### Voice sidecar (phone channel + local leg)
 
 Full rules live in `internal/voice/AGENTS.md` (frames, sockets,
 reorder/pacing/barge-in, release fan-out, secrets lanes, child
-confinement, one-live-call-per-employee); user-facing docs are
-`docs/workflows/voice-sidecar.md` (spec + as-built) and
+confinement, one-live-call-per-employee, local-leg invariants);
+user-facing docs are
+`docs/workflows/voice-sidecar.md` (spec rev 3 + as-built) and
 `docs/workflows/voice.md`. Short form: C1 text frames are byte-exact
 JSON lines, every frame carries `call_id`, only final prompts
 (`last:true`) start a turn, and `say` goes out only after the
@@ -341,7 +342,11 @@ provider keys reach the child over the unix socket and live in child
 memory only. jargo is imported ONLY by `cmd/meept-voice` and
 `internal/voicechild` (compile-time pins); the registry enforces one
 live call per employee and per target number, with outbound dials
-gated by allowlist + effects reservation + audit-before-dial.
+gated by allowlist + effects reservation + audit-before-dial. The
+LOCAL leg (phone + local run concurrently on one child/registry/store)
+never imports telnyx and skips effects + audit by contract; its
+barge-in is RMS VAD gated to `Local==true`; `LocalSplice` has no
+reorder window and negotiates L16@16k only.
 
 ### The github_* tools register through the tool-provider seam; githubsvc never imports builtin
 
