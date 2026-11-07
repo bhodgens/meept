@@ -600,18 +600,6 @@ type CallEndedEvent struct {
 // topic; ended carries the terminal outcome here).
 var TopicVoiceCallEnded = bus.NewTopic[CallEndedEvent]("voice.call.ended")
 
-// pick returns the first non-empty value. CL4 precedence: per-leg config
-// before global config; empty stays empty and means "vendor default" -
-// nothing here invents vendor or model names.
-func pick(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 // sendOpenFrame sends the C1 open frame (local-leg plan CL1) for ccid.
 // The leg comes from the registry instance (leaf 06); provider selection
 // follows CL4 precedence (local-leg config falls back to global, empty
@@ -635,20 +623,19 @@ func (w *VoiceWiring) sendOpenFrame(ccid string) error {
 			continue
 		}
 		f.To = inst.Target
+		// CL4 resolver: per-call employee defaults (voice.employee_leg)
+		// over per-leg config over provider default. The registry leg is
+		// authoritative for THIS call (acquire pinned it; ResolveLeg is
+		// for acquire-time, not send-time).
+		p := voice.ResolveProfile(w.cfg, inst.EmployeeID, "", inst.Leg)
+		f.SttVendor = p.SttVendor
+		f.SttModel = p.SttModel
+		f.TtsVendor = p.TtsVendor
+		f.TtsModel = p.TtsModel
+		f.TtsVoice = p.TtsVoice
 		if inst.Leg == voice.LegLocal {
 			f.Local = true
 			f.BargeInRms = w.cfg.Local.BargeInRms
-			f.SttVendor = pick(w.cfg.Local.STTProvider, w.cfg.STTProvider)
-			f.SttModel = w.cfg.STTModel
-			f.TtsVendor = pick(w.cfg.Local.TTSProvider, w.cfg.TTSProvider)
-			f.TtsModel = pick(w.cfg.Local.TTSModel, w.cfg.TTSModel)
-			f.TtsVoice = pick(w.cfg.Local.TTSVoice, w.cfg.TTSVoice)
-		} else {
-			f.SttVendor = w.cfg.STTProvider
-			f.SttModel = w.cfg.STTModel
-			f.TtsVendor = w.cfg.TTSProvider
-			f.TtsModel = w.cfg.TTSModel
-			f.TtsVoice = w.cfg.TTSVoice
 		}
 		break
 	}

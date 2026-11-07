@@ -5233,36 +5233,50 @@ type TTSConfig struct {
 }
 
 type VoiceConfig struct {
-	Enabled              bool        `json:"enabled"                toml:"enabled"`
-	IdleStopSeconds      int         `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
-	OnnxRuntimeLib       string      `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
-	STTProvider          string      `json:"stt_provider"           toml:"stt_provider"`
-	TTSProvider          string      `json:"tts_provider"           toml:"tts_provider"`
-	Filler               []string    `json:"filler"                 toml:"filler"`
-	SupervisorEmployee   string      `json:"supervisor_employee"    toml:"supervisor_employee"`
-	SupervisorEnabled    bool        `json:"supervisor_enabled"     toml:"supervisor_enabled"`
-	SupervisorModel      string      `json:"supervisor_model"       toml:"supervisor_model"`
-	SupervisorTimeoutMs  int         `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
-	VoiceModel           string      `json:"voice_model"            toml:"voice_model"`
-	PublicStreamURL      string      `json:"public_stream_url"      toml:"public_stream_url"`
-	ConnectionID         string      `json:"connection_id"          toml:"connection_id"`
-	FromNumber           string      `json:"from_number"            toml:"from_number"`
-	AllowedNumbers       []string    `json:"allowed_numbers"        toml:"allowed_numbers"`
-	TimeoutSecs          int         `json:"timeout_secs"           toml:"timeout_secs"`
-	MaxCallMinutes       int         `json:"max_call_minutes"       toml:"max_call_minutes"`
-	SilencePromptSeconds int         `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
-	MaxConcurrentCalls   int         `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	ReorderWindowFrames  int         `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	ReorderGapMs         int         `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	TelnyxPublicKey      string      `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	ChildBinaryPath      string      `json:"child_binary_path"      toml:"child_binary_path"`
-	LoopbackPlainAddr    string      `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	DefaultEmployee      string      `json:"default_employee"       toml:"default_employee"`
-	DefaultLeg           string      `json:"default_leg"            toml:"default_leg"`
-	TTSModel             string      `json:"tts_model"              toml:"tts_model"`
-	TTSVoice             string      `json:"tts_voice"              toml:"tts_voice"`
-	STTModel             string      `json:"stt_model"              toml:"stt_model"`
-	Local                LocalConfig `json:"local"                  toml:"local"`
+	Enabled              bool                `json:"enabled"                toml:"enabled"`
+	IdleStopSeconds      int                 `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	OnnxRuntimeLib       string              `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	STTProvider          string              `json:"stt_provider"           toml:"stt_provider"`
+	TTSProvider          string              `json:"tts_provider"           toml:"tts_provider"`
+	Filler               []string            `json:"filler"                 toml:"filler"`
+	SupervisorEmployee   string              `json:"supervisor_employee"    toml:"supervisor_employee"`
+	SupervisorEnabled    bool                `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	SupervisorModel      string              `json:"supervisor_model"       toml:"supervisor_model"`
+	SupervisorTimeoutMs  int                 `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	VoiceModel           string              `json:"voice_model"            toml:"voice_model"`
+	PublicStreamURL      string              `json:"public_stream_url"      toml:"public_stream_url"`
+	ConnectionID         string              `json:"connection_id"          toml:"connection_id"`
+	FromNumber           string              `json:"from_number"            toml:"from_number"`
+	AllowedNumbers       []string            `json:"allowed_numbers"        toml:"allowed_numbers"`
+	TimeoutSecs          int                 `json:"timeout_secs"           toml:"timeout_secs"`
+	MaxCallMinutes       int                 `json:"max_call_minutes"       toml:"max_call_minutes"`
+	SilencePromptSeconds int                 `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	MaxConcurrentCalls   int                 `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	ReorderWindowFrames  int                 `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs         int                 `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	TelnyxPublicKey      string              `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	ChildBinaryPath      string              `json:"child_binary_path"      toml:"child_binary_path"`
+	LoopbackPlainAddr    string              `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	DefaultEmployee      string              `json:"default_employee"       toml:"default_employee"`
+	DefaultLeg           string              `json:"default_leg"            toml:"default_leg"`
+	TTSModel             string              `json:"tts_model"              toml:"tts_model"`
+	TTSVoice             string              `json:"tts_voice"              toml:"tts_voice"`
+	STTModel             string              `json:"stt_model"              toml:"stt_model"`
+	Local                LocalConfig         `json:"local"                  toml:"local"`
+	EmployeeLeg          []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
+}
+
+// EmployeeLegConfig is one per-agent voice routing default (voice tree
+// CL4, OQ4 shape): employee_leg entries in the [voice] block pin an
+// employee's default leg and TTS voice/model. Routing config lives here,
+// NOT in the employee constitution (constitution is goal-scope,
+// user-authored text; routing changes must not require re-registration).
+// Empty Leg/TTSVoice/TTSModel fall through to per-leg config.
+type EmployeeLegConfig struct {
+	Employee string `json:"employee"   toml:"employee"`
+	Leg      string `json:"leg"        toml:"leg"`
+	TTSVoice string `json:"tts_voice"  toml:"tts_voice"`
+	TTSModel string `json:"tts_model"  toml:"tts_model"`
 }
 
 // LocalConfig holds the local voice leg sub-block (voice.local, local-leg

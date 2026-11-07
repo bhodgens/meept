@@ -177,3 +177,44 @@ func TestSendOpenFrameUnknownCcidStillSendsIdentity(t *testing.T) {
 		t.Fatalf("open line:\n got %s\nwant %s", line, want)
 	}
 }
+
+// TestSendOpenFrameEmployeeLegEntry: a voice.employee_leg row for the
+// CALL's employee must beat the per-leg config on the wire (CL4:
+// employee_leg > per-leg). The open line's tts_voice is the proof the
+// resolver ran with the right employeeID, not with "none".
+func TestSendOpenFrameEmployeeLegEntry(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	ccid := "cc-open-e"
+	w.cfg.TTSProvider = "piper"
+	w.cfg.Local = config.LocalConfig{
+		Enabled:     true,
+		TTSProvider: "piper",
+		TTSVoice:    "danny-medium",
+		BargeInRms:  3000,
+	}
+	emp := "employee-open-test"
+	w.cfg.EmployeeLeg = []config.EmployeeLegConfig{
+		{Employee: emp, Leg: voice.LegLocal, TTSVoice: "echo-voice", TTSModel: "echo-model"},
+	}
+	lr, ok := w.Registry.(*voice.CallRegistry)
+	if !ok {
+		t.Fatalf("fixture registry is %T, want *voice.CallRegistry", w.Registry)
+	}
+	if _, err := lr.AcquireLeg(ccid, emp, "local:box", voice.LegLocal); err != nil {
+		t.Fatalf("acquire leg: %v", err)
+	}
+
+	path := filepath.Join(voice.SocketDir(), "test-text.sock")
+	r := fakeChildAt(t, w, path)
+	if err := sendWhenChild(t, w, ccid); err != nil {
+		t.Fatalf("sendOpenFrame: %v", err)
+	}
+	line, err := r.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read open line: %v", err)
+	}
+	want := `{"call_id":"cc-open-e","event":"open","to":"local:box","direction":"inbound","codec":"L16","sample_rate":16000,"local":true,"tts_vendor":"piper","tts_model":"echo-model","tts_voice":"echo-voice","barge_in_rms":3000}` + "\n"
+	if line != want {
+		t.Fatalf("open line:\n got %s\nwant %s", line, want)
+	}
+}
