@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 )
@@ -44,6 +45,13 @@ type TextServer struct {
 	child   net.Conn // nil until a child connects
 	handler func(Frame)
 	closed  bool
+
+	// childReady closes the first time a child is claimed (leaf 03):
+	// SendRaw's keys emission waits on it so a child that has dialed but
+	// not yet been claimed by acceptLoop (unix connect completes into the
+	// backlog before Accept runs) still receives its frame.
+	childReadyOnce sync.Once
+	childReady     chan struct{}
 }
 
 // NewTextServer creates a server listening on path (a unix socket path).
@@ -53,7 +61,7 @@ func NewTextServer(path string, logger *slog.Logger) *TextServer {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &TextServer{path: path, logger: logger}
+	return &TextServer{path: path, logger: logger, childReady: make(chan struct{})}
 }
 
 // Start binds the socket and serves until ctx is cancelled or Close is
@@ -122,6 +130,9 @@ func (s *TextServer) claimChild(conn net.Conn) bool {
 		return false
 	}
 	s.child = conn
+	// Leaf 03: signal SendRaw that a child transport exists (close is
+	// once-only via childReadyOnce).
+	s.childReadyOnce.Do(func() { close(s.childReady) })
 	return true
 }
 
@@ -189,6 +200,45 @@ func (s *TextServer) Send(f Frame) error {
 		return errors.New("voice: no child connected on text socket")
 	}
 	if _, err := conn.Write(b); err != nil {
+		// Surface the dead connection to the caller; readLoop will also
+		// notice and clear s.child.
+		return fmt.Errorf("voice: write to child: %w", err)
+	}
+	return nil
+}
+
+// SendRaw writes one pre-encoded raw JSON line (already newline-terminated)
+// to the connected child, bypassing the Frame codec. It exists for the C1
+// keys frame (voice-tierA leaf 03): keys material must not live in the
+// shared Frame struct, so the daemon marshals its own keysWire and ships
+// the line through this seam. Same mutex-serialized single write as Send;
+// returns an error (never panics) when no child is connected or the child
+// connection is closed.
+func (s *TextServer) SendRaw(line []byte) error {
+	s.mu.Lock()
+	conn := s.child
+	s.mu.Unlock()
+	if conn == nil {
+		// A dialed-but-unclaimed child (connect completed into the unix
+		// listen backlog before acceptLoop's claimChild ran) is not a
+		// dead transport: wait briefly for the claim rather than failing
+		// the first send. Bounded so a genuinely absent child still
+		// errors fast; emission treats the error as a degrade (warn,
+		// call continues). The send itself stays exactly once - this is
+		// transport-readiness, not a retry loop.
+		select {
+		case <-s.childReady:
+			s.mu.Lock()
+			conn = s.child
+			s.mu.Unlock()
+		case <-time.After(2 * time.Second):
+			return errors.New("voice: no child connected on text socket")
+		}
+	}
+	if conn == nil {
+		return errors.New("voice: no child connected on text socket")
+	}
+	if _, err := conn.Write(line); err != nil {
 		// Surface the dead connection to the caller; readLoop will also
 		// notice and clear s.child.
 		return fmt.Errorf("voice: write to child: %w", err)

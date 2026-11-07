@@ -89,6 +89,13 @@ type VoiceWiring struct {
 	// bus publishes voice.call.ended (typed topic); nil drops events.
 	bus *bus.MessageBus
 
+	// broker resolves the cloud STT/TTS keys at emission time (leaf 03,
+	// C4). In-process Broker.Value consumers only - never a child env,
+	// command line, or bus payload. nil degrades keys emission to empty
+	// keys with a loud WARN (keys are still sent: the child factory fails
+	// that call, the child and other calls stay up).
+	broker *secrets.Broker
+
 	// stopCtx/stopCancel bound the text server lifetime (set at Start).
 	stopCtx    context.Context
 	stopCancel context.CancelFunc
@@ -306,6 +313,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		loopCancels:    make(map[string]context.CancelFunc),
 		bus:            deps.Bus,
 		textSocketPath: textSocketPath,
+		broker:         deps.Broker,
 		cfg:            cfg,
 		logger:         vlog,
 	}
@@ -440,6 +448,14 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		loopCtx, loopCancel := context.WithCancel(w.loopContext(f.CallID))
 		w.loopCancels[f.CallID] = loopCancel
 		w.loopsMu.Unlock()
+		// Leaf 03 (C4): the extended keys frame goes out right after the
+		// loop registers, once per call, on the setup goroutine. The
+		// idempotency guard above returned on duplicate setups before
+		// reaching this line, so a replayed setup never re-sends keys;
+		// the unknown-ccid return also precedes it (refused setups send
+		// nothing). Send failure degrades inside sendKeysFrame (warn,
+		// no teardown).
+		w.sendKeysFrame(f.CallID)
 		go func() {
 			// Talk loop lives for the call; Run returns at end (end
 			// frame, timers) or when releaseCall cancels loopCtx. Run's
