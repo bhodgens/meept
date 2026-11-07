@@ -188,14 +188,27 @@ func (p *pipeline) startTranscripts() {
 
 // consumeTranscripts turns STT transcripts into C1 prompt frames: a final
 // transcript is last:true (starts an employee turn), a partial is last:false
-// (preview only), and empty-text silence results emit nothing (C5). The
-// barge-in trigger on the partial path is leaf 06 - this is the seam where
-// it will hook; nothing calls noteBargeIn here. No lock is held across
-// channel reads or socket writes (mutexio).
+// (preview only), and empty-text silence results emit nothing (C5). A
+// partial while playback is active trips the barge-in latch (leaf 06, C5
+// order): the interrupt frame is emitted BEFORE the partial's prompt frame
+// so playback stops before the new turn's say can start; the latch keeps
+// it exactly-once per barge-in until a new say restarts playback. No lock
+// is held across channel reads or socket writes (mutexio).
 func (p *pipeline) consumeTranscripts() {
 	for tr := range p.transcripts {
 		if tr.Text == "" {
 			continue // Deepgram silence results produce no frame
+		}
+		if !tr.Final {
+			// Barge-in first (C5): interrupt stops playback before the
+			// partial preview prompt flows. noteBargeIn enforces
+			// exactly-once per barge-in and reports false when idle or
+			// already latched (leaf 06).
+			if p.noteBargeIn() {
+				if err := p.child.emitInterrupt(p.ctx, p.ccid); err != nil {
+					p.logger.Error("voicechild: emit interrupt", "err", err, "call_id", p.ccid)
+				}
+			}
 		}
 		if err := p.child.emitPrompt(p.ctx, p.ccid, tr.Text, tr.Final); err != nil {
 			p.logger.Error("voicechild: emit prompt", "err", err, "call_id", p.ccid)
