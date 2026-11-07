@@ -145,11 +145,20 @@ func TestPipelineSTTWiring(t *testing.T) {
 	// so providers constructing does not start an STT session.
 	waitFor(t, func() bool { return stt.streamCalls() == 1 })
 
-	// Write three distinct PCM chunks to the daemon side of .in.
+	// Write three distinct full C2 chunks (L16@16k = 640 bytes) to the
+	// daemon side of .in. Full-size chunks matter on macOS: a tight loop
+	// of tiny writes coalesces inside the unix socket and the pump's
+	// single Read then delivers several writes as ONE chunk, which the
+	// pump contract explicitly permits ("a coalesced Read arrives as one
+	// chunk") — a chunk-boundary assertion on tiny writes is a timing
+	// flake, not a wiring failure.
 	in, _ := d.acceptAll(ccid) //nolint:dogsled // out accepted above; in reused here for writes
 	var written [][]byte
 	for i := 0; i < 3; i++ {
-		chunk := []byte{byte(i), byte(i), byte(i), byte(i)}
+		chunk := make([]byte, 640)
+		for j := range chunk {
+			chunk[j] = byte(i + 1)
+		}
 		written = append(written, chunk)
 		if _, err := in.Write(chunk); err != nil {
 			t.Fatalf("write .in: %v", err)
@@ -162,10 +171,19 @@ func TestPipelineSTTWiring(t *testing.T) {
 		if len(got) < len(written) {
 			return false
 		}
-		for i, want := range written {
-			if string(got[i]) != string(want) {
-				t.Errorf("STT chunk %d = %v, want %v", i, got[i], want)
-			}
+		// Order + content, but not chunk boundaries: the pump may coalesce
+		// adjacent writes into one Read (contract-permitted). Verify the
+		// bytes arrived intact and in order across the concatenated stream.
+		var blob []byte
+		for _, g := range got {
+			blob = append(blob, g...)
+		}
+		var want []byte
+		for _, w := range written {
+			want = append(want, w...)
+		}
+		if len(blob) < len(want) || string(blob[:len(want)]) != string(want) {
+			t.Errorf("STT stream prefix = %d bytes, want %d in order", len(blob), len(want))
 		}
 		return true
 	})
@@ -259,12 +277,24 @@ func TestBargeInViaPartial(t *testing.T) {
 	}
 
 	// Scenario B: speaking -> first partial trips the latch exactly once.
+	// The gated TTS holds the stream open on its second read, so the
+	// `speaking` state stays observable: the instant-drain stub TTS can
+	// flip speaking true->false inside a single 5 ms poll window, which
+	// loses the race on macOS and reports a live pipeline as never
+	// speaking (timing flake, not a wiring failure).
 	if !ok2(child, ccid) {
 		t.Fatal("pipeline missing")
 	}
+	gate := newGatedTTS()
+	p.tts = gate
 	say := voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "sure, one moment"}
 	if err := child.handleSay(say); err != nil {
 		t.Fatalf("handleSay: %v", err)
+	}
+	select {
+	case <-gate.enteredPlay:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("utterance playback never started")
 	}
 	waitFor(t, func() bool { return p.isSpeaking() })
 
@@ -299,8 +329,21 @@ func TestBargeInViaPartial(t *testing.T) {
 	// and the next partial interrupts again (latch re-arm).
 	child.handleClear(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventClear})
 	waitFor(t, func() bool { return !p.isSpeaking() })
+	// Unblock the interrupted stream: it is parked on the gate's second
+	// read; after the clear bumped the gen it must abort on its next
+	// loop check instead of writing again.
+	close(gate.releaseSecond)
+	// New gate for the second utterance: keeps `speaking` observable
+	// through the re-arm partial (same race as Scenario B).
+	gate2 := newGatedTTS()
+	p.tts = gate2
 	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "where were we"}); err != nil {
 		t.Fatalf("handleSay 2: %v", err)
+	}
+	select {
+	case <-gate2.enteredPlay:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("utterance 2 playback never started")
 	}
 	waitFor(t, func() bool { return p.isSpeaking() })
 
@@ -312,6 +355,9 @@ func TestBargeInViaPartial(t *testing.T) {
 	if n, _ := interrupts(); n != 2 {
 		t.Fatalf("interrupt count after re-arm = %d, want exactly 2 (one per barge-in)", n)
 	}
+	// Retire utterance 2's stream so teardown has no reader parked on
+	// the gate.
+	close(gate2.releaseSecond)
 }
 
 func ok2(c *Child, ccid string) bool {

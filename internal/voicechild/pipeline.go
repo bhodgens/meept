@@ -397,6 +397,14 @@ func (p *pipeline) clear() {
 	p.dropQueued = true
 	p.playGen++
 	p.outCh = nil
+	// Playback stopped with the clear: drop the stale `speaking` flag.
+	// The aborted stream's deferred reset skips itself on the gen
+	// mismatch (playback()), so without this the flag would stay true
+	// across the interrupt and let noteBargeIn observe a speaking
+	// pipeline that no longer exists (also makes a watcher that waits
+	// for speaking==true synchronize with the next playback's latch
+	// re-arm, which happens in the same critical section).
+	p.speaking = false
 	p.playMu.Unlock()
 }
 
@@ -410,6 +418,12 @@ func (p *pipeline) noteBargeIn() bool {
 		return false
 	}
 	p.interrupted = true
+	// The trip STOPS the playback (R3: caller speech stops playout): the
+	// interrupted stream aborts on clear/gen bump, but until that frame
+	// lands the pipeline must not present itself as speaking — otherwise
+	// a watcher or a later say cannot tell the aborted stream from a
+	// live one and the latch re-arm becomes unobservable.
+	p.speaking = false
 	return true
 }
 
