@@ -1366,6 +1366,7 @@
     "tts_model": "",                        // global TTS model (openai voice id etc.)
     "tts_voice": "",                        // global TTS voice
     "stt_model": "",                        // global STT model
+    "tts_base_url": "",                     // TTS base URL override (local Qwen3-TTS server); empty = vendor default
     "local": {                              // local voice leg (mic + speaker on the client device); opt-in
       "enabled": false,                     // local leg master switch
       "stt_provider": "",                   // default "whisper"; empty = voice.stt_provider
