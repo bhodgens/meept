@@ -1733,11 +1733,19 @@ func TestSQLiteStore_ToolCallTraceRoundtrip(t *testing.T) {
 
 	// (d) Legacy row: raw SQL insert without trace columns, then read
 	// through GetToolCalls — DEFAULT '' must surface as "".
+	// The session must be REAL: _foreign_keys(1) now actually reaches
+	// SQLite on the modernc DSN (bughunt 2026-11-07 infra-fixes — the
+	// mattn-style key was silently dropped before, so an orphan
+	// session_id used to pass here; FK enforcement correctly refuses it).
+	legacySess, err := store.Create("trace-roundtrip-legacy")
+	if err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
 	var legacyMsgID int64
 	if err := store.db.QueryRow(
 		`INSERT INTO session_messages (session_id, role, content, timestamp, entry_type, branch_id)
-		 VALUES ('trace-roundtrip-legacy', 'assistant', 'legacy', ?, 'message', 'main')
-		 RETURNING id`, time.Now().UTC().Format(time.RFC3339)).Scan(&legacyMsgID); err != nil {
+		 VALUES (?, 'assistant', 'legacy', ?, 'message', 'main')
+		 RETURNING id`, legacySess.ID, time.Now().UTC().Format(time.RFC3339)).Scan(&legacyMsgID); err != nil {
 		t.Fatalf("legacy message insert: %v", err)
 	}
 	if _, err := store.db.Exec(

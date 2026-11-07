@@ -90,7 +90,7 @@ func (s *SQLiteFTSStore) Initialize(ctx context.Context) error {
 	}
 
 	// Open database directly using sqlx
-	dsn := "file:" + dbPath + "?_fk=1&_journal_mode=WAL&_busy_timeout=5000&cache=shared"
+	dsn := "file:" + dbPath + "?cache=shared&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" // modernc _pragma form (bughunt 2026-11-07)
 	rawDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)

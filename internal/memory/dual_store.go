@@ -125,9 +125,9 @@ func NewDualStore(dataDir string, nodeID string, logger *slog.Logger) (*DualStor
 func openWithRetries(path string, logger *slog.Logger, retries int) (*sql.DB, error) {
 	dsn := path
 	if !strings.Contains(dsn, "?") {
-		dsn += "?_journal_mode=WAL&_busy_timeout=5000"
-	} else if !strings.Contains(dsn, "_busy_timeout") {
-		dsn += "&_busy_timeout=5000"
+		dsn += "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+	} else if !strings.Contains(dsn, "busy_timeout") {
+		dsn += "&_pragma=busy_timeout(5000)"
 	}
 	var lastErr error
 	for range retries {

@@ -603,7 +603,7 @@ func countOriginUnknownFacts(stateDir string) int {
 	if _, err := os.Stat(dbPath); err != nil {
 		return 0
 	}
-	dsn := "file:" + dbPath + "?mode=ro&_busy_timeout=5000"
+	dsn := "file:" + dbPath + "?mode=ro&_pragma=busy_timeout(5000)" // modernc honors mode= (real URI param) but needs _pragma= for the timeout (bughunt 2026-11-07)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return 0

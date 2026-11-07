@@ -511,7 +511,7 @@ func (o *Orchestrator) initAuditDB(dbPath string) error {
 		return fmt.Errorf("create audit db directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)") // modernc _pragma form (bughunt 2026-11-07)
 	if err != nil {
 		return fmt.Errorf("open audit db: %w", err)
 	}

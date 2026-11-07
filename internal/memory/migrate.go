@@ -86,7 +86,7 @@ func MigrateToDualDB(dataDir string, nodeID string, logger *slog.Logger) error {
 	}
 
 	// Step 4: Create empty gossip DB with schema.
-	gossipDB, err := sql.Open("sqlite", gossipPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	gossipDB, err := sql.Open("sqlite", gossipPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)") // modernc _pragma form (bughunt 2026-11-07)
 	if err != nil {
 		return fmt.Errorf("migration: create gossip DB: %w", err)
 	}

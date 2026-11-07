@@ -91,7 +91,7 @@ func NewSQLiteStore(dbPath string, logger *slog.Logger, opts ...Option) (*SQLite
 		}
 	}
 
-	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=%d&_foreign_keys=ON", dbPath, store.busyTimeoutMs)
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(1)", dbPath, store.busyTimeoutMs) // modernc _pragma form (bughunt 2026-11-07)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)

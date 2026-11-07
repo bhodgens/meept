@@ -622,6 +622,7 @@ Audit scripts in `scripts/`:
 | `audit-dart-enum-name-shadow.py` | Flags Dart extensions shadowing Enum.name/index |
 | `audit-utf8-byte-arithmetic.py` | Flags hand-rolled ASCII case-conversion corrupting UTF-8 |
 | `audit-secrets-value-callers.py` | Pins the secrets in-process-only rule: `Broker.Value`/`resolve` callers must be allowlisted; their results never reach logs, env entries, or `os.Setenv` |
+| `audit-sqlite-dsn-pragmas.py` | Flags modernc-style `sql.Open("sqlite")` DSNs using mattn keys (`_journal_mode`/`_busy_timeout`/`_fk`/`_foreign_keys`) — modernc.org/sqlite silently drops them (only `_pragma=name(value)` reaches SQLite). bughunt 2026-11-07 infra-fixes |
 | `gen-connectivity-graph.py` | Generates bus/RPC/HTTP/WS topology (`make graphs`) |
 | `ensure-dev-key.sh` | Provision the per-installation dev API key (`$MEEPT_HOME/dev_key`, 0600) |
 | `gui-daemon-connect.py` | Reconcile the installed daemon config with the GUI connect path (`ensure-config` / `endpoint` / `check` / `probe`) |

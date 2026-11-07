@@ -883,6 +883,10 @@ audit-scripts:
 		echo "  secrets-value-callers..."; \
 		python3 scripts/audit-secrets-value-callers.py || exit 1; \
 	fi
+	@if [ -f scripts/audit-sqlite-dsn-pragmas.py ]; then \
+		echo "  sqlite-dsn-pragmas..."; \
+		python3 scripts/audit-sqlite-dsn-pragmas.py || exit 1; \
+	fi
 	@if [ -f scripts/research-harness-lit.py ]; then \
 		echo "  research-harness-lit..."; \
 		python3 scripts/research-harness-lit.py --check || exit 1; \

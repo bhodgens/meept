@@ -64,7 +64,7 @@ func NewRoutingLogger(dbPath string, logger *slog.Logger) (*RoutingLogger, error
 		}
 	}
 
-	db, err := sqlx.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sqlx.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)") // modernc _pragma form (bughunt 2026-11-07)
 	if err != nil {
 		return nil, fmt.Errorf("routing logger: failed to open database: %w", err)
 	}

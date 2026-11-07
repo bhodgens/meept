@@ -3296,7 +3296,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Create a direct connection for recents queries
 			var recents *project.RecentsStore
 			{
-				recentsDB, rerr := sql.Open("sqlite", projDBPath+"?_fk=1&cache=shared")
+				recentsDB, rerr := sql.Open("sqlite", projDBPath+"?cache=shared&_pragma=foreign_keys(1)") // modernc _pragma form (bughunt 2026-11-07)
 				if rerr == nil {
 					recentsDB.SetMaxOpenConns(1)
 					recents = project.NewRecentsStore(recentsDB)

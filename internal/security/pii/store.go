@@ -57,7 +57,7 @@ func NewSwapStore(dir string) (*SwapStore, error) {
 		return nil, fmt.Errorf("pii swap store: creating dir: %w", err)
 	}
 	dbPath := filepath.Join(dir, "pii_swap.db")
-	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=ON"
+	dsn := dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)" // modernc _pragma form (bughunt 2026-11-07)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("pii swap store: open: %w", err)
