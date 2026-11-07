@@ -275,7 +275,7 @@ Output: APPROVED or a list of specific gaps with file + line references.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests | PENDING | 0 | |
+| 00T-gate-tests | DONE a0cb1c37 | 1 | reflection-RED accepted; T2 temp-socket seam |
 | 01-config | PENDING | 0 | |
 | 02-keys-frame-extension | PENDING | 0 | |
 | 03-daemon-keys-emission | PENDING | 0 | |
