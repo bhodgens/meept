@@ -246,6 +246,16 @@ func shortThrottleSleep(header http.Header, plan BackoffPlan, now time.Time, att
 			step = wait
 		}
 	}
+	// F3 fix (property-test finding 2026-11-06): honor the doc contract —
+	// raise to the server schedule but NEVER past the plan's Max step, so
+	// a huge Retry-After cannot burn the short budget wall-clock (D8).
+	if plan.Max > 0 && step > plan.Max {
+		step = plan.Max
+	}
+	// The horizon is a hard ceiling too (D8: never wait past GiveUpAt).
+	if g := plan.GiveUpAt.Sub(now); g >= 0 && step > g {
+		step = g
+	}
 	if step < 0 {
 		step = 0
 	}

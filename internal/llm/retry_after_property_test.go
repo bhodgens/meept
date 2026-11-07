@@ -36,31 +36,32 @@ package llm
 //	   provider headers set on the same header map
 //	   (retry_after.go:29-30, 36-57 before 59-84).
 //
-// KNOWN FINDINGS (property counterexamples, 2026-11-06 — reported, NOT
-// fixed in this pass; see the KNOWN-BUG subtests for minimal repros):
+// FIXED FINDINGS (property counterexamples, 2026-11-06; fixed and pins
+// flipped to assert the corrected behavior — see the former KNOWN-BUG
+// subtests for the exact counterexamples):
 //
 //	F1 delta-seconds int64-ns overflow: "Retry-After: 9223372037"
 //	   (secs > maxSecs but still a valid RFC7231 1*DIGIT that Atoi
-//	   accepts) wraps time.Duration(secs)*time.Second (retry_after.go:45)
-//	   NEGATIVE, returning present=true, date=zero, delta<0 — violating
-//	   the delta-seconds shape contract (retry_after.go:17-18, 22-24).
-//	   Same wrap on the Codex lanes (retry_after.go:75-84) and on
-//	   "2252913649760013"-scale values. shortThrottleSleep
-//	   (client.go:226-234) happens to degrade benignly (past serverAt
-//	   loses the `wait > step` comparison), so impact is latent, but
-//	   every future delta consumer inherits the trap.
+//	   accepts) used to wrap time.Duration(secs)*time.Second
+//	   (retry_after.go:45) NEGATIVE with present=true. Fixed:
+//	   secondsToDuration saturates at MaxInt64 ns; the Retry-After lane
+//	   uses strconv.ParseInt and parseRetryAfterSeconds rejects the
+//	   <=0 result of an int64-wrapped Sscanf value.
 //	F2 date-form zero-time sentinel collision: "Retry-After: Mon, 01 Jan
-//	   0001 00:00:00 GMT" parses (RFC1123) to the zero time.Time — the
-//	   caller cannot distinguish date-form from delta-seconds form, and
-//	   delta is hugely negative (retry_after.go:54).
-//	F3 (adjacent, same call chain, found while tracing F1's consumers):
-//	   shortThrottleSleep (client.go:214-239) documents "never longer
-//	   than the plan's Max step, so a huge Retry-After cannot burn the
-//	   short budget wall-clock (capped by the plan, D8)" but the code
-//	   raises step to the server wait with NO clamp to plan.Max /
-//	   GiveUpAt — "Retry-After: 31536000" (1 year) wedges the streaming
-//	   throttle retry in `time.After(backoff)` (client.go:~2745) for a
-//	   year, contradicting the doc comment.
+//	   0001 00:00:00 GMT" parsed (RFC1123) to the zero time.Time —
+//	   indistinguishable from the delta form for date.IsZero() callers.
+//	   Fixed: dezeroDate remaps year-1 to the Unix epoch — still a
+//	   past date (caller clamps), but never the sentinel.
+//	F3 (adjacent, same call chain): shortThrottleSleep (client.go)
+//	   documented "never longer than the plan's Max step" but raised
+//	   the step to the server wait with NO clamp to plan.Max / GiveUpAt
+//	   — "Retry-After: 31536000" (1 year) wedged the streaming
+//	   throttle retry in time.After(backoff). Fixed: clamped to
+//	   plan.Max and the GiveUpAt horizon (D8). Pinned by
+//	   TestShortThrottleSleep_ClampedToPlan.
+//
+// The shape property (P1/P2) now runs STRICT over the full generator
+// space — the former F1 overflow-band and F2 year-1 skips are removed.
 //
 // Generator: seed 20261106, rand.New(rand.NewSource(...)), 5000 cases
 // per property; hostile corners seeded explicitly. On failure the seed
@@ -68,6 +69,7 @@ package llm
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -148,40 +150,15 @@ func rflip() bool { return flipRand.Intn(2) == 0 }
 
 // TestParseRetryAfter_NoThrowAndShape ports P1+P2: any header set parses
 // without panic, and a present result has exactly one non-zero schedule.
+// Runs STRICT over the full generator space: the F1 overflow band and the
+// F2 year-1 sentinel (former skip routes) are fixed in the product code —
+// overflow saturates positive, year-1 remaps to the epoch — so no input
+// may violate the shape any more.
 func TestParseRetryAfter_NoThrowAndShape(t *testing.T) {
 	flipRand = rand.New(rand.NewSource(retryAfterSeed))
 	r := rand.New(rand.NewSource(retryAfterSeed + 1))
-	// The generator never emits a Retry-After value inside the overflow
-	// band (maxInt64 < v <= maxSafeSecs is unreachable from digit soup
-	// either — see F1 in the header): those cases are the KNOWN-BUG
-	// subtest's job, so this property stays strict elsewhere.
-	const maxSafeSecs = int64(1) << 61 / int64(time.Second)
-	overflowBand := func(v string) bool {
-		for _, c := range v {
-			if c < '0' || c > '9' {
-				return false
-			}
-		}
-		if v == "" {
-			return false
-		}
-		if len(v) > 18 {
-			return true // beyond any safe band shape: route to F1 handling
-		}
-		n, err := strconv.ParseInt(v, 10, 64)
-		return err == nil && n > maxSafeSecs
-	}
 	for i := 0; i < 5000; i++ {
 		h := headerWith(randHeaderValue(r), randHeaderValue(r), randHeaderValue(r))
-		if overflowBand(h.Get("Retry-After")) || overflowBand(h.Get("X-Codex-Primary-Reset-At")) || overflowBand(h.Get("X-Codex-Primary-Reset-After-Seconds")) {
-			continue // F1 counterexample band: pinned by the KNOWN-BUG subtest
-		}
-		// F2 band: the year-1 RFC1123 date parses to the zero-time
-		// sentinel — the case is indistinguishable from the delta form and
-		// pinned by the KNOWN-BUG subtest.
-		if h.Get("Retry-After") == "Mon, 01 Jan 0001 00:00:00 GMT" {
-			continue
-		}
 		func() {
 			defer func() {
 				if rec := recover(); rec != nil {
@@ -195,7 +172,8 @@ func TestParseRetryAfter_NoThrowAndShape(t *testing.T) {
 			dateSet := !date.IsZero()
 			if !dateSet {
 				// delta-seconds form: date zero and the schedule strictly
-				// positive (secs > 0 gates on retry_after.go:44, 76, 81).
+				// positive (secs > 0 gates on retry_after.go:44, 76, 81;
+				// F1 fix saturates oversized digits instead of wrapping).
 				if delta <= 0 {
 					t.Fatalf("case %d: delta-seconds form returned delta %v; headers=%v", i, delta, h)
 				}
@@ -284,42 +262,87 @@ func TestParseRetryAfter_DeltaSecondsExact(t *testing.T) {
 	_ = checked
 }
 
-// KNOWN-BUG F1 (property counterexample 2026-11-06, header comment): a
+// FIXED F1/F2 (property counterexamples 2026-11-06, header comment): a
 // valid RFC7231 1*DIGIT Retry-After whose seconds exceed the Duration
-// nanosecond budget wraps NEGATIVE and is returned with present=true —
-// documented shape contract violated. Reported, not fixed in this pass.
-// If a future fix lands, delete the want-negativity pins below and move
-// the values into TestParseRetryAfter_NoThrowAndShape's hostile set.
-func TestParseRetryAfter_KnownBugOverflowWrapsNegative(t *testing.T) {
-	t.Skip("KNOWN-BUG F1/F2: enable ONLY to re-verify the reported counterexamples; this subtest FAILS until the product fix lands")
+// nanosecond budget now SATURATES at the maximum representable Duration
+// with present=true (secondsToDuration), and the year-1 date form no
+// longer collides with the zero-time sentinel (dezeroDate remaps it to
+// the Unix epoch, a past date callers already clamp). This subtest asserts
+// the corrected behavior; if it ever fails, the fix regressed.
+func TestParseRetryAfter_OverflowSaturatesAndZeroTimeRemaps(t *testing.T) {
 	for _, v := range []string{"9223372036854775807", "9223372037", "2252913649760013"} {
 		h := http.Header{}
 		h.Set("Retry-After", v)
-		_, delta, present := ParseRetryAfter(h)
+		date, delta, present := ParseRetryAfter(h)
 		if !present {
-			t.Fatalf("value %q: not present (behavior changed — re-evaluate F1)", v)
+			t.Fatalf("value %q: not present — the delta form must saturate, not disappear", v)
 		}
-		if delta > 0 {
-			t.Fatalf("value %q: delta %v is now POSITIVE — F1 appears fixed; re-enable the strict property", v, delta)
-		} else {
-			t.Logf("F1 still live: %q -> delta %v (negative wrap)", v, delta)
+		if !date.IsZero() {
+			t.Fatalf("value %q: delta form returned a date %v", v, date)
+		}
+		if delta <= 0 {
+			t.Fatalf("value %q: delta %v is not positive — F1 regression (wrap?)", v, delta)
+		}
+		if delta > time.Duration(math.MaxInt64) {
+			t.Fatalf("value %q: delta %v exceeds the Duration budget", v, delta)
 		}
 	}
-	// Codex lanes share the wrap (parseRetryAfterSeconds → same multiply).
+	// Codex lanes saturate the same way (parseRetryAfterSeconds shares the
+	// multiply guard).
 	h := http.Header{}
-	h.Set("X-Codex-Primary-Reset-At", "9223372036854775807")
+	h.Set("X-Codex-Primary-Reset-At", "9223372037")
 	_, delta, present := ParseRetryAfter(h)
-	if !present || delta > 0 {
-		t.Fatalf("codex lane behavior drifted (delta=%v present=%v) — re-evaluate F1", delta, present)
+	if !present || delta <= 0 {
+		t.Fatalf("codex lane drifted (delta=%v present=%v) — F1 fix must cover it", delta, present)
 	}
-	// F2: the zero-time date-form collision.
+	// F2: the zero-time date-form collision is gone — the year-1 RFC1123
+	// date now returns a non-zero, past instant with present=true.
 	h2 := http.Header{}
 	h2.Set("Retry-After", "Mon, 01 Jan 0001 00:00:00 GMT")
-	date, _, present := ParseRetryAfter(h2)
-	if !present || !date.IsZero() {
-		t.Fatalf("F2 behavior drifted (date=%v present=%v) — re-evaluate F2", date, present)
+	date, delta, present := ParseRetryAfter(h2)
+	if !present {
+		t.Fatal("F2: year-1 date form must stay present=true (date-form semantics kept)")
 	}
-	t.Log("F2 still live: date-form year-1 parses to the zero-time sentinel")
+	if date.IsZero() {
+		t.Fatalf("F2 regression: date-form result collides with the zero sentinel (date=%v)", date)
+	}
+	if delta >= 0 {
+		t.Fatalf("F2: remapped year-1 must be a past instant (delta negative, caller clamps); got %v", delta)
+	}
+}
+
+// FIXED F3 (client.go shortThrottleSleep): the server Retry-After raises
+// the plan step but the result is clamped to plan.Max and never passes the
+// GiveUpAt horizon (D8). Before the fix "Retry-After: 31536000" (1 year)
+// wedged the streaming throttle retry in time.After(backoff).
+func TestShortThrottleSleep_ClampedToPlan(t *testing.T) {
+	now := time.Date(2026, time.November, 7, 12, 0, 0, 0, time.UTC)
+	plan := BackoffPlan{Base: 30 * time.Second, Max: time.Hour, GiveUpAt: now.Add(24 * time.Hour)}
+
+	h := http.Header{}
+	h.Set("Retry-After", "31536000") // one year
+	if got := shortThrottleSleep(h, plan, now, 0); got > plan.Max {
+		t.Fatalf("huge Retry-After: sleep %v exceeds plan.Max %v — F3 regression (doc contract violated)", got, plan.Max)
+	}
+
+	// A sane server wait BELOW Max still wins over the exponential step
+	// (never hit a provider before it says).
+	h.Set("Retry-After", "1800")
+	if got := shortThrottleSleep(h, plan, now, 0); got != 30*time.Minute {
+		t.Fatalf("server 30m < Max must be honored exactly, got %v", got)
+	}
+
+	// Date form far past GiveUpAt: clamped to the horizon.
+	far := now.Add(365 * 24 * time.Hour).UTC().Format(time.RFC1123)
+	h.Set("Retry-After", far)
+	if got := shortThrottleSleep(h, plan, now, 0); got > plan.GiveUpAt.Sub(now) || got > plan.Max {
+		t.Fatalf("far-future date-form: sleep %v must clamp to Max/horizon", got)
+	}
+
+	// No server header: plan step applies unchanged.
+	if got := shortThrottleSleep(http.Header{}, plan, now, 0); got != plan.Base {
+		t.Fatalf("bare throttle: got %v want plan.Base %v", got, plan.Base)
+	}
 }
 
 // TestParseRetryAfter_Precedence ports P5: a parseable standard
