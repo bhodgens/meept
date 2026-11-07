@@ -17,7 +17,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -75,26 +74,17 @@ func qwen3Fake(t *testing.T, pcm []byte, seen *qwen3Seen) *httptest.Server {
 	return srv
 }
 
-// newQwen3TTS builds the adapter the way leaf 04's contract shape
-// requires: ProviderConfig carries Vendor/BaseURL/Model/Voice/SampleRate.
-// The BaseURL field does not exist until leaf 02 lands; reflect keeps this
-// file compilable, and the missing field is named in the failure.
+// newQwen3TTS (leaf 02 + leaf 04) builds the adapter the way leaf 04's
+// contract shape requires: ProviderConfig carries
+// Vendor/BaseURL/Model/Voice/SampleRate. The fields exist since leaf 02,
+// so the helper assigns them directly (the pre-leaf-02 reflection
+// indirection wrote to a throwaway copy and stopped landing values once
+// the fields existed).
 func setQwen3Fields(t *testing.T, cfg *ProviderConfig, baseURL, model, voice string) {
 	t.Helper()
-	v := reflectFieldByName(*cfg, "BaseURL")
-	if !v.IsValid() {
-		t.Fatalf("missing symbol ProviderConfig.BaseURL (leaf 02): qwen3 adapter cannot be configured")
-	}
-	v.SetString(baseURL)
-	reflectFieldByName(*cfg, "Model").SetString(model)
-	reflectFieldByName(*cfg, "Voice").SetString(voice)
-}
-
-// reflectFieldByName returns the settable field of cfg (value copy's
-// addressable equivalent) by name; invalid when leaf 02 has not added it.
-func reflectFieldByName(cfg ProviderConfig, name string) reflect.Value {
-	v := reflect.ValueOf(&cfg).Elem().FieldByName(name)
-	return v
+	cfg.BaseURL = baseURL
+	cfg.Model = model
+	cfg.Voice = voice
 }
 
 // TestQwen3TTSConstruction pins the constructor matrix (D2 keyless rule).

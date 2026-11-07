@@ -97,13 +97,13 @@ func newSTTWiredChild(t *testing.T, ccid string) (*fakeDaemon, *Child, net.Conn,
 	child := newTestChild(t, d, "tok")
 	stt := newRecordingSTT()
 	child.SetProviderFactories(
-		func(key string, rate int) (STTProvider, error) {
+		func(cfg ProviderConfig, key string) (STTProvider, error) {
 			if key != "stt-secret" {
 				return nil, errors.New("test: want stt-secret key")
 			}
 			return stt, nil
 		},
-		func(key string, rate int) (TTSProvider, error) { return stubTTS{}, nil },
+		func(cfg ProviderConfig, key string) (TTSProvider, error) { return stubTTS{}, nil },
 	)
 	runDone := make(chan error, 1)
 	go func() { runDone <- child.Run(context.Background()) }()

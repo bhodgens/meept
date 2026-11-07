@@ -40,12 +40,14 @@ type pipeline struct {
 	sampleRt int
 	child    *Child
 	logger   *slog.Logger
-	stt      STTProvider // stub this leaf
-	tts      TTSProvider // stub this leaf
-	sttKey   string      // provider keys, in memory only (leaf 08 consumes)
-	ttsKey   string      // provider keys, in memory only (leaf 08 consumes)
-	audioOut net.Conn    // child->daemon PCM (C2 <ccid>.out)
-	audioIn  net.Conn    // daemon->child PCM (C2 <ccid>.in)
+	stt      STTProvider    // stub this leaf
+	tts      TTSProvider    // stub this leaf
+	sttKey   string         // provider keys, in memory only (leaf 08 consumes)
+	ttsKey   string         // provider keys, in memory only (leaf 08 consumes)
+	sttCfg   ProviderConfig // per-call vendor/model/base_url/voice (C1 keys frame)
+	ttsCfg   ProviderConfig // per-call vendor/model/base_url/voice (C1 keys frame)
+	audioOut net.Conn       // child->daemon PCM (C2 <ccid>.out)
+	audioIn  net.Conn       // daemon->child PCM (C2 <ccid>.in)
 	audioDir string
 
 	// open-frame profile (local-leg plan CL1/CL3), set once by handleOpen

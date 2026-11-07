@@ -22,19 +22,19 @@ func TestKeysWiringConstructsProviders(t *testing.T) {
 	var sttCalls, ttsCalls int
 	var mu sync.Mutex
 	child.SetProviderFactories(
-		func(key string, rate int) (STTProvider, error) {
+		func(cfg ProviderConfig, key string) (STTProvider, error) {
 			mu.Lock()
 			sttCalls++
 			mu.Unlock()
 			if key != "stt-secret" {
 				t.Errorf("stt factory key = %q, want the keys-frame key", key)
 			}
-			if rate != 16000 {
-				t.Errorf("stt factory rate = %d, want setup-frame 16000", rate)
+			if cfg.SampleRate != 16000 {
+				t.Errorf("stt factory rate = %d, want setup-frame 16000", cfg.SampleRate)
 			}
 			return stubSTT{}, nil
 		},
-		func(key string, rate int) (TTSProvider, error) {
+		func(cfg ProviderConfig, key string) (TTSProvider, error) {
 			mu.Lock()
 			ttsCalls++
 			mu.Unlock()
@@ -97,7 +97,7 @@ func TestKeysWiringConstructsProviders(t *testing.T) {
 	// providers.NewSTT's ErrMissingSTTKey; the real constructor is
 	// exercised in the providers package, here we pin the child's
 	// routing behavior on failure).
-	child.SetProviderFactories(func(key string, rate int) (STTProvider, error) {
+	child.SetProviderFactories(func(cfg ProviderConfig, key string) (STTProvider, error) {
 		return nil, ErrMissingSTTKeyFactory
 	}, nil)
 
@@ -152,10 +152,10 @@ func TestNoKeyLogs(t *testing.T) {
 		Logger:         logger.logger(),
 	})
 	child.SetProviderFactories(
-		func(key string, rate int) (STTProvider, error) {
+		func(cfg ProviderConfig, key string) (STTProvider, error) {
 			return nil, errMissingKeyForLogTest
 		},
-		func(key string, rate int) (TTSProvider, error) {
+		func(cfg ProviderConfig, key string) (TTSProvider, error) {
 			return stubTTS{}, nil
 		},
 	)
