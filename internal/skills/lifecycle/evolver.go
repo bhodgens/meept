@@ -594,6 +594,26 @@ func (e *Evolver) passCPrune(ctx context.Context, report *EvolutionReport) {
 // proposals, which the content rubric judges — the content path needs no
 // usage input.
 func (e *Evolver) processProposal(ctx context.Context, report *EvolutionReport, proposal EvolutionProposal, currentContent, verifyAction string, usage *UsageStats) {
+	// bughunt 2026-11-07 agent-fixes F-G: user-locked skills are skipped at
+	// proposal time, not merely refused at apply time. The origin guard
+	// (config-tools F-4) made overwrite a PERMANENT refusal class, but the
+	// retry loop around it was never updated: every cycle re-ran the
+	// verifier LLM call, re-refused, and re-wrote the candidate sidecar
+	// forever, with no acknowledge path. An on-disk `origin: user` stamp
+	// means "user-locked, stop proposing" until a human re-authorizes.
+	if e.writer != nil && proposal.SkillName != "" {
+		lockContent := currentContent
+		if lockContent == "" {
+			if disk, err := e.writer.ReadSkill(proposal.SkillName); err == nil {
+				lockContent = disk
+			}
+		}
+		if skillFileOrigin([]byte(lockContent)) == OriginUser {
+			e.userLocked(report, proposal)
+			return
+		}
+	}
+
 	// Route through the verifier gate.
 	verifyReq := VerifyRequest{
 		Action:           verifyAction,
@@ -792,8 +812,21 @@ func (e *Evolver) passDFillGap(ctx context.Context, report *EvolutionReport) {
 	}
 }
 
-// incrementActionCount bumps the appropriate report counter for a successfully
-// applied proposal.
+// userLocked records the F-G skip: a proposal against a skill stamped
+// `origin: user` is dropped before the verifier runs. Reported as a skip
+// with a detail line so the cycle report shows WHY the skill never
+// evolves, without the per-cycle LLM + sidecar churn.
+func (e *Evolver) userLocked(report *EvolutionReport, proposal EvolutionProposal) {
+	proposal.Rationale = proposal.Rationale + " [skipped: skill is user-locked (origin: user); re-authorize by editing the stamp]"
+	proposal.VerifierResult = nil
+	report.Skipped++
+	report.Details = append(report.Details, proposal)
+	e.logger.Info("evolver: proposal skipped for user-locked skill",
+		"skill", proposal.SkillName, "action", proposal.Action)
+}
+
+// incrementActionCount bumps the appropriate report counter for a
+// successfully applied proposal.
 func (e *Evolver) incrementActionCount(report *EvolutionReport, action EvolutionProposalAction) {
 	switch action {
 	case ProposalRefine:

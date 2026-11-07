@@ -44,10 +44,16 @@ func TestWriteSkillWithOrigin_UserClobberGuard(t *testing.T) {
 			if string(data) != userStampedSkill {
 				t.Fatalf("protected file altered:\n%s", data)
 			}
-			// Candidate preserved in the sidecar.
-			side, serr := os.ReadFile(filepath.Join(dir, "prot", "SKILL.md.new"))
+			// Candidate preserved in its PER-FUNNEL sidecar (bughunt
+			// 2026-11-07 agent-fixes F-F: shared `.new` let one funnel's
+			// refusal clobber another's candidate; unstamped keeps `.new`).
+			sidecarName := "SKILL.md.new-" + string(o)
+			if o == OriginUnknown {
+				sidecarName = "SKILL.md.new"
+			}
+			side, serr := os.ReadFile(filepath.Join(dir, "prot", sidecarName))
 			if serr != nil {
-				t.Fatalf("sidecar missing: %v", serr)
+				t.Fatalf("sidecar %s missing: %v", sidecarName, serr)
 			}
 			if !strings.Contains(string(side), "machine body") {
 				t.Fatalf("sidecar lost candidate: %s", side)
@@ -112,5 +118,37 @@ func TestSkillFileOrigin(t *testing.T) {
 		if got := skillFileOrigin([]byte(c.in)); got != c.want {
 			t.Errorf("skillFileOrigin(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// bughunt 2026-11-07 agent-fixes F-E: the guard must speak the same
+// vocabulary as the YAML loader that renders the file. Two fail-opens
+// closed: quoted values (`origin: "user"` — the loader parses that as user)
+// and CRLF files (`---\r\n...` — HasPrefix("---\n") used to miss them).
+func TestSkillFileOriginQuotedAndCRLF(t *testing.T) {
+	cases := []struct {
+		in   string
+		want Origin
+	}{
+		{"---\nname: x\norigin: \"user\"\n---\n", OriginUser},
+		{"---\nname: x\norigin: 'user'\n---\n", OriginUser},
+		{"---\r\nname: x\r\norigin: user\r\n---\r\n", OriginUser},
+		{"---\r\nname: x\r\norigin: \"user\"\r\n---\r\n", OriginUser},
+		{"---\r\nname: x\r\norigin: evolver\r\n---\r\n", OriginEvolver},
+		{"---\nname: x\norigin: \"bogus\"\n---\n", OriginUnknown},
+	}
+	for _, c := range cases {
+		if got := skillFileOrigin([]byte(c.in)); got != c.want {
+			t.Errorf("skillFileOrigin(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+
+	// End-to-end: a quoted user stamp gets the same protection as bare.
+	dir := t.TempDir()
+	w := NewWriter(dir, nil)
+	writeRaw(t, dir, "protq", "---\nname: protq\ndescription: d\norigin: \"user\"\n---\n\nuser body\n")
+	err := w.WriteSkillWithOrigin("protq", "---\nname: protq\norigin: evolver\n---\n\ncandidate\n", OriginEvolver)
+	if !errors.Is(err, ErrUserClobber) {
+		t.Fatalf("quoted origin: user must be protected (F-E fail-open), got %v", err)
 	}
 }

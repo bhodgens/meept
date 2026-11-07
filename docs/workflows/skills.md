@@ -27,11 +27,16 @@ When multiple skills have the same name, the highest-priority version wins.
   never overwritten. `make install` prints `skipping <name> (exists)` for
   those and `installed skill <name>` for fresh installs.
 - **Origin no-clobber (enforced)**: every funnel write stamps its
-  provenance into SKILL.md frontmatter (`origin: user|agent|evolver|review`).
-  A file declaring `origin: user` refuses overwrite by any OTHER funnel:
-  the write returns `ErrUserClobber` and the candidate lands as
-  `SKILL.md.new` beside the real file for a human merge (the same sidecar
-  convention as `make install`). A user-class write is always allowed —
+  provenance into SKILL.md frontmatter (`origin: user|agent|evolver|review`;
+  YAML-quoted and CRLF forms count). A file declaring `origin: user`
+  refuses overwrite by any OTHER funnel: the write returns
+  `ErrUserClobber` and the candidate lands as `SKILL.md.new-<funnel>`
+  beside the real file (`.new` for unstamped writes) so concurrent
+  funnels' candidates never clobber each other — a human merge reads
+  each one (per-funnel sidecars, bughunt 2026-11-07 agent-fixes F-F).
+  The evolver skips user-locked skills BEFORE its verifier call
+  (`Skipped` in the cycle report), so a locked skill stops generating
+  per-cycle proposal churn (F-G). A user-class write is always allowed —
   it is the explicit re-authorization. Legacy/unstamped files stay
   overwritable.
 - **User edits shadow bundled**: discovery resolves `~/.meept/skills/`

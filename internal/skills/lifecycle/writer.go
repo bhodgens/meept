@@ -274,7 +274,17 @@ func (w *Writer) WriteSkillWithOrigin(name string, content string, o Origin) err
 	// user-stamped file is protected).
 	if o != OriginUser {
 		if existing, err := os.ReadFile(targetPath); err == nil && skillFileOrigin(existing) == OriginUser {
+			// bughunt 2026-11-07 agent-fixes F-F: per-funnel sidecar names.
+			// The single shared `<file>.new` meant an evolver refusal
+			// silently clobbered an earlier agent candidate (and vice
+			// versa) — refusals recur every cycle (see the evolver
+			// user-locks guard), so lost candidates were routine. The
+			// user/agent/evolver funnels each get their own slot; an
+			// unstamped write keeps the shared `.new` name.
 			sidecar := targetPath + ".new"
+			if o != OriginUnknown {
+				sidecar = targetPath + ".new-" + string(o)
+			}
 			if werr := os.WriteFile(sidecar, []byte(content), 0o644); werr != nil {
 				w.logger.Warn("origin guard: sidecar write failed; refusing overwrite anyway",
 					"name", name, "sidecar", sidecar, "error", werr)

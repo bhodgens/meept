@@ -41,7 +41,7 @@ var ErrUserClobber = errors.New("skill declares origin: user; overwrite refused"
 // absent, unknown-valued, or legacy/unstamped reads as OriginUnknown —
 // so the guard fires ONLY on a proven `origin: user` declaration.
 func skillFileOrigin(data []byte) Origin {
-	text := string(data)
+	text := strings.ReplaceAll(string(data), "\r\n", "\n") // CRLF tolerance (bughunt 2026-11-07 agent-fixes F-E)
 	if !strings.HasPrefix(text, "---\n") {
 		return OriginUnknown
 	}
@@ -59,6 +59,15 @@ func skillFileOrigin(data []byte) Origin {
 		}
 		if l == "origin:" || strings.HasPrefix(l, "origin: ") {
 			v := strings.TrimSpace(strings.TrimPrefix(l, "origin:"))
+			// The YAML loader (models.go `Origin string yaml:"origin"`)
+			// parses quoted "user" as user; the guard must speak the same
+			// vocabulary or a legitimately-user-stamped file written with
+			// YAML quoting gets zero protection (fail-open).
+			if len(v) >= 2 {
+				if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
+					v = v[1 : len(v)-1]
+				}
+			}
 			switch Origin(v) {
 			case OriginUser:
 				return OriginUser
