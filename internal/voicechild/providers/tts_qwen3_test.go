@@ -27,11 +27,10 @@ import (
 
 // qwen3Seen records what the fake local server received.
 type qwen3Seen struct {
-	mu       sync.Mutex
-	auth     string
-	path     string
-	body     string
-	clientIP string
+	mu   sync.Mutex
+	auth string
+	path string
+	body string
 }
 
 func (s *qwen3Seen) snapshot() (string, string, string) {
@@ -47,8 +46,12 @@ func qwen3Fake(t *testing.T, pcm []byte, seen *qwen3Seen) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		// Read the header BEFORE the lock: mutexio flags any `.Get(`
+		// call under a held mutex, and http.Header.Get is a map read
+		// it cannot distinguish from an HTTP client call.
+		auth := r.Header.Get("Authorization")
 		seen.mu.Lock()
-		seen.auth = r.Header.Get("Authorization")
+		seen.auth = auth
 		seen.path = r.URL.Path
 		seen.body = string(body)
 		seen.mu.Unlock()
