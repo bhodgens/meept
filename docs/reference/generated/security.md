@@ -152,6 +152,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func NewSecretObfuscator\(\) \*SecretObfuscator](<#NewSecretObfuscator>)
   - [func \(s \*SecretObfuscator\) Deobfuscate\(text string\) string](<#SecretObfuscator.Deobfuscate>)
   - [func \(s \*SecretObfuscator\) DeobfuscateMessages\(messages \[\]any\) \[\]any](<#SecretObfuscator.DeobfuscateMessages>)
+  - [func \(s \*SecretObfuscator\) DeobfuscateUntagged\(text string\) string](<#SecretObfuscator.DeobfuscateUntagged>)
   - [func \(s \*SecretObfuscator\) LoadFromConfig\(path string\) error](<#SecretObfuscator.LoadFromConfig>)
   - [func \(s \*SecretObfuscator\) Obfuscate\(text string\) string](<#SecretObfuscator.Obfuscate>)
   - [func \(s \*SecretObfuscator\) ObfuscateForSession\(text, sessionID string\) string](<#SecretObfuscator.ObfuscateForSession>)
@@ -1406,6 +1407,13 @@ Deobfuscate replaces placeholders back with original secrets, consulting the pro
 	func (s *SecretObfuscator) DeobfuscateMessages(messages []any) []any
 
 DeobfuscateMessages reverses obfuscation on a slice of messages.
+
+<a name="SecretObfuscator.DeobfuscateUntagged"></a>
+### func \(\*SecretObfuscator\) DeobfuscateUntagged
+
+	func (s *SecretObfuscator) DeobfuscateUntagged(text string) string
+
+DeobfuscateUntagged resolves ONLY placeholders with no minting\-session tag \- the pre\-deploy entries the legacy full\-sweep Deobfuscate used to serve \- and skips every session\-tagged placeholder. Callers pairing this with RestoreOutput \(the PII/secret restore hook\) get untagged legacy coverage WITHOUT the cross\-session leak: a placeholder tagged to session A never resolves for session B's text \(bughunt 2026\-11\-06 security F\-3; the old "no progress" fallback to full Deobfuscate resolved exactly the cross\-session case the scoped lane refuses\).
 
 <a name="SecretObfuscator.LoadFromConfig"></a>
 ### func \(\*SecretObfuscator\) LoadFromConfig

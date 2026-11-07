@@ -83,6 +83,7 @@ Package agent provides the agent loop and related components.
 - [func EnforceMemoryItemBudget\(items \[\]string, maxTokens int, estimate ...func\(string\) int\) \[\]string](<#EnforceMemoryItemBudget>)
 - [func EstimateStepTokens\(desc string, cfg AllotmentConfig\) int](<#EstimateStepTokens>)
 - [func ExecutorAgentIDs\(\) \[\]string](<#ExecutorAgentIDs>)
+- [func ExposureGateRefusal\(ctx context.Context, toolName string\) \(refuse bool, directive string\)](<#ExposureGateRefusal>)
 - [func ExtractJSON\(s string\) string](<#ExtractJSON>)
 - [func FinalSentinelContent\(\) string](<#FinalSentinelContent>)
 - [func FlattenPlanPhasesToSteps\(taskID string, phases \[\]PlanPhaseSpec, maxStepsPerPhase int\) \[\]\*task.TaskStep](<#FlattenPlanPhasesToSteps>)
@@ -145,6 +146,7 @@ Package agent provides the agent loop and related components.
 - [func VerifyFromToolResults\(results \[\]tools.ToolResult\) bool](<#VerifyFromToolResults>)
 - [func WarnToolsWithoutProperties\(reg ToolRegistry, logger \*slog.Logger\) \[\]string](<#WarnToolsWithoutProperties>)
 - [func WithACPTurnSource\(ctx context.Context, kind, employeeID string\) context.Context](<#WithACPTurnSource>)
+- [func WithExposurePlan\(ctx context.Context, plan \*ExposurePlan\) context.Context](<#WithExposurePlan>)
 - [func WithResumedTurn\(ctx context.Context\) context.Context](<#WithResumedTurn>)
 - [func WithRetryBudget\(ctx context.Context, budget \*RetryBudget\) context.Context](<#WithRetryBudget>)
 - [func WithScopeOptions\(ctx context.Context, opts \[\]llm.ChatOption\) context.Context](<#WithScopeOptions>)
@@ -356,6 +358,7 @@ Package agent provides the agent loop and related components.
   - [func \(s \*AgentSpec\) HasSkill\(skillName string\) bool](<#AgentSpec.HasSkill>)
   - [func \(s \*AgentSpec\) HasTool\(tool string\) bool](<#AgentSpec.HasTool>)
   - [func \(s \*AgentSpec\) ScopedToolNames\(limit int\) \[\]string](<#AgentSpec.ScopedToolNames>)
+  - [func \(s \*AgentSpec\) ScopedToolNamesPresent\(limit int, baselinePresent func\(string\) bool\) \[\]string](<#AgentSpec.ScopedToolNamesPresent>)
 - [type AgentStartData](<#AgentStartData>)
 - [type AgentState](<#AgentState>)
   - [func \(s AgentState\) IsActive\(\) bool](<#AgentState.IsActive>)
@@ -805,7 +808,6 @@ Package agent provides the agent loop and related components.
   - [func \(e \*Executor\) SetAgentID\(id string\)](<#Executor.SetAgentID>)
   - [func \(e \*Executor\) SetConversationID\(id string\)](<#Executor.SetConversationID>)
   - [func \(e \*Executor\) SetDecisionLogLevel\(level string\)](<#Executor.SetDecisionLogLevel>)
-  - [func \(e \*Executor\) SetExposurePlan\(plan \*ExposurePlan\)](<#Executor.SetExposurePlan>)
   - [func \(e \*Executor\) SetGroupResolution\(res \*groups.Resolved\)](<#Executor.SetGroupResolution>)
   - [func \(e \*Executor\) SetParallelismConfig\(baseParallelism int, profiles map\[string\]int\)](<#Executor.SetParallelismConfig>)
   - [func \(e \*Executor\) SetRegistry\(registry ToolRegistry\)](<#Executor.SetRegistry>)
@@ -822,8 +824,9 @@ Package agent provides the agent loop and related components.
   - [func WithGroupResolutionOption\(res \*groups.Resolved\) ExecutorOption](<#WithGroupResolutionOption>)
   - [func WithParallelism\(n int\) ExecutorOption](<#WithParallelism>)
 - [type ExposurePlan](<#ExposurePlan>)
-  - [func NewExposurePlan\(mode ToolExposureMode, predicted \[\]string, budget int, ceiling \[\]string, knownNames \[\]string\) \*ExposurePlan](<#NewExposurePlan>)
+  - [func NewExposurePlan\(mode ToolExposureMode, predicted \[\]string, budget int, ceiling \[\]string, knownNames \[\]string, liveSource ToolRegistry\) \*ExposurePlan](<#NewExposurePlan>)
   - [func \(p \*ExposurePlan\) Active\(\) \[\]string](<#ExposurePlan.Active>)
+  - [func \(p \*ExposurePlan\) Enforcing\(\) bool](<#ExposurePlan.Enforcing>)
   - [func \(p \*ExposurePlan\) IsActive\(name string\) bool](<#ExposurePlan.IsActive>)
   - [func \(p \*ExposurePlan\) IsKnown\(name string\) bool](<#ExposurePlan.IsKnown>)
   - [func \(p \*ExposurePlan\) Promote\(name string\) error](<#ExposurePlan.Promote>)
@@ -1543,10 +1546,8 @@ Package agent provides the agent loop and related components.
 - [type SemanticIndex](<#SemanticIndex>)
   - [func NewSemanticIndex\(client EmbeddingClient\) \*SemanticIndex](<#NewSemanticIndex>)
   - [func \(idx \*SemanticIndex\) BuildIndex\(ctx context.Context\) error](<#SemanticIndex.BuildIndex>)
-  - [func \(idx \*SemanticIndex\) BuildIndexWithCancel\(ctx context.Context\) \(cancel context.CancelFunc, err error\)](<#SemanticIndex.BuildIndexWithCancel>)
   - [func \(idx \*SemanticIndex\) IsReady\(\) bool](<#SemanticIndex.IsReady>)
   - [func \(idx \*SemanticIndex\) Match\(input string, minConfidence float64\) \*SemanticMatch](<#SemanticIndex.Match>)
-  - [func \(idx \*SemanticIndex\) Stop\(\)](<#SemanticIndex.Stop>)
 - [type SemanticMatch](<#SemanticMatch>)
 - [type SessionBeforeCompactData](<#SessionBeforeCompactData>)
 - [type SessionBeforeTreeData](<#SessionBeforeTreeData>)
@@ -2563,6 +2564,8 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "ask":             "send_message",
 	    "request_handoff": "send_message",
 	
+	    "voice_call": "voice_call",
+	
 	    "pdf_read": ToolFileRead,
 	
 	    "skills_create": "skill_execute",
@@ -2802,6 +2805,13 @@ EstimateStepTokens estimates the token cost of a step description as ceil\(len\(
 	func ExecutorAgentIDs() []string
 
 ExecutorAgentIDs returns the canonical list of executor agent IDs \(excluding the dispatcher, which routes but does not execute jobs\). The IDs are returned in a stable order suitable for deterministic worker bootstrapping.
+
+<a name="ExposureGateRefusal"></a>
+## func ExposureGateRefusal
+
+	func ExposureGateRefusal(ctx context.Context, toolName string) (refuse bool, directive string)
+
+ExposureGateRefusal is the §6 row\-4 verdict for one tool name against the plan riding ctx: refuse=true only when an ENFORCING plan is armed, the name is known \(snapshot OR live filtered registry\), and it is not yet active. directive is the actionable recovery text. Exported so every execution lane — Executor.Execute, the codemode sandbox bridge, and the skill\-state tool runner — pays the same gate \(bughunt 2026\-11\-07 agent\-fixes F\-C: the gate lived only in Executor.Execute, so a sandbox script could invoke any known\-but\-inactive tool in the filtered registry without ever promoting it via tool\_view\).
 
 <a name="ExtractJSON"></a>
 ## func ExtractJSON
@@ -3270,6 +3280,13 @@ WarnToolsWithoutProperties logs a warning listing every property\-less tool in r
 	func WithACPTurnSource(ctx context.Context, kind, employeeID string) context.Context
 
 WithACPTurnSource stamps who is driving an acp turn onto ctx so ACPExecutor.recordTurn can tag acp.persona.turns without the executor knowing about employees. kind is ACPTurnSourceEmployee for employee turns \(employeeID names the employee; an empty id just omits the employee\_id tag\); an empty kind returns ctx unchanged — the chat default — so a mis\-wired caller can never emit source:"".
+
+<a name="WithExposurePlan"></a>
+## func WithExposurePlan
+
+	func WithExposurePlan(ctx context.Context, plan *ExposurePlan) context.Context
+
+WithExposurePlan attaches the episode's plan to ctx for the duration of the turn. A nil plan leaves ctx untouched \(legacy posture: the row\-4 execution gate stays off\).
 
 <a name="WithResumedTurn"></a>
 ## func WithResumedTurn
@@ -3853,7 +3870,7 @@ Chatter returns the loop's LLM chatter \(Client, ProviderManager, or a wrapper s
 
 	func (l *AgentLoop) ClearConversation(id string)
 
-ClearConversation removes a conversation.
+ClearConversation removes a conversation. Nil\-safe on the store \(bughunt 2026\-11\-07 agent\-fixes F\-A: ChatHandler.ClearConversation now routes here instead of touching l.conversations directly, so the exposure\-plan prune below dies with every real /reset, not only test callers\).
 
 <a name="AgentLoop.ClearModelOverride"></a>
 ### func \(\*AgentLoop\) ClearModelOverride
@@ -5170,6 +5187,18 @@ ScopedToolNames returns the tool names offered to this agent under tool\-list sc
 - limit \> 0: at most \`limit\` names, ordered AdditionalTools first \(the task\-relevant tools the agent was granted for its job — these survive the cap\) then BaselineTools \(the always\-available platform/task tools\), de\-duplicated, with names normalized to registry names.
 
 The cap exists because a forced tool call must choose among few candidates: with a large candidate set a \`tool\_choice: "required"\` request produces spurious calls \(measured; see docs/reference/agent\-loop\-tools.md\).
+
+<a name="AgentSpec.ScopedToolNamesPresent"></a>
+### func \(\*AgentSpec\) ScopedToolNamesPresent
+
+	func (s *AgentSpec) ScopedToolNamesPresent(limit int, baselinePresent func(string) bool) []string
+
+ScopedToolNamesPresent caps like ScopedToolNames but drops BASELINE names that \`baselinePresent\` reports as not registered BEFORE they consume a cap slot \(bughunt config\-tools F\-3\). Without it, a config opt\-out that unregisters conditional baseline tools \(knowledge\_\* under memory.knowledge.enabled=false\) silently displaces up to 3 real tail tools \(project\_info, delegate\_task\) from a capped agent's grant: the dead names pass the cap first and the filtered registry hides them at definitions time, so the agent sees fewer tools than its cap allows.
+
+- limit \<= 0: no cap — identical to GrantedToolNames \(presence is irrelevant when nothing is displaced\).
+- baselinePresent == nil: identical to ScopedToolNames.
+
+AdditionalTools are NEVER dropped by presence: they are explicit per\-agent grants \(e.g. an MCP tool that reconnects later\), and they already outrank the baseline, so a dead one costs a slot nobody else wanted. Baseline names are static builtins whose registration is decided at boot, so a cap\-time presence check is stable.
 
 <a name="AgentStartData"></a>
 ## type AgentStartData
@@ -6582,6 +6611,8 @@ NewChatHandler creates a new ChatHandler. The dispatcher parameter is optional; 
 	func (h *ChatHandler) ClearConversation(conversationID string)
 
 ClearConversation removes the in\-memory conversation cache for a session. Called by the /reset RPC handler after clearing persisted messages.
+
+bughunt 2026\-11\-07 agent\-fixes F\-A: route through the loop method, NOT conversations.Delete directly. AgentLoop.ClearConversation also prunes the conversation's exposure plan \(bughunt agent\-core F\-4\); bypassing it left every real /reset leaking a frozen episode \(map growth \+ a recycled conversationID silently resuming the old active set\).
 
 <a name="ChatHandler.EmitTurnTerminal"></a>
 ### func \(\*ChatHandler\) EmitTurnTerminal
@@ -9281,13 +9312,6 @@ SetConversationID updates the conversation/session identifier included in bus pr
 
 SetDecisionLogLevel sets the level for the permission decision\-audit lines: "deny\-warn" \(default\), "all", or "off". The empty string keeps the deny\-warn default; unknown values are ignored \(the config loader already normalizes, so this only defends direct callers\). Nil\-safe per setter convention.
 
-<a name="Executor.SetExposurePlan"></a>
-### func \(\*Executor\) SetExposurePlan
-
-	func (e *Executor) SetExposurePlan(plan *ExposurePlan)
-
-SetExposurePlan installs the per\-episode tool\-exposure plan on the executor \(dynamic\-tools leaf 06\). The tool\-lookup site consults it to emit the actionable "not active in this episode; call tool\_view\{X\} first" error for a known\-but\-inactive tool \(design §6 row 4\). A nil plan is the flag\-off posture: the lookup site never takes the active\-set branch, so the error behavior is byte\-identical to legacy. Nil\-guarded per the repo setter convention \(a nil plan resets to the legacy posture\).
-
 <a name="Executor.SetGroupResolution"></a>
 ### func \(\*Executor\) SetGroupResolution
 
@@ -9409,7 +9433,7 @@ knownNames is the FULL registry's name set at episode start \(design §6 row 4\)
 <a name="NewExposurePlan"></a>
 ### func NewExposurePlan
 
-	func NewExposurePlan(mode ToolExposureMode, predicted []string, budget int, ceiling []string, knownNames []string) *ExposurePlan
+	func NewExposurePlan(mode ToolExposureMode, predicted []string, budget int, ceiling []string, knownNames []string, liveSource ToolRegistry) *ExposurePlan
 
 NewExposurePlan builds the episode's active set for the given mode. ceiling is the role ceiling \(design §1 layer 1\): the set of tool names this agent's role may ever activate. A nil ceiling means "no ceiling" \(the flag\-off legacy posture\). In search mode the predicted set is empty \(budget 0\) so only core always\-full \+ the meta pair \(tool\_search, tool\_view\) are active. In predicted mode the caller passes the intent\-selected set; the core always\-full set and the meta pair are unioned in. knownNames is the FULL registry's name set \(design §6 row 4\) so the executor can distinguish a real registered tool that is not active yet from a genuinely unknown name.
 
@@ -9419,6 +9443,13 @@ NewExposurePlan builds the episode's active set for the given mode. ceiling is t
 	func (p *ExposurePlan) Active() []string
 
 Active returns the current active set \(a copy; safe to iterate\).
+
+<a name="ExposurePlan.Enforcing"></a>
+### func \(\*ExposurePlan\) Enforcing
+
+	func (p *ExposurePlan) Enforcing() bool
+
+Enforcing reports whether this plan hard\-gates tool execution \(dynamic modes only\). Full/indexed plans never gate: the active set there is advisory, matching the pre\-gate posture \(bughunt agent\-core F\-1\).
 
 <a name="ExposurePlan.IsActive"></a>
 ### func \(\*ExposurePlan\) IsActive
@@ -15075,6 +15106,18 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // behaves byte-identically to pre-codemode and the tool stays absent
 	    // from filtered registries.
 	    CodemodeEnabled bool
+	
+	    // DynamicExposureEnabled is [agent.tools].dynamic_tool_exposure: when
+	    // true, filterTools unions the tool_search/tool_view meta pair into
+	    // every SCOPED agent's allow-list (bughunt agent-core F-2). Design
+	    // §1 layer 3 makes the pair always-active in dynamic modes, and the
+	    // row-4 hard execution gate refuses any non-active tool — so an agent
+	    // whose grant lacks the meta pair would have no recovery path (it
+	    // could never activate an in-ceiling non-core tool). Most AGENT.md
+	    // specs grant neither meta tool (only coder grants tool_view), so
+	    // without this union the gate starves scoped agents. Default false
+	    // keeps filtered registries byte-identical to the pre-union posture.
+	    DynamicExposureEnabled bool
 	}
 
 <a name="RejectedCandidateLogger"></a>
@@ -16254,13 +16297,6 @@ NewSemanticIndex creates a new semantic index.
 
 BuildIndex pre\-computes embeddings for all intent definitions.
 
-<a name="SemanticIndex.BuildIndexWithCancel"></a>
-### func \(\*SemanticIndex\) BuildIndexWithCancel
-
-	func (idx *SemanticIndex) BuildIndexWithCancel(ctx context.Context) (cancel context.CancelFunc, err error)
-
-BuildIndexWithCancel is like BuildIndex but returns a cancellation function so callers can shut down the background goroutine cleanly.
-
 <a name="SemanticIndex.IsReady"></a>
 ### func \(\*SemanticIndex\) IsReady
 
@@ -16274,13 +16310,6 @@ IsReady returns true if the index is built and ready.
 	func (idx *SemanticIndex) Match(input string, minConfidence float64) *SemanticMatch
 
 Match finds the best matching intent by semantic similarity.
-
-<a name="SemanticIndex.Stop"></a>
-### func \(\*SemanticIndex\) Stop
-
-	func (idx *SemanticIndex) Stop()
-
-Stop cancels the background build\-index goroutine \(if any\) and waits for it to exit, preventing goroutine leaks. AGENT\-10 FIX
 
 <a name="SemanticMatch"></a>
 ## type SemanticMatch

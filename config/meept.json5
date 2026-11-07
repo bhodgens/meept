@@ -611,7 +611,7 @@
     "block_financial": true,
     "allowed_paths": ["~/*"],
     "blocked_paths": ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"],
-    "enable_audit_log": false,
+    "enable_audit_log": true,   // Security audit capture — default-ON (decision 2026-11-06); set false to opt out
     "audit_db_path": "~/.meept/audit.db",
     "strict_override_matching": false,  // Use lenient three-strategy cascade for permission overrides
 

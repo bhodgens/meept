@@ -504,12 +504,24 @@ type AuditEvent struct {
 // initAuditDB opens (or creates) the SQLite audit database and ensures the
 // audit_log table exists.
 func (o *Orchestrator) initAuditDB(dbPath string) error {
-	// Ensure parent directory exists
+	// Ensure parent directory exists. Owner-only: audit rows carry
+	// prompt-injection and threat detail — same class as the gatecapture
+	// DB fixed in 39dfb0ca (bughunt security F-1), applied here because
+	// capture went default-ON (user decision 2026-11-06).
 	dir := filepath.Dir(dbPath)
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create audit db directory: %w", err)
 	}
+	// MkdirAll applies the mode only to dirs it CREATES; repair pre-existing.
+	_ = os.Chmod(dir, 0o700) //nolint:errcheck // best-effort tighten
+
+	// Pre-create/tighten the DB file before sql.Open so a fresh install is
+	// never world-readable between create and first write.
+	if f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600); err == nil {
+		_ = f.Close() //nolint:errcheck // existence+mode pin; sql.Open re-opens
+	}
+	_ = os.Chmod(dbPath, 0o600) //nolint:errcheck // best-effort tighten
 
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)") // modernc _pragma form (bughunt 2026-11-07)
 	if err != nil {
@@ -532,6 +544,17 @@ func (o *Orchestrator) initAuditDB(dbPath string) error {
 	if err != nil {
 		db.Close()
 		return fmt.Errorf("create audit_log table: %w", err)
+	}
+
+	// WAL sidecars (-wal/-shm) only exist once the first write activates
+	// WAL, and SQLite creates them 0644 — the exact window that made the
+	// gatecapture fix incomplete (bughunt 2026-11-07 infra-fixes F-1).
+	// Tighten them after the migration CREATE, not before sql.Open.
+	for _, suffix := range []string{"-wal", "-shm"} {
+		p := dbPath + suffix
+		if _, statErr := os.Stat(p); statErr == nil {
+			_ = os.Chmod(p, 0o600) //nolint:errcheck // best-effort tighten
+		}
 	}
 
 	o.auditDB = db
@@ -632,7 +655,10 @@ func DefaultOrchestratorConfig() OrchestratorConfig {
 		RedactOutput:       true,
 		ScanShellCommands:  true,
 		TirithBinary:       BinaryTirith,
-		EnableAuditLog:     false,
-		AuditDBPath:        "",
+		// Security audit capture is DEFAULT-ON (user decision 2026-11-06,
+		// closing bughunt 2026-11-06 security F-2). The DB still binds only
+		// when AuditDBPath is non-empty — the daemon passes ~/.meept/audit.db.
+		EnableAuditLog: true,
+		AuditDBPath:    "",
 	}
 }

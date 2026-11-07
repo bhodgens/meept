@@ -4421,8 +4421,10 @@ func DefaultConfig() *Config {
 			RedactOutput:                true,
 			ScanShellCommands:           true,
 			TirithBinary:                "tirith",
-			EnableAuditLog:              false,
-			AuditDBPath:                 "~/.meept/audit.db",
+			// Audit capture default-ON (user decision 2026-11-06, closing
+			// bughunt 2026-11-06 security F-2).
+			EnableAuditLog: true,
+			AuditDBPath:    "~/.meept/audit.db",
 			SSRF: SSRFConfig{
 				Enabled:      true,
 				MaxRedirects: 5,

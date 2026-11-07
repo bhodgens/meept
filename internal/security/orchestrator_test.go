@@ -532,7 +532,8 @@ func TestOrchestratorAuditLog_InitDB(t *testing.T) {
 
 func TestOrchestratorAuditLog_Disabled(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	cfg := DefaultOrchestratorConfig() // EnableAuditLog defaults to false
+	cfg := DefaultOrchestratorConfig()
+	cfg.EnableAuditLog = false // explicitly disabled: the shipped default is now ON
 	orch := NewOrchestrator(cfg, logger)
 	defer orch.Close()
 
@@ -858,5 +859,66 @@ func TestRecordMemoryTaint_WithTracker(t *testing.T) {
 	orch.RecordMemoryTaint("", "task", "fallback key", taint.TaintUserInput)
 	if tracker.Retrieve("memory:task") == nil {
 		t.Error("expected taint stored under fallback key 'memory:task'")
+	}
+}
+
+// TestOrchestratorAuditLog_DefaultOn pins the product decision (2026-11-06,
+// closing bughunt 2026-11-06 security F-2): DefaultOrchestratorConfig ships
+// audit capture ENABLED. If anyone flips the default back, this test goes
+// RED and forces a conscious re-decision.
+func TestOrchestratorAuditLog_DefaultOn(t *testing.T) {
+	if !DefaultOrchestratorConfig().EnableAuditLog {
+		t.Fatal("security F-2 closeout: EnableAuditLog must default to true " +
+			"(user decision 2026-11-06; opt out via security.enable_audit_log=false)")
+	}
+}
+
+// TestOrchestratorAuditDBFileModes pins owner-only file modes on the audit
+// DB: rows carry prompt-injection and threat detail, so the DB must never
+// be world-readable — same contract gatecapture got in 39dfb0ca.
+func TestOrchestratorAuditDBFileModes(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	tmpDir := t.TempDir()
+	subdir := filepath.Join(tmpDir, "audit")
+	dbPath := filepath.Join(subdir, "audit.db")
+
+	cfg := OrchestratorConfig{EnableAuditLog: true, AuditDBPath: dbPath}
+	orch := NewOrchestrator(cfg, logger)
+	if orch.auditDB == nil {
+		t.Fatal("auditDB not initialized")
+	}
+	// Force WAL + sidecars to exist with a real write (the migration
+	// CREATE already did one; log an event to be sure).
+	orch.logAuditEvent("pin", "info", map[string]string{"k": "v"}, "test")
+
+	if fi, err := os.Stat(subdir); err != nil {
+		t.Fatalf("stat dir: %v", err)
+	} else if fi.Mode().Perm()&0o077 != 0 {
+		t.Errorf("audit dir mode = %o, want no group/other bits", fi.Mode().Perm())
+	}
+	if fi, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("stat db: %v", err)
+	} else if fi.Mode().Perm() != 0o600 {
+		t.Errorf("audit db mode = %o, want 0600", fi.Mode().Perm())
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if fi, err := os.Stat(dbPath + suffix); err == nil && fi.Mode().Perm()&0o077 != 0 {
+			t.Errorf("audit db sidecar %s mode = %o, want owner-only", suffix, fi.Mode().Perm())
+		}
+	}
+	orch.Close()
+
+	// Pre-existing loose dir gets repaired on reopen.
+	loose := filepath.Join(tmpDir, "loose")
+	if err := os.Mkdir(loose, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	loosePath := filepath.Join(loose, "audit.db")
+	orch2 := NewOrchestrator(OrchestratorConfig{EnableAuditLog: true, AuditDBPath: loosePath}, logger)
+	defer orch2.Close()
+	if fi, err := os.Stat(loose); err != nil {
+		t.Fatalf("stat loose: %v", err)
+	} else if fi.Mode().Perm()&0o077 != 0 {
+		t.Errorf("pre-existing audit dir not repaired: mode = %o", fi.Mode().Perm())
 	}
 }

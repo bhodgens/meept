@@ -269,6 +269,7 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(m \*Manager\) LLM\(\) llm.Chatter](<#Manager.LLM>)
   - [func \(m \*Manager\) ListAutoClaims\(ctx context.Context, createdAfter time.Time, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListAutoClaims>)
   - [func \(m \*Manager\) ListAutoClaimsFiltered\(ctx context.Context, opts ListAutoClaimsOptions\) \(items \[\]MemoryResult, total int, err error\)](<#Manager.ListAutoClaimsFiltered>)
+  - [func \(m \*Manager\) ListBridgesScoped\(ctx context.Context, opts ...SearchOption\) \(\[\]BridgeRecord, error\)](<#Manager.ListBridgesScoped>)
   - [func \(m \*Manager\) ListExpiredClaims\(ctx context.Context, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListExpiredClaims>)
   - [func \(m \*Manager\) ListMergeClaims\(ctx context.Context, createdAfter time.Time, limit int\) \(\[\]MemoryResult, error\)](<#Manager.ListMergeClaims>)
   - [func \(m \*Manager\) ListPendingReviews\(ctx context.Context, before time.Time\) \(decisions, predictions \[\]MemoryResult, err error\)](<#Manager.ListPendingReviews>)
@@ -2904,6 +2905,13 @@ ListAutoClaims returns claims with status=auto, optionally filtered by created\_
 ListAutoClaimsFiltered returns status=auto claims matching the filter options, plus the TOTAL count of matching claims \(before offset/limit\) so callers can paginate. Ordering follows Search \(relevance, then created\_at descending\).
 
 MinConfidence/MaxConfidence are inclusive bounds over the claim's extraction\-time confidence. OlderThan keeps only claims created before now\-OlderThan \(stale claims first for review\). Limit \<= 0 defaults to 20; Offset \< 0 is treated as 0.
+
+<a name="Manager.ListBridgesScoped"></a>
+### func \(\*Manager\) ListBridgesScoped
+
+	func (m *Manager) ListBridgesScoped(ctx context.Context, opts ...SearchOption) ([]BridgeRecord, error)
+
+ListBridgesScoped lists every persisted bridge record through the same C2 scope predicate the recall lane uses \(bughunt 2026\-11\-07 agent\-fixes F\-H: the visibility/dashboard lane returned ALL bridges — including rows distilled from another project's memories — while mergeBridges recall was already scope\-gated by 78a1da70; the leak claim closed only for recall\). No options = unfiltered \(the single\-user, owner\-trusted posture — byte\-identical to the old service method\). Under multiuser, callers pass WithScopeFilter \+ WithMultiUserEnabled exactly like Search does, and an unresolved identity fails closed \(Flag 3\): global rows stay visible, project/user rows hide.
 
 <a name="Manager.ListExpiredClaims"></a>
 ### func \(\*Manager\) ListExpiredClaims

@@ -587,6 +587,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(pm \*ProviderManager\) ResetProviderHealth\(providerID string\) error](<#ProviderManager.ResetProviderHealth>)
   - [func \(pm \*ProviderManager\) SetCostOptimized\(enabled bool\)](<#ProviderManager.SetCostOptimized>)
   - [func \(pm \*ProviderManager\) SetFailurePolicyConfig\(cfg \*FailurePolicyConfig\)](<#ProviderManager.SetFailurePolicyConfig>)
+  - [func \(pm \*ProviderManager\) SetLLMCallObserver\(fn func\(appmetrics.LLMCallRecord\)\)](<#ProviderManager.SetLLMCallObserver>)
   - [func \(pm \*ProviderManager\) SetQuotaMaxWait\(d time.Duration\)](<#ProviderManager.SetQuotaMaxWait>)
   - [func \(pm \*ProviderManager\) SetSessionActivityCallback\(callback func\(sessionID, endpointKey, providerID, modelID string\)\)](<#ProviderManager.SetSessionActivityCallback>)
   - [func \(pm \*ProviderManager\) SetSessionAffinityConfig\(cfg \*AffinityConfig\)](<#ProviderManager.SetSessionAffinityConfig>)
@@ -1882,8 +1883,10 @@ ParseRetryAfter extracts a retry schedule from an HTTP error response's headers 
 Returns:
 
 - date: the parsed absolute instant for date\-form headers and date\-valued provider headers \(zero for delta\-seconds headers\);
-- delta: the parsed relative duration for delta\-seconds headers \(zero for date forms; time.Until\(date\) for date forms, which is negative for past dates\);
+- delta: the parsed relative duration for delta\-seconds headers \(zero for date forms; time.Until\(date\) for date forms, which is negative for past dates\). Delta\-seconds values beyond the int64\-nanosecond Duration budget saturate at the maximum representable Duration instead of wrapping negative \(F1\).
 - present: whether any recognizable header was found.
+
+Date\-form results never collide with the zero time.Time sentinel: a parsed year\-1 instant is remapped to the Unix epoch, still past \(F2\).
 
 Callers compose the schedule as: retryAt = date when non\-zero, else now\+delta. A date in the past yields a negative delta — the caller clamps \(leaf rule\).
 
@@ -6545,6 +6548,13 @@ SetCostOptimized enables or disables cost\-optimized routing.
 	func (pm *ProviderManager) SetFailurePolicyConfig(cfg *FailurePolicyConfig)
 
 SetFailurePolicyConfig propagates a failure\-policy config onto every OpenAI\-compatible Client chatter this manager owns \(existing and future\), mirroring Client.SetFailurePolicyConfig. Tests inject tiny throttle durations so in\-loop retry waits are near\-zero; production callers leave it unset and keep the client\-level defaults \(30s/1h/24h\). Anthropic and Codex chatters are unaffected \(their own policy seams are untouched\). Nil\-receiver and nil\-config safe; a nil cfg restores the default.
+
+<a name="ProviderManager.SetLLMCallObserver"></a>
+### func \(\*ProviderManager\) SetLLMCallObserver
+
+	func (pm *ProviderManager) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord))
+
+SetLLMCallObserver fans the llm\-hop\-tracing observer out onto every chatter this manager owns \(existing and future via AddProvider\), mirroring SetFailurePolicyConfig. Before this seam the daemon attached the observer ONLY to the primary OpenAI\-compatible c.LLMClient, so Anthropic/Codex serving hops never produced llm.call spans even with otlp\_traces enabled \(bughunt 2026\-11\-06 llm\-daemon F\-1\). A nil fn is ignored by the per\-client setters \(nil\-guard contract\), so this is an attach\-only seam. Nil\-receiver safe.
 
 <a name="ProviderManager.SetQuotaMaxWait"></a>
 ### func \(\*ProviderManager\) SetQuotaMaxWait
