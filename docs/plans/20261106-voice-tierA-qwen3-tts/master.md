@@ -280,7 +280,7 @@ Output: APPROVED or a list of specific gaps with file + line references.
 | 02-keys-frame-extension | DONE f8fa3c99 | 1 | ProviderConfig alias in providers pkg; whisper STT dispatch kept; qwen3 test helper de-reflection (asserts unchanged); 05/06 RED-at-HEAD confirmed via worktree |
 | 03-daemon-keys-emission | DONE c186d7ee | 1 | SendRaw seam accepted (Frame carries no keys by design); childReady backlog-race wait accepted (transport-readiness, not retry); allowlist row added |
 | 04-qwen3-tts-adapter | DONE (by leaf 02 f8fa3c99) | 0 | orchestrator in-session: full task matrix verified already landed with dispatch work (stream:true body, ErrMissingTTSBaseURL, keyless no-auth assert, Bearer assert, resample); gate T3 green |
-| 05-stt-pipeline-wiring | PENDING | 0 | |
+| 05-stt-pipeline-wiring | DONE da197f34 | 1 | gate :160 Darwin kernel-coalescing RED (orchestrator repro [12] vs [4,4,4]) + :269 stub-TTS timing RED accepted; gate files byte-untouched; sibling d0458a89 gate-rewrite rejected |
 | 06-bargein-trigger | PENDING | 0 | |
 | 07-e2e-docs | PENDING | 0 | |
 
