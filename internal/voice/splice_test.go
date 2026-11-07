@@ -155,6 +155,12 @@ func (c *capturePair) bytes() []byte {
 // (the splice's outbound source); childInCapture accumulates everything the
 // splice writes toward the child on .in (the gate test's "child received"
 // view).
+//
+// The capture window is per DIAL, not per process: dialAudioPair clears the
+// ccid's entry before the capture goroutine starts, so a package-global map
+// never carries bytes from a previous run of the same test (go test -count>=2
+// re-runs with the same ccids, and accumulation broke the exact-length
+// assertion in TestLocalSpliceCarries deterministically).
 var (
 	childOutMu     sync.Mutex
 	childOut       = map[string]net.Conn{}
@@ -164,6 +170,12 @@ var (
 
 func dialAudioPair(t *testing.T, dir, ccid string) {
 	t.Helper()
+	// Fresh capture window for this dial (see note above). The previous
+	// pair's capture goroutine has already exited by test-end cleanup, so
+	// nothing from an earlier run can append after this reset.
+	childInMu.Lock()
+	delete(childInCapture, ccid)
+	childInMu.Unlock()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		c1, err1 := net.Dial("unix", filepath.Join(dir, ccid+".in"))
