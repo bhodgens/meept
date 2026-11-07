@@ -42,6 +42,14 @@ Neither exists in the text chat path.
 All under `voice` in meept.json5. enabled defaults false. See
 docs/workflows/voice-sidecar.md Config section for the full key list.
 
+Provider selection is per call, carried on the C1 keys frame the daemon
+emits at call setup: `stt_provider`/`stt_model` (empty = deepgram /
+nova-3) and `tts_provider`/`tts_model`/`tts_base_url`/`tts_voice`.
+TTS vendors: `openai` (cloud, key required via the secrets broker) and
+`qwen3` (local, keyless, `tts_base_url` REQUIRED - any
+OpenAI-compatible streaming /v1/audio/speech endpoint). See the Tier A
+as-built section of docs/workflows/voice-sidecar.md.
+
 ## Observability
 
 voice.call.started / progress / ended bus events (WS class event).
@@ -52,5 +60,7 @@ transcripts in $MEEPT_HOME/voice/calls.db.
 
 - No-answer outbound releases the plan slot within timeout_secs.
 - Barge-in cancels only the interrupted call's drafts.
-- Missing ONNX runtime or public key fails closed: no call is answered.
+- Missing Telnyx public key fails closed: no call is answered. Barge-in
+  rides STT partial transcripts (no ONNX requirement; see the Tier A
+  as-built notes in docs/workflows/voice-sidecar.md).
 - Untracked call IDs are refused; hangups are idempotent.

@@ -550,3 +550,90 @@ completion reports (leaf ids cited):
   (internal/tools/builtin/voice_call.go) plus the inbound path; the CLI
   status command and a Flutter control remain future work.
 - The full invariant contract lives in internal/voice/AGENTS.md.
+
+## As-built (2026-11-07, plan docs/plans/20261106-voice-tierA-qwen3-tts/)
+
+Tier A closes the wiring gaps that kept every call on stub audio. The
+spec above stays rev 2; this section records the shipped deltas.
+
+### Config-driven providers (C1 keys frame)
+
+The daemon emits one extended C1 `keys` line per call through
+`TextServer.SendRaw`, immediately after the talk loop registers on setup
+(internal/daemon/voice_keys.go; idempotent setups never re-send, refused
+setups never send). The line carries both key fields AND the vendor
+selectors:
+
+- `stt_vendor` / `stt_model` / `stt_base_url`
+- `tts_vendor` / `tts_model` / `tts_base_url` / `tts_voice`
+
+Config mapping (C4): `voice.stt_provider` -> `stt_vendor`,
+`voice.stt_model` -> `stt_model`, `voice.tts_provider` -> `tts_vendor`,
+`voice.tts_model` -> `tts_model`, `voice.tts_base_url` ->
+`tts_base_url`, `voice.tts_voice` -> `tts_voice`. An empty vendor falls
+back to the hardcoded defaults (deepgram / openai), so existing
+deployments keep their behavior. Keys resolve through the secrets broker
+in-daemon (`deepgram_api_key`, `openai_api_key` via `Broker.Value`,
+allowlisted); a missing broker/secret sends `""` - the child factory
+fails THAT call only, the child and other calls stay up. Key material
+never appears in logs, env, or argv (the shared `voiceframe.Frame`
+carries no key fields by design; `SendRaw` is the keys seam).
+
+### Config reference rows (under `voice`)
+
+- `stt_provider` - STT vendor selector; empty = `deepgram`
+- `stt_model` - STT model; empty = vendor default (`nova-3`)
+- `tts_provider` - TTS vendor selector: `openai` (cloud, key required)
+  or `qwen3` (local, keyless)
+- `tts_model` - TTS model; empty = vendor default (`gpt-4o-mini-tts`
+  cloud; qwen3 keeps it empty = server's loaded default)
+- `tts_base_url` - OpenAI-compatible TTS endpoint; REQUIRED for qwen3
+  (empty is the named `ErrMissingTTSBaseURL` refusal for that call),
+  empty = `api.openai.com` for openai
+- `tts_voice` - TTS voice name; empty = vendor default (`alloy`)
+
+### Tier A: local Qwen3-TTS
+
+`qwen3` is a keyless local vendor speaking any OpenAI-compatible
+streaming endpoint (vLLM-Omni or a community server the user deploys;
+D3 keeps the server out of repo scope). The adapter posts
+`stream=true`, `response_format=pcm` to `<tts_base_url>/v1/audio/speech`
+and consumes raw s16le mono 24 kHz incrementally - first audio leaves
+the adapter as the vendor emits it, never buffered whole - resampled to
+the negotiated rate inside the adapter. No Authorization header is sent
+(D2 keyless). The child process itself is `cmd/meept-voice`; its
+factories dispatch on the per-call config the keys frame carries (C3),
+so provider selection is per call, not per deployment.
+
+### Barge-in trigger: STT partial (D1 deviation)
+
+Barge-in is triggered by STT partial transcripts, NOT by ONNX/jargo VAD.
+The child pipeline (internal/voicechild/pipeline.go) pumps daemon->child
+PCM into the bound STT session; a non-empty partial while playback is
+live trips `noteBargeIn` and emits the interrupt frame BEFORE the
+partial's prompt frame (C5 order: playback stops before the new turn's
+say can start), exactly once per barge-in until the next say re-arms
+playback. Finals start employee turns as before; empty-text silence
+results emit nothing.
+
+**DEVIATION from spec rev 2:** the ONNX hard dependency is GONE for
+Tier A. The spec said "a phone call without barge-in is refused" and
+described the ONNX probe as fatal; as built, the ONNX probe stays
+non-fatal and jargo VAD is an optional future upgrade. Zero new runtime
+deps; the trigger is fully unit-testable. `voice.onnx_runtime_lib`
+remains accepted config (passed to the child env) but nothing requires
+it.
+
+### E2E coverage of the integrated chain
+
+- voice-lifecycle `TestVoiceKeysToProviders`: the daemon's keys line
+  (qwen3 + loopback fake endpoint) reaches the fake child in
+  real-providers mode, the REAL qwen3 adapter constructs keyless from
+  it, and synthesized PCM reaches the fake Telnyx media socket as
+  decoded audio frames. The pre-tierA named skip
+  (TestVoiceLifecycleGreetingAudioAtTelnyx) is retired - the gap it
+  documented is now covered by a live assertion.
+- voice-bargein `TestVoicePartialBargein`: a STT-partial during live
+  playback (local leg) trips exactly one interrupt, the talk loop clears
+  the call, and the fresh final starts a new employee turn whose reply
+  reflects the interrupting prompt (FakeLLM request-log observable).

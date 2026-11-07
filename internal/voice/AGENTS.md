@@ -27,6 +27,19 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   sole exception, emitted by the daemon talk loop (greeting on connect,
   filler immediately on each final prompt - order pinned by
   TestTalkLoopGreetingAndFiller).
+- The daemon sends ONE extended C1 `keys` line per call (voice-tierA
+  leaf 03, internal/daemon/voice_keys.go) through `TextServer.SendRaw`
+  right after the talk loop registers on setup: `stt_key`, `tts_key`,
+  plus the selectors `stt_vendor`/`stt_model`/`stt_base_url`/
+  `tts_vendor`/`tts_model`/`tts_base_url`/`tts_voice` (absent = "" = the
+  hardcoded deepgram/openai defaults). The shared `voiceframe.Frame`
+  carries NO key fields by design - `SendRaw` is the keys seam, and the
+  child decodes the raw line (KeysFrame String/LogValue redacts). The
+  child constructs its real providers from this frame (C3 factories in
+  cmd/meept-voice); a pre-Tier-A child that ignores unknown keys fields
+  keeps working (D4). A daemon-side `open` frame (local-leg CL1) now
+  precedes setup: the child answers open with setup, which arms the talk
+  loop and triggers the keys emission.
 
 ## Sockets (C2): per-call unix pairs, codec-derived chunks
 
@@ -60,8 +73,18 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   on the next say (playGen retirement kills the interrupted stream), and
   the splice re-arms when fresh child PCM arrives (bughunt 2026-11-07
   voice F-1 — both latches used to be once-per-call, muting the agent
-  after its first interrupt). One interrupt VAD latch per barge-in in the
+  after its first interrupt). One interrupt latch per barge-in in the
   child pipeline.
+- The barge-in TRIGGER is the child's STT-partial transcript branch
+  (voice-tierA leaves 05/06, D1): pumpAudioIn feeds the bound STT
+  session; a non-empty partial while playback is live emits interrupt
+  BEFORE the partial's prompt frame (C5 order), once per barge-in
+  (noteBargeIn latch, re-armed by the next say). ONNX/jargo VAD is NOT
+  required for Tier A - the ONNX probe in cmd/meept-voice stays
+  non-fatal and the "a phone call without barge-in is refused" spec line
+  is superseded (see docs/workflows/voice-sidecar.md Tier A as-built).
+  The local leg keeps its RMS VAD trigger (Local==true only); STT
+  partials drive the phone leg.
 
 ## Release fan-out
 

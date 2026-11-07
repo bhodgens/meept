@@ -3,9 +3,19 @@
 //
 // It connects the daemon's shared text socket (C1), reads its start token
 // from STDIN (never argv, never env), and serves one jargo pipeline per
-// call, multiplexed by call_id. Provider keys arrive over the text socket
-// (keys frame) after the daemon validates the token; they are held in
-// memory only and never logged.
+// call, multiplexed by call_id. Provider keys AND the per-call vendor/
+// model/base_url/voice selectors arrive over the text socket (extended
+// keys frame, voice-tierA leaf 03) after the daemon validates the token;
+// they are held in memory only and never logged. The C3 factories below
+// dispatch on the keys frame's config, so provider selection is per call.
+//
+// Barge-in trigger (voice-tierA D1): STT partial transcripts from the
+// bound STT session - a partial while playback is live emits interrupt
+// before the partial's prompt (C5), once per barge-in. jargo's ONNX VAD
+// is NOT required for this: the ONNX Runtime probe stays non-fatal and
+// a missing library only means the (future) VAD upgrade is absent, not
+// that barge-in is lost. See docs/workflows/voice-sidecar.md Tier A
+// as-built notes.
 //
 // ONNX Runtime: jargo's VAD/turn models load it at runtime through purego.
 // A missing library is not recoverable for a phone call (no barge-in), so

@@ -59,12 +59,19 @@ func TestVoiceLifecycleInboundCall(t *testing.T) {
 	// The manager answered the call at the fake call-control API.
 	fake.awaitAction(ccid, "/answer", 10*time.Second)
 
-	// Fake Telnyx dials the media route; the splice consumes the start
-	// frame. The answer path spawned the fake child, so its control
-	// socket now exists and the suite can drive C1.
+	// voice-tierA leaf 07: the fake child now answers the daemon's open
+	// frame with setup (mirroring the real child's handleOpen), so the
+	// talk loop arms and the greeting say flows as soon as the media
+	// splice starts. One throwaway call first spawns the child so the
+	// ctrl mirror can attach before the primary call's greeting say
+	// arrives (a late-attaching observer misses the mirrored frames).
+	const warmCcid = "cc-life-warm"
+	fake.dialMedia(s, warmCcid)
+	awaitLogLine(t, s, "voice media: start frame", 15*time.Second)
+	fake.deliverHangup(s, warmCcid)
+	fake.connectChild(ctrlPath, 15*time.Second)
 	fake.dialMedia(s, ccid)
 	awaitLogLine(t, s, "voice media: start frame", 15*time.Second)
-	fake.connectChild(ctrlPath, 15*time.Second)
 	fake.childDialAudio(ccid)
 
 	// C1 setup (a child->daemon production) arms the talk loop: the
@@ -137,13 +144,10 @@ func TestVoiceChildIdleStopNotSpawnedAtBoot(t *testing.T) {
 	_ = s
 }
 
-// TestVoiceLifecycleGreetingAudioAtTelnyx documents the split: the
-// greeting SAY reaching the child is asserted above; the audio the splice
-// paces onto the Telnyx media socket needs the child's REAL TTS stage
-// (leaf-08 providers) to synthesize PCM on the .out socket - the fake
-// child holds the socket open but speaks no audio, so a mid-call audio
-// assertion would prove nothing. Skipped with the named gap per the leaf
-// split rule.
-func TestVoiceLifecycleGreetingAudioAtTelnyx(t *testing.T) {
-	t.Skipf("not yet wirable hermetically: greeting AUDIO on the Telnyx media socket requires the child's real TTS stage (leaf-08 providers); the fake child holds the C2 pair open but synthesizes no PCM - the splice outbound path is pinned by internal/voice splice unit tests instead")
-}
+// TestVoiceLifecycleGreetingAudioAtTelnyx was RETIRED by voice-tierA leaf
+// 07: the greeting-audio gap it documented (the splice pacing REAL PCM
+// onto the Telnyx media socket needs the child's real TTS stage) is now
+// covered LIVE by TestVoiceKeysToProviders (keys_providers_test.go),
+// which synthesizes through the REAL qwen3 adapter constructed from the
+// daemon's keys line and asserts decoded audio frames on the media
+// socket. The named skip is gone because the gap is.

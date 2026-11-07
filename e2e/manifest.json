@@ -4264,7 +4264,7 @@
       "id": "voice-inbound-lifecycle-skipped",
       "suite": "voice-lifecycle",
       "diff": "L",
-      "title": "[voice] full inbound loop (greeting->prompt->say->hangup) SKIPPED: leaf-14 inbound SessionSpawner never registry.Acquires, C1 setup router drops the talk-loop arm",
+      "title": "[voice-tierA] full inbound loop (greeting->prompt->say->hangup) now GREEN: keys emission + real providers + STT pump landed; audio assertions live in voice-keys-providers-01",
       "paths": [
         "internal/daemon/voice_wiring.go"
       ]
@@ -4282,7 +4282,7 @@
       "id": "voice-bargein-c1-skipped",
       "suite": "voice-bargein",
       "diff": "M",
-      "title": "[voice] C1 interrupt -> talk-loop clear path SKIPPED: blocked by the inbound registry-Acquire gap",
+      "title": "[voice-tierA] C1 interrupt -> talk-loop clear path now GREEN (registry Acquire landed leaf 15; STT-partial trigger landed tierA 05/06); live-turn reflection pinned by voice-partial-bargein-01",
       "paths": [
         "internal/voice/talkloop.go",
         "internal/daemon/voice_wiring.go"
@@ -4324,6 +4324,28 @@
       "title": "[voice] duplicate-target + max_concurrent caps gate the OUTBOUND dialer, not the inbound webhook (named skips; pinned by TestRegistryLimits/TestDialRefusals)",
       "paths": [
         "internal/voice/dial.go"
+      ]
+    },
+    {
+      "id": "voice-keys-providers-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[voice-tierA] keys line observed on setup, REAL qwen3 provider constructs keyless from it, synthesized PCM reaches the Telnyx media socket (stub-audio era retired)",
+      "paths": [
+        "internal/daemon/voice_keys.go",
+        "internal/voicechild/providers_wiring.go",
+        "internal/voicechild/providers/tts_openai.go"
+      ]
+    },
+    {
+      "id": "voice-partial-bargein-01",
+      "suite": "voice-bargein",
+      "diff": "M",
+      "title": "[voice-tierA] STT-partial during live playback trips exactly one interrupt, the talk loop clears, and the fresh final starts a new employee turn whose reply reflects the interrupting prompt",
+      "paths": [
+        "internal/voicechild/pipeline.go",
+        "internal/voice/talkloop.go",
+        "internal/voice/local.go"
       ]
     }
   ]
