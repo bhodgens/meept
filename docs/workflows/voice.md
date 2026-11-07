@@ -119,6 +119,27 @@ places a phone call with `leg="phone"` (default) and opens a local
 session with `leg="local"` - on the local leg `target` is an optional
 session label, not a phone number, and no carrier or allowlist applies.
 
+## GUI (Flutter web)
+
+The GUI ships the same control plane as a page, not a new transport:
+`ui/flutter_ui/lib/features/voice/voice_page.dart` drives
+`voice.local.open` / `voice.local.end` / `voice.local.status` over the
+daemon's HTTP RPC-call bridge (`POST /api/v1/bus/call`, through
+`lib/services/voice_service.dart`). Reach it from the hamburger tools
+menu ("voice"), the command palette ("voice", key `p`), or the route
+`/tools/voice` (`goToolVoice`). The page has an employee picker (from
+the employee roster), a start button (open), a 2s live status poll
+(both legs), and an end button per call. Every daemon error envelope
+surfaces verbatim - the named refusals (disabled leg, unknown employee,
+busy, duplicate) appear exactly as the RPC plane words them. Browser
+mic capture/playback (`lib/services/voice_audio.dart`) provides the
+capture/playback lifecycle via getUserMedia/MediaRecorder and the
+WebAudio API; a browser tab cannot dial the local leg's unix socket
+pair (no audio over RPC, CL8), so audio streaming to the daemon is a
+future transport change, not a GUI gap. Parity note: TUI (`/voice`
+slash command), CLI (`meept voice local`), and this GUI page all drive
+the same `voice.local.*` RPC methods - leaf 13a + 13b.
+
 Key components: internal/voice/local.go (leg lifecycle),
 internal/voice/localsplice.go (media path),
 internal/rpc/voice_local.go (voice.local.* RPC),

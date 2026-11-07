@@ -6,6 +6,7 @@ import '../features/activity/activity_tab.dart';
 import '../features/intake/intake_tab.dart';
 import '../features/home/home_screen.dart';
 import '../features/home/sidebar_home_screen.dart';
+import '../features/voice/voice_page.dart';
 import '../features/settings/settings_panel.dart';
 import '../features/search/search_panel.dart';
 import '../features/projects/branches_panel.dart';
@@ -196,6 +197,18 @@ final GoRouter router = GoRouter(
       name: 'toolsMetrics',
       builder: (context, state) {
         return const MetricsPanel();
+      },
+      onExit: guardRouteExit,
+    ),
+
+    // Voice page (voice-local-leg leaf 13b): the GUI half of push-to-talk
+    // parity, driving the same voice.local.* RPC plane as the TUI/CLI
+    // through the daemon's bus/call bridge.
+    GoRoute(
+      path: '/tools/voice',
+      name: 'toolsVoice',
+      builder: (context, state) {
+        return const VoicePage();
       },
       onExit: guardRouteExit,
     ),
@@ -403,4 +416,7 @@ extension AppRouterExtension on BuildContext {
 
   /// Navigate to the metrics tool panel (replace current entry).
   void goToolMetrics() => go('/tools/metrics');
+
+  /// Navigate to the voice tool panel (replace current entry).
+  void goToolVoice() => go('/tools/voice');
 }

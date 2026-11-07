@@ -90,6 +90,17 @@ class CommandPalette extends StatefulWidget {
       description: 'github ticket intake: config + poller state',
       route: '/intake',
     ),
+    // Local voice page - parity with the TUI's /voice slash command
+    // (local-leg leaf 13a: internal/sharedclient/slash.go "voice") and
+    // the CLI's `meept voice local`. Same voice.local.* RPC plane; the
+    // GUI reaches it through the daemon's bus/call bridge. 'p' (unused)
+    // echoes push-to-talk. Routed at core/router.dart (/tools/voice).
+    const CommandPaletteItem(
+      keybinding: 'p',
+      label: 'voice',
+      description: 'local voice calls (start/end, live status)',
+      route: '/tools/voice',
+    ),
     const CommandPaletteItem(
       keybinding: 'f',
       label: 'find…',

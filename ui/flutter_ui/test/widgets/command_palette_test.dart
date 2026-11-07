@@ -4,7 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/widgets/command_palette.dart';
 
 void main() {
-  testWidgets('shows all 14 items with labels', (tester) async {
+  testWidgets('shows all 15 items with labels', (tester) async {
+    // Tall surface: 15 items must all be built/findable in the viewport
+    // (the palette list is a ListView, so off-viewport rows are not
+    // rendered and find.text would miss them).
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -16,7 +22,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(CommandPalette.defaultItems.length, 14);
+    expect(CommandPalette.defaultItems.length, 15);
     expect(find.text('chat'), findsOneWidget);
     expect(find.text('sessions'), findsOneWidget);
     expect(find.text('agents'), findsOneWidget);
@@ -27,6 +33,7 @@ void main() {
     expect(find.text('users'), findsOneWidget);
     expect(find.text('activity view'), findsOneWidget);
     expect(find.text('intake status'), findsOneWidget);
+    expect(find.text('voice'), findsOneWidget);
   });
 
   testWidgets('manifest parity: agents key e, edit description key r', (
