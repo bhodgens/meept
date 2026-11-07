@@ -2467,9 +2467,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 // EXISTING queue path, then run the closed-run retention sweep. The
 // requeue closure mirrors the chat/queue submission surface: it looks up
 // the turn's ORIGINAL job by task ID (jobs keep their ID across
-// requeue/claim -- that is the whole interlock), resets it to pending
-// when it is stuck in a claim state the claim reset above could not
-// cover (e.g. failed), and re-enqueues with the SAME ID so the queue's
+// requeue/claim -- that is the whole interlock), resets a crashed
+// claimed/processing row to pending via the startup claim sweep, retries a
+// 'failed' row to pending via the queue's own Retry transition (bughunt
+// 2026-11-07 F-1: the old shape routed failed through the claim sweep,
+// whose SQL cannot match a failed row -- a silent no-op that counted the
+// turn resumed forever), and re-enqueues with the SAME ID so the queue's
 // CompleteAttempt/CompletionIsFresh claim-token dedup stays the ONLY
 // completion dedup (research F4/F5 -- nothing here re-implements it).
 // A turn with no surviving queue row (compacted away) is skipped with a
@@ -2521,9 +2524,27 @@ func (d *Daemon) rehydrateTurnJournal(ctx context.Context) (resumed int) {
 			// still counts once (T1's "already-pending requeue counts
 			// once and does not double-count").
 			return nil
-		case queue.StateClaimed, queue.StateProcessing, queue.StateFailed:
+		case queue.StateClaimed, queue.StateProcessing:
 			if _, err := pq.ResetStaleClaimsAtStartup(ctx, time.Now().Add(-time.Second)); err != nil {
 				return fmt.Errorf("reset job to pending: %w", err)
+			}
+			return nil
+		case queue.StateFailed:
+			// bughunt 2026-11-07 dispatcher-queue F-1: routing failed
+			// through ResetStaleClaimsAtStartup was a silent no-op -- its
+			// UPDATE filters state IN ('claimed','processing'), so a
+			// 'failed' row matched nothing, the closure returned nil, and
+			// Rehydrate counted the turn resumed on EVERY boot while the
+			// job never re-ran (the claim SQL only selects 'pending').
+			// Retry is the queue's own failed->pending transition (same
+			// path the worker takes), preserves the original job ID, wakes
+			// claim waiters, and errors when the row is not in a retryable
+			// state -- which Rehydrate then Warns-and-continues instead of
+			// silently counting. Jobs exhausted on retry are dead-lettered
+			// (row removed); rehydrate then takes its job==nil skip branch
+			// and never fabricates a replacement ID.
+			if err := pq.Retry(ctx, job.ID); err != nil {
+				return fmt.Errorf("retry failed job to pending: %w", err)
 			}
 			return nil
 		default:
