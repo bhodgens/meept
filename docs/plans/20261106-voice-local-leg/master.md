@@ -409,11 +409,15 @@ fresh; `make lint-ci` findings attributable to this tree at zero.
 
 ## Open Questions
 
-- OQ1 (part 2 scope): TUI push-to-talk (leaf 13) ships WITHOUT Flutter GUI
-  parity, deviating from the parity rule with justification: the voice
-  control surface was already deferred phone-side (spec Open points), and
-  audio routing in the Flutter web target is a separate project. Confirm
-  the deviation, or cut leaf 13.
+- OQ1 (part 2 scope): RESOLVED 2026-11-07 by user: parity is an explicit
+  requirement - push-to-talk ships in BOTH the TUI and the Flutter GUI.
+  The TUI-only deviation is REJECTED. Leaf 13 is split: 13a (TUI /voice
+  command, as originally specced minus the deviation framing) and 13b
+  (Flutter GUI parity: expose voice.local.open/end/status over the
+  daemon HTTP transport + a new ui/flutter_ui voice feature; the GUI
+  web target cannot dial Unix sockets, so 13b owns that transport gap).
+  13b's spec lands as 13b-tui-gui-parity.md in this directory; leaf 13's
+  original file (13-tui-voice.md) is superseded by 13a-tui-voice.md.
 - OQ2: local leg max simultaneous sessions - recommend the shared
   voice.max_concurrent_calls cap (no separate knob). Confirm.
 - OQ3: the tierA tree is all-PENDING on branch plan/voice-tier-a.
