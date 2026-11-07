@@ -31,20 +31,16 @@ package tierpolicy
 //	P4 no-panic: arbitrary float bits (NaN, ±Inf, subnormals) and any
 //	   int never panic the resolver (thresholds.go:59-68).
 //
-// KNOWN FINDINGS (property counterexamples, 2026-11-06 — reported, NOT
-// fixed in this pass; see the KNOWN-BUG subtest for the minimal repro):
-//
-//	F4 NaN/±Inf pass through the resolver verbatim: MinUsefulness=NaN
-//	   fails both `<= 0` and `>= 1` (thresholds.go:64), so it lands in
-//	   the image as NaN — an in-image value OUTSIDE the documented
-//	   default contract (thresholds.go:50-52 "unset or invalid resolves
-//	   to the default"). demote.go:221 `score < th.MinUsefulness` with
-//	   NaN is always-false: the demote gate would silently never fire.
-//	   Today this is UNREACHABLE from config (hujson rejects NaN/Infinity
-//	   literals; encoding/json rejects 1e999), so impact is latent — but
-//	   ResolveDemotionThresholds is an exported Go API and any future
-//	   caller (a store backfill, a CLI flag, a TOML 1e999-free path that
-//	   computes the knob) inherits the trap.
+// FIXED FINDING (property counterexample, 2026-11-06; F4): NaN/±Inf used
+// to pass through the resolver verbatim — MinUsefulness=NaN fails both
+// `<= 0` and `>= 1` (old thresholds.go:64), so it landed in the image as
+// NaN, outside the documented default contract, and demote.go:221
+// `score < th.MinUsefulness` with NaN is always-false: the demote gate
+// silently never fired. Fixed: the resolver's range check is now the
+// NaN-safe inverted form !(x > 0 && x < 1), routing NaN/±Inf (and <=0,
+// and >=1) to DefaultDemotionMinUsefulness — the package convention is
+// normalize-to-defaults, not error returns (contract C6). Asserted by
+// TestResolveDemotion_NonFiniteResolvesToDefault below.
 //
 // Generator: seed 20261106, rand.New(rand.NewSource(...)), 5000 cases
 // per property. On failure the seed and case print for replay.
@@ -86,30 +82,27 @@ func assertDefaults(t *testing.T, i int, in DemotionConfig, out DemotionThreshol
 	if in.StaleDays <= 0 && out.StaleDays != DefaultDemotionStaleDays {
 		t.Fatalf("case %d: StaleDays %d resolved to %d, want default %d", i, in.StaleDays, out.StaleDays, DefaultDemotionStaleDays)
 	}
-	if (in.MinUsefulness <= 0 || in.MinUsefulness >= 1) && !math.IsNaN(in.MinUsefulness) && !math.IsInf(in.MinUsefulness, 0) {
+	// F4 fix: every out-of-(0,1) value — including NaN and ±Inf, which
+	// the old `<= 0 || >= 1` check let through — resolves to the default.
+	if !(in.MinUsefulness > 0 && in.MinUsefulness < 1) {
 		if out.MinUsefulness != DefaultDemotionMinUsefulness {
 			t.Fatalf("case %d: MinUsefulness %v resolved to %v, want default %v", i, in.MinUsefulness, out.MinUsefulness, DefaultDemotionMinUsefulness)
 		}
 	}
-	// NaN/±Inf inputs: NOT asserted to hit the default — F4 (header
-	// comment) documents that they pass through verbatim; pinned by the
-	// KNOWN-BUG subtest below.
 }
 
 // TestResolveDemotion_IdempotenceOnImage ports P1: re-resolving a resolved
 // set (round-tripped through the config shape) returns it unchanged —
-// the documented idempotence contract (thresholds.go:57-58).
+// the documented idempotence contract (thresholds.go:57-58). The F4 fix
+// made the image finite-only (NaN/±Inf resolve to the default), so plain
+// struct equality suffices.
 func TestResolveDemotion_IdempotenceOnImage(t *testing.T) {
 	r := rand.New(rand.NewSource(tierPropSeed))
 	for i := 0; i < 5000; i++ {
 		cfg := randConfig(r)
 		first := ResolveDemotionThresholds(cfg)
 		again := ResolveDemotionThresholds(DemotionConfig(first))
-		// NaN never compares equal to itself, so the NaN image (F4
-		// passthrough) needs NaN-aware comparison; finite images must
-		// compare exactly.
-		same := again == first || (math.IsNaN(first.MinUsefulness) && math.IsNaN(again.MinUsefulness) && again.StaleDays == first.StaleDays)
-		if !same {
+		if again != first {
 			t.Fatalf("case %d: not idempotent: first=%+v second=%+v (cfg=%+v)", i, first, again, cfg)
 		}
 		assertDefaults(t, i, cfg, first)
@@ -137,7 +130,7 @@ func TestResolveDemotion_PassthroughInImage(t *testing.T) {
 // extreme ints resolve without panicking, and the resolved value is never
 // NaN in the ordinary finite-input stream.
 func TestResolveDemotion_NeverPanics(t *testing.T) {
-	specials := []float64{math.NaN(), math.Inf(1), math.Inf(-1), math.SmallestNonzeroFloat64, math.MaxFloat64, -0.0}
+	specials := []float64{math.NaN(), math.Inf(1), math.Inf(-1), math.SmallestNonzeroFloat64, math.MaxFloat64}
 	for i, f := range specials {
 		func() {
 			defer func() {
@@ -146,9 +139,11 @@ func TestResolveDemotion_NeverPanics(t *testing.T) {
 				}
 			}()
 			out := ResolveDemotionThresholds(DemotionConfig{StaleDays: math.MaxInt32, MinUsefulness: f})
-			// NOTE: NaN may land in out.MinUsefulness verbatim — that is
-			// F4 (header comment), pinned by the KNOWN-BUG subtest.
-			_ = out
+			// F4 fix: NaN never lands in the image — non-finite knobs
+			// resolve to the default.
+			if math.IsNaN(out.MinUsefulness) || math.IsInf(out.MinUsefulness, 0) {
+				t.Fatalf("special %d (%v) resolved to non-finite %v — F4 regression", i, f, out.MinUsefulness)
+			}
 			out2 := ResolveDemotionThresholds(DemotionConfig{StaleDays: math.MinInt32, MinUsefulness: f})
 			if out2.StaleDays != DefaultDemotionStaleDays {
 				t.Fatalf("MinInt32 StaleDays resolved to %d, want default", out2.StaleDays)
@@ -156,8 +151,8 @@ func TestResolveDemotion_NeverPanics(t *testing.T) {
 		}()
 	}
 	// NaN in the generator stream too (randConfig case 3 emits raw bits):
-	// must not panic, and (aside from F4's NaN passthrough) the OUTPUT
-	// for non-NaN INPUT must never be NaN.
+	// must not panic, and the OUTPUT must never be NaN for ANY input
+	// (F4 fix: the image is finite-only).
 	r := rand.New(rand.NewSource(tierPropSeed + 2))
 	for i := 0; i < 2000; i++ {
 		cfg := randConfig(r)
@@ -168,31 +163,34 @@ func TestResolveDemotion_NeverPanics(t *testing.T) {
 				}
 			}()
 			out := ResolveDemotionThresholds(cfg)
-			if !math.IsNaN(cfg.MinUsefulness) && math.IsNaN(out.MinUsefulness) {
-				t.Fatalf("case %d: finite input %v produced NaN output", i, cfg.MinUsefulness)
+			if math.IsNaN(out.MinUsefulness) || math.IsInf(out.MinUsefulness, 0) {
+				t.Fatalf("case %d: input %v produced non-finite output %v — F4 regression", i, cfg.MinUsefulness, out.MinUsefulness)
 			}
-			// Idempotence must hold even on the NaN image (F4 passthrough
-			// is still a stable fixed point: NaN -> NaN).
 			again := ResolveDemotionThresholds(DemotionConfig(out))
-			if again != out && !(math.IsNaN(out.MinUsefulness) && math.IsNaN(again.MinUsefulness)) {
+			if again != out {
 				t.Fatalf("case %d: not idempotent on image: %+v -> %+v", i, out, again)
 			}
 		}()
 	}
 }
 
-// KNOWN-BUG F4 (property counterexample 2026-11-06, header comment): NaN
-// and ±Inf pass through ResolveDemotionThresholds verbatim, violating the
-// documented default contract. Reported, not fixed in this pass.
-func TestResolveDemotion_KnownBugNaNPassesThrough(t *testing.T) {
-	t.Skip("KNOWN-BUG F4: enable ONLY to re-verify the reported counterexample; this subtest FAILS until the product fix lands")
-	out := ResolveDemotionThresholds(DemotionConfig{StaleDays: 0, MinUsefulness: math.NaN()})
-	if out.MinUsefulness == DefaultDemotionMinUsefulness {
-		t.Fatal("NaN now resolves to the default — F4 appears fixed; re-enable the strict property")
+// FIXED F4 (property counterexample 2026-11-06, header comment): NaN and
+// ±Inf no longer pass through ResolveDemotionThresholds verbatim — the
+// NaN-safe inverted range check routes them to the documented default,
+// so the demote.go usefulness gate can never be silently disarmed.
+func TestResolveDemotion_NonFiniteResolvesToDefault(t *testing.T) {
+	for _, f := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		out := ResolveDemotionThresholds(DemotionConfig{StaleDays: 0, MinUsefulness: f})
+		if out.MinUsefulness != DefaultDemotionMinUsefulness {
+			t.Fatalf("%v resolved to %v, want default %v — F4 regression", f, out.MinUsefulness, DefaultDemotionMinUsefulness)
+		}
+		if out.StaleDays != DefaultDemotionStaleDays {
+			t.Fatalf("%v: StaleDays %d, want default %d", f, out.StaleDays, DefaultDemotionStaleDays)
+		}
 	}
-	t.Logf("F4 still live: NaN -> %v (passthrough)", out.MinUsefulness)
-	out2 := ResolveDemotionThresholds(DemotionConfig{StaleDays: 0, MinUsefulness: math.Inf(1)})
-	if out2.MinUsefulness != DefaultDemotionMinUsefulness {
-		t.Logf("F4 adjacent: +Inf -> %v (passthrough)", out2.MinUsefulness)
+	// The image is finite-only now: idempotence holds with plain equality.
+	out := ResolveDemotionThresholds(DemotionConfig{StaleDays: 7, MinUsefulness: math.NaN()})
+	if again := ResolveDemotionThresholds(DemotionConfig(out)); again != out {
+		t.Fatalf("not idempotent on image: %+v -> %+v", out, again)
 	}
 }
