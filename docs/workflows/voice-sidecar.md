@@ -114,6 +114,22 @@ config (`voice.public_stream_url`). An empty URL refuses both directions
 before any HTTP call, so a missing origin never places a paid call or
 strands an answered caller.
 
+**The plain loopback listener (`voice.loopback_plain_addr`).** The main
+listener is TLS-mandatory, so a TLS-terminating tunnel cannot post to it
+in cleartext. When `voice.loopback_plain_addr` is non-empty (and
+`voice.enabled`), the daemon boots a SECOND listener
+(`internal/comm/http/voice_plain.go`, wired at boot by
+`internal/daemon/voice_plain_boot.go` from `VoiceWiring.Start`) that
+serves ONLY the two voice routes in cleartext on that address — every
+other path 404s. The address MUST be loopback (127.0.0.0/8 or ::1;
+"localhost" only after the actual bind is re-verified): a non-loopback
+value raises the named `ErrNonLoopbackVoiceAddr` and fails daemon startup
+loudly, never degrades. The listener rides the voice subsystem's stop
+context and shares the main chain's protections: the same per-IP rate
+limiter (tuned by `transport.http.rate_limit_rpm` /
+`rate_limit_burst` / `trust_xff`) and access logging. Telnyx signatures
+stay mandatory on both listeners — plain HTTP never relaxes them.
+
 ### Signatures
 
 - Call-control webhooks: verify the Telnyx Ed25519 signature before

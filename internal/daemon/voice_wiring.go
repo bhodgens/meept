@@ -111,6 +111,12 @@ type VoiceWiring struct {
 	// cfg + logger are construction-time values.
 	cfg    config.VoiceConfig
 	logger *slog.Logger
+
+	// plainOpts configures the optional plain-HTTP loopback listener's
+	// middleware (rate limit + access log parity with the main listener;
+	// zero values take the server.go defaults). Set by WireVoice from the
+	// transport.http block.
+	plainOpts commhttp.PlainListenerOptions
 }
 
 // WireVoiceDeps carries the components WireVoice captures. All pointer
@@ -330,6 +336,12 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		broker:         deps.Broker,
 		cfg:            cfg,
 		logger:         vlog,
+		plainOpts: commhttp.PlainListenerOptions{
+			RateLimitPerMinute: deps.Config.Transport.HTTP.RateLimitRPM,
+			RateLimitBurst:     deps.Config.Transport.HTTP.RateLimitBurst,
+			TrustXForwardedFor: deps.Config.Transport.HTTP.TrustXForwardedFor,
+			Logger:             vlog.With("sub", "voice-plain"),
+		},
 	}
 
 	// -- 7b. LocalLeg (local-leg plan CL5/leaf 07): constructed when
@@ -839,6 +851,13 @@ func (w *VoiceWiring) Start(ctx context.Context, registerTool func(dial builtin.
 		time.Sleep(5 * time.Millisecond)
 	}
 	w.logger.Info("voice wiring: text server armed")
+	// Plain-HTTP loopback listener (voice.loopback_plain_addr, leaf 10 T6;
+	// audit HIGH: previously a dead knob with no production caller). Rides
+	// w.stopCtx so VoiceWiring.Stop's cancel shuts it down with the rest of
+	// the subsystem. A refused address fails the boot loudly.
+	if err := w.startPlainListener(w.stopCtx); err != nil {
+		return err
+	}
 	if registerTool != nil {
 		registerTool(w.dialForTool(), w.agentIDForTool())
 	}

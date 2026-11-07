@@ -346,7 +346,14 @@ gated by allowlist + effects reservation + audit-before-dial. The
 LOCAL leg (phone + local run concurrently on one child/registry/store)
 never imports telnyx and skips effects + audit by contract; its
 barge-in is RMS VAD gated to `Local==true`; `LocalSplice` has no
-reorder window and negotiates L16@16k only.
+reorder window and negotiates L16@16k only. The optional SECOND
+cleartext listener (`voice.loopback_plain_addr`, leaf 10 T6) is booted by
+`internal/daemon/voice_plain_boot.go` from `VoiceWiring.Start` when the
+knob is non-empty, rides the voice subsystem's stop context, and MUST
+bind loopback: a non-loopback address (name-checked AND actual-bind
+re-checked) is `ErrNonLoopbackVoiceAddr` and fails the startup loudly,
+never degrades. Its mux carries the same per-IP rate limit + access
+logging as the main listener's voice chain.
 
 ### The github_* tools register through the tool-provider seam; githubsvc never imports builtin
 
