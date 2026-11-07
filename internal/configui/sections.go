@@ -90,6 +90,8 @@ func BuildSectionFields(keyPath string) []Field {
 		return buildTTSFields()
 	case "stt":
 		return buildSTTFields()
+	case "voice":
+		return buildVoiceFields()
 	case "oauth":
 		return buildOAuthFields()
 	case "compression":

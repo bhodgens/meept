@@ -98,6 +98,7 @@ func NewApp() *App {
 		{Title: "oauth", Description: "connected providers, tokens, status", KeyPath: "oauth", ConfigFile: "oauth"},
 		{Title: "scheduler", Description: "timezone", KeyPath: "scheduler", ConfigFile: "meept.json5"},
 		{Title: "stt", Description: "speech-to-text engine and recording", KeyPath: "stt", ConfigFile: "meept.json5"},
+		{Title: "voice", Description: "voice sidecar, supervisor gate, telephony", KeyPath: "voice", ConfigFile: "meept.json5"},
 		{Title: "reasoning", Description: "tier budget tokens for reasoning/thinking", KeyPath: "reasoning", ConfigFile: "meept.json5"},
 	}
 

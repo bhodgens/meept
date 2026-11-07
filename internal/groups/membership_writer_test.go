@@ -71,7 +71,8 @@ func TestSetAgentGroups_ReplacesAndClears(t *testing.T) {
 	if err := SetAgentGroups(p, nil); err != nil {
 		t.Fatalf("SetAgentGroups clear: %v", err)
 	}
-	if got := readGroupsFrontmatter(t, p); len(got) != 0 {
+	got = readGroupsFrontmatter(t, p)
+	if len(got) != 0 {
 		t.Fatalf("groups after clear = %v, want empty", got)
 	}
 	// Body intact.
@@ -112,8 +113,7 @@ func TestAgentDefinitionPath_ResolvesUserTierFirst(t *testing.T) {
 		_ = os.Remove(userP)
 		_ = os.Remove(filepath.Dir(userP))
 	}
-	got, ok = AgentDefinitionPath(home, bundledDir, "coder")
-	if !ok {
+	if _, ok = AgentDefinitionPath(home, bundledDir, "coder"); !ok {
 		t.Fatalf("bundled fallback not resolved")
 	}
 	// Traversal rejected.

@@ -36,21 +36,6 @@ func metricsFixture() (DecisionStream, CounterfactualResult) {
 	return ds, cf
 }
 
-func newTestEngine(t *testing.T) *security.Engine {
-	t.Helper()
-	cfg := &config.SecurityConfig{
-		BlockFinancial:              false,
-		RequireConfirmationHigh:     false,
-		RequireConfirmationCritical: false,
-	}
-	engine, err := security.NewEngine(filepath.Join(t.TempDir(), "audit.db"), cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
-	}
-	t.Cleanup(func() { _ = engine.Close() })
-	return engine
-}
-
 // ---------------------------------------------------------------------------
 // T3: C7 field computation
 // ---------------------------------------------------------------------------

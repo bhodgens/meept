@@ -83,7 +83,11 @@ func TestConcurrentPipelines(t *testing.T) {
 		t.Fatalf("call cb pipeline must survive call ca end")
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	if runErr := <-runDone; runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 	_ = filepath.Join // keep path/filepath linked
 }

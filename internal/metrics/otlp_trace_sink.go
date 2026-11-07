@@ -376,8 +376,8 @@ func encodeSpan(sp Span) []byte {
 		if msg := sp.Attributes["error.message"]; msg != "" {
 			status = appendString(status, 1, msg) // Status.message field 1
 		}
-		status = appendVarint(status, 2<<3|0) // Status.code field 2, varint
-		status = appendVarint(status, 2)      // STATUS_CODE_ERROR
+		status = appendVarint(status, 2<<3) // Status.code field 2, varint
+		status = appendVarint(status, 2)    // STATUS_CODE_ERROR
 		out = appendBytesField(out, 15, status)
 	}
 	return out

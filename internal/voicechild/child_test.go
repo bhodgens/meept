@@ -247,14 +247,22 @@ func TestPromptFrames(t *testing.T) {
 	}
 
 	// Byte-exact C1 shape check.
-	b, _ := voiceframe.EncodeFrame(got)
+	b, encErr := voiceframe.EncodeFrame(got)
+	if encErr != nil {
+		t.Fatalf("encode final prompt frame: %v", encErr)
+	}
 	want := `{"call_id":"cc9","event":"prompt","text":"final words","last":true}` + "\n"
 	if string(b) != want {
 		t.Fatalf("final prompt wire bytes:\n got %s\nwant %s", b, want)
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	runErr := <-runDone
+	if runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 }
 
 // T4: say -> stub TTS PCM reaches the .out socket; clear drops the rest.
@@ -316,8 +324,12 @@ func TestSayClear(t *testing.T) {
 		t.Fatalf("clear did not stop .out writes: got %d extra bytes", n)
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	if runErr := <-runDone; runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 }
 
 // T5: caller speech during playback emits interrupt exactly once.
@@ -377,8 +389,12 @@ func TestInterrupt(t *testing.T) {
 		t.Fatalf("barge-in after playback restart must arm interrupt again")
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	if runErr := <-runDone; runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 }
 
 // T6: keys frame formatting redacts key material.

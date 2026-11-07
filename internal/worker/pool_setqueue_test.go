@@ -96,7 +96,8 @@ func TestClusterQueueSatisfiesQueueInterface(t *testing.T) {
 	t.Cleanup(func() { _ = pq.Close() })
 
 	var q queue.Queue = queue.NewClusterQueue(pq, nil, "node-test", logger)
-	if q == nil {
+	cq, concrete := q.(*queue.ClusterQueue)
+	if !concrete || cq == nil {
 		t.Fatal("ClusterQueue does not satisfy queue.Queue")
 	}
 }

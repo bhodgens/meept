@@ -38,13 +38,13 @@ func TestNewValidation(t *testing.T) {
 	}
 	// empty name -> error
 	s, err = New(Options{Tools: []ToolBridge{{Name: "", Call: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }}}})
-	if err == nil {
-		t.Fatalf("New empty name: err=%v, want error", err)
+	if err == nil || s != nil {
+		t.Fatalf("New empty name: err=%v s=%v, want error", err, s)
 	}
 	// nil Call -> error
 	s, err = New(Options{Tools: []ToolBridge{{Name: "x"}}})
-	if err == nil {
-		t.Fatalf("New nil Call: err=%v, want error", err)
+	if err == nil || s != nil {
+		t.Fatalf("New nil Call: err=%v s=%v, want error", err, s)
 	}
 	// valid
 	s, err = New(Options{Tools: []ToolBridge{{Name: "ok", Call: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }}}})

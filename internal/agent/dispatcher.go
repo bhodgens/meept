@@ -3188,8 +3188,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// executing agent lost the digest block entirely). The context MESSAGE
 	// itself is built after the per-agent memory re-scope below, once
 	// result.AgentID is final (recall continuity may consume it first).
-	contextMsg := d.buildContextMessage(result, sessionConversationID)
-
+	//
 	// Recall continuity (option 3, issue #58 follow-up): answer
 	// follow-up questions about prior work directly from the stored task
 	// result — no LLM call, no digest race. Falls through to the normal
@@ -3279,7 +3278,9 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// (e.g. image attachments), route them through RunOnceWithParts so the
 	// provider serializer emits native image blocks. Otherwise use the
 	// plain RunOnce path — the two are equivalent for text-only turns.
-	contextMsg = d.buildContextMessage(result, sessionConversationID)
+	// Built AFTER the per-agent memory re-scope above (its search result
+	// set is what this message renders).
+	contextMsg := d.buildContextMessage(result, sessionConversationID)
 	var response string
 	var err error
 	if len(result.Parts) > 0 {

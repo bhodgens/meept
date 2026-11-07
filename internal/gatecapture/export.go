@@ -104,17 +104,6 @@ func formatBand(score float64) string {
 // minimal differing prefix group).
 const NearMissPrefixLen = 8
 
-// sharesNearMissPrefix reports whether two command texts share the frozen
-// minimum common prefix (case-sensitive: command text is captured verbatim).
-func sharesNearMissPrefix(a, b string) bool {
-	a = strings.TrimSpace(a)
-	b = strings.TrimSpace(b)
-	if len(a) < NearMissPrefixLen || len(b) < NearMissPrefixLen {
-		return false
-	}
-	return a[:NearMissPrefixLen] == b[:NearMissPrefixLen]
-}
-
 // deriveNearMissPairs derives contrastive pairs deterministically (Contract
 // C5): for each minimal differing prefix group (records sharing the frozen
 // prefix with divergent HumanDecision), exactly one near_miss pair emits,

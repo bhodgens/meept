@@ -18,29 +18,6 @@ import (
 //
 // T3 (bounded scan): restore consults only the requested session's entries.
 
-// mintPlaceholders mints N obfuscate-mode placeholders by obfuscating N
-// distinct secrets, returning the placeholder assigned to secret index i.
-func mintPlaceholders(t *testing.T, n int) []string {
-	t.Helper()
-	s := NewSecretObfuscator()
-	secrets := make([]string, n)
-	for i := range secrets {
-		secrets[i] = "collide-secret-" + strings.Repeat("x", i+1) + "-value"
-		s.addPlainEntry(secrets[i], SecretModeObfuscate)
-	}
-	s.sortEntriesLocked()
-
-	placeholders := make([]string, n)
-	for i, secret := range secrets {
-		ph, ok := s.deobfuscateMap[secret]
-		if !ok {
-			t.Fatalf("secret %d never minted a placeholder", i)
-		}
-		placeholders[i] = ph
-	}
-	return placeholders
-}
-
 // TestObfuscate_PlaceholderEntropyWidened pins the T1 fix structurally: the
 // placeholder format carries 48 bits (12 hex chars), not the legacy 16.
 func TestObfuscate_PlaceholderEntropyWidened(t *testing.T) {

@@ -115,8 +115,12 @@ func TestKeysWiringConstructsProviders(t *testing.T) {
 		t.Fatalf("pipeline count = %d, want 1", child.pipelineCount())
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	if runErr := <-runDone; runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 }
 
 // ErrMissingSTTKeyFactory mirrors providers.ErrMissingSTTKey without the
@@ -191,8 +195,12 @@ func TestNoKeyLogs(t *testing.T) {
 		}
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	if runErr := <-runDone; runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 }
 
 var errMissingKeyForLogTest = errors.New("missing STT key for call")

@@ -83,9 +83,7 @@ func newGroupsOverrideAddCmd() *cobra.Command {
 				Subject: subject,
 				Reason:  reasonFl,
 			}
-			for _, a := range splitCommaList(allowFlag) {
-				entry.Allow = append(entry.Allow, a)
-			}
+			entry.Allow = append(entry.Allow, splitCommaList(allowFlag)...)
 			if expiresFl == "" {
 				return fmt.Errorf("--expires is required (RFC3339, e.g. 2026-11-05T17:00:00Z); overrides are time-boxed only")
 			}
