@@ -76,6 +76,12 @@ fidelity when the gate signals; a fatal gate trip stops the listener through
 the ordinary `shutdown()` path, so clients see a disconnect, never a
 half-booted server. Do not move the HTTP start back below the gate.
 
+**Signal handler is armed before listeners.** `Run` calls `signal.Notify`
+for SIGINT/SIGTERM/SIGHUP before the HTTP listener starts. `/health` is
+live for the rest of boot; a SIGHUP in that window must be queued for the
+reload loop, not kill the process (the default disposition). Do not move
+`signal.Notify` back down to the wait loop.
+
 A hard kill no longer leaks. Each runtime is spawned under a supervisor (the
 daemon binary in a hidden mode, `meept-daemon --supervise-parent <pid> -- <argv>`)
 that kills the runtime's process group - SIGTERM, then SIGKILL after 10s - once

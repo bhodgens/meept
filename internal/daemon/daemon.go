@@ -2146,6 +2146,20 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.status.Store(models.StatusStarting)
 	d.startTime = time.Now()
 
+	// Arm SIGINT/SIGTERM/SIGHUP before any listener accepts traffic.
+	// HTTP /health starts later in this function, ahead of the wait
+	// loop, so a client can SIGHUP as soon as /health answers. Until
+	// Notify is installed, SIGHUP's default disposition is terminate:
+	// the process dies and the reload never runs. e2e
+	// TestBadReloadKeepsOldConfig timed out on health under CI load
+	// (run 42329339354) for exactly that gap — harness.Start returns
+	// on /health and HUPs before the old install site. Buffer the
+	// signal; the loop below drains it, so a HUP that arrived during
+	// boot reloads once the loop starts instead of killing the daemon.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
+
 	// Validate all config sections BEFORE starting any components.
 	// This fails fast on invalid configuration rather than failing silently later.
 	if d.fullConfig != nil {
@@ -2446,10 +2460,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// "bus: Publish with no subscribers". Re-add only together with a
 	// subscriber that attaches before this point.
 
-	// Wait for shutdown signal or SIGHUP for reload
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-
+	// Wait for shutdown signal or SIGHUP for reload. sigCh was armed
+	// at the top of Run, before the HTTP listener, so a HUP that
+	// arrived during boot is already buffered here.
 	for {
 		select {
 		case sig := <-sigCh:

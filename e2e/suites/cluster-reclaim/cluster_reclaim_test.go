@@ -171,6 +171,12 @@ func TestClusterReclaim01_ClaimStampsOwnership(t *testing.T) {
 // remote node whose timeout_at has expired (crashed claimer) is reset to
 // pending by THIS node's sweeper, then re-claimable. This is the shared-
 // store sweep the daemon drives (StartReclaimSweeper -> ReclaimRemoteStale).
+//
+// The pending state is transient. Pool workers claim any pending job, so
+// the row is usually re-stamped by node-a or node-b before a 200ms poll
+// sees "pending". CI run 42329339354 timed out 20s waiting for that
+// window under full-tier load; the ghost claim had already been released.
+// The stable signal is that node-ghost no longer owns the row.
 func TestClusterReclaim02_ExpiredRemoteClaimReclaimed(t *testing.T) {
 	gossipA := "127.0.0.1:" + strconv.Itoa(harness.FreePort(t))
 	gossipB := "127.0.0.1:" + strconv.Itoa(harness.FreePort(t))
@@ -184,18 +190,35 @@ func TestClusterReclaim02_ExpiredRemoteClaimReclaimed(t *testing.T) {
 	// timeout already 2s in the past.
 	seedClaimed(t, db, "reclaim-02-job", "node-ghost", -2*time.Second)
 
-	waitFor(t, sweepDeadline, "expired remote claim reset to pending", func() bool {
-		state, _ := jobRow(t, db, "reclaim-02-job")
-		return state == "pending"
-	})
-
-	// The reclaim must clear the ownership stamps.
-	var node string
-	if err := db.QueryRow(`SELECT COALESCE(claimed_by_node,'') FROM jobs WHERE id = 'reclaim-02-job'`).Scan(&node); err != nil {
-		t.Fatalf("post-reclaim scan: %v", err)
+	deadline := time.Now().Add(sweepDeadline)
+	var state, node string
+	for {
+		state, node = jobRow(t, db, "reclaim-02-job")
+		if node != "node-ghost" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out after %v waiting for expired remote claim to leave node-ghost; last state=%q node=%q",
+				sweepDeadline, state, node)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
-	if node != "" {
-		t.Fatalf("claimed_by_node = %q after reclaim, want empty", node)
+
+	// Pending + empty stamp is the reset itself. A live node (or a
+	// terminal state still carrying that node's stamp) means a pool
+	// worker re-claimed the reset row before this poll — the
+	// re-claimable outcome, not a missed reclaim.
+	switch state {
+	case "pending":
+		if node != "" {
+			t.Fatalf("pending row still stamped claimed_by_node=%q", node)
+		}
+	case "claimed", "processing", "completed", "failed":
+		if node != "" && node != "node-a" && node != "node-b" {
+			t.Fatalf("ghost claim released into unexpected owner state=%q node=%q", state, node)
+		}
+	default:
+		t.Fatalf("ghost claim released into unexpected state=%q node=%q", state, node)
 	}
 }
 
