@@ -18,9 +18,10 @@ import (
 func TestBargeInResume(t *testing.T) {
 	wsA := &fakeWS{}
 	// rawPairFor, not capturePairFor: the splice read pump must be the
-	// sole .out reader. capturePairFor's drain goroutine races the pump
-	// for the same unix socket (a Read wakes only one blocked reader)
-	// and can steal every chunk, so the pacer writes zero media frames.
+	// sole .out reader. This test asserts media frames, not captured
+	// child bytes. A second .out reader (a unix Read wakes only one
+	// blocked reader) can steal every chunk, so the pacer writes zero
+	// media frames.
 	pA := rawPairFor(t, "cc-r")
 	textA := &textSink{}
 

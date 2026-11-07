@@ -102,60 +102,33 @@ func (w *fakeWS) Close() error {
 	return nil
 }
 
-// capturePair builds an AudioPair whose child side is drained into a
-// captured buffer, so tests assert the exact byte stream the child sees.
+// capturePair is an AudioPair plus the daemon->child (.in) byte stream
+// dialAudioPair already accumulates. bytes() is what the child received:
+// the inbound path's output (WriteToChild on .in), not a second read of
+// .out.
+//
+// The splice read pump must be the sole .out reader. A unix conn Read
+// wakes only one blocked reader, so the old capturePairFor drain
+// goroutine (a competing ReadFromChild) stole child PCM from the pump
+// and flaked every test that asserted pacer or outbound behavior. Tests
+// that need the captured child bytes keep this helper; the capture stays
+// on .in, which the pump does not read.
 type capturePair struct {
 	*AudioPair
-	mu   sync.Mutex
-	got  []byte
-	done chan struct{}
-	once sync.Once
 }
 
 func capturePairFor(t *testing.T, ccid string) *capturePair {
 	t.Helper()
-	dir := t.TempDir()
-	p, err := NewAudioPair(dir, ccid)
-	if err != nil {
-		t.Fatalf("NewAudioPair: %v", err)
-	}
-	t.Cleanup(func() { _ = p.Close() })
-	cp := &capturePair{AudioPair: p, done: make(chan struct{})}
-	// Start the drain loop FIRST but tolerate the pair's pre-accept
-	// sentinel ("child not connected"): the dial below completes within
-	// microseconds, and the loop must survive until the real accept.
-	go func() {
-		buf := make([]byte, 8192)
-		for {
-			n, err := p.ReadFromChild(buf)
-			if n > 0 {
-				cp.mu.Lock()
-				cp.got = append(cp.got, buf[:n]...)
-				cp.mu.Unlock()
-			}
-			if err != nil {
-				if len(err.Error()) > 0 && bytes.Contains([]byte(err.Error()), []byte("child not connected")) {
-					time.Sleep(2 * time.Millisecond)
-					continue
-				}
-				cp.once.Do(func() { close(cp.done) })
-				return
-			}
-		}
-	}()
-	dialAudioPair(t, dir, ccid)
-	return cp
+	return &capturePair{AudioPair: rawPairFor(t, ccid)}
 }
 
-// rawPairFor builds an AudioPair and dials it like capturePairFor but
-// WITHOUT the capture drain goroutine. Some gate tests (backpressure)
-// need the splice's read pump to be the SINGLE reader of the .out
-// socket: a unix conn Read wakes only one blocked reader, so a competing
-// capture drain can steal the feed for stretches, legitimately emptying
-// the outbound queue - which resets the grace clock (recovery at
-// splice.go clears outFullAt once the queue stays under half the limit
-// for one pace) - and pushing the grace hangup past the test deadline
-// nondeterministically.
+// rawPairFor builds an AudioPair and dials it. Gate tests that assert
+// splice or pacer behavior and do not need the captured child bytes use
+// this so the read pump is the sole .out reader (see capturePair). A
+// second .out reader empties the outbound queue, which resets the grace
+// clock (recovery at splice.go clears outFullAt once the queue stays
+// under half the limit for one pace) and pushes the grace hangup past
+// the test deadline nondeterministically.
 func rawPairFor(t *testing.T, ccid string) *AudioPair {
 	t.Helper()
 	dir := t.TempDir()
@@ -337,6 +310,9 @@ func TestSpliceChunkSizes(t *testing.T) {
 // never drop-oldest).
 func TestSpliceReorder(t *testing.T) {
 	ws := &fakeWS{}
+	// Keeps capturePairFor: asserts the reordered bytes the child
+	// received on .in. The helper no longer drains .out, so the read
+	// pump is the sole reader.
 	p := capturePairFor(t, "cc-re-1")
 	text := &textSink{}
 
@@ -378,7 +354,11 @@ func TestSpliceReorder(t *testing.T) {
 // buffer).
 func TestSplicePacing(t *testing.T) {
 	ws := &fakeWS{}
-	p := capturePairFor(t, "cc-pace-1")
+	// rawPairFor, not capturePairFor: asserts paced outbound frames, not
+	// captured child bytes. The pump must be the sole .out reader — a
+	// unix Read wakes only one blocked reader, and a drain steals chunks
+	// so the pacer never reaches 10 frames inside the deadline.
+	p := rawPairFor(t, "cc-pace-1")
 	text := &textSink{}
 
 	var mu sync.Mutex
@@ -390,7 +370,7 @@ func TestSplicePacing(t *testing.T) {
 	}
 
 	cfg := spliceConfig()
-	deps := SpliceDeps{TelnyxWS: ws, Audio: p.AudioPair, Text: text, Clock: clock}
+	deps := SpliceDeps{TelnyxWS: ws, Audio: p, Text: text, Clock: clock}
 	cancel, done := startSplice(t, "cc-pace-1", cfg, deps)
 	defer stopSplice(t, cancel, done)
 
@@ -428,8 +408,12 @@ func TestSplicePacing(t *testing.T) {
 func TestBargeInPerCall(t *testing.T) {
 	wsA := &fakeWS{}
 	wsB := &fakeWS{}
-	pA := capturePairFor(t, "cc-a")
-	pB := capturePairFor(t, "cc-b")
+	// rawPairFor, not capturePairFor: asserts clear plus call B keeps
+	// writing, not captured child bytes. Both pumps must be the sole
+	// .out reader or a drain steals B's chunks and the "keeps writing"
+	// check flakes.
+	pA := rawPairFor(t, "cc-a")
+	pB := rawPairFor(t, "cc-b")
 	textA := &textSink{}
 	textB := &textSink{}
 
@@ -444,8 +428,8 @@ func TestBargeInPerCall(t *testing.T) {
 	}
 
 	cfg := spliceConfig()
-	depsA := SpliceDeps{TelnyxWS: wsA, Audio: pA.AudioPair, Text: textA, CancelDraftFn: cancelDraft, Clock: time.Now}
-	depsB := SpliceDeps{TelnyxWS: wsB, Audio: pB.AudioPair, Text: textB, Clock: time.Now}
+	depsA := SpliceDeps{TelnyxWS: wsA, Audio: pA, Text: textA, CancelDraftFn: cancelDraft, Clock: time.Now}
+	depsB := SpliceDeps{TelnyxWS: wsB, Audio: pB, Text: textB, Clock: time.Now}
 	cancelA_, doneA := startSplice(t, "cc-a", cfg, depsA)
 	cancelB, doneB := startSplice(t, "cc-b", cfg, depsB)
 	defer stopSplice(t, cancelA_, doneA)
@@ -511,13 +495,13 @@ func TestSpliceBackpressure(t *testing.T) {
 	// - never a silent drop-oldest.
 	//
 	// rawPairFor, NOT capturePairFor: the splice's read pump must be the
-	// SINGLE reader of the .out socket here. A competing capture drain
-	// can steal the feed (a unix conn Read wakes only one blocked
-	// reader), legitimately emptying the queue and resetting the grace
-	// clock via the low-water recovery path - the nondeterministic flake
-	// this test used to carry. Also stop feeding once HangupFn fires
-	// (terminal: the call is over, further frames are post-teardown
-	// noise).
+	// SINGLE reader of the .out socket here. This test does not assert
+	// captured child bytes. A second .out reader steals the feed (a unix
+	// conn Read wakes only one blocked reader), legitimately emptying
+	// the queue and resetting the grace clock via the low-water recovery
+	// path — the nondeterministic flake this test used to carry. Also
+	// stop feeding once HangupFn fires (terminal: the call is over,
+	// further frames are post-teardown noise).
 	p := rawPairFor(t, "cc-bp-1")
 	ws := &fakeWS{}
 	text := &textSink{}
@@ -574,19 +558,20 @@ func TestSpliceBackpressure(t *testing.T) {
 // mu-law fragments (quarter-rate audio).
 func TestSpliceH2Outbound(t *testing.T) {
 	ws := &fakeWS{}
-	p := capturePairFor(t, "cc-h2o")
+	// rawPairFor, not capturePairFor: asserts the wire payload size, not
+	// captured child bytes. The pump must be the sole .out reader.
+	p := rawPairFor(t, "cc-h2o")
 	text := &textSink{}
 
 	cfg := spliceConfig() // Codec = L16@16k (legacy child-native field)
 	cfg.CodecWire.BidirectionalCodec = "PCMU"
 	cfg.CodecWire.SamplingRate = 8000
-	deps := SpliceDeps{TelnyxWS: ws, Audio: p.AudioPair, Text: text, Clock: time.Now}
+	deps := SpliceDeps{TelnyxWS: ws, Audio: p, Text: text, Clock: time.Now}
 	cancel, done := startSplice(t, "cc-h2-out", cfg, deps)
 	defer stopSplice(t, cancel, done)
 
-	// Feed child chunks until one lands on the wire (the capture drain
-	// competes for .out reads, so a single feed can be stolen; same shape
-	// as TestSplicePacing).
+	// Feed child chunks until one lands on the wire. The pacer emits one
+	// frame per pace, so a single feed can still be in flight.
 	deadline := time.Now().Add(2 * time.Second)
 	for ws.framesCount() == 0 && time.Now().Before(deadline) {
 		_ = feedChild("cc-h2o")
@@ -639,6 +624,9 @@ func TestSpliceWireCodecFallback(t *testing.T) {
 // multiple of 640, never 160-byte raw fragments.
 func TestSpliceH2Inbound(t *testing.T) {
 	ws := &fakeWS{}
+	// Keeps capturePairFor: asserts the transcoded bytes the child
+	// received on .in. The helper no longer drains .out, so the read
+	// pump is the sole reader.
 	p := capturePairFor(t, "cc-h2i")
 	text := &textSink{}
 
