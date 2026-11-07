@@ -69,3 +69,20 @@ Status: FINAL (call budget reached at ~25). 3 findings (F-1 MEDIUM, F-2 LOW/INFO
   fallback (leak text printed by the failure) + TestUntaggedPlaceholderStillRestores
   guards the legacy lane + sessionless callers no longer sweep tagged maps.
   internal/agent + internal/security full packages ok.
+
+## Closeout (2026-11-06, product decision)
+- F-2 CLOSED by user decision "flip" (2026-11-06): security audit capture is
+  now DEFAULT-ON at all three default sites — security.DefaultOrchestratorConfig
+  (orchestrator.go), config.DefaultConfig Security section (schema.go), and the
+  shipped template config/meept.json5. docs/configuration/production-security.md
+  updated to match. Pin: TestOrchestratorAuditLog_DefaultOn (mutation-proven:
+  flipping the default back goes RED). Opt-out stays one config line:
+  security.enable_audit_log=false.
+  Companion hardening shipped with the flip: initAuditDB now enforces the
+  gatecapture 39dfb0ca mode contract (dir 0700 + pre-existing-dir repair,
+  DB pre-created/tightened 0600, WAL/SHM sidecars tightened post-migration)
+  — the capture lane was previously world-readable 0755/0644 and would have
+  gone default-ON leaking injection/threat rows. Pin:
+  TestOrchestratorAuditDBFileModes.
+  Live install: ~/.meept/meept.json5 explicit false replaced with true
+  (no-clobber sync never rewrites user lines; done manually per decision).
