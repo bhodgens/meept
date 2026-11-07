@@ -1504,6 +1504,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// a daemon without [intake] answers the disabled envelope.
 	registerIntakeStatusRPC(components, rpcServer, logger)
 
+	// voice.local.* RPC (local-leg leaf 08): opens local voice calls,
+	// ends them, and snapshots both legs' live calls. Always registers
+	// (nil voice wiring / disabled local leg = the named disabled-leg
+	// refusal, never "method not found").
+	registerVoiceLocalRPC(components, rpcServer, logger)
+
 	// Create HTTP server (if enabled)
 	var httpSrv *http.Server
 	if fullCfg.Transport.HTTP.Enabled {
