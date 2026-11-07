@@ -17,11 +17,15 @@ import (
 
 func TestBargeInResume(t *testing.T) {
 	wsA := &fakeWS{}
-	pA := capturePairFor(t, "cc-r")
+	// rawPairFor, not capturePairFor: the splice read pump must be the
+	// sole .out reader. capturePairFor's drain goroutine races the pump
+	// for the same unix socket (a Read wakes only one blocked reader)
+	// and can steal every chunk, so the pacer writes zero media frames.
+	pA := rawPairFor(t, "cc-r")
 	textA := &textSink{}
 
 	cfg := spliceConfig()
-	depsA := SpliceDeps{TelnyxWS: wsA, Audio: pA.AudioPair, Text: textA, CancelDraftFn: func(string) {}, Clock: time.Now}
+	depsA := SpliceDeps{TelnyxWS: wsA, Audio: pA, Text: textA, CancelDraftFn: func(string) {}, Clock: time.Now}
 	cancelA, doneA := startSplice(t, "cc-r", cfg, depsA)
 	defer stopSplice(t, cancelA, doneA)
 

@@ -225,6 +225,10 @@ func TestPromptFrames(t *testing.T) {
 	go func() { runDone <- child.Run(context.Background()) }()
 
 	childConn := d.serveText()
+	// Accept returning does not mean Run has published the text conn:
+	// Dial unblocks Accept, then the child goroutine assigns c.conn.
+	// emitPrompt before that assignment is "text socket not connected".
+	waitFor(t, child.textConnected)
 
 	// no setup frame: emit directly against the connected child
 	if err := child.emitPrompt(context.Background(), "cc9", "partial words", false); err != nil {
@@ -520,6 +524,14 @@ func (c *Child) tokenLoad() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.token
+}
+
+// textConnected reports whether Run has published the text socket.
+// serveText's Accept can return before that assignment.
+func (c *Child) textConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn != nil
 }
 
 var (
