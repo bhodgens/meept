@@ -371,7 +371,7 @@ Per child, in order:
 | 07 | local-leg | C | PENDING | |
 | 08 | rpc-cli | D | PENDING | only components.go toucher |
 | 09 | tool-leg | D | PENDING | |
-| 10 | local-providers | B | PARKED | leaf10 subagent: piper TTS usable, whisper STT empty scaffolding; providers.go damage reverted; salvage in /tmp/leaf10-salvage/ |
+| 10 | local-providers | B | DONE 02157fc2 | orchestrator in-session after 3 delegation deaths; whisper+piper subprocess adapters, vendor switch in NewSTT/NewTTS; local vendors keyless; fake-binary test seams; race+gofmt+vet clean |
 | 11 | e2e | E | PENDING | manifest same commit |
 | 12 | docs | E | PENDING | AGENTS.md same commit |
 | 13 | tui-voice (part 2) | F | PENDING (optional) | parity deviation documented |
