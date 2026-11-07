@@ -549,7 +549,10 @@ func testSecretsBroker(t *testing.T) *secrets.Broker {
 // caller passes (chatter + factory).
 func wireVoiceTestDeps(t *testing.T, supervisorModel string) WireVoiceDeps {
 	t.Helper()
-	t.Setenv("MEEPT_HOME", t.TempDir())
+	// A SHORT MEEPT_HOME: the local-leg test (leaf 07) binds C2 audio
+	// pairs under SocketDir and the macOS sun_path limit (103 bytes)
+	// overruns t.TempDir()'s prefixed path.
+	t.Setenv("MEEPT_HOME", shortMeeptHomeForTest(t))
 	sessions := session.NewMemoryStore(testLogger(t))
 	template := agent.NewAgentLoop("template-voice-wiring-test", t.TempDir())
 	loopMgr := agent.NewManager(agent.ManagerConfig{SessionStore: sessions})

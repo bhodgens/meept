@@ -35,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/activity"
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/bus"
@@ -67,6 +68,10 @@ type VoiceWiring struct {
 	Routes *commhttp.VoiceRoutes
 	// Employee holds the goal hold seam + call store (leaf 12 wiring).
 	Employee *VoiceEmployeeWiring
+	// Local is the local voice leg (leaf 07). Nil when
+	// voice.local.enabled is false - leaf 08's RPC refuses opens on nil
+	// with the disabled-leg error.
+	Local *voice.LocalLeg
 
 	// supervisor is the C6 gate shared by all talk loops.
 	supervisor voice.Supervisor
@@ -134,7 +139,16 @@ type WireVoiceDeps struct {
 	// createAuxiliaryLLMClientWithResolver, the SAME resolution path
 	// classifier chatter uses.
 	SupervisorChatterClient func(modelRef string) *llm.Client
-	Logger                  *slog.Logger
+	// Day-brief sources for the local leg (leaf 07): the activity
+	// aggregator adapts onto voice.ActivitySource, and the memory/goal
+	// narrow interfaces are injected by components.go (the employee
+	// framework owns both stores). Nil sources omit their brief section
+	// (leaf-04 rule); Transcripts always comes from the employee stack's
+	// call store, never nil here.
+	ActivityAggregator *activity.Aggregator
+	MemorySource       voice.MemorySource
+	GoalSource         voice.GoalSource
+	Logger             *slog.Logger
 }
 
 // WireVoice constructs the voice stack from cfg. It returns (nil, nil)
@@ -316,6 +330,56 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		broker:         deps.Broker,
 		cfg:            cfg,
 		logger:         vlog,
+	}
+
+	// -- 7b. LocalLeg (local-leg plan CL5/leaf 07): constructed when
+	// voice.local.enabled; nil otherwise (leaf 08's RPC checks nil before
+	// refusing with the disabled-leg error). The brief builder adapts the
+	// leaf-04 BuildDayBrief over the day-brief sources - the SAME sources
+	// the phone path would use, injected as a closure so internal/voice
+	// stays dependency-free. The cancel-draft hook routes the splice's
+	// barge-in seam to the wiring's talk loop (same HandleBargeIn the
+	// media-side interrupt uses). --
+	if cfg.Local.Enabled {
+		local, lerr := voice.NewLocalLeg(voice.LocalLegConfig{
+			Enabled:    true,
+			Label:      cfg.Local.Name,
+			BargeInRms: cfg.Local.BargeInRms,
+		}, voice.LocalDeps{
+			Registry:   registry,
+			ChildProc:  child,
+			TextServer: textServer,
+			Manager:    manager,
+			Binding:    employee.Binding,
+			DayBriefBuilder: func(ctx context.Context, employeeID, number string) (voice.DayBrief, error) {
+				return voice.BuildDayBrief(ctx, voice.Deps{
+					Activity:    voice.AggregatorSource{Agg: deps.ActivityAggregator},
+					Transcripts: employee.store,
+					Memory:      deps.MemorySource,
+					Goals:       deps.GoalSource,
+				}, employeeID, number, time.Now(), time.Local)
+			},
+			Profile: func(employeeID string) voice.Profile {
+				return voice.ResolveProfile(cfg, employeeID, "", voice.LegLocal)
+			},
+			Logger: vlog.With("sub", "local-leg"),
+		})
+		if lerr != nil {
+			return nil, fmt.Errorf("voice wiring: local leg: %w", lerr)
+		}
+		local.SetCancelDraftHook(func(ccid string) {
+			w.loopsMu.Lock()
+			loop := w.loops[ccid]
+			w.loopsMu.Unlock()
+			if loop != nil {
+				// Splice-side barge-in (local leg): same drop contract
+				// as a child interrupt frame, minus the clear echo (the
+				// splice itself sent clear toward the child).
+				loop.HandleBargeIn(ccid)
+			}
+		})
+		w.Local = local
+		vlog.Info("voice wiring: local leg armed", "label", cfg.Local.Name)
 	}
 
 	// -- 8. Release-hook fan-out (the leaf's once-per-outcome contract).

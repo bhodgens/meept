@@ -573,10 +573,17 @@ type Instance struct {
 // (voice.max_concurrent_calls), one live call per employee, and one live
 // call per target number globally.
 type Registry interface {
-	// Acquire registers a live instance. ErrBusy over cap or when the
-	// employee already has a live call; ErrDuplicateTarget when a live
-	// call to the same target already exists.
+	// Acquire registers a live instance on the PHONE leg (CL6
+	// compatibility shape; the concrete CallRegistry wraps AcquireLeg).
+	// ErrBusy over cap or when the employee already has a live call;
+	// ErrDuplicateTarget when a live call to the same target already
+	// exists.
 	Acquire(ccid, employeeID, target string) (Instance, error)
+	// AcquireLeg registers a live instance with an explicit leg (CL6:
+	// "phone" or "local"; the empty string means "phone"). The same cap,
+	// employee, and target rules apply across legs; the target is
+	// normalized ONLY for the phone leg.
+	AcquireLeg(ccid, employeeID, target, leg string) (Instance, error)
 	// Release frees the slot and the target. Unknown ccid is a no-op.
 	Release(ccid string)
 	// Live reports the live instances.

@@ -1,0 +1,503 @@
+package voice
+
+// LocalLeg lifecycle (local-leg plan CL5, docs/plans/20261106-voice-
+// local-leg/07-local-leg.md): ONE callable unit that turns (employee,
+// label) into a live local voice call - registry slot, audio pair, child
+// pipeline via the C1 open frame, talk loop via the setup frame the
+// child answers, day brief + binding exactly like a phone call, and a
+// release fan-out identical to the phone path MINUS the carrier.
+//
+// Mirror of dial.go DialFlow steps 3-8 MINUS steps 1-2 (the enabled
+// gate keeps; the audit row and the effects claim are DROPPED: no paid
+// side effect, no external party - the CL5 deliberate difference, pinned
+// structurally by the nil-carrier Manager in every fixture) and MINUS
+// any telnyx call anywhere in this file (build-pinned: local.go imports
+// no telnyx package; the LocalLeg carries no carrier seam at all).
+//
+// Order (Open):
+//
+//  1. gates: leg enabled; non-empty employee (named refusals)
+//  2. ccid = "local-" + pkg/id.Generate(); target = "local:<label>"
+//  3. registry AcquireLeg(..., leg=local) - ErrBusy / ErrDuplicateTarget
+//     surface unchanged (rules shared across legs per CL6)
+//  4. Manager.TrackOutbound(ccid) so FailOutcome / WaitCall / the
+//     existing release fan-out work unchanged (no carrier involved)
+//  5. AudioPair in SocketDir (the pair PATHS go to the caller: leaf 08's
+//     clients dial them)
+//  6. C1 open frame (direction "local", local:true, barge_in_rms,
+//     CL4-resolved provider profile) - the child builds its pipeline,
+//     dials the C2 pair, and answers with setup; routeFrame's existing
+//     setup handler arms the talk loop from Registry.Live()
+//  7. LocalSplice in a goroutine (client join grace armed)
+//  8. DayBriefBuilder + Binding.OnCallStart with direction "local" and
+//     number "local:<label>" - the SAME call-site shape as the phone
+//     path (day brief built BEFORE OnCallStart)
+//
+// Teardown (End, and any splice terminal error): Manager.FailOutcome
+// runs the once-per-outcome release fan-out (childproc note, loop
+// cancel, registry release, binding end) exactly as a phone hangup
+// does; End additionally cancels the splice context and closes the
+// audio pair. Double End is idempotent.
+//
+// Interrupt: nothing extra here - the C1 interrupt frame routes by ccid
+// through the wiring's talk loop, and the splice's HandleInterrupt
+// (leaf 05) resolves LocalSpliceFor(ccid). A foreign ccid is a no-op on
+// both paths.
+//
+// Reaping: no silence-based auto-hangup override - the talk loop's
+// normal silence / max-call timers apply (same config as a phone call),
+// so a forgotten local call self-reaps through managerHangup ->
+// FailOutcome -> the release fan-out.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"strings"
+	"sync"
+
+	"github.com/caimlas/meept/pkg/id"
+)
+
+// ErrNoEmployee is the named refusal for an Open without an employee id.
+var ErrNoEmployee = errors.New("voice: local leg open: employee_id is required")
+
+// ErrLocalDisabled is the named refusal when the leg is not enabled
+// (voice.local.enabled=false or the constructed config disabled it).
+var ErrLocalDisabled = errors.New("voice: local leg is disabled")
+
+// ErrUnknownLocalCall is returned by End for a ccid that was never
+// opened by this leg. A double End (a ccid already reaped here) stays
+// the idempotent nil the contract pins.
+var ErrUnknownLocalCall = errors.New("voice: local leg: unknown call")
+
+// LocalLegConfig carries the leg-level knobs. Enabled mirrors the
+// voice.enabled && voice.local.enabled gate (the daemon glue folds both
+// into this one bool); empty Label falls back to os.Hostname() at Open.
+type LocalLegConfig struct {
+	Enabled    bool
+	Label      string // session label; empty = hostname (leaf 01)
+	BargeInRms int    // s16 RMS threshold for the local VAD (CL1)
+}
+
+// ProfileResolver resolves one call's CL4 provider profile (voice
+// selection). The daemon glue adapts voice.ResolveProfile over the live
+// config onto it so internal/voice needs no config import here.
+type ProfileResolver func(employeeID string) Profile
+
+// LocalDeps carries the injected edges (CL5 verbatim field set). The
+// concrete *Binding rides the dep because the daemon glue owns it; nil
+// is tolerated (the call then runs unbound - production wiring always
+// supplies it). DayBriefBuilder is injected BY the daemon glue so
+// internal/voice stays dependency-free (no internal/activity,
+// internal/agent, or internal/employee imports).
+type LocalDeps struct {
+	Registry        Registry
+	ChildProc       childNoteSeam // the concrete *ChildProc; nil-safe call sites
+	TextServer      *TextServer
+	Manager         *Manager
+	Binding         *Binding
+	DayBriefBuilder func(ctx context.Context, employeeID, number string) (DayBrief, error)
+	// Profile resolves the CL4 provider selection for the open frame.
+	// Nil falls back to the empty profile (vendor defaults apply
+	// child-side).
+	Profile ProfileResolver
+	Logger  *slog.Logger
+}
+
+// LocalCall is one live local call's handle (CL5 verbatim): the ccid,
+// the resolved meept session id, and the C2 pair PATHS the client dials
+// (leaf 08's clients write mic bytes to InPath and read speaker bytes
+// from OutPath).
+type LocalCall struct {
+	CallID    string
+	SessionID string
+	InPath    string
+	OutPath   string
+}
+
+// localCallState is one live call's leg-owned state.
+type localCallState struct {
+	ccid      string
+	employee  string
+	target    string
+	pair      *AudioPair
+	cancel    context.CancelFunc // splice ctx cancel (End tears it down)
+	sessionID string
+}
+
+// childNoteSeam is the ChildProc note seam the leg calls through. The
+// concrete *ChildProc satisfies it; tests inject a recorder. Nil-safe
+// call sites: a nil seam drops the note (production wiring always
+// supplies the real child).
+type childNoteSeam interface {
+	NoteCallStart(ccid string)
+	NoteCallEnd(ccid string)
+}
+
+// LocalLeg opens and tears down local voice calls. All mutable state is
+// mutex-guarded; the deps are immutable after construction (except the
+// cancelDraft hook, which is nil-guarded and set once at wiring).
+type LocalLeg struct {
+	cfg  LocalLegConfig
+	deps LocalDeps
+	log  *slog.Logger
+
+	mu    sync.Mutex
+	calls map[string]*localCallState
+
+	// cancelDraftHook is the daemon glue's draft-cancel seam (the
+	// wiring's loop.HandleBargeIn for this ccid). Set at wiring time.
+	cancelDraftHook func(ccid string)
+}
+
+// NewLocalLeg constructs the leg. Typed-nil guards on the load-bearing
+// deps fields (repo rule): a nil Registry, Manager, or TextServer fails
+// construction - each carries a load-bearing half of the lifecycle
+// (capacity, release fan-out, C1 transport). The Manager may be the
+// nil-carrier manager (telnyx.CallController nil): the local leg never
+// issues a carrier call; it only rides TrackOutbound/FailOutcome.
+func NewLocalLeg(cfg LocalLegConfig, deps LocalDeps) (*LocalLeg, error) {
+	if deps.Registry == nil {
+		return nil, errors.New("voice: local leg: registry is required")
+	}
+	if deps.TextServer == nil {
+		return nil, errors.New("voice: local leg: text server is required")
+	}
+	if deps.Manager == nil {
+		return nil, errors.New("voice: local leg: manager is required (it carries the release fan-out)")
+	}
+	if deps.Logger == nil {
+		deps.Logger = slog.Default()
+	}
+	return &LocalLeg{
+		cfg:   cfg,
+		deps:  deps,
+		log:   deps.Logger,
+		calls: make(map[string]*localCallState),
+	}, nil
+}
+
+// SetCancelDraftHook wires the daemon glue's draft-cancel seam (the
+// wiring's loop.HandleBargeIn). Nil fn is ignored (every Set* nil-guarded
+// per repo rule). Without the hook, barge-in still flushes the child's
+// TTS queue (the clear frame) - only the daemon-side draft cancellation
+// is absent, the same shape as a phone call whose loop already died.
+func (l *LocalLeg) SetCancelDraftHook(fn func(ccid string)) {
+	if fn == nil {
+		return
+	}
+	l.mu.Lock()
+	l.cancelDraftHook = fn
+	l.mu.Unlock()
+}
+
+// localLabel resolves the session label: the explicit arg wins, then the
+// configured Label, then the hostname (leaf 01: "empty = hostname
+// (resolved by caller)").
+func (l *LocalLeg) localLabel(label string) (string, error) {
+	if label != "" {
+		return label, nil
+	}
+	if l.cfg.Label != "" {
+		return l.cfg.Label, nil
+	}
+	host, err := os.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("voice: local leg: resolve label: %w", err)
+	}
+	return host, nil
+}
+
+// Open turns (employee, label) into a live local voice call (CL5). The
+// registry errors surface unchanged; every other refusal is a named
+// error BEFORE any side effect.
+func (l *LocalLeg) Open(ctx context.Context, employeeID, label string) (LocalCall, error) {
+	// -- 1. gates (named refusals, zero side effects) --
+	if !l.cfg.Enabled {
+		return LocalCall{}, ErrLocalDisabled
+	}
+	if employeeID == "" {
+		return LocalCall{}, ErrNoEmployee
+	}
+	target, err := l.localLabel(label)
+	if err != nil {
+		return LocalCall{}, err
+	}
+	target = "local:" + target
+
+	// -- 2. identity: ccid = "local-" + pkg/id.Generate() --
+	ccid := id.Generate("local-")
+
+	// -- 3. registry slot. ErrBusy / ErrDuplicateTarget surface
+	// unchanged; cap + one-live-per-employee are shared across legs
+	// (CL6). The target stays VERBATIM (NormalizeE164 must never mangle
+	// "local:..."). --
+	if _, err := l.deps.Registry.AcquireLeg(ccid, employeeID, target, LegLocal); err != nil {
+		return LocalCall{}, err
+	}
+
+	// -- 4. TrackOutbound BEFORE the pair (phone-path order: the manager
+	// tracks first, so any later failure can FailOutcome cleanly). --
+	if err := l.deps.Manager.TrackOutbound(ccid); err != nil {
+		l.deps.Registry.Release(ccid)
+		return LocalCall{}, fmt.Errorf("voice: local leg: track: %w", err)
+	}
+
+	// -- 5. audio pair (paths under SocketDir, sun_path-safe like every
+	// phone call; NewAudioPair removes stale files itself). --
+	pair, err := NewAudioPair(SocketDir(), ccid)
+	if err != nil {
+		l.deps.Manager.FailOutcome(ccid, OutcomeFailed, fmt.Sprintf("audio pair: %v", err))
+		l.deps.Registry.Release(ccid)
+		return LocalCall{}, fmt.Errorf("voice: local leg: audio pair: %w", err)
+	}
+
+	st := &localCallState{
+		ccid:     ccid,
+		employee: employeeID,
+		target:   target,
+		pair:     pair,
+	}
+	spliceCtx, spliceCancel := context.WithCancel(context.Background())
+	st.cancel = spliceCancel
+
+	l.mu.Lock()
+	l.calls[ccid] = st
+	l.mu.Unlock()
+
+	// ChildProc note (releaseCall's sink 1 mirror): the child's idle
+	// timer counts this call from now; NoteCallEnd fires at teardown.
+	if l.deps.ChildProc != nil {
+		l.deps.ChildProc.NoteCallStart(ccid)
+	}
+
+	// -- 6. open frame (CL1 local shape): identity + leg marker + RMS
+	// threshold + the CL4-resolved provider profile. Send failure
+	// degrades (warn, call continues on stub audio) - the same posture
+	// the wiring's spliceRunner pins for phone calls. --
+	if err := l.sendOpenFrame(st); err != nil {
+		l.log.Warn("voice: local leg: open frame send failed (continuing on stub audio)", "ccid", ccid, "err", err)
+	}
+
+	// -- 7. splice in a goroutine: client mic chunked to the child, child
+	// PCM paced to the client, the leaf-05 barge-in latch live. A
+	// terminal splice error (client vanished, socket broke) funnels
+	// through the same teardown as End; the pre-dial window (nobody has
+	// dialed the pair yet - the client joins seconds later) is NOT
+	// terminal: ReadFromClient surfaces "not connected" while the accept
+	// is pending and the splice's own JoinTimeout bounds that grace
+	// (ErrNoClient), so a never-dialed leg still self-reaps. --
+	go func() {
+		err := RunLocalSplice(spliceCtx, ccid, LocalSpliceConfig{}, LocalSpliceDeps{
+			Audio:       pair,
+			Client:      localClientIO{pair: pair},
+			Text:        rawTextSender{srv: l.deps.TextServer},
+			CancelDraft: func(cancelCcid string) { l.cancelDraft(cancelCcid) },
+			Logger:      l.log.With("sub", "localsplice", "ccid", ccid),
+		})
+		if err != nil && !errors.Is(err, context.Canceled) && spliceCtx.Err() == nil && !isNotConnected(err) {
+			l.log.Error("voice: local leg: splice ended", "ccid", ccid, "err", err)
+			_ = l.End(ccid, fmt.Sprintf("splice: %v", err))
+		}
+	}()
+
+	// -- 8. day brief + binding: the SAME call-site shape as the phone
+	// path (build the brief, then Binding.OnCallStart with the call's
+	// direction and number). Direction "local", number "local:<label>".
+	// A builder failure degrades to an empty brief (never blocks the
+	// call); OnCallEnd rides the existing release fan-out, so the call
+	// row the binding records ends exactly once. --
+	var brief DayBrief
+	if l.deps.DayBriefBuilder != nil {
+		b, berr := l.deps.DayBriefBuilder(ctx, employeeID, target)
+		if berr != nil {
+			l.log.Warn("voice: local leg: day brief build failed (continuing with an empty brief)", "ccid", ccid, "err", berr)
+		} else {
+			brief = b
+		}
+	}
+	if l.deps.Binding != nil {
+		sid, serr := l.deps.Binding.OnCallStart(ctx, ccid, target, employeeID, "local", brief)
+		if serr != nil {
+			l.log.Warn("voice: local leg: binding OnCallStart failed (call continues unbound)", "ccid", ccid, "err", serr)
+		} else {
+			st.sessionID = sid
+		}
+	}
+
+	inPath := pairInPath(pair)
+	outPath := pairOutPath(pair)
+	l.log.Info("voice: local call open", "ccid", ccid, "employee_id", employeeID,
+		"target", target, "in", inPath, "out", outPath)
+	return LocalCall{
+		CallID:    ccid,
+		SessionID: st.sessionID,
+		InPath:    inPath,
+		OutPath:   outPath,
+	}, nil
+}
+
+// sendOpenFrame builds and sends the CL1 open frame for st. Identity
+// mirrors the phone producer's sendOpenFrame: child-native codec
+// (L16@16000 - the NEGOTIATED wire codec belongs to the splice), the
+// call's CL4-resolved provider profile, and the local leg marker with
+// its RMS threshold. Providers never ride the open frame (they ride the
+// keys line, tierA's wire - the wiring emits keys at EventSetup, which
+// the child answers the open frame with).
+func (l *LocalLeg) sendOpenFrame(st *localCallState) error {
+	f := Frame{
+		CallID:     st.ccid,
+		Event:      EventOpen,
+		To:         st.target,
+		Direction:  "local",
+		Codec:      "L16",
+		SampleRate: 16000,
+		Local:      true,
+		BargeInRms: l.cfg.BargeInRms,
+	}
+	if l.deps.Profile != nil {
+		p := l.deps.Profile(st.employee)
+		f.SttVendor = p.SttVendor
+		f.SttModel = p.SttModel
+		f.TtsVendor = p.TtsVendor
+		f.TtsModel = p.TtsModel
+		f.TtsVoice = p.TtsVoice
+	}
+	return l.deps.TextServer.Send(f)
+}
+
+// cancelDraft is the splice's barge-in CancelDraft seam: drop the talk
+// loop's in-flight draft for THIS call. The talk loop lives in the
+// daemon wiring (routeFrame armed it from Registry.Live() when the child
+// answered the open frame with setup), so the leg reaches it through the
+// hook the glue installs. LocalSpliceFor(ccid).HandleInterrupt already
+// latches per barge-in (leaf 05), so this runs at most once per barge-in.
+func (l *LocalLeg) cancelDraft(ccid string) {
+	l.mu.Lock()
+	hook := l.cancelDraftHook
+	l.mu.Unlock()
+	if hook != nil {
+		hook(ccid)
+	}
+}
+
+// End tears the call down: Manager.FailOutcome(ccid, OutcomeHangup,
+// reason) runs the once-per-outcome release fan-out (childproc note,
+// loop cancel, registry release, binding end - identical to a phone
+// hangup minus the carrier POST); the splice ctx cancel and the audio
+// pair Close complete the leg-local teardown. Double End is idempotent
+// (second call is a nil no-op); a foreign id is a named error.
+func (l *LocalLeg) End(ccid, reason string) error {
+	l.mu.Lock()
+	st, ok := l.calls[ccid]
+	if ok {
+		delete(l.calls, ccid)
+	}
+	l.mu.Unlock()
+	if !ok {
+		// A ccid this leg never opened is a named refusal; a ccid it
+		// already reaped is the idempotent nil the contract pins. The
+		// prefix distinguishes the two: only "local-*" ids can ever be
+		// ours, so a re-End of a local-shaped id is the idempotent path.
+		if !isLocalCcid(ccid) {
+			return fmt.Errorf("%w: %s", ErrUnknownLocalCall, ccid)
+		}
+		return nil
+	}
+
+	// Fan-out FIRST (phone-path order: the manager owns idempotent
+	// teardown and fires the release hook exactly once), then the
+	// leg-local teardown. The childproc note is NOT duplicated here:
+	// in production the wiring's releaseCall (the manager's release
+	// hook) already notes the end for this ccid, and the once-per-outcome
+	// contract is the manager's. The wiring's releaseCall covers local
+	// ccids exactly like phone ccids because TrackOutbound registered
+	// the ccid with the manager (step 4).
+	l.deps.Manager.FailOutcome(ccid, OutcomeHangup, reason)
+	st.cancel()
+	if err := st.pair.Close(); err != nil {
+		l.log.Debug("voice: local leg: pair close", "ccid", ccid, "err", err)
+	}
+	l.log.Info("voice: local call ended", "ccid", ccid, "reason", reason)
+	return nil
+}
+
+// Live snapshots the live local calls (leaf 08's voice.local.status
+// reads this).
+func (l *LocalLeg) Live() []LocalCall {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]LocalCall, 0, len(l.calls))
+	for _, st := range l.calls {
+		out = append(out, LocalCall{
+			CallID:    st.ccid,
+			SessionID: st.sessionID,
+			InPath:    pairInPath(st.pair),
+			OutPath:   pairOutPath(st.pair),
+		})
+	}
+	return out
+}
+
+// isLocalCcid reports whether ccid carries the local-leg prefix shape.
+func isLocalCcid(ccid string) bool {
+	const prefix = "local-"
+	return len(ccid) > len(prefix) && ccid[:len(prefix)] == prefix
+}
+
+// isNotConnected reports whether err is the AudioPair's pre-accept
+// "not connected" shape. The phone splice polls this condition
+// (splice.go's pump); the local splice surfaces it as a terminal read
+// error, so the leg's teardown filters it: during the pre-dial window
+// the pair is healthy, just not yet joined. The JoinTimeout grace still
+// bounds a never-joined leg (ErrNoClient is a distinct error and stays
+// terminal).
+func isNotConnected(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not connected")
+}
+
+// rawTextSender adapts *TextServer onto TextSender (the splice's raw
+// seam): frames are decoded then re-sent through the Frame-typed Send,
+// the same shape as the wiring's rawFrameSender.
+type rawTextSender struct {
+	srv *TextServer
+}
+
+// Send implements TextSender.
+func (s rawTextSender) Send(raw []byte) error {
+	f, err := DecodeFrame(raw)
+	if err != nil {
+		return fmt.Errorf("voice: local leg: decode frame for child: %w", err)
+	}
+	return s.srv.Send(f)
+}
+
+// localClientIO adapts the AudioPair onto the io.ReadWriter the local
+// splice wants. The pair's two-listener design stays the transport: the
+// client dials BOTH sockets (leaf 08); the daemon's accepted ends are
+// the client-facing surface. InPath (<ccid>.in) accepted conn: mic bytes
+// client -> daemon. OutPath (<ccid>.out) accepted conn: child PCM and
+// speaker bytes daemon -> client. ReadFromClient/WriteToClient (below,
+// in socket.go) expose those accepted ends.
+type localClientIO struct {
+	pair *AudioPair
+}
+
+// Read reads client mic bytes from the pair's accepted .in conn (the
+// client dialed InPath and writes its mic there).
+func (c localClientIO) Read(p []byte) (int, error) {
+	return c.pair.ReadFromClient(p)
+}
+
+// Write writes paced child PCM to the client over the pair's accepted
+// .out conn (the client dialed OutPath and reads its speaker there).
+func (c localClientIO) Write(p []byte) (int, error) {
+	return c.pair.WriteToClient(p)
+}
+
+// Compile-time: localClientIO satisfies the splice's client seam.
+var _ io.ReadWriter = localClientIO{}

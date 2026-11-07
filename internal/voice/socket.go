@@ -418,6 +418,45 @@ func (p *AudioPair) WriteToChild(pcm []byte) error {
 // L16@16k chunks is 2.56 s of audio, far past any realistic dial window.
 const maxPendingInBytes = 128 * 640
 
+// pairInPath returns the .in socket file path for the pair (CL5: the
+// LocalCall exposes the pair PATHS; leaf 08's clients dial them).
+func pairInPath(p *AudioPair) string {
+	return filepath.Join(p.dir, p.ccid+".in")
+}
+
+// pairOutPath returns the .out socket file path for the pair.
+func pairOutPath(p *AudioPair) string {
+	return filepath.Join(p.dir, p.ccid+".out")
+}
+
+// ReadFromClient reads raw mic bytes from the CLIENT over the accepted
+// <ccid>.in conn (local-leg leaf 07). The local leg's client dials the
+// pair like the child does and writes mic bytes there; the splice's
+// chunking loop reads them through this accessor. Delegates to
+// ReadFromChild: same accepted-conn surface, same errors while nobody
+// connected or after Close.
+func (p *AudioPair) ReadFromClient(buf []byte) (int, error) {
+	return p.ReadFromChild(buf)
+}
+
+// WriteToClient writes raw bytes to the CLIENT over the accepted conn
+// (local-leg leaf 07). Mirrors ReadFromClient: the local leg reuses the
+// pair's accepted-conn surface, so client mic in and speaker out ride
+// the same pair sockets the child audio already uses.
+func (p *AudioPair) WriteToClient(pcm []byte) (int, error) {
+	p.mu.Lock()
+	conn := p.out
+	p.mu.Unlock()
+	if conn == nil {
+		return 0, fmt.Errorf("voice: client not connected on %s.out", p.ccid)
+	}
+	n, err := conn.Write(pcm)
+	if err != nil {
+		return n, fmt.Errorf("voice: write %s.out (client): %w", p.ccid, err)
+	}
+	return n, nil
+}
+
 // ReadFromChild reads raw PCM from the child over the <ccid>.out socket.
 // Errors while the child has not connected yet or after Close.
 func (p *AudioPair) ReadFromChild(buf []byte) (int, error) {
