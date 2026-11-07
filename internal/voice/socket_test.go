@@ -158,6 +158,18 @@ func TestTextServerConcurrentSend(t *testing.T) {
 		_ = child
 		return true
 	})
+	// Dial returns before acceptLoop stores the child. A Send in that
+	// gap returns "no child connected" and the sender returns. The drain
+	// then blocks in ReadString forever, and the package hits the 10m
+	// timeout (CI run 42349356264, socket_test.go drain wait). Wait until
+	// one Send succeeds, then drop that warmup line so the counted burst
+	// stays exact.
+	waitConn(t, func() bool {
+		return srv.Send(Frame{CallID: "c", Event: EventSay, Text: "warm"}) == nil
+	})
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatalf("warmup read: %v", err)
+	}
 
 	const goroutines, perG = 8, 25
 	total := goroutines * perG
@@ -194,7 +206,12 @@ func TestTextServerConcurrentSend(t *testing.T) {
 	}
 	wg.Wait()
 
-	lines := <-drainDone
+	var lines []string
+	select {
+	case lines = <-drainDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("drain did not finish within 5s; Send raced accept or a write was lost")
+	}
 	if len(lines) != total {
 		t.Fatalf("drained %d lines, want %d", len(lines), total)
 	}
