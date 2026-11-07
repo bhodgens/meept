@@ -32,7 +32,9 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   right after the talk loop registers on setup: `stt_key`, `tts_key`,
   plus the selectors `stt_vendor`/`stt_model`/`stt_base_url`/
   `tts_vendor`/`tts_model`/`tts_base_url`/`tts_voice` (absent = "" = the
-  hardcoded deepgram/openai defaults). The shared `voiceframe.Frame`
+  hardcoded deepgram/openai defaults; a non-empty `stt_base_url`/`tts_base_url`
+  is dialed instead of the cloud default - `[voice].stt_base_url` /
+  `[voice].tts_base_url` feed them daemon-side). The shared `voiceframe.Frame`
   carries NO key fields by design - `SendRaw` is the keys seam, and the
   child decodes the raw line (KeysFrame String/LogValue redacts). The
   child constructs its real providers from this frame (C3 factories in

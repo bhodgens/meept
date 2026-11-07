@@ -82,8 +82,10 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 	if kw.TTSVendor == "" {
 		kw.TTSVendor = defaultTTSVendor
 	}
-	// STT base URL has no config field today (Deepgram is hosted only);
-	// the wire field exists for shape parity with the child decoder.
+	// STT base URL: when set, the child dials Deepgram (or any
+	// wire-compatible STT) at this endpoint instead of the cloud default
+	// - the same contract TTS honors for tts_base_url.
+	kw.STTBaseURL = w.cfg.STTBaseURL
 	if w.broker == nil {
 		// Loud WARN in the ResolveVoiceSecrets style: a broker-less
 		// install must still run, but every cloud-provider call would

@@ -87,7 +87,7 @@ func newTestSTT(t *testing.T, results []string) (*DeepgramSTT, *dgFakeServer) {
 		apiKey: "test-key",
 	}
 	host := strings.TrimPrefix(f.srv.URL, "http://")
-	s.setSTTDialer(func(ctx context.Context, path string, header wsHeader) (wsSession, error) {
+	s.setSTTDialer(func(ctx context.Context, base, path string, header wsHeader) (wsSession, error) {
 		conn, err := dialFakeWS(ctx, "ws://"+host+path, header)
 		if err != nil {
 			return nil, err
@@ -197,7 +197,7 @@ func TestSTTReconnectsOnce(t *testing.T) {
 		cfg:    ProviderConfig{Vendor: "deepgram", Model: "nova-3", SampleRate: 16000},
 		apiKey: "test-key",
 	}
-	s.setSTTDialer(func(ctx context.Context, path string, header wsHeader) (wsSession, error) {
+	s.setSTTDialer(func(ctx context.Context, base, path string, header wsHeader) (wsSession, error) {
 		dialMu.Lock()
 		n := dials + 1 // dial in flight
 		dialMu.Unlock()
@@ -289,7 +289,7 @@ func TestSTTSecondDropEndsStream(t *testing.T) {
 		cfg:    ProviderConfig{Vendor: "deepgram", Model: "nova-3", SampleRate: 16000},
 		apiKey: "test-key",
 	}
-	s.setSTTDialer(func(ctx context.Context, path string, header wsHeader) (wsSession, error) {
+	s.setSTTDialer(func(ctx context.Context, base, path string, header wsHeader) (wsSession, error) {
 		dialMu.Lock()
 		idx := dials
 		dialMu.Unlock()
@@ -328,6 +328,48 @@ func TestSTTSecondDropEndsStream(t *testing.T) {
 	dialMu.Unlock()
 	if n != 2 {
 		t.Fatalf("dials = %d, want exactly 2 (initial + one retry)", n)
+	}
+}
+
+// T-base_url regression: the real dialer (no seam) must honor
+// cfg.BaseURL - the stt_base_url field from the keys frame - the same way
+// TTS honors tts_base_url. Before the fix, dialDeepgram hardcoded the
+// cloud default host and a configured base URL never reached the wire.
+func TestSTTDialsConfiguredBaseURL(t *testing.T) {
+	f := newDGFake(t, []string{dgResultsJSON("routed via base_url", true)})
+	base := f.srv.URL // http://127.0.0.1:port - dialURL upgrades it to ws://
+
+	s := &DeepgramSTT{
+		cfg:    ProviderConfig{Vendor: "deepgram", Model: "nova-3", BaseURL: base, SampleRate: 16000},
+		apiKey: "test-key",
+		// The real dialer: no setSTTDialer override.
+		dial: sttDialer,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pcm := make(chan []byte)
+	out, err := s.Stream(ctx, pcm)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	pcm <- pcmS16LE(160)
+	for {
+		select {
+		case tr, ok := <-out:
+			if !ok {
+				t.Fatalf("stream closed before the final transcript")
+			}
+			if tr.Final {
+				if tr.Text != "routed via base_url" {
+					t.Fatalf("final text wrong: %+v", tr)
+				}
+				return // the fake was reached, so cfg.BaseURL was dialed
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for the final via base URL %q", base)
+		}
 	}
 }
 

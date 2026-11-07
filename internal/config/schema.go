@@ -5263,6 +5263,7 @@ type VoiceConfig struct {
 	TTSVoice             string              `json:"tts_voice"              toml:"tts_voice"`
 	STTModel             string              `json:"stt_model"              toml:"stt_model"`
 	TTSBaseURL           string              `json:"tts_base_url"           toml:"tts_base_url"`
+STTBaseURL           string              `json:"stt_base_url"           toml:"stt_base_url"`
 	Local                LocalConfig         `json:"local"                  toml:"local"`
 	EmployeeLeg          []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
 }

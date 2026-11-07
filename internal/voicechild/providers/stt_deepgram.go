@@ -70,12 +70,14 @@ func dialURL(base, path string) string {
 	}
 }
 
-// dialDeepgram opens the live transcription WebSocket at path with the
-// Authorization header set. The base comes from the adapter's config
-// (cfg.BaseURL; empty = the cloud default). The bounded-close wrapper is
-// adapted to this package's simpler wsSession interface.
-func dialDeepgram(ctx context.Context, path string, header wsHeader) (wsSession, error) {
-	conn, err := wsutil.Dial(ctx, dialURL(deepgramDefaultBaseURL, path), header.http(), wsutil.DefaultReadLimit)
+// dialDeepgram opens the live transcription WebSocket at path against the
+// supplied base with the Authorization header set. base is the adapter's
+// resolved endpoint (cfg.BaseURL; empty = the cloud default) - honoring
+// stt_base_url from the keys frame is the same contract TTS honors for
+// tts_base_url. The bounded-close wrapper is adapted to this package's
+// simpler wsSession interface.
+func dialDeepgram(ctx context.Context, base, path string, header wsHeader) (wsSession, error) {
+	conn, err := wsutil.Dial(ctx, dialURL(base, path), header.http(), wsutil.DefaultReadLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -136,8 +138,10 @@ type DeepgramSTT struct {
 	cfg    ProviderConfig
 	apiKey string
 
-	// dial overrides the session dialer (test seam).
-	dial func(ctx context.Context, path string, header wsHeader) (wsSession, error)
+	// dial opens the vendor session (test seam). base is the adapter's
+	// resolved endpoint (cfg.BaseURL; empty = the cloud default) so the
+	// stt_base_url keys-frame field reaches the wire.
+	dial func(ctx context.Context, base, path string, header wsHeader) (wsSession, error)
 }
 
 // NewSTT builds an STT adapter selected by ProviderConfig.Vendor. Cloud
@@ -177,8 +181,9 @@ func (s *DeepgramSTT) dialBase() string {
 }
 
 // setSTTDialer replaces the session dialer (test seam for the httptest
-// fake vendor).
-func (s *DeepgramSTT) setSTTDialer(dial func(ctx context.Context, path string, header wsHeader) (wsSession, error)) {
+// fake vendor). base is the resolved endpoint (cfg.BaseURL; empty = the
+// cloud default) that the real dialer would target.
+func (s *DeepgramSTT) setSTTDialer(dial func(ctx context.Context, base, path string, header wsHeader) (wsSession, error)) {
 	s.dial = dial
 }
 
@@ -231,7 +236,7 @@ func (s *DeepgramSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voi
 // the Stream level rather than here.
 func (s *DeepgramSTT) dialSession(ctx context.Context) (wsSession, error) {
 	header := wsHeader{"Authorization": "Token " + s.apiKey}
-	sess, err := s.dial(ctx, s.listenPath(), header)
+	sess, err := s.dial(ctx, s.dialBase(), s.listenPath(), header)
 	if err != nil {
 		return nil, fmt.Errorf("deepgram stt: dial: %w", err)
 	}
