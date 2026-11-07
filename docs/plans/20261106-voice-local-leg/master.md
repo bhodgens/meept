@@ -368,7 +368,7 @@ Per child, in order:
 | 04 | open-producer-profile | B | DONE 6e1113ce + follow-up | CL4 resolver (internal/voice/profile.go) + voice.employee_leg config (OQ4 pick: config list, per leaf 01 doc shape); keys-emission swap still gated on tierA 03 |
 | 05 | local-splice | A | DONE 57abc139 | orchestrator fixed clear-frame newline |
 | 06 | registry-leg | A | DONE a72d293f | 4-arg shape = AcquireLeg (Go: no overload) |
-| 07 | local-leg | C | PENDING | |
+| 07-local-leg | DONE b374927f | 1 | LocalLeg CL5 (no carrier/audit/effects, nil-carrier pinned); pre-accept 'not connected' splice filter; deadcode rebaseline: 5 reachable, 13 leaf-08 surfaces; sun_path fixture fix |
 | 08 | rpc-cli | D | PENDING | only components.go toucher |
 | 09 | tool-leg | D | PENDING | |
 | 10 | local-providers | B | DONE 02157fc2 | orchestrator in-session after 3 delegation deaths; whisper+piper subprocess adapters, vendor switch in NewSTT/NewTTS; local vendors keyless; fake-binary test seams; race+gofmt+vet clean |
