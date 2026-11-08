@@ -434,9 +434,13 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 	defer outConn.Close() //nolint:errcheck // teardown
 
 	done := make(chan error, 2)
-	// mic: capture -> in socket.
+	// mic: capture -> in socket. Byte-counted so an instant capture death
+	// (broken ffmpeg install: the process exits before producing audio) is
+	// REPORTED instead of silently ending the call.
+	micBytes := int64(0)
 	go func() {
-		_, err := io.Copy(inConn, cap)
+		n, err := io.Copy(inConn, cap)
+		micBytes = n
 		done <- err
 	}()
 	// speaker: out socket -> sink (burst WAVs -> oto).
@@ -462,6 +466,14 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 	}()
 	select {
 	case err := <-done:
+		// The mic side dying with ZERO bytes captured inside the call is
+		// not a hangup - it is a broken capture pipeline (broken ffmpeg
+		// install, denied mic permission, wrong device). Name it; the
+		// old behavior silently ended the call and the operator saw only
+		// "call ended."
+		if micBytes == 0 && len(done) == 0 {
+			return fmt.Errorf("live mic capture produced no audio (is ffmpeg working? try 'brew reinstall ffmpeg'; check mic permission for the terminal) - mic err: %v", err)
+		}
 		if err != nil {
 			// A mic EOF after the file-less capture died is normal on
 			// ctrl-c; speaker errors matter.
