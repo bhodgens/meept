@@ -44,6 +44,10 @@ const (
 	// GoalRetired means the goal is no longer relevant. Retired goals are
 	// retained for audit (soft-delete via retired_at).
 	GoalRetired
+	// GoalBlocked means the goal refused further autonomous rounds — either
+	// the round cap was reached or the model self-reported a block. It is a
+	// durable phase; an operator must explicitly unblock it.
+	GoalBlocked
 )
 
 // String returns the canonical string representation used in storage and logs.
@@ -55,6 +59,8 @@ func (s GoalState) String() string {
 		return "paused"
 	case GoalRetired:
 		return "retired"
+	case GoalBlocked:
+		return "blocked"
 	default:
 		return fmt.Sprintf("unknown(%d)", int(s))
 	}
@@ -71,6 +77,8 @@ func ParseGoalState(s string) (GoalState, error) {
 		return GoalPaused, nil
 	case "retired":
 		return GoalRetired, nil
+	case "blocked":
+		return GoalBlocked, nil
 	default:
 		return GoalActive, fmt.Errorf("unknown goal state %q", s)
 	}
@@ -150,6 +158,14 @@ const (
 // Goal
 // --------------------------------------------------------------------------
 
+// BlockedReason carries the durable reason a goal entered the blocked phase.
+// Code is a short machine key (e.g. "round-limit", "model-reported"); Message
+// is the human-readable explanation.
+type BlockedReason struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 // Goal is the long-lived mandate owned by an employee. Plans are the concrete
 // iterations that pursue a Goal; the Goal itself changes far less often.
 //
@@ -196,6 +212,19 @@ type Goal struct {
 	// PlanHistory (G4). Zero means use the default (DefaultMaxPlanHistory).
 	// Attempts to append beyond this cap evict the oldest entry.
 	MaxPlanHistory int `json:"max_plan_history,omitempty"`
+	// MaxRounds is the cap on autonomous rounds this goal may run. Zero
+	// means use the default (DefaultMaxGoalRounds, resolved via RoundsCap()).
+	// When RoundsStarted reaches MaxRounds the goal is expected to block.
+	MaxRounds int `json:"max_rounds,omitempty"`
+	// RoundsStarted counts how many autonomous rounds this goal has run.
+	// Guarded counter; durable across daemon restarts.
+	RoundsStarted int `json:"rounds_started"`
+	// BlockedReason is the durable reason the goal entered GoalBlocked, if
+	// any. Nil when the goal is not blocked.
+	BlockedReason *BlockedReason `json:"blocked_reason,omitempty"`
+	// Revision is a compare-and-set counter, +1 on each Create/Update. Lets
+	// goal_update CAS on optimistic concurrency.
+	Revision int64 `json:"revision"`
 	// CreatedAt is when the goal was first persisted.
 	CreatedAt time.Time `json:"created_at"`
 	// RetiredAt is when the goal was retired. Zero for active goals.
@@ -214,6 +243,13 @@ type Goal struct {
 	// guidance).
 	mu sync.RWMutex `json:"-"`
 
+	// armed is the process-local, non-persisted arming flag: Activate()
+	// arms automatic continuation, Disarm() clears it. The zero value is
+	// disarmed. Deliberately never written to the store — after a daemon
+	// restart an armed goal comes back disarmed (dsh session-start disarm
+	// edge). Guarded by mu.
+	armed bool `json:"-"`
+
 	// recentFindingsMax is the cap on the RecentFindings slice. Exported
 	// as a const so tests and callers can reference it.
 	// RecentFindings holds the finding IDs linked to this goal, newest first
@@ -230,6 +266,15 @@ const recentFindingsMax = 50
 // DefaultMaxPlanHistory is the default cap on PlanHistory entries (G4).
 // When Goal.MaxPlanHistory is zero, this value is used.
 const DefaultMaxPlanHistory = 100
+
+// DefaultMaxGoalRounds is the default cap on autonomous rounds a goal may run
+// (dsh default 256). When Goal.MaxRounds is zero, RoundsCap() uses this value.
+const DefaultMaxGoalRounds = 256
+
+// DefaultBlockedAfterConsecutiveRounds is the consecutive-round threshold at
+// which IsBlockedAfterNConsecutive reports the goal should self-block (dsh
+// default 3).
+const DefaultBlockedAfterConsecutiveRounds = 3
 
 // DefaultMaxActivePlans is the default cap on concurrently active plans
 // (G2). When Constitution.MaxActivePlans is zero, this value is used.
@@ -339,6 +384,24 @@ func (g *Goal) snapshot() (activePlanID string, activePlanIDs []string, history 
 		recentFindings = append([]string(nil), g.RecentFindings...)
 	}
 	return
+}
+
+// autonomySnapshot returns the C4a autonomy fields under a read lock. It must
+// be called without holding any other lock on g.
+func (g *Goal) autonomySnapshot() (maxRounds, roundsStarted int, blockedReason *BlockedReason) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.MaxRounds, g.RoundsStarted, g.BlockedReason
+}
+
+// bumpRevision increments the CAS revision counter under the write lock and
+// returns the new value. Each Update calls this exactly once so revision
+// advances monotonically per persisted write.
+func (g *Goal) bumpRevision() int64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.Revision++
+	return g.Revision
 }
 
 // ActivePlan returns the currently executing plan ID (empty if none) in a
@@ -480,6 +543,60 @@ func (g *Goal) IsRetired() bool {
 	return !g.RetiredAt.IsZero()
 }
 
+// RoundsCap returns the resolved maximum number of autonomous rounds:
+// MaxRounds when positive, else the DefaultMaxGoalRounds default.
+func (g *Goal) RoundsCap() int {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if g.MaxRounds > 0 {
+		return g.MaxRounds
+	}
+	return DefaultMaxGoalRounds
+}
+
+// Activate arms the goal for automatic continuation. It is idempotent and
+// process-local only (never persisted).
+func (g *Goal) Activate() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.armed = true
+}
+
+// Disarm clears the live arming flag. It is idempotent and process-local.
+func (g *Goal) Disarm() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.armed = false
+}
+
+// IsArmed reports whether the goal is armed for automatic continuation in
+// this process.
+func (g *Goal) IsArmed() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.armed
+}
+
+// StartRound increments RoundsStarted under the goal lock and returns the
+// new count. Callers compare the result against RoundsCap() to enforce the
+// round budget.
+func (g *Goal) StartRound() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.RoundsStarted++
+	return g.RoundsStarted
+}
+
+// IsBlockedAfterNConsecutive reports whether RoundsStarted has reached the
+// consecutive-round self-block threshold (DefaultBlockedAfterConsecutiveRounds,
+// 3). Used to refuse starting another autonomous round before an operator
+// explicitly overrides the cap.
+func (g *Goal) IsBlockedAfterNConsecutive() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.RoundsStarted >= DefaultBlockedAfterConsecutiveRounds
+}
+
 // NewGoalID returns a fresh random goal ID.
 func NewGoalID() string { return id.Generate(GoalIDPrefix) }
 
@@ -574,6 +691,25 @@ func (s *GoalStore) migrate() error {
 			return fmt.Errorf("migrate gate: %w", err)
 		}
 	}
+	// C4a autonomy surface: additive columns for the round cap, rounds
+	// started, the durable blocked reason, and the CAS revision counter.
+	// Each ALTER is idempotent-safe when guarded by the duplicate-column
+	// check, matching the pattern above.
+	for _, add := range []struct {
+		name string
+		ddl  string
+	}{
+		{"max_rounds", `ALTER TABLE employee_goals ADD COLUMN max_rounds INTEGER DEFAULT 0`},
+		{"rounds_started", `ALTER TABLE employee_goals ADD COLUMN rounds_started INTEGER DEFAULT 0`},
+		{"blocked_reason_json", `ALTER TABLE employee_goals ADD COLUMN blocked_reason_json TEXT`},
+		{"revision", `ALTER TABLE employee_goals ADD COLUMN revision INTEGER DEFAULT 0`},
+	} {
+		if _, err := s.db.Exec(add.ddl); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return fmt.Errorf("migrate %s: %w", add.name, err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -593,6 +729,10 @@ CREATE TABLE IF NOT EXISTS employee_goals (
     created_at    TEXT NOT NULL,
     retired_at    TEXT,
     recent_findings TEXT,
+    max_rounds INTEGER DEFAULT 0,
+    rounds_started INTEGER DEFAULT 0,
+    blocked_reason_json TEXT,
+    revision INTEGER DEFAULT 0,
     FOREIGN KEY (employee_id) REFERENCES bot_definitions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_goals_employee ON employee_goals(employee_id);
@@ -629,9 +769,15 @@ func (s *GoalStore) Create(ctx context.Context, g *Goal) error {
 	// Defensive: ensure state is one of the defined constants. The zero
 	// value (GoalActive) is valid and the most common case.
 	switch g.State {
-	case GoalActive, GoalPaused, GoalRetired:
+	case GoalActive, GoalPaused, GoalRetired, GoalBlocked:
 	default:
 		return fmt.Errorf("create: invalid goal state %d", g.State)
+	}
+
+	// C4a: revision begins at 1 on first persist so every created goal has a
+	// non-zero CAS anchor for later goal_update writes.
+	if g.Revision == 0 {
+		g.Revision = 1
 	}
 
 	history, err := marshalHistory(g.History())
@@ -648,17 +794,21 @@ func (s *GoalStore) Create(ctx context.Context, g *Goal) error {
 	activePlanIDsJSON := marshalPlanIDs(g.ActivePlans())
 	maxPlanHistory := g.MaxPlanHistory
 
+	blockedReasonJSON := marshalBlockedReason(g.BlockedReason)
+
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO employee_goals
     (id, employee_id, title, mandate, state, source, trigger_ref,
      health, last_assessed, active_plan_id, plan_history,
-     created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     created_at, retired_at, recent_findings, active_plan_ids, max_plan_history,
+     gate, max_rounds, rounds_started, blocked_reason_json, revision)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		g.ID, g.EmployeeID, g.Title, g.Mandate,
 		g.State.String(), string(g.Source), triggerRef,
 		g.Health.String(), lastAssessed, activePlan, history,
 		g.CreatedAt.Format(time.RFC3339), retiredAt, recentFindings,
 		activePlanIDsJSON, maxPlanHistory, marshalGate(g.Gate),
+		g.MaxRounds, g.RoundsStarted, blockedReasonJSON, g.Revision,
 	)
 	if err != nil {
 		return fmt.Errorf("insert: %w", err)
@@ -716,6 +866,8 @@ func (s *GoalStore) Update(ctx context.Context, g *Goal) error {
 		return errors.New("update: nil goal")
 	}
 	activePlanID, activePlanIDs, history, lastAssessed, retiredAt, recentFindings := g.snapshot()
+	maxRounds, roundsStarted, blockedReason := g.autonomySnapshot()
+	revision := g.bumpRevision()
 
 	historyJSON, err := marshalHistory(history)
 	if err != nil {
@@ -739,13 +891,18 @@ UPDATE employee_goals SET
     recent_findings = ?,
     active_plan_ids = ?,
     max_plan_history = ?,
-    gate = ?
+    gate = ?,
+    max_rounds = ?,
+    rounds_started = ?,
+    blocked_reason_json = ?,
+    revision = ?
 WHERE id = ?`,
 		g.Title, g.Mandate, g.State.String(), string(g.Source),
 		goalNullableString(g.TriggerRef), g.Health.String(),
 		goalNullableTime(lastAssessed), goalNullableString(activePlanID),
 		historyJSON, goalNullableTime(retiredAt), findingsJSON,
-		activePlanIDsJSON, g.MaxPlanHistory, marshalGate(g.Gate), g.ID,
+		activePlanIDsJSON, g.MaxPlanHistory, marshalGate(g.Gate),
+		maxRounds, roundsStarted, marshalBlockedReason(blockedReason), revision, g.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
@@ -836,25 +993,29 @@ const (
 	selectByID = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate,
+       max_rounds, rounds_started, blocked_reason_json, revision
 FROM employee_goals WHERE id = ?`
 
 	selectByEmployee = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate,
+       max_rounds, rounds_started, blocked_reason_json, revision
 FROM employee_goals WHERE employee_id = ? ORDER BY created_at`
 
 	selectActiveAll = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate,
+       max_rounds, rounds_started, blocked_reason_json, revision
 FROM employee_goals WHERE state != 'retired' ORDER BY created_at`
 
 	selectActiveByEmployee = `
 SELECT id, employee_id, title, mandate, state, source, trigger_ref,
        health, last_assessed, active_plan_id, plan_history,
-       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate
+       created_at, retired_at, recent_findings, active_plan_ids, max_plan_history, gate,
+       max_rounds, rounds_started, blocked_reason_json, revision
 FROM employee_goals WHERE employee_id = ? AND state != 'retired'
 ORDER BY created_at`
 
@@ -874,6 +1035,10 @@ func scanGoal(sc rowScanner) (*Goal, error) {
 		activePlanIDsJSON        sql.NullString
 		maxPlanHistory           sql.NullInt64
 		gateJSON                 sql.NullString
+		maxRounds                sql.NullInt64
+		roundsStarted            sql.NullInt64
+		blockedReasonJSON        sql.NullString
+		revision                 sql.NullInt64
 		createdAt                string
 	)
 	if err := sc.Scan(
@@ -882,6 +1047,7 @@ func scanGoal(sc rowScanner) (*Goal, error) {
 		&healthStr, &lastAssessed, &activePlanID, &planHistoryJSON,
 		&createdAt, &retiredAt, &recentFindingsJSON,
 		&activePlanIDsJSON, &maxPlanHistory, &gateJSON,
+		&maxRounds, &roundsStarted, &blockedReasonJSON, &revision,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrGoalNotFound
@@ -946,6 +1112,19 @@ func scanGoal(sc rowScanner) (*Goal, error) {
 	}
 	g.Gate = unmarshalGate(gateJSON)
 
+	if maxRounds.Valid {
+		g.MaxRounds = int(maxRounds.Int64)
+	}
+	if roundsStarted.Valid {
+		g.RoundsStarted = int(roundsStarted.Int64)
+	}
+	if blockedReasonJSON.Valid {
+		g.BlockedReason = unmarshalBlockedReason(blockedReasonJSON.String)
+	}
+	if revision.Valid {
+		g.Revision = revision.Int64
+	}
+
 	t, err := time.Parse(time.RFC3339, createdAt)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal created_at: %w", err)
@@ -1002,6 +1181,32 @@ func unmarshalGate(s sql.NullString) *GateConfig {
 		return nil
 	}
 	return &g
+}
+
+// marshalBlockedReason serializes a BlockedReason to its storage form (JSON
+// text). Returns nil for a nil reason so the column is NULL (the common case).
+func marshalBlockedReason(br *BlockedReason) any {
+	if br == nil {
+		return nil
+	}
+	b, err := json.Marshal(br)
+	if err != nil {
+		return nil
+	}
+	return string(b)
+}
+
+// unmarshalBlockedReason decodes a blocked-reason JSON string. Empty or
+// unparseable values decode to nil (defensive for legacy rows).
+func unmarshalBlockedReason(s string) *BlockedReason {
+	if s == "" {
+		return nil
+	}
+	var br BlockedReason
+	if err := json.Unmarshal([]byte(s), &br); err != nil {
+		return nil
+	}
+	return &br
 }
 
 func marshalHistory(history []string) (string, error) {

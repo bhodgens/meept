@@ -2,7 +2,6 @@ package employee
 
 import (
 	"testing"
-	"time"
 )
 
 func TestGoal_AutonomyExtension(t *testing.T) {
@@ -53,7 +52,7 @@ func TestGoal_StateTransitions_Blocked(t *testing.T) {
 		t.Fatalf("ParseGoalState(\"blocked\") failed: %v", err)
 	}
 	if state != GoalBlocked {
-		t.Errorf("ParseGoalState(\"blocked\") = %v, want GoalBlocked", state, GoalBlocked)
+		t.Errorf("ParseGoalState(\"blocked\") = %v, want GoalBlocked", state)
 	}
 
 	if g.BlockedReason == nil || g.BlockedReason.Code != "round-limit" {
