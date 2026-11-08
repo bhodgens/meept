@@ -7951,6 +7951,16 @@ func registerBuiltinTools(
 	// working-dir fence.
 	registry.Register(builtin.NewSpreadsheetWriteTool())
 
+	// Office tools (dsh-convergence leaf 06, contract C11.2-C11.5): the
+	// model-facing office_docx / office_pptx / office_workbook authoring
+	// tools, registered at the daemon seam exactly like the spreadsheet
+	// precedent above. Each is the backing tool of a requires-tools-gated
+	// skill in config/skills/office; execution of the skill is refused when
+	// the tool is unavailable (internal/skills executor checkRequiredTools).
+	registry.Register(builtin.NewOfficeDocxTool())
+	registry.Register(builtin.NewOfficePptxTool())
+	registry.Register(builtin.NewOfficeWorkbookTool())
+
 	// Web search tool (MCP-first: searxng when connected; DuckDuckGo
 	// direct-scrape fallback). The MCP manager is built earlier in
 	// NewComponents (components.go:2159), so the provider can be attached

@@ -3327,6 +3327,11 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// injection failure never blocks the turn.
 	l.wireReplyCarriers(conversationID)
 
+	// Leaf 04 plan-mode: inject the per-turn Approve/Keep-planning responder
+	// + session binding into tools implementing ResponseFuncSetter (builtin
+	// exit_plan_mode), same per-turn cadence as the reply carriers.
+	l.wireResponseSetters(conversationID)
+
 	// Add validation anchor instructions as an anchor message (persists through truncation)
 	// Only add once per conversation
 	if conv.Len() == 0 {

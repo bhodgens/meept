@@ -176,6 +176,19 @@ type ReplyFuncSetter interface {
 	SetReplyFunc(fn func(text string) error)
 }
 
+// ResponseFuncSetter is implemented by tools that accept a per-turn user
+// response callback AND a session binding — e.g. builtin exit_plan_mode,
+// whose SetResponseFunc carries the same func(ctx, question, options)
+// signature as builtin.ResponseFunc and whose SetSessionID binds the tool to
+// the current session. The agent loop injects a responder + the session id
+// at turn start so the tool presents its Approve/Keep-planning decision
+// against the current session. Satisfied structurally to avoid an import
+// cycle (builtin imports agent).
+type ResponseFuncSetter interface {
+	SetResponseFunc(fn func(ctx context.Context, question string, options []string) (string, error))
+	SetSessionID(sessionID string)
+}
+
 // ReplyCarrier returns the closure the loop injects into ReplyFuncSetter
 // tools at turn start. The carrier classifies the CURRENT run from the
 // captured attachment bits and routes through the router:
@@ -259,6 +272,42 @@ func (l *AgentLoop) wireReplyCarriers(conversationID string) {
 	for _, tool := range l.registry.List() {
 		if setter, ok := tool.(ReplyFuncSetter); ok {
 			setter.SetReplyFunc(carrier)
+		}
+	}
+}
+
+// wireResponseSetters injects the per-turn plan-mode user-response callback
+// and the current session id into every registry tool implementing
+// ResponseFuncSetter (builtin exit_plan_mode). The responder DELIVERS the
+// Approve/Keep-planning question through the same classified router the
+// post-turn text uses, so the decision is visibly presented; it then fails
+// closed with an explicit error because no interactive mid-turn answer sink
+// exists on the chat surface yet (the tool no longer trips "no user response
+// callback configured", but still cannot auto-approve). Best-effort:
+// injection failure never blocks the turn.
+func (l *AgentLoop) wireResponseSetters(conversationID string) {
+	if l.registry == nil {
+		return
+	}
+	router, attached, isolated := l.speakContextSnapshot()
+	deliver := func(text string) {
+		if router == nil {
+			return
+		}
+		kind := ClassifyRun(attached, isolated)
+		if kind != SpeakNotify {
+			return // bubble/isolated-child text is delivered by the caller
+		}
+		_ = router.Deliver(context.Background(), kind, text, l.sessionID, conversationID)
+	}
+	responder := func(ctx context.Context, question string, _ []string) (string, error) {
+		deliver(question)
+		return "", fmt.Errorf("plan approval requires an interactive user response, which the current chat surface does not provide; present the decision directly to the user and continue planning")
+	}
+	for _, tool := range l.registry.List() {
+		if setter, ok := tool.(ResponseFuncSetter); ok {
+			setter.SetSessionID(l.sessionID)
+			setter.SetResponseFunc(responder)
 		}
 	}
 }

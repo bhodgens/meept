@@ -266,11 +266,30 @@ type delegateRegistry interface {
 type DelegateTaskTool struct {
 	tools.ToolDefaults
 	registry delegateRegistry
+	// delegateMgr, when bound, routes the tool through the C1 async
+	// DelegateManager (spawn returns a child handle with child_id +
+	// status "running" immediately; settlement arrives via the
+	// agent.delegate.result bus event) instead of the legacy synchronous
+	// RunAgent path. An unbound manager keeps the legacy tool byte-
+	// compatible for existing callers (the daemon binds it only when the
+	// delegate provider is wired).
+	delegateMgr *agent.DelegateManager
 }
 
 // NewDelegateTaskTool creates a new delegate task tool.
 func NewDelegateTaskTool(registry *agent.AgentRegistry) *DelegateTaskTool {
 	return &DelegateTaskTool{registry: registry}
+}
+
+// SetDelegateManager binds the C1 async DelegateManager onto the tool. When
+// bound, spawn delegates asynchronously and return the child handle; when nil
+// (unbound / typed-nil), the legacy synchronous path runs unchanged. Set once
+// at daemon startup by the delegate wiring seam (typed-nil guarded).
+func (t *DelegateTaskTool) SetDelegateManager(m *agent.DelegateManager) {
+	if m == nil {
+		return
+	}
+	t.delegateMgr = m
 }
 
 func (t *DelegateTaskTool) Name() string { return "delegate_task" }
@@ -315,6 +334,13 @@ type DelegateResult struct {
 }
 
 func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	// Async C1 seam: when the daemon wired the DelegateManager, spawn as a
+	// child and return its handle (child_id + status "running") immediately;
+	// settlement surfaces via the agent.delegate.result bus event. Falls back
+	// to the legacy synchronous path only when no manager is bound.
+	if t.delegateMgr != nil {
+		return t.executeAsync(ctx, args)
+	}
 	if t.registry == nil {
 		return DelegateResult{
 			Success: false,
@@ -422,6 +448,51 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 		Success:  true,
 		Response: response,
 	}, nil
+}
+
+// executeAsync routes a delegation through the C1 async DelegateManager: it
+// builds a DelegateRequest from the tool args and calls Spawn, which validates
+// the spec, registers the child under the parent session, and returns the
+// child handle (child_id + status "running") immediately. The child executes
+// on a goroutine and settles asynchronously (bus event + record update), so
+// the child's later result is steered/interrupted/listed through the
+// subagent_* control tools and surfaced via the agent.delegate.result event.
+func (t *DelegateTaskTool) executeAsync(ctx context.Context, args map[string]any) (any, error) {
+	agentID, _ := args["agent_id"].(string)
+	message, _ := args["message"].(string)
+	contextStr, _ := args["context"].(string)
+
+	if agentID == "" {
+		return DelegateResult{Success: false, Error: "agent_id is required"}, nil
+	}
+	if message == "" {
+		return DelegateResult{Success: false, Error: "message is required"}, nil
+	}
+
+	req := agent.DelegateRequest{
+		AgentID: agentID,
+		Message: message,
+		Context: contextStr,
+	}
+	if schemaRaw, ok := args["output_schema"].(map[string]any); ok {
+		if schemaJSON, err := json.Marshal(schemaRaw); err == nil {
+			req.OutputSchema = schemaJSON
+		}
+	}
+
+	// The tool execution context does not carry a session id today (the C1
+	// registry still keys children by the caller's parent session; an empty
+	// value registers them under a blank parent, which the control tools
+	// surface once the caller-session resolver seam lands in the loop).
+	res, err := t.delegateMgr.Spawn(ctx, req, "")
+	if err != nil {
+		return DelegateResult{ //nolint:nilerr // reported through the DelegateResult envelope
+			AgentID: agentID,
+			Success: false,
+			Error:   err.Error(),
+		}, nil
+	}
+	return res, nil
 }
 
 // SessionHistoryTool provides access to recent session activity and completed work.

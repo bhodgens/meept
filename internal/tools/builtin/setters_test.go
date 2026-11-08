@@ -37,6 +37,9 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		{"FileEditTool.SetLSPNotifier", func() { (&FileEditTool{}).SetLSPNotifier(nil) }},
 		{"ResolveTool.SetFenceChecker", func() { (&ResolveTool{}).SetFenceChecker(nil) }},
 		{"AskTool.SetResponseFunc", func() { (&AskTool{}).SetResponseFunc(nil) }},
+		{"DelegateTaskTool.SetDelegateManager", func() { (&DelegateTaskTool{}).SetDelegateManager(nil) }},
+		{"ExitPlanModeTool.SetResponseFunc", func() { (&ExitPlanModeTool{}).SetResponseFunc(nil) }},
+		{"ExitPlanModeTool.SetPlanGate", func() { (&ExitPlanModeTool{}).SetPlanGate(nil) }},
 		// Additional setters that must be nil-safe (S4-3 coverage gap)
 		{"GitCommitTool.SetFenceChecker", func() { (&GitCommitTool{}).SetFenceChecker(nil) }},
 		{"GitOverviewTool.SetFenceChecker", func() { (&GitOverviewTool{}).SetFenceChecker(nil) }},

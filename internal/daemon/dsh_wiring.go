@@ -125,6 +125,16 @@ func wireDelegateProvider(c *Components, cfg *config.Config, msgBus *bus.Message
 	c.DelegateManager = dm
 	c.DelegateController = ctrl
 
+	// Bind the async manager onto the legacy registered delegate_task tool so
+	// it spawns asynchronously and returns a child handle (child_id). The
+	// tool keeps its legacy synchronous path when no manager is bound — here
+	// the binding happens only when the delegate provider is wired. Typed-nil
+	// safe: a missing/renamed registration leaves delegate_task on its legacy
+	// sync path.
+	if dt, ok := c.ToolRegistry.Get("delegate_task").(*builtin.DelegateTaskTool); ok {
+		dt.SetDelegateManager(dm)
+	}
+
 	builtin.SetDelegateProvider(ctrl)
 	names := enabledToolProviderNames(cfg, []string{"delegate"}, logger)
 	if len(names) == 0 {
@@ -192,7 +202,22 @@ func wirePlanMode(c *Components, logger *slog.Logger) {
 	ctrl := builtin.NewPlanModeController(newPlanModeMemoryPersistence())
 	c.PlanModeController = ctrl
 
-	builtin.RegisterPlanModeTools(c.ToolRegistry, ctrl)
+	// Construct exit_plan_mode EXPLICITLY and bind the daemon's real plan gate
+	// (the durable *plan.PlanManager) so the Approve path lands on the same
+	// gate the CLI's `plans list/approve` and the PlanModeController's /plan
+	// surface use. Registering this same instance (rather than the default
+	// one RegisterPlanModeTools creates) is what lets the loop injection seam
+	// (SetResponseFunc + SetSessionID per turn) and the plan-gate binding
+	// reach the tool the model actually calls.
+	exitTool := builtin.NewExitPlanModeTool(ctrl)
+	if c.PlanManager != nil {
+		exitTool.SetPlanGate(c.PlanManager)
+	}
+	c.ToolRegistry.Register(exitTool)
+
+	// The per-turn user-response callback + session binding are injected by
+	// the agent loop (PlanModeResponseSetter seam); the daemon owns only the
+	// durable gate above. The policy section + /plan reconcile follow.
 
 	if c.InstructionContextInjector != nil {
 		// plan:policy prompt injection — present only while at least one
