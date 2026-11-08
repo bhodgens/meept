@@ -507,6 +507,19 @@ func (c *Client) Implementation(ctx context.Context, uri string, line, char int)
 	return locations, nil
 }
 
+// GotoImplementation finds the implementations of a symbol at a position.
+// Additive (dsh-convergence 04/02-lsp-navigation): reuses the existing
+// textDocument/implementation request mechanism already exposed as
+// Implementation, adding a nil-transport guard so a client built without a
+// server connection returns an error instead of panicking. This is the
+// read-only navigation surface the model-facing lsp_navigate tool calls.
+func (c *Client) GotoImplementation(ctx context.Context, uri string, line, char int) ([]Location, error) {
+	if c.transport == nil {
+		return nil, errors.New("lsp client has no server connection")
+	}
+	return c.Implementation(ctx, uri, line, char)
+}
+
 // CodeActions retrieves available code actions for a range.
 func (c *Client) CodeActions(ctx context.Context, uri string, line, char int) ([]CodeAction, error) {
 	params := CodeActionParams{

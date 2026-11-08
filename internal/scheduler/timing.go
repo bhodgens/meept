@@ -15,11 +15,11 @@ type TimingKind string
 
 // The five semantic timing kinds (L1 contract).
 const (
-	TimingRRule  TimingKind = "rrule"
-	TimingDaily  TimingKind = "daily"
-	TimingWeekly TimingKind = "weekly"
-	TimingAt     TimingKind = "at"
-	TimingEvery  TimingKind = "every"
+	TimingRRule  TimingKind = "TimingRRule"
+	TimingDaily  TimingKind = "TimingDaily"
+	TimingWeekly TimingKind = "TimingWeekly"
+	TimingAt     TimingKind = "TimingOneShot"
+	TimingEvery  TimingKind = "TimingEvery"
 )
 
 // MinTimingEverySeconds is the floor for the `every` kind, mirroring the dsh
@@ -211,10 +211,18 @@ func parseTimingRRule(spec string) (*TimingSpec, error) {
 	if _, err := time.LoadLocation(tzid); err != nil {
 		return nil, fmt.Errorf("%w: %s: %v", ErrInvalidTimeZone, tzid, err)
 	}
+	// A valid DTSTART is the RFC5545 local date+time form "yyyymmddThhmmss"
+	// resolved in the TZID; take its wall-clock as the recurrence time of day
+	// so Validate/CronExpr share a single clock source.
+	ts := strings.TrimSpace(dtstart[strings.LastIndex(dtstart, ":")+1:])
+	if !isDTSTARTLocalTs(ts) {
+		return nil, fmt.Errorf("%w: DTSTART timestamp must be yyyymmddThhmmss", ErrInvalidRule)
+	}
+	clock := ts[9:11] + ":" + ts[11:13] + ":" + ts[13:15]
 	rule := strings.TrimSpace(rrule[len("RRULE"):])
 	rule = strings.TrimPrefix(rule, ":")
 
-	spec2 := &TimingSpec{Kind: TimingRRule, TimeZone: tzid, RRule: dtstart + "\n" + rrule}
+	spec2 := &TimingSpec{Kind: TimingRRule, TimeZone: tzid, Time: clock, RRule: dtstart + "\n" + rrule}
 	if err := spec2.Validate(); err != nil {
 		return nil, err
 	}
@@ -290,19 +298,19 @@ func normalizeWeekdays(tokens string) ([]int, error) {
 			iso = n
 		} else {
 			switch tok {
-			case "MON":
+			case "MON", "MO":
 				iso = 1
-			case "TUE":
+			case "TUE", "TU":
 				iso = 2
-			case "WED":
+			case "WED", "WE":
 				iso = 3
-			case "THU":
+			case "THU", "TH":
 				iso = 4
-			case "FRI":
+			case "FRI", "FR":
 				iso = 5
-			case "SAT":
+			case "SAT", "SA":
 				iso = 6
-			case "SUN":
+			case "SUN", "SU":
 				iso = 7
 			default:
 				return nil, fmt.Errorf("%w: unknown weekday %q", ErrInvalidRule, tok)
@@ -418,12 +426,12 @@ func (t *TimingSpec) validateRRule() error {
 		return fmt.Errorf("%w: %s: %v", ErrInvalidTimeZone, tzid, err)
 	}
 	ts := strings.TrimSpace(dtstart[strings.LastIndex(dtstart, ":")+1:])
-	if len(ts) != 15 || !isDigits(ts) {
+	if !isDTSTARTLocalTs(ts) {
 		return fmt.Errorf("%w: DTSTART timestamp must be yyyymmddThhmmss", ErrInvalidRule)
 	}
 	// The RRULE wall-clock must match the DTSTART wall-clock so CronExpr can
 	// take the time of day from a single source.
-	if hh, mm, ss, ok := splitClock(t.Time); !ok || hh != ts[9:11] || mm != ts[12:14] || ss != ts[15:17] {
+	if hh, mm, ss, ok := splitClock(t.Time); !ok || hh != ts[9:11] || mm != ts[11:13] || ss != ts[13:15] {
 		return fmt.Errorf("%w: Time must match the DTSTART wall-clock", ErrInvalidRule)
 	}
 
@@ -523,6 +531,15 @@ func isDigits(s string) bool {
 	return len(s) > 0
 }
 
+// isDTSTARTLocalTs reports whether s is the RFC5545 local date+time form
+// "yyyymmddThhmmss" — a literal T separating the date from the wall-clock.
+func isDTSTARTLocalTs(s string) bool {
+	if len(s) != 15 || s[8] != 'T' {
+		return false
+	}
+	return isDigits(s[:8]) && isDigits(s[9:])
+}
+
 // splitClock splits an HH:mm[:ss] string into parts (no validation).
 func splitClock(s string) (hh, mm, ss string, ok bool) {
 	parts := strings.Split(s, ":")
@@ -557,15 +574,15 @@ func (t *TimingSpec) CronExpr() (string, error) {
 	}
 	switch t.Kind {
 	case TimingDaily:
-		hh, mm, ss, _ := splitClock(t.Time)
-		return fmt.Sprintf("%s %s %s * * *", ss, mm, hh), nil
+		hh, mm, _, _ := splitClock(t.Time)
+		return fmt.Sprintf("%s %s * * *", mm, hh), nil
 	case TimingWeekly:
-		hh, mm, ss, _ := splitClock(t.Time)
+		hh, mm, _, _ := splitClock(t.Time)
 		dows, err := cronDowList(t.Weekdays)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s %s %s * * %s", ss, mm, hh, dows), nil
+		return fmt.Sprintf("%s %s * * %s", mm, hh, dows), nil
 	case TimingAt:
 		return "", fmt.Errorf("%w: at has no cron expression (one-shot)", ErrInvalidRule)
 	case TimingEvery:
@@ -574,7 +591,7 @@ func (t *TimingSpec) CronExpr() (string, error) {
 		lines := strings.Split(t.RRule, "\n")
 		rule := strings.TrimSpace(lines[1])
 		rule = strings.TrimPrefix(strings.TrimPrefix(rule, "RRULE"), ":")
-		hh, mm, ss, _ := splitClock(t.Time)
+		hh, mm, _, _ := splitClock(t.Time)
 		var freq string
 		for _, part := range strings.Split(rule, ";") {
 			kv := strings.SplitN(part, "=", 2)
@@ -584,13 +601,13 @@ func (t *TimingSpec) CronExpr() (string, error) {
 		}
 		switch freq {
 		case "DAILY":
-			return fmt.Sprintf("%s %s %s * * *", ss, mm, hh), nil
+			return fmt.Sprintf("%s %s * * *", mm, hh), nil
 		case "WEEKLY":
 			dows, err := cronDowList(t.Weekdays)
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("%s %s %s * * %s", ss, mm, hh, dows), nil
+			return fmt.Sprintf("%s %s * * %s", mm, hh, dows), nil
 		case "MONTHLY":
 			var day string
 			for _, part := range strings.Split(rule, ";") {
@@ -599,7 +616,7 @@ func (t *TimingSpec) CronExpr() (string, error) {
 					day = strings.TrimSpace(kv[1])
 				}
 			}
-			return fmt.Sprintf("%s %s %s %s * *", ss, mm, hh, day), nil
+			return fmt.Sprintf("%s %s %s * *", mm, hh, day), nil
 		default:
 			return "", fmt.Errorf("%w: unsupported FREQ %s", ErrInvalidRule, freq)
 		}

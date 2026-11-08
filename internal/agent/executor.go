@@ -417,6 +417,9 @@ var ToolActionMap = map[string]string{
 	"lsp_hover":             ToolFileRead,
 	"lsp_workspace_symbols": ToolFileRead,
 	"lsp_diagnostics":       ToolFileRead,
+	// lsp_navigate (dsh-convergence 04/02-lsp-navigation): read-only LSP nav
+	// with the same code_read -> file_read remap as the sibling lsp_* tools.
+	"lsp_navigate": ToolFileRead,
 
 	// Remaining registered builtins (found by the completeness test
 	// enumerating builtin constructors — every entry below was a latent

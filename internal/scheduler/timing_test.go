@@ -95,7 +95,7 @@ func TestTiming_NextOccurrence_DST(t *testing.T) {
 func TestTiming_Validate_RFC5545Boundary(t *testing.T) {
 	tests := []struct {
 		input string
-		err   error 
+		err   error
 	}{
 		{"FREQ=MONTHLY;BYDAY=-1FR", nil},
 		{"FREQ=YEARLY;COUNT=5", nil},

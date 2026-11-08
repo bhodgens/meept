@@ -8975,6 +8975,11 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegis
 		} else {
 			c.ToolRegistry.Register(tool)
 		}
+		if tool, err := builtin.NewLSPNavigateTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP navigate tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
 		logger.Debug("Registered LSP tools")
 
 		// Wire LSP writethrough notifier into file tools
