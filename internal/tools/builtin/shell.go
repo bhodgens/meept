@@ -917,6 +917,9 @@ func (t *ShellExecuteTool) spillCombined(ctx context.Context, combined string) s
 // context carries no session, so the spill sanitizer maps it to the
 // "nosession" directory (leaf contract: empty session -> "nosession").
 func shellSpillSessionID(ctx context.Context) string {
+	if sid := tools.SessionIDFromContext(ctx); sid != "" {
+		return sid
+	}
 	if sid, ok := ctx.Value(sessionIDContextKey).(string); ok && sid != "" {
 		return sid
 	}

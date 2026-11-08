@@ -31,7 +31,14 @@ func newBrowserTool(mgr *browser.Manager) BrowserTool {
 }
 
 // sessionIDFromCtx extracts the agent session ID for browser session scoping.
+// Reads the SHARED tools-layer session key (the loop's one injection site);
+// the builtin-local sessionIDContextKey is kept as a fallback so tests (and
+// any caller still using builtin.ContextWithSessionID) keep working during
+// the migration.
 func sessionIDFromCtx(ctx context.Context) string {
+	if sid := tools.SessionIDFromContext(ctx); sid != "" {
+		return sid
+	}
 	if sid, ok := ctx.Value(sessionIDContextKey).(string); ok && sid != "" {
 		return sid
 	}

@@ -567,7 +567,9 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 		}
 
 		sessionID := id.Generate("write-")
-		if sid, ok := ctx.Value(sessionIDContextKey).(string); ok && sid != "" {
+		if sid := tools.SessionIDFromContext(ctx); sid != "" {
+			sessionID = sid
+		} else if sid, ok := ctx.Value(sessionIDContextKey).(string); ok && sid != "" {
 			sessionID = sid
 		}
 

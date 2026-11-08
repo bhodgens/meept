@@ -33,6 +33,22 @@ const (
 	ToolRequestReview    = "request_review"
 )
 
+// delegationToolNames lists the delegation tool family: the spawn tool and
+// every subagent control tool built in internal/tools/builtin/delegate_*.
+// The agent package cannot import internal/tools/builtin (import cycle), so
+// the family is enumerated here and pinned by
+// TestDelegationToolNamesMatchBuiltinFamily (registry_test.go keeps the two
+// sides in sync). CanDelegate=false strips every member of this family, not
+// just delegate_task (DSH-7).
+func delegationToolNames() []string {
+	return []string{
+		"delegate_task",
+		"subagent_send_message",
+		"subagent_interrupt",
+		"subagent_list_children",
+	}
+}
+
 // Map key constants used in structured log/event payloads throughout the agent package.
 const (
 	KeyTaskID         = "task_id"

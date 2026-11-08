@@ -10,6 +10,33 @@ import (
 // directory injected by the agent loop before tool execution.
 type workingDirCtxKey struct{}
 
+// sessionIDCtxKey is the context key for the caller's session id injected by
+// the agent loop before tool execution (DSH-6). Tools that register state
+// under a parent session (delegate_task's C1 Spawn) read it so children key
+// to the real caller session; an absent/empty value stays the legacy
+// sessionless posture. This is the shared production seam — the builtin
+// package's own sessionIDContextKey predates it and its readers migrate to
+// this key so ONE injection site serves every consumer.
+type sessionIDCtxKey struct{}
+
+// SessionIDFromContext extracts the caller's session id from ctx, if set.
+// Returns empty string when not present (no session attribution).
+func SessionIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(sessionIDCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// ContextWithSessionID returns a new context carrying the caller's session
+// id. An empty id stores nothing (no attribution = legacy behavior).
+func ContextWithSessionID(ctx context.Context, sessionID string) context.Context {
+	if sessionID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, sessionIDCtxKey{}, sessionID)
+}
+
 // WorkingDirFromContext extracts the working directory from ctx, if set.
 // Returns empty string when not present.
 func WorkingDirFromContext(ctx context.Context) string {

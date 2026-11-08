@@ -480,11 +480,12 @@ func (t *DelegateTaskTool) executeAsync(ctx context.Context, args map[string]any
 		}
 	}
 
-	// The tool execution context does not carry a session id today (the C1
-	// registry still keys children by the caller's parent session; an empty
-	// value registers them under a blank parent, which the control tools
-	// surface once the caller-session resolver seam lands in the loop).
-	res, err := t.delegateMgr.Spawn(ctx, req, "")
+	// Parent-session attribution (DSH-6): the loop injects its session id
+	// into every tool context (tools.ContextWithSessionID); register the
+	// child under THAT session so the subagent_* control tools surface it
+	// to the caller. A context without a session (legacy callers, direct
+	// tool tests) keeps the blank-parent behavior — empty is then correct.
+	res, err := t.delegateMgr.Spawn(ctx, req, tools.SessionIDFromContext(ctx))
 	if err != nil {
 		return DelegateResult{ //nolint:nilerr // reported through the DelegateResult envelope
 			AgentID: agentID,

@@ -298,6 +298,17 @@ type AfterProviderResponseData struct {
 	Latency        time.Duration `json:"latency"`
 	Cached         bool          `json:"cached"`
 	Error          string        `json:"error,omitempty"`
+	// Tier signaling (llm-serving-tiers leaf 01, Contract C3, PINNED
+	// channel): the llm.Response metadata keys bridged verbatim onto the
+	// per-step surface so agent_progress/step consumers can show "served
+	// by degraded tier". Key names MUST stay identical to the
+	// internal/llm constants (llm.MetaKeyLLMTier*). Zero values ("", 0)
+	// mean the tier feature is off — absent from the payload in effect
+	// (omitempty on the string; the bool/int stay but mean "not
+	// degraded"/"depth 0", matching the response's own disabled posture).
+	LLMTier         string `json:"llm_tier,omitempty"`
+	LLMTierDegraded bool   `json:"llm_tier_degraded"`
+	LLMTierDepth    int    `json:"llm_tier_depth"`
 }
 
 func (AfterProviderResponseData) agentEventData() {}

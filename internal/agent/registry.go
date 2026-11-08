@@ -969,7 +969,15 @@ func (r *AgentRegistry) filterTools(spec *AgentSpec) ToolRegistry {
 	}
 	allowedTools := spec.ScopedToolNamesPresent(spec.ToolScopeLimit, baselinePresent)
 	if !spec.CanDelegate {
-		allowedTools = removeString(allowedTools, "delegate_task")
+		// Strip the FULL delegation tool family (DSH-7): delegate_task alone
+		// left the C1 control tools (subagent_send_message /
+		// subagent_interrupt / subagent_list_children) reachable for a
+		// can_delegate:false agent whenever additional_tools granted one —
+		// a can't-spawn agent could still steer/interrupt/enumerate another
+		// session's children through the control surface.
+		for _, name := range delegationToolNames() {
+			allowedTools = removeString(allowedTools, name)
+		}
 	}
 	// Codemode gate (token-efficiency branch 02 leaf 02): when [agent.tools]
 	// codemode_enabled is on, union the codemode tool into a SCOPED agent's

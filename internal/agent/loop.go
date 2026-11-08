@@ -1849,6 +1849,15 @@ func (l *AgentLoop) PiiRestoreHook() *PiiRestoreHook {
 	return l.piiRestore
 }
 
+// SessionID returns the loop's session identifier (the identity the loop was
+// constructed with). Read-only, used for tool-context session attribution
+// (DSH-6); may be empty on degenerate loops.
+func (l *AgentLoop) SessionID() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.sessionID
+}
+
 // WithCapabilityIndex sets the capability index for skill discovery.
 func WithCapabilityIndex(ci *skills.CapabilityIndex) LoopOption {
 	return func(l *AgentLoop) {
@@ -5029,6 +5038,21 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 		}
 
+		// PII pre-LLM masking (agent-boundary-hardening BND-1; master
+		// contract C1-C scenario 03(a)): when [security.pii] is enabled and
+		// the restore lane is armed, replace detected PII in the CLONED
+		// provider-bound message content with [PII:*] tokens minted into
+		// THIS session's swap scope — the same-session RestoreOutput at the
+		// ScanOutput choke point (loop.go, before reply persistence) then
+		// un-masks the model's reply. Runs AFTER the transform lane (the
+		// lane's writers own their outputs; masking last wins) and only on
+		// the per-iteration clone: stored conversation history keeps the
+		// raw text; nothing sessionless is ever minted. Nil/disabled hook
+		// or empty loop session -> slice unchanged, byte-identical.
+		if hook := l.PiiRestoreHook(); hook != nil {
+			messages = hook.MaskOutboundScoped(messages, l.SessionID())
+		}
+
 		// Vision pre-flight: analyze undescribed images before the main turn.
 		// The messages slice is modified in-place — ImageRef.Description fields
 		// are populated so the main LLM turn uses the cached descriptions
@@ -5413,14 +5437,26 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		// Emit after-provider-response event with cache data
 		if l.eventEmitter != nil {
+			// Tier signaling bridge (llm-serving-tiers leaf 01, Contract
+			// C3): the ProviderManager stamps llm_tier /
+			// llm_tier_degraded / llm_tier_depth into the response's
+			// metadata when the tier gate is enabled + signal_degraded;
+			// bridge the keys onto the per-step event surface so
+			// agent_progress consumers can show "served by degraded
+			// tier". A nil/disabled-gate response carries no metadata and
+			// the fields ride zero-valued (feature-off posture unchanged).
+			tier, tierDegraded, tierDepth := tierMetadataFromResponse(response)
 			l.eventEmitter.EmitWithFields(ctx, AgentEvent{
 				Type:           AgentEventAfterProviderResponse,
 				ConversationID: conversationID,
 				Iteration:      iteration,
 				Data: AfterProviderResponseData{
-					ModelID:        response.Model,
-					ResponseTokens: response.Usage.TotalTokens,
-					CachedTokens:   response.Usage.CachedTokens,
+					ModelID:         response.Model,
+					ResponseTokens:  response.Usage.TotalTokens,
+					CachedTokens:    response.Usage.CachedTokens,
+					LLMTier:         tier,
+					LLMTierDegraded: tierDegraded,
+					LLMTierDepth:    tierDepth,
 				},
 			})
 		}
@@ -5439,7 +5475,8 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 
 		// Publish token usage event
-		l.publishTokenUsage(conversationID, totalTokens)
+		tier, tierDegraded, tierDepth := tierMetadataFromResponse(response)
+		l.publishTokenUsage(conversationID, totalTokens, tier, tierDegraded, tierDepth)
 
 		// Snapshot a promoted chain-of-thought for the give-up paths. The
 		// reply is about to be re-asked for visible output (the watchdog
@@ -8736,6 +8773,14 @@ func (l *AgentLoop) executeToolCallsUngated(ctx context.Context, toolCalls []llm
 	// shared mutable state on the tool registry.
 	ctx = tools.ContextWithWorkingDir(ctx, l.GetWorkingDir())
 
+	// Session attribution (DSH-6): the loop's own session id rides the
+	// tool context so tools that register state under a parent session
+	// (delegate_task's C1 Spawn) key children to the REAL caller session
+	// instead of a blank parent. l.sessionID is the loop-identity field;
+	// an empty value stores nothing and the reader behaves exactly as
+	// before this injection — empty stays the no-session posture.
+	ctx = tools.ContextWithSessionID(ctx, l.SessionID())
+
 	// Memory-scope identity (leaf 03-agent-recall-wiring T3): the memory
 	// tools stamp writes and filter reads with the SAME resolved B1 tuple
 	// this loop recalls under. Absent from contexts without this injection
@@ -9223,8 +9268,31 @@ func (l *AgentLoop) publishStreamDeltaNow(conversationID string, iteration int, 
 	l.bus.Publish("agent.progress", msg)
 }
 
-// publishTokenUsage publishes token usage to the message bus.
-func (l *AgentLoop) publishTokenUsage(conversationID string, totalTokens int) {
+// tierMetadataFromResponse extracts the tier signaling keys (Contract C3)
+// from a completed llm.Response for the step-surface bridge. Returns the
+// zero triple when the response carries no metadata (tier feature off) —
+// callers omit the keys from map payloads and leave struct fields zero.
+func tierMetadataFromResponse(resp *llm.Response) (tier string, degraded bool, depth int) {
+	if resp == nil || resp.Metadata == nil {
+		return "", false, 0
+	}
+	if v, ok := resp.Metadata[llm.MetaKeyLLMTier].(string); ok {
+		tier = v
+	}
+	if v, ok := resp.Metadata[llm.MetaKeyLLMTierDegraded].(bool); ok {
+		degraded = v
+	}
+	if v, ok := resp.Metadata[llm.MetaKeyLLMTierDepth].(int); ok {
+		depth = v
+	}
+	return tier, degraded, depth
+}
+
+// publishTokenUsage publishes token usage to the message bus. The tier
+// signaling keys (llm_tier / llm_tier_degraded / llm_tier_depth) ride the
+// payload only when the response actually carried them (tier feature on) —
+// feature-off payloads stay byte-identical to the pre-TIER-1 shape.
+func (l *AgentLoop) publishTokenUsage(conversationID string, totalTokens int, tier string, tierDegraded bool, tierDepth int) {
 	if l.bus == nil {
 		return
 	}
@@ -9232,6 +9300,12 @@ func (l *AgentLoop) publishTokenUsage(conversationID string, totalTokens int) {
 	payload := map[string]any{
 		"conversation_id": conversationID,
 		"total_tokens":    totalTokens,
+	}
+	if tier != "" {
+		// Key names PINNED to the internal/llm constants (Contract C3).
+		payload[llm.MetaKeyLLMTier] = tier
+		payload[llm.MetaKeyLLMTierDegraded] = tierDegraded
+		payload[llm.MetaKeyLLMTierDepth] = tierDepth
 	}
 
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload)
