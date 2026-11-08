@@ -447,6 +447,19 @@ func (m *DelegateManager) Children(parentSessionID string) []ChildRecord {
 	return out
 }
 
+// Session returns the live ACP session recorded for an acp-mode child, if
+// any. It backs the B3 child-control SendMessage path, which routes an acp
+// child's message through its recorded session (never a second client).
+func (m *DelegateManager) Session(childID string) (*acp.Session, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	e, ok := m.children[childID]
+	if !ok || e.sess == nil {
+		return nil, false
+	}
+	return e.sess, true
+}
+
 // Lookup returns a copy of a child record by childID.
 func (m *DelegateManager) Lookup(childID string) (ChildRecord, bool) {
 	m.mu.RLock()

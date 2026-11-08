@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -138,26 +140,199 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 // visibleSkillLines returns one C4 listing line per visible cached skill, in
 // alphabetical name order (deterministic = cache-stable). Skills whose
 // frontmatter sets disable-model-invocation are hidden from the listing.
+// The lines are generated through the skillCatalog type so the line shape and
+// digest-derived ordering stay single-sourced with the durable catalog.
 func (c *ContextInjector) visibleSkillLines() []string {
+	if c.skillLoader == nil {
+		return nil
+	}
 	names := c.skillLoader.CachedNames()
 	if len(names) == 0 {
 		return nil
 	}
-	sort.Strings(names)
 
-	var out []string
+	var entries []skills.SkillIndexEntry
 	for _, name := range names {
 		s := c.skillLoader.Get(name)
 		if s == nil || s.DisableModelInvocation {
 			continue
 		}
-		desc := s.Description
-		if desc == "" {
-			desc = "(no description)"
-		}
-		out = append(out, fmt.Sprintf("- %s: %s [load: file_read %s]", s.Name, desc, s.Path))
+		entries = append(entries, skills.SkillIndexEntry{
+			Name:        s.Name,
+			Description: s.Description,
+			Path:        s.Path,
+		})
 	}
-	return out
+	rendered := NewSkillCatalog(entries).Render()
+	if rendered == "" {
+		return nil
+	}
+	return strings.Split(rendered, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// Durable skill catalog (dsh 04-tool-surface/03-skill-catalog, master C9).
+//
+// Replaces the process-cache-only relist with a digest-stable snapshot of
+// every visible model-invocable skill sourced from DISCOVERY — not merely the
+// live loader cache. The catalog is rendered once per digest period and is
+// meant to be persisted as a session record, so a resume/replay rebuilds the
+// same listing from the session store instead of the in-memory cache. The
+// digest dedup is what lets materialization fire only when the visible set
+// actually changes.
+// ---------------------------------------------------------------------------
+
+// skillCatalog is an immutable, digest-stable snapshot of a visible skill set.
+// It is source-agnostic: callers build it from a fresh discovery / index
+// snapshot OR from reconstructed entries parsed back out of a rendered (and
+// thus persisted) catalog message.
+type skillCatalog struct {
+	entries  []skills.SkillIndexEntry // visible-only, name-sorted
+	digest   string
+	rendered string
+}
+
+// NewSkillCatalog builds a catalog from a discovery snapshot (the full indexed
+// / discovered skill set). Skills with disable-model-invocation are omitted
+// (visibleSkillLines parity). The digest is stable across input order and is
+// sha256 over the name-sorted "name	description" pairs.
+func NewSkillCatalog(entries []skills.SkillIndexEntry) *skillCatalog {
+	visible := make([]skills.SkillIndexEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.DisableModelInvocation {
+			continue
+		}
+		visible = append(visible, e)
+	}
+	// Name-sort the visible set so both the digest and the rendered listing
+	// are deterministically ordered regardless of the caller's input order
+	// (e.g. an unordered cache map). Without this, a catalog rebuilt from a
+	// differently-ordered input hashes differently and the render churns.
+	sort.Slice(visible, func(i, j int) bool {
+		return visible[i].Name < visible[j].Name
+	})
+	c := &skillCatalog{entries: visible}
+	c.digest = catalogDigest(visible)
+	c.rendered = renderCatalog(visible)
+	return c
+}
+
+// Digest returns the stable sha256 digest of the visible skill set.
+func (c *skillCatalog) Digest() string {
+	if c == nil {
+		return ""
+	}
+	return c.digest
+}
+
+// Render returns the C4-format listing: one "- name: desc [load: file_read
+// path]" line per visible skill, name-sorted, joined by newlines.
+func (c *skillCatalog) Render() string {
+	if c == nil {
+		return ""
+	}
+	return c.rendered
+}
+
+// catalogDigest computes sha256 over the name-sorted entries, hashing the
+// exact strings a resuming session must reproduce (name + rendered
+// description). The load path is intentionally NOT part of the identity: it is
+// derivable from the name via current discovery and may legitimately move
+// between sessions.
+func catalogDigest(entries []skills.SkillIndexEntry) string {
+	sorted := make([]skills.SkillIndexEntry, len(entries))
+	copy(sorted, entries)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Name < sorted[j].Name
+	})
+	h := sha256.New()
+	for _, e := range sorted {
+		h.Write([]byte(e.Name))
+		h.Write([]byte("	"))
+		h.Write([]byte(catalogDescription(e.Description)))
+		h.Write([]byte("\n"))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// catalogDescription returns the description text a catalog line renders (and
+// digests): an empty description renders as "(no description)" so a catalog
+// rebuilt from its rendered form hashes identically to the original.
+func catalogDescription(desc string) string {
+	if desc == "" {
+		return "(no description)"
+	}
+	return desc
+}
+
+// renderCatalog emits the C4 listing lines for the (name-sorted) visible
+// entries.
+func renderCatalog(entries []skills.SkillIndexEntry) string {
+	var sb strings.Builder
+	for i, e := range entries {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		fmt.Fprintf(&sb, "- %s: %s [load: file_read %s]",
+			e.Name, catalogDescription(e.Description), e.Path)
+	}
+	return sb.String()
+}
+
+// ParseSkillCatalogMessage reconstructs a catalog from its rendered form (the
+// persisted session record). It re-derives name + description per C4 line and
+// recomputes the digest, so a resume that reads the old session record
+// reproduces the same digest without the live loader cache.
+func ParseSkillCatalogMessage(rendered string) (*skillCatalog, error) {
+	entries := make([]skills.SkillIndexEntry, 0)
+	for _, line := range strings.Split(rendered, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "- ") {
+			continue
+		}
+		rest := strings.TrimPrefix(line, "- ")
+		// Strip the "[load: file_read <path>]" trailer, if present.
+		if i := strings.Index(rest, " [load: file_read "); i >= 0 {
+			rest = rest[:i]
+		}
+		// Split "name: desc" on the first ": ".
+		name, desc := rest, ""
+		if i := strings.Index(rest, ": "); i >= 0 {
+			name, desc = rest[:i], rest[i+2:]
+		}
+		if name == "" {
+			continue
+		}
+		entries = append(entries, skills.SkillIndexEntry{Name: name, Description: desc})
+	}
+	return NewSkillCatalog(entries), nil
+}
+
+// catalogInjector owns the digest-dedup decision for materializing a durable
+// skill-catalog session record: it re-materializes only when the visible skill
+// set actually changed (the digest differs from the last materialized one).
+// A fresh injector (lastDigest "") always materializes the first catalog so a
+// new session gets a baseline even if a zero-length set.
+type catalogInjector struct {
+	lastDigest string
+}
+
+// ShouldMaterialize reports whether a catalog's visible set differs from the
+// last one this injector materialized.
+func (inj *catalogInjector) ShouldMaterialize(c *skillCatalog) bool {
+	if inj == nil || c == nil {
+		return false
+	}
+	return inj.lastDigest != c.Digest()
+}
+
+// MarkMaterialized records a catalog's digest as the most recently
+// materialized one.
+func (inj *catalogInjector) MarkMaterialized(c *skillCatalog) {
+	if inj == nil || c == nil {
+		return
+	}
+	inj.lastDigest = c.Digest()
 }
 
 // HasActiveInstructions returns true if there are active user instructions.
