@@ -87,3 +87,50 @@ TestActivityWiring_AllNilHandlesNeverPanics (ACT-1) fails at committed HEAD and 
 - Fully landed+accurate: memory-second-brain, context-memory-engine, hitl-notifications, llm-hop-tracing, tool-provider-seam, trajectory-golden-ci, turn-journal, security-gate-followups, wiring-gap-remediation, wiring-followups-final, voice-tierA-qwen3-tts, budget-status-consistency, e2e-boot-hardening, token-efficiency (14)
 - Landed w/ real code gaps needing fixes: agent-boundary-hardening (PII mask unwired), llm-serving-tiers (tier signal undelivered), agent-groups (boot C6 + template loop), agent-activity-audit-views (RED test), voice-sidecar (leaf16 build/docs + panic tests), dsh-convergence (fork-seed, projections, catalog, modelselect, CanDelegate, round-driver), github-intake-factory (sub-issue 422), fresh-context-critic (doc addendum) (8)
 - Jeopardy items: jev-command-gate (e2e suite build break), voice-local-leg (flaky gate test) (2)
+
+## FIX DISPOSITION (2026-11-08, all fixes verified in-session and committed)
+
+| Finding | Fix | Commit |
+|---|---|---|
+| ACT-1 RED activity wiring test | test-side: manager-backed methods expect clean errors | 6f14a94f |
+| JEV-1 jev e2e build break | rec.Ts -> rec.TS | 6f14a94f |
+| VS-1 voice WS nil-Body panic | closeDialResp guard (7 close sites) | 6f14a94f |
+| BND-1 PII mask unwired | MaskOutboundScoped on transform-lane clone + restore via existing hook | 0b5cc1cd + 19c1534b |
+| TIER-1 tier metadata undelivered | llm_tier* bridged into AfterProviderResponseData + bus payload | 0b5cc1cd |
+| DSH-7 CanDelegate leak | full delegation family stripped | 0b5cc1cd |
+| DSH-6 blank parent session | tools-layer session ctx threaded into Spawn | 0b5cc1cd |
+| GRP-1 boot C6 inert | WithKnownTools + revalidateGroupsPolicyTools at boot hook | bacff2e7 |
+| GRP-2 template-loop record | ResolveForAgent + SetGroupResolution at construction | bacff2e7 |
+| DSH-2 projections/events inert | registry + ChangeEmitter wired at store construction | bacff2e7 |
+| DSH-4 skill catalog test-only | prompt path sources index; per-session catalog record | bacff2e7 |
+| DSH-3 round driver manual-only | scheduler deferred-turn auto-advance; [employees] goal_auto_advance default true | f6ecd5ca |
+| DSH-5 PreflightRoute unwired | [delegation] allowed_routes + fail-closed preflight on every spawn | f6ecd5ca |
+| DSH-9a timing JSON drift | snake_case MarshalJSON, legacy-compatible Unmarshal | f6ecd5ca |
+| INT-1 sub-issue 422 | two-step create+link form; fake validates sequence | 7483dd3d |
+| BUD-1 budget bridge 0,0 | HTTP TokenLimitGetter wired (mirror of RPC) | 7483dd3d |
+| DSH-8 workflow fire-and-forget | WaitCompletion seam + agent.delegate.result publish | 7483dd3d |
+| FC-1 critic doc stale | dated C1-delta addendum | 24036114 |
+| TTS-1 gate rows PENDING | F1-F6 -> VALIDATED | 24036114 |
+| VS-2 tracking all-PENDING | reconciled to as-built (15/16, leaf 16 partial) | 24036114 |
+
+Verification: make test full sweep 12405/12406 (1 fail = codemode
+TestBridgePerCallContextCancellation, passes 5/5 isolated, package untouched
+by the wave - pre-existing load-timing flake). go build clean.
+graphs-check green. All fixes with new tests ship those tests.
+
+NOT FIXED (documented, need product decisions or their own leaves):
+- DSH-1 fork-seed nil seeding: the slicer is real; wiring Spawn to pass the
+  parent *Conversation is a behavior change (fork spawns today are fresh-brief).
+  Needs a decision: is fork-from-transcript wanted for chat-dispatched children?
+- VS-2 leaf-16 remainder: Makefile/magefiles meept-voice build+install targets,
+  docs/features.md voice row - packaging work, recommended as its own leaf.
+- VLC-1/VS-3 RMS barge-in test flake (5s poll under -p 2 load) - timing fix
+  or named-flake annotation, test-side, flaky class documented in commit bodies.
+- HITL-1 goal-gate parks test-only (disclosed deviation; production goal
+  surface routes through plan gates by design per 52148db1).
+- HITL-2/GRP-3/ACT-2/CME-1/JEV-2/SEAM-1/TIER-4/VLC-2/BUD-1(residual)/TRJ-1/
+  FC-2/VS-4/TTS-1(residual) LOW doc/citation drifts - batch into the next
+  docs commit; none affect behavior.
+- WS relay has no storage.* topic pattern (DSH-2 consumer surface) - GUI live
+  refresh is a product-surface decision.
+- make docs-check needs mage+gomarkdoc (not run locally).
