@@ -272,8 +272,8 @@ Output: APPROVED or a list of specific gaps.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 00T-gate-tests | TESTS_VALIDATED | 1 | RED verified (unit) + skip-pass e2e; 2 matrix deltas applied (F4 test path, F7 scope); commit 3083e8f7 |
-| 01-contact-foundation | TESTS_VALIDATED | 0 | gate green; may dispatch |
-| 10-signal-sidecar | TESTS_VALIDATED | 0 | gate green; may dispatch |
+| 01-contact-foundation | REVIEWED | 1 | gate GREEN; T0 both unit + e2e verified; 1 gate assertion delta (ada/Ada) fixed in-session; commit ff2c8eb9 |
+| 10-signal-sidecar | REVIEWED | 1 | gate GREEN x3 + race; sun_path TMPDIR env fix; Dial 1-arg per gate; commit ff2c8eb9 |
 | 11-signal-legs (branch) | PENDING | 0 | awaits 01+10 |
 | 12-telnyx-sms | PENDING | 0 | awaits 01 |
 | 02-contact-wiring | PENDING | 0 | awaits 01+11+12 |
