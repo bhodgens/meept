@@ -45,7 +45,7 @@ func TestCompletedTurnPrefix_DropsInFlightTurn(t *testing.T) {
 	// Turn 2: completed (tool round trip balanced).
 	conv.AddUserMessage("q2")
 	conv.AddAssistantMessageWithToolCalls("calling", []llm.ToolCall{
-		{ID: "call-1", Function: llm.FunctionCall{Name: "terminal", Arguments: "{}"}},
+		{ID: "call-1", Type: "function", Function: llm.ToolCallFunction{Name: "terminal", Arguments: "{}"}},
 	})
 	conv.AddToolResult("call-1", "output")
 	conv.AddAssistantMessage("a2")
@@ -70,7 +70,7 @@ func TestCompletedTurnPrefix_DropsUnbalancedToolCall(t *testing.T) {
 	// In-flight turn: assistant tool-call whose result never arrived.
 	conv.AddUserMessage("q2")
 	conv.AddAssistantMessageWithToolCalls("calling", []llm.ToolCall{
-		{ID: "call-2", Function: llm.FunctionCall{Name: "terminal", Arguments: "{}"}},
+		{ID: "call-2", Type: "function", Function: llm.ToolCallFunction{Name: "terminal", Arguments: "{}"}},
 	})
 
 	got := completedTurnPrefix(conv)

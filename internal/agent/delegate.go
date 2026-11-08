@@ -87,6 +87,12 @@ type ChildRecord struct {
 	Result          string
 	Err             string
 	Descriptor      ChildDescriptor
+
+	// seed is the B2 history-seeded fork snapshot, captured ONCE at spawn
+	// (not re-derived from the parent's newer history on resume). It rides
+	// the child descriptor for cold resume (leaf 06 serializes it); here it
+	// keeps the spawn-time snapshot stable in memory for the child run.
+	seed []llm.ChatMessage
 }
 
 // ChildOptions carries the per-child model routing parameters resolved by the
@@ -171,6 +177,12 @@ func NewDelegateManager(reg *AgentRegistry, publisher func(string, any), cancelH
 		publisher:  publisher,
 		cancelHook: cancelHook,
 		children:   make(map[string]*childEntry),
+		// B2: register the history-seeded fork slicer as the default so
+		// every spawn path seeds Mode:"fork" without waiting for daemon
+		// wiring. It is pure and nil-safe (nil conversation -> nil seed ->
+		// fresh shared-transcript spawn), and a later SetForkSeed(nil)
+		// still resets to that default no-op behavior.
+		forkSeed: completedTurnPrefix,
 	}
 }
 
@@ -385,21 +397,26 @@ func (m *DelegateManager) runACPChild(ctx context.Context, req DelegateRequest, 
 
 // childPrompt builds the child's full input message from the request, mirroring
 // the legacy delegate_task prompt construction (structured spawn brief +
-// optional caller context + optional output-schema directive).
+// optional caller context + optional output-schema directive). In fork mode it
+// seeds the child with the parent's completed-turn prefix, CAPTURED ONCE at
+// this spawn invocation (each spawn runs childPrompt a single time in
+// runChild), so the child replays a stable snapshot rather than re-forking the
+// parent's newer history. The seed first computed is stashed on the record and
+// reused on any re-render — never recomputed.
 func (m *DelegateManager) childPrompt(rec ChildRecord, req DelegateRequest) (string, error) {
 	var fullMessage string
 	switch rec.Mode {
 	case "fork":
-		var seed []llm.ChatMessage
-		if m.forkSeed != nil {
-			// B2: the supplied slicer materializes the parent transcript seed.
-			// This leaf has no live parent *Conversation at spawn time; leaf
-			// 02 supplies the real slicer and threads the conversation through
-			// Spawn's parent-session context. nil seed falls back to the
-			// request message as the brief under shared-transcript isolation.
-			seed = m.forkSeed(nil)
+		// B2: materialize the parent-transcript seed once at spawn. The
+		// concrete *Conversation is threaded through Spawn's
+		// parent-session context by callers that hold it; the default
+		// hook (completedTurnPrefix, nil-safe) yields an empty seed for a
+		// nil conversation, falling back to a fresh shared-transcript
+		// brief. Best-effort by contract: never a hard requirement.
+		if rec.seed == nil && m.forkSeed != nil {
+			rec.seed = m.forkSeed(nil)
 		}
-		spawn := BuildSpawnContext(IsolationSharedTranscript, req.Message, nil, nil, seed)
+		spawn := BuildSpawnContext(IsolationSharedTranscript, req.Message, nil, nil, rec.seed)
 		fullMessage = RenderSpawnContext(spawn)
 	default: // spawn
 		spawn := BuildSpawnContext(IsolationArtifactOnly, req.Message, nil, nil, nil)

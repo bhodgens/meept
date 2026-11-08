@@ -17,6 +17,12 @@ type ContextInjector struct {
 	learning     *selfimprove.LearningPipeline
 	instructions *preferences.Store
 	skillLoader  *skills.LazySkillLoader
+	// planModePolicySection returns the plan-policy prompt section when plan
+	// mode is active (for the prompt's session), else "". When set and the
+	// returned text is non-empty, it is appended to BuildSystemPrompt so the
+	// plan-mode collaboration policy reaches the model only while active.
+	// Nil-safe: unset means no plan-mode injection.
+	planModePolicySection func() string
 }
 
 // NewContextInjector creates a new context injector.
@@ -35,6 +41,16 @@ func NewContextInjector(
 func (c *ContextInjector) SetSkillLoader(loader *skills.LazySkillLoader) {
 	if loader != nil {
 		c.skillLoader = loader
+	}
+}
+
+// SetPlanModePolicySection wires the plan-mode plan:policy prompt provider. It
+// returns the plan-policy section text while plan mode is active, else "". A
+// nil arg is a no-op (typed-nil guard); an unset provider disables plan-mode
+// injection entirely.
+func (c *ContextInjector) SetPlanModePolicySection(fn func() string) {
+	if fn != nil {
+		c.planModePolicySection = fn
 	}
 }
 
@@ -104,6 +120,16 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 		}
 
 		sb.WriteString("\nWhen triggers occur, execute associated actions automatically.\n")
+	}
+
+	// Plan-mode plan:policy section — injected only while plan mode is active
+	// for the prompt's session (provider set and returns non-empty). Unset or
+	// inactive leaves the prompt byte-identical to before.
+	if c.planModePolicySection != nil {
+		if section := c.planModePolicySection(); section != "" {
+			sb.WriteString("\n\n")
+			sb.WriteString(section)
+		}
 	}
 
 	return sb.String()
