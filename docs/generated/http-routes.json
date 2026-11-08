@@ -165,7 +165,7 @@
     "path": "GET ",
     "handler": "",
     "file": "internal/comm/http/voice_plain.go",
-    "line": 57
+    "line": 98
   },
   {
     "method": "ANY",
@@ -1089,7 +1089,7 @@
     "path": "POST ",
     "handler": "",
     "file": "internal/comm/http/voice_plain.go",
-    "line": 56
+    "line": 97
   },
   {
     "method": "ANY",
