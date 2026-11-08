@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/effects"
@@ -38,6 +39,7 @@ func (t *gateStubTool) Execute(_ context.Context, _ map[string]any) (any, error)
 }
 func (t *gateStubTool) IsReadOnly(map[string]any) bool        { return t.readOnly }
 func (t *gateStubTool) IsConcurrencySafe(map[string]any) bool { return false }
+func (t *gateStubTool) TimeoutMs() time.Duration              { return 0 }
 func (t *gateStubTool) Category() string                      { return t.category }
 
 // recordingEmitter records every audit chain emission.

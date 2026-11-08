@@ -319,6 +319,21 @@ func executorModelRefFromDirective(directive *ModelReassignmentDirective) string
 	return ""
 }
 
+// PlanModeController is the subset of the builtin plan-mode controller the
+// /plan slash-route consults to reconcile plan-mode toggling with the legacy
+// force-plan-creation path. Defined locally because internal/agent cannot
+// import internal/tools/builtin (builtin imports agent); the daemon supplies a
+// bridge (internal/daemon/dsh_wiring.go) wrapping *builtin.PlanModeController.
+// A nil controller leaves the /plan branch on its legacy routeToPlan path.
+type PlanModeController interface {
+	// HandlePlanCommand handles a /plan command for a session. It returns a
+	// non-empty steer text when the command activates plan mode with a real
+	// task to dispatch, the status reply when the command is a pure toggle,
+	// and whether the command was consumed by plan mode (false = fall through
+	// to the legacy /plan force-creation path).
+	HandlePlanCommand(sessionID, input string) (steer, reply string, consumed bool)
+}
+
 // Dispatcher handles intake classification and routing of requests.
 type Dispatcher struct {
 	registry          *AgentRegistry
@@ -343,6 +358,7 @@ type Dispatcher struct {
 	modelParser       *ModelReassignmentParser
 	planManager       *plan.PlanManager
 	goalAnchor        GoalAnchorStore
+	planMode          PlanModeController
 	metricsStore      *metrics.Store
 
 	// inputHasher, when non-nil, derives the salted input_hash persisted in
@@ -802,6 +818,15 @@ func (d *Dispatcher) SetSessionStore(s SessionStoreReader) {
 	}
 }
 
+// SetPlanModeController wires the plan-mode controller the /plan slash-route
+// consults. A nil controller (or a nil-boxed one) leaves the /plan branch on
+// its legacy force-creation path; the guard keeps the seam typed-nil-safe.
+func (d *Dispatcher) SetPlanModeController(ctrl PlanModeController) {
+	if ctrl != nil {
+		d.planMode = ctrl
+	}
+}
+
 // resolveSessionWorkingDir returns the working directory for a dispatched
 // turn and the source it came from, using the ONE precedence documented in
 // AGENTS.md and implemented by session.ResolveWorkingDir:
@@ -975,29 +1000,51 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// Check for explicit skill invocation (/skill-name)
 	if strings.HasPrefix(input, "/") {
 		// Handle /plan command — force plan creation
-		if strings.HasPrefix(input, "/plan") && d.planManager != nil {
-			desc := strings.TrimPrefix(input, "/plan")
-			desc = strings.TrimSpace(desc)
-			if desc == "" {
-				desc = input
+		if strings.HasPrefix(input, "/plan") {
+			// Plan-mode reconcile (dsh-convergence): when a plan-mode
+			// controller is wired, /plan is a plan-mode toggle (on/off/steer),
+			// NOT an immediate plan creation. A pure toggle returns the status
+			// reply directly; a non-empty steer (a real task under plan mode)
+			// is dispatched as a normal turn so the plan:policy prompt guides
+			// design-first work. Only when no controller is wired (the legacy
+			// default) does /plan force-create a plan.
+			if d.planMode != nil {
+				steer, reply, consumed := d.planMode.HandlePlanCommand(sessionID, input)
+				if consumed {
+					if steer = strings.TrimSpace(steer); steer != "" &&
+						!strings.HasPrefix(strings.ToLower(steer), "/plan") {
+						// A real task steered under plan mode: re-dispatch as a
+						// normal turn. The recursion is bounded because the
+						// steered text no longer begins with /plan.
+						return d.ClassifyAndRoute(ctx, steer, sessionID, parts, agentOverride, requestModel)
+					}
+					return &DispatchResult{Response: reply}, nil
+				}
 			}
-			// Build a minimal intent for plan routing
-			planIntent := &Intent{
-				Type:       string(IntentPlan),
-				Confidence: 1.0,
-				AgentType:  config.AgentIDPlanner,
-				Summary:    extractSummary(desc),
+			if d.planManager != nil {
+				desc := strings.TrimPrefix(input, "/plan")
+				desc = strings.TrimSpace(desc)
+				if desc == "" {
+					desc = input
+				}
+				// Build a minimal intent for plan routing
+				planIntent := &Intent{
+					Type:       string(IntentPlan),
+					Confidence: 1.0,
+					AgentType:  config.AgentIDPlanner,
+					Summary:    extractSummary(desc),
+				}
+				// sessionID, NOT the thread-resolved conversationID: the plan
+				// route links plan SourceSession / plan_sessions (and, on the
+				// quickplan arm, createTask → LinkSession) with this id, all
+				// session-store lookup keys. The compound/plan detected routes
+				// pass the session-level id for the same reason (90eb0f45);
+				// this slash-route site had the same failure: work created via
+				// /plan inside a non-general thread was invisible to every
+				// digest/recall lookup. See the thread-isolation contract at
+				// RouteToAgent.
+				return d.routeToPlan(ctx, desc, planIntent, sessionID)
 			}
-			// sessionID, NOT the thread-resolved conversationID: the plan
-			// route links plan SourceSession / plan_sessions (and, on the
-			// quickplan arm, createTask → LinkSession) with this id, all
-			// session-store lookup keys. The compound/plan detected routes
-			// pass the session-level id for the same reason (90eb0f45);
-			// this slash-route site had the same failure: work created via
-			// /plan inside a non-general thread was invisible to every
-			// digest/recall lookup. See the thread-isolation contract at
-			// RouteToAgent.
-			return d.routeToPlan(ctx, desc, planIntent, sessionID)
 		}
 		skillName, skillInput := d.parseSkillInvocation(input)
 		if skill := d.getSkill(skillName); skill != nil {

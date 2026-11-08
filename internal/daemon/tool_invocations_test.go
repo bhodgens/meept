@@ -18,6 +18,7 @@ func (invocationProbe) Name() string                          { return "platform
 func (invocationProbe) Description() string                   { return "offline invocation probe" }
 func (invocationProbe) IsReadOnly(map[string]any) bool        { return true }
 func (invocationProbe) IsConcurrencySafe(map[string]any) bool { return true }
+func (invocationProbe) TimeoutMs() time.Duration              { return 0 }
 func (invocationProbe) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{Type: "object"}
 }

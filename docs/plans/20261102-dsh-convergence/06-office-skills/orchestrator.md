@@ -304,11 +304,11 @@ user picks the library or approves a non-Go runtime, never the agent silently.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 00-research-assignment | COMPLETE | 0 | library-picks.md committed, GO (docx godocx, xlsx excelize, pptx pptxgo) |
-| 00T-tests | COMPLETE | 0 | parked RED (.staged) per Phase 0; activates with C11.5 |
+| 00T-tests | COMPLETE | 0 | gate tests landed RED, parked .staged (e62e3fdd); activates with C11.5 registration |
 | 01-docx-skill | COMPLETE | 0 | cb3e999b: office_docx builtin + office-docx skill |
-| 02-pptx-skill | PENDING | 0 | gated on 00R GO; pick = mmonterroca/pptxgo (fallback F31/go-pptx) |
+| 02-pptx-skill | COMPLETE | 0 | cccb25c: office_pptx builtin + office-pptx skill over pptxgo |
 | 03-xlsx-skill | COMPLETE | 0 | 51d4abbc: office_workbook builtin + office-xlsx skill |
-| 04-docs | PENDING | 0 | after 01-03 REVIEWED + 00R GO |
+| 04-docs | COMPLETE | 0 | d280e582: office router SKILL.md + office-skills.md feature doc |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

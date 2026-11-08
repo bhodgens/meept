@@ -249,13 +249,13 @@ new tool. Note in Notes.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-tests | PENDING | 0 | Phase 0 gate |
-| 01-tool-timeout | PENDING | 0 | |
-| 02-lsp-navigation | PENDING | 0 | |
-| 03-skill-catalog | PENDING | 0 | |
-| 04-skill-invocation | PENDING | 0 | |
-| 05-message-quotes | PENDING | 0 | |
-| 06-gh-issues | PENDING | 0 | docs; filed at Phase 2 |
+| 00T-tests | COMPLETE | 0 | gate tests landed RED, parked .staged (762dc9d3); activate at e2e integration |
+| 01-tool-timeout | COMPLETE | 0 | a87a1276: Tool.TimeoutMs + executor deadline wrapper (ErrToolTimeout) |
+| 02-lsp-navigation | COMPLETE | 0 | a5f3b641: lsp_navigate builtin over existing LSP client |
+| 03-skill-catalog | COMPLETE | 0 | cccb25c + d280e582: skill watcher hot-reload + source_file split |
+| 04-skill-invocation | COMPLETE | 0 | cccb25c: skill_invocation /name gesture |
+| 05-message-quotes | COMPLETE | 0 | b8a5cc09: TUI message-quotes |
+| 06-gh-issues | COMPLETE | 0 | d280e582: issue bodies 11+12 committed; filed as #111/#112 per prior reconcile |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

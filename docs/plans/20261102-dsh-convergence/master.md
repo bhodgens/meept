@@ -334,13 +334,20 @@ The orchestrator (main model) verifies each branch in-session:
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-delegation/ | PENDING | 0 | spine; impl NOT-STARTED (gates parked .staged) |
-| 02-goals-plans/ | PENDING | 0 | waits 01 partially; impl NOT-STARTED (gates parked .staged) |
+| 01-delegation/ | COMPLETE | 0 | waves 3-7: spawn (ccc764b6), fork (e94e8497), child-control (5b66d4cc), model/select+workflow (380c8d31), descriptor-resume (dd4fa153); gate parked .staged (ec1445b2) |
+| 02-goals-plans/ | COMPLETE | 0 | goal model + round-cap (ccc764b6), goal tools + plan-mode (e94e8497); gate parked .staged (ec1445b2) |
 | 03-session-storage/ | COMPLETE | 0 | 4 impl leaves + gates GREEN; suite in manifest |
-| 04-tool-surface/ | PENDING | 0 | impl NOT-STARTED; gh-issue drafts 11+12 written, unfiled |
-| 05-schedule/ | PENDING | 0 | impl NOT-STARTED (gates parked .staged) |
-| 06-office-skills/ | IN_PROGRESS | 0 | 00R+01-docx+03-xlsx DONE; 02-pptx+04-docs+C11.5 open |
-| gh-issues (11,12) | IN_PROGRESS | 0 | bodies drafted in 04/06-gh-issues/; filing pending |
+| 04-tool-surface/ | COMPLETE | 0 | timeout (a87a1276), lsp_navigate (a5f3b641), skill catalog/invocation (cccb25c + d280e582), quotes (b8a5cc09), gh-issues (d280e582); gate parked .staged (762dc9d3) |
+| 05-schedule/ | COMPLETE | 0 | timing kinds (a5f3b641 + cccb25c + d280e582), delivery inbox + receipts (cccb25c); gate parked .staged (d1f1f70f) |
+| 06-office-skills/ | COMPLETE | 0 | research GO + docx (cb3e999b) + xlsx (51d4abbc) + pptx (cccb25c) + docs (d280e582); gate parked .staged (e62e3fdd) |
+| gh-issues (11,12) | COMPLETE | 0 | issue bodies committed (d280e582); filed as #111/#112 per prior reconcile |
+
+> REMAINING (in-progress) integration steps - NOT complete: (1) daemon wiring of the
+> new tool surface (office C11.5 registration + any delegate/goal tool wiring the
+> daemon boot path must not yet attach), (2) e2e-suite activation (branch gates are
+> committed RED and parked .staged, pending un-park + manifest entries), and (3) merge
+> to main. These are the only incomplete items in this tree; everything above the line
+> has committed implementation.
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -365,22 +372,25 @@ Gate matrix. Root-level e2e owns the cross-branch C1-C4 contract tests above.
 
 | # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
 |---|---------------------|--------|-----------|-----------|--------|
-| F1 | delegation seam + child control + fork-seed | 01 (C1,C2) | branch unit | branch e2e | PENDING |
-| F2 | per-child model selection | 01 | branch unit | branch e2e | PENDING |
-| F3 | workflow orchestration tool | 01 (C3) | branch unit | branch e2e | PENDING |
-| F4 | model goal tools + autonomous rounds | 02 (C4) | branch unit | branch e2e | PENDING |
-| F5 | plan-mode present-for-review | 02 | branch unit | branch e2e | PENDING |
-| F6 | versioned session log + projection | 03 (C5) | branch unit | branch e2e | PENDING |
-| F7 | cross-session bounded reference | 03 (C7) | branch unit | branch e2e | PENDING |
-| F8 | storage record-change events | 03 (C6) | branch unit | branch e2e | PENDING |
-| F9 | per-tool timeout | 04 (C8) | branch unit | branch e2e | PENDING |
-| F10 | LSP navigation tool | 04 (C8) | branch unit | branch e2e | PENDING |
-| F11 | skill hot-reload + catalog + /name | 04 (C9) | branch unit | branch e2e | PENDING |
-| F12 | message-quotes | 04 | branch unit | n/a (UI) | PENDING |
-| F13 | RFC5545 + delivery receipts | 05 (C10) | branch unit | branch e2e | PENDING |
-| F14 | skill-office docx/pptx/xlsx | 06 (C11) | branch unit | branch e2e | PENDING |
+| F1 | delegation seam + child control + fork-seed | 01 (C1,C2) | branch unit | branch e2e | COMPLETE |
+| F2 | per-child model selection | 01 | branch unit | branch e2e | COMPLETE |
+| F3 | workflow orchestration tool | 01 (C3) | branch unit | branch e2e | COMPLETE |
+| F4 | model goal tools + autonomous rounds | 02 (C4) | branch unit | branch e2e | COMPLETE |
+| F5 | plan-mode present-for-review | 02 | branch unit | branch e2e | COMPLETE |
+| F6 | versioned session log + projection | 03 (C5) | branch unit | branch e2e | COMPLETE |
+| F7 | cross-session bounded reference | 03 (C7) | branch unit | branch e2e | COMPLETE |
+| F8 | storage record-change events | 03 (C6) | branch unit | branch e2e | COMPLETE |
+| F9 | per-tool timeout | 04 (C8) | branch unit | branch e2e | COMPLETE |
+| F10 | LSP navigation tool | 04 (C8) | branch unit | branch e2e | COMPLETE |
+| F11 | skill hot-reload + catalog + /name | 04 (C9) | branch unit | branch e2e | COMPLETE |
+| F12 | message-quotes | 04 | branch unit | n/a (UI) | COMPLETE |
+| F13 | RFC5545 + delivery receipts | 05 (C10) | branch unit | branch e2e | COMPLETE |
+| F14 | skill-office docx/pptx/xlsx | 06 (C11) | branch unit | branch e2e | COMPLETE |
 
-Delta log: [date, feature ID, direction, one-line reason]
+Delta log: [2026-11-07, F1-F14, COMPLETE, implementation committed (waves 1-7 + pre-wave
+leaves); gate tests exist per branch but are parked .staged RED - e2e-suite activation
+and daemon wiring are the remaining integration steps, so the feature rows mark the
+committed implementation, not a green gate run.]
 
 ## Frozen Documents
 

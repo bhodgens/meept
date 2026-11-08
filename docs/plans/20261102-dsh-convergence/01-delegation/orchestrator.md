@@ -366,13 +366,13 @@ Output: APPROVED or a list of specific gaps with file+line.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-tests | PENDING | 0 | Phase 0 gate |
-| 01-spawn-async | PENDING | 0 | seam core, dispatch B |
-| 02-fork-seed | PENDING | 0 | dispatch C |
-| 03-child-control | PENDING | 0 | dispatch C |
-| 04-model-selection | PENDING | 0 | dispatch D |
-| 05-workflow-tool | PENDING | 0 | dispatch D |
-| 06-descriptor-resume | PENDING | 0 | dispatch E |
+| 00T-tests | COMPLETE | 0 | gate tests landed RED, parked .staged (ec1445b2); activate (mv + manifest) at e2e integration |
+| 01-spawn-async | COMPLETE | 0 | ccc764b6: DelegateManager async spawn + child registry |
+| 02-fork-seed | COMPLETE | 0 | e94e8497: delegate_fork history-seeded fork |
+| 03-child-control | COMPLETE | 0 | 5b66d4cc: delegate_control tools (send_message/interrupt/list) |
+| 04-model-selection | COMPLETE | 0 | 380c8d31: modelselect Resolve/Preflight |
+| 05-workflow-tool | COMPLETE | 0 | 380c8d31: delegate_workflow confined orchestration tool |
+| 06-descriptor-resume | COMPLETE | 0 | dd4fa153: delegate_descriptor + cold resume |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

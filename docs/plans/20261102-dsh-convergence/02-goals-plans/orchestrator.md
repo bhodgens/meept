@@ -311,11 +311,11 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-tests | PENDING | 0 | gate — must validate before impl dispatch |
-| 01-goal-model | PENDING | 0 | substrate |
-| 02-model-goal-tools | PENDING | 0 | after 01 |
-| 03-round-driver | PENDING | 0 | after 01 + parent 01-delegation |
-| 04-plan-mode | PENDING | 0 | parallel with 01 |
+| 00T-tests | COMPLETE | 0 | gate tests landed RED, parked .staged (ec1445b2); activate (mv + manifest) at e2e integration |
+| 01-goal-model | COMPLETE | 0 | ccc764b6: goal autonomy model (MaxRounds/RoundsStarted/blocked/activation) |
+| 02-model-goal-tools | COMPLETE | 0 | e94e8497: goal_get/create/update tools + authority gate |
+| 03-round-driver | COMPLETE | 0 | ccc764b6: round-cap + auto-block folded into goal.go autonomy |
+| 04-plan-mode | COMPLETE | 0 | e94e8497: plan_mode.go present-for-review + ApprovePlan gate |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

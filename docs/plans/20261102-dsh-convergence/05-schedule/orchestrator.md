@@ -269,9 +269,9 @@ Single source of truth for subtree status; parent reads this.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-tests.md | PENDING | 0 | gate |
-| 01-timing-kinds.md | PENDING | 0 | gated on 00T |
-| 02-delivery-inbox.md | PENDING | 0 | gated on 00T |
+| 00T-tests.md | COMPLETE | 0 | gate tests landed RED, parked .staged (d1f1f70f); activate at e2e integration |
+| 01-timing-kinds.md | COMPLETE | 0 | a5f3b641 + cccb25c + d280e582: RFC5545 timing kinds (rrule/daily/weekly/at/every) + RPC + schedule_create |
+| 02-delivery-inbox.md | COMPLETE | 0 | cccb25c: receipts.go + jobs.go delivery inbox + in-flight recovery |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

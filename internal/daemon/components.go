@@ -371,6 +371,20 @@ type Components struct {
 	AgentRegistry *agent.AgentRegistry
 	Dispatcher    *agent.Dispatcher
 
+	// DelegateManager is the C1 async delegation seam (dsh-convergence leaf
+	// 01) constructed by wireDSHConvergence after the agent registry +
+	// dispatcher exist. It backs the subagent_send_message/interrupt/
+	// list_children + workflow tools. Nil when the wiring did not run (disabled
+	// boot). Distinct from the worker-pool AgentLoopManager above.
+	DelegateManager *agent.DelegateManager
+	// DelegateController is the builtin controller bound behind the delegate
+	// tool group (leaf 03). Nil when DelegateManager construction was skipped.
+	DelegateController *builtin.DelegateController
+	// PlanModeController is the per-session plan-mode toggle (leaf 04). It owns
+	// the /plan command + exit_plan_mode tool + plan:policy prompt injection.
+	// Nil when plan-mode wiring did not run.
+	PlanModeController *builtin.PlanModeController
+
 	// Shadow training
 	ShadowManager *shadow.Manager
 
@@ -5016,6 +5030,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			)
 		}
 	}
+
+	// dsh-convergence daemon integration (leaf seams): wire the goal /
+	// delegate / plan-mode tool providers and the plan-mode per-session
+	// controller NOW that the agent registry, dispatcher, ACP manager, and
+	// employee manager are all live. goal + delegate arrive through the
+	// toolprov seam gated by [tool_providers] (mirroring the scheduler
+	// registration at :4756); plan-mode is registered directly. All seams are
+	// typed-nil guarded inside wireDSHConvergence.
+	wireDSHConvergence(c, cfg, msgBus, logger)
 
 	// Voice sidecar ([voice] block, voice-sidecar leaf 14): the whole-
 	// daemon wiring - call manager, registry, dialer, talk loops,

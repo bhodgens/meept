@@ -52,7 +52,8 @@
       "skills-refresh-origin",
       "dynamic-tools",
       "hitl-notifications",
-      "turn-journal"
+      "turn-journal",
+      "delegate-seam"
     ],
     "internal/validator/": [
       "output-filters",
@@ -80,7 +81,8 @@
     "internal/skills/": [
       "skills-discovery",
       "continuity-regressions",
-      "skills-refresh-origin"
+      "skills-refresh-origin",
+      "tool-surface"
     ],
     "internal/tools/": [
       "memory-knowledge-assets",
@@ -91,7 +93,8 @@
       "tools-memory",
       "tools-tasks",
       "dynamic-tools",
-      "tools-web-ssrf"
+      "tools-web-ssrf",
+      "tool-surface"
     ],
     "internal/eval/": [
       "eval-judge",
@@ -208,12 +211,14 @@
     ],
     "internal/employee/": [
       "goal-loop",
-      "goal-completion"
+      "goal-completion",
+      "goals-plans"
     ],
     "internal/acp/": [
       "acp-wire",
       "acp-persona-route",
-      "hitl-notifications"
+      "hitl-notifications",
+      "delegate-seam"
     ],
     "internal/process/": [
       "acp-wire"
@@ -249,6 +254,9 @@
     "internal/cluster/": [
       "smoke",
       "agent-groups"
+    ],
+    "internal/code/lsp/": [
+      "tool-surface"
     ],
     "internal/code/": [
       "smoke"
@@ -399,7 +407,8 @@
     ],
     "internal/tools/builtin/": [
       "github-pr-ci",
-      "skills-refresh-origin"
+      "skills-refresh-origin",
+      "office-skills"
     ],
     "internal/intake/": [
       "github-intake"
@@ -494,6 +503,9 @@
     ],
     "e2e/suites/session-storage": [
       "session-storage"
+    ],
+    "config/skills/": [
+      "office-skills"
     ]
   },
   "suites": [
@@ -514,6 +526,57 @@
         "flagoff-04 flag-off legacy control: kill mid-turn -> the in-flight job re-runs live (executor counter advances); turnjournal.db never exists"
       ],
       "note": "leaf 04 hermetic acceptance gate of the turn-journal tree: true SIGKILL on the harness daemon handle + fresh boot over the SAME data dir (state-restart restart primitive); fake-LLM executor counter proves no re-invocation; read-only SQL over <DataDir>/turnjournal.db for row-shape assertions; serial 3-step pinned plan (sleep-8 STEP-B gives the deterministic mid-turn window). KNOWN GAPS observed and reported: boot RecoverStaleTasks force-fails the in-flight step before the reclaim re-runs it, so a resumed turn's task row may read failed while the WORK completes; the journal writer keys run_started/run_closed per step-job round, so a multi-round turn carries multiple close rows and OpenRuns() can miss the parked round (the queue reclaim is the working resume path in that shape)."
+    },
+    {
+      "name": "delegate-seam",
+      "dir": "e2e/suites/delegate-seam",
+      "status": "implemented",
+      "diff": "L",
+      "scenarios": [
+        "delegate-seam-01 async delegate_task spawn returns a child handle (child_id, running); the settlement arrives on agent.delegate.result (contract B1)",
+        "delegate-seam-02 subagent_send_message steers a running child; subagent_interrupt returns accepted:true and transitions to interrupted; subagent_list_children enumerates states (F3)",
+        "delegate-seam-03 workflow tool confined fan-out (goja, dsh-archetype) returns {kind:foreground, runId, agentsStarted, result}; cap trip is FAIL-CLOSE; Node APIs rejected (B5)",
+        "delegate-seam-04 descriptor cold resume: interrupted child resumes via DelegateManager.Resume and completes (B6)"
+      ],
+      "note": "01-delegation branch e2e gate (T1/T5/T6/T7): hermetic scratch daemon, asserts over live chat.submit + agent.delegate.result, never mocks. Fails RED until the daemon wiring (internal/daemon/components.go + dsh_wiring.go) and the delegate/plan-mode providers land concurrently."
+    },
+    {
+      "name": "goals-plans",
+      "dir": "e2e/suites/goals-plans",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "goals-plans-01 goal_get/goal_create/goal_update are registered; goal_create without direct human authority is refused at the tool boundary (C4b)",
+        "goals-plans-02 round driver: goal with max_rounds=2 advances autonomously then auto-blocks with code round-limit after zero human turns (C4c)",
+        "goals-plans-03 plan mode: /plan enters plan mode; exit_plan_mode presents Approve; approve lands via the existing plan gate and plan mode exits (C4d)"
+      ],
+      "note": "02-goals-plans branch e2e gate (G2/G3/G4): goal tools + round driver + plan mode through live RPC/CLI. Fails RED until the goal/delegate/plan-mode daemon wiring lands concurrently."
+    },
+    {
+      "name": "office-skills",
+      "dir": "e2e/suites/office-skills",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "office-skills-01 office_docx create->read round-trip returns the final path and the reopened doc has the requested heading/paragraph (C11.2)",
+        "office-skills-02 office_pptx create->read round-trip returns the path and the reopened deck has the slide title/body (C11.3)",
+        "office-skills-03 office_workbook create->read round-trip returns the path, sheet names, and typed cell values (C11.4)",
+        "office-skills-04 requires-tools gate: unregistered tool in a skill's requires-tools fires the exact contract message (C11.1)"
+      ],
+      "note": "06-office-skills branch e2e gate (T1-T4): asserts the tool behavior contract through the live daemon surface, never imports the concrete docx/pptx library. Requires the office_* tools registered + skills.validate_prerequisites wiring."
+    },
+    {
+      "name": "tool-surface",
+      "dir": "e2e/suites/tool-surface",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "tool-surface-01 declared-timeout tool surfaces TOOL_TIMEOUT through the live executor, never raw context.DeadlineExceeded (F9)",
+        "tool-surface-02 lsp_navigate goToDefinition against a real LSP server returns a location (F10)",
+        "tool-surface-03 a skill added under MEEPT_HOME/skills appears in skills.list WITHOUT a daemon restart (F11)",
+        "tool-surface-04 the skill catalog survives a daemon restart (durable, digest-equal) (F11)"
+      ],
+      "note": "04-tool-surface branch e2e gate (T5): timeout tool + real LSP navigate + skill hot-reload/durability through the live RPC surface."
     },
     {
       "name": "hitl-notifications",
