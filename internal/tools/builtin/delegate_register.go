@@ -72,13 +72,16 @@ type delegateProvider struct {
 // Name implements toolprov.Provider.
 func (p *delegateProvider) Name() string { return "delegate" }
 
-// Discover implements toolprov.Provider. All three control tools share the
-// same bound controller.
+// Discover implements toolprov.Provider. All three control tools plus the
+// workflow orchestration tool share the same bound controller.
 func (p *delegateProvider) Discover() []tools.Tool {
 	return []tools.Tool{
 		NewSubagentSendMessageTool(p.ctrl),
 		NewSubagentInterruptTool(p.ctrl),
 		NewSubagentListChildrenTool(p.ctrl),
+		// workflow: the confined, model-authored orchestration tool (contract
+		// C3). It fans out through the controller's C1 DelegateManager.
+		NewWorkflowTool(p.ctrl),
 	}
 }
 

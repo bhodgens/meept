@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/secrets"
@@ -44,6 +45,7 @@ func (t *stubSeamTool) Execute(_ context.Context, _ map[string]any) (any, error)
 
 func (t *stubSeamTool) IsReadOnly(map[string]any) bool        { return true }
 func (t *stubSeamTool) IsConcurrencySafe(map[string]any) bool { return true }
+func (t *stubSeamTool) TimeoutMs() time.Duration              { return 0 }
 
 // clearFactories resets the package-level factory map between tests and
 // restores it afterwards, so init-populated state cannot leak between

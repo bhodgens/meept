@@ -81,3 +81,89 @@ func TestSkillInvocation_ResolvedBodiesInOrder(t *testing.T) {
 		t.Errorf("block body missing explicit-invocation framing: %q", blocks[0].Body)
 	}
 }
+
+// TestSkillInvocation_DurableCatalogResolution (T4): the gesture resolves
+// names against the durable catalog / skill index via the LOADED-body lookup.
+// A skill present in the index (discovery) but never cache-loaded — i.e. one
+// that never had a fuzzy hit — is still directly invokable by /name. The
+// disable-model-invocation and unknown cases stay plain prose, decided on the
+// LOADED definition, not an unparsed index token. This exercises the real
+// *skills.LazySkillLoader (not a double), backed by on-disk SKILL.md files
+// exactly as the durable catalog pipeline produces them.
+func TestSkillInvocation_DurableCatalogResolution(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	reviewPath := createTestSkillFile(t, tmpDir, "review-code",
+		`---
+name: review-code
+description: Review code from the durable catalog
+---
+
+# Review Code
+
+DO THE REVIEW FROM CATALOG
+`)
+	privatePath := createTestSkillFile(t, tmpDir, "private-skill",
+		`---
+name: private-skill
+description: Internal-only skill
+disable-model-invocation: true
+---
+
+SECRET BODY
+`)
+
+	// The durable catalog: an index whose entries carry the load path from
+	// discovery. No skill has been cache-loaded yet.
+	idx := skills.NewSkillIndex()
+	idx.Index(&skills.SkillIndexEntry{Name: "review-code", Path: reviewPath})
+	idx.Index(&skills.SkillIndexEntry{Name: "private-skill", Path: privatePath})
+	loader := skills.NewLazySkillLoader(idx)
+
+	// T4 premise: not cached (never fuzzy-hit / never loaded), yet Load must
+	// still resolve the body from the catalog-backed index.
+	if loader.IsCached("review-code") {
+		t.Fatal("durable-catalog premis violated: review-code should start uncached")
+	}
+
+	// The gesture scan sees all three tokens; only review-code is invokable.
+	names := invokedSkillNames("use /review-code and /private-skill plus /nope")
+	if !reflect.DeepEqual(names, []string{"review-code", "private-skill", "nope"}) {
+		t.Fatalf("invokedSkillNames = %v, want [review-code private-skill nope]", names)
+	}
+
+	blocks := resolveSkillInvocationBlocks(context.Background(), loader, names)
+	if len(blocks) != 1 {
+		t.Fatalf("got %d blocks, want exactly 1 (only the user-invocable catalog skill)", len(blocks))
+	}
+	if blocks[0].Name != "review-code" {
+		t.Errorf("block name = %q, want review-code", blocks[0].Name)
+	}
+	if !strings.Contains(blocks[0].Body, "DO THE REVIEW FROM CATALOG") {
+		t.Errorf("block body missing the loaded skill body (durable-catalog lookup failed): %q", blocks[0].Body)
+	}
+	if !strings.Contains(blocks[0].Body, "Review code from the durable catalog") {
+		t.Errorf("block body missing the loaded description: %q", blocks[0].Body)
+	}
+	if !strings.Contains(blocks[0].Body, "user asked for this skill: review-code") {
+		t.Errorf("block body missing explicit-invocation provenance: %q", blocks[0].Body)
+	}
+
+	// T2 durable analog: the disable-model-invocation skill decoded from disk
+	// frontmatter stays prose — Load resolved it (and cached the body), the
+	// gate excluded the block. Its body must not leak into any injection.
+	if strings.Contains(blocks[0].Body, "SECRET BODY") {
+		t.Error("disable-model-invocation skill body leaked into a block")
+	}
+}
+
+// TestSkillInvocation_UnknownNameStaysProse ensures an /name with no indexed
+// skill (absent from the durable catalog) yields no block and no error,
+// leaving the token as plain prose in the user's message.
+func TestSkillInvocation_UnknownNameStaysProse(t *testing.T) {
+	loader := skills.NewLazySkillLoader(skills.NewSkillIndex()) // empty durable catalog
+	blocks := resolveSkillInvocationBlocks(context.Background(), loader, []string{"no-such-skill"})
+	if len(blocks) != 0 {
+		t.Fatalf("got %d blocks for an unknown name, want 0", len(blocks))
+	}
+}
