@@ -145,9 +145,22 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
 - `internal/voiceframe` is dependency-free (stdlib only): both sides
   share the codec and neither may drag the other's world in through it.
 - The child never imports telnyx code and never sees the Telnyx token.
-- The child reads its one-time start token from STDIN (never
-  argv/env); the supervised-spawn path preserves that stdin seam
-  (leaf 13/14). Keep any new spawn wrapper stdin-compatible.
+- The one-time start token is an ENFORCED authentication seam:
+  ChildProc.spawn() generates the per-spawn crypto/rand token, pipes it
+  to the child STDIN (never argv/env), and - with ChildProcConfig.TokenAuth
+  wired (internal/daemon/voice_wiring.go NewChildProc sets
+  `TokenAuth: textServer`) - arms it on the text server via
+  SetExpectedToken BEFORE the process exists; each spawn re-arms a fresh
+  token. The child writes that raw stdin token as a newline-terminated
+  FIRST line after dialing text.sock, before any C1 frame; the auth line
+  is NOT a C1 event (the frame protocol is unchanged). TextServer
+  authenticates each would-be child BEFORE claimChild (first line under a
+  5s deadline, subtle.ConstantTimeCompare; mismatch/timeout/EOF logs a
+  generic WARN - token material never logged - and closes without
+  claiming; a later correct dialer can still claim). No token armed =
+  legacy first-dial-wins (unit fixtures / hand-built dialers; e2e
+  fakechild proves the token like the real binary). Keep any new spawn
+  wrapper stdin-compatible and arm the gate on its TextServer.
 
 ## One live call per employee (C8)
 
@@ -203,10 +216,22 @@ store. Invariants a future agent must NOT break:
   setup arrives, and do not make open failure fatal (warn-and-continue
   on stub audio is the pinned posture, local.go:291-292).
 - RMS VAD only when Local==true: the local leg's barge-in trigger is
-  the playback-side RMS window (10 sustained chunks = 200 ms over
-  `voice.local.barge_in_rms`; internal/voicechild/pipeline.go:430-432).
-  RMS must NEVER run on phone legs - they keep the Tier A STT-partial
-  trigger. Never move the trigger to a leg-agnostic branch.
+  the INCOMING-audio RMS window - pumpAudioIn taps caller-mic PCM from
+  the .in socket while playback is live; 10 sustained chunk-lengths
+  (200 ms at L16/16k) of over-threshold energy (`voice.local.barge_in_rms`,
+  rmsBargeInCheck in internal/voicechild/pipeline.go) that CLEAR the
+  echo guard trip the latch. The outbound .out stream is only the echo
+  REFERENCE (playbackStream records each written chunk's energy): a trip
+  requires window-average energy > 130% of the last outbound chunk's
+  average, so speaker-through-mic echo never self-trips and the agent's
+  own loud TTS never interrupts itself (feeding the VAD outgoing PCM was
+  a pinned bug, fixed 615808e3). The trip shares the noteBargeIn latch
+  (one interrupt per barge-in, F-1 re-arm by the next say) and the
+  pendingInterrupt handshake keeps the C5 interrupt-before-prompt order
+  even though the RMS trip fires on the audio-pump goroutine; mic PCM
+  keeps flowing to STT during playback so the employee reforms from what
+  the caller said. RMS must NEVER run on phone legs - they keep the Tier
+  A STT-partial trigger. Never move the trigger to a leg-agnostic branch.
 - LocalSplice has NO reorder and NO transcode by contract:
   unix sockets preserve order (no reorder window), and the local leg
   negotiates L16 s16le@16000 only - any other chunk size is the named
