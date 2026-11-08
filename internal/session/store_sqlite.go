@@ -153,6 +153,13 @@ func (s *SQLiteStore) migrate() error {
 		return fmt.Errorf("failed to create projection cache table: %w", err)
 	}
 
+	// Additive child-descriptor table (01-delegation leaf 06 cold resume).
+	if _, err := s.db.Exec(childDescriptorSchema); err != nil {
+		return fmt.Errorf("failed to create child descriptor table: %w", err)
+	}
+	// Forward-compatible additive column on the child_descriptors table.
+	s.migrationAddColumn("ALTER TABLE child_descriptors ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''", "agent_id")
+
 	// Add description column if not present (migration for existing databases)
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN description TEXT DEFAULT ''", "description")
 

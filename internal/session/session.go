@@ -255,7 +255,11 @@ type MemoryStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	messages map[string][]Message // sessionID -> messages
-	logger   *slog.Logger
+
+	// childDescs holds durable child records (delegation cold-resume, leaf 06)
+	// for the in-memory (non-daemon / test) store.
+	childDescs map[string]ChildDescriptorRecord
+	logger     *slog.Logger
 
 	// lifecycleHook is the Contract 5 teardown notification hook. Access
 	// is guarded by mu and fire points collect under the lock, then invoke
@@ -270,9 +274,10 @@ func NewMemoryStore(logger *slog.Logger) *MemoryStore {
 		logger = slog.Default()
 	}
 	return &MemoryStore{
-		sessions: make(map[string]*Session),
-		messages: make(map[string][]Message),
-		logger:   logger,
+		sessions:   make(map[string]*Session),
+		messages:   make(map[string][]Message),
+		childDescs: make(map[string]ChildDescriptorRecord),
+		logger:     logger,
 	}
 }
 
@@ -1530,7 +1535,6 @@ func (h *Handler) SetProjectResolver(pm ProjectResolver) {
 	}
 	h.projects = pm
 }
-
 
 // WithSummarizer sets the summarizer for LLM-based description generation.
 func WithSummarizer(s *Summarizer) HandlerOption {

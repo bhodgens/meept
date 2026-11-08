@@ -186,4 +186,30 @@ type Store interface {
 	GetDesignatedSessionIDs() ([]string, error)
 	UpdateDesignation(sessionID string, status DesignationStatus, reason, priority string) error
 	ClearDesignation(sessionID string) error
+
+	// Child-descriptor persistence (01-delegation leaf 06 cold resume).
+	// A durable child descriptor lets an interrupted/idle delegated child be
+	// re-spawned from its record after a parent/daemon restart. The methods
+	// are additive and neutral (JSON blob + lifecycle fields); the agent
+	// layer maps its ChildRecord to and from this shape. Save upserts by
+	// child_id (never fails a completed child turn at the caller — treat
+	// errors as best-effort there).
+	SaveChildDescriptor(ctx context.Context, rec ChildDescriptorRecord) error
+	GetChildDescriptor(ctx context.Context, childID string) (ChildDescriptorRecord, error)
+	RemoveChildDescriptor(ctx context.Context, childID string) error
+}
+
+// ChildDescriptorRecord is the durable, store-neutral persistence shape for a
+// delegated child descriptor (01-delegation leaf 06). The agent layer owns the
+// child* descriptor semantics; the session store only persists the payload it
+// is handed, so it never imports internal/agent (which imports it). Errvar
+// sentinels for a missing child live in child_descriptor.go.
+type ChildDescriptorRecord struct {
+	ChildID         string
+	ParentSessionID string
+	AgentID         string
+	State           string
+	DescriptorJSON  []byte
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }

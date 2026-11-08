@@ -20,6 +20,7 @@ import (
 
 	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 )
 
@@ -64,13 +65,10 @@ type ChildDescriptor struct {
 	// populated by the same wiring seam leaf 06 ships.
 }
 
-// Validate reports whether the descriptor is well-formed and current.
-func (d ChildDescriptor) Validate() error {
-	if d.Version != 1 {
-		return fmt.Errorf("unsupported child descriptor version %d (expected 1)", d.Version)
-	}
-	return nil
-}
+// Validate reports whether the descriptor is well-formed and current. Full
+// implementation (version + mode) lives in delegate_descriptor.go; kept here as
+// a thin wrapper for symmetry with the struct it documents.
+func (d ChildDescriptor) Validate() error { return validateChildDescriptor(d) }
 
 // ChildRecord is the per-session registry entry for a delegated child.
 type ChildRecord struct {
@@ -165,6 +163,13 @@ type DelegateManager struct {
 	forkSeed          func(*Conversation) []llm.ChatMessage                     // B2
 	descriptorFactory func(ChildRecord) ChildDescriptor                         // B6
 	persist           func(ChildRecord) error                                   // B6
+
+	// store is the daemon-owned durable child-descriptor store (B6), set once
+	// via SetStore. When wired, settle() persists each child's descriptor here
+	// (best-effort, never failing the child turn) so an interrupted child can
+	// be cold-resumed after a parent/daemon restart. Optional: nil disables
+	// durable persistence (run-state only).
+	store session.Store
 }
 
 // NewDelegateManager constructs the manager. A nil registry disables child
@@ -208,6 +213,15 @@ func (m *DelegateManager) SetDescriptorFactory(f func(ChildRecord) ChildDescript
 // persistence a no-op.
 func (m *DelegateManager) SetPersist(f func(ChildRecord) error) {
 	m.persist = f
+}
+
+// SetStore installs the daemon-owned durable child-descriptor store (B6). When
+// set, every settled child's descriptor is persisted here (best-effort) and
+// DelegateManager.Resume can cold-resume an interrupted child after a
+// parent/daemon restart. nil disables durable persistence. It never replaces
+// the SetPersist hook — if both are set, both run (store first, then hook).
+func (m *DelegateManager) SetStore(store session.Store) {
+	m.store = store
 }
 
 // SetACPManager injects the acp.Manager used for Mode=="acp" delegation
@@ -594,8 +608,14 @@ func (m *DelegateManager) publishResult(rec ChildRecord) {
 
 // persistRecord runs the B6 persistence hook on completion. Failure is
 // best-effort and never fails the child lifecycle (there is no logger on the
-// manager to surface the error); leaf 06 hardens this with its store wiring.
+// manager to surface the error). When a durable store is wired (SetStore), the
+// child's descriptor is persisted there FIRST; the SetPersist hook (if any)
+// runs afterwards. A failed persist never fails the completed child turn
+// (root AGENTS.md invariants).
 func (m *DelegateManager) persistRecord(rec ChildRecord) {
+	if m.store != nil {
+		_ = m.saveDescriptorToStore(rec)
+	}
 	if m.persist == nil {
 		return
 	}
