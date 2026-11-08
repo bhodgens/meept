@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -411,6 +412,32 @@ func patchWAVDataLen(f io.WriteCloser) {
 // runVoiceLocalLive wires the ffmpeg mic + speaker sink over the pair
 // sockets (T5). darwin-only live capture: other GOOS refuse with the
 // named clientaudio error pointing at --in.
+
+// ErrMicNoAudio names the live-capture death where the mic pipeline died
+// before producing a single byte (broken ffmpeg install, denied mic
+// permission, wrong device). The old behavior SILENTLY ended the call -
+// the operator saw only "call ended." - so this failure condition is
+// pinned by TestClassifyMicDeath: every zero-byte mic death MUST surface
+// as this error, never as a clean return.
+var ErrMicNoAudio = errors.New("live mic capture produced no audio (is ffmpeg working? try 'brew reinstall ffmpeg'; check mic permission for the terminal)")
+
+// classifyMicDeath maps one finished mic stream onto the live-mode exit:
+// ErrMicNoAudio when the capture died before producing audio (wrap it
+// around the underlying read error so the cause is never lost), the read
+// error itself when real audio flowed then failed, and nil for a clean
+// EOF after audio (normal hangup path). micErr nil + noAudio means the
+// capture ended cleanly without ever producing audio - still a failure:
+// a live mic that produces nothing IS the failure condition.
+func classifyMicDeath(micErr error, micBytes int64) error {
+	if micBytes > 0 {
+		return micErr
+	}
+	if micErr == nil {
+		return fmt.Errorf("%w: capture ended cleanly with zero bytes", ErrMicNoAudio)
+	}
+	return fmt.Errorf("%w: %v", ErrMicNoAudio, micErr)
+}
+
 func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 	cap, err := voice.NewRawMicCapture("", "")
 	if err != nil {
@@ -464,25 +491,12 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 			}
 		}
 	}()
+	// First finished side wins; the mic side runs through
+	// classifyMicDeath so a zero-byte capture death can never pass as a
+	// clean hangup again.
 	select {
 	case err := <-done:
-		// The mic side dying with ZERO bytes captured inside the call is
-		// not a hangup - it is a broken capture pipeline (broken ffmpeg
-		// install, denied mic permission, wrong device). Name it; the
-		// old behavior silently ended the call and the operator saw only
-		// "call ended."
-		if micBytes == 0 && len(done) == 0 {
-			return fmt.Errorf("live mic capture produced no audio (is ffmpeg working? try 'brew reinstall ffmpeg'; check mic permission for the terminal) - mic err: %v", err)
-		}
-		if err != nil {
-			// A mic EOF after the file-less capture died is normal on
-			// ctrl-c; speaker errors matter.
-			if strings.Contains(err.Error(), "mic") {
-				return nil
-			}
-			return err
-		}
-		return nil
+		return classifyMicDeath(err, micBytes)
 	case <-ctx.Done():
 		return nil
 	}
