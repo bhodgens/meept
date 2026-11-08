@@ -105,7 +105,26 @@ type LocalDeps struct {
 	// Nil falls back to the empty profile (vendor defaults apply
 	// child-side).
 	Profile ProfileResolver
-	Logger  *slog.Logger
+	// Hold is the daemon-glue goal-hold seam (AcquireCallHold). The leg
+	// invokes it once per successfully-opened call so the release
+	// fan-out's ReleaseHook (internal/daemon/voice_employee.go) sees the
+	// ccid in heldCalls and runs Binding.OnCallEnd to mark the calls.db
+	// row ended; without it the row stays 'live' forever. Nil degrades
+	// to no hold (the row then never reaches 'ended'), mirroring the
+	// "do not claim ended-state behavior" posture.
+	Hold func(ccid, employeeID string)
+	Logger *slog.Logger
+}
+
+// holdCall acquires the goal hold for a live call when the seam is
+// wired. Nil seam is a no-op (degraded stack). Called once per
+// successfully-opened call, before any teardown path can run so the
+// release fan-out always observes the hold.
+func (l *LocalLeg) holdCall(ccid, employeeID string) {
+	if l.deps.Hold == nil {
+		return
+	}
+	l.deps.Hold(ccid, employeeID)
 }
 
 // LocalCall is one live local call's handle (CL5 verbatim): the ccid,
@@ -277,6 +296,15 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 	l.mu.Lock()
 	l.calls[ccid] = st
 	l.mu.Unlock()
+
+	// Acquire the goal hold ONCE the call is live (gap closure): the
+	// release fan-out's ReleaseHook gates Binding.OnCallEnd on this
+	// heldCalls entry, so the acquire must land before any teardown
+	// path can run (splice goroutine below, End, or a later error). The
+	// per-employee serialization mutex is free here - the registry's
+	// one-live-call-per-employee rule rejected a concurrent open for
+	// this employee before this point.
+	l.holdCall(ccid, employeeID)
 
 	// ChildProc note (releaseCall's sink 1 mirror): the child's idle
 	// timer counts this call from now; NoteCallEnd fires at teardown.

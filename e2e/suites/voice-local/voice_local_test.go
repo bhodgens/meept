@@ -840,7 +840,8 @@ func assertCallRow(t *testing.T, s *harness.Stack, ccid, employee, target, userT
 			sessionID = rows[0].sessionID
 			transcript = rows[0].transcript
 			if strings.Contains(transcript, userText) &&
-				strings.Contains(transcript, assistantText) {
+				strings.Contains(transcript, assistantText) &&
+				state == "ended" {
 				settled = true
 				break
 			}
@@ -856,14 +857,13 @@ func assertCallRow(t *testing.T, s *harness.Stack, ccid, employee, target, userT
 	if number != target {
 		t.Errorf("call row number = %q, want %q (NormalizeE164 must never mangle local targets)", number, target)
 	}
+	// HARD ended-state assertion (gap closed): the local call row MUST
+	// transition to 'ended' through ReleaseHook -> OnCallEnd, which the
+	// goal hold (LocalLeg.Open -> AcquireCallHold) now feeds. The loop
+	// above also gates on ended, so reaching this line means the row
+	// settled only once it ended. A row stuck at 'live' fails here.
 	if state != "ended" {
-		// KNOWN CROSS-LEAF GAP (not pinned as a failure): the call row's
-		// ended transition rides ReleaseHook -> OnCallEnd, whose heldCalls
-		// gate never fills in production (AcquireCallHold has no
-		// production caller yet - both legs). The row, direction, session
-		// binding, and transcripts are the landed behavior this suite
-		// pins; the ended-state transition is the wiring owner's gap.
-		t.Logf("call row state = %q (OnCallEnd release gap: AcquireCallHold has no production caller)", state)
+		t.Errorf("call row state = %q, want \"ended\" (local call must reach the ended state via ReleaseHook -> OnCallEnd; heldCalls filled by LocalLeg.Open -> AcquireCallHold)", state)
 	}
 	if sessionID == "" {
 		t.Errorf("call row session_id is empty; OnCallStart never bound the session")

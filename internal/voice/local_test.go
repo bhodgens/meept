@@ -98,6 +98,26 @@ func (f *legFakeChild) endsSnap() []string {
 	return append([]string(nil), f.ends...)
 }
 
+// holdRecorder records goal-hold acquisitions through the LocalDeps.Hold
+// seam (gap closure: Open must acquire the hold so the release fan-out's
+// ReleaseHook carries the call row to 'ended').
+type holdRecorder struct {
+	mu  sync.Mutex
+	got []string
+}
+
+func (r *holdRecorder) add(ccid, employee string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.got = append(r.got, ccid+"|"+employee)
+}
+
+func (r *holdRecorder) acquired() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.got...)
+}
+
 // legFixture wires a LocalLeg over a fake registry, a real ChildProc seam
 // recorder, a real Manager (NIL carrier: the CL5 compile-pin - local.go
 // must never touch a carrier), a real TextServer with a fake child
@@ -111,6 +131,7 @@ type legFixture struct {
 	audioDir    string
 	briefMu     sync.Mutex
 	briefs      []string
+	hold        *holdRecorder
 }
 
 func newLegFixture(t *testing.T) *legFixture {
@@ -168,6 +189,7 @@ func newLegFixture(t *testing.T) *legFixture {
 		child:       child,
 		childReader: bufio.NewReader(conn),
 		audioDir:    audioDir,
+		hold:        &holdRecorder{},
 	}
 	manager.SetReleaseHook(func(ccid string, _ Outcome) {
 		child.NoteCallEnd(ccid)
@@ -188,7 +210,11 @@ func newLegFixture(t *testing.T) *legFixture {
 			Manager:         manager, // nil carrier: CL5 nil-carrier seam
 			Binding:         nil,     // binding rides the daemon glue; nil tolerated
 			DayBriefBuilder: briefBuilder,
-			Logger:          localLegDiscard(),
+			Profile:         nil,
+			// The goal-hold seam: records acquisitions (the daemon
+			// wires AcquireCallHold here).
+			Hold:   f.hold.add,
+			Logger: localLegDiscard(),
 		})
 	if err != nil {
 		t.Fatalf("NewLocalLeg: %v", err)
@@ -347,6 +373,42 @@ func TestLocalLegOpen(t *testing.T) {
 
 	if err := f.leg.End(call.CallID, "test done"); err != nil {
 		t.Errorf("End: %v", err)
+	}
+}
+
+// T1b (gap closure): Open acquires the goal hold once, keyed by the
+// call's ccid and employee. The release fan-out's ReleaseHook gates its
+// OnCallEnd on this heldCalls entry, so without the acquire the calls.db
+// row never reaches 'ended'.
+func TestLocalLegOpenAcquiresHold(t *testing.T) {
+	f := newLegFixture(t)
+	call, err := f.leg.Open(context.Background(), "emp-hold", "holdbox")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	got := f.hold.acquired()
+	if len(got) != 1 {
+		t.Fatalf("hold acquired %d times; want exactly one: %v", len(got), got)
+	}
+	if want := call.CallID + "|emp-hold"; got[0] != want {
+		t.Fatalf("hold = %q, want %q (ccid|employee)", got[0], want)
+	}
+
+	if err := f.leg.End(call.CallID, "test done"); err != nil {
+		t.Errorf("End: %v", err)
+	}
+}
+
+// Refused opens must not acquire a hold (no ccid to hold): the seam is
+// only reached for a successfully-registered live call.
+func TestLocalLegNoHoldOnRefusedOpen(t *testing.T) {
+	f := newLegFixture(t)
+	if _, err := f.leg.Open(context.Background(), "", "holdbox"); err == nil {
+		t.Fatal("Open(empty employee) must refuse")
+	}
+	if got := f.hold.acquired(); len(got) != 0 {
+		t.Fatalf("refused open acquired holds: %v", got)
 	}
 }
 

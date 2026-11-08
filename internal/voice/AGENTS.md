@@ -224,14 +224,19 @@ store. Invariants a future agent must NOT break:
   idempotent nil; a foreign (non-`local-`-shaped) id is
   ErrUnknownLocalCall. Keep the prefix shape test honest - it is what
   distinguishes those two.
+- Goal-hold feeding (gap closed): the call row's ended-state transition
+  rides `ReleaseHook -> heldCalls`. The ONLY production caller of
+  `AcquireCallHold` (internal/daemon/voice_employee.go:264) is now the
+  local leg: `LocalLeg.Open` invokes the injected `LocalDeps.Hold` seam
+  (wired to AcquireCallHold in internal/daemon/voice_wiring.go) once the
+  call is live, so the release fan-out's ReleaseHook sees the ccid and
+  runs `Binding.OnCallEnd` -> CallStore.End to mark the row 'ended'.
+  This covers BOTH local openers (the voice.local.* RPC seam and the
+  voice_call tool's SetVoiceLocalFunc). Keep the Hold seam optional
+  (nil degrades to no ended-state), the same posture as before.
 - RPC stays seam-based: `internal/rpc/voice_local.go` takes
   `VoiceLocalSeams` func fields and NEVER imports internal/voice (the
   daemon adapts in internal/daemon/voice_local_rpc.go). No audio ever
   rides RPC - clients dial the C2 pair paths directly (internal/rpc/
   voice_local.go:23-24).
-- Known product gap (do not paper over): the call row's ended-state
-  transition rides `ReleaseHook -> heldCalls`, whose only writer
-  `AcquireCallHold` (internal/daemon/voice_employee.go:264) has no
-  production caller - OnCallEnd never marks rows ended on EITHER leg.
-  State the gap in docs; do not claim ended-state behavior.
 

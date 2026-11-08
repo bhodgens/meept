@@ -374,6 +374,15 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			Profile: func(employeeID string) voice.Profile {
 				return voice.ResolveProfile(cfg, employeeID, "", voice.LegLocal)
 			},
+			// Goal-hold seam (AcquireCallHold gap closure): every opened
+			// local call acquires the per-employee hold so the release
+			// fan-out's ReleaseHook sees it in heldCalls and runs
+			// Binding.OnCallEnd to mark the calls.db row 'ended'. The
+			// release itself rides ReleaseHook -> ReleaseForCall at teardown;
+			// this only acquires.
+			Hold: func(ccid, emp string) {
+				employee.AcquireCallHold(ccid, emp)
+			},
 			Logger: vlog.With("sub", "local-leg"),
 		})
 		if lerr != nil {
