@@ -118,8 +118,8 @@ func TestGateCapture02a_DecisionGateDenyRecordsOnHumanResolve(t *testing.T) {
 	if rec.Approver != "peercred:pid=100,uid=501" {
 		t.Errorf("approver = %q", rec.Approver)
 	}
-	if rec.ID == "" || rec.Ts.IsZero() {
-		t.Error("store must mint ID and Ts")
+	if rec.ID == "" || rec.TS.IsZero() {
+		t.Error("store must mint ID and TS")
 	}
 }
 

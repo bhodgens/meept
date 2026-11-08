@@ -309,6 +309,15 @@ func doVoiceUpgrade(t *testing.T, v *VoiceRoutes, path string, headers http.Head
 
 // --- T3: start frame ---
 
+// closeDialResp closes the handshake response from dialMediaWS. A coder/websocket
+// 101 upgrade response carries a nil Body per net/http (a handshake response has
+// no body to drain), so nil must be guarded before Close.
+func closeDialResp(resp *http.Response) {
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+}
+
 func TestVoiceStartFrameSkipAndParse(t *testing.T) {
 	v, _, runner, _, signMedia := enabledRoutes(t)
 
@@ -327,9 +336,7 @@ func TestVoiceStartFrameSkipAndParse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial media ws: %v (resp %v)", err, resp)
 	}
-	if resp != nil {
-		defer resp.Body.Close()
-	}
+	closeDialResp(resp)
 	defer conn.Close(websocketStatusNormal, "")
 
 	// connected frame first (must be skipped), then the start frame.
@@ -365,9 +372,7 @@ func TestVoiceStartFrameL16NoTranscode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	if resp != nil {
-		defer resp.Body.Close()
-	}
+	closeDialResp(resp)
 	defer conn.Close(websocketStatusNormal, "")
 	mustWriteWS(t, conn, []byte(`{"event":"start","start":{"call_control_id":"cc88","media_format":{"encoding":"L16","sample_rate":16000}}}`))
 	deadline := time.Now().Add(3 * time.Second)
@@ -398,9 +403,7 @@ func TestVoiceMediaHandoffIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	if resp != nil {
-		defer resp.Body.Close()
-	}
+	closeDialResp(resp)
 	defer conn.Close(websocketStatusNormal, "")
 	start := []byte(`{"event":"start","start":{"call_control_id":"cc9","media_format":{"encoding":"L16","sample_rate":16000}}}`)
 	mustWriteWS(t, conn, start)
@@ -676,9 +679,7 @@ func TestVoiceDTMFCountedNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	if resp != nil {
-		defer resp.Body.Close()
-	}
+	closeDialResp(resp)
 	defer conn.Close(websocketStatusNormal, "")
 
 	mustWriteWS(t, conn, []byte(`{"event":"connected"}`))
@@ -798,9 +799,7 @@ func TestVoiceStartFrameCarriesWireCodec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	if resp != nil {
-		defer resp.Body.Close()
-	}
+	closeDialResp(resp)
 	defer conn.Close(websocketStatusNormal, "")
 	mustWriteWS(t, conn, []byte(`{"event":"connected"}`))
 	mustWriteWS(t, conn, []byte(`{"event":"start","start":{"call_control_id":"cc-h2","media_format":{"encoding":"PCMU","sample_rate":8000}}}`))
@@ -835,9 +834,7 @@ func TestVoiceStartFrameL16EmptyTranscodeKeepsCodecFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	if resp != nil {
-		defer resp.Body.Close()
-	}
+	closeDialResp(resp)
 	defer conn.Close(websocketStatusNormal, "")
 	mustWriteWS(t, conn, []byte(`{"event":"start","start":{"call_control_id":"cc-h2b","media_format":{"encoding":"L16","sample_rate":16000}}}`))
 

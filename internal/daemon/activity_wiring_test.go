@@ -110,6 +110,14 @@ func TestActivityWiring_AllNilHandlesNeverPanics(t *testing.T) {
 	if c.ActivityAggregator == nil || c.ActivityRing == nil {
 		t.Fatal("wiring with nil handles must still construct aggregator + ring")
 	}
+	// managerBacked marks the methods whose handler requires a live
+	// EmployeeManager: with the handle nil they must return a clean
+	// RPC error, never panic and never succeed.
+	managerBacked := map[string]bool{
+		"activity.overview": true,
+		"activity.findings": true,
+		"agents.review":     true,
+	}
 	cases := []struct {
 		method string
 		params string
@@ -122,9 +130,19 @@ func TestActivityWiring_AllNilHandlesNeverPanics(t *testing.T) {
 	for _, tc := range cases {
 		// activity.query with a live-but-empty aggregator returns an
 		// empty result, NOT an error; the manager-backed methods must
-		// error cleanly. Either way: no panic is the contract.
-		if err := callWiring(t, srv, tc.method, tc.params); err != nil {
-			t.Errorf("%s: %v", tc.method, err)
+		// error cleanly (a nil EmployeeManager is a configuration
+		// error, never a panic and never a silent success).
+		err := callWiring(t, srv, tc.method, tc.params)
+		if !managerBacked[tc.method] {
+			if err != nil {
+				t.Errorf("%s: %v", tc.method, err)
+			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("%s: nil manager must produce a clean RPC error, got nil", tc.method)
+		} else if err.Error() == "" {
+			t.Errorf("%s: RPC error must be non-empty", tc.method)
 		}
 	}
 	if err := callWiring(t, srv, "activity.recent", `{}`); err != nil {
