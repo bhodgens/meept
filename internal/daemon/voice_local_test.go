@@ -126,3 +126,97 @@ func TestWireVoiceLocalLegBrief(t *testing.T) {
 		}
 	}
 }
+
+// TestWireVoiceLocalLegArmsWithoutTelnyxKey pins the phone-secret-gate
+// bughunt: with voice.enabled + voice.local.enabled but NO broker-resolvable
+// telnyx_api_key (the local-leg-only install: nil broker, or a broker error),
+// the local leg must STILL arm (w.Local non-nil, the voice.local RPC seam
+// routes an open) while the phone/telnyx seam stays nil. This is the
+// local-leg invariant in internal/voice/AGENTS.md (local leg never imports
+// telnyx or touches the broker key). Before the fix, WireVoice returned
+// nil,nil here, disabling BOTH legs.
+func TestWireVoiceLocalLegArmsWithoutTelnyxKey(t *testing.T) {
+	t.Setenv("MEEPT_HOME", shortMeeptHomeForTest(t))
+	deps := wireVoiceTestDeps(t, "")
+	deps.Config.Voice.Local = config.LocalConfig{Enabled: true, Name: "notoken"}
+	deps.Broker = nil // broker-less install: telnyx_api_key cannot resolve
+
+	w, err := WireVoice(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("WireVoice: %v", err)
+	}
+	if w == nil {
+		t.Fatal("local-enabled + broker-less install must NOT yield nil wiring (the phone-secret gate must not disable the local leg)")
+	}
+	defer w.Employee.Close()
+
+	if w.Local == nil {
+		t.Fatal("local leg failed to arm without a telnyx_api_key; voice.local.open would refuse with ErrVoiceLocalDisabled")
+	}
+	if w.tel != nil {
+		t.Fatal("phone/telnyx seam must stay nil without a telnyx_api_key")
+	}
+	if w.Dialer != nil {
+		t.Fatal("phone dialer must be nil without a telnyx_api_key")
+	}
+	if w.Routes != nil {
+		t.Fatal("phone routes must be nil without a telnyx_api_key")
+	}
+
+	// voice.local.open routes normally (not the disabled refusal): the RPC
+	// seam adapts a live leg, so the handler's open seam is non-empty.
+	seams := voiceLocalSeams(w, nil, testLogger(t))
+	if seams.Open == nil {
+		t.Fatal("voice.local.open seam unwired without a telnyx_key; opens would refuse with ErrVoiceLocalDisabled")
+	}
+	if seams.End == nil || seams.Status == nil {
+		t.Fatal("voice.local.end/.status seams unwired without a telnyx_api_key")
+	}
+}
+
+// TestWireVoiceDisabledWhenNoTokenAndNoLocal pins the fail-closed bound of
+// the same bughunt fix: when BOTH the phone token is unresolvable AND the
+// local leg is not enabled, WireVoice must STILL return nil,nil (the fully
+// disabled boot, byte-identical to the pre-fix posture) - the partial
+// local-only wiring exists ONLY to serve a live local leg.
+func TestWireVoiceDisabledWhenNoTokenAndNoLocal(t *testing.T) {
+	t.Setenv("MEEPT_HOME", shortMeeptHomeForTest(t))
+	deps := wireVoiceTestDeps(t, "")
+	deps.Config.Voice.Local = config.LocalConfig{Enabled: false}
+	deps.Broker = nil
+
+	w, err := WireVoice(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("WireVoice: %v", err)
+	}
+	if w != nil {
+		t.Fatal("no phone token + local disabled must be the fully-disabled boot (nil wiring); got a partial wiring")
+	}
+}
+
+// TestWireVoiceLocalDisabledRefusalPreserved pins the disabled-leg named
+// error contract: when voice.local.enabled is false (token present - the
+// normal phone boot), the local RPC seams must be nil, so the handler keeps
+// refusing opens with ErrVoiceLocalDisabled.
+func TestWireVoiceLocalDisabledRefusalPreserved(t *testing.T) {
+	t.Setenv("MEEPT_HOME", shortMeeptHomeForTest(t))
+	deps := wireVoiceTestDeps(t, "")
+	deps.Config.Voice.Local = config.LocalConfig{Enabled: false}
+
+	w, err := WireVoice(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("WireVoice: %v", err)
+	}
+	if w == nil {
+		t.Fatal("precondition: phone-token present must wire; want non-nil wiring")
+	}
+	defer w.Employee.Close()
+	if w.Local != nil {
+		t.Fatal("local leg constructed with voice.local.enabled=false; want nil (ErrVoiceLocalDisabled must still fire on opens)")
+	}
+	seams := voiceLocalSeams(w, nil, testLogger(t))
+	if seams.Open != nil {
+		t.Fatal("voice.local.open seam must be nil when the local leg is disabled, so ErrVoiceLocalDisabled keeps firing")
+	}
+}
+

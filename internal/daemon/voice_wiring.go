@@ -170,42 +170,57 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	}
 	vlog := logger.With("component", "voice")
 
-	// -- 1. Telnyx client: Broker.Value resolves the API token in-process
-	// ONLY (audit-secrets-value-callers allowlist row); it reaches the
-	// client constructor and nothing else - never a log line, env entry,
-	// or child process. A missing broker/secret DEGRADES to voice-disabled
-	// with a loud WARN (a scratch boot or a broker-less install must still
-	// boot; the dial-time gates and the route-level fail-closed posture
-	// keep every call path refused without credentials), never a daemon
-	// boot failure - mirroring the wireSlackChannel optional-channel shape.
-	telnyxToken := ""
+	// -- 1. Telnyx client (PHONE leg). Broker.Value resolves the API token
+	// in-process ONLY (audit-secrets-value-callers allowlist row); it reaches
+	// the client constructor and nothing else - never a log line, env entry,
+	// or child process. A missing broker/secret DEGRADES the PHONE leg to
+	// disabled (nil carrier client; every phone call path fails closed at
+	// dial/answer time) - scratch boots and broker-less installs still boot,
+	// mirroring the wireSlackChannel optional-channel shape. It does NOT
+	// disable the LOCAL leg: the local leg never imports telnyx or touches
+	// the broker key (internal/voice/AGENTS.md invariant), so it arms
+	// independently of the phone secret. Only when BOTH the phone token is
+	// unresolvable AND voice.local.enabled=false is the whole block disabled
+	// (the fully-disabled boot, unchanged posture).
+	var tel *telnyx.Client
 	if deps.Broker != nil {
 		token, err := deps.Broker.Value("telnyx_api_key")
 		if err != nil {
-			vlog.Warn("voice wiring degraded to disabled: secrets broker error", "err", err)
-			return nil, nil
+			vlog.Warn("voice wiring: telnyx_api_key unresolvable (secrets broker error); phone leg disabled, local leg unaffected",
+				"err", err)
+		} else {
+			tel = telnyx.NewClient(telnyxBaseURL(), token)
 		}
-		telnyxToken = token
 	} else {
-		vlog.Warn("voice wiring degraded to disabled: no secrets broker configured; " +
-			"telnyx_api_key unresolvable (declare it under [secrets.sources])")
+		vlog.Warn("voice wiring: no secrets broker configured; telnyx_api_key unresolvable " +
+			"(phone leg disabled, local leg unaffected; declare it under [secrets.sources] for phone calls)")
+	}
+	phoneEnabled := tel != nil
+	if !phoneEnabled && !cfg.Local.Enabled {
+		vlog.Warn("voice wiring degraded to disabled: no telnyx_api_key and voice.local.enabled=false; no voice leg can arm")
 		return nil, nil
 	}
-	tel := telnyx.NewClient(telnyxBaseURL(), telnyxToken)
 
-	// -- 2. Signature verifiers (leaf 02): mandatory; an undecodable
-	// public key fails the boot.
-	pubKey, err := decodeTelnyxPublicKey(cfg.TelnyxPublicKey)
-	if err != nil {
-		return nil, err
-	}
-	verify := commhttp.VerifyFuncs{
-		Webhook: func(body []byte, headers http.Header) error {
-			return telnyx.VerifyWebhookSignature(body, headers, pubKey)
-		},
-		Media: func(headers http.Header, streamURL string) error {
-			return telnyx.VerifyMediaSocket(headers, streamURL, pubKey)
-		},
+
+	// -- 2. Signature verifiers (leaf 02): mandatory for the PHONE routes;
+	// an undecodable public key fails the boot. Only the phone leg needs
+	// them (the local leg rides C2 audio pairs over SocketDir, never Telnyx
+	// HTTP), so a local-only install skips this - it must not REQUIRE a
+	// voice.telnyx_public_key.
+	var verify commhttp.VerifyFuncs
+	if phoneEnabled {
+		pubKey, err := decodeTelnyxPublicKey(cfg.TelnyxPublicKey)
+		if err != nil {
+			return nil, err
+		}
+		verify = commhttp.VerifyFuncs{
+			Webhook: func(body []byte, headers http.Header) error {
+				return telnyx.VerifyWebhookSignature(body, headers, pubKey)
+			},
+			Media: func(headers http.Header, streamURL string) error {
+				return telnyx.VerifyMediaSocket(headers, streamURL, pubKey)
+			},
+		}
 	}
 
 	// -- 3. C1 text server (shared by every call). Started at Start;
@@ -305,19 +320,25 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		supervisor = voice.NewSupervisor(voice.SupervisorConfig{Enabled: false}, nil, vlog.With("sub", "supervisor"))
 	}
 
-	// -- 7. Dialer (C9) with the audit adapter.
-	var audit voice.AuditWriter
-	if deps.Audit != nil {
-		audit = auditWriterAdapter{store: deps.Audit}
+	// -- 7. Dialer (C9) with the audit adapter. Phone-only: nil without a
+	// telnyx key, so the voice_call tool refuses outbound dials (fail
+	// closed) and the phone side stays visibly disabled while the local
+	// leg lives.
+	var dialer *voice.Dialer
+	if phoneEnabled {
+		var audit voice.AuditWriter
+		if deps.Audit != nil {
+			audit = auditWriterAdapter{store: deps.Audit}
+		}
+		dialer = voice.NewDialer(voice.DialConfig{
+			Enabled:         true,
+			AllowedNumbers:  cfg.AllowedNumbers,
+			PublicStreamURL: cfg.PublicStreamURL,
+			ConnectionID:    cfg.ConnectionID,
+			FromNumber:      cfg.FromNumber,
+			TimeoutSecs:     cfg.TimeoutSecs,
+		}, tel, manager, registry, deps.Effects, audit, vlog.With("sub", "dialer"))
 	}
-	dialer := voice.NewDialer(voice.DialConfig{
-		Enabled:         true,
-		AllowedNumbers:  cfg.AllowedNumbers,
-		PublicStreamURL: cfg.PublicStreamURL,
-		ConnectionID:    cfg.ConnectionID,
-		FromNumber:      cfg.FromNumber,
-		TimeoutSecs:     cfg.TimeoutSecs,
-	}, tel, manager, registry, deps.Effects, audit, vlog.With("sub", "dialer"))
 
 	w := &VoiceWiring{
 		Manager:        manager,
@@ -328,7 +349,6 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		TextServer:     textServer,
 		Employee:       employee,
 		supervisor:     supervisor,
-		tel:            tel,
 		loops:          make(map[string]*voice.TalkLoop),
 		loopCancels:    make(map[string]context.CancelFunc),
 		bus:            deps.Bus,
@@ -342,6 +362,14 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			TrustXForwardedFor: deps.Config.Transport.HTTP.TrustXForwardedFor,
 			Logger:             vlog.With("sub", "voice-plain"),
 		},
+	}
+	// The phone seam is an interface field; assigning a nil *Client here
+	// would leave a non-nil interface wrapping a nil pointer (typed-nil
+	// trap). Set it only when the phone leg actually armed so the
+	// nil-carrier manager + nil-tel guards read the truth (phone leg
+	// disabled) in the local-only boot.
+	if phoneEnabled {
+		w.tel = tel
 	}
 
 	// -- 7b. LocalLeg (local-leg plan CL5/leaf 07): constructed when
@@ -414,18 +442,24 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	textServer.SetHandler(w.routeFrame)
 
 	// -- 10. HTTP routes (leaf 10) with the splice runner closure.
-	runner := w.spliceRunner()
-	routes, err := commhttp.NewVoiceRoutes(manager, verify, commhttp.VoiceRoutesConfig{
-		Enabled:      true,
-		SpliceRunner: runner,
-	}, vlog.With("sub", "routes"))
-	if err != nil {
-		if closeErr := employee.Close(); closeErr != nil {
-			w.logger.Debug("voice wiring: employee close", "err", closeErr)
+	// Phone-only: without a telnyx key the Telnyx webhook/media endpoints
+	// stay unserved, so no inbound phone call can ever reach the manager
+	// (the phone leg stays fully disabled); the local leg needs no HTTP
+	// route (it rides C2 audio pairs over SocketDir).
+	if phoneEnabled {
+		runner := w.spliceRunner()
+		routes, err := commhttp.NewVoiceRoutes(manager, verify, commhttp.VoiceRoutesConfig{
+			Enabled:      true,
+			SpliceRunner: runner,
+		}, vlog.With("sub", "routes"))
+		if err != nil {
+			if closeErr := employee.Close(); closeErr != nil {
+				w.logger.Debug("voice wiring: employee close", "err", closeErr)
+			}
+			return nil, fmt.Errorf("voice wiring: routes: %w", err)
 		}
-		return nil, fmt.Errorf("voice wiring: routes: %w", err)
+		w.Routes = routes
 	}
-	w.Routes = routes
 
 	return w, nil
 }
@@ -602,10 +636,17 @@ func (w *VoiceWiring) loopContext(string) context.Context {
 // over (max duration, silence, child end). The manager owns idempotent
 // teardown; a plain hangup on a tracked id releases everything.
 func (w *VoiceWiring) managerHangup(ccid, reason string) {
-	if err := w.tel.HangupCall(context.Background(), ccid); err != nil {
-		// Best-effort carrier hangup; the manager already owns teardown
-		// state. A failed POST leaves the leg to Telnyx's own timeout.
-		w.logger.Debug("voice wiring: carrier hangup", "ccid", ccid, "err", err)
+	// The carrier POST is best-effort and phone-led only: a nil seam (the
+	// local-only boot with no telnyx key) skips it entirely - the manager
+	// already owns teardown state. Without the guard, a self-reaped LOCAL
+	// call (silence/max-call) whose talk loop fires managerHangup would
+	// nil-deref the phone seam.
+	if w.tel != nil {
+		if err := w.tel.HangupCall(context.Background(), ccid); err != nil {
+			// Best-effort carrier hangup; the manager already owns teardown
+			// state. A failed POST leaves the leg to Telnyx's own timeout.
+			w.logger.Debug("voice wiring: carrier hangup", "ccid", ccid, "err", err)
+		}
 	}
 	w.Manager.FailOutcome(ccid, voice.OutcomeHangup, reason)
 }
@@ -617,8 +658,13 @@ func (w *VoiceWiring) managerHangup(ccid, reason string) {
 // timeout while the daemon-side teardown still completes.
 func (w *VoiceWiring) spliceHangup(ccid, reason string) {
 	w.logger.Info("voice wiring: splice hangup", "ccid", ccid, "reason", reason)
-	if err := w.tel.HangupCall(context.Background(), ccid); err != nil {
-		w.logger.Debug("voice wiring: splice carrier hangup", "ccid", ccid, "err", err)
+	// The POST is best-effort and phone-led only; a nil seam (local-only
+	// boot, no telnyx key) skips the carrier POST while the daemon-side
+	// teardown still completes.
+	if w.tel != nil {
+		if err := w.tel.HangupCall(context.Background(), ccid); err != nil {
+			w.logger.Debug("voice wiring: splice carrier hangup", "ccid", ccid, "err", err)
+		}
 	}
 	w.Manager.FailOutcome(ccid, voice.OutcomeFailed, reason)
 }
@@ -876,6 +922,12 @@ func (w *VoiceWiring) Start(ctx context.Context, registerTool func(dial builtin.
 // dialForTool adapts the dialer onto the voice_call tool seam.
 func (w *VoiceWiring) dialForTool() builtin.DialerFunc {
 	return func(ctx context.Context, employeeID, target, requestID string) (string, error) {
+		// Phone leg disabled (local-only boot, no telnyx key): the dialer
+		// is nil, so an outbound phone dial refuses cleanly instead of a
+		// nil-deref panic.
+		if w.Dialer == nil {
+			return "", fmt.Errorf("voice: phone leg disabled (no telnyx_api_key); outbound dial refused")
+		}
 		res, err := w.Dialer.Dial(ctx, voice.DialRequest{
 			EmployeeID: employeeID,
 			Target:     target,
