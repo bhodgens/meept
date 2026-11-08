@@ -49,7 +49,8 @@ type ResolverOptions struct {
 	ExtraAllowsFor func(subject string) []string
 	// knownTools is the LIVE registered-tool-name set (C6). Boot and
 	// RPC validation reject policy tool names outside this set; set via
-	// WithKnownTools (below) so the raw field stays construction-only.
+	// WithKnownTools (below) — the only injection path, so the raw
+	// field stays construction-only.
 	knownTools map[string]struct{}
 }
 

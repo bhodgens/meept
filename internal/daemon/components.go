@@ -82,6 +82,7 @@ import (
 	"github.com/caimlas/meept/internal/shadow/adapters"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/skills/lifecycle"
+	"github.com/caimlas/meept/internal/storage"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/templates"
 	"github.com/caimlas/meept/internal/toolprov"
@@ -2492,6 +2493,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		})
 	}
 	c.AgentLoop = agent.NewAgentLoop("daemon", "", agentOpts...)
+	// Loop-carried group resolution (agent-groups leaf 04 T1, wiring
+	// remediation GRP-2): the template loop executes plain chat turns, so it
+	// must carry the SAME group policy record the registry lane stamps at
+	// createLoop (registry.go:783-790) — under security.groups.default_managed
+	// a nil record skipped the executor's call-time gate entirely, making the
+	// template lane a bypass the leaf's security posture claims to close.
+	// Managed=false records are stamped too (the gate reads Managed and skips
+	// explicitly), and an empty-table resolver is the no-op legacy posture
+	// (D7), mirroring the registry lane. Session clones inherit the record via
+	// ConfigSnapshot; the executor is re-pointed by SetGroupResolution.
+	if groupsResolver != nil {
+		res := groupsResolver.ResolveForAgent("daemon", nil, nil)
+		c.AgentLoop.SetGroupResolution(&res)
+		logger.Info("groups resolution wired to daemon template loop",
+			"managed", res.Managed,
+			"allowed_tools", len(res.AllowedTools),
+		)
+	}
 	// Memory-scope multiuser bit (leaf 03-agent-recall-wiring, Flag 3):
 	// the daemon-wide multiuser.enabled flag ORs into the scope resolution
 	// so an identity gap under enabled multiuser fails closed.
@@ -3016,6 +3035,31 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	} else {
 		if c.DualStore != nil {
 			sessionStore.SetTurnGossipPublisher(c.DualStore)
+		}
+		// Durable session substrate (dsh-convergence leaves 02+04, wiring
+		// remediation DSH-2): the projection registry and the storage
+		// record-change emitter were defined with typed-nil setter seams but
+		// never constructed in production, so session_projection_cache rows
+		// were never written and storage.record.changed had no publisher
+		// path. Wire both here on the LIVE components bus (the same handle
+		// every other boot-time publisher uses). Best-effort by contract: a
+		// construction failure logs and leaves the seam unwired (the store's
+		// nil guards make both no-ops), never fails boot.
+		if msgBus != nil {
+			if cache, cacheErr := session.NewSessionProjectionCache(sessionStore.DB()); cacheErr == nil {
+				projReg := session.NewSessionProjectionRegistry(cache)
+				if _, regErr := session.RegisterSessionSummary(projReg); regErr != nil {
+					logger.Warn("session projection summary unit not registered", "error", regErr)
+				} else {
+					sessionStore.SetProjectionRegistry(projReg)
+					logger.Info("session projection registry wired", "unit", "session-summary")
+				}
+			} else {
+				logger.Warn("session projection cache unavailable; projections unwired", "error", cacheErr)
+			}
+			sessionStore.SetStorageEventEmitter(storage.NewChangeEmitter(msgBus))
+		} else {
+			logger.Warn("no message bus; session projections + storage events unwired")
 		}
 		c.SessionStore = sessionStore
 	}
@@ -3700,8 +3744,46 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// + deterministic wrappers all registered above), or boot fails
 	// naming the offender. Runs here — not at the early structural hook —
 	// because the registry is empty before registerBuiltinTools.
+	//
+	// GRP-1 (wiring-gap remediation): the C6 leg was INERT at this site —
+	// the resolver was constructed without WithKnownTools, so
+	// ValidatePolicies saw an empty known set and returned nil unconditionally
+	// (resolution.go's len(known)==0 early-out), letting a policy naming an
+	// unregistered tool boot silently despite the comment above. Rebuild the
+	// resolver with the live registry's canonical-name set (the same seam the
+	// RPC leg wires via GroupsHandler.SetToolValidation); CanonicalNames() is
+	// normalized-lowercase, matching the normalizer's output space so lookup
+	// keys agree.
+	if c.ToolRegistry != nil && groupsResolver != nil {
+		knownOpts := groups.ResolverOptions{
+			NormalizeToolName: agent.CanonicalToolName,
+			ExtraAllowsFor: func(subject string) []string {
+				return groupsOverrides.AllowsFor(subject, EnvGroupsNow())
+			},
+		}.WithKnownTools(c.ToolRegistry.CanonicalNames())
+		groupsResolver = groups.NewResolver(
+			groupsPoliciesFromConfig(cfg.Security.Groups.Policies),
+			groupsBindingsFromConfig(cfg.Security.Groups.Bindings),
+			cfg.Security.Groups.DefaultManaged,
+			&knownOpts,
+		)
+	}
 	if err := groupsResolver.ValidatePolicies(); err != nil {
 		logger.Error("FATAL: groups config policy tool names invalid", "error", err)
+		return nil, err
+	}
+	if err := revalidateGroupsPolicyTools(groupsResolver, groupsPoliciesFromConfig(cfg.Security.Groups.Policies), c.ToolRegistry, agent.CanonicalToolName); err != nil {
+		// C6 live-registry leg (agent-groups leaf 04, wiring remediation
+		// GRP-1): the resolver was constructed BEFORE the registry filled,
+		// so its known-tools set was empty and the ValidatePolicies call
+		// above ran structural checks only. Now that registerBuiltinTools,
+		// wireGitHubTools, extract/deterministic/codemode registration and
+		// the deferred scheduler/goal/delegate provider registration have
+		// all run, re-run the tool-name leg against the LIVE registry and
+		// fail boot naming the offender — matching the boot-hook
+		// comment's promise instead of leaving a policy that names an
+		// unregistered tool silently half-enforced.
+		logger.Error("FATAL: groups config policy tool names invalid (live registry)", "error", err)
 		return nil, err
 	}
 

@@ -130,6 +130,16 @@ type ChatHandler struct {
 	// exchange. Wired by the daemon via SetMessageSaver.
 	messageSaver SessionMessageSaver
 
+	// skillCatalogDedup tracks the last materialized skill-catalog digest per
+	// session (dsh 04-tool-surface/03-skill-catalog T3, wiring remediation
+	// DSH-4): the durable catalog session record re-materializes only when
+	// the visible skill set changed for THAT session. Guarded by
+	// skillCatalogMu; entries are small (64-char digests) and bounded by the
+	// number of live sessions the handler serves. On persistExchange the
+	// catalog rides the SAME saver as the exchange, post-commit, best-effort.
+	skillCatalogDedup map[string]string
+	skillCatalogMu    sync.Mutex
+
 	// budgetResumeWatcher parks turns interrupted by budget exhaustion and
 	// retries them when the budget window clears.
 	budgetResumeWatcher *BudgetResumeWatcher
@@ -316,11 +326,12 @@ func NewChatHandler(loop *AgentLoop, dispatcher *Dispatcher, msgBus *bus.Message
 		logger = slog.Default()
 	}
 	return &ChatHandler{
-		loop:       loop,
-		dispatcher: dispatcher,
-		bus:        msgBus,
-		logger:     logger,
-		workers:    make(map[string]*Worker),
+		loop:              loop,
+		dispatcher:        dispatcher,
+		bus:               msgBus,
+		logger:            logger,
+		workers:           make(map[string]*Worker),
+		skillCatalogDedup: make(map[string]string),
 	}
 }
 
@@ -1488,6 +1499,72 @@ func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.Con
 		h.logger.Warn("failed to persist chat exchange",
 			"session_id", sessionID,
 			"message_count", len(msgs),
+			"error", err,
+		)
+		return
+	}
+
+	// Durable skill catalog (dsh 04-tool-surface/03-skill-catalog T3+T4,
+	// wiring remediation DSH-4): after the exchange commit, materialize the
+	// catalog from the loop's discovery snapshot and append it as a
+	// session record (source kind "skill-catalog", EntryType "skill_catalog")
+	// when the visible set changed for THIS session (per-session digest
+	// dedup, so an unchanged set never duplicates the record and a resume
+	// rebuild reads the same set from the store). Best-effort: a failure
+	// logs and never touches the already-committed exchange.
+	h.persistSkillCatalog(sessionID, agentID)
+}
+
+// persistSkillCatalog materializes the durable skill catalog for one session
+// and persists it through the same saver as the exchange, digest-deduplicated
+// per session. Nil-safe at every seam: no injector, no loader, no saver, or
+// an empty session id is a no-op. The rendered block is the C4 listing the
+// prompt path renders, so a session resume can rebuild the same catalog from
+// the persisted record (ParseSkillCatalogMessage parity).
+func (h *ChatHandler) persistSkillCatalog(sessionID, agentID string) {
+	if h.messageSaver == nil || sessionID == "" || h.loop == nil {
+		return
+	}
+	inj := h.loop.ContextInjector()
+	if inj == nil {
+		return
+	}
+	rendered, _ := inj.MaterializeSkillCatalog()
+	if rendered == "" {
+		return
+	}
+	digest := ""
+	if cat, err := ParseSkillCatalogMessage(rendered); err == nil {
+		digest = cat.Digest()
+	}
+	// Per-session digest is the SOLE dedup authority. The injector's own
+	// lastDigest is shared across every session (session clones inherit one
+	// ContextInjector via ConfigSnapshot), so its `changed` answer suppresses
+	// session B's baseline whenever session A materialized the same visible
+	// set first — B's session record would never land and a resume would
+	// rebuild an empty catalog. Comparing per session here keeps each
+	// session's durable record independent; the injector call is retained
+	// for its render + digest computation only.
+	h.skillCatalogMu.Lock()
+	if prev, seen := h.skillCatalogDedup[sessionID]; seen && prev == digest {
+		h.skillCatalogMu.Unlock()
+		return
+	}
+	h.skillCatalogDedup[sessionID] = digest
+	h.skillCatalogMu.Unlock()
+
+	catalogMsg := session.Message{
+		SessionID: sessionID,
+		Role:      "system",
+		Content:   "# Skill Catalog\n\n" + rendered,
+		Timestamp: time.Now().UTC(),
+		EntryType: "skill_catalog",
+		BranchID:  "main",
+		AgentID:   agentID,
+	}
+	if err := h.messageSaver.SaveMessages(sessionID, []session.Message{catalogMsg}); err != nil {
+		h.logger.Warn("failed to persist skill catalog record",
+			"session_id", sessionID,
 			"error", err,
 		)
 	}

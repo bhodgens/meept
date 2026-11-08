@@ -1529,6 +1529,37 @@ func (s *SQLiteStore) SetProjectionRegistry(reg *SessionProjectionRegistry) {
 	})
 }
 
+// Snapshot reads projected values for one session through the wired
+// projection registry (contract S2). Delegates to
+// SessionProjectionRegistry.Snapshot; a store without a wired registry
+// (the nil-guard default state) returns a descriptive error, never a
+// panic. Read-only and best-effort like the fold itself.
+func (s *SQLiteStore) Snapshot(sessionID string, keys ...string) (SessionProjectionSnapshot, error) {
+	if s == nil {
+		return SessionProjectionSnapshot{}, fmt.Errorf("session: nil store")
+	}
+	s.mu.RLock()
+	reg := s.projections
+	s.mu.RUnlock()
+	if reg == nil {
+		return SessionProjectionSnapshot{}, fmt.Errorf("session: no projection registry wired")
+	}
+	return reg.Snapshot(sessionID, keys...)
+}
+
+// DB exposes the underlying sqlite handle for additive daemon-side seams
+// (e.g. the session projection watermark cache, dsh leaf 02) that must share
+// the store's connection pool and WAL discipline rather than opening a second
+// handle against the same file. The caller owns nothing: lifecycle stays with
+// the store (Close closes this handle). Nil receiver returns nil per the
+// repo's typed-nil guard convention.
+func (s *SQLiteStore) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
+
 // GetDesignationHistory returns the designation history store for external access.
 func (s *SQLiteStore) GetDesignationHistory() DesignationHistoryStore {
 	return s.designationHistory

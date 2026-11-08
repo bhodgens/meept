@@ -27,6 +27,12 @@ type ContextInjector struct {
 	// Nil-safe: unset means no plan-mode injection.
 	planModePolicySection func() string
 
+	// catalogInjector owns the digest-dedup decision for the durable skill
+	// catalog (dsh leaf 03 T3): MaterializeSkillCatalog consults it so a
+	// re-materialization fires only when the visible skill set actually
+	// changed. Method-value (not pointer) so a zero ContextInjector is usable.
+	catalogInjector catalogInjector
+
 	// Episode-start skill ranking (token-efficiency branch 04 leaf 02,
 	// Q4: always rank). mu guards the episode state below; it is never
 	// held across the embedding I/O inside visibleSkillLinesForEpisode.
@@ -177,15 +183,27 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 	return sb.String()
 }
 
-// visibleSkillLinesForEpisode returns one C4 listing line per visible cached
-// skill in the episode's frozen order. The order is computed ONCE per
-// episode (first build after SetEpisodeTask) and cached, so every
-// subsequent build in the same episode emits byte-identical listing bytes —
-// the prompt-cache stability contract. Ranking is order-only: the SET of
-// lines equals the alphabetical set exactly (no cap, no hiding below the
-// disable-model-invocation rule from leaf 01).
+// visibleSkillLinesForEpisode returns one C4 listing line per visible skill
+// in the episode's frozen order. The SOURCE is the DURABLE catalog discovery
+// snapshot (dsh 04-tool-surface/03-skill-catalog T4, wiring remediation
+// DSH-4): a fresh SkillIndex.List() enumeration, not merely the loader's
+// live cache — a skill present in discovery but not yet cache-loaded (no
+// fuzzy hit yet) must still be listed. The prior CachedNames() source made
+// the listing depend on the process cache, so the prompt lost skills on
+// restart until something loaded them. Falls back to the cache-derived
+// entry set when the index is unavailable (loader wired without an index —
+// the historical shape), preserving byte-identical behavior there. The
+// order is computed ONCE per episode (first build after SetEpisodeTask) and
+// cached, so every subsequent build in the same episode emits byte-identical
+// listing bytes — the prompt-cache stability contract. Ranking is
+// order-only: the SET of lines equals the alphabetical set exactly (no cap,
+// no hiding below the disable-model-invocation rule from leaf 01).
 func (c *ContextInjector) visibleSkillLinesForEpisode() []string {
-	names := c.skillLoader.CachedNames()
+	entries := c.discoveryEntries()
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name)
+	}
 	if len(names) == 0 {
 		return nil
 	}
@@ -235,8 +253,38 @@ func (c *ContextInjector) visibleSkillLinesForEpisode() []string {
 
 	var out []string
 	for _, name := range ordered {
-		s := c.skillLoader.Get(name)
-		if s == nil || s.DisableModelInvocation {
+		// Resolve per name: index first (the durable discovery snapshot —
+		// covers skills present on disk but not yet cache-loaded), then the
+		// loader cache (a name that left the index mid-episode but is still
+		// cache-warm keeps its line). Both absent: the skill vanished from
+		// discovery AND cache, so its line vanishes with it.
+		//
+		// The hidden flag is OR'd across sources: the loader's parsed
+		// frontmatter is authoritative for cache-warm skills (the index
+		// entry may pre-date a frontmatter change or a discovery pass that
+		// omitted the key), so a cache hit that says hidden must hide the
+		// line even when the index snapshot claims visible (DSH-4
+		// regression: TestSkillsListingHidesModelInvocationDisabled).
+		var s *skills.SkillIndexEntry
+		hidden := false
+		if e := c.entryByName(name, entries); e != nil {
+			s = e
+			hidden = e.DisableModelInvocation
+		}
+		if cached := c.skillLoader.Get(name); cached != nil {
+			if cached.DisableModelInvocation {
+				hidden = true
+			}
+			if s == nil {
+				s = &skills.SkillIndexEntry{
+					Name:                   cached.Name,
+					Description:            cached.Description,
+					Path:                   cached.Path,
+					DisableModelInvocation: cached.DisableModelInvocation,
+				}
+			}
+		}
+		if s == nil || hidden {
 			continue
 		}
 		desc := s.Description
@@ -246,6 +294,73 @@ func (c *ContextInjector) visibleSkillLinesForEpisode() []string {
 		out = append(out, fmt.Sprintf("- %s: %s [load: file_read %s]", s.Name, desc, s.Path))
 	}
 	return out
+}
+
+// discoveryEntries enumerates the durable discovery snapshot: the loader's
+// index List() when wired, else (index nil — the loader-owns-its-index
+// historical shape) the cache-derived entry set. Both empty yields nil and
+// the caller suppresses the listing. The disable-model-invocation filter is
+// NOT applied here — visibleSkillLinesForEpisode applies it per line so the
+// mid-episode merge (appended names, dropped names) sees the same rule.
+func (c *ContextInjector) discoveryEntries() []skills.SkillIndexEntry {
+	if c.skillLoader == nil {
+		return nil
+	}
+	if idx := c.skillLoader.Index(); idx != nil {
+		listed := idx.List()
+		entries := make([]skills.SkillIndexEntry, 0, len(listed))
+		for _, e := range listed {
+			if e == nil {
+				continue
+			}
+			entries = append(entries, *e)
+		}
+		return entries
+	}
+	var entries []skills.SkillIndexEntry
+	for _, name := range c.skillLoader.CachedNames() {
+		if s := c.skillLoader.Get(name); s != nil {
+			entries = append(entries, skills.SkillIndexEntry{
+				Name:                   s.Name,
+				Description:            s.Description,
+				Path:                   s.Path,
+				DisableModelInvocation: s.DisableModelInvocation,
+			})
+		}
+	}
+	return entries
+}
+
+// entryByName finds one entry in the discovery snapshot by name.
+func (c *ContextInjector) entryByName(name string, entries []skills.SkillIndexEntry) *skills.SkillIndexEntry {
+	for i := range entries {
+		if entries[i].Name == name {
+			return &entries[i]
+		}
+	}
+	return nil
+}
+
+// MaterializeSkillCatalog builds the durable skill catalog from the CURRENT
+// discovery snapshot and decides, through the digest-dedup injector, whether
+// it changed since the last materialization (dsh 04-tool-surface/03-skill-catalog
+// T3, wiring remediation DSH-4). Returns the rendered C4 listing and whether
+// the caller should append it as a session record: true for the first call
+// (a fresh injector always materializes a baseline) and whenever the visible
+// skill set changed since. The caller persists the rendered block itself
+// (source kind "skill-catalog" session record) — the injector stays
+// session-agnostic; per-session dedup lives in the caller's handling of the
+// returned bool keyed on its session identity. Nil-safe.
+func (c *ContextInjector) MaterializeSkillCatalog() (rendered string, changed bool) {
+	if c == nil || c.skillLoader == nil {
+		return "", false
+	}
+	cat := NewSkillCatalog(c.discoveryEntries())
+	if !c.catalogInjector.ShouldMaterialize(cat) {
+		return cat.Render(), false
+	}
+	c.catalogInjector.MarkMaterialized(cat)
+	return cat.Render(), true
 }
 
 // ---------------------------------------------------------------------------

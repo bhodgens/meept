@@ -27,19 +27,20 @@ func TestContextInjector_SetSkillLoader_Nil(t *testing.T) {
 // cache is empty.
 func TestContextInjector_SkillsSection(t *testing.T) {
 	idx := skills.NewSkillIndex()
-	idx.Index(&skills.SkillIndexEntry{
-		Name:        "code-review",
-		Description: "Review code for bugs and style",
-	})
 	loader := skills.NewLazySkillLoader(idx)
 
-	// With no cached skills, the prompt should NOT contain the skills section.
+	// With an EMPTY index (nothing in discovery, nothing cached), the
+	// prompt should NOT contain the skills section. The listing source is
+	// the durable discovery snapshot (dsh 04-tool-surface/03-skill-catalog
+	// T4, wiring remediation DSH-4), so emptiness is judged on the index —
+	// an indexed-but-uncached skill IS listed now (that is the leaf's
+	// contract: skills discoverable independent of fuzzy routing).
 	ci := NewContextInjector(nil, nil)
 	ci.SetSkillLoader(loader)
 
 	prompt := ci.BuildSystemPrompt(context.Background(), "base")
 	if strings.Contains(prompt, "## Active Skills") {
-		t.Error("expected no Active Skills section when cache is empty")
+		t.Error("expected no Active Skills section when discovery index is empty")
 	}
 	if !strings.Contains(prompt, "base") {
 		t.Error("base prompt missing")

@@ -5,6 +5,7 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/groups"
+	"github.com/caimlas/meept/internal/tools"
 )
 
 // validateGroupsConfig is the agent-groups boot hook (leaf 02, task T4):
@@ -27,6 +28,32 @@ func validateGroupsConfig(cfg *config.Config) error {
 		return fmt.Errorf("boot validation failed: %w", err)
 	}
 	return nil
+}
+
+// revalidateGroupsPolicyTools is the C6 live-registry leg of the boot hook
+// (agent-groups leaf 04; wiring remediation GRP-1). The resolver is
+// constructed early in NewComponents BEFORE the tool registry fills, so a
+// construction-time ValidatePolicies ran structural checks only (its
+// known-tools set was empty and the C6 leg is deliberately inert there).
+// Once every registration path has run (builtin tools, github provider,
+// extract, deterministic wrappers, codemode, scheduler/goal/delegate
+// providers), this re-runs the tool-name check against the LIVE registry
+// snapshot so a policy naming an unregistered tool fails boot naming the
+// offender — the promise the C6 boot-hook comment makes. An empty registry
+// (degenerate/test wiring) stays inert exactly like ValidatePolicies does,
+// never inventing a failure the live hook cannot justify. The resolver
+// parameter is unused today beyond documentation parity with the early
+// hook; the check goes through the same shared ValidatePolicyTools
+// primitive so boot and the groups.* RPC leg can never drift.
+func revalidateGroupsPolicyTools(_ interface{ ValidatePolicies() error }, policies []groups.Policy, reg *tools.Registry, normalize func(string) string) error {
+	var known map[string]struct{}
+	if reg != nil {
+		known = reg.CanonicalNames()
+	}
+	if len(known) == 0 {
+		return nil
+	}
+	return groups.ValidatePolicyTools(policies, known, normalize)
 }
 
 // groupsPoliciesFromConfig maps the config schema types to the model types
