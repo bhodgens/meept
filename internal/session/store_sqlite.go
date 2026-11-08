@@ -1273,50 +1273,59 @@ func (s *SQLiteStore) GetMessageCount(sessionID string) (int, error) {
 // ClearMessages removes all messages for a session and resets the leaf
 // pointer. The session row itself is preserved. FTS cleanup is handled
 // automatically by the session_messages_ad_fts trigger.
-func (s *SQLiteStore) ClearMessages(sessionID string) (retErr error) {
+func (s *SQLiteStore) ClearMessages(sessionID string) error {
+	// DB work runs under the lock (one sqlite connection, serialized);
+	// the storage-event publish runs AFTER the lock is released — it is
+	// I/O on a separate channel and must never run under the mutex
+	// (mutexio rule; contract S4: events follow durable commits). The
+	// emitter is snapshotted inside the locked helper and handed out.
+	em, err := s.clearMessagesLocked(sessionID)
+	if err != nil {
+		return err
+	}
+	if em != nil {
+		em.Publish("session.store", storage.RecordChanged{
+			Store: "session_messages",
+			Key:   sessionID,
+			Op:    storage.ChangeOpDelete,
+		})
+	}
+	return nil
+}
+
+// clearMessagesLocked performs the DELETE + leaf reset + thread cleanup
+// under the store mutex and returns the storage-event emitter to publish
+// to after the unlock (nil emitter when the clear failed or the emitter
+// is unset, so no event fires on a failed commit).
+func (s *SQLiteStore) clearMessagesLocked(sessionID string) (*storage.ChangeEmitter, error) {
 	s.mu.Lock()
-	// Defer ordering (LIFO): the publish defer is registered BEFORE the
-	// unlock defer, so it runs AFTER the unlock — post-commit, outside the
-	// lock (contract S4). Publishes only on a successful clear: events
-	// follow durable commits, never failed ones. The emitter is
-	// snapshotted under the lock.
-	em := s.storageEvents
-	defer func() {
-		if em != nil && retErr == nil {
-			em.Publish("session.store", storage.RecordChanged{
-				Store: "session_messages",
-				Key:   sessionID,
-				Op:    storage.ChangeOpDelete,
-			})
-		}
-	}()
 	defer s.mu.Unlock()
 
 	session := s.getByColumnUnsafe("id", sessionID)
 	if session == nil {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
 
 	_, err := s.db.Exec("DELETE FROM session_messages WHERE session_id = ?", sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
-		return fmt.Errorf("failed to clear messages: %w", err)
+		return nil, fmt.Errorf("failed to clear messages: %w", err)
 	}
 
 	// Reset the leaf pointer so the next message starts a fresh tree.
 	_, err = s.db.Exec("UPDATE sessions SET leaf_message_id = NULL WHERE id = ?", sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
-		return fmt.Errorf("failed to reset leaf pointer: %w", err)
+		return nil, fmt.Errorf("failed to reset leaf pointer: %w", err)
 	}
 
 	// Delete all threads for this session so stale thread state doesn't
 	// linger after a reset.
 	_, err = s.db.Exec("DELETE FROM session_threads WHERE session_id = ?", sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
-		return fmt.Errorf("failed to delete threads: %w", err)
+		return nil, fmt.Errorf("failed to delete threads: %w", err)
 	}
 
 	s.logger.Info("Session messages cleared", "id", sessionID)
-	return nil
+	return s.storageEvents, nil
 }
 
 // UpdateDescription updates a session's description.

@@ -105,24 +105,33 @@ func (m *VoiceSessionModel) SetAudioDialer(d VoiceAudioDialer) {
 // Start opens a local session for employeeID over RPC and attaches the
 // audio shim when the dialer is wired. An already-active session
 // refuses (one live call per TUI). A dial failure rolls the open back
-// with voice.local.end so the daemon never holds a ghost call.
+// with voice.local.end so the daemon never holds a ghost call. The RPC
+// calls + JSON decode + audio attach are I/O and are done OUTSIDE the
+// lock (mutexio rule): the needed handles (rpc, dialer) are snapshotted
+// under the lock, the work runs unlocked, and committing the new call
+// state re-takes the lock.
 func (m *VoiceSessionModel) Start(employeeID, label string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.callID != "" {
+		m.mu.Unlock()
 		return fmt.Errorf("voice: a session is already active (call %s); use /voice stop first", m.callID)
 	}
 	if employeeID == "" {
+		m.mu.Unlock()
 		return fmt.Errorf("voice: employee id is required (/voice eve)")
 	}
-	if m.rpc == nil || !m.rpc.IsConnected() {
+	rpc := m.rpc
+	dialer := m.dialer
+	m.mu.Unlock()
+
+	if rpc == nil || !rpc.IsConnected() {
 		return fmt.Errorf("not connected to daemon")
 	}
 	req := map[string]any{"employee_id": employeeID}
 	if label != "" {
 		req["label"] = label
 	}
-	raw, err := m.rpc.Call("voice.local.open", req)
+	raw, err := rpc.Call("voice.local.open", req)
 	if err != nil {
 		return fmt.Errorf("voice.local.open: %w", err)
 	}
@@ -130,25 +139,28 @@ func (m *VoiceSessionModel) Start(employeeID, label string) error {
 	if err := json.Unmarshal(raw, &open); err != nil {
 		// Roll the just-opened call back so the daemon never holds a
 		// ghost call on a malformed envelope.
-		_, _ = m.rpc.Call("voice.local.end", map[string]any{"call_id": open.CallID})
+		_, _ = rpc.Call("voice.local.end", map[string]any{"call_id": open.CallID})
 		return fmt.Errorf("voice.local.open: bad response: %w", err)
 	}
 	if open.CallID == "" {
 		return fmt.Errorf("voice.local.open: daemon refused (no call id)")
 	}
 	// Audio attach (leaf 08 shim). Failure rolls the call back.
-	if m.dialer != nil {
-		audio, err := m.dialer(open.InPath, open.OutPath)
+	var audio VoiceAudioSession
+	if dialer != nil {
+		audio, err = dialer(open.InPath, open.OutPath)
 		if err != nil {
-			_, _ = m.rpc.Call("voice.local.end", map[string]any{"call_id": open.CallID})
+			_, _ = rpc.Call("voice.local.end", map[string]any{"call_id": open.CallID})
 			return fmt.Errorf("voice: audio attach: %w", err)
 		}
-		m.audio = audio
 	}
+	m.mu.Lock()
+	m.audio = audio
 	m.callID = open.CallID
 	m.empID = employeeID
 	m.since = time.Now()
 	m.stopped = false
+	m.mu.Unlock()
 	return nil
 }
 
