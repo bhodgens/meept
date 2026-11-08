@@ -133,10 +133,25 @@ type pipeline struct {
 	// utterance plays again — without this reset the agent was muted for
 	// the whole call after its first interrupt.
 	playGen uint64
-	// rmsRun (local-leg leaf 02): consecutive over-threshold chunk count
-	// of the playback-side RMS VAD; guarded by playMu, reset by latch
-	// state changes (see rmsBargeInCheck).
-	rmsRun int
+	// rmsRun (local-leg leaf 02): sustained loud-SAMPLE counter of the
+	// INCOMING-audio RMS VAD (caller mic); rmsEnergyRun accumulates the
+	// energy of the same counted samples. Both guarded by playMu, reset
+	// by latch state changes and by under-threshold chunks (see
+	// rmsBargeInCheck).
+	rmsRun       uint64
+	rmsEnergyRun uint64
+	// outEnergySum/outEnergySample (playMu): the energy and sample count
+	// of the most recent chunk WRITTEN to the .out socket — the echo
+	// reference the incoming VAD compares against (see rmsBargeInCheck).
+	outEnergySum    uint64
+	outEnergySample uint64 // samples of the most recent outbound chunk
+	// pendingInterrupt (playMu): non-nil while an RMS-trip's interrupt
+	// frame is in flight to the text socket. The transcript consumer
+	// waits on it (closed when the write completes) before emitting a
+	// prompt, preserving C5 (interrupt strictly before the partial's
+	// prompt frame) even when the VAD trips on the audio-pump goroutine
+	// a moment before the STT partial lands.
+	pendingInterrupt chan struct{}
 
 	// cancel cancels the pipeline's internal context (workers, streams).
 	cancel context.CancelFunc
@@ -298,13 +313,18 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 			// Barge-in first (C5): interrupt stops playback before the
 			// partial preview prompt flows. noteBargeIn enforces
 			// exactly-once per barge-in and reports false when idle or
-			// already latched (leaf 06).
+			// already latched (leaf 06). On the local leg the RMS VAD
+			// usually latched first (it sees raw audio before STT has a
+			// partial), so noteBargeIn returns false here and the
+			// pending-interrupt write below is what C5 must wait on.
 			if p.noteBargeIn() {
 				if err := p.child.emitInterrupt(p.ctx, p.ccid); err != nil {
 					p.logger.Error("voicechild: emit interrupt", "err", err, "call_id", p.ccid)
 				}
 			}
 		}
+		// C5: never let a prompt overtake an in-flight interrupt frame.
+		p.awaitPendingInterrupt()
 		if err := p.child.emitPrompt(p.ctx, p.ccid, tr.Text, tr.Final); err != nil {
 			p.logger.Error("voicechild: emit prompt", "err", err, "call_id", p.ccid)
 		}
@@ -333,6 +353,11 @@ func (p *pipeline) pumpAudioIn() {
 			// Copy: buf is reused by the next Read.
 			data := make([]byte, n)
 			copy(data, buf[:n])
+			// Local-leg VAD (CL3): the caller's microphone PCM arriving
+			// on .in is the barge-in signal — tap it BEFORE forwarding
+			// to STT. No-op unless local && bargeInRms > 0; takes playMu
+			// briefly, never blocks the socket drain beyond that.
+			p.rmsBargeInCheck(data)
 			p.forwardPCM(data)
 		}
 		if err != nil {
@@ -489,9 +514,13 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 	}
 	// Fresh playback restarts the barge-in VAD latch (one interrupt per
 	// barge-in, T5) — the path playbackRestarted() documented but never
-	// took in production.
+	// took in production. The incoming-RMS window accumulators are part
+	// of that latch state: a partial run from the retired utterance must
+	// not feed into the new one's window.
 	p.dropQueued = false
 	p.interrupted = false
+	p.rmsRun = 0
+	p.rmsEnergyRun = 0
 	p.speaking = true
 	p.playMu.Unlock()
 	defer func() {
@@ -529,11 +558,14 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 				p.logger.Error("voicechild: audio out write", "err", werr, "call_id", p.ccid)
 				return
 			}
-			// Local-leg VAD (leaf 02, CL3): the chunk just written to the
-			// .out socket is the caller-heard audio; feed it to the RMS
-			// hook. No-op unless local && bargeInRms > 0. Called with no
-			// lock held (the hook takes playMu itself).
-			p.rmsBargeInCheck(buf[:n])
+			// Local-leg echo reference (CL3): record this outbound
+			// chunk's energy so the INCOMING-side VAD tap can tell a
+			// speaker echo from a caller talking over the agent. This is
+			// NOT the barge-in trigger any more — the old bug fed the
+			// RMS VAD this TTS audio and the agent interrupted itself.
+			// No-op unless local && bargeInRms > 0. Called with no lock
+			// held (the hook takes playMu itself).
+			p.noteOutgoingChunk(buf[:n])
 		}
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
@@ -594,6 +626,26 @@ func (p *pipeline) noteBargeIn() bool {
 // over-threshold chunks = 200 ms at the L16/16k 20 ms chunk size.
 const rmsWindowChunks = 10
 
+// rmsEnergy reports an s16le mono PCM chunk's loudness as (sum of squared
+// |sample|, sample count); a trailing odd byte is ignored. This is the
+// integer form of rms^2 * n used by the threshold compare in
+// rmsChunkOver and the echo compare in rmsBargeInCheck, so neither needs a
+// division or a float.
+func rmsEnergy(b []byte) (uint64, uint64) {
+	var sum uint64
+	var n uint64
+	for i := 0; i+1 < len(b); i += 2 {
+		v := int16(binary.LittleEndian.Uint16(b[i:]))
+		u := uint64(uint16(v)) // |v| without float/negation games
+		if v < 0 {
+			u = uint64(-u) // two's complement wrap: -32768 -> 32768
+		}
+		sum += u * u
+		n++
+	}
+	return sum, n
+}
+
 // rmsChunkOver reports whether an s16le mono PCM chunk's loudness exceeds
 // threshold, comparing the integer sum of squares against threshold^2 *
 // sampleCount (integer-sqrt-free: sum >= thr*thr*n <=> rms >= thr; at
@@ -603,58 +655,164 @@ func rmsChunkOver(b []byte, threshold int) bool {
 	if threshold <= 0 {
 		return false
 	}
-	n := len(b) / 2 // whole int16 samples; trailing odd byte ignored
+	sum, n := rmsEnergy(b)
 	if n <= 0 {
 		return false
 	}
-	var sum uint64
-	for i := 0; i+1 < len(b); i += 2 {
-		v := int16(binary.LittleEndian.Uint16(b[i:]))
-		u := uint64(uint16(v)) // |v| without float/negation games
-		if v < 0 {
-			u = uint64(-u) // two's complement wrap: -32768 -> 32768
-		}
-		sum += u * u
-	}
 	thr := uint64(threshold)
-	return sum >= thr*thr*uint64(n)
+	return sum >= thr*thr*n
 }
 
-// rmsBargeInCheck is the playback-side VAD hook (local leg only, CL3
-// matrix): called with each outgoing chunk's bytes. On a non-local leg it
-// returns immediately without touching the audio data (RMS unreachable on
-// phone legs); with bargeInRms <= 0 it is likewise a named no-op.
-// Sustained loudness - rmsWindowChunks consecutive over-threshold chunks,
-// the counter reset by any under-threshold chunk and by latch state - trips
-// the noteBargeIn latch: the SAME p.interrupted latch field noteBargeIn
-// guards (inlined here because noteBargeIn itself takes playMu; no second
-// dedup mechanism), and the trip fires emitInterrupt off-lock.
+// rmsBargeInCheck is the INCOMING-audio VAD hook (local leg only, CL3
+// matrix): called by pumpAudioIn with each caller-microphone chunk read
+// from the .in socket, never with outbound TTS audio. Feeding the agent's
+// own outgoing PCM (the pre-fix wiring) made loud speech interrupt itself
+// and could never hear a caller talking over playback; the tap lives on
+// the incoming path now — product parity with the phone leg's STT-partial
+// trigger. No-op unless local && bargeInRms > 0.
+//
+// Trip rule: while playback is live, incoming chunks whose per-chunk RMS
+// meets the threshold accumulate for rmsWindowChunks chunk-lengths
+// (200 ms at the L16/16k 20 ms chunk size); any under-threshold chunk or
+// latch-state change resets the run.
+//
+// Echo guard (energy compare, no clock): the local-leg mic can pick up the
+// speakers playing the agent's own audio, so a faithful echo must not
+// trip. At the window boundary the run's AVERAGE energy is compared
+// against the average energy of the most recent .out chunk (recorded by
+// noteOutgoingChunk) scaled by rmsEchoMarginPct: the caller must be
+// CLEARLY louder than what the speakers are emitting. Chosen over a
+// 150-300 ms suppress window after each outbound chunk because the pump
+// and the playback worker are separate goroutines and outbound chunks land
+// every 20 ms: a time-based ignore window would starve the sustained
+// counter (10 consecutive incoming chunks can never all fall outside a
+// repeating 150-300 ms suppression) and add cross-goroutine clock races.
+// Zero-energy reference (agent silent / no chunk written yet) sets the
+// ceiling to 0, so a caller talking over quiet playback trips normally.
+//
+// The latch trip happens under playMu with the SAME semantics as
+// noteBargeIn (one interrupt per barge-in until the next say re-arms it;
+// speaking drops with the trip so a watcher sees the interruption). The
+// interrupt frame is emitted off-lock, and pendingInterrupt signals the
+// transcript consumer to wait for it before any prompt, preserving the C5
+// "interrupt strictly before the partial's prompt frame" order even when
+// the VAD trip and an STT partial race on different goroutines.
 func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 	if !p.local || p.bargeInRms <= 0 {
 		return // phone legs keep the STT-partial trigger; VAD never runs
 	}
+	// Per-chunk gate via the named helper (threshold <= 0 already
+	// short-circuited above); on a loud chunk accumulate its energy and
+	// sample count for the sustained window + echo compare.
+	over := rmsChunkOver(chunk, p.bargeInRms)
+	var sum, samples uint64
+	if over {
+		sum, samples = rmsEnergy(chunk)
+	}
 	p.playMu.Lock()
-	defer p.playMu.Unlock()
-	if !p.speaking || p.interrupted || p.dropQueued {
+	if !p.speaking || p.interrupted || p.dropQueued || !over {
 		p.rmsRun = 0
+		p.rmsEnergyRun = 0
+		p.playMu.Unlock()
 		return
 	}
-	if rmsChunkOver(chunk, p.bargeInRms) {
-		p.rmsRun++
-		if p.rmsRun >= rmsWindowChunks {
-			p.rmsRun = 0
-			// Latch trip happens under playMu: noteBargeIn cannot be
-			// called re-entrantly (it would deadlock on playMu).
-			p.interrupted = true
-			go func() {
-				if err := p.child.emitInterrupt(p.ctx, p.ccid); err != nil {
-					p.logger.Error("voicechild: emit interrupt", "err", err, "call_id", p.ccid)
-				}
-			}()
-		}
+	p.rmsRun += samples
+	p.rmsEnergyRun += sum
+	if p.rmsRun < rmsWindowChunks*samples {
+		p.playMu.Unlock()
 		return
 	}
+	// Sustained window reached: echo guard. Compare window average energy
+	// against the outbound reference average scaled by the echo margin,
+	// integer cross-multiplied (no division, no float):
+	//   windowSum/windowSamples > outSum*outSamples * (margin/100)
+	// bounded so overflow cannot occur at s16 chunk sizes (~1e17 < 1.8e19).
+	windowTotal := p.rmsEnergyRun
+	windowSamples := p.rmsRun
+	echoSum := p.outEnergySum
+	echoSamples := p.outEnergySample
 	p.rmsRun = 0
+	p.rmsEnergyRun = 0
+	// Zero reference (agent silent: no chunk written yet, or the last
+	// chunk was digital silence) means the ceiling is 0 — a loud incoming
+	// window trips. Otherwise cross-multiply the average-energy compare
+	// (no division, no float): trip only when
+	//   windowTotal/windowSamples > echoSum/echoSamples * (margin/100).
+	// Bounds: at 20 ms chunks the products stay under 1.8e19 (s16 energy
+	// max 32768^2 * 3200 samples * 130 * 100 ~ 4.4e15), no overflow.
+	if echoSum > 0 && windowTotal*echoSamples*100 <= echoSum*windowSamples*rmsEchoMarginPct {
+		p.playMu.Unlock()
+		return // looks like self-echo: latch stays armed, keep listening
+	}
+	// Latch trip under playMu (noteBargeIn cannot be called re-entrantly:
+	// it would deadlock on playMu). Same field transitions as
+	// noteBargeIn: interrupted latches one-interrupt-per-barge-in,
+	// speaking drops so playback stops presenting as live (R3).
+	p.interrupted = true
+	p.speaking = false
+	// C5 guard: the write below is in flight; the transcript consumer
+	// waits on this channel before emitting any prompt frame.
+	done := make(chan struct{})
+	p.pendingInterrupt = done
+	p.playMu.Unlock()
+	// Off-lock so the audio pump never stalls on a text-socket write
+	// (writeMu can hold up to its 2 s deadline): the C5 order is kept by
+	// the pendingInterrupt handshake — the transcript consumer waits on
+	// the same channel before emitting any prompt frame.
+	go func() {
+		err := p.child.emitInterrupt(p.ctx, p.ccid)
+		close(done)
+		p.playMu.Lock()
+		if p.pendingInterrupt == done {
+			p.pendingInterrupt = nil
+		}
+		p.playMu.Unlock()
+		if err != nil {
+			p.logger.Error("voicechild: emit interrupt", "err", err, "call_id", p.ccid)
+		}
+	}()
+}
+
+// awaitPendingInterrupt blocks until an in-flight RMS-trip interrupt frame
+// has reached the text socket (no-op when none is pending). consumeTranscripts
+// calls it before emitting a prompt, so the local leg keeps the C5 order —
+// interrupt strictly before the partial's prompt frame — even though the
+// VAD trip fires on the audio-pump goroutine, typically a moment before
+// the STT partial for the same caller utterance lands.
+func (p *pipeline) awaitPendingInterrupt() {
+	p.playMu.Lock()
+	done := p.pendingInterrupt
+	p.playMu.Unlock()
+	if done == nil {
+		return
+	}
+	<-done
+}
+
+// rmsEchoMarginPct is the echo-guard headroom: the incoming window's
+// average energy must exceed the last outbound chunk's average energy by
+// this percentage (i.e. be >130% of the speaker reference) before the
+// local leg's RMS VAD trips. The mic/speaker loop is passive and
+// attenuated, so a faithful echo lands well under the reference; the 30%
+// headroom absorbs room gain variation while a caller talking over the
+// agent's own voice clears it.
+const rmsEchoMarginPct = 130
+
+// noteOutgoingChunk records the energy of one chunk written to the .out
+// socket as the echo reference for rmsBargeInCheck (local leg only — a
+// no-op elsewhere; phone legs never run the RMS VAD). Called with no lock
+// held by playbackStream after each write. The RMS tap moved OFF this
+// path (the old bug: outgoing TTS was fed to the VAD, so the agent
+// interrupted itself); this only maintains the echo reference now.
+func (p *pipeline) noteOutgoingChunk(chunk []byte) {
+	if !p.local || p.bargeInRms <= 0 {
+		return
+	}
+	sum, samples := rmsEnergy(chunk)
+	p.playMu.Lock()
+	p.outEnergySum = sum
+	p.outEnergySample = samples
+	p.playMu.Unlock()
 }
 
 // playbackRestarted resets the one-interrupt-per-barge-in latch when a new
