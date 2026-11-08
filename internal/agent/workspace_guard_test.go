@@ -9,6 +9,24 @@ import (
 	"testing"
 )
 
+// configTestGitIdentity sets a repo-local user identity so the real
+// `git commit` calls in these tests succeed on clean CI runners that carry
+// no global git config (fatal: empty ident name). Repo-local config only:
+// no global config, no env leaking between sites.
+func configTestGitIdentity(t *testing.T, repo string) {
+	t.Helper()
+	for _, kv := range [][2]string{
+		{"user.name", "Meept Test"},
+		{"user.email", "meept-test@example.com"},
+	} {
+		cmd := exec.Command("git", "config", kv[0], kv[1])
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git config %s in %s failed: %v, output: %s", kv[0], repo, err, string(out))
+		}
+	}
+}
+
 func TestWorkspaceGuard_NormalWorkspace(t *testing.T) {
 	// Create a temp base directory
 	baseDir, err := os.MkdirTemp("", "meept-workspace-test-*")
@@ -51,7 +69,9 @@ func TestWorkspaceGuard_NormalWorkspace(t *testing.T) {
 		t.Fatalf("workspace is not its own repo root: got %q, want %q", toplevelClean, workspaceClean)
 	}
 
-	// Test commit
+	// Test commit (repo-local identity: clean CI runners have no global
+	// git config, so the commit would fail with an empty ident)
+	configTestGitIdentity(t, workspace)
 	err = wm.Commit(context.Background(), "test-normal", "test commit", nil)
 	if err != nil {
 		t.Fatalf("Commit failed: %v", err)
@@ -85,6 +105,7 @@ func TestWorkspaceGuard_ParentRepoToplevelRefused(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git add in parent failed: %v, output: %s", err, string(out))
 	}
+	configTestGitIdentity(t, parentRepo)
 	cmd = exec.Command("git", "commit", "-m", "initial commit")
 	cmd.Dir = parentRepo
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -142,6 +163,7 @@ func TestWorkspaceGuard_GITCeilingDirectoriesPreventsWalkUp(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git add in parent failed: %v, output: %s", err, string(out))
 	}
+	configTestGitIdentity(t, parentRepo)
 	cmd = exec.Command("git", "commit", "-m", "initial commit")
 	cmd.Dir = parentRepo
 	if out, err := cmd.CombinedOutput(); err != nil {

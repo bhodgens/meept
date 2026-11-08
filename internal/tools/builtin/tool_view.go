@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
@@ -97,10 +98,25 @@ func (t *ToolViewTool) Parameters() llm.FunctionParameters {
 //
 // Mutex scope: the LRU map is snapshotted/mutated under t.mu, but JSON
 // marshaling and the registry lookup happen outside it (mutexio).
-func (t *ToolViewTool) Execute(_ context.Context, args map[string]any) (any, error) {
+func (t *ToolViewTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	name, _ := args["name"].(string)
 	if name == "" {
 		return nil, fmt.Errorf("name is required")
+	}
+
+	// bughunt config-tools F-1 (tool_view half): expand ONLY tools inside
+	// this agent's role ceiling. The daemon-wide registration bound t.reg
+	// to the FULL registry, so any agent could pull a full parameter
+	// schema for a tool outside its ceiling; the shared LRU cache leaked
+	// schemas across agents too. The executor injects the agent's
+	// filtered registry into the call context (agent.ContextWithToolRegistry)
+	// — when present it is the authoritative view: an out-of-ceiling name
+	// is refused BEFORE the cache is consulted, and lookups go through the
+	// filtered Get. Standalone callers (nil ctx value) keep the legacy
+	// t.reg path.
+	scope := agent.ToolRegistryFromContext(ctx)
+	if scope != nil && scope.Get(name) == nil {
+		return nil, fmt.Errorf("tool %q is outside this agent's tool ceiling", name)
 	}
 
 	t.mu.Lock()

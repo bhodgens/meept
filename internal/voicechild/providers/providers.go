@@ -36,14 +36,19 @@ import (
 )
 
 // ProviderConfig selects and shapes a vendor adapter. It mirrors the leaf
-// contract: vendor name, model, the negotiated output sample rate, and the
-// recognition language.
-type ProviderConfig struct {
-	Vendor     string // "deepgram" (STT) | "openai" (TTS)
-	Model      string // empty = vendor default
-	SampleRate int    // negotiated rate (s16le mono PCM)
-	Language   string // BCP-47 tag; empty = vendor default
-}
+// contract: vendor name, model, per-instance API endpoint, TTS voice, the
+// negotiated output sample rate, and the recognition language.
+//
+// The canonical struct lives in voicechild (it rides the C3 factory
+// signatures there); this alias keeps the C2 name importable as
+// providers.ProviderConfig without a second copy of the shape.
+type ProviderConfig = voicechild.ProviderConfig
+
+// Vendor names for NewTTS dispatch (C2: "deepgram" is STT-only).
+const (
+	TTSVendorOpenAI = "openai"
+	TTSVendorQwen3  = "qwen3"
+)
 
 // Errors named per the leaf: a missing key fails the call with a
 // constructor error; the child process and other calls stay up.
@@ -52,8 +57,12 @@ var (
 	// no STT key.
 	ErrMissingSTTKey = errors.New("voicechild/providers: missing STT key for call")
 	// ErrMissingTTSKey is returned by NewTTS when the keys frame carried
-	// no TTS key.
+	// no TTS key (cloud vendors only - qwen3 is keyless, D2).
 	ErrMissingTTSKey = errors.New("voicechild/providers: missing TTS key for call")
+	// ErrMissingTTSBaseURL is returned by NewTTS for vendor qwen3 when the
+	// keys frame carried no base URL: a local OpenAI-compatible server has
+	// no meaningful default endpoint to fall back to (leaf 04 contract).
+	ErrMissingTTSBaseURL = errors.New("voicechild/providers: missing TTS base URL for call")
 	// ErrUnknownVendor is returned when ProviderConfig.Vendor names no
 	// adapter this package builds.
 	ErrUnknownVendor = errors.New("voicechild/providers: unknown vendor")
@@ -71,3 +80,7 @@ const (
 	sttVendorDefaultModel = "nova-3"
 	ttsVendorDefaultModel = "gpt-4o-mini-tts"
 )
+
+// ttsDefaultVoice is the TTS voice when ProviderConfig.Voice is empty
+// (vendor default for the OpenAI-compatible request shape).
+const ttsDefaultVoice = "alloy"

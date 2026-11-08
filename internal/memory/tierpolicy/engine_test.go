@@ -11,12 +11,6 @@ import (
 	"github.com/caimlas/meept/internal/memory/working"
 )
 
-// stubTokenCounter is the deterministic chars/4 counter used by the
-// working-tier tests.
-type stubTokenCounter struct{}
-
-func (stubTokenCounter) CountTokens(s string) int { return (len(s) + 3) / 4 }
-
 // stubCandidates serves a fixed candidate list per tier, oldest first.
 type stubCandidates struct {
 	byTier map[string][]memory.MemoryResult
@@ -354,4 +348,52 @@ type failingCandidates struct{}
 
 func (failingCandidates) Candidates(context.Context, string, int) ([]memory.MemoryResult, error) {
 	return nil, errStubFailure
+}
+
+// TestPlanEvictHonorsUsefulnessConfig pins bughunt config-tools F-2: the
+// tier-policy eviction lane must honor the resolved [memory.usefulness]
+// knob set instead of hardcoding Enabled+defaults.
+//
+//	Discrimination: candidate source order (oldest-first wiring) is
+//	[A(10d, 0 votes), B..D(30d), E(50d)]. Ranked by usefulness, E scores
+//	lowest (age penalty Ws/day) and leads the floor; the age-only lane
+//	preserves source order, so A leads. Enabled=true -> E first;
+//	Enabled=false -> A first.
+func TestPlanEvictHonorsUsefulnessConfig(t *testing.T) {
+	stub := map[string][]memory.MemoryResult{"episodic": {
+		mem("A", "x", 10), mem("B", "x", 30), mem("C", "x", 30),
+		mem("D", "x", 30), mem("E", "x", 50),
+	}}
+	votes := stubVotes{}
+	st := TierState{Tier: "episodic", Tokens: 95, Items: 5, Ceiling: 100}
+
+	firstEvict := func(t *testing.T, cfg Config, want string) {
+		t.Helper()
+		e := New(cfg, Deps{Candidates: &stubCandidates{byTier: stub}, Votes: votes})
+		act, err := e.Evaluate(context.Background(), []TierState{st})
+		if err != nil {
+			t.Fatalf("Evaluate: %v", err)
+		}
+		for i := range act {
+			if act[i].Kind == KindEvict {
+				if act[i].TargetIDs[0] != want {
+					t.Errorf("evict first id = %q, want %q (full=%v)", act[i].TargetIDs[0], want, act[i].TargetIDs)
+				}
+				return
+			}
+		}
+		t.Fatalf("no evict action in hard band (actions=%d)", len(act))
+	}
+
+	enabled := enabledCfg()
+	enabled.Usefulness = memory.UsefulEvictionConfig{Enabled: true, FloorPct: 0.2, Weights: memory.DefaultWeights()}
+	firstEvict(t, enabled, "E")
+
+	dis := enabledCfg()
+	dis.Usefulness = memory.UsefulEvictionConfig{Enabled: false, FloorPct: 0.05, Weights: memory.DefaultWeights()}
+	firstEvict(t, dis, "A")
+
+	// Zero-valued Usefulness (legacy unit engines + pre-F-2 field): the
+	// documented ranked-default posture, byte-identical to the old code.
+	firstEvict(t, enabledCfg(), "E")
 }

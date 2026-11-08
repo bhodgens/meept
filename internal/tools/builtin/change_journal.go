@@ -97,7 +97,7 @@ func NewJournal(cfg JournalConfig, logger *slog.Logger) (*Journal, error) {
 		maxBytes = defaultMaxEntryBytes
 	}
 
-	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000"
+	dsn := dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" // modernc _pragma form (bughunt 2026-11-07)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("change journal: failed to open database: %w", err)

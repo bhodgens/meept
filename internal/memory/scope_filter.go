@@ -166,6 +166,22 @@ func filterScopeResults(results []MemoryResult, f *scopeRecallFilter) []MemoryRe
 	return filtered
 }
 
+// bridgeVisible applies the C2 scope predicate to one bridge record at
+// recall time (bughunt wave 2026-11-06, memory F-1). The record's scope
+// stamp lives in its metadata (scope / project_id / user_id, folded from
+// its evidence sources at generation), so the predicate binds identically
+// to a source row: construct the Memory and run f.visible. A nil filter is
+// the unfiltered legacy path (byte-identical: everything visible). Records
+// written BEFORE the stamp existed carry no scope key, so
+// scopeFromMetadata defaults them to global — the safe legacy reading
+// (never silently hides an existing bridge).
+func bridgeVisible(f *scopeRecallFilter, b BridgeRecord) bool {
+	if f == nil {
+		return true
+	}
+	return f.visible(Memory{ID: b.ID, Content: b.Content, Metadata: b.Metadata})
+}
+
 // FilterResults applies the committed C2 scope predicate to an ALREADY
 // fetched result slice (leaf 03-agent-recall-wiring). Recall sites that
 // fetch once and scope per consumer (the loop's memvid recall path, the

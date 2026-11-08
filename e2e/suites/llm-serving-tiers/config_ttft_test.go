@@ -33,9 +33,10 @@ import (
 
 // ttftSuiteOverlay is the meept.json5 overlay shared by the live-daemon
 // scenarios: the tier policy and semantic cache keys enabled (config must
-// be ACCEPTED - the daemon-side wiring consuming them is a separate gap),
-// plus the short failure policy the chat path needs for fast stub failure
-// rotation.
+// be ACCEPTED; the daemon-side wiring now exists but the harness stubs
+// leave both tiers inert for these turns - embedder never resolves against
+// the stub topology), plus the short failure policy the chat path needs
+// for fast stub failure rotation.
 func ttftSuiteOverlay() map[string]any {
 	return map[string]any{
 		"llm.tiers.enabled":                 true,
@@ -119,9 +120,14 @@ func TestLLMCallsLedgerOnStreamingTurn(t *testing.T) {
 
 // TestConfigTierSemanticKeysAccepted (leaf 01/02 config acceptance at the
 // daemon boundary): the llm.tiers.* and llm.cache.semantic.* keys parse
-// and the daemon boots cleanly with them enabled - the wiring seam
-// (SetTierPolicy call site / semantic client attachment) is a documented
-// gap, so this pins the config contract only.
+// and the daemon boots cleanly with them enabled. The wiring seam landed
+// (issue #82 arm-up: applyTierPolicyToProviderManager arms llm.tiers;
+// buildSemanticCacheTier runs at client construction), so this now pins
+// both the config contract AND the armed posture: with
+// llm.cache.semantic.enabled=true and no embedder configured, the daemon
+// logs the degraded-off Warn line ("semantic cache disabled: no
+// embedder") and still boots clean - the degraded-never-boot-fails
+// guarantee of wiring-followups-final leaf 05 proven on the live daemon.
 func TestConfigTierSemanticKeysAccepted(t *testing.T) {
 	s := harness.Start(t, harness.WithConfigOverlay(ttftSuiteOverlay()))
 	harness.WaitFor(t, 60*time.Second, "the daemon to become healthy", func() bool {
@@ -132,6 +138,12 @@ func TestConfigTierSemanticKeysAccepted(t *testing.T) {
 		if strings.Contains(log, bad) {
 			t.Fatalf("daemon rejected the tier/semantic config keys (%q in boot log):\n%s", bad, log)
 		}
+	}
+	// Wiring-armed proof: the semantic construction site RAN and degraded
+	// to exact-only (the harness sets no embedder_alias and no
+	// memory.embeddings provider), never failing boot.
+	if !strings.Contains(log, "semantic cache disabled: no embedder") {
+		t.Fatalf("daemon boot log missing the semantic-cache degraded Warn line - the leaf-05 construction site did not run:\n%s", log)
 	}
 }
 

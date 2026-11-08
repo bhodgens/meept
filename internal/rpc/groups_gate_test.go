@@ -275,8 +275,6 @@ func TestGroupsListAndExplain(t *testing.T) {
 
 // tiny shape helpers keeping the assertions readable without importing
 // encoding/json plumbing into every branch.
-type groupsShape = map[string]any
-
 func listPol(m map[string]any) []groups.Policy {
 	raw, _ := m["policies"].([]groups.Policy)
 	return raw

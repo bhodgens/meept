@@ -288,9 +288,7 @@ func (s *Sandbox) joinOutput() string {
 	s.outMu.Lock()
 	defer s.outMu.Unlock()
 	b := make([]string, 0, len(s.outputs))
-	for _, chunk := range s.outputs {
-		b = append(b, chunk)
-	}
+	b = append(b, s.outputs...)
 	return sortJoinSpaces(b)
 }
 

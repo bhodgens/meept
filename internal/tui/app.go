@@ -218,6 +218,11 @@ type App struct {
 
 	// Thread indicator (thread-based context partitioning)
 	threadIndicator *ThreadIndicator
+
+	// Voice session (local-leg leaf 13a): shared between the status
+	// bar renderer and the /voice command handler. The audio dialer
+	// (leaf 08 shim) is injected by cmd/meept via SetVoiceAudioDialer.
+	voice *models.VoiceSessionModel
 }
 
 // KeyMap defines the key bindings.
@@ -389,6 +394,13 @@ func NewApp(socketPath string, cwd string) *App {
 	handlerOpts = append(handlerOpts, WithNotificationToggler(app.notifications))
 	app.commandHandler = NewCommandHandler(rpc, handlerOpts...)
 
+	// Voice session (local-leg leaf 13a): one model shared by the
+	// /voice command and the status bar. The audio dialer stays nil
+	// here (control-only posture) until cmd/meept injects the leaf 08
+	// shim via SetVoiceAudioDialer.
+	app.voice = models.NewVoiceSessionModel(rpc)
+	app.commandHandler.SetVoiceSessionModel(app.voice)
+
 	// Initialize thread indicator
 	app.threadIndicator = NewThreadIndicator()
 
@@ -450,6 +462,17 @@ func NewApp(socketPath string, cwd string) *App {
 	app.verbosity = parseVerbosity(clientConfig.Chat.Verbosity)
 
 	return app
+}
+
+// SetVoiceAudioDialer injects the leaf 08 client audio shim dialer
+// (voice.NewRawMicCapture + voice.NewSpeakerSink over the open call's
+// pair sockets). cmd/meept calls this right after NewApp; without it
+// /voice runs control-only (open/end/status, no audio). Must be called
+// before the program runs.
+func (a *App) SetVoiceAudioDialer(d models.VoiceAudioDialer) {
+	if a.voice != nil {
+		a.voice.SetAudioDialer(d)
+	}
 }
 
 // SetTargetSession sets a session ID to load on startup. Must be called
@@ -851,6 +874,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			now := time.Now()
 			if now.Sub(a.lastCtrlC) < a.doublePressTTL {
 				a.sidebar.Cleanup()
+				// Voice session teardown (leaf 13a): a live local call ends
+				// via voice.local.end before the app quits (no reaper wait).
+				if a.voice != nil {
+					a.voice.Teardown()
+				}
 				a.rpc.Close()
 				if a.eventRPC != nil {
 					a.eventRPC.Close()
@@ -2484,6 +2512,14 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalUsers
 			a.usersModal.Show()
 			return a, nil
+		case "i":
+			// intake status (GUI command-palette parity, issue #109): runs
+			// the same /intake slash path the chat input intercepts
+			// (CommandHandler.executeIntake -> intake.status RPC).
+			if cmd := ParseSlash("/intake"); cmd != nil && a.commandHandler != nil {
+				return a, a.commandHandler.Execute(cmd)
+			}
+			return a, nil
 		}
 		return a, nil
 
@@ -3127,6 +3163,14 @@ func (a *App) renderStatusBar() string {
 		// silently invisible.
 		if a.acpPermPending > 0 {
 			parts = append(parts, a.styles.Warning.Render(a.acpPermPendingLine()))
+		}
+
+		// Live local voice session (leaf 13a): employee + leg + call id
+		// while a /voice call is up.
+		if a.voice != nil {
+			if line := a.voice.StatusLine(); line != "" {
+				parts = append(parts, a.styles.StatusRunning.Render(line))
+			}
 		}
 
 		// Add context-sensitive quick actions

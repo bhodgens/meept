@@ -28,8 +28,8 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	employeepkg "github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/eval"
-	intakepkg "github.com/caimlas/meept/internal/intake"
 	"github.com/caimlas/meept/internal/groups"
+	intakepkg "github.com/caimlas/meept/internal/intake"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/metrics"
@@ -595,9 +595,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				localNodeID = "local"
 			}
 			cqConfig := queue.ClusterQueueConfig{
-				DefaultClaimTimeout:     clusterCfg.Gossip.HeartbeatInterval,
+				// bughunt 2026-11-07 dispatcher-queue F-2: the claim timeout
+				// must come from the QUEUE section (default 5 min, normalized
+				// in cluster.Config.Load), NOT the gossip heartbeat interval
+				// (default 30s). Worker heartbeats fire every 60s, so a 30s
+				// claim deadline expired between heartbeats: every job
+				// running >~30s was reclaimed mid-flight and double-dispatched.
+				DefaultClaimTimeout:     clusterCfg.Queue.DefaultClaimTimeout,
 				NodeReachabilityTimeout: clusterCfg.Gossip.PeerTimeout,
 				FullPayloadReplication:  false,
+			}
+			if cqConfig.DefaultClaimTimeout <= 0 {
+				cqConfig.DefaultClaimTimeout = 5 * time.Minute
 			}
 			if pq, ok := components.Queue.(*queue.PersistentQueue); ok {
 				queueStore = pq.Store()
@@ -1331,7 +1340,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// Memory RPC handlers (vector search + export). These override the
 		// dead bus proxies for the same methods — see memory_rpc.go.
 		if svcRegistry.Memory != nil {
-			registerMemoryRPCHandlers(rpcServer, svcRegistry.Memory)
+			registerMemoryRPCHandlers(rpcServer, svcRegistry.Memory, fullCfg.MultiUser.Enabled)
 			logger.Info("Memory RPC handlers registered")
 		}
 
@@ -1488,6 +1497,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// degrades its method to a clean RPC error). No-op when the RPC
 	// server is absent.
 	wireActivityComponents(components, msgBus, rpcServer, logger)
+
+	// intake.status RPC (issue #109 TUI/GUI parity): registers the
+	// handler shipped in 9a19d0be with the daemon as its config/poller
+	// snapshot source. Pure wiring of the existing nil-safe handler —
+	// a daemon without [intake] answers the disabled envelope.
+	registerIntakeStatusRPC(components, rpcServer, logger)
+
+	// voice.local.* RPC (local-leg leaf 08): opens local voice calls,
+	// ends them, and snapshots both legs' live calls. Always registers
+	// (nil voice wiring / disabled local leg = the named disabled-leg
+	// refusal, never "method not found").
+	registerVoiceLocalRPC(components, rpcServer, logger)
 
 	// Create HTTP server (if enabled)
 	var httpSrv *http.Server
@@ -1703,6 +1724,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			if components.SlackInteractions != nil {
 				httpOpts = append(httpOpts, http.WithSlackInteractions(components.SlackInteractions))
 				logger.Info("slack interactions endpoint enabled", "path", "/api/v1/slack/interactions")
+			}
+			// Telnyx voice endpoints (voice-sidecar leaf 14): wired ONLY
+			// when the voice block is enabled and its routes armed
+			// (signature verifiers constructed - otherwise nil and the
+			// routes never register, 404 instead of 503-fail-closed since
+			// an enabled-but-unverifiable voice config fails the boot).
+			if components.Voice != nil && components.Voice.Routes != nil {
+				httpOpts = append(httpOpts, http.WithVoiceRoutes(components.Voice.Routes))
+				logger.Info("voice routes armed",
+					"webhook_path", components.Voice.Routes.WebhookPath(),
+					"media_path", components.Voice.Routes.MediaPath(),
+				)
 			}
 			httpSrv = http.NewServer(httpCfg, configService, daemonControl, metricsService, svcRegistry, logger, httpOpts...)
 			// Wire firewall stats getter for HTTP endpoint
@@ -2119,6 +2152,20 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.status.Store(models.StatusStarting)
 	d.startTime = time.Now()
 
+	// Arm SIGINT/SIGTERM/SIGHUP before any listener accepts traffic.
+	// HTTP /health starts later in this function, ahead of the wait
+	// loop, so a client can SIGHUP as soon as /health answers. Until
+	// Notify is installed, SIGHUP's default disposition is terminate:
+	// the process dies and the reload never runs. e2e
+	// TestBadReloadKeepsOldConfig timed out on health under CI load
+	// (run 42329339354) for exactly that gap — harness.Start returns
+	// on /health and HUPs before the old install site. Buffer the
+	// signal; the loop below drains it, so a HUP that arrived during
+	// boot reloads once the loop starts instead of killing the daemon.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
+
 	// Validate all config sections BEFORE starting any components.
 	// This fails fast on invalid configuration rather than failing silently later.
 	if d.fullConfig != nil {
@@ -2419,10 +2466,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// "bus: Publish with no subscribers". Re-add only together with a
 	// subscriber that attaches before this point.
 
-	// Wait for shutdown signal or SIGHUP for reload
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-
+	// Wait for shutdown signal or SIGHUP for reload. sigCh was armed
+	// at the top of Run, before the HTTP listener, so a HUP that
+	// arrived during boot is already buffered here.
 	for {
 		select {
 		case sig := <-sigCh:
@@ -2449,9 +2495,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 // EXISTING queue path, then run the closed-run retention sweep. The
 // requeue closure mirrors the chat/queue submission surface: it looks up
 // the turn's ORIGINAL job by task ID (jobs keep their ID across
-// requeue/claim -- that is the whole interlock), resets it to pending
-// when it is stuck in a claim state the claim reset above could not
-// cover (e.g. failed), and re-enqueues with the SAME ID so the queue's
+// requeue/claim -- that is the whole interlock), resets a crashed
+// claimed/processing row to pending via the startup claim sweep, retries a
+// 'failed' row to pending via the queue's own Retry transition (bughunt
+// 2026-11-07 F-1: the old shape routed failed through the claim sweep,
+// whose SQL cannot match a failed row -- a silent no-op that counted the
+// turn resumed forever), and re-enqueues with the SAME ID so the queue's
 // CompleteAttempt/CompletionIsFresh claim-token dedup stays the ONLY
 // completion dedup (research F4/F5 -- nothing here re-implements it).
 // A turn with no surviving queue row (compacted away) is skipped with a
@@ -2503,9 +2552,27 @@ func (d *Daemon) rehydrateTurnJournal(ctx context.Context) (resumed int) {
 			// still counts once (T1's "already-pending requeue counts
 			// once and does not double-count").
 			return nil
-		case queue.StateClaimed, queue.StateProcessing, queue.StateFailed:
+		case queue.StateClaimed, queue.StateProcessing:
 			if _, err := pq.ResetStaleClaimsAtStartup(ctx, time.Now().Add(-time.Second)); err != nil {
 				return fmt.Errorf("reset job to pending: %w", err)
+			}
+			return nil
+		case queue.StateFailed:
+			// bughunt 2026-11-07 dispatcher-queue F-1: routing failed
+			// through ResetStaleClaimsAtStartup was a silent no-op -- its
+			// UPDATE filters state IN ('claimed','processing'), so a
+			// 'failed' row matched nothing, the closure returned nil, and
+			// Rehydrate counted the turn resumed on EVERY boot while the
+			// job never re-ran (the claim SQL only selects 'pending').
+			// Retry is the queue's own failed->pending transition (same
+			// path the worker takes), preserves the original job ID, wakes
+			// claim waiters, and errors when the row is not in a retryable
+			// state -- which Rehydrate then Warns-and-continues instead of
+			// silently counting. Jobs exhausted on retry are dead-lettered
+			// (row removed); rehydrate then takes its job==nil skip branch
+			// and never fabricates a replacement ID.
+			if err := pq.Retry(ctx, job.ID); err != nil {
+				return fmt.Errorf("retry failed job to pending: %w", err)
 			}
 			return nil
 		default:
@@ -2513,12 +2580,24 @@ func (d *Daemon) rehydrateTurnJournal(ctx context.Context) (resumed int) {
 			// turn's completion (T3 interlock) -- nothing to resume, and
 			// the run must NOT count as resumed. Returning an error here
 			// routes through Rehydrate's Warn-and-continue so the row is
-			// surfaced, never dropped silently; the journal run stays
-			// open (harmless: every later boot takes this same branch
-			// until boot-time retention prunes it via CloseRun aging --
-			// and if it is not yet closed, the queue's terminal state is
-			// the authoritative answer per research F4/D2).
-			d.logger.Warn("turn journal: open run's job is already terminal at the queue (dedup interlock: no resume)",
+			// surfaced, never dropped silently.
+			//
+			// bughunt 2026-11-07 dispatcher-queue F-3: close the journal
+			// run HERE. The queue's terminal state is the authoritative
+			// close signal (research F4/D2 -- the comment's own
+			// citation), but the writer never got the memo: a run whose
+			// terminal close write failed, or whose job reached
+			// completed/dead without OnRunClose ever firing, stayed open
+			// forever. PruneClosed deletes only turns WITH a run_closed
+			// row, and OpenRuns re-lists these rows on EVERY boot —
+			// permanent re-walk plus an unprunable retention hole that
+			// defeated the 7d F6 contract. Writing the close row now
+			// moves the run into the prunable set immediately after.
+			if cerr := d.components.TurnJournal.CloseRun(ctx, turnID); cerr != nil {
+				d.logger.Warn("turn journal: closing terminal-state run failed (retried next boot)",
+					"turn_id", turnID, "error", cerr)
+			}
+			d.logger.Warn("turn journal: open run's job is already terminal at the queue (closed for retention; no resume)",
 				"turn_id", turnID,
 				"job_id", job.ID,
 				"job_state", string(job.State),

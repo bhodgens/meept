@@ -33,6 +33,17 @@ type Frame struct {
 	Codec      string `json:"codec,omitempty"`     // L16|PCMU
 	SampleRate int    `json:"sample_rate,omitempty"`
 	Reason     string `json:"reason,omitempty"`
+
+	// Per-call provider profile (local-leg plan CL1, additive). The daemon
+	// sets these on the open frame; zero values are omitted, so existing
+	// frames stay byte-identical on the wire.
+	Local      bool   `json:"local,omitempty"`
+	SttVendor  string `json:"stt_vendor,omitempty"`
+	SttModel   string `json:"stt_model,omitempty"`
+	TtsVendor  string `json:"tts_vendor,omitempty"`
+	TtsModel   string `json:"tts_model,omitempty"`
+	TtsVoice   string `json:"tts_voice,omitempty"`
+	BargeInRms int    `json:"barge_in_rms,omitempty"`
 }
 
 // Text-socket event values (C1).
@@ -43,6 +54,11 @@ const (
 	EventEnd       = "end"
 	EventSay       = "say"
 	EventClear     = "clear"
+
+	// EventOpen is the daemon -> child open frame (local-leg plan CL1):
+	// per call, at pipeline registration, for both legs. The child creates
+	// the pipeline, dials the C2 audio pair, and answers with setup.
+	EventOpen = "open"
 )
 
 // EncodeFrame serializes f as one JSON line: compact JSON plus '\n'.

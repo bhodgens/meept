@@ -4,12 +4,15 @@
 // paraphrase hit (no fresh consult), tool-call exemption, embedder-failure
 // exact-only degradation, and the disabled posture.
 //
-// Route (documented deviation): leaf 02's T4/T5 client+daemon wiring is not
-// landed, so no chat turn can reach the tier through the harness daemon.
-// The scenarios drive the REAL llm.SemanticCache over the REAL embedding
-// path (memory/vector OpenAIProvider) against a stub /embeddings endpoint
-// - the adapter shape leaf 02's Embedder contract names - and assert via
-// the stub request counters (the observable shape the leaf prescribes).
+// Route (documented deviation): the daemon-side construction site landed
+// (wiring-followups-final leaf 05, internal/daemon/
+// semantic_cache_wiring.go) and is pinned in-package
+// (TestSemanticCacheWiring*), but the harness daemon does not expose a
+// second-chance-lookup scenario, so these scenarios keep driving the REAL
+// llm.SemanticCache over the REAL embedding path (memory/vector
+// OpenAIProvider) against a stub /embeddings endpoint - the adapter shape
+// leaf 02's Embedder contract names (the daemon's semanticVectorEmbedder
+// wraps the SAME provider) - and assert via the stub request counters.
 package llmservingtiers
 
 import (

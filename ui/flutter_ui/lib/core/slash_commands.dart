@@ -131,6 +131,13 @@ const _defaultCommands = <SlashCommand>[
     usage: '/skill [name|search <query>]',
   ),
   SlashCommand(name: '/debugsession', description: 'show session debug info'),
+  // TUI parity (issue #109): /intake opens the intake status view — the
+  // GUI twin of the TUI's executeIntake report over the intake.status RPC
+  // (internal/sharedclient/slash.go builtin "intake").
+  SlashCommand(
+    name: '/intake',
+    description: 'show github ticket intake status',
+  ),
   // TUI parity: /dnd toggles do-not-disturb through the HTTP surface of
   // the notifications.get_dnd / notifications.set_dnd RPCs — the same
   // daemon RPCs the TUI's executeDnd calls (chat_input.dart

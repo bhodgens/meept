@@ -22,19 +22,19 @@ func TestKeysWiringConstructsProviders(t *testing.T) {
 	var sttCalls, ttsCalls int
 	var mu sync.Mutex
 	child.SetProviderFactories(
-		func(key string, rate int) (STTProvider, error) {
+		func(cfg ProviderConfig, key string) (STTProvider, error) {
 			mu.Lock()
 			sttCalls++
 			mu.Unlock()
 			if key != "stt-secret" {
 				t.Errorf("stt factory key = %q, want the keys-frame key", key)
 			}
-			if rate != 16000 {
-				t.Errorf("stt factory rate = %d, want setup-frame 16000", rate)
+			if cfg.SampleRate != 16000 {
+				t.Errorf("stt factory rate = %d, want setup-frame 16000", cfg.SampleRate)
 			}
 			return stubSTT{}, nil
 		},
-		func(key string, rate int) (TTSProvider, error) {
+		func(cfg ProviderConfig, key string) (TTSProvider, error) {
 			mu.Lock()
 			ttsCalls++
 			mu.Unlock()
@@ -97,7 +97,7 @@ func TestKeysWiringConstructsProviders(t *testing.T) {
 	// providers.NewSTT's ErrMissingSTTKey; the real constructor is
 	// exercised in the providers package, here we pin the child's
 	// routing behavior on failure).
-	child.SetProviderFactories(func(key string, rate int) (STTProvider, error) {
+	child.SetProviderFactories(func(cfg ProviderConfig, key string) (STTProvider, error) {
 		return nil, ErrMissingSTTKeyFactory
 	}, nil)
 
@@ -115,8 +115,12 @@ func TestKeysWiringConstructsProviders(t *testing.T) {
 		t.Fatalf("pipeline count = %d, want 1", child.pipelineCount())
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	if runErr := <-runDone; runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 }
 
 // ErrMissingSTTKeyFactory mirrors providers.ErrMissingSTTKey without the
@@ -148,10 +152,10 @@ func TestNoKeyLogs(t *testing.T) {
 		Logger:         logger.logger(),
 	})
 	child.SetProviderFactories(
-		func(key string, rate int) (STTProvider, error) {
+		func(cfg ProviderConfig, key string) (STTProvider, error) {
 			return nil, errMissingKeyForLogTest
 		},
-		func(key string, rate int) (TTSProvider, error) {
+		func(cfg ProviderConfig, key string) (TTSProvider, error) {
 			return stubTTS{}, nil
 		},
 	)
@@ -191,8 +195,12 @@ func TestNoKeyLogs(t *testing.T) {
 		}
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	if runErr := <-runDone; runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 }
 
 var errMissingKeyForLogTest = errors.New("missing STT key for call")

@@ -2054,6 +2054,15 @@ class SdkApiClient {
     return _get('/api/v1/agents/$employeeId/review');
   }
 
+  /// GET /api/v1/intake/status (issue #109 GUI parity; bridge to the
+  /// intake.status RPC). Returns the frozen cross-surface snapshot:
+  /// {enabled, watch_repo, poll_interval, required_labels, done_label,
+  /// default_employee, gate_command, project_number, poller_scheduled,
+  /// note}. Read-only; never carries token material.
+  Future<Map<String, dynamic>> getIntakeStatus() async {
+    return _get('/api/v1/intake/status');
+  }
+
   /// Fetches eval runs from GET /api/v1/eval/runs.
   /// Returns a list of raw eval run maps matching the C1 contract.
   Future<List<Map<String, dynamic>>> listEvalRuns() async {

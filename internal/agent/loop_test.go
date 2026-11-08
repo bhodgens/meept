@@ -1349,7 +1349,8 @@ func TestTraceContextRoundtrip(t *testing.T) {
 	if got := TraceIDFromContext(ctx); got != "" {
 		t.Errorf("TraceIDFromContext(bare) = %q, want \"\"", got)
 	}
-	if got := TraceIDFromContext(nil); got != "" {
+	var nilCtx context.Context
+	if got := TraceIDFromContext(nilCtx); got != "" {
 		t.Errorf("TraceIDFromContext(nil) = %q, want \"\"", got)
 	}
 	if got := TraceIDFromContext(WithTraceContext(ctx, "")); got != "" {

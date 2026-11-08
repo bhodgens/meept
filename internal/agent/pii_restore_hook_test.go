@@ -282,3 +282,79 @@ func TestLoopPiiRestore_NoHookByteIdentical(t *testing.T) {
 		t.Fatalf("no-hook loop should be byte-identical to today (token preserved), got %q", resp)
 	}
 }
+
+// TestSecretPlaceholderCrossSessionNeverRestores pins bughunt 2026-11-06
+// security F-3: a placeholder TAGGED to session A that arrives in session
+// B's output (handoff, delegate result, memory replay) must never resolve
+// for B. The old "scoped restore made no progress -> full Deobfuscate"
+// fallback fired in exactly this case and leaked A's secret.
+func TestSecretPlaceholderCrossSessionNeverRestores(t *testing.T) {
+	const secretA = "sk-alpha...cret-1"
+	const secretB = "sk-bravo...cret-2"
+	t.Setenv("PII_RESTORE_TEST_SECRET_A", secretA)
+	t.Setenv("PII_RESTORE_TEST_SECRET_B", secretB)
+
+	obfuscator := intsecurity.NewSecretObfuscator()
+	store, err := pii.NewSwapStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSwapStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	hook := NewPiiRestoreHook(pii.NewSwapper(store), obfuscator, config.PiiConfig{Enabled: true, SecretRestore: true}, slog.Default())
+
+	// A mints a tagged placeholder for its secret.
+	phA := obfuscator.ObfuscateForSession("A holds "+secretA, "sess-alpha")
+	if phA == "A holds "+secretA {
+		t.Fatalf("no placeholder minted for session A: %q", phA)
+	}
+	carrier := extractPlaceholder(t, phA, secretA) // "#XXXX#" tagged to sess-alpha
+	// B has its own tagged entry so the map is non-trivial.
+	phB := obfuscator.ObfuscateForSession("B holds "+secretB, "sess-bravo")
+	_ = phB
+
+	// Cross-session transfer: A's placeholder text lands in B's output.
+	leakProbe := "forwarded from alpha: " + carrier
+
+	restored := hook.RestoreOutput(leakProbe, "sess-bravo")
+	if strings.Contains(restored, secretA) {
+		t.Fatalf("CROSS-SESSION LEAK: session A's secret restored into session B output: %q", restored)
+	}
+	if restored != leakProbe {
+		t.Fatalf("B's restore changed A's placeholder unexpectedly: %q", restored)
+	}
+
+	// Sessionless caller must not sweep the process-wide map either.
+	anon := hook.RestoreOutput(leakProbe, "")
+	if strings.Contains(anon, secretA) {
+		t.Fatalf("sessionless restore leaked tagged secret: %q", anon)
+	}
+}
+
+// TestUntaggedPlaceholderStillRestores guards the other half of F-3: the
+// legacy lane (untagged = pre-deploy placeholders) must keep restoring,
+// else the fix would be a regression of T4's contract.
+func TestUntaggedPlaceholderStillRestores(t *testing.T) {
+	const secret = "sk-untag...cret"
+	t.Setenv("PII_RESTORE_TEST_SECRET", secret)
+
+	obfuscator := intsecurity.NewSecretObfuscator()
+	store, err := pii.NewSwapStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSwapStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	hook := NewPiiRestoreHook(pii.NewSwapper(store), obfuscator, config.PiiConfig{Enabled: true, SecretRestore: true}, slog.Default())
+
+	obfuscated := obfuscator.Obfuscate("legacy secret " + secret) // untagged lane
+	ph := extractPlaceholder(t, obfuscated, secret)
+
+	restored := hook.RestoreOutput("echo "+ph+" back", "sess-any")
+	if !strings.Contains(restored, secret) {
+		t.Fatalf("untagged placeholder not restored via the untagged fallback: %q", restored)
+	}
+	// And in a sessionless call too (RestoreOutput refuses, untagged lane serves).
+	restoredAnon := hook.RestoreOutput("echo "+ph+" back", "")
+	if !strings.Contains(restoredAnon, secret) {
+		t.Fatalf("sessionless untagged restore broke: %q", restoredAnon)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/internal/services"
 )
@@ -19,7 +20,14 @@ import (
 // These handlers call the MemoryService directly — the same code path as the
 // HTTP routes /api/v1/memory/vector/search and /api/v1/memory/export.
 // Registered AFTER the proxy so these override the dead proxied versions.
-func registerMemoryRPCHandlers(server *rpc.Server, memSvc *services.MemoryService) {
+// multiUser carries cfg.MultiUser.Enabled into the bridge-listing scope
+// predicate (bughunt 2026-11-07 agent-fixes F-H). The Unix socket stays
+// owner-trusted (AGENTS.md: no token auth), so the honest purview for this
+// surface is USER scope: project rows are in purview, user rows match the
+// empty owner identity when multiuser is off (single-user install:
+// byte-identical full listing), and multiuser-on + unresolved identity fails
+// closed on user rows (Flag 3). Global rows always stay visible.
+func registerMemoryRPCHandlers(server *rpc.Server, memSvc *services.MemoryService, multiUser bool) {
 	if server == nil || memSvc == nil {
 		return
 	}
@@ -90,7 +98,11 @@ func registerMemoryRPCHandlers(server *rpc.Server, memSvc *services.MemoryServic
 	// returns "memory service unavailable", which the CLI renders as the
 	// honest empty state.
 	server.RegisterHandler("memory.bridges", func(ctx context.Context, _ json.RawMessage) (any, error) {
-		bridges, err := memSvc.Bridges(ctx)
+		// bughunt 2026-11-07 agent-fixes F-H: scope-gated listing (see
+		// registerMemoryRPCHandlers doc).
+		bridges, err := memSvc.Bridges(ctx,
+			memory.WithScopeFilter(memory.ScopeUser, "", ""),
+			memory.WithMultiUserEnabled(multiUser))
 		if err != nil {
 			return nil, err
 		}

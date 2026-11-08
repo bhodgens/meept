@@ -124,16 +124,23 @@ func TestConcurrentFence_Pin(t *testing.T) {
 					}
 				}
 				res = pc.CheckPermissionForAgent("file_write", map[string]string{"path": path}, "")
-				local := result{
-					checker:  checkerName,
-					idx:      idx,
-					allowed:  res.Allowed,
-					reason:   res.Reason,
-					wantDeny: denyOwn,
-				}
+				// denyOwner pins the expected deny SOURCE: a denial must
+				// name the checker's OWN fence, never the sibling's.
+				denyOwner := ""
 				if denyOwn {
-					local.wantDeny = true
-					local.reason = res.Reason
+					if isA {
+						denyOwner = "A"
+					} else {
+						denyOwner = "B"
+					}
+				}
+				local := result{
+					checker:   checkerName,
+					idx:       idx,
+					allowed:   res.Allowed,
+					reason:    res.Reason,
+					wantDeny:  denyOwn,
+					denyOwner: denyOwner,
 				}
 				results <- local
 				_ = fence // fence captured read-only (pointer value copied)
@@ -155,12 +162,22 @@ func TestConcurrentFence_Pin(t *testing.T) {
 				"command": "make build",
 				"workdir": workdir,
 			}, "")
+			// denyOwner pins the expected deny SOURCE for the assertion.
+			denyOwner := ""
+			if denyOwn {
+				if isA {
+					denyOwner = "A"
+				} else {
+					denyOwner = "B"
+				}
+			}
 			results <- result{
-				checker:  checkerName,
-				idx:      idx,
-				allowed:  res.Allowed,
-				reason:   res.Reason,
-				wantDeny: denyOwn,
+				checker:   checkerName,
+				idx:       idx,
+				allowed:   res.Allowed,
+				reason:    res.Reason,
+				wantDeny:  denyOwn,
+				denyOwner: denyOwner,
 			}
 		}(i)
 	}
@@ -179,6 +196,8 @@ func TestConcurrentFence_Pin(t *testing.T) {
 		}
 		// Cross-fence detection: a denial must name the checker's OWN fence
 		// (pointer embedded in the fake's error text), never the other one.
+		// denyOwner is the worker-side expectation of that source; a
+		// deny-owned check whose reason names the OTHER fence fails here.
 		if r.wantDeny {
 			own := fenceB
 			if r.checker == "A" {
@@ -186,6 +205,13 @@ func TestConcurrentFence_Pin(t *testing.T) {
 			}
 			if !strings.HasPrefix(r.reason, own.ownErrorText()) {
 				t.Errorf("check %d (checker %s): deny reason %q does not come from its own fence", r.idx, r.checker, r.reason)
+			}
+			wantOwner := "B"
+			if r.checker == "A" {
+				wantOwner = "A"
+			}
+			if r.denyOwner != wantOwner {
+				t.Errorf("check %d (checker %s): expected deny source %s, recorded %q", r.idx, r.checker, wantOwner, r.denyOwner)
 			}
 		}
 	}

@@ -117,7 +117,7 @@ func NewPool(cfg PoolConfig) (*Pool, error) {
 // createConn creates a new database connection with configured pragmas.
 func (p *Pool) createConn() (*sql.DB, error) {
 	// Use URI mode for more options
-	dsn := "file:" + p.dbPath + "?_fk=1&cache=shared"
+	dsn := "file:" + p.dbPath + "?cache=shared&_pragma=foreign_keys(1)" // modernc _pragma form; _fk= was silently ignored (bughunt 2026-11-07)
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

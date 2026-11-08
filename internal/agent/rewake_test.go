@@ -306,22 +306,24 @@ func TestRewake_BufferFullEvictsOldest(t *testing.T) {
 		})
 	}
 
-	// Wait for the pump to settle: the channel should be full with the
-	// NEWEST signals (the oldest were evicted). The window must be very
-	// generous because the pump goroutine competes with the rest of the
-	// package's tests (and -race overhead) for CPU: under full-suite
-	// parallel load a 10s deadline observed a false "pump did not settle"
-	// failure (the len==capacity check itself is deterministic — the
-	// buffered channel can only hold rewakeChannelCapacity).
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(loop.rewakeCh) == rewakeChannelCapacity {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	// Stop the pump BEFORE draining (bughunt wave 2026-11-06, PB-2). The
+	// previous settle loop polled len(rewakeCh)==capacity and started
+	// draining the moment it saw a full channel — but the channel hits
+	// capacity mid-pipeline (after any evict+insert pair), so under
+	// full-suite CPU pressure the drain raced the still-running pump and
+	// the newest signal (sig-10) was still to come: the collected window
+	// ended one behind and the test false-failed. stopRewake() unsubscribes
+	// (closing sub.Channel), waits on rewakeWG for the pump to drain the
+	// subscription buffer and apply the eviction policy to every signal,
+	// then closes rewakeCh — so what remains in the channel is exactly the
+	// post-eviction state. Deterministic; no polling window needed.
+	// (publishRewake wrote all total signals into the buffered
+	// subscription channel before the pump can be torn down: Subscribe's
+	// channel is buffered, Publish is non-blocking but the pump consumes
+	// in arrival order.)
+	loop.stopRewake()
 	if got := len(loop.rewakeCh); got != rewakeChannelCapacity {
-		t.Fatalf("channel length = %d, want %d (pump did not settle)", got, rewakeChannelCapacity)
+		t.Fatalf("channel length = %d, want %d (eviction policy did not leave a full buffer)", got, rewakeChannelCapacity)
 	}
 
 	// Drain and check: the last signal published must be present, and the

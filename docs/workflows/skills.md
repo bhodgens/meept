@@ -26,6 +26,19 @@ When multiple skills have the same name, the highest-priority version wins.
 - **No-clobber**: an existing skill directory in `~/.meept/skills/` is
   never overwritten. `make install` prints `skipping <name> (exists)` for
   those and `installed skill <name>` for fresh installs.
+- **Origin no-clobber (enforced)**: every funnel write stamps its
+  provenance into SKILL.md frontmatter (`origin: user|agent|evolver|review`;
+  YAML-quoted and CRLF forms count). A file declaring `origin: user`
+  refuses overwrite by any OTHER funnel: the write returns
+  `ErrUserClobber` and the candidate lands as `SKILL.md.new-<funnel>`
+  beside the real file (`.new` for unstamped writes) so concurrent
+  funnels' candidates never clobber each other — a human merge reads
+  each one (per-funnel sidecars, bughunt 2026-11-07 agent-fixes F-F).
+  The evolver skips user-locked skills BEFORE its verifier call
+  (`Skipped` in the cycle report), so a locked skill stops generating
+  per-cycle proposal churn (F-G). A user-class write is always allowed —
+  it is the explicit re-authorization. Legacy/unstamped files stay
+  overwritable.
 - **User edits shadow bundled**: discovery resolves `~/.meept/skills/`
   above the bundled source (and project-local `.meept/skills/` above
   both). Editing or replacing an installed bundled skill is safe —
@@ -137,6 +150,38 @@ with a load hint —
 ```
 
 — so the model can pull the body on demand; there is no relevance cap.
+
+### Optional: embedding-ranked listing order
+
+With `[skills.ranking].enabled = true` (default **false**), the line ORDER
+becomes cosine similarity between the episode's task text and each skill's
+name+description embedding:
+
+```json5
+"skills": {
+  "ranking": {
+    "enabled": true,
+    "base_url": "http://127.0.0.1:8090/v1", // OpenAI-compatible /v1/embeddings
+    "model": "qwen3-emb",
+    "timeout_seconds": 2,
+  },
+},
+```
+
+`scripts/embed_server.py` serves the Qwen3-Embedding weights in that shape.
+Three invariants hold regardless of the setting (user decision Q4, option 3 —
+"always rank"):
+
+- **Order-only.** Ranking never hides, drops, or caps a skill. The listed SET
+  is exactly the same as the alphabetical listing's.
+- **Once per episode.** The order is computed at episode start and frozen for
+  the episode's turns, so the skills section stays byte-stable and cannot
+  churn the prompt cache. Skill embeddings are cached in the skill index and
+  re-embedded only when a skill's frontmatter text changes.
+- **Silent degradation.** Ranking off, endpoint unreachable, empty task text,
+  or any embedding error falls back to the alphabetical order above. Listing
+  behavior is byte-identical to the disabled case — an embedding failure can
+  never fail a turn.
 
 ### Model Resolution
 - Skills declare `requires: [code, reasoning]` in YAML

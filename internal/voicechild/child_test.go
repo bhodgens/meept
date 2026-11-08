@@ -34,16 +34,23 @@ func shortTempDir(t *testing.T) string {
 }
 
 // fakeDaemon stands in for the daemon: a text socket listener recording
-// frames the child emits, plus per-call audio pair listeners.
+// frames the child emits (decoded, plus the raw lines for wire-shape
+// assertions), and per-call audio pair listeners. The child's FIRST line
+// is its start-token proof (never a frame), so serveText consumes it into
+// authLine and records only subsequent lines as frames.
 type fakeDaemon struct {
 	t           *testing.T
 	dir         string
 	textLn      net.Listener
 	mu          sync.Mutex
 	queue       []voiceframe.Frame
+	rawQueue    []string
+	authLine    string // first child line: the start-token proof
 	frameSignal chan struct{}
 	inLn        map[string]net.Listener
 	outLn       map[string]net.Listener
+	accIn       map[string]net.Conn // accepted C2 conns by ccid (acceptAll is idempotent)
+	accOut      map[string]net.Conn
 }
 
 func newFakeDaemon(t *testing.T, dir string) *fakeDaemon {
@@ -60,6 +67,8 @@ func newFakeDaemon(t *testing.T, dir string) *fakeDaemon {
 		frameSignal: make(chan struct{}, 64),
 		inLn:        make(map[string]net.Listener),
 		outLn:       make(map[string]net.Listener),
+		accIn:       make(map[string]net.Conn),
+		accOut:      make(map[string]net.Conn),
 	}
 	return d
 }
@@ -84,19 +93,36 @@ func (d *fakeDaemon) listenPair(ccid string) {
 }
 
 // acceptAll accepts one connection per audio listener (child dials both).
+// Idempotent per ccid: the child dials each socket exactly once, so a
+// second call returns the conns already accepted (some call sites accept
+// early and re-acquire `in` later for writes).
 func (d *fakeDaemon) acceptAll(ccid string) (in, out net.Conn) {
 	d.t.Helper()
 	d.mu.Lock()
 	inLn, outLn := d.inLn[ccid], d.outLn[ccid]
+	in, out = d.accIn[ccid], d.accOut[ccid]
 	d.mu.Unlock()
-	var err error
-	in, err = inLn.Accept()
-	if err != nil {
-		d.t.Fatalf("accept in: %v", err)
+	if in != nil && out != nil {
+		return in, out
 	}
-	out, err = outLn.Accept()
-	if err != nil {
-		d.t.Fatalf("accept out: %v", err)
+	var err error
+	if in == nil {
+		in, err = inLn.Accept()
+		if err != nil {
+			d.t.Fatalf("accept in: %v", err)
+		}
+		d.mu.Lock()
+		d.accIn[ccid] = in
+		d.mu.Unlock()
+	}
+	if out == nil {
+		out, err = outLn.Accept()
+		if err != nil {
+			d.t.Fatalf("accept out: %v", err)
+		}
+		d.mu.Lock()
+		d.accOut[ccid] = out
+		d.mu.Unlock()
 	}
 	return in, out
 }
@@ -128,7 +154,10 @@ func (d *fakeDaemon) waitFrame(t *testing.T) voiceframe.Frame {
 	return f
 }
 
-// serveText accepts the child's text connection and records frames it sends.
+// serveText accepts the child's text connection and records frames it
+// sends. The FIRST line is the child's start-token proof (the daemon
+// seam consumes it; it is never a C1 frame), so it is captured into
+// authLine and excluded from the frame/raw queues.
 func (d *fakeDaemon) serveText() net.Conn {
 	d.t.Helper()
 	conn, err := d.textLn.Accept()
@@ -137,7 +166,18 @@ func (d *fakeDaemon) serveText() net.Conn {
 	}
 	go func() {
 		br := bufio.NewScanner(conn)
+		first := true
 		for br.Scan() {
+			if first {
+				first = false
+				d.mu.Lock()
+				d.authLine = br.Text()
+				d.mu.Unlock()
+				continue
+			}
+			d.mu.Lock()
+			d.rawQueue = append(d.rawQueue, br.Text())
+			d.mu.Unlock()
 			f, err := voiceframe.DecodeFrame(br.Bytes())
 			if err != nil {
 				continue
@@ -152,6 +192,44 @@ func (d *fakeDaemon) serveText() net.Conn {
 		}
 	}()
 	return conn
+}
+
+// waitAuthLine waits for the child's first line (the start-token proof)
+// and returns it.
+func (d *fakeDaemon) waitAuthLine(t *testing.T) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		d.mu.Lock()
+		line := d.authLine
+		d.mu.Unlock()
+		if line != "" {
+			return line
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("child never sent its start-token proof line")
+	return ""
+}
+
+// waitRawLine waits for and pops the next raw child-emitted line. Wire
+// shape is a contract (byte-exact JSON keys), so some assertions must see
+// the line itself, not the decoded struct.
+func (d *fakeDaemon) waitRawLine(t *testing.T) string {
+	t.Helper()
+	select {
+	case <-d.frameSignal:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for child frame")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.rawQueue) == 0 {
+		t.Fatalf("no raw child line queued")
+	}
+	line := d.rawQueue[0]
+	d.rawQueue = d.rawQueue[1:]
+	return line
 }
 
 // newTestChild wires a Child against the fake daemon with a token on stdin.
@@ -194,6 +272,11 @@ func TestSetupRegistersPipeline(t *testing.T) {
 	if child.tokenLoad() != "tok-123" {
 		t.Fatalf("token not read from stdin reader")
 	}
+	// The daemon-side seam consumes the child's FIRST line as the
+	// start-token proof (it never reaches the frame queue).
+	if got := d.waitAuthLine(t); got != "tok-123" {
+		t.Fatalf("first child line = %q, want the token proof tok-123", got)
+	}
 
 	// End tears the pipeline down (T2).
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cc1", Event: voiceframe.EventEnd, Reason: "hangup"})
@@ -225,6 +308,10 @@ func TestPromptFrames(t *testing.T) {
 	go func() { runDone <- child.Run(context.Background()) }()
 
 	childConn := d.serveText()
+	// Accept returning does not mean Run has published the text conn:
+	// Dial unblocks Accept, then the child goroutine assigns c.conn.
+	// emitPrompt before that assignment is "text socket not connected".
+	waitFor(t, child.textConnected)
 
 	// no setup frame: emit directly against the connected child
 	if err := child.emitPrompt(context.Background(), "cc9", "partial words", false); err != nil {
@@ -247,14 +334,22 @@ func TestPromptFrames(t *testing.T) {
 	}
 
 	// Byte-exact C1 shape check.
-	b, _ := voiceframe.EncodeFrame(got)
+	b, encErr := voiceframe.EncodeFrame(got)
+	if encErr != nil {
+		t.Fatalf("encode final prompt frame: %v", encErr)
+	}
 	want := `{"call_id":"cc9","event":"prompt","text":"final words","last":true}` + "\n"
 	if string(b) != want {
 		t.Fatalf("final prompt wire bytes:\n got %s\nwant %s", b, want)
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	runErr := <-runDone
+	if runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 }
 
 // T4: say -> stub TTS PCM reaches the .out socket; clear drops the rest.
@@ -279,7 +374,7 @@ func TestSayClear(t *testing.T) {
 	waitFor(t, func() bool { return child.pipelineCount() == 1 })
 	p, _ := child.getPipeline("cc2")
 	gate := newGatedTTS()
-	p.tts = gate
+	swapTTS(p, gate)
 
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cc2", Event: voiceframe.EventSay, Text: "hello there", Last: lastPtr(true)})
 	gotFirst := make(chan []byte, 1)
@@ -316,8 +411,12 @@ func TestSayClear(t *testing.T) {
 		t.Fatalf("clear did not stop .out writes: got %d extra bytes", n)
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	if runErr := <-runDone; runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 }
 
 // T5: caller speech during playback emits interrupt exactly once.
@@ -342,7 +441,7 @@ func TestInterrupt(t *testing.T) {
 	waitFor(t, func() bool { return child.pipelineCount() == 1 })
 	p, _ := child.getPipeline("cc3")
 	gate := newGatedTTS()
-	p.tts = gate
+	swapTTS(p, gate)
 
 	// Start playback through the real say path; the gated TTS parks the
 	// stream after the first chunk, so playback stays active.
@@ -377,8 +476,12 @@ func TestInterrupt(t *testing.T) {
 		t.Fatalf("barge-in after playback restart must arm interrupt again")
 	}
 
-	_ = childConn.Close()
-	_ = <-runDone
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	if runErr := <-runDone; runErr != nil {
+		t.Fatalf("Run returned error on close: %v", runErr)
+	}
 }
 
 // T6: keys frame formatting redacts key material.
@@ -398,6 +501,89 @@ func TestKeysRedaction(t *testing.T) {
 	formatted := fmt.Sprintf("%v", k)
 	if strings.Contains(formatted, "sk-secret") {
 		t.Fatalf("%%v formatting leaked key material: %s", formatted)
+	}
+}
+
+// TestPerFrameErrorKeepsChildAlive (audit fix 4): one bad frame — here a
+// setup whose audio dial fails (the .out socket listener never exists),
+// then a malformed line, then a keys decode failure — must NEVER end
+// serve/Run. Every other live call keeps working; Run exits only when the
+// text socket itself dies. This pins the 'fail the call, not the child'
+// posture that handleKeys already implemented for construction failures.
+func TestPerFrameErrorKeepsChildAlive(t *testing.T) {
+	dir := shortTempDir(t)
+	d := newFakeDaemon(t, dir)
+	d.listenPair("good")
+
+	child := newTestChild(t, d, "tok")
+	runDone := make(chan error, 1)
+	go func() { runDone <- child.Run(context.Background()) }()
+	childConn := d.serveText()
+
+	// A healthy call first.
+	d.sendLine(childConn, voiceframe.Frame{
+		CallID: "good", Event: voiceframe.EventSetup, Codec: "L16", SampleRate: 16000,
+	})
+	gin, gout := d.acceptAll("good")
+	defer func() { _ = gin.Close() }()
+	defer func() { _ = gout.Close() }()
+	waitFor(t, func() bool { return child.pipelineCount() == 1 })
+
+	// 1) setup for a call whose audio pair cannot be dialed: the
+	// "deaddial" socket files are never listened on. Pre-fix this
+	// error propagated out of serve into Run and os.Exit'd the child.
+	d.sendLine(childConn, voiceframe.Frame{
+		CallID: "deaddial", Event: "setup", Codec: "L16", SampleRate: 16000,
+	})
+	// Give the handler time to fail; the child must still be serving.
+	time.Sleep(200 * time.Millisecond)
+
+	// 2) a malformed JSON line: decode failure.
+	if _, err := childConn.Write([]byte("{not json\n")); err != nil {
+		t.Fatalf("write malformed: %v", err)
+	}
+	// 3) a keys line that cannot decode.
+	sendRaw(t, childConn, `{"call_id":"good","event":"keys","stt_key":`)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// The child is alive: the healthy pipeline survived all three frames
+	// and a fresh say on it still produces audio.
+	if _, ok := child.getPipeline("good"); !ok {
+		t.Fatalf("healthy pipeline gone after per-frame errors")
+	}
+	d.sendLine(childConn, voiceframe.Frame{CallID: "good", Event: voiceframe.EventSay, Text: "still alive", Last: lastPtr(true)})
+	first := make(chan int, 1)
+	go func() {
+		_ = gout.SetReadDeadline(time.Now().Add(5 * time.Second))
+		buf := make([]byte, 640)
+		n, _ := gout.Read(buf)
+		first <- n
+	}()
+	select {
+	case n := <-first:
+		if n != 640 {
+			t.Fatalf("surviving call got %d bytes, want 640", n)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("FIX 4 VIOLATION: child stopped serving after a bad frame (or the whole suite died with it)")
+	}
+
+	// A second failing setup (empty call_id) — also non-fatal.
+	d.sendLine(childConn, voiceframe.Frame{CallID: "", Event: voiceframe.EventSetup})
+	time.Sleep(100 * time.Millisecond)
+
+	// Run returns nil ONLY when the text socket dies.
+	if err := childConn.Close(); err != nil {
+		t.Fatalf("close child conn: %v", err)
+	}
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run returned error after clean close: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Run did not return after socket close")
 	}
 }
 
@@ -476,6 +662,31 @@ func (p *pipeline) isDropped() bool {
 	return p.dropQueued
 }
 
+// isTransStarted reports whether the transcript session claim landed
+// (transMu regime — tests must not read the field bare under -race).
+func (p *pipeline) isTransStarted() bool {
+	p.transMu.Lock()
+	defer p.transMu.Unlock()
+	return p.transStarted
+}
+
+// queuedSayCount reports how many say frames sit in the FIFO (test seam
+// for the single-worker serialization audit, fix 1).
+func (p *pipeline) queuedSayCount() int {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	return len(p.sayQueue)
+}
+
+// swapTTS installs a test TTS under playMu — the same lock regime the
+// production code uses for provider fields (audit fix 2), so a test swap
+// can never race the playback worker's ttsProvider() read under -race.
+func swapTTS(p *pipeline, tts TTSProvider) {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	p.tts = tts
+}
+
 // helpers
 
 func lastPtr(v bool) *bool { return &v }
@@ -506,8 +717,85 @@ func (c *Child) tokenLoad() string {
 	return c.token
 }
 
+// textConnected reports whether Run has published the text socket.
+// serveText's Accept can return before that assignment.
+func (c *Child) textConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn != nil
+}
+
 var (
 	_ = json.Marshal  // keep encoding/json linked for wire assertions
 	_ = io.ReadFull   // keep io linked
 	_ context.Context // keep context linked
 )
+
+// T-token-dial: the child proves its start token as the FIRST line on the
+// text socket, immediately after dialing and BEFORE any C1 frame (the
+// daemon's auth gate consumes that line; a frame-first child would be
+// refused). Asserted against a raw byte-capturing listener so the ORDER is
+// pinned at the wire level, not through the fake daemon's line framing.
+func TestChildSendsTokenLineFirst(t *testing.T) {
+	dir := shortTempDir(t)
+	sockPath := filepath.Join(dir, "t.sock")
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	captured := make(chan []byte, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			captured <- nil
+			return
+		}
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+		out := make([]byte, n)
+		copy(out, buf[:n])
+		captured <- out
+		_ = conn.Close()
+	}()
+
+	child := New(ChildConfig{
+		TextSocketPath: sockPath,
+		AudioDir:       dir,
+		TokenReader:    strings.NewReader("tok-first-42\n"),
+	})
+	runDone := make(chan error, 1)
+	go func() { runDone <- child.Run(context.Background()) }()
+
+	select {
+	case b := <-captured:
+		if b == nil {
+			t.Fatalf("accept failed")
+		}
+		if string(b) != "tok-first-42\n" {
+			t.Fatalf("first bytes on the text socket = %q, want %q", string(b), "tok-first-42\n")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("child never sent its start-token proof line")
+	}
+
+	// The connection died (listener closed): Run ends; the token was the
+	// ONLY thing sent (no frame bytes landed before the close).
+	_ = ln.Close()
+	select {
+	case <-runDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after the auth listener closed")
+	}
+}
+
+// T-token-stdin-shape: readToken keeps the stdin seam exactly as contracted
+// (line read, whitespace-trimmed, empty refused) — the token the child
+// writes on the socket is the trimmed stdin line byte-for-byte.
+func TestTokenIsTrimmedStdinLine(t *testing.T) {
+	tok, err := readToken(strings.NewReader("  abc123\r\n"))
+	if err != nil || tok != "abc123" {
+		t.Fatalf("readToken = %q, %v; want abc123, nil", tok, err)
+	}
+}

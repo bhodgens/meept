@@ -22,10 +22,11 @@ func closeQuiet(s wsSession) {
 	}
 }
 
-// deepgramBaseURL is the Deepgram API host; tests override it per adapter
-// with setSTTDialer against an httptest WS fake (never the live vendor in
+// deepgramDefaultBaseURL is the Deepgram API host used when
+// ProviderConfig.BaseURL is empty; tests override it per adapter with
+// setSTTDialer against an httptest WS fake (never the live vendor in
 // CI).
-const deepgramBaseURL = "api.deepgram.com"
+const deepgramDefaultBaseURL = "api.deepgram.com"
 
 // Deepgram STT wire messages (live transcription). Only Results carries a
 // transcript; the rest are skipped by name.
@@ -52,11 +53,31 @@ type dgMessage struct {
 // httptest fake swaps the dial target without touching the live vendor.
 var sttDialer = dialDeepgram
 
-// dialDeepgram opens the live transcription WebSocket at path with the
-// Authorization header set. The bounded-close wrapper is adapted to this
-// package's simpler wsSession interface.
-func dialDeepgram(ctx context.Context, path string, header wsHeader) (wsSession, error) {
-	conn, err := wsutil.Dial(ctx, "wss://"+deepgramBaseURL+path, header.http(), wsutil.DefaultReadLimit)
+// dialURL renders a base (host, http(s):// URL, or ws(s):// URL) plus the
+// listen path as a dialable ws/wss URL: a bare host dials wss:// (the
+// cloud default shape), an http/https base is upgraded to ws/wss so an
+// httptest-style endpoint dials cleanly.
+func dialURL(base, path string) string {
+	switch {
+	case strings.HasPrefix(base, "wss://"), strings.HasPrefix(base, "ws://"):
+		return strings.TrimSuffix(base, "/") + path
+	case strings.HasPrefix(base, "https://"):
+		return "wss://" + strings.TrimPrefix(strings.TrimSuffix(base, "/"), "https://") + path
+	case strings.HasPrefix(base, "http://"):
+		return "ws://" + strings.TrimPrefix(strings.TrimSuffix(base, "/"), "http://") + path
+	default:
+		return "wss://" + base + path
+	}
+}
+
+// dialDeepgram opens the live transcription WebSocket at path against the
+// supplied base with the Authorization header set. base is the adapter's
+// resolved endpoint (cfg.BaseURL; empty = the cloud default) - honoring
+// stt_base_url from the keys frame is the same contract TTS honors for
+// tts_base_url. The bounded-close wrapper is adapted to this package's
+// simpler wsSession interface.
+func dialDeepgram(ctx context.Context, base, path string, header wsHeader) (wsSession, error) {
+	conn, err := wsutil.Dial(ctx, dialURL(base, path), header.http(), wsutil.DefaultReadLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -117,29 +138,52 @@ type DeepgramSTT struct {
 	cfg    ProviderConfig
 	apiKey string
 
-	// dial overrides the session dialer (test seam).
-	dial func(ctx context.Context, path string, header wsHeader) (wsSession, error)
+	// dial opens the vendor session (test seam). base is the adapter's
+	// resolved endpoint (cfg.BaseURL; empty = the cloud default) so the
+	// stt_base_url keys-frame field reaches the wire.
+	dial func(ctx context.Context, base, path string, header wsHeader) (wsSession, error)
 }
 
-// NewSTT builds a Deepgram streaming STT adapter from the call's key
-// (C1 keys frame). A missing key is ErrMissingSTTKey; the child and other
-// calls are unaffected. Construction logs vendor+model only, never the key.
+// NewSTT builds an STT adapter selected by ProviderConfig.Vendor. Cloud
+// vendors (deepgram) take the call's key (C1 keys frame); local vendors
+// (whisper) need none. cfg.BaseURL empty falls back to the cloud default
+// (api.deepgram.com); cfg.Model empty falls back to the vendor default
+// (nova-3). A missing key for a cloud vendor is ErrMissingSTTKey; every
+// failure is a constructor error - the child and other calls are
+// unaffected. Construction logs vendor+model only, never the key.
 func NewSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) {
-	if cfg.Vendor != "deepgram" {
+	switch cfg.Vendor {
+	case "deepgram":
+		if key == "" {
+			return nil, ErrMissingSTTKey
+		}
+		if cfg.Model == "" {
+			cfg.Model = sttVendorDefaultModel
+		}
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = deepgramDefaultBaseURL
+		}
+		return &DeepgramSTT{cfg: cfg, apiKey: key, dial: sttDialer}, nil
+	case "whisper":
+		return newWhisperSTT(cfg)
+	default:
 		return nil, fmt.Errorf("%w: stt vendor %q", ErrUnknownVendor, cfg.Vendor)
 	}
-	if key == "" {
-		return nil, ErrMissingSTTKey
+}
+
+// dialBase is the endpoint this adapter's dialer targets (cfg.BaseURL;
+// empty = the cloud default).
+func (s *DeepgramSTT) dialBase() string {
+	if s.cfg.BaseURL == "" {
+		return deepgramDefaultBaseURL
 	}
-	if cfg.Model == "" {
-		cfg.Model = sttVendorDefaultModel
-	}
-	return &DeepgramSTT{cfg: cfg, apiKey: key, dial: sttDialer}, nil
+	return s.cfg.BaseURL
 }
 
 // setSTTDialer replaces the session dialer (test seam for the httptest
-// fake vendor).
-func (s *DeepgramSTT) setSTTDialer(dial func(ctx context.Context, path string, header wsHeader) (wsSession, error)) {
+// fake vendor). base is the resolved endpoint (cfg.BaseURL; empty = the
+// cloud default) that the real dialer would target.
+func (s *DeepgramSTT) setSTTDialer(dial func(ctx context.Context, base, path string, header wsHeader) (wsSession, error)) {
 	s.dial = dial
 }
 
@@ -192,7 +236,7 @@ func (s *DeepgramSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voi
 // the Stream level rather than here.
 func (s *DeepgramSTT) dialSession(ctx context.Context) (wsSession, error) {
 	header := wsHeader{"Authorization": "Token " + s.apiKey}
-	sess, err := s.dial(ctx, s.listenPath(), header)
+	sess, err := s.dial(ctx, s.dialBase(), s.listenPath(), header)
 	if err != nil {
 		return nil, fmt.Errorf("deepgram stt: dial: %w", err)
 	}

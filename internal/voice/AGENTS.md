@@ -5,8 +5,10 @@ its child-side siblings `internal/voiceframe`, `internal/voicechild`,
 `cmd/meept-voice`). Referenced from the root AGENTS.md; the full voice
 sidecar contract lives here. Update both in the same commit per the
 root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
-(spec rev 2 + as-built), `docs/workflows/voice.md`,
-`docs/workflows/voicechild.md`. Plan tree: `docs/plans/20261102-voice-sidecar/`.
+(spec rev 3 + as-built), `docs/workflows/voice.md`,
+`docs/workflows/voicechild.md`. Plan trees:
+`docs/plans/20261102-voice-sidecar/` and
+`docs/plans/20261106-voice-local-leg/`.
 
 ## Frames (C1): one JSON object per line, every frame carries call_id
 
@@ -27,6 +29,26 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   sole exception, emitted by the daemon talk loop (greeting on connect,
   filler immediately on each final prompt - order pinned by
   TestTalkLoopGreetingAndFiller).
+- The daemon sends ONE extended C1 `keys` line per call (voice-tierA
+  leaf 03, internal/daemon/voice_keys.go) through `TextServer.SendRaw`
+  right after the talk loop registers on setup: `stt_key`, `tts_key`,
+  plus the selectors `stt_vendor`/`stt_model`/`stt_base_url`/
+  `tts_vendor`/`tts_model`/`tts_base_url`/`tts_voice` (absent = "" = the
+  hardcoded deepgram/openai defaults; a non-empty `stt_base_url`/`tts_base_url`
+  is dialed instead of the cloud default - `[voice].stt_base_url` /
+  `[voice].tts_base_url` feed them daemon-side, global config by design).
+  The vendor/model/voice selectors resolve per call through
+  `voice.ResolveProfile` (local-leg CL4: `voice.employee_leg` row >
+  per-leg config > provider default) over the call's registry row
+  (employee id + leg); an untracked ccid lands on the global values.
+  The shared `voiceframe.Frame`
+  carries NO key fields by design - `SendRaw` is the keys seam, and the
+  child decodes the raw line (KeysFrame String/LogValue redacts). The
+  child constructs its real providers from this frame (C3 factories in
+  cmd/meept-voice); a pre-Tier-A child that ignores unknown keys fields
+  keeps working (D4). A daemon-side `open` frame (local-leg CL1) now
+  precedes setup: the child answers open with setup, which arms the talk
+  loop and triggers the keys emission.
 
 ## Sockets (C2): per-call unix pairs, codec-derived chunks
 
@@ -46,12 +68,32 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
 - Reorder window (`reorder_window_frames`, default 10) with silence
   fill; frames arriving within `reorder_gap_ms` (default 60) are
   sequenced, not forwarded in arrival order (uptractor deviation).
-- Playback paces 20 ms per frame outbound; chunk size follows the
-  negotiated codec, never a fixed constant.
-- Barge-in is PER CALL: `clear` stops playback and drops queued drafts
-  for THAT call_id only; other calls' pipelines are untouched
-  (pinned by TestBargeInPerCall and the voice-bargein e2e suite). One
-  interrupt latch per barge-in in the child pipeline.
+- Playback paces 20 ms per frame outbound. Child chunks are ALWAYS
+  L16@16k = 640 bytes (`ChunkBytes("L16", 16000)`) regardless of the
+  negotiated wire codec (audit H2: the wire codec must NEVER size child
+  chunks). The wire codec selects only the transcode direction
+  (L16 = byte-identical passthrough, PCMU = mu-law 8 kHz up/downsample),
+  and the wiring REFUSES a codec/rate mismatch (L16@!=16000, PCMU@!=8000)
+  rather than silently mis-resampling (bughunt 2026-11-07 voice F-3).
+- Barge-in is PER CALL and per BARGE-IN: `clear` stops playback and drops
+  queued drafts for THAT call_id only; other calls' pipelines are untouched
+  (pinned by TestBargeInPerCall and the voice-bargein e2e suite). The
+  latch is per barge-in, not per call: the child pipeline re-opens playback
+  on the next say (playGen retirement kills the interrupted stream), and
+  the splice re-arms when fresh child PCM arrives (bughunt 2026-11-07
+  voice F-1 — both latches used to be once-per-call, muting the agent
+  after its first interrupt). One interrupt latch per barge-in in the
+  child pipeline.
+- The barge-in TRIGGER is the child's STT-partial transcript branch
+  (voice-tierA leaves 05/06, D1): pumpAudioIn feeds the bound STT
+  session; a non-empty partial while playback is live emits interrupt
+  BEFORE the partial's prompt frame (C5 order), once per barge-in
+  (noteBargeIn latch, re-armed by the next say). ONNX/jargo VAD is NOT
+  required for Tier A - the ONNX probe in cmd/meept-voice stays
+  non-fatal and the "a phone call without barge-in is refused" spec line
+  is superseded (see docs/workflows/voice-sidecar.md Tier A as-built).
+  The local leg keeps its RMS VAD trigger (Local==true only); STT
+  partials drive the phone leg.
 
 ## Release fan-out
 
@@ -103,9 +145,22 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
 - `internal/voiceframe` is dependency-free (stdlib only): both sides
   share the codec and neither may drag the other's world in through it.
 - The child never imports telnyx code and never sees the Telnyx token.
-- The child reads its one-time start token from STDIN (never
-  argv/env); the supervised-spawn path preserves that stdin seam
-  (leaf 13/14). Keep any new spawn wrapper stdin-compatible.
+- The one-time start token is an ENFORCED authentication seam:
+  ChildProc.spawn() generates the per-spawn crypto/rand token, pipes it
+  to the child STDIN (never argv/env), and - with ChildProcConfig.TokenAuth
+  wired (internal/daemon/voice_wiring.go NewChildProc sets
+  `TokenAuth: textServer`) - arms it on the text server via
+  SetExpectedToken BEFORE the process exists; each spawn re-arms a fresh
+  token. The child writes that raw stdin token as a newline-terminated
+  FIRST line after dialing text.sock, before any C1 frame; the auth line
+  is NOT a C1 event (the frame protocol is unchanged). TextServer
+  authenticates each would-be child BEFORE claimChild (first line under a
+  5s deadline, subtle.ConstantTimeCompare; mismatch/timeout/EOF logs a
+  generic WARN - token material never logged - and closes without
+  claiming; a later correct dialer can still claim). No token armed =
+  legacy first-dial-wins (unit fixtures / hand-built dialers; e2e
+  fakechild proves the token like the real binary). Keep any new spawn
+  wrapper stdin-compatible and arm the gate on its TextServer.
 
 ## One live call per employee (C8)
 
@@ -129,3 +184,84 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   supervisor mode; only the startup sweep reaps orphans (mirrors the
   root daemon invariants).
 - Child RSS is logged at spawn, first call, and idle stop.
+
+## Local leg (C11, local-leg plan): invariants
+
+The local leg (`internal/voice/local.go`, `internal/voice/localsplice.go`)
+is the carrier-free sibling of the phone leg. Two legs exist
+CONCURRENTLY - one child, one text server, one registry, one call
+store. Invariants a future agent must NOT break:
+
+- Local leg NEVER imports telnyx or touches the broker key: local.go
+  imports no telnyx package and carries no carrier seam at all
+  (internal/voice/local.go:14-15 - build-pinned, not convention), and
+  `Broker.Value("telnyx_api_key")` has no local-leg caller. The leg may
+  ride a Manager whose `telnyx.CallController` is nil (:165) - never
+  give the local leg a live carrier client, and never add a carrier
+  call to its teardown.
+- Registry leg field semantics: `Instance.Leg` is `"phone"` or
+  `"local"`; the ZERO value means "phone" so existing composite
+  literals stay valid (internal/voice/dial.go:555-569). Acquire via
+  `AcquireLeg`; `NormalizeE164` runs ONLY for leg "phone" - local
+  targets look like `local:<label>` and must never be mangled
+  (:629-633). Capacity, one-live-per-employee, and one-live-per-target
+  rules are SHARED across legs (:621-628); never add a leg-scoped
+  bypass of them.
+- Open-before-setup ordering: the daemon sends the C1 `open` frame
+  right after the AudioPair exists, for BOTH legs; the child creates
+  its pipeline, dials the pair, and answers with `setup`; the talk
+  loop arms on setup and the keys line follows at the Tier A emission
+  site (internal/daemon/voice_wiring.go:683-745; local producer
+  internal/voice/local.go:360). Do not send keys or say frames before
+  setup arrives, and do not make open failure fatal (warn-and-continue
+  on stub audio is the pinned posture, local.go:291-292).
+- RMS VAD only when Local==true: the local leg's barge-in trigger is
+  the INCOMING-audio RMS window - pumpAudioIn taps caller-mic PCM from
+  the .in socket while playback is live; 10 sustained chunk-lengths
+  (200 ms at L16/16k) of over-threshold energy (`voice.local.barge_in_rms`,
+  rmsBargeInCheck in internal/voicechild/pipeline.go) that CLEAR the
+  echo guard trip the latch. The outbound .out stream is only the echo
+  REFERENCE (playbackStream records each written chunk's energy): a trip
+  requires window-average energy > 130% of the last outbound chunk's
+  average, so speaker-through-mic echo never self-trips and the agent's
+  own loud TTS never interrupts itself (feeding the VAD outgoing PCM was
+  a pinned bug, fixed 615808e3). The trip shares the noteBargeIn latch
+  (one interrupt per barge-in, F-1 re-arm by the next say) and the
+  pendingInterrupt handshake keeps the C5 interrupt-before-prompt order
+  even though the RMS trip fires on the audio-pump goroutine; mic PCM
+  keeps flowing to STT during playback so the employee reforms from what
+  the caller said. RMS must NEVER run on phone legs - they keep the Tier
+  A STT-partial trigger. Never move the trigger to a leg-agnostic branch.
+- LocalSplice has NO reorder and NO transcode by contract:
+  unix sockets preserve order (no reorder window), and the local leg
+  negotiates L16 s16le@16000 only - any other chunk size is the named
+  ErrL16Only refusal (internal/voice/localsplice.go:8-12,49-51).
+  Outbound stays paced at one 640 B chunk per 20 ms (the uptractor
+  rule; :14-17). Do not "harden" it with a reorder buffer.
+- Deliberate policy differences, pinned not accidental: the local leg
+  skips the effects reservation and the dial audit row (no paid side
+  effect, no external party; internal/voice/local.go:10-13 mirror
+  comment) and writes no carrier POST. Do not "restore symmetry" -
+  add the leg's invariants, not the phone leg's policy.
+- Teardown parity: `LocalLeg.End` fans out through
+  `Manager.FailOutcome` exactly like a phone hangup (release hook,
+  registry release, binding end; local.go:401-440). Double End is
+  idempotent nil; a foreign (non-`local-`-shaped) id is
+  ErrUnknownLocalCall. Keep the prefix shape test honest - it is what
+  distinguishes those two.
+- Goal-hold feeding (gap closed): the call row's ended-state transition
+  rides `ReleaseHook -> heldCalls`. The ONLY production caller of
+  `AcquireCallHold` (internal/daemon/voice_employee.go:264) is now the
+  local leg: `LocalLeg.Open` invokes the injected `LocalDeps.Hold` seam
+  (wired to AcquireCallHold in internal/daemon/voice_wiring.go) once the
+  call is live, so the release fan-out's ReleaseHook sees the ccid and
+  runs `Binding.OnCallEnd` -> CallStore.End to mark the row 'ended'.
+  This covers BOTH local openers (the voice.local.* RPC seam and the
+  voice_call tool's SetVoiceLocalFunc). Keep the Hold seam optional
+  (nil degrades to no ended-state), the same posture as before.
+- RPC stays seam-based: `internal/rpc/voice_local.go` takes
+  `VoiceLocalSeams` func fields and NEVER imports internal/voice (the
+  daemon adapts in internal/daemon/voice_local_rpc.go). No audio ever
+  rides RPC - clients dial the C2 pair paths directly (internal/rpc/
+  voice_local.go:23-24).
+

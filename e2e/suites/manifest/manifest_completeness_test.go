@@ -350,6 +350,69 @@ func suitesFor(m manifest, path string) []string {
 	return out
 }
 
+// narrowCatchallPrefixes mirrors scripts/e2e-pathmap-narrow.py: for these
+// prefixes the catch-all key carries ONLY whole-subject suites (daemon boot),
+// and every file-specific selection comes from scenario-derived exact keys.
+// A change to one file of a hub package must not run suites that never touch
+// it — the 9-suites-for-voice_wiring.go pre-commit tax that motivated the
+// derivation. Keep this list in sync with NARROW_PREFIXES/KEEP_ON_CATCHALL
+// in the script.
+var narrowCatchallPrefixes = map[string][]string{
+	"internal/daemon/": {"daemon-lifecycle"},
+}
+
+// TestNarrowCatchallKeysAreScenarioDerived pins the derivation: for each
+// narrow prefix, (1) the catch-all value is EXACTLY the whole-subject keep
+// list, and (2) every scenario path under the prefix has an exact-file
+// path_map key listing exactly the suites whose scenarios cite that path.
+// If someone adds a scenario citing internal/daemon/foo_wiring.go without
+// re-running scripts/e2e-pathmap-narrow.py --write, this fails with that
+// command in the message.
+func TestNarrowCatchallKeysAreScenarioDerived(t *testing.T) {
+	m := loadManifest(t)
+
+	for prefix, keep := range narrowCatchallPrefixes {
+		got := append([]string(nil), m.PathMap[prefix]...)
+		sort.Strings(got)
+		wantKeep := append([]string(nil), keep...)
+		sort.Strings(wantKeep)
+		if strings.Join(got, ",") != strings.Join(wantKeep, ",") {
+			t.Errorf("path_map[%q] = %v, want exactly %v (whole-subject suites only; "+
+				"file-level selection belongs to derived keys — re-run "+
+				"scripts/e2e-pathmap-narrow.py --write)", prefix, got, wantKeep)
+		}
+
+		derived := map[string]map[string]bool{}
+		for _, sc := range m.Scenarios {
+			for _, p := range sc.Paths {
+				if p == prefix || !strings.HasPrefix(p, prefix) {
+					continue
+				}
+				if strings.HasSuffix(p, "/") {
+					continue // dir-style citation: its own key already rules
+				}
+				if derived[p] == nil {
+					derived[p] = map[string]bool{}
+				}
+				derived[p][sc.Suite] = true
+			}
+		}
+		for p, suites := range derived {
+			vals := m.PathMap[p]
+			set := map[string]bool{}
+			for _, v := range vals {
+				set[v] = true
+			}
+			for s := range suites {
+				if !set[s] {
+					t.Errorf("scenario evidence cites %q for suite %q but path_map[%q]=%v omits it — "+
+						"re-run scripts/e2e-pathmap-narrow.py --write", p, s, p, vals)
+				}
+			}
+		}
+	}
+}
+
 // TestManifestGeneratedDateIsCurrent guards the metadata itself: the
 // `generated` field is what tells a reader the manifest was refreshed
 // rather than hand-edited into a stale state (audit M12: it still read

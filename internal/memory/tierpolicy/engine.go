@@ -208,6 +208,12 @@ type Config struct {
 	// defaults via ResolveDemotionThresholds (30d staleness window,
 	// 0.1 usefulness floor).
 	Demotion DemotionConfig
+	// Usefulness carries the resolved [memory.usefulness] knobs for the
+	// eviction ranking lane (bughunt config-tools F-2): the engine must
+	// honor the user's enabled/floor_pct/base/wv/wa/ws, matching the
+	// consolidator path (consolidation.go ResolveUsefulEviction).
+	// Enabled=false restores age-only eviction ordering.
+	Usefulness memory.UsefulEvictionConfig
 }
 
 // Engine evaluates tier states into actions and executes them. Safe for
@@ -483,11 +489,45 @@ func (e *Engine) planEvict(ctx context.Context, st TierState, targetTokens float
 		return nil, fmt.Errorf("tierpolicy: net votes for tier %q: %w", st.Tier, err)
 	}
 	now := e.now()
-	plan := memory.PlanUsefulEviction(cands, votes, now, memory.UsefulEvictionConfig{
-		Enabled:  true,
-		FloorPct: floorPct,
-		Weights:  memory.DefaultWeights(),
-	})
+	useCfg := e.cfg.Usefulness
+	// An all-zero Usefulness means the caller never resolved the knob set
+	// (unit-test engines built with a bare Config): keep the documented
+	// package posture (enabled, floor 0.05, default weights)
+	// byte-identically. The daemon ALWAYS resolves [memory.usefulness]
+	// onto the engine Config via ResolveUsefulEviction (schema default
+	// Enabled=true), and an explicit user enabled=false arrives as a
+	// non-zero struct with Enabled false - which now takes the age-only
+	// lane (bughunt config-tools F-2).
+	if useCfg == (memory.UsefulEvictionConfig{}) {
+		useCfg = memory.UsefulEvictionConfig{Enabled: true, FloorPct: floorPct, Weights: memory.DefaultWeights()}
+	}
+	if useCfg.FloorPct <= 0 {
+		useCfg.FloorPct = floorPct
+	}
+	if useCfg.Weights.Base <= 0 {
+		useCfg.Weights = memory.DefaultWeights()
+	}
+	if !useCfg.Enabled {
+		// usefulness.enabled=false: age-only eviction ordering, mirroring
+		// the consolidator's documented "explicit false restores age-only
+		// eviction ordering" contract (config MemoryUsefulnessConfig).
+		// The candidate source (managerCandidates.Candidates ->
+		// GetOldMemories) is already oldest-first, so the pool passes
+		// through unranked. Harmful votes still evict regardless, matching
+		// PlanUsefulEviction's "harmful regardless of age/rank" posture.
+		pool := make([]string, 0, len(cands))
+		var harmful []string
+		for _, c := range cands {
+			if votes[c.Memory.ID] <= memory.HarmfulVoteThreshold {
+				harmful = append(harmful, c.Memory.ID)
+				continue
+			}
+			pool = append(pool, c.Memory.ID)
+		}
+		pool = append(harmful, pool...)
+		return e.selectEvictBatch(cands, votes, pool, st, targetTokens)
+	}
+	plan := memory.PlanUsefulEviction(cands, votes, now, useCfg)
 	// Pool order: harmful (evict regardless), floor (worst-first),
 	// survivors reversed to ascending usefulness.
 	pool := make([]string, 0, len(plan.Harmful)+len(plan.Floor)+len(plan.Survivors))
@@ -496,6 +536,15 @@ func (e *Engine) planEvict(ctx context.Context, st TierState, targetTokens float
 	for i := len(plan.Survivors) - 1; i >= 0; i-- {
 		pool = append(pool, plan.Survivors[i].Memory.ID)
 	}
+	return e.selectEvictBatch(cands, votes, pool, st, targetTokens)
+}
+
+// selectEvictBatch walks a pre-ordered candidate pool selecting a batch
+// worth ~targetTokens, bounded by MaxBatch; under MinBatch with nothing
+// harmful, the pass is skipped (nil). Shared by the usefulness-ranked and
+// age-only planEvict lanes (bughunt config-tools F-2) so the R-B5
+// batching rules stay identical across both.
+func (e *Engine) selectEvictBatch(cands []memory.MemoryResult, votes map[string]int, pool []string, st TierState, targetTokens float64) (*Action, error) {
 	byID := make(map[string]memory.MemoryResult, len(cands))
 	for _, c := range cands {
 		byID[c.Memory.ID] = c

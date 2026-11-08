@@ -122,18 +122,21 @@ type BridgeInfo struct {
 	Metadata      map[string]any `json:"metadata,omitempty"`
 }
 
-// Bridges lists every persisted bridging fact. Unavailable (not an error
+// Bridges lists persisted bridging facts through the C2 scope predicate
+// (bughunt 2026-11-07 agent-fixes F-H). No options = unfiltered listing
+// (single-user owner-trusted posture, byte-identical to the old lane).
+// Multiuser callers pass WithScopeFilter/WithMultiUserEnabled exactly like
+// Search does; unresolved identity fails closed. Unavailable (not an error
 // payload) when no bridge store is wired: the visibility surface reports the
 // empty state honestly instead of failing.
-func (s *MemoryService) Bridges(ctx context.Context) ([]BridgeInfo, error) {
+func (s *MemoryService) Bridges(ctx context.Context, opts ...memory.SearchOption) ([]BridgeInfo, error) {
 	if s.manager == nil {
 		return nil, wrapError("memory", "Bridges", ErrUnavailable)
 	}
-	store := s.manager.BridgeStore()
-	if store == nil {
+	if s.manager.BridgeStore() == nil {
 		return nil, wrapError("memory", "Bridges", ErrUnavailable)
 	}
-	records, err := store.ListBridges(ctx)
+	records, err := s.manager.ListBridgesScoped(ctx, opts...)
 	if err != nil {
 		return nil, wrapError("memory", "Bridges", err)
 	}

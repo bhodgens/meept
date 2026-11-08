@@ -76,10 +76,14 @@ String _formatQuotaHHmm(int epochMs, int? offsetMinutes, bool useDeviceTime) {
     return '${t.hour.toString().padLeft(2, '0')}:'
         '${t.minute.toString().padLeft(2, '0')}';
   }
-  // Daemon-local: epoch shifted by (daemon offset − device offset),
-  // rendered with the device getters.
-  final delta = offsetMinutes! - DateTime.now().timeZoneOffset.inMinutes;
-  final t = DateTime.fromMillisecondsSinceEpoch(epochMs + delta * 60000);
+  // Daemon-local: the daemon wall-clock is the UTC instant shifted by the
+  // daemon offset. Computed from the UTC components directly (never via the
+  // device-zone getters), so it stays correct even when the device zone's
+  // DST at the wait date differs from its DST today.
+  final t = DateTime.fromMillisecondsSinceEpoch(
+    epochMs,
+    isUtc: true,
+  ).add(Duration(minutes: offsetMinutes!));
   return '${t.hour.toString().padLeft(2, '0')}:'
       '${t.minute.toString().padLeft(2, '0')}';
 }

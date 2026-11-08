@@ -132,12 +132,16 @@ func (j *SQLiteJournal) OpenRuns(ctx context.Context) ([]OpenRun, error) {
 	defer cancel()
 
 	rows, err := j.db.QueryContext(ctx, `
-		SELECT r.turn_id, MAX(r.session_id), r.result_payload
+		SELECT r.turn_id, r.session_id, r.result_payload
 		FROM turn_journal r
 		WHERE r.kind = 'run_started'
 		  AND NOT EXISTS (
 			SELECT 1 FROM turn_journal c
 			WHERE c.turn_id = r.turn_id AND c.kind = 'run_closed'
+		  )
+		  AND r.created_at = (
+			SELECT MAX(r2.created_at) FROM turn_journal r2
+			WHERE r2.turn_id = r.turn_id AND r2.kind = 'run_started'
 		  )
 		GROUP BY r.turn_id
 	`)

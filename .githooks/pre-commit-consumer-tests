@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# Pre-commit hook: test-compile DOWNSTREAM CONSUMER packages of staged Go
+# changes (gate 2/20).
+#
+# WHY THIS EXISTS (the bug class, reproduced 2026-11-05 on main):
+# commit 65ad62b1 added SaveMessagesWithToolCalls to the session.Store
+# interface but did not update fakeStore in
+# internal/services/push_effects_test.go. `go build` skips _test.go files, so
+# the production build stayed green while `go vet`/`go test` could not compile
+# internal/services for a day. Gate 1 (pre-commit-build) builds downstream
+# importers' PRODUCTION files only; gate 6 (pre-commit-vet) vets only the
+# STAGED packages' own tests. Neither compiles a CLEAN consumer's _test.go
+# against a staged contract change - this gate closes that gap.
+#
+# HOW: for each staged non-test Go package S, one `go list` pass finds every
+# module package P whose test files import P (TestImports/XTestImports). P is
+# `go vet`-ed (vet type-checks the package including its test files) unless P
+# is itself staged (gate 6 covers it) or P has unstaged WIP (a foreign
+# session's half-written test must not block this commit - same exclusion
+# rule as pre-commit-build's downstream pass).
+#
+# KNOWN SCOPE LIMITS (deliberate, each covered elsewhere):
+#   * tag-gated packages (magefiles, e2e suites) report no imports to an
+#     untagged `go list`, so their test files are not checked here; the
+#     push-boundary gate (pre-push-vet) vet the whole tree including
+#     `-tags e2e ./e2e/...`, and CI's "Go static analysis" job runs
+#     `go vet ./...`.
+#   * S's own tests are vetted by gate 6 (pre-commit-vet); this gate never
+#     re-runs them.
+#
+# Compatibility: needs bash >= 3.2 (shared worktree; no mapfile, no
+# associative arrays). Fail-closed: a `go list` failure is a hook failure.
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}  Test-compiling clean consumer packages of staged Go changes${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=d 2>/dev/null | grep '\.go$' | grep -v '_test\.go$' || true)
+
+if [ -z "$STAGED_GO_FILES" ]; then
+  echo -e "${GREEN}✅ No Go source files staged${NC}"
+  exit 0
+fi
+
+STAGED_DIRS=$(printf '%s\n' "$STAGED_GO_FILES" | xargs -I{} dirname {} | sort -u)
+
+# Resolve staged dirs to import paths via `go list` (handles dirs whose
+# import path differs from the relative dir, e.g. cmd/ binaries keep the
+# path but package names may differ; this uses the authoritative list).
+STAGED_IMPORTS=""
+LIST_OK=1
+while IFS= read -r dir; do
+  [ -z "$dir" ] && continue
+  ip=$(go list -e "./$dir" 2>/dev/null </dev/null) || { LIST_OK=0; break; }
+  [ -z "$ip" ] && continue
+  STAGED_IMPORTS="$STAGED_IMPORTS$ip
+"
+done <<EOF
+$STAGED_DIRS
+EOF
+
+if [ "$LIST_OK" != "1" ]; then
+  echo -e "${RED}❌ go list failed - cannot compute consumer packages (not a pass).${NC}"
+  echo -e "${YELLOW}Fix the module state (go.mod / broken package) and re-run.${NC}"
+  exit 1
+fi
+
+STAGED_IMPORTS=$(printf '%s' "$STAGED_IMPORTS" | grep -v '^$' | sort -u || true)
+
+if [ -z "$STAGED_IMPORTS" ]; then
+  echo -e "${GREEN}✅ No staged Go packages to resolve${NC}"
+  exit 0
+fi
+
+# One `go list` pass over the module: ImportPath + its test-file imports.
+# .TestImports covers in-package _test.go; .XTestImports covers the
+# package_test (external) flavour. Both are exactly the file sets `go vet`
+# compiles. STAGED_IMPORTS must be EXPORTED: the awk program reads it via
+# ENVIRON (an awk command-line assignment is not visible to BEGIN).
+export STAGED_IMPORTS
+MODULE=$(go list -m 2>/dev/null </dev/null)
+if [ -z "$MODULE" ]; then
+  echo -e "${RED}❌ go list -m failed - module path unresolved (not a pass).${NC}"
+  exit 1
+fi
+
+LISTFILE=$(mktemp)
+trap 'rm -f "$LISTFILE"' EXIT
+if ! go list -f '{{.ImportPath}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... >"$LISTFILE" 2>/dev/null </dev/null; then
+  echo -e "${RED}❌ go list ./... failed - module does not load (not a pass).${NC}"
+  exit 1
+fi
+
+CONSUMERS=$(awk '
+  BEGIN { n = split(ENVIRON["STAGED_IMPORTS"], s, "\n") }
+  {
+    for (i = 2; i <= NF; i++) {
+      for (j = 1; j <= n; j++) {
+        if (s[j] != "" && $i == s[j]) { print $1; next }
+      }
+    }
+  }' "$LISTFILE" | sort -u)
+
+if [ -z "$CONSUMERS" ]; then
+  echo -e "${GREEN}✅ No downstream test consumers of staged packages${NC}"
+  exit 0
+fi
+
+# Exclude staged packages (gate 6 vets them with their own tests) and dirty
+# consumers (foreign WIP must not block this commit - same rule as
+# pre-commit-build).
+CLEAN_CONSUMERS=""
+SKIPPED_DIRTY=""
+while IFS= read -r pkg; do
+  [ -z "$pkg" ] && continue
+  if printf '%s\n' "$STAGED_IMPORTS" | grep -Fxq "$pkg"; then
+    continue
+  fi
+  rel="${pkg#$MODULE/}"
+  if ! git diff --quiet HEAD -- "$rel" 2>/dev/null; then
+    SKIPPED_DIRTY="$SKIPPED_DIRTY$rel
+"
+    continue
+  fi
+  CLEAN_CONSUMERS="$CLEAN_CONSUMERS$pkg
+"
+done <<EOF
+$CONSUMERS
+EOF
+
+if [ -n "$SKIPPED_DIRTY" ]; then
+  echo -e "${YELLOW}SKIP(dirty WIP - not this commit's state):${NC}"
+  printf '%s' "$SKIPPED_DIRTY" | grep -v '^$' | sed 's/^/  /'
+  echo ""
+fi
+
+if [ -z "$CLEAN_CONSUMERS" ]; then
+  echo -e "${GREEN}✅ No clean downstream consumers to test-compile${NC}"
+  exit 0
+fi
+
+echo "Test-compiling consumers (go vet includes their _test.go files):"
+printf '%s' "$CLEAN_CONSUMERS" | grep -v '^$' | sed 's/^/  /'
+echo ""
+
+VET_FAILED=""
+while IFS= read -r pkg; do
+  [ -z "$pkg" ] && continue
+  if ! VET_OUTPUT=$(go vet "$pkg" 2>&1 </dev/null); then
+    VET_FAILED="${VET_FAILED}${pkg}:
+${VET_OUTPUT}
+
+"
+  fi
+done <<EOF
+$CLEAN_CONSUMERS
+EOF
+
+if [ -n "$VET_FAILED" ]; then
+  echo -e "${RED}❌ a staged change breaks a downstream package's TEST compile:${NC}"
+  echo ""
+  echo "$VET_FAILED"
+  echo -e "${YELLOW}Fix the consumer's test fake/stub in this same commit.${NC}"
+  echo -e "${YELLOW}Interface method added in a staged package => every _test.go fake that${NC}"
+  echo -e "${YELLOW}implements it must gain the method (go build does NOT check _test.go).${NC}"
+  echo ""
+  exit 1
+fi
+
+echo -e "${GREEN}✅ go vet passed - staged changes compile against all clean consumer tests${NC}"
+exit 0

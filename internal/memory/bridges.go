@@ -300,7 +300,25 @@ func persistBridgeFacts(ctx context.Context, store *BridgeStore, entity string, 
 				continue
 			}
 		}
-		md := make(map[string]any, 1+len(evidenceContent))
+		// Scope stamp (bughunt wave 2026-11-06, memory F-1): a bridge is
+		// grounded in its evidence sources, so it may never be more
+		// visible than its least-visible source. Fold the evidence
+		// memories' scopes into one conservative stamp written into the
+		// bridge metadata — the recall-side scopeRecallFilter then
+		// applies the same C2 predicate to bridge rows it applies to
+		// source rows (before this, bridge recall appended after the
+		// filter and bridge rows had no scope key at all, so a
+		// project-scoped caller could read bridging facts distilled
+		// from another project's memories).
+		md := make(map[string]any, 1+len(evidenceContent)+3)
+		scope, scopeProjectID, scopeUserID := bridgeSourceScope(evidenceMemories(candidates, evIDs))
+		md["scope"] = string(scope)
+		if scopeProjectID != "" {
+			md["project_id"] = scopeProjectID
+		}
+		if scopeUserID != "" {
+			md["user_id"] = scopeUserID
+		}
 		md["entity"] = entity
 		for k, v := range evidenceContent {
 			md[k] = v
@@ -321,6 +339,82 @@ func persistBridgeFacts(ctx context.Context, store *BridgeStore, entity string, 
 		generated++
 	}
 	return generated, rejected
+}
+
+// evidenceMemories returns the candidate memories whose IDs appear in
+// evIDs (the effective provenance of one bridge). Generation guarantees
+// evIDs is a subset of the candidate IDs (filterBridgeEvidence or the
+// full-candidate fallback), so the result is never larger than candidates.
+func evidenceMemories(candidates []Memory, evIDs []string) []Memory {
+	byID := make(map[string]Memory, len(candidates))
+	for _, c := range candidates {
+		byID[c.ID] = c
+	}
+	out := make([]Memory, 0, len(evIDs))
+	for _, id := range evIDs {
+		if m, ok := byID[id]; ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// bridgeSourceScope folds the scopes of a bridge's source memories into one
+// conservative (scope, projectID, userID) stamp. A bridge may never be
+// visible to callers that cannot see EVERY source:
+//
+//   - all sources global (or unknown-scope legacy, which the filter treats
+//     as global): global.
+//   - exactly one distinct project binding and no user-scope sources:
+//     project + that projectID (global rows are transparent).
+//   - anything else (user sources present, several distinct projects, or a
+//     project row without a binding): user. The userID is the single
+//     distinct non-empty source userID when there is exactly one, else ""
+//     — empty under multiuser fails closed (hidden), which is the correct
+//     conservative direction; a user-scope caller sees ALL project rows
+//     per the committed C2 matrix, so user is always a valid upper bound
+//     for project-containing mixes.
+//
+// Never returns a stamp that EXPOSES a source to a caller that could not
+// see it; over-hiding a derived bridge is the safe error.
+func bridgeSourceScope(sources []Memory) (Scope, string, string) {
+	var projectID string
+	projectRows, userRows := 0, 0
+	userID := ""
+	seenProjects := make(map[string]bool)
+	seenUsers := make(map[string]bool)
+	for _, m := range sources {
+		scope := m.Scope
+		if scope == "" {
+			scope = scopeFromMetadata(m.Metadata)
+		}
+		switch scope {
+		case ScopeProject:
+			projectRows++
+			if pid := scopeRowOwner(m.Metadata, "project_id"); pid != "" {
+				seenProjects[pid] = true
+				projectID = pid
+			}
+		case ScopeUser:
+			userRows++
+			if uid := scopeRowOwner(m.Metadata, "user_id"); uid != "" {
+				seenUsers[uid] = true
+				userID = uid
+			}
+		}
+	}
+	switch {
+	case projectRows == 0 && userRows == 0:
+		return ScopeGlobal, "", ""
+	case userRows == 0 && len(seenProjects) == 1 && projectID != "":
+		return ScopeProject, projectID, ""
+	default:
+		uid := ""
+		if len(seenUsers) == 1 {
+			uid = userID
+		}
+		return ScopeUser, "", uid
+	}
 }
 
 // truncateBridgeEvidenceContent caps evidence text at

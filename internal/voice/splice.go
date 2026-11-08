@@ -62,13 +62,27 @@ type TextSender interface {
 	Send(raw []byte) error
 }
 
-// SpliceConfig sizes the splice's windows. Codec selects the transcode path
-// and, via ChunkBytes, the 20 ms chunk size; ReorderWindowFrames bounds the
-// reorder buffer; ReorderGap is how long a sequence gap may persist before
-// it is silence-filled; Pace is the outbound inter-frame interval (20 ms);
+// SpliceConfig sizes the splice's windows. Codec is the child-native codec
+// configuration (legacy wiring field); CodecWire is the NEGOTIATED wire
+// codec from the Telnyx media start frame (start.media_format) and selects
+// the transcode path — an empty CodecWire falls back to Codec. The child's
+// C2 chunk size is ALWAYS ChunkBytes("L16", 16000) = 640 regardless of the
+// wire codec: the child speaks L16 s16le@16k only, and the splice
+// transcodes wire <-> child. ReorderWindowFrames bounds the reorder buffer;
+// ReorderGap is how long a sequence gap may persist before it is
+// silence-filled; Pace is the outbound inter-frame interval (20 ms);
 // QueueLimit bounds the outbound queue.
 type SpliceConfig struct {
 	Codec struct {
+		BidirectionalCodec string
+		SamplingRate       int
+	} `json:"-"`
+	// CodecWire is the negotiated WIRE codec from the media start frame.
+	// Empty falls back to Codec. It drives transcodeInbound /
+	// transcodeOutbound only; child chunks are always
+	// ChunkBytes("L16", 16000) = 640 regardless of the wire codec
+	// (audit H2: the wire codec must never size child chunks).
+	CodecWire struct {
 		BidirectionalCodec string
 		SamplingRate       int
 	} `json:"-"`
@@ -78,10 +92,23 @@ type SpliceConfig struct {
 	QueueLimit          int
 }
 
-// NOTE(leaf06): SpliceConfig.Codec is declared inline above to mirror the
-// telnyx.Codec shape without importing internal/voice/telnyx here; the
-// composite-literal assignment from a telnyx.Codec value in the gate test
-// uses field names, so the shapes must stay aligned.
+// NOTE(leaf06): SpliceConfig.Codec and SpliceConfig.CodecWire are declared
+// inline above to mirror the telnyx.Codec shape without importing
+// internal/voice/telnyx here; the composite-literal assignment from a
+// telnyx.Codec value in the gate test uses field names, so the shapes must
+// stay aligned.
+
+// wireCodecOf resolves the negotiated wire codec: CodecWire when set, else
+// the legacy Codec field, else L16.
+func wireCodecOf(cfg SpliceConfig) string {
+	if cfg.CodecWire.BidirectionalCodec != "" {
+		return cfg.CodecWire.BidirectionalCodec
+	}
+	if cfg.Codec.BidirectionalCodec != "" {
+		return cfg.Codec.BidirectionalCodec
+	}
+	return "L16"
+}
 
 // SpliceDeps carries the injected edges. HangupFn and CancelDraftFn are
 // ALWAYS injected (never direct telnyx client calls from the splice).
@@ -110,6 +137,9 @@ type runSplice struct {
 	mu         sync.Mutex
 	interrupt  bool // barge-in armed for this ccid
 	cancelSent bool // CancelDraftFn fired exactly once per interrupt
+	// ended latches the end frame (bughunt 2026-11-07 voice F-1): after
+	// teardown begins the barge-in latch must never re-arm again.
+	ended bool
 
 	outboundMu      sync.Mutex
 	outbound        [][]byte
@@ -119,8 +149,26 @@ type runSplice struct {
 	lowWaterSinceMu sync.Mutex
 	hangupSent      bool        // HangupFn fired at most once
 	overflow        chan []byte // producer blocks here when the queue is full
+	// wake (audit m3) pokes the outbound pacer on every state change:
+	// chunk enqueued, chunk parked on overflow, barge-in latch tripped
+	// or re-armed, terminal pump error. It replaces the old 5/20 ms
+	// poll timers. Capacity 1: a dropped notify only means a pending
+	// wake exists, and every receiver re-checks state AFTER receiving
+	// (sender sets state before sending), so no signal is ever lost.
+	wake chan struct{}
 
 	grace time.Duration // backpressure grace window
+}
+
+// notify (audit m3) pokes the outbound pacer awake. Senders mutate state
+// (under their locks) BEFORE calling this, and every receiver re-checks
+// state AFTER receiving, so the cap-1 drop-on-full is safe: a dropped
+// notify only means a wake is already pending.
+func (s *runSplice) notify() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
 }
 
 // RunSplice runs one call's splice until ctx is cancelled, a Telnyx WS read
@@ -151,15 +199,13 @@ func RunSplice(ctx context.Context, ccid string, cfg SpliceConfig, deps SpliceDe
 	if cfg.QueueLimit <= 0 {
 		cfg.QueueLimit = 100
 	}
-	codec := cfg.Codec.BidirectionalCodec
-	if codec == "" {
-		codec = "L16"
-	}
-	rate := cfg.Codec.SamplingRate
-	if rate == 0 {
-		rate = 16000
-	}
-	chunk, err := ChunkBytes(codec, rate)
+	// The child speaks L16 s16le@16k ONLY (C2): its chunk size is the
+	// child-native 20 ms chunk, ALWAYS 640 bytes, regardless of the
+	// negotiated wire codec. Audit H2: computing this from the wire codec
+	// produced 160-byte PCMU-sized chunks of L16 PCM at the child socket -
+	// corrupt audio the moment Telnyx negotiated PCMU. The WIRE codec
+	// (CodecWire, fallback Codec) selects only the transcode path.
+	chunk, err := ChunkBytes("L16", 16000)
 	if err != nil {
 		return fmt.Errorf("voice: RunSplice %s: %w", ccid, err)
 	}
@@ -172,6 +218,7 @@ func RunSplice(ctx context.Context, ccid string, cfg SpliceConfig, deps SpliceDe
 		now:        deps.Clock,
 		chunkBytes: chunk,
 		overflow:   make(chan []byte, 1),
+		wake:       make(chan struct{}, 1),
 		grace:      5 * time.Second,
 	}
 
@@ -384,6 +431,13 @@ func (s *runSplice) handleInboundLine(
 // splitJSONObjects splits a line that may contain several concatenated JSON
 // objects (whitespace-separated) into the individual object byte slices.
 // A well-formed single-object line yields one element.
+//
+// The scan is string-aware (audit m2): `{` and `}` inside a JSON string
+// literal (e.g. a base64 payload or a text field carrying braces) must not
+// drive the depth counter, or the split cuts objects at brace characters
+// that are string CONTENT, producing fragments no decoder accepts. Escapes
+// (`\"`, `\\`) inside strings are tracked so an escaped quote or backslash
+// cannot flip string state either.
 func splitJSONObjects(line []byte) [][]byte {
 	var out [][]byte
 	depth := 0
@@ -394,10 +448,18 @@ func splitJSONObjects(line []byte) [][]byte {
 		switch {
 		case escaped:
 			escaped = false
-		case c == '\\' && inString:
-			escaped = true
-		case c == '"' && depth > 0:
-			inString = !inString
+		case inString:
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+		case c == '"':
+			if depth > 0 {
+				inString = true
+			}
+			// A quote outside any object cannot open a string that
+			// matters: only brace-delimited objects are surfaced.
 		case c == '{':
 			if depth == 0 {
 				start = i
@@ -422,11 +484,10 @@ func splitJSONObjects(line []byte) [][]byte {
 	return out
 }
 
+// codec resolves the negotiated WIRE codec for transcode selection
+// (CodecWire, fallback Codec, fallback L16). It never sizes child chunks.
 func (s *runSplice) codec() string {
-	if s.cfg.Codec.BidirectionalCodec == "" {
-		return "L16"
-	}
-	return s.cfg.Codec.BidirectionalCodec
+	return wireCodecOf(s.cfg)
 }
 
 // ---------- reorder window (spec: Frame order) ----------
@@ -650,9 +711,18 @@ func (s *runSplice) bargeIn() {
 	s.cancelSent = true
 	s.interrupt = true
 	s.mu.Unlock()
+	s.notify() // audit m3: wake the pacer to stop writing now
 
-	// Byte-exact clear frame (review checklist pins the exact bytes).
-	_ = s.deps.TelnyxWS.Write([]byte(`{"event":"clear"}`))
+	// Byte-exact clear frame (review checklist pins the exact bytes). The
+	// write error is NOT discarded (audit m1): a failed clear leaves
+	// Telnyx playout running through the barge-in, so surface it loudly.
+	// Barge-in state is already latched, so we do not retry or unwind -
+	// the splice continues (the queue drop and draft cancel below still
+	// happen) and the error is logged at warn for call diagnostics.
+	if err := s.deps.TelnyxWS.Write([]byte(`{"event":"clear"}`)); err != nil {
+		s.log.Warn("voice: barge-in clear frame write failed",
+			"ccid", s.ccid, "err", err)
+	}
 
 	s.outboundMu.Lock()
 	s.outbound = nil
@@ -683,9 +753,44 @@ func (s *runSplice) HandleText(raw []byte) error {
 	case "end":
 		s.mu.Lock()
 		s.interrupt = true
+		// bughunt 2026-11-07 voice F-1: teardown is terminal — the
+		// resume path below must never re-arm the latch after end.
+		s.ended = true
 		s.mu.Unlock()
+		s.notify() // audit m3: stop writing immediately on teardown
 	}
 	return nil
+}
+
+// resumeBargeIn re-arms the outbound latch for the NEXT barge-in
+// (bughunt 2026-11-07 voice F-1, HIGH). Before this, `interrupt` and
+// `cancelSent` were once-per-CALL latches: after the first barge-in the
+// pacer idle-waited forever (the agent was muted for the rest of the call
+// while conversation logic kept running) and bargeIn() early-returned on
+// cancelSent, so even the Telnyx clear frame stopped being sent. The
+// contract (docs/workflows/voice-sidecar.md C1, "per call_id") is
+// per-barge-in, not per-call: a resume decision lands when the call-level
+// side streams FRESH child audio (only a new supervisor-allowed say
+// produces PCM — the child aborted the interrupted utterance's stream),
+// so new bytes at the read pump mean "speak again": drop the held
+// mid-pace chunk and the queue (barge-in means interrupted audio is
+// abandoned, matching the child's clear()), and re-arm both latch fields.
+// After end the splice stays stopped (ended guard).
+func (s *runSplice) resumeBargeIn() {
+	s.mu.Lock()
+	armed := s.interrupt && !s.ended
+	if armed {
+		s.interrupt = false
+		s.cancelSent = false
+	}
+	s.mu.Unlock()
+	if armed {
+		s.notify() // audit m3: re-armed — the pacer may resume writing
+		s.outboundMu.Lock()
+		s.outbound = nil
+		s.outboundMu.Unlock()
+		s.log.Info("voice: barge-in resumed for next utterance", "ccid", s.ccid)
+	}
 }
 
 // Text implements TextSender for runSplice so callers can route C1 frames
@@ -727,6 +832,7 @@ func (s *runSplice) outboundLoop(ctx context.Context) error {
 			s.outboundMu.Unlock()
 			select {
 			case s.overflow <- chunk:
+				s.notify() // audit m3: parked overflow is now pacer-visible
 			case <-ctx.Done():
 			}
 			// Chunk parked; the pacer will pick it up.
@@ -759,6 +865,7 @@ func (s *runSplice) outboundLoop(ctx context.Context) error {
 		copy(cp, chunk)
 		s.outbound = append(s.outbound, cp)
 		s.outboundMu.Unlock()
+		s.notify() // audit m3: wake the pacer for the new chunk
 	}
 
 	// The read pump: ONE long-lived reader goroutine streams child PCM
@@ -775,6 +882,14 @@ func (s *runSplice) outboundLoop(ctx context.Context) error {
 			rb := make([]byte, s.chunkBytes)
 			n, err := s.deps.Audio.ReadFromChild(rb)
 			if n > 0 {
+				// bughunt 2026-11-07 voice F-1: fresh child PCM means the
+				// call-level side started speaking again (only a new
+				// supervisor-allowed say produces a stream — the child
+				// aborted the interrupted utterance). Re-arm the barge-in
+				// latch so the pacer resumes writing toward Telnyx. At
+				// most one stale chunk (~20 ms) can ride past the child's
+				// abort check; bounded double-talk beats a muted call.
+				s.resumeBargeIn()
 				carry = append(carry, rb[:n]...)
 				for len(carry) >= s.chunkBytes {
 					chunk := transcodeOutbound(carry[:s.chunkBytes], s.codec())
@@ -799,6 +914,7 @@ func (s *runSplice) outboundLoop(ctx context.Context) error {
 				// Terminal: surface the error to the loop.
 				select {
 				case reads <- readResult{err: err}:
+					s.notify() // audit m3: wake the loop to observe it
 				case <-ctx.Done():
 				}
 				return
@@ -836,23 +952,27 @@ func (s *runSplice) outboundLoop(ctx context.Context) error {
 }
 
 // paceOne pops one queued chunk (or a parked overflow chunk) and writes it
-// to Telnyx after the pace interval, polling interrupt state between writes
-// (the waitInterrupt shape borrowed from uptractor). The wait happens
-// BEFORE the write so a barge-in landing mid-wait stops the very next
-// frame: barge-in lands within one chunk interval.
+// to Telnyx after the pace interval, waiting on the wake channel instead of
+// polling timers (audit m3: the old shape burned ~5 timers per 20 ms chunk
+// plus a 20 ms/5 ms idle poll; now a call with live audio starts exactly
+// one timer per paced frame, and every interrupt/resume/overflow/error
+// transition wakes the pacer through s.wake). The wait happens BEFORE the
+// write so a barge-in landing mid-wait stops the very next frame: barge-in
+// lands within one chunk interval, and now within one wake.
 func (s *runSplice) paceOne(ctx context.Context) error {
 	s.mu.Lock()
 	stopped := s.interrupt
 	s.mu.Unlock()
 	if stopped {
-		// Barge-in active: idle-wait instead of writing, so the loop stays
-		// responsive to ctx and stays alive for the call's remaining life.
+		// Barge-in active: wait for the next transition (resume, end,
+		// ctx) instead of idle-polling, so the loop stays responsive
+		// and stays alive for the call's remaining life.
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(20 * time.Millisecond):
+		case <-s.wake:
+			return nil
 		}
-		return nil
 	}
 
 	var chunk []byte
@@ -865,13 +985,13 @@ func (s *runSplice) paceOne(ctx context.Context) error {
 	if chunk == nil {
 		s.outboundMu.Lock()
 		if len(s.outbound) == 0 {
-			// Nothing queued: short idle wait (poll shape, same as
-			// waitInterrupt) and no write.
+			// Nothing queued: wait for a state change (enqueue,
+			// overflow park, pump error, ctx) — no poll timer.
 			s.outboundMu.Unlock()
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(5 * time.Millisecond):
+			case <-s.wake:
 			}
 			return nil
 		}
@@ -883,13 +1003,15 @@ func (s *runSplice) paceOne(ctx context.Context) error {
 	// Grace check: degraded for too long -> hangup (once).
 	s.checkGrace()
 
-	// Wait the pace interval, polling ctx and interrupt between slices so
-	// a barge-in mid-wait stops before the write (within one interval).
-	// A barge-in landing mid-wait RE-QUEUES the chunk at the front: the
+	// Wait the pace interval on the wall clock (as before: s.now is the
+	// injectable test clock and stays out of the pacing path). A
+	// barge-in landing mid-wait RE-QUEUES the chunk at the front: the
 	// frame is never lost (no drop path), it is held for the post-clear
-	// resume decision at the call level.
-	remain := s.cfg.Pace
-	for remain > 0 {
+	// resume decision at the call level. A wake consumed mid-wait only
+	// re-checks the latch; the deadline is honored regardless, so the
+	// send rate never accelerates.
+	deadline := time.Now().Add(s.cfg.Pace)
+	for {
 		s.mu.Lock()
 		stopped := s.interrupt
 		s.mu.Unlock()
@@ -899,16 +1021,22 @@ func (s *runSplice) paceOne(ctx context.Context) error {
 			s.outboundMu.Unlock()
 			return nil
 		}
-		step := remain
-		if step > 5*time.Millisecond {
-			step = 5 * time.Millisecond
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			break
 		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
-		case <-time.After(step):
+		case <-s.wake:
+			timer.Stop()
+			// Re-loop: check the interrupt latch; keep waiting to
+			// the original deadline. A dropped-or-stale wake is
+			// safe — state is always re-read after receiving.
+		case <-timer.C:
 		}
-		remain -= step
 	}
 
 	encoded, err := EncodeMediaFrame(chunk)

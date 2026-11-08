@@ -21,6 +21,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -42,17 +43,67 @@ type DialerFunc func(ctx context.Context, employeeID, target, requestID string) 
 // attributable employee).
 type AgentIDFunc func(ctx context.Context) string
 
-// VoiceCallTool places one outbound call on behalf of the calling employee.
+// LocalFunc is the injected local-leg seam (local-leg plan leaf 09): the
+// daemon wiring adapts voice.LocalLeg.Open onto it, so the builtin package
+// carries NO internal/voice import edge (plain strings, never a voice
+// type). The return pair is (call_id, session_id); refusals come back as
+// errors and surface through the ToolResult envelope like dial refusals
+// (busy, duplicate target, disabled-inside-the-leg all ride this path -
+// policy stays entirely in the leg, per the tool's founding rule).
+type LocalFunc func(ctx context.Context, employeeID, label, ttsVoice string) (callID, sessionID string, err error)
+
+// LegDefaultFunc resolves the CL4 default leg for the calling employee:
+// voice.employee_leg[employee].leg, falling back to voice.default_leg.
+// The daemon wiring injects the config lookup; an empty (or nil-func)
+// resolution means "phone". Never a policy decision of the tool's own -
+// just the CL4 leg chain's last two layers.
+type LegDefaultFunc func(ctx context.Context, employeeID string) string
+
+// voice legs a call may name (CL4). The empty string means "not specified"
+// and resolves through LegDefaultFunc; anything else refuses.
+const (
+	toolLegPhone = "phone"
+	toolLegLocal = "local"
+)
+
+// VoiceCallTool places one outbound call on behalf of the calling employee
+// - on the PHONE leg (allowlisted number, carrier) or on the LOCAL leg
+// (direct-TTS voice session on a same-machine client, no carrier, no
+// cloud). Both legs share the same policy gates behind their seams; the
+// tool validates argument shapes and routes.
 type VoiceCallTool struct {
 	tools.ToolDefaults
 	dial    DialerFunc
 	agentID AgentIDFunc
+	local   LocalFunc
+	legDef  LegDefaultFunc
 }
 
 // NewVoiceCallTool constructs the tool. A nil dial func fails closed at
-// Execute (config error surfaced to the model, never a panic).
+// Execute (config error surfaced to the model, never a panic). The local
+// seam starts nil (leg disabled); the wiring arms it additively via
+// SetVoiceLocalFunc. An empty leg arg with no armed LegDefaultFunc means
+// phone - the CL4 config default byte-compatible with the pre-local tool.
 func NewVoiceCallTool(dial DialerFunc, agentID AgentIDFunc) *VoiceCallTool {
 	return &VoiceCallTool{dial: dial, agentID: agentID}
+}
+
+// SetLocalFunc arms the local leg seam. Nil fn is ignored (every Set*
+// nil-guarded per repo rule): an unarmed local leg fails closed at Execute
+// with the named disabled error.
+func (t *VoiceCallTool) SetLocalFunc(fn LocalFunc) {
+	if fn == nil {
+		return
+	}
+	t.local = fn
+}
+
+// SetLegDefault arms the CL4 leg-default seam. Nil fn is ignored.
+func (t *VoiceCallTool) SetLegDefault(fn LegDefaultFunc) {
+	if fn == nil {
+		return
+	}
+	t.legDef = fn
 }
 
 func (t *VoiceCallTool) Name() string { return "voice_call" }
@@ -60,7 +111,7 @@ func (t *VoiceCallTool) Name() string { return "voice_call" }
 func (t *VoiceCallTool) Category() string { return "platform" }
 
 func (t *VoiceCallTool) Description() string {
-	return "Place an outbound phone call to an allowlisted number on behalf of the calling employee. The call is gated by the voice allowlist, the concurrency registry, and the effects ledger (a retry of the same request_id never rings twice). Returns the call_control_id; the call's lifecycle surfaces via voice.call.* progress events."
+	return "Place a voice call on behalf of the calling employee. Default leg is the phone (allowlisted E.164 number, carrier call). With leg=\"local\" (when the local voice leg is enabled) it instead opens a local voice session for this employee's goal loop on whatever client connects next - on that leg target is an optional session label, not a phone number, and no carrier or cloud provider is involved. Every call is gated by the voice policy stack: the allowlist and effects ledger on the phone leg (a retry of the same request_id never rings twice), the concurrency registry and capacity on both. Pass voice to override the TTS voice for this call. Returns the call_control_id (and session_id on the local leg); the call's lifecycle surfaces via voice.call.* progress events."
 }
 
 func (t *VoiceCallTool) Parameters() llm.FunctionParameters {
@@ -69,7 +120,7 @@ func (t *VoiceCallTool) Parameters() llm.FunctionParameters {
 		Properties: map[string]llm.ParameterProperty{
 			"target": {
 				Type:        "string",
-				Description: "Phone number to dial, E.164 format (+1555...). Must be in voice.allowed_numbers.",
+				Description: "Phone leg: the number to dial, E.164 format (+1555...), must be in voice.allowed_numbers. Local leg: optional session label (default: this employee's id).",
 			},
 			"request_id": {
 				Type:        "string",
@@ -79,26 +130,52 @@ func (t *VoiceCallTool) Parameters() llm.FunctionParameters {
 				Type:        "string",
 				Description: "Optional first-turn context for the employee answering the call (why it is calling).",
 			},
+			"leg": {
+				Type:        "string",
+				Description: "Which leg to place the call on: \"phone\" (default) or \"local\" (direct-TTS session on a connected client; requires the local voice leg to be enabled). Omit to use the configured employee/config default.",
+			},
+			"voice": {
+				Type:        "string",
+				Description: "Optional TTS voice override for this call (highest CL4 precedence). Omit to use the employee/per-leg/provider defaults.",
+			},
 		},
-		Required: []string{"target"},
 	}
 }
 
-// VoiceCallResult is the structured tool result.
+// VoiceCallResult is the structured tool result. SessionID is populated on
+// the local leg only (the phone leg has no meept session before answer);
+// Target carries the phone number or the resolved local target.
 type VoiceCallResult struct {
 	CallControlID string `json:"call_control_id"`
 	Target        string `json:"target"`
-	State         string `json:"state"` // dialing (terminal outcome via events)
+	State         string `json:"state"`                // dialing (terminal outcome via events)
+	SessionID     string `json:"session_id,omitempty"` // local leg only
+}
+
+// resolveLeg applies the CL4 leg chain: the arg wins; an empty arg falls to
+// the injected employee/config default; an unresolved default is phone.
+func (t *VoiceCallTool) resolveLeg(ctx context.Context, arg, employeeID string) (string, error) {
+	switch arg {
+	case toolLegPhone, toolLegLocal:
+		return arg, nil
+	case "":
+		if t.legDef != nil {
+			if def := t.legDef(ctx, employeeID); def == toolLegLocal {
+				return toolLegLocal, nil
+			}
+		}
+		return toolLegPhone, nil
+	default:
+		return "", fmt.Errorf("voice_call: leg must be \"phone\" or \"local\" (got %q)", arg)
+	}
 }
 
 func (t *VoiceCallTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	if t.dial == nil {
-		return tools.NewErrorResult("voice_call: dialer not wired (voice block disabled or misconfigured)"), nil
-	}
 	target, _ := args["target"].(string)
-	if strings.TrimSpace(target) == "" {
-		return tools.NewErrorResult("voice_call: target is required (E.164 phone number)"), nil
-	}
+	target = strings.TrimSpace(target)
+	legArg, _ := args["leg"].(string)
+	ttsVoice, _ := args["voice"].(string)
+
 	requestID, _ := args["request_id"].(string)
 	if requestID == "" {
 		requestID = id.Generate("voicecall-")
@@ -112,6 +189,28 @@ func (t *VoiceCallTool) Execute(ctx context.Context, args map[string]any) (any, 
 		return tools.NewErrorResult("voice_call: no employee identity on this request; the dial is attributable only to an employee"), nil
 	}
 
+	leg, err := t.resolveLeg(ctx, strings.TrimSpace(legArg), employeeID)
+	if err != nil {
+		return tools.NewErrorResult(err.Error()), nil
+	}
+
+	if leg == toolLegLocal {
+		return t.executeLocal(ctx, employeeID, target, ttsVoice)
+	}
+	return t.executePhone(ctx, employeeID, target, requestID)
+}
+
+// executePhone is the pre-existing phone branch, behavior unchanged: the
+// target rule (required, E.164) and the DialFunc round-trip stay exactly
+// as the leaf-14 tool pinned them.
+func (t *VoiceCallTool) executePhone(ctx context.Context, employeeID, target, requestID string) (any, error) {
+	if t.dial == nil {
+		return tools.NewErrorResult("voice_call: dialer not wired (voice block disabled or misconfigured)"), nil
+	}
+	if target == "" {
+		return tools.NewErrorResult("voice_call: target is required (E.164 phone number)"), nil
+	}
+
 	ccid, err := t.dial(ctx, employeeID, target, requestID)
 	if err != nil {
 		return tools.NewErrorResultErr(
@@ -121,6 +220,28 @@ func (t *VoiceCallTool) Execute(ctx context.Context, args map[string]any) (any, 
 		CallControlID: ccid,
 		Target:        target,
 		State:         "dialing",
+	}), nil
+}
+
+// executeLocal routes the local leg: the seam must be armed (the wiring
+// arms it only when the leg is enabled and constructed - a nil seam IS the
+// disabled-leg refusal, mirroring the nil-dial rule); the target arg is an
+// OPTIONAL label (empty = the leg's own default); the ttsVoice override
+// rides through for the CL4 voice chain.
+func (t *VoiceCallTool) executeLocal(ctx context.Context, employeeID, label, ttsVoice string) (any, error) {
+	if t.local == nil {
+		return tools.NewErrorResultErr(errors.New("voice_call refused: voice local leg disabled")), nil
+	}
+	callID, sessionID, err := t.local(ctx, employeeID, label, ttsVoice)
+	if err != nil {
+		return tools.NewErrorResultErr(
+			fmt.Errorf("voice_call refused: %w", err)), nil
+	}
+	return tools.NewSuccessResult(VoiceCallResult{
+		CallControlID: callID,
+		Target:        label,
+		State:         "dialing",
+		SessionID:     sessionID,
 	}), nil
 }
 
@@ -158,6 +279,25 @@ func SetVoiceProvider(dial DialerFunc, agentID AgentIDFunc, broker *secrets.Brok
 	}
 }
 
+// SetVoiceLocalFunc binds the local-leg seam additively (local-leg plan
+// leaf 09 T4): the daemon wiring adapts voice.LocalLeg.Open onto it and
+// calls this right after SetVoiceProvider. Nil fn is ignored (repo Set*
+// nil-guard rule) so a disabled local leg leaves the previous binding
+// intact and every provider-built tool keeps its nil local seam - the
+// fail-closed "voice local leg disabled" posture. Kept separate from
+// SetVoiceProvider so the pre-existing 3-arg call site (components.go)
+// stays source-compatible while the parallel leaf 08 wires it.
+func SetVoiceLocalFunc(fn LocalFunc) {
+	if fn == nil {
+		return
+	}
+	voiceLocalFunc = fn
+}
+
+// voiceLocalFunc is the package-level local-leg binding the factory folds
+// into every constructed provider. Nil = leg disabled.
+var voiceLocalFunc LocalFunc
+
 // voiceProvider is the toolprov.Provider for the voice tool group.
 type voiceProvider struct {
 	dial    DialerFunc
@@ -170,9 +310,9 @@ func (p *voiceProvider) Name() string { return "voice" }
 
 // Discover implements toolprov.Provider.
 func (p *voiceProvider) Discover() []tools.Tool {
-	return []tools.Tool{
-		NewVoiceCallTool(p.dial, p.agentID),
-	}
+	tool := NewVoiceCallTool(p.dial, p.agentID)
+	tool.SetLocalFunc(voiceLocalFunc)
+	return []tools.Tool{tool}
 }
 
 // PermissionClass implements toolprov.Provider. Placing a phone call

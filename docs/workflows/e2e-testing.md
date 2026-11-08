@@ -110,6 +110,17 @@ make e2e-affected                              # same, --from-diff
 Behavior:
 
 - Affected Go suite dirs that exist → `go test -tags e2e -count=1 -p 2` on them.
+- **File-level narrowing on hub prefixes.** A catch-all package key like
+  `internal/daemon/` used to select nine suites for ANY file in the package,
+  so a one-line `voice_wiring.go` change ran the memory/agent/queue suites
+  that never touch it. Hub prefixes now carry ONLY whole-subject suites
+  (`daemon-lifecycle`: boot/pid/restart hygiene, breakable by any daemon
+  change); file-specific selection comes from exact-file `path_map` keys
+  DERIVED from scenario evidence (each scenario's `paths[]` lists the source
+  files its suite exercises). Re-derive after adding scenarios that cite new
+  hub files: `python3 scripts/e2e-pathmap-narrow.py --write` (pinned by
+  `TestNarrowCatchallKeysAreScenarioDerived` in the manifest suite, which
+  fails when the derivation and the evidence drift apart).
 - Affected suites with `runner: dart` → their `command` run from their
   `workdir` (skipped with a printed note when the Flutter toolchain is
   absent). A failing Dart suite fails the gate exactly like a Go one.

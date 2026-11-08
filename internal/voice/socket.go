@@ -7,6 +7,7 @@ package voice
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 )
@@ -35,6 +37,17 @@ func SocketDir() string {
 // with a log line and closed (documented choice: refuse, not replace -
 // replacing would silently steal the live call transport from a healthy
 // child, e.g. one recovering from a forked duplicate).
+//
+// Start-token authentication (bughunt 2026-11-07 voice): the daemon pipes a
+// one-time start token to the child's STDIN at spawn (childproc.go). When
+// an expected token is set via SetExpectedToken, a connecting process must
+// prove it by sending the token as its FIRST newline-terminated line,
+// BEFORE any C1 frame: the line is consumed by the auth step and never
+// parsed as a frame. A mismatch or a slow client is refused (conn closed,
+// no claim, no frame processing - so no provider-key SendRaw can ever
+// reach an unauthenticated dialer). With NO expected token set the server
+// behaves exactly as before (first dial wins the claim): unit fixtures and
+// hand-built child dialers keep working unchanged.
 type TextServer struct {
 	path   string
 	logger *slog.Logger
@@ -44,6 +57,43 @@ type TextServer struct {
 	child   net.Conn // nil until a child connects
 	handler func(Frame)
 	closed  bool
+
+	// expectedToken is the one-time start token the connecting child must
+	// prove on its first line (guarded by mu; nil = no enforcement).
+	expectedToken []byte
+
+	// childReady closes the first time a child is claimed (leaf 03):
+	// SendRaw's keys emission waits on it so a child that has dialed but
+	// not yet been claimed by acceptLoop (unix connect completes into the
+	// backlog before Accept runs) still receives its frame.
+	childReadyOnce sync.Once
+	childReady     chan struct{}
+
+	// authTimeout bounds the first-line (start token) read when an
+	// expected token is armed. Zero means textAuthTimeoutDefault; tests
+	// lower it to keep the timeout-refusal case fast.
+	authTimeout time.Duration
+}
+
+// textAuthTimeoutDefault bounds how long the server waits for the connecting
+// child to send its start-token line when an expected token is armed.
+const textAuthTimeoutDefault = 5 * time.Second
+
+// SetExpectedToken arms the start-token authentication gate: a connecting
+// child must send token as its FIRST newline-terminated line before any C1
+// frame to be claimed (see TextServer doc). An empty token clears the gate
+// (legacy accept-first behavior; every Set* is nil/empty-guarded per repo
+// rule in the sense that no partial state is ever armed). The daemon's
+// spawn path (ChildProc) sets the per-spawn token before the child can
+// dial; the token is compared with subtle.ConstantTimeCompare.
+func (s *TextServer) SetExpectedToken(token string) {
+	s.mu.Lock()
+	if token == "" {
+		s.expectedToken = nil
+	} else {
+		s.expectedToken = []byte(token)
+	}
+	s.mu.Unlock()
 }
 
 // NewTextServer creates a server listening on path (a unix socket path).
@@ -53,7 +103,7 @@ func NewTextServer(path string, logger *slog.Logger) *TextServer {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &TextServer{path: path, logger: logger}
+	return &TextServer{path: path, logger: logger, childReady: make(chan struct{})}
 }
 
 // Start binds the socket and serves until ctx is cancelled or Close is
@@ -89,7 +139,9 @@ func (s *TextServer) Start(ctx context.Context) error {
 
 // acceptLoop accepts connections until the listener closes. The first
 // connection becomes the child; subsequent ones are refused with a log
-// line (one child hosts N pipelines - see TextServer doc).
+// line (one child hosts N pipelines - see TextServer doc). When a start
+// token is armed, the would-be child must authenticate its first line
+// BEFORE any claim or frame processing (see TextServer doc).
 func (s *TextServer) acceptLoop(ctx context.Context, ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
@@ -104,6 +156,13 @@ func (s *TextServer) acceptLoop(ctx context.Context, ln net.Listener) {
 			s.logger.Error("voice: text socket accept failed", "error", err)
 			return
 		}
+		// A live child short-circuits the refusal path (today's behavior:
+		// immediate refuse + close, no auth read). Only a connection that
+		// could still BECOME the child pays the auth step.
+		if !s.hasChild() && !s.authenticate(conn) {
+			_ = conn.Close() //nolint:mutexio // refusal path, no lock held
+			continue
+		}
 		if s.claimChild(conn) {
 			go s.readLoop(conn)
 			continue
@@ -114,14 +173,87 @@ func (s *TextServer) acceptLoop(ctx context.Context, ln net.Listener) {
 	}
 }
 
+// hasChild reports whether a child is already claimed.
+func (s *TextServer) hasChild() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.child != nil
+}
+
+// authLineMaxBytes caps the first-line read: the start token is 32 hex
+// chars (plus newline); anything longer is not a token and is refused
+// without reading further.
+const authLineMaxBytes = 1024
+
+// authenticate proves conn against the armed start token: it reads the
+// connection's FIRST newline-terminated line (byte-at-a-time so no frame
+// bytes are ever buffered past the auth line - readLoop starts cleanly
+// after it) under the auth deadline, and compares it to the expected token
+// in constant time. With no token armed it accepts immediately (legacy
+// first-dial-wins behavior). On failure it logs a warning carrying NO
+// token material and returns false; the caller closes the conn without
+// claiming it. The auth line is consumed here and never parsed as a frame.
+func (s *TextServer) authenticate(conn net.Conn) bool {
+	s.mu.Lock()
+	want := s.expectedToken
+	timeout := s.authTimeout
+	s.mu.Unlock()
+	if len(want) == 0 {
+		return true
+	}
+	if timeout <= 0 {
+		timeout = textAuthTimeoutDefault
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	line, ok := readFirstLine(conn, authLineMaxBytes)
+	_ = conn.SetReadDeadline(time.Time{})
+	if ok && len(want) == len(line) && subtle.ConstantTimeCompare(line, want) == 1 {
+		return true
+	}
+	// Deliberately generic: no token value, no comparison detail, no
+	// distinction between timeout/oversize/mismatch in the log line.
+	s.logger.Warn("voice: text-socket child refused: start token authentication failed")
+	return false
+}
+
+// readFirstLine reads bytes one at a time until '\n' (which is stripped,
+// along with a preceding '\r'), reporting false on EOF, read error, or a
+// line exceeding maxBytes. Byte-at-a-time reads never over-read, so the
+// bytes after the auth line stay in the socket for readLoop.
+func readFirstLine(r io.Reader, maxBytes int) ([]byte, bool) {
+	var line []byte
+	buf := make([]byte, 1)
+	for {
+		n, err := r.Read(buf)
+		if n == 0 || err != nil {
+			return nil, false
+		}
+		if buf[0] == '\n' {
+			if len(line) > 0 && line[len(line)-1] == '\r' {
+				line = line[:len(line)-1]
+			}
+			return line, true
+		}
+		line = append(line, buf[0])
+		if len(line) > maxBytes {
+			return nil, false
+		}
+	}
+}
+
 // claimChild takes conn as THE child if none is connected yet.
 func (s *TextServer) claimChild(conn net.Conn) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.child != nil || s.closed {
+		s.mu.Unlock()
 		return false
 	}
 	s.child = conn
+	// Leaf 03: signal SendRaw that a child transport exists (close is
+	// once-only via childReadyOnce). The channel close runs OUTSIDE the
+	// mutex — waking goroutines must not queue behind the claimer.
+	s.mu.Unlock()
+	s.childReadyOnce.Do(func() { close(s.childReady) })
 	return true
 }
 
@@ -189,6 +321,45 @@ func (s *TextServer) Send(f Frame) error {
 		return errors.New("voice: no child connected on text socket")
 	}
 	if _, err := conn.Write(b); err != nil {
+		// Surface the dead connection to the caller; readLoop will also
+		// notice and clear s.child.
+		return fmt.Errorf("voice: write to child: %w", err)
+	}
+	return nil
+}
+
+// SendRaw writes one pre-encoded raw JSON line (already newline-terminated)
+// to the connected child, bypassing the Frame codec. It exists for the C1
+// keys frame (voice-tierA leaf 03): keys material must not live in the
+// shared Frame struct, so the daemon marshals its own keysWire and ships
+// the line through this seam. Same mutex-serialized single write as Send;
+// returns an error (never panics) when no child is connected or the child
+// connection is closed.
+func (s *TextServer) SendRaw(line []byte) error {
+	s.mu.Lock()
+	conn := s.child
+	s.mu.Unlock()
+	if conn == nil {
+		// A dialed-but-unclaimed child (connect completed into the unix
+		// listen backlog before acceptLoop's claimChild ran) is not a
+		// dead transport: wait briefly for the claim rather than failing
+		// the first send. Bounded so a genuinely absent child still
+		// errors fast; emission treats the error as a degrade (warn,
+		// call continues). The send itself stays exactly once - this is
+		// transport-readiness, not a retry loop.
+		select {
+		case <-s.childReady:
+			s.mu.Lock()
+			conn = s.child
+			s.mu.Unlock()
+		case <-time.After(2 * time.Second):
+			return errors.New("voice: no child connected on text socket")
+		}
+	}
+	if conn == nil {
+		return errors.New("voice: no child connected on text socket")
+	}
+	if _, err := conn.Write(line); err != nil {
 		// Surface the dead connection to the caller; readLoop will also
 		// notice and clear s.child.
 		return fmt.Errorf("voice: write to child: %w", err)
@@ -367,6 +538,45 @@ func (p *AudioPair) WriteToChild(pcm []byte) error {
 // maxPendingInBytes bounds the pre-connect write buffer: 128 x 640-byte
 // L16@16k chunks is 2.56 s of audio, far past any realistic dial window.
 const maxPendingInBytes = 128 * 640
+
+// pairInPath returns the .in socket file path for the pair (CL5: the
+// LocalCall exposes the pair PATHS; leaf 08's clients dial them).
+func pairInPath(p *AudioPair) string {
+	return filepath.Join(p.dir, p.ccid+".in")
+}
+
+// pairOutPath returns the .out socket file path for the pair.
+func pairOutPath(p *AudioPair) string {
+	return filepath.Join(p.dir, p.ccid+".out")
+}
+
+// ReadFromClient reads raw mic bytes from the CLIENT over the accepted
+// <ccid>.in conn (local-leg leaf 07). The local leg's client dials the
+// pair like the child does and writes mic bytes there; the splice's
+// chunking loop reads them through this accessor. Delegates to
+// ReadFromChild: same accepted-conn surface, same errors while nobody
+// connected or after Close.
+func (p *AudioPair) ReadFromClient(buf []byte) (int, error) {
+	return p.ReadFromChild(buf)
+}
+
+// WriteToClient writes raw bytes to the CLIENT over the accepted conn
+// (local-leg leaf 07). Mirrors ReadFromClient: the local leg reuses the
+// pair's accepted-conn surface, so client mic in and speaker out ride
+// the same pair sockets the child audio already uses.
+func (p *AudioPair) WriteToClient(pcm []byte) (int, error) {
+	p.mu.Lock()
+	conn := p.out
+	p.mu.Unlock()
+	if conn == nil {
+		return 0, fmt.Errorf("voice: client not connected on %s.out", p.ccid)
+	}
+	n, err := conn.Write(pcm)
+	if err != nil {
+		return n, fmt.Errorf("voice: write %s.out (client): %w", p.ccid, err)
+	}
+	return n, nil
+}
 
 // ReadFromChild reads raw PCM from the child over the <ccid>.out socket.
 // Errors while the child has not connected yet or after Close.

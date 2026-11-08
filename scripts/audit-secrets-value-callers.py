@@ -53,6 +53,31 @@ ALLOWED_VALUE_CALLERS = {
         "HTTP client (go-github) only; never logged, never placed in "
         "child envs or command args."
     ),
+    # The voice sidecar's Telnyx token source (voice-sidecar leaf 14):
+    # the daemon wiring (WireVoice) resolves telnyx_api_key via
+    # Broker.Value and hands it ONLY to telnyx.NewClient(baseURL, key) as
+    # an already-resolved in-process string - the same posture as the
+    # github row above. The token never reaches a log line, env entry,
+    # os.Setenv, bus payload, or the meept-voice child process (the child
+    # gets provider keys over the unix socket, a different surface).
+    "internal/daemon/voice_wiring.go": (
+        "WireVoice resolves the Telnyx API token in-process and hands it "
+        "only to telnyx.NewClient (outbound call-control auth); never "
+        "logged, never in child envs or command args."
+    ),
+    # The voice sidecar's per-call cloud keys producer (voice-tierA leaf
+    # 03): VoiceWiring.sendKeysFrame/voiceSecret resolve deepgram_api_key
+    # + openai_api_key via Broker.Value and marshal them into the C1 keys
+    # JSON line sent over the unix socket to the meept-voice child (the
+    # documented keys surface - in-memory, never argv/env). The values
+    # never reach a log line (presence booleans at debug only), env entry,
+    # os.Setenv, or bus payload.
+    "internal/daemon/voice_keys.go": (
+        "sendKeysFrame resolves the Deepgram/OpenAI cloud keys in-process "
+        "and embeds them ONLY in the C1 keys line to the voice child over "
+        "the unix socket; never logged (presence booleans at debug), "
+        "never in child envs or command args."
+    ),
 }
 
 # A call whose result may carry real secret material. The receiver name is

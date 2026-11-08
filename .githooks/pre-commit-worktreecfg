@@ -5,7 +5,7 @@
 # It's designed to catch the intermittent core.bare=true flip that breaks
 # go build -buildvcs and git status.
 #
-# Runs as pre-flight [0/19], BEFORE the numbered chain: a bare-config flip makes
+# Runs as pre-flight [0/20], BEFORE the numbered chain: a bare-config flip makes
 # gate 1 (pre-commit-build) fail on "error obtaining VCS status", so a guard
 # placed later in the chain would never run.
 

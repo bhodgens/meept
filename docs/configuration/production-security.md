@@ -482,7 +482,7 @@ When enabled, every security decision is logged to an SQLite database (`~/.meept
 ```json5
 {
   security: {
-    "enable_audit_log": false,  // Disabled by default for performance
+    "enable_audit_log": true,   // Default-ON (decision 2026-11-06); set false to opt out
     "audit_db_path": "~/.meept/audit.db",
   },
 }

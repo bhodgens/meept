@@ -11,20 +11,15 @@
 //     manager's ResolvePermissionWithApprover seam with Approver Kind
 //     "slack".
 //
-// Config note: the [comm.slack] schema key addition is CLOSED this wave
-// (schema.go is owned by another tree), so this wiring reads the block
-// from the raw config source file and decodes it into slack.SlackConfig.
-// The schema.go field (`Slack SlackConfig` with tag `json:"slack"
-// toml:"slack"`) is the next wave's job; once it lands, switch
-// readCommSlackConfig to return cfg.Slack directly.
+// Config note: the [comm.slack] block is a registered schema key
+// (config.SlackConfig, json key "slack"); this wiring maps the schema
+// struct into slack.SlackConfig at wiring time, per the ResolverConfig
+// convention (config does not import internal/comm/slack).
 package daemon
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/comm/slack"
@@ -34,34 +29,24 @@ import (
 // SlackConfigKey is the JSON5/TOML top-level key for the Slack block.
 const SlackConfigKey = "slack"
 
-// readCommSlackConfig decodes the [comm.slack] block (top-level "slack"
-// key) from the daemon's config source. The main Config struct does not
-// carry the field yet (schema.go closed this wave), so this re-reads the
-// source file and pulls the single key. A missing file or missing key is
-// the zero config (disabled) - never an error.
+// readCommSlackConfig maps the schema-backed [comm.slack] block
+// (config.SlackConfig, parsed by the JSON5 loader into the daemon's
+// Config) into slack.SlackConfig. A nil Config is the zero config
+// (disabled) — never an error. An empty api_base_url stays empty here;
+// slack.SlackConfig.apiURL() applies the production default.
 func readCommSlackConfig(cfg *config.Config) (slack.SlackConfig, error) {
 	var out slack.SlackConfig
 	if cfg == nil {
 		return out, nil
 	}
-	path := config.MeeptPath("meept.json5")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return out, nil
-		}
-		return out, fmt.Errorf("slack: read config source: %w", err)
-	}
-	var probe map[string]json.RawMessage
-	if err := config.LoadJSON5Bytes(raw, &probe); err != nil {
-		return out, fmt.Errorf("slack: decode config source: %w", err)
-	}
-	block, ok := probe[SlackConfigKey]
-	if !ok {
-		return out, nil
-	}
-	if err := json.Unmarshal(block, &out); err != nil {
-		return out, fmt.Errorf("slack: decode %s block: %w", SlackConfigKey, err)
+	s := cfg.Slack
+	out = slack.SlackConfig{
+		Enabled:        s.Enabled,
+		BotToken:       s.BotToken,
+		SigningSecret:  s.SigningSecret,
+		ChannelID:      s.ChannelID,
+		AllowedUserIDs: append([]string(nil), s.AllowedUserIDs...),
+		APIBaseURL:     s.APIBaseURL,
 	}
 	return out, nil
 }
@@ -84,8 +69,9 @@ func wireSlackChannel(cfg *config.Config, logger *slog.Logger) (*slack.SlackChan
 	}
 	if err := slackCfg.Validate(); err != nil {
 		// enabled=true with missing required keys fails at load time per
-		// C2; here it degrades to disabled with a warning (the config
-		// loader cannot validate the block until the schema key lands).
+		// C2 (config.SlackConfig.ValidateEnabled is the schema-side twin);
+		// here it degrades to disabled with a warning so a half-configured
+		// block never hard-fails daemon boot.
 		logger.Warn("slack: disabled (invalid config)", "error", err)
 		return nil, nil
 	}

@@ -394,7 +394,10 @@ func (s *Store) land(chokepoint string, p *pendingGate, decision, approver strin
 		Command:       command,
 		ContextBlob:   serializeBare(command),
 		HumanDecision: decision,
-		Approver:      approver,
+		Approver:      approverEmpty, // documented empty approver, never a guessed name
+	}
+	if approver != "" {
+		rec.Approver = approver
 	}
 	if p != nil {
 		if p.contextBlob != "" {

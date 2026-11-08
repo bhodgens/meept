@@ -48,6 +48,7 @@ import (
 	"github.com/caimlas/meept/internal/githubsvc"
 	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/intake"
+	"github.com/caimlas/meept/internal/jevgate"
 	"github.com/caimlas/meept/internal/learning"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
@@ -243,6 +244,16 @@ type Components struct {
 	// permission table) AND the store opened; capture is strictly additive
 	// and never blocks a gate or confirmation flow.
 	GateCapture *gateCaptureStore
+	// JevScoreGate is the graded command-safety score gate
+	// (internal/jevgate, docs/plans/20261031-jev-command-gate +
+	// docs/plans/20261103-wiring-gap-remediation/04-jev-gate-wiring.md):
+	// a fail-closed BeforeToolCallHook on shell calls behind the opt-in
+	// [security.jev_command_gate] knob. Nil unless enabled=true AND the LLM
+	// client/resolver built (degraded posture, never a boot-fail); the
+	// registration block below treats nil as "unregistered" (zero
+	// behavior). Issue #87: this field + construction + registration are
+	// the wiring the leaf wave's commit message claimed but never landed.
+	JevScoreGate *jevgate.ScoreGateHook
 	// EffectsReconciler re-drives claimed/receipted effects on startup and
 	// parked-turn resume. Nil when the ledger is nil (no ledger, no
 	// reconcile -- nothing pending can exist).
@@ -1116,6 +1127,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// out-of-tree embedders).
 
 	// Create LLM client with budget tracking
+	// Semantic cache tier wiring (llm-serving-tiers leaf 02 T5,
+	// wiring-followups-final leaf 05): the ONE shared embedding provider
+	// is hoisted ahead of the client build so the semantic cache tier and
+	// the memory-stack blocks below reuse the SAME handle - never a
+	// duplicate vector.NewProviderFromConfig construction.
+	var embedder vector.Provider
+	if cfg.Memory.Embeddings.Enabled {
+		emb, embErr := vector.NewProviderFromConfig(cfg.Memory.Embeddings)
+		if embErr != nil {
+			logger.Warn("Failed to create embedding provider, vector search disabled", "error", embErr)
+		} else {
+			embedder = emb
+		}
+	}
 	llmCfg := createLLMConfig(c.ModelsConfig, logger)
 	var budgetTracker *llm.Budget
 	// Decision-model irreversibility gate (decision-model leaf 03). Built in
@@ -1128,6 +1153,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// capture disabled, every consumer nil-guards. Open failure is logged
 	// and degrades to no capture - never blocks boot.
 	var gateCap *gateCaptureStore
+	// JeV command-score gate (jev-command-gate leaf 01 T5 + wiring-gap
+	// leaf 04, issue #87). Built in the resolver block below ONLY when
+	// [security.jev_command_gate].enabled; registered onto the hook
+	// registry at the hook-wiring block. Nil = feature off (the opt-in
+	// default) -- construction and registration both no-op.
+	var jevScoreGate *jevgate.ScoreGateHook
 	// Shared decision-model client (acp-permission-decision leaf 03,
 	// Contract C): ONE *llm.DecisionClient instance serves both consumers --
 	// the tool-call gate hook above and the ACP permission lane below --
@@ -1202,6 +1233,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 		if tokenCache != nil {
 			clientOpts = append(clientOpts, llm.WithTokenCache(tokenCache))
+		}
+		// Semantic cache tier (llm-serving-tiers leaf 02 T5 + wiring-
+		// followups-final leaf 05): nil (disabled default or degraded
+		// embedder resolution) leaves clientOpts byte-identical -
+		// WithSemanticCache ignores a nil cache by contract.
+		if semanticCache := buildSemanticCacheTier(cfg, embedder, logger); semanticCache != nil {
+			clientOpts = append(clientOpts, llm.WithSemanticCache(semanticCache))
 		}
 		c.LLMClient = llm.NewClient(llmCfg, clientOpts...)
 
@@ -1307,7 +1345,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// that opted out. Registration onto the hook registry happens
 			// below at the hook-wiring block.
 			acpWantsDecision := cfg.ACP.Enabled && (cfg.ACP.PermissionMode == "decision" || cfg.ACP.ResolveRank)
-			if providersCfg.DecisionGateEnabled || acpWantsDecision {
+			jevGateEnabled := cfg.Security.JevCommandGate.Enabled
+			if providersCfg.DecisionGateEnabled || acpWantsDecision || jevGateEnabled {
 				decisionClient = llm.NewDecisionClient(c.LLMResolver, logger.With("component", "decision-client"))
 			}
 			if providersCfg.DecisionGateEnabled {
@@ -1324,11 +1363,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				)
 			}
 			// Gate capture store (jev-command-gate leaf 02, Contract C4).
-			// Built when the decision gate armed (chokepoint-1 source);
-			// the permission-table side attaches its arm when the table is
-			// wired further down. Best-effort: an open failure logs and
-			// leaves capture disabled.
-			if decisionGate != nil && gateCap == nil {
+			// Built when the decision gate armed (chokepoint-1 source) or
+			// the jev score gate is enabled (its RecordScore/Escalated
+			// seam rides this same store); the permission-table side
+			// attaches its arm when the table is wired further down.
+			// Best-effort: an open failure logs and leaves capture
+			// disabled.
+			if (decisionGate != nil || jevGateEnabled) && gateCap == nil {
 				gc, gcErr := newGateCaptureStore(gatecapture.DefaultDBPath(), logger)
 				if gcErr != nil {
 					logger.Warn("gate capture store unavailable; capture disabled",
@@ -1338,6 +1379,49 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 					c.GateCapture = gc
 					logger.Info("gate capture store open", "path", gatecapture.DefaultDBPath())
 				}
+			}
+			// JeV graded command-safety score gate (issue #87;
+			// docs/plans/20261031-jev-command-gate leaf 01 T5 +
+			// docs/plans/20261103-wiring-gap-remediation/04-jev-gate-wiring.md).
+			// Constructed ONLY when [security.jev_command_gate].enabled
+			// (opt-in default false = zero behavior change; a nil field is
+			// the registration block's "not registered" signal). The scorer
+			// is the SAME shared *llm.DecisionClient the decision gate and
+			// ACP lane use (its ScoreCommand satisfies jevgate.ScoreClient);
+			// jevGateEnabled above already pulled the client into
+			// existence. Degraded posture never boot-fails: an unconfigured
+			// decision_model slot leaves the client Available()==false, and
+			// the hook then escalates every shell call per-branch
+			// (fail-closed Contract C3) -- the operator opted in, so ASK is
+			// the safe render. A type-assert miss leaves a nil scorer,
+			// which BeforeToolCall also routes to ASK. The capture store is
+			// both the hook's ConfirmFlow and its Recorder (leaf-02
+			// gatecapture_wiring.go adapters); typed-nil guard per
+			// internal/daemon/AGENTS.md -- a nil *gateCaptureStore must
+			// never be boxed into the interface fields.
+			if jevGateEnabled {
+				var scorer jevgate.ScoreClient
+				if sc, ok := decisionClient.(jevgate.ScoreClient); ok {
+					scorer = sc
+				}
+				var confirmFlow jevgate.ConfirmFlow
+				var recorder jevgate.Recorder
+				if gateCap != nil {
+					confirmFlow = gateCap
+					recorder = gateCap
+				}
+				jevScoreGate = jevgate.NewScoreGateHook(
+					scorer,
+					jevScoreGateConfigFromConfig(&cfg.Security.JevCommandGate),
+					confirmFlow,
+					logger,
+				)
+				jevScoreGate.SetRecorder(recorder)
+				c.JevScoreGate = jevScoreGate
+				logger.Info("jev score gate armed",
+					"score_threshold", cfg.Security.JevCommandGate.ScoreThreshold,
+					"confidence_threshold", cfg.Security.JevCommandGate.ConfidenceThreshold,
+				)
 			}
 		}
 
@@ -1744,7 +1828,22 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// c.LLMResolver is constructed earlier in this function, so the
 			// wire is always non-nil here.
 			pm.SetStickyEndpointResolver(c.LLMResolver)
+			// Serving-tier policy (llm-serving-tiers leaf 01 T5 arm-up,
+			// issue #82): map llm.tiers onto llm.TierPolicy and install
+			// via SetTierPolicy. Disabled default installs nil - the
+			// rotation stays unbounded with zero metadata change.
+			applyTierPolicyToProviderManager(pm, cfg)
 			c.ProviderManager = pm
+
+			// llm-hop-tracing fan-out (bughunt llm-daemon F-1): the boot
+			// attach above only reaches the primary OpenAI-compatible
+			// client; the manager seam puts the observer on EVERY
+			// chatter (Anthropic/Codex included) and on providers added
+			// later (OAuth registration, AddProvider). No-op when traces
+			// are disabled (otlpTraceSubs nil).
+			if c.otlpTraceSubs != nil {
+				pm.SetLLMCallObserver(c.otlpTraceSubs.llmCallObserver())
+			}
 
 			// Dynamically register OAuth-backed LLM providers that have
 			// stored tokens but are not already in the static config.
@@ -2335,6 +2434,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// JeV graded command-safety score gate (issue #87): registered as the
+	// decision-gate's BeforeToolCallHook peer at the same High priority
+	// (equal-priority peers keep insertion order, so it runs AFTER
+	// decision-gate and after the security-critical hooks). A nil field is
+	// the ONLY registration source: disabled default = no registration =
+	// zero behavior (04-jev-gate-wiring.md pins this).
+	if c.JevScoreGate != nil {
+		hookRegistry.RegisterBeforeToolCall("jev-score-gate", agent.HookPriorityHigh, c.JevScoreGate)
+		logger.Info("Registered jev score gate BeforeToolCall hook")
+	}
+
 	agentOpts = append(agentOpts, agent.WithEventEmitter(emitter), agent.WithHookRegistry(hookRegistry))
 	c.AgentEventEmitter = emitter
 
@@ -2574,13 +2684,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create vector shard manager for semantic search
 	var vectorSearcher memory.VectorSearcher
-	var embedder vector.Provider
 	if cfg.Memory.Embeddings.Enabled {
-		// Create embedding provider
-		var err error
-		embedder, err = vector.NewProviderFromConfig(cfg.Memory.Embeddings)
-		if err != nil {
-			logger.Warn("Failed to create embedding provider, vector search disabled", "error", err)
+		// Create embedding provider: hoisted above the LLM client build
+		// for the semantic cache tier (wiring-followups-final leaf 05)
+		// and reused here - a duplicate construction is forbidden (the
+		// ONE-shared-provider constraint). embedder == nil means
+		// construction failed and was already warned at the hoist site.
+		if embedder == nil {
+			logger.Warn("Embedding provider unavailable, vector search disabled")
 		} else {
 			// Parse shard types from config
 			var shardTypes []vector.ShardType
@@ -2753,6 +2864,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// enriched with standing instructions and learned patterns.
 	if c.AgentLoop != nil && instrResult.ContextInjector != nil {
 		c.AgentLoop.SetContextInjector(instrResult.ContextInjector)
+		// The injector renders the no-cap skill listing (branch 04); it
+		// needs the lazy loader's cache, and its episode ranking needs
+		// the loader's index embedder (wired in initializeSkills above).
+		if c.SkillLoader != nil {
+			instrResult.ContextInjector.SetSkillLoader(c.SkillLoader)
+		}
 		logger.Info("context injector wired to agent loop")
 	}
 	// Store the memvid client from memory manager if active, or create standalone
@@ -3197,7 +3314,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Create a direct connection for recents queries
 			var recents *project.RecentsStore
 			{
-				recentsDB, rerr := sql.Open("sqlite", projDBPath+"?_fk=1&cache=shared")
+				recentsDB, rerr := sql.Open("sqlite", projDBPath+"?cache=shared&_pragma=foreign_keys(1)") // modernc _pragma form (bughunt 2026-11-07)
 				if rerr == nil {
 					recentsDB.SetMaxOpenConns(1)
 					recents = project.NewRecentsStore(recentsDB)
@@ -3763,6 +3880,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// off (tool absent from filtered registries even if it were
 			// registered elsewhere).
 			CodemodeEnabled: cfg.Agent.Tools.CodemodeEnabled,
+			// Meta-pair grant (bughunt agent-core F-2): pass
+			// [agent.tools].dynamic_tool_exposure into the registry so
+			// filterTools unions tool_search/tool_view into each scoped
+			// agent's filtered registry — the row-4 hard gate's recovery
+			// path must exist for the gate to be fair.
+			DynamicExposureEnabled: cfg.Agent.Tools.DynamicToolExposure,
 			// Hook registry inheritance: registry-built specialists must
 			// enforce the same security-before-tool deny, decision gate,
 			// and transform hooks as the daemon template loop.
@@ -5074,9 +5197,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}
 		}
 		// Supervisor chatter (C6 fast endpoint): voice.supervisor_model
-		// resolves to the classifier/small-model client when configured,
-		// else the main client. nil degrades the gate to allow-all with a
-		// single construction warning (NewSupervisor logs it).
+		// resolves to a DEDICATED client through the same
+		// createAuxiliaryLLMClientWithResolver path the classifier chain
+		// uses (bughunt M1); nil/empty falls back to the classifier
+		// chatter below. nil chatter degrades the gate to allow-all with
+		// a single construction warning (NewSupervisor logs it).
+		vdeps.SupervisorChatterClient = func(modelRef string) *llm.Client {
+			return createAuxiliaryLLMClientWithResolver(
+				c.ModelsConfig,
+				modelRef,
+				c.LLMResolver,
+				logger.With("component", "voice-supervisor-llm"),
+				budgetTracker,
+			)
+		}
 		vdeps.SupervisorChatter = voiceSupervisorChatter(c)
 		wiring, err := WireVoice(c.ctx, vdeps)
 		if err != nil {
@@ -5409,6 +5543,48 @@ func (c *Components) Start(ctx context.Context) error {
 		startedHandlers = append(startedHandlers, "tierpolicy")
 		c.Logger.Info("memory.tiers engine started",
 			"running", c.TiersEngine.Running())
+	}
+
+	// Voice sidecar Start (leaf 14): text server up + voice_call tool
+	// registered via the toolprov provider seam. Runs after the ordinary
+	// component Start machinery so the loop manager is live before the
+	// first talk loop can clone a session loop. Failure rolls back through
+	// the ordinary started-handlers path.
+	// Without this call the C1 text socket listener never binds, the
+	// ChildProc spawn handshake blocks, and every inbound webhook hangs
+	// (bughunt 2026-11-06: restore after the token-efficiency sweep).
+	if c.Voice != nil {
+		if err := c.Voice.Start(ctx, func(dial builtin.DialerFunc, agentID builtin.AgentIDFunc) {
+			builtin.SetVoiceProvider(dial, agentID, c.SecretBroker)
+			// local-leg leaf 08 T4: arm the voice_call tool's local seam
+			// when the leg exists (nil seam = the tool fails closed with
+			// the disabled-leg error, exactly the voice.local.enabled=false
+			// posture). The override arg rides LocalLeg.Open's variadic
+			// voiceOverride into the open frame (CL4 top layer).
+			if c.Voice.Local != nil {
+				local := c.Voice.Local
+				builtin.SetVoiceLocalFunc(func(ctx context.Context, employeeID, label, ttsVoice string) (string, string, error) {
+					call, err := local.Open(ctx, employeeID, label, ttsVoice)
+					if err != nil {
+						return "", "", err
+					}
+					return call.CallID, call.SessionID, nil
+				})
+			}
+			names := enabledToolProviderNames(c.Config, []string{"voice"}, c.Logger)
+			if len(names) == 0 {
+				c.Logger.Debug("voice provider disabled by [tool_providers]; no voice_call tool registered")
+				return
+			}
+			if _, err := toolprov.RegisterAll(c.ToolRegistry, names); err != nil {
+				c.Logger.Error("voice_call tool registration failed", "error", err)
+				return
+			}
+			c.Logger.Info("voice_call tool registered (employee outbound dial, gated by allowlist + effects ledger)")
+		}); err != nil {
+			return err
+		}
+		startedHandlers = append(startedHandlers, "voice")
 	}
 
 	// Start chat handler
@@ -6796,6 +6972,17 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.Logger.Info("Dispatcher stopped")
 	}
 
+	// Voice sidecar Stop (leaf 14): child FIRST (it holds the text socket
+	// connection and can be mid-call), then the text server listener,
+	// then the call store - children before stores. Runs before the
+	// session store close below so the binding's terminal call-row writes
+	// still find the store open.
+	if c.Voice != nil {
+		c.Voice.Stop(ctx)
+		c.Voice = nil
+		c.Logger.Info("voice sidecar stopped")
+	}
+
 	// Close stores
 	if c.TaskRegistry != nil {
 		if err := c.TaskRegistry.Close(); err != nil {
@@ -7362,6 +7549,24 @@ func buildTaintHookConfig(sec *config.SecurityConfig) agent.TaintHookConfig {
 		hookCfg.Mode = agent.TaintModeEnforce
 	}
 	return hookCfg
+}
+
+// jevScoreGateConfigFromConfig maps the [security.jev_command_gate] knob
+// (config.JevGateConfig) onto jevgate.ScoreGateConfig field-for-field
+// (issue #87; the schema struct mirrors these names, see
+// internal/config/schema.go JevGateConfig). SecurityConfig.Validate already
+// normalizes the thresholds when Enabled, so zero/unset values never reach
+// here on an armed boot; jevgate's effectiveThreshold/effectiveConfFloor
+// clamp anything that does.
+func jevScoreGateConfigFromConfig(g *config.JevGateConfig) jevgate.ScoreGateConfig {
+	if g == nil {
+		return jevgate.DefaultScoreGateConfig()
+	}
+	return jevgate.ScoreGateConfig{
+		Enabled:         g.Enabled,
+		ScoreThreshold:  g.ScoreThreshold,
+		ConfidenceFloor: g.ConfidenceThreshold,
+	}
 }
 
 // newCollabHandoffBoundary builds the collaboration drivers' handoff seam
@@ -9366,6 +9571,32 @@ func (c *Components) initializeSkillsWithBus(cfg *config.Config, logger *slog.Lo
 		// mid-session skill writes invisible until a restart. Discovery is
 		// lightweight (metadata-only, no bodies) and runs off the index mutex.
 		c.SkillIndex.SetRescanSource(discovery.DiscoverMetadataOnly)
+
+		// Embedding-rank ordering of the model-facing skill listing
+		// (token-efficiency branch 04 leaf 02; Q4 user ruling: always
+		// rank, never hide/cap). Opt-in: [skills.ranking].enabled false
+		// (the default) wires NOTHING — the listing stays alphabetical,
+		// byte-identical to leaf 01. Enabled without a base_url degrades
+		// to alphabetical with a warning; ranking itself is order-only
+		// and any embedding failure never fails an episode.
+		if cfg.Skills.Ranking.Enabled {
+			if strings.TrimSpace(cfg.Skills.Ranking.BaseURL) == "" {
+				logger.Warn("skills.ranking enabled but base_url empty; skill listing stays alphabetical")
+			} else {
+				timeout := 2 * time.Second
+				if cfg.Skills.Ranking.TimeoutSeconds > 0 {
+					timeout = time.Duration(cfg.Skills.Ranking.TimeoutSeconds) * time.Second
+				}
+				c.SkillIndex.SetEmbedder(agent.NewSkillRankingEmbedder(
+					cfg.Skills.Ranking.BaseURL, cfg.Skills.Ranking.Model, timeout,
+				))
+				logger.Info("Skill ranking embedder wired",
+					"base_url", cfg.Skills.Ranking.BaseURL,
+					"model", cfg.Skills.Ranking.Model,
+					"timeout", timeout.String(),
+				)
+			}
+		}
 
 		// Build capability index for metadata-driven skill matching
 		c.CapabilityIndex = skills.BuildCapabilityIndex(

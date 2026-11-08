@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-01",
+  "generated": "2026-11-07",
   "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
   "path_map": {
     "e2e/suites/smoke": [
@@ -35,25 +35,25 @@
       "http-stream"
     ],
     "internal/agent/": [
+      "acp-persona-route",
+      "async-turn",
+      "breakers",
+      "continuity-regressions",
+      "delegate-seam",
       "dispatcher",
+      "dynamic-tools",
+      "goal-completion",
+      "hitl-notifications",
+      "llm-hop-tracing",
+      "naive-user-chat",
+      "output-filters",
       "planner",
+      "quota-park",
+      "refusal",
+      "skills-refresh-origin",
       "step-pipeline",
       "task-state",
-      "async-turn",
-      "quota-park",
-      "breakers",
-      "output-filters",
-      "refusal",
-      "naive-user-chat",
-      "continuity-regressions",
-      "goal-completion",
-      "acp-persona-route",
-      "llm-hop-tracing",
-      "skills-refresh-origin",
-      "dynamic-tools",
-      "hitl-notifications",
-      "turn-journal",
-      "delegate-seam"
+      "turn-journal"
     ],
     "internal/validator/": [
       "output-filters",
@@ -79,22 +79,22 @@
       "scheduler"
     ],
     "internal/skills/": [
-      "skills-discovery",
       "continuity-regressions",
+      "skills-discovery",
       "skills-refresh-origin",
       "tool-surface"
     ],
     "internal/tools/": [
+      "dynamic-tools",
       "memory-knowledge-assets",
+      "tool-surface",
       "tools-argvalidate",
       "tools-docs",
       "tools-filesystem",
       "tools-mcp",
       "tools-memory",
       "tools-tasks",
-      "dynamic-tools",
-      "tools-web-ssrf",
-      "tool-surface"
+      "tools-web-ssrf"
     ],
     "internal/eval/": [
       "eval-judge",
@@ -157,15 +157,7 @@
       "llm-serving-tiers"
     ],
     "internal/daemon/": [
-      "daemon-lifecycle",
-      "memory-knowledge-assets",
-      "memory-turn-capture",
-      "project-binding",
-      "state-restart",
-      "acp-wire",
-      "llm-hop-tracing",
-      "turn-journal",
-      "hitl-notifications"
+      "daemon-lifecycle"
     ],
     "internal/llm/": [
       "daemon-lifecycle",
@@ -210,15 +202,15 @@
       "boundary-hardening"
     ],
     "internal/employee/": [
-      "goal-loop",
       "goal-completion",
+      "goal-loop",
       "goals-plans"
     ],
     "internal/acp/": [
-      "acp-wire",
       "acp-persona-route",
-      "hitl-notifications",
-      "delegate-seam"
+      "acp-wire",
+      "delegate-seam",
+      "hitl-notifications"
     ],
     "internal/process/": [
       "acp-wire"
@@ -254,9 +246,6 @@
     "internal/cluster/": [
       "smoke",
       "agent-groups"
-    ],
-    "internal/code/lsp/": [
-      "tool-surface"
     ],
     "internal/code/": [
       "smoke"
@@ -407,8 +396,8 @@
     ],
     "internal/tools/builtin/": [
       "github-pr-ci",
-      "skills-refresh-origin",
-      "office-skills"
+      "office-skills",
+      "skills-refresh-origin"
     ],
     "internal/intake/": [
       "github-intake"
@@ -490,13 +479,167 @@
       "dynamic-tools"
     ],
     "internal/comm/http/": [
-      "hitl-notifications"
+      "hitl-notifications",
+      "intake-status"
     ],
     "internal/comm/web/": [
       "hitl-notifications"
     ],
     "internal/eval/hitl/": [
       "hitl-notifications"
+    ],
+    "e2e/suites/intake-status": [
+      "intake-status"
+    ],
+    "internal/voice/": [
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
+    ],
+    "internal/voice/telnyx/": [
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
+    ],
+    "internal/voiceframe/": [
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
+    ],
+    "internal/voicechild/": [
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
+    ],
+    "cmd/meept-voice/": [
+      "voice-lifecycle",
+      "voice-bargein",
+      "voice-concurrency"
+    ],
+    "internal/voice/local.go": [
+      "voice-local"
+    ],
+    "internal/voice/localsplice.go": [
+      "voice-local"
+    ],
+    "internal/rpc/voice_local.go": [
+      "voice-local"
+    ],
+    "internal/daemon/acp_notifier.go": [
+      "acp-persona-route",
+      "acp-wire"
+    ],
+    "internal/daemon/acp_register.go": [
+      "acp-wire"
+    ],
+    "internal/daemon/activity_rpc.go": [
+      "activity-views"
+    ],
+    "internal/daemon/activity_wiring.go": [
+      "activity-views"
+    ],
+    "internal/daemon/bridges_wiring.go": [
+      "bridges"
+    ],
+    "internal/daemon/components.go": [
+      "acp-persona-route",
+      "acp-wire",
+      "auth-multiuser",
+      "boundary-hardening",
+      "config-models",
+      "github-intake",
+      "memory-knowledge-assets",
+      "plan-critic",
+      "quota-park",
+      "runtime-hang",
+      "session-teardown",
+      "state-restart",
+      "task-state",
+      "tool-provider-seam",
+      "turn-journal"
+    ],
+    "internal/daemon/context_assembler_wiring.go": [
+      "context-memory-engine"
+    ],
+    "internal/daemon/daemon.go": [
+      "config-reload",
+      "daemon-lifecycle",
+      "gui-pairing",
+      "naive-user-chat",
+      "plan-critic",
+      "security-tls",
+      "session-teardown",
+      "task-queue",
+      "turn-journal"
+    ],
+    "internal/daemon/daemon_rpc.go": [
+      "rpc-ping"
+    ],
+    "internal/daemon/evolver_approval_bridge.go": [
+      "continuity-regressions"
+    ],
+    "internal/daemon/filter_wiring.go": [
+      "output-filters"
+    ],
+    "internal/daemon/gate_park_wiring.go": [
+      "hitl-notifications"
+    ],
+    "internal/daemon/github_wiring.go": [
+      "github-pr-ci",
+      "tool-provider-seam"
+    ],
+    "internal/daemon/goal_anchor_adapter.go": [
+      "goal-completion"
+    ],
+    "internal/daemon/hermes_register.go": [
+      "tool-provider-seam"
+    ],
+    "internal/daemon/instruction_wiring.go": [
+      "github-pr-ci"
+    ],
+    "internal/daemon/intake_status_rpc.go": [
+      "intake-status"
+    ],
+    "internal/daemon/knowledge_wiring.go": [
+      "memory-knowledge-assets"
+    ],
+    "internal/daemon/l0_wiring.go": [
+      "memory-layered-distill"
+    ],
+    "internal/daemon/memory_capture.go": [
+      "memory-defaults",
+      "memory-turn-capture"
+    ],
+    "internal/daemon/memory_rpc.go": [
+      "bridges"
+    ],
+    "internal/daemon/orphan.go": [
+      "daemon-lifecycle"
+    ],
+    "internal/daemon/otlp_traces_wiring.go": [
+      "llm-hop-tracing"
+    ],
+    "internal/daemon/slack_wiring.go": [
+      "hitl-notifications"
+    ],
+    "internal/daemon/tiers_engine.go": [
+      "context-memory-engine"
+    ],
+    "internal/daemon/toolgate.go": [
+      "tool-provider-seam"
+    ],
+    "internal/daemon/toolprovider_config.go": [
+      "tool-provider-seam"
+    ],
+    "internal/daemon/voice_keys.go": [
+      "voice-lifecycle"
+    ],
+    "internal/daemon/voice_wiring.go": [
+      "voice-bargein",
+      "voice-lifecycle"
+    ],
+    "internal/code/lsp/": [
+      "tool-surface"
     ],
     "internal/context/sessionref/": [
       "session-storage"
@@ -526,57 +669,6 @@
         "flagoff-04 flag-off legacy control: kill mid-turn -> the in-flight job re-runs live (executor counter advances); turnjournal.db never exists"
       ],
       "note": "leaf 04 hermetic acceptance gate of the turn-journal tree: true SIGKILL on the harness daemon handle + fresh boot over the SAME data dir (state-restart restart primitive); fake-LLM executor counter proves no re-invocation; read-only SQL over <DataDir>/turnjournal.db for row-shape assertions; serial 3-step pinned plan (sleep-8 STEP-B gives the deterministic mid-turn window). KNOWN GAPS observed and reported: boot RecoverStaleTasks force-fails the in-flight step before the reclaim re-runs it, so a resumed turn's task row may read failed while the WORK completes; the journal writer keys run_started/run_closed per step-job round, so a multi-round turn carries multiple close rows and OpenRuns() can miss the parked round (the queue reclaim is the working resume path in that shape)."
-    },
-    {
-      "name": "delegate-seam",
-      "dir": "e2e/suites/delegate-seam",
-      "status": "implemented",
-      "diff": "L",
-      "scenarios": [
-        "delegate-seam-01 async delegate_task spawn returns a child handle (child_id, running); the settlement arrives on agent.delegate.result (contract B1)",
-        "delegate-seam-02 subagent_send_message steers a running child; subagent_interrupt returns accepted:true and transitions to interrupted; subagent_list_children enumerates states (F3)",
-        "delegate-seam-03 workflow tool confined fan-out (goja, dsh-archetype) returns {kind:foreground, runId, agentsStarted, result}; cap trip is FAIL-CLOSE; Node APIs rejected (B5)",
-        "delegate-seam-04 descriptor cold resume: interrupted child resumes via DelegateManager.Resume and completes (B6)"
-      ],
-      "note": "01-delegation branch e2e gate (T1/T5/T6/T7): hermetic scratch daemon, asserts over live chat.submit + agent.delegate.result, never mocks. Fails RED until the daemon wiring (internal/daemon/components.go + dsh_wiring.go) and the delegate/plan-mode providers land concurrently."
-    },
-    {
-      "name": "goals-plans",
-      "dir": "e2e/suites/goals-plans",
-      "status": "implemented",
-      "diff": "M",
-      "scenarios": [
-        "goals-plans-01 goal_get/goal_create/goal_update are registered; goal_create without direct human authority is refused at the tool boundary (C4b)",
-        "goals-plans-02 round driver: goal with max_rounds=2 advances autonomously then auto-blocks with code round-limit after zero human turns (C4c)",
-        "goals-plans-03 plan mode: /plan enters plan mode; exit_plan_mode presents Approve; approve lands via the existing plan gate and plan mode exits (C4d)"
-      ],
-      "note": "02-goals-plans branch e2e gate (G2/G3/G4): goal tools + round driver + plan mode through live RPC/CLI. Fails RED until the goal/delegate/plan-mode daemon wiring lands concurrently."
-    },
-    {
-      "name": "office-skills",
-      "dir": "e2e/suites/office-skills",
-      "status": "implemented",
-      "diff": "M",
-      "scenarios": [
-        "office-skills-01 office_docx create->read round-trip returns the final path and the reopened doc has the requested heading/paragraph (C11.2)",
-        "office-skills-02 office_pptx create->read round-trip returns the path and the reopened deck has the slide title/body (C11.3)",
-        "office-skills-03 office_workbook create->read round-trip returns the path, sheet names, and typed cell values (C11.4)",
-        "office-skills-04 requires-tools gate: unregistered tool in a skill's requires-tools fires the exact contract message (C11.1)"
-      ],
-      "note": "06-office-skills branch e2e gate (T1-T4): asserts the tool behavior contract through the live daemon surface, never imports the concrete docx/pptx library. Requires the office_* tools registered + skills.validate_prerequisites wiring."
-    },
-    {
-      "name": "tool-surface",
-      "dir": "e2e/suites/tool-surface",
-      "status": "implemented",
-      "diff": "M",
-      "scenarios": [
-        "tool-surface-01 declared-timeout tool surfaces TOOL_TIMEOUT through the live executor, never raw context.DeadlineExceeded (F9)",
-        "tool-surface-02 lsp_navigate goToDefinition against a real LSP server returns a location (F10)",
-        "tool-surface-03 a skill added under MEEPT_HOME/skills appears in skills.list WITHOUT a daemon restart (F11)",
-        "tool-surface-04 the skill catalog survives a daemon restart (durable, digest-equal) (F11)"
-      ],
-      "note": "04-tool-surface branch e2e gate (T5): timeout tool + real LSP navigate + skill hot-reload/durability through the live RPC surface."
     },
     {
       "name": "hitl-notifications",
@@ -1058,11 +1150,6 @@
       "note": "plan-20261101-fresh-context-critic tree: fresh-context evidence critic (leaf 02), hostile second pass (leaf 03), contest path (leaf 04), zero-decision compile (leaf 05), interview option gates (leaf 06), daemon wiring + model slots (leaf 07). Self-contained fixtures over real StrategicPlanner + live harness daemon for the wiring scenario."
     },
     {
-      "name": "session-storage",
-      "dir": "e2e/suites/session-storage",
-      "status": "implemented"
-    },
-    {
       "name": "skills-refresh-origin",
       "dir": "e2e/suites/skills-refresh-origin",
       "status": "todo",
@@ -1079,7 +1166,89 @@
       "name": "dynamic-tools",
       "dir": "e2e/suites/dynamic-tools",
       "status": "implemented",
-      "note": "RED gate skeleton (branch 03 leaf 00T): compiles against current code; flag-off byte-identical control + capability-gate cases 1-4 fail RED for the missing capability-gate/exposure seam (no llm.CapFrontier tag, no warn-once downgrade, no episode-boundary restore yet). Starvation canary + cache-continuity cases are todo-marked (need the 01/04/05 impl seams: tool_search + predicted-budget promotion + the SetSchemaMode re-cache)."    }
+      "note": "As-needed tool exposure (branch 03): flag-off byte-identical control + capability-gate cases 1-4 + starvation canary (tool_search -> tool_view append-only promotion) + cache-continuity (no mid-episode invalidation) all green against the landed seams; scenarios dynamic-tools-01..04 in scenarios[] below."
+    },
+    {
+      "name": "intake-status",
+      "dir": "e2e/suites/intake-status",
+      "status": "implemented"
+    },
+    {
+      "name": "voice-lifecycle",
+      "dir": "e2e/suites/voice-lifecycle",
+      "status": "implemented"
+    },
+    {
+      "name": "voice-bargein",
+      "dir": "e2e/suites/voice-bargein",
+      "status": "implemented"
+    },
+    {
+      "name": "voice-concurrency",
+      "dir": "e2e/suites/voice-concurrency",
+      "status": "implemented"
+    },
+    {
+      "name": "voice-local",
+      "dir": "e2e/suites/voice-local",
+      "status": "implemented"
+    },
+    {
+      "name": "delegate-seam",
+      "dir": "e2e/suites/delegate-seam",
+      "status": "implemented",
+      "diff": "L",
+      "scenarios": [
+        "delegate-seam-01 async delegate_task spawn returns a child handle (child_id, running); the settlement arrives on agent.delegate.result (contract B1)",
+        "delegate-seam-02 subagent_send_message steers a running child; subagent_interrupt returns accepted:true and transitions to interrupted; subagent_list_children enumerates states (F3)",
+        "delegate-seam-03 workflow tool confined fan-out (goja, dsh-archetype) returns {kind:foreground, runId, agentsStarted, result}; cap trip is FAIL-CLOSE; Node APIs rejected (B5)",
+        "delegate-seam-04 descriptor cold resume: interrupted child resumes via DelegateManager.Resume and completes (B6)"
+      ],
+      "note": "01-delegation branch e2e gate (T1/T5/T6/T7): hermetic scratch daemon, asserts over live chat.submit + agent.delegate.result, never mocks. Fails RED until the daemon wiring (internal/daemon/components.go + dsh_wiring.go) and the delegate/plan-mode providers land concurrently."
+    },
+    {
+      "name": "goals-plans",
+      "dir": "e2e/suites/goals-plans",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "goals-plans-01 goal_get/goal_create/goal_update are registered; goal_create without direct human authority is refused at the tool boundary (C4b)",
+        "goals-plans-02 round driver: goal with max_rounds=2 advances autonomously then auto-blocks with code round-limit after zero human turns (C4c)",
+        "goals-plans-03 plan mode: /plan enters plan mode; exit_plan_mode presents Approve; approve lands via the existing plan gate and plan mode exits (C4d)"
+      ],
+      "note": "02-goals-plans branch e2e gate (G2/G3/G4): goal tools + round driver + plan mode through live RPC/CLI. Fails RED until the goal/delegate/plan-mode daemon wiring lands concurrently."
+    },
+    {
+      "name": "office-skills",
+      "dir": "e2e/suites/office-skills",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "office-skills-01 office_docx create->read round-trip returns the final path and the reopened doc has the requested heading/paragraph (C11.2)",
+        "office-skills-02 office_pptx create->read round-trip returns the path and the reopened deck has the slide title/body (C11.3)",
+        "office-skills-03 office_workbook create->read round-trip returns the path, sheet names, and typed cell values (C11.4)",
+        "office-skills-04 requires-tools gate: unregistered tool in a skill's requires-tools fires the exact contract message (C11.1)"
+      ],
+      "note": "06-office-skills branch e2e gate (T1-T4): asserts the tool behavior contract through the live daemon surface, never imports the concrete docx/pptx library. Requires the office_* tools registered + skills.validate_prerequisites wiring."
+    },
+    {
+      "name": "tool-surface",
+      "dir": "e2e/suites/tool-surface",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "tool-surface-01 declared-timeout tool surfaces TOOL_TIMEOUT through the live executor, never raw context.DeadlineExceeded (F9)",
+        "tool-surface-02 lsp_navigate goToDefinition against a real LSP server returns a location (F10)",
+        "tool-surface-03 a skill added under MEEPT_HOME/skills appears in skills.list WITHOUT a daemon restart (F11)",
+        "tool-surface-04 the skill catalog survives a daemon restart (durable, digest-equal) (F11)"
+      ],
+      "note": "04-tool-surface branch e2e gate (T5): timeout tool + real LSP navigate + skill hot-reload/durability through the live RPC surface."
+    },
+    {
+      "name": "session-storage",
+      "dir": "e2e/suites/session-storage",
+      "status": "implemented"
+    }
   ],
   "scenarios": [
     {
@@ -4197,6 +4366,374 @@
       "title": "regime report generation: the hitl Runner runs the scripted scenario in all three regimes and the report JSON parses into HitlRegimeReport with every C7 field present; the markdown renders",
       "paths": [
         "internal/eval/hitl/"
+      ]
+    },
+    {
+      "id": "intake-status-01",
+      "suite": "intake-status",
+      "diff": "M",
+      "title": "intake-status bridge enabled: authenticated GET /api/v1/intake/status returns the frozen cross-surface shape (enabled, watch_repo, poll_interval, required_labels, done_label, default_employee, gate_command, project_number, poller_scheduled, note) with poller_scheduled=true for an enabled+valid [intake]; missing Authorization -> 401",
+      "paths": [
+        "internal/comm/http/intake_handlers.go",
+        "internal/comm/http/server.go",
+        "internal/daemon/intake_status_rpc.go",
+        "e2e/suites/intake-status/intake_status_test.go"
+      ]
+    },
+    {
+      "id": "dynamic-tools-01",
+      "suite": "dynamic-tools",
+      "diff": "M",
+      "title": "flag-off control: with [agent.tools].dynamic_tool_exposure=false the executor tool payload is byte-identical across consecutive turns of one episode (the stable legacy enumeration, never append/reshape-spliced)",
+      "paths": [
+        "internal/agent/",
+        "internal/config/",
+        "e2e/suites/dynamic-tools/dynamic_tools_test.go"
+      ]
+    },
+    {
+      "id": "dynamic-tools-02",
+      "suite": "dynamic-tools",
+      "diff": "M",
+      "title": "capability-gate matrix (Integration Test Plan cases 1-4): configured search + non-frontier active model downgrades to predicted with exactly ONE warn-once log naming the model; a mid-session frontier->lesser switch reverts the mode ON the switch; a lesser->frontier switch-back restores search ONLY at the episode boundary (no mid-episode flap or re-log); an unknown/unclassified model is treated as non-frontier and downgrades too",
+      "paths": [
+        "internal/agent/",
+        "internal/llm/",
+        "e2e/suites/dynamic-tools/dynamic_tools_test.go"
+      ]
+    },
+    {
+      "id": "dynamic-tools-03",
+      "suite": "dynamic-tools",
+      "diff": "M",
+      "title": "starvation canary: an episode needing a NON-core tool (task_create, outside the always-full set) recovers it through the always-full meta pair tool_search -> tool_view; the tool_view promotion appends the tool into the episode's active set so the NEXT request ships its full schema and the turn completes (the model is never starved)",
+      "paths": [
+        "internal/agent/",
+        "internal/tools/",
+        "e2e/suites/dynamic-tools/dynamic_tools_test.go"
+      ]
+    },
+    {
+      "id": "dynamic-tools-04",
+      "suite": "dynamic-tools",
+      "diff": "M",
+      "title": "cache continuity: three consecutive ordinary turns of one episode add ZERO 'prefix cache invalidated' events (a frozen active set is byte-identical turn to turn; only a promotion or a model switch re-caches, once each)",
+      "paths": [
+        "internal/agent/",
+        "internal/llm/",
+        "e2e/suites/dynamic-tools/dynamic_tools_test.go"
+      ]
+    },
+    {
+      "id": "voice-boot-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[voice] enabled boot arms the voice routes (sidecar wired + routes armed log); disabled boot arms nothing",
+      "paths": [
+        "internal/daemon/voice_wiring.go",
+        "internal/comm/http/voice.go"
+      ]
+    },
+    {
+      "id": "voice-child-lazy-01",
+      "suite": "voice-lifecycle",
+      "diff": "S",
+      "title": "[voice] the meept-voice child is NOT spawned at boot; EnsureRunning is lazy on first call",
+      "paths": [
+        "internal/voice/childproc.go"
+      ]
+    },
+    {
+      "id": "voice-webhook-media-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[voice] signed call.initiated accepted 200, answer action placed at the call-control API, media start frame consumed by the splice",
+      "paths": [
+        "internal/comm/http/voice.go",
+        "internal/voice/manager.go",
+        "internal/voice/splice.go"
+      ]
+    },
+    {
+      "id": "voice-inbound-lifecycle-skipped",
+      "suite": "voice-lifecycle",
+      "diff": "L",
+      "title": "[voice-tierA] full inbound loop (greeting->prompt->say->hangup) now GREEN: keys emission + real providers + STT pump landed; audio assertions live in voice-keys-providers-01",
+      "paths": [
+        "internal/daemon/voice_wiring.go"
+      ]
+    },
+    {
+      "id": "voice-bargein-01",
+      "suite": "voice-bargein",
+      "diff": "M",
+      "title": "[voice] media-side interrupt clears ONLY the interrupted call's socket; the concurrent call's socket never sees clear",
+      "paths": [
+        "internal/voice/splice.go"
+      ]
+    },
+    {
+      "id": "voice-bargein-c1-skipped",
+      "suite": "voice-bargein",
+      "diff": "M",
+      "title": "[voice-tierA] C1 interrupt -> talk-loop clear path now GREEN (registry Acquire landed leaf 15; STT-partial trigger landed tierA 05/06); live-turn reflection pinned by voice-partial-bargein-01",
+      "paths": [
+        "internal/voice/talkloop.go",
+        "internal/daemon/voice_wiring.go"
+      ]
+    },
+    {
+      "id": "voice-conc-01",
+      "suite": "voice-concurrency",
+      "diff": "M",
+      "title": "[voice] two simultaneous inbound calls: both answered, both media splices armed, one child hosts both",
+      "paths": [
+        "internal/voice/childproc.go",
+        "internal/voice/splice.go"
+      ]
+    },
+    {
+      "id": "voice-refusal-01",
+      "suite": "voice-concurrency",
+      "diff": "S",
+      "title": "[voice] unresolvable child binary -> inbound webhook refused 5xx, no media session arms",
+      "paths": [
+        "internal/voice/manager.go",
+        "internal/comm/http/voice.go"
+      ]
+    },
+    {
+      "id": "voice-say-streams-skipped",
+      "suite": "voice-concurrency",
+      "diff": "M",
+      "title": "[voice] concurrent say streams SKIPPED: blocked by the inbound registry-Acquire gap (talk loops cannot arm inbound)",
+      "paths": [
+        "internal/voice/talkloop.go"
+      ]
+    },
+    {
+      "id": "voice-dup-target-skipped",
+      "suite": "voice-concurrency",
+      "diff": "S",
+      "title": "[voice] duplicate-target + max_concurrent caps gate the OUTBOUND dialer, not the inbound webhook (named skips; pinned by TestRegistryLimits/TestDialRefusals)",
+      "paths": [
+        "internal/voice/dial.go"
+      ]
+    },
+    {
+      "id": "voice-keys-providers-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[voice-tierA] keys line observed on setup, REAL qwen3 provider constructs keyless from it, synthesized PCM reaches the Telnyx media socket (stub-audio era retired)",
+      "paths": [
+        "internal/daemon/voice_keys.go",
+        "internal/voicechild/providers_wiring.go",
+        "internal/voicechild/providers/tts_openai.go"
+      ]
+    },
+    {
+      "id": "voice-partial-bargein-01",
+      "suite": "voice-bargein",
+      "diff": "M",
+      "title": "[voice-tierA] STT-partial during live playback trips exactly one interrupt, the talk loop clears, and the fresh final starts a new employee turn whose reply reflects the interrupting prompt",
+      "paths": [
+        "internal/voicechild/pipeline.go",
+        "internal/voice/talkloop.go",
+        "internal/voice/local.go"
+      ]
+    },
+    {
+      "id": "voice-local-e2e-01",
+      "suite": "voice-local",
+      "diff": "L",
+      "title": "[voice-local] the whole local leg hermetic: RPC open -> pair paths -> scripted client PCM through the REAL whisper adapter (fake shim) -> fake-runner employee turn -> say through the REAL piper adapter -> paced PCM at OutPath -> voice.local.end -> registry empty + calls.db row with transcripts",
+      "paths": [
+        "internal/voice/local.go",
+        "internal/voice/localsplice.go",
+        "internal/rpc/voice_local.go"
+      ]
+    },
+    {
+      "id": "voice-local-refusals-01",
+      "suite": "voice-local",
+      "diff": "S",
+      "title": "[voice-local] busy / duplicate-target / unknown-employee refusals surface through the voice.local.open RPC error shapes (named CL8 errors)",
+      "paths": [
+        "internal/voice/dial.go",
+        "internal/rpc/voice_local.go"
+      ]
+    },
+    {
+      "id": "delegate-seam-01",
+      "suite": "delegate-seam",
+      "diff": "L",
+      "title": "async delegate_task spawn returns a child handle (child_id, running); the settlement arrives on agent.delegate.result (contract B1)",
+      "paths": [
+        "internal/agent/",
+        "internal/acp/"
+      ]
+    },
+    {
+      "id": "delegate-seam-02",
+      "suite": "delegate-seam",
+      "diff": "L",
+      "title": "subagent_send_message steers a running child; subagent_interrupt returns accepted:true and transitions to interrupted; subagent_list_children enumerates states (F3)",
+      "paths": [
+        "internal/agent/",
+        "internal/acp/"
+      ]
+    },
+    {
+      "id": "delegate-seam-03",
+      "suite": "delegate-seam",
+      "diff": "L",
+      "title": "workflow tool confined fan-out (goja, dsh-archetype) returns {kind:foreground, runId, agentsStarted, result}; cap trip is FAIL-CLOSE; Node APIs rejected (B5)",
+      "paths": [
+        "internal/agent/",
+        "internal/acp/"
+      ]
+    },
+    {
+      "id": "delegate-seam-04",
+      "suite": "delegate-seam",
+      "diff": "L",
+      "title": "descriptor cold resume: interrupted child resumes via DelegateManager.Resume and completes (B6)",
+      "paths": [
+        "internal/agent/",
+        "internal/acp/"
+      ]
+    },
+    {
+      "id": "goals-plans-01",
+      "suite": "goals-plans",
+      "diff": "M",
+      "title": "goal_get/goal_create/goal_update are registered; goal_create without direct human authority is refused at the tool boundary (C4b)",
+      "paths": [
+        "internal/employee/"
+      ]
+    },
+    {
+      "id": "goals-plans-02",
+      "suite": "goals-plans",
+      "diff": "M",
+      "title": "round driver: goal with max_rounds=2 advances autonomously then auto-blocks with code round-limit after zero human turns (C4c)",
+      "paths": [
+        "internal/employee/"
+      ]
+    },
+    {
+      "id": "goals-plans-03",
+      "suite": "goals-plans",
+      "diff": "M",
+      "title": "plan mode: /plan enters plan mode; exit_plan_mode presents Approve; approve lands via the existing plan gate and plan mode exits (C4d)",
+      "paths": [
+        "internal/employee/"
+      ]
+    },
+    {
+      "id": "office-skills-01",
+      "suite": "office-skills",
+      "diff": "M",
+      "title": "office_docx create->read round-trip returns the final path and the reopened doc has the requested heading/paragraph (C11.2)",
+      "paths": [
+        "internal/tools/builtin/",
+        "config/skills/"
+      ]
+    },
+    {
+      "id": "office-skills-02",
+      "suite": "office-skills",
+      "diff": "M",
+      "title": "office_pptx create->read round-trip returns the path and the reopened deck has the slide title/body (C11.3)",
+      "paths": [
+        "internal/tools/builtin/",
+        "config/skills/"
+      ]
+    },
+    {
+      "id": "office-skills-03",
+      "suite": "office-skills",
+      "diff": "M",
+      "title": "office_workbook create->read round-trip returns the path, sheet names, and typed cell values (C11.4)",
+      "paths": [
+        "internal/tools/builtin/",
+        "config/skills/"
+      ]
+    },
+    {
+      "id": "office-skills-04",
+      "suite": "office-skills",
+      "diff": "M",
+      "title": "requires-tools gate: unregistered tool in a skill's requires-tools fires the exact contract message (C11.1)",
+      "paths": [
+        "internal/tools/builtin/",
+        "config/skills/"
+      ]
+    },
+    {
+      "id": "tool-surface-01",
+      "suite": "tool-surface",
+      "diff": "M",
+      "title": "declared-timeout tool surfaces TOOL_TIMEOUT through the live executor, never raw context.DeadlineExceeded (F9)",
+      "paths": [
+        "internal/skills/",
+        "internal/tools/",
+        "internal/code/lsp/"
+      ]
+    },
+    {
+      "id": "tool-surface-02",
+      "suite": "tool-surface",
+      "diff": "M",
+      "title": "lsp_navigate goToDefinition against a real LSP server returns a location (F10)",
+      "paths": [
+        "internal/skills/",
+        "internal/tools/",
+        "internal/code/lsp/"
+      ]
+    },
+    {
+      "id": "tool-surface-03",
+      "suite": "tool-surface",
+      "diff": "M",
+      "title": "a skill added under MEEPT_HOME/skills appears in skills.list WITHOUT a daemon restart (F11)",
+      "paths": [
+        "internal/skills/",
+        "internal/tools/",
+        "internal/code/lsp/"
+      ]
+    },
+    {
+      "id": "tool-surface-04",
+      "suite": "tool-surface",
+      "diff": "M",
+      "title": "the skill catalog survives a daemon restart (durable, digest-equal) (F11)",
+      "paths": [
+        "internal/skills/",
+        "internal/tools/",
+        "internal/code/lsp/"
+      ]
+    },
+    {
+      "id": "session-storage-01",
+      "suite": "session-storage",
+      "diff": "M",
+      "title": "storage.record.changed put/delete events fire strictly after the session-scope record commit (contract S4, G5)",
+      "paths": [
+        "internal/session/",
+        "internal/context/sessionref/",
+        "e2e/suites/session-storage"
+      ]
+    },
+    {
+      "id": "session-storage-02",
+      "suite": "session-storage",
+      "diff": "M",
+      "title": "session projection references rebuild from the durable record and survive a resume without the live store (record identity)",
+      "paths": [
+        "internal/session/",
+        "internal/context/sessionref/",
+        "e2e/suites/session-storage"
       ]
     }
   ]

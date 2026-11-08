@@ -193,11 +193,3 @@ func (o *ResolverOptions) KnownTools() map[string]struct{} {
 	}
 	return o.knownTools
 }
-
-// normalizeFunc returns the injected normalizer (nil-safe).
-func (o *ResolverOptions) normalizeFunc() func(string) string {
-	if o == nil {
-		return nil
-	}
-	return o.NormalizeToolName
-}

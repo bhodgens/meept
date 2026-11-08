@@ -105,6 +105,13 @@ var builtinCommands = map[string]struct{}{
 	// status` already exists). Routed to executeIntake in
 	// internal/tui/command_handler.go.
 	"intake": {},
+
+	// Local voice session (local-leg leaf 13a): /voice eve|stop|list
+	// starts, stops, and lists local voice calls over the voice.local.*
+	// RPC plane (leaf 08). Routed to executeVoice in
+	// internal/tui/command_handler.go via the VoiceSessionModel
+	// (internal/tui/models/voice.go).
+	"voice": {},
 }
 
 // CommandTasks is the "tasks" command name, exported for compatibility with tui/constants.go.

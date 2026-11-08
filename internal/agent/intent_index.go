@@ -27,10 +27,6 @@ type SemanticIndex struct {
 	entries []IntentEntry
 	vectors [][]float64
 	ready   bool
-	// AGENT-10 FIX: cancel function and WaitGroup to allow clean shutdown
-	// of the background BuildIndex goroutine, preventing goroutine leaks.
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
 }
 
 // NewSemanticIndex creates a new semantic index.
@@ -40,21 +36,6 @@ func NewSemanticIndex(client EmbeddingClient) *SemanticIndex {
 		entries: make([]IntentEntry, 0),
 		vectors: make([][]float64, 0),
 	}
-}
-
-// BuildIndexWithCancel is like BuildIndex but returns a cancellation function
-// so callers can shut down the background goroutine cleanly.
-func (idx *SemanticIndex) BuildIndexWithCancel(ctx context.Context) (cancel context.CancelFunc, err error) {
-	ctx, idx.cancel = context.WithCancel(ctx)
-	idx.wg.Add(1)
-	go func() {
-		defer idx.wg.Done()
-		if buildErr := idx.BuildIndex(ctx); buildErr != nil {
-			// Index build failed; caller can check IsReady() or call BuildIndex
-			// synchronously as a fallback.
-		}
-	}()
-	return idx.cancel, nil
 }
 
 func buildIntentText(t IntentType) string {
@@ -156,12 +137,8 @@ func (idx *SemanticIndex) IsReady() bool {
 	return idx.ready
 }
 
-// Stop cancels the background build-index goroutine (if any) and waits for it
-// to exit, preventing goroutine leaks.
-// AGENT-10 FIX
-func (idx *SemanticIndex) Stop() {
-	if idx.cancel != nil {
-		idx.cancel()
-	}
-	idx.wg.Wait()
-}
+// Lifecycle note: SemanticIndex spawns no goroutines (BuildIndex runs
+// synchronously on the caller). The background build + shutdown drain lives
+// on the Dispatcher (indexCtx/indexCancel/indexWG, drained by Stop, wired
+// from Components.Stop). The former BuildIndexWithCancel/Stop pair here was
+// dead (zero callers; bughunt 2026-11-06 regression F-3) and was removed.

@@ -86,7 +86,7 @@ func NewCCRStore(cfg CCRStoreConfig) (*sqliteStore, error) {
 	}
 
 	// Open database with WAL mode, busy timeout, and shared cache
-	dsn := "file:" + dbPath + "?_fk=1&_journal_mode=WAL&_busy_timeout=5000&cache=shared"
+	dsn := "file:" + dbPath + "?cache=shared&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" // modernc _pragma form (bughunt 2026-11-07)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening SQLite database: %w", err)

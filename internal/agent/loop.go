@@ -2180,11 +2180,35 @@ func (l *AgentLoop) ensureExposurePlan(conversationID string) *ExposurePlan {
 			known = append(known, t.Name())
 		}
 	}
+	// bughunt agent-core F-2: the ceiling is the agent's EXECUTABLE view —
+	// the per-loop filtered registry (canonical registry names, grant
+	// aliases resolved, group intersection already applied by
+	// filterTools/ScopedToolNames) — NOT the raw declared grant names
+	// (spec.AllTools returns "shell_execute" where the registry serves
+	// "shell", so Promote mis-refused every alias'd grant). It also
+	// skipped the group denial entirely; a live execution gate (F-1) made
+	// that a permission bypass. The meta pair is UNIONed: design §1 layer
+	// 3 makes the discoverer+expander always-active in dynamic modes, and
+	// most AGENT.md specs never grant them — without the union, agents
+	// would have no recovery path under the hard gate.
 	var ceiling []string
-	if l.spec != nil {
-		ceiling = l.spec.AllTools()
+	if l.registry != nil {
+		ceiling = append([]string(nil), known...)
+	} else if l.spec != nil {
+		ceiling = l.spec.GrantedToolNames()
 	}
-	plan := NewExposurePlan(mode, nil, l.schemaModeCfg.PredictedBudget, ceiling, known)
+	if len(ceiling) > 0 {
+		seenC := make(map[string]struct{}, len(ceiling)+2)
+		for _, c := range ceiling {
+			seenC[c] = struct{}{}
+		}
+		for _, m := range metaTools {
+			if _, ok := seenC[m]; !ok {
+				ceiling = append(ceiling, m)
+			}
+		}
+	}
+	plan := NewExposurePlan(mode, nil, l.schemaModeCfg.PredictedBudget, ceiling, known, l.registry)
 	l.exposurePlans[conversationID] = plan
 	return plan
 }
@@ -4706,8 +4730,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	// path is byte-identical to the legacy.
 	if l.schemaModeSet && l.schemaModeCfg.DynamicToolExposure {
 		plan := l.ensureExposurePlan(conversationID)
-		if plan != nil && l.executor != nil {
-			l.executor.SetExposurePlan(plan)
+		if plan != nil {
+			// bughunt agent-core F-3: the plan rides the TURN CONTEXT, not
+			// a shared executor field, so interleaved conversations on one
+			// session-long loop are each adjudicated against their own
+			// episode's active set.
+			ctx = WithExposurePlan(ctx, plan)
 		}
 	}
 
@@ -7445,6 +7473,12 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	}
 
 	// Build system prompt with memory and skill context
+	// Episode-start skill-ranking signal (branch 04 leaf 02): the task
+	// name+description is this episode's ranking text, recorded once here
+	// so the injector freezes the listing order for the whole episode.
+	if inj := l.ContextInjector(); inj != nil {
+		inj.SetEpisodeTask(taskInput)
+	}
 	systemPrompt := l.buildSystemPromptWithContextAndSkills(ctx, conv, discovered)
 	conv.SetSystemPrompt(systemPrompt)
 
@@ -7676,11 +7710,14 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []memo
 	}
 	// Scope filter for THIS loop's session (T2): applied to every fetched
 	// slice below via memory.FilterResults — the committed C2 predicate.
-	scopeIdentity := l.memoryScopeCtxIdentity()
-	scopeOpts := []memory.SearchOption{
-		memory.WithScopeFilter(memory.Scope(scopeIdentity.MaxScope), scopeIdentity.ProjectID, scopeIdentity.UserID),
-		memory.WithMultiUserEnabled(scopeIdentity.MultiUser),
-	}
+	// bughunt 2026-11-07 agent-fixes F-D: fold through memoryScopeOptions
+	// (the same helper dispatcher_scope.go and the tool lane use), NOT the
+	// verbatim MaxScope. A declared-global chief-of-staff maps to the USER
+	// purview there; passing ScopeGlobal verbatim made the C2 predicate
+	// hide every project/user row from prompt-injected recall — the exact
+	// contradiction f5eb3e03 closed on the tool lane, reopened here on the
+	// loop lane (three-site rule, scope_wiring.go:11-13).
+	scopeOpts := l.recallScopeOptions()
 	addScoped := func(mems []memvid.Memory) {
 		for _, m := range mems {
 			res := memory.FilterResults([]memory.MemoryResult{memory.MemoryToResult(memory.Memory{
@@ -9319,9 +9356,26 @@ func (l *AgentLoop) SessionConversation(id string) *Conversation {
 	return l.conversations.Get(id)
 }
 
-// ClearConversation removes a conversation.
+// ClearConversation removes a conversation. Nil-safe on the store (bughunt
+// 2026-11-07 agent-fixes F-A: ChatHandler.ClearConversation now routes here
+// instead of touching l.conversations directly, so the exposure-plan prune
+// below dies with every real /reset, not only test callers).
 func (l *AgentLoop) ClearConversation(id string) {
-	l.conversations.Delete(id)
+	if l == nil {
+		return
+	}
+	if l.conversations != nil {
+		l.conversations.Delete(id)
+	}
+	// bughunt agent-core F-4: the episode's exposure plan dies with the
+	// conversation. Without this the map grows per conversationID for the
+	// loop's whole life (active slice + two name sets per entry) and a
+	// recycled conversationID would silently resume a frozen episode
+	// instead of starting fresh (design §2.2: a new conversation is a new
+	// episode).
+	l.exposureMu.Lock()
+	delete(l.exposurePlans, id)
+	l.exposureMu.Unlock()
 }
 
 // SetConfig updates the agent configuration.

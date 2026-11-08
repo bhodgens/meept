@@ -423,6 +423,9 @@ func runTUIWithSession(cwd, sessionID string) error {
 		return fmt.Errorf("TUI does not yet support --transport=http; use the default RPC transport or the Flutter web UI")
 	}
 	app := tui.NewApp(getSocketPath(), cwd)
+	// Wire the leaf 08 client audio shim into /voice (leaf 13a); the
+	// TUI itself stays voice-package-free (import cycle).
+	wireTUIVoiceDialer(app)
 	if sessionID != "" {
 		app.SetTargetSession(sessionID)
 	}

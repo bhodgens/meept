@@ -352,7 +352,7 @@ hooks:
 	@echo "Installing git hooks (core.hooksPath -> .githooks)..."
 	@git config core.hooksPath .githooks
 	@chmod +x .githooks/pre-commit .githooks/pre-commit-* .githooks/pre-push .githooks/pre-push-*
-	@echo "Installed 18 pre-commit checks + the pre-push chain (e2e-affected gate, then bench gate) via .githooks."
+	@echo "Installed 20 pre-commit checks + the pre-push chain (whole-tree vet gate, then e2e-affected gate, then bench gate) via .githooks."
 	@echo "Requires bash >= 3.2; sub-hooks run under whatever 'bash' resolves to"
 	@echo "on PATH, so the same suite executes on macOS and on a Linux runner."
 	@echo "Bypass with --no-verify (or MEEPT_E2E_SKIP=1 / MEEPT_BENCH_SKIP=1 per gate)."
@@ -882,6 +882,10 @@ audit-scripts:
 	@if [ -f scripts/audit-secrets-value-callers.py ]; then \
 		echo "  secrets-value-callers..."; \
 		python3 scripts/audit-secrets-value-callers.py || exit 1; \
+	fi
+	@if [ -f scripts/audit-sqlite-dsn-pragmas.py ]; then \
+		echo "  sqlite-dsn-pragmas..."; \
+		python3 scripts/audit-sqlite-dsn-pragmas.py || exit 1; \
 	fi
 	@if [ -f scripts/research-harness-lit.py ]; then \
 		echo "  research-harness-lit..."; \

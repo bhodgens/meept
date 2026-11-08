@@ -285,3 +285,35 @@ func TestPruneClosed(t *testing.T) {
 		t.Fatalf("OpenRuns after prune = %+v, want empty", runs)
 	}
 }
+
+// bughunt 2026-11-07 dispatcher-queue F-4: OpenRuns' docblock promises the
+// NEWEST payload on duplicate run_started rows. The old GROUP BY took MAX
+// (session_id) and read result_payload from an arbitrary tie row — the bare-
+// column rule only resolves to the row that satisfied the MAX aggregate, so
+// with identical session_ids the payload was scan-order-dependent. The SQL
+// now selects the row whose created_at equals the per-turn MAX explicitly.
+func TestOpenRunsNewestPayloadWins(t *testing.T) {
+	j := newTestJournal(t)
+	ctx := context.Background()
+
+	base := time.Now().Add(-time.Minute)
+	if err := j.Append(ctx, Record{TurnID: "dup-1", SessionID: "s", Kind: KindRunStarted,
+		ResultPayload: []byte(`{"payload":"older"}`), Timestamp: base}); err != nil {
+		t.Fatalf("append older: %v", err)
+	}
+	if err := j.Append(ctx, Record{TurnID: "dup-1", SessionID: "s", Kind: KindRunStarted,
+		ResultPayload: []byte(`{"payload":"newest"}`), Timestamp: base.Add(time.Second)}); err != nil {
+		t.Fatalf("append newer: %v", err)
+	}
+
+	runs, err := j.OpenRuns(ctx)
+	if err != nil {
+		t.Fatalf("open runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("want 1 open run, got %+v", runs)
+	}
+	if got := string(runs[0].TurnPayload); got != `{"payload":"newest"}` {
+		t.Fatalf("OpenRuns payload = %s, want the NEWEST run_started row (F-4 tie-break)", got)
+	}
+}

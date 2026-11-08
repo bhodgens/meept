@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm/metrics"
@@ -145,7 +146,20 @@ type Client struct {
 	// ALSO handed to the callback from recordUsageStore's async goroutine
 	// -- it never runs on the request goroutine and never blocks the call
 	// path. Nil = off (SetLLMCallObserver nil-guard).
-	llmCallObserver func(appmetrics.LLMCallRecord)
+	//
+	// Atomic: the fan-out setter writes under ProviderManager's pm.mu while
+	// every completed call's recordUsageStore goroutine reads this field; a
+	// plain func-field write racing request-path reads is a data race
+	// (bughunt 2026-11-07 infra-fixes F-3).
+	llmCallObserver atomic.Pointer[func(appmetrics.LLMCallRecord)]
+}
+
+// llmCallObserverFn loads the attached observer (nil when unset).
+func (c *Client) llmCallObserverFn() func(appmetrics.LLMCallRecord) {
+	if p := c.llmCallObserver.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // DefaultQuotaMaxWait mirrors config.DefaultQuotaRetryMaxWait without
@@ -231,6 +245,16 @@ func shortThrottleSleep(header http.Header, plan BackoffPlan, now time.Time, att
 		if wait := serverAt.Sub(now); wait > step {
 			step = wait
 		}
+	}
+	// F3 fix (property-test finding 2026-11-06): honor the doc contract —
+	// raise to the server schedule but NEVER past the plan's Max step, so
+	// a huge Retry-After cannot burn the short budget wall-clock (D8).
+	if plan.Max > 0 && step > plan.Max {
+		step = plan.Max
+	}
+	// The horizon is a hard ceiling too (D8: never wait past GiveUpAt).
+	if g := plan.GiveUpAt.Sub(now); g >= 0 && step > g {
+		step = g
 	}
 	if step < 0 {
 		step = 0
@@ -321,7 +345,7 @@ func (c *Client) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord)) {
 	if c == nil || fn == nil {
 		return
 	}
-	c.llmCallObserver = fn
+	c.llmCallObserver.Store(&fn)
 }
 
 // Semantic cache partition keys: lookup/store partition by (model,
@@ -2227,7 +2251,8 @@ func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string
 	// first-delta state; -1 on non-streaming calls, cache hits, and
 	// errors (nothing armed the clock or no delta ever arrived).
 	ttftMs := ttftMS(chatOpts)
-	if c.usageStore == nil && c.llmCallObserver == nil {
+	observer := c.llmCallObserverFn()
+	if c.usageStore == nil && observer == nil {
 		return
 	}
 	//nolint:gosec // goroutine outlives request context
@@ -2252,8 +2277,8 @@ func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string
 		if c.usageStore != nil {
 			c.usageStore.RecordLLMCall(record)
 		}
-		if c.llmCallObserver != nil {
-			c.llmCallObserver(record)
+		if observer != nil {
+			observer(record)
 		}
 	}()
 }
@@ -2559,7 +2584,13 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		// TTFT clock arm (llm-serving-tiers leaf 04): dispatch instant of
 		// THIS attempt, refreshed per short-retry so the number measures
 		// the serving attempt's first-token wait. First delta captures.
+		// The capture state resets with the clock: a delta captured by an
+		// earlier (failed) attempt must not stamp this attempt's wait —
+		// stale pair vs a fresh ttftMS read clamped to 0 (bughunt
+		// 2026-11-06 llm-daemon F-2).
 		chatOpts.ttftStart = time.Now()
+		chatOpts.ttftCaptured = false
+		chatOpts.ttftFirstDelta = time.Time{}
 		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill, chatOpts)
 		if err == nil {
 			// Record usage with scope

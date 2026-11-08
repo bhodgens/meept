@@ -141,7 +141,7 @@ type toolSearchPayload struct {
 // description contains the (case-insensitive) query. Results are ordered
 // deterministically by tool name; there is no time- or map-iteration-
 // dependent ordering anywhere in the path.
-func (t *ToolSearchTool) Execute(_ context.Context, args map[string]any) (any, error) {
+func (t *ToolSearchTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	query, _ := args[schemaPropQuery].(string)
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -152,8 +152,16 @@ func (t *ToolSearchTool) Execute(_ context.Context, args map[string]any) (any, e
 
 	// Collect the candidate tools from the scope. A nil scope is legal and
 	// just yields an empty candidate set (reported as a no-match digest).
-	var scope agent.ToolRegistry
-	if t != nil {
+	// bughunt config-tools F-1: prefer the registry the executor injected
+	// into this call's context (the AGENT's filtered view = role ceiling,
+	// canonical names + group intersection already applied). The
+	// daemon-wide registration bound t.scope to the FULL registry, so any
+	// agent could discover out-of-ceiling names/descriptions. The ctx seam
+	// is per-call (unlike SetScope on a shared singleton, which would race
+	// across concurrent agents); t.scope remains the fallback for
+	// standalone callers (tests, direct tool use).
+	scope := agent.ToolRegistryFromContext(ctx)
+	if scope == nil && t != nil {
 		scope = t.scope
 	}
 	var candidates []tools.Tool

@@ -12,14 +12,22 @@ import (
 	"github.com/caimlas/meept/internal/config"
 )
 
-// writeHomeConfig writes a minimal meept.json5 into a scratch MEEPT_HOME.
-func writeHomeConfig(t *testing.T, content string) {
+// loadConfigJSON5 parses a meept.json5 snippet through the REAL loader
+// into a DefaultConfig, so the wiring tests exercise the schema-backed
+// [comm.slack] path end to end (parse -> Config.Slack -> bridge), not a
+// hand-built struct.
+func loadConfigJSON5(t *testing.T, content string) *config.Config {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv(config.EnvMeeptHome, home)
-	if err := os.WriteFile(filepath.Join(home, "meept.json5"), []byte(content), 0o600); err != nil {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "meept.json5")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	cfg := config.DefaultConfig()
+	if err := config.LoadJSON5(path, cfg); err != nil {
+		t.Fatalf("load json5: %v", err)
+	}
+	return cfg
 }
 
 const slackEnabledCfg = `{
@@ -40,10 +48,12 @@ const slackAbsentCfg = `{
 
 func TestWireSlackChannelDefaultOff(t *testing.T) {
 	// THE default-off invariant (T4): with no [comm.slack] block the
-	// wiring produces NO channel and NO handler - nothing registers, no
-	// route is served.
-	writeHomeConfig(t, slackAbsentCfg)
-	cfg := &config.Config{}
+	// schema default is disabled, and the wiring produces NO channel and
+	// NO handler - nothing registers, no route is served.
+	if cfg := config.DefaultConfig(); cfg.Slack.Enabled {
+		t.Fatal("DefaultConfig: comm.slack must be disabled")
+	}
+	cfg := loadConfigJSON5(t, slackAbsentCfg)
 	ch, h := wireSlackChannel(cfg, slog.Default())
 	if ch != nil || h != nil {
 		t.Fatalf("default-off wiring returned (%v, %v), want (nil, nil)", ch, h)
@@ -51,8 +61,7 @@ func TestWireSlackChannelDefaultOff(t *testing.T) {
 }
 
 func TestWireSlackChannelDisabledExplicit(t *testing.T) {
-	writeHomeConfig(t, `{"slack": {"enabled": false, "bot_token": "x", "signing_secret": "y", "channel_id": "C"}}`)
-	cfg := &config.Config{}
+	cfg := loadConfigJSON5(t, `{"slack": {"enabled": false, "bot_token": "x", "signing_secret": "y", "channel_id": "C"}}`)
 	ch, h := wireSlackChannel(cfg, slog.Default())
 	if ch != nil || h != nil {
 		t.Fatalf("enabled=false wiring returned (%v, %v), want (nil, nil)", ch, h)
@@ -60,9 +69,9 @@ func TestWireSlackChannelDisabledExplicit(t *testing.T) {
 }
 
 func TestWireSlackChannelEnabledRegisters(t *testing.T) {
-	// Enabled wiring builds exactly one channel + handler pair (T4).
-	writeHomeConfig(t, slackEnabledCfg)
-	cfg := &config.Config{}
+	// Enabled wiring builds exactly one channel + handler pair (T4), fed
+	// through the schema-backed config field.
+	cfg := loadConfigJSON5(t, slackEnabledCfg)
 	ch, h := wireSlackChannel(cfg, slog.Default())
 	if ch == nil || h == nil {
 		t.Fatal("enabled wiring returned nil channel/handler")
@@ -74,12 +83,19 @@ func TestWireSlackChannelEnabledRegisters(t *testing.T) {
 
 func TestWireSlackChannelInvalidEnabledDegradesOff(t *testing.T) {
 	// enabled=true with missing signing_secret is the C2 validation
-	// failure; until the schema key lands, wiring degrades to disabled.
-	writeHomeConfig(t, `{"slack": {"enabled": true, "bot_token": "xoxb", "channel_id": "C"}}`)
-	cfg := &config.Config{}
+	// failure; wiring degrades to disabled with a warning.
+	cfg := loadConfigJSON5(t, `{"slack": {"enabled": true, "bot_token": "xoxb", "channel_id": "C"}}`)
 	ch, h := wireSlackChannel(cfg, slog.Default())
 	if ch != nil || h != nil {
 		t.Fatalf("invalid enabled wiring returned (%v, %v), want (nil, nil)", ch, h)
+	}
+}
+
+func TestReadCommSlackConfigNilSafe(t *testing.T) {
+	// nil Config -> zero (disabled), never an error.
+	got, err := readCommSlackConfig(nil)
+	if err != nil || got.Enabled {
+		t.Fatalf("readCommSlackConfig(nil) = (%+v, %v), want disabled + nil error", got, err)
 	}
 }
 

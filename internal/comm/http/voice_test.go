@@ -535,6 +535,128 @@ func TestVoicePlainListenerRefusesNonLoopback(t *testing.T) {
 	}
 }
 
+// fakeVoiceListener is a net.Listener whose Addr() reports a chosen address
+// regardless of what is actually bound — it simulates the audit LOW-b case
+// (a caller pre-opened a listener on a non-loopback interface) and the
+// LOW-a case (localhost resolving to a routable IP via /etc/hosts) without
+// touching the machine's hosts file.
+type fakeVoiceListener struct {
+	addr   net.Addr
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (f *fakeVoiceListener) Accept() (net.Conn, error) {
+	<-f.closed
+	return nil, net.ErrClosed
+}
+
+func (f *fakeVoiceListener) Close() error {
+	f.once.Do(func() { close(f.closed) })
+	return nil
+}
+
+func (f *fakeVoiceListener) Addr() net.Addr { return f.addr }
+
+func TestVoicePlainListenerRejectsNonLoopbackPreOpened(t *testing.T) {
+	v, _, _, _, _ := enabledRoutes(t)
+	// Pre-opened listener claiming a routable bind: must be refused with
+	// the named error AND closed (audit LOW b), before Serve ever runs.
+	ln := &fakeVoiceListener{
+		addr: &net.TCPAddr{IP: net.ParseIP("8.8.8.8"), Port: 53},
+		// buffered: the listener's Accept must never block forever on close.
+	}
+	ln.closed = make(chan struct{})
+	err := StartVoicePlainListenerWith(context.Background(), ln, v, "")
+	if !errors.Is(err, ErrNonLoopbackVoiceAddr) {
+		t.Fatalf("pre-opened routable listener: err = %v, want ErrNonLoopbackVoiceAddr", err)
+	}
+	select {
+	case <-ln.closed:
+	default:
+		t.Fatal("rejected pre-opened listener was not closed")
+	}
+
+	// A pre-opened listener claiming loopback passes validation and serves.
+	good, gerr := net.Listen("tcp", "127.0.0.1:0")
+	if gerr != nil {
+		t.Fatalf("listen: %v", gerr)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- StartVoicePlainListenerWith(ctx, good, v, "") }()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("loopback pre-opened listener: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("loopback pre-opened listener did not shut down")
+	}
+}
+
+// TestVoicePlainListenerRateLimited asserts the middleware wrapper (audit
+// MED): the plain listener applies the same per-IP rate limiter as the
+// main chain. burst 2 + flood 6 rapid requests -> the 3rd onward hits 429
+// (refill is 1/s; the whole burst window is milliseconds).
+func TestVoicePlainListenerRateLimited(t *testing.T) {
+	v, _, _, signWebhook, _ := enabledRoutes(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opts := PlainListenerOptions{RateLimitPerMinute: 60, RateLimitBurst: 2}
+	done := make(chan error, 1)
+	go func() { done <- StartVoicePlainListenerWith(ctx, ln, v, "", opts) }()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	base := "http://" + ln.Addr().String()
+	body := callEventBody(t, "call.initiated", "cc-rl")
+	saw429 := false
+	var statuses []int
+	for i := 0; i < 6; i++ {
+		req, err := http.NewRequest(http.MethodPost, base+v.WebhookPath(), bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		for k, vs := range signWebhook(body) {
+			for _, val := range vs {
+				req.Header.Add(k, val)
+			}
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("flood request %d: %v", i, err)
+		}
+		resp.Body.Close()
+		statuses = append(statuses, resp.StatusCode)
+		if resp.StatusCode == http.StatusTooManyRequests {
+			saw429 = true
+		}
+	}
+	if !saw429 {
+		t.Fatalf("rate limiter never fired over plain listener: statuses = %v", statuses)
+	}
+	// The FIRST requests within burst must still reach the handler (200):
+	// the wrapper must not refuse everything.
+	if statuses[0] != http.StatusOK {
+		t.Fatalf("first in-burst request: status = %d, want 200", statuses[0])
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("plain listener shutdown: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("plain listener did not shut down")
+	}
+}
+
 // --- T7: DTMF ---
 
 func TestVoiceDTMFCountedNoop(t *testing.T) {
@@ -648,3 +770,75 @@ func mustWriteWS(t *testing.T, conn *websocket.Conn, data []byte) {
 }
 
 const websocketStatusNormal = websocket.StatusNormalClosure
+
+// --- bughunt H2-wiring: start frame carries the negotiated wire codec ---
+//
+// The splice runner builds SpliceConfig.CodecWire from StartFrame.Encoding/
+// SampleRate while TranscodeInbound keeps its PCMU-flag semantics. These
+// tests pin the StartFrame side of that contract (the SpliceConfig fill is
+// daemon wiring, pinned in internal/daemon/voice_wiring_test.go).
+
+func TestVoiceStartFrameCarriesWireCodec(t *testing.T) {
+	v, _, runner, _, signMedia := enabledRoutes(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s := NewServer(ServerConfig{}, nil, nil, nil, nil, nil, WithVoiceRoutes(v))
+		s.middleware(http.HandlerFunc(v.serveVoiceRoute)).ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + v.MediaPath()
+	conn, _, err := dialMediaWS(t, wsURL, signMedia(v.mgrStreamURL()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close(websocketStatusNormal, "")
+	mustWriteWS(t, conn, []byte(`{"event":"connected"}`))
+	mustWriteWS(t, conn, []byte(`{"event":"start","start":{"call_control_id":"cc-h2","media_format":{"encoding":"PCMU","sample_rate":8000}}}`))
+
+	deadline := time.Now().Add(3 * time.Second)
+	for runner.callCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("runner never invoked")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	start := runner.lastStart()
+	// Wire codec fields populated verbatim from media_format...
+	if start.Encoding != "PCMU" || start.SampleRate != 8000 {
+		t.Fatalf("start frame wire codec: encoding=%q sample_rate=%d, want PCMU/8000", start.Encoding, start.SampleRate)
+	}
+	// ...while TranscodeInbound keeps its PCMU-flag semantics.
+	if !start.TranscodeInbound {
+		t.Fatal("PCMU encoding must keep TranscodeInbound true")
+	}
+}
+
+func TestVoiceStartFrameL16EmptyTranscodeKeepsCodecFields(t *testing.T) {
+	v, _, runner, _, signMedia := enabledRoutes(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s := NewServer(ServerConfig{}, nil, nil, nil, nil, nil, WithVoiceRoutes(v))
+		s.middleware(http.HandlerFunc(v.serveVoiceRoute)).ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + v.MediaPath()
+	conn, _, err := dialMediaWS(t, wsURL, signMedia(v.mgrStreamURL()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close(websocketStatusNormal, "")
+	mustWriteWS(t, conn, []byte(`{"event":"start","start":{"call_control_id":"cc-h2b","media_format":{"encoding":"L16","sample_rate":16000}}}`))
+
+	deadline := time.Now().Add(3 * time.Second)
+	for runner.callCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("runner never invoked")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	start := runner.lastStart()
+	if start.Encoding != "L16" || start.SampleRate != 16000 {
+		t.Fatalf("start frame wire codec: encoding=%q sample_rate=%d, want L16/16000", start.Encoding, start.SampleRate)
+	}
+	if start.TranscodeInbound {
+		t.Fatal("L16 must not set TranscodeInbound")
+	}
+}

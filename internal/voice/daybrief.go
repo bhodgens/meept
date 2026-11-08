@@ -207,10 +207,7 @@ func (b DayBrief) PromptBlock() string {
 	writeSection("[prior calls today]", callLines)
 
 	if b.DurableMemory != "" {
-		var mem []string
-		for _, line := range strings.Split(strings.TrimRight(b.DurableMemory, "\n"), "\n") {
-			mem = append(mem, line)
-		}
+		mem := strings.Split(strings.TrimRight(b.DurableMemory, "\n"), "\n")
 		writeSection("[durable memory]", mem)
 	}
 

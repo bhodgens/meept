@@ -64,8 +64,14 @@ type DialConfig struct {
 	PublicStreamURL string
 	ConnectionID    string
 	FromNumber      string
-	TimeoutSecs     int
-	TestBaseURL     string
+	// TimeoutSecs drives BOTH ring-time limits (audit 2026-11-06 M8):
+	// the dialer's local no-answer timer AND the carrier-side
+	// timeout_secs on the POST /calls body. Keeping the carrier limit on
+	// the same config (voice.timeout_secs, default 30) means the two
+	// races can never disagree about when a ring is dead; 0 falls back
+	// to DefaultNoAnswerSecs on both sides.
+	TimeoutSecs int
+	TestBaseURL string
 }
 
 // AuditWriter is the narrow audit seam (C9): one canonical row per dial
@@ -88,10 +94,11 @@ type EffectsLedger interface {
 
 // DialController is the dial-facing seam: telnyx.CallController plus
 // DialOut (leaf-02 Client satisfies it; the countingController gate fake
-// satisfies it structurally).
+// satisfies it structurally). The trailing timeoutSecs is the carrier-side
+// timeout_secs resolved from voice.timeout_secs (audit 2026-11-06 M8).
 type DialController interface {
 	telnyx.CallController
-	DialOut(ctx context.Context, to, from, connectionID string) (string, error)
+	DialOut(ctx context.Context, to, from, connectionID string, timeoutSecs int) (string, error)
 }
 
 // compile-time proof that the leaf-02 client satisfies the dial seam.
@@ -103,9 +110,24 @@ type dialReceipt struct {
 	CallControlID string `json:"call_control_id"`
 }
 
-// defaultNoAnswerSecs matches telnyx timeout_secs default (leaf-02 dial
-// request body) when config leaves TimeoutSecs unset.
-const defaultNoAnswerSecs = 30
+// DefaultNoAnswerSecs is the ring-time limit applied when config leaves
+// TimeoutSecs unset: it matches the telnyx default timeout_secs (leaf-02
+// dial request body) so the local timer and the carrier limit agree. It is
+// exported because the telnyx DialOut call site consumes the same value for
+// the carrier-side timeout_secs (audit 2026-11-06 M8 - the carrier field
+// was previously hardcoded, ignoring voice.timeout_secs).
+const DefaultNoAnswerSecs = 30
+
+// NoAnswerSecs resolves the effective ring timeout: the configured
+// TimeoutSecs when positive, else DefaultNoAnswerSecs. Both the dialer's
+// no-answer timer and the DialOut timeout_secs ride this single resolution
+// so the two limits can never disagree.
+func (d *Dialer) NoAnswerSecs() int {
+	if d.cfg.TimeoutSecs > 0 {
+		return d.cfg.TimeoutSecs
+	}
+	return DefaultNoAnswerSecs
+}
 
 // Dialer places outbound calls under the C9 order. All fields are
 // immutable after construction; mutable state (no-answer timers, per-call
@@ -119,21 +141,28 @@ type Dialer struct {
 	audit  AuditWriter
 	logger *slog.Logger
 
-	mu     sync.Mutex
-	timers map[string]*time.Timer   // ccid -> no-answer timer (stopped on answered)
-	dones  map[string]chan struct{} // ccid -> terminal channel (closed once)
-	fin    map[string]bool          // ccid -> terminal cleanup already ran
+	mu       sync.Mutex
+	timers   map[string]*time.Timer   // ccid -> no-answer timer (stopped on answered)
+	answered map[string]bool          // ccid -> answer notification landed (bughunt 2026-11-07 voice F-2)
+	dones    map[string]chan struct{} // ccid -> terminal channel (closed once)
+	fin      map[string]bool          // ccid -> terminal cleanup already ran
 }
 
 // NewDialer returns a Dialer. mgr may be nil (registry-only tests, and the
 // wiring leaf before the manager exists on the path); when non-nil, the
 // no-answer timer reports FailOutcome(ccid, OutcomeNoAnswer) and terminal
-// closure is observed through Manager.WaitCall.
+// closure is observed through Manager.WaitCall. Non-nil mgr also WIRES the
+// answered notification (audit 2026-11-06 H1): the dialer registers its
+// NotifyAnswered as the manager's call.answered hook, so an outbound call
+// picked up before timer expiry keeps its slot instead of eating a late
+// no-answer release. The dialer owns its timer; the manager owns the
+// webhook seam - connecting them at dialer construction keeps the whole
+// contract inside the voice package.
 func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, fx EffectsLedger, audit AuditWriter, logger *slog.Logger) *Dialer {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Dialer{
+	d := &Dialer{
 		cfg:    cfg,
 		tel:    tel,
 		mgr:    mgr,
@@ -141,10 +170,15 @@ func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, f
 		fx:     fx,
 		audit:  audit,
 		logger: logger,
-		timers: make(map[string]*time.Timer),
-		dones:  make(map[string]chan struct{}),
-		fin:    make(map[string]bool),
+		timers:   make(map[string]*time.Timer),
+		answered: make(map[string]bool),
+		dones:    make(map[string]chan struct{}),
+		fin:      make(map[string]bool),
 	}
+	if mgr != nil {
+		mgr.SetAnsweredHook(d.NotifyAnswered)
+	}
+	return d
 }
 
 // Dial places one outbound call under the pinned order:
@@ -221,9 +255,10 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 	// -- 4. remaining policy + registry gates (still zero HTTP): one live
 	// call per target globally (ErrDuplicateTarget, pinned BEFORE the
 	// allowlist check by TestDialRefusals), allowlist, public URL,
-	// connection id, capacity, one live call per employee. --
+	// connection id, capacity, one live call per employee. Targets are
+	// compared through NormalizeE164 (audit 2026-11-06 M7). --
 	for _, inst := range d.reg.Live() {
-		if inst.Target == target {
+		if NormalizeE164(inst.Target) == target {
 			gateErr := fmt.Errorf("%w: %s", ErrDuplicateTarget, target)
 			d.abandonEffect(ctx, key, gateErr)
 			return DialResult{}, gateErr
@@ -253,8 +288,10 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 		return DialResult{}, gateErr
 	}
 
-	// -- 5. POST /calls --
-	ccid, err := d.tel.DialOut(ctx, target, d.cfg.FromNumber, d.cfg.ConnectionID)
+	// -- 5. POST /calls (timeout_secs rides the resolved voice.timeout_secs
+	// so the carrier-side ring limit matches the local no-answer timer;
+	// audit 2026-11-06 M8) --
+	ccid, err := d.tel.DialOut(ctx, target, d.cfg.FromNumber, d.cfg.ConnectionID, d.NoAnswerSecs())
 	if err != nil || ccid == "" {
 		if err == nil {
 			err = errors.New("telnyx dial out returned an empty call_control_id")
@@ -346,10 +383,18 @@ func (d *Dialer) doneFor(ctx context.Context, ccid string) <-chan struct{} {
 
 // registryGate enforces the C8 capacity and uniqueness rules against the
 // live snapshot: cap, one live call per employee (ErrBusy), one live call
-// per target globally (ErrDuplicateTarget).
+// per target globally (ErrDuplicateTarget). Live targets are compared
+// through NormalizeE164 (audit 2026-11-06 M7) so a registry entry acquired
+// in a non-canonical shape (a raw webhook `from`, a legacy row) still
+// collides with its canonical dial-target twin - the duplicate-target rule
+// is by number, not by string.
 func (d *Dialer) registryGate(target, employeeID string) error {
 	live := d.reg.Live()
-	if len(live) >= d.registryCap() {
+	// Same sentinel as CallRegistry.Acquire: cap <= 0 means unlimited
+	// (voice.max_concurrent_calls 0 = unlimited per config docs). The
+	// pre-gate must not refuse every dial while Acquire would accept it
+	// (bughunt 2026-11-06 voice F-3).
+	if cap := d.registryCap(); cap > 0 && len(live) >= cap {
 		return fmt.Errorf("%w: at capacity (%d)", ErrBusy, len(live))
 	}
 	for _, inst := range live {
@@ -365,8 +410,11 @@ func (d *Dialer) registryGate(target, employeeID string) error {
 	return nil
 }
 
-// registryCap returns the configured cap; 0 means zero capacity (every
-// Acquire is refused) - there is no "unlimited" sentinel.
+// registryCap returns the configured cap. Like CallRegistry.Acquire, a cap
+// of 0 (or negative) means UNLIMITED - voice.max_concurrent_calls documents
+// "0 = unlimited" (template config/meept.json5), so the gate semantics must
+// match Acquire's sentinel or a cap-0 config refuses dials that Acquire
+// would accept.
 func (d *Dialer) registryCap() int { return d.reg.Cap() }
 
 // abandonEffect marks a claimed effect dead (refused/failed dial: the ring
@@ -383,12 +431,17 @@ func (d *Dialer) abandonEffect(ctx context.Context, key string, cause error) {
 // and closes the dial result's Done channel. NotifyAnswered stops the
 // timer when the call is picked up, so no late Fail lands on a live call.
 func (d *Dialer) armNoAnswerTimer(ccid string) {
-	secs := d.cfg.TimeoutSecs
-	if secs <= 0 {
-		secs = defaultNoAnswerSecs
-	}
+	secs := d.NoAnswerSecs()
 	timer := time.NewTimer(time.Duration(secs) * time.Second)
 	d.mu.Lock()
+	// bughunt 2026-11-07 voice F-2: if the answer webhook landed before
+	// this arm site (webhook beats DialOut's line-339 path), the call is
+	// already answered — arming a no-answer timer would be wrong; skip it.
+	if d.answered[ccid] {
+		d.mu.Unlock()
+		timer.Stop()
+		return
+	}
 	d.timers[ccid] = timer
 	d.mu.Unlock()
 
@@ -399,6 +452,30 @@ func (d *Dialer) armNoAnswerTimer(ccid string) {
 		}
 		select {
 		case <-timer.C:
+			// bughunt 2026-11-07 voice F-2: the fire may win the race
+			// against NotifyAnswered's timer.Stop (Stop returns false
+			// once the value is buffered). Re-check answered at fire
+			// time: an answered call keeps running, its no-answer never
+			// lands. Do NOT return here — the call still needs terminal
+			// bookkeeping: wait the manager's done channel (the hangup /
+			// release signal) so finishCall still frees the registry
+			// slot and closes the dial Done channel exactly once.
+			d.mu.Lock()
+			answered := d.answered[ccid]
+			d.mu.Unlock()
+			if answered {
+				d.logger.Debug("voice: no-answer timer fired for answered call (ignored)", "ccid", ccid)
+				if mgrDone != nil {
+					// Real call lifecycle: hold the slot until the
+					// manager's terminal event, then clean up once.
+					<-mgrDone
+					d.finishCall(ccid)
+				}
+				// mgr == nil (registry-only dialer): no lifecycle to
+				// observe; leave the slot to the caller's own release,
+				// never tear down an answered call.
+				return
+			}
 			if d.mgr != nil {
 				d.mgr.FailOutcome(ccid, OutcomeNoAnswer, fmt.Sprintf("no answer within %ds", secs))
 			}
@@ -419,8 +496,24 @@ func (d *Dialer) armNoAnswerTimer(ccid string) {
 // NotifyAnswered cancels the no-answer timer for ccid (call.answered on
 // the outbound leg). The webhook wiring calls this on every answered event
 // for a tracked outbound id. Unknown ccid is a no-op.
+//
+// bughunt 2026-11-07 voice F-2: Timer.Stop CANNOT un-arm a fire already in
+// flight — when the expiry tick and the webhook race, the fire wins the
+// select and FailOutcome(OutcomeNoAnswer) tears down a call that was
+// answered in the same instant (3bf5431c M8 deliberately aligned the local
+// timer and the carrier timeout_secs, which maximizes that simultaneity).
+// The answered map is the second cancellation channel: NotifyAnswered
+// marks the ccid answered (even before armNoAnswerTimer runs — the webhook
+// can beat DialOut's arm site), and the fire branch refuses to fail an
+// answered call.
 func (d *Dialer) NotifyAnswered(ccid string) {
 	d.mu.Lock()
+	// A call already terminal-cleaned (finishCall ran) must not regain an
+	// answered marker after finishCall's delete — that would leak the
+	// entry for the ccid's whole daemon life.
+	if !d.fin[ccid] {
+		d.answered[ccid] = true
+	}
 	timer := d.timers[ccid]
 	d.mu.Unlock()
 	if timer != nil {
@@ -438,6 +531,12 @@ func (d *Dialer) finishCall(ccid string) {
 	}
 	d.fin[ccid] = true
 	ch := d.dones[ccid]
+	delete(d.dones, ccid)
+	delete(d.timers, ccid)
+	// bughunt 2026-11-07 voice F-2: the answered marker is per-call
+	// bookkeeping; drop it at terminal cleanup so the map cannot grow
+	// across the daemon's dial history.
+	delete(d.answered, ccid)
 	d.mu.Unlock()
 
 	d.reg.Release(ccid)
@@ -453,21 +552,38 @@ func (d *Dialer) finishCall(ccid string) {
 // the daemon components; the interface is the dependency seam every other
 // consumer codes against.
 
+// Leg values for Instance.Leg (CL6). The zero value of Leg is the phone
+// leg, so existing Instance composite literals stay valid untouched.
+const (
+	LegPhone = "phone"
+	LegLocal = "local"
+)
+
 // Instance is one live voice instance: the registry's unit of capacity.
+// Leg is which leg the instance rides ("phone" or "local"; CL6). The zero
+// value of Leg means "phone" so existing composite literals stay valid.
 type Instance struct {
 	CallControlID string
 	EmployeeID    string
 	Target        string
+	Leg           string
 }
 
 // Registry tracks live calls: N concurrent calls need N slots
 // (voice.max_concurrent_calls), one live call per employee, and one live
 // call per target number globally.
 type Registry interface {
-	// Acquire registers a live instance. ErrBusy over cap or when the
-	// employee already has a live call; ErrDuplicateTarget when a live
-	// call to the same target already exists.
+	// Acquire registers a live instance on the PHONE leg (CL6
+	// compatibility shape; the concrete CallRegistry wraps AcquireLeg).
+	// ErrBusy over cap or when the employee already has a live call;
+	// ErrDuplicateTarget when a live call to the same target already
+	// exists.
 	Acquire(ccid, employeeID, target string) (Instance, error)
+	// AcquireLeg registers a live instance with an explicit leg (CL6:
+	// "phone" or "local"; the empty string means "phone"). The same cap,
+	// employee, and target rules apply across legs; the target is
+	// normalized ONLY for the phone leg.
+	AcquireLeg(ccid, employeeID, target, leg string) (Instance, error)
 	// Release frees the slot and the target. Unknown ccid is a no-op.
 	Release(ccid string)
 	// Live reports the live instances.
@@ -485,13 +601,38 @@ type CallRegistry struct {
 }
 
 // NewRegistry returns a CallRegistry with the given capacity. A cap of 0
-// refuses every Acquire with ErrBusy.
+// (or negative) means UNLIMITED - the same sentinel Acquire applies.
 func NewRegistry(cap int) *CallRegistry {
 	return &CallRegistry{cap: cap, live: make(map[string]Instance)}
 }
 
-// Acquire registers a live instance under the C8 rules.
+// Acquire registers a live instance under the C8 rules on the PHONE leg
+// (CL6 compatibility wrapper: the Registry interface keeps the 3-arg shape
+// so existing implementors and test fakes do not all break at once). The
+// target is normalized at this boundary (audit 2026-11-06 M7): every
+// registry entry carries the same canonical E.164 shape, so direct Acquire
+// callers (the inbound spawn seam passes a raw webhook `from`) and the
+// dialer's pre-gate snapshot agree by construction instead of by each
+// caller remembering to normalize.
 func (r *CallRegistry) Acquire(ccid, employeeID, target string) (Instance, error) {
+	return r.AcquireLeg(ccid, employeeID, target, LegPhone)
+}
+
+// AcquireLeg registers a live instance under the C8 rules with an explicit
+// leg (CL6: "phone" or "local"; the empty string means "phone"). The target
+// is normalized ONLY for the phone leg: local targets look like
+// "local:<label>" and NormalizeE164 must never mangle them. For phone legs
+// the same boundary normalization as Acquire applies (audit 2026-11-06
+// M7). The cap, one-live-per-employee, and one-live-per-target rules are
+// shared across legs: one employee, one conversation at a time, whatever
+// the leg.
+func (r *CallRegistry) AcquireLeg(ccid, employeeID, target, leg string) (Instance, error) {
+	if leg == "" {
+		leg = LegPhone
+	}
+	if leg == LegPhone {
+		target = NormalizeE164(target)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -510,7 +651,7 @@ func (r *CallRegistry) Acquire(ccid, employeeID, target string) (Instance, error
 			return Instance{}, fmt.Errorf("%w: employee %s already live", ErrBusy, employeeID)
 		}
 	}
-	inst := Instance{CallControlID: ccid, EmployeeID: employeeID, Target: target}
+	inst := Instance{CallControlID: ccid, EmployeeID: employeeID, Target: target, Leg: leg}
 	r.live[ccid] = inst
 	return inst, nil
 }
@@ -522,7 +663,9 @@ func (r *CallRegistry) Release(ccid string) {
 	delete(r.live, ccid)
 }
 
-// Live snapshots the live instances.
+// Live snapshots the live instances. Each Instance carries its Leg
+// ("phone" or "local"; CL6) so telemetry and gates can tell the legs
+// apart; the cap and uniqueness rules are shared across legs.
 func (r *CallRegistry) Live() []Instance {
 	r.mu.Lock()
 	defer r.mu.Unlock()

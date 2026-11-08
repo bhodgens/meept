@@ -435,8 +435,10 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 				"error", processErr,
 			)
 		} else if job.CanRetry() {
-			w.mu.RLock(); qh := w.queue; w.mu.RUnlock()
-	if err := qh.Retry(ctx, job.ID); err != nil {
+			w.mu.RLock()
+			qh := w.queue
+			w.mu.RUnlock()
+			if err := qh.Retry(ctx, job.ID); err != nil {
 				w.logger.Error("Failed to queue job for retry", "job", job.ID, "error", err)
 			}
 		}
@@ -688,7 +690,9 @@ func (w *Worker) failJob(ctx context.Context, jobID string, jobErr error, claimT
 			return fa.FailAttempt(ctx, jobID, jobErr, claimToken)
 		}
 	}
-	w.mu.RLock(); qh := w.queue; w.mu.RUnlock()
+	w.mu.RLock()
+	qh := w.queue
+	w.mu.RUnlock()
 	return qh.Fail(ctx, jobID, jobErr)
 }
 
@@ -701,7 +705,9 @@ func (w *Worker) completeJob(ctx context.Context, jobID string, result any, clai
 			return ac.CompleteAttempt(ctx, jobID, result, claimToken)
 		}
 	}
-	w.mu.RLock(); qh := w.queue; w.mu.RUnlock()
+	w.mu.RLock()
+	qh := w.queue
+	w.mu.RUnlock()
 	return qh.Complete(ctx, jobID, result)
 }
 

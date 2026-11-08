@@ -100,7 +100,7 @@ func newVoteStore(dataDir string, shared *SQLiteFTSStore) (*voteStore, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil { //nolint:gosec // user config dir
 		return nil, fmt.Errorf("failed to create votes directory: %w", err)
 	}
-	rawDB, err := sql.Open("sqlite", "file:"+dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	rawDB, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)") // modernc _pragma form (bughunt 2026-11-07)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open votes database: %w", err)
 	}

@@ -65,6 +65,7 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func WithTiers\(tiers \[\]DiscoveryTier\) DiscoveryOption](<#WithTiers>)
 - [type DiscoveryTier](<#DiscoveryTier>)
   - [func DefaultTiers\(\) \[\]DiscoveryTier](<#DefaultTiers>)
+- [type Embedder](<#Embedder>)
 - [type Executor](<#Executor>)
   - [func NewExecutor\(resolver \*llm.Resolver, opts ...ExecutorOption\) \*Executor](<#NewExecutor>)
   - [func \(e \*Executor\) CanExecute\(skill \*Skill\) bool](<#Executor.CanExecute>)
@@ -183,10 +184,16 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func \(idx \*SkillIndex\) Get\(name string\) \*SkillIndexEntry](<#SkillIndex.Get>)
   - [func \(idx \*SkillIndex\) Index\(entry \*SkillIndexEntry\)](<#SkillIndex.Index>)
   - [func \(idx \*SkillIndex\) IndexAll\(entries \[\]\*SkillIndexEntry\)](<#SkillIndex.IndexAll>)
+  - [func \(idx \*SkillIndex\) IsDirty\(\) bool](<#SkillIndex.IsDirty>)
   - [func \(idx \*SkillIndex\) List\(\) \[\]\*SkillIndexEntry](<#SkillIndex.List>)
+  - [func \(idx \*SkillIndex\) MarkDirty\(\)](<#SkillIndex.MarkDirty>)
   - [func \(idx \*SkillIndex\) Match\(query string\) \*SkillIndexEntry](<#SkillIndex.Match>)
   - [func \(idx \*SkillIndex\) MatchAll\(query string\) \[\]\*SkillIndexMatch](<#SkillIndex.MatchAll>)
   - [func \(idx \*SkillIndex\) Names\(\) \[\]string](<#SkillIndex.Names>)
+  - [func \(idx \*SkillIndex\) RankedNames\(taskText string, fallback \[\]string\) \[\]string](<#SkillIndex.RankedNames>)
+  - [func \(idx \*SkillIndex\) Refresh\(\) error](<#SkillIndex.Refresh>)
+  - [func \(idx \*SkillIndex\) SetEmbedder\(e Embedder\)](<#SkillIndex.SetEmbedder>)
+  - [func \(idx \*SkillIndex\) SetRescanSource\(fn func\(\) \(\[\]\*SkillIndexEntry, error\)\)](<#SkillIndex.SetRescanSource>)
 - [type SkillIndexEntry](<#SkillIndexEntry>)
   - [func ParseSkillMetadataOnly\(path string\) \(\*SkillIndexEntry, error\)](<#ParseSkillMetadataOnly>)
   - [func \(e \*SkillIndexEntry\) HasCapability\(cap string\) bool](<#SkillIndexEntry.HasCapability>)
@@ -622,6 +629,15 @@ DiscoveryTier represents a directory tier for skill discovery.
 	func DefaultTiers() []DiscoveryTier
 
 DefaultTiers returns the standard filesystem discovery paths. Claude skills \(\~/.claude/skills/\) are handled by the dedicated ClaudeSource. Hermes skills \(\~/.hermes/skills/\) are auto\-discovered when the directory exists. Discovery priority \(highest to lowest\): project \> user \> claude \> hermes \> system.
+
+<a name="Embedder"></a>
+## type Embedder
+
+Embedder produces text embeddings for skill\-relevance ranking \(token\-efficiency branch 04, leaf 02\). One call embeds a batch of texts and returns one vector per text, same order. Implementations may hit a network endpoint; SkillIndex never calls an Embedder while holding its mutex.
+
+	type Embedder interface {
+	    Embed(ctx context.Context, texts []string) ([][]float32, error)
+	}
 
 <a name="Executor"></a>
 ## type Executor
@@ -1681,12 +1697,26 @@ Index adds or updates an entry in the index.
 
 IndexAll adds multiple entries to the index.
 
+<a name="SkillIndex.IsDirty"></a>
+### func \(\*SkillIndex\) IsDirty
+
+	func (idx *SkillIndex) IsDirty() bool
+
+IsDirty reports whether MarkDirty has been observed since the last Refresh. A nil receiver reads clean so miswired indexes are inert.
+
 <a name="SkillIndex.List"></a>
 ### func \(\*SkillIndex\) List
 
 	func (idx *SkillIndex) List() []*SkillIndexEntry
 
 List returns all indexed entries sorted by name.
+
+<a name="SkillIndex.MarkDirty"></a>
+### func \(\*SkillIndex\) MarkDirty
+
+	func (idx *SkillIndex) MarkDirty()
+
+MarkDirty flags that the on\-disk skill set changed since the last Refresh. It is O\(1\): it only sets the dirty flag under the index mutex, it does not rescan. Branch 2's write\-path change notifier \(lifecycle.Writer.SetChangeNotifier\) is the in\-tree caller that arrives after this leaf; marking is a cross\-branch contract, so it lands now.
 
 <a name="SkillIndex.Match"></a>
 ### func \(\*SkillIndex\) Match
@@ -1708,6 +1738,36 @@ MatchAll performs fuzzy matching and returns all entries with scores.
 	func (idx *SkillIndex) Names() []string
 
 Names returns sorted list of all indexed skill names.
+
+<a name="SkillIndex.RankedNames"></a>
+### func \(\*SkillIndex\) RankedNames
+
+	func (idx *SkillIndex) RankedNames(taskText string, fallback []string) []string
+
+RankedNames orders fallback names by cosine similarity between the latest task text and each skill's name\+description embedding. It is ORDER\-ONLY: the returned slice is a permutation of fallback — no name is ever added, hidden, or capped \(Q4 ruling: always rank, never gate\). Any failure mode — nil embedder, empty task text, embedder error, a name missing from the index or without a usable vector, or dimension mismatch — degrades to the fallback order untouched, never an error.
+
+There is no ctx parameter \(leaf contract\): embedder calls use context.Background\(\) and rely on the embedder's own client timeout — ranking must never stall an episode, and degradation is silent\-safe. Embedding work \(network I/O\) happens strictly OUTSIDE the index mutex. Determinism: ties within embeddingTieEpsilon resolve by name ascending, so repeated calls with the same inputs produce byte\-identical order.
+
+<a name="SkillIndex.Refresh"></a>
+### func \(\*SkillIndex\) Refresh
+
+	func (idx *SkillIndex) Refresh() error
+
+Refresh rescans the configured skill tiers and rebuilds the index in place. It reuses the shared indexLocked maintenance path \(the same primitive Index uses\), so a refresh that observes an unchanged on\-disk set reinserts byte\-identical entries and downstream consumers \(CapabilityIndex, the loop\-economics stable prefix\) see no change. It clears the dirty flag and returns a wrapped error only when the tier rescan itself fails. The rescan \(the only I/O\) runs before the write lock is taken, so the mutex is never held across I/O.
+
+<a name="SkillIndex.SetEmbedder"></a>
+### func \(\*SkillIndex\) SetEmbedder
+
+	func (idx *SkillIndex) SetEmbedder(e Embedder)
+
+SetEmbedder installs the Embedder used by RankedNames to order the model\-facing skill listing \(token\-efficiency branch 04 leaf 02, Q4: always rank\). Nil\-safe per the setter convention: a nil receiver or nil embedder is a no\-op — passing nil explicitly disables ranking and reverts RankedNames to pure fallback order. The embed cache is dropped when the embedder changes: vectors from a different model are incomparable, and a fresh embedder must not rank against stale ones.
+
+<a name="SkillIndex.SetRescanSource"></a>
+### func \(\*SkillIndex\) SetRescanSource
+
+	func (idx *SkillIndex) SetRescanSource(fn func() ([]*SkillIndexEntry, error))
+
+SetRescanSource installs the discovery source that Refresh uses to read the current on\-disk skill tiers. fn returns freshly discovered metadata entries and may do I/O; Refresh runs it OUTSIDE the index mutex, then rebuilds the index in place. A nil fn \(the default\) leaves refresh inert: Refresh still settles the dirty flag but rescans nothing. The setter is nil\-guarded; a nil receiver or nil fn is a no\-op.
 
 <a name="SkillIndexEntry"></a>
 ## type SkillIndexEntry
@@ -1886,6 +1946,14 @@ SkillMetadata holds the parsed YAML frontmatter from a SKILL.md file.
 	    // remains executable via explicit invocation paths; only the listing
 	    // hides it. Absent or false keeps the skill visible.
 	    DisableModelInvocation bool `yaml:"disable-model-invocation"`
+	
+	    // Origin stamps the provenance of the write that produced this skill
+	    // (frontmatter `origin: user|agent|evolver|review`, lifecycle.Origin).
+	    // The Writer persists it into the frontmatter on a stamped write
+	    // (WriteSkillWithOrigin) and parses it back on read; legacy
+	    // frontmatter without the key reads as "" (OriginUnknown). omitempty
+	    // keeps bare/legacy writes byte-stable.
+	    Origin string `yaml:"origin,omitempty"`
 	
 	    // Claude-specific fields (parsed separately, merged into Tags).
 	    Trigger  string     `yaml:"trigger"`

@@ -607,3 +607,188 @@ func TestTalkLoopPartialPromptsNeverTurn(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// lastTrueSays returns the say frames that carry the turn-final marker
+// (last:true), whether on a spoken sentence or on the empty-text flush.
+func lastTrueSays(frames []Frame) []Frame {
+	var out []Frame
+	for _, f := range frames {
+		if f.Event != EventSay || f.Last == nil || !*f.Last {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// M2: a denied FINAL sentence after earlier sentences were spoken used to
+// swallow the turn-final say flush - no last:true frame ever went out, so
+// the child's turn-taking never saw the turn end. The drain must send the
+// empty-text flush exactly once per draft.
+func TestTalkLoopDeniedFinalFlushesTurnEnd(t *testing.T) {
+	sink := &recordSink{}
+	sup := &cannedSupervisor{allowed: map[string]bool{
+		"Visible fact.": true,
+		"Denied tail.":  false,
+	}}
+	turns := &cannedTurns{reply: "Visible fact. Denied tail."}
+	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
+		FillerLines: []string{"One moment."},
+	})
+
+	cancel, done := runLoop(t, loop, "cc-m2flush")
+	defer cancel()
+
+	last := true
+	loop.frames <- Frame{CallID: "cc-m2flush", Event: EventPrompt, Text: "go", Last: &last}
+
+	// The flush (last:true, empty text) appears once the checker closes
+	// the verdict channel - deterministic, no timing guess.
+	waitFor(t, 2*time.Second, "turn-final flush never sent after a denied final sentence", func() bool {
+		for _, f := range lastTrueSays(sink.all()) {
+			if f.Text == "" {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Exactly once: the drain is the only flusher; settle and re-count.
+	time.Sleep(150 * time.Millisecond)
+	flushes := 0
+	for _, f := range lastTrueSays(sink.all()) {
+		if f.Text == "" {
+			flushes++
+		}
+	}
+	if flushes != 1 {
+		t.Errorf("turn-final flush sent %d times, want exactly 1", flushes)
+	}
+	// The denied sentence still never reaches a say frame.
+	for _, tx := range sink.sayTexts() {
+		if strings.Contains(tx, "Denied") {
+			t.Errorf("denied sentence %q reached a say frame", tx)
+		}
+	}
+	cancel()
+	<-done
+}
+
+// M2 exact-once companion pin: a normal draft whose final sentence is
+// allowed carries the turn-final marker ON the sentence, and the drain
+// adds no second flush (exactly one last:true say per draft).
+func TestTalkLoopAllowedFinalSingleLastMarker(t *testing.T) {
+	sink := &recordSink{}
+	sup := &cannedSupervisor{}
+	turns := &cannedTurns{reply: "Alpha. Beta."}
+	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
+		FillerLines: []string{"One moment."},
+	})
+
+	cancel, done := runLoop(t, loop, "cc-m2single")
+	defer cancel()
+
+	last := true
+	loop.frames <- Frame{CallID: "cc-m2single", Event: EventPrompt, Text: "go", Last: &last}
+
+	waitFor(t, 2*time.Second, "final sentence never spoken", func() bool {
+		for _, tx := range sink.sayTexts() {
+			if tx == "Beta." {
+				return true
+			}
+		}
+		return false
+	})
+	time.Sleep(150 * time.Millisecond) // settle: any buggy second flush lands here
+
+	markers := lastTrueSays(sink.all())
+	if len(markers) != 1 {
+		t.Fatalf("last:true says = %d, want exactly 1 (the final sentence)", len(markers))
+	}
+	if markers[0].Text != "Beta." {
+		t.Errorf("last:true carried by %q, want the final sentence \"Beta.\"", markers[0].Text)
+	}
+	cancel()
+	<-done
+}
+
+// M5: the silence timer used a bare Reset without draining a stale fire,
+// so the silence path could double-fire (a second prompt, or an immediate
+// bogus hangup right after a new prompt). With a real prompt between the
+// two windows, the hangup must come only after the SECOND full window.
+func TestTalkLoopSilenceTimerNoDoubleFire(t *testing.T) {
+	sink := &recordSink{}
+	sup := &cannedSupervisor{}
+	turns := &cannedTurns{reply: "Back online."}
+	endReasons := make(chan string, 1)
+	loop := NewTalkLoop(TalkDeps{
+		Supervisor: sup,
+		Turns:      turns,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       sink.Send,
+		OnEnd:      func(ccid, reason string) { endReasons <- reason },
+		Logger:     testLogger(),
+	}, TalkLoopConfig{
+		GreetingLine:         "Welcome.", // distinct: the filler text stays unambiguous
+		FillerLines:          []string{"Are you there?"},
+		SilencePromptSeconds: 1,
+	})
+
+	promptCount := func() int {
+		n := 0
+		for _, tx := range sink.sayTexts() {
+			if tx == "Are you there?" {
+				n++
+			}
+		}
+		return n
+	}
+
+	go func() {
+		loop.Run(context.Background(), Instance{CallControlID: "cc-m5"})
+	}()
+
+	// Window 1: silence fires once and speaks the prompt (the greeting is
+	// the distinct "Welcome." line, so the count is unambiguous).
+	waitFor(t, 5*time.Second, "first silence prompt never spoken", func() bool {
+		return promptCount() >= 1
+	})
+
+	// Caller returns: a final prompt stops the timer and runs a quick
+	// turn; the loop then re-arms a fresh window.
+	last := true
+	loop.frames <- Frame{CallID: "cc-m5", Event: EventPrompt, Text: "hello?", Last: &last}
+	waitFor(t, 2*time.Second, "employee reply never spoken", func() bool {
+		for _, tx := range sink.sayTexts() {
+			if tx == "Back online." {
+				return true
+			}
+		}
+		return false
+	})
+	baseline := promptCount()
+
+	// If a stale fire survived, the loop reads it as the SECOND
+	// consecutive fire and hangs up within milliseconds of the reply.
+	// Healthy behavior: nothing ends the call inside the fresh window.
+	select {
+	case r := <-endReasons:
+		t.Fatalf("early hangup %q right after a fresh prompt (stale silence fire consumed)", r)
+	case <-time.After(800 * time.Millisecond):
+	}
+
+	// The re-armed window still works: its first fire speaks the prompt
+	// once more, and the second consecutive fire ends the call with the
+	// silence reason.
+	select {
+	case r := <-endReasons:
+		if !strings.Contains(r, "silence") {
+			t.Fatalf("end reason = %q, want a silence-named reason", r)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("re-armed silence window never hung up")
+	}
+	if got := promptCount(); got != baseline+1 {
+		t.Errorf("silence prompt spoken %d times after the reply (baseline %d), want exactly one more", got, baseline)
+	}
+}

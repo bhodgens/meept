@@ -2,7 +2,7 @@
 #
 # pre-push-e2e — push-boundary e2e gate for the NO-NEW-UNIT-TESTS policy.
 #
-# pre-commit-e2e (check 18/18) gates the affected hermetic e2e suites at
+# pre-commit-e2e (check 19/20) gates the affected hermetic e2e suites at
 # COMMIT time. This hook closes the bypass hole: a commit that skipped or
 # broke that gate (--no-verify, MEEPT_SKIP_E2E=1, or a hook run that was
 # killed mid-sweep) still cannot LAND on the remote while any affected

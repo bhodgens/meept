@@ -8,6 +8,8 @@
 
 ## Meta
 
+- **Status:** COMPLETE (promoted 2026-11-06, post-crash closeout — all 7 leaves
+  verified landed at HEAD: commit ancestry + deliverables + tests re-checked)
 - **Role:** Root
 - **Parent:** none
 - **Children:** 7 leaf documents under this node
@@ -253,13 +255,13 @@ Deferred: none. Silent omission is a defect.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-aggregator | REVIEWED | 1 | Committed 36f4211a 2026-10-31. In-session review: C1 byte-identical (gold JSON test), 12 tests green + -race clean, read-only verified, no internal/plan import. Deviations all pre-approved addenda. Plan-stamp note: resolver stamps batch-carried + queried planIDs (leaf 02 passes resolver; overview relies on Query.PlanID). |
-| 02-rpc | REVIEWED | 1 | Committed 7829a857 2026-10-31. In-session review: all 5 methods registered, nil-guarded, -race green in overlay; findings since/resolved/offset enforced in-closure (Manager limits documented). Deviation accepted: agents.review as direct closure. |
-| 03-tui | REVIEWED | 2 | Committed 25f3a460 (view+model+palette+manifest) + 043520d7 (tail-order contract fix). In-session review: suites+parity green; caught leaf-03's test fabricating a newest-first wire the daemon never sends (real order: chronological ascending, e2e-pinned) - replaced with a contract-true test. gui_inventory deviation flips gui:true at leaf 04. |
-| 04-gui | REVIEWED | 3 | CLOSED. T1 f389ef0b (HTTP handlers over the s.rpcCall seam), T2/T3 0a023292 (parity flipped gui:true, TestParity green), generated graphs a5a8b7d9, salvage 3dba2286. Salvage content: activity_list.dart declared a feature-local provider returning SdkApiClient(host:'localhost', port:8080), bypassing providers/providers.dart:36 sdkClientProvider (SdkApiClient.storage reads the persisted host/port/API KEY) - wrong server, unauthenticated, on any non-default install; drift + findings panels constructed the client directly (same bug, plus no mock seam). All four sites now ref.read(sdkClientProvider); grep "SdkApiClient(host" over lib/features/activity/ returns nothing. Added the leaf T3 coverage that was impossible before the mock seam: drift 0.40, findings severity/resolved, recent drop counter. Final gates: flutter test test/features/activity 6/6, command_palette 11/11, test/e2e gui-flows 23/23, analyze zero warnings, dart format clean, go build ./... ok, activity + comm/http + tui suites ok, e2e-fast-area activity-views ok (16.8s). Attempt 1 was a DISPATCH ERROR on my side: the brief forbade Go edits, but leaf 04 T1 requires HTTP handlers in internal/comm/http (the GUI talks HTTP, not the RPC socket - leaf doc lines 32-34). Attempt 2 split correctly (T1 Go + Dart fixer). My staged T1 files were consumed by the co-orchestrator's commit f389ef0b - the git INDEX is shared across sessions, same crossing-write class as the manifest; all 19 pre-commit gates passed on that commit. |
-| 05-ring | REVIEWED | 2 | Salvaged+committed 7829a857 (writer session went silent mid-flight - ghost class). Second pass b08874c1 fixed 4 contract defects the first review waived: Tail order was newest-FIRST against C3 newest-LAST (the sibling's own e2e asserts oldest-first at activity_views_test.go:477-480, proving the contract was right and the code wrong); bridge subscribed to task.ev.completed/failed which nothing publishes (taskEventPrefix, internal/task/registry.go:69, wraps COMMAND topics only - real events are bare task.completed internal/agent/tactical.go:2196 and task.failed internal/agent/strategic.go:598), so the live tail showed no task completions; queue job_id/worker_id were written into TaskID/AgentID and agent.progress conversation_id into SessionID (identity-space violation, now in Detail); recover() was deferred around the range loop so one bad payload killed the subscription for the daemon's life. WireBusBridge now returns []*bus.Subscriber and stopActivityRing unsubscribes them (c.activityBridgeSubs) instead of only nil-ing the ring. |
-| 06-e2e-suite | REVIEWED | 1 | Committed e8b1f7c5 2026-10-31. Orchestrator re-ran the suite independently: green (16.5s) on the combined tree incl. b08874c1 ring fixes; scenarios activity-views-01..04 registered by the co-orchestrator session; the suite pins the authoritative tail wire order (insertion-ordered oldest first, :480). |
-| 07-langfuse-sink | REVIEWED | 1 | Committed 1510efc1 2026-10-31. In-session review: default-OFF inert proven, bus-driven producers (no sync loop hook), circuit+drop counters, config in new otlp_traces.go; schema.go staged with ONLY the OTLPTraces field (intake hunks left to sibling). Producer split (bus decode in daemon wiring) pre-approved cycle-avoidance. |
+| 01-aggregator | COMPLETE | 1 | VERIFIED 2026-11-06 (post-crash closeout): 36f4211a ancestor of HEAD; internal/activity/{types,aggregator,mappers,sources,plans,adapters,seams,envelope}.go present at HEAD; C1 ActivityRecord byte-identical (types.go:10); package builds + tests green. |
+| 02-rpc | COMPLETE | 1 | VERIFIED 2026-11-06: 7829a857 ancestor of HEAD; all 4 activity.* closures + agents.review registered in internal/daemon/activity_rpc.go at HEAD; wiring in activity_wiring.go; daemon activity tests green. |
+| 03-tui | COMPLETE | 2 | VERIFIED 2026-11-06: 25f3a460 + 043520d7 ancestors of HEAD; internal/tui/models/activity.go + activity_view_test.go present; palette entry "activity view" in gui_inventory.json:12; TUI tests green. |
+| 04-gui | COMPLETE | 3 | VERIFIED 2026-11-06: f389ef0b + 0a023292 + a5a8b7d9 + 3dba2286 ancestors of HEAD; internal/comm/http/activity_handlers.go (all 4 GET /api/v1/activity* routes) + ui/flutter_ui/lib/features/activity/ (6 dart files) present at HEAD; gui:true parity flipped in gui_inventory.json:12; no SdkApiClient(host) regression (grep clean). |
+| 05-ring | COMPLETE | 2 | VERIFIED 2026-11-06: b08874c1 (+ salvage in 7829a857) ancestors of HEAD; ring.go NewRing/Append/Tail (newest-last Tail) + busbridge.go present at HEAD; bus topology regenerated (activity edges in docs/generated/bus-topology.md); ring/busbridge tests green. |
+| 06-e2e-suite | COMPLETE | 1 | VERIFIED 2026-11-06: e8b1f7c5 ancestor of HEAD; e2e/suites/activity-views/activity_views_test.go present; manifest suites[] entry + scenarios activity-views-01..04 + path_map for internal/activity/ all in e2e/manifest.json at HEAD. |
+| 07-langfuse-sink | COMPLETE | 1 | VERIFIED 2026-11-06: 1510efc1 ancestor of HEAD; internal/metrics/otlp_trace_{sink,exporter,producer,sampling}.go + internal/config/otlp_traces.go + internal/daemon/otlp_traces_wiring.go present at HEAD; OTLPTraces config normalized + default-off; metrics + config trace tests green. |
 
 Dispatch schedule (user constraint: 2 concurrent, raised to 3 on request
 2026-10-31): wave 1 = {01, 07, 05}; wave 2 = {02}; wave 3 = {03, 06};
@@ -313,14 +315,14 @@ matrix at each review:
 
 | # | Feature (from plan) | Source (leaf/spec section) | Unit tests | E2E tests | Status |
 |---|---------------------|----------------------------|-----------|-----------|--------|
-| F1 | cross-store chronological merge | 01-aggregator T1-T2 | internal/activity tests | activity-views suite | PENDING |
-| F2 | sort chrono/task/plan + filters | 01 T3-T4, 02 T2 | internal/activity + rpc tests | activity-views | PENDING |
-| F3 | live-tail ring (bus -> recent) | 05 T1-T2 | internal/activity ring tests | activity-views | PENDING |
-| F4 | activity RPC surface + HTTP parity | 02 T1-T4 | rpc closure tests | activity-views (RPC leg) | PENDING |
-| F5 | drift + findings exposure (C4) | 02 T5 | employee handler tests | activity-views | PENDING |
-| F6 | TUI view + parity entry | 03 T1-T4 | internal/tui model tests | parity_test (manifest) | PENDING |
-| F7 | GUI page + palette parity | 04 T1-T3 | flutter widget tests | command_palette_test | PENDING |
-| F8 | OTLP trace spans to endpoint | 07 T1-T2 | internal/metrics trace sink tests | n/a (opt-in, no daemon dependency) | PENDING |
+| F1 | cross-store chronological merge | 01-aggregator T1-T2 | internal/activity tests | activity-views suite | VALIDATED |
+| F2 | sort chrono/task/plan + filters | 01 T3-T4, 02 T2 | internal/activity + rpc tests | activity-views | VALIDATED |
+| F3 | live-tail ring (bus -> recent) | 05 T1-T2 | internal/activity ring tests | activity-views | VALIDATED |
+| F4 | activity RPC surface + HTTP parity | 02 T1-T4 | rpc closure tests | activity-views (RPC leg) | VALIDATED |
+| F5 | drift + findings exposure (C4) | 02 T5 | employee handler tests | activity-views | VALIDATED |
+| F6 | TUI view + parity entry | 03 T1-T4 | internal/tui model tests | parity_test (manifest) | VALIDATED |
+| F7 | GUI page + palette parity | 04 T1-T3 | flutter widget tests | command_palette_test | VALIDATED |
+| F8 | OTLP trace spans to endpoint | 07 T1-T2 | internal/metrics trace sink tests | n/a (opt-in, no daemon dependency) | VALIDATED |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 

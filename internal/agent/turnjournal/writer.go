@@ -32,9 +32,37 @@ type JournalWriter struct {
 	// append a second run_started/run_closed row. The mutex only
 	// serializes the map check-then-set; all store I/O happens after
 	// Unlock (mutexio).
+	//
+	// Both sets are BOUNDED (bughunt agent-core F-5): each keeps at most
+	// dedupRingCap entries, evicting the oldest turnID FIFO-style. The
+	// interlock only needs RECENT turns (retries and double-closes land
+	// within seconds); a forgotten turnID re-appending one duplicate
+	// journal row is tolerated by OpenRuns (GROUP BY newest) and
+	// reclaimed by PruneClosed. Semantics are byte-identical to the
+	// unbounded legacy below the cap; above it the writer no longer
+	// registers every turn ever run for the daemon's lifetime.
 	runStartedMu   sync.Mutex
 	runStartedRuns map[string]bool
+	startedOrder   []string // FIFO of keys present in runStartedRuns
 	closedRuns     map[string]bool
+	closedOrder    []string // FIFO of keys present in closedRuns
+}
+
+// dedupRingCap bounds each dedup set (bughunt agent-core F-5). At 8192
+// turnIDs (~400 KB per ring) a daemon must churn through thousands of
+// turns before the interlock forgets a turn recent enough to matter.
+const dedupRingCap = 8192
+
+// markDedup records turnID in set/order under the caller-held lock,
+// evicting the oldest entry when the ring is full (FIFO).
+func markDedup(turnID string, set map[string]bool, order *[]string) {
+	if len(*order) >= dedupRingCap {
+		oldest := (*order)[0]
+		*order = (*order)[1:]
+		delete(set, oldest)
+	}
+	set[turnID] = true
+	*order = append(*order, turnID)
 }
 
 // NewJournalWriter builds a writer over store. store must be non-nil; a
@@ -85,7 +113,7 @@ func (w *JournalWriter) OnRunStart(ctx context.Context, turnID, sessionID string
 		w.runStartedMu.Unlock()
 		return
 	}
-	w.runStartedRuns[turnID] = true
+	markDedup(turnID, w.runStartedRuns, &w.startedOrder)
 	w.runStartedMu.Unlock()
 
 	w.record(Record{
@@ -138,8 +166,10 @@ func (w *JournalWriter) OnStepComplete(ctx context.Context, turnID, sessionID, s
 // open -- leaf 03's rehydrate then treats it as interrupted, which is
 // the safe direction (research F4: recorded steps are skipped, never
 // re-executed). Best-effort like every On*: the error becomes a Warn,
-// never a turn failure.
-func (w *JournalWriter) OnRunClose(ctx context.Context, turnID string) {
+// never a turn failure. The caller's ctx is deliberately ignored (the
+// journal must survive a cancelled turn context, same posture as
+// record()).
+func (w *JournalWriter) OnRunClose(_ context.Context, turnID string) {
 	if w == nil || w.store == nil || turnID == "" {
 		return
 	}
@@ -148,9 +178,12 @@ func (w *JournalWriter) OnRunClose(ctx context.Context, turnID string) {
 		w.runStartedMu.Unlock()
 		return
 	}
-	w.closedRuns[turnID] = true
+	markDedup(turnID, w.closedRuns, &w.closedOrder)
 	w.runStartedMu.Unlock()
 
+	// Detached from the caller's ctx on purpose: the journal must survive
+	// the turn's request context being cancelled mid-flight (same posture
+	// as record(); a cancelled turn never produces a spurious Warn).
 	ctx, cancel := context.WithTimeout(context.Background(), journalOpTimeout)
 	defer cancel()
 	if err := w.store.CloseRun(ctx, turnID); err != nil {

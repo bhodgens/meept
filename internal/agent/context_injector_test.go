@@ -463,3 +463,187 @@ func TestSkillsListingStableWithinEpisode(t *testing.T) {
 		t.Errorf("skills section churns with per-turn base within one episode:\n--- turn A base ---\n%s\n--- turn B base ---\n%s", secA, secB)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Embedding-rank episode ordering (token-efficiency branch 04, leaf 02;
+// Q4 user ruling: always rank, never hide). Stubs give fixed vectors —
+// no network, deterministic ordering.
+// ---------------------------------------------------------------------------
+
+// rankStubEmbedder is a test skills.Embedder with fixed vectors per text.
+type rankStubEmbedder struct {
+	vectors map[string][]float32
+	calls   int
+}
+
+func (s *rankStubEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	s.calls++
+	out := make([][]float32, len(texts))
+	for i, t := range texts {
+		if v, ok := s.vectors[t]; ok {
+			out[i] = v
+			continue
+		}
+		out[i] = []float32{0, 0}
+	}
+	return out, nil
+}
+
+func c4RankFixture(t *testing.T, defs []c4TestSkill) (*skills.LazySkillLoader, *rankStubEmbedder, map[string]string) {
+	t.Helper()
+	loader, _ := c4SkillFixture(t, defs)
+	texts := map[string]string{}
+	vectors := map[string][]float32{}
+	for _, def := range defs {
+		texts[def.name] = def.name + "\n" + def.description
+	}
+	emb := &rankStubEmbedder{vectors: vectors}
+	loader.Index().SetEmbedder(emb)
+	return loader, emb, texts
+}
+
+// TestSkillsRankingEpisodeFrozenOrder pins T3: after SetEpisodeTask the
+// listing is embedding-ranked, and every later build in the SAME episode
+// (different per-turn base) reuses the frozen order byte-for-byte.
+func TestSkillsRankingEpisodeFrozenOrder(t *testing.T) {
+	defs := []c4TestSkill{
+		{name: "alpha", description: "Alpha skill"},
+		{name: "bravo", description: "Bravo skill"},
+		{name: "charlie", description: "Charlie skill"},
+	}
+	loader, emb, texts := c4RankFixture(t, defs)
+	// task vector +1,0; charlie same (cos 1), bravo orthogonal (cos 0),
+	// alpha orthogonal (cos 0, tie with bravo -> name asc: alpha, bravo).
+	emb.vectors[texts["charlie"]] = []float32{1, 0}
+	emb.vectors[texts["bravo"]] = []float32{0, 1}
+	emb.vectors[texts["alpha"]] = []float32{0, 1}
+	emb.vectors["ship the release"] = []float32{1, 0}
+
+	ci := NewContextInjector(nil, nil)
+	ci.SetSkillLoader(loader)
+	ci.SetEpisodeTask("ship the release")
+
+	ctx := context.Background()
+	first := c4SkillsSection(ci.BuildSystemPrompt(ctx, "turn one base"))
+	second := c4SkillsSection(ci.BuildSystemPrompt(ctx, "completely different turn two base"))
+
+	if first != second {
+		t.Errorf("skills section churned within one episode:\n--- A ---\n%s\n--- B ---\n%s", first, second)
+	}
+	lines := c4ListingLines(first)
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 ranked C4 lines, got %d:\n%v", len(lines), lines)
+	}
+	wantOrder := []string{"- charlie:", "- alpha:", "- bravo:"}
+	for i, want := range wantOrder {
+		if !strings.HasPrefix(lines[i], want) {
+			t.Errorf("ranked order line %d: got %q, want prefix %q", i, lines[i], want)
+		}
+	}
+}
+
+// TestSkillsRankingEmbedsOncePerEpisode pins the "computed once per episode"
+// half of T3: subsequent builds in the same episode issue zero additional
+// Embed calls (task vector and skill vectors are cached downstream).
+func TestSkillsRankingEmbedsOncePerEpisode(t *testing.T) {
+	defs := []c4TestSkill{{name: "alpha", description: "Alpha skill"}}
+	loader, emb, texts := c4RankFixture(t, defs)
+	emb.vectors[texts["alpha"]] = []float32{1, 0}
+	emb.vectors["the task"] = []float32{1, 0}
+
+	ci := NewContextInjector(nil, nil)
+	ci.SetSkillLoader(loader)
+	ci.SetEpisodeTask("the task")
+
+	ctx := context.Background()
+	ci.BuildSystemPrompt(ctx, "base one")
+	afterFirst := emb.calls
+	ci.BuildSystemPrompt(ctx, "base two")
+	ci.BuildSystemPrompt(ctx, "base three")
+	if emb.calls != afterFirst {
+		t.Errorf("episode frozen order re-embedded: %d calls before, %d after two more builds", afterFirst, emb.calls)
+	}
+}
+
+// TestSkillsRankingSetNeverShrinks pins the hard contract: with a ranker
+// wired, the ranked listing contains EXACTLY the same set of skills as the
+// alphabetical listing (order-only; no cap, no hiding).
+func TestSkillsRankingSetNeverShrinks(t *testing.T) {
+	defs := c4DefaultSkills() // 8 visible skills
+	loader, emb, texts := c4RankFixture(t, defs)
+	rand := [][]float32{{1, 0}, {0, 1}}
+	for i, def := range defs {
+		emb.vectors[texts[def.name]] = rand[i%2]
+	}
+	emb.vectors["ranked episode task"] = []float32{1, 0}
+
+	ci := NewContextInjector(nil, nil)
+	ci.SetSkillLoader(loader)
+
+	ctx := context.Background()
+	plain := map[string]bool{}
+	for _, line := range c4ListingLines(ci.BuildSystemPrompt(ctx, "irrelevant base")) {
+		plain[strings.SplitN(strings.TrimPrefix(line, "- "), ":", 2)[0]] = true
+	}
+	if len(plain) != 8 {
+		t.Fatalf("alphabetical baseline should list all 8, got %d", len(plain))
+	}
+
+	// New episode with the ranker signal.
+	ci.SetEpisodeTask("ranked episode task")
+	ranked := map[string]bool{}
+	lines := c4ListingLines(c4SkillsSection(ci.BuildSystemPrompt(ctx, "another base")))
+	if len(lines) != 8 {
+		t.Fatalf("ranked listing must keep all 8 lines, got %d:\n%v", len(lines), lines)
+	}
+	for _, line := range lines {
+		ranked[strings.SplitN(strings.TrimPrefix(line, "- "), ":", 2)[0]] = true
+	}
+	for name := range plain {
+		if !ranked[name] {
+			t.Errorf("ranking dropped skill %q from the listing", name)
+		}
+	}
+	for name := range ranked {
+		if !plain[name] {
+			t.Errorf("ranking invented unknown skill %q", name)
+		}
+	}
+}
+
+// TestSkillsRankingNoEpisodeTaskStaysAlphabetical pins the opt-in default:
+// without SetEpisodeTask (config off / no signal) the listing is exactly the
+// leaf-01 alphabetical behavior.
+func TestSkillsRankingNoEpisodeTaskStaysAlphabetical(t *testing.T) {
+	defs := []c4TestSkill{
+		{name: "zulu", description: "Zulu skill"},
+		{name: "alpha", description: "Alpha skill"},
+	}
+	loader, emb, texts := c4RankFixture(t, defs)
+	emb.vectors[texts["zulu"]] = []float32{1, 0}
+	emb.vectors[texts["alpha"]] = []float32{0, 1}
+
+	ci := NewContextInjector(nil, nil)
+	ci.SetSkillLoader(loader)
+	// No SetEpisodeTask call: episodeTask stays empty.
+	lines := c4ListingLines(ci.BuildSystemPrompt(context.Background(), "any base"))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+	if !strings.HasPrefix(lines[0], "- alpha:") || !strings.HasPrefix(lines[1], "- zulu:") {
+		t.Errorf("no episode task must stay alphabetical, got %v", lines)
+	}
+	if emb.calls != 0 {
+		t.Errorf("no episode task must not embed, got %d calls", emb.calls)
+	}
+}
+
+// TestContextInjector_SetEpisodeTask_Nil verifies the setter is nil-safe
+// (per the typed-nil setter guard rule).
+func TestContextInjector_SetEpisodeTask_Nil(t *testing.T) {
+	var ci *ContextInjector
+	ci.SetEpisodeTask("must not panic") //nolint // nil receiver no-op
+	ci2 := NewContextInjector(nil, nil)
+	ci2.SetEpisodeTask("a")
+	ci2.SetEpisodeTask("a") // idempotent same text, no panic
+}

@@ -332,6 +332,51 @@ func (s *AgentSpec) ScopedToolNames(limit int) []string {
 	return names
 }
 
+// ScopedToolNamesPresent caps like ScopedToolNames but drops BASELINE
+// names that `baselinePresent` reports as not registered BEFORE they
+// consume a cap slot (bughunt config-tools F-3). Without it, a config
+// opt-out that unregisters conditional baseline tools (knowledge_* under
+// memory.knowledge.enabled=false) silently displaces up to 3 real tail
+// tools (project_info, delegate_task) from a capped agent's grant: the
+// dead names pass the cap first and the filtered registry hides them at
+// definitions time, so the agent sees fewer tools than its cap allows.
+//
+//   - limit <= 0: no cap — identical to GrantedToolNames (presence is
+//     irrelevant when nothing is displaced).
+//   - baselinePresent == nil: identical to ScopedToolNames.
+//
+// AdditionalTools are NEVER dropped by presence: they are explicit
+// per-agent grants (e.g. an MCP tool that reconnects later), and they
+// already outrank the baseline, so a dead one costs a slot nobody else
+// wanted. Baseline names are static builtins whose registration is
+// decided at boot, so a cap-time presence check is stable.
+func (s *AgentSpec) ScopedToolNamesPresent(limit int, baselinePresent func(string) bool) []string {
+	if limit <= 0 || baselinePresent == nil {
+		return s.ScopedToolNames(limit)
+	}
+	names := make([]string, 0, limit)
+	seen := make(map[string]bool, limit)
+	add := func(list []string, checkPresent bool) {
+		for _, raw := range list {
+			if len(names) >= limit {
+				return
+			}
+			name := CanonicalToolName(raw)
+			if seen[name] {
+				continue
+			}
+			if checkPresent && !baselinePresent(name) {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	add(s.AdditionalTools, false)
+	add(BaselineTools, true)
+	return names
+}
+
 // HasSkill checks if the agent spec includes a specific skill.
 func (s *AgentSpec) HasSkill(skillName string) bool {
 	return slices.Contains(s.AvailableSkills, skillName)

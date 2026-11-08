@@ -20,6 +20,7 @@ import 'package:meept_ui/features/reflection/reflection_panel.dart';
 import 'package:meept_ui/features/search/search_panel.dart';
 import 'package:meept_ui/features/settings/settings_panel.dart';
 import 'package:meept_ui/features/skills/skill_panel.dart';
+import 'package:meept_ui/features/voice/voice_page.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/providers/tool_exit_guard.dart';
 import 'package:meept_ui/services/sdk_client.dart';
@@ -84,6 +85,9 @@ class _StubSdkClient extends SdkApiClient {
 
   @override
   Future<List<Map<String, dynamic>>> listPromptsRaw() async => [];
+
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async => [];
 }
 
 /// Reports a live connection so the metrics notifier subscribes to WS
@@ -149,6 +153,7 @@ final Map<String, Widget Function()> _panelBuilders = {
   'branches': () => const BranchesPanel(),
   'search': () => const SearchPanel(),
   'reflection': () => const ReflectionPanel(),
+  'voice': () => const VoicePage(),
 };
 
 void main() {
@@ -195,6 +200,7 @@ void main() {
           'calendar',
           'metrics',
           'prompts',
+          'voice',
           'settings',
         ]),
       );
@@ -366,6 +372,7 @@ void main() {
           '/tools/prompts',
           '/tools/calendar',
           '/tools/metrics',
+          '/tools/voice',
         }),
       );
       // settings is the one menu entry that is not under /tools.

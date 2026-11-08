@@ -19,6 +19,10 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		// LazySkillLoader setters (internal/skills/lazy_loader.go)
 		{"LazySkillLoader.SetIndex", func() { loader.SetIndex((*SkillIndex)(nil)) }},
 
+		// SkillIndex setters (internal/skills/index.go)
+		{"SkillIndex.SetEmbedder", func() { NewSkillIndex().SetEmbedder(nil) }},
+		{"SkillIndex.SetEmbedderNilReceiver", func() { (*SkillIndex)(nil).SetEmbedder(nil) }},
+
 		// Executor setters (internal/skills/executor.go)
 		{"Executor.SetLazyLoader", func() { executor.SetLazyLoader((*LazySkillLoader)(nil)) }},
 	}

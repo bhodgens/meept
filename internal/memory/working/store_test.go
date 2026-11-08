@@ -372,10 +372,13 @@ func TestSnapshotCopySafe(t *testing.T) {
 		t.Errorf("SessionID = %q, want sess-9 (recorded for adapter)", snap[0].SessionID)
 	}
 
-	// Mutate the returned slice and its elements.
+	// Mutate the returned slice and its elements (the re-assignment to
+	// snap[0] and the append are deliberate aliasing probes — the store
+	// must be unaffected by either).
 	snap[0].Content = "mutated"
 	snap[0] = mkTurn("evil", "evil", "evil", "evil", base)
 	snap = append(snap, mkTurn("extra", "s", "u", "extra", base))
+	_ = snap
 
 	after := s.Snapshot()
 	if len(after) != 1 {

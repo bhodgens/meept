@@ -174,8 +174,17 @@ type CodexClient struct {
 	usageStore *appmetrics.Store
 	// llmCallObserver is the leaf-01 (llm-hop-tracing) seam -- see
 	// Client.llmCallObserver. Fired from recordUsageStore's async
-	// goroutine; nil = off (SetLLMCallObserver nil-guard).
-	llmCallObserver func(appmetrics.LLMCallRecord)
+	// goroutine; nil = off (SetLLMCallObserver nil-guard). Atomic for the
+	// same reason as Client's (bughunt 2026-11-07 infra-fixes F-3).
+	llmCallObserver atomic.Pointer[func(appmetrics.LLMCallRecord)]
+}
+
+// llmCallObserverFn loads the attached observer (nil when unset).
+func (c *CodexClient) llmCallObserverFn() func(appmetrics.LLMCallRecord) {
+	if p := c.llmCallObserver.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // CodexClientOption is a functional option for NewCodexClient.
@@ -300,7 +309,8 @@ type codexResponsesResponse struct {
 // -- see Client.recordUsageStore.
 func (c *CodexClient) recordUsageStore(cfg *ModelConfig, chatOpts *chatOptions, usage TokenUsage, isErr bool, errMsg string, latencyMs int64) {
 	traceID, spanID := traceScopeOf(chatOpts)
-	if c.usageStore == nil && c.llmCallObserver == nil {
+	observer := c.llmCallObserverFn()
+	if c.usageStore == nil && observer == nil {
 		return
 	}
 	agentID := ""
@@ -336,8 +346,8 @@ func (c *CodexClient) recordUsageStore(cfg *ModelConfig, chatOpts *chatOptions, 
 		if c.usageStore != nil {
 			c.usageStore.RecordLLMCall(record)
 		}
-		if c.llmCallObserver != nil {
-			c.llmCallObserver(record)
+		if observer != nil {
+			observer(record)
 		}
 	}()
 }
@@ -350,7 +360,7 @@ func (c *CodexClient) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord)) {
 	if c == nil || fn == nil {
 		return
 	}
-	c.llmCallObserver = fn
+	c.llmCallObserver.Store(&fn)
 }
 
 // Chat sends a non-streaming Responses request (stream:false + single JSON

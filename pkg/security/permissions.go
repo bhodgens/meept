@@ -77,6 +77,17 @@ var BuiltinRules = map[string]ActionRule{
 	// require_confirmation_high gate does not block it in the e2e
 	// harness (nested calls inherit the grant, not a new confirmation).
 	"codemode": {Action: "codemode", RiskLevel: RiskMedium, RequiresConfirmation: false},
+
+	// Voice sidecar (voice-sidecar leaf 14 T5): the employee-callable
+	// outbound dial. Mandatory BuiltinRules row — unknown actions DENY by
+	// default, so without this row voice_call fails every turn with
+	// "Unknown action" even for a granted employee. MEDIUM like
+	// send_message (outbound communication to a third party, no
+	// confirmation gate): the real policy lives in voice.Dialer.Dial
+	// (voice.enabled, allowlist, capacity, duplicate-target, audit row,
+	// effects reservation), so the gate class only needs to admit the
+	// action for constitution-granted employees.
+	"voice_call": {Action: "voice_call", RiskLevel: RiskMedium, RequiresConfirmation: false},
 }
 
 // Dangerous command patterns that elevate shell_execute to HIGH risk.

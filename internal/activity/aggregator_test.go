@@ -350,47 +350,6 @@ func TestAggregator_FiltersAndPagination(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Real-store adapters (sandbox sqlite, audit-chain suite pattern)
-// ---------------------------------------------------------------------------
-
-// newSandboxStores opens real task/session/auditlog/employee stores under a
-// per-test temp dir and returns an aggregator wired to them plus the raw
-// handles for seeding.
-func newSandboxStores(t *testing.T) (*Aggregator, *task.Registry, func()) {
-	t.Helper()
-	dir := t.TempDir()
-
-	reg, err := task.NewRegistry(dir+"/tasks.db", nil, slog.Default())
-	if err != nil {
-		t.Fatalf("task registry: %v", err)
-	}
-
-	chainStore, err := auditlog.OpenStore(dir+"/audit.db", slog.Default())
-	if err != nil {
-		t.Fatalf("auditlog store: %v", err)
-	}
-
-	auditStore, err := employee.NewAuditStore(dir + "/findings.db")
-	if err != nil {
-		t.Fatalf("employee audit store: %v", err)
-	}
-
-	a := newAggregator(
-		NewTaskRegistryAdapter(reg),
-		nil, // steps wired via the registry adapter below
-		nil, nil,
-		NewAuditStoreAdapter(auditStore),
-		Options{},
-	)
-	cleanup := func() {
-		_ = auditStore.Close()
-		_ = chainStore.Close()
-		reg.Close()
-	}
-	return a, reg, cleanup
-}
-
 // TestAggregator_SandboxStores_TaskStepsFromRealDB seeds a real task
 // registry and asserts steps flow through the real adapters in chrono
 // order with envelope-stripped summaries.

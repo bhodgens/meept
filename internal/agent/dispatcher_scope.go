@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 
-	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/session"
 )
@@ -115,10 +114,4 @@ func (d *Dispatcher) rescopeMemoryContextForAgent(ctx context.Context, result *D
 	if loop != nil {
 		d.recallOutcomeSnapshot(result, loop, conversationID, results)
 	}
-}
-
-// chatAgentScopeOptions is the conservative chat-lane filter used at
-// Dispatch step 3 (documented at the buildMemoryContext call site).
-func (d *Dispatcher) chatAgentScopeOptions(sessionID string) []memory.SearchOption {
-	return d.sessionScopeOptions(config.AgentIDChat, sessionID)
 }

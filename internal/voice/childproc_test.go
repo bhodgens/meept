@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,6 +114,23 @@ func waitGone(t *testing.T, pid int, within time.Duration) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("pid %d still alive after %s", pid, within)
+}
+
+// waitAlive polls until pid is a live process (signal 0), failing after the
+// deadline. The supervised child needs a moment to exec and connect, so a
+// one-shot signal-0 check races the spawn chain (fake daemon -> supervisor ->
+// child); polling removes the race while keeping the assertion strong: a
+// child killed by a real parent-death bug stays dead and the deadline fails.
+func waitAlive(t *testing.T, pid int, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if processAlive(pid) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("supervised child pid %d not alive after %s", pid, within)
 }
 
 // T2: EnsureRunning spawns exactly one child; a second EnsureRunning reuses
@@ -332,13 +350,21 @@ func TestChildProcParentDeath(t *testing.T) {
 		t.Fatalf("child pid never appeared in %s: %v", pidFile, err)
 	}
 	waitReady(t, readyFile, 5*time.Second)
-	if !processAlive(childPID) {
-		t.Fatalf("supervised child pid %d not alive", childPID)
-	}
+	// Poll liveness with a generous deadline instead of a one-shot check:
+	// the pid lands in the file as soon as the supervisor reports it, but
+	// the child may still be mid-exec. If the child died for any reason
+	// (supervisor bug, spawn failure) it stays dead and this fails.
+	waitAlive(t, childPID, 10*time.Second)
 
 	// Hard-kill the parent: the supervisor must terminate the child group.
 	if err := fakeDaemon.Process.Kill(); err != nil {
-		t.Fatalf("kill fake daemon: %v", err)
+		// Kill reports an error only once the process is gone: the test's
+		// premise is a hard kill of a LIVE parent, so an early fake-daemon
+		// exit is the failure, not the kill error itself. The fake daemon
+		// exits on its own only when the supervisor or the runtime died
+		// first, and its stderr (passed through above) says which.
+		waitCmd(t, fakeDaemon)
+		t.Fatalf("fake daemon exited before the hard kill: %v", err)
 	}
 	waitCmd(t, fakeDaemon)
 
@@ -583,4 +609,84 @@ func readIntFile(path string) (int, error) {
 		return 0, err
 	}
 	return n, nil
+}
+
+// ---- start-token enforcement through the spawn path (bughunt 2026-11-07) ----
+
+// T-auth-spawn-1: with TokenAuth armed, the supervised spawn completes the
+// handshake only because the fake child proves the per-spawn stdin token
+// as its first socket line (the child proc helper mirrors the real child).
+// After Stop, the gate stays armed: an unauthenticated raw dial is refused
+// (conn closed, never claimed) — the next spawn re-arms a fresh token.
+func TestChildProcTokenAuthEndToEnd(t *testing.T) {
+	env := newChildProcTestEnv(t)
+	p := NewChildProc(env.cfg(func(c *ChildProcConfig) {
+		c.TokenAuth = env.server
+	}), slog.Default(), nil)
+
+	ctx := context.Background()
+	if err := p.EnsureRunning(ctx); err != nil {
+		t.Fatalf("armed EnsureRunning: %v", err)
+	}
+	if err := p.Stop(ctx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// Gate remains armed post-teardown: a dial that sends nothing and EOFs
+	// is refused without a claim, and Send still reports no child.
+	bare, err := net.Dial("unix", env.sock)
+	if err != nil {
+		t.Fatalf("bare dial: %v", err)
+	}
+	if _, err := bare.Write([]byte("stale-token-guess\n")); err != nil {
+		t.Fatalf("bare write: %v", err)
+	}
+	waitConn(t, func() bool {
+		buf := make([]byte, 1)
+		_ = bare.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		_, rerr := bare.Read(buf)
+		return rerr != nil
+	})
+	_ = bare.Close()
+	if err := env.server.Send(Frame{CallID: "c", Event: EventSay}); err == nil {
+		t.Fatal("stale dialer claimed the armed text server")
+	}
+
+	// Re-spawn under the armed gate succeeds (fresh token, fresh proof).
+	if err := p.EnsureRunning(context.Background()); err != nil {
+		t.Fatalf("re-spawn EnsureRunning: %v", err)
+	}
+	if err := p.Stop(context.Background()); err != nil {
+		t.Fatalf("final Stop: %v", err)
+	}
+}
+
+// T-auth-spawn-2: with TokenAuth armed, a child that proves the WRONG
+// token is never claimed: the handshake cannot succeed, so EnsureRunning
+// fails with ErrChildUnavailable within StartTimeout (bounded refusal,
+// no hang), and the impersonator's stdin-token seam still held (it read
+// the pipe — spawn itself never fails).
+func TestChildProcTokenAuthRefusesImpostor(t *testing.T) {
+	env := newChildProcTestEnv(t)
+	bin := buildBadTokenVoiceChild(t, env.dir)
+	p := NewChildProc(env.cfg(func(c *ChildProcConfig) {
+		c.BinaryPath = bin
+		c.TokenAuth = env.server
+		c.StartTimeout = 4 * time.Second
+	}), slog.Default(), nil)
+
+	start := time.Now()
+	err := p.EnsureRunning(context.Background())
+	if !errors.Is(err, ErrChildUnavailable) {
+		t.Fatalf("impostor spawn err = %v, want ErrChildUnavailable", err)
+	}
+	if elapsed := time.Since(start); elapsed > 8*time.Second {
+		t.Fatalf("impostor refusal took %s; must land within StartTimeout", elapsed)
+	}
+	if p.Alive() {
+		t.Fatal("impostor child considered alive after refusal")
+	}
+	if err := env.server.Send(Frame{CallID: "c", Event: EventSay}); err == nil {
+		t.Fatal("impostor was claimed on the armed text server")
+	}
 }

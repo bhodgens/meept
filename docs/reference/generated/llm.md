@@ -587,6 +587,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(pm \*ProviderManager\) ResetProviderHealth\(providerID string\) error](<#ProviderManager.ResetProviderHealth>)
   - [func \(pm \*ProviderManager\) SetCostOptimized\(enabled bool\)](<#ProviderManager.SetCostOptimized>)
   - [func \(pm \*ProviderManager\) SetFailurePolicyConfig\(cfg \*FailurePolicyConfig\)](<#ProviderManager.SetFailurePolicyConfig>)
+  - [func \(pm \*ProviderManager\) SetLLMCallObserver\(fn func\(appmetrics.LLMCallRecord\)\)](<#ProviderManager.SetLLMCallObserver>)
   - [func \(pm \*ProviderManager\) SetQuotaMaxWait\(d time.Duration\)](<#ProviderManager.SetQuotaMaxWait>)
   - [func \(pm \*ProviderManager\) SetSessionActivityCallback\(callback func\(sessionID, endpointKey, providerID, modelID string\)\)](<#ProviderManager.SetSessionActivityCallback>)
   - [func \(pm \*ProviderManager\) SetSessionAffinityConfig\(cfg \*AffinityConfig\)](<#ProviderManager.SetSessionAffinityConfig>)
@@ -1882,8 +1883,10 @@ ParseRetryAfter extracts a retry schedule from an HTTP error response's headers 
 Returns:
 
 - date: the parsed absolute instant for date\-form headers and date\-valued provider headers \(zero for delta\-seconds headers\);
-- delta: the parsed relative duration for delta\-seconds headers \(zero for date forms; time.Until\(date\) for date forms, which is negative for past dates\);
+- delta: the parsed relative duration for delta\-seconds headers \(zero for date forms; time.Until\(date\) for date forms, which is negative for past dates\). Delta\-seconds values beyond the int64\-nanosecond Duration budget saturate at the maximum representable Duration instead of wrapping negative \(F1\).
 - present: whether any recognizable header was found.
+
+Date\-form results never collide with the zero time.Time sentinel: a parsed year\-1 instant is remapped to the Unix epoch, still past \(F2\).
 
 Callers compose the schedule as: retryAt = date when non\-zero, else now\+delta. A date in the past yields a negative delta — the caller clamps \(leaf rule\).
 
@@ -5502,6 +5505,17 @@ ModelConfig holds configuration for a specific LLM model endpoint.
 	    // global [agent.tools].schema_mode (default "indexed") via
 	    // Resolver.EffectiveSchemaMode.
 	    SchemaMode string
+	    // ToolExposure is the per-model as-needed tool-exposure tier
+	    // ("full"|"indexed"|"predicted"|"search"), mapped from the models.json5
+	    // per-model tool_exposure key (branch 03 leaf 02, design §7). Empty
+	    // (the default) means inherit: the exposure engine resolves
+	    // per-model > per-agent AGENT.md frontmatter > global [agent.tools]
+	    // tool_exposure > default ("predicted" with the flag on, "indexed"
+	    // legacy with the flag off). "search" takes effect only when the
+	    // model's capabilities carry "frontier" (CapFrontier, design §5.1);
+	    // otherwise the engine downgrades to "predicted" with one warn
+	    // naming the model.
+	    ToolExposure string
 	    // ToolChoice is the resolved tool_choice policy for this endpoint,
 	    // resolved per-model over provider from models.json5 `tool_choice`
 	    // (see internal/llm/providers.go). Empty (the default) means the
@@ -5637,6 +5651,17 @@ ModelDef represents a model definition in the config.
 	    // model ("full"|"indexed", loop-economics leaf 02). Empty inherits
 	    // the provider setting. Unknown values are ignored at resolve time.
 	    SchemaMode string `json:"schema_mode,omitempty"`
+	    // ToolExposure is the per-model as-needed tool-exposure tier
+	    // ("full"|"indexed"|"predicted"|"search", token-efficiency branch 03
+	    // leaf 02, design §7). It resolves ahead of the per-agent AGENT.md
+	    // `tool_exposure:` frontmatter key and the global [agent.tools]
+	    // tool_exposure. Empty (the default) inherits those lower layers;
+	    // "search" takes effect only for models whose capabilities carry the
+	    // "frontier" tag (design §5.1) — the exposure engine (branch 03 leaf
+	    // 05) downgrades it to "predicted" with one warn otherwise. There is
+	    // no provider-level option: the value maps straight through from
+	    // ModelDef.
+	    ToolExposure string `json:"tool_exposure,omitempty"`
 	    // ToolChoice overrides the provider-level tool_choice policy for this
 	    // model. Empty inherits the provider setting. See
 	    // ProviderOptionsConfig.ToolChoice.
@@ -6523,6 +6548,13 @@ SetCostOptimized enables or disables cost\-optimized routing.
 	func (pm *ProviderManager) SetFailurePolicyConfig(cfg *FailurePolicyConfig)
 
 SetFailurePolicyConfig propagates a failure\-policy config onto every OpenAI\-compatible Client chatter this manager owns \(existing and future\), mirroring Client.SetFailurePolicyConfig. Tests inject tiny throttle durations so in\-loop retry waits are near\-zero; production callers leave it unset and keep the client\-level defaults \(30s/1h/24h\). Anthropic and Codex chatters are unaffected \(their own policy seams are untouched\). Nil\-receiver and nil\-config safe; a nil cfg restores the default.
+
+<a name="ProviderManager.SetLLMCallObserver"></a>
+### func \(\*ProviderManager\) SetLLMCallObserver
+
+	func (pm *ProviderManager) SetLLMCallObserver(fn func(appmetrics.LLMCallRecord))
+
+SetLLMCallObserver fans the llm\-hop\-tracing observer out onto every chatter this manager owns \(existing and future via AddProvider\), mirroring SetFailurePolicyConfig. Before this seam the daemon attached the observer ONLY to the primary OpenAI\-compatible c.LLMClient, so Anthropic/Codex serving hops never produced llm.call spans even with otlp\_traces enabled \(bughunt 2026\-11\-06 llm\-daemon F\-1\). A nil fn is ignored by the per\-client setters \(nil\-guard contract\), so this is an attach\-only seam. Nil\-receiver safe.
 
 <a name="ProviderManager.SetQuotaMaxWait"></a>
 ### func \(\*ProviderManager\) SetQuotaMaxWait
@@ -8130,6 +8162,14 @@ SemanticCacheConfig is the llm\-side shape of Contract C4 \(json5 key llm.cache.
 	    // daemon may stamp an instruction fingerprint here). Empty means
 	    // model-only partitioning.
 	    PartitionKey string
+	    // VerifyFloor is the lower bound of the two-stage verifier band
+	    // (wiring-followups-final leaf 03). A candidate scoring in
+	    // [VerifyFloor, Threshold) is re-embedded (stage 2) and direct-cosine
+	    // compared against its stored embedding: >= Threshold serves, below
+	    // misses. Zero (the default) disables the band = pre-band behavior.
+	    // Values >= Threshold are clamped to 0 (a useless band) at
+	    // construction; negative values are clamped to 0 as well.
+	    VerifyFloor float64
 	}
 
 <a name="SessionSummaryResult"></a>

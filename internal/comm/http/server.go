@@ -1671,6 +1671,10 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/activity/findings", s.handleActivityFindings)
 	mux.HandleFunc("GET /api/v1/agents/{id}/review", s.handleAgentsReview)
 
+	// Intake status endpoint (issue #109 GUI parity; bridge to the
+	// intake.status RPC, read-only, no params).
+	mux.HandleFunc("GET /api/v1/intake/status", s.handleIntakeStatus)
+
 	// Session endpoints
 	mux.HandleFunc("POST /api/v1/sessions", s.handleSessionCreate)
 	mux.HandleFunc("GET /api/v1/sessions", s.handleSessionList)

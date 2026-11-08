@@ -6,13 +6,14 @@
 // splice-owned per contract C1: RunSplice's bargeIn writes the clear frame
 // on its own WS and touches only its own state).
 //
-// Reshaped from the parked leaf-00T sketch: the parked flow drove the
-// interrupt through the child C1 stream into the talk loop, but the full
-// inbound loop (greeting -> say -> talk loop) is blocked by the leaf-14
-// inbound registry-Acquire gap (see voice-lifecycle). The MEDIA-side
-// interrupt path (Telnyx sends {"event":"interrupt"} on the media socket,
-// the splice handles it itself) is fully wired today, so the suite pins
-// barge-in clear + isolation there. The C1/talk-loop leg is a named skip.
+// Reshaped from the parked leaf-00T sketch, which drove the interrupt
+// through the child C1 stream into the talk loop. Both legs run today:
+//   - the MEDIA-side leg (Telnyx sends {"event":"interrupt"} on the media
+//     socket, the splice handles it itself) is pinned by
+//     TestVoiceBargeinClearsOnlyInterruptedCall;
+//   - the C1/talk-loop leg (child interrupt -> talk loop -> clear back on
+//     the text socket) is pinned by TestVoiceBargeinViaTalkLoop, activatable
+//     now that the inbound answer path Acquires its registry slot (leaf 15).
 package voicebargein
 
 import (
@@ -56,11 +57,35 @@ func TestVoiceBargeinClearsOnlyInterruptedCall(t *testing.T) {
 	}
 }
 
-// TestVoiceBargeinViaTalkLoop documents the split: the parked suite drove
-// the interrupt through the CHILD's C1 stream (childSendsInterrupt -> talk
-// loop HandleBargeIn -> clear), which needs a live talk loop, which needs
-// the inbound registry Acquire the leaf-14 wiring does not do. Skipped
-// with the named gap per the leaf split rule.
+// TestVoiceBargeinViaTalkLoop pins the C1 leg of barge-in: the CHILD sends
+// an interrupt frame, the talk loop drops the in-flight draft and writes a
+// clear frame back on the text socket. This leg needed a live talk loop,
+// which needed the inbound registry Acquire - landed with leaf 15, so the
+// fake child's setup frame now arms the loop here. The MEDIA-side leg
+// (Telnyx interrupt on the media socket -> splice clear to Telnyx) is
+// pinned by TestVoiceBargeinClearsOnlyInterruptedCall above.
 func TestVoiceBargeinViaTalkLoop(t *testing.T) {
-	t.Skipf("not yet wirable: the C1 interrupt -> talk-loop clear path needs a live talk loop, which the leaf-14 inbound wiring cannot arm (no registry.Acquire on the inbound answer path - see voice-lifecycle TestVoiceLifecycleInboundCall); the media-side interrupt -> splice clear path is pinned green by TestVoiceBargeinClearsOnlyInterruptedCall")
+	fake := newFakeTelnyx(t)
+	s, ctrlPath := bootVoiceStack(t, fake, map[string]any{
+		"max_concurrent_calls": 4,
+	})
+
+	const ccid = "cc-barge-a"
+
+	// Arm the call: answer + media start frame + child on C1, then the
+	// child's setup frame registers the talk loop.
+	fake.deliverCallInitiated(s, ccid, "incoming")
+	fake.awaitAnswered(ccid, 10*time.Second)
+	fake.dialMedia(s, ccid)
+	awaitLogLine(t, s, "voice media: start frame", 15*time.Second)
+	fake.connectChild(ctrlPath, 15*time.Second)
+	fake.childDialAudio(ccid)
+	fake.childSetup(ccid, "inbound")
+	awaitLogLine(t, s, "voice wiring: talk loop armed", 15*time.Second)
+
+	// C1 interrupt -> talk-loop handleInterrupt -> clear back to the
+	// child on the text socket, plus the loop's own barge-in log line.
+	fake.childSendsInterrupt(ccid)
+	fake.awaitClearFrame(ccid, 10*time.Second)
+	awaitLogLine(t, s, "voice talk loop: barge-in", 10*time.Second)
 }

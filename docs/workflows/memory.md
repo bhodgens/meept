@@ -428,6 +428,16 @@ memories.
 3. **Recall** (post-retrieval, `SelectBalanced`): source units always pass;
    bridges are admitted while `bridges_included < kb` — at most k_b bridging
    facts enter one assembled context, regardless of how many rank highly.
+   Bridges carry a scope stamp folded from their evidence sources at
+   generation (all-global sources → `global`; one bound project and no user
+   sources → that `project`; anything else → `user`, with a single shared
+   `user_id` when exactly one exists). The recall-side `WithScopeFilter`
+   predicate binds bridge rows exactly like source rows (bughunt
+   2026-11-06: bridge rows were appended AFTER the filter and had no scope
+   key, so a project-scoped caller could read facts distilled from another
+   project's memories). Pre-stamp bridges keep no scope key and read as
+   global — the safe legacy default; the over-visible window closes for new
+   bridges.
 4. **Invalidation** (guarantees): every bridge carries non-empty evidence
    IDs at write time, and deleting, superseding (versioned update), or
    consolidator-expiring a source memory cascade-deletes every bridge citing
@@ -455,6 +465,12 @@ it back if it loses the eval). The defaults below are the shipped values.
 ```bash
 meept memory --bridges      # list bridging facts (verified flag, evidence count, entity)
 ```
+
+The listing lane is scope-gated with the same C2 predicate as recall
+(bughunt 2026-11-07 agent-fixes F-H): a single-user install lists every
+bridge; under `multiuser.enabled`, user-scope rows resolve against the
+caller identity and fail closed when the identity is unresolved. Project
+rows sit in the user-purview listing (the socket is owner-trusted).
 
 In the default `meept memory` listing and the TUI memory browser, bridge
 rows carry a `[bridge]` marker with `verified: yes/no` and their evidence

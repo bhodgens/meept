@@ -13,6 +13,9 @@ internal/session/ -> internal/session/AGENTS.md (lifecycle hooks, idle reaper)
 internal/daemon/  -> internal/daemon/AGENTS.md  (runtime lifecycle, spawn guards)
 internal/agent/   -> internal/agent/AGENTS.md   (chat contracts, output filters, session IDs)
 internal/comm/    -> internal/comm/AGENTS.md    (WS classification, bus topics)
+internal/voice/   -> internal/voice/AGENTS.md   (frames, sockets, splice/barge-in,
+                                                 supervisor gate, release fan-out,
+                                                 secrets lanes, child confinement)
 docs/agents/      -> coding-practices.md | opt-in-defaults.md | projects-and-workdirs.md
 ```
 
@@ -32,7 +35,8 @@ guidance at all.
 # Build
 go build -o bin/meept-daemon ./cmd/meept-daemon
 go build -o bin/meept ./cmd/meept
-make build              # Everything (daemon + CLI + gendoc + GUI + lite + graphs)
+go build -o bin/meept-voice ./cmd/meept-voice  # voice child (phone sidecar)
+make build              # Everything (daemon + CLI + voice child + gendoc + GUI + lite + graphs)
 make build-gui          # Flutter GUI only
 make build-gui-dist     # Flutter GUI with NO embedded dev key (distribution; first-run pairing)
 make menubar-install    # macOS MenuBar app
@@ -184,7 +188,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 
 | Layer | Packages |
 |-------|----------|
-| **Server** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus` (typed topics: `bus.Topic[T]`/`PublishT`/`SubscribeT`, `internal/bus/topic.go`), `internal/comm` (WS classification: `internal/comm/wsclass`) |
+| **Server** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus` (typed topics: `bus.Topic[T]`/`PublishT`/`SubscribeT`, `internal/bus/topic.go`), `internal/comm` (WS classification: `internal/comm/wsclass`; HITL Slack approval channel: `internal/comm/slack`, docs/workflows/hitl-notifications.md) |
 | **Agent** | `internal/agent` (loop, orchestrator, planner, collaborative, workspace, executor, dispatcher) |
 | **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context firewall) |
 | **Memory** | `internal/memory` (manager, episodic, task, ftstore, facts) |
@@ -195,13 +199,14 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **Audit Chain** | `internal/auditlog` (canonical JSON, hash chain, store, anchoring, verification) |
 | **Session** | `internal/session` (store, store_sqlite, threads, messages) |
 | **Effects** | `internal/effects` (external-effect idempotency ledger) |
-| **GitHub** | `internal/githubsvc` (token sources, per-token client pool, PR status + `ReArmSink` seam; tools themselves are `internal/tools/builtin` github_* registered via the init-populated `ToolFactories` factory seam — `builtin` imports `githubsvc`, so `githubsvc` may NEVER import `builtin`; binaries that don't link `builtin` get a descriptive registration error, never a panic) |
-| **Intake** | `internal/intake` (github-intake-factory: label-gated GitHub Issues poller, ticket→goal identity layer (`Linker.EnsureGoal`, TriggerRef `intake:<repo>#<ticket>`), outcome write-back with the effects storm guard, plan→GitHub-Projects projection (`Projector`, effects receipts as the phase↔issue correlation store, driven by the `plan.executing` + `plan.phase_state` bus topics); daemon wiring `internal/daemon/intake_wiring.go` schedules `intake_poller` only when `[intake].enabled` — disabled by default; rides the `[github]` token sources, no separate token; docs/workflows/intake.md) |
+| **GitHub** | `internal/githubsvc` (token sources, per-token client pool, PR status + `ReArmSink` seam; tools themselves are `internal/tools/builtin` github_* registered through the `toolprov` "github" provider (`builtin.SetGitHubProvider` + `toolprov.RegisterAll`), with `githubsvc.ToolFactories` as the mirrored construction seam — `builtin` imports `githubsvc`, so `githubsvc` may NEVER import `builtin`) |
+| **Intake** | `internal/intake` (github-intake-factory: label-gated GitHub Issues poller, ticket→goal identity layer (`Linker.EnsureGoal`, TriggerRef `intake:<repo>#<ticket>`), outcome write-back with the effects storm guard, plan→GitHub-Projects projection (`Projector`, effects receipts as the phase↔issue correlation store, driven by the `plan.executing` + `plan.phase_state` bus topics); daemon wiring `internal/daemon/intake_wiring.go` schedules `intake_poller` only when `[intake].enabled` — disabled by default; rides the `[github]` token sources, no separate token; the read-only `intake.status` RPC (`internal/rpc/intake_status.go`, registered by `internal/daemon/intake_status_rpc.go`) backs the TUI `/intake`, the CLI `meept intake status`, and the GUI's `GET /api/v1/intake/status` bridge + `ui/flutter_ui/lib/features/intake` view (issue #109 parity); docs/workflows/intake.md) |
 | **Services** | `internal/services` (chat, session, terminal, push, reflection) |
 | **Project** | `internal/project` (manager, init_deep, detection) |
 | **TUI** | `internal/tui` (app, commands, components, handlers, modals, models, tableutil) |
 | **GUI** | `ui/flutter_ui` (Flutter web + desktop) |
 | **Scheduling** | `internal/scheduler`, `internal/queue`, `internal/worker` |
+| **Voice** | `internal/voice` (daemon side: call manager, splice, supervisor gate, dial, day brief, registry, child proc, local leg `local.go`/`localsplice.go`), `internal/voiceframe` (stdlib-only shared frame codec), `internal/voicechild` + `cmd/meept-voice` (jargo voice child), `cmd/meept/voice.go` (`voice local`/`voice status` CLI), `internal/rpc/voice_local.go` (`voice.local.*` RPC - full contract in `internal/voice/AGENTS.md`) |
 | **Skills** | `internal/skills`, `internal/selfimprove` |
 | **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/process`, `internal/eval`, `internal/gate` |
 
@@ -297,11 +302,12 @@ runtime, only `StartupOrphanSweep` reaps orphans, sweep before spawn, a local
 classifier that never becomes healthy fails startup (F-D8), and client transports
 (RPC socket, HTTP/WS listener) come up BEFORE the F-D8 gate so clients can connect
 and enqueue during slow model loads (boot-window submits park on
-`ClassifierBootReadiness`). Hang detection (inference canary + checker
-self-watchdog, `VerdictHung`, `runtime.health` bus events) adds one rule: HUNG
-drives restart ONLY through the existing bool callback/auto-restart path and the
-bus seam is `SetHealthEventPublisher` — full invariants in `internal/llm/AGENTS.md`
-(`docs/workflows/runtime-hang-watchdog.md`).
+`ClassifierBootReadiness`). The SIGINT/SIGTERM/SIGHUP handler is installed before
+those listeners: a reload during boot is queued, not fatal. Hang detection
+(inference canary + checker self-watchdog, `VerdictHung`, `runtime.health` bus
+events) adds one rule: HUNG drives restart ONLY through the existing bool
+callback/auto-restart path and the bus seam is `SetHealthEventPublisher` — full
+invariants in `internal/llm/AGENTS.md` (`docs/workflows/runtime-hang-watchdog.md`).
 
 ### Session affinity headers and upstream teardown
 
@@ -316,20 +322,56 @@ idle/shutdown) is best-effort with the verified route `POST /slots/0?action=eras
 and NEVER fails a turn, an archive, or a shutdown; cloud providers are an
 explicit no-op.
 
-### The github_* tool factory seam is init-populated; githubsvc never imports builtin
+### Voice sidecar (phone channel + local leg)
+
+Full rules live in `internal/voice/AGENTS.md` (frames, sockets,
+reorder/pacing/barge-in, release fan-out, secrets lanes, child
+confinement, one-live-call-per-employee, local-leg invariants);
+user-facing docs are
+`docs/workflows/voice-sidecar.md` (spec rev 3 + as-built) and
+`docs/workflows/voice.md`. Short form: C1 text frames are byte-exact
+JSON lines, every frame carries `call_id`, only final prompts
+(`last:true`) start a turn, and `say` goes out only after the
+supervisor allows (fact-free filler/greeting excepted); C2 audio rides
+per-call unix socket pairs with codec-derived 20 ms chunks; barge-in
+`clear` affects the interrupted call only. A voice call is never
+quota-parked - supervisor timeout means fallback line and the call
+continues; hangups fan out release (slot, goal unpark, effects) exactly
+once. The Telnyx token resolves via `Broker.Value` in-daemon only;
+provider keys reach the child over the unix socket and live in child
+memory only. jargo is imported ONLY by `cmd/meept-voice` and
+`internal/voicechild` (compile-time pins); the registry enforces one
+live call per employee and per target number, with outbound dials
+gated by allowlist + effects reservation + audit-before-dial. The
+LOCAL leg (phone + local run concurrently on one child/registry/store)
+never imports telnyx and skips effects + audit by contract; its
+barge-in is RMS VAD gated to `Local==true`; `LocalSplice` has no
+reorder window and negotiates L16@16k only. The optional SECOND
+cleartext listener (`voice.loopback_plain_addr`, leaf 10 T6) is booted by
+`internal/daemon/voice_plain_boot.go` from `VoiceWiring.Start` when the
+knob is non-empty, rides the voice subsystem's stop context, and MUST
+bind loopback: a non-loopback address (name-checked AND actual-bind
+re-checked) is `ErrNonLoopbackVoiceAddr` and fails the startup loudly,
+never degrades. Its mux carries the same per-IP rate limit + access
+logging as the main listener's voice chain.
+
+### The github_* tools register through the tool-provider seam; githubsvc never imports builtin
 
 The github PR/CI tools live in `internal/tools/builtin` (which imports
 `internal/githubsvc` for pool / `OwnerRepo` / `ReArmSink`), so
 `githubsvc` may NEVER import `builtin` back — that would be an import
-cycle. Instead the registration entry point is an inversion of control:
-`githubsvc.RegisterGitHubTools(reg, opts)` consults the package-level
-`githubsvc.ToolFactories` factory, which `builtin` populates in its
-`init()` (internal/tools/builtin/github_register.go). A binary that links
-`builtin` gets full registration; a binary that does not gets a
-descriptive error in the enabled case only (nil-Pool "disabled" still
-returns nil with no registrations). Keep `githubsvc` import-free of
-`builtin` (checked by the import cycle itself); new github_* tools are
-added to the factory closure, not to a `githubsvc`-side constructor list.
+cycle. Registration runs through the tool-provider seam: the daemon
+(`internal/daemon/github_wiring.go`) binds runtime inputs via
+`builtin.SetGitHubProvider(opts, ledger, sink, broker)`, then
+`toolprov.RegisterAll` walks the compiled-in `"github"` provider whose
+`Discover()` constructs the tools. `builtin`'s `init()` also populates the
+package-level `githubsvc.ToolFactories` construction seam (mirrored
+constructors); the former `githubsvc.RegisterGitHubTools` entry point was
+removed as dead code (zero callers since the provider seam landed —
+`internal/githubsvc/register.go` keeps a tombstone). New github_* tools are
+added to BOTH the provider's Discover list and the factory closure (they
+must stay identical). A `[tool_providers]` `enabled=false` for `github`
+skips registration entirely.
 Token material is NEVER logged — the token source reports presence/length
 only, and a token file with group/other access bits is refused
 (`internal/daemon/github_wiring.go` + `meept github status`). A parked
@@ -593,6 +635,7 @@ Audit scripts in `scripts/`:
 | `audit-dart-enum-name-shadow.py` | Flags Dart extensions shadowing Enum.name/index |
 | `audit-utf8-byte-arithmetic.py` | Flags hand-rolled ASCII case-conversion corrupting UTF-8 |
 | `audit-secrets-value-callers.py` | Pins the secrets in-process-only rule: `Broker.Value`/`resolve` callers must be allowlisted; their results never reach logs, env entries, or `os.Setenv` |
+| `audit-sqlite-dsn-pragmas.py` | Flags modernc-style `sql.Open("sqlite")` DSNs using mattn keys (`_journal_mode`/`_busy_timeout`/`_fk`/`_foreign_keys`) — modernc.org/sqlite silently drops them (only `_pragma=name(value)` reaches SQLite). bughunt 2026-11-07 infra-fixes |
 | `gen-connectivity-graph.py` | Generates bus/RPC/HTTP/WS topology (`make graphs`) |
 | `ensure-dev-key.sh` | Provision the per-installation dev API key (`$MEEPT_HOME/dev_key`, 0600) |
 | `gui-daemon-connect.py` | Reconcile the installed daemon config with the GUI connect path (`ensure-config` / `endpoint` / `check` / `probe`) |

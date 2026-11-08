@@ -100,7 +100,7 @@ func New(dataDir string, maxPages int, logger *slog.Logger) (*Store, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, "knowledge.db")
-	dsn := "file:" + dbPath + "?_fk=1&_journal_mode=WAL&_busy_timeout=5000"
+	dsn := "file:" + dbPath + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" // modernc _pragma form (bughunt 2026-11-07)
 	rawDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open knowledge database: %w", err)

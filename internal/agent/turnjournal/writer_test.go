@@ -3,6 +3,7 @@ package turnjournal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -196,3 +197,91 @@ func TestJournalWriterOverSQLite(t *testing.T) {
 
 // Keep strings referenced without infloning runtime cost in this file.
 var _ = strings.Contains
+
+// F-5 (bughunt agent-core): the dedup sets must stay BOUNDED across
+// daemon-lifetime turn churn while the pinned interlock semantics hold:
+// below the ring cap behavior is byte-identical to the unbounded legacy
+// (retries coalesce, double closes no-op); above it the oldest turnIDs
+// are forgotten FIFO — a forgotten turn re-appending one duplicate row
+// is tolerated by OpenRuns (GROUP BY newest) and reclaimed by
+// PruneClosed.
+
+func TestJournalWriterDedupSetsStayBounded(t *testing.T) {
+	store := &recordingStore{}
+	w := NewJournalWriter(store, slog.New(slog.DiscardHandler))
+	ctx := context.Background()
+
+	// Churn 3x the ring cap through open->close cycles.
+	for i := 0; i < 3*dedupRingCap; i++ {
+		id := fmt.Sprintf("t-%d", i)
+		w.OnRunStart(ctx, id, "s", []byte(`{}`))
+		w.OnRunClose(ctx, id)
+	}
+
+	w.runStartedMu.Lock()
+	defer w.runStartedMu.Unlock()
+	if len(w.runStartedRuns) != dedupRingCap || len(w.startedOrder) != dedupRingCap {
+		t.Fatalf("runStartedRuns ring = map %d/order %d, want both %d",
+			len(w.runStartedRuns), len(w.startedOrder), dedupRingCap)
+	}
+	if len(w.closedRuns) != dedupRingCap || len(w.closedOrder) != dedupRingCap {
+		t.Fatalf("closedRuns ring = map %d/order %d, want both %d",
+			len(w.closedRuns), len(w.closedOrder), dedupRingCap)
+	}
+	// FIFO: the ring forgot the OLDEST ids and kept the newest.
+	if w.runStartedRuns["t-0"] || !w.runStartedRuns[fmt.Sprintf("t-%d", 3*dedupRingCap-1)] {
+		t.Fatal("runStarted ring evicted the wrong end")
+	}
+	if w.closedRuns["t-0"] || !w.closedRuns[fmt.Sprintf("t-%d", 3*dedupRingCap-1)] {
+		t.Fatal("closed ring evicted the wrong end")
+	}
+}
+
+func TestJournalWriterRingKeepsLegacySemanticsBelowCap(t *testing.T) {
+	store := &recordingStore{}
+	w := NewJournalWriter(store, slog.New(slog.DiscardHandler))
+	ctx := context.Background()
+
+	// Live-run retry coalesces (T1 shape).
+	w.OnRunStart(ctx, "turn-x", "s", []byte("p1"))
+	w.OnRunStart(ctx, "turn-x", "s", []byte("p2"))
+	// Re-start after close is STILL deduped (legacy posture preserved:
+	// rehydrate tolerates open runs via SQL, not writer re-append).
+	w.OnRunClose(ctx, "turn-x")
+	w.OnRunStart(ctx, "turn-x", "s", []byte("p3"))
+	// Double close no-ops (T1 shape).
+	w.OnRunClose(ctx, "turn-x")
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var started, closed int
+	for _, r := range store.rows {
+		switch r.Kind {
+		case KindRunStarted:
+			started++
+		case KindRunClosed:
+			closed++
+		}
+	}
+	if started != 1 || closed != 1 {
+		t.Fatalf("rows: started=%d closed=%d, want 1/1 (legacy dedup semantics below cap)", started, closed)
+	}
+}
+
+func TestJournalWriterFailedCloseKeepsDedupMarkers(t *testing.T) {
+	store := &failingStore{}
+	w := NewJournalWriter(store, slog.New(slog.DiscardHandler))
+	ctx := context.Background()
+
+	w.OnRunStart(ctx, "turn-f", "s", []byte("p"))
+	w.OnRunClose(ctx, "turn-f") // CloseRun fails -> keep markers
+
+	w.runStartedMu.Lock()
+	defer w.runStartedMu.Unlock()
+	if !w.runStartedRuns["turn-f"] || !w.closedRuns["turn-f"] {
+		t.Fatal("failed close must keep BOTH dedup markers (legacy posture; boot rehydrate settles the run)")
+	}
+	if len(w.closedOrder) != 1 {
+		t.Fatalf("closedOrder should track the marked close: %v", w.closedOrder)
+	}
+}

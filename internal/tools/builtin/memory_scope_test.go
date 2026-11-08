@@ -260,3 +260,58 @@ func TestMemoryToolsLegacyUnfiltered(t *testing.T) {
 
 // compile guard for fmt (kept imports honest if assertions change)
 var _ = fmt.Sprintf
+
+// TestGlobalAgentToolRecallMatchesLoopPurview pins bughunt 2026-11-06
+// memory F-2: a declared-global (chief-of-staff) identity must map to the
+// USER purview on the tool lane, exactly as internal/agent/scope_wiring.go
+// memoryScopeOptions does for loop injection. Passing ScopeGlobal verbatim
+// made the C2 predicate treat the caller as identity-less: tool recall
+// could never see project rows while the same agent's loop context did.
+func TestGlobalAgentToolRecallMatchesLoopPurview(t *testing.T) {
+	mgr := scopeTestManager(t)
+	ctxA := scopedCtx("proj-a")
+	ctxGlobal := tools.ContextWithScopeIdentity(context.Background(), tools.ScopeIdentity{
+		MaxScope: "global",
+		UserID:   "boss",
+	})
+
+	storeViaTool(t, mgr, ctxA, "the zeta marker lives in project A", "project")
+	storeViaTool(t, mgr, ctxA, "the omega marker is global", "global")
+
+	// The exact option set the memory_* tools fold from the context.
+	opts := scopeSearchOptions(ctxGlobal)
+	searchAs := func(query string) []memory.MemoryResult {
+		t.Helper()
+		res, err := mgr.Search(context.Background(), memory.MemoryQuery{Query: query, Limit: 10}, opts...)
+		if err != nil {
+			t.Fatalf("search %q: %v", query, err)
+		}
+		return res
+	}
+	contains := func(res []memory.MemoryResult, marker string) bool {
+		for _, r := range res {
+			if strings.Contains(r.Memory.Content, marker) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !contains(searchAs("zeta marker"), "zeta") {
+		t.Errorf("declared-global agent's TOOL recall lost project rows (loop injection sees them via the user purview)")
+	}
+	if !contains(searchAs("omega marker"), "omega") {
+		t.Errorf("declared-global agent lost global rows")
+	}
+
+	// Project-scoped callers keep the strict project predicate: the
+	// mapping must not widen project sessions.
+	optsB := scopeSearchOptions(scopedCtx("proj-b"))
+	resB, err := mgr.Search(context.Background(), memory.MemoryQuery{Query: "zeta marker", Limit: 10}, optsB...)
+	if err != nil {
+		t.Fatalf("project-B search: %v", err)
+	}
+	if contains(resB, "zeta") {
+		t.Errorf("project-B caller saw project-A row")
+	}
+}

@@ -24,13 +24,11 @@ import (
 	"strings"
 )
 
-// SlackConfig is the [comm.slack] configuration block. NOTE: the config
-// schema key addition is CLOSED for this wave (another tree owns
-// internal/config/schema.go), so the struct ships in-package and the
-// daemon wiring reads it from the [comm.slack] JSON5 key by hand-rolled
-// decoding against the raw config map - the schema.go struct + loader
-// registration (field on Config, tag `json:"slack" toml:"slack"`) is
-// tracked for the next wave.
+// SlackConfig is the [comm.slack] configuration block. The schema-backed
+// registration lives in internal/config (config.SlackConfig, json key
+// "slack"); this in-package struct is the runtime shape the daemon bridge
+// (internal/daemon/slack_wiring.go) maps the schema fields into, per the
+// ResolverConfig convention (config never imports this package).
 //
 // Values support the ${VAR} and file: env/file indirection conventions
 // used by other secret-bearing config values.

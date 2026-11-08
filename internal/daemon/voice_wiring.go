@@ -35,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/activity"
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/bus"
@@ -67,20 +68,38 @@ type VoiceWiring struct {
 	Routes *commhttp.VoiceRoutes
 	// Employee holds the goal hold seam + call store (leaf 12 wiring).
 	Employee *VoiceEmployeeWiring
+	// Local is the local voice leg (leaf 07). Nil when
+	// voice.local.enabled is false - leaf 08's RPC refuses opens on nil
+	// with the disabled-leg error.
+	Local *voice.LocalLeg
 
 	// supervisor is the C6 gate shared by all talk loops.
 	supervisor voice.Supervisor
 
-	// tel is the resolved telnyx client (shared by manager + dialer).
-	tel *telnyx.Client
+	// tel is the resolved telnyx seam (shared by manager + dialer +
+	// hangup paths). The narrow CallController interface (not the
+	// concrete client) keeps the wiring testable with a fake seam.
+	tel telnyx.CallController
 
 	// loops maps call_control_id -> live talk loop so the C1 frame
 	// handler routes frames and teardown cancels the right goroutine.
-	loopsMu sync.Mutex
-	loops   map[string]*voice.TalkLoop
+	// loopCancels (same lock) holds the per-call context cancel armed at
+	// loop setup (audit H4): releaseCall cancels it so a released call's
+	// talk loop exits promptly instead of self-reaping after silence
+	// timers.
+	loopsMu     sync.Mutex
+	loops       map[string]*voice.TalkLoop
+	loopCancels map[string]context.CancelFunc
 
 	// bus publishes voice.call.ended (typed topic); nil drops events.
 	bus *bus.MessageBus
+
+	// broker resolves the cloud STT/TTS keys at emission time (leaf 03,
+	// C4). In-process Broker.Value consumers only - never a child env,
+	// command line, or bus payload. nil degrades keys emission to empty
+	// keys with a loud WARN (keys are still sent: the child factory fails
+	// that call, the child and other calls stay up).
+	broker *secrets.Broker
 
 	// stopCtx/stopCancel bound the text server lifetime (set at Start).
 	stopCtx    context.Context
@@ -92,6 +111,12 @@ type VoiceWiring struct {
 	// cfg + logger are construction-time values.
 	cfg    config.VoiceConfig
 	logger *slog.Logger
+
+	// plainOpts configures the optional plain-HTTP loopback listener's
+	// middleware (rate limit + access log parity with the main listener;
+	// zero values take the server.go defaults). Set by WireVoice from the
+	// transport.http block.
+	plainOpts commhttp.PlainListenerOptions
 }
 
 // WireVoiceDeps carries the components WireVoice captures. All pointer
@@ -112,7 +137,24 @@ type WireVoiceDeps struct {
 	// gate (voice.supervisor_model alias). nil degrades the gate to
 	// disabled (every sentence allowed) with a logged warning.
 	SupervisorChatter voice.SupervisorChatter
-	Logger            *slog.Logger
+	// SupervisorChatterClient resolves a *llm.Client for the
+	// voice.supervisor_model ref (alias or provider/model) at
+	// construction time (audit M1). Nil (or a failed resolution) falls
+	// back to the components-injected SupervisorChatter - the legacy
+	// classifier-chatter behavior. components.go passes a closure over
+	// createAuxiliaryLLMClientWithResolver, the SAME resolution path
+	// classifier chatter uses.
+	SupervisorChatterClient func(modelRef string) *llm.Client
+	// Day-brief sources for the local leg (leaf 07): the activity
+	// aggregator adapts onto voice.ActivitySource, and the memory/goal
+	// narrow interfaces are injected by components.go (the employee
+	// framework owns both stores). Nil sources omit their brief section
+	// (leaf-04 rule); Transcripts always comes from the employee stack's
+	// call store, never nil here.
+	ActivityAggregator *activity.Aggregator
+	MemorySource       voice.MemorySource
+	GoalSource         voice.GoalSource
+	Logger             *slog.Logger
 }
 
 // WireVoice constructs the voice stack from cfg. It returns (nil, nil)
@@ -128,42 +170,56 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	}
 	vlog := logger.With("component", "voice")
 
-	// -- 1. Telnyx client: Broker.Value resolves the API token in-process
-	// ONLY (audit-secrets-value-callers allowlist row); it reaches the
-	// client constructor and nothing else - never a log line, env entry,
-	// or child process. A missing broker/secret DEGRADES to voice-disabled
-	// with a loud WARN (a scratch boot or a broker-less install must still
-	// boot; the dial-time gates and the route-level fail-closed posture
-	// keep every call path refused without credentials), never a daemon
-	// boot failure - mirroring the wireSlackChannel optional-channel shape.
-	telnyxToken := ""
+	// -- 1. Telnyx client (PHONE leg). Broker.Value resolves the API token
+	// in-process ONLY (audit-secrets-value-callers allowlist row); it reaches
+	// the client constructor and nothing else - never a log line, env entry,
+	// or child process. A missing broker/secret DEGRADES the PHONE leg to
+	// disabled (nil carrier client; every phone call path fails closed at
+	// dial/answer time) - scratch boots and broker-less installs still boot,
+	// mirroring the wireSlackChannel optional-channel shape. It does NOT
+	// disable the LOCAL leg: the local leg never imports telnyx or touches
+	// the broker key (internal/voice/AGENTS.md invariant), so it arms
+	// independently of the phone secret. Only when BOTH the phone token is
+	// unresolvable AND voice.local.enabled=false is the whole block disabled
+	// (the fully-disabled boot, unchanged posture).
+	var tel *telnyx.Client
 	if deps.Broker != nil {
 		token, err := deps.Broker.Value("telnyx_api_key")
 		if err != nil {
-			vlog.Warn("voice wiring degraded to disabled: secrets broker error", "err", err)
-			return nil, nil
+			vlog.Warn("voice wiring: telnyx_api_key unresolvable (secrets broker error); phone leg disabled, local leg unaffected",
+				"err", err)
+		} else {
+			tel = telnyx.NewClient(telnyxBaseURL(), token)
 		}
-		telnyxToken = token
 	} else {
-		vlog.Warn("voice wiring degraded to disabled: no secrets broker configured; " +
-			"telnyx_api_key unresolvable (declare it under [secrets.sources])")
+		vlog.Warn("voice wiring: no secrets broker configured; telnyx_api_key unresolvable " +
+			"(phone leg disabled, local leg unaffected; declare it under [secrets.sources] for phone calls)")
+	}
+	phoneEnabled := tel != nil
+	if !phoneEnabled && !cfg.Local.Enabled {
+		vlog.Warn("voice wiring degraded to disabled: no telnyx_api_key and voice.local.enabled=false; no voice leg can arm")
 		return nil, nil
 	}
-	tel := telnyx.NewClient(telnyxBaseURL(), telnyxToken)
 
-	// -- 2. Signature verifiers (leaf 02): mandatory; an undecodable
-	// public key fails the boot.
-	pubKey, err := decodeTelnyxPublicKey(cfg.TelnyxPublicKey)
-	if err != nil {
-		return nil, err
-	}
-	verify := commhttp.VerifyFuncs{
-		Webhook: func(body []byte, headers http.Header) error {
-			return telnyx.VerifyWebhookSignature(body, headers, pubKey)
-		},
-		Media: func(headers http.Header, streamURL string) error {
-			return telnyx.VerifyMediaSocket(headers, streamURL, pubKey)
-		},
+	// -- 2. Signature verifiers (leaf 02): mandatory for the PHONE routes;
+	// an undecodable public key fails the boot. Only the phone leg needs
+	// them (the local leg rides C2 audio pairs over SocketDir, never Telnyx
+	// HTTP), so a local-only install skips this - it must not REQUIRE a
+	// voice.telnyx_public_key.
+	var verify commhttp.VerifyFuncs
+	if phoneEnabled {
+		pubKey, err := decodeTelnyxPublicKey(cfg.TelnyxPublicKey)
+		if err != nil {
+			return nil, err
+		}
+		verify = commhttp.VerifyFuncs{
+			Webhook: func(body []byte, headers http.Header) error {
+				return telnyx.VerifyWebhookSignature(body, headers, pubKey)
+			},
+			Media: func(headers http.Header, streamURL string) error {
+				return telnyx.VerifyMediaSocket(headers, streamURL, pubKey)
+			},
+		}
 	}
 
 	// -- 3. C1 text server (shared by every call). Started at Start;
@@ -184,6 +240,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		IdleStop:       time.Duration(cfg.IdleStopSeconds) * time.Second,
 		StartTimeout:   30 * time.Second,
 		Handshake:      voice.HandshakeProbe(textServer),
+		TokenAuth:      textServer,
 		Live:           func() int { return len(registry.Live()) },
 	}, vlog.With("sub", "child"), nil)
 	spawn := func(callCtx context.Context, ev telnyx.CallEvent) (context.CancelFunc, error) {
@@ -227,33 +284,61 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		return nil, fmt.Errorf("voice wiring: employee stack: %w", err)
 	}
 
-	// -- 6. Supervisor (C6). Chatter is the resolved small/classifier
-	// model client injected by components (voice.supervisor_model alias
-	// resolved there); nil chatter with Enabled=true is a config error.
+	// -- 6. Supervisor (C6). The fast-model seam honors
+	// voice.supervisor_model (audit M1): when set, a dedicated client is
+	// resolved for that alias/model through the same resolution path
+	// components.go uses for classifier chatter. Empty model, no
+	// factory, or failed resolution falls back to the components-built
+	// classifier chatter (legacy behavior); nil chatter with
+	// Enabled=true degrades the gate to allow-all with a logged warning.
 	var supervisor voice.Supervisor
-	if deps.SupervisorChatter != nil {
+	chatter := deps.SupervisorChatter
+	if cfg.SupervisorModel != "" {
+		if deps.SupervisorChatterClient != nil {
+			if dedicated := deps.SupervisorChatterClient(cfg.SupervisorModel); dedicated != nil {
+				chatter = &chatterAdapter{client: dedicated}
+				vlog.Info("voice wiring: supervisor gate resolved dedicated model",
+					"supervisor_model", cfg.SupervisorModel)
+			} else {
+				vlog.Warn("voice wiring: voice.supervisor_model did not resolve to a model; "+
+					"supervisor gate falls back to the classifier chatter chain",
+					"supervisor_model", cfg.SupervisorModel)
+			}
+		} else {
+			vlog.Warn("voice wiring: no client factory available for voice.supervisor_model; "+
+				"supervisor gate falls back to the classifier chatter chain",
+				"supervisor_model", cfg.SupervisorModel)
+		}
+	}
+	if chatter != nil {
 		supervisor = voice.NewSupervisor(voice.SupervisorConfig{
 			Enabled:      cfg.SupervisorEnabled,
 			Timeout:      time.Duration(cfg.SupervisorTimeoutMs) * time.Millisecond,
 			FallbackLine: "I cannot confirm that yet.",
-		}, deps.SupervisorChatter, vlog.With("sub", "supervisor"))
+		}, chatter, vlog.With("sub", "supervisor"))
 	} else {
 		supervisor = voice.NewSupervisor(voice.SupervisorConfig{Enabled: false}, nil, vlog.With("sub", "supervisor"))
 	}
 
-	// -- 7. Dialer (C9) with the audit adapter.
-	var audit voice.AuditWriter
-	if deps.Audit != nil {
-		audit = auditWriterAdapter{store: deps.Audit}
+	// -- 7. Dialer (C9) with the audit adapter. Phone-only: nil without a
+	// telnyx key, so the voice_call tool refuses outbound dials (fail
+	// closed) and the phone side stays visibly disabled while the local
+	// leg lives.
+	var dialer *voice.Dialer
+	if phoneEnabled {
+		var audit voice.AuditWriter
+		if deps.Audit != nil {
+			audit = auditWriterAdapter{store: deps.Audit}
+		}
+		dialer = voice.NewDialer(voice.DialConfig{
+			Enabled:         true,
+			AllowedNumbers:  cfg.AllowedNumbers,
+			PublicStreamURL: cfg.PublicStreamURL,
+			ConnectionID:    cfg.ConnectionID,
+			FromNumber:      cfg.FromNumber,
+			TimeoutSecs:     cfg.TimeoutSecs,
+		}, tel, manager, registry, deps.Effects, audit, vlog.With("sub", "dialer"))
 	}
-	dialer := voice.NewDialer(voice.DialConfig{
-		Enabled:         true,
-		AllowedNumbers:  cfg.AllowedNumbers,
-		PublicStreamURL: cfg.PublicStreamURL,
-		ConnectionID:    cfg.ConnectionID,
-		FromNumber:      cfg.FromNumber,
-		TimeoutSecs:     cfg.TimeoutSecs,
-	}, tel, manager, registry, deps.Effects, audit, vlog.With("sub", "dialer"))
 
 	w := &VoiceWiring{
 		Manager:        manager,
@@ -264,12 +349,86 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		TextServer:     textServer,
 		Employee:       employee,
 		supervisor:     supervisor,
-		tel:            tel,
 		loops:          make(map[string]*voice.TalkLoop),
+		loopCancels:    make(map[string]context.CancelFunc),
 		bus:            deps.Bus,
 		textSocketPath: textSocketPath,
+		broker:         deps.Broker,
 		cfg:            cfg,
 		logger:         vlog,
+		plainOpts: commhttp.PlainListenerOptions{
+			RateLimitPerMinute: deps.Config.Transport.HTTP.RateLimitRPM,
+			RateLimitBurst:     deps.Config.Transport.HTTP.RateLimitBurst,
+			TrustXForwardedFor: deps.Config.Transport.HTTP.TrustXForwardedFor,
+			Logger:             vlog.With("sub", "voice-plain"),
+		},
+	}
+	// The phone seam is an interface field; assigning a nil *Client here
+	// would leave a non-nil interface wrapping a nil pointer (typed-nil
+	// trap). Set it only when the phone leg actually armed so the
+	// nil-carrier manager + nil-tel guards read the truth (phone leg
+	// disabled) in the local-only boot.
+	if phoneEnabled {
+		w.tel = tel
+	}
+
+	// -- 7b. LocalLeg (local-leg plan CL5/leaf 07): constructed when
+	// voice.local.enabled; nil otherwise (leaf 08's RPC checks nil before
+	// refusing with the disabled-leg error). The brief builder adapts the
+	// leaf-04 BuildDayBrief over the day-brief sources - the SAME sources
+	// the phone path would use, injected as a closure so internal/voice
+	// stays dependency-free. The cancel-draft hook routes the splice's
+	// barge-in seam to the wiring's talk loop (same HandleBargeIn the
+	// media-side interrupt uses). --
+	if cfg.Local.Enabled {
+		local, lerr := voice.NewLocalLeg(voice.LocalLegConfig{
+			Enabled:    true,
+			Label:      cfg.Local.Name,
+			BargeInRms: cfg.Local.BargeInRms,
+		}, voice.LocalDeps{
+			Registry:   registry,
+			ChildProc:  child,
+			TextServer: textServer,
+			Manager:    manager,
+			Binding:    employee.Binding,
+			DayBriefBuilder: func(ctx context.Context, employeeID, number string) (voice.DayBrief, error) {
+				return voice.BuildDayBrief(ctx, voice.Deps{
+					Activity:    voice.AggregatorSource{Agg: deps.ActivityAggregator},
+					Transcripts: employee.store,
+					Memory:      deps.MemorySource,
+					Goals:       deps.GoalSource,
+				}, employeeID, number, time.Now(), time.Local)
+			},
+			Profile: func(employeeID string) voice.Profile {
+				return voice.ResolveProfile(cfg, employeeID, "", voice.LegLocal)
+			},
+			// Goal-hold seam (AcquireCallHold gap closure): every opened
+			// local call acquires the per-employee hold so the release
+			// fan-out's ReleaseHook sees it in heldCalls and runs
+			// Binding.OnCallEnd to mark the calls.db row 'ended'. The
+			// release itself rides ReleaseHook -> ReleaseForCall at teardown;
+			// this only acquires.
+			Hold: func(ccid, emp string) {
+				employee.AcquireCallHold(ccid, emp)
+			},
+			Logger: vlog.With("sub", "local-leg"),
+		})
+		if lerr != nil {
+			return nil, fmt.Errorf("voice wiring: local leg: %w", lerr)
+		}
+		local.SetCancelDraftHook(func(ccid string) {
+			w.loopsMu.Lock()
+			loop := w.loops[ccid]
+			w.loopsMu.Unlock()
+			if loop != nil {
+				// Splice-side barge-in (local leg): same drop contract
+				// as a child interrupt frame, minus the clear echo (the
+				// splice itself sent clear toward the child).
+				loop.HandleBargeIn(ccid)
+			}
+		})
+		w.Local = local
+		vlog.Info("voice wiring: local leg armed", "label", cfg.Local.Name)
 	}
 
 	// -- 8. Release-hook fan-out (the leaf's once-per-outcome contract).
@@ -283,18 +442,24 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	textServer.SetHandler(w.routeFrame)
 
 	// -- 10. HTTP routes (leaf 10) with the splice runner closure.
-	runner := w.spliceRunner()
-	routes, err := commhttp.NewVoiceRoutes(manager, verify, commhttp.VoiceRoutesConfig{
-		Enabled:      true,
-		SpliceRunner: runner,
-	}, vlog.With("sub", "routes"))
-	if err != nil {
-		if closeErr := employee.Close(); closeErr != nil {
-			w.logger.Debug("voice wiring: employee close", "err", closeErr)
+	// Phone-only: without a telnyx key the Telnyx webhook/media endpoints
+	// stay unserved, so no inbound phone call can ever reach the manager
+	// (the phone leg stays fully disabled); the local leg needs no HTTP
+	// route (it rides C2 audio pairs over SocketDir).
+	if phoneEnabled {
+		runner := w.spliceRunner()
+		routes, err := commhttp.NewVoiceRoutes(manager, verify, commhttp.VoiceRoutesConfig{
+			Enabled:      true,
+			SpliceRunner: runner,
+		}, vlog.With("sub", "routes"))
+		if err != nil {
+			if closeErr := employee.Close(); closeErr != nil {
+				w.logger.Debug("voice wiring: employee close", "err", closeErr)
+			}
+			return nil, fmt.Errorf("voice wiring: routes: %w", err)
 		}
-		return nil, fmt.Errorf("voice wiring: routes: %w", err)
+		w.Routes = routes
 	}
-	w.Routes = routes
 
 	return w, nil
 }
@@ -349,6 +514,20 @@ func (a auditWriterAdapter) WriteAudit(ctx context.Context, row map[string]any) 
 func (w *VoiceWiring) routeFrame(f voice.Frame) {
 	switch f.Event {
 	case voice.EventSetup:
+		// bughunt 2026-11-07 voice F-6: idempotent setup, mirroring the
+		// child's handleSetup ("setup for live call ignored"). Without the
+		// guard a duplicate setup (child reconnect/replay) overwrote the
+		// loop + loopCancel map entries: the replaced loop kept running
+		// unreached (router looks up by map), received no frames, and its
+		// silence timer eventually fired t.end -> managerHangup on the
+		// CURRENT live call. The lost cancel func also leaked the ctx.
+		w.loopsMu.Lock()
+		if _, exists := w.loops[f.CallID]; exists {
+			w.loopsMu.Unlock()
+			w.logger.Debug("voice wiring: setup for live call ignored", "ccid", f.CallID)
+			return
+		}
+		w.loopsMu.Unlock()
 		// Setup carries the call identity the talk loop needs. The
 		// registry instance was acquired at answer/dial time; find it.
 		var inst voice.Instance
@@ -381,15 +560,34 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		})
 		w.loopsMu.Lock()
 		w.loops[f.CallID] = loop
+		// H4: arm the per-call context. releaseCall cancels it so a
+		// released call's talk loop exits promptly instead of
+		// self-reaping after silence timers. loopContext owns the
+		// daemon-lifecycle parent.
+		loopCtx, loopCancel := context.WithCancel(w.loopContext(f.CallID))
+		w.loopCancels[f.CallID] = loopCancel
 		w.loopsMu.Unlock()
+		// Leaf 03 (C4): the extended keys frame goes out right after the
+		// loop registers, once per call, on the setup goroutine. The
+		// idempotency guard above returned on duplicate setups before
+		// reaching this line, so a replayed setup never re-sends keys;
+		// the unknown-ccid return also precedes it (refused setups send
+		// nothing). Send failure degrades inside sendKeysFrame (warn,
+		// no teardown).
+		w.sendKeysFrame(f.CallID)
 		go func() {
-			// Talk loop lives for the call; Run returns at end. Run's own
-			// error paths log; the goroutine cannot surface further.
-			if runErr := loop.Run(w.loopContext(f.CallID), inst); runErr != nil {
+			// Talk loop lives for the call; Run returns at end (end
+			// frame, timers) or when releaseCall cancels loopCtx. Run's
+			// own error paths log; the goroutine cannot surface further.
+			if runErr := loop.Run(loopCtx, inst); runErr != nil {
 				w.logger.Debug("voice wiring: talk loop ended", "ccid", f.CallID, "err", runErr)
 			}
+			// Own the cancel either way: a self-ended loop releases its
+			// context slot; a released loop was already cancelled.
+			loopCancel()
 			w.loopsMu.Lock()
 			delete(w.loops, f.CallID)
+			delete(w.loopCancels, f.CallID)
 			w.loopsMu.Unlock()
 		}()
 		w.logger.Info("voice wiring: talk loop armed", "ccid", f.CallID, "employee_id", inst.EmployeeID)
@@ -423,10 +621,14 @@ func (w *VoiceWiring) sessionFor(call voice.Instance) voice.SessionHandle {
 	return voice.SessionHandle{}
 }
 
-// loopContext returns the per-loop context. The daemon lifecycle context
-// cancels every talk loop at shutdown; a per-call cancel is unnecessary
-// because the loop ends itself via OnEnd.
+// loopContext returns the parent context for one call's talk loop: the
+// daemon lifecycle context cancels every loop at shutdown. The per-call
+// cancellation lives in loopCancels (armed in routeFrame, fired by
+// releaseCall — audit H4).
 func (w *VoiceWiring) loopContext(string) context.Context {
+	if w.stopCancel != nil && w.stopCtx != nil {
+		return w.stopCtx
+	}
 	return context.Background()
 }
 
@@ -434,18 +636,45 @@ func (w *VoiceWiring) loopContext(string) context.Context {
 // over (max duration, silence, child end). The manager owns idempotent
 // teardown; a plain hangup on a tracked id releases everything.
 func (w *VoiceWiring) managerHangup(ccid, reason string) {
-	if err := w.tel.HangupCall(context.Background(), ccid); err != nil {
-		// Best-effort carrier hangup; the manager already owns teardown
-		// state. A failed POST leaves the leg to Telnyx's own timeout.
-		w.logger.Debug("voice wiring: carrier hangup", "ccid", ccid, "err", err)
+	// The carrier POST is best-effort and phone-led only: a nil seam (the
+	// local-only boot with no telnyx key) skips it entirely - the manager
+	// already owns teardown state. Without the guard, a self-reaped LOCAL
+	// call (silence/max-call) whose talk loop fires managerHangup would
+	// nil-deref the phone seam.
+	if w.tel != nil {
+		if err := w.tel.HangupCall(context.Background(), ccid); err != nil {
+			// Best-effort carrier hangup; the manager already owns teardown
+			// state. A failed POST leaves the leg to Telnyx's own timeout.
+			w.logger.Debug("voice wiring: carrier hangup", "ccid", ccid, "err", err)
+		}
 	}
 	w.Manager.FailOutcome(ccid, voice.OutcomeHangup, reason)
+}
+
+// spliceHangup is the splice's HangupFn seam (backpressure grace exceeded).
+// It mirrors managerHangup (audit M4): the carrier POST kills the live
+// phone leg, then FailOutcome runs the once-per-outcome release fan-out.
+// The POST is best-effort — a failed call leaves the leg to Telnyx's own
+// timeout while the daemon-side teardown still completes.
+func (w *VoiceWiring) spliceHangup(ccid, reason string) {
+	w.logger.Info("voice wiring: splice hangup", "ccid", ccid, "reason", reason)
+	// The POST is best-effort and phone-led only; a nil seam (local-only
+	// boot, no telnyx key) skips the carrier POST while the daemon-side
+	// teardown still completes.
+	if w.tel != nil {
+		if err := w.tel.HangupCall(context.Background(), ccid); err != nil {
+			w.logger.Debug("voice wiring: splice carrier hangup", "ccid", ccid, "err", err)
+		}
+	}
+	w.Manager.FailOutcome(ccid, voice.OutcomeFailed, reason)
 }
 
 // releaseCall is the Manager release hook fan-out. Order matters for
 // observability, not correctness (each sink is once-guarded):
 //  1. childproc NoteCallEnd (idle timer accounting)
-//  2. talk-loop cancel (drops the pipeline for this call)
+//  2. talk-loop cancel (per-call ctx, audit H4 — the loop's Run select
+//     sees ctx.Done and exits promptly, cancelling its in-flight turn
+//     pipeline)
 //  3. registry Release (frees the C8 slot + target)
 //  4. binding OnCallEnd (leaf-12 ReleaseHook: call row + goal hold)
 func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
@@ -453,18 +682,25 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 
 	w.loopsMu.Lock()
 	loop := w.loops[ccid]
+	cancel := w.loopCancels[ccid]
 	delete(w.loops, ccid)
+	delete(w.loopCancels, ccid)
 	w.loopsMu.Unlock()
 	if loop == nil {
 		// The loop's frames channel is not closed here (close would race
-		// a concurrent routeFrame send); the drop from the map is what
-		// stops delivery, and the loop's ctx (daemon lifecycle) or its
-		// own end path reaps it. Prompt frames after release are dropped
-		// by the router's unknown-call branch. A live loop object left
-		// here is intentionally NOT referenced further: canceling it is
-		// the talk-loop cancel sink's job (see below).
+		// a concurrent routeFrame send); the drop from the map stops
+		// delivery, and the loop's own end path reaps it. Prompt frames
+		// after release are dropped by the router's unknown-call branch.
 	} else {
 		w.logger.Debug("voice wiring: talk loop dropped from map on release", "ccid", ccid)
+	}
+	// H4: cancel the per-call context AFTER the map drop. The loop's
+	// deferred cleanup re-runs cancel (idempotent) when Run returns; a
+	// cancel racing loop setup is impossible — releaseCall only sees a
+	// ccid after the manager tracks the call, and the loop arms its ctx
+	// at the setup frame, which strictly precedes any terminal event.
+	if cancel != nil {
+		cancel()
 	}
 
 	w.Registry.Release(ccid)
@@ -511,6 +747,48 @@ type CallEndedEvent struct {
 // topic; ended carries the terminal outcome here).
 var TopicVoiceCallEnded = bus.NewTopic[CallEndedEvent]("voice.call.ended")
 
+// sendOpenFrame sends the C1 open frame (local-leg plan CL1) for ccid.
+// The leg comes from the registry instance (leaf 06); provider selection
+// follows CL4 precedence (local-leg config falls back to global, empty
+// stays empty). The child-native codec (L16@16k, the C2 chunk format) is
+// always the open frame codec - the NEGOTIATED wire codec belongs to the
+// splice, not to the child.
+func (w *VoiceWiring) sendOpenFrame(ccid string) error {
+	f := voice.Frame{
+		CallID:     ccid,
+		Event:      voice.EventOpen,
+		Codec:      telnyx.DefaultCodec.BidirectionalCodec,
+		SampleRate: telnyx.DefaultCodec.SamplingRate,
+		Direction:  "inbound",
+		From:       w.cfg.FromNumber,
+	}
+	if w.Manager != nil && w.Manager.IsOutbound(ccid) {
+		f.Direction = "outbound"
+	}
+	for _, inst := range w.Registry.Live() {
+		if inst.CallControlID != ccid {
+			continue
+		}
+		f.To = inst.Target
+		// CL4 resolver: per-call employee defaults (voice.employee_leg)
+		// over per-leg config over provider default. The registry leg is
+		// authoritative for THIS call (acquire pinned it; ResolveLeg is
+		// for acquire-time, not send-time).
+		p := voice.ResolveProfile(w.cfg, inst.EmployeeID, "", inst.Leg)
+		f.SttVendor = p.SttVendor
+		f.SttModel = p.SttModel
+		f.TtsVendor = p.TtsVendor
+		f.TtsModel = p.TtsModel
+		f.TtsVoice = p.TtsVoice
+		if inst.Leg == voice.LegLocal {
+			f.Local = true
+			f.BargeInRms = w.cfg.Local.BargeInRms
+		}
+		break
+	}
+	return w.TextServer.Send(f)
+}
+
 // spliceRunner builds the leaf-10 SpliceRunner closure: RunSplice for this
 // call with a per-call AudioPair under the manager's per-call context.
 func (w *VoiceWiring) spliceRunner() func(context.Context, string, commhttp.WebSocketConn, commhttp.StartFrame) error {
@@ -523,19 +801,63 @@ func (w *VoiceWiring) spliceRunner() func(context.Context, string, commhttp.WebS
 		}
 		defer audio.Close()
 
-		// SpliceConfig codec is the INLINE mirror of telnyx.Codec (leaf 06
-		// shape-parity note); keep the field order aligned.
+		// bughunt voice-sidecar local leg (CL1): open the call on the child
+		// BEFORE splicing. The child creates its pipeline, dials the C2 pair
+		// this runner splices, and answers with the setup frame routeFrame
+		// arms the talk loop on. Without this frame the child never builds a
+		// pipeline, so no setup ever arrives, so no loop arms - the omission
+		// that kept every production call on stub audio. Failure is warn-and-
+		// continue (degrade, not fail - mirrors the supervisor philosophy): a
+		// call must not die because an optional arm frame failed to send.
+		if err := w.sendOpenFrame(ccid); err != nil {
+			w.logger.Warn("voice wiring: open frame send failed", "ccid", ccid, "error", err)
+		}
+
+		// Codec is the child-native config (legacy wiring field, default
+		// L16@16k). CodecWire (audit H2) is the NEGOTIATED wire codec
+		// from the media start frame: the splice transcodes wire <-> child
+		// through it (PCMU negotiated => mulaw both directions) while the
+		// child's C2 chunks stay L16 s16le@16k. Empty (no encoding in the
+		// start frame) falls back to Codec.
 		var cfg voice.SpliceConfig
 		cfg.Codec.BidirectionalCodec = telnyx.DefaultCodec.BidirectionalCodec
 		cfg.Codec.SamplingRate = telnyx.DefaultCodec.SamplingRate
+		if start.Encoding != "" {
+			cfg.CodecWire.BidirectionalCodec = start.Encoding
+			cfg.CodecWire.SamplingRate = start.SampleRate
+			// bughunt 2026-11-07 voice F-3: the echoed sample rate must
+			// MATCH what the transcode path assumes, or the splice
+			// silently mis-resamples. The path is codec-selected ONLY:
+			// L16 passes bytes through and everything downstream
+			// (640-byte "20 ms" chunks, silence fill, pacing) assumes
+			// 16 kHz; PCMU is 8 kHz with explicit up/downsample. An
+			// L16@8000 negotiation would play at double speed with
+			// half-length chunks; a PCMU@16000 would double-decode.
+			// Refuse the mismatched media leg instead of shipping
+			// corrupted audio (the SpliceRunner error ends the call
+			// path; the caller hears the carrier's failure, not noise).
+			switch start.Encoding {
+			case "L16":
+				if start.SampleRate != 0 && start.SampleRate != 16000 {
+					err := fmt.Errorf("voice wiring: negotiated wire codec %s@%d is unsupported (L16 must be 16000)", start.Encoding, start.SampleRate)
+					w.logger.Error("voice wiring: wire rate mismatch", "ccid", ccid, "error", err)
+					return err // deferred audio.Close() tears the pair down
+				}
+			case "PCMU":
+				if start.SampleRate != 0 && start.SampleRate != 8000 {
+					err := fmt.Errorf("voice wiring: negotiated wire codec %s@%d is unsupported (PCMU must be 8000)", start.Encoding, start.SampleRate)
+					w.logger.Error("voice wiring: wire rate mismatch", "ccid", ccid, "error", err)
+					return err // deferred audio.Close() tears the pair down
+				}
+			}
+		}
 
 		return voice.RunSplice(ctx, ccid, cfg, voice.SpliceDeps{
 			TelnyxWS: conn,
 			Audio:    audio,
 			Text:     rawFrameSender{srv: w.TextServer},
 			HangupFn: func(hangupCcid, reason string) {
-				w.logger.Info("voice wiring: splice hangup", "ccid", hangupCcid, "reason", reason)
-				w.Manager.FailOutcome(hangupCcid, voice.OutcomeFailed, reason)
+				w.spliceHangup(hangupCcid, reason)
 			},
 			CancelDraftFn: func(cancelCcid string) {
 				w.loopsMu.Lock()
@@ -584,6 +906,13 @@ func (w *VoiceWiring) Start(ctx context.Context, registerTool func(dial builtin.
 		time.Sleep(5 * time.Millisecond)
 	}
 	w.logger.Info("voice wiring: text server armed")
+	// Plain-HTTP loopback listener (voice.loopback_plain_addr, leaf 10 T6;
+	// audit HIGH: previously a dead knob with no production caller). Rides
+	// w.stopCtx so VoiceWiring.Stop's cancel shuts it down with the rest of
+	// the subsystem. A refused address fails the boot loudly.
+	if err := w.startPlainListener(w.stopCtx); err != nil {
+		return err
+	}
 	if registerTool != nil {
 		registerTool(w.dialForTool(), w.agentIDForTool())
 	}
@@ -593,6 +922,12 @@ func (w *VoiceWiring) Start(ctx context.Context, registerTool func(dial builtin.
 // dialForTool adapts the dialer onto the voice_call tool seam.
 func (w *VoiceWiring) dialForTool() builtin.DialerFunc {
 	return func(ctx context.Context, employeeID, target, requestID string) (string, error) {
+		// Phone leg disabled (local-only boot, no telnyx key): the dialer
+		// is nil, so an outbound phone dial refuses cleanly instead of a
+		// nil-deref panic.
+		if w.Dialer == nil {
+			return "", fmt.Errorf("voice: phone leg disabled (no telnyx_api_key); outbound dial refused")
+		}
 		res, err := w.Dialer.Dial(ctx, voice.DialRequest{
 			EmployeeID: employeeID,
 			Target:     target,
@@ -632,11 +967,14 @@ func (w *VoiceWiring) Stop(ctx context.Context) {
 	w.logger.Info("voice wiring: stopped")
 }
 
-// voiceSupervisorChatter resolves the C6 gate's fast-model seam: the
-// classifier client (voice.supervisor_model resolves through the
-// classifier/small-model chain per config default), falling back to the
-// main LLM client. nil when neither exists (the gate then runs disabled -
-// NewSupervisor logs it once).
+// voiceSupervisorChatter resolves the C6 gate's fast-model seam for the
+// components.go call site (audit M1). voice.supervisor_model is honored in
+// WireVoice itself (via deps.SupervisorChatterClient, the
+// createAuxiliaryLLMClientWithResolver resolution path shared with the
+// classifier chain); when the model ref is empty, unresolvable, or no
+// factory was injected, this returns the classifier client — else the main
+// LLM client — as the legacy fallback. nil when neither exists (the gate
+// then runs disabled - NewSupervisor logs it once).
 func voiceSupervisorChatter(c *Components) voice.SupervisorChatter {
 	if c == nil {
 		return nil

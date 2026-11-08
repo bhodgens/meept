@@ -65,7 +65,9 @@ func OpenStore(dbPath string, logger *slog.Logger) (*Store, error) {
 			return nil, fmt.Errorf("audit log: create dir: %w", err)
 		}
 	}
-	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000"
+	// DSN uses the modernc _pragma= form: mattn-style keys are silently
+	// ignored by the pure-Go driver (bughunt 2026-11-07 infra-fixes class).
+	dsn := dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("audit log: open db: %w", err)

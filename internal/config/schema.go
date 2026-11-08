@@ -122,6 +122,7 @@ type Config struct {
 	Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 	GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	Intake              IntakeConfig              `json:"intake"               toml:"intake"`
+	Slack               SlackConfig               `json:"slack"                toml:"slack"`
 }
 
 // GitHubConfig configures the GitHub PR/CI tool set ([github]). Disabled by
@@ -195,6 +196,65 @@ func (c IntakeConfig) ValidateEnabled() error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("intake.enabled requires intake.%s to be set", strings.Join(missing, " and intake."))
+	}
+	return nil
+}
+
+// SlackConfig configures the HITL Slack approval channel ([comm.slack],
+// json key "slack"): a services.PushChannel that publishes pending ACP
+// permission requests as interactive Slack messages and resolves approver
+// button clicks through the ACP human permission relay. Opt-in — disabled
+// by default; when disabled nothing registers, no route is served, and no
+// goroutine runs. Mirrors slack.SlackConfig (internal/comm/slack); config
+// does not import the channel package and the daemon maps the fields in
+// internal/daemon/slack_wiring.go, per the ResolverConfig convention.
+// BotToken and SigningSecret support the ${VAR} env indirection the JSON5
+// loader applies (ExpandEnvVars) before decoding; the values themselves
+// are never logged.
+//
+//gendoc:section slack
+//gendoc:desc HITL Slack approval channel: post pending ACP permission requests to a fixed channel and resolve approver clicks via the permission relay (opt-in; disabled by default).
+//gendoc:example [slack] enabled = true, bot_token = "${SLACK_BOT_TOKEN}", signing_secret = "${SLACK_SIGNING_SECRET}", channel_id = "C0123456789"
+type SlackConfig struct {
+	// Enabled turns the channel on (default: false, opt-in).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// BotToken is the Slack bot token (xoxb-...), chat:write scope.
+	// Env indirection (${VAR}) only — never plaintext in logs.
+	BotToken string `json:"bot_token" toml:"bot_token"`
+	// SigningSecret is the Slack app signing secret used to verify the
+	// v0 HMAC signature on interaction callbacks.
+	SigningSecret string `json:"signing_secret" toml:"signing_secret"`
+	// ChannelID is the fixed Slack channel the approval cards post to.
+	ChannelID string `json:"channel_id" toml:"channel_id"`
+	// AllowedUserIDs are the Slack user IDs allowed to answer approval
+	// requests. Empty allows NOBODY (fail closed) — unlike the Telegram
+	// precedent where empty means all.
+	AllowedUserIDs []string `json:"allowed_user_ids" toml:"allowed_user_ids"`
+	// APIBaseURL overrides the Slack Web API base (default
+	// https://slack.com/api); tests point it at a local server.
+	// Never logged.
+	APIBaseURL string `json:"api_base_url" toml:"api_base_url"`
+}
+
+// ValidateEnabled checks the REQUIRED-when-enabled fields of the Slack
+// block: bot_token, signing_secret, and channel_id must all be set when
+// Enabled=true; no-op when disabled.
+func (c SlackConfig) ValidateEnabled() error {
+	if !c.Enabled {
+		return nil
+	}
+	var missing []string
+	if strings.TrimSpace(c.BotToken) == "" {
+		missing = append(missing, "bot_token")
+	}
+	if strings.TrimSpace(c.SigningSecret) == "" {
+		missing = append(missing, "signing_secret")
+	}
+	if strings.TrimSpace(c.ChannelID) == "" {
+		missing = append(missing, "channel_id")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("slack.enabled requires slack.%s to be set", strings.Join(missing, " and slack."))
 	}
 	return nil
 }
@@ -3315,6 +3375,35 @@ type SkillsConfig struct {
 	Evolver               SkillsEvolverConfig `json:"evolver"                 toml:"evolver"`                // Closed-loop skill evolution settings
 	Wiki                  SkillsWikiConfig    `json:"wiki"                    toml:"wiki"`                   // Wiki knowledge store (raw/consolidated evidence base)
 	State                 SkillsStateConfig   `json:"state"                   toml:"state"`                  // SKILL.state execution mode settings
+	Ranking               SkillsRankingConfig `json:"ranking"                 toml:"ranking"`                // Embedding-rank ordering of the model-facing skill listing (branch 04 leaf 02; opt-in, default OFF)
+}
+
+// SkillsRankingConfig configures embedding-rank ordering of the no-cap
+// skill listing (token-efficiency branch 04, leaf 02; Q4 user ruling:
+// always rank, never hide/cap). When Enabled and a reachable
+// OpenAI-compatible embeddings endpoint is configured, the "## Active
+// Skills" listing is ordered by cosine similarity between the episode's
+// task text and each skill's name+description embedding, computed ONCE per
+// episode (cache-stable). Ranking is order-only: every visible skill is
+// still listed. Disabled (the default), a missing/unreachable endpoint, or
+// any embedding failure leaves the listing alphabetical — byte-identical to
+// the leaf-01 shipped behavior.
+type SkillsRankingConfig struct {
+	// Enabled turns on embedding-rank ordering. Default false (opt-in
+	// defaults invariant, docs/agents/opt-in-defaults.md).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// BaseURL is the OpenAI-compatible embeddings root, e.g.
+	// "http://127.0.0.1:8090/v1" (scripts/embed_server.py serves the
+	// Qwen3-Embedding weights in that shape). Required when Enabled;
+	// empty with Enabled=true disables ranking at wiring time (warn).
+	BaseURL string `json:"base_url" toml:"base_url"`
+	// Model is the model id sent in the embeddings request (e.g.
+	// "qwen3-emb"). Empty is sent through as-is; the local embed server
+	// ignores it.
+	Model string `json:"model" toml:"model"`
+	// TimeoutSeconds bounds each embeddings call. 0 uses the built-in
+	// default (2s). The embedder must never stall an episode build.
+	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
 }
 
 // SkillsWikiConfig configures the wiki knowledge store (arXiv:2608.27454).
@@ -4332,8 +4421,10 @@ func DefaultConfig() *Config {
 			RedactOutput:                true,
 			ScanShellCommands:           true,
 			TirithBinary:                "tirith",
-			EnableAuditLog:              false,
-			AuditDBPath:                 "~/.meept/audit.db",
+			// Audit capture default-ON (user decision 2026-11-06, closing
+			// bughunt 2026-11-06 security F-2).
+			EnableAuditLog: true,
+			AuditDBPath:    "~/.meept/audit.db",
 			SSRF: SSRFConfig{
 				Enabled:      true,
 				MaxRedirects: 5,
@@ -4839,6 +4930,8 @@ func DefaultConfig() *Config {
 			SilencePromptSeconds: 45,
 			ReorderWindowFrames:  10,
 			ReorderGapMs:         60,
+			DefaultLeg:           "phone",
+			Local:                LocalConfig{Enabled: false, BargeInRms: 3000},
 		},
 		ReflectionCollector: ReflectionCollectorConfig{
 			Enabled:              true,
@@ -4870,6 +4963,16 @@ func DefaultConfig() *Config {
 			DoneLabel:       "factory:done",
 			GateCommand:     "",
 			ProjectNumber:   0,
+		},
+		// HITL Slack approval channel (opt-in, disabled by default; T4).
+		// APIBaseURL mirrors slack.DefaultAPIBaseURL (internal/comm/slack).
+		Slack: SlackConfig{
+			Enabled:        false,
+			BotToken:       "",
+			SigningSecret:  "",
+			ChannelID:      "",
+			AllowedUserIDs: nil,
+			APIBaseURL:     "https://slack.com/api",
 		},
 	}
 }
@@ -5130,31 +5233,67 @@ type TTSConfig struct {
 }
 
 type VoiceConfig struct {
-	Enabled              bool     `json:"enabled"                toml:"enabled"`
-	IdleStopSeconds      int      `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
-	OnnxRuntimeLib       string   `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
-	STTProvider          string   `json:"stt_provider"           toml:"stt_provider"`
-	TTSProvider          string   `json:"tts_provider"           toml:"tts_provider"`
-	Filler               []string `json:"filler"                 toml:"filler"`
-	SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
-	SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
-	SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
-	SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
-	VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
-	PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
-	ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
-	FromNumber           string   `json:"from_number"            toml:"from_number"`
-	AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
-	TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
-	MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
-	SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
-	MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
-	LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
+	Enabled              bool                `json:"enabled"                toml:"enabled"`
+	IdleStopSeconds      int                 `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	OnnxRuntimeLib       string              `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	STTProvider          string              `json:"stt_provider"           toml:"stt_provider"`
+	TTSProvider          string              `json:"tts_provider"           toml:"tts_provider"`
+	Filler               []string            `json:"filler"                 toml:"filler"`
+	SupervisorEmployee   string              `json:"supervisor_employee"    toml:"supervisor_employee"`
+	SupervisorEnabled    bool                `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	SupervisorModel      string              `json:"supervisor_model"       toml:"supervisor_model"`
+	SupervisorTimeoutMs  int                 `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	VoiceModel           string              `json:"voice_model"            toml:"voice_model"`
+	PublicStreamURL      string              `json:"public_stream_url"      toml:"public_stream_url"`
+	ConnectionID         string              `json:"connection_id"          toml:"connection_id"`
+	FromNumber           string              `json:"from_number"            toml:"from_number"`
+	AllowedNumbers       []string            `json:"allowed_numbers"        toml:"allowed_numbers"`
+	TimeoutSecs          int                 `json:"timeout_secs"           toml:"timeout_secs"`
+	MaxCallMinutes       int                 `json:"max_call_minutes"       toml:"max_call_minutes"`
+	SilencePromptSeconds int                 `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	MaxConcurrentCalls   int                 `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	ReorderWindowFrames  int                 `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs         int                 `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	TelnyxPublicKey      string              `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	ChildBinaryPath      string              `json:"child_binary_path"      toml:"child_binary_path"`
+	LoopbackPlainAddr    string              `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	DefaultEmployee      string              `json:"default_employee"       toml:"default_employee"`
+	DefaultLeg           string              `json:"default_leg"            toml:"default_leg"`
+	TTSModel             string              `json:"tts_model"              toml:"tts_model"`
+	TTSVoice             string              `json:"tts_voice"              toml:"tts_voice"`
+	STTModel             string              `json:"stt_model"              toml:"stt_model"`
+	TTSBaseURL           string              `json:"tts_base_url"           toml:"tts_base_url"`
+STTBaseURL           string              `json:"stt_base_url"           toml:"stt_base_url"`
+	Local                LocalConfig         `json:"local"                  toml:"local"`
+	EmployeeLeg          []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
+}
+
+// EmployeeLegConfig is one per-agent voice routing default (voice tree
+// CL4, OQ4 shape): employee_leg entries in the [voice] block pin an
+// employee's default leg and TTS voice/model. Routing config lives here,
+// NOT in the employee constitution (constitution is goal-scope,
+// user-authored text; routing changes must not require re-registration).
+// Empty Leg/TTSVoice/TTSModel fall through to per-leg config.
+type EmployeeLegConfig struct {
+	Employee string `json:"employee"   toml:"employee"`
+	Leg      string `json:"leg"        toml:"leg"`
+	TTSVoice string `json:"tts_voice"  toml:"tts_voice"`
+	TTSModel string `json:"tts_model"  toml:"tts_model"`
+}
+
+// LocalConfig holds the local voice leg sub-block (voice.local, local-leg
+// plan CL4). The local leg is opt-in: Enabled must be true before any local
+// session opens. Empty provider/model/voice fields fall back to the global
+// voice.* values at selection time; BargeInRms 3000 comes from
+// DefaultConfig.
+type LocalConfig struct {
+	Enabled     bool   `json:"enabled"      toml:"enabled"`
+	STTProvider string `json:"stt_provider" toml:"stt_provider"`
+	TTSProvider string `json:"tts_provider" toml:"tts_provider"`
+	TTSModel    string `json:"tts_model"    toml:"tts_model"`
+	TTSVoice    string `json:"tts_voice"    toml:"tts_voice"`
+	BargeInRms  int    `json:"barge_in_rms" toml:"barge_in_rms"`
+	Name        string `json:"name"         toml:"name"`
 }
 
 // PiperTTSConfig holds Piper TTS engine settings.

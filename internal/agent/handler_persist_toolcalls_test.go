@@ -217,13 +217,17 @@ func TestSessionSQLiteStoreToolCallRoundtrip(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	if _, err := store.Create("sess-roundtrip"); err != nil {
+	sess, err := store.Create("sess-roundtrip")
+	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-
+	// bughunt 2026-11-07 agent-fixes follow-up: rows key on sessions.ID
+	// (the generated id), not the display name — the FK constraint now
+	// actually binds (modernc _pragma form), so the old literal
+	// "sess-roundtrip" insert would be an orphan.
 	msgs := []session.Message{
-		{SessionID: "sess-roundtrip", Role: "user", Content: "run it"},
-		{SessionID: "sess-roundtrip", Role: "assistant", Content: "done"},
+		{SessionID: sess.ID, Role: "user", Content: "run it"},
+		{SessionID: sess.ID, Role: "assistant", Content: "done"},
 	}
 	toolCalls := map[int][]session.ToolCall{
 		1: {
@@ -231,12 +235,12 @@ func TestSessionSQLiteStoreToolCallRoundtrip(t *testing.T) {
 			{ToolName: "shell", ToolCallID: "rt-2", Arguments: `{"command":"rm -rf x"}`, Seq: 1},
 		},
 	}
-	if err := store.SaveMessagesWithToolCalls("sess-roundtrip", msgs, toolCalls); err != nil {
+	if err := store.SaveMessagesWithToolCalls(sess.ID, msgs, toolCalls); err != nil {
 		t.Fatalf("SaveMessagesWithToolCalls: %v", err)
 	}
 
 	// Read back through the message IDs the store assigned.
-	saved, err := store.GetMessages("sess-roundtrip", 0, 10)
+	saved, err := store.GetMessages(sess.ID, 0, 10)
 	if err != nil {
 		t.Fatalf("GetMessages: %v", err)
 	}

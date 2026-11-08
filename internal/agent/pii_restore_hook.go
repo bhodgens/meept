@@ -87,13 +87,15 @@ func (h *PiiRestoreHook) RestoreOutput(text, sessionID string) string {
 	secretCount := 0
 	if h.cfg.SecretRestore && h.obfuscator != nil {
 		// Session-scoped restore (wiring-gap leaf 07 T2): placeholders
-		// minted in OTHER sessions never resolve here. A scoped restore
-		// that made no progress falls back to the legacy sessionless lane
-		// so placeholders minted before this deploy (untagged) still
-		// restore within this process.
+		// minted in OTHER sessions never resolve here. The fallback lane
+		// resolves ONLY untagged (pre-deploy) placeholders — a scoped
+		// restore that made no progress must not re-open the cross-session
+		// leak the scoped lane exists to refuse (bughunt 2026-11-06
+		// security F-3; the old full-Deobfuscate fallback fired exactly
+		// when text carried another session's tagged placeholder).
 		deobfuscated := h.obfuscator.RestoreOutput(restored, sessionID)
-		if sessionID == "" || deobfuscated == restored {
-			deobfuscated = h.obfuscator.Deobfuscate(restored)
+		if untagged := h.obfuscator.DeobfuscateUntagged(deobfuscated); untagged != deobfuscated {
+			deobfuscated = untagged
 		}
 		if deobfuscated != restored {
 			// Count one event, never the values: the obfuscator's

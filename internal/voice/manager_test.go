@@ -57,6 +57,12 @@ func (f *fakeController) countStreams() int {
 	return f.streams
 }
 
+func (f *fakeController) countHangups() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.hangups
+}
+
 // noopSpawn never spawns a live session.
 func noopSpawn(_ context.Context, _ telnyx.CallEvent) (context.CancelFunc, error) {
 	return func() {}, nil
@@ -260,6 +266,175 @@ func TestManagerFailReleases(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("release hook not fired after Fail")
+	}
+}
+
+// TestManagerAnsweredHookFires pins audit 2026-11-06 H1: SetAnsweredHook
+// wires the call.answered notification - the hook fires for a tracked
+// OUTBOUND answered event (the no-answer-timer cancel rides it) and for a
+// tracked inbound one, but never for an untracked id (refused before the
+// hook) and not when no hook is set.
+func TestManagerAnsweredHookFires(t *testing.T) {
+	tel := &fakeController{}
+	m := newTestManager(t, tel)
+
+	hooked := make(chan string, 4)
+	m.SetAnsweredHook(func(ccid string) { hooked <- ccid })
+
+	// Tracked outbound: hook must fire.
+	if err := m.TrackOutbound("cc-answ-out"); err != nil {
+		t.Fatalf("TrackOutbound: %v", err)
+	}
+	if err := m.HandleCallEvent(t.Context(), telnyx.CallEvent{
+		EventType: "call.answered", CallControlID: "cc-answ-out", Direction: "outgoing",
+	}); err != nil {
+		t.Fatalf("HandleCallEvent(outbound answered): %v", err)
+	}
+	select {
+	case got := <-hooked:
+		if got != "cc-answ-out" {
+			t.Errorf("answered hook ccid = %q, want cc-answ-out", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("answered hook not fired for tracked outbound call.answered (H1: unwired notification)")
+	}
+
+	// Tracked inbound: hook must fire too.
+	if err := m.HandleCallEvent(t.Context(), inboundInitiated("cc-answ-in")); err != nil {
+		t.Fatalf("HandleCallEvent(initiated): %v", err)
+	}
+	if err := m.HandleCallEvent(t.Context(), telnyx.CallEvent{
+		EventType: "call.answered", CallControlID: "cc-answ-in", Direction: "incoming",
+	}); err != nil {
+		t.Fatalf("HandleCallEvent(inbound answered): %v", err)
+	}
+	select {
+	case got := <-hooked:
+		if got != "cc-answ-in" {
+			t.Errorf("answered hook ccid = %q, want cc-answ-in", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("answered hook not fired for tracked inbound call.answered")
+	}
+
+	// Untracked id: refused, hook NOT invoked (channel stays empty).
+	if err := m.HandleCallEvent(t.Context(), telnyx.CallEvent{
+		EventType: "call.answered", CallControlID: "cc-answ-unknown", Direction: "incoming",
+	}); err == nil {
+		t.Fatalf("answered for untracked ccid accepted, want refusal error")
+	}
+	select {
+	case got := <-hooked:
+		t.Errorf("answered hook fired for untracked id %q, want no invocation", got)
+	default:
+	}
+}
+
+// failingSpawn simulates the wiring-side spawn seam erroring (child down,
+// registry lost a race). Audit 2026-11-06 H3: the caller must not be
+// stranded - the manager hangs the leg up and fires the release fan-out.
+func failingSpawn(_ context.Context, _ telnyx.CallEvent) (context.CancelFunc, error) {
+	return nil, errors.New("voice child unavailable")
+}
+
+// TestManagerSpawnFailureHangsUpCaller pins H3: on a spawn failure after
+// AnswerCall, HandleCallEvent (a) issues the carrier HangupCall for the leg,
+// (b) fires the release hook exactly once with OutcomeFailed (registry slot
+// / goal / effects release), and (c) surfaces the spawn error to the webhook
+// path. A later hangup for the already-released id stays nil (idempotent).
+func TestManagerSpawnFailureHangsUpCaller(t *testing.T) {
+	tel := &fakeController{}
+	m := NewManager(ManagerConfig{
+		StreamURL: "wss://tunnel.example/media",
+		Codec:     telnyx.Codec{BidirectionalCodec: "L16", SamplingRate: 16000},
+	}, tel, failingSpawn)
+
+	released := make(chan Outcome, 1)
+	m.SetReleaseHook(func(ccid string, outcome Outcome) { released <- outcome })
+
+	err := m.HandleCallEvent(t.Context(), inboundInitiated("cc-spawn-1"))
+	if err == nil {
+		t.Fatalf("spawn failure swallowed, want surfaced error")
+	}
+	if got := tel.countHangups(); got != 1 {
+		t.Errorf("HangupCall count after spawn failure = %d, want 1 (caller must not be stranded ringing)", got)
+	}
+	select {
+	case o := <-released:
+		if o != OutcomeFailed {
+			t.Errorf("spawn-failure release outcome = %q, want %q", o, OutcomeFailed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("release hook not fired after spawn failure (state would leak)")
+	}
+	// The terminal event already ran: a late hangup is a no-op, no second release.
+	if err := m.HandleCallEvent(t.Context(), telnyx.CallEvent{
+		EventType: "call.hangup", CallControlID: "cc-spawn-1",
+	}); err != nil {
+		t.Errorf("late hangup after spawn-failure teardown = %v, want nil", err)
+	}
+	select {
+	case o := <-released:
+		t.Errorf("release hook fired twice (%v), want exactly once", o)
+	default:
+	}
+	if got := tel.countHangups(); got != 1 {
+		t.Errorf("HangupCall count after late hangup = %d, want still 1 (spawn-failure path owns teardown)", got)
+	}
+}
+
+// TestManagerSpawnFailureHangupErrorStillReleases pins the degraded branch
+// of H3: when the carrier hangup ALSO fails, the release fan-out still fires
+// exactly once and the surfaced error names both failures.
+func TestManagerSpawnFailureHangupErrorStillReleases(t *testing.T) {
+	tel := &fakeController{}
+	m := NewManager(ManagerConfig{
+		StreamURL: "wss://tunnel.example/media",
+		Codec:     telnyx.Codec{BidirectionalCodec: "L16", SamplingRate: 16000},
+	}, tel, failingSpawn)
+
+	released := make(chan Outcome, 2)
+	m.SetReleaseHook(func(ccid string, outcome Outcome) { released <- outcome })
+
+	if err := m.HandleCallEvent(t.Context(), inboundInitiated("cc-spawn-2")); err == nil {
+		t.Fatalf("spawn failure swallowed, want surfaced error")
+	}
+	select {
+	case o := <-released:
+		if o != OutcomeFailed {
+			t.Errorf("release outcome = %q, want %q", o, OutcomeFailed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("release hook not fired even when the carrier hangup failed")
+	}
+}
+
+// TestManagerWaitCallNotRetainedAfterTeardown pins audit 2026-11-06 M3: the
+// done channel is NOT retained after release, so a WaitCall issued AFTER
+// teardown yields a fresh never-closing channel (the original holder keeps
+// its closed channel; a late re-resolver does not).
+func TestManagerWaitCallNotRetainedAfterTeardown(t *testing.T) {
+	m := newTestManager(t, &fakeController{})
+	if err := m.HandleCallEvent(t.Context(), inboundInitiated("cc-wait-2")); err != nil {
+		t.Fatalf("HandleCallEvent(initiated): %v", err)
+	}
+	done := m.WaitCall("cc-wait-2")
+	if err := m.HandleCallEvent(t.Context(), telnyx.CallEvent{
+		EventType: "call.hangup", CallControlID: "cc-wait-2",
+	}); err != nil {
+		t.Fatalf("HandleCallEvent(hangup): %v", err)
+	}
+	select {
+	case <-done:
+		// the original channel closed: fine
+	case <-time.After(2 * time.Second):
+		t.Fatalf("original WaitCall channel never closed")
+	}
+	// Post-teardown re-resolution: fresh channel that never closes.
+	select {
+	case <-m.WaitCall("cc-wait-2"):
+		t.Errorf("post-teardown WaitCall channel closed, want a fresh never-closing channel (M3: no retention)")
+	case <-time.After(150 * time.Millisecond):
 	}
 }
 

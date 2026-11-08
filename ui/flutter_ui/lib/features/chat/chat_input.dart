@@ -1608,6 +1608,19 @@ class _ChatInputState extends ConsumerState<ChatInput>
         _history.add(widget.sessionId, text);
         _openPrompts();
         return true;
+      case '/intake':
+        // TUI parity (issue #109): the TUI's /intake prints the
+        // intake.status report; the GUI twin opens the routed view
+        // (core/router.dart /intake), same push-not-replace posture as
+        // the /activity route.
+        _history.add(widget.sessionId, text);
+        unawaited(
+          Future<void>(() async {
+            await Future<void>.delayed(Duration.zero);
+            router.push('/intake');
+          }),
+        );
+        return true;
       case '/session':
         _history.add(widget.sessionId, text);
         _showSessionInfo();

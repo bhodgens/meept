@@ -482,6 +482,18 @@ func (r *SkillStateRuntime) Run(ctx context.Context, skill *skills.Skill, input,
 		return "", errors.New("state runtime: no tool runner injected")
 	}
 
+	// bughunt 2026-11-07 agent-fixes F-C: the state lane's tool calls never
+	// passed through reasoningCycle's WithExposurePlan, so a known-but-
+	// inactive tool was un-gated here. Arm the conversation's episode plan
+	// onto the runtime ctx (nil when the dynamic flag is off — byte-
+	// identical legacy). ExecuteSkillToolCalls fans this ctx into the
+	// executor, where the §6 row-4 gate reads it.
+	if r.loop != nil {
+		if plan := r.loop.ensureExposurePlan(conversationID); plan != nil {
+			ctx = WithExposurePlan(ctx, plan)
+		}
+	}
+
 	maxIters := r.cfg.MaxIterations
 	if skill.MaxIterations > 0 && skill.MaxIterations < maxIters {
 		maxIters = skill.MaxIterations

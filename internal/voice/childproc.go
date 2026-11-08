@@ -115,6 +115,17 @@ type ChildProcConfig struct {
 	// considered ready once the process is up and the caller observes the
 	// connection through the TextServer itself.
 	Handshake func(ctx context.Context) error
+	// TokenAuth arms the per-spawn start-token gate on the text
+	// transport: when non-nil, spawn() calls TokenAuth.SetExpectedToken
+	// (token) BEFORE the child process starts, so the connecting child
+	// must prove the STDIN token on its first socket line before it is
+	// claimed (bughunt 2026-11-07 voice). nil = no enforcement: the
+	// legacy first-dial-wins accept stays byte-identically for unit
+	// fixtures and hand-built dialers. Production wiring opts in
+	// (TokenAuth: textServer); the arm persists after the child stops,
+	// so a stale dialer can never impersonate the previous spawn's token
+	// window - the next spawn re-arms a fresh one.
+	TokenAuth *TextServer
 	// Live is the C8 live-call guard for the idle timer. Nil = single-call
 	// assumption (see LiveCount).
 	Live LiveCount
@@ -324,6 +335,14 @@ func (p *ChildProc) spawn(ctx context.Context) error {
 	token, err := newStartToken()
 	if err != nil {
 		return fmt.Errorf("voice child: start token: %w", err)
+	}
+	// Arm the text-transport token gate BEFORE the process exists, so no
+	// dial can ever be claimed without proving this token (fail-closed:
+	// the arm persists even if the spawn below fails; the next spawn
+	// re-arms a fresh token). Only set when the wiring opted in
+	// (TokenAuth); nil keeps the legacy first-dial-wins accept.
+	if p.cfg.TokenAuth != nil {
+		p.cfg.TokenAuth.SetExpectedToken(token)
 	}
 	stdinR, stdinW, err := os.Pipe()
 	if err != nil {

@@ -611,7 +611,7 @@
     "block_financial": true,
     "allowed_paths": ["~/*"],
     "blocked_paths": ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"],
-    "enable_audit_log": false,
+    "enable_audit_log": true,   // Security audit capture — default-ON (decision 2026-11-06); set false to opt out
     "audit_db_path": "~/.meept/audit.db",
     "strict_override_matching": false,  // Use lenient three-strategy cascade for permission overrides
 
@@ -846,6 +846,18 @@
     "search_paths": [],
     "auto_reload": false,
     "max_cached_skills": 50,
+    // drift: commented template block; absent from installed homes by
+    // design (ranking.enabled defaults false = alphabetical listing).
+    // Uncomment to order the model-facing skill listing by embedding
+    // similarity to the episode's task text (branch 04 leaf 02; Q4:
+    // always rank, never hide). Needs a running OpenAI-compatible
+    // /v1/embeddings endpoint, e.g. scripts/embed_server.py.
+    // "ranking": {
+    //   "enabled": true,
+    //   "base_url": "http://127.0.0.1:8090/v1",
+    //   "model": "qwen3-emb",
+    //   "timeout_seconds": 2,
+    // },
   },
 
   // Self-improvement configuration
@@ -1350,6 +1362,22 @@
     "reorder_gap_ms": 60,                   // audio reorder gap (ms)
     "telnyx_public_key": "",                // base64 Ed25519 public key from Mission Control; unset = routes 503
     "default_employee": "",                 // phone employee id owning inbound calls; required when enabled
+    "default_leg": "phone",                 // phone | local; default leg for outbound voice
+    "tts_model": "",                        // global TTS model (openai voice id etc.)
+    "tts_voice": "",                        // global TTS voice
+    "stt_model": "",                        // global STT model
+    "tts_base_url": "",                     // TTS base URL override (local Qwen3-TTS server); empty = vendor default
+    "stt_base_url": "",                     // STT base URL override (Deepgram-compatible endpoint); empty = api.deepgram.com
+    "local": {                              // local voice leg (mic + speaker on the client device); opt-in
+      "enabled": false,                     // local leg master switch
+      "stt_provider": "",                   // default "whisper"; empty = voice.stt_provider
+      "tts_provider": "",                   // default "piper"; empty = voice.tts_provider
+      "tts_model": "",                      // local-leg TTS model; empty = voice.tts_model
+      "tts_voice": "",                      // local-leg TTS voice; empty = voice.tts_voice
+      "barge_in_rms": 3000,                 // s16 RMS threshold for local-leg barge-in
+      "name": ""                            // session label; empty = hostname
+    },
+    "employee_leg": [],                     // per-agent routing defaults; entry {employee, leg: "phone"|"local", tts_voice, tts_model}; beats per-leg config, beats provider default
     "child_binary_path": "",                // empty = daemon-adjacent lookup
     "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
   },
@@ -1458,6 +1486,25 @@
   //   "done_label": "factory:done",
   //   "gate_command": "",
   //   "project_number": 0,
+  // },
+
+  // HITL Slack approval channel (opt-in, disabled by default). Publishes
+  // pending ACP permission requests as interactive Slack cards in
+  // channel_id; approvers in allowed_user_ids resolve them with Approve/
+  // Deny buttons (signed callbacks to POST /api/v1/slack/interactions).
+  // Secrets support ${VAR} env indirection — never plaintext values in
+  // logs. allowed_user_ids empty allows NOBODY (fail closed). Requires a
+  // reachable HTTP endpoint for Slack's Interactivity Requests URL; see
+  // docs/workflows/hitl-notifications.md.
+  // drift: commented template block; absent from installed homes by
+  // design (default-off: an absent block is identical to disabled).
+  // "slack": {
+  //   "enabled": false,
+  //   "bot_token": "${SLACK_BOT_TOKEN}",
+  //   "signing_secret": "${SLACK_SIGNING_SECRET}",
+  //   "channel_id": "C0123456789",
+  //   "allowed_user_ids": ["U0123456789"],
+  //   "api_base_url": "https://slack.com/api",
   // },
 
   // Distributed cluster (opt-in, disabled by default). Joins a peer mesh

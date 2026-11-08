@@ -340,12 +340,12 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| R0-research | PENDING | 0 | |
-| 01-slack-channel | PENDING | 0 | |
-| 02-checkpointed-gates | PENDING | 0 | |
-| 03-deep-links | PENDING | 0 | |
-| 04-regime-evaluation | PENDING | 0 | |
-| 05-e2e | PENDING | 0 | |
+| R0-research | COMPLETE | 1 | c5ef67e9: research-notes.md - verified Slack signing constants (sourced/quoted) + regime methodology |
+| 01-slack-channel | COMPLETE | 1 | 71312c96: Slack PushChannel, Block Kit, signed interactions endpoint, slack:<uid> approver, relay stays timeout authority; schema close 3723542d |
+| 02-checkpointed-gates | COMPLETE | 1 | 52148db1: ParkKindGate TurnParker over shared parks.db, GateParkData (C5), resumeByKey at-most-once, restart re-arm, plan.approved pump; orphaned hitl C4 gate landed 8ef5c90c |
+| 03-deep-links | COMPLETE | 1 | 8aa404da: meept://session/<id> deep links, Flutter DeepLinkTarget with route-presence feature gate, menubar tap-through via NSWorkspace |
+| 04-regime-evaluation | COMPLETE | 1 | 8f053abd: three-regime harness + ground-truth metrics in internal/eval/hitl (Go tests; no dart surface in this leaf) |
+| 05-e2e | COMPLETE | 1 | e7a966d4: hitl-notifications e2e suite (signed round trip, late-click fail-closed, park->restart->resume, deep-link web substrate, regime report) + manifest entry; issue 86 closed |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -390,14 +390,14 @@ it against returned tests in-session and applies the delta protocol
 
 | # | Feature (from plan) | Source (leaf/spec section) | Unit tests | E2E tests | Status |
 |---|---------------------|----------------------------|-----------|-----------|--------|
-| F1 | Slack signature verification (good/bad/stale/replay) | 01 T3, C3 | TestSlackSignature_* in internal/comm/slack | hitl-notifications:1 | PENDING |
-| F2 | Button action -> relay resolve round trip with slack:<uid> attribution | 01 T3-T4, C3, C4 | TestSlackInteraction_Resolve* | hitl-notifications:1 | PENDING |
-| F3 | Fail-closed: late/expired action gets "no pending request", permission times out denied | 01 T3, R4 | TestSlackInteraction_ExpiredRequest | hitl-notifications:1 | PENDING |
-| F4 | Gate park persists + resumes out-of-band (plan and goal gates) | 02 T1-T3, C5 | TestGatePark_* in internal/agent | hitl-notifications:2 | PENDING |
-| F5 | Deep link parse + feature gate + web fallback URL | 03 T1-T3, C6 | dart test deep_link_test.dart | hitl-notifications:3 | PENDING |
-| F6 | Menubar tap opens deep link (userInfo sessionID -> URL) | 03 T2 | Swift: thin handler, logic mirrored in dart tests (documented limitation) | n/a - no Swift test harness; handler delegates parsing to pinned C6 grammar | PENDING |
-| F7 | Regime metrics computed from ground-truth sources | 04 T1-T3, C7 | TestRegimeMetrics_* in internal/eval | hitl-notifications:4 | PENDING |
-| F8 | Manifest + path_map entry for new packages | 05 T3 | n/a - manifest JSON | manifest-driven e2e-fast selection | PENDING |
+| F1 | Slack signature verification (good/bad/stale/replay) | 01 T3, C3 | TestInteractionsRejectsBadSignature / RejectsStaleTimestamp / AcceptsFreshTimestamp / VerifiesRawBody - internal/comm/slack/interactions_test.go | hitl-notifications:1 | VALIDATED |
+| F2 | Button action -> relay resolve round trip with slack:<uid> attribution | 01 T3-T4, C3, C4 | TestInteractionsResolvesWithSlackApprover, RejectsDisallowedUser - internal/comm/slack/interactions_test.go | hitl-notifications:1 | VALIDATED |
+| F3 | Fail-closed: late/expired action gets "no pending request", permission times out denied | 01 T3, R4 | TestInteractionsUnknownRequestStill200 - internal/comm/slack/interactions_test.go | hitl-notifications:1 | VALIDATED |
+| F4 | Gate park persists + resumes out-of-band (plan and goal gates) | 02 T1-T3, C5 | TestGateParkPersistsKindScoped / PersistsThroughSQLiteStore / PlanResumeAtMostOnce / GoalRestartReArmLateApproval / KindIsolation - internal/agent/gate_park_test.go; wiring: internal/daemon/gate_park_wiring_test.go | hitl-notifications:2 | VALIDATED |
+| F5 | Deep link parse + feature gate + web fallback URL | 03 T1-T3, C6 | 20 flutter deep-link tests - ui/flutter_ui/test/core/deep_link_test.dart + deep_link_nav_test.dart | hitl-notifications:3 | VALIDATED |
+| F6 | Menubar tap opens deep link (userInfo sessionID -> URL) | 03 T2 | Swift handler landed (menubar/MeeptMenuBar/Services/NotificationManager.swift tap-through + GuiLauncher.swift NSWorkspace); no Swift test harness - grammar verified via the dart-mirrored deep_link_test.dart, as the plan anticipated | n/a - no Swift test harness; handler delegates parsing to pinned C6 grammar | VALIDATED |
+| F7 | Regime metrics computed from ground-truth sources | 04 T1-T3, C7 | TestMetrics* - internal/eval/hitl/metrics_test.go; harness TestHarness* + TestRegimeOverlayMapping - harness_test.go; TestReport* - report_test.go | hitl-notifications:4 | VALIDATED |
+| F8 | Manifest + path_map entry for new packages | 05 T3 | n/a - manifest JSON | e2e/manifest.json suite hitl-notifications (path_map + suite entry); suite at e2e/suites/hitl-notifications/ | VALIDATED |
 
 Delta log: (empty - entries appended as date, feature ID, direction, reason)
 

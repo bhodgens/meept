@@ -237,7 +237,7 @@ func applyFilters(a *Aggregator, records []ActivityRecord, q Query) []ActivityRe
 // tuple (groupKey, At) with the empty-key-last rule is equivalent to two
 // passes.
 func sortRecords(records []ActivityRecord, mode string) {
-	less := func(i, j int) bool { return false }
+	var less func(i, j int) bool
 	switch mode {
 	case SortTask:
 		less = func(i, j int) bool {

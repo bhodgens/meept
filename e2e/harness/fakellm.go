@@ -89,11 +89,12 @@ type FakeLLM struct {
 	server *httptest.Server
 	url    string
 
-	toolCalls     []ToolCall // consumed by executor turns, in order
-	postToolText  string     // executor reply once the queue is empty
-	chatText      string     // non-classifier/planner/executor replies
-	classifierOut string     // classification JSON (empty = heuristic)
-	plannerText   string     // planner decompose reply (empty = hard-coded plan)
+	toolCalls            []ToolCall // consumed by executor turns, in order
+	postToolText         string     // executor reply once the queue is empty
+	postToolTextExplicit bool       // SetPostToolText called (recall arm stands down)
+	chatText             string     // non-classifier/planner/executor replies
+	classifierOut        string     // classification JSON (empty = heuristic)
+	plannerText          string     // planner decompose reply (empty = hard-coded plan)
 
 	requests []map[string]any
 
@@ -392,11 +393,15 @@ func (f *FakeLLM) EnqueueFileWrite(id, path, content string) {
 }
 
 // SetPostToolText sets the executor turn's final reply, served once the
-// scripted tool-call queue is empty.
+// scripted tool-call queue is empty. Suites that call this are treated as
+// scripting the post-tool reply EXPLICITLY: the memory-recall arm in
+// handleExecutorTurn then stands down (bughunt 2026-11-06 regression F-2 —
+// the arm's comment claimed this precedence but no flag implemented it).
 func (f *FakeLLM) SetPostToolText(text string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.postToolText = text
+	f.postToolTextExplicit = true
 }
 
 // SetChatText sets the reply for generic (non-classifier/planner/executor)
@@ -435,6 +440,7 @@ func (f *FakeLLM) Reset() {
 	defer f.mu.Unlock()
 	f.toolCalls = nil
 	f.postToolText = "done"
+	f.postToolTextExplicit = false
 	f.chatText = "ok"
 	f.classifierOut = ""
 	f.plannerText = ""
@@ -655,7 +661,7 @@ func (f *FakeLLM) classifyLocked(body map[string]any) (ChatCompletionResponse, *
 		// the default, and this arm only fires when the prompt carries
 		// injected memory (a recall turn) — never for plain post-tool
 		// work turns.
-		if f.chatText != "" &&
+		if f.chatText != "" && !f.postToolTextExplicit &&
 			(strings.Contains(all, "Memory (standing)") || strings.Contains(all, "<memory-context>")) {
 			return envelope(body, ResponseMsg{
 				Role: "assistant", Content: f.chatText,

@@ -62,4 +62,40 @@ func TestVoiceConfigDefaults(t *testing.T) {
 	if v.ConnectionID != "" {
 		t.Errorf("voice.connection_id default = %q, want empty", v.ConnectionID)
 	}
+
+	// Leg + voice selection defaults (local-leg plan CL4): a config-less
+	// boot keeps phone-only behavior byte-identically.
+	if v.DefaultLeg != "phone" {
+		t.Errorf("voice.default_leg default = %q, want phone", v.DefaultLeg)
+	}
+	if v.TTSModel != "" {
+		t.Errorf("voice.tts_model default = %q, want empty", v.TTSModel)
+	}
+	if v.TTSVoice != "" {
+		t.Errorf("voice.tts_voice default = %q, want empty", v.TTSVoice)
+	}
+	if v.STTModel != "" {
+		t.Errorf("voice.stt_model default = %q, want empty", v.STTModel)
+	}
+	if v.Local.Enabled != false {
+		t.Errorf("voice.local.enabled default = %v, want false (opt-in master switch)", v.Local.Enabled)
+	}
+	if v.Local.STTProvider != "" {
+		t.Errorf("voice.local.stt_provider default = %q, want empty (= voice.stt_provider)", v.Local.STTProvider)
+	}
+	if v.Local.TTSProvider != "" {
+		t.Errorf("voice.local.tts_provider default = %q, want empty (= voice.tts_provider)", v.Local.TTSProvider)
+	}
+	if v.Local.TTSModel != "" {
+		t.Errorf("voice.local.tts_model default = %q, want empty", v.Local.TTSModel)
+	}
+	if v.Local.TTSVoice != "" {
+		t.Errorf("voice.local.tts_voice default = %q, want empty", v.Local.TTSVoice)
+	}
+	if v.Local.BargeInRms != 3000 {
+		t.Errorf("voice.local.barge_in_rms default = %d, want 3000", v.Local.BargeInRms)
+	}
+	if v.Local.Name != "" {
+		t.Errorf("voice.local.name default = %q, want empty (= hostname)", v.Local.Name)
+	}
 }

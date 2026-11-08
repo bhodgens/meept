@@ -3,9 +3,19 @@
 //
 // It connects the daemon's shared text socket (C1), reads its start token
 // from STDIN (never argv, never env), and serves one jargo pipeline per
-// call, multiplexed by call_id. Provider keys arrive over the text socket
-// (keys frame) after the daemon validates the token; they are held in
-// memory only and never logged.
+// call, multiplexed by call_id. Provider keys AND the per-call vendor/
+// model/base_url/voice selectors arrive over the text socket (extended
+// keys frame, voice-tierA leaf 03) after the daemon validates the token;
+// they are held in memory only and never logged. The C3 factories below
+// dispatch on the keys frame's config, so provider selection is per call.
+//
+// Barge-in trigger (voice-tierA D1): STT partial transcripts from the
+// bound STT session - a partial while playback is live emits interrupt
+// before the partial's prompt (C5), once per barge-in. jargo's ONNX VAD
+// is NOT required for this: the ONNX Runtime probe stays non-fatal and
+// a missing library only means the (future) VAD upgrade is absent, not
+// that barge-in is lost. See docs/workflows/voice-sidecar.md Tier A
+// as-built notes.
 //
 // ONNX Runtime: jargo's VAD/turn models load it at runtime through purego.
 // A missing library is not recoverable for a phone call (no barge-in), so
@@ -59,21 +69,28 @@ func run(ctx context.Context, textSocket, audioDir string) error {
 		AudioDir:       audioDir,
 		TokenReader:    os.Stdin, // start token via stdin ONLY (never argv/env)
 	})
-	// Leaf 08: real provider adapters behind the leaf-07 interfaces. The
-	// vendors and models are fixed here (A1: Deepgram STT, OpenAI TTS);
-	// keys arrive per call over the C1 keys frame and live in memory only.
+	// Real provider adapters behind the leaf-07 interfaces, dispatched on
+	// the per-call config the child passes from the C1 keys frame (C3):
+	// the vendor, model, base URL, and voice now come from the daemon per
+	// call, not hardcoded here. Keys ride the frame and live in memory
+	// only. An unknown vendor fails the call (named error); the child and
+	// other calls stay up.
 	child.SetProviderFactories(
-		func(key string, sampleRate int) (voicechild.STTProvider, error) {
-			return providers.NewSTT(providers.ProviderConfig{
-				Vendor:     "deepgram",
-				SampleRate: sampleRate,
-			}, key)
+		func(cfg providers.ProviderConfig, key string) (voicechild.STTProvider, error) {
+			// One STT vendor ships (A1: deepgram); a cfg naming anything
+			// else fails the call with the named vendor error.
+			switch cfg.Vendor {
+			case "", "deepgram":
+				return providers.NewSTT(cfg, key)
+			default:
+				return nil, fmt.Errorf("%w: stt vendor %q", providers.ErrUnknownVendor, cfg.Vendor)
+			}
 		},
-		func(key string, sampleRate int) (voicechild.TTSProvider, error) {
-			return providers.NewTTS(providers.ProviderConfig{
-				Vendor:     "openai",
-				SampleRate: sampleRate,
-			}, key)
+		func(cfg providers.ProviderConfig, key string) (voicechild.TTSProvider, error) {
+			// NewTTS dispatches on cfg.Vendor: "openai" (cloud, key
+			// required) or "qwen3" (keyless local, cfg.BaseURL required).
+			// Model/BaseURL/Voice ride the config untouched.
+			return providers.NewTTS(cfg, key)
 		},
 	)
 	return child.Run(ctx)

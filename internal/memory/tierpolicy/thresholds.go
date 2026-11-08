@@ -47,8 +47,8 @@ type DemotionConfig struct {
 	// StaleDays overrides DefaultDemotionStaleDays. <= 0 resolves to the
 	// default.
 	StaleDays int
-	// MinUsefulness overrides DefaultDemotionMinUsefulness. <= 0 or
-	// >= 1 resolves to the default.
+	// MinUsefulness overrides DefaultDemotionMinUsefulness. <= 0,
+	// >= 1, or non-finite (NaN/±Inf) resolves to the default.
 	MinUsefulness float64
 }
 
@@ -57,11 +57,20 @@ type DemotionConfig struct {
 // rejected, i.e. resolved back to the defaults). Idempotent: feeding an
 // already-resolved threshold set through again is a no-op.
 func ResolveDemotionThresholds(cfg DemotionConfig) DemotionThresholds {
-	out := DemotionThresholds{StaleDays: cfg.StaleDays, MinUsefulness: cfg.MinUsefulness}
+	out := DemotionThresholds(cfg)
 	if out.StaleDays <= 0 {
 		out.StaleDays = DefaultDemotionStaleDays
 	}
-	if out.MinUsefulness <= 0 || out.MinUsefulness >= 1 {
+	// MinUsefulness must be a finite score in the open interval (0,1).
+	// The inverted range check is NaN-safe: NaN fails both comparisons,
+	// so !(x > 0 && x < 1) routes NaN (and ±Inf, and <=0, and >=1) to
+	// the default instead of letting it pass through verbatim (F4 fix,
+	// property-test finding 2026-11-06: a NaN floor made demote.go's
+	// `score < th.MinUsefulness` gate silently never fire). Convention:
+	// normalize to defaults — the resolver rejects by defaulting, it
+	// has no error return (contract C6: "zero-value config =>
+	// defaults; negative rejected at resolve").
+	if !(out.MinUsefulness > 0 && out.MinUsefulness < 1) {
 		out.MinUsefulness = DefaultDemotionMinUsefulness
 	}
 	return out

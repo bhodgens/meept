@@ -48,7 +48,7 @@ func NewSQLiteTrainingStore(dbPath string) (*SQLiteTrainingStore, error) {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_foreign_keys=on")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)") // modernc _pragma form (bughunt 2026-11-07)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -682,7 +682,7 @@ func NewSQLiteExamplesStore(dbPath string) (*SQLiteExamplesStore, error) {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)") // modernc _pragma form (bughunt 2026-11-07)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -1088,7 +1088,7 @@ func NewSQLiteAdaptersStore(dbPath string) (*SQLiteAdaptersStore, error) {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)") // modernc _pragma form (bughunt 2026-11-07)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

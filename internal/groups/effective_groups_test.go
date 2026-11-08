@@ -25,10 +25,6 @@ import (
 	"github.com/caimlas/meept/internal/auth"
 )
 
-// lookupByUserID is the storeLookup seam leaf 02 T3 names: identity -> the
-// owner's stored groups. Empty = the user has no groups (or is unknown).
-type lookupByUserID func(identity *auth.Identity) []string
-
 // M1: nil identity — single-user install — returns the agent groups alone.
 func TestEffectiveGroups_NilIdentityAgentOnly(t *testing.T) {
 	lookup := func(*auth.Identity) []string {

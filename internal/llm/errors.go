@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -184,12 +185,21 @@ func parseRetryAfter(header string) time.Duration {
 }
 
 func parseRetryAfterSeconds(header string) (time.Duration, error) {
-	var seconds int
+	var seconds int64
 	n, err := fmt.Sscanf(header, "%d", &seconds)
+	// F1 fix: an out-of-int64 digit value is ErrRange (n=0), not
+	// garbage — saturate it (an enormous wait is still a wait; the
+	// plan clamps bound it downstream). Values inside the int64 range
+	// convert through secondsToDuration, which saturates anything
+	// past the Duration nanosecond budget instead of wrapping
+	// negative. Non-positive stays rejected (lax guard preserved).
+	if errors.Is(err, strconv.ErrRange) {
+		return maxRetryAfterDuration, nil
+	}
 	if err != nil || n != 1 || seconds <= 0 {
 		return 0, fmt.Errorf("invalid seconds format")
 	}
-	return time.Duration(seconds) * time.Second, nil
+	return secondsToDuration(seconds), nil
 }
 
 func parseRetryAfterDate(header string) time.Duration {

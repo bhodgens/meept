@@ -148,7 +148,7 @@ func TestDialOutPayloadKeys(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "test-key")
-	ccid, err := c.DialOut(t.Context(), "+15551230001", "+15551239999", "conn-1")
+	ccid, err := c.DialOut(t.Context(), "+15551230001", "+15551239999", "conn-1", 30)
 	if err != nil {
 		t.Fatalf("DialOut: %v", err)
 	}
@@ -218,6 +218,41 @@ func TestStartStreamingBody(t *testing.T) {
 			}
 			if _, ok := gotBody["stream_url"]; !ok && gotBody["stream_bidirectional_mode"] == nil {
 				t.Errorf("streaming_start body carried no recognizable keys: %v", gotBody)
+			}
+		})
+	}
+}
+
+// TestDialOutTimeoutSecsFromCaller pins audit 2026-11-06 M8: DialOut sends
+// the caller-provided timeout_secs on the wire instead of a hardcoded 30;
+// the <= 0 sentinel falls back to DefaultDialTimeoutSecs.
+func TestDialOutTimeoutSecsFromCaller(t *testing.T) {
+	cases := []struct {
+		name     string
+		passArg  int
+		wantWire float64
+	}{
+		{"configured value", 45, 45},
+		{"zero falls back to default", 0, 30},
+		{"negative falls back to default", -5, 30},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				buf := new(bytes.Buffer)
+				_, _ = buf.ReadFrom(r.Body)
+				_ = json.Unmarshal(buf.Bytes(), &gotBody)
+				_, _ = w.Write([]byte(`{"data":{"call_control_id":"cc-timeout-1"}}`))
+			}))
+			defer srv.Close()
+
+			c := NewClient(srv.URL, "test-key")
+			if _, err := c.DialOut(t.Context(), "+15550000001", "+15550009999", "conn-1", tc.passArg); err != nil {
+				t.Fatalf("DialOut(%d): %v", tc.passArg, err)
+			}
+			if gotBody["timeout_secs"] != tc.wantWire {
+				t.Errorf("timeout_secs on wire = %v, want %v (M8: config-driven carrier ring timeout)", gotBody["timeout_secs"], tc.wantWire)
 			}
 		})
 	}
