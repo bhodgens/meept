@@ -218,6 +218,21 @@ func (f *fakeStore) SetEmployeeID(string, string) error                         
 func (f *fakeStore) ClearMessages(string) error                                      { return nil }
 func (f *fakeStore) UpdateSessionsProjectPath(context.Context, string, string) error { return nil }
 
+// Stubs for the session.Store ChildDescriptor methods (dsh-convergence
+// merge; same lane as the F-04 FIX stubs below — never invoked, only
+// satisfies the interface).
+func (f *fakeStore) SaveChildDescriptor(context.Context, session.ChildDescriptorRecord) error {
+	return nil
+}
+func (f *fakeStore) GetChildDescriptor(context.Context, string) (session.ChildDescriptorRecord, error) {
+	return session.ChildDescriptorRecord{}, nil
+}
+func (f *fakeStore) RemoveChildDescriptor(context.Context, string) error { return nil }
+
+// GetSchemaVersion stub (same interface-drift lane).
+func (f *fakeStore) GetSchemaVersion(string) (int, error) { return 0, nil }
+func (f *fakeStore) MigrateSchema(string) error           { return nil }
+
 // F-04 FIX: stub for new Store interface method.
 func (f *fakeStore) SetNoFence(string, bool) error              { return nil }
 func (f *fakeStore) SetForeground(string, bool) error           { return nil }
