@@ -505,6 +505,7 @@ type Components struct {
 	SkillExecutor   *skills.Executor
 	SkillIndex      *skills.SkillIndex
 	SkillLoader     *skills.LazySkillLoader
+	SkillWatcher    *skills.SkillWatcher
 	CapabilityIndex *skills.CapabilityIndex
 
 	// TT-SR stream rule enforcement
@@ -1631,9 +1632,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Create tool registry (builtin tools registered after all dependencies are available)
 	c.ToolRegistry = tools.NewRegistry(logger)
 
-	// Initialize skills system
+	// Initialize skills system. The hot-reload watcher rides the
+	// NewComponents msgBus parameter directly (leaf 03's skills/change
+	// publishes need the live bus; c.msgBus is only set later in Start-time
+	// employee wiring, too late for a boot-time watcher).
 	if cfg.Skills.Enabled {
-		c.initializeSkills(cfg, logger)
+		c.initializeSkillsWithBus(cfg, logger, msgBus)
 	}
 
 	// Initialize templates system (shares the skills enabled flag since
@@ -9215,13 +9219,21 @@ func (c *Components) initializeCalendar(cfg *config.Config, msgBus *bus.MessageB
 	}
 }
 
-// initializeSkills sets up the skills system with lazy loading.
+// initializeSkills sets up the skills system with lazy loading. The
+// hot-reload watcher publishes skills/change onto the bus stored at
+// construction time (c.msgBus may be nil until Start-time wiring; a nil bus
+// means watch+reload without the TUI/GUI refresh event).
 func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
+	c.initializeSkillsWithBus(cfg, logger, c.msgBus)
+}
+
+// initializeSkillsWithBus is initializeSkills with an explicit bus handle
+// for the skill hot-reload watcher (04-tool-surface leaf 03).
+func (c *Components) initializeSkillsWithBus(cfg *config.Config, logger *slog.Logger, msgBus *bus.MessageBus) {
 	// Build discovery options
 	discoveryOpts := []skills.DiscoveryOption{
 		skills.WithDiscoveryLogger(logger.With("component", "skills-discovery")),
 	}
-
 	// Build base tiers (DefaultTiers may include Hermes auto-discovery)
 	baseTiers := skills.DefaultTiers()
 
@@ -9374,6 +9386,43 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 	// Wire registry into skill writer so archive/restore keeps registry in sync.
 	if c.SkillWriter != nil {
 		c.SkillWriter.SetRegistry(c.SkillRegistry)
+	}
+
+	// Hot-reload watcher (04-tool-surface leaf 03, contract B3): watch the
+	// two canonical discovery roots (project .meept/skills + user
+	// ~/.meept/skills); on a change under <root>/<skill>/SKILL.md or
+	// <root>/<skill>.md invalidate the loader cache, re-discover metadata,
+	// rebuild the index, and publish skills/change AFTER the commit. The
+	// bus publish reuses the watcher's typed TopicSkillChange topic (TUI/GUI
+	// refresh is fire-and-forget). The watcher follows the components ctx so
+	// daemon shutdown also stops it. Best-effort: a watcher construction
+	// failure logs and continues (skills still work; they just need a
+	// restart to pick up changes).
+	if c.SkillLoader != nil && c.SkillIndex != nil {
+		var watchedRoots []string
+		for _, t := range baseTiers {
+			if t.Priority == skills.PriorityProject || t.Priority == skills.PriorityUser {
+				watchedRoots = append(watchedRoots, t.Path)
+			}
+		}
+		if len(watchedRoots) > 0 {
+			watcher, err := skills.NewSkillWatcher(skills.SkillWatcherConfig{
+				Roots:  watchedRoots,
+				Loader: c.SkillLoader,
+				Discover: func(ctx context.Context) ([]*skills.SkillIndexEntry, error) {
+					return discovery.DiscoverMetadataOnly()
+				},
+				Index:  c.SkillIndex,
+				Bus:    msgBus,
+				Logger: logger.With("component", "skills-watcher"),
+			})
+			if err != nil {
+				logger.Warn("skill hot-reload watcher not armed", "error", err)
+			} else {
+				c.SkillWatcher = watcher
+				logger.Info("skill hot-reload watcher armed", "roots", len(watchedRoots))
+			}
+		}
 	}
 
 	// Wire the skill writer's post-write change notifier into the branch-1

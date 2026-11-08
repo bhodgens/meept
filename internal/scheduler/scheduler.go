@@ -227,6 +227,13 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		s.logger.Warn("scheduler: failed to load persisted jobs", "error", err)
 	}
 
+	// Recover deliveries left pending/in_flight by a previous run. Scans
+	// receipt rows (not ticks — a claimed tick never re-fires) and
+	// re-delivers the same MessageID, idempotent via turn_id dedupe.
+	if err := s.recoverInFlightDeliveries(); err != nil {
+		s.logger.Warn("scheduler: in-flight delivery recovery failed", "error", err)
+	}
+
 	// Start cron scheduler
 	s.cron.Start()
 	s.running.Store(true)
@@ -819,11 +826,20 @@ func (s *Scheduler) loadPersistedJobs() error {
 }
 
 // createJob creates a job from config, using JobDependencies if available.
+// Agent jobs created here get a deliveryScheduler back-reference so Execute
+// can persist delivery receipts around the chat.request publish.
 func (s *Scheduler) createJob(cfg JobConfig) (Job, error) {
 	if s.jobDeps != nil {
 		return CreateJobWithDeps(cfg, s.jobDeps)
 	}
-	return CreateJob(cfg, s.bus)
+	job, err := CreateJob(cfg, s.bus)
+	if err != nil {
+		return nil, err
+	}
+	if aj, ok := job.(*AgentJob); ok {
+		aj.deliveryScheduler = s
+	}
+	return job, nil
 }
 
 // parseSchedule validates and parses a schedule expression.

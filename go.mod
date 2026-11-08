@@ -36,6 +36,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20260903153007-b3c860c23753
 	github.com/magefile/mage v1.17.2
 	github.com/mattn/go-sqlite3 v1.14.45
+	github.com/mmonterroca/pptxgo v0.0.0-20260802145618-9e8c8b31d00c
 	github.com/nsf/termbox-go v1.1.1
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/pkoukk/tiktoken-go v0.1.8

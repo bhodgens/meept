@@ -3373,6 +3373,15 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// Truncate if needed
 	conv.Truncate()
 
+	// /name gesture (04-skill-invocation): scan the claimed USER input only
+	// for explicit skill invocations. Resolved bodies inject as user-role
+	// blocks AFTER the user message (and after all system-prompt injections)
+	// — the deterministic last injection, closest to the answer material
+	// (dsh agent/pre-step ordering). Unknown and disable-model-invocation
+	// names stay plain prose: no block, no error. Never scans tool or
+	// assistant content, so external text cannot forge the gesture.
+	l.injectInvokedSkills(ctx, conv, sanitizedMessage)
+
 	// Register with watchdog for stuck/timeout monitoring.
 	// The watchdog will cancel the context if the agent loop gets stuck.
 	loopCtx, loopCancel := context.WithCancel(ctx)

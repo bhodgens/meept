@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -64,6 +65,17 @@ type JobConfig struct {
 	OptimizationConfig *OptimizationJobConfig `json:"optimization_config,omitempty"`
 	SecurityConfig     *SecurityJobConfig     `json:"security_config,omitempty"`
 	LearningConfig     *LearningJobConfig     `json:"learning_config,omitempty"`
+
+	// Timing is the semantic schedule spec (leaf 05-schedule/01-timing-kinds).
+	// When set, the job may be expressed and re-registered from this spec
+	// (Schedule OR Timing validation); the normalized cron string stays in
+	// Schedule for the engine.
+	Timing *TimingSpec `json:"timing,omitempty"`
+
+	// Delivery bookkeeping (leaf 05-schedule/02-delivery-inbox). Both are
+	// optional and only populated for jobs that deliver to a session inbox.
+	LastDelivery    *ScheduleDeliveryReceipt `json:"last_delivery,omitempty"`
+	DeliveryHistory *DeliveryHistory         `json:"delivery_history,omitempty"`
 }
 
 // AgentJobConfig holds configuration for agent jobs.
@@ -74,6 +86,12 @@ type AgentJobConfig struct {
 	AgentID     string            `json:"agent_id,omitempty"`
 	MaxTokens   int               `json:"max_tokens,omitempty"`
 	Temperature float64           `json:"temperature,omitempty"`
+
+	// TargetSessionID pins delivery to a session inbox: when set, the
+	// chat.request payload carries session_id (and a stable turn_id derived
+	// from the delivery MessageID) and the scheduler tracks a durable
+	// delivery receipt. Empty preserves the legacy fire-and-forget behavior.
+	TargetSessionID string `json:"target_session_id,omitempty"`
 }
 
 // ShellJobConfig holds configuration for shell jobs.
@@ -182,6 +200,11 @@ type AgentJob struct {
 	context map[string]string
 	model   string
 	bus     *bus.MessageBus
+
+	// deliveryScheduler is set by the scheduler when it owns this job so
+	// Execute can persist delivery receipts around the publish. Agents
+	// created standalone (tests, tooling) leave it nil and skip receipts.
+	deliveryScheduler *Scheduler
 }
 
 // NewAgentJob creates a new agent job.
@@ -210,11 +233,68 @@ func NewAgentJob(cfg JobConfig, msgBus *bus.MessageBus) (*AgentJob, error) {
 
 // Execute sends a chat request to the agent via the message bus.
 func (j *AgentJob) Execute(ctx context.Context) error {
+	// No target session: legacy fire-and-forget dispatch with a fresh,
+	// unpredictable turn id.
+	if j.config.AgentConfig.TargetSessionID == "" {
+		return j.deliver(ctx, id.Generate("turn-"))
+	}
+
+	// Session-pinned delivery: MessageID is minted per occurrence and becomes
+	// the chat.request turn_id, so re-delivery (at-least-once recovery) is
+	// idempotent. The scheduler records the receipt around this call.
+	messageID := id.Generate("turn-")
+	if s := j.deliveryScheduler; s != nil {
+		receipt := ScheduleDeliveryReceipt{
+			ScheduleID:      j.id,
+			ScheduledAt:     time.Now().UTC(),
+			OccurrenceAt:    time.Now().UTC(),
+			MessageID:       messageID,
+			TargetSessionID: j.config.AgentConfig.TargetSessionID,
+			Prompt:          j.prompt,
+			Status:          DeliveryPending,
+		}
+		if err := s.recordDelivery(j.id, receipt); err != nil {
+			return fmt.Errorf("failed to record pending delivery receipt: %w", err)
+		}
+		receipt.Status = DeliveryInFlight
+		if err := s.recordDelivery(j.id, receipt); err != nil {
+			return fmt.Errorf("failed to record in-flight delivery receipt: %w", err)
+		}
+	}
+
+	if err := j.deliver(ctx, messageID); err != nil {
+		// Receipt intentionally stays in_flight so recovery re-delivers it.
+		return err
+	}
+
+	if s := j.deliveryScheduler; s != nil {
+		receipt := ScheduleDeliveryReceipt{
+			ScheduleID:      j.id,
+			ScheduledAt:     time.Now().UTC(),
+			OccurrenceAt:    time.Now().UTC(),
+			DeliveredAt:     time.Now().UTC(),
+			MessageID:       messageID,
+			TargetSessionID: j.config.AgentConfig.TargetSessionID,
+			Prompt:          j.prompt,
+			Status:          DeliveryDelivered,
+		}
+		if err := s.recordDelivery(j.id, receipt); err != nil {
+			return fmt.Errorf("failed to record delivered receipt: %w", err)
+		}
+	}
+	return nil
+}
+
+// deliver publishes the chat.request with the given turn id. When a target
+// session is configured the payload is pinned to that session's inbox via
+// session_id; otherwise it is legacy fire-and-forget.
+func (j *AgentJob) deliver(ctx context.Context, turnID string) error {
 	payload := map[string]any{
 		"prompt":          j.prompt,
 		"source":          "scheduler",
 		SchedulerKeyJobID: j.id,
 		"job_name":        j.name,
+		"turn_id":         turnID,
 	}
 
 	if j.context != nil {
@@ -228,6 +308,9 @@ func (j *AgentJob) Execute(ctx context.Context) error {
 	}
 	if j.config.AgentConfig.Temperature > 0 {
 		payload["temperature"] = j.config.AgentConfig.Temperature
+	}
+	if target := j.config.AgentConfig.TargetSessionID; target != "" {
+		payload["session_id"] = target
 	}
 
 	msg, err := models.NewBusMessage(models.MessageTypeRequest, "scheduler."+j.id, payload)
@@ -718,8 +801,15 @@ func ValidateJobConfig(cfg JobConfig) error {
 	if cfg.Name == "" {
 		return fmt.Errorf("job name is required")
 	}
-	if cfg.Schedule == "" {
-		return fmt.Errorf("job schedule is required")
+	// Schedule OR Timing (leaf 05-schedule/01-timing-kinds): a job may be
+	// expressed either as a raw cron expression or as a semantic timing spec.
+	if cfg.Schedule == "" && cfg.Timing == nil {
+		return fmt.Errorf("job schedule or timing is required")
+	}
+	if cfg.Timing != nil {
+		if err := cfg.Timing.Validate(); err != nil {
+			return fmt.Errorf("invalid timing spec: %w", err)
+		}
 	}
 	if cfg.Type == "" {
 		return fmt.Errorf("job type is required")

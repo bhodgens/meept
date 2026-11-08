@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -207,6 +208,7 @@ func (t *noopLeaf) Execute(ctx context.Context, args map[string]any) (any, error
 }
 func (t *noopLeaf) IsReadOnly(map[string]any) bool        { return false }
 func (t *noopLeaf) IsConcurrencySafe(map[string]any) bool { return false }
+func (t *noopLeaf) TimeoutMs() time.Duration              { return 0 }
 
 // spawnLeaf is a depth-gated tool representing the subagent-spawn capability.
 // It is visible at all depths less than its gate depth, making it invisible
@@ -233,6 +235,7 @@ func (t *spawnLeaf) IsReadOnly(input map[string]any) bool { return t.base.IsRead
 func (t *spawnLeaf) IsConcurrencySafe(input map[string]any) bool {
 	return t.base.IsConcurrencySafe(input)
 }
+func (t *spawnLeaf) TimeoutMs() time.Duration { return t.base.TimeoutMs() }
 
 // -----------------------------------------------------------------------
 // GatedToolRegistry: multi-dimensional tool gating
@@ -438,6 +441,7 @@ func (t *descriptorTool) Execute(ctx context.Context, args map[string]any) (any,
 }
 func (t *descriptorTool) IsReadOnly(map[string]any) bool        { return false }
 func (t *descriptorTool) IsConcurrencySafe(map[string]any) bool { return false }
+func (t *descriptorTool) TimeoutMs() time.Duration              { return 0 }
 
 // GatedDepth returns the maximum depth at which the tool is visible.
 // For descriptor-based gating we derive this from AvailableAtDepths:

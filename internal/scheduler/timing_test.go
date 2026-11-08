@@ -35,11 +35,15 @@ func TestParseTiming_Kinds(t *testing.T) {
 			}
 
 			if tt.wantCron != "" {
-				cronExpr := spec.CronExpr()
+				cronExpr, err := spec.CronExpr()
+				if err != nil {
+					t.Errorf("ParseTiming(%q) CronExpr() error: %v", tt.input, err)
+					return
+				}
 				if cronExpr == "" {
 					t.Errorf("ParseTiming(%q) CronExpr() = empty", tt.input)
 				}
-				if _, err := cron.Parse(cronExpr); err != nil {
+				if _, err := cron.ParseStandard(cronExpr); err != nil {
 					t.Errorf("ParseTiming(%q) produced invalid cron: %v", tt.input, err)
 				}
 			}
@@ -56,7 +60,7 @@ func TestTiming_CronExpr_PerKind(t *testing.T) {
 		{"weekly", "0 9 * * 1,4"},
 	}
 	for _, tt := range exprs {
-		if _, err := cron.Parse(tt.expr); err != nil {
+		if _, err := cron.ParseStandard(tt.expr); err != nil {
 			t.Errorf("Invalid cron expr %q for %s: %v", tt.expr, tt.name, err)
 		}
 	}
@@ -77,12 +81,12 @@ func TestTiming_NextOccurrence_DST(t *testing.T) {
 	t1 := time.Date(2026, 3, 7, 0, 0, 0, 0, loc)
 	t2 := time.Date(2026, 3, 9, 0, 0, 0, 0, loc)
 
-	next1 := spec.NextOccurrence(t1)
+	next1, _ := spec.NextOccurrence(t1)
 	if next1.Hour() != 9 || next1.Location().String() != "America/Denver" {
 		t.Errorf("Expected 09:00 local for t1, got %v", next1)
 	}
 
-	next2 := spec.NextOccurrence(t2)
+	next2, _ := spec.NextOccurrence(t2)
 	if next2.Hour() != 9 || next2.Location().String() != "America/Denver" {
 		t.Errorf("Expected 09:00 local for t2, got %v", next2)
 	}
