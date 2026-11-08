@@ -271,12 +271,12 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests | PENDING | 0 | |
-| 01-contact-foundation | PENDING | 0 | |
-| 10-signal-sidecar | PENDING | 0 | |
-| 11-signal-legs (branch) | PENDING | 0 | |
-| 12-telnyx-sms | PENDING | 0 | |
-| 02-contact-wiring | PENDING | 0 | |
+| 00T-gate-tests | TESTS_VALIDATED | 1 | RED verified (unit) + skip-pass e2e; 2 matrix deltas applied (F4 test path, F7 scope); commit 3083e8f7 |
+| 01-contact-foundation | TESTS_VALIDATED | 0 | gate green; may dispatch |
+| 10-signal-sidecar | TESTS_VALIDATED | 0 | gate green; may dispatch |
+| 11-signal-legs (branch) | PENDING | 0 | awaits 01+10 |
+| 12-telnyx-sms | PENDING | 0 | awaits 01 |
+| 02-contact-wiring | PENDING | 0 | awaits 01+11+12 |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
