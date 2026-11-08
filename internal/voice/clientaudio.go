@@ -135,8 +135,8 @@ func (c *RawMicCapture) Read(p []byte) (int, error) {
 // handles close. Safe to call multiple times.
 func (c *RawMicCapture) Close() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.closeErr != nil || (c.file == nil && c.cmd == nil) {
+		c.mu.Unlock()
 		return nil
 	}
 	if c.cancel != nil {
@@ -145,12 +145,21 @@ func (c *RawMicCapture) Close() error {
 			_ = c.cmd.Wait() //nolint:mutexio // mutex serializes capture lifecycle; Wait reaps under the owning lock
 		}
 	}
-	if f, ok := c.file.(io.Closer); ok {
-		c.closeErr = f.Close()
-		c.file = nil
-		return c.closeErr
-	}
+	// Hand the file off to be closed OUTSIDE the mutex (no I/O under lock);
+	// nil it under the lock so a second Close() sees the handoff.
+	f := c.file
 	c.file = nil
+	c.mu.Unlock()
+	if cf, ok := f.(io.Closer); ok {
+		err := cf.Close()
+		c.mu.Lock()
+		if c.closeErr == nil {
+			c.closeErr = err
+		}
+		err = c.closeErr
+		c.mu.Unlock()
+		return err
+	}
 	return nil
 }
 

@@ -125,13 +125,15 @@ func (s *TextServer) acceptLoop(ctx context.Context, ln net.Listener) {
 // claimChild takes conn as THE child if none is connected yet.
 func (s *TextServer) claimChild(conn net.Conn) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.child != nil || s.closed {
+		s.mu.Unlock()
 		return false
 	}
 	s.child = conn
 	// Leaf 03: signal SendRaw that a child transport exists (close is
-	// once-only via childReadyOnce).
+	// once-only via childReadyOnce). The channel close runs OUTSIDE the
+	// mutex — waking goroutines must not queue behind the claimer.
+	s.mu.Unlock()
 	s.childReadyOnce.Do(func() { close(s.childReady) })
 	return true
 }
