@@ -751,8 +751,9 @@ func TestAgentLoop_PublishTokenUsage(t *testing.T) {
 
 	loop := NewAgentLoop("test-session", "/tmp", WithMessageBus(msgBus))
 
-	// Publish token usage
-	loop.publishTokenUsage("conv-1", 1500)
+	// Publish token usage (no tier keys: feature-off posture, payload
+	// carries only the legacy keys)
+	loop.publishTokenUsage("conv-1", 1500, "", false, 0)
 
 	select {
 	case msg := <-sub.Channel:

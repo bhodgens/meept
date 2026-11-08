@@ -143,3 +143,54 @@ func countPlaceholders(text string) int {
 func (h *PiiRestoreHook) TransformContext(_ context.Context, messages []llm.ChatMessage, toolDefs []llm.ToolDefinition) ContextTransform {
 	return ContextTransform{}
 }
+
+// MaskOutboundScoped is the pre-LLM masking half of the unmasking proxy
+// (agent-boundary-hardening BND-1; master contract C1-C scenario 03(a):
+// provider-bound context carries only [PII:*] tokens). It replaces every
+// detected PII span in message text with a session-scoped token minted
+// through the SAME Swapper the restore lane resolves through, so the later
+// RestoreOutput call on the response un-masks with the mapping this call
+// recorded. Called by the loop on the CLONED provider-bound message slice
+// (after cloneMessagesForTransform) — stored session history is never
+// touched; only what crosses to the provider this iteration.
+//
+// Refusals (each returns the input unchanged — the disabled-path
+// discipline):
+//   - nil hook / disabled config: feature off, byte-identical.
+//   - empty sessionID: tokens minted without a session scope can never be
+//     restored (the store refuses empty-session resolution), so scope-less
+//     masking is refused, not degraded.
+//   - empty message slice.
+//
+// Tool-call arguments are NOT masked: they are data addressed at this
+// session's tools, and masking them would corrupt tool semantics while the
+// responses they produce flow back only into this session. Content only —
+// the same surface the restore lane un-masks.
+func (h *PiiRestoreHook) MaskOutboundScoped(messages []llm.ChatMessage, sessionID string) []llm.ChatMessage {
+	if h == nil || !h.cfg.Enabled || sessionID == "" || len(messages) == 0 {
+		return messages
+	}
+
+	total := 0
+	for i := range messages {
+		if messages[i].Content == "" {
+			continue
+		}
+		masked, n := h.swapper.Mask(messages[i].Content, sessionID)
+		if n > 0 {
+			messages[i].Content = masked
+			total += n
+		}
+	}
+
+	if total > 0 {
+		// Counts and identifiers only — raw values and tokens never reach
+		// logs (leakage class C3).
+		h.logger.Debug("masked PII in provider-bound context",
+			"session_id", sessionID,
+			"spans", total,
+			"messages", len(messages),
+		)
+	}
+	return messages
+}
