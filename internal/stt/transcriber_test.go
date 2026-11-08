@@ -19,9 +19,12 @@ func TestNewTranscriber(t *testing.T) {
 		skipOnLinux bool   // native engine not supported on Linux
 	}{
 		{
+			// whisper-cli may or may not be installed (dev hosts
+			// often run whisper.cpp via Homebrew; CI runners don't),
+			// so the expectation follows the real PATH lookup.
 			name:     "whisper engine returns WhisperEngine",
 			engine:   "whisper",
-			wantErr:  true, // whisper-cli likely not installed in CI
+			wantErr:  func() bool { _, p := whisperCLIPresent(); return !p }(),
 			wantType: "whisper",
 		},
 		{

@@ -3,6 +3,7 @@ package stt
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -102,11 +103,28 @@ func TestNewWhisperEngine_BinaryNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "whisper-cli not found")
 }
 
+// whisperCLIPresent reports whether the default whisper-cli binary is
+// resolvable in PATH — the tests branch on it because a dev host may have
+// whisper.cpp installed (Homebrew) while CI runners typically do not.
+func whisperCLIPresent() (string, bool) {
+	p, err := exec.LookPath("whisper-cli")
+	return p, err == nil
+}
+
 func TestNewWhisperEngine_DefaultBinPath(t *testing.T) {
 	t.Parallel()
 
-	// Default bin path is "whisper-cli" which likely doesn't exist.
-	_, err := NewWhisperEngine(Config{Engine: "whisper"})
+	// Default bin path is "whisper-cli". The host may or may not have it
+	// installed (whisper.cpp via Homebrew is a supported local setup), so
+	// assert the behavior conditional on the real PATH lookup instead of
+	// assuming absence.
+	_, present := whisperCLIPresent()
+	eng, err := NewWhisperEngine(Config{Engine: "whisper"})
+	if present {
+		require.NoError(t, err)
+		require.NotNil(t, eng)
+		return
+	}
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "whisper-cli not found")
 }
