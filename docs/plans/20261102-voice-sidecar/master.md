@@ -243,26 +243,26 @@ Coverage matrix (gate tests live in 00T, parked .staged until each leaf):
 
 | Feature | Unit pin | e2e pin | Status |
 |---------|----------|---------|--------|
-| Config defaults C3 | TestVoiceConfigDefaults | - | PENDING |
-| ParseCallEvent + streaming.* no-ops | TestParseCallEvent | - | PENDING |
-| Webhook/media signature verify | TestVerifyWebhookSignature, TestVerifyMediaSocket | - | PENDING |
-| No AnswerCall on outbound leg | TestManagerOutboundNoAnswer | voice-lifecycle | PENDING |
-| Idempotent OnMediaStart | TestOnMediaStartIdempotent | - | PENDING |
-| Reorder window + silence fill | TestSpliceReorder | - | PENDING |
-| Pacing 20ms, chunk codec-derived | TestSplicePacing | - | PENDING |
-| Barge-in: clear to Telnyx + draft cancel, other calls untouched | TestBargeInPerCall | voice-bargein | PENDING |
-| Supervisor timeout -> fallback line, call continues, never parked | TestSupervisorTimeout | - | PENDING |
-| Dial refusals (empty URL/connection id/target/slot) | TestDialRefusals | - | PENDING |
-| Effects reservation: retry never rings twice | TestDialEffectsIdempotent | - | PENDING |
-| Day brief local-midnight (TZ differential) | TestDayBriefLocalDay | - | PENDING |
-| One live call per target; max_concurrent_calls busy | TestRegistryLimits | voice-concurrency | PENDING |
-| Unanswered outbound releases slot + unparks goal | TestOutboundTimeoutRelease | - | PENDING |
-| jargo not importable from internal/voice | TestNoJargoImport | - | PENDING |
-| DTMF frames decode as counted no-op | TestFrameDTMF, TestVoiceDTMF | - | PENDING |
-| Plain loopback listener (tunnel ingress), loopback-only bind | TestVoicePlainListener | - | PENDING |
-| Greeting on connect + filler on final prompt (fact-free, order pinned) | TestTalkLoopGreetingAndFiller | voice-lifecycle | PENDING |
-| Missing telnyx_public_key -> routes 503, fail-closed | TestVoiceRoutesDisabled | - | PENDING |
-| Child text-socket keys frame: redaction, memory-only, no env/argv | TestKeysRedaction, TestNoKeyLogs | - | PENDING |
+| Config defaults C3 | TestVoiceConfigDefaults | - | VALIDATED |
+| ParseCallEvent + streaming.* no-ops | TestParseCallEvent | - | VALIDATED |
+| Webhook/media signature verify | TestVerifyWebhookSignature, TestVerifyMediaSocket | - | VALIDATED |
+| No AnswerCall on outbound leg | TestManagerOutboundNoAnswer | voice-lifecycle | VALIDATED |
+| Idempotent OnMediaStart | TestOnMediaStartIdempotent | - | VALIDATED |
+| Reorder window + silence fill | TestSpliceReorder | - | VALIDATED |
+| Pacing 20ms, chunk codec-derived | TestSplicePacing | - | VALIDATED |
+| Barge-in: clear to Telnyx + draft cancel, other calls untouched | TestBargeInPerCall | voice-bargein | VALIDATED |
+| Supervisor timeout -> fallback line, call continues, never parked | TestSupervisorTimeout | - | VALIDATED |
+| Dial refusals (empty URL/connection id/target/slot) | TestDialRefusals | - | VALIDATED |
+| Effects reservation: retry never rings twice | TestDialEffectsIdempotent | - | VALIDATED |
+| Day brief local-midnight (TZ differential) | TestDayBriefLocalDay | - | VALIDATED |
+| One live call per target; max_concurrent_calls busy | TestRegistryLimits | voice-concurrency | VALIDATED |
+| Unanswered outbound releases slot + unparks goal | TestOutboundTimeoutRelease | - | VALIDATED |
+| jargo not importable from internal/voice | TestNoJargoImport | - | VALIDATED |
+| DTMF frames decode as counted no-op | TestFrameDTMF, TestVoiceDTMF | - | VALIDATED |
+| Plain loopback listener (tunnel ingress), loopback-only bind | TestVoicePlainListener | - | VALIDATED |
+| Greeting on connect + filler on final prompt (fact-free, order pinned) | TestTalkLoopGreetingAndFiller | voice-lifecycle | VALIDATED |
+| Missing telnyx_public_key -> routes 503, fail-closed | TestVoiceRoutesDisabled | - | VALIDATED |
+| Child text-socket keys frame: redaction, memory-only, no env/argv | TestKeysRedaction, TestNoKeyLogs | - | VALIDATED |
 
 Validation: control agent (in-session) runs each gate test RED for
 missing-implementation reasons, marks TESTS_VALIDATED, commits parked
@@ -272,23 +272,36 @@ files, then releases the wave.
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 00T | PENDING | |
-| 01 | PENDING | |
-| 02 | PENDING | |
-| 03 | PENDING | |
-| 04 | PENDING | |
-| 05 | PENDING | |
-| 06 | PENDING | |
-| 07 | PENDING | |
-| 08 | PENDING | |
-| 09 | PENDING | |
-| 10 | PENDING | |
-| 11 | PENDING | |
-| 12 | PENDING | |
-| 13 | PENDING | |
-| 14 | PENDING | serial, components.go |
-| 15 | PENDING | manifest is shared-write: merge, never overwrite |
-| 16 | PENDING | |
+| 00T | COMPLETE | gate tests landed + validated (see Test Gate matrix above) |
+| 01 | COMPLETE | config schema + templates |
+| 02 | COMPLETE | telnyx webhook + media |
+| 03 | COMPLETE | manager + call events |
+| 04 | COMPLETE | splice + pacing |
+| 05 | COMPLETE | dial + effects |
+| 06 | COMPLETE | registry + one-live-call |
+| 07 | COMPLETE | supervisor gate |
+| 08 | COMPLETE | day brief |
+| 09 | COMPLETE | child proc + lifecycle |
+| 10 | COMPLETE | plain loopback listener |
+| 11 | COMPLETE | talk loop + greeting/filler |
+| 12 | COMPLETE | routes fail-closed |
+| 13 | COMPLETE | keys redaction + secrets lanes |
+| 14 | COMPLETE | daemon wiring |
+| 15 | COMPLETE | manifest is shared-write: merged, never overwritten |
+| 16 | PARTIAL | docs + internal/voice/AGENTS.md + root AGENTS.md row landed; Makefile `make install` meept-voice target and docs/features.md row still PENDING |
+
+Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
+IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED | PARTIAL
+
+Update note (2026-11-08, VS-2 addendum): the tracking table above was
+all-PENDING at authoring; it now reflects the landed tree — leaves 00T-15
+COMPLETE (15 of 16 wired: suites voice-lifecycle / voice-bargein /
+voice-concurrency green in e2e, spec at rev 3 + as-built in
+docs/workflows/voice-sidecar.md, internal/voice/AGENTS.md carrying the
+full contract), leaf 16 PARTIAL (its docs half landed: spec status flip,
+invariant docs, root package-table row; its build half — the Makefile
+install target for cmd/meept-voice and the docs/features.md row — is
+still pending).
 
 ## Integration Test Plan
 

@@ -306,16 +306,26 @@ control agent (orchestrator, in-session).
 
 | # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
 |---|---------------------|--------|-----------|-----------|--------|
-| F1 | Extended keys frame decode/store | C1, leaf 02 | providers_wiring_test (vendor/base_url/voice fields, defaults) | n/a (wire is socket-level, covered by unit) | PENDING |
-| F2 | Daemon keys emission from config+broker | C4, leaf 03 | daemon voice_wiring keys test (fake broker + recording TextServer) | voice-lifecycle (keys line observed) | PENDING |
-| F3 | qwen3 streaming TTS adapter | C2, leaf 04 | providers tts_qwen3_test (httptest streaming PCM, keyless, resample) | n/a (vendor faked in CI) | PENDING |
-| F4 | pump->STT->prompt wiring | C5, leaf 05 | child_test/pipeline test (fake STT transcripts -> emitted prompt frames, partials preview-only) | voice-lifecycle | PENDING |
-| F5 | Barge-in via partial during playback | C5, leaf 06 | pipeline test (partial while speaking -> interrupt frame once; not while idle) | voice-bargein | PENDING |
-| F6 | Config fields for vendor/model/base_url/voice | leaf 01 | config schema/template test | n/a | PENDING |
+| F1 | Extended keys frame decode/store | C1, leaf 02 | providers_wiring_test (vendor/base_url/voice fields, defaults) | n/a (wire is socket-level, covered by unit) | VALIDATED 2026-11-07 (f8fa3c99) |
+| F2 | Daemon keys emission from config+broker | C4, leaf 03 | daemon voice_wiring keys test (fake broker + recording TextServer) | voice-lifecycle (keys line observed) | VALIDATED 2026-11-07 (c186d7ee) |
+| F3 | qwen3 streaming TTS adapter | C2, leaf 04 | providers tts_qwen3_test (httptest streaming PCM, keyless, resample) | n/a (vendor faked in CI) | VALIDATED 2026-11-07 (f8fa3c99, task matrix absorbed into leaf 02 dispatch) |
+| F4 | pump->STT->prompt wiring | C5, leaf 05 | child_test/pipeline test (fake STT transcripts -> emitted prompt frames, partials preview-only) | voice-lifecycle | VALIDATED 2026-11-07 (da197f34) |
+| F5 | Barge-in via partial during playback | C5, leaf 06 | pipeline test (partial while speaking -> interrupt frame once; not while idle) | voice-bargein | VALIDATED 2026-11-07 (abd08370) |
+| F6 | Config fields for vendor/model/base_url/voice | leaf 01 | config schema/template test | n/a | VALIDATED 2026-11-07 (a4216248) |
 
 Statuses: PENDING | DELTA (resolution in progress) | VALIDATED
 
-Delta log: (empty at authoring)
+Delta log:
+
+- 2026-11-07 (TTS-1 addendum): Test Gate matrix rows F1-F6 flipped
+  PENDING -> VALIDATED. Evidence: all six gate features landed and ran
+  green on 2026-11-07 — F1/F3 via leaf 02 f8fa3c99 (leaf 04's task matrix
+  verified already landed in the leaf 02 dispatch commit), F2 via leaf 03
+  c186d7ee (plus the leaf 07 b82e8f16 voice-lifecycle e2e keys-line
+  observation), F4 via leaf 05 da197f34, F5 via leaf 06 abd08370, F6 via
+  leaf 01 a4216248. The C2 alias deviation (SendRaw seam; Frame carries no
+  keys by design) was accepted in leaf 03 review and is recorded in the
+  Completion Tracking Table, not here.
 
 ## Open Questions
 

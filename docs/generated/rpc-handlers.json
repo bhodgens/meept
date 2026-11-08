@@ -51,7 +51,7 @@
     "topic": "agents.review",
     "handler": "register(func literal)",
     "file": "internal/daemon/activity_rpc.go",
-    "line": 299
+    "line": 292
   },
   {
     "topic": "backup.list",
@@ -183,7 +183,7 @@
     "topic": "chat.submit",
     "handler": "chatSubmitHandler.Submit",
     "file": "internal/daemon/daemon.go",
-    "line": 336
+    "line": 337
   },
   {
     "topic": "chat.submit",
@@ -381,31 +381,31 @@
     "topic": "groups.assign",
     "handler": "h.handleAssign",
     "file": "internal/rpc/groups.go",
-    "line": 153
+    "line": 154
   },
   {
     "topic": "groups.check",
     "handler": "h.handleCheck",
     "file": "internal/rpc/groups.go",
-    "line": 155
+    "line": 156
   },
   {
     "topic": "groups.explain",
     "handler": "h.handleExplain",
     "file": "internal/rpc/groups.go",
-    "line": 152
+    "line": 153
   },
   {
     "topic": "groups.list",
     "handler": "h.handleList",
     "file": "internal/rpc/groups.go",
-    "line": 151
+    "line": 152
   },
   {
     "topic": "groups.remove",
     "handler": "h.handleRemove",
     "file": "internal/rpc/groups.go",
-    "line": 154
+    "line": 155
   },
   {
     "topic": "instruction.add",

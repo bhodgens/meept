@@ -315,7 +315,34 @@ Test leaf: 00T-plan-critic-gate.md. Dispatched in Phase 0. Files land as `.stage
 
 Statuses: PENDING | DELTA | VALIDATED
 
-Delta log: none yet.
+Delta log:
+
+- 2026-11-03 (FC-1 addendum): commit 977d4044 records the C1 delta — the
+  critic feature flags shipped INVERTED to disable-form, per operator
+  product decision 2026-11-02. Details:
+  - Keys are `fresh_critic_disabled` / `hostile_critic_disabled` /
+    `interview_options_disabled` (not the `*_enabled` keys C1 originally
+    froze), all defaulting ON: absent config = ENABLED, explicit disable
+    honored, the old `*_enabled` keys have no effect (renamed while the
+    feature was still one day dark — no external user).
+  - TierComplex can no longer self-seal by default: hostile_critic_model
+    stays an empty slot, so every plan stamps hostile_skipped and waits at
+    the human seal until the slot names a model distinct from the planner
+    (the no-clean-seal-without-hostile-reader property is now the default
+    posture). New pin: defaults-on + nil hostile chatter + selfSeal ->
+    hostile_skipped / await_seal, no sealed hash, metric skip reason
+    no_model.
+  - Test Gate row F9 renamed: TestCriticFlagsDefaultOff ->
+    TestCriticFlagsDefaultOn (live boot), with TestCriticFlagsExplicitDisable
+    added alongside.
+  - The C5 flag_off skip reason is retired as a gate surface: with the
+    default inverted, the same-model hostile skip is now the standing
+    default behavior (hostile_skipped), not a flag-off path.
+  Daemon wiring reads inverted (`Set*Enabled(!Plans.*Disabled)`; landed via
+  sibling commit 5dc732e5). Files: internal/config/schema.go,
+  internal/config/plans_config_test.go, internal/agent/
+  plan_critique_loop_test.go, e2e/suites/plan-critic/wiring_test.go,
+  docs/agents/opt-in-defaults.md, docs/workflows/agent-orchestration.md.
 
 ## Open Questions
 

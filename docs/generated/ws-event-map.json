@@ -25,6 +25,11 @@
     "event_type": "agent_progress"
   },
   {
+    "topic_pattern": "agent.delegate.result",
+    "match": "exact",
+    "event_type": "agent_progress"
+  },
+  {
     "topic_pattern": "agent.progress",
     "match": "exact",
     "event_type": "agent_progress"
