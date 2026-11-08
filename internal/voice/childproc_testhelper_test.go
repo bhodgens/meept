@@ -242,6 +242,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "fake child: dial: %v\n", err)
 		os.Exit(4)
 	}
+	// Prove the start token as the FIRST line before any frame, exactly
+	// like the real child (internal/voicechild/child.go): a daemon with
+	// the token gate armed claims this conn; a legacy (disarmed) daemon
+	// drops the line as an undecodable frame.
+	if _, wErr := fmt.Fprintf(conn, "%s\n", token); wErr != nil {
+		fmt.Fprintln(os.Stderr, "fake child: token write:", wErr)
+	}
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
@@ -284,6 +291,53 @@ func main() {
 }
 `
 
+// badTokenVoiceChildSrc dials and proves the WRONG start token — the
+// impersonator the armed gate must refuse. It still reads (and discards)
+// its stdin token line so the spawn's stdin contract holds.
+const badTokenVoiceChildSrc = `package main
+
+import (
+	"bufio"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+)
+
+func main() {
+	args := os.Args[1:]
+	textSocket := ""
+	audioDir := ""
+	for i := 0; i+1 < len(args); i += 2 {
+		switch args[i] {
+		case "--text-socket":
+			textSocket = args[i+1]
+		case "--audio-dir":
+			audioDir = args[i+1]
+		}
+	}
+	if textSocket == "" || audioDir == "" {
+		os.Exit(2)
+	}
+	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+	conn, err := net.Dial("unix", textSocket)
+	if err != nil {
+		os.Exit(4)
+	}
+	if _, wErr := conn.Write([]byte("totally-wrong-token\n")); wErr != nil {
+		os.Exit(5)
+	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
+	select {
+	case <-sigs:
+	case <-time.After(60 * time.Second):
+	}
+	conn.Close()
+}
+`
+
 // buildFakeVoiceChild returns the fake child binary, built once per test run
 // (the dir argument is kept for call-site compatibility; the binary is
 // run-constant and must NOT be rebuilt per test / per -count iteration —
@@ -308,6 +362,17 @@ func buildSilentVoiceChild(t *testing.T, dir string) string {
 	return bin
 }
 
+// buildBadTokenVoiceChild returns the wrong-token impersonator binary.
+func buildBadTokenVoiceChild(t *testing.T, dir string) string {
+	t.Helper()
+	_ = dir
+	bin, err := badTokenVoiceChildBin()
+	if err != nil {
+		t.Fatalf("build bad token voice child: %v", err)
+	}
+	return bin
+}
+
 // The run-scoped build caches. Each sync.OnceValues runs the build+warm
 // sequence exactly once per test binary; a real (non-transient) build failure
 // is cached and fails every dependent test — correct: it is a broken
@@ -321,6 +386,11 @@ var silentVoiceChildBin = sync.OnceValues(func() (string, error) {
 	// The silent child never exits on its own: warm exec starts it and
 	// kills it at the grace tick.
 	return buildAndWarm("silent-meept-voice", silentVoiceChildSrc, "", 1*time.Second)
+})
+
+var badTokenVoiceChildBin = sync.OnceValues(func() (string, error) {
+	// Warm exec with no args: main exits 2 immediately (missing flags).
+	return buildAndWarm("badtoken-meept-voice", badTokenVoiceChildSrc, "", 10*time.Second)
 })
 
 // buildSupervisorCapableBinary builds a meept-daemon-named binary that

@@ -7,6 +7,7 @@ package voice
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -36,6 +37,17 @@ func SocketDir() string {
 // with a log line and closed (documented choice: refuse, not replace -
 // replacing would silently steal the live call transport from a healthy
 // child, e.g. one recovering from a forked duplicate).
+//
+// Start-token authentication (bughunt 2026-11-07 voice): the daemon pipes a
+// one-time start token to the child's STDIN at spawn (childproc.go). When
+// an expected token is set via SetExpectedToken, a connecting process must
+// prove it by sending the token as its FIRST newline-terminated line,
+// BEFORE any C1 frame: the line is consumed by the auth step and never
+// parsed as a frame. A mismatch or a slow client is refused (conn closed,
+// no claim, no frame processing - so no provider-key SendRaw can ever
+// reach an unauthenticated dialer). With NO expected token set the server
+// behaves exactly as before (first dial wins the claim): unit fixtures and
+// hand-built child dialers keep working unchanged.
 type TextServer struct {
 	path   string
 	logger *slog.Logger
@@ -46,12 +58,42 @@ type TextServer struct {
 	handler func(Frame)
 	closed  bool
 
+	// expectedToken is the one-time start token the connecting child must
+	// prove on its first line (guarded by mu; nil = no enforcement).
+	expectedToken []byte
+
 	// childReady closes the first time a child is claimed (leaf 03):
 	// SendRaw's keys emission waits on it so a child that has dialed but
 	// not yet been claimed by acceptLoop (unix connect completes into the
 	// backlog before Accept runs) still receives its frame.
 	childReadyOnce sync.Once
 	childReady     chan struct{}
+
+	// authTimeout bounds the first-line (start token) read when an
+	// expected token is armed. Zero means textAuthTimeoutDefault; tests
+	// lower it to keep the timeout-refusal case fast.
+	authTimeout time.Duration
+}
+
+// textAuthTimeoutDefault bounds how long the server waits for the connecting
+// child to send its start-token line when an expected token is armed.
+const textAuthTimeoutDefault = 5 * time.Second
+
+// SetExpectedToken arms the start-token authentication gate: a connecting
+// child must send token as its FIRST newline-terminated line before any C1
+// frame to be claimed (see TextServer doc). An empty token clears the gate
+// (legacy accept-first behavior; every Set* is nil/empty-guarded per repo
+// rule in the sense that no partial state is ever armed). The daemon's
+// spawn path (ChildProc) sets the per-spawn token before the child can
+// dial; the token is compared with subtle.ConstantTimeCompare.
+func (s *TextServer) SetExpectedToken(token string) {
+	s.mu.Lock()
+	if token == "" {
+		s.expectedToken = nil
+	} else {
+		s.expectedToken = []byte(token)
+	}
+	s.mu.Unlock()
 }
 
 // NewTextServer creates a server listening on path (a unix socket path).
@@ -97,7 +139,9 @@ func (s *TextServer) Start(ctx context.Context) error {
 
 // acceptLoop accepts connections until the listener closes. The first
 // connection becomes the child; subsequent ones are refused with a log
-// line (one child hosts N pipelines - see TextServer doc).
+// line (one child hosts N pipelines - see TextServer doc). When a start
+// token is armed, the would-be child must authenticate its first line
+// BEFORE any claim or frame processing (see TextServer doc).
 func (s *TextServer) acceptLoop(ctx context.Context, ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
@@ -112,6 +156,13 @@ func (s *TextServer) acceptLoop(ctx context.Context, ln net.Listener) {
 			s.logger.Error("voice: text socket accept failed", "error", err)
 			return
 		}
+		// A live child short-circuits the refusal path (today's behavior:
+		// immediate refuse + close, no auth read). Only a connection that
+		// could still BECOME the child pays the auth step.
+		if !s.hasChild() && !s.authenticate(conn) {
+			_ = conn.Close() //nolint:mutexio // refusal path, no lock held
+			continue
+		}
 		if s.claimChild(conn) {
 			go s.readLoop(conn)
 			continue
@@ -119,6 +170,74 @@ func (s *TextServer) acceptLoop(ctx context.Context, ln net.Listener) {
 		s.logger.Warn("voice: refusing second text-socket connection (one child hosts all pipelines)",
 			"remote", conn.RemoteAddr().String())
 		_ = conn.Close() //nolint:mutexio // refusal path, no lock held
+	}
+}
+
+// hasChild reports whether a child is already claimed.
+func (s *TextServer) hasChild() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.child != nil
+}
+
+// authLineMaxBytes caps the first-line read: the start token is 32 hex
+// chars (plus newline); anything longer is not a token and is refused
+// without reading further.
+const authLineMaxBytes = 1024
+
+// authenticate proves conn against the armed start token: it reads the
+// connection's FIRST newline-terminated line (byte-at-a-time so no frame
+// bytes are ever buffered past the auth line - readLoop starts cleanly
+// after it) under the auth deadline, and compares it to the expected token
+// in constant time. With no token armed it accepts immediately (legacy
+// first-dial-wins behavior). On failure it logs a warning carrying NO
+// token material and returns false; the caller closes the conn without
+// claiming it. The auth line is consumed here and never parsed as a frame.
+func (s *TextServer) authenticate(conn net.Conn) bool {
+	s.mu.Lock()
+	want := s.expectedToken
+	timeout := s.authTimeout
+	s.mu.Unlock()
+	if len(want) == 0 {
+		return true
+	}
+	if timeout <= 0 {
+		timeout = textAuthTimeoutDefault
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	line, ok := readFirstLine(conn, authLineMaxBytes)
+	_ = conn.SetReadDeadline(time.Time{})
+	if ok && len(want) == len(line) && subtle.ConstantTimeCompare(line, want) == 1 {
+		return true
+	}
+	// Deliberately generic: no token value, no comparison detail, no
+	// distinction between timeout/oversize/mismatch in the log line.
+	s.logger.Warn("voice: text-socket child refused: start token authentication failed")
+	return false
+}
+
+// readFirstLine reads bytes one at a time until '\n' (which is stripped,
+// along with a preceding '\r'), reporting false on EOF, read error, or a
+// line exceeding maxBytes. Byte-at-a-time reads never over-read, so the
+// bytes after the auth line stay in the socket for readLoop.
+func readFirstLine(r io.Reader, maxBytes int) ([]byte, bool) {
+	var line []byte
+	buf := make([]byte, 1)
+	for {
+		n, err := r.Read(buf)
+		if n == 0 || err != nil {
+			return nil, false
+		}
+		if buf[0] == '\n' {
+			if len(line) > 0 && line[len(line)-1] == '\r' {
+				line = line[:len(line)-1]
+			}
+			return line, true
+		}
+		line = append(line, buf[0])
+		if len(line) > maxBytes {
+			return nil, false
+		}
 	}
 }
 

@@ -35,7 +35,9 @@ func shortTempDir(t *testing.T) string {
 
 // fakeDaemon stands in for the daemon: a text socket listener recording
 // frames the child emits (decoded, plus the raw lines for wire-shape
-// assertions), and per-call audio pair listeners.
+// assertions), and per-call audio pair listeners. The child's FIRST line
+// is its start-token proof (never a frame), so serveText consumes it into
+// authLine and records only subsequent lines as frames.
 type fakeDaemon struct {
 	t           *testing.T
 	dir         string
@@ -43,6 +45,7 @@ type fakeDaemon struct {
 	mu          sync.Mutex
 	queue       []voiceframe.Frame
 	rawQueue    []string
+	authLine    string // first child line: the start-token proof
 	frameSignal chan struct{}
 	inLn        map[string]net.Listener
 	outLn       map[string]net.Listener
@@ -151,7 +154,10 @@ func (d *fakeDaemon) waitFrame(t *testing.T) voiceframe.Frame {
 	return f
 }
 
-// serveText accepts the child's text connection and records frames it sends.
+// serveText accepts the child's text connection and records frames it
+// sends. The FIRST line is the child's start-token proof (the daemon
+// seam consumes it; it is never a C1 frame), so it is captured into
+// authLine and excluded from the frame/raw queues.
 func (d *fakeDaemon) serveText() net.Conn {
 	d.t.Helper()
 	conn, err := d.textLn.Accept()
@@ -160,7 +166,15 @@ func (d *fakeDaemon) serveText() net.Conn {
 	}
 	go func() {
 		br := bufio.NewScanner(conn)
+		first := true
 		for br.Scan() {
+			if first {
+				first = false
+				d.mu.Lock()
+				d.authLine = br.Text()
+				d.mu.Unlock()
+				continue
+			}
 			d.mu.Lock()
 			d.rawQueue = append(d.rawQueue, br.Text())
 			d.mu.Unlock()
@@ -178,6 +192,24 @@ func (d *fakeDaemon) serveText() net.Conn {
 		}
 	}()
 	return conn
+}
+
+// waitAuthLine waits for the child's first line (the start-token proof)
+// and returns it.
+func (d *fakeDaemon) waitAuthLine(t *testing.T) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		d.mu.Lock()
+		line := d.authLine
+		d.mu.Unlock()
+		if line != "" {
+			return line
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("child never sent its start-token proof line")
+	return ""
 }
 
 // waitRawLine waits for and pops the next raw child-emitted line. Wire
@@ -239,6 +271,11 @@ func TestSetupRegistersPipeline(t *testing.T) {
 	}
 	if child.tokenLoad() != "tok-123" {
 		t.Fatalf("token not read from stdin reader")
+	}
+	// The daemon-side seam consumes the child's FIRST line as the
+	// start-token proof (it never reaches the frame queue).
+	if got := d.waitAuthLine(t); got != "tok-123" {
+		t.Fatalf("first child line = %q, want the token proof tok-123", got)
 	}
 
 	// End tears the pipeline down (T2).
@@ -693,3 +730,72 @@ var (
 	_ = io.ReadFull   // keep io linked
 	_ context.Context // keep context linked
 )
+
+// T-token-dial: the child proves its start token as the FIRST line on the
+// text socket, immediately after dialing and BEFORE any C1 frame (the
+// daemon's auth gate consumes that line; a frame-first child would be
+// refused). Asserted against a raw byte-capturing listener so the ORDER is
+// pinned at the wire level, not through the fake daemon's line framing.
+func TestChildSendsTokenLineFirst(t *testing.T) {
+	dir := shortTempDir(t)
+	sockPath := filepath.Join(dir, "t.sock")
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	captured := make(chan []byte, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			captured <- nil
+			return
+		}
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+		out := make([]byte, n)
+		copy(out, buf[:n])
+		captured <- out
+		_ = conn.Close()
+	}()
+
+	child := New(ChildConfig{
+		TextSocketPath: sockPath,
+		AudioDir:       dir,
+		TokenReader:    strings.NewReader("tok-first-42\n"),
+	})
+	runDone := make(chan error, 1)
+	go func() { runDone <- child.Run(context.Background()) }()
+
+	select {
+	case b := <-captured:
+		if b == nil {
+			t.Fatalf("accept failed")
+		}
+		if string(b) != "tok-first-42\n" {
+			t.Fatalf("first bytes on the text socket = %q, want %q", string(b), "tok-first-42\n")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("child never sent its start-token proof line")
+	}
+
+	// The connection died (listener closed): Run ends; the token was the
+	// ONLY thing sent (no frame bytes landed before the close).
+	_ = ln.Close()
+	select {
+	case <-runDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after the auth listener closed")
+	}
+}
+
+// T-token-stdin-shape: readToken keeps the stdin seam exactly as contracted
+// (line read, whitespace-trimmed, empty refused) — the token the child
+// writes on the socket is the trimmed stdin line byte-for-byte.
+func TestTokenIsTrimmedStdinLine(t *testing.T) {
+	tok, err := readToken(strings.NewReader("  abc123\r\n"))
+	if err != nil || tok != "abc123" {
+		t.Fatalf("readToken = %q, %v; want abc123, nil", tok, err)
+	}
+}

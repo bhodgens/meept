@@ -213,6 +213,18 @@ func (c *Child) Run(ctx context.Context) error {
 		return fmt.Errorf("voicechild: dial text socket %s: %w", c.cfg.TextSocketPath, err)
 	}
 	defer func() { _ = conn.Close() }() //nolint:mutexio // deferred close, no lock held
+
+	// Start-token proof (bughunt 2026-11-07 voice): the one-time token read
+	// from STDIN is the child's credential for the text socket. The daemon
+	// reads the FIRST line before claiming the connection, so the token
+	// goes out here — after dialing, BEFORE any C1 frame. A token-less
+	// daemon (no expected token armed: unit fixtures, hand-built dialers)
+	// treats the line as an undecodable frame and drops it with a warning;
+	// the seam is harmless in that direction.
+	if _, err := conn.Write([]byte(token + "\n")); err != nil {
+		return fmt.Errorf("voicechild: send start token: %w", err)
+	}
+
 	c.mu.Lock()
 	c.conn = conn
 	c.mu.Unlock()

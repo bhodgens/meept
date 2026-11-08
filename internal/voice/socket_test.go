@@ -3,9 +3,11 @@ package voice
 import (
 	"bufio"
 	"context"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -35,6 +37,15 @@ func waitConn(t *testing.T, fn func() bool) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatalf("condition not reached within 2s")
+}
+
+// armFastAuth lowers the start-token read deadline for tests so the
+// timeout-refusal case fails fast instead of waiting the production 5s.
+// Call before the dial whose first line is expected to stall.
+func (s *TextServer) armFastAuth() {
+	s.mu.Lock()
+	s.authTimeout = 200 * time.Millisecond
+	s.mu.Unlock()
 }
 
 // shortDir creates a temp dir with a SHORT path. Unix socket paths are
@@ -559,4 +570,244 @@ func ioReadFull(c net.Conn, buf []byte) (int, error) {
 		}
 	}
 	return total, nil
+}
+
+// ---- start-token authentication gate (bughunt 2026-11-07 voice) ----
+
+// T-auth-1: with an expected token armed, a child that sends the token as
+// its first line is claimed; frames flow after the auth line, and the auth
+// line itself is NEVER parsed as a frame (the handler sees only the prompt).
+func TestTextServerTokenAuthClaimsChild(t *testing.T) {
+	dir := shortDir(t)
+	path := filepath.Join(dir, "text.sock")
+	srv := NewTextServer(path, nil)
+	srv.SetExpectedToken("tok-abc")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+
+	frames := make(chan Frame, 8)
+	srv.SetHandler(func(f Frame) { frames <- f })
+
+	var child net.Conn
+	waitConn(t, func() bool {
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+		child, _ = dialText(t, path)
+		return true
+	})
+	if _, err := child.Write([]byte("tok-abc\n" +
+		`{"call_id":"c1","event":"prompt","text":"hello"}` + "\n")); err != nil {
+		t.Fatalf("child write: %v", err)
+	}
+
+	// Claimed: Send to the child succeeds (it must drain the frame).
+	waitConn(t, func() bool {
+		return srv.Send(Frame{CallID: "c1", Event: EventSay, Text: "ok"}) == nil
+	})
+	select {
+	case f := <-frames:
+		if f.Event != EventPrompt || f.CallID != "c1" || f.Text != "hello" {
+			t.Fatalf("frame = %+v, want prompt c1 hello", f)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("frame after auth line never reached the handler")
+	}
+	// The auth line must NOT have reached the handler as a frame: only the
+	// one prompt was written. Drain any late arrival to prove absence.
+	select {
+	case f := <-frames:
+		t.Fatalf("unexpected second frame delivered: %+v", f)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// T-auth-2: a WRONG token is refused — conn closed, never claimed (Send
+// keeps failing with "no child connected"), and the warning names the
+// failure without leaking token material. A LATER correct dial still
+// claims the transport (refusal does not poison the gate).
+func TestTextServerTokenAuthRefusesWrongToken(t *testing.T) {
+	dir := shortDir(t)
+	path := filepath.Join(dir, "text.sock")
+	logBuf := &lockedBuffer{}
+	srv := NewTextServer(path, slog.New(slog.NewTextHandler(logBuf, nil)))
+	const token = "sekrit-token-xyz"
+	srv.SetExpectedToken(token)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+
+	var impostor net.Conn
+	waitConn(t, func() bool {
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+		impostor, _ = dialText(t, path)
+		return true
+	})
+	if _, err := impostor.Write([]byte("not-the-token\n")); err != nil {
+		t.Fatalf("impostor write: %v", err)
+	}
+	// Refused conn: the server closes it, so a read sees EOF/error.
+	waitConn(t, func() bool {
+		buf := make([]byte, 1)
+		_ = impostor.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		_, rerr := impostor.Read(buf)
+		return rerr != nil
+	})
+
+	// No claim ever happened: Send fails while the gate holds no child.
+	if err := srv.Send(Frame{CallID: "c", Event: EventSay}); err == nil {
+		t.Fatal("impostor was claimed as the child")
+	}
+
+	logs := logBuf.String()
+	if !strings.Contains(logs, "start token authentication failed") {
+		t.Fatalf("refusal not logged: %s", logs)
+	}
+	if strings.Contains(logs, token) || strings.Contains(logs, "not-the-token") {
+		t.Fatalf("log leaked token material: %s", logs)
+	}
+
+	// A later correct child still claims (refused dialers don't poison).
+	var child net.Conn
+	waitConn(t, func() bool {
+		child, _ = dialText(t, path)
+		_, werr := child.Write([]byte(token + "\n"))
+		if werr != nil {
+			return false
+		}
+		return srv.Send(Frame{CallID: "c", Event: EventSay, Text: "hi"}) == nil
+	})
+	_ = child
+
+	// And the SECOND correct dial (child slot taken) is refused by the
+	// one-child rule, not the token gate.
+	second, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatalf("second dial: %v", err)
+	}
+	defer second.Close()
+	waitConn(t, func() bool {
+		buf := make([]byte, 1)
+		_ = second.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		_, rerr := second.Read(buf)
+		return rerr != nil
+	})
+}
+
+// T-auth-3: a dialer that sends NOTHING and hangs is refused at the auth
+// deadline (fast arm: 200ms); EOF-before-line is refused the same way.
+func TestTextServerTokenAuthRefusesStalledAndEOF(t *testing.T) {
+	dir := shortDir(t)
+	path := filepath.Join(dir, "text.sock")
+	srv := NewTextServer(path, nil)
+	srv.SetExpectedToken("tok-abc")
+	srv.armFastAuth()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+
+	var stalled net.Conn
+	waitConn(t, func() bool {
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+		stalled, _ = dialText(t, path)
+		return true
+	})
+	waitConn(t, func() bool {
+		buf := make([]byte, 1)
+		_ = stalled.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		_, rerr := stalled.Read(buf)
+		return rerr != nil
+	})
+	if err := srv.Send(Frame{CallID: "c", Event: EventSay}); err == nil {
+		t.Fatal("stalled dialer was claimed as the child")
+	}
+
+	// EOF without any line: also refused, and the gate stays usable.
+	eofConn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatalf("eof dial: %v", err)
+	}
+	_ = eofConn.Close()
+	waitConn(t, func() bool {
+		return srv.Send(Frame{CallID: "c", Event: EventSay}) != nil
+	})
+	// A correct child after both refusals still claims.
+	var child net.Conn
+	waitConn(t, func() bool {
+		child, _ = dialText(t, path)
+		if _, werr := child.Write([]byte("tok-abc\n")); werr != nil {
+			return false
+		}
+		return srv.Send(Frame{CallID: "c", Event: EventSay, Text: "hi"}) == nil
+	})
+	_ = child
+}
+
+// T-auth-4: with NO expected token armed the server keeps the legacy
+// first-dial-wins behavior exactly: a bare dial (no auth line at all) is
+// claimed and frames flow. This is what every existing test fixture and
+// any hand-built child dialer relies on.
+func TestTextServerTokenAuthDisabledLegacyAccept(t *testing.T) {
+	dir := shortDir(t)
+	path := filepath.Join(dir, "text.sock")
+	srv := NewTextServer(path, nil)
+	// Deliberately no SetExpectedToken call.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+
+	var child net.Conn
+	waitConn(t, func() bool {
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+		child, _ = dialText(t, path)
+		return true
+	})
+	// NO auth line: straight to a frame.
+	if _, err := child.Write([]byte(`{"call_id":"c1","event":"prompt","text":"x"}` + "\n")); err != nil {
+		t.Fatalf("child write: %v", err)
+	}
+	frames := make(chan Frame, 4)
+	srv.SetHandler(func(f Frame) { frames <- f })
+	select {
+	case f := <-frames:
+		if f.CallID != "c1" || f.Event != EventPrompt {
+			t.Fatalf("legacy frame = %+v", f)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("legacy (no token) accept: frame never reached handler")
+	}
+}
+
+// T-auth-5: SetExpectedToken("") disarms the gate (nil-safe setter: an
+// empty token never arms a partial state).
+func TestTextServerSetExpectedTokenClearsGate(t *testing.T) {
+	dir := shortDir(t)
+	path := filepath.Join(dir, "text.sock")
+	srv := NewTextServer(path, nil)
+	srv.SetExpectedToken("tok")
+	srv.SetExpectedToken("")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+
+	var child net.Conn
+	waitConn(t, func() bool {
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+		child, _ = dialText(t, path)
+		return true
+	})
+	// Bare dial, no auth line: must claim (gate cleared).
+	waitConn(t, func() bool {
+		return srv.Send(Frame{CallID: "c", Event: EventSay}) == nil
+	})
+	_ = child
 }
