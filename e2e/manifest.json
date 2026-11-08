@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-06",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
+  "generated": "2026-11-07",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -153,15 +153,7 @@
       "llm-serving-tiers"
     ],
     "internal/daemon/": [
-      "daemon-lifecycle",
-      "memory-knowledge-assets",
-      "memory-turn-capture",
-      "project-binding",
-      "state-restart",
-      "acp-wire",
-      "llm-hop-tracing",
-      "turn-journal",
-      "hitl-notifications"
+      "daemon-lifecycle"
     ],
     "internal/llm/": [
       "daemon-lifecycle",
@@ -525,6 +517,119 @@
     ],
     "internal/rpc/voice_local.go": [
       "voice-local"
+    ],
+    "internal/daemon/acp_notifier.go": [
+      "acp-persona-route",
+      "acp-wire"
+    ],
+    "internal/daemon/acp_register.go": [
+      "acp-wire"
+    ],
+    "internal/daemon/activity_rpc.go": [
+      "activity-views"
+    ],
+    "internal/daemon/activity_wiring.go": [
+      "activity-views"
+    ],
+    "internal/daemon/bridges_wiring.go": [
+      "bridges"
+    ],
+    "internal/daemon/components.go": [
+      "acp-persona-route",
+      "acp-wire",
+      "auth-multiuser",
+      "boundary-hardening",
+      "config-models",
+      "github-intake",
+      "memory-knowledge-assets",
+      "plan-critic",
+      "quota-park",
+      "runtime-hang",
+      "session-teardown",
+      "state-restart",
+      "task-state",
+      "tool-provider-seam",
+      "turn-journal"
+    ],
+    "internal/daemon/context_assembler_wiring.go": [
+      "context-memory-engine"
+    ],
+    "internal/daemon/daemon.go": [
+      "config-reload",
+      "daemon-lifecycle",
+      "gui-pairing",
+      "naive-user-chat",
+      "plan-critic",
+      "security-tls",
+      "session-teardown",
+      "task-queue",
+      "turn-journal"
+    ],
+    "internal/daemon/daemon_rpc.go": [
+      "rpc-ping"
+    ],
+    "internal/daemon/evolver_approval_bridge.go": [
+      "continuity-regressions"
+    ],
+    "internal/daemon/filter_wiring.go": [
+      "output-filters"
+    ],
+    "internal/daemon/gate_park_wiring.go": [
+      "hitl-notifications"
+    ],
+    "internal/daemon/github_wiring.go": [
+      "github-pr-ci",
+      "tool-provider-seam"
+    ],
+    "internal/daemon/goal_anchor_adapter.go": [
+      "goal-completion"
+    ],
+    "internal/daemon/hermes_register.go": [
+      "tool-provider-seam"
+    ],
+    "internal/daemon/instruction_wiring.go": [
+      "github-pr-ci"
+    ],
+    "internal/daemon/intake_status_rpc.go": [
+      "intake-status"
+    ],
+    "internal/daemon/knowledge_wiring.go": [
+      "memory-knowledge-assets"
+    ],
+    "internal/daemon/l0_wiring.go": [
+      "memory-layered-distill"
+    ],
+    "internal/daemon/memory_capture.go": [
+      "memory-defaults",
+      "memory-turn-capture"
+    ],
+    "internal/daemon/memory_rpc.go": [
+      "bridges"
+    ],
+    "internal/daemon/orphan.go": [
+      "daemon-lifecycle"
+    ],
+    "internal/daemon/otlp_traces_wiring.go": [
+      "llm-hop-tracing"
+    ],
+    "internal/daemon/slack_wiring.go": [
+      "hitl-notifications"
+    ],
+    "internal/daemon/tiers_engine.go": [
+      "context-memory-engine"
+    ],
+    "internal/daemon/toolgate.go": [
+      "tool-provider-seam"
+    ],
+    "internal/daemon/toolprovider_config.go": [
+      "tool-provider-seam"
+    ],
+    "internal/daemon/voice_keys.go": [
+      "voice-lifecycle"
+    ],
+    "internal/daemon/voice_wiring.go": [
+      "voice-bargein",
+      "voice-lifecycle"
     ]
   },
   "suites": [
@@ -759,7 +864,7 @@
         "memory-scoping-02 chief-of-staff: memory_max_scope=global agent recalls the project-A fact in project B; the default (project) agent does not (F3, C3)",
         "memory-scoping-03 fail-closed cell: multiuser enabled + resolved-empty userID hides user-scope rows while global rows stay visible (Flag 3)"
       ],
-      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today — the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
+      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today \u2014 the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
     },
     {
       "name": "memory-layered-distill",
@@ -2768,7 +2873,7 @@
       "id": "naive-user-chat-05",
       "suite": "naive-user-chat",
       "diff": "M",
-      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge — the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge \u2014 the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
       "paths": [
         "internal/agent/loop.go",
         "internal/agent/reply_guard.go"
@@ -2891,7 +2996,7 @@
       "id": "plan-lifecycle-02",
       "suite": "plan-lifecycle",
       "diff": "M",
-      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write — file parses at every observation",
+      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write \u2014 file parses at every observation",
       "paths": [
         "internal/plan/manager.go",
         "internal/plan/filelock.go",
@@ -3101,7 +3206,7 @@
       "id": "goal-completion-01",
       "suite": "goal-completion",
       "diff": "L",
-      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger — plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
+      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger \u2014 plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
       "paths": [
         "internal/employee/manager.go",
         "internal/employee/goal_loop.go",
@@ -3186,7 +3291,7 @@
       "id": "memory-turn-capture-02",
       "suite": "memory-turn-capture",
       "diff": "M",
-      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID — task reply reaches L0 + status=auto claim",
+      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID \u2014 task reply reaches L0 + status=auto claim",
       "paths": [
         "internal/daemon/memory_capture.go",
         "internal/agent/handler.go"
@@ -3384,7 +3489,7 @@
       "id": "github-pr-ci-04",
       "suite": "github-pr-ci",
       "diff": "M",
-      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline — the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
+      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline \u2014 the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
       "paths": [
         "internal/tools/builtin/github_ci.go",
         "internal/githubsvc/rearm.go",
