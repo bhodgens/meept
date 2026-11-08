@@ -201,7 +201,6 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		return nil, nil
 	}
 
-
 	// -- 2. Signature verifiers (leaf 02): mandatory for the PHONE routes;
 	// an undecodable public key fails the boot. Only the phone leg needs
 	// them (the local leg rides C2 audio pairs over SocketDir, never Telnyx
@@ -241,6 +240,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		IdleStop:       time.Duration(cfg.IdleStopSeconds) * time.Second,
 		StartTimeout:   30 * time.Second,
 		Handshake:      voice.HandshakeProbe(textServer),
+		TokenAuth:      textServer,
 		Live:           func() int { return len(registry.Live()) },
 	}, vlog.With("sub", "child"), nil)
 	spawn := func(callCtx context.Context, ev telnyx.CallEvent) (context.CancelFunc, error) {

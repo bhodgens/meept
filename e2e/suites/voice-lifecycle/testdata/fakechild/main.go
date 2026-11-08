@@ -723,6 +723,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "fakechild: dial text socket: %v\n", err)
 		os.Exit(4)
 	}
+	// Proof of the one-time start token, exactly like the real child
+	// (internal/voicechild/child.go): the raw stdin token as the FIRST
+	// newline-terminated line, before any C1 frame. Required once the
+	// daemon arms TokenAuth (internal/daemon/voice_wiring.go).
+	if _, err := fmt.Fprintf(conn, "%s\n", token); err != nil {
+		fmt.Fprintf(os.Stderr, "fakechild: token proof: %v\n", err)
+		os.Exit(6)
+	}
 	c.mu.Lock()
 	c.conn = conn
 	c.mu.Unlock()
