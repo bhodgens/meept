@@ -27,6 +27,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -67,6 +68,16 @@ type stubNotification struct {
 
 func startStubRPC(t *testing.T) *stubRPCServer {
 	t.Helper()
+	// macOS default TMPDIR (/var/folders/...) exceeds the kernel sun_path
+	// limit (~104 bytes); the per-test TempDir suffix pushes the socket
+	// path past it -> "bind: invalid argument". Shorten the base once per
+	// process (the voice e2e suites' leaf-15 pattern).
+	if base := os.Getenv("TMPDIR"); len(base) > 40 {
+		short := "/tmp/meept-sigtest"
+		if err := os.MkdirAll(short, 0o700); err == nil {
+			t.Setenv("TMPDIR", short+"/")
+		}
+	}
 	sock := filepath.Join(t.TempDir(), "signal-cli.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {

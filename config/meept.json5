@@ -1382,6 +1382,14 @@
     "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
   },
 
+  // Employee contact chain ([contact]). The ordered fallback used when a
+  // contact record has no per-person policy; hop_delay_ms paces the wait
+  // before each fallback channel attempt.
+  "contact": {
+    "default_channels": ["telnyx_voice", "signal_voice", "signal_msg", "telnyx_sms"],  // ordered employee default chain
+    "hop_delay_ms": 5000,                   // wait before each fallback channel attempt
+  },
+
   // Analytics configuration
   "analytics": {
     "enabled": true,
@@ -1523,5 +1531,24 @@
   //     "require_node_signatures": true,
   //     "ed25519_key_rotation_days": 90,
   //   },
+  // },
+
+  // signal-cli sidecar (opt-in, disabled by default). One supervised
+  // signal-cli json-rpc child per Signal account serving calls and
+  // messages over a unix socket (contact channels, contract C3).
+  // signal-cli holds its own linked-device account state — NO Signal
+  // credentials live in this file or anywhere in meept. socket_path
+  // empty resolves to $MEEPT_HOME/signal/signal.sock. Requires
+  // signal-cli >= v0.13.0 with voice support (PR #1932).
+  // drift: commented template block; absent from installed homes by
+  // design (default-off: an absent block is identical to disabled).
+  // "signal": {
+  //   "enabled": false,
+  //   "binary": "signal-cli",
+  //   "account": "+15550001234",
+  //   "socket_path": "",
+  //   "idle_stop_seconds": 300,
+  //   "restart_backoff_ms": 1000,
+  //   "restart_max_backoff_ms": 30000,
   // },
 }

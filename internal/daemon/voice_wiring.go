@@ -117,6 +117,12 @@ type VoiceWiring struct {
 	// zero values take the server.go defaults). Set by WireVoice from the
 	// transport.http block.
 	plainOpts commhttp.PlainListenerOptions
+
+	// dayBriefSources carry the leaf-04 brief inputs for the PHONE leg's
+	// OnCallStart (the local leg builds its own closure). Nil sources
+	// omit their brief section (leaf-04 rule); Transcripts comes from the
+	// employee stack's call store. Zero-value struct = brief-less calls.
+	dayBriefSources voice.Deps
 }
 
 // WireVoiceDeps carries the components WireVoice captures. All pointer
@@ -228,6 +234,44 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	textSocketPath := filepath.Join(voice.SocketDir(), "text.sock")
 	textServer := voice.NewTextServer(textSocketPath, vlog.With("sub", "text-socket"))
 
+	// -- 3b. Employee stack (leaf 12): call store + binding + goal hold.
+	// Constructed BEFORE the manager (step 4) so the phone spawn closure
+	// and the dial tool adapter close over the live wiring: the phone-leg
+	// goal-hold + call-row bind (GH #123) register the employee hold at
+	// answer/dial time exactly like the local leg's Hold seam does. The
+	// voice dir must exist before the sqlite store opens calls.db.
+	if err := os.MkdirAll(config.MeeptPath("voice"), 0o755); err != nil {
+		return nil, fmt.Errorf("voice wiring: voice dir: %w", err)
+	}
+	employee, err := WireVoiceEmployee(VoiceEmployeeDeps{
+		Sessions:      deps.Sessions,
+		LoopManager:   deps.Loops,
+		TemplateLoop:  deps.Template,
+		WorkingDir:    config.MeeptPath("voice"),
+		Bus:           deps.Bus,
+		CallStorePath: filepath.Join(config.MeeptPath("voice"), "calls.db"),
+		Logger:        vlog.With("sub", "employee"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("voice wiring: employee stack: %w", err)
+	}
+	// Phone-leg day brief sources (GH #123 bind): the SAME leaf-04 shape
+	// the local leg's DayBriefBuilder closure uses, stored on the wiring
+	// so bindPhoneCall can build briefs for inbound + outbound calls.
+	phoneBriefDeps := voice.Deps{
+		Activity:    voice.AggregatorSource{Agg: deps.ActivityAggregator},
+		Transcripts: employee.store,
+		Memory:      deps.MemorySource,
+		Goals:       deps.GoalSource,
+	}
+	// bindPhone routes the PHONE leg's goal-hold + call-row bind (GH #123
+	// gap closure) to the wiring method. Declared before the spawn closure
+	// (step 4) captures it and assigned right after w exists: closures
+	// capture variables, and no call event or tool dial can fire before
+	// WireVoice returns, so the method value is always live at call time.
+	// See bindPhoneCall for the hold + row contract.
+	var bindPhone func(ccid, number, employeeID, direction string)
+
 	// -- 4. Registry (C8) + call manager (C5). The manager's SessionSpawner
 	// ensures the child is up before the call is answered; a spawn failure
 	// refuses the call (ErrChildUnavailable), never hangs it.
@@ -259,30 +303,22 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		if _, err := registry.Acquire(ev.CallControlID, cfg.DefaultEmployee, ev.From); err != nil {
 			return nil, fmt.Errorf("voice wiring: registry acquire: %w", err)
 		}
+		// Goal-hold + call row (GH #123 gap closure): the INBOUND phone
+		// leg registers the per-employee hold and starts the calls.db row
+		// at answer time, exactly like LocalLeg.Open does for the local
+		// leg. Without this the release fan-out's ReleaseHook never sees
+		// the phone ccid and the row stays 'live' forever. The registry's
+		// one-live-call-per-employee rule passed above, so the hold's
+		// serialization mutex is free here - no deadlock. Bind failure
+		// degrades to an unbound call (warn), mirroring the local leg.
+		bindPhone(ev.CallControlID, voice.NormalizeE164(ev.From),
+			cfg.DefaultEmployee, voice.DirectionIncoming)
 		return func() {}, nil
 	}
 	manager := voice.NewManager(voice.ManagerConfig{
 		StreamURL: cfg.PublicStreamURL,
 		Codec:     telnyx.DefaultCodec,
 	}, tel, spawn)
-
-	// -- 5. Employee stack (leaf 12): call store + binding + goal hold.
-	// The voice dir must exist before the sqlite store opens calls.db.
-	if err := os.MkdirAll(config.MeeptPath("voice"), 0o755); err != nil {
-		return nil, fmt.Errorf("voice wiring: voice dir: %w", err)
-	}
-	employee, err := WireVoiceEmployee(VoiceEmployeeDeps{
-		Sessions:      deps.Sessions,
-		LoopManager:   deps.Loops,
-		TemplateLoop:  deps.Template,
-		WorkingDir:    config.MeeptPath("voice"),
-		Bus:           deps.Bus,
-		CallStorePath: filepath.Join(config.MeeptPath("voice"), "calls.db"),
-		Logger:        vlog.With("sub", "employee"),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("voice wiring: employee stack: %w", err)
-	}
 
 	// -- 6. Supervisor (C6). The fast-model seam honors
 	// voice.supervisor_model (audit M1): when set, a dedicated client is
@@ -362,7 +398,11 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			TrustXForwardedFor: deps.Config.Transport.HTTP.TrustXForwardedFor,
 			Logger:             vlog.With("sub", "voice-plain"),
 		},
+		dayBriefSources: phoneBriefDeps,
 	}
+	// Arm the phone bind seam now that w exists (see the declaration at
+	// the employee-stack site; no call event can precede this line).
+	bindPhone = w.bindPhoneCall
 	// The phone seam is an interface field; assigning a nil *Client here
 	// would leave a non-nil interface wrapping a nil pointer (typed-nil
 	// trap). Set it only when the phone leg actually armed so the
@@ -747,6 +787,44 @@ type CallEndedEvent struct {
 // topic; ended carries the terminal outcome here).
 var TopicVoiceCallEnded = bus.NewTopic[CallEndedEvent]("voice.call.ended")
 
+// bindPhoneCall is the PHONE leg's goal-hold + call-row bind (GH #123
+// gap closure), the mirror of LocalLeg.Open's Hold seam + OnCallStart:
+//
+//  1. AcquireCallHold registers the per-employee hold so the release
+//     fan-out's ReleaseHook sees the ccid in heldCalls and runs
+//     Binding.OnCallEnd -> CallStore.End at teardown, marking the row
+//     'ended'. The registry's one-live-call-per-employee rule passed
+//     before this call, so the hold's serialization mutex is free - no
+//     deadlock. The release itself rides ReleaseHook -> ReleaseForCall;
+//     this only acquires.
+//  2. Binding.OnCallStart starts the calls.db row (state 'live') and
+//     resolves the ONE meept session per (number, employee), so phone
+//     turns bind like local turns.
+//
+// Nil-safe: a nil Employee wiring (unarmed employee stack) skips both.
+// OnCallStart failure degrades to an unbound call (warn) - the call
+// continues, mirroring the local leg's posture. Best-effort brief: a
+// brief-build failure binds the call brief-less (leaf-04 rule).
+func (w *VoiceWiring) bindPhoneCall(ccid, number, employeeID, direction string) {
+	if w.Employee == nil || w.Employee.Binding == nil {
+		return
+	}
+	w.Employee.AcquireCallHold(ccid, employeeID)
+	brief, err := voice.BuildDayBrief(context.Background(), w.dayBriefSources,
+		employeeID, number, time.Now(), time.Local)
+	if err != nil {
+		w.logger.Warn("voice wiring: phone day brief failed (call binds brief-less)",
+			"ccid", ccid, "err", err)
+		brief = voice.DayBrief{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := w.Employee.Binding.OnCallStart(ctx, ccid, number, employeeID, direction, brief); err != nil {
+		w.logger.Warn("voice wiring: phone binding OnCallStart failed (call continues unbound)",
+			"ccid", ccid, "err", err)
+	}
+}
+
 // sendOpenFrame sends the C1 open frame (local-leg plan CL1) for ccid.
 // The leg comes from the registry instance (leaf 06); provider selection
 // follows CL4 precedence (local-leg config falls back to global, empty
@@ -936,6 +1014,14 @@ func (w *VoiceWiring) dialForTool() builtin.DialerFunc {
 		if err != nil {
 			return "", err
 		}
+		// Goal-hold + call row (GH #123 gap closure): the OUTBOUND phone
+		// leg registers the per-employee hold and starts the calls.db row
+		// right after the dial is tracked (the outbound TrackOutbound
+		// site), before the no-answer timer can fire any release. The
+		// registry's one-live-call-per-employee rule passed inside Dial,
+		// so the hold's serialization mutex is free here. Bind failure
+		// degrades to an unbound call (warn), mirroring the local leg.
+		w.bindPhoneCall(res.CallControlID, target, employeeID, voice.DirectionOutgoing)
 		return res.CallControlID, nil
 	}
 }

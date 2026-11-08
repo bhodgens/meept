@@ -249,16 +249,19 @@ store. Invariants a future agent must NOT break:
   idempotent nil; a foreign (non-`local-`-shaped) id is
   ErrUnknownLocalCall. Keep the prefix shape test honest - it is what
   distinguishes those two.
-- Goal-hold feeding (gap closed): the call row's ended-state transition
-  rides `ReleaseHook -> heldCalls`. The ONLY production caller of
-  `AcquireCallHold` (internal/daemon/voice_employee.go:264) is now the
-  local leg: `LocalLeg.Open` invokes the injected `LocalDeps.Hold` seam
-  (wired to AcquireCallHold in internal/daemon/voice_wiring.go) once the
-  call is live, so the release fan-out's ReleaseHook sees the ccid and
-  runs `Binding.OnCallEnd` -> CallStore.End to mark the row 'ended'.
-  This covers BOTH local openers (the voice.local.* RPC seam and the
-  voice_call tool's SetVoiceLocalFunc). Keep the Hold seam optional
-  (nil degrades to no ended-state), the same posture as before.
+- Goal-hold feeding (gap closed, BOTH legs): the call row's ended-state
+  transition rides `ReleaseHook -> heldCalls`. The local leg's `Hold`
+  seam (LocalLeg.Open -> LocalDeps.Hold, wired to AcquireCallHold in
+  internal/daemon/voice_wiring.go) covers BOTH local openers (the
+  voice.local.* RPC seam and the voice_call tool's SetVoiceLocalFunc).
+  The PHONE leg binds through the same wiring: `bindPhoneCall` (daemon
+  voice_wiring.go, GH #123) registers AcquireCallHold AND starts the
+  calls.db row (Binding.OnCallStart) at the inbound spawn seam and the
+  outbound dial adapter, so phone rows reach 'ended' too. Without the
+  phone bind, phone rows stayed 'live' forever (they were never even
+  started - OnCallStart had no phone call site). Keep the Hold seam
+  optional (nil degrades to no ended-state), the same posture as
+  before.
 - RPC stays seam-based: `internal/rpc/voice_local.go` takes
   `VoiceLocalSeams` func fields and NEVER imports internal/voice (the
   daemon adapts in internal/daemon/voice_local_rpc.go). No audio ever

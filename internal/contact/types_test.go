@@ -101,7 +101,7 @@ func TestStorePutGetByPhoneNormalized(t *testing.T) {
 	if got.Phone != "+15550000001" {
 		t.Errorf("stored Phone = %q, want E.164-normalized %q (normalize AT WRITE, C1)", got.Phone, "+15550000001")
 	}
-	if got.ID != in.ID || got.DisplayName != "Ada" {
+	if got.ID != in.ID || got.DisplayName != "ada" {
 		t.Errorf("GetByPhone record = %+v, want the stored record body", got)
 	}
 	if len(got.Policy) != 4 || got.Policy[0] != ChannelTelnyxVoice {

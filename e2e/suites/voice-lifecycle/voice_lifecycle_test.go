@@ -36,8 +36,13 @@ package voicelifecycle
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/e2e/harness"
 )
 
 // TestVoiceLifecycleInboundCall runs the hermetic inbound loop end to end:
@@ -100,6 +105,37 @@ func TestVoiceLifecycleInboundCall(t *testing.T) {
 	fake.deliverHangup(s, ccid)
 	awaitLogLine(t, s, "voice call ended", 15*time.Second)
 	fake.awaitChildStop(15 * time.Second)
+
+	// GH #123 hard assertion (phone mirror of the voice-local ended-state
+	// pin): the inbound call row bindPhoneCall started at answer time
+	// (AcquireCallHold + Binding.OnCallStart) must reach 'ended' through
+	// the release fan-out (ReleaseHook -> OnCallEnd -> CallStore.End).
+	// Before the fix the phone leg never registered the hold, so the row
+	// stayed 'live' (or never existed at all - OnCallStart had no phone
+	// call site). Bounded poll: the fan-out rides the hangup event.
+	awaitCallRowEnded(t, s, ccid, 20*time.Second)
+}
+
+// awaitCallRowEnded polls calls.db until ccid's row state is 'ended'
+// (the phone-leg GH #123 assertion; sqlite3 CLI, the voice-local suite's
+// read pattern).
+func awaitCallRowEnded(t *testing.T, s *harness.Stack, ccid string, within time.Duration) {
+	t.Helper()
+	dbPath := filepath.Join(s.MeeptHome, "voice", "calls.db")
+	deadline := time.Now().Add(within)
+	var state string
+	for time.Now().Before(deadline) {
+		out, err := exec.Command("sqlite3", dbPath,
+			"SELECT state FROM voice_calls WHERE call_id='"+ccid+"';").Output()
+		if err == nil {
+			state = strings.TrimSpace(string(out))
+			if state == "ended" {
+				return
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("phone call row for %s never reached 'ended' within %s (last state %q; GH #123: the phone leg must end its calls.db row)", ccid, within, state)
 }
 
 // TestVoiceWebhookAcceptedAndMediaArmed pins the runnable hermetic half of

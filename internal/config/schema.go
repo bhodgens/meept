@@ -123,7 +123,9 @@ type Config struct {
 	GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	Intake              IntakeConfig              `json:"intake"               toml:"intake"`
 	Slack               SlackConfig               `json:"slack"                toml:"slack"`
+	Signal              SignalConfig              `json:"signal"               toml:"signal"`
 	Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
+	Contact             ContactConfig             `json:"contact,omitzero"     toml:"contact"`
 }
 
 // GitHubConfig configures the GitHub PR/CI tool set ([github]). Disabled by
@@ -4988,6 +4990,10 @@ func DefaultConfig() *Config {
 			DefaultLeg:           "phone",
 			Local:                LocalConfig{Enabled: false, BargeInRms: 3000},
 		},
+		Contact: ContactConfig{
+			DefaultChannels: []string{"telnyx_voice", "signal_voice", "signal_msg", "telnyx_sms"},
+			HopDelayMS:      5000,
+		},
 		ReflectionCollector: ReflectionCollectorConfig{
 			Enabled:              true,
 			AutoQueue:            true,
@@ -5028,6 +5034,19 @@ func DefaultConfig() *Config {
 			ChannelID:      "",
 			AllowedUserIDs: nil,
 			APIBaseURL:     "https://slack.com/api",
+		},
+		// signal-cli sidecar (opt-in, disabled by default; contact
+		// channels C3). SocketPath stays empty: it resolves to
+		// $MEEPT_HOME/signal/signal.sock at wiring time so MEEPT_HOME
+		// set AFTER DefaultConfig() still wins.
+		Signal: SignalConfig{
+			Enabled:             false,
+			Binary:              "signal-cli",
+			Account:             "",
+			SocketPath:          "",
+			IdleStopSeconds:     0,
+			RestartBackoffMs:    0,
+			RestartMaxBackoffMs: 0,
 		},
 	}
 }
@@ -5336,6 +5355,23 @@ type EmployeeLegConfig struct {
 	TTSModel string `json:"tts_model"  toml:"tts_model"`
 }
 
+// ContactConfig configures the employee contact chain ([contact],
+// contact-channels plan leaf 01 T5). DefaultChannels is the employee
+// default fallback chain applied when a contact record has no policy;
+// HopDelayMS paces the wait before each fallback channel attempt.
+//
+//gendoc:section contact
+//gendoc:desc Employee contact chain: default channel fallback order and the per-hop delay.
+//gendoc:example [contact] default_channels = ["telnyx_voice", "signal_voice", "signal_msg", "telnyx_sms"], hop_delay_ms = 5000
+type ContactConfig struct {
+	// DefaultChannels is the ordered employee default chain (record
+	// policy empty = this list at chain time).
+	DefaultChannels []string `json:"default_channels" toml:"default_channels"`
+	// HopDelayMS is the wait before each fallback channel attempt
+	// (the chain's pacing; 0 means no inter-channel delay).
+	HopDelayMS int `json:"hop_delay_ms" toml:"hop_delay_ms"`
+}
+
 // LocalConfig holds the local voice leg sub-block (voice.local, local-leg
 // plan CL4). The local leg is opt-in: Enabled must be true before any local
 // session opens. Empty provider/model/voice fields fall back to the global
@@ -5531,4 +5567,42 @@ func (c *Config) ValidateAll() error {
 func ParseLogLevel(level string) slog.Level {
 	lvl, _ := ParseLogLevelValue(level)
 	return lvl
+}
+
+// SignalConfig configures the signal-cli sidecar ([signal], contract C3
+// of the contact-channels plan, owner leaf 10): one supervised
+// signal-cli json-rpc child per Signal account, serving calls and
+// messages over a unix socket. Opt-in — disabled by default; when
+// disabled no subprocess is ever spawned. The daemon NEVER handles
+// Signal account credentials: signal-cli holds its own linked-device
+// state, and the supervisor only spawns the binary with the configured
+// account handle. SocketPath supports the ${VAR} env indirection the
+// JSON5 loader applies; the default resolves under $MEEPT_HOME
+// (config.MeeptPath("signal", "signal.sock")).
+//
+//gendoc:section signal
+//gendoc:desc signal-cli sidecar: supervised json-rpc child for Signal calls and messages (opt-in; disabled by default).
+//gendoc:example [signal] enabled = true, binary = "signal-cli", account = "+15550001234", idle_stop_seconds = 300
+type SignalConfig struct {
+	// Enabled turns the sidecar on (default: false, opt-in). Disabled
+	// means: never spawn signal-cli, never bind the socket.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// Binary is the signal-cli executable (PATH-resolved).
+	Binary string `json:"binary" toml:"binary"`
+	// Account is the Signal account handle the child serves (-u);
+	// signal-cli's own linked-device state holds the credentials.
+	Account string `json:"account" toml:"account"`
+	// SocketPath is the json-rpc unix socket the child binds. Empty
+	// resolves to $MEEPT_HOME/signal/signal.sock at wiring time.
+	SocketPath string `json:"socket_path" toml:"socket_path"`
+	// IdleStopSeconds stops the child after this many seconds without
+	// a client; signal-cli is expensive to keep warm. 0 disables idle
+	// stop (child stays up while enabled).
+	IdleStopSeconds int `json:"idle_stop_seconds" toml:"idle_stop_seconds"`
+	// RestartBackoffMs is the base crash-restart backoff (0 = default
+	// 1000ms); exponential, capped by RestartMaxBackoffMs.
+	RestartBackoffMs int `json:"restart_backoff_ms" toml:"restart_backoff_ms"`
+	// RestartMaxBackoffMs caps the restart backoff (0 = default
+	// 30000ms).
+	RestartMaxBackoffMs int `json:"restart_max_backoff_ms" toml:"restart_max_backoff_ms"`
 }
