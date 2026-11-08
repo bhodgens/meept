@@ -357,3 +357,53 @@ func TestDiscovery_SkillSource_Interface(t *testing.T) {
 	var _ SkillSource = (*ClaudeSource)(nil)
 	var _ SkillSource = (*mockSource)(nil)
 }
+
+// TestDiscovery_NestedSkillBundle regresses the C11.1 office bundle layout:
+// config/skills/office/office-docx/SKILL.md is TWO directories below the
+// tier root, and the one-level scan missed it - the format skills landed
+// undiscoverable (dormant) at runtime. Both the full scan and the
+// metadata-only index must surface a nested-bundle skill by name.
+func TestDiscovery_NestedSkillBundle(t *testing.T) {
+	projectDir := t.TempDir()
+	// Tier root has no SKILL.md of its own: office/ is a bundle whose
+	// subdirectories each carry a format skill.
+	bundle := filepath.Join(projectDir, "office")
+	skillDir := filepath.Join(bundle, "office-docx")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := "---\nname: office-docx\nrequires-tools: [office_docx]\n---\ncreate/edit Word docs"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	fs := NewFileSource([]DiscoveryTier{{Path: projectDir, Priority: PriorityProject}}, nil)
+
+	skills, err := fs.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("Discover: want 1 nested-bundle skill, got %d (%v)", len(skills), skills)
+	}
+	// The Skill's frontmatter-parsed requires-tools rides a SkillIndexEntry;
+	// assert the skill itself is discovered under the correct name.
+	if skills[0].Name != "office-docx" {
+		t.Errorf("Discover: Name = %q, want %q", skills[0].Name, "office-docx")
+	}
+
+	// Metadata-only index path (skill catalog) must surface it too.
+	entries, err := fs.DiscoverMetadata(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverMetadata: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("DiscoverMetadata: want 1 nested-bundle skill, got %d", len(entries))
+	}
+	if entries[0].Name != "office-docx" {
+		t.Errorf("DiscoverMetadata: Name = %q, want %q", entries[0].Name, "office-docx")
+	}
+	if len(entries[0].RequiresTools) != 1 || entries[0].RequiresTools[0] != "office_docx" {
+		t.Errorf("DiscoverMetadata: RequiresTools = %v, want [office_docx]", entries[0].RequiresTools)
+	}
+}

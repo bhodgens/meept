@@ -53,7 +53,11 @@ func (t *ScheduleCreateTool) Parameters() llm.FunctionParameters {
 			},
 			"schedule": {
 				Type:        schemaTypeString,
-				Description: "Cron expression for when to run the job (e.g., '0 9 * * *' for daily at 9am, '*/5 * * * *' for every 5 minutes). Supports 6-field cron with seconds.",
+				Description: "Cron expression for when to run the job (e.g., '0 9 * * *' for daily at 9am, '*/5 * * * *' for every 5 minutes). Supports 6-field cron with seconds. Mutually exclusive with timing.",
+			},
+			"timing": {
+				Type:        schemaTypeString,
+				Description: "Semantic timing spec for when to run the job, mutually exclusive with schedule. Forms: 'daily HH:mm:ss [TZ]', 'weekly DOW[,DOW...] HH:mm:ss [TZ]', 'at RFC3339', 'every <duration>=60s>', or a two-line 'rrule:\\nDTSTART;TZID=<IANA>:<yyyymmddThhmmss>\\nRRULE:<rule>'.",
 			},
 			schemaPropJobType: {
 				Type:        schemaTypeString,
@@ -85,7 +89,7 @@ func (t *ScheduleCreateTool) Parameters() llm.FunctionParameters {
 				Description: "Whether the job is enabled immediately (default true).",
 			},
 		},
-		Required: []string{"name", "schedule", "job_type"},
+		Required: []string{"name", "job_type"},
 	}
 }
 
@@ -107,6 +111,7 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 
 	name, _ := args[schemaPropName].(string)
 	schedule, _ := args["schedule"].(string)
+	timing, _ := args["timing"].(string)
 	jobType, _ := args["job_type"].(string)
 
 	if name == "" {
@@ -115,10 +120,16 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 			Error:   "name is required",
 		}, nil
 	}
-	if schedule == "" {
+	if schedule == "" && timing == "" {
 		return ScheduleCreateResult{
 			Success: false,
-			Error:   "schedule is required",
+			Error:   "schedule or timing is required",
+		}, nil
+	}
+	if schedule != "" && timing != "" {
+		return ScheduleCreateResult{
+			Success: false,
+			Error:   "schedule and timing are mutually exclusive",
 		}, nil
 	}
 	if jobType == "" {
@@ -144,6 +155,19 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 	// Set enabled flag if provided
 	if enabled, ok := args["enabled"].(bool); ok {
 		cfg.Enabled = enabled
+	}
+
+	// Parse the semantic timing spec when given (mutually exclusive with a
+	// cron schedule; ValidJobConfig below enforces Schedule-OR-Timing).
+	if timing != "" {
+		ts, err := scheduler.ParseTiming(timing)
+		if err != nil {
+			return ScheduleCreateResult{
+				Success: false,
+				Error:   fmt.Sprintf("invalid timing: %v", err),
+			}, nil
+		}
+		cfg.Timing = ts
 	}
 
 	// Type-specific configuration

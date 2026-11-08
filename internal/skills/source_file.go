@@ -177,6 +177,18 @@ func (s *FileSource) DiscoverMetadata(ctx context.Context) ([]*SkillIndexEntry, 
 
 // scanTier scans a single tier directory for skills.
 func (s *FileSource) scanTier(ctx context.Context, tier DiscoveryTier, skills map[string]*Skill) error {
+	return s.walkTier(ctx, tier, func(ctx context.Context, tier DiscoveryTier, skillFile, skillDir string, priority int) error {
+		s.loadSkillFile(skillFile, priority, skills, skillDir)
+		return nil
+	})
+}
+
+// walkTier walks one tier directory for SKILL.md: a flat entry
+// (config/skills/<name>/SKILL.md) or a nested bundle whose subdirectories
+// each carry their own SKILL.md (config/skills/office/office-docx/SKILL.md).
+// The nested `office` bundle layout is C11.1-mandated; without the one-level
+// recursion its format skills were undiscoverable at runtime.
+func (s *FileSource) walkTier(ctx context.Context, tier DiscoveryTier, visit func(ctx context.Context, tier DiscoveryTier, skillFile, skillDir string, priority int) error) error {
 	path := pathutil.ExpandPath(tier.Path)
 
 	info, err := os.Stat(path)
@@ -206,14 +218,42 @@ func (s *FileSource) scanTier(ctx context.Context, tier DiscoveryTier, skills ma
 		entryPath := filepath.Join(path, entry.Name())
 
 		if entry.IsDir() {
-			// Look for SKILL.md inside the directory
+			// Look for SKILL.md inside the directory.
 			skillFile := filepath.Join(entryPath, "SKILL.md")
 			if _, err := os.Stat(skillFile); err == nil {
-				s.loadSkillFile(skillFile, tier.Priority, skills, entryPath)
+				if err := visit(ctx, tier, skillFile, entryPath, tier.Priority); err != nil {
+					return err
+				}
+				continue
+			}
+			// Nested bundle: recurse one level into subdirectories, each
+			// of which carries its own SKILL.md under the bundle root.
+			subs, err := os.ReadDir(entryPath)
+			if err != nil {
+				s.logger.Debug("Failed to read nested skill bundle", "dir", entryPath, "err", err)
+				continue
+			}
+			for _, sub := range subs {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+				if !sub.IsDir() {
+					continue
+				}
+				subSkillFile := filepath.Join(entryPath, sub.Name(), "SKILL.md")
+				if _, err := os.Stat(subSkillFile); err == nil {
+					if err := visit(ctx, tier, subSkillFile, filepath.Join(entryPath, sub.Name()), tier.Priority); err != nil {
+						return err
+					}
+				}
 			}
 		} else if isSkillFile(entry.Name()) {
 			// Support flat .md files (not SKILL.md, which would be at root)
-			s.loadSkillFile(entryPath, tier.Priority, skills, "")
+			if err := visit(ctx, tier, entryPath, "", tier.Priority); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -344,45 +384,10 @@ func (s *FileSource) scanLinkedAssets(skillDir string) []LinkedAsset {
 
 // scanTierMetadataOnly scans a single tier directory for skill metadata.
 func (s *FileSource) scanTierMetadataOnly(ctx context.Context, tier DiscoveryTier, entries map[string]*SkillIndexEntry) error {
-	path := pathutil.ExpandPath(tier.Path)
-
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		s.logger.Debug("Tier directory does not exist", "path", path)
+	return s.walkTier(ctx, tier, func(ctx context.Context, tier DiscoveryTier, skillFile, skillDir string, priority int) error {
+		s.loadSkillMetadata(skillFile, priority, entries)
 		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return nil
-	}
-
-	dirEntries, err := os.ReadDir(path)
-	if err != nil {
-		return err
-	}
-
-	for _, dirEntry := range dirEntries {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		entryPath := filepath.Join(path, dirEntry.Name())
-
-		if dirEntry.IsDir() {
-			skillFile := filepath.Join(entryPath, "SKILL.md")
-			if _, err := os.Stat(skillFile); err == nil {
-				s.loadSkillMetadata(skillFile, tier.Priority, entries)
-			}
-		} else if isSkillFile(dirEntry.Name()) {
-			s.loadSkillMetadata(entryPath, tier.Priority, entries)
-		}
-	}
-
-	return nil
+	})
 }
 
 // loadSkillMetadata loads skill metadata from a file and adds it to entries.

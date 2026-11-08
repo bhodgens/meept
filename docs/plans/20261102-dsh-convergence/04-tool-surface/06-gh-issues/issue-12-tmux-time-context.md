@@ -5,13 +5,13 @@
 The 2026-11-02 dsh-vs-meept convergence audit closed this item as a **GitHub
 issue, not an implementation leaf** (user decision D2/D9). Two related gaps:
 
-1. **tmux-style session context** — meept has a PTY manager
-   (`internal/tools/interface.go` `PTYTool` / `PTYSessionConfig`, driven by
-   `internal/pty`) and a rich TUI with a PTY session surface, but there is no
-   model-facing persistent-multiwindow terminal session tool. The model cannot
-   create a named, resumable terminal session that it (and the user) can call
-   back into across turns the way tmux windows persist.
-2. **time-context** — the model-facing session context has no explicit
+1. **tmux-style session context** - meept has a PTY manager
+   (`internal/tools/interface.go` `PTYTool` at 229, `PTYSessionConfig` at 250,
+   driven by `internal/pty`) and a rich TUI with a PTY session surface, but
+   there is no model-facing persistent-multiwindow terminal session tool. The
+   model cannot create a named, resumable terminal session that it (and the
+   user) can call back into across turns the way tmux windows persist.
+2. **time-context** - the model-facing session context has no explicit
    current-time / elapsed / schedule-awareness block. An agent reasoning about
    "how long has this run?", "what is today/local time?", or a schedule that
    just fired cannot see that without querying an external tool.
@@ -20,7 +20,7 @@ issue, not an implementation leaf** (user decision D2/D9). Two related gaps:
 
 The items 11/12 of the audit closeout were explicitly scoped OUT of the
 implementation tree by user decision. This issue captures the gap and
-acceptance target without prescribing an engine — it is a backlog item.
+acceptance target without prescribing an engine - it is a backlog item.
 
 ## Expected behavior
 
@@ -46,8 +46,8 @@ acceptance target without prescribing an engine — it is a backlog item.
 ## Notes / grounding
 
 - Present-absent anchored against the meept repo at the audit date: `PTYTool`
-  and `PTYSessionConfig` exist (interface.go:216-244), the TUI has a PTY
+  and `PTYSessionConfig` exist (interface.go:229-251), the TUI has a PTY
   session surface, but there is NO model-facing multiwindow persistent-session
   tool and NO explicit time-context injection into the model prompt. This
-  issue frames a surface gap over an existing engine — the engine is a
+  issue frames a surface gap over an existing engine - the engine is a
   foundation, not a re-build.

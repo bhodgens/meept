@@ -44,6 +44,7 @@ type AddJobParams struct {
 	Name     string   `json:"name"`
 	Type     JobType  `json:"type"`
 	Schedule string   `json:"schedule"`
+	Timing   string   `json:"timing,omitempty"`
 	Enabled  bool     `json:"enabled"`
 	Tags     []string `json:"tags,omitempty"`
 
@@ -83,6 +84,20 @@ func (h *RPCHandler) AddJob(ctx context.Context, params json.RawMessage) (any, e
 		AgentConfig:    p.AgentConfig,
 		ShellConfig:    p.ShellConfig,
 		ReminderConfig: p.ReminderConfig,
+	}
+
+	// Schedule and timing are mutually exclusive admission paths; a timing
+	// spec is parsed into the semantic Timing field, which ScheduleConfig
+	// then re-registers via RegisterTiming.
+	if p.Timing != "" {
+		if p.Schedule != "" {
+			return nil, fmt.Errorf("schedule and timing are mutually exclusive")
+		}
+		ts, err := ParseTiming(p.Timing)
+		if err != nil {
+			return nil, fmt.Errorf("invalid timing: %w", err)
+		}
+		cfg.Timing = ts
 	}
 
 	// Validate config

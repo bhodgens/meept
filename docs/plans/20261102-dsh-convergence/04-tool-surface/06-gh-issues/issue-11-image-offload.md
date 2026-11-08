@@ -15,7 +15,7 @@ impossible for the user.
 
 The items 11/12 of the audit closeout were explicitly scoped OUT of the
 implementation tree by user decision. This issue captures the product gap and
-acceptance target without prescribing an engine — it is a backlog item for a
+acceptance target without prescribing an engine - it is a backlog item for a
 future session.
 
 ## Expected behavior
@@ -43,6 +43,6 @@ future session.
 ## Notes / grounding
 
 - Present-absent anchored against the meept repo at the audit date: no image
-  message block and no image-input tool exist in the chat path (audit
-  runtime-safety.md and skills-schedule-storage.md found no model-facing image
-  surface). This issue is a pure backlog item.
+  message block and no image-input tool exist in the chat path. The
+  2026-11-02 dsh-vs-meept convergence audit (item 11, decisions D2/D9)
+  recorded this gap; this issue is a pure backlog item.

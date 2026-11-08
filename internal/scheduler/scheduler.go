@@ -326,14 +326,19 @@ func (s *Scheduler) Schedule(job Job) (string, error) {
 		return "", fmt.Errorf("job already exists: %s", jobID)
 	}
 
-	// Validate schedule expression
-	schedule := job.Schedule()
-	if _, err := s.parseSchedule(schedule); err != nil {
-		return "", fmt.Errorf("invalid schedule expression: %w", err)
+	cfg := job.Config()
+
+	// A timing-carrying job has no raw cron schedule string, so skip the
+	// expression parse and register from the semantic Timing spec instead.
+	if cfg.Timing == nil {
+		schedule := job.Schedule()
+		if _, err := s.parseSchedule(schedule); err != nil {
+			return "", fmt.Errorf("invalid schedule expression: %w", err)
+		}
 	}
 
-	// Add to cron
-	entryID, err := s.cron.AddFunc(schedule, s.wrapJob(job))
+	// Add to cron (via the Timing spec when present, else the raw schedule).
+	entryID, err := s.registerJobEntry(job)
 	if err != nil {
 		return "", fmt.Errorf("failed to add job to cron: %w", err)
 	}
@@ -343,7 +348,6 @@ func (s *Scheduler) Schedule(job Job) (string, error) {
 	s.entryIDs[jobID] = entryID
 
 	// Persist job config
-	cfg := job.Config()
 	if cfg.CreatedAt.IsZero() {
 		cfg.CreatedAt = time.Now().UTC()
 	}
@@ -354,7 +358,7 @@ func (s *Scheduler) Schedule(job Job) (string, error) {
 	s.logger.Info("scheduler: job scheduled",
 		"job_id", jobID,
 		"name", job.Name(),
-		"schedule", schedule,
+		"schedule", cfg.Schedule,
 	)
 
 	return jobID, nil
@@ -562,8 +566,8 @@ func (s *Scheduler) ResumeJob(jobID string) error {
 		return fmt.Errorf("job already running: %s", jobID)
 	}
 
-	// Add back to cron
-	entryID, err := s.cron.AddFunc(job.Schedule(), s.wrapJob(job))
+	// Add back to cron (via Timing spec when present, else the raw schedule)
+	entryID, err := s.registerJobEntry(job)
 	if err != nil {
 		return fmt.Errorf("failed to add job to cron: %w", err)
 	}
@@ -584,6 +588,19 @@ func (s *Scheduler) JobCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.jobs)
+}
+
+// registerJobEntry adds a job to the cron engine. When the job config carries
+// a semantic Timing spec, registration goes through RegisterTimingVia so the
+// DST-aware engine location and one-shot handling apply (and a persisted
+// Timing re-registers on restart); otherwise it falls back to the raw cron
+// schedule string.
+func (s *Scheduler) registerJobEntry(job Job) (cron.EntryID, error) {
+	cfg := job.Config()
+	if cfg.Timing != nil {
+		return s.RegisterTimingVia(cfg, job)
+	}
+	return s.cron.AddFunc(cfg.Schedule, s.wrapJob(job))
 }
 
 // wrapJob creates a function wrapper for the job that handles execution tracking.
@@ -801,8 +818,8 @@ func (s *Scheduler) loadPersistedJobs() error {
 			continue
 		}
 
-		// Add to cron
-		entryID, err := s.cron.AddFunc(cfg.Schedule, s.wrapJob(job))
+		// Add to cron (via Timing spec when present, else the raw schedule)
+		entryID, err := s.registerJobEntry(job)
 		if err != nil {
 			s.logger.Warn("scheduler: failed to schedule job",
 				"job_id", cfg.ID,

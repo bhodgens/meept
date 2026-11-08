@@ -96,6 +96,69 @@ func TestRPCAddJobAutoID(t *testing.T) {
 	}
 }
 
+func TestAddJobTiming(t *testing.T) {
+	// Thin T4 wire test (leaf 05-schedule/01-timing-kinds): scheduler.add_job
+	// accepts a semantic timing spec (daily, no cron schedule) and lands a job.
+	_, handler := setupTestScheduler(t)
+	ctx := context.Background()
+
+	params := AddJobParams{
+		ID:      "rpc-timing-1",
+		Name:    "Timing Job",
+		Type:    JobTypeReminder,
+		Timing:  "daily 09:30:00 UTC",
+		Enabled: true,
+		ReminderConfig: &ReminderJobConfig{
+			Message: "Morning reminder",
+		},
+	}
+
+	paramsJSON, _ := json.Marshal(params)
+	result, err := handler.AddJob(ctx, paramsJSON)
+	if err != nil {
+		t.Fatalf("AddJob with timing failed: %v", err)
+	}
+
+	addResult := result.(AddJobResult)
+	if addResult.JobID != "rpc-timing-1" {
+		t.Errorf("expected job ID 'rpc-timing-1', got %q", addResult.JobID)
+	}
+	if addResult.NextRun == nil {
+		t.Error("expected NextRun to be set")
+	}
+
+	// The job must actually be registered on the engine as a timing entry.
+	entryID, ok := handler.scheduler.entryIDs["rpc-timing-1"]
+	if !ok {
+		t.Fatal("expected job to be registered in scheduler entryIDs")
+	}
+	if entry := handler.scheduler.cron.Entry(entryID); entry.Next.IsZero() {
+		t.Error("expected a real cron entry with a next run for the timing job")
+	}
+}
+
+func TestRPCAddJobTimingExclusive(t *testing.T) {
+	// schedule and timing are mutually exclusive at the RPC boundary.
+	_, handler := setupTestScheduler(t)
+	ctx := context.Background()
+
+	params := AddJobParams{
+		ID:       "rpc-timing-both",
+		Name:     "Both",
+		Type:     JobTypeReminder,
+		Schedule: "0 9 * * *",
+		Timing:   "daily 09:30:00 UTC",
+		ReminderConfig: &ReminderJobConfig{
+			Message: "Test",
+		},
+	}
+
+	paramsJSON, _ := json.Marshal(params)
+	if _, err := handler.AddJob(ctx, paramsJSON); err == nil {
+		t.Error("expected error when both schedule and timing are provided")
+	}
+}
+
 func TestRPCAddJobValidation(t *testing.T) {
 	_, handler := setupTestScheduler(t)
 	ctx := context.Background()

@@ -88,6 +88,27 @@ unavailable, execution is refused with an error naming them:
 to diagnose`. Skills without the key are unaffected — no tool check
 runs for them.
 
+### Office bundle gate
+
+The office capability ships as a bundle under `config/skills/office/` - see
+[docs/workflows/office-skills.md](office-skills.md) for the full feature doc and
+tool action contracts. The bundle's three format skills each gate on the tool
+that backs them; the `office` router skill carries no gate (it routes by file
+extension only):
+
+| Format skill | requires-tools entry |
+|--------------|----------------------|
+| `office-docx` | `office_docx`        |
+| `office-pptx` | `office_pptx`        |
+| `office-xlsx` | `office_workbook`    |
+
+The gate fires only when `skills.validate_prerequisites` is enabled (default:
+OFF). With it off, the format skills are offered to the model even if their tool
+is not registered; with it on, the executor refuses a format skill whose tool is
+unavailable and names the missing tool. The router `office` always routes
+regardless of the gate - deferring to a format skill is how execution gets
+gated.
+
 ### Hiding a skill from the model-facing listing
 
 A skill can opt out of the system-prompt listing with the
