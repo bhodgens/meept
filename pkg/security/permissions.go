@@ -270,7 +270,7 @@ func (pc *PermissionChecker) SetFence(fence FenceStage) {
 		pc.fence = nil
 		return
 	}
-	if v := reflectValueOf(fence); v.Kind() == reflect.Ptr && v.IsNil() {
+	if v := reflectValueOf(fence); v.Kind() == reflect.Pointer && v.IsNil() {
 		pc.fence = nil
 		return
 	}

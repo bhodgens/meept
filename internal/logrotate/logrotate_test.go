@@ -26,7 +26,7 @@ func TestCapSizeRotatesAndBoundsDisk(t *testing.T) {
 	// 64 KiB of 128-byte lines: 16x the cap.
 	line := bytes.Repeat([]byte("x"), 127)
 	line = append(line, '\n')
-	for i := 0; i < 512; i++ {
+	for i := range 512 {
 		if _, err := c.Write(line); err != nil {
 			t.Fatalf("write %d: %v", i, err)
 		}
@@ -85,7 +85,7 @@ func TestCapSizeRetainedBytesAreAnExactSuffix(t *testing.T) {
 	}
 
 	var all bytes.Buffer
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		msg := []byte(strings.Repeat("a", 40) + "\n")
 		if _, err := c.Write(msg); err != nil {
 			t.Fatalf("write %d: %v", i, err)
@@ -134,7 +134,7 @@ func TestCapSizeBoundsTotalDiskFootprint(t *testing.T) {
 	// 256 KiB against a 1 KiB cap: hundreds of rotations.
 	chunk := bytes.Repeat([]byte("y"), 255)
 	chunk = append(chunk, '\n')
-	for i := 0; i < 1024; i++ {
+	for i := range 1024 {
 		if _, err := c.Write(chunk); err != nil {
 			t.Fatalf("write %d: %v", i, err)
 		}

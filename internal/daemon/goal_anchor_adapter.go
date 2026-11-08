@@ -14,6 +14,7 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"slices"
 
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/session"
@@ -139,10 +140,8 @@ func (a *goalAnchorAdapter) SessionEmployeeID(sessionID string) string {
 	// never receives new work.
 	if a.roster != nil {
 		if ids, err := a.roster.ListEmployeeIDs(context.Background()); err == nil {
-			for _, id := range ids {
-				if id == bound {
-					return bound
-				}
+			if slices.Contains(ids, bound) {
+				return bound
 			}
 		}
 	}

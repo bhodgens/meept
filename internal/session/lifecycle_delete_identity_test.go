@@ -126,7 +126,7 @@ func TestIdleReaperStartStopRaceSafe(t *testing.T) {
 	tracker := NewActivityTracker()
 	r := NewIdleReaper(tracker, &recordingHook{}, slog.Default())
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		wg.Add(2)
 		go func() { defer wg.Done(); r.Start() }()
 		go func() { defer wg.Done(); r.Stop() }()
@@ -141,13 +141,13 @@ func TestIdleReaperStartStopRaceSafe(t *testing.T) {
 func TestActivityTrackerEvictBoundsMap(t *testing.T) {
 	tracker := NewActivityTracker()
 	const n = 50
-	for i := 0; i < n; i++ {
+	for i := range n {
 		tracker.RecordActivity("sess-"+string(rune('a'+i%26))+string(rune('0'+i)), "client")
 	}
 	if tracker.Len() != n {
 		t.Fatalf("Len = %d, want %d", tracker.Len(), n)
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		tracker.Evict("sess-" + string(rune('a'+i%26)) + string(rune('0'+i)))
 	}
 	if tracker.Len() != 0 {
@@ -201,13 +201,13 @@ func TestSetLifecycleHookConcurrentWithDelete(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			store.SetLifecycleHook(&altRecordingHook{})
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			s, err := store.Create("race")
 			if err != nil {
 				return

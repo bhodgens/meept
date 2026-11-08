@@ -469,11 +469,11 @@ func TestWriterOriginStampAndRoundTrip(t *testing.T) {
 		// splitFrontmatter would hand it to yaml.Unmarshal.
 		text := string(data)
 		rest := strings.TrimPrefix(text, "---\n")
-		idx := strings.Index(rest, "\n---")
-		if idx < 0 {
+		before, _, ok := strings.Cut(rest, "\n---")
+		if !ok {
 			t.Fatalf("unterminated frontmatter:\n%s", text)
 		}
-		frontmatter := rest[:idx]
+		frontmatter := before
 		var meta skills.SkillMetadata
 		if err := yaml.Unmarshal([]byte(frontmatter), &meta); err != nil {
 			t.Fatalf("reparse frontmatter: %v", err)

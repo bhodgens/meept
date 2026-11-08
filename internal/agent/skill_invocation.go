@@ -152,21 +152,6 @@ func renderSkillInvocationBlock(skill *skills.Skill) string {
 	return sb.String()
 }
 
-// injectSkillInvocations appends the resolved gesture blocks to the turn
-// context, AFTER the other injections (catalog, skills, project context) so
-// the invoked bodies sit closest to the answer material — the deterministic
-// last injection (dsh agent/pre-step ordering).
-func injectSkillInvocations(sb *strings.Builder, blocks []SkillInvocationBlock) {
-	if sb == nil || len(blocks) == 0 {
-		return
-	}
-	sb.WriteString("\n\n# Direct Skill Invocations\n")
-	for _, b := range blocks {
-		sb.WriteString(b.Body)
-		sb.WriteString("\n")
-	}
-}
-
 // injectInvokedSkills is the turn-seam binding: scan the claimed user text
 // for /name gestures, resolve each through the loaded-body lookup (the
 // LazySkillLoader the loop already owns), and append the rendered bodies as

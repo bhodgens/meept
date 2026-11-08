@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -115,9 +117,7 @@ func (r BridgeRecord) bridgeMetadata() (map[string]any, error) {
 		return nil, fmt.Errorf("bridge store: marshal evidence_ids: %w", err)
 	}
 	md := make(map[string]any, 4+len(r.Metadata))
-	for k, v := range r.Metadata {
-		md[k] = v
-	}
+	maps.Copy(md, r.Metadata)
 	md[BridgeMetaUnitType] = BridgeUnitTypeValue
 	md[BridgeMetaEvidenceIDs] = string(evJSON)
 	md[BridgeMetaCreatedAt] = r.CreatedAt.UTC().Format(time.RFC3339)
@@ -274,14 +274,7 @@ func (bs *BridgeStore) ListBridgesByEvidence(ctx context.Context, evidenceID str
 		if err := json.Unmarshal([]byte(evJSON), &ids); err != nil {
 			continue
 		}
-		match := false
-		for _, e := range ids {
-			if e == evidenceID {
-				match = true
-				break
-			}
-		}
-		if !match {
+		if !slices.Contains(ids, evidenceID) {
 			continue // substring false positive (e.g. "mem-1" vs "mem-12")
 		}
 		rec := BridgeRecord{ID: id, EvidenceIDs: ids, Metadata: map[string]any{}}

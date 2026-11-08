@@ -15,6 +15,8 @@ package daemon
 // pre-leaf daemon.
 
 import (
+	"maps"
+
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -37,9 +39,7 @@ func tierPolicyFromSchema(tp config.TierPolicyConfig) *llm.TierPolicy {
 	}
 	if len(tp.TurnCeilings) > 0 {
 		policy.TurnCeilings = make(map[string]int, len(tp.TurnCeilings))
-		for capName, ceil := range tp.TurnCeilings {
-			policy.TurnCeilings[capName] = ceil
-		}
+		maps.Copy(policy.TurnCeilings, tp.TurnCeilings)
 	}
 	return policy
 }

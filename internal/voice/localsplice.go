@@ -46,6 +46,15 @@ import (
 // first byte within cfg.JoinTimeout.
 var ErrNoClient = errors.New("voice: local client never connected")
 
+// ErrMicSpeechEnded is the CLEAN inbound end: the client half-closed its
+// mic direction (end of speech - file mode after the utterance drains).
+// It is NOT a call end: the outbound side stays live so the reply path
+// (STT flush -> employee turn -> TTS) still reaches the client. The
+// child learns end-of-speech through the half-closed CHILD conn
+// (CloseWriteChild): its audio pump sees EOF, closes the PCM channel,
+// and the STT adapter flushes the buffered utterance.
+var ErrMicSpeechEnded = errors.New("voice: local mic stream ended (end of speech)")
+
 // ErrL16Only is returned by RunLocalSplice when cfg.ChunkBytes names any
 // chunk size other than the L16 s16le@16k native 640 bytes.
 var ErrL16Only = errors.New("voice: local leg negotiates L16 s16le@16000 only")
@@ -194,7 +203,14 @@ func RunLocalSplice(ctx context.Context, ccid string, cfg LocalSpliceConfig, dep
 	go func() { outboundDone <- s.outboundLoop(loopCtx) }()
 
 	errIn := <-inboundDone
-	loopCancel() // stop the peer loop now that one side is terminal
+	if !errors.Is(errIn, ErrMicSpeechEnded) {
+		// A terminal inbound error stops the peer loop now; a clean
+		// end-of-speech does NOT - the outbound side must stay live so
+		// the reply (whisper flush -> employee turn -> TTS) still
+		// reaches the client after the mic stream closed (file mode
+		// half-closes at end of utterance; live mode never EOFs).
+		loopCancel()
+	}
 	errOut := <-outboundDone
 
 	// Caller cancellation wins, mirroring RunSplice's contract.
@@ -286,15 +302,16 @@ func (s *runLocalSplice) inboundLoop(ctx context.Context) error {
 			continue
 		case item := <-pump:
 			if item.err != nil {
-				// io.EOF from the client is the client hanging up: a
-				// clean end for the leg (the outbound side stops via
-				// loopCancel). End is terminal: the barge-in latch
-				// must never re-arm afterward (F-1 spirit).
 				if errors.Is(item.err, io.EOF) {
-					s.mu.Lock()
-					s.ended = true
-					s.mu.Unlock()
-					return nil
+					// Client EOF = END OF SPEECH, not a hangup: forward
+					// the close to the CHILD (its pump EOF triggers the
+					// STT flush) and keep the splice alive for the
+					// reply. The ended latch stays UNSET - the barge-in
+					// path must stay armed for the turn that follows.
+					if cwErr := s.deps.Audio.CloseWriteChild(); cwErr != nil {
+						s.log.Debug("child half-close", "err", cwErr)
+					}
+					return ErrMicSpeechEnded
 				}
 				if ctx.Err() != nil {
 					return ctx.Err()

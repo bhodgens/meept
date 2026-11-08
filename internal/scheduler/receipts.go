@@ -35,8 +35,8 @@ const (
 type ScheduleDeliveryReceipt struct {
 	ScheduleID      string         `json:"schedule_id"`
 	ScheduledAt     time.Time      `json:"scheduled_at"`
-	OccurrenceAt    time.Time      `json:"occurrence_at,omitempty"`
-	DeliveredAt     time.Time      `json:"delivered_at,omitempty"`
+	OccurrenceAt    time.Time      `json:"occurrence_at,omitzero"`
+	DeliveredAt     time.Time      `json:"delivered_at,omitzero"`
 	MessageID       string         `json:"message_id"`
 	TargetSessionID string         `json:"target_session_id"`
 	Prompt          string         `json:"prompt,omitempty"`

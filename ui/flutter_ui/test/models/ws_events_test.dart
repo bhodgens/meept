@@ -16,10 +16,14 @@ void main() {
     late Map<String, dynamic> fixture;
 
     setUpAll(() {
-      expect(fixtureFile.existsSync(), isTrue,
-          reason: 'missing test/fixtures/turn_terminal_event.json — '
-              'regenerate with: go test ./internal/comm/http '
-              '-run TestWSSchemaFixtureGolden -update');
+      expect(
+        fixtureFile.existsSync(),
+        isTrue,
+        reason:
+            'missing test/fixtures/turn_terminal_event.json — '
+            'regenerate with: go test ./internal/comm/http '
+            '-run TestWSSchemaFixtureGolden -update',
+      );
       fixture =
           jsonDecode(fixtureFile.readAsStringSync()) as Map<String, dynamic>;
     });
@@ -58,8 +62,11 @@ void main() {
       // matching the daemon's wire discipline.
       for (final entry in map.entries) {
         if (!fixture.containsKey(entry.key)) continue;
-        expect(entry.value, fixture[entry.key],
-            reason: 'round-trip drift at ${entry.key}');
+        expect(
+          entry.value,
+          fixture[entry.key],
+          reason: 'round-trip drift at ${entry.key}',
+        );
       }
       // Re-parse must reproduce the same typed values.
       final reparsed = TurnTerminalEvent.fromParse(map);
@@ -102,8 +109,7 @@ void main() {
   });
 
   group('ChatMessageEvent (relay-normalized shape)', () {
-    test('parses the publishChatMessage + relay normalization guarantees',
-        () {
+    test('parses the publishChatMessage + relay normalization guarantees', () {
       // Exactly what transformBusEventToWS emits for the chat_message topic
       // (handler.publishChatMessage payload + relay normalization: content
       // mirrors reply, role defaults, id = bus message ID, source_topic).
@@ -137,11 +143,7 @@ void main() {
     });
 
     test('toJson -> fromParse round-trips', () {
-      const event = ChatMessageEvent(
-        sessionId: 's9',
-        content: 'hi',
-        id: 'm9',
-      );
+      const event = ChatMessageEvent(sessionId: 's9', content: 'hi', id: 'm9');
       final reparsed = ChatMessageEvent.fromJson(event.toJson());
       expect(reparsed.sessionId, 's9');
       expect(reparsed.content, 'hi');
@@ -166,10 +168,7 @@ void main() {
 
   group('WsEvent envelope', () {
     test('fromFlat extracts the type and keeps the payload', () {
-      const frame = {
-        'type': WsEventTypes.metricsUpdate,
-        'cpu': 0.5,
-      };
+      const frame = {'type': WsEventTypes.metricsUpdate, 'cpu': 0.5};
       final ev = WsEvent.fromFlat(frame);
       expect(ev.type, WsEventTypes.metricsUpdate);
       expect(ev.payload['cpu'], 0.5);

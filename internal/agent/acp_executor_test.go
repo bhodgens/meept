@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 	"testing"
 
@@ -66,6 +67,7 @@ func (p *fakeACPSessionProvider) GetOrCreatePersona(
 		return nil, p.err
 	}
 	if p.returnNil {
+		//nolint:nilnil // test double: drills the nil-session path (executor maps it to ErrNoACPSession)
 		return nil, nil
 	}
 	return p.sess, nil
@@ -398,9 +400,7 @@ type fakeTurnMetricRecorder struct {
 
 func (r *fakeTurnMetricRecorder) Record(name string, value float64, tags map[string]string) {
 	cp := make(map[string]string, len(tags))
-	for k, v := range tags {
-		cp[k] = v
-	}
+	maps.Copy(cp, tags)
 	r.records = append(r.records, recordedMetric{name: name, value: value, tags: cp})
 }
 

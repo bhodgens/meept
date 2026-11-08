@@ -437,7 +437,7 @@ func TestSpliceRunnerCodecWireTranscodesPCMU(t *testing.T) {
 	// Wait for >= 2 full child chunks (4 PCMU frames upsample past 1280
 	// bytes), then assert the child stream is 640-byte aligned.
 	waitDeadline := time.Now().Add(3 * time.Second)
-	total := 0
+	var total int
 	for time.Now().Before(waitDeadline) {
 		childMu.Lock()
 		total = len(childGot)
@@ -523,7 +523,7 @@ func validWiringTestPubKey(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	return base64.StdEncoding.EncodeToString(ed25519.PublicKey(priv.Public().(ed25519.PublicKey)))
+	return base64.StdEncoding.EncodeToString(priv.Public().(ed25519.PublicKey))
 }
 
 // testSecretsBroker builds a broker resolving telnyx_api_key from a temp

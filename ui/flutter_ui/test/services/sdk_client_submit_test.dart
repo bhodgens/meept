@@ -32,7 +32,9 @@ class _FakeAdapter implements HttpClientAdapter {
     return ResponseBody.fromString(
       jsonEncode(responseBody),
       200,
-      headers: {Headers.contentTypeHeader: [Headers.jsonContentType]},
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
     );
   }
 
@@ -85,29 +87,31 @@ void main() {
   });
 
   group('submitTurn / submitChat endpoint contract', () {
-    test('POSTs to /api/v1/chat/submit — never the legacy sync endpoint',
-        () async {
-      final adapter = _FakeAdapter({
-        'turn_id': 'turn-1',
-        'conversation_id': 'conv-1',
-        'session_id': 'sess-1',
-        'accepted': true,
-        'note': 'accepted; result arrives via turn.terminal',
-      });
-      final client = _clientWith(adapter);
+    test(
+      'POSTs to /api/v1/chat/submit — never the legacy sync endpoint',
+      () async {
+        final adapter = _FakeAdapter({
+          'turn_id': 'turn-1',
+          'conversation_id': 'conv-1',
+          'session_id': 'sess-1',
+          'accepted': true,
+          'note': 'accepted; result arrives via turn.terminal',
+        });
+        final client = _clientWith(adapter);
 
-      final ack = await client.submitTurn(
-        message: 'hello',
-        conversationId: 'sess-1',
-      );
+        final ack = await client.submitTurn(
+          message: 'hello',
+          conversationId: 'sess-1',
+        );
 
-      // The migrated path must hit ONLY the submit endpoint. The old
-      // /api/v1/chat still exists during migration but must not be called.
-      expect(adapter.capturedPaths, ['/api/v1/chat/submit']);
-      expect(ack.accepted, isTrue);
-      expect(ack.turnId, 'turn-1');
-      client.dispose();
-    });
+        // The migrated path must hit ONLY the submit endpoint. The old
+        // /api/v1/chat still exists during migration but must not be called.
+        expect(adapter.capturedPaths, ['/api/v1/chat/submit']);
+        expect(ack.accepted, isTrue);
+        expect(ack.turnId, 'turn-1');
+        client.dispose();
+      },
+    );
 
     test('request body carries the chat payload keys', () async {
       final adapter = _FakeAdapter({'turn_id': 't', 'accepted': true});
@@ -135,7 +139,11 @@ void main() {
     });
 
     test('submitChat (typed ChatRequest) posts the same endpoint', () async {
-      final adapter = _FakeAdapter({'turn_id': 't', 'accepted': false, 'note': 'nope'});
+      final adapter = _FakeAdapter({
+        'turn_id': 't',
+        'accepted': false,
+        'note': 'nope',
+      });
       final client = _clientWith(adapter);
 
       final ack = await client.submitChat(

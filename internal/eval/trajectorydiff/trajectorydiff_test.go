@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caimlas/meept/internal/eval"
 	"github.com/caimlas/meept/internal/session"
 )
 
@@ -204,7 +203,7 @@ func TestStepsFromGoldenMapsCleanSteps(t *testing.T) {
 			t.Errorf("steps[%d].Err = %q, want empty", i, s.Err)
 		}
 	}
-	var _ []eval.Step = steps
+	var _ = steps
 }
 
 // --- T3: Compare EXACT ---

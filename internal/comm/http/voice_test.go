@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,11 +52,9 @@ func (m *fakeVoiceManager) HandleCallEvent(ctx context.Context, ev telnyx.CallEv
 // ccid runs dial, later starts are no-ops.
 func (m *fakeVoiceManager) OnMediaStart(ccid string, dial func(context.Context) error) error {
 	m.mu.Lock()
-	for _, s := range m.starts {
-		if s == ccid {
-			m.mu.Unlock()
-			return nil
-		}
+	if slices.Contains(m.starts, ccid) {
+		m.mu.Unlock()
+		return nil
 	}
 	m.starts = append(m.starts, ccid)
 	m.mu.Unlock()
@@ -328,6 +327,9 @@ func TestVoiceStartFrameSkipAndParse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial media ws: %v (resp %v)", err, resp)
 	}
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	defer conn.Close(websocketStatusNormal, "")
 
 	// connected frame first (must be skipped), then the start frame.
@@ -335,10 +337,7 @@ func TestVoiceStartFrameSkipAndParse(t *testing.T) {
 	mustWriteWS(t, conn, []byte(`{"event":"start","start":{"call_control_id":"cc77","media_format":{"encoding":"PCMU","sample_rate":8000}}}`))
 
 	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if runner.callCount() > 0 {
-			break
-		}
+	for runner.callCount() == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("splice runner never invoked after start frame")
 		}
@@ -362,9 +361,12 @@ func TestVoiceStartFrameL16NoTranscode(t *testing.T) {
 	}))
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + v.MediaPath()
-	conn, _, err := dialMediaWS(t, wsURL, signMedia(v.mgrStreamURL()))
+	conn, resp, err := dialMediaWS(t, wsURL, signMedia(v.mgrStreamURL()))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
+	}
+	if resp != nil {
+		defer resp.Body.Close()
 	}
 	defer conn.Close(websocketStatusNormal, "")
 	mustWriteWS(t, conn, []byte(`{"event":"start","start":{"call_control_id":"cc88","media_format":{"encoding":"L16","sample_rate":16000}}}`))
@@ -392,9 +394,12 @@ func TestVoiceMediaHandoffIdempotent(t *testing.T) {
 	}))
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + v.MediaPath()
-	conn, _, err := dialMediaWS(t, wsURL, signMedia(mgr.StreamURL()))
+	conn, resp, err := dialMediaWS(t, wsURL, signMedia(mgr.StreamURL()))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
+	}
+	if resp != nil {
+		defer resp.Body.Close()
 	}
 	defer conn.Close(websocketStatusNormal, "")
 	start := []byte(`{"event":"start","start":{"call_control_id":"cc9","media_format":{"encoding":"L16","sample_rate":16000}}}`)
@@ -617,7 +622,7 @@ func TestVoicePlainListenerRateLimited(t *testing.T) {
 	body := callEventBody(t, "call.initiated", "cc-rl")
 	saw429 := false
 	var statuses []int
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		req, err := http.NewRequest(http.MethodPost, base+v.WebhookPath(), bytes.NewReader(body))
 		if err != nil {
 			t.Fatalf("request: %v", err)
@@ -667,9 +672,12 @@ func TestVoiceDTMFCountedNoop(t *testing.T) {
 	}))
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + v.MediaPath()
-	conn, _, err := dialMediaWS(t, wsURL, signMedia(mgr.StreamURL()))
+	conn, resp, err := dialMediaWS(t, wsURL, signMedia(mgr.StreamURL()))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
+	}
+	if resp != nil {
+		defer resp.Body.Close()
 	}
 	defer conn.Close(websocketStatusNormal, "")
 
@@ -786,9 +794,12 @@ func TestVoiceStartFrameCarriesWireCodec(t *testing.T) {
 	}))
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + v.MediaPath()
-	conn, _, err := dialMediaWS(t, wsURL, signMedia(v.mgrStreamURL()))
+	conn, resp, err := dialMediaWS(t, wsURL, signMedia(v.mgrStreamURL()))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
+	}
+	if resp != nil {
+		defer resp.Body.Close()
 	}
 	defer conn.Close(websocketStatusNormal, "")
 	mustWriteWS(t, conn, []byte(`{"event":"connected"}`))
@@ -820,9 +831,12 @@ func TestVoiceStartFrameL16EmptyTranscodeKeepsCodecFields(t *testing.T) {
 	}))
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + v.MediaPath()
-	conn, _, err := dialMediaWS(t, wsURL, signMedia(v.mgrStreamURL()))
+	conn, resp, err := dialMediaWS(t, wsURL, signMedia(v.mgrStreamURL()))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
+	}
+	if resp != nil {
+		defer resp.Body.Close()
 	}
 	defer conn.Close(websocketStatusNormal, "")
 	mustWriteWS(t, conn, []byte(`{"event":"start","start":{"call_control_id":"cc-h2b","media_format":{"encoding":"L16","sample_rate":16000}}}`))

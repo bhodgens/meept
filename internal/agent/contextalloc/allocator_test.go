@@ -139,9 +139,7 @@ func TestAllocateSumsExactly(t *testing.T) {
 					w, fi, sum, alloc.WindowTokens, alloc)
 			}
 			wantUsable := w - alloc.OutputReserve
-			if wantUsable < 0 {
-				wantUsable = 0
-			}
+			wantUsable = max(wantUsable, 0)
 			if alloc.WindowTokens != wantUsable {
 				t.Fatalf("window %d: usable %d, want %d (reserve %d)",
 					w, alloc.WindowTokens, wantUsable, alloc.OutputReserve)
@@ -157,7 +155,7 @@ func TestAllocateDeterministic(t *testing.T) {
 	}
 	req := Request{Query: "alpha", ToolCount: 7, DocBytes: 2048, HistoryTokens: 4096}
 	first := a.Allocate(context.Background(), 100000, req)
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		again := a.Allocate(context.Background(), 100000, req)
 		if first != again {
 			t.Fatalf("Allocate is not deterministic:\nfirst: %+v\nagain: %+v", first, again)

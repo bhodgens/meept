@@ -113,7 +113,7 @@ func TestBridgeEntityExtractionV1(t *testing.T) {
 
 	// Cap: > MaxBridgeFactsPerSource entities trims to the cap.
 	var many []string
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		many = append(many, string(rune('a'+i)))
 	}
 	m3 := bridgeTestMemory("m-3", "content", many...)

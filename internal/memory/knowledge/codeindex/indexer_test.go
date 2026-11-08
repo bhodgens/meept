@@ -186,11 +186,11 @@ func TestIndexChangedFileReingests(t *testing.T) {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // G122/G703: fixture copy of trusted repo content into a fresh MkdirTemp sandbox; paths derive from the walk root, not untrusted input
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0o644)
+		return os.WriteFile(target, data, 0o644) //nolint:gosec // G122/G703: fixture copy of trusted repo content into a fresh MkdirTemp sandbox; paths derive from the walk root, not untrusted input
 	}); err != nil {
 		t.Fatalf("copy fixture: %v", err)
 	}
@@ -290,11 +290,11 @@ func TestIndexDropsDeletedFiles(t *testing.T) {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // G122/G703: fixture copy of trusted repo content into a fresh MkdirTemp sandbox; paths derive from the walk root, not untrusted input
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0o644)
+		return os.WriteFile(target, data, 0o644) //nolint:gosec // G122/G703: fixture copy of trusted repo content into a fresh MkdirTemp sandbox; paths derive from the walk root, not untrusted input
 	}); err != nil {
 		t.Fatalf("copy fixture: %v", err)
 	}

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"maps"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,9 +25,7 @@ func scopedBridgeMemory(id string, scope Scope, meta map[string]any) Memory {
 			BridgeMetaEntities: "sharedentity",
 		},
 	}
-	for k, v := range meta {
-		m.Metadata[k] = v
-	}
+	maps.Copy(m.Metadata, meta)
 	return m
 }
 

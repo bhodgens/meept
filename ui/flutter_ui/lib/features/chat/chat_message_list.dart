@@ -209,9 +209,10 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
         child: Stack(
           children: [
             Positioned.fill(
-              child: chatState.messages.isEmpty &&
-                          !chatState.isAgentProcessing &&
-                          chatState.pendingTurns.isEmpty
+              child:
+                  chatState.messages.isEmpty &&
+                      !chatState.isAgentProcessing &&
+                      chatState.pendingTurns.isEmpty
                   ? (chatState.isLoading
                         ? const _SessionLoadingPlaceholder()
                         : const MessagePlaceholder())
@@ -281,7 +282,8 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                               child: Column(
                                 key: const ValueKey('pending-turns'),
                                 children: [
-                                  for (final turn in chatState.pendingTurns.values)
+                                  for (final turn
+                                      in chatState.pendingTurns.values)
                                     PendingTurnIndicator(
                                       key: ValueKey('pending-${turn.turnId}'),
                                       turn: turn,

@@ -361,7 +361,7 @@ func TestActivityRPC_QueryShape(t *testing.T) {
 func TestActivityRPC_RecentAndOverview(t *testing.T) {
 	t.Run("recent returns limit newest plus dropped", func(t *testing.T) {
 		ring := activity.NewRing(10)
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			ring.Append(activity.ActivityRecord{
 				Kind:    activity.KindTaskStep,
 				At:      time.Now().UTC().Add(time.Duration(i) * time.Second),
@@ -387,7 +387,7 @@ func TestActivityRPC_RecentAndOverview(t *testing.T) {
 
 	t.Run("dropped counts evicted events", func(t *testing.T) {
 		ring := activity.NewRing(10)
-		for i := 0; i < 12; i++ {
+		for range 12 {
 			ring.Append(activity.ActivityRecord{Kind: "bus_event", Summary: "x"})
 		}
 		srv := rpc.New(&rpc.Config{SocketPath: ""}, nil, nil)

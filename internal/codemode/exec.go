@@ -101,8 +101,7 @@ func (s *Sandbox) Execute(ctx context.Context, script string) (Result, error) {
 	// closure has written its results; the channel close establishes
 	// happens-before, so read them directly.
 	if ranErr != nil {
-		var ie *goja.InterruptedError
-		if errors.As(ranErr, &ie) {
+		if ie, ok := errors.AsType[*goja.InterruptedError](ranErr); ok {
 			if val, ok := ie.Value().(error); ok && errors.Is(val, errMemoryCap) {
 				return s.killedResult(fmt.Sprintf("%s (counted allocation crossed the %d byte limit)",
 					errMemoryCap.Error(), s.memThreshold)), nil

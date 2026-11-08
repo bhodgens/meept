@@ -71,7 +71,7 @@ func TestGoalsCreateRouteBadJSON(t *testing.T) {
 	t.Parallel()
 	h := NewAgentAPIHandler(func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		t.Error("rpc callback must not be called for malformed JSON")
-		return nil, nil
+		return nil, nil //nolint:nilnil // test double: the callback is asserted to never be invoked
 	})
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)

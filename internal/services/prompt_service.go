@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -433,10 +434,8 @@ func normalizeName(name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("invalid prompt name: empty")
 	}
-	for _, seg := range strings.Split(name, "/") {
-		if seg == ".." {
-			return "", fmt.Errorf("invalid prompt name %q: \"..\" traversal is not allowed", name)
-		}
+	if slices.Contains(strings.Split(name, "/"), "..") {
+		return "", fmt.Errorf("invalid prompt name %q: \"..\" traversal is not allowed", name)
 	}
 	// Shorthand: bare name without slash → assume planner/.
 	if !strings.Contains(name, "/") {

@@ -16,7 +16,6 @@ import (
 	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/session"
-	"github.com/caimlas/meept/internal/tools"
 )
 
 func TestMemoryCeilingNeverWidens(t *testing.T) {
@@ -192,7 +191,7 @@ func TestMemoryToolIdentityCarriesCeiling(t *testing.T) {
 	}
 	l.mu.Unlock()
 
-	id := tools.ScopeIdentity(l.memoryScopeCtxIdentity())
+	id := l.memoryScopeCtxIdentity()
 	if id.MaxScope != string(memory.ScopeProject) {
 		t.Fatalf("memory tools would filter at %q; the group ceiling requires "+
 			"project (C7)", id.MaxScope)

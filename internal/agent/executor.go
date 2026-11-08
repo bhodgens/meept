@@ -1582,7 +1582,7 @@ func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, co
 				"tool", toolName,
 				"reason", err,
 			)
-			return nil, fmt.Errorf("%w: %s", ErrGateBlocked, err)
+			return nil, fmt.Errorf("%w: %w", ErrGateBlocked, err)
 		}
 	}
 	backoff := NewBackoff(config)

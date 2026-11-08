@@ -53,8 +53,8 @@ type chunkedTTS struct {
 
 func newChunkedTTS(sample int, chunks int) *chunkedTTS {
 	return &chunkedTTS{
-		lo:     byte(sample),
-		hi:     byte(sample >> 8),
+		lo:     byte(sample),      //nolint:gosec // G115: test fixture splits an int16 sample into LE bytes
+		hi:     byte(sample >> 8), //nolint:gosec // G115: test fixture splits an int16 sample into LE bytes
 		chunks: chunks,
 		park:   make(chan struct{}),
 	}
@@ -154,9 +154,9 @@ func writeMic(t *testing.T, in net.Conn, sample int, n int) {
 	t.Helper()
 	chunk := make([]byte, 640)
 	for i := 0; i+1 < len(chunk); i += 2 {
-		binary.LittleEndian.PutUint16(chunk[i:], uint16(int16(sample)))
+		binary.LittleEndian.PutUint16(chunk[i:], uint16(int16(sample))) //nolint:gosec // G115: test injects a constant int16 sample
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if _, err := in.Write(chunk); err != nil {
 			t.Fatalf("write mic .in chunk %d: %v", i, err)
 		}
@@ -201,7 +201,7 @@ func TestRMSChunk(t *testing.T) {
 	mk := func(sample int, samples int, oddTail bool) []byte {
 		b := make([]byte, samples*2)
 		for i := 0; i+1 < len(b); i += 2 {
-			binary.LittleEndian.PutUint16(b[i:], uint16(int16(sample)))
+			binary.LittleEndian.PutUint16(b[i:], uint16(int16(sample))) //nolint:gosec // G115: test fixture PCM encode of a constant sample
 		}
 		if oddTail {
 			b = append(b, 0xFF) // trailing half-sample: must be ignored
@@ -223,7 +223,7 @@ func TestRMSChunk(t *testing.T) {
 	for i := 2; i+1 < len(alt); i += 4 {
 		// Flip every second sample to its negative via two's complement.
 		neg := int16(-loudSample)
-		binary.LittleEndian.PutUint16(alt[i:], uint16(neg))
+		binary.LittleEndian.PutUint16(alt[i:], uint16(neg)) //nolint:gosec // G115: test fixture flips the sample sign via two's complement
 	}
 	if !rmsChunkOver(alt, rmsThresh) {
 		t.Fatalf("alternating +/- %d rated under threshold %d", loudSample, rmsThresh)

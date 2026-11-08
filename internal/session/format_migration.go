@@ -108,7 +108,7 @@ func NewSessionFormatCatalog(migrations []SessionFormatMigration) (*SessionForma
 		}
 		byFrom[m.FromVersion] = m
 	}
-	for v := 0; v < SessionFormatVersion; v++ {
+	for v := range SessionFormatVersion {
 		if _, ok := byFrom[v]; !ok {
 			return nil, fmt.Errorf("session: %w: no migration from version %d", ErrSessionFormatGap, v)
 		}

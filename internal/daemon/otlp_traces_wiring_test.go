@@ -141,7 +141,7 @@ func TestOTLPTracesWiringDisabledIsInert(t *testing.T) {
 	}
 
 	// Turn terminal events flow (as they always do) — nothing may ship.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		bus.PublishT(b, agent.TopicTurnTerminal, "test", agent.TurnTerminalEvent{
 			ConversationID: "conv-1",
 			Status:         "completed",
@@ -182,7 +182,7 @@ func TestOTLPTracesExportFailureNeverBlocksTurn(t *testing.T) {
 
 	// A burst of terminal events while the receiver is down: none of these
 	// may panic, block, or fail the (simulated) turn.
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		bus.PublishT(b, agent.TopicTurnTerminal, "test", agent.TurnTerminalEvent{
 			ConversationID: "conv-x",
 			Status:         "completed",
@@ -233,7 +233,7 @@ func TestOTLPTracesWiringDisabledNoObserver(t *testing.T) {
 		t.Fatal("disabled wiring constructed pipeline pieces or attached an observer")
 	}
 	warns := 0
-	for _, line := range strings.Split(buf.String(), "\n") {
+	for line := range strings.SplitSeq(buf.String(), "\n") {
 		if strings.Contains(line, "OTLP trace export disabled") {
 			warns++
 		}
@@ -263,7 +263,7 @@ func TestOTLPTracesWiringObserverProducesLLMCallSpan(t *testing.T) {
 	}
 	defer stopOTLPTraces(b, exp, subs)
 	infos := 0
-	for _, line := range strings.Split(buf.String(), "\n") {
+	for line := range strings.SplitSeq(buf.String(), "\n") {
 		if strings.Contains(line, "OTLP trace export enabled") {
 			infos++
 		}

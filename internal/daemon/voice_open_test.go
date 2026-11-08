@@ -105,11 +105,8 @@ func TestSendOpenFramePhoneLeg(t *testing.T) {
 // firstDiff returns the byte index where a and b first differ, or min(len)
 // when one is a prefix of the other.
 func firstDiff(a, b string) int {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
+	n := min(len(b), len(a))
+	for i := range n {
 		if a[i] != b[i] {
 			return i
 		}

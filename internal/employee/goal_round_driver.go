@@ -274,5 +274,7 @@ func (d *GoalRoundDriver) drivableGoal(ctx context.Context, employeeID string) (
 		}
 		return g, nil
 	}
-	return nil, nil
+	// (nil, nil) when no goal is drivable is the documented contract (see
+	// the doc comment above); callers treat it as "nothing to advance".
+	return nil, nil //nolint:nilnil // documented sentinel: no drivable goal, not an error
 }

@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 )
 
@@ -302,9 +303,7 @@ func (r *SessionProjectionRegistry) Snapshot(sessionID string, keys ...string) (
 	// Live-state read under the lock; cache reads happen after release.
 	r.mu.RLock()
 	units := make(map[string]projectionUnit, len(r.units))
-	for k, u := range r.units {
-		units[k] = u
-	}
+	maps.Copy(units, r.units)
 	live := make(map[string]SessionProjectionState, len(units))
 	liveSeqs := make(map[string]int64, len(units))
 	for k := range units {

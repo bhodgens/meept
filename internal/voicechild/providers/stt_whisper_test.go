@@ -43,9 +43,9 @@ func chunkOf(ms int, amplitude int16) []byte {
 	if amplitude == 0 {
 		return b
 	}
-	for i := 0; i < n; i++ {
-		b[2*i] = byte(amplitude)
-		b[2*i+1] = byte(uint16(amplitude) >> 8)
+	for i := range n {
+		b[2*i] = byte(amplitude)                //nolint:gosec // G115: test PCM encode of an int16 amplitude (LE low byte)
+		b[2*i+1] = byte(uint16(amplitude) >> 8) //nolint:gosec // G115: test PCM encode of an int16 amplitude (LE high byte)
 	}
 	return b
 }
@@ -111,7 +111,7 @@ func TestWhisperOneUtteranceOneFinal(t *testing.T) {
 	pcm := make(chan []byte, 16)
 	go func() {
 		pcm <- chunkOf(speechChunkMs, loudAmplitude)
-		for i := 0; i < minSilenceChunks; i++ {
+		for range minSilenceChunks {
 			pcm <- chunkOf(silenceChunkMs, 0)
 		}
 		close(pcm)
@@ -137,9 +137,9 @@ func TestWhisperTwoUtterances(t *testing.T) {
 	}
 	pcm := make(chan []byte, 16)
 	go func() {
-		for u := 0; u < 2; u++ {
+		for range 2 {
 			pcm <- chunkOf(speechChunkMs, loudAmplitude)
-			for i := 0; i < minSilenceChunks; i++ {
+			for range minSilenceChunks {
 				pcm <- chunkOf(silenceChunkMs, 0)
 			}
 		}
@@ -168,7 +168,7 @@ func TestWhisperNeverSilentCapHolds(t *testing.T) {
 	pcm := make(chan []byte, 16)
 	go func() {
 		// 11 s of continuous speech in 1 s chunks, never silent.
-		for i := 0; i < 11; i++ {
+		for range 11 {
 			pcm <- chunkOf(1000, loudAmplitude)
 		}
 		close(pcm)
@@ -205,7 +205,7 @@ func TestWhisperOddChunkBoundary(t *testing.T) {
 	go func() {
 		pcm <- []byte{0xAB} // low byte, dangling
 		pcm <- []byte{0xCD} // completes the sample with the carry
-		for i := 0; i < minSilenceChunks; i++ {
+		for range minSilenceChunks {
 			pcm <- chunkOf(silenceChunkMs, 0)
 		}
 		close(pcm)

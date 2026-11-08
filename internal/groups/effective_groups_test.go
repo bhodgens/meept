@@ -68,7 +68,7 @@ func TestEffectiveGroups_DedupsAcrossSources(t *testing.T) {
 func TestEffectiveGroups_StableOrder(t *testing.T) {
 	lookup := func(*auth.Identity) []string { return []string{"zeta", "alpha", "mid"} }
 	first := EffectiveGroups([]string{"coders", "oncall"}, &auth.Identity{UserID: "u-1"}, lookup)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		again := EffectiveGroups([]string{"coders", "oncall"}, &auth.Identity{UserID: "u-1"}, lookup)
 		if !slices.Equal(first, again) {
 			t.Fatalf("EffectiveGroups order is not stable: run 0 = %v, run %d = %v", first, i, again)

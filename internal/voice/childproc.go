@@ -199,7 +199,7 @@ func ResolveChildBinary(configPath string) string {
 
 // regularFile reports whether path exists as a regular file.
 func regularFile(path string) bool {
-	fi, err := os.Stat(path)
+	fi, err := os.Stat(path) //nolint:gosec // G703: candidate child binary path is daemon-derived (exe dir / MEEPT_HOME), not user taint
 	return err == nil && fi.Mode().IsRegular()
 }
 
@@ -400,7 +400,7 @@ func (p *ChildProc) spawn(ctx context.Context) error {
 			if stopErr := rp.Stop(shortStopCtx(handshakeStopGrace)); stopErr != nil {
 				p.log.Debug("voice: handshake-fail child stop", "pid", pid, "err", stopErr)
 			}
-			return fmt.Errorf("voice child handshake: %w (%v)", ErrChildUnavailable, herr)
+			return fmt.Errorf("voice child handshake: %w (%w)", ErrChildUnavailable, herr)
 		}
 	}
 
@@ -610,7 +610,7 @@ func childRSSKB(pid int) (int64, error) {
 	field := strings.TrimSpace(out.String())
 	// ps prints one line per pid plus a header-less value; a multi-line
 	// output (pid reuse) takes the last line.
-	for _, line := range strings.Split(field, "\n") {
+	for line := range strings.SplitSeq(field, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

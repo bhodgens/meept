@@ -9,12 +9,12 @@ import (
 )
 
 // sampleGateRecord builds a vocabulary-valid row for the file-mode tests.
-// insert() is the raw row writer (Store.Record mints ID/Ts upstream), so the
+// insert() is the raw row writer (Store.Record mints ID/TS upstream), so the
 // helper stamps them here.
 func sampleGateRecord() *CommandGateRecord {
 	return &CommandGateRecord{
 		ID:            "rec-modes-1",
-		Ts:            time.Now().UTC(),
+		TS:            time.Now().UTC(),
 		Chokepoint:    ChokepointDecisionGateDeny,
 		Command:       "rm -rf /tmp/x",
 		ContextBlob:   "{}",

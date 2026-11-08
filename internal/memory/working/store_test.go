@@ -140,7 +140,7 @@ func TestAppendEviction(t *testing.T) {
 	// 10 turns x 30 tokens = 300 tokens against a 100-token budget.
 	// After each Append the live set must be <= 100 tokens, and evicted
 	// turns must be queued in eviction (oldest-first) order.
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		turn := mkTurn(
 			"t"+string(rune('a'+i)),
 			"sess-1",
@@ -252,7 +252,7 @@ func TestAppendQueueBoundedDropOldest(t *testing.T) {
 	cfg := Config{MaxTokens: 20, MaxItems: 5, TTL: 0}
 	s := newTestStore(t, cfg)
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if err := s.Append(context.Background(),
 			mkTurn("q"+string(rune('a'+i)), "s", "user", strings.Repeat("x", 80), base.Add(time.Duration(i)*time.Second))); err != nil {
 			t.Fatal(err)
@@ -301,7 +301,7 @@ func TestRecallTermOverlapRanking(t *testing.T) {
 func TestRecallEmptyQueryReturnsNewest(t *testing.T) {
 	base := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	s := newTestStore(t, Config{MaxTokens: 1000, MaxItems: 10, TTL: 0})
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := s.Append(context.Background(),
 			mkTurn("e"+string(rune('a'+i)), "s", "user", strings.Repeat("w", 10), base.Add(time.Duration(i)*time.Minute))); err != nil {
 			t.Fatal(err)
@@ -339,11 +339,11 @@ func TestRecallConcurrencyRace(t *testing.T) {
 	s := newTestStore(t, Config{MaxTokens: 500, MaxItems: 50, TTL: 0})
 
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			for j := 0; j < 50; j++ {
+			for range 50 {
 				_ = s.Append(context.Background(),
 					mkTurn("c", "s", "user", "race check turn text", base))
 				_ = s.Recall(context.Background(), "race check", 5)

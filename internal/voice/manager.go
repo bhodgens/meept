@@ -227,7 +227,7 @@ func (m *Manager) HandleCallEvent(ctx context.Context, ev telnyx.CallEvent) erro
 				// redelivered initiated event for the now-dead leg fails
 				// at AnswerCall, as any late event for an ended call does.
 				if hErr := m.tel.HangupCall(ctx, ev.CallControlID); hErr != nil {
-					err = fmt.Errorf("voice: spawn failed (%v); carrier hangup also failed (%v)", err, hErr)
+					err = fmt.Errorf("voice: spawn failed (%w); carrier hangup also failed (%w)", err, hErr)
 				}
 				m.failUntracked(ev.CallControlID, fmt.Sprintf("inbound spawn failed: %v", err))
 				return err
@@ -250,13 +250,10 @@ func (m *Manager) HandleCallEvent(ctx context.Context, ev telnyx.CallEvent) erro
 		// Answered on a tracked id: notify the answered hook (audit
 		// 2026-11-06 H1 - the outbound no-answer timer cancel rides this).
 		m.notifyAnswered(ev.CallControlID)
-		if trackedOut {
-			// Dial-initiated (outbound) call: Telnyx already answered the leg
-			// it dialed; there is nothing to answer. AnswerCall here returns
-			// 404 on a live call and aborts the session (uptractor live
-			// drill). The answered event streams exactly like inbound;
-			// answering happens at call.initiated only.
-		}
+		// Dial-initiated (outbound) calls need no AnswerCall: Telnyx already
+		// answered the leg it dialed, and AnswerCall returns 404 on a live call
+		// and aborts the session (uptractor live drill). The answered event
+		// streams exactly like inbound; answering happens at call.initiated only.
 		m.mu.Lock()
 		streamURL := m.cfg.StreamURL
 		codec := m.cfg.Codec

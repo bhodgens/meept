@@ -67,6 +67,7 @@ func (s *Store) ClaimNextClustered(workerID, nodeID string, caps []string, agent
 	if err != nil {
 		return nil, fmt.Errorf("cluster claim: query: %w", err)
 	}
+	defer rows.Close()
 	var claimableJob *Job
 	for rows.Next() {
 		job, err := s.scanJobRows(rows)
@@ -81,7 +82,6 @@ func (s *Store) ClaimNextClustered(workerID, nodeID string, caps []string, agent
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("cluster claim: iterate: %w", err)
 	}
-	rows.Close()
 
 	if claimableJob == nil {
 		return nil, ErrNoJobAvailable
@@ -153,6 +153,7 @@ func (s *Store) ReclaimRemoteStale(ctx context.Context, localNodeID string) ([]s
 	if err != nil {
 		return nil, fmt.Errorf("remote reclaim: query: %w", err)
 	}
+	defer rows.Close()
 	var stale []struct {
 		id, node string
 	}
@@ -162,7 +163,6 @@ func (s *Store) ReclaimRemoteStale(ctx context.Context, localNodeID string) ([]s
 			stale = append(stale, struct{ id, node string }{id, node})
 		}
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("remote reclaim: iterate: %w", err)
 	}

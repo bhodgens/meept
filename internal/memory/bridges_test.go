@@ -107,7 +107,7 @@ func TestGenerateBridgesRespectsDFWindow(t *testing.T) {
 
 	// df=15: above the default max -> skipped, no additional LLM call.
 	var df15 []Memory
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		df15 = append(df15, bridgeTestMemory(
 			fmt.Sprintf("m-hot%d", i), "hot topic memory", "hot"))
 	}
@@ -158,7 +158,7 @@ func TestGenerateBridgesCapsSourcesAndFacts(t *testing.T) {
 
 	// 8 candidate memories sharing entity "capped" -> only 5 in the prompt.
 	var memories []Memory
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		memories = append(memories, bridgeTestMemory(
 			fmt.Sprintf("m-cap%d", i), fmt.Sprintf("capped memory %d", i), "capped"))
 	}

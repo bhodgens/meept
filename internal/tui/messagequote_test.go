@@ -49,7 +49,7 @@ func TestQuoteSelect_InsertsBlockquoteWithMsgRef(t *testing.T) {
 		t.Errorf("input %q must carry the [msg msg-002] reference", got)
 	}
 	// Every quoted content line must be blockquote-prefixed.
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if strings.Contains(line, "answer") || strings.Contains(line, "multiple lines") {
 			if !strings.HasPrefix(strings.TrimSpace(line), ">") {
 				t.Errorf("quoted line %q is not blockquote-prefixed", line)

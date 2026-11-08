@@ -316,12 +316,12 @@ func TestVoiceEmployeeProgressTypedTopic(t *testing.T) {
 func TestVoiceEmployeeHoldRaceConcurrentHangup(t *testing.T) {
 	w, _ := newHoldWiring(t)
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		wg.Add(1)
 		go func(k int) {
 			defer wg.Done()
-			ccid := "cc-race-" + string(rune('a'+k))
-			emp := "emp-r" + string(rune('a'+k%2))
+			ccid := "cc-race-" + string(rune('a'+k)) //nolint:gosec // G115: k is bounded 0..7 by the range-8 loop, so rune('a'+k) cannot overflow
+			emp := "emp-r" + string(rune('a'+k%2))   //nolint:gosec // G115: k%2 is bounded 0..1, cannot overflow int->rune
 			release := w.AcquireCallHold(ccid, emp)
 			w.ReleaseHook(ccid, voice.OutcomeHangup)
 			release()

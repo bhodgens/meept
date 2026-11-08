@@ -292,7 +292,7 @@ func TestDoctorMemoryExtrasStates(t *testing.T) {
 	if _, err := db.Exec(`CREATE TABLE knowledge_pages (id TEXT PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := db.Exec(`INSERT INTO knowledge_pages (id) VALUES (?)`, fmt.Sprintf("p%d", i)); err != nil {
 			t.Fatal(err)
 		}

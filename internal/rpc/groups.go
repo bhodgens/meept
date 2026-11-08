@@ -31,6 +31,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -379,10 +380,8 @@ func (h *GroupsHandler) resolveCaller(ctx context.Context, req *assignRequest) e
 	// middleware through auth.Store.Validate) whose user id is in
 	// admin_users. Never derived from key material.
 	if idn, ok := CallerIdentityFromContext(ctx); ok && idn.UserID != "" {
-		for _, u := range adminUsers {
-			if u == idn.UserID {
-				return nil
-			}
+		if slices.Contains(adminUsers, idn.UserID) {
+			return nil
 		}
 	}
 

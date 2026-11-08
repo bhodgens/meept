@@ -326,13 +326,13 @@ func (t *ExitPlanModeTool) Execute(ctx context.Context, args map[string]any) (an
 	title := planTitle(planText)
 	created, err := t.planGate.CreatePlan(ctx, title, planText, "", "", sessionID)
 	if err != nil {
-		return tools.NewErrorResult("create plan: " + err.Error()), nil
+		return tools.NewErrorResult("create plan: " + err.Error()), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	}
 	if err := t.planGate.SubmitPlan(ctx, created.ID); err != nil {
-		return tools.NewErrorResult("submit plan: " + err.Error()), nil
+		return tools.NewErrorResult("submit plan: " + err.Error()), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	}
 	if err := t.planGate.ApprovePlan(ctx, created.ID, sessionID, t.approver); err != nil {
-		return tools.NewErrorResult("approve plan: " + err.Error()), nil
+		return tools.NewErrorResult("approve plan: " + err.Error()), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	}
 	_ = t.ctrl.SetPlanMode(sessionID, false)
 
@@ -366,10 +366,10 @@ func classifyDecision(answer string) decision {
 // planTitle derives a plan title from the required leading '# ' heading, e.g.
 // "# probe plan" -> "probe plan".
 func planTitle(md string) string {
-	for _, line := range strings.Split(md, "\n") {
+	for line := range strings.Lines(md) {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "# ") {
-			return strings.TrimSpace(strings.TrimPrefix(trimmed, "# "))
+		if heading, ok := strings.CutPrefix(trimmed, "# "); ok {
+			return strings.TrimSpace(heading)
 		}
 	}
 	return "untitled plan"
@@ -379,7 +379,7 @@ func planTitle(md string) string {
 // top-level "# " heading (the required heading shape; "## ..." subheadings are
 // rejected).
 func planHasTopHeading(md string) bool {
-	for _, line := range strings.Split(md, "\n") {
+	for line := range strings.Lines(md) {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
@@ -395,5 +395,4 @@ func planHasTopHeading(md string) bool {
 // wired by the orchestrator on the returned tool.
 func RegisterPlanModeTools(registry *tools.Registry, ctrl *PlanModeController) {
 	registry.Register(NewExitPlanModeTool(ctrl))
-	return
 }

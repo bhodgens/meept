@@ -199,7 +199,7 @@ func TokenEstimate(text string) int {
 // returns nil.
 func SalientTokens(text string) []string {
 	toks := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	})
 	seen := make(map[string]struct{}, len(toks))
 	out := make([]string, 0, len(toks))
@@ -222,7 +222,7 @@ func SalientTokens(text string) []string {
 // twice as strongly).
 func ReplyTokens(text string) []string {
 	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	})
 }
 
@@ -264,7 +264,7 @@ func OutcomeRows(path string) ([]RecallOutcomeRecord, error) {
 		return nil, err
 	}
 	var rows []RecallOutcomeRecord
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

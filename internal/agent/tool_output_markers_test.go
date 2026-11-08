@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -91,7 +90,7 @@ func TestAbortedToolResultStoredWithMarkers(t *testing.T) {
 // (bughunt M5). The id-anchored wrap is reserved for un-pre-fenced input.
 func TestSecurityFencedContentPreservedInsideMarkers(t *testing.T) {
 	orch := intsecurity.NewOrchestrator(intsecurity.DefaultOrchestratorConfig(),
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
+		slog.New(slog.DiscardHandler))
 	raw := "ls output\nsecond line"
 	preFenced := orch.WrapToolOutput("shell_exec", raw)
 

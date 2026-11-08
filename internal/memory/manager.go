@@ -223,10 +223,11 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	case config.MemoryBackendLocal, config.MemoryBackendSQLite:
 		// Built-in local store.
 		wantSQLite = true
-	// lint: intentional legacy alias — the deprecated constant is the value
-	// being handled here, not a use of the deprecated API.
-	//lint:ignore SA1019 legacy memvid alias is the subject of this switch case
-	case "", config.MemoryBackendMemvid:
+	// Legacy value: MemoryBackendMemvid is the pre-rename name. The
+	// deprecated constant is the VALUE being handled here, not a use of
+	// the deprecated API — keep the symbolic reference so config
+	// round-trips stay coupled to the schema constant.
+	case "", config.MemoryBackendMemvid: //nolint:staticcheck // legacy memvid alias is the switch-case subject, not a deprecated-API use
 		// Legacy value: attempt the memvid service (aliasing preserves the
 		// old behavior exactly), falling back to the local store below.
 		wantMemvid = true

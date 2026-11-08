@@ -109,7 +109,7 @@ func writeL0FixtureOn(t *testing.T, dataDir, sessionID string, n int, date strin
 	}
 	var recs []l0Record
 	var b strings.Builder
-	for i := 0; i < n; i++ {
+	for i := range n {
 		role := "user"
 		if i%2 == 1 {
 			role = "assistant"

@@ -876,7 +876,7 @@ func TestSession_HumanRelayFullRejectsFailsClosed(t *testing.T) {
 	// request is rejected with a WARN and cancelled immediately — the
 	// oldest pendings stay answerable.
 	rl := NewRelay()
-	for i := 0; i < maxPendingPermissions; i++ {
+	for i := range maxPendingPermissions {
 		if _, err := rl.Register(PendingPermission{ID: fmt.Sprintf("perm-full-%d", i), AgentID: "pre"}); err != nil {
 			t.Fatalf("prefill register %d: %v", i, err)
 		}
@@ -1082,7 +1082,7 @@ func TestRelay_ResolveSentinels(t *testing.T) {
 
 func TestRelay_RegisterCap(t *testing.T) {
 	rl := NewRelay()
-	for i := 0; i < maxPendingPermissions; i++ {
+	for i := range maxPendingPermissions {
 		if _, err := rl.Register(PendingPermission{ID: fmt.Sprintf("perm-%d", i)}); err != nil {
 			t.Fatalf("Register %d: %v", i, err)
 		}
@@ -1685,7 +1685,7 @@ func TestRelay_OptionsCappedAtRegister(t *testing.T) {
 func TestSession_HumanRelayOptionsCapped(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString(`{"sessionId":"sess-h","toolCall":{"title":"rm -rf scratch"},"options":[`)
-	for i := 0; i < maxPermissionOptions+4; i++ {
+	for i := range maxPermissionOptions + 4 {
 		if i > 0 {
 			sb.WriteString(",")
 		}

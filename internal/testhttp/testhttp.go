@@ -59,8 +59,7 @@ func IsEphemeralExhaustion(err error) bool {
 	if !errors.As(err, &oe) || oe.Op != "dial" {
 		return false
 	}
-	var se *os.SyscallError
-	if errors.As(err, &se) {
+	if se, ok := errors.AsType[*os.SyscallError](err); ok {
 		return strings.Contains(se.Err.Error(), ephemeralExhaustionMarker)
 	}
 	// Some platforms surface the message without an os.SyscallError wrapper.
@@ -136,7 +135,7 @@ func WrapDialer(inner func(ctx context.Context, network, addr string) (net.Conn,
 // unreachable peer surfaces unchanged.
 func retryOnExhaustion(ctx context.Context, dial func(context.Context, string, string) (net.Conn, error), network, addr string) (net.Conn, error) {
 	var lastErr error
-	for attempt := 0; attempt < ephemeralRetryAttempts; attempt++ {
+	for attempt := range ephemeralRetryAttempts {
 		conn, err := dial(ctx, network, addr)
 		if err == nil {
 			return conn, nil
@@ -145,10 +144,7 @@ func retryOnExhaustion(ctx context.Context, dial func(context.Context, string, s
 			return nil, err
 		}
 		lastErr = err
-		backoff := ephemeralRetryBase << attempt
-		if backoff > ephemeralRetryMax {
-			backoff = ephemeralRetryMax
-		}
+		backoff := min(ephemeralRetryBase<<attempt, ephemeralRetryMax)
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():

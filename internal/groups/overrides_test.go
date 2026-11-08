@@ -155,7 +155,7 @@ func TestOverridesMalformedEntryNamedError(t *testing.T) {
 		// wrapper shape differs; write the array form directly
 		broken = `[{"subject":"agent:ok","allow":["git_push"],"reason":"window","expires":"2027-01-01T00:00:00Z"},{"subject":"agent:broken","allow":["shell"],"reason":"x"}]`
 	}
-	if err := os.WriteFile(path, []byte(broken), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(broken), 0o600); err != nil { //nolint:gosec // G703: path is a fresh t.TempDir() test fixture, not external input
 		t.Fatalf("write broken: %v", err)
 	}
 	_, err = LoadOverrides(path, OverrideLoadOptions{Now: fixedClock(at(2026, 11, 1, 0, 0))})
@@ -217,13 +217,12 @@ func TestOverridesRequiresInjectedClock(t *testing.T) {
 // cannot express a denial or a memory/network/model widening, so the
 // C8 "add only" guarantee needs no runtime enforcement.
 func TestOverridesAddOnlyShape(t *testing.T) {
-	typ := reflect.TypeOf(Override{})
+	typ := reflect.TypeFor[Override]()
 	allowed := map[string]bool{"Subject": true, "Allow": true, "Reason": true, "Expires": true}
 	var got []string
-	for i := 0; i < typ.NumField(); i++ {
-		name := typ.Field(i).Name
-		if !allowed[name] {
-			got = append(got, name)
+	for f := range typ.Fields() {
+		if !allowed[f.Name] {
+			got = append(got, f.Name)
 		}
 	}
 	if len(got) > 0 {

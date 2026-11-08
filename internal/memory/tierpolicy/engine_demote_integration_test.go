@@ -22,7 +22,7 @@ func TestEngineDemoteMixedPlanOrder(t *testing.T) {
 	// Over-ceiling working tier with enough candidates to fill an evict
 	// batch (R-B5 min batch 5).
 	byTier := map[string][]memory.MemoryResult{}
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		byTier["working"] = append(byTier["working"], mem("m-d"+string(rune('a'+i)), "tiny", 30))
 	}
 	e := New(enabledCfg(), Deps{

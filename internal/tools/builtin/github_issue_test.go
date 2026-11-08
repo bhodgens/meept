@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/caimlas/meept/internal/effects"
@@ -44,10 +45,10 @@ func newIssueGateFake() *issueGateFake {
 		f.reqPaths = append(f.reqPaths, r.Method+" "+r.URL.Path)
 		p := r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case p == "/repos/octo/cat/issues/5":
+		switch p {
+		case "/repos/octo/cat/issues/5":
 			_, _ = w.Write([]byte(`{"number":5,"title":"x","state":"open","html_url":"https://github.com/octo/cat/issues/5"}`))
-		case p == "/repos/octo/cat/issues/5/comments":
+		case "/repos/octo/cat/issues/5/comments":
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":789,"body":"done","html_url":"https://github.com/octo/cat/issues/5#issuecomment-789"}`))
 		default:
@@ -190,14 +191,7 @@ func TestGitHubIssueGetTool(t *testing.T) {
 	}
 
 	// The fake must have received a GET to the issue endpoint.
-	found := false
-	for _, p := range fake.recordedPaths() {
-		if p == "GET /repos/octo/cat/issues/5" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(fake.recordedPaths(), "GET /repos/octo/cat/issues/5") {
 		t.Errorf("fake server did not receive GET /repos/octo/cat/issues/5; got: %v", fake.recordedPaths())
 	}
 }
@@ -226,14 +220,7 @@ func TestGitHubIssueCommentTool(t *testing.T) {
 	_ = res
 
 	// The fake must have received a POST to the issue comment endpoint.
-	found := false
-	for _, p := range fake.recordedPaths() {
-		if p == "POST /repos/octo/cat/issues/5/comments" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(fake.recordedPaths(), "POST /repos/octo/cat/issues/5/comments") {
 		t.Errorf("fake server did not receive POST /repos/octo/cat/issues/5/comments; got: %v", fake.recordedPaths())
 	}
 

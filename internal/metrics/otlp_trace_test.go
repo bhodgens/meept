@@ -70,7 +70,7 @@ func parseProtobuf(t *testing.T, data []byte) []pbField {
 			data = data[8:]
 		case 2: // length-delimited
 			l, n := binary.Uvarint(data)
-			if n <= 0 || int(l) > len(data[n:]) {
+			if n <= 0 || l > uint64(len(data[n:])) {
 				t.Fatal("bad length")
 			}
 			data = data[n:]
@@ -301,7 +301,7 @@ func TestTraceExporterBatches(t *testing.T) {
 	sink := NewOTLPTraceHTTPSink(srv.URL, nil, nil)
 	exp := NewTraceExporter(TraceExporterConfig{}, sink)
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		exp.RecordSpan(makeSpan("chat.turn"))
 	}
 	exp.Flush()
@@ -354,7 +354,7 @@ func TestTraceExporterOverflowDropsAndCounts(t *testing.T) {
 	exp := NewTraceExporter(TraceExporterConfig{}, &blockingSink{})
 	defer exp.Stop()
 	// Queue capacity is 512; push far beyond it with no flush loop running.
-	for i := 0; i < traceQueueCapacity+100; i++ {
+	for range traceQueueCapacity + 100 {
 		exp.RecordSpan(makeSpan("chat.turn"))
 	}
 	if got := exp.DroppedSpans.Load(); got != 100 {
@@ -388,12 +388,12 @@ func TestTraceSinkCircuitOpensAfterRepeatedFailures(t *testing.T) {
 
 	sink := NewOTLPTraceHTTPSink(srv.URL, nil, nil)
 	ctx := context.Background()
-	for i := 0; i < traceCircuitThreshold; i++ {
+	for range traceCircuitThreshold {
 		_ = sink.ExportSpans(ctx, []Span{makeSpan("chat.turn")})
 	}
 	before := hits.Load()
 	// Circuit open: no more network attempts.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		err := sink.ExportSpans(ctx, []Span{makeSpan("chat.turn")})
 		if !errors.Is(err, errTraceCircuitOpen) {
 			t.Fatalf("want errTraceCircuitOpen while circuit open, got %v", err)

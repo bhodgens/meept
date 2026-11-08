@@ -42,8 +42,7 @@ func resolveScopeInputs(spec *AgentSpec, projectID, userID string) (memory.Scope
 	maxScope := memory.ScopeProject
 	switch decl {
 	case "":
-		// Default: project isolation (D2).
-		maxScope = memory.ScopeProject
+		// Default: project isolation (D2); maxScope already initialized.
 	case string(memory.ScopeProject), string(memory.ScopeUser), string(memory.ScopeGlobal):
 		maxScope = memory.Scope(decl)
 	default:
@@ -58,7 +57,6 @@ func resolveScopeInputs(spec *AgentSpec, projectID, userID string) (memory.Scope
 			}(),
 			"declared", decl,
 		)
-		maxScope = memory.ScopeProject
 	}
 
 	return maxScope, projectID, userID, userID != ""
@@ -105,16 +103,14 @@ func resolveScopeInputsWithCeiling(spec *AgentSpec, ceiling, projectID, userID s
 func EffectiveMemoryScope(agentDecl, groupCeiling string) memory.Scope {
 	maxScope := memory.ScopeProject
 	switch agentDecl {
-	case "", string(memory.ScopeProject):
-		maxScope = memory.ScopeProject
 	case string(memory.ScopeUser):
 		maxScope = memory.ScopeUser
 	case string(memory.ScopeGlobal):
 		maxScope = memory.ScopeGlobal
 	default:
-		// Fail SAFE: an unrecognized declaration narrows to project,
-		// never widens to global (same posture as resolveScopeInputs).
-		maxScope = memory.ScopeProject
+		// "", project, or invalid all resolve to project scope (fail-safe
+		// narrow, same posture as resolveScopeInputs); maxScope is already
+		// initialized to memory.ScopeProject.
 	}
 	return memoryScopeCeiling(maxScope, groupCeiling)
 }

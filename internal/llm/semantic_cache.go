@@ -252,7 +252,7 @@ func (s *SemanticCache) verifyBehindBand(ctx context.Context, modelID, prompt, p
 	verifyVec, err := s.embedder.Embed(ctx, semanticPromptText(modelID, prompt))
 	s.mu.Lock()
 	if err != nil || len(verifyVec) == 0 {
-		return nil, false, nil
+		return nil, false, nil //nolint:nilerr // documented above: any failure shape degrades to a miss, never an error
 	}
 	e, ok := s.entries[key]
 	if !ok || e.partition != part {

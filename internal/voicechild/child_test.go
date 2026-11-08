@@ -376,7 +376,7 @@ func TestSayClear(t *testing.T) {
 	gate := newGatedTTS()
 	swapTTS(p, gate)
 
-	d.sendLine(childConn, voiceframe.Frame{CallID: "cc2", Event: voiceframe.EventSay, Text: "hello there", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: "cc2", Event: voiceframe.EventSay, Text: "hello there", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	gotFirst := make(chan []byte, 1)
 	go func() {
 		buf := make([]byte, 640)
@@ -445,7 +445,7 @@ func TestInterrupt(t *testing.T) {
 
 	// Start playback through the real say path; the gated TTS parks the
 	// stream after the first chunk, so playback stays active.
-	d.sendLine(childConn, voiceframe.Frame{CallID: "cc3", Event: voiceframe.EventSay, Text: "long utterance", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: "cc3", Event: voiceframe.EventSay, Text: "long utterance", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	select {
 	case <-gate.enteredPlay:
 	case <-time.After(5 * time.Second):
@@ -552,7 +552,7 @@ func TestPerFrameErrorKeepsChildAlive(t *testing.T) {
 	if _, ok := child.getPipeline("good"); !ok {
 		t.Fatalf("healthy pipeline gone after per-frame errors")
 	}
-	d.sendLine(childConn, voiceframe.Frame{CallID: "good", Event: voiceframe.EventSay, Text: "still alive", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: "good", Event: voiceframe.EventSay, Text: "still alive", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	first := make(chan int, 1)
 	go func() {
 		_ = gout.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -645,11 +645,8 @@ func (r *gReader) Read(p []byte) (int, error) {
 func (r *gReader) Close() error { return nil }
 
 func fill(p []byte, b byte) int {
-	n := len(p)
-	if n > 640 {
-		n = 640
-	}
-	for i := 0; i < n; i++ {
+	n := min(len(p), 640)
+	for i := range n {
 		p[i] = b
 	}
 	return n
@@ -689,7 +686,7 @@ func swapTTS(p *pipeline, tts TTSProvider) {
 
 // helpers
 
-func lastPtr(v bool) *bool { return &v }
+func lastPtr(v bool) *bool { return &v } //nolint:modernize // newexpr suggests new(bool)=false; lastPtr preserves the caller's value
 
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()

@@ -164,8 +164,7 @@ func TestGateWiringNilParkerNoop(t *testing.T) {
 	c.handleGateApproved(gateBusMessage("plan.approved", map[string]any{
 		"plan_id": "p",
 	}))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	c.StartGateParkPump(ctx) // must not panic
 }
 

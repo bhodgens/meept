@@ -89,23 +89,22 @@ Future<void> _pumpBounded(WidgetTester tester, {int frames = 4}) async {
 }
 
 void main() {
-  testWidgets('pending turn renders lowercase "running turn …" row',
-      (tester) async {
+  testWidgets('pending turn renders lowercase "running turn …" row', (
+    tester,
+  ) async {
     late ProviderContainer container;
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          chatProvider('test-session').overrideWith(
-            (ref) {
-              final notifier = _TestChatNotifier(
-                sdkClient: _StubSdkClient(),
-                websocket: _StubWebSocket(),
-                ttsNotifier: _StubTtsNotifier(),
-                sessionId: 'test-session',
-              );
-              return notifier;
-            },
-          ),
+          chatProvider('test-session').overrideWith((ref) {
+            final notifier = _TestChatNotifier(
+              sdkClient: _StubSdkClient(),
+              websocket: _StubWebSocket(),
+              ttsNotifier: _StubTtsNotifier(),
+              sessionId: 'test-session',
+            );
+            return notifier;
+          }),
         ],
         child: MaterialApp(
           theme: ThemeData.dark(),
@@ -141,9 +140,9 @@ void main() {
   testWidgets('stalled turn renders the stalled text; parked renders quota '
       'text', (tester) async {
     late ProviderContainer container;
-    await tester.pumpWidget(_buildTestApp(
-      child: const ChatMessageList(sessionId: 'test-session'),
-    ));
+    await tester.pumpWidget(
+      _buildTestApp(child: const ChatMessageList(sessionId: 'test-session')),
+    );
     container = ProviderScope.containerOf(
       tester.element(find.byType(ChatMessageList)),
     );

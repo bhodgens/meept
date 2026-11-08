@@ -123,7 +123,9 @@ func TestActivityWiring_AllNilHandlesNeverPanics(t *testing.T) {
 		// activity.query with a live-but-empty aggregator returns an
 		// empty result, NOT an error; the manager-backed methods must
 		// error cleanly. Either way: no panic is the contract.
-		callWiring(t, srv, tc.method, tc.params)
+		if err := callWiring(t, srv, tc.method, tc.params); err != nil {
+			t.Errorf("%s: %v", tc.method, err)
+		}
 	}
 	if err := callWiring(t, srv, "activity.recent", `{}`); err != nil {
 		t.Errorf("activity.recent must work with a live ring: %v", err)
@@ -157,7 +159,7 @@ func TestActivityWiring_RingReceivesBusEvents(t *testing.T) {
 	})
 
 	deadline := 100
-	for i := 0; i < deadline; i++ {
+	for range deadline {
 		result, err := srv.CallMethod(context.Background(), "activity.recent", json.RawMessage(`{}`))
 		if err != nil {
 			t.Fatalf("activity.recent: %v", err)

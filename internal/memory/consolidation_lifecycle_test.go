@@ -2,7 +2,6 @@ package memory
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -108,7 +107,7 @@ func (b *blockingConsolidationBackend) DeleteSingle(_ context.Context, _ string)
 }
 
 func discardConsolidationLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // TestConsolidator_RestartAfterStop pins the Start→Stop→Start restart
@@ -169,11 +168,9 @@ func TestConsolidator_ConcurrentStartSingleTicker(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			c.StartPeriodicConsolidation(ctx, time.Millisecond, 24)
-		}()
+		})
 	}
 	wg.Wait()
 

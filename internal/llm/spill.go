@@ -121,9 +121,7 @@ func countSpillTokens(content string) int {
 	}
 	n := len(content)
 	tokens := (n + 2) / 3 // ceil(n/3), matching HeuristicTokenizer
-	if tokens < 1 {
-		tokens = 1
-	}
+	tokens = max(tokens, 1)
 	return tokens
 }
 

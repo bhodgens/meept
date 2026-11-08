@@ -26,8 +26,8 @@ func TestSanitize_ControlCharSplitRoleMarker(t *testing.T) {
 	}
 	// The reassembled role marker must be stripped (STANDARD strips
 	// line-initial role markers), so no live "System:" may survive.
-	for _, line := range strings.Split(result.CleanText, "\n") {
-		trimmed := strings.TrimLeft(line, " \t")
+	for line := range strings.Lines(result.CleanText) {
+		trimmed := strings.TrimLeft(line, " 	")
 		if strings.HasPrefix(strings.ToLower(trimmed), "system:") {
 			t.Errorf("live 'System:' role marker survived sanitization: CleanText=%q", result.CleanText)
 		}

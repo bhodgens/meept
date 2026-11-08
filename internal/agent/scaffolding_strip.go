@@ -29,15 +29,14 @@ func StripPromptScaffolding(desc string) string {
 	if desc == "" {
 		return desc
 	}
-	if idx := strings.Index(desc, yourTaskMarker); idx >= 0 {
-		rest := desc[idx+len(yourTaskMarker):]
+	if _, rest, ok := strings.Cut(desc, yourTaskMarker); ok {
 		return strings.TrimSpace(rest)
 	}
-	if idx := strings.Index(desc, sessionContextMarker); idx >= 0 {
+	if before, _, ok := strings.Cut(desc, sessionContextMarker); ok {
 		// No Your Task marker: keep any text BEFORE the block (the
 		// injection prepends, so this is normally empty) and drop the
 		// block itself.
-		return strings.TrimSpace(desc[:idx])
+		return strings.TrimSpace(before)
 	}
 	return strings.TrimSpace(desc)
 }

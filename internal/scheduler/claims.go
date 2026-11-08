@@ -216,7 +216,7 @@ func readLastWake(dataDir string) (time.Time, error) {
 // corrupt content is simply re-read and re-quarantined next tick).
 func quarantineLastWake(path string, data []byte, cause error) {
 	qPath := path + ".corrupt"
-	_ = os.WriteFile(qPath, data, 0o600)
+	_ = os.WriteFile(qPath, data, 0o600) //nolint:gosec // G703: qPath is <last-wake path>.corrupt, derived from config (best-effort forensics copy)
 	_ = os.Remove(path)
 	slog.Warn("scheduler: last wake file corrupt; quarantined and reset",
 		"path", path, "quarantined_to", qPath, "error", cause)

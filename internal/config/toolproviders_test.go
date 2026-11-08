@@ -163,7 +163,7 @@ func TestDoctorReportsProviders(t *testing.T) {
 	all := []string{"github", "scheduler", "hermes", "acp"}
 	cfg := ToolProvidersConfig{
 		Providers: map[string]ToolProviderEntry{
-			"scheduler": {Enabled: boolPtr(false)},
+			"scheduler": {Enabled: new(false)},
 		},
 	}
 
@@ -191,5 +191,3 @@ func TestDoctorReportsProviders(t *testing.T) {
 		t.Errorf("second EnabledNames pass = %v, want 3 entries (report-only, no mutation)", again)
 	}
 }
-
-func boolPtr(b bool) *bool { return &b }

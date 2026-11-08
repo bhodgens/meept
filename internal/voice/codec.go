@@ -34,7 +34,7 @@ func mulawDecodeByte(u byte) int16 {
 	if neg {
 		v = -v
 	}
-	return int16(v)
+	return int16(v) //nolint:gosec // G115: bounded mu-law decode into s16le sample
 }
 
 // linearToMulawByte encodes one 16-bit linear sample as G.711 mu-law.
@@ -58,7 +58,7 @@ func linearToMulawByte(pcm int16) byte {
 		mask >>= 1
 	}
 	mant := (v >> (exp + 3)) & 0x0F
-	return ^(sign | byte(exp)<<4 | byte(mant))
+	return ^(sign | byte(exp)<<4 | byte(mant)) //nolint:gosec // G115: bounded mu-law encode (exp 0-7, mant 0-15)
 }
 
 // mulaw8ToPCM16 doubles every 8 kHz decoded sample into 16 kHz PCM16 LE
@@ -74,16 +74,16 @@ func mulaw8ToPCM16(mu []byte) []byte {
 	}
 	out := make([]byte, 4*len(mu)-2)
 	pos := 0
-	for i := 0; i < len(mu); i++ {
+	for i := range mu {
 		s := mulawDecodeByte(mu[i])
-		out[pos] = byte(s)
-		out[pos+1] = byte(s >> 8)
+		out[pos] = byte(s)        //nolint:gosec // G115: s16le byte encode
+		out[pos+1] = byte(s >> 8) //nolint:gosec // G115: s16le byte encode
 		pos += 2
 		if i+1 < len(mu) {
 			next := mulawDecodeByte(mu[i+1])
 			mid := (int(s) + int(next)) / 2
-			out[pos] = byte(mid)
-			out[pos+1] = byte(mid >> 8)
+			out[pos] = byte(mid)        //nolint:gosec // G115: s16le byte encode
+			out[pos+1] = byte(mid >> 8) //nolint:gosec // G115: s16le byte encode
 			pos += 2
 		}
 	}
@@ -100,10 +100,10 @@ func pcm16ToMulaw8(pcm []byte) []byte {
 		return nil
 	}
 	out := make([]byte, n)
-	for i := 0; i < n; i++ {
-		s0 := int(int16(binary.LittleEndian.Uint16(pcm[4*i:])))
-		s1 := int(int16(binary.LittleEndian.Uint16(pcm[4*i+2:])))
-		out[i] = linearToMulawByte(int16((s0 + s1) / 2))
+	for i := range n {
+		s0 := int(int16(binary.LittleEndian.Uint16(pcm[4*i:])))   //nolint:gosec // G115: signed s16le sample decode
+		s1 := int(int16(binary.LittleEndian.Uint16(pcm[4*i+2:]))) //nolint:gosec // G115: signed s16le sample decode
+		out[i] = linearToMulawByte(int16((s0 + s1) / 2))          //nolint:gosec // G115: pair-average into bounded s16 sample
 	}
 	return out
 }

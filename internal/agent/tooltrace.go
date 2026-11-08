@@ -67,8 +67,8 @@ func blockReasonForToolResult(r *ExecutionResult) string {
 		return ""
 	}
 	const prefix = "blocked by security policy: "
-	if strings.HasPrefix(r.Error, prefix) {
-		return strings.TrimPrefix(r.Error, prefix)
+	if stripped, ok := strings.CutPrefix(r.Error, prefix); ok {
+		return stripped
 	}
 	return ""
 }

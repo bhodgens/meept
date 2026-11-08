@@ -122,7 +122,7 @@ func (l *Linker) findLinkedGoal(ctx context.Context, employeeID, repo, ticketID 
 			return g, nil
 		}
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // deliberate: "no goal exists for this trigger ref yet" is a lookup miss, not an error; callers proceed to create
 }
 
 // create claims the IntakeKey and creates the trigger-source goal. The
@@ -161,7 +161,7 @@ func (l *Linker) create(ctx context.Context, t Ticket, employeeID string, gate *
 		// picks it up on the next poll (dedup). Abandon would kill the
 		// winner's in-flight claim, so it is NOT called here.
 		if errors.Is(err, effects.ErrInvalidTransition) {
-			return nil, nil
+			return nil, nil //nolint:nilnil // concurrent poller won the claim: this tick creates nothing and re-polls (dedup), not an error
 		}
 		return nil, fmt.Errorf("intake: create goal for %s#%s: %w", t.Repo, t.ID, err)
 	}

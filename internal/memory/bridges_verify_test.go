@@ -121,7 +121,7 @@ func TestBridgeVerdictGrammarDecodable(t *testing.T) {
 	}
 	// The grammar must decode in llama.cpp GBNF terms — we can't run
 	// llama.cpp here, so assert structural sanity: first line declares root.
-	first := strings.SplitN(g, "\n", 2)[0]
+	first, _, _ := strings.Cut(g, "\n")
 	if !strings.HasPrefix(first, "root ::=") {
 		t.Errorf("first grammar rule must be root, got %q", first)
 	}

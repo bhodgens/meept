@@ -38,34 +38,34 @@ func renderIntakeStatus(s IntakeStatus, rawErr error) string {
 	sb.WriteString("intake status\n")
 	sb.WriteString("---------------\n")
 
-	sb.WriteString(fmt.Sprintf("  enabled:      %v\n", s.Enabled))
-	sb.WriteString(fmt.Sprintf("  watch_repo:    %s\n", s.WatchRepo))
-	sb.WriteString(fmt.Sprintf("  interval:      %s\n", s.PollInterval))
+	fmt.Fprintf(&sb, "  enabled:      %v\n", s.Enabled)
+	fmt.Fprintf(&sb, "  watch_repo:    %s\n", s.WatchRepo)
+	fmt.Fprintf(&sb, "  interval:      %s\n", s.PollInterval)
 
 	if len(s.RequiredLabels) > 0 {
-		sb.WriteString(fmt.Sprintf("  labels:       %s\n", strings.Join(s.RequiredLabels, ", ")))
+		fmt.Fprintf(&sb, "  labels:       %s\n", strings.Join(s.RequiredLabels, ", "))
 	} else {
 		sb.WriteString("  labels:       factory (default)\n")
 	}
 
-	sb.WriteString(fmt.Sprintf("  done_label:   %s\n", s.DoneLabel))
+	fmt.Fprintf(&sb, "  done_label:   %s\n", s.DoneLabel)
 
 	if strings.TrimSpace(s.DefaultEmployee) == "" {
 		sb.WriteString("  employee:     missing\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("  employee:     %s\n", s.DefaultEmployee))
+		fmt.Fprintf(&sb, "  employee:     %s\n", s.DefaultEmployee)
 	}
 
 	if s.GateCommand == "" {
 		sb.WriteString("  gate:         none\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("  gate:         %s\n", s.GateCommand))
+		fmt.Fprintf(&sb, "  gate:         %s\n", s.GateCommand)
 	}
 
 	if s.ProjectNumber == 0 {
 		sb.WriteString("  project:      none\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("  project:      #%d\n", s.ProjectNumber))
+		fmt.Fprintf(&sb, "  project:      #%d\n", s.ProjectNumber)
 	}
 
 	if s.PollerScheduled {

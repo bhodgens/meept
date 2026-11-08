@@ -235,10 +235,6 @@ func registerActivityRPC(server *rpc.Server, agg *activity.Aggregator,
 				return nil, fmt.Errorf("activity.findings: since: %w", err)
 			}
 		}
-		limit := req.Limit
-		if limit <= 0 {
-			limit = 100
-		}
 		findings, err := mgr.ListAuditFindings(ctx, employee.AuditQuery{
 			EmployeeID: req.EmployeeID,
 			Severity:   req.Severity,
@@ -275,10 +271,7 @@ func registerActivityRPC(server *rpc.Server, agg *activity.Aggregator,
 		}
 		total := len(findings)
 		if req.Offset > 0 || req.Limit > 0 {
-			start := req.Offset
-			if start > total {
-				start = total
-			}
+			start := min(req.Offset, total)
 			end := total
 			if req.Limit > 0 && start+req.Limit < end {
 				end = start + req.Limit

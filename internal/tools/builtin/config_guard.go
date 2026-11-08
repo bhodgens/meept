@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/caimlas/meept/internal/config"
@@ -77,7 +78,7 @@ func guardProtectedConfigPath(resolved string, appendMode bool) error {
 	if err != nil {
 		// MeeptHome does not exist yet (fresh install). Nothing is protected
 		// from a path that cannot exist; let the normal write proceed.
-		return nil
+		return nil //nolint:nilerr // fresh install = nothing to protect, not a guard error
 	}
 	target, err := filepath.EvalSymlinks(resolved)
 	if err != nil {
@@ -87,7 +88,7 @@ func guardProtectedConfigPath(resolved string, appendMode bool) error {
 		// comparison still holds against the resolved home.
 		abs, aerr := filepath.Abs(resolved)
 		if aerr != nil {
-			return nil
+			return nil //nolint:nilerr // unresolvable target inside a fresh tree degrades to no summary
 		}
 		target = resolveExistingAncestor(filepath.Clean(abs))
 	}
@@ -171,13 +172,13 @@ func guardSecretReadPath(resolved string) error {
 	home, err := filepath.EvalSymlinks(config.MeeptHome())
 	if err != nil {
 		// MeeptHome does not exist yet (fresh install): nothing to protect.
-		return nil
+		return nil //nolint:nilerr // fresh install = nothing to protect, not a guard error
 	}
 	target, err := filepath.EvalSymlinks(resolved)
 	if err != nil {
 		abs, aerr := filepath.Abs(resolved)
 		if aerr != nil {
-			return nil
+			return nil //nolint:nilerr // unresolvable target inside a fresh tree degrades to no summary
 		}
 		target = resolveExistingAncestor(filepath.Clean(abs))
 	}
@@ -185,13 +186,11 @@ func guardSecretReadPath(resolved string) error {
 		return nil
 	}
 	base := filepath.Base(target)
-	for _, name := range secretReadNames {
-		if base == name {
-			return fmt.Errorf(
-				"refusing to read %s: it is the daemon's credential material. "+
-					"An agent must never see the API key; the daemon and the GUI "+
-					"pairing flow read it directly", target)
-		}
+	if slices.Contains(secretReadNames, base) {
+		return fmt.Errorf(
+			"refusing to read %s: it is the daemon's credential material. "+
+				"An agent must never see the API key; the daemon and the GUI "+
+				"pairing flow read it directly", target)
 	}
 	for _, d := range secretReadDirs {
 		if pathWithin(target, filepath.Join(home, d)) {

@@ -86,8 +86,6 @@ func cloneGoal(g *GoalRecord) *GoalRecord {
 	return &c
 }
 
-func ownerOf(id string) []string { return []string{id} }
-
 func goalOwnerStatic(id string) goalOwner {
 	return func(context.Context) string { return id }
 }

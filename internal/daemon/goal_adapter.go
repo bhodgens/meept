@@ -75,7 +75,7 @@ func (a *goalEmployeeManagerAdapter) GetGoal(ctx context.Context, id string) (*b
 		return nil, err
 	}
 	if g == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented not-found contract: the tool layer maps nil goal to ErrGoalToolNotFound
 	}
 	return goalRecordFromGoal(g), nil
 }

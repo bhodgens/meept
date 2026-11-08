@@ -101,7 +101,7 @@ func (a *Aggregator) auditRecords(ctx context.Context) ([]ActivityRecord, error)
 			continue
 		}
 		summary := firstNonEmpty(r.Payload["summary"], r.Payload["action"], r.Payload["violated_rule"], "audit "+r.Type)
-		detail := map[string]string{"seq": itoa(uint64(r.Seq))}
+		detail := map[string]string{"seq": itoa(r.Seq)}
 		for _, k := range []string{"action", "plan_id", "task_id", "session_id", "violated_rule"} {
 			if v, ok := r.Payload[k]; ok {
 				detail[k] = v

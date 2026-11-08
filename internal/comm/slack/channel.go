@@ -122,9 +122,7 @@ func (c *SlackChannel) NotifyPermissionRequested(p acp.PendingPermission) bool {
 	}
 	card := renderRequestCard(c.cfg.ChannelID, requestID, summary, p.AgentID)
 
-	c.inflight.Add(1)
-	go func() {
-		defer c.inflight.Done()
+	c.inflight.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		var ts string
@@ -142,7 +140,7 @@ func (c *SlackChannel) NotifyPermissionRequested(p acp.PendingPermission) bool {
 		}
 		c.cardTS[requestID] = cardRef{channel: c.cfg.ChannelID, ts: ts}
 		c.mu.Unlock()
-	}()
+	})
 	return true
 }
 
@@ -161,15 +159,13 @@ func (c *SlackChannel) NotifyPermissionResolved(p acp.PendingPermission, decisio
 	}
 	card := renderResolvedCard(ref.channel, ref.ts, decision, approver.String())
 
-	c.inflight.Add(1)
-	go func() {
-		defer c.inflight.Done()
+	c.inflight.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := c.postChat(ctx, "chat.update", card, nil); err != nil {
 			c.logger.Warn("slack: failed to update permission card", "request", p.ID, "error", err)
 		}
-	}()
+	})
 }
 
 // dropOldestCardLocked evicts an arbitrary (Go map order) entry; the map is

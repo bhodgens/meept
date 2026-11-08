@@ -11,7 +11,7 @@ func TestRing_AppendAndTail(t *testing.T) {
 
 	// Append 5 records with distinct timestamps
 	base := time.Now()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		r.Append(ActivityRecord{
 			Kind:    "test",
 			At:      base.Add(time.Duration(i) * time.Second),
@@ -59,11 +59,9 @@ func TestRing_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// 10 goroutines appending
-	for g := 0; g < 10; g++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			for i := 0; i < 100; i++ {
+	for range 10 {
+		wg.Go(func() {
+			for range 100 {
 				r.Append(ActivityRecord{
 					Kind:    "concurrent",
 					AgentID: "agent",
@@ -71,18 +69,16 @@ func TestRing_Concurrent(t *testing.T) {
 					Summary: "test",
 				})
 			}
-		}(g)
+		})
 	}
 
 	// 5 goroutines reading
-	for g := 0; g < 5; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 100; i++ {
+	for range 5 {
+		wg.Go(func() {
+			for range 100 {
 				r.Tail(50)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

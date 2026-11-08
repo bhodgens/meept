@@ -867,8 +867,8 @@ func matchEnginePathPattern(pattern, resolved string) bool {
 	if matched, _ := filepath.Match(expanded, resolved); matched {
 		return true
 	}
-	if strings.HasSuffix(expanded, "**") {
-		dirPrefix := strings.TrimSuffix(strings.TrimSuffix(expanded, "**"), "*")
+	if dirPrefix, ok := strings.CutSuffix(expanded, "**"); ok {
+		dirPrefix = strings.TrimSuffix(dirPrefix, "*")
 		if dirPrefix != "" && isPathUnderDir(resolved, dirPrefix) {
 			return true
 		}

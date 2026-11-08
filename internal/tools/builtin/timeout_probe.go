@@ -9,12 +9,12 @@ import (
 	"github.com/caimlas/meept/internal/tools"
 )
 
-// TimeoutProbeTimeoutMs is the cooperative budget the probe tool declares
+// TimeoutProbeTimeout is the cooperative budget the probe tool declares
 // (contract B1 / tool-surface leaf 01). The F9 e2e gate invokes it with a
 // sleep far longer than this so the executor's derived deadline expires and
 // substitutes the structured TOOL_TIMEOUT result (ErrCode "TOOL_TIMEOUT"),
 // never a raw context.DeadlineExceeded in the model-facing envelope.
-const TimeoutProbeTimeoutMs = 1500 * time.Millisecond
+const TimeoutProbeTimeout = 1500 * time.Millisecond
 
 // TimeoutProbeTool is an instrumentation tool that sleeps for the requested
 // duration and reports the elapsed time. It declares a short cooperative time
@@ -52,7 +52,7 @@ func (t *TimeoutProbeTool) Parameters() llm.FunctionParameters {
 
 // TimeoutMs declares a short cooperative budget (contract B1): a sleep beyond
 // this must surface as a structured TOOL_TIMEOUT, not a hang.
-func (t *TimeoutProbeTool) TimeoutMs() time.Duration { return TimeoutProbeTimeoutMs }
+func (t *TimeoutProbeTool) TimeoutMs() time.Duration { return TimeoutProbeTimeout }
 
 // IsReadOnly reports the probe as a pure read: sleeping has no side effects.
 func (t *TimeoutProbeTool) IsReadOnly(map[string]any) bool { return true }

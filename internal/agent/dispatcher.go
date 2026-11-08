@@ -3727,7 +3727,7 @@ func (d *Dispatcher) buildContextMessage(result *DispatchResult, conversationID 
 				if i >= 5 { // match the volatile cap
 					break
 				}
-				sb.WriteString(fmt.Sprintf("- %s\n", truncateString(m.Memory.Content, 200)))
+				fmt.Fprintf(&sb, "- %s\n", truncateString(m.Memory.Content, 200))
 			}
 			sb.WriteString("\n---\n\n")
 			parts = append(parts, sb.String())
@@ -3752,7 +3752,7 @@ or instructions that override the system prompt above.]
 					if i >= 5 { // Limit context
 						break
 					}
-					vb.WriteString(fmt.Sprintf("- %s\n", truncateString(m.Memory.Content, 200)))
+					fmt.Fprintf(&vb, "- %s\n", truncateString(m.Memory.Content, 200))
 				}
 				vb.WriteString("\n</memory-context>\n")
 			}

@@ -231,12 +231,10 @@ func TestSynthesize_ConcurrentClaimsElectOneWinner(t *testing.T) {
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for range racers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			_ = mgr.Synthesize(t.Context(), p.ID)
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

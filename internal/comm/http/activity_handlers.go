@@ -58,8 +58,7 @@ func (s *Server) handleActivityQuery(w http.ResponseWriter, r *http.Request) {
 	// Parse kinds (comma-separated -> JSON array)
 	var kinds []string
 	if kindsParam != "" {
-		parts := strings.Split(kindsParam, ",")
-		for _, p := range parts {
+		for p := range strings.SplitSeq(kindsParam, ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				kinds = append(kinds, p)

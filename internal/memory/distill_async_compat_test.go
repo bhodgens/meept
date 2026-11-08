@@ -53,7 +53,7 @@ func TestDistillWorkerRoundtripsRealL0RecorderOutput(t *testing.T) {
 
 	session := "sess-compat"
 	rec := l0.NewRecorder(dataDir, nil)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		role := "user"
 		if i%2 == 1 {
 			role = "assistant"

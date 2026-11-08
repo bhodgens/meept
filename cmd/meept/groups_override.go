@@ -19,6 +19,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -227,14 +228,14 @@ func commaJoin(in []string) string {
 	if len(in) == 0 {
 		return "-"
 	}
-	out := ""
+	var sb strings.Builder
 	for i, v := range in {
 		if i > 0 {
-			out += ","
+			sb.WriteByte(',')
 		}
-		out += v
+		sb.WriteString(v)
 	}
-	return out
+	return sb.String()
 }
 
 // trimSpaces is strings.TrimSpace without the import (single use pair).

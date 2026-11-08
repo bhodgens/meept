@@ -66,7 +66,7 @@ func NewSwapStore(dir string) (*SwapStore, error) {
 	if f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600); err == nil {
 		_ = f.Close() //nolint:errcheck // existence+mode pin; sql.Open re-opens
 	}
-	_ = os.Chmod(dbPath, 0o600) //nolint:errcheck // best-effort tighten
+	_ = os.Chmod(dbPath, 0o600)                                                                     //nolint:errcheck // best-effort tighten
 	dsn := dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)" // modernc _pragma form (bughunt 2026-11-07)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -108,8 +108,8 @@ func NewSwapStore(dir string) (*SwapStore, error) {
 		ins: ins,
 	}
 	if err := st.loadFromDisk(); err != nil {
-		ins.Close()
-		db.Close()
+		defer ins.Close()
+		defer db.Close()
 		return nil, err
 	}
 	return st, nil
@@ -128,17 +128,15 @@ func (st *SwapStore) loadFromDisk() error {
 	if err != nil {
 		return fmt.Errorf("pii swap store: load: %w", err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var r diskRow
 		if err := rows.Scan(&r.sessionID, &r.token, &r.value, &r.class, &r.expiry); err != nil {
-			rows.Close()
 			return fmt.Errorf("pii swap store: scan row: %w", err)
 		}
 		drained = append(drained, r)
 	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
+	if err := rows.Err(); err != nil {
 		return fmt.Errorf("pii swap store: load rows: %w", err)
 	}
 
@@ -161,11 +159,8 @@ func forwardKey(sessionID, class, value string) string {
 }
 
 func splitStoreKey(key string) (sessionID, token string, ok bool) {
-	i := strings.IndexByte(key, 0)
-	if i < 0 {
-		return "", "", false
-	}
-	return key[:i], key[i+1:], true
+	sessionID, token, ok = strings.Cut(key, "\x00")
+	return sessionID, token, ok
 }
 
 // SetRestoreWindow enables the restore-window TTL (research D4): rows

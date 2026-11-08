@@ -100,10 +100,7 @@ func (h *PiiRestoreHook) RestoreOutput(text, sessionID string) string {
 		if deobfuscated != restored {
 			// Count one event, never the values: the obfuscator's
 			// per-placeholder detail stays in-process.
-			secretCount = countPlaceholders(restored) - countPlaceholders(deobfuscated)
-			if secretCount < 0 {
-				secretCount = 0
-			}
+			secretCount = max(countPlaceholders(restored)-countPlaceholders(deobfuscated), 0)
 			restored = deobfuscated
 		}
 	}

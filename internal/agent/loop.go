@@ -5008,7 +5008,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// only.
 		if l.hookRegistry != nil && len(messages) > 0 {
 			messages = cloneMessagesForTransform(messages)
-			for pass := 0; pass < maxTransformFixpointPasses; pass++ {
+			for pass := range maxTransformFixpointPasses {
 				tr := func() (tr ContextTransform) {
 					defer func() {
 						if r := recover(); r != nil {
@@ -7791,7 +7791,7 @@ func (l *AgentLoop) injectProjectContext(builder *PromptBuilder) {
 		// CLAUDE.md can no longer eat the window. The disabled path keeps
 		// the unbounded builder byte-for-byte (caller rewiring contract:
 		// BuildFullArtifactContext unchanged).
-		artifactCtx := ""
+		var artifactCtx string
 		if docBudget, enabled := l.docBudgetViaSeam(ctx); enabled {
 			var truncated bool
 			artifactCtx, truncated = l.artifactManager.BuildFullArtifactContextBudgeted(

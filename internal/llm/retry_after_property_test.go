@@ -87,11 +87,11 @@ var hostileHeaderValues = []string{
 	"2027-12-31T23:59:59Z", "2027-12-31T23:59:59.123456+05:30",
 	"Mon, 01 Jan 0001 00:00:00 GMT", // zero time edge: parses, date==time.Time{}
 	"Wed, 31 Feb 2027 00:00:00 GMT", // impossible date
-	"\x00\x01", "fullwidth-error", "\u202Eevil", strings_Repeat("9", 4096),
+	"\x00\x01", "fullwidth-error", "\u202Eevil", stringsRepeat("9", 4096),
 	";q=0.5", "\"120\"", "120, 180",
 }
 
-func strings_Repeat(s string, n int) string {
+func stringsRepeat(s string, n int) string {
 	out := ""
 	for range n {
 		out += s
@@ -115,14 +115,14 @@ func randHeaderValue(r *rand.Rand) string {
 	case 3: // digit soup (occasionally huge)
 		digits := make([]byte, r.Intn(30))
 		for i := range digits {
-			digits[i] = byte('0' + r.Intn(10))
+			digits[i] = byte('0' + r.Intn(10)) //nolint:gosec // G115: ASCII digit 0x30..0x39, provably in byte range
 		}
 		return string(digits)
 	default: // arbitrary junk
 		n := r.Intn(40)
 		b := make([]byte, n)
 		for i := range b {
-			b[i] = byte(0x20 + r.Intn(0x70))
+			b[i] = byte(0x20 + r.Intn(0x70)) //nolint:gosec // G115: deliberate hostile byte 0x20..0x8f
 		}
 		return string(b)
 	}
@@ -155,9 +155,9 @@ func rflip() bool { return flipRand.Intn(2) == 0 }
 // overflow saturates positive, year-1 remaps to the epoch — so no input
 // may violate the shape any more.
 func TestParseRetryAfter_NoThrowAndShape(t *testing.T) {
-	flipRand = rand.New(rand.NewSource(retryAfterSeed))
-	r := rand.New(rand.NewSource(retryAfterSeed + 1))
-	for i := 0; i < 5000; i++ {
+	flipRand = rand.New(rand.NewSource(retryAfterSeed)) //nolint:gosec // G404: deterministic seed required for reproducible property failures
+	r := rand.New(rand.NewSource(retryAfterSeed + 1))   //nolint:gosec // G404: deterministic seed required for reproducible property failures
+	for i := range 5000 {
 		h := headerWith(randHeaderValue(r), randHeaderValue(r), randHeaderValue(r))
 		func() {
 			defer func() {
@@ -191,10 +191,10 @@ func TestParseRetryAfter_NoThrowAndShape(t *testing.T) {
 // date (past date ⇒ negative delta, future date ⇒ positive delta), which
 // is the contract callers rely on (retry_after.go:22-24, 54, 68).
 func TestParseRetryAfter_DateDeltaAgreement(t *testing.T) {
-	flipRand = rand.New(rand.NewSource(retryAfterSeed + 2))
-	r := rand.New(rand.NewSource(retryAfterSeed + 3))
+	flipRand = rand.New(rand.NewSource(retryAfterSeed + 2)) //nolint:gosec // G404: deterministic seed required for reproducible property failures
+	r := rand.New(rand.NewSource(retryAfterSeed + 3))       //nolint:gosec // G404: deterministic seed required for reproducible property failures
 	checked := 0
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		h := headerWith(randHeaderValue(r), randHeaderValue(r), randHeaderValue(r))
 		date, delta, present := ParseRetryAfter(h)
 		if !present || date.IsZero() {
@@ -223,10 +223,10 @@ func TestParseRetryAfter_DateDeltaAgreement(t *testing.T) {
 // Retry-After values within the Duration-representable budget return
 // exactly secs*time.Second.
 func TestParseRetryAfter_DeltaSecondsExact(t *testing.T) {
-	r := rand.New(rand.NewSource(retryAfterSeed + 4))
+	r := rand.New(rand.NewSource(retryAfterSeed + 4)) //nolint:gosec // G404: deterministic seed required for reproducible property failures
 	checked := 0
 	const maxSafeSecs = int64(1) << 61 / int64(time.Second) // Duration nanosecond budget
-	for i := 0; i < 2000; i++ {
+	for i := range 2000 {
 		secs := r.Int63n(maxSafeSecs) + 1
 		h := http.Header{}
 		h.Set("Retry-After", strconv.FormatInt(secs, 10))
@@ -244,7 +244,7 @@ func TestParseRetryAfter_DeltaSecondsExact(t *testing.T) {
 	}
 	// Overflow budget: digits beyond int64 must not panic and must not
 	// produce a positive-delta success.
-	for _, big := range []string{"9223372036854775808", strings_Repeat("9", 4096)} {
+	for _, big := range []string{"9223372036854775808", stringsRepeat("9", 4096)} {
 		h := http.Header{}
 		h.Set("Retry-After", big)
 		func() {

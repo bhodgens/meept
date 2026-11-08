@@ -18,6 +18,7 @@ package security
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -280,13 +281,7 @@ func TestFenceStage_OpMapping(t *testing.T) {
 			got := pc.CheckPermissionForAgent(tt.action, tt.details, "")
 			_ = got // result itself not under test here; only the fence routing is
 			calls := fence.recordedCalls()
-			found := false
-			for _, c := range calls {
-				if c == tt.wantCall {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(calls, tt.wantCall)
 			if !found {
 				t.Fatalf("fence call %q not recorded; calls = %v", tt.wantCall, calls)
 			}

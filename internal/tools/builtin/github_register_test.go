@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -95,15 +96,8 @@ func TestGitHubToolRegistration(t *testing.T) {
 
 	// The "github" provider must be discoverable by name; this is what
 	// doctor surfacing and the [tool_providers] config filter consume.
-	found := false
-	for _, name := range toolprov.Names() {
-		if name == "github" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("toolprov.Names() missing %q; names=%v", "github", toolprov.Names())
+	if !slices.Contains(toolprov.Names(), "github") {
+		t.Errorf("github provider missing from toolprov.Names(): got %v", toolprov.Names())
 	}
 
 	enabledReg := tools.NewRegistry(slog.New(slog.DiscardHandler))

@@ -155,7 +155,7 @@ func (c *Client) sseStream(ctx context.Context, endpoint, method, path string, i
 	if streamClient == nil {
 		streamClient = sseHTTPClient
 	}
-	resp, err := streamClient.Do(req)
+	resp, err := streamClient.Do(req) //nolint:bodyclose // resp.Body is owned by ssePump's deferred respClosing (goroutine below)
 	if err != nil {
 		return nil, fmt.Errorf("hermes %s: %w", endpoint, err)
 	}

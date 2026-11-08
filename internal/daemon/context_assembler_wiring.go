@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"runtime/debug"
+	"slices"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
@@ -267,19 +268,16 @@ func (wp *workingProducer) lastUserMessage(sessionID string) (string, bool) {
 	if err != nil || total == 0 {
 		return "", false
 	}
-	offset := total - memoryCapturePage
-	if offset < 0 {
-		offset = 0
-	}
+	offset := max(total-memoryCapturePage, 0)
 	msgs, err := wp.store.GetMessages(sessionID, offset, memoryCapturePage)
 	if err != nil {
 		wp.logger.Warn("working producer: get messages failed",
 			"session_id", sessionID, "error", err)
 		return "", false
 	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" && msgs[i].Content != "" {
-			return msgs[i].Content, true
+	for _, msg := range slices.Backward(msgs) {
+		if msg.Role == "user" && msg.Content != "" {
+			return msg.Content, true
 		}
 	}
 	return "", false

@@ -107,6 +107,7 @@ func (s *OTLPHTTPSink) ExportMetrics(ctx context.Context, data []MetricDatum) er
 		s.noteFailure(err)
 		return err
 	}
+	defer resp.Body.Close()
 	// Drain + close are best-effort cleanup on a body we never read; a
 	// drain failure cannot change the export outcome (status is checked
 	// below and errors already flow through noteFailure). The drain error

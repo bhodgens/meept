@@ -756,7 +756,7 @@ func TestStickyEndpointPreference(t *testing.T) {
 	r3 := newStickyPrefResolver(t)
 	keyX := EndpointKey(r3.aliases["medium"].Models[0])
 	r3.RememberSessionEndpoint("old-session", keyX)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		r3.RememberSessionEndpoint(fmt.Sprintf("filler-%d", i), keyX)
 	}
 	if _, ok := r3.PreferredEndpoint("old-session"); ok {

@@ -69,7 +69,7 @@ func newWhisperSTT(cfg ProviderConfig) (voicechild.STTProvider, error) {
 	}
 	bin, err := exec.LookPath(defaultWhisperBin)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrWhisperBinMissing, defaultWhisperBin, err)
+		return nil, fmt.Errorf("%w: %s: %w", ErrWhisperBinMissing, defaultWhisperBin, err)
 	}
 	return &WhisperSTT{cfg: cfg, bin: bin}, nil
 }
@@ -85,6 +85,7 @@ func (s *WhisperSTT) Stream(ctx context.Context, pcm <-chan []byte) (<-chan voic
 		return nil, fmt.Errorf("whisper temp dir: %w", err)
 	}
 	out := make(chan voicechild.Transcript, 8)
+	slog.Info("whisper stream started", "dir", dir, "model", s.cfg.Model)
 	go s.run(ctx, pcm, out, dir)
 	return out, nil
 }
@@ -158,8 +159,14 @@ func (s *WhisperSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voic
 			if len(chunk) == 0 {
 				continue
 			}
+			if len(buf) == 0 {
+				slog.Info("whisper first mic chunk", "bytes", len(chunk))
+			}
 			buf = append(buf, chunk...)
 			n, voicedNow := gate.energy(chunk)
+			if len(buf) < 200000 && len(buf)%64000 == 0 {
+				slog.Info("whisper buffering", "bytes", len(buf), "voiced", voicedNow)
+			}
 			if voicedNow {
 				voicedSamples += n
 				silenceSamples = 0
@@ -193,15 +200,15 @@ func (g *rmsGate) energy(chunk []byte) (samples int, voiced bool) {
 	if g.haveCarry {
 		// Carry (low byte of the dangling sample) + this chunk's first
 		// byte (its high byte) complete one sample.
-		sample := int16(uint16(chunk[0])<<8 | uint16(g.carry))
-		sumSq += uint64(int32(sample) * int32(sample))
+		sample := int16(uint16(chunk[0])<<8 | uint16(g.carry)) //nolint:gosec // G115: PCM s16le byte reassembly
+		sumSq += uint64(int32(sample) * int32(sample))         //nolint:gosec // G115: 16-bit sample squared, fits int64
 		n++
 		g.haveCarry = false
 		start = 1 // bytes 1.. now hold whole samples only
 	}
 	for i := start + 1; i < len(chunk); i += 2 {
-		sample := int16(uint16(chunk[i])<<8 | uint16(chunk[i-1]))
-		sumSq += uint64(int32(sample) * int32(sample))
+		sample := int16(uint16(chunk[i])<<8 | uint16(chunk[i-1])) //nolint:gosec // G115: PCM s16le byte reassembly
+		sumSq += uint64(int32(sample) * int32(sample))            //nolint:gosec // G115: 16-bit sample squared, fits int64
 		n++
 	}
 	if (len(chunk)-start)%2 == 1 {
@@ -250,18 +257,18 @@ func writeWAV16(path string, buf []byte, sampleRate int) error {
 	const headerBytes = 36
 	var hdr [44]byte
 	copy(hdr[0:4], "RIFF")
-	binary.LittleEndian.PutUint32(hdr[4:8], uint32(headerBytes+len(data)))
+	binary.LittleEndian.PutUint32(hdr[4:8], uint32(headerBytes+len(data))) //nolint:gosec // G115: WAV size lives well below 2^32
 	copy(hdr[8:12], "WAVE")
 	copy(hdr[12:16], "fmt ")
-	binary.LittleEndian.PutUint32(hdr[16:20], 16) // fmt chunk size
-	binary.LittleEndian.PutUint16(hdr[20:22], 1)  // PCM
-	binary.LittleEndian.PutUint16(hdr[22:24], 1)  // mono
-	binary.LittleEndian.PutUint32(hdr[24:28], uint32(sampleRate))
-	binary.LittleEndian.PutUint32(hdr[28:32], uint32(sampleRate*2)) // byte rate
+	binary.LittleEndian.PutUint16(hdr[16:20], 16)                   // fmt chunk size
+	binary.LittleEndian.PutUint16(hdr[20:22], 1)                    // PCM
+	binary.LittleEndian.PutUint16(hdr[22:24], 1)                    // mono
+	binary.LittleEndian.PutUint32(hdr[24:28], uint32(sampleRate))   //nolint:gosec // G115: sample rate is a small config int
+	binary.LittleEndian.PutUint32(hdr[28:32], uint32(sampleRate*2)) //nolint:gosec // G115: byte rate, always within uint32
 	binary.LittleEndian.PutUint16(hdr[32:34], 2)                    // block align
 	binary.LittleEndian.PutUint16(hdr[34:36], 16)                   // bits
 	copy(hdr[36:40], "data")
-	binary.LittleEndian.PutUint32(hdr[40:44], uint32(len(data)))
+	binary.LittleEndian.PutUint32(hdr[40:44], uint32(len(data))) //nolint:gosec // G115: WAV data size lives well below 2^32
 	if _, err := w.Write(hdr[:]); err != nil {
 		return fmt.Errorf("wav header: %w", err)
 	}

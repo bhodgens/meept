@@ -40,11 +40,11 @@ func (s *toolCallSpySaver) SaveMessagesWithToolCalls(sessionID string, messages 
 	return nil
 }
 
-type constErr string
+type constTestError string
 
-func (e constErr) Error() string { return string(e) }
+func (e constTestError) Error() string { return string(e) }
 
-const errPersistInjected = constErr("injected persistence failure")
+const errPersistInjected = constTestError("injected persistence failure")
 
 // newPersistTestHandler builds a ChatHandler with just the pieces
 // persistExchange touches: logger, message saver, and a loop whose

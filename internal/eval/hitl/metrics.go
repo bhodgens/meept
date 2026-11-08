@@ -34,6 +34,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strings"
@@ -108,7 +109,7 @@ type DecisionStream struct {
 // terminal events closed completed (status "completed").
 type TerminalState struct {
 	Attempts   int
-	Completeds int
+	Completeds int //nolint:misspell // exported field name consumed by e2e/suites/hitl-notifications; renaming is a public-API break
 	// Recorded reports whether ANY terminal event closed the run (an
 	// attempt that hit the drive budget without a terminal is honest:
 	// completion counts it as not-completed and flags the gap).
@@ -189,7 +190,7 @@ func Compute(regime Regime, sc Scenario, opts ComputeOptions) RegimeMetrics {
 	// Completion rate (ground truth: the terminal feed only).
 	m.AttemptsBump(opts.Terminal.Attempts)
 	if opts.Terminal.Attempts > 0 {
-		m.CompletionRate = float64(opts.Terminal.Completeds) / float64(opts.Terminal.Attempts)
+		m.CompletionRate = float64(opts.Terminal.Completeds) / float64(opts.Terminal.Attempts) //nolint:misspell // field name is public (e2e uses it)
 	}
 	m.TerminalRecorded = opts.Terminal.Recorded
 
@@ -346,9 +347,7 @@ func computeEscapeRates(m *RegimeMetrics, opts ComputeOptions) {
 			m.EscapeRateIncludesAlways[c] = m.EscapeRateExcludesAlways[c]
 		}
 	}
-	for c, v := range m.EscapeRateExcludesAlways {
-		m.EscapeRateIncludesAlways[c] = v
-	}
+	maps.Copy(m.EscapeRateIncludesAlways, m.EscapeRateExcludesAlways)
 }
 
 // ---------------------------------------------------------------------------

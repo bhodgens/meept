@@ -531,8 +531,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         error: e.toString(),
       );
     }
-
-    }
+  }
 
   /// Arm (or keep) this notifier's three per-session WS subscriptions:
   /// `chat_message` relays, `agent_progress`, and the `turn.terminal` frames

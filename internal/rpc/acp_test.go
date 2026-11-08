@@ -306,7 +306,7 @@ func TestACPHandler_PermissionsList_EnabledRelay(t *testing.T) {
 }
 
 func TestACPHandler_PermissionsList_TagParity(t *testing.T) {
-	assertJSONYAMLTags(t, reflect.TypeOf(ACPPendingPermissionStatus{}), map[string]string{
+	assertJSONYAMLTags(t, reflect.TypeFor[ACPPendingPermissionStatus](), map[string]string{
 		"ID":        "id",
 		"AgentID":   "agent_id",
 		"Persona":   "persona,omitempty",
@@ -315,7 +315,7 @@ func TestACPHandler_PermissionsList_TagParity(t *testing.T) {
 		"CreatedAt": "created_at",
 		"Options":   "options,omitempty",
 	})
-	assertJSONYAMLTags(t, reflect.TypeOf(ACPPermissionsResult{}), map[string]string{
+	assertJSONYAMLTags(t, reflect.TypeFor[ACPPermissionsResult](), map[string]string{
 		"Enabled": "enabled",
 		"Pending": "pending",
 	})

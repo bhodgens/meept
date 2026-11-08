@@ -116,10 +116,7 @@ func AuditAliasReachability(cfg *ProvidersConfig, registered map[string]bool) []
 			continue
 		}
 		for _, member := range entry.Models {
-			providerID := member
-			if i := strings.Index(member, "/"); i >= 0 {
-				providerID = member[:i]
-			}
+			providerID, _, _ := strings.Cut(member, "/")
 			f := AliasFinding{
 				Alias:      alias,
 				Member:     member,

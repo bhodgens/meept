@@ -8,6 +8,10 @@ import (
 
 // Defect is one structural config defect: a named, typed finding from
 // Validate (the boot hook surfaces these as one boot error each).
+//
+// e2e and docs, not a conventional XxxError; renaming would be an out-of-package API break.
+//
+//nolint:errname // exported public defect type (Kind/Name/Detail) used by daemon,
 type Defect struct {
 	// Kind classifies the defect for `groups check` output:
 	//   cyclic_group       - group binding subject chain forms a cycle
@@ -166,8 +170,7 @@ func Validate(policies []Policy, bindings []Binding) error {
 		// another group-subject binding (name collision between the
 		// policy and group namespaces — the aggregate "group P" would
 		// grant through itself).
-		if strings.HasPrefix(b.Subject, "group:") {
-			g := strings.TrimPrefix(b.Subject, "group:")
+		if g, ok := strings.CutPrefix(b.Subject, "group:"); ok {
 			if edges[g] == nil {
 				edges[g] = map[string]struct{}{}
 			}
@@ -186,8 +189,8 @@ func Validate(policies []Policy, bindings []Binding) error {
 	// no second group involved) and is NOT an edge.
 	groupLabels := map[string]struct{}{}
 	for _, b := range bindings {
-		if strings.HasPrefix(b.Subject, "group:") {
-			groupLabels[strings.TrimPrefix(b.Subject, "group:")] = struct{}{}
+		if g, ok := strings.CutPrefix(b.Subject, "group:"); ok {
+			groupLabels[g] = struct{}{}
 		}
 	}
 	graph := map[string][]string{}

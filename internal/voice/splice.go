@@ -449,9 +449,10 @@ func splitJSONObjects(line []byte) [][]byte {
 		case escaped:
 			escaped = false
 		case inString:
-			if c == '\\' {
+			switch c {
+			case '\\':
 				escaped = true
-			} else if c == '"' {
+			case '"':
 				inString = false
 			}
 		case c == '"':

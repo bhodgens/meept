@@ -143,7 +143,7 @@ func tightenWalSidecars(dbPath string) {
 }
 
 // insert writes one row. The caller has already validated the vocabularies
-// and stamped ID/Ts (Store.Record).
+// and stamped ID/TS (Store.Record).
 func (g *gateDB) insert(_ context.Context, rec *CommandGateRecord) error {
 	degraded := 0
 	if rec.PriorDegraded {
@@ -157,7 +157,7 @@ func (g *gateDB) insert(_ context.Context, rec *CommandGateRecord) error {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
-		rec.Ts.UTC().Format(time.RFC3339Nano),
+		rec.TS.UTC().Format(time.RFC3339Nano),
 		rec.Chokepoint,
 		rec.Command,
 		rec.ContextBlob,
@@ -229,7 +229,7 @@ func (g *gateDB) list(_ context.Context, opts ListOptions) ([]CommandGateRecord,
 		if err != nil {
 			return nil, fmt.Errorf("gatecapture: parse ts %q: %w", tsStr, err)
 		}
-		rec.Ts = ts
+		rec.TS = ts
 		rec.PriorDegraded = degraded != 0
 		out = append(out, rec)
 	}

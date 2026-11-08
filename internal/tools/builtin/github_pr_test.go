@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/caimlas/meept/internal/effects"
@@ -49,27 +50,27 @@ func newPrGateFake() *prGateFake {
 		f.reqPaths = append(f.reqPaths, r.Method+" "+r.URL.Path)
 		p := r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case p == "/repos/octo/cat/pulls":
+		switch p {
+		case "/repos/octo/cat/pulls":
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"number":7,"state":"open","html_url":"https://github.com/octo/cat/pulls/7"}`))
-		case p == "/repos/octo/cat/pulls/7/comments":
+		case "/repos/octo/cat/pulls/7/comments":
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":123,"body":"hi","html_url":"https://github.com/octo/cat/pulls/7#issuecomment-123"}`))
-		case p == "/repos/octo/cat/pulls/7/reviews":
+		case "/repos/octo/cat/pulls/7/reviews":
 			var raw map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&raw)
 			event, _ := raw["event"].(string)
 			f.reviewBodies = append(f.reviewBodies, "event="+event)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"id":456,"state":"commented"}`))
-		case p == "/repos/octo/cat/pulls/7/merge":
+		case "/repos/octo/cat/pulls/7/merge":
 			_, _ = w.Write([]byte(`{"merged":true,"sha":"def456","message":"Merged"}`))
-		case p == "/repos/octo/cat/pulls/7":
+		case "/repos/octo/cat/pulls/7":
 			_, _ = w.Write([]byte(`{"number":7,"state":"open","draft":false,"mergeable":true,"head":{"sha":"abc123"}}`))
-		case p == "/repos/octo/cat/check-runs":
+		case "/repos/octo/cat/check-runs":
 			f.writeChecks(w)
-		case p == "/repos/octo/cat/actions/runs":
+		case "/repos/octo/cat/actions/runs":
 			f.writeWorkflows(w)
 		default:
 			_, _ = w.Write([]byte(`{}`))
@@ -275,14 +276,7 @@ func TestGitHubPRCreateTool(t *testing.T) {
 	}
 
 	// The fake must have received a POST to the create endpoint.
-	found := false
-	for _, p := range fake.recordedPaths() {
-		if p == "POST /repos/octo/cat/pulls" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(fake.recordedPaths(), "POST /repos/octo/cat/pulls") {
 		t.Errorf("fake server did not receive POST /repos/octo/cat/pulls; got: %v", fake.recordedPaths())
 	}
 }
@@ -335,14 +329,7 @@ func TestGitHubPRCommentTool(t *testing.T) {
 	_ = res
 
 	// The fake must have received a POST to the comment endpoint.
-	found := false
-	for _, p := range fake.recordedPaths() {
-		if p == "POST /repos/octo/cat/pulls/7/comments" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(fake.recordedPaths(), "POST /repos/octo/cat/pulls/7/comments") {
 		t.Errorf("fake server did not receive POST /repos/octo/cat/pulls/7/comments; got: %v", fake.recordedPaths())
 	}
 
@@ -440,14 +427,7 @@ func TestGitHubPRMergeTool(t *testing.T) {
 	}
 
 	// The fake must have received a POST to the merge endpoint.
-	found := false
-	for _, p := range fake.recordedPaths() {
-		if p == "PUT /repos/octo/cat/pulls/7/merge" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(fake.recordedPaths(), "PUT /repos/octo/cat/pulls/7/merge") {
 		t.Errorf("fake server did not receive PUT /repos/octo/cat/pulls/7/merge; got: %v", fake.recordedPaths())
 	}
 

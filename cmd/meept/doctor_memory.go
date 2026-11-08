@@ -253,9 +253,10 @@ func memoryQueueCountsFromStats(client transport.Client) (*memoryJobCounts, erro
 	counts.pendingAll = stats.ByState["pending"]
 	jobs, err := client.ListQueueJobs("pending", memoryQueueTypeScanLimit)
 	if err != nil {
-		// Stats still gave the totals; the per-type split is best-effort.
+		// Stats still gave the totals; the per-type split is best-effort,
+		// so a failed list is a degraded-but-valid report, not an error.
 		counts.scanLimit = true
-		return counts, nil
+		return counts, nil //nolint:nilerr // intentional: stats totals are authoritative, the type split is optional
 	}
 	for _, j := range jobs.Jobs {
 		if j.State != "pending" {
@@ -313,6 +314,9 @@ func memoryQueueCountsFromDB(dbPath string) (*memoryJobCounts, error) {
 		case "memory.l2_scene":
 			counts.pendingL2 = n
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending types: %w", err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM dead_letter`).Scan(&counts.dead); err != nil {
 		// dead_letter always exists (schema bootstrap); a failure here is a
@@ -514,11 +518,10 @@ func bridgesPhrase(extrasDetail string) string {
 // check's own detail carries ("... dead=N ..."). A parse miss renders 0 —
 // the authoritative number always lives on the memory-distill line.
 func memoryDistillDeadFromDetail(detail string) int {
-	i := strings.Index(detail, "dead=")
-	if i < 0 {
+	_, rest, ok := strings.Cut(detail, "dead=")
+	if !ok {
 		return 0
 	}
-	rest := detail[i+len("dead="):]
 	end := strings.IndexAny(rest, " ;")
 	if end < 0 {
 		end = len(rest)

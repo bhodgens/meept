@@ -75,8 +75,7 @@ Map<String, dynamic> ordinaryProgressFrame({required String sessionId}) {
 
 void main() {
   group('turn.terminal stream (leaf 05 Task 2)', () {
-    test('emits parsed TurnTerminalEvent for terminal-shaped frames',
-        () async {
+    test('emits parsed TurnTerminalEvent for terminal-shaped frames', () async {
       final harness = _TerminalFilterHarness();
       final events = <TurnTerminalEvent>[];
       final sub = harness.typedFor('sess-1').listen(events.add);
@@ -96,8 +95,7 @@ void main() {
       await sub.cancel();
     });
 
-    test('does NOT emit for ordinary progress events (no turn_id)',
-        () async {
+    test('does NOT emit for ordinary progress events (no turn_id)', () async {
       final harness = _TerminalFilterHarness();
       final events = <TurnTerminalEvent>[];
       final sub = harness.typedFor('sess-1').listen(events.add);
@@ -139,12 +137,14 @@ void main() {
       final sub = harness.typedFor('sess-1').listen(events.add);
       await Future<void>.delayed(Duration.zero);
 
-      harness.emitFlat(terminalFrame(
-        sessionId: 'sess-1',
-        status: 'failed',
-        reply: '',
-        error: 'provider quota exhausted',
-      ));
+      harness.emitFlat(
+        terminalFrame(
+          sessionId: 'sess-1',
+          status: 'failed',
+          reply: '',
+          error: 'provider quota exhausted',
+        ),
+      );
       await Future<void>.delayed(Duration.zero);
 
       expect(events.single.status, 'failed');
@@ -177,10 +177,7 @@ void main() {
         isTrue,
       );
       expect(
-        isTurnTerminalPayload({
-          'type': 'agent_progress',
-          'turn_id': 't',
-        }),
+        isTurnTerminalPayload({'type': 'agent_progress', 'turn_id': 't'}),
         isFalse,
       );
       expect(

@@ -46,11 +46,11 @@ func skillFileOrigin(data []byte) Origin {
 		return OriginUnknown
 	}
 	rest := strings.TrimPrefix(text, "---\n")
-	idx := strings.Index(rest, "\n---")
-	if idx < 0 {
+	before, _, ok := strings.Cut(rest, "\n---")
+	if !ok {
 		return OriginUnknown
 	}
-	for _, l := range strings.Split(rest[:idx], "\n") {
+	for l := range strings.SplitSeq(before, "\n") {
 		if l == "" {
 			continue
 		}

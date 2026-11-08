@@ -255,7 +255,7 @@ func startVoicePlain(ctx context.Context, ln net.Listener, voice *VoiceRoutes, a
 				_ = ln.Close()
 			}
 			if serveErr != nil {
-				return fmt.Errorf("voice plain listener shutdown: graceful=%v serve=%w", err, serveErr)
+				return fmt.Errorf("voice plain listener shutdown: graceful=%w serve=%w", err, serveErr)
 			}
 			return fmt.Errorf("voice plain listener shutdown: forced close after graceful failure: %w", err)
 		}

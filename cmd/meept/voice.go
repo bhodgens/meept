@@ -204,24 +204,43 @@ func runVoiceLocal(employee, label, inPath, outPath string) error {
 func runVoiceLocalFileMode(ctx context.Context, client interface {
 	Call(method string, params any) (json.RawMessage, error)
 }, open voiceLocalOpenResult, inPath, outPath string) error {
-	// Mic side: file -> InPath. Optional: without --in the child gets
-	// no mic audio (a reply-only probe still needs the socket dialed).
+	// Dial BOTH pair sockets up front (live mode's ordering): the
+	// daemon's splice ends with a named error the moment the child's
+	// first outbound audio lands while the speaker accept is pending,
+	// so a mic-first sequential dial deadlocks file mode.
 	if inPath != "" {
-		if err := copyMicFile(ctx, open.InPath, inPath); err != nil {
-			return err
-		}
+		// Keep the mic conn open across the whole call below.
 	} else {
-		// Dial and immediately close: marks the pair joined so the
-		// splice's accept completes.
+		// Without --in the child gets no mic audio; dial and close to
+		// mark the pair joined so the splice's accept completes.
 		if conn, err := net.Dial("unix", open.InPath); err == nil {
 			_ = conn.Close()
 		}
 	}
 
-	// Speaker side: OutPath -> file (or discard). The read fails once
-	// the daemon closes the pair at call end - that is the normal exit.
-	if err := drainSpeakerFile(ctx, open.OutPath, outPath); err != nil {
-		return err
+	micDone := make(chan error, 1)
+	spkDone := make(chan error, 1)
+	if inPath != "" {
+		go func() { micDone <- copyMicFile(ctx, open.InPath, inPath) }()
+	}
+	go func() { spkDone <- drainSpeakerFile(ctx, open.OutPath, outPath) }()
+
+	// Phase 1: the mic file drains (utterance delivered) - then hold the
+	// call open so whisper STT + the employee turn + piper TTS can run
+	// and the reply reaches the speaker file. Phase 2: the speaker
+	// stream closes (the daemon ended the call - silence timeout or a
+	// hangup), which is file mode's real end. A ctx cancel cuts through
+	// both.
+	if inPath != "" {
+		select {
+		case <-micDone:
+		case <-spkDone:
+		case <-ctx.Done():
+		}
+	}
+	select {
+	case <-spkDone:
+	case <-ctx.Done():
 	}
 
 	// File mode has no user "hangup" gesture: once the mic file is
@@ -229,7 +248,7 @@ func runVoiceLocalFileMode(ctx context.Context, client interface {
 	if _, err := client.Call("voice.local.end", map[string]any{"call_id": open.CallID}); err != nil {
 		// The daemon may have ended it first; a not-found / unknown
 		// refusal is the idempotent shape, keep it quiet.
-		return nil
+		return nil //nolint:nilerr // intentional: end-of-call is idempotent, a refusal is not a failure
 	}
 	return nil
 }
@@ -255,6 +274,17 @@ func copyMicFile(ctx context.Context, sockPath, wavPath string) error {
 	case err := <-done:
 		if err != nil {
 			return fmt.Errorf("stream mic: %w", err)
+		}
+		// End-of-speech signal: half-close the mic direction so the
+		// child's audio pump sees EOF, closes the PCM channel, and the
+		// whisper adapter flushes the buffered utterance. Without this
+		// the pump blocks on Read forever (file mode has no more mic
+		// chunks), no silence ever accumulates, and the utterance is
+		// never recognized. The conn itself stays open (defer Close).
+		if uc, ok := conn.(*net.UnixConn); ok {
+			if hwErr := uc.CloseWrite(); hwErr != nil {
+				return fmt.Errorf("half-close mic: %w", hwErr)
+			}
 		}
 		return nil
 	case <-ctx.Done():
@@ -294,14 +324,14 @@ func drainSpeakerFile(ctx context.Context, sockPath, outPath string) error {
 		for {
 			n, rerr := conn.Read(buf)
 			if n > 0 {
+				// With a nil sink and nil wavFile there is nowhere for the bytes to
+				// go (connectivity probe with --out unset): the discard path drops
+				// them here by design.
 				if sink != nil {
 					if _, werr := sink.Write(buf[:n]); werr != nil {
 						done <- werr
 						return
 					}
-				}
-				if wavFile == nil && sink == nil {
-					// discard path: nothing to do with the bytes
 				}
 			}
 			if rerr != nil {
@@ -358,14 +388,20 @@ func patchWAVDataLen(f io.WriteCloser) {
 		return
 	}
 	dataLen := cur - 44
+	if dataLen < 0 || dataLen > int64(^uint32(0)) {
+		// The WAV size field is 32-bit; a stream longer than that can't be
+		// header-addressed, so leave the reserved trailer bytes untouched.
+		return
+	}
 	if _, err := sk.Seek(40, io.SeekStart); err != nil {
 		return
 	}
+	sz := uint32(dataLen)
 	var size [4]byte
-	size[0] = byte(dataLen)
-	size[1] = byte(dataLen >> 8)
-	size[2] = byte(dataLen >> 16)
-	size[3] = byte(dataLen >> 24)
+	size[0] = byte(sz)                          //nolint:gosec // G115: dataLen bounds-checked to fit uint32 immediately above
+	size[1] = byte(sz >> 8)                     //nolint:gosec // G115: dataLen bounds-checked to fit uint32 immediately above
+	size[2] = byte(sz >> 16)                    //nolint:gosec // G115: dataLen bounds-checked to fit uint32 immediately above
+	size[3] = byte(sz >> 24)                    //nolint:gosec // G115: dataLen bounds-checked to fit uint32 immediately above
 	if _, err := f.Write(size[:]); err != nil { //nolint:errcheck // best-effort trailer patch
 		return
 	}

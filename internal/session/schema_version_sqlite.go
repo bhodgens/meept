@@ -77,10 +77,10 @@ func (s *SQLiteStore) MigrateSchema(sessionID string) error {
 
 // GetSchemaVersion reports SessionFormatVersion for every in-memory
 // session (the memory store has no persisted legacy rows).
-func (m *MemoryStore) GetSchemaVersion(sessionID string) (int, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if _, ok := m.sessions[sessionID]; !ok {
+func (s *MemoryStore) GetSchemaVersion(sessionID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.sessions[sessionID]; !ok {
 		return 0, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 	return SessionFormatVersion, nil
@@ -88,7 +88,7 @@ func (m *MemoryStore) GetSchemaVersion(sessionID string) (int, error) {
 
 // MigrateSchema is a no-op for the memory store: rows are always at the
 // current build version, so the catalog plan is empty.
-func (m *MemoryStore) MigrateSchema(sessionID string) error {
-	_, err := m.GetSchemaVersion(sessionID)
+func (s *MemoryStore) MigrateSchema(sessionID string) error {
+	_, err := s.GetSchemaVersion(sessionID)
 	return err
 }

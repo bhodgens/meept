@@ -160,6 +160,7 @@ func (s *OTLPTraceHTTPSink) ExportSpans(ctx context.Context, spans []Span) error
 		s.noteFailure(err)
 		return err
 	}
+	defer resp.Body.Close()
 	// Drain + close are best-effort cleanup on a body we never read; a
 	// drain failure cannot change the export outcome (status is checked
 	// below and errors already flow through noteFailure).
@@ -270,6 +271,8 @@ func appendVarint(dst []byte, v uint64) []byte {
 }
 
 // appendTag writes a field tag (field number + wire type).
+//
+//nolint:gosec // G115: OTLP field tags are bounded protobuf wire encodings (field < 2^29, wire in 0..3)
 func appendTag(dst []byte, field, wire int) []byte {
 	return appendVarint(dst, uint64(field)<<3|uint64(wire))
 }

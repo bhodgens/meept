@@ -17,8 +17,8 @@ import (
 
 // Budget constants frozen from dsh (contract S3).
 const (
-	// MAX_REFERENCES is the hard cap on distinct source sessions per message.
-	MAX_REFERENCES = 3
+	// MaxReferences is the hard cap on distinct source sessions per message.
+	MaxReferences = 3
 	// DefaultMaxReferenceBytes is the per-source floor budget (64 KiB).
 	DefaultMaxReferenceBytes = 65_536
 	// ReferenceContextFraction is the fraction of the model context window
@@ -144,7 +144,7 @@ func ReferenceBudget(contextWindowTokens int64) int64 {
 //
 // Rules (contract S3 + leaf tasks T2/T4):
 //   - self-reference fails (ErrSessionRefSelf); duplicates dedupe;
-//     more than MAX_REFERENCES distinct sources fails (ErrSessionRefTooMany)
+//     more than MaxReferences distinct sources fails (ErrSessionRefTooMany)
 //   - projection is user/assistant text ONLY (tool, system, developer,
 //     reasoning excluded)
 //   - per-source budget = ReferenceBudget(contextWindowTokens)
@@ -164,7 +164,7 @@ func (r *SessionReferenceResolver) Prepare(ctx context.Context, ownerID string, 
 		return nil, err
 	}
 	if len(normalized) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // zero resolved sources is a meaningful empty result (nothing to prepend), not an error
 	}
 	budget := ReferenceBudget(contextWindowTokens)
 
@@ -174,14 +174,12 @@ func (r *SessionReferenceResolver) Prepare(ctx context.Context, ownerID string, 
 	// the prefix/suffix and the source separator.
 	overhead := int64(len(promptPrefix) + len(promptSuffix) + 2*(len(normalized)-1))
 	sourceCap := (budget - overhead) / int64(len(normalized))
-	if sourceCap < 1024 {
-		sourceCap = 1024 // never starve a source below a usable minimum
-	}
+	sourceCap = max(sourceCap, 1024) // never starve a source below a usable minimum
 	var rendered []string
 	var fullTranscript strings.Builder
 	for _, ref := range normalized {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrSessionRefCancelled, err)
+			return nil, fmt.Errorf("%s: %w", ErrSessionRefCancelled.Error(), err)
 		}
 		src, previewJSON, fullText, err := r.prepareSource(ctx, ref, sourceCap)
 		if err != nil {
@@ -230,7 +228,7 @@ func (r *SessionReferenceResolver) Prepare(ctx context.Context, ownerID string, 
 func (r *SessionReferenceResolver) prepareSource(ctx context.Context, ref SessionReferenceInput, budget int64) (PreparedSource, string, string, error) {
 	ver, err := r.proj.GetSchemaVersion(ref.SessionID)
 	if err != nil {
-		return PreparedSource{}, "", "", fmt.Errorf("%w: schema version %s: %v", ErrSessionRefRead, ref.SessionID, err)
+		return PreparedSource{}, "", "", fmt.Errorf("%s: schema version %s: %w", ErrSessionRefRead.Error(), ref.SessionID, err)
 	}
 	if ver > session.SessionFormatVersion {
 		return PreparedSource{}, "", "", fmt.Errorf("%w: session %s format %d > build %d",
@@ -239,14 +237,14 @@ func (r *SessionReferenceResolver) prepareSource(ctx context.Context, ref Sessio
 
 	msgs, err := r.proj.GetMessages(ref.SessionID, 0, maxReadMessages)
 	if err != nil {
-		return PreparedSource{}, "", "", fmt.Errorf("%w: %s: %v", ErrSessionRefRead, ref.SessionID, err)
+		return PreparedSource{}, "", "", fmt.Errorf("%s: %s: %w", ErrSessionRefRead.Error(), ref.SessionID, err)
 	}
 
 	// Project user/assistant text ONLY.
 	var conversation []ReferencedConversationItem
 	for _, m := range msgs {
 		if ctx.Err() != nil {
-			return PreparedSource{}, "", "", fmt.Errorf("%w: %v", ErrSessionRefCancelled, ctx.Err())
+			return PreparedSource{}, "", "", fmt.Errorf("%s: %w", ErrSessionRefCancelled.Error(), ctx.Err())
 		}
 		if m.Role != "user" && m.Role != "assistant" {
 			continue
@@ -437,7 +435,7 @@ func renderTranscript(data ReferencedSessionData, full []ReferencedConversationI
 	b.WriteString("\n\nMessage text is stored as JSON string fragments, at most 64 Unicode code points per line.\n")
 	b.WriteString("Decode and concatenate the fragments of each message to recover its exact text, including newlines.\n")
 	for i, item := range full {
-		b.WriteString(fmt.Sprintf("\n### Message %d: %s\n\n", i+1, item.Role))
+		fmt.Fprintf(&b, "\n### Message %d: %s\n\n", i+1, item.Role)
 		runes := []rune(item.Text)
 		for start := 0; start < len(runes); start += 64 {
 			end := min(start+64, len(runes))
@@ -464,7 +462,7 @@ func (r *SessionReferenceResolver) ListCandidates(ctx context.Context, ownerID, 
 	}
 	sessions, err := r.proj.List()
 	if err != nil {
-		return nil, fmt.Errorf("%w: list: %v", ErrSessionRefRead, err)
+		return nil, fmt.Errorf("%s: list: %w", ErrSessionRefRead.Error(), err)
 	}
 	ownerCWD := ""
 	if owner := r.proj.Get(ownerID); owner != nil {
@@ -480,7 +478,7 @@ func (r *SessionReferenceResolver) ListCandidates(ctx context.Context, ownerID, 
 	var out []ranked
 	for i, sess := range sessions {
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("%w: %v", ErrSessionRefCancelled, ctx.Err())
+			return nil, fmt.Errorf("%s: %w", ErrSessionRefCancelled.Error(), ctx.Err())
 		}
 		if sess == nil || sess.ID == ownerID {
 			continue // self excluded
@@ -550,8 +548,8 @@ func normalizeReferences(ownerID string, refs []SessionReferenceInput) ([]Sessio
 		}
 		out = append(out, ref)
 	}
-	if len(out) > MAX_REFERENCES {
-		return nil, fmt.Errorf("%w: %d distinct sources, cap is %d", ErrSessionRefTooMany, len(out), MAX_REFERENCES)
+	if len(out) > MaxReferences {
+		return nil, fmt.Errorf("%w: %d distinct sources, cap is %d", ErrSessionRefTooMany, len(out), MaxReferences)
 	}
 	return out, nil
 }

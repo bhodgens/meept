@@ -117,8 +117,7 @@ func warmExec(path string, warmGrace time.Duration, args ...string) error {
 		if err == nil {
 			return nil
 		}
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
+		if _, ok := errors.AsType[*exec.ExitError](err); ok {
 			// Ran and exited (any code): exec path is proven.
 			return nil
 		}
@@ -143,7 +142,7 @@ func runGoBuild(out, target string) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%v: %s", err, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
@@ -451,7 +450,7 @@ func runVoiceFakeDaemon(args []string) int {
 		fmt.Fprintln(os.Stderr, "fake daemon: death pipe:", err)
 		return 1
 	}
-	cmd := exec.Command(supBin, llmSuperviseArgvShim(os.Getpid(), 3, 4, runtimeArgv)...)
+	cmd := exec.Command(supBin, llmSuperviseArgvShim(os.Getpid(), 3, 4, runtimeArgv)...) //nolint:gosec // G702: test fixture argv (fixed helper binaries + controlled shims), not attacker input
 	cmd.ExtraFiles = []*os.File{reportWrite, deathRead}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -488,7 +487,7 @@ func runVoiceFakeDaemon(args []string) int {
 	// Hold the death pipe for this process's whole life (the parent-death
 	// mechanism under test), via the package-level reference.
 	voiceFakeDaemonDeathPipe = deathWrite
-	if rfErr := os.WriteFile(readyFile, []byte("ready"), 0o600); rfErr != nil {
+	if rfErr := os.WriteFile(readyFile, []byte("ready"), 0o600); rfErr != nil { //nolint:gosec // G703: test helper writes its own controlled tempdir path
 		fmt.Fprintln(os.Stderr, "fake daemon: ready file:", rfErr)
 	}
 
@@ -581,7 +580,7 @@ func fakeChildSpawnCount(t *testing.T, dir string) int {
 		return 0
 	}
 	n := 0
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if strings.TrimSpace(line) != "" {
 			n++
 		}

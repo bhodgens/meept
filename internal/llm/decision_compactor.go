@@ -216,7 +216,7 @@ const decisionCompactionTask = "context compaction"
 func parseHistoryEntries(content string) []ChatMessage {
 	var out []ChatMessage
 	var cur *ChatMessage
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if role, text, ok := splitHistoryLine(line); ok {
 			out = append(out, ChatMessage{Role: role, Content: text})
 			cur = &out[len(out)-1]

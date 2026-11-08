@@ -151,7 +151,7 @@ func TestOnRoundSettled_AdvanceThenAutoBlock(t *testing.T) {
 	d := NewGoalRoundDriver(mgr, slog.New(slog.DiscardHandler))
 
 	// Advance 1 and 2 (rounds 0→1, 1→2).
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		outcome, err := d.OnRoundSettled(ctx, "emp_rounds")
 		if err != nil {
 			t.Fatalf("OnRoundSettled advance %d: %v", i, err)

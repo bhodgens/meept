@@ -43,11 +43,11 @@ func TestStreamRunEvents_KeepaliveThenTerminal(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		f := sseFlusher(w)
-		for i := 0; i < 3; i++ {
-			io.WriteString(w, ": keepalive\n\n")
+		for range 3 {
+			_, _ = io.WriteString(w, ": keepalive\n\n")
 			f.Flush()
 		}
-		io.WriteString(w, "event: run.completed\ndata: {\"status\":\"completed\"}\n\n")
+		_, _ = io.WriteString(w, "event: run.completed\ndata: {\"status\":\"completed\"}\n\n")
 		f.Flush()
 	}))
 	defer srv.Close()
@@ -83,9 +83,9 @@ func TestStreamRunEvents_MultiLineData(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		f := sseFlusher(w)
 		// One JSON object split across three data: lines.
-		io.WriteString(w, "event: tool.completed\ndata: {\"name\": \"terminal\",\ndata:  \"exit\": 0,\ndata:  \"note\": \"ok\"}\n\n")
+		_, _ = io.WriteString(w, "event: tool.completed\ndata: {\"name\": \"terminal\",\ndata:  \"exit\": 0,\ndata:  \"note\": \"ok\"}\n\n")
 		f.Flush()
-		io.WriteString(w, "event: run.failed\ndata: {\"error\": \"boom\"}\n\n")
+		_, _ = io.WriteString(w, "event: run.failed\ndata: {\"error\": \"boom\"}\n\n")
 		f.Flush()
 	}))
 	defer srv.Close()
@@ -134,19 +134,19 @@ func TestStreamChat_DeltaSequence(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		gotContentType = r.Header.Get("Content-Type")
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		f := sseFlusher(w)
 		for _, s := range []string{"Hel", "lo ", "world"} {
-			io.WriteString(w, "event: assistant.delta\ndata: {\"text\": \""+s+"\"}\n\n")
+			_, _ = io.WriteString(w, "event: assistant.delta\ndata: {\"text\": \""+s+"\"}\n\n")
 			f.Flush()
 		}
-		io.WriteString(w, "event: tool.started\ndata: {\"name\": \"terminal\"}\n\n")
+		_, _ = io.WriteString(w, "event: tool.started\ndata: {\"name\": \"terminal\"}\n\n")
 		f.Flush()
-		io.WriteString(w, "event: tool.completed\ndata: {\"name\": \"terminal\"}\n\n")
+		_, _ = io.WriteString(w, "event: tool.completed\ndata: {\"name\": \"terminal\"}\n\n")
 		f.Flush()
-		io.WriteString(w, "event: run.completed\ndata: {\"status\": \"completed\"}\n\n")
+		_, _ = io.WriteString(w, "event: run.completed\ndata: {\"status\": \"completed\"}\n\n")
 		f.Flush()
 		// Anything after the terminal event must not be delivered (channel
 		// is closed); give the client a moment, then exit.
@@ -211,7 +211,7 @@ func TestStreamRunEvents_ContextCancelMidStream(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		f := sseFlusher(w)
-		io.WriteString(w, "event: tool.started\ndata: {\"name\": \"first\"}\n\n")
+		_, _ = io.WriteString(w, "event: tool.started\ndata: {\"name\": \"first\"}\n\n")
 		f.Flush()
 		// Hold the stream open until the client goes away.
 		select {
@@ -328,12 +328,12 @@ func TestStreamRunEvents_NotBoundedBySyncTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		f := sseFlusher(w)
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			time.Sleep(100 * time.Millisecond)
-			io.WriteString(w, "event: assistant.delta\ndata: {\"i\": "+string(rune('0'+i))+"}\n\n")
+			_, _ = io.WriteString(w, "event: assistant.delta\ndata: {\"i\": "+string(rune('0'+i))+"}\n\n")
 			f.Flush()
 		}
-		io.WriteString(w, "event: run.completed\ndata: {}\n\n")
+		_, _ = io.WriteString(w, "event: run.completed\ndata: {}\n\n")
 		f.Flush()
 	}))
 	defer srv.Close()

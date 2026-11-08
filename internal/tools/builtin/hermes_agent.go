@@ -453,7 +453,7 @@ func (t *HermesTool) status(ctx context.Context) (map[string]any, error) {
 	}
 	if capErr != nil {
 		payload["capabilities_error"] = capErr.Error()
-		return payload, nil
+		return payload, nil //nolint:nilerr // capability probe failure is reported via the payload, not a fatal status error
 	}
 	payload["features"] = caps.Features
 	endpoints := map[string]any{}

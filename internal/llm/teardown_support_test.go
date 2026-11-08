@@ -3,6 +3,7 @@ package llm_test
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -106,9 +107,7 @@ func TestLlamaTeardownErases(t *testing.T) {
 		snapshotMu.Lock()
 		defer snapshotMu.Unlock()
 		cp := make(map[string]string, len(snapshot))
-		for k, v := range snapshot {
-			cp[k] = v
-		}
+		maps.Copy(cp, snapshot)
 		return cp
 	}, 2*time.Second, teardownLogger())
 
@@ -295,9 +294,7 @@ func TestSharedRuntimeSkip(t *testing.T) {
 		snapshotMu.Lock()
 		defer snapshotMu.Unlock()
 		cp := make(map[string]string, len(snapshot))
-		for k, v := range snapshot {
-			cp[k] = v
-		}
+		maps.Copy(cp, snapshot)
 		return cp
 	}
 	realLlama := llm.NewLlamaServerTeardown(mgr, snapshotFn, 2*time.Second, teardownLogger())
@@ -430,7 +427,7 @@ func hostPortOf(t *testing.T, baseURL string) string {
 	t.Helper()
 	key := llm.ComputeEndpointKey("llama-cpp", baseURL)
 	// key = "llama-cpp:<host>:<port>"; strip the runtime prefix.
-	for i := 0; i < len(key); i++ {
+	for i := range len(key) {
 		if key[i] == ':' {
 			return key[i+1:]
 		}

@@ -132,8 +132,8 @@ func TestRestoreOutput_EmptySessionRefused(t *testing.T) {
 // another session in the map is neither looked up nor replaced.
 func TestRestoreOutput_BoundedToSessionEntries(t *testing.T) {
 	s := NewSecretObfuscator()
-	secretA := "bounded-alpha-secret-value"
-	secretB := "bounded-beta-secret-value"
+	secretA := "bounded-alpha-secret-value" // #nosec G101 -- test fixture under obfuscation, not a real credential
+	secretB := "bounded-beta-secret-value"  // #nosec G101 -- test fixture under obfuscation, not a real credential
 	s.addPlainEntry(secretA, SecretModeObfuscate)
 	s.addPlainEntry(secretB, SecretModeObfuscate)
 	s.sortEntriesLocked()

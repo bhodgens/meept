@@ -57,7 +57,7 @@ func turnjournalSource(t *testing.T) (string, error) {
 // man's grep, stdlib-only, ASCII-safe).
 func grepLines(src, substr string) []string {
 	var out []string
-	for _, line := range strings.Split(src, "\n") {
+	for line := range strings.SplitSeq(src, "\n") {
 		if strings.Contains(line, substr) {
 			out = append(out, line)
 		}
@@ -201,14 +201,14 @@ func TestBootRehydrateOrderingBelowClaimReset(t *testing.T) {
 	if claimReset < 0 || rehydrate < 0 || running < 0 {
 		t.Fatalf("anchors missing: claimReset=%d rehydrate=%d running=%d", claimReset, rehydrate, running)
 	}
-	if !(claimReset < rehydrate && rehydrate < running) {
+	if claimReset >= rehydrate || rehydrate >= running {
 		t.Fatalf("ordering broken: claimReset@%d rehydrate@%d running@%d (want claimReset < rehydrate < running)", claimReset, rehydrate, running)
 	}
 	// R7 ordering chain: the classifier boot gate resolves BEFORE the
 	// claim reset, which precedes the rehydrate block, which precedes
 	// status=running. Nothing in this leaf moved a transport or the gate.
 	gate := strings.Index(src, "classifierBoot.SignalReady()")
-	if gate < 0 || !(gate < claimReset && claimReset < rehydrate && rehydrate < running) {
+	if gate < 0 || (gate >= claimReset || claimReset >= rehydrate || rehydrate >= running) {
 		t.Fatalf("boot ordering broken: gate@%d claimReset@%d rehydrate@%d running@%d (want gate < claimReset < rehydrate < running)",
 			gate, claimReset, rehydrate, running)
 	}

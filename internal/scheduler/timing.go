@@ -2,7 +2,10 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -97,7 +100,7 @@ func parseTimingDaily(fields []string) (*TimingSpec, error) {
 	if len(fields) == 2 {
 		tz = fields[1]
 		if _, err := time.LoadLocation(tz); err != nil {
-			return nil, fmt.Errorf("%w: %s: %v", ErrInvalidTimeZone, tz, err)
+			return nil, fmt.Errorf("time zone %s: %w", tz, errors.Join(ErrInvalidTimeZone, err))
 		}
 	}
 	spec := &TimingSpec{Kind: TimingDaily, Time: clock, TimeZone: tz}
@@ -125,7 +128,7 @@ func parseTimingWeekly(fields []string) (*TimingSpec, error) {
 	if len(fields) == 3 {
 		tz = fields[2]
 		if _, err := time.LoadLocation(tz); err != nil {
-			return nil, fmt.Errorf("%w: %s: %v", ErrInvalidTimeZone, tz, err)
+			return nil, fmt.Errorf("time zone %s: %w", tz, errors.Join(ErrInvalidTimeZone, err))
 		}
 	}
 	spec := &TimingSpec{Kind: TimingWeekly, Time: clock, TimeZone: tz, Weekdays: weekdays}
@@ -142,7 +145,7 @@ func parseTimingAt(fields []string) (*TimingSpec, error) {
 	}
 	at, err := time.Parse(time.RFC3339, fields[0])
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid RFC3339 timestamp %q: %v", ErrInvalidRule, fields[0], err)
+		return nil, fmt.Errorf("invalid RFC3339 timestamp %q: %w", fields[0], errors.Join(ErrInvalidRule, err))
 	}
 	spec := &TimingSpec{Kind: TimingAt, At: &at}
 	if err := spec.Validate(); err != nil {
@@ -209,18 +212,16 @@ func parseTimingRRule(spec string) (*TimingSpec, error) {
 		return nil, err
 	}
 	if _, err := time.LoadLocation(tzid); err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrInvalidTimeZone, tzid, err)
+		return nil, fmt.Errorf("time zone %s: %w", tzid, errors.Join(ErrInvalidTimeZone, err))
 	}
 	// A valid DTSTART is the RFC5545 local date+time form "yyyymmddThhmmss"
 	// resolved in the TZID; take its wall-clock as the recurrence time of day
 	// so Validate/CronExpr share a single clock source.
 	ts := strings.TrimSpace(dtstart[strings.LastIndex(dtstart, ":")+1:])
-	if !isDTSTARTLocalTs(ts) {
+	if !isDTSTARTLocalTS(ts) {
 		return nil, fmt.Errorf("%w: DTSTART timestamp must be yyyymmddThhmmss", ErrInvalidRule)
 	}
 	clock := ts[9:11] + ":" + ts[11:13] + ":" + ts[13:15]
-	rule := strings.TrimSpace(rrule[len("RRULE"):])
-	rule = strings.TrimPrefix(rule, ":")
 
 	spec2 := &TimingSpec{Kind: TimingRRule, TimeZone: tzid, Time: clock, RRule: dtstart + "\n" + rrule}
 	if err := spec2.Validate(); err != nil {
@@ -237,7 +238,7 @@ func parseDTSTARTTZID(line string) (string, error) {
 		return "", fmt.Errorf("%w: DTSTART must be \"DTSTART;TZID=<IANA>:<timestamp>\"", ErrInvalidRule)
 	}
 	params := line[semi+1 : colon]
-	for _, p := range strings.Split(params, ";") {
+	for p := range strings.SplitSeq(params, ";") {
 		kv := strings.SplitN(p, "=", 2)
 		if len(kv) == 2 && strings.EqualFold(kv[0], "TZID") {
 			return strings.TrimSpace(kv[1]), nil
@@ -288,7 +289,7 @@ func isoWeekdayToInt(iso int) (int, error) {
 func normalizeWeekdays(tokens string) ([]int, error) {
 	seen := make(map[int]bool)
 	var out []int
-	for _, tok := range strings.Split(tokens, ",") {
+	for tok := range strings.SplitSeq(tokens, ",") {
 		tok = strings.TrimSpace(strings.ToUpper(tok))
 		if tok == "" {
 			return nil, fmt.Errorf("%w: empty weekday token", ErrInvalidRule)
@@ -352,7 +353,7 @@ func (t *TimingSpec) Validate() error {
 			return err
 		}
 		if _, err := time.LoadLocation(t.timeZoneOrUTC()); err != nil {
-			return fmt.Errorf("%w: %s: %v", ErrInvalidTimeZone, t.TimeZone, err)
+			return fmt.Errorf("time zone %s: %w", t.timeZoneOrUTC(), errors.Join(ErrInvalidTimeZone, err))
 		}
 	case TimingWeekly:
 		if _, err := normalizeClock(t.Time); err != nil {
@@ -372,7 +373,7 @@ func (t *TimingSpec) Validate() error {
 			prev = d
 		}
 		if _, err := time.LoadLocation(t.timeZoneOrUTC()); err != nil {
-			return fmt.Errorf("%w: %s: %v", ErrInvalidTimeZone, t.TimeZone, err)
+			return fmt.Errorf("time zone %s: %w", t.timeZoneOrUTC(), errors.Join(ErrInvalidTimeZone, err))
 		}
 	case TimingAt:
 		if t.At == nil {
@@ -423,10 +424,10 @@ func (t *TimingSpec) validateRRule() error {
 		return err
 	}
 	if _, err := time.LoadLocation(tzid); err != nil {
-		return fmt.Errorf("%w: %s: %v", ErrInvalidTimeZone, tzid, err)
+		return fmt.Errorf("time zone %s: %w", tzid, errors.Join(ErrInvalidTimeZone, err))
 	}
 	ts := strings.TrimSpace(dtstart[strings.LastIndex(dtstart, ":")+1:])
-	if !isDTSTARTLocalTs(ts) {
+	if !isDTSTARTLocalTS(ts) {
 		return fmt.Errorf("%w: DTSTART timestamp must be yyyymmddThhmmss", ErrInvalidRule)
 	}
 	// The RRULE wall-clock must match the DTSTART wall-clock so CronExpr can
@@ -443,7 +444,7 @@ func (t *TimingSpec) validateRRule() error {
 
 	var freq string
 	var byday, byhour, byminute, bymonthday string
-	for _, part := range strings.Split(rule, ";") {
+	for part := range strings.SplitSeq(rule, ";") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
@@ -531,9 +532,9 @@ func isDigits(s string) bool {
 	return len(s) > 0
 }
 
-// isDTSTARTLocalTs reports whether s is the RFC5545 local date+time form
+// isDTSTARTLocalTS reports whether s is the RFC5545 local date+time form
 // "yyyymmddThhmmss" — a literal T separating the date from the wall-clock.
-func isDTSTARTLocalTs(s string) bool {
+func isDTSTARTLocalTS(s string) bool {
 	if len(s) != 15 || s[8] != 'T' {
 		return false
 	}
@@ -593,7 +594,7 @@ func (t *TimingSpec) CronExpr() (string, error) {
 		rule = strings.TrimPrefix(strings.TrimPrefix(rule, "RRULE"), ":")
 		hh, mm, _, _ := splitClock(t.Time)
 		var freq string
-		for _, part := range strings.Split(rule, ";") {
+		for part := range strings.SplitSeq(rule, ";") {
 			kv := strings.SplitN(part, "=", 2)
 			if len(kv) == 2 && strings.EqualFold(kv[0], "FREQ") {
 				freq = strings.ToUpper(kv[1])
@@ -610,7 +611,7 @@ func (t *TimingSpec) CronExpr() (string, error) {
 			return fmt.Sprintf("%s %s * * %s", mm, hh, dows), nil
 		case "MONTHLY":
 			var day string
-			for _, part := range strings.Split(rule, ";") {
+			for part := range strings.SplitSeq(rule, ";") {
 				kv := strings.SplitN(part, "=", 2)
 				if len(kv) == 2 && strings.EqualFold(kv[0], "BYMONTHDAY") {
 					day = strings.TrimSpace(kv[1])
@@ -658,19 +659,13 @@ func (t *TimingSpec) NextOccurrence(from time.Time) (time.Time, bool) {
 		m, _ := strconv.Atoi(mm)
 		s, _ := strconv.Atoi(ss)
 		local := from.In(loc)
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			day := time.Date(local.Year(), local.Month(), local.Day(), h, m, s, 0, loc).AddDate(0, 0, i)
 			isoDow := int(day.Weekday())
 			if isoDow == 0 {
 				isoDow = 7
 			}
-			matched := false
-			for _, d := range t.Weekdays {
-				if d == isoDow {
-					matched = true
-					break
-				}
-			}
+			matched := slices.Contains(t.Weekdays, isoDow)
 			if matched && day.After(from) {
 				return day, true
 			}
@@ -724,7 +719,9 @@ func RegisterTiming(c *cron.Cron, cfg JobConfig, job Job) (cron.EntryID, error) 
 		var entryID cron.EntryID
 		entryID = c.Schedule(robfigAtSchedule{at: at}, cron.FuncJob(func() {
 			// Fire exactly once, then unregister.
-			job.Execute(context.Background())
+			if err := job.Execute(context.Background()); err != nil {
+				slog.Warn("scheduler: one-shot timing job failed", "error", err)
+			}
 			c.Remove(entryID)
 		}))
 		return entryID, nil
@@ -735,7 +732,9 @@ func RegisterTiming(c *cron.Cron, cfg JobConfig, job Job) (cron.EntryID, error) 
 		return 0, err
 	}
 	return c.AddFunc(expr, func() {
-		job.Execute(context.Background())
+		if err := job.Execute(context.Background()); err != nil {
+			slog.Warn("scheduler: recurring timing job failed", "error", err)
+		}
 	})
 }
 

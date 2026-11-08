@@ -1,6 +1,7 @@
 package taint
 
 import (
+	"slices"
 	"sync"
 	"testing"
 )
@@ -47,12 +48,7 @@ func TestAgentMessageSinkCheckSinkUntrusted(t *testing.T) {
 }
 
 func containsLabel(labels []TaintLabel, want TaintLabel) bool {
-	for _, l := range labels {
-		if l == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(labels, want)
 }
 
 var _ = sync.Mutex{} // keep sync import stable if tests evolve

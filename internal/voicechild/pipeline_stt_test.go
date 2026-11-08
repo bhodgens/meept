@@ -154,7 +154,7 @@ func TestPipelineSTTWiring(t *testing.T) {
 	// flake, not a wiring failure.
 	in, _ := d.acceptAll(ccid) //nolint:dogsled // out accepted above; in reused here for writes
 	var written [][]byte
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		chunk := make([]byte, 640)
 		for j := range chunk {
 			chunk[j] = byte(i + 1)

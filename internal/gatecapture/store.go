@@ -60,9 +60,9 @@ type CommandGateRecord struct {
 	// ID is pkg/id.Generate-derived (never time.Now/rand). Empty on Record
 	// input: the store mints one.
 	ID string
-	// Ts is the resolution timestamp (UTC). Zero on Record input: the store
+	// TS is the resolution timestamp (UTC). Zero on Record input: the store
 	// stamps it.
-	Ts time.Time
+	TS time.Time
 	// Chokepoint is one of the two Chokepoint* constants above.
 	Chokepoint string
 	// Command is the command text (or bounded args summary when the tool
@@ -166,7 +166,7 @@ func (s *Store) Close() error {
 	return s.db.close()
 }
 
-// Record writes one record, minting ID and Ts when unset. The sqlite write
+// Record writes one record, minting ID and TS when unset. The sqlite write
 // happens with NO store mutex held (mutexio).
 func (s *Store) Record(ctx context.Context, rec *CommandGateRecord) error {
 	if s == nil || rec == nil {
@@ -175,8 +175,8 @@ func (s *Store) Record(ctx context.Context, rec *CommandGateRecord) error {
 	if strings.TrimSpace(rec.ID) == "" {
 		rec.ID = sid.Generate("jgate")
 	}
-	if rec.Ts.IsZero() {
-		rec.Ts = time.Now().UTC()
+	if rec.TS.IsZero() {
+		rec.TS = time.Now().UTC()
 	}
 	switch rec.Chokepoint {
 	case ChokepointDecisionGateDeny, ChokepointPermissionTableAsk:

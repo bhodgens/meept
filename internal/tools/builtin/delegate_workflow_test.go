@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -51,7 +52,7 @@ func (f *fakeSpawner) Join(ctx context.Context, parent, childID string, timeout 
 	return agent.DelegateResult{Success: true, Status: "completed", Response: "done"}, nil
 }
 
-func itoa(n int) string { return string(rune('0' + n)) }
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // newTestEngine builds a workflow engine with a fake spawner and bounded caps.
 func newTestEngine(t *testing.T, s *fakeSpawner) *WorkflowEngine {
@@ -210,7 +211,7 @@ func TestWorkflowAgentFanoutJoin(t *testing.T) {
 	run := e.Run(context.Background(), "const v = await agent('do work');\nreturn {answer: v};", nil)
 	val := wfRunValue(t, run)
 	m := val.(map[string]any)
-	ans := m["answer"].(map[string]interface{})
+	ans := m["answer"].(map[string]any)
 	if ans["count"] != float64(3) {
 		t.Fatalf("answer = %v, want count 3", m["answer"])
 	}
@@ -246,7 +247,7 @@ func TestWorkflowParallelFansOutAndNullsFailedThunks(t *testing.T) {
 		"const rs = await parallel([()=>agent('one'), ()=>agent('two'), ()=>agent('three')]);\n"+
 			"return {rs: rs};", nil)
 	val := wfRunValue(t, run)
-	out := val.(map[string]any)["rs"].([]interface{})
+	out := val.(map[string]any)["rs"].([]any)
 	// Three concurrent Join consumers drain the canned results in an
 	// unspecified order; assert set-wise: one null, the other two are "a"/"c".
 	var nulls int
@@ -272,7 +273,7 @@ func TestWorkflowPipelineNullsThrowingItem(t *testing.T) {
 		"const out = await pipeline([1,2], (x)=>x, (x)=>{ if(x===2) throw new Error('boom'); return x; });\n"+
 			"return {out: out};", nil)
 	val := wfRunValue(t, run)
-	out := val.(map[string]any)["out"].([]interface{})
+	out := val.(map[string]any)["out"].([]any)
 	if out[0] != float64(1) || out[1] != nil {
 		t.Fatalf("pipeline out = %#v, want [1 null]", out)
 	}

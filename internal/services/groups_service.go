@@ -41,14 +41,14 @@ type GroupsService struct {
 // Compile-time: the RPC diagnosis interface is satisfied structurally
 // (the rpc package mirrors this method set as DiagnosisService).
 var (
-	_ = func() { explainShape(); checkShape() }
+	_ = func() { _, _ = explainShape(); _, _ = checkShape() }
 )
 
 // explainShape pins the Explain signature the RPC interface mirrors.
-func explainShape() (*groups.ExplainResult, error) { return nil, nil }
+func explainShape() (*groups.ExplainResult, error) { return nil, nil } //nolint:nilnil // signature-pin stub (rpc mirrors this method set; never invoked for a value)
 
 // checkShape pins the Check signature the RPC interface mirrors.
-func checkShape() (*groups.CheckResult, error) { return nil, nil }
+func checkShape() (*groups.CheckResult, error) { return nil, nil } //nolint:nilnil // signature-pin stub (rpc mirrors this method set; never invoked for a value)
 
 // NewGroupsService constructs the diagnosis service over a loaded config.
 // extraDiscoverDirs are extra discovery tier roots (test injection); an

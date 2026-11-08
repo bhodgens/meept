@@ -139,5 +139,5 @@ func TestGroupsExplainServiceBacked(t *testing.T) {
 // the interface the handler consumes matches the services.GroupsService
 // method set (compile-time via a local structural assertion).
 func TestDiagnosisServiceInterfaceShape(t *testing.T) {
-	var _ DiagnosisService = (DiagnosisService)(nil)
+	var _ = (DiagnosisService)(nil)
 }

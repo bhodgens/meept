@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -303,12 +304,7 @@ func (w *SkillWatcher) relevantSkillChange(event fsnotify.Event) (string, bool) 
 // watchedRoot reports whether dir sits directly under one of the watcher's
 // roots.
 func (w *SkillWatcher) watchedRoot(dir string) bool {
-	for _, root := range w.cfg.Roots {
-		if dir == root {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(w.cfg.Roots, dir)
 }
 
 // reload runs the coalesced reload pass: invalidate the loader cache for the

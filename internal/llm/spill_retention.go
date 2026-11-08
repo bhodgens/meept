@@ -75,7 +75,7 @@ func SweepSpill(ctx context.Context, opts SpillRetentionOptions) (int, error) {
 		if info.ModTime().After(cutoff) {
 			return nil
 		}
-		if rmErr := os.Remove(path); rmErr != nil {
+		if rmErr := os.Remove(path); rmErr != nil { //nolint:gosec // G122: retention sweep inside the PRIVATE spill root; no untrusted symlink input
 			if !errors.Is(rmErr, fs.ErrNotExist) {
 				logger.Debug("spill retention: remove failed", "path", path, "error", rmErr)
 			}
@@ -111,13 +111,13 @@ func SweepSpill(ctx context.Context, opts SpillRetentionOptions) (int, error) {
 func prunedDirs(root string, logger *slog.Logger) {
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() || path == root {
-			return nil
+			return nil //nolint:nilerr // doc comment above: walk errors are skipped, a busy/kept dir is not an abort
 		}
 		entries, readErr := os.ReadDir(path)
 		if readErr != nil || len(entries) > 0 {
-			return nil
+			return nil //nolint:nilerr // failed/unreadable dir is simply kept (best-effort sweep)
 		}
-		if rmErr := os.Remove(path); rmErr != nil {
+		if rmErr := os.Remove(path); rmErr != nil { //nolint:gosec // G122: retention sweep inside the PRIVATE spill root; no untrusted symlink input
 			logger.Debug("spill retention: empty-dir remove failed", "path", path, "error", rmErr)
 		}
 		// Removing a child can empty its parent; WalkDir still descends
@@ -135,13 +135,13 @@ func prunedDirs(root string, logger *slog.Logger) {
 		changed := false
 		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || !d.IsDir() || path == root {
-				return nil
+				return nil //nolint:nilerr // walk errors are skipped, a busy/kept dir is not an abort
 			}
 			entries, readErr := os.ReadDir(path)
 			if readErr != nil || len(entries) > 0 {
-				return nil
+				return nil //nolint:nilerr // failed/unreadable dir is simply kept (best-effort sweep)
 			}
-			if rmErr := os.Remove(path); rmErr == nil {
+			if rmErr := os.Remove(path); rmErr == nil { //nolint:gosec // G122: retention sweep inside the PRIVATE spill root; no untrusted symlink input
 				changed = true
 			}
 			return nil

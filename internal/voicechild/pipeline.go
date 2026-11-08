@@ -243,6 +243,7 @@ func (p *pipeline) startTranscripts() {
 		return
 	}
 	p.transStarted = true // claimed; the retry chain owns the slot
+	p.logger.Info("voicechild: transcript session claimed", "call_id", p.ccid)
 	p.transMu.Unlock()
 
 	go p.openTranscriptSession(stt, sttOpenAttempts)
@@ -361,6 +362,7 @@ func (p *pipeline) pumpAudioIn() {
 			p.forwardPCM(data)
 		}
 		if err != nil {
+			p.logger.Info("voicechild: audio pump EOF", "call_id", p.ccid, "err", err)
 			close(p.pcmCh) // socket closed by teardown or daemon: end the Stream feed
 			return
 		}
@@ -635,10 +637,10 @@ func rmsEnergy(b []byte) (uint64, uint64) {
 	var sum uint64
 	var n uint64
 	for i := 0; i+1 < len(b); i += 2 {
-		v := int16(binary.LittleEndian.Uint16(b[i:]))
-		u := uint64(uint16(v)) // |v| without float/negation games
+		v := int16(binary.LittleEndian.Uint16(b[i:])) //nolint:gosec // G115: PCM s16le decode — byte-pair truncation is the codec contract
+		u := uint64(uint16(v))                        //nolint:gosec // G115: |v| magnitude cast of a 16-bit sample (always in uint16 range)
 		if v < 0 {
-			u = uint64(-u) // two's complement wrap: -32768 -> 32768
+			u = -u // two's complement wrap: -32768 -> 32768
 		}
 		sum += u * u
 		n++

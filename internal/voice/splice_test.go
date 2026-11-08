@@ -271,7 +271,7 @@ func spliceConfig() SpliceConfig {
 // delivery order is assertable by content.
 func payloadFrame(seq int32) []byte {
 	payload := make([]byte, 640)
-	binary.LittleEndian.PutUint32(payload[0:4], uint32(seq))
+	binary.LittleEndian.PutUint32(payload[0:4], uint32(seq)) //nolint:gosec // G115: test sequence stamp; seq is bounded in the fixture
 	b64 := base64.StdEncoding.EncodeToString(payload)
 	return []byte(`{"event":"media","sequence_number":` + fmt.Sprintf("%d", seq) + `,"media":{"payload":"` + b64 + `"}}`)
 }
@@ -450,7 +450,7 @@ func TestBargeInPerCall(t *testing.T) {
 	// Feed both calls' outbound paths some child audio so B is actively
 	// writing before the interrupt (the splice writes only what the child
 	// sends; silence from the child means silence to Telnyx).
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		_ = feedChild("cc-b")
 		_ = feedChild("cc-a")
 	}
@@ -485,7 +485,7 @@ func TestBargeInPerCall(t *testing.T) {
 		t.Errorf("CancelDraftFn(cc-a) called %d times, want exactly 1", got)
 	}
 	// B keeps writing: keep feeding B's child side and expect more frames.
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		_ = feedChild("cc-b")
 		time.Sleep(10 * time.Millisecond)
 	}

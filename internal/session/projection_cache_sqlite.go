@@ -103,7 +103,7 @@ func (c *SessionProjectionCache) Checkpoint(sessionID string, rows map[string]Pr
 // is logged and omitted rather than failing the whole read.
 func (c *SessionProjectionCache) LoadSession(sessionID string) (map[string]ProjectionCheckpointRow, error) {
 	if c == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil cache is "no cached rows" (empty read), not an error; caller ranges the map
 	}
 	rows, err := c.db.Query(
 		"SELECT key, ver, seq, val FROM session_projection_cache WHERE session_id = ?",

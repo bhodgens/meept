@@ -299,7 +299,7 @@ func TestAggregator_TaskSort(t *testing.T) {
 func TestAggregator_FiltersAndPagination(t *testing.T) {
 	t0 := base()
 	var steps []StepRow
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		steps = append(steps, StepRow{
 			ID:          "s" + itoa(uint64(i)),
 			TaskID:      "task-1",

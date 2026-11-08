@@ -53,9 +53,6 @@ const (
 	// workflowDefaultEngineTimeout bounds the whole script execution (wall
 	// clock) so a runaway body is hard-killed, never a hang.
 	workflowDefaultEngineTimeout = 30 * time.Minute
-	// workflowDefaultMemoryLimit bounds counted allocation so a runaway
-	// allocation loop trips the codemode memory interrupt.
-	workflowDefaultMemoryLimit = 1 << 30 // 1 GiB
 	// workflowRenderCap is the maximum rendered result length (dsh renders
 	// foreground results capped; truncation carries a notice).
 	workflowRenderCap = 50000
@@ -160,14 +157,7 @@ func defaultWorkflowConfig(cfg *WorkflowConfig) {
 
 // workflowDefaultMaxConcurrent mirrors dsh's default: min(16, max(1, cores-2)).
 func workflowDefaultMaxConcurrent() int {
-	n := runtime.NumCPU() - 2
-	if n < 1 {
-		n = 1
-	}
-	if n > 16 {
-		n = 16
-	}
-	return n
+	return min(16, max(1, runtime.NumCPU()-2))
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +175,7 @@ func validateScript(script string) error {
 		return fmt.Errorf("workflow: %s: script may not carry an `export const meta` statement; pass meta as the tool's meta argument instead", workflowClassScriptParse)
 	}
 	if _, err := goja.Compile("workflow.js", "(async()=>{\n"+script+"\n})()", false); err != nil {
-		return fmt.Errorf("workflow: %s: %v", workflowClassScriptParse, err)
+		return fmt.Errorf("workflow: %s: %w", workflowClassScriptParse, err)
 	}
 	return nil
 }
@@ -661,9 +651,9 @@ func (t *WorkflowTool) Execute(ctx context.Context, args map[string]any) (any, e
 	}
 	var p workflowParams
 	if b, err := json.Marshal(args); err != nil {
-		return tools.NewErrorResult("workflow: INVALID_ARGUMENT: could not read arguments"), nil
+		return tools.NewErrorResult("workflow: INVALID_ARGUMENT: could not read arguments"), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	} else if err := json.Unmarshal(b, &p); err != nil {
-		return tools.NewErrorResult("workflow: INVALID_ARGUMENT: " + err.Error()), nil
+		return tools.NewErrorResult("workflow: INVALID_ARGUMENT: " + err.Error()), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	}
 
 	// Host-side validation before any child: script + meta. Fail-close.

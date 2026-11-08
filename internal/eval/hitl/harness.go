@@ -636,7 +636,11 @@ func seedACPCatalog(s *harness.Stack, sc Scenario) error {
 	if patched == string(data) {
 		return fmt.Errorf("hitl: chat AGENT.md has no additional_tools block to extend")
 	}
-	return os.WriteFile(chatSpec, []byte(patched), 0o644)
+	// chatSpec is a fixed sub-path of the sandbox home; leave gosec G703
+	// (path-traversal taint on MeeptHome) suppressed — the path is built
+	// from MeeptHome via filepath.Join of literal subpaths, never from
+	// script/user input, and the write is sandbox-home-scoped.
+	return os.WriteFile(chatSpec, []byte(patched), 0o644) //nolint:gosec // G703: sandbox-scoped write, not user input
 }
 
 // ---------------------------------------------------------------------------
@@ -681,19 +685,17 @@ func SampleIndices(n int, rate float64, seed uint64) []int {
 		return []int{}
 	}
 	count := int(math.Round(float64(n) * rate))
-	if count > n {
-		count = n
-	}
-	if count < 0 {
-		count = 0
-	}
+	count = min(count, n)
+	count = max(count, 0)
 	state := seed ^ sampleStreamConst
 	perm := make([]int, n)
 	for i := range perm {
 		perm[i] = i
 	}
 	for i := n - 1; i > 0; i-- {
-		j := int(splitmix64(&state) % uint64(i+1))
+		// Fisher-Yates swap index: r < i+1 <= n (slice bounds), so the
+		// uint64 -> int narrowing cannot overflow for any in-memory n.
+		j := int(splitmix64(&state) % uint64(i+1)) //nolint:gosec // G115: r < i+1 <= n <= MaxInt
 		perm[i], perm[j] = perm[j], perm[i]
 	}
 	out := append([]int(nil), perm[:count]...)

@@ -292,7 +292,7 @@ func TestChildProcConcurrentCallNotes(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			ccid := "cc-race"
 			p.NoteCallStart(ccid)
 			p.NoteCallEnd(ccid)
@@ -562,7 +562,7 @@ func TestChildProcBinaryLookup(t *testing.T) {
 // rssLines extracts the "voice child rss" log lines from the captured text.
 func rssLines(logs string) string {
 	var out []string
-	for _, line := range strings.Split(logs, "\n") {
+	for line := range strings.SplitSeq(logs, "\n") {
 		if strings.Contains(line, "voice child rss") {
 			out = append(out, strings.TrimSpace(line))
 		}

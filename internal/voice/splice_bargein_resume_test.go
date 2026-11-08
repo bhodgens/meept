@@ -31,7 +31,7 @@ func TestBargeInResume(t *testing.T) {
 	defer stopSplice(t, cancelA, doneA)
 
 	// Pre-interrupt traffic: the pacer is actively writing.
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		_ = feedChild("cc-r")
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -62,7 +62,7 @@ func TestBargeInResume(t *testing.T) {
 	}
 
 	// The NEXT utterance: fresh child PCM resumes the latch.
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		_ = feedChild("cc-r")
 		time.Sleep(5 * time.Millisecond)
 	}

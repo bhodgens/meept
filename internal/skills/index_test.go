@@ -429,7 +429,7 @@ func TestRankedNamesTiesByAscendingName(t *testing.T) {
 	})
 
 	want := []string{"alpha", "mike", "zulu"}
-	for round := 0; round < 10; round++ {
+	for round := range 10 {
 		got := idx.RankedNames("task", []string{"zulu", "mike", "alpha"})
 		if strings.Join(got, ",") != strings.Join(want, ",") {
 			t.Fatalf("tie order not deterministic (round %d): got %v want %v", round, got, want)

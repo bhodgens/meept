@@ -19,7 +19,7 @@ func TestStore_List(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	base := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := store.Append(ctx, Record{
 			Type:       fmt.Sprintf("event.%d", i),
 			EmployeeID: "emp-1",

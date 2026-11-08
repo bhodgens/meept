@@ -307,8 +307,7 @@ func TestLoopJournalQuotaPark(t *testing.T) {
 	if perr == nil {
 		t.Fatal("Process = nil error, want the quota failure to propagate (the park/requeue shape)")
 	}
-	var qe *llm.QuotaResetError
-	if !errors.As(perr, &qe) {
+	if _, ok := errors.AsType[*llm.QuotaResetError](perr); !ok {
 		t.Fatalf("error %v is not QuotaResetError-reachable; the job must PARK via the provider-wait path, never short-retry", perr)
 	}
 

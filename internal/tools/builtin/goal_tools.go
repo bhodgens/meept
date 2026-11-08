@@ -317,7 +317,7 @@ func (t *GoalCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 	maxRounds, _, err := parsePositiveIntField(args, "max_rounds")
 	if err != nil {
-		return tools.NewErrorResult("goal_create: " + err.Error()), nil
+		return tools.NewErrorResult("goal_create: " + err.Error()), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	}
 	owner, err := resolveGoalOwner(t.owner, ctx)
 	if err != nil {
@@ -412,7 +412,7 @@ func (t *GoalUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 	revision, err := asInt64(rev)
 	if err != nil {
-		return tools.NewErrorResult("goal_update: revision must be a number"), nil
+		return tools.NewErrorResult("goal_update: revision must be a number"), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	}
 	action := strings.TrimSpace(asString(args["action"]))
 	if action == "" {
@@ -448,7 +448,7 @@ func (t *GoalUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 			changed = true
 		}
 		if mr, present, err := parsePositiveIntField(args, "max_rounds"); err != nil {
-			return tools.NewErrorResult("goal_update edit: " + err.Error()), nil
+			return tools.NewErrorResult("goal_update edit: " + err.Error()), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 		} else if present {
 			next.MaxRounds = mr
 			changed = true
@@ -502,7 +502,7 @@ func (t *GoalUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 	// Re-fetch for the authoritative post-write revision.
 	updated, err := t.mgr.GetGoal(ctx, goalID)
 	if err != nil || updated == nil {
-		return map[string]any{"goal": goalValueFromRecord(&next)}, nil
+		return map[string]any{"goal": goalValueFromRecord(&next)}, nil //nolint:nilerr // re-fetch is best-effort; the just-written record is authoritative enough
 	}
 	return map[string]any{"goal": goalValueFromRecord(updated)}, nil
 }

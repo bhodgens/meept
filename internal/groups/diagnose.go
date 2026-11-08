@@ -465,8 +465,8 @@ func Check(policies []Policy, bindings []Binding, agentsIn []DiagnosisAgent, kno
 	// --- R5: unknown group in frontmatter (C4) ---
 	groupLabels := map[string]struct{}{}
 	for _, b := range bindings {
-		if strings.HasPrefix(b.Subject, "group:") {
-			groupLabels[strings.TrimPrefix(b.Subject, "group:")] = struct{}{}
+		if g, ok := strings.CutPrefix(b.Subject, "group:"); ok {
+			groupLabels[g] = struct{}{}
 		}
 	}
 	for _, a := range agentsIn {
@@ -540,9 +540,9 @@ func Check(policies []Policy, bindings []Binding, agentsIn []DiagnosisAgent, kno
 					directOrGroup = true
 					break
 				}
-				if strings.HasPrefix(b.Subject, "group:") {
+				if g, ok := strings.CutPrefix(b.Subject, "group:"); ok {
 					for _, gm := range a.Groups {
-						if strings.TrimPrefix(b.Subject, "group:") == gm {
+						if g == gm {
 							directOrGroup = true
 						}
 					}
@@ -750,7 +750,7 @@ func enumerateStructural(policies []Policy, bindings []Binding) []CheckFinding {
 // lines (each line after the first is one "groups: <kind>: ..." entry).
 func splitDefectLines(joined string) []string {
 	var lines []string
-	for _, line := range strings.Split(joined, "\n") {
+	for line := range strings.SplitSeq(joined, "\n") {
 		if strings.HasPrefix(line, "groups: ") {
 			lines = append(lines, line)
 		}

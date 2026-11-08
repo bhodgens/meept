@@ -137,7 +137,7 @@ func (c *RawMicCapture) Close() error {
 	c.mu.Lock()
 	if c.closeErr != nil || (c.file == nil && c.cmd == nil) {
 		c.mu.Unlock()
-		return nil
+		return c.closeErr
 	}
 	if c.cancel != nil {
 		c.cancel()
@@ -181,7 +181,7 @@ func (p *OtoPlayer) Play(burst []byte) error { return p.inner.Play(burst) }
 
 // Clear is a no-op: oto v3 plays a handed-off burst to completion
 // (the documented accepted limitation in the SpeakerSink contract).
-func (p *OtoPlayer) Clear() { p.inner.Stop() }
+func (p *OtoPlayer) Clear() { _ = p.inner.Stop() }
 
 // Close suspends the audio driver.
 func (p *OtoPlayer) Close() { _ = p.inner.Close() }
@@ -276,7 +276,7 @@ func NewWAVHeader(sampleRate, channels, dataLen int) []byte {
 	byteRate := sampleRate * channels * byteRateBase
 	blockAlign := channels * byteRateBase
 	copy(h[0:4], "RIFF")
-	binary.LittleEndian.PutUint32(h[4:8], uint32(36+dataLen))
+	binary.LittleEndian.PutUint32(h[4:8], uint32(36+dataLen)) //nolint:gosec // G115: bounded WAV RIFF size field
 	copy(h[8:12], "WAVE")
 	copy(h[12:16], "fmt ")
 	binary.LittleEndian.PutUint32(h[16:20], 16)                 // fmt chunk size

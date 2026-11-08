@@ -84,11 +84,10 @@ func isCompleteToolOutputFence(content string) bool {
 		return false
 	}
 	interior := content[len(startPrefix) : len(content)-len(ToolOutputMarkerEnd)]
-	tagClose := strings.Index(interior, ">>>")
-	if tagClose < 0 {
+	_, body, ok := strings.Cut(interior, ">>>")
+	if !ok {
 		return false
 	}
-	body := interior[tagClose+len(">>>"):]
 	return !strings.Contains(body, ToolOutputMarkerEnd) &&
 		!strings.Contains(body, startPrefix)
 }

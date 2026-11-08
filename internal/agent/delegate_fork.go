@@ -43,9 +43,7 @@ func lastCompletedTurn(msgs []llm.ChatMessage) int {
 			}
 		}
 		if m.Role == llm.RoleTool && m.ToolCallID != "" {
-			if _, ok := outstanding[m.ToolCallID]; ok {
-				delete(outstanding, m.ToolCallID)
-			}
+			delete(outstanding, m.ToolCallID)
 		}
 		if m.Role == llm.RoleAssistant && len(outstanding) == 0 {
 			cut = i + 1

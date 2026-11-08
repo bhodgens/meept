@@ -174,7 +174,7 @@ func TestGuardIsIndependentOfTheFence(t *testing.T) {
 
 	// No fence checker, no permission checker, nothing wired — the guard is a
 	// pure function of the path.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := guardProtectedConfigPath(target, false); err == nil {
 			t.Fatalf("attempt %d: guard was bypassable", i)
 		}

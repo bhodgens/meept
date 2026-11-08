@@ -408,7 +408,7 @@ func TestDeterminism(t *testing.T) {
 		})
 	}
 	runs := 0
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		s, err := mk()
 		if err != nil {
 			t.Fatal(err)
@@ -494,7 +494,7 @@ func TestBridgePerCallContextCancellation(t *testing.T) {
 					return "late", nil
 				case <-ctx.Done():
 					cancelled.Store(true)
-					return "", fmt.Errorf("tool cancelled: %v", ctx.Err())
+					return "", fmt.Errorf("tool cancelled: %w", ctx.Err())
 				}
 			}},
 		},
@@ -520,7 +520,7 @@ func TestConcurrentExecutesSerialized(t *testing.T) {
 	const n = 8
 	var wg sync.WaitGroup
 	resCh := make(chan Result, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

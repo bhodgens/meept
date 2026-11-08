@@ -394,16 +394,16 @@ func stampSkillOrigin(name, content string, o Origin) (string, error) {
 	if strings.HasPrefix(rest, "---") {
 		// Empty frontmatter block: no metadata lines to preserve.
 		after = rest[len("---"):]
-	} else if idx := strings.Index(rest, "\n---"); idx >= 0 {
-		block = rest[:idx]
-		after = rest[idx+len("\n---"):]
+	} else if before, after0, ok := strings.Cut(rest, "\n---"); ok {
+		block = before
+		after = after0
 	} else {
 		return "", fmt.Errorf("unterminated frontmatter block in skill %q", name)
 	}
 
 	// Drop any existing top-level origin line, keep every other byte.
 	var lines []string
-	for _, l := range strings.Split(block, "\n") {
+	for l := range strings.SplitSeq(block, "\n") {
 		if l == "origin:" || strings.HasPrefix(l, "origin: ") {
 			continue
 		}

@@ -251,9 +251,7 @@ func TestSessionAffinityConfigRaceSafe(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -263,12 +261,10 @@ func TestSessionAffinityConfigRaceSafe(t *testing.T) {
 			c.SetSessionAffinityConfig(&AffinityConfig{Enabled: true, Header: "session_id"})
 			c.SetSessionAffinityConfig(&AffinityConfig{Enabled: false, Header: "x"})
 		}
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 2000; i++ {
+	wg.Go(func() {
+		for range 2000 {
 			req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:11/v1/chat/completions", nil)
 			if err != nil {
 				t.Errorf("NewRequest: %v", err)
@@ -281,7 +277,7 @@ func TestSessionAffinityConfigRaceSafe(t *testing.T) {
 			}
 		}
 		close(stop)
-	}()
+	})
 
 	wg.Wait()
 }
@@ -414,22 +410,18 @@ func TestIdentityResolverRaceSafe(t *testing.T) {
 	)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
+	wg.Go(func() {
+		for range 200 {
 			c.SetIdentityResolver(func(sessionID string) (string, bool) {
 				return "conv-" + sessionID, true
 			})
 		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
+	})
+	wg.Go(func() {
+		for range 200 {
 			c.OnSessionEvent(context.Background(), "session-race", "archive")
 		}
-	}()
+	})
 	wg.Wait()
 	c.inFlight.Wait() // let every dispatch finish before the detector reports
 }

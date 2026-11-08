@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -269,9 +270,7 @@ func TestHermesTool_VerbDispatch(t *testing.T) {
 // withHermesVerb copies args with the verb set.
 func withHermesVerb(args map[string]any, verb string) map[string]any {
 	out := map[string]any{"verb": verb}
-	for k, v := range args {
-		out[k] = v
-	}
+	maps.Copy(out, args)
 	return out
 }
 
@@ -994,7 +993,7 @@ func hermesSSEFlusher(w http.ResponseWriter) http.Flusher {
 
 // hermesWriteSSE writes one SSE frame and flushes it.
 func hermesWriteSSE(w http.ResponseWriter, f http.Flusher, event, data string) {
-	io.WriteString(w, "event: "+event+"\ndata: "+data+"\n\n")
+	_, _ = io.WriteString(w, "event: "+event+"\ndata: "+data+"\n\n")
 	f.Flush()
 }
 
@@ -1005,7 +1004,7 @@ func TestHermesTool_RunsWaitToTerminal(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
 			f := hermesSSEFlusher(w)
-			io.WriteString(w, ": keepalive\n\n")
+			_, _ = io.WriteString(w, ": keepalive\n\n")
 			f.Flush()
 			hermesWriteSSE(w, f, "tool.started", `{"name":"terminal"}`)
 			hermesWriteSSE(w, f, "tool.completed", `{"name":"terminal"}`)

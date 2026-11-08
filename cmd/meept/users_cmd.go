@@ -156,7 +156,7 @@ func runUsersList(path string, asJSON bool) error {
 // (from "" or trailing commas) are dropped. An empty spec yields nil.
 func parseGroupsFlag(spec string) []string {
 	var out []string
-	for _, g := range strings.Split(spec, ",") {
+	for g := range strings.SplitSeq(spec, ",") {
 		g = strings.TrimSpace(g)
 		if g == "" {
 			continue

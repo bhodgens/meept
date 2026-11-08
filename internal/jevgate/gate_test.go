@@ -279,7 +279,7 @@ func TestSerializeCommandContext_ByteStable(t *testing.T) {
 	}
 
 	first := SerializeCommandContext("grep -rn TODO .", "/Users/caimlas/git/meept", build())
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		again := SerializeCommandContext("grep -rn TODO .", "/Users/caimlas/git/meept", build())
 		if again != first {
 			t.Fatalf("serialization unstable on run %d:\n%q\nvs\n%q", i, again, first)

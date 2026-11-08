@@ -43,7 +43,7 @@ func (s *compactionDecisionStub) Chat(_ context.Context, messages []ChatMessage,
 // exact DecisionQuestion the compactor renders (Ask itself lives on the
 // client; the stub records the rendered chat messages instead).
 func (s *compactionDecisionStub) Ask(_ context.Context, _ DecisionQuestion) (*DecisionResult, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // unused stub default: Ask is not exercised by the compactor tests (they drive Chat)
 }
 
 func (s *compactionDecisionStub) ChatWithProgress(ctx context.Context, messages []ChatMessage, _ ProgressCallback, _ ...ChatOption) (*Response, error) {

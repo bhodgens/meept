@@ -61,7 +61,7 @@ func (h *GroupsHandler) SetOverridesLoader(loader func() (groups.OverridesReader
 // reader-not-wired note instead of counts).
 func (h *GroupsHandler) overridesReader() (groups.OverridesReader, error) {
 	if h.overridesLoader == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // deliberate: absent loader means "reader not wired", which handleCheck turns into the note instead of counts
 	}
 	return h.overridesLoader()
 }

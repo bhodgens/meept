@@ -18,7 +18,7 @@ func TestFlushDrainsInOrderAndIdempotent(t *testing.T) {
 	s := newTestStore(t, Config{MaxTokens: 100, MaxItems: 10, TTL: 0})
 
 	// 10 x 30-token turns against 100 budget: 7+ evictions.
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if err := s.Append(context.Background(),
 			mkTurn("f"+string(rune('a'+i)), "sess-f", "user", string(rune('A'+i))+strings.Repeat("z", 119), base.Add(time.Duration(i)*time.Minute))); err != nil {
 			t.Fatal(err)
@@ -64,7 +64,7 @@ func TestFlushDrainsInOrderAndIdempotent(t *testing.T) {
 func TestFlushErrorRestoresQueue(t *testing.T) {
 	base := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	s := newTestStore(t, Config{MaxTokens: 40, MaxItems: 10, TTL: 0})
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := s.Append(context.Background(),
 			mkTurn("e", "s", "user", strings.Repeat("q", 80), base.Add(time.Duration(i)*time.Minute))); err != nil {
 			t.Fatal(err)
@@ -140,7 +140,7 @@ func TestFlushAdapterCompilesAgainstRealEpisodicStore(t *testing.T) {
 
 	// End-to-end: store evictions flush into the real episodic store.
 	s := newTestStore(t, Config{MaxTokens: 40, MaxItems: 10, TTL: 0})
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		if err := s.Append(ctx, mkTurn("w", "sess-a", "user", strings.Repeat("m", 80), base.Add(time.Duration(i)*time.Second))); err != nil {
 			t.Fatal(err)
 		}

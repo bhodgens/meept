@@ -10,7 +10,6 @@ package voice
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"net"
 	"runtime"
@@ -21,7 +20,7 @@ import (
 
 // localDiscardLogger keeps splice logs out of test output.
 func localDiscardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func startLocalSplice(t *testing.T, ccid string, cfg LocalSpliceConfig, deps LocalSpliceDeps) (context.CancelFunc, <-chan error) {
@@ -111,13 +110,13 @@ func TestLocalSpliceCarries(t *testing.T) {
 
 	// Outbound: 10 child chunks paced to the client at 20ms per chunk.
 	start := time.Now()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if err := feedChild("ls-car-1"); err != nil {
 			t.Fatalf("feedChild: %v", err)
 		}
 	}
 	buf := make([]byte, 640)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if err := localReadFull(micSide, buf); err != nil {
 			t.Fatalf("speaker read %d: %v", i, err)
 		}
@@ -253,7 +252,7 @@ func TestLocalSpliceBargeIn(t *testing.T) {
 	defer close(stopRead)
 
 	// Phase 2: fresh child PCM re-arms the latch - paced writes resume.
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		if err := feedChild("ls-barge-1"); err != nil {
 			t.Fatalf("feedChild: %v", err)
 		}

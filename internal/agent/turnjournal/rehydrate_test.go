@@ -39,7 +39,7 @@ func (s *rehydrateStore) OpenRuns(ctx context.Context) ([]OpenRun, error) {
 }
 
 func (s *rehydrateStore) CompletedSteps(ctx context.Context, turnID string) (map[string][]byte, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: not exercised by the rehydrate tests
 }
 
 func (s *rehydrateStore) CloseRun(ctx context.Context, turnID string) error {

@@ -140,7 +140,7 @@ func TestOTLPTracesWiringConversationMapBounded(t *testing.T) {
 	// bounded (FIFO drop). The proof is behavioral: no panic, no unbounded
 	// growth observable through continued correct stamping on a RECENT
 	// trace after the flood.
-	for i := 0; i < 1100; i++ {
+	for i := range 1100 {
 		bus.PublishT(b, agent.TopicTurnTerminal, "test", agent.TurnTerminalEvent{
 			ConversationID: "conv-flood",
 			Status:         "completed",

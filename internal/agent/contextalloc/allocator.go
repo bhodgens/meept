@@ -235,20 +235,14 @@ func (c Config) computedConversationRatio() float64 {
 //     firewall ratios capped at the section shares (leaf T6)
 func (a *Allocator) Allocate(ctx context.Context, windowTokens int, req Request) Allocation {
 	window := windowTokens
-	if window < 0 {
-		window = 0
-	}
+	window = max(window, 0)
 
 	// R-A2: reserve the LARGER of the configured fraction and the absolute
 	// floor. The reserve never shrinks proportionally on small windows
 	// (R-A2/R-A10; ml4devs absolute-reserve principle).
 	reserve := int(float64(window) * a.cfg.OutputReserveFraction)
-	if reserve < OutputReserveFloor {
-		reserve = OutputReserveFloor
-	}
-	if reserve > window {
-		reserve = window
-	}
+	reserve = max(reserve, OutputReserveFloor)
+	reserve = min(reserve, window)
 	usable := window - reserve
 
 	// R-A4: split the post-reserve window by fraction, largest-remainder so
@@ -327,16 +321,12 @@ func (a *Allocator) Allocate(ctx context.Context, windowTokens int, req Request)
 	// flexible-only scaling at wiring time if SmallModelContextThreshold
 	// behavior is wanted.
 	iteration := int(a.iterationRatio * float64(window))
-	if iteration > alloc.History {
-		iteration = alloc.History
-	}
+	iteration = min(iteration, alloc.History)
 	// ConversationBudget tracks the prior-art conversation ratio of the
 	// resolved window, capped at the post-reserve window so it can never
 	// promise more than exists after the R-A2 reserve.
 	conversation := int(a.conversationRatio * float64(window))
-	if conversation > usable {
-		conversation = usable
-	}
+	conversation = min(conversation, usable)
 	alloc.IterationBudget = iteration
 	alloc.ConversationBudget = conversation
 	return alloc

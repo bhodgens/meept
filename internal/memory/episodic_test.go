@@ -219,7 +219,7 @@ func TestGetNewestByCategoryAndMetadataBeyondWindow(t *testing.T) {
 	}
 	defer mem.Close()
 
-	for i := 0; i < 250; i++ {
+	for i := range 250 {
 		if _, err := mem.Store(ctx, "filler", "l0_progress", map[string]any{
 			"session_id":  "other",
 			"l0_progress": "filler",

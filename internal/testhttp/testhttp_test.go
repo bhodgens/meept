@@ -17,13 +17,9 @@ import (
 // syscall error carries the "assign requested address" text qualifies: a
 // refused or unreachable peer is a real failure and must not be retried.
 func TestIsEphemeralExhaustion(t *testing.T) {
-	exhausted := &net.OpError{
-		Op:  "dial",
-		Err: &os.SyscallError{Err: syscall.EADDRNOTAVAIL},
-	}
 	// The marker match is on message text, so wrap a sentinel that carries
 	// the macOS wording rather than relying on EADDRNOTAVAIL's own text.
-	exhausted = &net.OpError{
+	exhausted := &net.OpError{
 		Op:  "dial",
 		Err: &os.SyscallError{Err: errors.New("connect: can't assign requested address")},
 	}

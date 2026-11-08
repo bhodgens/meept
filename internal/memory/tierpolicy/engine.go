@@ -47,6 +47,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -251,6 +252,11 @@ var (
 	ErrAlreadyStarted = errors.New("tierpolicy: engine already started")
 	// ErrDisabled is returned by Start on a disabled engine.
 	ErrDisabled = errors.New("tierpolicy: engine disabled (memory.tiers.enabled=false)")
+	// ErrNoAction is returned by the planning helpers when a pass selects
+	// no action (missing deps seam, no candidates, or selection under
+	// MinBatch with nothing harmful). It is NOT a failure: the engine
+	// records OutcomeNoop for the tier instead.
+	ErrNoAction = errors.New("tierpolicy: no action planned")
 )
 
 // New constructs an engine. It NEVER constructs a Consolidator and never
@@ -375,7 +381,7 @@ func (e *Engine) Evaluate(ctx context.Context, states []TierState) ([]Action, er
 			// Middle band: compress the overage only (R-B2 soft band).
 			overage := float64(st.Tokens) - compressAt
 			act, err := e.planCompress(ctx, st, overage)
-			if err != nil {
+			if err != nil && !errors.Is(err, ErrNoAction) {
 				errs = append(errs, err)
 			}
 			if act == nil {
@@ -393,7 +399,7 @@ func (e *Engine) Evaluate(ctx context.Context, states []TierState) ([]Action, er
 		overage := float64(st.Tokens) - evictAt
 		rec.Outcome = OutcomeNoop
 		compressAct, err := e.planCompress(ctx, st, overage)
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrNoAction) {
 			errs = append(errs, err)
 		}
 		if compressAct != nil {
@@ -401,7 +407,7 @@ func (e *Engine) Evaluate(ctx context.Context, states []TierState) ([]Action, er
 			rec.Outcome = OutcomeCompress
 		}
 		evictAct, err := e.planEvict(ctx, st, overage/2)
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrNoAction) {
 			errs = append(errs, err)
 		}
 		if evictAct != nil {
@@ -428,11 +434,11 @@ func (e *Engine) thresholds(st TierState) (compressAt, evictAt float64) {
 }
 
 // planCompress selects the oldest candidates (R-B5 oldest-first) worth
-// ~targetTokens of reclamation, bounded by MaxBatch, skipping (nil, no
-// action) when the selection is under MinBatch.
+// ~targetTokens of reclamation, bounded by MaxBatch, returning
+// ErrNoAction when the selection is under MinBatch.
 func (e *Engine) planCompress(ctx context.Context, st TierState, targetTokens float64) (*Action, error) {
 	if e.deps.Candidates == nil {
-		return nil, nil
+		return nil, ErrNoAction
 	}
 	cands, err := e.deps.Candidates.Candidates(ctx, st.Tier, e.cfg.MaxBatch)
 	if err != nil {
@@ -453,7 +459,7 @@ func (e *Engine) planCompress(ctx context.Context, st TierState, targetTokens fl
 		}
 	}
 	if len(ids) < e.cfg.MinBatch {
-		return nil, nil // R-B5: skip if under min batch
+		return nil, ErrNoAction // R-B5: skip if under min batch
 	}
 	return &Action{
 		Kind:      KindCompress,
@@ -471,14 +477,14 @@ func (e *Engine) planCompress(ctx context.Context, st TierState, targetTokens fl
 // nothing harmful, the pass is skipped (nil).
 func (e *Engine) planEvict(ctx context.Context, st TierState, targetTokens float64) (*Action, error) {
 	if e.deps.Candidates == nil || e.deps.Votes == nil {
-		return nil, nil
+		return nil, ErrNoAction
 	}
 	cands, err := e.deps.Candidates.Candidates(ctx, st.Tier, evictCandidateLimit)
 	if err != nil {
 		return nil, fmt.Errorf("tierpolicy: candidates for tier %q: %w", st.Tier, err)
 	}
 	if len(cands) == 0 {
-		return nil, nil
+		return nil, ErrNoAction
 	}
 	ids := make([]string, len(cands))
 	for i, c := range cands {
@@ -533,17 +539,17 @@ func (e *Engine) planEvict(ctx context.Context, st TierState, targetTokens float
 	pool := make([]string, 0, len(plan.Harmful)+len(plan.Floor)+len(plan.Survivors))
 	pool = append(pool, plan.Harmful...)
 	pool = append(pool, plan.Floor...)
-	for i := len(plan.Survivors) - 1; i >= 0; i-- {
-		pool = append(pool, plan.Survivors[i].Memory.ID)
+	for _, sv := range slices.Backward(plan.Survivors) {
+		pool = append(pool, sv.Memory.ID)
 	}
 	return e.selectEvictBatch(cands, votes, pool, st, targetTokens)
 }
 
 // selectEvictBatch walks a pre-ordered candidate pool selecting a batch
 // worth ~targetTokens, bounded by MaxBatch; under MinBatch with nothing
-// harmful, the pass is skipped (nil). Shared by the usefulness-ranked and
-// age-only planEvict lanes (bughunt config-tools F-2) so the R-B5
-// batching rules stay identical across both.
+// harmful, the pass is skipped (ErrNoAction). Shared by the
+// usefulness-ranked and age-only planEvict lanes (bughunt config-tools
+// F-2) so the R-B5 batching rules stay identical across both.
 func (e *Engine) selectEvictBatch(cands []memory.MemoryResult, votes map[string]int, pool []string, st TierState, targetTokens float64) (*Action, error) {
 	byID := make(map[string]memory.MemoryResult, len(cands))
 	for _, c := range cands {
@@ -570,7 +576,7 @@ func (e *Engine) selectEvictBatch(cands []memory.MemoryResult, votes map[string]
 		}
 	}
 	if len(selected) < e.cfg.MinBatch && !harmful {
-		return nil, nil // R-B5: skip if under min batch
+		return nil, ErrNoAction // R-B5: skip if under min batch
 	}
 	return &Action{
 		Kind:      KindEvict,

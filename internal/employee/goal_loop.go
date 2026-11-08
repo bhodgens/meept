@@ -2020,7 +2020,7 @@ func extractFirstJSONSpan(s string) (string, bool) {
 	depth := 0
 	start := -1
 	inStr, esc := false, false
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		c := s[i]
 		if inStr {
 			if esc {

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -91,9 +93,9 @@ func (g *llmBridgeGenerator) GenerateBridgeFacts(ctx context.Context, entity str
 	var sb strings.Builder
 	sb.WriteString("You write cross-memory bridging facts. Given several memories that all mention the same entity, produce the connecting facts that link them — information only true or meaningful because the memories share that entity.\n")
 	sb.WriteString("Respond with ONLY a JSON array. Each element is an object with keys \"text\" (the bridging fact sentence) and \"evidence_ids\" (the source memory IDs the fact derives from).\n\n")
-	sb.WriteString(fmt.Sprintf("Entity: %s\n\nMemories:\n", entity))
+	fmt.Fprintf(&sb, "Entity: %s\n\nMemories:\n", entity)
 	for _, m := range sources {
-		sb.WriteString(fmt.Sprintf("- [%s] %s\n", m.ID, m.Content))
+		fmt.Fprintf(&sb, "- [%s] %s\n", m.ID, m.Content)
 	}
 
 	msgs := []llm.ChatMessage{
@@ -184,7 +186,7 @@ func bridgeFactsFromMetadata(m Memory) []string {
 		return nil
 	}
 	var facts []string
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		if part = strings.TrimSpace(strings.ToLower(part)); part != "" {
 			facts = append(facts, part)
 		}
@@ -241,11 +243,8 @@ func eligibleBridgeEntities(perMemory map[string][]string, maxDF int) []string {
 func bridgeCandidates(memories []Memory, perMemory map[string][]string, entity string) []Memory {
 	var out []Memory
 	for _, m := range memories {
-		for _, f := range perMemory[m.ID] {
-			if f == entity {
-				out = append(out, m)
-				break
-			}
+		if slices.Contains(perMemory[m.ID], entity) {
+			out = append(out, m)
 		}
 		if len(out) == MaxBridgeSourceMemories {
 			break
@@ -320,9 +319,7 @@ func persistBridgeFacts(ctx context.Context, store *BridgeStore, entity string, 
 			md["user_id"] = scopeUserID
 		}
 		md["entity"] = entity
-		for k, v := range evidenceContent {
-			md[k] = v
-		}
+		maps.Copy(md, evidenceContent)
 		rec := BridgeRecord{
 			ID:          id.Generate("bridge-"),
 			Content:     text,

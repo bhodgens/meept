@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -179,7 +180,7 @@ func (cq *ClusterQueue) Claim(ctx context.Context, workerID string, caps []strin
 			cq.mu.Unlock()
 			return job, nil
 		}
-		if err != ErrNoJobAvailable {
+		if !errors.Is(err, ErrNoJobAvailable) {
 			cq.logger.Warn("cluster_queue: clustered claim failed, falling back",
 				"error", err)
 		}

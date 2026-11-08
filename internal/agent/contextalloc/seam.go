@@ -159,11 +159,7 @@ func recallItemCount(budgetTokens int) int {
 		return 0
 	}
 	n := budgetTokens / 100
-	if n < 1 {
-		n = 1
-	}
-	if n > 20 {
-		n = 20
-	}
+	n = max(n, 1)
+	n = min(n, 20)
 	return n
 }

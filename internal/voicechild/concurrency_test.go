@@ -35,7 +35,7 @@ func (s *serialTTS) Speak(ctx context.Context, text string) (io.ReadCloser, erro
 		s.overlaps++
 	}
 	s.mu.Unlock()
-	return &serialReader{s: s, chunks: 3, ordinal: byte(ordinal)}, nil
+	return &serialReader{s: s, chunks: 3, ordinal: byte(ordinal)}, nil //nolint:gosec // G115: ordinal is a small test counter, fits a byte
 }
 
 func (s *serialTTS) counts() (speaks, overlaps int) {
@@ -62,11 +62,8 @@ func (r *serialReader) Read(p []byte) (int, error) {
 		r.s.mu.Unlock()
 	}
 	r.chunks--
-	n := len(p)
-	if n > 640 {
-		n = 640
-	}
-	for i := 0; i < n; i++ {
+	n := min(len(p), 640)
+	for i := range n {
 		p[i] = r.ordinal
 	}
 	return n, nil
@@ -113,11 +110,11 @@ func TestConcurrentSaysSerialize(t *testing.T) {
 	// Fire the whole burst through the REAL handler concurrently, exactly
 	// as the daemon read loop would deliver back-to-back say frames.
 	var wg sync.WaitGroup
-	for i := 0; i < burst; i++ {
+	for i := range burst {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			frame := voiceframe.Frame{CallID: "cs1", Event: voiceframe.EventSay, Text: fmt.Sprintf("sentence %d", i), Last: lastPtr(true)}
+			frame := voiceframe.Frame{CallID: "cs1", Event: voiceframe.EventSay, Text: fmt.Sprintf("sentence %d", i), Last: lastPtr(true)} //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 			if err := child.handleSay(frame); err != nil {
 				t.Errorf("handleSay %d: %v", i, err)
 			}
@@ -196,14 +193,14 @@ func TestClearDropsQueuedDrafts(t *testing.T) {
 	// Stream 1 parks the worker mid-write; drafts 2+3 queue behind it.
 	gate := newGatedTTS()
 	swapTTS(p, gate)
-	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "current", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "current", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	select {
 	case <-gate.enteredPlay:
 	case <-time.After(5 * time.Second):
 		t.Fatalf("playback never started")
 	}
-	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "queued-1", Last: lastPtr(true)})
-	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "queued-2", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "queued-1", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
+	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "queued-2", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	waitFor(t, func() bool { return p.queuedSayCount() == 2 })
 
 	// Clear: retire stream 1 and the two queued drafts of the old gen.
@@ -219,7 +216,7 @@ func TestClearDropsQueuedDrafts(t *testing.T) {
 	stub := newChunkedTTS(quietSample, 2)
 	swapTTS(p, stub)
 	defer close(stub.park)
-	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "after-clear", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "after-clear", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	_ = out.SetReadDeadline(time.Now().Add(5 * time.Second))
 	buf := make([]byte, 1280)
 	if n, err := io.ReadFull(out, buf); n != 1280 || err != nil {
@@ -262,8 +259,8 @@ func TestConcurrentPipelines(t *testing.T) {
 	waitFor(t, func() bool { return child.pipelineCount() == 2 })
 
 	// say to both calls; each .out must get its own stub audio.
-	d.sendLine(childConn, voiceframe.Frame{CallID: "ca", Event: voiceframe.EventSay, Text: "a speech", Last: lastPtr(true)})
-	d.sendLine(childConn, voiceframe.Frame{CallID: "cb", Event: voiceframe.EventSay, Text: "b speech", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: "ca", Event: voiceframe.EventSay, Text: "a speech", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
+	d.sendLine(childConn, voiceframe.Frame{CallID: "cb", Event: voiceframe.EventSay, Text: "b speech", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 
 	type read struct {
 		ccid string

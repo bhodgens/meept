@@ -236,7 +236,7 @@ func TestEmployeeBotExecutor_NonACPEmployeeUntouched(t *testing.T) {
 	logger := bufLogger(t, &buf)
 	sentinel := &sentinelExecutor{}
 	resolveCalled := false
-	resolve := func(string) (acpTurnRunner, error) { resolveCalled = true; return nil, nil }
+	resolve := func(string) (acpTurnRunner, error) { resolveCalled = true; return nil, nil } //nolint:nilnil // test stub: never invoked on the non-acp path being pinned
 
 	emp := employee.Employee{BotDefinition: bot.BotDefinition{ID: "plain", Prompt: "p"}}
 	emp.Constitution = employee.Constitution{Purpose: "x", AutonomyTier: employee.Tier1Reactive}

@@ -259,7 +259,6 @@ func (m *PlanManager) CreatePlan(ctx context.Context, title, description, projec
 // (chat with no resolvable employee keeps working).
 func (m *PlanManager) CreatePlanWithGoal(ctx context.Context, title, description, projectID, projectPath, sessionID, goalID string) (*Plan, error) {
 	dir := m.resolvePlanDir(projectPath)
-	filePath := filepath.Join(dir, slugify(title)+".md")
 
 	// Never clobber an existing plan file. slugify(title) can collide with a
 	// plan from an earlier run (a common title like "plan the refactor" recurs

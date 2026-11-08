@@ -211,7 +211,7 @@ func TestHarnessDriveTimeoutLeavesAttemptUncompleted(t *testing.T) {
 	}
 	// The honest gap: completion rate computes 0 with TerminalRecorded=false.
 	m := Compute(RegimeAutonomousSampled, Scenario{ID: "S"}, ComputeOptions{
-		Terminal: TerminalState{Attempts: res.Attempts, Completeds: 0, Recorded: false},
+		Terminal: TerminalState{Attempts: res.Attempts, Completeds: 0, Recorded: false}, //nolint:misspell // field name is public
 	})
 	if !FloatZero(m.CompletionRate) {
 		t.Fatalf("completion rate = %v, want 0", m.CompletionRate)
@@ -321,7 +321,7 @@ func TestHarnessAutonomousSampledExactlyTheSeededSample(t *testing.T) {
 	start := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	tools := make([]string, 0, 20)
 	declared := make([]ScenarioAction, 0, 20)
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		tools = append(tools, "file_write")
 		declared = append(declared, ScenarioAction{Key: "HITL-STEP", Tool: "file_write"})
 	}

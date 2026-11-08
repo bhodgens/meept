@@ -324,7 +324,7 @@ func (e *Engine) demotedDetector() (DemotedDetector, bool) {
 	if e.deps.DemotedCheck != nil {
 		return e.deps.DemotedCheck, true
 	}
-	if det, ok := interface{}(e.deps.Demotion).(DemotedDetector); ok && det != nil {
+	if det, ok := any(e.deps.Demotion).(DemotedDetector); ok && det != nil {
 		return det, true
 	}
 	return nil, false
@@ -353,7 +353,7 @@ func (e *Engine) loadClaim(ctx context.Context, id string) (*memory.Memory, erro
 func splitSemicolon(s string) []string {
 	var out []string
 	start := 0
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] == ';' {
 			out = append(out, s[start:i])
 			start = i + 1

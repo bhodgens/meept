@@ -401,7 +401,7 @@ func (v *VoiceRoutes) readStartFrame(ctx context.Context, conn WebSocketConn) (S
 	ctx, cancel := context.WithTimeout(ctx, startFrameTimeout)
 	defer cancel()
 	dtmf := 0
-	for i := 0; i < maxStartFrames; i++ {
+	for range maxStartFrames {
 		data, err := conn.Read(ctx)
 		if err != nil {
 			return StartFrame{}, dtmf, fmt.Errorf("voice media: read start frame: %w", err)

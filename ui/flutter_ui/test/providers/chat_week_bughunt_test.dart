@@ -87,7 +87,10 @@ class _TestChatNotifier extends ChatNotifier {
   Future<void> loadMessages() async {}
 }
 
-ChatNotifier _notifier(SdkApiClient client, {String sessionId = 'test-session'}) {
+ChatNotifier _notifier(
+  SdkApiClient client, {
+  String sessionId = 'test-session',
+}) {
   return _TestChatNotifier(
     sdkClient: client,
     websocket: _ConnectedWebSocket(),
@@ -97,12 +100,12 @@ ChatNotifier _notifier(SdkApiClient client, {String sessionId = 'test-session'})
 }
 
 ChatSubmitAck _ack(String turnId) => ChatSubmitAck(
-      turnId: turnId,
-      conversationId: 'test-session',
-      sessionId: 'test-session',
-      accepted: true,
-      note: 'accepted',
-    );
+  turnId: turnId,
+  conversationId: 'test-session',
+  sessionId: 'test-session',
+  accepted: true,
+  note: 'accepted',
+);
 
 /// Feed a terminal-shaped frame into the notifier through the same public
 /// handler the WS subscription uses.
@@ -114,15 +117,17 @@ void _terminal(
   String error = '',
   String sessionId = 'test-session',
 }) {
-  notifier.debugHandleTurnTerminal(TurnTerminalEvent(
-    turnId: turnId,
-    conversationId: sessionId,
-    sessionId: sessionId,
-    status: status,
-    reply: reply,
-    error: error,
-    durationMs: 10,
-  ));
+  notifier.debugHandleTurnTerminal(
+    TurnTerminalEvent(
+      turnId: turnId,
+      conversationId: sessionId,
+      sessionId: sessionId,
+      status: status,
+      reply: reply,
+      error: error,
+      durationMs: 10,
+    ),
+  );
 }
 
 void main() {
@@ -131,10 +136,7 @@ void main() {
   group('week bughunt F20: send path preserves pendingTurns', () {
     test('two concurrent sends through the REAL _doSend path keep both '
         'turns tracked (single notifier)', () async {
-      final client = _SequencedSdkClient([
-        _ack('turn-1'),
-        _ack('turn-2'),
-      ]);
+      final client = _SequencedSdkClient([_ack('turn-1'), _ack('turn-2')]);
       final notifier = _notifier(client);
 
       // Two sends through the real sendMessage -> _doSend path (not
@@ -142,15 +144,17 @@ void main() {
       // each _doSend call RECONSTRUCTS ChatState; the second send's state
       // assignment must retain the first turn.
       await notifier.sendMessage(sessionId: 'test-session', text: 'first');
-      expect(notifier.state.pendingTurns.keys, contains('turn-1'),
-          reason: 'first send must register turn-1');
+      expect(
+        notifier.state.pendingTurns.keys,
+        contains('turn-1'),
+        reason: 'first send must register turn-1',
+      );
 
       await notifier.sendMessage(sessionId: 'test-session', text: 'second');
       expect(
         notifier.state.pendingTurns.keys,
         containsAll(<String>['turn-1', 'turn-2']),
-        reason:
-            'F20: the second send dropped the first send\'s pendingTurns',
+        reason: 'F20: the second send dropped the first send\'s pendingTurns',
       );
 
       // Resolving turn-1 leaves turn-2 tracked (independence preserved).
@@ -184,33 +188,38 @@ void main() {
   });
 
   group('week bughunt F19: early terminal events are buffered', () {
-    test('terminal arriving BEFORE the ack renders after registration',
-        () async {
-      final client = _SequencedSdkClient([_ack('turn-early')]);
-      final notifier = _notifier(client);
+    test(
+      'terminal arriving BEFORE the ack renders after registration',
+      () async {
+        final client = _SequencedSdkClient([_ack('turn-early')]);
+        final notifier = _notifier(client);
 
-      // Terminal relay fires while the submit is still in flight (no
-      // tracked turn yet) — the event must be buffered, not dropped.
-      _terminal(
-        notifier,
-        turnId: 'turn-early',
-        status: 'completed',
-        reply: 'fast reply',
-      );
-      expect(notifier.state.pendingTurns, isEmpty);
+        // Terminal relay fires while the submit is still in flight (no
+        // tracked turn yet) — the event must be buffered, not dropped.
+        _terminal(
+          notifier,
+          turnId: 'turn-early',
+          status: 'completed',
+          reply: 'fast reply',
+        );
+        expect(notifier.state.pendingTurns, isEmpty);
 
-      // The ack registers the turn; the buffered terminal must be
-      // consumed: turn resolved + reply rendered.
-      await notifier.submitTurn(sessionId: 'test-session', text: 'go');
-      expect(notifier.state.pendingTurns, isEmpty,
-          reason: 'F19: buffered terminal consumed on ack registration');
-      expect(
-        notifier.state.messages.any(
-          (m) => m.role == 'assistant' && m.content == 'fast reply',
-        ),
-        isTrue,
-        reason: 'F19: early terminal reply rendered after registration',
-      );
-    });
+        // The ack registers the turn; the buffered terminal must be
+        // consumed: turn resolved + reply rendered.
+        await notifier.submitTurn(sessionId: 'test-session', text: 'go');
+        expect(
+          notifier.state.pendingTurns,
+          isEmpty,
+          reason: 'F19: buffered terminal consumed on ack registration',
+        );
+        expect(
+          notifier.state.messages.any(
+            (m) => m.role == 'assistant' && m.content == 'fast reply',
+          ),
+          isTrue,
+          reason: 'F19: early terminal reply rendered after registration',
+        );
+      },
+    );
   });
 }

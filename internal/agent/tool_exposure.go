@@ -11,6 +11,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/caimlas/meept/internal/config"
@@ -239,10 +240,8 @@ func (p *ExposurePlan) Enforcing() bool {
 
 // promoteLocked appends name to the active set. Caller holds p.mu.
 func (p *ExposurePlan) promoteLocked(name string) bool {
-	for _, n := range p.active {
-		if n == name {
-			return false // already active
-		}
+	if slices.Contains(p.active, name) {
+		return false // already active
 	}
 	p.active = append(p.active, name)
 	return true
@@ -262,13 +261,7 @@ func (p *ExposurePlan) Promote(name string) error {
 		return fmt.Errorf("exposure: cannot promote empty tool name")
 	}
 	p.mu.Lock()
-	already := false
-	for _, n := range p.active {
-		if n == name {
-			already = true
-			break
-		}
-	}
+	already := slices.Contains(p.active, name)
 	outsideCeiling := false
 	if p.ceilingNames != nil {
 		if _, ok := p.ceilingNames[name]; !ok {
@@ -288,7 +281,7 @@ func (p *ExposurePlan) Promote(name string) error {
 	// arbitrary I/O under the mutex-scope rule), same shape as IsKnown.
 	// The append is re-checked under the lock: a concurrent Promote of
 	// the same name is idempotent by the already-active scan.
-	if outsideCeiling && !(live != nil && live.Get(name) != nil) {
+	if outsideCeiling && (live == nil || live.Get(name) == nil) {
 		return fmt.Errorf("exposure: cannot activate %q: outside this agent's role ceiling (%d tools)", name, len(p.ceilingNames))
 	}
 	p.mu.Lock()
@@ -308,12 +301,7 @@ func (p *ExposurePlan) IsActive(name string) bool {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, n := range p.active {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(p.active, name)
 }
 
 // IsKnown reports whether name is registered in the FULL registry (regardless

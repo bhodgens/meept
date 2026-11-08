@@ -235,7 +235,7 @@ func (h *ACPHandler) handlePermissionsList(ctx context.Context, _ json.RawMessag
 	// for you", never a hint that a gate exists to probe.
 	if h.enforceApprover {
 		if _, err := h.checkApprover(ctx); err != nil {
-			return ACPPermissionsResult{Enabled: false, Pending: []ACPPendingPermissionStatus{}}, nil
+			return ACPPermissionsResult{Enabled: false, Pending: []ACPPendingPermissionStatus{}}, nil //nolint:nilerr // deliberate: rejected callers get the disabled envelope, not an error (audit M5)
 		}
 	}
 	return h.permissionsList(), nil

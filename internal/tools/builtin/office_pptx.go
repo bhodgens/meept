@@ -583,7 +583,7 @@ func patchContentTypes(ctXML []byte, staged map[string]stagedPart) ([]byte, erro
 		coveredByDefault[d.Extension] = d.ContentType
 	}
 
-	added := ""
+	var added strings.Builder
 	for name, sp := range staged {
 		if name == "[Content_Types].xml" {
 			continue
@@ -594,9 +594,9 @@ func patchContentTypes(ctXML []byte, staged map[string]stagedPart) ([]byte, erro
 		if ext := strings.TrimPrefix(strings.ToLower(path.Ext(name)), "."); ext != "" && coveredByDefault[ext] == sp.contentType {
 			continue
 		}
-		added += fmt.Sprintf(`<Override PartName="/%s" ContentType="%s"/>`, name, sp.contentType)
+		fmt.Fprintf(&added, `<Override PartName="/%s" ContentType="%s"/>`, name, sp.contentType)
 	}
-	if added == "" {
+	if added.Len() == 0 {
 		return ctXML, nil
 	}
 	s := string(ctXML)
@@ -604,11 +604,21 @@ func patchContentTypes(ctXML []byte, staged map[string]stagedPart) ([]byte, erro
 	if closeIdx < 0 {
 		return nil, fmt.Errorf("[Content_Types].xml has no </Types> close tag")
 	}
-	return []byte(s[:closeIdx] + added + s[closeIdx:]), nil
+	overrideStr := added.String()
+	return []byte(s[:closeIdx] + overrideStr + s[closeIdx:]), nil
 }
+
+// maxPPTXEntryBytes is the per-entry decompressed ceiling while streaming a
+// deck's parts. A single PPTX part (a slide, its rels, a media file) has no
+// legitimate size near 1 GiB, so this bounds decompression amplification
+// without disturbing any real deck (decompression-bomb guard, G110).
+const maxPPTXEntryBytes = 1 << 30 // 1 GiB
 
 // copyZipEntry streams one zip entry into w.
 func copyZipEntry(w *zip.Writer, f *zip.File) error {
+	if f.UncompressedSize64 > maxPPTXEntryBytes {
+		return fmt.Errorf("%s: decompressed size %d exceeds %d cap (decompression-bomb guard)", f.Name, f.UncompressedSize64, maxPPTXEntryBytes)
+	}
 	rc, err := f.Open()
 	if err != nil {
 		return fmt.Errorf("open %s: %w", f.Name, err)
@@ -619,7 +629,7 @@ func copyZipEntry(w *zip.Writer, f *zip.File) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", f.Name, err)
 	}
-	if _, err := io.Copy(ow, rc); err != nil {
+	if _, err := io.Copy(ow, io.LimitReader(rc, maxPPTXEntryBytes+1)); err != nil {
 		return fmt.Errorf("copy %s: %w", f.Name, err)
 	}
 	return nil
@@ -772,7 +782,7 @@ func extractATText(raw []byte) (string, error) {
 			}
 		}
 	}
-	return sb.String(), nil
+	return sb.String(), nil //nolint:nilerr // an XML tokenizer error ends extraction gracefully with the text accumulated so far
 }
 
 // doRead returns the slide summary (count, titles, text, notes) from the
@@ -1000,8 +1010,8 @@ func parseSlideRels(raw []byte, srcPath string) ([]slideRelEntry, error) {
 			continue
 		}
 		target := e.Target
-		if strings.HasPrefix(target, "/") {
-			target = path.Clean(strings.TrimPrefix(target, "/"))
+		if rest, ok := strings.CutPrefix(target, "/"); ok {
+			target = path.Clean(rest)
 		} else {
 			target = path.Clean(path.Join(path.Dir(srcPath), target))
 		}

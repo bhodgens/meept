@@ -100,7 +100,7 @@ func newTestSTT(t *testing.T, results []string) (*DeepgramSTT, *dgFakeServer) {
 // pcmS16LE builds n samples of a deterministic non-zero s16le pattern.
 func pcmS16LE(n int) []byte {
 	b := make([]byte, n*2)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		binary.LittleEndian.PutUint16(b[i*2:], uint16(1000+i))
 	}
 	return b
@@ -181,7 +181,7 @@ func TestSTTReconnectsOnce(t *testing.T) {
 			dials++
 			first := dials
 			dialMu.Unlock()
-			conn.Write(ctx, websocket.MessageText, []byte(dgResultsJSON("par", false))) // best-effort vendor frame; write errors are the drop path under test
+			_ = conn.Write(ctx, websocket.MessageText, []byte(dgResultsJSON("par", false))) // best-effort vendor frame; write errors are the drop path under test
 			if first == 1 {
 				// Abrupt vendor drop after the interim.
 				conn.Close(websocket.StatusAbnormalClosure, "drop") // best-effort test teardown
@@ -212,8 +212,7 @@ func TestSTTReconnectsOnce(t *testing.T) {
 		return conn, nil
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	pcm := make(chan []byte)
 	out, err := s.Stream(ctx, pcm)
 	if err != nil {
@@ -300,8 +299,7 @@ func TestSTTSecondDropEndsStream(t *testing.T) {
 		return dialFakeWS(ctx, "ws://"+hosts[idx]+path, header)
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	pcm := make(chan []byte)
 	out, err := s.Stream(ctx, pcm)
 	if err != nil {
@@ -346,8 +344,7 @@ func TestSTTDialsConfiguredBaseURL(t *testing.T) {
 		dial: sttDialer,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	pcm := make(chan []byte)
 	out, err := s.Stream(ctx, pcm)
 	if err != nil {

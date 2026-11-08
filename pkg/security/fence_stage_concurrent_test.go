@@ -92,7 +92,7 @@ func TestConcurrentFence_Pin(t *testing.T) {
 	results := make(chan result, totalChecks)
 	var wg sync.WaitGroup
 
-	for i := 0; i < totalChecks; i++ {
+	for i := range totalChecks {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

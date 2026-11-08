@@ -8,7 +8,6 @@ package daemon
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,7 +27,7 @@ func plainBootWiring(t *testing.T, addr string) *VoiceWiring {
 	return &VoiceWiring{
 		cfg:    config.VoiceConfig{LoopbackPlainAddr: addr},
 		Routes: routes,
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger: slog.New(slog.DiscardHandler),
 	}
 }
 
@@ -64,7 +63,7 @@ func TestPlainBootNonLoopbackFailsLoudly(t *testing.T) {
 func TestPlainBootNilRoutesWithAddrFails(t *testing.T) {
 	w := &VoiceWiring{
 		cfg:    config.VoiceConfig{LoopbackPlainAddr: freeLoopbackAddr(t)},
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger: slog.New(slog.DiscardHandler),
 	}
 	if err := w.startPlainListener(context.Background()); err == nil {
 		t.Fatal("addr set with nil routes must fail the boot")

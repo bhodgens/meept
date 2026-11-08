@@ -69,7 +69,7 @@ func TestAuditAliasReachability_StaticPredicate(t *testing.T) {
 			t.Errorf("%s/%s: got reachable=%v reason=%q, want reachable=%v reason=%q",
 				c.alias, c.member, f.Reachable, f.Reason, c.reachable, c.reason)
 		}
-		wantProvider := strings.SplitN(c.member, "/", 2)[0]
+		wantProvider, _, _ := strings.Cut(c.member, "/")
 		if f.ProviderID != wantProvider {
 			t.Errorf("%s/%s: ProviderID = %q, want %q", c.alias, c.member, f.ProviderID, wantProvider)
 		}
@@ -130,7 +130,7 @@ func captureLogs(t *testing.T, fn func(logger *slog.Logger)) []map[string]any {
 	fn(logger)
 
 	var records []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
 		if line == "" {
 			continue
 		}

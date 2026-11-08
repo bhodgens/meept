@@ -34,11 +34,11 @@ func (s stubTokenSource) Token(ctx context.Context) (string, error) {
 // answers with a minimal successful JSON body so the go-github client can
 // decode it.
 type countingTransport struct {
-	hits int64
+	hits atomic.Int64
 }
 
 func (c *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	atomic.AddInt64(&c.hits, 1)
+	c.hits.Add(1)
 	return &http.Response{
 		Status:     "200 OK",
 		StatusCode: 200,
@@ -79,9 +79,9 @@ func TestClientPool_BuildsAndReuses(t *testing.T) {
 // with BaseURL pointed at a fake GitHub server sends requests to that
 // server, not to api.github.com.
 func TestClientPool_BaseURLOverride(t *testing.T) {
-	var fakeHit int64
+	var fakeHit atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&fakeHit, 1)
+		fakeHit.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"login":"octo"}`))
 	}))
@@ -106,7 +106,7 @@ func TestClientPool_BaseURLOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Users.Get against fake server: %v", err)
 	}
-	if n := atomic.LoadInt64(&fakeHit); n == 0 {
+	if n := fakeHit.Load(); n == 0 {
 		t.Fatalf("fake GitHub server was never hit: BaseURL override not in effect")
 	}
 }
@@ -135,7 +135,7 @@ func TestClientPool_HTTPClientPlumbed(t *testing.T) {
 		t.Fatalf("Users.Get via custom transport: %v", err)
 	}
 
-	if n := atomic.LoadInt64(&transport.hits); n == 0 {
+	if n := transport.hits.Load(); n == 0 {
 		t.Fatalf("custom HTTPClient transport was never used: pool did not plumb the supplied client")
 	}
 }

@@ -296,7 +296,7 @@ var c4LinePattern = regexp.MustCompile(`^- [a-z0-9-]+: .+ \[load: file_read /.+/
 // c4ListingLines extracts the C4-shaped listing lines from a built prompt.
 func c4ListingLines(prompt string) []string {
 	var out []string
-	for _, line := range strings.Split(prompt, "\n") {
+	for line := range strings.SplitSeq(prompt, "\n") {
 		if c4LinePattern.MatchString(line) {
 			out = append(out, line)
 		}
@@ -428,13 +428,12 @@ func TestSkillsListingHidesModelInvocationDisabled(t *testing.T) {
 // the listing bytes — not the per-turn base text that prefixes the prompt.
 func c4SkillsSection(prompt string) string {
 	const header = "\n## Active Skills\n"
-	i := strings.Index(prompt, header)
-	if i < 0 {
+	_, rest, ok := strings.Cut(prompt, header)
+	if !ok {
 		return ""
 	}
-	rest := prompt[i+len(header):]
-	if j := strings.Index(rest, "\nWhen triggers occur"); j >= 0 {
-		return rest[:j]
+	if before, _, ok := strings.Cut(rest, "\nWhen triggers occur"); ok {
+		return before
 	}
 	return rest
 }

@@ -61,14 +61,14 @@ func randText(r *rand.Rand) string {
 		// astral-plane runes (multi-byte UTF-8 stress).
 		switch r.Intn(4) {
 		case 0:
-			b = append(b, rune(0x20+r.Intn(0x5f))) // printable ASCII
+			b = append(b, rune(0x20+r.Intn(0x5f))) //nolint:gosec // bounded ASCII range, cannot overflow rune
 		case 1:
 			escapeStress := []rune(`"\{}` + " \n	\x00")
 			b = append(b, escapeStress[r.Intn(len(escapeStress))])
 		case 2:
-			b = append(b, rune(0x4e00+r.Intn(0x200))) // CJK
+			b = append(b, rune(0x4e00+r.Intn(0x200))) //nolint:gosec // bounded CJK range, cannot overflow rune
 		default:
-			b = append(b, rune(0x1F300+r.Intn(0x100))) // astral (4-byte UTF-8)
+			b = append(b, rune(0x1F300+r.Intn(0x100))) //nolint:gosec // bounded astral range, cannot overflow rune
 		}
 	}
 	return string(b)
@@ -76,7 +76,8 @@ func randText(r *rand.Rand) string {
 
 func randFrame(r *rand.Rand) Frame {
 	events := []string{"setup", "prompt", "interrupt", "end", "say", "clear", "dtmf", "", strings.Repeat("x", 32)}
-	bPtr := []*bool{nil, boolPtrV(true), boolPtrV(false)}
+	trueVal, falseVal := true, false
+	bPtr := []*bool{nil, &trueVal, &falseVal}
 	return Frame{
 		CallID:     randText(r),
 		Event:      events[r.Intn(len(events))],
@@ -91,13 +92,11 @@ func randFrame(r *rand.Rand) Frame {
 	}
 }
 
-func boolPtrV(b bool) *bool { return &b }
-
 // TestFrame_RoundTrip ports P1+P2: encode→decode is the identity and the
 // encoded line never splits.
 func TestFrame_RoundTrip(t *testing.T) {
-	r := rand.New(rand.NewSource(propSeed))
-	for i := 0; i < 4000; i++ {
+	r := rand.New(rand.NewSource(propSeed)) // #nosec G404 -- deterministic property seed, not randomness-leaking
+	for i := range 4000 {
 		f := randFrame(r)
 		enc, err := EncodeFrame(f)
 		if err != nil {
@@ -119,13 +118,13 @@ func TestFrame_RoundTrip(t *testing.T) {
 // TestFrame_DecodeArbitraryBytesNeverPanics ports P3: arbitrary socket bytes
 // produce a frame or an error, never a panic, and garbage never decodes.
 func TestFrame_DecodeArbitraryBytesNeverPanics(t *testing.T) {
-	r := rand.New(rand.NewSource(propSeed + 1))
+	r := rand.New(rand.NewSource(propSeed + 1)) // #nosec G404 -- deterministic property seed, not randomness-leaking
 	corners := [][]byte{
 		{}, []byte("\n"), []byte("null"), []byte("[]"), []byte("123"),
 		[]byte(`"a string"`), []byte(`{"call_id":123}`),
 		[]byte(`{"call_id":"a","event":"prompt","last":"notabool"}`),
 		[]byte(`{"call_id":"a","event":` + strings.Repeat("[", 2000) + strings.Repeat("]", 2000) + `}`),
-		bytes_of(0x00, 0xff), []byte("{\"call_id\":\"a\",\"event\":\"say\"}\ntrailing line\n"),
+		bytesOf(0x00, 0xff), []byte("{\"call_id\":\"a\",\"event\":\"say\"}\ntrailing line\n"),
 		[]byte(`{"text":"` + strings.Repeat("\\ud800", 10) + `"}`), // lone surrogates
 	}
 	for i, c := range corners {
@@ -138,11 +137,11 @@ func TestFrame_DecodeArbitraryBytesNeverPanics(t *testing.T) {
 			_, _ = DecodeFrame(c)
 		}()
 	}
-	for i := 0; i < 2000; i++ {
+	for i := range 2000 {
 		n := r.Intn(512)
 		b := make([]byte, n)
 		for j := range b {
-			b[j] = byte(r.Intn(256))
+			b[j] = byte(r.Intn(256)) //nolint:gosec // Intn(256) bounds the byte exactly
 		}
 		func() {
 			defer func() {
@@ -155,8 +154,8 @@ func TestFrame_DecodeArbitraryBytesNeverPanics(t *testing.T) {
 	}
 }
 
-// bytes_of is a small helper so the corners table stays readable.
-func bytes_of(pairs ...byte) []byte {
+// bytesOf is a small helper so the corners table stays readable.
+func bytesOf(pairs ...byte) []byte {
 	b := make([]byte, 0, len(pairs))
 	for range pairs {
 		b = append(b, pairs...)

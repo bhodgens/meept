@@ -26,8 +26,7 @@ func (c *countingStates) TierStates(context.Context) ([]TierState, error) {
 func TestStartSingleStartGuarantee(t *testing.T) {
 	states := &countingStates{}
 	e := New(enabledCfg(), Deps{States: states})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := e.Start(ctx); err != nil {
 		t.Fatalf("first Start: %v", err)
 	}
@@ -44,8 +43,7 @@ func TestStartSingleStartGuarantee(t *testing.T) {
 	// Stop is idempotent.
 	e.Stop()
 	// Restart after Stop is allowed (no permanently single-use engine).
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	defer cancel2()
+	ctx2 := t.Context()
 	if err := e.Start(ctx2); err != nil {
 		t.Fatalf("restart after Stop: %v", err)
 	}

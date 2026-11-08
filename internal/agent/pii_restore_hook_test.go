@@ -102,6 +102,7 @@ func TestNewPiiRestoreHookNilSwapper(t *testing.T) {
 // context obfuscated (#XXXX#) comes back restored at output when the config
 // gates the lane on.
 func TestSecretPlaceholderRestore(t *testing.T) {
+	//nolint:gosec // G101: fake secret fixture to exercise the restore lane
 	const secret = "sk-restore-lane-secret-99"
 
 	t.Setenv("PII_RESTORE_TEST_SECRET", secret)
@@ -289,8 +290,9 @@ func TestLoopPiiRestore_NoHookByteIdentical(t *testing.T) {
 // for B. The old "scoped restore made no progress -> full Deobfuscate"
 // fallback fired in exactly this case and leaked A's secret.
 func TestSecretPlaceholderCrossSessionNeverRestores(t *testing.T) {
+	//nolint:gosec // G101: paired fake secrets for the cross-session isolation test
 	const secretA = "sk-alpha...cret-1"
-	const secretB = "sk-bravo...cret-2"
+	const secretB = "sk-bravo...cret-2" //nolint:gosec // G101: paired fake secret fixture
 	t.Setenv("PII_RESTORE_TEST_SECRET_A", secretA)
 	t.Setenv("PII_RESTORE_TEST_SECRET_B", secretB)
 
@@ -334,7 +336,7 @@ func TestSecretPlaceholderCrossSessionNeverRestores(t *testing.T) {
 // legacy lane (untagged = pre-deploy placeholders) must keep restoring,
 // else the fix would be a regression of T4's contract.
 func TestUntaggedPlaceholderStillRestores(t *testing.T) {
-	const secret = "sk-untag...cret"
+	const secret = "sk-untag...cret" //nolint:gosec // G101: fake secret fixture for the untagged restore lane
 	t.Setenv("PII_RESTORE_TEST_SECRET", secret)
 
 	obfuscator := intsecurity.NewSecretObfuscator()

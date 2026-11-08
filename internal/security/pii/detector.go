@@ -80,7 +80,7 @@ func luhnValid(digits string) bool {
 // allDigits extracts ASCII digits from s.
 func allDigits(s string) string {
 	var b strings.Builder
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] >= '0' && s[i] <= '9' {
 			b.WriteByte(s[i])
 		}
@@ -104,7 +104,7 @@ func digitRunAdjacent(text string, sp *Span) bool {
 func ibanValid(iban string) bool {
 	rearranged := iban[4:] + iban[:4]
 	rem := 0
-	for i := 0; i < len(rearranged); i++ {
+	for i := range len(rearranged) {
 		c := rearranged[i]
 		switch {
 		case c >= '0' && c <= '9':

@@ -340,7 +340,7 @@ func TestListAutoClaimsFiltered_Uninitialized(t *testing.T) {
 func TestListAutoClaimsFiltered_PaginationWindowIsStable(t *testing.T) {
 	m := newTestManager(t)
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := m.StoreClaim(ctx, Claim{Text: "pag claim", Status: ClaimStatusAuto}); err != nil {
 			t.Fatalf("store %d: %v", i, err)
 		}

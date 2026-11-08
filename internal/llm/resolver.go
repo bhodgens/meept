@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"slices"
 	"sort"
@@ -916,9 +917,7 @@ func (r *Resolver) SessionEndpoints() map[string]string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make(map[string]string, len(r.sessionEndpoints))
-	for sessionID, endpointKey := range r.sessionEndpoints {
-		out[sessionID] = endpointKey
-	}
+	maps.Copy(out, r.sessionEndpoints)
 	return out
 }
 
@@ -1201,8 +1200,7 @@ func VerdictForFailure(err error) PolicyVerdict {
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return PolicyVerdict{Class: FailureThrottle, Reason: "transport_timeout"}
 	}
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		return Classify(apiErr.StatusCode, nil, []byte(apiErr.Detail), time.Now())
 	}
 	return PolicyVerdict{Class: FailureNone}

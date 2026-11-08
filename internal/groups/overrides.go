@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/tailscale/hujson"
@@ -90,11 +91,9 @@ func (o Override) Validate() error {
 		return fmt.Errorf("%w: %s: allow list is empty (an override grants at least one tool)",
 			ErrMalformedOverride, o.Subject)
 	}
-	for _, a := range o.Allow {
-		if a == "" {
-			return fmt.Errorf("%w: %s: allow list carries an empty tool name",
-				ErrMalformedOverride, o.Subject)
-		}
+	if slices.Contains(o.Allow, "") {
+		return fmt.Errorf("%w: %s: allow list carries an empty tool name",
+			ErrMalformedOverride, o.Subject)
 	}
 	if o.Reason == "" {
 		return fmt.Errorf("%w: %s: reason is required (the file is a reviewable artifact)",
@@ -196,7 +195,7 @@ func LoadOverrides(path string, opts OverrideLoadOptions) (*OverrideSet, error) 
 	}
 	stdJSON, err := hujson.Standardize(data)
 	if err != nil {
-		return nil, fmt.Errorf("%w: parse %s: %v", ErrMalformedOverride, path, err)
+		return nil, fmt.Errorf("%w: parse %s: %w", ErrMalformedOverride, path, err)
 	}
 
 	// Accept both the C8 top-level array and the writer's wrapper form.
@@ -204,7 +203,7 @@ func LoadOverrides(path string, opts OverrideLoadOptions) (*OverrideSet, error) 
 	if err := json.Unmarshal(stdJSON, &arr); err != nil {
 		var wrapper overridesDoc
 		if err2 := json.Unmarshal(stdJSON, &wrapper); err2 != nil {
-			return nil, fmt.Errorf("%w: decode %s: %v", ErrMalformedOverride, path, err)
+			return nil, fmt.Errorf("%w: decode %s: %w", ErrMalformedOverride, path, err)
 		}
 		arr = wrapper.Overrides
 	}
@@ -248,7 +247,7 @@ func expiredWarn(expired []Override) string {
 func SaveOverrides(path string, entries []Override) error {
 	for i, o := range entries {
 		if err := o.Validate(); err != nil {
-			return fmt.Errorf("save overrides %s: entry %d: %v", path, i, err)
+			return fmt.Errorf("save overrides %s: entry %d: %w", path, i, err)
 		}
 	}
 	doc := overridesDoc{Overrides: entries}

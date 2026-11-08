@@ -101,7 +101,7 @@ func TestEvaluateBands(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			byTier := map[string][]memory.MemoryResult{}
-			for i := 0; i < tc.cands; i++ {
+			for i := range tc.cands {
 				byTier["working"] = append(byTier["working"],
 					mem(fmt.Sprintf("m%02d", i), "tiny", tc.cands-i))
 			}
@@ -140,7 +140,7 @@ func TestEvaluateBands(t *testing.T) {
 func TestEvaluateCompressBatchBounds(t *testing.T) {
 	t.Parallel()
 	byTier := map[string][]memory.MemoryResult{}
-	for i := 0; i < 3; i++ { // 3 candidates < MinBatch 5
+	for i := range 3 { // 3 candidates < MinBatch 5
 		byTier["working"] = append(byTier["working"], mem(fmt.Sprintf("m%d", i), "tiny", 10-i))
 	}
 	e := New(enabledCfg(), Deps{Candidates: &stubCandidates{byTier: byTier}, Votes: stubVotes{}})
@@ -156,7 +156,7 @@ func TestEvaluateCompressBatchBounds(t *testing.T) {
 
 	// MaxBatch cap: 50 candidates, MaxBatch 10 -> exactly 10 IDs.
 	byTier2 := map[string][]memory.MemoryResult{}
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		byTier2["working"] = append(byTier2["working"], mem(fmt.Sprintf("m%02d", i), "some content to compress", 50-i))
 	}
 	cfg := enabledCfg()
@@ -243,7 +243,7 @@ func TestEvaluateDeterministic(t *testing.T) {
 	t.Parallel()
 	build := func() *stubCandidates {
 		byTier := map[string][]memory.MemoryResult{}
-		for i := 0; i < 30; i++ {
+		for i := range 30 {
 			byTier["working"] = append(byTier["working"],
 				mem(fmt.Sprintf("m%02d", i), fmt.Sprintf("deterministic content %02d", i), 30-i))
 		}

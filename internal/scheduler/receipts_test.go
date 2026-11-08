@@ -155,7 +155,7 @@ func TestReceipts_BoundedHistory(t *testing.T) {
 	now := time.Now().UTC()
 
 	// 210 delivered receipts: history must prune to <= 200 and flag it.
-	for i := 0; i < MaxDeliveryHistoryRecords+10; i++ {
+	for i := range MaxDeliveryHistoryRecords + 10 {
 		r := ScheduleDeliveryReceipt{
 			ScheduleID:      "job-hist",
 			ScheduledAt:     now,

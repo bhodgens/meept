@@ -96,9 +96,9 @@ func newProjFake() *projFake {
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(fmt.Sprintf(
+		_, _ = fmt.Fprintf(w,
 			`{"number":%d,"title":%q,"body":%q,"node_id":%q,"html_url":"https://github.com/o/r/issues/%d"}`,
-			num, pi.Title, pi.Body, pi.NodeID, num)))
+			num, pi.Title, pi.Body, pi.NodeID, num)
 	}
 
 	mux.HandleFunc("/repos/o/r/issues", func(w http.ResponseWriter, r *http.Request) {

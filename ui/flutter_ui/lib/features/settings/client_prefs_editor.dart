@@ -84,8 +84,6 @@ const _prefs = <_Pref>[
   ),
 ];
 
-
-
 /// Structured editor for GUI-relevant blocks of client.json5.
 ///
 /// Loads via GET /api/v1/config/client and applies per-field RFC 7396

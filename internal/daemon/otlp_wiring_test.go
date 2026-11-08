@@ -34,7 +34,7 @@ func TestWireOTLPExporter_DisabledIsInert(t *testing.T) {
 	}
 
 	warns := 0
-	for _, line := range bytes.Split(logBuf.Bytes(), []byte("\n")) {
+	for line := range bytes.SplitSeq(logBuf.Bytes(), []byte("\n")) {
 		if bytes.Contains(line, []byte("OTLP metrics export disabled")) {
 			warns++
 		}

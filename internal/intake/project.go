@@ -37,6 +37,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -217,7 +218,7 @@ func (p *Projector) runPhaseEffect(ctx context.Context, key string, meta effects
 		// Someone else owns the in-flight effect: never execute twice.
 		p.log.WarnContext(ctx, "intake: projection effect already in flight; skipping this pass",
 			"plan_id", planID, "phase_id", phase.ID, "state", string(prior.State))
-		return nil, nil
+		return nil, nil //nolint:nilnil // deliberate skip: a concurrent projection owns the effect; no error to surface
 	}
 
 	out, err := p.createPhaseTree(ctx, t, ticketNumber, planID, phase, steps)
@@ -409,9 +410,7 @@ func (p *Projector) resolveBoard(ctx context.Context) {
 	p.boardNodeID = nodeID
 	p.stateFieldID = fieldID
 	p.stateOptsKnown = true
-	for name, id := range opts {
-		p.stateOpts[name] = id
-	}
+	maps.Copy(p.stateOpts, opts)
 }
 
 // queryBoard reads the board node id plus the State single-select field and
@@ -448,7 +447,7 @@ func (p *Projector) queryBoard(ctx context.Context) (boardID, fieldID string, op
 	}
 	vars := map[string]any{
 		"owner":  githubv4.String(p.repo.Owner),
-		"number": githubv4.Int(p.projectNumber),
+		"number": githubv4.Int(p.projectNumber), //nolint:gosec // G115: project_number is a config-supplied small int; GitHub board numbers are far below int32 max
 	}
 	if err := gql.Query(ctx, &q, vars); err != nil {
 		return "", "", nil, fmt.Errorf("board query: %w", err)
@@ -510,7 +509,7 @@ func (p *Projector) addToProject(ctx context.Context, contentNodeID, label strin
 		return ""
 	}
 	var m struct {
-		AddProjectV2ItemById struct {
+		AddProjectV2ItemByID struct {
 			Item struct {
 				ID string `graphql:"id"`
 			} `graphql:"item"`
@@ -525,7 +524,7 @@ func (p *Projector) addToProject(ctx context.Context, contentNodeID, label strin
 			"item", label, "project_number", p.projectNumber, "error", err)
 		return ""
 	}
-	return m.AddProjectV2ItemById.Item.ID
+	return m.AddProjectV2ItemByID.Item.ID
 }
 
 // mirrorStateMutation writes the State single-select value for one board
@@ -547,12 +546,13 @@ func (p *Projector) mirrorStateMutation(ctx context.Context, itemID, fieldID, op
 			} `graphql:"item"`
 		} `graphql:"updateProjectV2ItemFieldValue(input: $input)"`
 	}
+	optIDStr := githubv4.String(optID)
 	input := githubv4.UpdateProjectV2ItemFieldValueInput{
 		ProjectID: githubv4.ID(boardID),
 		ItemID:    githubv4.ID(itemID),
 		FieldID:   githubv4.ID(fieldID),
 		Value: githubv4.ProjectV2FieldValue{
-			SingleSelectOptionID: githubv4.NewString(githubv4.String(optID)),
+			SingleSelectOptionID: &optIDStr,
 		},
 	}
 	if err := gql.Mutate(ctx, &m, input, nil); err != nil {

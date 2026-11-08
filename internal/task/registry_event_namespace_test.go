@@ -58,8 +58,7 @@ func TestCreateDoesNotSelfReplicate(t *testing.T) {
 	}
 	h := NewHandler(reg, msgBus, slog.Default())
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := h.Start(ctx); err != nil {
 		t.Fatalf("handler Start: %v", err)
 	}

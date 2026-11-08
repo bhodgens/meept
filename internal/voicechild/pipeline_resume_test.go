@@ -38,7 +38,7 @@ func TestSayAfterClearPlaysAgain(t *testing.T) {
 	// Utterance 1: gated TTS, one chunk out, then clear mid-stream.
 	gate1 := newGatedTTS()
 	swapTTS(p, gate1)
-	d.sendLine(childConn, voiceframe.Frame{CallID: "cc7", Event: voiceframe.EventSay, Text: "first", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: "cc7", Event: voiceframe.EventSay, Text: "first", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	buf := make([]byte, 640)
 	_ = out.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if n, err := io.ReadFull(out, buf); n != 640 || err != nil {
@@ -52,7 +52,7 @@ func TestSayAfterClearPlaysAgain(t *testing.T) {
 	// be silently dropped.
 	gate2 := newGatedTTS()
 	swapTTS(p, gate2)
-	d.sendLine(childConn, voiceframe.Frame{CallID: "cc7", Event: voiceframe.EventSay, Text: "second", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: "cc7", Event: voiceframe.EventSay, Text: "second", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	_ = out.SetReadDeadline(time.Now().Add(5 * time.Second))
 	n, err := io.ReadFull(out, buf)
 	if n != 640 || err != nil {

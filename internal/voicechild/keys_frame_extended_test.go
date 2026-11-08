@@ -56,7 +56,7 @@ func pipelineCfgString(p *pipeline, cfgField, name string) (string, bool) {
 
 func TestKeysFrameExtendedFields(t *testing.T) {
 	// Part 1: keysWire carries all seven C1 fields with exact json tags.
-	wireType := reflect.TypeOf(keysWire{})
+	wireType := reflect.TypeFor[keysWire]()
 	var missing []string
 	for name, tag := range keysWireWant {
 		f, ok := wireType.FieldByName(name)
@@ -77,8 +77,8 @@ func TestKeysFrameExtendedFields(t *testing.T) {
 		name string
 		typ  reflect.Type
 	}{
-		{"STTFactory", reflect.TypeOf((*STTFactory)(nil)).Elem()},
-		{"TTSFactory", reflect.TypeOf((*TTSFactory)(nil)).Elem()},
+		{"STTFactory", reflect.TypeFor[STTFactory]()},
+		{"TTSFactory", reflect.TypeFor[TTSFactory]()},
 	} {
 		if ft.typ.NumIn() != 2 {
 			t.Fatalf("%s takes %d params, want 2 (contract C3: cfg + key)", ft.name, ft.typ.NumIn())

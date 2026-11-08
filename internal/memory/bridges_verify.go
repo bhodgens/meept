@@ -57,10 +57,10 @@ func (v *llmBridgeVerifier) VerifyBridge(ctx context.Context, rec BridgeRecord) 
 	var sb strings.Builder
 	sb.WriteString("You verify bridging facts. Given a candidate bridging fact and the memory excerpts it was derived from, decide whether the fact is actually ENTAILED by those excerpts — true information about the shared entity that follows from them, not a hallucination. Bridging facts may combine information ACROSS the excerpts, but every claim must be grounded in at least one of them.\n")
 	sb.WriteString("Respond with ONLY a JSON object: {\"supported\": true or false, \"reason\": \"short explanation\"}.\n\n")
-	sb.WriteString(fmt.Sprintf("Bridging fact: %s\n\nEvidence memories:\n", rec.Content))
+	fmt.Fprintf(&sb, "Bridging fact: %s\n\nEvidence memories:\n", rec.Content)
 	for i, ev := range rec.EvidenceIDs {
 		content := bridgeEvidenceContent(rec, ev)
-		sb.WriteString(fmt.Sprintf("- [%s] %s\n", ev, content))
+		fmt.Fprintf(&sb, "- [%s] %s\n", ev, content)
 		i++
 		if i >= MaxBridgeSourceMemories {
 			break

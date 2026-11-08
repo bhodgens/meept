@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -30,10 +31,7 @@ func ttsFake(t *testing.T, pcm []byte, chunk int, status int, seen *ttsSeen) *ht
 		w.Header().Set("Content-Type", "application/octet-stream")
 		flusher := w.(http.Flusher)
 		for len(pcm) > 0 {
-			n := chunk
-			if n > len(pcm) {
-				n = len(pcm)
-			}
+			n := min(chunk, len(pcm))
 			if _, err := w.Write(pcm[:n]); err != nil {
 				return
 			}
@@ -55,7 +53,7 @@ type ttsSeen struct {
 // pcm24k builds n samples of a ramp at the vendor's fixed 24 kHz rate.
 func pcm24k(n int) []byte {
 	b := make([]byte, n*2)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		binary.LittleEndian.PutUint16(b[i*2:], uint16(500+i%300))
 	}
 	return b
@@ -65,7 +63,7 @@ func pcm24k(n int) []byte {
 // target rate.
 func newTestTTS(t *testing.T, srv *httptest.Server, targetRate int) *OpenAITTS {
 	t.Helper()
-	tts := &OpenAITTS{
+	tts := &OpenAITTS{ //nolint:gosec // G101: TEST-only fake vendor key, not a real credential
 		cfg:    ProviderConfig{Vendor: "openai", Model: "gpt-4o-mini-tts", SampleRate: targetRate},
 		apiKey: "test-tts-key",
 	}
@@ -167,13 +165,13 @@ func TestTTSBadStatus(t *testing.T) {
 
 // Constructor guards: missing key and unknown vendor.
 func TestTTSConstructorGuards(t *testing.T) {
-	if _, err := NewTTS(ProviderConfig{Vendor: "openai"}, ""); err != ErrMissingTTSKey {
+	if _, err := NewTTS(ProviderConfig{Vendor: "openai"}, ""); !errors.Is(err, ErrMissingTTSKey) {
 		t.Fatalf("missing key: got %v", err)
 	}
 	if _, err := NewTTS(ProviderConfig{Vendor: "piper"}, "k"); err == nil {
 		t.Fatalf("expected unknown vendor error")
 	}
-	if _, err := NewSTT(ProviderConfig{Vendor: "deepgram"}, ""); err != ErrMissingSTTKey {
+	if _, err := NewSTT(ProviderConfig{Vendor: "deepgram"}, ""); !errors.Is(err, ErrMissingSTTKey) {
 		t.Fatalf("missing key: got %v", err)
 	}
 	if _, err := NewSTT(ProviderConfig{Vendor: "whispercpp"}, "k"); err == nil {

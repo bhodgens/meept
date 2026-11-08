@@ -278,9 +278,7 @@ func (s *DeepgramSTT) pumpAndRead(ctx context.Context, sess wsSession, pcm <-cha
 	// Pump: forward caller audio into the session until the context ends,
 	// the chunk stream closes (Finalize flush), or the reader below tears
 	// the session down after a drop.
-	pumpWG.Add(1)
-	go func() {
-		defer pumpWG.Done()
+	pumpWG.Go(func() {
 		for {
 			select {
 			case chunk, ok := <-pcm:
@@ -302,7 +300,7 @@ func (s *DeepgramSTT) pumpAndRead(ctx context.Context, sess wsSession, pcm <-cha
 				return
 			}
 		}
-	}()
+	})
 
 	// Read: decode vendor messages until the session fails or the context
 	// ends. An error here drops the session, which unblocks the pump's

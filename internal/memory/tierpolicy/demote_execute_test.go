@@ -2,6 +2,7 @@ package tierpolicy
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -221,10 +222,8 @@ func (c *crashAfterCopyApplier) MarkDemoted(_ context.Context, claimID, _ string
 }
 
 func (c *crashAfterCopyApplier) IsDemoted(_ context.Context, claimID string) (bool, error) {
-	for _, f := range c.flags {
-		if f == claimID {
-			return true, nil
-		}
+	if slices.Contains(c.flags, claimID) {
+		return true, nil
 	}
 	return false, nil
 }

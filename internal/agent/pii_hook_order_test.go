@@ -56,6 +56,7 @@ func (s *piiStubTransform) TransformContext(_ context.Context, messages []llm.Ch
 func TestPiiHookOrderPinned(t *testing.T) {
 	// The secret-obfuscation hook loads env secrets at construction; plant
 	// a unique one this test controls.
+	//nolint:gosec // G101: planted fake secret for the test harness, not a credential
 	const secret = "zqxwv-supersecret-value-42"
 	t.Setenv("PII_ORDER_TEST_SECRET", secret)
 
@@ -100,7 +101,7 @@ func TestPiiHookOrderPinned(t *testing.T) {
 		Role:    llm.RoleUser,
 		Content: "the credential is " + secret + " and my mail is bob@example.com",
 	}}
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		tr := reg.RunTransformContext(context.Background(), msgs, nil)
 		if !tr.Modified {
 			break

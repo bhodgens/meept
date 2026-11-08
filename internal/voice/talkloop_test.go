@@ -6,6 +6,7 @@ package voice
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -283,12 +284,7 @@ func TestTalkLoopAllDeniedSpeaksFallback(t *testing.T) {
 	loop.frames <- Frame{CallID: "cc-alldeny", Event: EventPrompt, Text: "go", Last: &last}
 
 	waitFor(t, 2*time.Second, "fallback line never spoken", func() bool {
-		for _, tx := range sink.sayTexts() {
-			if tx == "I cannot confirm that yet." {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(sink.sayTexts(), "I cannot confirm that yet.")
 	})
 	for _, tx := range sink.sayTexts() {
 		if strings.Contains(tx, "Secret") {
@@ -328,12 +324,7 @@ func TestTalkLoopCheckFailureSpeaksFallback(t *testing.T) {
 	loop.frames <- Frame{CallID: "cc-supfail", Event: EventPrompt, Text: "go", Last: &last}
 
 	waitFor(t, 2*time.Second, "fallback never spoken on check failure", func() bool {
-		for _, tx := range sink.sayTexts() {
-			if tx == "I cannot confirm that yet." {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(sink.sayTexts(), "I cannot confirm that yet.")
 	})
 	for _, tx := range sink.sayTexts() {
 		if strings.Contains(tx, "Fact") {
@@ -516,7 +507,7 @@ func TestTalkLoopSilenceHangup(t *testing.T) {
 	go func() {
 		// Run's own error paths log at Debug; nothing to assert here - the
 		// test selects on endReasons and does not wait for this goroutine.
-		loop.Run(context.Background(), Instance{CallControlID: "cc-silence"})
+		_ = loop.Run(context.Background(), Instance{CallControlID: "cc-silence"})
 	}()
 
 	select {
@@ -692,12 +683,7 @@ func TestTalkLoopAllowedFinalSingleLastMarker(t *testing.T) {
 	loop.frames <- Frame{CallID: "cc-m2single", Event: EventPrompt, Text: "go", Last: &last}
 
 	waitFor(t, 2*time.Second, "final sentence never spoken", func() bool {
-		for _, tx := range sink.sayTexts() {
-			if tx == "Beta." {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(sink.sayTexts(), "Beta.")
 	})
 	time.Sleep(150 * time.Millisecond) // settle: any buggy second flush lands here
 
@@ -745,7 +731,7 @@ func TestTalkLoopSilenceTimerNoDoubleFire(t *testing.T) {
 	}
 
 	go func() {
-		loop.Run(context.Background(), Instance{CallControlID: "cc-m5"})
+		_ = loop.Run(context.Background(), Instance{CallControlID: "cc-m5"})
 	}()
 
 	// Window 1: silence fires once and speaks the prompt (the greeting is
@@ -759,12 +745,7 @@ func TestTalkLoopSilenceTimerNoDoubleFire(t *testing.T) {
 	last := true
 	loop.frames <- Frame{CallID: "cc-m5", Event: EventPrompt, Text: "hello?", Last: &last}
 	waitFor(t, 2*time.Second, "employee reply never spoken", func() bool {
-		for _, tx := range sink.sayTexts() {
-			if tx == "Back online." {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(sink.sayTexts(), "Back online.")
 	})
 	baseline := promptCount()
 

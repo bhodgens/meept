@@ -163,13 +163,13 @@ func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, f
 		logger = slog.Default()
 	}
 	d := &Dialer{
-		cfg:    cfg,
-		tel:    tel,
-		mgr:    mgr,
-		reg:    reg,
-		fx:     fx,
-		audit:  audit,
-		logger: logger,
+		cfg:      cfg,
+		tel:      tel,
+		mgr:      mgr,
+		reg:      reg,
+		fx:       fx,
+		audit:    audit,
+		logger:   logger,
 		timers:   make(map[string]*time.Timer),
 		answered: make(map[string]bool),
 		dones:    make(map[string]chan struct{}),

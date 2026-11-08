@@ -3196,12 +3196,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		c.ToolGate.SetLogger(logger.With("component", "tool-gate"))
 		c.ToolRegistry.SetGate(c.ToolGate)
 		SetProviderConfigFilter(func(name string) bool {
-			for _, n := range cfg.ToolProviders.EnabledNames(toolprov.Names()) {
-				if n == name {
-					return true
-				}
-			}
-			return false
+			return slices.Contains(cfg.ToolProviders.EnabledNames(toolprov.Names()), name)
 		})
 		logger.Info("tool gate wired",
 			"audit_chain", gateAudit != nil,
@@ -9480,11 +9475,9 @@ func (c *Components) initializeCalendar(cfg *config.Config, msgBus *bus.MessageB
 // initializeSkills sets up the skills system with lazy loading. The
 // hot-reload watcher publishes skills/change onto the bus stored at
 // construction time (c.msgBus may be nil until Start-time wiring; a nil bus
-// means watch+reload without the TUI/GUI refresh event).
-func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
-	c.initializeSkillsWithBus(cfg, logger, c.msgBus)
-}
-
+// means watch+reload without the TUI/GUI refresh event). The bus-aware
+// initializeSkillsWithBus below is the single entry point (line 1743).
+//
 // initializeSkillsWithBus is initializeSkills with an explicit bus handle
 // for the skill hot-reload watcher (04-tool-surface leaf 03).
 func (c *Components) initializeSkillsWithBus(cfg *config.Config, logger *slog.Logger, msgBus *bus.MessageBus) {

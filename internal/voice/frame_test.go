@@ -158,7 +158,7 @@ func TestChunkBytes(t *testing.T) {
 // frame is one line, multiple frames concatenate cleanly.
 func TestFrameLineFraming(t *testing.T) {
 	var buf []byte
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		b, err := EncodeFrame(Frame{CallID: "c", Event: EventSay, Text: "s"})
 		if err != nil {
 			t.Fatalf("EncodeFrame: %v", err)

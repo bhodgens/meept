@@ -297,7 +297,7 @@ func TestRewake_BufferFullEvictsOldest(t *testing.T) {
 
 	// Publish more signals than the channel can hold.
 	total := rewakeChannelCapacity + 3
-	for i := 0; i < total; i++ {
+	for i := range total {
 		publishRewake(t, mb, RewakePayload{
 			SessionID: "",
 			HookType:  "scheduler_job",

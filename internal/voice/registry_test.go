@@ -70,7 +70,7 @@ func TestRegistryRace(t *testing.T) {
 
 	var wg sync.WaitGroup
 	granted := make(chan struct{}, 100)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()

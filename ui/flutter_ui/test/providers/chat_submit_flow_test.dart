@@ -95,7 +95,10 @@ class _TestChatNotifier extends ChatNotifier {
   Future<void> loadMessages() async {}
 }
 
-ChatNotifier _notifier(SdkApiClient client, {String sessionId = 'test-session'}) {
+ChatNotifier _notifier(
+  SdkApiClient client, {
+  String sessionId = 'test-session',
+}) {
   return _TestChatNotifier(
     sdkClient: client,
     websocket: _ConnectedWebSocket(),
@@ -114,23 +117,24 @@ void _terminal(
   String error = '',
   String sessionId = 'test-session',
 }) {
-  notifier.debugHandleTurnTerminal(TurnTerminalEvent(
-    turnId: turnId,
-    conversationId: sessionId,
-    sessionId: sessionId,
-    status: status,
-    reply: reply,
-    error: error,
-    durationMs: 10,
-  ));
+  notifier.debugHandleTurnTerminal(
+    TurnTerminalEvent(
+      turnId: turnId,
+      conversationId: sessionId,
+      sessionId: sessionId,
+      status: status,
+      reply: reply,
+      error: error,
+      durationMs: 10,
+    ),
+  );
 }
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('submitTurn flow (leaf 05 Task 3)', () {
-    test('ack registers a pending turn and appends the user bubble',
-        () async {
+    test('ack registers a pending turn and appends the user bubble', () async {
       final client = _StubSdkClient();
       final notifier = _notifier(client);
 
@@ -151,44 +155,53 @@ void main() {
       expect(notifier.state.isAgentProcessing, isTrue);
     });
 
-    test('terminal completed renders the reply bubble and clears pending',
-        () async {
-      final notifier = _notifier(_StubSdkClient());
-      await notifier.submitTurn(sessionId: 'test-session', text: 'hello');
+    test(
+      'terminal completed renders the reply bubble and clears pending',
+      () async {
+        final notifier = _notifier(_StubSdkClient());
+        await notifier.submitTurn(sessionId: 'test-session', text: 'hello');
 
-      _terminal(notifier, turnId: 'turn-1', status: 'completed', reply: 'hi!');
+        _terminal(
+          notifier,
+          turnId: 'turn-1',
+          status: 'completed',
+          reply: 'hi!',
+        );
 
-      expect(notifier.state.pendingTurns, isEmpty);
-      expect(
-        notifier.state.messages.any(
-          (m) => m.role == 'assistant' && m.content == 'hi!',
-        ),
-        isTrue,
-      );
-      expect(notifier.state.isAgentProcessing, isFalse);
-    });
+        expect(notifier.state.pendingTurns, isEmpty);
+        expect(
+          notifier.state.messages.any(
+            (m) => m.role == 'assistant' && m.content == 'hi!',
+          ),
+          isTrue,
+        );
+        expect(notifier.state.isAgentProcessing, isFalse);
+      },
+    );
 
-    test('terminal failed renders an error bubble with the error text',
-        () async {
-      final notifier = _notifier(_StubSdkClient());
-      await notifier.submitTurn(sessionId: 'test-session', text: 'hello');
+    test(
+      'terminal failed renders an error bubble with the error text',
+      () async {
+        final notifier = _notifier(_StubSdkClient());
+        await notifier.submitTurn(sessionId: 'test-session', text: 'hello');
 
-      _terminal(
-        notifier,
-        turnId: 'turn-1',
-        status: 'failed',
-        error: 'provider exploded',
-      );
+        _terminal(
+          notifier,
+          turnId: 'turn-1',
+          status: 'failed',
+          error: 'provider exploded',
+        );
 
-      expect(notifier.state.pendingTurns, isEmpty);
-      expect(
-        notifier.state.messages.any(
-          (m) => m.role == 'system' && m.content == 'provider exploded',
-        ),
-        isTrue,
-      );
-      expect(notifier.state.error, 'provider exploded');
-    });
+        expect(notifier.state.pendingTurns, isEmpty);
+        expect(
+          notifier.state.messages.any(
+            (m) => m.role == 'system' && m.content == 'provider exploded',
+          ),
+          isTrue,
+        );
+        expect(notifier.state.error, 'provider exploded');
+      },
+    );
 
     test('rejected ack surfaces the note and registers nothing', () async {
       final client = _StubSdkClient(
@@ -214,8 +227,7 @@ void main() {
       expect(notifier.state.messages, isEmpty);
     });
 
-    test('two concurrent submits track independently (turn-keyed)',
-        () async {
+    test('two concurrent submits track independently (turn-keyed)', () async {
       final notifier = _notifier(_StubSdkClient());
 
       // Simulate two acks for two different turns by submitting, then
@@ -241,14 +253,8 @@ void main() {
       await notifier2.submitTurn(sessionId: 'test-session', text: 'second');
 
       // Each notifier tracks its own turn — cross-check combined state:
-      expect(
-        notifier.state.pendingTurns.keys,
-        contains('turn-1'),
-      );
-      expect(
-        notifier2.state.pendingTurns.keys,
-        contains('turn-2'),
-      );
+      expect(notifier.state.pendingTurns.keys, contains('turn-1'));
+      expect(notifier2.state.pendingTurns.keys, contains('turn-2'));
 
       // Resolve turn-1: only turn-1's state clears.
       _terminal(notifier, turnId: 'turn-1', status: 'completed', reply: 'r1');

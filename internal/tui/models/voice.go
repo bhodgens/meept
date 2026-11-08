@@ -272,7 +272,7 @@ func (m *VoiceSessionModel) List() (string, error) {
 		if since == "" {
 			since = "-"
 		}
-		b.WriteString(fmt.Sprintf("%-8s %-10s %-10s %-12s %s\n", leg, c.CallID, c.EmployeeID, c.Target, since))
+		fmt.Fprintf(&b, "%-8s %-10s %-10s %-12s %s\n", leg, c.CallID, c.EmployeeID, c.Target, since)
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
 }

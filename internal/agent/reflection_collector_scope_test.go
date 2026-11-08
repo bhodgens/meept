@@ -100,22 +100,20 @@ func TestReflectionCollector_ConcurrentTurnsCarryOwnScope(t *testing.T) {
 	}{{loopA, "sess-scope-a"}, {loopB, "sess-scope-b"}} {
 		scope := pair.l.scopeOptions()
 		sess := pair.sess
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			traj := ReflectionTrajectory{
 				SessionID: sess,
 				AgentID:   "test",
 				UserInput: "do the thing for " + sess,
 				Outcome:   "success",
 			}
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				if err := rc.ReflectTurnWithScope(context.Background(), traj, scope); err != nil {
 					t.Errorf("ReflectTurnWithScope(%s): %v", sess, err)
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

@@ -144,7 +144,7 @@ func (g *ScriptedBridgeGenerator) GenerateBridgeFacts(_ context.Context, entity 
 // mentions entity (case-insensitive), trimmed of terminal punctuation.
 func shortestSentenceContaining(text, entity string) string {
 	best := ""
-	for _, sent := range strings.Split(text, ". ") {
+	for sent := range strings.SplitSeq(text, ". ") {
 		sent = strings.TrimSpace(sent)
 		if sent == "" {
 			continue
@@ -266,7 +266,7 @@ func CosineSim(a, b []float32) float64 {
 // TokenizeLower lowercases, strips punctuation, and splits into word tokens.
 func TokenizeLower(s string) []string {
 	fields := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	})
 	return fields
 }

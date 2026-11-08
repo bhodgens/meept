@@ -54,7 +54,7 @@ import (
 const tierPropSeed = int64(20261106)
 
 func randConfig(r *rand.Rand) DemotionConfig {
-	stale := 0
+	var stale int
 	switch r.Intn(3) {
 	case 0:
 		stale = r.Intn(400) - 50 // includes zero/negative
@@ -97,8 +97,8 @@ func assertDefaults(t *testing.T, i int, in DemotionConfig, out DemotionThreshol
 // made the image finite-only (NaN/±Inf resolve to the default), so plain
 // struct equality suffices.
 func TestResolveDemotion_IdempotenceOnImage(t *testing.T) {
-	r := rand.New(rand.NewSource(tierPropSeed))
-	for i := 0; i < 5000; i++ {
+	r := rand.New(rand.NewSource(tierPropSeed)) //nolint:gosec // G404: deterministic fixed-seed property-test generator, not security-relevant
+	for i := range 5000 {
 		cfg := randConfig(r)
 		first := ResolveDemotionThresholds(cfg)
 		again := ResolveDemotionThresholds(DemotionConfig(first))
@@ -112,8 +112,8 @@ func TestResolveDemotion_IdempotenceOnImage(t *testing.T) {
 // TestResolveDemotion_PassthroughInImage ports P2+P3: in-range knobs pass
 // through exactly; out-of-range knobs land on the documented defaults.
 func TestResolveDemotion_PassthroughInImage(t *testing.T) {
-	r := rand.New(rand.NewSource(tierPropSeed + 1))
-	for i := 0; i < 5000; i++ {
+	r := rand.New(rand.NewSource(tierPropSeed + 1)) //nolint:gosec // G404: deterministic fixed-seed property-test generator, not security-relevant
+	for i := range 5000 {
 		cfg := randConfig(r)
 		out := ResolveDemotionThresholds(cfg)
 		if cfg.StaleDays > 0 && out.StaleDays != cfg.StaleDays {
@@ -153,8 +153,8 @@ func TestResolveDemotion_NeverPanics(t *testing.T) {
 	// NaN in the generator stream too (randConfig case 3 emits raw bits):
 	// must not panic, and the OUTPUT must never be NaN for ANY input
 	// (F4 fix: the image is finite-only).
-	r := rand.New(rand.NewSource(tierPropSeed + 2))
-	for i := 0; i < 2000; i++ {
+	r := rand.New(rand.NewSource(tierPropSeed + 2)) //nolint:gosec // G404: deterministic fixed-seed property-test generator, not security-relevant
+	for i := range 2000 {
 		cfg := randConfig(r)
 		func() {
 			defer func() {

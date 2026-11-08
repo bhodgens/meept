@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -359,13 +360,7 @@ func (c *Client) doHeaders(ctx context.Context, endpoint, method, path string, i
 	// pass it explicitly.
 	ok := resp.StatusCode >= 200 && resp.StatusCode < 300
 	if len(expectStatus) > 0 {
-		ok = false
-		for _, s := range expectStatus {
-			if resp.StatusCode == s {
-				ok = true
-				break
-			}
-		}
+		ok = slices.Contains(expectStatus, resp.StatusCode)
 	}
 	if !ok {
 		return c.classifyError(endpoint, resp)
@@ -387,7 +382,7 @@ func (c *Client) doHeaders(ctx context.Context, endpoint, method, path string, i
 // p2-02 name split (p2-02 owns sse-prefixed helpers in this package).
 func clientSessionKeyHeaders(sessionKey string) (map[string]string, error) {
 	if sessionKey == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // deliberate: empty key means NO session header; callers treat nil map as absent and set no headers
 	}
 	if strings.ContainsAny(sessionKey, "\r\n\x00") {
 		return nil, fmt.Errorf("session key must not contain control characters")

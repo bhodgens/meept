@@ -21,7 +21,7 @@ func captureLogger(buf *bytes.Buffer) *slog.Logger {
 func writeSkillDir(t *testing.T, n int) string {
 	t.Helper()
 	root := t.TempDir()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		name := "skill-number-" + itoa(i)
 		dir := filepath.Join(root, name)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -83,7 +83,7 @@ func TestFrontmatterWarningsAreAggregatedPerScan(t *testing.T) {
 
 	out := buf.String()
 	warns := 0
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(line, "no frontmatter") {
 			warns++
 		}
@@ -120,7 +120,7 @@ func TestFrontmatterWarningSamplesPathsBounded(t *testing.T) {
 		t.Fatalf("expected a bounded sample with paths_truncated for %d skills:\n%s", n, out)
 	}
 	// At most 5 paths are listed, so the line stays short.
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(line, "paths=") && strings.Count(line, ".md") > 5 {
 			t.Fatalf("aggregated line lists every path (%d); it must sample:\n%s",
 				strings.Count(line, ".md"), line)
@@ -133,7 +133,7 @@ func TestFrontmatterWarningSamplesPathsBounded(t *testing.T) {
 func TestNoFrontmatterWarningWhenAllSkillsAreWellFormed(t *testing.T) {
 	dir := t.TempDir()
 	good := "---\nname: proper-skill\ndescription: has frontmatter\n---\n\nBody.\n"
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		d := filepath.Join(dir, "good"+itoa(i))
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatalf("mkdir: %v", err)
@@ -166,7 +166,7 @@ func TestMetadataScanAlsoAggregates(t *testing.T) {
 	}
 	out := buf.String()
 	warns := 0
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(line, "no frontmatter") {
 			warns++
 		}
@@ -186,13 +186,13 @@ func TestAccumulatorResetsBetweenScans(t *testing.T) {
 
 	var buf bytes.Buffer
 	src := NewFileSource([]DiscoveryTier{{Path: dir, Priority: 1}}, captureLogger(&buf))
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := src.Discover(context.Background()); err != nil {
 			t.Fatalf("Discover %d: %v", i, err)
 		}
 	}
 	warns := 0
-	for _, line := range strings.Split(buf.String(), "\n") {
+	for line := range strings.SplitSeq(buf.String(), "\n") {
 		if strings.Contains(line, "no frontmatter") {
 			warns++
 		}

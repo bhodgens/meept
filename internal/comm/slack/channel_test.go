@@ -46,10 +46,10 @@ func newTestAPIServer(t *testing.T, status int, envelope map[string]any) *apiCap
 }
 
 func testSlackCfg(base string) SlackConfig {
-	return SlackConfig{
+	return SlackConfig{ //nolint:gosec // test fixtures: tokens/secrets are placeholders, not real material
 		Enabled:        true,
 		BotToken:       "xoxb-test-token",
-		SigningSecret:  "test-secret",
+		SigningSecret:  "test-secret", //nolint:gosec // test fixture, not a real credential
 		ChannelID:      "CCHAN",
 		AllowedUserIDs: []string{"U123ABC"},
 		APIBaseURL:     base,

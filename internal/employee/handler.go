@@ -661,7 +661,7 @@ func (h *RPCHandler) handleGoalsAssess(ctx context.Context, raw json.RawMessage)
 	reported := false
 	if h.goalOutcomeReporter != nil {
 		if err := h.goalOutcomeReporter(ctx, g); err != nil {
-			return map[string]any{
+			return map[string]any{ //nolint:nilerr // outcome error is surfaced in the response body per RPC contract
 				"goal":             g,
 				"outcome_reported": false,
 				"outcome_error":    err.Error(),

@@ -40,11 +40,11 @@ func sourceResult(id string, score float64) vector.SearchResult {
 func rankedBridgesThenSources(n, m int) []vector.SearchResult {
 	results := make([]vector.SearchResult, 0, n+m)
 	score := float64(n + m)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		results = append(results, bridgeResult(fmt.Sprintf("bridge-%d", i), score))
 		score--
 	}
-	for i := 0; i < m; i++ {
+	for i := range m {
 		results = append(results, sourceResult(fmt.Sprintf("source-%d", i), score))
 		score--
 	}

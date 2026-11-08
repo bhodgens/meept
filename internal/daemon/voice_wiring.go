@@ -198,7 +198,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	phoneEnabled := tel != nil
 	if !phoneEnabled && !cfg.Local.Enabled {
 		vlog.Warn("voice wiring degraded to disabled: no telnyx_api_key and voice.local.enabled=false; no voice leg can arm")
-		return nil, nil
+		return nil, nil //nolint:nilnil // deliberate: no voice leg can arm is a valid disabled deployment; callers (daemon.go boot) nil-check the wiring
 	}
 
 	// -- 2. Signature verifiers (leaf 02): mandatory for the PHONE routes;

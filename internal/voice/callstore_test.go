@@ -4,6 +4,7 @@ package voice
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -74,7 +75,7 @@ func TestCallStoreStartEndRoundtrip(t *testing.T) {
 func TestCallStoreAppendUnknownCall(t *testing.T) {
 	s := newTestCallStore(t)
 	err := s.AppendTranscript(context.Background(), "cc-none", TranscriptLine{Role: "user", Text: "x"})
-	if err != ErrCallNotFound {
+	if !errors.Is(err, ErrCallNotFound) {
 		t.Fatalf("AppendTranscript unknown = %v; want ErrCallNotFound", err)
 	}
 }

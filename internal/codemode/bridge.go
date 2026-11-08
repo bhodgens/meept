@@ -38,9 +38,7 @@ func (s *Sandbox) toolFunc(vm *goja.Runtime, tool ToolBridge) goja.Value {
 
 		promise, resolve, reject := vm.NewPromise()
 		gen := s.runGen.Load()
-		s.toolJobs.Add(1)
-		go func() {
-			defer s.toolJobs.Done()
+		s.toolJobs.Go(func() {
 			// Per-call ctx from the in-flight Execute ctx; if Execute
 			// already finished (cancelled), the derived ctx is cancelled
 			// too and the bridge is told to abort promptly.
@@ -60,14 +58,14 @@ func (s *Sandbox) toolFunc(vm *goja.Runtime, tool ToolBridge) goja.Value {
 				}
 				if err != nil {
 					e := vm.NewObject()
-					e.Set("name", "Error")
-					e.Set("message", err.Error())
+					_ = e.Set("name", "Error")
+					_ = e.Set("message", err.Error())
 					_ = reject(e)
 					return
 				}
 				_ = resolve(out)
 			})
-		}()
+		})
 		return vm.ToValue(promise)
 	}
 	return vm.ToValue(fn)
@@ -122,8 +120,8 @@ func (s *Sandbox) buildMemHook(vm *goja.Runtime) goja.Value {
 		s.countAlloc(vm, n)
 		return vm.ToValue(n)
 	}
-	hook.Set("alloc", vm.ToValue(alloc))
-	hook.Set("allocBytes", vm.ToValue(alloc))
+	_ = hook.Set("alloc", vm.ToValue(alloc))
+	_ = hook.Set("allocBytes", vm.ToValue(alloc))
 	return hook
 }
 
@@ -150,7 +148,7 @@ func instrumentAllocations(vm *goja.Runtime, s *Sandbox) {
 		if !ok {
 			continue
 		}
-		arrProto.Set(m, vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		_ = arrProto.Set(m, vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			s.countAlloc(vm, estBytes(call.Arguments))
 			res, err := orig(call.This, call.Arguments...)
 			if err != nil {
@@ -162,7 +160,7 @@ func instrumentAllocations(vm *goja.Runtime, s *Sandbox) {
 	// Global String constructor: String(n) allocation.
 	if g, ok := vm.GlobalObject().Get("String").(*goja.Object); ok {
 		origStr := g
-		vm.Set("String", vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		_ = vm.Set("String", vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			// The String global is a constructor; call it through the
 			// original object so semantics (new String vs String) hold.
 			origFn, okFn := goja.AssertFunction(origStr)
@@ -183,7 +181,7 @@ func instrumentAllocations(vm *goja.Runtime, s *Sandbox) {
 	if g, ok := vm.GlobalObject().Get("JSON").(*goja.Object); ok {
 		orig := g.Get("stringify")
 		if fn, ok := goja.AssertFunction(orig); ok {
-			g.Set("stringify", vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			_ = g.Set("stringify", vm.ToValue(func(call goja.FunctionCall) goja.Value {
 				res, err := fn(nil, call.Arguments...)
 				if err != nil {
 					panic(vm.NewGoError(err))

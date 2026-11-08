@@ -68,7 +68,7 @@ func TestTextServerSendReceive(t *testing.T) {
 	dir := shortDir(t)
 	path := filepath.Join(dir, "text.sock")
 	srv := NewTextServer(path, nil)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- srv.Start(ctx) }()
 
@@ -109,7 +109,7 @@ func TestTextServerHandler(t *testing.T) {
 	dir := shortDir(t)
 	path := filepath.Join(dir, "text.sock")
 	srv := NewTextServer(path, nil)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() { _ = srv.Start(ctx) }()
 
@@ -155,7 +155,7 @@ func TestTextServerConcurrentSend(t *testing.T) {
 	dir := shortDir(t)
 	path := filepath.Join(dir, "text.sock")
 	srv := NewTextServer(path, nil)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() { _ = srv.Start(ctx) }()
 
@@ -202,11 +202,11 @@ func TestTextServerConcurrentSend(t *testing.T) {
 	}()
 
 	var wg sync.WaitGroup
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < perG; i++ {
+			for range perG {
 				err := srv.Send(Frame{CallID: "c", Event: EventSay, Text: "x"})
 				if err != nil {
 					t.Errorf("Send: %v", err)
@@ -226,7 +226,7 @@ func TestTextServerConcurrentSend(t *testing.T) {
 	if len(lines) != total {
 		t.Fatalf("drained %d lines, want %d", len(lines), total)
 	}
-	for i := 0; i < total; i++ {
+	for i := range total {
 		line := lines[i]
 		f, derr := DecodeFrame([]byte(line))
 		if derr != nil {
@@ -243,7 +243,7 @@ func TestTextServerClosedChild(t *testing.T) {
 	dir := shortDir(t)
 	path := filepath.Join(dir, "text.sock")
 	srv := NewTextServer(path, nil)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() { _ = srv.Start(ctx) }()
 
@@ -294,7 +294,7 @@ func TestTextServerSecondConnectionRefused(t *testing.T) {
 	dir := shortDir(t)
 	path := filepath.Join(dir, "text.sock")
 	srv := NewTextServer(path, nil)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() { _ = srv.Start(ctx) }()
 
@@ -412,7 +412,7 @@ func TestAudioPairRoundTrip(t *testing.T) {
 	// The warm-up loop can have queued extra probe bytes on the child-side
 	// conn; sweep it until a deadline read finds silence so the payload
 	// check below reads exact data.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if a := drain(in); !a {
 			break
 		}
@@ -582,7 +582,7 @@ func TestTextServerTokenAuthClaimsChild(t *testing.T) {
 	path := filepath.Join(dir, "text.sock")
 	srv := NewTextServer(path, nil)
 	srv.SetExpectedToken("tok-abc")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() { _ = srv.Start(ctx) }()
 
@@ -632,9 +632,10 @@ func TestTextServerTokenAuthRefusesWrongToken(t *testing.T) {
 	path := filepath.Join(dir, "text.sock")
 	logBuf := &lockedBuffer{}
 	srv := NewTextServer(path, slog.New(slog.NewTextHandler(logBuf, nil)))
+	//nolint:gosec // G101: fake auth token fixture, not a real credential
 	const token = "sekrit-token-xyz"
 	srv.SetExpectedToken(token)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() { _ = srv.Start(ctx) }()
 
@@ -705,7 +706,7 @@ func TestTextServerTokenAuthRefusesStalledAndEOF(t *testing.T) {
 	srv := NewTextServer(path, nil)
 	srv.SetExpectedToken("tok-abc")
 	srv.armFastAuth()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() { _ = srv.Start(ctx) }()
 
@@ -757,7 +758,7 @@ func TestTextServerTokenAuthDisabledLegacyAccept(t *testing.T) {
 	path := filepath.Join(dir, "text.sock")
 	srv := NewTextServer(path, nil)
 	// Deliberately no SetExpectedToken call.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() { _ = srv.Start(ctx) }()
 
@@ -793,7 +794,7 @@ func TestTextServerSetExpectedTokenClearsGate(t *testing.T) {
 	srv := NewTextServer(path, nil)
 	srv.SetExpectedToken("tok")
 	srv.SetExpectedToken("")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() { _ = srv.Start(ctx) }()
 

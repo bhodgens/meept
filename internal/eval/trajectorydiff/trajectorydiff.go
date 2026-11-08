@@ -314,7 +314,7 @@ func compareExact(golden, actual []NormalizedCall, rules map[string]ArgRule) (fl
 	steps := make([]StepDiff, 0, max(len(golden), len(actual)))
 	matched := 0
 	firstDiff := 0
-	for i := 0; i < max(len(golden), len(actual)); i++ {
+	for i := range max(len(golden), len(actual)) {
 		switch {
 		case i < len(golden) && i < len(actual):
 			ok := callEq(golden[i], actual[i], rules)
@@ -378,7 +378,7 @@ func compareInOrder(golden, actual []NormalizedCall, rules map[string]ArgRule) (
 	steps := make([]StepDiff, 0, n+(m-n)+1)
 	firstDiff := 0
 	if n == 0 {
-		for j := 0; j < m; j++ {
+		for j := range m {
 			a := actual[j]
 			steps = append(steps, StepDiff{Actual: &a, Matched: false})
 		}

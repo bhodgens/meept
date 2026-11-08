@@ -158,8 +158,7 @@ func Test5xxNotMisroutedToRateLimitLane(t *testing.T) {
 	if isClientError(err) {
 		t.Fatal("503 classified as client error")
 	}
-	var rl *RateLimitError
-	if errors.As(err, &rl) {
+	if _, ok := errors.AsType[*RateLimitError](err); ok {
 		t.Fatal("503 wrapped into RateLimitError")
 	}
 }

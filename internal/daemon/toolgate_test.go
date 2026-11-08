@@ -188,7 +188,7 @@ func TestExecGateLedger(t *testing.T) {
 
 	// The mutating run must have left its claim COMPLETED (claim -> receipt
 	// -> complete); verify one record exists for it in the completed state.
-	found := false
+	var found bool
 	for _, key := range []string{} {
 		_ = key
 	}

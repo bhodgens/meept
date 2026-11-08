@@ -325,9 +325,7 @@ func readPastedCodeWithState(r io.Reader, expectedState string) (string, error) 
 	}
 
 	// Check for Anthropic's code#state format
-	if idx := strings.Index(pasted, "#"); idx != -1 {
-		codePart := pasted[:idx]
-		statePart := pasted[idx+1:]
+	if codePart, statePart, ok := strings.Cut(pasted, "#"); ok {
 		if codePart == "" {
 			return "", fmt.Errorf("empty code in pasted value")
 		}

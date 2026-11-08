@@ -628,7 +628,7 @@ func TestPreferRequestedProvider_NoMatchWarns(t *testing.T) {
 
 	// Exactly one WARN naming the missing provider.
 	warns := 0
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
 		if line == "" {
 			continue
 		}

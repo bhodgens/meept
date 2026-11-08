@@ -84,12 +84,12 @@ func BuildSystemPromptBlocks(sections []string) []SystemPromptBlock {
 // prompts. A prompt without the boundary returns as a single-element slice
 // (all-static classification).
 func SplitSystemPromptOnBoundary(s string) []string {
-	idx := strings.Index(s, PromptCacheBoundary)
-	if idx < 0 {
+	before, after, ok := strings.Cut(s, PromptCacheBoundary)
+	if !ok {
 		return []string{s}
 	}
-	before := strings.TrimSuffix(s[:idx], "\n\n")
-	after := strings.TrimPrefix(s[idx+len(PromptCacheBoundary):], "\n\n")
+	before = strings.TrimSuffix(before, "\n\n")
+	after = strings.TrimPrefix(after, "\n\n")
 	return []string{before, PromptCacheBoundary, after}
 }
 

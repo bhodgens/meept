@@ -241,8 +241,7 @@ func TestTiersEngineStartStopViaComponentsShape(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, wired)
 	handle := WrapEngine(eng)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	require.NoError(t, handle.Start(ctx))
 	assert.True(t, handle.Running())
 	// Double-start refused.

@@ -88,7 +88,7 @@ func (s FileTokenSource) Token(ctx context.Context) (string, error) {
 	}
 	f, err := os.Open(s.Path)
 	if err != nil {
-		return "", fmt.Errorf("%w: read token file: %v", ErrNoToken, err)
+		return "", fmt.Errorf("%w: read token file: %w", ErrNoToken, err)
 	}
 	defer f.Close()
 	if fi, statErr := f.Stat(); statErr == nil && fi.Mode().Perm()&0o077 != 0 {
@@ -96,7 +96,7 @@ func (s FileTokenSource) Token(ctx context.Context) (string, error) {
 	}
 	data, err := io.ReadAll(f)
 	if err != nil {
-		return "", fmt.Errorf("%w: read token file: %v", ErrNoToken, err)
+		return "", fmt.Errorf("%w: read token file: %w", ErrNoToken, err)
 	}
 	token := strings.TrimSpace(string(data))
 	if token == "" {

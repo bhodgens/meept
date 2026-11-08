@@ -106,7 +106,7 @@ func randActionValue(r *rand.Rand) string {
 		n := r.Intn(40)
 		b := make([]rune, 0, n)
 		for range n {
-			b = append(b, rune(r.Intn(0x2000)))
+			b = append(b, rune(r.Intn(0x2000))) //nolint:gosec // bounded junk range in a test generator
 		}
 		return string(b)
 	}
@@ -115,8 +115,8 @@ func randActionValue(r *rand.Rand) string {
 // TestActionValue_RoundTrip ports P1: build→parse is the identity for
 // colon-free ids over every relay verb.
 func TestActionValue_RoundTrip(t *testing.T) {
-	r := rand.New(rand.NewSource(slackPropSeed))
-	for i := 0; i < 5000; i++ {
+	r := rand.New(rand.NewSource(slackPropSeed)) //nolint:gosec // deterministic property seed, not randomness-leaking
+	for i := range 5000 {
 		id := randSlackID(r)
 		verb := []string{"allow", "deny", "always"}[r.Intn(3)]
 		v := ActionValue(id, verb)
@@ -134,8 +134,8 @@ func TestActionValue_RoundTrip(t *testing.T) {
 // by the grammar is rejected with EMPTY outputs (never a partial parse the
 // relay could act on).
 func TestActionValue_RejectsEverythingElse(t *testing.T) {
-	r := rand.New(rand.NewSource(slackPropSeed + 1))
-	for i := 0; i < 5000; i++ {
+	r := rand.New(rand.NewSource(slackPropSeed + 1)) //nolint:gosec // deterministic property seed, not randomness-leaking
+	for i := range 5000 {
 		v := randActionValue(r)
 		id, verb, ok := ParseActionValue(v)
 		if !ok {
@@ -165,11 +165,11 @@ func TestActionValue_RejectsEverythingElse(t *testing.T) {
 // TestActionValue_NeverPanics ports P3: arbitrary bytes never panic the
 // parser.
 func TestActionValue_NeverPanics(t *testing.T) {
-	r := rand.New(rand.NewSource(slackPropSeed + 2))
-	for i := 0; i < 2000; i++ {
+	r := rand.New(rand.NewSource(slackPropSeed + 2)) //nolint:gosec // deterministic property seed, not randomness-leaking
+	for i := range 2000 {
 		raw := make([]byte, r.Intn(64))
 		for j := range raw {
-			raw[j] = byte(r.Intn(256))
+			raw[j] = byte(r.Intn(256)) //nolint:gosec // Intn(256) bounds the byte exactly
 		}
 		func() {
 			defer func() {
@@ -185,7 +185,7 @@ func TestActionValue_NeverPanics(t *testing.T) {
 // TestEscapeSlackText_BoundedAndClean ports P4: the escaper always bounds
 // length, keeps valid UTF-8, and strips C0 controls (except \n and \t).
 func TestEscapeSlackText_BoundedAndClean(t *testing.T) {
-	r := rand.New(rand.NewSource(slackPropSeed + 3))
+	r := rand.New(rand.NewSource(slackPropSeed + 3)) //nolint:gosec // deterministic property seed, not randomness-leaking
 	inputs := make([]string, 0, len(slackHostileCorners)+2500)
 	inputs = append(inputs, slackHostileCorners...)
 	// Explicit hostile shapes: json-injection attempt, astral-plane soup,
@@ -195,19 +195,19 @@ func TestEscapeSlackText_BoundedAndClean(t *testing.T) {
 		strings.Repeat("a", 599), strings.Repeat("a", 600), strings.Repeat("a", 601),
 		strings.Repeat("ab", 400), "\xed\xa0\x80", // lone surrogate (invalid UTF-8 input)
 	)
-	for i := 0; i < 2500; i++ {
+	for range 2500 {
 		n := r.Intn(800)
 		b := make([]rune, 0, n)
 		for range n {
 			switch r.Intn(4) {
 			case 0:
-				b = append(b, rune(r.Intn(0x20))) // C0 controls
+				b = append(b, rune(r.Intn(0x20))) //nolint:gosec // bounded C0 range // C0 controls
 			case 1:
-				b = append(b, rune(0x1F300+r.Intn(0x100))) // astral
+				b = append(b, rune(0x1F300+r.Intn(0x100))) //nolint:gosec // bounded astral range // astral
 			case 2:
 				b = append(b, []rune(`{}[]"` + "\n\t")[r.Intn(7)])
 			default:
-				b = append(b, rune(0x20+r.Intn(0x5f)))
+				b = append(b, rune(0x20+r.Intn(0x5f))) //nolint:gosec // bounded ASCII range
 			}
 		}
 		inputs = append(inputs, string(b))
@@ -232,12 +232,12 @@ func TestEscapeSlackText_BoundedAndClean(t *testing.T) {
 // TestTruncateRunes_RuneBoundary ports P5: truncation stays on a rune
 // boundary, honors the bound, and is the identity under the bound.
 func TestTruncateRunes_RuneBoundary(t *testing.T) {
-	r := rand.New(rand.NewSource(slackPropSeed + 4))
-	for i := 0; i < 3000; i++ {
+	r := rand.New(rand.NewSource(slackPropSeed + 4)) //nolint:gosec // deterministic property seed, not randomness-leaking
+	for i := range 3000 {
 		n := r.Intn(50)
 		b := make([]rune, 0, n)
 		for range n {
-			b = append(b, rune(0x1F300+r.Intn(0x100))) // 4-byte runes: any byte-cut would panic Validate
+			b = append(b, rune(0x1F300+r.Intn(0x100))) //nolint:gosec // bounded astral range // 4-byte runes: any byte-cut would panic Validate
 		}
 		in := string(b)
 		max := r.Intn(60)

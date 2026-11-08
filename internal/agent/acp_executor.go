@@ -266,9 +266,7 @@ func (e *ACPExecutor) Run(
 	// the final text remain buffered for later consumers.
 	done := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		events := sess.Events()
 		for {
 			select {
@@ -293,7 +291,7 @@ func (e *ACPExecutor) Run(
 				emitACPUpdate(emit, ev)
 			}
 		}
-	}()
+	})
 	finalText, err := sess.Send(ctx, promptText)
 	close(done)
 	wg.Wait()

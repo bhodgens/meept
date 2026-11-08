@@ -145,9 +145,9 @@ func mapVoiceLocalOpenErr(err error) error {
 	case errors.Is(err, voice.ErrNoEmployee):
 		return fmt.Errorf("%w", rpc.ErrVoiceLocalUnknownEmployee)
 	case errors.Is(err, voice.ErrBusy):
-		return fmt.Errorf("%w: %v", rpc.ErrVoiceLocalBusy, err)
+		return fmt.Errorf("%w: %w", rpc.ErrVoiceLocalBusy, err)
 	case errors.Is(err, voice.ErrDuplicateTarget):
-		return fmt.Errorf("%w: %v", rpc.ErrVoiceLocalDuplicate, err)
+		return fmt.Errorf("%w: %w", rpc.ErrVoiceLocalDuplicate, err)
 	default:
 		return err
 	}

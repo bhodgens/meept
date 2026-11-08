@@ -491,9 +491,7 @@ func truncateDocToBudget(content string, budgetTokens int, noticeOriginal int, t
 	// token count fits the remaining budget. Token counts are monotone in
 	// prefix length, so a binary search bounds this deterministically.
 	avail := budgetTokens - noticeTokens
-	if avail < 0 {
-		avail = 0
-	}
+	avail = max(avail, 0)
 	lo, hi := 0, len(content)
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
@@ -653,10 +651,7 @@ func (am *ArtifactManager) BuildFullArtifactContextBudgeted(
 		original := contents[i]
 		parts[i] = parts[i][:len(parts[i])-len(original)] // keep the header only
 		rest := tk.CountTokens(join())
-		avail := docBudgetTokens - rest
-		if avail < 0 {
-			avail = 0
-		}
+		avail := max(docBudgetTokens-rest, 0)
 		trimmed, wasTruncated := truncateDocToBudget(original, avail, tk.CountTokens(original), tk)
 		parts[i] += trimmed
 		contents[i] = ""

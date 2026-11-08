@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -43,7 +44,7 @@ type ciGateFake struct {
 	// checkSeq[n-1] (or the last entry if the sequence is shorter). Each
 	// entry is "success" / "in_progress" / "failure".
 	checkSeq []string
-	checkHit int64
+	checkHit atomic.Int64
 }
 
 func newCIGateFake(checkSeq ...string) *ciGateFake {
@@ -71,7 +72,7 @@ func newCIGateFake(checkSeq ...string) *ciGateFake {
 func (f *ciGateFake) writeChecks(w http.ResponseWriter) {
 	state := "success"
 	if len(f.checkSeq) > 0 {
-		idx := int(atomic.AddInt64(&f.checkHit, 1)) - 1
+		idx := int(f.checkHit.Add(1)) - 1
 		if idx >= 0 && idx < len(f.checkSeq) {
 			state = f.checkSeq[idx]
 		} else {
@@ -213,12 +214,7 @@ func TestGitHubPRStatusTool(t *testing.T) {
 
 // sliceContains reports whether s contains target.
 func sliceContains(s []string, target string) bool {
-	for _, v := range s {
-		if v == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s, target)
 }
 
 // TestGitHubCIWaitTool_TerminalGreen verifies github_ci_wait: the fake

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -204,7 +205,7 @@ func (h *InteractionsHandler) ack(w http.ResponseWriter, status int, ephemeral s
 // isNoPending reports whether err means "no such pending request" (unknown
 // or already-answered). errors.Is keeps it honest against wrapper chains.
 func isNoPending(err error) bool {
-	return err == acp.ErrRelayNotFound || err == acp.ErrRelayAnswered
+	return errors.Is(err, acp.ErrRelayNotFound) || errors.Is(err, acp.ErrRelayAnswered)
 }
 
 // userAllowed checks the payload user against AllowedUserIDs (empty = none).

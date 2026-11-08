@@ -14,6 +14,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,8 +22,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/caimlas/meept/internal/voicechild"
 )
 
 // qwen3Seen records what the fake local server received.
@@ -59,10 +58,7 @@ func qwen3Fake(t *testing.T, pcm []byte, seen *qwen3Seen) *httptest.Server {
 		flusher := w.(http.Flusher)
 		const chunk = 480 // 240 samples per write: many writes for 24k samples
 		for len(pcm) > 0 {
-			n := chunk
-			if n > len(pcm) {
-				n = len(pcm)
-			}
+			n := min(chunk, len(pcm))
 			if _, err := w.Write(pcm[:n]); err != nil {
 				return
 			}
@@ -105,10 +101,10 @@ func TestQwen3TTSConstruction(t *testing.T) {
 	if tts == nil {
 		t.Fatal("NewTTS returned nil provider without error")
 	}
-	var _ voicechild.TTSProvider = tts
+	var _ = tts
 
 	// openai with key "" still fails ErrMissingTTSKey (unchanged).
-	if _, err := NewTTS(ProviderConfig{Vendor: "openai", Model: "gpt-4o-mini-tts"}, ""); err != ErrMissingTTSKey {
+	if _, err := NewTTS(ProviderConfig{Vendor: "openai", Model: "gpt-4o-mini-tts"}, ""); !errors.Is(err, ErrMissingTTSKey) {
 		t.Fatalf("NewTTS(openai, key=\"\") err = %v, want ErrMissingTTSKey", err)
 	}
 
@@ -165,8 +161,7 @@ func TestQwen3TTSSpeakStreaming(t *testing.T) {
 		t.Fatalf("drain: %v", derr)
 	}
 	total := len(buf) + len(rest)
-	want := 24000 * 2 * 16000 / 24000 * 2 // source bytes scaled by 16000/24000
-	want = 24000 * 2 * 16000 / 24000
+	want := 24000 * 2 * 16000 / 24000 // resampled output: source bytes scaled by 16000/24000
 	if total < want*9/10 || total > want*11/10 {
 		t.Fatalf("resampled output %d bytes, want ~%d (24k -> 16k, ratio ~1.5)", total, want)
 	}

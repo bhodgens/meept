@@ -252,7 +252,7 @@ func TestACPPermissionsResolve_BadBody(t *testing.T) {
 	s := &Server{
 		rpcCall: func(_ context.Context, _ string, _ json.RawMessage) (any, error) {
 			t.Error("rpcCall must not fire for a malformed body")
-			return nil, nil
+			return nil, errors.New("rpcCall must not fire for a malformed body")
 		},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/acp/permissions/resolve",

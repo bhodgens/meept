@@ -390,10 +390,7 @@ func (t *GitHubCIWaitTool) Execute(ctx context.Context, args map[string]any) (an
 		if remaining <= 0 {
 			return t.park(owner, repo, prNum, status)
 		}
-		sleep := interval
-		if remaining < sleep {
-			sleep = remaining
-		}
+		sleep := min(interval, remaining)
 		select {
 		case <-ctx.Done():
 		case <-time.After(sleep):

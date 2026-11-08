@@ -105,7 +105,7 @@ func isNilSource(src any) bool {
 	}
 	v := reflect.ValueOf(src)
 	switch v.Kind() {
-	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
 		return v.IsNil()
 	default:
 		return false

@@ -32,7 +32,7 @@ func (f *fakeSessions) Create(name string) (SessionHandle, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nextID++
-	id := "session-" + name + "-" + string(rune('a'+f.nextID))
+	id := "session-" + name + "-" + string(rune('a'+f.nextID)) //nolint:gosec // G115: test session id; nextID is a small bounded counter
 	f.created = append(f.created, id)
 	sess := NamedSession{ID: id, Name: name, ConversationID: "conv-" + id}
 	f.sessions = append(f.sessions, sess)
@@ -177,7 +177,7 @@ func TestBindingSessionResolveAndReuse(t *testing.T) {
 		wg.Add(1)
 		go func(k int) {
 			defer wg.Done()
-			id, err := b.OnCallStart(ctx, "cc-c-"+string(rune('0'+k)), "+15551230005", "emp-d", DirectionIncoming, DayBrief{})
+			id, err := b.OnCallStart(ctx, "cc-c-"+string(rune('0'+k)), "+15551230005", "emp-d", DirectionIncoming, DayBrief{}) //nolint:gosec // G115: test ccid; k is bounded by the loop count
 			if err != nil {
 				t.Errorf("concurrent OnCallStart: %v", err)
 				return

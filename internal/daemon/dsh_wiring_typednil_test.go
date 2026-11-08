@@ -124,7 +124,7 @@ func TestDshWiringPlanModeBridge(t *testing.T) {
 		t.Fatal("plan mode should be ON after /plan")
 	}
 
-	steer, reply, consumed = b.HandlePlanCommand("sess-a", "/plan off")
+	_, reply, consumed = b.HandlePlanCommand("sess-a", "/plan off")
 	if !consumed || reply != "plan mode off" {
 		t.Fatalf("/plan off: consumed=%v reply=%q; want true \"plan mode off\"", consumed, reply)
 	}

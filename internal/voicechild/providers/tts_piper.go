@@ -58,7 +58,7 @@ func newPiperTTS(cfg ProviderConfig) (voicechild.TTSProvider, error) {
 	}
 	bin, err := exec.LookPath(defaultPiperBin)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrPiperBinMissing, defaultPiperBin, err)
+		return nil, fmt.Errorf("%w: %s: %w", ErrPiperBinMissing, defaultPiperBin, err)
 	}
 	return &PiperTTS{cfg: cfg, bin: bin, model: piperModelRate(cfg.Model)}, nil
 }
@@ -180,7 +180,7 @@ func (s *piperStream) finish() {
 	default:
 	}
 	if err := s.cmd.Wait(); err != nil {
-		s.sticky = fmt.Errorf("%w: %v (stderr tail: %s)", ErrPiperExit, err, tailBytes(s.stderr.Bytes(), piperStderrTailBytes))
+		s.sticky = fmt.Errorf("%w: %w (stderr tail: %s)", ErrPiperExit, err, tailBytes(s.stderr.Bytes(), piperStderrTailBytes))
 		return
 	}
 	if s.sticky == nil {
@@ -191,7 +191,7 @@ func (s *piperStream) finish() {
 // stdinFailed records a broken text feed only while no worse error exists.
 func (s *piperStream) stdinFailed(werr error) {
 	if s.sticky == nil {
-		s.sticky = fmt.Errorf("%w: writing text to piper stdin: %v", ErrPiperExit, werr)
+		s.sticky = fmt.Errorf("%w: writing text to piper stdin: %w", ErrPiperExit, werr)
 	}
 }
 

@@ -1616,7 +1616,7 @@ func TestEvolver_PendingCapBlocksNewPlans(t *testing.T) {
 
 	// Fill the pending queue to the cap with unrelated plans.
 	ctx := context.Background()
-	for i := 0; i < maxPendingEvolverPlans; i++ {
+	for i := range maxPendingEvolverPlans {
 		p, err := planMgr.CreatePlan(ctx, fmt.Sprintf("filler plan %d", i), "", "", "", "")
 		if err != nil {
 			t.Fatalf("filler CreatePlan %d: %v", i, err)

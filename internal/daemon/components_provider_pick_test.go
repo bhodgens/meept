@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"io"
 	"log/slog"
 	"testing"
 
@@ -9,7 +8,7 @@ import (
 )
 
 func discardTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func multiModelProviderCfg(defaultModel string) *config.ModelsConfig {

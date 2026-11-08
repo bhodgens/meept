@@ -52,7 +52,7 @@ func TestWAVHeaderShape(t *testing.T) {
 		t.Fatalf("missing data chunk id: %v", h[36:40])
 	}
 	// data size == pcmLen (little endian, last 4 bytes)
-	want := uint32(len(pcm))
+	want := uint32(len(pcm)) //nolint:gosec // G115: test WAV data-length; pcm is bounded by the fixture
 	got := uint32(h[40]) | uint32(h[41])<<8 | uint32(h[42])<<16 | uint32(h[43])<<24
 	if got != want {
 		t.Fatalf("data size %d, want %d", got, want)

@@ -14,7 +14,6 @@ package agent
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -102,7 +101,7 @@ func TestSessionFence_ConcurrentSessionsIsolated(t *testing.T) {
 		if root == rootB {
 			other = rootA
 		}
-		for i := 0; i < perSession; i++ {
+		for i := range perSession {
 			// Inside own root: allowed. Inside the OTHER root: denied by
 			// the session's OWN fence (the old shared-RootPath race would
 			// let this through or deny with the wrong fence's root).
@@ -204,5 +203,5 @@ func TestSessionFence_FactoryMintsDistinctInstances(t *testing.T) {
 // testLoggerForFence returns a silent logger for factory construction
 // (the fence checker logs misconfiguration warnings through it).
 func testLoggerForFence() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }

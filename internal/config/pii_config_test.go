@@ -59,8 +59,7 @@ func fieldTags(v any) map[string]string {
 	if rt.Kind() == reflect.Pointer {
 		rt = rt.Elem()
 	}
-	for i := 0; i < rt.NumField(); i++ {
-		f := rt.Field(i)
+	for f := range rt.Fields() {
 		if !f.IsExported() {
 			continue
 		}

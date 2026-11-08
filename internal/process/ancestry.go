@@ -31,7 +31,7 @@ func IsDescendantOf(pid, ancestor int) bool {
 		return false
 	}
 	cur := pid
-	for i := 0; i < maxAncestryDepth; i++ {
+	for range maxAncestryDepth {
 		ppid, ok := ParentPID(cur)
 		if !ok {
 			return false

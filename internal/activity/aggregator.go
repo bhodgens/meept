@@ -212,7 +212,7 @@ func applyFilters(a *Aggregator, records []ActivityRecord, q Query) []ActivityRe
 		if q.SessionID != "" && r.SessionID != q.SessionID {
 			continue
 		}
-		if q.PlanID != "" && r.PlanID != q.PlanID && !(planTasks != nil && r.TaskID != "" && planTasks[r.TaskID]) {
+		if q.PlanID != "" && r.PlanID != q.PlanID && (planTasks == nil || r.TaskID == "" || !planTasks[r.TaskID]) {
 			continue
 		}
 		if !q.Since.IsZero() && r.At.Before(q.Since) {

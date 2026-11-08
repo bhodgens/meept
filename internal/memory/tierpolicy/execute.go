@@ -164,7 +164,7 @@ func (e *Engine) enqueueCompress(ctx context.Context, act Action) (int, error) {
 // reason ("tier=<name>;...") for job scoping. Unknown reasons map to
 // "unknown".
 func sessionFromReason(reason string) string {
-	for _, part := range strings.Split(reason, ";") {
+	for part := range strings.SplitSeq(reason, ";") {
 		if v, ok := strings.CutPrefix(part, "tier="); ok {
 			return v
 		}

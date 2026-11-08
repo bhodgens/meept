@@ -20,7 +20,7 @@ func TestSwapper_TokenFormat(t *testing.T) {
 		t.Fatalf("token %q is not UUIDv4 (version nibble %q)", tok, string(uuid[14]))
 	}
 	if seen := map[string]bool{}; true {
-		for i := 0; i < 1000; i++ {
+		for range 1000 {
 			u := NewToken()
 			if seen[u] {
 				t.Fatalf("duplicate token minted: %s", u)

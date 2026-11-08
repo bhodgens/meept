@@ -12,7 +12,7 @@ import (
 func memoryItem(id string, words int) string {
 	var b strings.Builder
 	b.WriteString("- memory-" + id + ": ")
-	for i := 0; i < words; i++ {
+	for range words {
 		b.WriteString("word ")
 	}
 	return b.String()
@@ -91,7 +91,7 @@ func TestMemoryBudgetDropsWholeItems(t *testing.T) {
 	i1 := strings.Index(got, items[0])
 	i2 := strings.Index(got, items[1])
 	i3 := strings.Index(got, items[2])
-	if i1 < 0 || i2 < 0 || i3 < 0 || !(i1 < i2 && i2 < i3) {
+	if i1 < 0 || i2 < 0 || i3 < 0 || i1 >= i2 || i2 >= i3 {
 		t.Errorf("kept items not in relevance order: idx(%d,%d,%d)", i1, i2, i3)
 	}
 }
@@ -147,7 +147,7 @@ func TestSplitMemoryItemsSingle(t *testing.T) {
 	if got := SplitMemoryItems(one); len(got) != 1 || got[0] != one {
 		t.Errorf("single-item split wrong: %#v", got)
 	}
-	if got := SplitMemoryItems(""); len(got) != 0 && !(len(got) == 1 && got[0] == "") {
+	if got := SplitMemoryItems(""); len(got) != 0 && (len(got) != 1 || got[0] != "") {
 		t.Errorf("empty context should split to at most one empty item, got %#v", got)
 	}
 }

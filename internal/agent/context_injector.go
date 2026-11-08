@@ -363,7 +363,7 @@ func renderCatalog(entries []skills.SkillIndexEntry) string {
 // reproduces the same digest without the live loader cache.
 func ParseSkillCatalogMessage(rendered string) (*skillCatalog, error) {
 	entries := make([]skills.SkillIndexEntry, 0)
-	for _, line := range strings.Split(rendered, "\n") {
+	for line := range strings.SplitSeq(rendered, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || !strings.HasPrefix(line, "- ") {
 			continue

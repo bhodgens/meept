@@ -110,7 +110,7 @@ func TestClient_Capabilities_TTL_SecondCallNoHTTP(t *testing.T) {
 		_, _ = w.Write([]byte(`{"features":{"runs":true},"endpoints":{}}`))
 	})
 	c := newTestClient(s.srv.URL)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := c.Capabilities(context.Background()); err != nil {
 			t.Fatalf("call %d: %v", i, err)
 		}
@@ -435,7 +435,7 @@ func TestClient_BearerHeaderSent(t *testing.T) {
 
 func isBusy(err error) bool {
 	for e := err; e != nil; e = unwrap(e) {
-		if e == ErrHermesBusy {
+		if errors.Is(e, ErrHermesBusy) {
 			return true
 		}
 	}
@@ -444,7 +444,7 @@ func isBusy(err error) bool {
 
 func isForeignSession(err error) bool {
 	for e := err; e != nil; e = unwrap(e) {
-		if e == ErrHermesSessionForeign {
+		if errors.Is(e, ErrHermesSessionForeign) {
 			return true
 		}
 	}
@@ -453,7 +453,7 @@ func isForeignSession(err error) bool {
 
 func isAuth(err error) bool {
 	for e := err; e != nil; e = unwrap(e) {
-		if e == ErrHermesAuth {
+		if errors.Is(e, ErrHermesAuth) {
 			return true
 		}
 	}

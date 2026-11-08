@@ -44,7 +44,7 @@ func TestMetricsCompletionWallClockInterrupt(t *testing.T) {
 	ds, cf := metricsFixture()
 	m := Compute(RegimePerAction, Scenario{ID: "S"}, ComputeOptions{
 		Decisions:      ds,
-		Terminal:       TerminalState{Attempts: 2, Completeds: 1, Recorded: true},
+		Terminal:       TerminalState{Attempts: 2, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public
 		WallClock:      15 * time.Second,
 		Counterfactual: &cf,
 	})
@@ -72,7 +72,7 @@ func TestMetricsInterventionPrecision(t *testing.T) {
 	ds, cf := metricsFixture()
 	m := Compute(RegimePerAction, Scenario{ID: "S"}, ComputeOptions{
 		Decisions:      ds,
-		Terminal:       TerminalState{Attempts: 1, Completeds: 1, Recorded: true},
+		Terminal:       TerminalState{Attempts: 1, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public
 		Counterfactual: &cf,
 	})
 	// Only HITL-CHANGED diverged; the timeout is denominator-only.
@@ -85,7 +85,7 @@ func TestMetricsPrecisionNilCounterfactualStaysHonest(t *testing.T) {
 	ds, _ := metricsFixture()
 	m := Compute(RegimePerAction, Scenario{ID: "S"}, ComputeOptions{
 		Decisions: ds,
-		Terminal:  TerminalState{Attempts: 1, Completeds: 1, Recorded: true},
+		Terminal:  TerminalState{Attempts: 1, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public
 	})
 	if m.InterruptsTotal != 4 {
 		t.Fatalf("interrupts total = %d, want 4", m.InterruptsTotal)
@@ -97,7 +97,7 @@ func TestMetricsPrecisionNilCounterfactualStaysHonest(t *testing.T) {
 
 func TestMetricsZeroInterventionsIsNotFakePrecision(t *testing.T) {
 	m := Compute(RegimeAutonomousSampled, Scenario{ID: "auto"}, ComputeOptions{
-		Terminal: TerminalState{Attempts: 1, Completeds: 1, Recorded: true},
+		Terminal: TerminalState{Attempts: 1, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public
 	})
 	if m.InterruptCount != 0 {
 		t.Fatalf("interrupt_count = %d, want 0", m.InterruptCount)
@@ -109,7 +109,7 @@ func TestMetricsZeroInterventionsIsNotFakePrecision(t *testing.T) {
 
 func TestMetricsUnrecordedTerminalCountsNotCompleted(t *testing.T) {
 	m := Compute(RegimePerAction, Scenario{ID: "S"}, ComputeOptions{
-		Terminal: TerminalState{Attempts: 1, Completeds: 0, Recorded: false},
+		Terminal: TerminalState{Attempts: 1, Completeds: 0, Recorded: false}, //nolint:misspell // field name is public
 	})
 	if !FloatZero(m.CompletionRate) {
 		t.Fatalf("completion_rate = %v, want 0 for an unrecorded terminal", m.CompletionRate)
@@ -123,7 +123,7 @@ func TestMetricsJSONRoundTripMatchesC7Tags(t *testing.T) {
 	ds, cf := metricsFixture()
 	m := Compute(RegimePlanGateLead, Scenario{ID: "S"}, ComputeOptions{
 		Decisions:      ds,
-		Terminal:       TerminalState{Attempts: 1, Completeds: 1, Recorded: true},
+		Terminal:       TerminalState{Attempts: 1, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public
 		WallClock:      2 * time.Second,
 		Counterfactual: &cf,
 	})
@@ -179,7 +179,7 @@ func TestMetricsEscapeRatePerRiskClass(t *testing.T) {
 		},
 	}
 	m := Compute(RegimeAutonomousSampled, Scenario{ID: "auto"}, ComputeOptions{
-		Terminal: TerminalState{Attempts: 1, Completeds: 1, Recorded: true},
+		Terminal: TerminalState{Attempts: 1, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public
 		Actions:  acts,
 		Sample:   spot,
 	})
@@ -219,7 +219,7 @@ func TestMetricsEscapeRateAlwaysAllowSplit(t *testing.T) {
 		},
 	}
 	m := Compute(RegimeAutonomousSampled, Scenario{ID: "auto"}, ComputeOptions{
-		Terminal:         TerminalState{Attempts: 1, Completeds: 1, Recorded: true},
+		Terminal:         TerminalState{Attempts: 1, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public
 		Actions:          acts,
 		Sample:           spot,
 		AlwaysAttributed: map[int]bool{0: true},
@@ -237,7 +237,7 @@ func TestMetricsEscapeRateAlwaysAllowSplit(t *testing.T) {
 
 func TestMetricsEmptyEscapeFeedsStayEmpty(t *testing.T) {
 	m := Compute(RegimePerAction, Scenario{ID: "S"}, ComputeOptions{
-		Terminal: TerminalState{Attempts: 1, Completeds: 1, Recorded: true},
+		Terminal: TerminalState{Attempts: 1, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public
 	})
 	if len(m.EscapeRate) != 0 {
 		t.Fatalf("escape rate without an action stream = %v, want empty (no fabricated rows)", m.EscapeRate)
@@ -390,7 +390,7 @@ func TestMetricsDeterministicAcrossRuns(t *testing.T) {
 		})
 		return Compute(RegimeAutonomousSampled, Scenario{ID: "det"}, ComputeOptions{
 			Decisions:      ds,
-			Terminal:       TerminalState{Attempts: 2, Completeds: 1, Recorded: true},
+			Terminal:       TerminalState{Attempts: 2, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public
 			WallClock:      3 * time.Second,
 			Actions:        acts,
 			Sample:         spot,

@@ -186,29 +186,27 @@ func (s *Sandbox) setupGlobals(vm *goja.Runtime) {
 	s.vm = vm
 	toolsObj := vm.NewObject()
 	for _, t := range s.tools {
-		t := t // closure capture
-		toolsObj.Set(t.Name, s.toolFunc(vm, t))
+		_ = toolsObj.Set(t.Name, s.toolFunc(vm, t))
 	}
-	vm.Set("tools", toolsObj)
+	_ = vm.Set("tools", toolsObj)
 
-	vm.Set("text", s.textFunc(vm))
+	_ = vm.Set("text", s.textFunc(vm))
 
 	// ALL_TOOLS: the tool catalog a script can enumerate (name,
 	// description, input schema) — plain JS objects, JSON.stringify-able.
 	all := vm.NewObject()
 	for _, t := range s.tools {
-		t := t
 		entry := vm.NewObject()
-		entry.Set("name", t.Name)
-		entry.Set("description", t.Description)
+		_ = entry.Set("name", t.Name)
+		_ = entry.Set("description", t.Description)
 		if t.InputSchema != nil {
-			entry.Set("inputSchema", vm.ToValue(t.InputSchema))
+			_ = entry.Set("inputSchema", vm.ToValue(t.InputSchema))
 		}
-		all.Set(t.Name, entry)
+		_ = all.Set(t.Name, entry)
 	}
-	vm.Set("ALL_TOOLS", all)
+	_ = vm.Set("ALL_TOOLS", all)
 
-	vm.Set("memory", s.buildMemHook(vm))
+	_ = vm.Set("memory", s.buildMemHook(vm))
 	instrumentAllocations(vm, s)
 }
 

@@ -546,7 +546,7 @@ func promoteTopLevelGroups(stdJSON []byte) ([]byte, error) {
 		// Not a top-level object (or malformed post-standardize): hand the
 		// original back and let the caller's Unmarshal produce the real
 		// error.
-		return stdJSON, nil
+		return stdJSON, nil //nolint:nilerr // deliberate: defer the shape error to the caller's Unmarshal, which has caller context
 	}
 	raw, ok := root["groups"]
 	if !ok {

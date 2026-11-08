@@ -45,7 +45,7 @@ func (r *recordingStore) Append(ctx context.Context, rec Record) error {
 }
 func (r *recordingStore) OpenRuns(ctx context.Context) ([]OpenRun, error) { return nil, nil }
 func (r *recordingStore) CompletedSteps(ctx context.Context, turnID string) (map[string][]byte, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: not exercised by the writer tests
 }
 func (r *recordingStore) CloseRun(ctx context.Context, turnID string) error {
 	r.mu.Lock()
@@ -212,7 +212,7 @@ func TestJournalWriterDedupSetsStayBounded(t *testing.T) {
 	ctx := context.Background()
 
 	// Churn 3x the ring cap through open->close cycles.
-	for i := 0; i < 3*dedupRingCap; i++ {
+	for i := range 3 * dedupRingCap {
 		id := fmt.Sprintf("t-%d", i)
 		w.OnRunStart(ctx, id, "s", []byte(`{}`))
 		w.OnRunClose(ctx, id)

@@ -103,7 +103,7 @@ func main() {
 func parseBackfillMeta(path string) backfillMeta {
 	// filepath.Clean defuses traversal-style taint (gosec G703): the path is
 	// <flagged dir>/<ReadDir entry name>, not user-supplied input.
-	data, err := os.ReadFile(filepath.Clean(path))
+	data, err := os.ReadFile(filepath.Clean(path)) //nolint:gosec // G703: path is a fixed-flag-dir ReadDir entry, defused by Clean
 	if err != nil {
 		return backfillMeta{}
 	}

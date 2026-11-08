@@ -38,7 +38,7 @@ func stripEnvelopeProse(raw string) string {
 // Brace-aware with strings skipped so braces inside strings cannot
 // miscount; an unterminated envelope drops the tail from its opening brace.
 func envelopeSpan(s string) (int, int, bool) {
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] != '{' {
 			continue
 		}

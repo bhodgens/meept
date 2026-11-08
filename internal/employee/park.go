@@ -497,7 +497,7 @@ func (l *GoalLoop) Steer(_ context.Context, content string) (bool, error) {
 				"employee_id", l.employeeID,
 				"goal_lookup_err", err != nil,
 			)
-			return false, nil
+			return false, nil //nolint:nilerr // quiet employee: a goal lookup miss/error means no provable episode, not a failure
 		}
 	}
 	trigger := TriggerEvent{

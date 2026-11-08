@@ -58,7 +58,7 @@ func DecodeSessionReferenceURI(uri string) (string, error) {
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(payload)
 	if err != nil {
-		return "", fmt.Errorf("%w: uri %q: %v", ErrSessionRefInvalid, uri, err)
+		return "", fmt.Errorf("%s: uri %q: %w", ErrSessionRefInvalid.Error(), uri, err)
 	}
 	sessionID := string(raw)
 	if sessionID == "" {
