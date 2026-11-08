@@ -13,6 +13,7 @@ package daemon
 // seam is reported as fail-closed, never faked.
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/caimlas/meept/internal/agent/modelselect"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/pkg/models"
@@ -42,6 +44,25 @@ func wireDSHConvergence(c *Components, cfg *config.Config, msgBus *bus.MessageBu
 	wireGoalProvider(c, cfg, logger)
 	wireDelegateProvider(c, cfg, msgBus, logger)
 	wirePlanMode(c, logger)
+	wireGoalRoundDriver(c, logger)
+}
+
+// wireGoalRoundDriver constructs the autonomous continuation driver over the
+// live employee manager and binds the leaf-02 authority seam (the daemon
+// bridge onto builtin.SetGoalAutonomousRound). Typed-nil guarded: a nil
+// manager leaves c.GoalRoundDriver nil and the round-advance RPC fails closed
+// ("round driver not configured"). The driver is owned here so the
+// agents.goals.round.advance RPC handler reads it from Components.
+func wireGoalRoundDriver(c *Components, logger *slog.Logger) {
+	if c == nil || c.EmployeeManager == nil {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	c.GoalRoundDriver = employee.NewGoalRoundDriver(c.EmployeeManager, logger).
+		WithAutonomousRoundSetter(builtin.SetGoalAutonomousRound)
+	logger.Debug("wired goal round driver", "employee_framework", true)
 }
 
 // ---------------------------------------------------------------------------
@@ -49,26 +70,26 @@ func wireDSHConvergence(c *Components, cfg *config.Config, msgBus *bus.MessageBu
 // ---------------------------------------------------------------------------
 
 // wireGoalProvider registers the "goal" tool-provider group, gated by
-// [tool_providers] exactly like the scheduler group. The goal seam FAILS
-// CLOSED by design: builtin's goalManager interface
-// (internal/tools/builtin/goal_tools.go) declares methods whose signatures
-// reference UNEXPORTED types (goalCreateSpec, goalRecord), so an adapter onto
-// the live *employee.Manager CANNOT be constructed from the daemon package —
-// implementing the interface is a compile-time error. SetGoalProvider is
-// therefore never bound with a live adapter here; the factory stays nil and
-// toolprov.RegisterAll rejects the nil provider, landing zero goal tools
-// (byte-identical to "not registered", the ACP-disabled-default contract).
-// The group is registered in its OWN RegisterAll so this expected fail-closed
-// error never aborts the sibling delegate group. To activate: export the
-// leaf's goalCreateSpec/goalRecord (or add an exported adapter factory in
-// builtin), build the *employee.Manager adapter here, and the same gated
-// RegisterAll immediately arms the tools.
+// [tool_providers] exactly like the scheduler group. The goal seam binds the
+// LIVE *employee.Manager through the exported goalManager adapter
+// (goal_adapter.go) and a current-agent owner resolver. The seam FAILS
+// CLOSED: a nil manager (employee framework disabled / not yet wired) leaves
+// the provider unbound and toolprov.RegisterAll rejects it — zero goal tools,
+// byte-identical to "not registered".
 func wireGoalProvider(c *Components, cfg *config.Config, logger *slog.Logger) {
-	// Typed-nil-guarded setter: SetGoalProvider guards internally
-	// (reflectNil => factory unbound => fail-closed). A nil adapter is the
-	// ONLY bindable handle today because the adapter type itself cannot be
-	// written externally — never wire a hand-rolled fake manager.
-	builtin.SetGoalProvider(nil, nil)
+	// Typed-nil-guarded setter: SetGoalProvider binds the adapter only when
+	// it carries a live manager. A nil manager (employee framework disabled /
+	// not yet wired) leaves the provider UNBOUND — clear any stale factory and
+	// return so toolprov.RegisterAll fails closed to zero goal tools.
+	adapter := newGoalManagerAdapter(c)
+	if adapter == nil || adapter.m == nil {
+		builtin.SetGoalProvider(nil, nil)
+		if logger != nil {
+			logger.Debug("goal provider unbound: employee manager not available; fails closed")
+		}
+		return
+	}
+	builtin.SetGoalProvider(adapter, resolveGoalOwner(c))
 
 	names := enabledToolProviderNames(cfg, []string{"goal"}, logger)
 	if len(names) == 0 {
@@ -76,11 +97,43 @@ func wireGoalProvider(c *Components, cfg *config.Config, logger *slog.Logger) {
 		return
 	}
 	if _, err := toolprov.RegisterAll(c.ToolRegistry, names); err != nil {
-		// Expected while the goalManager adapter types are unexported: the
-		// provider factory returns nil and registration fails closed. Debug
-		// (not Warn/Error) keeps the known-unwireable seam quiet on every boot.
-		logger.Debug("goal provider not registered (goalManager adapter types unexported; fails closed)",
-			"error", err)
+		logger.Warn("goal tool registration failed", "error", err)
+		return
+	}
+	logger.Debug("Registered goal tools (via provider)")
+}
+
+// newGoalManagerAdapter returns the *employee.Manager goal adapter, or a
+// typed-nil *goalEmployeeManagerAdapter whose methods return
+// errGoalStoreUnavailable when the employee framework is absent. It is
+// deliberately NOT nil — the SetGoalProvider reflectNil guard then rejects
+// only a genuinely nil boxed pointer, never a valid-but-unwired store handle.
+func newGoalManagerAdapter(c *Components) *goalEmployeeManagerAdapter {
+	if c == nil {
+		return nil
+	}
+	return &goalEmployeeManagerAdapter{m: c.EmployeeManager}
+}
+
+// resolveGoalOwner returns the goal owner resolver bound into the goal tools.
+// It resolves in precedence order:
+//  1. an employee-driven turn source (agent.ACPTurnSourceFromContext) — the
+//     autonomous-goal-round / employee lane, so tools address the employee
+//     whose goal they run for; and
+//  2. the daemon-wide default owner ("orchestrator", matching the messaging
+//     wiring's default sender) so goal tools still work from a sourced chat
+//     turn when no goal round owns the context.
+//
+// A nil Components degrades to the default owner only.
+func resolveGoalOwner(c *Components) func(ctx context.Context) string {
+	defaultOwner := "orchestrator"
+	return func(ctx context.Context) string {
+		if kind, empID, ok := agent.ACPTurnSourceFromContext(ctx); ok &&
+			kind == agent.ACPTurnSourceEmployee && empID != "" {
+			return empID
+		}
+		_ = c // c provides no per-turn owner today; kept for future seam wiring
+		return defaultOwner
 	}
 }
 

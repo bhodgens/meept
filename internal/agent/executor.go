@@ -485,6 +485,18 @@ var ToolActionMap = map[string]string{
 	// "Unknown action" despite registration + grant (bughunt H7 class — the exact
 	// gap that hit ask / json_extract / the GitHub family before their entries).
 	"exit_plan_mode": "send_message",
+
+	// Goal tools (dsh-convergence 02-goals-plans, 02-model-goal-tools + the
+	// goal provider): goal_get reads the persistent employee goal store
+	// (goal_read, RiskSafe); goal_create / goal_update persist goal records
+	// (goal_write, RiskLow — the same read/write split as the memory/task
+	// families). Both actions are mandatory BuiltinRules rows (unknown actions
+	// DENY by default); without the ToolActionMap entries the tool name
+	// becomes the fallback action and BuiltinRules denies every call "Unknown
+	// action" despite registration + grant (bughunt H7 class).
+	"goal_get":    "goal_read",
+	"goal_create": "goal_write",
+	"goal_update": "goal_write",
 }
 
 // WorkingDirSetter is implemented by tools that accept a session-scoped

@@ -58,6 +58,16 @@ var BuiltinRules = map[string]ActionRule{
 	"task_read":  {Action: "task_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
 	"task_write": {Action: "task_write", RiskLevel: RiskLow, RequiresConfirmation: false},
 
+	// Goal store (dsh-convergence 02-goals-plans): the model-facing goal
+	// tools read/mutate the persistent employee goal store (a local SQLite
+	// DB) — no filesystem/network/exec surface of their own. goal_read is
+	// read-only introspection (RiskSafe); goal_write persists goal records
+	// (RiskLow, mirroring task_write). Without these rows unknown actions
+	// DENY by default and every goal tool call fails "Unknown action"
+	// despite registration + grant (bughunt H7 class).
+	"goal_read":  {Action: "goal_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
+	"goal_write": {Action: "goal_write", RiskLevel: RiskLow, RequiresConfirmation: false},
+
 	// Agent operations
 	"agent_delegate": {Action: "agent_delegate", RiskLevel: RiskLow, RequiresConfirmation: false},
 	"skill_execute":  {Action: "skill_execute", RiskLevel: RiskMedium, RequiresConfirmation: false},

@@ -13,7 +13,7 @@
 // Import cycle: internal/tools/builtin cannot import internal/employee
 // (employee → bot → … → tools/builtin), so the goal store is abstracted
 // behind the local goalManager interface and the builtin-local goalRecord /
-// goalCreateSpec views. The daemon wiring leaf supplies an adapter onto
+// GoalCreateSpec views. The daemon wiring leaf supplies an adapter onto
 // *employee.Manager via SetGoalProvider (goal_register.go) — the same
 // inversion-of-control seam agent_message.go uses for its store.
 package builtin
@@ -46,24 +46,24 @@ const (
 // the employee default; a self-block before this many rounds is rejected.
 const defaultBlockedAfterConsecutiveRounds = 3
 
-// goalCreateSpec is the builtin-local creation request the wiring adapter
+// GoalCreateSpec is the builtin-local creation request the wiring adapter
 // maps onto employee.GoalSpec. Objective is the mandate/objective prose;
 // MaxRounds bounds the autonomous rounds (0 = default cap).
-type goalCreateSpec struct {
+type GoalCreateSpec struct {
 	Owner     string
 	Objective string
 	MaxRounds int
 }
 
-// goalRecord is the builtin-local view of a persisted goal shared by the
+// GoalRecord is the builtin-local view of a persisted goal shared by the
 // tools and the wiring adapter. Phase uses the employee phase string;
 // Objective is the mandate. Armed is the process-local activation flag
 // (employee.(*Goal).IsArmed).
-type goalRecord struct {
+type GoalRecord struct {
 	ID            string
 	Revision      int64
 	Objective     string
-	Phase         goalPhase
+	Phase         string
 	RoundsStarted int
 	MaxRounds     int
 	BlockedReason *string
@@ -77,15 +77,15 @@ type goalManager interface {
 	// CreateGoal validates and persists a new goal, returning the durable
 	// record. The adapter must reflect MaxRounds (spec.MaxRounds) in the
 	// persisted record.
-	CreateGoal(ctx context.Context, spec goalCreateSpec) (*goalRecord, error)
+	CreateGoal(ctx context.Context, spec GoalCreateSpec) (*GoalRecord, error)
 	// GetGoal returns the goal by ID with its current revision loaded.
-	GetGoal(ctx context.Context, id string) (*goalRecord, error)
+	GetGoal(ctx context.Context, id string) (*GoalRecord, error)
 	// ListActive returns the owner's active (non-retired) goals, oldest
 	// first; used by goal_get to resolve the current goal.
-	ListActive(ctx context.Context, owner string) ([]*goalRecord, error)
+	ListActive(ctx context.Context, owner string) ([]*GoalRecord, error)
 	// UpdateGoal persists the mutated record. The adapter (and its backing
 	// employee store) advance the CAS revision on write.
-	UpdateGoal(ctx context.Context, g *goalRecord) error
+	UpdateGoal(ctx context.Context, g *GoalRecord) error
 }
 
 // goalOwner resolves the owning agent/employee id of the calling turn. It is
@@ -106,7 +106,9 @@ type goalValue struct {
 	Activation    bool    `json:"activation"`
 }
 
-func goalValueFromRecord(g *goalRecord) goalValue {
+// goalValueFromRecord maps the backing GoalRecord view onto the tool-facing
+// compact value.
+func goalValueFromRecord(g *GoalRecord) goalValue {
 	var br *string
 	if g != nil && g.BlockedReason != nil && *g.BlockedReason != "" {
 		reason := *g.BlockedReason
@@ -119,7 +121,7 @@ func goalValueFromRecord(g *goalRecord) goalValue {
 		ID:            g.ID,
 		Revision:      g.Revision,
 		Objective:     g.Objective,
-		Phase:         string(g.Phase),
+		Phase:         g.Phase,
 		RoundsStarted: g.RoundsStarted,
 		MaxRounds:     g.MaxRounds,
 		BlockedReason: br,
@@ -321,7 +323,7 @@ func (t *GoalCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 	if err != nil {
 		return tools.NewErrorResultErr(err), nil
 	}
-	g, err := t.mgr.CreateGoal(ctx, goalCreateSpec{
+	g, err := t.mgr.CreateGoal(ctx, GoalCreateSpec{
 		Owner:     owner,
 		Objective: objective,
 		MaxRounds: maxRounds,
@@ -459,19 +461,19 @@ func (t *GoalUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 		if err := requireDirectHuman(); err != nil {
 			return tools.NewErrorResultErr(fmt.Errorf("goal_update pause denied: %w", err)), nil
 		}
-		next.Phase = goalPhasePaused
+		next.Phase = string(goalPhasePaused)
 		next.Armed = false
 
 	case "resume":
 		if err := requireDirectHuman(); err != nil {
 			return tools.NewErrorResultErr(fmt.Errorf("goal_update resume denied: %w", err)), nil
 		}
-		next.Phase = goalPhaseActive
+		next.Phase = string(goalPhaseActive)
 		next.Armed = true
 
 	case "complete":
 		// Legal under direct human or autonomous authority.
-		next.Phase = goalPhaseRetired
+		next.Phase = string(goalPhaseRetired)
 		next.Armed = false
 
 	case "blocked":
@@ -487,7 +489,7 @@ func (t *GoalUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 		}
 		reasonCopy := reason
 		next.BlockedReason = &reasonCopy
-		next.Phase = goalPhaseBlocked
+		next.Phase = string(goalPhaseBlocked)
 		next.Armed = false
 
 	default:

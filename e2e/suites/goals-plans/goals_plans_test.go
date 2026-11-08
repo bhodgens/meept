@@ -9,18 +9,19 @@
 // VERIFIABLY produce it, with each unreachable branch documented as a
 // residual and its root cause stated:
 //
-//   - goals-plans-01 (goal tools) and goals-plans-02 (round driver) are
-//     RED-phase gates for implementation pieces that did NOT land in this
-//     tree. The goal-tool provider is deliberately left UNBOUND
-//     (internal/daemon/dsh_wiring.go wireGoalProvider calls
-//     builtin.SetGoalProvider(nil,nil) because the goalManager adapter types
-//     goalCreateSpec/goalRecord are unexported in internal/tools/builtin →
-//     toolprov.RegisterAll fails closed → zero goal tools), and the round
-//     driver (F4b/C4c, autonomous advance + auto-block) has no production
-//     caller of builtin.SetGoalAutonomousRound and no round-advance loop over
-//     Goal.MaxRounds/RoundsStarted. These are IMPLEMENTATION residuals, not
-//     harness ones; each test fails fast with that root cause and goes GREEN
-//     as soon as the leaf lands, with no harness edit.
+//   - goals-plans-01 (goal tools) and goals-plans-02 (round driver) are now
+//     WIRED and assert their features genuinely:
+//   - goals-plans-01: the daemon binds a live *employee.Manager goal
+//     adapter and registers the "goal" provider, so goal_get /
+//     goal_create / goal_update register and execute against the real
+//     store (goal_adapter.go, SetGoalProvider). The suite hires the
+//     resolver-owned employee, rigs the executor to call goal_create then
+//     goal_get, and asserts the created goal persists and reads back.
+//   - goals-plans-02: the daemon builds a GoalRoundDriver bound onto the
+//     live employee manager and exposes it via agents.goals.round.advance
+//     (round-advance CLI); goal-create carries --max-rounds and the
+//     `agents goals` table reports state + rounds/max. The suite drives a
+//     goal past its round cap and observes the round-limit auto-block.
 //   - goals-plans-03 (plan mode) is GREEN: /plan is wired and reachable, and
 //     exit_plan_mode runs its present-for-review path. The Approve→durable-
 //     plan→plan-mode-exits tail is a documented-infeasible residual: approval
@@ -91,77 +92,138 @@ func grantCoderTool(t testing.TB, st *harness.Stack, tool string) {
 	}
 }
 
+// rpcCreateEmployee registers a fixture employee through agents.create so the
+// goal store's employee_id FK and the daemon's owner-resolution both resolve
+// to a real bot_definitions row (mirrors e2e/suites/voice-local).
+func rpcCreateEmployee(t testing.TB, s *harness.Stack, employee string) {
+	t.Helper()
+	client := harness.DialRPC(t, s.SocketPath)
+	created := client.CallResult("agents.create", map[string]any{
+		"id":      employee,
+		"name":    employee,
+		"prompt":  "You are " + employee + ", an e2e goal probe.",
+		"enabled": true,
+		"triggers": []map[string]any{
+			{"type": "cron", "schedule": "0 4 * * *", "enabled": false},
+		},
+		"constitution": map[string]any{
+			"purpose":       employee,
+			"role":          employee,
+			"charter":       "Answer calls briefly.",
+			"autonomy_tier": "tier_1_reactive",
+			"escalates_to":  []string{"user"},
+			"constraints": map[string]any{
+				"tools_allowed": []string{},
+				"risk_ceiling":  "medium",
+			},
+			"amendment_policy": map[string]any{
+				"self_propose_allowed": false,
+				"requires_approval":    true,
+				"frozen_fields":        []string{},
+			},
+			"version":     1,
+			"authored_by": "user",
+		},
+	})
+	if got, _ := created["id"].(string); got != employee {
+		t.Fatalf("agents.create id = %v, want %s", created["id"], employee)
+	}
+}
+
 // TestGoalTools_RegisteredAndAuthorityGated (G2, F4a, C4b, manifest
-// goals-plans-01): RED-phase gate for the goal-tool wiring, which did NOT land
-// in this tree.
-//
-// Root cause (verified in internal/daemon/dsh_wiring.go wireGoalProvider, lines
-// 51-85): the goal provider is deliberately unbound — builtin.SetGoalProvider(nil,nil)
-// because the goalManager adapter types (goalCreateSpec/goalRecord) are
-// unexported in internal/tools/builtin, so the daemon cannot construct an
-// adapter onto *employee.Manager and toolprov.RegisterAll fails closed → zero
-// goal tools are registered. The chat-facing registry therefore answers
-// "unknown tool: goal_get" (and goal_create / goal_update). Fixing it is an
-// IMPLEMENTATION task (export the adapter types + wire a live *employee.Manager
-// adapter), out of scope for a harness fix. We keep the rigged executor turn so
-// the test is a truthful, fast-failing gate that goes GREEN unprompted once the
-// wiring lands.
+// goals-plans-01): the goal tools are now wired — the daemon binds a live
+// *employee.Manager adapter (goal_adapter.go) through SetGoalProvider and
+// registers the "goal" provider, so goal_get / goal_create / goal_update
+// register AND execute against the real store. The test hires the owner the
+// daemon's resolver addresses, rigs the executor to call goal_create then
+// goal_get, and asserts the created goal is genuinely persisted and read back
+// (not "unknown tool").
 func TestGoalTools_RegisteredAndAuthorityGated(t *testing.T) {
-	s := harness.Start(t)
+	s := harness.Start(t, harness.WithPreBootHook(func(st *harness.Stack) error {
+		grantCoderTool(t, st, "goal_get")
+		grantCoderTool(t, st, "goal_create")
+		grantCoderTool(t, st, "goal_update")
+		return nil
+	}))
+	// Hire the goal owner the daemon's owner resolver addresses (default
+	// "orchestrator") so the goal tools' CreateGoal FK + ListActive both
+	// resolve to a real employee. This is the live wired path the adapter
+	// (goal_adapter.go) maps onto *employee.Manager.
+	rpcCreateEmployee(t, s, "orchestrator")
 	s.RegisterProject(t, "goals-e2e")
 	sessionID := s.CreateSession(t, "goal-tools", s.ProjectDir)
 
-	// Rig so the executor ACTUALLY calls goal_get (previously the loop just
-	// returned 'done' and the "not registered" check passed vacuously).
-	s.Fake.EnqueueToolCalls(harness.ToolCall{Name: "goal_get", Arguments: "{}"})
+	// Rig so the executor ACTUALLY calls goal_create then goal_get, and
+	// assert the goal tools execute against real state.
+	s.Fake.SetPostToolText("goal tool probe complete.")
+	s.Fake.EnqueueToolCalls(
+		harness.ToolCall{Name: "goal_create", Arguments: `{"objective":"keep the build green","max_rounds":3}`},
+		harness.ToolCall{Name: "goal_get", Arguments: "{}"},
+	)
 	s.ChatTurn(t, sessionID,
-		"Call the goal_get tool and report its raw result verbatim.",
-		3*time.Minute)
-	if res := toolResultsJoined(s.Fake); strings.Contains(strings.ToLower(squash(res)), "unknowntool") {
-		t.Fatalf("goal-get wiring not present (documented-infeasible residual, C4b/F4a): "+
-			"goal tools are NOT registered because internal/daemon/dsh_wiring.go wireGoalProvider "+
-			"calls builtin.SetGoalProvider(nil,nil) (goalManager adapter types goalCreateSpec/goalRecord "+
-			"unexported in internal/tools/builtin) -> toolprov.RegisterAll fails closed -> zero goal tools. "+
-			"Envelope:\n%s", res)
+		"Call the goal_create tool with objective 'keep the build green' and max_rounds 3, then call goal_get, and report both raw results verbatim.",
+		4*time.Minute)
+
+	raw := toolResultsJoined(s.Fake)
+	res := squash(raw)
+	if strings.Contains(strings.ToLower(res), "unknowntool") {
+		t.Fatalf("goal tools are NOT registered (goal provider must be wired): envelope:\n%s", res)
+	}
+	if strings.Contains(strings.ToLower(res), "goal store not available") {
+		t.Fatalf("goal tools failed closed against the live store: envelope:\n%s", res)
+	}
+	// goal_create genuinely created + echoed the objective (raw, space-accurate).
+	if !strings.Contains(raw, "keep the build green") {
+		t.Errorf("goal_create did not persist/echo the objective: envelope:\n%s", raw)
+	}
+	// The round cap (max_rounds=3) must survive the create → get round-trip.
+	if !strings.Contains(res, `"maxRounds":3`) {
+		t.Errorf("goal_create/goal_get did not carry max_rounds=3: envelope:\n%s", raw)
 	}
 }
 
 // TestRoundDriver_AutonomousContinuationAndAutoBlock (G3, F4b, C4c, manifest
-// goals-plans-02): RED-phase gate for the round driver, which was NOT
-// implemented in this tree.
-//
-// Root cause (verified): there is no production caller of
-// builtin.SetGoalAutonomousRound (internal/tools/builtin/goal_tools.go:173) and
-// no round-advance loop over Goal.MaxRounds / Goal.RoundsStarted that would
-// advance a goal autonomously and self-block with code "round-limit". The
-// desired C4c behavior — "max_rounds=2 advances to round 2 with ZERO human
-// turns, then blocks round-limit" — is therefore unobservable. Independent
-// harness facts that also made the staged version untenable: the
-// `agents goal-create` CLI flag set has no --max-rounds flag, and the
-// `agents goals` table exposes no blocked/round-limit column. IMPLEMENTATION
-// residual. The config-overlay bug (a scalar `false` stamped on the STRUCT
-// llm.session_affinity) that previously crashed this test's daemon boot is
-// fixed by removing the overlay — the daemon now boots cleanly and this line is
-// the only remaining blocker.
+// goals-plans-02): the autonomous round driver is now wired — the daemon
+// builds a GoalRoundDriver (internal/employee/goal_round_driver.go) bound onto
+// the live employee manager and exposes it via agents.goals.round.advance
+// (round-advance CLI). The test drives the full loop through the CLI/table
+// surface: goal-create with --max-rounds, advance past the cap, and observe
+// the auto-block (code "round-limit") at MaxRounds with zero human turns into
+// the round.
 func TestRoundDriver_AutonomousContinuationAndAutoBlock(t *testing.T) {
-	// Boot with defaults (no llm.session_affinity overlay: it is a struct; a
-	// scalar false broke daemon config parsing -> "daemon not healthy within
-	// 2m"; harmless for the fake anyway).
 	s := harness.Start(t)
+	rpcCreateEmployee(t, s, "rounds-worker")
 	s.RegisterProject(t, "rounds-e2e")
-	sessionID := s.CreateSession(t, "round-driver", s.ProjectDir)
 
-	// Drive one executor turn so the loop actually runs (no 5-minute poll).
-	s.Fake.SetPostToolText("round driver probe")
-	s.ChatTurn(t, sessionID,
-		"Probe the goal round driver once and report the outcome verbatim.",
-		3*time.Minute)
+	// Create a goal with a 2-round cap via the CLI --max-rounds surface.
+	if out, errOut := s.RunCLI(t, 60*time.Second, false,
+		"agents", "goal-create", "rounds-worker",
+		"--title", "advance probe", "--mandate", "auto-advance probe", "--max-rounds", "2"); !strings.Contains(out, "goal created") {
+		t.Fatalf("agents goal-create failed:\nstdout:%s\nstderr:%s", out, errOut)
+	}
 
-	t.Fatalf("round driver (F4b/C4c) not implemented (documented-infeasible residual): "+
-		"no production caller of builtin.SetGoalAutonomousRound and no round-advance loop over "+
-		"Goal.MaxRounds/RoundsStarted; the agents goal-create CLI has no --max-rounds flag and the "+
-		"goal tools are unbound (see TestGoalTools). A zero-human-turn goal cannot be created or "+
-		"advanced to a round-limit block. Envelope:\n%s", toolResultsJoined(s.Fake))
+	// Drive the round driver: rounds 0→1, 1→2 advance; the 3rd settlement
+	// (rounds_started 2 ≥ max_rounds 2) auto-blocks with code round-limit.
+	for i := 0; i < 2; i++ {
+		out, _ := s.RunCLI(t, 60*time.Second, false, "agents", "goals", "advance", "rounds-worker")
+		if !strings.Contains(out, "advanced") {
+			t.Fatalf("round advance %d did not reserve a round:\n%s", i, out)
+		}
+	}
+	out, _ := s.RunCLI(t, 60*time.Second, false, "agents", "goals", "advance", "rounds-worker")
+	if !strings.Contains(out, "blocked") || !strings.Contains(out, "round-limit") {
+		t.Fatalf("3rd round advance did not auto-block at the round cap (round-limit):\n%s", out)
+	}
+
+	// The goals table must surface the blocked state + rounds/max (2/2),
+	// making the cap auto-block user-visible.
+	out, _ = s.RunCLI(t, 60*time.Second, false, "agents", "goals", "--employee=rounds-worker")
+	if !strings.Contains(strings.ToLower(out), "blocked") {
+		t.Fatalf("goals table did not show the blocked state after the round-limit auto-block:\n%s", out)
+	}
+	if !strings.Contains(out, "2/2") {
+		t.Fatalf("goals table did not show rounds/max 2/2:\n%s", out)
+	}
 }
 
 // TestPlanMode_PresentForReviewApprove (G4, F5, C4d, manifest goals-plans-03):

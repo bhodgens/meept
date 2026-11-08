@@ -391,6 +391,11 @@ type Components struct {
 	// DelegateController is the builtin controller bound behind the delegate
 	// tool group (leaf 03). Nil when DelegateManager construction was skipped.
 	DelegateController *builtin.DelegateController
+	// GoalRoundDriver is the autonomous continuation driver (C4c) built by
+	// wireDSHConvergence over the live employee manager. It backs the
+	// round-advance RPC/CLI surface (agents.goals.round.advance). Nil when
+	// the employee framework or dsh wiring is absent.
+	GoalRoundDriver *employee.GoalRoundDriver
 	// PlanModeController is the per-session plan-mode toggle (leaf 04). It owns
 	// the /plan command + exit_plan_mode tool + plan:policy prompt injection.
 	// Nil when plan-mode wiring did not run.

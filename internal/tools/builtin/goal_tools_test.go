@@ -20,22 +20,22 @@ import (
 // fakeGoalManager is an in-memory goalManager.
 type fakeGoalManager struct {
 	mu    sync.Mutex
-	goals map[string]*goalRecord
+	goals map[string]*GoalRecord
 	next  int
 }
 
 func newFakeGoalManager() *fakeGoalManager {
-	return &fakeGoalManager{goals: map[string]*goalRecord{}}
+	return &fakeGoalManager{goals: map[string]*GoalRecord{}}
 }
 
-func (f *fakeGoalManager) CreateGoal(_ context.Context, spec goalCreateSpec) (*goalRecord, error) {
+func (f *fakeGoalManager) CreateGoal(_ context.Context, spec GoalCreateSpec) (*GoalRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next++
-	g := &goalRecord{
+	g := &GoalRecord{
 		ID:        fmt.Sprintf("goal_%d", f.next),
 		Objective: spec.Objective,
-		Phase:     goalPhaseActive,
+		Phase:     string(goalPhaseActive),
 		MaxRounds: spec.MaxRounds,
 		Revision:  1,
 		Armed:     true,
@@ -44,7 +44,7 @@ func (f *fakeGoalManager) CreateGoal(_ context.Context, spec goalCreateSpec) (*g
 	return cloneGoal(g), nil
 }
 
-func (f *fakeGoalManager) GetGoal(_ context.Context, id string) (*goalRecord, error) {
+func (f *fakeGoalManager) GetGoal(_ context.Context, id string) (*GoalRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	g, ok := f.goals[id]
@@ -54,19 +54,19 @@ func (f *fakeGoalManager) GetGoal(_ context.Context, id string) (*goalRecord, er
 	return cloneGoal(g), nil
 }
 
-func (f *fakeGoalManager) ListActive(_ context.Context, _ string) ([]*goalRecord, error) {
+func (f *fakeGoalManager) ListActive(_ context.Context, _ string) ([]*GoalRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var out []*goalRecord
+	var out []*GoalRecord
 	for _, g := range f.goals {
-		if g.Phase != goalPhaseRetired {
+		if g.Phase != string(goalPhaseRetired) {
 			out = append(out, cloneGoal(g))
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeGoalManager) UpdateGoal(_ context.Context, g *goalRecord) error {
+func (f *fakeGoalManager) UpdateGoal(_ context.Context, g *GoalRecord) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.goals[g.ID]; !ok {
@@ -77,7 +77,7 @@ func (f *fakeGoalManager) UpdateGoal(_ context.Context, g *goalRecord) error {
 	return nil
 }
 
-func cloneGoal(g *goalRecord) *goalRecord {
+func cloneGoal(g *GoalRecord) *GoalRecord {
 	c := *g
 	if g.BlockedReason != nil {
 		r := *g.BlockedReason
@@ -153,7 +153,7 @@ func TestGoalGet_NoGoalReturnsNull(t *testing.T) {
 
 func TestGoalGet_ReturnsCompactValue(t *testing.T) {
 	m := newFakeGoalManager()
-	g, _ := m.CreateGoal(context.Background(), goalCreateSpec{Owner: "emp_1", Objective: "keep tests green", MaxRounds: 5})
+	g, _ := m.CreateGoal(context.Background(), GoalCreateSpec{Owner: "emp_1", Objective: "keep tests green", MaxRounds: 5})
 	tool := NewGoalGetTool(m, goalOwnerStatic("emp_1"))
 	got, err := tool.Execute(context.Background(), nil)
 	if err != nil {
@@ -218,7 +218,7 @@ func TestGoalCreate_DirectHumanPersists(t *testing.T) {
 func TestGoalUpdate_DirectHumanActionsAndCAS(t *testing.T) {
 	setAutonomous(t, false)
 	m := newFakeGoalManager()
-	g, _ := m.CreateGoal(context.Background(), goalCreateSpec{Owner: "emp_1", Objective: "orig", MaxRounds: 3})
+	g, _ := m.CreateGoal(context.Background(), GoalCreateSpec{Owner: "emp_1", Objective: "orig", MaxRounds: 3})
 	tool := NewGoalUpdateTool(m, goalOwnerStatic("emp_1"))
 
 	// edit bumps the objective and revision.
@@ -263,7 +263,7 @@ func TestGoalUpdate_DirectHumanActionsAndCAS(t *testing.T) {
 func TestGoalUpdate_CompleteAllowedInAutonomous(t *testing.T) {
 	setAutonomous(t, true)
 	m := newFakeGoalManager()
-	g, _ := m.CreateGoal(context.Background(), goalCreateSpec{Owner: "emp_1", Objective: "done work", MaxRounds: 3})
+	g, _ := m.CreateGoal(context.Background(), GoalCreateSpec{Owner: "emp_1", Objective: "done work", MaxRounds: 3})
 	tool := NewGoalUpdateTool(m, goalOwnerStatic("emp_1"))
 	res, err := tool.Execute(context.Background(), map[string]any{
 		"goal_id": g.ID, "revision": float64(1), "action": "complete"})
@@ -283,7 +283,7 @@ func TestGoalUpdate_CompleteAllowedInAutonomous(t *testing.T) {
 func TestGoalUpdate_BlockedThreshold(t *testing.T) {
 	m := newFakeGoalManager()
 	// Goal with roundsStarted=1 (below threshold 3).
-	g := &goalRecord{ID: "goal_a", Objective: "blocker", Phase: goalPhaseActive, RoundsStarted: 1, Revision: 1, Armed: true}
+	g := &GoalRecord{ID: "goal_a", Objective: "blocker", Phase: string(goalPhaseActive), RoundsStarted: 1, Revision: 1, Armed: true}
 	m.goals[g.ID] = cloneGoal(g)
 	tool := NewGoalUpdateTool(m, goalOwnerStatic("emp_1"))
 
@@ -303,7 +303,7 @@ func TestGoalUpdate_BlockedThreshold(t *testing.T) {
 	}
 
 	// At threshold (roundsStarted=3): autonomous block succeeds.
-	g = &goalRecord{ID: "goal_b", Objective: "at cap", Phase: goalPhaseActive, RoundsStarted: 3, Revision: 1, Armed: true}
+	g = &GoalRecord{ID: "goal_b", Objective: "at cap", Phase: string(goalPhaseActive), RoundsStarted: 3, Revision: 1, Armed: true}
 	m.goals[g.ID] = cloneGoal(g)
 	res, _ = tool.Execute(context.Background(), map[string]any{
 		"goal_id": g.ID, "revision": float64(1), "action": "blocked", "blocked_reason": "reached cap"})
@@ -314,7 +314,7 @@ func TestGoalUpdate_BlockedThreshold(t *testing.T) {
 	setAutonomous(t, false)
 
 	// Direct human may block at any round (operator authority).
-	g = &goalRecord{ID: "goal_c", Objective: "operator", Phase: goalPhaseActive, RoundsStarted: 0, Revision: 1, Armed: true}
+	g = &GoalRecord{ID: "goal_c", Objective: "operator", Phase: string(goalPhaseActive), RoundsStarted: 0, Revision: 1, Armed: true}
 	m.goals[g.ID] = cloneGoal(g)
 	res, _ = tool.Execute(context.Background(), map[string]any{
 		"goal_id": g.ID, "revision": float64(1), "action": "blocked", "blocked_reason": "operator call"})
@@ -331,7 +331,7 @@ func TestGoalUpdate_UnknownGoalOrAction(t *testing.T) {
 	if !errors.Is(toErr(res), ErrGoalToolNotFound) {
 		t.Errorf("unknown goal not surfaced: %T %s", toErr(res), resultText(res))
 	}
-	g, _ := m.CreateGoal(context.Background(), goalCreateSpec{Owner: "emp_1", Objective: "o", MaxRounds: 2})
+	g, _ := m.CreateGoal(context.Background(), GoalCreateSpec{Owner: "emp_1", Objective: "o", MaxRounds: 2})
 	res = ctxArgs(tool.Execute, context.Background(), map[string]any{
 		"goal_id": g.ID, "revision": float64(1), "action": "bogus"})
 	if strings.Contains(strings.ToLower(resultText(res)), "unknown action") == false {

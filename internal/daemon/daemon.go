@@ -4,6 +4,7 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -1483,6 +1484,40 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			agentHandlers := agentRPCHandler.Handlers()
 			for method, handler := range agentHandlers {
 				rpcServer.RegisterHandler(method, handler)
+			}
+			// Round driver (dsh-convergence C4c): expose the autonomous
+			// continuation driver that advances a goal's round at quiescence
+			// and auto-blocks at the round cap. Nil-safe: an unwired driver
+			// leaves the method unregistered (clients get an unknown-method
+			// RPC error), never a nil-deref.
+			if driver := components.GoalRoundDriver; driver != nil {
+				rpcServer.RegisterHandler("agents.goals.round.advance",
+					func(ctx context.Context, raw json.RawMessage) (any, error) {
+						var req struct {
+							EmployeeID string `json:"employee_id"`
+						}
+						if len(raw) > 0 {
+							if err := json.Unmarshal(raw, &req); err != nil {
+								return nil, fmt.Errorf("round advance: %w", err)
+							}
+						}
+						if req.EmployeeID == "" {
+							return nil, fmt.Errorf("round advance: employee_id is required")
+						}
+						outcome, err := driver.OnRoundSettled(ctx, req.EmployeeID)
+						if err != nil {
+							return nil, err
+						}
+						detail := map[string]any{"outcome": string(outcome)}
+						// Surface the current round state for observability.
+						if goals, gerr := components.EmployeeManager.ListGoals(ctx, req.EmployeeID); gerr == nil && len(goals) > 0 {
+							detail["rounds_started"] = goals[0].RoundsStarted
+							detail["max_rounds"] = goals[0].RoundsCap()
+							detail["goal_id"] = goals[0].ID
+							detail["blocked_reason"] = goals[0].BlockedReason
+						}
+						return detail, nil
+					})
 			}
 			logger.Info("employee (agents.*) RPC handlers registered",
 				"methods", len(agentHandlers))

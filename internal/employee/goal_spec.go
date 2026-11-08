@@ -22,6 +22,11 @@ type GoalSpec struct {
 	Source     string        `json:"source,omitempty"` // "user" | "trigger"; default "user"
 	TriggerRef string        `json:"trigger_ref,omitempty"`
 	Gate       *GoalGateSpec `json:"gate,omitempty"`
+	// MaxRounds is the cap on autonomous rounds (0 = the employee default,
+	// DefaultMaxGoalRounds). Carried through to the created Goal so the
+	// dsh goal tools / round driver can refund a per-goal round budget
+	// ("max_rounds" wire field).
+	MaxRounds int `json:"max_rounds,omitempty"`
 }
 
 // GoalGateSpec is the per-goal quality-gate configuration in a GoalSpec.
@@ -72,6 +77,7 @@ func (s GoalSpec) toGoal(now time.Time) *Goal {
 		TriggerRef: s.TriggerRef,
 		Health:     GoalUnknown,
 		CreatedAt:  now,
+		MaxRounds:  s.MaxRounds,
 	}
 	if s.Gate != nil && s.Gate.Command != "" {
 		g.Gate = &GateConfig{

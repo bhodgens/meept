@@ -139,6 +139,69 @@ func truncateID(id string) string {
 	return id
 }
 
+// goalStateLabel maps the GoalState integer (as it serializes from the Goal
+// struct's json:"state") onto its stable string label. Returns "" for a
+// value it cannot interpret so callers can fall back.
+func goalStateLabel(v any) string {
+	switch n := v.(type) {
+	case float64:
+		return goalStateFromInt(int(n))
+	case int:
+		return goalStateFromInt(n)
+	case string:
+		switch n {
+		case "active", "paused", "retired", "blocked":
+			return n
+		}
+	}
+	return ""
+}
+
+func goalStateFromInt(s int) string {
+	switch s {
+	case 0:
+		return "active"
+	case 1:
+		return "paused"
+	case 2:
+		return "retired"
+	case 3:
+		return "blocked"
+	default:
+		return ""
+	}
+}
+
+// getIntOr reads an integer field that may arrive as float64 (JSON number).
+// Returns 0 when absent or not numeric.
+func getIntOr(m map[string]any, key string) int {
+	switch n := m[key].(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+// stateColor renders a goal state label with state-appropriate coloring
+// (blocked/red, paused/yellow, else neutral).
+func stateColor(s string) string {
+	switch strings.ToLower(s) {
+	case "blocked":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render(s)
+	case "paused":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render(s)
+	case "retired":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(s)
+	default:
+		return s
+	}
+}
+
 // readDefinitionFile reads a JSON5 employee definition file and unmarshals it
 // into v. This supports the same JSON5 syntax (comments, trailing commas,
 // unquoted keys) used everywhere else in the project. Falls back to raw JSON
@@ -1065,7 +1128,7 @@ func newAgentsGoalsCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID	EMPLOYEE	TITLE	HEALTH	GATE	ACTIVE_PLAN	LAST_ASSESSED")
+			fmt.Fprintln(w, "ID	EMPLOYEE	TITLE	STATE	ROUNDS/MAX	GATE	HEALTH	ACTIVE_PLAN")
 
 			for _, g := range goalsList {
 				goal, ok := g.(map[string]any)
@@ -1084,7 +1147,20 @@ func newAgentsGoalsCmd() *cobra.Command {
 				if activePlan == "" {
 					activePlan = getStringOr(goal, "active_plan", "")
 				}
-				lastAssessed := getStringOr(goal, "last_assessed", "")
+				// State/rounds come from the raw Goal JSON: state is the
+				// GoalState int (0=active,1=paused,2=retired,3=blocked);
+				// rounds_started / max_rounds are the autonomy fields.
+				stateLabel := goalStateLabel(goal["state"])
+				if stateLabel == "" {
+					// Fall back: a durable blocked_reason implies blocked.
+					if _, has := goal["blocked_reason"]; has && goal["blocked_reason"] != nil {
+						stateLabel = "blocked"
+					} else {
+						stateLabel = "active"
+					}
+				}
+				rounds := getIntOr(goal, "rounds_started")
+				maxRounds := getIntOr(goal, "max_rounds")
 				gateLabel := "-"
 				if gm, ok := goal["gate"].(map[string]any); ok {
 					if cmd := getStringOr(gm, "command", ""); cmd != "" {
@@ -1099,8 +1175,8 @@ func newAgentsGoalsCmd() *cobra.Command {
 					title = title[:37] + "..."
 				}
 
-				fmt.Fprintf(w, "%s	%s	%s	%s	%s	%s	%s\n",
-					gid, emp, title, healthColor(health), gateLabel, activePlan, lastAssessed)
+				fmt.Fprintf(w, "%s	%s	%s	%s	%d/%d	%s	%s	%s\n",
+					gid, emp, title, stateColor(stateLabel), rounds, maxRounds, gateLabel, healthColor(health), activePlan)
 			}
 
 			w.Flush()
@@ -1111,6 +1187,72 @@ func newAgentsGoalsCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&employeeID, "employee", "", "filter by employee ID")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "output as JSON")
+	// `agents goals advance <employee-id>` drives the round driver one step.
+	cmd.AddCommand(newAgentsGoalsAdvanceCmd())
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// agents goals advance
+// ---------------------------------------------------------------------------
+
+// newAgentsGoalsAdvanceCmd drives the dsh round driver one settlement step
+// for an employee: reserve the next autonomous goal round (advancing
+// RoundsStarted) or auto-block the goal at its round cap. It is the operator
+// surface for the C4c continuation driver.
+func newAgentsGoalsAdvanceCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "advance <employee-id>",
+		Short: "advance a goal's autonomous round or auto-block at its cap",
+		Long: `Drive the goal round driver for an employee (agents.goals.round.advance).
+
+Each call is one settlement: if the employee's active goal is under its round
+cap (--max-rounds), it reserves round N+1 and advances rounds_started; once
+the cap is reached it auto-blocks the goal with code "round-limit". With no
+active/armed goal it reports idle.
+
+Examples:
+  meept agents goals advance emp_abc
+  meept agents goals --employee=emp_abc    # after advancing, show rounds/max`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			rawResult, err := client.Call("agents.goals.round.advance", map[string]any{
+				"employee_id": args[0],
+			})
+			if err != nil {
+				return fmt.Errorf("failed to advance goal round: %w", err)
+			}
+			var res map[string]any
+			if err := json.Unmarshal(rawResult, &res); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+			if errMsg := rpcError(res); errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+			outcome := getStringOr(res, "outcome", "")
+			goalID := getStringOr(res, "goal_id", "")
+			rounds := getIntOr(res, "rounds_started")
+			maxRounds := getIntOr(res, "max_rounds")
+			switch outcome {
+			case "advanced":
+				fmt.Printf("advanced: goal %s reached round %d/%d\n", goalID, rounds, maxRounds)
+			case "blocked":
+				fmt.Printf("blocked: goal %s auto-blocked at its round cap (round-limit)\n", goalID)
+				if br, ok := res["blocked_reason"].(map[string]any); ok {
+					fmt.Printf("  reason: %s\n", getStringOr(br, "message", ""))
+				}
+			default:
+				fmt.Printf("idle: no active/armed goal for employee %s\n", args[0])
+			}
+			return nil
+		},
+	}
 	return cmd
 }
 
@@ -1119,7 +1261,6 @@ func newAgentsSetGateCmd() *cobra.Command {
 	var timeout int
 	var skipUnchanged bool
 	var clear bool
-
 	cmd := &cobra.Command{
 		Use:   "set-gate <goal-id>",
 		Short: "set or clear a goal quality gate",
@@ -1324,6 +1465,7 @@ func newAgentsGoalCreateCmd() *cobra.Command {
 		mandate     string
 		gateCommand string
 		source      string
+		maxRounds   int
 	)
 
 	cmd := &cobra.Command{
@@ -1334,7 +1476,8 @@ func newAgentsGoalCreateCmd() *cobra.Command {
 Examples:
   meept agents goal-create emp_abc --title "keep main shippable" --mandate "every commit on main passes CI"
   meept agents goal-create emp_abc --title "nightly report" --mandate "..." --source trigger
-  meept agents goal-create emp_abc --title "t" --mandate "m" --gate-command "go test ./..."`,
+  meept agents goal-create emp_abc --title "t" --mandate "m" --gate-command "go test ./..."
+  meept agents goal-create emp_abc --title "t" --mandate "m" --max-rounds 5`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if title == "" {
@@ -1345,6 +1488,9 @@ Examples:
 			}
 			if source != "" && source != "user" && source != "trigger" {
 				return fmt.Errorf("source must be \"user\" or \"trigger\"")
+			}
+			if maxRounds < 0 {
+				return fmt.Errorf("--max-rounds must not be negative")
 			}
 
 			client, err := connectDaemon()
@@ -1363,6 +1509,9 @@ Examples:
 			}
 			if gateCommand != "" {
 				params["gate"] = map[string]any{"command": gateCommand}
+			}
+			if maxRounds > 0 {
+				params["max_rounds"] = maxRounds
 			}
 
 			rawResult, err := client.Call("agents.goals.create", params)
@@ -1390,6 +1539,7 @@ Examples:
 	cmd.Flags().StringVar(&mandate, "mandate", "", "durable objective in plain prose")
 	cmd.Flags().StringVar(&gateCommand, "gate-command", "", "optional completion gate command (must exit 0)")
 	cmd.Flags().StringVar(&source, "source", "", "goal source: \"user\" (default) or \"trigger\"")
+	cmd.Flags().IntVar(&maxRounds, "max-rounds", 0, "optional cap on autonomous rounds (positive integer; 0 = the employee default)")
 	if err := cmd.MarkFlagRequired("title"); err != nil {
 		// The flag was just added above, so this cannot fail.
 		log.Printf("agents: warning: MarkFlagRequired(title) failed: %v", err)
