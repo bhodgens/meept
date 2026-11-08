@@ -1212,9 +1212,9 @@
       "status": "implemented",
       "diff": "M",
       "scenarios": [
-        "goals-plans-01 goal_get/goal_create/goal_update are registered; goal_create without direct human authority is refused at the tool boundary (C4b)",
-        "goals-plans-02 round driver: goal with max_rounds=2 advances autonomously then auto-blocks with code round-limit after zero human turns (C4c)",
-        "goals-plans-03 plan mode: /plan enters plan mode; exit_plan_mode presents Approve; approve lands via the existing plan gate and plan mode exits (C4d)"
+        "goals-plans-01 goal_get/goal_create/goal_update are staged as a RED gate: the goal-tool provider is NOT wired (wireGoalProvider fails closed - adapter types unexported), so a rigged goal_get turn gets 'unknown tool' (C4b/F4a; implementation residual)",
+        "goals-plans-02 round driver staged as a RED gate: no round advance loop / no SetGoalAutonomousRound caller, so zero-human-turn advance to a round-limit block is unobservable (C4c; implementation residual)",
+        "goals-plans-03 plan mode: /plan enters mode; exit_plan_mode present-for-review runs; the interactive Approve that lands the plan is a documented-infeasible residual (no mid-turn answer sink) (C4d)"
       ],
       "note": "02-goals-plans branch e2e gate (G2/G3/G4): goal tools + round driver + plan mode through live RPC/CLI. Fails RED until the goal/delegate/plan-mode daemon wiring lands concurrently."
     },
@@ -4607,7 +4607,7 @@
       "id": "goals-plans-01",
       "suite": "goals-plans",
       "diff": "M",
-      "title": "goal_get/goal_create/goal_update are registered; goal_create without direct human authority is refused at the tool boundary (C4b)",
+      "title": "goal_get/goal_create/goal_update RED gate: goal-tool provider unwired (wireGoalProvider fails closed), rigged goal_get -> 'unknown tool' (C4b/F4a; implementation residual)",
       "paths": [
         "internal/employee/"
       ]
@@ -4616,7 +4616,7 @@
       "id": "goals-plans-02",
       "suite": "goals-plans",
       "diff": "M",
-      "title": "round driver: goal with max_rounds=2 advances autonomously then auto-blocks with code round-limit after zero human turns (C4c)",
+      "title": "round driver RED gate: no round-advance loop / no SetGoalAutonomousRound caller; zero-human-turn advance to round-limit unobservable (C4c; implementation residual)",
       "paths": [
         "internal/employee/"
       ]
@@ -4625,7 +4625,7 @@
       "id": "goals-plans-03",
       "suite": "goals-plans",
       "diff": "M",
-      "title": "plan mode: /plan enters plan mode; exit_plan_mode presents Approve; approve lands via the existing plan gate and plan mode exits (C4d)",
+      "title": "plan mode: /plan enters mode; exit_plan_mode present-for-review runs; interactive Approve that lands the plan is a documented-infeasible residual (C4d)",
       "paths": [
         "internal/employee/"
       ]

@@ -426,25 +426,42 @@ var ToolActionMap = map[string]string{
 	// lsp_navigate (dsh-convergence 04/02-lsp-navigation): read-only LSP nav
 	// with the same code_read -> file_read remap as the sibling lsp_* tools.
 	"lsp_navigate": ToolFileRead,
+	// timeout_probe (tool-surface 01, e2e F9): a read-only sleep probe used
+	// exclusively by the hermetic tool-surface gate to exercise the declared
+	// TOOL_TIMEOUT path through the live executor. Maps to file_read (a grant
+	// the coder lane holds), not tool_shell, so the test never squeaks past a
+	// shell-command gate.
+	"timeout_probe": ToolFileRead,
 
 	// Remaining registered builtins (found by the completeness test
 	// enumerating builtin constructors — every entry below was a latent
 	// "Unknown action" denial of the H7 class):
-	"memory_retain":        "memory_write",
-	"memory_recall":        "memory_read",
-	"memory_reflect":       "memory_write",
-	"memory_vote":          "memory_write", // vote mutates a claim's usefulness score
-	"list_expired_claims":  "memory_read",
-	"purge_auto_claims":    "memory_write", // purges auto-generated claims only
-	"entity_create":        "memory_write", // knowledge graph = memory store
-	"entity_link":          "memory_write",
-	"entity_query":         "memory_read",
-	"graph_stats":          "memory_read",
-	"compute_pagerank":     "memory_read",
-	"detect_communities":   "memory_read",
-	"community_siblings":   "memory_read",
-	"resolve":              "task_write", // resolves a pending change
-	"spreadsheet_write":    "file_write",
+	"memory_retain":       "memory_write",
+	"memory_recall":       "memory_read",
+	"memory_reflect":      "memory_write",
+	"memory_vote":         "memory_write", // vote mutates a claim's usefulness score
+	"list_expired_claims": "memory_read",
+	"purge_auto_claims":   "memory_write", // purges auto-generated claims only
+	"entity_create":       "memory_write", // knowledge graph = memory store
+	"entity_link":         "memory_write",
+	"entity_query":        "memory_read",
+	"graph_stats":         "memory_read",
+	"compute_pagerank":    "memory_read",
+	"detect_communities":  "memory_read",
+	"community_siblings":  "memory_read",
+	"resolve":             "task_write", // resolves a pending change
+	"spreadsheet_write":   "file_write",
+	// Office authoring tools (dsh-convergence leaf 06, contract C11.2-C11.4):
+	// model-facing docx/pptx/xlsx writers registered like spreadsheet_write
+	// (components.go registrar) and backed by requires-tools-gated skills in
+	// config/skills/office. create/edit write files in the session working
+	// directory (same file_write class as spreadsheet_write); read/validate
+	// are read-only but ride the same per-tool mapping (bughunt H7 class —
+	// without these entries the tool name becomes the action and
+	// BuiltinRules denies every call "Unknown action").
+	"office_docx":          "file_write",
+	"office_pptx":          "file_write",
+	"office_workbook":      "file_write",
 	"git_validate":         "file_read",     // read-only validation
 	"git_split":            "shell_execute", // runs git via subprocess; risk elevation applies
 	"template_invoke":      "skill_execute", // executes a stored template
@@ -459,6 +476,15 @@ var ToolActionMap = map[string]string{
 	"team_result":          "task_write",
 	"platform_team_create": "task_write",
 	"team_preset_create":   "task_write",
+	// Plan mode (dsh-convergence 02-goals-plans, 04-plan-mode leaf): exit_plan_mode
+	// presents the Approve / Keep-planning decision on the messaging surface and,
+	// on interactive approval, lands a plan on the durable plan gate. It has no
+	// fs/network/exec surface of its own, so send_message (the ask/reply_to_user
+	// family) is the least-privileged consistent mapping. Without this entry the
+	// tool name becomes the fallback action and BuiltinRules denies every call
+	// "Unknown action" despite registration + grant (bughunt H7 class — the exact
+	// gap that hit ask / json_extract / the GitHub family before their entries).
+	"exit_plan_mode": "send_message",
 }
 
 // WorkingDirSetter is implemented by tools that accept a session-scoped

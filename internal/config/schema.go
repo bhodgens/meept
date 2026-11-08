@@ -2258,6 +2258,12 @@ type AgentConfig struct {
 	// every loop budget path byte-identical to the pre-assembler
 	// behavior.
 	ContextAssembler ContextAssemblerConfig `json:"context_assembler" toml:"context_assembler"`
+	// ToolTimeoutProbeEnabled registers the e2e-only "timeout_probe"
+	// instrumentation tool (a sleep probe declaring a short cooperative
+	// budget) so the live-turn TOOL_TIMEOUT path (contract B1) stays
+	// hermetic-testable without touching production registries or agent
+	// grants. Default false: production registries never carry the probe.
+	ToolTimeoutProbeEnabled bool `json:"tool_timeout_probe_enabled" toml:"tool_timeout_probe_enabled"`
 }
 
 // AgentToolsConfig holds [agent.tools] settings. GBNFConstrained is the
@@ -5263,7 +5269,7 @@ type VoiceConfig struct {
 	TTSVoice             string              `json:"tts_voice"              toml:"tts_voice"`
 	STTModel             string              `json:"stt_model"              toml:"stt_model"`
 	TTSBaseURL           string              `json:"tts_base_url"           toml:"tts_base_url"`
-STTBaseURL           string              `json:"stt_base_url"           toml:"stt_base_url"`
+	STTBaseURL           string              `json:"stt_base_url"           toml:"stt_base_url"`
 	Local                LocalConfig         `json:"local"                  toml:"local"`
 	EmployeeLeg          []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
 }

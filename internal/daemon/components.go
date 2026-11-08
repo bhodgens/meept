@@ -3657,7 +3657,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// dedicated directory under the daemon data dir, opened lazily inside
 	// registerBuiltinTools only when enabled.
 	knowledgeDataDir := filepath.Join(cfg.Daemon.DataDir, "knowledge")
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions, gateCap, securityEngine)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions, gateCap, securityEngine, cfg.Agent.ToolTimeoutProbeEnabled)
 
 	// GitHub PR/CI tools ([github] block, github-pr-ci tree): register
 	// next to the other builtin tools, gated on enabled + a resolvable
@@ -7759,8 +7759,18 @@ func registerBuiltinTools(
 	shellPermCfg config.ShellPermissionsConfig,
 	gateCap *gateCaptureStore,
 	securityEngine *intsecurity.Engine,
+	probeTimeoutEnabled bool,
 ) {
 	readCache := builtin.NewReadCache(30)
+
+	// timeout_probe (tool-surface 01, e2e F9): registration is gated on the
+	// opt-in flag so production registries never carry the instrumentation
+	// tool. The harness sets agent.tool_timeout_probe_enabled to exercise the
+	// declared TOOL_TIMEOUT path through the live executor.
+	if probeTimeoutEnabled {
+		registry.Register(builtin.NewTimeoutProbeTool())
+		logger.Debug("timeout_probe tool registered (agent.tool_timeout_probe_enabled)")
+	}
 
 	// Filesystem tools
 	// NOTE (agent-groups leaf 01 T3): per-tool SetFenceChecker wiring is
@@ -9679,7 +9689,30 @@ func (c *Components) initializeSkillsWithBus(cfg *config.Config, logger *slog.Lo
 				Roots:  watchedRoots,
 				Loader: c.SkillLoader,
 				Discover: func(ctx context.Context) ([]*skills.SkillIndexEntry, error) {
-					return discovery.DiscoverMetadataOnly()
+					entries, err := discovery.DiscoverMetadataOnly()
+					if err != nil {
+						return entries, err
+					}
+					// Hot-reload surfaces the same durable catalog through the
+					// existing skills.list RPC (registry.List), which otherwise
+					// stays frozen at the boot population: the watcher's metadata
+					// rescan updates the index (loader/context) but never the
+					// backwards-compat registry, so a skill written to a discovery
+					// root is invisible to skills.list until a restart. Re-run the
+					// body-bearing discovery and swap the registry to the fresh
+					// set — the same population the boot path performs (leaf 03
+					// hot-reload contract: visible WITHOUT a restart). Best-effort:
+					// a registry re-discover failure logs and leaves the previous
+					// registry in place (the index still hot-reloads).
+					if c.SkillRegistry != nil {
+						if full, ferr := discovery.Discover(); ferr == nil {
+							c.SkillRegistry.Clear()
+							c.SkillRegistry.RegisterAll(full)
+						} else {
+							logger.Warn("skill watcher: registry re-discover failed", "error", ferr)
+						}
+					}
+					return entries, nil
 				},
 				Index:  c.SkillIndex,
 				Bus:    msgBus,
