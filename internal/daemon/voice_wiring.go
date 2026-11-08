@@ -247,6 +247,11 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		TokenAuth:      textServer,
 		Live:           func() int { return len(registry.Live()) },
 	}, vlog.With("sub", "child"), nil)
+	// phoneHold is filled once the employee stack exists (below). The
+	// spawn closure reads it at call time, never during WireVoice, so
+	// the later assignment is visible. A nil read degrades to no
+	// ended-state rather than panicking.
+	var phoneHold *VoiceEmployeeWiring
 	spawn := func(callCtx context.Context, ev telnyx.CallEvent) (context.CancelFunc, error) {
 		if err := child.EnsureRunning(callCtx); err != nil {
 			return nil, err
@@ -263,6 +268,12 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		if _, err := registry.Acquire(ev.CallControlID, cfg.DefaultEmployee, ev.From); err != nil {
 			return nil, fmt.Errorf("voice wiring: registry acquire: %w", err)
 		}
+		// Goal-hold + call row (ended-state gap): same acquire the local
+		// leg's Hold seam does. Release rides ReleaseHook exactly once;
+		// do not keep AcquireCallHold's release func (a second release
+		// would be a double-unlock without the once-guard, and the
+		// contract is hook-only, matching the local wiring).
+		holdPhoneCall(phoneHold, ev.CallControlID, cfg.DefaultEmployee, ev.From, voice.DirectionIncoming)
 		return func() {}, nil
 	}
 	manager := voice.NewManager(voice.ManagerConfig{
@@ -288,6 +299,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	if err != nil {
 		return nil, fmt.Errorf("voice wiring: employee stack: %w", err)
 	}
+	phoneHold = employee
 
 	// -- 6. Supervisor (C6). The fast-model seam honors
 	// voice.supervisor_model (audit M1): when set, a dedicated client is
@@ -342,6 +354,13 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			ConnectionID:    cfg.ConnectionID,
 			FromNumber:      cfg.FromNumber,
 			TimeoutSecs:     cfg.TimeoutSecs,
+			// Outbound twin of LocalDeps.Hold. Nil is not used here:
+			// the phone leg is armed, so the hold is wired. A nil
+			// employee cannot happen (WireVoiceEmployee already
+			// returned). Release is the manager hook, not this closure.
+			Hold: func(ccid, emp string) {
+				holdPhoneCall(employee, ccid, emp, livePhoneTarget(registry, ccid), voice.DirectionOutgoing)
+			},
 		}, tel, manager, registry, deps.Effects, audit, vlog.With("sub", "dialer"))
 	}
 
@@ -412,7 +431,9 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			// fan-out's ReleaseHook sees it in heldCalls and runs
 			// Binding.OnCallEnd to mark the calls.db row 'ended'. The
 			// release itself rides ReleaseHook -> ReleaseForCall at teardown;
-			// this only acquires.
+			// this only acquires. Phone inbound/outbound use holdPhoneCall;
+			// do not fold them into this closure (a second OnCallStart
+			// on the local leg would duplicate the call row).
 			Hold: func(ccid, emp string) {
 				employee.AcquireCallHold(ccid, emp)
 			},
@@ -673,6 +694,51 @@ func (w *VoiceWiring) spliceHangup(ccid, reason string) {
 		}
 	}
 	w.Manager.FailOutcome(ccid, voice.OutcomeFailed, reason)
+}
+
+// holdPhoneCall registers the goal hold and starts the calls.db row for a
+// live phone leg (inbound answer and outbound dial). Release is NOT taken
+// here: Manager release hook -> ReleaseHook -> ReleaseForCall unlocks the
+// per-employee mutex exactly once. Keeping AcquireCallHold's returned
+// release func and also running the hook would be a second release attempt;
+// the map-delete once-guard makes that a no-op, but the contract is
+// hook-only, matching the local leg's Hold seam.
+//
+// Nil employee degrades to no ended-state (the pinned posture). OnCallStart
+// failure is logged and does not fail the call (local-leg posture): without
+// a live binding entry, OnCallEnd is a no-op and the row cannot reach ended,
+// so the start has to land here — the phone leg had no other OnCallStart
+// call site.
+func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction string) {
+	if emp == nil || ccid == "" || employeeID == "" {
+		return
+	}
+	emp.AcquireCallHold(ccid, employeeID)
+	if emp.Binding == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := emp.Binding.OnCallStart(ctx, ccid, number, employeeID, direction, voice.DayBrief{})
+	if err != nil && emp.logger != nil {
+		emp.logger.Warn("voice wiring: phone OnCallStart failed (call continues unbound)",
+			"ccid", ccid, "direction", direction, "error", err)
+	}
+}
+
+// livePhoneTarget returns the registry target for ccid, or "" when the
+// slot is already gone. Outbound dial Acquires before Hold, so the
+// normalized target is present for OnCallStart.
+func livePhoneTarget(reg voice.Registry, ccid string) string {
+	if reg == nil || ccid == "" {
+		return ""
+	}
+	for _, inst := range reg.Live() {
+		if inst.CallControlID == ccid {
+			return inst.Target
+		}
+	}
+	return ""
 }
 
 // releaseCall is the Manager release hook fan-out. Order matters for

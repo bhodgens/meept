@@ -251,3 +251,107 @@ func TestCheckClassifierRuntimeHealth_NoSlotSkips(t *testing.T) {
 		t.Fatalf("no classifier slot must skip the gate: %v", err)
 	}
 }
+
+// llamaCtxProviders is a local llama-server whose --ctx-size can be set
+// independently of the model's context_limit.
+func llamaCtxProviders(ctxSize string, limit int) *llm.ProvidersConfig {
+	cmd := []string{"llama-server", "--model", "/models/lfm.gguf", "--port", "8080", "--ctx-size", ctxSize}
+	return &llm.ProvidersConfig{
+		Providers: map[string]llm.ProviderConfig{
+			"local-gguf": {
+				API:     "openai",
+				Options: llm.ProviderOptionsConfig{BaseURL: "http://127.0.0.1:8080/v1"},
+				Lifecycle: &llm.RuntimeLifecycleConfig{
+					Runtime:      "llama-cpp",
+					ModelPath:    "/models/lfm.gguf",
+					SpawnCommand: cmd,
+				},
+				Models: map[string]llm.ModelDef{
+					"lfm-8b-gguf": {ContextLimit: limit},
+				},
+			},
+		},
+	}
+}
+
+// TestCheckClassifierRuntimeHealth_CtxSizeExceedsLimitFails pins issue 51:
+// boot fails immediately when --ctx-size exceeds the model's context_limit.
+// The value is not clamped, and the health prober is not consulted.
+func TestCheckClassifierRuntimeHealth_CtxSizeExceedsLimitFails(t *testing.T) {
+	providers := llamaCtxProviders("65536", 32768)
+	calls := 0
+	proberFor := func(providerID string) (classifierRuntimeProber, bool) {
+		calls++
+		return &fakeProber{healthy: true}, true
+	}
+	modelsCfg := &config.ModelsConfig{ClassifierModel: "local-gguf/lfm-8b-gguf"}
+
+	err := checkClassifierRuntimeHealth(
+		context.Background(), slog.Default(), modelsCfg, providers, true,
+		proberFor, metaForAdapter(providers),
+	)
+	if err == nil {
+		t.Fatal("ctx-size above context_limit must fail the boot gate")
+	}
+	if !errors.Is(err, errLlamaCtxSizeExceedsLimit) {
+		t.Fatalf("error = %v, want errLlamaCtxSizeExceedsLimit", err)
+	}
+	for _, want := range []string{"65536", "32768", "local-gguf", "lfm-8b-gguf"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("ctx-size gate must fail before the health prober, got %d calls", calls)
+	}
+
+	// Equal values are not a failure. A smaller loaded window is not this
+	// gate (the task is exceeds, not a silent clamp and not !=).
+	equal := llamaCtxProviders("32768", 32768)
+	err = checkClassifierRuntimeHealth(
+		context.Background(), slog.Default(), modelsCfg, equal, true,
+		proberFor, metaForAdapter(equal),
+	)
+	if err != nil {
+		t.Fatalf("ctx-size equal to context_limit must not fail the gate: %v", err)
+	}
+	if calls == 0 {
+		t.Fatal("equal ctx-size must fall through to the health prober")
+	}
+
+	smaller := llamaCtxProviders("16384", 32768)
+	err = checkLlamaCtxSizeLimit(smaller)
+	if err != nil {
+		t.Fatalf("ctx-size below context_limit must not fail: %v", err)
+	}
+
+	// The health-gate escape hatch does not skip a ctx-size violation.
+	err = checkClassifierRuntimeHealth(
+		context.Background(), slog.Default(), modelsCfg, providers, false,
+		proberFor, metaForAdapter(providers),
+	)
+	if !errors.Is(err, errLlamaCtxSizeExceedsLimit) {
+		t.Fatalf("failFast=false must still fail a ctx-size violation: %v", err)
+	}
+}
+
+// TestCheckClassifierRuntimeHealth_UnhealthyPrintsCtxSize pins issue 51 item 3:
+// the health-gate error names the configured ctx-size, not only the argv.
+func TestCheckClassifierRuntimeHealth_UnhealthyPrintsCtxSize(t *testing.T) {
+	providers := llamaCtxProviders("32768", 32768)
+	proberFor := func(providerID string) (classifierRuntimeProber, bool) {
+		return &fakeProber{healthy: false}, true
+	}
+	modelsCfg := &config.ModelsConfig{ClassifierModel: "local-gguf/lfm-8b-gguf"}
+
+	err := checkClassifierRuntimeHealth(
+		context.Background(), slog.Default(), modelsCfg, providers, true,
+		proberFor, metaForAdapter(providers),
+	)
+	if err == nil {
+		t.Fatal("unhealthy runtime must fail the health gate")
+	}
+	if !strings.Contains(err.Error(), "ctx_size 32768") {
+		t.Errorf("health-gate error missing configured ctx-size: %v", err)
+	}
+}

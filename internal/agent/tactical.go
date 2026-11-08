@@ -94,25 +94,35 @@ type StepJobPayload struct {
 
 // TacticalScheduler schedules ready steps as queue jobs and handles completion callbacks.
 type TacticalScheduler struct {
-	stepStore              *task.StepStore
-	taskStore              *task.Store
-	queue                  queue.Queue
-	registry               *AgentRegistry
-	bus                    *bus.MessageBus
-	pairManager            *PairManager
-	reviewManager          *ReviewManager
-	validatorManager       *validator.ValidatorManager
-	escalationManager      *EscalationManager
-	logger                 *slog.Logger
-	globalSemaphore        chan struct{}            // Global execution limit
-	agentSemaphore         map[string]chan struct{} // Per-agent concurrency slots
-	semaphoreMu            sync.Mutex               // Protects agentSemaphore map
-	validationGateInterval int                      // Run validation gate every N steps
-	validationGateCounter  map[string]int           // Per-task validation gate counter
-	validationGateMu       sync.Mutex               // Protects validationGateCounter
-	maxHandoffSteps        int                      // Max handoff steps per task (0 = unlimited)
-	handoffUseAmendment    bool                     // Route handoffs through amendment system
-	amendmentMgr           AmendmentSubmitter       // Optional: enables amendment-based step creation
+	stepStore         *task.StepStore
+	taskStore         *task.Store
+	queue             queue.Queue
+	registry          *AgentRegistry
+	bus               *bus.MessageBus
+	pairManager       *PairManager
+	reviewManager     *ReviewManager
+	validatorManager  *validator.ValidatorManager
+	escalationManager *EscalationManager
+	logger            *slog.Logger
+	globalSemaphore   chan struct{}            // Global execution limit
+	agentSemaphore    map[string]chan struct{} // Per-agent concurrency slots
+	semaphoreMu       sync.Mutex               // Protects agentSemaphore map
+	// slotLeases maps a step ID to the execution slot scheduleStep
+	// acquired for that step. Release returns only that lease, once.
+	// Retry requeues keep the lease so the continuation still occupies
+	// the slot; the terminal completion or failure releases it.
+	slotLeases map[string]*slotLease
+	// agentLeases is the acquireSlots/releaseSlots stack. releaseSlots
+	// pops one lease this agent acquired; an empty stack is a no-op and
+	// does not drain a token another execution still holds.
+	agentLeases            map[string][]*slotLease
+	slotLeaseMu            sync.Mutex
+	validationGateInterval int                // Run validation gate every N steps
+	validationGateCounter  map[string]int     // Per-task validation gate counter
+	validationGateMu       sync.Mutex         // Protects validationGateCounter
+	maxHandoffSteps        int                // Max handoff steps per task (0 = unlimited)
+	handoffUseAmendment    bool               // Route handoffs through amendment system
+	amendmentMgr           AmendmentSubmitter // Optional: enables amendment-based step creation
 
 	// Quota deferral (quota-aware job deferral): when a step job's failure
 	// is quota-class, the step is DEFERRED instead of failed — the job is
@@ -474,6 +484,8 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 		globalSemaphore:        globalSemaphore,
 		agentSemaphore:         agentSemaphore,
 		semaphoreMu:            sync.Mutex{},
+		slotLeases:             make(map[string]*slotLease),
+		agentLeases:            make(map[string][]*slotLease),
 		validationGateInterval: validationGateInterval,
 		validationGateCounter:  make(map[string]int),
 		validationGateMu:       sync.Mutex{},
@@ -758,8 +770,12 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 	ts.assignStepAgent(step)
 	agentID := step.AgentID
 
-	// Acquire semaphore slots (non-blocking)
-	if !ts.acquireSlots(agentID) {
+	// Acquire semaphore slots (non-blocking). The lease is held against
+	// the step until a terminal completion or failure — not released on
+	// the job-create/enqueue error paths below, which return these tokens
+	// directly because the step never started.
+	lease, ok := ts.acquireSlotLease(agentID)
+	if !ok {
 		return fmt.Errorf("%w: for agent %s", ErrNoExecutionSlot, agentID)
 	}
 
@@ -775,7 +791,7 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 
 	job, err := queue.NewJob(queue.JobTypeProjectTask, payload)
 	if err != nil {
-		ts.releaseSlots(agentID)
+		lease.release()
 		return fmt.Errorf("failed to create job: %w", err)
 	}
 
@@ -789,9 +805,10 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 
 	// Enqueue the job
 	if err := ts.queue.Enqueue(ctx, job); err != nil {
-		ts.releaseSlots(agentID)
+		lease.release()
 		return fmt.Errorf("failed to enqueue job: %w", err)
 	}
+	ts.holdStepSlot(step.ID, lease)
 
 	// Update step state, agent, and job reference
 	if err := ts.stepStore.SetAgentID(step.ID, agentID); err != nil {
@@ -816,9 +833,41 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 	return nil
 }
 
+// slotLease is one successful acquire of the global and per-agent
+// semaphores. release returns exactly those two tokens, once. A second
+// call is a no-op, so a release that does not own a lease cannot drain
+// a token another job still holds.
+type slotLease struct {
+	once   sync.Once
+	global chan struct{}
+	agent  chan struct{}
+}
+
+func (l *slotLease) release() {
+	if l == nil {
+		return
+	}
+	l.once.Do(func() {
+		<-l.agent
+		<-l.global
+	})
+}
+
 // acquireSlots attempts to acquire both global and per-agent semaphore slots.
 // Returns true if both acquired, false otherwise (no blocking).
+// The lease is recorded so releaseSlots can return only those tokens.
 func (ts *TacticalScheduler) acquireSlots(agentID string) bool {
+	lease, ok := ts.acquireSlotLease(agentID)
+	if !ok {
+		return false
+	}
+	ts.pushAgentLease(agentID, lease)
+	return true
+}
+
+// acquireSlotLease takes one global token and one per-agent token.
+// The returned lease is the only handle that can put those tokens back.
+func (ts *TacticalScheduler) acquireSlotLease(agentID string) (*slotLease, bool) {
 	// Get or create per-agent semaphore under lock, then release the lock
 	// before performing channel operations. The channels themselves are
 	// concurrency-safe; holding the mutex across channel sends both violates
@@ -842,7 +891,7 @@ func (ts *TacticalScheduler) acquireSlots(agentID string) bool {
 	case ts.globalSemaphore <- struct{}{}:
 		// Got global slot
 	default:
-		return false // Global semaphore full
+		return nil, false // Global semaphore full
 	}
 
 	// Try to acquire per-agent slot (non-blocking)
@@ -850,31 +899,88 @@ func (ts *TacticalScheduler) acquireSlots(agentID string) bool {
 	case agentSem <- struct{}{}:
 		// Got agent slot
 	default:
-		<-ts.globalSemaphore // Release global slot
-		return false         // Agent semaphore full
+		<-ts.globalSemaphore // Release the global token this attempt just took
+		return nil, false    // Agent semaphore full
 	}
 
-	return true
+	return &slotLease{global: ts.globalSemaphore, agent: agentSem}, true
 }
 
-// releaseSlots releases both global and per-agent semaphore slots.
+// releaseSlots releases one global and one per-agent slot this agent
+// acquired via acquireSlots. A call with no outstanding lease is a no-op:
+// it must not drain a token another execution still holds.
 func (ts *TacticalScheduler) releaseSlots(agentID string) {
-	ts.semaphoreMu.Lock()
-	agentSem := ts.agentSemaphore[agentID]
-	ts.semaphoreMu.Unlock()
-
-	// Release per-agent slot
-	if agentSem != nil {
-		select {
-		case <-agentSem:
-		default:
-		}
+	if lease := ts.popAgentLease(agentID); lease != nil {
+		lease.release()
 	}
+}
 
-	// Release global slot
-	select {
-	case <-ts.globalSemaphore:
-	default:
+func (ts *TacticalScheduler) pushAgentLease(agentID string, lease *slotLease) {
+	ts.slotLeaseMu.Lock()
+	defer ts.slotLeaseMu.Unlock()
+	if ts.agentLeases == nil {
+		ts.agentLeases = make(map[string][]*slotLease)
+	}
+	ts.agentLeases[agentID] = append(ts.agentLeases[agentID], lease)
+}
+
+func (ts *TacticalScheduler) popAgentLease(agentID string) *slotLease {
+	ts.slotLeaseMu.Lock()
+	defer ts.slotLeaseMu.Unlock()
+	stack := ts.agentLeases[agentID]
+	if len(stack) == 0 {
+		return nil
+	}
+	n := len(stack) - 1
+	lease := stack[n]
+	stack[n] = nil
+	if n == 0 {
+		delete(ts.agentLeases, agentID)
+	} else {
+		ts.agentLeases[agentID] = stack[:n]
+	}
+	return lease
+}
+
+// holdStepSlot records the lease scheduleStep acquired for stepID.
+// A step already holding a slot keeps that lease; the new tokens are
+// returned immediately so a second schedule cannot leak a slot or
+// overwrite the live one.
+func (ts *TacticalScheduler) holdStepSlot(stepID string, lease *slotLease) {
+	if lease == nil {
+		return
+	}
+	if stepID == "" {
+		lease.release()
+		return
+	}
+	ts.slotLeaseMu.Lock()
+	if ts.slotLeases == nil {
+		ts.slotLeases = make(map[string]*slotLease)
+	}
+	if ts.slotLeases[stepID] != nil {
+		ts.slotLeaseMu.Unlock()
+		lease.release()
+		return
+	}
+	ts.slotLeases[stepID] = lease
+	ts.slotLeaseMu.Unlock()
+}
+
+// releaseStepSlot returns the slot this step acquired, once. A step with
+// no outstanding lease is a no-op — the call must not steal another job's
+// token. Retry requeues leave the lease in place so the continuation
+// still occupies the slot.
+func (ts *TacticalScheduler) releaseStepSlot(stepID string) {
+	if stepID == "" {
+		return
+	}
+	ts.slotLeaseMu.Lock()
+	lease := ts.slotLeases[stepID]
+	delete(ts.slotLeases, stepID)
+	ts.slotLeaseMu.Unlock()
+	if lease != nil {
+		lease.release()
 	}
 }
 
@@ -1330,8 +1436,10 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 				"session_id", session.ID,
 			)
 
-			// Release semaphore slots
-			ts.releaseSlots(step.AgentID)
+			// Release the slot scheduleStep acquired for this step, if any.
+			// Pair steps are not scheduled through scheduleStep, so a step
+			// with no lease is a no-op and cannot steal another job's token.
+			ts.releaseStepSlot(step.ID)
 
 			// Store result
 			resultStr := ""
@@ -1361,8 +1469,17 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		}
 	}
 
-	// Release semaphore slots for this completed job
-	defer ts.releaseSlots(step.AgentID)
+	// Release the slot scheduleStep acquired for this step, unless a
+	// retry requeue below keeps it. The retried job does not acquire
+	// again; releasing here and again on the later completion steals
+	// another job's token. Capture the ID before step is reassigned.
+	heldStepID := step.ID
+	releaseSlot := true
+	defer func() {
+		if releaseSlot {
+			ts.releaseStepSlot(heldStepID)
+		}
+	}()
 
 	// Terminal completion: drop any quota-deferral counters for this step.
 	ts.clearQuotaDeferrals(step.ID)
@@ -1636,6 +1753,9 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 					"max_retries":            maxRetries,
 					string(MessageTypeError): rejected.Reason,
 				})
+				// The retry job occupies the slot acquired at schedule. Do not
+				// release it here; the later terminal completion releases once.
+				releaseSlot = false
 				return nil // Don't proceed to completion; step will be retried
 			}
 
@@ -1777,6 +1897,9 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 					"max_retries":            maxRetries,
 					string(MessageTypeError): validationErr.Error(),
 				})
+				// Same ownership rule as the filter retry: one acquire, held
+				// across the requeue, released on the terminal outcome.
+				releaseSlot = false
 				return nil // Don't proceed to completion; step will be retried
 			}
 
@@ -2333,8 +2456,10 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 				"error", jobErr,
 			)
 
-			// Release semaphore slots
-			ts.releaseSlots(step.AgentID)
+			// Release the slot scheduleStep acquired for this step, if any.
+			// Pair steps are not scheduled through scheduleStep, so a step
+			// with no lease is a no-op and cannot steal another job's token.
+			ts.releaseStepSlot(step.ID)
 
 			// Mark step failed and session failed
 			if err := ts.stepStore.SetResult(step.ID, jobErr); err != nil {
@@ -2349,8 +2474,17 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 		}
 	}
 
-	// Release semaphore slots for this failed job
-	defer ts.releaseSlots(step.AgentID)
+	// Release the slot scheduleStep acquired for this step, unless a
+	// quota deferral or transient retry below keeps it. Those requeues
+	// do not acquire again; releasing here and on the later terminal
+	// outcome steals another job's token.
+	heldStepID := step.ID
+	releaseSlot := true
+	defer func() {
+		if releaseSlot {
+			ts.releaseStepSlot(heldStepID)
+		}
+	}()
 
 	// Quota-aware job deferral (quota-reset-resilience): a quota-classified
 	// failure is a provider wait, NOT a step failure. If the queue supports
@@ -2401,7 +2535,9 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 						"resume_at": resumeAt.Format(time.RFC3339),
 						"deferrals": deferralCount,
 					})
-					return nil // deferred, not failed
+					// Deferred, not failed. The slot stays with the requeued job.
+					releaseSlot = false
+					return nil
 				}
 			}
 			// Bounds exhausted (or the schedule exceeded them): stamp the
@@ -2463,6 +2599,8 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 				// The retry consumed the failure: a later completion (or the
 				// eventual terminal outcome) re-arms the quota-deferral window.
 				ts.clearQuotaDeferrals(step.ID)
+				// Requeued, not failed. Keep the slot for the retry attempt.
+				releaseSlot = false
 				return nil // Job has been requeued, don't mark as failed
 			}
 		default:

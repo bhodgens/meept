@@ -903,13 +903,12 @@ out path -> voice.local.end -> registry empty + calls.db row with
 transcripts. Two scenarios are registered in e2e/manifest.json
 (voice-local-e2e-01, voice-local-refusals-01).
 
-### Known product gap (stated honestly)
+### Ended-state transition
 
-The call row's ENDED-state transition does not fire in production on
-either leg yet: `Binding.OnCallEnd` (which marks calls.db rows ended)
-rides `ReleaseHook -> heldCalls` (internal/daemon/voice_employee.go:312-326),
-and the hold is only registered by `AcquireCallHold`
-(internal/daemon/voice_employee.go:264), which has no production caller.
-The row, direction, session binding, and transcripts land; the ended
-transition is the wiring owner's gap (the e2e suite logs it rather than
-failing: e2e/suites/voice-local/voice_local_test.go:858-866).
+`Binding.OnCallEnd` marks calls.db rows ended. It rides
+`ReleaseHook -> heldCalls`, and the hold is registered by
+`AcquireCallHold` on every live leg: local (`LocalDeps.Hold`), phone
+inbound (spawn seam), and phone outbound (`DialConfig.Hold`). Release
+is the manager hook exactly once; a nil hold seam degrades to no
+ended-state. The phone leg also calls `Binding.OnCallStart` from
+`holdPhoneCall` — without that row, OnCallEnd is a no-op.

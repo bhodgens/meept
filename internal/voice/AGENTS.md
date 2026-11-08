@@ -249,16 +249,25 @@ store. Invariants a future agent must NOT break:
   idempotent nil; a foreign (non-`local-`-shaped) id is
   ErrUnknownLocalCall. Keep the prefix shape test honest - it is what
   distinguishes those two.
-- Goal-hold feeding (gap closed): the call row's ended-state transition
-  rides `ReleaseHook -> heldCalls`. The ONLY production caller of
-  `AcquireCallHold` (internal/daemon/voice_employee.go:264) is now the
-  local leg: `LocalLeg.Open` invokes the injected `LocalDeps.Hold` seam
-  (wired to AcquireCallHold in internal/daemon/voice_wiring.go) once the
-  call is live, so the release fan-out's ReleaseHook sees the ccid and
-  runs `Binding.OnCallEnd` -> CallStore.End to mark the row 'ended'.
-  This covers BOTH local openers (the voice.local.* RPC seam and the
-  voice_call tool's SetVoiceLocalFunc). Keep the Hold seam optional
-  (nil degrades to no ended-state), the same posture as before.
+- Goal-hold feeding: the call row's ended-state transition rides
+  `ReleaseHook -> heldCalls`. `AcquireCallHold` is registered once per
+  live call, and released exactly once by `ReleaseHook -> ReleaseForCall`
+  (the map delete is the once-guard; do not also call the returned
+  release func). Production callers:
+  - local: `LocalLeg.Open` -> `LocalDeps.Hold` (wired in
+    `internal/daemon/voice_wiring.go`). Nil Hold degrades to no
+    ended-state. Do not change this contract; do not add a second
+    OnCallStart on the local path.
+  - phone inbound: the spawn seam in `voice_wiring.go` calls
+    `holdPhoneCall` after registry Acquire (the closure reads the
+    employee pointer filled after `WireVoiceEmployee`).
+  - phone outbound: `Dialer.holdCall` after a successful Acquire, via
+    `DialConfig.Hold` (nil degrades to no ended-state). Refusals and
+    the idempotent retry path do not hold.
+  `holdPhoneCall` also runs `Binding.OnCallStart` — the phone leg had
+  no other call site, and `OnCallEnd` is a no-op without a live binding
+  entry, so the row would never reach 'ended' on the hold alone.
+  Keep both Hold seams optional.
 - RPC stays seam-based: `internal/rpc/voice_local.go` takes
   `VoiceLocalSeams` func fields and NEVER imports internal/voice (the
   daemon adapts in internal/daemon/voice_local_rpc.go). No audio ever

@@ -1646,6 +1646,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			// agents.* RPC methods, so rpcServer must be non-nil.
 			if rpcServer != nil && components.EmployeeManager != nil {
 				agentHandler := employeepkg.NewAgentAPIHandler(employeepkg.RPCCallback(rpcServer.CallMethod))
+				// Same store HTTP auth already validated against. Nil when
+				// multi-user is off (setter no-ops); the handler then uses a
+				// context identity if one is present and never invents "user".
+				agentHandler.SetAuthStore(components.AuthUsersStore)
+				if store, ok := httpCfg.AuthStore.(*auth.Store); ok {
+					agentHandler.SetAuthStore(store)
+				}
 				httpOpts = append(httpOpts, http.WithAgentHandlers(agentHandler))
 				logger.Info("agent (employee) HTTP endpoints enabled", "path", "/api/v1/agents/*")
 			} else if components.EmployeeManager != nil {
@@ -2448,7 +2455,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Marks them and their pending steps as failed so they don't accumulate forever.
 	if d.components != nil && d.components.TaskRegistry != nil {
 		if store := d.components.TaskRegistry.Store(); store != nil {
-			count, err := store.RecoverStaleTasks()
+			count, err := store.RecoverStaleTasks(d.components.TurnJournal, d.components.Queue)
 			if err != nil {
 				d.logger.Error("daemon: failed to recover stale tasks", "error", err)
 			} else if count > 0 {

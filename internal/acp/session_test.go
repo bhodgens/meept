@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -1912,4 +1913,107 @@ func TestResolveRankTargetExtraction(t *testing.T) {
 	if !strings.Contains(state, "path=/tmp/a/note.txt") {
 		t.Fatalf("state missing extracted target: %q", state)
 	}
+}
+
+// TestSession_ParentSecretNotInChildEnv pins issue 72: a sentinel in the
+// daemon environ must not reach an ACP child, whether the catalog env is
+// empty (previously left cmd.Env unset, so Go inherited everything) or
+// non-empty (previously copied os.Environ()). Failure text names the
+// sentinel key only — never dump the child environ (it can hold real
+// secrets from the test process).
+func TestSession_ParentSecretNotInChildEnv(t *testing.T) {
+	const sentinelName = "MEEPT_ACP_SENTINEL_SECRET"
+	const sentinelValue = "acp-parent-secret-should-not-leak"
+	t.Setenv(sentinelName, sentinelValue)
+
+	parent := []string{
+		"PATH=/usr/bin:/bin",
+		sentinelName + "=" + sentinelValue,
+		"HOME=/tmp/acp-home",
+	}
+	for _, catalog := range []map[string]string{
+		nil,
+		{"ACP_CATALOG_MARKER": "present"},
+	} {
+		built := childEnv(parent, catalog)
+		if envHasName(built, sentinelName) || envHasValue(built, sentinelValue) {
+			t.Fatalf("childEnv kept parent sentinel %s (%d entries)", sentinelName, len(built))
+		}
+	}
+
+	cases := []struct {
+		name    string
+		catalog map[string]string
+		want    string
+	}{
+		{name: "empty catalog env", catalog: nil},
+		{name: "non-empty catalog env", catalog: map[string]string{"ACP_CATALOG_MARKER": "present"}, want: "ACP_CATALOG_MARKER"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			out := filepath.Join(dir, "child-env")
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			_, err := Start(ctx, SessionConfig{
+				AgentID:     "envpin",
+				Command:     []string{"/bin/sh", "-c", fmt.Sprintf("/usr/bin/env > %q", out)},
+				Env:         tc.catalog,
+				Cwd:         dir,
+				DialTimeout: 5 * time.Second,
+			})
+			if err == nil {
+				t.Fatal("expected handshake failure from env dump command")
+			}
+			data, readErr := os.ReadFile(out)
+			if readErr != nil {
+				t.Fatalf("child did not write env (%d-byte start error)", len(err.Error()))
+			}
+			lines := splitEnvLines(data)
+			if envHasName(lines, sentinelName) || bytesContainsValue(data, sentinelValue) {
+				t.Fatalf("parent sentinel %s reached ACP child env (%d entries)", sentinelName, len(lines))
+			}
+			if !envHasName(lines, "PATH") {
+				t.Fatalf("allowlist dropped PATH (%d entries)", len(lines))
+			}
+			if tc.want != "" && !envHasName(lines, tc.want) {
+				t.Fatalf("catalog env %s did not reach child (%d entries)", tc.want, len(lines))
+			}
+		})
+	}
+}
+
+func splitEnvLines(data []byte) []string {
+	raw := strings.Split(string(data), "\n")
+	out := make([]string, 0, len(raw))
+	for _, line := range raw {
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func envHasName(entries []string, name string) bool {
+	prefix := name + "="
+	for _, entry := range entries {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func envHasValue(entries []string, value string) bool {
+	for _, entry := range entries {
+		_, rest, ok := strings.Cut(entry, "=")
+		if ok && rest == value {
+			return true
+		}
+	}
+	return false
+}
+
+func bytesContainsValue(data []byte, value string) bool {
+	return strings.Contains(string(data), value)
 }

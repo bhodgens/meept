@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/pkg/id"
 )
 
@@ -84,6 +85,28 @@ type Session struct {
 	events chan SessionEvent
 }
 
+// childEnv builds the ACP subprocess environment. cmd.Env must always be
+// set: a nil slice inherits the full daemon environ. Empty policy mode is
+// allowlist, matching LocalBackend when env_mode is unset. Catalog names
+// are added to that allowlist so explicit catalog entries still reach the
+// child; names present only in the daemon environ stay on BaseEnvKeys.
+// Stripped names are discarded — never log values.
+func childEnv(parent []string, catalog map[string]string) []string {
+	allow := make([]string, 0, len(catalog))
+	for name := range catalog {
+		allow = append(allow, name)
+	}
+	env, _ := runtime.BuildChildEnv(runtime.EnvPolicyConfig{
+		Mode:      runtime.EnvModeAllowlist,
+		Allowlist: allow,
+	}, parent, catalog)
+	if env == nil {
+		// nil Env on exec.Cmd inherits the parent environ.
+		return []string{}
+	}
+	return env
+}
+
 // Start spawns the agent subprocess and runs the ACP handshake.
 func Start(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	if len(cfg.Command) == 0 {
@@ -114,13 +137,10 @@ func Start(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	if cfg.Cwd != "" {
 		cmd.Dir = cfg.Cwd
 	}
-	if len(cfg.Env) > 0 {
-		env := os.Environ()
-		for k, v := range cfg.Env {
-			env = append(env, k+"="+v)
-		}
-		cmd.Env = env
-	}
+	// Always set Env. A nil Env inherits the full daemon environ, which is
+	// what an empty catalog env used to do; copying os.Environ() when the
+	// catalog env was non-empty did the same (issue 72).
+	cmd.Env = childEnv(os.Environ(), cfg.Env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stderr = os.Stderr
 

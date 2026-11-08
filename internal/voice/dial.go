@@ -72,6 +72,12 @@ type DialConfig struct {
 	// to DefaultNoAnswerSecs on both sides.
 	TimeoutSecs int
 	TestBaseURL string
+	// Hold is the daemon-glue goal-hold seam (AcquireCallHold), the
+	// outbound twin of LocalDeps.Hold. Invoked once after a successful
+	// registry Acquire, before the no-answer timer, so ReleaseHook sees
+	// the ccid. Nil degrades to no ended-state. The release itself rides
+	// the manager release hook; this seam only acquires.
+	Hold func(ccid, employeeID string)
 }
 
 // AuditWriter is the narrow audit seam (C9): one canonical row per dial
@@ -140,6 +146,9 @@ type Dialer struct {
 	fx     EffectsLedger
 	audit  AuditWriter
 	logger *slog.Logger
+	// hold is DialConfig.Hold, copied at construction. Immutable after
+	// NewDialer returns; nil is a no-op (degraded stack).
+	hold func(ccid, employeeID string)
 
 	mu       sync.Mutex
 	timers   map[string]*time.Timer   // ccid -> no-answer timer (stopped on answered)
@@ -170,6 +179,7 @@ func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, f
 		fx:       fx,
 		audit:    audit,
 		logger:   logger,
+		hold:     cfg.Hold,
 		timers:   make(map[string]*time.Timer),
 		answered: make(map[string]bool),
 		dones:    make(map[string]chan struct{}),
@@ -321,6 +331,11 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 		}
 		return DialResult{}, fmt.Errorf("voice: dial: registry acquire: %w", err)
 	}
+	// Goal hold once the slot is live, before the no-answer timer can
+	// fire a terminal outcome. Refusals and the idempotent retry path
+	// return above this line and must not hold. Release rides the
+	// manager hook; do not release here.
+	d.holdCall(ccid, req.EmployeeID)
 
 	// -- 7. receipt + Complete: the irreversible effect (one ring) happened.
 	// A later retry of this request_id returns this ccid without dialing. --
@@ -379,6 +394,17 @@ func (d *Dialer) doneFor(ctx context.Context, ccid string) <-chan struct{} {
 		return d.mgr.WaitCall(ccid)
 	}
 	return make(chan struct{})
+}
+
+// holdCall acquires the goal hold for a live outbound call when the seam
+// is wired. Nil seam is a no-op (degraded stack: the row then never
+// reaches ended). Called once per successful Acquire, matching
+// LocalLeg.holdCall.
+func (d *Dialer) holdCall(ccid, employeeID string) {
+	if d.hold == nil || ccid == "" {
+		return
+	}
+	d.hold(ccid, employeeID)
 }
 
 // registryGate enforces the C8 capacity and uniqueness rules against the

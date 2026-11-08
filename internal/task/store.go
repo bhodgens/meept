@@ -8,7 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
+
+	"github.com/caimlas/meept/internal/agent/turnjournal"
+	"github.com/caimlas/meept/internal/queue"
 
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
@@ -786,14 +790,30 @@ func decodeStringSlice(s string) []string {
 	return slice
 }
 
-// RecoverStaleTasks finds all tasks in non-terminal states (pending, planning,
-// executing, testing) and marks them as failed with reason "daemon_shutdown".
+// RecoverStaleTasks finds tasks in non-terminal states (pending, planning,
+// executing, testing) and marks them failed with reason "daemon_shutdown".
 // It also marks any non-terminal steps belonging to those tasks as failed.
 // All updates run inside a single transaction so a crash cannot leave the
 // database in an inconsistent state (tasks failed but steps non-terminal).
 // Returns the number of tasks that were recovered.
-func (s *Store) RecoverStaleTasks() (int, error) {
+//
+// A task the turn journal will resume is not force-failed. journal is the
+// boot journal (nil when the flag is off or the store failed to open — then
+// nothing will be reclaimed, and every non-terminal row is abandoned).
+// jobs is the queue rehydrate requeues through (nil skips reclaim). An open
+// run is spared only when that queue's first project_task job is still
+// pending, claimed, processing, or failed — the same states the rehydrate
+// requeue closure puts back to pending. A closed run, a missing job, or a
+// job already completed/dead stays in the sweep.
+func (s *Store) RecoverStaleTasks(journal turnjournal.JournalStore, jobs queue.Queue) (int, error) {
 	ctx := context.Background()
+
+	spare, err := s.journalReclaimableTasks(ctx, journal, jobs)
+	if err != nil {
+		// Without the open-run list a journaled in-flight step cannot be
+		// told from an abandoned row. Do not force-fail either.
+		return 0, fmt.Errorf("failed to list journal-reclaimable tasks: %w", err)
+	}
 
 	// Collect IDs of stale tasks in non-terminal states.
 	rows, err := s.db.QueryContext(ctx, `
@@ -805,10 +825,15 @@ func (s *Store) RecoverStaleTasks() (int, error) {
 	defer rows.Close()
 
 	var taskIDs []string
+	spared := 0
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			s.logger.Error("Failed to scan stale task ID", "error", err)
+			continue
+		}
+		if _, ok := spare[id]; ok {
+			spared++
 			continue
 		}
 		taskIDs = append(taskIDs, id)
@@ -817,7 +842,7 @@ func (s *Store) RecoverStaleTasks() (int, error) {
 		return 0, fmt.Errorf("failed to iterate stale tasks: %w", err)
 	}
 
-	if len(taskIDs) == 0 {
+	if len(taskIDs) == 0 && spared == 0 {
 		return 0, nil
 	}
 
@@ -840,16 +865,22 @@ func (s *Store) RecoverStaleTasks() (int, error) {
 		s.logger.Error("Failed to sweep orphaned stale steps", "error", err)
 	}
 
-	// Mark stale tasks as failed.
+	// Mark abandoned stale tasks as failed. Journal-reclaimable IDs are
+	// excluded here, not only from taskIDs: a spared row that the SELECT
+	// already saw must not be failed by the blanket update.
+	clause, spareArgs := sqlNotIn("id", mapKeys(spare))
+	updateArgs := make([]any, 0, 1+len(spareArgs))
+	updateArgs = append(updateArgs, now)
+	updateArgs = append(updateArgs, spareArgs...)
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE tasks
 		SET state = 'failed', updated_at = ?
-		WHERE state IN ('pending', 'planning', 'executing', 'testing')`,
-		now); err != nil {
+		WHERE state IN ('pending', 'planning', 'executing', 'testing')`+clause,
+		updateArgs...); err != nil {
 		return 0, fmt.Errorf("failed to mark stale tasks as failed: %w", err)
 	}
 
-	// Mark non-terminal steps belonging to stale tasks as failed.
+	// Mark non-terminal steps belonging to abandoned stale tasks as failed.
 	for _, taskID := range taskIDs {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE task_steps
@@ -865,8 +896,94 @@ func (s *Store) RecoverStaleTasks() (int, error) {
 		return 0, fmt.Errorf("failed to commit stale recovery: %w", err)
 	}
 
-	s.logger.Info("Recovered stale tasks", "count", len(taskIDs))
+	if spared > 0 {
+		s.logger.Info("left journaled in-flight tasks for turn-journal reclaim", "spared", spared)
+	}
+	if len(taskIDs) > 0 {
+		s.logger.Info("Recovered stale tasks", "count", len(taskIDs))
+	}
 	return len(taskIDs), nil
+}
+
+// journalReclaimableTasks is the set of task IDs the boot rehydrate will
+// resume. A nil journal or a nil queue means rehydrate will not run, so
+// the set is empty and the sweep keeps every abandoned row. An OpenRuns
+// failure is returned: the caller must not force-fail a step it cannot
+// classify. A per-turn job lookup failure spares that turn (the safe
+// direction) and the sweep continues.
+func (s *Store) journalReclaimableTasks(ctx context.Context, journal turnjournal.JournalStore, jobs queue.Queue) (map[string]struct{}, error) {
+	if journal == nil || jobs == nil {
+		return nil, nil
+	}
+	runs, err := journal.OpenRuns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	spare := make(map[string]struct{})
+	for _, run := range runs {
+		if run.TurnID == "" {
+			continue
+		}
+		listed, lerr := jobs.ListByTaskID(ctx, run.TurnID)
+		if lerr != nil {
+			s.logger.Warn("turn journal reclaim: job lookup failed; sparing task",
+				"task_id", run.TurnID, "error", lerr)
+			spare[run.TurnID] = struct{}{}
+			continue
+		}
+		if projectTaskResumable(listed) {
+			spare[run.TurnID] = struct{}{}
+		}
+	}
+	return spare, nil
+}
+
+// projectTaskResumable reports whether the rehydrate requeue closure will
+// put this turn's job back to pending. It uses the FIRST project_task job,
+// matching rehydrateTurnJournal: a later job is not consulted. pending,
+// claimed, and processing are reset by the claim sweep; failed is retried
+// by the queue's own Retry. completed/dead and a missing job are not a
+// resume.
+func projectTaskResumable(jobs []*queue.Job) bool {
+	for _, j := range jobs {
+		if j == nil || j.Type != queue.JobTypeProjectTask {
+			continue
+		}
+		switch j.State {
+		case queue.StatePending, queue.StateClaimed, queue.StateProcessing, queue.StateFailed:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// sqlNotIn builds an " AND col NOT IN (?,?,?)" clause. An empty id list
+// returns an empty clause so the caller SQL stays byte-identical to the
+// no-journal sweep.
+func sqlNotIn(column string, ids []string) (string, []any) {
+	if len(ids) == 0 {
+		return "", nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	return " AND " + column + " NOT IN (" + strings.Join(placeholders, ",") + ")", args
+}
+
+func mapKeys(m map[string]struct{}) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // Ensure TaskStore implements io.Closer

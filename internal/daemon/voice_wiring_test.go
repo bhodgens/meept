@@ -11,12 +11,16 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +28,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	commhttp "github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/effects"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/secrets"
 	"github.com/caimlas/meept/internal/session"
@@ -710,4 +715,124 @@ func TestRouteFrameDuplicateSetupIgnored(t *testing.T) {
 		t.Fatal("precondition: per-call cancel armed on both reads")
 	}
 	t.Cleanup(func() { w.releaseCall(ccid, voice.OutcomeHangup) })
+}
+
+// TestPhoneHoldReleaseMarksEnded pins issue 123: phone inbound and
+// outbound take the same goal hold the local leg takes, Binding.OnCallEnd
+// marks the calls.db row ended, and a second release does not panic or
+// re-lock the per-employee mutex.
+func TestPhoneHoldReleaseMarksEnded(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("internal", "daemon", "voice_wiring.go"))
+	if err != nil {
+		// go test's cwd is the package dir when invoked as ./internal/daemon,
+		// and the module root when the harness sets workdir there.
+		src, err = os.ReadFile("voice_wiring.go")
+	}
+	if err != nil {
+		t.Fatalf("read voice_wiring.go: %v", err)
+	}
+	body := string(src)
+	spawnAt := strings.Index(body, "spawn := func")
+	mgrAt := strings.Index(body, "manager := voice.NewManager")
+	if spawnAt < 0 || mgrAt < spawnAt {
+		t.Fatal("could not locate inbound spawn closure")
+	}
+	if !strings.Contains(body[spawnAt:mgrAt], "holdPhoneCall(") {
+		t.Fatal("inbound spawn does not call holdPhoneCall (ended-state gap)")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.Header().Set("Content-Type", "application/json")
+		_, _ = rw.Write([]byte(`{"data":{"call_control_id":"cc-phone-out"}}`))
+	}))
+	defer srv.Close()
+	t.Setenv("MEEPT_TELNYX_TEST_BASE_URL", srv.URL)
+
+	deps := wireVoiceTestDeps(t, "")
+	deps.Config.Voice.AllowedNumbers = []string{"hold-target"}
+	deps.Config.Voice.ConnectionID = "conn-hold"
+	deps.Config.Voice.FromNumber = "hold-from"
+	deps.Config.Voice.TimeoutSecs = 3600
+	deps.Effects = effects.NewMemoryLedger()
+	w, err := WireVoice(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("WireVoice: %v", err)
+	}
+	if w == nil || w.Dialer == nil || w.Employee == nil {
+		t.Fatal("phone leg did not arm")
+	}
+	t.Cleanup(func() { w.Employee.Close() })
+	dbPath := filepath.Join(config.MeeptPath("voice"), "calls.db")
+
+	const inCCID = "cc-phone-in"
+	holdPhoneCall(w.Employee, inCCID, "phone-employee", "hold-caller", voice.DirectionIncoming)
+	if got := phoneCallState(t, dbPath, inCCID); got != "live" {
+		t.Fatalf("inbound row state = %q, want live (OnCallStart)", got)
+	}
+	w.releaseCall(inCCID, voice.OutcomeHangup)
+	if got := phoneCallState(t, dbPath, inCCID); got != "ended" {
+		t.Fatalf("inbound row state = %q, want ended", got)
+	}
+	w.releaseCall(inCCID, voice.OutcomeHangup)
+	if got := phoneCallState(t, dbPath, inCCID); got != "ended" {
+		t.Fatalf("second inbound release changed state to %q", got)
+	}
+	assertEmployeeHoldFree(t, w, "phone-employee")
+
+	res, err := w.Dialer.Dial(context.Background(), voice.DialRequest{
+		EmployeeID: "emp-out",
+		Target:     "hold-target",
+		RequestID:  "req-hold-out",
+	})
+	if err != nil {
+		t.Fatalf("outbound Dial: %v", err)
+	}
+	w.Employee.holdMu.Lock()
+	_, held := w.Employee.heldCalls[res.CallControlID]
+	w.Employee.holdMu.Unlock()
+	if !held {
+		t.Fatal("outbound dial did not AcquireCallHold")
+	}
+	if got := phoneCallState(t, dbPath, res.CallControlID); got != "live" {
+		t.Fatalf("outbound row state = %q, want live", got)
+	}
+	w.Manager.FailOutcome(res.CallControlID, voice.OutcomeHangup, "test hangup")
+	if got := phoneCallState(t, dbPath, res.CallControlID); got != "ended" {
+		t.Fatalf("outbound row state = %q, want ended", got)
+	}
+	w.Manager.FailOutcome(res.CallControlID, voice.OutcomeHangup, "second hangup")
+	if got := phoneCallState(t, dbPath, res.CallControlID); got != "ended" {
+		t.Fatalf("second outbound release changed state to %q", got)
+	}
+	assertEmployeeHoldFree(t, w, "emp-out")
+}
+
+func phoneCallState(t *testing.T, dbPath, ccid string) string {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("open calls.db: %v", err)
+	}
+	defer db.Close()
+	var state string
+	err = db.QueryRow(`SELECT state FROM voice_calls WHERE call_id = ?`, ccid).Scan(&state)
+	if err != nil {
+		t.Fatalf("call %s state: %v", ccid, err)
+	}
+	return state
+}
+
+func assertEmployeeHoldFree(t *testing.T, w *VoiceWiring, emp string) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		release := w.Employee.AcquireCallHold("cc-after-"+emp, emp)
+		release()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("employee %s hold was not released exactly once", emp)
+	}
 }

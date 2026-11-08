@@ -131,6 +131,12 @@ func TestConfigLoads(t *testing.T) {
 		t.Errorf("local-gguf spawn_command = %v, want --jinja (without it llama-server cannot emit tool calls)",
 			ggufProvider.Lifecycle.SpawnCommand)
 	}
+	// Issue 51: 65536 does not load on the validated host class (M2 Ultra
+	// 64GB, 3 resident llama-servers). --ctx-size must not exceed
+	// context_limit; both stay at the measured 32768 ceiling.
+	if i := slices.Index(ggufProvider.Lifecycle.SpawnCommand, "--ctx-size"); i < 0 || i+1 >= len(ggufProvider.Lifecycle.SpawnCommand) || ggufProvider.Lifecycle.SpawnCommand[i+1] != "32768" {
+		t.Errorf("local-gguf spawn_command = %v, want --ctx-size 32768", ggufProvider.Lifecycle.SpawnCommand)
+	}
 	// Contract C7 (llm-serving-tiers leaf 03): BOTH llama-server spawn
 	// entries carry explicit chunk-level KV reuse. Without the flag the
 	// server falls back to plain prefix-only reuse and silently loses the
@@ -157,6 +163,9 @@ func TestConfigLoads(t *testing.T) {
 	}
 	if !slices.Contains(ggufModel.Capabilities, "tool_use") {
 		t.Errorf("lfm-8b-gguf capabilities = %v, want tool_use", ggufModel.Capabilities)
+	}
+	if ggufModel.ContextLimit != 32768 {
+		t.Errorf("lfm-8b-gguf context_limit = %d, want 32768", ggufModel.ContextLimit)
 	}
 
 	// Port guard. Two loopback endpoints sharing one port makes the daemon
