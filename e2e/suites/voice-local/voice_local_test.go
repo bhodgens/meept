@@ -1020,3 +1020,53 @@ func TestVoiceLocalRefusals(t *testing.T) {
 	}
 	awaitLogLine(t, s, "voice call ended", 15*time.Second)
 }
+
+// TestVoiceLocalSpawnsChildWithoutPhone pins the local-only spawn gap
+// closure: voice.local.open itself guarantees the sidecar is up. The
+// stack boots with NO phone warm call - the previous topology needed a
+// throwaway Telnyx call because EnsureRunning's only production caller
+// was the phone spawn seam, so a local-only install (no telnyx token)
+// never armed the child and every local call ran on stub audio.
+func TestVoiceLocalSpawnsChildWithoutPhone(t *testing.T) {
+	_, modelDir := shimPath(t)
+	modelPath := writePiperModel(t, modelDir)
+	fake := newFakeTelnyx(t)
+	s, ctrlPath := bootLocalStack(t, fake, modelPath)
+
+	const (
+		employee = "emp-local-spawn"
+		label    = "spawnbox"
+	)
+	rpcCreateEmployee(t, s, employee)
+
+	// Open the local call. NO phone call was delivered anywhere in this
+	// test: if open no longer spawns the child, the control-socket poll
+	// below times out.
+	open := rpcOpenLocalCall(t, s, employee, label)
+	ccid, _ := open["call_id"].(string)
+
+	// The control socket derives from the child's --audio-dir and appears
+	// only once the child process is up (same observable the warm-call
+	// helper polls).
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if _, err := os.Stat(ctrlPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("child control socket %s never appeared after a local-only open (spawn-on-open gap regressed)", ctrlPath)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// The talk loop armed: the child answered the open frame with setup.
+	awaitLogLine(t, s, "voice wiring: talk loop armed", 15*time.Second)
+
+	// Teardown: end the spawned call so the suite leaves nothing live.
+	endClient := harness.DialRPC(t, s.SocketPath)
+	end := endClient.CallResult("voice.local.end", map[string]any{"call_id": ccid})
+	if end["ok"] != true {
+		t.Fatalf("voice.local.end result = %v, want ok:true", end)
+	}
+	awaitLogLine(t, s, "voice call ended", 15*time.Second)
+}

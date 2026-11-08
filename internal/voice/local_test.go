@@ -11,7 +11,6 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -24,7 +23,7 @@ import (
 
 // localLegDiscard keeps leaf logs out of test output.
 func localLegDiscard() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // legFakeRegistry wraps the real CallRegistry and records every Acquire
@@ -323,9 +322,11 @@ func TestLocalLegOpen(t *testing.T) {
 		t.Errorf("CallID = %q, want local- + a pkg/id-sized suffix", call.CallID)
 	}
 
-	// Pair paths under SocketDir, both files exist, sun_path-safe.
-	wantIn := filepath.Join(SocketDir(), call.CallID+".in")
-	wantOut := filepath.Join(SocketDir(), call.CallID+".out")
+	// Pair paths under SocketDir, both files exist, sun_path-safe. The
+	// open result exposes the CLIENT pair (<ccid>.c.in/.c.out); the
+	// child pair (<ccid>.in/.out) stays daemon-side.
+	wantIn := filepath.Join(SocketDir(), call.CallID+".c.in")
+	wantOut := filepath.Join(SocketDir(), call.CallID+".c.out")
 	if call.InPath != wantIn || call.OutPath != wantOut {
 		t.Errorf("paths = (%s, %s), want (%s, %s)", call.InPath, call.OutPath, wantIn, wantOut)
 	}

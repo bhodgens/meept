@@ -85,7 +85,6 @@ func (s *WhisperSTT) Stream(ctx context.Context, pcm <-chan []byte) (<-chan voic
 		return nil, fmt.Errorf("whisper temp dir: %w", err)
 	}
 	out := make(chan voicechild.Transcript, 8)
-	slog.Info("whisper stream started", "dir", dir, "model", s.cfg.Model)
 	go s.run(ctx, pcm, out, dir)
 	return out, nil
 }
@@ -159,14 +158,8 @@ func (s *WhisperSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voic
 			if len(chunk) == 0 {
 				continue
 			}
-			if len(buf) == 0 {
-				slog.Info("whisper first mic chunk", "bytes", len(chunk))
-			}
 			buf = append(buf, chunk...)
 			n, voicedNow := gate.energy(chunk)
-			if len(buf) < 200000 && len(buf)%64000 == 0 {
-				slog.Info("whisper buffering", "bytes", len(buf), "voiced", voicedNow)
-			}
 			if voicedNow {
 				voicedSamples += n
 				silenceSamples = 0

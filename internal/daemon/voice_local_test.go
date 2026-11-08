@@ -9,10 +9,14 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/tools/builtin"
 )
 
 // TestWireVoiceLocalLegNilWhenDisabled pins T6: without voice.local.enabled
@@ -64,6 +68,71 @@ func TestWireVoiceLocalLegConstructedWhenEnabled(t *testing.T) {
 	}
 }
 
+// buildConnectChildStub compiles a minimal meept-voice stand-in: it reads
+// the start token from stdin and dials the text socket, then holds until
+// signalled. Enough for ChildProc's handshake probe to pass so a local
+// Open's spawn-on-open guarantee succeeds in-process (the brief test
+// needs the spawn, not the audio pipeline).
+func buildConnectChildStub(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "connectchild.go")
+	const stub = `package main
+
+import (
+	"bufio"
+	"net"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+)
+
+func main() {
+	args := os.Args[1:]
+	textSocket := ""
+	for i := 0; i+1 < len(args); i += 2 {
+		if args[i] == "--text-socket" {
+			textSocket = args[i+1]
+		}
+	}
+	token, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	if textSocket == "" || strings.TrimSpace(token) == "" {
+		os.Exit(2)
+	}
+	conn, err := net.Dial("unix", textSocket)
+	if err != nil {
+		os.Exit(4)
+	}
+	if _, wErr := conn.Write([]byte(token + "\n")); wErr != nil {
+		os.Exit(5)
+	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			if _, err := conn.Read(buf); err != nil {
+				sigs <- syscall.SIGTERM
+				return
+			}
+		}
+	}()
+	<-sigs
+	conn.Close()
+}
+`
+	if wErr := os.WriteFile(src, []byte(stub), 0o600); wErr != nil {
+		t.Fatalf("write stub source: %v", wErr)
+	}
+	out := filepath.Join(dir, "meept-voice-stub")
+	cmd := exec.Command("go", "build", "-o", out, src)
+	if bErr := cmd.Run(); bErr != nil {
+		t.Fatalf("go build stub child: %v", bErr)
+	}
+	return out
+}
+
 // TestWireVoiceLocalLegBrief pins T5: a local Open runs the day brief +
 // binding with direction "local" and number "local:<label>" - the call
 // row in the call store carries direction=local and the local: target,
@@ -71,6 +140,7 @@ func TestWireVoiceLocalLegConstructedWhenEnabled(t *testing.T) {
 func TestWireVoiceLocalLegBrief(t *testing.T) {
 	t.Setenv("MEEPT_HOME", shortMeeptHomeForTest(t))
 	deps := wireVoiceTestDeps(t, "")
+	deps.Config.Voice.ChildBinaryPath = buildConnectChildStub(t)
 	deps.Config.Voice.Local = config.LocalConfig{
 		Enabled:     true,
 		STTProvider: "whisper",
@@ -83,6 +153,15 @@ func TestWireVoiceLocalLegBrief(t *testing.T) {
 		t.Fatalf("WireVoice: %v", err)
 	}
 	defer func() { w.Employee.Close() }()
+	// The text server must LISTEN before the local Open spawns the child:
+	// the stub dials the socket and the handshake probe waits for a
+	// connected child (a spawn without the listener is a guaranteed
+	// handshake timeout). registerTool stays a no-op here.
+	startCtx, stopStart := context.WithCancel(context.Background())
+	defer stopStart()
+	if sErr := w.Start(startCtx, func(dial builtin.DialerFunc, agentID builtin.AgentIDFunc) {}); sErr != nil {
+		t.Fatalf("Start: %v", sErr)
+	}
 
 	call, err := w.Local.Open(context.Background(), "emp-local-brief", "briefbox")
 	if err != nil {
@@ -219,4 +298,3 @@ func TestWireVoiceLocalDisabledRefusalPreserved(t *testing.T) {
 		t.Fatal("voice.local.open seam must be nil when the local leg is disabled, so ErrVoiceLocalDisabled keeps firing")
 	}
 }
-

@@ -112,7 +112,7 @@ type LocalDeps struct {
 	// row ended; without it the row stays 'live' forever. Nil degrades
 	// to no hold (the row then never reaches 'ended'), mirroring the
 	// "do not claim ended-state behavior" posture.
-	Hold func(ccid, employeeID string)
+	Hold   func(ccid, employeeID string)
 	Logger *slog.Logger
 }
 
@@ -143,7 +143,8 @@ type localCallState struct {
 	ccid      string
 	employee  string
 	target    string
-	pair      *AudioPair
+	pair      *AudioPair         // CHILD pair: the child dials <ccid>.in/.out
+	cliPair   *AudioPair         // CLIENT pair: the client dials <ccid>.cli.in/.out
 	cancel    context.CancelFunc // splice ctx cancel (End tears it down)
 	sessionID string
 	// ttsVoiceOverride is the tool's per-call `voice` arg (leaf 09
@@ -159,6 +160,15 @@ type localCallState struct {
 type childNoteSeam interface {
 	NoteCallStart(ccid string)
 	NoteCallEnd(ccid string)
+}
+
+// childSpawnSeam is the ensure-child seam the local leg calls through.
+// The concrete *ChildProc satisfies it (EnsureRunning spawns the sidecar
+// on first use); tests inject a stub or a recorder. Separate from
+// childNoteSeam so the phone-only spawn seam stays the ONLY EnsureRunning
+// caller at the wiring layer and the leg's own guarantee stays local.
+type childSpawnSeam interface {
+	EnsureRunning(ctx context.Context) error
 }
 
 // LocalLeg opens and tears down local voice calls. All mutable state is
@@ -270,8 +280,29 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 		return LocalCall{}, fmt.Errorf("voice: local leg: track: %w", err)
 	}
 
-	// -- 5. audio pair (paths under SocketDir, sun_path-safe like every
-	// phone call; NewAudioPair removes stale files itself). --
+	// -- 5b. child availability (local-leg CL5 closure, BEFORE the pair):
+	// the phone spawn seam is the only other EnsureRunning caller, and a
+	// local-only install (no telnyx token -> no phone leg) never crosses
+	// it. The leg therefore guarantees the sidecar itself. Ordering
+	// matters: ChildProc.spawn sweeps AudioDir/*.in|*.out as stale, so a
+	// spawn AFTER NewAudioPair would delete the live pair files. Spawning
+	// first also keeps the failure refusal clean: a failure refuses the
+	// call before any pair/hold/note side effect beyond the registry
+	// slot - which Release reaps directly. --
+	if l.deps.ChildProc != nil {
+		if s, ok := l.deps.ChildProc.(childSpawnSeam); ok {
+			if err := s.EnsureRunning(ctx); err != nil {
+				l.deps.Manager.FailOutcome(ccid, OutcomeFailed, fmt.Sprintf("child spawn: %v", err))
+				l.deps.Registry.Release(ccid)
+				return LocalCall{}, fmt.Errorf("voice: local leg: child spawn: %w", err)
+			}
+		}
+	}
+
+	// -- 6. audio pair (paths under SocketDir, sun_path-safe like every
+	// phone call; NewAudioPair removes stale files itself). AFTER the
+	// spawn: ChildProc.spawn sweeps AudioDir/*.in|*.out as stale and
+	// would delete the live pair files. --
 	pair, err := NewAudioPair(SocketDir(), ccid)
 	if err != nil {
 		l.deps.Manager.FailOutcome(ccid, OutcomeFailed, fmt.Sprintf("audio pair: %v", err))
@@ -285,6 +316,24 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 		target:   target,
 		pair:     pair,
 	}
+	// Client pair (local-leg client transport): the CHILD owns the main
+	// pair's accepts (it dials <ccid>.in/.out from its --audio-dir), so
+	// the CLIENT needs its own two listeners. The CLI/RPC open result
+	// returns the CLIENT pair paths; the child pair paths never leave
+	// the daemon. Suffix ".c" (not ".cli"): the macOS sun_path limit is
+	// 103 bytes and e2e sandboxes run close to it. The spawn's stale
+	// sweep only removes *.in|*.out under AudioDir at spawn time, which
+	// runs BEFORE either pair is created.
+	cliPair, err := NewAudioPair(SocketDir(), ccid+".c")
+	if err != nil {
+		l.deps.Manager.FailOutcome(ccid, OutcomeFailed, fmt.Sprintf("client pair: %v", err))
+		if cerr := pair.Close(); cerr != nil {
+			l.log.Debug("voice: local leg: child pair close on refusal", "ccid", ccid, "err", cerr)
+		}
+		l.deps.Registry.Release(ccid)
+		return LocalCall{}, fmt.Errorf("voice: local leg: client pair: %w", err)
+	}
+	st.cliPair = cliPair
 	// Tool-supplied CL4 override (voice_call's `voice` arg): highest
 	// precedence - beats the per-call profile resolver (voice_wiring).
 	if len(voiceOverride) > 0 {
@@ -331,12 +380,12 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 	go func() {
 		err := RunLocalSplice(spliceCtx, ccid, LocalSpliceConfig{}, LocalSpliceDeps{
 			Audio:       pair,
-			Client:      localClientIO{pair: pair},
+			Client:      localClientIO{cli: cliPair},
 			Text:        rawTextSender{srv: l.deps.TextServer},
 			CancelDraft: func(cancelCcid string) { l.cancelDraft(cancelCcid) },
 			Logger:      l.log.With("sub", "localsplice", "ccid", ccid),
 		})
-		if err != nil && !errors.Is(err, context.Canceled) && spliceCtx.Err() == nil && !isNotConnected(err) {
+		if err != nil && !errors.Is(err, context.Canceled) && spliceCtx.Err() == nil && !isNotConnected(err) && !errors.Is(err, ErrMicSpeechEnded) {
 			l.log.Error("voice: local leg: splice ended", "ccid", ccid, "err", err)
 			_ = l.End(ccid, fmt.Sprintf("splice: %v", err))
 		}
@@ -366,8 +415,8 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 		}
 	}
 
-	inPath := pairInPath(pair)
-	outPath := pairOutPath(pair)
+	inPath := pairInPath(cliPair)
+	outPath := pairOutPath(cliPair)
 	l.log.Info("voice: local call open", "ccid", ccid, "employee_id", employeeID,
 		"target", target, "in", inPath, "out", outPath)
 	return LocalCall{
@@ -463,6 +512,11 @@ func (l *LocalLeg) End(ccid, reason string) error {
 	if err := st.pair.Close(); err != nil {
 		l.log.Debug("voice: local leg: pair close", "ccid", ccid, "err", err)
 	}
+	if st.cliPair != nil {
+		if err := st.cliPair.Close(); err != nil {
+			l.log.Debug("voice: local leg: client pair close", "ccid", ccid, "err", err)
+		}
+	}
 	l.log.Info("voice: local call ended", "ccid", ccid, "reason", reason)
 	return nil
 }
@@ -477,8 +531,8 @@ func (l *LocalLeg) Live() []LocalCall {
 		out = append(out, LocalCall{
 			CallID:    st.ccid,
 			SessionID: st.sessionID,
-			InPath:    pairInPath(st.pair),
-			OutPath:   pairOutPath(st.pair),
+			InPath:    pairInPath(st.cliPair),
+			OutPath:   pairOutPath(st.cliPair),
 		})
 	}
 	return out
@@ -517,27 +571,29 @@ func (s rawTextSender) Send(raw []byte) error {
 	return s.srv.Send(f)
 }
 
-// localClientIO adapts the AudioPair onto the io.ReadWriter the local
-// splice wants. The pair's two-listener design stays the transport: the
-// client dials BOTH sockets (leaf 08); the daemon's accepted ends are
-// the client-facing surface. InPath (<ccid>.in) accepted conn: mic bytes
-// client -> daemon. OutPath (<ccid>.out) accepted conn: child PCM and
-// speaker bytes daemon -> client. ReadFromClient/WriteToClient (below,
-// in socket.go) expose those accepted ends.
+// localClientIO adapts the AudioPairs onto the io.ReadWriter the local
+// splice wants. TWO pairs stay the transport: the CHILD dials the main
+// pair (<ccid>.in/.out, one accept each - its conn is the audio side);
+// the CLIENT dials its own pair (<ccid>.cli.in/.cli.out). The daemon's
+// accepted ends on the CLIENT pair are the client-facing surface: the
+// .cli.in accept carries mic bytes client -> daemon, the .cli.out accept
+// carries speaker bytes daemon -> client. The child pair paths never
+// leave the daemon; open RPC/LocalCall expose only the client pair.
 type localClientIO struct {
-	pair *AudioPair
+	cli *AudioPair // the client pair (mic in / speaker out)
 }
 
-// Read reads client mic bytes from the pair's accepted .in conn (the
-// client dialed InPath and writes its mic there).
+// Read reads client mic bytes from the pair's accepted .cli.in conn (the
+// client dialed the client InPath and writes its mic there).
 func (c localClientIO) Read(p []byte) (int, error) {
-	return c.pair.ReadFromClient(p)
+	return c.cli.ReadFromMic(p)
 }
 
 // Write writes paced child PCM to the client over the pair's accepted
-// .out conn (the client dialed OutPath and reads its speaker there).
+// .cli.out conn (the client dialed the client OutPath and reads its
+// speaker there).
 func (c localClientIO) Write(p []byte) (int, error) {
-	return c.pair.WriteToClient(p)
+	return c.cli.WriteToClient(p)
 }
 
 // Compile-time: localClientIO satisfies the splice's client seam.

@@ -77,14 +77,11 @@ func run(ctx context.Context, textSocket, audioDir string) error {
 	// other calls stay up.
 	child.SetProviderFactories(
 		func(cfg providers.ProviderConfig, key string) (voicechild.STTProvider, error) {
-			// One STT vendor ships (A1: deepgram); a cfg naming anything
-			// else fails the call with the named vendor error.
-			switch cfg.Vendor {
-			case "", "deepgram":
-				return providers.NewSTT(cfg, key)
-			default:
-				return nil, fmt.Errorf("%w: stt vendor %q", providers.ErrUnknownVendor, cfg.Vendor)
-			}
+			// NewSTT dispatches on cfg.Vendor: "deepgram" (cloud, key
+			// required) or "whisper" (keyless local whisper.cpp
+			// subprocess). A cfg naming anything else fails the call
+			// with the named vendor error.
+			return providers.NewSTT(cfg, key)
 		},
 		func(cfg providers.ProviderConfig, key string) (voicechild.TTSProvider, error) {
 			// NewTTS dispatches on cfg.Vendor: "openai" (cloud, key

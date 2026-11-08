@@ -561,13 +561,22 @@ func (p *AudioPair) ReadFromClient(buf []byte) (int, error) {
 }
 
 // WriteToClient writes raw bytes to the CLIENT over the accepted conn
-// (local-leg leaf 07). Mirrors ReadFromClient: the local leg reuses the
-// pair's accepted-conn surface, so client mic in and speaker out ride
-// the same pair sockets the child audio already uses.
+// (local-leg leaf 07). Mirrors ReadFromMic: the client dials only after
+// the open RPC returns, so this WAITS for the .out accept (bounded by a
+// Close - the End-teardown path) before writing. Dropping audio instead
+// would starve the client's speaker mid-call.
 func (p *AudioPair) WriteToClient(pcm []byte) (int, error) {
-	p.mu.Lock()
-	conn := p.out
-	p.mu.Unlock()
+	var conn net.Conn
+	for {
+		p.mu.Lock()
+		conn = p.out
+		closed := p.closed
+		p.mu.Unlock()
+		if conn != nil || closed {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if conn == nil {
 		return 0, fmt.Errorf("voice: client not connected on %s.out", p.ccid)
 	}
@@ -592,6 +601,56 @@ func (p *AudioPair) ReadFromChild(buf []byte) (int, error) {
 		return n, fmt.Errorf("voice: read %s.out: %w", p.ccid, err)
 	}
 	return n, nil
+}
+
+// ReadFromMic reads raw bytes the CLIENT wrote over the accepted <ccid>.in
+// conn (local-leg client pair: the client dials <ccid>.c.in and writes
+// its mic there; the child pair's .in accept stays the child's). The
+// client dials only AFTER the open RPC returns - i.e. after the splice
+// started - so this call WAITS for the accept (bounded: a Close ends the
+// wait with the named error, which is the End-teardown path). A poll
+// loop, not a condition variable: the accept is a one-shot and 10 ms
+// granularity is far below audio timescales.
+func (p *AudioPair) ReadFromMic(buf []byte) (int, error) {
+	for {
+		p.mu.Lock()
+		conn := p.in
+		closed := p.closed
+		p.mu.Unlock()
+		if conn != nil {
+			n, err := conn.Read(buf)
+			if err != nil {
+				return n, fmt.Errorf("voice: read %s.in (client mic): %w", p.ccid, err)
+			}
+			return n, nil
+		}
+		if closed {
+			return 0, fmt.Errorf("voice: client not connected on %s.in (pair closed)", p.ccid)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// CloseWriteChild half-closes the daemon->child mic direction on the
+// accepted <ccid>.in conn: the child's audio pump sees EOF, closes its
+// PCM channel, and the STT adapter flushes the buffered utterance
+// (end-of-speech for file mode, where no more mic chunks ever arrive).
+// Errors while the child has not connected or after Close.
+func (p *AudioPair) CloseWriteChild() error {
+	p.mu.Lock()
+	conn := p.in
+	p.mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("voice: child not connected on %s.in", p.ccid)
+	}
+	uc, ok := conn.(*net.UnixConn)
+	if !ok {
+		return fmt.Errorf("voice: %s.in is not a unix conn; no half-close", p.ccid)
+	}
+	if err := uc.CloseWrite(); err != nil {
+		return fmt.Errorf("voice: half-close %s.in: %w", p.ccid, err)
+	}
+	return nil
 }
 
 // Close closes both listeners and any accepted connections and removes

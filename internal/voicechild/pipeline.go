@@ -243,7 +243,6 @@ func (p *pipeline) startTranscripts() {
 		return
 	}
 	p.transStarted = true // claimed; the retry chain owns the slot
-	p.logger.Info("voicechild: transcript session claimed", "call_id", p.ccid)
 	p.transMu.Unlock()
 
 	go p.openTranscriptSession(stt, sttOpenAttempts)
@@ -362,7 +361,6 @@ func (p *pipeline) pumpAudioIn() {
 			p.forwardPCM(data)
 		}
 		if err != nil {
-			p.logger.Info("voicechild: audio pump EOF", "call_id", p.ccid, "err", err)
 			close(p.pcmCh) // socket closed by teardown or daemon: end the Stream feed
 			return
 		}
