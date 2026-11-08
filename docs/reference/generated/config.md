@@ -88,6 +88,7 @@ Package config provides configuration loading and validation for meept.
   - [func \(c \*AgentToolsConfig\) Validate\(\) error](<#AgentToolsConfig.Validate>)
 - [type AgentWorkerPoolConfig](<#AgentWorkerPoolConfig>)
 - [type AgentsConfig](<#AgentsConfig>)
+- [type AllowedModelRouteConfig](<#AllowedModelRouteConfig>)
 - [type AmbientExtractionConfig](<#AmbientExtractionConfig>)
 - [type AnalyticsConfig](<#AnalyticsConfig>)
 - [type BackupConfig](<#BackupConfig>)
@@ -147,6 +148,7 @@ Package config provides configuration loading and validation for meept.
 - [type ContextAssemblerConfig](<#ContextAssemblerConfig>)
 - [type ContextDiscoveryConfig](<#ContextDiscoveryConfig>)
 - [type DaemonConfig](<#DaemonConfig>)
+- [type DelegationConfig](<#DelegationConfig>)
 - [type DetectionConfig](<#DetectionConfig>)
 - [type DistillationConfig](<#DistillationConfig>)
 - [type DistributedMemoryConfig](<#DistributedMemoryConfig>)
@@ -155,10 +157,12 @@ Package config provides configuration loading and validation for meept.
 - [type EgressRuleConfig](<#EgressRuleConfig>)
 - [type EmbedHealthCheckConfig](<#EmbedHealthCheckConfig>)
 - [type EmbeddingConfig](<#EmbeddingConfig>)
+- [type EmployeeLegConfig](<#EmployeeLegConfig>)
 - [type EmployeesAuditConfig](<#EmployeesAuditConfig>)
   - [func \(c \*EmployeesAuditConfig\) Validate\(\) error](<#EmployeesAuditConfig.Validate>)
 - [type EmployeesAutoPauseConfig](<#EmployeesAutoPauseConfig>)
 - [type EmployeesConfig](<#EmployeesConfig>)
+  - [func \(c \*EmployeesConfig\) GoalAutoAdvanceEnabled\(\) bool](<#EmployeesConfig.GoalAutoAdvanceEnabled>)
   - [func \(c \*EmployeesConfig\) Validate\(\) error](<#EmployeesConfig.Validate>)
 - [type EmployeesDefaultsConfig](<#EmployeesDefaultsConfig>)
 - [type EmployeesGateConfig](<#EmployeesGateConfig>)
@@ -1158,6 +1162,12 @@ AgentConfig holds agent loop settings.
 	    // every loop budget path byte-identical to the pre-assembler
 	    // behavior.
 	    ContextAssembler ContextAssemblerConfig `json:"context_assembler" toml:"context_assembler"`
+	    // ToolTimeoutProbeEnabled registers the e2e-only "timeout_probe"
+	    // instrumentation tool (a sleep probe declaring a short cooperative
+	    // budget) so the live-turn TOOL_TIMEOUT path (contract B1) stays
+	    // hermetic-testable without touching production registries or agent
+	    // grants. Default false: production registries never carry the probe.
+	    ToolTimeoutProbeEnabled bool `json:"tool_timeout_probe_enabled" toml:"tool_timeout_probe_enabled"`
 	}
 
 <a name="AgentGuardsConfig"></a>
@@ -1390,6 +1400,16 @@ AgentsConfig holds agent configuration settings.
 	    // disabled the dispatcher skips keyword-based capability matching and
 	    // relies on the LLM intent classifier (with keyword-table fallback).
 	    CapabilityMatchEnabled bool `json:"capability_match_enabled" toml:"capability_match_enabled"`
+	}
+
+<a name="AllowedModelRouteConfig"></a>
+## type AllowedModelRouteConfig
+
+AllowedModelRouteConfig is one exact provider\+model pair in the \[delegation\] allowed\_routes allowlist.
+
+	type AllowedModelRouteConfig struct {
+	    Provider string `json:"provider" toml:"provider"`
+	    Model    string `json:"model"    toml:"model"`
 	}
 
 <a name="AmbientExtractionConfig"></a>
@@ -1899,6 +1919,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	    Intake              IntakeConfig              `json:"intake"               toml:"intake"`
 	    Slack               SlackConfig               `json:"slack"                toml:"slack"`
+	    Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -2199,6 +2220,27 @@ DaemonConfig holds daemon\-specific settings.
 	    OutputFilters      OutputFiltersConfig  `json:"output_filters"       toml:"output_filters"`
 	}
 
+<a name="DelegationConfig"></a>
+## type DelegationConfig
+
+DelegationConfig configures the delegation subsystem \(\[delegation\] block, dsh\-convergence B4\): the model\-selection policy applied to every spawned child's provider/model route.
+
+	type DelegationConfig struct {
+	    // Enabled turns on per-child model selection (dsh B4). When false (the
+	    // default), request provider/model fields are ignored and the child
+	    // inherits the configured (or parent) route — the pre-existing behavior.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	
+	    // AllowedRoutes is the exact provider+model allowlist a child's
+	    // resolved route must match before it may spawn. An empty list means
+	    // NO allowlist is in force: every resolvable route is permitted. Each
+	    // entry is a [provider, model] pair (or an object with provider/model
+	    // keys in JSON5). Enforced by modelselect.PreflightRoute at the spawn
+	    // boundary — an unlisted route fails the delegation visibly, with no
+	    // child created.
+	    AllowedRoutes []AllowedModelRouteConfig `json:"allowed_routes,omitempty" toml:"allowed_routes"`
+	}
+
 <a name="DetectionConfig"></a>
 ## type DetectionConfig
 
@@ -2333,6 +2375,18 @@ EmbeddingConfig holds vector embedding settings for semantic memory search.
 	    ShardTypes    []string `json:"shard_types"     toml:"shard_types"`     // Enabled shard types
 	}
 
+<a name="EmployeeLegConfig"></a>
+## type EmployeeLegConfig
+
+EmployeeLegConfig is one per\-agent voice routing default \(voice tree CL4, OQ4 shape\): employee\_leg entries in the \[voice\] block pin an employee's default leg and TTS voice/model. Routing config lives here, NOT in the employee constitution \(constitution is goal\-scope, user\-authored text; routing changes must not require re\-registration\). Empty Leg/TTSVoice/TTSModel fall through to per\-leg config.
+
+	type EmployeeLegConfig struct {
+	    Employee string `json:"employee"   toml:"employee"`
+	    Leg      string `json:"leg"        toml:"leg"`
+	    TTSVoice string `json:"tts_voice"  toml:"tts_voice"`
+	    TTSModel string `json:"tts_model"  toml:"tts_model"`
+	}
+
 <a name="EmployeesAuditConfig"></a>
 ## type EmployeesAuditConfig
 
@@ -2420,7 +2474,23 @@ EmployeesConfig configures the AI Employee framework. The employee layer wraps t
 	    // Defaults holds per-aspect defaults merged under each employee's own
 	    // definition. Currently only gate is defined.
 	    Defaults EmployeesDefaultsConfig `json:"defaults" toml:"defaults"`
+	
+	    // GoalAutoAdvance gates the autonomous round-driver continuation loop
+	    // (dsh-convergence C4c/leaf 03). When true (the default, the leaf's
+	    // zero-human-turns contract), the driver reserves and triggers round
+	    // N+1 itself whenever an armed goal settles under its round cap;
+	    // goals still auto-block at the cap with code "round-limit". When
+	    // false, rounds advance only through the manual
+	    // agents.goals.round.advance RPC/CLI surface.
+	    GoalAutoAdvance *bool `json:"goal_auto_advance,omitempty" toml:"goal_auto_advance"`
 	}
+
+<a name="EmployeesConfig.GoalAutoAdvanceEnabled"></a>
+### func \(\*EmployeesConfig\) GoalAutoAdvanceEnabled
+
+	func (c *EmployeesConfig) GoalAutoAdvanceEnabled() bool
+
+GoalAutoAdvanceEnabled reports the resolved goal\_auto\_advance value: true unless explicitly set false \(the leaf contract default is autonomous\).
 
 <a name="EmployeesConfig.Validate"></a>
 ### func \(\*EmployeesConfig\) Validate
@@ -5762,36 +5832,48 @@ VerificationDefaults holds daemon\-level verification defaults.
 
 
 	type VoiceConfig struct {
-	    Enabled              bool        `json:"enabled"                toml:"enabled"`
-	    IdleStopSeconds      int         `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
-	    OnnxRuntimeLib       string      `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
-	    STTProvider          string      `json:"stt_provider"           toml:"stt_provider"`
-	    TTSProvider          string      `json:"tts_provider"           toml:"tts_provider"`
-	    Filler               []string    `json:"filler"                 toml:"filler"`
-	    SupervisorEmployee   string      `json:"supervisor_employee"    toml:"supervisor_employee"`
-	    SupervisorEnabled    bool        `json:"supervisor_enabled"     toml:"supervisor_enabled"`
-	    SupervisorModel      string      `json:"supervisor_model"       toml:"supervisor_model"`
-	    SupervisorTimeoutMs  int         `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
-	    VoiceModel           string      `json:"voice_model"            toml:"voice_model"`
-	    PublicStreamURL      string      `json:"public_stream_url"      toml:"public_stream_url"`
-	    ConnectionID         string      `json:"connection_id"          toml:"connection_id"`
-	    FromNumber           string      `json:"from_number"            toml:"from_number"`
-	    AllowedNumbers       []string    `json:"allowed_numbers"        toml:"allowed_numbers"`
-	    TimeoutSecs          int         `json:"timeout_secs"           toml:"timeout_secs"`
-	    MaxCallMinutes       int         `json:"max_call_minutes"       toml:"max_call_minutes"`
-	    SilencePromptSeconds int         `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
-	    MaxConcurrentCalls   int         `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	    ReorderWindowFrames  int         `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	    ReorderGapMs         int         `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	    TelnyxPublicKey      string      `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	    ChildBinaryPath      string      `json:"child_binary_path"      toml:"child_binary_path"`
-	    LoopbackPlainAddr    string      `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	    DefaultEmployee      string      `json:"default_employee"       toml:"default_employee"`
-	    DefaultLeg           string      `json:"default_leg"            toml:"default_leg"`
-	    TTSModel             string      `json:"tts_model"              toml:"tts_model"`
-	    TTSVoice             string      `json:"tts_voice"              toml:"tts_voice"`
-	    STTModel             string      `json:"stt_model"              toml:"stt_model"`
-	    Local                LocalConfig `json:"local"                  toml:"local"`
+	    // TurnTimeoutSeconds (json turn_timeout_seconds) is the opt-in hard
+	    // cap on one voice turn (final prompt dispatched -> turn-final say
+	    // flushed). The silence timer is suspended while a turn is in flight
+	    // (a slow cloud LLM must not be reaped mid-generation), so this cap
+	    // is the only bound on a hung employee LLM. Default 0 = disabled
+	    // (opt-in defaults rule, docs/agents/opt-in-defaults.md). Declared
+	    // here in lieu of an in-field comment, which would split the field
+	    // block's gofmt alignment group.
+	    Enabled              bool                `json:"enabled"                toml:"enabled"`
+	    IdleStopSeconds      int                 `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	    OnnxRuntimeLib       string              `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	    STTProvider          string              `json:"stt_provider"           toml:"stt_provider"`
+	    TTSProvider          string              `json:"tts_provider"           toml:"tts_provider"`
+	    Filler               []string            `json:"filler"                 toml:"filler"`
+	    SupervisorEmployee   string              `json:"supervisor_employee"    toml:"supervisor_employee"`
+	    SupervisorEnabled    bool                `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	    SupervisorModel      string              `json:"supervisor_model"       toml:"supervisor_model"`
+	    SupervisorTimeoutMs  int                 `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	    VoiceModel           string              `json:"voice_model"            toml:"voice_model"`
+	    PublicStreamURL      string              `json:"public_stream_url"      toml:"public_stream_url"`
+	    ConnectionID         string              `json:"connection_id"          toml:"connection_id"`
+	    FromNumber           string              `json:"from_number"            toml:"from_number"`
+	    AllowedNumbers       []string            `json:"allowed_numbers"        toml:"allowed_numbers"`
+	    TimeoutSecs          int                 `json:"timeout_secs"           toml:"timeout_secs"`
+	    MaxCallMinutes       int                 `json:"max_call_minutes"       toml:"max_call_minutes"`
+	    SilencePromptSeconds int                 `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	    TurnTimeoutSeconds   int                 `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
+	    MaxConcurrentCalls   int                 `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	    ReorderWindowFrames  int                 `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	    ReorderGapMs         int                 `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	    TelnyxPublicKey      string              `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	    ChildBinaryPath      string              `json:"child_binary_path"      toml:"child_binary_path"`
+	    LoopbackPlainAddr    string              `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	    DefaultEmployee      string              `json:"default_employee"       toml:"default_employee"`
+	    DefaultLeg           string              `json:"default_leg"            toml:"default_leg"`
+	    TTSModel             string              `json:"tts_model"              toml:"tts_model"`
+	    TTSVoice             string              `json:"tts_voice"              toml:"tts_voice"`
+	    STTModel             string              `json:"stt_model"              toml:"stt_model"`
+	    TTSBaseURL           string              `json:"tts_base_url"           toml:"tts_base_url"`
+	    STTBaseURL           string              `json:"stt_base_url"           toml:"stt_base_url"`
+	    Local                LocalConfig         `json:"local"                  toml:"local"`
+	    EmployeeLeg          []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
 	}
 
 <a name="WatchdogConfig"></a>

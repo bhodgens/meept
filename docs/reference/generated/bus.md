@@ -14,6 +14,7 @@ Package bus provides a channel\-based pub/sub message bus.
 - [func PublishBlockingT\[T any\]\(b \*MessageBus, t Topic\[T\], source string, payload T\) int](<#PublishBlockingT>)
 - [func PublishT\[T any\]\(b \*MessageBus, t Topic\[T\], source string, payload T\) int](<#PublishT>)
 - [func SetPanicOnUndrainedSubscription\(enabled bool\)](<#SetPanicOnUndrainedSubscription>)
+- [func Unsubscribe\(b \*MessageBus, sub \*Subscriber\)](<#Unsubscribe>)
 - [type ACPPermissionEvent](<#ACPPermissionEvent>)
   - [func \(ACPPermissionEvent\) WSClass\(\) wsclass.WSClass](<#ACPPermissionEvent.WSClass>)
 - [type ACPPermissionOption](<#ACPPermissionOption>)
@@ -115,6 +116,13 @@ Marshal\-failure policy: json.Marshal of T fails only for channels, funcs, or re
 	func SetPanicOnUndrainedSubscription(enabled bool)
 
 SetPanicOnUndrainedSubscription enables/disables error\-level logging mode for testing. When enabled, Publish\(\) logs at Error level if no subscribers exist for the topic.
+
+<a name="Unsubscribe"></a>
+## func Unsubscribe
+
+	func Unsubscribe(b *MessageBus, sub *Subscriber)
+
+Unsubscribe removes a subscription \(package\-level form: the G5 gate and other test/e2e callers hold the bus as a value; nil\-safe\).
 
 <a name="ACPPermissionEvent"></a>
 ## type ACPPermissionEvent

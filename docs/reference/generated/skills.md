@@ -171,6 +171,7 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
   - [func \(s \*Skill\) MatchesTags\(tags \[\]string\) bool](<#Skill.MatchesTags>)
   - [func \(s \*Skill\) UsesExternalLLM\(\) bool](<#Skill.UsesExternalLLM>)
   - [func \(s \*Skill\) UsesMCP\(\) bool](<#Skill.UsesMCP>)
+- [type SkillChanged](<#SkillChanged>)
 - [type SkillExecutionResult](<#SkillExecutionResult>)
 - [type SkillIndex](<#SkillIndex>)
   - [func NewSkillIndex\(\) \*SkillIndex](<#NewSkillIndex>)
@@ -212,6 +213,11 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 - [type SkillMatch](<#SkillMatch>)
 - [type SkillMetadata](<#SkillMetadata>)
 - [type SkillSource](<#SkillSource>)
+- [type SkillWatcher](<#SkillWatcher>)
+  - [func NewSkillWatcher\(cfg SkillWatcherConfig\) \(\*SkillWatcher, error\)](<#NewSkillWatcher>)
+  - [func \(w \*SkillWatcher\) Close\(\) error](<#SkillWatcher.Close>)
+  - [func \(w \*SkillWatcher\) Start\(ctx context.Context\) error](<#SkillWatcher.Start>)
+- [type SkillWatcherConfig](<#SkillWatcherConfig>)
 - [type ToolAvailabilityFunc](<#ToolAvailabilityFunc>)
 - [type ToolDef](<#ToolDef>)
 
@@ -260,6 +266,10 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 	    SourceExample:     0.8,
 	    SourceDescription: 0.5,
 	}
+
+<a name="TopicSkillChange"></a>TopicSkillChange is the typed bus topic fired after a hot\-reload commit. Payload is SkillChanged; declared here \(internal/skills\) so the compiler enforces payload agreement between this publisher and any TUI/GUI subscriber. Name matches the gate test's raw topic string exactly \(typed and raw publishes to the same name interoperate\).
+
+	var TopicSkillChange = bus.NewTopic[SkillChanged]("skills/change")
 
 <a name="CheckPrerequisites"></a>
 ## func CheckPrerequisites
@@ -1574,6 +1584,16 @@ UsesExternalLLM returns true if the skill uses an external LLM for inference. Sk
 
 UsesMCP returns true if the skill is configured to use MCP servers.
 
+<a name="SkillChanged"></a>
+## type SkillChanged
+
+SkillChanged is the payload for TopicSkillChange \("skills/change"\). Source identifies the emitting subsystem; Names lists the affected skill names when they are known cheaply \(they may be empty for a bulk reload\).
+
+	type SkillChanged struct {
+	    Source string   `json:"source"`
+	    Names  []string `json:"names,omitempty"`
+	}
+
 <a name="SkillExecutionResult"></a>
 ## type SkillExecutionResult
 
@@ -1974,6 +1994,63 @@ SkillSource provides skills from a specific source.
 	    Name() string
 	    // Discover scans the source and returns discovered skills.
 	    Discover(ctx context.Context) ([]*Skill, error)
+	}
+
+<a name="SkillWatcher"></a>
+## type SkillWatcher
+
+SkillWatcher watches skill discovery roots for changes and hot\-invalidates the LazySkillLoader cache. Only canonical skill files count as relevant: \`\<root\>/\<skill\>/SKILL.md\` \(bundle layout\) and \`\<root\>/\<skill\>.md\` \(flat layout\) — stray events \(\`.git\`, editor locks, \`README.md\` inside a bundle\) never trigger a reload \(dsh 1b \`isRelevantWatchEvent\` parity\).
+
+	type SkillWatcher struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewSkillWatcher"></a>
+### func NewSkillWatcher
+
+	func NewSkillWatcher(cfg SkillWatcherConfig) (*SkillWatcher, error)
+
+NewSkillWatcher creates a watcher over cfg.Roots and immediately arms it: the fsnotify watches are registered here \(existing roots \+ existing skill bundle dirs one level down\) and the event loop goroutine is spawned, so a watcher fires without an explicit Start call. The background context covers the loop's lifetime; Start remains available for ctx\-controlled shutdown and re\-arm, and Close stops everything.
+
+<a name="SkillWatcher.Close"></a>
+### func \(\*SkillWatcher\) Close
+
+	func (w *SkillWatcher) Close() error
+
+Close stops the event loop and releases the fsnotify resources. Safe to call more than once.
+
+<a name="SkillWatcher.Start"></a>
+### func \(\*SkillWatcher\) Start
+
+	func (w *SkillWatcher) Start(ctx context.Context) error
+
+Start re\-arms the watcher under the given context: it \(re\)adds the fsnotify watches and spawns a fresh event loop that also honors ctx cancellation. Calling Start after construction is optional \(the constructor already armed the watcher with a background context\); calling it twice spawns a second loop — prefer Start for ctx\-controlled shutdown, Close to stop.
+
+<a name="SkillWatcherConfig"></a>
+## type SkillWatcherConfig
+
+SkillWatcherConfig configures NewSkillWatcher.
+
+	type SkillWatcherConfig struct {
+	    // Roots are the skill discovery root directories to watch (typically
+	    // the project `.meept/skills` and user `~/.meept/skills` tiers).
+	    // Missing roots are skipped at Start; a nil/empty list is an error.
+	    Roots []string
+	    // Loader is the LazySkillLoader whose cache is invalidated on changes.
+	    // Nil is allowed (a watch-only watcher that still publishes the bus
+	    // event), but the normal wiring passes the live loader.
+	    Loader *LazySkillLoader
+	    // Discover re-runs discovery and returns fresh metadata entries for the
+	    // index rebuild. May be nil: then only loader invalidation + the bus
+	    // event fire (the gate tests exercise that path).
+	    Discover func(context.Context) ([]*SkillIndexEntry, error)
+	    // Index receives the rebuilt metadata from Discover. Nil Discover/nil
+	    // Index together mean "invalidate + publish only".
+	    Index *SkillIndex
+	    // Bus receives the skills/change event. Nil disables publishing.
+	    Bus *bus.MessageBus
+	    // Logger receives watcher diagnostics; nil defaults to slog.Default().
+	    Logger *slog.Logger
 	}
 
 <a name="ToolAvailabilityFunc"></a>

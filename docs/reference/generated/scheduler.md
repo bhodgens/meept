@@ -13,8 +13,10 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
 ## Index
 
 - Constants
+- Variables
 - [func NotifyJobComplete\(publish func\(topic string, msg \*models.BusMessage\) int, msg \*models.BusMessage\) int](<#NotifyJobComplete>)
 - [func RegisterRPCHandlers\(server \*rpc.Server, scheduler \*Scheduler\)](<#RegisterRPCHandlers>)
+- [func RegisterTiming\(c \*cron.Cron, cfg JobConfig, job Job\) \(cron.EntryID, error\)](<#RegisterTiming>)
 - [func ValidateJobConfig\(cfg JobConfig\) error](<#ValidateJobConfig>)
 - [type AddJobParams](<#AddJobParams>)
 - [type AddJobResult](<#AddJobResult>)
@@ -22,6 +24,10 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
   - [func NewAgentJob\(cfg JobConfig, msgBus \*bus.MessageBus\) \(\*AgentJob, error\)](<#NewAgentJob>)
   - [func \(j \*AgentJob\) Execute\(ctx context.Context\) error](<#AgentJob.Execute>)
 - [type AgentJobConfig](<#AgentJobConfig>)
+- [type DeliveryHistory](<#DeliveryHistory>)
+  - [func NewDeliveryHistory\(\) \*DeliveryHistory](<#NewDeliveryHistory>)
+  - [func \(h \*DeliveryHistory\) Append\(r ScheduleDeliveryReceipt\)](<#DeliveryHistory.Append>)
+- [type DeliveryStatus](<#DeliveryStatus>)
 - [type ExecutionOptions](<#ExecutionOptions>)
 - [type GetJobParams](<#GetJobParams>)
 - [type InstructionScheduler](<#InstructionScheduler>)
@@ -85,6 +91,7 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
 - [type RemoveJobParams](<#RemoveJobParams>)
 - [type ResumeJobParams](<#ResumeJobParams>)
 - [type RunJobParams](<#RunJobParams>)
+- [type ScheduleDeliveryReceipt](<#ScheduleDeliveryReceipt>)
 - [type Scheduler](<#Scheduler>)
   - [func NewScheduler\(cfg config.SchedulerConfig, msgBus \*bus.MessageBus, opts ...Option\) \(\*Scheduler, error\)](<#NewScheduler>)
   - [func \(s \*Scheduler\) Bus\(\) \*bus.MessageBus](<#Scheduler.Bus>)
@@ -99,12 +106,14 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
   - [func \(s \*Scheduler\) NextRun\(jobID string\) \(time.Time, error\)](<#Scheduler.NextRun>)
   - [func \(s \*Scheduler\) PauseJob\(jobID string\) error](<#Scheduler.PauseJob>)
   - [func \(s \*Scheduler\) ProcessMissedTicks\(now time.Time\) \(\[\]MissedTickRun, error\)](<#Scheduler.ProcessMissedTicks>)
+  - [func \(s \*Scheduler\) RegisterTimingVia\(cfg JobConfig, job Job\) \(cron.EntryID, error\)](<#Scheduler.RegisterTimingVia>)
   - [func \(s \*Scheduler\) ResumeJob\(jobID string\) error](<#Scheduler.ResumeJob>)
   - [func \(s \*Scheduler\) RunNow\(jobID string\) error](<#Scheduler.RunNow>)
   - [func \(s \*Scheduler\) Running\(\) bool](<#Scheduler.Running>)
   - [func \(s \*Scheduler\) Schedule\(job Job\) \(string, error\)](<#Scheduler.Schedule>)
   - [func \(s \*Scheduler\) ScheduleConfig\(cfg JobConfig\) \(string, error\)](<#Scheduler.ScheduleConfig>)
   - [func \(s \*Scheduler\) SetLastWake\(wake time.Time\) error](<#Scheduler.SetLastWake>)
+  - [func \(s \*Scheduler\) Shutdown\(ctx context.Context\) error](<#Scheduler.Shutdown>)
   - [func \(s \*Scheduler\) Start\(ctx context.Context\) error](<#Scheduler.Start>)
   - [func \(s \*Scheduler\) Stop\(ctx context.Context\) error](<#Scheduler.Stop>)
   - [func \(s \*Scheduler\) Store\(\) \*Store](<#Scheduler.Store>)
@@ -137,6 +146,14 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
   - [func \(s \*Store\) Update\(job JobConfig\) error](<#Store.Update>)
   - [func \(s \*Store\) UpdateLastRun\(id string, runTime time.Time, runErr error\) error](<#Store.UpdateLastRun>)
 - [type StoreData](<#StoreData>)
+- [type TimingKind](<#TimingKind>)
+- [type TimingSpec](<#TimingSpec>)
+  - [func ParseTiming\(spec string\) \(\*TimingSpec, error\)](<#ParseTiming>)
+  - [func \(t \*TimingSpec\) CronExpr\(\) \(string, error\)](<#TimingSpec.CronExpr>)
+  - [func \(t TimingSpec\) MarshalJSON\(\) \(\[\]byte, error\)](<#TimingSpec.MarshalJSON>)
+  - [func \(t \*TimingSpec\) NextOccurrence\(from time.Time\) \(time.Time, bool\)](<#TimingSpec.NextOccurrence>)
+  - [func \(t \*TimingSpec\) UnmarshalJSON\(data \[\]byte\) error](<#TimingSpec.UnmarshalJSON>)
+  - [func \(t \*TimingSpec\) Validate\(\) error](<#TimingSpec.Validate>)
 - [type ValidateScheduleParams](<#ValidateScheduleParams>)
 
 
@@ -155,9 +172,32 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
 
 	const DefaultClaimRetentionDays = 7
 
+<a name="DeliveryHistoryRetentionDays"></a>DeliveryHistoryRetentionDays bounds the per\-job delivery history age.
+
+	const DeliveryHistoryRetentionDays = 30
+
 <a name="HookAsyncRewakeTopic"></a>HookAsyncRewakeTopic is the EXISTING rewake bus topic consumed by the agent loop \(internal/agent.HookAsyncRewakeTopic\). Duplicated as a literal to preserve package layering; a test pins both spellings equal.
 
 	const HookAsyncRewakeTopic = "hook.async_rewake"
+
+<a name="MaxDeliveryHistoryRecords"></a>MaxDeliveryHistoryRecords bounds the per\-job delivery history length.
+
+	const MaxDeliveryHistoryRecords = 200
+
+<a name="MinTimingEverySeconds"></a>MinTimingEverySeconds is the floor for the \`every\` kind, mirroring the dsh MIN\_EVERY\_INTERVAL\_SECONDS constraint. Higher\-frequency recurrences are rejected as frequency\_too\_high.
+
+	const MinTimingEverySeconds = 60
+
+## Variables
+
+<a name="ErrInvalidRule"></a>Typed validation errors \(mirrors the dsh rejection vocabulary\).
+
+	var (
+	    ErrInvalidRule       = fmt.Errorf("invalid_rule")
+	    ErrInvalidTimeZone   = fmt.Errorf("invalid_time_zone")
+	    ErrFrequencyTooHigh  = fmt.Errorf("frequency_too_high")
+	    ErrTimingUnsupported = fmt.Errorf("invalid_kind")
+	)
 
 <a name="NotifyJobComplete"></a>
 ## func NotifyJobComplete
@@ -174,6 +214,13 @@ publish is injectable for tests \(pass nil to treat it as a no\-op\). msg, if no
 	func RegisterRPCHandlers(server *rpc.Server, scheduler *Scheduler)
 
 RegisterRPCHandlers registers all scheduler RPC handlers with the server.
+
+<a name="RegisterTiming"></a>
+## func RegisterTiming
+
+	func RegisterTiming(c *cron.Cron, cfg JobConfig, job Job) (cron.EntryID, error)
+
+RegisterTiming registers cfg's Timing spec on the given cron engine in the engine's location so cron.WithLocation DST handling applies. \`at\` specs register as a one\-shot entry that removes itself after firing exactly once.
 
 <a name="ValidateJobConfig"></a>
 ## func ValidateJobConfig
@@ -192,6 +239,7 @@ AddJobParams represents the parameters for adding a job.
 	    Name     string   `json:"name"`
 	    Type     JobType  `json:"type"`
 	    Schedule string   `json:"schedule"`
+	    Timing   string   `json:"timing,omitempty"`
 	    Enabled  bool     `json:"enabled"`
 	    Tags     []string `json:"tags,omitempty"`
 	
@@ -246,7 +294,56 @@ AgentJobConfig holds configuration for agent jobs.
 	    AgentID     string            `json:"agent_id,omitempty"`
 	    MaxTokens   int               `json:"max_tokens,omitempty"`
 	    Temperature float64           `json:"temperature,omitempty"`
+	
+	    // TargetSessionID pins delivery to a session inbox: when set, the
+	    // chat.request payload carries session_id (and a stable turn_id derived
+	    // from the delivery MessageID) and the scheduler tracks a durable
+	    // delivery receipt. Empty preserves the legacy fire-and-forget behavior.
+	    TargetSessionID string `json:"target_session_id,omitempty"`
 	}
+
+<a name="DeliveryHistory"></a>
+## type DeliveryHistory
+
+DeliveryHistory is a bounded, most\-recent\-first\-kept history of delivery receipts for one schedule.
+
+	type DeliveryHistory struct {
+	    Records              []ScheduleDeliveryReceipt `json:"records"`
+	    EarlierRecordsPruned bool                      `json:"earlier_records_pruned"`
+	}
+
+<a name="NewDeliveryHistory"></a>
+### func NewDeliveryHistory
+
+	func NewDeliveryHistory() *DeliveryHistory
+
+NewDeliveryHistory returns an empty delivery history.
+
+<a name="DeliveryHistory.Append"></a>
+### func \(\*DeliveryHistory\) Append
+
+	func (h *DeliveryHistory) Append(r ScheduleDeliveryReceipt)
+
+Append adds a receipt and enforces the retention bounds: records older than DeliveryHistoryRetentionDays \(measured on DeliveredAt, falling back to ScheduledAt\) and records beyond the MaxDeliveryHistoryRecords most recent are dropped. Any drop sets EarlierRecordsPruned.
+
+<a name="DeliveryStatus"></a>
+## type DeliveryStatus
+
+DeliveryStatus is the lifecycle state of a scheduled\-message delivery.
+
+	type DeliveryStatus string
+
+<a name="DeliveryPending"></a>
+
+	const (
+	    // DeliveryPending: the occurrence is due but dispatch has not started.
+	    DeliveryPending DeliveryStatus = "pending"
+	    // DeliveryInFlight: dispatched (or about to be) but not yet acked by the
+	    // target session. A crash here is recoverable via re-delivery.
+	    DeliveryInFlight DeliveryStatus = "in_flight"
+	    // DeliveryDelivered: the publish to chat.request succeeded.
+	    DeliveryDelivered DeliveryStatus = "delivered"
+	)
 
 <a name="ExecutionOptions"></a>
 ## type ExecutionOptions
@@ -388,6 +485,17 @@ JobConfig is the serializable configuration for a job.
 	    OptimizationConfig *OptimizationJobConfig `json:"optimization_config,omitempty"`
 	    SecurityConfig     *SecurityJobConfig     `json:"security_config,omitempty"`
 	    LearningConfig     *LearningJobConfig     `json:"learning_config,omitempty"`
+	
+	    // Timing is the semantic schedule spec (leaf 05-schedule/01-timing-kinds).
+	    // When set, the job may be expressed and re-registered from this spec
+	    // (Schedule OR Timing validation); the normalized cron string stays in
+	    // Schedule for the engine.
+	    Timing *TimingSpec `json:"timing,omitempty"`
+	
+	    // Delivery bookkeeping (leaf 05-schedule/02-delivery-inbox). Both are
+	    // optional and only populated for jobs that deliver to a session inbox.
+	    LastDelivery    *ScheduleDeliveryReceipt `json:"last_delivery,omitempty"`
+	    DeliveryHistory *DeliveryHistory         `json:"delivery_history,omitempty"`
 	}
 
 <a name="JobConfig.MarshalJSON"></a>
@@ -827,6 +935,22 @@ RunJobParams represents the parameters for running a job immediately.
 	    JobID string `json:"job_id"`
 	}
 
+<a name="ScheduleDeliveryReceipt"></a>
+## type ScheduleDeliveryReceipt
+
+ScheduleDeliveryReceipt records one delivery attempt of a scheduled message to a target session's inbox.
+
+	type ScheduleDeliveryReceipt struct {
+	    ScheduleID      string         `json:"schedule_id"`
+	    ScheduledAt     time.Time      `json:"scheduled_at"`
+	    OccurrenceAt    time.Time      `json:"occurrence_at,omitzero"`
+	    DeliveredAt     time.Time      `json:"delivered_at,omitzero"`
+	    MessageID       string         `json:"message_id"`
+	    TargetSessionID string         `json:"target_session_id"`
+	    Prompt          string         `json:"prompt,omitempty"`
+	    Status          DeliveryStatus `json:"status"`
+	}
+
 <a name="Scheduler"></a>
 ## type Scheduler
 
@@ -929,6 +1053,13 @@ ProcessMissedTicks computes due ticks per job since lastWake and delivers them. 
 
 The scheduler must be running. Call this once at startup \(Start does this automatically\) or after known downtime; cron fires continue to use the claim\-before\-deliver path, so double delivery cannot occur either way.
 
+<a name="Scheduler.RegisterTimingVia"></a>
+### func \(\*Scheduler\) RegisterTimingVia
+
+	func (s *Scheduler) RegisterTimingVia(cfg JobConfig, job Job) (cron.EntryID, error)
+
+RegisterTimingVia registers a Timing\-carrying JobConfig on the scheduler's engine \(DST\-safe: the engine's location applies\). Used from ScheduleConfig and loadPersistedJobs so a persisted Timing re\-registers on restart.
+
 <a name="Scheduler.ResumeJob"></a>
 ### func \(\*Scheduler\) ResumeJob
 
@@ -970,6 +1101,13 @@ ScheduleConfig creates and schedules a job from a JobConfig.
 	func (s *Scheduler) SetLastWake(wake time.Time) error
 
 SetLastWake persists the last wake time.
+
+<a name="Scheduler.Shutdown"></a>
+### func \(\*Scheduler\) Shutdown
+
+	func (s *Scheduler) Shutdown(ctx context.Context) error
+
+Shutdown is a cleanup alias for Stop: the delivery\-inbox gate test uses it in a t.Cleanup to release the claim store after Start.
 
 <a name="Scheduler.Start"></a>
 ### func \(\*Scheduler\) Start
@@ -1231,6 +1369,89 @@ StoreData represents the persisted job data structure.
 	    UpdatedAt time.Time   `json:"updated_at"`
 	    Jobs      []JobConfig `json:"jobs"`
 	}
+
+<a name="TimingKind"></a>
+## type TimingKind
+
+TimingKind is the semantic kind of a model\-authored timing spec.
+
+	type TimingKind string
+
+<a name="TimingRRule"></a>The five semantic timing kinds \(L1 contract\). The constants keep the Go\-side names used across the scheduler \(switch statements, tests\); the JSON WIRE shape is the contracted snake\_case form \(TimingSpec.MarshalJSON\): "rrule", "daily", "weekly", "at", "every".
+
+	const (
+	    TimingRRule  TimingKind = "TimingRRule"
+	    TimingDaily  TimingKind = "TimingDaily"
+	    TimingWeekly TimingKind = "TimingWeekly"
+	    TimingAt     TimingKind = "TimingOneShot"
+	    TimingEvery  TimingKind = "TimingEvery"
+	)
+
+<a name="TimingSpec"></a>
+## type TimingSpec
+
+TimingSpec is the semantic timing layer over the robfig/cron engine. A persisted JobConfig keeps its normalized cron \`Schedule\` string for the engine and carries this spec for semantic re\-registration on restart.
+
+	type TimingSpec struct {
+	    Kind     TimingKind    `json:"kind"`
+	    Time     string        `json:"time,omitempty"`      // HH:mm:ss (daily/weekly)
+	    TimeZone string        `json:"time_zone,omitempty"` // IANA (daily/weekly/rrule DTSTART TZID)
+	    Weekdays []int         `json:"weekdays,omitempty"`  // ISO 1=Mon..7=Sun, ascending unique (weekly)
+	    At       *time.Time    `json:"at,omitempty"`        // absolute instant (at)
+	    Every    time.Duration `json:"every,omitempty"`     // >= MinTimingEverySeconds (every)
+	    RRule    string        `json:"rrule,omitempty"`     // "DTSTART;TZID=<IANA>:<ts>\nRRULE:<rule>" (rrule)
+	}
+
+<a name="ParseTiming"></a>
+### func ParseTiming
+
+	func ParseTiming(spec string) (*TimingSpec, error)
+
+ParseTiming parses a model\-facing timing spec string into a TimingSpec.
+
+Supported forms:
+
+	daily <HH:mm[:ss]> [<IANA tz>]
+	weekly <DOW-list> <HH:mm[:ss]> [<IANA tz>]   (DOW names or ISO numbers)
+	at <RFC3339>
+	every <Go duration>
+	rrule:\nDTSTART;TZID=<IANA>:<yyyymmddThhmmss>\nRRULE:<rule>
+	
+
+<a name="TimingSpec.CronExpr"></a>
+### func \(\*TimingSpec\) CronExpr
+
+	func (t *TimingSpec) CronExpr() (string, error)
+
+CronExpr returns the robfig/cron expression for this spec \(6\-field, second\-precision form matching the scheduler engine's parser; \`every\` yields an @every descriptor\).
+
+<a name="TimingSpec.MarshalJSON"></a>
+### func \(TimingSpec\) MarshalJSON
+
+	func (t TimingSpec) MarshalJSON() ([]byte, error)
+
+MarshalJSON serializes the spec with the kind in the contracted snake\_case wire form \("rrule"/"daily"/"weekly"/"at"/"every"\), never the Go\-side constants \("TimingOneShot" etc.\). All other fields use the struct tags verbatim.
+
+<a name="TimingSpec.NextOccurrence"></a>
+### func \(\*TimingSpec\) NextOccurrence
+
+	func (t *TimingSpec) NextOccurrence(from time.Time) (time.Time, bool)
+
+NextOccurrence resolves the next wall\-clock occurrence at or after \`from\`, DST\-safe via time.LoadLocation\(TimeZone\). The returned time carries the spec's location. ok=false when no future occurrence exists \(at in the past\).
+
+<a name="TimingSpec.UnmarshalJSON"></a>
+### func \(\*TimingSpec\) UnmarshalJSON
+
+	func (t *TimingSpec) UnmarshalJSON(data []byte) error
+
+UnmarshalJSON parses a spec whose kind is either the contracted snake\_case wire form \("at"\) or the legacy capitalized constant \("TimingOneShot" — written by builds before the JSON contract landed\). An unrecognized kind fails with ErrTimingUnsupported.
+
+<a name="TimingSpec.Validate"></a>
+### func \(\*TimingSpec\) Validate
+
+	func (t *TimingSpec) Validate() error
+
+Validate enforces kind\-specific input rules and the bounded RFC5545 profile. Out\-of\-profile constructs are rejected with a typed error, never silently mapped onto a wrong schedule.
 
 <a name="ValidateScheduleParams"></a>
 ## type ValidateScheduleParams

@@ -102,6 +102,7 @@ Package agent provides the agent loop and related components.
 - [func LaneAgentFor\(lane string\) string](<#LaneAgentFor>)
 - [func LoadJSONLTraces\(store \*InMemoryTraceStore, path string\) error](<#LoadJSONLTraces>)
 - [func LoadSoul\(path string\) \(string, error\)](<#LoadSoul>)
+- [func MarshalChildDescriptor\(d ChildDescriptor\) \(\[\]byte, error\)](<#MarshalChildDescriptor>)
 - [func MarshalTurnResult\(envelope any\) \[\]byte](<#MarshalTurnResult>)
 - [func NewSkillRankingEmbedder\(baseURL, model string, timeout time.Duration\) skills.Embedder](<#NewSkillRankingEmbedder>)
 - [func PairTopic\(sessionID string\) string](<#PairTopic>)
@@ -239,6 +240,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) RunWithTask\(ctx context.Context, t \*task.Task\) \(string, error\)](<#AgentLoop.RunWithTask>)
   - [func \(l \*AgentLoop\) Security\(\) \*security.PermissionChecker](<#AgentLoop.Security>)
   - [func \(l \*AgentLoop\) SessionConversation\(id string\) \*Conversation](<#AgentLoop.SessionConversation>)
+  - [func \(l \*AgentLoop\) SessionID\(\) string](<#AgentLoop.SessionID>)
   - [func \(l \*AgentLoop\) SetACPExecutor\(e \*ACPExecutor\)](<#AgentLoop.SetACPExecutor>)
   - [func \(l \*AgentLoop\) SetActive\(v bool\)](<#AgentLoop.SetActive>)
   - [func \(l \*AgentLoop\) SetAutonomous\(autonomous bool\)](<#AgentLoop.SetAutonomous>)
@@ -548,6 +550,12 @@ Package agent provides the agent loop and related components.
 - [type CheckResult](<#CheckResult>)
 - [type Checkpoint](<#Checkpoint>)
   - [func SnapshotForTurn\(runID, agentID string, depth int, currentTurn, limit int, toolCalls \[\]TurnRecord, messages \[\]LLMMessage, output string\) \*Checkpoint](<#SnapshotForTurn>)
+- [type ChildDescriptor](<#ChildDescriptor>)
+  - [func UnmarshalChildDescriptor\(b \[\]byte\) \(ChildDescriptor, error\)](<#UnmarshalChildDescriptor>)
+  - [func \(d ChildDescriptor\) Validate\(\) error](<#ChildDescriptor.Validate>)
+- [type ChildOptions](<#ChildOptions>)
+- [type ChildRecord](<#ChildRecord>)
+- [type ChildState](<#ChildState>)
 - [type ClassifierBootReadiness](<#ClassifierBootReadiness>)
   - [func NewClassifierBootReadiness\(\) \*ClassifierBootReadiness](<#NewClassifierBootReadiness>)
   - [func \(b \*ClassifierBootReadiness\) Done\(\) bool](<#ClassifierBootReadiness.Done>)
@@ -598,7 +606,9 @@ Package agent provides the agent loop and related components.
   - [func \(c \*ContextInjector\) GetActiveInstructions\(\) \[\]\*preferences.UserInstruction](<#ContextInjector.GetActiveInstructions>)
   - [func \(c \*ContextInjector\) HasActiveInstructions\(\) bool](<#ContextInjector.HasActiveInstructions>)
   - [func \(c \*ContextInjector\) HasLearnedPatterns\(ctx context.Context\) bool](<#ContextInjector.HasLearnedPatterns>)
+  - [func \(c \*ContextInjector\) MaterializeSkillCatalog\(\) \(rendered string, changed bool\)](<#ContextInjector.MaterializeSkillCatalog>)
   - [func \(c \*ContextInjector\) SetEpisodeTask\(taskText string\)](<#ContextInjector.SetEpisodeTask>)
+  - [func \(c \*ContextInjector\) SetPlanModePolicySection\(fn func\(\) string\)](<#ContextInjector.SetPlanModePolicySection>)
   - [func \(c \*ContextInjector\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#ContextInjector.SetSkillLoader>)
 - [type ContextIsolation](<#ContextIsolation>)
 - [type ContextTransform](<#ContextTransform>)
@@ -674,6 +684,25 @@ Package agent provides the agent loop and related components.
   - [func \(t \*CountTracesTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#CountTracesTool.Invoke>)
 - [type CritiqueInputSources](<#CritiqueInputSources>)
 - [type Decision](<#Decision>)
+- [type DelegateManager](<#DelegateManager>)
+  - [func NewDelegateManager\(reg \*AgentRegistry, publisher func\(string, any\), cancelHook func\(string\) error\) \*DelegateManager](<#NewDelegateManager>)
+  - [func \(m \*DelegateManager\) Cancel\(childID string\) error](<#DelegateManager.Cancel>)
+  - [func \(m \*DelegateManager\) Children\(parentSessionID string\) \[\]ChildRecord](<#DelegateManager.Children>)
+  - [func \(m \*DelegateManager\) Dispose\(ctx context.Context, parentSessionID, childID string\) error](<#DelegateManager.Dispose>)
+  - [func \(m \*DelegateManager\) Join\(ctx context.Context, parentSessionID, childID string, timeout time.Duration\) \(DelegateResult, error\)](<#DelegateManager.Join>)
+  - [func \(m \*DelegateManager\) Lookup\(childID string\) \(ChildRecord, bool\)](<#DelegateManager.Lookup>)
+  - [func \(m \*DelegateManager\) Resume\(ctx context.Context, parentSessionID, childID string\) \(DelegateResult, error\)](<#DelegateManager.Resume>)
+  - [func \(m \*DelegateManager\) Session\(childID string\) \(\*acp.Session, bool\)](<#DelegateManager.Session>)
+  - [func \(m \*DelegateManager\) SetACPManager\(acpMgr \*acp.Manager\)](<#DelegateManager.SetACPManager>)
+  - [func \(m \*DelegateManager\) SetDescriptorFactory\(f func\(ChildRecord\) ChildDescriptor\)](<#DelegateManager.SetDescriptorFactory>)
+  - [func \(m \*DelegateManager\) SetForkSeed\(f func\(\*Conversation\) \[\]llm.ChatMessage\)](<#DelegateManager.SetForkSeed>)
+  - [func \(m \*DelegateManager\) SetPersist\(f func\(ChildRecord\) error\)](<#DelegateManager.SetPersist>)
+  - [func \(m \*DelegateManager\) SetRouteResolver\(f func\(ChildOptions, DelegateRequest\) \(ChildOptions, error\)\)](<#DelegateManager.SetRouteResolver>)
+  - [func \(m \*DelegateManager\) SetStore\(store session.Store\)](<#DelegateManager.SetStore>)
+  - [func \(m \*DelegateManager\) SettleForTest\(childID string, state ChildState, result, errStr string\)](<#DelegateManager.SettleForTest>)
+  - [func \(m \*DelegateManager\) Spawn\(ctx context.Context, req DelegateRequest, parentSessionID string\) \(DelegateResult, error\)](<#DelegateManager.Spawn>)
+- [type DelegateRequest](<#DelegateRequest>)
+- [type DelegateResult](<#DelegateResult>)
 - [type DependencyInferrer](<#DependencyInferrer>)
   - [func NewDependencyInferrer\(reg ToolRegistry, logger \*slog.Logger\) \*DependencyInferrer](<#NewDependencyInferrer>)
   - [func \(r \*DependencyInferrer\) InferDependencies\(calls \[\]llm.ToolCall\) \*ToolDependencyGraph](<#DependencyInferrer.InferDependencies>)
@@ -733,6 +762,7 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) SetMetricsStore\(store \*metrics.Store\)](<#Dispatcher.SetMetricsStore>)
   - [func \(d \*Dispatcher\) SetMultiUserScopeEnabled\(enabled bool\)](<#Dispatcher.SetMultiUserScopeEnabled>)
   - [func \(d \*Dispatcher\) SetPlanManager\(pm \*plan.PlanManager\)](<#Dispatcher.SetPlanManager>)
+  - [func \(d \*Dispatcher\) SetPlanModeController\(ctrl PlanModeController\)](<#Dispatcher.SetPlanModeController>)
   - [func \(d \*Dispatcher\) SetSessionFenceFactory\(factory sessionFenceFactory\)](<#Dispatcher.SetSessionFenceFactory>)
   - [func \(d \*Dispatcher\) SetSessionStore\(s SessionStoreReader\)](<#Dispatcher.SetSessionStore>)
   - [func \(d \*Dispatcher\) SetThreadRouter\(tr \*ThreadRouter\)](<#Dispatcher.SetThreadRouter>)
@@ -1132,6 +1162,7 @@ Package agent provides the agent loop and related components.
   - [func \(t \*MockTool\) IsReadOnly\(map\[string\]any\) bool](<#MockTool.IsReadOnly>)
   - [func \(t \*MockTool\) Name\(\) string](<#MockTool.Name>)
   - [func \(t \*MockTool\) Parameters\(\) llm.FunctionParameters](<#MockTool.Parameters>)
+  - [func \(t \*MockTool\) TimeoutMs\(\) time.Duration](<#MockTool.TimeoutMs>)
 - [type ModelOverrideFreshTurnHook](<#ModelOverrideFreshTurnHook>)
 - [type ModelReassignmentDirective](<#ModelReassignmentDirective>)
 - [type ModelReassignmentParser](<#ModelReassignmentParser>)
@@ -1250,6 +1281,7 @@ Package agent provides the agent loop and related components.
 - [type PiiRestoreHook](<#PiiRestoreHook>)
   - [func NewPiiRestoreHook\(swapper \*pii.Swapper, obfuscator \*intsecurity.SecretObfuscator, cfg config.PiiConfig, logger \*slog.Logger\) \*PiiRestoreHook](<#NewPiiRestoreHook>)
   - [func \(h \*PiiRestoreHook\) Enabled\(\) bool](<#PiiRestoreHook.Enabled>)
+  - [func \(h \*PiiRestoreHook\) MaskOutboundScoped\(messages \[\]llm.ChatMessage, sessionID string\) \[\]llm.ChatMessage](<#PiiRestoreHook.MaskOutboundScoped>)
   - [func \(h \*PiiRestoreHook\) RestoreOutput\(text, sessionID string\) string](<#PiiRestoreHook.RestoreOutput>)
   - [func \(h \*PiiRestoreHook\) TransformContext\(\_ context.Context, messages \[\]llm.ChatMessage, toolDefs \[\]llm.ToolDefinition\) ContextTransform](<#PiiRestoreHook.TransformContext>)
 - [type PlaceholderToolRegistry](<#PlaceholderToolRegistry>)
@@ -1263,6 +1295,7 @@ Package agent provides the agent loop and related components.
   - [func \(in \*PlanCritiqueInput\) Render\(\) string](<#PlanCritiqueInput.Render>)
   - [func \(in \*PlanCritiqueInput\) ValidateToolHints\(hints \[\]string\) \[\]critiqueObjection](<#PlanCritiqueInput.ValidateToolHints>)
 - [type PlanDraft](<#PlanDraft>)
+- [type PlanModeController](<#PlanModeController>)
 - [type PlanPhaseSpec](<#PlanPhaseSpec>)
   - [func PhaseSpecsFromPlan\(in \[\]plan.PhaseSpec\) \[\]PlanPhaseSpec](<#PhaseSpecsFromPlan>)
 - [type PlanRequest](<#PlanRequest>)
@@ -1421,6 +1454,7 @@ Package agent provides the agent loop and related components.
   - [func \(r \*ReportRouter\) Route\(ctx context.Context, params RouteParams\) RouteResult](<#ReportRouter.Route>)
 - [type ReportRouterConfig](<#ReportRouterConfig>)
 - [type ResourcesUpdateData](<#ResourcesUpdateData>)
+- [type ResponseFuncSetter](<#ResponseFuncSetter>)
 - [type ResultCache](<#ResultCache>)
   - [func NewResultCache\(config CacheConfig, logger \*slog.Logger\) \*ResultCache](<#NewResultCache>)
   - [func \(c \*ResultCache\) Clear\(\)](<#ResultCache.Clear>)
@@ -1595,6 +1629,7 @@ Package agent provides the agent loop and related components.
 - [type SettledData](<#SettledData>)
 - [type ShouldStopAfterTurnHook](<#ShouldStopAfterTurnHook>)
 - [type SkillEntryView](<#SkillEntryView>)
+- [type SkillInvocationBlock](<#SkillInvocationBlock>)
 - [type SkillStateConfig](<#SkillStateConfig>)
 - [type SkillStateRuntime](<#SkillStateRuntime>)
   - [func NewSkillStateRuntime\(loop \*AgentLoop, cfg SkillStateConfig, logger \*slog.Logger\) \*SkillStateRuntime](<#NewSkillStateRuntime>)
@@ -2397,6 +2432,14 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 
 	var ErrBudgetExceeded = &CollaborationError{Code: ErrCodeBudgetExceeded, Message: "insufficient token budget for collaboration session"}
 
+<a name="ErrChildNotFound"></a>ErrChildNotFound is returned by Lookup/Join/Cancel for an unknown child.
+
+	var ErrChildNotFound = fmt.Errorf("delegate: child not found")
+
+<a name="ErrChildNotResumable"></a>ErrChildNotResumable is returned by Resume when the child's current state does not permit a cold resume \(e.g. it is already running or completed\).
+
+	var ErrChildNotResumable = errors.New("delegate: child not resumable")
+
 <a name="ErrClassifierBootGateFailed"></a>ErrClassifierBootGateFailed is returned by ClassifierBootReadiness.Wait when the F\-D8 boot gate tripped \(the local classifier never became healthy and the daemon is shutting down\). Callers must treat it as "proceed with the ordinary classification attempt", never as a turn failure.
 
 	var ErrClassifierBootGateFailed = errors.New("classifier boot gate failed")
@@ -2405,6 +2448,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 
 	var ErrDepthExceeded = &CollaborationError{Code: ErrCodeDepthExceeded, Message: "maximum collaboration nesting depth exceeded"}
 
+<a name="ErrDescriptorUnknownVersion"></a>ErrDescriptorUnknownVersion reports a descriptor from an unsupported \(newer\) build. It is returned by UnmarshalChildDescriptor so callers can distinguish a version mismatch from malformed JSON.
+
+	var ErrDescriptorUnknownVersion = fmt.Errorf("child descriptor: unsupported version")
+
 <a name="ErrGateBlocked"></a>ErrGateBlocked is the sentinel wrapped into the error an execution takes when the centralized registry gate \(G1\-G4\) blocks the tool call. Callers classify it with errors.Is to distinguish policy blocks from tool failures \(blocks are deterministic and never retried\).
 
 	var ErrGateBlocked = errors.New("tool execution blocked by gate")
@@ -2412,6 +2459,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 <a name="ErrIsolatedSpeak"></a>ErrIsolatedSpeak is the sentinel wrapped by every refusal to let an isolated child speak to the user. Match with errors.Is.
 
 	var ErrIsolatedSpeak = errors.New("isolated speak denied")
+
+<a name="ErrJoinTimeout"></a>ErrJoinTimeout is returned by Join when a child does not settle within the requested bounded wait.
+
+	var ErrJoinTimeout = fmt.Errorf("delegate: join timeout")
 
 <a name="ErrNoACPSession"></a>ErrNoACPSession is returned when the manager resolved no live session \(its documented nil\-session/nil\-error "not started" signal\).
 
@@ -2428,6 +2479,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 <a name="ErrPlannerNoPlanNotArtifact"></a>errPlannerNoPlanNotArtifact is the honest\-failure reason \(issue \#53 direction 3, pin 2\): the planner produced no plan and the task description does not carry a single concrete artifact action, so there is nothing to execute deterministically.
 
 	var ErrPlannerNoPlanNotArtifact = errors.New("planner produced no plan; not a single-artifact task")
+
+<a name="ErrResumeParentMismatch"></a>ErrResumeParentMismatch is returned by Resume when the caller is not the child's parent session. Auth contract: only the parent may resume a child.
+
+	var ErrResumeParentMismatch = errors.New("delegate: resume denied: caller is not the child's parent")
 
 <a name="ErrRetryBudgetExhausted"></a>ErrRetryBudgetExhausted indicates no retries remain.
 
@@ -2580,21 +2635,29 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "lsp_workspace_symbols": ToolFileRead,
 	    "lsp_diagnostics":       ToolFileRead,
 	
-	    "memory_retain":        "memory_write",
-	    "memory_recall":        "memory_read",
-	    "memory_reflect":       "memory_write",
-	    "memory_vote":          "memory_write",
-	    "list_expired_claims":  "memory_read",
-	    "purge_auto_claims":    "memory_write",
-	    "entity_create":        "memory_write",
-	    "entity_link":          "memory_write",
-	    "entity_query":         "memory_read",
-	    "graph_stats":          "memory_read",
-	    "compute_pagerank":     "memory_read",
-	    "detect_communities":   "memory_read",
-	    "community_siblings":   "memory_read",
-	    "resolve":              "task_write",
-	    "spreadsheet_write":    "file_write",
+	    "lsp_navigate": ToolFileRead,
+	
+	    "timeout_probe": ToolFileRead,
+	
+	    "memory_retain":       "memory_write",
+	    "memory_recall":       "memory_read",
+	    "memory_reflect":      "memory_write",
+	    "memory_vote":         "memory_write",
+	    "list_expired_claims": "memory_read",
+	    "purge_auto_claims":   "memory_write",
+	    "entity_create":       "memory_write",
+	    "entity_link":         "memory_write",
+	    "entity_query":        "memory_read",
+	    "graph_stats":         "memory_read",
+	    "compute_pagerank":    "memory_read",
+	    "detect_communities":  "memory_read",
+	    "community_siblings":  "memory_read",
+	    "resolve":             "task_write",
+	    "spreadsheet_write":   "file_write",
+	
+	    "office_docx":          "file_write",
+	    "office_pptx":          "file_write",
+	    "office_workbook":      "file_write",
 	    "git_validate":         "file_read",
 	    "git_split":            "shell_execute",
 	    "template_invoke":      "skill_execute",
@@ -2609,6 +2672,12 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "team_result":          "task_write",
 	    "platform_team_create": "task_write",
 	    "team_preset_create":   "task_write",
+	
+	    "exit_plan_mode": "send_message",
+	
+	    "goal_get":    "goal_read",
+	    "goal_create": "goal_write",
+	    "goal_update": "goal_write",
 	}
 
 <a name="TopicTurnTerminal"></a>TopicTurnTerminal is the typed declaration for the turn.terminal bus topic \(typed\-bus\-topics leaf 02\). Publishers MUST use bus.PublishT with this declaration; future subscribers MUST use bus.SubscribeT with it. Payload is the frozen TurnTerminalEvent \- see its doc comment \(CLOSED field set\).
@@ -2950,6 +3019,13 @@ LoadJSONLTraces reads spans from a JSONL file and adds them to the store. Each l
 	func LoadSoul(path string) (string, error)
 
 LoadSoul reads and validates the soul file at path. It is the startup gate: an invalid file refuses the daemon.
+
+<a name="MarshalChildDescriptor"></a>
+## func MarshalChildDescriptor
+
+	func MarshalChildDescriptor(d ChildDescriptor) ([]byte, error)
+
+MarshalChildDescriptor serializes a descriptor to its durable JSON form. It is strict: an invalid descriptor \(wrong version or missing mode\) refuses to marshal so a corrupt record can never be persisted.
 
 <a name="MarshalTurnResult"></a>
 ## func MarshalTurnResult
@@ -3507,6 +3583,17 @@ AfterProviderResponseData is emitted after receiving an LLM provider response.
 	    Latency        time.Duration `json:"latency"`
 	    Cached         bool          `json:"cached"`
 	    Error          string        `json:"error,omitempty"`
+	    // Tier signaling (llm-serving-tiers leaf 01, Contract C3, PINNED
+	    // channel): the llm.Response metadata keys bridged verbatim onto the
+	    // per-step surface so agent_progress/step consumers can show "served
+	    // by degraded tier". Key names MUST stay identical to the
+	    // internal/llm constants (llm.MetaKeyLLMTier*). Zero values ("", 0)
+	    // mean the tier feature is off — absent from the payload in effect
+	    // (omitempty on the string; the bool/int stay but mean "not
+	    // degraded"/"depth 0", matching the response's own disabled posture).
+	    LLMTier         string `json:"llm_tier,omitempty"`
+	    LLMTierDegraded bool   `json:"llm_tier_degraded"`
+	    LLMTierDepth    int    `json:"llm_tier_depth"`
 	}
 
 <a name="AfterToolCallHook"></a>
@@ -4171,6 +4258,13 @@ Security returns the loop's current permission checker \(nil = none\). Daemon\-s
 	func (l *AgentLoop) SessionConversation(id string) *Conversation
 
 SessionConversation returns the conversation for the given session/conversation ID, creating it on first access \(ConversationStore.Get auto\-vivifies: a miss allocates a new Conversation, inserts it into the LRU cache, and returns it, so the result is never nil for a non\-nil receiver\). Unlike GetConversation, which only reads existing entries, this is safe to use when the session conversation may not exist yet — e.g. recording a task\-path exchange into the session conversation before any direct\-path turn has run. Successive calls with the same ID return the same \*Conversation \(cache identity\).
+
+<a name="AgentLoop.SessionID"></a>
+### func \(\*AgentLoop\) SessionID
+
+	func (l *AgentLoop) SessionID() string
+
+SessionID returns the loop's session identifier \(the identity the loop was constructed with\). Read\-only, used for tool\-context session attribution \(DSH\-6\); may be empty on degenerate loops.
 
 <a name="AgentLoop.SetACPExecutor"></a>
 ### func \(\*AgentLoop\) SetACPExecutor
@@ -6914,6 +7008,93 @@ Modeled after HALO's turn\-compaction recovery: checkpoints are written periodic
 
 SnapshotForTurn converts a set of turn records and LLM messages into a Checkpoint suitable for WriteCheckpoint.
 
+<a name="ChildDescriptor"></a>
+## type ChildDescriptor
+
+ChildDescriptor is a durable description of a child that leaf 06 persists for cold resume. Version must be 1; a future build's descriptor is rejected by Validate rather than silently resumed with wrong semantics.
+
+	type ChildDescriptor struct {
+	    Version         int       `json:"version"`
+	    Mode            string    `json:"mode"`
+	    Provider        string    `json:"provider,omitempty"`
+	    Label           string    `json:"label,omitempty"`
+	    AgentProvider   string    `json:"agent_provider,omitempty"`
+	    AgentModel      string    `json:"agent_model,omitempty"`
+	    Reasoning       string    `json:"reasoning,omitempty"`
+	    ParentSessionID string    `json:"parent_session_id"`
+	    SeedPayload     string    `json:"seed_payload,omitempty"`
+	    CreatedAt       time.Time `json:"created_at"`
+	}
+
+<a name="UnmarshalChildDescriptor"></a>
+### func UnmarshalChildDescriptor
+
+	func UnmarshalChildDescriptor(b []byte) (ChildDescriptor, error)
+
+UnmarshalChildDescriptor rehydrates a descriptor from its durable JSON form. It is strict: an unknown/newer version is an error \(never silently downgraded or resumed with wrong semantics\). Malformed JSON is also an error.
+
+<a name="ChildDescriptor.Validate"></a>
+### func \(ChildDescriptor\) Validate
+
+	func (d ChildDescriptor) Validate() error
+
+Validate reports whether the descriptor is well\-formed and current. Full implementation \(version \+ mode\) lives in delegate\_descriptor.go; kept here as a thin wrapper for symmetry with the struct it documents.
+
+<a name="ChildOptions"></a>
+## type ChildOptions
+
+ChildOptions carries the per\-child model routing parameters resolved by the route resolver \(B4\); the identity resolver passes the request's values through unchanged.
+
+	type ChildOptions struct {
+	    Provider        string
+	    Model           string
+	    ReasoningEffort string
+	}
+
+<a name="ChildRecord"></a>
+## type ChildRecord
+
+ChildRecord is the per\-session registry entry for a delegated child.
+
+	type ChildRecord struct {
+	    ChildID         string
+	    AgentID         string
+	    ParentSessionID string
+	    Mode            string
+	    Model           string
+	    Provider        string
+	    ReasoningEffort string
+	    ConversationID  string
+	    State           ChildState
+	    CreatedAt       time.Time
+	    Result          string
+	    Err             string
+	    Descriptor      ChildDescriptor
+	    // contains filtered or unexported fields
+	}
+
+<a name="ChildState"></a>
+## type ChildState
+
+ChildState is the lifecycle state of a delegated child.
+
+	type ChildState string
+
+<a name="ChildStatePending"></a>
+
+	const (
+	    // ChildStatePending is a child that was registered but has not started yet.
+	    ChildStatePending ChildState = "pending"
+	    // ChildStateRunning is a child whose spawn was accepted and is executing.
+	    ChildStateRunning ChildState = "running"
+	    // ChildStateCompleted is a child that settled with a final response.
+	    ChildStateCompleted ChildState = "completed"
+	    // ChildStateInterrupted is a child that was cancelled via Cancel.
+	    ChildStateInterrupted ChildState = "interrupted"
+	    // ChildStateFailed is a child that settled with an error.
+	    ChildStateFailed ChildState = "failed"
+	)
+
 <a name="ClassifierBootReadiness"></a>
 ## type ClassifierBootReadiness
 
@@ -7406,12 +7587,26 @@ HasActiveInstructions returns true if there are active user instructions.
 
 HasLearnedPatterns returns true if there are learned patterns available.
 
+<a name="ContextInjector.MaterializeSkillCatalog"></a>
+### func \(\*ContextInjector\) MaterializeSkillCatalog
+
+	func (c *ContextInjector) MaterializeSkillCatalog() (rendered string, changed bool)
+
+MaterializeSkillCatalog builds the durable skill catalog from the CURRENT discovery snapshot and decides, through the digest\-dedup injector, whether it changed since the last materialization \(dsh 04\-tool\-surface/03\-skill\-catalog T3, wiring remediation DSH\-4\). Returns the rendered C4 listing and whether the caller should append it as a session record: true for the first call \(a fresh injector always materializes a baseline\) and whenever the visible skill set changed since. The caller persists the rendered block itself \(source kind "skill\-catalog" session record\) — the injector stays session\-agnostic; per\-session dedup lives in the caller's handling of the returned bool keyed on its session identity. Nil\-safe.
+
 <a name="ContextInjector.SetEpisodeTask"></a>
 ### func \(\*ContextInjector\) SetEpisodeTask
 
 	func (c *ContextInjector) SetEpisodeTask(taskText string)
 
 SetEpisodeTask marks the start of a new episode and records its task text as the ranking signal for the skill listing \(leaf 02: "rank at episode start"\). Called once per episode by the agent loop; subsequent BuildSystemPrompt calls in the same episode reuse the frozen order, so per\-turn churn never invalidates the prompt cache. Empty taskText keeps the listing alphabetical \(no signal\). Setting the SAME text again does not invalidate the frozen order \(idempotent within an episode\). Nil\-safe.
+
+<a name="ContextInjector.SetPlanModePolicySection"></a>
+### func \(\*ContextInjector\) SetPlanModePolicySection
+
+	func (c *ContextInjector) SetPlanModePolicySection(fn func() string)
+
+SetPlanModePolicySection wires the plan\-mode plan:policy prompt provider. It returns the plan\-policy section text while plan mode is active, else "". A nil arg is a no\-op \(typed\-nil guard\); an unset provider disables plan\-mode injection entirely.
 
 <a name="ContextInjector.SetSkillLoader"></a>
 ### func \(\*ContextInjector\) SetSkillLoader
@@ -7992,6 +8187,163 @@ Decision captures a notable design or tooling choice the step made.
 	type Decision struct {
 	    Name      string `json:"name"`
 	    Rationale string `json:"rationale"`
+	}
+
+<a name="DelegateManager"></a>
+## type DelegateManager
+
+DelegateManager owns async child delegation for a parent session. It is safe for concurrent use; every field that can change post\-construction is guarded by mu \(children map\).
+
+	type DelegateManager struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewDelegateManager"></a>
+### func NewDelegateManager
+
+	func NewDelegateManager(reg *AgentRegistry, publisher func(string, any), cancelHook func(string) error) *DelegateManager
+
+NewDelegateManager constructs the manager. A nil registry disables child execution \(children are still registered and can be settled through the test seam / external hooks\); publisher and cancelHook are optional and nil\-safe.
+
+<a name="DelegateManager.Cancel"></a>
+### func \(\*DelegateManager\) Cancel
+
+	func (m *DelegateManager) Cancel(childID string) error
+
+Cancel interrupts a running child: it invokes the external cancel hook, the per\-child run context, and any live ACP session, then marks the record interrupted and publishes settlement.
+
+<a name="DelegateManager.Children"></a>
+### func \(\*DelegateManager\) Children
+
+	func (m *DelegateManager) Children(parentSessionID string) []ChildRecord
+
+Children returns a snapshot \(copies\) of all children registered under a parent session, in no particular order.
+
+<a name="DelegateManager.Dispose"></a>
+### func \(\*DelegateManager\) Dispose
+
+	func (m *DelegateManager) Dispose(ctx context.Context, parentSessionID, childID string) error
+
+Dispose tears down a child: it removes the durable descriptor record \(best\-effort\) and, if the child is terminal, evicts its run\-state entry. It is idempotent and safe on unknown children \(returns ErrChildNotFound only for a wholly unknown child with no durable record\). Designed for the delegation supervisor's explicit cleanup path after settlement.
+
+<a name="DelegateManager.Join"></a>
+### func \(\*DelegateManager\) Join
+
+	func (m *DelegateManager) Join(ctx context.Context, parentSessionID, childID string, timeout time.Duration) (DelegateResult, error)
+
+Join waits \(bounded by timeout and ctx\) for a child to settle and returns its final result. It returns ErrChildNotFound for an unknown child and a deadline/ctx error when the wait is exceeded.
+
+<a name="DelegateManager.Lookup"></a>
+### func \(\*DelegateManager\) Lookup
+
+	func (m *DelegateManager) Lookup(childID string) (ChildRecord, bool)
+
+Lookup returns a copy of a child record by childID.
+
+<a name="DelegateManager.Resume"></a>
+### func \(\*DelegateManager\) Resume
+
+	func (m *DelegateManager) Resume(ctx context.Context, parentSessionID, childID string) (DelegateResult, error)
+
+Resume re\-spawns an interrupted/idle child from its durable descriptor. It works in two layers:
+
+- Live: the child still exists in this daemon run \-\> it must be in an Interrupted \(or Pending\) state, and it is re\-run under its recorded descriptor.
+- Cold: the child's record is gone from the run\-state \(parent/daemon restart\) \-\> it is rehydrated from the durable store, re\-registered under its original childID, and re\-run from its persisted descriptor.
+
+Both paths replay the frozen fork seed \(SeedPayload\), re\-pin the descriptor's model/route, set the record back to running, and re\-publish the settlement on completion. Only the parent \(record.ParentSessionID == caller\) may resume.
+
+<a name="DelegateManager.Session"></a>
+### func \(\*DelegateManager\) Session
+
+	func (m *DelegateManager) Session(childID string) (*acp.Session, bool)
+
+Session returns the live ACP session recorded for an acp\-mode child, if any. It backs the B3 child\-control SendMessage path, which routes an acp child's message through its recorded session \(never a second client\).
+
+<a name="DelegateManager.SetACPManager"></a>
+### func \(\*DelegateManager\) SetACPManager
+
+	func (m *DelegateManager) SetACPManager(acpMgr *acp.Manager)
+
+SetACPManager injects the acp.Manager used for Mode=="acp" delegation children. A nil/absent ACP manager makes an acp child settle with "acp provider not wired".
+
+<a name="DelegateManager.SetDescriptorFactory"></a>
+### func \(\*DelegateManager\) SetDescriptorFactory
+
+	func (m *DelegateManager) SetDescriptorFactory(f func(ChildRecord) ChildDescriptor)
+
+SetDescriptorFactory installs the B6 descriptor writer, stamped onto each child at spawn. nil keeps the built\-in descriptor.
+
+<a name="DelegateManager.SetForkSeed"></a>
+### func \(\*DelegateManager\) SetForkSeed
+
+	func (m *DelegateManager) SetForkSeed(f func(*Conversation) []llm.ChatMessage)
+
+SetForkSeed installs the B2 fork\-seed seam that materializes a parent transcript for IsolationSharedTranscript. nil keeps a fresh spawn default.
+
+<a name="DelegateManager.SetPersist"></a>
+### func \(\*DelegateManager\) SetPersist
+
+	func (m *DelegateManager) SetPersist(f func(ChildRecord) error)
+
+SetPersist installs the B6 persistence hook called on settlement. nil makes persistence a no\-op.
+
+<a name="DelegateManager.SetRouteResolver"></a>
+### func \(\*DelegateManager\) SetRouteResolver
+
+	func (m *DelegateManager) SetRouteResolver(f func(ChildOptions, DelegateRequest) (ChildOptions, error))
+
+SetRouteResolver installs the B4 per\-child route resolver. nil resets to the identity default \(request values pass through unchanged\).
+
+<a name="DelegateManager.SetStore"></a>
+### func \(\*DelegateManager\) SetStore
+
+	func (m *DelegateManager) SetStore(store session.Store)
+
+SetStore installs the daemon\-owned durable child\-descriptor store \(B6\). When set, every settled child's descriptor is persisted here \(best\-effort\) and DelegateManager.Resume can cold\-resume an interrupted child after a parent/daemon restart. nil disables durable persistence. It never replaces the SetPersist hook — if both are set, both run \(store first, then hook\).
+
+<a name="DelegateManager.SettleForTest"></a>
+### func \(\*DelegateManager\) SettleForTest
+
+	func (m *DelegateManager) SettleForTest(childID string, state ChildState, result, errStr string)
+
+SettleForTest is the unit\-test seam that settles a child as if its run had completed. It is not used by production callers.
+
+<a name="DelegateManager.Spawn"></a>
+### func \(\*DelegateManager\) Spawn
+
+	func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parentSessionID string) (DelegateResult, error)
+
+Spawn validates the request, registers the child as running, and returns the child handle immediately; the child executes on a goroutine and settles \(bus event \+ record update\) asynchronously.
+
+<a name="DelegateRequest"></a>
+## type DelegateRequest
+
+DelegateRequest is the C1 request shape for spawning a delegated child.
+
+	type DelegateRequest struct {
+	    AgentID         string          `json:"agent_id"`
+	    Message         string          `json:"message"`
+	    Context         string          `json:"context,omitempty"`
+	    OutputSchema    json.RawMessage `json:"output_schema,omitempty"`
+	    Mode            string          `json:"mode,omitempty"` // "spawn"|"fork"|"acp" (default spawn)
+	    Model           string          `json:"model,omitempty"`
+	    Provider        string          `json:"provider,omitempty"`
+	    ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	    Depth           int             `json:"depth,omitempty"` // max nesting, default 1
+	}
+
+<a name="DelegateResult"></a>
+## type DelegateResult
+
+DelegateResult is the C1 result shape; it expands the legacy platform.go shape with ChildID \+ Status so a spawn returns the child handle immediately.
+
+	type DelegateResult struct {
+	    AgentID  string `json:"agent_id"`
+	    Success  bool   `json:"success"`
+	    Response string `json:"response,omitempty"`
+	    Error    string `json:"error,omitempty"`
+	    ChildID  string `json:"child_id,omitempty"` // steer/interrupt key
+	    Status   string `json:"status,omitempty"`   // running|completed|interrupted
 	}
 
 <a name="DependencyInferrer"></a>
@@ -8583,6 +8935,13 @@ SetMultiUserScopeEnabled wires the daemon\-wide multiuser.enabled bit onto the d
 	func (d *Dispatcher) SetPlanManager(pm *plan.PlanManager)
 
 SetPlanManager wires the plan manager after construction. The daemon creates the dispatcher before the plan system is initialized \(same ordering constraint as Orchestrator.SetPlanManager\); nil is a no\-op and leaves the quickplan session\-context block without its Active plan section.
+
+<a name="Dispatcher.SetPlanModeController"></a>
+### func \(\*Dispatcher\) SetPlanModeController
+
+	func (d *Dispatcher) SetPlanModeController(ctrl PlanModeController)
+
+SetPlanModeController wires the plan\-mode controller the /plan slash\-route consults. A nil controller \(or a nil\-boxed one\) leaves the /plan branch on its legacy force\-creation path; the guard keeps the seam typed\-nil\-safe.
 
 <a name="Dispatcher.SetSessionFenceFactory"></a>
 ### func \(\*Dispatcher\) SetSessionFenceFactory
@@ -9222,6 +9581,12 @@ ExecutionResult represents the result of a tool execution.
 	    // so a guard-only harness that fails every call identically by policy —
 	    // not by the tool's own logic — never trips breaker terminalization.
 	    IsBreakableRepeat bool `json:"is_breakable_repeat,omitempty"`
+	    // ErrCode is a machine-readable error class for classified failures.
+	    // Today only a declared-TimeoutMs budget expiry stamps it
+	    // ("TOOL_TIMEOUT"); every other path leaves the zero value "" — purely
+	    // additive, mirroring tools.ToolResult.ErrCode (contract B1,
+	    // 01-tool-timeout).
+	    ErrCode string `json:"err_code,omitempty"`
 	}
 
 <a name="ExecutionResult.ToChatMessage"></a>
@@ -12213,6 +12578,13 @@ Name returns the tool's name.
 
 Parameters returns the JSON Schema parameters for this tool.
 
+<a name="MockTool.TimeoutMs"></a>
+### func \(\*MockTool\) TimeoutMs
+
+	func (t *MockTool) TimeoutMs() time.Duration
+
+TimeoutMs returns 0 for mock tools: no declared timeout budget.
+
 <a name="ModelOverrideFreshTurnHook"></a>
 ## type ModelOverrideFreshTurnHook
 
@@ -13418,6 +13790,21 @@ NewPiiRestoreHook builds the output restore hook. Typed\-nil guards: a nil swapp
 
 Enabled reports whether the feature flag is on \(the store may exist while the lane is off; RestoreOutput must still refuse to mutate\).
 
+<a name="PiiRestoreHook.MaskOutboundScoped"></a>
+### func \(\*PiiRestoreHook\) MaskOutboundScoped
+
+	func (h *PiiRestoreHook) MaskOutboundScoped(messages []llm.ChatMessage, sessionID string) []llm.ChatMessage
+
+MaskOutboundScoped is the pre\-LLM masking half of the unmasking proxy \(agent\-boundary\-hardening BND\-1; master contract C1\-C scenario 03\(a\): provider\-bound context carries only \[PII:\*\] tokens\). It replaces every detected PII span in message text with a session\-scoped token minted through the SAME Swapper the restore lane resolves through, so the later RestoreOutput call on the response un\-masks with the mapping this call recorded. Called by the loop on the CLONED provider\-bound message slice \(after cloneMessagesForTransform\) — stored session history is never touched; only what crosses to the provider this iteration.
+
+Refusals \(each returns the input unchanged — the disabled\-path discipline\):
+
+- nil hook / disabled config: feature off, byte\-identical.
+- empty sessionID: tokens minted without a session scope can never be restored \(the store refuses empty\-session resolution\), so scope\-less masking is refused, not degraded.
+- empty message slice.
+
+Tool\-call arguments are NOT masked: they are data addressed at this session's tools, and masking them would corrupt tool semantics while the responses they produce flow back only into this session. Content only — the same surface the restore lane un\-masks.
+
 <a name="PiiRestoreHook.RestoreOutput"></a>
 ### func \(\*PiiRestoreHook\) RestoreOutput
 
@@ -13546,6 +13933,20 @@ PlanDraft is the brainstorm draft carried on a task's metadata while the user an
 	    CritiqueRoundsUsed int    `json:"critique_rounds_used,omitempty"`
 	    KnownRisksCount    int    `json:"known_risks_count,omitempty"`
 	    CritiqueOutcome    string `json:"critique_outcome,omitempty"`
+	}
+
+<a name="PlanModeController"></a>
+## type PlanModeController
+
+PlanModeController is the subset of the builtin plan\-mode controller the /plan slash\-route consults to reconcile plan\-mode toggling with the legacy force\-plan\-creation path. Defined locally because internal/agent cannot import internal/tools/builtin \(builtin imports agent\); the daemon supplies a bridge \(internal/daemon/dsh\_wiring.go\) wrapping \*builtin.PlanModeController. A nil controller leaves the /plan branch on its legacy routeToPlan path.
+
+	type PlanModeController interface {
+	    // HandlePlanCommand handles a /plan command for a session. It returns a
+	    // non-empty steer text when the command activates plan mode with a real
+	    // task to dispatch, the status reply when the command is a pure toggle,
+	    // and whether the command was consumed by plan mode (false = fall through
+	    // to the legacy /plan force-creation path).
+	    HandlePlanCommand(sessionID, input string) (steer, reply string, consumed bool)
 	}
 
 <a name="PlanPhaseSpec"></a>
@@ -15216,6 +15617,16 @@ ResourcesUpdateData is emitted when resource usage changes.
 	    IterationsMax  int `json:"iterations_max"`
 	}
 
+<a name="ResponseFuncSetter"></a>
+## type ResponseFuncSetter
+
+ResponseFuncSetter is implemented by tools that accept a per\-turn user response callback AND a session binding — e.g. builtin exit\_plan\_mode, whose SetResponseFunc carries the same func\(ctx, question, options\) signature as builtin.ResponseFunc and whose SetSessionID binds the tool to the current session. The agent loop injects a responder \+ the session id at turn start so the tool presents its Approve/Keep\-planning decision against the current session. Satisfied structurally to avoid an import cycle \(builtin imports agent\).
+
+	type ResponseFuncSetter interface {
+	    SetResponseFunc(fn func(ctx context.Context, question string, options []string) (string, error))
+	    SetSessionID(sessionID string)
+	}
+
 <a name="ResultCache"></a>
 ## type ResultCache
 
@@ -16808,6 +17219,19 @@ SkillEntryView is the minimal skill metadata the domain\-agreement gate inspects
 	    Name        string
 	    Tags        []string
 	    Description string
+	}
+
+<a name="SkillInvocationBlock"></a>
+## type SkillInvocationBlock
+
+SkillInvocationBlock is one resolved gesture: the skill plus the rendered user\-role instruction block ready for context injection.
+
+	type SkillInvocationBlock struct {
+	    // Name is the invoked skill's canonical name.
+	    Name string
+	    // Body is the full rendered instruction block ("user asked for this
+	    // skill: <name>" + the skill body).
+	    Body string
 	}
 
 <a name="SkillStateConfig"></a>
