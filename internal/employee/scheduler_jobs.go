@@ -177,6 +177,17 @@ func (m *Manager) runAssessForEmployee(ctx context.Context, employeeID string) {
 	}
 	defer func() { <-sem }() // release
 
+	// Live-voice-call gate: a voice-bound employee's assessment shares the
+	// call's session — an assessment turn would speak through the live
+	// call and contend with the operator (barge-in contention). Skip the
+	// tick while a call is live; the next scheduled tick re-checks.
+	// Nil predicate = no gate (legacy always-run behavior).
+	if isLive := m.voiceCallLiveSnapshot(); isLive != nil && isLive(employeeID) {
+		m.logger.Info("assessment skipped: live voice call",
+			"employee_id", employeeID)
+		return
+	}
+
 	emp, err := m.GetEmployee(ctx, employeeID)
 	if err != nil {
 		m.logger.Warn("scheduled assess: employee not found",
@@ -415,6 +426,31 @@ func (m *Manager) SetPeriodicAuditor(a *PeriodicAuditor) {
 // runtime observer (PostTurnAuditor or similar). When nil, the periodic
 // audit job has no turns to audit and is effectively a no-op.
 type TurnCollectorFunc func(employeeID string, limit int, lookback time.Duration) []TurnRecord
+
+// SetVoiceCallLiveFunc wires the live-voice-call predicate used by the
+// scheduled assessment gate. The daemon injects a closure over the voice
+// registry's Live() set: true means a live call currently holds that
+// employee's session, so runAssessForEmployee skips the tick instead of
+// injecting assessment turns into the call. Nil is ignored (typed-nil
+// guard per docs/agents/coding-practices.md setter convention — nil keeps
+// the legacy always-run behavior). Thread-safe. Callers should treat the
+// predicate as possibly-blocking-cheap only: it is invoked once per
+// scheduled tick outside any manager lock.
+func (m *Manager) SetVoiceCallLiveFunc(fn func(employeeID string) bool) {
+	m.mu.Lock()
+	m.voiceCallLive = fn
+	m.mu.Unlock()
+}
+
+// voiceCallLiveSnapshot reads the gate predicate under a read lock so a
+// concurrent Set cannot race the check. Nil is a legal state meaning
+// "no gate" (legacy always-run behavior).
+func (m *Manager) voiceCallLiveSnapshot() func(employeeID string) bool {
+	m.mu.RLock()
+	fn := m.voiceCallLive
+	m.mu.RUnlock()
+	return fn
+}
 
 // SetTurnCollector wires the turn collector used by the periodic audit.
 // Nil is ignored (typed-nil guard). Thread-safe.
