@@ -5265,7 +5265,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			Template: c.AgentLoop,
 			Effects:  c.EffectsLedger,
 			Broker:   c.ensureSecretBroker(logger),
-			Logger:   logger,
+			// Employee definitions (voice-persona fix): the voice turn
+			// runner stamps the bound employee's prompt + constitution
+			// onto the session loop before every turn. Nil (employees and
+			// bots both disabled) degrades to the template persona.
+			Employees: c.EmployeeManager,
+			Logger:    logger,
 		}
 		// Audit chain: the employee wiring hands the Manager the chain DB
 		// handle; voice dial audit rows append through a store opened over

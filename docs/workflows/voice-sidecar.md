@@ -293,7 +293,13 @@ verdict) is the latency risk. Mitigations, all required:
   per partial fragment cannot keep up on a local model.
 - Per-call limits: max call duration (`voice.max_call_minutes`, default
   15) and a silence prompt at `voice.silence_prompt_seconds` (default 45),
-  then hangup.
+  then hangup. The silence clock is TURN-AWARE: while an employee turn is
+  in flight (final prompt dispatched, reply not yet fully spoken) the
+  silence window is suspended, so a slow cloud model (30-90s) is never
+  reaped mid-generation; the window re-arms fresh once the reply is
+  spoken. The optional `voice.turn_timeout_seconds` hard cap (default 0 =
+  disabled) bounds a hung LLM, since the suspended silence clock no
+  longer can.
 
 ## Concurrency and instances
 
@@ -444,7 +450,10 @@ Proposed keys, all under `voice`:
 - `allowed_numbers` - E.164 list; inbound and outbound both gated
 - `timeout_secs` - outbound ring timeout, default 30
 - `max_call_minutes` - int, default 15
-- `silence_prompt_seconds` - int, default 45
+- `silence_prompt_seconds` - int, default 45; the clock pauses while the
+  employee turn is in flight and re-arms after the reply is spoken
+- `turn_timeout_seconds` - int, default 0 (disabled); optional hard cap
+  on one in-flight voice turn (bounds a hung employee LLM)
 - `max_concurrent_calls` - int
 - `reorder_window_frames` - int, default 10
 - `reorder_gap_ms` - int, default 60

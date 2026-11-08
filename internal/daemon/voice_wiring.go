@@ -133,6 +133,10 @@ type WireVoiceDeps struct {
 	Audit    *auditlog.Store
 	Effects  voice.EffectsLedger
 	Broker   *secrets.Broker
+	// Employees resolves the bound employee's definition for the voice
+	// turn runner (persona prompt + constitution stamping). Nil degrades
+	// to the daemon template persona (the legacy behavior).
+	Employees EmployeeDefinitionResolver
 	// SupervisorChatter is the resolved fast-model client for the C6
 	// gate (voice.supervisor_model alias). nil degrades the gate to
 	// disabled (every sentence allowed) with a logged warning.
@@ -277,6 +281,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		TemplateLoop:  deps.Template,
 		WorkingDir:    config.MeeptPath("voice"),
 		Bus:           deps.Bus,
+		Employees:     deps.Employees,
 		CallStorePath: filepath.Join(config.MeeptPath("voice"), "calls.db"),
 		Logger:        vlog.With("sub", "employee"),
 	})
@@ -557,6 +562,7 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			FallbackLine:         "I cannot confirm that yet.",
 			MaxCallMinutes:       w.cfg.MaxCallMinutes,
 			SilencePromptSeconds: w.cfg.SilencePromptSeconds,
+			TurnTimeoutSeconds:   w.cfg.TurnTimeoutSeconds,
 		})
 		w.loopsMu.Lock()
 		w.loops[f.CallID] = loop

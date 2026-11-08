@@ -123,6 +123,29 @@ func constSession(sess SessionHandle) func(Instance) SessionHandle {
 	return func(Instance) SessionHandle { return sess }
 }
 
+// gatedTurns blocks its turn until the gate channel closes, then returns
+// the canned reply. Models a slow cloud LLM (30-90s) or a hung one (gate
+// never closed); records the start like cannedTurns.
+type gatedTurns struct {
+	mu     sync.Mutex
+	reply  string
+	starts int
+	gate   chan struct{}
+}
+
+func (t *gatedTurns) Run(ctx context.Context, sess SessionHandle, prompt string) (string, error) {
+	t.mu.Lock()
+	t.starts++
+	t.mu.Unlock()
+	select {
+	case <-t.gate:
+		return t.reply, nil
+	case <-ctx.Done():
+		// Interrupt/teardown while parked: the draft dies silently.
+		return "", ctx.Err()
+	}
+}
+
 func newTestTalkLoop(t *testing.T, sink func(Frame) error, sup Supervisor, turns TurnRunner, cfg TalkLoopConfig) *TalkLoop {
 	t.Helper()
 	return NewTalkLoop(TalkDeps{
@@ -771,5 +794,123 @@ func TestTalkLoopSilenceTimerNoDoubleFire(t *testing.T) {
 	}
 	if got := promptCount(); got != baseline+1 {
 		t.Errorf("silence prompt spoken %d times after the reply (baseline %d), want exactly one more", got, baseline)
+	}
+}
+
+// TestTalkLoopSilenceNotWhileTurnInFlight pins the turn-aware silence
+// rule: a final prompt whose employee turn outlives the whole silence
+// window must NOT be reaped - the clock is suspended from prompt dispatch
+// until the draft drains, then re-arms fresh. Before the fix the call
+// died with the silence reason while the reply was still generating.
+func TestTalkLoopSilenceNotWhileTurnInFlight(t *testing.T) {
+	sink := &recordSink{}
+	sup := &cannedSupervisor{}
+	// The turn blocks well past the silence window: the reply arrives
+	// only when the test releases the gate.
+	release := make(chan struct{})
+	turns := &gatedTurns{reply: "Finally, back.", gate: release}
+	endReasons := make(chan string, 1)
+	loop := NewTalkLoop(TalkDeps{
+		Supervisor: sup,
+		Turns:      turns,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       sink.Send,
+		OnEnd:      func(ccid, reason string) { endReasons <- reason },
+		Logger:     testLogger(),
+	}, TalkLoopConfig{
+		GreetingLine:         "Welcome.",
+		FillerLines:          []string{"Hold on."},
+		SilencePromptSeconds: 1,
+	})
+
+	go func() {
+		_ = loop.Run(context.Background(), Instance{CallControlID: "cc-turnaware"})
+	}()
+
+	last := true
+	loop.frames <- Frame{CallID: "cc-turnaware", Event: EventPrompt, Text: "slow question", Last: &last}
+
+	// Wait well past TWO full silence windows while the turn is in
+	// flight. Legacy behavior would hang the call up here with a
+	// silence-named reason (first fire: prompt; second fire: hangup).
+	select {
+	case r := <-endReasons:
+		t.Fatalf("call reaped while the employee turn was in flight: %q", r)
+	case <-time.After(2200 * time.Millisecond):
+	}
+
+	// The greeting ("Welcome.") is the only say so far besides the
+	// prompt-dispatch filler ("Hold on."): the silence path shares the
+	// filler list, so a second filler means a silence fire spoke while
+	// the turn was in flight.
+	fillers := 0
+	for _, tx := range sink.sayTexts() {
+		if tx == "Hold on." {
+			fillers++
+		}
+	}
+	if fillers != 1 {
+		t.Errorf("filler spoken %d times while the turn was in flight, want exactly 1 (dispatch filler only; silence clock must stay stopped)", fillers)
+	}
+
+	// Release the gate: the slow reply lands, the draft drains, and the
+	// silence window re-arms FRESH from that moment.
+	close(release)
+	waitFor(t, 2*time.Second, "slow reply never spoken after release", func() bool {
+		return slices.Contains(sink.sayTexts(), "Finally, back.")
+	})
+
+	// The call survived the turn, and the re-armed window works: quiet
+	// caller now => first fire speaks the prompt, second fire ends the
+	// call with the silence reason.
+	select {
+	case r := <-endReasons:
+		if !strings.Contains(r, "silence") {
+			t.Fatalf("end reason = %q, want a silence-named reason after the turn drained", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("re-armed silence window never ended the call")
+	}
+}
+
+// TestTalkLoopTurnTimeoutCap pins the opt-in turn cap: a hung employee LLM
+// (turn never returns) is bounded by voice.turn_timeout_seconds - the
+// only bound left once the silence clock is suspended for in-flight
+// turns. The end reason names the cap.
+func TestTalkLoopTurnTimeoutCap(t *testing.T) {
+	sink := &recordSink{}
+	sup := &cannedSupervisor{}
+	// A turn that never finishes: the goroutine parks forever, mirroring
+	// a hung LLM request.
+	turns := &gatedTurns{reply: "never", gate: make(chan struct{})}
+	endReasons := make(chan string, 1)
+	loop := NewTalkLoop(TalkDeps{
+		Supervisor: sup,
+		Turns:      turns,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       sink.Send,
+		OnEnd:      func(ccid, reason string) { endReasons <- reason },
+		Logger:     testLogger(),
+	}, TalkLoopConfig{
+		GreetingLine:         "Welcome.",
+		FillerLines:          []string{"Are you there?"},
+		SilencePromptSeconds: 1,
+		TurnTimeoutSeconds:   1,
+	})
+
+	go func() {
+		_ = loop.Run(context.Background(), Instance{CallControlID: "cc-turncap"})
+	}()
+
+	last := true
+	loop.frames <- Frame{CallID: "cc-turncap", Event: EventPrompt, Text: "hello?", Last: &last}
+
+	select {
+	case r := <-endReasons:
+		if !strings.Contains(r, "turn timeout") {
+			t.Fatalf("end reason = %q, want a turn-timeout-named reason", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("turn timeout cap never fired on a hung turn")
 	}
 }

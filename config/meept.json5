@@ -1356,7 +1356,8 @@
     "allowed_numbers": null,                // allowed caller numbers (E.164); null = all
     "timeout_secs": 30,                     // per-step call timeout
     "max_call_minutes": 15,                 // hard cap on call length
-    "silence_prompt_seconds": 45,           // silence before prompting the caller
+    "silence_prompt_seconds": 45,           // silence before prompting the caller; the clock pauses while the employee turn is in flight
+    "turn_timeout_seconds": 0,              // optional hard cap on one in-flight voice turn (hung LLM bound); 0 = disabled
     "max_concurrent_calls": 2,              // concurrent voice instances; 0 = unlimited
     "reorder_window_frames": 10,            // audio reorder window (frames)
     "reorder_gap_ms": 60,                   // audio reorder gap (ms)

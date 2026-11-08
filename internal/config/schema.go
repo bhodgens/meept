@@ -4983,10 +4983,15 @@ func DefaultConfig() *Config {
 			MaxConcurrentCalls:   2,
 			MaxCallMinutes:       15,
 			SilencePromptSeconds: 45,
-			ReorderWindowFrames:  10,
-			ReorderGapMs:         60,
-			DefaultLeg:           "phone",
-			Local:                LocalConfig{Enabled: false, BargeInRms: 3000},
+			// turn_timeout_seconds is opt-in: default 0 = disabled
+			// (docs/agents/opt-in-defaults.md). The silence timer is
+			// suspended while a voice turn is in flight, so an operator
+			// who wants a hard bound on a hung employee LLM sets this.
+			TurnTimeoutSeconds:  0,
+			ReorderWindowFrames: 10,
+			ReorderGapMs:        60,
+			DefaultLeg:          "phone",
+			Local:               LocalConfig{Enabled: false, BargeInRms: 3000},
 		},
 		ReflectionCollector: ReflectionCollectorConfig{
 			Enabled:              true,
@@ -5288,6 +5293,14 @@ type TTSConfig struct {
 }
 
 type VoiceConfig struct {
+	// TurnTimeoutSeconds (json turn_timeout_seconds) is the opt-in hard
+	// cap on one voice turn (final prompt dispatched -> turn-final say
+	// flushed). The silence timer is suspended while a turn is in flight
+	// (a slow cloud LLM must not be reaped mid-generation), so this cap
+	// is the only bound on a hung employee LLM. Default 0 = disabled
+	// (opt-in defaults rule, docs/agents/opt-in-defaults.md). Declared
+	// here in lieu of an in-field comment, which would split the field
+	// block's gofmt alignment group.
 	Enabled              bool                `json:"enabled"                toml:"enabled"`
 	IdleStopSeconds      int                 `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
 	OnnxRuntimeLib       string              `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
@@ -5306,6 +5319,7 @@ type VoiceConfig struct {
 	TimeoutSecs          int                 `json:"timeout_secs"           toml:"timeout_secs"`
 	MaxCallMinutes       int                 `json:"max_call_minutes"       toml:"max_call_minutes"`
 	SilencePromptSeconds int                 `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	TurnTimeoutSeconds   int                 `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
 	MaxConcurrentCalls   int                 `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
 	ReorderWindowFrames  int                 `json:"reorder_window_frames"  toml:"reorder_window_frames"`
 	ReorderGapMs         int                 `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`

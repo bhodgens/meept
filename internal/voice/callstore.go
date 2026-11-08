@@ -259,6 +259,42 @@ func (s *CallStore) TodayTranscripts(ctx context.Context, number string) ([]Call
 	return out, nil
 }
 
+// EndedCall returns one terminal call's record plus its decoded
+// transcript, ok=false for an unknown call_id. Read-only: it exists for
+// the daemon's call-end notification relay
+// (internal/daemon/voice_employee.go notifyCallRelay) and mutates
+// nothing.
+func (s *CallStore) EndedCall(ctx context.Context, callID string) (CallRecord, []TranscriptLine, bool, error) {
+	var (
+		number, employeeID, direction, sessionID string
+		startedAt                                string
+		raw                                      string
+	)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT number, employee_id, direction, session_id, started_at, transcript
+		 FROM voice_calls WHERE call_id = ?`, callID,
+	).Scan(&number, &employeeID, &direction, &sessionID, &startedAt, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CallRecord{}, nil, false, nil
+	}
+	if err != nil {
+		return CallRecord{}, nil, false, fmt.Errorf("voice callstore: read call %s: %w", callID, err)
+	}
+	var lines []TranscriptLine
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &lines); err != nil {
+			return CallRecord{}, nil, false, fmt.Errorf("voice callstore: decode transcript for %s: %w", callID, err)
+		}
+	}
+	return CallRecord{
+		CallID:     callID,
+		Number:     number,
+		EmployeeID: employeeID,
+		Direction:  direction,
+		SessionID:  sessionID,
+	}, lines, true, nil
+}
+
 // SessionIDFor returns the meept session id bound to the most recent call
 // with this number and employee, or ok=false when none exists.
 func (s *CallStore) SessionIDFor(number, employeeID string) (string, bool) {

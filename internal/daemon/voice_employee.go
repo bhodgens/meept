@@ -22,11 +22,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/voice"
 )
@@ -49,6 +51,7 @@ type VoiceEmployeeWiring struct {
 	Binding *voice.Binding
 
 	store  *voice.CallStore
+	bus    *bus.MessageBus
 	logger *slog.Logger
 
 	holdMu    sync.Mutex
@@ -66,6 +69,11 @@ type VoiceEmployeeDeps struct {
 	WorkingDir   string           // per-session working dir for cloned loops
 	Bus          *bus.MessageBus
 	Logger       *slog.Logger
+
+	// Employees resolves the bound employee's definition (persona prompt +
+	// constitution) for turn-time stamping. Nil degrades to the template
+	// persona (logged at turn time) - same optional-seam posture as Hold.
+	Employees EmployeeDefinitionResolver
 
 	// CallStorePath is $MEEPT_HOME/voice/calls.db (config.MeeptPath).
 	CallStorePath string
@@ -124,15 +132,124 @@ func (a sessionStoreAdapter) SetEmployeeID(sessionID, employeeID string) error {
 
 // loopTurnRunner adapts agent.Manager onto voice.TurnRunner: the loop is
 // cloned per session via GetOrCreateWired (never the shared template),
-// RunOnce runs on the session's conversation id, and the exchange is
-// persisted to the session store (persistExchange seam) so the phone
-// conversation history survives across calls.
+// the BOUND EMPLOYEE'S DEFINITION is stamped onto the loop before every
+// turn (prompt + constitution -> persona/output constraints), RunOnce
+// runs on the session's conversation id, and the exchange is persisted
+// to the session store (persistExchange seam) so the phone conversation
+// history survives across calls.
+//
+// Employee-definition seam (voice-persona fix): GetOrCreateWired clones
+// the DAEMON TEMPLATE loop, whose config carries the default persona
+// (SOUL.md personality + DefaultConstitution/Purpose). Without the stamp
+// below, a voice turn ran the daemon default persona - the bound
+// employee's spoken-word prompt (companion: no markdown, short spoken
+// sentences) and constitution constraints never reached the model. The
+// stamp mirrors what a chat turn for that employee would run:
+//   - Persona: SystemPromptOverride = def.Prompt + SynthesizedPrompt
+//     (constitution constraints/charter). The override lane
+//     (buildSystemPromptWithOverride, internal/agent/loop.go:9064) wins
+//     over the SOUL.md personality on every prompt build site, and
+//     GlobalRules are still appended - platform rules stay in force.
+//   - Enforcement: Constraints.Never/NeverRules flow into AgentConfig so
+//     the executor's constitution gate (PreExecChecker) and the
+//     post-turn audit pattern-match the employee's prohibitions.
+//   - Output filters: the reply path already applies the frozen
+//     post-step pipeline (applyReplyGuard + filter chain via
+//     RunOnceWithParts); the persona override is what makes the employee's
+//     no-markdown/short-sentence constraints reach the model so the
+//     filter chain judges an in-persona draft.
+//
+// The resolver never nils: an unknown/missing employee definition is a
+// logged Warn + empty override (the turn proceeds on the template persona)
+// - a voice call is never dropped because a definition lookup failed
+// (the voice never-quota-parked contract's same posture).
 type loopTurnRunner struct {
 	mgr        *agent.Manager
 	template   *agent.AgentLoop
 	workingDir string
 	sessions   session.Store
-	logger     *slog.Logger
+	// employees resolves the bound employee's definition. Nil degrades to
+	// the legacy template-persona behavior (documented posture, same as
+	// the Hold seam).
+	employees EmployeeDefinitionResolver
+	logger    *slog.Logger
+}
+
+// EmployeeDefinitionResolver resolves one employee's runtime definition:
+// the persona prompt and the constitution that constrains output. The
+// narrow shape internal/daemon needs; employee.Manager satisfies it
+// structurally via GetEmployee.
+type EmployeeDefinitionResolver interface {
+	GetEmployee(ctx context.Context, id string) (*employee.Employee, error)
+}
+
+// employeeSystemPrompt renders the employee's system prompt for voice
+// turns: the definition prompt (spoken-word persona) followed by the
+// constitution synthesized constraints (purpose/role/charter/never
+// rules). Empty definition prompt + empty constitution -> "" (no
+// override; the template persona stands).
+func employeeSystemPrompt(def *employee.Employee) string {
+	if def == nil {
+		return ""
+	}
+	prompt := strings.TrimSpace(def.Prompt)
+	if def.HasConstitution() {
+		c := def.Constitution
+		synthesized := employee.SynthesizedPrompt(&c, "")
+		if synthesized != "" {
+			if prompt != "" {
+				prompt = prompt + "\n\n" + synthesized
+			} else {
+				prompt = synthesized
+			}
+		}
+	}
+	return prompt
+}
+
+// applyEmployeeDefinition stamps the bound employee's definition onto the
+// session loop before the turn: persona override + constitution
+// constraints + model ref. It mutates ONLY the per-session cloned loop
+// (GetOrCreateWired never returns the shared template), so concurrent
+// sessions are isolated by construction. Returns the override actually
+// applied ("" = template persona) for logging/tests.
+func applyEmployeeDefinition(ctx context.Context, loop *agent.AgentLoop, employeeID string, resolver EmployeeDefinitionResolver, logger *slog.Logger) string {
+	if resolver == nil || employeeID == "" {
+		return ""
+	}
+	def, err := resolver.GetEmployee(ctx, employeeID)
+	if err != nil || def == nil {
+		logger.Warn("voice turn runner: employee definition unavailable (turn runs the template persona)",
+			"employee_id", employeeID, "error", err)
+		return ""
+	}
+
+	cfg := loop.GetConfig()
+	override := employeeSystemPrompt(def)
+	if override != "" {
+		cfg.SystemPromptOveride = override
+	} else {
+		cfg.SystemPromptOveride = ""
+	}
+	if def.HasConstitution() {
+		c := def.Constitution
+		cfg.Purpose = c.Purpose
+		cfg.Constitution = employee.SynthesizedPrompt(&c, cfg.Constitution)
+		if len(c.Constraints.Never) > 0 {
+			cfg.Restrictions = strings.Join(c.Constraints.Never, "; ")
+		}
+	}
+	loop.SetConfig(cfg)
+
+	// Per-employee model binding: the definition's model ref routes the
+	// loop onto the employee's configured model. The PERSISTENT override
+	// survives across turns (the one-shot lane auto-clears after one
+	// reasoning cycle, wrong for a standing per-employee binding); empty
+	// definition ref keeps the template's model unchanged.
+	if ref := strings.TrimSpace(def.Model); ref != "" {
+		loop.SetPersistentModelOverride(ref)
+	}
+	return override
 }
 
 // Run implements voice.TurnRunner.
@@ -140,6 +257,11 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 	loop, err := r.mgr.GetOrCreateWired(sess.ID, r.workingDir, r.template)
 	if err != nil {
 		return "", fmt.Errorf("voice turn runner: wired loop for %s: %w", sess.ID, err)
+	}
+	employeeID := sess.EmployeeID
+	if override := applyEmployeeDefinition(ctx, loop, employeeID, r.employees, r.logger); override != "" {
+		r.logger.Debug("voice turn runner: employee persona applied",
+			"session_id", sess.ID, "employee_id", employeeID, "prompt_bytes", len(override))
 	}
 	reply, err := loop.RunOnce(ctx, prompt, sess.ConversationID)
 	if err != nil {
@@ -228,6 +350,7 @@ func WireVoiceEmployee(deps VoiceEmployeeDeps) (*VoiceEmployeeWiring, error) {
 			template:   deps.TemplateLoop,
 			workingDir: deps.WorkingDir,
 			sessions:   deps.Sessions,
+			employees:  deps.Employees,
 			logger:     logger.With("component", "voice-turns"),
 		},
 		Progress: progressPublisherFunc(progressFn),
@@ -241,6 +364,7 @@ func WireVoiceEmployee(deps VoiceEmployeeDeps) (*VoiceEmployeeWiring, error) {
 	w := &VoiceEmployeeWiring{
 		Binding:   binding,
 		store:     store,
+		bus:       deps.Bus,
 		logger:    logger,
 		holds:     make(map[string]*sync.Mutex),
 		heldCalls: make(map[string]holdEntry),
@@ -308,23 +432,119 @@ func (w *VoiceEmployeeWiring) ReleaseForCall(ccid string) bool {
 // Manager.SetReleaseHook(w.ReleaseHook). It ends the call row, publishes
 // terminal cleanup, and drops the goal hold exactly once per ccid (the
 // manager fires the hook once; this side also guards with its own map
-// delete so a replayed outcome cannot double-unlock).
+// delete so a replayed outcome cannot double-unlock). AFTER teardown it
+// publishes the call-end employee.notify relay (notifyCallRelay) for
+// EVERY terminal outcome - held or not, phone or local leg.
 func (w *VoiceEmployeeWiring) ReleaseHook(ccid string, outcome voice.Outcome) {
 	// Peek under holdMu (the ONLY guard of heldCalls; the map delete in
 	// ReleaseForCall is the once-guard against replayed outcomes).
 	w.holdMu.Lock()
 	_, seen := w.heldCalls[ccid]
 	w.holdMu.Unlock()
-	if !seen {
+	if seen {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := w.Binding.OnCallEnd(ctx, ccid, string(outcome)); err != nil {
+			w.logger.Error("voice employee wiring: end call", "ccid", ccid, "error", err)
+		}
+		w.ReleaseForCall(ccid)
+		w.logger.Info("voice call released", "ccid", ccid, "outcome", string(outcome))
+	}
+	// Best-effort and last: the relay must never delay or fail the
+	// teardown above (the notification contract, pinned by the unit test).
+	w.notifyCallRelay(ccid, outcome)
+}
+
+// relayTranscriptBudget caps the rendered transcript section of the call
+// relay (a few hundred characters keeps the notification scannable).
+const relayTranscriptBudget = 400
+
+// notifyCallRelay is the call-end notification relay (secretary leaf): on
+// every terminal outcome it reads the call row from calls.db and publishes
+// a compact relay of the call - employee id, leg (phone/local), direction,
+// caller/target - plus the transcript rendered readably ("caller: ..." /
+// "reply: ...", capped) on agent.SpeakTopicNotify ("employee.notify"). The
+// speak push bridge (speak_push_bridge.go) decodes agent.NotifyPayload and
+// pushes it to TUI/GUI/taskbar surfaces; the WS bridge independently
+// forwards the same topic to browser clients. The call's bound session id
+// fills BOTH payload id fields (session_id and conversation_id), the same
+// duality sessionFor pins.
+//
+// Contract:
+//   - Best-effort: every failure logs a Warn and NEVER fails the release
+//     (a nil bus or store drops the relay silently).
+//   - Calls with an empty transcript (no conversation happened) notify
+//     nothing, as do ccids with no call row at all.
+//   - Always-on by design: no per-employee or global opt-out knob exists
+//     in [voice] today, and relaying the message is the secretary
+//     employee's whole purpose. If an opt-out is ever wanted, add a
+//     [voice] config key and gate HERE - this is the single publish site.
+func (w *VoiceEmployeeWiring) notifyCallRelay(ccid string, outcome voice.Outcome) {
+	if w.bus == nil || w.store == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := w.Binding.OnCallEnd(ctx, ccid, string(outcome)); err != nil {
-		w.logger.Error("voice employee wiring: end call", "ccid", ccid, "error", err)
+	rec, lines, ok, err := w.store.EndedCall(ctx, ccid)
+	if err != nil {
+		w.logger.Warn("voice employee wiring: call relay read", "ccid", ccid, "error", err)
+		return
 	}
-	w.ReleaseForCall(ccid)
-	w.logger.Info("voice call released", "ccid", ccid, "outcome", string(outcome))
+	if !ok {
+		return
+	}
+	text := renderCallRelay(rec, lines, string(outcome))
+	if text == "" {
+		return
+	}
+	pub := agent.BusSpeakPublisher(w.bus, "voice-call-relay")
+	if err := pub(agent.SpeakNotify, text, rec.SessionID, rec.SessionID); err != nil {
+		w.logger.Warn("voice employee wiring: call relay publish", "ccid", ccid, "error", err)
+		return
+	}
+	w.logger.Debug("voice call relay published", "ccid", ccid, "session_id", rec.SessionID)
+}
+
+// renderCallRelay builds the notification text: a one-line header
+// (outcome, employee, leg, direction, target) followed by the transcript
+// as "caller: ..." / "reply: ..." lines. Returns "" (notify nothing) when
+// the transcript carries no rendered content. The leg derives from the
+// stored target ("local:<label>" is the local leg; everything else is the
+// phone leg) because the registry instance is already released when the
+// relay runs.
+func renderCallRelay(rec voice.CallRecord, lines []voice.TranscriptLine, outcome string) string {
+	leg := "phone"
+	if strings.HasPrefix(rec.Number, "local:") {
+		leg = "local"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "call ended (%s): employee %s | %s leg | %s | %s",
+		outcome, rec.EmployeeID, leg, rec.Direction, rec.Number)
+	used := 0
+	for _, l := range lines {
+		t := strings.TrimSpace(l.Text)
+		if t == "" {
+			continue
+		}
+		role := "caller"
+		if l.Role == "assistant" {
+			role = "reply"
+		}
+		line := role + ": " + t
+		if used > 0 {
+			line = "\n" + line
+		}
+		if used+len(line) > relayTranscriptBudget {
+			b.WriteString("\n...")
+			break
+		}
+		b.WriteString(line)
+		used += len(line)
+	}
+	if used == 0 {
+		return "" // empty transcript: no conversation happened, notify nothing
+	}
+	return b.String()
 }
 
 // Close closes the call store. Safe to call once at daemon shutdown.

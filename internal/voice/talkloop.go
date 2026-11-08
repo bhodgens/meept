@@ -37,6 +37,14 @@ package voice
 // Timers with named reasons: max_call_minutes bounds the call; the silence
 // path (silence_prompt_seconds) speaks one filler-class prompt after the
 // first quiet window and hangs up if the silence persists another window.
+// The silence clock is TURN-AWARE: while a prompt's employee turn is in
+// flight (final prompt dispatched, reply not yet fully spoken), the
+// silence window is suspended - a slow cloud LLM (30-90s) must never lose
+// the call to the 45s silence reaper before its reply is spoken. Once the
+// draft's verdict channel drains (reply spoken or flushed), the window
+// re-arms fresh. An opt-in hard cap (voice.turn_timeout_seconds, default
+// 0 = disabled) bounds a hung LLM; without it an in-flight turn can hold
+// the silence path off indefinitely.
 
 import (
 	"context"
@@ -73,6 +81,13 @@ type TalkLoopConfig struct {
 	// silence persists another full window, the call hangs up. Zero
 	// disables.
 	SilencePromptSeconds int
+	// TurnTimeoutSeconds is the opt-in hard cap on one in-flight turn
+	// (final prompt dispatched -> turn-final say flushed). While a turn
+	// is in flight the silence timer is suspended, so without a cap a
+	// hung employee LLM would keep the call alive forever. Zero (the
+	// default) disables the cap: the legacy behavior where only the
+	// silence path ends a quiet call.
+	TurnTimeoutSeconds int
 }
 
 // TalkDeps wires the loop. Send is the C1 seam: the talk loop never touches
@@ -255,7 +270,16 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	}
 
 	// Silence timer (voice.silence_prompt_seconds): re-armed after every
-	// final prompt.
+	// turn (final prompt dispatched -> reply fully spoken).
+	//
+	// TURN-AWARE silence (bughunt 2026-11-08): while a turn is in flight
+	// (t.cur != nil, i.e. prompt dispatched, turn-final say not yet
+	// flushed), the silence window is SUSPENDED - a slow cloud LLM (30-90s)
+	// must not be reaped by the 45s silence clock before its reply is
+	// spoken. Concretely: the final-prompt handler stops the silence timer
+	// instead of re-arming it; the draft-drain branch re-arms a fresh
+	// window once the reply is out. Between prompts (caller quiet), the
+	// legacy two-fire silence path is byte-identical.
 	//
 	// Timer discipline (M5): never Reset a timer whose fire may already
 	// be buffered (or racing Stop) — the stale value would be consumed
@@ -283,6 +307,32 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	}
 	rearmSilence()
 	defer stopSilence()
+
+	// Turn hard cap (voice.turn_timeout_seconds, opt-in, default 0 =
+	// disabled): bounds a hung employee LLM. The silence timer cannot
+	// reap an in-flight turn, so without this cap a wedged turn keeps
+	// the call alive forever. The timer arms FRESH at each final-prompt
+	// dispatch and stops when the draft drains; a fire with no live
+	// pipeline is a dropped no-op (the turn finished inside the cap).
+	var turnTimer *time.Timer
+	var turnTimerC <-chan time.Time
+	armTurn := func() {
+		if t.cfg.TurnTimeoutSeconds <= 0 {
+			return
+		}
+		if turnTimer != nil {
+			turnTimer.Stop()
+		}
+		turnTimer = time.NewTimer(time.Duration(t.cfg.TurnTimeoutSeconds) * time.Second)
+		turnTimerC = turnTimer.C
+	}
+	stopTurn := func() {
+		if turnTimer != nil {
+			turnTimer.Stop()
+		}
+		turnTimerC = nil
+	}
+	defer stopTurn()
 
 	// current drains the live pipeline's verdict channel, or nil between
 	// prompts.
@@ -329,6 +379,14 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			if t.cfg.SilencePromptSeconds <= 0 {
 				continue
 			}
+			// A turn was in flight when this stale fire landed (the
+			// final-prompt handler stops the timer; a fire already
+			// buffered before the stop is possible). The silence path
+			// must never reap an in-flight turn: drop the fire, keep
+			// the clock stopped until the turn drains and re-arms it.
+			if t.curPipeline() != nil {
+				continue
+			}
 			if !t.silencePrompted {
 				// First fire: one filler-class prompt, then re-arm.
 				t.silencePrompted = true
@@ -344,9 +402,25 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			t.cancelPipeline()
 			t.end(ccid, fmt.Sprintf("silence (%ds without caller speech after prompt)", t.cfg.SilencePromptSeconds))
 			return nil
+		case <-turnTimerC:
+			// Hard cap on ONE in-flight turn (opt-in). The fire is
+			// consulted once: nil pipeline (turn already drained or
+			// never started) means the cap missed its window - drop it
+			// and let the silence path own the call from here.
+			turnTimerC = nil
+			if t.curPipeline() == nil {
+				continue
+			}
+			t.cancelPipeline()
+			t.end(ccid, fmt.Sprintf("turn timeout (%ds without a spoken reply)", t.cfg.TurnTimeoutSeconds))
+			return nil
 		case vr, ok := <-current():
 			if !ok {
-				// Draft finished (checker closed the channel).
+				// Draft finished (checker closed the channel): the
+				// turn is no longer in flight, so the silence clock
+				// re-arms fresh from NOW (turn-aware suspension ends)
+				// and the turn cap stands down.
+				stopTurn()
 				flushTurnEnd(ccid)
 				t.clearPipeline()
 				rearmSilence()
@@ -365,7 +439,13 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 					// Partial transcript: preview only, never a turn.
 					continue
 				}
+				// The clock stops while the turn runs: the silence window
+				// is turn-aware, and the draft-drain branch re-arms it
+				// fresh once the reply is fully spoken (a slow 30-90s LLM
+				// must not lose the call mid-generation). The turn cap
+				// (opt-in) arms fresh per prompt for the same window.
 				stopSilence()
+				armTurn()
 				t.silencePrompted = false
 				// A newer prompt supersedes any in-flight draft (the
 				// barge-in drop rule applies to a fresh question too).
@@ -527,6 +607,15 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 	} else {
 		t.log.Info("voice talk loop: sentence denied and dropped", "ccid", ccid, "position", p.said)
 	}
+}
+
+// curPipeline returns the live pipeline pointer (nil between turns). The
+// select loop uses it to make the silence path turn-aware: a nil pipeline
+// means no turn is in flight, so the silence clock may act.
+func (t *TalkLoop) curPipeline() *pipeline {
+	t.interruptMu.Lock()
+	defer t.interruptMu.Unlock()
+	return t.cur
 }
 
 // clearPipeline drops the reference to a finished pipeline (the checker's

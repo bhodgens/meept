@@ -62,9 +62,13 @@ func SessionName(employeeID, number string) string {
 
 // SessionHandle carries BOTH identity keys of the bound meept session
 // (session_id and conversation_id are distinct; new code handles both).
+// EmployeeID is the call's bound employee id: the daemon turn runner
+// stamps that employee's definition (persona + constitution) onto the
+// session loop before each turn. Empty = no binding (template persona).
 type SessionHandle struct {
 	ID             string
 	ConversationID string
+	EmployeeID     string
 }
 
 // SessionStore is the narrow session-store seam (lookup-by-name, create,
@@ -262,7 +266,11 @@ func (b *Binding) RunTurn(ctx context.Context, ccid, text string) (string, error
 	}
 	b.deps.Progress.PublishProgress(ev)
 
-	reply, err := b.deps.Turns.Run(ctx, st.session, prompt)
+	reply, err := b.deps.Turns.Run(ctx, SessionHandle{
+		ID:             st.session.ID,
+		ConversationID: st.session.ConversationID,
+		EmployeeID:     st.employeeID,
+	}, prompt)
 	if err != nil {
 		return "", fmt.Errorf("voice binding: turn for call %s: %w", ccid, err)
 	}
