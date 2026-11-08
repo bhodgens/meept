@@ -638,6 +638,21 @@
       "voice-bargein",
       "voice-lifecycle"
     ],
+    "internal/contact/": [
+      "contact-chain"
+    ],
+    "internal/signal/": [
+      "signal-sidecar"
+    ],
+    "internal/telnyx/": [
+      "telnyx-sms"
+    ],
+    "internal/voice/signal_leg_test.go": [
+      "signal-sidecar"
+    ],
+    "internal/tools/builtin/contact.go": [
+      "contact-chain"
+    ],
     "internal/code/lsp/": [
       "tool-surface"
     ],
@@ -1244,6 +1259,41 @@
         "tool-surface-04 the skill catalog survives a daemon restart (durable, digest-equal) (F11)"
       ],
       "note": "04-tool-surface branch e2e gate (T5): timeout tool + real LSP navigate + skill hot-reload/durability through the live RPC surface."
+    },
+    {
+      "name": "contact-chain",
+      "dir": "e2e/suites/contact-chain",
+      "status": "todo",
+      "diff": "L",
+      "scenarios": [
+        "contact-chain-01 contact record seeded; fake channel attempts registered; the employee contact tool walks voice(no-answer) -> signal_voice(busy) -> signal_msg(delivered) and the chain stops (F1, F2, F8)",
+        "contact-chain-02 every effect/audit row of the run shares ONE chain execution id; no second notification per channel (F2 dedupe)"
+      ],
+      "note": "contact-channels branch e2e gate (00T T7): RED skip-guarded until leaf 01/02 land; activation un-skips the body and fills the harness seams."
+    },
+    {
+      "name": "signal-sidecar",
+      "dir": "e2e/suites/signal-sidecar",
+      "status": "todo",
+      "diff": "L",
+      "scenarios": [
+        "signal-sidecar-01 a REAL signal-cli-format stub process (scripted json-rpc + callEvent stream) through the real Client: StartCall surfaces RINGING_OUTGOING -> CONNECTED -> ENDED in order (F3)",
+        "signal-sidecar-02 the real signal voice-leg adapter bridges stub socket audio to a fake child PCM pair paced 640B/20ms L16 (F4)",
+        "signal-sidecar-03 hangup release fan-out empties the registry slot exactly once (F4)"
+      ],
+      "note": "contact-channels branch e2e gate (00T T8): RED skip-guarded until leaf 10/11 land; the stub is a scripted sh process, never an in-process mock."
+    },
+    {
+      "name": "telnyx-sms",
+      "dir": "e2e/suites/telnyx-sms",
+      "status": "todo",
+      "diff": "M",
+      "scenarios": [
+        "telnyx-sms-01 Ed25519-signed webhook POST message.received -> employee session inbound row; bad signature refused (F6)",
+        "telnyx-sms-02 message.finalized status=failed DLR -> matching chain attempt outcome failed (F6)",
+        "telnyx-sms-03 SendSMS via stub messaging API parses data.id and refuses non-E.164 input client-side (F6)"
+      ],
+      "note": "contact-channels branch e2e gate (00T T9): RED skip-guarded until leaf 12 lands; signs payloads with a test Ed25519 key verified through the EXISTING telnyx-signature verifier (config seam)."
     },
     {
       "name": "session-storage",
@@ -4562,6 +4612,38 @@
       "paths": [
         "internal/voice/dial.go",
         "internal/rpc/voice_local.go"
+      ]
+    },
+    {
+      "id": "contact-chain-01",
+      "suite": "contact-chain",
+      "diff": "L",
+      "title": "[contact-chain] the ordered fallback chain end to end: contact record seeded, fake channel attempts registered, the employee contact tool walks telnyx_voice(no-answer) -> signal_voice(busy) -> signal_msg(delivered), one chain execution id on every effect/audit row, no double notification per channel",
+      "paths": [
+        "internal/contact/",
+        "internal/tools/builtin/contact.go",
+        "internal/daemon/"
+      ]
+    },
+    {
+      "id": "signal-sidecar-01",
+      "suite": "signal-sidecar",
+      "diff": "L",
+      "title": "[signal-sidecar] signal-cli stub process (scripted json-rpc + callEvent + PCM socket) through the real Client and the real voice-leg adapter to a fake child pair paced 640B/20ms; hangup release fan-out empties the registry",
+      "paths": [
+        "internal/signal/",
+        "internal/voice/signal_leg_test.go",
+        "internal/daemon/"
+      ]
+    },
+    {
+      "id": "telnyx-sms-01",
+      "suite": "telnyx-sms",
+      "diff": "M",
+      "title": "[telnyx-sms] Ed25519-signed webhook receiver: message.received inbound lands in the employee session; message.finalized failed DLR marks the chain attempt outcome failed",
+      "paths": [
+        "internal/telnyx/",
+        "internal/comm/http/"
       ]
     },
     {
