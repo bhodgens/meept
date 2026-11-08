@@ -36,7 +36,12 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   `tts_vendor`/`tts_model`/`tts_base_url`/`tts_voice` (absent = "" = the
   hardcoded deepgram/openai defaults; a non-empty `stt_base_url`/`tts_base_url`
   is dialed instead of the cloud default - `[voice].stt_base_url` /
-  `[voice].tts_base_url` feed them daemon-side). The shared `voiceframe.Frame`
+  `[voice].tts_base_url` feed them daemon-side, global config by design).
+  The vendor/model/voice selectors resolve per call through
+  `voice.ResolveProfile` (local-leg CL4: `voice.employee_leg` row >
+  per-leg config > provider default) over the call's registry row
+  (employee id + leg); an untracked ccid lands on the global values.
+  The shared `voiceframe.Frame`
   carries NO key fields by design - `SendRaw` is the keys seam, and the
   child decodes the raw line (KeysFrame String/LogValue redacts). The
   child constructs its real providers from this frame (C3 factories in

@@ -33,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/voice"
 )
 
@@ -132,6 +133,48 @@ func TestVoiceKeysEmission(t *testing.T) {
 	case extra := <-f.lines:
 		t.Fatalf("duplicate setup emitted a second line %q; keys send once per call (C4)", extra)
 	case <-time.After(300 * time.Millisecond):
+	}
+
+	t.Cleanup(func() { f.w.releaseCall(ccid, voice.OutcomeHangup) })
+}
+
+// TestVoiceKeysEmissionUsesProfileResolution (local-leg leaf 04 tail,
+// CL4): the keys line must carry the per-call employee_leg row's TTS
+// model/voice over the top-level [voice] config. RED today: sendKeysFrame
+// reads w.cfg directly, so the employee row is invisible to the wire.
+func TestVoiceKeysEmissionUsesProfileResolution(t *testing.T) {
+	f := newKeysEmitFixture(t)
+	const ccid = "cc-keys-profile"
+	// Employee row wins over top level per CL4 precedence; STT model has
+	// no per-employee pin, so top level must still land.
+	f.w.cfg.TTSModel = "global-model"
+	f.w.cfg.TTSVoice = "global-voice"
+	f.w.cfg.STTModel = "global-stt-model"
+	f.w.cfg.EmployeeLeg = []config.EmployeeLegConfig{{
+		Employee: f.w.cfg.DefaultEmployee,
+		Leg:      voice.LegPhone,
+		TTSModel: "employee-model",
+		TTSVoice: "employee-voice",
+	}}
+	acquireFor(f.w, ccid)
+
+	f.w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+	line := readKeysLine(t, f.lines)
+	var wire map[string]any
+	if err := json.Unmarshal([]byte(line), &wire); err != nil {
+		t.Fatalf("keys line not JSON: %v: %s", err, line)
+	}
+	wantStr := map[string]string{
+		"tts_model":  "employee-model",
+		"tts_voice":  "employee-voice",
+		"stt_model":  "global-stt-model",
+		"stt_vendor": "deepgram",
+		"tts_vendor": "openai",
+	}
+	for key, want := range wantStr {
+		if got, _ := wire[key].(string); got != want {
+			t.Errorf("wire %s = %v, want %q (CL4: employee_leg row over top-level config)", key, wire[key], want)
+		}
 	}
 
 	t.Cleanup(func() { f.w.releaseCall(ccid, voice.OutcomeHangup) })

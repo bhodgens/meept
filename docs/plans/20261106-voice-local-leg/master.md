@@ -365,16 +365,16 @@ Per child, in order:
 | 01 | frame-config | A | DONE cb8c8672 | gates re-run by orchestrator |
 | 02 | local-rms-bargein | B | DONE 1046dda0 | playback-side RMS VAD (10-chunk/200ms sustained window), same interrupted latch inlined under playMu, phone legs excluded; -race clean; only the 2 documented host-bound REDs |
 | 03 | child-open-handler | B | DONE 6e1113ce | orchestrator in-session after 2 delegation deaths |
-| 04 | open-producer-profile | B | DONE 6e1113ce + follow-up | CL4 resolver (internal/voice/profile.go) + voice.employee_leg config (OQ4 pick: config list, per leaf 01 doc shape); keys-emission swap still gated on tierA 03 |
+| 04 | open-producer-profile | B | DONE 6e1113ce + follow-up + keys swap | CL4 resolver (internal/voice/profile.go) + voice.employee_leg config (OQ4: config list); keys emission now resolves per-call through ResolveProfile (TDD: TestVoiceKeysEmissionUsesProfileResolution red->green) - leaf 04 fully closed |
 | 05 | local-splice | A | DONE 57abc139 | orchestrator fixed clear-frame newline |
 | 06 | registry-leg | A | DONE a72d293f | 4-arg shape = AcquireLeg (Go: no overload) |
 | 07-local-leg | DONE b374927f | 1 | LocalLeg CL5 (no carrier/audit/effects, nil-carrier pinned); pre-accept 'not connected' splice filter; deadcode rebaseline: 5 reachable, 13 leaf-08 surfaces; sun_path fixture fix |
 | 08 | rpc-cli | D | DONE 439624b2 + T4 seam arming 9c459774 | voice.local.* RPC (import-cycle seam adapters), client audio, CLI; components.go diff kept empty; deadcode +229 CLI-scope entries rebalanced |
 | 09 | tool-leg | D | DONE 7854e298 | leg/voice args, CL4 precedence, LocalFunc seam fails closed; phone branch verbatim; daemon arming = 9c459774 |
 | 10 | local-providers | B | DONE 02157fc2 | orchestrator in-session after 3 delegation deaths; whisper+piper subprocess adapters, vendor switch in NewSTT/NewTTS; local vendors keyless; fake-binary test seams; race+gofmt+vet clean |
-| 11 | e2e | E | PENDING | manifest same commit |
-| 12 | docs | E | PENDING | AGENTS.md same commit |
-| 13 | tui-voice (part 2) | F | PENDING (optional) | parity deviation documented |
+| 11 | e2e | E | DONE 73d5b900 | voice-local suite: RPC open->PCM->whisper shim->fake-LLM turn->piper shim->paced PCM->end; orchestrator-verified green 16.4s -count=1; manifest + path_map same commit |
+| 12 | docs | E | DONE 3e461382 | spec rev 3 + user doc + invariants + graphs refresh |
+| 13 | tui-voice -> SPLIT 13a/13b | F | DONE: 13a=114687f0, 13b=099cd3ac | OQ1 resolved 25eb11cf (parity explicit; TUI-only deviation REJECTED); 13a `/voice` TUI command + 13b Flutter GUI voice feature both landed. 13-tui-voice.md superseded |
 
 ## Integration Test Plan
 

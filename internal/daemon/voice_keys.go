@@ -27,6 +27,8 @@ package daemon
 
 import (
 	"encoding/json"
+
+	"github.com/caimlas/meept/internal/voice"
 )
 
 // keysWire is the daemon-side C1 keys JSON shape. Field-for-field identical
@@ -65,16 +67,37 @@ const keysEvent = "keys"
 // Called once per call from routeFrame's EventSetup branch AFTER the talk
 // loop registers; the loop-level idempotency guard (F-6) already returned
 // on duplicate setups before reaching us, so duplicates never re-send.
+//
+// Local-leg leaf 04 (CL4): the selector fields come from ResolveProfile
+// for THIS call's employee + leg (voice.employee_leg row > per-leg config
+// > provider default), not from the global [voice] block directly. The
+// registry row is the authority for employee and leg (acquire pinned
+// them); a ccid missing from the registry resolves with an empty
+// employeeID, which lands on the same global values as before - the
+// phone-leg default config reproduces byte-identically. Base URLs stay
+// global: per the frozen tree split they are config, not per-agent
+// routing, and Profile carries none by design.
 func (w *VoiceWiring) sendKeysFrame(ccid string) {
+	employeeID, leg := "", voice.LegPhone
+	for _, inst := range w.Registry.Live() {
+		if inst.CallControlID == ccid {
+			employeeID = inst.EmployeeID
+			if inst.Leg != "" {
+				leg = inst.Leg
+			}
+			break
+		}
+	}
+	p := voice.ResolveProfile(w.cfg, employeeID, "", leg)
 	kw := keysWire{
 		CallID:     ccid,
 		Event:      keysEvent,
-		STTVendor:  w.cfg.STTProvider,
-		STTModel:   w.cfg.STTModel,
-		TTSVendor:  w.cfg.TTSProvider,
-		TTSModel:   w.cfg.TTSModel,
+		STTVendor:  p.SttVendor,
+		STTModel:   p.SttModel,
+		TTSVendor:  p.TtsVendor,
+		TTSModel:   p.TtsModel,
 		TTSBaseURL: w.cfg.TTSBaseURL,
-		TTSVoice:   w.cfg.TTSVoice,
+		TTSVoice:   p.TtsVoice,
 	}
 	if kw.STTVendor == "" {
 		kw.STTVendor = defaultSTTVendor
