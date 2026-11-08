@@ -384,28 +384,33 @@ func TestSpliceRunnerCodecWireTranscodesPCMU(t *testing.T) {
 		defer close(childDialDone)
 		close(childDialStart)
 		var c1, c2 net.Conn
+		defer func() {
+			_ = c1.Close()
+			_ = c2.Close()
+		}()
 		deadline := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
+			// Hold an already-dialed conn across retries: the pair's accept
+			// goroutine claims the FIRST .in conn (internal/voice/socket.go
+			// NewAudioPair); closing it to retry both poisons the pair -
+			// the retry conn is never accepted and the pipeline is dead.
+			// Retry only the missing side (the .out socket file lands one
+			// statement after .in's bind, so an early .out dial races it).
 			var e1, e2 error
-			c1, e1 = net.Dial("unix", filepath.Join(dir, ccid+".in"))
-			c2, e2 = net.Dial("unix", filepath.Join(dir, ccid+".out"))
+			if c1 == nil {
+				c1, e1 = net.Dial("unix", filepath.Join(dir, ccid+".in"))
+			}
+			if c2 == nil {
+				c2, e2 = net.Dial("unix", filepath.Join(dir, ccid+".out"))
+			}
 			if e1 == nil && e2 == nil {
 				break
-			}
-			if c1 != nil {
-				_ = c1.Close()
-				c1 = nil
-			}
-			if c2 != nil {
-				_ = c2.Close()
-				c2 = nil
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
 		if c1 == nil || c2 == nil {
 			return
 		}
-		defer func() { _ = c1.Close(); _ = c2.Close() }()
 		buf := make([]byte, 8192)
 		for {
 			n, readErr := c1.Read(buf)

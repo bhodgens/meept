@@ -17,9 +17,23 @@ import (
 // connection plus a line reader over what the daemon sends.
 func dialText(t *testing.T, path string) (net.Conn, *bufio.Reader) {
 	t.Helper()
-	conn, err := net.Dial("unix", path)
-	if err != nil {
-		t.Fatalf("child dial %s: %v", path, err)
+	// Retry the dial: os.Stat (in the callers' waitConn closures) sees the
+	// socket file at bind() time, a beat before listen() finishes, and a
+	// dial in that window gets ECONNREFUSED under suite load. The connect
+	// is idempotent - nothing is observed before it succeeds - so the
+	// retry cannot mask a protocol regression.
+	var conn net.Conn
+	dialDeadline := time.Now().Add(2 * time.Second)
+	for {
+		var err error
+		conn, err = net.Dial("unix", path)
+		if err == nil {
+			break
+		}
+		if time.Now().After(dialDeadline) {
+			t.Fatalf("child dial %s: %v", path, err)
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn, bufio.NewReader(conn)

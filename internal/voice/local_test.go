@@ -273,10 +273,21 @@ func (f *legFixture) dialPair(t *testing.T, ccid string) net.Conn {
 	t.Helper()
 	dir := SocketDir()
 	var lastErr error
+	// Hold an already-dialed conn across retries: the pair's accept
+	// goroutine claims the FIRST conn per socket (socket.go NewAudioPair);
+	// closing it to retry both poisons the pair - the retry conn is never
+	// accepted. Retry only the missing side (the .out socket file lands
+	// one statement after .in's bind, so an early .out dial races it).
+	var c1, c2 net.Conn
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		c1, e1 := net.Dial("unix", filepath.Join(dir, ccid+".in"))
-		c2, e2 := net.Dial("unix", filepath.Join(dir, ccid+".out"))
+		var e1, e2 error
+		if c1 == nil {
+			c1, e1 = net.Dial("unix", filepath.Join(dir, ccid+".in"))
+		}
+		if c2 == nil {
+			c2, e2 = net.Dial("unix", filepath.Join(dir, ccid+".out"))
+		}
 		if e1 == nil && e2 == nil {
 			go func() {
 				buf := make([]byte, 4096)
@@ -290,12 +301,6 @@ func (f *legFixture) dialPair(t *testing.T, ccid string) net.Conn {
 			return c2
 		}
 		lastErr = e1
-		if c1 != nil {
-			_ = c1.Close()
-		}
-		if c2 != nil {
-			_ = c2.Close()
-		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("could not dial audio pair for %s: %v (exists in=%v out=%v)", ccid, lastErr,

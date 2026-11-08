@@ -272,7 +272,10 @@ func TestRMSBargeIn(t *testing.T) {
 
 	// Barge-in 1: LOUD outgoing TTS (what the old tap watched) must not
 	// self-trip; loud INCOMING mic audio while speaking trips the
-	// sustained window through the pump tap.
+	// sustained window through the pump tap. The STT evidence gate needs
+	// a recent final: stamp one (whisper heard the caller moments ago),
+	// set the same way consumeTranscripts does.
+	stampRecentFinal(p)
 	gate1 := newChunkedTTS(loudSample, chunks)
 	swapTTS(p, gate1)
 	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "one moment"}); err != nil {
@@ -285,7 +288,11 @@ func TestRMSBargeIn(t *testing.T) {
 		t.Fatalf("first frame under loud INCOMING audio = %q, want interrupt", f.Event)
 	}
 	// The caller's mic PCM still rode the STT lane during playback.
-	waitFor(t, func() bool { return len(stt.gotChunks()) >= chunks })
+	// At least ONE full chunk, not all N: pcmCh is a bounded 8-slot
+	// channel with oldest-drop overflow (pump must never block), so a
+	// rapid burst can shed chunks under scheduler pressure — the wiring
+	// contract, not a failure. Any forwarded bytes prove the lane flows.
+	waitFor(t, func() bool { return stt.sttBytesAtLeast(640) })
 	// FIFO playback (audit fix 1): utterance 2 starts only after
 	// utterance 1's stream ends — release the park, which EOFs gate1.
 	close(gate1.park)
@@ -323,7 +330,8 @@ func TestRMSBargeIn(t *testing.T) {
 	close(gate3.park)
 
 	// Barge-in 2: the new say re-armed the latch; loud INCOMING audio
-	// trips again.
+	// trips again (fresh evidence stamp: the caller spoke again).
+	stampRecentFinal(p)
 	gate4 := newChunkedTTS(quietSample, chunks)
 	swapTTS(p, gate4)
 	defer close(gate4.park)
@@ -351,7 +359,9 @@ func TestRMSIncomingWhileNotSpeaking(t *testing.T) {
 	d, _, _, in, _, stt := newRMSChild(t, ccid, true, rmsThresh)
 
 	writeMic(t, in, callerSample, 14)
-	waitFor(t, func() bool { return len(stt.gotChunks()) >= 14 })
+	// At least ONE full chunk (see TestRMSBargeIn: bounded pcmCh sheds
+	// burst overflow by design); any forwarded bytes prove the STT lane.
+	waitFor(t, func() bool { return stt.sttBytesAtLeast(640) })
 	assertNoInterruptWithin(t, d, 30*time.Millisecond, "idle loud mic tripped (barge-in is playback-gated)")
 }
 
@@ -402,9 +412,9 @@ func TestRMSDisabledOnPhoneLeg(t *testing.T) {
 		t.Fatalf("handleSay: %v", err)
 	}
 	waitFor(t, func() bool { return p.isSpeaking() })
-	writeMic(t, in, callerSample, chunks) // would trip a local leg
-	drainOut(t, out, chunks*640)          // all loud chunks reached the daemon
-	waitFor(t, func() bool { return len(stt.gotChunks()) >= chunks })
+	writeMic(t, in, callerSample, chunks)                       // would trip a local leg
+	drainOut(t, out, chunks*640)                                // all loud chunks reached the daemon
+	waitFor(t, func() bool { return stt.sttBytesAtLeast(640) }) // one chunk suffices (see TestRMSBargeIn)
 	assertNoInterruptWithin(t, d, 30*time.Millisecond, "phone leg ran the RMS VAD (must not)")
 	close(gate.park)
 }
@@ -431,6 +441,9 @@ func TestRMSBargeInC5FrameOrder(t *testing.T) {
 		t.Fatalf("handleSay: %v", err)
 	}
 	waitFor(t, func() bool { return p.isSpeaking() })
+	// Fresh evidence: the caller's prior utterance finalized; the RMS
+	// trip must emit under the STT-evidence gate (C5 order preserved).
+	stampRecentFinal(p)
 	writeMic(t, in, callerSample, chunks) // trips the RMS latch (async emit)
 	stt.emit(Transcript{Text: "actually", Final: false})
 
