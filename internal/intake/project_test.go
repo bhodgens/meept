@@ -41,11 +41,11 @@ func (projTokenStub) Token(ctx context.Context) (string, error) {
 }
 
 // projFake serves the endpoints the Projector exercises:
-//   - POST /repos/o/r/issues            (phase/step sub-issue creation —
-//     numbered sequentially from 100)
-//   - POST /repos/o/r/issues/N/sub_issues (child parenting; v93 may lack
-//     the typed method — leaf 06 uses NewRequest/Do, this fake serves the
-//     route regardless)
+//   - POST /repos/o/r/issues            (step 1 of sub-issue creation — the
+//     child is created here, numbered sequentially from 100)
+//   - POST /repos/o/r/issues/N/sub_issues (step 2: parents an EXISTING issue
+//     via {"issue_number": N} — GitHub's live shape; the fake verifies the
+//     referenced number was actually created and records the parent link)
 //   - POST / (the graphql endpoint: addProjectV2ItemById +
 //     updateProjectV2ItemFieldValue + the State-field bootstrap queries)
 //
@@ -55,10 +55,12 @@ type projFake struct {
 	*httptest.Server
 
 	mu           sync.Mutex
-	issueCreates int         // POST /repos/o/r/issues
-	subIssues    int         // POST .../sub_issues
+	issueCreates int         // POST /repos/o/r/issues (step 1)
+	subIssues    int         // POST .../sub_issues (step 2)
 	nextNumber   int         // next created issue number (starts 100)
 	created      []projIssue // every created issue (number + body)
+	parentOf     map[int]int // child number -> parent number (step 2 links)
+	badLinks     []int       // sub_issues posts naming an uncreated number
 	graphqlCalls int
 	graphqlErr   bool // when true, the GraphQL endpoint returns an error
 	stateSets    int  // updateProjectV2ItemFieldValue mutations
@@ -73,17 +75,15 @@ type projIssue struct {
 }
 
 func newProjFake() *projFake {
-	f := &projFake{nextNumber: 100}
+	f := &projFake{nextNumber: 100, parentOf: make(map[int]int)}
 	mux := http.NewServeMux()
 
-	createIssue := func(w http.ResponseWriter, r *http.Request, parent int) {
+	// Step 1: plain issue creation ({title, body}).
+	createIssue := func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
 		f.issueCreates++
-		if parent > 0 {
-			f.subIssues++
-		}
 		num := f.nextNumber
 		f.nextNumber++
 		pi := projIssue{
@@ -106,15 +106,41 @@ func newProjFake() *projFake {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		createIssue(w, r, 0)
+		createIssue(w, r)
 	})
-	// Both REST spellings of sub-issue creation are served so the leaf can
-	// pick either path shape.
+	// Step 2: parent an EXISTING issue ({"issue_number": N}) — GitHub's live
+	// sub-issues shape. The fake 422s a link naming a number it never
+	// created, mirroring github.com's validation.
 	mux.HandleFunc("/repos/o/r/issues/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/sub_issues") && r.Method == http.MethodPost {
 			parent := 0
 			_, _ = fmt.Sscanf(r.URL.Path, "/repos/o/r/issues/%d/sub_issues", &parent)
-			createIssue(w, r, parent)
+			var body struct {
+				IssueNumber int `json:"issue_number"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			f.mu.Lock()
+			f.subIssues++
+			known := false
+			for _, ci := range f.created {
+				if ci.Number == body.IssueNumber {
+					known = true
+					break
+				}
+			}
+			if !known || body.IssueNumber == 0 {
+				f.badLinks = append(f.badLinks, body.IssueNumber)
+				f.mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"message":"Validation Failed: issue_number must reference an existing issue"}`))
+				return
+			}
+			f.parentOf[body.IssueNumber] = parent
+			f.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprintf(w, `{"number":%d,"parent_issue_number":%d}`, body.IssueNumber, parent)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -219,6 +245,35 @@ func TestProjector_EnsureProjection_Creates(t *testing.T) {
 	}
 	if subIssues != 6 {
 		t.Errorf("sub-issue creations = %d, want 6 (everything parents under the ticket)", subIssues)
+	}
+
+	// Two-step sequence (GitHub's live shape): every sub-issue link must
+	// reference an issue the fake actually created ({issue_number: N}), and
+	// every created child must carry a parent link. A create-and-parent
+	// {title, body} post to the sub_issues route would fail both halves
+	// (the fake 422s unknown numbers).
+	fake.mu.Lock()
+	badLinks := len(fake.badLinks)
+	linked := len(fake.parentOf)
+	parentOf := make(map[int]int, len(fake.parentOf))
+	for k, v := range fake.parentOf {
+		parentOf[k] = v
+	}
+	fake.mu.Unlock()
+	if badLinks != 0 {
+		t.Errorf("sub_issues posts naming uncreated issue numbers: %v (create-and-parent shape leaked)", fake.badLinks)
+	}
+	if linked != 6 {
+		t.Errorf("parent links recorded = %d, want 6 (one per created child)", linked)
+	}
+	ticket := 42
+	for child, parent := range parentOf {
+		if child == ticket {
+			t.Errorf("the ticket issue %d itself was linked as a sub-issue", ticket)
+		}
+		if parent != ticket && parentOf[parent] != ticket {
+			t.Errorf("child %d parented under %d, which is neither the ticket nor a linked phase issue", child, parent)
+		}
 	}
 
 	// Anchors: each phase body carries meept-plan:<id> phase:<phaseID>.

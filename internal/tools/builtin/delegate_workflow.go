@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/id"
+	"github.com/caimlas/meept/pkg/models"
 	"github.com/dop251/goja"
 )
 
@@ -273,12 +275,16 @@ type WorkflowRun struct {
 // It is safe for a single foreground Run (one execution owns the codemode
 // sandbox); RunBackground runs the engine in a detached goroutine.
 type WorkflowEngine struct {
+	mu            sync.Mutex
 	mgr           workflowSpawner
 	parentSession string
 	cfg           WorkflowConfig
 	runID         string
 	sem           chan struct{}
 	started       atomic.Int64
+	completion    chan WorkflowRun
+	deliver       func(WorkflowRun)
+	bus           workflowBus
 }
 
 // NewWorkflowEngine builds an engine. cfg defaults are applied; an out-of-range
@@ -372,14 +378,121 @@ func (e *WorkflowEngine) Run(ctx context.Context, script string, args map[string
 // immediately. The caller's context is NOT the run's lifetime: the run
 // continues in the background and its children settle via the DelegateManager
 // registry (interruptible by childID through the B3 child-control tools).
+//
+// DEVIATION (recorded per the leaf rule against a second job registry): the
+// wf-job id is NOT a queue job — queue integration would need the daemon-side
+// job store wired through the toolprov provider seam (a cross-package change
+// out of scope for this pass). Instead the settled WorkflowRun is delivered on
+// completion: it is stored on the engine (WorkflowCompletion, readable via
+// WaitCompletion/Completion) and published on the EXISTING
+// agent.delegate.result bus topic with kind "workflow" — the same
+// publisher-adaptor lane the child settlements already ride, so no new
+// registry, topic, or reaper is introduced.
 func (e *WorkflowEngine) RunBackground(script string, args map[string]any) string {
 	jobID := id.Generate("wf-job-")
+	e.mu.Lock()
+	if e.deliver == nil {
+		ch := make(chan WorkflowRun, 1)
+		e.completion = ch
+		e.deliver = func(run WorkflowRun) {
+			ch <- run
+		}
+	}
+	deliver := e.deliver
+	e.mu.Unlock()
 	go func() {
 		runCtx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_ = e.Run(runCtx, script, args)
+		run := e.Run(runCtx, script, args)
+		// Publish BEFORE delivering on the channel: delivery is the final
+		// signal, so a caller waking on WaitCompletion always sees the bus
+		// event already published.
+		e.publishCompletion(run, jobID)
+		deliver(run)
 	}()
 	return jobID
+}
+
+// workflowBus is the minimal publish surface RunBackground delivery rides.
+// It matches the handoffBus adaptor pattern (agent_message.go / handoff.go):
+// a tool-level interface so tests can inject a fake without a live bus.
+type workflowBus interface {
+	Publish(topic string, msg *models.BusMessage) int
+}
+
+// SetCompletionBus wires the bus the background run's completion event is
+// published on (agent.delegate.result with kind "workflow"). Nil (the default,
+// and the test wiring) skips the publish; the completion stays readable via
+// WaitCompletion either way.
+func (e *WorkflowEngine) SetCompletionBus(b workflowBus) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.bus = b
+}
+
+// Completion returns the settled run of a background RunBackground execution
+// without blocking. ok is false until the run settles (and false forever for
+// engines never run in the background).
+func (e *WorkflowEngine) Completion() (WorkflowRun, bool) {
+	e.mu.Lock()
+	ch := e.completion
+	e.mu.Unlock()
+	if ch == nil {
+		return WorkflowRun{}, false
+	}
+	select {
+	case run := <-ch:
+		return run, true
+	default:
+		return WorkflowRun{}, false
+	}
+}
+
+// WaitCompletion blocks until the background run settles (or ctx is done) and
+// returns the settled run. A foreground-only engine (no RunBackground call)
+// never settles: WaitCompletion returns the ctx error wrapped.
+func (e *WorkflowEngine) WaitCompletion(ctx context.Context) (WorkflowRun, error) {
+	e.mu.Lock()
+	ch := e.completion
+	e.mu.Unlock()
+	if ch == nil {
+		return WorkflowRun{}, fmt.Errorf("workflow: no background run on engine %s", e.runID)
+	}
+	select {
+	case run := <-ch:
+		return run, nil
+	case <-ctx.Done():
+		return WorkflowRun{}, fmt.Errorf("workflow: wait for run %s: %w", e.runID, ctx.Err())
+	}
+}
+
+// publishCompletion publishes the background run's settlement on the existing
+// agent.delegate.result topic (kind "workflow"), via the daemon-wired bus
+// adaptor. Best-effort: a nil bus or a marshal failure skips the event (the
+// completion itself is still delivered via the channel seam).
+func (e *WorkflowEngine) publishCompletion(run WorkflowRun, jobID string) {
+	e.mu.Lock()
+	b := e.bus
+	parent := e.parentSession
+	e.mu.Unlock()
+	if b == nil {
+		return
+	}
+	payload := map[string]any{
+		"kind":              "workflow",
+		"job_id":            jobID,
+		"run_id":            run.RunID,
+		"status":            run.StopReason,
+		"result":            run.Value,
+		"error":             run.StopMessage,
+		"agents":            run.AgentsStarted,
+		"parent_session_id": parent,
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "workflow-engine", payload)
+	if err != nil {
+		return
+	}
+	_ = b.Publish("agent.delegate.result", msg)
 }
 
 // failedRun builds a WorkflowRun terminal without a value.
@@ -675,6 +788,7 @@ func (t *WorkflowTool) Execute(ctx context.Context, args map[string]any) (any, e
 	engine.parentSession = parent
 
 	if p.RunInBackground {
+		engine.SetCompletionBus(t.ctrl.completionBus)
 		jobID := engine.RunBackground(p.Script, args)
 		return map[string]any{
 			"kind":  "background",

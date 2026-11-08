@@ -153,6 +153,14 @@ type Server struct {
 	// the within-budget booleans from raw counters.
 	BudgetStatusSnapshotGetter func() llm.BudgetStatusSnapshot
 
+	// TokenLimitGetter is an optional callback returning the configured
+	// hourly and daily TOKEN limits (0 = disabled/unlimited). The legacy
+	// tuple bridge mirrors rpc.Server: when only BudgetStatusGetter is
+	// wired, the bridge consults this getter so a limited budget's
+	// within-budget booleans match the RPC surface instead of treating the
+	// configured limit as disabled.
+	TokenLimitGetter func() (hourlyLimit int, dailyLimit int)
+
 	// CompressionStatsGetter is an optional callback that returns compression
 	// pipeline statistics. Used by the compression stats handler.
 	CompressionStatsGetter func() map[string]any
@@ -1019,6 +1027,13 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 			// exhaustion switches the fix loop to the escalation model) are
 			// agent state transitions. They MUST render as progress — never
 			// chat_message (AGENTS.md WS classification invariant).
+			eventType = "agent_progress"
+		case topic == "agent.delegate.result" && payload["kind"] == "workflow":
+			// Background workflow-run settlements (delegate_workflow.go
+			// RunBackground delivery, DSH-8) ride the child-settlement topic
+			// with a distinct "kind". They are run lifecycle, not child
+			// records: classify as agent_progress so clients see the
+			// background run's completion without a job_update shape.
 			eventType = "agent_progress"
 		case topic == "agent.progress":
 			// Raw agent.progress frames (internal/agent/loop.go
@@ -2418,11 +2433,16 @@ func (s *Server) handleDaemonStatus(w http.ResponseWriter, r *http.Request) {
 			snap = s.BudgetStatusSnapshotGetter()
 		} else {
 			hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl, ptc, psc, ptb, psb := s.BudgetStatusGetter()
-			// This surface has no TokenLimitGetter: pass 0/0 (disabled =
-			// unconstrained) so a disabled budget never recomputes to
-			// over-budget. Production wiring uses the snapshot getter;
-			// the bridge exists for legacy tuple consumers/tests.
-			snap = llm.LegacyTupleBudgetSnapshot(hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl, ptc, psc, ptb, psb, 0, 0)
+			// Mirror the rpc/server.go:635 bridge: pull the configured
+			// hourly/daily token limits from the same llm.Budget the tuple
+			// getter closes over (via llm.SnapshotFromStatus's source), so a
+			// limited budget's booleans match the RPC surface. Zero here
+			// means unwired, and stays disabled = unconstrained.
+			var hl, dl int
+			if s.TokenLimitGetter != nil {
+				hl, dl = s.TokenLimitGetter()
+			}
+			snap = llm.LegacyTupleBudgetSnapshot(hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl, ptc, psc, ptb, psb, hl, dl)
 		}
 		status["budget"] = map[string]any{
 			"hourly_used":        snap.HourlyUsed,

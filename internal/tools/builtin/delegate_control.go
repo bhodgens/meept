@@ -35,6 +35,10 @@ type DelegateController struct {
 	dsp    *agent.Dispatcher
 	acpM   *acp.Manager
 	caller func(ctx context.Context) string
+	// completionBus is the bus background workflow runs publish their
+	// settlement on (DSH-8 delivery). Nil = no publish; the engine's channel
+	// seam still delivers the run.
+	completionBus workflowBus
 }
 
 // NewDelegateController constructs the controller. A nil manager, dispatcher
@@ -55,6 +59,16 @@ func (c *DelegateController) SetCallerSessionResolver(f func(ctx context.Context
 		return
 	}
 	c.caller = f
+}
+
+// SetCompletionBus wires the bus background workflow runs (DSH-8 delivery)
+// publish their settlement on. A typed-nil / nil bus is ignored (nil-safe per
+// the setters rule).
+func (c *DelegateController) SetCompletionBus(b workflowBus) {
+	if b == nil {
+		return
+	}
+	c.completionBus = b
 }
 
 // resolveCallerSession returns the calling turn's session id, or "" when no

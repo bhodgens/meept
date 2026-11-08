@@ -11,6 +11,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // fakeSpawner implements the workflowSpawner seam against a controllable
@@ -392,5 +393,104 @@ func TestWorkflowResultRenderCap(t *testing.T) {
 	short := renderWorkflowResult("ok")
 	if short != "ok" {
 		t.Fatalf("short result mutated: %q", short)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DSH-8: background run completion delivery
+// ---------------------------------------------------------------------------
+
+// fakeWorkflowBus records the RunBackground completion publishes.
+type fakeWorkflowBus struct {
+	mu     sync.Mutex
+	topics []string
+	kinds  []string
+}
+
+func (f *fakeWorkflowBus) Publish(topic string, msg *models.BusMessage) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.topics = append(f.topics, topic)
+	var payload struct {
+		Kind string `json:"kind"`
+	}
+	_ = json.Unmarshal(msg.Payload, &payload)
+	f.kinds = append(f.kinds, payload.Kind)
+	return 1
+}
+
+// TestWorkflowBackgroundDeliversCompletion: a background run delivers its
+// settled WorkflowRun via the engine's channel seam (WaitCompletion) AND
+// publishes an agent.delegate.result bus event with kind "workflow" (DSH-8 —
+// the fabricated wf-job id is no longer a fire-and-forget leak).
+func TestWorkflowBackgroundDeliversCompletion(t *testing.T) {
+	e := newTestEngine(t, &fakeSpawner{})
+	fake := &fakeWorkflowBus{}
+	e.SetCompletionBus(fake)
+
+	jobID := e.RunBackground("return 'bg-ok';", nil)
+	if jobID == "" {
+		t.Fatal("RunBackground returned empty job id")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	run, err := e.WaitCompletion(ctx)
+	if err != nil {
+		t.Fatalf("WaitCompletion: %v", err)
+	}
+	if run.StopReason != workflowStopCompleted {
+		t.Fatalf("background run stop reason = %s, want completed (msg=%s)", run.StopReason, run.StopMessage)
+	}
+	if !strings.Contains(run.Value, "bg-ok") {
+		t.Fatalf("background run value = %q, want it to carry bg-ok", run.Value)
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.topics) != 1 {
+		t.Fatalf("completion publishes = %d, want 1 (topics: %v)", len(fake.topics), fake.topics)
+	}
+	if fake.topics[0] != "agent.delegate.result" {
+		t.Fatalf("completion topic = %s, want agent.delegate.result", fake.topics[0])
+	}
+	if fake.kinds[0] != "workflow" {
+		t.Fatalf("completion payload kind = %s, want workflow", fake.kinds[0])
+	}
+
+	// Completion() is non-blocking. After WaitCompletion has CONSUMED the
+	// delivery (buffered channel drained), a second read correctly reports
+	// not-settled-yet — the seam is single-consumption by design. Just pin
+	// that the call never blocks or panics after consumption.
+	_, _ = e.Completion()
+}
+
+// TestWorkflowBackgroundNilBusStillDelivers: with no bus wired (nil), the run
+// still delivers via the channel seam — the publish is best-effort fan-out.
+func TestWorkflowBackgroundNilBusStillDelivers(t *testing.T) {
+	e := newTestEngine(t, &fakeSpawner{})
+	jobID := e.RunBackground("return 7;", nil)
+	if jobID == "" {
+		t.Fatal("RunBackground returned empty job id")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	run, err := e.WaitCompletion(ctx)
+	if err != nil {
+		t.Fatalf("WaitCompletion with nil bus: %v", err)
+	}
+	if run.StopReason != workflowStopCompleted {
+		t.Fatalf("stop reason = %s, want completed", run.StopReason)
+	}
+}
+
+// TestWorkflowWaitCompletionNoBackgroundRun: a foreground-only engine never
+// arms the completion seam; WaitCompletion fails fast with a named error.
+func TestWorkflowWaitCompletionNoBackgroundRun(t *testing.T) {
+	e := newTestEngine(t, &fakeSpawner{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := e.WaitCompletion(ctx); err == nil {
+		t.Fatal("WaitCompletion on a foreground-only engine should error, got nil")
 	}
 }

@@ -17,17 +17,14 @@ package intake
 //     github.com/shurcooL/githubv4 on the pool's OWN authenticated
 //     *http.Client (client.Client()) — one token, no second auth surface,
 //     no internal/secrets import.
-//   - Sub-issue creation uses the raw client.NewRequest/client.Do escape
-//     hatch: go-github v93's SubIssueService.Add parents an EXISTING
-//     issue (it takes an issue number), so it cannot create-and-parent in
-//     one call. DEVIATION, recorded in the leaf report: GitHub's real
-//     POST /repos/{owner}/{repo}/issues/{n}/sub_issues body is
-//     {"issue_number": N}; the create-and-parent shape this file posts
-//     ({"title":..., "body":...}) is the shape the committed gate fake
-//     defines (internal/intake/project_test.go). Swap the body for
-//     {"issue_number": N} plus a prior POST /repos/{o}/{r}/issues call
-//     when this runs against live GitHub; the effects keys and receipts
-//     do not change.
+//   - Sub-issue creation is TWO-STEP, matching GitHub's live REST shape:
+//     (1) POST /repos/{owner}/{repo}/issues with {title, body} creates the
+//     child, (2) POST /repos/{owner}/{repo}/issues/{parent}/sub_issues with
+//     {"issue_number": N} parents the EXISTING issue. (The recorded deviation
+//     #3 create-and-parent body {title, body} on the sub_issues route 422s
+//     against github.com; go-github v93 lacks a typed create method, so both
+//     posts still go through the raw client.NewRequest/client.Do escape
+//     hatch. Effects keys and receipts are unchanged.)
 //   - Hierarchy depth is ticket=1, phase=2, step=3 — inside GitHub's
 //     depth limit of 8.
 
@@ -565,15 +562,24 @@ func (p *Projector) mirrorStateMutation(ctx context.Context, itemID, fieldID, op
 // REST: sub-issue creation through the go-github escape hatch.
 // ---------------------------------------------------------------------------
 
-// subIssueCreate is the POST body for the sub-issues route. See the file
-// header for the recorded deviation from GitHub's live body shape.
+// subIssueLink is the POST body for the sub-issues parenting route: it
+// parents an EXISTING issue (GitHub's live shape — a create-and-parent
+// {title, body} form 422s against github.com). See the file header.
+type subIssueLink struct {
+	IssueNumber int `json:"issue_number"`
+}
+
+// subIssueCreate is the POST body for plain issue creation (step 1 of the
+// two-step sub-issue flow; see the file header).
 type subIssueCreate struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 }
 
-// createSubIssue creates an issue that is already parented to parentNumber,
-// in one POST. Returns the new issue number and node id.
+// createSubIssue creates a child issue in two steps (GitHub's live REST
+// shape): (1) POST /repos/{o}/{r}/issues creates it, (2) POST
+// /repos/{o}/{r}/issues/{parent}/sub_issues with {"issue_number": N} parents
+// it. Returns the new issue number and node id.
 func (p *Projector) createSubIssue(ctx context.Context, parentNumber int, title, body string) (int, string, error) {
 	if parentNumber <= 0 {
 		return 0, "", fmt.Errorf("parent issue number %d is not positive", parentNumber)
@@ -582,17 +588,30 @@ func (p *Projector) createSubIssue(ctx context.Context, parentNumber int, title,
 	if err != nil {
 		return 0, "", fmt.Errorf("pool client: %w", err)
 	}
-	path := fmt.Sprintf("repos/%s/%s/issues/%d/sub_issues", p.repo.Owner, p.repo.Repo, parentNumber)
-	req, err := client.NewRequest(ctx, http.MethodPost, path, subIssueCreate{Title: title, Body: body})
+
+	// Step 1: create the child issue.
+	createPath := fmt.Sprintf("repos/%s/%s/issues", p.repo.Owner, p.repo.Repo)
+	req, err := client.NewRequest(ctx, http.MethodPost, createPath, subIssueCreate{Title: title, Body: body})
 	if err != nil {
-		return 0, "", fmt.Errorf("build sub-issue request: %w", err)
+		return 0, "", fmt.Errorf("build issue-create request: %w", err)
 	}
 	var issue github.Issue
 	if _, err := client.Do(req, &issue); err != nil {
-		return 0, "", fmt.Errorf("POST %s: %w", path, err)
+		return 0, "", fmt.Errorf("POST %s: %w", createPath, err)
 	}
 	if issue.GetNumber() == 0 {
-		return 0, "", fmt.Errorf("POST %s returned issue number 0", path)
+		return 0, "", fmt.Errorf("POST %s returned issue number 0", createPath)
+	}
+
+	// Step 2: parent the EXISTING issue under parentNumber.
+	linkPath := fmt.Sprintf("repos/%s/%s/issues/%d/sub_issues", p.repo.Owner, p.repo.Repo, parentNumber)
+	linkReq, err := client.NewRequest(ctx, http.MethodPost, linkPath, subIssueLink{IssueNumber: issue.GetNumber()})
+	if err != nil {
+		return 0, "", fmt.Errorf("build sub-issue link request: %w", err)
+	}
+	var linked github.Issue
+	if _, err := client.Do(linkReq, &linked); err != nil {
+		return 0, "", fmt.Errorf("POST %s: %w", linkPath, err)
 	}
 	return issue.GetNumber(), issue.GetNodeID(), nil
 }
