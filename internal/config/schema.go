@@ -123,6 +123,7 @@ type Config struct {
 	GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	Intake              IntakeConfig              `json:"intake"               toml:"intake"`
 	Slack               SlackConfig               `json:"slack"                toml:"slack"`
+	Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
 }
 
 // GitHubConfig configures the GitHub PR/CI tool set ([github]). Disabled by
@@ -142,6 +143,36 @@ type GitHubConfig struct {
 	DefaultOwner string `json:"default_owner" toml:"default_owner"`
 	DefaultRepo  string `json:"default_repo"  toml:"default_repo"`
 	BaseURL      string `json:"base_url,omitempty" toml:"base_url,omitempty"`
+}
+
+// DelegationConfig configures the delegation subsystem ([delegation] block,
+// dsh-convergence B4): the model-selection policy applied to every spawned
+// child's provider/model route.
+//
+//gendoc:section delegation
+//gendoc:desc Delegation model-selection policy: enable per-child provider/model selection and the exact allowed_routes allowlist (empty = allow all).
+//gendoc:example [delegation] enabled = true, allowed_routes = [["openai","gpt-5"],["anthropic","claude-sonnet"]]
+type DelegationConfig struct {
+	// Enabled turns on per-child model selection (dsh B4). When false (the
+	// default), request provider/model fields are ignored and the child
+	// inherits the configured (or parent) route — the pre-existing behavior.
+	Enabled bool `json:"enabled" toml:"enabled"`
+
+	// AllowedRoutes is the exact provider+model allowlist a child's
+	// resolved route must match before it may spawn. An empty list means
+	// NO allowlist is in force: every resolvable route is permitted. Each
+	// entry is a [provider, model] pair (or an object with provider/model
+	// keys in JSON5). Enforced by modelselect.PreflightRoute at the spawn
+	// boundary — an unlisted route fails the delegation visibly, with no
+	// child created.
+	AllowedRoutes []AllowedModelRouteConfig `json:"allowed_routes,omitempty" toml:"allowed_routes"`
+}
+
+// AllowedModelRouteConfig is one exact provider+model pair in the
+// [delegation] allowed_routes allowlist.
+type AllowedModelRouteConfig struct {
+	Provider string `json:"provider" toml:"provider"`
+	Model    string `json:"model"    toml:"model"`
 }
 
 // IntakeConfig configures the GitHub ticket intake ([intake]): a poller
@@ -453,6 +484,24 @@ type EmployeesConfig struct {
 	// Defaults holds per-aspect defaults merged under each employee's own
 	// definition. Currently only gate is defined.
 	Defaults EmployeesDefaultsConfig `json:"defaults" toml:"defaults"`
+
+	// GoalAutoAdvance gates the autonomous round-driver continuation loop
+	// (dsh-convergence C4c/leaf 03). When true (the default, the leaf's
+	// zero-human-turns contract), the driver reserves and triggers round
+	// N+1 itself whenever an armed goal settles under its round cap;
+	// goals still auto-block at the cap with code "round-limit". When
+	// false, rounds advance only through the manual
+	// agents.goals.round.advance RPC/CLI surface.
+	GoalAutoAdvance *bool `json:"goal_auto_advance,omitempty" toml:"goal_auto_advance"`
+}
+
+// GoalAutoAdvanceEnabled reports the resolved goal_auto_advance value: true
+// unless explicitly set false (the leaf contract default is autonomous).
+func (c *EmployeesConfig) GoalAutoAdvanceEnabled() bool {
+	if c == nil || c.GoalAutoAdvance == nil {
+		return true
+	}
+	return *c.GoalAutoAdvance
 }
 
 // EmployeesDefaultsConfig carries employee-layer default blocks.

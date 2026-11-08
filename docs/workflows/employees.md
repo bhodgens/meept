@@ -406,12 +406,61 @@ meept agents migrate --apply <id>              # write proposed constitution to 
 
 ```bash
 meept agents goals [--employee=<id>]           # list goals with health (red/yellow/green)
-meept agents goal-create <employee-id> --title T --mandate M [--gate-command CMD] [--source user|trigger]
+meept agents goal-create <employee-id> --title T --mandate M [--gate-command CMD] [--source user|trigger] [--max-rounds N]
 meept agents set-gate <goal-id> --command="..." # set/clear a goal's completion gate
 meept agents goal <goal-id>                    # goal detail + active plan + history
 meept agents goal <goal-id> --approve <plan-id>
 meept agents goal <goal-id> --reject <plan-id> --reason="..."
+meept agents goals advance <employee-id>       # drive one round settlement manually (see "Autonomous round driver")
 ```
+
+### Autonomous round driver (goal rounds)
+
+An active goal advances in ROUNDS: each round is one goal-loop episode
+(ASSESS → PLAN → EXECUTE → REFLECT). The autonomous round driver
+(`internal/employee/goal_round_driver.go`, dsh-convergence C4c/leaf 03)
+continues a goal with zero human turns:
+
+- **Auto-advance (default ON).** After an armed goal settles (no in-flight
+  episode, no parked provider-wait, no queued steering), the driver reserves
+  round N+1 and re-enters the goal loop through the scheduler with a
+  `source:"goal"` trigger carrying `goal_id`/`round`/`revision`. Rounds run
+  back-to-back until the goal completes, blocks, or exhausts its budget.
+- **Round cap.** When `rounds_started` reaches the goal's `max_rounds`
+  (default 256), the goal auto-blocks durably with code `round-limit`
+  ("Goal reached its configured limit of N rounds.") and disarms. The
+  blocked state + rounds/max are visible in `meept agents goals`.
+- **Manual mode.** `[employees] goal_auto_advance = false` disables the
+  autonomous loop; rounds then advance only through
+  `meept agents goals advance` (the `agents.goals.round.advance` RPC).
+
+```json5
+{
+  employees: {
+    goal_auto_advance: true  // default; false = manual-only round advance
+  }
+}
+```
+
+### Delegation route policy
+
+`[delegation]` constrains which provider/model routes delegation children
+(`delegate_task` / subagent tools) may spawn with (dsh-convergence B4):
+
+```json5
+{
+  delegation: {
+    enabled: false,  // default: per-child model selection off, child inherits the parent route
+    allowed_routes: [
+      // empty = no restriction; with entries, every child route must be an
+      // exact provider+model member or the delegation fails visibly with
+      // no child created (modelselect.PreflightRoute runs at spawn time)
+      { provider: "openai", model: "gpt-5" }
+    ]
+  }
+}
+```
+
 
 ### Audit
 

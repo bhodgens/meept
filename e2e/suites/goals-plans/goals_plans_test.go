@@ -296,3 +296,35 @@ func TestPlanMode_PresentForReviewApprove(t *testing.T) {
 		t.Errorf("plan mode was not still active after an un-approved present (got: %s)", reply)
 	}
 }
+
+// TestRoundDriver_AutoAdvanceKnobGatesManualOnly (DSH-3 config knob): with
+// [employees] goal_auto_advance=false the autonomous loop never starts, so
+// the goal's rounds advance ONLY through the manual
+// agents.goals.round.advance surface and never on their own.
+func TestRoundDriver_AutoAdvanceKnobGatesManualOnly(t *testing.T) {
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		"employees": map[string]any{"goal_auto_advance": false},
+	}))
+	rpcCreateEmployee(t, s, "manual-worker")
+	s.RegisterProject(t, "manual-e2e")
+
+	if out, errOut := s.RunCLI(t, 60*time.Second, false,
+		"agents", "goal-create", "manual-worker",
+		"--title", "manual probe", "--mandate", "manual only", "--max-rounds", "2"); !strings.Contains(out, "goal created") {
+		t.Fatalf("agents goal-create failed:\nstdout:%s\nstderr:%s", out, errOut)
+	}
+
+	// Manual advance still works (the RPC surface is the only driver).
+	out, _ := s.RunCLI(t, 60*time.Second, false, "agents", "goals", "advance", "manual-worker")
+	if !strings.Contains(out, "advanced") {
+		t.Fatalf("manual round advance must work in manual-only mode:\n%s", out)
+	}
+
+	// Give any (disabled) autonomous loop ample time to interfere, then
+	// verify the round count never moved on its own.
+	time.Sleep(3 * time.Second)
+	out, _ = s.RunCLI(t, 60*time.Second, false, "agents", "goals", "--employee=manual-worker")
+	if !strings.Contains(out, "1/2") {
+		t.Fatalf("goal_auto_advance=false must pin the goal at the manually-advanced round 1/2 (auto loop must not run):\n%s", out)
+	}
+}

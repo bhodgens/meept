@@ -852,6 +852,30 @@ func (m *Manager) SetBotStore(bs *bot.Store) {
 	m.mu.Unlock()
 }
 
+// PendingSteerCount reports how many steer triggers are queued for the
+// employee's GoalLoop (0 when no loop is registered). Round-driver
+// quiescence seam (leaf 03): a queued steer means the employee is not
+// settled.
+func (m *Manager) PendingSteerCount(employeeID string) int {
+	loop := m.GetGoalLoop(employeeID)
+	if loop == nil {
+		return 0
+	}
+	return loop.PendingSteerCount()
+}
+
+// HasParkedEpisode reports whether the employee's GoalLoop holds a parked
+// episode (provider-wait park). Round-driver quiescence seam (leaf 03):
+// a parked episode means the employee is not settled. No loop registered
+// (or no parker wired) is quiet by definition.
+func (m *Manager) HasParkedEpisode(employeeID string) bool {
+	loop := m.GetGoalLoop(employeeID)
+	if loop == nil {
+		return false
+	}
+	return loop.HasParkedEpisode()
+}
+
 // RegisterGoalLoop registers a GoalLoop for an employee. Once registered,
 // Trigger delegates to loop.Decide instead of returning a synthesized
 // TriggerResult. Nil loop is ignored (typed-nil guard per CLAUDE.md).

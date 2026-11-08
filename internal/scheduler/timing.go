@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,7 +17,10 @@ import (
 // TimingKind is the semantic kind of a model-authored timing spec.
 type TimingKind string
 
-// The five semantic timing kinds (L1 contract).
+// The five semantic timing kinds (L1 contract). The constants keep the
+// Go-side names used across the scheduler (switch statements, tests); the
+// JSON WIRE shape is the contracted snake_case form (TimingSpec.MarshalJSON):
+// "rrule", "daily", "weekly", "at", "every".
 const (
 	TimingRRule  TimingKind = "TimingRRule"
 	TimingDaily  TimingKind = "TimingDaily"
@@ -24,6 +28,46 @@ const (
 	TimingAt     TimingKind = "TimingOneShot"
 	TimingEvery  TimingKind = "TimingEvery"
 )
+
+// timingJSONKind maps a TimingKind constant onto the contracted snake_case
+// JSON wire value (05-schedule/01-timing-kinds contract). Unknown kinds pass
+// through verbatim so a future kind fails validation loudly rather than
+// silently mis-serializing.
+func timingJSONKind(k TimingKind) string {
+	switch k {
+	case TimingRRule:
+		return "rrule"
+	case TimingDaily:
+		return "daily"
+	case TimingWeekly:
+		return "weekly"
+	case TimingAt:
+		return "at"
+	case TimingEvery:
+		return "every"
+	}
+	return string(k)
+}
+
+// timingKindFromJSON maps a JSON wire value back onto the TimingKind
+// constant. It accepts BOTH the contracted snake_case form and the legacy
+// capitalized constants ("TimingOneShot" etc.) so timing specs persisted by
+// older builds still load.
+func timingKindFromJSON(s string) (TimingKind, error) {
+	switch s {
+	case "rrule", "TimingRRule":
+		return TimingRRule, nil
+	case "daily", "TimingDaily":
+		return TimingDaily, nil
+	case "weekly", "TimingWeekly":
+		return TimingWeekly, nil
+	case "at", "TimingOneShot":
+		return TimingAt, nil
+	case "every", "TimingEvery":
+		return TimingEvery, nil
+	}
+	return "", fmt.Errorf("%w: unknown timing kind %q", ErrTimingUnsupported, s)
+}
 
 // MinTimingEverySeconds is the floor for the `every` kind, mirroring the dsh
 // MIN_EVERY_INTERVAL_SECONDS constraint. Higher-frequency recurrences are
@@ -49,6 +93,40 @@ type TimingSpec struct {
 	At       *time.Time    `json:"at,omitempty"`        // absolute instant (at)
 	Every    time.Duration `json:"every,omitempty"`     // >= MinTimingEverySeconds (every)
 	RRule    string        `json:"rrule,omitempty"`     // "DTSTART;TZID=<IANA>:<ts>\nRRULE:<rule>" (rrule)
+}
+
+// MarshalJSON serializes the spec with the kind in the contracted snake_case
+// wire form ("rrule"/"daily"/"weekly"/"at"/"every"), never the Go-side
+// constants ("TimingOneShot" etc.). All other fields use the struct tags
+// verbatim.
+func (t TimingSpec) MarshalJSON() ([]byte, error) {
+	type plain TimingSpec
+	wire := struct {
+		Kind string `json:"kind"`
+		*plain
+	}{Kind: timingJSONKind(t.Kind), plain: (*plain)(&t)}
+	return json.Marshal(wire)
+}
+
+// UnmarshalJSON parses a spec whose kind is either the contracted snake_case
+// wire form ("at") or the legacy capitalized constant ("TimingOneShot" —
+// written by builds before the JSON contract landed). An unrecognized kind
+// fails with ErrTimingUnsupported.
+func (t *TimingSpec) UnmarshalJSON(data []byte) error {
+	type plain TimingSpec
+	aux := struct {
+		Kind string `json:"kind"`
+		*plain
+	}{plain: (*plain)(t)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	kind, err := timingKindFromJSON(aux.Kind)
+	if err != nil {
+		return err
+	}
+	t.Kind = kind
+	return nil
 }
 
 // ParseTiming parses a model-facing timing spec string into a TimingSpec.

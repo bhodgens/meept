@@ -577,6 +577,19 @@ func (l *GoalLoop) PendingSteerCount() int {
 	return len(l.pendingSteer)
 }
 
+// HasParkedEpisode reports whether the parker currently holds a parked
+// episode for this employee (round-driver quiescence seam, leaf 03: a
+// parked provider-wait means the employee is not settled). A loop without
+// a wired parker is quiet by definition.
+func (l *GoalLoop) HasParkedEpisode() bool {
+	if l == nil {
+		return false
+	}
+	l.steerMu.Lock()
+	defer l.steerMu.Unlock()
+	return l.hasParkedEpisodeLocked()
+}
+
 // DrainedSteerTrigger returns the most recently drained steer trigger and
 // whether one was available. Test seam for the drain path.
 func (l *GoalLoop) DrainedSteerTrigger() (TriggerEvent, bool) {

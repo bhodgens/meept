@@ -76,8 +76,10 @@ func TestWireDSHConvergenceNilDepsFailClosed(t *testing.T) {
 // TestDshWiringDelegateRouteIdentity pins that delegateRouteResolver is the
 // modelselect identity path when model selection is disabled: the request
 // route passes through unchanged and never panics on a nil resolved route.
+// Nil cfg/resolver/logger = disabled selection, the production default
+// ([delegation] absent), so the identity posture is exercised exactly.
 func TestDshWiringDelegateRouteIdentity(t *testing.T) {
-	resolve := delegateRouteResolver()
+	resolve := delegateRouteResolver(nil, nil, nil)
 	in := agent.ChildOptions{Provider: "openai", Model: "gpt", ReasoningEffort: "high"}
 	out, err := resolve(in, agent.DelegateRequest{Provider: "openai", Model: "gpt", ReasoningEffort: "high"})
 	if err != nil {

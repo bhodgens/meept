@@ -1834,6 +1834,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 						bs := budget.GetStatus()
 						return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit, bs.PerTaskCost, bs.PerSessionCost, bs.PerTaskBudget, bs.PerSessionBudget
 					}
+					// Mirror the RPC twin's TokenLimitGetter (budget-status
+					// consistency leaf, BUD-1): the legacy-tuple bridge consults
+					// it so a limited budget's within-budget booleans match the
+					// RPC surface instead of treating the limit as disabled.
+					httpSrv.TokenLimitGetter = func() (int, int) {
+						bs := budget.GetStatus()
+						return bs.HourlyLimit, bs.DailyLimit
+					}
 					logger.Info("Budget stats HTTP getters registered (snapshot + legacy)")
 				}
 			}
@@ -2265,6 +2273,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 			}
 			return fmt.Errorf("failed to start agent components: %w", err)
 		}
+		// Autonomous goal round driver (dsh-convergence leaf 03 T2):
+		// start AFTER Components.Start so the GoalLoops are registered
+		// (the quiescence check reads them) and the scheduler runs (the
+		// deferred turn rides it). Gated by [employees]
+		// goal_auto_advance (default true — the leaf's zero-human-turns
+		// contract); stopped in shutdown().
+		d.components.StartGoalRoundDriverLoop(ctx)
 		d.logger.Info("daemon: agent components started",
 			"tools", d.components.ToolRegistry.Count(),
 			"llm_configured", d.components.LLMClient != nil,
@@ -2744,6 +2759,9 @@ func (d *Daemon) shutdown() error {
 
 	// Stop agent components first
 	if d.components != nil {
+		// Autonomous goal round driver loop joins here (before the
+		// components stop tears the scheduler down under it).
+		d.components.StopGoalRoundDriverLoop()
 		if err := d.components.Stop(ctx); err != nil {
 			d.logger.Error("daemon: agent component shutdown errors", "error", err)
 		}

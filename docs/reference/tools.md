@@ -580,9 +580,13 @@ Create a new scheduled job.
     "enabled": {
       "type": "boolean",
       "description": "Whether the job is enabled immediately (default true)."
+    },
+    "timing": {
+      "type": "string",
+      "description": "Semantic timing spec (mutually exclusive with `schedule`). Forms: `daily <HH:mm[:ss]> [<IANA tz>]`, `weekly <DOW-list> <HH:mm[:ss]> [<tz>]`, `at <RFC3339>` (one-shot), `every <Go duration>` (>= 60s), or a two-line RFC5545 `rrule:` DTSTART/RRULE. Persisted job JSON carries the parsed spec with `kind` in snake_case (\"daily\"/\"weekly\"/\"at\"/\"every\"/\"rrule\"); the legacy capitalized constants (\"TimingOneShot\" etc.) are still accepted on load."
     }
   },
-  "required": ["name", "schedule", "job_type"]
+  "required": ["name", "job_type"]
 }
 ```
 

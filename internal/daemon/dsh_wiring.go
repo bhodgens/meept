@@ -16,12 +16,15 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/agent/modelselect"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/scheduler"
 	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/pkg/models"
@@ -44,25 +47,118 @@ func wireDSHConvergence(c *Components, cfg *config.Config, msgBus *bus.MessageBu
 	wireGoalProvider(c, cfg, logger)
 	wireDelegateProvider(c, cfg, msgBus, logger)
 	wirePlanMode(c, logger)
-	wireGoalRoundDriver(c, logger)
+	wireGoalRoundDriver(c, cfg, logger)
 }
 
 // wireGoalRoundDriver constructs the autonomous continuation driver over the
 // live employee manager and binds the leaf-02 authority seam (the daemon
-// bridge onto builtin.SetGoalAutonomousRound). Typed-nil guarded: a nil
-// manager leaves c.GoalRoundDriver nil and the round-advance RPC fails closed
-// ("round driver not configured"). The driver is owned here so the
-// agents.goals.round.advance RPC handler reads it from Components.
-func wireGoalRoundDriver(c *Components, logger *slog.Logger) {
+// bridge onto builtin.SetGoalAutonomousRound), the deferred-turn scheduler
+// seam (leaf 03 T2: re-enter Manager.Trigger with a source:"goal" payload),
+// and the quiescence check (no parked episode + no queued steer + invoke
+// mutex free). Typed-nil guarded: a nil manager leaves c.GoalRoundDriver nil
+// and the round-advance RPC fails closed ("round driver not configured").
+// The driver is owned here so the agents.goals.round.advance RPC handler
+// reads it from Components. Start happens in Components.Start (after the
+// GoalLoops are registered and the scheduler runs), gated by
+// [employees] goal_auto_advance (default true, the leaf's zero-human-turns
+// contract).
+func wireGoalRoundDriver(c *Components, cfg *config.Config, logger *slog.Logger) {
 	if c == nil || c.EmployeeManager == nil {
 		return
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	c.GoalRoundDriver = employee.NewGoalRoundDriver(c.EmployeeManager, logger).
-		WithAutonomousRoundSetter(builtin.SetGoalAutonomousRound)
-	logger.Debug("wired goal round driver", "employee_framework", true)
+	driver := employee.NewGoalRoundDriver(c.EmployeeManager, logger).
+		WithAutonomousRoundSetter(builtin.SetGoalAutonomousRound).
+		WithAutoAdvance(cfg.Employees.GoalAutoAdvanceEnabled())
+	if c.Scheduler != nil {
+		// Leaf T2: the deferred turn rides the EXISTING scheduler via the
+		// same adapter shape as the employee background jobs — no new
+		// queue/scheduler primitive. ScheduleOneShot maps onto an
+		// immediate-fire "@every" registration that the loop's own
+		// settlement pass replaces each tick.
+		driver = driver.WithDeferredScheduler(
+			goalRoundDeferredScheduler{sched: c.Scheduler, logger: logger})
+	}
+	if c.EmployeeManager != nil {
+		// Quiescence (leaf 03): an employee with a parked episode
+		// (provider-wait park) or queued steering is NOT settled —
+		// advancing a round under it would double-start the goal.
+		// Manager accessors delegate to the per-employee GoalLoop; a
+		// loop without a wired parker (nil-safe seam, leaf G4) reports
+		// quiet.
+		mgr := c.EmployeeManager
+		driver = driver.WithQuiescenceCheck(func(employeeID string) bool {
+			return !mgr.HasParkedEpisode(employeeID) &&
+				mgr.PendingSteerCount(employeeID) == 0
+		})
+	}
+	c.GoalRoundDriver = driver
+	logger.Debug("wired goal round driver", "employee_framework", true,
+		"auto_advance", cfg.Employees.GoalAutoAdvanceEnabled(),
+		"deferred_scheduler", c.Scheduler != nil)
+}
+
+// StartGoalRoundDriverLoop launches the round driver's autonomous
+// continuation loop (dsh-convergence leaf 03 T2) on the daemon lifecycle
+// context. Called from Daemon.Run AFTER Components.Start so the GoalLoops
+// are registered (the quiescence check reads them) and the scheduler runs
+// (the deferred turn rides it). Gated by the driver's auto-advance flag:
+// [employees] goal_auto_advance=false leaves the RPC/CLI manual advance as
+// the only driver. Stop happens in Daemon.shutdown via
+// StopGoalRoundDriverLoop.
+func (c *Components) StartGoalRoundDriverLoop(ctx context.Context) {
+	if c == nil || c.GoalRoundDriver == nil {
+		return
+	}
+	c.GoalRoundDriver.Start(ctx)
+}
+
+// StopGoalRoundDriverLoop ends the autonomous continuation loop and joins
+// its goroutine. Safe when the driver or the loop never started.
+func (c *Components) StopGoalRoundDriverLoop() {
+	if c == nil || c.GoalRoundDriver == nil {
+		return
+	}
+	c.GoalRoundDriver.Stop()
+}
+
+// goalRoundDeferredScheduler adapts *scheduler.Scheduler onto the round
+// driver's DeferredScheduler seam (ScheduleOneShot): each registration is a
+// transient immediate-fire interval job keyed per employee. The driver's
+// poll loop replaces the registration per settled round, so the job never
+// accumulates; Stop drops it via Unschedule on shutdown. Best-effort:
+// scheduling failures log and skip (the manual RPC/CLI advance remains).
+type goalRoundDeferredScheduler struct {
+	sched  *scheduler.Scheduler
+	logger *slog.Logger
+}
+
+// ScheduleOneShot implements DeferredScheduler. The registration is an
+// "@every 1s" interval job (the scheduler's only immediate-fire shape) whose
+// callback FIRST unschedules itself, giving exact one-shot semantics: the
+// first tick runs fn once and drops the registration, so a long round never
+// re-queues behind its own trigger. A re-registration for the same name
+// (next settled round) replaces the prior entry.
+func (a goalRoundDeferredScheduler) ScheduleOneShot(name string, fn func()) {
+	_ = a.sched.Unschedule(name)
+	job := &simpleIntervalJob{
+		id:       name,
+		name:     name,
+		interval: time.Second,
+		fn: func() {
+			// One-shot: drop the recurring registration before the work
+			// runs. Safe from inside Execute — executeJob does not hold
+			// the scheduler mutex across job callbacks.
+			_ = a.sched.Unschedule(name)
+			fn()
+		},
+	}
+	if _, err := a.sched.Schedule(job); err != nil {
+		a.logger.Warn("goal round deferred turn: schedule failed",
+			"job_id", name, "error", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +250,7 @@ func wireDelegateProvider(c *Components, cfg *config.Config, msgBus *bus.Message
 	}
 
 	dm := agent.NewDelegateManager(c.AgentRegistry, delegateBusPublisher(msgBus, logger), nil)
-	dm.SetRouteResolver(delegateRouteResolver())
+	dm.SetRouteResolver(delegateRouteResolver(cfg, c.LLMResolver, logger))
 	if c.SessionStore != nil {
 		// B6 durable child-descriptor store (SaveChildDescriptor/Get...): each
 		// settled child persists its descriptor here (best-effort) so an
@@ -175,6 +271,11 @@ func wireDelegateProvider(c *Components, cfg *config.Config, msgBus *bus.Message
 	// fails closed safely without it (subagent_interrupt denies; list_children
 	// requires an explicit parent_session_id).
 	ctrl := builtin.NewDelegateController(dm, c.Dispatcher, c.ACPManager)
+	if msgBus != nil {
+		// DSH-8: background workflow runs deliver completion on the same
+		// bus lane as child settlements (agent.delegate.result).
+		ctrl.SetCompletionBus(delegateCompletionBus{msgBus})
+	}
 	c.DelegateManager = dm
 	c.DelegateController = ctrl
 
@@ -201,20 +302,68 @@ func wireDelegateProvider(c *Components, cfg *config.Config, msgBus *bus.Message
 	}
 }
 
-// delegateRouteResolver returns the B4 per-child model-route resolver. No
-// [delegation] policy is configured, so model selection is DISABLED and the
-// resolver is modelselect's identity path (the child inherits the
-// request/parent route, fail-safe). It is wired anyway so the live modelselect
-// code path runs on every spawn; a future delegation policy flips enabled +
-// policy here.
-func delegateRouteResolver() func(agent.ChildOptions, agent.DelegateRequest) (agent.ChildOptions, error) {
+// delegateCompletionBus adapts *bus.MessageBus onto builtin's workflowBus
+// interface (the background workflow completion delivery lane, DSH-8).
+type delegateCompletionBus struct {
+	b *bus.MessageBus
+}
+
+func (a delegateCompletionBus) Publish(topic string, msg *models.BusMessage) int {
+	return a.b.Publish(topic, msg)
+}
+
+// delegateRouteResolver returns the B4 per-child model-route resolver built
+// from the [delegation] config block (dsh-convergence DSH-5). The resolver
+// runs at ChildOptions finalization on EVERY delegate spawn:
+//
+//   - [delegation] enabled=false (default): model selection is DISABLED and
+//     the resolver is modelselect's identity path (the child inherits the
+//     request/parent route, fail-safe).
+//   - enabled=true: the request route merges parent < configured < request
+//     and asserts against the allowed_routes allowlist. An EMPTY allowlist
+//     means no restriction (every resolvable route permitted); a non-empty
+//     one requires an exact provider+model member match.
+//   - whenever a resolved route carries provider+model, modelselect.
+//     PreflightRoute verifies it resolves through the live LLM resolver
+//     BEFORE the child spawns, so an unresolvable route errors visibly at
+//     the tool boundary with no child created. A nil resolver (unit-test
+//     wiring) skips the preflight.
+func delegateRouteResolver(cfg *config.Config, resolver *llm.Resolver, logger *slog.Logger) func(agent.ChildOptions, agent.DelegateRequest) (agent.ChildOptions, error) {
+	var policy *modelselect.ModelSelectionPolicy
+	enabled := false
+	if cfg != nil && cfg.Delegation.Enabled {
+		enabled = true
+		if len(cfg.Delegation.AllowedRoutes) > 0 {
+			policy = &modelselect.ModelSelectionPolicy{}
+			for _, r := range cfg.Delegation.AllowedRoutes {
+				policy.Routes = append(policy.Routes, modelselect.AllowedModelRoute{
+					Provider: r.Provider,
+					Model:    r.Model,
+				})
+			}
+		}
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(parent agent.ChildOptions, req agent.DelegateRequest) (agent.ChildOptions, error) {
-		resolved, err := modelselect.ResolveChildRoute(parent, nil, req, nil, false)
+		resolved, err := modelselect.ResolveChildRoute(parent, nil, req, policy, enabled)
 		if err != nil {
 			return parent, err
 		}
 		if resolved == nil {
 			return parent, nil
+		}
+		// Preflight the effective route through the live resolver BEFORE
+		// the child spawns (DSH-5). Fail-closed: an unresolvable route
+		// returns an error, which Spawn surfaces as a failed delegation
+		// with no child created.
+		if resolver != nil && resolved.Provider != "" && resolved.Model != "" {
+			if err := modelselect.PreflightRoute(context.Background(), resolver, *resolved); err != nil {
+				logger.Warn("delegate route preflight failed",
+					"provider", resolved.Provider, "model", resolved.Model, "error", err)
+				return parent, err
+			}
 		}
 		return *resolved, nil
 	}

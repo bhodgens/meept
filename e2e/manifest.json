@@ -1212,11 +1212,12 @@
       "status": "implemented",
       "diff": "M",
       "scenarios": [
-        "goals-plans-01 goal_get/goal_create/goal_update are staged as a RED gate: the goal-tool provider is NOT wired (wireGoalProvider fails closed - adapter types unexported), so a rigged goal_get turn gets 'unknown tool' (C4b/F4a; implementation residual)",
-        "goals-plans-02 round driver staged as a RED gate: no round advance loop / no SetGoalAutonomousRound caller, so zero-human-turn advance to a round-limit block is unobservable (C4c; implementation residual)",
-        "goals-plans-03 plan mode: /plan enters mode; exit_plan_mode present-for-review runs; the interactive Approve that lands the plan is a documented-infeasible residual (no mid-turn answer sink) (C4d)"
+        "goals-plans-01 goal_get/goal_create/goal_update are WIRED: the daemon binds a live *employee.Manager goal adapter and registers the 'goal' provider; a rigged goal_create/goal_get turn executes against the real store (C4b/F4a)",
+        "goals-plans-02 round driver WIRED: agents.goals.round.advance reserves rounds and auto-blocks at the cap with code round-limit (C4c); the autonomous continuation loop (leaf 03 T2) is gated by [employees] goal_auto_advance (default true)",
+        "goals-plans-03 plan mode: /plan enters mode; exit_plan_mode present-for-review runs; the interactive Approve that lands the plan is a documented-infeasible residual (no mid-turn answer sink) (C4d)",
+        "goals-plans-04 round-driver autonomy knob: goal_auto_advance=false pins the goal at the manually-advanced round (the autonomous loop never starts)"
       ],
-      "note": "02-goals-plans branch e2e gate (G2/G3/G4): goal tools + round driver + plan mode through live RPC/CLI. Fails RED until the goal/delegate/plan-mode daemon wiring lands concurrently."
+      "note": "02-goals-plans branch e2e gate (G2/G3/G4): goal tools + round driver + plan mode through live RPC/CLI. goals-plans-01/02 fully wired (incl. the deferred-turn autonomy loop); goals-plans-03 approve tail documented-infeasible."
     },
     {
       "name": "office-skills",
