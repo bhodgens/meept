@@ -60,7 +60,6 @@ func AsStreamingChatter(c Chatter) (StreamingChatter, bool) {
 var (
 	_ Chatter = (*Client)(nil)
 	_ Chatter = (*ProviderManager)(nil)
-	_ Chatter = (*ModelBroker)(nil)
 	_ Chatter = (*ContextFirewall)(nil)
 )
 
