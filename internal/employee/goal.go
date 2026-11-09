@@ -1155,11 +1155,13 @@ func collectRows(ctx context.Context, rows *sql.Rows) ([]*Goal, error) {
 // small helpers
 // --------------------------------------------------------------------------
 
-// marshalHistory serializes a plan-history slice to the storage form (a JSON
-// array). Empty slices are stored as the literal "[]" so the column is never
-// NULL — simplifies queries and keeps the schema NOT NULL-friendly.
+// marshalGate serializes a Goal.Gate to its storage form (JSON text).
+// Returns nil for a nil gate or a config that carries neither a command
+// nor an approval type — such a config gates nothing and stays NULL (the
+// common case). Approval gates (audit HITL-1) persist even with an empty
+// command: their Type is the discriminator.
 func marshalGate(g *GateConfig) any {
-	if g == nil || g.Command == "" {
+	if g == nil || (g.Command == "" && !g.IsApproval()) {
 		return nil
 	}
 	b, err := json.Marshal(g)
@@ -1177,7 +1179,7 @@ func unmarshalGate(s sql.NullString) *GateConfig {
 	if err := json.Unmarshal([]byte(s.String), &g); err != nil {
 		return nil
 	}
-	if g.Command == "" {
+	if g.Command == "" && !g.IsApproval() {
 		return nil
 	}
 	return &g

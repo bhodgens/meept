@@ -635,6 +635,16 @@ type Manager struct {
 	// are published. Guarded by mu so the nil-check + dereference is safe.
 	busPublisher BusPublisher
 
+	// Human-approval goal gate seams (audit HITL-1), injected by the
+	// daemon's gate-park wiring. goalGatePark wraps
+	// agent.GateParker.ParkGate (GateKind "goal") and is handed to every
+	// registered goal loop at wiring time; goalGateResume wraps
+	// agent.GateParker.ResumeByKey("goal", ...) for the approve_gate drain
+	// path. Both guarded by mu. Nil pair = approval gates degrade in the
+	// loop (at_risk, never a silent completion).
+	goalGatePark   goalGateParkFn
+	goalGateResume GoalGateResumeFn
+
 	// goalLoops holds the per-employee GoalLoop registry. When a loop is
 	// registered for an employee, Trigger delegates to loop.Decide instead
 	// of synthesizing a placeholder TriggerResult. Keyed by employee ID.
@@ -892,6 +902,18 @@ func (m *Manager) HasParkedEpisode(employeeID string) bool {
 func (m *Manager) RegisterGoalLoop(employeeID string, loop *GoalLoop) {
 	if loop == nil || employeeID == "" {
 		return
+	}
+	// Audit HITL-1: loops registered AFTER the gate-park seam landed still
+	// checkpoint human-approval gates through the shared GateParker. The
+	// seam read is lock-ordered before the loop registration so a racing
+	// SetGoalGateParker cannot be missed between read and register (the
+	// setter also sweeps already-registered loops, so the only race window
+	// is a park at wiring time — acceptable: the next round re-raises).
+	m.mu.Lock()
+	parkFn := m.goalGatePark
+	m.mu.Unlock()
+	if parkFn != nil {
+		loop.SetGoalGateParker(parkFn)
 	}
 	m.goalLoopsMu.Lock()
 	m.goalLoops[employeeID] = loop
@@ -2084,8 +2106,11 @@ func (m *Manager) GetGoal(ctx context.Context, id string) (*Goal, error) {
 	return m.goalStore.Get(ctx, id)
 }
 
-// SetGoalGate persists the completion gate on a goal. A nil or empty-command
-// gate clears it (legacy model-judgment completion).
+// SetGoalGate persists the completion gate on a goal. A nil gate clears it
+// (legacy model-judgment completion), as does a config carrying neither a
+// command nor an approval type. An approval gate (audit HITL-1,
+// GateConfig.Type "approval") persists even with an empty command — its
+// Type is the discriminator.
 func (m *Manager) SetGoalGate(ctx context.Context, goalID string, gate *GateConfig) (*Goal, error) {
 	if m.goalStore == nil {
 		return nil, ErrNotImplemented
@@ -2094,7 +2119,7 @@ func (m *Manager) SetGoalGate(ctx context.Context, goalID string, gate *GateConf
 	if err != nil {
 		return nil, err
 	}
-	if gate != nil && gate.Command == "" {
+	if gate != nil && gate.Command == "" && !gate.IsApproval() {
 		gate = nil
 	}
 	g.Gate = gate
@@ -2103,6 +2128,78 @@ func (m *Manager) SetGoalGate(ctx context.Context, goalID string, gate *GateConf
 	}
 	return g, nil
 }
+
+// ---------------------------------------------------------------------------
+// Human-approval goal gates (audit HITL-1)
+// ---------------------------------------------------------------------------
+
+// SetGoalGateParker installs the goal-gate checkpoint park seam on the
+// manager: new goal loops receive the SAME park wrapper at registration
+// (SetGoalGateParker is also applied to already-registered loops so a
+// mid-life wiring lands), and the manager itself uses it for the
+// approve_gate drain path. Nil is ignored (typed-nil guard).
+func (m *Manager) SetGoalGateParker(parkFn goalGateParkFn) {
+	if m == nil || parkFn == nil {
+		return
+	}
+	m.mu.Lock()
+	m.goalGatePark = parkFn
+	m.mu.Unlock()
+
+	m.goalLoopsMu.Lock()
+	for _, loop := range m.goalLoops {
+		if loop != nil {
+			loop.SetGoalGateParker(parkFn)
+		}
+	}
+	m.goalLoopsMu.Unlock()
+	m.logger.Info("goal approval gate park seam wired on goal loops")
+}
+
+// ResumeGoalGateParked drains the parked goal-gate row for goalID (through
+// the injected resume probe — agent.GateParker.ResumeByKey with the "goal"
+// kind, delete-before-callback). Returns resumed=true when a row was
+// drained. The loop re-entry itself rides the parker's resume callback
+// (the daemon's goal-gate dispatch decodes the row there — at-most-once);
+// this method is the coordination half that answers the approval RPC.
+func (m *Manager) ResumeGoalGateParked(ctx context.Context, employeeID, goalID string) (bool, error) {
+	m.mu.Lock()
+	resumeFn := m.goalGateResume
+	m.mu.Unlock()
+	if resumeFn == nil {
+		return false, errGoalGateResumeUnwired
+	}
+	resumed := resumeFn(ctx, goalID)
+	if resumed {
+		m.logger.Info("goal gate approved",
+			"goal_id", goalID,
+			"employee_id", employeeID,
+		)
+	}
+	return resumed, nil
+}
+
+// GoalGateResumeFn is the daemon-injected drain probe (audit HITL-1):
+// resolves one parked goal gate by goal id through
+// agent.GateParker.ResumeByKey("goal", ...) and reports whether a row was
+// drained. The decoded row's re-entry dispatch is the drain callback's
+// job (resumeGoalGateFromDrain in daemon goal_gate_wiring.go).
+type GoalGateResumeFn func(ctx context.Context, goalID string) bool
+
+// SetGoalGateResumeFn installs the drain probe. Nil is ignored.
+func (m *Manager) SetGoalGateResumeFn(fn GoalGateResumeFn) {
+	if fn == nil {
+		return
+	}
+	m.mu.Lock()
+	m.goalGateResume = fn
+	m.mu.Unlock()
+}
+
+// errGoalGateResumeUnwired is returned by ResumeGoalGateParked when no
+// drain probe was wired (gate checkpointing absent): approval surfaces get
+// a clear error instead of a silent false.
+var errGoalGateResumeUnwired = errors.New("employee: goal gate resume probe not configured")
 
 // AssessGoal records a health verdict on a goal (agents.goals.assess RPC,
 // github-intake-factory leaf 05): the same Assess + persist the GoalLoop

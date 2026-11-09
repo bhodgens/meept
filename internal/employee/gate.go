@@ -23,9 +23,20 @@ import (
 const DefaultGateTimeoutSeconds = gate.DefaultGateTimeoutSeconds
 
 // GateConfig configures the quality gate for a goal. An empty Command means
-// no gate is configured (legacy behaviour: the model's own judgment completes
-// the goal).
+// no gate is configured (legacy behaviour: the model's own judgment
+// completes the goal) — UNLESS Type selects the human-approval gate kind,
+// which needs no command.
 type GateConfig = gate.GateConfig
+
+// Gate type discriminators (audit HITL-1): re-exported so employee-side
+// callers and configs never import internal/gate directly.
+const (
+	// GateTypeCommand is the legacy shell-command gate (empty Type).
+	GateTypeCommand = gate.GateTypeCommand
+	// GateTypeApproval is the human-approval gate: parks the goal turn
+	// pending operator signoff instead of running a shell command.
+	GateTypeApproval = gate.GateTypeApproval
+)
 
 // GateResult reports the outcome of a gate run.
 type GateResult = gate.GateResult

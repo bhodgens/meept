@@ -170,6 +170,9 @@ func (h *RPCHandler) Handlers() map[string]func(context.Context, json.RawMessage
 		"agents.employees.bind_session": h.handleEmployeesBindSession,
 		"agents.goals.approve":          h.handleGoalsApprove,
 		"agents.goals.reject":           h.handleGoalsReject,
+		// Human-approval goal gate resume (audit HITL-1): drains the
+		// checkpointed goal gate park row and re-enters the loop.
+		"agents.goals.approve_gate": h.handleGoalsApproveGate,
 
 		// Health assessment (github-intake-factory leaf 05): the same
 		// Assess+persist the GoalLoop reflect path performs, exposed for
@@ -756,6 +759,51 @@ func (h *RPCHandler) handleGoalsApprove(ctx context.Context, raw json.RawMessage
 		"goal_id":  req.GoalID,
 		"plan_id":  req.PlanID,
 		"status":   "approved",
+		"approver": caller.UserID,
+	}, nil
+}
+
+// handleGoalsApproveGate handles agents.goals.approve_gate (audit HITL-1):
+// resumes the goal turn parked on its HUMAN-approval gate. Same approver
+// authorization as plan approval; the drain is at-most-once through the
+// gate parker (a duplicate call reports resumed=false, not an error).
+func (h *RPCHandler) handleGoalsApproveGate(ctx context.Context, raw json.RawMessage) (any, error) {
+	if h.manager == nil {
+		return nil, errNotConfigured
+	}
+	var req struct {
+		GoalID string `json:"goal_id"`
+		Reason string `json:"reason,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, fmt.Errorf("invalid approve_gate request: %w", err)
+	}
+	if req.GoalID == "" {
+		return nil, fmt.Errorf("goal_id is required")
+	}
+	caller := CallerFromContext(ctx)
+	if caller == nil {
+		return nil, fmt.Errorf("unauthenticated: API key required for gate approval")
+	}
+	goal, err := h.manager.GetGoal(ctx, req.GoalID)
+	if err != nil {
+		return nil, fmt.Errorf("get goal: %w", err)
+	}
+	emp, err := h.manager.GetEmployee(ctx, goal.EmployeeID)
+	if err != nil {
+		return nil, fmt.Errorf("get employee: %w", err)
+	}
+	if !isAuthorizedApprover(caller.UserID, emp.Constitution.EscalatesTo) {
+		return nil, fmt.Errorf("unauthorized: caller %q cannot approve gates for employee %q (escalates_to: %v)",
+			caller.UserID, emp.ID, emp.Constitution.EscalatesTo)
+	}
+	resumed, err := h.manager.ResumeGoalGateParked(ctx, goal.EmployeeID, req.GoalID)
+	if err != nil {
+		return nil, fmt.Errorf("approve gate: %w", err)
+	}
+	return map[string]any{
+		"goal_id":  req.GoalID,
+		"resumed":  resumed,
 		"approver": caller.UserID,
 	}, nil
 }
