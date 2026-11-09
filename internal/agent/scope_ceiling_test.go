@@ -149,8 +149,8 @@ func TestMemoryCeilingNarrowsGroupedAgent(t *testing.T) {
 }
 
 // TestMemoryCeilingUngroupedBaseline pins the ungrouped invariance leg:
-// a nil group record resolves byte-identically to the post-#70 baseline
-// (resolveScopeInputs on the same inputs).
+// a nil group record resolves to the declared scope unchanged (the B1
+// baseline); the group ceiling only ever narrows.
 func TestMemoryCeilingUngroupedBaseline(t *testing.T) {
 	l := NewAgentLoop("ceiling-ungrouped", "/tmp", WithLoopLogger(silentLogger()))
 	l.mu.Lock()
@@ -163,12 +163,10 @@ func TestMemoryCeilingUngroupedBaseline(t *testing.T) {
 	// groupResolution nil = no group policy bound.
 	l.mu.Unlock()
 
-	lMax, lProj, lUID, lMulti := l.resolveMemoryScope()
-	bMax, bProj, bUID, bMulti := resolveScopeInputs(l.spec, l.GetProjectID(), l.scopeUserID)
-	if lMax != bMax || lProj != bProj || lUID != bUID || lMulti != bMulti {
-		t.Fatalf("T2 RED: ungrouped resolution drifted from the post-#70 "+
-			"baseline: got (%v,%q,%q,%v) want (%v,%q,%q,%v)",
-			lMax, lProj, lUID, lMulti, bMax, bProj, bUID, bMulti)
+	maxScope, _, _, _ := l.resolveMemoryScope()
+	if maxScope != memory.ScopeGlobal {
+		t.Fatalf("T2 RED: ungrouped resolution drifted from the declared "+
+			"scope: got %v, want global (no ceiling bound = no narrowing)", maxScope)
 	}
 }
 

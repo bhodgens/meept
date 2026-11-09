@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"log/slog"
-
 	"github.com/caimlas/meept/internal/memory"
 )
 
@@ -11,12 +9,12 @@ import (
 // scope_inputs_gate_test.go is the frozen shape).
 //
 // An AgentSpec declares the WIDEST recall scope its sessions may operate at
-// (MemoryMaxScope, empty = project). resolveScopeInputs turns that
-// declaration plus the serving session's identity into the tuple the C2
-// WithScopeFilter predicate consumes:
-//
-//	resolveScopeInputs(spec, projectID, userID) ->
-//	    (maxScope memory.Scope, projectID, userID string, multiUser bool)
+// (MemoryMaxScope, empty = project). scopeIdentityInputs is the identity
+// pass-through half of the resolution (project + user + multiuser bit), split
+// out so the group-ceiling variant (resolveScopeInputsWithCeiling — the ONLY
+// constructor scope_wiring.go consumes; the plain resolveScopeInputs wrapper
+// was deleted as deadcode wave-1, zero callers at HEAD) reuses the exact
+// same identity semantics.
 //
 // Precedence per B1: maxScope from the agent declaration (fail-SAFE:
 // invalid values land on project, never global); projectID is the
@@ -33,39 +31,9 @@ import (
 // OR in their config-level multiuser.enabled bit at the WithMultiUserEnabled
 // call site (scope_wiring.go) so a resolution GAP under enabled multiuser
 // still fails closed.
-func resolveScopeInputs(spec *AgentSpec, projectID, userID string) (memory.Scope, string, string, bool) {
-	decl := ""
-	if spec != nil {
-		decl = spec.MemoryMaxScope
-	}
-
-	maxScope := memory.ScopeProject
-	switch decl {
-	case "":
-		// Default: project isolation (D2); maxScope already initialized.
-	case string(memory.ScopeProject), string(memory.ScopeUser), string(memory.ScopeGlobal):
-		maxScope = memory.Scope(decl)
-	default:
-		// Fail SAFE: an unrecognized declaration narrows to project, never
-		// widens to global. Warn so a typo in AGENT.md is diagnosable.
-		slog.Warn("invalid agent memory_max_scope; using project scope",
-			"agent", func() string {
-				if spec != nil {
-					return spec.ID
-				}
-				return ""
-			}(),
-			"declared", decl,
-		)
-	}
-
-	return maxScope, projectID, userID, userID != ""
-}
-
-// scopeIdentityInputs is the identity pass-through half of
-// resolveScopeInputs (project + user + multiuser bit), split out so the
-// group-ceiling variant (resolveScopeInputsWithCeiling) reuses the exact
-// same identity semantics without re-deriving the B1 max scope.
+// scopeIdentityInputs is the identity pass-through half of the scope
+// resolution (project + user + multiuser bit), consumed by
+// resolveScopeInputsWithCeiling.
 func scopeIdentityInputs(projectID, userID string) (string, string, bool) {
 	return projectID, userID, userID != ""
 }

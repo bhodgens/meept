@@ -1,29 +1,24 @@
 package agent
 
-// Gate test for B1 scope-input resolution
-// (docs/plans/20261030-memory-second-brain/01-scoping/00T-tests.md, S3;
-// contract B1 from ../01-scoping/orchestrator.md, verbatim):
+// Gate test for B1 scope-input resolution, retargeted to the WIRED
+// constructor (resolveScopeInputsWithCeiling, called by scope_wiring.go for
+// every recall surface). The plain resolveScopeInputs wrapper this file
+// originally pinned was deleted as deadcode wave-1 (zero callers at HEAD;
+// scope_wiring.go consumes the WithCeiling variant exclusively).
 //
-//	resolveScopeInputs(session) -> (maxScope Scope, projectID, userID string)
-//	Precedence: agent MemoryMaxScope (empty=project) ; projectID = session's
-//	bound project (DetectionContext.CWD-resolved project id; "" if unbound);
-//	userID = multiuser identity ("" in single-user). Unbound session +
-//	maxScope=project => filter matches NOTHING project-scoped (global + own-
-//	user still recallable). Never fall back to the daemon's CWD.
+// Contract (docs/plans/20261030-memory-second-brain/01-scoping, B1 + Flag 3):
 //
-// RED by design: resolveScopeInputs and AgentSpec.MemoryMaxScope DO NOT
-// EXIST yet. Must fail ONLY for missing-symbol reasons; leaf
-// 03-agent-recall-wiring implements against these exact tuples.
+//	resolveScopeInputs(session) -> (maxScope Scope, projectID, userID string, multiUser bool)
+//	Precedence: agent MemoryMaxScope (empty=project); projectID = session's
+//	bound project ("" if unbound); userID = multiuser identity ("" in
+//	single-user). Unbound session + maxScope=project => filter matches
+//	NOTHING project-scoped (global + own-user still recallable). Never fall
+//	back to the daemon's CWD. The multiUser bit rides ALONGSIDE userID so
+//	the WithScopeFilter predicate can distinguish multiuser-disabled (empty
+//	userID matches) from multiuser-enabled-empty-userID (fail closed).
 //
-// Flag 3 (master.md dated addenda 2026-11-03) requires the multiuser-enabled
-// bit to ride ALONGSIDE userID so the WithScopeFilter predicate can
-// distinguish multiuser-disabled (empty userID matches) from
-// multiuser-enabled-empty-userID (fail closed). The resolution therefore
-// carries the bit as a 4th return value:
-//
-//	resolveScopeInputs(...) -> (maxScope memory.Scope, projectID, userID string, multiUser bool)
-//
-// Signature deviation is reported to the orchestrator in the leaf report.
+// With a nil group ceiling the WithCeiling constructor is behaviorally the
+// B1 baseline, so the pin transfers unchanged.
 
 import (
 	"testing"
@@ -121,7 +116,7 @@ func TestResolveScopeInputs(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			maxScope, projectID, userID, multiUser := resolveScopeInputs(tc.spec, tc.projectID, tc.userID)
+			maxScope, projectID, userID, multiUser := resolveScopeInputsWithCeiling(tc.spec, "", tc.projectID, tc.userID)
 
 			if maxScope != tc.wantMax {
 				t.Errorf("maxScope = %q, want %q", string(maxScope), string(tc.wantMax))
