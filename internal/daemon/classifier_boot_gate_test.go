@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -353,5 +355,107 @@ func TestCheckClassifierRuntimeHealth_UnhealthyPrintsCtxSize(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ctx_size 32768") {
 		t.Errorf("health-gate error missing configured ctx-size: %v", err)
+	}
+}
+
+// loadBundledModelsConfig loads the shipped template exactly as
+// LoadProvidersConfigDefault loads it as the merge base (repo-root daemon
+// boot: config/models.json5 resolves via bundledModelsPaths). The path is
+// resolved from this test file's location, not the process CWD — other
+// tests in this package chdir.
+func loadBundledModelsConfig(t *testing.T) *llm.ProvidersConfig {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller: cannot locate the test file")
+	}
+	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "config", "models.json5")
+	cfg, err := llm.LoadProvidersConfig(path)
+	if err != nil {
+		t.Fatalf("load bundled config/models.json5: %v", err)
+	}
+	return cfg
+}
+
+// TestBundledTemplate_NoLocalProviderCtxSizeCollision is the F-D8 boot-gate
+// regression for the MLX-era bundled `local` provider (deleted 2026-11-09).
+//
+// LoadProvidersConfigDefault merges the bundled config/models.json5 as the
+// base with the user's ~/.meept/models.json5 overlaying it PER MODEL KEY
+// under a provider id. The old bundled `local` provider declared
+// lfm-8b-mlx-4bit (context_limit 16384) and lfm-1.2b-q8 (8192) under an mlx
+// lifecycle; a user overlay that REPLACED that provider's lifecycle with
+// llama-server --ctx-size 32768 (the modern local-gguf layout most installs
+// converge on — the operator's real file does exactly this) kept the stale
+// bundled context_limits, and checkLlamaCtxSizeLimit then refused boot with
+// "llama.cpp ctx-size exceeds context_limit" on models the user never
+// declared. The collision only fires when the daemon runs from the repo
+// root, where config/models.json5 resolves as the bundled base.
+//
+// Positive: merge the shipped template with exactly that overlay shape and
+// the ctx-size gate must pass. Negative: replay the same overlay against a
+// synthetic base carrying the deleted provider (the pre-fix template) and
+// the gate must fail naming both stale models — pinning that the gate
+// mechanics are what the template deletion removes, and that a reintroduced
+// bundled `local` MLX-era provider re-arms the boot failure.
+func TestBundledTemplate_NoLocalProviderCtxSizeCollision(t *testing.T) {
+	overlay := &llm.ProvidersConfig{
+		Providers: map[string]llm.ProviderConfig{
+			"local": {
+				API:     "openai",
+				Options: llm.ProviderOptionsConfig{BaseURL: "http://127.0.0.1:8080/v1", NoAuth: true},
+				Lifecycle: &llm.RuntimeLifecycleConfig{
+					Runtime: "llama-cpp",
+					SpawnCommand: []string{
+						"llama-server", "--model", "${MODEL_PATH}", "--port", "8080",
+						"--host", "127.0.0.1", "--jinja", "--ctx-size", "32768",
+					},
+				},
+				Models: map[string]llm.ModelDef{
+					"lfm-8b-q4": {ContextLimit: 32768},
+				},
+			},
+		},
+	}
+
+	// Positive: the shipped template must survive the modern overlay.
+	merged := llm.MergeProvidersConfig(loadBundledModelsConfig(t), overlay)
+	if _, ok := merged.Providers["local"]; !ok {
+		t.Fatal("the user's own `local` provider must survive the merge")
+	}
+	if err := checkLlamaCtxSizeLimit(merged); err != nil {
+		t.Fatalf("bundled base + modern user `local` overlay must not trip the ctx-size gate: %v", err)
+	}
+
+	// Negative: the retired pre-fix base (the deleted bundled provider,
+	// reproduced verbatim: mlx lifecycle + the two stale MLX-era limits).
+	staleBase := &llm.ProvidersConfig{
+		Providers: map[string]llm.ProviderConfig{
+			"local": {
+				API:     "openai",
+				Options: llm.ProviderOptionsConfig{BaseURL: "http://127.0.0.1:8083/v1"},
+				Lifecycle: &llm.RuntimeLifecycleConfig{
+					Runtime:      "mlx",
+					SpawnCommand: []string{"mlx_lm", "server", "--model", "${MODEL_PATH}", "--port", "8083"},
+				},
+				Models: map[string]llm.ModelDef{
+					"lfm-8b-mlx-4bit": {ContextLimit: 16384},
+					"lfm-1.2b-q8":     {ContextLimit: 8192},
+				},
+			},
+		},
+	}
+	mergedStale := llm.MergeProvidersConfig(staleBase, overlay)
+	err := checkLlamaCtxSizeLimit(mergedStale)
+	if err == nil {
+		t.Fatal("reintroducing the bundled MLX-era `local` provider must re-arm the ctx-size boot failure")
+	}
+	if !errors.Is(err, errLlamaCtxSizeExceedsLimit) {
+		t.Fatalf("error = %v, want errLlamaCtxSizeExceedsLimit", err)
+	}
+	for _, want := range []string{"lfm-8b-mlx-4bit", "lfm-1.2b-q8", "32768"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("collision error missing %q: %v", want, err)
+		}
 	}
 }

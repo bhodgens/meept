@@ -19,7 +19,7 @@ Models are organized in layers:
   "model": "zai/glm-5.2",
 
   // Fast/cheap model for classification, summarization
-  "small_model": "local/lfm-1.2b-q8",
+  "small_model": "local-mlx/lfm-combined-sft",
 
   // Model for intent classification (falls back to small_model)
   "classifier_model": "classifier",

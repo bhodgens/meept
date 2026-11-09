@@ -228,14 +228,7 @@ func TestConfigLoads(t *testing.T) {
 			"give the runtime its own port", clash.provName, clash.port)
 	}
 
-	// Verify lfm-1.2b-q8 model (primary small model)
-	lfm12b, ok := localProvider.Models["lfm-1.2b-q8"]
-	if !ok {
-		t.Fatal("lfm-1.2b-q8 model not found in local provider")
-	}
-	if lfm12b.ContextLimit != 8192 {
-		t.Errorf("lfm-1.2b-q8 context_limit = %d, want 8192", lfm12b.ContextLimit)
-	}
+	// (the old lfm-1.2b-q8 pin retired with the `local` provider above)
 
 	// zai/glm removed from the shipped config 2026-10-24 (operator
 	// decision: glm quota windows exhausted mid-turn and the provider was

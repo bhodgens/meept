@@ -94,6 +94,12 @@ can call tools, so it is the default (`model:` in models.json5).
 | `local-gguf/lfm-8b-gguf` | llama-server, GGUF Q4_K_M, `--jinja` | 8080 | yes — `finish_reason: "tool_calls"` |
 | `local/lfm-8b-mlx-4bit` | mlx_lm server, MLX 4-bit | 8083 | no — prose JSON or reasoning-only |
 
+(2026-11-09: the bundled `local` MLX-era provider was deleted from
+config/models.json5 — the row above is kept as the historical measurement.
+It duplicated the local-gguf weights while its stale context_limits merged
+under a modern user llama.cpp lifecycle override and tripped the F-D8
+ctx-size boot gate. The 1.2B-class slot is now `local-mlx/lfm-combined-sft`.)
+
 The difference is the runtime, not the model or the chat template. Measured
 2026-09-12 with one identical request (the `json_extract` tool plus a short
 text): llama-server answered `finish_reason=tool_calls` with a structured

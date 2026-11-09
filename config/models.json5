@@ -13,7 +13,12 @@
 
   // Fast/cheap model for classification, summarization
   // Use "classifier" or "summarizer" aliases for automatic fallback
-  "small_model": "local/lfm-1.2b-q8",
+  // 2026-11-09: was local/lfm-1.2b-q8. The bundled MLX-era `local` provider
+  // was deleted (see the tombstone where it stood): its lfm-1.2b-q8 entry
+  // declared a GGUF path on an mlx_lm runtime that serves the 8B MLX dir, so
+  // it never actually resolved on the endpoint. local-mlx/lfm-combined-sft
+  // is the 1.2B-class entry with a real runtime.
+  "small_model": "local-mlx/lfm-combined-sft",
 
   // Model for intent classification (use alias "classifier" for fallback)
   "classifier_model": "classifier",
@@ -95,10 +100,8 @@
   "model_aliases": {
     "classifier": {
       "models": [
-        "local-gguf/lfm-8b-gguf",     // Primary: same 8B weights as the MLX entry, but on llama.cpp — the runtime that returns structured tool_calls (2026-09-12)
-        "local/lfm-8b-mlx-4bit",      // Alternate: same weights on mlx_lm (86.8% corpus accuracy 2026-09-06); no tool-call extraction
+        "local-gguf/lfm-8b-gguf",     // Primary: LFM2.5-8B on llama.cpp — the runtime that returns structured tool_calls (2026-09-12)
         "local-mlx/lfm-combined-sft", // A/B alternate: SFT specialist (287ms; schedule/chat/coding strong, platform/search/report/review 0%)
-        "local/lfm-1.2b-q8",          // Fallback: fast, best-effort
         "ollama/llama3.2"             // Fallback: local Ollama
       ],
       "timeout": 10,
@@ -106,17 +109,17 @@
     },
     "summarizer": {
       "models": [
-        "local/lfm-1.2b-q8",   // Primary: fast local model
-        "local/lfm-8b-mlx-4bit",    // Fallback 1: LFM2.5-8B-A1B MLX 4-bit
-        "ollama/llama3.2"      // Fallback 3: local Ollama
+        "local-mlx/lfm-combined-sft", // Primary: fast 1.2B-class local model
+        "local-gguf/lfm-8b-gguf",     // Fallback 1: LFM2.5-8B-A1B GGUF on llama.cpp
+        "ollama/llama3.2"             // Fallback 2: local Ollama
       ],
       "timeout": 15,
       "max_fails": 2
     },
     "small": {
       "models": [
-        "local/lfm-1.2b-q8",
-        "local/lfm-8b-mlx-4bit",
+        "local-mlx/lfm-combined-sft",
+        "local-gguf/lfm-8b-gguf",
         "ollama/llama3.2"
       ],
       "timeout": 15,
@@ -208,76 +211,38 @@
         }
       }
     },
-    "local": {
-      "api": "openai",
-      "options": {
-        // :8083 — the MLX general endpoint, per the layout documented on the
-        // local-extract provider below. This was :8082, which is the
-        // prompt-router sidecar's port: two services claimed the same port,
-        // so the daemon adopted the router as its "own" runtime and the
-        // driver answered with canned classifier JSON (2026-09-12).
-        "baseURL": "http://127.0.0.1:8083/v1"
-      },
-      "lifecycle": {
-        "runtime": "mlx",
-        "model_path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
-        "auto_start": true,
-        "auto_stop_on_exit": true,
-        "pid_file": "~/.meept/run/mlx-general.pid",
-        "spawn_command": ["mlx_lm", "server", "--model", "${MODEL_PATH}", "--port", "8083"],
-        "spawn_timeout_seconds": 180,
-        "health_check": {
-          "endpoint": "/health",
-          "interval_seconds": 10,
-          "timeout_seconds": 5,
-          "unhealthy_threshold": 18
-        },
-        "restart_policy": {
-          "enabled": true,
-          "max_attempts": 3,
-          "cooldown_seconds": 30,
-          "reset_after_seconds": 300
-        }
-      },
-      "models": {
-        "lfm-8b-mlx-4bit": {
-          // mlx_lm.server reports the model ID as the path passed via --model.
-          // The "name" must match this ID so the daemon doesn't try to look
-          // up a different model name on HuggingFace.
-          "name": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
-          "path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
-          "capabilities": ["completion", "code", "reasoning"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 16384,
-          // max_output 4096 (was 2048): the 8B's reasoning + tool-call XML
-          // routinely exceeded 2048 tokens; truncated replies arrived as
-          // empty content (burning the loop's nudge ladder) or as tool-call
-          // blocks cut mid-JSON that the LFM recovery parser cannot
-          // reassemble (e2e run 6, 2026-09-10: T1 completed with zero tools
-          // executed). 4096 halves the truncation incidence within the
-          // 16K context (gguf variant now 64K, see local-gguf spawn below).
-          "max_output": 4096,
-          "temperature": 0.7,
-          "max_concurrency": 2
-        },
-        "lfm-1.2b-q8": {
-          "name": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
-          "path": "${MEEPT_MODELS_DIR:-$HOME/.meept/models}/BenjaminHelle/LFM2.5-1.2B-Code/LFM2.5-1.2B-Instruct.Q8_0.gguf",
-          "capabilities": ["completion", "code", "reasoning"],
-          "input_cost": 0.0,
-          "output_cost": 0.0,
-          "context_limit": 8192,
-          "max_output": 512,
-          "temperature": 0.1
-        }
-      }
-    },
+    // Provider "local" DELETED 2026-11-09 (tombstone). It was the MLX-era
+    // general endpoint (mlx_lm on :8083, models lfm-8b-mlx-4bit ctx 16384 /
+    // lfm-1.2b-q8 ctx 8192). Two independent reasons it had to go:
+    //   1. Boot-gate collision: LoadProvidersConfigDefault merges this bundled
+    //      base with the user's ~/.meept/models.json5 PER MODEL KEY under a
+    //      provider id. A user overlay that replaces the `local` provider's
+    //      lifecycle with llama-server --ctx-size 32768 (the modern local-gguf
+    //      layout most installs converge on) kept these stale MLX-era
+    //      context_limits, and the F-D8 gate checkLlamaCtxSizeLimit
+    //      (internal/daemon/classifier_boot_gate.go) then refused boot with
+    //      "llama.cpp ctx-size exceeds context_limit" on the surviving
+    //      bundled models. Every repo-root daemon boot (where config/
+    //      models.json5 resolves as the base) hit this.
+    //   2. It was already broken as shipped: lfm-1.2b-q8 declares a GGUF path
+    //      on an mlx_lm runtime that serves the 8B MLX dir (the endpoint
+    //      never resolves that model id), and lfm-8b-mlx-4bit duplicates the
+    //      local-gguf weights minus tool-call extraction (the driver moved
+    //      to local-gguf 2026-09-12 — see the header note at the top).
+    // Survivors: local-mlx (1.2B SFT classifier on :8143) and local-gguf
+    // (8B GGUF llama.cpp on :8080). Aliases/slots retargeted accordingly;
+    // :8083 is now free. A user's own `local` provider id is untouched —
+    // deletion only removes the base entry the collision came from.
+    // drift: correct-by-schema: providers.local.* -> the template no longer
+    // ships `local` (deleted 2026-11-09, see the tombstone); an installed
+    // home declaring its own llama.cpp `local` provider is valid overlay,
+    // never a drift the merge layer needs to reconcile.
 
     // Dedicated local extraction endpoint (json_extract tool). Second
     // llama.cpp instance on port 8084 so the extraction specialist model
     // never evicts the main chat model (8080) and stays clear of the
-    // prompt-router sidecar (8082) and the MLX general endpoint (8083).
+    // prompt-router sidecar (8082) and the retired MLX general endpoint
+    // (8083, freed 2026-11-09 — see the "local" tombstone above).
     // max_concurrency 1: the extraction model is small; parallel calls
     // queue instead of thrashing.
     "local-extract": {
@@ -324,8 +289,9 @@
 
     // Main local chat driver: LFM2.5-8B-A1B on llama.cpp (GGUF). Third
     // llama.cpp instance, on port 8080 — the "main chat model (8080)" the
-    // local-extract comment above refers to. Same weights as the `local`
-    // MLX entry, but llama-server extracts tool calls server-side
+    // local-extract comment above refers to. Same weights as the retired
+    // `local` MLX entry (deleted 2026-11-09, see its tombstone), but
+    // llama-server extracts tool calls server-side
     // (--jinja + the LFM2.5 tool-call parser) and mlx_lm does not:
     // measured 2026-09-12, this endpoint answers finish_reason=tool_calls
     // with a structured json_extract call where mlx_lm returns either
