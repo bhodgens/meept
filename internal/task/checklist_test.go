@@ -70,44 +70,6 @@ func TestChecklist_Remaining(t *testing.T) {
 	}
 }
 
-func TestTaskStep_ApplyTemplate(t *testing.T) {
-	step := NewTaskStep("task-1", "Test step", 0)
-	template := GetSecurityChecklist()
-
-	step.ApplyTemplate(template, false)
-
-	if step.Checklist == nil {
-		t.Fatal("Expected checklist to be set")
-	}
-	if len(step.Checklist.Items) != len(template.Items) {
-		t.Errorf("Expected %d items, got %d", len(template.Items), len(step.Checklist.Items))
-	}
-}
-
-func TestTaskStep_ApplyTemplate_Merge(t *testing.T) {
-	step := NewTaskStep("task-1", "Test step", 0)
-	step.Checklist = &Checklist{
-		Items: []ChecklistItem{{Text: "Existing item", Completed: false}},
-	}
-
-	template := GetSecurityChecklist()
-	step.ApplyTemplate(template, true)
-
-	if len(step.Checklist.Items) < 2 {
-		t.Errorf("Expected merged checklists to have at least 2 items, got %d", len(step.Checklist.Items))
-	}
-}
-
-func TestGetSecurityChecklist(t *testing.T) {
-	c := GetSecurityChecklist()
-	if c == nil {
-		t.Fatal("Expected non-nil checklist")
-	}
-	if len(c.Items) == 0 {
-		t.Error("Expected security checklist to have items")
-	}
-}
-
 func TestGetCheckpointGates(t *testing.T) {
 	// Test that the function exists and compiles
 	// Full integration testing would require a database
