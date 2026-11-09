@@ -119,7 +119,7 @@ func startTestServer(t *testing.T, opts ...http.ServerOption) (baseURL string, c
 	// Wait for listener to be ready
 	for range 50 {
 		time.Sleep(20 * time.Millisecond)
-		conn, err := net.DialTimeout("tcp", "127.0.0.1"+srv.Addr(), time.Second)
+		conn, err := net.DialTimeout("tcp", "127.0.0.1"+srv.TestAddr(), time.Second)
 		if err == nil {
 			conn.Close()
 			break
@@ -127,7 +127,7 @@ func startTestServer(t *testing.T, opts ...http.ServerOption) (baseURL string, c
 	}
 
 	// Get actual address — format for URL (handle IPv6 [::]:port)
-	addr := srv.Addr()
+	addr := srv.TestAddr()
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		t.Fatalf("failed to parse server address %q: %v", addr, err)
@@ -1268,14 +1268,14 @@ func TestUnifiedHTTPServer_RuntimeStatus_WithManager(t *testing.T) {
 	// Wait for server to be ready
 	for range 50 {
 		time.Sleep(20 * time.Millisecond)
-		conn, err := net.DialTimeout("tcp", "127.0.0.1"+srv.Addr(), time.Second)
+		conn, err := net.DialTimeout("tcp", "127.0.0.1"+srv.TestAddr(), time.Second)
 		if err == nil {
 			conn.Close()
 			break
 		}
 	}
 
-	addr := srv.Addr()
+	addr := srv.TestAddr()
 	host, port, _ := net.SplitHostPort(addr)
 	if host == "" || host == "::" {
 		host = "127.0.0.1"

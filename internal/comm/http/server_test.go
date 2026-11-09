@@ -1956,12 +1956,10 @@ func TestProgressRateLimiter(t *testing.T) {
 	}
 }
 
-// TestProgressRateLimiterCleanup tests that stale entries are cleaned up.
-func TestProgressRateLimiter_Cleanup(t *testing.T) {
+// TestProgressRateLimiter_Remove tests that removing a connection's entry
+// unblocks sends for that connection.
+func TestProgressRateLimiter_Remove(t *testing.T) {
 	limiter := newProgressRateLimiter(100 * time.Millisecond)
-
-	// Test cleanup removes stale entries
-	// Note: nil pointers all map to same key, so we test the cleanup mechanism
 
 	// Verify initial state: no entries, shouldSend returns true
 	var mockConn *wsConn
@@ -1977,12 +1975,12 @@ func TestProgressRateLimiter_Cleanup(t *testing.T) {
 		t.Error("Should be blocked after recordSend")
 	}
 
-	// Cleanup with empty active set should remove the entry
-	limiter.cleanup(map[*wsConn]struct{}{})
+	// remove (the live Unregister path) drops the entry
+	limiter.remove(mockConn)
 
-	// After cleanup, should allow sends again
+	// After removal, should allow sends again
 	if !limiter.shouldSend(mockConn) {
-		t.Error("Should allow send after cleanup")
+		t.Error("Should allow send after remove")
 	}
 }
 func TestHandleWSProgress_RateLimiting(t *testing.T) {
@@ -2437,16 +2435,19 @@ func startWSTestServer(t *testing.T) (baseURL string, msgBus *bus.MessageBus, ca
 	go func() { _ = srv.Start(ctx) }()
 
 	// Wait for listener to be ready.
+	var addr string
 	for range 50 {
 		time.Sleep(20 * time.Millisecond)
-		conn, err := net.Dial("tcp", srv.Addr())
+		conn, err := net.Dial("tcp", srv.listenerAddr())
 		if err == nil {
 			conn.Close()
+			addr = srv.listenerAddr()
 			break
 		}
 	}
-
-	addr := srv.Addr()
+	if addr == "" {
+		addr = srv.listenerAddr()
+	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		t.Fatalf("failed to parse server address %q: %v", addr, err)

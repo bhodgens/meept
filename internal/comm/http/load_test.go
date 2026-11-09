@@ -77,7 +77,7 @@ func TestWebSocket_Load_100Concurrent(t *testing.T) {
 	var baseURL string
 	for range 100 {
 		time.Sleep(20 * time.Millisecond)
-		addr := srv.Addr()
+		addr := srv.TestAddr()
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			continue
@@ -357,7 +357,7 @@ func TestWebSocket_Load_BroadcastCorrectness(t *testing.T) {
 	var baseURL string
 	for range 100 {
 		time.Sleep(20 * time.Millisecond)
-		addr := srv.Addr()
+		addr := srv.TestAddr()
 		_, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			continue

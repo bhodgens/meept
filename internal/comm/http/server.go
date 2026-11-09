@@ -485,17 +485,6 @@ func (r *progressRateLimiter) recordSend(wc *wsConn) {
 	r.mu.Unlock()
 }
 
-// cleanup removes stale entries for disconnected connections.
-func (r *progressRateLimiter) cleanup(conns map[*wsConn]struct{}) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for wc := range r.lastSent {
-		if _, ok := conns[wc]; !ok {
-			delete(r.lastSent, wc)
-		}
-	}
-}
-
 // remove drops the entry for a single connection. Intended to be called
 // from WebSocketHub.Unregister so the map does not grow unbounded.
 func (r *progressRateLimiter) remove(wc *wsConn) {
@@ -541,13 +530,6 @@ func (h *WebSocketHub) Unregister(wc *wsConn, progressRateLimiter *progressRateL
 
 	wc.conn.Close()
 	h.logger.Debug("ws client unregistered", "remote", wc.conn.RemoteAddr())
-}
-
-// ClientCount returns the number of connected clients.
-func (h *WebSocketHub) ClientCount() int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return len(h.clients)
 }
 
 // SubscribeSession records that this websocket connection is interested
@@ -710,38 +692,6 @@ func (h *WebSocketHub) ShouldSend(wc *wsConn, eventType, sessionID string) bool 
 // subscribed is not matched, an empty session id matches nothing either.
 func (h *WebSocketHub) ShouldSendProgress(wc *wsConn, sessionID string) bool {
 	return h.ShouldSend(wc, "agent_progress", sessionID)
-}
-
-// Broadcast sends a typed message to all connected WebSocket clients.
-func (h *WebSocketHub) Broadcast(msgType string, data any) {
-	payload, err := json.Marshal(map[string]any{
-		"type": msgType,
-		"data": data,
-	})
-	if err != nil {
-		h.logger.Error("ws broadcast marshal error", "error", err)
-		return
-	}
-
-	var failedConns []*wsConn
-
-	h.mu.RLock()
-	conns := make([]*wsConn, 0, len(h.clients))
-	for wc := range h.clients {
-		conns = append(conns, wc)
-	}
-	h.mu.RUnlock()
-
-	for _, wc := range conns {
-		if err := wc.write(payload); err != nil {
-			h.logger.Warn("ws write error, will remove client", "error", err)
-			failedConns = append(failedConns, wc)
-		}
-	}
-
-	for _, wc := range failedConns {
-		h.Unregister(wc, nil)
-	}
 }
 
 // WithWebSocket enables WebSocket support.
@@ -1348,17 +1298,6 @@ type ServerOption func(*Server)
 // shared chat.submit handler; week bughunt 2026-09-17 finding 17).
 func (s *Server) ChatSubmitter() ChatSubmitter {
 	return s.chatSubmitter
-}
-
-// Addr returns the actual address the server is listening on. Useful when
-// binding to :0 to discover the kernel-assigned port.
-func (s *Server) Addr() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.listener != nil {
-		return s.listener.Addr().String()
-	}
-	return s.config.Addr
 }
 
 // Start starts the HTTP server.
