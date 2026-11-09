@@ -304,10 +304,10 @@ Phase 0, validated by the control agent (orchestrator, in-session).
 | F1 | contact store CRUD + E.164 normalize | C1 | contact/store_test.go | contact-chain scenario | PENDING |
 | F2 | chain runner ordered fallback + dedupe | C2 | contact/chain_test.go | contact-chain scenario | PENDING |
 | F3 | signal json-rpc client + demux | C3 | signal/rpc_test.go | signal-sidecar scenario | PENDING |
-| F4 | signal voice leg registry + splice adapter | C4 | voice/registry_leg_test.go additions | signal-sidecar scenario | PENDING |
+| F4 | signal voice leg registry + splice adapter | C4 | voice/signal_leg_test.go | signal-sidecar scenario | PENDING |
 | F5 | signal msg send/receive | #120 | signal/msg_test.go | signal-sidecar scenario | PENDING |
 | F6 | telnyx SMS send + webhook + DLR | C5 | telnyx/messaging_test.go | telnyx-sms scenario | PENDING |
-| F7 | phone-leg ended-state fix (#123) | leaf 01 T0 | daemon voice wiring test | voice-local suite assertion upgrade | PENDING |
+| F7 | phone-leg ended-state fix (#123) | leaf 01 T0 | daemon voice wiring test | NEW phone-leg ended assertion (leaf 01 T0); local-leg assertion already landed upstream (commit 2a5c0ccf) | PENDING |
 | F8 | contact tool surface | C6 | builtin/contact_test.go | contact-chain scenario | PENDING |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
