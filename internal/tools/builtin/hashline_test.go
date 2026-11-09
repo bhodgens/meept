@@ -154,43 +154,6 @@ func TestFormatHashLines(t *testing.T) {
 	})
 }
 
-func TestParseAnchor(t *testing.T) {
-	tests := []struct {
-		name     string
-		anchor   string
-		wantLine int
-		wantHash string
-		wantErr  bool
-	}{
-		{"valid anchor", "42:ab", 42, "ab", false},
-		{"valid anchor line 1", "1:zz", 1, "zz", false},
-		{"missing colon", "42ab", 0, "", true},
-		{"missing hash", "42:", 0, "", true},
-		{"hash too short", "42:a", 0, "", true},
-		{"hash too long", "42:abc", 0, "", true},
-		{"non-numeric line", "abc:ab", 0, "", true},
-		{"empty string", "", 0, "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			lineNum, hash, err := ParseAnchor(tt.anchor)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseAnchor(%q) error = %v, wantErr %v", tt.anchor, err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr {
-				if lineNum != tt.wantLine {
-					t.Errorf("ParseAnchor(%q) lineNum = %d, want %d", tt.anchor, lineNum, tt.wantLine)
-				}
-				if hash != tt.wantHash {
-					t.Errorf("ParseAnchor(%q) hash = %q, want %q", tt.anchor, hash, tt.wantHash)
-				}
-			}
-		})
-	}
-}
-
 func TestValidateAnchor(t *testing.T) {
 	lines := []string{"alpha", "beta", "gamma", "delta"}
 

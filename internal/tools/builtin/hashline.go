@@ -128,26 +128,6 @@ func ParseSnapshotAnchor(anchor string) (lineNum int, snapshotTag string, hash s
 	}
 }
 
-// ParseAnchor parses a "LINE_NUMBER:HASH" anchor string and returns the line number and hash.
-// Returns (0, "", error) on invalid format.
-func ParseAnchor(anchor string) (lineNum int, hash string, err error) {
-	parts := strings.SplitN(anchor, ":", 2)
-	if len(parts) != 2 {
-		return 0, "", fmt.Errorf("invalid anchor format %q: expected LINE:HASH", anchor)
-	}
-
-	var n int
-	if _, err := fmt.Sscanf(parts[0], "%d", &n); err != nil {
-		return 0, "", fmt.Errorf("invalid line number in anchor %q: %w", anchor, err)
-	}
-
-	if len(parts[1]) != 2 {
-		return 0, "", fmt.Errorf("invalid hash in anchor %q: expected 2-char bigram", anchor)
-	}
-
-	return n, parts[1], nil
-}
-
 // ValidateAnchor checks if a hashline anchor matches the actual content at the given line.
 // lines is 0-indexed (lines[0] is line 1). lineNum is 1-based.
 func ValidateAnchor(lines []string, lineNum int, expectedHash string) bool {
