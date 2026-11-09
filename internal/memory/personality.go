@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"errors"
 	"context"
 	"fmt"
 	"log/slog"
@@ -323,40 +322,4 @@ func parsePersonality(document string) map[string][]string {
 	}
 
 	return result
-}
-
-// PersonalityStore provides a key-value interface over personality data.
-type PersonalityStore struct {
-	memory *PersonalityMemory
-}
-
-
-
-
-
-// Get retrieves a preference value.
-func (s *PersonalityStore) Get(ctx context.Context, key string) (string, error) {
-	if s.memory == nil {
-		return "", errors.New("personality memory not initialized")
-	}
-
-	personality := s.memory.GetPersonality()
-	for _, entries := range personality {
-		for _, entry := range entries {
-			if after, ok := strings.CutPrefix(entry, key+":"); ok {
-				return strings.TrimSpace(after), nil
-			}
-		}
-	}
-
-	return "", nil // Not found, not an error
-}
-
-// Set stores a preference value.
-func (s *PersonalityStore) Set(ctx context.Context, key, value string) error {
-	if s.memory == nil {
-		return errors.New("personality memory not initialized")
-	}
-
-	return s.memory.UpdateKey(ctx, "Creator Preferences", key, value)
 }

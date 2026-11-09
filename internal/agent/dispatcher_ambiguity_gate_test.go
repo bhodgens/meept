@@ -42,7 +42,7 @@ func ambiguityTestServer(t *testing.T, ambiguity float64) *IntentAnalyzer {
 		APIKey:    "test-key",
 		MaxTokens: 256,
 	})
-	return NewIntentAnalyzer(client, nil)
+	return newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, client, nil)
 }
 
 func mustJSON(t *testing.T, v any) string {

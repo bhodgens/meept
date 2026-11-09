@@ -260,7 +260,7 @@ func TestIntentAnalyzer_BootWindowWaitsForGate(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	gate := NewClassifierBootReadiness()
-	ia := newIntentAnalyzer(llmTestClient(t, srv.URL), 0, nil, nil)
+	ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, llmTestClient(t, srv.URL), nil)
 	ia.SetBootReadiness(gate)
 
 	done := make(chan error, 1)

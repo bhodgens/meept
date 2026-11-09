@@ -22,25 +22,6 @@ func needsVisionPreflight(messages []llm.ChatMessage) bool {
 	return false
 }
 
-// collectUndescribedImageRefs returns pointers to all ImageRef values
-// across all messages that have an empty Description OR have AnalysisFailed
-// set (meaning a prior attempt failed and should be retried). These are the
-// images that need to be analyzed by the vision model.
-func collectUndescribedImageRefs(messages []llm.ChatMessage) []*llm.ImageRef {
-	var refs []*llm.ImageRef
-	for i := range messages {
-		parts := messages[i].Parts
-		for j := range parts {
-			part := &parts[j]
-			if part.Type == "image_url" && part.ImageURL != nil &&
-				(part.ImageURL.Description == "" || part.ImageURL.AnalysisFailed) {
-				refs = append(refs, part.ImageURL)
-			}
-		}
-	}
-	return refs
-}
-
 // runVisionPreflight analyzes undescribed images in the messages slice.
 // For each unique image (by URL), it sends a single-turn request to a
 // vision-capable model and stores the resulting description on the ImageRef.

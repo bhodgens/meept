@@ -44,20 +44,6 @@ func TestVisionPreflightWithDescribedImage(t *testing.T) {
 	}
 }
 
-func TestVisionPreflightCollectImageRefs(t *testing.T) {
-	messages := []llm.ChatMessage{
-		{Role: llm.RoleUser, Parts: []llm.ContentPart{
-			{Type: "text", Text: "check this"},
-			{Type: "image_url", ImageURL: &llm.ImageRef{URL: "file://a.png"}},
-			{Type: "image_url", ImageURL: &llm.ImageRef{URL: "file://b.png"}},
-		}},
-	}
-	refs := collectUndescribedImageRefs(messages)
-	if len(refs) != 2 {
-		t.Errorf("expected 2 refs, got %d", len(refs))
-	}
-}
-
 // TestVisionPreflightNeedsRetryAfterFailure (M1) verifies that a ref whose
 // analysis failed on a previous turn is picked up by needsVisionPreflight on
 // the next turn, even though its Description remains empty. Before the fix,
@@ -215,27 +201,5 @@ func TestVisionPreflightEmptyResponseSetsFailureFlag(t *testing.T) {
 	}
 	if ref.Description != "" {
 		t.Errorf("expected Description to remain empty, got %q", ref.Description)
-	}
-}
-
-// TestCollectUndescribedImageRefsIncludesFailedRefs (M1) verifies the
-// collector includes refs whose AnalysisFailed flag is set even when they
-// have no Description, so the retry path actually re-queues them.
-func TestCollectUndescribedImageRefsIncludesFailedRefs(t *testing.T) {
-	messages := []llm.ChatMessage{
-		{Role: llm.RoleUser, Parts: []llm.ContentPart{
-			{Type: "image_url", ImageURL: &llm.ImageRef{
-				URL:            "file://fresh.png",
-				AnalysisFailed: false,
-			}},
-			{Type: "image_url", ImageURL: &llm.ImageRef{
-				URL:            "file://retry.png",
-				AnalysisFailed: true, // prior failure, needs retry
-			}},
-		}},
-	}
-	refs := collectUndescribedImageRefs(messages)
-	if len(refs) != 2 {
-		t.Errorf("expected 2 refs (fresh + failed), got %d", len(refs))
 	}
 }

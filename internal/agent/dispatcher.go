@@ -908,34 +908,6 @@ func (d *Dispatcher) SetInstructionParser(parser *InstructionParser) {
 	d.instructionParser = parser
 }
 
-// suggestReasoningForIntent returns the suggested reasoning tier for a given
-// intent type per LLM Reasoning Effort spec §7.5. Returns empty string when
-// the intent has no defined mapping (meaning "no suggestion"), so callers
-// can distinguish "no suggestion" from a valid tier value.
-//
-// The suggestion is ONLY applied when:
-//   - no explicit user reasoning directive was parsed, AND
-//   - the agent's AllowSelfModulation flag is true (enforced at AgentLoop).
-//
-// Callers should stash the return value on DispatchResult.SuggestedReasoningTier
-// for downstream consumers.
-func suggestReasoningForIntent(intentType string) string {
-	switch IntentType(intentType) {
-	case IntentPlan, IntentQuickPlan:
-		// quickplan is autonomous plan-execution: same depth bar as plan
-		// (bughunt 2026-09-10 L2).
-		return llm.ReasoningXHigh
-	case IntentDebug, IntentResearch, IntentAnalyze:
-		return llm.ReasoningHigh
-	case IntentCode:
-		return llm.ReasoningMedium
-	case IntentChat:
-		return llm.ReasoningLow
-	default:
-		return ""
-	}
-}
-
 // ClassifyAndRoute is the main entry point for the dispatcher.
 //
 // parts carries optional multimodal content (e.g. image attachments). When
@@ -6030,12 +6002,3 @@ func (d *Dispatcher) BuildSessionDigestForConversation(sessionID string) *Sessio
 // If an active agent loop exists for this conversation, it injects
 // the message into the queue (steer or follow-up) based on the
 // SteeringHeuristicTable. Otherwise, it runs the agent synchronously.
-// isWorkIntent reports whether the intent produces new work and must
-// always run the executor path (never short-circuit into a recall answer).
-func isWorkIntent(intentType string) bool {
-	switch IntentType(intentType) {
-	case IntentCode, IntentDebug, IntentPlan, IntentQuickPlan, IntentReview:
-		return true
-	}
-	return false
-}

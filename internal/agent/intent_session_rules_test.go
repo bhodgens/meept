@@ -148,7 +148,7 @@ func newDigestCaptureDispatcher(t *testing.T, cs *captureServer) *Dispatcher {
 // two session rules are present in the system prompt in both cases.
 func TestIntentAnalyzer_SessionRules_WireCapture(t *testing.T) {
 	cs := newCaptureServer(t, `{"goal":"fix bug","ambiguity":0.2,"scope":"narrow","category":"fix","suggested_questions":[],"confidence":0.9}`)
-	ia := NewIntentAnalyzer(llm.NewClient(&llm.ModelConfig{
+	ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, llm.NewClient(&llm.ModelConfig{
 		BaseURL: cs.Server.URL,
 		ModelID: "capture",
 	}), digestTestLogger())

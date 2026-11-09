@@ -2,7 +2,6 @@ package agent
 
 import (
 	"strings"
-	"time"
 
 	"github.com/caimlas/meept/internal/config"
 )
@@ -74,51 +73,6 @@ func (rt *RoutingTable) SetRoute(intent, actorID, reviewerID string) {
 	}
 	if reviewerID != "" {
 		rt.reviewer[intent] = reviewerID
-	}
-}
-
-// PlannerThresholds centralizes all tunable StrategicPlanner parameters that
-// were previously magic numbers scattered across strategic.go.
-type PlannerThresholds struct {
-	// InterviewAmbiguityThreshold controls when ConductInterview triggers.
-	// Requests with ambiguity below this skip the interview phase.
-	// (replaces interviewAmbiguityThreshold const in strategic.go:50)
-	InterviewAmbiguity float64
-
-	// MaxPlanSteps caps the number of steps in a generated plan.
-	// (replaces StrategicPlanner.maxPlanSteps default in strategic.go:141)
-	MaxPlanSteps int
-
-	// PlannerTimeout is the max duration for a single planner LLM call.
-	// (replaces StrategicPlanner.plannerTimeout default in strategic.go:144)
-	PlannerTimeout time.Duration
-
-	// SimpleInputMaxChars is the threshold below which a request is
-	// considered "simple" and may skip LLM decomposition.
-	// (replaces hardcoded 100 in strategic.go:631)
-	SimpleInputMaxChars int
-
-	// PairInputMinChars is the threshold above which code/debug requests
-	// are routed to pair sessions.
-	// (replaces hardcoded 200 in strategic.go:685)
-	PairInputMinChars int
-
-	// ApprovalStepThreshold is the minimum plan size that triggers the
-	// user approval gate (independent of the interview gate). This is a
-	// new configurable knob; the current code only gates on
-	// InterviewCompleted.
-	ApprovalStepThreshold int
-}
-
-// NewDefaultThresholds returns thresholds matching current hardcoded defaults.
-func NewDefaultThresholds() *PlannerThresholds {
-	return &PlannerThresholds{
-		InterviewAmbiguity:    0.6,
-		MaxPlanSteps:          10,
-		PlannerTimeout:        120 * time.Second,
-		SimpleInputMaxChars:   100,
-		PairInputMinChars:     200,
-		ApprovalStepThreshold: 5,
 	}
 }
 

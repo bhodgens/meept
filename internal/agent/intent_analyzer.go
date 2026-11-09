@@ -77,7 +77,6 @@ type IntentAnalyzer struct {
 	bootWait      time.Duration
 }
 
-
 // IntentAnalyzerConfig carries optional construction parameters for
 // newIntentAnalyzer. All fields are additive; zero values keep prior defaults.
 type IntentAnalyzerConfig struct {
@@ -106,7 +105,6 @@ type IntentAnalyzerConfig struct {
 	// calls, byte-identical to prior behavior.
 	ScopeProvider chatScopeProvider
 }
-
 
 // newIntentAnalyzerWithConfig is the fully-parameterized constructor used by
 // the dispatcher to wire resolver-based alias failover.
@@ -398,15 +396,4 @@ func clampFloat(v, min, max float64) float64 {
 		return max
 	}
 	return v
-}
-
-// NewIntentAnalyzer creates a new IntentAnalyzer with the given LLM client and logger.
-func NewIntentAnalyzer(client *llm.Client, logger *slog.Logger) *IntentAnalyzer {
-	return newIntentAnalyzer(client, 0, nil, logger)
-}
-
-// newIntentAnalyzer is the shared constructor; tokenCapOverride of 0 means
-// derive from modelCfg.
-func newIntentAnalyzer(client *llm.Client, _ int, modelCfg *llm.ModelConfig, logger *slog.Logger) *IntentAnalyzer {
-	return newIntentAnalyzerWithConfig(IntentAnalyzerConfig{ModelConfig: modelCfg}, client, logger)
 }

@@ -16,7 +16,7 @@ func TestNewIntentAnalyzer(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	client := &llm.Client{} //nolint:ineffassign // Only tests construction
 
-	ia := NewIntentAnalyzer(client, logger)
+	ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, client, logger)
 	if ia == nil {
 		t.Fatal("NewIntentAnalyzer returned nil")
 	}
@@ -31,20 +31,20 @@ func TestNewIntentAnalyzer(t *testing.T) {
 	}
 
 	// Test nil logger fallback
-	ia2 := NewIntentAnalyzer(client, nil)
+	ia2 := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, client, nil)
 	if ia2.logger == nil {
 		t.Error("logger fallback to default failed")
 	}
 
 	// Test WithAmbiguityThreshold
-	ia3 := NewIntentAnalyzer(client, logger).WithAmbiguityThreshold(0.8)
+	ia3 := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, client, logger).WithAmbiguityThreshold(0.8)
 	if ia3.ambiguityThreshold != 0.8 {
 		t.Errorf("custom threshold = %v, want 0.8", ia3.ambiguityThreshold)
 	}
 }
 
 func TestIntentAnalyzer_ParseAnalysis(t *testing.T) {
-	ia := NewIntentAnalyzer(nil, slog.Default())
+	ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, nil, slog.Default())
 
 	tests := []struct {
 		name    string
@@ -302,7 +302,7 @@ func TestTrueIntentAnalysis_IsAmbiguous(t *testing.T) {
 }
 
 func TestIntentAnalyzer_AnalyzeTrueIntent_NoClient(t *testing.T) {
-	ia := NewIntentAnalyzer(nil, slog.Default())
+	ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, nil, slog.Default())
 	ctx := context.Background()
 
 	_, err := ia.AnalyzeTrueIntent(ctx, "test input", nil)
@@ -338,7 +338,7 @@ func requireSessionRules(t *testing.T, systemPrompt string) {
 }
 
 func TestIntentAnalyzer_BuildAnalysisMessages_Contextless(t *testing.T) {
-	ia := NewIntentAnalyzer(nil, digestTestLogger())
+	ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, nil, digestTestLogger())
 	const input = "did the change get made?"
 
 	cases := map[string]*SessionContextDigest{
@@ -372,7 +372,7 @@ func TestIntentAnalyzer_BuildAnalysisMessages_Contextless(t *testing.T) {
 }
 
 func TestIntentAnalyzer_BuildAnalysisMessages_WithDigest(t *testing.T) {
-	ia := NewIntentAnalyzer(nil, digestTestLogger())
+	ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, nil, digestTestLogger())
 
 	digest := &SessionContextDigest{
 		LastTaskName:      "Fix the login bug",
@@ -397,7 +397,7 @@ func TestIntentAnalyzer_BuildAnalysisMessages_WithDigest(t *testing.T) {
 }
 
 func TestIntentAnalyzer_BuildAnalysisMessages_PartialDigest(t *testing.T) {
-	ia := NewIntentAnalyzer(nil, digestTestLogger())
+	ia := newIntentAnalyzerWithConfig(IntentAnalyzerConfig{}, nil, digestTestLogger())
 
 	// Name present; state, agent, and summary empty.
 	digest := &SessionContextDigest{LastTaskName: "Pending work item"}

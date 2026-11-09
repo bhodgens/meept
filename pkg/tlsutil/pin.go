@@ -3,12 +3,10 @@ package tlsutil
 
 import (
 	"crypto/sha256"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 )
@@ -66,57 +64,3 @@ func LoadExpectedFingerprint(path string) (certFP, spkiFP string, err error) {
 	return strings.TrimSpace(certFP), strings.TrimSpace(spkiFP), nil
 }
 
-// PinningVerifier returns a TLS verify callback that pins the server cert to
-// an expected fingerprint. Use with crypto/tls.Config.InsecureSkipVerify and
-// VerifyConnection.
-type PinningVerifier struct {
-	ExpectedCertFP string // SHA-256 of raw certificate
-	ExpectedSPKIFP string // SHA-256 of RawSubjectPublicKeyInfo
-}
-
-// VerifyConnection implements tls.Config.VerifyConnection.
-// C-06 FIX: Returns an error when no fingerprints are configured to prevent
-// fail-open MITM vulnerability.
-func (pv *PinningVerifier) VerifyConnection(cs tls.ConnectionState) error {
-	if len(cs.PeerCertificates) == 0 {
-		return fmt.Errorf("no peer certificates presented")
-	}
-	// C-06: Fail closed when no fingerprints configured - this prevents
-	// a misconfigured pin verifier from allowing MITM attacks
-	if pv.ExpectedCertFP == "" && pv.ExpectedSPKIFP == "" {
-		return fmt.Errorf("TLS pin verifier misconfigured: no fingerprints specified")
-	}
-	peer := cs.PeerCertificates[0]
-	if pv.ExpectedCertFP != "" {
-		actual := Fingerprint(peer)
-		if actual != pv.ExpectedCertFP {
-			return fmt.Errorf("certificate fingerprint mismatch")
-		}
-	}
-	if pv.ExpectedSPKIFP != "" {
-		actual := FingerprintSPKI(peer)
-		if actual != pv.ExpectedSPKIFP {
-			return fmt.Errorf("SPKI fingerprint mismatch")
-		}
-	}
-	return nil
-}
-
-// PinTransport returns an http.RoundTripper that skips CA verification and
-// instead verifies the certificate fingerprint directly.
-func (pv *PinningVerifier) PinTransport(base http.RoundTripper) http.RoundTripper {
-	if base == nil {
-		base = http.DefaultTransport
-	}
-	tt, ok := base.(*http.Transport)
-	if !ok {
-		return base
-	}
-	transport := tt.Clone()
-	transport.TLSClientConfig = &tls.Config{
-		InsecureSkipVerify: true, //nolint:gosec // we do custom pinning in VerifyConnection
-		VerifyConnection:   pv.VerifyConnection,
-		MinVersion:         tls.VersionTLS12,
-	}
-	return transport
-}

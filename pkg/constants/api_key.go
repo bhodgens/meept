@@ -11,20 +11,6 @@ import (
 	"sync"
 )
 
-// defaultDevAPIKeyLegacy is the old hardcoded public key from early versions.
-// It is kept ONLY for migration detection — never returned by DevAPIKey().
-// New code must use DevAPIKey() exclusively.
-//
-//nolint:gosec // G101: intentional legacy migration-detection constant, documented placeholder, never used as a real credential
-const defaultDevAPIKeyLegacy = "meept_dev_default_key_CHANGE_ME"
-
-// DefaultDevAPIKey returns the legacy hardcoded key value. This exists solely
-// for backward compatibility with external consumers (e.g., the Swift menubar
-// app) that reference the constant by name. New code must call DevAPIKey().
-func DefaultDevAPIKey() string {
-	return defaultDevAPIKeyLegacy
-}
-
 // devKeyFileName is the name of the per-installation dev key file, stored
 // under the meept home directory ($MEEPT_HOME, else ~/.meept).
 const devKeyFileName = "dev_key"

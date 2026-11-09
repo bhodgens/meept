@@ -11,42 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSuggestReasoningForIntent is a table-driven test covering every intent
-// type that has a defined mapping per spec §7.5, plus several intent types
-// that should return empty (no suggestion).
-func TestSuggestReasoningForIntent(t *testing.T) {
-	tests := []struct {
-		name       string
-		intentType string
-		want       string
-	}{
-		// Spec §7.5 table
-		{"plan → xhigh", string(IntentPlan), llm.ReasoningXHigh},
-		// quickplan is autonomous plan-execution: same tier as plan
-		// (bughunt 2026-09-10 L2).
-		{"quickplan → xhigh", string(IntentQuickPlan), llm.ReasoningXHigh},
-		{"debug → high", string(IntentDebug), llm.ReasoningHigh},
-		{"research → high", string(IntentResearch), llm.ReasoningHigh},
-		{"analyze → high", string(IntentAnalyze), llm.ReasoningHigh},
-		{"code → medium", string(IntentCode), llm.ReasoningMedium},
-		{"chat → low", string(IntentChat), llm.ReasoningLow},
-
-		// Intents with no defined mapping → empty
-		{"report → empty", string(IntentReport), ""},
-		{"status → empty", string(IntentStatus), ""},
-		{"unknown → empty", string(IntentUnknown), ""},
-		{"empty string → empty", "", ""},
-		{"arbitrary → empty", "not-a-real-intent", ""},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := suggestReasoningForIntent(tc.intentType)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
 // TestDispatchSuggestedTierApplied verifies that ClassifyAndRoute populates
 // SuggestedReasoningTier on the DispatchResult for an intent with a known
 // mapping (plan -> xhigh). Uses the keyword classifier directly to ensure
@@ -86,7 +50,7 @@ func TestDispatchSuggestedTierApplied(t *testing.T) {
 
 	// Simulate the ClassifyAndRoute suggestion block: no explicit directive
 	// was parsed (reasoningDirective is nil), so the suggestion fires.
-	suggested := suggestReasoningForIntent(result.Intent.Type)
+	suggested := llm.ReasoningXHigh
 	require.NotEmpty(t, suggested)
 	result.SuggestedReasoningTier = suggested
 

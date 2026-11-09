@@ -4,7 +4,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/caimlas/meept/internal/config"
 )
@@ -129,49 +128,6 @@ func TestRoutingTable_NilSafe(t *testing.T) {
 
 	// SetRoute on nil should be a no-op, not a panic.
 	rt.SetRoute("foo", "bar", "baz")
-}
-
-// --- PlannerThresholds tests ---
-
-func TestPlannerThresholds_Defaults(t *testing.T) {
-	pt := NewDefaultThresholds()
-
-	tests := []struct {
-		name string
-		got  any
-		want any
-	}{
-		{"InterviewAmbiguity", pt.InterviewAmbiguity, float64(0.6)},
-		{"MaxPlanSteps", pt.MaxPlanSteps, 10},
-		{"PlannerTimeout", pt.PlannerTimeout, 120 * time.Second},
-		{"SimpleInputMaxChars", pt.SimpleInputMaxChars, 100},
-		{"PairInputMinChars", pt.PairInputMinChars, 200},
-		{"ApprovalStepThreshold", pt.ApprovalStepThreshold, 5},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			switch want := tc.want.(type) {
-			case float64:
-				got := tc.got.(float64)
-				if got != want {
-					t.Errorf("%s = %v, want %v", tc.name, got, want)
-				}
-			case int:
-				got := tc.got.(int)
-				if got != want {
-					t.Errorf("%s = %v, want %v", tc.name, got, want)
-				}
-			case time.Duration:
-				got := tc.got.(time.Duration)
-				if got != want {
-					t.Errorf("%s = %v, want %v", tc.name, got, want)
-				}
-			default:
-				t.Fatalf("unsupported type for %s", tc.name)
-			}
-		})
-	}
 }
 
 // --- BuildPlannerPromptHint tests ---

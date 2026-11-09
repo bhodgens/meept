@@ -25,16 +25,3 @@ func TestReferencesPriorWork(t *testing.T) {
 		}
 	}
 }
-
-func TestIsWorkIntent(t *testing.T) {
-	for _, w := range []string{"code", "debug", "plan", "quickplan", "review"} {
-		if !isWorkIntent(w) {
-			t.Errorf("isWorkIntent(%q) = false, want true", w)
-		}
-	}
-	for _, nw := range []string{"chat", "recall", "status", "platform", "clarify", "unknown"} {
-		if isWorkIntent(nw) {
-			t.Errorf("isWorkIntent(%q) = true, want false", nw)
-		}
-	}
-}
