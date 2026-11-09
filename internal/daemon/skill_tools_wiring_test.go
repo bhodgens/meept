@@ -50,9 +50,18 @@ func newSkillToolsTestComponents(t *testing.T, cfg *config.Config) *Components {
 
 // executeToolArgs runs a tool through the registry, failing the test on
 // transport-level errors (tool missing, registry execution panic).
+//
+// The context carries a session id: the exec gate's G3 effects reservation
+// requires a real claimant (main commit 358fe995, bug #73 — Claim rejects a
+// zero AgentID+SessionID pair with "effects: claimant required"). The agent
+// loop injects this attribution in production; a wiring test executing a
+// mutating-class tool through the REAL gated registry must do the same, or
+// the gate fail-closes before the tool body runs. Harmless on trees where
+// the gate predates the claimant rule.
 func executeSkillTool(t *testing.T, comps *Components, name string, args map[string]any) (*tools.ToolResult, error) {
 	t.Helper()
-	return comps.ToolRegistry.Execute(context.Background(), name, args)
+	ctx := tools.ContextWithSessionID(context.Background(), "skill-wiring-test-session")
+	return comps.ToolRegistry.Execute(ctx, name, args)
 }
 
 // requireSuccess asserts a ToolResult reports success and returns its
@@ -163,7 +172,7 @@ func TestTranscriptToolGatedOnConfig(t *testing.T) {
 		t.Fatal("transcript_fetch not registered with enabled=true")
 	}
 
-	res, err := compsOn.ToolRegistry.Execute(context.Background(), "transcript_fetch", map[string]any{
+	res, err := executeSkillTool(t, compsOn, "transcript_fetch", map[string]any{
 		"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
 	})
 	if err != nil {
