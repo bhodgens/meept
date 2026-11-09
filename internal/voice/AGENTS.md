@@ -269,9 +269,15 @@ store. Invariants a future agent must NOT break:
   - phone outbound: `Dialer.holdCall` after a successful Acquire, via
     `DialConfig.Hold` (nil degrades to no ended-state). Refusals and
     the idempotent retry path do not hold.
-  `holdPhoneCall` also runs `Binding.OnCallStart` — the phone leg had
-  no other call site, and `OnCallEnd` is a no-op without a live binding
-  entry, so the row would never reach 'ended' on the hold alone.
+    `holdPhoneCall` also runs `Binding.OnCallStart` — the phone leg had
+    no other call site, and `OnCallEnd` is a no-op without a live
+    binding entry, so the row would never reach 'ended' on the hold
+    alone. OnCallStart takes the fresh-session-per-call flag as a
+    trailing variadic (voice.fresh_session_per_call / employee_leg
+    fresh_session, resolved via voice.FreshSessionFor at the wiring
+    layer) - when true the call gets a NEW session named "voice <emp>
+    <ccid>" instead of the shared (employee, number) one; the hold/
+    release flow is unchanged (keys off ccid).
   Keep both Hold seams optional.
 - RPC stays seam-based: `internal/rpc/voice_local.go` takes
   `VoiceLocalSeams` func fields and NEVER imports internal/voice (the

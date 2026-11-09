@@ -44,6 +44,22 @@ configured default (`voice.employee_leg`) and then `voice.default_leg`
 (else phone). The optional `voice` argument overrides the TTS voice for
 that one call.
 
+## Conversation memory across calls
+
+By default every call to the same employee and target (the local label
+defaults to your hostname) shares ONE session: each call's turns append
+to that stored conversation, so the employee remembers - and replays -
+prior calls. When that history snowball becomes noise, set
+`voice.fresh_session_per_call = true` (opt-in, default false): every
+call opens its own session and starts clean. The day brief ("prior
+calls today", one line per call) remains the only cross-call context
+either way, and every call's full transcript still lands in the call
+store plus an `employee.notify` relay. Per-employee policy: an
+`employee_leg` row's `fresh_session` key overrides the global flag
+(`{employee: "companion", fresh_session: false}` keeps continuity for
+one employee while the rest start fresh). Until the flag, a quick
+manual reset is a distinct `--label` per call.
+
 ## Configuration options
 
 All under `voice` in meept.json5. `enabled` defaults false. See

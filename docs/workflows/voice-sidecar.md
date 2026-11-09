@@ -454,6 +454,13 @@ Proposed keys, all under `voice`:
   employee turn is in flight and re-arms after the reply is spoken
 - `turn_timeout_seconds` - int, default 0 (disabled); optional hard cap
   on one in-flight voice turn (bounds a hung employee LLM)
+- `fresh_session_per_call` - bool, default false (opt-in). When true,
+  each voice call opens a NEW session instead of appending to the shared
+  (employee, target) conversation, so turn history never snowballs; the
+  day brief stays the only cross-call context channel. Per-employee
+  override: `employee_leg[].fresh_session` (absent = inherit). Fresh
+  sessions are named `voice <employee> <ccid>` (distinct from the shared
+  `voice:<employee>:<number>` key, so they can never hijack it).
 - `max_concurrent_calls` - int
 - `reorder_window_frames` - int, default 10
 - `reorder_gap_ms` - int, default 60
@@ -801,8 +808,10 @@ local.tts_voice    ""
 local.barge_in_rms 3000             // s16 RMS threshold, local leg only
 local.name         ""               // session label; empty = hostname
 employee_leg       []                // per-agent defaults:
-  // {employee, leg, tts_voice, tts_model} so different employees default
-  // to different legs/voices with no tool arg (the concurrent-legs case)
+  // {employee, leg, tts_voice, tts_model, fresh_session?} so different employees default
+  // to different legs/voices with no tool arg (the concurrent-legs case);
+  // fresh_session (absent = inherit voice.fresh_session_per_call) picks
+  // per-employee session policy (secretary per-call, companion shared)
 ```
 
 Selection precedence (frozen, resolved in ONE place:
