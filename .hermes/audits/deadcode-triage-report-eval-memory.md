@@ -81,10 +81,10 @@ will activate).
 | HALO Phase 10 conversation sessions (DEFERRED-BY-PLAN, same doc :24,:149-155) | internal/eval/conversation_session.go + conversation_session_test.go | 36 | a85bbcf7 |
 | docs: stale 'Trace Analysis Evaluation (HALO)' section in docs/workflows/eval.md documented the deleted AnalysisSession type | docs/workflows/eval.md | — | 2f2be33c |
 | PersonalityStore cluster (never constructed; PersonalityMemory in same file KEPT - wired at manager.go:274) - surgical edit, not file delete | internal/memory/personality.go | 2 | dc8560e5* |
-| legacy Store (superseded by VectorShard/ShardManager) + private helpers (serialize/deserializeVector, cosineSimilarity, StoreConfig); SearchResult KEPT (consumed by wired VectorShard/ShardManager/SelectBalanced/bridges-eval) - surgical edit, not file delete; store_test.go KEPT (tests VectorShard, not Store) | internal/memory/vector/store.go | 10 | c22a25b0 |
+| legacy Store (superseded by VectorShard/ShardManager) + private helpers (serialize/deserializeVector, cosineSimilarity, StoreConfig); SearchResult KEPT (consumed by wired VectorShard/ShardManager/SelectBalanced/bridges-eval) - surgical edit, not file delete; store_test.go KEPT (tests VectorShard, not Store) | internal/memory/vector/store.go | 11 | c22a25b0 |
 | HuggingFace ModelDownloader (lazy-download path never implemented; UNCLAIMED) + its tests | internal/memory/vector/model_downloader.go + model_downloader_test.go | 9 | c22a25b0 |
 
-Total funcs deleted: 76 (19 + 36 + 2 + 10 + 9). Deleted lines: 747 + 1388 + 35(docs) + 37 + 979 = 3186.
+Total funcs deleted: 77 (19 + 36 + 2 + 11 + 9). Deleted lines: 747 + 1388 + 35(docs) + 37 + 979 = 3186.
 
 \* dc8560e5 is a sibling wave's multi-file commit ('pkg — delete tlsutil PinningVerifier...')
 that landed during this wave; the personality.go hunk in it is byte-identical to this
