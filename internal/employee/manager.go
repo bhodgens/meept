@@ -1198,7 +1198,11 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 	}
 
 	if len(knownTools) > 0 {
-		unknownAllowed, unknownForbidden := c.CheckToolReferences(knownTools)
+		// The "*" wildcard is a semantic "forbid everything" token, not a
+		// tool name: never report it as unknown (stripping it silently
+		// re-armed the full toolset on a talk-only employee - live defect
+		// 2026-11-09: a voice companion executed schedule_list mid-call).
+		unknownAllowed, unknownForbidden := c.CheckToolReferences(knownTools, "*")
 		if len(unknownAllowed) > 0 {
 			m.logger.Warn("hire: constitution references unknown tools in tools_allowed; removing",
 				"employee_id", req.ID, "tools", unknownAllowed)

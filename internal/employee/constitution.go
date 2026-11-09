@@ -554,20 +554,39 @@ func (c *Constitution) CheckEscalationReferences(knownAgentIDs map[string]struct
 // using tools.Registry.CanonicalNames() (or equivalent lowercased keys).
 //
 // knownToolNames is treated as a set; pass nil to skip the check.
-func (c *Constitution) CheckToolReferences(knownToolNames map[string]struct{}) (unknownAllowed, unknownForbidden []string) {
+// CheckToolReferences reports allowed/forbidden tool names that are not in
+// knownToolNames. reserved lists semantic wildcard tokens (e.g. "*" in
+// tools_forbidden = "deny every tool") that are never "unknown": hire-time
+// validation must preserve them, not strip them.
+func (c *Constitution) CheckToolReferences(knownToolNames map[string]struct{}, reserved ...string) (unknownAllowed, unknownForbidden []string) {
 	if c == nil {
 		return nil, nil
 	}
 	if knownToolNames == nil {
 		return nil, nil
 	}
+	isReserved := func(name string) bool {
+		canonical := canonicalToolName(name)
+		for _, r := range reserved {
+			if canonical == r {
+				return true
+			}
+		}
+		return false
+	}
 	for _, name := range c.Constraints.ToolsAllowed {
+		if isReserved(name) {
+			continue
+		}
 		canonical := canonicalToolName(name)
 		if _, ok := knownToolNames[canonical]; !ok {
 			unknownAllowed = append(unknownAllowed, name)
 		}
 	}
 	for _, name := range c.Constraints.ToolsForbidden {
+		if isReserved(name) {
+			continue
+		}
 		canonical := canonicalToolName(name)
 		if _, ok := knownToolNames[canonical]; !ok {
 			unknownForbidden = append(unknownForbidden, name)
