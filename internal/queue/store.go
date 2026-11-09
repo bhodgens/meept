@@ -523,6 +523,41 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 	return claimableJob, nil
 }
 
+// MarkProcessing promotes a claimed attempt to 'processing' — but only for
+// the writer that HOLDS the current claim token (contract C-Q1, audit M-1).
+// The CAS predicate (id + claim_token + state IN claimed/processing) closes
+// the requeue-vs-MarkProcessing race: a superseded or foreign attempt can
+// never flip the row forward, and neither can a token-less writer (an empty
+// token matches no row — claim_token is NULL or a minted token, never the
+// empty string).
+//
+// 0 rows affected means one of: the token is not the live attempt's, the row
+// left the claimed/processing window (requeued, completed, dead-lettered), or
+// the row is gone. All of them mean "my attempt lost the race", so the
+// caller-facing error is ErrJobStateLocked, symmetric with UpdateState's L8
+// terminal guard.
+func (s *Store) MarkProcessing(jobID, claimToken string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.Exec(`
+		UPDATE jobs SET state = 'processing', updated_at = ?
+		WHERE id = ? AND claim_token = ? AND state IN ('claimed', 'processing')`,
+		now, jobID, claimToken)
+	if err != nil {
+		return fmt.Errorf("failed to mark job processing: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read mark-processing rows affected: %w", err)
+	}
+	if affected == 0 {
+		s.logger.Warn("Refused MarkProcessing from a non-owner or superseded attempt",
+			"id", jobID)
+		return ErrJobStateLocked
+	}
+	return nil
+}
+
 // UpdateState updates a job's state.
 //
 // State guard (audit L8): the write is refused when the row is TERMINAL
@@ -532,9 +567,12 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 // own guard. Callers treat ErrJobStateLocked as "my attempt lost the race",
 // which is exactly what it is.
 //
-// Only UpdateState's single production caller (MarkProcessing) touches a
-// claimed/processing row, so the predicate stays general rather than pinning
-// the exact old state: any non-terminal state is updatable.
+// TOKEN-LESS / test-only surface since audit M-1 (leaf 01-queue/01): the
+// production path (PersistentQueue.MarkProcessing -> Store.MarkProcessing)
+// predicates on the claim token; this generic writer has no production
+// callers left and is kept solely for the pre-M-1 state-transition pins in
+// store_complete_guard_test.go. Do not wire new production callers here —
+// use MarkProcessing(jobID, claimToken) (C-Q1).
 func (s *Store) UpdateState(jobID string, state JobState) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec(`
