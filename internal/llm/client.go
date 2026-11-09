@@ -103,7 +103,6 @@ type Client struct {
 	httpClient    *http.Client
 	logger        *slog.Logger
 	metricsStore  *metrics.Store
-	timeoutCalc   *metrics.Calculator
 	tokenCache    ResponseCache
 	keyBuilder    *CacheKeyBuilder
 	semanticCache *SemanticCache
@@ -436,13 +435,6 @@ func WithSemanticCache(cache *SemanticCache) ClientOption {
 		if cache != nil {
 			c.semanticCache = cache
 		}
-	}
-}
-
-// WithTimeoutCalculator sets the adaptive timeout calculator for the client.
-func WithTimeoutCalculator(calc *metrics.Calculator) ClientOption {
-	return func(c *Client) {
-		c.timeoutCalc = calc
 	}
 }
 
@@ -818,18 +810,6 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		}
 	}
 
-	// Compute adaptive timeout if available (LLM-3 FIX: use per-request context timeout instead of mutating shared httpClient.Timeout)
-	if c.timeoutCalc != nil {
-		estimatedTokens := chatOpts.maxTokens
-		if estimatedTokens <= 0 {
-			estimatedTokens = 4096 // Safe default
-		}
-		timeout := c.timeoutCalc.Calculate(ctx, cfg.ProviderID, cfg.ModelID, estimatedTokens, defaultTimeout)
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
 	var lastErr error
 
 	// D4 (leaf 03): every failure classifies through the policy engine
@@ -852,7 +832,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			// Bughunt F12: the refused call still consumed tokens — ledger
 			// the provider-reported usage BEFORE surfacing the refusal.
 			if refusal, ok := errors.AsType[*RefusalError](err); ok {
-				c.recordUsageStore(refusalProviderOr(cfg.ProviderID, refusal), refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", time.Since(start).Milliseconds(), chatOpts)
+				c.recordUsageStore(refusalProviderOr(cfg.ProviderID, refusal), refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", time.Since(start).Milliseconds(), chatOpts, nil)
 				c.recordRefusalBudget(refusal, cfg, chatOpts)
 				return nil, err
 			}
@@ -902,7 +882,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 				// ledger a failure-shaped row so the burn is visible (the
 				// parser returns no usage on an empty body; the store's
 				// zero-completion row is the valid failure shape).
-				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, ErrEmptyResponse.Message, time.Since(start).Milliseconds(), chatOpts)
+				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, ErrEmptyResponse.Message, time.Since(start).Milliseconds(), chatOpts, nil)
 				return nil, err
 			}
 
@@ -1002,7 +982,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		}
 
 		// Per-provider/per-agent token accounting (metrics.db llm_calls).
-		c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, resp.Usage, false, "", time.Since(start).Milliseconds(), chatOpts)
+		c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, resp.Usage, false, "", time.Since(start).Milliseconds(), chatOpts, resp)
 
 		return resp, nil
 	}
@@ -1015,7 +995,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
-	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, allFailed.Message, time.Since(start).Milliseconds(), chatOpts)
+	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, allFailed.Message, time.Since(start).Milliseconds(), chatOpts, nil)
 	return nil, allFailed
 }
 
@@ -1094,18 +1074,6 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		}
 	}
 
-	// Compute adaptive timeout if available (mirrors Chat() logic)
-	if c.timeoutCalc != nil {
-		estimatedTokens := chatOpts.maxTokens
-		if estimatedTokens <= 0 {
-			estimatedTokens = 4096 // Safe default
-		}
-		timeout := c.timeoutCalc.Calculate(ctx, cfg.ProviderID, cfg.ModelID, estimatedTokens, defaultTimeout)
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
 	if len(chatOpts.tools) > 0 {
 		reportProgress(ProgressStageToolCall, fmt.Sprintf("Request includes %d tools", len(chatOpts.tools)))
 	}
@@ -1135,7 +1103,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			// Bughunt F12: ledger the refused call's provider-reported
 			// usage BEFORE surfacing the refusal.
 			if refusal, ok := errors.AsType[*RefusalError](err); ok {
-				c.recordUsageStore(refusalProviderOr(cfg.ProviderID, refusal), refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", time.Since(start).Milliseconds(), chatOpts)
+				c.recordUsageStore(refusalProviderOr(cfg.ProviderID, refusal), refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", time.Since(start).Milliseconds(), chatOpts, nil)
 				c.recordRefusalBudget(refusal, cfg, chatOpts)
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
@@ -1169,7 +1137,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 					continue
 				}
 				// L4: ledger the burned blank completions (see Chat loop).
-				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, ErrEmptyResponse.Message, time.Since(start).Milliseconds(), chatOpts)
+				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, ErrEmptyResponse.Message, time.Since(start).Milliseconds(), chatOpts, nil)
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
@@ -1280,7 +1248,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		reportProgress(ProgressStageDone, fmt.Sprintf("Complete: %d tokens", resp.Usage.TotalTokens))
 
 		// Per-provider/per-agent token accounting (metrics.db llm_calls).
-		c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, resp.Usage, false, "", time.Since(start).Milliseconds(), chatOpts)
+		c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, resp.Usage, false, "", time.Since(start).Milliseconds(), chatOpts, resp)
 
 		return resp, nil
 	}
@@ -1290,7 +1258,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		Message: fmt.Sprintf("All %d attempts failed", shortRetries),
 		Cause:   lastErr,
 	}
-	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, allFailed.Message, time.Since(start).Milliseconds(), chatOpts)
+	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, allFailed.Message, time.Since(start).Milliseconds(), chatOpts, nil)
 	return nil, allFailed
 }
 
@@ -2245,12 +2213,20 @@ func ttftMS(chatOpts *chatOptions) int64 {
 // the shared trace. With no trace the span still mints (a record can carry
 // span-only identity); both fields are "" in the pre-leaf posture only when
 // the caller passes neither.
-func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string, usage TokenUsage, isErr bool, errMsg string, latencyMs int64, chatOpts *chatOptions) {
+func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string, usage TokenUsage, isErr bool, errMsg string, latencyMs int64, chatOpts *chatOptions, resp *Response) {
 	traceID, spanID := traceScopeOf(chatOpts)
 	// TTFT (llm-serving-tiers leaf 04): captured from the request-scoped
 	// first-delta state; -1 on non-streaming calls, cache hits, and
 	// errors (nothing armed the clock or no delta ever arrived).
 	ttftMs := ttftMS(chatOpts)
+	// Serving-tier attribution (llm-serving-tiers TIER-1): the three
+	// llm_tier* metadata keys stampMetadata wrote on the completed
+	// response (same two-value assertions as loop.go's
+	// tierMetadataFromResponse). No metadata = tier feature off / error
+	// path: the record keeps the disabled-path defaults ("" / false /
+	// -1), which is also what the schema's NOT NULL DEFAULTs backfill on
+	// legacy rows.
+	tier, tierDegraded, tierDepth := tierMetadataFromResponse(resp)
 	observer := c.llmCallObserverFn()
 	if c.usageStore == nil && observer == nil {
 		return
@@ -2271,6 +2247,9 @@ func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string
 			ErrorMessage:    errMsg,
 			LatencyMs:       latencyMs,
 			TTFTMS:          ttftMs,
+			LLMTier:         tier,
+			LLMTierDegraded: tierDegraded,
+			LLMTierDepth:    tierDepth,
 			TraceID:         traceID,
 			SpanID:          spanID,
 		}
@@ -2281,6 +2260,29 @@ func (c *Client) recordUsageStore(providerID, modelID, agentID, sessionID string
 			observer(record)
 		}
 	}()
+}
+
+// tierMetadataFromResponse extracts the serving-tier signaling keys
+// (Contract C3) from a completed response's metadata map, mirroring the
+// agent loop's helper of the same name. Nil response / nil metadata (tier
+// feature off, error paths) yields the disabled-path defaults: "" / false
+// / -1 — the -1 depth sentinel means "no tier signal", distinct from a
+// tier-enabled primary call's 0.
+func tierMetadataFromResponse(resp *Response) (tier string, degraded bool, depth int) {
+	depth = -1
+	if resp == nil || resp.Metadata == nil {
+		return "", false, depth
+	}
+	if v, ok := resp.Metadata[MetaKeyLLMTier].(string); ok {
+		tier = v
+	}
+	if v, ok := resp.Metadata[MetaKeyLLMTierDegraded].(bool); ok {
+		degraded = v
+	}
+	if v, ok := resp.Metadata[MetaKeyLLMTierDepth].(int); ok {
+		depth = v
+	}
+	return tier, degraded, depth
 }
 
 // traceScopeOf resolves the record's trace/span stamps from the request's
@@ -2640,7 +2642,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 
 			// Per-provider/per-agent token accounting (metrics.db llm_calls).
 			if resp != nil {
-				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, resp.Usage, false, "", time.Since(start).Milliseconds(), chatOpts)
+				c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, resp.Usage, false, "", time.Since(start).Milliseconds(), chatOpts, resp)
 				// Cache store (leaf 04, wiring-followups-final): the
 				// exact-key Put then the semantic tier, identical shape
 				// to the ChatWithProgress() success site. Tool-call
@@ -2665,7 +2667,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		// BEFORE surfacing the refusal. (The duplicated branch below was
 		// collapsed into this one — identical semantics.)
 		if refusal, ok := errors.AsType[*RefusalError](err); ok {
-			c.recordUsageStore(refusalProviderOr(cfg.ProviderID, refusal), refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", time.Since(start).Milliseconds(), chatOpts)
+			c.recordUsageStore(refusalProviderOr(cfg.ProviderID, refusal), refusal.ModelID, chatOpts.agentID, chatOpts.sessionID, refusal.Usage, true, "model refusal", time.Since(start).Milliseconds(), chatOpts, nil)
 			c.recordRefusalBudget(refusal, cfg, chatOpts)
 			return nil, err
 		}
@@ -2716,7 +2718,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 			// invisible unless the ledger records a failure-shaped row
 			// (the streaming site has no parsed usage to attach; the
 			// store schema's zero-value row is valid for consumers).
-			c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, ErrEmptyResponse.Message, time.Since(start).Milliseconds(), chatOpts)
+			c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, ErrEmptyResponse.Message, time.Since(start).Milliseconds(), chatOpts, nil)
 			return nil, err
 		}
 
@@ -2801,7 +2803,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		Message: fmt.Sprintf("streaming failed after %d attempts", shortRetries),
 		Cause:   lastErr,
 	}
-	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, streamFailed.Message, time.Since(start).Milliseconds(), chatOpts)
+	c.recordUsageStore(cfg.ProviderID, cfg.ModelID, chatOpts.agentID, chatOpts.sessionID, TokenUsage{}, true, streamFailed.Message, time.Since(start).Milliseconds(), chatOpts, nil)
 	return nil, streamFailed
 }
 
