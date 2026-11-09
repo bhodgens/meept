@@ -22,7 +22,6 @@ func TestReadOnlyTools(t *testing.T) {
 		{"WebFetchTool", &WebFetchTool{}},
 		{"ScheduleListTool", &ScheduleListTool{}},
 		{"ScheduleGetTool", &ScheduleGetTool{}},
-		{"RecallTool", &RecallTool{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,8 +89,6 @@ func TestDefaultToolsNotReadOnly(t *testing.T) {
 	}{
 		{"TaskCreateTool", &TaskCreateTool{}},
 		{"RememberTool", &RememberTool{}},
-		{"RetainTool", &RetainTool{}},
-		{"ReflectTool", &ReflectTool{}},
 		{"GitCommitTool", &GitCommitTool{}},
 	}
 	for _, tt := range tests {
