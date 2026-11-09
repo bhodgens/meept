@@ -108,6 +108,6 @@
 | 02 | DONE | | |
 | 03 | DONE | | |
 | 04 | DONE | | |
-| 05 | PENDING | |
+| 05 | DONE (docs wave C; e2e 29/30, lone FAIL pre-existing on main) | |
 
 Statuses: PENDING -> IN_PROGRESS -> REVIEWED -> DONE | BLOCKED.
