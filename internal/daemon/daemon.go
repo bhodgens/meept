@@ -2488,6 +2488,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 			} else if count > 0 {
 				d.logger.Info("daemon: reclaimed crash-orphaned queue jobs from previous run", "count", count)
 			}
+			// Stranded-state sweeper (audit 2026-11-09 M-2/M-3, leaf
+			// 01-queue/03): periodically revisits failed rows with an
+			// exhausted retry budget and dead rows stranded in jobs
+			// (moveToDead failure path). Runs on the daemon ctx; package
+			// defaults (15m interval / 1h cutoff) apply.
+			pq.Store().StartSweeper(ctx, 0, 0)
 		}
 	}
 
