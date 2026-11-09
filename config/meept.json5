@@ -1344,6 +1344,7 @@
     "onnx_runtime_lib": "",                 // optional ONNX runtime library override
     "stt_provider": "",                     // STT provider for call audio
     "tts_provider": "",                     // TTS provider for call audio
+    "greeting": "",                          // fact-free line spoken once on connect; empty = first filler line; an empty filler list disables the greeting
     "filler": ["Hold on, let me check."],   // spoken filler lines while working
     "supervisor_employee": "",              // employee id supervising calls
     "supervisor_enabled": true,             // run the call supervisor

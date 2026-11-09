@@ -41,6 +41,20 @@ func TestStripThinkingExported(t *testing.T) {
 			input: "",
 			want:  "",
 		},
+		{
+			// Live defect 2026-11-09 voice path: llama.cpp consumed the
+			// opening tag, the chain-of-thought plus a lone closing tag
+			// leaked into content, and the talk loop spoke it to the
+			// caller's speaker before the real reply followed.
+			name:  "openless leak: text before a lone closing tag drops",
+			input: "\nWe need to understand what the user is asking. Thus we ask.\n</think>\nCould you clarify what you would like?",
+			want:  "Could you clarify what you would like?",
+		},
+		{
+			name:  "mid-text openless closer keeps only following text",
+			input: "Preamble reasoning here.</think>Real answer.",
+			want:  "Real answer.",
+		},
 	}
 
 	for _, tt := range tests {

@@ -652,7 +652,7 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			Logger:  w.logger.With("sub", "talk", "ccid", f.CallID),
 		}, voice.TalkLoopConfig{
 			FillerLines:          w.cfg.Filler,
-			GreetingLine:         greetingFromFiller(w.cfg.Filler),
+			GreetingLine:         w.cfg.GreetingLine,
 			FallbackLine:         "I cannot confirm that yet.",
 			MaxCallMinutes:       w.cfg.MaxCallMinutes,
 			SilencePromptSeconds: w.cfg.SilencePromptSeconds,
@@ -1207,16 +1207,6 @@ func (s rawFrameSender) Send(raw []byte) error {
 		return fmt.Errorf("voice wiring: decode frame for child: %w", err)
 	}
 	return s.srv.Send(f)
-}
-
-// greetingFromFiller derives the greeting line from the filler list (the
-// greeting is filler-class; an empty list disables the greeting rather than
-// hardcoding one).
-func greetingFromFiller(filler []string) string {
-	if len(filler) > 0 {
-		return filler[0]
-	}
-	return ""
 }
 
 // agentIDFromContext resolves the calling employee's id from the tool
