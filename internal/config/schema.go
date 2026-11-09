@@ -4989,6 +4989,7 @@ func DefaultConfig() *Config {
 			ReorderGapMs:         60,
 			DefaultLeg:           "phone",
 			Local:                LocalConfig{Enabled: false, BargeInRms: 3000},
+			Messaging:            MessagingConfig{Enabled: false, FromNumber: "", ProfileID: "", DLRWaitSeconds: 30},
 		},
 		Contact: ContactConfig{
 			DefaultChannels: []string{"telnyx_voice", "signal_voice", "signal_msg", "telnyx_sms"},
@@ -5047,6 +5048,8 @@ func DefaultConfig() *Config {
 			IdleStopSeconds:     0,
 			RestartBackoffMs:    0,
 			RestartMaxBackoffMs: 0,
+			MsgPerMinute:        3,
+			AllowedUUIDs:        nil,
 		},
 	}
 }
@@ -5340,6 +5343,33 @@ type VoiceConfig struct {
 	STTBaseURL           string              `json:"stt_base_url"           toml:"stt_base_url"`
 	Local                LocalConfig         `json:"local"                  toml:"local"`
 	EmployeeLeg          []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
+	Messaging            MessagingConfig     `json:"messaging"              toml:"messaging"`
+}
+
+// MessagingConfig holds the Telnyx SMS messaging settings
+// ([voice.messaging], contact-channels plan leaf 12 T5). Same Telnyx
+// account as Call Control (one API key via the secrets Broker); the
+// from number must carry a Messaging Profile (ProfileID). Enabled is
+// false by default: a disabled block refuses every SMS attempt with
+// ErrMessagingDisabled BEFORE any HTTP call. DLRWaitSeconds is the
+// bounded wait for message.finalized before an attempt reports
+// unavailable (default 30).
+//
+// Ops note (documented, not coded): application-to-person traffic from
+// local numbers requires 10DLC brand+campaign registration (days to
+// weeks); the toll-free-verified path is recommended for this use case.
+type MessagingConfig struct {
+	// Enabled gates the whole messaging block; false (the default)
+	// refuses every attempt before any HTTP call.
+	Enabled bool `json:"enabled"          toml:"enabled"`
+	// FromNumber is the E.164 sender number (must be bound to the
+	// Messaging Profile in the Telnyx console).
+	FromNumber string `json:"from_number"      toml:"from_number"`
+	// ProfileID is the Telnyx Messaging Profile id sent on every send.
+	ProfileID string `json:"profile_id"       toml:"profile_id"`
+	// DLRWaitSeconds bounds the wait for message.finalized; 0 inherits
+	// the telnyx.DefaultDLRWaitSeconds (30) at adapter construction.
+	DLRWaitSeconds int `json:"dlr_wait_seconds" toml:"dlr_wait_seconds"`
 }
 
 // EmployeeLegConfig is one per-agent voice routing default (voice tree
@@ -5605,4 +5635,12 @@ type SignalConfig struct {
 	// RestartMaxBackoffMs caps the restart backoff (0 = default
 	// 30000ms).
 	RestartMaxBackoffMs int `json:"restart_max_backoff_ms" toml:"restart_max_backoff_ms"`
+	// MsgPerMinute throttles OUTBOUND signal messages (the signal_msg
+	// contact channel's token bucket, leaf 11b). 0 = default 3.
+	MsgPerMinute int `json:"msg_per_minute" toml:"msg_per_minute"`
+	// AllowedUUIDs is the outbound/inbound Signal UUID allowlist both
+	// signal channels consume (mirror of voice.allowed_numbers
+	// posture). Empty = deny all (fail-closed; the wiring leaf decides
+	// the disabled-posture default).
+	AllowedUUIDs []string `json:"allowed_uuids" toml:"allowed_uuids"`
 }

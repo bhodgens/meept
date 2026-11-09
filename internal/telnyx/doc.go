@@ -1,11 +1,13 @@
 // Package telnyx is the Telnyx messaging (SMS) client (contact-channels
-// plan, contract C5, owner leaf 12). The webhook receiver half lives in
-// internal/comm/http and reuses the existing Ed25519 telnyx-signature
-// verifier - never a second one.
+// plan, contract C5, leaf 12): the send client (messaging.go), the
+// webhook payload parser, the telnyx_sms contact.ChannelAttempt adapter
+// with its bounded DLR pending map (sms_attempt.go), and the named
+// sentinels (ErrInvalidE164, ErrMessagingDisabled, ErrUnknownMessage).
 //
-// GATE PLACEHOLDER (00T-gate-tests.md): this file exists ONLY so the
-// package directory has a non-test Go file and `go build ./...` stays
-// green while the RED unit test (messaging_test.go) fails on undefined
-// symbols. It declares no symbols and will be replaced by the leaf-12
-// implementation (messaging.go). No implementation code lives here.
+// The webhook receiver half lives in internal/comm/http
+// (MessagingRoutes) and reuses the existing Ed25519 telnyx-signature
+// verifier from internal/voice/telnyx (VerifyWebhookSignature) through
+// its injected Verify seam - never a second one.
+//
+// The API key is never logged and never appears in error text.
 package telnyx

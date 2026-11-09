@@ -72,6 +72,11 @@ type VoiceWiring struct {
 	// voice.local.enabled is false - leaf 08's RPC refuses opens on nil
 	// with the disabled-leg error.
 	Local *voice.LocalLeg
+	// Signal is the armed Signal voice leg + its sidecar supervisor
+	// (contact-channels leaf 11a T6). Nil when [signal].enabled is
+	// false (clean disabled boot) OR the sidecar failed to arm (the
+	// degrade posture: Signal call paths stay refused, boot proceeds).
+	Signal *WireSignalLegResult
 
 	// supervisor is the C6 gate shared by all talk loops.
 	supervisor voice.Supervisor
@@ -469,6 +474,24 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		})
 		w.Local = local
 		vlog.Info("voice wiring: local leg armed", "label", cfg.Local.Name)
+	}
+
+	// -- 7c. Signal leg (contact-channels leaf 11a T6): constructed when
+	// [signal].enabled; nil otherwise (the disabled boot is clean - no
+	// Leg, no supervisor, no warnings beyond the wiring's info line).
+	// The leg rides the SAME registry/manager/text-server/binding as the
+	// phone+local legs (one child, one registry, one call store), and
+	// carries its own supervised signal-cli sidecar. Degrade posture
+	// mirrors the phone leg's secrets gate: an unarmed sidecar logs a
+	// loud WARN and leaves Signal call paths refused; the boot proceeds.
+	if deps.Config.Signal.Enabled {
+		sigRes, serr := WireSignalLeg(ctx, deps.Config.Signal, deps, registry, manager, textServer, employee.Binding, vlog.With("sub", "signal"))
+		if serr != nil {
+			return nil, fmt.Errorf("voice wiring: signal leg: %w", serr)
+		}
+		if sigRes != nil {
+			w.Signal = sigRes
+		}
 	}
 
 	// -- 8. Release-hook fan-out (the leaf's once-per-outcome contract).
@@ -1033,13 +1056,17 @@ func (w *VoiceWiring) agentIDForTool() builtin.AgentIDFunc {
 
 // Stop tears the stack down in dependency order: child FIRST (it holds the
 // text socket connection), then the text server listener, then the call
-// store. Loop goroutines exit with the daemon lifecycle context.
+// store. Loop goroutines exit with the daemon lifecycle context. The
+// Signal sidecar stops before the text server (its client holds a
+// signal-cli socket conn, not the C1 socket - but the order keeps the
+// leg's call paths quiesced before the shared transport closes).
 func (w *VoiceWiring) Stop(ctx context.Context) {
 	if w == nil {
 		return
 	}
 	stopCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	StopSignalLeg(stopCtx, w.Signal)
 	if err := w.ChildProc.Stop(stopCtx); err != nil {
 		w.logger.Warn("voice wiring: child stop", "error", err)
 	}

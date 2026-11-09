@@ -215,13 +215,15 @@ type Server struct {
 	slackInteractions http.Handler
 	// Notification handler (optional)
 	// voiceRoutes serves the two Telnyx endpoints (POST /api/v1/voice/
-	// webhook, GET media websocket; voice-sidecar leaf 10). Registered only
-	// when the daemon wires it via WithVoiceRoutes (voice.enabled + a
-	// telnyx public key); exempt from bearer auth (Telnyx cannot send a
-	// meept API key - the mandatory Ed25519 signatures are the credential,
+	// webhook, GET media websocket; voice-sidecar leaf 10) plus the SMS
+	// messaging webhook (contact-channels leaf 12). Registered only when
+	// the daemon wires it via WithVoiceRoutes (voice.enabled + a telnyx
+	// public key); exempt from bearer auth (Telnyx cannot send a meept
+	// API key - the mandatory Ed25519 signatures are the credential,
 	// enforced inside the handlers; key-unset fail-closes to 503).
-	voiceRoutes  *VoiceRoutes
-	notifHandler *NotificationHandler
+	voiceRoutes     *VoiceRoutes
+	messagingRoutes *MessagingRoutes
+	notifHandler    *NotificationHandler
 	// PTY session handler (optional, set via WithPTY)
 	ptyHandler *PTYHandler
 	// Instructions handler (optional, set via WithInstructions)
@@ -1163,6 +1165,21 @@ func WithVoiceRoutes(v *VoiceRoutes) ServerOption {
 	}
 }
 
+// WithMessagingRoutes enables the Telnyx SMS messaging webhook
+// (contact-channels leaf 12). The route shares the voice routes'
+// bearer-auth exemption (it lives under the /api/v1/voice/ prefix) and
+// is gated by mandatory Ed25519 signature verification inside the
+// handler: a bad signature is a 401 before the body is parsed. A nil
+// verifier is a construction error at NewMessagingRoutes - the route is
+// never registered signature-optional.
+func WithMessagingRoutes(m *MessagingRoutes) ServerOption {
+	return func(s *Server) {
+		if m != nil {
+			s.messagingRoutes = m
+		}
+	}
+}
+
 func WithAgentHandlers(h RouteRegistrar) ServerOption {
 	return func(s *Server) {
 		if h != nil {
@@ -2031,6 +2048,15 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			// fail-closes to 503 inside the handlers. Rate limiting still
 			// applies (the handlers run under the ordinary chain).
 			s.voiceRoutes.serveVoiceRoute(lrw, r)
+			return
+		}
+
+		if s.messagingRoutes != nil && s.messagingRoutes.HandlesPath(r.URL.Path) {
+			// Telnyx SMS messaging webhook (contact-channels leaf 12):
+			// same posture - the mandatory Ed25519 signature verified
+			// inside the handler is the credential; a bad signature is a
+			// 401 before the body is parsed.
+			s.messagingRoutes.serveMessagingRoute(lrw, r)
 			return
 		}
 

@@ -554,9 +554,13 @@ func (d *Dialer) finishCall(ccid string) {
 
 // Leg values for Instance.Leg (CL6). The zero value of Leg is the phone
 // leg, so existing Instance composite literals stay valid untouched.
+// LegSignal is the Signal voice leg (C4): targets look like
+// "signal:<uuid>" and NormalizeE164 NEVER runs on them (AcquireLeg
+// normalizes only leg "phone", the same rule local:<label> rides).
 const (
-	LegPhone = "phone"
-	LegLocal = "local"
+	LegPhone  = "phone"
+	LegLocal  = "local"
+	LegSignal = "signal"
 )
 
 // Instance is one live voice instance: the registry's unit of capacity.

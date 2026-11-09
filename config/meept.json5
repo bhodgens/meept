@@ -1380,6 +1380,12 @@
     "employee_leg": [],                     // per-agent routing defaults; entry {employee, leg: "phone"|"local", tts_voice, tts_model}; beats per-leg config, beats provider default
     "child_binary_path": "",                // empty = daemon-adjacent lookup
     "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
+    "messaging": {                          // Telnyx SMS messaging (contact channels); disabled by default
+      "enabled": false,                     // master switch; disabled = every SMS attempt refused before any HTTP
+      "from_number": "",                    // sender number (E.164), bound to the messaging profile
+      "profile_id": "",                     // Telnyx Messaging Profile id
+      "dlr_wait_seconds": 30                // bounded wait for message.finalized before an attempt reports unavailable
+    },
   },
 
   // Employee contact chain ([contact]). The ordered fallback used when a
