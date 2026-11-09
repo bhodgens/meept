@@ -21,24 +21,33 @@ type KeywordResult struct {
 	RelevanceScore float64
 }
 
+// VectorSearcher is the vector-search seam the HybridSearcher needs. The
+// legacy *Store that satisfied it structurally was removed as dead code;
+// the wired *ShardManagerVectorSearcher (internal/memory/vector_searcher.go)
+// satisfies this shape and is the intended production implementation when
+// hybrid search gets wired (docs/plans/2026-06-07-sharded-vector-memory.md).
+type VectorSearcher interface {
+	Search(ctx context.Context, query string, limit int) ([]SearchResult, error)
+}
+
 // HybridSearcher combines keyword (FTS) and vector similarity search.
 type HybridSearcher struct {
-	vectorStore     *Store
+	vectorSearcher  VectorSearcher
 	keywordSearcher KeywordSearcher
 	alpha           float64 // Weight for vector similarity (0-1)
 }
 
 // HybridSearcherConfig holds configuration for the hybrid searcher.
 type HybridSearcherConfig struct {
-	VectorStore     *Store
+	VectorSearcher  VectorSearcher
 	KeywordSearcher KeywordSearcher
 	Alpha           float64 // Weight for vector similarity: 0 = pure keyword, 1 = pure vector
 }
 
 // NewHybridSearcher creates a new hybrid searcher.
 func NewHybridSearcher(cfg HybridSearcherConfig) (*HybridSearcher, error) {
-	if cfg.VectorStore == nil {
-		return nil, fmt.Errorf("vector store is required")
+	if cfg.VectorSearcher == nil {
+		return nil, fmt.Errorf("vector searcher is required")
 	}
 	if cfg.KeywordSearcher == nil {
 		return nil, fmt.Errorf("keyword searcher is required")
@@ -48,7 +57,7 @@ func NewHybridSearcher(cfg HybridSearcherConfig) (*HybridSearcher, error) {
 	}
 
 	return &HybridSearcher{
-		vectorStore:     cfg.VectorStore,
+		vectorSearcher:  cfg.VectorSearcher,
 		keywordSearcher: cfg.KeywordSearcher,
 		alpha:           cfg.Alpha,
 	}, nil
@@ -73,7 +82,7 @@ func (h *HybridSearcher) Search(ctx context.Context, query string, limit int) ([
 	}
 
 	// Get vector search results
-	vectorResults, err := h.vectorStore.Search(ctx, query, limit*2)
+	vectorResults, err := h.vectorSearcher.Search(ctx, query, limit*2)
 	if err != nil {
 		vectorResults = []SearchResult{}
 	}
@@ -157,7 +166,7 @@ func (h *HybridSearcher) Search(ctx context.Context, query string, limit int) ([
 
 // SemanticOnly performs vector-only semantic search.
 func (h *HybridSearcher) SemanticOnly(ctx context.Context, query string, limit int) ([]SearchResult, error) {
-	return h.vectorStore.Search(ctx, query, limit)
+	return h.vectorSearcher.Search(ctx, query, limit)
 }
 
 // KeywordOnly performs keyword-only search (FTS).

@@ -42,7 +42,8 @@ type SentenceTransformerConfig struct {
 	ModelID string
 
 	// ModelDir is the local directory containing the model files.
-	// If empty, the model will be downloaded using NewModelDownloader.
+	// If empty, resolves to the per-installation model cache directory
+	// (~/.meept/models/<model-id>) on first use.
 	ModelDir string
 
 	// ONNXPath is an explicit path to the model.onnx file.
@@ -64,8 +65,9 @@ type SentenceTransformerConfig struct {
 
 // NewSentenceTransformerProvider creates a new sentence transformer embedding provider.
 //
-// If ModelDir is empty and ModelID is known, DownloadModel is called to fetch
-// the model from HuggingFace and store it in the cache directory.
+// If ModelDir is empty, the model directory resolves to the
+// per-installation model cache on first use (no lazy download is
+// performed — the HuggingFace downloader path was removed as dead code).
 func NewSentenceTransformerProvider(cfg SentenceTransformerConfig) (*sentenceTransformerProvider, error) {
 	p := &sentenceTransformerProvider{
 		logger:        cfg.Logger,
