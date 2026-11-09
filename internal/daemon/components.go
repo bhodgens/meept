@@ -5653,6 +5653,19 @@ func (c *Components) Start(ctx context.Context) error {
 					return call.CallID, call.SessionID, nil
 				})
 			}
+			// Contact chain (leaf 02): assemble the fallback chain over
+			// the live wiring and arm the tool seam before registration.
+			// Degrade posture: a build failure logs + leaves the contact
+			// tool unregistered (opt-in, never a boot failure).
+			if c.Config.Contact.DefaultChannels != nil {
+				chain, cerr := BuildContactChain(c.Config, c.Voice, c.EffectsLedger, c.Voice.auditStore, c.SecretBroker.Value, c.Logger)
+				if cerr != nil {
+					c.Logger.Warn("contact chain degraded: contact tool unregistered", "error", cerr)
+				} else {
+					c.Voice.Contact = chain
+					builtin.SetContactChain(chain)
+				}
+			}
 			names := enabledToolProviderNames(c.Config, []string{"voice"}, c.Logger)
 			if len(names) == 0 {
 				c.Logger.Debug("voice provider disabled by [tool_providers]; no voice_call tool registered")
