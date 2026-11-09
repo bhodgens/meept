@@ -72,6 +72,7 @@ func newAgentsCmd() *cobra.Command {
 	cmd.AddCommand(newAgentsGoalCreateCmd())
 	cmd.AddCommand(newAgentsSetGateCmd())
 	cmd.AddCommand(newAgentsAuditCmd())
+	cmd.AddCommand(newAgentsChildrenCmd())
 
 	return cmd
 }

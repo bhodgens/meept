@@ -82,6 +82,9 @@ func (p *delegateProvider) Discover() []tools.Tool {
 		// workflow: the confined, model-authored orchestration tool (contract
 		// C3). It fans out through the controller's C1 DelegateManager.
 		NewWorkflowTool(p.ctrl),
+		// workflow_status: background wf-job status (leaf 07) — reads the
+		// same controller's bounded job registry. Read-only.
+		NewWorkflowStatusTool(p.ctrl),
 	}
 }
 

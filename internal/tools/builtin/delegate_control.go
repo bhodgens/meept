@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/agent"
@@ -39,6 +40,17 @@ type DelegateController struct {
 	// settlement on (DSH-8 delivery). Nil = no publish; the engine's channel
 	// seam still delivers the run.
 	completionBus workflowBus
+	// jobMu guards the wf-job registry (workflow_status tool surface, leaf
+	// 07-workflow-status): jobID -> engine, bounded by workflowJobRegistryCap
+	// (oldest evicted). This is the ONLY handle by which a background job id
+	// stays answerable to the model after the tool call that started it
+	// returned.
+	jobMu    sync.Mutex
+	jobOrder []string
+	jobReg   map[string]*WorkflowEngine
+	// settledCache holds the first-observed settlement per job (the engine
+	// seam is single-consumption; this makes status idempotent).
+	settledCache map[string]jobStatusView
 }
 
 // NewDelegateController constructs the controller. A nil manager, dispatcher
