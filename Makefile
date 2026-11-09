@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui build-gui-dist test test-verbose test-cover test-race test-record test-efficacy bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install install-cli install-desktop setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-voice build-gui build-gui-dist test test-verbose test-cover test-race test-record test-efficacy bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install install-cli install-desktop setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -105,6 +105,7 @@ MEEPT_HOME ?= $(HOME)/.meept
 BIN_DIR := bin
 DAEMON := $(BIN_DIR)/meept-daemon
 CLI := $(BIN_DIR)/meept
+VOICE := $(BIN_DIR)/meept-voice
 
 # Install destinations.
 #
@@ -428,7 +429,7 @@ endif
 
 build: build-all
 
-build-all: build-daemon build-cli build-gendoc build-gui build-lite graphs
+build-all: build-daemon build-cli build-voice build-gendoc build-gui build-lite graphs
 	@echo ""
 	@echo "Build complete:"
 	@ls -lh $(BIN_DIR)/
@@ -444,6 +445,19 @@ build-cli:
 	@echo "Building CLI..."
 	go build $(GO_BUILD_FLAGS) -o $(CLI) ./cmd/meept
 	@echo "Built $(CLI) ($$(du -h $(CLI) | cut -f1))"
+
+# build-voice: the jargo voice child (phone sidecar). Headless Go binary —
+# installed by install-bin alongside daemon/CLI/lite (and therefore by both
+# install-cli and install): the voice child is part of the daemon's runtime
+# surface, not a desktop client, so the daemon/CLI-vs-desktop split keeps it
+# on the headless side. The local leg (`meept voice local`) also needs the
+# daemon (not this child) to own it — the child is spawned by the daemon and
+# must exist wherever meept-daemon runs.
+build-voice:
+	@mkdir -p $(BIN_DIR)
+	@echo "Building voice child..."
+	go build $(GO_BUILD_FLAGS) -o $(VOICE) ./cmd/meept-voice
+	@echo "Built $(VOICE) ($$(du -h $(VOICE) | cut -f1))"
 
 build-gendoc:
 	@mkdir -p $(BIN_DIR)
@@ -473,13 +487,14 @@ install-install-order:
 	@$(MAKE) deps-llama-check
 	@$(MAKE) gui-connect-setup
 	@$(MAKE) build-lite
+	@$(MAKE) build-voice
 	@$(MAKE) build menubar-app build-gui
 
 # -----------------------------------------------------------------------------
 # Component install targets. Each copies an already-built component to its
 # destination (honoring DESTDIR staging); none of them build.
 #
-#   install-bin      meept, meept-daemon, meept-lite  -> $(DESTDIR)$(BINDIR)
+#   install-bin      meept, meept-daemon, meept-lite, meept-voice -> $(DESTDIR)$(BINDIR)
 #   install-config   config templates + sync          -> $(MEEPT_HOME) (never staged)
 #   install-gui      Meept Client GUI.app             -> $(DESTDIR)$(APPSDIR)
 #   install-menubar  MeeptMenuBar.app                 -> $(DESTDIR)$(APPSDIR)
@@ -494,7 +509,7 @@ install-install-order:
 .PHONY: install-bin
 install-bin:
 	@mkdir -p $(DESTDIR)$(BINDIR)
-	@for b in meept meept-daemon meept-lite; do \
+	@for b in meept meept-daemon meept-lite meept-voice; do \
 		if [ -f $(BIN_DIR)/$$b ]; then \
 			install -m 755 $(BIN_DIR)/$$b $(DESTDIR)$(BINDIR)/$$b; \
 			echo "  installed $(DESTDIR)$(BINDIR)/$$b"; \

@@ -144,8 +144,14 @@ func (d *fakeDaemon) waitFrame(t *testing.T) voiceframe.Frame {
 	t.Helper()
 	select {
 	case <-d.frameSignal:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("timed out waiting for child frame")
+	case <-time.After(testPollDeadline):
+		d.mu.Lock()
+		evs := make([]string, len(d.queue))
+		for i, f := range d.queue {
+			evs[i] = f.Event
+		}
+		d.mu.Unlock()
+		t.Fatalf("timed out waiting for child frame after %s; queue=%v", testPollDeadline, evs)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -690,15 +696,27 @@ func lastPtr(v bool) *bool { return &v } //nolint:modernize // newexpr suggests 
 
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testPollDeadline)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("condition not met within timeout")
+	t.Fatalf("condition not met within %s", testPollDeadline)
 }
+
+// testPollDeadline is the load-tolerant deadline for the voicechild test
+// helpers (audit VLC-1/VS-3). The polls wait on real goroutine progress
+// (playback state flips, socket bytes, queued frames) — progress the
+// production pacer and scheduler deliver in microseconds when idle but
+// seconds-scale jitter under full-package or -p 2 host load, where the
+// old 5s windows flaked rotatingly ("documented host-bound REDs"; each
+// failure passed isolated). The window is generous against LOAD, not
+// against a broken property: a genuinely broken path still waits on an
+// event that can never fire and fails at the deadline, so 30s fails
+// nothing a 5s window would have caught.
+const testPollDeadline = 30 * time.Second
 
 // isSpeaking reports whether the pipeline has playback active.
 func (p *pipeline) isSpeaking() bool {

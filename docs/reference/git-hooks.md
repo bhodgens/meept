@@ -121,6 +121,9 @@ git config core.hooksPath .githooks
 | `internal/selfimprove/` | `docs/workflows/self-improvement.md` |
 | `internal/project/` | `docs/workflows/project-context.md` |
 | `internal/daemon/` | `docs/concepts/architecture.md` |
+| `internal/voice/` | `docs/workflows/voice.md` |
+| `internal/voicechild/` | `docs/workflows/voicechild.md` |
+| `cmd/meept-voice/` | `docs/workflows/voicechild.md` |
 
 **Aider Integration:**
 

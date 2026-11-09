@@ -16,6 +16,9 @@ func Build() error {
 	if err := BuildCLI(); err != nil {
 		return err
 	}
+	if err := BuildVoice(); err != nil {
+		return err
+	}
 	if err := BuildGendoc(); err != nil {
 		return err
 	}
@@ -36,6 +39,12 @@ func BuildDaemon() error {
 func BuildCLI() error {
 	fmt.Println("Building meept CLI...")
 	return goBuild("./cmd/meept", "bin/meept")
+}
+
+// BuildVoice builds the meept-voice child binary (jargo voice sidecar)
+func BuildVoice() error {
+	fmt.Println("Building meept-voice...")
+	return goBuild("./cmd/meept-voice", "bin/meept-voice")
 }
 
 // BuildGendoc builds the gendoc documentation generator

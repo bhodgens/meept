@@ -29,6 +29,10 @@ import (
 	"github.com/caimlas/meept/internal/voiceframe"
 )
 
+// rmsBargeInTestDeadline is this file's local alias for the shared
+// load-tolerant poll deadline (audit VLC-1/VS-3, see child_test.go).
+const rmsBargeInTestDeadline = testPollDeadline
+
 // loudSample/quietSample: little-endian int16 sample bytes for the chunked
 // TTS. 8000 is far above the 3000 test threshold; 100 is far below it.
 // callerSample is the loud INCOMING mic level: above the 8000 outgoing
@@ -139,9 +143,13 @@ func newRMSChild(t *testing.T, ccid string, local bool, threshold int) (*fakeDae
 
 // drainOut reads exactly want bytes off the .out socket (a deterministic
 // "playback wrote N chunks" signal); fails the test if they never arrive.
+// The deadline is load-tolerant (audit VLC-1/VS-3): pacing is 20 ms per
+// 640-byte chunk and goroutine scheduling adds host-load jitter on top,
+// so a 5s window flaked under -p 2 load. A broken pump still delivers
+// nothing and times out at the deadline.
 func drainOut(t *testing.T, out net.Conn, want int) {
 	t.Helper()
-	_ = out.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = out.SetReadDeadline(time.Now().Add(testPollDeadline))
 	buf := make([]byte, want)
 	if _, err := io.ReadFull(out, buf); err != nil {
 		t.Fatalf(".out socket never delivered %d bytes: %v", want, err)
@@ -331,6 +339,17 @@ func TestRMSBargeIn(t *testing.T) {
 
 	// Barge-in 2: the new say re-armed the latch; loud INCOMING audio
 	// trips again (fresh evidence stamp: the caller spoke again).
+	//
+	// Sync on gate4's FIRST chunk, not on isSpeaking(): between the
+	// handleSay enqueue and the worker starting gate4, gate3's deferred
+	// speaking=false may not have landed yet, so isSpeaking() can return
+	// true while the OLD (pre-re-arm, interrupted=true) latch state still
+	// governs — mic chunks written in that gap are discarded by the VAD
+	// (rmsBargeInCheck resets the window while !speaking), leaving fewer
+	// than 10 sustained chunks and no interrupt (the load-sensitive flake
+	// this test used to carry). The first .out byte of a quiet stream is
+	// deterministic proof that gate4's own playback — and its latch
+	// re-arm — is live.
 	stampRecentFinal(p)
 	gate4 := newChunkedTTS(quietSample, chunks)
 	swapTTS(p, gate4)
@@ -338,13 +357,13 @@ func TestRMSBargeIn(t *testing.T) {
 	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "ok, back"}); err != nil {
 		t.Fatalf("handleSay 4: %v", err)
 	}
-	waitFor(t, func() bool { return p.isSpeaking() })
+	drainOut(t, out, 640) // gate4's first chunk: the re-arm is live
 	writeMic(t, in, callerSample, chunks)
 	f = d.waitFrame(t)
 	if f.Event != voiceframe.EventInterrupt {
 		t.Fatalf("second barge-in frame = %q, want interrupt", f.Event)
 	}
-	drainOut(t, out, chunks*640)
+	drainOut(t, out, (chunks-1)*640) // gate4's remaining chunks (1 synced above)
 	// Whole scenario: exactly 2 interrupts (both popped above; nothing left).
 	if n := countQueuedInterrupts(d); n != 0 {
 		t.Fatalf("scenario queued %d unexpected interrupts, want 2 total", n)
