@@ -4,8 +4,7 @@ import "testing"
 
 // TestStripThinkingExported pins the exported StripThinking symbol
 // (internal/llm/reasoning_strip.go) that the agent conversation layer
-// (Leaf 03) consumes. The unexported stripThinking delegate keeps its own
-// behavior pin in task_summarizer_test.go TestStripThinking.
+// (Leaf 03) consumes.
 func TestStripThinkingExported(t *testing.T) {
 	tests := []struct {
 		name  string

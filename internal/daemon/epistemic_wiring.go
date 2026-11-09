@@ -104,7 +104,7 @@ func (a *ambientClassifierAdapter) ExtractCandidates(ctx context.Context, prompt
 	// and local-endpoint-gated: local models get the grammar, cloud
 	// providers never see the field. DisableThinking keeps the LFM2.5
 	// <think> template from fighting the grammar (mechanical extraction
-	// gains nothing from reasoning); the task_summarizer uses the same
+	// gains nothing from reasoning); the reasoning strip uses the same
 	// option for the same reason.
 	resp, err := a.chatter.Chat(ctx, []llm.ChatMessage{
 		{Role: llm.RoleUser, Content: prompt},

@@ -74,7 +74,7 @@ func applyOpenAICompatReasoning(body map[string]any, cfg *ModelConfig, rc *Reaso
 	// (verified BY TEST against :8080 — 58 reasoning_content chunks with
 	// the toggle set). llama-server DOES honor reasoning_format:"none",
 	// which moves the reasoning into content inside <think> tags; the
-	// agent loop strips those via the task_summarizer regexes. Send both
+	// agent loop strips those via the reasoning_strip.go regexes. Send both
 	// wire forms when disabling: Qwen-style servers take the toggle,
 	// llama.cpp servers take reasoning_format.
 	case ProviderIDOllama, ProviderIDLMStudio, "qwen", "local", "gala-mlx", "gala-llama":
