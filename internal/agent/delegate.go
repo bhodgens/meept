@@ -49,8 +49,10 @@ const (
 )
 
 // ChildDescriptor is a durable description of a child that leaf 06 persists
-// for cold resume. Version must be 1; a future build's descriptor is rejected
-// by Validate rather than silently resumed with wrong semantics.
+// for cold resume. Version must be current (see childDescriptorVersion); a
+// future build's descriptor is rejected by Validate rather than silently
+// resumed with wrong semantics. Version 1 (pre-seed) descriptors stay
+// readable: they resume brief-only, exactly as before.
 type ChildDescriptor struct {
 	Version         int       `json:"version"`
 	Mode            string    `json:"mode"`
@@ -62,6 +64,12 @@ type ChildDescriptor struct {
 	ParentSessionID string    `json:"parent_session_id"`
 	SeedPayload     string    `json:"seed_payload,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
+
+	// SeedMessages is the bounded fork-seed snapshot (v2): the parent's
+	// completed-turn prefix captured ONCE at spawn, serialized so a cold
+	// resume replays the parent-context seed instead of only the brief.
+	// Empty for spawn-mode children and for v1 descriptors.
+	SeedMessages []llm.ChatMessage `json:"seed_messages,omitempty"`
 
 	// Label is written by SetDescriptorFactory (B6). Reserved field,
 	// populated by the same wiring seam leaf 06 ships.
@@ -370,7 +378,9 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 	}
 	rec.seed = forkSeedMsgs
 
-	// Stamp the child descriptor (B6 hook if set, else the built-in).
+	// Stamp the child descriptor (B6 hook if set, else the built-in). Either
+	// way the fork seed snapshot is captured into the descriptor so cold
+	// resume replays the parent-context seed, not just the brief.
 	if df := m.descriptorFactory; df != nil {
 		rec.Descriptor = df(rec)
 		if rec.Descriptor.Version == 0 {
@@ -389,6 +399,7 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 			CreatedAt:       now,
 		}
 	}
+	rec.Descriptor.captureSeed(rec.seed)
 
 	m.mu.Lock()
 	if m.children == nil {
@@ -669,12 +680,17 @@ func (m *DelegateManager) settle(childID string, state ChildState, result, errSt
 	e.rec.State = state
 	e.rec.Result = result
 	e.rec.Err = errStr
-	close(e.settle)
 	rec := e.rec
 	m.mu.Unlock()
 
 	m.publishResult(rec)
+	// Persist BEFORE closing the settle channel: Join returns the moment the
+	// channel closes, so a resume path (or a test) observing a settled child
+	// must be able to rely on the durable descriptor already being saved.
+	// Still outside the mutex (no I/O under lock - mutexio invariant); the
+	// cost lands on the child's own goroutine, and persist stays best-effort.
 	m.persistRecord(rec)
+	close(e.settle)
 }
 
 // resultFromRecord maps a settled record to the C1 DelegateResult shape.

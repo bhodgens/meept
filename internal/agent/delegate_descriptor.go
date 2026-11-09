@@ -18,23 +18,83 @@ import (
 	"fmt"
 
 	"github.com/caimlas/meept/internal/acp"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 )
 
 // childDescriptorVersion is the only descriptor version this build understands.
-// A descriptor stamped by a future build (version > 1) is rejected on
+// A descriptor stamped by a future build (version > 2) is rejected on
 // UnmarshalChildDescriptor / Validate rather than silently resumed with wrong
 // semantics (same posture as the session schema_version contract).
-const childDescriptorVersion = 1
+//
+// Version history:
+//
+//	1 — original B6 shape (SeedPayload brief only, no fork-seed snapshot).
+//	2 — adds SeedMessages: the bounded parent-context fork seed captured at
+//	    spawn, so cold resume replays the seed a v1 descriptor lost. v1
+//	    descriptors remain valid and resume brief-only (identical to pre-v2
+//	    behavior), matching the version-pinning pattern: old versions stay
+//	    READABLE, only future versions are rejected.
+const childDescriptorVersion = 2
 
-// validateChildDescriptor enforces the B6 descriptor contract: the version must
-// be exactly 1 and the mode must be present. Mode is the one field every
+// Descriptor seed bounds. The fork seed can be large (the parent's whole
+// completed-turn transcript); the durable descriptor must stay bounded, so the
+// capture keeps at most the LAST seedDescriptorMaxMessages messages under
+// seedDescriptorMaxBytes total (newest context first — the tail of the
+// transcript is what orients the child). Bounds are descriptor-local constants
+// (no config knob): consistent with the descriptor's existing fixed-shape
+// posture, and the in-memory record keeps the FULL seed for the live run.
+const (
+	seedDescriptorMaxMessages = 40
+	seedDescriptorMaxBytes    = 128 * 1024
+)
+
+// captureSeed materializes the spawn-time fork seed into the descriptor
+// (bounded; newest-tail kept). nil/empty seed is a no-op (spawn-mode and
+// degraded-fork children carry no seed).
+func (d *ChildDescriptor) captureSeed(seed []llm.ChatMessage) {
+	if len(seed) == 0 {
+		return
+	}
+	msgs := append([]llm.ChatMessage(nil), seed...)
+	// Keep the newest messages under both caps: drop from the front (oldest)
+	// until the message count and total byte budget fit.
+	for len(msgs) > seedDescriptorMaxMessages {
+		msgs = msgs[1:]
+	}
+	for len(msgs) > 0 && seedJSONBytes(msgs) > seedDescriptorMaxBytes {
+		msgs = msgs[1:]
+	}
+	if len(msgs) == 0 {
+		return
+	}
+	d.SeedMessages = msgs
+	if d.Version < childDescriptorVersion {
+		d.Version = childDescriptorVersion
+	}
+}
+
+// seedJSONBytes sizes a seed snapshot the way it will be serialized (JSON
+// encode), so the byte budget matches the durable payload, not a heuristic.
+func seedJSONBytes(msgs []llm.ChatMessage) int {
+	raw, err := json.Marshal(msgs)
+	if err != nil {
+		// Unencodable seed can never be persisted; report oversize so the
+		// shrink loop drops messages until it empties.
+		return seedDescriptorMaxBytes + 1
+	}
+	return len(raw)
+}
+
+// validateChildDescriptor enforces the B6 descriptor contract: the version
+// must be a readable one (1 = pre-seed, 2 = carries the bounded fork-seed
+// snapshot) and the mode must be present. Mode is the one field every
 // legitimate descriptor must carry; Provider/AgentModel/etc. are routing pins
 // that may legitimately be empty for the identity-route default.
 func validateChildDescriptor(d ChildDescriptor) error {
-	if d.Version != childDescriptorVersion {
-		return fmt.Errorf("unsupported child descriptor version %d (expected %d)", d.Version, childDescriptorVersion)
+	if d.Version < 1 || d.Version > childDescriptorVersion {
+		return fmt.Errorf("unsupported child descriptor version %d (build supports 1..%d)", d.Version, childDescriptorVersion)
 	}
 	if d.Mode == "" {
 		return fmt.Errorf("child descriptor: mode is required")
@@ -59,14 +119,16 @@ var ErrDescriptorUnknownVersion = fmt.Errorf("child descriptor: unsupported vers
 
 // UnmarshalChildDescriptor rehydrates a descriptor from its durable JSON form.
 // It is strict: an unknown/newer version is an error (never silently downgraded
-// or resumed with wrong semantics). Malformed JSON is also an error.
+// or resumed with wrong semantics). Older-but-readable versions (v1) unmarshal
+// fine — they simply carry no SeedMessages and resume brief-only. Malformed
+// JSON is also an error.
 func UnmarshalChildDescriptor(b []byte) (ChildDescriptor, error) {
 	var d ChildDescriptor
 	if err := json.Unmarshal(b, &d); err != nil {
 		return ChildDescriptor{}, fmt.Errorf("child descriptor: %w", err)
 	}
-	if d.Version != childDescriptorVersion {
-		return ChildDescriptor{}, fmt.Errorf("%w: got %d, build supports %d", ErrDescriptorUnknownVersion, d.Version, childDescriptorVersion)
+	if d.Version < 1 || d.Version > childDescriptorVersion {
+		return ChildDescriptor{}, fmt.Errorf("%w: got %d, build supports 1..%d", ErrDescriptorUnknownVersion, d.Version, childDescriptorVersion)
 	}
 	return d, nil
 }
@@ -145,9 +207,11 @@ var ErrResumeParentMismatch = errors.New("delegate: resume denied: caller is not
 //     restart) -> it is rehydrated from the durable store, re-registered under
 //     its original childID, and re-run from its persisted descriptor.
 //
-// Both paths replay the frozen fork seed (SeedPayload), re-pin the descriptor's
-// model/route, set the record back to running, and re-publish the settlement on
-// completion. Only the parent (record.ParentSessionID == caller) may resume.
+// Both paths replay the frozen fork seed — the descriptor's SeedMessages
+// snapshot when present (v2, stamped onto the child's conversation before the
+// first turn), else brief-only as v1 always did — re-pin the descriptor's
+// model/route, set the record back to running, and re-publish the settlement
+// on completion. Only the parent (record.ParentSessionID == caller) may resume.
 func (m *DelegateManager) Resume(ctx context.Context, parentSessionID, childID string) (DelegateResult, error) {
 	// Live path.
 	if rec, ok := m.Lookup(childID); ok {
@@ -196,6 +260,18 @@ func (m *DelegateManager) resumeRegister(ctx context.Context, parentSessionID st
 	payload := d.SeedPayload
 	if payload == "" {
 		return DelegateResult{}, fmt.Errorf("%w: %s has no seed payload to resume", ErrChildNotResumable, rec.ChildID)
+	}
+	// Cold-resume seed carry: a v2 descriptor holds the spawn-time fork seed,
+	// so the resumed child replays the parent-context seed the original had
+	// instead of only the brief. The restored snapshot rides the record like
+	// a fresh spawn's; resumeChild re-stamps it through the seedWriter and
+	// prepends the same fork preamble.
+	if len(d.SeedMessages) > 0 {
+		rec.seed = append([]llm.ChatMessage(nil), d.SeedMessages...)
+		m.log().Debug("delegate resume: restored fork seed from descriptor",
+			"child_id", rec.ChildID,
+			"seed_messages", len(rec.seed),
+			"seed_bytes", seedJSONBytes(rec.seed))
 	}
 	if agentID != "" {
 		rec.AgentID = agentID
@@ -251,9 +327,12 @@ func (m *DelegateManager) resumeRecord(ctx context.Context, parentSessionID stri
 	return m.resumeRegister(ctx, parentSessionID, rec, descriptorFromRecord(rec), rec.AgentID)
 }
 
-// resumeChild executes a resuming child using the frozen seed payload verbatim
-// as its brief — the fork seed replays the SNAPSHOT (SeedPayload), never a
-// re-fork of the parent's newer history. It settles exactly like a fresh spawn.
+// resumeChild executes a resuming child. It replays the frozen seed snapshot
+// (SeedMessages, restored from the descriptor onto the record by
+// resumeRegister) exactly like a fresh spawn's runChild: the conversation is
+// re-stamped via the seedWriter and the fork preamble precedes the brief —
+// the resume replays the SNAPSHOT, never a re-fork of the parent's newer
+// history. It settles exactly like a fresh spawn.
 func (m *DelegateManager) resumeChild(ctx context.Context, childID string, rec ChildRecord, seedPayload string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -272,7 +351,19 @@ func (m *DelegateManager) resumeChild(ctx context.Context, childID string, rec C
 		m.settle(childID, ChildStateFailed, "", "agent not found: "+rec.AgentID)
 		return
 	}
-	resp, err := m.reg.RunAgent(ctx, spec.ID, seedPayload, rec.ConversationID)
+	// Re-stamp the parent-context seed onto the child's conversation BEFORE
+	// the first turn and prepend the fork preamble (same path as runChild).
+	// The brief rides the recorded SeedPayload; the seed carries the parent
+	// context. A seed-less resume (v1 descriptor / spawn-mode child) runs the
+	// plain payload byte-identically.
+	fullMessage := seedPayload
+	if len(rec.seed) > 0 {
+		if m.seedWriter != nil {
+			m.seedWriter(spec.ID, rec.ConversationID, rec.seed)
+		}
+		fullMessage = forkSeedPreamble(len(rec.seed)) + fullMessage
+	}
+	resp, err := m.reg.RunAgent(ctx, spec.ID, fullMessage, rec.ConversationID)
 	if err != nil {
 		m.settle(childID, ChildStateFailed, "", err.Error())
 		return
