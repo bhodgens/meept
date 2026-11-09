@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"text/tabwriter"
 
@@ -533,27 +534,48 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 	}
 	defer outConn.Close() //nolint:errcheck // teardown
 
-	done := make(chan error, 2)
-	// mic: capture -> in socket. Byte-counted so an instant capture death
-	// (broken ffmpeg install: the process exits before producing audio) is
-	// REPORTED instead of silently ending the call.
-	micBytes := int64(0)
+	micDone := make(chan error, 1)
+	spkDone := make(chan error, 1)
+	// mic: capture -> in socket. Byte-counted atomically so the count is
+	// live even while io.Copy is running, and a capture death can be
+	// DISTINGUISHED from a user hangup: only a zero-byte death while the
+	// call is still supposed to be live is an error (a ^C or daemon-side
+	// call end closes the sockets and the mic dies at zero bytes as a
+	// SYMPTOM, not the cause - reporting that as a mic failure was the
+	// user-visible false alarm).
+	var micBytes int64
 	go func() {
 		n, err := io.Copy(inConn, cap)
-		micBytes = n
-		done <- err
+		atomic.StoreInt64(&micBytes, n)
+		micDone <- err
 	}()
 	// speaker: out socket -> sink (raw PCM bursts -> oto), bounded
 	// lookahead (leaf 01). No unbounded per-utterance buffering: the old
 	// gap-only flush let seconds of audio queue behind a barge-in and
 	// talk over the new answer.
-	go drainLiveSpeaker(outConn, sink, done)
-	// First finished side wins; the mic side runs through
-	// classifyMicDeath so a zero-byte capture death can never pass as a
-	// clean hangup again.
+	go drainLiveSpeaker(outConn, sink, spkDone)
 	select {
-	case err := <-done:
-		return classifyMicDeath(err, micBytes)
+	case err := <-micDone:
+		// The mic pipe ended: an ffmpeg death. While the call is still
+		// live that is a failure (classify + name the ffmpeg cause);
+		// after a cancel it is teardown noise.
+		if ctx.Err() != nil {
+			return nil
+		}
+		if cErr := classifyMicDeath(err, atomic.LoadInt64(&micBytes)); cErr != nil {
+			if tail := cap.StderrTail(); tail != "" {
+				return fmt.Errorf("%w (ffmpeg: %s)", cErr, tail)
+			}
+			return cErr
+		}
+		return nil
+	case err := <-spkDone:
+		// The .out socket closed: the call ended (daemon hangup, idle
+		// reaper, or the SIGINT path's voice.local.end) or errored.
+		// Never re-interpret this as a mic failure.
+		_ = cap.Close()
+		<-micDone
+		return err
 	case <-ctx.Done():
 		return nil
 	}

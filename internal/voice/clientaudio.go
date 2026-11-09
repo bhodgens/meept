@@ -42,6 +42,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +65,33 @@ type RawMicCapture struct {
 	cmd      *exec.Cmd // live mode (darwin)
 	pipe     io.Reader // live mode stdout
 	cancel   context.CancelFunc
+	stderr   *boundedTail // live mode ffmpeg stderr tail (failure diagnosis)
 	closeErr error
+}
+
+// boundedTail keeps the last max bytes written to it - enough to carry
+// ffmpeg's short error lines without unbounded memory. It names the cause
+// of a zero-byte capture death (TCC mic denial, dead device).
+type boundedTail struct {
+	mu  sync.Mutex
+	max int
+	buf []byte
+}
+
+func (b *boundedTail) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	if len(b.buf) > b.max {
+		b.buf = b.buf[len(b.buf)-b.max:]
+	}
+	return len(p), nil
+}
+
+func (b *boundedTail) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
 }
 
 // micSampleRate / micChannels are the leg's wire format (CL1/CL5:
@@ -126,12 +153,31 @@ func newRawMicCaptureCtx(ctx context.Context, _ string) (*RawMicCapture, error) 
 		cancel()
 		return nil, fmt.Errorf("voice: mic capture: stdout pipe: %w", err)
 	}
-	cmd.Stderr = nil // loud ffmpeg logs stay out of the CLI's stdout
+	// ffmpeg's stderr is kept (bounded, last lines only) so a zero-byte
+	// death can NAME its cause - a TCC microphone denial and a dead
+	// device look identical from the pipe side (clean EOF, no bytes) and
+	// silent for the user before this. Loud logs still stay off the CLI's
+	// stdout: this buffer is only rendered inside the failure error.
+	errs := &boundedTail{max: 4096}
+	cmd.Stderr = errs
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("voice: mic capture: start ffmpeg: %w", err)
 	}
-	return &RawMicCapture{cmd: cmd, pipe: pipe, cancel: cancel}, nil
+	return &RawMicCapture{cmd: cmd, pipe: pipe, cancel: cancel, stderr: errs}, nil
+}
+
+// StderrTail returns the captured ffmpeg stderr (live mode), trimmed;
+// "" for file mode or a silent ffmpeg. Safe after Close (the buffer
+// outlives the process).
+func (c *RawMicCapture) StderrTail() string {
+	c.mu.Lock()
+	t := c.stderr
+	c.mu.Unlock()
+	if t == nil {
+		return ""
+	}
+	return strings.TrimSpace(t.String())
 }
 
 // Read implements io.Reader over the armed source.
