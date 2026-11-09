@@ -66,12 +66,6 @@ type ModelCatalogEntry struct {
 }
 ```
 
-### TUI Model Picker
-
-The picker uses Bubble Tea v2 with two modes:
-1. **Provider Selection**: List of all providers with filtering
-2. **Model Selection**: List of models for selected provider
-
 ### CLI Commands
 
 | Command | Description |
@@ -93,7 +87,6 @@ The picker uses Bubble Tea v2 with two modes:
 internal/llm/
   provider_registry.go    # Provider definitions
   models_catalog.go       # Model definitions
-  model_picker.go         # TUI picker component
   credentials.go          # Credential storage
 
 cmd/meept/
@@ -103,12 +96,10 @@ cmd/meept/
 ### Configuration Flow
 
 1. User runs `meept models setup`
-2. TUI picker launches in provider selection mode
-3. User selects provider (arrow keys + enter)
-4. TUI switches to model selection mode
-5. User selects model
-6. Configuration saved to `~/.meept/models.json5`
-7. If API key needed, prompted to store in credentials
+2. User selects a provider
+3. User selects a model
+4. Configuration saved to `~/.meept/models.json5`
+5. If API key needed, prompted to store in credentials
 
 ### Credential Storage
 
