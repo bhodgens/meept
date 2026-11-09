@@ -784,12 +784,15 @@ func TestTextServerTokenAuthDisabledLegacyAccept(t *testing.T) {
 		child, _ = dialText(t, path)
 		return true
 	})
-	// NO auth line: straight to a frame.
+	// NO auth line: straight to a frame. The handler registers BEFORE the
+	// dial: the server's read loop consumes whatever is in flight at
+	// accept time, and a handler set later under suite load can miss the
+	// frame (mutex-guarded setter, safe pre-start).
+	frames := make(chan Frame, 4)
+	srv.SetHandler(func(f Frame) { frames <- f })
 	if _, err := child.Write([]byte(`{"call_id":"c1","event":"prompt","text":"x"}` + "\n")); err != nil {
 		t.Fatalf("child write: %v", err)
 	}
-	frames := make(chan Frame, 4)
-	srv.SetHandler(func(f Frame) { frames <- f })
 	select {
 	case f := <-frames:
 		if f.CallID != "c1" || f.Event != EventPrompt {

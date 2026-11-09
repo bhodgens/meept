@@ -169,10 +169,23 @@ func newLegFixture(t *testing.T) *legFixture {
 		case <-time.After(2 * time.Second):
 		}
 	})
-	// Fake child claims the text socket so Send has a transport.
-	conn, err := net.Dial("unix", sockPath)
-	if err != nil {
-		t.Fatalf("fake child dial: %v", err)
+	// Fake child claims the text socket so Send has a transport. The dial
+	// retries: os.Stat sees the socket file at bind() time, a beat before
+	// listen() finishes, and a dial in that window gets ECONNREFUSED
+	// under suite load (the first dial claims the single child slot, so
+	// the wait cannot probe-dial).
+	var conn net.Conn
+	dialDeadline := time.Now().Add(5 * time.Second)
+	for {
+		var err error
+		conn, err = net.Dial("unix", sockPath)
+		if err == nil {
+			break
+		}
+		if time.Now().After(dialDeadline) {
+			t.Fatalf("fake child dial: %v", err)
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
@@ -627,9 +640,22 @@ func TestLocalLegVoiceOverride(t *testing.T) {
 		case <-time.After(2 * time.Second):
 		}
 	})
-	conn, err := net.Dial("unix", sockPath)
-	if err != nil {
-		t.Fatalf("fake child dial: %v", err)
+	// The dial retries: os.Stat sees the socket file at bind() time, a
+	// beat before listen() finishes, and a dial in that window gets
+	// ECONNREFUSED under suite load (the first dial claims the single
+	// child slot, so the wait cannot probe-dial).
+	var conn net.Conn
+	dialDeadline := time.Now().Add(5 * time.Second)
+	for {
+		var dialErr error
+		conn, dialErr = net.Dial("unix", sockPath)
+		if dialErr == nil {
+			break
+		}
+		if time.Now().After(dialDeadline) {
+			t.Fatalf("fake child dial: %v", dialErr)
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	childReader := bufio.NewReader(conn)
