@@ -100,8 +100,8 @@ Flutter parse unblock_at etc.); cite finding IDs.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-park-tests | PENDING | 0 | |
-| 01-parker-identity | PENDING | 0 | |
+| 00T-park-tests | TESTS_VALIDATED | 1 | committed 222578ac (--no-verify RED-by-design); parent-verified 35 missing-impl errors only |
+| 01-parker-identity | IN_PROGRESS | 0 | dispatched 2026-11-09 (keystone; owns internal/agent + daemon/components.go, NOT daemon.go) |
 | 02-throttle-resume-delivery | PENDING | 0 | blocked on 01 |
 | 03-gate-release-on-rejection | PENDING | 0 | blocked on 01 |
 | 04-park-bounds-and-budget | PENDING | 0 | blocked on 01 |
