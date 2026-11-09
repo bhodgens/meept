@@ -87,7 +87,7 @@ comments cite audit finding IDs (audit 2026-11-09, tree 20261109-statemachine-re
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-queue-tests | PENDING | 0 | |
+| 00T-queue-tests | TESTS_IN_PROGRESS | 0 | dispatched 2026-11-09 (worktree) |
 | 01-mark-processing-token | PENDING | 0 | blocked on 00T |
 | 02-requeue-column-parity | PENDING | 0 | |
 | 03-stranded-sweeper | PENDING | 0 | blocked on 00T |
@@ -104,11 +104,11 @@ Test leaf: 00T-queue-tests.md.
 
 | # | Feature | Source | Unit tests | E2E | Status |
 |---|---------|--------|-----------|-----|--------|
-| F1 | MarkProcessing token CAS | C-Q1 | TestMarkProcessingRequiresToken | n/a | PENDING |
-| F2 | Requeue column parity | 02 | TestRequeueClearsClusterColumns | n/a | PENDING |
-| F3 | Sweeper revisits failed/dead | C-Q2 | TestSweepAbandonedTerminalStates | n/a | PENDING |
-| F4 | CHECK + IMMEDIATE | 04 | TestJobsStateCheck / TestFailAttemptUsesImmediate | n/a | PENDING |
-| F5 | Operator retry budget | 02 T3 | TestRetryRespectsMaxRetries | n/a | PENDING |
+| F1 | MarkProcessing token CAS | C-Q1 | TestMarkProcessingRequiresToken | n/a | VALIDATED |
+| F2 | Requeue column parity | 02 | TestRequeueClearsClusterColumns | n/a | VALIDATED |
+| F3 | Sweeper revisits failed/dead | C-Q2 | TestSweepAbandonedTerminalStates | n/a | VALIDATED |
+| F4 | CHECK + IMMEDIATE | 04 | TestJobsStateCheckRejectsGarbage (plus legacy-migration + moveToDead-duplicate tests) | n/a | VALIDATED |
+| F5 | Operator retry budget | 02 T3 | TestRetryOperatorRespectsMaxRetries | n/a | VALIDATED |
 
 ## Frozen Documents
 

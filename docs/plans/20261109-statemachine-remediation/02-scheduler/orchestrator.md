@@ -30,8 +30,12 @@ dispatch context.
 ### C-S1: Recovery walks full history
 
 ```
-func (r *ReceiptStore) RecoverInFlight(ctx context.Context) (int, error)
-// re-delivers every receipt in state pending|in_flight from DeliveryHistory, ordered by attempt time
+// Fixed in place: recoverInFlightDeliveries walks DeliveryHistory for ALL
+// pending|in_flight receipts (ordered by attempt time, MessageID dedup),
+// not cfg.LastDelivery only. Gate test drives this existing entry point;
+// keep its signature.
+// Delta 2026-11-09: plan named ReceiptStore.RecoverInFlight(ctx); test
+// targets the real entry point. Test wins; this contract restated.
 // Owner: 01-crash-window.md
 ```
 
@@ -70,7 +74,7 @@ Repo conventions; `-p 2`; audit-finding citations in fix comments.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-scheduler-tests | PENDING | 0 | |
+| 00T-scheduler-tests | TESTS_IN_PROGRESS | 0 | dispatched 2026-11-09 (worktree) |
 | 01-crash-window | PENDING | 0 | blocked on 00T |
 
 ## Integration Test Plan
@@ -83,8 +87,14 @@ occurrence.
 
 | # | Feature | Source | Unit tests | E2E | Status |
 |---|---------|--------|-----------|-----|--------|
-| F1 | advance ordering | 01 T1 | TestAdvanceLastWakeAfterDelivery | n/a | PENDING |
-| F2 | history-walking recovery | 01 T3 | TestRecoverInFlightWalksHistory | n/a | PENDING |
+| F1 | advance ordering | 01 T1 | TestAdvanceLastWakeAfterDelivery | n/a | VALIDATED |
+| F2 | history-walking recovery | 01 T3 | TestRecoverInFlightWalksHistory | n/a | VALIDATED |
+
+Delta log: 2026-11-09, F1, plan->tests, gate adds an extra sub-case
+"successful_execute_advances_watermark" pinning happy-path semantics; kept
+(plan silent on it — lesser artifact updated to reflect greater). 2026-11-09,
+F2, plan->tests, C-S1 restated to the real entry point recoverInFlightDeliveries
+(see contract delta).
 
 ## Open Questions
 
