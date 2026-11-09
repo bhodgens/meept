@@ -73,21 +73,6 @@ func NewEmployeeService(m EmployeeManager) *EmployeeService {
 
 
 
-// Get retrieves a single employee by ID.
-func (s *EmployeeService) Get(ctx context.Context, id string) (any, error) {
-	if id == "" {
-		return nil, wrapError("employee", "Get", ErrInvalidInput)
-	}
-	if s.manager == nil {
-		return nil, wrapError("employee", "Get", ErrUnavailable)
-	}
-	emp, err := s.manager.GetEmployee(ctx, id)
-	if err != nil {
-		return nil, wrapError("employee", "Get", err)
-	}
-	return emp, nil
-}
-
 // SetLogger replaces the default logger. Nil is ignored (typed-nil guard per
 // CLAUDE.md setter rules).
 func (s *EmployeeService) SetLogger(l *slog.Logger) {

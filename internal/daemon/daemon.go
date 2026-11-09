@@ -1201,13 +1201,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)
 	}
 
-	// Wire audit DB from security orchestrator into security service
-	if components.SecurityOrchestrator != nil && svcRegistry.Security != nil {
-		if auditDB := components.SecurityOrchestrator.AuditDB(); auditDB != nil {
-			svcRegistry.Security.SetAuditDB(auditDB)
-			logger.Info("Audit DB wired to security service")
-		}
-	}
+	// NOTE: SecurityService.SetAuditDB and its Audit query were removed as
+	// dead code (deadcode wave-1): no RPC/HTTP handler ever exposed the
+	// audit-log query path. The security orchestrator keeps its own DB.
 
 	// Wire the same security orchestrator the agent-path shell tool gets
 	// (components.go registerTools) into the TerminalService shell.

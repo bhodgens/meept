@@ -12,7 +12,7 @@ func TestBotContext_PushNotification(t *testing.T) {
 	bus := bus.New(&bus.Config{BufferSize: 100}, slog.New(slog.DiscardHandler))
 	defer bus.Close()
 
-	pushSvc := NewPushService(nil, bus, nil)
+	pushSvc := NewPushServiceWithChannels(bus, nil, nil)
 	ctx := NewBotContext(pushSvc, nil)
 
 	if ctx == nil {

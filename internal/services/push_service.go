@@ -10,7 +10,6 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/effects"
-	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -70,24 +69,8 @@ type PushResult struct {
 	Skipped   int `json:"skipped"`
 }
 
-// NewPushService creates a push service with bus-only delivery.
-// For channel routing (Telegram, CLI, TUI, HTTP), use NewPushServiceWithChannels.
-func NewPushService(
-	sessionMgr session.Store,
-	msgBus *bus.MessageBus,
-	logger *slog.Logger,
-	_ ...PushServiceOption,
-) *PushService {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &PushService{
-		bus:    msgBus,
-		logger: logger,
-	}
-}
-
 // NewPushServiceWithChannels creates a push service with channel routing.
+// Bus-only delivery (no channel registry) is the channels=nil case.
 func NewPushServiceWithChannels(
 	msgBus *bus.MessageBus,
 	channels *ChannelRegistry,
@@ -139,9 +122,6 @@ func (s *PushService) PushToChannels(ctx context.Context, req *PushRequest) (*Pu
 	delivered := s.channels.Push(ctx, msg)
 	return &PushResult{Delivered: delivered}, nil
 }
-
-// PushServiceOption configures a PushService.
-type PushServiceOption func(*PushService)
 
 // SetEffectsLedger wires the external-effect ledger. When nil (tests,
 // ledger disabled), Push keeps its legacy behavior exactly — no claiming.

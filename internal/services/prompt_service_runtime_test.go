@@ -34,16 +34,10 @@ func TestPromptService_ProjectTierFollowsRuntimeChange(t *testing.T) {
 
 	svc := NewPromptService(projA, filepath.Join(tmp, "user"), filepath.Join(tmp, "system"), filepath.Join(tmp, "bundled"))
 
-	if got := svc.ProjectDir(); got != projA {
-		t.Fatalf("ProjectDir = %q, want %q", got, projA)
-	}
 	assertPrompt(t, svc, "interview", TierProject, "A")
 
 	// Simulated project switch: same call the daemon bridge makes on project.set.
 	svc.SetProjectDir(projB)
-	if got := svc.ProjectDir(); got != projB {
-		t.Fatalf("ProjectDir after switch = %q, want %q", got, projB)
-	}
 	assertPrompt(t, svc, "interview", TierProject, "B")
 
 	// List must agree with Get on the switched tier.
@@ -69,9 +63,6 @@ func TestPromptService_ProjectTierFollowsRuntimeChange(t *testing.T) {
 
 	// Clearing the project tier drops it (no project active → no project tier).
 	svc.SetProjectDir("")
-	if got := svc.ProjectDir(); got != "" {
-		t.Errorf("ProjectDir after clear = %q, want empty", got)
-	}
 	if _, err := svc.Get("interview"); err == nil {
 		t.Error("Get succeeded after clearing the project tier, want not-found")
 	}

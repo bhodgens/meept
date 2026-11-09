@@ -235,19 +235,6 @@ func (s *ModelService) GetCredential(ctx context.Context, providerID string) (st
 	return strings.Repeat("*", len(key)), nil
 }
 
-// GetCredentialRaw returns the raw API key (for config export).
-func (s *ModelService) GetCredentialRaw(ctx context.Context, providerID string) (string, error) {
-	if s.credStore == nil {
-		return "", wrapError("model", "GetCredentialRaw", ErrUnavailable)
-	}
-
-	key, ok := s.credStore.Get(providerID)
-	if !ok {
-		return "", wrapError("model", "GetCredentialRaw", ErrNotFound)
-	}
-	return key, nil
-}
-
 // SetCredential stores an API key for a provider.
 func (s *ModelService) SetCredential(ctx context.Context, providerID, apiKey string) error {
 	if s.credStore == nil {

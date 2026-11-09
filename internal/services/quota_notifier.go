@@ -300,14 +300,3 @@ func (qn *QuotaNotifier) Cleanup() {
 		qn.seen = make(map[string]bool)
 	}
 }
-
-// Start ensures the event pump is running. Present for explicit lifecycle
-// symmetry with Stop; NewQuotaNotifier already auto-starts the pump, so this
-// is a no-op in normal use.
-func (qn *QuotaNotifier) Start() {
-	qn.mu.Lock()
-	defer qn.mu.Unlock()
-	if qn.sub != nil && qn.stopCh == nil {
-		qn.start()
-	}
-}

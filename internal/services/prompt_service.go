@@ -142,17 +142,6 @@ func (s *PromptService) SetProjectDir(dir string) {
 	s.mu.Unlock()
 }
 
-// ProjectDir returns the project tier directory currently in effect ("" when
-// no project is active).
-func (s *PromptService) ProjectDir() string {
-	if s == nil {
-		return ""
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.projectDir
-}
-
 // tiersSnapshot returns the effective tier list for a single call: the current
 // project tier (highest priority) followed by the immutable user/system/
 // bundled tiers, applying the same empty-dir and duplicate-dir handling as

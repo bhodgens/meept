@@ -15,7 +15,7 @@ func TestQuotaNotifier_ProcessEvent(t *testing.T) {
 	b := bus.New(nil, slog.Default())
 	defer b.Close()
 
-	pushSvc := NewPushService(nil, b, slog.Default())
+	pushSvc := NewPushServiceWithChannels(b, nil, slog.Default())
 	qn := NewQuotaNotifier(b, pushSvc, slog.Default())
 
 	unblockAt := time.Now().Add(3 * time.Hour)
@@ -45,7 +45,7 @@ func TestQuotaNotifier_Dedup(t *testing.T) {
 	b := bus.New(nil, slog.Default())
 	defer b.Close()
 
-	pushSvc := NewPushService(nil, b, slog.Default())
+	pushSvc := NewPushServiceWithChannels(b, nil, slog.Default())
 	qn := NewQuotaNotifier(b, pushSvc, slog.Default())
 
 	unblockAt := time.Now().Add(3 * time.Hour)
@@ -112,7 +112,7 @@ func TestQuotaNotifier_MalformedPayload(t *testing.T) {
 	b := bus.New(nil, slog.Default())
 	defer b.Close()
 
-	pushSvc := NewPushService(nil, b, slog.Default())
+	pushSvc := NewPushServiceWithChannels(b, nil, slog.Default())
 	qn := NewQuotaNotifier(b, pushSvc, slog.Default())
 
 	// Malformed payload - should not panic
@@ -125,7 +125,7 @@ func TestQuotaNotifier_Cleanup(t *testing.T) {
 	b := bus.New(nil, slog.Default())
 	defer b.Close()
 
-	pushSvc := NewPushService(nil, b, slog.Default())
+	pushSvc := NewPushServiceWithChannels(b, nil, slog.Default())
 	qn := NewQuotaNotifier(b, pushSvc, slog.Default())
 
 	// Add more than 100 entries

@@ -58,23 +58,6 @@ func (s *SelfImproveService) Trigger(ctx context.Context, req TriggerRequest) er
 	return wrapError("selfimprove", "Trigger", err)
 }
 
-// CancelRequest contains cancel parameters.
-type CancelRequest struct {
-	CycleID string `json:"cycle_id"`
-}
-
-// Cancel stops an ongoing self-improvement cycle.
-func (s *SelfImproveService) Cancel(ctx context.Context, req CancelRequest) error {
-	if req.CycleID == "" {
-		return wrapError("selfimprove", "Cancel", ErrInvalidInput)
-	}
-	if s.controller == nil {
-		return wrapError("selfimprove", "Cancel", ErrUnavailable)
-	}
-
-	return wrapError("selfimprove", "Cancel", s.controller.Stop())
-}
-
 // Analyze runs analysis for improvements (alias for Detect).
 func (s *SelfImproveService) Analyze(ctx context.Context) error {
 	if s.controller == nil {

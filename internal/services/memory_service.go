@@ -161,23 +161,6 @@ func (s *MemoryService) Bridges(ctx context.Context, opts ...memory.SearchOption
 	return out, nil
 }
 
-// BridgeCount returns the number of persisted bridging facts (0 when no
-// bridge store is wired — the count is a display figure, not an error).
-func (s *MemoryService) BridgeCount(ctx context.Context) int {
-	if s.manager == nil {
-		return 0
-	}
-	store := s.manager.BridgeStore()
-	if store == nil {
-		return 0
-	}
-	n, err := store.Count(ctx)
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
 // VectorSearchRequest contains parameters for vector search.
 type VectorSearchRequest struct {
 	Query      string   `json:"query"`

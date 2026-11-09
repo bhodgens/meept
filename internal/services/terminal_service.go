@@ -208,22 +208,6 @@ func (svc *TerminalService) GetHistory(limit int) []CommandHistory {
 	return result
 }
 
-// GetSession returns a snapshot of a terminal session by ID.
-//
-// Returns a value copy rather than the internal pointer so callers cannot race
-// with updateSession mutating fields (LastUsed, CommandCount) on the same
-// struct. The returned snapshot is safe to use without further locking.
-func (svc *TerminalService) GetSession(id string) (TerminalSession, error) {
-	svc.sessionMu.RLock()
-	defer svc.sessionMu.RUnlock()
-
-	session, ok := svc.sessionStore[id]
-	if !ok {
-		return TerminalSession{}, ErrNotFound
-	}
-	return *session, nil
-}
-
 // ListSessions returns all active terminal sessions.
 func (svc *TerminalService) ListSessions() []*TerminalSession {
 	svc.sessionMu.RLock()

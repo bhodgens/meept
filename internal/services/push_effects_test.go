@@ -89,7 +89,7 @@ func TestPushService_EffectsIdempotent(t *testing.T) {
 		}()
 
 		ledger := effects.NewMemoryLedger()
-		s := NewPushService(&fakeStore{}, b, effectsTestLogger())
+		s := NewPushServiceWithChannels(b, nil, effectsTestLogger())
 		s.SetEffectsLedger(ledger)
 
 		res, err := s.Push(context.Background(), newReq())
@@ -141,7 +141,7 @@ func TestPushService_EffectsIdempotent(t *testing.T) {
 		}()
 
 		ledger := effects.NewMemoryLedger()
-		s := NewPushService(&fakeStore{}, b, effectsTestLogger())
+		s := NewPushServiceWithChannels(b, nil, effectsTestLogger())
 		s.SetEffectsLedger(ledger)
 
 		first, err := s.Push(context.Background(), newReq())
@@ -197,7 +197,7 @@ func TestPushService_EffectsIdempotent(t *testing.T) {
 		defer b.Close()
 
 		ledger := effects.NewMemoryLedger()
-		s := NewPushService(&fakeStore{}, b, effectsTestLogger())
+		s := NewPushServiceWithChannels(b, nil, effectsTestLogger())
 		s.SetEffectsLedger(ledger)
 
 		reqA := newReq()
@@ -224,7 +224,7 @@ func TestPushService_EffectsIdempotent(t *testing.T) {
 		b := testBus()
 		defer b.Close()
 
-		s := NewPushService(&fakeStore{}, b, effectsTestLogger())
+		s := NewPushServiceWithChannels(b, nil, effectsTestLogger())
 		if s.effects != nil {
 			t.Fatal("effects field must start nil")
 		}
@@ -239,7 +239,7 @@ func TestPushService_EffectsIdempotent(t *testing.T) {
 	})
 
 	t.Run("set effects ledger nil guard", func(t *testing.T) {
-		s := NewPushService(&fakeStore{}, testBus(), effectsTestLogger())
+		s := NewPushServiceWithChannels(testBus(), nil, effectsTestLogger())
 		s.SetEffectsLedger(effects.NewMemoryLedger())
 		s.SetEffectsLedger(nil) // must be a no-op, not a clobber
 		if s.effects == nil {

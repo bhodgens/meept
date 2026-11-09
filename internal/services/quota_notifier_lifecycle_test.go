@@ -30,7 +30,7 @@ func TestQuotaNotifier_ClearedResetsDedup(t *testing.T) {
 	b := bus.New(nil, slog.Default())
 	defer b.Close()
 
-	pushSvc := NewPushService(nil, b, slog.Default())
+	pushSvc := NewPushServiceWithChannels(b, nil, slog.Default())
 	qn := NewQuotaNotifier(b, pushSvc, slog.Default())
 	defer qn.Stop()
 
@@ -79,7 +79,7 @@ func TestQuotaNotifier_ClearedDoesNotDedupRepeatedly(t *testing.T) {
 	b := bus.New(nil, slog.Default())
 	defer b.Close()
 
-	pushSvc := NewPushService(nil, b, slog.Default())
+	pushSvc := NewPushServiceWithChannels(b, nil, slog.Default())
 	qn := NewQuotaNotifier(b, pushSvc, slog.Default())
 	defer qn.Stop()
 
@@ -126,7 +126,7 @@ func TestQuotaNotifier_ClearedRendersRecovery(t *testing.T) {
 	b := bus.New(nil, slog.Default())
 	defer b.Close()
 
-	pushSvc := NewPushService(nil, b, slog.Default())
+	pushSvc := NewPushServiceWithChannels(b, nil, slog.Default())
 	qn := NewQuotaNotifier(b, pushSvc, slog.Default())
 	defer qn.Stop()
 
@@ -166,7 +166,7 @@ func TestQuotaNotifier_PumpEndToEnd(t *testing.T) {
 	b := bus.New(nil, slog.Default())
 	defer b.Close()
 
-	pushSvc := NewPushService(nil, b, slog.Default())
+	pushSvc := NewPushServiceWithChannels(b, nil, slog.Default())
 	qn := NewQuotaNotifier(b, pushSvc, slog.Default())
 	defer qn.Stop()
 
@@ -208,17 +208,16 @@ func TestQuotaNotifier_StartStopCycle(t *testing.T) {
 	b := bus.New(nil, slog.Default())
 	defer b.Close()
 
-	pushSvc := NewPushService(nil, b, slog.Default())
+	pushSvc := NewPushServiceWithChannels(b, nil, slog.Default())
 	qn := NewQuotaNotifier(b, pushSvc, slog.Default())
 
 	// Stop must terminate the pump without hanging.
 	qn.Stop()
 	qn.Stop() // idempotent
 
-	// A fresh notifier with nil bus must not panic and Start/Stop must be
-	// safe no-ops.
+	// A fresh notifier with nil bus must not panic and Stop must be a safe
+	// no-op (the pump auto-starts only with a bus).
 	qn2 := NewQuotaNotifier(nil, pushSvc, slog.Default())
-	qn2.Start()
 	qn2.Stop()
 }
 

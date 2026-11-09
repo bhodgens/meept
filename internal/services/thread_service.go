@@ -105,48 +105,6 @@ func (t *ThreadService) ListThreads(ctx context.Context, req ListThreadsRequest)
 	return threads, nil
 }
 
-// UpdateThreadRequest contains parameters for updating a thread.
-type UpdateThreadRequest struct {
-	ThreadID       string `json:"thread_id"`
-	TopicLabel     string `json:"topic_label,omitempty"`
-	ConversationID string `json:"conversation_id,omitempty"`
-	Summary        string `json:"summary,omitempty"`
-	IsActive       *bool  `json:"is_active,omitempty"` // pointer to distinguish unset vs false
-}
-
-// UpdateThread updates an existing thread.
-func (t *ThreadService) UpdateThread(ctx context.Context, req UpdateThreadRequest) (*session.Thread, error) {
-	if t.store == nil {
-		return nil, wrapError("thread", "UpdateThread", ErrUnavailable)
-	}
-	if req.ThreadID == "" {
-		return nil, wrapError("thread", "UpdateThread", ErrInvalidInput)
-	}
-
-	thread, err := t.store.GetThread(ctx, req.ThreadID)
-	if err != nil {
-		return nil, wrapError("thread", "UpdateThread", err)
-	}
-
-	if req.TopicLabel != "" {
-		thread.TopicLabel = req.TopicLabel
-	}
-	if req.ConversationID != "" {
-		thread.ConversationID = req.ConversationID
-	}
-	if req.Summary != "" {
-		thread.Summary = req.Summary
-	}
-	if req.IsActive != nil {
-		thread.IsActive = *req.IsActive
-	}
-
-	if err := t.store.UpdateThread(ctx, thread); err != nil {
-		return nil, wrapError("thread", "UpdateThread", err)
-	}
-	return thread, nil
-}
-
 // DeleteThreadRequest contains parameters for deleting a thread.
 type DeleteThreadRequest struct {
 	ThreadID string `json:"thread_id"`

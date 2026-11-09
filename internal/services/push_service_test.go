@@ -16,12 +16,11 @@ func testBus() *bus.MessageBus {
 	}, slog.New(slog.DiscardHandler))
 }
 
-func TestNewPushService(t *testing.T) {
-	store := &fakeStore{}
+func TestNewPushServiceWithChannels_BusOnly(t *testing.T) {
 	b := testBus()
 	defer b.Close()
 
-	s := NewPushService(store, b, nil)
+	s := NewPushServiceWithChannels(b, nil, nil)
 	if s == nil {
 		t.Fatal("expected non-nil PushService")
 	}
@@ -31,11 +30,10 @@ func TestNewPushService(t *testing.T) {
 }
 
 func TestPush_NilRequest(t *testing.T) {
-	store := &fakeStore{}
 	b := testBus()
 	defer b.Close()
 
-	s := NewPushService(store, b, nil)
+	s := NewPushServiceWithChannels(b, nil, nil)
 	_, err := s.Push(context.Background(), nil)
 	if err == nil {
 		t.Error("expected error for nil request")
@@ -43,11 +41,10 @@ func TestPush_NilRequest(t *testing.T) {
 }
 
 func TestPush_EmptyContent(t *testing.T) {
-	store := &fakeStore{}
 	b := testBus()
 	defer b.Close()
 
-	s := NewPushService(store, b, nil)
+	s := NewPushServiceWithChannels(b, nil, nil)
 	_, err := s.Push(context.Background(), &PushRequest{
 		Content: "",
 	})
@@ -57,8 +54,7 @@ func TestPush_EmptyContent(t *testing.T) {
 }
 
 func TestPush_WithoutBus(t *testing.T) {
-	store := &fakeStore{}
-	s := NewPushService(store, nil, nil)
+	s := NewPushServiceWithChannels(nil, nil, nil)
 	_, err := s.Push(context.Background(), &PushRequest{
 		Content: "hello",
 	})
@@ -68,11 +64,10 @@ func TestPush_WithoutBus(t *testing.T) {
 }
 
 func TestPush_PublishesMessage(t *testing.T) {
-	store := &fakeStore{}
 	b := testBus()
 	defer b.Close()
 
-	s := NewPushService(store, b, nil)
+	s := NewPushServiceWithChannels(b, nil, nil)
 
 	result, err := s.Push(context.Background(), &PushRequest{
 		Content:    "test notification",
@@ -90,11 +85,10 @@ func TestPush_PublishesMessage(t *testing.T) {
 }
 
 func TestPush_Defaults(t *testing.T) {
-	store := &fakeStore{}
 	b := testBus()
 	defer b.Close()
 
-	s := NewPushService(store, b, nil)
+	s := NewPushServiceWithChannels(b, nil, nil)
 
 	result, err := s.Push(context.Background(), &PushRequest{
 		Content: "test",
@@ -106,11 +100,10 @@ func TestPush_Defaults(t *testing.T) {
 }
 
 func TestPush_MultiSession(t *testing.T) {
-	store := &fakeStore{}
 	b := testBus()
 	defer b.Close()
 
-	s := NewPushService(store, b, nil)
+	s := NewPushServiceWithChannels(b, nil, nil)
 
 	result, err := s.Push(context.Background(), &PushRequest{
 		Content:    "broadcast",
@@ -126,11 +119,10 @@ func TestPush_MultiSession(t *testing.T) {
 }
 
 func TestPush_ContextCanceled(t *testing.T) {
-	store := &fakeStore{}
 	b := testBus()
 	defer b.Close()
 
-	s := NewPushService(store, b, nil)
+	s := NewPushServiceWithChannels(b, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

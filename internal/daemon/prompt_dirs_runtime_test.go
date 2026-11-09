@@ -134,22 +134,28 @@ func TestWireProjectPromptTier_UpdatesOnProjectChange(t *testing.T) {
 
 	wantPrompts := filepath.Join(projBDir, ".meept", "prompts")
 	deadline := time.Now().Add(3 * time.Second)
-	for svc.ProjectDir() != wantPrompts {
+	for {
+		// The project tier is observable through lookup resolution (the
+		// ProjectDir getter was removed as dead code; Get is the real seam).
+		got, err := svc.Get("interview")
+		if err == nil && got.Content == "B" {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("ProjectDir = %q, want %q after project.set", svc.ProjectDir(), wantPrompts)
+			t.Fatalf("project tier never switched to %q after project.set", wantPrompts)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 
 	// The switched project tier must win in lookup resolution.
-	got, err := svc.Get("interview")
+	gotFinal, err := svc.Get("interview")
 	if err != nil {
 		t.Fatalf("Get after switch: %v", err)
 	}
-	if got.Content != "B" {
-		t.Errorf("Get after switch content = %q, want B", got.Content)
+	if gotFinal.Content != "B" {
+		t.Errorf("Get after switch content = %q, want B", gotFinal.Content)
 	}
-	if got.Tier != services.TierProject {
-		t.Errorf("Get after switch tier = %s, want project", got.Tier)
+	if gotFinal.Tier != services.TierProject {
+		t.Errorf("Get after switch tier = %s, want project", gotFinal.Tier)
 	}
 }

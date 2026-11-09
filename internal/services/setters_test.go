@@ -1,7 +1,6 @@
 package services
 
 import (
-	"database/sql"
 	"testing"
 )
 
@@ -9,10 +8,6 @@ import (
 // structs that accepts a pointer, interface, slice, map, or func argument is
 // nil-safe. See CLAUDE.md "Setter methods" coding practice.
 func TestAllSetters_NilSafe(t *testing.T) {
-	// SecurityService only needs a nil checker for this test (the setter
-	// under test does not dereference the receiver's existing fields).
-	secSvc := NewSecurityService(nil)
-
 	// TerminalService is constructed with NewTerminalService so that its
 	// shellTool field is non-nil, allowing SetKnownSafeCommands to forward
 	// without panicking on a nil receiver.
@@ -22,9 +17,6 @@ func TestAllSetters_NilSafe(t *testing.T) {
 		name    string
 		setFunc func()
 	}{
-		// SecurityService setters (internal/services/security_service.go)
-		{"SecurityService.SetAuditDB", func() { secSvc.SetAuditDB((*sql.DB)(nil)) }},
-
 		// TerminalService setters (internal/services/terminal_service.go)
 		// SetKnownSafeCommands forwards to shellTool.SetKnownSafeCommands;
 		// pass nil to verify the nil slice is handled safely.
