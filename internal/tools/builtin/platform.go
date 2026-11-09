@@ -320,6 +320,10 @@ func (t *DelegateTaskTool) Parameters() llm.FunctionParameters {
 				Type:        schemaTypeObject,
 				Description: "Optional JSON Schema to validate subagent output. When provided, the subagent is instructed to produce JSON matching this schema.",
 			},
+			"delegate_context": {
+				Type:        schemaTypeString,
+				Description: "Optional context handoff scope: \"full\" requests the child be seeded with this conversation's completed-turn transcript (only honored when the target agent's config sets delegate_context: full), \"task\" (default) starts the child from this task alone.",
+			},
 		},
 		Required: []string{"agent_id", "message"},
 	}
@@ -461,6 +465,7 @@ func (t *DelegateTaskTool) executeAsync(ctx context.Context, args map[string]any
 	agentID, _ := args["agent_id"].(string)
 	message, _ := args["message"].(string)
 	contextStr, _ := args["context"].(string)
+	mode, _ := args["delegate_context"].(string)
 
 	if agentID == "" {
 		return DelegateResult{Success: false, Error: "agent_id is required"}, nil
@@ -469,10 +474,27 @@ func (t *DelegateTaskTool) executeAsync(ctx context.Context, args map[string]any
 		return DelegateResult{Success: false, Error: "message is required"}, nil
 	}
 
+	// delegate_context (DSH-1): "full" maps onto the C1 manager's fork mode
+	// (seed from the parent transcript, GATED by the child agent's own
+	// delegate_context: full config); "task" / absent / unknown all map to
+	// the default spawn. The child-agent gate owns the final decision —
+	// requesting full on a task-scope child degrades at the manager with a
+	// visible Info line, never silently.
 	req := agent.DelegateRequest{
 		AgentID: agentID,
 		Message: message,
 		Context: contextStr,
+	}
+	switch mode {
+	case "full":
+		req.Mode = "fork"
+	case "", "task":
+	default:
+		return DelegateResult{
+			AgentID: agentID,
+			Success: false,
+			Error:   fmt.Sprintf("delegate_context must be \"full\" or \"task\" (default); got %q", mode),
+		}, nil
 	}
 	if schemaRaw, ok := args["output_schema"].(map[string]any); ok {
 		if schemaJSON, err := json.Marshal(schemaRaw); err == nil {

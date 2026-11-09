@@ -115,6 +115,19 @@ type AgentMetadata struct {
 	// "global". The underscore key parses natively via the yaml tag.
 	MemoryMaxScope string `yaml:"memory_max_scope,omitempty"`
 
+	// DelegateContext declares the context handoff scope when THIS agent
+	// is spawned as a delegated child (DSH-1 fork-seed gate):
+	// "" / "task" (default — the child starts from its task brief alone,
+	// exactly like any meept agent; a fork request degrades to a fresh
+	// brief) or "full" (a Mode:"fork" spawn seeds this child with the
+	// parent's completed-turn transcript snapshot at the spawn boundary).
+	// The knob lives on the DELEGATED agent's own configuration — the
+	// requesting parent cannot force transcript inheritance onto an
+	// agent that did not opt in. Unknown values fail safe to "task" at
+	// the fork gate (internal/agent delegate.go), mirroring
+	// memory_max_scope's fail-safe posture (no parse-time validation).
+	DelegateContext string `yaml:"delegate_context,omitempty"`
+
 	// MaxIterations is the maximum reasoning cycles.
 	MaxIterations int `yaml:"max_iterations,omitempty"`
 

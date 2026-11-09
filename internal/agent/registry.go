@@ -183,6 +183,12 @@ type AgentRegistry struct {
 	// the executor consults. Guarded by mu; written only at construction.
 	dynamicExposureEnabled bool
 
+	// seedChildConversation is the DSH-1 fork-seed adapter captured at
+	// construction: DelegateManager.SetForkSeedWriter binds it so a
+	// full-context fork child's seed is stamped onto its conversation
+	// before the first turn. Method value on the receiver; immutable.
+	seedChildConversation func(agentID, conversationID string, seed []llm.ChatMessage)
+
 	// Lazy-discovery fallback state (leaf 03-agent-recall-wiring):
 	// bundledAgentsPath is the path captured at construction so a
 	// post-boot discovery rescan uses the same tiers;
@@ -380,6 +386,16 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		codemodeEnabled:        cfg.CodemodeEnabled,
 		dynamicExposureEnabled: cfg.DynamicExposureEnabled,
 	}
+
+	// DSH-1 fork-seed: expose the conversation-seed adapter so a wired
+	// DelegateManager (SetForkSeedWriter(r.SeedChildConversation)) can
+	// materialize a full-context fork child's seed onto its conversation
+	// BEFORE the first turn. The adapter goes through SessionConversation
+	// (cache auto-vivify — the child's loop may never have run a turn), a
+	// fresh *Conversation, so no eviction hazard exists; the pre-stamped
+	// messages become the child's inherited history. No I/O under any lock
+	// (RestoreFromMessages is an in-memory copy).
+	r.seedChildConversation = r.SeedChildConversation
 
 	// Load global rules
 	if cfg.GlobalRules != "" {
@@ -1537,6 +1553,15 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.MemoryMaxScope = base.MemoryMaxScope
 	}
 
+	// DelegateContext: prefer AGENT.md if set (scalar replacement, DSH-1);
+	// omission keeps the base. The fork gate fails safe to "task" on an
+	// unknown value, so no parse-time validation here either.
+	if def.DelegateContext != "" {
+		merged.DelegateContext = def.DelegateContext
+	} else {
+		merged.DelegateContext = base.DelegateContext
+	}
+
 	// Verification: prefer AGENT.md when the re-loaded frontmatter carries a
 	// verification block; omission keeps the current config (D16 gap fix —
 	// previously only definitionToSpec wired this, so re-loads silently
@@ -1654,6 +1679,7 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		EscalationModel: def.EscalationModel,
 		RefusalModel:    def.RefusalModel,
 		MemoryMaxScope:  def.MemoryMaxScope,
+		DelegateContext: def.DelegateContext,
 		AdditionalTools: append([]string(nil), def.AdditionalTools...),
 		AvailableSkills: append([]string(nil), def.AvailableSkills...),
 		SkillTriggers:   copyStringMap(def.SkillTriggers),

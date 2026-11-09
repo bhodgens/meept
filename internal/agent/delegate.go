@@ -15,12 +15,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/id"
 )
 
@@ -115,6 +117,16 @@ type DelegateRequest struct {
 	Depth           int             `json:"depth,omitempty"` // max nesting, default 1
 }
 
+// childWantsForkSeed reports whether the TARGET child agent's own
+// configuration opts it into fork transcript seeding (DSH-1
+// delegate_context knob). Only "full" opts in: "" and "task" (the
+// default) keep the agent's ordinary fresh-brief posture, and any unknown
+// value fails SAFE to "task" — the parent's fork request can never force
+// transcript inheritance onto an agent that did not declare it.
+func childWantsForkSeed(spec *AgentSpec) bool {
+	return spec != nil && spec.DelegateContext == "full"
+}
+
 // DelegateResult is the C1 result shape; it expands the legacy platform.go
 // shape with ChildID + Status so a spawn returns the child handle immediately.
 type DelegateResult struct {
@@ -164,6 +176,18 @@ type DelegateManager struct {
 	descriptorFactory func(ChildRecord) ChildDescriptor                         // B6
 	persist           func(ChildRecord) error                                   // B6
 
+	// seedWriter installs the fork seed onto a child's conversation BEFORE
+	// its first turn runs (DSH-1). Conversation seeding is loop-internal
+	// state (the conversation cache lives on the AgentLoop), so the manager
+	// cannot do it directly; the registry wires the adapter at construction
+	// and the manager stays loop-free. Optional: nil leaves the seed riding
+	// the rendered brief alone (no conversation pre-seed).
+	seedWriter func(agentID, conversationID string, seed []llm.ChatMessage)
+
+	// logger is optional (nil = slog.Default()); it carries the DSH-1
+	// degradation line so a fork request on a task-scope child is visible.
+	logger *slog.Logger
+
 	// store is the daemon-owned durable child-descriptor store (B6), set once
 	// via SetStore. When wired, settle() persists each child's descriptor here
 	// (best-effort, never failing the child turn) so an interrupted child can
@@ -201,6 +225,33 @@ func (m *DelegateManager) SetRouteResolver(f func(ChildOptions, DelegateRequest)
 // transcript for IsolationSharedTranscript. nil keeps a fresh spawn default.
 func (m *DelegateManager) SetForkSeed(f func(*Conversation) []llm.ChatMessage) {
 	m.forkSeed = f
+}
+
+// SetForkSeedWriter installs the DSH-1 conversation-seed adapter (wired by
+// AgentRegistry construction): the adapter stamps a fork child's seed onto
+// its conversation before the first turn. nil keeps the brief-only path.
+func (m *DelegateManager) SetForkSeedWriter(f func(agentID, conversationID string, seed []llm.ChatMessage)) {
+	m.seedWriter = f
+}
+
+// log lazily resolves the manager's logger.
+func (m *DelegateManager) log() *slog.Logger {
+	if m.logger != nil {
+		return m.logger
+	}
+	return slog.Default()
+}
+
+// parentConversationFromCtx extracts the calling loop's live conversation
+// from the tool-execution context (tools.ContextWithConversation, injected
+// by executeToolCallsUngated next to the session id). Legacy callers
+// (unwired contexts, direct tool tests) yield nil — the fork path then
+// degrades to a fresh brief exactly as before this carrier existed.
+func parentConversationFromCtx(ctx context.Context) *Conversation {
+	if v, ok := tools.ConversationFromContext(ctx).(*Conversation); ok {
+		return v
+	}
+	return nil
 }
 
 // SetDescriptorFactory installs the B6 descriptor writer, stamped onto each
@@ -262,10 +313,34 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 
 	// Validate the spec exists BEFORE any child exists. A nil registry skips
 	// the check (unwired/test registries register children without execution).
+	var childSpec *AgentSpec
 	if m.reg != nil && mode != "acp" {
-		if _, ok := m.reg.GetSpec(req.AgentID); !ok {
+		spec, ok := m.reg.GetSpec(req.AgentID)
+		if !ok {
 			return DelegateResult{AgentID: req.AgentID, Success: false, Error: "agent not found: " + req.AgentID}, nil
 		}
+		childSpec = spec
+	}
+
+	// DSH-1 fork-seed gate: a Mode:"fork" request seeds the child from the
+	// parent's completed-turn transcript ONLY when the TARGET child agent's
+	// own configuration opts in (delegate_context: full). The default child
+	// ("task" scope) is treated exactly like any meept agent given a task —
+	// the fork request degrades to a fresh brief, with one Info line naming
+	// the agent so the degradation is visible. The parent conversation is
+	// extracted from the tool-execution context (tools.ContextWithConversation);
+	// without it even a full-context child cannot seed (no source to slice).
+	parentConv := parentConversationFromCtx(ctx)
+	var forkSeedMsgs []llm.ChatMessage
+	if mode == "fork" && childWantsForkSeed(childSpec) {
+		forkSeedMsgs = m.forkSeed(parentConv)
+		if forkSeedMsgs == nil && parentConv != nil && m.forkSeed != nil {
+			m.log().Info("delegate fork: parent has no completed turn to seed; child starts fresh",
+				"agent_id", req.AgentID)
+		}
+	} else if mode == "fork" {
+		m.log().Info("delegate fork degraded to fresh brief: child agent delegate_context is task (default)",
+			"agent_id", req.AgentID)
 	}
 
 	// Depth: default 1, never above the structural ceiling.
@@ -293,6 +368,7 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 		State:           ChildStateRunning,
 		CreatedAt:       now,
 	}
+	rec.seed = forkSeedMsgs
 
 	// Stamp the child descriptor (B6 hook if set, else the built-in).
 	if df := m.descriptorFactory; df != nil {
@@ -361,10 +437,23 @@ func (m *DelegateManager) runChild(ctx context.Context, req DelegateRequest, chi
 		return
 	}
 
+	// DSH-1: materialize a full-context fork child's seed into its OWN
+	// conversation BEFORE the first turn (the loop cache auto-vivifies on
+	// RunOnce, so these pre-stamped messages are its history), and prepend
+	// a fork preamble to the task brief so the child knows it continues
+	// the parent's work. A task-scope child (nil seed) runs the plain
+	// brief byte-identically. Best-effort: a nil seedWriter (unwired
+	// adapter) leaves the conversation unseeded.
 	fullMessage, err := m.childPrompt(rec, req)
 	if err != nil {
 		m.settle(childID, ChildStateFailed, "", err.Error())
 		return
+	}
+	if len(rec.seed) > 0 {
+		if m.seedWriter != nil {
+			m.seedWriter(spec.ID, rec.ConversationID, rec.seed)
+		}
+		fullMessage = forkSeedPreamble(len(rec.seed)) + fullMessage
 	}
 
 	resp, err := m.reg.RunAgent(ctx, spec.ID, fullMessage, rec.ConversationID)
@@ -409,27 +498,24 @@ func (m *DelegateManager) runACPChild(ctx context.Context, req DelegateRequest, 
 	m.settle(childID, ChildStateCompleted, resp, "")
 }
 
+// forkSeedPreamble returns the fork-mode preamble naming the inherited
+// turn count: the child's conversation already carries the parent's
+// completed turns (conversation-seeded), so the preamble orients it and
+// the task brief follows.
+func forkSeedPreamble(turnMsgs int) string {
+	return fmt.Sprintf("You are continuing prior work. Your conversation below already carries %d message(s) inherited from the parent's completed turns; treat them as your own history, then perform the NEW task that follows.\n\n", turnMsgs)
+}
+
 // childPrompt builds the child's full input message from the request, mirroring
 // the legacy delegate_task prompt construction (structured spawn brief +
 // optional caller context + optional output-schema directive). In fork mode it
-// seeds the child with the parent's completed-turn prefix, CAPTURED ONCE at
-// this spawn invocation (each spawn runs childPrompt a single time in
-// runChild), so the child replays a stable snapshot rather than re-forking the
-// parent's newer history. The seed first computed is stashed on the record and
-// reused on any re-render — never recomputed.
+// rides the seed captured ONCE at Spawn (DSH-1 gate: only a full-context
+// child carries a non-nil seed; Spawn stashed it on the record so this
+// re-render never recomputes from the parent's newer history).
 func (m *DelegateManager) childPrompt(rec ChildRecord, req DelegateRequest) (string, error) {
 	var fullMessage string
 	switch rec.Mode {
 	case "fork":
-		// B2: materialize the parent-transcript seed once at spawn. The
-		// concrete *Conversation is threaded through Spawn's
-		// parent-session context by callers that hold it; the default
-		// hook (completedTurnPrefix, nil-safe) yields an empty seed for a
-		// nil conversation, falling back to a fresh shared-transcript
-		// brief. Best-effort by contract: never a hard requirement.
-		if rec.seed == nil && m.forkSeed != nil {
-			rec.seed = m.forkSeed(nil)
-		}
 		spawn := BuildSpawnContext(IsolationSharedTranscript, req.Message, nil, nil, rec.seed)
 		fullMessage = RenderSpawnContext(spawn)
 	default: // spawn
@@ -457,6 +543,21 @@ func (m *DelegateManager) Children(parentSessionID string) []ChildRecord {
 		if e.rec.ParentSessionID == parentSessionID {
 			out = append(out, e.rec)
 		}
+	}
+	return out
+}
+
+// AllChildren returns a snapshot (copies) of every registered child across
+// ALL parent sessions, in no particular order. Read-only report surface for
+// the delegate.status RPC (DSH-9d): the operator queries by session id OR
+// agent id, so the manager needs the unfiltered view; callers filter. No
+// secret material rides ChildRecord (the seed and the live session do not).
+func (m *DelegateManager) AllChildren() []ChildRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ChildRecord, 0, len(m.children))
+	for _, e := range m.children {
+		out = append(out, e.rec)
 	}
 	return out
 }

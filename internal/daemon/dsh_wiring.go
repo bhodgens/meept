@@ -25,6 +25,7 @@ import (
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/scheduler"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/pkg/models"
@@ -251,6 +252,11 @@ func wireDelegateProvider(c *Components, cfg *config.Config, msgBus *bus.Message
 
 	dm := agent.NewDelegateManager(c.AgentRegistry, delegateBusPublisher(msgBus, logger), nil)
 	dm.SetRouteResolver(delegateRouteResolver(cfg, c.LLMResolver, logger))
+	// DSH-1 fork-seed: bind the registry's conversation-seed adapter so a
+	// full-context fork child's seed is stamped onto its conversation before
+	// its first turn (delegate.go's gate already restricts seeding to agents
+	// whose own config sets delegate_context: full).
+	dm.SetForkSeedWriter(c.AgentRegistry.ForkSeedWriter())
 	if c.SessionStore != nil {
 		// B6 durable child-descriptor store (SaveChildDescriptor/Get...): each
 		// settled child persists its descriptor here (best-effort) so an
@@ -396,12 +402,20 @@ func delegateBusPublisher(b *bus.MessageBus, logger *slog.Logger) func(string, a
 // and reconciles the dispatcher's /plan branch (which consults the controller
 // as a toggle/steer rather than force-creating a plan).
 func wirePlanMode(c *Components, logger *slog.Logger) {
-	// Persistence adapter: the session store exposes no plan_mode accessor
-	// (leaf 04 defined the PlanModePersistence seam but shipped no durable
-	// column; adding one is a session-store change outside daemon ownership).
-	// A memory-backed adapter satisfies the seam and keeps the toggle durable
-	// FOR THE PROCESS; a dedicated session.Store column would swap it in place.
-	ctrl := builtin.NewPlanModeController(newPlanModeMemoryPersistence())
+	// Persistence adapter: the session store carries the durable plan_mode
+	// column (DSH-9c: Store.SetPlanMode / Session.PlanMode), so the
+	// toggle survives a daemon restart. When the store is unavailable
+	// (or the session row does not exist yet — brand-new sessions before
+	// their first persist), the adapter falls back to the process-local
+	// memory map so the toggle still works within the process.
+	// planModeStorePersistence satisfies builtin.PlanModePersistence over
+	// the session store; the controller's GetPlanMode consults it on an
+	// in-memory cache miss (builtin.PlanModeController.PlanMode).
+	var persist builtin.PlanModePersistence = newPlanModeMemoryPersistence()
+	if c.SessionStore != nil {
+		persist = newPlanModeStorePersistence(c.SessionStore, newPlanModeMemoryPersistence())
+	}
+	ctrl := builtin.NewPlanModeController(persist)
 	c.PlanModeController = ctrl
 
 	// Construct exit_plan_mode EXPLICITLY and bind the daemon's real plan gate
@@ -457,11 +471,12 @@ func (b planModeCommandBridge) HandlePlanCommand(sessionID, input string) (steer
 	return cr.Steer, cr.Message, true
 }
 
-// planModeMemoryPersistence is a process-local builtin.PlanModePersistence. It
-// makes the per-session plan_mode toggle durable for the controller's lifetime
-// (satisfying the seam a durable store accessor would fill) but is NOT
-// cross-restart durable — the session store exposes no plan_mode accessor. A
-// later session.Store column can replace this in place.
+// planModeMemoryPersistence is a process-local builtin.PlanModePersistence.
+// It is the FALLBACK lane of the plan-mode persistence adapter: it keeps the
+// per-session toggle working when the session store is unavailable or the
+// session row does not exist yet (brand-new sessions). It is NOT
+// cross-restart durable; the store-backed adapter (planModeStorePersistence)
+// owns durability.
 type planModeMemoryPersistence struct {
 	mu sync.Mutex
 	m  map[string]bool
@@ -485,3 +500,46 @@ func (p *planModeMemoryPersistence) SetPlanMode(sessionID string, on bool) error
 }
 
 var _ builtin.PlanModePersistence = (*planModeMemoryPersistence)(nil)
+
+// planModeStorePersistence is the DURABLE builtin.PlanModePersistence
+// (DSH-9c): writes land in the session store's plan_mode column via
+// session.Store.SetPlanMode so the toggle survives a daemon restart, and
+// reads consult the store (Session.PlanMode via Get) so a fresh process
+// restores the flag instead of silently resetting to OFF.
+//
+// Fallback contract: when the store has no row for the session (a brand-new
+// session before its first persist — SetPlanMode errors with "session not
+// found") both directions degrade to the memory lane, so the toggle still
+// works within the process without resurrecting stale cross-restart state
+// for a session that was never persisted. Store unavailability is logged
+// best-effort, never fatal to the toggle caller.
+type planModeStorePersistence struct {
+	store session.Store
+	mem   *planModeMemoryPersistence
+}
+
+func newPlanModeStorePersistence(store session.Store, mem *planModeMemoryPersistence) *planModeStorePersistence {
+	return &planModeStorePersistence{store: store, mem: mem}
+}
+
+func (p *planModeStorePersistence) GetPlanMode(sessionID string) (bool, error) {
+	if sess := p.store.Get(sessionID); sess != nil {
+		return sess.PlanMode, nil
+	}
+	// No session row (or store unavailable): fall back to the process-local
+	// lane so the in-process toggle survives.
+	return p.mem.GetPlanMode(sessionID)
+}
+
+func (p *planModeStorePersistence) SetPlanMode(sessionID string, on bool) error {
+	if err := p.store.SetPlanMode(sessionID, on); err != nil {
+		// New session without a store row (or a store write failure): keep
+		// the toggle functional in-process via the memory lane.
+		return p.mem.SetPlanMode(sessionID, on)
+	}
+	// Keep the memory lane in sync so a later Get that falls back to it
+	// (row deleted mid-process) agrees with the durable value.
+	return p.mem.SetPlanMode(sessionID, on)
+}
+
+var _ builtin.PlanModePersistence = (*planModeStorePersistence)(nil)

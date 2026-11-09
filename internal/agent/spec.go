@@ -144,6 +144,15 @@ type AgentSpec struct {
 	// to project (resolveScopeInputs warns). AGENT.md frontmatter key:
 	// memory_max_scope.
 	MemoryMaxScope string `json:"memory_max_scope,omitempty" yaml:"memory_max_scope,omitempty"`
+	// DelegateContext declares the context handoff scope when this agent
+	// is spawned as a delegated child (DSH-1 fork-seed gate): "" or
+	// "task" (default — a fork request degrades to a fresh task brief),
+	// "full" (a Mode:"fork" spawn seeds the child with the parent's
+	// completed-turn transcript snapshot). The knob lives on the
+	// DELEGATED agent's configuration; the parent cannot opt an agent in
+	// from the request side. Unknown values fail safe to "task" at the
+	// fork gate. AGENT.md frontmatter key: delegate_context.
+	DelegateContext string `json:"delegate_context,omitempty" yaml:"delegate_context,omitempty"`
 	// AdditionalTools are tools beyond the baseline that this agent has access to.
 	AdditionalTools []string `json:"additional_tools,omitempty"`
 	// ToolScopeLimit caps how many tools are offered to this agent in the
