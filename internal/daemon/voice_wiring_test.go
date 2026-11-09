@@ -765,7 +765,7 @@ func TestPhoneHoldReleaseMarksEnded(t *testing.T) {
 	dbPath := filepath.Join(config.MeeptPath("voice"), "calls.db")
 
 	const inCCID = "cc-phone-in"
-	holdPhoneCall(w.Employee, inCCID, "phone-employee", "hold-caller", voice.DirectionIncoming)
+	holdPhoneCall(w.Employee, inCCID, "phone-employee", "hold-caller", voice.DirectionIncoming, false)
 	if got := phoneCallState(t, dbPath, inCCID); got != "live" {
 		t.Fatalf("inbound row state = %q, want live (OnCallStart)", got)
 	}

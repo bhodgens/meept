@@ -73,3 +73,17 @@ func ResolveProfile(cfg config.VoiceConfig, employeeID, ttsVoiceOverride, leg st
 	p.TtsVoice = firstNonEmpty(ttsVoiceOverride, p.TtsVoice)
 	return p
 }
+
+// FreshSessionFor resolves one call's fresh-session-per-call flag
+// (fresh-session plan leaf 02): the employee_leg row's tri-state
+// FreshSession overrides the global voice.fresh_session_per_call; an
+// absent (nil) row value inherits the global. Pure config read — the
+// daemon computes it once per call and passes the bool to
+// Binding.OnCallStart, so internal/voice's binding layer stays free of
+// per-call config plumbing (mirrors the ResolveProfile shape).
+func FreshSessionFor(cfg config.VoiceConfig, employeeID string) bool {
+	if entry := employeeEntry(cfg, employeeID); entry != nil && entry.FreshSession != nil {
+		return *entry.FreshSession
+	}
+	return cfg.FreshSessionPerCall
+}

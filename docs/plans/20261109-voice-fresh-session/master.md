@@ -91,7 +91,7 @@ owns the choice; must not delay the FIRST burst beyond ~250 ms).
 | Leaf | Status | Notes |
 |------|--------|-------|
 | 01 | DONE | fresh_session_per_call + employee_leg.fresh_session (*bool tri-state) + template keys; gofmt alignment note: keep the in-struct comment (gofmt -w absorbed it cleanly this time) |
-| 02 | PENDING | |
+| 02 | IMPLEMENTED | binding.go: OnCallStart trailing variadic ...bool freshSession (documented seam choice; signalleg's compile-pinned voiceBindingSeam mirrored); FreshSessionName shape ("voice <emp> <ccid>", space-separated so it can never hijack the shared lookup); LocalDeps.FreshSession closure seam wired daemon-side to voice.FreshSessionFor (voice_wiring.go LocalDeps + both holdPhoneCall sites); FreshSessionFor in profile.go + matrix test; binding fresh test; e2e TestVoiceLocalFreshSessionPerCall + flag-OFF twin (whole voice-local suite green, unit voice/daemon/signalleg green) |
 | 03 | DONE | The jitter was NOT buffering: oto context hardcoded 22050 Hz while the leg streams L16@16k (oto plays bytes at context rate, no resample) -> ~38% fast. resolveSampleRate + MicSampleRate at the seam; TestAudioPlayerSampleRateConfig pins it. Pre-commit consumer gate additionally required the dsh SetPlanMode method on internal/services fakeStore (broken at HEAD by the sibling DSH-9c commit; fixed here) |
 | 04 | PENDING | |
 

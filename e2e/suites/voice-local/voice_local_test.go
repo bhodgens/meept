@@ -399,7 +399,10 @@ func init() {
 
 // bootLocalStack starts a scratch daemon with the local leg enabled, the
 // real-audio fake child, and the subprocess shims on the daemon's PATH.
-func bootLocalStack(t *testing.T, fake *fakeTelnyx, modelPath string) (*harness.Stack, string) {
+// The optional fresh flag (fresh-session plan leaf 02) overlays
+// [voice].fresh_session_per_call; omitted = the default (false, shared
+// session per (employee,target)).
+func bootLocalStack(t *testing.T, fake *fakeTelnyx, modelPath string, fresh ...bool) (*harness.Stack, string) {
 	t.Helper()
 	childBin := buildRealAudioChild(t, t.TempDir())
 	voiceExtras := map[string]any{
@@ -417,6 +420,9 @@ func bootLocalStack(t *testing.T, fake *fakeTelnyx, modelPath string) (*harness.
 			"enabled":      true,
 			"barge_in_rms": 3000,
 		},
+	}
+	if len(fresh) > 0 && fresh[0] {
+		voiceExtras["fresh_session_per_call"] = true
 	}
 	opts := []harness.StartOption{
 		fake.overlayOptions(voiceExtras),
@@ -1069,4 +1075,106 @@ func TestVoiceLocalSpawnsChildWithoutPhone(t *testing.T) {
 		t.Fatalf("voice.local.end result = %v, want ok:true", end)
 	}
 	awaitLogLine(t, s, "voice call ended", 15*time.Second)
+}
+
+// awaitCallRowEnded polls calls.db until ccid's row is 'ended' with a
+// bound session_id (the release fan-out writes ended via ReleaseHook ->
+// OnCallEnd AFTER the registry release, so a settled row also proves the
+// slot is free for the next open). Fresh-session plan leaf 02: the ended
+// flow must ride fresh sessions exactly like shared ones.
+func awaitCallRowEnded(t *testing.T, s *harness.Stack, ccid string) callRow {
+	t.Helper()
+	dbPath := filepath.Join(s.MeeptHome, "voice", "calls.db")
+	deadline := time.Now().Add(25 * time.Second)
+	for time.Now().Before(deadline) {
+		if rows, err := queryCallsDB(t, dbPath, ccid); err == nil && len(rows) == 1 &&
+			rows[0].state == "ended" && rows[0].sessionID != "" {
+			return rows[0]
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("calls.db row for %s never reached 'ended' with a bound session_id within 25s", ccid)
+	return callRow{}
+}
+
+// endLocalCall ends one live call and waits for the row to settle,
+// returning the settled calls.db row.
+func endLocalCall(t *testing.T, s *harness.Stack, ccid string) callRow {
+	t.Helper()
+	endClient := harness.DialRPC(t, s.SocketPath)
+	end := endClient.CallResult("voice.local.end", map[string]any{"call_id": ccid})
+	if end["ok"] != true {
+		t.Fatalf("voice.local.end(%s) result = %v, want ok:true", ccid, end)
+	}
+	return awaitCallRowEnded(t, s, ccid)
+}
+
+// TestVoiceLocalFreshSessionPerCall (fresh-session plan leaf 02, T2):
+// with [voice].fresh_session_per_call = true, two successive local opens
+// for the SAME (employee, label) — the first ended via voice.local.end —
+// land on DIFFERENT session ids, and both calls.db rows still reach
+// 'ended' (the Hold/ReleaseHook/OnCallEnd flow is untouched by fresh
+// session resolution).
+func TestVoiceLocalFreshSessionPerCall(t *testing.T) {
+	_, modelDir := shimPath(t)
+	modelPath := writePiperModel(t, modelDir)
+	fake := newFakeTelnyx(t)
+	s, _ := bootLocalStack(t, fake, modelPath, true)
+
+	const (
+		employee = "emp-local-fresh"
+		label    = "freshbox"
+	)
+	rpcCreateEmployee(t, s, employee)
+
+	open1 := rpcOpenLocalCall(t, s, employee, label)
+	ccid1, _ := open1["call_id"].(string)
+	sid1, _ := open1["session_id"].(string)
+	row1 := endLocalCall(t, s, ccid1).sessionID
+	if row1 != sid1 {
+		t.Fatalf("call 1 row session_id = %q, open returned %q", row1, sid1)
+	}
+
+	open2 := rpcOpenLocalCall(t, s, employee, label)
+	ccid2, _ := open2["call_id"].(string)
+	sid2, _ := open2["session_id"].(string)
+	row2 := endLocalCall(t, s, ccid2).sessionID
+	if row2 != sid2 {
+		t.Fatalf("call 2 row session_id = %q, open returned %q", row2, sid2)
+	}
+
+	if sid2 == sid1 {
+		t.Fatalf("fresh_session_per_call=true reused session %q across calls — each call must get a NEW session (the snowball defect)", sid1)
+	}
+}
+
+// TestVoiceLocalSharedSessionByDefault is the flag-OFF twin: the default
+// (fresh_session_per_call absent = false) keeps today's behavior — two
+// successive opens for the same (employee, label) resolve the SAME shared
+// session.
+func TestVoiceLocalSharedSessionByDefault(t *testing.T) {
+	_, modelDir := shimPath(t)
+	modelPath := writePiperModel(t, modelDir)
+	fake := newFakeTelnyx(t)
+	s, _ := bootLocalStack(t, fake, modelPath)
+
+	const (
+		employee = "emp-local-shared"
+		label    = "sharedbox"
+	)
+	rpcCreateEmployee(t, s, employee)
+
+	open1 := rpcOpenLocalCall(t, s, employee, label)
+	ccid1, _ := open1["call_id"].(string)
+	sid1, _ := open1["session_id"].(string)
+	endLocalCall(t, s, ccid1)
+
+	open2 := rpcOpenLocalCall(t, s, employee, label)
+	ccid2, _ := open2["call_id"].(string)
+	sid2, _ := open2["session_id"].(string)
+	endLocalCall(t, s, ccid2)
+
+	if sid2 != sid1 {
+		t.Fatalf("flag OFF must reuse the shared session across calls: got %q then %q (byte-identical pre-leaf-02 behavior expected)", sid1, sid2)
+	}
 }

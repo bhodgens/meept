@@ -293,4 +293,72 @@ func TestSessionNameShape(t *testing.T) {
 	if got := SessionName("emp-1", "+15551230009"); got != "voice:emp-1:+15551230009" {
 		t.Fatalf("SessionName = %q", got)
 	}
+	if got := FreshSessionName("emp-1", "cc-9"); got != "voice emp-1 cc-9" {
+		t.Fatalf("FreshSessionName = %q", got)
+	}
+}
+
+// fresh-session plan leaf 02: with the per-call fresh flag the binding
+// SKIPS the (employee,target) lookup and creates a NEW session even when
+// the shared named session already exists.
+func TestBindingFreshSessionPerCall(t *testing.T) {
+	b, sessions, _, _ := newTestBinding(t)
+	ctx := context.Background()
+
+	// Shared call first: creates the (employee, number) session.
+	shared, err := b.OnCallStart(ctx, "cc-1", "+155****0010", "emp-h", DirectionIncoming, DayBrief{})
+	if err != nil {
+		t.Fatalf("OnCallStart shared: %v", err)
+	}
+	if len(sessions.created) != 1 {
+		t.Fatalf("created %d sessions after shared start; want 1", len(sessions.created))
+	}
+
+	// Fresh call for the SAME pair: a NEW session, not the shared one.
+	fresh1, err := b.OnCallStart(ctx, "cc-2", "+155****0010", "emp-h", DirectionIncoming, DayBrief{}, true)
+	if err != nil {
+		t.Fatalf("OnCallStart fresh: %v", err)
+	}
+	if fresh1 == shared {
+		t.Fatal("fresh=true must not reuse the shared session")
+	}
+	if len(sessions.created) != 2 {
+		t.Fatalf("created %d sessions after fresh start; want 2", len(sessions.created))
+	}
+	if got := sessions.renamed[fresh1]; got != FreshSessionName("emp-h", "cc-2") {
+		t.Errorf("fresh session name = %q; want %q", got, FreshSessionName("emp-h", "cc-2"))
+	}
+	if sessions.employee[fresh1] != "emp-h" {
+		t.Errorf("fresh session employee_id = %q; want emp-h", sessions.employee[fresh1])
+	}
+
+	// A second fresh call: ANOTHER new session (per-call, not per-pair).
+	fresh2, err := b.OnCallStart(ctx, "cc-3", "+155****0010", "emp-h", DirectionIncoming, DayBrief{}, true)
+	if err != nil {
+		t.Fatalf("OnCallStart fresh 2: %v", err)
+	}
+	if fresh2 == fresh1 || fresh2 == shared {
+		t.Fatalf("each fresh call must mint its own session (got fresh2=%q fresh1=%q shared=%q)", fresh2, fresh1, shared)
+	}
+
+	// A fresh name never satisfies the shared lookup: a later NON-fresh
+	// call (flag omitted AND flag=false) still resolves the original
+	// shared session — byte-identical behavior.
+	reuse, err := b.OnCallStart(ctx, "cc-4", "+155****0010", "emp-h", DirectionOutgoing, DayBrief{})
+	if err != nil {
+		t.Fatalf("OnCallStart omitted flag: %v", err)
+	}
+	if reuse != shared {
+		t.Fatalf("omitted-flag call = %q; want the shared %q (fresh sessions must not hijack the shared lookup)", reuse, shared)
+	}
+	reuse2, err := b.OnCallStart(ctx, "cc-5", "+155****0010", "emp-h", DirectionOutgoing, DayBrief{}, false)
+	if err != nil {
+		t.Fatalf("OnCallStart flag=false: %v", err)
+	}
+	if reuse2 != shared {
+		t.Fatalf("flag=false call = %q; want the shared %q", reuse2, shared)
+	}
+	if len(sessions.created) != 3 {
+		t.Fatalf("created %d sessions total; want 3 (1 shared + 2 fresh)", len(sessions.created))
+	}
 }

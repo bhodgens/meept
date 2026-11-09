@@ -294,7 +294,8 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		// do not keep AcquireCallHold's release func (a second release
 		// would be a double-unlock without the once-guard, and the
 		// contract is hook-only, matching the local wiring).
-		holdPhoneCall(phoneHold, ev.CallControlID, cfg.DefaultEmployee, ev.From, voice.DirectionIncoming)
+		holdPhoneCall(phoneHold, ev.CallControlID, cfg.DefaultEmployee, ev.From, voice.DirectionIncoming,
+			voice.FreshSessionFor(cfg, cfg.DefaultEmployee))
 		return func() {}, nil
 	}
 	manager := voice.NewManager(voice.ManagerConfig{
@@ -380,7 +381,8 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			// employee cannot happen (WireVoiceEmployee already
 			// returned). Release is the manager hook, not this closure.
 			Hold: func(ccid, emp string) {
-				holdPhoneCall(employee, ccid, emp, livePhoneTarget(registry, ccid), voice.DirectionOutgoing)
+				holdPhoneCall(employee, ccid, emp, livePhoneTarget(registry, ccid), voice.DirectionOutgoing,
+					voice.FreshSessionFor(cfg, emp))
 			},
 		}, tel, manager, registry, deps.Effects, audit, vlog.With("sub", "dialer"))
 	}
@@ -447,6 +449,13 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			},
 			Profile: func(employeeID string) voice.Profile {
 				return voice.ResolveProfile(cfg, employeeID, "", voice.LegLocal)
+			},
+			// Fresh-session flag (fresh-session plan leaf 02): resolve
+			// global voice.fresh_session_per_call + the employee_leg
+			// override once per call, daemon-side, so the binding just
+			// receives the computed bool (mirrors the Profile closure).
+			FreshSession: func(employeeID string) bool {
+				return voice.FreshSessionFor(cfg, employeeID)
 			},
 			// Goal-hold seam (AcquireCallHold gap closure): every opened
 			// local call acquires the per-employee hold so the release
@@ -773,7 +782,12 @@ func (w *VoiceWiring) spliceHangup(ccid, reason string) {
 // a live binding entry, OnCallEnd is a no-op and the row cannot reach ended,
 // so the start has to land here — the phone leg had no other OnCallStart
 // call site.
-func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction string) {
+//
+// fresh (fresh-session plan leaf 02): the caller resolves the per-call
+// fresh-session flag from the voice config (voice.FreshSessionFor) and
+// passes it through to the binding; false is byte-identical to the
+// pre-leaf-02 shared-session behavior.
+func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction string, fresh bool) {
 	if emp == nil || ccid == "" || employeeID == "" {
 		return
 	}
@@ -783,7 +797,7 @@ func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err := emp.Binding.OnCallStart(ctx, ccid, number, employeeID, direction, voice.DayBrief{})
+	_, err := emp.Binding.OnCallStart(ctx, ccid, number, employeeID, direction, voice.DayBrief{}, fresh)
 	if err != nil && emp.logger != nil {
 		emp.logger.Warn("voice wiring: phone OnCallStart failed (call continues unbound)",
 			"ccid", ccid, "direction", direction, "error", err)

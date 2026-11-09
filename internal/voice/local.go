@@ -105,6 +105,15 @@ type LocalDeps struct {
 	// Nil falls back to the empty profile (vendor defaults apply
 	// child-side).
 	Profile ProfileResolver
+	// FreshSession resolves the per-call fresh-session flag for the
+	// binding (fresh-session plan leaf 02): true makes
+	// Binding.OnCallStart create a NEW per-call session instead of
+	// reusing the shared (employee,target) one. The daemon wires it to
+	// voice.FreshSessionFor over the live config (same closure shape as
+	// Profile, so the global + per-employee override resolves once per
+	// call outside the binding). Nil degrades to false (shared session,
+	// byte-identical to the pre-leaf-02 behavior).
+	FreshSession func(employeeID string) bool
 	// Hold is the daemon-glue goal-hold seam (AcquireCallHold). The leg
 	// invokes it once per successfully-opened call so the release
 	// fan-out's ReleaseHook (internal/daemon/voice_employee.go) sees the
@@ -407,7 +416,13 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 		}
 	}
 	if l.deps.Binding != nil {
-		sid, serr := l.deps.Binding.OnCallStart(ctx, ccid, target, employeeID, "local", brief)
+		// Fresh-session flag (leaf 02): resolved once per call via the
+		// daemon-wired closure (nil seam = false = today's behavior).
+		var fresh bool
+		if l.deps.FreshSession != nil {
+			fresh = l.deps.FreshSession(employeeID)
+		}
+		sid, serr := l.deps.Binding.OnCallStart(ctx, ccid, target, employeeID, "local", brief, fresh)
 		if serr != nil {
 			l.log.Warn("voice: local leg: binding OnCallStart failed (call continues unbound)", "ccid", ccid, "err", serr)
 		} else {

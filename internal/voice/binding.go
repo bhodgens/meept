@@ -60,6 +60,16 @@ func SessionName(employeeID, number string) string {
 	return "voice:" + employeeID + ":" + number
 }
 
+// FreshSessionName is the per-call session NAME used when a call opens a
+// fresh session (voice.fresh_session_per_call, fresh-session plan leaf 02).
+// The shape deliberately differs from SessionName ("voice " spaces vs
+// "voice:" colons), so a fresh session can NEVER satisfy the shared
+// (employee, target) lookup on a later call - fresh calls do not
+// snowball, shared calls never collide with them.
+func FreshSessionName(employeeID, ccid string) string {
+	return "voice " + employeeID + " " + ccid
+}
+
 // SessionHandle carries BOTH identity keys of the bound meept session
 // (session_id and conversation_id are distinct; new code handles both).
 // EmployeeID is the call's bound employee id: the daemon turn runner
@@ -203,11 +213,28 @@ func isNilTyped(v any) bool {
 // (number, employee), binds employee_id on it, records the call row, and
 // registers per-call state. The brief itself is injected lazily on the
 // first RunTurn (the caller supplies it once here).
-func (b *Binding) OnCallStart(ctx context.Context, ccid, number, employeeID, direction string, brief DayBrief) (string, error) {
+//
+// SEAM CHOICE (fresh-session plan leaf 02): the per-call fresh flag rides
+// a trailing variadic bool — the same least-invasive shape as
+// LocalLeg.Open's voiceOverride — so every EXISTING caller compiles and
+// behaves byte-identically when it is omitted or false. When
+// freshSession[0] is true the (employee,target) lookup is skipped
+// entirely and a NEW session named FreshSessionName(employeeID, ccid) is
+// created, so the call's turns never append to the shared conversation
+// (the session-snowball fix). The calls.db row, the goal hold, and the
+// release fan-out are unchanged: they key off ccid, never off session
+// resolution.
+func (b *Binding) OnCallStart(ctx context.Context, ccid, number, employeeID, direction string, brief DayBrief, freshSession ...bool) (string, error) {
 	if ccid == "" {
 		return "", errors.New("voice binding: call control id is required")
 	}
-	sess, err := b.resolveSession(employeeID, number)
+	var sess SessionHandle
+	var err error
+	if len(freshSession) > 0 && freshSession[0] {
+		sess, err = b.createFreshSession(employeeID, ccid)
+	} else {
+		sess, err = b.resolveSession(employeeID, number)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -369,6 +396,27 @@ func (b *Binding) resolveSession(employeeID, number string) (SessionHandle, erro
 	}
 	if err := b.deps.Sessions.SetEmployeeID(sess.ID, employeeID); err != nil {
 		return SessionHandle{}, fmt.Errorf("voice binding: bind employee on %s: %w", sess.ID, err)
+	}
+	return sess, nil
+}
+
+// createFreshSession creates a NEW per-call session named
+// FreshSessionName(employeeID, ccid) and binds employee_id on it. No
+// lookup, no resolveMu: there is nothing to race — the name carries the
+// per-call-unique ccid, so it can never match an existing session and the
+// fresh name shape can never satisfy the shared (employee,target) lookup
+// on a later call (byte-identical shared behavior across fresh calls).
+func (b *Binding) createFreshSession(employeeID, ccid string) (SessionHandle, error) {
+	name := FreshSessionName(employeeID, ccid)
+	sess, err := b.deps.Sessions.Create("voice call")
+	if err != nil {
+		return SessionHandle{}, fmt.Errorf("voice binding: create fresh session: %w", err)
+	}
+	if err := b.deps.Sessions.UpdateName(sess.ID, name); err != nil {
+		return SessionHandle{}, fmt.Errorf("voice binding: name fresh session %s: %w", sess.ID, err)
+	}
+	if err := b.deps.Sessions.SetEmployeeID(sess.ID, employeeID); err != nil {
+		return SessionHandle{}, fmt.Errorf("voice binding: bind employee on fresh %s: %w", sess.ID, err)
 	}
 	return sess, nil
 }

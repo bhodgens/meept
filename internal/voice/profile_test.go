@@ -106,4 +106,49 @@ func TestEmployeeLegConfigDecodes(t *testing.T) {
 	if e.Employee != "echo" || e.Leg != "local" || e.TTSVoice != "v" || e.TTSModel != "m" {
 		t.Fatalf("entry fields wrong: %+v", e)
 	}
+	// fresh_session absent on the row = tri-state nil (inherit global).
+	if e.FreshSession != nil {
+		t.Fatalf("absent fresh_session must stay nil, got %v", *e.FreshSession)
+	}
+}
+
+// FreshSessionFor matrix (fresh-session plan leaf 02): the employee_leg
+// row's tri-state FreshSession overrides the global
+// voice.fresh_session_per_call; nil inherits it; no row uses the global.
+func TestFreshSessionForMatrix(t *testing.T) {
+	yes := true
+	no := false
+	tests := []struct {
+		name       string
+		global     bool
+		setRow     string // employee to attach an explicit override to
+		rowVal     *bool
+		employeeID string
+		want       bool
+	}{
+		{name: "global off, no row", global: false, employeeID: "", want: false},
+		{name: "global on, no row", global: true, employeeID: "", want: true},
+		{name: "global on, row absent employee", global: true, employeeID: "ghost", want: true},
+		{name: "global off, row nil (echo)", global: false, employeeID: "echo", want: false},
+		{name: "global on, row nil (echo)", global: true, employeeID: "echo", want: true},
+		{name: "row true overrides global off", global: false, setRow: "echo", rowVal: &yes, employeeID: "echo", want: true},
+		{name: "row false overrides global on", global: true, setRow: "bob", rowVal: &no, employeeID: "bob", want: false},
+		{name: "row false does not leak to other employee", global: true, setRow: "bob", rowVal: &no, employeeID: "echo", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseCfg()
+			c.FreshSessionPerCall = tt.global
+			if tt.setRow != "" {
+				for i := range c.EmployeeLeg {
+					if c.EmployeeLeg[i].Employee == tt.setRow {
+						c.EmployeeLeg[i].FreshSession = tt.rowVal
+					}
+				}
+			}
+			if got := FreshSessionFor(c, tt.employeeID); got != tt.want {
+				t.Fatalf("FreshSessionFor(%q) = %v, want %v", tt.employeeID, got, tt.want)
+			}
+		})
+	}
 }

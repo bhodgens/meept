@@ -85,8 +85,13 @@ type AuditSeam interface {
 // voiceBindingSeam is the voice-call view of the binding seam: the ONE
 // session per (number, employee) plus the calls.db row, exactly the
 // Binding.OnCallStart signature. Compile-time pinned below.
+//
+// The trailing ...bool is the fresh-session-per-call flag (voice
+// fresh-session plan leaf 02: Binding.OnCallStart gained a variadic so
+// every existing caller — including this one — compiles unchanged); the
+// interface must mirror it or *voice.Binding stops satisfying the seam.
 type voiceBindingSeam interface {
-	OnCallStart(ctx context.Context, ccid, number, employeeID, direction string, brief voice.DayBrief) (string, error)
+	OnCallStart(ctx context.Context, ccid, number, employeeID, direction string, brief voice.DayBrief, freshSession ...bool) (string, error)
 }
 
 // Compile-time pin: the concrete voice binding satisfies the voice view.
