@@ -306,6 +306,12 @@
     "line": 32
   },
   {
+    "topic": "delegate.status",
+    "handler": "h.handleStatus",
+    "file": "internal/rpc/delegate_children.go",
+    "line": 80
+  },
+  {
     "topic": "dev.config",
     "handler": "h.handleConfig",
     "file": "internal/rpc/dev.go",

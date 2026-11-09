@@ -289,7 +289,12 @@ func (j *AgentJob) Execute(ctx context.Context) error {
 // session is configured the payload is pinned to that session's inbox via
 // session_id; otherwise it is legacy fire-and-forget.
 func (j *AgentJob) deliver(ctx context.Context, turnID string) error {
+	// ChatRequest (internal/agent/handler.go) parses the turn text from
+	// "message" — every other chat.request publisher (chat.submit RPC,
+	// ChatService, MCP HTTP) uses that key. "prompt" is retained alongside
+	// for legacy consumers; the handler ignores it.
 	payload := map[string]any{
+		"message":         j.prompt,
 		"prompt":          j.prompt,
 		"source":          "scheduler",
 		SchedulerKeyJobID: j.id,

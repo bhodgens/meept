@@ -2,12 +2,19 @@ package agent
 
 // F9 gate T1/T1b executor arm (04-tool-surface/00T-tests.md): the live
 // dispatch wrapper (executeToolWithRetry) arms a per-tool deadline ONLY when
-// TimeoutMs() > 0, substitutes the structured TOOL_TIMEOUT result on expiry,
+// TimeoutMs() > 0, substitutes the structured TOOL_TIMEOUT error on expiry,
 // and never swallows turn-level cancellation. Pins contract B1
 // (.hermes/contracts/04-tool-surface.md).
 //
-// RED until leaf 01-tool-timeout lands (Tool.TimeoutMs / tools.ErrToolTimeout
-// undefined; executor has no timeout arm).
+// Activated from the parked gate file (executor_timeout_test.go.staged,
+// 762dc9d3). Drift fixed vs the staged draft: the deadlineProbeTool's seen
+// channel typed as chan (struct{...}) (invalid parenthesized element type)
+// is now a proper struct channel; the timeout-shape assertions target the
+// executor's real substitution (a wrapped tools.ErrToolTimeout error whose
+// message names the declared budget and never leaks a raw
+// context.DeadlineExceeded string) — the ErrCode "TOOL_TIMEOUT" envelope
+// path through the LIVE Execute is already pinned by
+// executor_timeout_leaf_test.go (T3).
 
 import (
 	"context"
@@ -22,28 +29,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// seenDeadline is what the probe's Execute observed about its context.
+type seenDeadline struct {
+	hasDeadline bool
+	deadline    time.Time
+}
+
 // deadlineProbeTool records the deadline its Execute context carries.
 type deadlineProbeTool struct {
 	tools.ToolDefaults
 	timeout time.Duration
-	seen    chan (struct {
-		hasDeadline bool
-		deadline    time.Time
-	})
+	seen    chan seenDeadline
 }
 
-func (t *deadlineProbeTool) Name() string                            { return "deadline_probe" }
-func (t *deadlineProbeTool) Description() string                     { return "probe" }
-func (t *deadlineProbeTool) Parameters() llm.FunctionParameters      { return llm.FunctionParameters{} }
-func (t *deadlineProbeTool) IsReadOnly(map[string]any) bool          { return true }
-func (t *deadlineProbeTool) IsConcurrencySafe(map[string]any) bool   { return true }
-func (t *deadlineProbeTool) TimeoutMs() time.Duration                { return t.timeout }
+func (t *deadlineProbeTool) Name() string                       { return "deadline_probe" }
+func (t *deadlineProbeTool) Description() string                { return "probe" }
+func (t *deadlineProbeTool) Parameters() llm.FunctionParameters { return llm.FunctionParameters{} }
+func (t *deadlineProbeTool) IsReadOnly(map[string]any) bool     { return true }
+func (t *deadlineProbeTool) IsConcurrencySafe(map[string]any) bool {
+	return true
+}
+func (t *deadlineProbeTool) TimeoutMs() time.Duration { return t.timeout }
 func (t *deadlineProbeTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	dl, ok := ctx.Deadline()
-	t.seen <- struct {
-		hasDeadline bool
-		deadline    time.Time
-	}{ok, dl}
+	t.seen <- seenDeadline{ok, dl}
 	return "ran", nil
 }
 
@@ -74,13 +83,7 @@ func (t *sleepingTool) Execute(ctx context.Context, args map[string]any) (any, e
 func TestExecutor_NoDeclaredTimeout_ArmsNoDeadline(t *testing.T) {
 	// TimeoutMs()==0 (ToolDefaults semantics): the executor must NOT derive
 	// a new deadline; the tool runs unchanged.
-	probe := &deadlineProbeTool{
-		timeout: 0,
-		seen: make(chan struct {
-			hasDeadline bool
-			deadline    time.Time
-		}, 1),
-	}
+	probe := &deadlineProbeTool{timeout: 0, seen: make(chan seenDeadline, 1)}
 	e := NewExecutor(nil, nil)
 	res, err := e.executeToolWithRetry(context.Background(), probe, BackoffConfig{}, "call-t1", "deadline_probe", map[string]any{}, nil)
 	require.NoError(t, err)
@@ -94,13 +97,7 @@ func TestExecutor_DeclaredTimeout_ToolsWithinBudgetSucceed(t *testing.T) {
 	// A declared budget larger than the tool's runtime: success, and the
 	// parent context keeps NO deadline after the call (the derived deadline
 	// must not leak onto the caller's ctx).
-	probe := &deadlineProbeTool{
-		timeout: time.Second,
-		seen: make(chan struct {
-			hasDeadline bool
-			deadline    time.Time
-		}, 1),
-	}
+	probe := &deadlineProbeTool{timeout: time.Second, seen: make(chan seenDeadline, 1)}
 	e := NewExecutor(nil, nil)
 	parent := context.Background()
 	res, err := e.executeToolWithRetry(parent, probe, BackoffConfig{}, "call-t1b-ok", "deadline_probe", map[string]any{}, nil)

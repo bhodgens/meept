@@ -794,7 +794,17 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 			// (bus.matchWildcard compares segment counts). Without an
 			// explicit pattern the WS relay drops every terminal event and
 			// HTTP/WS clients (Flutter GUI) hang in pending forever.
-			"employee.*"}
+			"employee.*",
+			// storage.* (dsh DSH-2 consumer residual): the durable-domain
+			// record-change events (storage.record.changed, contract S4
+			// typed Topic[storage.RecordChanged]) are 2-segment topics the
+			// single-segment "*" never matches. They are data-change
+			// events: no prefix case in transformBusEventToWS matches, so
+			// they classify through the default generic "event" bucket —
+			// never chat_message (AGENTS.md invariant). Without this
+			// pattern the WS relay drops every record change and diffing
+			// WS consumers never see session-message writes/deletes.
+			"storage.*"}
 		for _, topic := range topics {
 			sub := msgBus.Subscribe("http-ws-"+topic, topic)
 			s.wsSubMu.Lock()

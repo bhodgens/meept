@@ -140,6 +140,15 @@ type Session struct {
 	// (employee_id column), mirroring the goal_id precedent.
 	EmployeeID string `json:"employee_id,omitempty"`
 
+	// PlanMode is the per-session plan-mode collaboration flag (dsh
+	// DSH-9c): durable so a daemon restart does not drop an active
+	// plan-mode session back to execution mode. Written via
+	// Store.SetPlanMode (plan_mode column); read through Get/List. It
+	// backs the PlanModeController's PlanModePersistence seam — the
+	// controller keeps its process-local view and consults the store on
+	// a cache miss.
+	PlanMode bool `json:"plan_mode,omitempty"`
+
 	// Thread-based context partitioning (NEW)
 	Threads        map[string]*Thread `json:"threads,omitempty"` // threadID -> Thread
 	ActiveThreadID string             `json:"active_thread_id,omitempty"`
@@ -796,6 +805,22 @@ func (s *MemoryStore) SetEmployeeID(sessionID, employeeID string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	session.EmployeeID = employeeID
+	return nil
+}
+
+// SetPlanMode persists the per-session plan-mode collaboration flag
+// (dsh DSH-9c). MemoryStore returns the same *Session pointer from Get, so
+// the assignment is the persistence; this exists for parity with
+// SQLiteStore (which writes the plan_mode column).
+func (s *MemoryStore) SetPlanMode(sessionID string, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.PlanMode = on
 	return nil
 }
 

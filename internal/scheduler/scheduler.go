@@ -844,10 +844,20 @@ func (s *Scheduler) loadPersistedJobs() error {
 
 // createJob creates a job from config, using JobDependencies if available.
 // Agent jobs created here get a deliveryScheduler back-reference so Execute
-// can persist delivery receipts around the chat.request publish.
+// can persist delivery receipts around the chat.request publish. The
+// back-reference is set on BOTH construction paths — the daemon always
+// passes jobDeps, so wiring only the legacy path left live agent jobs
+// receipt-less (05-schedule/02-delivery-inbox e2e gate caught this).
 func (s *Scheduler) createJob(cfg JobConfig) (Job, error) {
 	if s.jobDeps != nil {
-		return CreateJobWithDeps(cfg, s.jobDeps)
+		job, err := CreateJobWithDeps(cfg, s.jobDeps)
+		if err != nil {
+			return nil, err
+		}
+		if aj, ok := job.(*AgentJob); ok {
+			aj.deliveryScheduler = s
+		}
+		return job, nil
 	}
 	job, err := CreateJob(cfg, s.bus)
 	if err != nil {
