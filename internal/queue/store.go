@@ -1523,7 +1523,20 @@ func boolToInt(b bool) int {
 }
 
 // moveToDead moves a job to the dead letter table.
+//
+// Audit 2026-11-09 M-2 (contract C-Q2): the INSERT and the DELETE compose
+// under ONE immediate-write transaction, and a duplicate dead_letter id (the
+// crash residue of an earlier move that inserted but never deleted) is
+// downgraded from a hard PRIMARY KEY error to "insert ignored, ensure the
+// jobs row is deleted". That makes the move both atomic and idempotent:
+// SweepAbandonedTerminalStates can safely re-apply it to stranded rows, and a
+// second moveToDead for an already-dead-lettered id is a no-op instead of a
+// permanent error.
 func (s *Store) moveToDead(jobID string) error {
+	// Repo idiom (see FailAttempt/Retry): with SetMaxOpenConns(1) the pool
+	// hands every Begin a fresh IMMEDIATE write transaction — the write lock
+	// is held up front, so the INSERT..SELECT and the DELETE cannot interleave
+	// with a concurrent claim or Fail on the same row.
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -1536,8 +1549,15 @@ func (s *Store) moveToDead(jobID string) error {
 	// interactive rides along (audit 2026-11-09 leaf 02): the dead-letter
 	// row must remember the flag so RecoverFromDeadLetter can restore the
 	// job's D11 claim ordering.
+	//
+	// INSERT OR IGNORE (M-2): if a dead_letter row for this id already
+	// exists — a prior moveToDead crashed between the INSERT and the DELETE,
+	// or a sweep re-applies the move — the earlier shadow stands and the
+	// collision downgrades to a skip. The pre-existing row is the older,
+	// more faithful record of the death, so it is deliberately NOT
+	// overwritten.
 	_, err = tx.Exec(`
-		INSERT INTO dead_letter (id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, interactive, error, created_at, died_at, due_at)
+		INSERT OR IGNORE INTO dead_letter (id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, interactive, error, created_at, died_at, due_at)
 		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, interactive, error, created_at, ?, due_at
 		FROM jobs WHERE id = ?`,
 		now, jobID)
@@ -1545,13 +1565,149 @@ func (s *Store) moveToDead(jobID string) error {
 		return err
 	}
 
-	// Delete from jobs
+	// Delete from jobs — this is the "ensure deleted" half of the duplicate
+	// path: even when the INSERT above was ignored, the jobs row must not
+	// stay stranded beside its dead_letter shadow.
 	_, err = tx.Exec(`DELETE FROM jobs WHERE id = ?`, jobID)
 	if err != nil {
 		return err
 	}
 
 	return tx.Commit()
+}
+
+// sweepDefaultInterval and sweepDefaultOlderThan are the package defaults for
+// the StartSweeper ticker (contract C-Q2). They live beside the retry/backoff
+// constants rather than in config: the queue package has no config section,
+// and adding one for the sweeper would be config-surface creep (leaf doc
+// Notes). The daemon wiring can pass its own values.
+const (
+	sweepDefaultInterval  = 15 * time.Minute
+	sweepDefaultOlderThan = 1 * time.Hour
+)
+
+// SweepAbandonedTerminalStates re-applies the dead-letter move to rows the
+// write paths stranded (audit 2026-11-09 M-2/M-3, contract C-Q2):
+//
+//   - 'failed' rows whose retry budget is EXHAUSTED (retry_count >=
+//     max_retries) and whose updated_at is older than the cutoff: FailAttempt
+//     computes StateDead but the post-commit moveToDead is log-only, so a
+//     crash/lock between them leaves the row failed-forever in jobs.
+//   - 'dead' rows still sitting in jobs past the cutoff: moveToDead never
+//     completed its INSERT+DELETE pair.
+//
+// 'failed' rows WITH budget remaining are deliberately untouched — the
+// Retry/worker requeue path owns them; sweeping them would dead-letter
+// recoverable work. The cutoff is the ONLY age bound: a stranded 'dead' row
+// only needs updated_at < cutoff, which the write paths always age.
+//
+// Idempotent by construction: moveToDead is a single-transaction INSERT OR
+// IGNORE + DELETE, so a row already in dead_letter and still in jobs is
+// completed (deleted) without duplicating the shadow, and a row already fully
+// moved is never re-selected (it is gone from jobs). A second sweep after a
+// clean first sweep moves 0.
+//
+// Returns the number of rows successfully moved (or completed). Per-row
+// failures are logged and skipped — one poisoned row must not block the rest
+// of the sweep — and the first such error is surfaced alongside the count.
+func (s *Store) SweepAbandonedTerminalStates(ctx context.Context, olderThan time.Duration) (int, error) {
+	if olderThan < 0 {
+		olderThan = 0
+	}
+	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id FROM jobs
+		WHERE updated_at < ?
+		  AND (
+		        (state = 'failed' AND retry_count >= max_retries)
+		     OR (state = 'dead')
+		  )
+		ORDER BY updated_at`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("sweep: select abandoned rows: %w", err)
+	}
+
+	var stranded []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("sweep: scan abandoned row: %w", err)
+		}
+		stranded = append(stranded, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("sweep: iterate abandoned rows: %w", err)
+	}
+	rows.Close()
+
+	moved := 0
+	var sweepErr error
+	for _, id := range stranded {
+		if ctx.Err() != nil {
+			if sweepErr == nil {
+				sweepErr = ctx.Err()
+			}
+			break
+		}
+		if err := s.moveToDead(id); err != nil {
+			if sweepErr == nil {
+				sweepErr = fmt.Errorf("sweep: move job %s to dead letter: %w", id, err)
+			}
+			s.logger.Warn("sweep: failed to move abandoned row to dead letter",
+				"id", id, "error", err)
+			continue
+		}
+		moved++
+	}
+
+	if moved > 0 {
+		s.logger.Info("sweeper moved abandoned rows to dead letter",
+			"moved", moved, "candidates", len(stranded), "cutoff", cutoff)
+	}
+	return moved, sweepErr
+}
+
+// StartSweeper launches the stranded-state sweeper goroutine (contract C-Q2
+// wrapper): every interval it calls SweepAbandonedTerminalStates(olderThan)
+// and logs the moved count at debug. Non-positive durations fall back to the
+// package defaults (sweepDefaultInterval / sweepDefaultOlderThan); a nil ctx
+// falls back to context.Background(). The goroutine exits when ctx is
+// cancelled. Nil-safe: a nil store or closed pool never starts the loop and
+// never panics. Callers own cancellation; there is no second-instance guard
+// because the sweep is idempotent.
+func (s *Store) StartSweeper(ctx context.Context, interval, olderThan time.Duration) {
+	if s == nil || s.db == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if interval <= 0 {
+		interval = sweepDefaultInterval
+	}
+	if olderThan <= 0 {
+		olderThan = sweepDefaultOlderThan
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				moved, err := s.SweepAbandonedTerminalStates(ctx, olderThan)
+				if err != nil {
+					s.logger.Warn("sweeper pass failed", "error", err, "moved", moved)
+					continue
+				}
+				s.logger.Debug("sweeper pass completed", "moved", moved)
+			}
+		}
+	}()
 }
 
 // RecoverFromDeadLetter recovers a dead-lettered job by re-inserting it into the active queue.
