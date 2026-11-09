@@ -70,13 +70,27 @@ func NewStore(dbPath string, logger *slog.Logger) (*Store, error) {
 	// were silently ignored (see internal/plan/store_sqlite.go for the same
 	// rationale). WAL + busy_timeout keep parallel job claims/acks from
 	// turning into a SQLITE_BUSY storm.
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
+	//
+	// `_txlock=immediate` is the TRUE BEGIN IMMEDIATE mechanism (audit F6):
+	// the modernc driver ignores database/sql TxOptions isolation levels
+	// entirely — only this DSN param makes the driver issue
+	// "BEGIN IMMEDIATE" instead of "BEGIN" (modernc.org/sqlite
+	// sqlite.go `_txlock` -> conn.beginMode, tx.go newTx). Every
+	// Begin/BeginTx on this pool now takes the write lock up front, which is
+	// what the FailAttempt/Retry/moveToDead comments have always claimed.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 	// Serialize writes at the connection-pool level: sqlite allows exactly
 	// one writer at a time, so a pool wider than the writer count only adds
 	// BUSY handoffs. Multiple *readers* remain allowed under WAL.
+	//
+	// NOTE: the deferred-vs-immediate distinction is behaviorally invisible
+	// today because this pool is width-1 (every transaction is the single
+	// connection's). Widening SetMaxOpenConns must revisit transaction modes
+	// and reader concurrency before landing — the `_txlock=immediate` above
+	// then becomes the active writer serialization, not just documentation.
 	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
 		db.Close()
@@ -105,7 +119,12 @@ CREATE TABLE IF NOT EXISTS jobs (
 	agent_id      TEXT,
 	type          TEXT NOT NULL,
 	priority      INTEGER DEFAULT 2,
-	state         TEXT DEFAULT 'pending',
+	-- state is pinned to the JobState enum (audit 2026-11-09 F7), the same
+	-- way effects_ledger.state is: the DB refuses garbage the code would
+	-- never write. migrate() carries pre-CHECK databases through a guarded
+	-- table rebuild. NULL passes the CHECK (SQL three-valued logic) for
+	-- legacy rows that never set a state.
+	state         TEXT DEFAULT 'pending' CHECK (state IN ('pending','claimed','processing','completed','failed','dead')),
 	payload       TEXT NOT NULL,
 	required_caps TEXT DEFAULT '[]',
 	max_retries   INTEGER DEFAULT 3,
@@ -233,6 +252,13 @@ func (s *Store) migrate() error {
 		}
 	}
 
+	// jobs.state CHECK migration (audit 2026-11-09 F7, leaf 04). Runs AFTER
+	// the legacy column migrations so the table rebuild sees the live,
+	// current column set — not a stale baseSchema assumption.
+	if err := s.migrateJobsStateCheck(); err != nil {
+		return err
+	}
+
 	// Claim-covering index for interactive-first ordering (tree 04 leaf 02,
 	// Contract 2). Runs after the interactive column migration above so
 	// pre-interactive databases have the column before the index references
@@ -271,6 +297,188 @@ func (s *Store) columnExists(table, column string) (bool, error) {
 		}
 	}
 	return false, rows.Err()
+}
+
+// jobsStateEnumSQL lists the six JobState values pinned by the jobs.state
+// CHECK constraint (audit 2026-11-09 F7). Kept in sync with the constants in
+// job.go (StatePending..StateDead); the migration and the base schema both
+// interpolate it so there is exactly one source of truth.
+const jobsStateEnumSQL = `('pending','claimed','processing','completed','failed','dead')`
+
+// migrateJobsStateCheck enforces the jobs.state CHECK on databases created
+// before the constraint existed (audit 2026-11-09 F7). SQLite cannot ALTER
+// TABLE ADD CONSTRAINT, so a pre-CHECK jobs table is rebuilt: create a new
+// table carrying the same live column set (captured from PRAGMA table_info,
+// which includes every legacy/cluster column migrated so far) PLUS the state
+// CHECK, copy all rows across, swap names, and recreate every index the old
+// table owned from their captured sqlite_master SQL — DROP TABLE takes the
+// indexes with it, so a rebuild that forgets to re-create them silently
+// degrades claim scans to full-table scans.
+//
+// The whole swap runs in one transaction (the store's DSN sets
+// _txlock=immediate, so the BEGIN takes the write lock up front). Pre-flight:
+// if any existing row's state is outside the enum, the migration FAILS with a
+// clear error and rolls back — data is never deleted or rewritten to make a
+// constraint fit. The probe (sqlite_master SQL containing CHECK) makes this a
+// no-op on fresh databases and on already-migrated ones.
+func (s *Store) migrateJobsStateCheck() error {
+	var tableSQL string
+	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'`).Scan(&tableSQL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // no jobs table at all (base schema runs first; defensive)
+	}
+	if err != nil {
+		return fmt.Errorf("jobs CHECK migration probe: %w", err)
+	}
+	if strings.Contains(strings.ToUpper(tableSQL), "CHECK") {
+		return nil // fresh schema or already migrated — nothing to do
+	}
+
+	// Live column set, in table order. The rebuild must carry every column
+	// forward (audit lesson: the legacy ALTERs add columns the CREATE would
+	// otherwise drop), so this is read from the database, not assumed.
+	colRows, err := s.db.Query(`PRAGMA table_info(jobs)`)
+	if err != nil {
+		return fmt.Errorf("jobs CHECK migration table_info: %w", err)
+	}
+	type colDef struct {
+		name    string
+		ctype   string
+		notnull int
+		dflt    sql.NullString
+		pk      int
+	}
+	var cols []colDef
+	for colRows.Next() {
+		var (
+			cid       int
+			c         colDef
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := colRows.Scan(&cid, &c.name, &c.ctype, &notnull, &dfltValue, &pk); err != nil {
+			colRows.Close()
+			return fmt.Errorf("jobs CHECK migration table_info scan: %w", err)
+		}
+		c.notnull = notnull
+		c.dflt = dfltValue
+		c.pk = pk
+		cols = append(cols, c)
+	}
+	if err := colRows.Err(); err != nil {
+		colRows.Close()
+		return fmt.Errorf("jobs CHECK migration table_info iteration: %w", err)
+	}
+	colRows.Close()
+	if len(cols) == 0 {
+		return fmt.Errorf("jobs CHECK migration: PRAGMA table_info(jobs) returned no columns")
+	}
+
+	// Captured index SQL for jobs (explicit indexes only; the implicit
+	// sqlite_autoindex for the PRIMARY KEY travels with the new CREATE).
+	idxRows, err := s.db.Query(`SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='jobs' AND sql IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("jobs CHECK migration index capture: %w", err)
+	}
+	var indexSQL []string
+	for idxRows.Next() {
+		var sqlText string
+		if err := idxRows.Scan(&sqlText); err != nil {
+			idxRows.Close()
+			return fmt.Errorf("jobs CHECK migration index scan: %w", err)
+		}
+		indexSQL = append(indexSQL, sqlText)
+	}
+	if err := idxRows.Err(); err != nil {
+		idxRows.Close()
+		return fmt.Errorf("jobs CHECK migration index iteration: %w", err)
+	}
+	idxRows.Close()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin jobs CHECK migration: %w", err)
+	}
+	defer func() {
+		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) {
+			s.logger.Debug("jobs CHECK migration rollback (no-op after commit)", "error", rErr)
+		}
+	}()
+
+	// Pre-flight data check: refuse rather than destroy. Any row outside the
+	// enum fails the migration with the offending values listed.
+	var badCount int
+	var badStates sql.NullString
+	if err := tx.QueryRow(fmt.Sprintf(`SELECT
+		(SELECT COUNT(*) FROM jobs WHERE state IS NOT NULL AND state NOT IN %[1]s),
+		(SELECT group_concat(s, ', ') FROM
+			(SELECT DISTINCT state AS s FROM jobs WHERE state IS NOT NULL AND state NOT IN %[1]s))`,
+		jobsStateEnumSQL)).Scan(&badCount, &badStates); err != nil {
+		return fmt.Errorf("jobs CHECK migration pre-flight: %w", err)
+	}
+	if badCount > 0 {
+		return fmt.Errorf("jobs CHECK migration refused: %d row(s) have state outside the JobState enum (values: %s); repair them before upgrading", badCount, badStates.String)
+	}
+
+	// Build the replacement CREATE from the live columns.
+	var create strings.Builder
+	create.WriteString("CREATE TABLE jobs_new (\n")
+	for _, c := range cols {
+		create.WriteString("  ")
+		create.WriteString(quoteSQLIdent(c.name))
+		if c.ctype != "" {
+			create.WriteString(" " + c.ctype)
+		}
+		if c.pk == 1 {
+			create.WriteString(" PRIMARY KEY")
+		}
+		if c.notnull == 1 {
+			create.WriteString(" NOT NULL")
+		}
+		if c.dflt.Valid {
+			create.WriteString(" DEFAULT " + c.dflt.String)
+		}
+		create.WriteString(",\n")
+	}
+	create.WriteString(fmt.Sprintf("  CHECK (state IN %s)\n)", jobsStateEnumSQL))
+
+	colList := make([]string, len(cols))
+	for i, c := range cols {
+		colList[i] = quoteSQLIdent(c.name)
+	}
+	colsJoined := strings.Join(colList, ", ")
+
+	if _, err := tx.Exec(create.String()); err != nil {
+		return fmt.Errorf("jobs CHECK migration create jobs_new: %w", err)
+	}
+	if _, err := tx.Exec(fmt.Sprintf("INSERT INTO jobs_new (%s) SELECT %s FROM jobs", colsJoined, colsJoined)); err != nil {
+		return fmt.Errorf("jobs CHECK migration copy rows: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE jobs`); err != nil {
+		return fmt.Errorf("jobs CHECK migration drop old jobs: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE jobs_new RENAME TO jobs`); err != nil {
+		return fmt.Errorf("jobs CHECK migration rename: %w", err)
+	}
+	for _, stmt := range indexSQL {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("jobs CHECK migration recreate index %q: %w", stmt, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit jobs CHECK migration: %w", err)
+	}
+	s.logger.Info("Migrated jobs table: added state CHECK constraint", "indexes_preserved", len(indexSQL))
+	return nil
+}
+
+// quoteSQLIdent double-quotes a SQL identifier (column/table names here come
+// from SQLite's own PRAGMA output, so this is belt-and-braces against names
+// needing quoting).
+func quoteSQLIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // applyClusterSchema applies the cluster portion of clusterSchema one
