@@ -276,7 +276,7 @@ Output: APPROVED or a list of specific gaps.
 | 10-signal-sidecar | REVIEWED | 1 | gate GREEN x3 + race; sun_path TMPDIR env fix; Dial 1-arg per gate; commit ff2c8eb9 |
 | 11-signal-legs (branch) | REVIEWED | 1 | 11a+11b integrated; MessageAttempt accessor added in-session; commit a0e2217e |
 | 12-telnyx-sms | REVIEWED | 1 | gate GREEN, webhook 401-first, verifier reused via seam; commit a0e2217e |
-| 02-contact-wiring | PENDING | 0 | awaits 01+11+12 |
+| 02-contact-wiring | COMPLETE | 1 | in-session takeover after subagent stall; tool+adapters+wiring+3 e2e suites activated, all green; commit 256b2be9 |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
