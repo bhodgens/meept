@@ -328,10 +328,11 @@ var ToolActionMap = map[string]string{
 	// Memory claim-curation family (granted to librarian/verifier-style
 	// agents): writes mutate claim state, reads only query it. Same
 	// read/write split as the core memory tools above (bughunt H7 class:
-	// all were "Unknown action"-denied before these entries).
-	"retain":            "memory_write",
-	"recall":            "memory_read",
-	"reflect":           "memory_write",
+	// all were "Unknown action"-denied before these entries). The bare
+	// short names (retain/recall/reflect — the deleted RetainTool/
+	// RecallTool/ReflectTool from builtin/memory_curation.go) and
+	// promote_claim (no such tool ever registered) are NOT mapped: a
+	// mapping whose tool does not exist is a dead risk-class entry.
 	"retain_claim":      "memory_write",
 	"retain_decision":   "memory_write",
 	"retain_prediction": "memory_write",
@@ -339,7 +340,6 @@ var ToolActionMap = map[string]string{
 	"mark_resolved":     "memory_write",
 	"record_review":     "memory_write",
 	"reject_claim":      "memory_write",
-	"promote_claim":     "memory_write",
 
 	// Platform introspection (read-only, safe)
 	ToolPlatformStatus: "platform_read",
