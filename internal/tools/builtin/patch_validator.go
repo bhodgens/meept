@@ -44,22 +44,6 @@ var opsForbiddingContent = map[string]bool{
 
 const maxLineNum = 1000000
 
-// ValidatePatch validates an array of edit operations (raw maps) against the patch grammar.
-// Returns nil if valid, or a slice of PatchError for all violations found.
-func ValidatePatch(edits []map[string]any) []PatchError {
-	var errs []PatchError
-
-	for i, raw := range edits {
-		idx := i + 1 // 1-based
-		errs = append(errs, validateEditMap(idx, raw)...)
-	}
-
-	if len(errs) == 0 {
-		return nil
-	}
-	return errs
-}
-
 // ValidatePatchFromOps validates an already-parsed slice of editOp structs.
 // Returns nil if valid, or a slice of PatchError for all violations found.
 func ValidatePatchFromOps(ops []editOp) []PatchError {
@@ -74,16 +58,6 @@ func ValidatePatchFromOps(ops []editOp) []PatchError {
 		return nil
 	}
 	return errs
-}
-
-// validateEditMap validates a single raw edit map from JSON input.
-func validateEditMap(idx int, m map[string]any) []PatchError {
-	op, _ := m["op"].(string)
-	anchor, _ := m["anchor"].(string)
-	endAnchor, _ := m["end_anchor"].(string)
-	content, _ := m["content"].(string)
-
-	return validateCommon(idx, op, anchor, endAnchor, content)
 }
 
 // validateEditOp validates a single parsed editOp struct.
