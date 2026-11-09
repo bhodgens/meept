@@ -45,7 +45,6 @@ func GitInit(repoPath string) (*git.Repository, string, error) {
 	return repo, repoPath, nil
 }
 
-
 // GitPullRebase pulls from the default remote, rebasing local commits.
 func GitPullRebase(repo *git.Repository) error {
 	w, err := repo.Worktree()
@@ -249,11 +248,12 @@ func GitAddCommitPushWithLedger(repo *git.Repository, ledger effects.Ledger, fil
 	headSHA := head.Hash().String()
 	key := effects.GitPushKey(remotePath, headSHA)
 
+	who := effects.Claimant{AgentID: "backup.git_push", SessionID: remotePath}
 	receipt, reused, err := effects.Run(context.Background(), ledger, key, effects.EffectMeta{
 		Tool:               "backup.git_push",
 		ProviderIdempotent: true,
 		Payload:            mustEffectJSON(map[string]any{"remote": remotePath, "head": headSHA}),
-	}, func(ctx context.Context) (json.RawMessage, error) {
+	}, who, func(ctx context.Context) (json.RawMessage, error) {
 		// AlreadyUpToDate (the remote already has this commit) IS
 		// provider-side idempotency: check BEFORE pushing so the receipt
 		// records the pre-push state.
@@ -287,7 +287,7 @@ func GitAddCommitPushWithLedger(repo *git.Repository, ledger effects.Ledger, fil
 		slog.Debug("backup push already completed", "key", key)
 		return false, nil
 	}
-	if err := ledger.Complete(context.Background(), key); err != nil {
+	if err := ledger.Complete(context.Background(), key, who); err != nil {
 		return false, fmt.Errorf("backup push effects complete %s: %w", key, err)
 	}
 	_ = receipt

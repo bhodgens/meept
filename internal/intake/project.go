@@ -176,11 +176,11 @@ func (p *Projector) EnsureProjectionWithSteps(ctx context.Context, t Ticket,
 			meta.Payload = payload
 		}
 
-		if _, err := p.runPhaseEffect(ctx, key, meta, t, ticketNumber, planID, phase, stepsByPhase[phase.ID]); err != nil {
+		if _, err := p.runPhaseEffect(ctx, key, meta, effects.Claimant{SessionID: planID}, t, ticketNumber, planID, phase, stepsByPhase[phase.ID]); err != nil {
 			// The phase effect stays claimed: effects reconcile finds it.
 			return fmt.Errorf("intake: project phase %s of plan %s: %w", phase.ID, planID, err)
 		}
-		if err := p.ledger.Complete(ctx, key); err != nil {
+		if err := p.ledger.Complete(ctx, key, effects.Claimant{SessionID: planID}); err != nil {
 			return fmt.Errorf("intake: complete projection %s: %w", key, err)
 		}
 	}
@@ -192,10 +192,10 @@ func (p *Projector) EnsureProjectionWithSteps(ctx context.Context, t Ticket,
 // call — that is what makes a re-run cost zero API calls. An in-flight prior
 // (claimed/receipted, owned by another caller) is logged and skipped rather
 // than raced.
-func (p *Projector) runPhaseEffect(ctx context.Context, key string, meta effects.EffectMeta,
+func (p *Projector) runPhaseEffect(ctx context.Context, key string, meta effects.EffectMeta, who effects.Claimant,
 	t Ticket, ticketNumber int, planID string, phase plan.PlanPhase,
 	steps []task.TaskStep) (*projectionReceipt, error) {
-	granted, prior, err := p.ledger.Claim(ctx, key, meta)
+	granted, prior, err := p.ledger.Claim(ctx, key, meta, who)
 	if err != nil {
 		return nil, fmt.Errorf("claim: %w", err)
 	}
@@ -226,7 +226,7 @@ func (p *Projector) runPhaseEffect(ctx context.Context, key string, meta effects
 	if err != nil {
 		return nil, fmt.Errorf("marshal receipt: %w", err)
 	}
-	if err := p.ledger.RecordReceipt(ctx, key, receiptBytes); err != nil {
+	if err := p.ledger.RecordReceipt(ctx, key, who, receiptBytes); err != nil {
 		return nil, fmt.Errorf("record receipt: %w", err)
 	}
 	return out, nil

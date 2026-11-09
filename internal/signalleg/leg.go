@@ -67,11 +67,11 @@ const OutcomeBusy = voice.Outcome("busy")
 type EffectsSeam interface {
 	// Reserve claims the outbound effect BEFORE StartCall; granted=false
 	// means a prior claim exists (a retry never rings twice).
-	Reserve(ctx context.Context, key string) (granted bool, err error)
+	Reserve(ctx context.Context, key, employeeID string) (granted bool, err error)
 	// Complete marks the reservation satisfied (the ring happened).
-	Complete(ctx context.Context, key string) error
+	Complete(ctx context.Context, key, employeeID string) error
 	// Abandon releases a reservation whose call refused before ringing.
-	Abandon(ctx context.Context, key, reason string) error
+	Abandon(ctx context.Context, key, employeeID, reason string) error
 }
 
 // AuditSeam is the narrow audit seam (phone-outbound posture): one row
@@ -405,7 +405,7 @@ func (l *Leg) Place(ctx context.Context, employeeID, targetUUID, firstLine strin
 	var key string
 	if l.deps.Effects != nil {
 		key = effectKey(employeeID, target, ccid)
-		granted, err := l.deps.Effects.Reserve(ctx, key)
+		granted, err := l.deps.Effects.Reserve(ctx, key, employeeID)
 		if err != nil {
 			l.deps.Registry.Release(ccid)
 			return "", fmt.Errorf("signalleg: effect reserve: %w", err)
@@ -425,14 +425,14 @@ func (l *Leg) Place(ctx context.Context, employeeID, targetUUID, firstLine strin
 			"channel":     "signal_voice",
 		}
 		if err := l.deps.Audit.WriteAudit(ctx, row); err != nil {
-			l.abandonOutbound(ctx, key, ccid, fmt.Sprintf("audit: %v", err))
+			l.abandonOutbound(ctx, key, employeeID, ccid, fmt.Sprintf("audit: %v", err))
 			return "", fmt.Errorf("signalleg: audit: %w", err)
 		}
 	}
 	// -- 9. audio pair (the child dials <ccid>.in/.out on open) --
 	pair, err := voice.NewAudioPair(voice.SocketDir(), ccid)
 	if err != nil {
-		l.abandonOutbound(ctx, key, ccid, fmt.Sprintf("audio pair: %v", err))
+		l.abandonOutbound(ctx, key, employeeID, ccid, fmt.Sprintf("audio pair: %v", err))
 		return "", fmt.Errorf("signalleg: audio pair: %w", err)
 	}
 	actx, cancel := context.WithCancel(context.Background())
@@ -456,12 +456,12 @@ func (l *Leg) Place(ctx context.Context, employeeID, targetUUID, firstLine strin
 	// same point, dial.go step 7). --
 	callID, err := l.deps.Client.StartCall(targetUUID, signal.CallAudioModeSocket)
 	if err != nil {
-		l.abandonOutbound(ctx, key, ccid, fmt.Sprintf("startCall: %v", err))
+		l.abandonOutbound(ctx, key, employeeID, ccid, fmt.Sprintf("startCall: %v", err))
 		l.teardownPair(st)
 		return "", fmt.Errorf("signalleg: start call: %w", err)
 	}
 	if key != "" && l.deps.Effects != nil {
-		if cerr := l.deps.Effects.Complete(ctx, key); cerr != nil {
+		if cerr := l.deps.Effects.Complete(ctx, key, employeeID); cerr != nil {
 			// The ring happened; the ledger row is stuck. Surface in
 			// the log, keep the call lifecycle running (the
 			// phone-dialer posture, dial.go step 7).
@@ -571,7 +571,7 @@ func (l *Leg) End(ccid string) error {
 	// landed on this state.
 	if st.effectKey != "" && l.deps.Effects != nil && st.callID == "" {
 		actx, cancel := context.WithTimeout(context.Background(), abandonTimeout)
-		if err := l.deps.Effects.Abandon(actx, st.effectKey, "call ended before connect"); err != nil {
+		if err := l.deps.Effects.Abandon(actx, st.effectKey, st.employee, "call ended before connect"); err != nil {
 			l.log.Debug("signalleg: effect abandon", "ccid", ccid, "err", err)
 		}
 		cancel()
@@ -595,9 +595,9 @@ func (l *Leg) teardownPair(st *callState) {
 
 // abandonOutbound releases a failed outbound dial's side effects in
 // order: effect abandon, registry release, manager FailOutcome.
-func (l *Leg) abandonOutbound(ctx context.Context, key, ccid, reason string) {
+func (l *Leg) abandonOutbound(ctx context.Context, key, employeeID, ccid, reason string) {
 	if key != "" && l.deps.Effects != nil {
-		if err := l.deps.Effects.Abandon(ctx, key, reason); err != nil {
+		if err := l.deps.Effects.Abandon(ctx, key, employeeID, reason); err != nil {
 			l.log.Debug("signalleg: effect abandon on refusal", "ccid", ccid, "err", err)
 		}
 	}

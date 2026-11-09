@@ -5,15 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
-	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/validator"
 )
 
 // Note: slogDiscardLogger is defined in handler_test.go (same package).
@@ -664,4 +667,245 @@ func TestTacticalScheduler_RejectedWithoutRevisionFinalizes(t *testing.T) {
 	if terminal {
 		t.Fatal("pending step did not block finalization, want false")
 	}
+}
+
+// slotScriptFilter fails the first fails Process calls, then passes. One
+// failure is one filter-retry requeue; the next completion is terminal.
+type slotScriptFilter struct {
+	fails int
+	calls int
+}
+
+func (f *slotScriptFilter) Name() string                { return "slot_script" }
+func (f *slotScriptFilter) Applies(*task.TaskStep) bool { return true }
+func (f *slotScriptFilter) Process(context.Context, *task.TaskStep, string) validator.FilterResult {
+	f.calls++
+	if f.calls <= f.fails {
+		return validator.FilterResult{Outcome: validator.FilterFail, Filter: f.Name(), Reason: "bad shape"}
+	}
+	return validator.FilterResult{Outcome: validator.FilterPass, Filter: f.Name()}
+}
+
+func newSlotPinScheduler(t *testing.T, jobs, perAgent int, q queue.Queue) *TacticalScheduler {
+	t.Helper()
+	store, err := task.NewStore(filepath.Join(t.TempDir(), "tasks.db"), nil)
+	if err != nil {
+		t.Fatalf("task store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return NewTacticalScheduler(TacticalSchedulerConfig{
+		StepStore:             store.StepStore(),
+		TaskStore:             store,
+		Queue:                 q,
+		Logger:                slogDiscardLogger(),
+		MaxConcurrentJobs:     jobs,
+		MaxConcurrentPerAgent: perAgent,
+	})
+}
+
+func scheduleHeldStep(t *testing.T, ts *TacticalScheduler, name string) *task.TaskStep {
+	t.Helper()
+	parent := task.NewTask(name, "slot pin")
+	parent.TotalJobs = 1
+	parent.SetState(task.StateExecuting)
+	if err := ts.taskStore.Create(parent); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	step := task.NewTaskStep(parent.ID, "do the thing", 0)
+	step.ToolHint = "shell"
+	step.AgentID = "coder"
+	step.State = task.StepReady
+	if err := ts.stepStore.Create(step); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if err := ts.scheduleStep(t.Context(), step); err != nil {
+		t.Fatalf("scheduleStep: %v", err)
+	}
+	got, err := ts.stepStore.GetByID(step.ID)
+	if err != nil || got == nil {
+		t.Fatalf("reload step: %v", err)
+	}
+	return got
+}
+
+func requireGlobalHeld(t *testing.T, ts *TacticalScheduler, want int, what string) {
+	t.Helper()
+	if got := len(ts.globalSemaphore); got != want {
+		t.Fatalf("%s: global slots held = %d, want %d", what, got, want)
+	}
+}
+
+// TestTacticalScheduler_RetryRequeueDoesNotDoubleReleaseSlot pins the
+// semaphore ownership rule: releaseSlots drains a token only when this
+// execution acquired one, and a retry requeue does not release the slot
+// scheduleStep acquired. A second release must not steal a bystander's slot.
+func TestTacticalScheduler_RetryRequeueDoesNotDoubleReleaseSlot(t *testing.T) {
+	t.Run("unmatched release does not steal", func(t *testing.T) {
+		ts := NewTacticalScheduler(TacticalSchedulerConfig{
+			MaxConcurrentJobs:     1,
+			MaxConcurrentPerAgent: 1,
+			Logger:                slogDiscardLogger(),
+		})
+		if !ts.acquireSlots("coder") {
+			t.Fatal("acquire coder slot")
+		}
+		requireGlobalHeld(t, ts, 1, "after acquire")
+		ts.releaseSlots("unknown-agent")
+		requireGlobalHeld(t, ts, 1, "unmatched release stole a held slot")
+		ts.releaseSlots("coder")
+		requireGlobalHeld(t, ts, 0, "matched release")
+		// A second release has no lease. It must not block and must not
+		// invent a free slot for a later acquire beyond the cap.
+		ts.releaseSlots("coder")
+		if !ts.acquireSlots("coder") {
+			t.Fatal("slot should be free after the matched release")
+		}
+		if ts.acquireSlots("coder") {
+			t.Fatal("cap exceeded after extra release")
+		}
+	})
+
+	t.Run("filter retry keeps the acquired slot", func(t *testing.T) {
+		rq := &recordingQueue{}
+		ts := newSlotPinScheduler(t, 2, 2, rq)
+		filter := &slotScriptFilter{fails: 1}
+		ts.SetFilterChain(validator.NewFilterChain([]validator.OutputFilter{filter}, 2))
+
+		step := scheduleHeldStep(t, ts, "filter-slot")
+		if !ts.acquireSlots("coder") {
+			t.Fatal("bystander acquire")
+		}
+		requireGlobalHeld(t, ts, 2, "step plus bystander")
+
+		env := stepCompletedEnvelope(t, `{"broken":true}`)
+		if err := ts.OnJobCompleted(t.Context(), step.JobID, env); err != nil {
+			t.Fatalf("filter retry completion: %v", err)
+		}
+		requireGlobalHeld(t, ts, 2, "filter requeue released a slot it must keep")
+
+		retried, err := ts.stepStore.GetByID(step.ID)
+		if err != nil || retried == nil {
+			t.Fatalf("reload retried step: %v", err)
+		}
+		if retried.State != task.StepScheduled || retried.JobID == "" || retried.JobID == step.JobID {
+			t.Fatalf("filter retry did not requeue: state=%s job=%s", retried.State, retried.JobID)
+		}
+		if err := ts.OnJobCompleted(t.Context(), retried.JobID, env); err != nil {
+			t.Fatalf("terminal completion: %v", err)
+		}
+		requireGlobalHeld(t, ts, 1, "terminal completion stole the bystander slot or leaked the step slot")
+		ts.releaseSlots("coder")
+		requireGlobalHeld(t, ts, 0, "bystander release")
+	})
+
+	t.Run("validation retry keeps the acquired slot", func(t *testing.T) {
+		ts := newSlotPinScheduler(t, 2, 2, &recordingQueue{})
+		vm := validator.NewValidatorManager()
+		vm.RegisterValidator("shell", &recordingValidator{trace: &traceRecorder{alwaysApplies: true}, fail: true})
+		ts.validatorManager = vm
+
+		step := scheduleHeldStep(t, ts, "validation-slot")
+		if !ts.acquireSlots("coder") {
+			t.Fatal("bystander acquire")
+		}
+		requireGlobalHeld(t, ts, 2, "step plus bystander")
+
+		env := stepCompletedEnvelope(t, `{"ok":true}`)
+		if err := ts.OnJobCompleted(t.Context(), step.JobID, env); err != nil {
+			t.Fatalf("validation retry completion: %v", err)
+		}
+		requireGlobalHeld(t, ts, 2, "validation requeue released a slot it must keep")
+		retried, err := ts.stepStore.GetByID(step.ID)
+		if err != nil || retried == nil {
+			t.Fatalf("reload step: %v", err)
+		}
+		if retried.State != task.StepScheduled {
+			t.Fatalf("validation retry did not requeue: state=%s", retried.State)
+		}
+	})
+
+	t.Run("quota deferral keeps the acquired slot", func(t *testing.T) {
+		q := newRequeueableQueue()
+		ts := newSlotPinScheduler(t, 2, 2, q)
+		step := scheduleHeldStep(t, ts, "quota-slot")
+		if !ts.acquireSlots("coder") {
+			t.Fatal("bystander acquire")
+		}
+		requireGlobalHeld(t, ts, 2, "step plus bystander")
+
+		resetAt := time.Now().UTC().Add(3 * time.Hour)
+		if err := ts.OnJobFailed(t.Context(), step.JobID, quotaFailureMsg(resetAt)); err != nil {
+			t.Fatalf("quota deferral: %v", err)
+		}
+		if _, ok := q.requeues[step.JobID]; !ok {
+			t.Fatal("quota failure did not requeue")
+		}
+		requireGlobalHeld(t, ts, 2, "quota requeue released a slot it must keep")
+
+		if err := ts.OnJobFailed(t.Context(), step.JobID, "permission denied"); err != nil {
+			t.Fatalf("terminal failure after deferral: %v", err)
+		}
+		requireGlobalHeld(t, ts, 1, "terminal failure after quota deferral stole the bystander slot")
+		ts.releaseSlots("coder")
+		requireGlobalHeld(t, ts, 0, "bystander release")
+	})
+
+	t.Run("transient retry keeps the acquired slot", func(t *testing.T) {
+		q := newRequeueableQueue()
+		ts := newSlotPinScheduler(t, 2, 2, q)
+		step := scheduleHeldStep(t, ts, "retry-slot")
+		if !ts.acquireSlots("coder") {
+			t.Fatal("bystander acquire")
+		}
+		requireGlobalHeld(t, ts, 2, "step plus bystander")
+
+		if err := ts.OnJobFailed(t.Context(), step.JobID, "connection reset by peer"); err != nil {
+			t.Fatalf("transient retry: %v", err)
+		}
+		if len(q.retryCalls) != 1 || q.retryCalls[0] != step.JobID {
+			t.Fatalf("transient failure did not retry: %v", q.retryCalls)
+		}
+		requireGlobalHeld(t, ts, 2, "transient requeue released a slot it must keep")
+	})
+
+	t.Run("terminal failure releases only the acquired slot", func(t *testing.T) {
+		ts := newSlotPinScheduler(t, 2, 2, newRequeueableQueue())
+		step := scheduleHeldStep(t, ts, "fail-slot")
+		if !ts.acquireSlots("coder") {
+			t.Fatal("bystander acquire")
+		}
+		requireGlobalHeld(t, ts, 2, "step plus bystander")
+		if err := ts.OnJobFailed(t.Context(), step.JobID, "permission denied"); err != nil {
+			t.Fatalf("terminal failure: %v", err)
+		}
+		requireGlobalHeld(t, ts, 1, "terminal failure did not release the step slot, or stole the bystander")
+		ts.releaseSlots("coder")
+		requireGlobalHeld(t, ts, 0, "bystander release")
+	})
+
+	t.Run("enqueue failure releases only the acquired slot", func(t *testing.T) {
+		rq := &recordingQueue{enqErr: errors.New("enqueue failed")}
+		ts := newSlotPinScheduler(t, 2, 2, rq)
+		if !ts.acquireSlots("coder") {
+			t.Fatal("bystander acquire")
+		}
+		parent := task.NewTask("enqueue-fail", "slot pin")
+		parent.SetState(task.StateExecuting)
+		if err := ts.taskStore.Create(parent); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		step := task.NewTaskStep(parent.ID, "do the thing", 0)
+		step.AgentID = "coder"
+		step.State = task.StepReady
+		if err := ts.stepStore.Create(step); err != nil {
+			t.Fatalf("create step: %v", err)
+		}
+		err := ts.scheduleStep(t.Context(), step)
+		if err == nil || !errors.Is(err, rq.enqErr) {
+			t.Fatalf("scheduleStep err = %v, want enqueue failure", err)
+		}
+		requireGlobalHeld(t, ts, 1, "enqueue failure leaked a slot or stole the bystander")
+		ts.releaseSlots("coder")
+		requireGlobalHeld(t, ts, 0, "bystander release")
+	})
 }

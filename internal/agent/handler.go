@@ -1169,18 +1169,19 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		}
 	}
 
-	// Update worker state
-	worker.LastActivity = time.Now()
+	// Terminal worker fields are shared with handleAgentProgress and
+	// GetWorkers, both of which take workersMu. Mutate under that lock,
+	// copy, then log and publish the snapshot — never hold workersMu
+	// across the logger or the bus publish.
+	snapshot := h.setWorkerTerminalState(worker, err != nil)
 	if err != nil {
-		worker.State = string(MessageTypeError)
 		h.logger.Error("Agent loop failed",
 			"worker", workerID,
 			"error", err,
 		)
-		h.publishWorkerEvent("chat.worker.error", worker)
+		h.publishWorkerEvent("chat.worker.error", snapshot)
 	} else {
-		worker.State = "completed"
-		h.publishWorkerEvent("chat.worker.completed", worker)
+		h.publishWorkerEvent("chat.worker.completed", snapshot)
 	}
 
 	// Build response
@@ -1808,6 +1809,26 @@ func (h *ChatHandler) sendError(replyTo, errorMsg string) {
 		Reply: "I encountered an error: " + errorMsg,
 	}
 	h.sendResponse(replyTo, response)
+}
+
+// setWorkerTerminalState writes the request's terminal worker state under
+// workersMu and returns a copy safe to publish. Callers must not hold
+// workersMu. The lock covers only the field writes: logging and bus
+// publish stay outside so a slow subscriber cannot stall GetWorkers or
+// handleAgentProgress. failed selects MessageTypeError; otherwise the
+// state is ReportStatusCompleted, which handleAgentProgress refuses to
+// override.
+func (h *ChatHandler) setWorkerTerminalState(w *Worker, failed bool) *Worker {
+	h.workersMu.Lock()
+	w.LastActivity = time.Now()
+	if failed {
+		w.State = string(MessageTypeError)
+	} else {
+		w.State = ReportStatusCompleted
+	}
+	snap := *w
+	h.workersMu.Unlock()
+	return &snap
 }
 
 // registerWorker adds a worker to the tracking map.

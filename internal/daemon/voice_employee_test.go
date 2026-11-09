@@ -8,7 +8,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/voice"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // holdProgressCapture counts progress publications (bus not needed).
@@ -328,4 +331,150 @@ func TestVoiceEmployeeHoldRaceConcurrentHangup(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// notifyBusWiring is newHoldWiring with a live bus so the notify relay
+// publishes somewhere observable; the returned bus is the wiring's.
+func notifyBusWiring(t *testing.T) (*VoiceEmployeeWiring, *bus.MessageBus) {
+	t.Helper()
+	logger := testLogger(t)
+	sessions := session.NewMemoryStore(logger)
+	template := agent.NewAgentLoop("template-voice", t.TempDir())
+	mgr := agent.NewManager(agent.ManagerConfig{SessionStore: sessions})
+	msgBus := bus.New(nil, logger)
+	w, err := WireVoiceEmployee(VoiceEmployeeDeps{
+		Sessions:      sessions,
+		LoopManager:   mgr,
+		TemplateLoop:  template,
+		WorkingDir:    t.TempDir(),
+		Bus:           msgBus,
+		CallStorePath: filepath.Join(t.TempDir(), "calls.db"),
+		Logger:        logger,
+	})
+	if err != nil {
+		t.Fatalf("WireVoiceEmployee: %v", err)
+	}
+	t.Cleanup(func() { w.Close() })
+	return w, msgBus
+}
+
+// collectNotify decodes every employee.notify payload arriving on sub
+// until deadline; a nil channel means the caller never subscribed.
+func collectNotify(t *testing.T, sub <-chan *models.BusMessage, deadline time.Duration) []agent.NotifyPayload {
+	t.Helper()
+	var out []agent.NotifyPayload
+	timer := time.After(deadline)
+	for {
+		select {
+		case msg := <-sub:
+			if msg == nil || len(msg.Payload) == 0 {
+				continue
+			}
+			var p agent.NotifyPayload
+			if err := json.Unmarshal(msg.Payload, &p); err != nil {
+				t.Fatalf("bad notify payload: %v", err)
+			}
+			out = append(out, p)
+		case <-timer:
+			return out
+		}
+	}
+}
+
+func TestVoiceEmployeeNotifyRelayOnRelease(t *testing.T) {
+	w, msgBus := notifyBusWiring(t)
+	sub := msgBus.Subscribe("relay-test", agent.SpeakTopicNotify)
+	t.Cleanup(func() { msgBus.Unsubscribe(sub) })
+
+	ctx := context.Background()
+	if _, err := w.Binding.OnCallStart(ctx, "cc-relay", "+15551230001", "emp-relay", voice.DirectionIncoming, voice.DayBrief{}); err != nil {
+		t.Fatalf("OnCallStart: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := w.store.AppendTranscript(ctx, "cc-relay", voice.TranscriptLine{Role: "user", Text: "please take a message for Alice", At: now}); err != nil {
+		t.Fatalf("AppendTranscript: %v", err)
+	}
+	if err := w.store.AppendTranscript(ctx, "cc-relay", voice.TranscriptLine{Role: "assistant", Text: "I will pass that along.", At: now}); err != nil {
+		t.Fatalf("AppendTranscript: %v", err)
+	}
+
+	release := w.AcquireCallHold("cc-relay", "emp-relay")
+	w.ReleaseHook("cc-relay", voice.OutcomeHangup)
+	release()
+
+	payloads := collectNotify(t, sub.Channel, 2*time.Second)
+	if len(payloads) != 1 {
+		t.Fatalf("got %d notify payloads; want 1", len(payloads))
+	}
+	p := payloads[0]
+	if p.SessionID == "" {
+		t.Error("payload session_id is empty")
+	}
+	for _, want := range []string{"caller: please take a message", "reply: I will pass that along", "emp-relay", "+15551230001", "incoming"} {
+		if !strings.Contains(p.Text, want) {
+			t.Errorf("payload text %q missing %q", p.Text, want)
+		}
+	}
+}
+
+func TestVoiceEmployeeNotifyRelaySkipsEmptyTranscript(t *testing.T) {
+	w, msgBus := notifyBusWiring(t)
+	sub := msgBus.Subscribe("relay-empty-test", agent.SpeakTopicNotify)
+	t.Cleanup(func() { msgBus.Unsubscribe(sub) })
+
+	ctx := context.Background()
+	if _, err := w.Binding.OnCallStart(ctx, "cc-empty", "+15551230002", "emp-empty", voice.DirectionOutgoing, voice.DayBrief{}); err != nil {
+		t.Fatalf("OnCallStart: %v", err)
+	}
+
+	release := w.AcquireCallHold("cc-empty", "emp-empty")
+	w.ReleaseHook("cc-empty", voice.OutcomeNoAnswer)
+	release()
+
+	if payloads := collectNotify(t, sub.Channel, 300*time.Millisecond); len(payloads) != 0 {
+		t.Fatalf("empty-transcript call notified %d payloads; want 0", len(payloads))
+	}
+}
+
+func TestVoiceEmployeeNotifyRelayUnknownCallNoop(t *testing.T) {
+	w, msgBus := notifyBusWiring(t)
+	sub := msgBus.Subscribe("relay-unknown-test", agent.SpeakTopicNotify)
+	t.Cleanup(func() { msgBus.Unsubscribe(sub) })
+
+	// Never started, never held: the relay must not panic or notify.
+	w.ReleaseHook("cc-never", voice.OutcomeFailed)
+	if payloads := collectNotify(t, sub.Channel, 200*time.Millisecond); len(payloads) != 0 {
+		t.Fatalf("unknown-ccid release notified %d payloads; want 0", len(payloads))
+	}
+}
+
+func TestRenderCallRelay(t *testing.T) {
+	rec := voice.CallRecord{CallID: "cc-1", Number: "local:desk", EmployeeID: "emp-9", Direction: "incoming"}
+	lines := []voice.TranscriptLine{
+		{Role: "user", Text: "  hello there  "},
+		{Role: "assistant", Text: "hi"},
+	}
+	got := renderCallRelay(rec, lines, "hangup")
+	if !strings.Contains(got, "local leg") || !strings.Contains(got, "caller: hello there") || !strings.Contains(got, "reply: hi") {
+		t.Errorf("renderCallRelay = %q", got)
+	}
+
+	// Budget: many long lines cap the transcript section.
+	long := strings.Repeat("x", 300)
+	var many []voice.TranscriptLine
+	for range 5 {
+		many = append(many, voice.TranscriptLine{Role: "user", Text: long})
+	}
+	capped := renderCallRelay(rec, many, "hangup")
+	if len(capped) > len("call ended (hangup): employee emp-9 | local leg | incoming | local:desk\n")+relayTranscriptBudget+16 {
+		t.Errorf("relay not capped: %d chars", len(capped))
+	}
+	if !strings.HasSuffix(capped, "...") {
+		t.Errorf("capped relay missing ellipsis marker: %q", capped)
+	}
+
+	// Whitespace-only transcript notifies nothing.
+	if got := renderCallRelay(rec, []voice.TranscriptLine{{Role: "user", Text: "   "}}, "hangup"); got != "" {
+		t.Errorf("whitespace-only transcript rendered %q; want empty", got)
+	}
 }

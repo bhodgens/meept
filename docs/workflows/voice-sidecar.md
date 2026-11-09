@@ -293,7 +293,13 @@ verdict) is the latency risk. Mitigations, all required:
   per partial fragment cannot keep up on a local model.
 - Per-call limits: max call duration (`voice.max_call_minutes`, default
   15) and a silence prompt at `voice.silence_prompt_seconds` (default 45),
-  then hangup.
+  then hangup. The silence clock is TURN-AWARE: while an employee turn is
+  in flight (final prompt dispatched, reply not yet fully spoken) the
+  silence window is suspended, so a slow cloud model (30-90s) is never
+  reaped mid-generation; the window re-arms fresh once the reply is
+  spoken. The optional `voice.turn_timeout_seconds` hard cap (default 0 =
+  disabled) bounds a hung LLM, since the suspended silence clock no
+  longer can.
 
 ## Concurrency and instances
 
@@ -444,7 +450,10 @@ Proposed keys, all under `voice`:
 - `allowed_numbers` - E.164 list; inbound and outbound both gated
 - `timeout_secs` - outbound ring timeout, default 30
 - `max_call_minutes` - int, default 15
-- `silence_prompt_seconds` - int, default 45
+- `silence_prompt_seconds` - int, default 45; the clock pauses while the
+  employee turn is in flight and re-arms after the reply is spoken
+- `turn_timeout_seconds` - int, default 0 (disabled); optional hard cap
+  on one in-flight voice turn (bounds a hung employee LLM)
 - `max_concurrent_calls` - int
 - `reorder_window_frames` - int, default 10
 - `reorder_gap_ms` - int, default 60
@@ -894,13 +903,12 @@ out path -> voice.local.end -> registry empty + calls.db row with
 transcripts. Two scenarios are registered in e2e/manifest.json
 (voice-local-e2e-01, voice-local-refusals-01).
 
-### Known product gap (stated honestly)
+### Ended-state transition
 
-The call row's ENDED-state transition does not fire in production on
-either leg yet: `Binding.OnCallEnd` (which marks calls.db rows ended)
-rides `ReleaseHook -> heldCalls` (internal/daemon/voice_employee.go:312-326),
-and the hold is only registered by `AcquireCallHold`
-(internal/daemon/voice_employee.go:264), which has no production caller.
-The row, direction, session binding, and transcripts land; the ended
-transition is the wiring owner's gap (the e2e suite logs it rather than
-failing: e2e/suites/voice-local/voice_local_test.go:858-866).
+`Binding.OnCallEnd` marks calls.db rows ended. It rides
+`ReleaseHook -> heldCalls`, and the hold is registered by
+`AcquireCallHold` on every live leg: local (`LocalDeps.Hold`), phone
+inbound (spawn seam), and phone outbound (`DialConfig.Hold`). Release
+is the manager hook exactly once; a nil hold seam degrades to no
+ended-state. The phone leg also calls `Binding.OnCallStart` from
+`holdPhoneCall` — without that row, OnCallEnd is a no-op.

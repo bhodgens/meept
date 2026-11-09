@@ -3,10 +3,12 @@ package cluster
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -37,6 +39,14 @@ type GitSync struct {
 
 	// Git repository path (local clone of the membership registry)
 	gitRepoPath string
+
+	// localSigningPub is this node's ed25519 public key, stamped onto
+	// the member record by heartbeat and PublishSigningPub. Guarded by
+	// gitMu. Never logged.
+	localSigningPub ed25519.PublicKey
+	// signingPubDirty is set when the member file gained a new signing
+	// pubkey that still needs a registry commit. Guarded by gitMu.
+	signingPubDirty bool
 }
 
 // NewGitSync creates a new git syncer.
@@ -129,6 +139,7 @@ func (g *GitSync) run(ctx context.Context) {
 			case <-ticker.C:
 				g.gitMu.Lock()
 				err := g.pullRemote()
+				g.flushSigningPubLocked()
 				g.gitMu.Unlock()
 				if err != nil {
 					g.logger.Warn("git_sync: sync failed", "error", err)
@@ -153,6 +164,7 @@ func (g *GitSync) run(ctx context.Context) {
 			case <-ticker.C:
 				g.gitMu.Lock()
 				err := g.pullRemote()
+				g.flushSigningPubLocked()
 				g.gitMu.Unlock()
 				if err != nil {
 					g.logger.Warn("git_sync: sync failed", "error", err)
@@ -180,6 +192,7 @@ func (g *GitSync) RegisterNode(member *Member) error {
 
 	g.gitMu.Lock()
 	defer g.gitMu.Unlock()
+	g.stampLocalSigningPub(member)
 
 	if err := SaveMember(g.gitRepoPath, member); err != nil {
 		return fmt.Errorf("git_sync: register: save member: %w", err)
@@ -276,6 +289,133 @@ func (g *GitSync) GitRepoPath() string {
 	return g.gitRepoPath
 }
 
+// SigningKeyDir is the directory for this node's private signing key.
+// It is a sibling of the git repo, never inside it: RegisterNode runs
+// `git add .` and must not commit key material.
+func (g *GitSync) SigningKeyDir() string {
+	if g == nil || g.gitRepoPath == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(g.gitRepoPath), "signing-keys")
+}
+
+// PublishSigningPub writes pub onto the existing member record for nodeID
+// and marks the registry dirty so the sync loop can commit it. It does
+// not create a member record (an empty WireGuard peer would break mesh
+// sync) and never logs key bytes. Caller does not hold gitMu.
+func (g *GitSync) PublishSigningPub(nodeID string, pub ed25519.PublicKey) error {
+	if g == nil {
+		return fmt.Errorf("git_sync: publish signing pub: nil receiver")
+	}
+	if nodeID == "" || len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("git_sync: publish signing pub: node id or key length invalid")
+	}
+	g.gitMu.Lock()
+	defer g.gitMu.Unlock()
+	cp := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	copy(cp, pub)
+	g.localSigningPub = cp
+
+	member, err := LoadMember(g.gitRepoPath, nodeID)
+	if err != nil {
+		if g.logger != nil {
+			g.logger.Debug("git_sync: signing key not published; node is not in the member registry",
+				"node_id", nodeID)
+		}
+		return nil
+	}
+	if bytes.Equal(member.SigningPub, cp) {
+		return nil
+	}
+	member.SigningPub = append([]byte(nil), cp...)
+	if err := SaveMember(g.gitRepoPath, member); err != nil {
+		return fmt.Errorf("git_sync: publish signing pub: %w", err)
+	}
+	g.signingPubDirty = true
+	if g.logger != nil {
+		g.logger.Info("git_sync: signing key staged for registry sync", "node_id", nodeID)
+	}
+	return nil
+}
+
+// ListedSigningPubs reads signing pubkeys from the local member files.
+// It does not pull. Invalid lengths are omitted and never logged as bytes.
+func (g *GitSync) ListedSigningPubs() (map[string]ed25519.PublicKey, error) {
+	if g == nil {
+		return nil, fmt.Errorf("git_sync: list signing pubs: nil receiver")
+	}
+	members, err := ListLocalMembers(g.gitRepoPath)
+	if err != nil {
+		return nil, fmt.Errorf("git_sync: list signing pubs: %w", err)
+	}
+	out := make(map[string]ed25519.PublicKey, len(members))
+	for id, m := range members {
+		if m == nil || len(m.SigningPub) == 0 {
+			continue
+		}
+		if len(m.SigningPub) != ed25519.PublicKeySize {
+			if g.logger != nil {
+				g.logger.Warn("git_sync: ignoring invalid signing pubkey length",
+					"node_id", id, "length", len(m.SigningPub))
+			}
+			continue
+		}
+		pub := make(ed25519.PublicKey, ed25519.PublicKeySize)
+		copy(pub, m.SigningPub)
+		out[id] = pub
+	}
+	return out, nil
+}
+
+// stampLocalSigningPub copies the local signing pubkey onto member when
+// one is known. Caller holds gitMu. No-op when unset or already equal.
+func (g *GitSync) stampLocalSigningPub(member *Member) {
+	if member == nil || len(g.localSigningPub) != ed25519.PublicKeySize {
+		return
+	}
+	if bytes.Equal(member.SigningPub, g.localSigningPub) {
+		return
+	}
+	member.SigningPub = append([]byte(nil), g.localSigningPub...)
+	g.signingPubDirty = true
+}
+
+// flushSigningPubLocked commits and pushes a staged signing-key update.
+// Caller holds gitMu. Git failures are logged and retried next tick;
+// key bytes are not logged. A non-git directory clears the dirty bit
+// (the file write already landed).
+func (g *GitSync) flushSigningPubLocked() {
+	if !g.signingPubDirty {
+		return
+	}
+	if !g.isGitRepo() {
+		g.signingPubDirty = false
+		return
+	}
+	if err := g.git("add", "nodes"); err != nil {
+		if g.logger != nil {
+			g.logger.Warn("git_sync: stage signing-key update failed", "error", err)
+		}
+		return
+	}
+	if err := g.git("commit", "-m", "cluster: publish signing keys"); err != nil {
+		if g.logger != nil {
+			g.logger.Warn("git_sync: commit signing-key update failed", "error", err)
+		}
+		return
+	}
+	if err := g.push(); err != nil {
+		if g.logger != nil {
+			g.logger.Warn("git_sync: push signing-key update failed", "error", err)
+		}
+		return
+	}
+	g.signingPubDirty = false
+	if g.logger != nil {
+		g.logger.Info("git_sync: signing keys pushed to registry")
+	}
+}
+
 // pullRemote fetches the latest cluster state from the remote git repository
 // using pull --rebase for linear history.
 func (g *GitSync) pullRemote() error {
@@ -356,6 +496,7 @@ func (g *GitSync) pushHeartbeat() error {
 	}
 
 	UpdateHeartbeat(member)
+	g.stampLocalSigningPub(member)
 
 	if err := SaveMember(g.gitRepoPath, member); err != nil {
 		return fmt.Errorf("pushHeartbeat: save member: %w", err)

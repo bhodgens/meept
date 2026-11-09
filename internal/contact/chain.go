@@ -251,11 +251,16 @@ func (c *ChainRunner) writeExecutionRow(ctx context.Context, chainID string, rec
 	}
 	if c.sinks.Effects != nil {
 		key := effects.EffectKey(contactChainToolName, "execution", chainID)
+		// The claimant is the run's own chain id: the chain RECORDS
+		// execution/attempt rows (it never Completes them - the per-
+		// channel effects live in each adapter), so identity here is
+		// attribution, not a reservation lock. chainID is fresh per run
+		// (pkg/id), non-zero, and collision-free.
 		granted, _, err := c.sinks.Effects.Claim(ctx, key, effects.EffectMeta{
 			Tool:      contactChainToolName,
-			SessionID: rec.ID,
+			SessionID: chainID,
 			Payload:   payload,
-		})
+		}, effects.Claimant{AgentID: "contact-chain", SessionID: chainID})
 		if err != nil {
 			c.logger.Warn("contact chain: execution claim", "chain_id", chainID, "err", err)
 		} else if !granted {
@@ -293,9 +298,9 @@ func (c *ChainRunner) writeAttemptRow(ctx context.Context, chainID string, rec R
 		key := effects.EffectKey(contactChainToolName, "attempt", chainID, string(record.Channel))
 		if _, _, err := c.sinks.Effects.Claim(ctx, key, effects.EffectMeta{
 			Tool:      contactChainToolName,
-			SessionID: rec.ID,
+			SessionID: chainID,
 			Payload:   payload,
-		}); err != nil {
+		}, effects.Claimant{AgentID: "contact-chain", SessionID: chainID}); err != nil {
 			c.logger.Warn("contact chain: attempt claim", "chain_id", chainID, "err", err)
 		}
 	}

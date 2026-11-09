@@ -75,11 +75,14 @@ class CommandPalette extends StatefulWidget {
       label: 'agents',
       description: 'switch to employees view',
     ),
-    // Activity view (gui_inventory.json: "activity view" entry)
+    // Activity view (gui_inventory.json: "activity view" entry).
+    // Routed at core/router.dart (/activity), same shape as intake
+    // (issue #114). 'a' matches the TUI ViewActivity key.
     const CommandPaletteItem(
       keybinding: 'a',
       label: 'activity view',
       description: 'agent activity, findings + drift',
+      route: '/activity',
     ),
     // Intake status view — parity with the TUI's /intake slash command
     // (internal/sharedclient/slash.go; issue #109). 'i' is unused and

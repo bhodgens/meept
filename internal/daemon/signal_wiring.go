@@ -4,7 +4,7 @@ package daemon
 // signalleg.Leg when [signal].enabled=true, arms its call-event state
 // machine, and adapts the phone-posture seams (effects reservation,
 // audit row, allowlist) onto the daemon components. Nil-safe degrade
-// posture mirrors bindPhoneCall: a disabled signal config leaves the
+// posture mirrors holdPhoneCall: a disabled signal config leaves the
 // Leg nil, the daemon boots clean, and every call path stays refused.
 // A construction failure is a loud WARN (not fatal) - the rest of the
 // voice stack keeps running, mirroring the wireSlackChannel
@@ -37,24 +37,24 @@ import (
 // view, which is the same four methods minus Close - the concrete
 // *MemoryLedger/*SQLiteLedger carry all of them).
 type effectsEffectsSeam struct {
-	claim    func(ctx context.Context, key string) (bool, error)
-	complete func(ctx context.Context, key string) error
-	abandon  func(ctx context.Context, key, reason string) error
+	claim    func(ctx context.Context, key, employeeID string) (bool, error)
+	complete func(ctx context.Context, key, employeeID string) error
+	abandon  func(ctx context.Context, key, employeeID, reason string) error
 	hash     func(employeeID, target, requestID string) string
 }
 
 func (a effectsEffectsSeam) keyFor(rawKey string) string { return rawKey }
 
-func (a effectsEffectsSeam) Reserve(ctx context.Context, key string) (bool, error) {
-	return a.claim(ctx, key)
+func (a effectsEffectsSeam) Reserve(ctx context.Context, key, employeeID string) (bool, error) {
+	return a.claim(ctx, key, employeeID)
 }
 
-func (a effectsEffectsSeam) Complete(ctx context.Context, key string) error {
-	return a.complete(ctx, key)
+func (a effectsEffectsSeam) Complete(ctx context.Context, key, employeeID string) error {
+	return a.complete(ctx, key, employeeID)
 }
 
-func (a effectsEffectsSeam) Abandon(ctx context.Context, key, reason string) error {
-	return a.abandon(ctx, key, reason)
+func (a effectsEffectsSeam) Abandon(ctx context.Context, key, employeeID, reason string) error {
+	return a.abandon(ctx, key, employeeID, reason)
 }
 
 // newEffectsEffectsSeam folds the voice.EffectsLedger view onto the
@@ -62,17 +62,18 @@ func (a effectsEffectsSeam) Abandon(ctx context.Context, key, reason string) err
 // collide with identical parts across retries.
 func newEffectsEffectsSeam(ledger voice.EffectsLedger) effectsEffectsSeam {
 	return effectsEffectsSeam{
-		claim: func(ctx context.Context, key string) (bool, error) {
+		claim: func(ctx context.Context, key, employeeID string) (bool, error) {
 			granted, _, err := ledger.Claim(ctx, effects.EffectKey("signal.voice_call", key), effects.EffectMeta{
-				Tool: "signal.voice_call",
-			})
+				Tool:      "signal.voice_call",
+				SessionID: employeeID,
+			}, effects.Claimant{AgentID: employeeID})
 			return granted, err
 		},
-		complete: func(ctx context.Context, key string) error {
-			return ledger.Complete(ctx, effects.EffectKey("signal.voice_call", key))
+		complete: func(ctx context.Context, key, employeeID string) error {
+			return ledger.Complete(ctx, effects.EffectKey("signal.voice_call", key), effects.Claimant{AgentID: employeeID})
 		},
-		abandon: func(ctx context.Context, key, reason string) error {
-			return ledger.Abandon(ctx, effects.EffectKey("signal.voice_call", key), reason)
+		abandon: func(ctx context.Context, key, employeeID, reason string) error {
+			return ledger.Abandon(ctx, effects.EffectKey("signal.voice_call", key), effects.Claimant{AgentID: employeeID}, reason)
 		},
 	}
 }

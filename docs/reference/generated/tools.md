@@ -16,12 +16,14 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 - [func CanonicalName\(tool Tool\) string](<#CanonicalName>)
 - [func ContextWithAutonomous\(ctx context.Context\) context.Context](<#ContextWithAutonomous>)
 - [func ContextWithScopeIdentity\(ctx context.Context, id ScopeIdentity\) context.Context](<#ContextWithScopeIdentity>)
+- [func ContextWithSessionID\(ctx context.Context, sessionID string\) context.Context](<#ContextWithSessionID>)
 - [func ContextWithWorkingDir\(ctx context.Context, dir string\) context.Context](<#ContextWithWorkingDir>)
 - [func GetCategory\(t Tool\) string](<#GetCategory>)
 - [func GetMaxResultTokens\(t Tool\) int](<#GetMaxResultTokens>)
 - [func IsNoWorkingDir\(err error\) bool](<#IsNoWorkingDir>)
 - [func NoPathError\(tool string\) error](<#NoPathError>)
 - [func NoWorkingDirError\(tool string\) error](<#NoWorkingDirError>)
+- [func SessionIDFromContext\(ctx context.Context\) string](<#SessionIDFromContext>)
 - [func ValidateToolArgs\(tool Tool, args map\[string\]any\) error](<#ValidateToolArgs>)
 - [func WorkingDirFromContext\(ctx context.Context\) string](<#WorkingDirFromContext>)
 - [type ArgValidationError](<#ArgValidationError>)
@@ -66,6 +68,7 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 - [type ToolDefaults](<#ToolDefaults>)
   - [func \(ToolDefaults\) IsConcurrencySafe\(map\[string\]any\) bool](<#ToolDefaults.IsConcurrencySafe>)
   - [func \(ToolDefaults\) IsReadOnly\(map\[string\]any\) bool](<#ToolDefaults.IsReadOnly>)
+  - [func \(ToolDefaults\) TimeoutMs\(\) time.Duration](<#ToolDefaults.TimeoutMs>)
 - [type ToolExecutor](<#ToolExecutor>)
 - [type ToolInfo](<#ToolInfo>)
 - [type ToolResult](<#ToolResult>)
@@ -151,6 +154,10 @@ Before this existed the tools returned the bare "no path specified", which told 
 
 	var ErrNoWorkingDir = errors.New("no working directory for this session; pass an explicit path")
 
+<a name="ErrToolTimeout"></a>ErrToolTimeout is the sentinel a tool\-execution timeout classifies through: when a declared TimeoutMs budget expires, the executor returns an error wrapping this sentinel \(routeable via errors.Is\) with the machine\-readable "TOOL\_TIMEOUT" ErrCode, never a raw context.DeadlineExceeded. Upstream / turn\-level cancellation is NOT masked through this sentinel — only the tool's own declared timer substitutes it \(dsh convergence leaf 01\-tool\-timeout, contract B1\).
+
+	var ErrToolTimeout = errors.New("tool call timed out")
+
 <a name="AutonomousFromContext"></a>
 ## func AutonomousFromContext
 
@@ -180,6 +187,13 @@ ContextWithAutonomous marks the context as AUTONOMOUS execution: a job\-driven, 
 	func ContextWithScopeIdentity(ctx context.Context, id ScopeIdentity) context.Context
 
 ContextWithScopeIdentity returns ctx carrying the session's memory\-scope identity. A zero MaxScope stores nothing \(no identity = legacy behavior\).
+
+<a name="ContextWithSessionID"></a>
+## func ContextWithSessionID
+
+	func ContextWithSessionID(ctx context.Context, sessionID string) context.Context
+
+ContextWithSessionID returns a new context carrying the caller's session id. An empty id stores nothing \(no attribution = legacy behavior\).
 
 <a name="ContextWithWorkingDir"></a>
 ## func ContextWithWorkingDir
@@ -222,6 +236,13 @@ NoPathError reports that tool requires an explicit path argument and got none. T
 	func NoWorkingDirError(tool string) error
 
 NoWorkingDirError reports that tool needed a path, had no path argument, and the session has no working directory to default to. The returned error wraps ErrNoWorkingDir \(%w\), so callers can detect it with IsNoWorkingDir / errors.Is.
+
+<a name="SessionIDFromContext"></a>
+## func SessionIDFromContext
+
+	func SessionIDFromContext(ctx context.Context) string
+
+SessionIDFromContext extracts the caller's session id from ctx, if set. Returns empty string when not present \(no session attribution\).
 
 <a name="ValidateToolArgs"></a>
 ## func ValidateToolArgs
@@ -683,6 +704,15 @@ A tool provides metadata \(name, description, parameters\) that is sent to the L
 	    // are concurrency-safe may be parallelized even if they are not
 	    // strictly read-only (e.g., independent file writes to different paths).
 	    IsConcurrencySafe(input map[string]any) bool
+	
+	    // TimeoutMs declares this tool's cooperative execution budget.
+	    // 0 (the ToolDefaults default) means no declared timeout: the executor
+	    // delegates unchanged. A value > 0 arms a context deadline around the
+	    // dispatch (bounding the whole retry loop, so a retry storm cannot
+	    // outlive the declared budget); on expiry the executor substitutes a
+	    // structured TOOL_TIMEOUT result instead of leaking a raw
+	    // context.DeadlineExceeded. Opt-in per tool.
+	    TimeoutMs() time.Duration
 	}
 
 <a name="ToolDefaults"></a>
@@ -705,6 +735,13 @@ IsConcurrencySafe returns false by default. Tools that can safely execute concur
 	func (ToolDefaults) IsReadOnly(map[string]any) bool
 
 IsReadOnly returns false by default. Tools that are always read\-only should override this method to return true.
+
+<a name="ToolDefaults.TimeoutMs"></a>
+### func \(ToolDefaults\) TimeoutMs
+
+	func (ToolDefaults) TimeoutMs() time.Duration
+
+TimeoutMs returns 0 by default: no declared timeout, the executor delegates unchanged. Tools that want a cooperative budget override this method with their declared duration \(dsh convergence leaf 01\-tool\-timeout, contract B1\).
 
 <a name="ToolExecutor"></a>
 ## type ToolExecutor

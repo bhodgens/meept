@@ -153,11 +153,11 @@ func (h *EffectsRPCHandler) handleReconcile(ctx context.Context, params json.Raw
 // inventing an overwrite semantics the state machine does not have.
 func (h *EffectsRPCHandler) reconcileComplete(ctx context.Context, key string, receipt json.RawMessage) (any, error) {
 	if len(receipt) > 0 && string(receipt) != "null" {
-		if err := h.ledger.RecordReceipt(ctx, key, receipt); err != nil {
+		if err := h.ledger.RecordReceiptAdmin(ctx, key, receipt); err != nil {
 			return nil, fmt.Errorf("effects: record receipt %s: %w", key, err)
 		}
 	}
-	if err := h.ledger.Complete(ctx, key); err != nil {
+	if err := h.ledger.CompleteAdmin(ctx, key); err != nil {
 		return nil, fmt.Errorf("effects: complete %s: %w", key, err)
 	}
 	rec, err := h.ledger.Get(ctx, key)
@@ -171,7 +171,7 @@ func (h *EffectsRPCHandler) reconcileAbandon(ctx context.Context, key, reason st
 	if strings.TrimSpace(reason) == "" {
 		return nil, fmt.Errorf("reason required for abandon")
 	}
-	if err := h.ledger.Abandon(ctx, key, reason); err != nil {
+	if err := h.ledger.AbandonAdmin(ctx, key, reason); err != nil {
 		return nil, fmt.Errorf("effects: abandon %s: %w", key, err)
 	}
 	rec, err := h.ledger.Get(ctx, key)

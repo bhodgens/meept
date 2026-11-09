@@ -155,7 +155,7 @@ func NewHermesToolMapper(logger *slog.Logger) *HermesToolMapper {
 			"team_create":  "delegate_task",
 			"team_list":    "platform_agents",
 			"team_message": "request_handoff",
-			"image_gen":    "", // no Meept equivalent yet — see https://github.com/bhodgens/meept/issues/13
+			"image_gen":    "generate_image",
 		},
 	}
 }

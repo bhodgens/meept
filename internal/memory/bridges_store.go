@@ -94,6 +94,14 @@ func NewBridgeStore(path string) (*BridgeStore, error) {
 		shard.Close()
 		return nil, err
 	}
+	// Rows written before unit_type existed still have the tag in
+	// bridge_meta. Stamp the shard metadata row so generic Search sees it
+	// without a rewrite of the side table.
+	if err := stampBridgeUnitTypes(db); err != nil {
+		db.Close()
+		shard.Close()
+		return nil, err
+	}
 	return &BridgeStore{
 		shard: shard,
 		db:    db,
@@ -149,6 +157,15 @@ func (bs *BridgeStore) PutBridge(ctx context.Context, rec BridgeRecord) error {
 
 	if err := bs.shard.Insert(ctx, rec.ID, rec.Embedding, rec.Content); err != nil {
 		return fmt.Errorf("bridge store: insert vector: %w", err)
+	}
+	// Persist the tag on the shard metadata row Search joins. bridge_meta
+	// alone never reaches generic shard hits, so SelectBalanced counted
+	// them as source units and the k_b cap did not apply.
+	if err := bs.shard.SetUnitType(ctx, rec.ID, BridgeUnitTypeValue); err != nil {
+		if delErr := bs.shard.Delete(ctx, rec.ID); delErr != nil {
+			bs.log.Warn("bridge store: failed to roll back vector after unit_type error", "id", rec.ID, "error", delErr)
+		}
+		return fmt.Errorf("bridge store: tag unit type: %w", err)
 	}
 	if err := bs.putBridgeMetadata(ctx, rec.ID, md); err != nil {
 		// Roll back the vector row so a rejected/failed write never leaves a
@@ -542,6 +559,25 @@ func initBridgeSidecar(db *sql.DB) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("bridge store: init sidecar schema: %w", err)
+	}
+	return nil
+}
+
+// stampBridgeUnitTypes copies unit_type=bridge onto shard metadata rows that
+// already have the tag in bridge_meta. Generic VectorShard.Search joins
+// metadata, not bridge_meta; without this stamp those hits stay untyped and
+// SelectBalanced does not cap them. New writes tag the row in PutBridge.
+func stampBridgeUnitTypes(db *sql.DB) error {
+	_, err := db.Exec(`
+		UPDATE metadata
+		SET unit_type = ?
+		WHERE memory_id IN (
+			SELECT memory_id FROM bridge_meta WHERE key = ?
+		)
+		AND COALESCE(unit_type, '') = ''
+	`, BridgeUnitTypeValue, BridgeMetaUnitType)
+	if err != nil {
+		return fmt.Errorf("bridge store: stamp unit_type onto shard metadata: %w", err)
 	}
 	return nil
 }

@@ -32,7 +32,7 @@
     "path": "DELETE /api/v1/agents/{id}",
     "handler": "h.handleDelete",
     "file": "internal/employee/api_handlers.go",
-    "line": 66
+    "line": 80
   },
   {
     "method": "ANY",
@@ -221,42 +221,42 @@
     "path": "GET /api/v1/agents",
     "handler": "h.handleList",
     "file": "internal/employee/api_handlers.go",
-    "line": 60
+    "line": 74
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/agents/{id}",
     "handler": "h.handleGet",
     "file": "internal/employee/api_handlers.go",
-    "line": 64
+    "line": 78
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/agents/{id}/audit",
     "handler": "h.handleAuditList",
     "file": "internal/employee/api_handlers.go",
-    "line": 80
+    "line": 94
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/agents/{id}/constitution",
     "handler": "h.handleConstitutionGet",
     "file": "internal/employee/api_handlers.go",
-    "line": 72
+    "line": 86
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/agents/{id}/goals",
     "handler": "h.handleGoalsList",
     "file": "internal/employee/api_handlers.go",
-    "line": 75
+    "line": 89
   },
   {
     "method": "ANY",
     "path": "GET /api/v1/agents/{id}/goals/{gid}",
     "handler": "h.handleGoalsGet",
     "file": "internal/employee/api_handlers.go",
-    "line": 77
+    "line": 91
   },
   {
     "method": "ANY",
@@ -1054,14 +1054,14 @@
     "path": "PATCH /api/v1/agents/{id}",
     "handler": "h.handleUpdate",
     "file": "internal/employee/api_handlers.go",
-    "line": 65
+    "line": 79
   },
   {
     "method": "ANY",
     "path": "PATCH /api/v1/agents/{id}/constitution",
     "handler": "h.handleConstitutionAmend",
     "file": "internal/employee/api_handlers.go",
-    "line": 73
+    "line": 87
   },
   {
     "method": "ANY",
@@ -1103,21 +1103,21 @@
     "path": "POST /api/v1/agents",
     "handler": "h.handleCreate",
     "file": "internal/employee/api_handlers.go",
-    "line": 61
+    "line": 75
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/agents/migrate",
     "handler": "h.handleMigrate",
     "file": "internal/employee/api_handlers.go",
-    "line": 62
+    "line": 76
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/agents/{id}/audit/{fid}/resolve",
     "handler": "h.handleAuditResolve",
     "file": "internal/employee/api_handlers.go",
-    "line": 81
+    "line": 95
   },
   {
     "method": "ANY",
@@ -1131,35 +1131,35 @@
     "path": "POST /api/v1/agents/{id}/goals",
     "handler": "h.handleGoalsCreate",
     "file": "internal/employee/api_handlers.go",
-    "line": 76
+    "line": 90
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/agents/{id}/pause",
     "handler": "h.handlePause",
     "file": "internal/employee/api_handlers.go",
-    "line": 68
+    "line": 82
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/agents/{id}/resume",
     "handler": "h.handleResume",
     "file": "internal/employee/api_handlers.go",
-    "line": 69
+    "line": 83
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/agents/{id}/steer",
     "handler": "h.handleSteerHTTP",
     "file": "internal/employee/api_handlers.go",
-    "line": 70
+    "line": 84
   },
   {
     "method": "ANY",
     "path": "POST /api/v1/agents/{id}/trigger",
     "handler": "h.handleTrigger",
     "file": "internal/employee/api_handlers.go",
-    "line": 67
+    "line": 81
   },
   {
     "method": "ANY",
@@ -1964,7 +1964,7 @@
     "path": "PUT /api/v1/agents/{id}/goals/{gid}/gate",
     "handler": "h.handleGoalsSetGate",
     "file": "internal/employee/api_handlers.go",
-    "line": 78
+    "line": 92
   },
   {
     "method": "ANY",

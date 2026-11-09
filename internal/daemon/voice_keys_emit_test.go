@@ -67,10 +67,24 @@ func newKeysEmitFixture(t *testing.T) *keysEmitFixture {
 		}
 	})
 
-	// Fake child: records every raw line the daemon sends.
-	conn, err := net.Dial("unix", path)
-	if err != nil {
-		t.Fatalf("fake child dial: %v", err)
+	// Fake child: records every raw line the daemon sends. The dial
+	// retries: os.Stat sees the socket file at bind() time, a beat
+	// before listen() finishes accepting (ECONNREFUSED in that window
+	// under suite load - the internal/voice/socket_test.go waitConn
+	// pattern). A probe dial cannot be used to wait: the first
+	// connection claims the single child slot.
+	var conn net.Conn
+	dialDeadline := time.Now().Add(5 * time.Second)
+	for {
+		var err error
+		conn, err = net.Dial("unix", path)
+		if err == nil {
+			break
+		}
+		if time.Now().After(dialDeadline) {
+			t.Fatalf("fake child dial: %v", err)
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 	lines := make(chan string, 16)
 	go func() {

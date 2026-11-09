@@ -51,6 +51,50 @@ void main() {
     expect(items['memory'], 'm');
     expect(items['memory review'], 'v');
     expect(items['users'], 'u');
+    // TUI ViewActivity default ('a') — label stays lowercase.
+    expect(items['activity view'], 'a');
+  });
+
+  test('activity view carries the existing /activity route', () {
+    final activity = CommandPalette.defaultItems
+        .where((item) => item.label == 'activity view')
+        .toList();
+    expect(activity, hasLength(1));
+    expect(activity.single.label, 'activity view');
+    expect(activity.single.route, '/activity');
+    // Intake is the sibling pattern this fix matches.
+    final intake = CommandPalette.defaultItems
+        .where((item) => item.label == 'intake status')
+        .toList();
+    expect(intake.single.route, '/intake');
+  });
+
+  test('every palette item has a route, a page, or a host dispatch label', () {
+    // Labels the home-screen switches handle without a route or page.
+    // Anything else with neither is a silent no-op (issue #114).
+    const dispatched = {
+      'chat',
+      'sessions',
+      'plans',
+      'tasks',
+      'agents',
+      'find…',
+      'new session',
+      'edit description',
+      'projects',
+      'activity view',
+    };
+    for (final item in CommandPalette.defaultItems) {
+      final wired =
+          item.route != null ||
+          item.page != null ||
+          dispatched.contains(item.label);
+      expect(
+        wired,
+        isTrue,
+        reason: '${item.label} has no route, page, or dispatch handler',
+      );
+    }
   });
 
   testWidgets('arrow down moves selection; enter activates', (tester) async {

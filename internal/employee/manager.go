@@ -616,6 +616,15 @@ type Manager struct {
 	// audit is a no-op (Checkpoint 2 is dormant).
 	postTurnAuditor *PostTurnAuditor
 
+	// voiceCallLive is an optional predicate injected by the daemon wiring
+	// to gate scheduled assessments during live voice calls. When it
+	// returns true for an employee ID, runAssessForEmployee skips the tick
+	// (the assessment would otherwise inject turns into the live call's
+	// session, speak through the call, and contend with the operator).
+	// Nil means no gate — the legacy always-run behavior. Snapshot under
+	// mu at check time (the predicate may query live call state).
+	voiceCallLive func(employeeID string) bool
+
 	// turnCollector is an optional callback injected by the daemon wiring
 	// to supply TurnRecords to the periodic audit job. When nil, the
 	// periodic audit runs but produces no findings (no turns to audit).

@@ -66,23 +66,23 @@ func newCaptureLedger(t *testing.T) *captureLedger {
 	return &captureLedger{inner: effects.NewMemoryLedger()}
 }
 
-func (c *captureLedger) Claim(ctx context.Context, key string, meta effects.EffectMeta) (bool, *effects.EffectRecord, error) {
+func (c *captureLedger) Claim(ctx context.Context, key string, meta effects.EffectMeta, who effects.Claimant) (bool, *effects.EffectRecord, error) {
 	c.mu.Lock()
 	c.keys = append(c.keys, key)
 	c.mu.Unlock()
-	return c.inner.Claim(ctx, key, meta)
+	return c.inner.Claim(ctx, key, meta, who)
 }
 
-func (c *captureLedger) RecordReceipt(ctx context.Context, key string, receipt json.RawMessage) error {
-	return c.inner.RecordReceipt(ctx, key, receipt)
+func (c *captureLedger) RecordReceipt(ctx context.Context, key string, who effects.Claimant, receipt json.RawMessage) error {
+	return c.inner.RecordReceipt(ctx, key, who, receipt)
 }
 
-func (c *captureLedger) Complete(ctx context.Context, key string) error {
-	return c.inner.Complete(ctx, key)
+func (c *captureLedger) Complete(ctx context.Context, key string, who effects.Claimant) error {
+	return c.inner.Complete(ctx, key, who)
 }
 
-func (c *captureLedger) Abandon(ctx context.Context, key string, reason string) error {
-	return c.inner.Abandon(ctx, key, reason)
+func (c *captureLedger) Abandon(ctx context.Context, key string, who effects.Claimant, reason string) error {
+	return c.inner.Abandon(ctx, key, who, reason)
 }
 
 func (c *captureLedger) ReconcilePending(ctx context.Context) ([]effects.EffectRecord, error) {

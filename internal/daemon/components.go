@@ -5265,7 +5265,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			Template: c.AgentLoop,
 			Effects:  c.EffectsLedger,
 			Broker:   c.ensureSecretBroker(logger),
-			Logger:   logger,
+			// Employee definitions (voice-persona fix): the voice turn
+			// runner stamps the bound employee's prompt + constitution
+			// onto the session loop before every turn. Nil (employees and
+			// bots both disabled) degrades to the template persona.
+			Employees: c.EmployeeManager,
+			Logger:    logger,
 		}
 		// Audit chain: the employee wiring hands the Manager the chain DB
 		// handle; voice dial audit rows append through a store opened over
@@ -6163,6 +6168,24 @@ func (c *Components) Start(ctx context.Context) error {
 		// global periodic audit, and plan approval timeout sweeper.
 		// Spec lines 40, 430, 591.
 		if c.Scheduler != nil {
+			// Live-voice-call gate: a voice-bound employee's assessment
+			// shares the call's session, so a scheduled tick mid-call
+			// would inject assessment turns into the live conversation
+			// (speak through the call, trip barge-in, contend with the
+			// operator). Skip those ticks while any call is live for the
+			// employee. Captures the wiring built earlier in this boot
+			// (nil when voice is disabled → nil predicate → no gate).
+			if vw := c.Voice; vw != nil && vw.Registry != nil {
+				registry := vw.Registry
+				c.EmployeeManager.SetVoiceCallLiveFunc(func(employeeID string) bool {
+					for _, inst := range registry.Live() {
+						if inst.EmployeeID == employeeID {
+							return true
+						}
+					}
+					return false
+				})
+			}
 			schedAdapter := employeeSchedulerAdapter{sched: c.Scheduler}
 			if n, err := c.EmployeeManager.ScheduleAssessJobs(ctx, schedAdapter, 15*time.Minute); err != nil {
 				c.Logger.Warn("Failed to schedule employee assess jobs", "error", err)

@@ -34,6 +34,20 @@ import (
 // Small arg-extraction helpers shared by the four tools.
 // ---------------------------------------------------------------------------
 
+// effectClaimant is the effects principal for a github tool execution.
+// It reads the agent and session the loop injected. It does not fall
+// back to "default" — that string is shared by every unscoped caller
+// and would make the ledger claimant check a no-op.
+func effectClaimant(ctx context.Context) effects.Claimant {
+	sid := tools.SessionIDFromContext(ctx)
+	if sid == "" {
+		if v, ok := ctx.Value(sessionIDContextKey).(string); ok {
+			sid = v
+		}
+	}
+	return effects.Claimant{AgentID: tools.AgentIDFromContext(ctx), SessionID: sid}
+}
+
 // prStringArg returns args[key] as a string, or "" when absent/mistyped.
 func prStringArg(args map[string]any, key string) string {
 	s, _ := args[key].(string)
@@ -200,10 +214,11 @@ func (t *GitHubPRCreateTool) Execute(ctx context.Context, args map[string]any) (
 	if t.ledger == nil {
 		return nil, githubLedgerGuard("github_pr_create")
 	}
+	who := effectClaimant(ctx)
 
 	var resNumber int
 	var resURL string
-	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, func(ctx context.Context) (json.RawMessage, error) {
+	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, who, func(ctx context.Context) (json.RawMessage, error) {
 		pr, _, apiErr := client.PullRequests.Create(ctx, owner, repo, req)
 		if apiErr != nil {
 			return nil, apiErr
@@ -216,7 +231,7 @@ func (t *GitHubPRCreateTool) Execute(ctx context.Context, args map[string]any) (
 		return nil, fmt.Errorf("github_pr_create: %w", runErr)
 	}
 	if !reused {
-		if err := t.ledger.Complete(ctx, key); err != nil {
+		if err := t.ledger.Complete(ctx, key, who); err != nil {
 			return nil, fmt.Errorf("github_pr_create: complete: %w", err)
 		}
 	} else {
@@ -307,10 +322,11 @@ func (t *GitHubPRCommentTool) Execute(ctx context.Context, args map[string]any) 
 	if t.ledger == nil {
 		return nil, githubLedgerGuard("github_pr_comment")
 	}
+	who := effectClaimant(ctx)
 
 	var resID int64
 	var resURL string
-	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, func(ctx context.Context) (json.RawMessage, error) {
+	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, who, func(ctx context.Context) (json.RawMessage, error) {
 		c, _, apiErr := client.PullRequests.CreateComment(ctx, owner, repo, prNum,
 			github.CreatePullRequestCommentRequest{Body: body})
 		if apiErr != nil {
@@ -324,7 +340,7 @@ func (t *GitHubPRCommentTool) Execute(ctx context.Context, args map[string]any) 
 		return nil, fmt.Errorf("github_pr_comment: %w", runErr)
 	}
 	if !reused {
-		if err := t.ledger.Complete(ctx, key); err != nil {
+		if err := t.ledger.Complete(ctx, key, who); err != nil {
 			return nil, fmt.Errorf("github_pr_comment: complete: %w", err)
 		}
 	} else {
@@ -427,6 +443,7 @@ func (t *GitHubPRReviewTool) Execute(ctx context.Context, args map[string]any) (
 	if t.ledger == nil {
 		return nil, githubLedgerGuard("github_pr_review")
 	}
+	who := effectClaimant(ctx)
 
 	var resID int64
 	// attemptErr carries a rejected review (4xx provider outcome) so the
@@ -435,7 +452,7 @@ func (t *GitHubPRReviewTool) Execute(ctx context.Context, args map[string]any) (
 	// with state REQUEST_CHANGES when an APPROVE is not permitted; the
 	// result state is checked below so that path cannot read as success.
 	var attemptErr error
-	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, func(ctx context.Context) (json.RawMessage, error) {
+	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, who, func(ctx context.Context) (json.RawMessage, error) {
 		r, resp, apiErr := client.PullRequests.CreateReview(ctx, owner, repo, prNum, &github.PullRequestReviewRequest{
 			Body:  new(body),
 			Event: new(event),
@@ -477,7 +494,7 @@ func (t *GitHubPRReviewTool) Execute(ctx context.Context, args map[string]any) (
 		return nil, fmt.Errorf("github_pr_review: %w", runErr)
 	}
 	if !reused {
-		if err := t.ledger.Complete(ctx, key); err != nil {
+		if err := t.ledger.Complete(ctx, key, who); err != nil {
 			return nil, fmt.Errorf("github_pr_review: complete: %w", err)
 		}
 	} else {
@@ -582,13 +599,14 @@ func (t *GitHubPRMergeTool) Execute(ctx context.Context, args map[string]any) (a
 	if t.ledger == nil {
 		return nil, githubLedgerGuard("github_pr_merge")
 	}
+	who := effectClaimant(ctx)
 
 	var resMerged bool
 	var resSHA, resMsg string
 	// attemptErr carries the 4xx provider outcome so it can be surfaced to
 	// the caller after the receipt has been recorded and the record completed.
 	var attemptErr error
-	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, func(ctx context.Context) (json.RawMessage, error) {
+	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, who, func(ctx context.Context) (json.RawMessage, error) {
 		m, _, apiErr := client.PullRequests.Merge(ctx, owner, repo, prNum, "",
 			&github.PullRequestOptions{MergeMethod: strategy})
 		if apiErr != nil {
@@ -613,7 +631,7 @@ func (t *GitHubPRMergeTool) Execute(ctx context.Context, args map[string]any) (a
 		return nil, fmt.Errorf("github_pr_merge: %w", runErr)
 	}
 	if !reused {
-		if err := t.ledger.Complete(ctx, key); err != nil {
+		if err := t.ledger.Complete(ctx, key, who); err != nil {
 			return nil, fmt.Errorf("github_pr_merge: complete: %w", err)
 		}
 	} else {

@@ -53,6 +53,10 @@ key registry the gossip engine uses for event signatures (no second crypto path)
   signing, or whose origin node has no registered signing key is rejected with a
   Warn (carrying node + job id) and NEVER executed. Rejected jobs also emit
   `TASK_FAIL` so the origin learns the dispatch was refused.
+- **Key distribution**: `SyncPeerSigningKeys` installs each member's
+  `SigningPub` into the gossip registry and publishes the local key onto
+  existing `nodes/*.json5` records. A node with no member file still cannot
+  publish a key. Unsigned remote dispatches stay rejected.
 - **Default ON with the cluster**: `cluster.security.require_node_signatures`
   defaults to `true`. A cluster-enabled boot with no explicit security section
   requires signatures; an explicit `require_node_signatures: false` in the
@@ -105,7 +109,8 @@ WireGuard need real network separation; the verified procedure:
    `node_id`, `gossip_listen_addr` set to the node's WireGuard inner IP
    (`10.77.0.x:<wgport+1>`), `wireguard_port` matching on both nodes (the
    transport dials `member.ClusterIP:<wireguard_port+1>`), and
-   `require_node_signatures=false` OR pre-distributed signing keys.
+   `require_node_signatures=false` OR member records that carry SigningPub
+   (SyncPeerSigningKeys installs those keys; do not hand-copy them).
 4. **Membership**: seed both nodes' git registry repos
    (`<state_dir>/cluster/nodes/<id>.json5`) with each member's
    `cluster_ip` = WireGuard inner IP and a fresh `last_heartbeat`. Keep

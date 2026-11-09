@@ -19,6 +19,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/caimlas/meept/internal/auth"
 )
 
 const maxAgentBodySize = 1 << 20 // 1 MB
@@ -33,7 +35,8 @@ type RPCCallback func(ctx context.Context, method string, params json.RawMessage
 // every request through the injected RPCCallback to the agents.* RPC methods
 // registered by employee.RPCHandler (Phase 6).
 type AgentAPIHandler struct {
-	rpc RPCCallback
+	rpc       RPCCallback
+	authStore *auth.Store
 }
 
 // NewAgentAPIHandler creates a handler that dispatches to the agents.* RPC
@@ -51,6 +54,17 @@ func (h *AgentAPIHandler) SetRPCCallback(cb RPCCallback) {
 		return
 	}
 	h.rpc = cb
+}
+
+// SetAuthStore wires the users store used to resolve a presented API key
+// to a caller identity. Nil is ignored (typed-nil guard). A nil store
+// leaves multi-user resolution to an identity already on the request
+// context; it never invents a user id.
+func (h *AgentAPIHandler) SetAuthStore(store *auth.Store) {
+	if store == nil {
+		return
+	}
+	h.authStore = store
 }
 
 // RegisterRoutes wires all /api/v1/agents/* routes onto the provided mux.
@@ -146,9 +160,13 @@ func (h *AgentAPIHandler) dispatch(w http.ResponseWriter, r *http.Request, metho
 	} else {
 		raw = json.RawMessage("{}")
 	}
-	// Inject caller information from HTTP context into RPC context.
-	// This enables RPC handlers to validate caller authorization.
-	ctx := injectCallerIntoContext(r.Context(), r)
+	// Inject the store identity into RPC context. A presented key that
+	// the store does not match fails closed before dispatch.
+	ctx, cerr := h.injectCallerIntoContext(r.Context(), r)
+	if cerr != nil {
+		h.writeError(w, http.StatusUnauthorized, cerr.Error())
+		return
+	}
 	result, err := h.rpc(ctx, method, raw)
 	if err != nil {
 		// Map common sentinel errors to HTTP status codes.
@@ -170,34 +188,21 @@ func (h *AgentAPIHandler) dispatch(w http.ResponseWriter, r *http.Request, metho
 	h.writeJSON(w, http.StatusOK, result)
 }
 
-// injectCallerIntoContext extracts the API key from the HTTP request context
-// and injects a CallerInfo into the context for RPC handlers to use.
-func injectCallerIntoContext(ctx context.Context, r *http.Request) context.Context {
-	// Extract API key from HTTP context (set by auth middleware)
-	apiKey := extractAPIKeyFromContext(ctx)
-	if apiKey == "" {
-		// No API key in context - return original context
-		// RPC handlers will handle unauthenticated requests
-		return ctx
+// injectCallerIntoContext resolves the caller from the request context
+// identity or, failing that, from the auth store. A presented key with no
+// store match fails closed. The raw key is never logged.
+func (h *AgentAPIHandler) injectCallerIntoContext(ctx context.Context, r *http.Request) (context.Context, error) {
+	if h == nil {
+		return ctx, nil
 	}
-	// Create caller info and inject into context
-	callerInfo := &CallerInfo{
-		APIKey: apiKey,
-		UserID: deriveUserIDFromAPIKey(apiKey),
+	info, err := resolveCaller(ctx, presentedAPIKey(ctx, r), h.authStore)
+	if err != nil {
+		return ctx, err
 	}
-	return ContextWithCaller(ctx, callerInfo)
-}
-
-// extractAPIKeyFromContext extracts API key from HTTP context.
-// Uses the same context key as internal/comm/http/auth.go to avoid import cycle.
-func extractAPIKeyFromContext(ctx context.Context) string {
-	type contextKey string
-	const apiKeyContextKey contextKey = "api_key"
-	key, ok := ctx.Value(apiKeyContextKey).(string)
-	if !ok {
-		return ""
+	if info == nil {
+		return ctx, nil
 	}
-	return key
+	return ContextWithCaller(ctx, info), nil
 }
 
 // ---------------------------------------------------------------------------

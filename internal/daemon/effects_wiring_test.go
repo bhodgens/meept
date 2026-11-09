@@ -23,11 +23,12 @@ func effectsTestBuf() (*slog.Logger, *bytes.Buffer) {
 func seedClaimedRecord(t *testing.T, l effects.Ledger, tool string, providerIdempotent bool, payload json.RawMessage) string {
 	t.Helper()
 	key := effects.EffectKey("reconcile-test", tool, payloadString(payload))
+	who := effects.Claimant{AgentID: "reconcile-test", SessionID: tool}
 	_, _, err := l.Claim(context.Background(), key, effects.EffectMeta{
 		Tool:               tool,
 		ProviderIdempotent: providerIdempotent,
 		Payload:            payload,
-	})
+	}, who)
 	if err != nil {
 		t.Fatalf("seed claim: %v", err)
 	}
@@ -42,7 +43,7 @@ func seedReceiptedRecord(t *testing.T, l effects.Ledger, tool string, providerId
 	t.Helper()
 	payload := json.RawMessage(`{"seeded":"receipted"}`)
 	key := seedClaimedRecord(t, l, tool, providerIdempotent, payload)
-	if err := l.RecordReceipt(context.Background(), key, json.RawMessage(`{"ok":true}`)); err != nil {
+	if err := l.RecordReceipt(context.Background(), key, effects.Claimant{AgentID: "reconcile-test", SessionID: tool}, json.RawMessage(`{"ok":true}`)); err != nil {
 		t.Fatalf("seed receipt: %v", err)
 	}
 	return key

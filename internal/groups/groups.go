@@ -23,7 +23,7 @@ type Policy struct {
 	ToolsDenied    []string `json:"tools_denied,omitempty"`     // deny beats allow
 	MemoryMaxScope string   `json:"memory_max_scope,omitempty"` // "", "project", "user", "global"
 	FSRoots        []string `json:"fs_roots,omitempty"`         // additional fence roots
-	NetworkClass   string   `json:"network_class,omitempty"`    // "", "unrestricted", "allowlist", "none"
+	NetworkClass   string   `json:"network_class,omitempty"`    // "", "unrestricted", "allowlist", "domain-allowlist", "none"
 	AllowedModels  []string `json:"allowed_models,omitempty"`   // alias names; empty = unrestricted
 }
 
@@ -80,10 +80,11 @@ var scopeRank = map[string]int{
 // least restrictive. Unknown values rank most restrictive so an
 // unrecognized class never widens access.
 var networkRank = map[string]int{
-	"none":         0,
-	"allowlist":    1,
-	"unrestricted": 2,
-	"":             2,
+	"none":             0,
+	"allowlist":        1,
+	"domain-allowlist": 1, // issue 71 name; same rank as allowlist
+	"unrestricted":     2,
+	"":                 2,
 }
 
 // sortDedup returns the input sorted and de-duplicated (stable, no

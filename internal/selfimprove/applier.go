@@ -22,9 +22,10 @@ import (
 var ErrApprovalRequired = fmt.Errorf("fix requires human approval")
 
 // ErrTrustedRoot is returned when a proposed fix targets a trusted-root path:
-// the security/eval packages, the self-improvement machinery itself, or
-// gate-bearing configuration. The component that approves updates must never
-// be writable by those updates. Callers should test with errors.Is.
+// the security/eval/auth packages, auth handlers, the self-improvement
+// machinery itself, build and CI files, or gate-bearing configuration. The
+// component that approves updates must never be writable by those updates.
+// Callers should test with errors.Is.
 var ErrTrustedRoot = errors.New("trusted root path denied")
 
 // trustedRootPrefixes are path prefixes (slash-separated, relative to the
@@ -32,6 +33,9 @@ var ErrTrustedRoot = errors.New("trusted root path denied")
 // meept.json5 (employees.defaults.gate.enabled) and config/employees/*.json5;
 // the `meept agents set-gate` CLI remains the only gate mutator. Skills
 // (config/skills/, .meept/skills/) intentionally stay writable.
+//
+// Build and CI files, and auth handlers, are refused here too: an LLM patch
+// must not rewrite the build, the module graph, CI, or credential checks.
 var trustedRootPrefixes = []string{
 	"internal/security/",
 	"pkg/security/",
@@ -43,7 +47,24 @@ var trustedRootPrefixes = []string{
 	// Eval oracle fixtures (harness-eval C5): the runs that judge skill
 	// quality must not be editable by the thing being judged.
 	"testdata/eval/",
+	"Makefile",
+	"go.mod",
+	"go.sum",
+	"Dockerfile",
+	".github",
+	// Auth package plus the handlers that accept credentials. A patch that
+	// hardcodes a credential or disables a check lands in one of these.
+	"internal/auth/",
+	"internal/comm/http/auth.go",
+	"internal/comm/http/identity.go",
+	"internal/comm/http/pairing.go",
+	"internal/comm/web/auth.go",
+	"internal/employee/handler_auth.go",
 }
+
+// deniedBuildFiles are build-graph filenames refused at any depth, not only
+// at the project root. A nested Dockerfile is still a Dockerfile.
+var deniedBuildFiles = []string{"Makefile", "go.mod", "go.sum", "Dockerfile"}
 
 // gateFrontmatterDeny marks the YAML frontmatter block of roster AGENT.md
 // files. C5 (harness-eval): `meept agents set-gate` is the only gate
@@ -90,6 +111,12 @@ type ChangeApplier struct {
 
 	// Backup directory
 	backupDir string
+
+	// verify runs in the temporary worktree after the patch is written there
+	// and before any live-tree write. Nil fails closed: the live file is not
+	// written. The production caller installs verifyTouchedPackage; tests
+	// inject their own.
+	verify PatchVerifier
 }
 
 type pendingFix struct {
@@ -121,6 +148,24 @@ func NewChangeApplier(cfg SafetyConfig, projectRoot string, msgBus *bus.MessageB
 	}
 }
 
+// PatchVerifier checks a patched worktree before the live tree is updated.
+// worktreeRoot is the temporary git worktree. relPath is the patched file,
+// slash-separated, relative to that root. A non-nil error discards the
+// worktree and leaves the live file unchanged.
+type PatchVerifier func(ctx context.Context, worktreeRoot, relPath string) error
+
+// SetVerifier installs the worktree verifier. A nil verifier fails closed:
+// Apply refuses to write the live tree. The receiver nil guard matches the
+// other setters; a nil function value is a valid clear.
+func (a *ChangeApplier) SetVerifier(v PatchVerifier) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.verify = v
+	a.mu.Unlock()
+}
+
 // Apply applies a validated fix.
 func (a *ChangeApplier) Apply(ctx context.Context, fix *ProposedFix, validation *ValidationResult, approvedBy string) (*AppliedFix, error) {
 	// Check if approval is required
@@ -143,7 +188,7 @@ func (a *ChangeApplier) Apply(ctx context.Context, fix *ProposedFix, validation 
 }
 
 // applyFix performs the actual fix application.
-func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix, approvedBy string) (*AppliedFix, error) {
+func (a *ChangeApplier) applyFix(ctx context.Context, fix *ProposedFix, approvedBy string) (*AppliedFix, error) {
 	// Deny trusted-root targets BEFORE any backup or write: the approver
 	// must not be updatable by the updates it approves, and rejecting here
 	// also prevents traversal targets from being copied into backups.
@@ -160,20 +205,13 @@ func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix, approvedBy
 		return nil, err
 	}
 
-	// Create backup
-	backupPath, err := a.createBackup(fix)
-	if err != nil {
-		a.logger.Warn("failed to create backup", "error", err)
-		// Continue anyway
-	}
-
-	// Parse the diff
+	// Parse the diff and compute the replacement in memory. The live file
+	// is not written until a worktree verify passes.
 	original, fixed, err := parseDiff(fix.Diff)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse diff: %w", err)
 	}
 
-	// Read the file
 	filePath := filepath.Join(a.projectRoot, fix.FilePath)
 
 	// Validate the resolved path is within projectRoot to prevent path traversal.
@@ -197,9 +235,20 @@ func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix, approvedBy
 		return nil, fmt.Errorf("original code not found in file")
 	}
 
-	// Write the file
+	verified, err := a.stageInWorktree(ctx, fix.FilePath, []byte(newContent))
+	if err != nil {
+		return nil, err
+	}
+
+	// Backup the still-original live file, then copy the verified bytes back.
+	backupPath, err := a.createBackup(fix)
+	if err != nil {
+		a.logger.Warn("failed to create backup", "error", err)
+		// Continue anyway
+	}
+
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
+	if err := os.WriteFile(filePath, verified, 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -448,9 +497,12 @@ func (a *ChangeApplier) denyTrustedRoot(relPath string) error {
 	}
 
 	for _, prefix := range trustedRootPrefixes {
-		if cleaned == prefix || strings.HasPrefix(cleaned, prefix) {
+		if matchesTrustedPrefix(cleaned, prefix) {
 			return fmt.Errorf("%w: %s", ErrTrustedRoot, relPath)
 		}
+	}
+	if isDeniedBuildFile(cleaned) {
+		return fmt.Errorf("%w: %s", ErrTrustedRoot, relPath)
 	}
 
 	// Symlink containment: resolve the deepest EXISTING ancestor so paths
@@ -512,6 +564,166 @@ func (a *ChangeApplier) denyTrustedRoot(relPath string) error {
 func (a *ChangeApplier) validateFixPath(relPath string) error {
 	if err := a.denyTrustedRoot(relPath); err != nil {
 		return err
+	}
+	return nil
+}
+
+// matchesTrustedPrefix reports whether cleaned matches a deny-list entry.
+// Directory prefixes (trailing slash) match any continuation. File prefixes
+// match the exact path or a boundary continuation (".bak", a child segment)
+// so "go.mod" does not deny "go.modules".
+func matchesTrustedPrefix(cleaned, prefix string) bool {
+	if cleaned == prefix {
+		return true
+	}
+	if !strings.HasPrefix(cleaned, prefix) {
+		return false
+	}
+	if strings.HasSuffix(prefix, "/") {
+		return true
+	}
+	rest := cleaned[len(prefix):]
+	if rest == "" {
+		return true
+	}
+	switch rest[0] {
+	case '/', '.':
+		return true
+	default:
+		return false
+	}
+}
+
+// isDeniedBuildFile reports whether cleaned's final component is a build
+// file, including extension variants such as Dockerfile.dev.
+func isDeniedBuildFile(cleaned string) bool {
+	base := cleaned
+	if i := strings.LastIndex(cleaned, "/"); i >= 0 {
+		base = cleaned[i+1:]
+	}
+	for _, name := range deniedBuildFiles {
+		if base == name || strings.HasPrefix(base, name+".") {
+			return true
+		}
+	}
+	return false
+}
+
+// stageInWorktree writes content into a temporary git worktree, runs the
+// caller-supplied verifier, and returns the verified bytes. The worktree is
+// discarded on every path. The live tree is not modified.
+func (a *ChangeApplier) stageInWorktree(ctx context.Context, relPath string, content []byte) ([]byte, error) {
+	a.mu.RLock()
+	verify := a.verify
+	a.mu.RUnlock()
+	if verify == nil {
+		return nil, fmt.Errorf("worktree verify is not configured")
+	}
+
+	parent, err := os.MkdirTemp("", "meept-selfimprove-verify-")
+	if err != nil {
+		return nil, fmt.Errorf("create verify dir: %w", err)
+	}
+	wt := filepath.Join(parent, "wt")
+	defer a.discardWorktree(parent, wt)
+
+	add := exec.CommandContext(ctx, "git", "worktree", "add", "--detach", wt, "HEAD")
+	add.Dir = a.projectRoot
+	add.Env = gitEnv()
+	out, err := add.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("create verify worktree: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+
+	cleaned := filepath.ToSlash(filepath.Clean(strings.ReplaceAll(relPath, "\\", "/")))
+	dest := filepath.Join(wt, filepath.FromSlash(cleaned))
+	if !isWithinDir(wt, dest) {
+		return nil, fmt.Errorf("%w: %s", ErrTrustedRoot, relPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return nil, fmt.Errorf("create worktree parent: %w", err)
+	}
+	//nolint:gosec // worktree file, discarded after verify
+	if err := os.WriteFile(dest, content, 0o644); err != nil {
+		return nil, fmt.Errorf("write worktree file: %w", err)
+	}
+	if err := verify(ctx, wt, cleaned); err != nil {
+		return nil, fmt.Errorf("worktree verify failed: %w", err)
+	}
+	verified, err := os.ReadFile(dest)
+	if err != nil {
+		return nil, fmt.Errorf("read verified file: %w", err)
+	}
+	return verified, nil
+}
+
+// discardWorktree removes a temporary verify worktree and its parent dir.
+// Cleanup errors are logged; they are not the caller's apply error.
+func (a *ChangeApplier) discardWorktree(parent, wt string) {
+	if wt != "" {
+		if info, statErr := os.Stat(wt); statErr == nil && info.IsDir() {
+			cmd := exec.Command("git", "worktree", "remove", "--force", wt)
+			cmd.Dir = a.projectRoot
+			cmd.Env = gitEnv()
+			if err := cmd.Run(); err != nil {
+				a.logger.Warn("worktree remove failed", "path", wt, "error", err)
+			}
+		}
+		prune := exec.Command("git", "worktree", "prune")
+		prune.Dir = a.projectRoot
+		prune.Env = gitEnv()
+		if err := prune.Run(); err != nil {
+			a.logger.Warn("worktree prune failed", "error", err)
+		}
+	}
+	if parent != "" {
+		if err := os.RemoveAll(parent); err != nil {
+			a.logger.Warn("verify dir cleanup failed", "path", parent, "error", err)
+		}
+	}
+}
+
+// gitEnv returns the process environment without git-dir overrides, so a
+// command rooted at projectRoot does not follow the caller's GIT_DIR.
+func gitEnv() []string {
+	env := os.Environ()
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, "GIT_DIR=") ||
+			strings.HasPrefix(e, "GIT_WORK_TREE=") ||
+			strings.HasPrefix(e, "GIT_INDEX_FILE=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// verifyTouchedPackage is the production verifier. It builds the Go package
+// that contains relPath inside the worktree. Non-Go files have no package
+// to build and pass. The unit-test pin is a caller-supplied failing
+// verifier, not this function.
+func verifyTouchedPackage(ctx context.Context, worktreeRoot, relPath string) error {
+	cleaned := filepath.ToSlash(filepath.Clean(relPath))
+	if !strings.HasSuffix(cleaned, ".go") {
+		return nil
+	}
+	dir := cleaned
+	if i := strings.LastIndex(cleaned, "/"); i >= 0 {
+		dir = cleaned[:i]
+	} else {
+		dir = "."
+	}
+	pkg := "."
+	if dir != "." && dir != "" {
+		pkg = "./" + dir
+	}
+	cmd := exec.CommandContext(ctx, "go", "build", pkg)
+	cmd.Dir = worktreeRoot
+	cmd.Env = gitEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("go build %s: %w: %s", pkg, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

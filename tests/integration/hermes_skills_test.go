@@ -347,7 +347,7 @@ func TestHermesToolMappingIntegration(t *testing.T) {
 			{"team_message", "request_handoff"},
 			// Unmapped tools pass through unchanged.
 			{"unknown_tool", "unknown_tool"},
-			{"image_gen", "image_gen"}, // maps to empty, so passthrough
+			{"image_gen", "generate_image"},
 		}
 		for _, tt := range tests {
 			got := mapper.Translate(tt.hermes)
@@ -388,6 +388,7 @@ func TestHermesToolMappingIntegration(t *testing.T) {
 			{from: "team_create", to: "delegate_task", skipAbsenceCheck: false},
 			{from: "team_list", to: "platform_agents", skipAbsenceCheck: false},
 			{from: "team_message", to: "request_handoff", skipAbsenceCheck: false},
+			{from: "image_gen", to: "generate_image", skipAbsenceCheck: false},
 		}
 
 		for _, em := range expectedMappings {
@@ -400,11 +401,6 @@ func TestHermesToolMappingIntegration(t *testing.T) {
 			if !em.skipAbsenceCheck && strings.Contains(result, em.from) {
 				t.Errorf("hermes tool %q still present in output body", em.from)
 			}
-		}
-
-		// image_gen has no equivalent, so it stays unchanged.
-		if !strings.Contains(result, "image_gen") {
-			t.Error("image_gen should remain in output (no meept equivalent)")
 		}
 	})
 

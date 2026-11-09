@@ -117,7 +117,7 @@ func (t *GossipTransport) Start(ctx context.Context) error {
 			host = addr // fallback: treat the whole addr as host
 		}
 		if host == "" || host == "0.0.0.0" || host == "::" {
-			t.logger.Warn("gossip: cluster enabled with unsigned events accepted on a non-loopback bind - peers can inject events (incl. TASK_CREATE); set cluster.security.require_node_signatures once peer key distribution exists")
+			t.logger.Warn("gossip: cluster enabled with unsigned events accepted on a non-loopback bind - peers can inject events (incl. TASK_CREATE); set cluster.security.require_node_signatures")
 		}
 	}
 

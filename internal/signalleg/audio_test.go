@@ -390,16 +390,16 @@ type fakeEffects struct {
 	grant   bool
 }
 
-func (f *fakeEffects) Reserve(_ context.Context, key string) (bool, error) {
+func (f *fakeEffects) Reserve(_ context.Context, key, _ string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reserve = append(f.reserve, key)
 	return f.grant, nil
 }
 
-func (f *fakeEffects) Complete(_ context.Context, _ string) error { return nil }
+func (f *fakeEffects) Complete(_ context.Context, _ string, _ string) error { return nil }
 
-func (f *fakeEffects) Abandon(_ context.Context, key, _ string) error {
+func (f *fakeEffects) Abandon(_ context.Context, key, _, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.abandon = append(f.abandon, key)

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -171,6 +173,22 @@ func TestDenyTrustedRoot(t *testing.T) {
 		{"config path normalized via clean", "config/skills/../meept.json5", true, true},
 		{"eval oracle fixture", "testdata/eval/oracle_k2.json", true, true},
 		{"eval oracle fixture nested", "testdata/eval/sub/run.json", true, true},
+		// Build, module, and CI files.
+		{"makefile", "Makefile", true, true},
+		{"go.mod", "go.mod", true, true},
+		{"go.sum", "go.sum", true, true},
+		{"dockerfile", "Dockerfile", true, true},
+		{"nested dockerfile", "deploy/Dockerfile", true, true},
+		{"github workflows", ".github/workflows/ci.yml", true, true},
+		// Auth handlers and the auth package.
+		{"auth package", "internal/auth/store.go", true, true},
+		{"http auth handler", "internal/comm/http/auth.go", true, true},
+		{"http identity handler", "internal/comm/http/identity.go", true, true},
+		{"http pairing handler", "internal/comm/http/pairing.go", true, true},
+		{"web auth handler", "internal/comm/web/auth.go", true, true},
+		{"employee auth handler", "internal/employee/handler_auth.go", true, true},
+		// A name that merely shares a prefix is not a build file.
+		{"go.modules not denied", "go.modules/foo.go", false, false},
 		// Skills stay writable (control cases).
 		{"skill under config", "config/skills/my-skill.md", false, false},
 		{"skill under .meept", ".meept/skills/x/SKILL.md", false, false},
@@ -269,6 +287,18 @@ func TestApply_DeniesTrustedRoots(t *testing.T) {
 		{"absolute passwd", "/etc/passwd"},
 		{"gate config", "config/meept.json5"},
 		{"employee gate config", "config/employees/ci-monitor.json5"},
+		{"makefile", "Makefile"},
+		{"go.mod", "go.mod"},
+		{"go.sum", "go.sum"},
+		{"dockerfile", "Dockerfile"},
+		{"nested dockerfile", "deploy/Dockerfile"},
+		{"github workflows", ".github/workflows/ci.yml"},
+		{"auth package", "internal/auth/store.go"},
+		{"http auth handler", "internal/comm/http/auth.go"},
+		{"http identity handler", "internal/comm/http/identity.go"},
+		{"http pairing handler", "internal/comm/http/pairing.go"},
+		{"web auth handler", "internal/comm/web/auth.go"},
+		{"employee auth handler", "internal/employee/handler_auth.go"},
 	}
 
 	for _, tc := range cases {
@@ -345,6 +375,24 @@ func TestApply_AllowsSkillWrite(t *testing.T) {
 	original := "does the thing\n"
 	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
+	}
+	initGitRepo(t, root)
+	a.verify = func(_ context.Context, worktreeRoot, rel string) error {
+		got, err := os.ReadFile(filepath.Join(worktreeRoot, rel))
+		if err != nil {
+			return err
+		}
+		if string(got) != "does the thing better\n" {
+			t.Errorf("worktree content = %q, want patched content", got)
+		}
+		live, err := os.ReadFile(target)
+		if err != nil {
+			return err
+		}
+		if string(live) != original {
+			t.Errorf("live file changed before verify returned: %q", live)
+		}
+		return nil
 	}
 
 	fix := &ProposedFix{
@@ -458,5 +506,99 @@ func TestApply_ApprovePathAlsoDenied(t *testing.T) {
 	// But approving must NOT apply it — the deny check guards applyFix too.
 	if _, err := a.Approve(context.Background(), fix.ID); !errors.Is(err, ErrTrustedRoot) {
 		t.Errorf("Approve err=%v, want errors.Is ErrTrustedRoot", err)
+	}
+}
+
+// initGitRepo makes root a git repository with one commit so worktree add
+// has a HEAD. Identity is local to the repo.
+func initGitRepo(t *testing.T, root string) {
+	t.Helper()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = root
+		cmd.Env = gitEnv()
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "user.email", "test@example.com")
+	run("git", "config", "user.name", "test")
+	run("git", "add", "-A")
+	run("git", "commit", "--allow-empty", "-m", "init")
+}
+
+// TestApply_FailingVerifierLeavesLiveFileUnchanged pins the worktree gate:
+// the patch is written in the worktree, a failing verifier aborts, and the
+// live file is unchanged. The verifier is injected; this test does not run
+// the repo suite.
+func TestApply_FailingVerifierLeavesLiveFileUnchanged(t *testing.T) {
+	a, root, _ := newTestApplier(t)
+	rel := filepath.Join("config", "skills", "my-skill.md")
+	target := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	original := []byte("does the thing\n")
+	if err := os.WriteFile(target, original, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	initGitRepo(t, root)
+
+	verifyFailed := errors.New("verify failed")
+	called := false
+	a.verify = func(_ context.Context, worktreeRoot, relPath string) error {
+		called = true
+		live, err := os.ReadFile(target)
+		if err != nil {
+			t.Errorf("read live during verify: %v", err)
+		} else if !bytes.Equal(live, original) {
+			t.Errorf("live file changed before verify returned: %q", live)
+		}
+		patched, err := os.ReadFile(filepath.Join(worktreeRoot, relPath))
+		if err != nil {
+			t.Errorf("read worktree file: %v", err)
+		} else if string(patched) != "does the thing better\n" {
+			t.Errorf("worktree content = %q, want patched content", patched)
+		}
+		return verifyFailed
+	}
+
+	fix := &ProposedFix{
+		ID:       "fix_verify_fail",
+		Type:     FixTypeConfigChange,
+		FilePath: rel,
+		Risk:     "low",
+		Diff:     testDiff("does the thing", "does the thing better"),
+	}
+	applied, err := a.Apply(context.Background(), fix, nil, "human")
+	if !errors.Is(err, verifyFailed) {
+		t.Fatalf("Apply err=%v, want verify failure", err)
+	}
+	if applied != nil {
+		t.Errorf("applied=%v, want nil", applied)
+	}
+	if !called {
+		t.Fatal("verifier was not called")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read live: %v", err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Errorf("live file = %q, want unchanged %q", got, original)
+	}
+
+	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = root
+	cmd.Env = gitEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("worktree list: %v", err)
+	}
+	if strings.Count(string(out), "worktree ") != 1 {
+		t.Errorf("worktree not discarded:\n%s", out)
 	}
 }

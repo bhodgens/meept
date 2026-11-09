@@ -38,7 +38,7 @@ A named bundle (config type `GroupsPolicyConfig`,
 | `tools_denied` | Registered tool names the policy revokes. Deny beats allow. |
 | `memory_max_scope` | Memory retrieval ceiling: `""` (unrestricted), `project`, `user`, or `global`. Narrowest wins across groups. |
 | `fs_roots` | Additional path-fence roots for members (additive: write inside any listed root). |
-| `network_class` | `""`/`unrestricted`, `allowlist`, or `none`. Most restrictive wins. |
+| `network_class` | `""`/`unrestricted`, `allowlist` (alias `domain-allowlist`), or `none`. Most restrictive wins. Enforced at shell launch: restrictive classes run with no egress. |
 | `allowed_models` | Model aliases the subject may use; empty = unrestricted. |
 
 ### Binding
@@ -137,10 +137,11 @@ resolution. Groups NEVER widen: a ceiling wider than the agent's own
 the memory-scoping baseline. The gate is pinned by the agent-groups-07 e2e
 scenario and the `internal/agent` ceiling pins.
 
-The same caution applies to the remaining policy fields: `network_class`
-and `allowed_models` resolve and merge (most-restrictive / intersection
-respectively) and surface through `meept groups explain`, but no runtime
-seam enforces them yet.
+The same caution applies to `allowed_models`: it resolves and merges
+(intersection) and surfaces through `meept groups explain`, but no runtime
+seam enforces it yet. `network_class` is enforced at local shell launch
+(issue 71): `none`, `allowlist`, and `domain-allowlist` confine egress
+before the child starts. Empty and `unrestricted` are unchanged.
 
 ### Where the fence and the decision log fit
 
@@ -521,8 +522,12 @@ Structural classes also reuse the frozen core vocabulary:
 - `memory_max_scope` is declared and resolves but is NOT enforced (leaf 05
   blocked on the memory-scoping branch, issue #70 tree). Do not treat it as
   isolation.
-- `network_class` and `allowed_models` resolve and merge into the record but
-  have no enforcement seam yet.
+- `network_class` is enforced at local shell launch: restrictive classes
+  (`none`, `allowlist`, `domain-allowlist`) confine egress. Empty and
+  `unrestricted` are unchanged. Container backends refuse a restrictive
+  class unless `network_mode` is already `none`.
+- `allowed_models` resolves and merges into the record but has no
+  enforcement seam yet.
 - Overrides on `group:`/`user:` subjects are visible but not consumed by any
   gate.
 - The file backstop's shell lane is a best-effort probe (variable expansion

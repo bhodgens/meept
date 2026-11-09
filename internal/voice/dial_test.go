@@ -516,3 +516,60 @@ func TestArmSkippedForAlreadyAnswered(t *testing.T) {
 		t.Fatal("timer armed for an already-answered ccid (F-2: webhook can beat the arm site)")
 	}
 }
+
+// TestDialAcquiresHoldOnce pins the ended-state gap (issue 123): a
+// successful outbound dial invokes DialConfig.Hold exactly once, keyed by
+// the new ccid and employee. The idempotent retry must not take a second
+// hold (that would block the per-employee mutex until a release that never
+// comes). Refusals acquire nothing.
+func TestDialAcquiresHoldOnce(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	cfg := dialConfig()
+	target := cfg.AllowedNumbers[0]
+	cfg.Hold = func(ccid, emp string) {
+		mu.Lock()
+		got = append(got, ccid+"|"+emp)
+		mu.Unlock()
+	}
+	d := NewDialer(cfg, &countingController{}, nil, NewRegistry(4), newTestLedger(t), nil, testLogger())
+	req := DialRequest{EmployeeID: "emp-hold", Target: target, RequestID: "req-hold-1"}
+	res, err := d.Dial(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	mu.Lock()
+	n := len(got)
+	first := ""
+	if n > 0 {
+		first = got[0]
+	}
+	mu.Unlock()
+	if n != 1 {
+		t.Fatalf("hold called %d times, want 1", n)
+	}
+	want := res.CallControlID + "|emp-hold"
+	if first != want {
+		t.Fatalf("hold = %q, want %q", first, want)
+	}
+
+	if _, err := d.Dial(context.Background(), req); err != nil {
+		t.Fatalf("retry Dial: %v", err)
+	}
+	mu.Lock()
+	n = len(got)
+	mu.Unlock()
+	if n != 1 {
+		t.Fatalf("retry acquired the hold again (%d calls); want exactly one", n)
+	}
+
+	refused := dialConfig()
+	refused.Enabled = false
+	refused.Hold = func(string, string) {
+		t.Error("refused dial must not acquire the hold")
+	}
+	rd := NewDialer(refused, &countingController{}, nil, NewRegistry(4), newTestLedger(t), nil, testLogger())
+	if _, err := rd.Dial(context.Background(), req); err == nil {
+		t.Fatal("disabled dial must refuse")
+	}
+}

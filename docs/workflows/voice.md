@@ -65,6 +65,21 @@ Local providers are subprocesses, not libraries: the daemon needs the
 `whisper-cli` (whisper.cpp) and `piper` binaries on PATH. Both are
 keyless - no secrets-broker entry is required for the local leg.
 
+## The default voice employee
+
+The repo ships a default voice employee:
+[`config/employees/secretary.json5`](../../config/employees/secretary.json5) -
+a personal-assistant/small-business receptionist. It answers inbound calls
+(phone leg via `voice.default_employee`) and desk conversations (local leg),
+takes messages, and relays notes to the operator as notifications. It never
+makes outbound calls: `voice_call` is forbidden by its constitution and
+omitted from its tools.
+
+The template ships DISABLED. To hire it: run
+`meept agents create config/employees/secretary.json5`, set
+`voice.default_employee = "secretary"`, and flip its top-level `enabled`
+to `true`.
+
 ## The local leg: how to run it
 
 Prereqs: daemon running with `voice.enabled = true` and
@@ -151,10 +166,10 @@ cmd/meept/voice.go (CLI), internal/voicechild/providers/
 voice.call.started / progress / ended bus events (WS class event) fire
 for both legs. Child RSS logged at spawn, first call, idle stop. Call
 rows and transcripts land in $MEEPT_HOME/voice/calls.db with direction
-"local" for local calls. Known gap: the row's ended-state transition
-does not fire yet (AcquireCallHold has no production caller); rows,
-directions, session bindings, and transcripts are landed behavior - see
-the spec's "Known product gap" note.
+"local" for local calls and "incoming"/"outgoing" for phone calls. The
+ended-state transition fires on every leg that registered
+`AcquireCallHold` (local Hold seam, phone inbound spawn, phone outbound
+`DialConfig.Hold`); release is once, through ReleaseHook.
 
 ## Edge Cases
 

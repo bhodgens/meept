@@ -561,10 +561,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       case 'projects':
         _leaderController.onBranches?.call();
         break;
+      case 'activity view':
+        // Same push the intake item gets from the default branch
+        // (core/router.dart /activity). Named so a missing route cannot
+        // fall through as a silent no-op (issue #114).
+        context.push('/activity');
+        break;
       default:
         // Items carrying a route/page target navigate directly (memory,
-        // memory review, users). Unhandled items without a target are
-        // ignored.
+        // memory review, users, intake). Unhandled items without a target
+        // are ignored.
         if (item.route != null) {
           context.push(item.route!);
         } else if (item.page != null) {

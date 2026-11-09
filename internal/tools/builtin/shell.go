@@ -193,6 +193,38 @@ func (t *ShellExecuteTool) checkPermissionTable(command string) error {
 	}
 }
 
+// runtimeCommand is the launch record. NetworkClass is resolved here, before
+// backend.Execute, from the tool context the executor stamps.
+func (t *ShellExecuteTool) runtimeCommand(ctx context.Context, command, workDir string, timeout time.Duration) runtime.Command {
+	return runtime.Command{
+		Cmd:          command,
+		Dir:          workDir,
+		Timeout:      timeout,
+		NetworkClass: tools.NetworkClassFromContext(ctx),
+	}
+}
+
+// confineDirect applies the network class to a direct (no-backend) exec.
+// A confinement error refuses the launch.
+func confineDirect(cmd *exec.Cmd, class string) error {
+	if err := runtime.ApplyNetworkClass(cmd, class); err != nil {
+		return fmt.Errorf("%w: %w", security.ErrCommandBlocked, err)
+	}
+	return nil
+}
+
+// blockNetworkLaunch wraps a backend error that is a network-class refusal
+// so the caller sees a guard block, not a transport failure.
+func blockNetworkLaunch(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, runtime.ErrNetworkClassDenied) || errors.Is(err, runtime.ErrNetworkClassUnenforceable) {
+		return fmt.Errorf("%w: %w", security.ErrCommandBlocked, err)
+	}
+	return nil
+}
+
 // SetFenceChecker sets the fence checker for path-based sandboxing.
 func (t *ShellExecuteTool) SetFenceChecker(fc FenceChecker) {
 	if fc != nil {
@@ -493,14 +525,14 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	var execErr error
 
 	if t.backend != nil {
-		// Route through runtime backend
-		result, err := t.backend.Execute(ctx, runtime.Command{
-			Cmd:     command,
-			Dir:     workDir,
-			Timeout: timeout,
-		})
+		// Route through runtime backend. Network class is on the command
+		// so Execute can confine before the child starts.
+		result, err := t.backend.Execute(ctx, t.runtimeCommand(ctx, command, workDir, timeout))
 		if err != nil {
 			cancel()
+			if blocked := blockNetworkLaunch(err); blocked != nil {
+				return nil, blocked
+			}
 			return nil, fmt.Errorf("backend execution failed: %w", err)
 		}
 		// Backend returns combined output
@@ -510,6 +542,10 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		// Direct exec (original behavior)
 		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 		cmd.Dir = workDir
+		if err := confineDirect(cmd, tools.NetworkClassFromContext(ctx)); err != nil {
+			cancel()
+			return nil, err
+		}
 
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -758,12 +794,11 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 			Percent: 50,
 		})
 
-		result, err := t.backend.Execute(ctx, runtime.Command{
-			Cmd:     command,
-			Dir:     workDir,
-			Timeout: timeout,
-		})
+		result, err := t.backend.Execute(ctx, t.runtimeCommand(ctx, command, workDir, timeout))
 		if err != nil {
+			if blocked := blockNetworkLaunch(err); blocked != nil {
+				return nil, blocked
+			}
 			return nil, fmt.Errorf("backend execution failed: %w", err)
 		}
 		// Backend returns combined output
@@ -778,6 +813,9 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 
 		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 		cmd.Dir = workDir
+		if err := confineDirect(cmd, tools.NetworkClassFromContext(ctx)); err != nil {
+			return nil, err
+		}
 
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout

@@ -168,6 +168,12 @@ func (b *BwrapBackend) Execute(ctx context.Context, cmd Command) (*CommandResult
 
 	args = append(args, b.cfg.ExtraArgs...)
 
+	// Restrictive classes drop the network namespace. --unshare-net is
+	// seatbelt-equivalent confinement, not a packet filter.
+	if NetworkClassRestricts(cmd.NetworkClass) {
+		args = append(args, "--unshare-net")
+	}
+
 	// Terminate option parsing; everything after "--" is the jailed command.
 	args = append(args, "--", "sh", "-c", cmd.Cmd)
 

@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -45,6 +46,13 @@ type GossipEngine struct {
 	// Signing key for this node (ed25519)
 	signingPriv ed25519.PrivateKey
 	signingPub  map[string]ed25519.PublicKey // indexed by peer nodeID
+
+	// signingPrev keeps a replaced (or registry-removed) peer key until
+	// signingKeyGrace elapses, so a rotation does not lock out in-flight
+	// dispatches signed with the previous key. Not a second trust root:
+	// verification still uses ed25519.Verify against this registry.
+	signingPrev        map[string]priorSigningKey
+	signingKeyGraceDur time.Duration // test override; 0 uses defaultSigningKeyGrace
 
 	// Database handle for event persistence
 	db *sql.DB
@@ -104,6 +112,9 @@ type GossipHandler interface {
 // called in registration order after an event passes signature verification
 // and persistence. Handler panics are recovered and logged.
 func (g *GossipEngine) RegisterHandler(h GossipHandler) {
+	if b, ok := h.(interface{ bindGossipEngine(*GossipEngine) }); ok {
+		b.bindGossipEngine(g)
+	}
 	g.handlersMu.Lock()
 	defer g.handlersMu.Unlock()
 	g.handlers = append(g.handlers, h)
@@ -164,19 +175,36 @@ func NewGossipEngine(cfg *Config, localNode string, msgBus *bus.MessageBus, logg
 		vectorClock:   make(map[string]int64),
 	}
 
-	// Generate an ed25519 signing key pair if signing is required
+	for _, opt := range opts {
+		opt(g)
+	}
+
+	// Stable node identity: prefer a key persisted beside the membership
+	// repo (never inside it) so a restart does not rotate the key peers
+	// already learned. Fall back to an ephemeral key only when signatures
+	// are required and no registry can name a key directory.
+	if g.signingPriv == nil {
+		if reg, ok := g.membersProvider.(memberSigningRegistry); ok {
+			if pub, priv, err := loadOrCreateNodeSigningKey(reg.SigningKeyDir()); err != nil {
+				if g.logger != nil {
+					g.logger.Error("gossip: failed to load signing key", "error", err)
+				}
+			} else if priv != nil {
+				g.signingPriv = priv
+				g.signingPub[localNode] = pub
+			}
+		}
+	}
 	if g.signingPriv == nil && cfg.Security.RequireNodeSignatures {
 		pub, priv, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
-			g.logger.Error("gossip: failed to generate signing key, events will be unsigned", "error", err)
+			if g.logger != nil {
+				g.logger.Error("gossip: failed to generate signing key, events will be unsigned", "error", err)
+			}
 		} else {
 			g.signingPriv = priv
 			g.signingPub[localNode] = pub
 		}
-	}
-
-	for _, opt := range opts {
-		opt(g)
 	}
 
 	// Register our own public key under our nodeID if we have a signing key
@@ -269,12 +297,63 @@ func (g *GossipEngine) PublicSigningKey() ed25519.PublicKey {
 	return g.signingPriv.Public().(ed25519.PublicKey)
 }
 
+// defaultSigningKeyGrace is how long a replaced peer signing key still
+// verifies in-flight dispatches and gossip events. A rotation must not
+// lock out jobs signed before the new key was published.
+const defaultSigningKeyGrace = time.Hour
+
+// priorSigningKey is a retired ed25519 public key kept only for the grace
+// window. The bytes are a copy owned by the engine.
+type priorSigningKey struct {
+	pub        ed25519.PublicKey
+	validUntil time.Time
+}
+
+// memberSigningRegistry is optionally implemented by a MembersProvider
+// that can publish this node's signing pubkey into the membership
+// registry and list peers' pubkeys already on disk. GitSync implements
+// it. Key bytes are never logged by either side.
+type memberSigningRegistry interface {
+	// SigningKeyDir is a directory OUTSIDE the git repo for this node's
+	// private signing key. Empty means "do not persist".
+	SigningKeyDir() string
+	// PublishSigningPub writes pub onto the existing member record for
+	// nodeID. It does not create a member (WireGuard sync treats every
+	// active member as a tunnel peer).
+	PublishSigningPub(nodeID string, pub ed25519.PublicKey) error
+	// ListedSigningPubs returns nodeID → signing pubkey from the local
+	// registry without a network pull. Invalid-length keys are omitted.
+	ListedSigningPubs() (map[string]ed25519.PublicKey, error)
+}
+
 // SetPeerSigningKey records the ed25519 public key for a peer node.
 // The key is indexed by nodeID for signature verification on receipt.
+// A different key for the same node replaces the current key and keeps
+// the previous one for signingKeyGrace so in-flight signatures still
+// verify. Invalid lengths are ignored. Key bytes are not logged.
 func (g *GossipEngine) SetPeerSigningKey(nodeID string, pubKey ed25519.PublicKey) {
+	if nodeID == "" || len(pubKey) != ed25519.PublicKeySize {
+		return
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.signingPub[nodeID] = pubKey
+	if g.signingPub == nil {
+		g.signingPub = make(map[string]ed25519.PublicKey)
+	}
+	if cur, ok := g.signingPub[nodeID]; ok && bytes.Equal(cur, pubKey) {
+		return
+	}
+	if cur, ok := g.signingPub[nodeID]; ok {
+		g.rememberRotatedKeyLocked(nodeID, cur)
+		if g.logger != nil {
+			g.logger.Info("gossip: peer signing key rotated", "node_id", nodeID)
+		}
+	} else if g.logger != nil {
+		g.logger.Info("gossip: peer signing key installed", "node_id", nodeID)
+	}
+	cp := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	copy(cp, pubKey)
+	g.signingPub[nodeID] = cp
 }
 
 // PeerSigningKey retrieves the ed25519 public key for a peer node.
@@ -284,6 +363,180 @@ func (g *GossipEngine) PeerSigningKey(nodeID string) (ed25519.PublicKey, bool) {
 	defer g.mu.RUnlock()
 	key, ok := g.signingPub[nodeID]
 	return key, ok
+}
+
+// PeerSigningKeys returns the current key and any unexpired previous key
+// for nodeID. Callers must not mutate the returned slices. Empty means
+// the origin is unknown (fail closed).
+func (g *GossipEngine) PeerSigningKeys(nodeID string) []ed25519.PublicKey {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	now := time.Now()
+	var out []ed25519.PublicKey
+	if key, ok := g.signingPub[nodeID]; ok && len(key) == ed25519.PublicKeySize {
+		out = append(out, key)
+	}
+	if prev, ok := g.signingPrev[nodeID]; ok && now.Before(prev.validUntil) && len(prev.pub) == ed25519.PublicKeySize {
+		out = append(out, prev.pub)
+	}
+	return out
+}
+
+// verifyEventWithPeerKeys reports whether event verifies against the
+// origin's current key or its unexpired previous key. Unsigned events
+// never verify.
+func verifyEventWithPeerKeys(g *GossipEngine, event *models.ClusterEvent) bool {
+	if g == nil || event == nil || len(event.Signature) == 0 {
+		return false
+	}
+	for _, pub := range g.PeerSigningKeys(event.NodeID) {
+		if event.Verify(pub) {
+			return true
+		}
+	}
+	return false
+}
+
+// SyncPeerSigningKeys publishes this node's signing pubkey into the
+// membership registry and installs every remote member's pubkey into
+// the gossip key registry. This is the production caller of
+// SetPeerSigningKey. Unsigned remote dispatches are not accepted here;
+// verification stays fail-closed in the executor bridge. Key bytes are
+// not logged.
+func (g *GossipEngine) SyncPeerSigningKeys() {
+	if g == nil || g.membersProvider == nil {
+		return
+	}
+	if pub := g.PublicSigningKey(); len(pub) == ed25519.PublicKeySize {
+		if reg, ok := g.membersProvider.(memberSigningRegistry); ok {
+			if err := reg.PublishSigningPub(g.localNode, pub); err != nil && g.logger != nil {
+				g.logger.Warn("gossip: publish signing key failed", "node_id", g.localNode, "error", err)
+			}
+		}
+	}
+	pubs, err := g.collectMemberSigningPubs()
+	if err != nil {
+		if g.logger != nil {
+			g.logger.Warn("gossip: signing-key sync failed", "error", err)
+		}
+		return
+	}
+	g.installMemberSigningPubs(pubs)
+}
+
+func (g *GossipEngine) collectMemberSigningPubs() (map[string]ed25519.PublicKey, error) {
+	if reg, ok := g.membersProvider.(memberSigningRegistry); ok {
+		return reg.ListedSigningPubs()
+	}
+	members, err := g.membersProvider.GetActiveMembers()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]ed25519.PublicKey, len(members))
+	for id, m := range members {
+		if m == nil || len(m.SigningPub) != ed25519.PublicKeySize {
+			continue
+		}
+		pub := make(ed25519.PublicKey, ed25519.PublicKeySize)
+		copy(pub, m.SigningPub)
+		out[id] = pub
+	}
+	return out, nil
+}
+
+func (g *GossipEngine) installMemberSigningPubs(pubs map[string]ed25519.PublicKey) {
+	keep := make(map[string]struct{}, len(pubs))
+	for id, pub := range pubs {
+		if id == "" || id == g.localNode || len(pub) != ed25519.PublicKeySize {
+			continue
+		}
+		keep[id] = struct{}{}
+		g.SetPeerSigningKey(id, pub)
+	}
+	g.retireMissingSigningKeys(keep)
+}
+
+func (g *GossipEngine) retireMissingSigningKeys(keep map[string]struct{}) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for id, pub := range g.signingPub {
+		if id == g.localNode {
+			continue
+		}
+		if _, ok := keep[id]; ok {
+			continue
+		}
+		g.rememberRotatedKeyLocked(id, pub)
+		delete(g.signingPub, id)
+		if g.logger != nil {
+			g.logger.Info("gossip: peer signing key retired", "node_id", id)
+		}
+	}
+}
+
+func (g *GossipEngine) signingKeyGrace() time.Duration {
+	if g.signingKeyGraceDur > 0 {
+		return g.signingKeyGraceDur
+	}
+	return defaultSigningKeyGrace
+}
+
+// rememberRotatedKeyLocked stores pub as the grace-window key for nodeID.
+// Caller holds g.mu.
+func (g *GossipEngine) rememberRotatedKeyLocked(nodeID string, pub ed25519.PublicKey) {
+	if nodeID == "" || len(pub) != ed25519.PublicKeySize {
+		return
+	}
+	if g.signingPrev == nil {
+		g.signingPrev = make(map[string]priorSigningKey)
+	}
+	now := time.Now()
+	for id, prev := range g.signingPrev {
+		if !now.Before(prev.validUntil) {
+			delete(g.signingPrev, id)
+		}
+	}
+	cp := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	copy(cp, pub)
+	g.signingPrev[nodeID] = priorSigningKey{
+		pub:        cp,
+		validUntil: now.Add(g.signingKeyGrace()),
+	}
+}
+
+// expireSigningKeyGrace marks nodeID's previous key as already expired.
+// Tests use it so the grace window does not depend on wall-clock sleeps.
+func (g *GossipEngine) expireSigningKeyGrace(nodeID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	prev, ok := g.signingPrev[nodeID]
+	if !ok {
+		return
+	}
+	prev.validUntil = time.Now().Add(-time.Second)
+	g.signingPrev[nodeID] = prev
+}
+
+// SignDispatchJob signs job with this node's ed25519 key. An already-signed
+// job is left unchanged. A missing key leaves the job unsigned — the
+// receiver fail-closes; this method does not invent a signature. Key
+// bytes are not logged.
+func (g *GossipEngine) SignDispatchJob(job *DispatchJob) error {
+	if job == nil {
+		return fmt.Errorf("gossip: sign dispatch: nil job")
+	}
+	if len(job.Signature) > 0 {
+		return nil
+	}
+	priv := g.SigningPrivate()
+	if len(priv) != ed25519.PrivateKeySize {
+		return nil
+	}
+	if job.OriginNode == "" {
+		job.OriginNode = g.localNode
+	}
+	job.Signature = ed25519.Sign(priv, job.signingBytes())
+	return nil
 }
 
 // incrementVC increments the vector clock entry for the given nodeID.
@@ -461,18 +714,20 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 
 	// Verify signature BEFORE dedup so that a poisoned/unsigned event with
 	// a known event ID cannot suppress a legitimate signed event.
+	// PeerSigningKeys includes the rotation grace window; an unknown
+	// origin (no current or grace key) is still rejected. Unsigned
+	// events are never accepted.
 	if g.cfg.Security.RequireNodeSignatures {
 		if len(event.Signature) == 0 {
 			g.logger.Warn("gossip: rejecting unsigned event (signatures required)",
 				"event_id", event.EventID, "node_id", event.NodeID)
 			return
 		}
-		pubKey, found := g.PeerSigningKey(event.NodeID)
-		if !found {
+		if len(g.PeerSigningKeys(event.NodeID)) == 0 {
 			g.logger.Warn("gossip: no signing key for event sender", "node_id", event.NodeID)
 			return
 		}
-		if !event.Verify(pubKey) {
+		if !verifyEventWithPeerKeys(g, &event) {
 			g.logger.Warn("gossip: event signature verification failed", "event_id", event.EventID, "node_id", event.NodeID)
 			return
 		}
@@ -724,6 +979,10 @@ func (g *GossipEngine) Start(ctx context.Context) error {
 
 	// Start TCP transport for peer-to-peer event delivery
 	if g.membersProvider != nil {
+		// Install remote signing keys before accepting peer traffic so a
+		// signed dispatch from a known member is not rejected as an
+		// unknown origin. Heartbeat re-syncs rotations.
+		g.SyncPeerSigningKeys()
 		g.transport = NewGossipTransport(g.cfg, g.localNode, g, g.membersProvider, g.logger)
 		if err := g.transport.Start(ctx); err != nil {
 			g.logger.Warn("gossip: TCP transport start failed (events will be local-only)", "error", err)
@@ -822,6 +1081,7 @@ func (g *GossipEngine) run(ctx context.Context) {
 		case <-g.stopCh:
 			return
 		case <-ticker.C:
+			g.SyncPeerSigningKeys()
 			g.sendHeartbeat()
 			g.pruneStalePeers()
 		case <-retentionTicker.C:

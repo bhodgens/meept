@@ -143,11 +143,12 @@ func (l *Linker) create(ctx context.Context, t Ticket, employeeID string, gate *
 		Gate:       gate,
 	}
 
+	who := effects.Claimant{AgentID: employeeID}
 	receipt, reused, err := effects.Run(ctx, l.ledger, IntakeKey(t.Repo, t.ID, t.Body), effects.EffectMeta{
 		Tool:               "intake_ticket_goal",
 		Payload:            payload,
 		ProviderIdempotent: false,
-	}, func(ctx context.Context) (json.RawMessage, error) {
+	}, who, func(ctx context.Context) (json.RawMessage, error) {
 		goal, err := l.goals.CreateGoal(ctx, spec)
 		if err != nil {
 			return nil, err
@@ -165,7 +166,7 @@ func (l *Linker) create(ctx context.Context, t Ticket, employeeID string, gate *
 		}
 		return nil, fmt.Errorf("intake: create goal for %s#%s: %w", t.Repo, t.ID, err)
 	}
-	if err := l.ledger.Complete(ctx, IntakeKey(t.Repo, t.ID, t.Body)); err != nil {
+	if err := l.ledger.Complete(ctx, IntakeKey(t.Repo, t.ID, t.Body), who); err != nil {
 		return nil, fmt.Errorf("intake: complete claim for %s#%s: %w", t.Repo, t.ID, err)
 	}
 

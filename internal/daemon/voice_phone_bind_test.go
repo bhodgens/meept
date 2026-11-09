@@ -11,7 +11,7 @@ package daemon
 // Path under test (outbound, the dial tool seam):
 //
 //	dialForTool -> Dialer.Dial (effects claim, TrackOutbound, registry
-//	Acquire) -> bindPhoneCall (AcquireCallHold + Binding.OnCallStart,
+//	Acquire) -> holdPhoneCall (AcquireCallHold + Binding.OnCallStart,
 //	row state 'live') -> manager hangup event -> releaseOnce ->
 //	w.releaseCall -> Employee.ReleaseHook (heldCases gate) ->
 //	Binding.OnCallEnd -> CallStore.End -> row state 'ended'.
@@ -144,9 +144,9 @@ func awaitPhoneRowState(t *testing.T, dbPath, ccid, want string) {
 
 // TestPhoneLegCallRowReachesEnded is the hard T0 assertion: an outbound
 // phone call through the REAL wiring starts its calls.db row ('live',
-// via bindPhoneCall -> OnCallStart) and reaches 'ended' through the
+// via holdPhoneCall -> OnCallStart) and reaches 'ended' through the
 // release fan-out (ReleaseHook gated on the AcquireCallHold registration
-// bindPhoneCall performed).
+// holdPhoneCall performed).
 func TestPhoneLegCallRowReachesEnded(t *testing.T) {
 	w := newPhoneBindWiring(t)
 	if w.Dialer == nil {
@@ -165,12 +165,12 @@ func TestPhoneLegCallRowReachesEnded(t *testing.T) {
 		t.Fatal("dial returned an empty ccid")
 	}
 
-	// The row exists and is live BEFORE any hangup (bindPhoneCall ran
+	// The row exists and is live BEFORE any hangup (holdPhoneCall ran
 	// OnCallStart; without the GH #123 fix there is NO row at all).
 	awaitPhoneRowState(t, callsDB, ccid, "live")
 
 	// Hangup: the manager fires the release hook exactly once; the hold
-	// bindPhoneCall acquired gates ReleaseHook -> OnCallEnd -> 'ended'.
+	// holdPhoneCall acquired gates ReleaseHook -> OnCallEnd -> 'ended'.
 	if err := w.Manager.HandleCallEvent(context.Background(), telnyx.CallEvent{EventType: "call.hangup", CallControlID: ccid, Direction: "outgoing"}); err != nil {
 		t.Fatalf("HandleCallEvent(hangup): %v", err)
 	}
@@ -186,12 +186,12 @@ func TestPhoneLegCallRowReachesEnded(t *testing.T) {
 }
 
 // TestPhoneLegInboundRowReachesEnded mirrors the assertion on the
-// INBOUND leg: the spawn seam's bindPhoneCall registers the hold + row
-// at call.initiated (the wire path runs the same bindPhoneCall closure
+// INBOUND leg: the spawn seam's holdPhoneCall registers the hold + row
+// at call.initiated (the wire path runs the same holdPhoneCall closure
 // WireVoice armed), so a hangup ends the row. The spawn seam needs the
 // child, so this test drives the wiring's own bind path through the
 // manager with a stubbed child... it instead pins the seam indirectly:
-// the outbound test above proves bindPhoneCall + the hold; this test
+// the outbound test above proves holdPhoneCall + the hold; this test
 // proves the INBOUND registry-spawn order by asserting that a failed
 // child spawn (no binary) refuses the call BEFORE any row is started -
 // the inbound contract is "bind only after the registry slot is held",
@@ -201,7 +201,7 @@ func TestPhoneLegInboundRefusedSpawnLeavesNoRow(t *testing.T) {
 
 	// The wiring under test has no child binary configured: the inbound
 	// spawn seam fails at EnsureRunning, the manager hangs the leg up and
-	// fails it untracked. No bindPhoneCall may have run (bind happens
+	// fails it untracked. No holdPhoneCall may have run (bind happens
 	// AFTER the registry acquire inside the spawn closure).
 	err := w.Manager.HandleCallEvent(context.Background(), telnyx.CallEvent{EventType: "call.initiated", CallControlID: "cc-phone-in-1", Direction: "incoming", From: phoneBindTarget})
 	if err == nil {

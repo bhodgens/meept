@@ -105,19 +105,21 @@ no re-invocation; no-duplicate-completion; quota-park-on-replay; and a
 flag-off legacy control (full job re-run, `turnjournal.db` never created).
 Package unit tests live in `internal/agent/turnjournal/`.
 
-## Known gap: RecoverStaleTasks force-fails the journaled in-flight step
+## RecoverStaleTasks and journaled in-flight steps
 
-Recorded in the e2e manifest suite note and observed by the kill-9 scenario:
-boot-time `RecoverStaleTasks` force-fails every non-terminal in-flight step
-BEFORE the reclaim re-runs the turn. The WORK completes correctly after
-resume, but the resumed turn's task ROW can read `failed` — a status/bookkeep
-ing divergence between the task store and the journaled execution. Related
-shape: the writer keys `run_started`/`run_closed` per step-job round, so a
-multi-round turn carries multiple close rows and `OpenRuns()` can miss the
-parked round (the queue reclaim is the working resume path in that shape).
-Tracked as a GitHub issue against this page; the fix belongs at the source —
-either RecoverStaleTasks learns about journaled in-flight steps, or the
-journal round-keying collapses to one run per turn.
+Recorded in the e2e manifest suite note. `RecoverStaleTasks` no longer
+force-fails a turn the journal will resume: an open run (`OpenRuns`) whose
+first `project_task` job is still pending, claimed, processing, or failed
+is left non-terminal so boot reclaim can finish it. A nil journal (flag
+off, or the store failed to open) and a nil queue still sweep every
+non-terminal row. A closed run, a missing job, or a job already
+completed/dead stays in the sweep (`daemon_shutdown`).
+
+Related shape still open: the writer keys `run_started`/`run_closed` per
+step-job round, so a multi-round turn carries multiple close rows and
+`OpenRuns()` can miss the parked round. That turn is not journal-reclaimable;
+the queue reclaim re-runs the job, and the sweep may still mark the task
+failed.
 
 ## See also
 

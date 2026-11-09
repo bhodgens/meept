@@ -189,8 +189,20 @@ func TestChildProcIdleStopFires(t *testing.T) {
 	if p.Alive() {
 		t.Fatal("Alive() true after idle stop")
 	}
-	if err := p.EnsureRunning(context.Background()); err != nil {
-		t.Fatalf("EnsureRunning after idle stop: %v", err)
+	// The OS process can be reaped a beat before the state machine leaves
+	// "stopping" (teardown runs after process death); EnsureRunning
+	// refuses while a Stop owns the teardown (childproc.go: a caller
+	// re-checks on its next call). Retry until the state settles.
+	var ensureErr error
+	ensureDeadline := time.Now().Add(5 * time.Second)
+	for {
+		if ensureErr = p.EnsureRunning(context.Background()); ensureErr == nil {
+			break
+		}
+		if time.Now().After(ensureDeadline) {
+			t.Fatalf("EnsureRunning after idle stop: %v", ensureErr)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if p.currentPIDForTest() == pid {
 		t.Fatal("EnsureRunning after idle stop reused the stopped pid")

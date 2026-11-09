@@ -80,6 +80,21 @@ func (r *recordingSTT) gotChunks() [][]byte {
 	return out
 }
 
+// sttBytesAtLeast reports whether the pump has forwarded at least n bytes
+// of PCM to the STT session. Deterministic where gotChunks() is not: a
+// coalesced unix-socket Read arrives as one larger chunk (pump contract),
+// so a fixed CHUNK count can never be reached on macOS while the BYTE
+// total is exact.
+func (r *recordingSTT) sttBytesAtLeast(n int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	total := 0
+	for _, c := range r.chunks {
+		total += len(c)
+	}
+	return total >= n
+}
+
 func (r *recordingSTT) streamCalls() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()

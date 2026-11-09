@@ -3,7 +3,7 @@ package daemon
 // Signal leg wiring tests (leaf 11a T6): the disabled boot is clean
 // (nil Leg, nil error, no construction), the enabled boot arms the
 // supervisor + leg, and an unarmed sidecar DEGRADES (nil Leg, non-nil
-// result, no error) - the bindPhoneCall nil-safe posture.
+// result, no error) - the holdPhoneCall nil-safe posture.
 
 import (
 	"context"

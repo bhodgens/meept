@@ -23,8 +23,13 @@ package daemon
 // extra threshold x interval credits the periodic checker the remaining
 // confirmations.) If any local classifier runtime is still unhealthy after
 // its window, the gate returns a fatal error: Run fails, and cmd/meept-daemon
-// exits non-zero. Cloud-only chains (no lifecycle block) never trip the gate.
-// orchestrator.classifier_boot_fail_fast = false skips it entirely.
+// exits non-zero. Cloud-only chains (no lifecycle block) never trip the health
+// wait. orchestrator.classifier_boot_fail_fast = false skips the health wait.
+//
+// A separate config check runs first and is not skipped by that escape hatch
+// when this function is entered: a llama.cpp spawn_command --ctx-size that
+// exceeds any declared context_limit on that provider fails boot immediately.
+// The loaded window is never clamped.
 //
 // Seams for tests: checkClassifierRuntimeHealth drives everything through the
 // classifierRuntimeProber / classifierRuntimeMetaFunc function types — no real
@@ -32,15 +37,22 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 )
+
+// errLlamaCtxSizeExceedsLimit is returned when a local llama.cpp
+// spawn_command asks for a context window larger than the model's declared
+// context_limit. Boot fails; the value is never clamped.
+var errLlamaCtxSizeExceedsLimit = errors.New("llama.cpp ctx-size exceeds context_limit")
 
 // The classifier failover alias is "classifier" (the dispatcher hardcodes
 // this default when ClassifierAlias is empty). A classifier_model slot
@@ -73,6 +85,10 @@ type classifierRuntimeMeta struct {
 	ModelPath    string
 	SpawnCommand []string
 	HealthWindow time.Duration
+	// CtxSize is the spawn_command --ctx-size (llama.cpp -c included).
+	// HasCtxSize is false when the flag is absent.
+	CtxSize    int
+	HasCtxSize bool
 }
 
 // classifierRuntimeMetaFunc resolves the runtime metadata for providerID.
@@ -162,6 +178,10 @@ func classifierRuntimeMetaFor(
 		HealthWindow: window,
 		SpawnCommand: append([]string(nil), provider.Lifecycle.SpawnCommand...),
 	}
+	if n, ok, err := parseSpawnCtxSize(meta.SpawnCommand); err == nil && ok {
+		meta.CtxSize = n
+		meta.HasCtxSize = true
+	}
 	if p := strings.TrimSpace(provider.Lifecycle.ModelPath); p != "" {
 		meta.ModelPath = p
 	} else if p := strings.TrimSpace(provider.Lifecycle.ModelPaths[modelKey]); p != "" {
@@ -183,17 +203,113 @@ func classifierRuntimeMetaFor(
 	return meta, true
 }
 
+// parseSpawnCtxSize reads llama.cpp --ctx-size from a spawn_command. The
+// short flag -c is accepted only when the argv is llama-server or llama-cli,
+// so an unrelated -c cannot trip the gate. ok is false when the flag is
+// absent. A present flag that is not a positive integer is an error: the
+// value is never clamped and never ignored.
+func parseSpawnCtxSize(cmd []string) (int, bool, error) {
+	llama := false
+	for _, arg := range cmd {
+		base := arg
+		if i := strings.LastIndex(base, "/"); i >= 0 {
+			base = base[i+1:]
+		}
+		base = strings.TrimSuffix(base, ".exe")
+		if base == "llama-server" || base == "llama-cli" {
+			llama = true
+			break
+		}
+	}
+	for i, arg := range cmd {
+		flag, value, hasEq := strings.Cut(arg, "=")
+		if flag != "--ctx-size" && !(llama && flag == "-c") {
+			continue
+		}
+		if !hasEq {
+			if i+1 >= len(cmd) {
+				return 0, false, fmt.Errorf("--ctx-size missing value")
+			}
+			value = cmd[i+1]
+		}
+		n, convErr := strconv.Atoi(value)
+		if convErr != nil || n <= 0 {
+			return 0, false, fmt.Errorf("--ctx-size %q is not a positive integer", value)
+		}
+		return n, true, nil
+	}
+	return 0, false, nil
+}
+
+// formatCtxSize renders the configured context size for gate errors. The
+// health-gate message must name this value: a slow load is usually the
+// window, and the full spawn_command is too easy to miss.
+func formatCtxSize(meta classifierRuntimeMeta) string {
+	if !meta.HasCtxSize {
+		return "unset"
+	}
+	return strconv.Itoa(meta.CtxSize)
+}
+
+// checkLlamaCtxSizeLimit fails when any local runtime's spawn_command
+// --ctx-size exceeds a declared context_limit on that provider. A missing
+// flag or a context_limit of 0 is not a comparison. The loaded window is
+// never clamped down to the limit.
+func checkLlamaCtxSizeLimit(providers *llm.ProvidersConfig) error {
+	if providers == nil || len(providers.Providers) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(providers.Providers))
+	for id := range providers.Providers {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	var errs []error
+	for _, id := range ids {
+		provider := providers.Providers[id]
+		if provider.Lifecycle == nil || len(provider.Lifecycle.SpawnCommand) == 0 {
+			continue
+		}
+		ctxSize, ok, err := parseSpawnCtxSize(provider.Lifecycle.SpawnCommand)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("provider %q spawn_command: %w", id, err))
+			continue
+		}
+		if !ok {
+			continue
+		}
+		modelKeys := make([]string, 0, len(provider.Models))
+		for key := range provider.Models {
+			modelKeys = append(modelKeys, key)
+		}
+		sort.Strings(modelKeys)
+		for _, key := range modelKeys {
+			limit := provider.Models[key].ContextLimit
+			if limit <= 0 || ctxSize <= limit {
+				continue
+			}
+			errs = append(errs, fmt.Errorf(
+				"%w: provider %q model %q --ctx-size %d exceeds context_limit %d (endpoint %s, spawn_command %q)",
+				errLlamaCtxSizeExceedsLimit, id, key, ctxSize, limit,
+				provider.Options.BaseURL, strings.Join(provider.Lifecycle.SpawnCommand, " ")))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // checkClassifierRuntimeHealth is the F-D8 boot gate. It resolves the
 // classifier chain from modelsCfg (+ providers for alias expansion), and for
 // every member that is a local spawned runtime (per metaFor) requires the
 // endpoint healthy within its configured health window (via proberFor).
-// Returns an error naming the endpoint, model path and spawn command when any
-// local classifier runtime stays unhealthy; nil when every local member is
-// healthy or the chain is cloud-only.
+// Returns an error naming the endpoint, model path, configured ctx-size, and
+// spawn command when any local classifier runtime stays unhealthy; nil when
+// every local member is healthy or the chain is cloud-only.
 //
-// failFast=false skips the gate entirely (orchestrator
-// classifier_boot_fail_fast escape hatch). Both proberFor and metaFor are
-// seams: tests inject fakes and no real runtime is touched.
+// Before the health wait, a llama.cpp --ctx-size that exceeds a declared
+// context_limit fails the boot. That check is not part of the failFast
+// escape hatch: failFast=false skips only the health wait. Both proberFor
+// and metaFor are seams: tests inject fakes and no real runtime is touched.
 func checkClassifierRuntimeHealth(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -203,6 +319,9 @@ func checkClassifierRuntimeHealth(
 	proberFor func(providerID string) (classifierRuntimeProber, bool),
 	metaFor classifierRuntimeMetaFunc,
 ) error {
+	if err := checkLlamaCtxSizeLimit(providers); err != nil {
+		return err
+	}
 	if !failFast {
 		logger.Debug("Classifier boot fail-fast disabled; skipping runtime health gate")
 		return nil
@@ -233,23 +352,24 @@ func checkClassifierRuntimeHealth(
 		prober, ok := proberFor(meta.ProviderID)
 		if !ok {
 			return fmt.Errorf(
-				"classifier runtime for provider %q (endpoint %s) is not registered; "+
+				"classifier runtime for provider %q (endpoint %s, ctx_size %s) is not registered; "+
 					"model_path %q, spawn_command %q — fix the lifecycle block in models.json5 "+
 					"or set orchestrator.classifier_boot_fail_fast=false to skip this gate",
-				meta.ProviderID, meta.Endpoint, meta.ModelPath, strings.Join(meta.SpawnCommand, " "))
+				meta.ProviderID, meta.Endpoint, formatCtxSize(meta), meta.ModelPath, strings.Join(meta.SpawnCommand, " "))
 		}
 		logger.Info("Waiting for local classifier runtime health",
 			"provider", meta.ProviderID,
 			"endpoint", meta.Endpoint,
+			"ctx_size", formatCtxSize(meta),
 			"health_window", meta.HealthWindow)
 		if err := prober.WaitForHealthy(ctx, meta.HealthWindow); err != nil {
 			return fmt.Errorf(
 				"classifier runtime on %s not healthy after %s (provider %q, model_path %q, "+
-					"spawn_command %q): %w — an unhealthy local classifier at boot is a "+
-					"platform failure; check the model path and port, then restart, or set "+
+					"ctx_size %s, spawn_command %q): %w — an unhealthy local classifier at boot is a "+
+					"platform failure; check the model path, ctx-size, and port, then restart, or set "+
 					"orchestrator.classifier_boot_fail_fast=false to tolerate degraded classification",
 				meta.Endpoint, meta.HealthWindow, meta.ProviderID, meta.ModelPath,
-				strings.Join(meta.SpawnCommand, " "), err)
+				formatCtxSize(meta), strings.Join(meta.SpawnCommand, " "), err)
 		}
 		logger.Info("Local classifier runtime healthy",
 			"provider", meta.ProviderID, "endpoint", meta.Endpoint)

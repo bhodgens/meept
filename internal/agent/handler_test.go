@@ -5,9 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"log/slog"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1502,4 +1508,333 @@ func TestHandleRequest_ProvenanceMetaOmittedOnUnclassified(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for chat.response")
 	}
+}
+
+// TestHandleRequest_WorkerTerminalStateHoldsWorkersMu pins issue 4: the
+// chat request path used to assign worker.State and worker.LastActivity
+// after registerWorker with no workersMu. handleAgentProgress writes those
+// same fields under the lock, and GetWorkers copies the struct under
+// RLock. The request path must mutate under workersMu, copy, unlock, then
+// publish the copy — a live pointer races json.Marshal in
+// publishWorkerEvent.
+//
+// The AST half fails without -race if the writes move back inline or the
+// lock drops. The hammer half is what `go test -race` actually flags.
+func TestHandleRequest_WorkerTerminalStateHoldsWorkersMu(t *testing.T) {
+	pinWorkerTerminalStateLocked(t)
+
+	t.Run("request path publishes terminal snapshot", func(t *testing.T) {
+		msgBus := bus.New(nil, slogDiscardLogger())
+		loop := NewAgentLoop("lock-pin", "/tmp")
+		h := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
+		sub := msgBus.Subscribe("lock-pin", "chat.worker.error")
+		defer msgBus.Unsubscribe(sub)
+
+		payload, err := json.Marshal(ChatRequest{
+			Message:        "hi",
+			ConversationID: "conv-lock-wire",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.handleRequest(context.Background(), &models.BusMessage{
+			ID:      "req-lock-wire",
+			Type:    models.MessageTypeRequest,
+			Payload: payload,
+		})
+
+		select {
+		case msg := <-sub.Channel:
+			var got Worker
+			if err := json.Unmarshal(msg.Payload, &got); err != nil {
+				t.Fatalf("unmarshal worker event: %v", err)
+			}
+			if got.State != string(MessageTypeError) {
+				t.Fatalf("published state = %q, want %q", got.State, MessageTypeError)
+			}
+			if got.LastActivity.IsZero() {
+				t.Fatal("published LastActivity is zero")
+			}
+			if got.ConversationID != "conv-lock-wire" {
+				t.Fatalf("conversation_id = %q, want conv-lock-wire", got.ConversationID)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for chat.worker.error")
+		}
+	})
+
+	msgBus := bus.New(nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
+	w := &Worker{
+		ID:             "worker-lock-pin",
+		ConversationID: "conv-lock-pin",
+		RequestID:      "req-lock-pin",
+		State:          "processing",
+		StartTime:      time.Now(),
+	}
+	h.registerWorker(w)
+	defer h.unregisterWorker(w.ID)
+
+	progressPayload, err := json.Marshal(map[string]string{
+		"conversation_id": w.ConversationID,
+		"stage":           "executing",
+		"detail":          "bash",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	progressMsg := &models.BusMessage{Payload: progressPayload}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = h.GetWorkers()
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				h.handleAgentProgress(progressMsg)
+			}
+		}
+	}()
+
+	for i := 0; i < 200; i++ {
+		// Re-open the non-terminal window so handleAgentProgress keeps
+		// writing the same fields the terminal update writes.
+		h.workersMu.Lock()
+		w.State = "processing"
+		w.CurrentTool = ""
+		h.workersMu.Unlock()
+
+		failed := i%2 == 0
+		snap := h.setWorkerTerminalState(w, failed)
+		if snap == w {
+			t.Fatal("terminal snapshot aliases the live worker")
+		}
+		want := ReportStatusCompleted
+		topic := "chat.worker.completed"
+		if failed {
+			want = string(MessageTypeError)
+			topic = "chat.worker.error"
+		}
+		if snap.State != want {
+			t.Fatalf("snapshot state = %q, want %q", snap.State, want)
+		}
+		if snap.LastActivity.IsZero() {
+			t.Fatal("snapshot LastActivity is zero")
+		}
+		if w.State != want {
+			t.Fatalf("live state = %q, want %q", w.State, want)
+		}
+		// Publish the copy while readers and writers still run. Passing
+		// the live pointer here races json.Marshal.
+		h.publishWorkerEvent(topic, snap)
+		snap.State = "mutated-snapshot"
+		if w.State == "mutated-snapshot" {
+			t.Fatal("mutating the snapshot wrote the live worker")
+		}
+	}
+
+	close(stop)
+	wg.Wait()
+}
+
+// pinWorkerTerminalStateLocked is the source half of the issue-4 pin.
+// A behavioural test of the helper passes with the lock deleted unless
+// -race is on; this fails either way if handleRequest assigns the fields
+// itself, if the helper drops workersMu, or if a terminal publish still
+// hands out the live worker pointer.
+func pinWorkerTerminalStateLocked(t *testing.T) {
+	t.Helper()
+	_, caller, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	path := filepath.Join(filepath.Dir(caller), "handler.go")
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse handler.go: %v", err)
+	}
+
+	handleRequest := findHandlerFunc(t, file, "handleRequest")
+	ast.Inspect(handleRequest.Body, func(n ast.Node) bool {
+		as, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for _, lhs := range as.Lhs {
+			sel, ok := lhs.(*ast.SelectorExpr)
+			if !ok {
+				continue
+			}
+			id, ok := sel.X.(*ast.Ident)
+			if !ok || id.Name != "worker" {
+				continue
+			}
+			if sel.Sel.Name == "State" || sel.Sel.Name == "LastActivity" {
+				t.Fatalf("handleRequest assigns worker.%s directly; route it through setWorkerTerminalState under workersMu", sel.Sel.Name)
+			}
+		}
+		return true
+	})
+	if !funcCalls(handleRequest, "setWorkerTerminalState") {
+		t.Fatal("handleRequest must record terminal worker state via setWorkerTerminalState")
+	}
+	for _, call := range publishWorkerEventCalls(handleRequest) {
+		topic, arg := workerEventCall(t, call)
+		if topic != "chat.worker.error" && topic != "chat.worker.completed" {
+			continue
+		}
+		if id, ok := arg.(*ast.Ident); ok && id.Name == "worker" {
+			t.Fatalf("handleRequest publishes the live worker on %s; copy under workersMu, unlock, then publish the snapshot", topic)
+		}
+	}
+
+	helper := findHandlerFunc(t, file, "setWorkerTerminalState")
+	lockPos, unlockPos := workersMuLockSpan(t, helper)
+	var sawActivity, sawState bool
+	ast.Inspect(helper.Body, func(n ast.Node) bool {
+		if callName(n) == "publishWorkerEvent" {
+			t.Fatal("setWorkerTerminalState must not publish; unlock, then publish the snapshot")
+		}
+		as, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for _, lhs := range as.Lhs {
+			sel, ok := lhs.(*ast.SelectorExpr)
+			if !ok {
+				continue
+			}
+			if sel.Sel.Name != "State" && sel.Sel.Name != "LastActivity" {
+				continue
+			}
+			if as.Pos() <= lockPos || as.End() >= unlockPos {
+				t.Fatalf("worker.%s write is outside workersMu (lock %s, unlock %s, write %s)",
+					sel.Sel.Name, fset.Position(lockPos), fset.Position(unlockPos), fset.Position(as.Pos()))
+			}
+			switch sel.Sel.Name {
+			case "LastActivity":
+				sawActivity = true
+			case "State":
+				sawState = true
+			}
+		}
+		return true
+	})
+	if !sawActivity || !sawState {
+		t.Fatal("setWorkerTerminalState must assign LastActivity and State under workersMu")
+	}
+}
+
+func findHandlerFunc(t *testing.T, file *ast.File, name string) *ast.FuncDecl {
+	t.Helper()
+	for _, d := range file.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		if ok && fn.Name.Name == name && fn.Recv != nil && fn.Body != nil {
+			return fn
+		}
+	}
+	t.Fatalf("func %s not found on a receiver in handler.go", name)
+	return nil
+}
+
+func funcCalls(fn *ast.FuncDecl, name string) bool {
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if callName(n) == name {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func callName(n ast.Node) string {
+	call, ok := n.(*ast.CallExpr)
+	if !ok {
+		return ""
+	}
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		return fun.Name
+	case *ast.SelectorExpr:
+		return fun.Sel.Name
+	default:
+		return ""
+	}
+}
+
+func publishWorkerEventCalls(fn *ast.FuncDecl) []*ast.CallExpr {
+	var calls []*ast.CallExpr
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if ok && callName(call) == "publishWorkerEvent" {
+			calls = append(calls, call)
+		}
+		return true
+	})
+	return calls
+}
+
+func workerEventCall(t *testing.T, call *ast.CallExpr) (string, ast.Expr) {
+	t.Helper()
+	if len(call.Args) < 2 {
+		t.Fatal("publishWorkerEvent call missing args")
+	}
+	lit, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		t.Fatal("publishWorkerEvent topic is not a string literal")
+	}
+	topic, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		t.Fatalf("unquote topic: %v", err)
+	}
+	return topic, call.Args[1]
+}
+
+func workersMuLockSpan(t *testing.T, fn *ast.FuncDecl) (token.Pos, token.Pos) {
+	t.Helper()
+	var lockPos, unlockPos token.Pos
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if isWorkersMuCall(n, "Lock") && lockPos == token.NoPos {
+			lockPos = n.Pos()
+		}
+		if isWorkersMuCall(n, "Unlock") && unlockPos == token.NoPos {
+			unlockPos = n.End()
+		}
+		return true
+	})
+	if lockPos == token.NoPos || unlockPos == token.NoPos || unlockPos <= lockPos {
+		t.Fatal("setWorkerTerminalState must Lock and Unlock workersMu around the field writes")
+	}
+	return lockPos, unlockPos
+}
+
+func isWorkersMuCall(n ast.Node, method string) bool {
+	call, ok := n.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != method {
+		return false
+	}
+	inner, ok := sel.X.(*ast.SelectorExpr)
+	return ok && inner.Sel.Name == "workersMu"
 }

@@ -145,8 +145,9 @@ func (w *WriteBack) Report(ctx context.Context, t Ticket, o Outcome) (int64, str
 		ProviderIdempotent: false,
 	}
 
+	who := effects.Claimant{AgentID: o.GoalID}
 	var attemptErr error
-	receipt, reused, runErr := effects.Run(ctx, w.ledger, key, meta, func(ctx context.Context) (json.RawMessage, error) {
+	receipt, reused, runErr := effects.Run(ctx, w.ledger, key, meta, who, func(ctx context.Context) (json.RawMessage, error) {
 		body := fmt.Sprintf(commentTemplate, o.GoalID, o.State, truncateRunes(o.Detail, maxDetailRunes))
 		c, resp, apiErr := client.Issues.CreateComment(ctx, w.repo.Owner, w.repo.Repo, num, github.IssueCommentRequest{Body: body})
 		if apiErr != nil {
@@ -195,7 +196,7 @@ func (w *WriteBack) Report(ctx context.Context, t Ticket, o Outcome) (int64, str
 
 	// Complete the effect so the next poll with the same outcome collides
 	// on the completed key and reuses this receipt (storm guard).
-	if err := w.ledger.Complete(ctx, key); err != nil {
+	if err := w.ledger.Complete(ctx, key, who); err != nil {
 		return rc.ID, rc.HTMLURL, fmt.Errorf("intake: WriteBack.Report: complete %s: %w", key, err)
 	}
 

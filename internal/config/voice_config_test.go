@@ -33,6 +33,9 @@ func TestVoiceConfigDefaults(t *testing.T) {
 	if v.SilencePromptSeconds != 45 {
 		t.Errorf("voice.silence_prompt_seconds default = %d, want 45", v.SilencePromptSeconds)
 	}
+	if v.TurnTimeoutSeconds != 0 {
+		t.Errorf("voice.turn_timeout_seconds default = %d, want 0 (opt-in: disabled unless configured)", v.TurnTimeoutSeconds)
+	}
 	if v.ReorderWindowFrames != 10 {
 		t.Errorf("voice.reorder_window_frames default = %d, want 10", v.ReorderWindowFrames)
 	}

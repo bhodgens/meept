@@ -168,10 +168,12 @@ func TestExecGateLedger(t *testing.T) {
 	reg.Register(&gateStubTool{name: "ro_tool", category: "custom", readOnly: true})
 	reg.Register(&gateStubTool{name: "mut_tool", category: "custom", readOnly: false})
 
-	if _, err := reg.Execute(context.Background(), "ro_tool", map[string]any{}); err != nil {
+	ctx := tools.ContextWithSessionID(context.Background(), "gate-sess")
+	ctx = tools.ContextWithAgentID(ctx, "gate-agent")
+	if _, err := reg.Execute(ctx, "ro_tool", map[string]any{}); err != nil {
 		t.Fatalf("read-only Execute returned error: %v", err)
 	}
-	if _, err := reg.Execute(context.Background(), "mut_tool", map[string]any{}); err != nil {
+	if _, err := reg.Execute(ctx, "mut_tool", map[string]any{}); err != nil {
 		t.Fatalf("mutating Execute returned error: %v", err)
 	}
 
@@ -242,7 +244,9 @@ func TestUndeclaredPostureMutating(t *testing.T) {
 	reg.SetGate(gate)
 	reg.Register(&gateStubTool{name: "claim_ro", category: "custom", readOnly: true})
 
-	if _, err := reg.Execute(context.Background(), "claim_ro", map[string]any{}); err != nil {
+	ctx := tools.ContextWithSessionID(context.Background(), "gate-sess")
+	ctx = tools.ContextWithAgentID(ctx, "gate-agent")
+	if _, err := reg.Execute(ctx, "claim_ro", map[string]any{}); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 	if _, err := ledger.Get(context.Background(), effects.EffectKey("gate.tool", "claim_ro", argsHashForTest(map[string]any{}))); err != nil {
@@ -303,12 +307,21 @@ func TestExecGateFailClosed(t *testing.T) {
 // failingLedger always errors on Claim.
 type failingLedger struct{}
 
-func (failingLedger) Claim(context.Context, string, effects.EffectMeta) (bool, *effects.EffectRecord, error) {
+func (failingLedger) Claim(context.Context, string, effects.EffectMeta, effects.Claimant) (bool, *effects.EffectRecord, error) {
 	return false, nil, errors.New("ledger disk failure")
 }
-func (failingLedger) RecordReceipt(context.Context, string, json.RawMessage) error { return nil }
-func (failingLedger) Complete(context.Context, string) error                       { return nil }
-func (failingLedger) Abandon(context.Context, string, string) error                { return nil }
+func (failingLedger) RecordReceipt(context.Context, string, effects.Claimant, json.RawMessage) error {
+	return nil
+}
+func (failingLedger) Complete(context.Context, string, effects.Claimant) error { return nil }
+func (failingLedger) Abandon(context.Context, string, effects.Claimant, string) error {
+	return nil
+}
+func (failingLedger) RecordReceiptAdmin(context.Context, string, json.RawMessage) error {
+	return nil
+}
+func (failingLedger) CompleteAdmin(context.Context, string) error        { return nil }
+func (failingLedger) AbandonAdmin(context.Context, string, string) error { return nil }
 func (failingLedger) ReconcilePending(context.Context) ([]effects.EffectRecord, error) {
 	return nil, nil
 }

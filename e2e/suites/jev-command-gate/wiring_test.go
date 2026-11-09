@@ -1,141 +1,187 @@
 //go:build e2e
 
-// jev-gate-03: score-gate daemon wiring (jev gate wiring leaf,
-// docs/plans/20261103-wiring-gap-remediation/04-jev-gate-wiring.md).
+// jev-gate-03: score-gate daemon wiring (issue #113).
 //
-// Covers the WIRING composition end-to-end at the same hermetic standard
-// as leaves 01/02 (stubs produce only real-client shapes):
-//   - the daemon adapter maps [security.jev_command_gate] config onto
-//     jevgate.ScoreGateConfig (mirrors components.go's construction block),
-//   - the constructed hook, registered as "jev-score-gate" in a REAL
-//     agent.NewHookRegistry, turns a shell call scoring below threshold
-//     into the confirmation escalation (Block=true),
-//   - WIRING-FAILURE PROPERTY: with the registration deleted, the same
-//     call falls through every remaining stage and executes (Block=false)
-//   - proof the gate's enforcement depends on the live registration and
-//     not on latent package state.
+// The previous test constructed jevgate.NewScoreGateHook by hand and
+// registered it on a private HookRegistry. That stayed green with zero
+// production wiring — the same gap that let issue #87 ship e2e-green.
+// This file boots a scratch daemon through the e2e harness and drives a
+// real shell tool call, so a deleted registration fails the suite.
 //
-// Hermetic: no daemon, no model.
+// Armed ([security.jev_command_gate].enabled=true):
+//   - boot log names the live "jev-score-gate" registration,
+//   - a benign shell call the shell tool would otherwise run is denied
+//     before execution (marker file absent, confirmation shape returned),
+//   - the same boot opens the capture store and the deny invokes that
+//     store's ConfirmFlow (Escalated log). The scorer-error reason is the
+//     branch that also calls Recorder.RecordScore.
+//
+// Disabled (opt-in default): no registration log, the same call executes.
+// That is the wiring-failure property: enforcement rides the live
+// registration, not latent package state.
+//
+// Hermetic: fake LLM, no decision_model slot. ScoreCommand returns
+// ErrDecisionUnavailable and the hook fail-closes (the degraded posture
+// components.go documents). A sqlite command_gate_records row is NOT the
+// deny artifact — RecordScore only arms an in-memory pending; the row
+// lands when a human resolves (gatecapture Contract C4). Asserting a row
+// here would contradict that contract.
 package jevgatecmd
 
 import (
-	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/caimlas/meept/internal/agent"
-	"github.com/caimlas/meept/internal/config"
-	"github.com/caimlas/meept/internal/jevgate"
-	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/e2e/harness"
 )
 
-// jevStubScorer mirrors the leaf-01 stub discipline: returns a canned REAL
-// client shape keyed off the serialized command text.
-type jevStubScorer struct {
-	result *llm.CommandScoreResult
-	err    error
-}
+const (
+	jevWiringMarkerName = "jev-wiring-marker.txt"
+	jevWiringMarkerBody = "jev-wiring-ran"
+	jevWiringShellCmd   = "printf " + jevWiringMarkerBody + " > " + jevWiringMarkerName
+)
 
-func (s *jevStubScorer) ScoreCommand(ctx context.Context, serializedContext string) (*llm.CommandScoreResult, error) {
-	return s.result, s.err
-}
+// jevWiringChat is an imperative artifact request so the fake classifier
+// pins intent=code (the coder lane holds shell).
+const jevWiringChat = "Create a marker file named jev-wiring-marker.txt by running a shell printf command in the project"
 
-// buildArmedHook reproduces the daemon construction block
-// (internal/daemon/components.go, jev construction comment) from a config
-// knob: adapter mapping + NewScoreGateHook + capture recorder.
-func buildArmedHook(t *testing.T, cfg config.JevGateConfig, scorer jevgate.ScoreClient) *jevgate.ScoreGateHook {
+func jevWiringLog(t *testing.T, s *harness.Stack) string {
 	t.Helper()
-	_ = cfg // adapter exercised in TestJevGate03a_ConfigAdapterMatchesWiring
-	hook := jevgate.NewScoreGateHook(
-		scorer,
-		jevgate.ScoreGateConfig{
-			Enabled:         true,
-			ScoreThreshold:  cfg.ScoreThreshold,
-			ConfidenceFloor: cfg.ConfidenceThreshold,
-		},
-		nil, // confirm seam nil-tolerant; escalation still blocks
-		nil, // logger default
-	)
-	return hook
+	data, err := os.ReadFile(s.Daemon.LogPath())
+	if err != nil {
+		t.Fatalf("read daemon log: %v", err)
+	}
+	return string(data)
 }
 
-// registerJevGate mirrors the registration block: name + priority as wired.
-func registerJevGate(reg *agent.HookRegistry, hook *jevgate.ScoreGateHook) {
-	reg.RegisterBeforeToolCall("jev-score-gate", agent.HookPriorityHigh, hook)
+func jevWiringToolResults(f *harness.FakeLLM) string {
+	var out []string
+	for _, body := range f.Requests() {
+		msgs, _ := body["messages"].([]any)
+		for _, m := range msgs {
+			msg, ok := m.(map[string]any)
+			if !ok {
+				continue
+			}
+			if role, _ := msg["role"].(string); role != "tool" {
+				continue
+			}
+			if c, _ := msg["content"].(string); c != "" {
+				out = append(out, c)
+			}
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
-func jevShellCall(command string) llm.ToolCall {
-	return llm.ToolCall{
-		Function: llm.ToolCallFunction{
-			Name:      "shell",
-			Arguments: `{"command":` + quoteGo(command) + `}`,
-		},
+// jevWiringShellTurn registers the project, binds a session, and drives one
+// scripted shell call that writes the marker file unless a before-tool-call
+// hook denies it first.
+func jevWiringShellTurn(t *testing.T, s *harness.Stack, sessionName string) string {
+	t.Helper()
+	s.RegisterProject(t, "e2e-project")
+	sessionID := s.CreateSession(t, sessionName, s.ProjectDir)
+	args, err := json.Marshal(map[string]any{
+		"command":     jevWiringShellCmd,
+		"working_dir": s.ProjectDir,
+		"timeout":     15,
+	})
+	if err != nil {
+		t.Fatalf("marshal shell args: %v", err)
+	}
+	s.Fake.EnqueueToolCalls(harness.ToolCall{
+		Name:      "shell",
+		Arguments: string(args),
+	})
+	s.ChatTurn(t, sessionID, jevWiringChat, 120*time.Second)
+	return filepath.Join(s.ProjectDir, jevWiringMarkerName)
+}
+
+// TestJevGate03_ArmedBootDeniesShellCall proves the daemon, not a
+// hand-built hook, registered jev-score-gate and ran it on a shell call.
+func TestJevGate03_ArmedBootDeniesShellCall(t *testing.T) {
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		"security.jev_command_gate.enabled": true,
+		// Escalated is Debug; INFO would hide the capture-store call.
+		"daemon.log_level": "DEBUG",
+	}))
+	marker := jevWiringShellTurn(t, s, "jev-armed")
+
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatalf("armed gate let the shell call execute; marker exists at %s\ntool results:\n%s",
+			marker, jevWiringToolResults(s.Fake))
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat marker: %v", err)
+	}
+
+	results := jevWiringToolResults(s.Fake)
+	for _, want := range []string{
+		"requires_confirmation",
+		"score gate",
+		"confirmation required",
+		"scorer error",
+	} {
+		if !strings.Contains(results, want) {
+			t.Fatalf("armed deny missing %q in tool results:\n%s\ndaemon log tail:\n%s",
+				want, results, s.Daemon.LogTail())
+		}
+	}
+	if strings.Contains(results, jevWiringMarkerBody) {
+		t.Fatalf("denied shell still returned its stdout:\n%s", results)
+	}
+
+	log := jevWiringLog(t, s)
+	for _, want := range []string{
+		"Registered jev score gate BeforeToolCall hook",
+		"jev score gate escalates to confirmation",
+		"tool call denied by before-tool-call hook",
+		"gate capture store open",
+		// Capture adapter, not a nil ConfirmFlow: Escalated only logs
+		// when the wired gateCaptureStore is the hook's confirm seam.
+		"gatecapture: jev score gate escalated",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("armed boot log missing %q\nlog tail:\n%s", want, s.Daemon.LogTail())
+		}
+	}
+
+	captureDB := filepath.Join(s.MeeptHome, "gatecapture.db")
+	if _, err := os.Stat(captureDB); err != nil {
+		t.Fatalf("armed wiring did not open the capture store at %s: %v", captureDB, err)
 	}
 }
 
-func quoteGo(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
-}
+// TestJevGate03_DisabledBootExecutesShellCall is the wiring-failure
+// property: with the opt-in knob off the daemon does not register the
+// hook, and the same shell call executes. Deleting the registration
+// block puts production in this posture even when the knob is on.
+func TestJevGate03_DisabledBootExecutesShellCall(t *testing.T) {
+	s := harness.Start(t)
+	marker := jevWiringShellTurn(t, s, "jev-disabled")
 
-// TestJevGate03a_ConfigAdapterMatchesWiring pins the adapter: the config
-// knob values land on the gate config verbatim (same field-for-field
-// mapping components.go performs).
-func TestJevGate03a_ConfigAdapterMatchesWiring(t *testing.T) {
-	cfg := config.JevGateConfig{Enabled: true, ScoreThreshold: 0.85, ConfidenceThreshold: 0.20}
-	hook := buildArmedHook(t, cfg, &jevStubScorer{})
-	if !hook.Enabled() {
-		t.Fatal("armed hook reports disabled: adapter dropped Enabled=true")
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("disabled gate blocked a benign shell call (registration leaked?): %v\ntool results:\n%s\nlog tail:\n%s",
+			err, jevWiringToolResults(s.Fake), s.Daemon.LogTail())
 	}
-}
-
-// TestJevGate03b_ArmedBootEscalatesShellCall covers the armed path: a
-// shell tool call whose score is below threshold goes through the
-// registered hook and comes back as the confirmation escalation shape.
-func TestJevGate03b_ArmedBootEscalatesShellCall(t *testing.T) {
-	cfg := config.JevGateConfig{Enabled: true, ScoreThreshold: 0.90, ConfidenceThreshold: 0.10}
-	// Real-client shape: band answer 0.2 (below the 0.90 allow bar),
-	// argmax-only confidence floor 1.0, degraded flag mirrors production.
-	scorer := &jevStubScorer{result: bandResult("0.2")}
-	hook := buildArmedHook(t, cfg, scorer)
-
-	reg := agent.NewHookRegistry(nil)
-	registerJevGate(reg, hook)
-
-	res := reg.RunBeforeToolCalls(context.Background(), jevShellCall("rm -rf /tmp/important"))
-	if !res.Block {
-		t.Fatalf("armed gate let a below-threshold shell call through: %+v", res)
+	if got := strings.TrimSpace(string(data)); got != jevWiringMarkerBody {
+		t.Fatalf("marker = %q, want %q", got, jevWiringMarkerBody)
 	}
-	if res.Reason == "" || !strings.Contains(res.Reason, "confirmation required") {
-		t.Fatalf("escalation reason missing the confirmation shape: %q", res.Reason)
+	if strings.Contains(jevWiringToolResults(s.Fake), "score gate") {
+		t.Fatalf("disabled boot still ran the score gate:\n%s", jevWiringToolResults(s.Fake))
 	}
-}
-
-// TestJevGate03c_DeleteRegistrationCallExecutes is the WIRING-FAILURE
-// property: delete the registration and the identical call falls through
-// the registry and executes. Proves enforcement rides the live
-// registration (and, inversely, that an armed-but-unregistered hook is
-// inert).
-func TestJevGate03c_DeleteRegistrationCallExecutes(t *testing.T) {
-	cfg := config.JevGateConfig{Enabled: true, ScoreThreshold: 0.90, ConfidenceThreshold: 0.10}
-	scorer := &jevStubScorer{result: bandResult("0.2")}
-	hook := buildArmedHook(t, cfg, scorer)
-
-	// The "deleted registration" shape: a registry with NO jev hook (the
-	// daemon builds one when components.JevScoreGate is nil - exactly the
-	// disabled/removed posture).
-	reg := agent.NewHookRegistry(nil)
-
-	res := reg.RunBeforeToolCalls(context.Background(), jevShellCall("rm -rf /tmp/important"))
-	if res.Block {
-		t.Fatalf("unregistered gate still blocked the call: %+v", res)
+	log := jevWiringLog(t, s)
+	if strings.Contains(log, "Registered jev score gate BeforeToolCall hook") {
+		t.Fatalf("disabled boot registered jev-score-gate; opt-in default broken\nlog tail:\n%s", s.Daemon.LogTail())
 	}
-
-	// Contrast arm: the SAME hook, registered, blocks - proving the delta
-	// is the registration, not the hook construction.
-	reg2 := agent.NewHookRegistry(nil)
-	registerJevGate(reg2, hook)
-	res2 := reg2.RunBeforeToolCalls(context.Background(), jevShellCall("rm -rf /tmp/important"))
-	if !res2.Block {
-		t.Fatal("contrast arm failed: registered hook did not block")
+	if strings.Contains(log, "jev score gate escalates to confirmation") {
+		t.Fatalf("disabled boot still ran the score gate\nlog tail:\n%s", s.Daemon.LogTail())
 	}
+	// gatecapture.db may exist anyway: the shell permission table opens the
+	// same store for chokepoint 2 (components.go). Absence of the
+	// registration + escalation lines is the opt-in pin, not the file.
 }

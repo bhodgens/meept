@@ -38,6 +38,12 @@ type eventGossipHandler struct {
 	// the default (no-op) case.
 	executorBridge *ExecutorBridge
 
+	// engine is the gossip engine this handler is registered on. Set by
+	// RegisterHandler so SetExecutorBridge can attach the same ed25519
+	// registry the engine uses — no second crypto path, and no daemon
+	// edit required for the lookup to be live.
+	engine *GossipEngine
+
 	// D-06 FIX: per-memory-ID mutex map to prevent TOCTOU races between
 	// fetchExistingMemoryEvent (read) and StoreRemoteMemory (write).
 	// Without this, two concurrent handler invocations for the same memory
@@ -82,9 +88,30 @@ func (h *eventGossipHandler) SetConflictResolver(r *ConflictResolver) {
 // convention. When unset, TASK_CREATE events fall through to the default
 // (no-op) case — preserving backward compatibility with pre-bridge
 // callers.
+//
+// If the handler is already bound to a GossipEngine, the bridge verifies
+// dispatch signatures against that engine's key registry (the same map
+// SyncPeerSigningKeys fills). Either wiring order works.
 func (h *eventGossipHandler) SetExecutorBridge(b *ExecutorBridge) {
-	if b != nil {
-		h.executorBridge = b
+	if b == nil || h == nil {
+		return
+	}
+	h.executorBridge = b
+	if h.engine != nil {
+		b.SetSigningKeyLookup(h.engine)
+	}
+}
+
+// bindGossipEngine records the engine that registered this handler and
+// attaches it as the bridge's signing-key lookup when the bridge is
+// already set. Called from GossipEngine.RegisterHandler.
+func (h *eventGossipHandler) bindGossipEngine(g *GossipEngine) {
+	if h == nil || g == nil {
+		return
+	}
+	h.engine = g
+	if h.executorBridge != nil {
+		h.executorBridge.SetSigningKeyLookup(g)
 	}
 }
 

@@ -258,19 +258,20 @@ func (b *ExecutorBridge) HandleTaskCreate(event *models.ClusterEvent) error {
 		// Resolve the origin node's signing key from the SHARED gossip
 		// registry (SetSigningKeyLookup). An unknown origin is rejected
 		// exactly like a bad signature: fail closed, never execute.
-		var pubKey ed25519.PublicKey
-		keyKnown := false
-		if b.signingKeys != nil {
-			pubKey, keyKnown = b.signingKeys.PeerSigningKey(job.OriginNode)
-		}
+		// PeerSigningKeys (when implemented) also accepts the previous
+		// key during a rotation grace window. Unsigned jobs are rejected
+		// before any key is consulted.
 		switch {
 		case len(job.Signature) == 0:
 			b.rejectDispatchJob(job, errors.New("dispatch job is unsigned (require_node_signatures)"))
 			return nil
-		case !keyKnown:
+		}
+		known, ok := verifyOriginSignature(b.signingKeys, job.OriginNode, job.signingBytes(), job.Signature)
+		switch {
+		case !known:
 			b.rejectDispatchJob(job, fmt.Errorf("no signing key registered for origin node %q", job.OriginNode))
 			return nil
-		case !ed25519.Verify(pubKey, job.signingBytes(), job.Signature):
+		case !ok:
 			b.rejectDispatchJob(job, fmt.Errorf("dispatch job signature verification failed for origin node %q", job.OriginNode))
 			return nil
 		}
@@ -311,6 +312,42 @@ func (b *ExecutorBridge) HandleTaskCreate(event *models.ClusterEvent) error {
 	go b.executeJob(ctx, aj)
 
 	return nil
+}
+
+// verifyOriginSignature reports whether sig verifies against the origin's
+// current signing key, or against a grace-window previous key when the
+// lookup exposes PeerSigningKeys. known is false when no key is
+// registered (unknown origin). Unsigned signatures never verify.
+func verifyOriginSignature(keys SigningKeyLookup, nodeID string, msg, sig []byte) (known, ok bool) {
+	if keys == nil || nodeID == "" || len(sig) == 0 {
+		return false, false
+	}
+	pubs := originSigningKeys(keys, nodeID)
+	if len(pubs) == 0 {
+		return false, false
+	}
+	for _, pub := range pubs {
+		if len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, msg, sig) {
+			return true, true
+		}
+	}
+	return true, false
+}
+
+// originSigningKeys returns every key the lookup will accept for nodeID.
+// A lookup that only implements PeerSigningKey contributes its single key.
+func originSigningKeys(keys SigningKeyLookup, nodeID string) []ed25519.PublicKey {
+	type multi interface {
+		PeerSigningKeys(string) []ed25519.PublicKey
+	}
+	if m, ok := keys.(multi); ok {
+		return m.PeerSigningKeys(nodeID)
+	}
+	pub, found := keys.PeerSigningKey(nodeID)
+	if !found {
+		return nil
+	}
+	return []ed25519.PublicKey{pub}
 }
 
 // rejectDispatchJob is the fail-closed rejection path (leaf 08 / C9):

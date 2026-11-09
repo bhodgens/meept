@@ -177,9 +177,19 @@ func dialAudioPair(t *testing.T, dir, ccid string) {
 	delete(childInCapture, ccid)
 	childInMu.Unlock()
 	deadline := time.Now().Add(2 * time.Second)
+	// Hold an already-dialed conn across retries: the pair's accept
+	// goroutine claims the FIRST conn per socket (socket.go NewAudioPair);
+	// closing it to retry both poisons the pair. Retry only the missing
+	// side (the .out socket file lands one statement after .in's bind).
+	var c1, c2 net.Conn
 	for time.Now().Before(deadline) {
-		c1, err1 := net.Dial("unix", filepath.Join(dir, ccid+".in"))
-		c2, err2 := net.Dial("unix", filepath.Join(dir, ccid+".out"))
+		var err1, err2 error
+		if c1 == nil {
+			c1, err1 = net.Dial("unix", filepath.Join(dir, ccid+".in"))
+		}
+		if c2 == nil {
+			c2, err2 = net.Dial("unix", filepath.Join(dir, ccid+".out"))
+		}
 		if err1 == nil && err2 == nil {
 			childOutMu.Lock()
 			childOut[ccid] = c2
@@ -210,12 +220,6 @@ func dialAudioPair(t *testing.T, dir, ccid string) {
 			// practice; the settle window absorbs scheduler jitter).
 			time.Sleep(50 * time.Millisecond)
 			return
-		}
-		if c1 != nil {
-			_ = c1.Close()
-		}
-		if c2 != nil {
-			_ = c2.Close()
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

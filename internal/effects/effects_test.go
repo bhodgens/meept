@@ -46,6 +46,10 @@ func metaFor(tool string) EffectMeta {
 	}
 }
 
+func testWho() Claimant {
+	return Claimant{AgentID: "agent-1", SessionID: "sess-3"}
+}
+
 func TestLedgerConformance(t *testing.T) {
 	for name, newLedger := range newTestLedgers(t) {
 		t.Run(name, func(t *testing.T) {
@@ -58,14 +62,14 @@ func TestLedgerConformance(t *testing.T) {
 
 			t.Run("claim grants once", func(t *testing.T) {
 				key := EffectKey("tool.a", "sess", "step")
-				granted, prior, err := l.Claim(context.Background(), key, metaFor("tool.a"))
+				granted, prior, err := l.Claim(context.Background(), key, metaFor("tool.a"), testWho())
 				if err != nil {
 					t.Fatalf("claim: %v", err)
 				}
 				if !granted || prior != nil {
 					t.Fatalf("first claim: granted=%v prior=%v, want true nil", granted, prior)
 				}
-				granted, prior, err = l.Claim(context.Background(), key, metaFor("tool.a"))
+				granted, prior, err = l.Claim(context.Background(), key, metaFor("tool.a"), testWho())
 				if err != nil {
 					t.Fatalf("second claim: %v", err)
 				}
@@ -90,11 +94,11 @@ func TestLedgerConformance(t *testing.T) {
 				key := EffectKey("tool.b", "sess", "step")
 				claimMeta := metaFor("tool.b")
 				claimMeta.Payload = json.RawMessage(`{"k":"v"}`)
-				if _, _, err := l.Claim(context.Background(), key, claimMeta); err != nil {
+				if _, _, err := l.Claim(context.Background(), key, claimMeta, testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
 				receipt := json.RawMessage(`{"status":"ok","id":42}`)
-				if err := l.RecordReceipt(context.Background(), key, receipt); err != nil {
+				if err := l.RecordReceipt(context.Background(), key, testWho(), receipt); err != nil {
 					t.Fatalf("record receipt: %v", err)
 				}
 				rec, err := l.Get(context.Background(), key)
@@ -117,13 +121,13 @@ func TestLedgerConformance(t *testing.T) {
 
 			t.Run("complete from receipted", func(t *testing.T) {
 				key := EffectKey("tool.c", "sess", "step")
-				if _, _, err := l.Claim(context.Background(), key, metaFor("tool.c")); err != nil {
+				if _, _, err := l.Claim(context.Background(), key, metaFor("tool.c"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if err := l.RecordReceipt(context.Background(), key, json.RawMessage(`{"done":true}`)); err != nil {
+				if err := l.RecordReceipt(context.Background(), key, testWho(), json.RawMessage(`{"done":true}`)); err != nil {
 					t.Fatalf("record receipt: %v", err)
 				}
-				if err := l.Complete(context.Background(), key); err != nil {
+				if err := l.Complete(context.Background(), key, testWho()); err != nil {
 					t.Fatalf("complete: %v", err)
 				}
 				rec, err := l.Get(context.Background(), key)
@@ -140,10 +144,10 @@ func TestLedgerConformance(t *testing.T) {
 
 			t.Run("complete from claimed is allowed", func(t *testing.T) {
 				key := EffectKey("tool.d", "sess", "step")
-				if _, _, err := l.Claim(context.Background(), key, metaFor("tool.d")); err != nil {
+				if _, _, err := l.Claim(context.Background(), key, metaFor("tool.d"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if err := l.Complete(context.Background(), key); err != nil {
+				if err := l.Complete(context.Background(), key, testWho()); err != nil {
 					t.Fatalf("complete from claimed: %v", err)
 				}
 				rec, err := l.Get(context.Background(), key)
@@ -157,10 +161,10 @@ func TestLedgerConformance(t *testing.T) {
 
 			t.Run("abandon from claimed and receipted", func(t *testing.T) {
 				keyC := EffectKey("tool.e", "sess", "claimed")
-				if _, _, err := l.Claim(context.Background(), keyC, metaFor("tool.e")); err != nil {
+				if _, _, err := l.Claim(context.Background(), keyC, metaFor("tool.e"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if err := l.Abandon(context.Background(), keyC, "test abandon claimed"); err != nil {
+				if err := l.Abandon(context.Background(), keyC, testWho(), "test abandon claimed"); err != nil {
 					t.Fatalf("abandon claimed: %v", err)
 				}
 				recC, err := l.Get(context.Background(), keyC)
@@ -172,13 +176,13 @@ func TestLedgerConformance(t *testing.T) {
 				}
 
 				keyR := EffectKey("tool.e", "sess", "receipted")
-				if _, _, err := l.Claim(context.Background(), keyR, metaFor("tool.e")); err != nil {
+				if _, _, err := l.Claim(context.Background(), keyR, metaFor("tool.e"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if err := l.RecordReceipt(context.Background(), keyR, json.RawMessage(`{}`)); err != nil {
+				if err := l.RecordReceipt(context.Background(), keyR, testWho(), json.RawMessage(`{}`)); err != nil {
 					t.Fatalf("record receipt: %v", err)
 				}
-				if err := l.Abandon(context.Background(), keyR, "test abandon receipted"); err != nil {
+				if err := l.Abandon(context.Background(), keyR, testWho(), "test abandon receipted"); err != nil {
 					t.Fatalf("abandon receipted: %v", err)
 				}
 				recR, err := l.Get(context.Background(), keyR)
@@ -192,13 +196,13 @@ func TestLedgerConformance(t *testing.T) {
 
 			t.Run("complete is idempotent on completed", func(t *testing.T) {
 				key := EffectKey("tool.f", "sess", "step")
-				if _, _, err := l.Claim(context.Background(), key, metaFor("tool.f")); err != nil {
+				if _, _, err := l.Claim(context.Background(), key, metaFor("tool.f"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if err := l.Complete(context.Background(), key); err != nil {
+				if err := l.Complete(context.Background(), key, testWho()); err != nil {
 					t.Fatalf("first complete: %v", err)
 				}
-				if err := l.Complete(context.Background(), key); err != nil {
+				if err := l.Complete(context.Background(), key, testWho()); err != nil {
 					t.Fatalf("re-complete of completed: %v", err)
 				}
 			})
@@ -209,13 +213,13 @@ func TestLedgerConformance(t *testing.T) {
 				if _, err := l.Get(ctx, key); !errors.Is(err, ErrUnknownKey) {
 					t.Fatalf("get unknown: err=%v, want ErrUnknownKey", err)
 				}
-				if err := l.RecordReceipt(ctx, key, json.RawMessage(`{}`)); !errors.Is(err, ErrUnknownKey) {
+				if err := l.RecordReceipt(ctx, key, testWho(), json.RawMessage(`{}`)); !errors.Is(err, ErrUnknownKey) {
 					t.Fatalf("record receipt unknown: err=%v, want ErrUnknownKey", err)
 				}
-				if err := l.Complete(ctx, key); !errors.Is(err, ErrUnknownKey) {
+				if err := l.Complete(ctx, key, testWho()); !errors.Is(err, ErrUnknownKey) {
 					t.Fatalf("complete unknown: err=%v, want ErrUnknownKey", err)
 				}
-				if err := l.Abandon(ctx, key, "nope"); !errors.Is(err, ErrUnknownKey) {
+				if err := l.Abandon(ctx, key, testWho(), "nope"); !errors.Is(err, ErrUnknownKey) {
 					t.Fatalf("abandon unknown: err=%v, want ErrUnknownKey", err)
 				}
 			})
@@ -224,44 +228,44 @@ func TestLedgerConformance(t *testing.T) {
 				ctx := context.Background()
 				// completed rejects RecordReceipt and Abandon.
 				keyDone := EffectKey("tool.h", "sess", "done")
-				if _, _, err := l.Claim(ctx, keyDone, metaFor("tool.h")); err != nil {
+				if _, _, err := l.Claim(ctx, keyDone, metaFor("tool.h"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if err := l.Complete(ctx, keyDone); err != nil {
+				if err := l.Complete(ctx, keyDone, testWho()); err != nil {
 					t.Fatalf("complete: %v", err)
 				}
-				if err := l.RecordReceipt(ctx, keyDone, json.RawMessage(`{}`)); !errors.Is(err, ErrInvalidTransition) {
+				if err := l.RecordReceipt(ctx, keyDone, testWho(), json.RawMessage(`{}`)); !errors.Is(err, ErrInvalidTransition) {
 					t.Fatalf("record receipt on completed: err=%v, want ErrInvalidTransition", err)
 				}
-				if err := l.Abandon(ctx, keyDone, "nope"); !errors.Is(err, ErrInvalidTransition) {
+				if err := l.Abandon(ctx, keyDone, testWho(), "nope"); !errors.Is(err, ErrInvalidTransition) {
 					t.Fatalf("abandon completed: err=%v, want ErrInvalidTransition", err)
 				}
 				// abandoned rejects everything.
 				keyDead := EffectKey("tool.h", "sess", "dead")
-				if _, _, err := l.Claim(ctx, keyDead, metaFor("tool.h")); err != nil {
+				if _, _, err := l.Claim(ctx, keyDead, metaFor("tool.h"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if err := l.Abandon(ctx, keyDead, "dead"); err != nil {
+				if err := l.Abandon(ctx, keyDead, testWho(), "dead"); err != nil {
 					t.Fatalf("abandon: %v", err)
 				}
-				if err := l.RecordReceipt(ctx, keyDead, json.RawMessage(`{}`)); !errors.Is(err, ErrInvalidTransition) {
+				if err := l.RecordReceipt(ctx, keyDead, testWho(), json.RawMessage(`{}`)); !errors.Is(err, ErrInvalidTransition) {
 					t.Fatalf("record receipt on abandoned: err=%v, want ErrInvalidTransition", err)
 				}
-				if err := l.Complete(ctx, keyDead); !errors.Is(err, ErrInvalidTransition) {
+				if err := l.Complete(ctx, keyDead, testWho()); !errors.Is(err, ErrInvalidTransition) {
 					t.Fatalf("complete abandoned: err=%v, want ErrInvalidTransition", err)
 				}
-				if err := l.Abandon(ctx, keyDead, "again"); !errors.Is(err, ErrInvalidTransition) {
+				if err := l.Abandon(ctx, keyDead, testWho(), "again"); !errors.Is(err, ErrInvalidTransition) {
 					t.Fatalf("abandon abandoned: err=%v, want ErrInvalidTransition", err)
 				}
 				// receipted rejects RecordReceipt (already receipted).
 				keyRec := EffectKey("tool.h", "sess", "twice")
-				if _, _, err := l.Claim(ctx, keyRec, metaFor("tool.h")); err != nil {
+				if _, _, err := l.Claim(ctx, keyRec, metaFor("tool.h"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if err := l.RecordReceipt(ctx, keyRec, json.RawMessage(`{}`)); err != nil {
+				if err := l.RecordReceipt(ctx, keyRec, testWho(), json.RawMessage(`{}`)); err != nil {
 					t.Fatalf("first record receipt: %v", err)
 				}
-				if err := l.RecordReceipt(ctx, keyRec, json.RawMessage(`{}`)); !errors.Is(err, ErrInvalidTransition) {
+				if err := l.RecordReceipt(ctx, keyRec, testWho(), json.RawMessage(`{}`)); !errors.Is(err, ErrInvalidTransition) {
 					t.Fatalf("second record receipt: err=%v, want ErrInvalidTransition", err)
 				}
 			})
@@ -274,17 +278,17 @@ func TestLedgerConformance(t *testing.T) {
 					EffectKey("tool.i", "sess", "p3"),
 				}
 				for i, key := range pendingKeys {
-					if _, _, err := l.Claim(ctx, key, metaFor("tool.i")); err != nil {
+					if _, _, err := l.Claim(ctx, key, metaFor("tool.i"), testWho()); err != nil {
 						t.Fatalf("claim %d: %v", i, err)
 					}
 					// Ensure strictly increasing claimed_at ordering.
 					time.Sleep(2 * time.Millisecond)
 				}
 				// p1: leave claimed. p2: receipt it. p3: complete it.
-				if err := l.RecordReceipt(ctx, pendingKeys[1], json.RawMessage(`{"n":2}`)); err != nil {
+				if err := l.RecordReceipt(ctx, pendingKeys[1], testWho(), json.RawMessage(`{"n":2}`)); err != nil {
 					t.Fatalf("receipt p2: %v", err)
 				}
-				if err := l.Complete(ctx, pendingKeys[2]); err != nil {
+				if err := l.Complete(ctx, pendingKeys[2], testWho()); err != nil {
 					t.Fatalf("complete p3: %v", err)
 				}
 
@@ -320,7 +324,7 @@ func TestLedgerConformance(t *testing.T) {
 
 			t.Run("returned records are defensive copies", func(t *testing.T) {
 				key := EffectKey("tool.j", "sess", "step")
-				if _, _, err := l.Claim(ctx2(), key, metaFor("tool.j")); err != nil {
+				if _, _, err := l.Claim(ctx2(), key, metaFor("tool.j"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
 				first, err := l.Get(ctx2(), key)
@@ -359,7 +363,7 @@ func TestLedgerConformance(t *testing.T) {
 				granted := make(chan struct{}, goroutines)
 				for range goroutines {
 					wg.Go(func() {
-						ok, _, err := l.Claim(ctx2(), key, EffectMeta{Tool: "tool.race"})
+						ok, _, err := l.Claim(ctx2(), key, EffectMeta{Tool: "tool.race"}, testWho())
 						if err != nil {
 							t.Errorf("claim: %v", err)
 							return
@@ -395,7 +399,7 @@ func TestRun(t *testing.T) {
 			t.Run("fresh key executes and receipts", func(t *testing.T) {
 				key := EffectKey("run.a", "sess", "step")
 				receipt := json.RawMessage(`{"pushed":true}`)
-				got, reused, err := Run(ctx, l, key, metaFor("run.a"),
+				got, reused, err := Run(ctx, l, key, metaFor("run.a"), testWho(),
 					func(ctx context.Context) (json.RawMessage, error) { return receipt, nil })
 				if err != nil {
 					t.Fatalf("run: %v", err)
@@ -421,17 +425,17 @@ func TestRun(t *testing.T) {
 			t.Run("completed prior reuses receipt without executing", func(t *testing.T) {
 				key := EffectKey("run.b", "sess", "step")
 				priorReceipt := json.RawMessage(`{"first":true}`)
-				if _, _, err := l.Claim(ctx, key, metaFor("run.b")); err != nil {
+				if _, _, err := l.Claim(ctx, key, metaFor("run.b"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if err := l.RecordReceipt(ctx, key, priorReceipt); err != nil {
+				if err := l.RecordReceipt(ctx, key, testWho(), priorReceipt); err != nil {
 					t.Fatalf("receipt: %v", err)
 				}
-				if err := l.Complete(ctx, key); err != nil {
+				if err := l.Complete(ctx, key, testWho()); err != nil {
 					t.Fatalf("complete: %v", err)
 				}
 				executed := false
-				got, reused, err := Run(ctx, l, key, metaFor("run.b"),
+				got, reused, err := Run(ctx, l, key, metaFor("run.b"), testWho(),
 					func(ctx context.Context) (json.RawMessage, error) {
 						executed = true
 						return json.RawMessage(`{"second":true}`), nil
@@ -452,11 +456,11 @@ func TestRun(t *testing.T) {
 
 			t.Run("claimed prior owned by someone else does not execute", func(t *testing.T) {
 				key := EffectKey("run.c", "sess", "step")
-				if _, _, err := l.Claim(ctx, key, metaFor("run.c")); err != nil {
+				if _, _, err := l.Claim(ctx, key, metaFor("run.c"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
 				executed := false
-				_, _, err := Run(ctx, l, key, metaFor("run.c"),
+				_, _, err := Run(ctx, l, key, metaFor("run.c"), testWho(),
 					func(ctx context.Context) (json.RawMessage, error) {
 						executed = true
 						return json.RawMessage(`{}`), nil
@@ -477,14 +481,14 @@ func TestRun(t *testing.T) {
 
 			t.Run("receipted prior owned by someone else does not execute", func(t *testing.T) {
 				key := EffectKey("run.d", "sess", "step")
-				if _, _, err := l.Claim(ctx, key, metaFor("run.d")); err != nil {
+				if _, _, err := l.Claim(ctx, key, metaFor("run.d"), testWho()); err != nil {
 					t.Fatalf("claim: %v", err)
 				}
-				if err := l.RecordReceipt(ctx, key, json.RawMessage(`{}`)); err != nil {
+				if err := l.RecordReceipt(ctx, key, testWho(), json.RawMessage(`{}`)); err != nil {
 					t.Fatalf("receipt: %v", err)
 				}
 				executed := false
-				_, _, err := Run(ctx, l, key, metaFor("run.d"),
+				_, _, err := Run(ctx, l, key, metaFor("run.d"), testWho(),
 					func(ctx context.Context) (json.RawMessage, error) {
 						executed = true
 						return json.RawMessage(`{}`), nil
@@ -500,7 +504,7 @@ func TestRun(t *testing.T) {
 			t.Run("execute error propagates and record stays claimed", func(t *testing.T) {
 				key := EffectKey("run.e", "sess", "step")
 				boom := errors.New("provider exploded")
-				_, _, runErr := Run(ctx, l, key, metaFor("run.e"),
+				_, _, runErr := Run(ctx, l, key, metaFor("run.e"), testWho(),
 					func(ctx context.Context) (json.RawMessage, error) { return nil, boom })
 				if !errors.Is(runErr, boom) {
 					t.Fatalf("run err=%v, want the execute error in the chain", runErr)
@@ -522,7 +526,7 @@ func TestRun(t *testing.T) {
 
 			t.Run("nil receipt is an error", func(t *testing.T) {
 				key := EffectKey("run.f", "sess", "step")
-				_, _, err := Run(ctx, l, key, metaFor("run.f"),
+				_, _, err := Run(ctx, l, key, metaFor("run.f"), testWho(),
 					func(ctx context.Context) (json.RawMessage, error) { return nil, nil })
 				if err == nil {
 					t.Fatal("run with nil receipt: err=nil, want an error")
@@ -562,3 +566,146 @@ func contains(s, sub string) bool {
 }
 
 var _ = fmt.Sprintf // keep fmt import if unused by future edits
+
+// TestSecondClaimantCannotComplete pins issue 73: a resolve must match
+// the claimant that claimed the key. A second principal who knows the
+// key cannot Complete, Abandon, or RecordReceipt the first claimant's
+// pending effect. The owner still can.
+func TestSecondClaimantCannotComplete(t *testing.T) {
+	owner := Claimant{AgentID: "agent-a", SessionID: "sess-a"}
+	other := Claimant{AgentID: "agent-b", SessionID: "sess-b"}
+	ctx := context.Background()
+	for name, newLedger := range newTestLedgers(t) {
+		t.Run(name, func(t *testing.T) {
+			l := newLedger()
+			defer func() {
+				if err := l.Close(); err != nil {
+					t.Errorf("close ledger: %v", err)
+				}
+			}()
+			key := EffectKey("tool.claimant", "pin", name)
+			if _, _, err := l.Claim(ctx, key, metaFor("tool.claimant"), owner); err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			if err := l.Complete(ctx, key, other); !errors.Is(err, ErrClaimantMismatch) {
+				t.Fatalf("second claimant Complete: err=%v, want ErrClaimantMismatch", err)
+			}
+			if err := l.Abandon(ctx, key, other, "stolen"); !errors.Is(err, ErrClaimantMismatch) {
+				t.Fatalf("second claimant Abandon: err=%v, want ErrClaimantMismatch", err)
+			}
+			if err := l.RecordReceipt(ctx, key, other, json.RawMessage(`{"stolen":true}`)); !errors.Is(err, ErrClaimantMismatch) {
+				t.Fatalf("second claimant RecordReceipt: err=%v, want ErrClaimantMismatch", err)
+			}
+			rec, err := l.Get(ctx, key)
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+			if rec.State != StateClaimed {
+				t.Fatalf("state = %q after mismatched resolves, want still claimed", rec.State)
+			}
+			if got, ok := rec.ClaimantOf(); !ok || !got.Matches(owner) {
+				t.Fatalf("stored claimant = %+v ok=%v, want owner", got, ok)
+			}
+			if err := l.Complete(ctx, key, owner); err != nil {
+				t.Fatalf("owner Complete: %v", err)
+			}
+			rec, err = l.Get(ctx, key)
+			if err != nil {
+				t.Fatalf("get after owner complete: %v", err)
+			}
+			if rec.State != StateCompleted {
+				t.Fatalf("state = %q, want completed by owner", rec.State)
+			}
+			// A later Complete by the other principal is still a mismatch,
+			// not the idempotent success the owner gets.
+			if err := l.Complete(ctx, key, other); !errors.Is(err, ErrClaimantMismatch) {
+				t.Fatalf("second claimant re-Complete: err=%v, want ErrClaimantMismatch", err)
+			}
+			if _, _, err := l.Claim(ctx, EffectKey("tool.claimant", "empty", name), metaFor("tool.claimant"), Claimant{}); !errors.Is(err, ErrClaimantRequired) {
+				t.Fatalf("zero claimant claim: err=%v, want ErrClaimantRequired", err)
+			}
+		})
+	}
+}
+
+// TestLegacyUnclaimedFirstClaimWins pins the migration rule: a row with
+// no claimant cannot be resolved by a guess, and the first Claim adopts
+// it (granted stays false — the effect must not be re-executed).
+func TestLegacyUnclaimedFirstClaimWins(t *testing.T) {
+	ctx := context.Background()
+	owner := Claimant{AgentID: "adopter", SessionID: "sess-legacy"}
+	other := Claimant{AgentID: "intruder", SessionID: "sess-other"}
+	key := EffectKey("legacy", "row", "1")
+
+	t.Run("memory", func(t *testing.T) {
+		m := NewMemoryLedger()
+		m.records[key] = EffectRecord{
+			Key: key, State: StateClaimed, Tool: "legacy",
+			ClaimedAt: time.Now().UTC(),
+		}
+		if err := m.Complete(ctx, key, other); !errors.Is(err, ErrClaimantMismatch) {
+			t.Fatalf("complete legacy before adopt: %v, want ErrClaimantMismatch", err)
+		}
+		granted, prior, err := m.Claim(ctx, key, EffectMeta{Tool: "legacy"}, owner)
+		if err != nil {
+			t.Fatalf("adopt claim: %v", err)
+		}
+		if granted {
+			t.Fatal("legacy adopt granted=true, want false (do not re-execute)")
+		}
+		got, ok := Claimant{}, false
+		if prior != nil {
+			got, ok = prior.ClaimantOf()
+		}
+		if prior == nil || !prior.ClaimantSet || !ok || !got.Matches(owner) {
+			t.Fatalf("adopted prior claimant = %+v ok=%v, want owner", got, ok)
+		}
+		if err := m.Complete(ctx, key, other); !errors.Is(err, ErrClaimantMismatch) {
+			t.Fatalf("intruder complete after adopt: %v", err)
+		}
+		if err := m.Complete(ctx, key, owner); err != nil {
+			t.Fatalf("adopter complete: %v", err)
+		}
+	})
+
+	t.Run("sqlite", func(t *testing.T) {
+		sl, err := NewSQLiteLedger(filepath.Join(t.TempDir(), "effects.db"), testLogger())
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		defer func() {
+			if err := sl.Close(); err != nil {
+				t.Errorf("close: %v", err)
+			}
+		}()
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		if _, err := sl.db.ExecContext(ctx,
+			`INSERT INTO effects_ledger (key, state, claimed_at, tool) VALUES (?, 'claimed', ?, 'legacy')`,
+			key, now); err != nil {
+			t.Fatalf("insert legacy row: %v", err)
+		}
+		if err := sl.Complete(ctx, key, other); !errors.Is(err, ErrClaimantMismatch) {
+			t.Fatalf("complete legacy before adopt: %v, want ErrClaimantMismatch", err)
+		}
+		granted, prior, err := sl.Claim(ctx, key, EffectMeta{Tool: "legacy"}, owner)
+		if err != nil {
+			t.Fatalf("adopt claim: %v", err)
+		}
+		if granted {
+			t.Fatal("legacy adopt granted=true, want false")
+		}
+		if prior == nil || !prior.ClaimantSet {
+			t.Fatalf("adopted prior = %+v, want claimant set", prior)
+		}
+		got, ok := prior.ClaimantOf()
+		if !ok || !got.Matches(owner) {
+			t.Fatalf("adopted claimant = %+v ok=%v, want owner", got, ok)
+		}
+		if err := sl.Complete(ctx, key, other); !errors.Is(err, ErrClaimantMismatch) {
+			t.Fatalf("intruder complete after adopt: %v", err)
+		}
+		if err := sl.Complete(ctx, key, owner); err != nil {
+			t.Fatalf("adopter complete: %v", err)
+		}
+	})
+}

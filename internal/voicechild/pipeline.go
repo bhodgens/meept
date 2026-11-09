@@ -152,6 +152,12 @@ type pipeline struct {
 	// prompt frame) even when the VAD trips on the audio-pump goroutine
 	// a moment before the STT partial lands.
 	pendingInterrupt chan struct{}
+	// lastFinalAt (playMu) is when the STT session produced its most
+	// recent non-empty FINAL transcript. The local leg's RMS VAD trip is
+	// gated on it (see rmsBargeInCheck): loudness alone is echo/noise
+	// evidence, not speech evidence, so a trip without a recent final
+	// must not cancel an in-flight answer.
+	lastFinalAt time.Time
 
 	// cancel cancels the pipeline's internal context (workers, streams).
 	cancel context.CancelFunc
@@ -309,7 +315,26 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 		if tr.Text == "" {
 			continue // Deepgram silence results produce no frame
 		}
-		if !tr.Final {
+		if tr.Final {
+			// Speech evidence for the local leg's RMS barge-in gate
+			// (see rmsBargeInCheck): whisper heard actual words.
+			p.playMu.Lock()
+			p.lastFinalAt = time.Now()
+			speaking := p.speaking
+			p.playMu.Unlock()
+			// C5 for the local leg's whisper adapter: whisper emits
+			// FINALS only (no partials), and the RMS gate now suppresses
+			// loudness-only trips. A final arriving while playback is
+			// live must therefore carry the interrupt itself - stop the
+			// old playback BEFORE the new prompt's reply can start, or
+			// the old say plays over the new turn's answer. Same
+			// exactly-once latch as the partial path.
+			if speaking && p.noteBargeIn() {
+				if err := p.child.emitInterrupt(p.ctx, p.ccid); err != nil {
+					p.logger.Error("voicechild: emit interrupt", "err", err, "call_id", p.ccid)
+				}
+			}
+		} else {
 			// Barge-in first (C5): interrupt stops playback before the
 			// partial preview prompt flows. noteBargeIn enforces
 			// exactly-once per barge-in and reports false when idle or
@@ -697,6 +722,13 @@ func rmsChunkOver(b []byte, threshold int) bool {
 // transcript consumer to wait for it before any prompt, preserving the C5
 // "interrupt strictly before the partial's prompt frame" order even when
 // the VAD trip and an STT partial race on different goroutines.
+//
+// STT evidence gate (defect 2026-11-08): a trip only EMITS when the STT
+// session produced a non-empty final transcript within
+// rmsSttEvidenceWindow (tracked as lastFinalAt by consumeTranscripts).
+// Loudness without recent STT evidence is echo/noise — it must never
+// cancel an in-flight answer or stop playback — so those trips are
+// suppressed with a Debug log and latch/playback state untouched.
 func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 	if !p.local || p.bargeInRms <= 0 {
 		return // phone legs keep the STT-partial trigger; VAD never runs
@@ -743,6 +775,29 @@ func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 	if echoSum > 0 && windowTotal*echoSamples*100 <= echoSum*windowSamples*rmsEchoMarginPct {
 		p.playMu.Unlock()
 		return // looks like self-echo: latch stays armed, keep listening
+	}
+	// STT evidence gate (defect 2026-11-08): the trip must be evidence of
+	// new SPEECH, not just loud sound. Only emit the interrupt when a
+	// non-empty final transcript arrived within rmsSttEvidenceWindow —
+	// the phone leg's trigger (STT partials) inherently carries that
+	// evidence; the RMS trip does not, so the gate supplies it. A
+	// trip without recent evidence is echo/noise: suppress entirely
+	// (latch stays armed, playback and any in-flight answer keep
+	// running); the window accumulators were already reset above, so
+	// a fresh window must re-earn the trip from scratch.
+	// Latch semantics are unchanged: only emission is gated; the next say
+	// re-arms the latch exactly as before.
+	if p.lastFinalAt.IsZero() || time.Since(p.lastFinalAt) > rmsSttEvidenceWindow {
+		p.logger.Debug("voicechild: rms barge-in suppressed (no recent stt final)",
+			"call_id", p.ccid,
+			"since_last_final_ms", func() int64 {
+				if p.lastFinalAt.IsZero() {
+					return -1
+				}
+				return time.Since(p.lastFinalAt).Milliseconds()
+			}())
+		p.playMu.Unlock()
+		return
 	}
 	// Latch trip under playMu (noteBargeIn cannot be called re-entrantly:
 	// it would deadlock on playMu). Same field transitions as
@@ -797,6 +852,18 @@ func (p *pipeline) awaitPendingInterrupt() {
 // headroom absorbs room gain variation while a caller talking over the
 // agent's own voice clears it.
 const rmsEchoMarginPct = 130
+
+// rmsSttEvidenceWindow bounds how recently the STT session must have
+// produced a non-empty FINAL transcript before an RMS VAD trip may emit
+// an interrupt (defect 2026-11-08: stale echo reference + a speaking
+// operator near speakers kept tripping the RMS guard while the answer
+// generated, and every trip cancelled the in-flight turn via
+// HandleBargeIn -> cancelPipeline). Loudness is echo/noise evidence, not
+// SPEECH evidence; real barge-in is "the user is actually talking", and
+// whisper then emits a final within seconds. 10 s comfortably covers a
+// final landing after the VAD window (whisper emits finals every few
+// seconds of continuous speech) while suppressing pure echo/noise trips.
+const rmsSttEvidenceWindow = 10 * time.Second
 
 // noteOutgoingChunk records the energy of one chunk written to the .out
 // socket as the echo reference for rmsBargeInCheck (local leg only — a

@@ -349,11 +349,15 @@
         "auto_start": true,
         "auto_stop_on_exit": true,
         "pid_file": "~/.meept/run/llama-general.pid",
-        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1", "--jinja", "--reasoning-budget", "0", "--ctx-size", "65536", "--cache-reuse", "256"],
-        // 65536 (was 16384): the model supports 128K (max_position_embeddings);
-        // 16K dates from the MLX era and the 2026-09-18 e2e exhausted it via
-        // guard-nudge + escalation churn (10x llama.cpp 500 "Context size has
-        // been exceeded"). 64K = 4x headroom; KV-cache cost is ~2-4 GB resident.
+        "spawn_command": ["llama-server", "--model", "${MODEL_PATH}", "--port", "8080", "--host", "127.0.0.1", "--jinja", "--reasoning-budget", "0", "--ctx-size", "32768", "--cache-reuse", "256"],
+        // --ctx-size 32768 (next to --jinja / --reasoning-budget 0) is the
+        // validated load ceiling for this host class: M2 Ultra 64GB with 3
+        // resident llama-servers, 8B MoE Q4. 16384 was exhausted by the
+        // 2026-09-18 e2e (guard-nudge churn, llama.cpp 500 "Context size has
+        // been exceeded"; prompts peak ~31K). 65536 does not finish loading
+        // inside the 6-minute health gate. Keep this equal to context_limit
+        // below. The daemon fails boot when --ctx-size exceeds context_limit;
+        // do not bump either without a measured justification.
         // KV-cache behavior: --cache-prompt is ON by default, so llama.cpp
         // reuses the previous call's KV cache rather than rebuilding it per
         // request. --cache-reuse 256 additionally enables chunk-level KV
@@ -390,7 +394,7 @@
           "tool_choice": "required",
           "input_cost": 0.0,
           "output_cost": 0.0,
-          "context_limit": 65536,
+          "context_limit": 32768,
           "max_output": 4096,
           // temperature 0.1 per LiquidAI's model-card sampling for LFM2.5
           // tool calling (temp 0.1 / top_k 50 / rep 1.1). Live A/B

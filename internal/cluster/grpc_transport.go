@@ -171,6 +171,19 @@ func (t *GRPCTransport) SetEventPublisher(p EventPublisher) {
 	}
 }
 
+// dispatchSigner returns the event publisher when it can sign dispatch
+// jobs (*GossipEngine). A publisher that is not a signer yields nil,
+// and Submit leaves the job unsigned.
+func (t *GRPCTransport) dispatchSigner() dispatchSigner {
+	if t == nil {
+		return nil
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	s, _ := t.eventPublisher.(dispatchSigner)
+	return s
+}
+
 // SetTLSConfig sets the TLS configuration for mTLS. When nil, insecure mode
 // is used (dev/test only). Spec §6: mTLS over WireGuard.
 func (t *GRPCTransport) SetTLSConfig(c *tls.Config) {
@@ -399,6 +412,7 @@ func (t *GRPCTransport) DialPeer(ctx context.Context, nodeID, addr string) (*Pee
 			addr:   dialAddr,
 			conn:   conn,
 			logger: t.logger,
+			signer: t.dispatchSigner(),
 		}
 
 		t.peersMu.Lock()
@@ -497,6 +511,13 @@ func (t *GRPCTransport) RegisterPeerAddr(nodeID, addr string) {
 // PeerClient — thin wrapper over grpc.ClientConn for all four services
 // =====================================================================
 
+// dispatchSigner signs an outbound DispatchJob with the local node's
+// ed25519 key. *GossipEngine implements it. Nil means the job is sent
+// as the caller built it.
+type dispatchSigner interface {
+	SignDispatchJob(job *DispatchJob) error
+}
+
 // PeerClient wraps a gRPC connection to a peer daemon and exposes typed
 // methods for each service RPC.
 type PeerClient struct {
@@ -504,6 +525,7 @@ type PeerClient struct {
 	addr   string
 	conn   *grpc.ClientConn
 	logger *slog.Logger
+	signer dispatchSigner
 }
 
 // Close releases the underlying gRPC connection.
@@ -661,8 +683,17 @@ func (pc *PeerClient) Prepare(ctx context.Context, ref WorkspaceRef) (WorkspaceR
 
 // ----- DispatchService -----
 
-// Submit sends a dispatch job to the peer.
+// Submit sends a dispatch job to the peer. When a signer is wired and
+// the job is unsigned, it is signed with the local node key before the
+// RPC. An already-signed job is not re-signed. A missing signer leaves
+// the job unchanged; the receiver still fail-closes on unsigned jobs
+// when signatures are required.
 func (pc *PeerClient) Submit(ctx context.Context, job DispatchJob) (DispatchJobAck, error) {
+	if pc.signer != nil && len(job.Signature) == 0 {
+		if err := pc.signer.SignDispatchJob(&job); err != nil {
+			return DispatchJobAck{}, err
+		}
+	}
 	var ack DispatchJobAck
 	err := pc.conn.Invoke(ctx, "/cluster.DispatchService/Submit", &job, &ack, jsonCallOption())
 	return ack, err
