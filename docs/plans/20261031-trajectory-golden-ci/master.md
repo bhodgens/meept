@@ -266,7 +266,8 @@ run `go test -p 2 ./internal/eval/... ` and `make e2e-fast` (or at minimum
 `make e2e-fast-area AREA=trajectory-golden`) plus `make e2e-affected`;
 run the line-number corruption check (`grep -rn '^\s*[0-9]\+|' internal/
 eval/trajectorydiff e2e/suites/trajectory-golden` = zero matches); verify
-manifest has 70 suites with trajectory-golden present. Gaps: re-dispatch
+manifest has 70 suites with trajectory-golden present (count corrected
+2026-11-08: 95 suites, trajectory-golden present). Gaps: re-dispatch
 the failing child with contract fixes (uncommitted). Pass: normalize
 formatting (gofmt), commit integration changes, set children COMPLETE.
 

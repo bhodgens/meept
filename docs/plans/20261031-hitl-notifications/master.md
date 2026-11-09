@@ -51,7 +51,9 @@ This tree delivers four approved workstreams:
     gate_command, autonomous + sampled post-hoc spot-check) and report
     completion rate, wall-clock, interrupt count, intervention precision,
     and per-risk-class escape rate, grounded in the auditlog hash chain,
-    the permission table RuleSource, and acp.permission.decision events.
+    the permission table RuleSource, and acp.permission.requested/.resolved
+    bus events (topic names corrected 2026-11-08; was acp.permission.decision -
+    no such topic exists; see internal/bus/acp_topics.go).
 
 Integration with the in-flight activity-views tree
 (docs/plans/20261030-agent-activity-audit-views/, approved): the deep-link
@@ -88,7 +90,7 @@ userInfo (sessionID key already present) and opens the app. Fourth, the
 regime harness (internal/eval) drives the same scripted hermetic scenario
 under three regime configurations and computes metrics from ground-truth
 sources that already exist (auditlog chain, permission table RuleSource,
-acp.permission.decision bus events). The e2e leaf wires everything into a
+acp.permission.requested/.resolved bus events). The e2e leaf wires everything into a
 hermetic suite + manifest entry.
 
 ## Interface Contracts
@@ -211,7 +213,8 @@ type RegimeMetrics struct {
 // Report: HitlRegimeReport{Scenarios []RegimeMetrics, GeneratedAt time.Time}
 // serialized as JSON + a markdown summary. Ground truth (ONLY these):
 // auditlog hash-chain records, the permission table RuleSource column,
-// and acp.permission.decision bus events.
+// and acp.permission.requested/.resolved bus events (topic names
+// corrected 2026-11-08; was acp.permission.decision - no such topic).
 ```
 
 ## Child Document Index
@@ -331,7 +334,7 @@ Output: APPROVED or a list of specific gaps.
 | R4 | 120 s fail-closed timeout honored | 01 T2/T3 (relay stays timeout authority); C3 note | e2e scenario 1 (late answer -> "no pending request") |
 | R5 | checkpointed pause-resume: persist pending gate + turn re-entry; out-of-band approval; TurnParker precedent; never a second park path | 02-checkpointed-gates.md T1-T3; C5 | e2e scenario 2 |
 | R6 | meept://session/<id> deep links + menubar tap-through + web fallback; feature-gated on the /activity route | 03-deep-links.md T1-T4; C6 | 03 dart tests + e2e scenario 3 |
-| R7 | regime evaluation harness: three regimes, completion/wall-clock/interrupt/precision/escape metrics, ground truth from auditlog + RuleSource + acp.permission.decision | 04-regime-evaluation.md T1-T4; C7 | 04 unit tests + e2e scenario 4 |
+| R7 | regime evaluation harness: three regimes, completion/wall-clock/interrupt/precision/escape metrics, ground truth from auditlog + RuleSource + acp.permission.requested/.resolved | 04-regime-evaluation.md T1-T4; C7 | 04 unit tests + e2e scenario 4 |
 | R8 | hermetic e2e suite hitl-notifications + manifest entry; scripted-human pattern (step-pipeline precedent) | 05-e2e.md T1-T3 | make e2e-fast-area AREA=hitl-notifications |
 
 ## Completion Tracking Table
@@ -393,13 +396,23 @@ it against returned tests in-session and applies the delta protocol
 | F1 | Slack signature verification (good/bad/stale/replay) | 01 T3, C3 | TestInteractionsRejectsBadSignature / RejectsStaleTimestamp / AcceptsFreshTimestamp / VerifiesRawBody - internal/comm/slack/interactions_test.go | hitl-notifications:1 | VALIDATED |
 | F2 | Button action -> relay resolve round trip with slack:<uid> attribution | 01 T3-T4, C3, C4 | TestInteractionsResolvesWithSlackApprover, RejectsDisallowedUser - internal/comm/slack/interactions_test.go | hitl-notifications:1 | VALIDATED |
 | F3 | Fail-closed: late/expired action gets "no pending request", permission times out denied | 01 T3, R4 | TestInteractionsUnknownRequestStill200 - internal/comm/slack/interactions_test.go | hitl-notifications:1 | VALIDATED |
-| F4 | Gate park persists + resumes out-of-band (plan and goal gates) | 02 T1-T3, C5 | TestGateParkPersistsKindScoped / PersistsThroughSQLiteStore / PlanResumeAtMostOnce / GoalRestartReArmLateApproval / KindIsolation - internal/agent/gate_park_test.go; wiring: internal/daemon/gate_park_wiring_test.go | hitl-notifications:2 | VALIDATED |
+| F4 | Gate park persists + resumes out-of-band (plan and goal gates) | 02 T1-T3, C5 | TestGateParkPersistsKindScoped / PersistsThroughSQLiteStore / PlanResumeAtMostOnce / GoalRestartReArmLateApproval / KindIsolation - internal/agent/gate_park_test.go; wiring: internal/daemon/gate_park_wiring_test.go | hitl-notifications:2 | VALIDATED (DEVIATION: goal-gate park/resume landing 2026-11-08, see delta log) |
 | F5 | Deep link parse + feature gate + web fallback URL | 03 T1-T3, C6 | 20 flutter deep-link tests - ui/flutter_ui/test/core/deep_link_test.dart + deep_link_nav_test.dart | hitl-notifications:3 | VALIDATED |
 | F6 | Menubar tap opens deep link (userInfo sessionID -> URL) | 03 T2 | Swift handler landed (menubar/MeeptMenuBar/Services/NotificationManager.swift tap-through + GuiLauncher.swift NSWorkspace); no Swift test harness - grammar verified via the dart-mirrored deep_link_test.dart, as the plan anticipated | n/a - no Swift test harness; handler delegates parsing to pinned C6 grammar | VALIDATED |
 | F7 | Regime metrics computed from ground-truth sources | 04 T1-T3, C7 | TestMetrics* - internal/eval/hitl/metrics_test.go; harness TestHarness* + TestRegimeOverlayMapping - harness_test.go; TestReport* - report_test.go | hitl-notifications:4 | VALIDATED |
 | F8 | Manifest + path_map entry for new packages | 05 T3 | n/a - manifest JSON | e2e/manifest.json suite hitl-notifications (path_map + suite entry); suite at e2e/suites/hitl-notifications/ | VALIDATED |
 
-Delta log: (empty - entries appended as date, feature ID, direction, reason)
+Delta log:
+- 2026-11-08, F4, DEVIATION disclosed: at leaf-02 validation the goal-gate half
+  of F4 existed ONLY as tests (TestGateParkGoalRestartReArmLateApproval in
+  internal/agent/gate_park_test.go drives ParkGate/ResumeByKey with GateKind
+  "goal" directly); the production wiring (internal/daemon/gate_park_wiring.go)
+  parks on the plan.submitting bus event with GateKind "plan" only and resumes
+  on plan.approved - no daemon path ever created a goal-kind park row. The
+  goal-gate park/resume wiring lands 2026-11-08 (fix agent, this wave); until
+  then F4's goal-gate coverage is test-only.
+
+Prior format note: entries appended as date, feature ID, direction, reason
 
 ## Open Questions
 
