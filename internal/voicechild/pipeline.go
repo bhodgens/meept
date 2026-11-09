@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,11 +154,25 @@ type pipeline struct {
 	// a moment before the STT partial lands.
 	pendingInterrupt chan struct{}
 	// lastFinalAt (playMu) is when the STT session produced its most
-	// recent non-empty FINAL transcript. The local leg's RMS VAD trip is
-	// gated on it (see rmsBargeInCheck): loudness alone is echo/noise
-	// evidence, not speech evidence, so a trip without a recent final
-	// must not cancel an in-flight answer.
+	// recent DISPATCHED non-empty FINAL transcript. The local leg's RMS
+	// VAD trip is gated on it (see rmsBargeInCheck): loudness alone is
+	// echo/noise evidence, not speech evidence, so a trip without a
+	// recent final must not cancel an in-flight answer. The trip
+	// CONSUMES the evidence (one-shot, defect 2026-11-09): an
+	// authorized trip zeroes this field, so a second trip needs a NEW
+	// final — a stale stamp must never re-authorize cancelling the
+	// very turn the final already dispatched. Non-speech-marker and
+	// duplicate finals never stamp it (see nonSpeechTranscript and
+	// lastFinalText).
 	lastFinalAt time.Time
+	// lastFinalText (playMu) is the trimmed text of the most recent
+	// DISPATCHED final transcript. whisper repeats the same final when
+	// the caller re-voices an utterance's tail; an exact duplicate
+	// inside the evidence window is that SAME utterance, not new
+	// speech, so consumeTranscripts drops it (defect 2026-11-09: the
+	// repeat re-stamped lastFinalAt and re-authorized stale barge-in
+	// trips).
+	lastFinalText string
 
 	// cancel cancels the pipeline's internal context (workers, streams).
 	cancel context.CancelFunc
@@ -302,6 +317,32 @@ func (p *pipeline) openTranscriptSession(stt STTProvider, attempts int) {
 	}
 }
 
+// nonSpeechTranscript reports whether a FINAL transcript is one of
+// whisper's no-speech markers rather than caller words (defect
+// 2026-11-09, call local-2d84c384fd93f447: three "[BLANK_AUDIO]" finals
+// and a "(sighs)" were dispatched as user prompts and the employee
+// answered silence). The match is on the TRIMMED text, case-insensitive,
+// against a fixed marker set; whitespace-only text counts as non-speech.
+// consumeTranscripts drops these finals entirely (no prompt frame, no
+// RMS barge-in evidence stamp). Partials never route through this —
+// they stay preview-only prompts and the daemon never starts a turn on
+// one.
+func nonSpeechTranscript(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if t == "" {
+		return true
+	}
+	switch t {
+	case "[blank_audio]", "<blank_audio>", "[blank audio]", "<blank audio>",
+		"(sighs)", "(sigh)",
+		"(laughing)", "(laughs)",
+		"(no speech)", "[no speech]",
+		"(background noise)", "(background noises)", "[background noise]", "[background noises]":
+		return true
+	}
+	return false
+}
+
 // consumeTranscripts turns STT transcripts into C1 prompt frames: a final
 // transcript is last:true (starts an employee turn), a partial is last:false
 // (preview only), and empty-text silence results emit nothing (C5). A
@@ -316,10 +357,34 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 			continue // Deepgram silence results produce no frame
 		}
 		if tr.Final {
+			trimmed := strings.TrimSpace(tr.Text)
+			// Non-speech filter (defect 2026-11-09): whisper emits its
+			// no-speech markers as FINAL transcripts ("[BLANK_AUDIO]",
+			// "(sighs)"). Those are not user prompts — dispatching them
+			// made the employee answer silence. Drop them entirely: no
+			// prompt frame, no speech-evidence stamp, no dedupe state.
+			// Partials keep passing through as previews (the daemon
+			// never starts a turn on one).
+			if nonSpeechTranscript(trimmed) {
+				continue
+			}
 			// Speech evidence for the local leg's RMS barge-in gate
 			// (see rmsBargeInCheck): whisper heard actual words.
+			// Exact-duplicate dedupe (defect 2026-11-09): whisper
+			// repeats the same final when the caller re-voices an
+			// utterance's tail. That repeat is the SAME utterance, not
+			// new speech: dropping it here is the single choke point —
+			// the daemon talk loop never sees a duplicate final prompt,
+			// so no daemon-side guard is needed (the repeat cannot
+			// dispatch a second turn or re-authorize a stale RMS trip).
 			p.playMu.Lock()
+			if trimmed == p.lastFinalText && !p.lastFinalAt.IsZero() &&
+				time.Since(p.lastFinalAt) <= rmsSttEvidenceWindow {
+				p.playMu.Unlock()
+				continue
+			}
 			p.lastFinalAt = time.Now()
+			p.lastFinalText = trimmed
 			speaking := p.speaking
 			p.playMu.Unlock()
 			// C5 for the local leg's whisper adapter: whisper emits
@@ -729,6 +794,10 @@ func rmsChunkOver(b []byte, threshold int) bool {
 // Loudness without recent STT evidence is echo/noise — it must never
 // cancel an in-flight answer or stop playback — so those trips are
 // suppressed with a Debug log and latch/playback state untouched.
+// The evidence is ONE-SHOT (defect 2026-11-09): an authorized trip
+// clears lastFinalAt, so re-tripping inside the same 10 s tail needs a
+// NEW final; the final that authorized the first trip already dispatched
+// the very turn the trip cancelled.
 func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 	if !p.local || p.bargeInRms <= 0 {
 		return // phone legs keep the STT-partial trigger; VAD never runs
@@ -805,6 +874,16 @@ func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 	// speaking drops so playback stops presenting as live (R3).
 	p.interrupted = true
 	p.speaking = false
+	// Evidence is CONSUMED (defect 2026-11-09, one-shot): the final
+	// that authorized this trip already dispatched its own turn — the
+	// live in-flight answer this trip is cancelling. Leaving the stamp
+	// set let a second sustained-loud window re-trip off the SAME stale
+	// evidence inside the 10 s tail (five barge-in kills in call
+	// local-2d84c384fd93f447). Zeroing lastFinalAt means a second trip
+	// needs a NEW final from consumeTranscripts; genuine new caller
+	// speech re-stamps within seconds of talking, so real barge-ins
+	// keep working.
+	p.lastFinalAt = time.Time{}
 	// C5 guard: the write below is in flight; the transcript consumer
 	// waits on this channel before emitting any prompt frame.
 	done := make(chan struct{})
