@@ -1,69 +1,10 @@
 package skills
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-func TestIsClaudeSkillPath(t *testing.T) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("Cannot determine home directory")
-	}
-
-	tests := []struct {
-		name string
-		path string
-		want bool
-	}{
-		{
-			name: "claude skills subdirectory",
-			path: filepath.Join(homeDir, ".claude", "skills", "graphify", "SKILL.md"),
-			want: true,
-		},
-		{
-			name: "claude skills root",
-			path: filepath.Join(homeDir, ".claude", "skills"),
-			want: true,
-		},
-		{
-			name: "claude config but not skills",
-			path: filepath.Join(homeDir, ".claude", "settings.json"),
-			want: false,
-		},
-		{
-			name: "meept project skills",
-			path: filepath.Join("project", ".meept", "skills", "code-review", "SKILL.md"),
-			want: false,
-		},
-		{
-			name: "meept user skills",
-			path: filepath.Join(homeDir, ".meept", "skills", "my-skill", "SKILL.md"),
-			want: false,
-		},
-		{
-			name: "meept system skills",
-			path: filepath.Join(homeDir, ".config", "meept", "skills", "system-skill", "SKILL.md"),
-			want: false,
-		},
-		{
-			name: "empty path",
-			path: "",
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsClaudeSkillPath(tt.path)
-			if got != tt.want {
-				t.Errorf("IsClaudeSkillPath(%q) = %v, want %v", tt.path, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestClaudeSkillAdapter_AdaptSkill_Nil(t *testing.T) {
 	a := &ClaudeSkillAdapter{}

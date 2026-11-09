@@ -183,25 +183,6 @@ func TestOutcomeString(t *testing.T) {
 	}
 }
 
-// TestParseOutcome verifies string-to-Outcome conversion.
-func TestParseOutcome(t *testing.T) {
-	tests := []struct {
-		input string
-		want  Outcome
-	}{
-		{"positive", OutcomePositive},
-		{"negative", OutcomeNegative},
-		{"neutral", OutcomeNeutral},
-		{"unknown", OutcomeNeutral},
-		{"", OutcomeNeutral},
-	}
-
-	for _, tc := range tests {
-		if got := ParseOutcome(tc.input); got != tc.want {
-			t.Errorf("ParseOutcome(%q) = %d, want %d", tc.input, got, tc.want)
-		}
-	}
-}
 
 // TestUsageTrackerImpl_RecordsAndReturnsLowMatchQueries verifies the Pass D
 // data source: RecordLowMatchQuery upserts accumulate count, and

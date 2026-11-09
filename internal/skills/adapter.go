@@ -2,7 +2,6 @@
 package skills
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -67,26 +66,4 @@ func (a *ClaudeSkillAdapter) AdaptSkill(skill *Skill) *Skill {
 	}
 
 	return skill
-}
-
-
-// IsClaudeSkillPath returns true if the path is under a ~/.claude/skills/
-// directory (expanded or literal).
-func IsClaudeSkillPath(path string) bool {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = ""
-	}
-
-	candidates := []string{
-		filepath.Join(homeDir, ".claude", "skills"),
-	}
-
-	for _, prefix := range candidates {
-		if prefix != "" && strings.HasPrefix(path, prefix) {
-			return true
-		}
-	}
-
-	return false
 }

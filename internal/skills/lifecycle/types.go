@@ -45,19 +45,6 @@ func (o Outcome) String() string {
 	}
 }
 
-// ParseOutcome converts a string to an Outcome. Returns OutcomeNeutral for
-// unrecognized strings (defensive — never fails).
-func ParseOutcome(s string) Outcome {
-	switch s {
-	case "positive":
-		return OutcomePositive
-	case "negative":
-		return OutcomeNegative
-	default:
-		return OutcomeNeutral
-	}
-}
-
 // UsageStats holds aggregate usage statistics for a single skill.
 type UsageStats struct {
 	SkillName      string    `json:"skill_name"`
