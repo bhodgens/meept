@@ -342,7 +342,7 @@ func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []Chat
 	payload := c.buildPayload(messages, effCfg, chatOpts, true)
 	resp, err := c.doRequestWithEmptyRetry(ctx, payload, effCfg, chatOpts.sessionID, onDelta)
 	if err != nil {
-		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error(), time.Since(start).Milliseconds())
+		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error(), time.Since(start).Milliseconds(), nil)
 		return nil, err
 	}
 
@@ -364,7 +364,7 @@ func (c *CodexClient) ChatWithDeltaCallback(ctx context.Context, messages []Chat
 	}
 
 	// Per-provider/per-agent token accounting (metrics.db llm_calls).
-	c.recordUsageStore(effCfg, chatOpts, resp.Usage, false, "", time.Since(start).Milliseconds())
+	c.recordUsageStore(effCfg, chatOpts, resp.Usage, false, "", time.Since(start).Milliseconds(), resp)
 
 	return resp, nil
 }

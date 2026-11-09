@@ -307,8 +307,12 @@ type codexResponsesResponse struct {
 // or observer. Leaf 01 (llm-hop-tracing): the chatOptions trace scope
 // (WithTraceID) rides into the record and a missing span ID mints per call
 // -- see Client.recordUsageStore.
-func (c *CodexClient) recordUsageStore(cfg *ModelConfig, chatOpts *chatOptions, usage TokenUsage, isErr bool, errMsg string, latencyMs int64) {
+func (c *CodexClient) recordUsageStore(cfg *ModelConfig, chatOpts *chatOptions, usage TokenUsage, isErr bool, errMsg string, latencyMs int64, resp *Response) {
 	traceID, spanID := traceScopeOf(chatOpts)
+	// Serving-tier attribution (llm-serving-tiers TIER-1), same
+	// extraction as Client.recordUsageStore; nil response = error path /
+	// tier feature off → disabled-path defaults ("" / false / -1).
+	tier, tierDegraded, tierDepth := tierMetadataFromResponse(resp)
 	observer := c.llmCallObserverFn()
 	if c.usageStore == nil && observer == nil {
 		return
@@ -334,14 +338,17 @@ func (c *CodexClient) recordUsageStore(cfg *ModelConfig, chatOpts *chatOptions, 
 			SessionID: sessionID,
 			// Codex usage payloads decode input/output/cached only;
 			// ReasoningTokens stays 0 (not reported).
-			TokensSent:   usage.PromptTokens,
-			TokensRecv:   usage.CompletionTokens,
-			TokensCached: usage.CachedTokens,
-			IsError:      isErr,
-			ErrorMessage: errMsg,
-			LatencyMs:    latencyMs,
-			TraceID:      traceID,
-			SpanID:       spanID,
+			TokensSent:      usage.PromptTokens,
+			TokensRecv:      usage.CompletionTokens,
+			TokensCached:    usage.CachedTokens,
+			IsError:         isErr,
+			ErrorMessage:    errMsg,
+			LatencyMs:       latencyMs,
+			LLMTier:         tier,
+			LLMTierDegraded: tierDegraded,
+			LLMTierDepth:    tierDepth,
+			TraceID:         traceID,
+			SpanID:          spanID,
 		}
 		if c.usageStore != nil {
 			c.usageStore.RecordLLMCall(record)
@@ -395,7 +402,7 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 	payload := c.buildPayload(messages, effCfg, chatOpts, false)
 	resp, err := c.doRequestWithEmptyRetry(ctx, payload, effCfg, chatOpts.sessionID, nil)
 	if err != nil {
-		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error(), time.Since(start).Milliseconds())
+		c.recordUsageStore(effCfg, chatOpts, TokenUsage{}, true, err.Error(), time.Since(start).Milliseconds(), nil)
 		return nil, err
 	}
 
@@ -417,7 +424,7 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 	}
 
 	// Per-provider/per-agent token accounting (metrics.db llm_calls).
-	c.recordUsageStore(effCfg, chatOpts, resp.Usage, false, "", time.Since(start).Milliseconds())
+	c.recordUsageStore(effCfg, chatOpts, resp.Usage, false, "", time.Since(start).Milliseconds(), resp)
 
 	return resp, nil
 }

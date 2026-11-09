@@ -259,6 +259,9 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     error_message   TEXT NOT NULL DEFAULT '',
     latency_ms      INTEGER NOT NULL DEFAULT 0,
     ttft_ms         INTEGER NOT NULL DEFAULT -1,
+    llm_tier        TEXT NOT NULL DEFAULT '',
+    llm_tier_degraded BOOLEAN NOT NULL DEFAULT 0,
+    llm_tier_depth  INTEGER NOT NULL DEFAULT -1,
     duration        REAL NOT NULL DEFAULT 0,
     trace_id        TEXT NOT NULL DEFAULT '',
     span_id         TEXT NOT NULL DEFAULT ''
@@ -531,6 +534,24 @@ ALTER TABLE llm_calls ADD COLUMN span_id TEXT NOT NULL DEFAULT '';`,
 			Name:    "llm_calls.ttft_ms",
 			SQL:     "ALTER TABLE llm_calls ADD COLUMN ttft_ms INTEGER NOT NULL DEFAULT -1",
 			Guard:   columnMissingGuard("llm_calls", "ttft_ms"),
+		},
+		{
+			// Serving-tier attribution (llm-serving-tiers TIER-1): the
+			// per-call tier columns mirroring the metrics_live llm_tier*
+			// tags. llm_tier is the canonical "provider/model-id" that
+			// served ('' = tier feature off / disabled path),
+			// llm_tier_degraded is depth > 0, llm_tier_depth is the
+			// degradations from the primary with -1 = "no tier signal on
+			// this call" (the disabled-path sentinel; a tier-enabled
+			// primary call writes 0). Existing rows get the disabled-path
+			// defaults. Fresh databases get the columns inline in the
+			// CREATE script, making the guard a no-op there.
+			Version: 10,
+			Name:    "llm_calls tier columns",
+			SQL: `ALTER TABLE llm_calls ADD COLUMN llm_tier TEXT NOT NULL DEFAULT '';
+ALTER TABLE llm_calls ADD COLUMN llm_tier_degraded BOOLEAN NOT NULL DEFAULT 0;
+ALTER TABLE llm_calls ADD COLUMN llm_tier_depth INTEGER NOT NULL DEFAULT -1;`,
+			Guard: migrate.ColumnsMissingGuard("llm_calls", "llm_tier", "llm_tier_degraded", "llm_tier_depth"),
 		},
 	})
 	if err != nil {
@@ -817,10 +838,23 @@ type LLMCallRecord struct {
 	// leaf 04). -1 = not measured (non-streaming calls, cache hits,
 	// errors); the schema default keeps legacy/unmeasured rows at -1 so
 	// aggregates can exclude them explicitly.
-	TTFTMS     int64
-	DurationMs float64 // wall-clock duration (duplicate of LatencyMs kept for schema parity)
-	TraceID    string  // 32-char lowercase hex; "" when no WithTraceID scope
-	SpanID     string  // 16-char lowercase hex; fresh per call
+	TTFTMS int64
+	// LLMTier carries the serving-tier attribution (llm-serving-tiers
+	// TIER-1): the canonical "provider/model-id" that served the call,
+	// mirroring the metrics_live llm_tier tag. "" = the tier feature
+	// was off for this call (the disabled path) — legacy rows and
+	// metadata-less responses read "".
+	LLMTier string
+	// LLMTierDegraded is true when the serving member was NOT the
+	// primary (depth > 0). Always false on disabled-path rows.
+	LLMTierDegraded bool
+	// LLMTierDepth is the number of degradations from the primary;
+	// -1 = no tier signal on this call (disabled path / metadata-less
+	// response), so a tier-enabled primary call writes 0, never -1.
+	LLMTierDepth int
+	DurationMs   float64 // wall-clock duration (duplicate of LatencyMs kept for schema parity)
+	TraceID      string  // 32-char lowercase hex; "" when no WithTraceID scope
+	SpanID       string  // 16-char lowercase hex; fresh per call
 }
 
 // RecordLLMCall appends one LLM call to llm_calls and updates the
@@ -839,16 +873,32 @@ func (s *Store) RecordLLMCall(record LLMCallRecord) {
 	if record.DurationMs == 0 {
 		record.DurationMs = float64(record.LatencyMs)
 	}
+	// Serving-tier invariant (llm-serving-tiers TIER-1): an empty llm_tier
+	// IS the disabled path, so depth/degraded must carry the disabled
+	// sentinels (-1 / false), never Go's zero values — depth 0 is reserved
+	// for a tier-ENABLED primary call and a 0 on a ''-tier row would be
+	// indistinguishable from one. Normalizing here keeps every writer
+	// (clients pass the metadata-less -1 explicitly; hand-built records
+	// need not remember) consistent with the schema defaults legacy rows
+	// are backfilled with.
+	if record.LLMTier == "" {
+		record.LLMTierDepth = -1
+		record.LLMTierDegraded = false
+	}
 	_, err := s.db.Exec(
 		`INSERT INTO llm_calls
 			(timestamp, provider, model_id, agent_id, session_id, tokens_sent,
 			 tokens_received, tokens_cached, reasoning_tokens, cache_creation_tokens,
-			 error, error_message, latency_ms, ttft_ms, duration, trace_id, span_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 error, error_message, latency_ms, ttft_ms,
+			 llm_tier, llm_tier_degraded, llm_tier_depth,
+			 duration, trace_id, span_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts.UTC().Format(time.RFC3339), record.Provider, record.ModelID, record.AgentID,
 		record.SessionID, record.TokensSent, record.TokensRecv, record.TokensCached,
 		record.ReasoningTokens, record.CacheCreationTokens, isErr,
-		record.ErrorMessage, record.LatencyMs, record.TTFTMS, record.DurationMs,
+		record.ErrorMessage, record.LatencyMs, record.TTFTMS,
+		record.LLMTier, record.LLMTierDegraded, record.LLMTierDepth,
+		record.DurationMs,
 		record.TraceID, record.SpanID,
 	)
 	if err != nil {
@@ -912,6 +962,13 @@ type LLMUsageRow struct {
 	// "not measured" sentinel rows never drag the average down. -1 when
 	// no measured call exists in the window.
 	AvgTTFTMs float64 `db:"avg_ttft_ms" json:"avg_ttft_ms"`
+	// TierCalls counts only tier-attributed calls (llm_tier != '');
+	// disabled-path and legacy rows (llm_tier = '') stay excluded so the
+	// count means "calls the serving-tier layer attributed".
+	TierCalls int64 `db:"tier_calls" json:"tier_calls"`
+	// TierDegradedCalls counts tier-attributed calls where the serving
+	// member was NOT the primary (llm_tier_degraded = 1).
+	TierDegradedCalls int64 `db:"tier_degraded_calls" json:"tier_degraded_calls"`
 }
 
 // QueryLLMCallUsage aggregates llm_calls over a window. When groupByAgent
@@ -933,13 +990,17 @@ func (s *Store) QueryLLMCallUsage(from, to time.Time, groupByAgent bool) ([]LLMU
 	// sentinel means "not measured" (non-streaming, cache hit, error),
 	// not "instant", so unmeasured rows must never drag the average
 	// toward 0. COALESCE keeps the -1 no-measurements contract.
+	// tier_calls / tier_degraded_calls count only tier-attributed rows
+	// (llm_tier != ''); the '' default = disabled path / legacy row.
 	query := fmt.Sprintf(`SELECT provider, %s, COUNT(*) AS calls,
 			SUM(error) AS errors,
 			SUM(tokens_sent) AS tokens_sent,
 			SUM(tokens_received) AS tokens_received,
 			SUM(tokens_cached) AS tokens_cached,
 			AVG(latency_ms) AS avg_latency_ms,
-			COALESCE(AVG(CASE WHEN ttft_ms >= 0 THEN ttft_ms END), -1) AS avg_ttft_ms
+			COALESCE(AVG(CASE WHEN ttft_ms >= 0 THEN ttft_ms END), -1) AS avg_ttft_ms,
+			SUM(CASE WHEN llm_tier != '' THEN 1 ELSE 0 END) AS tier_calls,
+			SUM(CASE WHEN llm_tier != '' AND llm_tier_degraded THEN 1 ELSE 0 END) AS tier_degraded_calls
 		FROM llm_calls
 		WHERE timestamp >= ? AND timestamp <= ?
 		GROUP BY %s

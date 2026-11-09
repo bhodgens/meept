@@ -27,8 +27,17 @@ func TestConfigLoads(t *testing.T) {
 	if cfg.Model != "local-gguf/lfm-8b-gguf" {
 		t.Errorf("model = %q, want local-gguf/lfm-8b-gguf", cfg.Model)
 	}
-	if cfg.SmallModel != "local/lfm-1.2b-q8" {
-		t.Errorf("small_model = %q, want local/lfm-1.2b-q8", cfg.SmallModel)
+	// 2026-11-09: the bundled MLX-era `local` provider was deleted — as a base
+	// it collided with the modern user overlay (a `local` provider whose
+	// lifecycle is llama-server --ctx-size 32768 keeps the bundled stale
+	// MLX-era context_limits through the per-model-key merge and trips the
+	// F-D8 ctx-size boot gate on every repo-root daemon boot). Its two model
+	// ids retired with it: lfm-8b-mlx-4bit (weights duplicated on
+	// local-gguf), lfm-1.2b-q8 (a GGUF path declared on an mlx_lm runtime
+	// that never served it). The fast/small slot moved to the 1.2B-class
+	// entry that actually resolves: local-mlx/lfm-combined-sft.
+	if cfg.SmallModel != "local-mlx/lfm-combined-sft" {
+		t.Errorf("small_model = %q, want local-mlx/lfm-combined-sft", cfg.SmallModel)
 	}
 	if cfg.ClassifierModel != "classifier" {
 		t.Errorf("classifier_model = %q, want classifier", cfg.ClassifierModel)
@@ -51,8 +60,11 @@ func TestConfigLoads(t *testing.T) {
 	if len(classifierAlias.Models) == 0 || classifierAlias.Models[0] != "local-gguf/lfm-8b-gguf" {
 		t.Errorf("classifier alias primary = %q, want local-gguf/lfm-8b-gguf", classifierAlias.Models[0])
 	}
-	if len(classifierAlias.Models) < 2 || classifierAlias.Models[1] != "local/lfm-8b-mlx-4bit" {
-		t.Errorf("classifier alias alternate = %v, want local/lfm-8b-mlx-4bit at [1]", classifierAlias.Models)
+	// 2026-11-09: the classifier alternate slot was the deleted bundled `local`
+	// MLX provider's lfm-8b-mlx-4bit; the A/B alternate is now the surviving
+	// local-mlx SFT entry.
+	if len(classifierAlias.Models) < 2 || classifierAlias.Models[1] != "local-mlx/lfm-combined-sft" {
+		t.Errorf("classifier alias alternate = %v, want local-mlx/lfm-combined-sft at [1]", classifierAlias.Models)
 	}
 
 	// Verify coder/planner/analyst aliases (operator decision, 2026-09-26;
@@ -78,39 +90,29 @@ func TestConfigLoads(t *testing.T) {
 		}
 	}
 
-	// Verify local provider has lfm-8b-mlx-4bit model (2026-09-06: the
-	// GGUF F16 general model was retired in favor of the MLX 4-bit one).
-	localProvider, ok := cfg.Providers["local"]
-	if !ok {
-		t.Fatal("local provider not found")
+	// The bundled MLX-era `local` provider is gone (deletion rationale in the
+	// small_model pin above and the tombstone comment in config/models.json5).
+	// Pin its ABSENCE — like the zai pin below — so a stale copy cannot sneak
+	// back in and re-arm the boot-gate collision for every repo-root daemon
+	// boot, and pin that no alias/member still references it.
+	if _, ok := cfg.Providers["local"]; ok {
+		t.Error("bundled `local` provider present, want deleted (2026-11-09: its stale MLX-era context_limits merge under a modern user llama.cpp lifecycle override and trip the F-D8 ctx-size boot gate)")
 	}
-
-	lfm8b, ok := localProvider.Models["lfm-8b-mlx-4bit"]
-	if !ok {
-		t.Fatal("lfm-8b-mlx-4bit model not found in local provider")
-	}
-	// 2026-10-24: the shipped config roots model paths at
-	// ${MEEPT_MODELS_DIR:-$HOME/.meept/models} — the layout the
-	// make deps-models downloader writes. LoadProvidersConfig expands env
-	// vars at load time, so the expected value is built from the same
-	// default the config declares (MEEPT_MODELS_DIR wins when exported).
-	modelsDir := os.Getenv("MEEPT_MODELS_DIR")
-	if modelsDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			t.Fatalf("cannot resolve HOME for the models-dir default: %v", err)
+	for id, alias := range cfg.ModelAliases {
+		for _, m := range alias.Models {
+			if p, _, _ := strings.Cut(m, "/"); p == "local" {
+				t.Errorf("alias %s still references deleted bundled provider via member %q", id, m)
+			}
 		}
-		modelsDir = home + "/.meept/models"
 	}
-	wantMlxPath := modelsDir + "/LiquidAI/LFM2.5-8B-A1B-MLX-4bit"
-	if lfm8b.Name != wantMlxPath {
-		t.Errorf("lfm-8b-mlx-4bit name = %q, want %q", lfm8b.Name, wantMlxPath)
-	}
-	if lfm8b.MaxConcurrency != 2 {
-		t.Errorf("lfm-8b-mlx-4bit max_concurrency = %d, want 2", lfm8b.MaxConcurrency)
-	}
-	if lfm8b.ContextLimit != 16384 {
-		t.Errorf("lfm-8b-mlx-4bit context_limit = %d, want 16384", lfm8b.ContextLimit)
+	for _, slot := range []struct{ name, ref string }{
+		{"model", cfg.Model}, {"small_model", cfg.SmallModel},
+		{"classifier_model", cfg.ClassifierModel}, {"summarizer_model", cfg.SummarizerModel},
+		{"vision_model", cfg.VisionModel}, {"extract_model", cfg.ExtractModel},
+	} {
+		if p, _, _ := strings.Cut(slot.ref, "/"); p == "local" && slot.ref != "" {
+			t.Errorf("%s slot still references deleted bundled provider: %q", slot.name, slot.ref)
+		}
 	}
 
 	// Verify the general driver is the llama.cpp endpoint, and that it can
