@@ -9,7 +9,6 @@ package employee
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"time"
 
@@ -108,67 +107,3 @@ func isAuthorizedApprover(callerID string, escalatesTo []string) bool {
 	return slices.Contains(escalatesTo, callerID)
 }
 
-// isAuthorizedAmmender checks if the caller is authorized to propose
-// constitution amendments for the given employee.
-//
-//lint:ignore U1000 Used by handler.go for constitution amendment validation
-func isAuthorizedAmmender(callerID string, employeeID string, escalatesTo []string, selfProposeAllowed bool) bool {
-	// User can always amend
-	if callerID == "user" {
-		return true
-	}
-	// Self-propose allowed and caller is the employee
-	if selfProposeAllowed && callerID == employeeID {
-		return true
-	}
-	// Caller is in escalates_to
-	return slices.Contains(escalatesTo, callerID)
-}
-
-// requireCaller extracts and validates the caller from context.
-// Returns error if no caller is present or if caller is not authorized
-// for the specified employee operation.
-//
-//lint:ignore U1000 Used by handler.go for operation-level authorization
-func requireCaller(ctx context.Context, emp *Employee, operation string) (*CallerInfo, error) {
-	caller := CallerFromContext(ctx)
-	if caller == nil {
-		return nil, fmt.Errorf("unauthenticated: API key required for %s", operation)
-	}
-
-	// Check authorization based on employee's escalates_to
-	if !isAuthorizedForOperation(caller.UserID, emp.ID, emp.Constitution.EscalatesTo, operation) {
-		return nil, fmt.Errorf("unauthorized: caller %q cannot perform %s on employee %q", caller.UserID, operation, emp.ID)
-	}
-
-	return caller, nil
-}
-
-// isAuthorizedForOperation checks if a caller can perform an operation on an employee.
-//
-//lint:ignore U1000 Used by handler.go for operation-level authorization
-func isAuthorizedForOperation(callerID, employeeID string, escalatesTo []string, operation string) bool {
-	// "user" can perform all operations
-	if callerID == "user" {
-		return true
-	}
-
-	// Some operations (read-only) may be allowed for escalates_to entries
-	switch operation {
-	case "read", "list":
-		// Allow read access to escalates_to entries
-		return slices.Contains(escalatesTo, callerID)
-
-	case "approve", "reject":
-		// Plan approval requires being in escalates_to
-		return slices.Contains(escalatesTo, callerID)
-
-	case "amend":
-		// Amendments handled separately via isAuthorizedAmmender
-		return false
-
-	default:
-		// All other operations (pause, resume, trigger, delete) require "user"
-		return false
-	}
-}
