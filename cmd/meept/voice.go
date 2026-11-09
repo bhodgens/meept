@@ -449,6 +449,68 @@ func classifyMicDeath(micErr error, micBytes int64) error {
 	return fmt.Errorf("%w: %v", ErrMicNoAudio, micErr)
 }
 
+// liveMaxPendingAudioBytes bounds the not-yet-played backlog the CLI
+// live loop keeps between the .out socket and the speakers (leaf 01,
+// recallable playback). The old loop let the sink's gap heuristic buffer
+// a whole utterance before the first handoff, so seconds of audio stayed
+// queued behind a barge-in and talked over the new answer (live defect,
+// transcript local-2d84c384fd93f447). The bound is the leaf's ~150 ms
+// ceiling: 16000 samples/s x 2 bytes x 150 ms = 4800 B (the daemon paces
+// 640 B per 20 ms, so 7.5 chunks). drainLiveSpeaker flushes the sink as
+// soon as its backlog reaches the bound; the steady-state overshoot is
+// one read (liveSpeakerReadChunk) on top. The hard recall of what the
+// player ALREADY holds is tts.AudioPlayer's Pause (Play pauses the
+// previous burst; the Player seam's Clear/Stop pauses the current one) -
+// that is what kills the tail. Socket backpressure then stalls the
+// daemon outbound loop, which stops writing at the barge-in latch
+// anyway.
+const liveMaxPendingAudioBytes = 16000 * 2 * 150 / 1000 // 4800 B = 150 ms @ L16@16k mono
+
+// liveSpeakerReadChunk is one paced daemon chunk (L16@16k, 20 ms):
+// sizing the drain read this way keeps the backlog overshoot past the
+// bound at most 20 ms of audio.
+const liveSpeakerReadChunk = 640
+
+// drainLiveSpeaker pumps the .out socket into the sink with the bounded
+// lookahead above: writes accumulate in the sink, and once the backlog
+// reaches liveMaxPendingAudioBytes the burst is handed off (Play pauses
+// the previous burst, so only the newest ~150 ms ever plays ahead). On
+// socket end the final pending burst is flushed before reporting. Runs
+// until read error / EOF / a sink write error; the error goes to done
+// (buffered: the reader selects on it, so this never blocks on exit).
+func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
+	buf := make([]byte, liveSpeakerReadChunk)
+	for {
+		n, rerr := r.Read(buf)
+		if n > 0 {
+			if _, werr := s.Write(buf[:n]); werr != nil {
+				done <- werr
+				return
+			}
+			if s.Pending() >= liveMaxPendingAudioBytes {
+				if ferr := s.Flush(); ferr != nil {
+					done <- ferr
+					return
+				}
+			}
+		}
+		if rerr != nil {
+			// EOF / connection closed = daemon ended the call: normal.
+			// Flush the tail burst BEFORE reporting the end (the
+			// per-read flush is gone - live defect 2026-11-09 jitter;
+			// the bound flush above is the only mid-stream handoff).
+			// Flush on an empty buffer is a no-op, so this is safe on
+			// a zero-byte EOF.
+			if ferr := s.Flush(); ferr != nil {
+				done <- ferr
+				return
+			}
+			done <- nil
+			return
+		}
+	}
+}
+
 func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 	cap, err := voice.NewRawMicCapture("", "")
 	if err != nil {
@@ -481,30 +543,11 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 		micBytes = n
 		done <- err
 	}()
-	// speaker: out socket -> sink (raw PCM bursts -> oto). No per-read
-	// flush: the gap heuristic closes bursts on real sentence breaks, and
-	// the final flush happens in the exit paths (a per-read Flush wrapped
-	// every paced chunk in its own WAV header - the 2026-11-09 jitter).
-	go func() {
-		buf := make([]byte, 8*1024)
-		for {
-			n, rerr := outConn.Read(buf)
-			if n > 0 {
-				if _, werr := sink.Write(buf[:n]); werr != nil {
-					done <- werr
-					return
-				}
-			}
-			if rerr != nil {
-				if ferr := sink.Flush(); ferr != nil {
-					done <- ferr
-					return
-				}
-				done <- nil // daemon closed the pair: call ended
-				return
-			}
-		}
-	}()
+	// speaker: out socket -> sink (raw PCM bursts -> oto), bounded
+	// lookahead (leaf 01). No unbounded per-utterance buffering: the old
+	// gap-only flush let seconds of audio queue behind a barge-in and
+	// talk over the new answer.
+	go drainLiveSpeaker(outConn, sink, done)
 	// First finished side wins; the mic side runs through
 	// classifyMicDeath so a zero-byte capture death can never pass as a
 	// clean hangup again.

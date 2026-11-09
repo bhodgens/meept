@@ -11,9 +11,11 @@ package voice
 // child paces chunks continuously while speaking and the barge-in clear
 // opens a real gap, so the gap heuristic bounds a burst to one spoken
 // sentence-group. Clear() drops the pending burst (barge-in: never play
-// the interrupted tail). Accepted limitation (spec notes it): oto's Play
-// runs a burst to completion - Clear stops the NEXT burst, not the one
-// already handed to the driver.
+// the interrupted tail) AND silences the burst already handed to the
+// player (leaf 01, recallable playback: tts.AudioPlayer retains the live
+// oto player and its Stop pauses it, so the old tail stops within ~20 ms
+// instead of playing out under the new answer - the talk-over defect of
+// transcript local-2d84c384fd93f447).
 //
 // WHY RAW PCM (not per-burst WAV headers): the players are raw-PCM sinks
 // (oto v3 plays bytes at the context rate, parsing NO headers; the file
@@ -24,8 +26,11 @@ package voice
 // nested RIFF headers (live defect 2026-11-09, whisper heard "(buzzing)").
 // The pre-amendment per-read Flush in the CLI drain loops made EVERY
 // 640-byte paced chunk its own header-wrapped burst (stride 684); the
-// CLI loops now flush only on stream end, leaving the gap heuristic to
-// bound bursts to sentence groups.
+// CLI loops no longer flush per read. File mode flushes only on the gap
+// heuristic and at stream end (byte-compatible output); live mode bounds
+// the not-yet-played backlog to ~150 ms and flushes at the bound (leaf
+// 01, recallable playback - an unbounded backlog kept talking over the
+// new answer after a barge-in).
 
 import (
 	"bytes"
@@ -193,19 +198,22 @@ func NewOtoPlayer() *OtoPlayer {
 	return &OtoPlayer{inner: tts.NewAudioPlayer(tts.PlaybackConfig{SampleRate: MicSampleRate})}
 }
 
-// Play hands one burst WAV to the oto player.
+// Play hands one burst to the oto player. The previous burst, if still
+// playing, is paused by the retained player (leaf 01: one live burst at
+// a time - the old tail never plays out under the new burst).
 func (p *OtoPlayer) Play(burst []byte) error { return p.inner.Play(burst) }
 
-// Clear is a no-op: oto v3 plays a handed-off burst to completion
-// (the documented accepted limitation in the SpeakerSink contract).
+// Clear silences the current burst: tts.AudioPlayer.Stop pauses the live
+// oto player (leaf 01, recallable playback). Idempotent; safe before any
+// Play (no retained burst = no-op).
 func (p *OtoPlayer) Clear() { _ = p.inner.Stop() }
 
 // Close suspends the audio driver.
 func (p *OtoPlayer) Close() { _ = p.inner.Close() }
 
 // Player is the speaker seam (leaf 08: tts.AudioPlayer satisfies it;
-// tests inject fakes). Clear drops any pending burst; Close releases
-// the device.
+// tests inject fakes). Clear drops any pending burst and silences the
+// one playing; Close releases the device.
 type Player interface {
 	Play(burst []byte) error
 	Clear()
@@ -266,11 +274,19 @@ func (s *SpeakerSink) Flush() error {
 	return s.player.Play(burst)
 }
 
-// Clear drops the pending burst (barge-in: the interrupted tail never
-// plays). A burst already handed to the player is the documented
-// accepted limitation (oto plays it out).
+// Pending reports the bytes buffered since the last burst handoff - the
+// not-yet-played backlog. Live-mode readers use it to bound their
+// lookahead (leaf 01: cmd/meept/voice.go drainLiveSpeaker never lets the
+// sink hold a whole utterance, so a barge-in tail is at most ~150 ms of
+// queued audio instead of seconds).
+func (s *SpeakerSink) Pending() int { return s.buf.Len() }
+
+// Clear drops the pending burst and silences the burst already handed
+// to the player (leaf 01: the oto Player's Clear pauses the live player,
+// so neither the queued tail nor the playing head survives a barge-in).
 func (s *SpeakerSink) Clear() {
 	s.buf.Reset()
+	s.lastWrite = time.Time{}
 	if s.player != nil {
 		s.player.Clear()
 	}

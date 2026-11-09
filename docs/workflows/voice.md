@@ -124,7 +124,11 @@ meept voice local --employee eve --label desk
 Your mic is captured through ffmpeg (avfoundation, raw s16le 16 kHz
 mono) and replies play through the speaker. Talk over the employee to
 barge in - the local leg detects your speech by RMS level
-(`local.barge_in_rms`). Ctrl-C ends the call cleanly (`voice.local.end`
+(`local.barge_in_rms`). The barge-in SILENCES the speaker: the queued
+tail is dropped and the burst already playing is paused within ~20 ms
+(recallable playback), and live mode keeps at most ~150 ms of
+not-yet-played audio ahead of the speakers, so the old answer never
+talks over the new one. Ctrl-C ends the call cleanly (`voice.local.end`
 fires before exit, so the registry slot and call row are released
 exactly once). The first live capture on macOS triggers the standard
 system mic-permission prompt for the terminal app; grant it once.
