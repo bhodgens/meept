@@ -382,6 +382,22 @@ COMPLETE):
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 
 Delta log: [date, feature ID, direction, one-line reason]
+- 2026-11-08, bookkeeping reconciliation, note: the tree's e2e tier is green as
+  recorded; the master suite-count era ("70 suites") is stale - the manifest now
+  carries 95 suites. Recorded as a dated correction, not a gate change.
+- 2026-11-08, F3/F5, KNOWN-GAP caveat 1 (RecoverStaleTasks row state): the
+  writer keys run_started/run_closed per step-job round, so RecoverStaleTasks's
+  spare set (journalReclaimableTasks over OpenRuns) can miss a multi-round
+  turn's parked round; that turn is not journal-reclaimable, the queue reclaim
+  re-runs the job, and the sweep may still mark the task failed
+  (state='failed'). Disclosed in docs/workflows/turn-journal.md and the e2e
+  manifest suite note; mirrors that disclosure here so the master carries it.
+- 2026-11-08, F5, KNOWN-GAP caveat 2 (multi-round OpenRuns): OpenRuns groups by
+  turn_id and yields ONE row per turn (newest run_started payload), so a
+  multi-round turn with multiple close rows can hide its still-open round from
+  rehydrate - Rehydrate resumes the turn at most once per round it can see,
+  and the unseen round falls back to the queue reclaim path. Same root shape
+  as caveat 1; no code change in this reconciliation.
 
 ## Frozen Documents
 

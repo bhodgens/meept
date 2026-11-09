@@ -16,6 +16,9 @@ func Install() error {
 	if err := installBin("./cmd/meept", "meept"); err != nil {
 		return err
 	}
+	if err := installBin("./cmd/meept-voice", "meept-voice"); err != nil {
+		return err
+	}
 	if err := installBin("./cmd/gendoc", "gendoc"); err != nil {
 		return err
 	}

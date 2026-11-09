@@ -67,10 +67,10 @@ Statuses: PENDING | DELTA | VALIDATED
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-tests.md | PENDING | 0 | |
-| 01-frontmatter.md | PENDING | 0 | |
-| 02-user-groups.md | PENDING | 0 | |
-| 03-mutation-gate.md | PENDING | 0 | |
+| 00T-tests.md | COMPLETE | 1 | 2026-11-08 reconciliation: was PENDING; gate landed as 1db4d8ed (see parent master completion table). Gate suite green with parent 00T. |
+| 01-frontmatter.md | COMPLETE | 1 | 2026-11-08 reconciliation: was PENDING; landed 99ac3e5a (frontmatter writer w/ parse round-trip + atomic write). |
+| 02-user-groups.md | COMPLETE | 1 | 2026-11-08 reconciliation: was PENDING; landed 63ba5d51 (users.json5 backstop stage, admin-exempt per C5). |
+| 03-mutation-gate.md | COMPLETE | 1 | 2026-11-08 reconciliation: was PENDING; landed 360d1c35 (groups.* RPC + C5 write gate; F3/F4 GREEN). |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

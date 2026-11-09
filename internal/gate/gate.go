@@ -37,7 +37,8 @@ const DefaultGateTimeoutSeconds = 300
 //nolint:revive // package-qualified name (gate.GateConfig) is intentional; package name matches domain
 type GateConfig struct {
 	// Command is the shell command run in the employee's workspace. Empty
-	// means no gate (legacy).
+	// means no gate (legacy) UNLESS Type is GateTypeApproval (human signoff
+	// gate: the command is not run; a human must approve the gate).
 	Command string `json:"command"`
 	// TimeoutSeconds kills the gate command after this many seconds.
 	// Zero/negative means DefaultGateTimeoutSeconds (300).
@@ -47,6 +48,40 @@ type GateConfig struct {
 	// from JSON5/TOML should default this to true explicitly (a plain bool
 	// cannot distinguish unset from false in Go).
 	SkipWhenUnchanged bool `json:"skip_when_unchanged"`
+	// Type selects the gate kind (audit HITL-1). Empty or "command" is the
+	// legacy shell-command gate. "approval" is a HUMAN-approval gate: the
+	// goal loop parks the turn through the gate checkpoint parker
+	// (agent.GateParkData, GateKind "goal") and resumes only when an
+	// operator approves (agents.goals.approve_gate). An approval gate never
+	// shells out.
+	Type string `json:"type,omitempty"`
+}
+
+// Gate type discriminators for GateConfig.Type.
+const (
+	// GateTypeCommand is the legacy shell-command gate (empty Type
+	// normalizes to this).
+	GateTypeCommand = "command"
+	// GateTypeApproval is the human-approval gate (audit HITL-1): parks
+	// the goal turn pending operator signoff instead of running a shell
+	// command.
+	GateTypeApproval = "approval"
+)
+
+// IsApproval reports whether the gate config selects the human-approval
+// gate kind (audit HITL-1). Empty Type defaults to the command gate.
+func (c GateConfig) IsApproval() bool {
+	return c.Type == GateTypeApproval
+}
+
+// EffectiveCommand returns the shell command that applies to this gate
+// config: empty for an approval gate (approval gates never shell out) even
+// when a command string is present in the JSON, the command otherwise.
+func (c GateConfig) EffectiveCommand() string {
+	if c.IsApproval() {
+		return ""
+	}
+	return c.Command
 }
 
 // timeout returns the effective timeout.

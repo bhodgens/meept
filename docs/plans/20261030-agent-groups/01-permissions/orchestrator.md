@@ -75,10 +75,10 @@ Statuses: PENDING | DELTA | VALIDATED
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-tests.md | PENDING | 0 | |
-| 01-fence-stage.md | PENDING | 0 | |
-| 02-decision-audit.md | PENDING | 0 | |
-| 03-delete-engine.md | PENDING | 0 | |
+| 00T-tests.md | COMPLETE | 1 | 2026-11-08 reconciliation: was PENDING; gate landed as d3ea88ea (see parent master completion table). Gate suite green with parent 00T. |
+| 01-fence-stage.md | COMPLETE | 1 | 2026-11-08 reconciliation: was PENDING; landed 7897037b (central FenceStage + per-session fence + RootPath race killed). |
+| 02-decision-audit.md | COMPLETE | 1 | 2026-11-08 reconciliation: was PENDING; landed b2ea6357 (RuleSource stamping + C2 decision log). |
+| 03-delete-engine.md | COMPLETE | 0 | 2026-11-08 reconciliation: was PENDING; SUPERSEDED per D3 re-decision (2026-10-31, Option A): Engine stays, wired as live G1 pipeline via sibling #78; #77 closed as "wired, not deleted". No commit (scope cancelled). |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

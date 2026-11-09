@@ -148,6 +148,11 @@ type Store interface {
 	// SetEmployeeID persists the explicitly bound employee on a session
 	// (goal-completion follow-up #5). An empty employeeID clears it.
 	SetEmployeeID(sessionID, employeeID string) error
+	// SetPlanMode persists the per-session plan-mode collaboration flag
+	// (dsh DSH-9c) so the toggle survives a daemon restart. It backs the
+	// PlanModeController's PlanModePersistence seam; the durable read side
+	// is Session.PlanMode via Get/List.
+	SetPlanMode(sessionID string, on bool) error
 
 	// F-04 FIX: Allow per-session fence override for --nofence CLI flag.
 	SetNoFence(sessionID string, noFence bool) error

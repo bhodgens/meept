@@ -98,6 +98,35 @@ func delegateCall(agentID, message string) harness.ToolCall {
 	return harness.ToolCall{Name: "delegate_task", Arguments: `{"agent_id":"` + agentID + `","message":"` + message + `"}`}
 }
 
+// forkDelegateCall is a delegate_task call requesting transcript inheritance
+// (delegate_context: full — the DSH-1 knob).
+func forkDelegateCall(agentID, message string) harness.ToolCall {
+	return harness.ToolCall{Name: "delegate_task", Arguments: `{"agent_id":"` + agentID + `","message":"` + message + `","delegate_context":"full"}`}
+}
+
+// userTexts returns every user-role message text the fake LLM has observed,
+// concatenated. Used to assert the fork child's first LLM call carried (or
+// did not carry) the parent's completed-turn content.
+func userTexts(f *harness.FakeLLM) string {
+	var sb strings.Builder
+	for _, body := range f.Requests() {
+		msgs, _ := body["messages"].([]any)
+		for _, m := range msgs {
+			msg, ok := m.(map[string]any)
+			if !ok {
+				continue
+			}
+			if role, _ := msg["role"].(string); role == "user" {
+				if c, _ := msg["content"].(string); c != "" {
+					sb.WriteString(c)
+					sb.WriteString("\n")
+				}
+			}
+		}
+	}
+	return sb.String()
+}
+
 // TestT1_AsyncSpawnChildHandle (T1, F1, contract B1): delegate_task spawn
 // returns a child handle with child_id and status running; a settlement
 // later arrives on agent.delegate.result carrying the final response.
@@ -287,4 +316,188 @@ func TestT7_DescriptorColdResume(t *testing.T) {
 	if !strings.Contains(reply, "RESUME-OK") {
 		t.Fatalf("cold resume did not complete the child: %s", reply)
 	}
+}
+
+// TestT8_ForkSeedGate (DSH-1 + DSH-9b): delegate_context is the per-agent
+// fork-seed knob. A parent turn completes a turn mentioning the seed marker
+// ("Remember the code FJQX92 for later."), then forks two children:
+//   - writer-fork-full, whose AGENT.md sets delegate_context: full — its
+//     first LLM request carries the parent marker (the seeded completed-turn
+//     prefix, in-flight turn excluded) and the fork preamble;
+//   - the default coder (delegate_context unset = task) — its request never
+//     sees the parent marker: the fork request degraded to a fresh brief.
+//
+// The two children differ ONLY in the knob (writer-fork-full is pre-boot
+// patched into the scratch roster). The fake LLM records every request, so
+// the assertions read the REAL wire payloads the children produced — never
+// mocks. The turn keeps the parent loop alive (a sleeping shell call) so the
+// async children's first LLM calls land before the turn's context cancels.
+func TestT8_ForkSeedGate(t *testing.T) {
+	const parentMarker = "FJQX92"
+	const fullMarker = "FORK-FULL-OK"
+	const taskMarker = "FORK-TASK-OK"
+
+	s := harness.Start(t,
+		harness.WithPreBootHook(func(st *harness.Stack) error {
+			// Grant the chat agent the delegation controls + a shell tool
+			// for the keep-alive call (registered name: shell) (same grant seam the other scenarios
+			// use).
+			chatSpec := filepath.Join(st.MeeptHome, "agents", "chat", "AGENT.md")
+			data, err := os.ReadFile(chatSpec)
+			if err != nil {
+				return err
+			}
+			patched := strings.Replace(string(data),
+				"additional_tools:\n",
+				"additional_tools:\n  - subagent_send_message\n  - subagent_interrupt\n  - subagent_list_children\n  - workflow\n  - shell_execute\n", 1)
+			patched = strings.Replace(patched, "can_delegate: false", "can_delegate: true", 1)
+			if patched == string(data) {
+				return errors.New("chat AGENT.md has no additional_tools block / can_delegate:false to patch")
+			}
+			if err := os.WriteFile(chatSpec, []byte(patched), 0o644); err != nil {
+				return err
+			}
+
+			// The full-context child: a writer variant whose ONLY difference
+			// from the task-scope coder is delegate_context: full. Distinct
+			// id + name keeps the fake-LLM child scripts unambiguous
+			// (SystemPromptContains anchors on the agent NAME).
+			fullSpec := "---\nid: writer-fork-full\nname: Fork Full Specialist\nrole: executor\ndescription: full-context fork child for the delegate-seam fork gate scenario\ncan_delegate: false\ndelegate_context: full\nadditional_tools:\n  - file_read\n  - tool_view\nmax_iterations: 10\ntimeout_seconds: 300\n---\n\nYou complete writing tasks precisely.\n"
+			dir := filepath.Join(st.MeeptHome, "agents", "writer-fork-full")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(fullSpec), 0o644)
+		}),
+	)
+	s.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"pinned chat for delegate-seam fork gate"}`)
+	s.RegisterProject(t, "fork-gate-e2e")
+	sessionID := s.CreateSession(t, "fork-gate-test", s.ProjectDir)
+
+	// Child scripts keyed on the child system prompts, so both children
+	// settle deterministically regardless of seed content.
+	s.Fake.Script(harness.And(
+		harness.IsExecutorRequest(),
+		harness.SystemPromptContains("Fork Full Specialist"),
+	), harness.TextResponse(fullMarker))
+	scriptChild(s, taskMarker, taskMarker)
+
+	// Parent turn 1: complete a turn carrying the seed marker.
+	s.Fake.SetChatText("the marker is noted")
+	s.ChatTurn(t, sessionID,
+		"Remember the code "+parentMarker+" for later. Just acknowledge briefly.",
+		5*time.Minute)
+
+	// Parent turn 2: fork-spawn the full-context child, task-spawn the
+	// default coder, then sleep so the children's first LLM calls land
+	// BEFORE the parent turn's context cancels (children derive their
+	// context from the spawning turn).
+	s.Fake.EnqueueToolCalls(
+		forkDelegateCall("writer-fork-full", "Reply with exactly: "+fullMarker),
+		delegateCall("coder", "Reply with exactly: "+taskMarker),
+		harness.ToolCall{Name: "shell", Arguments: `{"command":"sleep 1"}`},
+	)
+	s.Fake.SetPostToolText(`delegate_task child_id fork-full (running); delegate_task child_id fork-task (running); sleep done. Return both raw tool results verbatim.`)
+	reply := s.ChatTurn(t, sessionID,
+		"Use delegate_task twice with delegate_context \"full\" on both: first agent writer-fork-full with goal \"Reply with exactly: "+fullMarker+"\", then agent coder with goal \"Reply with exactly: "+taskMarker+"\". Then run the shell command \"sleep 1\". Return both raw tool results verbatim.",
+		5*time.Minute)
+	lower := strings.ToLower(reply)
+	if strings.Count(lower, "child_id") < 2 {
+		t.Fatalf("expected two child_ids from the two spawns: %s", reply)
+	}
+
+	// DSH-1 seeded side: the writer-fork-full child's LLM requests (system
+	// prompt anchored on its name) carry the parent marker — the seeded
+	// completed-turn prefix — and the fork preamble. Its OWN brief does not
+	// mention the parent marker, so the only path the marker can take into
+	// these requests is the transcript seed.
+	fullUser := userTextsBySystem(s.Fake, "You complete writing tasks precisely.")
+	if len(fullUser) == 0 {
+		t.Fatalf("writer-fork-full child never produced an LLM request (child loop did not start)")
+	}
+	joinedFull := strings.Join(fullUser, "\n")
+	if !strings.Contains(joinedFull, parentMarker) {
+		t.Fatalf("full-context fork child's requests missing the seeded parent marker %s; wire user texts: %s",
+			parentMarker, tail(joinedFull, 3000))
+	}
+	if !strings.Contains(joinedFull, "inherited from the parent's completed turns") {
+		t.Fatalf("fork preamble missing from the full-context child's prompt")
+	}
+	if strings.Contains(joinedFull, "in-flight, not yet answered") {
+		t.Fatalf("in-flight parent turn leaked into the fork seed")
+	}
+
+	// DSH-1 degraded side: the default coder's requests must NOT see the
+	// parent transcript. The coder's brief (taskMarker) is unique to it.
+	coderBriefs := userTextsBySystemContaining(s.Fake, "Code Specialist", taskMarker)
+	if len(coderBriefs) == 0 {
+		t.Fatalf("coder request carrying the task brief not found on the wire")
+	}
+	for _, brief := range coderBriefs {
+		if strings.Contains(brief, parentMarker) {
+			t.Fatalf("task-scope coder leaked the parent transcript (fork did not degrade): %s", tail(brief, 2000))
+		}
+	}
+}
+
+// userTextsBySystem returns the user-role message texts of every fake-LLM
+// request whose system prompt contains sysSubstr.
+func userTextsBySystem(f *harness.FakeLLM, sysSubstr string) []string {
+	return userTextsBySystemContaining(f, sysSubstr, "")
+}
+
+// userTextsBySystemContaining returns the user-role message texts of every
+// fake-LLM request whose system prompt contains sysSubstr and whose user
+// messages contain userSubstr (empty userSubstr = any).
+func userTextsBySystemContaining(f *harness.FakeLLM, sysSubstr, userSubstr string) []string {
+	var out []string
+	for _, body := range f.Requests() {
+		sys := systemTextOf(body)
+		if !strings.Contains(sys, sysSubstr) {
+			continue
+		}
+		var users []string
+		msgs, _ := body["messages"].([]any)
+		for _, m := range msgs {
+			msg, ok := m.(map[string]any)
+			if !ok {
+				continue
+			}
+			if role, _ := msg["role"].(string); role == "user" {
+				if c, _ := msg["content"].(string); c != "" {
+					users = append(users, c)
+				}
+			}
+		}
+		joined := strings.Join(users, "\n")
+		if userSubstr == "" || strings.Contains(joined, userSubstr) {
+			out = append(out, joined)
+		}
+	}
+	return out
+}
+
+// systemTextOf returns the first system message's content of a request body.
+func systemTextOf(body map[string]any) string {
+	msgs, _ := body["messages"].([]any)
+	for _, m := range msgs {
+		msg, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		if role, _ := msg["role"].(string); role == "system" {
+			if c, _ := msg["content"].(string); c != "" {
+				return c
+			}
+		}
+	}
+	return ""
+}
+
+// tail returns the last n characters of s (bounded failure output).
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "..." + s[len(s)-n:]
 }

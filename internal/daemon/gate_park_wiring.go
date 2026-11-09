@@ -67,6 +67,13 @@ func (c *Components) wireGateParker() {
 					"plan \""+data.GateID+"\" approved -- turn resumed",
 				)
 			}
+			// Audit HITL-1: goal-kind rows re-enter the owning loop's
+			// completion replay (the goal-gate resume callback resolves
+			// the loop by employee_id from the row's re-entry payload).
+			// Plan rows keep the notify-only path above.
+			if data.GateKind == goalGateApprovalKind {
+				c.resumeGoalGateFromDrain(data)
+			}
 			c.Logger.Info("gate checkpoint resumed",
 				"gate_kind", data.GateKind,
 				"gate_id", data.GateID,
@@ -194,6 +201,10 @@ func (c *Components) StartGateParkPump(ctx context.Context) {
 	subSubmit := c.msgBus.Subscribe("gate-park-pump", "plan.submitting")
 	go func() { c.pumpGateSubmits(ctx, subSubmit) }()
 	c.GateParker.Turns().Start(ctx)
+	// Audit HITL-1: arm the goal-loop human-approval gate seams (park +
+	// resume) over the SAME parker — the goal-kind branch of the checkpoint
+	// surface. No-op when the employee manager is absent.
+	c.StartGoalGateApprovalPump(ctx)
 	c.Logger.Info("gate checkpoint pump wired",
 		"park_topic", "plan.submitting",
 		"resume_topic", "plan.approved",

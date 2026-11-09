@@ -18,6 +18,7 @@ Feature specifications describing how each Meept subsystem works, with configura
 | [LLM Refusal Fallback](llm-refusal-fallback.md) | One-hop re-dispatch to a refusal model when a provider safety layer declines a turn |
 | [OAuth Providers](auth.md) | Device-code + PKCE subscription logins (ChatGPT, Claude Pro/Max, SuperGrok) |
 | [Models CLI](models-cli.md) | Interactive provider/model management |
+| [Delegation](delegation.md) | Subagent orchestration: `delegate_task` (spawn/fork modes, `delegate_context`), control tools, `workflow` tool, child descriptors + cold resume, `[delegation] allowed_routes` |
 | [Context Firewall](context-firewall.md) | Context pressure management and summarization |
 
 ## Advanced Features

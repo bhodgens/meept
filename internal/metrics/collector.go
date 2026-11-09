@@ -65,6 +65,15 @@ type AfterProviderResponseData struct {
 	Latency        time.Duration `json:"latency"`
 	Cached         bool          `json:"cached"`
 	Error          string        `json:"error,omitempty"`
+	// Tier signaling (TIER-1 residual, mirror of agent.AfterProviderResponseData):
+	// the llm.Response metadata keys bridged onto the per-step event surface so
+	// llm.calls metric rows can carry the tier. Key names MUST stay identical to
+	// the internal/llm constants (llm.MetaKeyLLMTier*). The string is omitted
+	// when empty (tier feature off); the bool/int stay zero-valued, matching
+	// the response's own disabled posture ("not degraded"/"depth 0").
+	LLMTier         string `json:"llm_tier,omitempty"`
+	LLMTierDegraded bool   `json:"llm_tier_degraded"`
+	LLMTierDepth    int    `json:"llm_tier_depth"`
 }
 
 func (AfterProviderResponseData) agentEventData() {}
@@ -284,20 +293,22 @@ func (c *Collector) collect() {
 	// c.store.Record("scheduler.jobs", count, nil)
 }
 
-// RecordLLMCall records an LLM API call.
-func (c *Collector) RecordLLMCall(model string, inputTokens, outputTokens int, latency time.Duration) {
-	c.store.Record("llm.calls", 1, map[string]string{
+// RecordLLMCall records an LLM API call. The optional tier tags (TIER-1
+// residual) ride the metrics_live tags JSON only when llmTier is non-empty —
+// a feature-off posture writes byte-identical rows to the pre-tier shape.
+func (c *Collector) RecordLLMCall(model string, inputTokens, outputTokens int, latency time.Duration, llmTier string) {
+	tags := map[string]string{
 		DimModel: model,
-	})
-	c.store.Record("tokens.input", float64(inputTokens), map[string]string{
-		DimModel: model,
-	})
-	c.store.Record("tokens.output", float64(outputTokens), map[string]string{
-		DimModel: model,
-	})
-	c.store.Record("llm.latency", latency.Seconds(), map[string]string{
-		DimModel: model,
-	})
+	}
+	if llmTier != "" {
+		// Tag key pinned to the internal/llm metadata constant
+		// (llm.MetaKeyLLMTier).
+		tags["llm_tier"] = llmTier
+	}
+	c.store.Record("llm.calls", 1, tags)
+	c.store.Record("tokens.input", float64(inputTokens), tags)
+	c.store.Record("tokens.output", float64(outputTokens), tags)
+	c.store.Record("llm.latency", latency.Seconds(), tags)
 }
 
 // RecordCompression records a compression event.
@@ -545,7 +556,7 @@ func (c *Collector) RegisterEventListeners(emitter TypedEventEmitter) {
 				})
 			}
 
-			c.RecordLLMCall(data.ModelID, 0, data.ResponseTokens, data.Latency)
+			c.RecordLLMCall(data.ModelID, 0, data.ResponseTokens, data.Latency, data.LLMTier)
 		},
 	)
 

@@ -306,3 +306,60 @@ pinned by the tree's gate tests (`health_checker_verdict_internal_test.go`,
   and the setter ignores nil. The payload keys are exactly the Contract-2
   set: `endpoint_key`/`verdict`/`model`/`detail`/`ts` — no lock is held
   across the publish call.
+
+## Serving tiers, semantic cache, and TTFT (llm-serving-tiers tree)
+
+- **The tier floor BOUNDS rotation; it never reorders precedence.**
+  `llm.tiers` (`config.TierPolicyConfig`, mirrored 1:1 as `llm.TierPolicy`
+  to dodge the internal/llm -> internal/config import cycle, same pattern
+  as `FailurePolicyConfig`) arms a per-request depth limit
+  (`EffectiveDepth`, default 2 when enabled) plus per-capability
+  `TurnCeilings`. The rotation loops in `provider_manager.go` consult
+  `tierGate.nextHopBlocked` BEFORE each dispatch (three call sites:
+  provider_manager.go:569, :788, :1044); past the ceiling the typed
+  `*TierFloorError` fires (wraps `ErrTierFloor` via `Unwrap()[]error`,
+  `NonRetryable` — a classified terminal error like
+  `ErrAllModelsQuotaBlocked`: never retried, never a completed turn,
+  never parked). The one rule: **the floor consumes DEPTH ONLY.** A
+  candidate skipped pre-dispatch (disabled, unhealthy, quota/endpoint/
+  alias-blocked) never reaches the floor check and consumes no depth;
+  the frozen precedence (quota blocks > endpoint cooldowns > alias
+  blocks > stickiness, resolver.go:660-661) is untouched. Signaling
+  rides per-step response metadata ONLY — `MetaKeyLLMTier` /
+  `MetaKeyLLMTierDegraded` / `MetaKeyLLMTierDepth`
+  (tier_policy.go:42-47) written into `Response.Metadata` on EVERY
+  completed call when `Enabled && SignalDegraded`; never a new bus
+  topic, never a new WS type. Disabled (nil policy or `Enabled=false`)
+  = unbounded rotation, zero metadata bytes. Daemon arm:
+  `applyTierPolicyToProviderManager(pm, cfg)`
+  (internal/daemon/components.go:1841, wiring in
+  internal/daemon/tierpolicy_wiring.go) — disabled installs nil.
+- **The semantic cache sits strictly BEHIND the exact-key miss.**
+  `llm.cache.semantic` (`config.SemanticCacheConfig`, schema.go:1284;
+  opt-in, `Enabled` default FALSE) is a second-chance lookup: exact-key
+  `Get` first, semantic `LookupBehindMiss` second, budget gate third —
+  wired on the three chat-variant cache paths (client.go:792-804
+  non-streaming, :1063-1075 with-progress, :2532-2540 streaming-delta;
+  the other exact-key cache paths client.go:996, :1266, :2650 stay
+  exact-only). Hard rule: **a response carrying tool calls is NEVER
+  STORED and NEVER SERVED as a semantic hit**
+  (semantic_cache.go:211-215 serve side, :283 store side — the tool
+  call IS the answer). Any embedder failure degrades silently to
+  exact-only — no error, no parked turn — and ErrEmptyResponse
+  accounting is untouched. Default threshold 0.95
+  (`DefaultSemanticCacheThreshold`, schema.go:1317-1318). The optional
+  `VerifyFloor` two-stage band (wiring-followups-final leaf 03)
+  re-embeds candidates scoring in [VerifyFloor, Threshold) and serves
+  only on direct-cosine >= Threshold; 0 (the default) disables the
+  band, and values at/above Threshold clamp to 0 at the load boundary
+  (`NormalizeSemanticCacheDefaults`, schema.go:1341-1344). Disabled =
+  structurally unreachable path, byte-identical responses.
+- **TTFT is the first content delta; -1 means unmeasured.** Migration
+  v9 adds `llm_calls.ttft_ms INTEGER NOT NULL DEFAULT -1` via
+  columnMissingGuard (internal/metrics/store.go:523-533, `Version: 9`
+  at :530); `captureFirstDelta` (client.go:2211) timestamps the first
+  non-empty content delta on the OpenAI-compatible and Anthropic
+  streaming paths and `ttftMS` (client.go:2224) writes the record;
+  `AvgTTFTMs` (store.go:911) averages ONLY measured rows. Non-streaming
+  calls, exact/semantic cache hits (they short-circuit before any clock
+  arm), and errors stay -1 — never write 0 for "not measured".

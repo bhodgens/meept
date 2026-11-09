@@ -2,20 +2,10 @@
 
 // Config + store-shape scenarios (leaf 05 T4, over leaves 01/03/04):
 // models.json5 --cache-reuse loader compatibility (leaf 03), the live
-// daemon's llm_calls ledger shape, and the llm.tiers / llm.cache.semantic
-// config-acceptance posture.
-//
-// Documented gap (leaf 04 TTFT): the ttft_ms column, first-delta capture,
-// and store-write are NOT landed (no TTFTMS anywhere in internal/llm or
-// internal/metrics; leaf 04's tasks are unwritten). The contracted
-// ttft_ms >= 0 / ttft_ms == -1 assertions are therefore UNASSERTABLE
-// today - a query against the nonexistent column would fail for the right
-// reason (column missing) but prove nothing about the feature. This file
-// pins the observable state that DOES exist: the streaming turn records
-// llm_calls rows (the exact table + columns the leaf-04 migration
-// extends), the loader accepts --cache-reuse, and the daemon boots with
-// the new config keys. The ttft_ms assertions land with leaf 04; the gap
-// is flagged to the orchestrator.
+// daemon's llm_calls ledger shape WITH the ttft_ms value assertions
+// (TIER-2: the column is live via migration v9 and the leaf-04 capture
+// paths, so the previously-deferred assertions are landed), and the
+// llm.tiers / llm.cache.semantic config-acceptance posture.
 package llmservingtiers
 
 import (
@@ -83,38 +73,109 @@ func TestConfigCacheReuseLoader(t *testing.T) {
 	}
 }
 
-// TestLLMCallsLedgerOnStreamingTurn (T4b shape pin): a streaming-capable
-// chat turn lands llm_calls rows in metrics.db with the EXACT column set
-// leaf 04's migration extends. The ttft_ms >= 0 assertion itself is
-// deferred (gap documented in the file header) - leaf 04 is not landed.
-func TestLLMCallsLedgerOnStreamingTurn(t *testing.T) {
+// TestLLMCallsLedgerTTFTOnStreamingTurn (T4b, the leaf's Integration item
+// 4 — now ASSERTED, no longer deferred): a turn whose LLM calls ride the
+// daemon's STREAMING path lands llm_calls rows carrying ttft_ms >= 0.
+// Which call streams: a tool-bearing turn's executor requests go through
+// chatWithFailoverRaw with a delta callback (loop.go hands EVERY chat turn
+// streamOnDelta), the manager fans to the client's ChatWithDeltaCallback,
+// and the harness FakeLLM answers "stream": true bodies with SSE deltas —
+// leaf 04's first-delta capture arms per attempt and stamps the measured
+// wait. Non-streaming calls in the same ledger (classifier etc.) carry
+// the -1 sentinel; that half is T4c's test.
+func TestLLMCallsLedgerTTFTOnStreamingTurn(t *testing.T) {
 	s := harness.Start(t, harness.WithConfigOverlay(ttftSuiteOverlay()))
 	harness.WaitFor(t, 60*time.Second, "the daemon to become healthy", func() bool {
 		return s.HealthOK()
 	})
 	s.RegisterProject(t, "e2e-project")
 	sess := s.CreateSession(t, "tiers", s.ProjectDir)
-	if reply := s.ChatTurn(t, sess, "hello there", 120*time.Second); reply == "" {
+	// Script a tool-call turn: the executor step's requests stream through
+	// the fake's writeSSE lane (body["stream"]=true) — the same lane the
+	// TTFT capture arms on. The plain-text turn ALSO reaches that lane,
+	// but the tool-bearing shape is the deterministic one (classifier and
+	// planner calls stay non-streaming; the executor call is the turn's
+	// core LLM work and always arrives with stream=true).
+	artifact := filepath.Join(s.ProjectDir, "ttft-probe.txt")
+	s.Fake.SetPostToolText("Created ttft-probe.txt at " + artifact + ".")
+	s.Fake.EnqueueFileWrite("call-ttft", artifact, "ttft")
+	if reply := s.ChatTurn(t, sess, "Create a file named ttft-probe.txt containing ttft", 120*time.Second); reply == "" {
 		t.Fatal("chat turn returned empty reply")
 	}
 
 	// metrics.db lives in the daemon data dir (store.go NewStore wiring).
+	// The turn is async and recordUsageStore writes from a goroutine, so
+	// poll the ledger until a measured (ttft_ms >= 0) row lands — polling
+	// only EXTENDS the wait; the assertions below stay exact.
 	dbPath := filepath.Join(s.StateDir, "metrics.db")
-	rows := tierSuiteLLMCallsRows(t, dbPath, 50)
-	if len(rows) == 0 {
-		t.Fatal("metrics.db has no llm_calls rows after a completed chat turn")
+	var measuredRow *llmCallsRow
+	harness.WaitFor(t, 30*time.Second, "a measured (ttft_ms >= 0) llm_calls row", func() bool {
+		for _, r := range tierSuiteLLMCallsRows(t, dbPath, 50) {
+			if r.TTFTMS >= 0 {
+				row := r
+				measuredRow = &row
+				return true
+			}
+		}
+		return false
+	})
+	if measuredRow == nil {
+		t.Fatal("no llm_calls row carries ttft_ms >= 0 after a streaming chat turn")
 	}
-	// Pin the columns the TTFT migration touches: provider/model_id name
-	// the serving model, latency_ms present (>= 0: an in-process fake
-	// answers in <1ms so Milliseconds() legitimately rounds to 0), and
-	// trace_id/span_id exist (the join shape leaf 04 writes ttft_ms
-	// alongside).
-	newest := rows[0]
-	if newest.ModelID == "" || newest.Provider == "" {
-		t.Fatalf("newest llm_calls row missing provider/model_id: %+v", newest)
+	m := *measuredRow
+	// Column-contract pins on the measured row (leaf 04 + the trace
+	// shape the ttft_ms write sits alongside):
+	if m.Provider == "" || m.ModelID == "" {
+		t.Fatalf("measured llm_calls row missing provider/model_id: %+v", m)
 	}
-	if newest.LatencyMS < 0 {
-		t.Fatalf("newest llm_calls row latency_ms = %d, want >= 0", newest.LatencyMS)
+	if m.LatencyMS < 0 {
+		t.Fatalf("measured llm_calls row latency_ms = %d, want >= 0", m.LatencyMS)
+	}
+	if m.TTFTMS > m.LatencyMS {
+		t.Fatalf("measured row id %d: ttft_ms (%d) > latency_ms (%d): first token cannot precede call end", m.ID, m.TTFTMS, m.LatencyMS)
+	}
+}
+
+// TestLLMCallsLedgerNonStreamingSentinel (T4c): the ledger's -1 sentinel is
+// observable on the live daemon. The daemon's intent classifier dials the
+// fake LLM on the NON-streaming path (LLMClassifier.chatWithFailover uses
+// plain Chat, no delta callback -> leaf 04 arms no clock -> ttft_ms -1),
+// so a turn that routes through classification leaves at least one
+// sentinel row. Newest-row-==-1 is NOT asserted (streaming executor rows
+// race the classifier row); the assertion is the SENTINEL VALUE ITSELF
+// landing in the column exactly as the contract states, alongside the
+// measured rows from the same turn.
+func TestLLMCallsLedgerNonStreamingSentinel(t *testing.T) {
+	s := harness.Start(t, harness.WithConfigOverlay(ttftSuiteOverlay()))
+	harness.WaitFor(t, 60*time.Second, "the daemon to become healthy", func() bool {
+		return s.HealthOK()
+	})
+	s.RegisterProject(t, "e2e-project")
+	sess := s.CreateSession(t, "tiers-ns", s.ProjectDir)
+	if reply := s.ChatTurn(t, sess, "just say hi", 120*time.Second); reply == "" {
+		t.Fatal("chat turn returned empty reply")
+	}
+
+	dbPath := filepath.Join(s.StateDir, "metrics.db")
+	var rows []llmCallsRow
+	harness.WaitFor(t, 30*time.Second, "llm_calls rows from the turn", func() bool {
+		rows = tierSuiteLLMCallsRows(t, dbPath, 50)
+		return len(rows) > 0
+	})
+	sentinel := 0
+	measured := 0
+	for _, r := range rows {
+		switch {
+		case r.TTFTMS == -1:
+			sentinel++
+		case r.TTFTMS >= 0:
+			measured++
+		default:
+			t.Fatalf("row id %d carries ttft_ms %d: outside the contract domain {-1} U [0, inf)", r.ID, r.TTFTMS)
+		}
+	}
+	if sentinel == 0 {
+		t.Fatalf("no ttft_ms == -1 row after a turn that routes through the non-streaming classifier path (rows: %+v)", rows)
 	}
 }
 
@@ -160,12 +221,14 @@ func tierSuiteDaemonLog(s *harness.Stack) string {
 	return string(data)
 }
 
-// llmCallsRow is one llm_calls row (the subset leaf 05 pins).
+// llmCallsRow is one llm_calls row (the subset leaf 05 pins, plus ttft_ms
+// for the TIER-2 value assertions).
 type llmCallsRow struct {
 	ID        int64
 	Provider  string
 	ModelID   string
 	LatencyMS int64
+	TTFTMS    int64
 	TraceID   string
 	SpanID    string
 }
@@ -180,7 +243,7 @@ func tierSuiteLLMCallsRows(t *testing.T, dbPath string, limit int) []llmCallsRow
 	db.SetMaxOpenConns(1)
 	defer db.Close()
 	rows, err := db.Query(`SELECT id, COALESCE(provider,''), COALESCE(model_id,''),
-		COALESCE(latency_ms,0), COALESCE(trace_id,''), COALESCE(span_id,'')
+		COALESCE(latency_ms,0), COALESCE(ttft_ms,-1), COALESCE(trace_id,''), COALESCE(span_id,'')
 		FROM llm_calls ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		t.Fatalf("query llm_calls: %v", err)
@@ -189,7 +252,7 @@ func tierSuiteLLMCallsRows(t *testing.T, dbPath string, limit int) []llmCallsRow
 	var out []llmCallsRow
 	for rows.Next() {
 		var r llmCallsRow
-		if err := rows.Scan(&r.ID, &r.Provider, &r.ModelID, &r.LatencyMS, &r.TraceID, &r.SpanID); err != nil {
+		if err := rows.Scan(&r.ID, &r.Provider, &r.ModelID, &r.LatencyMS, &r.TTFTMS, &r.TraceID, &r.SpanID); err != nil {
 			t.Fatalf("scan llm_calls: %v", err)
 		}
 		out = append(out, r)

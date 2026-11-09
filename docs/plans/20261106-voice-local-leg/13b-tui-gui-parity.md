@@ -30,9 +30,9 @@
 
 - The daemon enables `/api/v1/bus/call` when the RPC server exists: it
   dispatches ANY registered RPC method over HTTP
-  (internal/daemon/daemon.go:1588-1593, `http.WithRPCCall(rpcServer.CallMethod)`).
+  (internal/daemon/daemon.go:1625-1631, `http.WithRPCCall(rpcServer.CallMethod)`).
 - `voice.local.open`, `voice.local.end`, `voice.local.status` are
-  registered handlers (internal/rpc/voice_local.go:128-130). Their
+  registered handlers (internal/rpc/voice_local.go:124-131). Their
   request/result shapes are documented at the top of that file
   (voice.local.status -> {calls:[{call_id, employee_id, target,
   since_rfc3339, leg}]}) and in docs/workflows/voice-sidecar.md (CL8,

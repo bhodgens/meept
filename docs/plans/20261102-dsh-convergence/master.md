@@ -337,17 +337,17 @@ The orchestrator (main model) verifies each branch in-session:
 | 01-delegation/ | COMPLETE | 0 | waves 3-7: spawn (ccc764b6), fork (e94e8497), child-control (5b66d4cc), model/select+workflow (380c8d31), descriptor-resume (dd4fa153); gate parked .staged (ec1445b2) |
 | 02-goals-plans/ | COMPLETE | 0 | goal model + round-cap (ccc764b6), goal tools + plan-mode (e94e8497); gate parked .staged (ec1445b2) |
 | 03-session-storage/ | COMPLETE | 0 | 4 impl leaves + gates GREEN; suite in manifest |
-| 04-tool-surface/ | COMPLETE | 0 | timeout (a87a1276), lsp_navigate (a5f3b641), skill catalog/invocation (cccb25c + d280e582), quotes (b8a5cc09), gh-issues (d280e582); gate parked .staged (762dc9d3) |
-| 05-schedule/ | COMPLETE | 0 | timing kinds (a5f3b641 + cccb25c + d280e582), delivery inbox + receipts (cccb25c); gate parked .staged (d1f1f70f) |
-| 06-office-skills/ | COMPLETE | 0 | research GO + docx (cb3e999b) + xlsx (51d4abbc) + pptx (cccb25c) + docs (d280e582); gate parked .staged (e62e3fdd) |
+| 04-tool-surface/ | COMPLETE | 0 | timeout (a87a1276), lsp_navigate (a5f3b641), skill catalog/invocation (ccccb25c + d280e582), quotes (b8a5cc09), gh-issues (d280e582); gate parked .staged (762dc9d3) |
+| 05-schedule/ | COMPLETE | 0 | timing kinds (a5f3b641 + ccccb25c + d280e582), delivery inbox + receipts (ccccb25c); gate parked .staged (d1f1f70f) |
+| 06-office-skills/ | COMPLETE | 0 | research GO + docx (cb3e999b) + xlsx (51d4abbc) + pptx (ccccb25c) + docs (d280e582); gate parked .staged (e62e3fdd) |
 | gh-issues (11,12) | COMPLETE | 0 | issue bodies committed (d280e582); filed as #111/#112 per prior reconcile |
 
-> REMAINING (in-progress) integration steps - NOT complete: (1) daemon wiring of the
-> new tool surface (office C11.5 registration + any delegate/goal tool wiring the
-> daemon boot path must not yet attach), (2) e2e-suite activation (branch gates are
-> committed RED and parked .staged, pending un-park + manifest entries), and (3) merge
-> to main. These are the only incomplete items in this tree; everything above the line
-> has committed implementation.
+> RESOLVED 2026-11-08 (was "REMAINING integration steps - NOT complete"): the
+> daemon wiring landed (internal/daemon/dsh_wiring.go — office C11.5 registration
+> + delegate/goal/plan-mode seams) and the tree is merged to main. Only e2e-suite
+> un-parking/activation (branch gates still committed RED, parked .staged, pending
+> manifest activation) remains; everything else has committed implementation and
+> wiring on main.
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -390,7 +390,21 @@ Gate matrix. Root-level e2e owns the cross-branch C1-C4 contract tests above.
 Delta log: [2026-11-07, F1-F14, COMPLETE, implementation committed (waves 1-7 + pre-wave
 leaves); gate tests exist per branch but are parked .staged RED - e2e-suite activation
 and daemon wiring are the remaining integration steps, so the feature rows mark the
-committed implementation, not a green gate run.]
+committed implementation, not a green gate run.
+2026-11-08, bookkeeping reconciliation: the 2026-11-07 "remaining integration steps"
+claim is resolved — the daemon wiring landed (internal/daemon/dsh_wiring.go: goal,
+delegate, plan-mode seams incl. office C11.5 registration) and the tree is merged to
+main. Of the three listed steps, only e2e-suite un-parking/activation remains owned
+elsewhere; the RED-parked gate rows above still describe committed implementation,
+not a green gate run.
+2026-11-08, recorded deltas: (1) plan-mode persistence — leaf 04 defined the
+PlanModePersistence seam but shipped no durable session.Store column; wirePlanMode
+(internal/daemon/dsh_wiring.go) satisfies it with a process-local memory adapter,
+so the per-session plan toggle is durable FOR THE PROCESS only; a durable column
+would swap in place. (2) T6 deferral (03-session-reference, leaf 03, per Open
+Question #1) — the sessionref resolver shipped without the T6 turn-preparation
+integration; internal/agent does not invoke it yet (grep-verified 2026-11-08).
+SHA typo cccb25c -> ccccb25c fixed in this file's completion rows (2026-11-08).]
 
 ## Frozen Documents
 

@@ -112,6 +112,15 @@ type ProviderConfig struct {
 // Keyless rule: TTS Vendor "qwen3" MUST construct and speak with key "".
 ```
 
+> DEVIATION (annotated 2026-11-08, as-built since leaf 02 f8fa3c99): the
+> ProviderConfig struct lives in `internal/voicechild/providers_wiring.go:17`
+> (not providers/providers.go) - the providers package declares a type ALIAS
+> (`type ProviderConfig = voicechild.ProviderConfig`,
+> internal/voicechild/providers/providers.go:45) to avoid an import cycle
+> (providers imports voicechild for the interfaces). Field-for-field identical
+> to the contract above; leaf 03's C1 deviation note (Completion Tracking
+> Table) records the related SendRaw seam decision.
+
 ### C3: Factory signatures (internal/voicechild/providers_wiring.go)
 
 ```

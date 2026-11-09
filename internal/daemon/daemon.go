@@ -1539,6 +1539,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// a daemon without [intake] answers the disabled envelope.
 	registerIntakeStatusRPC(components, rpcServer, logger)
 
+	// delegate.status RPC (DSH-9d, audit item 5 operator half): a
+	// read-only report of a session's/agent's delegated children over
+	// the live C1 DelegateManager. Always registers (unwired registry =
+	// the handler's empty-report envelope, never "method not found").
+	registerDelegateStatusRPC(components, rpcServer, logger)
+
 	// voice.local.* RPC (local-leg leaf 08): opens local voice calls,
 	// ends them, and snapshots both legs' live calls. Always registers
 	// (nil voice wiring / disabled local leg = the named disabled-leg

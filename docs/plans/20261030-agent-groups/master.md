@@ -390,19 +390,29 @@ orchestrator in-session. Branches 01 and 03 carry their own gate leaves.
 
 | # | Feature | Source | E2E test | Status |
 |---|---------|--------|----------|--------|
-| F1 | Grouped agent deny-beats-allow on tools | C3, 04 | agent-groups suite: denied tool absent from LLM defs AND uncallable | PENDING |
-| F2 | Ungrouped agent backward compat (D7) | C3 | agent-groups suite: no-groups agent unchanged | PENDING |
-| F3 | Assignment-time validation rejects dangling tool | C6 | agent-groups suite: RPC reject + boot reject | PENDING |
-| F4 | Membership mutation gated to agent-update/admin | C5 | agent-groups suite: non-privileged deny at RPC + file backstop | PENDING |
-| F5 | Memory ceiling enforced | C7 | agent-groups suite: recall above ceiling returns no rows | PENDING |
-| F6 | Fence as central stage (fenced write by a tool with no opt-in) | C1 | agent-groups suite | PENDING |
-| F7 | Decision log lines present with rule_source | C2 | agent-groups suite (log capture) | PENDING |
-| F8 | explain/check surfaces | R4/R5 | groups-diagnosis suite | PENDING |
-| F9 | Unsigned cluster dispatch rejected | C9 | cluster member | PENDING |
-| F10 | Overrides expire | C8 | groups-diagnosis suite (clock-injected) | PENDING |
+| F1 | Grouped agent deny-beats-allow on tools | C3, 04 | agent-groups suite: denied tool absent from LLM defs AND uncallable | VALIDATED |
+| F2 | Ungrouped agent backward compat (D7) | C3 | agent-groups suite: no-groups agent unchanged | VALIDATED |
+| F3 | Assignment-time validation rejects dangling tool | C6 | agent-groups suite: RPC reject + boot reject | VALIDATED |
+| F4 | Membership mutation gated to agent-update/admin | C5 | agent-groups suite: non-privileged deny at RPC + file backstop | VALIDATED |
+| F5 | Memory ceiling enforced | C7 | agent-groups suite: recall above ceiling returns no rows | VALIDATED |
+| F6 | Fence as central stage (fenced write by a tool with no opt-in) | C1 | agent-groups suite | VALIDATED |
+| F7 | Decision log lines present with rule_source | C2 | agent-groups suite (log capture) | VALIDATED |
+| F8 | explain/check surfaces | R4/R5 | groups-diagnosis suite | VALIDATED |
+| F9 | Unsigned cluster dispatch rejected | C9 | cluster member | VALIDATED |
+| F10 | Overrides expire | C8 | groups-diagnosis suite (clock-injected) | VALIDATED |
 
 Statuses: PENDING | DELTA (resolution in progress) | VALIDATED
-Delta log: (empty - no validations yet)
+Delta log:
+- 2026-11-08 (bookkeeping reconciliation): F1-F10 marked VALIDATED. Evidence: 00T
+  gate reached TESTS_VALIDATED (master completion table, commit 6479ccaf; F5 e2e
+  GREEN x2 in leaf 05 6b000e97; F6 GREEN in leaf 04 7bffceb9; F8/F10 GREEN in
+  leaf 06/07 dfafb043; F9 GREEN in leaf 08 7bd0998b; F3/F4 GREEN via leaf
+  03-mutation-gate 360d1c35). Suites green, verified during the 2026-11-08
+  plan audit. No code change; status rows only.
+- 2026-11-08 (bookkeeping reconciliation): rule_source 'override' is stamped in
+  the decision log by the 07-overrides implementation but was never recorded as
+  a documented delta in any leaf or orchestrator note. Left as-is (historical
+  state, not a fix); recorded here so the vocabulary stays traceable.
 
 ## Frozen Documents
 

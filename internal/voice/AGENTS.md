@@ -196,25 +196,28 @@ store. Invariants a future agent must NOT break:
   imports no telnyx package and carries no carrier seam at all
   (internal/voice/local.go:14-15 - build-pinned, not convention), and
   `Broker.Value("telnyx_api_key")` has no local-leg caller. The leg may
-  ride a Manager whose `telnyx.CallController` is nil (:165) - never
+  ride a Manager whose `telnyx.CallController` is nil (local.go:194) -
+  never
   give the local leg a live carrier client, and never add a carrier
   call to its teardown.
 - Registry leg field semantics: `Instance.Leg` is `"phone"` or
   `"local"`; the ZERO value means "phone" so existing composite
-  literals stay valid (internal/voice/dial.go:555-569). Acquire via
+  literals stay valid (internal/voice/dial.go:583-598). Acquire via
   `AcquireLeg`; `NormalizeE164` runs ONLY for leg "phone" - local
   targets look like `local:<label>` and must never be mangled
-  (:629-633). Capacity, one-live-per-employee, and one-live-per-target
-  rules are SHARED across legs (:621-628); never add a leg-scoped
+  (dial.go:657-663). Capacity, one-live-per-employee, and one-live-per-target
+  rules are SHARED across legs (dial.go:663-680); never add a leg-scoped
   bypass of them.
 - Open-before-setup ordering: the daemon sends the C1 `open` frame
   right after the AudioPair exists, for BOTH legs; the child creates
   its pipeline, dials the pair, and answers with `setup`; the talk
   loop arms on setup and the keys line follows at the Tier A emission
-  site (internal/daemon/voice_wiring.go:683-745; local producer
-  internal/voice/local.go:360). Do not send keys or say frames before
+  site (internal/daemon/voice_wiring.go routeFrame EventSetup branch,
+  sendKeysFrame call at :604, builder internal/daemon/voice_keys.go:80;
+  local producer internal/voice/local.go:368 sendOpenFrame call,
+  builder :437). Do not send keys or say frames before
   setup arrives, and do not make open failure fatal (warn-and-continue
-  on stub audio is the pinned posture, local.go:291-292).
+  on stub audio is the pinned posture, local.go:368-370).
 - RMS VAD only when Local==true: the local leg's barge-in trigger is
   the INCOMING-audio RMS window - pumpAudioIn taps caller-mic PCM from
   the .in socket while playback is live; 10 sustained chunk-lengths
@@ -235,17 +238,19 @@ store. Invariants a future agent must NOT break:
 - LocalSplice has NO reorder and NO transcode by contract:
   unix sockets preserve order (no reorder window), and the local leg
   negotiates L16 s16le@16000 only - any other chunk size is the named
-  ErrL16Only refusal (internal/voice/localsplice.go:8-12,49-51).
+  ErrL16Only refusal (internal/voice/localsplice.go:58-60, named at
+  :172).
   Outbound stays paced at one 640 B chunk per 20 ms (the uptractor
-  rule; :14-17). Do not "harden" it with a reorder buffer.
+  rule; localsplice.go:14-16). Do not "harden" it with a reorder buffer.
 - Deliberate policy differences, pinned not accidental: the local leg
   skips the effects reservation and the dial audit row (no paid side
-  effect, no external party; internal/voice/local.go:10-13 mirror
+  effect, no external party; internal/voice/local.go:11-14 mirror
   comment) and writes no carrier POST. Do not "restore symmetry" -
   add the leg's invariants, not the phone leg's policy.
 - Teardown parity: `LocalLeg.End` fans out through
   `Manager.FailOutcome` exactly like a phone hangup (release hook,
-  registry release, binding end; local.go:401-440). Double End is
+  registry release, binding end; local.go:484-510, FailOutcome at
+  :510). Double End is
   idempotent nil; a foreign (non-`local-`-shaped) id is
   ErrUnknownLocalCall. Keep the prefix shape test honest - it is what
   distinguishes those two.

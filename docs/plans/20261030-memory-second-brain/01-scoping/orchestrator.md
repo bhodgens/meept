@@ -121,9 +121,9 @@ set children COMPLETE; report COMPLETE to ../master.md.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-tests.md | PENDING | 0 | |
-| 01-scope-schema.md | PENDING | 0 | |
-| 03-agent-recall-wiring.md | PENDING | 0 | |
+| 00T-tests.md | COMPLETE | 1 | 2026-11-08 reconciliation: was PENDING; gate landed as 7b775b70 (see parent master completion table). |
+| 01-scope-schema.md | COMPLETE | 1 | 2026-11-08 reconciliation: was PENDING; landed 9b1b94f9. |
+| 03-agent-recall-wiring.md | COMPLETE | 1 | 2026-11-08 reconciliation: was PENDING; landed 4cefbfc9 (self-committed by its session with the digest-gate fix + harness env). |
 
 ## Integration Test Plan
 

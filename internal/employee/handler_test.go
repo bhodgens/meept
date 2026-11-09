@@ -79,6 +79,8 @@ func TestRPCHandler_Handlers_Registration(t *testing.T) {
 		// goals (spec lines 537-538)
 		"agents.goals.list", "agents.goals.get", "agents.goals.set_gate",
 		"agents.goals.approve", "agents.goals.reject",
+		// human-approval goal gate resume (audit HITL-1)
+		"agents.goals.approve_gate",
 		// goal creation (leaf 01, contract C4)
 		"agents.goals.create",
 		// steer-of-episode (leaf 04, contract C5)

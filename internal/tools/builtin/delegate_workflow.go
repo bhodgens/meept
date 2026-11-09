@@ -284,7 +284,10 @@ type WorkflowEngine struct {
 	started       atomic.Int64
 	completion    chan WorkflowRun
 	deliver       func(WorkflowRun)
-	bus           workflowBus
+	// completedRun is the sticky settled run of a background execution
+	// (set once by the deliver closure under mu; nil until settled).
+	completedRun *WorkflowRun
+	bus          workflowBus
 }
 
 // NewWorkflowEngine builds an engine. cfg defaults are applied; an out-of-range
@@ -396,6 +399,13 @@ func (e *WorkflowEngine) RunBackground(script string, args map[string]any) strin
 		e.completion = ch
 		e.deliver = func(run WorkflowRun) {
 			ch <- run
+			// Keep the settled run on the engine (leaf 07): the channel is
+			// single-consumption, but completion is a sticky read so a
+			// later status surface (workflow_status) reports the settled
+			// outcome idempotently instead of degrading to running.
+			e.mu.Lock()
+			e.completedRun = &run
+			e.mu.Unlock()
 		}
 	}
 	deliver := e.deliver
@@ -411,6 +421,18 @@ func (e *WorkflowEngine) RunBackground(script string, args map[string]any) strin
 		deliver(run)
 	}()
 	return jobID
+}
+
+// settledRun returns the settled background run (sticky once delivered),
+// or ok=false until the run settles. Read by the workflow_status surface;
+// unlike the single-consumption channel seam this never degrades.
+func (e *WorkflowEngine) settledRun() (WorkflowRun, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.completedRun == nil {
+		return WorkflowRun{}, false
+	}
+	return *e.completedRun, true
 }
 
 // workflowBus is the minimal publish surface RunBackground delivery rides.
@@ -790,6 +812,9 @@ func (t *WorkflowTool) Execute(ctx context.Context, args map[string]any) (any, e
 	if p.RunInBackground {
 		engine.SetCompletionBus(t.ctrl.completionBus)
 		jobID := engine.RunBackground(p.Script, args)
+		// Leaf 07-workflow-status: keep the job answerable to the model via
+		// workflow_status(job_id) — bounded per-controller registry.
+		t.ctrl.registerWorkflowJob(jobID, engine)
 		return map[string]any{
 			"kind":  "background",
 			"jobId": jobID,
@@ -815,3 +840,191 @@ func (t *WorkflowTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 // Compile-time interface assertion.
 var _ tools.Tool = (*WorkflowTool)(nil)
+
+// ---------------------------------------------------------------------------
+// workflow_status: the model-facing background-job status surface
+// (dsh-convergence leaf docs/plans/20261102-dsh-convergence/04-tool-surface/
+// 07-workflow-status.md). DSH-8 made a background run deliver its settled
+// WorkflowRun; this leaf makes the job id ANSWERABLE to the model that
+// received it: query by wf-job id, get running / completed / failed plus the
+// settled run summary.
+// ---------------------------------------------------------------------------
+
+// workflowJobRegistryCap bounds the per-controller wf-job registry (FIFO
+// eviction of the oldest job). The engine caps a single run at
+// max_total_agents = 100000 spawns, so a registry of 256 jobs keeps the
+// controller's status surface O(1)-bounded without ever evicting a live
+// model-recent job in practice.
+const workflowJobRegistryCap = 256
+
+// Status vocabulary returned in the status field (the run's stop reasons
+// completed|cancelled|error map to the settled classes; unsettled is
+// running).
+const (
+	workflowStatusRunning   = "running"
+	workflowStatusCompleted = "completed"
+	workflowStatusFailed    = "failed"
+	workflowStatusCancelled = "cancelled"
+)
+
+// jobStatusView is the sanitized status projection workflow_status returns —
+// never a live engine reference or the settled channel seam.
+type jobStatusView struct {
+	JobID         string `json:"job_id"`
+	RunID         string `json:"run_id,omitempty"`
+	Status        string `json:"status"`
+	StopReason    string `json:"stop_reason,omitempty"`
+	Error         string `json:"error,omitempty"`
+	Result        string `json:"result,omitempty"`
+	AgentsStarted int64  `json:"agents_started,omitempty"`
+}
+
+// registerWorkflowJob records a background job's engine so a later
+// workflow_status(job_id) can read it. Bounded: registering over the cap
+// evicts the OLDEST job (a model-recent id stays answerable; the evicted
+// status becomes the clean unknown-job error).
+func (c *DelegateController) registerWorkflowJob(jobID string, e *WorkflowEngine) {
+	if c == nil || jobID == "" || e == nil {
+		return
+	}
+	c.jobMu.Lock()
+	defer c.jobMu.Unlock()
+	if c.jobReg == nil {
+		c.jobReg = make(map[string]*WorkflowEngine)
+	}
+	if _, exists := c.jobReg[jobID]; !exists {
+		c.jobOrder = append(c.jobOrder, jobID)
+	}
+	c.jobReg[jobID] = e
+	for len(c.jobOrder) > workflowJobRegistryCap {
+		oldest := c.jobOrder[0]
+		c.jobOrder = c.jobOrder[1:]
+		delete(c.jobReg, oldest)
+		delete(c.settledCache, oldest)
+	}
+}
+
+// cacheSettled stores a job's first-observed settlement and returns its
+// view. Idempotent: the first settlement wins for the job's lifetime —
+// a second call (e.g. after another reader drained the engine's channel)
+// keeps the cached view rather than degrading to running.
+func (c *DelegateController) cacheSettled(jobID string, run WorkflowRun) jobStatusView {
+	c.jobMu.Lock()
+	defer c.jobMu.Unlock()
+	if v, ok := c.settledCache[jobID]; ok {
+		return v
+	}
+	view := jobStatusView{
+		JobID:         jobID,
+		RunID:         run.RunID,
+		StopReason:    run.StopReason,
+		Error:         run.StopMessage,
+		Result:        run.Value,
+		AgentsStarted: run.AgentsStarted,
+	}
+	switch run.StopReason {
+	case workflowStopCompleted:
+		view.Status = workflowStatusCompleted
+	case workflowStopCancelled:
+		view.Status = workflowStatusCancelled
+	default:
+		view.Status = workflowStatusFailed
+	}
+	if c.settledCache == nil {
+		c.settledCache = make(map[string]jobStatusView)
+	}
+	c.settledCache[jobID] = view
+	return view
+}
+
+// workflowJobStatus reports a job's status WITHOUT blocking. The engine's
+// Completion seam is single-consumption, so the first observed settlement is
+// cached on the controller: repeated queries keep reporting the settled
+// outcome (idempotent), never flipping a completed job back to running.
+// The settled cache is the concurrency seam: WaitCompletion's delivery is
+// consumed by whoever wakes on it, but the controller's cache is populated
+// exactly once (settledCache), so every reader sees the same final view.
+func (c *DelegateController) workflowJobStatus(jobID string) (jobStatusView, bool) {
+	if c == nil {
+		return jobStatusView{}, false
+	}
+	c.jobMu.Lock()
+	e, ok := c.jobReg[jobID]
+	c.jobMu.Unlock()
+	if !ok || e == nil {
+		return jobStatusView{}, false
+	}
+	// A previously-observed settlement wins (idempotent across readers).
+	c.jobMu.Lock()
+	cached, haveCached := c.settledCache[jobID]
+	c.jobMu.Unlock()
+	if haveCached {
+		return cached, true
+	}
+	view := jobStatusView{JobID: jobID, Status: workflowStatusRunning, RunID: e.RunID()}
+	run, settled := e.settledRun()
+	if !settled {
+		return view, true
+	}
+	return c.cacheSettled(jobID, run), true
+}
+
+// WorkflowStatus reports a background workflow job's status to the model.
+// An unknown job id is a clean error envelope (never a panic, never a hang);
+// the id namespace is the wf-job-* ids RunBackground returned.
+func (c *DelegateController) WorkflowStatus(_ context.Context, jobID string) (any, error) {
+	if strings.TrimSpace(jobID) == "" {
+		return tools.NewErrorResult("workflow_status: job_id is required"), nil
+	}
+	view, ok := c.workflowJobStatus(jobID)
+	if !ok {
+		return tools.NewErrorResult(
+			"workflow_status: unknown job_id: "+jobID+" (background job ids come from the workflow tool's run_in_background result)"), nil
+	}
+	return view, nil
+}
+
+// WorkflowStatusTool exposes background workflow job status to the model.
+type WorkflowStatusTool struct {
+	tools.ToolDefaults
+	ctrl *DelegateController
+}
+
+// NewWorkflowStatusTool constructs the workflow_status tool bound to the
+// controller that owns the wf-job registry.
+func NewWorkflowStatusTool(c *DelegateController) *WorkflowStatusTool {
+	return &WorkflowStatusTool{ctrl: c}
+}
+
+func (t *WorkflowStatusTool) Name() string     { return "workflow_status" }
+func (t *WorkflowStatusTool) Category() string { return "delegation" }
+
+func (t *WorkflowStatusTool) Description() string {
+	return "Report the status of a background workflow run started with the workflow tool " +
+		"(run_in_background:true). Returns running until the run settles, then the settled " +
+		"summary: stop reason (completed/cancelled/error), agents started, result value, or " +
+		"the error. Idempotent — a settled job keeps reporting its outcome. Never blocks."
+}
+
+func (t *WorkflowStatusTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: schemaTypeObject,
+		Properties: map[string]llm.ParameterProperty{
+			"job_id": {
+				Type:        schemaTypeString,
+				Description: "The jobId returned by a workflow call with run_in_background:true.",
+			},
+		},
+		Required: []string{"job_id"},
+	}
+}
+
+func (t *WorkflowStatusTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.ctrl == nil {
+		return tools.NewErrorResult("workflow_status: controller not bound"), nil
+	}
+	return t.ctrl.WorkflowStatus(ctx, asString(args["job_id"]))
+}
+
+// Compile-time interface assertion.
+var _ tools.Tool = (*WorkflowStatusTool)(nil)

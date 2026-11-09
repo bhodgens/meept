@@ -734,6 +734,16 @@ type AgentLoop struct {
 	// before. Reset per turn in resetTurnGuards.
 	guardRetried bool
 
+	// turnConversation is the DSH-1 fork-seed handle: the RUNNING turn's
+	// live *Conversation, armed by RunOnceWithParts after the conversation
+	// resolves and read by executeToolCallsUngated to inject the parent-
+	// conversation carrier into the tool context (tools.ContextWithConversation)
+	// so delegate_task's fork spawn can slice the REAL parent transcript.
+	// Cleared per turn (injectTurnConversation's returned clear func) and
+	// on guard reset paths; nil = no carrier (fork degrades to a fresh
+	// brief). Guarded by l.mu.
+	turnConversation *Conversation
+
 	// terminateGuardRetried is the TERMINATING-TOOL lane's copy of the
 	// reply-guard rewrite budget. reasoningCycle short-circuits to
 	// buildTerminateResponse the moment a terminating tool's result
@@ -3328,6 +3338,12 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// Protect the conversation from LRU eviction while this turn is in-flight.
 	conv.MarkActive()
 	defer conv.MarkInactive()
+
+	// DSH-1 fork-seed: arm the per-turn parent-conversation handle (cleared
+	// on turn exit) so tool execution can inject the carrier into the tool
+	// context (executeToolCallsUngated -> tools.ContextWithConversation).
+	clearTurnConv := l.injectTurnConversation(ctx, conv)
+	defer clearTurnConv()
 
 	// Leaf 11: inject the speak reply carrier into every registry tool that
 	// accepts one (builtin reply_to_user). The carrier classifies THIS run
@@ -8782,6 +8798,17 @@ func (l *AgentLoop) executeToolCallsUngated(ctx context.Context, toolCalls []llm
 	ctx = tools.ContextWithSessionID(ctx, l.SessionID())
 	ctx = tools.ContextWithAgentID(ctx, l.agentID)
 
+	// Parent-conversation carrier (DSH-1 fork-seed): the loop's LIVE
+	// conversation rides the tool context so delegate_task's fork spawn can
+	// seed a full-context child from the REAL parent transcript at the
+	// spawn boundary (tools.ContextWithConversation). Read-only usage — the
+	// delegate manager slices a copy (completedTurnPrefix); a context
+	// without this injection (legacy callers) degrades to a fresh brief.
+	// The carrier is armed per-turn by RunOnceWithParts (setTurnConversation)
+	// next to the working-directory injection; without it (legacy callers)
+	// this reads nil and stores nothing.
+	ctx = tools.ContextWithConversation(ctx, l.turnConversationHandle())
+
 	// Memory-scope identity (leaf 03-agent-recall-wiring T3): the memory
 	// tools stamp writes and filter reads with the SAME resolved B1 tuple
 	// this loop recalls under. Absent from contexts without this injection
@@ -9434,6 +9461,34 @@ func (l *AgentLoop) GetConversation(id string) *Conversation {
 // calls with the same ID return the same *Conversation (cache identity).
 func (l *AgentLoop) SessionConversation(id string) *Conversation {
 	return l.conversations.Get(id)
+}
+
+// SeedChildConversation stamps a DSH-1 fork child's seed messages onto the
+// child agent's conversation (auto-vivified — a fork child's loop may never
+// have run a turn, so the fresh conversation becomes its inherited history)
+// BEFORE the child's first RunOnce. Bound onto DelegateManager.SetForkSeedWriter
+// by the daemon/registry wiring. No-op on an empty seed or a nil receiver.
+func (r *AgentRegistry) SeedChildConversation(agentID, conversationID string, seed []llm.ChatMessage) {
+	if r == nil || len(seed) == 0 || agentID == "" || conversationID == "" {
+		return
+	}
+	loop, err := r.Get(agentID)
+	if err != nil {
+		r.logger.Warn("delegate fork seed: child loop unavailable; seed dropped",
+			"agent_id", agentID, "error", err)
+		return
+	}
+	conv := loop.SessionConversation(conversationID)
+	if conv == nil {
+		return
+	}
+	conv.RestoreFromMessages(seed)
+}
+
+// ForkSeedWriter returns the registry's conversation-seed adapter for
+// DelegateManager.SetForkSeedWriter binding at daemon wiring.
+func (r *AgentRegistry) ForkSeedWriter() func(agentID, conversationID string, seed []llm.ChatMessage) {
+	return r.seedChildConversation
 }
 
 // ClearConversation removes a conversation. Nil-safe on the store (bughunt

@@ -334,6 +334,16 @@ type GoalLoop struct {
 	defaultGate *GateConfig
 	gateEnabled bool // global kill switch; default true so tests keep working
 
+	// Human-approval goal gate wiring (audit HITL-1). goalGatePark wraps
+	// agent.GateParker.ParkGate (GateKind "goal") — injected via
+	// SetGoalGateParker at daemon wiring time; nil = approval gates degrade
+	// to at_risk (never a silent completion). approvalGatePassedGoal is the
+	// transient re-entry marker (goal id) set by ResumeGoalGateApproval so
+	// the re-run of Reflect treats the approval gate as satisfied; guarded
+	// by mu, always cleared at resume end.
+	goalGatePark           goalGateParkFn
+	approvalGatePassedGoal string
+
 	// Mutable state (guarded by mu).
 	mu                   sync.Mutex
 	consecutiveFailures  int
@@ -1035,7 +1045,31 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 		// at_risk and records the failure output as feedback for the next
 		// round.
 		gateCfg := l.gateConfigForGoal(ctx)
-		if gateCfg != nil && gateCfg.Command != "" && health == GoalHealthy {
+		// Audit HITL-1: a gate with Type "approval" is a HUMAN signoff
+		// gate — the loop must not treat it as a command check. It parks
+		// the turn through the gate checkpoint parker (GateKind "goal")
+		// and stays parked until agents.goals.approve_gate resumes it.
+	if gateCfg != nil && gateCfg.IsApproval() && health == GoalHealthy {
+		// Audit HITL-1 re-entry: a goal-gate approval resume marks the
+		// approval as granted — the gate passes without a fresh park.
+		goalIDForGate := l.activeGoalID(ctx)
+		if l.reflectApprovalGateApproved(goalIDForGate) {
+			logger.Info("goal approval gate satisfied by operator approval",
+				"goal_id", goalIDForGate)
+		} else if parked := l.parkGateApproval(ctx, *gateCfg, plan, result); parked {
+			// Parked: Reflect completes without a completion claim.
+			// The resume (approve path) re-runs the completion by
+			// re-entering Reflect via the goal gate resume payload.
+			return GoalUnknown, nil
+		} else {
+			// Park refused (checkpointing disabled / encode failure):
+			// degrade to the legacy at-risk verdict so the round does
+			// NOT claim goal completion past an unapproved human gate.
+			logger.Warn("goal approval gate park refused — marking at_risk",
+				"goal_id", goalIDForGate)
+			health = GoalAtRisk
+		}
+	} else if gateCfg != nil && gateCfg.EffectiveCommand() != "" && health == GoalHealthy {
 			gateRes, gateErr := l.runCompletionGate(ctx, *gateCfg, logger)
 			switch {
 			case gateErr != nil:
@@ -1108,6 +1142,9 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 // gateConfigForGoal resolves the effective quality-gate config.
 // Order: global kill switch off → nil; else per-goal Gate from storage;
 // else loop-level SetGateConfig; else employees.defaults.gate.
+// Approval gates (Type "approval") resolve by their Type alone — a config
+// carrying an empty command is still a gate when it is an approval gate
+// (audit HITL-1).
 func (l *GoalLoop) gateConfigForGoal(ctx context.Context) *GateConfig {
 	l.mu.Lock()
 	enabled := l.gateEnabled
@@ -1117,16 +1154,188 @@ func (l *GoalLoop) gateConfigForGoal(ctx context.Context) *GateConfig {
 	if !enabled {
 		return nil
 	}
-	if g, err := l.lookupActiveGoal(ctx); err == nil && g != nil && g.Gate != nil && g.Gate.Command != "" {
+	if g, err := l.lookupActiveGoal(ctx); err == nil && g != nil && g.Gate != nil &&
+		(g.Gate.Command != "" || g.Gate.IsApproval()) {
 		return g.Gate
 	}
-	if loopCfg != nil && loopCfg.Command != "" {
+	if loopCfg != nil && (loopCfg.Command != "" || loopCfg.IsApproval()) {
 		return loopCfg
 	}
-	if def != nil && def.Command != "" {
+	if def != nil && (def.Command != "" || def.IsApproval()) {
 		return def
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Human-approval goal gates (audit HITL-1)
+// ---------------------------------------------------------------------------
+
+// goalGateParkFn is the daemon-injected checkpoint callback (audit HITL-1).
+// data carries the frozen GateParkData identity (GateKind "goal", GateID =
+// goal id); the boolean result mirrors agent.GateParker.ParkGate — false
+// when gate checkpointing is unavailable/refused. The seam is a function
+// (not the *agent.GateParker) so package employee stays construction-free;
+// the daemon injects exactly one wrapper around the shared GateParker (no
+// second parker).
+type goalGateParkFn func(data agent.GateParkData) bool
+
+// goalGateResumePayload is the re-entry snapshot persisted in
+// GateParkData.TurnReentry for a parked goal gate. On approval, the resume
+// path re-runs Reflect with the recorded plan + result so the completion
+// verdict (and any downstream completion bookkeeping) replays against the
+// gate the human just approved.
+type goalGateResumePayload struct {
+	PlanID string                  `json:"plan_id,omitempty"`
+	Prompt string                  `json:"prompt,omitempty"`
+	Result *bot.BotExecutionResult `json:"result,omitempty"`
+}
+
+// SetGoalGateParker wires the gate-checkpoint park seam (audit HITL-1).
+// parkFn wraps agent.GateParker.ParkGate. Nil is ignored (typed-nil guard):
+// approval gates then degrade to the park-refused behaviour (at_risk,
+// never a silent completion). Set once at wiring time; read-only
+// afterwards. Also exposes the park capability on the manager via the
+// goalGateParkCapable interface (Manager wires its own copy).
+func (l *GoalLoop) SetGoalGateParker(parkFn goalGateParkFn) {
+	if parkFn == nil {
+		return
+	}
+	l.mu.Lock()
+	l.goalGatePark = parkFn
+	l.mu.Unlock()
+}
+
+// ResumeGoalGateApproval completes a goal-gate approval resume (audit
+// HITL-1). The daemon's resume path has ALREADY drained the parked row via
+// GateParker.ResumeByKey("goal", ...) — delete-before-callback, at-most-once
+// — and passes the drained row's TurnReentry here. The marker is armed and
+// Reflect re-runs with the recorded plan + result: the approval gate passes
+// on this re-entry (the human approved), so the completion verdict lands.
+// An undecodable/missing plan id is logged and dropped (the round stays
+// unapproved; a later round re-raises the gate).
+func (l *GoalLoop) ResumeGoalGateApproval(ctx context.Context, reentry map[string]any) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	logger := l.logger
+	l.mu.Unlock()
+
+	var p goalGateResumePayload
+	if len(reentry) > 0 {
+		raw, err := json.Marshal(reentry)
+		if err != nil {
+			logger.Warn("goal gate resume re-entry encode failed — dropping", "error", err)
+			return
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			logger.Warn("goal gate resume payload undecodable — dropping", "error", err)
+			return
+		}
+	}
+	if p.PlanID == "" {
+		logger.Warn("goal gate resume payload missing plan id — dropping")
+		return
+	}
+	plan := PlanRef{ID: p.PlanID, Prompt: p.Prompt}
+
+	// Arm the approval-passed marker keyed by the ACTIVE GOAL id (the
+	// gate branch compares against activeGoalID, not the plan id), then
+	// clear it when the reflect completes (success or failure).
+	goalID := l.activeGoalID(ctx)
+	l.mu.Lock()
+	l.approvalGatePassedGoal = goalID
+	l.mu.Unlock()
+	if _, reflectErr := l.Reflect(ctx, plan, p.Result); reflectErr != nil {
+		logger.Warn("goal gate resume reflect failed (non-fatal)", "error", reflectErr)
+	}
+	l.mu.Lock()
+	l.approvalGatePassedGoal = ""
+	l.mu.Unlock()
+}
+
+// ResumeGoalGate re-enters a goal turn parked on its human-approval gate
+// (audit HITL-1, manager-side drain path). The reentry map carries the
+// drained row's TurnReentry payload; see ResumeGoalGateApproval.
+func (l *GoalLoop) ResumeGoalGate(ctx context.Context, reentry map[string]any) {
+	l.ResumeGoalGateApproval(ctx, reentry)
+}
+
+// parkGateApproval checkpoints the human-approval gate pause through the
+// daemon's GateParker (the ONE park path — no second parker). Returns true
+// when the turn is parked pending approval; the caller then skips the
+// completion claim. Reflect context: called only when the effective gate
+// config is an approval gate.
+func (l *GoalLoop) parkGateApproval(ctx context.Context, cfg GateConfig, plan PlanRef, result *bot.BotExecutionResult) bool {
+	l.mu.Lock()
+	parkFn := l.goalGatePark
+	logger := l.logger
+	l.mu.Unlock()
+	if parkFn == nil {
+		return false
+	}
+	goal, err := l.lookupActiveGoal(ctx)
+	if err != nil || goal == nil || goal.ID == "" {
+		logger.Warn("goal approval gate without an active goal id — cannot park",
+			"error", err)
+		return false
+	}
+	reentry, mErr := json.Marshal(goalGateResumePayload{
+		PlanID: plan.ID,
+		Prompt: plan.Prompt,
+		Result: result,
+	})
+	if mErr != nil {
+		logger.Warn("goal approval gate re-entry encode failed", "error", mErr)
+		return false
+	}
+	l.mu.Lock()
+	sessionID := l.speakSessionID
+	l.mu.Unlock()
+	ok := parkFn(agent.GateParkData{
+		GateKind:  "goal",
+		GateID:    goal.ID,
+		SessionID: sessionID,
+		TurnReentry: map[string]any{
+			"plan_id":     plan.ID,
+			"prompt":      plan.Prompt,
+			"reentry":     json.RawMessage(reentry),
+			"employee_id": l.employeeID,
+		},
+		RequestedAt: time.Now().UTC(),
+	})
+	if ok {
+		logger.Info("goal approval gate parked pending human signoff",
+			"goal_id", goal.ID,
+			"plan_id", plan.ID,
+		)
+	}
+	return ok
+}
+
+// GoalGateParkCheckpoint is the exported park checkpoint used by tests and
+// external drivers to place a goal gate row into the shared parker through
+// the loop's wired seam (mirrors what parkGateApproval does inside
+// Reflect). Returns false when the seam is unwired. Production flow goes
+// through Reflect; this is the same GateParker.ParkGate underneath.
+func (l *GoalLoop) GoalGateParkCheckpoint(data agent.GateParkData) bool {
+	l.mu.Lock()
+	parkFn := l.goalGatePark
+	l.mu.Unlock()
+	if parkFn == nil {
+		return false
+	}
+	return parkFn(data)
+}
+
+// reflectApprovalGateApproved reports whether the current re-entry is an
+// approval-gate resume for the given goal — the human already approved, so
+// the gate passes without another prompt.
+func (l *GoalLoop) reflectApprovalGateApproved(goalID string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.approvalGatePassedGoal != "" && l.approvalGatePassedGoal == goalID
 }
 
 // runCompletionGate executes the configured quality gate via RunGate,

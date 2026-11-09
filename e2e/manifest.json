@@ -1009,7 +1009,13 @@
     {
       "name": "scheduler",
       "dir": "e2e/suites/scheduler",
-      "status": "implemented"
+      "status": "implemented",
+      "scenarios": [
+        "scheduler-04 a timing-kind (one-shot at) agent job pinned to a target session fires at its scheduled instant and lands a delivered receipt (F13a)",
+        "scheduler-05 a target-session delivery records a durable receipt (pending->in_flight->delivered, message_id == turn_id) in jobs.json (F13b)",
+        "scheduler-06 restart redelivery: a stuck in-flight receipt is re-delivered with the SAME MessageID after a daemon restart (at-least-once, idempotent) (F13b)"
+      ],
+      "note": "05-schedule branch e2e gate rows (F13a/F13b) live beside scheduler-01..03; timing kind fires exercise the robfigAtSchedule one-shot registration path."
     },
     {
       "name": "tui-flows",
@@ -1217,9 +1223,10 @@
         "delegate-seam-01 async delegate_task spawn returns a child handle (child_id, running); the settlement arrives on agent.delegate.result (contract B1)",
         "delegate-seam-02 subagent_send_message steers a running child; subagent_interrupt returns accepted:true and transitions to interrupted; subagent_list_children enumerates states (F3)",
         "delegate-seam-03 workflow tool confined fan-out (goja, dsh-archetype) returns {kind:foreground, runId, agentsStarted, result}; cap trip is FAIL-CLOSE; Node APIs rejected (B5)",
-        "delegate-seam-04 descriptor cold resume: interrupted child resumes via DelegateManager.Resume and completes (B6)"
+        "delegate-seam-04 descriptor cold resume: interrupted child resumes via DelegateManager.Resume and completes (B6)",
+        "delegate-seam-05 fork seed gate (DSH-1): delegate_context:full child inherits the parent completed-turn transcript on its first LLM request + fork preamble; the default (task) child degrades to a fresh brief (DSH-9b)"
       ],
-      "note": "01-delegation branch e2e gate (T1/T5/T6/T7): hermetic scratch daemon, asserts over live chat.submit + agent.delegate.result, never mocks. Fails RED until the daemon wiring (internal/daemon/components.go + dsh_wiring.go) and the delegate/plan-mode providers land concurrently."
+      "note": "01-delegation branch e2e gate (T1/T5/T6/T7): hermetic scratch daemon, asserts over live chat.submit + agent.delegate.result, never mocks. NOTE (2026-11-08 bookkeeping): this note's pre-wiring RED claim is stale - the daemon wiring (internal/daemon/components.go + dsh_wiring.go) and the delegate/plan-mode providers HAVE landed (tree on main); the suite activation (un-park) is the remaining step. Note text kept as historical record; scenario/path_map owned by another agent."
     },
     {
       "name": "goals-plans",
@@ -3206,6 +3213,40 @@
       ]
     },
     {
+      "id": "scheduler-04",
+      "suite": "scheduler",
+      "diff": "M",
+      "title": "a timing-kind schedule (one-shot at) agent job pinned to a target session fires at its scheduled instant and lands a delivered delivery receipt (F13a)",
+      "paths": [
+        "internal/scheduler/timing.go",
+        "internal/scheduler/scheduler.go",
+        "internal/scheduler/jobs.go",
+        "internal/scheduler/rpc.go"
+      ]
+    },
+    {
+      "id": "scheduler-05",
+      "suite": "scheduler",
+      "diff": "S",
+      "title": "a target-session agent job records a durable delivery receipt (status delivered, target_session_id set, message_id == the delivered chat.request turn_id, bounded history) in jobs.json (F13b)",
+      "paths": [
+        "internal/scheduler/receipts.go",
+        "internal/scheduler/jobs.go",
+        "internal/scheduler/persistence.go"
+      ]
+    },
+    {
+      "id": "scheduler-06",
+      "suite": "scheduler",
+      "diff": "M",
+      "title": "restart redelivery: a receipt left in_flight by a crashed delivery is re-delivered with the SAME MessageID after a daemon restart (at-least-once recovery, idempotent via chat.request turn_id) (F13b)",
+      "paths": [
+        "internal/scheduler/receipts.go",
+        "internal/scheduler/scheduler.go",
+        "internal/scheduler/persistence.go"
+      ]
+    },
+    {
       "id": "tui-palette-01",
       "suite": "tui-flows",
       "diff": "M",
@@ -4684,6 +4725,17 @@
       "paths": [
         "internal/agent/",
         "internal/acp/"
+      ]
+    },
+    {
+      "id": "delegate-seam-05",
+      "suite": "delegate-seam",
+      "diff": "L",
+      "title": "fork seed gate (DSH-1): a delegate_context:full child's first LLM request carries the parent completed-turn transcript (seeded) + fork preamble; the same fork request on a default (task) child degrades to a fresh brief (DSH-9b)",
+      "paths": [
+        "internal/agent/",
+        "internal/agents/",
+        "internal/tools/builtin/"
       ]
     },
     {

@@ -11,9 +11,9 @@ import (
 // no map-iteration-order leakage. Identical inputs produce identical bytes,
 // always -- training manifest hashes depend on it.
 //
-// TODO(jev-gate leaf 02/03): the authoritative template freezes into
-// config/jev-command-gate.contract.json5 (C6); keep this render
-// byte-identical with that file once it lands.
+// The template is FROZEN in config/jev-command-gate.contract.json5
+// (serialization_template); TestSerializeCommandContext_MatchesContractTemplate
+// pins this render byte-identical with that file.
 func SerializeCommandContext(command, cwd string, facts map[string]string) string {
 	var b strings.Builder
 	b.WriteString("command: ")
