@@ -72,11 +72,27 @@ type VoiceWiring struct {
 	// voice.local.enabled is false - leaf 08's RPC refuses opens on nil
 	// with the disabled-leg error.
 	Local *voice.LocalLeg
+	// Messaging is the Telnyx SMS webhook routes (leaf 12). Nil when
+	// voice.messaging.enabled is false (the route stays unserved).
+	Messaging *commhttp.MessagingRoutes
+
 	// Signal is the armed Signal voice leg + its sidecar supervisor
 	// (contact-channels leaf 11a T6). Nil when [signal].enabled is
 	// false (clean disabled boot) OR the sidecar failed to arm (the
 	// degrade posture: Signal call paths stay refused, boot proceeds).
 	Signal *WireSignalLegResult
+
+	// Contact is the employee contact chain (leaf 02). Nil when the
+	// chain could not assemble (store failure) - the contact tool stays
+	// unregistered and the feature stays refused (opt-in posture).
+	Contact *ContactChainWiring
+
+	// outcomes collects terminal call outcomes for the contact voice
+	// attempts (leaf 02 T2): fed from the release hook (section 8).
+	outcomes *voice.OutcomeRegistry
+
+	// auditStore is the canonical audit chain (leaf 02's chain sinks).
+	auditStore *auditlog.Store
 
 	// supervisor is the C6 gate shared by all talk loops.
 	supervisor voice.Supervisor
@@ -413,6 +429,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	// trap). Set it only when the phone leg actually armed so the
 	// nil-carrier manager + nil-tel guards read the truth (phone leg
 	// disabled) in the local-only boot.
+	w.auditStore = deps.Audit
 	if phoneEnabled {
 		w.tel = tel
 	}
@@ -498,7 +515,13 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	// Sinks: talk-loop teardown, registry Release, binding OnCallEnd (via
 	// the leaf-12 ReleaseHook), childproc NoteCallEnd. Manager fires the
 	// hook exactly once per ccid; each sink is idempotent under it.
-	manager.SetReleaseHook(w.releaseCall)
+	// Contact outcome collector (leaf 02): the voice attempts wait on
+	// this map; the release hook is the single terminal-outcome source.
+	w.outcomes = voice.NewOutcomeRegistry()
+	manager.SetReleaseHook(func(ccid string, out voice.Outcome) {
+		w.outcomes.Record(ccid, out)
+		w.releaseCall(ccid, out)
+	})
 
 	// -- 9. C1 frame router: frames from the child land on the right
 	// call's talk loop; a setup frame registers a fresh loop.
@@ -522,6 +545,24 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			return nil, fmt.Errorf("voice wiring: routes: %w", err)
 		}
 		w.Routes = routes
+	}
+
+	// -- 10b. Messaging webhook routes (leaf 12): the SAME Ed25519
+	// verifier as the voice routes (injected; no second crypto impl).
+	// OnFinalized feeds the contact chain's SMS attempt DLR wait; the
+	// wiring arms it after the chain exists (BuildContactChain sets
+	// Messaging.OnFinalized through the exported seam). Disabled block
+	// leaves the route unserved.
+	if deps.Config.Voice.Messaging.Enabled {
+		msgDeps := commhttp.MessagingWebhookDeps{
+			Verify: verify.Webhook,
+		}
+		mr, err := commhttp.NewMessagingRoutes(msgDeps, vlog.With("sub", "messaging"))
+		if err == nil {
+			w.Messaging = mr
+		} else {
+			vlog.Warn("voice wiring: messaging routes degraded (route unserved)", "error", err)
+		}
 	}
 
 	return w, nil

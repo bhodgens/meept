@@ -312,7 +312,29 @@ func (p *voiceProvider) Name() string { return "voice" }
 func (p *voiceProvider) Discover() []tools.Tool {
 	tool := NewVoiceCallTool(p.dial, p.agentID)
 	tool.SetLocalFunc(voiceLocalFunc)
-	return []tools.Tool{tool}
+	// contact rides the same provider group (same policy family: the
+	// contact chain drives voice_call + the other channels behind one
+	// fallback policy). nil chain = nil seam, the tool fails closed.
+	out := []tools.Tool{tool}
+	if contactChainFunc != nil {
+		out = append(out, NewContactTool(contactChainFunc))
+	}
+	return out
+}
+
+// contactChainFunc is the contact tool's chain seam, bound by the daemon
+// wiring (SetContactChain) before toolprov.RegisterAll constructs the
+// voice provider. nil leaves the contact tool unregistered (the contact
+// feature is opt-in; no chain, no tool).
+var contactChainFunc ContactChainRunner
+
+// SetContactChain binds the contact chain seam (leaf 02 wiring). Nil fn
+// is ignored (repo Set* nil-guard rule).
+func SetContactChain(fn ContactChainRunner) {
+	if fn == nil {
+		return
+	}
+	contactChainFunc = fn
 }
 
 // PermissionClass implements toolprov.Provider. Placing a phone call

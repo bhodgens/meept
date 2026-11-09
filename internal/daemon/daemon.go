@@ -1767,6 +1767,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			// an enabled-but-unverifiable voice config fails the boot).
 			if components.Voice != nil && components.Voice.Routes != nil {
 				httpOpts = append(httpOpts, http.WithVoiceRoutes(components.Voice.Routes))
+				if components.Voice.Messaging != nil {
+					httpOpts = append(httpOpts, http.WithMessagingRoutes(components.Voice.Messaging))
+				}
 				logger.Info("voice routes armed",
 					"webhook_path", components.Voice.Routes.WebhookPath(),
 					"media_path", components.Voice.Routes.MediaPath(),

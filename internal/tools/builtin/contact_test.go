@@ -23,6 +23,17 @@ import (
 
 // fakeChainRunner lives in contact_fake_test.go (shared seam fake).
 
+// mustReport extracts the tool's string report (the repo convention:
+// NewSuccessResult(string); file_edit_test.go pattern). Zero-value
+// string on any other shape.
+func mustReport(tr *tools.ToolResult) string {
+	if tr == nil {
+		return ""
+	}
+	s, _ := tr.Result.(string)
+	return s
+}
+
 // TestContactToolName pins the registered tool name.
 func TestContactToolName(t *testing.T) {
 	tool := NewContactTool(nil)
@@ -63,14 +74,15 @@ func TestContactToolArgsAndReport(t *testing.T) {
 		t.Errorf("chain saw channels %v, want the override list", chain.gotChannels)
 	}
 
+	report, _ := tr.Result.(string)
 	for _, want := range []string{"telnyx_voice", "signal_voice", "signal_msg", "no_answer", "busy", "delivered"} {
-		if !strings.Contains(tr.Output, want) {
-			t.Errorf("report output missing %q:\n%s", want, tr.Output)
+		if !strings.Contains(report, want) {
+			t.Errorf("report output missing %q:\n%s", want, report)
 		}
 	}
 	// Per-channel LINES: each channel outcome is its own line.
-	if lines := strings.Split(strings.TrimSpace(tr.Output), "\n"); len(lines) < 3 {
-		t.Errorf("report rendered %d lines, want >= 3 per-channel outcome lines:\n%s", len(lines), tr.Output)
+	if lines := strings.Split(strings.TrimSpace(report), "\n"); len(lines) < 3 {
+		t.Errorf("report rendered %d lines, want >= 3 per-channel outcome lines:\n%s", len(lines), report)
 	}
 }
 
@@ -107,7 +119,7 @@ func TestContactToolAnsweredTerminal(t *testing.T) {
 		t.Fatalf("Execute: %v (answered must not block the tool result, C6)", err)
 	}
 	tr, _ := res.(*tools.ToolResult)
-	if tr == nil || !tr.Success || !strings.Contains(tr.Output, "answered") {
+	if tr == nil || !tr.Success || !strings.Contains(mustReport(tr), "answered") {
 		t.Fatalf("result = %+v, want success output containing the answered outcome", res)
 	}
 }

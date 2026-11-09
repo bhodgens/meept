@@ -89,6 +89,14 @@ func (m *MessagingRoutes) serveMessagingRoute(w http.ResponseWriter, r *http.Req
 	m.handleWebhook(w, r)
 }
 
+// ServeWebhook exposes the messaging webhook handler for direct callers
+// (the e2e suite drives the exact handler the Server middleware branch
+// runs; the Server path itself goes through serveMessagingRoute via
+// HandlesPath). Same 401-before-parse posture.
+func (m *MessagingRoutes) ServeWebhook(w http.ResponseWriter, r *http.Request) {
+	m.serveMessagingRoute(w, r)
+}
+
 // handleWebhook: signature -> parse -> dispatch (mirrors the voice
 // webhook's ordering exactly).
 func (m *MessagingRoutes) handleWebhook(w http.ResponseWriter, r *http.Request) {
